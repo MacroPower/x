@@ -1,0 +1,17 @@
+{
+  $schema: "https://docs.renovatebot.com/renovate-schema.json",
+  extends: [
+    "config:recommended",
+    ":disableRateLimiting",
+    ":separateMajorReleases",
+    ":semanticCommits",
+    ":automergeMinor",
+  ],
+  ignorePaths: [
+    "**/testdata/**",
+  ],
+  postUpdateOptions: [
+    "gomodTidy",
+    "gomodUpdateImportPaths",
+  ],
+}
