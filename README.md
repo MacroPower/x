@@ -5,5 +5,5 @@ Experimental packages.
 ## `godocfmt`
 
 ```sh
-go run github.com/macropower/x/cmd/godocfmt@latest
+go run go.jacobcolvin.com/x/cmd/godocfmt@latest
 ```

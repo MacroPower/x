@@ -1,4 +1,4 @@
-module github.com/macropower/x
+module go.jacobcolvin.com/x
 
 go 1.25
 

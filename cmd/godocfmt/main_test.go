@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/macropower/x/stringtest"
+	"go.jacobcolvin.com/x/stringtest"
 )
 
 func TestFormatDoc(t *testing.T) {

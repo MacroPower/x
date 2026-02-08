@@ -1,4 +1,4 @@
-// [Profiler] adds runtime profiling capabilities to CLI applications.
+// Package profiler adds runtime profiling capabilities to CLI applications.
 //
 // It supports CPU, heap, allocs, goroutine, threadcreate, block, and mutex
 // profiles through command-line flags.

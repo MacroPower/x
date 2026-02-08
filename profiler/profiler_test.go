@@ -7,36 +7,36 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/macropower/x/profiler"
+	"go.jacobcolvin.com/x/profiler"
 )
 
 func TestNew(t *testing.T) {
 	t.Parallel()
 
-	profiler := profiler.New()
+	p := profiler.New()
 
 	// All profile paths should be empty (disabled).
-	assert.Empty(t, profiler.CPUProfile)
-	assert.Empty(t, profiler.HeapProfile)
-	assert.Empty(t, profiler.AllocsProfile)
-	assert.Empty(t, profiler.GoroutineProfile)
-	assert.Empty(t, profiler.ThreadcreateProfile)
-	assert.Empty(t, profiler.BlockProfile)
-	assert.Empty(t, profiler.MutexProfile)
+	assert.Empty(t, p.CPUProfile)
+	assert.Empty(t, p.HeapProfile)
+	assert.Empty(t, p.AllocsProfile)
+	assert.Empty(t, p.GoroutineProfile)
+	assert.Empty(t, p.ThreadcreateProfile)
+	assert.Empty(t, p.BlockProfile)
+	assert.Empty(t, p.MutexProfile)
 
 	// Rate fields should be zero.
-	assert.Zero(t, profiler.MemProfileRate)
-	assert.Zero(t, profiler.BlockProfileRate)
-	assert.Zero(t, profiler.MutexProfileFraction)
+	assert.Zero(t, p.MemProfileRate)
+	assert.Zero(t, p.BlockProfileRate)
+	assert.Zero(t, p.MutexProfileFraction)
 }
 
 func TestProfiler_RegisterFlags(t *testing.T) {
 	t.Parallel()
 
-	profiler := profiler.New()
+	p := profiler.New()
 	flags := pflag.NewFlagSet("test", pflag.ContinueOnError)
 
-	profiler.RegisterFlags(flags)
+	p.RegisterFlags(flags)
 
 	// Verify all flags are registered.
 	wantFlags := []string{
@@ -61,10 +61,10 @@ func TestProfiler_RegisterFlags(t *testing.T) {
 func TestProfiler_RegisterFlags_Parsing(t *testing.T) {
 	t.Parallel()
 
-	profiler := profiler.New()
+	p := profiler.New()
 	flags := pflag.NewFlagSet("test", pflag.ContinueOnError)
 
-	profiler.RegisterFlags(flags)
+	p.RegisterFlags(flags)
 
 	err := flags.Parse([]string{
 		"--cpu-profile=cpu.prof",
@@ -81,34 +81,34 @@ func TestProfiler_RegisterFlags_Parsing(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify profile paths are bound.
-	assert.Equal(t, "cpu.prof", profiler.CPUProfile)
-	assert.Equal(t, "heap.prof", profiler.HeapProfile)
-	assert.Equal(t, "allocs.prof", profiler.AllocsProfile)
-	assert.Equal(t, "goroutine.prof", profiler.GoroutineProfile)
-	assert.Equal(t, "threadcreate.prof", profiler.ThreadcreateProfile)
-	assert.Equal(t, "block.prof", profiler.BlockProfile)
-	assert.Equal(t, "mutex.prof", profiler.MutexProfile)
+	assert.Equal(t, "cpu.prof", p.CPUProfile)
+	assert.Equal(t, "heap.prof", p.HeapProfile)
+	assert.Equal(t, "allocs.prof", p.AllocsProfile)
+	assert.Equal(t, "goroutine.prof", p.GoroutineProfile)
+	assert.Equal(t, "threadcreate.prof", p.ThreadcreateProfile)
+	assert.Equal(t, "block.prof", p.BlockProfile)
+	assert.Equal(t, "mutex.prof", p.MutexProfile)
 
 	// Verify rate values are bound.
-	assert.Equal(t, 1024, profiler.MemProfileRate)
-	assert.Equal(t, 100, profiler.BlockProfileRate)
-	assert.Equal(t, 10, profiler.MutexProfileFraction)
+	assert.Equal(t, 1024, p.MemProfileRate)
+	assert.Equal(t, 100, p.BlockProfileRate)
+	assert.Equal(t, 10, p.MutexProfileFraction)
 }
 
 func TestProfiler_RegisterFlags_Defaults(t *testing.T) {
 	t.Parallel()
 
-	profiler := profiler.New()
+	p := profiler.New()
 	flags := pflag.NewFlagSet("test", pflag.ContinueOnError)
 
-	profiler.RegisterFlags(flags)
+	p.RegisterFlags(flags)
 
 	// Parse with no flags to get defaults.
 	err := flags.Parse([]string{})
 	require.NoError(t, err)
 
 	// Verify default rate values from profile.go.
-	assert.Equal(t, 524288, profiler.MemProfileRate)
-	assert.Equal(t, 1, profiler.BlockProfileRate)
-	assert.Equal(t, 1, profiler.MutexProfileFraction)
+	assert.Equal(t, 524288, p.MemProfileRate)
+	assert.Equal(t, 1, p.BlockProfileRate)
+	assert.Equal(t, 1, p.MutexProfileFraction)
 }

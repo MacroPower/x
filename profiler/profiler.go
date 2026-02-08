@@ -162,9 +162,3 @@ func must(err error) {
 		panic(err)
 	}
 }
-
-func mustN(_ int, err error) {
-	if err != nil {
-		panic(err)
-	}
-}
