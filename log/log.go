@@ -5,85 +5,157 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"slices"
 	"strings"
+	"time"
+
+	charmlog "charm.land/log/v2"
 )
 
-// Format represents the log output format.
+// Handler is an alias of [slog.Handler].
+type Handler = slog.Handler
+
+// Format represents a log output format.
 type Format string
 
+// Log output format.
 const (
-	// FormatJSON outputs logs as JSON objects.
-	FormatJSON Format = "json"
-	// FormatLogfmt outputs logs in logfmt format.
+	FormatJSON   Format = "json"
 	FormatLogfmt Format = "logfmt"
+	FormatText   Format = "text"
 )
 
+// EqualFold reports whether s is equal to f under Unicode case-folding.
+func (f Format) EqualFold(s string) bool {
+	return strings.EqualFold(string(f), s)
+}
+
+// Level represents a log severity level as a string.
+type Level string
+
+// Log severity level.
+const (
+	LevelError Level = "error"
+	LevelWarn  Level = "warn"
+	LevelInfo  Level = "info"
+	LevelDebug Level = "debug"
+)
+
+// EqualFold reports whether s is equal to l under Unicode case-folding.
+func (l Level) EqualFold(s string) bool {
+	return strings.EqualFold(string(l), s)
+}
+
+// Level returns a [slog.Level], implementing the [slog.Leveler] interface.
+// Unrecognized levels default to [slog.LevelInfo].
+func (l Level) Level() slog.Level {
+	switch l {
+	case LevelError:
+		return slog.LevelError
+	case LevelWarn:
+		return slog.LevelWarn
+	case LevelInfo:
+		return slog.LevelInfo
+	case LevelDebug:
+		return slog.LevelDebug
+	}
+
+	return slog.LevelInfo
+}
+
+// Sentinel errors returned by parsing functions.
 var (
-	// ErrInvalidArgument indicates an invalid argument was provided.
-	ErrInvalidArgument = errors.New("invalid argument")
-	// ErrUnknownLogLevel indicates an unrecognized log level string.
-	ErrUnknownLogLevel = errors.New("unknown log level")
-	// ErrUnknownLogFormat indicates an unrecognized log format string.
+	ErrInvalidArgument  = errors.New("invalid argument")
+	ErrUnknownLogLevel  = errors.New("unknown log level")
 	ErrUnknownLogFormat = errors.New("unknown log format")
 )
 
-// CreateHandlerWithStrings creates a [slog.Handler] by strings.
-func CreateHandlerWithStrings(w io.Writer, logLevel, logFormat string) (slog.Handler, error) {
-	logLvl, err := GetLevel(logLevel)
+// NewHandlerFromStrings creates a [Handler] by strings.
+func NewHandlerFromStrings(w io.Writer, logLevel, logFormat string) (Handler, error) {
+	logLvl, err := ParseLevel(logLevel)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidArgument, err)
 	}
 
-	logFmt, err := GetFormat(logFormat)
+	logFmt, err := ParseFormat(logFormat)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidArgument, err)
 	}
 
-	return CreateHandler(w, logLvl, logFmt), nil
+	return NewHandler(w, logLvl, logFmt), nil
 }
 
-// CreateHandler creates a [slog.Handler] with the specified level and format.
-func CreateHandler(w io.Writer, logLvl slog.Level, logFmt Format) slog.Handler {
-	switch logFmt {
+// NewHandler creates a [Handler] with the given level and format.
+func NewHandler(w io.Writer, logLevel Level, logFormat Format) Handler {
+	switch logFormat {
 	case FormatJSON:
 		return slog.NewJSONHandler(w, &slog.HandlerOptions{
 			AddSource: true,
-			Level:     logLvl,
+			Level:     logLevel,
 		})
 
 	case FormatLogfmt:
 		return slog.NewTextHandler(w, &slog.HandlerOptions{
 			AddSource: true,
-			Level:     logLvl,
+			Level:     logLevel,
+		})
+
+	case FormatText:
+		return charmlog.NewWithOptions(w, charmlog.Options{
+			Level:           charmlog.Level(logLevel.Level()),
+			Formatter:       charmlog.TextFormatter,
+			ReportTimestamp: true,
+			ReportCaller:    true,
+			TimeFormat:      time.StampMilli,
 		})
 	}
 
 	return nil
 }
 
-// GetLevel parses a log level string and returns the corresponding
-// [slog.Level].
-func GetLevel(level string) (slog.Level, error) {
-	switch strings.ToLower(level) {
-	case "error":
-		return slog.LevelError, nil
-	case "warn", "warning":
-		return slog.LevelWarn, nil
-	case "info":
-		return slog.LevelInfo, nil
-	case "debug":
-		return slog.LevelDebug, nil
+// GetAllLevelStrings returns all valid log level strings.
+func GetAllLevelStrings() []string {
+	return []string{
+		string(LevelError),
+		string(LevelWarn),
+		string(LevelInfo),
+		string(LevelDebug),
 	}
-
-	return 0, ErrUnknownLogLevel
 }
 
-// GetFormat parses a log format string and returns the corresponding [Format].
-func GetFormat(format string) (Format, error) {
-	logFmt := Format(strings.ToLower(format))
-	if slices.Contains([]Format{FormatJSON, FormatLogfmt}, logFmt) {
-		return logFmt, nil
+// ParseLevel parses a level string into a [Level].
+func ParseLevel(level string) (Level, error) {
+	switch {
+	case LevelError.EqualFold(level):
+		return LevelError, nil
+	case LevelWarn.EqualFold(level), Level("warning").EqualFold(level):
+		return LevelWarn, nil
+	case LevelInfo.EqualFold(level):
+		return LevelInfo, nil
+	case LevelDebug.EqualFold(level):
+		return LevelDebug, nil
+	}
+
+	return "", ErrUnknownLogLevel
+}
+
+// GetAllFormatStrings returns all valid log format strings.
+func GetAllFormatStrings() []string {
+	return []string{
+		string(FormatJSON),
+		string(FormatLogfmt),
+		string(FormatText),
+	}
+}
+
+// ParseFormat parses a format string into a [Format].
+func ParseFormat(format string) (Format, error) {
+	switch {
+	case FormatJSON.EqualFold(format):
+		return FormatJSON, nil
+	case FormatLogfmt.EqualFold(format):
+		return FormatLogfmt, nil
+	case FormatText.EqualFold(format):
+		return FormatText, nil
 	}
 
 	return "", ErrUnknownLogFormat

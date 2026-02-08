@@ -25,6 +25,16 @@ var (
 	GoArch = runtime.GOARCH
 )
 
+// GetVersion returns the [Version] if defined,
+// otherwise it returns [Revision].
+func GetVersion() string {
+	if Version != "" {
+		return Version
+	}
+
+	return Revision
+}
+
 func getRevision() string {
 	rev := "unknown"
 
@@ -38,7 +48,12 @@ func getRevision() string {
 	for _, v := range buildInfo.Settings {
 		switch v.Key {
 		case "vcs.revision":
-			rev = v.Value
+			if len(v.Value) > 7 {
+				rev = v.Value[:7]
+			} else {
+				rev = v.Value
+			}
+
 		case "vcs.modified":
 			if v.Value == "true" {
 				modified = true

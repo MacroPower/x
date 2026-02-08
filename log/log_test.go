@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -17,42 +18,42 @@ func TestGetLevel(t *testing.T) {
 
 	tcs := map[string]struct {
 		input       string
-		expected    slog.Level
+		expected    log.Level
 		expectError bool
 	}{
 		"error level": {
 			input:       "error",
-			expected:    slog.LevelError,
+			expected:    log.LevelError,
 			expectError: false,
 		},
 		"warn level": {
 			input:       "warn",
-			expected:    slog.LevelWarn,
+			expected:    log.LevelWarn,
 			expectError: false,
 		},
 		"warning level": {
 			input:       "warning",
-			expected:    slog.LevelWarn,
+			expected:    log.LevelWarn,
 			expectError: false,
 		},
 		"info level": {
 			input:       "info",
-			expected:    slog.LevelInfo,
+			expected:    log.LevelInfo,
 			expectError: false,
 		},
 		"debug level": {
 			input:       "debug",
-			expected:    slog.LevelDebug,
+			expected:    log.LevelDebug,
 			expectError: false,
 		},
 		"case insensitive": {
 			input:       "INFO",
-			expected:    slog.LevelInfo,
+			expected:    log.LevelInfo,
 			expectError: false,
 		},
 		"unknown level": {
 			input:       "unknown",
-			expected:    0,
+			expected:    "",
 			expectError: true,
 		},
 	}
@@ -61,7 +62,7 @@ func TestGetLevel(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			lvl, err := log.GetLevel(tc.input)
+			lvl, err := log.ParseLevel(tc.input)
 			if tc.expectError {
 				require.Error(t, err)
 				require.ErrorIs(t, err, log.ErrUnknownLogLevel)
@@ -91,6 +92,11 @@ func TestGetFormat(t *testing.T) {
 			expected:    log.FormatLogfmt,
 			expectError: false,
 		},
+		"text format": {
+			input:       "text",
+			expected:    log.FormatText,
+			expectError: false,
+		},
 		"case insensitive": {
 			input:       "JSON",
 			expected:    log.FormatJSON,
@@ -107,7 +113,7 @@ func TestGetFormat(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			fmt, err := log.GetFormat(tc.input)
+			fmt, err := log.ParseFormat(tc.input)
 			if tc.expectError {
 				require.Error(t, err)
 				require.ErrorIs(t, err, log.ErrUnknownLogFormat)
@@ -151,6 +157,17 @@ func TestCreateHandler(t *testing.T) {
 				assert.Contains(t, outputStr, "key=value")
 			},
 		},
+		"text handler": {
+			format: log.FormatText,
+			checkFunc: func(t *testing.T, output []byte) {
+				t.Helper()
+
+				outputStr := string(output)
+				assert.Contains(t, outputStr, "INFO")
+				assert.Contains(t, outputStr, "test message")
+				assert.Contains(t, outputStr, "key=value")
+			},
+		},
 	}
 
 	for name, tc := range tcs {
@@ -159,7 +176,7 @@ func TestCreateHandler(t *testing.T) {
 
 			var buf bytes.Buffer
 
-			handler := log.CreateHandler(&buf, slog.LevelInfo, tc.format)
+			handler := log.NewHandler(&buf, log.LevelInfo, tc.format)
 			require.NotNil(t, handler)
 
 			logger := slog.New(handler)
@@ -223,7 +240,7 @@ func TestCreateHandlerWithStrings(t *testing.T) {
 
 			var buf bytes.Buffer
 
-			handler, err := log.CreateHandlerWithStrings(&buf, tc.levelStr, tc.formatStr)
+			handler, err := log.NewHandlerFromStrings(&buf, tc.levelStr, tc.formatStr)
 
 			if tc.expectError {
 				require.Error(t, err)
@@ -241,17 +258,56 @@ func TestCreateHandlerWithStrings(t *testing.T) {
 	}
 }
 
+func TestRegisterCompletions(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		flag string
+		want []string
+	}{
+		"log-level completions": {
+			flag: "log-level",
+			want: log.GetAllLevelStrings(),
+		},
+		"log-format completions": {
+			flag: "log-format",
+			want: log.GetAllFormatStrings(),
+		},
+	}
+
+	cfg := log.NewConfig()
+
+	cmd := &cobra.Command{Use: "test"}
+	cfg.RegisterFlags(cmd.Flags())
+
+	err := cfg.RegisterCompletions(cmd)
+	require.NoError(t, err)
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			completionFn, ok := cmd.GetFlagCompletionFunc(tc.flag)
+			require.True(t, ok)
+
+			values, directive := completionFn(cmd, nil, "")
+			assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
+			assert.Equal(t, tc.want, values)
+		})
+	}
+}
+
 func TestLogLevelFiltering(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
 		logFunc       func(*slog.Logger)
 		format        log.Format
-		level         slog.Level
+		level         log.Level
 		shouldContain bool
 	}{
 		"info level passes info log": {
-			level:  slog.LevelInfo,
+			level:  log.LevelInfo,
 			format: log.FormatJSON,
 			logFunc: func(logger *slog.Logger) {
 				logger.Info("test message")
@@ -259,7 +315,7 @@ func TestLogLevelFiltering(t *testing.T) {
 			shouldContain: true,
 		},
 		"info level blocks debug log": {
-			level:  slog.LevelInfo,
+			level:  log.LevelInfo,
 			format: log.FormatJSON,
 			logFunc: func(logger *slog.Logger) {
 				logger.Debug("test message")
@@ -267,7 +323,7 @@ func TestLogLevelFiltering(t *testing.T) {
 			shouldContain: false,
 		},
 		"error level passes error log": {
-			level:  slog.LevelError,
+			level:  log.LevelError,
 			format: log.FormatJSON,
 			logFunc: func(logger *slog.Logger) {
 				logger.Error("test message")
@@ -275,7 +331,7 @@ func TestLogLevelFiltering(t *testing.T) {
 			shouldContain: true,
 		},
 		"error level blocks info log": {
-			level:  slog.LevelError,
+			level:  log.LevelError,
 			format: log.FormatJSON,
 			logFunc: func(logger *slog.Logger) {
 				logger.Info("test message")
@@ -290,7 +346,7 @@ func TestLogLevelFiltering(t *testing.T) {
 
 			var buf bytes.Buffer
 
-			handler := log.CreateHandler(&buf, tc.level, tc.format)
+			handler := log.NewHandler(&buf, tc.level, tc.format)
 			logger := slog.New(handler)
 
 			tc.logFunc(logger)

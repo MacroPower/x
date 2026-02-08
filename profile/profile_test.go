@@ -1,19 +1,20 @@
-package profiler_test
+package profile_test
 
 import (
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"go.jacobcolvin.com/x/profiler"
+	"go.jacobcolvin.com/x/profile"
 )
 
 func TestNew(t *testing.T) {
 	t.Parallel()
 
-	p := profiler.New()
+	p := profile.NewConfig()
 
 	// All profile paths should be empty (disabled).
 	assert.Empty(t, p.CPUProfile)
@@ -30,10 +31,10 @@ func TestNew(t *testing.T) {
 	assert.Zero(t, p.MutexProfileFraction)
 }
 
-func TestProfiler_RegisterFlags(t *testing.T) {
+func TestProfile_RegisterFlags(t *testing.T) {
 	t.Parallel()
 
-	p := profiler.New()
+	p := profile.NewConfig()
 	flags := pflag.NewFlagSet("test", pflag.ContinueOnError)
 
 	p.RegisterFlags(flags)
@@ -58,10 +59,10 @@ func TestProfiler_RegisterFlags(t *testing.T) {
 	}
 }
 
-func TestProfiler_RegisterFlags_Parsing(t *testing.T) {
+func TestProfile_RegisterFlags_Parsing(t *testing.T) {
 	t.Parallel()
 
-	p := profiler.New()
+	p := profile.NewConfig()
 	flags := pflag.NewFlagSet("test", pflag.ContinueOnError)
 
 	p.RegisterFlags(flags)
@@ -95,10 +96,49 @@ func TestProfiler_RegisterFlags_Parsing(t *testing.T) {
 	assert.Equal(t, 10, p.MutexProfileFraction)
 }
 
-func TestProfiler_RegisterFlags_Defaults(t *testing.T) {
+func TestRegisterCompletions(t *testing.T) {
 	t.Parallel()
 
-	p := profiler.New()
+	tcs := map[string]struct {
+		flag string
+	}{
+		"mem-profile-rate completions": {
+			flag: "mem-profile-rate",
+		},
+		"block-profile-rate completions": {
+			flag: "block-profile-rate",
+		},
+		"mutex-profile-fraction completions": {
+			flag: "mutex-profile-fraction",
+		},
+	}
+
+	cfg := profile.NewConfig()
+
+	cmd := &cobra.Command{Use: "test"}
+	cfg.RegisterFlags(cmd.Flags())
+
+	err := cfg.RegisterCompletions(cmd)
+	require.NoError(t, err)
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			completionFn, ok := cmd.GetFlagCompletionFunc(tc.flag)
+			require.True(t, ok)
+
+			values, directive := completionFn(cmd, nil, "")
+			assert.Equal(t, cobra.ShellCompDirectiveNoFileComp, directive)
+			assert.Nil(t, values)
+		})
+	}
+}
+
+func TestProfile_RegisterFlags_Defaults(t *testing.T) {
+	t.Parallel()
+
+	p := profile.NewConfig()
 	flags := pflag.NewFlagSet("test", pflag.ContinueOnError)
 
 	p.RegisterFlags(flags)
