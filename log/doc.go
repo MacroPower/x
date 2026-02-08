@@ -16,4 +16,25 @@
 //
 //	handler, err := cfg.NewHandler(os.Stderr)
 //	slog.SetDefault(slog.New(handler))
+//
+// A [Publisher] fans out log output to multiple subscribers, which is useful
+// for displaying logs inside a Bubble Tea TUI:
+//
+//	pub := log.NewPublisher()
+//	handler := log.NewHandler(pub, log.LevelInfo, log.FormatJSON)
+//	logger := slog.New(handler)
+//
+//	sub := pub.Subscribe()
+//	go func() {
+//	    for entry := range sub.C() {
+//	        // Deliver entry to the TUI.
+//	    }
+//	}()
+//
+// Combine it with [io.MultiWriter] to write to multiple locations:
+//
+//	pub := log.NewPublisher()
+//	w := io.MultiWriter(logFile, pub)
+//	handler := log.NewHandler(w, log.LevelInfo, log.FormatJSON)
+//	logger := slog.New(handler)
 package log
