@@ -9,7 +9,7 @@
     "nodePackages.prettier": "3.5.3",
     "zizmor": "1.21.0",
     "conform": "0.1.0-alpha.29",
-    "renovate": "42.76.4"
+    "renovate": "42.83.1"
   },
   "shell": {
     "init_hook": ["echo 'Welcome to devbox!' > /dev/null"]
