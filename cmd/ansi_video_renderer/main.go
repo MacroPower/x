@@ -115,6 +115,7 @@ type model struct {
 	rows      int
 	loop      bool
 	done      bool
+	ticking   bool
 }
 
 func newModel(stream *frameStream, fps, cols, rows int, loop bool, videoPath string) *model {
@@ -128,14 +129,10 @@ func newModel(stream *frameStream, fps, cols, rows int, loop bool, videoPath str
 	}
 }
 
-// Init starts both the frame reader and the playback tick concurrently.
+// Init starts the frame reader. The playback tick is deferred until the first
+// frame arrives so that FFmpeg startup latency does not waste tick intervals.
 func (m *model) Init() tea.Cmd {
-	return tea.Batch(
-		m.stream.readFrame(),
-		tea.Tick(time.Second/time.Duration(m.fps), func(time.Time) tea.Msg {
-			return tickMsg{}
-		}),
-	)
+	return m.stream.readFrame()
 }
 
 // Update handles incoming frames, stream completion, ticks, resize, and quit.
@@ -155,7 +152,26 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.resized = nil // Invalidate; View will re-resize.
 
 	case frameMsg:
+		if m.current == nil {
+			// First frame: display immediately but don't start ticking yet.
+			m.current = msg.frame
+
+			return m, m.stream.readFrame()
+		}
+
 		m.pending = append(m.pending, msg.frame)
+
+		if !m.ticking && len(m.pending) >= m.fps/2 {
+			// Buffer is warm enough — start playback.
+			m.ticking = true
+
+			return m, tea.Batch(
+				m.stream.readFrame(),
+				tea.Tick(time.Second/time.Duration(m.fps), func(time.Time) tea.Msg {
+					return tickMsg{}
+				}),
+			)
+		}
 
 		return m, m.stream.readFrame()
 
@@ -165,6 +181,15 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		m.done = true
+
+		// Stream ended during buffering — start ticking with whatever we have.
+		if !m.ticking && m.current != nil {
+			m.ticking = true
+
+			return m, tea.Tick(time.Second/time.Duration(m.fps), func(time.Time) tea.Msg {
+				return tickMsg{}
+			})
+		}
 
 		return m, nil
 
@@ -202,6 +227,7 @@ func (m *model) restartStream() tea.Cmd {
 	m.stream.stop()
 
 	m.done = false
+	m.ticking = false
 	m.current = nil
 	m.resized = nil
 	m.pending = m.pending[:0]
@@ -218,12 +244,7 @@ func (m *model) restartStream() tea.Cmd {
 
 	m.stream = stream
 
-	return tea.Batch(
-		m.stream.readFrame(),
-		tea.Tick(time.Second/time.Duration(m.fps), func(time.Time) tea.Msg {
-			return tickMsg{}
-		}),
-	)
+	return m.stream.readFrame()
 }
 
 // View renders the current frame, resizing on-the-fly for the current terminal
@@ -237,7 +258,11 @@ func (m *model) View() tea.View {
 	}
 
 	if m.resized == nil {
-		m.resized = resizeImage(m.current, m.cols, m.rows)
+		if b := m.current.Bounds(); b.Dx() == m.cols && b.Dy() == m.rows*2 {
+			m.resized = m.current
+		} else {
+			m.resized = resizeImage(m.current, m.cols, m.rows)
+		}
 	}
 
 	m.buf.Reset()

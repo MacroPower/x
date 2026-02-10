@@ -6,7 +6,6 @@ import (
 	"image/color"
 	"strings"
 
-	"charm.land/lipgloss/v2"
 	"golang.org/x/image/draw"
 )
 
@@ -62,25 +61,14 @@ func renderFrame(img *image.RGBA, cols, rows int, w *strings.Builder) {
 		for x := range cols {
 			top := img.RGBAAt(x, topY)
 
-			bot := color.RGBA{}
+			var bot color.RGBA
 			if botY < pixH {
 				bot = img.RGBAAt(x, botY)
 			}
 
-			style := lipgloss.NewStyle().
-				Foreground(lipgloss.Color(colorHex(top))).
-				Background(lipgloss.Color(colorHex(bot)))
-
-			w.WriteString(style.Render("▀"))
+			fmt.Fprintf(w, "\033[38;2;%d;%d;%dm\033[48;2;%d;%d;%dm▀", top.R, top.G, top.B, bot.R, bot.G, bot.B)
 		}
 
 		w.WriteString("\033[0m\n")
 	}
-}
-
-// colorHex converts a color.Color to a "#RRGGBB" hex string.
-func colorHex(c color.Color) string {
-	r, g, b, _ := c.RGBA()
-
-	return fmt.Sprintf("#%02x%02x%02x", r>>8, g>>8, b>>8)
 }
