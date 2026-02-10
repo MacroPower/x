@@ -149,6 +149,16 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.cols = msg.Width
 		m.rows = msg.Height
+
+		// Only restart if the new dimensions differ from the stream's
+		// current resolution. This avoids spawning redundant ffmpeg
+		// processes when rapid resize events fire.
+		if m.stream.pixW != m.cols || m.stream.pixH != m.rows*2 {
+			cmd := m.resetStream()
+
+			return m, cmd
+		}
+
 		m.resized = nil // Invalidate; View will re-resize.
 
 	case frameMsg:
@@ -222,8 +232,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// restartStream stops the current stream and starts a new one for looping.
-func (m *model) restartStream() tea.Cmd {
+// resetStream stops the current ffmpeg stream and starts a fresh one at the
+// current terminal dimensions. It resets all playback state so that buffering
+// begins anew. Both loop-restart and terminal-resize use this.
+func (m *model) resetStream() tea.Cmd {
 	m.stream.stop()
 
 	m.done = false
@@ -245,6 +257,11 @@ func (m *model) restartStream() tea.Cmd {
 	m.stream = stream
 
 	return m.stream.readFrame()
+}
+
+// restartStream stops the current stream and starts a new one for looping.
+func (m *model) restartStream() tea.Cmd {
+	return m.resetStream()
 }
 
 // View renders the current frame, resizing on-the-fly for the current terminal
