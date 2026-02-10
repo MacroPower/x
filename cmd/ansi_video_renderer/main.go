@@ -260,8 +260,29 @@ func (m *model) resetStream() tea.Cmd {
 }
 
 // restartStream stops the current stream and starts a new one for looping.
+// Unlike resetStream, it preserves m.current so View() keeps showing the last
+// frame while the new stream buffers, avoiding a flash between loops.
 func (m *model) restartStream() tea.Cmd {
-	return m.resetStream()
+	m.stream.stop()
+
+	m.done = false
+	m.ticking = false
+	m.resized = nil
+	m.pending = m.pending[:0]
+
+	pixW := m.cols
+	pixH := m.rows * 2
+
+	stream, err := newFrameStream(context.Background(), m.videoPath, m.fps, pixW, pixH)
+	if err != nil {
+		return func() tea.Msg {
+			return streamDoneMsg{Err: err}
+		}
+	}
+
+	m.stream = stream
+
+	return m.stream.readFrame()
 }
 
 // View renders the current frame, resizing on-the-fly for the current terminal
