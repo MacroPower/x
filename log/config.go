@@ -9,17 +9,10 @@ import (
 )
 
 // Flags holds CLI flag names for log configuration, allowing callers to
-// customize flag names while keeping sensible defaults via [NewConfig].
+// customize flag names while keeping sensible defaults.
 type Flags struct {
 	Level  string
 	Format string
-}
-
-// NewConfig creates a new [Config] embedding these flag names.
-func (f Flags) NewConfig() *Config {
-	return &Config{
-		Flags: f,
-	}
 }
 
 // Config holds CLI flag values for log configuration.
@@ -41,7 +34,7 @@ func NewConfig() *Config {
 		Format: "log-format",
 	}
 
-	return f.NewConfig()
+	return &Config{Flags: f}
 }
 
 // RegisterFlags adds logging flags to the given [*pflag.FlagSet].

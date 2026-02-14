@@ -8,7 +8,7 @@ import (
 )
 
 // Flags holds CLI flag names for profiling configuration, allowing callers to
-// customize flag names while keeping sensible defaults via [NewConfig].
+// customize flag names while keeping sensible defaults.
 type Flags struct {
 	// Profile output path flag names.
 	CPUProfile          string
@@ -23,13 +23,6 @@ type Flags struct {
 	MemProfileRate       string
 	BlockProfileRate     string
 	MutexProfileFraction string
-}
-
-// NewConfig creates a new [Config] embedding these flag names.
-func (f Flags) NewConfig() *Config {
-	return &Config{
-		Flags: f,
-	}
 }
 
 // Config holds profiling configuration for CLI applications, including output
@@ -73,7 +66,7 @@ func NewConfig() *Config {
 		MutexProfileFraction: "mutex-profile-fraction",
 	}
 
-	return f.NewConfig()
+	return &Config{Flags: f}
 }
 
 // RegisterFlags adds profiling flags to the given [*pflag.FlagSet].
