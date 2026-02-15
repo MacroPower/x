@@ -33,6 +33,10 @@ RUN if [ -n "$HOST_HOME" ] && [ "$HOST_HOME" != "/home/devbox" ]; then \
 RUN mkdir -p /home/devbox/.config/claude/skills \
   && chown -R ${DEVBOX_USER}:${DEVBOX_USER} /home/devbox/.config
 
+# Pre-create volume mount points with correct ownership.
+RUN mkdir -p /home/devbox/.cache/go-build /home/devbox/go/pkg/mod /workspace/.devbox \
+  && chown ${DEVBOX_USER}:${DEVBOX_USER} /home/devbox/.cache/go-build /home/devbox/go/pkg/mod /workspace/.devbox
+
 # Persist bash history.
 RUN SNIPPET="export PROMPT_COMMAND='history -a' && export HISTFILE=/commandhistory/.bash_history" \
   && mkdir /commandhistory \
