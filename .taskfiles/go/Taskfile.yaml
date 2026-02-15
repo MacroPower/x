@@ -1,0 +1,174 @@
+version: "3"
+
+set: [errexit, nounset, pipefail]
+shopt: [globstar]
+
+vars:
+  GOTESTSUM_VERSION: v1.12.1
+  DEADCODE_VERSION: v0.32.0
+
+tasks:
+  format:
+    desc: Formats Go code
+    sources:
+      - "**/*.go"
+      - exclude: "{dist,.devbox,.worktrees}/**"
+      - go.mod
+      - go.sum
+      - .golangci.yaml
+    cmds:
+      - golangci-lint run --fix
+
+  code-lint:
+    internal: true
+    desc: Lints Go code
+    sources:
+      - "**/*.go"
+      - exclude: "{dist,.devbox,.worktrees}/**"
+      - go.mod
+      - go.sum
+      - .golangci.yaml
+    cmds:
+      - golangci-lint run
+
+  goreleaser-lint:
+    internal: true
+    desc: Lints GoReleaser configuration
+    sources:
+      - .goreleaser*
+    cmds:
+      - goreleaser check
+
+  lint:
+    desc: Lints Go code and config files
+    deps: [code-lint, goreleaser-lint]
+
+  test:
+    desc: Runs Go tests
+    label: "go:test {{.PKG}}"
+    summary: |
+      Runs Go tests
+
+      Args:
+        PKG: Go package to test (default: ./...)
+        FLAGS: Additional flags to pass to `go test` (default: "")
+        PKG_FLAGS: Additional flags to pass to test packages (default: "")
+    vars:
+      PKG: '{{.PKG | default "./..."}}'
+      FLAGS: '{{.FLAGS | default ""}}'
+      PKG_FLAGS: '{{.PKG_FLAGS | default ""}}'
+    cmds:
+      - go test -race -vet=all {{.FLAGS}} {{.PKG}} {{.PKG_FLAGS}}
+
+  cover:
+    desc: Runs Go tests with coverage
+    deps: [tools:gotestsum]
+    sources:
+      - "**/*.go"
+      - exclude: "{dist,.devbox,.worktrees}/**"
+      - go.mod
+      - go.sum
+    generates:
+      - .test/cover.out
+      - .test/junit.xml
+    cmds:
+      - cmd: mkdir -p .test/
+        silent: true
+      - gotestsum --junitfile=.test/junit.xml --format=pkgname -- -race -vet=all -coverprofile=.test/cover.out ./...
+
+  bench:
+    desc: Runs Go benchmarks
+    label: "go:bench {{.PKG}}"
+    summary: |
+      Runs Go benchmarks
+
+      Args:
+        PKG: Go package to test (default: ./...)
+        FLAGS: Additional flags to pass to `go test` (default: "")
+
+      Examples:
+        task go:bench PKG=./pkg/helm FLAGS="-cpuprofile profile.out -run=^\$"
+    vars:
+      PKG: '{{.PKG | default "./..."}}'
+      FLAGS: '{{.FLAGS | default ""}}'
+    cmds:
+      - go test -bench=. -benchmem {{.FLAGS}} {{.PKG}}
+
+  docs:
+    desc: Prints Go documentation for all packages
+    label: "go:docs {{.PKG}}"
+    summary: |
+      Prints Go documentation for all packages.
+
+      Args:
+        PKG: Go package(s) to document (default: ./...)
+        FLAGS: Additional flags to pass to `go doc` (default: "")
+    vars:
+      PKG: '{{.PKG | default "./..."}}'
+      FLAGS: '{{.FLAGS | default ""}}'
+      PACKAGES:
+        sh: go list {{.PKG}} | grep -v -E '/(examples|cmd)(/|$)'
+    cmds:
+      - for: { var: PACKAGES, split: "\n" }
+        cmd: echo "--------------------------------------------------------------------------------" && go doc {{.FLAGS}} {{.ITEM}}
+
+  gen:
+    desc: Generates Go code
+    cmds:
+      - go generate ./...
+
+  build:
+    desc: Builds Go binaries
+    vars:
+      FLAGS: '{{.FLAGS | default "--skip=docker,homebrew,nix,sign"}}'
+    sources:
+      - "**/*.go"
+      - exclude: "{dist,.devbox,.worktrees}/**"
+      - go.mod
+      - go.sum
+      - .goreleaser*
+    cmds:
+      - goreleaser release --snapshot --clean {{ .FLAGS }}
+
+  release:
+    desc: Releases Go binaries
+    vars:
+      FLAGS: '{{.FLAGS | default ""}}'
+    cmds:
+      - goreleaser release --clean {{.FLAGS}}
+
+  deadcode:
+    desc: Finds dead code in Go
+    summary: |
+      Finds dead code in Go.
+
+      Args:
+        PKG: Go package(s) to evaluate (default: ./...)
+        FLAGS: Additional flags to pass to `deadcode` (default: "")
+
+      Examples:
+        task go:deadcode FLAGS="-test -generated"
+    deps: [tools:deadcode]
+    vars:
+      PKG: '{{.PKG | default "./..."}}'
+      FLAGS: '{{.FLAGS | default ""}}'
+    cmds:
+      - deadcode {{.FLAGS}} {{.PKG}}
+
+  tools:gotestsum:
+    internal: true
+    run: once
+    desc: Installs gotestsum
+    status:
+      - command -v gotestsum
+    cmds:
+      - go install gotest.tools/gotestsum@{{.GOTESTSUM_VERSION}}
+
+  tools:deadcode:
+    internal: true
+    run: once
+    desc: Installs deadcode
+    status:
+      - command -v deadcode
+    cmds:
+      - go install golang.org/x/tools/cmd/deadcode@{{.DEADCODE_VERSION}}

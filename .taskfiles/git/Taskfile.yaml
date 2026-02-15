@@ -1,0 +1,43 @@
+version: "3"
+
+set: [errexit, nounset, pipefail]
+shopt: [globstar]
+
+tasks:
+  hooks:install:
+    desc: Installs git hooks
+    preconditions:
+      - sh: command -v lefthook
+        msg: "lefthook is not installed. Run 'task install' first."
+    cmds:
+      - lefthook install
+
+  worktree:add:
+    desc: Adds a git worktree
+    summary: |
+      Adds a git worktree for a branch.
+
+      Args:
+        BRANCH: Branch name (required)
+    requires:
+      vars: [BRANCH]
+    cmds:
+      - git worktree add .worktrees/{{.BRANCH}} {{.BRANCH}}
+
+  worktree:ls:
+    desc: Lists git worktrees
+    cmds:
+      - git worktree list
+
+  worktree:rm:
+    desc: Removes a git worktree
+    prompt: "Remove worktree for branch '{{.BRANCH}}'?"
+    summary: |
+      Removes a git worktree.
+
+      Args:
+        BRANCH: Branch name (required)
+    requires:
+      vars: [BRANCH]
+    cmds:
+      - git worktree remove .worktrees/{{.BRANCH}}

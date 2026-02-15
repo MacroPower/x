@@ -1,0 +1,26 @@
+version: "3"
+
+set: [errexit, nounset, pipefail]
+shopt: [globstar]
+
+vars:
+  PRETTIER_TARGETS: "*.{yaml,md,json} **/*.{yaml,md,json}"
+
+tasks:
+  format:
+    desc: Formats YAML, JSON, and Markdown files
+    sources:
+      - "**/*.{yaml,md,json}"
+      - exclude: "{dist,.devbox,.worktrees,.task,.test}/**"
+      - .prettierrc.yaml
+    cmds:
+      - prettier --config ./.prettierrc.yaml -w {{.PRETTIER_TARGETS}}
+
+  lint:
+    desc: Lints YAML, JSON, and Markdown files
+    sources:
+      - "**/*.{yaml,md,json}"
+      - exclude: "{dist,.devbox,.worktrees,.task,.test}/**"
+      - .prettierrc.yaml
+    cmds:
+      - prettier --config ./.prettierrc.yaml --check {{.PRETTIER_TARGETS}}

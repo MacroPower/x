@@ -21,6 +21,11 @@
     "gcc": "15.2.0"
   },
   "shell": {
-    "init_hook": ["echo 'Welcome to devbox!' > /dev/null"]
+    "init_hook": [
+      "alias python='uv run python'",
+      "alias python3='uv run python3'",
+      "alias pip='uv pip'",
+      "alias pip3='uv pip'"
+    ]
   }
 }

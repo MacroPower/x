@@ -1,0 +1,26 @@
+version: "3"
+
+set: [errexit, nounset, pipefail]
+shopt: [globstar]
+
+tasks:
+  renovate:lint:
+    internal: true
+    desc: Lints Renovate configuration
+    sources:
+      - .github/renovate.json5
+    cmds:
+      - renovate-config-validator .github/renovate.json5
+
+  actions:lint:
+    internal: true
+    desc: Lints GitHub Actions
+    sources:
+      - .github/workflows/*.yaml
+      - .github/zizmor.yaml
+    cmds:
+      - zizmor .github/workflows --config .github/zizmor.yaml
+
+  lint:
+    desc: Lints GitHub configuration
+    deps: [renovate:lint, actions:lint]

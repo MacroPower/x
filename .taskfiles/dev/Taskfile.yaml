@@ -1,0 +1,44 @@
+version: "3"
+
+set: [errexit, nounset, pipefail]
+shopt: [globstar]
+
+tasks:
+  install:
+    desc: Installs development dependencies
+    cmds:
+      - devbox install
+
+  gc:
+    desc: Runs Nix GC
+    cmds:
+      - nix-collect-garbage
+
+  container:
+    desc: Starts the devcontainer
+    run: once
+    status:
+      - devcontainer exec --workspace-folder "{{.ROOT_DIR}}" true 2>/dev/null
+    cmds:
+      - devcontainer up --workspace-folder "{{.ROOT_DIR}}"
+
+  container:rebuild:
+    desc: Rebuilds the devcontainer from scratch
+    cmds:
+      - devcontainer up --workspace-folder "{{.ROOT_DIR}}" --remove-existing-container
+
+  shell:
+    desc: Launches a shell in the devcontainer
+    interactive: true
+    deps:
+      - task: container
+    cmds:
+      - devcontainer exec --workspace-folder "{{.ROOT_DIR}}" bash
+
+  claude:
+    desc: Launches a Claude Code session in the devcontainer
+    interactive: true
+    deps:
+      - task: container
+    cmds:
+      - devcontainer exec --workspace-folder "{{.ROOT_DIR}}" claude --dangerously-skip-permissions
