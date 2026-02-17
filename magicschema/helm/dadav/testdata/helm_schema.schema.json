@@ -1,0 +1,267 @@
+{
+  "type": "object",
+  "properties": {
+    "replicas": {
+      "type": "integer",
+      "description": "Number of replicas",
+      "multipleOf": 1,
+      "minimum": 1,
+      "maximum": 100,
+      "exclusiveMinimum": 0,
+      "exclusiveMaximum": 101
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 63,
+      "pattern": "^[a-z]",
+      "format": "hostname"
+    },
+    "image": {
+      "type": "object",
+      "properties": {
+        "repository": {
+          "type": "string",
+          "pattern": "^[a-z]"
+        },
+        "tag": {
+          "type": "string"
+        }
+      },
+      "minProperties": 1,
+      "maxProperties": 5,
+      "additionalProperties": false
+    },
+    "optionalField": {
+      "type": ["string", "null"]
+    },
+    "logLevel": {
+      "type": "string",
+      "default": "info",
+      "enum": ["debug", "info", "warn", "error"]
+    },
+    "apiVersion": {
+      "type": "string",
+      "const": "v1"
+    },
+    "oldField": {
+      "type": "string",
+      "deprecated": true,
+      "readOnly": true
+    },
+    "password": {
+      "type": "string",
+      "writeOnly": true
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "maxItems": 10,
+      "uniqueItems": true
+    },
+    "sampleField": {
+      "type": "string",
+      "examples": ["example1", "example2"]
+    },
+    "port": {
+      "type": "integer",
+      "description": "Non-annotation description preserved"
+    },
+    "servicePort": {
+      "type": "integer",
+      "description": "Actual port description"
+    },
+    "enabled": {
+      "type": "boolean",
+      "description": "Helm docs style description"
+    },
+    "resources": {
+      "type": "object",
+      "$ref": "#/definitions/resource",
+      "additionalProperties": true
+    },
+    "config": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string"
+        }
+      },
+      "$id": "#/config",
+      "$comment": "Configuration object",
+      "additionalProperties": true
+    },
+    "certData": {
+      "type": "string",
+      "contentEncoding": "base64",
+      "contentMediaType": "application/octet-stream"
+    },
+    "advancedSetting": {
+      "type": "string",
+      "x-category": "advanced",
+      "x-order": 10
+    },
+    "database": {
+      "type": "object",
+      "properties": {
+        "host": {
+          "type": "string"
+        }
+      },
+      "dependencies": {
+        "enabled": ["host", "port"]
+      },
+      "additionalProperties": true
+    },
+    "feature": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "string"
+        }
+      },
+      "dependencies": {
+        "mode": {
+          "properties": {
+            "config": {
+              "type": "object"
+            }
+          },
+          "required": ["config"]
+        }
+      },
+      "additionalProperties": true
+    },
+    "metadata": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": ["name", "version"],
+      "additionalProperties": true
+    },
+    "flexibleValue": {
+      "type": "string",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "integer"
+        }
+      ]
+    },
+    "exclusiveValue": {
+      "type": "string",
+      "oneOf": [
+        {
+          "type": "string",
+          "maxLength": 10
+        },
+        {
+          "type": "string",
+          "minLength": 100
+        }
+      ]
+    },
+    "strictConfig": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true,
+      "allOf": [
+        {
+          "type": "object"
+        },
+        {
+          "required": ["id"]
+        }
+      ]
+    },
+    "nonNullable": {
+      "type": "string",
+      "not": {
+        "type": "null"
+      }
+    },
+    "conditionalField": {
+      "type": "string",
+      "if": {
+        "properties": {
+          "mode": {
+            "const": "advanced"
+          }
+        }
+      },
+      "then": {
+        "required": ["config"]
+      },
+      "else": {
+        "properties": {
+          "config": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "annotations": {
+      "type": "object",
+      "patternProperties": {
+        "^x-": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "labels": {
+      "type": "object",
+      "additionalProperties": true,
+      "propertyNames": {
+        "pattern": "^[a-z_]+$"
+      }
+    },
+    "mixedArray": {
+      "type": "array",
+      "contains": {
+        "type": "string",
+        "const": "required-item"
+      }
+    },
+    "tupleArray": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "additionalItems": {
+        "type": "string"
+      }
+    },
+    "portDefs": {
+      "type": "integer",
+      "definitions": {
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        }
+      }
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "My Chart",
+  "description": "A comprehensive chart",
+  "required": ["name"],
+  "additionalProperties": true,
+  "x-generated-by": "magic_schema"
+}

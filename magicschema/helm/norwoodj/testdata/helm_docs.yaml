@@ -1,0 +1,89 @@
+# -- Number of replicas to deploy
+replicas: 3
+
+# -- (string) Container image repository
+repository: nginx
+
+# -- (int) Port to expose
+port: 8080
+
+# -- Enable debug mode
+debug: false
+
+# @ignore
+internalConfig: value
+
+# -- (float) Resource limit
+cpuLimit: 1.5
+
+# -- (bool) Enable TLS
+tlsEnabled: true
+
+# -- (list) Container arguments
+args:
+  - arg1
+
+# -- (object) Pod labels
+labels:
+  app: test
+
+# -- (dict) Extra annotations
+annotations:
+  key: val
+
+# -- (tpl) Template value
+templateStr: "{{ .Values.name }}"
+
+# -- (yaml) Raw YAML content
+rawYaml: |
+  some: data
+
+# -- (tpl/string) Templated string value
+tplString: value
+
+# -- (tpl/array) Templated array
+tplArray:
+  - item
+
+# -- (tpl/object) Templated object
+tplObject:
+  nested: val
+
+# -- (k8s/storage/persistent-volume/access-modes) Complex compound type
+accessModes:
+  - ReadWriteOnce
+
+# -- (unknown) Unrecognized type hint
+unknownType: 123
+
+# @default -- custom-default
+# -- Description with default
+withDefault: actual
+
+# -- Multi-line description
+# that continues here
+#
+# and after a blank comment line
+multiLine: x
+
+# -- Raw multi-line
+# @raw
+# first line
+# second line
+rawMulti: y
+
+# image.tag -- (string) Old-style image tag
+image:
+  tag: latest
+
+# @ignore
+# -- This should be skipped entirely
+secretValue: supersecret
+
+# -- Description of annotated value
+# @notationType -- helm
+# @section -- General
+annotatedVal: z
+
+# -- (list/csv) Compound with unusual base
+csvList: "a,b,c"

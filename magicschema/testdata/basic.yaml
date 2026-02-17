@@ -1,0 +1,16 @@
+# Number of pod replicas
+replicas: 3
+
+image:
+  # Container image repository
+  repository: nginx
+  # Image tag to deploy
+  tag: latest
+
+# Enable debug mode
+debug: false
+
+# Resource limits
+resources:
+  cpu: 100m
+  memory: 128Mi

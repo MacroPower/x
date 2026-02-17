@@ -1,0 +1,81 @@
+## @section Common parameters
+
+## @descriptionStart
+## These are common parameters for the chart.
+## @descriptionEnd
+
+## @param replicaCount Number of replicas
+replicaCount: 1
+
+## @param image.registry [string] Container image registry
+## @param image.repository Container image name
+## @param image.tag [string] Container image tag
+image:
+  registry: docker.io
+  repository: bitnami/nginx
+  tag: latest
+
+## @param nameOverride [string, nullable] Override the name
+nameOverride: ""
+
+## @extra extraConfig.key [string] Extra config for README only
+
+## @skip secretConfig
+secretConfig:
+  password: secret123
+
+## @section Advanced parameters
+
+## @param service.type [string] Kubernetes service type
+## @param service.port [number] Service port number
+## @param service.annotations [object] Additional service annotations
+service:
+  type: ClusterIP
+  port: 80
+  annotations: {}
+
+## @param tolerations [array, nullable] Tolerations for pod assignment
+tolerations: []
+
+## @param resources.limits.cpu [string, default: 100m] CPU resource limit
+## @param resources.limits.memory [string, default: 128Mi] Memory resource limit
+resources:
+  limits:
+    cpu: 250m
+    memory: 256Mi
+
+## @param jobs[0].nameOverride Override name for the first job
+## @param jobs[0].image [string] Image for the first job
+jobs:
+  - nameOverride: my-job
+    image: busybox
+
+## @skip internalConfig[0].secret
+internalConfig:
+  - secret: hidden
+
+## @param flags.enabled [boolean] Enable feature flags
+## @param flags.count [integer] Number of active flags
+flags:
+  enabled: true
+  count: 5
+
+## @param customDefault [string, default: myval] Value with custom default
+customDefault: actual
+
+## @param nullableNoType [nullable] Nullable without explicit type
+nullableNoType: ""
+
+## @param registryUrl [string, default: https://registry.example.com] Default URL with colons
+registryUrl: https://other.example.com
+
+## @param config.timeout [integer] Request timeout
+## @param config.retries [integer] Number of retries
+## @param config.verbose [boolean] Enable verbose output
+config:
+  timeout: 30
+  retries: 3
+  verbose: false
+
+## @param optionalObj [object, nullable] Optional config object
+optionalObj: {}
