@@ -1,0 +1,87 @@
+# @schema.root
+# title: My Application
+# description: Helm chart values
+# @schema.root
+
+# @schema
+# type: integer
+# minimum: 1
+# description: Number of replicas
+# @schema
+replicaCount: 1
+
+image:
+  # @schema
+  # type: string
+  # required: true
+  # pattern: "^[a-z0-9.-]+$"
+  # @schema
+  # Container image repository
+  repository: nginx
+  # @schema type:string
+  tag: latest
+  # -- (string) Image pull policy
+  pullPolicy: IfNotPresent
+
+## @param nameOverride [string, nullable] Override chart name
+nameOverride: ""
+
+## @param fullnameOverride [string] Override full chart name
+fullnameOverride: ""
+
+# Kubernetes service settings
+service:
+  # @schema
+  # type: string
+  # enum: [ClusterIP, NodePort, LoadBalancer]
+  # @schema
+  type: ClusterIP
+  port: 80
+
+# -- (object) Resource limits and requests
+resources:
+  limits:
+    cpu: 100m
+    memory: 128Mi
+  requests:
+    cpu: 50m
+    memory: 64Mi
+
+# @schema
+# type: object
+# additionalProperties: false
+# @schema
+nodeSelector: {}
+
+# Pod tolerations
+tolerations: []
+
+# Pod affinity rules
+affinity: {}
+
+# @schema
+# type: boolean
+# default: false
+# @schema
+debug: false
+
+# -- Enable ingress
+ingress:
+  # @schema
+  # type: boolean
+  # @schema
+  enabled: false
+  hosts:
+    - host: chart-example.local
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+
+# YAML anchors and aliases test
+defaults: &defaults
+  timeout: 30
+  retries: 3
+
+production:
+  <<: *defaults
+  timeout: 60

@@ -1,0 +1,129 @@
+{
+  "type": "object",
+  "properties": {
+    "replicas": {
+      "type": "integer",
+      "description": "Number of replicas to deploy"
+    },
+    "repository": {
+      "type": "string",
+      "description": "Container image repository"
+    },
+    "port": {
+      "type": "integer",
+      "description": "Port to expose"
+    },
+    "debug": {
+      "type": "boolean",
+      "description": "Enable debug mode"
+    },
+    "cpuLimit": {
+      "type": "number",
+      "description": "Resource limit"
+    },
+    "tlsEnabled": {
+      "type": "boolean",
+      "description": "Enable TLS"
+    },
+    "args": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Container arguments"
+    },
+    "labels": {
+      "type": "object",
+      "properties": {
+        "app": {
+          "type": "string"
+        }
+      },
+      "description": "Pod labels",
+      "additionalProperties": true
+    },
+    "annotations": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string"
+        }
+      },
+      "description": "Extra annotations",
+      "additionalProperties": true
+    },
+    "templateStr": {
+      "type": "string",
+      "description": "Template value"
+    },
+    "rawYaml": {
+      "type": "string",
+      "description": "Raw YAML content"
+    },
+    "tplString": {
+      "type": "string",
+      "description": "Templated string value"
+    },
+    "tplArray": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Templated array"
+    },
+    "tplObject": {
+      "type": "object",
+      "properties": {
+        "nested": {
+          "type": "string"
+        }
+      },
+      "description": "Templated object",
+      "additionalProperties": true
+    },
+    "accessModes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Complex compound type"
+    },
+    "unknownType": {
+      "type": "integer",
+      "description": "Unrecognized type hint"
+    },
+    "withDefault": {
+      "type": "string",
+      "description": "Description with default",
+      "default": "custom-default"
+    },
+    "multiLine": {
+      "type": "string",
+      "description": "Multi-line description that continues here  and after a blank comment line"
+    },
+    "rawMulti": {
+      "type": "string",
+      "description": "Raw multi-line\nfirst line\nsecond line"
+    },
+    "image": {
+      "type": "object",
+      "properties": {
+        "tag": {
+          "type": "string",
+          "description": "Old-style image tag"
+        }
+      },
+      "additionalProperties": true
+    },
+    "annotatedVal": {
+      "type": "string",
+      "description": "Description of annotated value"
+    },
+    "csvList": {
+      "type": "string",
+      "description": "Compound with unusual base"
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": true
+}

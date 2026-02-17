@@ -1,0 +1,254 @@
+{
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "replicas": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "maximum": 100
+    },
+    "debug": {
+      "type": "boolean"
+    },
+    "image": {
+      "type": "string",
+      "title": "Image Repository",
+      "description": "Container image to use",
+      "pattern": "^[a-z0-9/]+$"
+    },
+    "cpuLimit": {
+      "type": "number",
+      "multipleOf": 0.5,
+      "minimum": 0.5,
+      "maximum": 16
+    },
+    "serviceType": {
+      "type": "string",
+      "enum": ["ClusterIP", "NodePort", "LoadBalancer"]
+    },
+    "httpsPort": {
+      "type": "integer",
+      "const": 443
+    },
+    "tag": {
+      "type": "string",
+      "default": "latest",
+      "maxLength": 128
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "maxItems": 10,
+      "uniqueItems": true
+    },
+    "nullableTags": {
+      "type": "array",
+      "items": {
+        "type": ["string", "null"]
+      }
+    },
+    "protocols": {
+      "type": "array",
+      "items": {
+        "enum": ["http", "https", "tcp"]
+      }
+    },
+    "ports": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/port"
+      }
+    },
+    "env": {
+      "type": "array",
+      "items": {
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "labels": {
+      "type": "object",
+      "properties": {
+        "app": {
+          "type": "string"
+        }
+      },
+      "minProperties": 1,
+      "maxProperties": 50,
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "strictConfig": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "openConfig": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "extensions": {
+      "type": "object",
+      "properties": {
+        "x-custom": {
+          "type": "string"
+        }
+      },
+      "patternProperties": {
+        "^x-": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "externalRef": {
+      "type": "string",
+      "$id": "https://example.com/schema",
+      "$ref": "#/definitions/item"
+    },
+    "hostname": {
+      "type": "string",
+      "readOnly": true
+    },
+    "closedObj": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true,
+      "unevaluatedProperties": false
+    },
+    "typedUnevaluated": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": true,
+      "unevaluatedProperties": {
+        "type": "integer"
+      }
+    },
+    "sampleValue": {
+      "type": "string",
+      "examples": ["foo", "bar", "baz"]
+    },
+    "validated": {
+      "type": ["string", "integer"],
+      "allOf": [
+        {
+          "minLength": 1
+        },
+        {
+          "maxLength": 100
+        }
+      ]
+    },
+    "prefixed": {
+      "type": "string",
+      "anyOf": [
+        {
+          "pattern": "^a"
+        },
+        {
+          "pattern": "^b"
+        }
+      ]
+    },
+    "ranged": {
+      "type": "integer",
+      "oneOf": [
+        {
+          "minimum": 0,
+          "maximum": 10
+        },
+        {
+          "minimum": 100,
+          "maximum": 200
+        }
+      ]
+    },
+    "username": {
+      "type": "string",
+      "not": {
+        "pattern": "^admin"
+      }
+    },
+    "dynamicMap": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "multiAnnotation": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 50
+    },
+    "region": {
+      "type": "string",
+      "enum": ["us-east-1", "us-west-2", "eu-west-1"]
+    },
+    "nodeCount": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 99
+    },
+    "nullConst": {
+      "const": null
+    },
+    "nullDefault": {
+      "default": null
+    },
+    "boolConstDefault": {
+      "type": "boolean",
+      "default": true,
+      "const": false
+    },
+    "mixedEnum": {
+      "type": "integer",
+      "enum": [null, 1, "two", true]
+    },
+    "mergedLabels": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "optionalField": {
+      "type": "string"
+    },
+    "typedDynamic": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer"
+      }
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "required": ["name"],
+  "additionalProperties": true
+}

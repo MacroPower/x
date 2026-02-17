@@ -1,0 +1,153 @@
+{
+  "type": "object",
+  "properties": {
+    "replicaCount": {
+      "type": "integer",
+      "description": "Number of replicas"
+    },
+    "image": {
+      "type": "object",
+      "properties": {
+        "registry": {
+          "type": "string",
+          "description": "Container image registry"
+        },
+        "repository": {
+          "type": "string",
+          "description": "Container image name"
+        },
+        "tag": {
+          "type": "string",
+          "description": "Container image tag"
+        }
+      },
+      "additionalProperties": true
+    },
+    "nameOverride": {
+      "type": ["string", "null"],
+      "description": "Override the name"
+    },
+    "service": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "Kubernetes service type"
+        },
+        "port": {
+          "type": "number",
+          "description": "Service port number"
+        },
+        "annotations": {
+          "type": "object",
+          "description": "Additional service annotations",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "tolerations": {
+      "type": ["array", "null"],
+      "description": "Tolerations for pod assignment"
+    },
+    "resources": {
+      "type": "object",
+      "properties": {
+        "limits": {
+          "type": "object",
+          "properties": {
+            "cpu": {
+              "type": "string",
+              "description": "CPU resource limit",
+              "default": "100m"
+            },
+            "memory": {
+              "type": "string",
+              "description": "Memory resource limit",
+              "default": "128Mi"
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "jobs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "nameOverride": {
+            "type": "string",
+            "description": "Override name for the first job"
+          },
+          "image": {
+            "type": "string",
+            "description": "Image for the first job"
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "internalConfig": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    "flags": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable feature flags"
+        },
+        "count": {
+          "type": "integer",
+          "description": "Number of active flags"
+        }
+      },
+      "additionalProperties": true
+    },
+    "customDefault": {
+      "type": "string",
+      "description": "Value with custom default",
+      "default": "myval"
+    },
+    "nullableNoType": {
+      "type": ["null"],
+      "description": "Nullable without explicit type"
+    },
+    "registryUrl": {
+      "type": "string",
+      "description": "Default URL with colons",
+      "default": "https://registry.example.com"
+    },
+    "config": {
+      "type": "object",
+      "properties": {
+        "timeout": {
+          "type": "integer",
+          "description": "Request timeout"
+        },
+        "retries": {
+          "type": "integer",
+          "description": "Number of retries"
+        },
+        "verbose": {
+          "type": "boolean",
+          "description": "Enable verbose output"
+        }
+      },
+      "additionalProperties": true
+    },
+    "optionalObj": {
+      "type": ["object", "null"],
+      "description": "Optional config object",
+      "additionalProperties": true
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": true
+}

@@ -1,0 +1,130 @@
+# @schema type:string;required;minLength:1
+name: my-release
+# @schema type:[integer, null];minimum:0;maximum:100
+replicas: 3
+# @schema type:boolean
+debug: false
+
+# @schema type:string;title:Image Repository;description:Container image to use;pattern:^[a-z0-9/]+$
+image: nginx
+
+# @schema type:number;multipleOf:0.5;minimum:0.5;maximum:16
+cpuLimit: 2.0
+
+# @schema type:string;enum:[ClusterIP, NodePort, LoadBalancer]
+serviceType: ClusterIP
+
+# @schema type:integer;const:443
+httpsPort: 443
+
+# @schema type:string;default:latest;maxLength:128
+tag: latest
+
+# @schema type:array;item:string;minItems:1;maxItems:10;uniqueItems
+tags:
+  - web
+  - production
+
+# @schema type:array;item:[string, null]
+nullableTags:
+  - web
+
+# @schema type:array;itemEnum:[http, https, tcp]
+protocols:
+  - http
+
+# @schema type:array;itemRef:#/definitions/port
+ports:
+  - 80
+
+# @schema type:array;itemProperties:{name: {type: string}, value: {type: string}}
+env:
+  - name: FOO
+    value: bar
+
+# @schema type:object;additionalProperties:{type: string};minProperties:1;maxProperties:50
+labels:
+  app: myapp
+
+# @schema type:object;additionalProperties:false
+strictConfig:
+  key: value
+
+# @schema type:object;additionalProperties
+openConfig:
+  key: value
+
+# @schema type:object;patternProperties:{"^x-": {type: string}}
+extensions:
+  x-custom: hello
+
+# @schema $id:https://example.com/schema;$ref:#/definitions/item
+externalRef: test
+
+# @schema type:string;readOnly
+hostname: my-host
+
+# @schema type:object;unevaluatedProperties:false
+closedObj:
+  key: value
+
+# @schema type:object;unevaluatedProperties:{type: integer}
+typedUnevaluated:
+  key: 1
+
+# @schema type:string;examples:[foo, bar, baz]
+sampleValue: foo
+
+# @schema type:[string, integer];allOf:[{minLength: 1}, {maxLength: 100}]
+validated: hello
+
+# @schema type:string;anyOf:[{pattern: "^a"}, {pattern: "^b"}]
+prefixed: alpha
+
+# @schema type:integer;oneOf:[{minimum: 0, maximum: 10}, {minimum: 100, maximum: 200}]
+ranged: 5
+
+# @schema type:string;not:{pattern: "^admin"}
+username: user1
+
+# @schema hidden
+internalSecret: s3cret
+
+# @schema type:object;skipProperties;additionalProperties
+dynamicMap:
+  key1: val1
+  key2: val2
+
+# @schema type:string
+# @schema minLength:3;maxLength:50
+multiAnnotation: hello
+
+region: us-east-1 # @schema type:string;enum:[us-east-1, us-west-2, eu-west-1]
+
+# @schema type:integer;minimum:1;maximum:99
+nodeCount: 3
+
+# @schema const:null
+nullConst: null
+
+# @schema default:null
+nullDefault: null
+
+# @schema type:boolean;default:true;const:false
+boolConstDefault: false
+
+# @schema enum:[null, 1, two, true]
+mixedEnum: 1
+
+# @schema type:object;mergeProperties
+mergedLabels:
+  app: myapp
+  version: v1
+
+# @schema type:string;required:false
+optionalField: value
+
+# @schema type:object;skipProperties;additionalProperties:{type: integer}
+typedDynamic:
+  key1: 1
+  key2: 2

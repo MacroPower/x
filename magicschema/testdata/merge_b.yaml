@@ -1,0 +1,5 @@
+replicas: 5
+image:
+  repository: apache
+  pullPolicy: Always
+logLevel: info

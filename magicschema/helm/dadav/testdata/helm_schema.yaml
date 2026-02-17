@@ -1,0 +1,248 @@
+# @schema.root
+# title: My Chart
+# description: A comprehensive chart
+# x-generated-by: magic_schema
+# @schema.root
+# @schema
+# type: integer
+# minimum: 1
+# maximum: 100
+# exclusiveMinimum: 0
+# exclusiveMaximum: 101
+# multipleOf: 1
+# description: Number of replicas
+# @schema
+replicas: 3
+
+# @schema
+# type: string
+# required: true
+# minLength: 1
+# maxLength: 63
+# pattern: "^[a-z]"
+# format: hostname
+# @schema
+name: my-release
+
+# @schema
+# type: object
+# additionalProperties: false
+# minProperties: 1
+# maxProperties: 5
+# @schema
+image:
+  # @schema
+  # type: string
+  # pattern: "^[a-z]"
+  # @schema
+  repository: nginx
+  ## @schema
+  ## type: string
+  ## @schema
+  tag: latest
+
+# @schema
+# type: [string, "null"]
+# @schema
+optionalField: value
+
+# @schema
+# type: string
+# enum: [debug, info, warn, error]
+# default: info
+# @schema
+logLevel: info
+
+# @schema
+# type: string
+# const: v1
+# @schema
+apiVersion: v1
+
+# @schema
+# type: string
+# deprecated: true
+# readOnly: true
+# @schema
+oldField: legacy
+
+# @schema
+# type: string
+# writeOnly: true
+# @schema
+password: secret
+
+# @schema
+# type: array
+# uniqueItems: true
+# minItems: 1
+# maxItems: 10
+# items:
+#   type: string
+# @schema
+tags:
+  - web
+  - api
+
+# @schema
+# type: string
+# examples: [example1, example2]
+# @schema
+sampleField: test
+
+# Non-annotation description preserved
+# @schema
+# type: integer
+# @schema
+port: 8080
+
+# Old context
+#
+# Actual port description
+# @schema
+# type: integer
+# @schema
+servicePort: 80
+
+# -- Helm docs style description
+# @schema
+# type: boolean
+# @schema
+enabled: true
+
+# @schema
+# $ref: "#/definitions/resource"
+# @schema
+resources: {}
+
+# @schema
+# $id: "#/config"
+# $comment: Configuration object
+# @schema
+config:
+  key: value
+
+# @schema
+# type: string
+# contentEncoding: base64
+# contentMediaType: application/octet-stream
+# @schema
+certData: dGVzdA==
+
+# @schema
+# x-order: 10
+# x-category: advanced
+# @schema
+advancedSetting: custom
+
+# @schema
+# dependencies:
+#   enabled: [host, port]
+# @schema
+database:
+  host: localhost
+
+# @schema
+# dependencies:
+#   mode:
+#     properties:
+#       config:
+#         type: object
+#     required: [config]
+# @schema
+feature:
+  mode: advanced
+
+# @schema
+# required: [name, version]
+# @schema
+metadata:
+  name: chart
+  version: "1.0"
+
+# @schema
+# anyOf:
+#   - type: string
+#   - type: integer
+# @schema
+flexibleValue: test
+
+# @schema
+# oneOf:
+#   - type: string
+#     maxLength: 10
+#   - type: string
+#     minLength: 100
+# @schema
+exclusiveValue: short
+
+# @schema
+# allOf:
+#   - type: object
+#   - required: [id]
+# @schema
+strictConfig:
+  id: "abc"
+
+# @schema
+# not:
+#   type: "null"
+# @schema
+nonNullable: something
+
+# @schema
+# if:
+#   properties:
+#     mode:
+#       const: advanced
+# then:
+#   required: [config]
+# else:
+#   properties:
+#     config:
+#       type: string
+# @schema
+conditionalField: basic
+
+# @schema
+# type: object
+# patternProperties:
+#   "^x-":
+#     type: string
+# @schema
+annotations: {}
+
+# @schema
+# type: object
+# propertyNames:
+#   pattern: "^[a-z_]+$"
+# @schema
+labels: {}
+
+# @schema
+# type: array
+# contains:
+#   type: string
+#   const: required-item
+# @schema
+mixedArray:
+  - required-item
+  - 42
+
+# @schema
+# type: array
+# additionalItems:
+#   type: string
+# @schema
+tupleArray:
+  - first
+  - second
+
+# @schema
+# definitions:
+#   port:
+#     type: integer
+#     minimum: 1
+#     maximum: 65535
+# @schema
+portDefs: 8080
