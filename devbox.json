@@ -16,7 +16,7 @@
     "bashInteractive": "5.2p37",
     "tmux": "3.5",
     "renovate": "42.76.4",
-    "lefthook": "2.1.0",
+    "lefthook": "2.1.1",
     "devcontainer": "0.82.0",
     "gcc": "15.2.0",
     "jq": "1.8.1"
