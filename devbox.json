@@ -18,7 +18,8 @@
     "renovate": "42.76.4",
     "lefthook": "2.1.0",
     "devcontainer": "0.82.0",
-    "gcc": "15.2.0"
+    "gcc": "15.2.0",
+    "jq": "1.8.1"
   },
   "shell": {
     "init_hook": [
