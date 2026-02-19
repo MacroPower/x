@@ -4,7 +4,7 @@ go 1.25
 
 require (
 	charm.land/bubbletea/v2 v2.0.0-rc.2.0.20251212194116-6348bd4b7475
-	charm.land/log/v2 v2.0.0-20251110204020-529bb77f35da
+	charm.land/log/v2 67215264cd4b
 	github.com/goccy/go-yaml v1.19.2
 	github.com/google/jsonschema-go v0.4.2
 	github.com/spf13/cobra v1.10.2
