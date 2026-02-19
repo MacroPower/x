@@ -36,3 +36,4 @@ task docs # Print all package docs
 - Always use `t.Parallel()` in all tests.
 - Use `require.ErrorIs` for sentinel error checking.
 - Use `require.ErrorAs` for error type extraction.
+- Use the `stringtest` helpers for all multi-line strings.
