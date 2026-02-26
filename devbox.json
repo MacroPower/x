@@ -9,7 +9,7 @@
     "git": "2.52.0",
     "nodejs": "25.6.0",
     "nodePackages.prettier": "3.5.3",
-    "uv": "0.9.30",
+    "uv": "0.10.4",
     "zizmor": "1.22.0",
     "conform": "0.1.0-alpha.29",
     "vhs": "0.10.0",
