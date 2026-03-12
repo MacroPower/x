@@ -1,6 +1,6 @@
 module go.jacobcolvin.com/x
 
-go 1.25
+go 1.25.0
 
 require (
 	charm.land/bubbletea/v2 v2.0.0-rc.2.0.20251212194116-6348bd4b7475
@@ -10,7 +10,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	github.com/stretchr/testify v1.11.1
-	golang.org/x/image v0.36.0
+	golang.org/x/image v0.37.0
 	golang.org/x/term v0.40.0
 )
 
