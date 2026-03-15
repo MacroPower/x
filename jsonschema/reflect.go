@@ -1,0 +1,1405 @@
+package jsonschema
+
+import (
+	"encoding"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"maps"
+	"math"
+	"math/big"
+	"net/url"
+	"reflect"
+	"runtime"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/google/jsonschema-go/jsonschema"
+)
+
+// ErrProviderPanic is returned when a user-supplied JSONSchemaProvider or
+// JSONSchemaExtender method panics during generation (for example by
+// dereferencing a nil pointer field on the zero value it is invoked against).
+// The panic is recovered so Generate returns this error instead of crashing.
+var ErrProviderPanic = errors.New("provider panicked")
+
+var (
+	typeTextMarshaler  = reflect.TypeFor[encoding.TextMarshaler]()
+	typeJSONMarshaler  = reflect.TypeFor[json.Marshaler]()
+	typeJSONRawMessage = reflect.TypeFor[json.RawMessage]()
+	typeTime           = reflect.TypeFor[time.Time]()
+	typeURL            = reflect.TypeFor[url.URL]()
+	typeJSONNumber     = reflect.TypeFor[json.Number]()
+	typeBigInt         = reflect.TypeFor[big.Int]()
+	typeBigRat         = reflect.TypeFor[big.Rat]()
+	typeBigFloat       = reflect.TypeFor[big.Float]()
+	typeByteSlice      = reflect.TypeFor[[]byte]()
+)
+
+// generator holds the state for a single schema generation run.
+type generator struct {
+	typeToDefName        map[reflect.Type]string
+	typeSchemas          map[reflect.Type]*Schema
+	namer                func(reflect.Type) string
+	defs                 map[string]*Schema
+	defsNameToTypes      map[string][]reflect.Type
+	typeToDefSchema      map[reflect.Type]*Schema
+	visiting             map[reflect.Type]bool
+	refRecords           []refRecord
+	commentExtractor     *commentExtractor
+	tagInterpreters      []TagInterpreter
+	draft                Draft
+	comments             bool
+	definitions          bool
+	additionalProperties bool
+}
+
+// refRecord tracks a $ref schema and the Go type it references, enabling
+// correct ref updates during $defs name disambiguation.
+type refRecord struct {
+	schema *Schema
+	target reflect.Type
+}
+
+func newGenerator(opts []Option) *generator {
+	g := &generator{
+		draft:       Draft2020,
+		typeSchemas: map[reflect.Type]*Schema{},
+		namer:       defaultNamer,
+		definitions: true,
+
+		defs:            map[string]*Schema{},
+		defsNameToTypes: map[string][]reflect.Type{},
+		typeToDefName:   map[reflect.Type]string{},
+		typeToDefSchema: map[reflect.Type]*Schema{},
+		visiting:        map[reflect.Type]bool{},
+	}
+	for _, opt := range opts {
+		opt(g)
+	}
+
+	return g
+}
+
+// generate produces the root schema for the given type.
+func (g *generator) generate(t reflect.Type) (*Schema, error) {
+	if g.comments {
+		g.commentExtractor = newCommentExtractor()
+	}
+
+	// Follow pointers for root type identity.
+	rootType := t
+	for rootType.Kind() == reflect.Pointer {
+		rootType = rootType.Elem()
+	}
+
+	schema, err := g.schemaForType(t, false)
+	if err != nil {
+		return nil, err
+	}
+
+	// If the root type was extracted to $defs and nothing references it,
+	// inline its schema at the root instead of using $ref. A root reached
+	// by another definition (self-reference or mutual recursion) must stay
+	// in $defs, or removing it would leave those refs dangling.
+	if schema.Ref != "" {
+		defName := g.typeToDefName[rootType]
+		if defName != "" && !g.isReferenced(defName) {
+			// Inline: use the $defs entry as the root schema directly.
+			inlined := g.defs[defName]
+			if inlined != nil {
+				schema = inlined
+
+				delete(g.defs, defName)
+			}
+		}
+	}
+
+	// Disambiguate $defs names if there are collisions.
+	// All $ref schemas are updated in-place via tracked refRecords.
+	g.disambiguateDefs()
+
+	// Set $schema on root.
+	schema.Schema = g.draft.schemaURI()
+
+	// Attach $defs if any.
+	if len(g.defs) > 0 {
+		if g.draft == Draft7 {
+			schema.Definitions = g.defs
+		} else {
+			schema.Defs = g.defs
+		}
+	}
+
+	return schema, nil
+}
+
+// isReferenced reports whether any $defs entry contains a $ref to the named
+// definition. A root reached this way (self-reference or mutual recursion)
+// must not be inlined and deleted, or those refs would dangle.
+func (g *generator) isReferenced(defName string) bool {
+	target := g.draft.refPrefix() + defName
+	for _, s := range g.defs {
+		if schemaContainsRef(s, target) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// schemaContainsRef recursively checks if a schema contains a $ref to the
+// given target. It walks the sub-schema-bearing fields via subschemaChildren,
+// the single source of truth for which keywords hold sub-schemas, so a
+// reference through any keyword is found and the field list stays in one place.
+// The freshly generated $defs trees this runs over are acyclic, so the walk
+// terminates.
+func schemaContainsRef(s *Schema, target string) bool {
+	if s == nil {
+		return false
+	}
+	if s.Ref == target {
+		return true
+	}
+
+	for _, child := range subschemaChildren(s) {
+		if schemaContainsRef(child, target) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// schemaForType produces a schema for the given type. If nullable is true,
+// the result is made nullable (see applyNullable: pointers wrap in an anyOf
+// with a null branch, while slices and maps use a "null" entry in the type
+// list).
+//
+//nolint:unparam // nullable is part of the API contract; callers pass false but the parameter is used internally after pointer unwrapping.
+func (g *generator) schemaForType(t reflect.Type, nullable bool) (*Schema, error) {
+	// Follow pointers.
+	for t.Kind() == reflect.Pointer {
+		nullable = true
+		t = t.Elem()
+	}
+
+	// 1. WithTypeSchema override.
+	if s, ok := g.typeSchemas[t]; ok {
+		return g.handleOverrideType(t, s, nullable)
+	}
+
+	// 2. JSONSchemaProvider interface.
+	if implementsProvider(t) {
+		return g.handleProviderType(t, nullable)
+	}
+
+	// 3. Built-in overrides.
+	if s, ok := g.builtinOverride(t); ok {
+		return g.handleBuiltinType(t, s, nullable)
+	}
+
+	// 4. TextMarshaler (direct implementation only, not promoted from an
+	// embedded field — promoted TextMarshaler is composed via allOf during
+	// struct field collection, matching the JSONSchemaProvider pattern).
+	if isDirectTextMarshaler(t) {
+		s := &Schema{Type: "string"}
+		return g.handleTextMarshalerType(t, s, nullable)
+	}
+
+	// 5. Kind-based reflection.
+	s, err := g.schemaForKind(t, nullable)
+	if err != nil {
+		return nil, err
+	}
+
+	// Type-level post-processing for non-struct named types.
+	// Struct types handle comments, extend, and extraction internally
+	// in buildStructSchema/schemaForStruct.
+	if t.Kind() != reflect.Struct && t.Name() != "" {
+		if g.comments {
+			g.applyTypeComment(t, s)
+		}
+		if implementsExtender(t) {
+			if err := callExtender(t, s); err != nil {
+				return nil, err
+			}
+		}
+		if g.shouldExtract(t) {
+			return g.extractToDefs(t, s, nullable)
+		}
+	}
+
+	return s, nil
+}
+
+// handleOverrideType processes a type with a WithTypeSchema override.
+//
+// The override is copied with the upstream shallow CloneSchemas, not the JSON
+// round-trip cloneSchema used for remote refs: CloneSchemas preserves the
+// caller's exact any-typed Enum/Const/Default values, whereas a round-trip
+// would rewrite them (a Go int enum value would decode back as float64).
+//
+// CloneSchemas only deep-copies sub-schema fields, leaving the Enum, Const,
+// Default, and Extra headers aliased to the caller's schema. cloneOverrideExtras
+// copies those too, so a tag interpreter or JSONSchemaExtender that mutates them
+// in place (appending to Enum, reassigning Const, writing into Extra) cannot
+// reach back into an override reused across Generate calls.
+func (g *generator) handleOverrideType(t reflect.Type, override *Schema, nullable bool) (*Schema, error) {
+	s := override.CloneSchemas()
+	cloneOverrideExtras(s)
+	// Apply type-level comments.
+	if g.comments {
+		g.applyTypeComment(t, s)
+	}
+	if g.shouldExtract(t) {
+		return g.extractToDefs(t, s, nullable)
+	}
+
+	return g.applyNullable(s, t, nullable), nil
+}
+
+// cloneOverrideExtras deep-copies the non-sub-schema fields that the upstream
+// CloneSchemas leaves aliased to the source schema: Enum, Const, Default, and
+// Extra. Only the top-level headers and pointers are copied; nested any values
+// keep their identity, which preserves the caller's exact typed values while
+// breaking the aliasing that lets in-place mutation leak across Generate calls.
+func cloneOverrideExtras(s *Schema) {
+	if s.Enum != nil {
+		s.Enum = slices.Clone(s.Enum)
+	}
+	if s.Const != nil {
+		c := *s.Const
+		s.Const = &c
+	}
+	if s.Default != nil {
+		s.Default = slices.Clone(s.Default)
+	}
+	if s.Extra != nil {
+		s.Extra = maps.Clone(s.Extra)
+	}
+}
+
+// handleProviderType processes a type implementing JSONSchemaProvider.
+func (g *generator) handleProviderType(t reflect.Type, nullable bool) (*Schema, error) {
+	s, err := callProvider(t)
+	if err != nil {
+		return nil, err
+	}
+	if s == nil {
+		s = &Schema{} // unrestricted
+	}
+	// Apply type-level comments.
+	if g.comments {
+		g.applyTypeComment(t, s)
+	}
+	if g.shouldExtract(t) {
+		return g.extractToDefs(t, s, nullable)
+	}
+
+	return g.applyNullable(s, t, nullable), nil
+}
+
+// handleBuiltinType processes a type with a built-in override, applying
+// type-level post-processing (comments, extender, $defs extraction) per
+// the processing order.
+func (g *generator) handleBuiltinType(t reflect.Type, s *Schema, nullable bool) (*Schema, error) {
+	if t.Name() != "" {
+		if g.comments {
+			g.applyTypeComment(t, s)
+		}
+		if implementsExtender(t) {
+			if err := callExtender(t, s); err != nil {
+				return nil, err
+			}
+		}
+		if g.shouldExtract(t) {
+			return g.extractToDefs(t, s, nullable)
+		}
+	}
+
+	return g.applyNullable(s, t, nullable), nil
+}
+
+// handleTextMarshalerType processes a type that directly implements
+// TextMarshaler. The type-level post-processing (comments, extender, $defs
+// extraction) is identical to a built-in override, so it delegates.
+func (g *generator) handleTextMarshalerType(t reflect.Type, s *Schema, nullable bool) (*Schema, error) {
+	return g.handleBuiltinType(t, s, nullable)
+}
+
+// builtinOverride returns a schema for well-known types, if applicable.
+func (g *generator) builtinOverride(t reflect.Type) (*Schema, bool) {
+	switch t {
+	case typeByteSlice:
+		return &Schema{Types: []string{typeNameNull, typeNameString}, ContentEncoding: "base64"}, true
+	case typeTime:
+		return &Schema{Type: "string", Format: "date-time"}, true
+	case typeURL:
+		return &Schema{Type: "string", Format: "uri"}, true
+	case typeJSONRawMessage:
+		return &Schema{}, true
+	case typeJSONNumber:
+		return &Schema{Type: "number"}, true
+	case typeBigInt:
+		return &Schema{Type: "string", Pattern: `^-?[0-9]+$`}, true
+	case typeBigRat:
+		return &Schema{Type: "string", Pattern: `^-?[0-9]+(/[0-9]+)?$`}, true
+	case typeBigFloat:
+		return &Schema{Type: "string", Pattern: `^-?[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]+)?$`}, true
+	}
+
+	return nil, false
+}
+
+// schemaForKind handles the kind-based reflection step.
+func (g *generator) schemaForKind(t reflect.Type, nullable bool) (*Schema, error) {
+	switch t.Kind() {
+	case reflect.Bool:
+		return g.applyNullable(&Schema{Type: "boolean"}, t, nullable), nil
+
+	case reflect.String:
+		return g.applyNullable(&Schema{Type: "string"}, t, nullable), nil
+
+	case reflect.Int:
+		// Plain int is platform-dependent (32 or 64 bit), so leave it unbounded.
+		return g.applyNullable(&Schema{Type: "integer"}, t, nullable), nil
+
+	case reflect.Int64:
+		// float64 has a 52-bit mantissa and cannot represent MaxInt64 (2^63-1)
+		// exactly: the nearest float64 is 2^63, which is one past the valid
+		// range and would admit out-of-range integers. Use the largest float64
+		// strictly below 2^63 so the bound never accepts a value the Go field
+		// cannot hold. MinInt64 (-2^63) is representable exactly.
+		s := &Schema{Type: "integer", Minimum: Ptr(float64(math.MinInt64)), Maximum: Ptr(safeIntMaxBound(float64(math.MaxInt64)))}
+		return g.applyNullable(s, t, nullable), nil
+
+	case reflect.Int8:
+		s := &Schema{Type: "integer", Minimum: Ptr(float64(math.MinInt8)), Maximum: Ptr(float64(math.MaxInt8))}
+		return g.applyNullable(s, t, nullable), nil
+
+	case reflect.Int16:
+		s := &Schema{Type: "integer", Minimum: Ptr(float64(math.MinInt16)), Maximum: Ptr(float64(math.MaxInt16))}
+		return g.applyNullable(s, t, nullable), nil
+
+	case reflect.Int32:
+		s := &Schema{Type: "integer", Minimum: Ptr(float64(math.MinInt32)), Maximum: Ptr(float64(math.MaxInt32))}
+		return g.applyNullable(s, t, nullable), nil
+
+	case reflect.Uint, reflect.Uintptr:
+		// Uint/uintptr are platform-dependent; only a lower bound is certain.
+		s := &Schema{Type: "integer", Minimum: Ptr(float64(0))}
+		return g.applyNullable(s, t, nullable), nil
+
+	case reflect.Uint64:
+		// float64(math.MaxUint64) rounds up to 2^64, one past the valid range;
+		// see the Int64 case. Round the maximum down to the largest float64
+		// that does not exceed MaxUint64 (2^64-1).
+		s := &Schema{Type: "integer", Minimum: Ptr(float64(0)), Maximum: Ptr(safeIntMaxBound(float64(math.MaxUint64)))}
+		return g.applyNullable(s, t, nullable), nil
+
+	case reflect.Uint8:
+		s := &Schema{Type: "integer", Minimum: Ptr(float64(0)), Maximum: Ptr(float64(math.MaxUint8))}
+		return g.applyNullable(s, t, nullable), nil
+
+	case reflect.Uint16:
+		s := &Schema{Type: "integer", Minimum: Ptr(float64(0)), Maximum: Ptr(float64(math.MaxUint16))}
+		return g.applyNullable(s, t, nullable), nil
+
+	case reflect.Uint32:
+		s := &Schema{Type: "integer", Minimum: Ptr(float64(0)), Maximum: Ptr(float64(math.MaxUint32))}
+		return g.applyNullable(s, t, nullable), nil
+
+	case reflect.Float32, reflect.Float64:
+		return g.applyNullable(&Schema{Type: "number"}, t, nullable), nil
+
+	case reflect.Interface:
+		return &Schema{}, nil
+
+	case reflect.Slice:
+		return g.schemaForSlice(t, nullable)
+
+	case reflect.Array:
+		return g.schemaForArray(t, nullable)
+
+	case reflect.Map:
+		return g.schemaForMap(t, nullable)
+
+	case reflect.Struct:
+		return g.schemaForStruct(t, nullable)
+
+	case reflect.Func, reflect.Chan, reflect.Complex64, reflect.Complex128, reflect.UnsafePointer:
+		return nil, fmt.Errorf("%w: %s", ErrUnsupportedType, t)
+
+	default:
+		return nil, fmt.Errorf("%w: %s", ErrUnsupportedType, t)
+	}
+}
+
+// safeIntMaxBound returns a float64 maximum bound that does not admit integers
+// larger than the true upper limit. Converting MaxInt64/MaxUint64 to float64
+// rounds up past the valid range; this rounds back down toward zero to the
+// largest float64 that is still within range. The bound is conservative: it may
+// reject the handful of valid integers between it and the true maximum that
+// float64 cannot represent, which is preferable to accepting out-of-range
+// values. The Schema's Minimum/Maximum are *float64, so the exact bound cannot
+// be expressed.
+func safeIntMaxBound(trueMax float64) float64 {
+	return math.Nextafter(trueMax, 0)
+}
+
+// schemaForSlice generates a schema for slice types.
+//
+//nolint:unparam // nullable is accepted for consistency with other schema-producing methods.
+func (g *generator) schemaForSlice(t reflect.Type, nullable bool) (*Schema, error) {
+	// Byte slices marshal to base64 strings in encoding/json. The element's kind
+	// (uint8) drives this, not the slice's exact type, so named byte-slice types
+	// (type Bytes []byte) and slices of named uint8 elements are base64 too.
+	// Mirror encoding/json's exception: an element implementing json.Marshaler or
+	// encoding.TextMarshaler is encoded through that method, not as base64.
+	if el := t.Elem(); el.Kind() == reflect.Uint8 {
+		pt := reflect.PointerTo(el)
+		if !pt.Implements(typeJSONMarshaler) && !pt.Implements(typeTextMarshaler) {
+			return &Schema{Types: []string{typeNameNull, typeNameString}, ContentEncoding: "base64"}, nil
+		}
+	}
+
+	items, err := g.schemaForType(t.Elem(), false)
+	if err != nil {
+		return nil, fmt.Errorf("element type: %w", err)
+	}
+
+	s := &Schema{
+		Types: []string{typeNameNull, "array"},
+		Items: items,
+	}
+
+	return s, nil
+}
+
+// schemaForArray generates a schema for fixed-length array types as a tuple.
+// Draft 2020-12 uses prefixItems with one entry per element; Draft-07 uses the
+// items-as-array form. MinItems/maxItems pin the length. Each element schema is
+// generated independently so the result is a tree (no shared sub-schema
+// pointers), which the validator requires.
+func (g *generator) schemaForArray(t reflect.Type, nullable bool) (*Schema, error) {
+	n := t.Len()
+
+	elems := make([]*Schema, n)
+	for i := range elems {
+		item, err := g.schemaForType(t.Elem(), false)
+		if err != nil {
+			return nil, fmt.Errorf("element type: %w", err)
+		}
+
+		elems[i] = item
+	}
+
+	s := &Schema{
+		Type:     "array",
+		MinItems: Ptr(n),
+		MaxItems: Ptr(n),
+	}
+	if g.draft == Draft7 {
+		s.ItemsArray = elems
+	} else {
+		s.PrefixItems = elems
+	}
+
+	return g.applyNullable(s, t, nullable), nil
+}
+
+// schemaForMap generates a schema for map types.
+//
+//nolint:unparam // nullable is accepted for consistency with other schema-producing methods.
+func (g *generator) schemaForMap(t reflect.Type, nullable bool) (*Schema, error) {
+	if !isValidMapKey(t.Key()) {
+		return nil, fmt.Errorf("%w: %s", ErrUnsupportedMapKey, t.Key())
+	}
+
+	valSchema, err := g.schemaForType(t.Elem(), false)
+	if err != nil {
+		return nil, fmt.Errorf("map value type: %w", err)
+	}
+
+	s := &Schema{
+		Types:                []string{typeNameNull, "object"},
+		AdditionalProperties: valSchema,
+	}
+
+	return s, nil
+}
+
+// isValidMapKey checks if a type is a valid map key for JSON serialization.
+func isValidMapKey(t reflect.Type) bool {
+	if t.Kind() == reflect.String || isIntegerKind(t.Kind()) {
+		return true
+	}
+	if t.Implements(typeTextMarshaler) || reflect.PointerTo(t).Implements(typeTextMarshaler) {
+		return true
+	}
+
+	return false
+}
+
+// isIntegerKind reports whether k is one of Go's signed or unsigned integer
+// kinds (including uintptr), all of which encoding/json renders as JSON
+// integers.
+func isIntegerKind(k reflect.Kind) bool {
+	switch k {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return true
+	default:
+		return false
+	}
+}
+
+// schemaForStruct generates a schema for struct types.
+func (g *generator) schemaForStruct(t reflect.Type, nullable bool) (*Schema, error) {
+	// Cycle detection: even when definitions are disabled, cyclic types must
+	// emit $defs/$ref to prevent infinite recursion.
+	if g.visiting[t] {
+		return g.refForType(t, nullable), nil
+	}
+
+	// Check for extraction to $defs.
+	if g.shouldExtract(t) {
+		// Check if already defined.
+		if _, exists := g.typeToDefName[t]; exists {
+			return g.refForType(t, nullable), nil
+		}
+
+		g.visiting[t] = true
+		s, err := g.buildStructSchema(t)
+		if err != nil {
+			return nil, err
+		}
+
+		delete(g.visiting, t)
+
+		return g.extractToDefs(t, s, nullable)
+	}
+
+	// Inline, but track visiting to detect cycles.
+	g.visiting[t] = true
+	s, err := g.buildStructSchema(t)
+	if err != nil {
+		return nil, err
+	}
+
+	delete(g.visiting, t)
+
+	// If a cycle was detected during buildStructSchema (a placeholder was
+	// created in $defs via refForType), extract this type's schema to fill it.
+	if _, exists := g.typeToDefName[t]; exists {
+		return g.extractToDefs(t, s, nullable)
+	}
+
+	return g.applyNullable(s, t, nullable), nil
+}
+
+// buildStructSchema builds the object schema for a struct type, including
+// type-level comment extraction and JSONSchemaExtend.
+func (g *generator) buildStructSchema(t reflect.Type) (*Schema, error) {
+	s := &Schema{
+		Type: "object",
+	}
+
+	// Set additionalProperties: false (unless opted out).
+	if !g.additionalProperties {
+		s.AdditionalProperties = &Schema{Not: &Schema{}}
+	}
+
+	// Process fields using encoding/json rules.
+	//
+	// Two passes: first build every field's schema and populate Properties,
+	// then run tag interpreters. This ensures a tag interpreter observing
+	// FieldContext.Parent sees the complete sibling property set regardless of
+	// field order.
+	fields := g.collectStructFields(t)
+
+	var hasAllOf bool
+
+	type pendingField struct {
+		schema *Schema
+		fi     structFieldInfo
+	}
+
+	var pending []pendingField
+
+	for idx := range fields {
+		if fields[idx].composeViaAllOf {
+			err := g.processAllOfField(fields[idx], s)
+			if err != nil {
+				return nil, fmt.Errorf("field %q: %w", fields[idx].jsonName, err)
+			}
+
+			hasAllOf = true
+
+			continue
+		}
+
+		fieldSchema, err := g.buildFieldSchema(t, fields[idx], s)
+		if err != nil {
+			return nil, fmt.Errorf("field %q: %w", fields[idx].jsonName, err)
+		}
+
+		pending = append(pending, pendingField{fi: fields[idx], schema: fieldSchema})
+	}
+
+	for i := range pending {
+		pf := &pending[i]
+		err := g.applyFieldInterpreters(pf.fi, pf.schema, s)
+		if err != nil {
+			return nil, fmt.Errorf("field %q: %w", pf.fi.jsonName, err)
+		}
+	}
+
+	// Handle allOf + additionalProperties interaction.
+	if hasAllOf && !g.additionalProperties {
+		if g.draft == Draft2020 {
+			s.AdditionalProperties = nil
+			s.UnevaluatedProperties = &Schema{Not: &Schema{}}
+		} else {
+			// Draft-07: omit additionalProperties when allOf is in use.
+			s.AdditionalProperties = nil
+		}
+	}
+
+	// Type-level comment.
+	if g.comments {
+		g.applyTypeComment(t, s)
+	}
+
+	// JSONSchemaExtend.
+	if implementsExtender(t) {
+		if err := callExtender(t, s); err != nil {
+			return nil, err
+		}
+	}
+
+	return s, nil
+}
+
+// structFieldInfo holds processed information about a struct field.
+type structFieldInfo struct {
+	jsonName        string
+	field           reflect.StructField
+	omitempty       bool
+	omitzero        bool
+	jsonString      bool
+	composeViaAllOf bool
+}
+
+// collectStructFields mimics encoding/json's field collection logic,
+// handling promotion, shadowing, and ambiguity.
+//
+//nolint:nestif // Mirrors encoding/json's field collection logic which is inherently nested.
+func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
+	type fieldLevel struct {
+		field reflect.StructField
+		depth int
+		// Optional is true when the field is promoted through a pointer-typed
+		// embedded struct. Such fields are omitted by encoding/json when the
+		// embedded pointer is nil, so they are not required.
+		optional bool
+	}
+
+	// Collect all visible fields grouped by JSON name.
+	byName := map[string][]fieldLevel{}
+
+	var order []string
+
+	var collect func(t reflect.Type, depth int, index []int, optional bool)
+
+	collect = func(t reflect.Type, depth int, index []int, optional bool) {
+		for i := range t.NumField() {
+			f := t.Field(i)
+			fieldIndex := append(slices.Clone(index), i)
+			f.Index = fieldIndex
+
+			if f.Anonymous {
+				// Embedded field.
+				ft := f.Type
+				embeddedViaPointer := ft.Kind() == reflect.Pointer
+				if embeddedViaPointer {
+					ft = ft.Elem()
+				}
+
+				// Skip unexported embedded non-struct types, matching
+				// encoding/json behavior. Unexported embedded structs
+				// still have their exported fields promoted.
+				if !f.IsExported() && ft.Kind() != reflect.Struct {
+					continue
+				}
+
+				tagVal, hasTag := f.Tag.Lookup("json")
+				explicitName, _, _ := strings.Cut(tagVal, ",")
+				if hasTag && explicitName != "" {
+					// Embedded struct with an explicit json name → treated as a
+					// regular named field; encoding/json does not promote it. An
+					// options-only tag (json:",omitempty") has no name and falls
+					// through to promotion below, matching encoding/json.
+					info := parseJSONTag(f)
+					if info.jsonName == "" {
+						continue // json:"-"
+					}
+					if _, seen := byName[info.jsonName]; !seen {
+						order = append(order, info.jsonName)
+					}
+
+					byName[info.jsonName] = append(byName[info.jsonName], fieldLevel{f, depth, optional})
+
+					continue
+				}
+
+				if ft.Kind() == reflect.Interface {
+					// Embedded interface types: if they implement
+					// JSONSchemaProvider, compose via allOf. Otherwise,
+					// skip — an unrestricted schema adds no useful info.
+					if g.needsAllOfComposition(ft) {
+						name := "__allof__" + ft.Name() + fmt.Sprintf("__%d", len(order))
+						order = append(order, name)
+						byName[name] = []fieldLevel{{f, depth, optional}}
+					}
+
+					continue
+				}
+
+				if ft.Kind() == reflect.Struct {
+					// Check if this embedded struct needs to be composed via allOf.
+					if g.needsAllOfComposition(ft) {
+						// Compose via allOf — treat as a single entry.
+						name := "__allof__" + ft.Name() + fmt.Sprintf("__%d", len(order))
+						order = append(order, name)
+						byName[name] = []fieldLevel{{f, depth, optional}}
+
+						continue
+					}
+					// Promote fields. Fields reached through a pointer embed are
+					// optional because a nil embed omits them entirely.
+					collect(ft, depth+1, fieldIndex, optional || embeddedViaPointer)
+
+					continue
+				}
+
+				// Embedded non-struct type: treated as regular field with type name as key.
+				jsonName := ft.Name()
+				if jsonName == "" {
+					continue
+				}
+				if _, seen := byName[jsonName]; !seen {
+					order = append(order, jsonName)
+				}
+
+				byName[jsonName] = append(byName[jsonName], fieldLevel{f, depth, optional})
+
+				continue
+			}
+
+			if !f.IsExported() {
+				continue
+			}
+
+			info := parseJSONTag(f)
+			if info.jsonName == "" {
+				continue // json:"-"
+			}
+			if _, seen := byName[info.jsonName]; !seen {
+				order = append(order, info.jsonName)
+			}
+
+			byName[info.jsonName] = append(byName[info.jsonName], fieldLevel{f, depth, optional})
+		}
+	}
+
+	collect(t, 0, nil, false)
+
+	// Resolve shadowing and ambiguity.
+	var result []structFieldInfo
+	for _, name := range order {
+		candidates := byName[name]
+		if len(candidates) == 0 {
+			continue
+		}
+
+		// Find minimum depth.
+		minDepth := candidates[0].depth
+		for _, c := range candidates[1:] {
+			if c.depth < minDepth {
+				minDepth = c.depth
+			}
+		}
+
+		// Filter to only those at minimum depth.
+		var atMin []fieldLevel
+		for _, c := range candidates {
+			if c.depth == minDepth {
+				atMin = append(atMin, c)
+			}
+		}
+
+		// Ambiguous: multiple fields at the same depth → silently drop.
+		if len(atMin) > 1 {
+			continue
+		}
+
+		f := atMin[0].field
+		isAllOf := strings.HasPrefix(name, "__allof__")
+
+		if isAllOf {
+			result = append(result, structFieldInfo{
+				field:           f,
+				composeViaAllOf: true,
+			})
+
+			continue
+		}
+
+		info := parseJSONTag(f)
+		if info.jsonName == "" {
+			continue
+		}
+
+		sfi := structFieldInfo{
+			field:      f,
+			jsonName:   info.jsonName,
+			omitempty:  info.omitempty || atMin[0].optional,
+			omitzero:   info.omitzero,
+			jsonString: info.jsonString,
+		}
+		result = append(result, sfi)
+	}
+
+	return result
+}
+
+// needsAllOfComposition reports whether an embedded struct type should be
+// composed via allOf rather than having its fields promoted.
+func (g *generator) needsAllOfComposition(t reflect.Type) bool {
+	// Check WithTypeSchema override.
+	if _, ok := g.typeSchemas[t]; ok {
+		return true
+	}
+	// Check JSONSchemaProvider.
+	if implementsProvider(t) {
+		return true
+	}
+	// Check built-in overrides.
+	if _, ok := g.builtinOverride(t); ok {
+		return true
+	}
+	// Check TextMarshaler (direct only, not promoted).
+	if isDirectTextMarshaler(t) {
+		return true
+	}
+
+	return false
+}
+
+// buildFieldSchema generates a struct field's schema, applies the json:",string"
+// override, comment extraction, and jsonschema struct tag, then registers it in
+// the parent's Properties/PropertyOrder and required list. Tag interpreters run
+// later in applyFieldInterpreters once all sibling properties exist.
+func (g *generator) buildFieldSchema(parentType reflect.Type, fi structFieldInfo, parent *Schema) (*Schema, error) {
+	fieldType := fi.field.Type
+
+	// Generate schema for the field's type.
+	isPointer := fieldType.Kind() == reflect.Pointer
+	fieldSchema, err := g.schemaForType(fieldType, false)
+	if err != nil {
+		return nil, err
+	}
+
+	// 1. JSON ",string" override.
+	if fi.jsonString {
+		if isStringableType(fieldType) {
+			if isPointer {
+				fieldSchema = &Schema{Types: []string{typeNameNull, typeNameString}}
+			} else {
+				fieldSchema = &Schema{Type: "string"}
+			}
+		}
+	}
+
+	// 2. Field-level comment.
+	if g.comments {
+		g.applyFieldComment(parentType, fi.field, fieldSchema)
+	}
+
+	// 3. Schema struct tag.
+	if tag, ok := fi.field.Tag.Lookup("jsonschema"); ok {
+		err := applyJSONSchemaTag(tag, fieldType, fieldSchema)
+		if err != nil {
+			return nil, fmt.Errorf("jsonschema tag: %w", err)
+		}
+	}
+
+	// Add to parent.
+	if parent.Properties == nil {
+		parent.Properties = map[string]*Schema{}
+	}
+
+	// Required unless omitempty/omitzero.
+	if !fi.omitempty && !fi.omitzero {
+		parent.Required = append(parent.Required, fi.jsonName)
+	}
+
+	parent.Properties[fi.jsonName] = fieldSchema
+	parent.PropertyOrder = append(parent.PropertyOrder, fi.jsonName)
+
+	return fieldSchema, nil
+}
+
+// applyFieldInterpreters runs the registered tag interpreters for a field and
+// then wraps a bare $ref with allOf for Draft-07 when siblings were added. It
+// runs after all field schemas are in place so interpreters see the full
+// parent.Properties.
+func (g *generator) applyFieldInterpreters(fi structFieldInfo, fieldSchema, parent *Schema) error {
+	fieldType := fi.field.Type
+
+	for _, interp := range g.tagInterpreters {
+		if tag, ok := fi.field.Tag.Lookup(interp.TagKey()); ok {
+			ctx := FieldContext{
+				Name:   fi.jsonName,
+				Type:   fieldType,
+				Schema: fieldSchema,
+				Parent: parent,
+			}
+			err := interp.Interpret(tag, ctx)
+			if err != nil {
+				return fmt.Errorf("tag interpreter %q: %w", interp.TagKey(), err)
+			}
+		}
+	}
+
+	// Wrap bare $ref with allOf for Draft-07 if annotations were added. This
+	// mutates the schema in place, so the entry already in parent.Properties
+	// reflects the change.
+	g.wrapRefForDraft7(fieldSchema)
+
+	return nil
+}
+
+// wrapRefForDraft7 wraps a bare $ref with allOf if sibling keywords were
+// added and the draft is Draft-07 (where $ref siblings are ignored).
+// This should be called after all field-level processing has been applied.
+// It moves the $ref into allOf in-place, preserving all sibling keywords.
+func (g *generator) wrapRefForDraft7(s *Schema) *Schema {
+	if g.draft != Draft7 || s.Ref == "" {
+		return s
+	}
+	// Check if there are any sibling keywords on the $ref.
+	if !hasRefSiblings(s) {
+		return s
+	}
+	// Move $ref into allOf, preserving all sibling keywords in place.
+	inner := &Schema{Ref: s.Ref}
+	// Repoint any tracked ref record from the outer schema to the inner
+	// $ref so $defs name disambiguation updates the live reference rather
+	// than the now-emptied outer Ref.
+	for i := range g.refRecords {
+		if g.refRecords[i].schema == s {
+			g.refRecords[i].schema = inner
+		}
+	}
+
+	s.AllOf = append(s.AllOf, inner)
+	s.Ref = ""
+
+	return s
+}
+
+// hasRefSiblings reports whether a schema has any keywords set beyond just
+// $ref. This includes annotation keywords, validation keywords, and content
+// keywords — all of which can be set by field-level processing (jsonschema
+// struct tag or tag interpreters).
+func hasRefSiblings(s *Schema) bool {
+	// Annotation keywords.
+	if s.Description != "" || s.Title != "" || s.Default != nil ||
+		s.Deprecated || s.ReadOnly || s.WriteOnly || len(s.Examples) > 0 {
+		return true
+	}
+	// Numeric validation keywords.
+	if s.Minimum != nil || s.Maximum != nil ||
+		s.ExclusiveMinimum != nil || s.ExclusiveMaximum != nil ||
+		s.MultipleOf != nil {
+		return true
+	}
+	// String validation keywords.
+	if s.MinLength != nil || s.MaxLength != nil ||
+		s.Pattern != "" || s.Format != "" {
+		return true
+	}
+	// Array validation keywords.
+	if s.MinItems != nil || s.MaxItems != nil || s.UniqueItems {
+		return true
+	}
+	// Object validation keywords.
+	if s.MinProperties != nil || s.MaxProperties != nil {
+		return true
+	}
+	// Enum/const keywords.
+	if s.Const != nil || len(s.Enum) > 0 {
+		return true
+	}
+	// Content keywords.
+	if s.ContentMediaType != "" || s.ContentEncoding != "" {
+		return true
+	}
+
+	return false
+}
+
+// processAllOfField handles embedded structs that need allOf composition.
+func (g *generator) processAllOfField(fi structFieldInfo, parent *Schema) error {
+	ft := fi.field.Type
+	if ft.Kind() == reflect.Pointer {
+		ft = ft.Elem()
+	}
+
+	embeddedSchema, err := g.schemaForType(ft, false)
+	if err != nil {
+		return err
+	}
+
+	if embeddedSchema.Ref != "" {
+		ref := &Schema{Ref: embeddedSchema.Ref}
+		g.refRecords = append(g.refRecords, refRecord{schema: ref, target: ft})
+		parent.AllOf = append(parent.AllOf, ref)
+	} else {
+		parent.AllOf = append(parent.AllOf, embeddedSchema)
+	}
+
+	return nil
+}
+
+// extractToDefs places a type's schema in $defs and returns a $ref.
+func (g *generator) extractToDefs(t reflect.Type, s *Schema, nullable bool) (*Schema, error) {
+	name := g.namer(t)
+
+	// Check if already defined (e.g., from a cycle placeholder).
+	if existingName, exists := g.typeToDefName[t]; exists {
+		// Already in defs; update if it was a placeholder.
+		if g.defs[existingName] == nil {
+			g.defs[existingName] = s
+			g.typeToDefSchema[t] = s
+		}
+
+		return g.refForType(t, nullable), nil
+	}
+
+	// Register.
+	g.typeToDefName[t] = name
+	g.defsNameToTypes[name] = append(g.defsNameToTypes[name], t)
+	g.defs[name] = s
+	g.typeToDefSchema[t] = s
+
+	return g.refForType(t, nullable), nil
+}
+
+// refForType creates a $ref schema pointing to the type's $defs entry.
+// If nullable, wraps in anyOf. All created $ref schemas are tracked for
+// correct updates during $defs name disambiguation.
+func (g *generator) refForType(t reflect.Type, nullable bool) *Schema {
+	name := g.typeToDefName[t]
+	if name == "" {
+		// Placeholder for cycle — register now.
+		name = g.namer(t)
+		g.typeToDefName[t] = name
+		g.defsNameToTypes[name] = append(g.defsNameToTypes[name], t)
+		// Placeholder: nil schema, to be filled later.
+		g.defs[name] = nil
+	}
+
+	ref := g.draft.refPrefix() + name
+
+	if nullable {
+		refSchema := &Schema{Ref: ref}
+		g.refRecords = append(g.refRecords, refRecord{schema: refSchema, target: t})
+
+		return &Schema{
+			AnyOf: []*Schema{
+				refSchema,
+				{Type: typeNameNull},
+			},
+		}
+	}
+
+	refSchema := &Schema{Ref: ref}
+	g.refRecords = append(g.refRecords, refRecord{schema: refSchema, target: t})
+
+	return refSchema
+}
+
+// applyNullable makes a schema nullable. Nullability is expressed by wrapping
+// the schema in an anyOf with a "null"-typed alternative, matching the pattern
+// used for nullable $ref schemas so all nullable pointers are represented
+// consistently. A truly empty schema (no keywords at all) already accepts every
+// value, including null, so it is returned as-is. A schema that lacks a type
+// keyword but is still constrained by $ref/anyOf/allOf/oneOf/enum/const must be
+// wrapped, since those constraints can reject null.
+//
+//nolint:unparam // t is kept for future use.
+func (g *generator) applyNullable(s *Schema, t reflect.Type, nullable bool) *Schema {
+	if !nullable {
+		return s
+	}
+	// Unconstrained schema — already accepts null, so wrapping adds nothing.
+	if isEmptySchema(s) {
+		return s
+	}
+
+	return &Schema{
+		AnyOf: []*Schema{
+			s,
+			{Type: "null"},
+		},
+	}
+}
+
+// isStringableType reports whether json:",string" applies to the given type.
+func isStringableType(t reflect.Type) bool {
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	if isIntegerKind(t.Kind()) {
+		return true
+	}
+
+	switch t.Kind() {
+	case reflect.String, reflect.Bool, reflect.Float32, reflect.Float64:
+		return true
+	default:
+		return false
+	}
+}
+
+// isDirectTextMarshaler reports whether a type directly implements
+// [encoding.TextMarshaler] (not via a promoted embedded field method).
+func isDirectTextMarshaler(t reflect.Type) bool {
+	if !t.Implements(typeTextMarshaler) && !reflect.PointerTo(t).Implements(typeTextMarshaler) {
+		return false
+	}
+
+	return hasDirectMethod(t, "MarshalText")
+}
+
+// implementsProvider checks if a type (or pointer to type) implements
+// JSONSchemaProvider directly (not just via an embedded field).
+func implementsProvider(t reflect.Type) bool {
+	providerType := reflect.TypeFor[JSONSchemaProvider]()
+	if !t.Implements(providerType) && !reflect.PointerTo(t).Implements(providerType) {
+		return false
+	}
+
+	return hasDirectMethod(t, "JSONSchema")
+}
+
+// implementsExtender checks if a type (or pointer to type) implements
+// JSONSchemaExtender directly (not just via an embedded field).
+func implementsExtender(t reflect.Type) bool {
+	extenderType := reflect.TypeFor[JSONSchemaExtender]()
+	if !t.Implements(extenderType) && !reflect.PointerTo(t).Implements(extenderType) {
+		return false
+	}
+
+	return hasDirectMethod(t, "JSONSchemaExtend")
+}
+
+// hasDirectMethod reports whether a method is defined directly on the type
+// (not solely promoted from an embedded field). A method declared directly on
+// the outer type shadows an embedded one at runtime, so detection must honor
+// that: it cannot simply assume the method is promoted whenever an embedded
+// field also provides it.
+//
+// Go offers no reflect API distinguishing a shadowing direct method from a
+// promoted one, so this inspects the method's implementation: the compiler
+// emits promotion wrappers with a synthetic "<autogenerated>" source location,
+// whereas a directly declared method points to its real source file. It checks
+// the value receiver first, then the pointer receiver, mirroring how Go
+// resolves the method set; a pointer-receiver method that shadows a promoted
+// value method suppresses that promotion, so the value method set reports no
+// method and the pointer set yields the direct one.
+func hasDirectMethod(t reflect.Type, name string) bool {
+	if t.Kind() != reflect.Struct {
+		// Non-struct types can't have promoted methods.
+		return true
+	}
+
+	if m, ok := t.MethodByName(name); ok {
+		return !isPromotedMethod(m)
+	}
+	if m, ok := reflect.PointerTo(t).MethodByName(name); ok {
+		return !isPromotedMethod(m)
+	}
+
+	// The method is not in the type's method set at all; treat as not direct.
+	return false
+}
+
+// isPromotedMethod reports whether a method is a compiler-generated promotion
+// wrapper rather than a directly declared method. Promotion wrappers report a
+// synthetic "<autogenerated>" source location.
+func isPromotedMethod(m reflect.Method) bool {
+	fn := runtime.FuncForPC(m.Func.Pointer())
+	if fn == nil {
+		return false
+	}
+	file, _ := fn.FileLine(m.Func.Pointer())
+
+	return strings.Contains(file, "<autogenerated>")
+}
+
+// callProvider calls JSONSchema() on a zero value of the type. For interface
+// types it returns nil, since a nil interface cannot be called. The user method
+// runs against a zero value whose pointer fields are nil, so a method that
+// dereferences such a field panics; the panic is recovered and returned as an
+// error wrapping [ErrProviderPanic] so it surfaces from Generate rather than
+// crashing the caller.
+func callProvider(t reflect.Type) (s *jsonschema.Schema, err error) {
+	if t.Kind() == reflect.Interface {
+		return nil, nil
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			s = nil
+			err = fmt.Errorf("%w: %s.JSONSchema: %v", ErrProviderPanic, t, r)
+		}
+	}()
+
+	providerType := reflect.TypeFor[JSONSchemaProvider]()
+
+	var v reflect.Value
+	if t.Implements(providerType) {
+		v = reflect.New(t).Elem()
+	} else {
+		v = reflect.New(t)
+	}
+
+	result := v.MethodByName("JSONSchema").Call(nil)
+	if result[0].IsNil() {
+		return nil, nil
+	}
+
+	sc, ok := result[0].Interface().(*jsonschema.Schema)
+	if !ok {
+		return nil, nil
+	}
+
+	return sc, nil
+}
+
+// callExtender calls JSONSchemaExtend() on a zero value of the type. As with
+// [callProvider], the method runs against a zero value, so a panic (for example
+// dereferencing a nil pointer field) is recovered and returned as an error
+// wrapping [ErrProviderPanic].
+func callExtender(t reflect.Type, s *jsonschema.Schema) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("%w: %s.JSONSchemaExtend: %v", ErrProviderPanic, t, r)
+		}
+	}()
+
+	extenderType := reflect.TypeFor[JSONSchemaExtender]()
+
+	var v reflect.Value
+	if t.Implements(extenderType) {
+		v = reflect.New(t).Elem()
+	} else {
+		v = reflect.New(t)
+	}
+
+	v.MethodByName("JSONSchemaExtend").Call([]reflect.Value{reflect.ValueOf(s)})
+
+	return nil
+}
+
+// jsonTagInfo holds parsed json tag information.
+type jsonTagInfo struct {
+	jsonName   string // empty means excluded (json:"-")
+	omitempty  bool
+	omitzero   bool
+	jsonString bool
+}
+
+// parseJSONTag parses the json struct tag.
+func parseJSONTag(f reflect.StructField) jsonTagInfo {
+	tag, ok := f.Tag.Lookup("json")
+	if !ok {
+		// Use field name if no tag.
+		if !f.IsExported() && !f.Anonymous {
+			return jsonTagInfo{} // excluded
+		}
+
+		name := f.Name
+		// For embedded non-struct types, use the type name.
+		if f.Anonymous {
+			ft := f.Type
+			if ft.Kind() == reflect.Pointer {
+				ft = ft.Elem()
+			}
+
+			name = ft.Name()
+		}
+
+		return jsonTagInfo{jsonName: name}
+	}
+
+	name, rest, found := strings.Cut(tag, ",")
+	if name == "-" && !found {
+		return jsonTagInfo{} // excluded
+	}
+
+	if name == "" {
+		// Use field name.
+		name = f.Name
+		if f.Anonymous {
+			ft := f.Type
+			if ft.Kind() == reflect.Pointer {
+				ft = ft.Elem()
+			}
+
+			name = ft.Name()
+		}
+	}
+
+	info := jsonTagInfo{jsonName: name}
+	if found {
+		for s := range strings.SplitSeq(rest, ",") {
+			switch s {
+			case "omitempty":
+				info.omitempty = true
+			case "omitzero":
+				info.omitzero = true
+			case "string":
+				info.jsonString = true
+			}
+		}
+	}
+
+	return info
+}
+
+// applyTypeComment sets the description from a doc comment on a type's schema.
+func (g *generator) applyTypeComment(t reflect.Type, s *Schema) {
+	if g.commentExtractor == nil {
+		return
+	}
+	if comment := g.commentExtractor.typeComment(t); comment != "" {
+		s.Description = comment
+	}
+}
+
+// applyFieldComment sets the description from a doc comment on a field's schema.
+func (g *generator) applyFieldComment(structType reflect.Type, f reflect.StructField, s *Schema) {
+	if g.commentExtractor == nil {
+		return
+	}
+	if comment := g.commentExtractor.fieldComment(structType, f.Name); comment != "" {
+		s.Description = comment
+	}
+}
