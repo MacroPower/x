@@ -222,6 +222,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			return m, tea.Quit
 		}
+
 		// If pending is empty but stream is still running, hold current frame.
 
 		return m, tea.Tick(time.Second/time.Duration(m.fps), func(time.Time) tea.Msg {

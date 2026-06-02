@@ -72,6 +72,7 @@ func (p *Publisher) Write(b []byte) (int, error) {
 			close(sub.ch)
 			continue
 		}
+
 		// Ring-buffer: drop oldest if full.
 		select {
 		case sub.ch <- entry:
@@ -83,6 +84,7 @@ func (p *Publisher) Write(b []byte) (int, error) {
 
 		alive = append(alive, sub)
 	}
+
 	// Clear trailing references for GC.
 	for i := len(alive); i < len(p.subscribers); i++ {
 		p.subscribers[i] = nil

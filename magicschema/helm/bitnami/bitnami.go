@@ -155,6 +155,7 @@ func parseModifiers(param *bitnamiParam, modifiers string) {
 			val = strings.TrimSpace(val)
 			param.defaultVal = &val
 		}
+
 		// Unknown modifiers silently ignored (best-effort).
 	}
 }

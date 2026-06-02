@@ -136,6 +136,7 @@ func TestMergeMultipleInputs(t *testing.T) {
 				if ok {
 					assert.Nil(t, items["type"], "incompatible item types should widen to no type constraint")
 				}
+
 				// If items is not a map (e.g. true schema), that also satisfies
 				// "no type constraint".
 			},
