@@ -1,0 +1,26 @@
+{
+  "name": "x",
+  "engineVersion": "v0.20.8",
+  "toolchains": [
+    {
+      "name": "go",
+      "source": "toolchains/go",
+      "customizations": [
+        {
+          "argument": "source",
+          "ignore": [".git", ".worktrees", ".devbox", ".task", "dist", ".tmp", "toolchains"]
+        }
+      ]
+    },
+    {
+      "name": "security",
+      "source": "toolchains/security",
+      "customizations": [
+        {
+          "argument": "source",
+          "ignore": [".git", ".worktrees", ".devbox", ".task", "dist", ".tmp", "toolchains"]
+        }
+      ]
+    }
+  ]
+}
