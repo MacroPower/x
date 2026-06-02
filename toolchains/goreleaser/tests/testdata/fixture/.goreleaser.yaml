@@ -1,0 +1,12 @@
+version: 2
+project_name: fixture
+builds:
+  - main: ./
+    binary: fixture
+    goos:
+      - linux
+    goarch:
+      - amd64
+archives:
+  - formats:
+      - tar.gz

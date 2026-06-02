@@ -16,6 +16,16 @@ consumed by any project (including this repo, which dogfoods them via the root
 - **`security`** — Trivy scanner: `scan-source`/`scan-image` (gate scans that
   fail on findings) and `scan-source-sarif`/`scan-image-sarif` (non-gating,
   emit SARIF for GitHub Code Scanning).
+- **`goreleaser`** — Reusable GoReleaser primitives (Tier A): `goreleaser-base`
+  (a Go base + the goreleaser binary), `check-base`, `check` (+check, validates
+  `.goreleaser.yaml`), `ensure-git-repo` (worktree-aware git bootstrap), and the
+  pure tag/digest helpers `version-tags`/`is-prerelease`/`deduplicate-digests`/
+  `format-digest-checksums`/`registry-host` (logic lives in the `release`
+  subpackage with plain `go test` unit tests). It is **independent** of the `go`
+  toolchain — pass the consumer's Go base via the `base` arg so it reuses those
+  caches. The full release pipeline (publish/sign/runtime images) stays in each
+  project's `*-ci` module, which composes these primitives. `release-base` +
+  `snapshot` + `verify-binary-platform` are the planned Tier B follow-up.
 
 Each module is self-contained: its own `go.mod`/`go.sum` and no relative
 `include`, so it can be sourced remotely. Tests live in per-module `tests/`
