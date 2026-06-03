@@ -250,7 +250,7 @@
 //
 // The package validates JSON instances against schemas and returns structured
 // errors with full path information and hierarchical multi-error support.
-// Two entry points are provided:
+// Two one-shot entry points are provided:
 //
 //   - [Validate] validates a pre-parsed Go value (map[string]any, []any,
 //     string, float64, [encoding/json.Number], bool, nil).
@@ -258,7 +258,12 @@
 //     using UseNumber() to preserve integer vs number distinction, then
 //     validates.
 //
-// On success both return nil. A validation failure returns an error that
+// Both compile the schema on every call. To validate many instances against the
+// same schema, call [Compile] once and reuse the returned [Validator]: it
+// performs the per-schema work (registry construction, Schema.Resolve, draft and
+// vocabulary detection) up front and is safe for concurrent use.
+//
+// On success all return nil. A validation failure returns an error that
 // unwraps to [*ValidationError] via [errors.As]. Non-validation failures — JSON
 // decoding, an unaccepted instance type, Schema.Resolve errors, and
 // [ErrUnknownVocabulary] — return ordinary wrapped errors that do not unwrap to

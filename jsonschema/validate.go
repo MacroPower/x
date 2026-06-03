@@ -180,6 +180,40 @@ func newValidator(schema *Schema, opts []ValidateOption) (*validator, error) {
 	return v, nil
 }
 
+// forInstance returns a per-validation view of a compiled validator with fresh
+// mutable walk state (the visiting set, dynamic scope, JSON-pointer cache, and
+// ref-resolution scratch), so a [Validator] can be reused and is safe for
+// concurrent use. The immutable per-schema state — registries, resolved
+// vocabularies, draft, and format configuration — is shared.
+//
+// When a [RefResolver] is configured the registries can still gain entries
+// during the walk (a remote ref reached only at validation time, via
+// resolveRemote), so each run gets its own copies to keep concurrent runs from
+// racing on them. Without a resolver the walk never writes the registries, so
+// they are shared directly.
+func (v *validator) forInstance() *validator {
+	rv := *v
+	rv.visiting = map[visitKey]bool{}
+	rv.jsonPointerCache = nil
+	rv.refResolveErr = nil
+
+	if rv.draft == Draft2020 {
+		rv.dynamicScope = []string{rv.baseURIs[rv.root]}
+	} else {
+		rv.dynamicScope = nil
+	}
+
+	if rv.refResolver != nil {
+		rv.uriRegistry = maps.Clone(v.uriRegistry)
+		rv.anchorRegistry = maps.Clone(v.anchorRegistry)
+		rv.dynamicAnchorRegistry = maps.Clone(v.dynamicAnchorRegistry)
+		rv.baseURIs = maps.Clone(v.baseURIs)
+		rv.walked = maps.Clone(v.walked)
+	}
+
+	return &rv
+}
+
 // resolveVocabularies determines the active vocabulary set.
 //
 // Resolution priority:
@@ -524,26 +558,28 @@ func detectDraft(s *Schema) Draft {
 	}
 }
 
-// Validate validates a pre-parsed Go value against a JSON Schema.
+// Validator is a schema compiled for repeated validation. Constructing it does
+// the per-schema work once — walking the schema to build the URI/anchor
+// registries, running [jsonschema.Schema.Resolve] for structural
+// pre-validation, and detecting the draft and active vocabularies — so each
+// subsequent validation only walks the instance.
 //
-// Accepted instance types: map[string]any, []any, string, float64,
-// [json.Number], bool, nil. Go structs are not accepted; passing any other
-// type returns an error (marshal to JSON or use [ValidateJSON] instead).
-//
-// Returns nil on success or an error that can be unwrapped to
-// *[ValidationError] via [errors.As].
-func Validate(schema *Schema, instance any, opts ...ValidateOption) error {
-	if !acceptedInstance(instance) {
-		return fmt.Errorf(
-			"instance of type %T is not accepted: accepted types are map[string]any, "+
-				"[]any, string, float64, json.Number, bool, and nil; marshal to JSON or use ValidateJSON",
-			instance,
-		)
-	}
+// A Validator is safe for concurrent use by multiple goroutines.
+type Validator struct {
+	proto *validator
+}
 
+// Compile prepares a [Validator] for schema, performing all per-schema work up
+// front so the returned validator can be reused across many instances. Prefer
+// it to [Validate] when validating more than one instance against the same
+// schema.
+//
+// It returns an error when the options are invalid or the schema fails
+// structural pre-validation.
+func Compile(schema *Schema, opts ...ValidateOption) (*Validator, error) {
 	v, err := newValidator(schema, opts)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Structural pre-validation via Schema.Resolve.
@@ -552,7 +588,7 @@ func Validate(schema *Schema, instance any, opts ...ValidateOption) error {
 	// and the result is cached in the URI registry so the validation walk
 	// never re-calls the resolver for the same URI.
 	// Copy the caller's options so assigning Loader doesn't mutate a
-	// *ResolveOptions shared across concurrent Validate calls.
+	// *ResolveOptions shared across calls.
 	var resolveOpts jsonschema.ResolveOptions
 	if v.resolveOpts != nil {
 		resolveOpts = *v.resolveOpts
@@ -563,10 +599,32 @@ func Validate(schema *Schema, instance any, opts ...ValidateOption) error {
 
 	_, err = schema.Resolve(&resolveOpts)
 	if err != nil && !v.resolveErrorIsRefOnly(schema, resolveOpts) {
-		return fmt.Errorf("schema resolve: %w", err)
+		return nil, fmt.Errorf("schema resolve: %w", err)
 	}
 
-	errs := v.validate(schema, instance, "", "", nil)
+	return &Validator{proto: v}, nil
+}
+
+// Validate validates a pre-parsed Go value against the compiled schema.
+//
+// Accepted instance types: map[string]any, []any, string, float64,
+// [json.Number], bool, nil. Go structs are not accepted; passing any other type
+// returns an error (marshal to JSON or use [Validator.ValidateJSON] instead).
+//
+// Returns nil on success or an error that can be unwrapped to *[ValidationError]
+// via [errors.As].
+func (c *Validator) Validate(instance any) error {
+	if !acceptedInstance(instance) {
+		return fmt.Errorf(
+			"instance of type %T is not accepted: accepted types are map[string]any, "+
+				"[]any, string, float64, json.Number, bool, and nil; marshal to JSON or use ValidateJSON",
+			instance,
+		)
+	}
+
+	v := c.proto.forInstance()
+
+	errs := v.validate(v.root, instance, "", "", nil)
 	if len(errs) == 0 {
 		return nil
 	}
@@ -575,6 +633,46 @@ func Validate(schema *Schema, instance any, opts ...ValidateOption) error {
 	}
 
 	return &ValidationError{Causes: errs}
+}
+
+// ValidateJSON decodes data as a JSON instance (numbers as [json.Number]) and
+// validates it against the compiled schema.
+func (c *Validator) ValidateJSON(data []byte) error {
+	instance, err := decodeJSONInstance(data)
+	if err != nil {
+		return err
+	}
+
+	return c.Validate(instance)
+}
+
+// Validate validates a pre-parsed Go value against a JSON Schema. It compiles
+// schema and validates instance in one call; to validate many instances against
+// the same schema, call [Compile] once and reuse the returned [Validator].
+//
+// Accepted instance types: map[string]any, []any, string, float64,
+// [json.Number], bool, nil. Go structs are not accepted; passing any other
+// type returns an error (marshal to JSON or use [ValidateJSON] instead).
+//
+// Returns nil on success or an error that can be unwrapped to
+// *[ValidationError] via [errors.As].
+func Validate(schema *Schema, instance any, opts ...ValidateOption) error {
+	// Check the instance type before compiling so an unaccepted instance is
+	// reported without the cost of (or any error from) schema preparation.
+	if !acceptedInstance(instance) {
+		return fmt.Errorf(
+			"instance of type %T is not accepted: accepted types are map[string]any, "+
+				"[]any, string, float64, json.Number, bool, and nil; marshal to JSON or use ValidateJSON",
+			instance,
+		)
+	}
+
+	c, err := Compile(schema, opts...)
+	if err != nil {
+		return err
+	}
+
+	return c.Validate(instance)
 }
 
 // resolveErrorIsRefOnly reports whether a [jsonschema.Schema.Resolve] failure
@@ -797,6 +895,18 @@ func schemaFormsTree(schema *Schema) bool {
 // Returns nil on success or an error that can be unwrapped to
 // *[ValidationError] via [errors.As].
 func ValidateJSON(schema *Schema, data []byte, opts ...ValidateOption) error {
+	instance, err := decodeJSONInstance(data)
+	if err != nil {
+		return err
+	}
+
+	return Validate(schema, instance, opts...)
+}
+
+// decodeJSONInstance decodes JSON bytes into an instance value using
+// [json.Decoder] with UseNumber(), preserving the integer vs number distinction
+// that the validator relies on.
+func decodeJSONInstance(data []byte) (any, error) {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.UseNumber()
 
@@ -804,10 +914,10 @@ func ValidateJSON(schema *Schema, data []byte, opts ...ValidateOption) error {
 
 	err := dec.Decode(&instance)
 	if err != nil {
-		return fmt.Errorf("JSON decode: %w", err)
+		return nil, fmt.Errorf("JSON decode: %w", err)
 	}
 
-	return Validate(schema, instance, opts...)
+	return instance, nil
 }
 
 // annotations tracks evaluated properties and items for unevaluated* keywords.
