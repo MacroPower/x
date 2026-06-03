@@ -212,7 +212,7 @@ func addRequired(parent *jsonschema.Schema, name string) {
 
 // applyRequiredConstraint adds type-specific "required" constraints, matching
 // go-playground/validator semantics where "required" means a non-zero value.
-// validator rules in a single tag compose conjunctively and order-independently,
+// Validator rules in a single tag compose conjunctively and order-independently,
 // so the floors only ever rise: a stronger min/len bound set by another part of
 // the tag is never lowered, regardless of where "required" appears.
 func applyRequiredConstraint(s *jsonschema.Schema, baseType reflect.Type) {
@@ -221,14 +221,17 @@ func applyRequiredConstraint(s *jsonschema.Schema, baseType reflect.Type) {
 		if s.MinLength == nil || *s.MinLength < 1 {
 			s.MinLength = jsonschema.Ptr(1)
 		}
+
 	case baseType.Kind() == reflect.Slice, baseType.Kind() == reflect.Array:
 		if s.MinItems == nil || *s.MinItems < 1 {
 			s.MinItems = jsonschema.Ptr(1)
 		}
+
 	case baseType.Kind() == reflect.Map:
 		if s.MinProperties == nil || *s.MinProperties < 1 {
 			s.MinProperties = jsonschema.Ptr(1)
 		}
+
 	case baseType.Kind() == reflect.Bool:
 		// Required on bool means the value must be true.
 		s.Const = jsonschema.Ptr[any](true)
@@ -292,9 +295,9 @@ func applyLenConstraint(s *jsonschema.Schema, value string, baseType reflect.Typ
 }
 
 // applyOneOf applies oneof constraint based on the type. A field whose base
-// type is neither numeric, bool, nor string (struct, time.Time, slice, map,
-// ...) cannot carry a string enum without producing an unsatisfiable schema, so
-// it is rejected rather than silently mis-stamped.
+// type is neither numeric, bool, nor string (for example a struct, [time.Time],
+// slice, or map) cannot carry a string enum without producing an unsatisfiable
+// schema, so it is rejected rather than silently mis-stamped.
 func applyOneOf(s *jsonschema.Schema, value string, baseType reflect.Type) error {
 	switch {
 	case isNumericKind(baseType):
@@ -309,9 +312,9 @@ func applyOneOf(s *jsonschema.Schema, value string, baseType reflect.Type) error
 }
 
 // applyEq applies eq constraint based on the type. A non-numeric, non-bool,
-// non-collection, non-string base type (struct, time.Time, ...) cannot carry a
-// string const without producing an unsatisfiable schema, so it is rejected
-// rather than silently mis-stamped.
+// non-collection, non-string base type (for example a struct or [time.Time])
+// cannot carry a string const without producing an unsatisfiable schema, so it
+// is rejected rather than silently mis-stamped.
 func applyEq(s *jsonschema.Schema, value string, baseType reflect.Type) error {
 	switch {
 	case isNumericKind(baseType):
@@ -325,6 +328,7 @@ func applyEq(s *jsonschema.Schema, value string, baseType reflect.Type) error {
 		applyStringEq(s, value)
 
 		return nil
+
 	default:
 		return fmt.Errorf("validate tag: eq not supported for type %s", baseType.Kind())
 	}
@@ -395,6 +399,7 @@ func applyNe(s *jsonschema.Schema, value string, baseType reflect.Type) error {
 		applyStringNe(s, value)
 
 		return nil
+
 	default:
 		return fmt.Errorf("validate tag: ne not supported for type %s", baseType.Kind())
 	}
@@ -419,7 +424,7 @@ func applyBoolNe(s *jsonschema.Schema, value string) error {
 func isControlTag(key string) bool {
 	switch key {
 	case "omitempty", "omitnil", "omitzero", "structonly", "nostructlevel",
-		"isdefault", "required_array_keys":
+		"isdefault":
 		return true
 	}
 
@@ -435,7 +440,7 @@ func isCrossFieldValidator(key string) bool {
 		"required_if", "required_unless", "required_with", "required_with_all",
 		"required_without", "required_without_all", "excluded_if", "excluded_unless",
 		"excluded_with", "excluded_with_all", "excluded_without", "excluded_without_all",
-		"fieldcontains", "fieldexcludes":
+		"skip_unless", "fieldcontains", "fieldexcludes":
 		return true
 	}
 

@@ -103,7 +103,10 @@ func applyCollectionNe(s *jsonschema.Schema, value string, baseType reflect.Type
 
 		return nil
 	}
-	// Compose with any existing not constraint so both apply conjunctively.
+	// A length exclusion is a min/max range rather than a single value, so it
+	// cannot ride on forbidValue's not.const/not.enum accumulation. Instead move
+	// any existing not under allOf and add a separate not for this length so both
+	// apply conjunctively.
 	s.AllOf = append(s.AllOf,
 		&jsonschema.Schema{Not: s.Not},
 		&jsonschema.Schema{Not: forbidden},
@@ -151,7 +154,8 @@ func diveIntoSequence(remaining []string, s *jsonschema.Schema, elem reflect.Typ
 
 	case len(s.PrefixItems) > 0:
 		for _, item := range s.PrefixItems {
-			if err := applyParts(remaining, item, nil, "", elem, true); err != nil {
+			err := applyParts(remaining, item, nil, "", elem, true)
+			if err != nil {
 				return err
 			}
 		}
@@ -160,14 +164,15 @@ func diveIntoSequence(remaining []string, s *jsonschema.Schema, elem reflect.Typ
 
 	case len(s.ItemsArray) > 0:
 		for _, item := range s.ItemsArray {
-			if err := applyParts(remaining, item, nil, "", elem, true); err != nil {
+			err := applyParts(remaining, item, nil, "", elem, true)
+			if err != nil {
 				return err
 			}
 		}
 
 		return nil
 
-	case s.ContentEncoding == "base64":
+	case s.ContentEncoding == base64Encoding:
 		// A []byte field marshals to a single base64 string, so there is no
 		// per-element schema to constrain. The dive has no representable target;
 		// accept it as a no-op rather than aborting generation.

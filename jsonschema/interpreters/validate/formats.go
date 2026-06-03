@@ -1,10 +1,20 @@
 package validate
 
-import "go.jacobcolvin.com/jsonschema"
+import (
+	"slices"
+
+	"go.jacobcolvin.com/jsonschema"
+)
+
+// base64Encoding is the content validator tag and the contentEncoding keyword
+// value for base64-encoded string content.
+const base64Encoding = "base64"
 
 // isStringKeywordTag reports whether key names a format, pattern, or content
 // validator. These all map to string-only JSON Schema keywords, so the caller
-// gates them on a string field before applying.
+// only applies them when the field's generated schema can hold a string
+// instance (see [schemaPermitsString]), which includes []byte fields whose Go
+// kind is not string but whose schema is a base64-encoded string.
 func isStringKeywordTag(key string) bool {
 	return formatFor(key) != "" || patternFor(key) != "" || isContentTag(key)
 }
@@ -18,18 +28,13 @@ func schemaPermitsString(s *jsonschema.Schema) bool {
 	if s.Type == "string" {
 		return true
 	}
-	for _, t := range s.Types {
-		if t == "string" {
-			return true
-		}
-	}
 
-	return false
+	return slices.Contains(s.Types, "string")
 }
 
 // applyStringKeywordTag applies the format, pattern, or content keyword named by
 // key to a string schema. An explicit jsonschema struct tag value is preserved:
-// each keyword is only set when not already present. key must be recognized by
+// each keyword is only set when not already present. Key must be recognized by
 // [isStringKeywordTag].
 func applyStringKeywordTag(key string, s *jsonschema.Schema) {
 	if format := formatFor(key); format != "" {
@@ -95,7 +100,7 @@ func patternFor(key string) string {
 // isContentTag reports whether key names a content validator.
 func isContentTag(key string) bool {
 	switch key {
-	case "json", "base64":
+	case "json", base64Encoding:
 		return true
 	default:
 		return false
@@ -111,9 +116,9 @@ func applyContentTag(key string, s *jsonschema.Schema) {
 			s.ContentMediaType = "application/json"
 		}
 
-	case "base64":
+	case base64Encoding:
 		if s.ContentEncoding == "" {
-			s.ContentEncoding = "base64"
+			s.ContentEncoding = base64Encoding
 		}
 	}
 }

@@ -2,6 +2,7 @@ package validate
 
 import (
 	"fmt"
+	"math"
 	"reflect"
 	"strconv"
 
@@ -14,7 +15,10 @@ func applyStringMinConstraint(s *jsonschema.Schema, value string, exclusive bool
 	if err != nil {
 		return fmt.Errorf("validate tag: invalid number %q: %w", value, err)
 	}
-	if exclusive {
+	// Gt=N means minLength N+1; guard against overflow so gt=MaxInt yields the
+	// largest representable bound instead of wrapping negative and collapsing
+	// to a permissive minLength: 0.
+	if exclusive && n != math.MaxInt {
 		n++
 	}
 	// MinLength MUST be non-negative per JSON Schema; a negative bound
@@ -34,11 +38,13 @@ func applyStringMaxConstraint(s *jsonschema.Schema, value string, exclusive bool
 	if err != nil {
 		return fmt.Errorf("validate tag: invalid number %q: %w", value, err)
 	}
-	if exclusive {
+	// Lt=N means maxLength N-1; guard against underflow so lt=MinInt does not
+	// wrap to a large positive (permissive) bound before the non-negative clamp.
+	if exclusive && n != math.MinInt {
 		n--
 	}
-	// MaxLength MUST be non-negative per JSON Schema; an exclusive bound of
-	// lt=0 collapses to 0.
+	// MaxLength MUST be non-negative per JSON Schema; a negative bound
+	// collapses to 0.
 	if n < 0 {
 		n = 0
 	}
