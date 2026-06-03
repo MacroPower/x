@@ -12,7 +12,7 @@ task test   # Run all tests
 
 ## Architecture
 
-See PRD.md for the design and doc.go for the package overview.
+See README.md for the design and usage, and doc.go for the package overview.
 
 ```bash
 task docs # Print all package docs
