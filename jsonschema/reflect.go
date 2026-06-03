@@ -35,6 +35,8 @@ var (
 	typeBigRat         = reflect.TypeFor[big.Rat]()
 	typeBigFloat       = reflect.TypeFor[big.Float]()
 	typeByteSlice      = reflect.TypeFor[[]byte]()
+	typeProvider       = reflect.TypeFor[JSONSchemaProvider]()
+	typeExtender       = reflect.TypeFor[JSONSchemaExtender]()
 )
 
 // generator holds the state for a single schema generation run.
@@ -1228,8 +1230,7 @@ func isDirectTextMarshaler(t reflect.Type) bool {
 // implementsProvider checks if a type (or pointer to type) implements
 // JSONSchemaProvider directly (not just via an embedded field).
 func implementsProvider(t reflect.Type) bool {
-	providerType := reflect.TypeFor[JSONSchemaProvider]()
-	if !t.Implements(providerType) && !reflect.PointerTo(t).Implements(providerType) {
+	if !t.Implements(typeProvider) && !reflect.PointerTo(t).Implements(typeProvider) {
 		return false
 	}
 
@@ -1239,8 +1240,7 @@ func implementsProvider(t reflect.Type) bool {
 // implementsExtender checks if a type (or pointer to type) implements
 // JSONSchemaExtender directly (not just via an embedded field).
 func implementsExtender(t reflect.Type) bool {
-	extenderType := reflect.TypeFor[JSONSchemaExtender]()
-	if !t.Implements(extenderType) && !reflect.PointerTo(t).Implements(extenderType) {
+	if !t.Implements(typeExtender) && !reflect.PointerTo(t).Implements(typeExtender) {
 		return false
 	}
 
@@ -1309,10 +1309,8 @@ func callProvider(t reflect.Type) (s *jsonschema.Schema, err error) {
 		}
 	}()
 
-	providerType := reflect.TypeFor[JSONSchemaProvider]()
-
 	var v reflect.Value
-	if t.Implements(providerType) {
+	if t.Implements(typeProvider) {
 		v = reflect.New(t).Elem()
 	} else {
 		v = reflect.New(t)
@@ -1342,10 +1340,8 @@ func callExtender(t reflect.Type, s *jsonschema.Schema) (err error) {
 		}
 	}()
 
-	extenderType := reflect.TypeFor[JSONSchemaExtender]()
-
 	var v reflect.Value
-	if t.Implements(extenderType) {
+	if t.Implements(typeExtender) {
 		v = reflect.New(t).Elem()
 	} else {
 		v = reflect.New(t)
