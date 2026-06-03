@@ -12,6 +12,8 @@ task test   # Run all tests
 
 ## Architecture
 
+See PRD.md for the design and doc.go for the package overview.
+
 ```bash
 task docs # Print all package docs
 ```
@@ -36,4 +38,3 @@ task docs # Print all package docs
 - Always use `t.Parallel()` in all tests.
 - Use `require.ErrorIs` for sentinel error checking.
 - Use `require.ErrorAs` for error type extraction.
-- Use the `stringtest` helpers for all multi-line strings.

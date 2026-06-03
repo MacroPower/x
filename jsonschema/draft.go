@@ -28,7 +28,11 @@ func (d Draft) schemaURI() string {
 	}
 }
 
-// refPrefix returns the $ref path prefix ("#/definitions/" or "#/$defs/").
+// refPrefix returns the $ref path prefix for the draft's definitions section:
+// "#/$defs/" for Draft 2020-12, or "#/definitions/" for Draft-07. An
+// unrecognized draft uses the Draft 2020-12 prefix, consistent with schemaURI
+// returning an empty $schema for unknown drafts: a document without $schema
+// defaults to the latest draft, whose definitions live under $defs.
 func (d Draft) refPrefix() string {
 	if d == Draft7 {
 		return "#/definitions/"

@@ -28,12 +28,14 @@
 //
 // # Errors
 //
-// Two sentinel errors are defined for error matching with [errors.Is]:
+// Sentinel errors are defined for error matching with [errors.Is]:
 //
 //   - [ErrUnsupportedType]: returned when a Go type has no JSON Schema
 //     representation (func, chan, complex, [unsafe.Pointer]).
 //   - [ErrUnsupportedMapKey]: returned when a map key type is not string,
 //     an integer type, or an [encoding.TextMarshaler].
+//   - [ErrProviderPanic]: returned when a [JSONSchemaProvider] or
+//     [JSONSchemaExtender] method panics; the panic is recovered and wrapped.
 //
 // Errors are wrapped with context so callers see the full path
 // (e.g., "field \"data\": unsupported type").
@@ -106,11 +108,12 @@
 //  5. Kind-based reflection.
 //
 // [encoding/json.Marshaler] is not in this chain. Types implementing only
-// [json.Marshaler] (not [encoding.TextMarshaler]) are handled by kind-based
-// reflection, since MarshalJSON can return any JSON type — the output type is
-// unknowable via reflection. Specific well-known [json.Marshaler] types are
-// handled via built-in overrides. Other [json.Marshaler] types should use
-// [WithTypeSchema] or implement [JSONSchemaProvider].
+// [encoding/json.Marshaler] (not [encoding.TextMarshaler]) are handled by
+// kind-based reflection, since MarshalJSON can return any JSON type — the
+// output type is unknowable via reflection. Specific well-known
+// [encoding/json.Marshaler] types are handled via built-in overrides. Other
+// [encoding/json.Marshaler] types should use [WithTypeSchema] or implement
+// [JSONSchemaProvider].
 //
 // # Customization Interfaces
 //
@@ -277,11 +280,13 @@
 //   - [WithFormatValidator] registers a custom format checker.
 //   - [WithFormats] forces built-in format assertion on or off. By default
 //     format is asserted under Draft-07 and is annotation-only under Draft
-//     2020-12 unless the format-assertion vocabulary is active (§7.2.1).
+//     2020-12 unless the format-assertion vocabulary is active.
 //   - [WithContent] asserts contentEncoding (base64) and contentMediaType
 //     (application/json) for string instances. Annotation-only by default.
-//   - [WithResolveOptions] passes upstream ResolveOptions for structural pre-validation.
-//   - [WithVocabularies] directly specifies active vocabularies for the validation run.
+//   - [WithResolveOptions] passes upstream ResolveOptions for structural
+//     pre-validation.
+//   - [WithVocabularies] directly specifies active vocabularies for the
+//     validation run.
 //   - [WithMetaSchema] registers a metaschema whose $vocabulary map controls
 //     which keyword groups are active.
 //
@@ -315,8 +320,8 @@
 // The format-assertion vocabulary is an exception: because this implementation
 // recognizes it, its presence in a $vocabulary map asserts format regardless of
 // the true/false value. The boolean only governs implementations that do not
-// understand the vocabulary (§7.2.1), so a metaschema with format-assertion: false
-// still asserts format here.
+// understand the vocabulary, so a metaschema with format-assertion: false still
+// asserts format here.
 //
 // Vocabulary resolution follows this priority:
 //  1. [WithVocabularies] direct override (highest).
@@ -334,8 +339,9 @@
 // under #/$defs or #/definitions). Remote and absolute $ref URIs are resolved
 // via an optional [RefResolver] set with [WithRefResolver]. An unresolvable
 // remote or absolute $ref is reported as a [*ValidationError] by the validation
-// walk: with no resolver (or a resolver returning nil) the message is "cannot
-// resolve $ref", while a resolver that returns an error yields one wrapping
-// [ErrRefResolve]. Only an unresolvable local fragment ref is silently skipped.
+// walk: with no resolver (or a resolver returning nil) the message begins with
+// "cannot resolve $ref" and includes the quoted ref, while a resolver that
+// returns an error yields one wrapping [ErrRefResolve]. Only an unresolvable
+// local fragment ref is silently skipped.
 // Circular refs are detected and treated as passing to avoid infinite recursion.
 package jsonschema

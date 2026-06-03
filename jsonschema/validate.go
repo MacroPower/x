@@ -260,7 +260,7 @@ func (v *validator) resolveVocabularies() error {
 	}
 
 	v.vocabs = resolveVocabs(rawVocabs)
-	// The content vocabulary gates validateContent. vocabSet omits it (content
+	// The content vocabulary gates validateContent. VocabSet omits it (content
 	// is annotation-only in the common path), so its active state is tracked
 	// here directly from the raw map.
 	v.contentVocab = rawVocabs[VocabContent2020]
@@ -478,10 +478,8 @@ func (v *validator) remoteLoader() jsonschema.Loader {
 // instead yields an independent copy of every serializable field, which is
 // what remote-ref isolation requires so [jsonschema.Schema.Resolve]'s in-place
 // mutations can't corrupt the caller's schema. The trade-off is that any field
-// omitted from the JSON encoding (such as PropertyOrder) is dropped;
-// TestCloneSchemaSerializableFieldCoverage forces every exported field to be
-// accounted for, and TestCloneSchemaDeepIndependence verifies the copy is fully
-// independent of the original.
+// omitted from the JSON encoding (such as PropertyOrder) is dropped; every
+// other serializable field round-trips as an independent copy.
 func cloneSchema(s *Schema) (*Schema, error) {
 	data, err := json.Marshal(s)
 	if err != nil {
@@ -682,9 +680,9 @@ func Validate(schema *Schema, instance any, opts ...ValidateOption) error {
 // Upstream Resolve performs reference resolution as part of pre-validation and
 // rejects refs it cannot follow — for example a JSON Pointer that targets an
 // unknown keyword or the internals of a non-applicator keyword such as
-// examples. The PRD assigns $ref/$dynamicRef target lookup to this package, not
-// upstream (see [validator.resolveRef]), so such a failure must not be fatal
-// when the schema is otherwise well-formed.
+// examples. This package resolves $ref/$dynamicRef targets itself (see
+// [validator.resolveRef]), so such a failure must not be fatal when the schema
+// is otherwise well-formed.
 //
 // The error is ref-only when all hold:
 //
@@ -1087,7 +1085,7 @@ func (v *validator) validateUnevaluated(
 	//nolint:nestif // Nesting tracks the annotation guards required to apply unevaluatedProperties correctly.
 	if schema.UnevaluatedProperties != nil {
 		if obj, ok := instance.(map[string]any); ok && !ann.allProperties {
-			// isEmptySchema implies Not == nil, so the schema is not a false
+			// IsEmptySchema implies Not == nil, so the schema is not a false
 			// schema: an empty (always-true) unevaluatedProperties evaluates
 			// every remaining property.
 			if isEmptySchema(schema.UnevaluatedProperties) {
@@ -1120,7 +1118,7 @@ func (v *validator) validateUnevaluated(
 	// UnevaluatedItems.
 	if schema.UnevaluatedItems != nil { //nolint:nestif // Validation keyword nesting is inherent.
 		if arr, ok := instance.([]any); ok && !ann.allItems {
-			// isEmptySchema implies Not == nil, so the schema is not a false
+			// IsEmptySchema implies Not == nil, so the schema is not a false
 			// schema: an empty (always-true) unevaluatedItems evaluates every
 			// remaining item.
 			if isEmptySchema(schema.UnevaluatedItems) {
@@ -1272,10 +1270,10 @@ func isIntegerLiteral(s string) bool {
 }
 
 // jsonNumberIsIntegral reports whether a [json.Number] denotes a mathematical
-// integer (e.g. "1.0" or a value far beyond the int64 range). A big.Rat parses
-// the decimal literal exactly, so IsInt holds at any magnitude or precision; a
-// fixed-width big.Float would round away the fraction of a very long non-integer
-// and misclassify it.
+// integer (e.g. "1.0" or a value far beyond the int64 range). A [big.Rat]
+// parses the decimal literal exactly, so IsInt holds at any magnitude or
+// precision; a fixed-width [big.Float] would round away the fraction of a very
+// long non-integer and misclassify it.
 func jsonNumberIsIntegral(n json.Number) bool {
 	// A plain integer literal is integral by construction; recognize it in O(n)
 	// so a very long integer literal never reaches the quadratic big.Rat parse.
@@ -1351,7 +1349,7 @@ func instanceMatchesType(instance any, typ string) bool {
 		return ok
 
 	case "string":
-		// json.Number is a distinct type, so a string assertion already
+		// Json.Number is a distinct type, so a string assertion already
 		// excludes it; no separate numeric guard is needed.
 		_, isStr := instance.(string)
 
@@ -1668,7 +1666,7 @@ func (v *validator) validateNumeric(schema *Schema, instance any, instancePath, 
 // literal is too long to parse into an exact [big.Rat] (see maxNumberLen). Such
 // a value lies beyond the float64 range of every bound, so a positive value
 // exceeds every minimum and a negative value is below every minimum; only the
-// sign matters. multipleOf needs the exact value and is skipped.
+// sign matters. MultipleOf needs the exact value and is skipped.
 func (v *validator) validateNumericExtreme(
 	schema *Schema,
 	instance any,
@@ -1740,7 +1738,7 @@ func ratString(r *big.Rat) string {
 func (v *validator) validateString(schema *Schema, instance any, instancePath, schemaPath string) []*ValidationError {
 	str, ok := instance.(string)
 	if !ok {
-		// json.Number is a distinct type, so it fails this assertion and string
+		// Json.Number is a distinct type, so it fails this assertion and string
 		// keywords correctly do not apply to numbers.
 		return nil
 	}
@@ -1787,6 +1785,7 @@ func (v *validator) validateString(schema *Schema, instance any, instancePath, s
 					Keyword:      "pattern",
 					Message:      fmt.Sprintf("pattern %q cannot be compiled", schema.Pattern),
 				})
+
 			case !re.MatchString(str):
 				errs = append(errs, &ValidationError{
 					InstancePath: instancePath,
@@ -1855,7 +1854,7 @@ func (v *validator) validateArray(
 			errs = append(errs, childErrs...)
 		}
 
-		// prefixItems annotates every index it applied a subschema to, regardless
+		// PrefixItems annotates every index it applied a subschema to, regardless
 		// of per-item success (2020-12 core §10.3.1.1: "the largest index to which
 		// this keyword applied a subschema"). Because this walk collects all
 		// errors instead of failing fast, the whole applied range is noted once
@@ -2856,7 +2855,7 @@ func (v *validator) resolveJSONPointer(root *Schema, fragment string, encoded bo
 	// When the fragment is still percent-encoded (the caller had a RawFragment),
 	// RFC 6901 requires splitting on '/' first — so a member name escaped as
 	// %2F survives as one segment rather than splitting the pointer — then
-	// percent-decoding each segment. When url.Parse already decoded the fragment
+	// percent-decoding each segment. When [url.Parse] already decoded the fragment
 	// (RawFragment empty), a second decode would corrupt a name that legitimately
 	// contains '%', so only the ~0/~1 unescape is applied.
 	for i, seg := range segments {
@@ -2880,7 +2879,8 @@ func (v *validator) resolveJSONPointer(root *Schema, fragment string, encoded bo
 }
 
 // rawFragment returns the JSON Pointer fragment to resolve plus whether it is
-// still percent-encoded. url.Parse populates RawFragment only when the fragment
+// still percent-encoded. The [url.Parse] result populates RawFragment only when
+// the fragment
 // carries an encoding it could not canonicalize (e.g. a %2F separator escape);
 // that form must be split before decoding. Otherwise Fragment is already the
 // single-decoded value and must not be decoded again.
@@ -3206,6 +3206,8 @@ func (v *validator) traverseSchema(schema *Schema, segments []string) *Schema {
 // jsonPointerEscaper and jsonPointerUnescaper apply the RFC 6901 ~0/~1
 // transforms in a single pass. NewReplacer matches leftmost-longest without
 // rescanning its own output, so unescaping "~1" before "~0" is order-correct.
+//
+//nolint:grouper // Kept apart from the package regexCache var; merging unrelated globals hurts readability.
 var (
 	jsonPointerEscaper   = strings.NewReplacer("~", "~0", "/", "~1")
 	jsonPointerUnescaper = strings.NewReplacer("~1", "/", "~0", "~")

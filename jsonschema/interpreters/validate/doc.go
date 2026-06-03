@@ -22,12 +22,14 @@
 // Presence:
 //
 //   - required: adds the field to the parent's "required" array. For non-pointer
-//     strings also sets minLength: 1; for slices/arrays, minItems: 1; for maps,
-//     minProperties: 1. Pointer fields only get the required constraint (not the
-//     type-specific minimum), since in go-playground/validator, required on a
-//     pointer means "must be non-nil" — the pointed-to value may be zero.
-//     The required tag adds the field to the parent's required array even when
-//     json:",omitempty" or json:",omitzero" would normally exclude it.
+//     fields it also adds a type-specific non-zero constraint: minLength: 1 for
+//     strings, minItems: 1 for slices/arrays, minProperties: 1 for maps,
+//     const: true for bools, and a not forbidding 0 for numbers. Pointer fields
+//     only get the required constraint (not the type-specific non-zero check),
+//     since in go-playground/validator required on a pointer means "must be
+//     non-nil" — the pointed-to value may be zero. The required tag adds the
+//     field to the parent's required array even when json:",omitempty" or
+//     json:",omitzero" would normally exclude it.
 //
 // String constraints:
 //
@@ -36,9 +38,11 @@
 //   - len=N: minLength and maxLength
 //   - gt=N: minLength: N+1
 //   - lt=N: maxLength: N-1
-//   - oneof=a b c: enum (space-separated values)
+//   - oneof=a b c: enum (space-separated values; single-quoted runs group
+//     multi-word values, e.g. oneof='New York' Boston)
 //   - eq=val: const
-//   - ne=val: not.const
+//   - ne=val: forbids the value via not (not.const for a single value, composed
+//     into not.enum or allOf when several values are forbidden, e.g. required+ne)
 //
 // Numeric constraints:
 //
@@ -48,7 +52,15 @@
 //   - lt=N: exclusiveMaximum
 //   - oneof=1 2 3: enum (space-separated, parsed as numbers)
 //   - eq=N: const
-//   - ne=N: not.const
+//   - ne=N: forbids the value via not (not.const for a single value, composed
+//     into not.enum or allOf when several values are forbidden, e.g. required+ne)
+//   - len=N: const (value equals N)
+//
+// Boolean constraints:
+//
+//   - eq=true / eq=false: const
+//   - ne=true / ne=false: not (forbids the value)
+//   - oneof=true false: enum
 //
 // Array/slice constraints:
 //
@@ -57,6 +69,8 @@
 //   - len=N: minItems and maxItems
 //   - gt=N: minItems: N+1
 //   - lt=N: maxItems: N-1
+//   - eq=N: minItems and maxItems (length equals N)
+//   - ne=N: not (forbids length N)
 //   - unique: uniqueItems: true
 //
 // Map constraints:
@@ -66,6 +80,8 @@
 //   - len=N: minProperties and maxProperties
 //   - gt=N: minProperties: N+1
 //   - lt=N: maxProperties: N-1
+//   - eq=N: minProperties and maxProperties (entry count equals N)
+//   - ne=N: not (forbids entry count N)
 //
 // Format tags (mapped to "format"):
 //
@@ -92,16 +108,25 @@
 //
 //	Tags [][]string `validate:"min=1,dive,max=5,dive,min=3"`
 //
-// This produces minItems: 1 on the outer slice, maxItems: 5 on the inner slice's
-// items schema, and minLength: 3 on the string element schema.
+// This produces minItems: 1 on the outer slice, maxItems: 5 on the inner slice
+// schema (the outer slice's items), and minLength: 3 on the string element
+// schema.
 //
 // For maps, dive descends into the additionalProperties sub-schema (the value
 // type). When dive descends through a pointer element type (e.g., []*int),
 // constraints after dive apply to the underlying type's schema.
 //
-// # Unsupported Tags
+// # Skipped and Unrecognized Tags
 //
-// Cross-field validators (eqfield, required_if, etc.), map key validators
-// (keys, endkeys), and the | OR operator are silently ignored or discarded.
-// Only the first group before | is used.
+// Some tags carry no JSON Schema representation and are skipped: cross-field and
+// conditional validators (eqfield, required_if, skip_unless, ...), control tags
+// that govern when validation runs (omitempty, structonly, ...), and the
+// constraints inside a keys...endkeys block (map-key constraints are not
+// modeled). The | OR operator is not modeled either; only the first group
+// before | is interpreted.
+//
+// Any other key that is not a recognized constraint causes Interpret to return
+// an error rather than being silently consumed, so a typo'd or unsupported
+// validator surfaces at generation time instead of yielding a schema that
+// quietly drops the intended constraint.
 package validate

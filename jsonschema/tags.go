@@ -84,14 +84,11 @@ func applyJSONSchemaTag(tag string, fieldType reflect.Type, s *Schema) error {
 		return nil
 	}
 
-	// Check if this is a key-value tag (starts with a recognized WORD=).
 	if !isKeyValueTag(tag) {
-		// Bare description.
 		s.Description = tag
 		return nil
 	}
 
-	// Parse as comma-separated key=value pairs.
 	pairs := splitTagPairs(tag)
 	for _, pair := range pairs {
 		key, value, found := strings.Cut(pair, "=")
@@ -123,7 +120,7 @@ func splitTagPairs(tag string) []string {
 		escaped bool
 	)
 
-	for i := 0; i < len(tag); i++ {
+	for i := range len(tag) {
 		c := tag[i]
 		if escaped {
 			// Preserve recognized escapes (\, and \\) literally; pass any other
@@ -147,6 +144,7 @@ func splitTagPairs(tag string) []string {
 		case ',':
 			pairs = append(pairs, segment.String())
 			segment.Reset()
+
 		default:
 			segment.WriteByte(c)
 		}
@@ -412,9 +410,8 @@ func parseFloat(key, value string) (float64, error) {
 	return n, nil
 }
 
-// parseInt parses a non-negative int tag value. Every keyword that uses it
-// (minLength, maxLength, minItems, maxItems, minProperties, maxProperties)
-// requires a non-negative integer per JSON Schema.
+// parseInt parses a non-negative int tag value, rejecting negatives as required
+// for the length and count keywords by JSON Schema.
 func parseInt(key, value string) (int, error) {
 	if value == "" {
 		return 0, fmt.Errorf("jsonschema tag: key %q requires a non-empty value", key)
@@ -439,7 +436,6 @@ func parseTypedScalar(value string, t reflect.Type) (any, error) {
 	// "null" via its kind switch instead of silently accepting JSON null.
 	nullable := t.Kind() == reflect.Pointer
 
-	// Follow pointers.
 	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}

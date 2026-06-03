@@ -28,10 +28,12 @@ var knownVocabularies = map[string]bool{
 }
 
 // vocabSet is the resolved set of active vocabularies for a validation run.
-// Named bools avoid map lookups in the hot validation path. Only vocabularies
-// that gate a keyword group behaviorally are tracked; core (always required),
-// content and meta-data (never validated), and format-annotation (no assertion
-// effect) are omitted because their active state has no bearing on the walk.
+// Named bools avoid map lookups in the hot validation path, so it tracks only
+// the groups consulted there: applicator, validation, unevaluated, and
+// format-assertion. The content vocabulary also gates a keyword group, but it
+// runs off the hot path and is tracked separately on the validator (see the
+// contentVocab field). Core is always required and meta-data carries no
+// assertion behavior, so neither needs a field here.
 type vocabSet struct {
 	applicator      bool
 	validation      bool
@@ -59,7 +61,7 @@ func resolveVocabs(vocabs map[string]bool) vocabSet {
 		// The format-assertion vocabulary is special: once an implementation
 		// recognizes it, format is asserted regardless of the true/false value.
 		// The boolean only governs implementations that do not understand the
-		// vocabulary (validation §7.2.1), so its mere presence enables assertion.
+		// vocabulary (validation §7.2.2), so its mere presence enables assertion.
 		if uri == VocabFormatAssertion2020 {
 			vs.formatAssertion = true
 			continue

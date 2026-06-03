@@ -52,13 +52,10 @@ func validateDateTime(s string) error {
 	upper := strings.ToUpper(s)
 
 	// Split on T separator (RFC 3339 allows lowercase t).
-	before, after, ok := strings.Cut(upper, "T")
+	datePart, timePart, ok := strings.Cut(upper, "T")
 	if !ok {
 		return errors.New("invalid date-time")
 	}
-
-	datePart := before
-	timePart := after
 
 	_, err := time.Parse("2006-01-02", datePart)
 	if err != nil {

@@ -12,6 +12,10 @@ import (
 )
 
 // commentExtractor extracts Go doc comments from source files.
+//
+// Generation drives the extractor from a single goroutine, so the mutex
+// guarding the cache is a forward-looking guard that keeps the extractor safe
+// should generation ever fan out across goroutines.
 type commentExtractor struct {
 	cache map[string][]*ast.File
 	mu    sync.Mutex
@@ -34,6 +38,11 @@ func baseTypeName(name string) string {
 }
 
 // typeComment returns the doc comment for a named type.
+//
+// Matching is by package path and unqualified type name, since reflection does
+// not expose source positions. A non-package-scope type (for example one
+// declared inside a function) that shadows a package-level name may therefore
+// receive the package-level type's comment.
 func (ce *commentExtractor) typeComment(t reflect.Type) string {
 	if t.Name() == "" || t.PkgPath() == "" {
 		return ""
@@ -70,6 +79,10 @@ func (ce *commentExtractor) typeComment(t reflect.Type) string {
 }
 
 // fieldComment returns the doc comment for a struct field.
+//
+// As with typeComment, matching is by package path and unqualified type name, so
+// a non-package-scope struct that shadows a package-level name may receive the
+// package-level struct's field comments.
 func (ce *commentExtractor) fieldComment(structType reflect.Type, fieldName string) string {
 	if structType.Name() == "" || structType.PkgPath() == "" {
 		return ""
@@ -134,12 +147,14 @@ func (ce *commentExtractor) sourceFiles(pkgPath string) []*ast.File {
 // loadPackage uses go/packages to load and parse source files for a package.
 // Returns nil if the package cannot be loaded.
 //
-// Package-level errors (an unrelated sibling file with a parse or type-check
-// problem, an unresolved import, and so on) do not discard the successfully
-// parsed files: go/packages populates Syntax with every AST that parsed cleanly
-// while aggregating per-file problems separately in Errors. Best-effort comment
-// extraction uses whatever parsed, so a single bad file in the package does not
-// drop doc comments for the types that did parse.
+// The configured Mode (NeedName | NeedFiles | NeedSyntax) parses but does not
+// type-check, so the only per-file problems that arise are parse errors and
+// import resolution failures. Package-level errors (an unrelated sibling file
+// with a parse problem, an unresolved import, and so on) do not discard the
+// successfully parsed files: go/packages populates Syntax with every AST that
+// parsed cleanly while aggregating per-file problems separately in Errors.
+// Best-effort comment extraction uses whatever parsed, so a single bad file in
+// the package does not drop doc comments for the types that did parse.
 func (ce *commentExtractor) loadPackage(pkgPath string) []*ast.File {
 	cfg := &packages.Config{
 		Mode: packages.NeedName | packages.NeedFiles | packages.NeedSyntax,
