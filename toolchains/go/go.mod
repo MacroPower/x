@@ -3,7 +3,7 @@ module dagger/go
 go 1.25.6
 
 require (
-	dagger.io/dagger v0.20.6-0.20260415192040-7058e9313c72
+	dagger.io/dagger v0.21.4
 	github.com/Khan/genqlient v0.8.1
 	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/dagger/otel-go v1.41.0
