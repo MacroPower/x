@@ -1437,7 +1437,30 @@ func (g *generator) applyFieldComment(structType reflect.Type, f reflect.StructF
 	if g.commentExtractor == nil {
 		return
 	}
-	if comment := g.commentExtractor.fieldComment(structType, f.Name); comment != "" {
+	if comment := g.commentExtractor.fieldComment(declaringType(structType, f), f.Name); comment != "" {
 		s.Description = comment
 	}
+}
+
+// declaringType returns the struct type that actually declares field f. For a
+// field promoted from an embedded struct this is the embedded type, not the
+// outer struct, and the field's doc comment lives in that type's source. The
+// field's index path is absolute from outer, so walking all but its last element
+// (dereferencing embedded pointers) reaches the declaring type.
+func declaringType(outer reflect.Type, f reflect.StructField) reflect.Type {
+	t := outer
+
+	for _, i := range f.Index[:max(len(f.Index)-1, 0)] {
+		for t.Kind() == reflect.Pointer {
+			t = t.Elem()
+		}
+
+		t = t.Field(i).Type
+	}
+
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+
+	return t
 }

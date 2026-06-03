@@ -24,11 +24,22 @@ func newCommentExtractor() *commentExtractor {
 	}
 }
 
+// baseTypeName strips the type-argument list from a reflect type name so an
+// instantiated generic type (whose Name() is e.g. "Box[int]") matches its source
+// declaration ("Box"). For a non-generic type it returns the name unchanged.
+func baseTypeName(name string) string {
+	base, _, _ := strings.Cut(name, "[")
+
+	return base
+}
+
 // typeComment returns the doc comment for a named type.
 func (ce *commentExtractor) typeComment(t reflect.Type) string {
 	if t.Name() == "" || t.PkgPath() == "" {
 		return ""
 	}
+
+	name := baseTypeName(t.Name())
 
 	files := ce.sourceFiles(t.PkgPath())
 	for _, f := range files {
@@ -40,7 +51,7 @@ func (ce *commentExtractor) typeComment(t reflect.Type) string {
 
 			for _, spec := range gd.Specs {
 				ts, ok := spec.(*ast.TypeSpec)
-				if !ok || ts.Name.Name != t.Name() {
+				if !ok || ts.Name.Name != name {
 					continue
 				}
 				// Doc comment can be on the GenDecl (for single-spec decls)
@@ -64,6 +75,8 @@ func (ce *commentExtractor) fieldComment(structType reflect.Type, fieldName stri
 		return ""
 	}
 
+	name := baseTypeName(structType.Name())
+
 	files := ce.sourceFiles(structType.PkgPath())
 	for _, f := range files {
 		for _, decl := range f.Decls {
@@ -74,7 +87,7 @@ func (ce *commentExtractor) fieldComment(structType reflect.Type, fieldName stri
 
 			for _, spec := range gd.Specs {
 				ts, ok := spec.(*ast.TypeSpec)
-				if !ok || ts.Name.Name != structType.Name() {
+				if !ok || ts.Name.Name != name {
 					continue
 				}
 
