@@ -10,6 +10,10 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+// defaultParallelism bounds concurrent per-module jobs (lint, tidy, format,
+// changeset fan-out) to keep memory use predictable when many modules run.
+const defaultParallelism = 3
+
 // parallelJob pairs a name with a function to execute.
 type parallelJob struct {
 	name string
@@ -28,10 +32,11 @@ func newParallel() parallelJobs {
 	return parallelJobs{}
 }
 
-// withJob adds a named job. Uses a value receiver to support a clone/builder
-// pattern.
+// withJob adds a named job and returns the updated builder. Callers chain it
+// linearly (p = p.withJob(...)), reassigning each result, so a plain append is
+// safe.
 func (p parallelJobs) withJob(name string, fn func(ctx context.Context) error) parallelJobs {
-	p.jobs = append(append([]parallelJob{}, p.jobs...), parallelJob{name: name, fn: fn})
+	p.jobs = append(p.jobs, parallelJob{name: name, fn: fn})
 	return p
 }
 

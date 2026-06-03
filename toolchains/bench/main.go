@@ -20,13 +20,20 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// Bench accumulates named container stages to time. Names and Stages are kept
-// parallel. Create instances with [New] and add stages with [Bench.WithStage].
+// Bench accumulates named container stages to time. Create instances with [New]
+// and add stages with [Bench.WithStage].
 type Bench struct {
-	// Stage names, parallel to [Bench.Stages].
-	Names []string // +private
-	// Stage containers to time, parallel to [Bench.Names].
-	Stages []*dagger.Container // +private
+	// Accumulated stages to time, in insertion order.
+	Stages []*stage // +private
+}
+
+// stage pairs a stage name with the container whose evaluation is the work to
+// time. Both fields stay +private so the type never crosses the module boundary.
+type stage struct {
+	// Stage name (e.g. "lint", "test").
+	Name string // +private
+	// Container whose evaluation is the work to time.
+	Ctr *dagger.Container // +private
 }
 
 // New creates an empty [Bench].
@@ -55,10 +62,7 @@ func (b *Bench) WithStage(
 	// Container whose evaluation is the work to time.
 	ctr *dagger.Container,
 ) *Bench {
-	return &Bench{
-		Names:  append(b.Names, name),
-		Stages: append(b.Stages, ctr),
-	}
+	return &Bench{Stages: append(b.Stages, &stage{Name: name, Ctr: ctr})}
 }
 
 // Run evaluates each stage and returns its timing. When parallel is false,
@@ -98,8 +102,8 @@ func (b *Bench) Summary(
 
 func (b *Bench) runSequential(ctx context.Context) []*Result {
 	results := make([]*Result, 0, len(b.Stages))
-	for i, ctr := range b.Stages {
-		results = append(results, timeStage(ctx, b.Names[i], ctr))
+	for _, s := range b.Stages {
+		results = append(results, timeStage(ctx, s.Name, s.Ctr))
 	}
 	return results
 }
@@ -107,9 +111,9 @@ func (b *Bench) runSequential(ctx context.Context) []*Result {
 func (b *Bench) runParallel(ctx context.Context) []*Result {
 	results := make([]*Result, len(b.Stages))
 	g, gCtx := errgroup.WithContext(ctx)
-	for i, ctr := range b.Stages {
+	for i, s := range b.Stages {
 		g.Go(func() error {
-			results[i] = timeStage(gCtx, b.Names[i], ctr)
+			results[i] = timeStage(gCtx, s.Name, s.Ctr)
 			return nil // always collect results; don't abort on stage failure
 		})
 	}

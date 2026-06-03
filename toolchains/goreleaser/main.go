@@ -26,8 +26,11 @@ type Goreleaser struct {
 	Source *dagger.Directory
 	// Base container to build on (typically the consumer's Go build base).
 	Base *dagger.Container
-	// GoReleaser version (image tag for ghcr.io/goreleaser/goreleaser).
+	// GoReleaser version, used to compose the default image tag.
 	Version string
+	// goreleaser container image. Defaults to ghcr.io/goreleaser/goreleaser at
+	// Version; override to pull from a mirror or air-gapped registry.
+	Image string
 	// Git remote URL configured on the bootstrapped repo, used by GoReleaser
 	// for changelog/version derivation and homebrew/nix repo resolution.
 	RemoteURL string
@@ -50,6 +53,10 @@ func New(
 	// GoReleaser version. Defaults to the version pinned in this module.
 	// +optional
 	version string,
+	// goreleaser container image. Defaults to ghcr.io/goreleaser/goreleaser at
+	// the resolved version; override to pull from a mirror or air-gapped registry.
+	// +optional
+	image string,
 	// Git remote URL to configure as origin on the bootstrapped repo.
 	// +optional
 	remoteURL string,
@@ -60,6 +67,9 @@ func New(
 	if version == "" {
 		version = goreleaserVersion
 	}
+	if image == "" {
+		image = "ghcr.io/goreleaser/goreleaser:" + version
+	}
 	if base == nil {
 		base = dag.Container().From("golang:" + goVersion).WithWorkdir("/src")
 	}
@@ -67,6 +77,7 @@ func New(
 		Source:    source,
 		Base:      base,
 		Version:   version,
+		Image:     image,
 		RemoteURL: remoteURL,
 	}
 }
@@ -75,15 +86,29 @@ func New(
 // Base containers
 // ---------------------------------------------------------------------------
 
+// Binary returns the goreleaser executable, extracted from the configured image
+// so it can be layered onto another container (e.g. a release base alongside
+// cosign and syft).
+func (m *Goreleaser) Binary() *dagger.File {
+	return dag.Container().From(m.Image).File("/usr/bin/goreleaser")
+}
+
+// WithGoreleaser installs the goreleaser binary at /usr/local/bin/goreleaser in
+// the given container, for layering onto a caller's own build environment.
+func (m *Goreleaser) WithGoreleaser(
+	// Container to install goreleaser into.
+	ctr *dagger.Container,
+) *dagger.Container {
+	return ctr.WithFile("/usr/local/bin/goreleaser", m.Binary())
+}
+
 // GoreleaserBase returns the base container with the goreleaser binary
 // installed. This is the common base for config checks and release builds;
 // callers mount source and bootstrap a git repo before running goreleaser.
 // The binary is copied out of the official image rather than running that
 // image directly, so it layers onto the caller's Go build environment.
 func (m *Goreleaser) GoreleaserBase() *dagger.Container {
-	return m.Base.WithFile("/usr/local/bin/goreleaser",
-		dag.Container().From("ghcr.io/goreleaser/goreleaser:"+m.Version).
-			File("/usr/bin/goreleaser"))
+	return m.WithGoreleaser(m.Base)
 }
 
 // CheckBase returns a container with goreleaser, the project source mounted

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"dagger/go/internal/dagger"
@@ -276,11 +277,7 @@ func (m *Go) Build(
 	// +default="./bin/"
 	outDir string,
 ) (*dagger.Directory, error) {
-	if m.Race {
-		m.Cgo = true
-	}
-
-	ldflags := m.Ldflags
+	ldflags := slices.Clone(m.Ldflags)
 	if noSymbols {
 		ldflags = append(ldflags, "-s")
 	}
@@ -334,11 +331,14 @@ func goCommand(
 	values []string,
 	race bool,
 ) []string {
+	// Clone so appending -X values never mutates the caller's backing array
+	// (m.Ldflags is shared across the per-package build loop).
+	flags := slices.Clone(ldflags)
 	for _, val := range values {
-		ldflags = append(ldflags, "-X '"+val+"'")
+		flags = append(flags, "-X '"+val+"'")
 	}
-	if len(ldflags) > 0 {
-		cmd = append(cmd, "-ldflags", strings.Join(ldflags, " "))
+	if len(flags) > 0 {
+		cmd = append(cmd, "-ldflags", strings.Join(flags, " "))
 	}
 	if race {
 		cmd = append(cmd, "-race")
@@ -479,6 +479,39 @@ func mergeChangesets(changesets []*dagger.Changeset) *dagger.Changeset {
 	return nonNil[0].WithChangesets(nonNil[1:])
 }
 
+// eachModuleChangeset discovers the modules matching include/exclude, runs fn
+// against each in bounded parallel (labelling spans "<label>:<mod>"), and
+// returns the merged changeset. It is the shared fan-out behind [Go.FormatGo]
+// and [Go.Tidy].
+func (m *Go) eachModuleChangeset(
+	ctx context.Context,
+	include, exclude []string,
+	label string,
+	fn func(ctx context.Context, mod string) (*dagger.Changeset, error),
+) (*dagger.Changeset, error) {
+	mods, err := m.Modules(ctx, include, exclude)
+	if err != nil {
+		return nil, err
+	}
+
+	changesets := make([]*dagger.Changeset, len(mods))
+	p := newParallel().withLimit(defaultParallelism)
+	for i, mod := range mods {
+		p = p.withJob(label+":"+mod, func(ctx context.Context) error {
+			cs, err := fn(ctx, mod)
+			if err != nil {
+				return err
+			}
+			changesets[i] = cs
+			return nil
+		})
+	}
+	if err := p.run(ctx); err != nil {
+		return nil, err
+	}
+	return mergeChangesets(changesets), nil
+}
+
 // ---------------------------------------------------------------------------
 // Tidy
 // ---------------------------------------------------------------------------
@@ -501,7 +534,7 @@ func (m *Go) CheckTidy(
 		return err
 	}
 
-	p := newParallel().withLimit(3)
+	p := newParallel().withLimit(defaultParallelism)
 	for _, mod := range mods {
 		p = p.withJob("check-tidy:"+mod, func(ctx context.Context) error {
 			changeset, err := m.TidyModule(ctx, mod)
@@ -577,27 +610,7 @@ func (m *Go) Tidy(
 	// +optional
 	exclude []string,
 ) (*dagger.Changeset, error) {
-	mods, err := m.Modules(ctx, include, exclude)
-	if err != nil {
-		return nil, err
-	}
-
-	changesets := make([]*dagger.Changeset, len(mods))
-	p := newParallel().withLimit(3)
-	for i, mod := range mods {
-		p = p.withJob("tidy:"+mod, func(ctx context.Context) error {
-			cs, err := m.TidyModule(ctx, mod)
-			if err != nil {
-				return err
-			}
-			changesets[i] = cs
-			return nil
-		})
-	}
-	if err := p.run(ctx); err != nil {
-		return nil, err
-	}
-	return mergeChangesets(changesets), nil
+	return m.eachModuleChangeset(ctx, include, exclude, "tidy", m.TidyModule)
 }
 
 // ---------------------------------------------------------------------------

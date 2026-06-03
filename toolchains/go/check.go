@@ -7,6 +7,11 @@ import (
 	"dagger/go/internal/dagger"
 )
 
+// integrationTestPattern is the regex matched against test names to separate
+// integration tests from unit tests ([Go.TestUnit] skips it, [Go.TestIntegration]
+// selects it).
+const integrationTestPattern = "Integration"
+
 // ---------------------------------------------------------------------------
 // Testing
 // ---------------------------------------------------------------------------
@@ -45,9 +50,6 @@ func (m *Go) Test(
 	// +default=["./..."]
 	pkgs []string,
 ) error {
-	if m.Race {
-		m.Cgo = true
-	}
 	cmd := []string{"go", "test"}
 	if parallel != 0 {
 		cmd = append(cmd, fmt.Sprintf("-parallel=%d", parallel))
@@ -113,7 +115,7 @@ func (m *Go) TestUnit(
 	pkgs []string,
 ) error {
 	if skip == "" {
-		skip = "Integration"
+		skip = integrationTestPattern
 	}
 	return m.Test(ctx, run, skip, failfast, parallel, timeout, count, pkgs)
 }
@@ -155,7 +157,7 @@ func (m *Go) TestIntegration(
 	pkgs []string,
 ) error {
 	if run == "" {
-		run = "Integration"
+		run = integrationTestPattern
 	}
 	return m.Test(ctx, run, skip, failfast, parallel, timeout, count, pkgs)
 }
@@ -196,7 +198,7 @@ func (m *Go) Lint(
 		return err
 	}
 
-	p := newParallel().withLimit(3)
+	p := newParallel().withLimit(defaultParallelism)
 	for _, mod := range mods {
 		p = p.withJob("lint:"+mod, func(ctx context.Context) error {
 			return m.LintModule(ctx, mod)

@@ -10,7 +10,6 @@ import (
 const (
 	defaultImage = "ghcr.io/zizmorcore/zizmor:1.22.0" // renovate: datasource=github-releases depName=zizmorcore/zizmor
 
-	defaultConfigPath   = ".github/zizmor.yaml"
 	defaultWorkflowsDir = ".github/workflows"
 )
 
@@ -21,7 +20,10 @@ type Zizmor struct {
 	Source *dagger.Directory
 	// zizmor container image reference.
 	Image string
-	// Path to the zizmor config file, relative to the source root.
+	// Path to the zizmor config file, relative to the source root. When empty,
+	// zizmor auto-discovers a config (e.g. .github/zizmor.yml) or falls back to
+	// its built-in audit defaults, so the module drops into projects that have
+	// no config file.
 	ConfigPath string
 	// Directory of workflows to lint, relative to the source root.
 	WorkflowsDir string
@@ -36,7 +38,8 @@ func New(
 	// zizmor container image.
 	// +optional
 	image string,
-	// Path to the zizmor config file, relative to the source root.
+	// Path to the zizmor config file, relative to the source root. When empty,
+	// zizmor auto-discovers a config or uses its built-in defaults.
 	// +optional
 	configPath string,
 	// Directory of workflows to lint, relative to the source root.
@@ -45,9 +48,6 @@ func New(
 ) *Zizmor {
 	if image == "" {
 		image = defaultImage
-	}
-	if configPath == "" {
-		configPath = defaultConfigPath
 	}
 	if workflowsDir == "" {
 		workflowsDir = defaultWorkflowsDir
@@ -70,13 +70,16 @@ func (m *Zizmor) LintBase() *dagger.Container {
 		WithWorkdir("/src")
 }
 
-// Lint runs zizmor against the workflows directory using the configured
-// config file.
+// Lint runs zizmor against the workflows directory. The config file is passed
+// only when [Zizmor.ConfigPath] is set; otherwise zizmor auto-discovers a
+// config or uses its built-in defaults.
 //
 // +check
 func (m *Zizmor) Lint(ctx context.Context) error {
-	_, err := m.LintBase().
-		WithExec([]string{"zizmor", m.WorkflowsDir, "--config", m.ConfigPath}).
-		Sync(ctx)
+	args := []string{"zizmor", m.WorkflowsDir}
+	if m.ConfigPath != "" {
+		args = append(args, "--config", m.ConfigPath)
+	}
+	_, err := m.LintBase().WithExec(args).Sync(ctx)
 	return err
 }

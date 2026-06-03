@@ -10,8 +10,8 @@ import (
 )
 
 const (
-	defaultImage   = "node:lts-slim"
-	defaultVersion = "3.5.3" // renovate: datasource=npm depName=prettier
+	defaultImage   = "node:22-slim" // renovate: datasource=docker depName=node
+	defaultVersion = "3.5.3"        // renovate: datasource=npm depName=prettier
 
 	defaultConfigPath     = "./.prettierrc.yaml"
 	defaultCacheNamespace = "go.jacobcolvin.com/x/toolchains/prettier"

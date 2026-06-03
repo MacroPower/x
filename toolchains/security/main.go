@@ -15,7 +15,12 @@ const (
 	defaultScanners       = "vuln"
 	defaultSourcePkgTypes = "library"
 	defaultImagePkgTypes  = "os,library"
-	defaultCacheNamespace = "trivy-cache"
+
+	// defaultCacheNamespace is the module's canonical path, used as the prefix
+	// for the Trivy database cache volume. Override via the cacheNamespace
+	// constructor parameter when consuming from another project so cache
+	// volumes do not collide across projects sharing an engine.
+	defaultCacheNamespace = "go.jacobcolvin.com/x/toolchains/security"
 
 	// sarifOutput is the in-container path where SARIF results are written.
 	sarifOutput = "/tmp/trivy-results.sarif"

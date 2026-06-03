@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"dagger/cosign/internal/dagger"
@@ -18,7 +19,19 @@ const (
 	cosignVersion = "v3.0.4" // renovate: datasource=github-releases depName=sigstore/cosign
 
 	defaultImage = "gcr.io/projectsigstore/cosign:" + cosignVersion
+
+	// binPath is the cosign executable path inside the official image.
+	binPath = "/ko-app/cosign"
+
+	// maxParallelSigns bounds the number of concurrent cosign invocations so a
+	// large multi-arch, multi-image release does not burst unbounded.
+	maxParallelSigns = 8
 )
+
+// ErrRegistryHostRequired indicates a registry password was supplied without a
+// registry host. cosign keys its auth entry on the host, so an empty host
+// would silently produce an unusable entry and fall back to anonymous access.
+var ErrRegistryHostRequired = errors.New("registry host is required when a registry password is set")
 
 // Cosign signs container image digests with Sigstore cosign. Create instances
 // with [New].
@@ -43,7 +56,7 @@ func New(
 // can be layered onto another container (e.g. a goreleaser release base, where
 // goreleaser invokes cosign for blob signing).
 func (m *Cosign) Binary() *dagger.File {
-	return dag.Container().From(m.Image).File("/ko-app/cosign")
+	return dag.Container().From(m.Image).File(binPath)
 }
 
 // WithCosign installs the cosign binary at /usr/local/bin/cosign in the given
@@ -85,6 +98,9 @@ func (m *Cosign) SignKeyless(
 	if len(digests) == 0 {
 		return nil
 	}
+	if registryPassword != nil && registryHost == "" {
+		return ErrRegistryHostRequired
+	}
 	ctr := m.base(registryHost, registryUsername, registryPassword).
 		WithEnvVariable("ACTIONS_ID_TOKEN_REQUEST_URL", oidcRequestURL).
 		WithSecretVariable("ACTIONS_ID_TOKEN_REQUEST_TOKEN", oidcRequestToken)
@@ -120,6 +136,9 @@ func (m *Cosign) SignWithKey(
 	if len(digests) == 0 {
 		return nil
 	}
+	if registryPassword != nil && registryHost == "" {
+		return ErrRegistryHostRequired
+	}
 	ctr := m.base(registryHost, registryUsername, registryPassword).
 		WithSecretVariable("COSIGN_KEY", key)
 	if password != nil {
@@ -152,6 +171,7 @@ func (m *Cosign) signAll(
 	args func(digest string) []string,
 ) error {
 	g, gCtx := errgroup.WithContext(ctx)
+	g.SetLimit(maxParallelSigns)
 	for _, digest := range digests {
 		g.Go(func() error {
 			_, err := ctr.WithExec(args(digest)).Sync(gCtx)

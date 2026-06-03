@@ -18,23 +18,10 @@ func (m *Go) FormatGo(
 	// +optional
 	exclude []string,
 ) (*dagger.Changeset, error) {
-	mods, err := m.Modules(ctx, include, exclude)
-	if err != nil {
-		return nil, err
-	}
-
-	changesets := make([]*dagger.Changeset, len(mods))
-	p := newParallel().withLimit(3)
-	for i, mod := range mods {
-		p = p.withJob("format-go:"+mod, func(ctx context.Context) error {
-			changesets[i] = m.FormatGoModule(mod)
-			return nil
+	return m.eachModuleChangeset(ctx, include, exclude, "format-go",
+		func(_ context.Context, mod string) (*dagger.Changeset, error) {
+			return m.FormatGoModule(mod), nil
 		})
-	}
-	if err := p.run(ctx); err != nil {
-		return nil, err
-	}
-	return mergeChangesets(changesets), nil
 }
 
 // FormatGoModule runs golangci-lint --fix on a single module directory
