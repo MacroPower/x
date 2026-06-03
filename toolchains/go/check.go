@@ -214,7 +214,7 @@ func (m *Go) LintModule(ctx context.Context,
 	if isNestedModule(mod) {
 		cmd = append(cmd, "--path-prefix", mod)
 	}
-	_, err := m.lintBase(mod).
+	_, err := m.LintBase(mod).
 		WithExec(cmd).
 		Sync(ctx)
 	return err

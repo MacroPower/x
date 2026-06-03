@@ -29,7 +29,7 @@ func (m *Go) BenchmarkSummary(
 func (m *Go) benchSuite() *dagger.Bench {
 	return dag.Bench().
 		WithStage("env", m.CacheBust(m.Env(""))).
-		WithStage("lint", m.CacheBust(m.lintBase("")).
+		WithStage("lint", m.CacheBust(m.LintBase("")).
 			WithExec([]string{"golangci-lint", "run"})).
 		WithStage("test", m.CacheBust(m.Env("")).
 			WithExec([]string{"go", "test", "./..."}))

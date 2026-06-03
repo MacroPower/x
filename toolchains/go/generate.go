@@ -47,7 +47,7 @@ func (m *Go) FormatGoModule(
 	if isNestedModule(mod) {
 		outDir = filepath.Join("/src", mod)
 	}
-	goFmt := m.lintBase(mod).
+	goFmt := m.LintBase(mod).
 		WithExec([]string{"golangci-lint", "run", "--fix"}).
 		Directory(outDir)
 	if isNestedModule(mod) {

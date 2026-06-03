@@ -604,14 +604,22 @@ func (m *Go) Tidy(
 // Base containers
 // ---------------------------------------------------------------------------
 
-// lintBase returns a golangci-lint container with source and caches. The
-// Debian-based image is used (not Alpine) because it includes kernel headers
-// needed by CGO transitive dependencies. The golangci-lint cache volume
-// includes the linter version so that version bumps start fresh.
+// LintBase returns a golangci-lint container with source and caches mounted,
+// ready to run `golangci-lint run`. The Debian-based image is used (not Alpine)
+// because it includes kernel headers needed by CGO transitive dependencies. The
+// golangci-lint cache volume includes the linter version so that version bumps
+// start fresh.
+//
+// It is exposed so consumers can build a lint stage (e.g. for benchmarks) on
+// the same base and cache this toolchain uses, instead of reconstructing it.
 //
 // When mod is non-empty and not ".", the container's working directory is
 // set to the module subdirectory so golangci-lint operates on that module.
-func (m *Go) lintBase(mod string) *dagger.Container {
+func (m *Go) LintBase(
+	// Module directory relative to the source root.
+	// +optional
+	mod string,
+) *dagger.Container {
 	ctr := dag.Container().
 		From("golangci/golangci-lint:"+m.LintVersion).
 		WithMountedCache("/go/pkg/mod", m.ModuleCache).
