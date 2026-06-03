@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -168,15 +167,15 @@ func TestRenderGoMod(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]struct {
-		modPath      string
-		modDir       string
-		jsonschmaDir string
-		want         string
+		modPath       string
+		modDir        string
+		jsonschemaDir string
+		want          string
 	}{
 		"different module": {
-			modPath:      "example.com/myapp",
-			modDir:       "/home/user/myapp",
-			jsonschmaDir: "/home/user/go/pkg/mod/go.jacobcolvin.com/jsonschema@v0.1.0",
+			modPath:       "example.com/myapp",
+			modDir:        "/home/user/myapp",
+			jsonschemaDir: "/home/user/go/pkg/mod/go.jacobcolvin.com/jsonschema@v0.1.0",
 			want: fmt.Sprintf(`module _jsonschemagen_tmp
 
 go %s
@@ -191,9 +190,9 @@ replace go.jacobcolvin.com/jsonschema => /home/user/go/pkg/mod/go.jacobcolvin.co
 `, goDirectiveVersion()),
 		},
 		"jsonschema module itself": {
-			modPath:      "go.jacobcolvin.com/jsonschema",
-			modDir:       "/home/user/jsonschema",
-			jsonschmaDir: "/home/user/jsonschema",
+			modPath:       "go.jacobcolvin.com/jsonschema",
+			modDir:        "/home/user/jsonschema",
+			jsonschemaDir: "/home/user/jsonschema",
 			want: fmt.Sprintf(`module _jsonschemagen_tmp
 
 go %s
@@ -211,7 +210,7 @@ replace go.jacobcolvin.com/jsonschema => /home/user/jsonschema
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got := renderGoMod(tc.modPath, tc.modDir, tc.jsonschmaDir)
+			got := renderGoMod(tc.modPath, tc.modDir, tc.jsonschemaDir)
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -518,14 +517,12 @@ func cmdStderr(err error) string {
 	return err.Error()
 }
 
-func TestTypeNameNotValidatedForInjection(t *testing.T) {
+func TestRenderMainGoRejectsInjectedTypeName(t *testing.T) {
 	t.Parallel()
 
-	// The -type flag value is injected directly into a Go source template.
-	// A crafted TypeName could inject arbitrary code. Low severity since
-	// the CLI is intended for go:generate use in trusted codebases.
-
-	// TypeName with special characters that could break the template.
+	// The type name is interpolated into a Go source template, so renderMainGo
+	// rejects any value that is not a plain Go identifier rather than emitting
+	// source a crafted name could escape into.
 	cfg := config{
 		TypeName: "Foo]()\n\tos.Exit(0)\n\t//",
 		Draft:    "2020",
@@ -535,50 +532,47 @@ func TestTypeNameNotValidatedForInjection(t *testing.T) {
 	var b strings.Builder
 
 	err := renderMainGo(&b, cfg, "example.com/myapp")
-	// The generated source should either be rejected or produce invalid Go.
-	// Currently it renders without error, producing compilable injected code.
 	require.Error(t, err, "renderMainGo should reject TypeName with special characters")
 }
 
-func TestImportPathNotValidatedForInjection(t *testing.T) {
+func TestRenderMainGoRejectsInjectedImportPath(t *testing.T) {
 	t.Parallel()
 
-	// ImportPath is inserted into the Go template as target "{{.ImportPath}}".
+	// The import path is interpolated into the template as target
+	// "{{.ImportPath}}", so renderMainGo rejects paths containing the quote,
+	// backtick, backslash, or whitespace characters that could break out of the
+	// import declaration's string literal.
 	cfg := config{
 		TypeName: "Foo",
 		Draft:    "2020",
 		Indent:   "  ",
 	}
 
-	// Crafted import path with quote to break the template.
 	malicious := `example.com/myapp"` + "\n\t\"os"
 
 	var b strings.Builder
 
 	err := renderMainGo(&b, cfg, malicious)
-	// Should either be rejected or produce invalid Go.
 	require.Error(t, err, "renderMainGo should reject ImportPath with injection characters")
 }
 
-func TestHardcodedGoVersionInGoMod(t *testing.T) {
+func TestGoModUsesDetectedGoVersion(t *testing.T) {
 	t.Parallel()
 
 	goMod := renderGoMod("example.com/mymod", "/tmp/mymod", "/tmp/jsonschema")
 
-	// The go version should match the current Go version or be the module's
-	// minimum, not a hardcoded "go 1.25.5".
-	currentVersion := runtime.Version()
-	_ = currentVersion
-
-	assert.NotContains(t, goMod, "go 1.25.5",
-		"go.mod should not hardcode a specific Go version; should detect from runtime or module")
+	// The go directive is derived from the running toolchain via
+	// goDirectiveVersion, never hardcoded.
+	assert.Contains(t, goMod, "go "+goDirectiveVersion()+"\n",
+		"go.mod go directive should be derived from the running toolchain")
 }
 
-func TestHardcodedGoVersionInTestHelper(t *testing.T) {
+func TestTestHelperGoModUsesDetectedGoVersion(t *testing.T) {
 	t.Parallel()
 
-	// CreateTestModule hardcodes "go 1.25.5" independently of the production code.
-	// Both locations need the same fix: detect from runtime or module.
+	// CreateTestModule derives its go directive from goDirectiveVersion, the
+	// same source the production code uses, so the helper never pins a fixed
+	// version of its own.
 	dir := createTestModule(t, `package testmod
 
 type Stub struct{}
@@ -586,48 +580,8 @@ type Stub struct{}
 	data, err := os.ReadFile(filepath.Join(dir, "go.mod"))
 	require.NoError(t, err)
 
-	// When fixed, the go.mod should not contain "go 1.25.5".
-	assert.NotContains(t, string(data), "go 1.25.5",
-		"test helper go.mod should not hardcode a specific Go version")
-}
-
-func TestGoModTidyErrorNotWrapped(t *testing.T) {
-	t.Parallel()
-
-	// RunGenerate uses %s instead of %w for the go mod tidy error,
-	// discarding the original *exec.ExitError.
-	//
-	// Simulate the difference between %s and %w wrapping.
-	original := &exec.ExitError{Stderr: []byte("some output")}
-
-	// This is what the code currently does (uses %s):.
-	wrappedWithS := fmt.Errorf("go mod tidy: %s", []byte("some output"))
-
-	// This is what the code should do (use %w):.
-	wrappedWithW := fmt.Errorf("go mod tidy: %w", original)
-
-	// With %s, the original error identity is lost.
-	var extracted *exec.ExitError
-	assert.NotErrorAs(t, wrappedWithS, &extracted,
-		"%%s wrapping loses the original *exec.ExitError")
-	assert.ErrorAs(t, wrappedWithW, &extracted,
-		"%%w wrapping preserves the original *exec.ExitError")
-}
-
-func TestGoSumWriteFailureSilentlyIgnored(t *testing.T) {
-	t.Parallel()
-
-	// If writing go.sum to the temp dir fails, the error is discarded.
-	// The subsequent go mod tidy might download from network or fail.
-	//
-	// Demonstrating the issue: main.go:178-179 reads go.sum and writes it
-	// with `_ = os.WriteFile(...)`, discarding the write error. The fix
-	// should propagate write errors from os.WriteFile.
-	//
-	// This is a code review finding that cannot be demonstrated with a unit
-	// test without filesystem injection. The fix is to check the error from
-	// os.WriteFile at main.go:179.
-	t.Log("go.sum write error at main.go:179 is assigned to _ and never checked")
+	assert.Contains(t, string(data), "go "+goDirectiveVersion()+"\n",
+		"test helper go.mod go directive should be derived from the running toolchain")
 }
 
 func TestRenderGoModPathsWithSpaces(t *testing.T) {
@@ -639,28 +593,23 @@ func TestRenderGoModPathsWithSpaces(t *testing.T) {
 		"/Users/my user/jsonschema",
 	)
 
-	// Go.mod replace directives require quoted paths for paths with spaces.
-	// Currently the paths are injected without quoting.
+	// RenderGoMod quotes replace-directive paths that contain whitespace, since
+	// an unquoted path with a space does not parse in go.mod.
 	assert.NotContains(t, goMod, "=> /Users/my user/project\n",
 		"paths with spaces in replace directives should be quoted")
 
-	// Should be: replace example.com/mymod => "/Users/my user/project".
 	assert.Contains(t, goMod, `"/Users/my user/project"`,
 		"paths with spaces should be quoted in go.mod replace directives")
 }
 
-func TestRenderGoModMissingReplaceDirectives(t *testing.T) {
+func TestRenderGoModEmitsTwoReplaceDirectives(t *testing.T) {
 	t.Parallel()
 
-	// The generated go.mod only requires the user's module and jsonschema.
-	// If the user's module has replace directives for transitive deps,
-	// those are NOT propagated. Go mod tidy would fail for modules
-	// with local replacements.
+	// RenderGoMod emits exactly two replace directives: one pointing the user's
+	// module at its local directory and one pointing jsonschema at its local
+	// directory.
 	goMod := renderGoMod("example.com/mymod", "/tmp/mymod", "/tmp/jsonschema")
 
-	// The go.mod should ideally propagate the user module's replace directives.
-	// Currently it only has the two replace directives for the user module
-	// and jsonschema.
 	lines := strings.Split(goMod, "\n")
 
 	replaceCount := 0
@@ -669,28 +618,26 @@ func TestRenderGoModMissingReplaceDirectives(t *testing.T) {
 			replaceCount++
 		}
 	}
-	// Only 2 replace directives -- user module and jsonschema.
-	// No mechanism to propagate transitive deps.
+
 	assert.Equal(t, 2, replaceCount,
-		"documents that only 2 replace directives are generated (no transitive propagation)")
+		"renderGoMod should emit replace directives for the user module and jsonschema")
 }
 
-func TestCmdErrorLosesExitCode(t *testing.T) {
+func TestCmdErrorExtractsStderr(t *testing.T) {
 	t.Parallel()
 
-	// CmdError extracts stderr from *exec.ExitError and wraps it as a string.
-	// The original *exec.ExitError (with its exit code) is lost.
+	// CmdError surfaces the trimmed stderr in the message while wrapping the
+	// original *exec.ExitError, so the stderr text is visible and the exit error
+	// stays recoverable via errors.As.
 	stderr := []byte("some error output")
 	exitErr := &exec.ExitError{Stderr: stderr}
 
 	wrapped := cmdError(exitErr)
 
-	// The wrapped error should still be identifiable as an exec.ExitError.
 	var extracted *exec.ExitError
-	assert.NotErrorAs(t, wrapped, &extracted,
-		"documents that cmdError loses the original *exec.ExitError")
+	require.ErrorAs(t, wrapped, &extracted,
+		"cmdError wraps the original *exec.ExitError so it stays recoverable")
 
-	// Verify the stderr content is preserved in the error message.
 	assert.Contains(t, wrapped.Error(), "some error output",
 		"stderr content should be preserved in the error message")
 }
@@ -709,7 +656,6 @@ type Exists struct{}
 
 	out, err := cmd.CombinedOutput()
 	require.Error(t, err)
-	// Should verify the error message mentions the type name.
 	assert.Contains(t, string(out), "DoesNotExist",
 		"error message should mention the invalid type name")
 }

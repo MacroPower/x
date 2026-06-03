@@ -2311,29 +2311,26 @@ func TestFormatAnnotationVocabSuppressesErrors(t *testing.T) {
 	require.NoError(t, err, "format-annotation should not produce validation errors")
 }
 
-func TestInstanceTypeOverflowLargeFloat64(t *testing.T) {
+func TestInstanceTypeRecognizesLargeFloat64Integer(t *testing.T) {
 	t.Parallel()
 
-	// A float64(2^53) value is exactly representable but the int64 cast can overflow
-	// for values > math.MaxInt64.
+	// A float64 integer beyond the int64 range is still recognized as an
+	// integer: instanceType uses math.Trunc rather than an int64 cast that
+	// would wrap around.
 	schema := &jsonschema.Schema{
 		Type: "integer",
 	}
 
-	// 2^53 is fine as int64, but values near MaxFloat64 that are integers
-	// should also be recognized. For instance, math.MaxInt64+1 as float64
-	// wraps around when cast to int64.
 	largeFloat := float64(math.MaxInt64) + 1024 // Exceeds int64, but is an integer
 	err := jsonschema.Validate(schema, largeFloat)
-	// This should pass because the value is mathematically an integer,
-	// but val == float64(int64(val)) overflows.
 	require.NoError(t, err, "large float64 integers should be recognized as integers")
 }
 
-func TestInstanceMatchesTypeOverflow(t *testing.T) {
+func TestInstanceMatchesTypeRecognizesLargeFloat64Integer(t *testing.T) {
 	t.Parallel()
 
-	// Same overflow as instanceType but in instanceMatchesType.
+	// InstanceMatchesType recognizes the same out-of-int64-range float64 integer
+	// when "integer" appears in a multi-type list.
 	schema := &jsonschema.Schema{
 		Types: []string{"integer", "string"},
 	}
@@ -2343,34 +2340,32 @@ func TestInstanceMatchesTypeOverflow(t *testing.T) {
 	require.NoError(t, err, "large float64 integers should match 'integer' type")
 }
 
-func TestHashValueOverflowFloat64(t *testing.T) {
+func TestHashValueDistinguishesLargeFloat64Integers(t *testing.T) {
 	t.Parallel()
 
-	// The hashValue helper uses an int64 cast for float64 integers, which overflows for
-	// values > MaxInt64. Two distinct large float64 integers could hash
-	// differently due to truncation.
+	// Distinct float64 integers beyond the int64 range hash distinctly: the fast
+	// int64 path is bounded, and larger values fall back to exact big.Rat keys.
 	schema := &jsonschema.Schema{
 		Type:        "array",
 		UniqueItems: true,
 	}
 
-	// Two large but distinct float64 integers that differ after int64 truncation.
 	a := float64(math.MaxInt64) + 1024
 	b := float64(math.MaxInt64) + 2048
 	err := jsonschema.Validate(schema, []any{a, b})
 	require.NoError(t, err, "distinct large float64 integers should be treated as unique")
 }
 
-func TestHashValueOverflowJSONNumber(t *testing.T) {
+func TestHashValueDistinguishesLargeJSONNumbers(t *testing.T) {
 	t.Parallel()
 
-	// The r.Num().Int64() call overflows for json.Number values > MaxInt64.
+	// Distinct json.Number integers beyond the int64 range hash distinctly: the
+	// int64 fast path is bounded and larger values use exact big.Rat keys.
 	schema := &jsonschema.Schema{
 		Type:        "array",
 		UniqueItems: true,
 	}
 
-	// Two distinct large integers that would overflow int64.
 	data := `[9999999999999999999, 9999999999999999998]`
 	err := jsonschema.ValidateJSON(schema, []byte(data))
 	require.NoError(t, err, "distinct large json.Number integers should be treated as unique")
@@ -2379,25 +2374,21 @@ func TestHashValueOverflowJSONNumber(t *testing.T) {
 func TestIsEmptySchemaContentSchema(t *testing.T) {
 	t.Parallel()
 
-	// A schema with only contentSchema should NOT be treated as empty.
-	// If isEmptySchema incorrectly returns true, this schema would accept
-	// everything without checking the contentSchema constraint.
+	// IsEmptySchema treats ContentSchema as a constraint, so a schema carrying
+	// only contentSchema is not accept-all and rejects a non-conforming instance.
 	schema := &jsonschema.Schema{
 		ContentSchema: &jsonschema.Schema{Type: "string"},
 	}
 
-	// An empty schema accepts everything. Since isEmptySchema misses
-	// ContentSchema, this currently passes when it arguably should not.
-	// Once fixed, content validation may reject non-string-content instances.
 	err := jsonschema.Validate(schema, 42.0)
 	require.Error(t, err,
 		"a schema with contentSchema should not be treated as empty/accept-all")
 }
 
-func TestUnresolvableRefSilentlyPasses(t *testing.T) {
+func TestUnresolvableRefIsError(t *testing.T) {
 	t.Parallel()
 
-	// A $ref to a non-existent definition should produce an error, not silently pass.
+	// An unresolvable local $ref (typo'd $defs key) is a validation error.
 	schema := &jsonschema.Schema{
 		Properties: map[string]*jsonschema.Schema{
 			"name": {Ref: "#/$defs/Usre"}, // Typo: should be "User"
@@ -2408,22 +2399,19 @@ func TestUnresolvableRefSilentlyPasses(t *testing.T) {
 	}
 
 	err := jsonschema.Validate(schema, map[string]any{"name": 42})
-	// Per spec, unresolvable $ref should be an error.
 	require.Error(t, err, "unresolvable $ref should produce a validation error")
 }
 
-func TestInvalidPatternRegexSilentlySkipped(t *testing.T) {
+func TestInvalidPatternFailsClosed(t *testing.T) {
 	t.Parallel()
 
-	// An invalid regex pattern should fail-closed (reject all strings),
-	// not silently accept all strings.
+	// A pattern Go's RE2 cannot compile fails closed: no string matches it.
 	schema := &jsonschema.Schema{
 		Type:    "string",
 		Pattern: "[invalid",
 	}
 
 	err := jsonschema.Validate(schema, "anything")
-	// Per spec, pattern MUST be a valid regex. Invalid regex should cause error.
 	require.Error(t, err, "invalid pattern regex should produce a validation error")
 }
 
@@ -2517,7 +2505,7 @@ func TestItemsAfterPrefixItemsAnnotationOnFailure(t *testing.T) {
 func TestPrefixItemsAnnotationGatedOnSuccess(t *testing.T) {
 	t.Parallel()
 
-	// prefixItems annotates every index it applied a subschema to, even when the
+	// PrefixItems annotates every index it applied a subschema to, even when the
 	// item fails validation, so unevaluatedItems must not re-validate it. With
 	// unevaluatedItems:false the index draws a second, spurious error if the
 	// annotation is (wrongly) gated on per-item success — so this asserts its
@@ -2574,7 +2562,7 @@ func TestContainsAnnotationsLeakOnFailure(t *testing.T) {
 func TestMinMaxContainsDraftGated(t *testing.T) {
 	t.Parallel()
 
-	// minContains/maxContains are 2019-09/2020-12 keywords. Under Draft-07 they
+	// MinContains/maxContains are 2019-09/2020-12 keywords. Under Draft-07 they
 	// are unknown and must be ignored, so contains keeps its bare "at least one
 	// match" meaning. Under 2020-12 they apply.
 	tests := map[string]struct {
@@ -2632,7 +2620,7 @@ func TestRefPercentEncodedPointer(t *testing.T) {
 	t.Parallel()
 
 	// A $ref whose JSON Pointer targets a property whose name contains '%' must
-	// resolve to that property's schema. url.Parse percent-decodes the fragment
+	// resolve to that property's schema. Url.Parse percent-decodes the fragment
 	// once; decoding a second time corrupts the name, drops the target, and the
 	// unresolved local ref is silently skipped — under-validating the instance.
 	schema := &jsonschema.Schema{
@@ -2809,9 +2797,9 @@ func TestBothFormatVocabsActiveAssertsFormat(t *testing.T) {
 func TestDraftEnumZeroValue(t *testing.T) {
 	t.Parallel()
 
-	// An uninitialized Draft field defaults to 0 which is Draft7.
+	// The Draft zero value is Draft2020 (Draft2020 = 0, Draft7 = -1), so an
+	// uninitialized Draft targets Draft 2020-12.
 	var d jsonschema.Draft
-	// The documented default is Draft2020, but the zero value is Draft7.
 	assert.Equal(t, jsonschema.Draft2020, d,
 		"zero value of Draft should be Draft2020 (the documented default)")
 }
@@ -2861,11 +2849,12 @@ func TestDynamicScopeDeduplication(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestFloat64PrecisionAsymmetry(t *testing.T) {
+func TestFloat64MultipleOfRoundTrip(t *testing.T) {
 	t.Parallel()
 
-	// Instance float64 uses Rat.SetFloat64 (exact binary), while schema bounds
-	// use a string round-trip, so multipleOf 0.01 with float64(1.01) could fail.
+	// Both the instance and the bound convert through the shortest-decimal
+	// round-trip (float64ToRat), so float64(1.01) compares as 101/100 and is a
+	// clean multiple of 0.01.
 	schema := &jsonschema.Schema{
 		Type:       "number",
 		MultipleOf: jsonschema.Ptr(0.01),
@@ -2876,11 +2865,11 @@ func TestFloat64PrecisionAsymmetry(t *testing.T) {
 	require.NoError(t, err, "float64(1.01) should be a valid multiple of 0.01")
 }
 
-func TestTraverseSchemaSscanfPermissive(t *testing.T) {
+func TestTraverseSchemaRejectsNonIntegerIndex(t *testing.T) {
 	t.Parallel()
 
-	// The fmt.Sscanf %d verb parses leading digits and ignores trailing chars.
-	// "0abc" should NOT parse as index 0.
+	// A JSON Pointer index segment must be a clean integer; "0abc" is not a
+	// valid index, so the ref does not resolve.
 	schema := &jsonschema.Schema{
 		Ref:   "#/items/0abc",
 		Items: &jsonschema.Schema{Type: "string"},
@@ -2948,24 +2937,28 @@ func TestRemoteLoaderReturnsEmptyOnFailure(t *testing.T) {
 	require.Error(t, err, "unresolvable remote $ref should not silently accept all values")
 }
 
-func TestRegexCacheUnboundedGrowth(t *testing.T) {
+func TestRegexCacheKeyedByPattern(t *testing.T) {
 	t.Parallel()
 
-	// The package-level regexCache (sync.Map) grows without bound.
-	// Every unique pattern is cached forever -- a memory leak for long-running
-	// services validating user-provided pattern/patternProperties values.
-	schema := &jsonschema.Schema{
-		Type: "string",
-	}
+	// The package-level regexCache keys compiled patterns by their source, so
+	// each distinct pattern validates against its own regex rather than a stale
+	// cached one. Across 26 single-letter patterns only "^testA$" matches the
+	// instance "testA"; a mis-keyed cache would let another letter's pattern
+	// match it.
+	for i := range 26 {
+		letter := string(rune('A' + i))
+		schema := &jsonschema.Schema{
+			Type:    "string",
+			Pattern: "^test" + letter + "$",
+		}
 
-	// In a real scenario, thousands of unique patterns would accumulate.
-	for i := range 100 {
-		schema.Pattern = "^test" + string(rune('A'+i)) + "$"
-		//nolint:errcheck // Exercising the pattern cache; the validation result is irrelevant here.
-		_ = jsonschema.Validate(schema, "testA")
+		err := jsonschema.Validate(schema, "testA")
+		if letter == "A" {
+			require.NoError(t, err, "pattern %q should match %q", schema.Pattern, "testA")
+		} else {
+			require.Error(t, err, "pattern %q should not match %q", schema.Pattern, "testA")
+		}
 	}
-	// No way to verify cache size from outside, but the test documents the issue.
-	// A bounded cache (LRU or similar) would be preferable.
 }
 
 func TestCycleDetectionPointerIdentity(t *testing.T) {
@@ -3011,18 +3004,16 @@ func (r *cloningResolver) ResolveRef(_ string) (*jsonschema.Schema, error) {
 func TestIsEmptySchemaExtraField(t *testing.T) {
 	t.Parallel()
 
-	// A schema with only Extra fields is treated as empty.
+	// A schema whose only keyword is an unknown one (carried in Extra) sets no
+	// validation constraints, so it accepts every instance.
 	schema := &jsonschema.Schema{
 		Extra: map[string]any{
 			"x-custom": true,
 		},
 	}
 
-	// The isEmptySchema helper returns true, so this schema accepts everything.
-	// For standard validation this is arguably correct (unknown keywords
-	// are annotations), but it could break if extension mechanisms read Extra.
 	err := jsonschema.Validate(schema, 42.0)
-	require.NoError(t, err) // Currently passes -- documents behavior.
+	require.NoError(t, err)
 }
 
 func TestRemoteLoaderDoubleCall(t *testing.T) {
@@ -3066,12 +3057,10 @@ func (r *countingRefResolver) ResolveRef(_ string) (*jsonschema.Schema, error) {
 func TestWalkSchemaSkipsRefs(t *testing.T) {
 	t.Parallel()
 
-	// The concern: walkSchema doesn't follow $ref, so an $anchor reachable only
-	// via a remote $ref might never be registered. In practice resolveRemote (and
-	// remoteLoader) walk the fetched remote schema before use, so anchors defined
-	// INSIDE a remote document — and the remote doc's own sub-$ref to that anchor
-	// — do resolve. These cases assert that documented behavior: anchors inside a
-	// remotely-resolved schema are registered and usable.
+	// Anchors defined inside a remotely-resolved schema — and that document's own
+	// sub-$ref to them — are registered and usable, because resolveRemote walks
+	// the fetched document before use. WalkSchema itself does not follow $ref;
+	// the registration happens when the remote document is walked on fetch.
 	remote := &jsonschema.Schema{
 		// The remote doc's own root $ref points at an $anchor it defines, so the
 		// anchor is reachable only after walkSchema registers the fetched remote.
@@ -3322,17 +3311,15 @@ func TestDraft07ItemsSingleSchema(t *testing.T) {
 		"expected a type error at element index 1, got: %s", err)
 }
 
-func TestRegistryStaleAfterResolve(t *testing.T) {
+func TestRegistryResolvesAnchorAfterResolve(t *testing.T) {
 	t.Parallel()
 
-	// The concern is that buildRegistry runs before Schema.Resolve and could
-	// therefore reflect a stale tree if Resolve mutated $id/$anchor/$ref. Whether
-	// Resolve adds new registry entries depends on unexported upstream internals
-	// that can't be observed directly. What CAN be asserted is the consequence
-	// callers care about: for an ordinary schema carrying $id, $anchor, and a $ref
-	// to that anchor, the full Validate pipeline still resolves the anchor and
-	// enforces the anchored constraints — i.e. the registry is not stale for
-	// well-formed schemas.
+	// BuildRegistry runs before Schema.Resolve, yet the registry stays current
+	// for well-formed schemas. Whether Resolve adds registry entries depends on
+	// unexported upstream internals that can't be observed directly, so the test
+	// asserts the consequence callers care about: for a schema carrying $id,
+	// $anchor, and a $ref to that anchor, the full Validate pipeline resolves the
+	// anchor and enforces the anchored constraints.
 	schema := &jsonschema.Schema{
 		Schema: "https://json-schema.org/draft/2020-12/schema",
 		ID:     "https://example.com/registry-root",
@@ -3463,8 +3450,9 @@ func (r *mutatingResolver) ResolveRef(_ string) (*jsonschema.Schema, error) {
 	return r.schema, nil
 }
 
-// --- Test Suite gap tests ---
-// These tests demonstrate missing test coverage identified in TODO.md.
+// The conformance suite drives ValidateJSON (the json.Number path); the tests
+// below cover the Validate() float64 path and other entry points the suite does
+// not exercise.
 
 func TestValidateFloat64PathForNumericKeywords(t *testing.T) {
 	t.Parallel()
@@ -3567,15 +3555,14 @@ func TestVocabularyGatedBehavior(t *testing.T) {
 func TestSchemaUnrecognizedURI(t *testing.T) {
 	t.Parallel()
 
-	// An unrecognized $schema URI silently falls through to Draft2020.
-	// This should be tested/documented behavior.
+	// An unrecognized $schema URI falls back to Draft2020, so a valid instance
+	// still validates.
 	schema := &jsonschema.Schema{
 		Schema: "https://example.com/unknown-draft",
 		Type:   "string",
 	}
 
 	err := jsonschema.Validate(schema, "hello")
-	// Should either error or be documented as falling back to Draft2020.
 	require.NoError(t, err)
 }
 
@@ -3730,7 +3717,7 @@ func TestJSONNumberAcrossNumericKeywords(t *testing.T) {
 func TestUniqueItemsNumericRepresentation(t *testing.T) {
 	t.Parallel()
 
-	// uniqueItems must agree with jsonschema.Equal's big.Rat comparison even when
+	// UniqueItems must agree with jsonschema.Equal's big.Rat comparison even when
 	// the same number appears in different Go representations. This is reachable
 	// only through Validate; ValidateJSON produces json.Number uniformly.
 	tests := map[string]struct {
@@ -3742,13 +3729,14 @@ func TestUniqueItemsNumericRepresentation(t *testing.T) {
 			err:      true,
 		},
 		"integer at 2^63 mixed representations": {
-			// 2^63 is exactly representable as float64 but exceeds int64, so a
-			// naive int64 hash truncates and would miss the duplicate.
+			// 2^63 is exactly representable as float64 but exceeds int64, so the
+			// hash falls back to an exact key and recognizes the float64 and
+			// json.Number forms as the same value.
 			instance: []any{float64(9223372036854775808), json.Number("9223372036854775808")},
 			err:      true,
 		},
 		"binary and decimal fractions are distinct": {
-			// float64(0.1) is the exact binary 0.1000...0555, not the rational
+			// Float64(0.1) is the exact binary 0.1000...0555, not the rational
 			// 1/10 that json.Number("0.1") denotes, so they are not duplicates.
 			instance: []any{float64(0.1), json.Number("0.1")},
 		},
@@ -4002,32 +3990,29 @@ func TestValidateJSONStructuredError(t *testing.T) {
 		"ValidateJSON should produce structured error with keyword and path, got: %s", err)
 }
 
-// Missing TODO.md items that need tests.
-
-func TestRemoteRefNilResolverMasksBugs(t *testing.T) {
+func TestRemoteRefNilResolverIsError(t *testing.T) {
 	t.Parallel()
 
-	// Both suiteRemoteResolver and mapResolver return (nil, nil) for unknown URIs.
-	// Combined with silent $ref skip, a $ref to a wrong URI silently passes.
+	// A resolver that returns (nil, nil) for an unknown URI leaves the $ref
+	// unresolved, which is a validation error rather than a silent pass.
 	schema := &jsonschema.Schema{
 		Properties: map[string]*jsonschema.Schema{
 			"data": {Ref: "http://example.com/completely-wrong-uri.json"},
 		},
 	}
 
-	// A resolver that returns (nil, nil) for unknown URIs.
 	err := jsonschema.Validate(schema, map[string]any{"data": 42},
 		jsonschema.WithRefResolver(&nilResolver{}),
 	)
-	// Per spec, unresolvable $ref should produce an error.
 	require.Error(t, err,
 		"nil resolver returning (nil, nil) should not silently pass validation for unresolvable $ref")
 }
 
-func TestRefToRootDoesntVerifyErrorPath(t *testing.T) {
+func TestRefToRootReportsNestedInstancePath(t *testing.T) {
 	t.Parallel()
 
-	// $ref: "#" test should verify the error reports the correct InstancePath.
+	// A $ref:"#" recursion reports the error at the nested instance location
+	// (/child/name), not at the top-level property.
 	schema := &jsonschema.Schema{
 		Schema: "https://json-schema.org/draft/2020-12/schema",
 		Type:   "object",
@@ -4646,19 +4631,17 @@ func TestDraftSpecificSemanticsApplied(t *testing.T) {
 	}
 }
 
-// --- Embedded struct field shadowing test ---
-// NOTE: This is a schema generation test (uses GenerateFor), but is placed
-// here because the TODO.md item (embed_test.go missing) specifically concerns
-// validation-relevant schema correctness. A companion test in
-// generate_test.go (TestShadowingTestDifferentTypesToDistinguishWinner)
+// TestEmbeddedStructFieldShadowing is a schema-generation test (it uses
+// GenerateFor) kept here because it guards validation-relevant schema
+// correctness for multi-level struct embedding. A companion test in
+// generate_test.go (TestFieldShadowingOuterWinsOverEmbedded)
 // covers the type-distinction aspect.
 
 func TestEmbeddedStructFieldShadowing(t *testing.T) {
 	t.Parallel()
 
-	// All existing embedding tests cover single-level embedding. This tests:
-	// - Outer field shadowing an inner promoted field
-	// Multiple levels of embedding (grandchild promotion).
+	// Across multiple levels of embedding, an outer field shadows an inner
+	// promoted field of the same JSON name (grandchild promotion).
 
 	type GrandChild struct {
 		Name string `json:"name"`
@@ -4860,9 +4843,9 @@ func TestValidateCollectsAllErrors(t *testing.T) {
 // TestValidateRefIntoUnknownKeyword covers $refs whose JSON Pointer targets a
 // location with no typed Schema field: a sub-schema carried in an unknown
 // keyword, or the internals of a non-applicator keyword such as examples.
-// Upstream Schema.Resolve rejects these during pre-validation, but the PRD
-// assigns $ref target lookup to this package, so they resolve and the
-// referenced constraint applies.
+// Upstream Schema.Resolve rejects these during pre-validation, but this package
+// resolves $ref targets itself, so they resolve and the referenced constraint
+// applies.
 func TestValidateRefIntoUnknownKeyword(t *testing.T) {
 	t.Parallel()
 
@@ -4979,9 +4962,9 @@ func TestValidateRefTargetWellFormed(t *testing.T) {
 			case tc.err:
 				require.Error(t, err, "a malformed ref-only target must keep the error fatal")
 			case tc.valid:
-				assert.NoError(t, err, "expected valid")
+				require.NoError(t, err, "expected valid")
 			default:
-				assert.Error(t, err, "expected invalid")
+				require.Error(t, err, "expected invalid")
 			}
 		})
 	}

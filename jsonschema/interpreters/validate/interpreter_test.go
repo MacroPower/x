@@ -540,10 +540,11 @@ func TestValidateInterpreter_RequiredOnNonPointerMap(t *testing.T) {
 	assert.Equal(t, jsonschema.Ptr(1), s.Properties["labels"].MinProperties)
 }
 
-func TestParseNumericValueTruncatesLargeIntegers(t *testing.T) {
+func TestNumericConstPreservesLargeIntegers(t *testing.T) {
 	t.Parallel()
 
-	// ParseNumericValue uses ParseFloat then int(n), losing precision for large ints.
+	// Integer kinds parse with strconv.ParseInt, so an eq value beyond
+	// float64's exact integer range keeps full precision.
 	type Large struct {
 		Value int64 `json:"value" validate:"eq=9007199254740993"`
 	}
@@ -556,16 +557,39 @@ func TestParseNumericValueTruncatesLargeIntegers(t *testing.T) {
 	prop := s.Properties["value"]
 	require.NotNil(t, prop)
 
-	// 9007199254740993 (2^53 + 1) should not lose precision.
+	// 9007199254740993 (2^53 + 1) keeps full precision.
 	require.NotNil(t, prop.Const)
 	assert.Equal(t, int(9007199254740993), *prop.Const,
-		"large int64 const should not lose precision")
+		"large int64 const keeps full precision")
 }
 
-func TestNumericOneOfProducesIntNotFloat64(t *testing.T) {
+func TestNumericConstPreservesLargeUnsignedIntegers(t *testing.T) {
 	t.Parallel()
 
-	// validate:"eq=42" on int produces int(42), while jsonschema:"const=42" produces float64(42).
+	// Unsigned kinds parse with strconv.ParseUint, so an eq value above
+	// math.MaxInt64 is representable rather than overflowing int64.
+	type Large struct {
+		Value uint64 `json:"value" validate:"eq=18446744073709551615"`
+	}
+
+	s, err := jsonschema.GenerateFor[Large](
+		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+	)
+	require.NoError(t, err)
+
+	prop := s.Properties["value"]
+	require.NotNil(t, prop)
+
+	// Math.MaxUint64 round-trips as a uint64 const instead of overflowing.
+	require.NotNil(t, prop.Const)
+	assert.Equal(t, uint64(18446744073709551615), *prop.Const)
+}
+
+func TestValidateAndJSONSchemaTagsProduceSameConstType(t *testing.T) {
+	t.Parallel()
+
+	// The validate eq tag and the jsonschema const tag both parse an integer
+	// field as a Go int, so the two dialects yield the same const type.
 	type IntField struct {
 		Value int `json:"value" validate:"eq=42"`
 	}
@@ -582,7 +606,6 @@ func TestNumericOneOfProducesIntNotFloat64(t *testing.T) {
 	sFloat, err := jsonschema.GenerateFor[FloatField]()
 	require.NoError(t, err)
 
-	// Both should produce the same const type.
 	intConst := sInt.Properties["value"].Const
 	floatConst := sFloat.Properties["value"].Const
 
@@ -590,14 +613,14 @@ func TestNumericOneOfProducesIntNotFloat64(t *testing.T) {
 	require.NotNil(t, floatConst)
 
 	assert.IsType(t, *floatConst, *intConst,
-		"validate and jsonschema tags should produce same const type")
+		"validate and jsonschema tags produce the same const type")
 }
 
-func TestApplyDiveSilentlyReturnsNilWhenItemsNil(t *testing.T) {
+func TestApplyDiveErrorsWhenItemsNil(t *testing.T) {
 	t.Parallel()
 
-	// When a JSONSchemaProvider returns a schema without items,
-	// all dive constraints are silently lost.
+	// Diving into a schema that has no element sub-schema returns an error
+	// rather than discarding the dive constraints.
 	s := &jsonschema.Schema{
 		Type: "object",
 		Properties: map[string]*jsonschema.Schema{
@@ -616,15 +639,15 @@ func TestApplyDiveSilentlyReturnsNilWhenItemsNil(t *testing.T) {
 		Name:   "items",
 	})
 
-	// Should produce an error or warning, not silently discard constraints.
 	require.Error(t, err,
-		"dive into nil Items should produce an error, not silently discard constraints")
+		"dive into nil Items returns an error rather than discarding the constraints")
 }
 
-func TestUnrecognizedValidateTagsSilentlyConsumed(t *testing.T) {
+func TestUnrecognizedValidateTagErrors(t *testing.T) {
 	t.Parallel()
 
-	// Typos like validate:"emial" are silently ignored.
+	// A typo like validate:"emial" is an unrecognized validator and surfaces as
+	// an error so the mistake does not pass unnoticed.
 	type MyType struct {
 		Email string `json:"email" validate:"emial"` //nolint:govet // intentional typo
 	}
@@ -632,15 +655,15 @@ func TestUnrecognizedValidateTagsSilentlyConsumed(t *testing.T) {
 	_, err := jsonschema.GenerateFor[MyType](
 		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
 	)
-	// Should produce an error for unrecognized tag.
 	require.Error(t, err,
-		"unrecognized validate tag 'emial' should produce an error")
+		"unrecognized validate tag 'emial' produces an error")
 }
 
-func TestCollectionGtLtProducesNegativeBounds(t *testing.T) {
+func TestCollectionGtLtClampsBoundsToZero(t *testing.T) {
 	t.Parallel()
 
-	// Lt=0 on a collection computes n-- = -1, producing MaxItems: -1.
+	// Lt=0 on a collection sets an exclusive upper bound of one below zero,
+	// which is clamped to a non-negative maxItems as JSON Schema requires.
 	type MyType struct {
 		Items []string `json:"items" validate:"lt=0"`
 	}
@@ -652,17 +675,18 @@ func TestCollectionGtLtProducesNegativeBounds(t *testing.T) {
 
 	prop := s.Properties["items"]
 	require.NotNil(t, prop)
-	require.NotNil(t, prop.MaxItems, "lt=0 on collection should set maxItems")
+	require.NotNil(t, prop.MaxItems, "lt=0 on collection sets maxItems")
 
-	// MaxItems MUST be a non-negative integer per JSON Schema spec (Section 6.4.1).
+	// MaxItems must be a non-negative integer per the JSON Schema spec.
 	assert.GreaterOrEqual(t, *prop.MaxItems, 0,
-		"maxItems MUST be non-negative per JSON Schema spec")
+		"maxItems must be non-negative per JSON Schema spec")
 }
 
-func TestStringGtLtProducesNegativeLength(t *testing.T) {
+func TestStringGtLtClampsLengthToZero(t *testing.T) {
 	t.Parallel()
 
-	// Lt=0 on a string produces MaxLength: -1.
+	// Lt=0 on a string sets an exclusive upper bound of one below zero, which is
+	// clamped to a non-negative maxLength as JSON Schema requires.
 	type MyType struct {
 		Name string `json:"name" validate:"lt=0"`
 	}
@@ -674,18 +698,18 @@ func TestStringGtLtProducesNegativeLength(t *testing.T) {
 
 	prop := s.Properties["name"]
 	require.NotNil(t, prop)
-	require.NotNil(t, prop.MaxLength, "lt=0 on string should set maxLength")
+	require.NotNil(t, prop.MaxLength, "lt=0 on string sets maxLength")
 
-	// MaxLength MUST be a non-negative integer per JSON Schema spec (Section 6.3.1).
+	// MaxLength must be a non-negative integer per the JSON Schema spec.
 	assert.GreaterOrEqual(t, *prop.MaxLength, 0,
-		"maxLength MUST be non-negative per JSON Schema spec")
+		"maxLength must be non-negative per JSON Schema spec")
 }
 
-func TestRequiredOnNumericTypesIsNoOp(t *testing.T) {
+func TestRequiredOnNumericForbidsZero(t *testing.T) {
 	t.Parallel()
 
-	// In go-playground/validator, required on int means "must not be zero".
-	// The interpreter adds to required array but no type-specific constraint.
+	// Go-playground/validator treats required on an int as "must not be zero",
+	// so the schema carries a not-zero constraint.
 	type MyType struct {
 		Count int `json:"count" validate:"required"`
 	}
@@ -698,15 +722,16 @@ func TestRequiredOnNumericTypesIsNoOp(t *testing.T) {
 	prop := s.Properties["count"]
 	require.NotNil(t, prop)
 
-	// Should have not:{const:0} or similar to reject zero values.
+	// not:{const:0} (or an enum) rejects the zero value.
 	assert.NotNil(t, prop.Not,
-		"required on int should produce a not-zero constraint")
+		"required on int produces a not-zero constraint")
 }
 
-func TestLenOnNumericTypesIsNoOp(t *testing.T) {
+func TestLenOnNumericProducesConst(t *testing.T) {
 	t.Parallel()
 
-	// In go-playground/validator, len=N on a numeric type means value must equal N.
+	// Go-playground/validator treats len=N on a numeric type as "value equals N",
+	// so the schema carries a const constraint.
 	type MyType struct {
 		Count int `json:"count" validate:"len=5"`
 	}
@@ -719,15 +744,16 @@ func TestLenOnNumericTypesIsNoOp(t *testing.T) {
 	prop := s.Properties["count"]
 	require.NotNil(t, prop)
 
-	// Should produce const:5 or min:5,max:5.
+	// Len=5 fixes the value with const:5.
 	assert.NotNil(t, prop.Const,
-		"len=5 on int should produce a const constraint")
+		"len=5 on int produces a const constraint")
 }
 
-func TestOneOfEmptyValueProducesUnsatisfiableEnum(t *testing.T) {
+func TestOneOfEmptyValueErrors(t *testing.T) {
 	t.Parallel()
 
-	// validate:"oneof=" with no values produces enum:[] which is unsatisfiable.
+	// validate:"oneof=" carries no values, so rather than emitting an
+	// unsatisfiable empty enum the interpreter returns an error.
 	type MyType struct {
 		Status string `json:"status" validate:"oneof="`
 	}
@@ -735,15 +761,15 @@ func TestOneOfEmptyValueProducesUnsatisfiableEnum(t *testing.T) {
 	_, err := jsonschema.GenerateFor[MyType](
 		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
 	)
-	// Should produce an error for empty oneof.
 	require.Error(t, err,
-		"oneof= with no values should produce an error")
+		"oneof= with no values produces an error")
 }
 
-func TestUniqueOnNonCollectionSetsUniqueItems(t *testing.T) {
+func TestUniqueOnNonCollectionLeavesUniqueItemsUnset(t *testing.T) {
 	t.Parallel()
 
-	// Unique unconditionally sets uniqueItems regardless of field type.
+	// UniqueItems is only meaningful for arrays, so unique on a string field
+	// leaves it unset.
 	type MyType struct {
 		Name string `json:"name" validate:"unique"`
 	}
@@ -756,15 +782,15 @@ func TestUniqueOnNonCollectionSetsUniqueItems(t *testing.T) {
 	prop := s.Properties["name"]
 	require.NotNil(t, prop)
 
-	// UniqueItems on a string field is meaningless; should only be set on arrays.
 	assert.False(t, prop.UniqueItems,
-		"uniqueItems should not be set on non-collection types")
+		"uniqueItems is not set on non-collection types")
 }
 
-func TestEqOnCollectionProducesStringConst(t *testing.T) {
+func TestEqOnCollectionProducesLengthBounds(t *testing.T) {
 	t.Parallel()
 
-	// Eq on a slice should mean "length equals N", not produce a string const.
+	// Eq=N on a slice means "length equals N", so it sets matching minItems and
+	// maxItems rather than a const.
 	type MyType struct {
 		Items []string `json:"items" validate:"eq=5"`
 	}
@@ -777,16 +803,16 @@ func TestEqOnCollectionProducesStringConst(t *testing.T) {
 	prop := s.Properties["items"]
 	require.NotNil(t, prop)
 
-	// Should produce minItems:5, maxItems:5, not const:"5".
-	assert.Nil(t, prop.Const, "eq=5 on slice should not produce a string const")
-	assert.NotNil(t, prop.MinItems, "eq=5 on slice should set minItems")
-	assert.NotNil(t, prop.MaxItems, "eq=5 on slice should set maxItems")
+	// Eq=5 yields minItems:5, maxItems:5 and no const.
+	assert.Nil(t, prop.Const, "eq=5 on slice does not produce a const")
+	assert.NotNil(t, prop.MinItems, "eq=5 on slice sets minItems")
+	assert.NotNil(t, prop.MaxItems, "eq=5 on slice sets maxItems")
 }
 
-func TestEqOnBoolProducesStringConst(t *testing.T) {
+func TestEqOnBoolProducesBooleanConst(t *testing.T) {
 	t.Parallel()
 
-	// validate:"eq=true" on bool produces {"const": "true"} (string) instead of {"const": true}.
+	// Eq=true on a bool field sets const to the boolean value true.
 	type MyType struct {
 		Active bool `json:"active" validate:"eq=true"`
 	}
@@ -801,12 +827,14 @@ func TestEqOnBoolProducesStringConst(t *testing.T) {
 	require.NotNil(t, prop.Const)
 
 	assert.Equal(t, true, *prop.Const,
-		"eq=true on bool should produce boolean const, not string")
+		"eq=true on bool produces a boolean const")
 }
 
-func TestOneOfOnBoolProducesStringEnum(t *testing.T) {
+func TestOneOfOnBoolProducesBooleanEnum(t *testing.T) {
 	t.Parallel()
 
+	// Oneof on a bool field parses each value into a boolean, so the enum holds
+	// [true, false] rather than the string forms.
 	type MyType struct {
 		Active bool `json:"active" validate:"oneof=true false"`
 	}
@@ -820,17 +848,17 @@ func TestOneOfOnBoolProducesStringEnum(t *testing.T) {
 	require.NotNil(t, prop)
 	require.NotNil(t, prop.Enum)
 
-	// Should be [true, false] (booleans), not ["true", "false"] (strings).
 	for _, v := range prop.Enum {
 		assert.IsType(t, true, v,
-			"oneof on bool should produce boolean enum values, not strings")
+			"oneof on bool produces boolean enum values")
 	}
 }
 
-func TestRequiredOnBoolIsNoOp(t *testing.T) {
+func TestRequiredOnBoolProducesConstTrue(t *testing.T) {
 	t.Parallel()
 
-	// In go-playground/validator, required on bool means "must be true".
+	// Go-playground/validator treats required on a bool as "must be true", so
+	// the schema carries a const constraint.
 	type MyType struct {
 		Accepted bool `json:"accepted" validate:"required"`
 	}
@@ -843,15 +871,16 @@ func TestRequiredOnBoolIsNoOp(t *testing.T) {
 	prop := s.Properties["accepted"]
 	require.NotNil(t, prop)
 
-	// Should produce const:true.
+	// Required fixes the value with const:true.
 	assert.NotNil(t, prop.Const,
-		"required on bool should produce a const:true constraint")
+		"required on bool produces a const:true constraint")
 }
 
-func TestTrailingDiveIsNoOp(t *testing.T) {
+func TestTrailingDiveErrors(t *testing.T) {
 	t.Parallel()
 
-	// A trailing dive with no subsequent validators should error.
+	// A trailing dive has no element constraints to apply, so it is an error,
+	// matching go-playground/validator.
 	type MyType struct {
 		Items []string `json:"items" validate:"dive"`
 	}
@@ -859,17 +888,17 @@ func TestTrailingDiveIsNoOp(t *testing.T) {
 	_, err := jsonschema.GenerateFor[MyType](
 		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
 	)
-	// In go-playground/validator, trailing dive is an error.
 	require.Error(t, err,
-		"trailing dive with no subsequent constraints should produce an error")
+		"trailing dive with no subsequent constraints produces an error")
 }
 
-func TestMissingEndkeysSwallowsConstraints(t *testing.T) {
+func TestMissingEndkeysStillAppliesValueConstraints(t *testing.T) {
 	t.Parallel()
 
-	// Without endkeys, inKeys stays true and all remaining constraints are lost.
-	// The tag has keys,min=1 (key constraint),min=3 (intended value constraint) but
-	// no endkeys, so min=3 is swallowed by the inKeys loop.
+	// A keys marker without a matching endkeys is malformed. Rather than
+	// swallowing every later constraint, the keys marker is ignored so the
+	// remaining constraints still apply to the value schema. Here min=3 reaches
+	// the value's minLength.
 	type MyType struct {
 		Data map[string]string `json:"data" validate:"dive,keys,min=1,min=3"`
 	}
@@ -882,18 +911,18 @@ func TestMissingEndkeysSwallowsConstraints(t *testing.T) {
 	prop := s.Properties["data"]
 	require.NotNil(t, prop)
 
-	// The min=3 after the missing endkeys should apply to value's minLength,
-	// but instead it is silently swallowed because inKeys stays true.
 	require.NotNil(t, prop.AdditionalProperties,
-		"map should have additionalProperties schema")
+		"map has an additionalProperties schema")
 	assert.NotNil(t, prop.AdditionalProperties.MinLength,
-		"min=3 after missing endkeys should not be silently swallowed")
+		"min=3 after the unmatched keys marker applies to the value's minLength")
 }
 
-func TestFormatOverwritesJsonSchemaTag(t *testing.T) {
+func TestExplicitJSONSchemaTagTakesPrecedenceOverValidate(t *testing.T) {
 	t.Parallel()
 
-	// Validate interpreter runs after jsonschema tag, so it overwrites.
+	// An explicit jsonschema tag wins over the format the validate interpreter
+	// would otherwise derive, so the date-time format set by the jsonschema tag
+	// survives alongside the email validator.
 	type MyType struct {
 		Email string `json:"email" jsonschema:"format=date-time" validate:"email"`
 	}
@@ -906,14 +935,15 @@ func TestFormatOverwritesJsonSchemaTag(t *testing.T) {
 	prop := s.Properties["email"]
 	require.NotNil(t, prop)
 
-	// The explicit jsonschema tag should take precedence.
 	assert.Equal(t, "date-time", prop.Format,
-		"explicit jsonschema tag format should take precedence over validate tag")
+		"explicit jsonschema tag format takes precedence over the validate tag")
 }
 
-func TestMinMaxOnUnsupportedTypesNoOp(t *testing.T) {
+func TestMinMaxOnUnsupportedTypeErrors(t *testing.T) {
 	t.Parallel()
 
+	// Min/max only apply to strings, numbers, and collections, so a struct field
+	// produces an error rather than being ignored.
 	type Inner struct {
 		Value string `json:"value"`
 	}
@@ -925,15 +955,14 @@ func TestMinMaxOnUnsupportedTypesNoOp(t *testing.T) {
 	_, err := jsonschema.GenerateFor[MyType](
 		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
 	)
-	// Should produce an error for unsupported type, not silently ignore.
 	require.Error(t, err,
-		"min on struct type should produce an error")
+		"min on a struct type produces an error")
 }
 
 func TestValidateInterpreter_RequiredPreservesStrongerBound(t *testing.T) {
 	t.Parallel()
 
-	// validator rules in a single tag compose conjunctively and are
+	// Validator rules in a single tag compose conjunctively and are
 	// order-independent, so "required" must never lower a stronger min/len bound
 	// set by another part of the tag, whatever the order.
 	type Form struct {
@@ -965,4 +994,150 @@ func TestValidateInterpreter_RequiredPreservesStrongerBound(t *testing.T) {
 		"required":["min_then_req","req_then_min","tags","labels","bare"],
 		"additionalProperties":false
 	}`, string(got))
+}
+
+func TestValidateInterpreter_CollectionNe(t *testing.T) {
+	t.Parallel()
+
+	// Ne=N on a collection forbids the exact length via a not subschema: minItems
+	// and maxItems for slices, minProperties and maxProperties for maps.
+	type Lists struct {
+		Tags   []string          `json:"tags"   validate:"ne=3"`
+		Labels map[string]string `json:"labels" validate:"ne=2"`
+	}
+
+	s, err := jsonschema.GenerateFor[Lists](
+		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+	)
+	require.NoError(t, err)
+
+	tags := s.Properties["tags"]
+	require.NotNil(t, tags.Not)
+	assert.Equal(t, jsonschema.Ptr(3), tags.Not.MinItems)
+	assert.Equal(t, jsonschema.Ptr(3), tags.Not.MaxItems)
+
+	labels := s.Properties["labels"]
+	require.NotNil(t, labels.Not)
+	assert.Equal(t, jsonschema.Ptr(2), labels.Not.MinProperties)
+	assert.Equal(t, jsonschema.Ptr(2), labels.Not.MaxProperties)
+}
+
+func TestValidateInterpreter_CollectionNeComposesWithAllOf(t *testing.T) {
+	t.Parallel()
+
+	// A second ne=N on the same collection cannot ride on the first not, so the
+	// existing not moves under allOf and each forbidden length gets its own not.
+	type Lists struct {
+		Tags []string `json:"tags" validate:"ne=2,ne=3"`
+	}
+
+	s, err := jsonschema.GenerateFor[Lists](
+		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+	)
+	require.NoError(t, err)
+
+	tags := s.Properties["tags"]
+	assert.Nil(t, tags.Not, "the first not is moved under allOf")
+	require.Len(t, tags.AllOf, 2)
+	require.NotNil(t, tags.AllOf[0].Not)
+	require.NotNil(t, tags.AllOf[1].Not)
+	assert.Equal(t, jsonschema.Ptr(2), tags.AllOf[0].Not.MinItems)
+	assert.Equal(t, jsonschema.Ptr(3), tags.AllOf[1].Not.MinItems)
+}
+
+func TestValidateInterpreter_DiveIntoFixedArray(t *testing.T) {
+	t.Parallel()
+
+	// A fixed array's element schemas live in prefixItems under Draft 2020-12 and
+	// in the items-array form under Draft-07; dive applies constraints to each.
+	type Arr struct {
+		Codes [3]string `json:"codes" validate:"dive,min=2"`
+	}
+
+	s2020, err := jsonschema.GenerateFor[Arr](
+		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+	)
+	require.NoError(t, err)
+
+	codes := s2020.Properties["codes"]
+	require.NotEmpty(t, codes.PrefixItems, "draft 2020-12 fixed arrays use prefixItems")
+
+	for _, item := range codes.PrefixItems {
+		assert.Equal(t, jsonschema.Ptr(2), item.MinLength)
+	}
+
+	s7, err := jsonschema.GenerateFor[Arr](
+		jsonschema.WithDraft(jsonschema.Draft7),
+		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+	)
+	require.NoError(t, err)
+
+	codes7 := s7.Properties["codes"]
+	require.NotEmpty(t, codes7.ItemsArray, "draft-07 fixed arrays use the items-array form")
+
+	for _, item := range codes7.ItemsArray {
+		assert.Equal(t, jsonschema.Ptr(2), item.MinLength)
+	}
+}
+
+func TestValidateInterpreter_DiveIntoByteSliceIsNoOp(t *testing.T) {
+	t.Parallel()
+
+	// A []byte field marshals to a single base64 string with no per-element
+	// schema, so diving into it is a no-op rather than a generation error.
+	type B struct {
+		Data []byte `json:"data" validate:"dive,min=1"`
+	}
+
+	s, err := jsonschema.GenerateFor[B](
+		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+	)
+	require.NoError(t, err)
+
+	assert.Equal(t, "base64", s.Properties["data"].ContentEncoding)
+}
+
+func TestValidateInterpreter_StringKeywordOnByteSlice(t *testing.T) {
+	t.Parallel()
+
+	// A []byte field's schema is a base64 string, so a string-only content tag
+	// applies even though the Go kind is not string.
+	type Doc struct {
+		Blob []byte `json:"blob" validate:"base64"`
+	}
+
+	s, err := jsonschema.GenerateFor[Doc](
+		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "base64", s.Properties["blob"].ContentEncoding)
+
+	// On a non-string kind whose schema is not a string, the same tag is
+	// rejected rather than silently stamped onto an integer schema.
+	type Bad struct {
+		Count int `json:"count" validate:"base64"`
+	}
+
+	_, err = jsonschema.GenerateFor[Bad](
+		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+	)
+	require.Error(t, err)
+}
+
+func TestValidateInterpreter_PatternKeywordDoesNotOverwrite(t *testing.T) {
+	t.Parallel()
+
+	// An explicit jsonschema pattern is preserved; a validate pattern tag only
+	// fills pattern when it is not already set.
+	type P struct {
+		Code string `json:"code" jsonschema:"pattern=^[0-9]{4}$" validate:"alpha"`
+	}
+
+	s, err := jsonschema.GenerateFor[P](
+		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+	)
+	require.NoError(t, err)
+
+	assert.Equal(t, "^[0-9]{4}$", s.Properties["code"].Pattern,
+		"explicit jsonschema pattern must win over the validate alpha tag")
 }

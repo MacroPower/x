@@ -1616,9 +1616,8 @@ func TestGenerateFor_JSONSchemaTag_Examples(t *testing.T) {
 func TestGenerateFor_ExtenderDescriptionPreservedWithComments(t *testing.T) {
 	t.Parallel()
 
-	// Per the PRD processing order, JSONSchemaExtend (step 3) runs after
-	// comment extraction (step 2), so the extender's description should
-	// take precedence over the AST doc comment.
+	// JSONSchemaExtend runs after comment extraction, so the extender's
+	// description takes precedence over the AST doc comment.
 	s, err := jsonschema.GenerateFor[NonStructExtender](
 		jsonschema.WithComments(true),
 	)
@@ -1889,14 +1888,12 @@ func TestGenerateFor_WithComments_FieldDescription(t *testing.T) {
 	assert.Equal(t, "Name is the JSON property name for the field.", s.Properties["Name"].Description)
 }
 
-func TestGenerateFor_WithComments_SilentlySkipsMissingSource(t *testing.T) {
+func TestGenerateFor_WithComments_HandlesTypesWithoutSource(t *testing.T) {
 	t.Parallel()
 
-	// Types from packages without available source should not cause errors.
-	// Time.Time is a stdlib type whose source is available, but we use
-	// a built-in override so comments are not extracted for it anyway.
-	// This test ensures WithComments doesn't error when processing
-	// types from external packages.
+	// WithComments does not error when a field's type comes from an external
+	// package. Time.Time uses a built-in override, so no comment is extracted
+	// for it, and generation succeeds.
 	type Container struct {
 		T time.Time `json:"t"`
 	}
@@ -1909,8 +1906,8 @@ func TestGenerateFor_WithComments_SilentlySkipsMissingSource(t *testing.T) {
 }
 
 // TextMarshalerWithExtender implements both TextMarshaler (producing "string")
-// and JSONSchemaExtender (adding enum constraints). Per the PRD processing
-// order, the extender runs after base type reflection.
+// and JSONSchemaExtender (adding enum constraints). The extender runs after
+// base type reflection, so it sees and augments the "string" schema.
 type TextMarshalerWithExtender int
 
 func (TextMarshalerWithExtender) MarshalText() ([]byte, error) { return nil, nil }
@@ -2049,7 +2046,7 @@ func TestUint64MaxNotExpressible(t *testing.T) {
 		"uint64 schema should express a maximum bound")
 }
 
-func TestInt64GeneratesUnboundedSchema(t *testing.T) {
+func TestInt64GeneratesBoundedSchema(t *testing.T) {
 	t.Parallel()
 
 	s, err := jsonschema.GenerateFor[int64]()
@@ -2064,7 +2061,7 @@ func TestInt64GeneratesUnboundedSchema(t *testing.T) {
 		"int64 schema should have maximum bound")
 }
 
-func TestArrayGenerationDoesntUsePrefixItems(t *testing.T) {
+func TestArrayGenerationUsesPrefixItems(t *testing.T) {
 	t.Parallel()
 
 	s, err := jsonschema.GenerateFor[[3]string]()
@@ -2072,12 +2069,12 @@ func TestArrayGenerationDoesntUsePrefixItems(t *testing.T) {
 
 	got := marshalSchema(t, s)
 
-	// For 2020-12, fixed-length arrays should use prefixItems + items:false.
+	// For 2020-12, fixed-length arrays use prefixItems.
 	assert.Contains(t, got, `"prefixItems"`,
 		"2020-12 fixed array should use prefixItems")
 }
 
-func TestCollectStructFieldsMissingTagShadowing(t *testing.T) {
+func TestCollectStructFieldsTaggedFieldWinsAtSameDepth(t *testing.T) {
 	t.Parallel()
 
 	// Encoding/json tiebreaker: at the same depth, a field with an explicit
@@ -2108,7 +2105,7 @@ func TestCollectStructFieldsMissingTagShadowing(t *testing.T) {
 		"tagged field (int) should win over untagged field (string)")
 }
 
-func TestDraft07AdditionalPropertiesDroppedWithAllOf(t *testing.T) {
+func TestDraft07AdditionalPropertiesRetainedWithPromotedEmbed(t *testing.T) {
 	t.Parallel()
 
 	type Inner struct {
@@ -2125,24 +2122,25 @@ func TestDraft07AdditionalPropertiesDroppedWithAllOf(t *testing.T) {
 
 	got := marshalSchema(t, s)
 
-	// When allOf is present in Draft7, additionalProperties is silently dropped.
-	// The schema should still have additionalProperties for closed-schema guarantee.
+	// A plain embedded struct has its fields promoted rather than allOf-composed,
+	// so additionalProperties stays on the schema and the closed-schema guarantee
+	// holds in Draft-07.
 	assert.Contains(t, got, `"additionalProperties"`,
-		"Draft7 with allOf should retain additionalProperties, not silently drop it")
+		"Draft7 with promoted embed should retain additionalProperties")
 }
 
 type providerMutationTestType struct{}
 
 func (providerMutationTestType) JSONSchema() *jsonschema.Schema {
-	return &todoProviderSchema
+	return &sharedProviderSchema
 }
 
-var todoProviderSchema = jsonschema.Schema{
+var sharedProviderSchema = jsonschema.Schema{
 	Type:        "string",
 	Description: "original",
 }
 
-func TestProviderSchemaNotCloned(t *testing.T) {
+func TestProviderSchemaIsolatedAcrossCalls(t *testing.T) {
 	t.Parallel()
 
 	// First generation call.
@@ -2157,11 +2155,11 @@ func TestProviderSchemaNotCloned(t *testing.T) {
 
 	assert.Equal(t, desc1, s2.Description,
 		"provider schema should not be mutated across calls")
-	assert.Equal(t, "original", todoProviderSchema.Description,
+	assert.Equal(t, "original", sharedProviderSchema.Description,
 		"original provider schema should not be modified")
 }
 
-func TestBigIntSchemaLacksFormatOrPattern(t *testing.T) {
+func TestBigNumericSchemaHasFormatOrPattern(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]struct {
@@ -2195,21 +2193,7 @@ func TestBigIntSchemaLacksFormatOrPattern(t *testing.T) {
 	}
 }
 
-func TestDisambiguateDefsNoSeparator(t *testing.T) {
-	t.Parallel()
-
-	// This issue requires types from different packages with names that collide
-	// after base-dir prefix: package "foo" type "BarBaz" and package "fooBar"
-	// type "Baz" both produce "fooBarBaz" without a separator.
-	// Cannot test directly without cross-package types.
-	//
-	// When fixed, the intermediate disambiguation step should use a separator
-	// (e.g., "foo_BarBaz" vs "fooBar_Baz") to avoid unnecessary fallback to
-	// verbose full-path names.
-	t.Log("documentation-only: requires cross-package types to reproduce")
-}
-
-func TestNullableInconsistency(t *testing.T) {
+func TestNullablePointerFieldsUseConsistentPattern(t *testing.T) {
 	t.Parallel()
 
 	type Inner struct {
@@ -2226,8 +2210,9 @@ func TestNullableInconsistency(t *testing.T) {
 
 	got := marshalSchema(t, s)
 
-	// Both nullable fields should use the same pattern for nullability.
-	// Currently, $ref types use anyOf while non-ref types use Types array.
+	// Nullable pointer fields express nullability the same way regardless of
+	// whether the value is a $ref or an inline type: both wrap in anyOf with a
+	// null branch.
 	refProp := s.Properties["ref"]
 	plainProp := s.Properties["plain"]
 
@@ -2241,7 +2226,7 @@ func TestNullableInconsistency(t *testing.T) {
 		"both nullable fields should use the same nullability pattern, got schema: %s", got)
 }
 
-func TestProcessAllOfFieldIgnoresNullablePointer(t *testing.T) {
+func TestPointerEmbeddedStructFieldsAreOptional(t *testing.T) {
 	t.Parallel()
 
 	type Embedded struct {
@@ -2289,7 +2274,7 @@ func TestDefaultNamerSpacesForGenerics(t *testing.T) {
 	}
 }
 
-func TestWithNamerNilPanics(t *testing.T) {
+func TestWithNamerNilDoesNotPanic(t *testing.T) {
 	t.Parallel()
 
 	type Simple struct {
@@ -2303,7 +2288,7 @@ func TestWithNamerNilPanics(t *testing.T) {
 	}, "WithNamer(nil) should not panic")
 }
 
-func TestWithTagInterpreterNilPanics(t *testing.T) {
+func TestWithTagInterpreterNilDoesNotPanic(t *testing.T) {
 	t.Parallel()
 
 	type Simple struct {
@@ -2317,7 +2302,7 @@ func TestWithTagInterpreterNilPanics(t *testing.T) {
 	}, "WithTagInterpreter(nil) should not panic")
 }
 
-func TestJSONStringOrphanedDefs(t *testing.T) {
+func TestJSONStringOnStructLeavesNoOrphanedDefs(t *testing.T) {
 	t.Parallel()
 
 	type Inner struct {
@@ -2331,14 +2316,13 @@ func TestJSONStringOrphanedDefs(t *testing.T) {
 	s, err := jsonschema.GenerateFor[Outer]()
 	require.NoError(t, err)
 
-	// The field schema should be {type: "string"} due to json:",string".
-	// But Inner may leave an orphaned entry in $defs.
+	// json:",string" does not apply to a struct field, so Inner keeps its normal
+	// $ref and every $defs entry stays referenced.
 	b, err := json.Marshal(s)
 	require.NoError(t, err)
 
 	if s.Defs != nil {
 		for name := range s.Defs {
-			// Check that all $defs entries are actually referenced.
 			assert.Contains(t, string(b), `"$ref":"#/$defs/`+name+`"`,
 				"$defs entry %q should be referenced", name)
 		}
@@ -2372,12 +2356,11 @@ func TestMutualRecursionNoDanglingRef(t *testing.T) {
 	require.NoError(t, err, "generated schema must resolve with no dangling $ref")
 }
 
-func TestSliceSchemaIgnoresNullable(t *testing.T) {
+func TestSliceAndPointerSliceProduceIdenticalSchemas(t *testing.T) {
 	t.Parallel()
 
-	// The nullable parameter is accepted but unused in schemaForSlice.
-	// Both []T and *[]T produce identical schemas because slices always
-	// emit ["null", "array"]. The issue is that the nullable param is dead code.
+	// Slices always emit ["null","array"], so []T and *[]T produce identical
+	// schemas.
 	sliceSchema, err := jsonschema.GenerateFor[[]string]()
 	require.NoError(t, err)
 
@@ -2390,16 +2373,15 @@ func TestSliceSchemaIgnoresNullable(t *testing.T) {
 	ptrSliceJSON, err := json.Marshal(ptrSliceSchema)
 	require.NoError(t, err)
 
-	// These are identical because nullable is ignored -- *[]T should arguably
-	// differ or at minimum the dead parameter should be removed.
 	assert.JSONEq(t, string(sliceJSON), string(ptrSliceJSON),
-		"[]T and *[]T produce identical schemas because nullable param is ignored")
+		"[]T and *[]T produce identical schemas")
 }
 
-func TestMapSchemaIgnoresNullable(t *testing.T) {
+func TestMapAndPointerMapProduceIdenticalSchemas(t *testing.T) {
 	t.Parallel()
 
-	// Same issue as slices: the nullable parameter is accepted but unused.
+	// Maps always emit ["null","object"], so map and *map produce identical
+	// schemas.
 	mapSchema, err := jsonschema.GenerateFor[map[string]string]()
 	require.NoError(t, err)
 
@@ -2412,36 +2394,8 @@ func TestMapSchemaIgnoresNullable(t *testing.T) {
 	ptrMapJSON, err := json.Marshal(ptrMapSchema)
 	require.NoError(t, err)
 
-	// These are identical because nullable is ignored.
 	assert.JSONEq(t, string(mapJSON), string(ptrMapJSON),
-		"map and *map produce identical schemas because nullable param is ignored")
-}
-
-func TestHasRefSiblingsFragility(t *testing.T) {
-	t.Parallel()
-
-	// HasRefSiblings manually enumerates schema keywords. If the upstream
-	// Schema struct adds new keywords, hasRefSiblings won't know about them.
-	// A $ref schema with only a new keyword would fail to get allOf-wrapped
-	// in Draft-07, silently losing the keyword.
-	//
-	// A proper fix would use reflection to compare the Schema against
-	// a zero-value Schema, similar to the isEmptySchema concern.
-	t.Log("documentation-only: maintenance fragility similar to isEmptySchema")
-}
-
-func TestCollectStructFieldsAllOfShadowing(t *testing.T) {
-	t.Parallel()
-
-	// When needsAllOfComposition returns true for an embedded struct, its fields
-	// are not collected into the byName map for shadowing resolution. Instead a
-	// synthetic __allof__ entry is created. But encoding/json still applies
-	// field-level promotion and shadowing. If the allOf-composed embed has a
-	// field with the same JSON name as a parent field, both appear in the schema.
-	//
-	// Cannot test without a type implementing JSONSchemaProvider (to trigger
-	// allOf composition) that also shares a field name with the parent struct.
-	t.Log("documentation-only: requires allOf-composed embed with name collision")
+		"map and *map produce identical schemas")
 }
 
 func TestGenerateThenValidateRoundTrip(t *testing.T) {
@@ -2477,68 +2431,65 @@ func TestGenerateThenValidateRoundTrip(t *testing.T) {
 	require.Error(t, err, "instance with wrong type should fail generated schema")
 }
 
-func TestExtractToDefsOverwriteBeforeDisambiguation(t *testing.T) {
-	t.Parallel()
-
-	// When two types from different packages produce the same name via g.namer(t),
-	// the second call to extractToDefs sets g.defs[name] = s, overwriting the
-	// first type's schema. The first type's schema survives in g.typeToDefSchema
-	// and is recovered during disambiguateDefs. The intermediate state is correct
-	// in practice but fragile.
-	//
-	// Cannot test without types from distinct packages sharing a name.
-	t.Log("documentation-only: requires same-named types from different packages")
+// panickingProvider has an empty slice field that its JSONSchema method
+// indexes, so calling it on the zero value panics with an out-of-range access.
+type panickingProvider struct {
+	names []string
 }
 
-func TestBuildStructSchemaClearsAdditionalPropertiesBeforeExtender(t *testing.T) {
-	t.Parallel()
-
-	// When allOf composition is present, buildStructSchema sets
-	// AdditionalProperties to nil before calling callExtender. A
-	// JSONSchemaExtender implementation that expects AdditionalProperties
-	// to be set to its default value ({not: {}}) will instead see nil.
-	//
-	// Would require a JSONSchemaExtender on an embedded type (triggering
-	// allOf) that inspects AdditionalProperties.
-	t.Log("documentation-only: requires extender on allOf-composed embed inspecting additionalProperties")
+func (p panickingProvider) JSONSchema() *jsonschema.Schema {
+	return &jsonschema.Schema{Description: p.names[0]} // out of range on zero value
 }
 
-func TestCallProviderPanicsOnZeroValues(t *testing.T) {
-	t.Parallel()
+// embeddedProvider supplies a JSONSchema method that an outer type can both
+// promote and shadow with its own direct method.
+//
+//nolint:unused // Embedded into outerWithDirectMethods to set up method shadowing, exercised via reflection.
+type embeddedProvider struct{}
 
-	// CallProvider creates a zero value via reflect.New(t) and calls
-	// JSONSchema() on it. If the type's method dereferences a nil pointer
-	// field, this panics with no recovery mechanism.
-	//
-	// A recover() wrapper with a descriptive error would be more robust.
-	// The test below would demonstrate the issue with a type whose
-	// JSONSchema() method dereferences a nil pointer, but since we cannot
-	// define such a type in test code without it being exercised by the
-	// parallel test runner, this remains documentation-only.
-	t.Log("documentation-only: requires JSONSchemaProvider that panics on zero value")
+//nolint:unused // Shadowed by outerWithDirectMethods.JSONSchema; present only to create the shadowing case.
+func (embeddedProvider) JSONSchema() *jsonschema.Schema {
+	return &jsonschema.Schema{Type: "embedded"}
 }
 
-func TestHasDirectMethodFalseNegatives(t *testing.T) {
-	t.Parallel()
-
-	// If the outer type defines a method directly AND embeds a type that
-	// also has it, Go shadows the embedded method. HasDirectMethod checks
-	// whether any embedded field provides the method and returns false
-	// (assumes promoted). This incorrectly reports the outer type's
-	// JSONSchemaProvider/JSONSchemaExtender/TextMarshaler as promoted,
-	// causing it to be ignored in favor of field promotion.
-	//
-	// Would require an outer type that implements JSONSchemaProvider and
-	// embeds a type that also implements it. The outer type's method should
-	// take precedence, but hasDirectMethod reports it as promoted.
-	t.Log("documentation-only: requires outer+inner both implementing JSONSchemaProvider")
+// outerWithDirectMethods declares JSONSchema directly and also embeds a type
+// that provides it; the direct method shadows the promoted one.
+type outerWithDirectMethods struct {
+	embeddedProvider //nolint:unused // Embedded to exercise direct-method-wins-over-promoted shadowing.
 }
 
-func TestEmbedTestSchemasNotValidated(t *testing.T) {
+func (outerWithDirectMethods) JSONSchema() *jsonschema.Schema {
+	return &jsonschema.Schema{Type: "outer"}
+}
+
+func TestProviderPanicOnZeroValueWrapsErrProviderPanic(t *testing.T) {
 	t.Parallel()
 
-	// Generated schemas with allOf and unevaluatedProperties are never
-	// validated against test instances. This is a test coverage gap.
+	// A JSONSchema() method that dereferences a nil pointer field panics when
+	// called on the zero value during generation. The generator recovers the
+	// panic and returns an error wrapping ErrProviderPanic rather than crashing.
+	_, err := jsonschema.GenerateFor[panickingProvider]()
+	require.ErrorIs(t, err, jsonschema.ErrProviderPanic)
+}
+
+func TestDirectMethodWinsOverEmbeddedProvider(t *testing.T) {
+	t.Parallel()
+
+	// When an outer type declares JSONSchema() directly and also embeds a type
+	// that provides it, Go's method resolution gives the outer type's directly-
+	// declared method precedence. The generator honors that: the outer schema
+	// wins over the embedded provider's schema.
+	s, err := jsonschema.GenerateFor[outerWithDirectMethods]()
+	require.NoError(t, err)
+
+	assert.Equal(t, "outer", s.Type, "outer's direct JSONSchema must win over the embedded provider")
+}
+
+func TestEmbeddedStructSchemaValidatesInstances(t *testing.T) {
+	t.Parallel()
+
+	// A schema generated from an embedded struct accepts a conforming instance
+	// and rejects one with extra properties.
 	type Inner struct {
 		Value string `json:"value"`
 	}
@@ -2562,16 +2513,13 @@ func TestEmbedTestSchemasNotValidated(t *testing.T) {
 	require.Error(t, err, "extra properties on embedded struct should fail")
 }
 
-func TestNeedsAllOfCompositionMissingExtender(t *testing.T) {
+func TestExtenderOnlyEmbedHasFieldsPromoted(t *testing.T) {
 	t.Parallel()
 
-	// A type implementing only JSONSchemaExtender still has its fields promoted
-	// rather than composed via allOf. The extender modifies the parent struct's
-	// schema context rather than its own standalone schema.
-	//
-	// Metadata (from generate_test.go) implements JSONSchemaExtender. When
-	// embedded, needsAllOfComposition returns false, so its fields are promoted
-	// rather than allOf-composed. The extender runs in the parent context.
+	// An embedded type that implements only JSONSchemaExtender (not a provider
+	// or marshaler) has its fields promoted rather than composed via allOf.
+	// Metadata implements JSONSchemaExtender, so needsAllOfComposition returns
+	// false and Metadata.Tags is inlined into the parent's properties.
 	type Outer struct {
 		Metadata
 		Name string `json:"name"`
@@ -2582,18 +2530,17 @@ func TestNeedsAllOfCompositionMissingExtender(t *testing.T) {
 
 	got := marshalSchema(t, s)
 
-	// If needsAllOfComposition checked JSONSchemaExtender, Metadata would be
-	// composed via allOf. Currently it is promoted (fields inlined).
+	// Metadata.Tags is promoted into the parent, so it appears directly in the
+	// schema rather than inside an allOf branch.
 	assert.Contains(t, got, `"tags"`,
-		"Metadata.Tags should be present (currently promoted, not allOf-composed)")
+		"Metadata.Tags should be promoted into the parent schema")
 }
 
-func TestShadowingTestDifferentTypesToDistinguishWinner(t *testing.T) {
+func TestFieldShadowingOuterWinsOverEmbedded(t *testing.T) {
 	t.Parallel()
 
-	// TestGenerateFor_FieldShadowing checks Properties length but doesn't
-	// verify which type won because both Inner.Name and Outer.Name are string.
-	// Using different types verifies shadowing precedence.
+	// An outer field shadows an embedded field with the same JSON name. Inner
+	// and Outer use distinct types so the winning field is unambiguous.
 	type Inner struct {
 		Name int `json:"name"` // int, not string
 	}
@@ -2618,7 +2565,8 @@ func TestGenerateFor_CrossPackageNameDisambiguation(t *testing.T) {
 	t.Parallel()
 
 	// Alpha.Widget and beta.Widget share the bare name "Widget"; the colliding
-	// $defs keys are disambiguated by each package's base directory name.
+	// $defs keys are disambiguated by each package's base directory name joined
+	// to the type name with an underscore.
 	type Root struct {
 		A alpha.Widget `json:"a"`
 		B beta.Widget  `json:"b"`
@@ -2627,13 +2575,13 @@ func TestGenerateFor_CrossPackageNameDisambiguation(t *testing.T) {
 	s, err := jsonschema.GenerateFor[Root]()
 	require.NoError(t, err)
 
-	require.Contains(t, s.Defs, "alphaWidget")
-	require.Contains(t, s.Defs, "betaWidget")
+	require.Contains(t, s.Defs, "alpha_Widget")
+	require.Contains(t, s.Defs, "beta_Widget")
 	require.NotContains(t, s.Defs, "Widget", "colliding bare name must be replaced")
 
 	// $ref targets are rewritten to the disambiguated names.
-	require.Equal(t, "#/$defs/alphaWidget", s.Properties["a"].Ref)
-	require.Equal(t, "#/$defs/betaWidget", s.Properties["b"].Ref)
+	require.Equal(t, "#/$defs/alpha_Widget", s.Properties["a"].Ref)
+	require.Equal(t, "#/$defs/beta_Widget", s.Properties["b"].Ref)
 }
 
 type jsonMarshalerOnly struct {
@@ -2709,7 +2657,7 @@ type byteSliceOfMarshaler []marshalByte
 func TestGenerateFor_NamedByteSlice(t *testing.T) {
 	t.Parallel()
 
-	// encoding/json base64-encodes any byte slice — selected by the element kind
+	// Encoding/json base64-encodes any byte slice — selected by the element kind
 	// (uint8), not the exact type — so named byte slices and slices of named
 	// uint8 elements are base64 strings too. The exception is an element type
 	// implementing json.Marshaler/encoding.TextMarshaler, which is encoded via

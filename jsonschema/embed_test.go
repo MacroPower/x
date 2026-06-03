@@ -307,7 +307,9 @@ func TestGenerateFor_EmbeddedTextMarshalerStruct(t *testing.T) {
 func TestGenerateFor_EmbeddedTextMarshalerStruct_Draft2020(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[HasTextMarshalerEmbed]()
+	s, err := jsonschema.GenerateFor[HasTextMarshalerEmbed](
+		jsonschema.WithDraft(jsonschema.Draft2020),
+	)
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -579,21 +581,21 @@ type embedPromoteInner struct {
 }
 
 type embedOptionsOnly struct {
-	embedPromoteInner `json:",omitempty"`
+	embedPromoteInner `json:",omitempty"` //nolint:unused,modernize // Tag under test: ",omitempty" on an embedded struct; promoted via reflection.
 }
 
 type embedEmptyName struct {
-	embedPromoteInner `json:","`
+	embedPromoteInner `json:","` //nolint:unused // Promoted via reflection in the generated schema.
 }
 
 type embedExplicitName struct {
-	embedPromoteInner `json:"inner"`
+	embedPromoteInner `json:"inner"` //nolint:unused // Named field via reflection in the generated schema.
 }
 
 func TestGenerateFor_EmbeddedOptionsOnlyTagPromotesFields(t *testing.T) {
 	t.Parallel()
 
-	// encoding/json promotes an embedded struct whose json tag carries options
+	// Encoding/json promotes an embedded struct whose json tag carries options
 	// but no name (e.g. json:",omitempty"), exactly like an untagged embed. Only
 	// an explicit name turns it into a named field. The generated schema must
 	// accept the value the type actually serializes to.

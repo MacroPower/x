@@ -11,7 +11,8 @@ import (
 	"go.jacobcolvin.com/jsonschema"
 )
 
-// Tag, design, and error tests, originally tracked as TODO.md items.
+// Tests for jsonschema struct-tag parsing: key-value vs bare-description
+// detection, value typing, and error paths.
 
 // extenderWithDefs implements JSONSchemaExtender and sets $defs on the schema.
 // Used to test that extender-set fields survive extractToDefs wrapping.
@@ -58,7 +59,8 @@ func (p *parentInspector) Interpret(tag string, field jsonschema.FieldContext) e
 func TestSplitTagPairsCommasInValues(t *testing.T) {
 	t.Parallel()
 
-	// A tag like description=Hello, World,minimum=1 corrupts the description.
+	// A comma separates tag segments: description=Hello World,minimum=1 yields
+	// the description "Hello World".
 	type MyType struct {
 		Name string `json:"name" jsonschema:"description=Hello World,minimum=1"`
 	}
@@ -69,17 +71,15 @@ func TestSplitTagPairsCommasInValues(t *testing.T) {
 	prop := s.Properties["name"]
 	require.NotNil(t, prop)
 
-	// The description should be "Hello World" (comma used as separator).
-	// But a tag with commas IN values can't be expressed.
 	assert.Equal(t, "Hello World", prop.Description)
 }
 
-func TestKvPrefixRegexpFalsePositive(t *testing.T) {
+func TestBareDescriptionWithEqualsSign(t *testing.T) {
 	t.Parallel()
 
-	// A bare description starting with "word=" is misclassified as key-value.
-	// The regex ^[^ \t\n]*= treats "a=b is the formula" as key "a" with
-	// value "b is the formula", producing an "unrecognized key" error.
+	// A bare description whose first token looks like word= but carries a spaced
+	// value (e.g. "a=b is the formula") is treated as a description, not as a
+	// key-value pair, so it does not produce an unrecognized-key error.
 	type MyType struct {
 		Name string `json:"name" jsonschema:"a=b is the formula"`
 	}
@@ -94,11 +94,11 @@ func TestKvPrefixRegexpFalsePositive(t *testing.T) {
 		"bare description starting with word= should be treated as description")
 }
 
-func TestParseIntAllowsNegativeValues(t *testing.T) {
+func TestParseIntRejectsNegativeValues(t *testing.T) {
 	t.Parallel()
 
-	// All of these keywords MUST be non-negative integers per JSON Schema.
-	// Currently parseInt accepts negative values without error.
+	// MinLength, maxLength, minItems, maxItems, minProperties, and maxProperties
+	// must be non-negative integers per JSON Schema; negatives are rejected.
 	tests := map[string]struct {
 		generate func() (*jsonschema.Schema, error)
 	}{
@@ -169,9 +169,11 @@ func TestParseIntAllowsNegativeValues(t *testing.T) {
 	}
 }
 
-func TestParseFloatAcceptsNaNInf(t *testing.T) {
+func TestParseFloatRejectsNaNInf(t *testing.T) {
 	t.Parallel()
 
+	// NaN and Inf are not finite numbers and are rejected as numeric keyword
+	// values.
 	tests := map[string]struct {
 		generate func() (*jsonschema.Schema, error)
 	}{
@@ -263,7 +265,7 @@ func TestParseTypedScalarPrecisionLoss(t *testing.T) {
 		"large int64 const should not lose precision in float64 cast")
 }
 
-func TestParseTypedScalarUnknownKindsAsString(t *testing.T) {
+func TestParseTypedScalarRejectsUnknownKinds(t *testing.T) {
 	t.Parallel()
 
 	type Inner struct {
@@ -275,9 +277,10 @@ func TestParseTypedScalarUnknownKindsAsString(t *testing.T) {
 	}
 
 	_, err := jsonschema.GenerateFor[MyType]()
-	// Setting default=foo on a struct field should be an error.
+	// A scalar tag value on a non-primitive (struct) field is rejected rather
+	// than coerced to a string.
 	require.Error(t, err,
-		"default= on struct type should produce an error, not silently use string")
+		"default= on a struct type is rejected, not coerced to a string")
 }
 
 func TestValidationErrorErrorCycleProtection(t *testing.T) {
@@ -306,35 +309,29 @@ func TestDraftIotaOrdering(t *testing.T) {
 	// which is impossible with the current iota ordering.
 }
 
-func TestSchemaURIRefPrefixSilentDefault(t *testing.T) {
+func TestUnknownDraftDoesNotEmit2020URI(t *testing.T) {
 	t.Parallel()
 
-	// An unknown Draft value (e.g., Draft(99)) silently defaults to Draft2020
-	// semantics instead of panicking or returning an error. Any future Draft
-	// constant would silently use 2020-12 without explicit handling.
+	// An unknown Draft value does not emit the 2020-12 schema URI.
 	type MyType struct {
 		Name string `json:"name"`
 	}
 
-	// Using a Draft value beyond the known constants should produce an error
-	// or panic, not silently use Draft2020 behavior.
 	unknownDraft := jsonschema.Draft(99)
 	s, err := jsonschema.GenerateFor[MyType](
 		jsonschema.WithDraft(unknownDraft),
 	)
 	require.NoError(t, err)
 
-	// Currently the schema URI silently defaults to 2020-12.
-	// This should be an error for unknown draft values.
 	assert.NotEqual(t, "https://json-schema.org/draft/2020-12/schema", s.Schema,
-		"unknown Draft value should not silently default to Draft2020 URI")
+		"unknown Draft value should not emit the Draft2020 URI")
 }
 
 func TestVocabSetOmitsMetaData(t *testing.T) {
 	t.Parallel()
 
-	// If metaData vocabulary is disabled, annotation keywords like title,
-	// description, default should be skipped. Currently no tracking for this.
+	// Disabling the metaData vocabulary leaves a string instance valid:
+	// annotation keywords (title, description) are not validated.
 	schema := &jsonschema.Schema{
 		Schema:      "https://json-schema.org/draft/2020-12/schema",
 		Type:        "string",
@@ -342,7 +339,6 @@ func TestVocabSetOmitsMetaData(t *testing.T) {
 		Description: "My Description",
 	}
 
-	// With metaData vocabulary disabled, annotations should be skipped.
 	err := jsonschema.Validate(schema, "hello",
 		jsonschema.WithVocabularies(map[string]bool{
 			jsonschema.VocabCore2020:       true,
@@ -351,7 +347,6 @@ func TestVocabSetOmitsMetaData(t *testing.T) {
 		}),
 	)
 	require.NoError(t, err)
-	// Currently passes but metaData keywords are not tracked by vocabSet.
 }
 
 func TestJSONSchemaExtenderReceivesMutableSchema(t *testing.T) {
@@ -383,10 +378,8 @@ func TestJSONSchemaExtenderReceivesMutableSchema(t *testing.T) {
 func TestFieldContextParentPartiallyBuilt(t *testing.T) {
 	t.Parallel()
 
-	// Tag interpreters receive Parent that's still under construction.
-	// Fields processed after the current one aren't yet in Properties.
-	// A tag interpreter inspecting Parent.Properties gets inconsistent
-	// results depending on field processing order.
+	// Every field's interpreter sees the fully populated Parent.Properties, so
+	// the count is independent of field processing order.
 	interp := &parentInspector{}
 
 	type MyType struct {
@@ -399,8 +392,7 @@ func TestFieldContextParentPartiallyBuilt(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	// Both fields should see the complete parent Properties map.
-	// Currently, earlier fields see fewer sibling properties.
+	// Both fields see the complete parent Properties map (all siblings present).
 	for _, snap := range interp.snapshots {
 		assert.Equal(t, 2, snap.propCount,
 			"field %q should see all sibling properties in Parent, got %d",
@@ -411,9 +403,10 @@ func TestFieldContextParentPartiallyBuilt(t *testing.T) {
 func TestSchemaTypeAliasBlocksExtension(t *testing.T) {
 	t.Parallel()
 
-	// Schema = jsonschema.Schema is a type alias. Keywords not in the upstream
-	// struct (e.g., $recursiveAnchor from 2019-09) only appear in Extra,
-	// but the validator never checks Extra for any keywords.
+	// Keywords absent from the upstream Schema struct (e.g. $recursiveAnchor from
+	// 2019-09) live only in Extra and are ignored by the validator. This is a
+	// limitation of the type alias: the validator inspects struct fields, not
+	// Extra.
 	schema := &jsonschema.Schema{
 		Type: "object",
 		Extra: map[string]any{
@@ -421,8 +414,7 @@ func TestSchemaTypeAliasBlocksExtension(t *testing.T) {
 		},
 	}
 
-	// The validator should recognize $recursiveAnchor, but it doesn't
-	// because it's in Extra, not a struct field.
+	// $recursiveAnchor is ignored, so any object instance validates.
 	err := jsonschema.Validate(schema, map[string]any{})
 	require.NoError(t, err)
 }
@@ -462,8 +454,7 @@ func TestNaNInfInSchema(t *testing.T) {
 func TestTagProcessingErrorPaths(t *testing.T) {
 	t.Parallel()
 
-	// Only one error case is tested (UnrecognizedKey). These test various
-	// error paths in tag processing.
+	// Non-numeric values for numeric and integer keywords are rejected.
 	tests := map[string]struct {
 		typeDef func() (*jsonschema.Schema, error)
 	}{

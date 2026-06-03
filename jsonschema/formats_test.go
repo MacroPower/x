@@ -9,9 +9,9 @@ import (
 	"go.jacobcolvin.com/jsonschema"
 )
 
-// Format validator tests, originally tracked as TODO.md items.
+// Edge-case tests for the built-in format validators in validate_formats.go.
 
-func TestRegexFormatValidatesRE2NotECMA262(t *testing.T) {
+func TestRegexFormatAcceptsECMA262Constructs(t *testing.T) {
 	t.Parallel()
 
 	schema := &jsonschema.Schema{
@@ -52,7 +52,7 @@ func TestRegexFormatValidatesRE2NotECMA262(t *testing.T) {
 	}
 }
 
-func TestEmailFormatUsesRFC5322NotRFC5321(t *testing.T) {
+func TestEmailFormatAcceptsQuotedLocalAndAddressLiteral(t *testing.T) {
 	t.Parallel()
 
 	schema := &jsonschema.Schema{
@@ -130,7 +130,7 @@ func TestHostnameRejectsTrailingDotFQDN(t *testing.T) {
 		"trailing-dot FQDN should be accepted for format=hostname")
 }
 
-func TestHostnameAcceptsAllNumericTLD(t *testing.T) {
+func TestHostnameRejectsAllNumericTLD(t *testing.T) {
 	t.Parallel()
 
 	schema := &jsonschema.Schema{
@@ -138,14 +138,14 @@ func TestHostnameAcceptsAllNumericTLD(t *testing.T) {
 		Format: "hostname",
 	}
 
-	// All-numeric hostname should be questionable (looks like IPv4).
-	// Convention: TLD should not be all-numeric to distinguish from IPv4.
+	// An all-numeric top-level label is rejected to disambiguate from an IPv4
+	// address (RFC 1123 2.1).
 	err := jsonschema.Validate(schema, "999.999.999", jsonschema.WithFormats(true))
 	require.Error(t, err,
 		"all-numeric hostname should be rejected for format=hostname")
 }
 
-func TestIDNHostnameMissing253OctetCheck(t *testing.T) {
+func TestIDNHostnameRejectsOver253Octets(t *testing.T) {
 	t.Parallel()
 
 	schema := &jsonschema.Schema{
@@ -169,7 +169,7 @@ func TestIDNHostnameMissing253OctetCheck(t *testing.T) {
 		"idn-hostname exceeding 253 octets should be rejected")
 }
 
-func TestIDNEmailMissing64OctetLocalPart(t *testing.T) {
+func TestIDNEmailRejectsOver64OctetLocalPart(t *testing.T) {
 	t.Parallel()
 
 	schema := &jsonschema.Schema{
@@ -184,7 +184,7 @@ func TestIDNEmailMissing64OctetLocalPart(t *testing.T) {
 		"idn-email with >64 octet local part should be rejected")
 }
 
-func TestIDNEmailTooPermissiveLocalPart(t *testing.T) {
+func TestIDNEmailRejectsSpacesInLocalPart(t *testing.T) {
 	t.Parallel()
 
 	schema := &jsonschema.Schema{
@@ -249,7 +249,7 @@ func TestURICharsControlCharacters(t *testing.T) {
 		"URI with control characters should be rejected")
 }
 
-func TestIRICharsMissingDoubleQuoteCheck(t *testing.T) {
+func TestIRIRejectsDoubleQuote(t *testing.T) {
 	t.Parallel()
 
 	schema := &jsonschema.Schema{
@@ -263,7 +263,7 @@ func TestIRICharsMissingDoubleQuoteCheck(t *testing.T) {
 		"IRI with double quotes should be rejected")
 }
 
-func TestURIPercentEncodingNotValidated(t *testing.T) {
+func TestURIRejectsInvalidPercentEncoding(t *testing.T) {
 	t.Parallel()
 
 	schema := &jsonschema.Schema{
@@ -277,24 +277,21 @@ func TestURIPercentEncodingNotValidated(t *testing.T) {
 		"URI with invalid percent-encoding should be rejected")
 }
 
-func TestHostnameRejectsIDNSeparatorsByAccident(t *testing.T) {
+func TestHostnameRejectsFullwidthFullStop(t *testing.T) {
 	t.Parallel()
 
-	// Non-ASCII characters like \uFF0E (fullwidth full stop) are rejected
-	// because they fail the isAlpha/isDigit/isHyphen check, not because
-	// they're recognized as IDNA separators.
 	schema := &jsonschema.Schema{
 		Type:   "string",
 		Format: "hostname",
 	}
 
-	// The fullwidth stop should be rejected specifically as an IDNA separator,
-	// not as an unrecognized character.
+	// A fullwidth full stop (U+FF0E) is not an ASCII label separator and is
+	// rejected.
 	err := jsonschema.Validate(schema, "example\uFF0Ecom", jsonschema.WithFormats(true))
 	require.Error(t, err)
 }
 
-func TestValidateTimeOffsetRelianceOnTimeParse(t *testing.T) {
+func TestTimeRequiresOffset(t *testing.T) {
 	t.Parallel()
 
 	schema := &jsonschema.Schema{
@@ -302,14 +299,13 @@ func TestValidateTimeOffsetRelianceOnTimeParse(t *testing.T) {
 		Format: "time",
 	}
 
-	// A time without any offset should be rejected.
-	// Currently relies on time.Parse failing due to string length mismatch.
+	// RFC 3339 requires a zone offset; an offsetless time is rejected.
 	err := jsonschema.Validate(schema, "12:00:00", jsonschema.WithFormats(true))
 	require.Error(t, err,
 		"time without offset should be rejected (RFC 3339 requires offset)")
 }
 
-func TestURIPermissiveValidation(t *testing.T) {
+func TestURIRejectsMalformedForms(t *testing.T) {
 	t.Parallel()
 
 	schema := &jsonschema.Schema{
@@ -339,7 +335,7 @@ func TestURIPermissiveValidation(t *testing.T) {
 	}
 }
 
-func TestIRIPercentEncodingNotValidated(t *testing.T) {
+func TestIRIRejectsInvalidPercentEncoding(t *testing.T) {
 	t.Parallel()
 
 	schema := &jsonschema.Schema{
@@ -356,8 +352,8 @@ func TestIRIPercentEncodingNotValidated(t *testing.T) {
 func TestIPv4LeadingZeros(t *testing.T) {
 	t.Parallel()
 
-	// TODO.md notes this was resolved in Go 1.17+ (module requires Go 1.24+).
-	// Go's net.ParseIP correctly rejects leading zeros in IPv4 octets.
+	// Net.ParseIP rejects leading zeros in IPv4 octets (since Go 1.17; this
+	// module requires Go 1.24+).
 	schema := &jsonschema.Schema{
 		Type:   "string",
 		Format: "ipv4",

@@ -118,10 +118,10 @@ var (
 
 // TestCloneSchemaDeepIndependence verifies that cloneSchema produces an
 // independent copy: mutating the clone must never reach back into the
-// original. The package relies on this for remote-ref isolation (PRD Thread
-// Safety: "remotely-fetched schemas are deep-copied before being registered"),
-// where Schema.Resolve's in-place mutations must not corrupt the caller's
-// schema. Because cloneSchema round-trips through JSON, every JSON-serializable
+// original. The package relies on this for remote-ref isolation: remotely
+// fetched schemas are deep-copied before being registered, so Schema.Resolve's
+// in-place mutations cannot corrupt the caller's schema. Because cloneSchema
+// round-trips through JSON, every JSON-serializable
 // field — including maps, slices, and pointers shared shallowly by upstream's
 // CloneSchemas — comes back as a fresh value. These cases verify that
 // independence directly rather than documenting upstream's shallow CloneSchemas

@@ -31,14 +31,14 @@ type suiteCase struct {
 // skipReason documents why a test is skipped.
 type skipReason string
 
-// Skip reasons. Each names the PRD constraint that makes a specific suite case
-// diverge. Skips stay as narrow as possible: only the cases that genuinely
+// Skip reasons. Each names the package constraint that makes a specific suite
+// case diverge. Skips stay as narrow as possible: only the cases that genuinely
 // cannot pass carry a reason, so the surrounding cases in the same file and
 // group still run.
 const (
-	reasonCrossDraft       skipReason = "the referenced schema is Draft 2019-09, which this package does not support (PRD Goal 2 and Design Decision 3: Draft-07 and 2020-12 only); the draft is taken from the root schema's $schema and there is no per-ref switch to an unsupported draft's keyword semantics"
-	reasonRE2Whitespace    skipReason = `patterns use Go RE2, not ECMA 262 (PRD Design Decision 15): RE2 \s matches only [\t\n\f\r ], so this character's class membership differs`
-	reasonRE2ControlEscape skipReason = `patterns use Go RE2, not ECMA 262 (PRD Design Decision 15): RE2 has no \cX control escape, so Schema.Resolve rejects the pattern and the matching instance cannot validate`
+	reasonCrossDraft       skipReason = "the referenced schema is Draft 2019-09, which this package does not support (Draft-07 and 2020-12 only); the draft is taken from the root schema's $schema and there is no per-ref switch to an unsupported draft's keyword semantics"
+	reasonRE2Whitespace    skipReason = `patterns use Go RE2, not ECMA 262: RE2 \s matches only [\t\n\f\r ], so this character's class membership differs`
+	reasonRE2ControlEscape skipReason = `patterns use Go RE2, not ECMA 262: RE2 has no \cX control escape, so Schema.Resolve rejects the pattern and the matching instance cannot validate`
 )
 
 func buildSuiteSkips() map[string]skipReason {
@@ -58,7 +58,7 @@ func buildSuiteSkips() map[string]skipReason {
 }
 
 // addECMARegexSkips records the ECMA-262 regex cases that diverge because
-// patterns use Go's RE2 (PRD Design Decision 15). RE2's \s matches only
+// patterns use Go's RE2. RE2's \s matches only
 // [\t\n\f\r ] — not vertical tab, non-breaking space, or Unicode separators —
 // and \S is its inverse, so the membership of those characters flips. RE2 also
 // rejects the \cX control escape. The divergence is identical for both drafts,
@@ -98,11 +98,11 @@ var (
 	// "draft/file.json/group", or "draft/file.json/group/test".
 	//
 	// Every entry is a deliberate, minimal divergence required by this package's
-	// PRD: only the specific cases that cannot pass are skipped, so the other
-	// cases in the same file and group still run. The required suite and the
-	// optional/format suite run with no skips. TestSuiteSkipsAreLive guards the
-	// map against typos and stale keys by asserting each key names a real suite
-	// file, group, and test.
+	// design (Draft-07/2020-12 only, Go RE2 patterns): only the specific cases
+	// that cannot pass are skipped, so the other cases in the same file and group
+	// still run. The required suite and the optional/format suite run with no
+	// skips. TestSuiteSkipsAreLive guards the map against typos and stale keys by
+	// asserting each key names a real suite file, group, and test.
 	suiteSkips = buildSuiteSkips()
 
 	// Remote schemas keyed by http://localhost:1234/<path>, loaded from

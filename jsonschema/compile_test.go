@@ -166,9 +166,7 @@ func TestCompileConcurrent(t *testing.T) {
 	// data race on shared state; the per-instance results must stay correct.
 	var wg sync.WaitGroup
 	for range 32 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for range 25 {
 				for _, c := range cases {
 					gotValid := v.Validate(c.instance) == nil
@@ -177,7 +175,7 @@ func TestCompileConcurrent(t *testing.T) {
 					}
 				}
 			}
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -206,18 +204,19 @@ func TestCompileConcurrentWithRefResolver(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for range 16 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for range 25 {
-				if err := v.Validate(map[string]any{"name": "ada"}); err != nil {
+				err := v.Validate(map[string]any{"name": "ada"})
+				if err != nil {
 					t.Errorf("valid instance rejected: %v", err)
 				}
-				if err := v.Validate(map[string]any{"name": ""}); err == nil {
+
+				err = v.Validate(map[string]any{"name": ""})
+				if err == nil {
 					t.Errorf("empty name should fail minLength")
 				}
 			}
-		}()
+		})
 	}
 
 	wg.Wait()
