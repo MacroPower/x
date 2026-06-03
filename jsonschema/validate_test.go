@@ -1051,6 +1051,13 @@ func TestValidateFormats(t *testing.T) {
 			value:  "25:00:00",
 			err:    "format",
 		},
+		"time single-digit hour invalid": {
+			// RFC 3339 requires a two-digit hour; Go's time.Parse would otherwise
+			// accept this leniently.
+			format: "time",
+			value:  "8:30:06Z",
+			err:    "format",
+		},
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {

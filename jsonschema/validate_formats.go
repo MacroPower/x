@@ -80,6 +80,14 @@ func validateDate(s string) error {
 func validateTime(s string) error {
 	upper := strings.ToUpper(s)
 
+	// RFC 3339 partial-time requires a two-digit hour, minute, and second.
+	// Go's time.Parse accepts a single-digit hour for the "15" layout field, so
+	// enforce the fixed-width "hh:mm:ss" shape explicitly; this also keeps the
+	// fixed byte offsets in validateLeapSecond aligned.
+	if !hasTwoDigitClock(upper) {
+		return errors.New("invalid time")
+	}
+
 	// Handle leap second: temporarily replace :60 with :59 for parsing.
 	isLeap := false
 	normalized := upper
@@ -110,6 +118,22 @@ func validateTime(s string) error {
 	}
 
 	return nil
+}
+
+// hasTwoDigitClock reports whether s begins with a fixed-width "hh:mm:ss" clock,
+// with two digits for each of the hour, minute, and second, as RFC 3339
+// partial-time requires. It does not range-check the fields or inspect the
+// optional fractional-second and offset parts.
+func hasTwoDigitClock(s string) bool {
+	if len(s) < 8 {
+		return false
+	}
+
+	isDigit := func(b byte) bool { return b >= '0' && b <= '9' }
+
+	return isDigit(s[0]) && isDigit(s[1]) && s[2] == ':' &&
+		isDigit(s[3]) && isDigit(s[4]) && s[5] == ':' &&
+		isDigit(s[6]) && isDigit(s[7])
 }
 
 // validateLeapSecond verifies that a time with second=60 corresponds to
