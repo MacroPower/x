@@ -935,6 +935,30 @@ func (g *generator) buildFieldSchema(parentType reflect.Type, fi structFieldInfo
 		if err != nil {
 			return nil, fmt.Errorf("jsonschema tag: %w", err)
 		}
+
+		// A nullable pointer field is generated as anyOf[value, null] with
+		// annotations kept as siblings of anyOf. const and enum, however, test the
+		// instance value regardless of its type, so on the wrapper they also
+		// reject the permitted null; move them onto the value branch. Type-gated
+		// keywords (minimum, pattern, ...) do not apply to null and stay put.
+		target := fieldSchema
+		if inner := nullableInnerSchema(fieldSchema); inner != nil &&
+			(fieldSchema.Const != nil || fieldSchema.Enum != nil) {
+			inner.Const, fieldSchema.Const = fieldSchema.Const, nil
+			inner.Enum, fieldSchema.Enum = fieldSchema.Enum, nil
+			target = inner
+		}
+
+		// An explicit const/enum fully constrains the value, so the type-derived
+		// numeric bounds are redundant. Drop them: those bounds round
+		// MaxInt64/MaxUint64 down to stay representable as float64, so they would
+		// otherwise reject a const/enum set to the type's own boundary value.
+		if target.Const != nil || target.Enum != nil {
+			target.Minimum = nil
+			target.Maximum = nil
+			target.ExclusiveMinimum = nil
+			target.ExclusiveMaximum = nil
+		}
 	}
 
 	// Add to parent.
@@ -1158,6 +1182,20 @@ func (g *generator) applyNullable(s *Schema, t reflect.Type, nullable bool) *Sch
 			{Type: "null"},
 		},
 	}
+}
+
+// nullableInnerSchema returns the value (non-null) branch of a schema produced
+// by [generator.applyNullable] — an anyOf of a value schema and
+// {"type":"null"} — or nil if s does not have that exact shape.
+func nullableInnerSchema(s *Schema) *Schema {
+	if len(s.AnyOf) != 2 || s.AnyOf[0] == nil || s.AnyOf[1] == nil {
+		return nil
+	}
+	if s.AnyOf[1].Type == typeNameNull {
+		return s.AnyOf[0]
+	}
+
+	return nil
 }
 
 // isStringableType reports whether json:",string" applies to the given type.
