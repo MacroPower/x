@@ -1237,12 +1237,58 @@ func acceptedInstance(instance any) bool {
 	}
 }
 
+// maxNumberLen bounds the length of a JSON number literal that the validator
+// parses into an exact [big.Rat]. [big.Rat.SetString] is quadratic in the digit
+// count, so an adversarial multi-megabyte literal can cost tens of seconds; a
+// literal this long is also far outside the float64 range of every schema bound
+// (float64 tops out near 1.8e308, ~309 digits), so exact rational arithmetic on
+// it is never needed for a correct comparison. Over-length numbers are handled
+// by magnitude (their sign) instead of being parsed.
+const maxNumberLen = 4096
+
+// isIntegerLiteral reports whether s is a base-10 integer literal: an optional
+// sign followed by one or more digits, with no fractional or exponent part. Such
+// a literal is always integral, which lets [jsonNumberIsIntegral] answer in O(n)
+// without the quadratic [big.Rat] parse a very long literal would otherwise
+// incur.
+func isIntegerLiteral(s string) bool {
+	if s == "" {
+		return false
+	}
+	if s[0] == '+' || s[0] == '-' {
+		s = s[1:]
+	}
+	if s == "" {
+		return false
+	}
+
+	for i := range len(s) {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+
+	return true
+}
+
 // jsonNumberIsIntegral reports whether a [json.Number] denotes a mathematical
 // integer (e.g. "1.0" or a value far beyond the int64 range). A big.Rat parses
 // the decimal literal exactly, so IsInt holds at any magnitude or precision; a
 // fixed-width big.Float would round away the fraction of a very long non-integer
 // and misclassify it.
 func jsonNumberIsIntegral(n json.Number) bool {
+	// A plain integer literal is integral by construction; recognize it in O(n)
+	// so a very long integer literal never reaches the quadratic big.Rat parse.
+	if isIntegerLiteral(string(n)) {
+		return true
+	}
+	// Past the length cap the literal carries a fractional or exponent part (a
+	// plain integer was handled above) and is too long to parse cheaply, so it is
+	// not treated as an integer.
+	if len(n) > maxNumberLen {
+		return false
+	}
+
 	r := new(big.Rat)
 	if _, ok := r.SetString(string(n)); !ok {
 		return false
@@ -1459,6 +1505,13 @@ func toBigRat(v any) (*big.Rat, bool) {
 		return r, true
 
 	case json.Number:
+		// DoS guard: an over-length literal would cost quadratic time to parse
+		// into an exact rational. Report it as unparseable so validateNumeric
+		// falls back to a sign-based magnitude comparison.
+		if len(val) > maxNumberLen {
+			return nil, false
+		}
+
 		r := new(big.Rat)
 		if _, ok := r.SetString(string(val)); ok {
 			return r, true
@@ -1514,7 +1567,11 @@ func (v *validator) validateNumeric(schema *Schema, instance any, instancePath, 
 
 	val, ok := toBigRat(instance)
 	if !ok {
-		return nil
+		// The only finite instance toBigRat rejects is a JSON number whose
+		// literal exceeds the length cap (the DoS guard). Its magnitude lies far
+		// outside the float64 range of every bound, so the comparisons reduce to
+		// its sign; multipleOf needs the exact value and is skipped.
+		return v.validateNumericExtreme(schema, instance, instancePath, schemaPath)
 	}
 
 	var errs []*ValidationError
@@ -1605,6 +1662,67 @@ func (v *validator) validateNumeric(schema *Schema, instance any, instancePath, 
 	}
 
 	return errs
+}
+
+// validateNumericExtreme checks the numeric bound keywords for an instance whose
+// literal is too long to parse into an exact [big.Rat] (see maxNumberLen). Such
+// a value lies beyond the float64 range of every bound, so a positive value
+// exceeds every minimum and a negative value is below every minimum; only the
+// sign matters. multipleOf needs the exact value and is skipped.
+func (v *validator) validateNumericExtreme(
+	schema *Schema,
+	instance any,
+	instancePath, schemaPath string,
+) []*ValidationError {
+	n, ok := instance.(json.Number)
+	if !ok || len(n) == 0 {
+		return nil
+	}
+
+	negative := n[0] == '-'
+	num := truncatedNumber(string(n))
+
+	var errs []*ValidationError
+
+	add := func(keyword, msg string) {
+		errs = append(errs, &ValidationError{
+			InstancePath: instancePath,
+			SchemaPath:   schemaPath + "/" + keyword,
+			Keyword:      keyword,
+			Message:      msg,
+		})
+	}
+
+	if negative {
+		if schema.Minimum != nil {
+			add("minimum", fmt.Sprintf("%s is less than %v", num, *schema.Minimum))
+		}
+		if schema.ExclusiveMinimum != nil {
+			add("exclusiveMinimum", fmt.Sprintf("%s is less than or equal to %v", num, *schema.ExclusiveMinimum))
+		}
+
+		return errs
+	}
+
+	if schema.Maximum != nil {
+		add("maximum", fmt.Sprintf("%s is greater than %v", num, *schema.Maximum))
+	}
+	if schema.ExclusiveMaximum != nil {
+		add("exclusiveMaximum", fmt.Sprintf("%s is greater than or equal to %v", num, *schema.ExclusiveMaximum))
+	}
+
+	return errs
+}
+
+// truncatedNumber shortens an over-length number literal for use in an error
+// message so the message stays bounded regardless of the instance size.
+func truncatedNumber(s string) string {
+	const keep = 32
+	if len(s) <= keep {
+		return s
+	}
+
+	return fmt.Sprintf("%s... (%d digits)", s[:keep], len(s))
 }
 
 // ratString returns a compact string representation of a [big.Rat].
@@ -1942,6 +2060,13 @@ func hashValue(v any) uint64 {
 		return stringHash(r.RatString()) + 4
 
 	case json.Number:
+		// DoS guard: avoid quadratic big.Rat parsing of an adversarial literal by
+		// hashing it textually. An over-length number is effectively unique for
+		// deduplication, matching the unparseable-literal fallback below.
+		if len(val) > maxNumberLen {
+			return stringHash(string(val)) + 5
+		}
+
 		r := new(big.Rat)
 		if _, ok := r.SetString(string(val)); ok {
 			// IsInt64 guards against silent truncation for integers beyond the
