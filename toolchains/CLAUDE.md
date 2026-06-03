@@ -12,8 +12,9 @@ consumed by any project (including this repo, which dogfoods them via the root
   `test-integration`/`test-coverage`, `lint` (golangci-lint), `lint-deadcode`
   (advisory `golang.org/x/tools` deadcode analysis, not a `+check`),
   `format-go`, `generate`, `tidy`/`check-tidy`, multi-module discovery
-  (`modules`), `ensure-git-init`/`ensure-git-repo`, and a benchmark harness.
-  Consolidated from the eidetic base plus kclipper's git helpers.
+  (`modules`), `ensure-git-init`/`ensure-git-repo`, and benchmark stages
+  (timed via the shared `bench` module). Consolidated from the eidetic base
+  plus kclipper's git helpers.
 - **`security`** — Trivy scanner: `scan-source`/`scan-image` (gate scans that
   fail on findings) and `scan-source-sarif`/`scan-image-sarif` (non-gating,
   emit SARIF for GitHub Code Scanning).
@@ -34,6 +35,21 @@ consumed by any project (including this repo, which dogfoods them via the root
   pipeline (publish/sign/runtime images) stays in each project's `*-ci` module,
   which composes these primitives. `release-base` + `snapshot` are the planned
   Tier B follow-up.
+- **`cosign`** — Sigstore image signing: `sign-keyless` (Fulcio + Rekor via an
+  OIDC token, for GitHub Actions) and `sign-with-key` (a cosign private key).
+  Both sign image digests concurrently and mount a Docker config for cosign's
+  own registry requests when credentials are supplied; callers deduplicate
+  digests first. Pins the cosign version once. It is **not** unit-tested in
+  isolation — real signing needs a reachable registry plus OIDC/key
+  credentials, so it is exercised through the consumer release pipelines.
+- **`bench`** — Pipeline benchmark harness. A stage is a `*dagger.Container`
+  rather than a closure, which is what lets the harness be shared at all
+  (containers cross module boundaries, closures do not): `with-stage`
+  accumulates named stages, `run` times each one's evaluation (sequential for
+  isolated timings, parallel for full-pipeline wall-clock), and `summary`
+  renders the table. Consumed by `go` and every `*-ci` module, which supply the
+  project-specific stages and apply cache-busting before handing the container
+  over.
 
 Each module is self-contained: its own `go.mod`/`go.sum` and no relative
 `include`, so it can be sourced remotely. Tests live in per-module `tests/`
