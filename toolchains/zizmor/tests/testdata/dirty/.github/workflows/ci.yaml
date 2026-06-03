@@ -1,0 +1,9 @@
+name: ci
+on:
+  push:
+permissions: {}
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "${{ github.event.head_commit.message }}"
