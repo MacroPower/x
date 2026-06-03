@@ -90,3 +90,35 @@ func TestRegistryHost(t *testing.T) {
 		}
 	}
 }
+
+func TestFileArch(t *testing.T) {
+	t.Parallel()
+	cases := map[string]struct {
+		platform string
+		want     string
+		err      bool
+	}{
+		"linux amd64": {"linux/amd64", "x86-64", false},
+		"linux arm64": {"linux/arm64", "aarch64", false},
+		"bare amd64":  {"amd64", "x86-64", false},
+		"unknown":     {"linux/riscv64", "", true},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			got, err := FileArch(tc.platform)
+			if tc.err {
+				if err == nil {
+					t.Errorf("FileArch(%q) expected error, got %q", tc.platform, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("FileArch(%q) unexpected error: %v", tc.platform, err)
+			}
+			if got != tc.want {
+				t.Errorf("FileArch(%q) = %q, want %q", tc.platform, got, tc.want)
+			}
+		})
+	}
+}

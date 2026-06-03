@@ -94,3 +94,27 @@ func FormatDigestChecksums(refs []string) string {
 func RegistryHost(registry string) string {
 	return strings.SplitN(registry, "/", 2)[0]
 }
+
+// platformToFileArch maps a Go platform architecture (GOARCH) to the
+// architecture token printed by the `file` command.
+var platformToFileArch = map[string]string{
+	"amd64": "x86-64",
+	"arm64": "aarch64",
+}
+
+// FileArch returns the architecture token that `file` prints for the given Go
+// platform string. It accepts a bare GOARCH ("amd64") or a full platform
+// ("linux/amd64") and uses the GOARCH component. An unrecognized architecture
+// returns an error.
+func FileArch(platform string) (string, error) {
+	parts := strings.Split(platform, "/")
+	arch := parts[len(parts)-1]
+	if len(parts) >= 2 {
+		arch = parts[1]
+	}
+	expected, ok := platformToFileArch[arch]
+	if !ok {
+		return "", fmt.Errorf("unknown platform architecture %q", arch)
+	}
+	return expected, nil
+}

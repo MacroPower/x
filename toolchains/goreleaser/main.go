@@ -7,6 +7,8 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"dagger/goreleaser/internal/dagger"
 	"dagger/goreleaser/release"
@@ -136,6 +138,49 @@ func (m *Goreleaser) EnsureGitRepo(
 			"--date='2000-01-01T00:00:00+00:00'; " +
 			"fi",
 	})
+}
+
+// ---------------------------------------------------------------------------
+// Release artifact verification
+// ---------------------------------------------------------------------------
+
+// VerifyBinaryPlatform runs the `file` command on a built binary and asserts
+// that its reported architecture matches the expected architecture for the
+// target platform, catching cross-compilation mismatches. Returns an error
+// when the architecture token is absent from the `file` output.
+func (m *Goreleaser) VerifyBinaryPlatform(
+	ctx context.Context,
+	// Built binary to inspect.
+	bin *dagger.File,
+	// Target platform (e.g. "linux/amd64").
+	platform dagger.Platform,
+) error {
+	expected, err := release.FileArch(string(platform))
+	if err != nil {
+		return err
+	}
+
+	name, err := bin.Name(ctx)
+	if err != nil {
+		return fmt.Errorf("get binary name: %w", err)
+	}
+
+	mntPath := "/mnt/" + name
+	out, err := dag.Container().
+		From("debian:13-slim").
+		WithExec([]string{"sh", "-c", "apt-get update -qq && apt-get install -y -qq file"}).
+		WithMountedFile(mntPath, bin).
+		WithExec([]string{"file", mntPath}).
+		Stdout(ctx)
+	if err != nil {
+		return fmt.Errorf("run file on binary %s: %w", name, err)
+	}
+
+	if !strings.Contains(out, expected) {
+		return fmt.Errorf("binary %s: expected architecture %q (%s) not found in file output: %s", name, expected, platform, out)
+	}
+
+	return nil
 }
 
 // ---------------------------------------------------------------------------
