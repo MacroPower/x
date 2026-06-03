@@ -80,9 +80,9 @@ func TestFormatDigestChecksums(t *testing.T) {
 func TestRegistryHost(t *testing.T) {
 	t.Parallel()
 	cases := map[string]string{
-		"ghcr.io/macropower/eidetic": "ghcr.io",
-		"localhost:5000/x":           "localhost:5000",
-		"ghcr.io":                    "ghcr.io",
+		"ghcr.io/acme/app": "ghcr.io",
+		"localhost:5000/x": "localhost:5000",
+		"ghcr.io":          "ghcr.io",
 	}
 	for in, want := range cases {
 		if got := RegistryHost(in); got != want {

@@ -1,10 +1,8 @@
 # Shared Dagger Toolchains
 
-Reusable Dagger toolchain modules, consolidated from the per-repo copies that
-previously lived in eidetic, terrarium, and kclipper. They are designed to be
-consumed by any project (including this repo, which dogfoods them via the root
-`dagger.json`) and, eventually, referenced remotely as
-`github.com/MacroPower/x/toolchains/<module>@<ref>`.
+Reusable Dagger toolchain modules designed to be consumed by any project
+(including this repo, which dogfoods them via the root `dagger.json`) and
+referenced remotely as `github.com/MacroPower/x/toolchains/<module>@<ref>`.
 
 ## Modules
 
@@ -13,8 +11,7 @@ consumed by any project (including this repo, which dogfoods them via the root
   (advisory `golang.org/x/tools` deadcode analysis, not a `+check`),
   `format-go`, `generate`, `tidy`/`check-tidy`, multi-module discovery
   (`modules`), `ensure-git-init`/`ensure-git-repo`, and benchmark stages
-  (timed via the shared `bench` module). Consolidated from the eidetic base
-  plus kclipper's git helpers.
+  (timed via the shared `bench` module).
 - **`security`** — Trivy scanner: `scan-source`/`scan-image` (gate scans that
   fail on findings) and `scan-source-sarif`/`scan-image-sarif` (non-gating,
   emit SARIF for GitHub Code Scanning).

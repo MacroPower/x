@@ -90,7 +90,7 @@ func FormatDigestChecksums(refs []string) string {
 }
 
 // RegistryHost extracts the host (with optional port) from a registry address.
-// For example, "ghcr.io/macropower/eidetic" returns "ghcr.io".
+// For example, "ghcr.io/acme/app" returns "ghcr.io".
 func RegistryHost(registry string) string {
 	return strings.SplitN(registry, "/", 2)[0]
 }

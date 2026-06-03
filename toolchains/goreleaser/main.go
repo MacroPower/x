@@ -253,9 +253,9 @@ func (m *Goreleaser) FormatDigestChecksums(
 }
 
 // RegistryHost extracts the host (with optional port) from a registry address.
-// For example, "ghcr.io/macropower/eidetic" returns "ghcr.io".
+// For example, "ghcr.io/acme/app" returns "ghcr.io".
 func (m *Goreleaser) RegistryHost(
-	// Registry address (e.g. "ghcr.io/macropower/eidetic").
+	// Registry address (e.g. "ghcr.io/acme/app").
 	registry string,
 ) string {
 	return release.RegistryHost(registry)
