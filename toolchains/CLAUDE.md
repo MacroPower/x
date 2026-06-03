@@ -19,18 +19,22 @@ consumed by any project (including this repo, which dogfoods them via the root
   fail on findings) and `scan-source-sarif`/`scan-image-sarif` (non-gating,
   emit SARIF for GitHub Code Scanning).
 - **`zizmor`** — GitHub Actions workflow linter: `lint` (+check, runs zizmor
-  over `.github/workflows` using `.github/zizmor.yaml`) and `lint-base` (the
-  configured container, exposed so consumers can wrap it for benchmarks without
-  a `go` dependency). `image`/`config-path`/`workflows-dir` are optional
-  overrides. Mirrors `security`'s self-contained, literal-defaulting shape.
+  over `.github/workflows`; `--config` is passed only when `config-path` is set,
+  otherwise zizmor auto-discovers a config or uses its built-in defaults, so it
+  drops into projects without a config file) and `lint-base` (the configured
+  container, exposed so consumers can wrap it for benchmarks without a `go`
+  dependency). `image`/`config-path`/`workflows-dir` are optional overrides.
+  Mirrors `security`'s self-contained, literal-defaulting shape.
 - **`prettier`** — Prettier formatter/linter for YAML/JSON/Markdown: `lint`
   (+check, `prettier --check`), `format` (returns a `Changeset` the consumer
   merges with its other formatters, e.g. gofmt), and `lint-base` (the configured
   container, for benchmarks). `image`/`version`/`config-path`/`patterns`/
   `cache-namespace` are optional overrides.
 - **`goreleaser`** — Reusable GoReleaser primitives (Tier A): `goreleaser-base`
-  (a Go base + the goreleaser binary), `check-base`, `check` (+check, validates
-  `.goreleaser.yaml`), `ensure-git-repo` (worktree-aware git bootstrap),
+  (a Go base + the goreleaser binary), `binary`/`with-goreleaser` (install the
+  goreleaser binary onto another container, mirroring cosign/syft), `check-base`,
+  `check` (+check, validates `.goreleaser.yaml`), `ensure-git-repo`
+  (worktree-aware git bootstrap),
   `verify-binary-platform` (asserts a built binary's arch matches its target,
   catching cross-compilation mismatches), and the pure tag/digest helpers
   `version-tags`/`is-prerelease`/`deduplicate-digests`/`format-digest-checksums`/
