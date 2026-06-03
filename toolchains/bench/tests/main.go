@@ -26,6 +26,7 @@ func (t *Tests) All(ctx context.Context) error {
 		{"failure-captured", t.FailureCaptured},
 		{"summary-table", t.SummaryTable},
 		{"timing", t.Timing},
+		{"parallel-wall-clock", t.ParallelWallClock},
 	}
 	for _, tc := range cases {
 		if err := tc.fn(ctx); err != nil {
@@ -142,6 +143,51 @@ func (t *Tests) Timing(ctx context.Context) error {
 	}
 	if dur < 1.5 {
 		return fmt.Errorf("sleep stage timed at %.2fs, want >= 1.5s (did it actually execute?)", dur)
+	}
+	return nil
+}
+
+// ParallelWallClock exercises the parallel run path and the WALL-CLOCK/SUM
+// branch of the summary table, neither of which the sequential tests cover. Two
+// sleeping stages both execute and are timed, and the parallel summary reports
+// the wall-clock and sum rows.
+func (t *Tests) ParallelWallClock(ctx context.Context) error {
+	b := dag.Bench().
+		WithStage("sleep-a", bust(base()).WithExec([]string{"sleep", "2"})).
+		WithStage("sleep-b", bust(base()).WithExec([]string{"sleep", "2"}))
+
+	results, err := b.Run(ctx, dagger.BenchRunOpts{Parallel: true})
+	if err != nil {
+		return err
+	}
+	if len(results) != 2 {
+		return fmt.Errorf("want 2 results, got %d", len(results))
+	}
+	for i := range results {
+		ok, err := results[i].Ok(ctx)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("parallel stage %d: want Ok=true", i)
+		}
+		dur, err := results[i].DurationSecs(ctx)
+		if err != nil {
+			return err
+		}
+		if dur < 1.5 {
+			return fmt.Errorf("parallel stage %d timed at %.2fs, want >= 1.5s", i, dur)
+		}
+	}
+
+	out, err := b.Summary(ctx, dagger.BenchSummaryOpts{Parallel: true})
+	if err != nil {
+		return err
+	}
+	for _, want := range []string{"WALL-CLOCK", "SUM", "parallel"} {
+		if !strings.Contains(out, want) {
+			return fmt.Errorf("parallel summary missing %q:\n%s", want, out)
+		}
 	}
 	return nil
 }

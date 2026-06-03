@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"dagger/tests/internal/dagger"
 )
@@ -58,8 +59,12 @@ func (t *Tests) FormatProducesChanges(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if patch == "" {
-		return fmt.Errorf("expected Format to produce a non-empty changeset for the unformatted fixture")
+	// Assert each advertised file type (JSON/Markdown/YAML) was reformatted, so
+	// a regression in any one type is caught rather than masked by the others.
+	for _, want := range []string{"sample.json", "sample.md", "sample.yaml"} {
+		if !strings.Contains(patch, want) {
+			return fmt.Errorf("expected Format changeset to reformat %s, patch:\n%s", want, patch)
+		}
 	}
 	return nil
 }

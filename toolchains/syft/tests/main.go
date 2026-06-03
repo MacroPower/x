@@ -6,8 +6,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-
-	"dagger/tests/internal/dagger"
 )
 
 // Tests exercises the syft toolchain.
@@ -38,7 +36,7 @@ func (t *Tests) SbomDetectsPackage(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	for _, want := range []string{"spdxVersion", "requests"} {
+	for _, want := range []string{"spdxVersion", "requests", "flask"} {
 		if !strings.Contains(out, want) {
 			return fmt.Errorf("SBOM missing %q", want)
 		}

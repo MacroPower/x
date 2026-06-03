@@ -26,6 +26,7 @@ func (t *Tests) All(ctx context.Context) error {
 	}{
 		{"lint-clean", t.LintClean},
 		{"lint-detects-issue", t.LintDetectsIssue},
+		{"lint-no-config", t.LintNoConfig},
 	}
 	for _, tc := range cases {
 		if err := tc.fn(ctx); err != nil {
@@ -47,4 +48,11 @@ func (t *Tests) LintDetectsIssue(ctx context.Context) error {
 		return fmt.Errorf("expected zizmor lint to flag the template-injection workflow")
 	}
 	return nil
+}
+
+// LintNoConfig verifies that a project with no zizmor config file lints against
+// zizmor's built-in defaults and passes, rather than erroring on a missing
+// config. This is the "droppable into any consumer" path.
+func (t *Tests) LintNoConfig(ctx context.Context) error {
+	return dag.Zizmor(dagger.ZizmorOpts{Source: t.fixture("no-config")}).Lint(ctx)
 }
