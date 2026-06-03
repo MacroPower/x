@@ -16,8 +16,9 @@ import (
 )
 
 const (
-	defaultGoVersion    = "1.26" // renovate: datasource=golang-version depName=go
-	golangciLintVersion = "v2.9" // renovate: datasource=github-releases depName=golangci/golangci-lint
+	defaultGoVersion    = "1.26"    // renovate: datasource=golang-version depName=go
+	golangciLintVersion = "v2.9"    // renovate: datasource=github-releases depName=golangci/golangci-lint
+	deadcodeVersion     = "v0.42.0" // renovate: datasource=go depName=golang.org/x/tools
 
 	// defaultGitBranch is the branch name written into the synthetic
 	// .git/HEAD when [Go.InjectGitHead] is enabled.

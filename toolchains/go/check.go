@@ -219,3 +219,32 @@ func (m *Go) LintModule(ctx context.Context,
 		Sync(ctx)
 	return err
 }
+
+// LintDeadcode reports unreachable functions using the golang.org/x/tools
+// deadcode analyzer. The analyzer is installed at call time into the Go build
+// environment and run against pkgs. It scans only the root module, like the
+// `deadcode` tool itself.
+//
+// This is an advisory lint: it is intentionally not annotated +check, so it
+// does not run under dagger check. Invoke it explicitly (dagger call go
+// lint-deadcode) or wrap it in a consuming module.
+func (m *Go) LintDeadcode(
+	ctx context.Context,
+	// Packages to analyze.
+	// +optional
+	// +default=["./..."]
+	pkgs []string,
+	// deadcode analyzer version (golang.org/x/tools). Defaults to the
+	// version pinned in this module.
+	// +optional
+	version string,
+) error {
+	if version == "" {
+		version = deadcodeVersion
+	}
+	_, err := m.Env("").
+		WithExec([]string{"go", "install", "golang.org/x/tools/cmd/deadcode@" + version}).
+		WithExec(append([]string{"deadcode"}, pkgs...)).
+		Sync(ctx)
+	return err
+}
