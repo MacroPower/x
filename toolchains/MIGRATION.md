@@ -55,10 +55,10 @@ local `../go` path that must be repointed to the remote ref too). One
    modules dropped their module-level `+ignore`, re-declare the equivalent as a
    root source-ignore customization:
    - **eidetic `go` + `security`**: add `ignore` = `[".git", ".worktrees",
-     ".workmux", "dist", ".tmp"]` (was the module `+ignore`). **Also set
+".workmux", "dist", ".tmp"]` (was the module `+ignore`). **Also set
      `cacheNamespace` to eidetic's own path** — the old default string was
      `go.jacobcolvin.com/terrarium/toolchains/go` (a stale copy pointing at
-     *terrarium*); the shared default is now `go.jacobcolvin.com/x/toolchains/go`,
+     _terrarium_); the shared default is now `go.jacobcolvin.com/x/toolchains/go`,
      so set it explicitly per repo to keep cache isolation.
    - **kclipper `go`**: keep the existing `cgo=true` default and the `source`
      Go-allowlist customization; pass `version="1.25"` until kclipper moves to
@@ -68,7 +68,7 @@ local `../go` path that must be repointed to the remote ref too). One
      `cacheNamespace` to its own path to reuse warm caches.
 3. Set `cacheNamespace` per repo (to its own canonical path) so existing cache
    volumes are reused.
-4. **TestUnit `+check` seam**: the shared `go` module deliberately does *not*
+4. **TestUnit `+check` seam**: the shared `go` module deliberately does _not_
    mark `TestUnit` as a check (so consumers can supply a base with the right
    `aptPackages`). terrarium and kclipper currently expose `go:test-unit` under
    `dagger check`; add a thin `+check` wrapper in their `*-ci` toolchain (the
