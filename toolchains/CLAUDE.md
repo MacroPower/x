@@ -23,6 +23,11 @@ consumed by any project (including this repo, which dogfoods them via the root
   configured container, exposed so consumers can wrap it for benchmarks without
   a `go` dependency). `image`/`config-path`/`workflows-dir` are optional
   overrides. Mirrors `security`'s self-contained, literal-defaulting shape.
+- **`prettier`** — Prettier formatter/linter for YAML/JSON/Markdown: `lint`
+  (+check, `prettier --check`), `format` (returns a `Changeset` the consumer
+  merges with its other formatters, e.g. gofmt), and `lint-base` (the configured
+  container, for benchmarks). `image`/`version`/`config-path`/`patterns`/
+  `cache-namespace` are optional overrides.
 - **`goreleaser`** — Reusable GoReleaser primitives (Tier A): `goreleaser-base`
   (a Go base + the goreleaser binary), `check-base`, `check` (+check, validates
   `.goreleaser.yaml`), `ensure-git-repo` (worktree-aware git bootstrap),
@@ -41,7 +46,12 @@ consumed by any project (including this repo, which dogfoods them via the root
   own registry requests when credentials are supplied; callers deduplicate
   digests first. Pins the cosign version once. It is **not** unit-tested in
   isolation — real signing needs a reachable registry plus OIDC/key
-  credentials, so it is exercised through the consumer release pipelines.
+  credentials, so it is exercised through the consumer release pipelines. It
+  also exposes `binary`/`with-cosign` to install the cosign binary into a
+  release container, where goreleaser drives its own blob signing.
+- **`syft`** — Anchore syft SBOM generator: `binary`/`with-syft` install the
+  syft binary into a release container (where goreleaser's sbom step drives it),
+  and `sbom` scans a directory to an SBOM file. Pins the syft version once.
 - **`bench`** — Pipeline benchmark harness. A stage is a `*dagger.Container`
   rather than a closure, which is what lets the harness be shared at all
   (containers cross module boundaries, closures do not): `with-stage`

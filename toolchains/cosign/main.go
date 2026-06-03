@@ -39,6 +39,22 @@ func New(
 	return &Cosign{Image: image}
 }
 
+// Binary returns the cosign executable, extracted from the official image so it
+// can be layered onto another container (e.g. a goreleaser release base, where
+// goreleaser invokes cosign for blob signing).
+func (m *Cosign) Binary() *dagger.File {
+	return dag.Container().From(m.Image).File("/ko-app/cosign")
+}
+
+// WithCosign installs the cosign binary at /usr/local/bin/cosign in the given
+// container, for tools (like goreleaser's sign step) that invoke it directly.
+func (m *Cosign) WithCosign(
+	// Container to install cosign into.
+	ctr *dagger.Container,
+) *dagger.Container {
+	return ctr.WithFile("/usr/local/bin/cosign", m.Binary())
+}
+
 // SignKeyless signs each digest using cosign keyless signing (Fulcio + Rekor).
 // Cosign's built-in GitHub Actions provider uses the OIDC request URL and token
 // to fetch fresh tokens on demand, avoiding expiry issues. When registry
