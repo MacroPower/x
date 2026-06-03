@@ -6,8 +6,8 @@
 //	//go:generate go run go.jacobcolvin.com/jsonschema/cmd/jsonschemagen -type Config -o config.schema.json
 //
 // The tool works by creating a temporary Go program that imports the target
-// package, calls [jsonschema.Generate], and outputs the resulting JSON. This
-// reuses all existing generation logic without duplication.
+// package, calls [jsonschema.Generate], and outputs the resulting JSON, so it
+// reuses the library's generation pipeline rather than duplicating it.
 package main
 
 import (
@@ -136,7 +136,7 @@ func resolveModuleInfo() (string, string, error) {
 		return "", "", cmdError(err)
 	}
 
-	// goMod is the current directory's module file; it is empty outside a
+	// GoMod is the current directory's module file; it is empty outside a
 	// module, in which case the first decoded object is used as a fallback.
 	goMod := currentGoMod()
 
@@ -273,7 +273,7 @@ func mergeGoSum(paths ...string) []byte {
 			continue
 		}
 
-		for _, line := range strings.Split(string(data), "\n") {
+		for line := range strings.SplitSeq(string(data), "\n") {
 			if line == "" {
 				continue
 			}
@@ -328,7 +328,7 @@ const defaultGoDirectiveVersion = "1.21"
 // goDirectiveVersion returns a valid major.minor Go version for the go.mod "go"
 // directive, derived from the running toolchain rather than hardcoded.
 //
-// runtime.Version() is not always a plain "goMAJOR.MINOR.PATCH" string: release
+// Runtime.Version() is not always a plain "goMAJOR.MINOR.PATCH" string: release
 // candidates report "go1.25rc1" and development builds report
 // "devel go1.26-abc123 ...". Extracting just the major.minor pair keeps the
 // emitted directive valid across all of these, since a raw release-candidate or
@@ -352,6 +352,7 @@ func quotePath(p string) string {
 	return p
 }
 
+//nolint:grouper // Template var kept apart from goVersionPattern; merging unrelated globals hurts readability.
 var mainGoTmpl = template.Must(template.New("main.go").Parse(`package main
 
 import (
@@ -468,11 +469,14 @@ func runGenerate(tempDir string) ([]byte, error) {
 	return out, nil
 }
 
-// cmdError extracts stderr from an *exec.ExitError, or returns the error as-is.
+// cmdError surfaces the trimmed stderr of an *exec.ExitError in the message
+// while wrapping the original error, so callers can still recover the exit
+// status via errors.As. A non-ExitError (or one without stderr) is returned
+// unchanged.
 func cmdError(err error) error {
 	var exitErr *exec.ExitError
 	if ok := errors.As(err, &exitErr); ok && len(exitErr.Stderr) > 0 {
-		return fmt.Errorf("%s", strings.TrimSpace(string(exitErr.Stderr)))
+		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(exitErr.Stderr)))
 	}
 
 	return err

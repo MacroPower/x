@@ -14,13 +14,22 @@ var (
 	// string, an integer type, nor an [encoding.TextMarshaler].
 	ErrUnsupportedMapKey = errors.New("unsupported map key type")
 
-	// ErrUnknownVocabulary is returned when a schema requires a vocabulary
-	// (marked true in $vocabulary) that this implementation does not recognize.
+	// ErrUnknownVocabulary is returned when the resolved $vocabulary set is
+	// unsatisfiable: it marks true a vocabulary that this implementation does
+	// not recognize, or it includes the 2020-12 core vocabulary without marking
+	// it required (which the spec does not permit).
 	ErrUnknownVocabulary = errors.New("unknown required vocabulary")
 
 	// ErrRefResolve is returned when a [RefResolver] returns an error while
 	// resolving a remote $ref URI.
 	ErrRefResolve = errors.New("ref resolve")
+
+	// ErrProviderPanic is returned when a user-supplied JSONSchemaProvider or
+	// JSONSchemaExtender method panics during generation (for example by
+	// dereferencing a nil pointer field on the zero value it is invoked
+	// against). The panic is recovered so Generate returns this error instead
+	// of crashing.
+	ErrProviderPanic = errors.New("provider panicked")
 )
 
 // ValidationError represents a JSON Schema validation failure.
@@ -122,12 +131,22 @@ func (e *ValidationError) writeError(b *strings.Builder, depth int, seen map[*Va
 		childDepth = depth + 1
 	}
 
-	for i, cause := range e.Causes {
-		if i > 0 || hasHeader {
+	// Wrote tracks whether the header line or an earlier sibling already emitted
+	// output, so a separating newline is inserted only between non-empty renders.
+	// A cause already in seen (a shared or cyclic node) renders nothing, so
+	// skipping it here avoids leaving a stray blank line behind it.
+	wrote := hasHeader
+	for _, cause := range e.Causes {
+		if seen[cause] {
+			continue
+		}
+		if wrote {
 			b.WriteString("\n")
 		}
 
 		cause.writeError(b, childDepth, seen)
+
+		wrote = true
 	}
 }
 

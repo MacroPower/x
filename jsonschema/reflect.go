@@ -3,7 +3,6 @@ package jsonschema
 import (
 	"encoding"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"maps"
 	"math"
@@ -17,12 +16,6 @@ import (
 
 	"github.com/google/jsonschema-go/jsonschema"
 )
-
-// ErrProviderPanic is returned when a user-supplied JSONSchemaProvider or
-// JSONSchemaExtender method panics during generation (for example by
-// dereferencing a nil pointer field on the zero value it is invoked against).
-// The panic is recovered so Generate returns this error instead of crashing.
-var ErrProviderPanic = errors.New("provider panicked")
 
 var (
 	typeTextMarshaler  = reflect.TypeFor[encoding.TextMarshaler]()
@@ -219,12 +212,14 @@ func (g *generator) schemaForType(t reflect.Type, nullable bool) (*Schema, error
 	// Type-level post-processing for non-struct named types.
 	// Struct types handle comments, extend, and extraction internally
 	// in buildStructSchema/schemaForStruct.
+	//nolint:nestif // Sequential post-processing steps; flattening adds no clarity.
 	if t.Kind() != reflect.Struct && t.Name() != "" {
 		if g.comments {
 			g.applyTypeComment(t, s)
 		}
 		if implementsExtender(t) {
-			if err := callExtender(t, s); err != nil {
+			err := callExtender(t, s)
+			if err != nil {
 				return nil, err
 			}
 		}
@@ -244,7 +239,7 @@ func (g *generator) schemaForType(t reflect.Type, nullable bool) (*Schema, error
 // would rewrite them (a Go int enum value would decode back as float64).
 //
 // CloneSchemas only deep-copies sub-schema fields, leaving the Enum, Const,
-// Default, and Extra headers aliased to the caller's schema. cloneOverrideExtras
+// Default, and Extra headers aliased to the caller's schema. CloneOverrideExtras
 // copies those too, so a tag interpreter or JSONSchemaExtender that mutates them
 // in place (appending to Enum, reassigning Const, writing into Extra) cannot
 // reach back into an override reused across Generate calls.
@@ -307,12 +302,14 @@ func (g *generator) handleProviderType(t reflect.Type, nullable bool) (*Schema, 
 // type-level post-processing (comments, extender, $defs extraction) per
 // the processing order.
 func (g *generator) handleBuiltinType(t reflect.Type, s *Schema, nullable bool) (*Schema, error) {
+	//nolint:nestif // Sequential post-processing steps; flattening adds no clarity.
 	if t.Name() != "" {
 		if g.comments {
 			g.applyTypeComment(t, s)
 		}
 		if implementsExtender(t) {
-			if err := callExtender(t, s); err != nil {
+			err := callExtender(t, s)
+			if err != nil {
 				return nil, err
 			}
 		}
@@ -369,12 +366,17 @@ func (g *generator) schemaForKind(t reflect.Type, nullable bool) (*Schema, error
 		return g.applyNullable(&Schema{Type: "integer"}, t, nullable), nil
 
 	case reflect.Int64:
-		// float64 has a 52-bit mantissa and cannot represent MaxInt64 (2^63-1)
+		// Float64 has a 52-bit mantissa and cannot represent MaxInt64 (2^63-1)
 		// exactly: the nearest float64 is 2^63, which is one past the valid
 		// range and would admit out-of-range integers. Use the largest float64
 		// strictly below 2^63 so the bound never accepts a value the Go field
 		// cannot hold. MinInt64 (-2^63) is representable exactly.
-		s := &Schema{Type: "integer", Minimum: Ptr(float64(math.MinInt64)), Maximum: Ptr(safeIntMaxBound(float64(math.MaxInt64)))}
+		s := &Schema{
+			Type:    "integer",
+			Minimum: Ptr(float64(math.MinInt64)),
+			Maximum: Ptr(safeIntMaxBound(float64(math.MaxInt64))),
+		}
+
 		return g.applyNullable(s, t, nullable), nil
 
 	case reflect.Int8:
@@ -395,7 +397,7 @@ func (g *generator) schemaForKind(t reflect.Type, nullable bool) (*Schema, error
 		return g.applyNullable(s, t, nullable), nil
 
 	case reflect.Uint64:
-		// float64(math.MaxUint64) rounds up to 2^64, one past the valid range;
+		// Float64(math.MaxUint64) rounds up to 2^64, one past the valid range;
 		// see the Int64 case. Round the maximum down to the largest float64
 		// that does not exceed MaxUint64 (2^64-1).
 		s := &Schema{Type: "integer", Minimum: Ptr(float64(0)), Maximum: Ptr(safeIntMaxBound(float64(math.MaxUint64)))}
@@ -635,7 +637,7 @@ func (g *generator) buildStructSchema(t reflect.Type) (*Schema, error) {
 		if fields[idx].composeViaAllOf {
 			err := g.processAllOfField(fields[idx], s)
 			if err != nil {
-				return nil, fmt.Errorf("field %q: %w", fields[idx].jsonName, err)
+				return nil, fmt.Errorf("embedded %s: %w", fields[idx].field.Type, err)
 			}
 
 			hasAllOf = true
@@ -677,7 +679,8 @@ func (g *generator) buildStructSchema(t reflect.Type) (*Schema, error) {
 
 	// JSONSchemaExtend.
 	if implementsExtender(t) {
-		if err := callExtender(t, s); err != nil {
+		err := callExtender(t, s)
+		if err != nil {
 			return nil, err
 		}
 	}
@@ -939,10 +942,10 @@ func (g *generator) buildFieldSchema(parentType reflect.Type, fi structFieldInfo
 		}
 
 		// A nullable pointer field is generated as anyOf[value, null] with
-		// annotations kept as siblings of anyOf. const and enum, however, test the
+		// annotations kept as siblings of anyOf. Const and enum, however, test the
 		// instance value regardless of its type, so on the wrapper they also
 		// reject the permitted null; move them onto the value branch. Type-gated
-		// keywords (minimum, pattern, ...) do not apply to null and stay put.
+		// keywords such as minimum and pattern do not apply to null and stay put.
 		target := fieldSchema
 		if inner := nullableInnerSchema(fieldSchema); inner != nil &&
 			(fieldSchema.Const != nil || fieldSchema.Enum != nil) {
@@ -1286,6 +1289,7 @@ func isPromotedMethod(m reflect.Method) bool {
 	if fn == nil {
 		return false
 	}
+
 	file, _ := fn.FileLine(m.Func.Pointer())
 
 	return strings.Contains(file, "<autogenerated>")
@@ -1297,6 +1301,8 @@ func isPromotedMethod(m reflect.Method) bool {
 // dereferences such a field panics; the panic is recovered and returned as an
 // error wrapping [ErrProviderPanic] so it surfaces from Generate rather than
 // crashing the caller.
+//
+//nolint:nonamedreturns,nilnil // Recover needs named returns; a nil schema with a nil error means the type supplies no provider schema, which callers handle.
 func callProvider(t reflect.Type) (s *jsonschema.Schema, err error) {
 	if t.Kind() == reflect.Interface {
 		return nil, nil

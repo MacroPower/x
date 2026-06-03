@@ -8,9 +8,9 @@ import (
 	"strings"
 )
 
-// defNameReplacer rewrites characters that are unsafe in a $defs key and the
-// JSON Pointer reference token that points at it. Brackets and commas appear in
-// generic type names (e.g. Box[pkg.T]); the slash and tilde are the RFC 6901
+// defNameReplacer rewrites characters that are unsafe in a definitions key and
+// the JSON Pointer reference token that points at it. Brackets and commas appear
+// in generic type names (e.g. Box[pkg.T]); the slash and tilde are the RFC 6901
 // JSON Pointer separator and escape characters, which a generic type argument's
 // import path (e.g. Box[example.com/foo/bar.T]) would otherwise embed verbatim
 // and break the resulting $ref fragment.
@@ -23,14 +23,14 @@ var defNameReplacer = strings.NewReplacer(
 )
 
 // defaultNamer returns a definition name for a Go type. Characters that are not
-// valid in a $defs key or its JSON Pointer $ref token are replaced with
+// valid in a definitions key or its JSON Pointer $ref token are replaced with
 // underscores so the generated reference resolves.
 func defaultNamer(t reflect.Type) string {
 	return defNameReplacer.Replace(t.Name())
 }
 
-// shouldExtract reports whether a type should be extracted to $defs and
-// referenced via $ref (as opposed to being inlined).
+// shouldExtract reports whether a type should be extracted to the definitions
+// map and referenced via $ref (as opposed to being inlined).
 func (g *generator) shouldExtract(t reflect.Type) bool {
 	if !g.definitions {
 		return false
@@ -48,11 +48,10 @@ func (g *generator) shouldExtract(t reflect.Type) bool {
 	return implementsProvider(t) || implementsExtender(t)
 }
 
-// disambiguateDefs resolves name collisions in the $defs map by prefixing
+// disambiguateDefs resolves name collisions in the definitions map by prefixing
 // with the package's base directory name, then with the full import path
-// if collisions persist. It returns true if any disambiguation was performed.
-func (g *generator) disambiguateDefs() bool {
-	// Find collisions.
+// if collisions persist.
+func (g *generator) disambiguateDefs() {
 	var hasCollision bool
 	for _, types := range g.defsNameToTypes {
 		if len(types) > 1 {
@@ -61,12 +60,12 @@ func (g *generator) disambiguateDefs() bool {
 		}
 	}
 	if !hasCollision {
-		return false
+		return
 	}
 
 	newDefs := make(map[string]*Schema, len(g.defs))
 
-	// used reserves every name placed in newDefs so that a disambiguated name
+	// Used reserves every name placed in newDefs so that a disambiguated name
 	// can never silently overwrite a retained non-colliding def or a name
 	// produced for a different collision group.
 	used := make(map[string]bool, len(g.defs))
@@ -87,6 +86,7 @@ func (g *generator) disambiguateDefs() bool {
 
 		collisionNames = append(collisionNames, name)
 	}
+
 	sort.Strings(collisionNames)
 
 	// Second pass: disambiguate each collision group, escalating the naming
@@ -94,10 +94,14 @@ func (g *generator) disambiguateDefs() bool {
 	for _, name := range collisionNames {
 		types := g.defsNameToTypes[name]
 
-		// Candidate scheme 1: prefix with the package's base directory name.
+		// Candidate scheme 1: prefix with the package's base directory name. The
+		// underscore separator keeps the package and type name distinct so two
+		// groups whose base+name concatenate to the same string (package "foo"
+		// with type "BarBaz" versus package "fooBar" with type "Baz") do not
+		// force an unnecessary escalation to the full-path scheme.
 		baseCandidates := make([]string, len(types))
 		for i, t := range types {
-			baseCandidates[i] = path.Base(t.PkgPath()) + name
+			baseCandidates[i] = path.Base(t.PkgPath()) + "_" + name
 		}
 
 		// Candidate scheme 2 (fallback): prefix with the full import path.
@@ -142,8 +146,6 @@ func (g *generator) disambiguateDefs() bool {
 
 		rec.schema.Ref = g.draft.refPrefix() + newName
 	}
-
-	return true
 }
 
 // candidatesUsable reports whether the disambiguation candidates are mutually
@@ -165,7 +167,7 @@ func (g *generator) candidatesUsable(candidates []string, used map[string]bool) 
 
 // uniqueName returns name if it is not yet reserved in used, otherwise it
 // appends the smallest numeric suffix that is. This is the last-resort
-// guarantee that every $defs key is distinct so no schema is silently
+// guarantee that every definitions key is distinct so no schema is silently
 // overwritten.
 func (g *generator) uniqueName(name string, used map[string]bool) string {
 	if !used[name] {

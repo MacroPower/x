@@ -30,16 +30,23 @@ func WithComments(enabled bool) Option {
 
 // WithTypeSchema overrides the generated schema for a specific Go type.
 // Takes the highest priority in the type resolution chain, overriding even
-// JSONSchemaProvider. Useful for mapping third-party types or overriding
-// types whose JSONSchemaProvider schema is undesirable.
+// [JSONSchemaProvider]. Useful for mapping third-party types or overriding
+// types whose [JSONSchemaProvider] schema is undesirable.
 // If called multiple times for the same type, the last registration wins.
 //
-// The override is shallow-cloned before use, so non-sub-schema fields (Enum,
-// Const, Default, Extra) remain shared with s. Treat s as read-only: a tag
-// interpreter or JSONSchemaExtender that mutates those fields in place can
-// affect s and any other Generate call that reuses the same override.
+// The override is copied before use: its sub-schemas are deep-copied and its
+// Enum, Const, Default, and Extra containers are cloned, so a tag interpreter
+// or [JSONSchemaExtender] that appends to Enum, reassigns Const, or writes into
+// Extra during generation cannot reach back into s or into another Generate
+// call reusing the same override. Only the top-level containers are cloned:
+// nested values keep their identity, so mutating through a pointer, slice, or
+// map element held inside one of those values can still leak.
 func WithTypeSchema(t reflect.Type, s *Schema) Option {
-	return func(g *generator) { g.typeSchemas[t] = s }
+	return func(g *generator) {
+		if s != nil {
+			g.typeSchemas[t] = s
+		}
+	}
 }
 
 // WithNamer sets a custom function for producing definition names from
