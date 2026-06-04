@@ -442,6 +442,11 @@ func validateURI(s string) error {
 	if containsInvalidURIChars(s) {
 		return errors.New("invalid URI: forbidden characters")
 	}
+	// Bare IPv6 addresses must be enclosed in brackets per RFC 3986 §3.2.2,
+	// mirroring validateIRI so "uri" and "iri" agree on this case.
+	if strings.Count(u.Host, ":") > 1 && !strings.HasPrefix(u.Host, "[") {
+		return errors.New("invalid URI: bare IPv6 address")
+	}
 	// Three or more consecutive slashes after the authority indicate a
 	// malformed authority/path boundary (e.g. "http://host///path"). A single
 	// extra slash ("http://host//path") is a valid empty path segment and is

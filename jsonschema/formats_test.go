@@ -462,3 +462,33 @@ func TestIDNHostnameRejectsNumericTopLabel(t *testing.T) {
 		})
 	}
 }
+
+// TestURIRejectsBareIPv6 confirms format=uri rejects an unbracketed IPv6
+// authority, matching format=iri so the two stay consistent (RFC 3986 §3.2.2).
+func TestURIRejectsBareIPv6(t *testing.T) {
+	t.Parallel()
+
+	const bareIPv6 = "http://2001:db8::1/path"
+
+	uriSchema := &jsonschema.Schema{
+		Type:   "string",
+		Format: "uri",
+	}
+	iriSchema := &jsonschema.Schema{
+		Type:   "string",
+		Format: "iri",
+	}
+
+	err := jsonschema.Validate(uriSchema, bareIPv6, jsonschema.WithFormats(true))
+	require.Error(t, err,
+		"uri with an unbracketed IPv6 authority should be rejected")
+
+	err = jsonschema.Validate(iriSchema, bareIPv6, jsonschema.WithFormats(true))
+	require.Error(t, err,
+		"iri with an unbracketed IPv6 authority should be rejected (consistency check)")
+
+	// A bracketed IPv6 authority remains valid for uri.
+	err = jsonschema.Validate(uriSchema, "http://[2001:db8::1]/path", jsonschema.WithFormats(true))
+	require.NoError(t, err,
+		"uri with a bracketed IPv6 authority should be accepted")
+}
