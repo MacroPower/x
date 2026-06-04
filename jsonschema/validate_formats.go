@@ -375,9 +375,13 @@ func validateHostname(s string) error {
 			}
 		}
 
-		// RFC 5891 §4.2.3.1: labels with hyphens at positions 3-4 are
-		// reserved for IDNA (e.g. "xn--"). Validate as A-label.
-		if len(label) >= 4 && label[2] == '-' && label[3] == '-' {
+		// Only labels carrying the "xn--" ACE prefix are A-labels and must
+		// decode as valid Punycode (RFC 5890 §2.3.2.1). The prefix match is
+		// case-insensitive per RFC 5890 §2.3.2.1. A plain RFC 1123 label may
+		// contain interior hyphens, including consecutive ones at positions 3-4
+		// (e.g. "ab--cd"), so the IDNA check must not apply to it; the hostname
+		// format is RFC 1123-based and permits such labels.
+		if hasACEPrefix(label) {
 			u, err := idna.Lookup.ToUnicode(label)
 			if err != nil {
 				return errors.New("invalid hostname")
@@ -397,6 +401,19 @@ func validateHostname(s string) error {
 	}
 
 	return nil
+}
+
+// hasACEPrefix reports whether label begins with the IDNA ACE prefix "xn--".
+// The match is case-insensitive, since RFC 5890 §2.3.2.1 defines the prefix
+// without regard to case.
+func hasACEPrefix(label string) bool {
+	if len(label) < 4 {
+		return false
+	}
+
+	return (label[0] == 'x' || label[0] == 'X') &&
+		(label[1] == 'n' || label[1] == 'N') &&
+		label[2] == '-' && label[3] == '-'
 }
 
 // isAllDigits reports whether s is non-empty and contains only ASCII digits.

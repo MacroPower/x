@@ -363,3 +363,57 @@ func TestIPv4LeadingZeros(t *testing.T) {
 	require.Error(t, err,
 		"IPv4 with leading zeros should be rejected")
 }
+
+// TestHostnameInteriorDoubleHyphen covers RFC 1123 labels that carry "--" at
+// positions 3-4 without the "xn--" ACE prefix. The hostname format is RFC
+// 1123-based and permits interior hyphens, so only true A-labels (the "xn--"
+// prefix, matched case-insensitively per RFC 5890) are validated as Punycode.
+func TestHostnameInteriorDoubleHyphen(t *testing.T) {
+	t.Parallel()
+
+	schema := &jsonschema.Schema{
+		Type:   "string",
+		Format: "hostname",
+	}
+
+	tests := map[string]struct {
+		instance string
+		want     bool
+	}{
+		"plain label with leading double hyphen": {
+			instance: "ab--cd.com",
+			want:     true,
+		},
+		"plain label with leading double hyphen in subdomain": {
+			instance: "te--st.example.com",
+			want:     true,
+		},
+		"valid xn-- A-label decodes as Punycode": {
+			instance: "xn--bcher-kva.example.com",
+			want:     true,
+		},
+		"invalid xn-- A-label rejected as bad Punycode": {
+			instance: "xn--a.com",
+			want:     false,
+		},
+		"uppercase XN-- A-label still validated as Punycode": {
+			instance: "XN--aa---o47jg78q.com",
+			want:     false,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := jsonschema.Validate(schema, tc.instance, jsonschema.WithFormats(true))
+			if tc.want {
+				require.NoError(t, err,
+					"RFC 1123 hostname should be accepted for format=hostname")
+			} else {
+				require.Error(t, err,
+					"malformed A-label hostname should be rejected for format=hostname")
+			}
+		})
+	}
+}
