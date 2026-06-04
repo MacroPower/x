@@ -1220,6 +1220,46 @@ func TestValidateDynamicRefUnresolvableErrors(t *testing.T) {
 	}
 }
 
+func TestValidateJSONPointerFallbackBaseURI(t *testing.T) {
+	t.Parallel()
+
+	// A $ref pointing into an untyped location (an unknown keyword) is
+	// materialized by the JSON-pointer fallback. A fragment-only $ref inside
+	// that target must resolve against the enclosing resource's base URI
+	// (https://example.test/sub), not the document root: the two resources
+	// deliberately define different schemas under the same $defs name.
+	root := &jsonschema.Schema{
+		ID: "https://example.test/root",
+		Properties: map[string]*jsonschema.Schema{
+			"bar": {Ref: "#/$defs/sub/unknown-keyword"},
+		},
+		Defs: map[string]*jsonschema.Schema{
+			"target": {Type: "integer"},
+			"sub": {
+				ID: "https://example.test/sub",
+				Defs: map[string]*jsonschema.Schema{
+					"target": {Type: "string"},
+				},
+				Extra: map[string]any{
+					"unknown-keyword": map[string]any{"$ref": "#/$defs/target"},
+				},
+			},
+		},
+	}
+
+	v, err := jsonschema.Compile(root)
+	require.NoError(t, err)
+
+	// The sub resource's target requires a string; resolving against the
+	// document root would find the integer schema instead and invert both
+	// verdicts.
+	require.NoError(t, v.Validate(map[string]any{"bar": "ok"}))
+
+	err = v.Validate(map[string]any{"bar": 7.0})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "expected")
+}
+
 func TestFormatAssertionVocabularyAssertsWhenRecognized(t *testing.T) {
 	t.Parallel()
 

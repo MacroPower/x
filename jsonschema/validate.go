@@ -138,12 +138,22 @@ type validator struct {
 	baseURIs              map[*Schema]string         // schema → its base URI
 	walked                map[*Schema]bool           // schemas already visited by walkSchema (cycle guard)
 	jsonPointerCache      map[jsonPointerKey]*Schema // JSON-pointer fallback results, keyed by (root, pointer)
-	dynamicScope          []string                   // stack of resource base URIs entered during validation
-	draft                 Draft
-	vocabs                vocabSet // resolved active vocabularies
-	formatsEnabled        bool
-	contentVocab          bool // content vocabulary active (gates validateContent)
-	contentEnabled        bool // assert contentEncoding/contentMediaType (WithContent)
+
+	// Registrations for schemas materialized by the JSON-pointer fallback
+	// (resolveJSONPointerViaJSON). Like jsonPointerCache they are per-run
+	// scratch state, so concurrent runs never write the shared registries;
+	// lookups consult the shared registry first and these second.
+	fallbackURIRegistry    map[string]*Schema
+	fallbackAnchorRegistry map[string]*Schema
+	fallbackDynamicAnchors map[string]*Schema
+	fallbackBaseURIs       map[*Schema]string
+
+	dynamicScope   []string // stack of resource base URIs entered during validation
+	draft          Draft
+	vocabs         vocabSet // resolved active vocabularies
+	formatsEnabled bool
+	contentVocab   bool // content vocabulary active (gates validateContent)
+	contentEnabled bool // assert contentEncoding/contentMediaType (WithContent)
 }
 
 func newValidator(schema *Schema, opts []ValidateOption) (*validator, error) {
@@ -196,6 +206,10 @@ func (v *validator) forInstance() *validator {
 	rv := *v
 	rv.visiting = map[visitKey]bool{}
 	rv.jsonPointerCache = nil
+	rv.fallbackURIRegistry = nil
+	rv.fallbackAnchorRegistry = nil
+	rv.fallbackDynamicAnchors = nil
+	rv.fallbackBaseURIs = nil
 	rv.refResolveErr = nil
 
 	if rv.draft == Draft2020 {
@@ -1000,7 +1014,7 @@ func (v *validator) validate(
 	// pushes happen when validation crosses into a schema whose resource
 	// base URI differs from the current scope top.
 	if v.draft == Draft2020 && len(v.dynamicScope) > 0 {
-		base := v.baseURIs[schema]
+		base := v.schemaBase(schema)
 		if base != v.dynamicScope[len(v.dynamicScope)-1] {
 			v.dynamicScope = append(v.dynamicScope, base)
 			defer func() { v.dynamicScope = v.dynamicScope[:len(v.dynamicScope)-1] }()
@@ -3154,15 +3168,15 @@ func (v *validator) resolveDynamicRef(schema *Schema, ref string) *Schema {
 
 	// Phase 2: Bookending check — the static target must have a
 	// $dynamicAnchor matching the fragment name.
-	staticBase := v.baseURIs[staticTarget]
-	if _, ok := v.dynamicAnchorRegistry[staticBase+"#"+fragment]; !ok {
+	staticBase := v.schemaBase(staticTarget)
+	if _, ok := v.lookupDynamicAnchor(staticBase + "#" + fragment); !ok {
 		return staticTarget // no bookend → behave like $ref
 	}
 
 	// Phase 3: Walk dynamic scope outermost→innermost for first matching
 	// $dynamicAnchor.
 	for _, scopeBase := range v.dynamicScope {
-		if target, ok := v.dynamicAnchorRegistry[scopeBase+"#"+fragment]; ok {
+		if target, ok := v.lookupDynamicAnchor(scopeBase + "#" + fragment); ok {
 			return target
 		}
 	}
@@ -3185,9 +3199,9 @@ func (v *validator) resolveRef(schema *Schema, ref string) *Schema {
 
 		// Find the root of the current resource.
 		resourceRoot := v.root
-		base := v.baseURIs[schema]
+		base := v.schemaBase(schema)
 		if base != "" {
-			if target, ok := v.uriRegistry[base]; ok {
+			if target, ok := v.lookupURI(base); ok {
 				resourceRoot = target
 			}
 		}
@@ -3205,7 +3219,7 @@ func (v *validator) resolveRef(schema *Schema, ref string) *Schema {
 		}
 
 		// Anchor reference.
-		if target, ok := v.anchorRegistry[base+"#"+fragment]; ok {
+		if target, ok := v.lookupAnchor(base + "#" + fragment); ok {
 			return target
 		}
 
@@ -3213,7 +3227,7 @@ func (v *validator) resolveRef(schema *Schema, ref string) *Schema {
 	}
 
 	// Non-fragment ref: resolve against current schema's base URI.
-	base := v.baseURIs[schema]
+	base := v.schemaBase(schema)
 	absRef := resolveURI(base, ref)
 
 	parsedAbs, err := url.Parse(absRef)
@@ -3227,7 +3241,7 @@ func (v *validator) resolveRef(schema *Schema, ref string) *Schema {
 	parsedAbs.RawFragment = ""
 	baseURI := parsedAbs.String()
 
-	target, ok := v.uriRegistry[baseURI]
+	target, ok := v.lookupURI(baseURI)
 	if !ok {
 		// Try remote resolution as fallback.
 		target = v.resolveRemote(baseURI)
@@ -3247,7 +3261,7 @@ func (v *validator) resolveRef(schema *Schema, ref string) *Schema {
 	}
 
 	// Anchor within resolved schema.
-	if anchorTarget, ok := v.anchorRegistry[baseURI+"#"+fragment]; ok {
+	if anchorTarget, ok := v.lookupAnchor(baseURI + "#" + fragment); ok {
 		return anchorTarget
 	}
 
@@ -3322,6 +3336,12 @@ type jsonPointerKey struct {
 // other target (a string, number, or missing member) yields nil, so a pointer
 // into a non-schema value or a typo stays unresolved.
 //
+// A located schema is freshly unmarshaled and so unknown to the registries
+// built at compile time; it is registered through the per-run fallback
+// registries with the base URI in effect at its location, so any $ref,
+// $anchor, or $id inside it resolves correctly instead of against an empty
+// base.
+//
 // Results are cached per (root, pointer): the same fallback is reached once per
 // ref during gate checking and again for each instance node the ref is
 // evaluated against, and the root is marshaled at most once per distinct
@@ -3336,34 +3356,128 @@ func (v *validator) resolveJSONPointerViaJSON(root *Schema, segments []string) *
 		return cached
 	}
 
-	target := schemaAtJSONPointer(root, segments)
+	target, base := schemaAtJSONPointer(root, segments, v.schemaBase(root))
+	if target != nil {
+		v.registerFallbackSchema(target, base)
+	}
+
 	v.jsonPointerCache[key] = target
 
 	return target
 }
 
-// schemaAtJSONPointer navigates root's JSON encoding by segments and returns the
-// located value as a Schema when it is itself a schema (a JSON object or
-// boolean), or nil otherwise.
-func schemaAtJSONPointer(root *Schema, segments []string) *Schema {
+// registerFallbackSchema walks a schema materialized by the JSON-pointer
+// fallback and records its subtree's base URIs, $ids, and anchors in the
+// per-run fallback registries. A scratch validator collects the walk output so
+// the shared registries stay untouched and concurrent runs cannot race on
+// them.
+func (v *validator) registerFallbackSchema(s *Schema, base string) {
+	scratch := &validator{
+		draft:                 v.draft,
+		uriRegistry:           map[string]*Schema{},
+		anchorRegistry:        map[string]*Schema{},
+		dynamicAnchorRegistry: map[string]*Schema{},
+		baseURIs:              map[*Schema]string{},
+		walked:                map[*Schema]bool{},
+	}
+	scratch.walkSchema(s, base)
+
+	if v.fallbackBaseURIs == nil {
+		v.fallbackURIRegistry = map[string]*Schema{}
+		v.fallbackAnchorRegistry = map[string]*Schema{}
+		v.fallbackDynamicAnchors = map[string]*Schema{}
+		v.fallbackBaseURIs = map[*Schema]string{}
+	}
+
+	maps.Copy(v.fallbackURIRegistry, scratch.uriRegistry)
+	maps.Copy(v.fallbackAnchorRegistry, scratch.anchorRegistry)
+	maps.Copy(v.fallbackDynamicAnchors, scratch.dynamicAnchorRegistry)
+	maps.Copy(v.fallbackBaseURIs, scratch.baseURIs)
+}
+
+// schemaBase returns the base URI registered for s, consulting the shared
+// registry first and the per-run fallback registrations second.
+func (v *validator) schemaBase(s *Schema) string {
+	if base, ok := v.baseURIs[s]; ok {
+		return base
+	}
+
+	return v.fallbackBaseURIs[s]
+}
+
+// lookupURI resolves an absolute URI to its schema, consulting the shared
+// registry first and the per-run fallback registrations second.
+func (v *validator) lookupURI(uri string) (*Schema, bool) {
+	if s, ok := v.uriRegistry[uri]; ok {
+		return s, true
+	}
+
+	s, ok := v.fallbackURIRegistry[uri]
+
+	return s, ok
+}
+
+// lookupAnchor resolves a baseURI#anchor key, consulting the shared registry
+// first and the per-run fallback registrations second.
+func (v *validator) lookupAnchor(key string) (*Schema, bool) {
+	if s, ok := v.anchorRegistry[key]; ok {
+		return s, true
+	}
+
+	s, ok := v.fallbackAnchorRegistry[key]
+
+	return s, ok
+}
+
+// lookupDynamicAnchor resolves a baseURI#name key against $dynamicAnchor
+// registrations, consulting the shared registry first and the per-run fallback
+// registrations second.
+func (v *validator) lookupDynamicAnchor(key string) (*Schema, bool) {
+	if s, ok := v.dynamicAnchorRegistry[key]; ok {
+		return s, true
+	}
+
+	s, ok := v.fallbackDynamicAnchors[key]
+
+	return s, ok
+}
+
+// schemaAtJSONPointer navigates root's JSON encoding by segments and returns
+// the located value as a Schema when it is itself a schema (a JSON object or
+// boolean), or nil otherwise. The walk starts from base (root's base URI) and
+// tracks $id members of the objects it descends through, so the returned base
+// is the one in effect at the located schema; the target's own $id is left to
+// walkSchema during registration.
+func schemaAtJSONPointer(root *Schema, segments []string, base string) (*Schema, string) {
 	data, err := json.Marshal(root)
 	if err != nil {
-		return nil
+		return nil, ""
 	}
 
 	var node any
 
 	err = json.Unmarshal(data, &node)
 	if err != nil {
-		return nil
+		return nil, ""
 	}
 
-	for _, seg := range segments {
+	for i, seg := range segments {
+		// Crossing into an intermediate object that establishes a resource
+		// ($id) rebases everything below it. The starting root is skipped:
+		// its own $id is already reflected in base.
+		if i > 0 {
+			if obj, ok := node.(map[string]any); ok {
+				if id, ok := obj["$id"].(string); ok && id != "" && !isFragmentOnly(id) {
+					base = stripFragment(resolveURI(base, id))
+				}
+			}
+		}
+
 		switch container := node.(type) {
 		case map[string]any:
 			next, ok := container[seg]
 			if !ok {
-				return nil
+				return nil, ""
 			}
 
 			node = next
@@ -3371,13 +3485,13 @@ func schemaAtJSONPointer(root *Schema, segments []string) *Schema {
 		case []any:
 			idx, err := strconv.Atoi(seg)
 			if err != nil || idx < 0 || idx >= len(container) {
-				return nil
+				return nil, ""
 			}
 
 			node = container[idx]
 
 		default:
-			return nil
+			return nil, ""
 		}
 	}
 
@@ -3385,20 +3499,20 @@ func schemaAtJSONPointer(root *Schema, segments []string) *Schema {
 	case map[string]any, bool:
 		target, err := json.Marshal(node)
 		if err != nil {
-			return nil
+			return nil, ""
 		}
 
 		var schema Schema
 
 		err = json.Unmarshal(target, &schema)
 		if err != nil {
-			return nil
+			return nil, ""
 		}
 
-		return &schema
+		return &schema, base
 
 	default:
-		return nil
+		return nil, ""
 	}
 }
 
