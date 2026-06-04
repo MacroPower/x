@@ -316,14 +316,25 @@ func cloneOverrideExtras(s *Schema) {
 }
 
 // handleProviderType processes a type implementing JSONSchemaProvider.
+//
+// The provider's JSONSchema method returns its exact *Schema, which it may share
+// across fields and Generate calls (for example a package-level singleton).
+// Downstream steps mutate it: applyTypeComment writes Description in place and
+// extractToDefs aliases the pointer into g.defs. The same clone the override
+// path uses (CloneSchemas to deep-copy sub-schemas, cloneOverrideExtras to copy
+// the aliased Enum/Const/Default/Extra containers) isolates the generator's copy
+// so the provider's source schema is never corrupted.
 func (g *generator) handleProviderType(t reflect.Type, nullable bool) (*Schema, error) {
-	s, err := callProvider(t)
+	provided, err := callProvider(t)
 	if err != nil {
 		return nil, err
 	}
-	if s == nil {
-		s = &Schema{} // unrestricted
+	if provided == nil {
+		provided = &Schema{} // unrestricted
 	}
+
+	s := provided.CloneSchemas()
+	cloneOverrideExtras(s)
 	// Apply type-level comments.
 	if g.comments {
 		g.applyTypeComment(t, s)

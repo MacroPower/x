@@ -2290,6 +2290,28 @@ func TestProviderSchemaIsolatedAcrossCalls(t *testing.T) {
 		"original provider schema should not be modified")
 }
 
+// TestProviderSchemaIsolatedWithComments covers the provider clone under
+// comment extraction. Comment extraction writes Description in place, so without
+// cloning the provider's returned pointer it would overwrite the shared
+// singleton's Description and leak across fields and Generate calls. The earlier
+// isolation test passes even without the clone because it runs without comments.
+// The provider type lives in a real source package so its doc comment loads,
+// making comment extraction (and thus the would-be mutation) actually fire.
+func TestProviderSchemaIsolatedWithComments(t *testing.T) {
+	t.Parallel()
+
+	s, err := jsonschema.GenerateFor[alpha.ProviderSingleton](jsonschema.WithComments(true))
+	require.NoError(t, err)
+
+	// The generated schema picks up the type's doc comment, confirming comment
+	// extraction ran and would have mutated the singleton absent the clone.
+	assert.Contains(t, s.Description, "documents a provider")
+
+	// The shared singleton the provider returns must remain untouched.
+	assert.Empty(t, alpha.SharedProviderSchema.Description,
+		"provider singleton must not be mutated by comment extraction")
+}
+
 func TestBigNumericSchemaHasFormatOrPattern(t *testing.T) {
 	t.Parallel()
 

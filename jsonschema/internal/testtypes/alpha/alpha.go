@@ -4,11 +4,29 @@
 // it via go/packages.
 package alpha
 
+import "github.com/google/jsonschema-go/jsonschema"
+
 // Box is a documented generic type, exercising doc-comment extraction for an
 // instantiated generic whose reflect name carries a type-argument list.
 type Box[T any] struct {
 	// Item documents the boxed value.
 	Item T `json:"item"`
+}
+
+// ProviderSingleton documents a provider whose JSONSchema returns a shared,
+// package-level schema pointer. It lives in this real source package so doc
+// comments are loadable, letting a test confirm comment extraction does not
+// mutate the singleton in place.
+type ProviderSingleton struct{}
+
+// SharedProviderSchema is the package-level singleton returned by every
+// ProviderSingleton.JSONSchema call. It carries no Description so a test can
+// observe whether comment extraction mutates it.
+var SharedProviderSchema = jsonschema.Schema{Type: "string"}
+
+// JSONSchema returns the shared singleton schema.
+func (ProviderSingleton) JSONSchema() *jsonschema.Schema {
+	return &SharedProviderSchema
 }
 
 // Widget is a test type with documented fields.
