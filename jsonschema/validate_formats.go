@@ -937,6 +937,14 @@ func validateIDNHostname(s string) error {
 		return errors.New("invalid IDN hostname: name too long")
 	}
 
+	// The top-level label must not be all-numeric, mirroring validateHostname so
+	// that an idn-hostname cannot be confused with an IPv4 address (RFC 1123
+	// §2.1 / RFC 5890). The check applies to the label as written: a numeric
+	// U-label is ASCII digits, so an all-ASCII-digit final label is rejected.
+	if isAllDigits(labels[len(labels)-1]) {
+		return errors.New("invalid IDN hostname: numeric top-level label")
+	}
+
 	return nil
 }
 

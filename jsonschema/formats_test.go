@@ -417,3 +417,48 @@ func TestHostnameInteriorDoubleHyphen(t *testing.T) {
 		})
 	}
 }
+
+// TestIDNHostnameRejectsNumericTopLabel mirrors the plain hostname numeric-TLD
+// rule: an idn-hostname whose top-level label is all digits is rejected to keep
+// it from being confused with an IPv4 address (RFC 1123 §2.1 / RFC 5890).
+func TestIDNHostnameRejectsNumericTopLabel(t *testing.T) {
+	t.Parallel()
+
+	schema := &jsonschema.Schema{
+		Type:   "string",
+		Format: "idn-hostname",
+	}
+
+	tests := map[string]struct {
+		instance string
+		want     bool
+	}{
+		"IPv4-looking idn-hostname": {
+			instance: "192.168.1.1",
+			want:     false,
+		},
+		"numeric top-level label": {
+			instance: "example.123",
+			want:     false,
+		},
+		"non-numeric top-level label remains valid": {
+			instance: "example.com",
+			want:     true,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := jsonschema.Validate(schema, tc.instance, jsonschema.WithFormats(true))
+			if tc.want {
+				require.NoError(t, err,
+					"idn-hostname with non-numeric TLD should be accepted")
+			} else {
+				require.Error(t, err,
+					"idn-hostname with all-numeric TLD should be rejected")
+			}
+		})
+	}
+}
