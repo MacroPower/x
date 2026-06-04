@@ -415,14 +415,15 @@ func (g *generator) schemaForKind(t reflect.Type, nullable bool) (*Schema, error
 
 	case reflect.Int64:
 		// Float64 has a 52-bit mantissa and cannot represent MaxInt64 (2^63-1)
-		// exactly: the nearest float64 is 2^63, which is one past the valid
-		// range and would admit out-of-range integers. Use the largest float64
-		// strictly below 2^63 so the bound never accepts a value the Go field
-		// cannot hold. MinInt64 (-2^63) is representable exactly.
+		// exactly, so an inclusive maximum cannot name the true boundary. 2^63 is
+		// exactly representable (a power of two), so an exclusive maximum of 2^63
+		// admits exactly the values v <= 2^63-1 = MaxInt64, including the boundary,
+		// without ever accepting an out-of-range integer. MinInt64 (-2^63) is
+		// representable exactly, so the minimum stays inclusive.
 		s := &Schema{
-			Type:    "integer",
-			Minimum: Ptr(float64(math.MinInt64)),
-			Maximum: Ptr(safeIntMaxBound(float64(math.MaxInt64))),
+			Type:             "integer",
+			Minimum:          Ptr(float64(math.MinInt64)),
+			ExclusiveMaximum: Ptr(exclusiveMaxInt64),
 		}
 
 		return g.applyNullable(s, t, nullable), nil
@@ -445,10 +446,10 @@ func (g *generator) schemaForKind(t reflect.Type, nullable bool) (*Schema, error
 		return g.applyNullable(s, t, nullable), nil
 
 	case reflect.Uint64:
-		// Float64(math.MaxUint64) rounds up to 2^64, one past the valid range;
-		// see the Int64 case. Round the maximum down to the largest float64
-		// that does not exceed MaxUint64 (2^64-1).
-		s := &Schema{Type: "integer", Minimum: Ptr(float64(0)), Maximum: Ptr(safeIntMaxBound(float64(math.MaxUint64)))}
+		// Float64 cannot represent MaxUint64 (2^64-1) exactly; see the Int64 case.
+		// 2^64 is exactly representable, so an exclusive maximum of 2^64 admits
+		// exactly v <= 2^64-1 = MaxUint64, including the boundary value.
+		s := &Schema{Type: "integer", Minimum: Ptr(float64(0)), ExclusiveMaximum: Ptr(exclusiveMaxUint64)}
 		return g.applyNullable(s, t, nullable), nil
 
 	case reflect.Uint8:
@@ -489,17 +490,15 @@ func (g *generator) schemaForKind(t reflect.Type, nullable bool) (*Schema, error
 	}
 }
 
-// safeIntMaxBound returns a float64 maximum bound that does not admit integers
-// larger than the true upper limit. Converting MaxInt64/MaxUint64 to float64
-// rounds up past the valid range; this rounds back down toward zero to the
-// largest float64 that is still within range. The bound is conservative: it may
-// reject the handful of valid integers between it and the true maximum that
-// float64 cannot represent, which is preferable to accepting out-of-range
-// values. The Schema's Minimum/Maximum are *float64, so the exact bound cannot
-// be expressed.
-func safeIntMaxBound(trueMax float64) float64 {
-	return math.Nextafter(trueMax, 0)
-}
+// exclusiveMaxInt64 and exclusiveMaxUint64 are the exclusive upper bounds for
+// the int64 and uint64 schemas. Float64 cannot represent MaxInt64 (2^63-1) or
+// MaxUint64 (2^64-1) exactly, but the next power of two above each is exactly
+// representable, so an exclusive maximum names the boundary precisely:
+// v < 2^63 is v <= MaxInt64, and v < 2^64 is v <= MaxUint64.
+const (
+	exclusiveMaxInt64  = float64(1 << 63) // 2^63
+	exclusiveMaxUint64 = float64(1 << 64) // 2^64
+)
 
 // schemaForSlice generates a schema for slice types.
 //

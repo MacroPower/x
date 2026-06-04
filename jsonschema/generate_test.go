@@ -2157,39 +2157,59 @@ func TestGenerateFor_BuiltinOverrideExtractedToDefs(t *testing.T) {
 	}`, string(got))
 }
 
-func TestUint64MaxNotExpressible(t *testing.T) {
+// TestUint64BoundExclusiveMaximum covers the uint64 upper bound. Float64 cannot
+// represent MaxUint64 (2^64-1) exactly, so an inclusive maximum would have to
+// round down and reject the field's own boundary value. The schema instead uses
+// an exclusive maximum of 2^64 (exactly representable), which admits every valid
+// uint64 including the boundary while still rejecting out-of-range values.
+func TestUint64BoundExclusiveMaximum(t *testing.T) {
 	t.Parallel()
 
 	s, err := jsonschema.GenerateFor[uint64]()
 	require.NoError(t, err)
 
-	got := marshalSchema(t, s)
-
-	// Uint64 should have a maximum, but math.MaxUint64 exceeds float64 precision.
 	// Float64 cannot represent MaxUint64 exactly: it rounds up to 2^64, which is
-	// then indistinguishable from MaxUint64-1. (The uint64 round-trip is avoided
-	// because converting an out-of-range float is platform-dependent.)
+	// then indistinguishable from MaxUint64-1, so no inclusive maximum names the
+	// boundary.
 	maxUint64 := uint64(math.MaxUint64)
 	assert.InDelta(t, float64(maxUint64), float64(maxUint64-1), 0,
 		"demonstrates float64 cannot represent MaxUint64 exactly")
 
-	assert.Contains(t, got, `"maximum"`,
-		"uint64 schema should express a maximum bound")
+	require.Nil(t, s.Maximum, "uint64 should not use an inclusive maximum")
+	require.NotNil(t, s.ExclusiveMaximum, "uint64 should express an exclusive maximum bound")
+	assert.InDelta(t, float64(1<<64), *s.ExclusiveMaximum, 0, "exclusive maximum should be 2^64")
+
+	// The boundary value MaxUint64 must validate against its own schema.
+	v, err := jsonschema.Compile(s)
+	require.NoError(t, err)
+	assert.NoError(t, v.ValidateJSON([]byte("18446744073709551615")),
+		"MaxUint64 must satisfy the uint64 schema")
 }
 
-func TestInt64GeneratesBoundedSchema(t *testing.T) {
+// TestInt64BoundExclusiveMaximum covers the int64 bounds. MinInt64 (-2^63) is
+// representable as float64, so the minimum stays inclusive; MaxInt64 (2^63-1) is
+// not, so the upper bound uses an exclusive maximum of 2^63 to admit the
+// boundary value exactly.
+func TestInt64BoundExclusiveMaximum(t *testing.T) {
 	t.Parallel()
 
 	s, err := jsonschema.GenerateFor[int64]()
 	require.NoError(t, err)
 
-	got := marshalSchema(t, s)
+	require.NotNil(t, s.Minimum, "int64 should have an inclusive minimum bound")
+	assert.InDelta(t, float64(math.MinInt64), *s.Minimum, 0, "minimum should be MinInt64")
 
-	// Int64 has known bounds representable as float64.
-	assert.Contains(t, got, `"minimum"`,
-		"int64 schema should have minimum bound")
-	assert.Contains(t, got, `"maximum"`,
-		"int64 schema should have maximum bound")
+	require.Nil(t, s.Maximum, "int64 should not use an inclusive maximum")
+	require.NotNil(t, s.ExclusiveMaximum, "int64 should express an exclusive maximum bound")
+	assert.InDelta(t, float64(1<<63), *s.ExclusiveMaximum, 0, "exclusive maximum should be 2^63")
+
+	// Both boundary values must validate against their own schema.
+	v, err := jsonschema.Compile(s)
+	require.NoError(t, err)
+	assert.NoError(t, v.ValidateJSON([]byte("9223372036854775807")),
+		"MaxInt64 must satisfy the int64 schema")
+	assert.NoError(t, v.ValidateJSON([]byte("-9223372036854775808")),
+		"MinInt64 must satisfy the int64 schema")
 }
 
 func TestArrayGenerationUsesPrefixItems(t *testing.T) {
