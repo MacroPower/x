@@ -1169,6 +1169,44 @@ func TestValidateWithContent(t *testing.T) {
 	}
 }
 
+func TestValidateDynamicRefUnresolvableErrors(t *testing.T) {
+	t.Parallel()
+
+	// A remote $dynamicRef that no resolver can satisfy must report a
+	// resolution error like the equivalent $ref, not silently accept every
+	// instance.
+	tests := map[string]struct {
+		schema *jsonschema.Schema
+		err    string
+	}{
+		"unresolvable remote $dynamicRef": {
+			schema: &jsonschema.Schema{
+				Properties: map[string]*jsonschema.Schema{
+					"x": {DynamicRef: "https://example.test/no-such"},
+				},
+			},
+			err: `cannot resolve $dynamicRef "https://example.test/no-such"`,
+		},
+		"unresolvable remote $ref": {
+			schema: &jsonschema.Schema{
+				Properties: map[string]*jsonschema.Schema{
+					"x": {Ref: "https://example.test/no-such"},
+				},
+			},
+			err: `cannot resolve $ref "https://example.test/no-such"`,
+		},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := jsonschema.Validate(tt.schema, map[string]any{"x": 1.0})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.err)
+		})
+	}
+}
+
 func TestFormatAssertionVocabularyAssertsWhenRecognized(t *testing.T) {
 	t.Parallel()
 

@@ -3087,7 +3087,21 @@ func (v *validator) validateDynamicRef(
 			}}
 		}
 
-		return nil // unresolvable: silently skip
+		// A non-local (remote/absolute) $dynamicRef that cannot be resolved is
+		// an error rather than silently passing, mirroring $ref. Unresolvable
+		// local fragment refs are already rejected by Schema.Resolve before
+		// the walk begins.
+		if !isFragmentOnly(ref) {
+			return []*ValidationError{{
+				InstancePath: instancePath,
+				SchemaPath:   schemaPath + "/$dynamicRef",
+				Keyword:      "$dynamicRef",
+				Message:      fmt.Sprintf("cannot resolve $dynamicRef %q", ref),
+			}}
+		}
+
+		// Unresolvable local fragment ref: silently skip.
+		return nil
 	}
 
 	refAnn := newAnnotations()
