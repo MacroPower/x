@@ -754,6 +754,14 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 
 	var order []string
 
+	// Track every struct type descended into during this walk. A struct that
+	// embeds itself (type T struct{ *T; X int }) is a valid Go type that
+	// encoding/json marshals by tracking visited types in typeFields; without the
+	// same guard, collect would recurse without bound. Each struct type is
+	// descended into at most once across the walk, matching encoding/json: a
+	// second embed of the same type adds no new promoted fields.
+	visited := map[reflect.Type]bool{t: true}
+
 	var collect func(t reflect.Type, depth int, index []int, optional bool)
 
 	collect = func(t reflect.Type, depth int, index []int, optional bool) {
@@ -820,8 +828,18 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 
 						continue
 					}
-					// Promote fields. Fields reached through a pointer embed are
-					// optional because a nil embed omits them entirely.
+					// Promote fields, unless this struct type has already been
+					// descended into during this walk: a self-embedding (or mutually
+					// embedding) type would otherwise recurse forever, and a repeat
+					// embed promotes no new fields anyway.
+					if visited[ft] {
+						continue
+					}
+
+					visited[ft] = true
+
+					// Fields reached through a pointer embed are optional because a
+					// nil embed omits them entirely.
 					collect(ft, depth+1, fieldIndex, optional || embeddedViaPointer)
 
 					continue

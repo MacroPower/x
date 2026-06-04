@@ -745,6 +745,50 @@ func TestGenerateFor_RecursiveArray(t *testing.T) {
 	}`, string(got))
 }
 
+// selfEmbeddingStruct embeds a pointer to itself. The standard library marshals
+// selfEmbeddingStruct{X: 5} as {"x":5}: the embedded pointer promotes its own X
+// at a deeper level, where the outer X shadows it. The field collector must
+// track visited embedded types so it does not recurse without bound.
+type selfEmbeddingStruct struct {
+	*selfEmbeddingStruct //nolint:unused // Self-embed under test; exercised via reflection.
+
+	X int `json:"x"`
+}
+
+// TestGenerateFor_SelfEmbeddingStruct covers a struct that embeds a pointer to
+// itself. Field collection must terminate, and the schema must match what
+// encoding/json serializes: a single "x" property.
+func TestGenerateFor_SelfEmbeddingStruct(t *testing.T) {
+	t.Parallel()
+
+	// Confirm the reference behavior: encoding/json marshals to {"x":5}.
+	encoded, err := json.Marshal(selfEmbeddingStruct{X: 5})
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"x":5}`, string(encoded))
+
+	s, err := jsonschema.GenerateFor[selfEmbeddingStruct]()
+	require.NoError(t, err)
+
+	got, err := json.Marshal(s)
+	require.NoError(t, err)
+
+	// The embedded pointer's only field, X, is shadowed by the outer X, so the
+	// final schema carries no self-reference and the root is inlined: a single
+	// "x" property, matching encoding/json's {"x":5}.
+	assert.JSONEq(t, `{
+		"$schema":"https://json-schema.org/draft/2020-12/schema",
+		"type":"object",
+		"properties":{"x":{"type":"integer"}},
+		"required":["x"],
+		"additionalProperties":false
+	}`, string(got))
+
+	// The schema must accept exactly what encoding/json produces.
+	v, err := jsonschema.Compile(s)
+	require.NoError(t, err)
+	assert.NoError(t, v.ValidateJSON(encoded))
+}
+
 func TestGenerateFor_IntegerMapKeys(t *testing.T) {
 	t.Parallel()
 
