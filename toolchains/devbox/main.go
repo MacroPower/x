@@ -68,14 +68,22 @@ func New(
 // The volume is seeded from the image's own store so the bootstrap Nix
 // installation keeps working, then accumulates installed packages across runs.
 // Source is not mounted.
+//
+// The cache key includes the image reference because the seed (Source) and
+// Owner only take effect when the volume is first created. Keying on the image
+// rotates the volume when the image is bumped, so a new image's bootstrap store
+// is never shadowed by a stale snapshot. Writes are serialized (Locked) since
+// the Nix store is backed by a SQLite database that concurrent writers can
+// corrupt.
 func (m *Devbox) Base() *dagger.Container {
 	ctr := dag.Container().From(m.Image)
 	return ctr.WithMountedCache(
 		nixStore,
-		dag.CacheVolume(m.CacheNamespace+":nix"),
+		dag.CacheVolume(m.CacheNamespace+":nix:"+m.Image),
 		dagger.ContainerWithMountedCacheOpts{
-			Source: ctr.Directory(nixStore),
-			Owner:  containerUser,
+			Source:  ctr.Directory(nixStore),
+			Owner:   containerUser,
+			Sharing: dagger.CacheSharingModeLocked,
 		},
 	)
 }
