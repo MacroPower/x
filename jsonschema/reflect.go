@@ -197,10 +197,12 @@ func (g *generator) schemaForType(t reflect.Type, nullable bool) (*Schema, error
 
 	// 4. TextMarshaler (direct implementation only, not promoted from an
 	// embedded field — promoted TextMarshaler is composed via allOf during
-	// struct field collection, matching the JSONSchemaProvider pattern).
+	// struct field collection, matching the JSONSchemaProvider pattern). A direct
+	// TextMarshaler serializes as a string and shares the built-in path's
+	// type-level post-processing (comments, extender, $defs extraction).
 	if isDirectTextMarshaler(t) {
 		s := &Schema{Type: "string"}
-		return g.handleTextMarshalerType(t, s, nullable)
+		return g.handleBuiltinType(t, s, nullable)
 	}
 
 	// 5. Cycle detection for named container types. A named type that contains
@@ -369,13 +371,6 @@ func (g *generator) handleBuiltinType(t reflect.Type, s *Schema, nullable bool) 
 	return g.applyNullable(s, t, nullable), nil
 }
 
-// handleTextMarshalerType processes a type that directly implements
-// TextMarshaler. The type-level post-processing (comments, extender, $defs
-// extraction) is identical to a built-in override, so it delegates.
-func (g *generator) handleTextMarshalerType(t reflect.Type, s *Schema, nullable bool) (*Schema, error) {
-	return g.handleBuiltinType(t, s, nullable)
-}
-
 // builtinOverride returns a schema for well-known types, if applicable.
 func (g *generator) builtinOverride(t reflect.Type) (*Schema, bool) {
 	switch t {
@@ -482,10 +477,9 @@ func (g *generator) schemaForKind(t reflect.Type, nullable bool) (*Schema, error
 	case reflect.Struct:
 		return g.schemaForStruct(t, nullable)
 
-	case reflect.Func, reflect.Chan, reflect.Complex64, reflect.Complex128, reflect.UnsafePointer:
-		return nil, fmt.Errorf("%w: %s", ErrUnsupportedType, t)
-
 	default:
+		// Func, chan, complex, and unsafe.Pointer have no JSON Schema
+		// representation; encoding/json cannot marshal them either.
 		return nil, fmt.Errorf("%w: %s", ErrUnsupportedType, t)
 	}
 }
