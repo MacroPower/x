@@ -26,6 +26,8 @@ func (t *Tests) All(ctx context.Context) error {
 	}{
 		{"run-executes-command", t.RunExecutesCommand},
 		{"run-uses-installed-package", t.RunUsesInstalledPackage},
+		{"run-propagates-failure", t.RunPropagatesFailure},
+		{"run-sees-full-source", t.RunSeesFullSource},
 	}
 	for _, tc := range cases {
 		if err := tc.fn(ctx); err != nil {
@@ -59,6 +61,32 @@ func (t *Tests) RunUsesInstalledPackage(ctx context.Context) error {
 	}
 	if !strings.Contains(out, "jq") {
 		return fmt.Errorf("expected jq version output, got: %q", out)
+	}
+	return nil
+}
+
+// RunPropagatesFailure verifies a command that exits non-zero surfaces an error
+// to the caller, so a failed CI step is reported rather than silently swallowed.
+func (t *Tests) RunPropagatesFailure(ctx context.Context) error {
+	_, err := dag.Devbox(dagger.DevboxOpts{Source: t.fixture()}).
+		Run(ctx, []string{"sh", "-c", "exit 3"})
+	if err == nil {
+		return fmt.Errorf("expected Run to propagate the non-zero exit code")
+	}
+	return nil
+}
+
+// RunSeesFullSource verifies WithSource overlays the whole project, not just the
+// install manifest, by reading a file that is not part of the install include
+// set (so the test fails if Run mistakenly used the manifest-only Install).
+func (t *Tests) RunSeesFullSource(ctx context.Context) error {
+	out, err := dag.Devbox(dagger.DevboxOpts{Source: t.fixture()}).
+		Run(ctx, []string{"cat", "data.txt"})
+	if err != nil {
+		return err
+	}
+	if !strings.Contains(out, "from-source") {
+		return fmt.Errorf("expected to read the non-manifest source file, got: %q", out)
 	}
 	return nil
 }
