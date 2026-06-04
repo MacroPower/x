@@ -984,7 +984,13 @@ func (g *generator) buildFieldSchema(parentType reflect.Type, fi structFieldInfo
 		return nil, err
 	}
 
-	// 1. JSON ",string" override.
+	// 1. JSON ",string" override. The tag-scalar type (used to parse the
+	// jsonschema tag's const/enum/default values) defaults to the field's Go
+	// type. When the override coerces the field schema to a string, encoding/json
+	// also serializes the value as a quoted string, so the tag scalars must parse
+	// as strings too — otherwise a numeric const on an int field would be
+	// {"type":"string","const":5}, which the string-encoded "5" can never satisfy.
+	tagType := fieldType
 	if fi.jsonString {
 		if isStringableType(fieldType) {
 			if isPointer {
@@ -992,6 +998,8 @@ func (g *generator) buildFieldSchema(parentType reflect.Type, fi structFieldInfo
 			} else {
 				fieldSchema = &Schema{Type: "string"}
 			}
+
+			tagType = reflect.TypeFor[string]()
 		}
 	}
 
@@ -1002,7 +1010,7 @@ func (g *generator) buildFieldSchema(parentType reflect.Type, fi structFieldInfo
 
 	// 3. Schema struct tag.
 	if tag, ok := fi.field.Tag.Lookup("jsonschema"); ok {
-		err := applyJSONSchemaTag(tag, fieldType, fieldSchema)
+		err := applyJSONSchemaTag(tag, tagType, fieldSchema)
 		if err != nil {
 			return nil, fmt.Errorf("jsonschema tag: %w", err)
 		}
