@@ -203,8 +203,26 @@ func (g *generator) schemaForType(t reflect.Type, nullable bool) (*Schema, error
 		return g.handleTextMarshalerType(t, s, nullable)
 	}
 
-	// 5. Kind-based reflection.
+	// 5. Cycle detection for named container types. A named type that contains
+	// itself (type T []T, type M map[string]M, type A [N]A) recurses without
+	// bound through schemaForKind. Tracking the type on the visiting stack lets a
+	// re-entry emit a $ref to its $defs entry, breaking the cycle exactly as
+	// schemaForStruct does for self-referential structs. Struct types run their
+	// own equivalent guard inside schemaForStruct, so they are excluded here.
+	guarded := t.Kind() != reflect.Struct && t.Name() != "" && isRecursiveContainerKind(t.Kind())
+	if guarded {
+		if g.visiting[t] {
+			return g.refForType(t, nullable), nil
+		}
+
+		g.visiting[t] = true
+	}
+
+	// 6. Kind-based reflection.
 	s, err := g.schemaForKind(t, nullable)
+	if guarded {
+		delete(g.visiting, t)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -223,12 +241,31 @@ func (g *generator) schemaForType(t reflect.Type, nullable bool) (*Schema, error
 				return nil, err
 			}
 		}
+		// A cycle detected while building this type's element/value schema left a
+		// placeholder $defs entry (created by refForType). Fill it with the now
+		// complete schema and return a $ref, mirroring the inline-struct path.
+		if _, cyclic := g.typeToDefName[t]; cyclic {
+			return g.extractToDefs(t, s, nullable)
+		}
 		if g.shouldExtract(t) {
 			return g.extractToDefs(t, s, nullable)
 		}
 	}
 
 	return s, nil
+}
+
+// isRecursiveContainerKind reports whether a kind can hold a value of its own
+// type and thus form a cycle through schemaForKind: slices, arrays, and maps
+// recurse on the element (or value) type. Other non-struct kinds cannot embed
+// themselves, so they need no cycle guard.
+func isRecursiveContainerKind(k reflect.Kind) bool {
+	switch k {
+	case reflect.Slice, reflect.Array, reflect.Map:
+		return true
+	default:
+		return false
+	}
 }
 
 // handleOverrideType processes a type with a WithTypeSchema override.

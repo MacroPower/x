@@ -658,6 +658,93 @@ func TestGenerateFor_RecursiveType(t *testing.T) {
 	}`, string(got))
 }
 
+// recursiveSlice, recursiveMap, and recursiveArray are named non-struct types
+// that contain themselves. They are valid Go types that encoding/json handles,
+// and the generator must break their cycles via $defs/$ref rather than recursing
+// without bound. A by-value recursive array (type A [2]A) has infinite size and
+// the Go compiler rejects it, so the array case recurses through a pointer.
+type recursiveSlice []recursiveSlice
+
+type recursiveMap map[string]recursiveMap
+
+type recursiveArray [2]*recursiveArray
+
+// TestGenerateFor_RecursiveSlice covers a named slice type whose element is the
+// slice type itself. Without cycle detection on the slice path the generator
+// recurses without bound; the result must reference itself through $defs.
+func TestGenerateFor_RecursiveSlice(t *testing.T) {
+	t.Parallel()
+
+	s, err := jsonschema.GenerateFor[recursiveSlice]()
+	require.NoError(t, err)
+
+	got, err := json.Marshal(s)
+	require.NoError(t, err)
+
+	assert.JSONEq(t, `{
+		"$schema":"https://json-schema.org/draft/2020-12/schema",
+		"$ref":"#/$defs/recursiveSlice",
+		"$defs":{
+			"recursiveSlice":{
+				"type":["null","array"],
+				"items":{"$ref":"#/$defs/recursiveSlice"}
+			}
+		}
+	}`, string(got))
+}
+
+// TestGenerateFor_RecursiveMap covers a named map type whose value is the map
+// type itself, exercising cycle detection on the map path.
+func TestGenerateFor_RecursiveMap(t *testing.T) {
+	t.Parallel()
+
+	s, err := jsonschema.GenerateFor[recursiveMap]()
+	require.NoError(t, err)
+
+	got, err := json.Marshal(s)
+	require.NoError(t, err)
+
+	assert.JSONEq(t, `{
+		"$schema":"https://json-schema.org/draft/2020-12/schema",
+		"$ref":"#/$defs/recursiveMap",
+		"$defs":{
+			"recursiveMap":{
+				"type":["null","object"],
+				"additionalProperties":{"$ref":"#/$defs/recursiveMap"}
+			}
+		}
+	}`, string(got))
+}
+
+// TestGenerateFor_RecursiveArray covers a named array type whose elements are
+// pointers to the array type itself, exercising cycle detection on the array
+// path (the only recursive array form Go permits).
+func TestGenerateFor_RecursiveArray(t *testing.T) {
+	t.Parallel()
+
+	s, err := jsonschema.GenerateFor[recursiveArray]()
+	require.NoError(t, err)
+
+	got, err := json.Marshal(s)
+	require.NoError(t, err)
+
+	assert.JSONEq(t, `{
+		"$schema":"https://json-schema.org/draft/2020-12/schema",
+		"$ref":"#/$defs/recursiveArray",
+		"$defs":{
+			"recursiveArray":{
+				"type":"array",
+				"minItems":2,
+				"maxItems":2,
+				"prefixItems":[
+					{"anyOf":[{"$ref":"#/$defs/recursiveArray"},{"type":"null"}]},
+					{"anyOf":[{"$ref":"#/$defs/recursiveArray"},{"type":"null"}]}
+				]
+			}
+		}
+	}`, string(got))
+}
+
 func TestGenerateFor_IntegerMapKeys(t *testing.T) {
 	t.Parallel()
 
