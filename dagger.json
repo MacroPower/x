@@ -21,6 +21,16 @@
           "ignore": [".git", ".worktrees", ".devbox", ".task", "dist", ".tmp", "toolchains"]
         }
       ]
+    },
+    {
+      "name": "devbox",
+      "source": "toolchains/devbox",
+      "customizations": [
+        {
+          "argument": "source",
+          "ignore": [".git", ".worktrees", ".devbox", ".task", "dist", ".tmp", "toolchains"]
+        }
+      ]
     }
   ]
 }
