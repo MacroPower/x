@@ -10,8 +10,6 @@ package main
 import (
 	"context"
 	"fmt"
-
-	"dagger/tests/internal/dagger"
 )
 
 // Tests exercises the cosign toolchain.

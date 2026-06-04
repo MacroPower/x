@@ -70,7 +70,7 @@ from a module directory.
 
 ## Conventions
 
-- **engineVersion** is pinned to `v0.20.8` across every `dagger.json` here.
+- **engineVersion** is pinned to `v0.21.4` across every `dagger.json` here.
   A consumer's root `dagger.json` and CI must match exactly (the engine
   enforces it), so engine bumps are coordinated across all adopters.
 - **Ignore patterns belong in the consumer's root `dagger.json`**
