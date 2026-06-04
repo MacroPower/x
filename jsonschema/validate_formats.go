@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"golang.org/x/net/idna"
 )
@@ -51,13 +52,16 @@ var (
 func validateDateTime(s string) error {
 	upper := strings.ToUpper(s)
 
-	// Split on T separator (RFC 3339 allows lowercase t).
+	// Split on T separator (RFC 3339 allows lowercase t). Uppercasing first
+	// folds the lowercase 't' so the date and time halves split cleanly; the
+	// date half holds only digits and hyphens, so uppercasing leaves it
+	// unchanged before it is handed to validateDate.
 	datePart, timePart, ok := strings.Cut(upper, "T")
 	if !ok {
 		return errors.New("invalid date-time")
 	}
 
-	_, err := time.Parse("2006-01-02", datePart)
+	err := validateDate(datePart)
 	if err != nil {
 		return errors.New("invalid date-time")
 	}
@@ -470,14 +474,27 @@ func validateURIReference(s string) error {
 	return nil
 }
 
-// containsInvalidURIChars checks for characters forbidden by RFC 3986.
+// containsInvalidURIChars checks for characters forbidden by RFC 3986. A URI is
+// limited to ASCII, so any code point above '~' (0x7E) is also rejected.
 func containsInvalidURIChars(s string) bool {
 	for _, c := range s {
-		if c > 0x7E || c == ' ' || c == '<' || c == '>' ||
-			c == '{' || c == '}' || c == '^' || c == '`' ||
-			c == '|' || c == '"' || c == '\\' {
+		if c > 0x7E || isForbiddenURIIRIChar(c) {
 			return true
 		}
+	}
+
+	return false
+}
+
+// isForbiddenURIIRIChar reports whether c is one of the gen-delims/sub-delims
+// and other characters that both RFC 3986 (URI) and RFC 3987 (IRI) exclude from
+// the unreserved/reserved sets. It covers only the rules the two share; their
+// genuinely different rule (URIs additionally ban all non-ASCII) lives in
+// containsInvalidURIChars.
+func isForbiddenURIIRIChar(c rune) bool {
+	switch c {
+	case ' ', '<', '>', '{', '}', '^', '`', '|', '\\', '"':
+		return true
 	}
 
 	return false
@@ -810,12 +827,11 @@ func validateIRIReference(s string) error {
 }
 
 // containsInvalidIRIChars checks for characters forbidden by RFC 3987.
-// Unlike URIs, IRIs allow non-ASCII Unicode characters.
+// Unlike URIs, IRIs allow non-ASCII Unicode characters, so only the shared
+// forbidden set applies.
 func containsInvalidIRIChars(s string) bool {
 	for _, c := range s {
-		if c == ' ' || c == '<' || c == '>' ||
-			c == '{' || c == '}' || c == '^' || c == '`' ||
-			c == '|' || c == '\\' || c == '"' {
+		if isForbiddenURIIRIChar(c) {
 			return true
 		}
 	}
@@ -963,7 +979,7 @@ func splitIDNADots(s string) []string {
 	for i, r := range s {
 		if r == '.' || r == '\u3002' || r == '\uFF0E' || r == '\uFF61' {
 			labels = append(labels, s[start:i])
-			start = i + len(string(r))
+			start = i + utf8.RuneLen(r)
 		}
 	}
 
