@@ -2,7 +2,9 @@ package validate_test
 
 import (
 	"encoding/json"
+	"math"
 	"reflect"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -1140,4 +1142,95 @@ func TestValidateInterpreter_PatternKeywordDoesNotOverwrite(t *testing.T) {
 
 	assert.Equal(t, "^[0-9]{4}$", s.Properties["code"].Pattern,
 		"explicit jsonschema pattern must win over the validate alpha tag")
+}
+
+func TestCollectionGtMaxIntDoesNotWrap(t *testing.T) {
+	t.Parallel()
+
+	// gt=MaxInt increments the bound by one, which without an overflow guard
+	// wraps to math.MinInt and then collapses to a permissive minItems: 0.
+	// The guard preserves math.MaxInt as the tightest representable bound.
+	cases := map[string]struct {
+		fieldType reflect.Type
+		wantMin   *int
+	}{
+		"slice": {
+			fieldType: reflect.TypeFor[[]string](),
+			wantMin:   jsonschema.Ptr(math.MaxInt),
+		},
+		"map": {
+			fieldType: reflect.TypeFor[map[string]string](),
+			wantMin:   jsonschema.Ptr(math.MaxInt),
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			schema := &jsonschema.Schema{}
+			parent := &jsonschema.Schema{}
+			interp := validate.NewInterpreter()
+			tag := "gt=" + strconv.Itoa(math.MaxInt)
+			err := interp.Interpret(tag, jsonschema.FieldContext{
+				Type:   tc.fieldType,
+				Schema: schema,
+				Parent: parent,
+				Name:   "field",
+			})
+			require.NoError(t, err)
+
+			if tc.fieldType.Kind() == reflect.Map {
+				assert.Equal(t, tc.wantMin, schema.MinProperties,
+					"gt=MaxInt on map must not overflow to a permissive bound")
+			} else {
+				assert.Equal(t, tc.wantMin, schema.MinItems,
+					"gt=MaxInt on slice must not overflow to a permissive bound")
+			}
+		})
+	}
+}
+
+func TestCollectionLtMinIntDoesNotWrap(t *testing.T) {
+	t.Parallel()
+
+	// lt=MinInt decrements the bound by one, which without an underflow guard
+	// wraps to math.MaxInt (a large positive) before the non-negative clamp,
+	// leaving a huge permissive maxItems instead of collapsing to 0.
+	cases := map[string]struct {
+		fieldType reflect.Type
+	}{
+		"slice": {fieldType: reflect.TypeFor[[]string]()},
+		"map":   {fieldType: reflect.TypeFor[map[string]string]()},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			schema := &jsonschema.Schema{}
+			parent := &jsonschema.Schema{}
+			interp := validate.NewInterpreter()
+			tag := "lt=" + strconv.Itoa(math.MinInt)
+			err := interp.Interpret(tag, jsonschema.FieldContext{
+				Type:   tc.fieldType,
+				Schema: schema,
+				Parent: parent,
+				Name:   "field",
+			})
+			require.NoError(t, err)
+
+			if tc.fieldType.Kind() == reflect.Map {
+				require.NotNil(t, schema.MaxProperties,
+					"lt=MinInt on map must still set maxProperties")
+				assert.GreaterOrEqual(t, *schema.MaxProperties, 0,
+					"lt=MinInt on map must not wrap to a large positive maxProperties")
+			} else {
+				require.NotNil(t, schema.MaxItems,
+					"lt=MinInt on slice must still set maxItems")
+				assert.GreaterOrEqual(t, *schema.MaxItems, 0,
+					"lt=MinInt on slice must not wrap to a large positive maxItems")
+			}
+		})
+	}
 }

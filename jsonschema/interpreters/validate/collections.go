@@ -2,6 +2,7 @@ package validate
 
 import (
 	"fmt"
+	"math"
 	"reflect"
 	"strconv"
 
@@ -14,7 +15,10 @@ func applyCollectionMinConstraint(s *jsonschema.Schema, value string, baseType r
 	if err != nil {
 		return fmt.Errorf("validate tag: invalid number %q: %w", value, err)
 	}
-	if exclusive {
+	// Gt=N means minItems N+1; guard against overflow so gt=MaxInt yields the
+	// largest representable bound instead of wrapping negative and collapsing
+	// to a permissive minItems: 0.
+	if exclusive && n != math.MaxInt {
 		n++
 	}
 	// MinItems/minProperties MUST be non-negative per JSON Schema; a negative
@@ -37,7 +41,9 @@ func applyCollectionMaxConstraint(s *jsonschema.Schema, value string, baseType r
 	if err != nil {
 		return fmt.Errorf("validate tag: invalid number %q: %w", value, err)
 	}
-	if exclusive {
+	// Lt=N means maxItems N-1; guard against underflow so lt=MinInt does not
+	// wrap to a large positive (permissive) bound before the non-negative clamp.
+	if exclusive && n != math.MinInt {
 		n--
 	}
 	// MaxItems/maxProperties MUST be non-negative per JSON Schema; an
