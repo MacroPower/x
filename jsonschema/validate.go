@@ -2975,8 +2975,12 @@ func (v *validator) assertContent(
 	}
 
 	decoded := []byte(str)
+	decodedKnown := true
 
-	if schema.ContentEncoding == "base64" {
+	switch schema.ContentEncoding {
+	case "":
+		// No encoding: the instance string is the content itself.
+	case "base64":
 		b, err := base64.StdEncoding.DecodeString(str)
 		if err != nil {
 			return []*ValidationError{{
@@ -2988,9 +2992,15 @@ func (v *validator) assertContent(
 		}
 
 		decoded = b
+
+	default:
+		// An unrecognized encoding cannot be decoded, so the media type
+		// cannot be asserted against the decoded form; both keywords remain
+		// annotations rather than running the assertion on still-encoded text.
+		decodedKnown = false
 	}
 
-	if schema.ContentMediaType == "application/json" && !json.Valid(decoded) {
+	if decodedKnown && schema.ContentMediaType == "application/json" && !json.Valid(decoded) {
 		return []*ValidationError{{
 			InstancePath: instancePath,
 			SchemaPath:   schemaPath + "/contentMediaType",

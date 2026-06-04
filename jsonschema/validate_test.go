@@ -1148,6 +1148,19 @@ func TestValidateWithContent(t *testing.T) {
 			instance: `{:}`,
 			enabled:  false,
 		},
+		"unknown encoding leaves media type unasserted": {
+			// The validator cannot decode base16, so the media type cannot be
+			// asserted against the decoded form; running json.Valid on the
+			// still-encoded text would falsely reject hex-encoded valid JSON.
+			schema:   &jsonschema.Schema{ContentEncoding: "base16", ContentMediaType: "application/json"},
+			instance: "7b22666f6f223a22626172227d",
+			enabled:  true,
+		},
+		"unknown encoding stays annotation for non-json text": {
+			schema:   &jsonschema.Schema{ContentEncoding: "base16", ContentMediaType: "application/json"},
+			instance: "zz-not-even-hex",
+			enabled:  true,
+		},
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
