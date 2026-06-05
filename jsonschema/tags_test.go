@@ -498,6 +498,189 @@ func TestTagProcessingErrorPaths(t *testing.T) {
 	}
 }
 
+func TestFloat32ScalarKeepsDecimal(t *testing.T) {
+	t.Parallel()
+
+	// A float32 field's const/default/enum/examples value is parsed at 64 bits so
+	// the stored schema value is the float64 closest to the decimal the author
+	// wrote, not the float32-rounded approximation. Parsing 0.1 at 32 bits and
+	// widening yields 0.10000000149011612, which would make a {"v":0.1} instance
+	// fail validation against its own const. A value exactly representable in
+	// float32 (e.g. 0.5, 1.5) is unchanged either way.
+	tests := map[string]struct {
+		generate func() (*jsonschema.Schema, error)
+		key      string // schema field carrying the value: const/default/enum/examples
+		want     string // marshaled JSON of that schema field
+	}{
+		"const decimal not float32-rounded": {
+			generate: func() (*jsonschema.Schema, error) {
+				type doc struct {
+					V float32 `json:"v" jsonschema:"const=0.1"`
+				}
+
+				return jsonschema.GenerateFor[doc]()
+			},
+			key:  "const",
+			want: `0.1`,
+		},
+		"default decimal not float32-rounded": {
+			generate: func() (*jsonschema.Schema, error) {
+				type doc struct {
+					V float32 `json:"v" jsonschema:"default=0.1"`
+				}
+
+				return jsonschema.GenerateFor[doc]()
+			},
+			key:  "default",
+			want: `0.1`,
+		},
+		"enum decimal not float32-rounded": {
+			generate: func() (*jsonschema.Schema, error) {
+				type doc struct {
+					V float32 `json:"v" jsonschema:"enum=0.1|0.2"`
+				}
+
+				return jsonschema.GenerateFor[doc]()
+			},
+			key:  "enum",
+			want: `[0.1,0.2]`,
+		},
+		"examples decimal not float32-rounded": {
+			generate: func() (*jsonschema.Schema, error) {
+				type doc struct {
+					V float32 `json:"v" jsonschema:"examples=0.1|0.2"`
+				}
+
+				return jsonschema.GenerateFor[doc]()
+			},
+			key:  "examples",
+			want: `[0.1,0.2]`,
+		},
+		"const exact float32 value unchanged": {
+			generate: func() (*jsonschema.Schema, error) {
+				type doc struct {
+					V float32 `json:"v" jsonschema:"const=0.5"`
+				}
+
+				return jsonschema.GenerateFor[doc]()
+			},
+			key:  "const",
+			want: `0.5`,
+		},
+		"const exact float32 value 1.5 unchanged": {
+			generate: func() (*jsonschema.Schema, error) {
+				type doc struct {
+					V float32 `json:"v" jsonschema:"const=1.5"`
+				}
+
+				return jsonschema.GenerateFor[doc]()
+			},
+			key:  "const",
+			want: `1.5`,
+		},
+		"float64 const decimal unchanged": {
+			generate: func() (*jsonschema.Schema, error) {
+				type doc struct {
+					V float64 `json:"v" jsonschema:"const=0.1"`
+				}
+
+				return jsonschema.GenerateFor[doc]()
+			},
+			key:  "const",
+			want: `0.1`,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			s, err := tc.generate()
+			require.NoError(t, err)
+
+			prop := s.Properties["v"]
+			require.NotNil(t, prop)
+
+			var got []byte
+			switch tc.key {
+			case "const":
+				require.NotNil(t, prop.Const)
+
+				got, err = json.Marshal(prop.Const)
+
+			case "default":
+				got = prop.Default
+			case "enum":
+				got, err = json.Marshal(prop.Enum)
+			case "examples":
+				got, err = json.Marshal(prop.Examples)
+			}
+
+			require.NoError(t, err)
+			assert.JSONEq(t, tc.want, string(got),
+				"float32 %s value should keep the author's decimal, not the float32-rounded approximation", tc.key)
+		})
+	}
+}
+
+func TestFloat32ScalarOverflow(t *testing.T) {
+	t.Parallel()
+
+	// A float32 field still rejects a value outside its range: the 32-bit parse is
+	// retained as an overflow check, so const/default/enum/examples values that the
+	// float32 type can never hold surface as generation errors.
+	tests := map[string]struct {
+		generate func() (*jsonschema.Schema, error)
+	}{
+		"const overflow": {
+			generate: func() (*jsonschema.Schema, error) {
+				type doc struct {
+					V float32 `json:"v" jsonschema:"const=1e300"`
+				}
+
+				return jsonschema.GenerateFor[doc]()
+			},
+		},
+		"default overflow": {
+			generate: func() (*jsonschema.Schema, error) {
+				type doc struct {
+					V float32 `json:"v" jsonschema:"default=1e300"`
+				}
+
+				return jsonschema.GenerateFor[doc]()
+			},
+		},
+		"enum overflow": {
+			generate: func() (*jsonschema.Schema, error) {
+				type doc struct {
+					V float32 `json:"v" jsonschema:"enum=1.0|1e300"`
+				}
+
+				return jsonschema.GenerateFor[doc]()
+			},
+		},
+		"examples overflow": {
+			generate: func() (*jsonschema.Schema, error) {
+				type doc struct {
+					V float32 `json:"v" jsonschema:"examples=1e300"`
+				}
+
+				return jsonschema.GenerateFor[doc]()
+			},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := tc.generate()
+			require.Error(t, err,
+				"out-of-range float32 tag scalar should be rejected at generation")
+		})
+	}
+}
+
 func TestTagEnumExamplesEmptySegment(t *testing.T) {
 	t.Parallel()
 

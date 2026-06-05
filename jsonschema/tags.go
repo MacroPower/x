@@ -488,17 +488,24 @@ func parseTypedScalar(value string, t reflect.Type) (any, error) {
 		return n, nil
 
 	case reflect.Float32, reflect.Float64:
-		// A float32 field cannot hold a value outside its range, so parse at 32 bits
-		// to reject the overflow; widen to float64 only for storage so the stored
-		// value keeps the float64 type the rest of the pipeline expects.
-		bitSize := 64
-		if t.Kind() == reflect.Float32 {
-			bitSize = 32
-		}
-
-		n, err := strconv.ParseFloat(value, bitSize)
+		// Parse at 64 bits for storage so the stored value is the float64 closest
+		// to the decimal the author wrote, not its float32-rounded approximation.
+		// Rounding const=0.1 to float32 would store 0.10000000149011612, which a
+		// {"v":0.1} instance can never match against its own const.
+		n, err := strconv.ParseFloat(value, 64)
 		if err != nil {
 			return nil, fmt.Errorf("invalid number %q: %w", value, err)
+		}
+
+		// A float32 field cannot hold a value outside its range, so reparse at 32
+		// bits purely as an overflow check: const=1e300 on a float32 still surfaces
+		// strconv.ErrRange as a tag value error rather than a schema that accepts a
+		// value the Go type can never hold.
+		if t.Kind() == reflect.Float32 {
+			_, err = strconv.ParseFloat(value, 32)
+			if err != nil {
+				return nil, fmt.Errorf("invalid number %q: %w", value, err)
+			}
 		}
 
 		return n, nil
