@@ -314,6 +314,97 @@ func TestIDNEmailRejectsSpacesInLocalPart(t *testing.T) {
 		"spaces in idn-email local part should be rejected")
 }
 
+// TestIDNEmailSharesEmailMachinery covers the RFC 6531 idn-email cases that the
+// plain email machinery already handles correctly: a quoted local part is split
+// at the quote-aware boundary rather than the last '@', its interior is scanned
+// with the same escape-aware loop (rejecting control characters, bare interior
+// quotes, and a backslash-escaped closing quote), and a bracketed address
+// literal in the domain follows the same path the email format uses. The
+// RFC 6531 difference is that non-ASCII UTF-8 is permitted in both the quoted
+// and unquoted local part.
+func TestIDNEmailSharesEmailMachinery(t *testing.T) {
+	t.Parallel()
+
+	schema := &jsonschema.Schema{
+		Type:   "string",
+		Format: "idn-email",
+	}
+
+	tests := map[string]struct {
+		instance string
+		want     bool
+	}{
+		// Finding A: split on the quote-aware boundary, not the last '@'.
+		"quoted local part containing @ is split at the closing quote": {
+			instance: `"x@"@example.com`,
+			want:     true,
+		},
+		"quoted local part with trailing @ in the domain is invalid": {
+			instance: `"x@"@host@evil`,
+			want:     false,
+		},
+		// Finding B: scan the quoted interior with the escape-aware loop.
+		"control character in quoted local part is invalid": {
+			instance: "\"ab\x01cd\"@example.com",
+			want:     false,
+		},
+		"unescaped interior quote in quoted local part is invalid": {
+			instance: `"a"b"@example.com`,
+			want:     false,
+		},
+		"backslash-escaped closing quote leaves the local part unterminated": {
+			instance: `"weird\"@example.com`,
+			want:     false,
+		},
+		// Finding C: bracketed address literals follow the email-domain path.
+		"IPv4 address literal in the domain is valid": {
+			instance: "joe@[127.0.0.1]",
+			want:     true,
+		},
+		"IPv6 address literal in the domain is valid": {
+			instance: "joe@[IPv6:::1]",
+			want:     true,
+		},
+		"out-of-range IPv4 address literal is invalid": {
+			instance: "joe@[999.0.0.1]",
+			want:     false,
+		},
+		// RFC 6531: non-ASCII UTF-8 is permitted in the local part.
+		"non-ASCII unquoted local part is valid": {
+			instance: "실례@실례.테스트",
+			want:     true,
+		},
+		"non-ASCII quoted local part is valid": {
+			instance: `"실례"@example.com`,
+			want:     true,
+		},
+		// Existing idn-email suite expectations stay green.
+		"a valid plain email is valid": {
+			instance: "joe.bloggs@example.com",
+			want:     true,
+		},
+		"a bare integer-like string is invalid": {
+			instance: "2962",
+			want:     false,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := jsonschema.Validate(schema, tc.instance, jsonschema.WithFormats(true))
+			if tc.want {
+				require.NoError(t, err,
+					"valid RFC 6531 idn-email should pass format=idn-email validation")
+			} else {
+				require.Error(t, err,
+					"invalid RFC 6531 idn-email should be rejected by format=idn-email validation")
+			}
+		})
+	}
+}
+
 func TestURITemplateMinimalValidation(t *testing.T) {
 	t.Parallel()
 

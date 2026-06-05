@@ -1236,28 +1236,32 @@ func checkContextualRules(label string) error {
 }
 
 // validateIDNEmail validates an internationalized email address per RFC 6531.
+// It shares the email machinery the plain email format uses: splitEmail locates
+// the local/domain boundary so a quoted local part containing '@' is honored,
+// and a bracketed address literal in the domain follows the same path as
+// validateEmailDomain. IDN-specific behavior is confined to where RFC 6531
+// widens RFC 5321: UTF-8 in the local part and U-labels/IDNA in the hostname.
 func validateIDNEmail(s string) error {
-	at := strings.LastIndex(s, "@")
-	if at < 1 || at == len(s)-1 {
+	local, domain, ok := splitEmail(s)
+	if !ok {
 		return errors.New("invalid IDN email: missing or misplaced @")
 	}
-
-	local := s[:at]
-	domain := s[at+1:]
 
 	err := validateIDNEmailLocal(local)
 	if err != nil {
 		return err
 	}
 
-	// The RFC 5321/6531 email domain grammar permits an all-numeric top-level
-	// label, so the idn-hostname format's numeric-TLD ban must not apply here.
-	return validateIDNHostnameLabels(domain, false)
+	return validateIDNEmailDomain(domain)
 }
 
 // validateIDNEmailLocal validates the local part of an IDN email address
 // (RFC 6531). Non-ASCII characters are permitted, but the part must be at most
-// 64 octets and, unless quoted, must form a dot-atom of IDN atext runes.
+// 64 octets and, unless quoted, must form a dot-atom of IDN atext runes. The
+// quoted form reuses validateQuotedLocal, whose escape-aware scan rejects
+// control characters, bare interior quotes, and an unterminated string; that
+// scan already admits non-ASCII UTF-8 (its bytes are all >= 0x80, above the
+// rejected control range), which is the RFC 6531 widening over RFC 5321.
 func validateIDNEmailLocal(s string) error {
 	if s == "" {
 		return errors.New("invalid IDN email: empty local part")
@@ -1265,17 +1269,8 @@ func validateIDNEmailLocal(s string) error {
 	if len(s) > 64 {
 		return errors.New("invalid IDN email: local part too long")
 	}
-
-	// A leading quote signals a quoted-string local part, which may contain
-	// spaces and dots. It must be terminated by a matching closing quote;
-	// otherwise the local part is malformed (an unbalanced or lone quote must
-	// not fall through to the dot-atom checks below).
 	if s[0] == '"' {
-		if len(s) < 2 || s[len(s)-1] != '"' {
-			return errors.New("invalid IDN email: malformed quoted local part")
-		}
-
-		return nil
+		return validateQuotedLocal(s)
 	}
 
 	return validateDotAtom(s, isIDNAtext, dotAtomErrors{
@@ -1283,6 +1278,24 @@ func validateIDNEmailLocal(s string) error {
 		doubleDot: "invalid IDN email: consecutive dots in local part",
 		badChar:   "invalid IDN email: invalid character in local part",
 	})
+}
+
+// validateIDNEmailDomain validates the domain part of an IDN email address. A
+// bracketed address literal ([IPv4] or [IPv6:...]) follows the same path as
+// validateEmailDomain, since RFC 6531 inherits the RFC 5321 address-literal
+// grammar unchanged. A hostname is validated as an internationalized domain
+// name (U-labels/IDNA); the RFC 5321/6531 email domain grammar permits an
+// all-numeric top-level label, so the idn-hostname numeric-TLD ban does not
+// apply here.
+func validateIDNEmailDomain(d string) error {
+	if d == "" {
+		return errors.New("invalid IDN email: empty domain")
+	}
+	if strings.HasPrefix(d, "[") && strings.HasSuffix(d, "]") {
+		return validateEmailDomain(d)
+	}
+
+	return validateIDNHostnameLabels(d, false)
 }
 
 // isIDNAtext reports whether r may appear in an unquoted IDN email local part
