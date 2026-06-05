@@ -17,10 +17,17 @@ func applyCollectionMinConstraint(s *jsonschema.Schema, value string, baseType r
 	// Gt=N means minItems N+1, clamped to a non-negative bound as JSON Schema
 	// requires.
 	n = clampNonNegative(inclusiveLowerBound(n, exclusive))
+	// Rules in a validate tag are ANDed, so overlapping minimum floors intersect
+	// to their maximum. The floor only ever rises: a weaker (lower) min never
+	// lowers a stronger floor set by another part of the tag, regardless of order.
 	if isMapKind(baseType) {
-		s.MinProperties = jsonschema.Ptr(n)
+		if s.MinProperties == nil || n > *s.MinProperties {
+			s.MinProperties = jsonschema.Ptr(n)
+		}
 	} else {
-		s.MinItems = jsonschema.Ptr(n)
+		if s.MinItems == nil || n > *s.MinItems {
+			s.MinItems = jsonschema.Ptr(n)
+		}
 	}
 
 	return nil
@@ -35,10 +42,17 @@ func applyCollectionMaxConstraint(s *jsonschema.Schema, value string, baseType r
 	// Lt=N means maxItems N-1, clamped to a non-negative bound as JSON Schema
 	// requires (so lt=0 collapses to 0).
 	n = clampNonNegative(inclusiveUpperBound(n, exclusive))
+	// Rules in a validate tag are ANDed, so overlapping maximum ceilings
+	// intersect to their minimum. The ceiling only ever falls: a weaker (higher)
+	// max never raises a stronger ceiling set by another part of the tag.
 	if isMapKind(baseType) {
-		s.MaxProperties = jsonschema.Ptr(n)
+		if s.MaxProperties == nil || n < *s.MaxProperties {
+			s.MaxProperties = jsonschema.Ptr(n)
+		}
 	} else {
-		s.MaxItems = jsonschema.Ptr(n)
+		if s.MaxItems == nil || n < *s.MaxItems {
+			s.MaxItems = jsonschema.Ptr(n)
+		}
 	}
 
 	return nil
@@ -175,6 +189,17 @@ func diveIntoSequence(remaining []string, s *jsonschema.Schema, elem reflect.Typ
 func isCollectionKind(t reflect.Type) bool {
 	switch t.Kind() {
 	case reflect.Slice, reflect.Array, reflect.Map:
+		return true
+	default:
+		return false
+	}
+}
+
+// isSequenceKind reports whether the type is a slice or array kind. Maps are
+// excluded: keywords such as uniqueItems apply only to JSON arrays, not objects.
+func isSequenceKind(t reflect.Type) bool {
+	switch t.Kind() {
+	case reflect.Slice, reflect.Array:
 		return true
 	default:
 		return false

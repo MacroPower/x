@@ -29,9 +29,69 @@ func parseBoundFloat(value string) (float64, error) {
 	return n, nil
 }
 
+// parseNumericBound parses a numeric min/max bound for the given field type. The
+// upstream [jsonschema.Schema] stores Minimum and Maximum as *float64, so a bound
+// must be exactly representable as a float64 to be stored faithfully. For
+// integer-kind fields the bound is parsed exactly with [strconv.ParseInt] or
+// [strconv.ParseUint] (mirroring [parseNumericValue]) and then checked for exact
+// float64 representability; a bound outside the float64 mantissa's exact-integer
+// range (beyond 2^53) would silently round, turning a forbidden value into an
+// accepted one (or vice versa), so it is rejected rather than stored. Float-kind
+// fields keep ordinary float parsing.
+func parseNumericBound(value string, t reflect.Type) (float64, error) {
+	switch {
+	case isUnsignedKind(t):
+		n, err := strconv.ParseUint(value, 10, 64)
+		if err != nil {
+			return 0, fmt.Errorf("invalid unsigned integer %q: %w", value, err)
+		}
+		if !uintExactlyRepresentableAsFloat64(n) {
+			return 0, fmt.Errorf("bound %s is not exactly representable as a JSON Schema number", value)
+		}
+
+		return float64(n), nil
+
+	case isIntegerKind(t):
+		n, err := strconv.ParseInt(value, 10, 64)
+		if err != nil {
+			return 0, fmt.Errorf("invalid integer %q: %w", value, err)
+		}
+		if !intExactlyRepresentableAsFloat64(n) {
+			return 0, fmt.Errorf("bound %s is not exactly representable as a JSON Schema number", value)
+		}
+
+		return float64(n), nil
+	}
+
+	return parseBoundFloat(value)
+}
+
+// intExactlyRepresentableAsFloat64 reports whether n round-trips through float64
+// without loss. Values beyond 2^53 in magnitude lose precision: float64(n) snaps
+// to a nearby representable integer, so int64(float64(n)) == n only when the
+// conversion was exact. The [math.MaxInt64] edge is handled by the round-trip
+// itself: float64 conversion rounds it up to 2^63, which is out of int64 range,
+// so the int64() conversion is implementation-defined and never equals
+// [math.MaxInt64], correctly reporting it inexact.
+func intExactlyRepresentableAsFloat64(n int64) bool {
+	const maxExact = int64(1) << 53
+
+	return n >= -maxExact && n <= maxExact
+}
+
+// uintExactlyRepresentableAsFloat64 reports whether n round-trips through
+// float64 without loss, the unsigned analog of
+// [intExactlyRepresentableAsFloat64]. Values beyond 2^53 lose precision, so for
+// example [math.MaxUint64] rounds up to 2^64 and is rejected.
+func uintExactlyRepresentableAsFloat64(n uint64) bool {
+	const maxExact = uint64(1) << 53
+
+	return n <= maxExact
+}
+
 // applyNumericMinConstraint applies min/gte or gt to a numeric schema.
-func applyNumericMinConstraint(s *jsonschema.Schema, value string, exclusive bool) error {
-	n, err := parseBoundFloat(value)
+func applyNumericMinConstraint(s *jsonschema.Schema, value string, baseType reflect.Type, exclusive bool) error {
+	n, err := parseNumericBound(value, baseType)
 	if err != nil {
 		name := "min"
 		if exclusive {
@@ -50,8 +110,8 @@ func applyNumericMinConstraint(s *jsonschema.Schema, value string, exclusive boo
 }
 
 // applyNumericMaxConstraint applies max/lte or lt to a numeric schema.
-func applyNumericMaxConstraint(s *jsonschema.Schema, value string, exclusive bool) error {
-	n, err := parseBoundFloat(value)
+func applyNumericMaxConstraint(s *jsonschema.Schema, value string, baseType reflect.Type, exclusive bool) error {
+	n, err := parseNumericBound(value, baseType)
 	if err != nil {
 		name := "max"
 		if exclusive {

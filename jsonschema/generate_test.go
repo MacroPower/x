@@ -1510,13 +1510,17 @@ func TestGenerateFor_JSONSchemaTagOverridesExtractedComment(t *testing.T) {
 	require.Equal(t, "tag wins over comment", s.Properties["label"].Description)
 }
 
-func TestGenerateFor_TagInterpreterOverridesJSONSchemaTag(t *testing.T) {
+func TestGenerateFor_TagInterpreterIntersectsJSONSchemaTagBounds(t *testing.T) {
 	t.Parallel()
 
-	// When both jsonschema tag and validate interpreter set the same property,
-	// the interpreter's value should take effect (it runs after).
+	// When both the jsonschema tag and the validate interpreter bound the same
+	// property, the bounds intersect: floors only rise and ceilings only fall,
+	// so the stricter constraint wins regardless of processing order.
 	type Config struct {
-		Value string `json:"value" jsonschema:"minLength=5" validate:"min=3"`
+		// The jsonschema tag's floor is stricter and is kept.
+		Strict string `json:"strict" jsonschema:"minLength=5" validate:"min=3"`
+		// The interpreter's floor is stricter and raises the tag's floor.
+		Loose string `json:"loose" jsonschema:"minLength=2" validate:"min=3"`
 	}
 
 	s, err := jsonschema.GenerateFor[Config](
@@ -1524,8 +1528,8 @@ func TestGenerateFor_TagInterpreterOverridesJSONSchemaTag(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	// validate:"min=3" runs after jsonschema:"minLength=5", so minLength should be 3.
-	assert.Equal(t, jsonschema.Ptr(3), s.Properties["value"].MinLength)
+	assert.Equal(t, jsonschema.Ptr(5), s.Properties["strict"].MinLength)
+	assert.Equal(t, jsonschema.Ptr(3), s.Properties["loose"].MinLength)
 }
 
 // GenericPair is a generic type for testing $defs name transformation.

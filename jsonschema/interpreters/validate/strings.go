@@ -17,8 +17,12 @@ func applyStringMinConstraint(s *jsonschema.Schema, value string, exclusive bool
 	// Gt=N means minLength N+1, clamped to a non-negative bound as JSON Schema
 	// requires.
 	n = clampNonNegative(inclusiveLowerBound(n, exclusive))
-
-	s.MinLength = jsonschema.Ptr(n)
+	// Rules in a validate tag are ANDed, so overlapping minimum floors intersect
+	// to their maximum. The floor only ever rises: a weaker (lower) min never
+	// lowers a stronger floor set by another part of the tag, regardless of order.
+	if s.MinLength == nil || n > *s.MinLength {
+		s.MinLength = jsonschema.Ptr(n)
+	}
 
 	return nil
 }
@@ -32,8 +36,12 @@ func applyStringMaxConstraint(s *jsonschema.Schema, value string, exclusive bool
 	// Lt=N means maxLength N-1, clamped to a non-negative bound as JSON Schema
 	// requires.
 	n = clampNonNegative(inclusiveUpperBound(n, exclusive))
-
-	s.MaxLength = jsonschema.Ptr(n)
+	// Rules in a validate tag are ANDed, so overlapping maximum ceilings
+	// intersect to their minimum. The ceiling only ever falls: a weaker (higher)
+	// max never raises a stronger ceiling set by another part of the tag.
+	if s.MaxLength == nil || n < *s.MaxLength {
+		s.MaxLength = jsonschema.Ptr(n)
+	}
 
 	return nil
 }

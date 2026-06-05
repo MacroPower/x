@@ -156,8 +156,11 @@ func applyValidator(key, value string, s, parent *jsonschema.Schema, fieldName s
 		return applyNe(s, value, baseType)
 
 	case "unique":
-		// UniqueItems is only meaningful for array/slice types.
-		if isCollectionKind(baseType) {
+		// UniqueItems is only meaningful for array/slice types. Maps are
+		// excluded: JSON Schema's uniqueItems is array-only, and
+		// go-playground/validator's unique-on-map checks unique values, which
+		// has no object-schema equivalent. So unique on a map is a no-op.
+		if isSequenceKind(baseType) {
 			s.UniqueItems = true
 		}
 
@@ -266,7 +269,7 @@ func applyMinConstraint(s *jsonschema.Schema, value string, baseType reflect.Typ
 	case isStringKind(baseType):
 		return applyStringMinConstraint(s, value, exclusive)
 	case isNumericKind(baseType):
-		return applyNumericMinConstraint(s, value, exclusive)
+		return applyNumericMinConstraint(s, value, baseType, exclusive)
 	case isCollectionKind(baseType):
 		return applyCollectionMinConstraint(s, value, baseType, exclusive)
 	default:
@@ -280,7 +283,7 @@ func applyMaxConstraint(s *jsonschema.Schema, value string, baseType reflect.Typ
 	case isStringKind(baseType):
 		return applyStringMaxConstraint(s, value, exclusive)
 	case isNumericKind(baseType):
-		return applyNumericMaxConstraint(s, value, exclusive)
+		return applyNumericMaxConstraint(s, value, baseType, exclusive)
 	case isCollectionKind(baseType):
 		return applyCollectionMaxConstraint(s, value, baseType, exclusive)
 	default:

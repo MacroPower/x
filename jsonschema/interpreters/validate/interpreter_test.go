@@ -1147,7 +1147,7 @@ func TestValidateInterpreter_PatternKeywordDoesNotOverwrite(t *testing.T) {
 func TestCollectionGtMaxIntDoesNotWrap(t *testing.T) {
 	t.Parallel()
 
-	// gt=MaxInt increments the bound by one, which without an overflow guard
+	// Gt=MaxInt increments the bound by one, which without an overflow guard
 	// wraps to math.MinInt and then collapses to a permissive minItems: 0.
 	// The guard preserves math.MaxInt as the tightest representable bound.
 	cases := map[string]struct {
@@ -1194,7 +1194,7 @@ func TestCollectionGtMaxIntDoesNotWrap(t *testing.T) {
 func TestCollectionLtMinIntDoesNotWrap(t *testing.T) {
 	t.Parallel()
 
-	// lt=MinInt decrements the bound by one, which without an underflow guard
+	// Lt=MinInt decrements the bound by one, which without an underflow guard
 	// wraps to math.MaxInt (a large positive) before the non-negative clamp,
 	// leaving a huge permissive maxItems instead of collapsing to 0.
 	cases := map[string]struct {
@@ -1326,4 +1326,178 @@ func TestValidateInterpreter_RequiredNeZeroOnUnsignedDedups(t *testing.T) {
 
 	assert.JSONEq(t, `{"const":0}`, string(got),
 		"the unsigned and int forms of 0 dedup to a single not.const")
+}
+
+func TestValidateInterpreter_RequiredMinZeroKeepsFloor(t *testing.T) {
+	t.Parallel()
+
+	// "required" floors the length at 1; a weaker "min=0" in the same tag must
+	// not lower that floor, in either order. Go-playground/validator rejects an
+	// empty value regardless of where min=0 appears, since rules are ANDed.
+	type Form struct {
+		ReqMinStr string            `json:"req_min_str" validate:"required,min=0"`
+		MinReqStr string            `json:"min_req_str" validate:"min=0,required"`
+		ReqMinVec []string          `json:"req_min_vec" validate:"required,min=0"`
+		MinReqVec []string          `json:"min_req_vec" validate:"min=0,required"`
+		ReqMinMap map[string]string `json:"req_min_map" validate:"required,min=0"`
+		MinReqMap map[string]string `json:"min_req_map" validate:"min=0,required"`
+	}
+
+	s, err := jsonschema.GenerateFor[Form](
+		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+	)
+	require.NoError(t, err)
+
+	got, err := json.Marshal(s)
+	require.NoError(t, err)
+
+	assert.JSONEq(t, `{
+		"$schema":"https://json-schema.org/draft/2020-12/schema",
+		"type":"object",
+		"properties":{
+			"req_min_str":{"type":"string","minLength":1},
+			"min_req_str":{"type":"string","minLength":1},
+			"req_min_vec":{"type":["null","array"],"items":{"type":"string"},"minItems":1},
+			"min_req_vec":{"type":["null","array"],"items":{"type":"string"},"minItems":1},
+			"req_min_map":{"type":["null","object"],"additionalProperties":{"type":"string"},"minProperties":1},
+			"min_req_map":{"type":["null","object"],"additionalProperties":{"type":"string"},"minProperties":1}
+		},
+		"required":["req_min_str","min_req_str","req_min_vec","min_req_vec","req_min_map","min_req_map"],
+		"additionalProperties":false
+	}`, string(got))
+}
+
+func TestValidateInterpreter_RepeatedMinIntersects(t *testing.T) {
+	t.Parallel()
+
+	// Repeated/overlapping bounds in a validate tag are ANDed, so the floor is
+	// the maximum of the mins and the ceiling is the minimum of the maxes,
+	// regardless of order.
+	type Form struct {
+		MinStr string            `json:"min_str" validate:"min=5,min=2"`
+		MaxStr string            `json:"max_str" validate:"max=5,max=10"`
+		MinVec []string          `json:"min_vec" validate:"min=5,min=2"`
+		MaxVec []string          `json:"max_vec" validate:"max=5,max=10"`
+		MinMap map[string]string `json:"min_map" validate:"min=5,min=2"`
+		MaxMap map[string]string `json:"max_map" validate:"max=5,max=10"`
+	}
+
+	s, err := jsonschema.GenerateFor[Form](
+		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+	)
+	require.NoError(t, err)
+
+	got, err := json.Marshal(s)
+	require.NoError(t, err)
+
+	assert.JSONEq(t, `{
+		"$schema":"https://json-schema.org/draft/2020-12/schema",
+		"type":"object",
+		"properties":{
+			"min_str":{"type":"string","minLength":5},
+			"max_str":{"type":"string","maxLength":5},
+			"min_vec":{"type":["null","array"],"items":{"type":"string"},"minItems":5},
+			"max_vec":{"type":["null","array"],"items":{"type":"string"},"maxItems":5},
+			"min_map":{"type":["null","object"],"additionalProperties":{"type":"string"},"minProperties":5},
+			"max_map":{"type":["null","object"],"additionalProperties":{"type":"string"},"maxProperties":5}
+		},
+		"required":["min_str","max_str","min_vec","max_vec","min_map","max_map"],
+		"additionalProperties":false
+	}`, string(got))
+}
+
+func TestValidateInterpreter_UniqueOnMapIsNoOp(t *testing.T) {
+	t.Parallel()
+
+	// UniqueItems is array-only in JSON Schema and go-playground's unique-on-map
+	// checks unique values (inexpressible for objects), so unique on a map field
+	// produces no uniqueItems keyword.
+	type MyType struct {
+		Labels map[string]string `json:"labels" validate:"unique"`
+	}
+
+	s, err := jsonschema.GenerateFor[MyType](
+		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+	)
+	require.NoError(t, err)
+
+	prop := s.Properties["labels"]
+	require.NotNil(t, prop)
+
+	assert.False(t, prop.UniqueItems,
+		"uniqueItems is not set on a map type")
+}
+
+func TestValidateInterpreter_IntegerBoundExactRepresentability(t *testing.T) {
+	t.Parallel()
+
+	// Integer min/max bounds are parsed exactly and rejected when they cannot be
+	// stored as a float64 without rounding (the upstream Minimum/Maximum are
+	// *float64). A bound within +/-2^53 round-trips; one beyond it would silently
+	// round, turning a forbidden value into an accepted one, so it errors.
+	type exactInt struct {
+		Value int64 `json:"value" validate:"min=9007199254740992"`
+	}
+
+	type inexactInt struct {
+		Value int64 `json:"value" validate:"min=9007199254740993"`
+	}
+
+	type inexactUint struct {
+		Value uint64 `json:"value" validate:"max=18446744073709551615"`
+	}
+
+	type smallInt struct {
+		Value int `json:"value" validate:"min=1,max=100"`
+	}
+
+	t.Run("exact bound is stored", func(t *testing.T) {
+		t.Parallel()
+
+		s, err := jsonschema.GenerateFor[exactInt](
+			jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		)
+		require.NoError(t, err)
+
+		prop := s.Properties["value"]
+		require.NotNil(t, prop.Minimum)
+		assert.InDelta(t, float64(9007199254740992), *prop.Minimum, 0)
+	})
+
+	t.Run("inexact integer bound errors", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := jsonschema.GenerateFor[inexactInt](
+			jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		)
+		require.Error(t, err,
+			"a min bound beyond 2^53 is not exactly representable")
+		assert.Contains(t, err.Error(), "9007199254740993")
+	})
+
+	t.Run("inexact uint bound errors", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := jsonschema.GenerateFor[inexactUint](
+			jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		)
+		require.Error(t, err,
+			"MaxUint64 rounds up past the float64 mantissa and is rejected")
+		assert.Contains(t, err.Error(), "18446744073709551615")
+	})
+
+	t.Run("small bounds are unaffected", func(t *testing.T) {
+		t.Parallel()
+
+		s, err := jsonschema.GenerateFor[smallInt](
+			jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		)
+		require.NoError(t, err)
+
+		prop := s.Properties["value"]
+		require.NotNil(t, prop.Minimum)
+		require.NotNil(t, prop.Maximum)
+		assert.InDelta(t, float64(1), *prop.Minimum, 0)
+		assert.InDelta(t, float64(100), *prop.Maximum, 0)
+	})
 }
