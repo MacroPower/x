@@ -155,30 +155,69 @@ func validateLeapSecond(s string) error {
 	return nil
 }
 
+// offsetKind classifies the trailing zone designator of an RFC 3339 time.
+type offsetKind int
+
+const (
+	// offsetNone marks a "Z"/"z" zone or an absent designator: no numeric
+	// offset to decompose, and a zero contribution when converting to UTC.
+	offsetNone offsetKind = iota
+	// offsetMalformed marks a "+"/"-" designator that is not the required
+	// "+hh:mm"/"-hh:mm" shape (six bytes with ':' at index 3).
+	offsetMalformed
+	// offsetNumeric marks a well-formed "+hh:mm"/"-hh:mm" designator whose
+	// sign, hour, and minute fields are populated.
+	offsetNumeric
+)
+
+// timeOffset describes the trailing zone designator of an RFC 3339 time. The
+// sign, hour, and minute fields are populated only when kind is offsetNumeric.
+type timeOffset struct {
+	kind   offsetKind
+	sign   byte // '+' or '-'
+	hour   int  // offset hours
+	minute int  // offset minutes
+}
+
+// parseTimeOffset locates and decomposes the trailing RFC 3339 zone designator
+// of s. It captures the shared byte parsing used by both utcOffsetMinutes and
+// validateTimeOffset; it does not range-check the components, so each caller
+// keeps its own semantics.
+func parseTimeOffset(s string) timeOffset {
+	if strings.HasSuffix(s, "Z") {
+		return timeOffset{kind: offsetNone}
+	}
+
+	idx := strings.LastIndexAny(s, "+-")
+	if idx < 0 {
+		return timeOffset{kind: offsetNone}
+	}
+
+	offset := s[idx:]
+	if len(offset) != 6 || offset[3] != ':' {
+		return timeOffset{kind: offsetMalformed}
+	}
+
+	return timeOffset{
+		kind:   offsetNumeric,
+		sign:   offset[0],
+		hour:   int(offset[1]-'0')*10 + int(offset[2]-'0'),
+		minute: int(offset[4]-'0')*10 + int(offset[5]-'0'),
+	}
+}
+
 // utcOffsetMinutes returns the signed minute offset encoded in a time string's
 // trailing zone designator: positive for "+hh:mm", negative for "-hh:mm". A
 // trailing "Z" or an absent/malformed offset yields 0. Converting a local time
 // to UTC subtracts this value.
 func utcOffsetMinutes(s string) int {
-	if strings.HasSuffix(s, "Z") {
+	off := parseTimeOffset(s)
+	if off.kind != offsetNumeric {
 		return 0
 	}
 
-	idx := strings.LastIndexAny(s, "+-")
-	if idx < 0 {
-		return 0
-	}
-
-	offset := s[idx:]
-	if len(offset) != 6 {
-		return 0
-	}
-
-	offHour := int(offset[1]-'0')*10 + int(offset[2]-'0')
-	offMinute := int(offset[4]-'0')*10 + int(offset[5]-'0')
-	total := offHour*60 + offMinute
-
-	if offset[0] == '-' {
+	total := off.hour*60 + off.minute
+	if off.sign == '-' {
 		return -total
 	}
 
@@ -188,23 +227,15 @@ func utcOffsetMinutes(s string) int {
 // validateTimeOffset checks that a time zone offset has valid hour (<24) and
 // minute (<60) components.
 func validateTimeOffset(s string) error {
-	if strings.HasSuffix(s, "Z") {
+	off := parseTimeOffset(s)
+	switch off.kind {
+	case offsetNone:
 		return nil
-	}
-
-	idx := strings.LastIndexAny(s, "+-")
-	if idx < 0 {
-		return nil
-	}
-
-	offset := s[idx:]
-	if len(offset) != 6 || offset[3] != ':' {
+	case offsetMalformed:
 		return errors.New("invalid time offset")
 	}
 
-	hour := int(offset[1]-'0')*10 + int(offset[2]-'0')
-	minute := int(offset[4]-'0')*10 + int(offset[5]-'0')
-	if hour > 23 || minute > 59 {
+	if off.hour > 23 || off.minute > 59 {
 		return errors.New("invalid time offset")
 	}
 
@@ -298,22 +329,46 @@ func validateQuotedLocal(s string) error {
 	return nil
 }
 
-// validateDotAtomLocal validates a dot-atom local part: atext runs separated by
-// single dots, with no leading, trailing, or consecutive dots.
-func validateDotAtomLocal(s string) error {
-	if s[0] == '.' || s[len(s)-1] == '.' || strings.Contains(s, "..") {
-		return errors.New("invalid email: misplaced dot in local part")
+// dotAtomErrors carries the messages a dot-atom validation reports for each
+// rejection. Callers that report leading/trailing and consecutive dots with a
+// single message may set edgeDot and doubleDot to the same value.
+type dotAtomErrors struct {
+	edgeDot   string // leading or trailing dot
+	doubleDot string // consecutive dots
+	badChar   string // a rune that is neither a dot nor accepted by isText
+}
+
+// validateDotAtom validates a dot-atom local part: isText runs separated by
+// single dots, with no leading, trailing, or consecutive dots. The isText
+// predicate selects the permitted run characters (RFC 5321 atext for email,
+// the wider IDN atext for idn-email), and msgs supplies the rejection messages.
+func validateDotAtom(s string, isText func(rune) bool, msgs dotAtomErrors) error {
+	if s[0] == '.' || s[len(s)-1] == '.' {
+		return errors.New(msgs.edgeDot)
+	}
+	if strings.Contains(s, "..") {
+		return errors.New(msgs.doubleDot)
 	}
 
 	for _, r := range s {
-		if r == '.' || isAtext(r) {
+		if r == '.' || isText(r) {
 			continue
 		}
 
-		return errors.New("invalid email: invalid character in local part")
+		return errors.New(msgs.badChar)
 	}
 
 	return nil
+}
+
+// validateDotAtomLocal validates a dot-atom local part: atext runs separated by
+// single dots, with no leading, trailing, or consecutive dots.
+func validateDotAtomLocal(s string) error {
+	return validateDotAtom(s, isAtext, dotAtomErrors{
+		edgeDot:   "invalid email: misplaced dot in local part",
+		doubleDot: "invalid email: misplaced dot in local part",
+		badChar:   "invalid email: invalid character in local part",
+	})
 }
 
 // isAtext reports whether r is an RFC 5321 atom character (atext).
@@ -588,12 +643,14 @@ func validateRegex(s string) error {
 				return errors.New("invalid regex: trailing backslash")
 			}
 
-			err := validateRegexEscape(s[i+1])
+			r, size := utf8.DecodeRuneInString(s[i+1:])
+
+			err := validateRegexEscape(r)
 			if err != nil {
 				return err
 			}
 
-			i += 2
+			i += 1 + size
 
 			continue
 
@@ -628,8 +685,15 @@ func validateRegex(s string) error {
 
 // validateRegexEscape reports whether c is a valid character following a
 // backslash in an ECMA 262 regular expression. It rejects escapes that ECMA
-// 262 does not define (e.g. "\a"), which RE2 would otherwise accept.
-func validateRegexEscape(c byte) error {
+// 262 does not define (e.g. "\a"), which RE2 would otherwise accept. Any
+// non-ASCII rune is a valid identity escape: ECMA 262 Annex B (non-unicode
+// mode) permits an identity escape of any source character that is not part of
+// another escape, so an escaped multi-byte code point is accepted.
+func validateRegexEscape(c rune) error {
+	if c >= utf8.RuneSelf {
+		return nil
+	}
+
 	switch {
 	case c >= '0' && c <= '9': // backreference / octal
 		return nil
@@ -1091,22 +1155,11 @@ func validateIDNEmailLocal(s string) error {
 		return nil
 	}
 
-	if s[0] == '.' || s[len(s)-1] == '.' {
-		return errors.New("invalid IDN email: leading or trailing dot in local part")
-	}
-	if strings.Contains(s, "..") {
-		return errors.New("invalid IDN email: consecutive dots in local part")
-	}
-
-	for _, r := range s {
-		if r == '.' || isIDNAtext(r) {
-			continue
-		}
-
-		return errors.New("invalid IDN email: invalid character in local part")
-	}
-
-	return nil
+	return validateDotAtom(s, isIDNAtext, dotAtomErrors{
+		edgeDot:   "invalid IDN email: leading or trailing dot in local part",
+		doubleDot: "invalid IDN email: consecutive dots in local part",
+		badChar:   "invalid IDN email: invalid character in local part",
+	})
 }
 
 // isIDNAtext reports whether r may appear in an unquoted IDN email local part

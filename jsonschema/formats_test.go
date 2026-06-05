@@ -52,6 +52,70 @@ func TestRegexFormatAcceptsECMA262Constructs(t *testing.T) {
 	}
 }
 
+// TestRegexFormatIdentityEscapesNonASCII covers ECMA 262 Annex B identity
+// escapes: a backslash followed by a non-ASCII source character is valid even
+// though it names no defined escape. The escaped rune must be decoded as UTF-8
+// rather than judged by its lead byte. The ASCII escape rules are unchanged: a
+// defined escape like "\d" stays valid and an undefined one like "\a" stays
+// invalid.
+func TestRegexFormatIdentityEscapesNonASCII(t *testing.T) {
+	t.Parallel()
+
+	schema := &jsonschema.Schema{
+		Type:   "string",
+		Format: "regex",
+	}
+
+	tests := map[string]struct {
+		instance string
+		valid    bool
+	}{
+		"escaped multi-byte rune is a valid identity escape": {
+			instance: "\\é", // backslash + e-acute
+			valid:    true,
+		},
+		"escaped multi-byte rune mid-pattern is valid": {
+			instance: "foo\\ébar",
+			valid:    true,
+		},
+		"escaped emoji is a valid identity escape": {
+			instance: "\\\U0001F600", // backslash + grinning face
+			valid:    true,
+		},
+		"escaped ASCII metacharacter stays valid": {
+			instance: `\.`,
+			valid:    true,
+		},
+		"escaped ASCII class shorthand stays valid": {
+			instance: `\d`,
+			valid:    true,
+		},
+		"undefined ASCII escape stays invalid": {
+			instance: `\a`,
+			valid:    false,
+		},
+		"trailing backslash stays invalid": {
+			instance: `foo\`,
+			valid:    false,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := jsonschema.Validate(schema, tc.instance, jsonschema.WithFormats(true))
+			if tc.valid {
+				require.NoError(t, err,
+					"valid ECMA 262 regex should pass format=regex validation")
+			} else {
+				require.Error(t, err,
+					"invalid ECMA 262 regex should be rejected by format=regex validation")
+			}
+		})
+	}
+}
+
 func TestEmailFormatAcceptsQuotedLocalAndAddressLiteral(t *testing.T) {
 	t.Parallel()
 
