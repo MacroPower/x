@@ -16,6 +16,7 @@ import "strings"
 //	) // -> "line1\nline2\nline3"
 func JoinLF(ss ...string) string {
 	var sb strings.Builder
+
 	for i, s := range ss {
 		if i > 0 {
 			sb.WriteByte('\n')
@@ -41,6 +42,7 @@ func JoinLF(ss ...string) string {
 //	) // -> "line1\r\nline2\r\nline3"
 func JoinCRLF(ss ...string) string {
 	var sb strings.Builder
+
 	for i, s := range ss {
 		if i > 0 {
 			sb.WriteByte('\r')

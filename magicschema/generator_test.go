@@ -112,6 +112,7 @@ func TestGeneratorBasic(t *testing.T) {
 			require.NoError(t, err)
 
 			var got map[string]any
+
 			require.NoError(t, json.Unmarshal(out, &got))
 
 			// Check properties match expected.
@@ -154,6 +155,7 @@ func TestGeneratorEmptyInput(t *testing.T) {
 
 			// Empty input produces schema with only $schema field.
 			var got map[string]any
+
 			require.NoError(t, json.Unmarshal(out, &got))
 			assert.Equal(t, "http://json-schema.org/draft-07/schema#", got["$schema"])
 			assert.Nil(t, got["type"])
@@ -171,6 +173,7 @@ func TestGeneratorEmptyInput(t *testing.T) {
 		require.NoError(t, err)
 
 		var got map[string]any
+
 		require.NoError(t, json.Unmarshal(out, &got))
 		assert.Equal(t, "http://json-schema.org/draft-07/schema#", got["$schema"])
 		assert.Nil(t, got["type"])
@@ -243,6 +246,7 @@ func TestGeneratorOptions(t *testing.T) {
 			require.NoError(t, err)
 
 			var got map[string]any
+
 			require.NoError(t, json.Unmarshal(out, &got))
 			tc.check(t, got)
 		})
@@ -318,6 +322,7 @@ production:
 	require.NoError(t, err)
 
 	var got map[string]any
+
 	require.NoError(t, json.Unmarshal(out, &got))
 
 	props, ok := got["properties"].(map[string]any)
@@ -363,6 +368,7 @@ func TestGeneratorLiteralBlocks(t *testing.T) {
 			require.NoError(t, err)
 
 			var got map[string]any
+
 			require.NoError(t, json.Unmarshal(out, &got))
 
 			props, ok := got["properties"].(map[string]any)
@@ -411,6 +417,7 @@ func TestGeneratorTaggedValues(t *testing.T) {
 			require.NoError(t, err)
 
 			var got map[string]any
+
 			require.NoError(t, json.Unmarshal(out, &got))
 
 			props, ok := got["properties"].(map[string]any)
@@ -456,6 +463,7 @@ func TestGeneratorSpecialFloats(t *testing.T) {
 			require.NoError(t, err)
 
 			var got map[string]any
+
 			require.NoError(t, json.Unmarshal(out, &got))
 
 			props, ok := got["properties"].(map[string]any)
@@ -493,6 +501,7 @@ func TestGeneratorMultiDocument(t *testing.T) {
 			require.NoError(t, err)
 
 			var got map[string]any
+
 			require.NoError(t, json.Unmarshal(out, &got))
 
 			props, ok := got["properties"].(map[string]any)
@@ -577,6 +586,7 @@ func TestGeneratorAllAnnotators(t *testing.T) {
 			require.NoError(t, err)
 
 			var got map[string]any
+
 			require.NoError(t, json.Unmarshal(out, &got))
 
 			tc.check(t, got)
@@ -651,6 +661,7 @@ func TestGeneratorFallbackInference(t *testing.T) {
 				replicas, ok := props["replicas"].(map[string]any)
 				require.True(t, ok)
 				assert.Equal(t, "integer", replicas["type"])
+
 				// The inline comment should be used as description.
 				desc, hasDesc := replicas["description"].(string)
 				require.True(t, hasDesc, "expected description on replicas")
@@ -720,6 +731,7 @@ func TestGeneratorFallbackInference(t *testing.T) {
 			require.NoError(t, err)
 
 			var got map[string]any
+
 			require.NoError(t, json.Unmarshal(out, &got))
 			tc.check(t, got)
 		})
@@ -739,6 +751,7 @@ func TestGeneratorArrayOfMappingObjects(t *testing.T) {
 	require.NoError(t, err)
 
 	var got map[string]any
+
 	require.NoError(t, json.Unmarshal(out, &got))
 
 	props, ok := got["properties"].(map[string]any)
@@ -778,6 +791,7 @@ level1:
 	require.NoError(t, err)
 
 	var got map[string]any
+
 	require.NoError(t, json.Unmarshal(out, &got))
 
 	// Navigate down to the deepest level.
@@ -840,6 +854,7 @@ func TestGeneratorRootAdditionalPropertiesNonObject(t *testing.T) {
 			require.NoError(t, err)
 
 			var got map[string]any
+
 			require.NoError(t, json.Unmarshal(out, &got))
 
 			// Non-object root schemas should not have additionalProperties.
@@ -877,6 +892,7 @@ func TestGeneratorEmptyMapping(t *testing.T) {
 	require.NoError(t, err)
 
 	var got map[string]any
+
 	require.NoError(t, json.Unmarshal(out, &got))
 
 	props, ok := got["properties"].(map[string]any)
@@ -901,6 +917,7 @@ func TestGeneratorMultipleInputsWithOneEmpty(t *testing.T) {
 	require.NoError(t, err)
 
 	var got map[string]any
+
 	require.NoError(t, json.Unmarshal(out, &got))
 
 	// The non-empty input's properties should still be present.

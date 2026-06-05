@@ -162,6 +162,7 @@ func TestInferTypes(t *testing.T) {
 			require.NoError(t, err)
 
 			var got map[string]any
+
 			require.NoError(t, json.Unmarshal(out, &got))
 
 			props, ok := got["properties"].(map[string]any)
@@ -230,6 +231,7 @@ func TestInferArrayItems(t *testing.T) {
 			require.NoError(t, err)
 
 			var got map[string]any
+
 			require.NoError(t, json.Unmarshal(out, &got))
 
 			props, ok := got["properties"].(map[string]any)
@@ -306,6 +308,7 @@ func TestInferEdgeCases(t *testing.T) {
 			require.NoError(t, err)
 
 			var got map[string]any
+
 			require.NoError(t, json.Unmarshal(out, &got))
 
 			props, ok := got["properties"].(map[string]any)

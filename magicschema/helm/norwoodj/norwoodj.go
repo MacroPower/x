@@ -39,6 +39,7 @@ var (
 	sectionRegex = regexp.MustCompile(`^\s*# @section -- (.*)$`)
 
 	// TypeMapping maps helm-docs type hints to JSON Schema types.
+	//nolint:goconst // JSON Schema type names repeated intentionally.
 	typeMapping = map[string]string{
 		"int":     "integer",
 		"float":   "number",
@@ -183,6 +184,7 @@ func parseCommentBlock(commentLines []string) *parsedComment {
 	// workaround, so that @default lines appearing before the last
 	// "# --" group are preserved.
 	var prefixDefault *string
+
 	for _, line := range commentLines {
 		if dm := defaultValueRegex.FindStringSubmatch(line); len(dm) > 1 {
 			val := dm[1]
@@ -232,6 +234,7 @@ func parseCommentBlock(commentLines []string) *parsedComment {
 
 	// Extract type hint from description.
 	var typeName string
+
 	if tm := helmDocsTypeRegex.FindStringSubmatch(description); tm != nil {
 		typeName = mapHelmDocsType(strings.TrimSpace(tm[1]))
 		description = strings.TrimSpace(tm[2])
@@ -336,6 +339,7 @@ func (a *Annotator) Annotate(node ast.Node, keyPath string) *magicschema.Annotat
 	// Try new-style "# -- description" from the head comment.
 	// Only use the head comment for new-style parsing (not inline comments).
 	var headComment string
+
 	if c := mvn.GetComment(); c != nil {
 		headComment = c.String()
 	}

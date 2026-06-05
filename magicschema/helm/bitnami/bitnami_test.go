@@ -1370,6 +1370,7 @@ func TestBitnamiAnnotator(t *testing.T) {
 			require.NoError(t, err)
 
 			var got map[string]any
+
 			require.NoError(t, json.Unmarshal(out, &got))
 			tc.want(t, got)
 		})

@@ -172,6 +172,7 @@ func (g *Generator) generateSingle(input []byte) (*jsonschema.Schema, error) {
 
 	// Process each document and merge schemas with union semantics.
 	var schemas []*jsonschema.Schema
+
 	for _, doc := range file.Docs {
 		if doc.Body == nil {
 			continue
@@ -237,6 +238,7 @@ func (g *Generator) walkMapping(
 	}
 
 	var values []*ast.MappingValueNode
+
 	if mn != nil {
 		values = mn.Values
 	}

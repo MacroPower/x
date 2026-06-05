@@ -372,6 +372,7 @@ func TestHelmSchemaAnnotator(t *testing.T) {
 			require.NoError(t, err)
 
 			var got map[string]any
+
 			require.NoError(t, json.Unmarshal(out, &got))
 			tc.want(t, got)
 		})
@@ -629,6 +630,7 @@ func TestHelmSchemaRootAnnotation(t *testing.T) {
 			require.NoError(t, err)
 
 			var got map[string]any
+
 			require.NoError(t, json.Unmarshal(out, &got))
 			tc.want(t, got)
 		})
@@ -1597,6 +1599,7 @@ func TestHelmSchemaAnnotatorEdgeCases(t *testing.T) {
 			require.NoError(t, err)
 
 			var got map[string]any
+
 			require.NoError(t, json.Unmarshal(out, &got))
 			tc.want(t, got)
 		})
@@ -1670,6 +1673,7 @@ func TestHelmSchemaAnnotatorAlignment(t *testing.T) {
 
 				// No @schema block found, type inferred from YAML value.
 				assert.Equal(t, "string", f["type"])
+
 				// Should NOT be required (losisin format not parsed here).
 				if req, ok := got["required"].([]any); ok {
 					assert.NotContains(t, req, "field")
@@ -2307,6 +2311,7 @@ func TestHelmSchemaAnnotatorAlignment(t *testing.T) {
 			require.NoError(t, err)
 
 			var got map[string]any
+
 			require.NoError(t, json.Unmarshal(out, &got))
 			tc.want(t, got)
 		})
@@ -2341,6 +2346,7 @@ func TestHelmSchemaAnnotatorForContentResetsState(t *testing.T) {
 	require.NoError(t, err)
 
 	var got1 map[string]any
+
 	require.NoError(t, json.Unmarshal(out1, &got1))
 	assert.Equal(t, "First File", got1["title"])
 
@@ -2363,6 +2369,7 @@ func TestHelmSchemaAnnotatorForContentResetsState(t *testing.T) {
 	require.NoError(t, err)
 
 	var got2 map[string]any
+
 	require.NoError(t, json.Unmarshal(out2, &got2))
 	assert.Equal(t, "Second File", got2["title"])
 }
@@ -2657,6 +2664,7 @@ func TestHelmSchemaAnnotatorUnit(t *testing.T) {
 			require.NoError(t, err)
 
 			var got map[string]any
+
 			require.NoError(t, json.Unmarshal(out, &got))
 			tc.want(t, ann, got)
 		})
@@ -3249,6 +3257,7 @@ func TestHelmSchemaUpstreamBehavior(t *testing.T) {
 			require.NoError(t, err)
 
 			var got map[string]any
+
 			require.NoError(t, json.Unmarshal(out, &got))
 			tc.want(t, got)
 		})

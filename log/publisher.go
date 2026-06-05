@@ -70,6 +70,7 @@ func (p *Publisher) Write(b []byte) (int, error) {
 	for _, sub := range p.subscribers {
 		if sub.closed.Load() {
 			close(sub.ch)
+
 			continue
 		}
 
@@ -107,6 +108,7 @@ func (p *Publisher) Subscribe() *Subscription {
 
 	if p.closed {
 		close(sub.ch)
+
 		return sub
 	}
 

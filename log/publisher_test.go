@@ -144,6 +144,7 @@ func TestPublisherRingBuffer(t *testing.T) {
 			}
 
 			var got []string
+
 			for range tc.want {
 				got = append(got, string(<-sub.C()))
 			}

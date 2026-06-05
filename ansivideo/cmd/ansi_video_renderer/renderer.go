@@ -62,6 +62,7 @@ func renderFrame(img *image.RGBA, cols, rows int, w *strings.Builder) {
 			top := img.RGBAAt(x, topY)
 
 			var bot color.RGBA
+
 			if botY < pixH {
 				bot = img.RGBAAt(x, botY)
 			}

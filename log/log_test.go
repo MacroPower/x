@@ -250,7 +250,7 @@ func TestCreateHandlerWithStrings(t *testing.T) {
 				require.NotNil(t, handler)
 
 				logger := slog.New(handler)
-				logger.Info(tc.message)
+				logger.Info(tc.message) //nolint:sloglint // Message comes from the test case.
 			}
 
 			tc.checkOutput(t, &buf)

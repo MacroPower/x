@@ -1544,6 +1544,7 @@ func TestHelmDocsAnnotator(t *testing.T) {
 
 				// No default since @default requires "-- " separator.
 				assert.Nil(t, v["default"])
+
 				// The line leaks into description as continuation.
 				desc, ok := v["description"].(string)
 				require.True(t, ok)
@@ -1931,6 +1932,7 @@ func TestHelmDocsAnnotator(t *testing.T) {
 
 				desc, ok := d["description"].(string)
 				require.True(t, ok)
+
 				// Raw mode joins with newlines. Blank "#" produces empty line.
 				want := stringtest.JoinLF(
 					"I mean, dogs are quite nice too...",
@@ -1965,6 +1967,7 @@ func TestHelmDocsAnnotator(t *testing.T) {
 
 				assert.Equal(t, "This describes a lion", l["description"])
 				assert.Equal(t, "Rawr", l["default"])
+
 				// @section is consumed but not in schema output.
 			},
 		},
@@ -2253,6 +2256,7 @@ func TestHelmDocsAnnotator(t *testing.T) {
 			require.NoError(t, err)
 
 			var got map[string]any
+
 			require.NoError(t, json.Unmarshal(out, &got))
 			tc.want(t, got)
 		})
@@ -2296,6 +2300,7 @@ func TestHelmDocsAnnotatorForContentResetsState(t *testing.T) {
 	require.NoError(t, err)
 
 	var got map[string]any
+
 	require.NoError(t, json.Unmarshal(out, &got))
 
 	props, ok := got["properties"].(map[string]any)

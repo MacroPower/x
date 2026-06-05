@@ -181,6 +181,7 @@ func TestHelmValuesSchemaAnnotator(t *testing.T) {
 			require.NoError(t, err)
 
 			var got map[string]any
+
 			require.NoError(t, json.Unmarshal(out, &got))
 			tc.want(t, got)
 		})
@@ -515,6 +516,7 @@ func TestHelmValuesSchemaAnnotatorEdgeCases(t *testing.T) {
 			require.NoError(t, err)
 
 			var got map[string]any
+
 			require.NoError(t, json.Unmarshal(out, &got))
 			tc.want(t, got)
 		})
@@ -956,6 +958,7 @@ func TestHelmValuesSchemaAnnotatorProperties(t *testing.T) {
 			require.NoError(t, err)
 
 			var got map[string]any
+
 			require.NoError(t, json.Unmarshal(out, &got))
 			tc.want(t, got)
 		})
@@ -1114,6 +1117,7 @@ func TestHelmValuesSchemaAnnotatorConstAndDefault(t *testing.T) {
 			require.NoError(t, err)
 
 			var got map[string]any
+
 			require.NoError(t, json.Unmarshal(out, &got))
 			tc.want(t, got)
 		})
@@ -1185,6 +1189,7 @@ func TestHelmValuesSchemaAnnotatorEnumEdgeCases(t *testing.T) {
 			require.NoError(t, err)
 
 			var got map[string]any
+
 			require.NoError(t, json.Unmarshal(out, &got))
 			tc.want(t, got)
 		})
@@ -1298,6 +1303,7 @@ func TestHelmValuesSchemaAnnotatorCommentPlacement(t *testing.T) {
 			require.NoError(t, err)
 
 			var got map[string]any
+
 			require.NoError(t, json.Unmarshal(out, &got))
 			tc.want(t, got)
 		})
@@ -1365,6 +1371,7 @@ func TestHelmValuesSchemaAnnotatorUnsupportedKeys(t *testing.T) {
 			require.NoError(t, err)
 
 			var got map[string]any
+
 			require.NoError(t, json.Unmarshal(out, &got))
 
 			props, ok := got["properties"].(map[string]any)
@@ -1480,6 +1487,7 @@ func TestHelmValuesSchemaAnnotatorDetection(t *testing.T) {
 			require.NoError(t, err)
 
 			var got map[string]any
+
 			require.NoError(t, json.Unmarshal(out, &got))
 
 			props, ok := got["properties"].(map[string]any)
@@ -2276,6 +2284,7 @@ func TestHelmValuesSchemaAnnotatorAlignment(t *testing.T) {
 			require.NoError(t, err)
 
 			var got map[string]any
+
 			require.NoError(t, json.Unmarshal(out, &got))
 			tc.want(t, got)
 		})
@@ -3181,6 +3190,7 @@ func TestHelmValuesSchemaAnnotatorUpstreamAlignment(t *testing.T) {
 				require.True(t, ok)
 
 				assert.Equal(t, "string", n["type"])
+
 				// Empty minLength should not be set. YAML unmarshal of ""
 				// produces nil which fails int assertion, or produces 0 which
 				// is valid. Either way, minLength should not cause an error.
@@ -3224,6 +3234,7 @@ func TestHelmValuesSchemaAnnotatorUpstreamAlignment(t *testing.T) {
 			require.NoError(t, err)
 
 			var got map[string]any
+
 			require.NoError(t, json.Unmarshal(out, &got))
 			tc.want(t, got)
 		})

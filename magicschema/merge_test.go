@@ -221,6 +221,7 @@ func TestMergeMultipleInputs(t *testing.T) {
 			require.NoError(t, err)
 
 			var got map[string]any
+
 			require.NoError(t, json.Unmarshal(out, &got))
 			tc.check(t, got)
 		})
@@ -389,6 +390,7 @@ func TestMergeTypeWidening(t *testing.T) {
 			require.NoError(t, err)
 
 			var got map[string]any
+
 			require.NoError(t, json.Unmarshal(out, &got))
 
 			props, ok := got["properties"].(map[string]any)
