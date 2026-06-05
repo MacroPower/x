@@ -10,7 +10,7 @@
     "nodejs": "25.6.0",
     "nodePackages.prettier": "3.5.3",
     "uv": "0.9.30",
-    "zizmor": "1.22.0",
+    "zizmor": "1.25.2",
     "conform": "0.1.0-alpha.29",
     "vhs": "0.10.0",
     "renovate": "42.76.4",
