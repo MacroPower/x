@@ -1501,3 +1501,238 @@ func TestValidateInterpreter_IntegerBoundExactRepresentability(t *testing.T) {
 		assert.InDelta(t, float64(100), *prop.Maximum, 0)
 	})
 }
+
+func TestValidateInterpreter_RequiredOnBoolPreservesConst(t *testing.T) {
+	t.Parallel()
+
+	// On a bool field, "required" means the value must be true. An earlier eq tag
+	// on the same field that pins the const must not be silently overwritten:
+	// eq=false,required is an impossible combination (the value cannot be both
+	// false and true) and is rejected, matching how conflicting rules are handled
+	// elsewhere; eq=true,required and bare required still yield const:true.
+	type eqFalseRequired struct {
+		Flag bool `json:"flag" validate:"eq=false,required"`
+	}
+
+	type requiredEqFalse struct {
+		Flag bool `json:"flag" validate:"required,eq=false"`
+	}
+
+	type eqTrueRequired struct {
+		Flag bool `json:"flag" validate:"eq=true,required"`
+	}
+
+	type bareRequired struct {
+		Flag bool `json:"flag" validate:"required"`
+	}
+
+	t.Run("eq=false then required conflicts", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := jsonschema.GenerateFor[eqFalseRequired](
+			jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		)
+		require.Error(t, err,
+			"required on a bool already pinned to false is an impossible combination")
+	})
+
+	t.Run("required then eq=false conflicts", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := jsonschema.GenerateFor[requiredEqFalse](
+			jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		)
+		require.Error(t, err,
+			"the conflict is detected regardless of tag order")
+	})
+
+	t.Run("eq=true and required agree", func(t *testing.T) {
+		t.Parallel()
+
+		s, err := jsonschema.GenerateFor[eqTrueRequired](
+			jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		)
+		require.NoError(t, err)
+
+		prop := s.Properties["flag"]
+		require.NotNil(t, prop.Const)
+		assert.Equal(t, true, *prop.Const,
+			"eq=true and required both pin the const to true")
+	})
+
+	t.Run("bare required pins const to true", func(t *testing.T) {
+		t.Parallel()
+
+		s, err := jsonschema.GenerateFor[bareRequired](
+			jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		)
+		require.NoError(t, err)
+
+		prop := s.Properties["flag"]
+		require.NotNil(t, prop.Const)
+		assert.Equal(t, true, *prop.Const,
+			"required on a bool pins the const to true")
+	})
+}
+
+func TestValidateInterpreter_NumericBoundsIntersectTypeBounds(t *testing.T) {
+	t.Parallel()
+
+	// A min/max tag bound intersects with the type-derived bound rather than
+	// overwriting it, so a bound the field's Go type can never satisfy is clamped
+	// to the type's own limit instead of widening the accepted range. The ceiling
+	// only falls and the floor only rises.
+	type Form struct {
+		I8Max   int8  `json:"i8_max"    validate:"max=200"`
+		U8Max   uint8 `json:"u8_max"    validate:"max=500"`
+		I8Min   int8  `json:"i8_min"    validate:"min=-300"`
+		I8MaxOK int8  `json:"i8_max_ok" validate:"max=100"`
+		I8MinOK int8  `json:"i8_min_ok" validate:"min=-50"`
+	}
+
+	s, err := jsonschema.GenerateFor[Form](
+		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+	)
+	require.NoError(t, err)
+
+	got, err := json.Marshal(s)
+	require.NoError(t, err)
+
+	assert.JSONEq(t, `{
+		"$schema":"https://json-schema.org/draft/2020-12/schema",
+		"type":"object",
+		"properties":{
+			"i8_max":{"type":"integer","minimum":-128,"maximum":127},
+			"u8_max":{"type":"integer","minimum":0,"maximum":255},
+			"i8_min":{"type":"integer","minimum":-128,"maximum":127},
+			"i8_max_ok":{"type":"integer","minimum":-128,"maximum":100},
+			"i8_min_ok":{"type":"integer","minimum":-50,"maximum":127}
+		},
+		"required":["i8_max","u8_max","i8_min","i8_max_ok","i8_min_ok"],
+		"additionalProperties":false
+	}`, string(got))
+}
+
+func TestValidateInterpreter_NumericValueOverflowErrors(t *testing.T) {
+	t.Parallel()
+
+	// An eq/ne/oneof/len value for a sized integer field is range-checked against
+	// the field's Go type, so a value the field can never hold overflows during
+	// parsing and surfaces as an error (wrapping strconv.ErrRange), mirroring the
+	// jsonschema-tag path. An out-of-range value never reaches an unsatisfiable or
+	// inert schema.
+	type eqInt8 struct {
+		Value int8 `json:"value" validate:"eq=200"`
+	}
+
+	type neInt16 struct {
+		Value int16 `json:"value" validate:"ne=40000"`
+	}
+
+	type oneofUint8 struct {
+		Value uint8 `json:"value" validate:"oneof=1 300"`
+	}
+
+	type lenInt8 struct {
+		Value int8 `json:"value" validate:"len=200"`
+	}
+
+	type inRangeInt8 struct {
+		Value int8 `json:"value" validate:"eq=100"`
+	}
+
+	cases := map[string]struct {
+		gen func() (*jsonschema.Schema, error)
+		err bool
+	}{
+		"eq overflow on int8": {
+			gen: func() (*jsonschema.Schema, error) {
+				return jsonschema.GenerateFor[eqInt8](
+					jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+				)
+			},
+			err: true,
+		},
+		"ne overflow on int16": {
+			gen: func() (*jsonschema.Schema, error) {
+				return jsonschema.GenerateFor[neInt16](
+					jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+				)
+			},
+			err: true,
+		},
+		"oneof overflow on uint8": {
+			gen: func() (*jsonschema.Schema, error) {
+				return jsonschema.GenerateFor[oneofUint8](
+					jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+				)
+			},
+			err: true,
+		},
+		"len overflow on int8": {
+			gen: func() (*jsonschema.Schema, error) {
+				return jsonschema.GenerateFor[lenInt8](
+					jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+				)
+			},
+			err: true,
+		},
+		"in-range eq on int8": {
+			gen: func() (*jsonschema.Schema, error) {
+				return jsonschema.GenerateFor[inRangeInt8](
+					jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+				)
+			},
+			err: false,
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := tc.gen()
+			if tc.err {
+				require.Error(t, err,
+					"an out-of-range value overflows during parsing")
+				require.ErrorIs(t, err, strconv.ErrRange,
+					"the overflow wraps strconv.ErrRange like the jsonschema-tag path")
+
+				return
+			}
+
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestValidateInterpreter_LenOnCollectionUnaffectedByFieldWidth(t *testing.T) {
+	t.Parallel()
+
+	// A len on a string or slice counts elements, not a field value, so a large
+	// length is never range-checked against an integer field's width. Only eq/ne/
+	// oneof on a numeric field carry a value that must fit the field's Go type.
+	type Form struct {
+		Code  string   `json:"code"  validate:"len=200"`
+		Items []string `json:"items" validate:"len=300"`
+	}
+
+	s, err := jsonschema.GenerateFor[Form](
+		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+	)
+	require.NoError(t, err)
+
+	got, err := json.Marshal(s)
+	require.NoError(t, err)
+
+	assert.JSONEq(t, `{
+		"$schema":"https://json-schema.org/draft/2020-12/schema",
+		"type":"object",
+		"properties":{
+			"code":{"type":"string","minLength":200,"maxLength":200},
+			"items":{"type":["null","array"],"items":{"type":"string"},"minItems":300,"maxItems":300}
+		},
+		"required":["code","items"],
+		"additionalProperties":false
+	}`, string(got))
+}

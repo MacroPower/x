@@ -56,11 +56,22 @@
 //     into not.enum or allOf when several values are forbidden, e.g. required+ne)
 //   - len=N: const (value equals N)
 //
+// Numeric bounds intersect with the bounds derived from the field's Go type:
+// a tag bound wider than the type's range clamps to the type limit (int8 with
+// max=200 emits maximum: 127), matching the jsonschema tag's bound handling.
+// Scalar values (eq, ne, oneof, and len on a numeric field) are instead
+// range-checked against the field's Go type, and a value the type cannot hold
+// is an error, mirroring the jsonschema tag's const/enum behavior.
+//
 // Boolean constraints:
 //
 //   - eq=true / eq=false: const
 //   - ne=true / ne=false: not (forbids the value)
 //   - oneof=true false: enum
+//
+// Combining required with eq=false on a bool is an error
+// ([ErrConflictingConstraints]): required on a bool pins the value to true,
+// which contradicts a const of false.
 //
 // Array/slice constraints:
 //

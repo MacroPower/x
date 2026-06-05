@@ -1,6 +1,7 @@
 package validate
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"slices"
@@ -8,6 +9,11 @@ import (
 
 	"go.jacobcolvin.com/jsonschema"
 )
+
+// ErrConflictingConstraints reports two tag rules on one field that can never
+// both hold, such as required and eq=false on a bool: required means the value
+// must be true while eq=false pins it to false, so no value satisfies both.
+var ErrConflictingConstraints = errors.New("validate tag: conflicting constraints")
 
 // Interpreter implements [jsonschema.TagInterpreter] for go-playground/validator
 // tag syntax. Create one with [NewInterpreter].
@@ -132,7 +138,7 @@ func applyValidator(key, value string, s, parent *jsonschema.Schema, fieldName s
 			addRequired(parent, fieldName)
 		}
 		if !isPointer {
-			applyRequiredConstraint(s, baseType)
+			return applyRequiredConstraint(s, baseType)
 		}
 
 		return nil
@@ -235,7 +241,7 @@ func addRequired(parent *jsonschema.Schema, name string) {
 // Validator rules in a single tag compose conjunctively and order-independently,
 // so the floors only ever rise: a stronger min/len bound set by another part of
 // the tag is never lowered, regardless of where "required" appears.
-func applyRequiredConstraint(s *jsonschema.Schema, baseType reflect.Type) {
+func applyRequiredConstraint(s *jsonschema.Schema, baseType reflect.Type) error {
 	switch {
 	case baseType.Kind() == reflect.String:
 		if s.MinLength == nil || *s.MinLength < 1 {
@@ -253,14 +259,27 @@ func applyRequiredConstraint(s *jsonschema.Schema, baseType reflect.Type) {
 		}
 
 	case baseType.Kind() == reflect.Bool:
-		// Required on bool means the value must be true.
+		// Required on bool means the value must be true. An eq tag elsewhere on the
+		// field may already have pinned the const: eq=true agrees and needs no
+		// change, but eq=false pins it to false, which required can never satisfy.
+		// Overwriting it would silently discard the eq=false rule, so the impossible
+		// combination is reported rather than resolved by precedence.
+		if s.Const != nil {
+			if b, ok := (*s.Const).(bool); ok && !b {
+				return fmt.Errorf("%w: required on a bool already constrained to false", ErrConflictingConstraints)
+			}
+		}
+
 		s.Const = jsonschema.Ptr[any](true)
+
 	case isIntegerKind(baseType):
 		// Required on a numeric type means the value must not be zero.
 		forbidValue(s, 0)
 	case isFloatKind(baseType):
 		forbidValue(s, 0.0)
 	}
+
+	return nil
 }
 
 // applyMinConstraint applies min/gte or gt constraint based on the type.
@@ -369,11 +388,20 @@ func parseBool(v string) (bool, error) {
 	}
 }
 
-// applyBoolEq applies eq=true/false → const for a bool schema.
+// applyBoolEq applies eq=true/false → const for a bool schema. A const already
+// pinned to the opposite value by another rule (for example required, which pins
+// it to true) is a conflict the two rules can never both satisfy, so it is
+// reported rather than silently overwritten — keeping the result independent of
+// tag order.
 func applyBoolEq(s *jsonschema.Schema, value string) error {
 	b, err := parseBool(value)
 	if err != nil {
 		return err
+	}
+	if s.Const != nil {
+		if existing, ok := (*s.Const).(bool); ok && existing != b {
+			return fmt.Errorf("%w: eq=%t conflicts with an existing bool constraint", ErrConflictingConstraints, b)
+		}
 	}
 
 	s.Const = jsonschema.Ptr[any](b)

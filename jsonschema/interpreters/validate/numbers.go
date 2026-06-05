@@ -100,10 +100,19 @@ func applyNumericMinConstraint(s *jsonschema.Schema, value string, baseType refl
 
 		return fmt.Errorf("validate tag: %s: %w", name, err)
 	}
+	// Rules in a validate tag are ANDed, so overlapping lower bounds intersect to
+	// their maximum: a tag floor never lowers a stronger floor set elsewhere (a
+	// repeated min, or the type-derived minimum for a sized integer). Without this
+	// a tag bound the field's Go type can never reach (min=-300 on an int8) would
+	// overwrite the type floor and admit out-of-range values.
 	if exclusive {
-		s.ExclusiveMinimum = jsonschema.Ptr(n)
+		if s.ExclusiveMinimum == nil || n > *s.ExclusiveMinimum {
+			s.ExclusiveMinimum = jsonschema.Ptr(n)
+		}
 	} else {
-		s.Minimum = jsonschema.Ptr(n)
+		if s.Minimum == nil || n > *s.Minimum {
+			s.Minimum = jsonschema.Ptr(n)
+		}
 	}
 
 	return nil
@@ -120,10 +129,19 @@ func applyNumericMaxConstraint(s *jsonschema.Schema, value string, baseType refl
 
 		return fmt.Errorf("validate tag: %s: %w", name, err)
 	}
+	// Rules in a validate tag are ANDed, so overlapping upper bounds intersect to
+	// their minimum: a tag ceiling never raises a stronger ceiling set elsewhere (a
+	// repeated max, or the type-derived maximum for a sized integer). Without this
+	// a tag bound the field's Go type can never reach (max=200 on an int8) would
+	// overwrite the type ceiling and admit out-of-range values.
 	if exclusive {
-		s.ExclusiveMaximum = jsonschema.Ptr(n)
+		if s.ExclusiveMaximum == nil || n < *s.ExclusiveMaximum {
+			s.ExclusiveMaximum = jsonschema.Ptr(n)
+		}
 	} else {
-		s.Maximum = jsonschema.Ptr(n)
+		if s.Maximum == nil || n < *s.Maximum {
+			s.Maximum = jsonschema.Ptr(n)
+		}
 	}
 
 	return nil
@@ -286,14 +304,17 @@ func asFloat64(v any) (float64, bool) {
 }
 
 // parseNumericValue parses a single numeric value according to the Go type.
-// Signed integer kinds parse with [strconv.ParseInt] and unsigned kinds with
-// [strconv.ParseUint], so a bound anywhere in the 64-bit range keeps the
-// precision a float64 round-trip would lose. Unsigned kinds are checked first
+// Unlike a min/max bound, this value (eq/ne/oneof, or len on a numeric field) is
+// itself a field value, so it is parsed at the field kind's bit width: a value
+// the field can never hold (eq=200 on an int8) overflows here rather than pinning
+// the schema to an unsatisfiable const or emitting an inert not. This mirrors the
+// jsonschema-tag path, which range-checks const/enum the same way, so both tag
+// dialects reject the same out-of-range values. Unsigned kinds are checked first
 // because [isIntegerKind] also reports true for them.
 func parseNumericValue(value string, t reflect.Type) (any, error) {
 	switch {
 	case isUnsignedKind(t):
-		n, err := strconv.ParseUint(value, 10, 64)
+		n, err := strconv.ParseUint(value, 10, uintBitSize(t.Kind()))
 		if err != nil {
 			return nil, fmt.Errorf("invalid unsigned integer %q: %w", value, err)
 		}
@@ -301,7 +322,7 @@ func parseNumericValue(value string, t reflect.Type) (any, error) {
 		return n, nil
 
 	case isIntegerKind(t):
-		n, err := strconv.ParseInt(value, 10, 64)
+		n, err := strconv.ParseInt(value, 10, intBitSize(t.Kind()))
 		if err != nil {
 			return nil, fmt.Errorf("invalid integer %q: %w", value, err)
 		}
@@ -315,6 +336,46 @@ func parseNumericValue(value string, t reflect.Type) (any, error) {
 	}
 
 	return n, nil
+}
+
+// intBitSize returns the bit width to parse a signed-integer field value at, so a
+// value the field cannot hold overflows during parsing. Plain int is platform-
+// dependent ([strconv.IntSize]); the sized kinds map to their fixed widths. The
+// parent package keeps the same mapping for the jsonschema tag; this subpackage
+// cannot import that unexported helper, so it carries a local equivalent.
+func intBitSize(k reflect.Kind) int {
+	switch k {
+	case reflect.Int8:
+		return 8
+	case reflect.Int16:
+		return 16
+	case reflect.Int32:
+		return 32
+	case reflect.Int64:
+		return 64
+	default: // reflect.Int
+		return strconv.IntSize
+	}
+}
+
+// uintBitSize returns the bit width to parse an unsigned-integer field value at,
+// so a value the field cannot hold overflows during parsing. Plain uint and
+// uintptr are platform-dependent ([strconv.IntSize]); the sized kinds map to
+// their fixed widths. It mirrors the parent package's unexported helper for the
+// jsonschema tag, kept local because the subpackage cannot import it.
+func uintBitSize(k reflect.Kind) int {
+	switch k {
+	case reflect.Uint8:
+		return 8
+	case reflect.Uint16:
+		return 16
+	case reflect.Uint32:
+		return 32
+	case reflect.Uint64:
+		return 64
+	default: // reflect.Uint, reflect.Uintptr
+		return strconv.IntSize
+	}
 }
 
 // parseNumericValues parses space-separated numeric values.
