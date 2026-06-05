@@ -114,9 +114,14 @@ func forbidValue(s *jsonschema.Schema, v any) {
 	case s.Not == nil:
 		s.Not = &jsonschema.Schema{Const: &v}
 	case s.Not.Const != nil:
-		if *s.Not.Const == v {
+		if numericEqual(*s.Not.Const, v) {
 			// Already forbidden as a single value (e.g. required and ne=0 on a
-			// numeric field both forbid 0); nothing to add.
+			// numeric field both forbid 0); nothing to add. The comparison is
+			// numeric-aware because the same number can arrive with different
+			// dynamic types: the required path forbids the untyped int 0 while
+			// ne=0 on an unsigned field parses to uint64(0) and on a float field
+			// to float64(0). Plain == treats those as distinct and would emit a
+			// duplicate.
 			return
 		}
 		// Promote the existing single forbidden value into an enum set.
@@ -124,7 +129,7 @@ func forbidValue(s *jsonschema.Schema, v any) {
 		s.Not.Const = nil
 
 	case s.Not.Enum != nil:
-		if slices.Contains(s.Not.Enum, v) {
+		if slices.ContainsFunc(s.Not.Enum, func(e any) bool { return numericEqual(e, v) }) {
 			return
 		}
 
@@ -140,6 +145,83 @@ func forbidValue(s *jsonschema.Schema, v any) {
 			&jsonschema.Schema{Not: &jsonschema.Schema{Const: &v}},
 		)
 		s.Not = nil
+	}
+}
+
+// numericEqual reports whether a and b represent the same number, regardless of
+// their dynamic Go types. Forbidden values reach [forbidValue] with different
+// types for the same number (the required path forbids the untyped int 0 while
+// ne=0 on an unsigned field forbids uint64(0) and on a float field float64(0)),
+// so an int and a uint64 holding 0 compare equal here even though == reports
+// them distinct. Non-numeric values (for example bools or strings) fall back to
+// ==.
+func numericEqual(a, b any) bool {
+	ai, aIsInt := asInt64(a)
+	bi, bIsInt := asInt64(b)
+	if aIsInt && bIsInt {
+		return ai == bi
+	}
+
+	au, aIsUint := asUint64(a)
+	bu, bIsUint := asUint64(b)
+	if aIsUint && bIsUint {
+		return au == bu
+	}
+	// A signed and an unsigned value can still match when the signed value is
+	// non-negative and equals the unsigned magnitude.
+	if aIsInt && bIsUint {
+		return ai >= 0 && uint64(ai) == bu
+	}
+	if aIsUint && bIsInt {
+		return bi >= 0 && uint64(bi) == au
+	}
+
+	af, aIsFloat := asFloat64(a)
+	bf, bIsFloat := asFloat64(b)
+	if (aIsInt || aIsUint || aIsFloat) && (bIsInt || bIsUint || bIsFloat) {
+		return af == bf
+	}
+
+	return a == b
+}
+
+// asInt64 returns the value as an int64 when it holds a signed integer kind.
+func asInt64(v any) (int64, bool) {
+	rv := reflect.ValueOf(v)
+
+	switch rv.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return rv.Int(), true
+	default:
+		return 0, false
+	}
+}
+
+// asUint64 returns the value as a uint64 when it holds an unsigned integer kind.
+func asUint64(v any) (uint64, bool) {
+	rv := reflect.ValueOf(v)
+
+	switch rv.Kind() {
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return rv.Uint(), true
+	default:
+		return 0, false
+	}
+}
+
+// asFloat64 returns the value as a float64 when it holds any numeric kind.
+func asFloat64(v any) (float64, bool) {
+	rv := reflect.ValueOf(v)
+
+	switch rv.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return float64(rv.Int()), true
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return float64(rv.Uint()), true
+	case reflect.Float32, reflect.Float64:
+		return rv.Float(), true
+	default:
+		return 0, false
 	}
 }
 

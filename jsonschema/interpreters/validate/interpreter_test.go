@@ -1234,3 +1234,96 @@ func TestCollectionLtMinIntDoesNotWrap(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateInterpreter_ParamEscapes(t *testing.T) {
+	t.Parallel()
+
+	// Tags split on commas and pipes, so a param that must contain either
+	// character uses the documented go-playground/validator escapes 0x2C -> ","
+	// and 0x7C -> "|". The interpreter unescapes the param value the same way, so
+	// an enum or const value can hold a literal comma or pipe. A param without an
+	// escape sequence is left unchanged.
+	cases := map[string]struct {
+		tag       string
+		wantEnum  []any
+		wantConst any
+	}{
+		"oneof comma escape": {
+			tag:      "oneof=a0x2Cb c",
+			wantEnum: []any{"a,b", "c"},
+		},
+		"eq comma escape": {
+			tag:       "eq=a0x2Cb",
+			wantConst: "a,b",
+		},
+		"eq pipe escape": {
+			tag:       "eq=a0x7Cb",
+			wantConst: "a|b",
+		},
+		"no escapes unchanged": {
+			tag:       "eq=plain",
+			wantConst: "plain",
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			schema := &jsonschema.Schema{Type: "string"}
+			parent := &jsonschema.Schema{Type: "object"}
+
+			interp := validate.NewInterpreter()
+			err := interp.Interpret(tc.tag, jsonschema.FieldContext{
+				Type:   reflect.TypeFor[string](),
+				Schema: schema,
+				Parent: parent,
+				Name:   "value",
+			})
+			require.NoError(t, err)
+
+			if tc.wantEnum != nil {
+				assert.Equal(t, tc.wantEnum, schema.Enum,
+					"escaped commas produce literal-comma enum members")
+				assert.Nil(t, schema.Const)
+
+				return
+			}
+
+			require.NotNil(t, schema.Const)
+			assert.Equal(t, tc.wantConst, *schema.Const,
+				"escaped param yields the unescaped const value")
+		})
+	}
+}
+
+func TestValidateInterpreter_RequiredNeZeroOnUnsignedDedups(t *testing.T) {
+	t.Parallel()
+
+	// The required path forbids the untyped int 0 while ne=0 on an unsigned field
+	// parses 0 via strconv.ParseUint to uint64(0). A plain == comparison treats
+	// those as distinct and emits a duplicate forbidden value; the numeric-aware
+	// dedup recognizes them as the same number and keeps a single not.const.
+	type MyType struct {
+		Count uint `json:"count" validate:"required,ne=0"`
+	}
+
+	s, err := jsonschema.GenerateFor[MyType](
+		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+	)
+	require.NoError(t, err)
+
+	prop := s.Properties["count"]
+	require.NotNil(t, prop)
+	require.NotNil(t, prop.Not, "required and ne=0 forbid the zero value")
+
+	// A single forbidden 0 is kept as not.const with no duplicate enum.
+	require.NotNil(t, prop.Not.Const, "the single forbidden 0 stays a not.const")
+	assert.Nil(t, prop.Not.Enum, "the forbidden 0 is not duplicated into not.enum")
+
+	got, err := json.Marshal(prop.Not)
+	require.NoError(t, err)
+
+	assert.JSONEq(t, `{"const":0}`, string(got),
+		"the unsigned and int forms of 0 dedup to a single not.const")
+}

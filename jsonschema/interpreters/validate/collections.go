@@ -2,7 +2,6 @@ package validate
 
 import (
 	"fmt"
-	"math"
 	"reflect"
 	"strconv"
 
@@ -15,17 +14,9 @@ func applyCollectionMinConstraint(s *jsonschema.Schema, value string, baseType r
 	if err != nil {
 		return fmt.Errorf("validate tag: invalid number %q: %w", value, err)
 	}
-	// Gt=N means minItems N+1; guard against overflow so gt=MaxInt yields the
-	// largest representable bound instead of wrapping negative and collapsing
-	// to a permissive minItems: 0.
-	if exclusive && n != math.MaxInt {
-		n++
-	}
-	// MinItems/minProperties MUST be non-negative per JSON Schema; a negative
-	// bound collapses to 0.
-	if n < 0 {
-		n = 0
-	}
+	// Gt=N means minItems N+1, clamped to a non-negative bound as JSON Schema
+	// requires.
+	n = clampNonNegative(inclusiveLowerBound(n, exclusive))
 	if isMapKind(baseType) {
 		s.MinProperties = jsonschema.Ptr(n)
 	} else {
@@ -41,16 +32,9 @@ func applyCollectionMaxConstraint(s *jsonschema.Schema, value string, baseType r
 	if err != nil {
 		return fmt.Errorf("validate tag: invalid number %q: %w", value, err)
 	}
-	// Lt=N means maxItems N-1; guard against underflow so lt=MinInt does not
-	// wrap to a large positive (permissive) bound before the non-negative clamp.
-	if exclusive && n != math.MinInt {
-		n--
-	}
-	// MaxItems/maxProperties MUST be non-negative per JSON Schema; an
-	// exclusive bound of lt=0 collapses to 0.
-	if n < 0 {
-		n = 0
-	}
+	// Lt=N means maxItems N-1, clamped to a non-negative bound as JSON Schema
+	// requires (so lt=0 collapses to 0).
+	n = clampNonNegative(inclusiveUpperBound(n, exclusive))
 	if isMapKind(baseType) {
 		s.MaxProperties = jsonschema.Ptr(n)
 	} else {
@@ -68,9 +52,7 @@ func applyCollectionLenConstraint(s *jsonschema.Schema, value string, baseType r
 	}
 	// Min/maxItems and min/maxProperties MUST be non-negative per JSON Schema;
 	// a negative length collapses to 0.
-	if n < 0 {
-		n = 0
-	}
+	n = clampNonNegative(n)
 	if isMapKind(baseType) {
 		s.MinProperties = jsonschema.Ptr(n)
 		s.MaxProperties = jsonschema.Ptr(n)

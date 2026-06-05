@@ -65,7 +65,15 @@ func applyParts(
 			return applyDive(remaining, s, fieldType)
 		}
 
-		key, value, _ := strings.Cut(part, "=")
+		key, value, hasValue := strings.Cut(part, "=")
+		if hasValue {
+			// Tags split blindly on commas, pipes, and equals, then the
+			// documented escapes in the param value only are unescaped:
+			// "0x2C" -> "," and "0x7C" -> "|". This lets a param carry a literal
+			// comma or pipe (e.g. oneof=a0x2Cb yields the enum value "a,b"). The
+			// key is never unescaped, matching go-playground/validator cache.go.
+			value = unescapeParam(value)
+		}
 
 		// Skip cross-field validators.
 		if isCrossFieldValidator(key) {
@@ -175,6 +183,15 @@ func applyValidator(key, value string, s, parent *jsonschema.Schema, fieldName s
 	}
 
 	return nil
+}
+
+// unescapeParam applies go-playground/validator's documented param escapes:
+// "0x2C" becomes a literal comma and "0x7C" a literal pipe. Tags are split on
+// commas and pipes before parsing, so these escapes are the only way a param
+// value can contain either character. The order matches validator cache.go:
+// commas are unescaped before pipes.
+func unescapeParam(value string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(value, "0x2C", ","), "0x7C", "|")
 }
 
 // hasConstraint reports whether parts contains at least one meaningful
