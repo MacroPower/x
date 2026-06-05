@@ -1,7 +1,6 @@
 {
   "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.13.7/.schema/devbox.schema.json",
   "packages": {
-    "coreutils-full": "9.9",
     "go-task": "3.48.0",
     "goreleaser": "2.16.0",
     "golangci-lint": "2.12.2",
@@ -9,21 +8,11 @@
     "git": "2.54.0",
     "nodejs": "25.9.0",
     "nodePackages.prettier": "3.5.3",
-    "uv": "0.11.17",
     "zizmor": "1.25.2",
     "conform": "0.1.0-alpha.29",
     "vhs": "0.11.0",
-    "renovate": "43.4.0",
+    "renovate": "43.150.1",
     "lefthook": "2.1.1",
-    "gcc": "16.1.0",
     "jq": "1.8.1"
-  },
-  "shell": {
-    "init_hook": [
-      "alias python='uv run python'",
-      "alias python3='uv run python3'",
-      "alias pip='uv pip'",
-      "alias pip3='uv pip'"
-    ]
   }
 }
