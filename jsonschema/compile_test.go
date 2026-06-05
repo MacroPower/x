@@ -181,6 +181,154 @@ func TestCompileConcurrent(t *testing.T) {
 	wg.Wait()
 }
 
+// numericPatternSchema exercises the Compile-time caches: numeric bound
+// keywords (multipleOf, minimum, maximum, exclusiveMinimum, exclusiveMaximum)
+// and both pattern forms (the string pattern keyword and patternProperties).
+func numericPatternSchema() *jsonschema.Schema {
+	return &jsonschema.Schema{
+		Type: "object",
+		Properties: map[string]*jsonschema.Schema{
+			"count": {
+				Type:             "number",
+				MultipleOf:       jsonschema.Ptr(2.0),
+				Minimum:          jsonschema.Ptr(0.0),
+				Maximum:          jsonschema.Ptr(10.0),
+				ExclusiveMinimum: jsonschema.Ptr(-1.0),
+				ExclusiveMaximum: jsonschema.Ptr(11.0),
+			},
+			"code": {Type: "string", Pattern: "^[A-Z]{3}$"},
+		},
+		PatternProperties: map[string]*jsonschema.Schema{
+			"^x-": {Type: "string"},
+		},
+	}
+}
+
+// TestCompileNumericAndPatternCaches checks that a compiled validator's
+// precomputed numeric-bound and pattern caches yield the same results as the
+// one-shot helper, both on first use and on reuse across many instances, so the
+// caches never change validation outcomes.
+func TestCompileNumericAndPatternCaches(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		instance any
+		valid    bool
+	}{
+		{map[string]any{"count": 4.0, "code": "ABC", "x-tag": "ok"}, true},
+		{map[string]any{"count": 3.0}, false},  // not a multiple of 2
+		{map[string]any{"count": 12.0}, false}, // above maximum
+		{map[string]any{"count": 11.0}, false}, // at exclusiveMaximum
+		{map[string]any{"code": "abc"}, false}, // lowercase fails pattern
+		{map[string]any{"code": "ABCD"}, false},
+		{map[string]any{"x-tag": 1.0}, false}, // patternProperties requires string
+		{map[string]any{"x-tag": "ok"}, true},
+	}
+
+	v, err := jsonschema.Compile(numericPatternSchema())
+	require.NoError(t, err)
+
+	// Two passes prove the caches carry no per-run state and stay consistent.
+	for range 2 {
+		for _, c := range cases {
+			compiledErr := v.Validate(c.instance)
+			directErr := jsonschema.Validate(numericPatternSchema(), c.instance)
+
+			assert.Equalf(t, directErr == nil, compiledErr == nil,
+				"compiled and direct disagree for %v", c.instance)
+			if c.valid {
+				assert.NoErrorf(t, compiledErr, "instance %v", c.instance)
+			} else {
+				assert.Errorf(t, compiledErr, "instance %v", c.instance)
+			}
+		}
+	}
+}
+
+// TestCompileNumericAndPatternConcurrent shares one compiled validator across
+// goroutines so the read-only numeric-bound and pattern caches are exercised
+// concurrently; run under -race it confirms those caches are never written after
+// Compile.
+func TestCompileNumericAndPatternConcurrent(t *testing.T) {
+	t.Parallel()
+
+	v, err := jsonschema.Compile(numericPatternSchema())
+	require.NoError(t, err)
+
+	cases := []struct {
+		instance any
+		valid    bool
+	}{
+		{map[string]any{"count": 4.0, "code": "ABC"}, true},
+		{map[string]any{"count": 3.0}, false},
+		{map[string]any{"code": "abc"}, false},
+		{map[string]any{"x-tag": "ok"}, true},
+	}
+
+	var wg sync.WaitGroup
+	for range 32 {
+		wg.Go(func() {
+			for range 25 {
+				for _, c := range cases {
+					gotValid := v.Validate(c.instance) == nil
+					if gotValid != c.valid {
+						t.Errorf("instance %v: got valid=%v, want %v", c.instance, gotValid, c.valid)
+					}
+				}
+			}
+		})
+	}
+
+	wg.Wait()
+}
+
+// TestCompileInvalidPatternRejected pins that an uncompilable pattern never
+// produces an accept-all validator. Structural pre-validation rejects it at
+// Compile, so the failure surfaces there; the cached fail-closed branch in
+// validateString backs the same contract for patterns reached only at
+// validation time (see TestInvalidPatternFailsClosed for the one-shot path).
+func TestCompileInvalidPatternRejected(t *testing.T) {
+	t.Parallel()
+
+	_, err := jsonschema.Compile(&jsonschema.Schema{Type: "string", Pattern: "[invalid"})
+	require.Error(t, err, "an uncompilable pattern must not yield an accept-all validator")
+}
+
+// TestCompileRemoteBoundsAndPatternFallback exercises the cache-miss fallback in
+// boundsFor and patternFor: a remote schema is reached only at validation time,
+// so it is absent from the Compile-time caches and its numeric bound and pattern
+// are computed on the fly. The results must match what a directly compiled schema
+// produces.
+func TestCompileRemoteBoundsAndPatternFallback(t *testing.T) {
+	t.Parallel()
+
+	resolver := mapResolver{
+		"https://example.com/bounded.json": {
+			Type:       "number",
+			Minimum:    jsonschema.Ptr(0.0),
+			Maximum:    jsonschema.Ptr(10.0),
+			MultipleOf: jsonschema.Ptr(2.0),
+		},
+		"https://example.com/code.json": {Type: "string", Pattern: "^[A-Z]{3}$"},
+	}
+	schema := &jsonschema.Schema{
+		Schema: "https://json-schema.org/draft/2020-12/schema",
+		Type:   "object",
+		Properties: map[string]*jsonschema.Schema{
+			"count": {Ref: "https://example.com/bounded.json"},
+			"code":  {Ref: "https://example.com/code.json"},
+		},
+	}
+
+	v, err := jsonschema.Compile(schema, jsonschema.WithRefResolver(resolver))
+	require.NoError(t, err)
+
+	require.NoError(t, v.Validate(map[string]any{"count": 4.0, "code": "ABC"}))
+	require.Error(t, v.Validate(map[string]any{"count": 3.0}), "3 is not a multiple of 2")
+	require.Error(t, v.Validate(map[string]any{"count": 12.0}), "12 exceeds the maximum")
+	require.Error(t, v.Validate(map[string]any{"code": "abc"}), "lowercase fails the pattern")
+}
+
 func TestCompileConcurrentWithRefResolver(t *testing.T) {
 	t.Parallel()
 

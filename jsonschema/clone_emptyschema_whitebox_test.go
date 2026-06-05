@@ -1,4 +1,4 @@
-//nolint:testpackage // white-box: tests unexported cloneSchema/isEmptySchema/isSchemaTrivial.
+//nolint:testpackage // white-box: tests unexported cloneSchema/isEmptySchema.
 package jsonschema
 
 import (
@@ -76,43 +76,6 @@ var (
 		"ReadOnly", "WriteOnly", "Deprecated", "Vocabulary",
 		"Extra", "PropertyOrder",
 		"ItemsArray", "ContentSchema",
-	}
-
-	// Checked-by-isSchemaTrivial fields: the fields isSchemaTrivial inspects. It
-	// mirrors isEmptySchema but allows Not to be set (a "false" schema is
-	// {not: {}}), so Not moves to the ignored set; it also stops short of the
-	// content keywords and $defs/definitions that isEmptySchema checks.
-	trivialSchemaCheckedFields = []string{
-		"Type", "Types", "Ref", "DynamicRef",
-		"Properties", "Required", "Items", "PrefixItems",
-		"AllOf", "AnyOf", "OneOf",
-		// Not is intentionally absent: trivial schemas allow Not to be set.
-		"If", "Then", "Else",
-		"Enum", "Const",
-		"Minimum", "Maximum", "ExclusiveMinimum", "ExclusiveMaximum",
-		"MinLength", "MaxLength", "Pattern", "Format",
-		"MinItems", "MaxItems", "UniqueItems",
-		"MinProperties", "MaxProperties",
-		"AdditionalProperties", "AdditionalItems",
-		"PatternProperties", "PropertyNames", "Contains",
-		"MultipleOf",
-		"UnevaluatedProperties", "UnevaluatedItems",
-		"DependentRequired", "DependentSchemas",
-		"DependencySchemas", "DependencyStrings",
-		"MinContains", "MaxContains",
-	}
-
-	// Ignored-by-isSchemaTrivial fields: the same annotation/metadata set as
-	// isEmptySchema, plus Not (allowed for false schemas) and the content/$defs
-	// keywords isSchemaTrivial does not inspect.
-	trivialSchemaIgnoredFields = []string{
-		"Schema", "ID", "Anchor", "DynamicAnchor", "Comment",
-		"Title", "Description", "Default", "Examples",
-		"ReadOnly", "WriteOnly", "Deprecated", "Vocabulary",
-		"Extra", "PropertyOrder",
-		"ItemsArray", "ContentSchema",
-		"Not", // Not is allowed — that is what makes a schema "false".
-		"Defs", "Definitions", "ContentEncoding", "ContentMediaType",
 	}
 )
 
@@ -273,15 +236,55 @@ func TestIsEmptySchemaFieldCoverage(t *testing.T) {
 	assertFieldPartition(t, "isEmptySchema", emptySchemaCheckedFields, emptySchemaIgnoredFields)
 }
 
-// TestIsSchemaTrivialFieldCoverage is the maintenance guard for isSchemaTrivial,
-// the predicate behind isFalseSchema. Like the isEmptySchema guard, it asserts
-// the checked and ignored sets partition the full reflected field set so a new
-// upstream field forces explicit classification. Note Not lives in the ignored
-// set here because a trivial (false) schema is exactly {not: {}}.
-func TestIsSchemaTrivialFieldCoverage(t *testing.T) {
+// TestIsFalseSchemaUsesEmptySchema pins isFalseSchema's definition in terms of
+// isEmptySchema: a schema is the boolean-false form {"not": {}} exactly when its
+// Not is non-nil and empty and the schema with Not cleared is itself empty.
+// Because isFalseSchema reuses the single isEmptySchema field list, the
+// isEmptySchema coverage guard already protects it; this test pins the
+// observable classification so the delegation cannot silently regress.
+func TestIsFalseSchemaUsesEmptySchema(t *testing.T) {
 	t.Parallel()
 
-	assertFieldPartition(t, "isSchemaTrivial", trivialSchemaCheckedFields, trivialSchemaIgnoredFields)
+	tests := map[string]struct {
+		schema *Schema
+		want   bool
+	}{
+		"empty not is false schema": {
+			schema: &Schema{Not: &Schema{}},
+			want:   true,
+		},
+		"nil not is not false schema": {
+			schema: &Schema{},
+			want:   false,
+		},
+		"non-empty not is not false schema": {
+			schema: &Schema{Not: &Schema{Type: "string"}},
+			want:   false,
+		},
+		"sibling keyword defeats false schema": {
+			schema: &Schema{Not: &Schema{}, Type: "string"},
+			want:   false,
+		},
+		"sibling defs defeats false schema": {
+			schema: &Schema{Not: &Schema{}, Defs: map[string]*Schema{"x": {}}},
+			want:   false,
+		},
+		"annotation siblings keep false schema": {
+			schema: &Schema{Not: &Schema{}, Title: "t", Description: "d"},
+			want:   true,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			before := tc.schema.Not
+
+			assert.Equal(t, tc.want, isFalseSchema(tc.schema))
+			assert.Same(t, before, tc.schema.Not, "isFalseSchema must not mutate the schema's Not pointer")
+		})
+	}
 }
 
 // assertFieldPartition asserts that checked and ignored together cover every

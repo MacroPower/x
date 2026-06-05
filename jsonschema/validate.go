@@ -139,6 +139,17 @@ type validator struct {
 	walked                map[*Schema]bool           // schemas already visited by walkSchema (cycle guard)
 	jsonPointerCache      map[jsonPointerKey]*Schema // JSON-pointer fallback results, keyed by (root, pointer)
 
+	// Compile-time caches of derived per-schema state. They are populated once
+	// during Compile by precompute, which runs single-threaded, and are
+	// read-only afterward; forInstance shares them by reference across runs, so
+	// concurrent Validate calls only read them. A schema reached only at
+	// validation time (a remote or JSON-pointer fallback schema) is absent from
+	// these maps, and the validation path falls back to computing the value
+	// directly.
+	numericBounds map[*Schema]*precomputedBounds         // numeric bound keywords as rationals
+	patternCache  map[*Schema]compiledPattern            // schema.Pattern compiled
+	patternProps  map[*Schema]map[string]compiledPattern // patternProperties keys compiled
+
 	// Registrations for schemas materialized by the JSON-pointer fallback
 	// (resolveJSONPointerViaJSON). Like jsonPointerCache they are per-run
 	// scratch state, so concurrent runs never write the shared registries;
@@ -410,6 +421,151 @@ func (v *validator) walkSchemaMap(m map[string]*Schema, base string) {
 	}
 }
 
+// precomputedBounds holds the numeric bound keywords of a schema as rationals,
+// converted once at Compile time so validateNumeric and validateNumericUnbounded
+// reuse them instead of re-parsing the float64 bounds on every numeric instance.
+// A nil field denotes either an absent keyword or a NaN/Inf bound that has no
+// rational form (mirroring [float64ToRat]). The rationals are operands only:
+// comparisons read them and never mutate them.
+type precomputedBounds struct {
+	multipleOf       *big.Rat
+	minimum          *big.Rat
+	maximum          *big.Rat
+	exclusiveMinimum *big.Rat
+	exclusiveMaximum *big.Rat
+}
+
+// compiledPattern caches the result of compiling a regular expression pattern at
+// Compile time. It records the compiled regexp or, when the pattern is one Go's
+// RE2 engine rejects, the compile error, so validation reproduces the same
+// fail-closed behavior it would on a fresh [compileRegexp] call.
+type compiledPattern struct {
+	re  *regexp.Regexp
+	err error
+}
+
+// precompute populates the read-only per-schema caches (numeric bounds and
+// compiled patterns) by traversing every schema reachable from the root once.
+// It runs single-threaded during Compile, before the [Validator] is shared, so
+// the caches it builds are never written concurrently. The traversal mirrors
+// [walkSchema]'s sub-schema recursion but consults only schema fields and its
+// own visited set; it does not touch the URI, anchor, or base-URI registries,
+// which keeps the validation-time fallback walk ([registerFallbackSchema]) from
+// populating these caches.
+func (v *validator) precompute() {
+	v.numericBounds = map[*Schema]*precomputedBounds{}
+	v.patternCache = map[*Schema]compiledPattern{}
+	v.patternProps = map[*Schema]map[string]compiledPattern{}
+
+	visited := map[*Schema]bool{}
+	v.precomputeSchema(v.root, visited)
+}
+
+// precomputeSchema records the derived caches for one schema and recurses into
+// its sub-schemas, guarding against schema graph cycles with visited.
+func (v *validator) precomputeSchema(schema *Schema, visited map[*Schema]bool) {
+	if schema == nil || visited[schema] {
+		return
+	}
+
+	visited[schema] = true
+
+	if b := computeBounds(schema); b != nil {
+		v.numericBounds[schema] = b
+	}
+
+	if schema.Pattern != "" {
+		re, err := compileRegexp(schema.Pattern)
+		v.patternCache[schema] = compiledPattern{re: re, err: err}
+	}
+
+	if len(schema.PatternProperties) > 0 {
+		compiled := make(map[string]compiledPattern, len(schema.PatternProperties))
+		for pattern := range schema.PatternProperties {
+			re, err := compileRegexp(pattern)
+			compiled[pattern] = compiledPattern{re: re, err: err}
+		}
+
+		v.patternProps[schema] = compiled
+	}
+
+	v.precomputeSchemaMap(schema.Properties, visited)
+	v.precomputeSchemaMap(schema.PatternProperties, visited)
+	v.precomputeSchemaMap(schema.Defs, visited)
+	v.precomputeSchemaMap(schema.Definitions, visited)
+	v.precomputeSchemaMap(schema.DependentSchemas, visited)
+	v.precomputeSchemaMap(schema.DependencySchemas, visited)
+
+	for _, s := range schema.AllOf {
+		v.precomputeSchema(s, visited)
+	}
+
+	for _, s := range schema.AnyOf {
+		v.precomputeSchema(s, visited)
+	}
+
+	for _, s := range schema.OneOf {
+		v.precomputeSchema(s, visited)
+	}
+
+	for _, s := range schema.PrefixItems {
+		v.precomputeSchema(s, visited)
+	}
+
+	for _, s := range schema.ItemsArray {
+		v.precomputeSchema(s, visited)
+	}
+
+	v.precomputeSchema(schema.Items, visited)
+	v.precomputeSchema(schema.AdditionalProperties, visited)
+	v.precomputeSchema(schema.AdditionalItems, visited)
+	v.precomputeSchema(schema.Not, visited)
+	v.precomputeSchema(schema.If, visited)
+	v.precomputeSchema(schema.Then, visited)
+	v.precomputeSchema(schema.Else, visited)
+	v.precomputeSchema(schema.Contains, visited)
+	v.precomputeSchema(schema.PropertyNames, visited)
+	v.precomputeSchema(schema.UnevaluatedProperties, visited)
+	v.precomputeSchema(schema.UnevaluatedItems, visited)
+	v.precomputeSchema(schema.ContentSchema, visited)
+}
+
+// precomputeSchemaMap precomputes a map of named sub-schemas.
+func (v *validator) precomputeSchemaMap(m map[string]*Schema, visited map[*Schema]bool) {
+	for _, s := range m {
+		v.precomputeSchema(s, visited)
+	}
+}
+
+// computeBounds converts a schema's numeric bound keywords to rationals,
+// returning nil when the schema sets none of them so the cache holds an entry
+// only for schemas that constrain numbers.
+func computeBounds(schema *Schema) *precomputedBounds {
+	if schema.MultipleOf == nil && schema.Minimum == nil && schema.Maximum == nil &&
+		schema.ExclusiveMinimum == nil && schema.ExclusiveMaximum == nil {
+		return nil
+	}
+
+	b := &precomputedBounds{}
+	if schema.MultipleOf != nil {
+		b.multipleOf = float64ToRat(*schema.MultipleOf)
+	}
+	if schema.Minimum != nil {
+		b.minimum = float64ToRat(*schema.Minimum)
+	}
+	if schema.Maximum != nil {
+		b.maximum = float64ToRat(*schema.Maximum)
+	}
+	if schema.ExclusiveMinimum != nil {
+		b.exclusiveMinimum = float64ToRat(*schema.ExclusiveMinimum)
+	}
+	if schema.ExclusiveMaximum != nil {
+		b.exclusiveMaximum = float64ToRat(*schema.ExclusiveMaximum)
+	}
+
+	return b
+}
+
 // resolveRemote calls the configured [RefResolver] to fetch a remote schema,
 // registers it in the URI/anchor registries, and returns it. On error it
 // stores the error in refResolveErr and returns nil. Subsequent calls for
@@ -594,6 +750,11 @@ func Compile(schema *Schema, opts ...ValidateOption) (*Validator, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// Precompute derived per-schema state (numeric bounds and compiled
+	// patterns) while still single-threaded, so the returned Validator only
+	// reads these caches once shared across goroutines.
+	v.precompute()
 
 	// Structural pre-validation via Schema.Resolve.
 	// A Loader is always provided so Schema.Resolve doesn't fail on remote
@@ -1169,9 +1330,24 @@ func (v *validator) validateUnevaluated(
 	return errs
 }
 
-// isFalseSchema checks if a schema is equivalent to boolean false (rejects all).
+// isFalseSchema reports whether a schema is equivalent to boolean false (rejects
+// all). The upstream library represents the JSON boolean `false` schema as
+// {"not": {}}: an empty "not" with no other constraining keyword. A schema is
+// that form when its Not is non-nil and empty and the schema with Not removed is
+// itself empty, which reuses the single [isEmptySchema] field list rather than
+// duplicating it.
 func isFalseSchema(s *Schema) bool {
-	return s.Not != nil && isEmptySchema(s.Not) && isSchemaTrivial(s)
+	if s.Not == nil || !isEmptySchema(s.Not) {
+		return false
+	}
+
+	// A value copy shares the sub-schema pointers with s, but isEmptySchema
+	// reads fields without mutating them, so clearing Not on the copy leaves s
+	// untouched while letting the one field list decide emptiness.
+	rest := *s
+	rest.Not = nil
+
+	return isEmptySchema(&rest)
 }
 
 // isEmptySchema checks if a schema is empty (no keywords set).
@@ -1201,37 +1377,6 @@ func isEmptySchema(s *Schema) bool {
 		s.MinContains == nil && s.MaxContains == nil &&
 		s.Defs == nil && s.Definitions == nil &&
 		s.ContentEncoding == "" && s.ContentMediaType == "" &&
-		s.ContentSchema == nil
-}
-
-// isSchemaTrivial checks if a schema has only the Not field
-// set (for false schema detection).
-func isSchemaTrivial(s *Schema) bool {
-	// A "false" schema is {not: {}}, meaning only Not is set.
-	// We need to verify no other validation/applicator keywords are set.
-	return s.Type == "" && s.Types == nil &&
-		s.Ref == "" && s.DynamicRef == "" &&
-		s.Properties == nil && s.Required == nil &&
-		s.Items == nil && s.PrefixItems == nil &&
-		s.AllOf == nil && s.AnyOf == nil && s.OneOf == nil &&
-		// Not is set — that's OK, it's what makes this a false schema.
-		s.If == nil && s.Then == nil && s.Else == nil &&
-		s.Enum == nil && s.Const == nil &&
-		s.Minimum == nil && s.Maximum == nil &&
-		s.ExclusiveMinimum == nil && s.ExclusiveMaximum == nil &&
-		s.MinLength == nil && s.MaxLength == nil &&
-		s.Pattern == "" && s.Format == "" &&
-		s.MinItems == nil && s.MaxItems == nil &&
-		!s.UniqueItems &&
-		s.MinProperties == nil && s.MaxProperties == nil &&
-		s.AdditionalProperties == nil && s.AdditionalItems == nil &&
-		s.PatternProperties == nil && s.PropertyNames == nil &&
-		s.Contains == nil &&
-		s.MultipleOf == nil &&
-		s.UnevaluatedProperties == nil && s.UnevaluatedItems == nil &&
-		s.DependentRequired == nil && s.DependentSchemas == nil &&
-		s.DependencySchemas == nil && s.DependencyStrings == nil &&
-		s.MinContains == nil && s.MaxContains == nil &&
 		s.ContentSchema == nil
 }
 
@@ -1934,6 +2079,48 @@ func float64ToRat(f float64) *big.Rat {
 	return r
 }
 
+// boundsFor returns the numeric bound rationals for schema, preferring the
+// Compile-time cache and converting on the fly for a schema absent from it
+// (a remote or JSON-pointer fallback schema reached only at validation time).
+// The returned rationals are operands only; callers must not mutate them.
+func (v *validator) boundsFor(schema *Schema) *precomputedBounds {
+	if b, ok := v.numericBounds[schema]; ok {
+		return b
+	}
+
+	return computeBounds(schema)
+}
+
+// patternFor returns the compiled form of schema.Pattern, preferring the
+// Compile-time cache and compiling on the fly for a schema absent from it
+// (a remote or JSON-pointer fallback schema reached only at validation time).
+// The compile error, when present, is reported by the caller exactly as a fresh
+// [compileRegexp] call would, preserving the fail-closed behavior.
+func (v *validator) patternFor(schema *Schema) compiledPattern {
+	if cp, ok := v.patternCache[schema]; ok {
+		return cp
+	}
+
+	re, err := compileRegexp(schema.Pattern)
+
+	return compiledPattern{re: re, err: err}
+}
+
+// patternPropertyFor returns the compiled form of one patternProperties key on
+// schema, preferring the Compile-time cache and compiling on the fly for a
+// schema absent from it.
+func (v *validator) patternPropertyFor(schema *Schema, pattern string) compiledPattern {
+	if byPattern, ok := v.patternProps[schema]; ok {
+		if cp, ok := byPattern[pattern]; ok {
+			return cp
+		}
+	}
+
+	re, err := compileRegexp(pattern)
+
+	return compiledPattern{re: re, err: err}
+}
+
 // validateNumeric checks numeric keywords.
 func (v *validator) validateNumeric(schema *Schema, instance any, instancePath, schemaPath string) []*ValidationError {
 	if !v.vocabs.validation {
@@ -1962,6 +2149,8 @@ func (v *validator) validateNumeric(schema *Schema, instance any, instancePath, 
 
 	var errs []*ValidationError
 
+	bounds := v.boundsFor(schema)
+
 	if schema.MultipleOf != nil {
 		switch {
 		case *schema.MultipleOf <= 0:
@@ -1977,8 +2166,9 @@ func (v *validator) validateNumeric(schema *Schema, instance any, instancePath, 
 		default:
 			// A NaN/Inf divisor has no rational form (float64ToRat returns
 			// nil); the constraint cannot apply, so skip it rather than
-			// dividing by a nil *big.Rat.
-			divisor := float64ToRat(*schema.MultipleOf)
+			// dividing by a nil *big.Rat. Quo writes its own receiver, so the
+			// cached divisor stays an operand and is never mutated.
+			divisor := bounds.multipleOf
 			if divisor != nil {
 				quotient := new(big.Rat).Quo(val, divisor)
 				if !quotient.IsInt() {
@@ -1996,7 +2186,7 @@ func (v *validator) validateNumeric(schema *Schema, instance any, instancePath, 
 	// A nil bound denotes a NaN/Inf value with no rational form; such a bound
 	// cannot constrain a finite instance, so the comparison is skipped.
 	if schema.Minimum != nil {
-		bound := float64ToRat(*schema.Minimum)
+		bound := bounds.minimum
 		if bound != nil && val.Cmp(bound) < 0 {
 			errs = append(errs, &ValidationError{
 				InstancePath: instancePath,
@@ -2008,7 +2198,7 @@ func (v *validator) validateNumeric(schema *Schema, instance any, instancePath, 
 	}
 
 	if schema.Maximum != nil {
-		bound := float64ToRat(*schema.Maximum)
+		bound := bounds.maximum
 		if bound != nil && val.Cmp(bound) > 0 {
 			errs = append(errs, &ValidationError{
 				InstancePath: instancePath,
@@ -2020,7 +2210,7 @@ func (v *validator) validateNumeric(schema *Schema, instance any, instancePath, 
 	}
 
 	if schema.ExclusiveMinimum != nil {
-		bound := float64ToRat(*schema.ExclusiveMinimum)
+		bound := bounds.exclusiveMinimum
 		if bound != nil && val.Cmp(bound) <= 0 {
 			errs = append(errs, &ValidationError{
 				InstancePath: instancePath,
@@ -2032,7 +2222,7 @@ func (v *validator) validateNumeric(schema *Schema, instance any, instancePath, 
 	}
 
 	if schema.ExclusiveMaximum != nil {
-		bound := float64ToRat(*schema.ExclusiveMaximum)
+		bound := bounds.exclusiveMaximum
 		if bound != nil && val.Cmp(bound) >= 0 {
 			errs = append(errs, &ValidationError{
 				InstancePath: instancePath,
@@ -2078,28 +2268,32 @@ func (v *validator) validateNumericUnbounded(
 		})
 	}
 
+	bounds := v.boundsFor(schema)
+
 	// A nil bound denotes a NaN/Inf value with no rational form; such a bound
-	// cannot constrain a finite instance, so the comparison is skipped.
+	// cannot constrain a finite instance, so the comparison is skipped. The
+	// comparison reads the bound and never mutates it, so the cached rational
+	// stays shared.
 	if schema.Minimum != nil {
-		if b := float64ToRat(*schema.Minimum); b != nil && d.cmpRat(b) < 0 {
+		if b := bounds.minimum; b != nil && d.cmpRat(b) < 0 {
 			add("minimum", fmt.Sprintf("%s is less than %v", num, *schema.Minimum))
 		}
 	}
 
 	if schema.Maximum != nil {
-		if b := float64ToRat(*schema.Maximum); b != nil && d.cmpRat(b) > 0 {
+		if b := bounds.maximum; b != nil && d.cmpRat(b) > 0 {
 			add("maximum", fmt.Sprintf("%s is greater than %v", num, *schema.Maximum))
 		}
 	}
 
 	if schema.ExclusiveMinimum != nil {
-		if b := float64ToRat(*schema.ExclusiveMinimum); b != nil && d.cmpRat(b) < 0 {
+		if b := bounds.exclusiveMinimum; b != nil && d.cmpRat(b) < 0 {
 			add("exclusiveMinimum", fmt.Sprintf("%s is less than or equal to %v", num, *schema.ExclusiveMinimum))
 		}
 	}
 
 	if schema.ExclusiveMaximum != nil {
-		if b := float64ToRat(*schema.ExclusiveMaximum); b != nil && d.cmpRat(b) > 0 {
+		if b := bounds.exclusiveMaximum; b != nil && d.cmpRat(b) > 0 {
 			add("exclusiveMaximum", fmt.Sprintf("%s is greater than or equal to %v", num, *schema.ExclusiveMaximum))
 		}
 	}
@@ -2167,9 +2361,9 @@ func (v *validator) validateString(schema *Schema, instance any, instancePath, s
 		}
 
 		if schema.Pattern != "" {
-			re, err := compileRegexp(schema.Pattern)
+			cp := v.patternFor(schema)
 			switch {
-			case err != nil:
+			case cp.err != nil:
 				// A pattern Go's RE2 cannot compile (e.g. an ECMA-262
 				// backreference or lookaround) fails closed: the constraint
 				// cannot be evaluated, so no string is accepted under it rather
@@ -2181,7 +2375,7 @@ func (v *validator) validateString(schema *Schema, instance any, instancePath, s
 					Message:      fmt.Sprintf("pattern %q cannot be compiled", schema.Pattern),
 				})
 
-			case !re.MatchString(str):
+			case !cp.re.MatchString(str):
 				errs = append(errs, &ValidationError{
 					InstancePath: instancePath,
 					SchemaPath:   schemaPath + "/pattern",
@@ -2560,8 +2754,8 @@ func (v *validator) validateObject(
 
 		// PatternProperties.
 		for pattern, patternSchema := range schema.PatternProperties {
-			re, err := compileRegexp(pattern)
-			if err != nil {
+			cp := v.patternPropertyFor(schema, pattern)
+			if cp.err != nil {
 				// A pattern Go's RE2 cannot compile fails closed: the keyword
 				// cannot decide which properties it governs, so the object is
 				// rejected rather than silently dropping the subschema.
@@ -2576,7 +2770,7 @@ func (v *validator) validateObject(
 			}
 
 			for propName, val := range obj {
-				if !re.MatchString(propName) {
+				if !cp.re.MatchString(propName) {
 					continue
 				}
 
