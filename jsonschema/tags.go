@@ -462,7 +462,11 @@ func parseTypedScalar(value string, t reflect.Type) (any, error) {
 		}
 
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		n, err := strconv.ParseInt(value, 10, 64)
+		// Parse at the field kind's bit size so a value the field cannot hold (for
+		// example const=200 on an int8) overflows here. Strconv reports overflow as
+		// strconv.ErrRange, which surfaces from Generate as a tag value error rather
+		// than producing a schema that accepts an out-of-range constant.
+		n, err := strconv.ParseInt(value, 10, intBitSize(t.Kind()))
 		if err != nil {
 			return nil, fmt.Errorf("invalid integer %q: %w", value, err)
 		}
@@ -473,7 +477,9 @@ func parseTypedScalar(value string, t reflect.Type) (any, error) {
 		return int(n), nil
 
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-		n, err := strconv.ParseUint(value, 10, 64)
+		// Parse at the field kind's bit size so a value the field cannot hold (for
+		// example enum=300 on a uint8) overflows here rather than being accepted.
+		n, err := strconv.ParseUint(value, 10, uintBitSize(t.Kind()))
 		if err != nil {
 			return nil, fmt.Errorf("invalid unsigned integer %q: %w", value, err)
 		}
@@ -482,7 +488,15 @@ func parseTypedScalar(value string, t reflect.Type) (any, error) {
 		return n, nil
 
 	case reflect.Float32, reflect.Float64:
-		n, err := strconv.ParseFloat(value, 64)
+		// A float32 field cannot hold a value outside its range, so parse at 32 bits
+		// to reject the overflow; widen to float64 only for storage so the stored
+		// value keeps the float64 type the rest of the pipeline expects.
+		bitSize := 64
+		if t.Kind() == reflect.Float32 {
+			bitSize = 32
+		}
+
+		n, err := strconv.ParseFloat(value, bitSize)
 		if err != nil {
 			return nil, fmt.Errorf("invalid number %q: %w", value, err)
 		}
@@ -494,5 +508,42 @@ func parseTypedScalar(value string, t reflect.Type) (any, error) {
 		// for primitive kinds. Anything else (struct, slice, map, interface) is
 		// an error rather than being silently coerced to a string.
 		return nil, fmt.Errorf("cannot assign scalar value %q to type %s", value, t.Kind())
+	}
+}
+
+// intBitSize returns the bit size to parse a signed-integer tag value at, so an
+// out-of-range constant overflows during parsing. Plain int is platform-
+// dependent ([strconv.IntSize]); the sized kinds map to their fixed widths.
+func intBitSize(k reflect.Kind) int {
+	switch k {
+	case reflect.Int8:
+		return 8
+	case reflect.Int16:
+		return 16
+	case reflect.Int32:
+		return 32
+	case reflect.Int64:
+		return 64
+	default: // reflect.Int
+		return strconv.IntSize
+	}
+}
+
+// uintBitSize returns the bit size to parse an unsigned-integer tag value at, so
+// an out-of-range constant overflows during parsing. Plain uint and uintptr are
+// platform-dependent ([strconv.IntSize]); the sized kinds map to their fixed
+// widths.
+func uintBitSize(k reflect.Kind) int {
+	switch k {
+	case reflect.Uint8:
+		return 8
+	case reflect.Uint16:
+		return 16
+	case reflect.Uint32:
+		return 32
+	case reflect.Uint64:
+		return 64
+	default: // reflect.Uint, reflect.Uintptr
+		return strconv.IntSize
 	}
 }

@@ -115,6 +115,144 @@ func TestIntegerConstAtTypeBoundary(t *testing.T) {
 	assert.NoError(t, v.ValidateJSON([]byte(`{"n":18446744073709551615}`)))
 }
 
+// TestTagScalarOutOfRange covers const, enum, and default tag values that lie
+// outside the field's integer (or float32) range. Such a value is parsed at the
+// field kind's bit size so it overflows and surfaces as a generation error,
+// rather than producing a schema that accepts a value the Go type can never
+// hold. This matters because an explicit const/enum drops the type-derived
+// numeric bounds, so an unchecked out-of-range value would slip through.
+func TestTagScalarOutOfRange(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		generate func() (*jsonschema.Schema, error)
+	}{
+		"int8 const above max": {
+			generate: func() (*jsonschema.Schema, error) {
+				type doc struct {
+					V int8 `json:"v" jsonschema:"const=200"`
+				}
+
+				return jsonschema.GenerateFor[doc]()
+			},
+		},
+		"int8 const below min": {
+			generate: func() (*jsonschema.Schema, error) {
+				type doc struct {
+					V int8 `json:"v" jsonschema:"const=-200"`
+				}
+
+				return jsonschema.GenerateFor[doc]()
+			},
+		},
+		"uint8 enum above max": {
+			generate: func() (*jsonschema.Schema, error) {
+				type doc struct {
+					V uint8 `json:"v" jsonschema:"enum=100|300"`
+				}
+
+				return jsonschema.GenerateFor[doc]()
+			},
+		},
+		"uint8 negative": {
+			generate: func() (*jsonschema.Schema, error) {
+				type doc struct {
+					V uint8 `json:"v" jsonschema:"const=-1"`
+				}
+
+				return jsonschema.GenerateFor[doc]()
+			},
+		},
+		"int16 default above max": {
+			generate: func() (*jsonschema.Schema, error) {
+				type doc struct {
+					V int16 `json:"v" jsonschema:"default=40000"`
+				}
+
+				return jsonschema.GenerateFor[doc]()
+			},
+		},
+		"int32 const above max": {
+			generate: func() (*jsonschema.Schema, error) {
+				type doc struct {
+					V int32 `json:"v" jsonschema:"const=3000000000"`
+				}
+
+				return jsonschema.GenerateFor[doc]()
+			},
+		},
+		"uint16 const above max": {
+			generate: func() (*jsonschema.Schema, error) {
+				type doc struct {
+					V uint16 `json:"v" jsonschema:"const=70000"`
+				}
+
+				return jsonschema.GenerateFor[doc]()
+			},
+		},
+		"float32 const overflow": {
+			generate: func() (*jsonschema.Schema, error) {
+				type doc struct {
+					V float32 `json:"v" jsonschema:"const=1e40"`
+				}
+
+				return jsonschema.GenerateFor[doc]()
+			},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := tc.generate()
+			require.Error(t, err,
+				"out-of-range tag scalar should be rejected at generation")
+		})
+	}
+}
+
+// TestTagScalarInRange confirms that in-range const/enum/default values still
+// parse after the bit-size range check, including a value at the sized type's
+// own boundary (where the type-derived bounds are dropped).
+func TestTagScalarInRange(t *testing.T) {
+	t.Parallel()
+
+	type doc struct {
+		A int8    `json:"a" jsonschema:"const=127"`
+		B uint8   `json:"b" jsonschema:"enum=0|255"`
+		C int16   `json:"c" jsonschema:"default=100"`
+		D float32 `json:"d" jsonschema:"const=1.5"`
+	}
+
+	s, err := jsonschema.GenerateFor[doc]()
+	require.NoError(t, err)
+
+	got, err := json.Marshal(s)
+	require.NoError(t, err)
+
+	// The const/enum drop the type-derived numeric bounds, leaving just the
+	// pinned value(s); the at-boundary const (int8=127, uint8=255) survives.
+	assert.JSONEq(t, `{
+		"$schema":"https://json-schema.org/draft/2020-12/schema",
+		"type":"object",
+		"properties":{
+			"a":{"type":"integer","const":127},
+			"b":{"type":"integer","enum":[0,255]},
+			"c":{"type":"integer","minimum":-32768,"maximum":32767,"default":100},
+			"d":{"type":"number","const":1.5}
+		},
+		"required":["a","b","c","d"],
+		"additionalProperties":false
+	}`, string(got))
+
+	v, err := jsonschema.Compile(s)
+	require.NoError(t, err)
+	assert.NoError(t, v.ValidateJSON([]byte(`{"a":127,"b":255,"c":5,"d":1.5}`)))
+	assert.Error(t, v.ValidateJSON([]byte(`{"a":126,"b":255,"c":5,"d":1.5}`)),
+		"const pins the value, so a different in-range integer is rejected")
+}
+
 // TestJSONStringTagScalarsParseAsStrings covers const, enum, and default tags on
 // json:",string" fields. The override coerces the field schema to type string,
 // and encoding/json also serializes the value as a quoted string, so the tag's

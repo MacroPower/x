@@ -786,6 +786,11 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 		// embedded struct. Such fields are omitted by encoding/json when the
 		// embedded pointer is nil, so they are not required.
 		optional bool
+		// Tagged is true when the field's JSON name comes from an explicit json
+		// tag name rather than the Go field name. Encoding/json's tie-break for
+		// fields colliding on a JSON name at the same depth keeps the field only
+		// if exactly one of them is tagged; this records the input to that rule.
+		tagged bool
 	}
 
 	// Collect all visible fields grouped by JSON name.
@@ -839,7 +844,10 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 						order = append(order, info.jsonName)
 					}
 
-					byName[info.jsonName] = append(byName[info.jsonName], fieldLevel{f, depth, optional})
+					byName[info.jsonName] = append(
+						byName[info.jsonName],
+						fieldLevel{field: f, depth: depth, optional: optional, tagged: true},
+					)
 
 					continue
 				}
@@ -851,7 +859,7 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 					if g.needsAllOfComposition(ft) {
 						name := "__allof__" + ft.Name() + fmt.Sprintf("__%d", len(order))
 						order = append(order, name)
-						byName[name] = []fieldLevel{{f, depth, optional}}
+						byName[name] = []fieldLevel{{field: f, depth: depth, optional: optional}}
 					}
 
 					continue
@@ -863,7 +871,7 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 						// Compose via allOf — treat as a single entry.
 						name := "__allof__" + ft.Name() + fmt.Sprintf("__%d", len(order))
 						order = append(order, name)
-						byName[name] = []fieldLevel{{f, depth, optional}}
+						byName[name] = []fieldLevel{{field: f, depth: depth, optional: optional}}
 
 						continue
 					}
@@ -893,7 +901,7 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 					order = append(order, jsonName)
 				}
 
-				byName[jsonName] = append(byName[jsonName], fieldLevel{f, depth, optional})
+				byName[jsonName] = append(byName[jsonName], fieldLevel{field: f, depth: depth, optional: optional})
 
 				continue
 			}
@@ -910,7 +918,10 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 				order = append(order, info.jsonName)
 			}
 
-			byName[info.jsonName] = append(byName[info.jsonName], fieldLevel{f, depth, optional})
+			byName[info.jsonName] = append(
+				byName[info.jsonName],
+				fieldLevel{field: f, depth: depth, optional: optional, tagged: info.taggedName},
+			)
 		}
 	}
 
@@ -940,9 +951,23 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 			}
 		}
 
-		// Ambiguous: multiple fields at the same depth → silently drop.
+		// Multiple fields collide on this JSON name at the shallowest depth.
+		// Encoding/json breaks the tie by explicit tag: if exactly one of them
+		// has an explicit json tag name, that field wins; if none or more than
+		// one is tagged, they are all dropped as ambiguous.
 		if len(atMin) > 1 {
-			continue
+			var tagged []fieldLevel
+			for _, c := range atMin {
+				if c.tagged {
+					tagged = append(tagged, c)
+				}
+			}
+
+			if len(tagged) != 1 {
+				continue
+			}
+
+			atMin = tagged
 		}
 
 		f := atMin[0].field
@@ -1483,6 +1508,10 @@ type jsonTagInfo struct {
 	omitempty  bool
 	omitzero   bool
 	jsonString bool
+	// TaggedName is true when jsonName comes from an explicit json tag name
+	// rather than the Go field name. Encoding/json's same-depth collision
+	// tie-break keeps a field only when exactly one colliding field is tagged.
+	taggedName bool
 }
 
 // parseJSONTag parses the json struct tag.
@@ -1513,6 +1542,11 @@ func parseJSONTag(f reflect.StructField) jsonTagInfo {
 		return jsonTagInfo{} // excluded
 	}
 
+	// A non-empty name segment is an explicit json tag name; an options-only tag
+	// (json:",omitempty") leaves the name empty and falls back to the field name,
+	// which is not "tagged" for the same-depth collision tie-break.
+	taggedName := name != ""
+
 	if name == "" {
 		// Use field name.
 		name = f.Name
@@ -1526,7 +1560,7 @@ func parseJSONTag(f reflect.StructField) jsonTagInfo {
 		}
 	}
 
-	info := jsonTagInfo{jsonName: name}
+	info := jsonTagInfo{jsonName: name, taggedName: taggedName}
 	if found {
 		for s := range strings.SplitSeq(rest, ",") {
 			switch s {

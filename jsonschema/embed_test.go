@@ -160,6 +160,85 @@ func TestGenerateFor_FieldAmbiguity(t *testing.T) {
 	assert.Contains(t, s.Properties, "y")
 }
 
+// Same-depth collision tie-break: one embed contributes the JSON name via an
+// explicit json tag, the other via the bare Go field name.
+type taggedShared struct {
+	V string `json:"Shared"`
+}
+
+type untaggedShared struct {
+	Shared string
+}
+
+type tieBreakParent struct {
+	taggedShared   //nolint:unused // Exercised via reflection.
+	untaggedShared //nolint:unused // Exercised via reflection.
+}
+
+// Same-depth collision where both contributors carry an explicit json tag → no
+// single winner, so encoding/json drops the field. The duplicate tag is reached
+// through one extra embed level on each side, which keeps the collision at the
+// same promotion depth while staying out of go vet's single-struct structtag
+// check (it would otherwise flag the deliberately duplicated json tag).
+type taggedDupA struct {
+	V string `json:"Dup"`
+}
+
+type taggedDupB struct {
+	W string `json:"Dup"`
+}
+
+type taggedDupMidA struct {
+	taggedDupA //nolint:unused // Exercised via reflection.
+}
+
+type taggedDupMidB struct {
+	taggedDupB //nolint:unused // Exercised via reflection.
+}
+
+type bothTaggedParent struct {
+	taggedDupMidA //nolint:unused // Exercised via reflection.
+	taggedDupMidB //nolint:unused // Exercised via reflection.
+}
+
+func TestGenerateFor_SameDepthTagTieBreak(t *testing.T) {
+	t.Parallel()
+
+	// Encoding/json's rule for fields colliding on a JSON name at the same
+	// shallowest depth: if exactly one has an explicit json tag name, it wins;
+	// if none or two-plus are tagged, the field is dropped. The generated schema
+	// must match whatever encoding/json actually emits, asserted here directly.
+
+	// Exactly one tagged → the tagged field wins and appears as a property.
+	mixed, err := json.Marshal(tieBreakParent{
+		taggedShared:   taggedShared{V: "from-tag"},
+		untaggedShared: untaggedShared{Shared: "from-field"},
+	})
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"Shared":"from-tag"}`, string(mixed),
+		"encoding/json keeps the explicitly tagged field on a same-depth collision")
+
+	s, err := jsonschema.GenerateFor[tieBreakParent]()
+	require.NoError(t, err)
+	assert.Contains(t, s.Properties, "Shared",
+		"schema must include the property encoding/json marshals")
+	assert.Equal(t, "string", s.Properties["Shared"].Type)
+
+	// Both tagged → no single winner, so the field is dropped.
+	both, err := json.Marshal(bothTaggedParent{
+		taggedDupMidA: taggedDupMidA{taggedDupA{V: "a"}},
+		taggedDupMidB: taggedDupMidB{taggedDupB{W: "b"}},
+	})
+	require.NoError(t, err)
+	assert.JSONEq(t, `{}`, string(both),
+		"encoding/json drops the field when two same-depth fields are tagged")
+
+	bs, err := jsonschema.GenerateFor[bothTaggedParent]()
+	require.NoError(t, err)
+	assert.NotContains(t, bs.Properties, "Dup",
+		"schema must drop the property encoding/json omits")
+}
+
 // Embedded non-struct type.
 type MyString string
 
