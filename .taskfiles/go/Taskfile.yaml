@@ -6,30 +6,41 @@ shopt: [globstar]
 vars:
   GOTESTSUM_VERSION: v1.12.1
   DEADCODE_VERSION: v0.32.0
+  # In workspace mode `go list -m -f '{{.Dir}}'` prints exactly the module
+  # directories named in go.work, so golangci-lint can run once per module.
+  # The Go template braces are escaped so Task forwards them to `go` verbatim.
+  GO_MODULE_DIRS:
+    sh: go list -m -f '{{`{{.Dir}}`}}'
 
 tasks:
   format:
     desc: Formats Go code
     sources:
       - "**/*.go"
-      - exclude: "{dist,.devbox,.worktrees}/**"
-      - go.mod
-      - go.sum
+      - exclude: "{dist,.devbox,.worktrees,toolchains}/**"
+      - "**/go.mod"
+      - "**/go.sum"
+      - go.work
       - .golangci.yaml
     cmds:
-      - golangci-lint run --fix
+      # golangci-lint does not span a go.work workspace; its gci formatter
+      # reads go.mod from the working directory, so run it in each module.
+      - for: { var: GO_MODULE_DIRS, split: "\n" }
+        cmd: cd '{{.ITEM}}' && golangci-lint run --fix
 
   code-lint:
     internal: true
     desc: Lints Go code
     sources:
       - "**/*.go"
-      - exclude: "{dist,.devbox,.worktrees}/**"
-      - go.mod
-      - go.sum
+      - exclude: "{dist,.devbox,.worktrees,toolchains}/**"
+      - "**/go.mod"
+      - "**/go.sum"
+      - go.work
       - .golangci.yaml
     cmds:
-      - golangci-lint run
+      - for: { var: GO_MODULE_DIRS, split: "\n" }
+        cmd: cd '{{.ITEM}}' && golangci-lint run
 
   goreleaser-lint:
     internal: true
@@ -50,11 +61,13 @@ tasks:
       Runs Go tests
 
       Args:
-        PKG: Go package to test (default: ./...)
+        PKG: Go package to test (default: go.jacobcolvin.com/x/...)
         FLAGS: Additional flags to pass to `go test` (default: "")
         PKG_FLAGS: Additional flags to pass to test packages (default: "")
     vars:
-      PKG: '{{.PKG | default "./..."}}'
+      # The workspace root is not itself a module, so `./...` matches nothing
+      # there; the module path pattern spans every go.work module instead.
+      PKG: '{{.PKG | default "go.jacobcolvin.com/x/..."}}'
       FLAGS: '{{.FLAGS | default ""}}'
       PKG_FLAGS: '{{.PKG_FLAGS | default ""}}'
     cmds:
@@ -65,16 +78,17 @@ tasks:
     deps: [tools:gotestsum]
     sources:
       - "**/*.go"
-      - exclude: "{dist,.devbox,.worktrees}/**"
-      - go.mod
-      - go.sum
+      - exclude: "{dist,.devbox,.worktrees,toolchains}/**"
+      - "**/go.mod"
+      - "**/go.sum"
+      - go.work
     generates:
       - .test/cover.out
       - .test/junit.xml
     cmds:
       - cmd: mkdir -p .test/
         silent: true
-      - gotestsum --junitfile=.test/junit.xml --format=pkgname -- -race -vet=all -coverprofile=.test/cover.out ./...
+      - gotestsum --junitfile=.test/junit.xml --format=pkgname -- -race -vet=all -coverprofile=.test/cover.out go.jacobcolvin.com/x/...
 
   bench:
     desc: Runs Go benchmarks
@@ -83,13 +97,13 @@ tasks:
       Runs Go benchmarks
 
       Args:
-        PKG: Go package to test (default: ./...)
+        PKG: Go package to test (default: go.jacobcolvin.com/x/...)
         FLAGS: Additional flags to pass to `go test` (default: "")
 
       Examples:
-        task go:bench PKG=./pkg/helm FLAGS="-cpuprofile profile.out -run=^\$"
+        task go:bench PKG=./magicschema/helm FLAGS="-cpuprofile profile.out -run=^\$"
     vars:
-      PKG: '{{.PKG | default "./..."}}'
+      PKG: '{{.PKG | default "go.jacobcolvin.com/x/..."}}'
       FLAGS: '{{.FLAGS | default ""}}'
     cmds:
       - go test -bench=. -benchmem {{.FLAGS}} {{.PKG}}
@@ -101,10 +115,10 @@ tasks:
       Prints Go documentation for all packages.
 
       Args:
-        PKG: Go package(s) to document (default: ./...)
+        PKG: Go package(s) to document (default: go.jacobcolvin.com/x/...)
         FLAGS: Additional flags to pass to `go doc` (default: "")
     vars:
-      PKG: '{{.PKG | default "./..."}}'
+      PKG: '{{.PKG | default "go.jacobcolvin.com/x/..."}}'
       FLAGS: '{{.FLAGS | default ""}}'
       PACKAGES:
         sh: go list {{.PKG}} | grep -v -E '/(examples|cmd)(/|$)'
@@ -115,7 +129,7 @@ tasks:
   gen:
     desc: Generates Go code
     cmds:
-      - go generate ./...
+      - go generate go.jacobcolvin.com/x/...
 
   build:
     desc: Builds Go binaries
@@ -123,9 +137,10 @@ tasks:
       FLAGS: '{{.FLAGS | default "--skip=docker,homebrew,nix,sign"}}'
     sources:
       - "**/*.go"
-      - exclude: "{dist,.devbox,.worktrees}/**"
-      - go.mod
-      - go.sum
+      - exclude: "{dist,.devbox,.worktrees,toolchains}/**"
+      - "**/go.mod"
+      - "**/go.sum"
+      - go.work
       - .goreleaser*
     cmds:
       - goreleaser release --snapshot --clean {{ .FLAGS }}
@@ -143,14 +158,14 @@ tasks:
       Finds dead code in Go.
 
       Args:
-        PKG: Go package(s) to evaluate (default: ./...)
+        PKG: Go package(s) to evaluate (default: go.jacobcolvin.com/x/...)
         FLAGS: Additional flags to pass to `deadcode` (default: "")
 
       Examples:
         task go:deadcode FLAGS="-test -generated"
     deps: [tools:deadcode]
     vars:
-      PKG: '{{.PKG | default "./..."}}'
+      PKG: '{{.PKG | default "go.jacobcolvin.com/x/..."}}'
       FLAGS: '{{.FLAGS | default ""}}'
     cmds:
       - deadcode {{.FLAGS}} {{.PKG}}

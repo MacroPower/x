@@ -29,7 +29,7 @@ jobs:
         run: go install gotest.tools/gotestsum@latest
 
       - name: Run Go test
-        run: gotestsum --junitfile=junit.xml --format=pkgname -- -race -vet=all -coverprofile=coverage.txt ./...
+        run: gotestsum --junitfile=junit.xml --format=pkgname -- -race -vet=all -coverprofile=coverage.txt go.jacobcolvin.com/x/...
 
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v5
@@ -43,8 +43,22 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
 
   lint:
-    name: lint
+    name: lint (${{ matrix.module }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # golangci-lint does not span a go.work workspace; its gci formatter
+        # reads go.mod from the working directory, so lint each module on its
+        # own. Config discovery walks up to the root .golangci.yaml.
+        # Keep this list in sync with the use block in go.work.
+        module:
+          - ansivideo
+          - log
+          - magicschema
+          - profile
+          - stringtest
+          - version
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -60,3 +74,4 @@ jobs:
         uses: golangci/golangci-lint-action@v9
         with:
           version: v2.7
+          working-directory: ${{ matrix.module }}

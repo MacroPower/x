@@ -9,10 +9,10 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/x/magicschema"
 	"go.jacobcolvin.com/x/magicschema/helm/norwoodj"
-	"go.jacobcolvin.com/x/stringtest"
 )
 
 var update = flag.Bool("update", false, "update golden files")
