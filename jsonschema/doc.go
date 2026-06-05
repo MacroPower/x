@@ -79,13 +79,15 @@
 //     additionalProperties: false by default.
 //
 // Well-known types have built-in overrides: [time.Time] maps to
-// {"type": "string", "format": "date-time"}, [net/url.URL] to
-// {"type": "string", "format": "uri"}, [encoding/json.RawMessage] to {},
-// [encoding/json.Number] to {"type": "number"}, and [math/big.Int],
-// [math/big.Rat], [math/big.Float] to {"type": "string"} with a numeric pattern
-// constraint. Built-in overrides are matched by exact [reflect.Type], so named
-// types wrapping a built-in-overridden type (e.g., type MyTime [time.Time]) do
-// not receive the override and fall through to subsequent resolution steps.
+// {"type": "string", "format": "date-time"}, [encoding/json.RawMessage] to {},
+// [encoding/json.Number] to {"type": "number"}, [math/big.Int] to
+// {"type": "integer"} (its MarshalJSON emits a bare number), and
+// [math/big.Rat], [math/big.Float] to {"type": "string"} with a numeric
+// pattern constraint. Built-in overrides are matched by exact [reflect.Type],
+// so named types wrapping a built-in-overridden type (e.g., type MyTime
+// [time.Time]) do not receive the override and fall through to subsequent
+// resolution steps. [net/url.URL] has no override: it implements no marshaler
+// interface, so it reflects as the struct object encoding/json actually emits.
 //
 // Types implementing [encoding.TextMarshaler] map to {"type": "string"},
 // checked before struct reflection.
@@ -104,16 +106,23 @@
 //  1. [WithTypeSchema] override (highest priority).
 //  2. [JSONSchemaProvider] interface.
 //  3. Built-in overrides ([]byte, [time.Time], [encoding/json.Number], etc.).
-//  4. [encoding.TextMarshaler] interface.
-//  5. Kind-based reflection.
+//  4. Marshaler methods promoted from an embedded field: a promoted
+//     [encoding/json.Marshaler] makes the schema unrestricted ({}), and a
+//     promoted [encoding.TextMarshaler] makes it {"type": "string"}.
+//  5. [encoding.TextMarshaler] interface (direct implementation).
+//  6. Kind-based reflection.
 //
-// [encoding/json.Marshaler] is not in this chain. Types implementing only
-// [encoding/json.Marshaler] (not [encoding.TextMarshaler]) are handled by
-// kind-based reflection, since MarshalJSON can return any JSON type — the
-// output type is unknowable via reflection. Specific well-known
-// [encoding/json.Marshaler] types are handled via built-in overrides. Other
-// [encoding/json.Marshaler] types should use [WithTypeSchema] or implement
-// [JSONSchemaProvider].
+// A direct [encoding/json.Marshaler] implementation is not in this chain.
+// Types directly implementing only [encoding/json.Marshaler] (not
+// [encoding.TextMarshaler]) are handled by kind-based reflection, since
+// MarshalJSON can return any JSON type — the output type is unknowable via
+// reflection. Specific well-known [encoding/json.Marshaler] types are handled
+// via built-in overrides. Other [encoding/json.Marshaler] types should use
+// [WithTypeSchema] or implement [JSONSchemaProvider]. A marshaler promoted
+// from an embedded field is different (step 4): encoding/json resolves
+// marshalers through the method set, so the promoted method serializes the
+// whole outer struct and reflecting its fields would describe a shape that
+// never appears in the output.
 //
 // # Customization Interfaces
 //
@@ -167,15 +176,20 @@
 //
 // Embedded structs without a json tag have their fields promoted into the
 // parent schema. Embedded pointer-to-struct (no json tag) is treated
-// identically — fields are promoted. Embedded types intercepted by earlier
-// priority chain steps ([WithTypeSchema], [JSONSchemaProvider], built-in
-// overrides, or [encoding.TextMarshaler]) are composed via allOf rather than
-// having their fields promoted. A [WithTypeSchema] or [JSONSchemaProvider]
-// schema used for such an embedded type must leave the object open (no
-// additionalProperties: false): allOf evaluates each branch against the whole
-// object, so a closed branch rejects the parent's sibling properties and the
-// generated schema then rejects the struct's own marshaled JSON. Embedded
-// structs with an explicit json name
+// identically, except the promoted fields are not required: a nil embed omits
+// them from the output. A struct whose method set includes a MarshalJSON or
+// MarshalText promoted from an embedded field is not reflected field by field
+// at all — the promoted marshaler serializes the whole outer value (see the
+// resolution priority above). Embedded types intercepted by earlier priority
+// chain steps ([WithTypeSchema] or [JSONSchemaProvider]) are composed via
+// allOf rather than having their fields promoted; an embed reached through a
+// pointer composes as anyOf[schema, {}] instead, since a nil pointer
+// contributes nothing to the marshaled object. A [WithTypeSchema] or
+// [JSONSchemaProvider] schema used for such an embedded type must leave the
+// object open (no additionalProperties: false): allOf evaluates each branch
+// against the whole object, so a closed branch rejects the parent's sibling
+// properties and the generated schema then rejects the struct's own marshaled
+// JSON. Embedded structs with an explicit json name
 // (e.g. json:"base") are treated as regular named fields, not promoted; an
 // options-only tag with no name (e.g. json:",omitempty") promotes the fields,
 // matching encoding/json.

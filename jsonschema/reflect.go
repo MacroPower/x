@@ -7,7 +7,6 @@ import (
 	"maps"
 	"math"
 	"math/big"
-	"net/url"
 	"reflect"
 	"runtime"
 	"slices"
@@ -22,7 +21,6 @@ var (
 	typeJSONMarshaler  = reflect.TypeFor[json.Marshaler]()
 	typeJSONRawMessage = reflect.TypeFor[json.RawMessage]()
 	typeTime           = reflect.TypeFor[time.Time]()
-	typeURL            = reflect.TypeFor[url.URL]()
 	typeJSONNumber     = reflect.TypeFor[json.Number]()
 	typeBigInt         = reflect.TypeFor[big.Int]()
 	typeBigRat         = reflect.TypeFor[big.Rat]()
@@ -200,17 +198,33 @@ func (g *generator) schemaForType(t reflect.Type, nullable bool) (*Schema, error
 		return g.handleBuiltinType(t, s, nullable)
 	}
 
-	// 4. TextMarshaler (direct implementation only, not promoted from an
-	// embedded field — promoted TextMarshaler is composed via allOf during
-	// struct field collection, matching the JSONSchemaProvider pattern). A direct
-	// TextMarshaler serializes as a string and shares the built-in path's
-	// type-level post-processing (comments, extender, $defs extraction).
+	// 4. Marshaler methods promoted from an embedded field. A struct whose
+	// method set includes a promoted MarshalJSON or MarshalText is serialized
+	// by that method — encoding/json resolves marshalers through the method
+	// set, so the embedded type's marshaler takes over the whole struct and
+	// reflecting its fields would describe a shape that never appears.
+	// A promoted json.Marshaler can emit any JSON value, so the schema is
+	// unrestricted; a promoted TextMarshaler always emits a string. A type
+	// that directly implements json.Marshaler is deliberately NOT handled
+	// here: per the documented resolution priority it falls through to
+	// kind-based reflection, and WithTypeSchema or JSONSchemaProvider is the
+	// escape hatch for its real shape.
+	if isPromotedJSONMarshaler(t) {
+		return g.handleBuiltinType(t, &Schema{}, nullable)
+	}
+	if isPromotedTextMarshaler(t) && !implementsJSONMarshaler(t) {
+		return g.handleBuiltinType(t, &Schema{Type: "string"}, nullable)
+	}
+
+	// 5. TextMarshaler (direct implementation). A direct TextMarshaler
+	// serializes as a string and shares the built-in path's type-level
+	// post-processing (comments, extender, $defs extraction).
 	if isDirectTextMarshaler(t) {
 		s := &Schema{Type: "string"}
 		return g.handleBuiltinType(t, s, nullable)
 	}
 
-	// 5. Cycle detection for named container types. A named type that contains
+	// 6. Cycle detection for named container types. A named type that contains
 	// itself (type T []T, type M map[string]M, type A [N]A) recurses without
 	// bound through schemaForKind. Tracking the type on the visiting stack lets a
 	// re-entry emit a $ref to its $defs entry, breaking the cycle exactly as
@@ -225,7 +239,7 @@ func (g *generator) schemaForType(t reflect.Type, nullable bool) (*Schema, error
 		g.visiting[t] = true
 	}
 
-	// 6. Kind-based reflection.
+	// 7. Kind-based reflection.
 	s, err := g.schemaForKind(t, nullable)
 	if guarded {
 		delete(g.visiting, t)
@@ -413,14 +427,15 @@ func (g *generator) builtinOverride(t reflect.Type) (*Schema, bool) {
 		return &Schema{Types: []string{typeNameNull, typeNameString}, ContentEncoding: "base64"}, true
 	case typeTime:
 		return &Schema{Type: "string", Format: "date-time"}, true
-	case typeURL:
-		return &Schema{Type: "string", Format: "uri"}, true
 	case typeJSONRawMessage:
 		return &Schema{}, true
 	case typeJSONNumber:
 		return &Schema{Type: "number"}, true
 	case typeBigInt:
-		return &Schema{Type: "string", Pattern: `^-?[0-9]+$`}, true
+		// Big.Int.MarshalJSON emits a bare JSON number (arbitrary precision),
+		// not a string, so the schema is an unbounded integer. (big.Rat and
+		// big.Float marshal via MarshalText and so are strings below.)
+		return &Schema{Type: "integer"}, true
 	case typeBigRat:
 		return &Schema{Type: "string", Pattern: `^-?[0-9]+(/[0-9]+)?$`}, true
 	case typeBigFloat:
@@ -772,10 +787,23 @@ type structFieldInfo struct {
 	omitzero        bool
 	jsonString      bool
 	composeViaAllOf bool
+	// Optional is true for an allOf-composed embed reached through a
+	// pointer-typed embedded field (directly or via an enclosing pointer
+	// embed). Encoding/json omits the embed's entire contribution when the
+	// pointer is nil, so the composed schema must not be unconditionally
+	// required. Regular fields fold this into omitempty instead.
+	optional bool
 }
 
 // collectStructFields mimics encoding/json's field collection logic,
 // handling promotion, shadowing, and ambiguity.
+//
+// The walk is breadth-first level by level, matching encoding/json's
+// typeFields: all fields at depth d are recorded before any embed at depth
+// d+1 is descended into, and a struct type is processed only once, at its
+// shallowest occurrence. A depth-first walk would mark a deep occurrence of
+// a type as visited and then skip a shallower embed of the same type,
+// silently dropping fields that encoding/json promotes.
 //
 //nolint:nestif // Mirrors encoding/json's field collection logic which is inherently nested.
 func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
@@ -798,134 +826,168 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 
 	var order []string
 
-	// Track every struct type descended into during this walk. A struct that
-	// embeds itself (type T struct{ *T; X int }) is a valid Go type that
-	// encoding/json marshals by tracking visited types in typeFields; without the
-	// same guard, collect would recurse without bound. Each struct type is
-	// descended into at most once across the walk, matching encoding/json: a
-	// second embed of the same type adds no new promoted fields.
-	visited := map[reflect.Type]bool{t: true}
+	// Record adds a sighting of a JSON name. The dup flag marks fields of a
+	// struct type embedded more than once at the same depth: the sighting is
+	// recorded twice so the same-depth ambiguity resolution below drops the
+	// name, matching encoding/json's annihilation of fields from repeated
+	// embeds.
+	record := func(name string, fl fieldLevel, dup bool) {
+		if _, seen := byName[name]; !seen {
+			order = append(order, name)
+		}
 
-	var collect func(t reflect.Type, depth int, index []int, optional bool)
-
-	collect = func(t reflect.Type, depth int, index []int, optional bool) {
-		for i := range t.NumField() {
-			f := t.Field(i)
-			fieldIndex := append(slices.Clone(index), i)
-			f.Index = fieldIndex
-
-			if f.Anonymous {
-				// Embedded field.
-				ft := f.Type
-				embeddedViaPointer := ft.Kind() == reflect.Pointer
-				if embeddedViaPointer {
-					ft = ft.Elem()
-				}
-
-				// Skip unexported embedded non-struct types, matching
-				// encoding/json behavior. Unexported embedded structs
-				// still have their exported fields promoted.
-				if !f.IsExported() && ft.Kind() != reflect.Struct {
-					continue
-				}
-
-				tagVal, hasTag := f.Tag.Lookup("json")
-				explicitName, _, _ := strings.Cut(tagVal, ",")
-				if hasTag && explicitName != "" {
-					// Embedded struct with an explicit json name → treated as a
-					// regular named field; encoding/json does not promote it. An
-					// options-only tag (json:",omitempty") has no name and falls
-					// through to promotion below, matching encoding/json.
-					info := parseJSONTag(f)
-					if info.jsonName == "" {
-						continue // json:"-"
-					}
-					if _, seen := byName[info.jsonName]; !seen {
-						order = append(order, info.jsonName)
-					}
-
-					byName[info.jsonName] = append(
-						byName[info.jsonName],
-						fieldLevel{field: f, depth: depth, optional: optional, tagged: true},
-					)
-
-					continue
-				}
-
-				if ft.Kind() == reflect.Interface {
-					// Embedded interface types: if they implement
-					// JSONSchemaProvider, compose via allOf. Otherwise,
-					// skip — an unrestricted schema adds no useful info.
-					if g.needsAllOfComposition(ft) {
-						name := "__allof__" + ft.Name() + fmt.Sprintf("__%d", len(order))
-						order = append(order, name)
-						byName[name] = []fieldLevel{{field: f, depth: depth, optional: optional}}
-					}
-
-					continue
-				}
-
-				if ft.Kind() == reflect.Struct {
-					// Check if this embedded struct needs to be composed via allOf.
-					if g.needsAllOfComposition(ft) {
-						// Compose via allOf — treat as a single entry.
-						name := "__allof__" + ft.Name() + fmt.Sprintf("__%d", len(order))
-						order = append(order, name)
-						byName[name] = []fieldLevel{{field: f, depth: depth, optional: optional}}
-
-						continue
-					}
-					// Promote fields, unless this struct type has already been
-					// descended into during this walk: a self-embedding (or mutually
-					// embedding) type would otherwise recurse forever, and a repeat
-					// embed promotes no new fields anyway.
-					if visited[ft] {
-						continue
-					}
-
-					visited[ft] = true
-
-					// Fields reached through a pointer embed are optional because a
-					// nil embed omits them entirely.
-					collect(ft, depth+1, fieldIndex, optional || embeddedViaPointer)
-
-					continue
-				}
-
-				// Embedded non-struct type: treated as regular field with type name as key.
-				jsonName := ft.Name()
-				if jsonName == "" {
-					continue
-				}
-				if _, seen := byName[jsonName]; !seen {
-					order = append(order, jsonName)
-				}
-
-				byName[jsonName] = append(byName[jsonName], fieldLevel{field: f, depth: depth, optional: optional})
-
-				continue
-			}
-
-			if !f.IsExported() {
-				continue
-			}
-
-			info := parseJSONTag(f)
-			if info.jsonName == "" {
-				continue // json:"-"
-			}
-			if _, seen := byName[info.jsonName]; !seen {
-				order = append(order, info.jsonName)
-			}
-
-			byName[info.jsonName] = append(
-				byName[info.jsonName],
-				fieldLevel{field: f, depth: depth, optional: optional, tagged: info.taggedName},
-			)
+		byName[name] = append(byName[name], fl)
+		if dup {
+			byName[name] = append(byName[name], fl)
 		}
 	}
 
-	collect(t, 0, nil, false)
+	// EmbedEntry is a struct type queued for processing at the next depth.
+	type embedEntry struct {
+		typ      reflect.Type
+		index    []int
+		optional bool
+	}
+
+	// Visited tracks every struct type processed during the walk. A type is
+	// processed only at its shallowest level: a deeper re-occurrence (including
+	// a self-embedding type T struct{ *T; X int }) is skipped, because its
+	// fields are shadowed by the shallower ones, matching encoding/json.
+	visited := map[reflect.Type]bool{}
+
+	next := []embedEntry{{typ: t}}
+
+	var count, nextCount map[reflect.Type]int
+
+	for depth := 0; len(next) > 0; depth++ {
+		current := next
+		next = nil
+		count, nextCount = nextCount, map[reflect.Type]int{}
+
+		for _, e := range current {
+			if visited[e.typ] {
+				continue
+			}
+
+			visited[e.typ] = true
+
+			// A type embedded more than once at this depth contributes every
+			// field twice so the resolution drops them all as ambiguous.
+			dup := count[e.typ] > 1
+
+			for i := range e.typ.NumField() {
+				f := e.typ.Field(i)
+				fieldIndex := append(slices.Clone(e.index), i)
+				f.Index = fieldIndex
+
+				if f.Anonymous {
+					// Embedded field.
+					ft := f.Type
+					embeddedViaPointer := ft.Kind() == reflect.Pointer
+					if embeddedViaPointer {
+						ft = ft.Elem()
+					}
+
+					// Skip unexported embedded non-struct types, matching
+					// encoding/json behavior. Unexported embedded structs
+					// still have their exported fields promoted.
+					if !f.IsExported() && ft.Kind() != reflect.Struct {
+						continue
+					}
+
+					tagVal, hasTag := f.Tag.Lookup("json")
+					explicitName, _, _ := strings.Cut(tagVal, ",")
+					if hasTag && explicitName != "" {
+						// Embedded struct with an explicit json name → treated as a
+						// regular named field; encoding/json does not promote it. An
+						// options-only tag (json:",omitempty") has no name and falls
+						// through to promotion below, matching encoding/json.
+						info := parseJSONTag(f)
+						if info.jsonName == "" {
+							continue // json:"-"
+						}
+
+						record(
+							info.jsonName,
+							fieldLevel{field: f, depth: depth, optional: e.optional, tagged: true},
+							dup,
+						)
+
+						continue
+					}
+
+					if ft.Kind() == reflect.Interface {
+						// Embedded interface types: if they implement
+						// JSONSchemaProvider, compose via allOf. Otherwise,
+						// skip — an unrestricted schema adds no useful info.
+						if g.needsAllOfComposition(ft) {
+							name := "__allof__" + ft.Name() + fmt.Sprintf("__%d", len(order))
+							record(name, fieldLevel{field: f, depth: depth, optional: e.optional}, false)
+						}
+
+						continue
+					}
+
+					if ft.Kind() == reflect.Struct {
+						// Check if this embedded struct needs to be composed via allOf.
+						if g.needsAllOfComposition(ft) {
+							// Compose via allOf — treat as a single entry. A pointer
+							// embed makes the composition optional: a nil pointer
+							// contributes nothing to the marshaled object.
+							name := "__allof__" + ft.Name() + fmt.Sprintf("__%d", len(order))
+							record(
+								name,
+								fieldLevel{field: f, depth: depth, optional: e.optional || embeddedViaPointer},
+								false,
+							)
+
+							continue
+						}
+
+						// Queue for the next depth. A type queued more than once at
+						// the same depth is processed once but counted, so its fields
+						// annihilate as ambiguous, matching encoding/json.
+						nextCount[ft]++
+						if nextCount[ft] == 1 {
+							// Fields reached through a pointer embed are optional
+							// because a nil embed omits them entirely.
+							next = append(
+								next,
+								embedEntry{typ: ft, index: fieldIndex, optional: e.optional || embeddedViaPointer},
+							)
+						}
+
+						continue
+					}
+
+					// Embedded non-struct type: treated as regular field with type name as key.
+					jsonName := ft.Name()
+					if jsonName == "" {
+						continue
+					}
+
+					record(jsonName, fieldLevel{field: f, depth: depth, optional: e.optional}, dup)
+
+					continue
+				}
+
+				if !f.IsExported() {
+					continue
+				}
+
+				info := parseJSONTag(f)
+				if info.jsonName == "" {
+					continue // json:"-"
+				}
+
+				record(
+					info.jsonName,
+					fieldLevel{field: f, depth: depth, optional: e.optional, tagged: info.taggedName},
+					dup,
+				)
+			}
+		}
+	}
 
 	// Resolve shadowing and ambiguity.
 	var result []structFieldInfo
@@ -977,6 +1039,7 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 			result = append(result, structFieldInfo{
 				field:           f,
 				composeViaAllOf: true,
+				optional:        atMin[0].optional,
 			})
 
 			continue
@@ -996,6 +1059,14 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 		}
 		result = append(result, sfi)
 	}
+
+	// The breadth-first walk sights names level by level, so `order` lists all
+	// depth-0 names before any promoted ones. Sorting the winners by their
+	// index path restores source declaration order — a promoted field sorts at
+	// its embed's position — matching encoding/json's byIndex ordering.
+	slices.SortStableFunc(result, func(a, b structFieldInfo) int {
+		return slices.Compare(a.field.Index, b.field.Index)
+	})
 
 	return result
 }
@@ -1200,6 +1271,16 @@ func hasRefSiblings(s *Schema) bool {
 }
 
 // processAllOfField handles embedded structs that need allOf composition.
+//
+// An embed reached through a pointer (fi.optional) contributes nothing to the
+// marshaled object when the pointer is nil, so its schema cannot be an
+// unconditional allOf branch — that would require the embed's properties in
+// every instance and reject the nil-embed serialization. The branch is
+// wrapped as anyOf[embedded, {}] instead: a non-nil embed matches the schema
+// (and its annotations still flow to unevaluatedProperties), while a nil
+// embed satisfies the empty alternative. The empty branch also admits a
+// partial embed serialization under Draft-07 (which lacks unevaluated
+// semantics); accepting those is the price of not rejecting valid documents.
 func (g *generator) processAllOfField(fi structFieldInfo, parent *Schema) error {
 	ft := fi.field.Type
 	if ft.Kind() == reflect.Pointer {
@@ -1211,13 +1292,18 @@ func (g *generator) processAllOfField(fi structFieldInfo, parent *Schema) error 
 		return err
 	}
 
+	branch := embeddedSchema
 	if embeddedSchema.Ref != "" {
 		ref := &Schema{Ref: embeddedSchema.Ref}
 		g.refRecords = append(g.refRecords, refRecord{schema: ref, target: ft})
-		parent.AllOf = append(parent.AllOf, ref)
-	} else {
-		parent.AllOf = append(parent.AllOf, embeddedSchema)
+		branch = ref
 	}
+
+	if fi.optional {
+		branch = &Schema{AnyOf: []*Schema{branch, {}}}
+	}
+
+	parent.AllOf = append(parent.AllOf, branch)
 
 	return nil
 }
@@ -1367,11 +1453,47 @@ func isStringableType(t reflect.Type) bool {
 // isDirectTextMarshaler reports whether a type directly implements
 // [encoding.TextMarshaler] (not via a promoted embedded field method).
 func isDirectTextMarshaler(t reflect.Type) bool {
-	if !t.Implements(typeTextMarshaler) && !reflect.PointerTo(t).Implements(typeTextMarshaler) {
+	if !implementsTextMarshaler(t) {
 		return false
 	}
 
 	return hasDirectMethod(t, "MarshalText")
+}
+
+// implementsJSONMarshaler reports whether the type or its pointer type
+// implements [encoding/json.Marshaler], directly or via promotion.
+func implementsJSONMarshaler(t reflect.Type) bool {
+	return t.Implements(typeJSONMarshaler) || reflect.PointerTo(t).Implements(typeJSONMarshaler)
+}
+
+// implementsTextMarshaler reports whether the type or its pointer type
+// implements [encoding.TextMarshaler], directly or via promotion.
+func implementsTextMarshaler(t reflect.Type) bool {
+	return t.Implements(typeTextMarshaler) || reflect.PointerTo(t).Implements(typeTextMarshaler)
+}
+
+// isPromotedJSONMarshaler reports whether a type's method set includes
+// MarshalJSON solely via promotion from an embedded field. Encoding/json
+// resolves marshalers through the method set, so a promoted MarshalJSON
+// serializes the whole outer value. Non-struct types cannot have promoted
+// methods, so this is always false for them.
+func isPromotedJSONMarshaler(t reflect.Type) bool {
+	if !implementsJSONMarshaler(t) {
+		return false
+	}
+
+	return !hasDirectMethod(t, "MarshalJSON")
+}
+
+// isPromotedTextMarshaler reports whether a type's method set includes
+// MarshalText solely via promotion from an embedded field. See
+// [isPromotedJSONMarshaler].
+func isPromotedTextMarshaler(t reflect.Type) bool {
+	if !implementsTextMarshaler(t) {
+		return false
+	}
+
+	return !hasDirectMethod(t, "MarshalText")
 }
 
 // implementsProvider checks if a type (or pointer to type) implements

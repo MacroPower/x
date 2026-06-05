@@ -359,7 +359,8 @@ func TestGenerateFor_EmbeddedInterfaceWithProvider(t *testing.T) {
 	assert.Contains(t, s.Properties, "extra")
 }
 
-// Embedded struct implementing TextMarshaler → allOf composition.
+// Embedded struct implementing TextMarshaler → the promoted MarshalText
+// serializes the whole outer struct as a string.
 type TextMarshalerEmbed struct {
 	Field1 string
 }
@@ -377,10 +378,11 @@ func TestGenerateFor_EmbeddedTextMarshalerStruct(t *testing.T) {
 	s, err := jsonschema.GenerateFor[HasTextMarshalerEmbed]()
 	require.NoError(t, err)
 
-	// TextMarshalerEmbed implements TextMarshaler, so it should be
-	// composed via allOf rather than having its fields promoted.
-	assert.NotNil(t, s.AllOf, "schema: %s", marshalSchema(t, s))
-	assert.Contains(t, s.Properties, "field2")
+	// HasTextMarshalerEmbed's method set includes the promoted MarshalText,
+	// so encoding/json serializes the whole struct as a string; reflecting
+	// its fields would describe a shape that never appears.
+	assert.Equal(t, "string", s.Type, "schema: %s", marshalSchema(t, s))
+	assert.Empty(t, s.Properties)
 }
 
 func TestGenerateFor_EmbeddedTextMarshalerStruct_Draft2020(t *testing.T) {
@@ -394,20 +396,10 @@ func TestGenerateFor_EmbeddedTextMarshalerStruct_Draft2020(t *testing.T) {
 	got, err := json.Marshal(s)
 	require.NoError(t, err)
 
-	// In Draft 2020-12, allOf composition uses unevaluatedProperties: false.
-	// TextMarshalerEmbed is a named struct type, so it's extracted to $defs.
+	// The promoted MarshalText drives serialization: the value is a string.
 	assert.JSONEq(t, `{
 		"$schema":"https://json-schema.org/draft/2020-12/schema",
-		"type":"object",
-		"allOf":[{"$ref":"#/$defs/TextMarshalerEmbed"}],
-		"properties":{
-			"field2":{"type":"string"}
-		},
-		"required":["field2"],
-		"unevaluatedProperties":false,
-		"$defs":{
-			"TextMarshalerEmbed":{"type":"string"}
-		}
+		"type":"string"
 	}`, string(got))
 }
 
@@ -422,19 +414,10 @@ func TestGenerateFor_EmbeddedTextMarshalerStruct_Draft7(t *testing.T) {
 	got, err := json.Marshal(s)
 	require.NoError(t, err)
 
-	// In Draft-07, additionalProperties: false is omitted when allOf is in use.
-	// TextMarshalerEmbed is a named struct type, so it's extracted to definitions.
+	// The promoted MarshalText drives serialization: the value is a string.
 	assert.JSONEq(t, `{
 		"$schema":"http://json-schema.org/draft-07/schema#",
-		"type":"object",
-		"allOf":[{"$ref":"#/definitions/TextMarshalerEmbed"}],
-		"properties":{
-			"field2":{"type":"string"}
-		},
-		"required":["field2"],
-		"definitions":{
-			"TextMarshalerEmbed":{"type":"string"}
-		}
+		"type":"string"
 	}`, string(got))
 }
 
@@ -552,7 +535,7 @@ func TestGenerateFor_EmbeddedStructWithTypeSchemaOverride(t *testing.T) {
 func TestGenerateFor_AllOfWithAdditionalPropertiesTrue(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[HasTextMarshalerEmbed](
+	s, err := jsonschema.GenerateFor[HasProviderEmbed](
 		jsonschema.WithAdditionalProperties(true),
 	)
 	require.NoError(t, err)
@@ -562,22 +545,28 @@ func TestGenerateFor_AllOfWithAdditionalPropertiesTrue(t *testing.T) {
 
 	// With WithAdditionalProperties(true), both additionalProperties
 	// and unevaluatedProperties should be omitted.
-	// TextMarshalerEmbed is a named struct type, so it's extracted to $defs.
+	// ProviderEmbed is a named struct type, so it's extracted to $defs.
 	assert.JSONEq(t, `{
 		"$schema":"https://json-schema.org/draft/2020-12/schema",
 		"type":"object",
-		"allOf":[{"$ref":"#/$defs/TextMarshalerEmbed"}],
+		"allOf":[{"$ref":"#/$defs/ProviderEmbed"}],
 		"properties":{
 			"field2":{"type":"string"}
 		},
 		"required":["field2"],
 		"$defs":{
-			"TextMarshalerEmbed":{"type":"string"}
+			"ProviderEmbed":{
+				"type":"object",
+				"properties":{
+					"field1":{"type":"string"}
+				}
+			}
 		}
 	}`, string(got))
 }
 
-// Embedded built-in override type (time.Time) → allOf composition.
+// Embedded time.Time → the promoted MarshalJSON serializes the whole outer
+// struct, so its JSON shape is opaque to reflection.
 type HasEmbeddedTime struct {
 	time.Time
 	Extra string `json:"extra"`
@@ -586,9 +575,12 @@ type HasEmbeddedTime struct {
 func TestGenerateFor_EmbeddedBuiltinOverrideType(t *testing.T) {
 	t.Parallel()
 
-	// Time.Time has a built-in override (format: date-time). When embedded
-	// without a json tag, it should be composed via allOf, not have its
-	// fields promoted. As a named struct type, it is extracted to $defs.
+	// HasEmbeddedTime's method set includes time.Time's promoted MarshalJSON,
+	// so encoding/json serializes the whole struct via that method (a bare
+	// date-time string here — but a promoted MarshalJSON can emit any JSON
+	// value in general), and the schema is unrestricted. Reflecting an object
+	// with an "extra" property composed with the date-time string via allOf
+	// would be unsatisfiable and reject every actual serialization.
 	s, err := jsonschema.GenerateFor[HasEmbeddedTime]()
 	require.NoError(t, err)
 
@@ -596,17 +588,7 @@ func TestGenerateFor_EmbeddedBuiltinOverrideType(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.JSONEq(t, `{
-		"$schema":"https://json-schema.org/draft/2020-12/schema",
-		"type":"object",
-		"allOf":[{"$ref":"#/$defs/Time"}],
-		"properties":{
-			"extra":{"type":"string"}
-		},
-		"required":["extra"],
-		"unevaluatedProperties":false,
-		"$defs":{
-			"Time":{"type":"string","format":"date-time"}
-		}
+		"$schema":"https://json-schema.org/draft/2020-12/schema"
 	}`, string(got))
 }
 
@@ -725,4 +707,126 @@ func TestGenerateFor_EmbeddedOptionsOnlyTagPromotesFields(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Shadowing across embed levels: SharedEmbed appears at depth 1 (direct) and
+// depth 2 (via LevelOne), and OtherEmbed collides on the same JSON name at
+// depth 2. Encoding/json keeps the shallowest occurrence, so the direct
+// SharedEmbed.X wins. The colliding fields are deliberately untagged (the Go
+// field name is the JSON name) so go vet's structtag check, which only
+// inspects tags, stays quiet about the intentional collision.
+type SharedEmbed struct {
+	X int
+}
+
+type OtherEmbed struct {
+	X string
+}
+
+type LevelOne struct {
+	SharedEmbed
+}
+
+type LevelOneOther struct {
+	OtherEmbed
+}
+
+type ShallowWins struct {
+	LevelOne
+	LevelOneOther
+	SharedEmbed
+}
+
+func TestGenerateFor_EmbeddedShallowestTypeWins(t *testing.T) {
+	t.Parallel()
+
+	// Encoding/json ground truth: the direct (depth-1) SharedEmbed.X shadows
+	// both depth-2 candidates, so the document carries an integer X.
+	v := ShallowWins{SharedEmbed: SharedEmbed{X: 99}}
+	doc, err := json.Marshal(v) //nolint:musttag // Untagged on purpose; see type comment.
+	require.NoError(t, err)
+	require.JSONEq(t, `{"X":99}`, string(doc))
+
+	s, err := jsonschema.GenerateFor[ShallowWins]()
+	require.NoError(t, err)
+
+	require.Contains(t, s.Properties, "X")
+	assert.Equal(t, "integer", s.Properties["X"].Type, "schema: %s", marshalSchema(t, s))
+	require.NoError(t, jsonschema.ValidateJSON(s, doc))
+}
+
+// The same type embedded twice at the same depth via distinct paths: its
+// fields are ambiguous and encoding/json drops them from the output entirely.
+type AnnihilateA struct {
+	SharedEmbed
+}
+
+type AnnihilateB struct {
+	SharedEmbed
+}
+
+type HasAnnihilatedEmbeds struct {
+	AnnihilateA
+	AnnihilateB
+	Name string `json:"name"`
+}
+
+func TestGenerateFor_EmbeddedRepeatedTypeAnnihilates(t *testing.T) {
+	t.Parallel()
+
+	// Encoding/json ground truth: X is ambiguous (SharedEmbed twice at depth 2)
+	// and omitted from the output.
+	v := HasAnnihilatedEmbeds{Name: "n"}
+	doc, err := json.Marshal(v) //nolint:musttag // Untagged on purpose; see SharedEmbed comment.
+	require.NoError(t, err)
+	require.JSONEq(t, `{"name":"n"}`, string(doc))
+
+	s, err := jsonschema.GenerateFor[HasAnnihilatedEmbeds]()
+	require.NoError(t, err)
+
+	assert.NotContains(t, s.Properties, "X", "schema: %s", marshalSchema(t, s))
+	require.NoError(t, jsonschema.ValidateJSON(s, doc))
+}
+
+// Pointer-embedded provider: a nil embed contributes nothing to the marshaled
+// object, so the provider's schema must not be an unconditional allOf branch.
+type OptionalProviderEmbed struct {
+	Req string `json:"req"`
+}
+
+func (OptionalProviderEmbed) JSONSchema() *jsonschema.Schema {
+	return &jsonschema.Schema{
+		Type:       "object",
+		Properties: map[string]*jsonschema.Schema{"req": {Type: "string"}},
+		Required:   []string{"req"},
+	}
+}
+
+type HasOptionalProviderEmbed struct {
+	*OptionalProviderEmbed
+	Name string `json:"name"`
+}
+
+func TestGenerateFor_EmbeddedPointerProviderOptional(t *testing.T) {
+	t.Parallel()
+
+	s, err := jsonschema.GenerateFor[HasOptionalProviderEmbed]()
+	require.NoError(t, err)
+
+	// Nil embed: encoding/json omits the provider's properties entirely, and
+	// the anyOf[$ref, {}] composition accepts the document.
+	nilDoc, err := json.Marshal(HasOptionalProviderEmbed{Name: "x"})
+	require.NoError(t, err)
+	require.JSONEq(t, `{"name":"x"}`, string(nilDoc))
+	require.NoError(t, jsonschema.ValidateJSON(s, nilDoc), "schema: %s", marshalSchema(t, s))
+
+	// Non-nil embed: the provider's branch matches and its annotations keep
+	// the embedded properties evaluated.
+	fullDoc, err := json.Marshal(HasOptionalProviderEmbed{
+		OptionalProviderEmbed: &OptionalProviderEmbed{Req: "r"},
+		Name:                  "x",
+	})
+	require.NoError(t, err)
+	require.JSONEq(t, `{"req":"r","name":"x"}`, string(fullDoc))
+	require.NoError(t, jsonschema.ValidateJSON(s, fullDoc), "schema: %s", marshalSchema(t, s))
 }

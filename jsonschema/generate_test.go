@@ -188,10 +188,6 @@ func TestGenerateFor_BuiltinOverrides(t *testing.T) {
 			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[time.Time]() },
 			want:     `{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"string","format":"date-time"}`,
 		},
-		"url.URL": {
-			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[url.URL]() },
-			want:     `{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"string","format":"uri"}`,
-		},
 		"json.RawMessage": {
 			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[json.RawMessage]() },
 			want:     `{"$schema":"https://json-schema.org/draft/2020-12/schema"}`,
@@ -205,8 +201,10 @@ func TestGenerateFor_BuiltinOverrides(t *testing.T) {
 			want:     `{"$schema":"https://json-schema.org/draft/2020-12/schema","type":["null","string"],"contentEncoding":"base64"}`,
 		},
 		"big.Int": {
+			// Big.Int.MarshalJSON emits a bare JSON number, so the schema is an
+			// unbounded integer rather than a string.
 			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[big.Int]() },
-			want:     `{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"string","pattern":"^-?[0-9]+$"}`,
+			want:     `{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"integer"}`,
 		},
 	}
 
@@ -2180,7 +2178,7 @@ func TestGenerateFor_TextMarshalerNamedStructExtractedToDefs(t *testing.T) {
 func TestGenerateFor_BuiltinOverrideExtractedToDefs(t *testing.T) {
 	t.Parallel()
 
-	// Named struct types with built-in overrides (time.Time, url.URL, etc.)
+	// Named struct types with built-in overrides (time.Time, big.Int, etc.)
 	// should be extracted to $defs when used as struct fields, consistent
 	// with how all named struct types are handled.
 	type Event struct {
@@ -2387,12 +2385,12 @@ func TestProviderSchemaIsolatedWithComments(t *testing.T) {
 func TestBigNumericSchemaHasFormatOrPattern(t *testing.T) {
 	t.Parallel()
 
+	// Big.Int marshals as a bare JSON number (covered by the built-in override
+	// test); big.Rat and big.Float marshal via MarshalText as strings, which
+	// need a pattern hint to distinguish them from arbitrary strings.
 	tests := map[string]struct {
 		generate func() (*jsonschema.Schema, error)
 	}{
-		"big.Int": {
-			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[big.Int]() },
-		},
 		"big.Rat": {
 			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[big.Rat]() },
 		},
@@ -2929,4 +2927,43 @@ func TestGenerateFor_NamedByteSlice(t *testing.T) {
 			"a json.Marshaler element must not trigger the base64 byte-slice path")
 		assert.Contains(t, string(got), `"array"`)
 	})
+}
+
+func TestGenerateFor_URLReflectsAsObject(t *testing.T) {
+	t.Parallel()
+
+	// Url.URL implements neither json.Marshaler nor encoding.TextMarshaler, so
+	// encoding/json serializes it as a plain struct object; a string/uri schema
+	// would reject every actual serialization.
+	u, err := url.Parse("https://example.com/path")
+	require.NoError(t, err)
+
+	doc, err := json.Marshal(*u)
+	require.NoError(t, err)
+
+	s, err := jsonschema.GenerateFor[url.URL]()
+	require.NoError(t, err)
+
+	assert.Equal(t, "object", s.Type)
+	assert.Contains(t, s.Properties, "Scheme")
+	assert.NoError(t, jsonschema.ValidateJSON(s, doc),
+		"generated schema rejected url.URL's actual serialization: %s", doc)
+}
+
+func TestGenerateFor_BigIntMatchesMarshalOutput(t *testing.T) {
+	t.Parallel()
+
+	type bigIntDoc struct {
+		I *big.Int `json:"i"`
+	}
+
+	// Big.Int.MarshalJSON emits a bare JSON number.
+	data, err := json.Marshal(bigIntDoc{I: big.NewInt(123)})
+	require.NoError(t, err)
+	require.JSONEq(t, `{"i":123}`, string(data))
+
+	s, err := jsonschema.GenerateFor[bigIntDoc]()
+	require.NoError(t, err)
+	assert.NoError(t, jsonschema.ValidateJSON(s, data),
+		"generated schema rejected big.Int's actual serialization: %s", data)
 }

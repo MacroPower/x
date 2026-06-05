@@ -138,12 +138,15 @@ entries never do.
 | `struct`                             | `object` with `properties`, `required`, and `additionalProperties: false`              |
 
 Well-known types have built-in overrides matched by exact `reflect.Type`:
-`time.Time` -> `{"type":"string","format":"date-time"}`, `net/url.URL` ->
-`format: uri`, `encoding/json.RawMessage` -> `{}`, `encoding/json.Number` ->
-`{"type":"number"}`, and `math/big` `Int`/`Rat`/`Float` -> `{"type":"string"}`
-with a numeric pattern. Types implementing `encoding.TextMarshaler` map to
-`{"type":"string"}`. Unsupported types (`func`, `chan`, `complex`,
-`unsafe.Pointer`) return `ErrUnsupportedType`.
+`time.Time` -> `{"type":"string","format":"date-time"}`,
+`encoding/json.RawMessage` -> `{}`, `encoding/json.Number` ->
+`{"type":"number"}`, `math/big.Int` -> `{"type":"integer"}` (its MarshalJSON
+emits a bare number), and `math/big` `Rat`/`Float` -> `{"type":"string"}` with
+a numeric pattern. `net/url.URL` has no override: it implements no marshaler
+interface, so it reflects as the struct object `encoding/json` actually emits.
+Types implementing `encoding.TextMarshaler` map to `{"type":"string"}`.
+Unsupported types (`func`, `chan`, `complex`, `unsafe.Pointer`) return
+`ErrUnsupportedType`.
 
 ### Configuration options
 
@@ -192,8 +195,17 @@ For each type, the schema is determined by the first matching step:
 1. `WithTypeSchema` override (highest priority).
 2. `JSONSchemaProvider`.
 3. Built-in overrides (`[]byte`, `time.Time`, `encoding/json.Number`, ...).
-4. `encoding.TextMarshaler`.
-5. Kind-based reflection.
+4. Marshaler methods promoted from an embedded field: a promoted
+   `encoding/json.Marshaler` makes the schema unrestricted (`{}`), and a
+   promoted `encoding.TextMarshaler` makes it `{"type":"string"}` — the
+   promoted method serializes the whole outer struct, so reflecting its fields
+   would describe a shape that never appears.
+5. `encoding.TextMarshaler` (direct implementation).
+6. Kind-based reflection.
+
+A direct `encoding/json.Marshaler` implementation is not consulted: it falls
+through to kind-based reflection, since MarshalJSON can return any JSON type.
+Use `WithTypeSchema` or `JSONSchemaProvider` to describe its real shape.
 
 If a type implements both customization interfaces, only `JSONSchemaProvider` is
 used. When `WithTypeSchema` or `JSONSchemaProvider` supplies the schema,
@@ -245,7 +257,9 @@ name, `json:"-"` excludes a field (`json:"-,"` uses the literal name `"-"`),
 `omitempty` and `omitzero` drop the field from `required`, and `json:",string"`
 forces a `{"type":"string"}` schema for applicable types. Embedded structs
 without a `json` tag have their fields promoted; embedded types intercepted by
-an earlier resolution step are composed via `allOf`. A provider or
+an earlier resolution step are composed via `allOf` (wrapped as
+`anyOf[schema, {}]` for a pointer embed, since a nil pointer contributes
+nothing to the marshaled object). A provider or
 `WithTypeSchema` override used for such an embedded type must leave the object
 open (no `additionalProperties: false`), since `allOf` evaluates each branch
 against the whole object: a closed branch rejects the parent's sibling
@@ -383,7 +397,9 @@ digits or decimal exponent magnitude), the `multipleOf` check is skipped, while
 exactly. Schema-side numeric keyword values are limited to `float64` precision:
 integers beyond 2^53 in keywords like `const`, `minimum`, or `multipleOf` round
 when the schema is decoded, even though the instance value they are compared
-against is exact.
+against is exact. A schema-side `float64` is interpreted at its shortest
+decimal value across all numeric keywords, so `const: 0.1` matches the
+instance `0.1` exactly, consistent with how `minimum: 0.1` bounds it.
 
 ### Structured errors
 
