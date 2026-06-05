@@ -3,7 +3,7 @@ module go.jacobcolvin.com/jsonschema
 go 1.25.5
 
 require (
-	github.com/google/jsonschema-go v0.4.2
+	github.com/google/jsonschema-go v0.4.3
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/net v0.50.0
 	golang.org/x/tools v0.42.0
