@@ -159,13 +159,13 @@ func validateLeapSecond(s string) error {
 type offsetKind int
 
 const (
-	// offsetNone marks a "Z"/"z" zone or an absent designator: no numeric
+	// OffsetNone marks a "Z"/"z" zone or an absent designator: no numeric
 	// offset to decompose, and a zero contribution when converting to UTC.
 	offsetNone offsetKind = iota
-	// offsetMalformed marks a "+"/"-" designator that is not the required
+	// OffsetMalformed marks a "+"/"-" designator that is not the required
 	// "+hh:mm"/"-hh:mm" shape (six bytes with ':' at index 3).
 	offsetMalformed
-	// offsetNumeric marks a well-formed "+hh:mm"/"-hh:mm" designator whose
+	// OffsetNumeric marks a well-formed "+hh:mm"/"-hh:mm" designator whose
 	// sign, hour, and minute fields are populated.
 	offsetNumeric
 )
@@ -233,10 +233,10 @@ func validateTimeOffset(s string) error {
 		return nil
 	case offsetMalformed:
 		return errors.New("invalid time offset")
-	}
-
-	if off.hour > 23 || off.minute > 59 {
-		return errors.New("invalid time offset")
+	case offsetNumeric:
+		if off.hour > 23 || off.minute > 59 {
+			return errors.New("invalid time offset")
+		}
 	}
 
 	return nil
@@ -400,10 +400,23 @@ func validateEmailDomain(d string) error {
 		return validateIPv4(lit)
 	}
 
-	return validateHostname(d)
+	// Email domains follow the RFC 5321 sub-domain grammar
+	// (sub-domain = Let-dig [Ldh-str]), which permits an all-numeric top-level
+	// label, so the numeric-TLD ban from the hostname format must not apply.
+	return validateHostnameLabels(d, false)
 }
 
 func validateHostname(s string) error {
+	// The hostname format is RFC 1123-based; the top-level label must not be
+	// all-numeric, to disambiguate from an IPv4 address (RFC 1123 §2.1).
+	return validateHostnameLabels(s, true)
+}
+
+// validateHostnameLabels validates the shared RFC 1123 label structure used by
+// both the hostname format and email domain validation. The banNumericTLD flag
+// rejects an all-numeric top-level label, which the hostname format requires
+// (RFC 1123 §2.1) but the RFC 5321 email domain grammar permits.
+func validateHostnameLabels(s string, banNumericTLD bool) error {
 	if s == "" || len(s) > 253 {
 		return errors.New("invalid hostname")
 	}
@@ -453,9 +466,7 @@ func validateHostname(s string) error {
 		}
 	}
 
-	// The top-level label must not be all-numeric, to disambiguate from an
-	// IPv4 address (RFC 1123 §2.1).
-	if isAllDigits(labels[len(labels)-1]) {
+	if banNumericTLD && isAllDigits(labels[len(labels)-1]) {
 		return errors.New("invalid hostname: numeric top-level label")
 	}
 
@@ -505,13 +516,6 @@ func validateURI(s string) error {
 	// mirroring validateIRI so "uri" and "iri" agree on this case.
 	if strings.Count(u.Host, ":") > 1 && !strings.HasPrefix(u.Host, "[") {
 		return errors.New("invalid URI: bare IPv6 address")
-	}
-	// Three or more consecutive slashes after the authority indicate a
-	// malformed authority/path boundary (e.g. "http://host///path"). A single
-	// extra slash ("http://host//path") is a valid empty path segment and is
-	// allowed.
-	if strings.HasPrefix(u.Path, "///") {
-		return errors.New("invalid URI: malformed path")
 	}
 
 	return nil
@@ -645,7 +649,7 @@ func validateRegex(s string) error {
 
 			r, size := utf8.DecodeRuneInString(s[i+1:])
 
-			err := validateRegexEscape(r)
+			err := validateRegexEscape(r, size)
 			if err != nil {
 				return err
 			}
@@ -688,8 +692,14 @@ func validateRegex(s string) error {
 // 262 does not define (e.g. "\a"), which RE2 would otherwise accept. Any
 // non-ASCII rune is a valid identity escape: ECMA 262 Annex B (non-unicode
 // mode) permits an identity escape of any source character that is not part of
-// another escape, so an escaped multi-byte code point is accepted.
-func validateRegexEscape(c rune) error {
+// another escape, so an escaped multi-byte code point is accepted. The size is
+// the byte length the rune decoded from: a lone invalid UTF-8 byte decodes to
+// (utf8.RuneError, 1) and is rejected, while a genuine U+FFFD decodes from three
+// bytes and is accepted as an identity escape.
+func validateRegexEscape(c rune, size int) error {
+	if c == utf8.RuneError && size == 1 {
+		return errors.New("invalid regex: invalid escape sequence")
+	}
 	if c >= utf8.RuneSelf {
 		return nil
 	}
@@ -940,38 +950,148 @@ func validateURITemplate(s string) error {
 	return nil
 }
 
-// validateURITemplateExpr validates the contents of a single {expression}.
+// validateURITemplateExpr validates the contents of a single {expression}
+// against the RFC 6570 grammar (the text between the braces, with the braces
+// already stripped):
+//
+//	expression    = [ operator ] variable-list
+//	operator      = op-level2 / op-level3 / op-reserve
+//	variable-list = varspec *( "," varspec )
+//	varspec       = varname [ modifier-level4 ]
+//	varname       = varchar *( ["."] varchar )
+//	varchar       = ALPHA / DIGIT / "_" / pct-encoded
+//
+// The op-reserve operators ("=", ",", "!", "@", "|") are reserved by RFC 6570
+// for future extensions; they are accepted as grammatically valid here.
 func validateURITemplateExpr(e string) error {
 	if e == "" {
 		return errors.New("invalid URI template: empty expression")
 	}
 
-	for i := range len(e) {
-		if !isURITemplateExprChar(e[i]) {
-			return errors.New("invalid URI template: invalid character in expression")
+	// Strip a leading operator. Op-level2/op-level3 are "+#./;?&" and op-reserve
+	// is "=,!@|"; both are a single character introducing the variable list.
+	switch e[0] {
+	case '+', '#', '.', '/', ';', '?', '&', // op-level2 / op-level3
+		'=', ',', '!', '@', '|': // op-reserve (reserved, accepted)
+		e = e[1:]
+	}
+	if e == "" {
+		return errors.New("invalid URI template: operator without variable list")
+	}
+
+	// Variable-list = varspec *( "," varspec ); each varspec must be non-empty.
+	for spec := range strings.SplitSeq(e, ",") {
+		err := validateURITemplateVarspec(spec)
+		if err != nil {
+			return err
 		}
 	}
 
 	return nil
 }
 
-// isURITemplateExprChar reports whether c may appear inside a URI Template
-// expression: variable characters, the level-2/3 operators, and modifiers.
-func isURITemplateExprChar(c byte) bool {
-	if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') {
-		return true
+// validateURITemplateVarspec validates a single RFC 6570 varspec:
+// varname [ ":" max-length / "*" ], where max-length is 1-4 digits with a
+// nonzero first digit.
+func validateURITemplateVarspec(spec string) error {
+	if spec == "" {
+		return errors.New("invalid URI template: empty varspec")
 	}
 
-	switch c {
-	case '_', '.', ',', '*', ':', '%', '+', '#', '/', ';', '?', '&', '=', '!', '@', '|':
-		return true
+	// Split off a level-4 modifier: explode ("*") or prefix (":max-length").
+	name := spec
+	if before, after, ok := strings.Cut(spec, ":"); ok {
+		name = before
+
+		err := validateURITemplateMaxLength(after)
+		if err != nil {
+			return err
+		}
+	} else if star := strings.IndexByte(spec, '*'); star >= 0 {
+		// The explode modifier must be the final character of the varspec.
+		if star != len(spec)-1 {
+			return errors.New("invalid URI template: characters after explode modifier")
+		}
+
+		name = spec[:star]
 	}
 
-	return false
+	return validateURITemplateVarname(name)
+}
+
+// validateURITemplateMaxLength validates an RFC 6570 prefix max-length:
+// 1-4 DIGITs whose first digit is nonzero.
+func validateURITemplateMaxLength(s string) error {
+	if s == "" {
+		return errors.New("invalid URI template: empty max-length")
+	}
+	if len(s) > 4 {
+		return errors.New("invalid URI template: max-length too long")
+	}
+	if s[0] == '0' {
+		return errors.New("invalid URI template: max-length leading zero")
+	}
+
+	for i := range len(s) {
+		if s[i] < '0' || s[i] > '9' {
+			return errors.New("invalid URI template: non-digit in max-length")
+		}
+	}
+
+	return nil
+}
+
+// validateURITemplateVarname validates an RFC 6570 varname:
+// varchar *( ["."] varchar ), where varchar = ALPHA / DIGIT / "_" /
+// pct-encoded. A dot may separate varchars but may not lead, trail, or repeat.
+func validateURITemplateVarname(name string) error {
+	if name == "" {
+		return errors.New("invalid URI template: empty varname")
+	}
+	if name[0] == '.' || name[len(name)-1] == '.' {
+		return errors.New("invalid URI template: misplaced dot in varname")
+	}
+	if strings.Contains(name, "..") {
+		return errors.New("invalid URI template: consecutive dots in varname")
+	}
+
+	for i := 0; i < len(name); {
+		c := name[i]
+		switch {
+		case c == '.':
+			i++
+		case c == '%':
+			// Pct-encoded = "%" HEXDIG HEXDIG.
+			if i+2 >= len(name) || !isHexDigit(name[i+1]) || !isHexDigit(name[i+2]) {
+				return errors.New("invalid URI template: malformed percent-encoding in varname")
+			}
+
+			i += 3
+
+		case (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+			(c >= '0' && c <= '9') || c == '_':
+			i++
+		default:
+			return errors.New("invalid URI template: invalid character in varname")
+		}
+	}
+
+	return nil
 }
 
 // validateIDNHostname validates an internationalized hostname per RFC 5890/5891.
 func validateIDNHostname(s string) error {
+	// The idn-hostname format bans an all-numeric top-level label, mirroring the
+	// plain hostname format so it cannot be confused with an IPv4 address.
+	return validateIDNHostnameLabels(s, true)
+}
+
+// validateIDNHostnameLabels validates the shared RFC 5890/5891 label structure
+// used by both the idn-hostname format and idn-email domain validation. The
+// banNumericTLD flag rejects an all-numeric top-level label, which the
+// idn-hostname format requires but the RFC 5321/6531 email domain grammar
+// permits.
+func validateIDNHostnameLabels(s string, banNumericTLD bool) error {
 	if s == "" {
 		return errors.New("invalid IDN hostname: empty string")
 	}
@@ -1022,11 +1142,12 @@ func validateIDNHostname(s string) error {
 		return errors.New("invalid IDN hostname: name too long")
 	}
 
-	// The top-level label must not be all-numeric, mirroring validateHostname so
-	// that an idn-hostname cannot be confused with an IPv4 address (RFC 1123
-	// §2.1 / RFC 5890). The check applies to the label as written: a numeric
-	// U-label is ASCII digits, so an all-ASCII-digit final label is rejected.
-	if isAllDigits(labels[len(labels)-1]) {
+	// When banNumericTLD is set, the top-level label must not be all-numeric,
+	// mirroring validateHostname so that an idn-hostname cannot be confused with
+	// an IPv4 address (RFC 1123 §2.1 / RFC 5890). The check applies to the label
+	// as written: a numeric U-label is ASCII digits, so an all-ASCII-digit final
+	// label is rejected.
+	if banNumericTLD && isAllDigits(labels[len(labels)-1]) {
 		return errors.New("invalid IDN hostname: numeric top-level label")
 	}
 
@@ -1129,7 +1250,9 @@ func validateIDNEmail(s string) error {
 		return err
 	}
 
-	return validateIDNHostname(domain)
+	// The RFC 5321/6531 email domain grammar permits an all-numeric top-level
+	// label, so the idn-hostname format's numeric-TLD ban must not apply here.
+	return validateIDNHostnameLabels(domain, false)
 }
 
 // validateIDNEmailLocal validates the local part of an IDN email address

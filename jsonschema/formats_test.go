@@ -82,6 +82,14 @@ func TestRegexFormatIdentityEscapesNonASCII(t *testing.T) {
 			instance: "\\\U0001F600", // backslash + grinning face
 			valid:    true,
 		},
+		"escaped literal replacement character is a valid identity escape": {
+			instance: "\\�", // backslash + U+FFFD (decodes from 3 bytes)
+			valid:    true,
+		},
+		"escaped lone invalid UTF-8 byte is rejected": {
+			instance: "\\\xff", // backslash + a single invalid UTF-8 byte
+			valid:    false,
+		},
 		"escaped ASCII metacharacter stays valid": {
 			instance: `\.`,
 			valid:    true,
@@ -151,6 +159,50 @@ func TestEmailFormatAcceptsQuotedLocalAndAddressLiteral(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestEmailAcceptsNumericTLD covers the RFC 5321 §4.1.2 sub-domain grammar
+// (sub-domain = Let-dig [Ldh-str]), which permits an all-numeric top-level
+// label in an email domain. The numeric-TLD ban belongs to the hostname format
+// (RFC 1123 disambiguation), not to email domain validation, so "user@example.123"
+// is a valid email even though "example.123" is an invalid hostname.
+func TestEmailAcceptsNumericTLD(t *testing.T) {
+	t.Parallel()
+
+	emailSchema := &jsonschema.Schema{
+		Type:   "string",
+		Format: "email",
+	}
+	idnEmailSchema := &jsonschema.Schema{
+		Type:   "string",
+		Format: "idn-email",
+	}
+	hostnameSchema := &jsonschema.Schema{
+		Type:   "string",
+		Format: "hostname",
+	}
+	idnHostnameSchema := &jsonschema.Schema{
+		Type:   "string",
+		Format: "idn-hostname",
+	}
+
+	err := jsonschema.Validate(emailSchema, "user@example.123", jsonschema.WithFormats(true))
+	require.NoError(t, err,
+		"email with an all-numeric TLD should be accepted (RFC 5321 sub-domain grammar)")
+
+	err = jsonschema.Validate(idnEmailSchema, "user@example.123", jsonschema.WithFormats(true))
+	require.NoError(t, err,
+		"idn-email with an all-numeric TLD should be accepted (RFC 6531/5321)")
+
+	// The same domain stays invalid for the hostname and idn-hostname formats,
+	// which ban an all-numeric TLD to disambiguate from an IPv4 address.
+	err = jsonschema.Validate(hostnameSchema, "example.123", jsonschema.WithFormats(true))
+	require.Error(t, err,
+		"hostname with an all-numeric TLD should be rejected")
+
+	err = jsonschema.Validate(idnHostnameSchema, "example.123", jsonschema.WithFormats(true))
+	require.Error(t, err,
+		"idn-hostname with an all-numeric TLD should be rejected")
 }
 
 func TestValidateDateExtendedYear(t *testing.T) {
@@ -299,6 +351,61 @@ func TestURITemplateMinimalValidation(t *testing.T) {
 	}
 }
 
+// TestURITemplateExprGrammar exercises the RFC 6570 expression grammar
+// structurally: an operator-only expression, an empty or malformed varspec, and
+// an out-of-range prefix length are rejected, while well-formed expressions with
+// operators, prefix and explode modifiers, dotted varnames, and pct-encoded
+// varchars are accepted.
+func TestURITemplateExprGrammar(t *testing.T) {
+	t.Parallel()
+
+	schema := &jsonschema.Schema{
+		Type:   "string",
+		Format: "uri-template",
+	}
+
+	tests := map[string]struct {
+		instance string
+		valid    bool
+	}{
+		// The brace expression is the whole instance so the grammar is tested
+		// directly; literal-only templates are covered by the suite.
+		"simple varname":               {instance: "{a}", valid: true},
+		"reserved-expansion operator":  {instance: "{+a}", valid: true},
+		"fragment operator with list":  {instance: "{#a,b}", valid: true},
+		"prefix length one":            {instance: "{a:1}", valid: true},
+		"prefix length max four":       {instance: "{a:9999}", valid: true},
+		"explode modifier":             {instance: "{a*}", valid: true},
+		"dotted varname":               {instance: "{a.b}", valid: true},
+		"pct-encoded varchar":          {instance: "{%20}", valid: true},
+		"path-style list with explode": {instance: "{;x,y*}", valid: true},
+
+		"operator without varspec":    {instance: "{|}", valid: false},
+		"empty trailing varspec":      {instance: "{a,}", valid: false},
+		"empty prefix length":         {instance: "{a:}", valid: false},
+		"prefix length five digits":   {instance: "{a:12345}", valid: false},
+		"prefix length leading zero":  {instance: "{a:0}", valid: false},
+		"operator only":               {instance: "{.}", valid: false},
+		"consecutive dots in varname": {instance: "{a..b}", valid: false},
+		"characters after explode":    {instance: "{a*b}", valid: false},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := jsonschema.Validate(schema, tc.instance, jsonschema.WithFormats(true))
+			if tc.valid {
+				require.NoError(t, err,
+					"grammatically valid URI template expression should be accepted")
+			} else {
+				require.Error(t, err,
+					"grammatically invalid URI template expression should be rejected")
+			}
+		})
+	}
+}
+
 func TestURICharsControlCharacters(t *testing.T) {
 	t.Parallel()
 
@@ -380,9 +487,6 @@ func TestURIRejectsMalformedForms(t *testing.T) {
 	tests := map[string]struct {
 		instance string
 	}{
-		"multiple consecutive slashes": {
-			instance: "http://example.com///path",
-		},
 		"missing scheme after colon": {
 			instance: "://example.com/path",
 		},
@@ -395,6 +499,39 @@ func TestURIRejectsMalformedForms(t *testing.T) {
 			err := jsonschema.Validate(schema, tc.instance, jsonschema.WithFormats(true))
 			require.Error(t, err,
 				"malformed URI should be rejected by format=uri")
+		})
+	}
+}
+
+// TestURIAcceptsEmptyPathSegments covers RFC 3986 §3.3 path-abempty, which
+// permits empty path segments. Consecutive slashes after the authority are
+// valid empty segments, not a malformed authority/path boundary.
+func TestURIAcceptsEmptyPathSegments(t *testing.T) {
+	t.Parallel()
+
+	schema := &jsonschema.Schema{
+		Type:   "string",
+		Format: "uri",
+	}
+
+	tests := map[string]struct {
+		instance string
+	}{
+		"single empty path segment": {
+			instance: "http://host//path",
+		},
+		"two empty path segments": {
+			instance: "http://example.com///a",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := jsonschema.Validate(schema, tc.instance, jsonschema.WithFormats(true))
+			require.NoError(t, err,
+				"URI with empty path segments should be accepted for format=uri")
 		})
 	}
 }
