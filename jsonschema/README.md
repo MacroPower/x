@@ -234,8 +234,9 @@ Supported keys include `description`, `title`, `default`, `examples`,
 `minItems`, `maxItems`, `uniqueItems`, `minProperties`, `maxProperties`, `enum`,
 and `const`. Values for `default`, `const`, `enum`, and `examples` are parsed
 according to the field's Go type. `enum` and `examples` values are separated by
-`|`; commas separate pairs, so values cannot contain commas. For complex values,
-use `JSONSchemaExtender` or doc comments with `WithComments`.
+`|`; commas separate pairs, so a value containing a comma escapes it with a
+backslash (`\,`, and `\\` for a literal backslash). For complex values, use
+`JSONSchemaExtender` or doc comments with `WithComments`.
 
 ### Struct field rules
 
@@ -244,7 +245,12 @@ name, `json:"-"` excludes a field (`json:"-,"` uses the literal name `"-"`),
 `omitempty` and `omitzero` drop the field from `required`, and `json:",string"`
 forces a `{"type":"string"}` schema for applicable types. Embedded structs
 without a `json` tag have their fields promoted; embedded types intercepted by
-an earlier resolution step are composed via `allOf`.
+an earlier resolution step are composed via `allOf`. A provider or
+`WithTypeSchema` override used for such an embedded type must leave the object
+open (no `additionalProperties: false`), since `allOf` evaluates each branch
+against the whole object: a closed branch rejects the parent's sibling
+properties and the generated schema then rejects the struct's own marshaled
+JSON.
 
 ### Comment extraction
 
@@ -328,9 +334,10 @@ produces:
 Supported tags (summary):
 
 - **Presence:** `required`.
-- **Bounds:** `min`, `max`, `len`, `gt`, `lt`, `gte`, `lte`, `eq`, `ne`,
-  `oneof`, mapped to length/numeric keywords for strings and numbers, and to
+- **Bounds:** `min`, `max`, `len`, `gt`, `lt`, `gte`, `lte`, `eq`, `ne`, mapped
+  to length/numeric keywords for strings and numbers, and to
   `minItems`/`maxItems` or `minProperties`/`maxProperties` for collections.
+- **Enumerations:** `oneof` maps to `enum` for strings, numbers, and bools.
 - **Collections:** `unique` -> `uniqueItems`; `dive` descends into element or
   value schemas.
 - **Formats:** `email`, `url`, `uri`, `uuid`, `ipv4`, `ipv6`, `hostname` ->
@@ -365,6 +372,18 @@ to `*ValidationError` via `errors.As`. Non-validation failures (JSON decoding,
 an unaccepted instance type, `Schema.Resolve` errors, and
 `ErrUnknownVocabulary`) return ordinary wrapped errors that do not unwrap to
 `*ValidationError`.
+
+### Numeric precision
+
+Instance numbers are compared exactly (decoded with `UseNumber`, compared as
+`big.Rat`), with one bound on the work an adversarial literal can demand: for a
+JSON number whose exact value exceeds an internal cap (about 4096 significant
+digits or decimal exponent magnitude), the `multipleOf` check is skipped, while
+`minimum`/`maximum`/`exclusiveMinimum`/`exclusiveMaximum` are still enforced
+exactly. Schema-side numeric keyword values are limited to `float64` precision:
+integers beyond 2^53 in keywords like `const`, `minimum`, or `multipleOf` round
+when the schema is decoded, even though the instance value they are compared
+against is exact.
 
 ### Structured errors
 

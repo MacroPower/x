@@ -170,7 +170,12 @@
 // identically — fields are promoted. Embedded types intercepted by earlier
 // priority chain steps ([WithTypeSchema], [JSONSchemaProvider], built-in
 // overrides, or [encoding.TextMarshaler]) are composed via allOf rather than
-// having their fields promoted. Embedded structs with an explicit json name
+// having their fields promoted. A [WithTypeSchema] or [JSONSchemaProvider]
+// schema used for such an embedded type must leave the object open (no
+// additionalProperties: false): allOf evaluates each branch against the whole
+// object, so a closed branch rejects the parent's sibling properties and the
+// generated schema then rejects the struct's own marshaled JSON. Embedded
+// structs with an explicit json name
 // (e.g. json:"base") are treated as regular named fields, not promoted; an
 // options-only tag with no name (e.g. json:",omitempty") promotes the fields,
 // matching encoding/json.
@@ -213,10 +218,12 @@
 //
 // Values for default, const, enum, and examples are parsed using type-aware
 // parsing based on the field's Go type. Enum and examples values are
-// separated by "|". Unrecognized keys are a parse error. Values cannot
-// contain commas (used as pair separator); enum and examples values cannot
-// contain "|" (used as value separator). For complex values, use
-// [JSONSchemaExtender] or AST doc comments with [WithComments].
+// separated by "|". Unrecognized keys are a parse error. A value containing a
+// comma escapes it with a backslash (a literal backslash is "\\"), so
+// jsonschema:"description=Hello\, World" sets the description "Hello, World";
+// enum and examples values cannot contain "|" (used as value separator). For
+// complex values, use [JSONSchemaExtender] or AST doc comments with
+// [WithComments].
 //
 // # Comment Extraction
 //
@@ -271,6 +278,16 @@
 // decoding, an unaccepted instance type, Schema.Resolve errors, and
 // [ErrUnknownVocabulary] — return ordinary wrapped errors that do not unwrap to
 // [*ValidationError].
+//
+// Instance numbers are compared exactly (decoded with UseNumber, compared as
+// [math/big.Rat]), with one bound on the work an adversarial literal can demand:
+// for a JSON number whose exact value exceeds an internal cap (about 4096
+// significant digits or decimal exponent magnitude), the multipleOf check is
+// skipped, while minimum, maximum, exclusiveMinimum, and exclusiveMaximum are
+// still enforced exactly. Schema-side numeric keyword values are limited to
+// float64 precision: integers beyond 2^53 in keywords like const, minimum, or
+// multipleOf round when the schema is decoded, even though the instance value
+// they are compared against is exact.
 //
 // Validation is configured via [ValidateOption] values:
 //
