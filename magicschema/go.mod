@@ -8,7 +8,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	github.com/stretchr/testify v1.11.1
-	go.jacobcolvin.com/x/stringtest v0.0.0-00010101000000-000000000000
+	go.jacobcolvin.com/x/stringtest v0.1.0
 )
 
 require (
@@ -17,5 +17,3 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace go.jacobcolvin.com/x/stringtest => ../stringtest
