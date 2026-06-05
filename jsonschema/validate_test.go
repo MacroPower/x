@@ -879,6 +879,25 @@ func TestValidateJSON(t *testing.T) {
 			json:   `3.14`,
 			err:    "(type)",
 		},
+		"trailing garbage after object": {
+			schema: &jsonschema.Schema{Type: "object"},
+			json:   `{"a":1} x`,
+			err:    "JSON decode",
+		},
+		"trailing value after scalar": {
+			schema: &jsonschema.Schema{Type: "boolean"},
+			json:   `true false`,
+			err:    "JSON decode",
+		},
+		"trailing number after number": {
+			schema: &jsonschema.Schema{Type: "integer"},
+			json:   `1 2`,
+			err:    "JSON decode",
+		},
+		"trailing whitespace accepted": {
+			schema: &jsonschema.Schema{Type: "object"},
+			json:   "{\"a\":1}\n  \t\n",
+		},
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -890,6 +909,109 @@ func TestValidateJSON(t *testing.T) {
 			} else {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tt.err)
+			}
+		})
+	}
+}
+
+// TestValidateConstEnumFloatEquality covers const/enum equality between
+// schema-authored float64 values (parsed without UseNumber, so 0.1 is the
+// nearest float64) and instance json.Number values. The comparison expands the
+// schema float through its shortest decimal so that 0.1 in the schema matches
+// the literal 0.1 in the instance, while keeping JSON Schema type distinctions
+// (true is not 1) and exact-representable numbers unchanged.
+func TestValidateConstEnumFloatEquality(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		schema   string
+		instance string
+		want     bool
+	}{
+		"const non-representable decimal matches": {
+			schema:   `{"const":0.1}`,
+			instance: `0.1`,
+			want:     true,
+		},
+		"const non-representable decimal mismatch": {
+			schema:   `{"const":0.1}`,
+			instance: `0.2`,
+			want:     false,
+		},
+		"enum non-representable decimals match second": {
+			schema:   `{"enum":[0.1,0.2]}`,
+			instance: `0.2`,
+			want:     true,
+		},
+		"enum non-representable decimal not present": {
+			schema:   `{"enum":[0.1,0.2]}`,
+			instance: `0.3`,
+			want:     false,
+		},
+		"const nested object decimal matches": {
+			schema:   `{"const":{"x":0.1}}`,
+			instance: `{"x":0.1}`,
+			want:     true,
+		},
+		"const nested object decimal mismatch": {
+			schema:   `{"const":{"x":0.1}}`,
+			instance: `{"x":0.2}`,
+			want:     false,
+		},
+		"const nested array decimal matches": {
+			schema:   `{"const":[0.1,0.2]}`,
+			instance: `[0.1,0.2]`,
+			want:     true,
+		},
+		"const exact float matches": {
+			schema:   `{"const":1.5}`,
+			instance: `1.5`,
+			want:     true,
+		},
+		"const integer matches decimal instance": {
+			schema:   `{"const":1}`,
+			instance: `1.0`,
+			want:     true,
+		},
+		"const decimal matches integer instance": {
+			schema:   `{"const":1.0}`,
+			instance: `1`,
+			want:     true,
+		},
+		"const true does not match one": {
+			schema:   `{"const":true}`,
+			instance: `1`,
+			want:     false,
+		},
+		"const false does not match zero": {
+			schema:   `{"const":false}`,
+			instance: `0`,
+			want:     false,
+		},
+		"enum mixed types matches decimal": {
+			schema:   `{"enum":["a",0.1,true]}`,
+			instance: `0.1`,
+			want:     true,
+		},
+		"enum true does not match one": {
+			schema:   `{"enum":[true,2]}`,
+			instance: `1`,
+			want:     false,
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var s jsonschema.Schema
+			require.NoError(t, json.Unmarshal([]byte(tt.schema), &s))
+
+			err := jsonschema.ValidateJSON(&s, []byte(tt.instance))
+			if tt.want {
+				assert.NoError(t, err)
+			} else {
+				assert.Error(t, err)
 			}
 		})
 	}

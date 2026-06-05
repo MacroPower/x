@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"math"
 	"math/big"
@@ -1079,6 +1081,11 @@ func ValidateJSON(schema *Schema, data []byte, opts ...ValidateOption) error {
 	return Validate(schema, instance, opts...)
 }
 
+// errTrailingData reports tokens after the single top-level JSON value.
+//
+//nolint:grouper // Kept next to decodeJSONInstance, its only user; merging unrelated globals hurts readability.
+var errTrailingData = errors.New("unexpected data after top-level value")
+
 // decodeJSONInstance decodes JSON bytes into an instance value using
 // [json.Decoder] with UseNumber(), preserving the integer vs number distinction
 // that the validator relies on.
@@ -1090,6 +1097,20 @@ func decodeJSONInstance(data []byte) (any, error) {
 
 	err := dec.Decode(&instance)
 	if err != nil {
+		return nil, fmt.Errorf("JSON decode: %w", err)
+	}
+
+	// A JSON document is a single value. The decoder stops after the first
+	// value and leaves any remaining tokens in the stream, so an exhausted
+	// stream is required to reject documents like `{"a":1} x` or `true false`.
+	// Token skips insignificant whitespace, so trailing whitespace still
+	// reaches io.EOF and is accepted.
+	_, err = dec.Token()
+	if !errors.Is(err, io.EOF) {
+		if err == nil {
+			return nil, fmt.Errorf("JSON decode: %w", errTrailingData)
+		}
+
 		return nil, fmt.Errorf("JSON decode: %w", err)
 	}
 
@@ -1820,7 +1841,7 @@ func (v *validator) validateEnum(schema *Schema, instance any, instancePath, sch
 	}
 
 	for _, allowed := range schema.Enum {
-		if equalJSONValues(instance, allowed) {
+		if equalSchemaInstance(allowed, instance) {
 			return nil
 		}
 	}
@@ -1844,7 +1865,7 @@ func (v *validator) validateConst(schema *Schema, instance any, instancePath, sc
 	}
 
 	constVal := *schema.Const
-	if equalJSONValues(instance, constVal) {
+	if equalSchemaInstance(constVal, instance) {
 		return nil
 	}
 
@@ -1854,6 +1875,109 @@ func (v *validator) validateConst(schema *Schema, instance any, instancePath, sc
 		Keyword:      "const",
 		Message:      "value does not match const",
 	}}
+}
+
+// equalSchemaInstance reports JSON-semantic equality between a schema-authored
+// value (from const/enum) and a decoded instance value.
+//
+// The schema side is parsed without UseNumber, so a JSON number there is a
+// float64 holding the nearest binary value (schema 0.1 is 0.1000...0555). The
+// instance side decodes through UseNumber, so its numbers are [json.Number]
+// decimal literals. Expanding the schema float through [big.Rat.SetFloat64]
+// would compare its exact binary value, which can never equal the literal 0.1,
+// so the schema float is instead expanded through its shortest decimal
+// ([float64ToRat]) to match how the numeric-bound keywords convert schema
+// values. The two sides then compare as exact rationals, recursing through
+// arrays and objects.
+//
+// JSON Schema treats booleans as distinct from numbers, so true never equals 1
+// and false never equals 0; the numeric branch only fires when both sides are
+// numeric kinds.
+func equalSchemaInstance(schemaVal, instance any) bool {
+	if sr, ok := schemaNumberRat(schemaVal); ok {
+		ir, ok := toBigRat(instance)
+		if !ok {
+			return false
+		}
+
+		return sr.Cmp(ir) == 0
+	}
+
+	switch sv := schemaVal.(type) {
+	case nil:
+		return instance == nil
+	case bool:
+		iv, ok := instance.(bool)
+
+		return ok && sv == iv
+
+	case string:
+		iv, ok := instance.(string)
+
+		return ok && sv == iv
+
+	case []any:
+		iv, ok := instance.([]any)
+		if !ok || len(sv) != len(iv) {
+			return false
+		}
+
+		for i := range sv {
+			if !equalSchemaInstance(sv[i], iv[i]) {
+				return false
+			}
+		}
+
+		return true
+
+	case map[string]any:
+		iv, ok := instance.(map[string]any)
+		if !ok || len(sv) != len(iv) {
+			return false
+		}
+
+		for k, item := range sv {
+			other, exists := iv[k]
+			if !exists || !equalSchemaInstance(item, other) {
+				return false
+			}
+		}
+
+		return true
+	}
+
+	// Schema values outside the JSON shapes above (none are produced by the
+	// upstream parser) fall back to upstream equality.
+	return jsonschema.Equal(schemaVal, instance)
+}
+
+// schemaNumberRat converts a schema-authored numeric value to an exact
+// rational. A float64 expands through its shortest decimal ([float64ToRat]) so
+// that, e.g., schema 0.1 compares as 1/10 rather than its binary expansion,
+// matching the numeric-bound keywords; integer kinds convert exactly. A
+// non-numeric value, or a non-finite float, reports false so the caller treats
+// the schema value as a non-number.
+func schemaNumberRat(v any) (*big.Rat, bool) {
+	if f, ok := v.(float64); ok {
+		r := float64ToRat(f)
+		if r == nil {
+			return nil, false
+		}
+
+		return r, true
+	}
+
+	rv := reflect.ValueOf(v)
+	switch {
+	case !rv.IsValid():
+		return nil, false
+	case rv.CanInt():
+		return new(big.Rat).SetInt64(rv.Int()), true
+	case rv.CanUint():
+		return new(big.Rat).SetUint64(rv.Uint()), true
+	}
+
+	return nil, false
 }
 
 // equalJSONValues reports JSON-semantic equality like [jsonschema.Equal], with
