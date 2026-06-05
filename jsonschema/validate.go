@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"reflect"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -97,10 +98,11 @@ func WithVocabularies(vocabs map[string]bool) ValidateOption {
 // WithMetaSchema registers a metaschema for vocabulary resolution. The
 // metaschema's $id is used to match against the root schema's $schema field.
 // If the root schema's $schema matches the metaschema's $id, the metaschema's
-// $vocabulary map is used to determine active vocabularies.
+// $vocabulary map is used to determine active vocabularies. A nil metaschema is
+// a no-op.
 func WithMetaSchema(ms *Schema) ValidateOption {
 	return func(v *validator) {
-		if ms.ID != "" {
+		if ms != nil && ms.ID != "" {
 			if v.metaSchemas == nil {
 				v.metaSchemas = map[string]*Schema{}
 			}
@@ -1429,8 +1431,8 @@ type decNumber struct {
 // parseDecNumber decomposes a decimal literal (the JSON number grammar, with a
 // leading '+' and bare ".5"/"5." forms also accepted for parity with
 // [big.Rat.SetString]) into canonical decNumber form. It reports false for
-// anything else, including the fraction and hexadecimal forms big.Rat accepts,
-// which JSON cannot produce.
+// anything else, including the fraction and hexadecimal forms [big.Rat]
+// accepts, which JSON cannot produce.
 func parseDecNumber(s string) (decNumber, bool) {
 	var d decNumber
 
@@ -1451,6 +1453,7 @@ func parseDecNumber(s string) (decNumber, bool) {
 
 	if i < len(s) && s[i] == '.' {
 		i++
+
 		fracStart := i
 		for i < len(s) && s[i] >= '0' && s[i] <= '9' {
 			i++
@@ -1459,7 +1462,7 @@ func parseDecNumber(s string) (decNumber, bool) {
 		fracDigits = s[fracStart:i]
 	}
 
-	if len(intDigits) == 0 && len(fracDigits) == 0 {
+	if intDigits == "" && fracDigits == "" {
 		return decNumber{}, false
 	}
 
@@ -1481,6 +1484,7 @@ func parseDecNumber(s string) (decNumber, bool) {
 			if exp < decExpClamp {
 				exp = exp*10 + int64(s[i]-'0')
 			}
+
 			i++
 		}
 
@@ -1496,7 +1500,7 @@ func parseDecNumber(s string) (decNumber, bool) {
 		return decNumber{}, false
 	}
 
-	// digitAt addresses the combined integer+fraction digit string without
+	// DigitAt addresses the combined integer+fraction digit string without
 	// concatenating it.
 	digitsLen := len(intDigits) + len(fracDigits)
 	digitAt := func(i int) byte {
@@ -1536,7 +1540,7 @@ func parseDecNumber(s string) (decNumber, bool) {
 		d.sig = intDigits[start:] + fracDigits[:end-len(intDigits)]
 	}
 
-	// value = sig × 10^(exp - len(frac) + trail), and as 0.sig form that shifts
+	// Value = sig × 10^(exp - len(frac) + trail), and as 0.sig form that shifts
 	// by len(sig) more.
 	e := int64(len(d.sig)) + exp - int64(len(fracDigits)) + int64(trail)
 	switch {
@@ -1549,11 +1553,6 @@ func parseDecNumber(s string) (decNumber, bool) {
 	d.exp = int(e)
 
 	return d, true
-}
-
-// isZero reports whether the value is zero (of either sign).
-func (d decNumber) isZero() bool {
-	return d.sig == ""
 }
 
 // isIntegral reports whether the value is a mathematical integer: zero, or a
@@ -1875,8 +1874,8 @@ func equalJSONValues(a, b any) bool {
 // containsUnboundedNumber walks the container shapes a decoded JSON instance
 // can take and reports whether any [json.Number] inside is outside the
 // cheap-expansion bounds (or not a decimal literal at all). Values of other
-// container types cannot hold a json.Number produced by JSON decoding, so only
-// these shapes need walking.
+// container types cannot hold a [json.Number] produced by JSON decoding, so
+// only these shapes need walking.
 func containsUnboundedNumber(v any) bool {
 	switch val := v.(type) {
 	case json.Number:
@@ -1885,10 +1884,8 @@ func containsUnboundedNumber(v any) bool {
 		return !ok || !d.exactlyComparable()
 
 	case []any:
-		for _, item := range val {
-			if containsUnboundedNumber(item) {
-				return true
-			}
+		if slices.ContainsFunc(val, containsUnboundedNumber) {
+			return true
 		}
 
 	case map[string]any:
@@ -1909,7 +1906,7 @@ func containsUnboundedNumber(v any) bool {
 // bounds can never equal a float64 or integer (those expand to at most ~767
 // significant decimal digits within exponent ±324). Container types other
 // than the decoded-JSON shapes fall through to [jsonschema.Equal], which is
-// safe because they cannot hold a decoded json.Number.
+// safe because they cannot hold a decoded [json.Number].
 func equalGuarded(a, b any) bool {
 	an, aNum := a.(json.Number)
 	bn, bNum := b.(json.Number)
@@ -2538,10 +2535,17 @@ func (v *validator) validateArray(
 			}
 
 			if matchCount < minContains {
+				// An explicit minContains owns the violation; without it the
+				// shortfall is a plain contains failure (default minContains=1).
+				keyword := "contains"
+				if v.draft == Draft2020 && v.vocabs.validation && schema.MinContains != nil {
+					keyword = "minContains"
+				}
+
 				errs = append(errs, &ValidationError{
 					InstancePath: instancePath,
-					SchemaPath:   schemaPath + "/contains",
-					Keyword:      "contains",
+					SchemaPath:   schemaPath + "/" + keyword,
+					Keyword:      keyword,
 					Message:      fmt.Sprintf("array has %d matching items, minimum is %d", matchCount, minContains),
 				})
 			}
@@ -3132,15 +3136,13 @@ func (v *validator) validateConditional(
 
 // validateContent applies content keywords.
 //
-// Per spec, content keywords (contentEncoding, contentMediaType, contentSchema)
-// are annotations only by default. [WithContent] opts in to asserting
-// contentEncoding and contentMediaType for string instances; that assertion runs
-// first and short-circuits on failure.
+// Per 2020-12 spec section 8.5, content keywords (contentEncoding,
+// contentMediaType, contentSchema) are annotations only and never affect
+// validity. ContentSchema describes the decoded content, which this package
+// does not decode, so it is never asserted regardless of the other keywords.
 //
-// For contentSchema: when a media type or encoding is present this package does
-// not decode the content, so contentSchema is left as an annotation. When
-// neither is present, contentSchema is the schema's only constraint and is
-// applied directly to the instance so the schema is not treated as accept-all.
+// [WithContent] opts in to asserting contentEncoding and contentMediaType for
+// string instances only; non-string instances carry no content and pass.
 func (v *validator) validateContent(
 	schema *Schema,
 	instance any,
@@ -3158,14 +3160,7 @@ func (v *validator) validateContent(
 		}
 	}
 
-	if schema.ContentSchema == nil {
-		return nil
-	}
-	if schema.ContentMediaType != "" || schema.ContentEncoding != "" {
-		return nil
-	}
-
-	return v.validate(schema.ContentSchema, instance, instancePath, schemaPath+"/contentSchema", nil)
+	return nil
 }
 
 // assertContent asserts contentEncoding and contentMediaType for a string
@@ -3232,50 +3227,7 @@ func (v *validator) validateRef(
 		return nil
 	}
 
-	target := v.resolveRef(schema, ref)
-	if target == nil {
-		if v.refResolveErr != nil {
-			err := v.refResolveErr
-			v.refResolveErr = nil
-
-			return []*ValidationError{{
-				InstancePath: instancePath,
-				SchemaPath:   schemaPath + "/$ref",
-				Keyword:      "$ref",
-				Message:      err.Error(),
-				err:          err,
-			}}
-		}
-		// A non-local (remote/absolute) ref that cannot be resolved is an
-		// error rather than silently passing. Unresolvable local fragment refs
-		// are already rejected by Schema.Resolve before the walk begins.
-		if !isFragmentOnly(ref) {
-			return []*ValidationError{{
-				InstancePath: instancePath,
-				SchemaPath:   schemaPath + "/$ref",
-				Keyword:      "$ref",
-				Message:      fmt.Sprintf("cannot resolve $ref %q", ref),
-			}}
-		}
-		// Unresolvable local fragment ref: silently skip.
-		return nil
-	}
-
-	refAnn := newAnnotations()
-	childErrs := v.validate(target, instance, instancePath, schemaPath+"/$ref", refAnn)
-	if len(childErrs) > 0 {
-		return []*ValidationError{{
-			InstancePath: instancePath,
-			SchemaPath:   schemaPath + "/$ref",
-			Keyword:      "$ref",
-			Causes:       childErrs,
-		}}
-	}
-	if ann != nil {
-		ann.merge(refAnn)
-	}
-
-	return nil
+	return v.validateResolvedRef(v.resolveRef(schema, ref), ref, "$ref", instance, instancePath, schemaPath, ann)
 }
 
 // validateDynamicRef resolves and validates a $dynamicRef.
@@ -3290,7 +3242,27 @@ func (v *validator) validateDynamicRef(
 		return nil
 	}
 
-	target := v.resolveDynamicRef(schema, ref)
+	return v.validateResolvedRef(
+		v.resolveDynamicRef(schema, ref),
+		ref,
+		"$dynamicRef",
+		instance,
+		instancePath,
+		schemaPath,
+		ann,
+	)
+}
+
+// validateResolvedRef validates the instance against a resolved reference
+// target, sharing the resolution-error and annotation handling between $ref
+// and $dynamicRef. The keyword names the reference keyword for error paths.
+func (v *validator) validateResolvedRef(
+	target *Schema,
+	ref, keyword string,
+	instance any,
+	instancePath, schemaPath string,
+	ann *annotations,
+) []*ValidationError {
 	if target == nil {
 		if v.refResolveErr != nil {
 			err := v.refResolveErr
@@ -3298,37 +3270,34 @@ func (v *validator) validateDynamicRef(
 
 			return []*ValidationError{{
 				InstancePath: instancePath,
-				SchemaPath:   schemaPath + "/$dynamicRef",
-				Keyword:      "$dynamicRef",
+				SchemaPath:   schemaPath + "/" + keyword,
+				Keyword:      keyword,
 				Message:      err.Error(),
 				err:          err,
 			}}
 		}
-
-		// A non-local (remote/absolute) $dynamicRef that cannot be resolved is
-		// an error rather than silently passing, mirroring $ref. Unresolvable
-		// local fragment refs are already rejected by Schema.Resolve before
-		// the walk begins.
+		// A non-local (remote/absolute) ref that cannot be resolved is an
+		// error rather than silently passing. Unresolvable local fragment refs
+		// are already rejected by Schema.Resolve before the walk begins.
 		if !isFragmentOnly(ref) {
 			return []*ValidationError{{
 				InstancePath: instancePath,
-				SchemaPath:   schemaPath + "/$dynamicRef",
-				Keyword:      "$dynamicRef",
-				Message:      fmt.Sprintf("cannot resolve $dynamicRef %q", ref),
+				SchemaPath:   schemaPath + "/" + keyword,
+				Keyword:      keyword,
+				Message:      fmt.Sprintf("cannot resolve %s %q", keyword, ref),
 			}}
 		}
-
 		// Unresolvable local fragment ref: silently skip.
 		return nil
 	}
 
 	refAnn := newAnnotations()
-	childErrs := v.validate(target, instance, instancePath, schemaPath+"/$dynamicRef", refAnn)
+	childErrs := v.validate(target, instance, instancePath, schemaPath+"/"+keyword, refAnn)
 	if len(childErrs) > 0 {
 		return []*ValidationError{{
 			InstancePath: instancePath,
-			SchemaPath:   schemaPath + "/$dynamicRef",
-			Keyword:      "$dynamicRef",
+			SchemaPath:   schemaPath + "/" + keyword,
+			Keyword:      keyword,
 			Causes:       childErrs,
 		}}
 	}
@@ -3677,8 +3646,8 @@ func schemaAtJSONPointer(root *Schema, segments []string, base string) (*Schema,
 			node = next
 
 		case []any:
-			idx, err := strconv.Atoi(seg)
-			if err != nil || idx < 0 || idx >= len(container) {
+			idx, ok := parseArrayIndex(seg)
+			if !ok || idx >= len(container) {
 				return nil, ""
 			}
 
@@ -3796,8 +3765,7 @@ func (v *validator) traverseSchema(schema *Schema, segments []string) *Schema {
 		}
 		// Array form (Draft-07 items as array): requires an index in rest.
 		if len(rest) > 0 && len(schema.ItemsArray) > 0 {
-			idx, err := strconv.Atoi(rest[0])
-			if err == nil && idx >= 0 && idx < len(schema.ItemsArray) {
+			if idx, ok := parseArrayIndex(rest[0]); ok && idx < len(schema.ItemsArray) {
 				return v.traverseSchema(schema.ItemsArray[idx], rest[1:])
 			}
 		}
@@ -3885,8 +3853,7 @@ func (v *validator) traverseSchema(schema *Schema, segments []string) *Schema {
 	// Slice fields: allOf, anyOf, oneOf, prefixItems.
 	idx := -1
 	if len(rest) > 0 {
-		n, err := strconv.Atoi(rest[0])
-		if err == nil {
+		if n, ok := parseArrayIndex(rest[0]); ok {
 			idx = n
 		}
 	}
@@ -3942,4 +3909,31 @@ func escapeJSONPointer(s string) string {
 // unescapeJSONPointer unescapes a JSON Pointer segment per RFC 6901.
 func unescapeJSONPointer(s string) string {
 	return jsonPointerUnescaper.Replace(s)
+}
+
+// parseArrayIndex parses a JSON Pointer reference token as an RFC 6901 array
+// index. The grammar admits only "0" or a nonzero leading digit followed by
+// digits, so non-canonical forms such as "01", "+1", or "-0" are rejected. It
+// returns the parsed index and true on success, or false otherwise.
+func parseArrayIndex(seg string) (int, bool) {
+	if seg == "" {
+		return 0, false
+	}
+
+	if seg != "0" && seg[0] == '0' {
+		return 0, false
+	}
+
+	for i := range len(seg) {
+		if seg[i] < '0' || seg[i] > '9' {
+			return 0, false
+		}
+	}
+
+	idx, err := strconv.Atoi(seg)
+	if err != nil {
+		return 0, false
+	}
+
+	return idx, true
 }

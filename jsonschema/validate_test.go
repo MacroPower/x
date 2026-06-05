@@ -1922,6 +1922,35 @@ func TestValidateVocabularyResolution(t *testing.T) {
 	}
 }
 
+func TestWithMetaSchemaNil(t *testing.T) {
+	t.Parallel()
+
+	// A nil metaschema is a no-op: it must not panic and must leave validation
+	// behaving exactly as if the option were absent.
+	schema := &jsonschema.Schema{
+		Schema: "https://json-schema.org/draft/2020-12/schema",
+		Type:   "string",
+	}
+
+	var withNil, without error
+
+	require.NotPanics(t, func() {
+		withNil = jsonschema.Validate(schema, 42.0, jsonschema.WithMetaSchema(nil))
+	}, "WithMetaSchema(nil) must not panic")
+
+	without = jsonschema.Validate(schema, 42.0)
+
+	require.Error(t, withNil, "the type constraint still applies with a nil metaschema")
+	assert.Contains(t, withNil.Error(), "(type)")
+
+	if without == nil {
+		assert.NoError(t, withNil)
+	} else {
+		assert.Equal(t, without.Error(), withNil.Error(),
+			"WithMetaSchema(nil) must match validation with the option absent")
+	}
+}
+
 func TestValidateVocabularyValidationDisabled(t *testing.T) {
 	t.Parallel()
 
@@ -2462,18 +2491,21 @@ func TestHashValueDistinguishesLargeJSONNumbers(t *testing.T) {
 	require.NoError(t, err, "distinct large json.Number integers should be treated as unique")
 }
 
-func TestIsEmptySchemaContentSchema(t *testing.T) {
+func TestContentSchemaIsAnnotationOnly(t *testing.T) {
 	t.Parallel()
 
-	// IsEmptySchema treats ContentSchema as a constraint, so a schema carrying
-	// only contentSchema is not accept-all and rejects a non-conforming instance.
+	// Per 2020-12 spec 8.5, contentSchema is an annotation-only keyword: it
+	// describes decoded content, which this package never decodes, so it never
+	// affects validity. A schema carrying only contentSchema therefore accepts
+	// any instance, including ones the contentSchema itself would reject.
 	schema := &jsonschema.Schema{
 		ContentSchema: &jsonschema.Schema{Type: "string"},
 	}
 
-	err := jsonschema.Validate(schema, 42.0)
-	require.Error(t, err,
-		"a schema with contentSchema should not be treated as empty/accept-all")
+	require.NoError(t, jsonschema.Validate(schema, 42.0),
+		"contentSchema must not be asserted against the raw instance")
+	require.NoError(t, jsonschema.Validate(schema, "anything"),
+		"contentSchema is an annotation even for string instances")
 }
 
 func TestUnresolvableRefIsError(t *testing.T) {
@@ -2491,6 +2523,118 @@ func TestUnresolvableRefIsError(t *testing.T) {
 
 	err := jsonschema.Validate(schema, map[string]any{"name": 42})
 	require.Error(t, err, "unresolvable $ref should produce a validation error")
+}
+
+func TestRefArrayIndexRFC6901Canonical(t *testing.T) {
+	t.Parallel()
+
+	// RFC 6901 array-index reference tokens admit only "0" or a nonzero leading
+	// digit followed by digits. A $ref into an allOf index resolves for the
+	// canonical "1" and never resolves to that subschema for the non-canonical
+	// "01" or "+1".
+	//
+	// The allOf members assert nothing on their own (the constraint lives in a
+	// $defs nested under index 1), so the only failure source is the ref. The
+	// canonical form reaches a const the instance violates. A leading-zero index
+	// is rejected outright by RFC 6901 resolution and surfaces as a ref error; a
+	// signed index resolves to nothing and leaves the instance unconstrained.
+	newSchema := func(ref string) *jsonschema.Schema {
+		return &jsonschema.Schema{
+			Ref: ref,
+			AllOf: []*jsonschema.Schema{
+				{},
+				{Defs: map[string]*jsonschema.Schema{
+					"strict": {Const: jsonschema.Ptr[any]("only-this")},
+				}},
+			},
+		}
+	}
+
+	tests := map[string]struct {
+		ref     string
+		wantErr string // substring required in the error; "" means no error
+	}{
+		"canonical index resolves and asserts the const": {
+			ref:     "#/allOf/1/$defs/strict",
+			wantErr: "(const)",
+		},
+		"leading-zero index is a ref resolution error": {
+			ref:     "#/allOf/01/$defs/strict",
+			wantErr: "01",
+		},
+		"signed index leaves the instance unconstrained": {
+			ref:     "#/allOf/+1/$defs/strict",
+			wantErr: "",
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := jsonschema.Validate(newSchema(tt.ref), "not-only-this")
+			if tt.wantErr == "" {
+				require.NoError(t, err,
+					"non-canonical array index %q must not resolve to the const subschema", tt.ref)
+
+				return
+			}
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
+		})
+	}
+}
+
+func TestSchemaAtJSONPointerArrayIndexCanonical(t *testing.T) {
+	t.Parallel()
+
+	// The JSON-encoding fallback walks array values held in unknown keywords,
+	// which typed traversal cannot reach. It too honors RFC 6901 canonical array
+	// indices: a $ref into an Extra slice resolves for "1", while "01" is
+	// rejected by RFC 6901 resolution and surfaces as a ref error.
+	newSchema := func(ref string) *jsonschema.Schema {
+		return &jsonschema.Schema{
+			Ref: ref,
+			Extra: map[string]any{
+				"x-cases": []any{
+					map[string]any{},
+					map[string]any{"const": "only-this"},
+				},
+			},
+		}
+	}
+
+	tests := map[string]struct {
+		ref     string
+		wantErr string // substring required in the error; "" means no error
+	}{
+		"canonical index resolves through the JSON fallback": {
+			ref:     "#/x-cases/1",
+			wantErr: "(const)",
+		},
+		"leading-zero index is a ref resolution error": {
+			ref:     "#/x-cases/01",
+			wantErr: "01",
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := jsonschema.Validate(newSchema(tt.ref), "not-only-this")
+			if tt.wantErr == "" {
+				require.NoError(t, err,
+					"non-canonical array index %q must not resolve through the JSON fallback", tt.ref)
+
+				return
+			}
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
+		})
+	}
 }
 
 func TestInvalidPatternFailsClosed(t *testing.T) {

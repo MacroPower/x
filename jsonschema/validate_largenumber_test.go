@@ -38,12 +38,12 @@ func TestValidateLargeNumberGuarded(t *testing.T) {
 		"large exponent above minimum":      {`{"minimum":1}`, "1e1000000", true},
 		"negative large exponent magnitude": {`{"minimum":0}`, "-1e1000000", false},
 
-		// const and enum compare via equality rather than the numeric bound
+		// Const and enum compare via equality rather than the numeric bound
 		// path; a giant literal must not reach an unguarded big.Rat parse.
 		"giant literal never matches const": {`{"const":1}`, big, false},
 		"giant literal never matches enum":  {`{"enum":[1,2]}`, big, false},
 
-		// uniqueItems hashes and compares array members; large-exponent
+		// UniqueItems hashes and compares array members; large-exponent
 		// members must be deduplicated canonically without expansion.
 		"unique giant exponents distinct":  {`{"uniqueItems":true}`, "[1e1000000,2e1000000,3e1000000]", true},
 		"unique giant exponents duplicate": {`{"uniqueItems":true}`, "[1e1000000,10e999999]", false},
