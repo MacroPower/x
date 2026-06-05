@@ -7,7 +7,7 @@ import (
 	"slices"
 	"strings"
 
-	"go.jacobcolvin.com/jsonschema"
+	"go.jacobcolvin.com/x/jsonschema"
 )
 
 // ErrConflictingConstraints reports two tag rules on one field that can never

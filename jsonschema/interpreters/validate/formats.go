@@ -3,7 +3,7 @@ package validate
 import (
 	"slices"
 
-	"go.jacobcolvin.com/jsonschema"
+	"go.jacobcolvin.com/x/jsonschema"
 )
 
 // base64Encoding is the content validator tag and the contentEncoding keyword

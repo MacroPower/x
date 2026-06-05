@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"go.jacobcolvin.com/jsonschema"
+	"go.jacobcolvin.com/x/jsonschema"
 )
 
 // Edge-case tests for the built-in format validators in validate_formats.go.

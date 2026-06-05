@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"go.jacobcolvin.com/jsonschema"
+	"go.jacobcolvin.com/x/jsonschema"
 )
 
 // suiteGroup is one test group from the JSON Schema Test Suite.

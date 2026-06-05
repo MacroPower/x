@@ -38,7 +38,7 @@ import (
 	"os"
 	"reflect"
 
-	"go.jacobcolvin.com/jsonschema"
+	"go.jacobcolvin.com/x/jsonschema"
 
 	target "example.com/myapp"
 )
@@ -77,7 +77,7 @@ import (
 	"os"
 	"reflect"
 
-	"go.jacobcolvin.com/jsonschema"
+	"go.jacobcolvin.com/x/jsonschema"
 
 	target "example.com/pkg"
 )
@@ -120,8 +120,8 @@ import (
 	"os"
 	"reflect"
 
-	"go.jacobcolvin.com/jsonschema"
-	"go.jacobcolvin.com/jsonschema/interpreters/validate"
+	"go.jacobcolvin.com/x/jsonschema"
+	"go.jacobcolvin.com/x/jsonschema/interpreters/validate"
 
 	target "example.com/full"
 )
@@ -175,22 +175,22 @@ func TestRenderGoMod(t *testing.T) {
 		"different module": {
 			modPath:       "example.com/myapp",
 			modDir:        "/home/user/myapp",
-			jsonschemaDir: "/home/user/go/pkg/mod/go.jacobcolvin.com/jsonschema@v0.1.0",
+			jsonschemaDir: "/home/user/go/pkg/mod/go.jacobcolvin.com/x/jsonschema@v0.1.0",
 			want: fmt.Sprintf(`module _jsonschemagen_tmp
 
 go %s
 
 require (
 	example.com/myapp v0.0.0
-	go.jacobcolvin.com/jsonschema v0.0.0
+	go.jacobcolvin.com/x/jsonschema v0.0.0
 )
 
 replace example.com/myapp => /home/user/myapp
-replace go.jacobcolvin.com/jsonschema => /home/user/go/pkg/mod/go.jacobcolvin.com/jsonschema@v0.1.0
+replace go.jacobcolvin.com/x/jsonschema => /home/user/go/pkg/mod/go.jacobcolvin.com/x/jsonschema@v0.1.0
 `, goDirectiveVersion()),
 		},
 		"jsonschema module itself": {
-			modPath:       "go.jacobcolvin.com/jsonschema",
+			modPath:       "go.jacobcolvin.com/x/jsonschema",
 			modDir:        "/home/user/jsonschema",
 			jsonschemaDir: "/home/user/jsonschema",
 			want: fmt.Sprintf(`module _jsonschemagen_tmp
@@ -198,10 +198,10 @@ replace go.jacobcolvin.com/jsonschema => /home/user/go/pkg/mod/go.jacobcolvin.co
 go %s
 
 require (
-	go.jacobcolvin.com/jsonschema v0.0.0
+	go.jacobcolvin.com/x/jsonschema v0.0.0
 )
 
-replace go.jacobcolvin.com/jsonschema => /home/user/jsonschema
+replace go.jacobcolvin.com/x/jsonschema => /home/user/jsonschema
 `, goDirectiveVersion()),
 		},
 	}
@@ -251,7 +251,7 @@ func buildBinary(t *testing.T) string {
 func moduleDir(t *testing.T) string {
 	t.Helper()
 
-	cmd := exec.CommandContext(t.Context(), "go", "list", "-m", "-json", "go.jacobcolvin.com/jsonschema")
+	cmd := exec.CommandContext(t.Context(), "go", "list", "-m", "-json", "go.jacobcolvin.com/x/jsonschema")
 	out, err := cmd.Output()
 	require.NoError(t, err)
 
@@ -273,9 +273,9 @@ func createTestModule(t *testing.T, typeDef string) string {
 
 go ` + goDirectiveVersion() + `
 
-require go.jacobcolvin.com/jsonschema v0.0.0
+require go.jacobcolvin.com/x/jsonschema v0.0.0
 
-replace go.jacobcolvin.com/jsonschema => ` + jsDir + `
+replace go.jacobcolvin.com/x/jsonschema => ` + jsDir + `
 `
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte(goMod), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "types.go"), []byte(typeDef), 0o644))

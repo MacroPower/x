@@ -13,7 +13,7 @@ import (
 
 	upstream "github.com/google/jsonschema-go/jsonschema"
 
-	"go.jacobcolvin.com/jsonschema"
+	"go.jacobcolvin.com/x/jsonschema"
 )
 
 func TestValidate(t *testing.T) {

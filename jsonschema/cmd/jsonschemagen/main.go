@@ -3,7 +3,7 @@
 //
 // Usage:
 //
-//	//go:generate go run go.jacobcolvin.com/jsonschema/cmd/jsonschemagen -type Config -o config.schema.json
+//	//go:generate go run go.jacobcolvin.com/x/jsonschema/cmd/jsonschemagen -type Config -o config.schema.json
 //
 // The tool works by creating a temporary Go program that imports the target
 // package, calls [jsonschema.Generate], and outputs the resulting JSON, so it
@@ -208,7 +208,7 @@ func resolveJSONSchemaDir() (string, error) {
 	return info.Dir, nil
 }
 
-const jsonschemaModule = "go.jacobcolvin.com/jsonschema"
+const jsonschemaModule = "go.jacobcolvin.com/x/jsonschema"
 
 func createTempDir(cfg config, importPath, modPath, modDir, jsonschemaDir string) (string, error) {
 	tempDir, err := os.MkdirTemp("", "jsonschemagen-*")
@@ -361,9 +361,9 @@ import (
 	"os"
 	"reflect"
 
-	"go.jacobcolvin.com/jsonschema"
+	"go.jacobcolvin.com/x/jsonschema"
 	{{- if .Validate}}
-	"go.jacobcolvin.com/jsonschema/interpreters/validate"
+	"go.jacobcolvin.com/x/jsonschema/interpreters/validate"
 	{{- end}}
 
 	target "{{.ImportPath}}"

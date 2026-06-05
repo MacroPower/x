@@ -3,8 +3,8 @@
 </p>
 
 <p align="center">
-  <a href="https://pkg.go.dev/go.jacobcolvin.com/jsonschema"><img alt="Go Reference" src="https://pkg.go.dev/badge/go.jacobcolvin.com/jsonschema.svg"></a>
-  <a href="https://goreportcard.com/report/go.jacobcolvin.com/jsonschema"><img alt="Go Report Card" src="https://goreportcard.com/badge/go.jacobcolvin.com/jsonschema"></a>
+  <a href="https://pkg.go.dev/go.jacobcolvin.com/x/jsonschema"><img alt="Go Reference" src="https://pkg.go.dev/badge/go.jacobcolvin.com/x/jsonschema.svg"></a>
+  <a href="https://goreportcard.com/report/go.jacobcolvin.com/x/jsonschema"><img alt="Go Report Card" src="https://goreportcard.com/badge/go.jacobcolvin.com/x/jsonschema"></a>
   <a href="https://github.com/macropower/x/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/macropower/x"></a>
 </p>
 
@@ -24,7 +24,7 @@ this package.
 ## Installation
 
 ```sh
-go get go.jacobcolvin.com/jsonschema
+go get go.jacobcolvin.com/x/jsonschema
 ```
 
 ## Quick start
@@ -316,7 +316,7 @@ The `interpreters/validate` subpackage maps
 syntax to schema constraints, without depending on the validator library itself:
 
 ```go
-import "go.jacobcolvin.com/jsonschema/interpreters/validate"
+import "go.jacobcolvin.com/x/jsonschema/interpreters/validate"
 
 type CreateUser struct {
 	Name  string `json:"name"  validate:"required,min=1,max=100"`
@@ -485,7 +485,7 @@ by generating a temporary program that imports the target package and calls
 `Generate`, reusing the library's generation pipeline:
 
 ```go
-//go:generate go run go.jacobcolvin.com/jsonschema/cmd/jsonschemagen -type Config -o config.schema.json
+//go:generate go run go.jacobcolvin.com/x/jsonschema/cmd/jsonschemagen -type Config -o config.schema.json
 ```
 
 | Flag                     | Default    | Description                              |
@@ -501,7 +501,7 @@ by generating a temporary program that imports the target package and calls
 For example, given a `User` type with `validate` tags:
 
 ```sh
-go run go.jacobcolvin.com/jsonschema/cmd/jsonschemagen -type User -validate
+go run go.jacobcolvin.com/x/jsonschema/cmd/jsonschemagen -type User -validate
 ```
 
 ```json

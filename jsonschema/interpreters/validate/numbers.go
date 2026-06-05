@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"go.jacobcolvin.com/jsonschema"
+	"go.jacobcolvin.com/x/jsonschema"
 )
 
 // parseBoundFloat parses a numeric bound, rejecting non-finite values

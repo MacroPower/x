@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"strconv"
 
-	"go.jacobcolvin.com/jsonschema"
+	"go.jacobcolvin.com/x/jsonschema"
 )
 
 // applyCollectionMinConstraint applies min/gte or gt to a collection schema.

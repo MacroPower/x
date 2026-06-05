@@ -6,8 +6,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"go.jacobcolvin.com/jsonschema"
-	"go.jacobcolvin.com/jsonschema/internal/testtypes/alpha"
+	"go.jacobcolvin.com/x/jsonschema"
+	"go.jacobcolvin.com/x/jsonschema/internal/testtypes/alpha"
 )
 
 // TestPromotedEmbeddedFieldComment covers doc-comment extraction for a field

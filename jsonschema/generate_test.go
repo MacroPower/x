@@ -14,10 +14,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"go.jacobcolvin.com/jsonschema"
-	"go.jacobcolvin.com/jsonschema/internal/testtypes/alpha"
-	"go.jacobcolvin.com/jsonschema/internal/testtypes/beta"
-	"go.jacobcolvin.com/jsonschema/interpreters/validate"
+	"go.jacobcolvin.com/x/jsonschema"
+	"go.jacobcolvin.com/x/jsonschema/internal/testtypes/alpha"
+	"go.jacobcolvin.com/x/jsonschema/internal/testtypes/beta"
+	"go.jacobcolvin.com/x/jsonschema/interpreters/validate"
 )
 
 // marshalSchema marshals a schema to a JSON string for comparison.
