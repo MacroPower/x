@@ -94,10 +94,19 @@ func (g *generator) generate(t reflect.Type) (*Schema, error) {
 		return nil, err
 	}
 
+	// Disambiguate $defs names if there are collisions.
+	// All $ref schemas are updated in-place via tracked refRecords.
+	g.disambiguateDefs()
+
 	// If the root type was extracted to $defs and nothing references it,
 	// inline its schema at the root instead of using $ref. A root reached
 	// by another definition (self-reference or mutual recursion) must stay
 	// in $defs, or removing it would leave those refs dangling.
+	//
+	// This runs after disambiguateDefs so the $defs keys are unique: the
+	// isReferenced check keys on the root's final $defs name, so a root whose
+	// simple name collides with a different referenced type is judged on its own
+	// renamed entry rather than the shared pre-disambiguation name.
 	if schema.Ref != "" {
 		defName := g.typeToDefName[rootType]
 		if defName != "" && !g.isReferenced(defName) {
@@ -110,10 +119,6 @@ func (g *generator) generate(t reflect.Type) (*Schema, error) {
 			}
 		}
 	}
-
-	// Disambiguate $defs names if there are collisions.
-	// All $ref schemas are updated in-place via tracked refRecords.
-	g.disambiguateDefs()
 
 	// Set $schema on root.
 	schema.Schema = g.draft.schemaURI()
@@ -296,11 +301,20 @@ func (g *generator) handleOverrideType(t reflect.Type, override *Schema, nullabl
 	return g.applyNullable(s, t, nullable), nil
 }
 
-// cloneOverrideExtras deep-copies the non-sub-schema fields that the upstream
-// CloneSchemas leaves aliased to the source schema: Enum, Const, Default, and
-// Extra. Only the top-level headers and pointers are copied; nested any values
-// keep their identity, which preserves the caller's exact typed values while
-// breaking the aliasing that lets in-place mutation leak across Generate calls.
+// cloneOverrideExtras clones the non-sub-schema container fields that the
+// upstream CloneSchemas leaves aliased to the source schema. CloneSchemas
+// deep-copies only the sub-schema fields (*Schema, []*Schema, map[string]*Schema)
+// and shallow-shares every other reference field, so an extender or interpreter
+// that appends or assigns into one of those in place would corrupt the caller's
+// schema across Generate calls.
+//
+// The policy is top-level headers only: each slice, map, and pointer container
+// is reallocated so writes to it cannot reach the source, but the nested any
+// values and the bytes they reference keep their identity, preserving the
+// caller's exact typed values. Every Schema field whose type is []any, []string,
+// map[string]bool, map[string][]string, [json.RawMessage], *any, or
+// map[string]any is covered here; the clone_overrideextras whitebox guard fails
+// if a future upstream field of one of those types is added without being cloned.
 func cloneOverrideExtras(s *Schema) {
 	if s.Enum != nil {
 		s.Enum = slices.Clone(s.Enum)
@@ -314,6 +328,27 @@ func cloneOverrideExtras(s *Schema) {
 	}
 	if s.Extra != nil {
 		s.Extra = maps.Clone(s.Extra)
+	}
+	if s.Examples != nil {
+		s.Examples = slices.Clone(s.Examples)
+	}
+	if s.Required != nil {
+		s.Required = slices.Clone(s.Required)
+	}
+	if s.Types != nil {
+		s.Types = slices.Clone(s.Types)
+	}
+	if s.PropertyOrder != nil {
+		s.PropertyOrder = slices.Clone(s.PropertyOrder)
+	}
+	if s.Vocabulary != nil {
+		s.Vocabulary = maps.Clone(s.Vocabulary)
+	}
+	if s.DependencyStrings != nil {
+		s.DependencyStrings = maps.Clone(s.DependencyStrings)
+	}
+	if s.DependentRequired != nil {
+		s.DependentRequired = maps.Clone(s.DependentRequired)
 	}
 }
 
@@ -1009,22 +1044,16 @@ func (g *generator) buildFieldSchema(parentType reflect.Type, fi structFieldInfo
 		}
 
 		// A nullable pointer field is generated as anyOf[value, null] with
-		// annotations kept as siblings of anyOf. Const and enum, however, test the
-		// instance value regardless of its type, so on the wrapper they also
-		// reject the permitted null; move them onto the value branch. Type-gated
-		// keywords such as minimum and pattern do not apply to null and stay put.
-		target := fieldSchema
-		if inner := nullableInnerSchema(fieldSchema); inner != nil &&
-			(fieldSchema.Const != nil || fieldSchema.Enum != nil) {
-			inner.Const, fieldSchema.Const = fieldSchema.Const, nil
-			inner.Enum, fieldSchema.Enum = fieldSchema.Enum, nil
-			target = inner
-		}
+		// annotations kept as siblings of anyOf. Const and enum test the instance
+		// value regardless of its type, so on the wrapper they also reject the
+		// permitted null; relocate them onto the value branch. Type-gated keywords
+		// such as minimum and pattern do not apply to null and stay put.
+		target := relocateConstEnumToValueBranch(fieldSchema)
 
 		// An explicit const/enum fully constrains the value, so the type-derived
-		// numeric bounds are redundant. Drop them: those bounds round
-		// MaxInt64/MaxUint64 down to stay representable as float64, so they would
-		// otherwise reject a const/enum set to the type's own boundary value.
+		// numeric bounds are redundant and are dropped. Keeping them would risk
+		// rejecting a const/enum set to the type's own boundary value, and they add
+		// nothing once the value is pinned to a fixed set.
 		if target.Const != nil || target.Enum != nil {
 			target.Minimum = nil
 			target.Maximum = nil
@@ -1071,6 +1100,12 @@ func (g *generator) applyFieldInterpreters(fi structFieldInfo, fieldSchema, pare
 		}
 	}
 
+	// Interpreters set Const/Enum on the field schema, which for a nullable
+	// pointer field is the anyOf wrapper. Const and enum test the instance value
+	// regardless of its type, so on the wrapper they reject the permitted null;
+	// relocate them onto the value branch, matching the jsonschema-tag path.
+	relocateConstEnumToValueBranch(fieldSchema)
+
 	// Wrap bare $ref with allOf for Draft-07 if annotations were added. This
 	// mutates the schema in place, so the entry already in parent.Properties
 	// reflects the change.
@@ -1108,45 +1143,35 @@ func (g *generator) wrapRefForDraft7(s *Schema) *Schema {
 	return s
 }
 
-// hasRefSiblings reports whether a schema has any keywords set beyond just
-// $ref. This includes annotation keywords, validation keywords, and content
-// keywords — all of which can be set by field-level processing (jsonschema
-// struct tag or tag interpreters).
+// hasRefSiblings reports whether a schema has any keyword set beyond just $ref.
+// Any such keyword is a sibling Draft-07 validators ignore alongside $ref, so a
+// constraint added by field-level processing (jsonschema struct tag or tag
+// interpreter) would be silently dropped unless the $ref is wrapped in allOf.
+//
+// Validation, applicator, and content keywords are detected by clearing $ref on
+// a copy and asking [isEmptySchema], the maintained single source of truth for
+// which keywords constrain a value; this catches every constraining keyword,
+// including Not/AllOf/AnyOf/OneOf/Required/Types/If/Then/Else/DependentRequired/
+// DependentSchemas and any future addition, without re-enumerating the list.
+// Annotation and metadata keywords (description, title, default, deprecated,
+// readOnly, writeOnly, examples) and the Extra escape hatch do not constrain a
+// value, so isEmptySchema deliberately ignores them; they are checked
+// explicitly here because they too must be preserved across the allOf wrap.
 func hasRefSiblings(s *Schema) bool {
-	// Annotation keywords.
+	// Annotation and metadata keywords, plus Extra: not constraints, so
+	// isEmptySchema ignores them, but field-level processing can set them and
+	// they must survive the allOf wrap.
 	if s.Description != "" || s.Title != "" || s.Default != nil ||
-		s.Deprecated || s.ReadOnly || s.WriteOnly || len(s.Examples) > 0 {
-		return true
-	}
-	// Numeric validation keywords.
-	if s.Minimum != nil || s.Maximum != nil ||
-		s.ExclusiveMinimum != nil || s.ExclusiveMaximum != nil ||
-		s.MultipleOf != nil {
-		return true
-	}
-	// String validation keywords.
-	if s.MinLength != nil || s.MaxLength != nil ||
-		s.Pattern != "" || s.Format != "" {
-		return true
-	}
-	// Array validation keywords.
-	if s.MinItems != nil || s.MaxItems != nil || s.UniqueItems {
-		return true
-	}
-	// Object validation keywords.
-	if s.MinProperties != nil || s.MaxProperties != nil {
-		return true
-	}
-	// Enum/const keywords.
-	if s.Const != nil || len(s.Enum) > 0 {
-		return true
-	}
-	// Content keywords.
-	if s.ContentMediaType != "" || s.ContentEncoding != "" {
+		s.Deprecated || s.ReadOnly || s.WriteOnly ||
+		len(s.Examples) > 0 || len(s.Extra) > 0 {
 		return true
 	}
 
-	return false
+	// Every constraining keyword: copy, clear $ref, and ask isEmptySchema.
+	withoutRef := *s
+	withoutRef.Ref = ""
+
+	return !isEmptySchema(&withoutRef)
 }
 
 // processAllOfField handles embedded structs that need allOf composition.
@@ -1254,6 +1279,33 @@ func (g *generator) applyNullable(s *Schema, t reflect.Type, nullable bool) *Sch
 			{Type: "null"},
 		},
 	}
+}
+
+// relocateConstEnumToValueBranch moves any Const and Enum keywords set on a
+// nullable pointer field's anyOf wrapper onto its value (non-null) branch and
+// returns the schema that holds them afterward. A pointer field is generated as
+// anyOf[value, {"type":"null"}] with field-level keywords kept as siblings of
+// anyOf. Const and enum test the instance value regardless of its type, so on
+// the wrapper they reject the permitted null; relocating them onto the value
+// branch keeps null valid. Type-gated keywords such as minimum and pattern do
+// not apply to null and stay on the wrapper.
+//
+// When s is not a nullable wrapper, or carries neither Const nor Enum, s is
+// returned unchanged. Each keyword moves only when set on the wrapper, so a nil
+// wrapper keyword never clobbers a value-branch keyword.
+func relocateConstEnumToValueBranch(s *Schema) *Schema {
+	inner := nullableInnerSchema(s)
+	if inner == nil || (s.Const == nil && s.Enum == nil) {
+		return s
+	}
+	if s.Const != nil {
+		inner.Const, s.Const = s.Const, nil
+	}
+	if s.Enum != nil {
+		inner.Enum, s.Enum = s.Enum, nil
+	}
+
+	return inner
 }
 
 // nullableInnerSchema returns the value (non-null) branch of a schema produced

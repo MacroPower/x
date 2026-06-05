@@ -1881,6 +1881,54 @@ func TestGenerateFor_Draft7_RefWithValidateInterpreter(t *testing.T) {
 	}`, string(got))
 }
 
+func TestGenerateFor_Draft7_RefWithInterpreterNot(t *testing.T) {
+	t.Parallel()
+
+	// A bare $ref field that a tag interpreter decorates with a logic keyword
+	// (here validate:"ne=0" sets not:{const:0} on the integer-typed
+	// NonStructProvider) must be wrapped in allOf under Draft-07, or the
+	// validator silently drops the not sibling alongside $ref. The not lands as a
+	// sibling of allOf, never of $ref.
+	type Container struct {
+		Level NonStructProvider `json:"level" validate:"ne=0"`
+	}
+
+	s, err := jsonschema.GenerateFor[Container](
+		jsonschema.WithDraft(jsonschema.Draft7),
+		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+	)
+	require.NoError(t, err)
+
+	// The $ref moved into allOf; not is a sibling of allOf, not of $ref.
+	field := s.Properties["level"]
+	require.Empty(t, field.Ref, "the bare $ref must be wrapped, not left as a sibling of not")
+	require.Len(t, field.AllOf, 1)
+	assert.Equal(t, "#/definitions/NonStructProvider", field.AllOf[0].Ref)
+	require.NotNil(t, field.Not, "not must remain a sibling of allOf")
+
+	got, err := json.Marshal(s)
+	require.NoError(t, err)
+
+	assert.JSONEq(t, `{
+		"$schema":"http://json-schema.org/draft-07/schema#",
+		"type":"object",
+		"properties":{
+			"level":{
+				"allOf":[{"$ref":"#/definitions/NonStructProvider"}],
+				"not":{"const":0}
+			}
+		},
+		"required":["level"],
+		"additionalProperties":false,
+		"definitions":{
+			"NonStructProvider":{
+				"type":"integer",
+				"enum":[1,2,3]
+			}
+		}
+	}`, string(got))
+}
+
 // WithTypeSchemaProvider implements JSONSchemaProvider but will be overridden
 // by WithTypeSchema.
 type WithTypeSchemaProvider struct {

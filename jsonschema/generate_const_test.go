@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/jsonschema"
+	"go.jacobcolvin.com/jsonschema/interpreters/validate"
 )
 
 // TestNullablePointerEnumPermitsNull covers a nullable pointer field carrying an
@@ -41,6 +42,45 @@ func TestNullablePointerEnumPermitsNull(t *testing.T) {
 	assert.NoError(t, v.Validate(map[string]any{"kind": nil}))
 	assert.NoError(t, v.Validate(map[string]any{"kind": "a"}))
 	assert.Error(t, v.Validate(map[string]any{"kind": "z"}))
+}
+
+// TestNullablePointerInterpreterEnumPermitsNull covers a nullable pointer field
+// whose enum is set by a tag interpreter (the validate dialect) rather than the
+// jsonschema struct tag. The interpreter receives the field schema, which for a
+// pointer is the anyOf wrapper; the enum must land on the value branch only, so
+// the permitted null stays valid. On the wrapper, enum (which tests the value
+// regardless of type) would reject null.
+func TestNullablePointerInterpreterEnumPermitsNull(t *testing.T) {
+	t.Parallel()
+
+	type doc struct {
+		Color *string `json:"color,omitempty" validate:"oneof=red green"`
+	}
+
+	s, err := jsonschema.GenerateFor[doc](
+		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+	)
+	require.NoError(t, err)
+
+	got, err := json.Marshal(s)
+	require.NoError(t, err)
+
+	// The enum is on the anyOf value branch, not on the wrapper.
+	assert.JSONEq(t, `{
+		"$schema":"https://json-schema.org/draft/2020-12/schema",
+		"type":"object",
+		"properties":{
+			"color":{"anyOf":[{"type":"string","enum":["red","green"]},{"type":"null"}]}
+		},
+		"additionalProperties":false
+	}`, string(got))
+
+	v, err := jsonschema.Compile(s)
+	require.NoError(t, err)
+	assert.NoError(t, v.Validate(map[string]any{"color": nil}),
+		"null is the value an omitempty pointer field permits")
+	assert.NoError(t, v.Validate(map[string]any{"color": "red"}))
+	assert.Error(t, v.Validate(map[string]any{"color": "purple"}))
 }
 
 // TestIntegerConstAtTypeBoundary covers a const set to a sized integer type's
