@@ -20,6 +20,10 @@ const (
 
 	defaultImage = "gcr.io/projectsigstore/cosign:" + cosignVersion
 
+	// Docker Official Image, pulled from Docker's verified publisher
+	// space on ECR Public to avoid Docker Hub pull rate limits.
+	debianImage = "public.ecr.aws/docker/library/debian:13-slim" // renovate: datasource=docker depName=public.ecr.aws/docker/library/debian
+
 	// binPath is the cosign executable path inside the official image.
 	binPath = "/ko-app/cosign"
 
@@ -189,7 +193,7 @@ func (m *Cosign) signAll(
 // [dagger.Secret] throughout.
 func dockerConfigFile(host, username string, password *dagger.Secret) *dagger.File {
 	return dag.Container().
-		From("debian:13-slim").
+		From(debianImage).
 		WithEnvVariable("REG_HOST", host).
 		WithEnvVariable("REG_USER", username).
 		WithSecretVariable("REG_PASS", password).

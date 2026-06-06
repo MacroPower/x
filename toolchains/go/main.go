@@ -21,6 +21,12 @@ const (
 	golangciLintVersion = "v2.12"   // renovate: datasource=github-releases depName=golangci/golangci-lint
 	deadcodeVersion     = "v0.42.0" // renovate: datasource=go depName=golang.org/x/tools
 
+	// defaultGoImage is the Docker Official golang image, pulled from
+	// Docker's verified publisher space on ECR Public to avoid Docker Hub
+	// pull rate limits. The tag is defaultGoVersion (or the version
+	// constructor argument).
+	defaultGoImage = "public.ecr.aws/docker/library/golang"
+
 	// defaultGitBranch is the branch name written into the synthetic
 	// .git/HEAD when [Go.InjectGitHead] is enabled.
 	defaultGitBranch = "main"
@@ -46,8 +52,8 @@ type Go struct {
 	// Cache volume for Go build artifacts (GOCACHE).
 	BuildCache *dagger.CacheVolume
 	// Base container with Go installed and caches mounted. When nil in
-	// the constructor, a default container is built from the official
-	// golang:<version> image.
+	// the constructor, a default container is built from the Docker
+	// Official golang image at the configured version.
 	Base *dagger.Container
 	// Arguments passed to go build -ldflags.
 	Ldflags []string
@@ -105,7 +111,7 @@ func New(
 	// +optional
 	buildCache *dagger.CacheVolume,
 	// Custom base container with Go installed. When provided, the
-	// default golang:<version> image is not used.
+	// default golang image is not used.
 	// +optional
 	base *dagger.Container,
 	// Additional Debian/Ubuntu packages to install in the default base
@@ -162,7 +168,7 @@ func New(
 		buildCache = dag.CacheVolume(cacheNamespace + ":build")
 	}
 	if base == nil {
-		base = dag.Container().From("golang:" + version)
+		base = dag.Container().From(defaultGoImage + ":" + version)
 		if len(aptPackages) > 0 {
 			cmd := "apt-get update && apt-get install -y --no-install-recommends " + strings.Join(aptPackages, " ")
 			base = base.WithExec([]string{"sh", "-c", cmd})

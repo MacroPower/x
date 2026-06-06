@@ -17,6 +17,11 @@ import (
 const (
 	defaultGoVersion  = "1.26"    // renovate: datasource=golang-version depName=go
 	goreleaserVersion = "v2.13.3" // renovate: datasource=github-releases depName=goreleaser/goreleaser
+
+	// Docker Official Images, pulled from Docker's verified publisher
+	// space on ECR Public to avoid Docker Hub pull rate limits.
+	defaultGoImage = "public.ecr.aws/docker/library/golang"
+	debianImage    = "public.ecr.aws/docker/library/debian:13-slim" // renovate: datasource=docker depName=public.ecr.aws/docker/library/debian
 )
 
 // Goreleaser provides reusable GoReleaser CI primitives. Create instances
@@ -44,7 +49,7 @@ func New(
 	source *dagger.Directory,
 	// Base container to build on, typically the consumer's Go build base
 	// (e.g. the go toolchain's Base()), so GoReleaser reuses its caches and
-	// Go version. When nil, a plain golang:<goVersion> base is used.
+	// Go version. When nil, a plain golang base at goVersion is used.
 	// +optional
 	base *dagger.Container,
 	// Go version for the fallback base image. Only used when base is nil.
@@ -71,7 +76,7 @@ func New(
 		image = "ghcr.io/goreleaser/goreleaser:" + version
 	}
 	if base == nil {
-		base = dag.Container().From("golang:" + goVersion).WithWorkdir("/src")
+		base = dag.Container().From(defaultGoImage + ":" + goVersion).WithWorkdir("/src")
 	}
 	return &Goreleaser{
 		Source:    source,
@@ -192,7 +197,7 @@ func (m *Goreleaser) VerifyBinaryPlatform(
 
 	mntPath := "/mnt/" + name
 	out, err := dag.Container().
-		From("debian:13-slim").
+		From(debianImage).
 		WithExec([]string{"sh", "-c", "apt-get update -qq && apt-get install -y -qq file"}).
 		WithMountedFile(mntPath, bin).
 		WithExec([]string{"file", mntPath}).
