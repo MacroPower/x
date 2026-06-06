@@ -452,12 +452,7 @@ func parseAnyList(val string) []any {
 
 // parseYAMLAny parses a YAML string into any Go value.
 func parseYAMLAny(val string) any {
-	var v any
-
-	err := yaml.Unmarshal([]byte(val), &v)
-	if err != nil {
-		return nil
-	}
+	v, _ := parseYAMLValue(val)
 
 	return v
 }
