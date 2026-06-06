@@ -297,7 +297,10 @@ func (a *Annotator) applyType(schema *jsonschema.Schema, val string) {
 	}
 }
 
-// splitSemicolons splits a line by semicolons, respecting brackets.
+// splitSemicolons splits a line by semicolons, respecting brackets. When the
+// brackets are unbalanced, bracket-aware splitting is unreliable, so the
+// line is split on every semicolon instead -- a malformed value then only
+// corrupts its own pair rather than swallowing every pair after it.
 func splitSemicolons(line string) []string {
 	var (
 		parts   []string
@@ -313,7 +316,9 @@ func splitSemicolons(line string) []string {
 			current.WriteRune(ch)
 
 		case ']', '}':
-			depth--
+			if depth > 0 {
+				depth--
+			}
 
 			current.WriteRune(ch)
 
@@ -332,6 +337,10 @@ func splitSemicolons(line string) []string {
 
 	if current.Len() > 0 {
 		parts = append(parts, current.String())
+	}
+
+	if depth != 0 {
+		return strings.Split(line, ";")
 	}
 
 	return parts
