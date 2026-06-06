@@ -763,6 +763,39 @@ func TestGeneratorFallbackInference(t *testing.T) {
 				assert.Empty(t, name["description"], "annotation-like comment should not become description")
 			},
 		},
+		"schema block content not extracted as plain descriptions": {
+			input: "# Real description\n# @schema\n# type: string\n# @schema\nname: test\n",
+			opts:  []magicschema.Option{magicschema.WithAnnotators()},
+			check: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				name, ok := props["name"].(map[string]any)
+				require.True(t, ok)
+				// Content inside the @schema fences is annotation data, not
+				// prose; only the plain comment becomes the description.
+				assert.Equal(t, "Real description", name["description"])
+			},
+		},
+		"junk-suffix schema fences not extracted as plain descriptions": {
+			input: "# Real description\n# @schema@\n# type: [null, string]\n# @schema@\nname: test\n",
+			opts:  []magicschema.Option{magicschema.WithAnnotators()},
+			check: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				name, ok := props["name"].(map[string]any)
+				require.True(t, ok)
+				// Upstream helm-schema treats any "# @schema"-prefixed line
+				// as a block delimiter, so "@schema@" fences (cilium) hide
+				// their content from fallback descriptions too.
+				assert.Equal(t, "Real description", name["description"])
+			},
+		},
 	}
 
 	for name, tc := range tcs {

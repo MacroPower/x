@@ -152,22 +152,68 @@ func extractFromComment(comment *ast.CommentGroupNode) string {
 // cleanComment strips comment markers and whitespace from a comment string.
 // Multi-line comments are joined with spaces, using only the last comment
 // group (the lines after the last blank line, ignoring trailing blanks).
+// Annotation lines are dropped before group selection: bare @schema and
+// @schema.root lines fence helm-schema blocks whose content is annotation
+// data, not prose, and lines matching [IsAnnotationComment] are markers.
 func cleanComment(s string) string {
-	var parts []string
+	var (
+		lines         []string
+		inSchemaBlock bool
+		inRootBlock   bool
+	)
 
-	for _, line := range LastCommentGroup(strings.Split(s, "\n")) {
+	for line := range strings.SplitSeq(s, "\n") {
 		cleaned := strings.TrimSpace(stripCommentPrefix(line))
-		if cleaned == "" {
+
+		// Track helm-schema block fences so block content never leaks
+		// into descriptions. A root marker inside an open @schema block
+		// is junk content, not a delimiter, and a @schema delimiter also
+		// ends an unclosed @schema.root block, mirroring the dadav
+		// annotator's block extraction. Like upstream helm-schema, junk
+		// suffixes such as "@schema@" still delimit a block; only a
+		// whitespace-separated suffix is excluded, since that form is the
+		// helm-values-schema inline annotation.
+		if after, ok := strings.CutPrefix(cleaned, "@schema.root"); ok {
+			if !inSchemaBlock && after == "" {
+				inRootBlock = !inRootBlock
+			}
+
+			continue
+		}
+
+		if after, ok := strings.CutPrefix(cleaned, "@schema"); ok {
+			if after == "" || (after[0] != ' ' && after[0] != '\t') {
+				inRootBlock = false
+				inSchemaBlock = !inSchemaBlock
+			}
+
+			// Inline @schema annotations (helm-values-schema format) are
+			// annotation markers either way.
+			continue
+		}
+
+		if inSchemaBlock || inRootBlock {
 			continue
 		}
 
 		// Skip annotation markers from any supported annotator format so
-		// they never leak into descriptions.
-		if IsAnnotationComment(cleaned) {
+		// they never leak into descriptions. Blank lines stay: they
+		// separate comment groups.
+		if cleaned != "" && IsAnnotationComment(cleaned) {
 			continue
 		}
 
-		parts = append(parts, cleaned)
+		lines = append(lines, cleaned)
+	}
+
+	var parts []string
+
+	for _, line := range LastCommentGroup(lines) {
+		if line == "" {
+			continue
+		}
+
+		parts = append(parts, line)
 	}
 
 	return strings.Join(parts, " ")
