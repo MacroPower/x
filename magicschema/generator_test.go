@@ -2,8 +2,11 @@ package magicschema_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -862,6 +865,37 @@ func TestGeneratorRootAdditionalPropertiesNonObject(t *testing.T) {
 			assert.Nil(t, got["additionalProperties"],
 				"non-object root should not have additionalProperties")
 		})
+	}
+}
+
+func TestGeneratorAliasFanOut(t *testing.T) {
+	t.Parallel()
+
+	// Chained anchors that each reference the previous level twice expand
+	// to 2^n node visits. Without a visit budget this hangs for minutes;
+	// with it, the walk cuts off and fails open.
+	var sb strings.Builder
+
+	sb.WriteString("l0: &l0 {a: 1}\n")
+
+	for i := 1; i <= 25; i++ {
+		fmt.Fprintf(&sb, "l%d: &l%d {x: *l%d, y: *l%d}\n", i, i, i-1, i-1)
+	}
+
+	done := make(chan error, 1)
+
+	go func() {
+		gen := magicschema.NewGenerator()
+		_, err := gen.Generate([]byte(sb.String()))
+
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(30 * time.Second):
+		t.Fatal("alias fan-out was not bounded: Generate did not return within 30s")
 	}
 }
 

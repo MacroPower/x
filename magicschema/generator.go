@@ -31,12 +31,22 @@ type Generator struct {
 	// Walk recursion depth on the per-document copy of the Generator,
 	// bounding alias cycles and nesting deeper than maxWalkDepth.
 	depth int
+
+	// Walked node count on the per-document copy of the Generator,
+	// bounding total work when aliases fan out exponentially (chained
+	// anchors each referenced multiple times, billion-laughs style).
+	visits int
 }
 
 // maxWalkDepth bounds schema-walk recursion. YAML alias cycles (an anchor
 // whose subtree aliases back to itself) would otherwise recurse forever;
 // subtrees past the bound fail open to the empty schema.
 const maxWalkDepth = 1000
+
+// maxNodeVisits bounds the total nodes walked per document. The depth bound
+// alone cannot stop exponential alias fan-out, which grows breadth rather
+// than depth; subtrees past the budget fail open to the empty schema.
+const maxNodeVisits = 500_000
 
 // Option configures a Generator.
 type Option func(*Generator)
@@ -233,7 +243,9 @@ func (g *Generator) walkNode(
 	g.depth++
 	defer func() { g.depth-- }()
 
-	if g.depth > maxWalkDepth {
+	g.visits++
+
+	if g.depth > maxWalkDepth || g.visits > maxNodeVisits {
 		return &jsonschema.Schema{}
 	}
 
@@ -266,7 +278,9 @@ func (g *Generator) walkMapping(
 	g.depth++
 	defer func() { g.depth-- }()
 
-	if g.depth > maxWalkDepth {
+	g.visits++
+
+	if g.depth > maxWalkDepth || g.visits > maxNodeVisits {
 		return &jsonschema.Schema{}
 	}
 

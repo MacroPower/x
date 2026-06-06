@@ -44,8 +44,9 @@
 //     the same as multiple input files. Empty files produce the "true" schema
 //     (validates everything). YAML anchors and aliases are resolved by
 //     walking the AST; alias cycles and pathologically deep nesting are cut
-//     off by a recursion bound, with the affected subtree failing open to
-//     the empty schema.
+//     off by a recursion bound, exponential alias fan-out (billion-laughs
+//     style documents) by a node-visit budget, and the affected subtree
+//     fails open to the empty schema.
 //
 //  2. Extract annotations: the YAML node tree is walked depth-first.
 //     For each key-value pair, all enabled annotators run against the
