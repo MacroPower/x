@@ -16,7 +16,7 @@ import (
 
 const (
 	defaultGoVersion  = "1.26"    // renovate: datasource=golang-version depName=go
-	goreleaserVersion = "v2.13.3" // renovate: datasource=github-releases depName=goreleaser/goreleaser
+	goreleaserVersion = "v2.16.0" // renovate: datasource=github-releases depName=goreleaser/goreleaser
 
 	// Docker Official Images, pulled from Docker's verified publisher
 	// space on ECR Public to avoid Docker Hub pull rate limits.
