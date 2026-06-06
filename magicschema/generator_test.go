@@ -868,6 +868,54 @@ func TestGeneratorRootAdditionalPropertiesNonObject(t *testing.T) {
 	}
 }
 
+func TestGeneratorDepthBoundUniform(t *testing.T) {
+	t.Parallel()
+
+	// 600 nested mappings sit beyond half the walk bound but within the
+	// bound itself. The walk used to consume two depth units per level on
+	// the plain-nesting path (walkNode and walkMapping each counted),
+	// cutting off at ~500 levels instead of the documented 1000.
+	const levels = 600
+
+	var sb strings.Builder
+
+	for i := range levels {
+		sb.WriteString(strings.Repeat("  ", i))
+		fmt.Fprintf(&sb, "l%d:\n", i)
+	}
+
+	sb.WriteString(strings.Repeat("  ", levels))
+	sb.WriteString("leaf: 1\n")
+
+	gen := magicschema.NewGenerator()
+	schema, err := gen.Generate([]byte(sb.String()))
+	require.NoError(t, err)
+
+	out, err := json.Marshal(schema)
+	require.NoError(t, err)
+
+	var got map[string]any
+
+	require.NoError(t, json.Unmarshal(out, &got))
+
+	cur := got
+
+	for i := range levels {
+		props, ok := cur["properties"].(map[string]any)
+		require.True(t, ok, "missing properties at level %d", i)
+
+		cur, ok = props[fmt.Sprintf("l%d", i)].(map[string]any)
+		require.True(t, ok, "missing property l%d", i)
+	}
+
+	props, ok := cur["properties"].(map[string]any)
+	require.True(t, ok, "leaf level was cut off by the depth bound")
+
+	leaf, ok := props["leaf"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "integer", leaf["type"])
+}
+
 func TestGeneratorAliasFanOut(t *testing.T) {
 	t.Parallel()
 

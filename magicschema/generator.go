@@ -38,9 +38,11 @@ type Generator struct {
 	visits int
 }
 
-// maxWalkDepth bounds schema-walk recursion. YAML alias cycles (an anchor
+// maxWalkDepth bounds schema-walk recursion, counted once per container
+// nesting level (mapping or sequence items). YAML alias cycles (an anchor
 // whose subtree aliases back to itself) would otherwise recurse forever;
-// subtrees past the bound fail open to the empty schema.
+// every such cycle passes through a container walker, and subtrees past
+// the bound fail open to the empty schema.
 const maxWalkDepth = 1000
 
 // maxNodeVisits bounds the total nodes walked per document. The depth bound
@@ -234,18 +236,19 @@ func prepareAnnotators(annotators []Annotator, content []byte) []Annotator {
 	return prepared
 }
 
-// walkNode recursively generates a schema from a YAML AST node.
+// walkNode recursively generates a schema from a YAML AST node. Depth is
+// counted by the container walkers (walkMapping, inferItemsFromSequence)
+// rather than here, so every recursion path -- including direct calls into
+// the container walkers from merge-key and annotation handling -- consumes
+// exactly one depth unit per nesting level.
 func (g *Generator) walkNode(
 	node ast.Node,
 	keyPath string,
 	anchors map[string]ast.Node,
 ) *jsonschema.Schema {
-	g.depth++
-	defer func() { g.depth-- }()
-
 	g.visits++
 
-	if g.depth > maxWalkDepth || g.visits > maxNodeVisits {
+	if g.visits > maxNodeVisits {
 		return &jsonschema.Schema{}
 	}
 
@@ -525,12 +528,23 @@ func (g *Generator) walkSequence(
 	}
 }
 
-// inferItemsFromSequence infers the items schema from a sequence node's values.
+// inferItemsFromSequence infers the items schema from a sequence node's
+// values. Returning nil leaves the items constraint unset, which both the
+// empty-sequence case and the depth cutoff use to fail open.
 func (g *Generator) inferItemsFromSequence(
 	seq *ast.SequenceNode,
 	keyPath string,
 	anchors map[string]ast.Node,
 ) *jsonschema.Schema {
+	g.depth++
+	defer func() { g.depth-- }()
+
+	g.visits++
+
+	if g.depth > maxWalkDepth || g.visits > maxNodeVisits {
+		return nil
+	}
+
 	if len(seq.Values) == 0 {
 		return nil
 	}
