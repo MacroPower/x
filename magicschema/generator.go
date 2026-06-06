@@ -25,7 +25,16 @@ type Generator struct {
 	id          string
 	annotators  []Annotator
 	strict      bool
+
+	// Walk recursion depth on the per-document copy of the Generator,
+	// bounding alias cycles and nesting deeper than maxWalkDepth.
+	depth int
 }
+
+// maxWalkDepth bounds schema-walk recursion. YAML alias cycles (an anchor
+// whose subtree aliases back to itself) would otherwise recurse forever;
+// subtrees past the bound fail open to the empty schema.
+const maxWalkDepth = 1000
 
 // Option configures a Generator.
 type Option func(*Generator)
@@ -200,6 +209,13 @@ func (g *Generator) walkNode(
 	keyPath string,
 	anchors map[string]ast.Node,
 ) *jsonschema.Schema {
+	g.depth++
+	defer func() { g.depth-- }()
+
+	if g.depth > maxWalkDepth {
+		return &jsonschema.Schema{}
+	}
+
 	node = resolveAliases(node, anchors)
 	node = unwrapNode(node)
 
@@ -226,6 +242,13 @@ func (g *Generator) walkMapping(
 	anchors map[string]ast.Node,
 	extraValues ...*ast.MappingValueNode,
 ) *jsonschema.Schema {
+	g.depth++
+	defer func() { g.depth-- }()
+
+	if g.depth > maxWalkDepth {
+		return &jsonschema.Schema{}
+	}
+
 	schema := &jsonschema.Schema{
 		Type:       typeObject,
 		Properties: make(map[string]*jsonschema.Schema),
