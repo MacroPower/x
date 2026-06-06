@@ -127,7 +127,7 @@ func (g *Generator) Generate(inputs ...[]byte) (*jsonschema.Schema, error) {
 	result.Schema = "http://json-schema.org/draft-07/schema#"
 
 	// Apply root schema from annotators (before CLI flag overrides).
-	applyRootAnnotations(result, roots)
+	applyRootAnnotations(result, roots, g.strict)
 
 	if g.title != "" {
 		result.Title = g.title
@@ -584,9 +584,12 @@ func (g *Generator) annotate(node ast.Node, keyPath string) *AnnotationResult {
 // examples, deprecated, readOnly, writeOnly, additionalProperties, and x-*
 // custom annotations. AdditionalProperties overrides the structural default
 // already set during the walk, so the first annotator that sets it wins
-// rather than the first non-nil check.
-func applyRootAnnotations(schema *jsonschema.Schema, roots []RootAnnotator) {
-	apSet := false
+// rather than the first non-nil check -- except in strict mode, where the
+// generator-level setting outranks annotators (per the documented rule that
+// CLI-level values override annotator values) and the root keeps the
+// FalseSchema set during the walk.
+func applyRootAnnotations(schema *jsonschema.Schema, roots []RootAnnotator, strict bool) {
+	apSet := strict
 
 	for _, ra := range roots {
 		root := ra.RootSchema()

@@ -470,7 +470,9 @@ func TestHelmSchemaRootAnnotation(t *testing.T) {
 				assert.Equal(t, false, got["additionalProperties"])
 			},
 		},
-		"root additionalProperties overrides strict": {
+		"strict outranks root additionalProperties": {
+			// CLI-level settings override annotator values, so a root
+			// block cannot reopen a schema the user locked down.
 			input: stringtest.Input(`
 				# @schema.root
 				# additionalProperties: true
@@ -485,7 +487,7 @@ func TestHelmSchemaRootAnnotation(t *testing.T) {
 			},
 			want: func(t *testing.T, got map[string]any) {
 				t.Helper()
-				assert.Equal(t, true, got["additionalProperties"])
+				assert.Equal(t, false, got["additionalProperties"])
 			},
 		},
 		"non-propagated fields ignored from root": {

@@ -865,6 +865,31 @@ func TestGeneratorRootAdditionalPropertiesNonObject(t *testing.T) {
 	}
 }
 
+func TestGeneratorStrictRootAdditionalProperties(t *testing.T) {
+	t.Parallel()
+
+	// A @schema.root block setting additionalProperties: true must not
+	// defeat strict mode: the generator-level setting outranks annotators.
+	input := "# @schema.root\n# additionalProperties: true\n# @schema.root\nreplicas: 3\n"
+
+	gen := magicschema.NewGenerator(
+		magicschema.WithStrict(true),
+		magicschema.WithAnnotators(dadav.New()),
+	)
+	schema, err := gen.Generate([]byte(input))
+	require.NoError(t, err)
+
+	out, err := json.Marshal(schema)
+	require.NoError(t, err)
+
+	var got map[string]any
+
+	require.NoError(t, json.Unmarshal(out, &got))
+
+	assert.Equal(t, false, got["additionalProperties"],
+		"strict mode must keep the root additionalProperties false")
+}
+
 func TestConfigNewGeneratorUnknownAnnotator(t *testing.T) {
 	t.Parallel()
 
