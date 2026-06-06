@@ -111,8 +111,11 @@ func mergeAnnotations(results []*AnnotationResult) *AnnotationResult {
 	return merged
 }
 
-// copySchema returns a shallow copy of s with its own Extra map, so in-place
-// merging of the copy never mutates the original.
+// copySchema returns a shallow copy of s with its own Extra map. The copy
+// supports the two mutations merging performs -- field reassignment and
+// writes into Extra -- without reaching the original. All other map, slice,
+// and sub-schema fields still alias the original, so downstream code must
+// only reassign those fields on the copy, never write into their contents.
 func copySchema(s *jsonschema.Schema) *jsonschema.Schema {
 	if s == nil {
 		return nil

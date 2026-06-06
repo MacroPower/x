@@ -24,6 +24,11 @@ import (
 // Combinators and references ($ref, allOf/anyOf/oneOf, not) are dropped
 // entirely, which is the most permissive behavior; the if/then/else
 // conditional is kept as a unit when both sides agree exactly.
+//
+// The result aliases sub-structures of both inputs (one-sided properties,
+// items, and kept-when-equal keywords are not cloned), so neither the
+// inputs nor the merged result's shared contents may be mutated in place
+// afterward; reassigning top-level fields on the result is safe.
 func mergeSchemas(a, b *jsonschema.Schema) *jsonschema.Schema {
 	if a == nil {
 		return b
