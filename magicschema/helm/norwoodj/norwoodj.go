@@ -370,7 +370,9 @@ func (a *Annotator) Annotate(node ast.Node, keyPath string) *magicschema.Annotat
 	}
 
 	if entry.defaultVal != nil {
-		schema.Default = magicschema.DefaultValue(*entry.defaultVal)
+		// @default values are YAML expressions, so numbers, booleans, and
+		// objects keep their native types (matching the bitnami annotator).
+		schema.Default = magicschema.ParseYAMLValue(*entry.defaultVal)
 	}
 
 	return &magicschema.AnnotationResult{Schema: schema}

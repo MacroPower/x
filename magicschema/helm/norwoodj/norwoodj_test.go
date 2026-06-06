@@ -333,6 +333,26 @@ func TestHelmDocsAnnotator(t *testing.T) {
 				assert.Equal(t, "custom-value", v["default"])
 			},
 		},
+		"default override keeps native yaml types": {
+			input: stringtest.Input(`
+				# @default -- 80
+				# -- Port number
+				port: 8080
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				p, ok := props["port"].(map[string]any)
+				require.True(t, ok)
+
+				// @default values parse as YAML, so numbers stay numeric
+				// instead of being quoted as JSON strings.
+				assert.InEpsilon(t, float64(80), p["default"], 0.0001)
+			},
+		},
 		"notationType does not leak into continuation": {
 			input: stringtest.Input(`
 				# -- Description of value
