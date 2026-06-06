@@ -17,13 +17,13 @@ func mergeSchemas(a, b *jsonschema.Schema) *jsonschema.Schema {
 
 	result := &jsonschema.Schema{}
 
-	// Merge types.
-	typeA := schemaType(a)
-	typeB := schemaType(b)
-	merged := widenType(typeA, typeB)
-
-	if merged != "" {
-		result.Type = merged
+	// Merge types with widening.
+	switch merged := widenTypeList(typeList(a), typeList(b)); len(merged) {
+	case 0:
+	case 1:
+		result.Type = merged[0]
+	default:
+		result.Types = merged
 	}
 
 	// Merge metadata: prefer a, fall back to b.

@@ -16,6 +16,7 @@ const (
 	typeString  = "string"
 	typeArray   = "array"
 	typeObject  = "object"
+	typeNull    = "null"
 )
 
 // inferType returns the JSON Schema type string for the given YAML AST node.
@@ -248,6 +249,104 @@ func widenType(a, b string) string {
 
 	// All other combinations -> no constraint.
 	return ""
+}
+
+// typeList returns a schema's type constraint as a list: the scalar Type
+// field as a single-element list, or the Types union as-is.
+func typeList(s *jsonschema.Schema) []string {
+	if s.Type != "" {
+		return []string{s.Type}
+	}
+
+	return s.Types
+}
+
+// widenTypeList merges two type lists, generalizing [widenType] to type
+// unions. An empty list (no constraint) adopts the other side, matching the
+// "null means the value was empty in one file" rule, and the "null" member
+// carries through whenever either side allows null. Beyond that, identical
+// sets merge, all-numeric sets widen to number, and anything else drops the
+// constraint entirely (fail open).
+func widenTypeList(a, b []string) []string {
+	if len(a) == 0 {
+		return b
+	}
+
+	if len(b) == 0 {
+		return a
+	}
+
+	coreA, nullA := splitNullType(a)
+	coreB, nullB := splitNullType(b)
+
+	var core []string
+
+	switch {
+	case len(coreA) == 0:
+		core = coreB
+	case len(coreB) == 0:
+		core = coreA
+	case sameStringSet(coreA, coreB):
+		core = coreA
+	case allNumeric(coreA) && allNumeric(coreB):
+		core = []string{typeNumber}
+	default:
+		return nil
+	}
+
+	if nullA || nullB {
+		core = append(slices.Clone(core), typeNull)
+	}
+
+	return core
+}
+
+// splitNullType separates the "null" member from a type list, returning the
+// remaining types and whether null was present.
+func splitNullType(types []string) ([]string, bool) {
+	var (
+		core     []string
+		nullable bool
+	)
+
+	for _, t := range types {
+		if t == typeNull {
+			nullable = true
+
+			continue
+		}
+
+		core = append(core, t)
+	}
+
+	return core, nullable
+}
+
+// sameStringSet reports whether two slices contain the same elements,
+// ignoring order.
+func sameStringSet(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+
+	for _, s := range a {
+		if !slices.Contains(b, s) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// allNumeric reports whether every type in the list is integer or number.
+func allNumeric(types []string) bool {
+	for _, t := range types {
+		if t != typeInteger && t != typeNumber {
+			return false
+		}
+	}
+
+	return true
 }
 
 // isObjectType checks if a schema represents an object type via Types array.
