@@ -157,6 +157,8 @@ func (g *Generator) generateSingle(input []byte) (*jsonschema.Schema, []Annotato
 		return TrueSchema(), nil, nil
 	}
 
+	input = dropEmptyDocuments(input)
+
 	file, err := parser.ParseBytes(input, parser.ParseComments)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: %w", ErrInvalidYAML, err)
@@ -733,6 +735,51 @@ func resolveAliases(node ast.Node, anchors map[string]ast.Node) ast.Node {
 
 	// Unresolvable alias treated as null.
 	return nil
+}
+
+// dropEmptyDocuments removes empty documents from a multi-document YAML
+// stream by collapsing each "---" separator that is followed, across blank
+// lines only, by another separator. The goccy/go-yaml parser stops emitting
+// documents after an empty one ("a: 1\n---\n\n---\nb: 2" parses as two
+// documents, losing b entirely), and empty documents contribute nothing to
+// the union (a nil document body is skipped), so removing them up front
+// preserves semantics while keeping later documents in the stream.
+func dropEmptyDocuments(input []byte) []byte {
+	lines := bytes.Split(input, []byte("\n"))
+
+	out := make([][]byte, 0, len(lines))
+
+	for i := 0; i < len(lines); i++ {
+		if !isSeparatorLine(lines[i]) {
+			out = append(out, lines[i])
+
+			continue
+		}
+
+		// Look ahead past blank lines; a following separator means this
+		// separator opens an empty document, so drop it and the blanks.
+		j := i + 1
+		for j < len(lines) && isBlank(lines[j]) {
+			j++
+		}
+
+		if j < len(lines) && isSeparatorLine(lines[j]) {
+			i = j - 1
+
+			continue
+		}
+
+		out = append(out, lines[i])
+	}
+
+	return bytes.Join(out, []byte("\n"))
+}
+
+// isSeparatorLine reports whether a line is a bare YAML document separator:
+// "---" with nothing but trailing whitespace. A separator carrying content
+// ("--- value") opens a non-empty document and is not bare.
+func isSeparatorLine(line []byte) bool {
+	return bytes.Equal(bytes.TrimRight(line, " \t\r"), []byte("---"))
 }
 
 // isBlank returns true if the byte slice contains only whitespace.

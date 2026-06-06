@@ -865,6 +865,48 @@ func TestGeneratorRootAdditionalPropertiesNonObject(t *testing.T) {
 	}
 }
 
+func TestGeneratorEmptyMidStreamDocument(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+	}{
+		"blank document mid-stream": {
+			input: "foo: 1\n---\n\n---\nbar: 2\n",
+		},
+		"consecutive separators": {
+			input: "foo: 1\n---\n---\nbar: 2\n",
+		},
+		"multiple empty documents": {
+			input: "foo: 1\n---\n\n---\n\n---\nbar: 2\n",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			gen := magicschema.NewGenerator()
+			schema, err := gen.Generate([]byte(tc.input))
+			require.NoError(t, err)
+
+			out, err := json.Marshal(schema)
+			require.NoError(t, err)
+
+			var got map[string]any
+
+			require.NoError(t, json.Unmarshal(out, &got))
+
+			props, ok := got["properties"].(map[string]any)
+			require.True(t, ok)
+
+			// Documents after an empty one must stay in the union.
+			assert.Contains(t, props, "foo")
+			assert.Contains(t, props, "bar")
+		})
+	}
+}
+
 func TestGeneratorByteOrderMark(t *testing.T) {
 	t.Parallel()
 
