@@ -3,6 +3,8 @@ version: "3"
 set: [errexit, nounset, pipefail]
 shopt: [globstar]
 
+# The .taskfiles/ segmentation is intentional, even where a namespace holds
+# only thin Dagger wrappers — do not flatten it into this file.
 includes:
   dev: ./.taskfiles/dev/Taskfile.yaml
   fmt: ./.taskfiles/fmt/Taskfile.yaml
@@ -10,13 +12,24 @@ includes:
   git: ./.taskfiles/git/Taskfile.yaml
   go: ./.taskfiles/go/Taskfile.yaml
 
+vars:
+  # Shared toolchain modules with a tests/ submodule. Keep this list in
+  # sync with the directories under toolchains/ and the toolchains matrix
+  # in .github/workflows/validate.yaml.
+  TOOLCHAIN_MODULES: bench cosign devbox go goreleaser prettier security syft zizmor
+
 tasks:
   default:
     cmd: task -l
 
   format:
-    desc: Runs all format targets
-    deps: [go:format, fmt:format]
+    desc: Formats, tidies, and generates code via Dagger
+    summary: |
+      Runs every registered Dagger generator (go:tidy, go:generate,
+      ci:format) and applies the changes. Supersedes go:format and
+      fmt:format, which remain for selective runs.
+    cmds:
+      - dagger generate --auto-apply
 
   lint:
     desc: Runs all lint targets
@@ -30,16 +43,28 @@ tasks:
     desc: Runs all test targets
     deps: [go:test]
 
+  test:toolchains:
+    desc: Runs every toolchain's fixture tests via Dagger
+    cmds:
+      - for: { var: TOOLCHAIN_MODULES }
+        cmd: dagger call -m toolchains/{{.ITEM}}/tests all
+
+  check:
+    desc: Runs all checks via Dagger
+    cmds:
+      - dagger check
+
+  scan:
+    desc: Scans source dependencies for vulnerabilities via Dagger
+    cmds:
+      - dagger call security scan-source
+
   pre-commit:
     desc: Runs all pre-commit targets
     cmds:
       - task: format
       - task: lint
       - task: test
-
-  build:
-    desc: Runs all build targets
-    deps: [go:build]
 
   install:
     desc: Runs all install targets

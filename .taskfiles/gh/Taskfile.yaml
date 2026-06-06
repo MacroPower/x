@@ -6,21 +6,17 @@ shopt: [globstar]
 tasks:
   renovate:lint:
     internal: true
-    desc: Lints Renovate configuration
-    sources:
-      - .github/renovate.json5
+    desc: Validates the Renovate configuration via Dagger
     cmds:
-      - renovate-config-validator .github/renovate.json5
+      - dagger check ci:lint-renovate
 
   actions:lint:
     internal: true
-    desc: Lints GitHub Actions
-    sources:
-      - .github/workflows/*.yaml
-      - .github/zizmor.yaml
+    desc: Lints GitHub Actions workflows via Dagger
     cmds:
-      - zizmor .github/workflows --config .github/zizmor.yaml
+      - dagger check zizmor:lint
 
   lint:
-    desc: Lints GitHub configuration
-    deps: [renovate:lint, actions:lint]
+    desc: Lints GitHub configuration via Dagger
+    cmds:
+      - dagger check zizmor:lint ci:lint-renovate
