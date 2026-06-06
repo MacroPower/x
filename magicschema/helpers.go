@@ -35,8 +35,10 @@ func FalseSchema() *jsonschema.Schema {
 	return &jsonschema.Schema{Not: &jsonschema.Schema{}}
 }
 
-// ToSubSchema converts a map[string]any to a [*jsonschema.Schema] by marshaling
-// through JSON.
+// ToSubSchema converts an arbitrary Go value (a map[string]any, bool, or any
+// other JSON-marshalable value) to a [*jsonschema.Schema] by round-tripping
+// through JSON. Returns nil for values that do not survive the round trip
+// (annotation parse failures are skipped, never fatal).
 func ToSubSchema(val any) *jsonschema.Schema {
 	if val == nil {
 		return nil
