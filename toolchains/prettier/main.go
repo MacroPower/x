@@ -119,7 +119,8 @@ func (m *Prettier) Lint(
 }
 
 // Format rewrites the configured patterns in place and returns a Changeset of
-// the modifications, for the consumer to apply or merge with other formatters.
+// the modifications, for the consumer to apply or merge with other formatters
+// (e.g. gofmt) in its own +generate function.
 func (m *Prettier) Format(
 	// Prettier config path, relative to the source root. Defaults to the
 	// configured path.

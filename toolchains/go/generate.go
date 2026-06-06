@@ -9,6 +9,11 @@ import (
 
 // FormatGo runs golangci-lint --fix across all discovered Go modules and
 // returns the merged changeset of Go source file changes.
+//
+// Not annotated +generate: consumers register this toolchain directly and
+// typically compose FormatGo into their own +generate Format alongside other
+// formatters (e.g. prettier); annotating it here would run golangci-lint
+// --fix twice and merge overlapping changesets under dagger generate.
 func (m *Go) FormatGo(
 	ctx context.Context,
 	// Include only modules whose directory matches one of these globs.
