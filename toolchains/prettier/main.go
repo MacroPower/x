@@ -13,7 +13,7 @@ const (
 	// Docker Official Image, pulled from Docker's verified publisher
 	// space on ECR Public to avoid Docker Hub pull rate limits.
 	defaultImage   = "public.ecr.aws/docker/library/node:22-slim" // renovate: datasource=docker depName=public.ecr.aws/docker/library/node
-	defaultVersion = "3.5.3"        // renovate: datasource=npm depName=prettier
+	defaultVersion = "3.8.3"        // renovate: datasource=npm depName=prettier
 
 	defaultConfigPath     = "./.prettierrc.yaml"
 	defaultCacheNamespace = "go.jacobcolvin.com/x/toolchains/prettier"
