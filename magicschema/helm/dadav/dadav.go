@@ -247,7 +247,7 @@ func (a *Annotator) applyField(schema *jsonschema.Schema, result *magicschema.An
 	case "contains":
 		schema.Contains = magicschema.ToSubSchema(val)
 	case "additionalItems":
-		schema.AdditionalItems = toAdditionalItems(val)
+		schema.AdditionalItems = toAdditionalProperties(val)
 	case "dependencies":
 		applyDependencies(schema, val)
 	case "definitions":
@@ -603,25 +603,9 @@ func applyDependencies(schema *jsonschema.Schema, val any) {
 	}
 }
 
-// toAdditionalItems converts a value to an additionalItems schema.
-// Upstream supports both boolean and schema values for additionalItems.
-func toAdditionalItems(val any) *jsonschema.Schema {
-	switch v := val.(type) {
-	case bool:
-		if v {
-			return magicschema.TrueSchema()
-		}
-
-		return magicschema.FalseSchema()
-
-	case map[string]any:
-		return magicschema.ToSubSchema(v)
-	}
-
-	return nil
-}
-
-// toAdditionalProperties converts a value to an additionalProperties schema.
+// toAdditionalProperties converts a value to an additionalProperties or
+// additionalItems schema. Upstream supports both boolean and schema values
+// for either field.
 func toAdditionalProperties(val any) *jsonschema.Schema {
 	switch v := val.(type) {
 	case bool:
