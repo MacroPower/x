@@ -490,6 +490,34 @@ func TestHelmSchemaRootAnnotation(t *testing.T) {
 				assert.Equal(t, false, got["additionalProperties"])
 			},
 		},
+		"root marker inside schema block is junk": {
+			// A bare @schema.root line between @schema delimiters must
+			// not toggle root state and swallow the rest of the block.
+			input: stringtest.Input(`
+				# @schema
+				# type: string
+				# @schema.root
+				# title: mytitle
+				# @schema
+				replicas: 3
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				replicas, ok := props["replicas"].(map[string]any)
+				require.True(t, ok)
+
+				// Both lines around the junk marker stay in the block.
+				assert.Equal(t, "string", replicas["type"])
+				assert.Equal(t, "mytitle", replicas["title"])
+
+				// Nothing leaks into the root schema.
+				assert.Nil(t, got["title"])
+			},
+		},
 		"non-propagated fields ignored from root": {
 			input: stringtest.Input(`
 				# @schema.root

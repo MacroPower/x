@@ -299,8 +299,10 @@ func extractSchemaBlock(comment string) string {
 
 		// Check for @schema.root delimiter (toggle root block state).
 		// Lines with trailing content are not delimiters and are skipped.
+		// Inside an open @schema block the marker is junk content, not a
+		// delimiter: toggling there would swallow the rest of the block.
 		if after, ok := strings.CutPrefix(stripped, "@schema.root"); ok {
-			if strings.TrimSpace(after) == "" {
+			if !inBlock && strings.TrimSpace(after) == "" {
 				inRootBlock = !inRootBlock
 			}
 
@@ -355,8 +357,9 @@ func extractSchemaRootBlock(comment string) string {
 	lines := strings.Split(comment, "\n")
 
 	var (
-		inBlock bool
-		content []string
+		inBlock       bool
+		inSchemaBlock bool
+		content       []string
 	)
 
 	for _, line := range lines {
@@ -375,6 +378,12 @@ func extractSchemaRootBlock(comment string) string {
 				continue
 			}
 
+			// Inside an open @schema block the marker is junk content,
+			// not a delimiter, mirroring extractSchemaBlock.
+			if inSchemaBlock {
+				continue
+			}
+
 			if inBlock {
 				break // Closing delimiter.
 			}
@@ -384,10 +393,18 @@ func extractSchemaRootBlock(comment string) string {
 			continue
 		}
 
-		// A bare @schema delimiter ends an unclosed root block: root
-		// content cannot extend into schema blocks.
-		if after, ok := strings.CutPrefix(stripped, "@schema"); ok && inBlock && strings.TrimSpace(after) == "" {
-			break
+		// A bare @schema delimiter ends an unclosed root block (root
+		// content cannot extend into schema blocks) and otherwise toggles
+		// schema-block state so root markers inside a schema block are
+		// ignored as junk.
+		if after, ok := strings.CutPrefix(stripped, "@schema"); ok && strings.TrimSpace(after) == "" {
+			if inBlock {
+				break
+			}
+
+			inSchemaBlock = !inSchemaBlock
+
+			continue
 		}
 
 		if inBlock {
@@ -435,8 +452,10 @@ func extractNonAnnotationDescription(comment string) string {
 			rest := strings.TrimSpace(after)
 
 			// Check for @schema.root delimiter (no trailing content).
+			// Inside an open @schema block the marker is junk content,
+			// not a delimiter, mirroring extractSchemaBlock.
 			if rootAfter, isRoot := strings.CutPrefix(rest, ".root"); isRoot {
-				if strings.TrimSpace(rootAfter) == "" {
+				if !inSchemaBlock && strings.TrimSpace(rootAfter) == "" {
 					inRootBlock = !inRootBlock
 				}
 
