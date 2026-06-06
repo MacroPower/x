@@ -241,37 +241,31 @@ func mergeAdditionalProperties(a, b *jsonschema.Schema) *jsonschema.Schema {
 	return mergeSchemas(a, b)
 }
 
-// isTrueSchema checks if a schema is the "true" schema (validates everything).
+// isTrueSchema checks if a schema is the "true" schema (validates
+// everything): the zero schema with no constraints, metadata, or extensions
+// at all. A schema carrying only value constraints (pattern, enum, const,
+// bounds) or x-* annotations is not "true" -- collapsing it would silently
+// drop the constraint.
 func isTrueSchema(s *jsonschema.Schema) bool {
 	if s == nil {
 		return false
 	}
 
-	return s.Not == nil &&
-		s.Type == "" &&
-		len(s.Types) == 0 &&
-		s.Properties == nil &&
-		s.Items == nil &&
-		len(s.AllOf) == 0 &&
-		len(s.AnyOf) == 0 &&
-		len(s.OneOf) == 0
+	return reflect.DeepEqual(*s, jsonschema.Schema{})
 }
 
 // isFalseSchema checks if a schema is the "false" schema (validates nothing),
-// i.e. exactly {"not": {}} as produced by [FalseSchema].
+// i.e. exactly {"not": {}} as produced by [FalseSchema], with no other
+// constraints, metadata, or extensions.
 func isFalseSchema(s *jsonschema.Schema) bool {
-	if s == nil || s.Not == nil {
+	if s == nil || !isTrueSchema(s.Not) {
 		return false
 	}
 
-	return isTrueSchema(s.Not) &&
-		s.Type == "" &&
-		len(s.Types) == 0 &&
-		s.Properties == nil &&
-		s.Items == nil &&
-		len(s.AllOf) == 0 &&
-		len(s.AnyOf) == 0 &&
-		len(s.OneOf) == 0
+	c := *s
+	c.Not = nil
+
+	return reflect.DeepEqual(c, jsonschema.Schema{})
 }
 
 // intersectStrings returns the intersection of two string slices.

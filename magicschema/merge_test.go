@@ -504,6 +504,27 @@ func TestMergeAnnotatedConstraints(t *testing.T) {
 				assert.Equal(t, "string", ap["type"])
 			},
 		},
+		"constrained additionalProperties survives merge when both sides agree": {
+			// A pattern-only additionalProperties schema has no type,
+			// properties, or items; it must not be mistaken for the "true"
+			// schema and collapsed, which would drop the shared pattern.
+			inputA: "# @schema\n# additionalProperties:\n#   pattern: ^[a-z]+$\n# @schema\nconf:\n  a: x\n",
+			inputB: "# @schema\n# additionalProperties:\n#   pattern: ^[a-z]+$\n# @schema\nconf:\n  b: y\n",
+			opts:   []magicschema.Option{magicschema.WithAnnotators(dadav.New())},
+			check: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				conf, ok := props["conf"].(map[string]any)
+				require.True(t, ok)
+
+				ap, ok := conf["additionalProperties"].(map[string]any)
+				require.True(t, ok, "expected constrained additionalProperties, got %v", conf["additionalProperties"])
+				assert.Equal(t, "^[a-z]+$", ap["pattern"])
+			},
+		},
 		"root annotations apply from the first input": {
 			inputA: "# @schema.root\n# title: My Chart\n# @schema.root\nreplicas: 3\n",
 			inputB: "name: x\n",
