@@ -1,0 +1,3024 @@
+{
+  "type": "object",
+  "properties": {
+    "image": {
+      "type": "object",
+      "properties": {
+        "registry": {
+          "type": "string"
+        },
+        "repository": {
+          "type": "string"
+        },
+        "tag": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "To pin by digest, prefer `image.digest`. A `\u003cversion\u003e@\u003cdigest\u003e` combo is also accepted here; in that case the digest is what Kubernetes verifies and the version is informational (and can drift from the underlying image)."
+        },
+        "digest": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "pullPolicy": {
+          "type": "string"
+        }
+      },
+      "description": "Default values for Traefik This is a YAML-formatted file. Declare variables to be passed into templates",
+      "additionalProperties": false
+    },
+    "commonLabels": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "deployment": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "replicas": {
+          "type": "integer"
+        },
+        "revisionHistoryLimit": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "terminationGracePeriodSeconds": {
+          "type": "integer"
+        },
+        "minReadySeconds": {
+          "type": "integer"
+        },
+        "healthchecksPort": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "with an external Load Balancer that performs healthchecks. Default: ports.traefik.port",
+          "minimum": 0
+        },
+        "healthchecksHost": {
+          "type": "string",
+          "description": "Default: ports.traefik.hostIP if set, otherwise Pod IP"
+        },
+        "healthchecksScheme": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "respond on websecure entryPoint.",
+          "default": "HTTP",
+          "enum": [
+            "HTTP",
+            "HTTPS",
+            null
+          ]
+        },
+        "readinessPath": {
+          "type": "string",
+          "description": "Default: /ping"
+        },
+        "livenessPath": {
+          "type": "string",
+          "description": "Default: /ping"
+        },
+        "annotations": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "labels": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "podAnnotations": {
+          "type": "object",
+          "description": "It supports templating. One can set it with values like traefik/name: '{{ template \"traefik.name\" . }}'",
+          "additionalProperties": true
+        },
+        "podLabels": {
+          "type": "object",
+          "description": "It supports templating. One can set it with values like traefik/name: '{{ template \"traefik.name\" . }}'",
+          "additionalProperties": true
+        },
+        "additionalContainers": {
+          "type": "array"
+        },
+        "additionalVolumes": {
+          "type": "array",
+          "description": "https://docs.datadoghq.com/developers/dogstatsd/unix_socket/?tab=host - name: socat-proxy image: alpine/socat:1.0.5 args: [\"-s\", \"-u\", \"udp-recv:8125\", \"unix-sendto:/socket/socket\"] volumeMounts: - name: dsdsocket mountPath: /socket"
+        },
+        "initContainers": {
+          "type": "array",
+          "description": "- name: dsdsocket hostPath: path: /var/run/statsd-exporter"
+        },
+        "shareProcessNamespace": {
+          "type": "boolean",
+          "description": "The \"volume-permissions\" init container is required if you run into permission issues. Related issue: https://github.com/traefik/traefik-helm-chart/issues/396 - name: volume-permissions image: busybox:latest command: [\"sh\", \"-c\", \"touch /data/acme.json; chmod -v 600 /data/acme.json\"] volumeMounts: - name: data mountPath: /data"
+        },
+        "hostUsers": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "which can improve security by isolating the pod's users from the host. See https://kubernetes.io/docs/concepts/workloads/pods/user-namespaces/"
+        },
+        "dnsPolicy": {
+          "type": "string"
+        },
+        "dnsConfig": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "hostAliases": {
+          "type": "array"
+        },
+        "imagePullSecrets": {
+          "type": "array"
+        },
+        "lifecycle": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "runtimeClassName": {
+          "type": "string",
+          "description": "preStop: sleep: seconds: 20 postStart: httpGet: path: /ping port: 8080 host: localhost scheme: HTTP"
+        },
+        "goMemLimitPercentage": {
+          "type": "number"
+        }
+      },
+      "additionalProperties": true
+    },
+    "podDisruptionBudget": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "maxUnavailable": {
+          "type": [
+            "string",
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "minAvailable": {
+          "type": [
+            "string",
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "ingressClass": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "isDefaultClass": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "core": {
+      "type": "object",
+      "properties": {
+        "defaultRuleSyntax": {
+          "type": "string",
+          "description": "See https://doc.traefik.io/traefik/v3.0/migration/v2-to-v3/#new-v3-syntax-notable-changes"
+        }
+      },
+      "additionalProperties": false
+    },
+    "experimental": {
+      "type": "object",
+      "properties": {
+        "abortOnPluginFailure": {
+          "type": "boolean"
+        },
+        "fastProxy": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "debug": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": true
+        },
+        "kubernetesGateway": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": true
+        },
+        "plugins": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "localPlugins": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "otlpLogs": {
+          "type": "boolean"
+        },
+        "knative": {
+          "type": "boolean"
+        }
+      },
+      "description": "Traefik experimental features",
+      "additionalProperties": true
+    },
+    "gateway": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "namespace": {
+          "type": "string"
+        },
+        "annotations": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "infrastructure": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "defaultScope": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "by setting the `defaultScope` field (e.g. `All` or `Namespace`).",
+          "default": null,
+          "enum": [
+            "All",
+            "None",
+            null
+          ]
+        },
+        "listeners": {
+          "type": "object",
+          "properties": {
+            "web": {
+              "type": "object",
+              "properties": {
+                "port": {
+                  "type": "integer",
+                  "description": "The port must match a port declared in ports section."
+                },
+                "hostname": {
+                  "type": "string"
+                },
+                "protocol": {
+                  "type": "string",
+                  "description": "Specify expected protocol on this listener. See [ProtocolType](https://gateway-api.sigs.k8s.io/reference/spec/#gateway.networking.k8s.io/v1.ProtocolType)"
+                },
+                "namespacePolicy": {
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "gatewayClass": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "labels": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "api": {
+      "type": "object",
+      "properties": {
+        "dashboard": {
+          "type": "boolean"
+        },
+        "dashboardName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "disableDashboardAd": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "insecure": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "debug": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "basePath": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": "/"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ingressRoute": {
+      "type": "object",
+      "properties": {
+        "dashboard": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "annotations": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "labels": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "matchRule": {
+              "type": "string"
+            },
+            "services": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": true
+              }
+            },
+            "entryPoints": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "By default, it's using traefik entrypoint, which is not exposed. /!\\ Do not expose your dashboard without any protection over the internet /!\\"
+            },
+            "middlewares": {
+              "type": "array"
+            },
+            "tls": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "additionalProperties": true
+        },
+        "healthcheck": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "annotations": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "labels": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "matchRule": {
+              "type": "string"
+            },
+            "services": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": true
+              }
+            },
+            "entryPoints": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "By default, it's using traefik entrypoint, which is not exposed."
+            },
+            "middlewares": {
+              "type": "array"
+            },
+            "tls": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "description": "It's recommended to create workloads CR outside of this Chart.",
+      "additionalProperties": true
+    },
+    "updateStrategy": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string"
+        },
+        "rollingUpdate": {
+          "type": "object",
+          "properties": {
+            "maxUnavailable": {
+              "type": [
+                "integer",
+                "string",
+                "null"
+              ]
+            },
+            "maxSurge": {
+              "type": [
+                "integer",
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "readinessProbe": {
+      "type": "object",
+      "properties": {
+        "failureThreshold": {
+          "type": "integer"
+        },
+        "initialDelaySeconds": {
+          "type": "integer"
+        },
+        "periodSeconds": {
+          "type": "integer"
+        },
+        "successThreshold": {
+          "type": "integer"
+        },
+        "timeoutSeconds": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false
+    },
+    "livenessProbe": {
+      "type": "object",
+      "properties": {
+        "failureThreshold": {
+          "type": "integer"
+        },
+        "initialDelaySeconds": {
+          "type": "integer"
+        },
+        "periodSeconds": {
+          "type": "integer"
+        },
+        "successThreshold": {
+          "type": "integer"
+        },
+        "timeoutSeconds": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false
+    },
+    "startupProbe": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "providers": {
+      "type": "object",
+      "properties": {
+        "precedence": {
+          "type": "array"
+        },
+        "kubernetesCRD": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "allowCrossNamespace": {
+              "type": "boolean"
+            },
+            "allowExternalNameServices": {
+              "type": "boolean"
+            },
+            "allowEmptyServices": {
+              "type": "boolean"
+            },
+            "crossProviderNamespaces": {
+              "type": "array"
+            },
+            "ingressClass": {
+              "type": "string"
+            },
+            "labelSelector": {
+              "type": "string"
+            },
+            "namespaces": {
+              "type": "array"
+            },
+            "nativeLBByDefault": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        "kubernetesIngress": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "allowExternalNameServices": {
+              "type": "boolean"
+            },
+            "allowEmptyServices": {
+              "type": "boolean"
+            },
+            "crossProviderNamespaces": {
+              "type": "array"
+            },
+            "disableIngressClassLookup": {
+              "type": "boolean"
+            },
+            "ingressClass": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "labelSelector": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "namespaces": {
+              "type": "array"
+            },
+            "publishedService": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "description": "usually with the Service provided by this Chart. It's possible to use it with an external Service using pathOverride."
+                },
+                "pathOverride": {
+                  "type": "string",
+                  "description": "Default to Service deployed with this Chart."
+                }
+              },
+              "description": "IP used for Kubernetes Ingress endpoints",
+              "additionalProperties": true
+            },
+            "ingressEndpoint": {
+              "type": "object",
+              "properties": {
+                "hostname": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "ip": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            "nativeLBByDefault": {
+              "type": "boolean"
+            },
+            "strictPrefixMatching": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        "kubernetesGateway": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "crossProviderNamespaces": {
+              "type": "array"
+            },
+            "experimentalChannel": {
+              "type": "boolean",
+              "description": "This option currently enables support for TCPRoute and TLSRoute."
+            },
+            "namespaces": {
+              "type": "array"
+            },
+            "labelSelector": {
+              "type": "string"
+            },
+            "nativeLBByDefault": {
+              "type": "boolean"
+            },
+            "statusAddress": {
+              "type": "object",
+              "properties": {
+                "ip": {
+                  "type": "string"
+                },
+                "hostname": {
+                  "type": "string"
+                },
+                "service": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "namespace": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "additionalProperties": false
+        },
+        "file": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "watch": {
+              "type": "boolean"
+            },
+            "content": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "kubernetesIngressNGINX": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "controllerClass": {
+              "type": "string"
+            },
+            "ingressClass": {
+              "type": "string"
+            },
+            "ingressClassByName": {
+              "type": "boolean"
+            },
+            "watchIngressWithoutClass": {
+              "type": "boolean"
+            },
+            "watchNamespace": {
+              "type": "string"
+            },
+            "watchNamespaceSelector": {
+              "type": "string"
+            },
+            "publishService": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "pathOverride": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": true
+            },
+            "publishStatusAddress": {
+              "type": "string"
+            },
+            "defaultBackendService": {
+              "type": "string"
+            },
+            "disableSvcExternalName": {
+              "type": "boolean"
+            },
+            "throttleDuration": {
+              "type": "string"
+            },
+            "certAuthFilePath": {
+              "type": "string"
+            },
+            "endpoint": {
+              "type": "string"
+            },
+            "token": {
+              "type": "string"
+            },
+            "proxyRequestBuffering": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "clientBodyBufferSize": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "proxyBodySize": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "proxyBuffering": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "proxyBufferSize": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "proxyBuffersNumber": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "proxyConnectTimeout": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "proxyReadTimeout": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "proxySendTimeout": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "proxyNextUpstream": {
+              "type": "string"
+            },
+            "proxyNextUpstreamTries": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "proxyNextUpstreamTimeout": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "customHTTPErrors": {
+              "type": "array"
+            },
+            "upstreamKeepaliveTimeout": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "allowCrossNamespaceResources": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "globalAllowedResponseHeaders": {
+              "type": "array"
+            },
+            "globalAuthUrl": {
+              "type": "string"
+            },
+            "ipAllowListStrategy": {
+              "type": "object",
+              "properties": {
+                "depth": {
+                  "type": "integer"
+                },
+                "excludedIPS": {
+                  "type": "array"
+                },
+                "ipv6Subnet": {
+                  "type": "integer"
+                }
+              },
+              "additionalProperties": true
+            },
+            "allowSnippetAnnotations": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "strictValidatePathType": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "httpEntryPoint": {
+              "type": "string"
+            },
+            "httpsEntryPoint": {
+              "type": "string"
+            },
+            "modsec": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "owaspCoreRules": {
+                  "type": "boolean"
+                },
+                "snippet": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "knative": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "namespaces": {
+              "type": "array"
+            },
+            "labelSelector": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "volumes": {
+      "type": "array",
+      "description": "This can be used to mount a cert pair or a configmap that holds a config.toml file. After the volume has been mounted, add the configs into traefik by using the `additionalArguments` list below, eg: `additionalArguments: - \"--providers.file.filename=/config/dynamic.toml\" - \"--ping\" - \"--ping.entrypoint=web\"`"
+    },
+    "additionalVolumeMounts": {
+      "type": "array",
+      "description": "- name: public-cert mountPath: \"/certs\" type: secret - name: '{{ printf \"%s-configs\" .Release.Name }}' mountPath: \"/config\" type: configMap"
+    },
+    "logs": {
+      "type": "object",
+      "properties": {
+        "general": {
+          "type": "object",
+          "properties": {
+            "format": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": "common",
+              "enum": [
+                "common",
+                "json",
+                null
+              ]
+            },
+            "level": {
+              "type": "string",
+              "description": "By default, the level is set to INFO.",
+              "default": "INFO",
+              "enum": [
+                "TRACE",
+                "DEBUG",
+                "INFO",
+                "WARN",
+                "ERROR",
+                "FATAL",
+                "PANIC"
+              ]
+            },
+            "filePath": {
+              "type": "string"
+            },
+            "noColor": {
+              "type": "boolean"
+            },
+            "otlp": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "serviceName": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "http": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "endpoint": {
+                      "type": "string"
+                    },
+                    "headers": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "tls": {
+                      "type": "object",
+                      "properties": {
+                        "ca": {
+                          "type": "string"
+                        },
+                        "cert": {
+                          "type": "string"
+                        },
+                        "key": {
+                          "type": "string"
+                        },
+                        "insecureSkipVerify": {
+                          "type": [
+                            "boolean",
+                            "null"
+                          ]
+                        }
+                      },
+                      "description": "Defines the TLS configuration used by the reporter to send logs to the OpenTelemetry Collector.",
+                      "additionalProperties": true
+                    }
+                  },
+                  "additionalProperties": true
+                },
+                "grpc": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "endpoint": {
+                      "type": "string"
+                    },
+                    "insecure": {
+                      "type": "boolean"
+                    },
+                    "tls": {
+                      "type": "object",
+                      "properties": {
+                        "ca": {
+                          "type": "string"
+                        },
+                        "cert": {
+                          "type": "string"
+                        },
+                        "key": {
+                          "type": "string"
+                        },
+                        "insecureSkipVerify": {
+                          "type": [
+                            "boolean",
+                            "null"
+                          ]
+                        }
+                      },
+                      "description": "Defines the TLS configuration used by the reporter to send logs to the OpenTelemetry Collector.",
+                      "additionalProperties": true
+                    }
+                  },
+                  "additionalProperties": true
+                },
+                "resourceAttributes": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "additionalProperties": true
+        },
+        "access": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "format": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": "common",
+              "enum": [
+                "common",
+                "genericCLF",
+                "json",
+                null
+              ]
+            },
+            "bufferingSize": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "description": "filePath: \"/var/log/traefik/access.log"
+            },
+            "timezone": {
+              "type": "string"
+            },
+            "filters": {
+              "type": "object",
+              "properties": {
+                "statuscodes": {
+                  "type": "string"
+                },
+                "retryattempts": {
+                  "type": "boolean"
+                },
+                "minduration": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            "addInternals": {
+              "type": "boolean"
+            },
+            "dualOutput": {
+              "type": "boolean"
+            },
+            "fields": {
+              "type": "object",
+              "properties": {
+                "general": {
+                  "type": "object",
+                  "properties": {
+                    "defaultmode": {
+                      "type": "string",
+                      "default": "keep",
+                      "enum": [
+                        "keep",
+                        "drop",
+                        "redact"
+                      ]
+                    },
+                    "names": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  },
+                  "additionalProperties": true
+                },
+                "headers": {
+                  "type": "object",
+                  "properties": {
+                    "defaultmode": {
+                      "type": "string",
+                      "default": "drop",
+                      "enum": [
+                        "keep",
+                        "drop",
+                        "redact"
+                      ]
+                    },
+                    "names": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              },
+              "additionalProperties": true
+            },
+            "otlp": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "serviceName": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "http": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "endpoint": {
+                      "type": "string"
+                    },
+                    "headers": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "tls": {
+                      "type": "object",
+                      "properties": {
+                        "ca": {
+                          "type": "string"
+                        },
+                        "cert": {
+                          "type": "string"
+                        },
+                        "key": {
+                          "type": "string"
+                        },
+                        "insecureSkipVerify": {
+                          "type": [
+                            "boolean",
+                            "null"
+                          ]
+                        }
+                      },
+                      "description": "Defines the TLS configuration used by the reporter to send access logs to the OpenTelemetry Collector.",
+                      "additionalProperties": true
+                    }
+                  },
+                  "additionalProperties": true
+                },
+                "grpc": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "endpoint": {
+                      "type": "string"
+                    },
+                    "insecure": {
+                      "type": "boolean"
+                    },
+                    "tls": {
+                      "type": "object",
+                      "properties": {
+                        "ca": {
+                          "type": "string"
+                        },
+                        "cert": {
+                          "type": "string"
+                        },
+                        "key": {
+                          "type": "string"
+                        },
+                        "insecureSkipVerify": {
+                          "type": [
+                            "boolean",
+                            "null"
+                          ]
+                        }
+                      },
+                      "description": "Defines the TLS configuration used by the reporter to send access logs to the OpenTelemetry Collector.",
+                      "additionalProperties": true
+                    }
+                  },
+                  "additionalProperties": true
+                },
+                "resourceAttributes": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "description": "- name: traefik-logs mountPath: /var/log/traefik",
+      "additionalProperties": true
+    },
+    "metrics": {
+      "type": "object",
+      "properties": {
+        "addInternals": {
+          "type": "boolean"
+        },
+        "prometheus": {
+          "type": "object",
+          "properties": {
+            "entryPoint": {
+              "type": "string"
+            },
+            "addEntryPointsLabels": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "addRoutersLabels": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "addServicesLabels": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "buckets": {
+              "type": "string"
+            },
+            "manualRouting": {
+              "type": "boolean",
+              "description": "order to allow creating a custom router for prometheus@internal service."
+            },
+            "headerLabels": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": true
+            },
+            "service": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "labels": {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                "annotations": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "additionalProperties": true
+            },
+            "disableAPICheck": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "serviceMonitor": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "apiVersion": {
+                  "type": "string"
+                },
+                "metricRelabelings": {
+                  "type": "array"
+                },
+                "relabelings": {
+                  "type": "array"
+                },
+                "jobLabel": {
+                  "type": "string"
+                },
+                "interval": {
+                  "type": "string"
+                },
+                "honorLabels": {
+                  "type": "boolean"
+                },
+                "scrapeTimeout": {
+                  "type": "string"
+                },
+                "honorTimestamps": {
+                  "type": "boolean"
+                },
+                "enableHttp2": {
+                  "type": "boolean"
+                },
+                "followRedirects": {
+                  "type": "boolean"
+                },
+                "additionalLabels": {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                "namespace": {
+                  "type": "string"
+                },
+                "namespaceSelector": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "additionalProperties": true
+            },
+            "prometheusRule": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "apiVersion": {
+                  "type": "string"
+                },
+                "additionalLabels": {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                "namespace": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "description": "Prometheus is enabled by default. It can be disabled by setting \"prometheus: null\"",
+          "additionalProperties": true
+        },
+        "otlp": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "addEntryPointsLabels": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "addRoutersLabels": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "addServicesLabels": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "explicitBoundaries": {
+              "type": "array"
+            },
+            "pushInterval": {
+              "type": "string"
+            },
+            "serviceName": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "http": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "endpoint": {
+                  "type": "string"
+                },
+                "headers": {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                "tls": {
+                  "type": "object",
+                  "properties": {
+                    "ca": {
+                      "type": "string"
+                    },
+                    "cert": {
+                      "type": "string"
+                    },
+                    "key": {
+                      "type": "string"
+                    },
+                    "insecureSkipVerify": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    }
+                  },
+                  "description": "Defines the TLS configuration used by the reporter to send metrics to the OpenTelemetry Collector.",
+                  "additionalProperties": true
+                }
+              },
+              "additionalProperties": true
+            },
+            "grpc": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "endpoint": {
+                  "type": "string"
+                },
+                "insecure": {
+                  "type": "boolean"
+                },
+                "tls": {
+                  "type": "object",
+                  "properties": {
+                    "ca": {
+                      "type": "string"
+                    },
+                    "cert": {
+                      "type": "string"
+                    },
+                    "key": {
+                      "type": "string"
+                    },
+                    "insecureSkipVerify": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    }
+                  },
+                  "description": "Defines the TLS configuration used by the reporter to send metrics to the OpenTelemetry Collector.",
+                  "additionalProperties": true
+                }
+              },
+              "additionalProperties": true
+            },
+            "resourceAttributes": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "description": "datadog: ## Address instructs exporter to send metrics to datadog-agent at this address. address: \"127.0.0.1:8125\" ## The interval used by the exporter to push metrics to datadog-agent. Default=10s # pushInterval: 30s ## The prefix to use for metrics collection. Default=\"traefik\" # prefix: traefik ## Enable metrics on entry points. Default=true # addEntryPointsLabels: false ## Enable metrics on routers. Default=false # addRoutersLabels: true ## Enable metrics on services. Default=true # addServicesLabels: false influxdb2: ## Address instructs exporter to send metrics to influxdb v2 at this address. address: localhost:8086 ## Token with which to connect to InfluxDB v2. token: xxx ## Organisation where metrics will be stored. org: \"\" ## Bucket where metrics will be stored. bucket: \"\" ## The interval used by the exporter to push metrics to influxdb. Default=10s # pushInterval: 30s ## Additional labels (influxdb tags) on all metrics. # additionalLabels: #   env: production #   foo: bar ## Enable metrics on entry points. Default=true # addEntryPointsLabels: false ## Enable metrics on routers. Default=false # addRoutersLabels: true ## Enable metrics on services. Default=true # addServicesLabels: false statsd: ## Address instructs exporter to send metrics to statsd at this address. address: localhost:8125 ## The interval used by the exporter to push metrics to influxdb. Default=10s # pushInterval: 30s ## The prefix to use for metrics collection. Default=\"traefik\" # prefix: traefik ## Enable metrics on entry points. Default=true # addEntryPointsLabels: false ## Enable metrics on routers. Default=false # addRoutersLabels: true ## Enable metrics on services. Default=true # addServicesLabels: false",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "ocsp": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "See https://doc.traefik.io/traefik/reference/install-configuration/tls/ocsp/"
+        },
+        "responderOverrides": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "tracing": {
+      "type": "object",
+      "properties": {
+        "addInternals": {
+          "type": "boolean"
+        },
+        "serviceName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "resourceAttributes": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "capturedRequestHeaders": {
+          "type": "array"
+        },
+        "capturedResponseHeaders": {
+          "type": "array"
+        },
+        "safeQueryParams": {
+          "type": "array"
+        },
+        "sampleRate": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "otlp": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "http": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "endpoint": {
+                  "type": "string"
+                },
+                "headers": {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                "tls": {
+                  "type": "object",
+                  "properties": {
+                    "ca": {
+                      "type": "string"
+                    },
+                    "cert": {
+                      "type": "string"
+                    },
+                    "key": {
+                      "type": "string"
+                    },
+                    "insecureSkipVerify": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    }
+                  },
+                  "description": "Defines the TLS configuration used by the reporter to send metrics to the OpenTelemetry Collector.",
+                  "additionalProperties": true
+                }
+              },
+              "additionalProperties": true
+            },
+            "grpc": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "endpoint": {
+                  "type": "string"
+                },
+                "insecure": {
+                  "type": "boolean"
+                },
+                "tls": {
+                  "type": "object",
+                  "properties": {
+                    "ca": {
+                      "type": "string"
+                    },
+                    "cert": {
+                      "type": "string"
+                    },
+                    "key": {
+                      "type": "string"
+                    },
+                    "insecureSkipVerify": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    }
+                  },
+                  "description": "Defines the TLS configuration used by the reporter to send metrics to the OpenTelemetry Collector.",
+                  "additionalProperties": true
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "description": "Tracing",
+      "additionalProperties": false
+    },
+    "global": {
+      "type": "object",
+      "properties": {
+        "checkNewVersion": {
+          "type": "boolean"
+        },
+        "sendAnonymousUsage": {
+          "type": "boolean",
+          "description": "See https://doc.traefik.io/traefik/contributing/data-collection/"
+        },
+        "notAppendXForwardedFor": {
+          "type": "boolean"
+        },
+        "azure": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "images": {
+              "type": "object",
+              "properties": {
+                "proxy": {
+                  "type": "object",
+                  "properties": {
+                    "image": {
+                      "type": "string"
+                    },
+                    "tag": {
+                      "type": "string"
+                    },
+                    "registry": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": true
+                },
+                "hub": {
+                  "type": "object",
+                  "properties": {
+                    "image": {
+                      "type": "string"
+                    },
+                    "tag": {
+                      "type": "string"
+                    },
+                    "registry": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "description": "See https://learn.microsoft.com/en-us/partner-center/marketplace-offers/azure-container-technical-assets-kubernetes?tabs=linux,linux2#update-the-helm-chart",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "additionalArguments": {
+      "type": "array",
+      "description": "See [CLI Reference](https://docs.traefik.io/reference/static-configuration/cli/) Use curly braces to pass values: `helm install --set=\"additionalArguments={--providers.kubernetesingress.ingressclass=traefik-internal,--log.level=DEBUG}\"`"
+    },
+    "env": {
+      "type": "array",
+      "description": "- \"--providers.kubernetesingress.ingressclass=traefik-internal\" - \"--log.level=DEBUG\""
+    },
+    "envFrom": {
+      "type": "array"
+    },
+    "ports": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "port": {
+            "type": "integer",
+            "description": "asDefault: true"
+          },
+          "hostPort": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "hostIP": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "means it's listening on all your interfaces and all your IPs. You may want to set this value if you need traefik to listen on specific interface only."
+          },
+          "expose": {
+            "type": "object",
+            "properties": {
+              "default": {
+                "type": "boolean"
+              }
+            },
+            "description": "If you want to access it from outside your cluster, use `kubectl port-forward` or create a secure ingress",
+            "additionalProperties": true
+          },
+          "exposedPort": {
+            "type": "integer"
+          },
+          "protocol": {
+            "type": "string",
+            "description": "The port protocol (TCP/UDP)"
+          },
+          "observability": {
+            "type": "object",
+            "properties": {
+              "metrics": {
+                "type": [
+                  "boolean",
+                  "null"
+                ],
+                "default": true
+              },
+              "accessLogs": {
+                "type": [
+                  "boolean",
+                  "null"
+                ],
+                "default": true
+              },
+              "tracing": {
+                "type": [
+                  "boolean",
+                  "null"
+                ],
+                "default": true
+              },
+              "traceVerbosity": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "default": "minimal",
+                "enum": [
+                  "minimal",
+                  "detailed",
+                  null
+                ]
+              }
+            },
+            "additionalProperties": false
+          },
+          "asDefault": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "default": null
+          },
+          "targetPort": {
+            "type": [
+              "string",
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "nodePort": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "allowACMEByPass": {
+            "type": "boolean"
+          },
+          "http": {
+            "type": "object",
+            "properties": {
+              "redirections": {
+                "type": "object",
+                "properties": {
+                  "entryPoint": {
+                    "type": "object",
+                    "description": "Added in 2.2, one can make permanent redirects via entrypoints. Same sets of parameters: to, scheme, permanent and priority. https://doc.traefik.io/traefik/reference/install-configuration/entrypoints/#configuration-example",
+                    "additionalProperties": true
+                  }
+                },
+                "additionalProperties": true
+              },
+              "encodedCharacters": {
+                "type": "object",
+                "properties": {
+                  "allowEncodedSlash": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "allowEncodedBackSlash": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "allowEncodedNullCharacter": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "allowEncodedSemicolon": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "allowEncodedPercent": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "allowEncodedQuestionMark": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "allowEncodedHash": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              },
+              "maxHeaderBytes": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "middlewares": {
+                "type": [
+                  "array",
+                  "null"
+                ]
+              },
+              "sanitizePath": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "tls": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "options": {
+                    "type": "string"
+                  },
+                  "certResolver": {
+                    "type": "string"
+                  },
+                  "domains": {
+                    "type": "array"
+                  }
+                },
+                "additionalProperties": true
+              }
+            },
+            "additionalProperties": true
+          },
+          "forwardedHeaders": {
+            "type": "object",
+            "properties": {
+              "trustedIPs": {
+                "type": "array"
+              },
+              "insecure": {
+                "type": "boolean"
+              },
+              "notAppendXForwardedFor": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": true
+          },
+          "proxyProtocol": {
+            "type": "object",
+            "properties": {
+              "trustedIPs": {
+                "type": "array"
+              },
+              "insecure": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": true
+          },
+          "transport": {
+            "type": "object",
+            "properties": {
+              "respondingTimeouts": {
+                "type": "object",
+                "properties": {
+                  "readTimeout": {
+                    "type": [
+                      "string",
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "writeTimeout": {
+                    "type": [
+                      "string",
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "idleTimeout": {
+                    "type": [
+                      "string",
+                      "integer",
+                      "null"
+                    ]
+                  }
+                },
+                "additionalProperties": true
+              },
+              "lifeCycle": {
+                "type": "object",
+                "properties": {
+                  "requestAcceptGraceTimeout": {
+                    "type": [
+                      "string",
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "graceTimeOut": {
+                    "type": [
+                      "string",
+                      "integer",
+                      "null"
+                    ]
+                  }
+                },
+                "additionalProperties": true
+              },
+              "keepAliveMaxRequests": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "keepAliveMaxTime": {
+                "type": [
+                  "string",
+                  "integer",
+                  "null"
+                ]
+              }
+            },
+            "additionalProperties": true
+          },
+          "uplink": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "⚠️ This feature is experimental and requires Traefik Hub with a specific subscription.",
+            "default": null
+          },
+          "containerPort": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "appProtocol": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "http3": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean",
+                "description": "Enabling it will also enable http3 experimental feature https://doc.traefik.io/traefik/reference/install-configuration/entrypoints/#opt-http3 There are known limitations when trying to listen on same ports for TCP \u0026 UDP (Http3). There is a workaround in this chart using dual Service. https://github.com/kubernetes/kubernetes/issues/47249#issuecomment-587960741"
+              },
+              "advertisedPort": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              }
+            },
+            "additionalProperties": true
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "tlsOptions": {
+      "type": "object",
+      "description": "When using `labelSelector`, you'll need to set labels on tlsOption accordingly. See EXAMPLE.md for details.",
+      "additionalProperties": true
+    },
+    "tlsStore": {
+      "type": "object",
+      "description": "This is useful if you want to set a default certificate. See EXAMPLE.md for details.",
+      "additionalProperties": true
+    },
+    "service": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "nameOverride": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "single": {
+          "type": "boolean"
+        },
+        "annotations": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "annotationsTCP": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "annotationsUDP": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "labels": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "spec": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string"
+            }
+          },
+          "description": "Cannot contain selector or ports entries.",
+          "additionalProperties": true
+        },
+        "additionalServices": {
+          "type": "object",
+          "description": "See EXAMPLES.md for more details.",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "autoscaling": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "See EXAMPLES.md for more details."
+        },
+        "minReplicas": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "maxReplicas": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "metrics": {
+          "type": "array"
+        },
+        "behavior": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "scaleTargetRef": {
+          "type": "object",
+          "properties": {
+            "apiVersion": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "persistence": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "ref: http://kubernetes.io/docs/user-guide/persistent-volumes/. It can be used to store TLS certificates along with `certificatesResolvers.\u003cname\u003e.acme.storage`  option"
+        },
+        "name": {
+          "type": "string"
+        },
+        "existingClaim": {
+          "type": "string"
+        },
+        "accessMode": {
+          "type": "string"
+        },
+        "size": {
+          "type": "string"
+        },
+        "storageClass": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "volumeName": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "annotations": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "subPath": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "certificatesResolvers": {
+      "type": "object",
+      "description": "Ref: https://doc.traefik.io/traefik/reference/install-configuration/tls/certificate-resolvers/acme/ See EXAMPLES.md for more details.",
+      "additionalProperties": true
+    },
+    "hostNetwork": {
+      "type": "boolean",
+      "description": "To prevent unschedulable pods due to port collisions, if hostNetwork=true and replicas\u003e1, a pod anti-affinity is recommended and will be set if the affinity is left as default."
+    },
+    "rbac": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "namespaced": {
+          "type": "boolean",
+          "description": "1. It switches respectively the use of `ClusterRole` and `ClusterRoleBinding` to `Role` and `RoleBinding`.\u003cbr /\u003e 2. It adds `disableClusterScopeResources` on Ingress and CRD (Kubernetes) providers\u003cbr /\u003e **NOTE**: `IngressClass`, `NodePortLB` and **Gateway** provider cannot be used with namespaced RBAC. \u003cbr /\u003e See [upstream documentation](https://doc.traefik.io/traefik/reference/install-configuration/providers/kubernetes/kubernetes-ingress/#opt-providers-kubernetesIngress-disableClusterScopeResources) for more details."
+        },
+        "aggregateTo": {
+          "type": "array",
+          "description": "https://kubernetes.io/docs/reference/access-authn-authz/rbac/#user-facing-roles"
+        }
+      },
+      "additionalProperties": false
+    },
+    "serviceAccount": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "If set, an existing service account is used If not set, a service account is created automatically using the fullname template"
+        }
+      },
+      "additionalProperties": false
+    },
+    "serviceAccountAnnotations": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "affinity": {
+      "type": "object",
+      "description": "It should be used when hostNetwork: true to prevent port conflicts",
+      "additionalProperties": true
+    },
+    "nodeSelector": {
+      "type": "object",
+      "description": "podAntiAffinity: requiredDuringSchedulingIgnoredDuringExecution: - labelSelector: matchLabels: app.kubernetes.io/name: '{{ template \"traefik.name\" . }}' app.kubernetes.io/instance: '{{ .Release.Name }}-{{ include \"traefik.namespace\" . }}' topologyKey: kubernetes.io/hostname",
+      "additionalProperties": true
+    },
+    "tolerations": {
+      "type": "array"
+    },
+    "topologySpreadConstraints": {
+      "type": "array",
+      "description": "how Pods are spread across your cluster among failure-domains."
+    },
+    "priorityClassName": {
+      "type": "string",
+      "description": "This example topologySpreadConstraints forces the scheduler to put traefik pods on nodes where no other traefik pods are scheduled. - labelSelector: matchLabels: app.kubernetes.io/name: '{{ template \"traefik.name\" . }}' maxSkew: 1 topologyKey: kubernetes.io/hostname whenUnsatisfiable: DoNotSchedule"
+    },
+    "securityContext": {
+      "type": "object",
+      "properties": {
+        "allowPrivilegeEscalation": {
+          "type": "boolean"
+        },
+        "capabilities": {
+          "type": "object",
+          "properties": {
+            "drop": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": true
+        },
+        "readOnlyRootFilesystem": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": true
+    },
+    "podSecurityContext": {
+      "type": "object",
+      "properties": {
+        "runAsGroup": {
+          "type": "integer"
+        },
+        "runAsNonRoot": {
+          "type": "boolean"
+        },
+        "runAsUser": {
+          "type": "integer"
+        },
+        "seccompProfile": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "extraObjects": {
+      "type": "array",
+      "description": "In some cases, it can avoid the need for additional, extended or adhoc deployments. See #595 for more details and traefik/tests/values/extra.yaml for example."
+    },
+    "namespaceOverride": {
+      "type": "string",
+      "description": "It will not affect optional CRDs such as `ServiceMonitor` and `PrometheusRules`"
+    },
+    "instanceLabelOverride": {
+      "type": "string"
+    },
+    "versionOverride": {
+      "type": "string"
+    },
+    "nameOverride": {
+      "type": "string"
+    },
+    "fullnameOverride": {
+      "type": "string"
+    },
+    "hub": {
+      "type": "object",
+      "properties": {
+        "token": {
+          "type": "string",
+          "description": "It enables API Gateway."
+        },
+        "tokenMountPath": {
+          "type": "string"
+        },
+        "offline": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "namespaces": {
+          "type": "array"
+        },
+        "apimanagement": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "admission": {
+              "type": "object",
+              "properties": {
+                "listenAddr": {
+                  "type": "string"
+                },
+                "secretName": {
+                  "type": "string"
+                },
+                "selfManagedCertificate": {
+                  "type": "boolean"
+                },
+                "customWebhookCertificate": {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                "restartOnCertificateChange": {
+                  "type": "boolean"
+                },
+                "annotations": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "additionalProperties": true
+            },
+            "openApi": {
+              "type": "object",
+              "properties": {
+                "validateRequestMethodAndPath": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "additionalProperties": true
+        },
+        "mcpgateway": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "maxRequestBodySize": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            }
+          },
+          "additionalProperties": true
+        },
+        "aigateway": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "maxRequestBodySize": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            }
+          },
+          "additionalProperties": true
+        },
+        "providers": {
+          "type": "object",
+          "properties": {
+            "consulCatalogEnterprise": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "cache": {
+                  "type": "boolean"
+                },
+                "connectAware": {
+                  "type": "boolean"
+                },
+                "connectByDefault": {
+                  "type": "boolean"
+                },
+                "constraints": {
+                  "type": "string"
+                },
+                "defaultRule": {
+                  "type": "string"
+                },
+                "endpoint": {
+                  "type": "object",
+                  "properties": {
+                    "address": {
+                      "type": "string"
+                    },
+                    "datacenter": {
+                      "type": "string"
+                    },
+                    "endpointWaitTime": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "httpauth": {
+                      "type": "object",
+                      "properties": {
+                        "password": {
+                          "type": "string"
+                        },
+                        "username": {
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": true
+                    },
+                    "scheme": {
+                      "type": "string"
+                    },
+                    "tls": {
+                      "type": "object",
+                      "properties": {
+                        "ca": {
+                          "type": "string"
+                        },
+                        "cert": {
+                          "type": "string"
+                        },
+                        "insecureSkipVerify": {
+                          "type": "boolean"
+                        },
+                        "key": {
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": true
+                    },
+                    "token": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": true
+                },
+                "exposedByDefault": {
+                  "type": "boolean"
+                },
+                "namespaces": {
+                  "type": "string"
+                },
+                "partition": {
+                  "type": "string"
+                },
+                "prefix": {
+                  "type": "string"
+                },
+                "refreshInterval": {
+                  "type": "integer"
+                },
+                "requireConsistent": {
+                  "type": "boolean"
+                },
+                "serviceName": {
+                  "type": "string"
+                },
+                "stale": {
+                  "type": "boolean"
+                },
+                "strictChecks": {
+                  "type": "string"
+                },
+                "watch": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": true
+            },
+            "microcks": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "auth": {
+                  "type": "object",
+                  "properties": {
+                    "clientId": {
+                      "type": "string"
+                    },
+                    "clientSecret": {
+                      "type": "string"
+                    },
+                    "endpoint": {
+                      "type": "string"
+                    },
+                    "token": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": true
+                },
+                "endpoint": {
+                  "type": "string"
+                },
+                "pollInterval": {
+                  "type": "integer"
+                },
+                "pollTimeout": {
+                  "type": "integer"
+                },
+                "tls": {
+                  "type": "object",
+                  "properties": {
+                    "ca": {
+                      "type": "string"
+                    },
+                    "cert": {
+                      "type": "string"
+                    },
+                    "insecureSkipVerify": {
+                      "type": "boolean"
+                    },
+                    "key": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              },
+              "additionalProperties": true
+            },
+            "multicluster": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "pollInterval": {
+                  "type": "integer"
+                },
+                "pollTimeout": {
+                  "type": "integer"
+                },
+                "children": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "address": {
+                        "type": "string"
+                      },
+                      "serversTransport": {
+                        "type": "object",
+                        "properties": {
+                          "insecureSkipVerify": {
+                            "type": [
+                              "boolean",
+                              "null"
+                            ]
+                          },
+                          "serverName": {
+                            "type": "string"
+                          },
+                          "rootCAs": {
+                            "type": "array"
+                          },
+                          "certificates": {
+                            "type": "array"
+                          },
+                          "maxIdleConnsPerHost": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "disableHTTP2": {
+                            "type": [
+                              "boolean",
+                              "null"
+                            ]
+                          },
+                          "minVersion": {
+                            "type": "string"
+                          },
+                          "maxVersion": {
+                            "type": "string"
+                          },
+                          "cipherSuites": {
+                            "type": "array"
+                          },
+                          "peerCertURI": {
+                            "type": "string"
+                          },
+                          "forwardingTimeouts": {
+                            "type": "object",
+                            "properties": {
+                              "dialTimeout": {
+                                "type": [
+                                  "string",
+                                  "integer",
+                                  "null"
+                                ]
+                              },
+                              "responseHeaderTimeout": {
+                                "type": [
+                                  "string",
+                                  "integer",
+                                  "null"
+                                ]
+                              },
+                              "idleConnTimeout": {
+                                "type": [
+                                  "string",
+                                  "integer",
+                                  "null"
+                                ]
+                              },
+                              "pingTimeout": {
+                                "type": [
+                                  "string",
+                                  "integer",
+                                  "null"
+                                ]
+                              },
+                              "readIdleTimeout": {
+                                "type": [
+                                  "string",
+                                  "integer",
+                                  "null"
+                                ]
+                              },
+                              "readTimeout": {
+                                "type": [
+                                  "string",
+                                  "integer",
+                                  "null"
+                                ]
+                              },
+                              "writeTimeout": {
+                                "type": [
+                                  "string",
+                                  "integer",
+                                  "null"
+                                ]
+                              }
+                            },
+                            "additionalProperties": true
+                          },
+                          "spiffe": {
+                            "type": "object",
+                            "properties": {
+                              "ids": {
+                                "type": "array"
+                              },
+                              "trustDomain": {
+                                "type": [
+                                  "string",
+                                  "integer",
+                                  "null"
+                                ]
+                              }
+                            },
+                            "additionalProperties": true
+                          }
+                        },
+                        "additionalProperties": true
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "additionalProperties": true
+            },
+            "nutanixPrismCentral": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "endpoint": {
+                  "type": "string"
+                },
+                "username": {
+                  "type": "string"
+                },
+                "password": {
+                  "type": "string"
+                },
+                "apiKey": {
+                  "type": "string"
+                },
+                "filename": {
+                  "type": "string"
+                },
+                "pollInterval": {
+                  "type": "integer"
+                },
+                "pollTimeout": {
+                  "type": "integer"
+                },
+                "serviceNameCategoryKey": {
+                  "type": "string"
+                },
+                "allowedVpcs": {
+                  "type": "array"
+                },
+                "tls": {
+                  "type": "object",
+                  "properties": {
+                    "ca": {
+                      "type": "string"
+                    },
+                    "cert": {
+                      "type": "string"
+                    },
+                    "key": {
+                      "type": "string"
+                    },
+                    "insecureSkipVerify": {
+                      "type": "boolean"
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": true
+        },
+        "redis": {
+          "type": "object",
+          "properties": {
+            "cluster": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "database": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "endpoints": {
+              "type": "string"
+            },
+            "username": {
+              "type": "string"
+            },
+            "password": {
+              "type": "string"
+            },
+            "sentinel": {
+              "type": "object",
+              "properties": {
+                "masterset": {
+                  "type": "string"
+                },
+                "username": {
+                  "type": "string"
+                },
+                "password": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": true
+            },
+            "timeout": {
+              "type": "string"
+            },
+            "tls": {
+              "type": "object",
+              "properties": {
+                "ca": {
+                  "type": "string"
+                },
+                "cert": {
+                  "type": "string"
+                },
+                "key": {
+                  "type": "string"
+                },
+                "insecureSkipVerify": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "additionalProperties": true
+        },
+        "sendlogs": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Enable export of error logs to the platform. Default: true."
+        },
+        "tracing": {
+          "type": "object",
+          "properties": {
+            "additionalTraceHeaders": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "description": "To configure the following, tracing.otlp.enabled needs to be set to true."
+                },
+                "traceContext": {
+                  "type": "object",
+                  "properties": {
+                    "parentId": {
+                      "type": "string"
+                    },
+                    "traceId": {
+                      "type": "string"
+                    },
+                    "traceParent": {
+                      "type": "string"
+                    },
+                    "traceState": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": true
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "additionalProperties": true
+        },
+        "pluginRegistry": {
+          "type": "object",
+          "properties": {
+            "sources": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "description": "Define private plugin sources",
+          "additionalProperties": true
+        }
+      },
+      "description": "Traefik Hub configuration. See https://doc.traefik.io/traefik-hub/",
+      "required": [
+        "namespaces"
+      ],
+      "additionalProperties": false
+    },
+    "oci_meta": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "repo": {
+          "type": "string"
+        },
+        "images": {
+          "type": "object",
+          "properties": {
+            "proxy": {
+              "type": "object",
+              "properties": {
+                "image": {
+                  "type": "string"
+                },
+                "tag": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": true
+            },
+            "hub": {
+              "type": "object",
+              "properties": {
+                "image": {
+                  "type": "string"
+                },
+                "tag": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "description": "See https://docs.public.content.oci.oraclecloud.com/en-us/iaas/Content/Marketplace/understanding-helm-charts.htm",
+      "additionalProperties": true
+    },
+    "offering_version": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Injected by IBM Cloud Catalog when deploying via IBM Cloud Schematics. This value is not used by the chart."
+    },
+    "enabled": {
+      "type": "boolean",
+      "const": true
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": true
+}
