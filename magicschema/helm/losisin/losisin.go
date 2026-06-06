@@ -494,29 +494,34 @@ func parseYAMLSchemaMap(val string) map[string]*jsonschema.Schema {
 }
 
 // lastCommentGroup extracts lines from the last comment group in a
-// multi-line comment string. Comment groups are separated by blank lines.
-// This matches upstream behavior where only the final group before a key
-// is considered for annotations.
+// multi-line comment string. Comment groups are separated by blank lines;
+// trailing blank lines are ignored so they cannot pull earlier groups back
+// into scope. This matches upstream behavior where only the final group
+// before a key is considered for annotations.
 func lastCommentGroup(s string) []string {
 	lines := strings.Split(s, "\n")
 
-	lastBlank := -1
-
-	for i, line := range lines {
+	blank := func(line string) bool {
 		stripped := strings.TrimSpace(line)
 		stripped = strings.TrimLeft(stripped, "#")
-		stripped = strings.TrimSpace(stripped)
 
-		if stripped == "" {
+		return strings.TrimSpace(stripped) == ""
+	}
+
+	end := len(lines)
+	for end > 0 && blank(lines[end-1]) {
+		end--
+	}
+
+	lastBlank := -1
+
+	for i, line := range lines[:end] {
+		if blank(line) {
 			lastBlank = i
 		}
 	}
 
-	if lastBlank >= 0 && lastBlank < len(lines)-1 {
-		return lines[lastBlank+1:]
-	}
-
-	return lines
+	return lines[lastBlank+1 : end]
 }
 
 // parseFloat64Ptr parses a string into *float64. Returns nil for "null"
