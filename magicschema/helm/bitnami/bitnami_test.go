@@ -1836,3 +1836,26 @@ func TestBitnamiAnnotatorFromFile(t *testing.T) {
 
 	assertGolden(t, "testdata/bitnami.schema.json", schema)
 }
+
+// TestBitnamiAnnotatorRealWorld generates a schema for the bitnami/grafana
+// chart's values.yaml, which documents every property with readme-generator
+// ## @param annotations, including [array], [object], and nullable
+// modifiers.
+//
+// Vendored from
+// https://github.com/bitnami/charts/blob/main/bitnami/grafana/values.yaml
+// (chart version 12.1.9).
+func TestBitnamiAnnotatorRealWorld(t *testing.T) {
+	t.Parallel()
+
+	data, err := os.ReadFile("testdata/grafana_values.yaml")
+	require.NoError(t, err)
+
+	gen := magicschema.NewGenerator(
+		magicschema.WithAnnotators(bitnami.New()),
+	)
+	schema, err := gen.Generate(data)
+	require.NoError(t, err)
+
+	assertGolden(t, "testdata/grafana_values.schema.json", schema)
+}

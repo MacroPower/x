@@ -1,0 +1,1244 @@
+{
+  "type": "object",
+  "properties": {
+    "global": {
+      "type": "object",
+      "properties": {
+        "imageRegistry": {
+          "type": "string",
+          "description": "Global Docker image registry"
+        },
+        "imagePullSecrets": {
+          "type": "array",
+          "description": "Global Docker registry secret names as an array"
+        },
+        "defaultStorageClass": {
+          "type": "string",
+          "description": "Global default StorageClass for Persistent Volume(s)"
+        },
+        "storageClass": {
+          "type": "string",
+          "description": "DEPRECATED: use global.defaultStorageClass instead"
+        },
+        "security": {
+          "type": "object",
+          "properties": {
+            "allowInsecureImages": {
+              "type": "boolean",
+              "description": "Allows skipping image verification"
+            }
+          },
+          "description": "Security parameters",
+          "additionalProperties": true
+        },
+        "compatibility": {
+          "type": "object",
+          "properties": {
+            "openshift": {
+              "type": "object",
+              "properties": {
+                "adaptSecurityContext": {
+                  "type": "string",
+                  "description": "Adapt the securityContext sections of the deployment to make them compatible with Openshift restricted-v2 SCC: remove runAsUser, runAsGroup and fsGroup and let the platform use their allowed default IDs. Possible values: auto (apply if the detected running cluster is Openshift), force (perform the adaptation always), disabled (do not perform adaptation)"
+                }
+              },
+              "description": "Compatibility adaptations for Openshift",
+              "additionalProperties": true
+            }
+          },
+          "description": "Compatibility adaptations for Kubernetes platforms",
+          "additionalProperties": true
+        }
+      },
+      "description": "Copyright Broadcom, Inc. All Rights Reserved. SPDX-License-Identifier: APACHE-2.0 Global Docker image parameters Please, note that this will override the image parameters, including dependencies, configured to use the global value Current available global Docker image parameters: imageRegistry, imagePullSecrets and storageClass",
+      "additionalProperties": true
+    },
+    "kubeVersion": {
+      "type": "string",
+      "description": "Force target Kubernetes version (using Helm capabilities if not set)"
+    },
+    "extraDeploy": {
+      "type": "array",
+      "description": "Array of extra objects to deploy with the release"
+    },
+    "nameOverride": {
+      "type": "string",
+      "description": "String to partially override grafana.fullname template (will maintain the release name)"
+    },
+    "fullnameOverride": {
+      "type": "string",
+      "description": "String to fully override grafana.fullname template"
+    },
+    "namespaceOverride": {
+      "type": "string",
+      "description": "String to fully override common.names.namespace"
+    },
+    "clusterDomain": {
+      "type": "string",
+      "description": "Default Kubernetes cluster domain"
+    },
+    "commonLabels": {
+      "type": "object",
+      "description": "Labels to add to all deployed objects",
+      "additionalProperties": true
+    },
+    "commonAnnotations": {
+      "type": "object",
+      "description": "Annotations to add to all deployed objects",
+      "additionalProperties": true
+    },
+    "usePasswordFiles": {
+      "type": "boolean",
+      "description": "Mount credentials as files instead of using environment variables"
+    },
+    "image": {
+      "type": "object",
+      "properties": {
+        "registry": {
+          "type": "string",
+          "description": "Grafana image registry",
+          "default": "REGISTRY_NAME"
+        },
+        "repository": {
+          "type": "string",
+          "description": "Grafana image repository",
+          "default": "REPOSITORY_NAME/grafana"
+        },
+        "digest": {
+          "type": "string",
+          "description": "Grafana image digest in the way sha256:aa.... Please note this parameter, if set, will override the tag"
+        },
+        "pullPolicy": {
+          "type": "string",
+          "description": "Grafana image pull policy"
+        },
+        "pullSecrets": {
+          "type": "array",
+          "description": "Grafana image pull secrets"
+        }
+      },
+      "description": "Bitnami Grafana image version ref: https://hub.docker.com/r/bitnami/grafana/tags/",
+      "additionalProperties": true
+    },
+    "admin": {
+      "type": "object",
+      "properties": {
+        "user": {
+          "type": "string",
+          "description": "Grafana admin username"
+        },
+        "password": {
+          "type": "string",
+          "description": "Admin password. If a password is not provided a random password will be generated"
+        },
+        "existingSecret": {
+          "type": "string",
+          "description": "Name of the existing secret containing admin password"
+        },
+        "existingSecretPasswordKey": {
+          "type": "string",
+          "description": "Password key on the existing secret"
+        }
+      },
+      "description": "Admin credentials configuration",
+      "additionalProperties": true
+    },
+    "smtp": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable SMTP configuration"
+        },
+        "user": {
+          "type": "string",
+          "description": "SMTP user"
+        },
+        "password": {
+          "type": "string",
+          "description": "SMTP password"
+        },
+        "host": {
+          "type": "string",
+          "description": "Custom host for the smtp server"
+        },
+        "fromAddress": {
+          "type": "string",
+          "description": "From address"
+        },
+        "fromName": {
+          "type": "string",
+          "description": "From name"
+        },
+        "skipVerify": {
+          "type": "string",
+          "description": "Enable skip verify"
+        },
+        "existingSecret": {
+          "type": "string",
+          "description": "Name of existing secret containing SMTP credentials (user and password)"
+        },
+        "existingSecretUserKey": {
+          "type": "string",
+          "description": "User key on the existing secret"
+        },
+        "existingSecretPasswordKey": {
+          "type": "string",
+          "description": "Password key on the existing secret"
+        }
+      },
+      "description": "SMTP configuration",
+      "additionalProperties": true
+    },
+    "plugins": {
+      "type": "string",
+      "description": "Grafana plugins to be installed in deployment time separated by commas"
+    },
+    "ldap": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable LDAP for Grafana"
+        },
+        "allowSignUp": {
+          "type": "boolean",
+          "description": "Allows LDAP sign up for Grafana"
+        },
+        "configuration": {
+          "type": "string",
+          "description": "Specify content for ldap.toml configuration file"
+        },
+        "configMapName": {
+          "type": "string",
+          "description": "Name of the ConfigMap with the ldap.toml configuration file for Grafana"
+        },
+        "secretName": {
+          "type": "string",
+          "description": "Name of the Secret with the ldap.toml configuration file for Grafana"
+        },
+        "uri": {
+          "type": "string",
+          "description": "Server URI, eg. ldap://ldap_server:389"
+        },
+        "binddn": {
+          "type": "string",
+          "description": "DN of the account used to search in the LDAP server."
+        },
+        "bindpw": {
+          "type": "string",
+          "description": "Password for binddn account."
+        },
+        "basedn": {
+          "type": "string",
+          "description": "Base DN path where binddn account will search for the users."
+        },
+        "searchAttribute": {
+          "type": "string",
+          "description": "Field used to match with the user name (uid, samAccountName, cn, etc). This value will be ignored if 'ldap.searchFilter' is set"
+        },
+        "searchFilter": {
+          "type": "string",
+          "description": "User search filter, for example \"(cn=%s)\" or \"(sAMAccountName=%s)\" or \"(|(sAMAccountName=%s)(userPrincipalName=%s)\""
+        },
+        "extraConfiguration": {
+          "type": "string",
+          "description": "Extra ldap configuration."
+        },
+        "tls": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Enabled TLS configuration."
+            },
+            "startTls": {
+              "type": "boolean",
+              "description": "Use STARTTLS instead of LDAPS."
+            },
+            "skipVerify": {
+              "type": "boolean",
+              "description": "Skip any SSL verification (hostanames or certificates)"
+            },
+            "certificatesMountPath": {
+              "type": "string",
+              "description": "Where LDAP certifcates are mounted."
+            },
+            "certificatesSecret": {
+              "type": "string",
+              "description": "Secret with LDAP certificates."
+            },
+            "CAFilename": {
+              "type": "string",
+              "description": "CA certificate filename. Should match with the CA entry key in the ldap.tls.certificatesSecret."
+            },
+            "certFilename": {
+              "type": "string",
+              "description": "Client certificate filename to authenticate against the LDAP server. Should match with certificate the entry key in the ldap.tls.certificatesSecret."
+            },
+            "certKeyFilename": {
+              "type": "string",
+              "description": "Client Key filename to authenticate against the LDAP server. Should match with certificate the entry key in the ldap.tls.certificatesSecret."
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "description": "Ldap configuration for Grafana",
+      "additionalProperties": true
+    },
+    "imageRenderer": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable using a remote rendering service to render PNG images"
+        },
+        "serverURL": {
+          "type": "string",
+          "description": "URL of the remote rendering service"
+        },
+        "callbackURL": {
+          "type": "string",
+          "description": "URL of the callback service"
+        }
+      },
+      "description": "Grafana Image Renderer configuration for Grafana",
+      "additionalProperties": true
+    },
+    "config": {
+      "type": "object",
+      "properties": {
+        "useGrafanaIniFile": {
+          "type": "boolean",
+          "description": "Allows to load a `grafana.ini` file"
+        },
+        "grafanaIniConfigMap": {
+          "type": "string",
+          "description": "Name of the ConfigMap containing the `grafana.ini` file"
+        },
+        "grafanaIniSecret": {
+          "type": "string",
+          "description": "Name of the Secret containing the `grafana.ini` file"
+        }
+      },
+      "description": "Parameters to override the default grafana.ini file. It is needed to create a configmap or a secret containing the grafana.ini file.",
+      "additionalProperties": true
+    },
+    "dashboardsProvider": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable the use of a Grafana dashboard provider"
+        },
+        "configMapName": {
+          "type": "string",
+          "description": "Name of a ConfigMap containing a custom dashboard provider"
+        }
+      },
+      "description": "Create dasboard provider to load dashboards, a default one is created to load dashboards from \"/opt/bitnami/grafana/dashboards\"",
+      "additionalProperties": true
+    },
+    "dashboardsConfigMaps": {
+      "type": "array",
+      "description": "Array with the names of a series of ConfigMaps containing dashboards files"
+    },
+    "datasources": {
+      "type": "object",
+      "properties": {
+        "secretName": {
+          "type": "string",
+          "description": "The name of an externally-managed secret containing custom datasource files."
+        },
+        "secretDefinition": {
+          "type": "object",
+          "description": "The contents of a secret defining a custom datasource file. Only used if datasources.secretName is empty or not defined.",
+          "additionalProperties": true
+        }
+      },
+      "description": "Import datasources from an externally-managed secret, or a secret definition set via Helm values.",
+      "additionalProperties": true
+    },
+    "notifiers": {
+      "type": "object",
+      "properties": {
+        "configMapName": {
+          "type": "string",
+          "description": "Name of a ConfigMap containing Grafana notifiers configuration"
+        }
+      },
+      "description": "Create notifiers from a configMap The notifiersName must contain the files",
+      "additionalProperties": true
+    },
+    "alerting": {
+      "type": "object",
+      "properties": {
+        "configMapName": {
+          "type": "string",
+          "description": "Name of a ConfigMap containing Grafana alerting configuration"
+        }
+      },
+      "description": "Create alerting rules, contact points, notification policies, templates, and mute timings from a configMap",
+      "additionalProperties": true
+    },
+    "grafana": {
+      "type": "object",
+      "properties": {
+        "replicaCount": {
+          "type": "integer",
+          "description": "Number of Grafana nodes"
+        },
+        "kind": {
+          "type": "string",
+          "description": "Use either Deployment or StatefulSet (default)"
+        },
+        "podManagementPolicy": {
+          "type": "string",
+          "description": "StatefulSet pod management policy"
+        },
+        "updateStrategy": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "description": "Set up update strategy for Grafana installation."
+            }
+          },
+          "description": "Set to Recreate if you use persistent volume that cannot be mounted by more than one pods to make sure the pods is destroyed first. ref: https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#strategy Example: updateStrategy: type: RollingUpdate rollingUpdate: maxSurge: 25% maxUnavailable: 25%",
+          "additionalProperties": true
+        },
+        "automountServiceAccountToken": {
+          "type": "boolean",
+          "description": "Mount Service Account token in pod"
+        },
+        "hostAliases": {
+          "type": "array",
+          "description": "Add deployment host aliases"
+        },
+        "schedulerName": {
+          "type": "string",
+          "description": "Alternative scheduler"
+        },
+        "terminationGracePeriodSeconds": {
+          "type": "string",
+          "description": "In seconds, time the given to the Grafana pod needs to terminate gracefully"
+        },
+        "priorityClassName": {
+          "type": "string",
+          "description": "Priority class name"
+        },
+        "podLabels": {
+          "type": "object",
+          "description": "Extra labels for Grafana pods",
+          "additionalProperties": true
+        },
+        "podAnnotations": {
+          "type": "object",
+          "description": "Grafana Pod annotations",
+          "additionalProperties": true
+        },
+        "podAffinityPreset": {
+          "type": "string",
+          "description": "Pod affinity preset. Ignored if `affinity` is set. Allowed values: `soft` or `hard`"
+        },
+        "podAntiAffinityPreset": {
+          "type": "string",
+          "description": "Pod anti-affinity preset. Ignored if `affinity` is set. Allowed values: `soft` or `hard`"
+        },
+        "containerPorts": {
+          "type": "object",
+          "properties": {
+            "grafana": {
+              "type": "integer",
+              "description": "Grafana container port"
+            }
+          },
+          "additionalProperties": true
+        },
+        "extraPorts": {
+          "type": "array",
+          "description": "Extra ports for Grafana deployment"
+        },
+        "nodeAffinityPreset": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "description": "Node affinity preset type. Ignored if `affinity` is set. Allowed values: `soft` or `hard`"
+            },
+            "key": {
+              "type": "string",
+              "description": "Node label key to match Ignored if `affinity` is set."
+            },
+            "values": {
+              "type": "array",
+              "description": "Node label values to match. Ignored if `affinity` is set."
+            }
+          },
+          "description": "Node affinity preset Ref: https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#node-affinity",
+          "additionalProperties": true
+        },
+        "affinity": {
+          "type": "object",
+          "description": "Affinity for pod assignment",
+          "additionalProperties": true
+        },
+        "nodeSelector": {
+          "type": "object",
+          "description": "Node labels for pod assignment",
+          "additionalProperties": true
+        },
+        "tolerations": {
+          "type": "array",
+          "description": "Tolerations for pod assignment"
+        },
+        "topologySpreadConstraints": {
+          "type": "array",
+          "description": "Topology spread constraints rely on node labels to identify the topology domain(s) that each Node is in"
+        },
+        "podSecurityContext": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Enable securityContext on for Grafana deployment"
+            },
+            "fsGroupChangePolicy": {
+              "type": "string",
+              "description": "Set filesystem group change policy"
+            },
+            "sysctls": {
+              "type": "array",
+              "description": "Set kernel settings using the sysctl interface"
+            },
+            "supplementalGroups": {
+              "type": "array",
+              "description": "Set filesystem extra groups"
+            },
+            "fsGroup": {
+              "type": "integer",
+              "description": "Group to configure permissions for volumes"
+            }
+          },
+          "additionalProperties": true
+        },
+        "containerSecurityContext": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Enabled containers' Security Context"
+            },
+            "seLinuxOptions": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "description": "Set SELinux options in container",
+              "additionalProperties": true
+            },
+            "runAsUser": {
+              "type": "integer",
+              "description": "Set containers' Security Context runAsUser"
+            },
+            "runAsGroup": {
+              "type": "integer",
+              "description": "Set containers' Security Context runAsGroup"
+            },
+            "runAsNonRoot": {
+              "type": "boolean",
+              "description": "Set container's Security Context runAsNonRoot"
+            },
+            "privileged": {
+              "type": "boolean",
+              "description": "Set container's Security Context privileged"
+            },
+            "readOnlyRootFilesystem": {
+              "type": "boolean",
+              "description": "Set container's Security Context readOnlyRootFilesystem"
+            },
+            "allowPrivilegeEscalation": {
+              "type": "boolean",
+              "description": "Set container's Security Context allowPrivilegeEscalation"
+            },
+            "capabilities": {
+              "type": "object",
+              "properties": {
+                "drop": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "List of capabilities to be dropped"
+                }
+              },
+              "additionalProperties": true
+            },
+            "seccompProfile": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "description": "Set container's Security Context seccomp profile"
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "description": "Configure Container Security Context ref: https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-pod",
+          "additionalProperties": true
+        },
+        "resourcesPreset": {
+          "type": "string",
+          "description": "Set container resources according to one common preset (allowed values: none, nano, micro, small, medium, large, xlarge, 2xlarge). This is ignored if grafana.resources is set (grafana.resources is recommended for production)."
+        },
+        "resources": {
+          "type": "object",
+          "description": "Set container requests and limits for different resources like CPU or memory (essential for production workloads)",
+          "additionalProperties": true
+        },
+        "livenessProbe": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Enable livenessProbe"
+            },
+            "initialDelaySeconds": {
+              "type": "integer",
+              "description": "Initial delay seconds for livenessProbe"
+            },
+            "periodSeconds": {
+              "type": "integer",
+              "description": "Period seconds for livenessProbe"
+            },
+            "timeoutSeconds": {
+              "type": "integer",
+              "description": "Timeout seconds for livenessProbe"
+            },
+            "failureThreshold": {
+              "type": "integer",
+              "description": "Failure threshold for livenessProbe"
+            },
+            "successThreshold": {
+              "type": "integer",
+              "description": "Success threshold for livenessProbe"
+            }
+          },
+          "description": "Grafana containers' liveness probe ref: https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-probes/#configure-probes",
+          "additionalProperties": true
+        },
+        "readinessProbe": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Enable readinessProbe"
+            },
+            "path": {
+              "type": "string",
+              "description": "Path for readinessProbe"
+            },
+            "scheme": {
+              "type": "string",
+              "description": "Scheme for readinessProbe"
+            },
+            "initialDelaySeconds": {
+              "type": "integer",
+              "description": "Initial delay seconds for readinessProbe"
+            },
+            "periodSeconds": {
+              "type": "integer",
+              "description": "Period seconds for readinessProbe"
+            },
+            "timeoutSeconds": {
+              "type": "integer",
+              "description": "Timeout seconds for readinessProbe"
+            },
+            "failureThreshold": {
+              "type": "integer",
+              "description": "Failure threshold for readinessProbe"
+            },
+            "successThreshold": {
+              "type": "integer",
+              "description": "Success threshold for readinessProbe"
+            }
+          },
+          "description": "Grafana containers' readinessProbe probe ref: https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-probes/#configure-probes",
+          "additionalProperties": true
+        },
+        "startupProbe": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Enable startupProbe"
+            },
+            "path": {
+              "type": "string",
+              "description": "Path for readinessProbe"
+            },
+            "scheme": {
+              "type": "string",
+              "description": "Scheme for readinessProbe"
+            },
+            "initialDelaySeconds": {
+              "type": "integer",
+              "description": "Initial delay seconds for startupProbe"
+            },
+            "periodSeconds": {
+              "type": "integer",
+              "description": "Period seconds for startupProbe"
+            },
+            "timeoutSeconds": {
+              "type": "integer",
+              "description": "Timeout seconds for startupProbe"
+            },
+            "failureThreshold": {
+              "type": "integer",
+              "description": "Failure threshold for startupProbe"
+            },
+            "successThreshold": {
+              "type": "integer",
+              "description": "Success threshold for startupProbe"
+            }
+          },
+          "additionalProperties": true
+        },
+        "customLivenessProbe": {
+          "type": "object",
+          "description": "Custom livenessProbe that overrides the default one",
+          "additionalProperties": true
+        },
+        "customReadinessProbe": {
+          "type": "object",
+          "description": "Custom readinessProbe that overrides the default one",
+          "additionalProperties": true
+        },
+        "customStartupProbe": {
+          "type": "object",
+          "description": "Custom startupProbe that overrides the default one",
+          "additionalProperties": true
+        },
+        "lifecycleHooks": {
+          "type": "object",
+          "description": "for the Grafana container(s) to automate configuration before or after startup",
+          "additionalProperties": true
+        },
+        "sidecars": {
+          "type": "array",
+          "description": "Attach additional sidecar containers to the Grafana pod"
+        },
+        "initContainers": {
+          "type": "array",
+          "description": "Add additional init containers to the Grafana pod(s)"
+        },
+        "enableServiceLinks": {
+          "type": "boolean",
+          "description": "Whether information about services should be injected into pod's environment variable"
+        },
+        "extraVolumes": {
+          "type": "array",
+          "description": "Additional volumes for the Grafana pod"
+        },
+        "extraVolumeMounts": {
+          "type": "array",
+          "description": "Additional volume mounts for the Grafana container"
+        },
+        "extraEnvVarsCM": {
+          "type": "string",
+          "description": "Name of existing ConfigMap containing extra env vars for Grafana nodes"
+        },
+        "extraEnvVarsCMOptional": {
+          "type": "boolean",
+          "description": "Whether to still run the Grafana node if the ConfigMap does not exist"
+        },
+        "extraEnvVarsSecret": {
+          "type": "string",
+          "description": "Name of existing Secret containing extra env vars for Grafana nodes"
+        },
+        "extraEnvVarsSecretOptional": {
+          "type": "boolean",
+          "description": "Whether to still run the Grafana node if the Secret does not exist"
+        },
+        "extraEnvVars": {
+          "type": "array",
+          "description": "Array containing extra env vars to configure Grafana"
+        },
+        "extraConfigmaps": {
+          "type": "array",
+          "description": "Array to mount extra ConfigMaps to configure Grafana"
+        },
+        "command": {
+          "type": "array",
+          "description": "Override default container command (useful when using custom images)"
+        },
+        "args": {
+          "type": "array",
+          "description": "Override default container args (useful when using custom images)"
+        },
+        "pdb": {
+          "type": "object",
+          "properties": {
+            "create": {
+              "type": "boolean",
+              "description": "Enable/disable a Pod Disruption Budget creation"
+            },
+            "minAvailable": {
+              "type": "string",
+              "description": "Minimum number/percentage of pods that should remain scheduled"
+            },
+            "maxUnavailable": {
+              "type": "string",
+              "description": "Maximum number/percentage of pods that may be made unavailable. Defaults to `1` if both `grafana.pdb.minAvailable` and `grafana.pdb.maxUnavailable` are empty."
+            }
+          },
+          "description": "Pod Disruption Budget configuration ref: https://kubernetes.io/docs/tasks/run-application/configure-pdb",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "persistence": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable persistence"
+        },
+        "storageClass": {
+          "type": "string",
+          "description": "Storage class to use with the PVC"
+        },
+        "annotations": {
+          "type": "object",
+          "description": "Persistent Volume Claim annotations",
+          "additionalProperties": true
+        },
+        "existingClaim": {
+          "type": "string",
+          "description": "If you want to reuse an existing claim, you can pass the name of the PVC using the existingClaim variable. Please note that this setting will be ignored when `grafana.kind` is set to `StatefulSet`."
+        },
+        "accessMode": {
+          "type": "string",
+          "description": "Persistent Volume Access Mode"
+        },
+        "accessModes": {
+          "type": "array",
+          "description": "Persistent Volume Access Modes"
+        },
+        "size": {
+          "type": "string",
+          "description": "Size for the PV"
+        }
+      },
+      "description": "Enable persistence using Persistent Volume Claims ref: https://kubernetes.io/docs/concepts/storage/persistent-volumes/",
+      "additionalProperties": true
+    },
+    "serviceAccount": {
+      "type": "object",
+      "properties": {
+        "create": {
+          "type": "boolean",
+          "description": "Specifies whether a ServiceAccount should be created"
+        },
+        "name": {
+          "type": "string",
+          "description": "The name of the ServiceAccount to use. If not set and create is true, a name is generated using the fullname template"
+        },
+        "annotations": {
+          "type": "object",
+          "description": "Annotations to add to the ServiceAccount Metadata",
+          "additionalProperties": true
+        },
+        "automountServiceAccountToken": {
+          "type": "boolean",
+          "description": "Automount service account token for the application controller service account"
+        }
+      },
+      "additionalProperties": true
+    },
+    "service": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "Kubernetes Service type"
+        },
+        "clusterIP": {
+          "type": "string",
+          "description": "Grafana service Cluster IP"
+        },
+        "ports": {
+          "type": "object",
+          "properties": {
+            "grafana": {
+              "type": "integer",
+              "description": "Grafana service port"
+            }
+          },
+          "additionalProperties": true
+        },
+        "nodePorts": {
+          "type": "object",
+          "properties": {
+            "grafana": {
+              "type": "string",
+              "description": "Specify the nodePort value for the LoadBalancer and NodePort service types"
+            }
+          },
+          "description": "ref: https://kubernetes.io/docs/concepts/services-networking/service/#type-nodeport",
+          "additionalProperties": true
+        },
+        "loadBalancerIP": {
+          "type": "string",
+          "description": "loadBalancerIP if Grafana service type is `LoadBalancer` (optional, cloud specific)"
+        },
+        "loadBalancerClass": {
+          "type": "string",
+          "description": "loadBalancerClass if Grafana service type is `LoadBalancer` (optional, cloud specific)"
+        },
+        "loadBalancerSourceRanges": {
+          "type": "array",
+          "description": "loadBalancerSourceRanges if Grafana service type is `LoadBalancer` (optional, cloud specific)"
+        },
+        "annotations": {
+          "type": "object",
+          "description": "Provide any additional annotations which may be required.",
+          "additionalProperties": true
+        },
+        "externalTrafficPolicy": {
+          "type": "string",
+          "description": "Grafana service external traffic policy"
+        },
+        "extraPorts": {
+          "type": "array",
+          "description": "Extra port to expose on Grafana service"
+        },
+        "sessionAffinity": {
+          "type": "string",
+          "description": "Session Affinity for Kubernetes service, can be \"None\" or \"ClientIP\""
+        },
+        "sessionAffinityConfig": {
+          "type": "object",
+          "description": "Additional settings for the sessionAffinity",
+          "additionalProperties": true
+        }
+      },
+      "description": "Service parameters",
+      "additionalProperties": true
+    },
+    "networkPolicy": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Specifies whether a NetworkPolicy should be created"
+        },
+        "allowExternal": {
+          "type": "boolean",
+          "description": "Don't require server label for connections"
+        },
+        "allowExternalEgress": {
+          "type": "boolean",
+          "description": "Allow the pod to access any range of port and all destinations."
+        },
+        "addExternalClientAccess": {
+          "type": "boolean",
+          "description": "Allow access from pods with client label set to \"true\". Ignored if `networkPolicy.allowExternal` is true."
+        },
+        "extraIngress": {
+          "type": "array",
+          "description": "Add extra ingress rules to the NetworkPolicy"
+        },
+        "extraEgress": {
+          "type": "array",
+          "description": "Add extra ingress rules to the NetworkPolicy"
+        },
+        "ingressPodMatchLabels": {
+          "type": "object",
+          "description": "Labels to match to allow traffic from other pods. Ignored if `networkPolicy.allowExternal` is true.",
+          "additionalProperties": true
+        },
+        "ingressNSMatchLabels": {
+          "type": "object",
+          "description": "Labels to match to allow traffic from other namespaces. Ignored if `networkPolicy.allowExternal` is true.",
+          "additionalProperties": true
+        },
+        "ingressNSPodMatchLabels": {
+          "type": "object",
+          "description": "Pod labels to match to allow traffic from other namespaces. Ignored if `networkPolicy.allowExternal` is true.",
+          "additionalProperties": true
+        }
+      },
+      "description": "Network Policies Ref: https://kubernetes.io/docs/concepts/services-networking/network-policies/",
+      "additionalProperties": true
+    },
+    "ingress": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Set to true to enable ingress record generation"
+        },
+        "pathType": {
+          "type": "string",
+          "description": "Ingress Path type"
+        },
+        "apiVersion": {
+          "type": "string",
+          "description": "Override API Version (automatically detected if not set)"
+        },
+        "hostname": {
+          "type": "string",
+          "description": "When the ingress is enabled, a host pointing to this will be created"
+        },
+        "path": {
+          "type": "string",
+          "description": "Default path for the ingress resource"
+        },
+        "annotations": {
+          "type": "object",
+          "description": "Additional annotations for the Ingress resource. To enable certificate autogeneration, place here your cert-manager annotations.",
+          "additionalProperties": true
+        },
+        "tls": {
+          "type": "boolean",
+          "description": "Enable TLS configuration for the hostname defined at ingress.hostname parameter"
+        },
+        "extraHosts": {
+          "type": "array",
+          "description": "The list of additional hostnames to be covered with this ingress record."
+        },
+        "extraPaths": {
+          "type": "array",
+          "description": "Any additional arbitrary paths that may need to be added to the ingress under the main host."
+        },
+        "extraTls": {
+          "type": "array",
+          "description": "The tls configuration for additional hostnames to be covered with this ingress record."
+        },
+        "secrets": {
+          "type": "array",
+          "description": "It is also possible to create and manage the certificates outside of this helm chart"
+        },
+        "selfSigned": {
+          "type": "boolean",
+          "description": "Create a TLS secret for this ingress record using self-signed certificates generated by Helm"
+        },
+        "ingressClassName": {
+          "type": "string",
+          "description": "IngressClass that will be be used to implement the Ingress (Kubernetes 1.18+)"
+        },
+        "extraRules": {
+          "type": "array",
+          "description": "Additional rules to be covered with this ingress record"
+        }
+      },
+      "description": "Configure the ingress resource that allows you to access the Grafana installation. Set up the URL ref: https://kubernetes.io/docs/concepts/services-networking/ingress/",
+      "additionalProperties": true
+    },
+    "metrics": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable the export of Prometheus metrics"
+        },
+        "service": {
+          "type": "object",
+          "properties": {
+            "annotations": {
+              "type": "object",
+              "properties": {
+                "prometheus.io/scrape": {
+                  "type": "string"
+                },
+                "prometheus.io/port": {
+                  "type": "string"
+                },
+                "prometheus.io/path": {
+                  "type": "string"
+                }
+              },
+              "description": "Annotations for Prometheus metrics service",
+              "additionalProperties": true
+            }
+          },
+          "description": "Prometheus Operator ServiceMonitor configuration",
+          "additionalProperties": true
+        },
+        "serviceMonitor": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "if `true`, creates a Prometheus Operator ServiceMonitor (also requires `metrics.enabled` to be `true`)"
+            },
+            "namespace": {
+              "type": "string",
+              "description": "Namespace in which Prometheus is running"
+            },
+            "interval": {
+              "type": "string",
+              "description": "Interval at which metrics should be scraped."
+            },
+            "scrapeTimeout": {
+              "type": "string",
+              "description": "Timeout after which the scrape is ended"
+            },
+            "selector": {
+              "type": "object",
+              "description": "Prometheus instance selector labels",
+              "additionalProperties": true
+            },
+            "relabelings": {
+              "type": "array",
+              "description": "RelabelConfigs to apply to samples before scraping"
+            },
+            "metricRelabelings": {
+              "type": "array",
+              "description": "MetricRelabelConfigs to apply to samples before ingestion"
+            },
+            "honorLabels": {
+              "type": "boolean",
+              "description": "Labels to honor to add to the scrape endpoint"
+            },
+            "labels": {
+              "type": "object",
+              "description": "Additional custom labels for the ServiceMonitor",
+              "additionalProperties": true
+            },
+            "jobLabel": {
+              "type": "string",
+              "description": "The name of the label on the target service to use as the job name in prometheus."
+            }
+          },
+          "additionalProperties": true
+        },
+        "prometheusRule": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "if `true`, creates a Prometheus Operator PrometheusRule (also requires `metrics.enabled` to be `true` and `metrics.prometheusRule.rules`)"
+            },
+            "namespace": {
+              "type": "string",
+              "description": "Namespace for the PrometheusRule Resource (defaults to the Release Namespace)"
+            },
+            "additionalLabels": {
+              "type": "object",
+              "description": "Additional labels that can be used so PrometheusRule will be discovered by Prometheus",
+              "additionalProperties": true
+            },
+            "rules": {
+              "type": "array",
+              "description": "PrometheusRule rules to configure"
+            }
+          },
+          "description": "Prometheus Operator PrometheusRule configuration",
+          "additionalProperties": true
+        }
+      },
+      "description": "Prometheus metrics",
+      "additionalProperties": true
+    },
+    "volumePermissions": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable init container that changes the owner/group of the PV mount point to `runAsUser:fsGroup`"
+        },
+        "image": {
+          "type": "object",
+          "properties": {
+            "registry": {
+              "type": "string",
+              "description": "OS Shell + Utility image registry",
+              "default": "REGISTRY_NAME"
+            },
+            "repository": {
+              "type": "string",
+              "description": "OS Shell + Utility image repository",
+              "default": "REPOSITORY_NAME/os-shell"
+            },
+            "digest": {
+              "type": "string",
+              "description": "OS Shell + Utility image digest in the way sha256:aa.... Please note this parameter, if set, will override the tag"
+            },
+            "pullPolicy": {
+              "type": "string",
+              "description": "OS Shell + Utility image pull policy"
+            },
+            "pullSecrets": {
+              "type": "array",
+              "description": "OS Shell + Utility image pull secrets"
+            }
+          },
+          "description": "OS Shell + Utility image ref: https://hub.docker.com/r/bitnami/os-shell/tags/",
+          "additionalProperties": true
+        },
+        "resourcesPreset": {
+          "type": "string",
+          "description": "Set container resources according to one common preset (allowed values: none, nano, micro, small, medium, large, xlarge, 2xlarge). This is ignored if volumePermissions.resources is set (volumePermissions.resources is recommended for production)."
+        },
+        "resources": {
+          "type": "object",
+          "description": "Set container requests and limits for different resources like CPU or memory (essential for production workloads)",
+          "additionalProperties": true
+        },
+        "containerSecurityContext": {
+          "type": "object",
+          "properties": {
+            "seLinuxOptions": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "description": "Set SELinux options in container",
+              "additionalProperties": true
+            },
+            "runAsUser": {
+              "type": "integer",
+              "description": "Set init container's Security Context runAsUser"
+            }
+          },
+          "description": "Init container Container Security Context ref: https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-container NOTE: when runAsUser is set to special value \"auto\", init container will try to chown the data folder to auto-determined user\u0026group, using commands: `id -u`:`id -G | cut -d\" \" -f2` \"auto\" is especially useful for OpenShift which has scc with dynamic user ids (and 0 is not allowed)",
+          "additionalProperties": true
+        }
+      },
+      "description": "'volumePermissions' init container parameters Changes the owner and group of the persistent volume mount point to runAsUser:fsGroup values based on the `grafana:podSecurityContext`/`grafana:containerSecurityContext`` parameters May require setting `grafana:podSecurityContext:runAsNonRoot` to false",
+      "additionalProperties": true
+    },
+    "diagnosticMode": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable diagnostic mode (all probes will be disabled and the command will be overridden)"
+        },
+        "command": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Command to override all containers in the deployment"
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Args to override all containers in the deployment"
+        }
+      },
+      "description": "Enable diagnostic mode in the deployment",
+      "additionalProperties": true
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": true
+}
