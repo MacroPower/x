@@ -3373,3 +3373,25 @@ func TestHelmSchemaAnnotatorFromFile(t *testing.T) {
 
 	assertGolden(t, "testdata/helm_schema.schema.json", schema)
 }
+
+// TestHelmSchemaAnnotatorRealWorld generates a schema for the cilium chart's
+// values.yaml, which annotates properties with @schema blocks throughout,
+// interleaved with helm-docs comments the annotator must not treat as
+// descriptions.
+//
+// Vendored via `helm show values cilium --repo https://helm.cilium.io
+// --version 1.18.7`.
+func TestHelmSchemaAnnotatorRealWorld(t *testing.T) {
+	t.Parallel()
+
+	data, err := os.ReadFile("testdata/cilium_values.yaml")
+	require.NoError(t, err)
+
+	gen := magicschema.NewGenerator(
+		magicschema.WithAnnotators(dadav.New()),
+	)
+	schema, err := gen.Generate(data)
+	require.NoError(t, err)
+
+	assertGolden(t, "testdata/cilium_values.schema.json", schema)
+}
