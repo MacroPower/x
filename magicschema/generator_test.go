@@ -11,6 +11,7 @@ import (
 	"go.jacobcolvin.com/x/magicschema"
 	"go.jacobcolvin.com/x/magicschema/helm"
 	"go.jacobcolvin.com/x/magicschema/helm/dadav"
+	"go.jacobcolvin.com/x/magicschema/helm/losisin"
 )
 
 func TestGeneratorBasic(t *testing.T) {
@@ -965,4 +966,191 @@ func assertPropertiesMatch(t *testing.T, want, got map[string]any) {
 			assertPropertiesMatch(t, wantMap, gotMap)
 		}
 	}
+}
+
+func TestGeneratorAnchorCycle(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+	}{
+		"self-referential anchor": {
+			input: "a: &x\n  b: *x\n",
+		},
+		"mutually recursive anchors": {
+			input: "a: &x\n  b: &y\n    c: *x\nd: *y\n",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			// Alias cycles must not crash the walk; the recursion bound
+			// cuts the subtree off fail-open.
+			gen := magicschema.NewGenerator()
+			schema, err := gen.Generate([]byte(tc.input))
+			require.NoError(t, err)
+			require.NotNil(t, schema)
+		})
+	}
+}
+
+func TestGeneratorQuotedKeys(t *testing.T) {
+	t.Parallel()
+
+	input := "\"my.key\": 1\n'other': two\n"
+
+	gen := magicschema.NewGenerator()
+	schema, err := gen.Generate([]byte(input))
+	require.NoError(t, err)
+
+	out, err := json.Marshal(schema)
+	require.NoError(t, err)
+
+	var got map[string]any
+
+	require.NoError(t, json.Unmarshal(out, &got))
+
+	props, ok := got["properties"].(map[string]any)
+	require.True(t, ok)
+
+	// Property names carry no quote characters from the YAML source.
+	assert.Contains(t, props, "my.key")
+	assert.Contains(t, props, "other")
+	assert.NotContains(t, props, `"my.key"`)
+	assert.NotContains(t, props, "'other'")
+}
+
+func TestGeneratorNullOnlyAnnotatedType(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		want  any
+	}{
+		"null-only type widens with value type": {
+			input: "# @schema type:null\nport: 8080\n",
+			want:  []any{"integer", "null"},
+		},
+		"null-only type with null value stays null": {
+			input: "# @schema type:null\nport:\n",
+			want:  "null",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			gen := magicschema.NewGenerator(
+				magicschema.WithAnnotators(losisin.New()),
+			)
+			schema, err := gen.Generate([]byte(tc.input))
+			require.NoError(t, err)
+
+			out, err := json.Marshal(schema)
+			require.NoError(t, err)
+
+			var got map[string]any
+
+			require.NoError(t, json.Unmarshal(out, &got))
+
+			props, ok := got["properties"].(map[string]any)
+			require.True(t, ok)
+
+			port, ok := props["port"].(map[string]any)
+			require.True(t, ok)
+
+			assert.Equal(t, tc.want, port["type"])
+		})
+	}
+}
+
+func TestGeneratorMergeKeyRequired(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		key   string
+		want  []any
+	}{
+		"merge key required deduplicates with direct annotation": {
+			input: "base: &base\n" +
+				"  # @schema required:true\n" +
+				"  name: x\n" +
+				"spec:\n" +
+				"  <<: *base\n" +
+				"  # @schema required:true\n" +
+				"  name: y\n",
+			key:  "spec",
+			want: []any{"name"},
+		},
+		"sequence merge keys carry required": {
+			input: "a: &a\n" +
+				"  # @schema required:true\n" +
+				"  x: 1\n" +
+				"b: &b\n" +
+				"  # @schema required:true\n" +
+				"  y: 2\n" +
+				"spec:\n" +
+				"  <<: [*a, *b]\n",
+			key:  "spec",
+			want: []any{"x", "y"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			gen := magicschema.NewGenerator(
+				magicschema.WithAnnotators(losisin.New()),
+			)
+			schema, err := gen.Generate([]byte(tc.input))
+			require.NoError(t, err)
+
+			out, err := json.Marshal(schema)
+			require.NoError(t, err)
+
+			var got map[string]any
+
+			require.NoError(t, json.Unmarshal(out, &got))
+
+			props, ok := got["properties"].(map[string]any)
+			require.True(t, ok)
+
+			spec, ok := props[tc.key].(map[string]any)
+			require.True(t, ok)
+
+			assert.Equal(t, tc.want, spec["required"])
+		})
+	}
+}
+
+func TestGeneratorAnnotationMarkersExcludedFromDescriptions(t *testing.T) {
+	t.Parallel()
+
+	// Annotation markers anywhere in a comment block stay out of fallback
+	// descriptions, not just markers on the first line.
+	input := "# Real description\n# @default -- foo\nreplicas: 3\n"
+
+	gen := magicschema.NewGenerator()
+	schema, err := gen.Generate([]byte(input))
+	require.NoError(t, err)
+
+	out, err := json.Marshal(schema)
+	require.NoError(t, err)
+
+	var got map[string]any
+
+	require.NoError(t, json.Unmarshal(out, &got))
+
+	props, ok := got["properties"].(map[string]any)
+	require.True(t, ok)
+
+	replicas, ok := props["replicas"].(map[string]any)
+	require.True(t, ok)
+
+	assert.Equal(t, "Real description", replicas["description"])
 }

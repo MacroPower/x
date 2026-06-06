@@ -9,6 +9,7 @@ import (
 
 	"go.jacobcolvin.com/x/magicschema"
 	"go.jacobcolvin.com/x/magicschema/helm/dadav"
+	"go.jacobcolvin.com/x/magicschema/helm/losisin"
 )
 
 func TestMergeMultipleInputs(t *testing.T) {
@@ -408,6 +409,129 @@ func TestMergeTypeWidening(t *testing.T) {
 				require.True(t, ok, "expected val to be a map")
 				assert.Equal(t, tc.wantType, val["type"])
 			}
+		})
+	}
+}
+
+func TestMergeAnnotatedConstraints(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		inputA string
+		inputB string
+		opts   []magicschema.Option
+		check  func(*testing.T, map[string]any)
+	}{
+		"nullable type union widens with scalar type": {
+			inputA: "# @schema type:[string, null]\nhost:\n",
+			inputB: "host: example.com\n",
+			opts:   []magicschema.Option{magicschema.WithAnnotators(losisin.New())},
+			check: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				host, ok := props["host"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, []any{"string", "null"}, host["type"])
+			},
+		},
+		"enum union when both sides constrain": {
+			inputA: "# @schema enum:[a, b]\nsize: a\n",
+			inputB: "# @schema enum:[b, c]\nsize: c\n",
+			opts:   []magicschema.Option{magicschema.WithAnnotators(losisin.New())},
+			check: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				size, ok := props["size"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, []any{"a", "b", "c"}, size["enum"])
+			},
+		},
+		"enum dropped when one side is unconstrained": {
+			inputA: "# @schema enum:[a, b]\nsize: a\n",
+			inputB: "size: d\n",
+			opts:   []magicschema.Option{magicschema.WithAnnotators(losisin.New())},
+			check: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				size, ok := props["size"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Nil(t, size["enum"])
+			},
+		},
+		"minimum widens to the smaller bound": {
+			inputA: "# @schema minimum:3\nport: 8080\n",
+			inputB: "# @schema minimum:1\nport: 8081\n",
+			opts:   []magicschema.Option{magicschema.WithAnnotators(losisin.New())},
+			check: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				port, ok := props["port"].(map[string]any)
+				require.True(t, ok)
+
+				assert.InEpsilon(t, float64(1), port["minimum"], 0.0001)
+			},
+		},
+		"false additionalProperties yields to constrained schema": {
+			inputA: "# @schema\n# additionalProperties: false\n# @schema\nconf:\n  a: 1\n",
+			inputB: "# @schema\n# additionalProperties:\n#   type: string\n# @schema\nconf:\n  b: x\n",
+			opts:   []magicschema.Option{magicschema.WithAnnotators(dadav.New())},
+			check: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				conf, ok := props["conf"].(map[string]any)
+				require.True(t, ok)
+
+				ap, ok := conf["additionalProperties"].(map[string]any)
+				require.True(t, ok, "expected constrained additionalProperties, got %v", conf["additionalProperties"])
+				assert.Equal(t, "string", ap["type"])
+			},
+		},
+		"root annotations apply from the first input": {
+			inputA: "# @schema.root\n# title: My Chart\n# @schema.root\nreplicas: 3\n",
+			inputB: "name: x\n",
+			opts:   []magicschema.Option{magicschema.WithAnnotators(dadav.New())},
+			check: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				assert.Equal(t, "My Chart", got["title"])
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			gen := magicschema.NewGenerator(tc.opts...)
+			schema, err := gen.Generate([]byte(tc.inputA), []byte(tc.inputB))
+			require.NoError(t, err)
+
+			out, err := json.Marshal(schema)
+			require.NoError(t, err)
+
+			var got map[string]any
+
+			require.NoError(t, json.Unmarshal(out, &got))
+
+			tc.check(t, got)
 		})
 	}
 }
