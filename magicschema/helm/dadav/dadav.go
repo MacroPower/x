@@ -471,33 +471,12 @@ func extractNonAnnotationDescription(comment string) string {
 
 	// Keep only the last comment group, ignoring trailing blank lines so a
 	// blank final line cannot discard the whole description.
-	end := len(descLines)
-	for end > 0 && strings.TrimSpace(descLines[end-1]) == "" {
-		end--
-	}
-
-	lastBlank := -1
-
-	for i, line := range descLines[:end] {
-		if strings.TrimSpace(line) == "" {
-			lastBlank = i
-		}
-	}
-
-	// Filter blank lines from the final result.
-	var nonBlank []string
-
-	for _, l := range descLines[lastBlank+1 : end] {
-		if strings.TrimSpace(l) != "" {
-			nonBlank = append(nonBlank, l)
-		}
-	}
-
-	if len(nonBlank) == 0 {
+	group := magicschema.LastCommentGroup(descLines)
+	if len(group) == 0 {
 		return ""
 	}
 
-	return strings.Join(nonBlank, " ")
+	return strings.Join(group, " ")
 }
 
 // cleanCommentLine strips up to two leading '#' characters plus optional space

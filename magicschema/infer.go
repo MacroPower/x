@@ -106,29 +106,12 @@ func extractFromComment(comment *ast.CommentGroupNode) string {
 }
 
 // cleanComment strips comment markers and whitespace from a comment string.
-// Multi-line comments are joined with spaces, using only lines after the
-// last blank line.
+// Multi-line comments are joined with spaces, using only the last comment
+// group (the lines after the last blank line, ignoring trailing blanks).
 func cleanComment(s string) string {
-	lines := strings.Split(s, "\n")
-
-	// Find the last blank line index to use only the final comment group.
-	lastBlank := -1
-
-	for i, line := range lines {
-		stripped := stripCommentPrefix(line)
-		if strings.TrimSpace(stripped) == "" {
-			lastBlank = i
-		}
-	}
-
-	start := 0
-	if lastBlank >= 0 && lastBlank < len(lines)-1 {
-		start = lastBlank + 1
-	}
-
 	var parts []string
 
-	for _, line := range lines[start:] {
+	for _, line := range LastCommentGroup(strings.Split(s, "\n")) {
 		cleaned := strings.TrimSpace(stripCommentPrefix(line))
 		if cleaned == "" {
 			continue

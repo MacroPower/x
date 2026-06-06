@@ -200,6 +200,9 @@
 //     @param, @skip, @default, --, etc.), allowing annotators and the
 //     fallback comment extractor to avoid treating annotations as plain
 //     descriptions.
+//   - [LastCommentGroup] returns the lines of the final comment group (the
+//     lines after the last blank comment line, ignoring trailing blanks),
+//     which is the group annotation formats scope to.
 //
 // # CLI Integration
 //

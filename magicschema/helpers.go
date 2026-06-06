@@ -2,6 +2,7 @@ package magicschema
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/goccy/go-yaml"
 	"github.com/google/jsonschema-go/jsonschema"
@@ -104,4 +105,34 @@ func ParseYAMLValue(val string) []byte {
 	}
 
 	return DefaultValue(v)
+}
+
+// LastCommentGroup returns the lines of the final comment group: the lines
+// after the last blank comment line, ignoring trailing blanks. A line is
+// blank when stripping '#' markers and whitespace leaves nothing. Annotation
+// formats scope to the comment group directly above a key, so earlier groups
+// (often documentation for the file or a preceding key) are excluded. The
+// returned slice contains no blank lines.
+func LastCommentGroup(lines []string) []string {
+	blank := func(line string) bool {
+		stripped := strings.TrimSpace(line)
+		stripped = strings.TrimLeft(stripped, "#")
+
+		return strings.TrimSpace(stripped) == ""
+	}
+
+	end := len(lines)
+	for end > 0 && blank(lines[end-1]) {
+		end--
+	}
+
+	lastBlank := -1
+
+	for i, line := range lines[:end] {
+		if blank(line) {
+			lastBlank = i
+		}
+	}
+
+	return lines[lastBlank+1 : end]
 }
