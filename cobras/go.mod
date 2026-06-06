@@ -1,4 +1,4 @@
-module go.jacobcolvin.com/x/log
+module go.jacobcolvin.com/x/cobras
 
 go 1.25.8
 

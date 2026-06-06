@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"go.jacobcolvin.com/x/profile"
+	"go.jacobcolvin.com/x/cobras/profile"
 )
 
 func TestNew(t *testing.T) {

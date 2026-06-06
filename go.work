@@ -2,10 +2,8 @@ go 1.26.1
 
 use (
 	./ansivideo
+	./cobras
 	./jsonschema
-	./log
 	./magicschema
-	./profile
 	./stringtest
-	./version
 )

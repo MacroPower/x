@@ -12,14 +12,13 @@
 
 ## Modules
 
-Each directory is an independent Go module, versioned and tagged separately
-(e.g. `magicschema/v0.1.0`).
+Each top-level directory is an independent Go module, versioned and tagged
+separately (e.g. `magicschema/v0.1.0`). Some modules contain multiple
+packages.
 
-| Module                                                               | Description                                            |
-| -------------------------------------------------------------------- | ------------------------------------------------------ |
-| [`ansivideo`](https://pkg.go.dev/go.jacobcolvin.com/x/ansivideo)     | Renders video in the terminal with ANSI half-blocks.   |
-| [`log`](https://pkg.go.dev/go.jacobcolvin.com/x/log)                 | Structured logging handlers for `log/slog`.            |
-| [`magicschema`](https://pkg.go.dev/go.jacobcolvin.com/x/magicschema) | Generates JSON Schema from YAML files.                 |
-| [`profile`](https://pkg.go.dev/go.jacobcolvin.com/x/profile)         | Runtime profiling for CLI applications.                |
-| [`stringtest`](https://pkg.go.dev/go.jacobcolvin.com/x/stringtest)   | Test helpers for multi-line strings.                   |
-| [`version`](https://pkg.go.dev/go.jacobcolvin.com/x/version)         | Build version information from ldflags and build info. |
+| Module                                                               | Description                                                       |
+| -------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| [`ansivideo`](https://pkg.go.dev/go.jacobcolvin.com/x/ansivideo)     | Renders video in the terminal with ANSI half-blocks.              |
+| [`cobras`](https://pkg.go.dev/go.jacobcolvin.com/x/cobras)           | CLI app helpers: structured logging, profiling, and version info. |
+| [`magicschema`](https://pkg.go.dev/go.jacobcolvin.com/x/magicschema) | Generates JSON Schema from YAML files.                            |
+| [`stringtest`](https://pkg.go.dev/go.jacobcolvin.com/x/stringtest)   | Test helpers for multi-line strings.                              |
