@@ -1,6 +1,7 @@
 package magicschema
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -148,6 +149,10 @@ func (g *Generator) Generate(inputs ...[]byte) (*jsonschema.Schema, error) {
 // prepared annotators alongside the schema so Generate can apply root
 // annotations from every input, not just the last one.
 func (g *Generator) generateSingle(input []byte) (*jsonschema.Schema, []Annotator, error) {
+	// Strip a UTF-8 byte-order mark; the parser would otherwise treat it
+	// as part of the first property key.
+	input = bytes.TrimPrefix(input, []byte("\xef\xbb\xbf"))
+
 	if len(input) == 0 || isBlank(input) {
 		return TrueSchema(), nil, nil
 	}

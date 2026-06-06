@@ -865,6 +865,31 @@ func TestGeneratorRootAdditionalPropertiesNonObject(t *testing.T) {
 	}
 }
 
+func TestGeneratorByteOrderMark(t *testing.T) {
+	t.Parallel()
+
+	// Files saved with a UTF-8 BOM must not leak the mark into the first
+	// property key.
+	input := "\xef\xbb\xbffoo: 1\n"
+
+	gen := magicschema.NewGenerator()
+	schema, err := gen.Generate([]byte(input))
+	require.NoError(t, err)
+
+	out, err := json.Marshal(schema)
+	require.NoError(t, err)
+
+	var got map[string]any
+
+	require.NoError(t, json.Unmarshal(out, &got))
+
+	props, ok := got["properties"].(map[string]any)
+	require.True(t, ok)
+
+	assert.Contains(t, props, "foo")
+	assert.NotContains(t, props, "\ufefffoo")
+}
+
 func TestGeneratorStrictRootAdditionalProperties(t *testing.T) {
 	t.Parallel()
 
