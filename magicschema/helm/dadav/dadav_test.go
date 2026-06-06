@@ -2759,6 +2759,38 @@ func TestHelmSchemaUpstreamBehavior(t *testing.T) {
 				assert.Contains(t, types, "null")
 			},
 		},
+		"junk-suffix delimiter toggles block": {
+			// Upstream toggles blocks on any "# @schema"-prefixed line, so
+			// junk suffixes such as "@schema@" (seen in cilium's
+			// values.yaml) still delimit a block. The block content must be
+			// parsed and must not leak into the description.
+			input: stringtest.Input(`
+				# -- Configure the kube-proxy replacement.
+				# @schema@
+				# type: [string, boolean]
+				# @schema@
+				field: "false"
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				f, ok := props["field"].(map[string]any)
+				require.True(t, ok)
+
+				types, ok := f["type"].([]any)
+				require.True(t, ok, "type union from the @schema@ block should apply")
+				assert.Contains(t, types, "string")
+				assert.Contains(t, types, "boolean")
+
+				if desc, hasDesc := f["description"].(string); hasDesc {
+					assert.NotContains(t, desc, "type:",
+						"block content must not leak into the description")
+				}
+			},
+		},
 		"multiple blocks with regular comments between them": {
 			// Upstream and our implementation both use toggle semantics.
 			// Regular comments between blocks should not interfere.

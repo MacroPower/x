@@ -303,10 +303,8 @@ func extractSchemaBlock(comment string) string {
 		}
 
 		if after, ok := strings.CutPrefix(stripped, "@schema"); ok {
-			rest := strings.TrimSpace(after)
-
-			if rest == "" {
-				// Toggle delimiter -- supports multiple blocks. A bare
+			if isDelimiterSuffix(after) {
+				// Toggle delimiter -- supports multiple blocks. A
 				// @schema delimiter also ends an unclosed @schema.root
 				// block, so a missing root close cannot swallow every
 				// following schema block.
@@ -314,8 +312,9 @@ func extractSchemaBlock(comment string) string {
 				inBlock = !inBlock
 			}
 
-			// Otherwise @schema with content on same line -- not this
-			// annotator (that's helm-values-schema inline format).
+			// Otherwise @schema with whitespace-separated content on the
+			// same line -- not this annotator (that's helm-values-schema
+			// inline format).
 			continue
 		}
 
@@ -371,11 +370,11 @@ func extractSchemaRootBlock(comment string) string {
 			continue
 		}
 
-		// A bare @schema delimiter ends an unclosed root block (root
-		// content cannot extend into schema blocks) and otherwise toggles
+		// A @schema delimiter ends an unclosed root block (root content
+		// cannot extend into schema blocks) and otherwise toggles
 		// schema-block state so root markers inside a schema block are
 		// ignored as junk.
-		if after, ok := strings.CutPrefix(stripped, "@schema"); ok && strings.TrimSpace(after) == "" {
+		if after, ok := strings.CutPrefix(stripped, "@schema"); ok && isDelimiterSuffix(after) {
 			if inBlock {
 				break
 			}
@@ -425,9 +424,9 @@ func extractNonAnnotationDescription(comment string) string {
 				continue
 			}
 
-			// Bare @schema delimiter (no content after it). It also ends
-			// an unclosed @schema.root block.
-			if rest == "" {
+			// @schema delimiter. It also ends an unclosed @schema.root
+			// block.
+			if isDelimiterSuffix(after) {
 				inRootBlock = false
 				inSchemaBlock = !inSchemaBlock
 
@@ -459,6 +458,16 @@ func extractNonAnnotationDescription(comment string) string {
 	}
 
 	return strings.Join(group, " ")
+}
+
+// isDelimiterSuffix reports whether the text following the "@schema" token
+// forms a block delimiter. Upstream helm-schema toggles blocks on any line
+// prefixed with "# @schema", so junk suffixes such as "@schema@" (seen in
+// the wild in cilium's values.yaml) still delimit a block. A
+// whitespace-separated suffix is excluded because that form is the
+// helm-values-schema inline annotation.
+func isDelimiterSuffix(after string) bool {
+	return after == "" || (after[0] != ' ' && after[0] != '\t')
 }
 
 // stripCommentHash removes leading whitespace, up to two leading '#'
