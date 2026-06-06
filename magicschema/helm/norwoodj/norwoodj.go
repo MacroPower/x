@@ -461,14 +461,10 @@ func mapHelmDocsType(hint string) string {
 }
 
 // isIgnoredHelmDocsAnnotation returns true if the content (after stripping
-// the comment prefix) is a recognized helm-docs annotation that should not
+// the comment prefix) is a recognized annotation marker that should not
 // leak into descriptions or be parsed as old-style key descriptions.
+// Recognition delegates to the central [magicschema.IsAnnotationComment]
+// list rather than maintaining a second marker set here.
 func isIgnoredHelmDocsAnnotation(content string) bool {
-	trimmed := strings.TrimSpace(content)
-
-	return strings.HasPrefix(trimmed, "@notationType") ||
-		strings.HasPrefix(trimmed, "@section") ||
-		strings.HasPrefix(trimmed, "@default") ||
-		strings.HasPrefix(trimmed, "@raw") ||
-		strings.HasPrefix(trimmed, "@ignore")
+	return magicschema.IsAnnotationComment(content)
 }
