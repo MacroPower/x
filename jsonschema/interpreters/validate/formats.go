@@ -44,6 +44,7 @@ func applyStringKeywordTag(key string, s *jsonschema.Schema) {
 
 		return
 	}
+
 	if pattern := patternFor(key); pattern != "" {
 		if s.Pattern == "" {
 			s.Pattern = pattern

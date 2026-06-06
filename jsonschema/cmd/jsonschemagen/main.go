@@ -222,12 +222,14 @@ func createTempDir(cfg config, importPath, modPath, modDir, jsonschemaDir string
 	err = renderMainGo(&mainBuf, cfg, importPath)
 	if err != nil {
 		os.RemoveAll(tempDir)
+
 		return "", fmt.Errorf("render main.go: %w", err)
 	}
 
 	err = os.WriteFile(filepath.Join(tempDir, "main.go"), mainBuf.Bytes(), 0o644)
 	if err != nil {
 		os.RemoveAll(tempDir)
+
 		return "", fmt.Errorf("write main.go: %w", err)
 	}
 
@@ -237,6 +239,7 @@ func createTempDir(cfg config, importPath, modPath, modDir, jsonschemaDir string
 	err = os.WriteFile(filepath.Join(tempDir, "go.mod"), []byte(goMod), 0o644)
 	if err != nil {
 		os.RemoveAll(tempDir)
+
 		return "", fmt.Errorf("write go.mod: %w", err)
 	}
 
@@ -252,6 +255,7 @@ func createTempDir(cfg config, importPath, modPath, modDir, jsonschemaDir string
 		err = os.WriteFile(filepath.Join(tempDir, "go.sum"), sum, 0o644)
 		if err != nil {
 			os.RemoveAll(tempDir)
+
 			return "", fmt.Errorf("write go.sum: %w", err)
 		}
 	}
@@ -300,6 +304,7 @@ func renderGoMod(modPath, modDir, jsonschemaDir string) string {
 
 	b.WriteString("require (\n")
 	b.WriteString("\t" + modPath + " v0.0.0\n")
+
 	if modPath != jsonschemaModule {
 		b.WriteString("\t" + jsonschemaModule + " v0.0.0\n")
 	}
@@ -307,6 +312,7 @@ func renderGoMod(modPath, modDir, jsonschemaDir string) string {
 	b.WriteString(")\n\n")
 
 	b.WriteString("replace " + modPath + " => " + quotePath(modDir) + "\n")
+
 	if modPath != jsonschemaModule {
 		b.WriteString("replace " + jsonschemaModule + " => " + quotePath(jsonschemaDir) + "\n")
 	}
@@ -416,6 +422,7 @@ func renderMainGo(w io.Writer, cfg config, importPath string) error {
 	if !token.IsIdentifier(cfg.TypeName) {
 		return fmt.Errorf("invalid type name %q: must be a Go identifier", cfg.TypeName)
 	}
+
 	if !isValidImportPath(importPath) {
 		return fmt.Errorf("invalid import path %q", importPath)
 	}
@@ -475,6 +482,7 @@ func runGenerate(tempDir string) ([]byte, error) {
 // unchanged.
 func cmdError(err error) error {
 	var exitErr *exec.ExitError
+
 	if ok := errors.As(err, &exitErr); ok && len(exitErr.Stderr) > 0 {
 		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(exitErr.Stderr)))
 	}

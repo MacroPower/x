@@ -351,6 +351,7 @@ func TestJSONStringTagScalarsParseAsStrings(t *testing.T) {
 
 			assert.NoError(t, v.ValidateJSON([]byte(tc.valid)),
 				"schema must accept the string-encoded value")
+
 			if tc.invalid != "" {
 				assert.Error(t, v.ValidateJSON([]byte(tc.invalid)),
 					"schema must reject the unquoted value")

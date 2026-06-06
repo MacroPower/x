@@ -35,14 +35,17 @@ func (g *generator) shouldExtract(t reflect.Type) bool {
 	if !g.definitions {
 		return false
 	}
+
 	// Only named types can be extracted.
 	if t.Name() == "" {
 		return false
 	}
+
 	// Named struct types are always extracted.
 	if t.Kind() == reflect.Struct {
 		return true
 	}
+
 	// Named non-struct types are extracted only if they implement
 	// JSONSchemaProvider or JSONSchemaExtender.
 	return implementsProvider(t) || implementsExtender(t)
@@ -53,12 +56,14 @@ func (g *generator) shouldExtract(t reflect.Type) bool {
 // if collisions persist.
 func (g *generator) disambiguateDefs() {
 	var hasCollision bool
+
 	for _, types := range g.defsNameToTypes {
 		if len(types) > 1 {
 			hasCollision = true
 			break
 		}
 	}
+
 	if !hasCollision {
 		return
 	}
@@ -76,6 +81,7 @@ func (g *generator) disambiguateDefs() {
 	// chosen disambiguation (and thus which schema wins a residual clash)
 	// nondeterministic.
 	var collisionNames []string
+
 	for name, schema := range g.defs {
 		if len(g.defsNameToTypes[name]) <= 1 {
 			newDefs[name] = schema

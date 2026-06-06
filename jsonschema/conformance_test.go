@@ -27,6 +27,7 @@ func (m metaSchemaResolver) ResolveRef(uri string) (*jsonschema.Schema, error) {
 	if s, ok := m[uri]; ok {
 		return s, nil
 	}
+
 	// Some $id values carry an empty fragment (e.g. the Draft-07 meta-schema id
 	// ends in "#").
 	if s, ok := m[uri+"#"]; ok {
@@ -52,6 +53,7 @@ func loadMetaSchemas(t *testing.T) (map[string]*jsonschema.Schema, []jsonschema.
 		if err != nil {
 			return err
 		}
+
 		if info.IsDir() || !strings.HasSuffix(path, ".json") {
 			return nil
 		}
@@ -214,6 +216,7 @@ func TestGeneratedSchemaConformsToMetaschema(t *testing.T) {
 					// definitions keyword (additionalProperties is open), so guard
 					// it explicitly: $defs is 2020-12, definitions is Draft-07.
 					var doc map[string]any
+
 					require.NoError(t, json.Unmarshal(raw, &doc))
 
 					if draft.name == "draft7" {

@@ -157,6 +157,7 @@ func schemaContainsRef(s *Schema, target string) bool {
 	if s == nil {
 		return false
 	}
+
 	if s.Ref == target {
 		return true
 	}
@@ -212,15 +213,16 @@ func (g *generator) schemaForType(t reflect.Type, nullable bool) (*Schema, error
 	if isPromotedJSONMarshaler(t) {
 		return g.handleBuiltinType(t, &Schema{}, nullable)
 	}
+
 	if isPromotedTextMarshaler(t) && !implementsJSONMarshaler(t) {
-		return g.handleBuiltinType(t, &Schema{Type: "string"}, nullable)
+		return g.handleBuiltinType(t, &Schema{Type: typeNameString}, nullable)
 	}
 
 	// 5. TextMarshaler (direct implementation). A direct TextMarshaler
 	// serializes as a string and shares the built-in path's type-level
 	// post-processing (comments, extender, $defs extraction).
 	if isDirectTextMarshaler(t) {
-		s := &Schema{Type: "string"}
+		s := &Schema{Type: typeNameString}
 		return g.handleBuiltinType(t, s, nullable)
 	}
 
@@ -244,6 +246,7 @@ func (g *generator) schemaForType(t reflect.Type, nullable bool) (*Schema, error
 	if guarded {
 		delete(g.visiting, t)
 	}
+
 	if err != nil {
 		return nil, err
 	}
@@ -256,18 +259,21 @@ func (g *generator) schemaForType(t reflect.Type, nullable bool) (*Schema, error
 		if g.comments {
 			g.applyTypeComment(t, s)
 		}
+
 		if implementsExtender(t) {
 			err := callExtender(t, s)
 			if err != nil {
 				return nil, err
 			}
 		}
+
 		// A cycle detected while building this type's element/value schema left a
 		// placeholder $defs entry (created by refForType). Fill it with the now
 		// complete schema and return a $ref, mirroring the inline-struct path.
 		if _, cyclic := g.typeToDefName[t]; cyclic {
 			return g.extractToDefs(t, s, nullable)
 		}
+
 		if g.shouldExtract(t) {
 			return g.extractToDefs(t, s, nullable)
 		}
@@ -304,10 +310,12 @@ func isRecursiveContainerKind(k reflect.Kind) bool {
 func (g *generator) handleOverrideType(t reflect.Type, override *Schema, nullable bool) (*Schema, error) {
 	s := override.CloneSchemas()
 	cloneOverrideExtras(s)
+
 	// Apply type-level comments.
 	if g.comments {
 		g.applyTypeComment(t, s)
 	}
+
 	if g.shouldExtract(t) {
 		return g.extractToDefs(t, s, nullable)
 	}
@@ -333,34 +341,44 @@ func cloneOverrideExtras(s *Schema) {
 	if s.Enum != nil {
 		s.Enum = slices.Clone(s.Enum)
 	}
+
 	if s.Const != nil {
 		c := *s.Const
 		s.Const = &c
 	}
+
 	if s.Default != nil {
 		s.Default = slices.Clone(s.Default)
 	}
+
 	if s.Extra != nil {
 		s.Extra = maps.Clone(s.Extra)
 	}
+
 	if s.Examples != nil {
 		s.Examples = slices.Clone(s.Examples)
 	}
+
 	if s.Required != nil {
 		s.Required = slices.Clone(s.Required)
 	}
+
 	if s.Types != nil {
 		s.Types = slices.Clone(s.Types)
 	}
+
 	if s.PropertyOrder != nil {
 		s.PropertyOrder = slices.Clone(s.PropertyOrder)
 	}
+
 	if s.Vocabulary != nil {
 		s.Vocabulary = maps.Clone(s.Vocabulary)
 	}
+
 	if s.DependencyStrings != nil {
 		s.DependencyStrings = maps.Clone(s.DependencyStrings)
 	}
+
 	if s.DependentRequired != nil {
 		s.DependentRequired = maps.Clone(s.DependentRequired)
 	}
@@ -380,16 +398,19 @@ func (g *generator) handleProviderType(t reflect.Type, nullable bool) (*Schema, 
 	if err != nil {
 		return nil, err
 	}
+
 	if provided == nil {
 		provided = &Schema{} // unrestricted
 	}
 
 	s := provided.CloneSchemas()
 	cloneOverrideExtras(s)
+
 	// Apply type-level comments.
 	if g.comments {
 		g.applyTypeComment(t, s)
 	}
+
 	if g.shouldExtract(t) {
 		return g.extractToDefs(t, s, nullable)
 	}
@@ -406,12 +427,14 @@ func (g *generator) handleBuiltinType(t reflect.Type, s *Schema, nullable bool) 
 		if g.comments {
 			g.applyTypeComment(t, s)
 		}
+
 		if implementsExtender(t) {
 			err := callExtender(t, s)
 			if err != nil {
 				return nil, err
 			}
 		}
+
 		if g.shouldExtract(t) {
 			return g.extractToDefs(t, s, nullable)
 		}
@@ -424,22 +447,22 @@ func (g *generator) handleBuiltinType(t reflect.Type, s *Schema, nullable bool) 
 func (g *generator) builtinOverride(t reflect.Type) (*Schema, bool) {
 	switch t {
 	case typeByteSlice:
-		return &Schema{Types: []string{typeNameNull, typeNameString}, ContentEncoding: "base64"}, true
+		return &Schema{Types: []string{typeNameNull, typeNameString}, ContentEncoding: contentEncodingBase64}, true
 	case typeTime:
-		return &Schema{Type: "string", Format: "date-time"}, true
+		return &Schema{Type: typeNameString, Format: formatDateTime}, true
 	case typeJSONRawMessage:
 		return &Schema{}, true
 	case typeJSONNumber:
-		return &Schema{Type: "number"}, true
+		return &Schema{Type: typeNameNumber}, true
 	case typeBigInt:
 		// Big.Int.MarshalJSON emits a bare JSON number (arbitrary precision),
 		// not a string, so the schema is an unbounded integer. (big.Rat and
 		// big.Float marshal via MarshalText and so are strings below.)
-		return &Schema{Type: "integer"}, true
+		return &Schema{Type: typeNameInteger}, true
 	case typeBigRat:
-		return &Schema{Type: "string", Pattern: `^-?[0-9]+(/[0-9]+)?$`}, true
+		return &Schema{Type: typeNameString, Pattern: `^-?[0-9]+(/[0-9]+)?$`}, true
 	case typeBigFloat:
-		return &Schema{Type: "string", Pattern: `^-?[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]+)?$`}, true
+		return &Schema{Type: typeNameString, Pattern: `^-?[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]+)?$`}, true
 	}
 
 	return nil, false
@@ -449,14 +472,14 @@ func (g *generator) builtinOverride(t reflect.Type) (*Schema, bool) {
 func (g *generator) schemaForKind(t reflect.Type, nullable bool) (*Schema, error) {
 	switch t.Kind() {
 	case reflect.Bool:
-		return g.applyNullable(&Schema{Type: "boolean"}, t, nullable), nil
+		return g.applyNullable(&Schema{Type: typeNameBoolean}, t, nullable), nil
 
 	case reflect.String:
-		return g.applyNullable(&Schema{Type: "string"}, t, nullable), nil
+		return g.applyNullable(&Schema{Type: typeNameString}, t, nullable), nil
 
 	case reflect.Int:
 		// Plain int is platform-dependent (32 or 64 bit), so leave it unbounded.
-		return g.applyNullable(&Schema{Type: "integer"}, t, nullable), nil
+		return g.applyNullable(&Schema{Type: typeNameInteger}, t, nullable), nil
 
 	case reflect.Int64:
 		// Float64 has a 52-bit mantissa and cannot represent MaxInt64 (2^63-1)
@@ -466,7 +489,7 @@ func (g *generator) schemaForKind(t reflect.Type, nullable bool) (*Schema, error
 		// without ever accepting an out-of-range integer. MinInt64 (-2^63) is
 		// representable exactly, so the minimum stays inclusive.
 		s := &Schema{
-			Type:             "integer",
+			Type:             typeNameInteger,
 			Minimum:          Ptr(float64(math.MinInt64)),
 			ExclusiveMaximum: Ptr(exclusiveMaxInt64),
 		}
@@ -474,43 +497,43 @@ func (g *generator) schemaForKind(t reflect.Type, nullable bool) (*Schema, error
 		return g.applyNullable(s, t, nullable), nil
 
 	case reflect.Int8:
-		s := &Schema{Type: "integer", Minimum: Ptr(float64(math.MinInt8)), Maximum: Ptr(float64(math.MaxInt8))}
+		s := &Schema{Type: typeNameInteger, Minimum: Ptr(float64(math.MinInt8)), Maximum: Ptr(float64(math.MaxInt8))}
 		return g.applyNullable(s, t, nullable), nil
 
 	case reflect.Int16:
-		s := &Schema{Type: "integer", Minimum: Ptr(float64(math.MinInt16)), Maximum: Ptr(float64(math.MaxInt16))}
+		s := &Schema{Type: typeNameInteger, Minimum: Ptr(float64(math.MinInt16)), Maximum: Ptr(float64(math.MaxInt16))}
 		return g.applyNullable(s, t, nullable), nil
 
 	case reflect.Int32:
-		s := &Schema{Type: "integer", Minimum: Ptr(float64(math.MinInt32)), Maximum: Ptr(float64(math.MaxInt32))}
+		s := &Schema{Type: typeNameInteger, Minimum: Ptr(float64(math.MinInt32)), Maximum: Ptr(float64(math.MaxInt32))}
 		return g.applyNullable(s, t, nullable), nil
 
 	case reflect.Uint, reflect.Uintptr:
 		// Uint/uintptr are platform-dependent; only a lower bound is certain.
-		s := &Schema{Type: "integer", Minimum: Ptr(float64(0))}
+		s := &Schema{Type: typeNameInteger, Minimum: Ptr(float64(0))}
 		return g.applyNullable(s, t, nullable), nil
 
 	case reflect.Uint64:
 		// Float64 cannot represent MaxUint64 (2^64-1) exactly; see the Int64 case.
 		// 2^64 is exactly representable, so an exclusive maximum of 2^64 admits
 		// exactly v <= 2^64-1 = MaxUint64, including the boundary value.
-		s := &Schema{Type: "integer", Minimum: Ptr(float64(0)), ExclusiveMaximum: Ptr(exclusiveMaxUint64)}
+		s := &Schema{Type: typeNameInteger, Minimum: Ptr(float64(0)), ExclusiveMaximum: Ptr(exclusiveMaxUint64)}
 		return g.applyNullable(s, t, nullable), nil
 
 	case reflect.Uint8:
-		s := &Schema{Type: "integer", Minimum: Ptr(float64(0)), Maximum: Ptr(float64(math.MaxUint8))}
+		s := &Schema{Type: typeNameInteger, Minimum: Ptr(float64(0)), Maximum: Ptr(float64(math.MaxUint8))}
 		return g.applyNullable(s, t, nullable), nil
 
 	case reflect.Uint16:
-		s := &Schema{Type: "integer", Minimum: Ptr(float64(0)), Maximum: Ptr(float64(math.MaxUint16))}
+		s := &Schema{Type: typeNameInteger, Minimum: Ptr(float64(0)), Maximum: Ptr(float64(math.MaxUint16))}
 		return g.applyNullable(s, t, nullable), nil
 
 	case reflect.Uint32:
-		s := &Schema{Type: "integer", Minimum: Ptr(float64(0)), Maximum: Ptr(float64(math.MaxUint32))}
+		s := &Schema{Type: typeNameInteger, Minimum: Ptr(float64(0)), Maximum: Ptr(float64(math.MaxUint32))}
 		return g.applyNullable(s, t, nullable), nil
 
 	case reflect.Float32, reflect.Float64:
-		return g.applyNullable(&Schema{Type: "number"}, t, nullable), nil
+		return g.applyNullable(&Schema{Type: typeNameNumber}, t, nullable), nil
 
 	case reflect.Interface:
 		return &Schema{}, nil
@@ -556,7 +579,7 @@ func (g *generator) schemaForSlice(t reflect.Type, nullable bool) (*Schema, erro
 	if el := t.Elem(); el.Kind() == reflect.Uint8 {
 		pt := reflect.PointerTo(el)
 		if !pt.Implements(typeJSONMarshaler) && !pt.Implements(typeTextMarshaler) {
-			return &Schema{Types: []string{typeNameNull, typeNameString}, ContentEncoding: "base64"}, nil
+			return &Schema{Types: []string{typeNameNull, typeNameString}, ContentEncoding: contentEncodingBase64}, nil
 		}
 	}
 
@@ -566,7 +589,7 @@ func (g *generator) schemaForSlice(t reflect.Type, nullable bool) (*Schema, erro
 	}
 
 	s := &Schema{
-		Types: []string{typeNameNull, "array"},
+		Types: []string{typeNameNull, typeNameArray},
 		Items: items,
 	}
 
@@ -592,7 +615,7 @@ func (g *generator) schemaForArray(t reflect.Type, nullable bool) (*Schema, erro
 	}
 
 	s := &Schema{
-		Type:     "array",
+		Type:     typeNameArray,
 		MinItems: Ptr(n),
 		MaxItems: Ptr(n),
 	}
@@ -619,7 +642,7 @@ func (g *generator) schemaForMap(t reflect.Type, nullable bool) (*Schema, error)
 	}
 
 	s := &Schema{
-		Types:                []string{typeNameNull, "object"},
+		Types:                []string{typeNameNull, typeNameObject},
 		AdditionalProperties: valSchema,
 	}
 
@@ -631,6 +654,7 @@ func isValidMapKey(t reflect.Type) bool {
 	if t.Kind() == reflect.String || isIntegerKind(t.Kind()) {
 		return true
 	}
+
 	if t.Implements(typeTextMarshaler) || reflect.PointerTo(t).Implements(typeTextMarshaler) {
 		return true
 	}
@@ -699,7 +723,7 @@ func (g *generator) schemaForStruct(t reflect.Type, nullable bool) (*Schema, err
 // type-level comment extraction and JSONSchemaExtend.
 func (g *generator) buildStructSchema(t reflect.Type) (*Schema, error) {
 	s := &Schema{
-		Type: "object",
+		Type: typeNameObject,
 	}
 
 	// Set additionalProperties: false (unless opted out).
@@ -991,6 +1015,7 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 
 	// Resolve shadowing and ambiguity.
 	var result []structFieldInfo
+
 	for _, name := range order {
 		candidates := byName[name]
 		if len(candidates) == 0 {
@@ -1007,6 +1032,7 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 
 		// Filter to only those at minimum depth.
 		var atMin []fieldLevel
+
 		for _, c := range candidates {
 			if c.depth == minDepth {
 				atMin = append(atMin, c)
@@ -1019,6 +1045,7 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 		// one is tagged, they are all dropped as ambiguous.
 		if len(atMin) > 1 {
 			var tagged []fieldLevel
+
 			for _, c := range atMin {
 				if c.tagged {
 					tagged = append(tagged, c)
@@ -1078,14 +1105,17 @@ func (g *generator) needsAllOfComposition(t reflect.Type) bool {
 	if _, ok := g.typeSchemas[t]; ok {
 		return true
 	}
+
 	// Check JSONSchemaProvider.
 	if implementsProvider(t) {
 		return true
 	}
+
 	// Check built-in overrides.
 	if _, ok := g.builtinOverride(t); ok {
 		return true
 	}
+
 	// Check TextMarshaler (direct only, not promoted).
 	if isDirectTextMarshaler(t) {
 		return true
@@ -1120,7 +1150,7 @@ func (g *generator) buildFieldSchema(parentType reflect.Type, fi structFieldInfo
 			if isPointer {
 				fieldSchema = &Schema{Types: []string{typeNameNull, typeNameString}}
 			} else {
-				fieldSchema = &Schema{Type: "string"}
+				fieldSchema = &Schema{Type: typeNameString}
 			}
 
 			tagType = reflect.TypeFor[string]()
@@ -1218,10 +1248,12 @@ func (g *generator) wrapRefForDraft7(s *Schema) *Schema {
 	if g.draft != Draft7 || s.Ref == "" {
 		return s
 	}
+
 	// Check if there are any sibling keywords on the $ref.
 	if !hasRefSiblings(s) {
 		return s
 	}
+
 	// Move $ref into allOf, preserving all sibling keywords in place.
 	inner := &Schema{Ref: s.Ref}
 	// Repoint any tracked ref record from the outer schema to the inner
@@ -1379,6 +1411,7 @@ func (g *generator) applyNullable(s *Schema, t reflect.Type, nullable bool) *Sch
 	if !nullable {
 		return s
 	}
+
 	// Unconstrained schema — already accepts null, so wrapping adds nothing.
 	if isEmptySchema(s) {
 		return s
@@ -1409,9 +1442,11 @@ func relocateConstEnumToValueBranch(s *Schema) *Schema {
 	if inner == nil || (s.Const == nil && s.Enum == nil) {
 		return s
 	}
+
 	if s.Const != nil {
 		inner.Const, s.Const = s.Const, nil
 	}
+
 	if s.Enum != nil {
 		inner.Enum, s.Enum = s.Enum, nil
 	}
@@ -1426,6 +1461,7 @@ func nullableInnerSchema(s *Schema) *Schema {
 	if len(s.AnyOf) != 2 || s.AnyOf[0] == nil || s.AnyOf[1] == nil {
 		return nil
 	}
+
 	if s.AnyOf[1].Type == typeNameNull {
 		return s.AnyOf[0]
 	}
@@ -1438,6 +1474,7 @@ func isStringableType(t reflect.Type) bool {
 	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
+
 	if isIntegerKind(t.Kind()) {
 		return true
 	}
@@ -1539,6 +1576,7 @@ func hasDirectMethod(t reflect.Type, name string) bool {
 	if m, ok := t.MethodByName(name); ok {
 		return !isPromotedMethod(m)
 	}
+
 	if m, ok := reflect.PointerTo(t).MethodByName(name); ok {
 		return !isPromotedMethod(m)
 	}
@@ -1582,6 +1620,7 @@ func callProvider(t reflect.Type) (s *jsonschema.Schema, err error) {
 	}()
 
 	var v reflect.Value
+
 	if t.Implements(typeProvider) {
 		v = reflect.New(t).Elem()
 	} else {
@@ -1613,6 +1652,7 @@ func callExtender(t reflect.Type, s *jsonschema.Schema) (err error) {
 	}()
 
 	var v reflect.Value
+
 	if t.Implements(typeExtender) {
 		v = reflect.New(t).Elem()
 	} else {
@@ -1690,7 +1730,7 @@ func parseJSONTag(f reflect.StructField) jsonTagInfo {
 				info.omitempty = true
 			case "omitzero":
 				info.omitzero = true
-			case "string":
+			case "string": //nolint:goconst // The encoding/json ",string" tag option, not the JSON Schema type name.
 				info.jsonString = true
 			}
 		}
@@ -1704,6 +1744,7 @@ func (g *generator) applyTypeComment(t reflect.Type, s *Schema) {
 	if g.commentExtractor == nil {
 		return
 	}
+
 	if comment := g.commentExtractor.typeComment(t); comment != "" {
 		s.Description = comment
 	}
@@ -1714,6 +1755,7 @@ func (g *generator) applyFieldComment(structType reflect.Type, f reflect.StructF
 	if g.commentExtractor == nil {
 		return
 	}
+
 	if comment := g.commentExtractor.fieldComment(declaringType(structType, f), f.Name); comment != "" {
 		s.Description = comment
 	}

@@ -183,6 +183,7 @@ func newValidator(schema *Schema, opts []ValidateOption) (*validator, error) {
 	for _, opt := range opts {
 		opt(v)
 	}
+
 	// Detect draft from $schema field.
 	v.draft = detectDraft(schema)
 
@@ -284,6 +285,7 @@ func (v *validator) resolveVocabularies() error {
 	if err != nil {
 		return err
 	}
+
 	// The core vocabulary MUST be required (true) when present in $vocabulary.
 	if required, ok := rawVocabs[VocabCore2020]; ok && !required {
 		return fmt.Errorf("%w: core vocabulary must be required", ErrUnknownVocabulary)
@@ -331,6 +333,7 @@ func (v *validator) walkSchema(schema *Schema, parentBase string) {
 	if schema == nil {
 		return
 	}
+
 	// Cycle guard: a *Schema graph may alias or form a cycle (e.g.
 	// s.AllOf = []*Schema{s}). Registering each pointer once and returning
 	// early on a repeat keeps the walk from recursing without bound.
@@ -554,15 +557,19 @@ func computeBounds(schema *Schema) *precomputedBounds {
 	if schema.MultipleOf != nil {
 		b.multipleOf = float64ToRat(*schema.MultipleOf)
 	}
+
 	if schema.Minimum != nil {
 		b.minimum = float64ToRat(*schema.Minimum)
 	}
+
 	if schema.Maximum != nil {
 		b.maximum = float64ToRat(*schema.Maximum)
 	}
+
 	if schema.ExclusiveMinimum != nil {
 		b.exclusiveMinimum = float64ToRat(*schema.ExclusiveMinimum)
 	}
+
 	if schema.ExclusiveMaximum != nil {
 		b.exclusiveMaximum = float64ToRat(*schema.ExclusiveMaximum)
 	}
@@ -584,6 +591,7 @@ func (v *validator) resolveRemote(baseURI string) *Schema {
 		v.refResolveErr = fmt.Errorf("%w: %w", ErrRefResolve, err)
 		return nil
 	}
+
 	if schema == nil {
 		return nil
 	}
@@ -622,6 +630,7 @@ func (v *validator) remoteLoader() jsonschema.Loader {
 		if s, ok := v.uriRegistry[uriStr]; ok {
 			return s, nil
 		}
+
 		if v.refResolver != nil {
 			s, err := v.refResolver.ResolveRef(uriStr)
 			if err == nil && s != nil {
@@ -631,6 +640,7 @@ func (v *validator) remoteLoader() jsonschema.Loader {
 				if cpErr != nil {
 					return nil, fmt.Errorf("clone resolved schema: %w", cpErr)
 				}
+
 				// Register and walk the copy so subsequent lookups
 				// during both Schema.Resolve and the validation walk
 				// find it without re-calling the resolver.
@@ -640,6 +650,7 @@ func (v *validator) remoteLoader() jsonschema.Loader {
 				return cp, nil
 			}
 		}
+
 		// Return empty schema so Schema.Resolve can proceed.
 		return &Schema{}, nil
 	}
@@ -708,14 +719,6 @@ func stripFragment(uri string) string {
 	return parsed.String()
 }
 
-// JSON Schema type name constants.
-const (
-	typeNameNull    = "null"
-	typeNameString  = "string"
-	typeNameInteger = "integer"
-	typeNameNumber  = "number"
-)
-
 // detectDraft determines the draft from the root schema's $schema field.
 func detectDraft(s *Schema) Draft {
 	switch s.Schema {
@@ -768,9 +771,11 @@ func Compile(schema *Schema, opts ...ValidateOption) (*Validator, error) {
 	// Copy the caller's options so assigning Loader doesn't mutate a
 	// *ResolveOptions shared across calls.
 	var resolveOpts jsonschema.ResolveOptions
+
 	if v.resolveOpts != nil {
 		resolveOpts = *v.resolveOpts
 	}
+
 	if resolveOpts.Loader == nil {
 		resolveOpts.Loader = v.remoteLoader()
 	}
@@ -806,6 +811,7 @@ func (c *Validator) Validate(instance any) error {
 	if len(errs) == 0 {
 		return nil
 	}
+
 	if len(errs) == 1 {
 		return errs[0]
 	}
@@ -925,12 +931,14 @@ func (v *validator) refsResolveWellFormed(schema *Schema, resolveOpts jsonschema
 		if !ok {
 			return
 		}
+
 		if s.Ref != "" && !v.refTargetWellFormed(v.resolveRef(s, s.Ref), resolveOpts) {
 			v.refResolveErr = nil
 			ok = false
 
 			return
 		}
+
 		if v.draft == Draft2020 && s.DynamicRef != "" &&
 			!v.refTargetWellFormed(v.resolveDynamicRef(s, s.DynamicRef), resolveOpts) {
 			v.refResolveErr = nil
@@ -972,10 +980,12 @@ func (v *validator) allRefsResolvable(schema *Schema) bool {
 		if !ok {
 			return
 		}
+
 		if s.Ref != "" && v.resolveRef(s, s.Ref) == nil {
 			v.refResolveErr = nil
 			ok = false
 		}
+
 		if v.draft == Draft2020 && s.DynamicRef != "" && v.resolveDynamicRef(s, s.DynamicRef) == nil {
 			v.refResolveErr = nil
 			ok = false
@@ -1050,6 +1060,7 @@ func schemaFormsTree(schema *Schema) bool {
 		if s == nil || !tree {
 			return
 		}
+
 		if seen[s] {
 			tree = false
 
@@ -1141,9 +1152,11 @@ func (a *annotations) merge(other *annotations) {
 	for k := range other.properties {
 		a.properties[k] = true
 	}
+
 	if other.allProperties {
 		a.allProperties = true
 	}
+
 	if other.itemsEnd > a.itemsEnd {
 		a.itemsEnd = other.itemsEnd
 	}
@@ -1151,6 +1164,7 @@ func (a *annotations) merge(other *annotations) {
 	for k := range other.itemIndexes {
 		a.itemIndexes[k] = true
 	}
+
 	if other.allItems {
 		a.allItems = true
 	}
@@ -1305,7 +1319,7 @@ func (v *validator) validateUnevaluated(
 					errs = append(errs, &ValidationError{
 						InstancePath: childPath,
 						SchemaPath:   childSchemaPath,
-						Keyword:      "unevaluatedProperties",
+						Keyword:      keywordUnevaluatedProperties,
 						Message:      fmt.Sprintf("property %q is not allowed by unevaluatedProperties", propName),
 						Causes:       childErrs,
 					})
@@ -1328,6 +1342,7 @@ func (v *validator) validateUnevaluated(
 				if i < ann.itemsEnd {
 					continue
 				}
+
 				if ann.itemIndexes[i] {
 					continue
 				}
@@ -1341,7 +1356,7 @@ func (v *validator) validateUnevaluated(
 					errs = append(errs, &ValidationError{
 						InstancePath: childPath,
 						SchemaPath:   childSchemaPath,
-						Keyword:      "unevaluatedItems",
+						Keyword:      keywordUnevaluatedItems,
 						Message:      fmt.Sprintf("item %d is not allowed by unevaluatedItems", i),
 						Causes:       childErrs,
 					})
@@ -1512,6 +1527,7 @@ func parseDecNumber(s string) (decNumber, bool) {
 		if i == expStart {
 			return decNumber{}, false
 		}
+
 		if expNeg {
 			exp = -exp
 		}
@@ -1694,7 +1710,7 @@ func instanceType(v any) string {
 
 	switch val := v.(type) {
 	case bool:
-		return "boolean"
+		return typeNameBoolean
 	case string:
 		return typeNameString
 	case json.Number:
@@ -1702,6 +1718,7 @@ func instanceType(v any) string {
 		if err == nil {
 			return typeNameInteger
 		}
+
 		// Handle cases like "1.0" where Int64 fails but the value
 		// is mathematically an integer. A big.Rat parses the decimal
 		// exactly, so its integrality test holds at any magnitude or
@@ -1722,9 +1739,9 @@ func instanceType(v any) string {
 		return typeNameNumber
 
 	case map[string]any:
-		return "object"
+		return typeNameObject
 	case []any:
-		return "array"
+		return typeNameArray
 	default:
 		return ""
 	}
@@ -1735,18 +1752,18 @@ func instanceMatchesType(instance any, typ string) bool {
 	switch typ {
 	case typeNameNull:
 		return instance == nil
-	case "boolean":
+	case typeNameBoolean:
 		_, ok := instance.(bool)
 		return ok
 
-	case "string":
+	case typeNameString:
 		// Json.Number is a distinct type, so a string assertion already
 		// excludes it; no separate numeric guard is needed.
 		_, isStr := instance.(string)
 
 		return isStr
 
-	case "integer":
+	case typeNameInteger:
 		switch val := instance.(type) {
 		case float64:
 			// Trunc avoids int64() saturation for large integral floats.
@@ -1756,6 +1773,7 @@ func instanceMatchesType(instance any, typ string) bool {
 			if err == nil {
 				return true
 			}
+
 			// Handle cases like "1.0" where Int64 fails but the value
 			// is mathematically an integer. A big.Rat parses the decimal
 			// exactly, so its integrality test holds at any magnitude or
@@ -1765,7 +1783,7 @@ func instanceMatchesType(instance any, typ string) bool {
 
 		return false
 
-	case "number":
+	case typeNameNumber:
 		switch instance.(type) {
 		case float64, json.Number:
 			return true
@@ -1773,11 +1791,11 @@ func instanceMatchesType(instance any, typ string) bool {
 
 		return false
 
-	case "object":
+	case typeNameObject:
 		_, ok := instance.(map[string]any)
 		return ok
 
-	case "array":
+	case typeNameArray:
 		_, ok := instance.([]any)
 		return ok
 	}
@@ -1795,6 +1813,7 @@ func (v *validator) validateType(schema *Schema, instance any, instancePath, sch
 	if schema.Type != "" {
 		types = []string{schema.Type}
 	}
+
 	if len(types) == 0 {
 		return nil
 	}
@@ -1810,7 +1829,7 @@ func (v *validator) validateType(schema *Schema, instance any, instancePath, sch
 	return []*ValidationError{{
 		InstancePath: instancePath,
 		SchemaPath:   schemaPath + "/type",
-		Keyword:      "type",
+		Keyword:      keywordType,
 		Message:      fmt.Sprintf("expected %s, got %q", formatTypes(types), got),
 	}}
 }
@@ -1849,7 +1868,7 @@ func (v *validator) validateEnum(schema *Schema, instance any, instancePath, sch
 	return []*ValidationError{{
 		InstancePath: instancePath,
 		SchemaPath:   schemaPath + "/enum",
-		Keyword:      "enum",
+		Keyword:      keywordEnum,
 		Message:      "value does not match any enum member",
 	}}
 }
@@ -1872,7 +1891,7 @@ func (v *validator) validateConst(schema *Schema, instance any, instancePath, sc
 	return []*ValidationError{{
 		InstancePath: instancePath,
 		SchemaPath:   schemaPath + "/const",
-		Keyword:      "const",
+		Keyword:      keywordConst,
 		Message:      "value does not match const",
 	}}
 }
@@ -2100,6 +2119,7 @@ func guardedNumberEqual(n json.Number, b any) bool {
 	if !ok {
 		return false
 	}
+
 	if !d.exactlyComparable() {
 		// Outside the bounds the value cannot equal any float64 or integer.
 		return false
@@ -2280,7 +2300,7 @@ func (v *validator) validateNumeric(schema *Schema, instance any, instancePath, 
 			errs = append(errs, &ValidationError{
 				InstancePath: instancePath,
 				SchemaPath:   schemaPath + "/multipleOf",
-				Keyword:      "multipleOf",
+				Keyword:      keywordMultipleOf,
 				Message:      fmt.Sprintf("multipleOf must be greater than 0, got %v", *schema.MultipleOf),
 			})
 
@@ -2296,7 +2316,7 @@ func (v *validator) validateNumeric(schema *Schema, instance any, instancePath, 
 					errs = append(errs, &ValidationError{
 						InstancePath: instancePath,
 						SchemaPath:   schemaPath + "/multipleOf",
-						Keyword:      "multipleOf",
+						Keyword:      keywordMultipleOf,
 						Message:      fmt.Sprintf("%s is not a multiple of %v", ratString(val), *schema.MultipleOf),
 					})
 				}
@@ -2312,7 +2332,7 @@ func (v *validator) validateNumeric(schema *Schema, instance any, instancePath, 
 			errs = append(errs, &ValidationError{
 				InstancePath: instancePath,
 				SchemaPath:   schemaPath + "/minimum",
-				Keyword:      "minimum",
+				Keyword:      keywordMinimum,
 				Message:      fmt.Sprintf("%s is less than %v", ratString(val), *schema.Minimum),
 			})
 		}
@@ -2324,7 +2344,7 @@ func (v *validator) validateNumeric(schema *Schema, instance any, instancePath, 
 			errs = append(errs, &ValidationError{
 				InstancePath: instancePath,
 				SchemaPath:   schemaPath + "/maximum",
-				Keyword:      "maximum",
+				Keyword:      keywordMaximum,
 				Message:      fmt.Sprintf("%s is greater than %v", ratString(val), *schema.Maximum),
 			})
 		}
@@ -2336,7 +2356,7 @@ func (v *validator) validateNumeric(schema *Schema, instance any, instancePath, 
 			errs = append(errs, &ValidationError{
 				InstancePath: instancePath,
 				SchemaPath:   schemaPath + "/exclusiveMinimum",
-				Keyword:      "exclusiveMinimum",
+				Keyword:      keywordExclusiveMinimum,
 				Message:      fmt.Sprintf("%s is less than or equal to %v", ratString(val), *schema.ExclusiveMinimum),
 			})
 		}
@@ -2348,7 +2368,7 @@ func (v *validator) validateNumeric(schema *Schema, instance any, instancePath, 
 			errs = append(errs, &ValidationError{
 				InstancePath: instancePath,
 				SchemaPath:   schemaPath + "/exclusiveMaximum",
-				Keyword:      "exclusiveMaximum",
+				Keyword:      keywordExclusiveMaximum,
 				Message: fmt.Sprintf(
 					"%s is greater than or equal to %v",
 					ratString(val),
@@ -2426,6 +2446,7 @@ func (v *validator) validateNumericUnbounded(
 // message so the message stays bounded regardless of the instance size.
 func truncatedNumber(s string) string {
 	const keep = 32
+
 	if len(s) <= keep {
 		return s
 	}
@@ -2466,7 +2487,7 @@ func (v *validator) validateString(schema *Schema, instance any, instancePath, s
 				errs = append(errs, &ValidationError{
 					InstancePath: instancePath,
 					SchemaPath:   schemaPath + "/minLength",
-					Keyword:      "minLength",
+					Keyword:      keywordMinLength,
 					Message:      fmt.Sprintf("string length %d is less than %d", runeLen, *schema.MinLength),
 				})
 			}
@@ -2475,7 +2496,7 @@ func (v *validator) validateString(schema *Schema, instance any, instancePath, s
 				errs = append(errs, &ValidationError{
 					InstancePath: instancePath,
 					SchemaPath:   schemaPath + "/maxLength",
-					Keyword:      "maxLength",
+					Keyword:      keywordMaxLength,
 					Message:      fmt.Sprintf("string length %d is greater than %d", runeLen, *schema.MaxLength),
 				})
 			}
@@ -2492,7 +2513,7 @@ func (v *validator) validateString(schema *Schema, instance any, instancePath, s
 				errs = append(errs, &ValidationError{
 					InstancePath: instancePath,
 					SchemaPath:   schemaPath + "/pattern",
-					Keyword:      "pattern",
+					Keyword:      keywordPattern,
 					Message:      fmt.Sprintf("pattern %q cannot be compiled", schema.Pattern),
 				})
 
@@ -2500,7 +2521,7 @@ func (v *validator) validateString(schema *Schema, instance any, instancePath, s
 				errs = append(errs, &ValidationError{
 					InstancePath: instancePath,
 					SchemaPath:   schemaPath + "/pattern",
-					Keyword:      "pattern",
+					Keyword:      keywordPattern,
 					Message:      fmt.Sprintf("string does not match pattern %q", schema.Pattern),
 				})
 			}
@@ -2514,7 +2535,7 @@ func (v *validator) validateString(schema *Schema, instance any, instancePath, s
 				errs = append(errs, &ValidationError{
 					InstancePath: instancePath,
 					SchemaPath:   schemaPath + "/format",
-					Keyword:      "format",
+					Keyword:      keywordFormat,
 					Message:      fmt.Sprintf("string does not match format %q: %v", schema.Format, err),
 				})
 			}
@@ -2545,6 +2566,7 @@ func (v *validator) validateArray(
 			prefixSchemas []*Schema
 			prefixPath    string
 		)
+
 		if v.draft == Draft2020 && len(schema.PrefixItems) > 0 {
 			prefixSchemas = schema.PrefixItems
 			prefixPath = "/prefixItems"
@@ -2586,6 +2608,7 @@ func (v *validator) validateArray(
 				childErrs := v.validate(schema.Items, item, childPath, childSchemaPath, nil)
 				errs = append(errs, childErrs...)
 			}
+
 			if ann != nil {
 				ann.allItems = true
 			}
@@ -2599,6 +2622,7 @@ func (v *validator) validateArray(
 					childErrs := v.validate(schema.Items, arr[i], childPath, childSchemaPath, nil)
 					errs = append(errs, childErrs...)
 				}
+
 				if ann != nil {
 					ann.allItems = true
 				}
@@ -2620,6 +2644,7 @@ func (v *validator) validateArray(
 			matchCount := 0
 
 			var matchedIdx []int
+
 			for i, item := range arr {
 				childErrs := v.validate(
 					schema.Contains,
@@ -2661,9 +2686,9 @@ func (v *validator) validateArray(
 			if matchCount < minContains {
 				// An explicit minContains owns the violation; without it the
 				// shortfall is a plain contains failure (default minContains=1).
-				keyword := "contains"
+				keyword := keywordContains
 				if v.draft == Draft2020 && v.vocabs.validation && schema.MinContains != nil {
-					keyword = "minContains"
+					keyword = keywordMinContains
 				}
 
 				errs = append(errs, &ValidationError{
@@ -2673,11 +2698,12 @@ func (v *validator) validateArray(
 					Message:      fmt.Sprintf("array has %d matching items, minimum is %d", matchCount, minContains),
 				})
 			}
+
 			if maxContains >= 0 && matchCount > maxContains {
 				errs = append(errs, &ValidationError{
 					InstancePath: instancePath,
 					SchemaPath:   schemaPath + "/maxContains",
-					Keyword:      "maxContains",
+					Keyword:      keywordMaxContains,
 					Message:      fmt.Sprintf("array has %d matching items, maximum is %d", matchCount, maxContains),
 				})
 			}
@@ -2692,7 +2718,7 @@ func (v *validator) validateArray(
 			errs = append(errs, &ValidationError{
 				InstancePath: instancePath,
 				SchemaPath:   schemaPath + "/minItems",
-				Keyword:      "minItems",
+				Keyword:      keywordMinItems,
 				Message:      fmt.Sprintf("array has %d items, minimum is %d", len(arr), *schema.MinItems),
 			})
 		}
@@ -2702,7 +2728,7 @@ func (v *validator) validateArray(
 			errs = append(errs, &ValidationError{
 				InstancePath: instancePath,
 				SchemaPath:   schemaPath + "/maxItems",
-				Keyword:      "maxItems",
+				Keyword:      keywordMaxItems,
 				Message:      fmt.Sprintf("array has %d items, maximum is %d", len(arr), *schema.MaxItems),
 			})
 		}
@@ -2713,7 +2739,7 @@ func (v *validator) validateArray(
 				errs = append(errs, &ValidationError{
 					InstancePath: instancePath,
 					SchemaPath:   schemaPath + "/uniqueItems",
-					Keyword:      "uniqueItems",
+					Keyword:      keywordUniqueItems,
 					Message:      "array contains duplicate items",
 				})
 			}
@@ -2827,8 +2853,9 @@ func hashValue(v any) uint64 {
 
 func stringHash(s string) uint64 {
 	var h uint64
-	for _, c := range s {
-		h = h*31 + uint64(c)
+
+	for i := range len(s) {
+		h = h*31 + uint64(s[i])
 	}
 
 	return h
@@ -2890,7 +2917,7 @@ func (v *validator) validateObject(
 				errs = append(errs, &ValidationError{
 					InstancePath: instancePath,
 					SchemaPath:   schemaPath + "/patternProperties/" + escapeJSONPointer(pattern),
-					Keyword:      "patternProperties",
+					Keyword:      keywordPatternProperties,
 					Message:      fmt.Sprintf("pattern %q cannot be compiled", pattern),
 				})
 
@@ -2920,6 +2947,7 @@ func (v *validator) validateObject(
 				if localEvaluated[propName] {
 					continue
 				}
+
 				if ann != nil {
 					ann.properties[propName] = true
 				}
@@ -2929,6 +2957,7 @@ func (v *validator) validateObject(
 				childErrs := v.validate(schema.AdditionalProperties, val, childPath, childSchemaPath, nil)
 				errs = append(errs, childErrs...)
 			}
+
 			if ann != nil {
 				ann.allProperties = true
 			}
@@ -2978,7 +3007,7 @@ func (v *validator) validateObject(
 				errs = append(errs, &ValidationError{
 					InstancePath: instancePath,
 					SchemaPath:   schemaPath + "/required",
-					Keyword:      "required",
+					Keyword:      keywordRequired,
 					Message:      fmt.Sprintf("missing required property %q", reqProp),
 				})
 			}
@@ -2989,7 +3018,7 @@ func (v *validator) validateObject(
 			errs = append(errs, &ValidationError{
 				InstancePath: instancePath,
 				SchemaPath:   schemaPath + "/minProperties",
-				Keyword:      "minProperties",
+				Keyword:      keywordMinProperties,
 				Message:      fmt.Sprintf("object has %d properties, minimum is %d", len(obj), *schema.MinProperties),
 			})
 		}
@@ -2999,7 +3028,7 @@ func (v *validator) validateObject(
 			errs = append(errs, &ValidationError{
 				InstancePath: instancePath,
 				SchemaPath:   schemaPath + "/maxProperties",
-				Keyword:      "maxProperties",
+				Keyword:      keywordMaxProperties,
 				Message:      fmt.Sprintf("object has %d properties, maximum is %d", len(obj), *schema.MaxProperties),
 			})
 		}
@@ -3016,7 +3045,7 @@ func (v *validator) validateObject(
 						errs = append(errs, &ValidationError{
 							InstancePath: instancePath,
 							SchemaPath:   schemaPath + "/dependentRequired/" + escapeJSONPointer(prop),
-							Keyword:      "dependentRequired",
+							Keyword:      keywordDependentRequired,
 							Message:      fmt.Sprintf("property %q requires property %q", prop, dep),
 						})
 					}
@@ -3055,7 +3084,7 @@ func (v *validator) validateObject(
 				errs = append(errs, &ValidationError{
 					InstancePath: instancePath,
 					SchemaPath:   schemaPath + "/dependencies/" + escapeJSONPointer(prop),
-					Keyword:      "dependencies",
+					Keyword:      keywordDependencies,
 					Message:      fmt.Sprintf("property %q requires property %q", prop, dep),
 				})
 			}
@@ -3086,6 +3115,7 @@ func (v *validator) validateComposition(
 			allCauses []*ValidationError
 			subAnns   []*annotations
 		)
+
 		for i, sub := range schema.AllOf {
 			subAnn := newAnnotations()
 			childSchemaPath := fmt.Sprintf("%s/allOf/%d", schemaPath, i)
@@ -3096,11 +3126,12 @@ func (v *validator) validateComposition(
 				subAnns = append(subAnns, subAnn)
 			}
 		}
+
 		if len(allCauses) > 0 {
 			errs = append(errs, &ValidationError{
 				InstancePath: instancePath,
 				SchemaPath:   schemaPath + "/allOf",
-				Keyword:      "allOf",
+				Keyword:      keywordAllOf,
 				Message:      "did not validate against all subschemas",
 				Causes:       allCauses,
 			})
@@ -3116,6 +3147,7 @@ func (v *validator) validateComposition(
 		matched := false
 
 		var allCauses []*ValidationError
+
 		for i, sub := range schema.AnyOf {
 			subAnn := newAnnotations()
 			childSchemaPath := fmt.Sprintf("%s/anyOf/%d", schemaPath, i)
@@ -3129,11 +3161,12 @@ func (v *validator) validateComposition(
 				allCauses = append(allCauses, childErrs...)
 			}
 		}
+
 		if !matched {
 			errs = append(errs, &ValidationError{
 				InstancePath: instancePath,
 				SchemaPath:   schemaPath + "/anyOf",
-				Keyword:      "anyOf",
+				Keyword:      keywordAnyOf,
 				Message:      "did not validate against any subschema",
 				Causes:       allCauses,
 			})
@@ -3166,7 +3199,7 @@ func (v *validator) validateComposition(
 			errs = append(errs, &ValidationError{
 				InstancePath: instancePath,
 				SchemaPath:   schemaPath + "/oneOf",
-				Keyword:      "oneOf",
+				Keyword:      keywordOneOf,
 				Message:      "did not validate against any subschema",
 				Causes:       allCauses,
 			})
@@ -3175,7 +3208,7 @@ func (v *validator) validateComposition(
 			errs = append(errs, &ValidationError{
 				InstancePath: instancePath,
 				SchemaPath:   schemaPath + "/oneOf",
-				Keyword:      "oneOf",
+				Keyword:      keywordOneOf,
 				Message:      fmt.Sprintf("validated against %d subschemas, expected exactly one", matchCount),
 			})
 
@@ -3194,7 +3227,7 @@ func (v *validator) validateComposition(
 			errs = append(errs, &ValidationError{
 				InstancePath: instancePath,
 				SchemaPath:   schemaPath + "/not",
-				Keyword:      "not",
+				Keyword:      keywordNot,
 				Message:      "should not validate against the schema",
 			})
 		}
@@ -3224,6 +3257,7 @@ func (v *validator) validateConditional(
 		if ann != nil {
 			ann.merge(ifAnn)
 		}
+
 		if schema.Then != nil {
 			thenAnn := newAnnotations()
 			thenErrs := v.validate(schema.Then, instance, instancePath, schemaPath+"/then", thenAnn)
@@ -3231,7 +3265,7 @@ func (v *validator) validateConditional(
 				errs = append(errs, &ValidationError{
 					InstancePath: instancePath,
 					SchemaPath:   schemaPath + "/then",
-					Keyword:      "then",
+					Keyword:      keywordThen,
 					Message:      "if condition was true but then validation failed",
 					Causes:       thenErrs,
 				})
@@ -3246,7 +3280,7 @@ func (v *validator) validateConditional(
 			errs = append(errs, &ValidationError{
 				InstancePath: instancePath,
 				SchemaPath:   schemaPath + "/else",
-				Keyword:      "else",
+				Keyword:      keywordElse,
 				Message:      "if condition was false but else validation failed",
 				Causes:       elseErrs,
 			})
@@ -3307,13 +3341,13 @@ func (v *validator) assertContent(
 	switch schema.ContentEncoding {
 	case "":
 		// No encoding: the instance string is the content itself.
-	case "base64":
+	case contentEncodingBase64:
 		b, err := base64.StdEncoding.DecodeString(str)
 		if err != nil {
 			return []*ValidationError{{
 				InstancePath: instancePath,
 				SchemaPath:   schemaPath + "/contentEncoding",
-				Keyword:      "contentEncoding",
+				Keyword:      keywordContentEncoding,
 				Message:      fmt.Sprintf("string is not valid base64: %v", err),
 			}}
 		}
@@ -3331,7 +3365,7 @@ func (v *validator) assertContent(
 		return []*ValidationError{{
 			InstancePath: instancePath,
 			SchemaPath:   schemaPath + "/contentMediaType",
-			Keyword:      "contentMediaType",
+			Keyword:      keywordContentMediaType,
 			Message:      "string is not a valid application/json document",
 		}}
 	}
@@ -3400,6 +3434,7 @@ func (v *validator) validateResolvedRef(
 				err:          err,
 			}}
 		}
+
 		// A non-local (remote/absolute) ref that cannot be resolved is an
 		// error rather than silently passing. Unresolvable local fragment refs
 		// are already rejected by Schema.Resolve before the walk begins.
@@ -3411,6 +3446,7 @@ func (v *validator) validateResolvedRef(
 				Message:      fmt.Sprintf("cannot resolve %s %q", keyword, ref),
 			}}
 		}
+
 		// Unresolvable local fragment ref: silently skip.
 		return nil
 	}
@@ -3425,6 +3461,7 @@ func (v *validator) validateResolvedRef(
 			Causes:       childErrs,
 		}}
 	}
+
 	if ann != nil {
 		ann.merge(refAnn)
 	}
@@ -3578,6 +3615,7 @@ func (v *validator) resolveJSONPointer(root *Schema, fragment string, encoded bo
 			if err == nil {
 				seg = decoded
 			}
+
 			// On an invalid percent-escape the segment is left as-is; resolution
 			// then simply does not match.
 		}
@@ -3887,6 +3925,7 @@ func (v *validator) traverseSchema(schema *Schema, segments []string) *Schema {
 		if schema.Items != nil {
 			return v.traverseSchema(schema.Items, rest)
 		}
+
 		// Array form (Draft-07 items as array): requires an index in rest.
 		if len(rest) > 0 && len(schema.ItemsArray) > 0 {
 			if idx, ok := parseArrayIndex(rest[0]); ok && idx < len(schema.ItemsArray) {

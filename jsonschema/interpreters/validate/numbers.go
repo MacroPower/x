@@ -22,6 +22,7 @@ func parseBoundFloat(value string) (float64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("invalid number %q: %w", value, err)
 	}
+
 	if math.IsNaN(n) || math.IsInf(n, 0) {
 		return 0, fmt.Errorf("%q is not a finite number", value)
 	}
@@ -45,6 +46,7 @@ func parseNumericBound(value string, t reflect.Type) (float64, error) {
 		if err != nil {
 			return 0, fmt.Errorf("invalid unsigned integer %q: %w", value, err)
 		}
+
 		if !uintExactlyRepresentableAsFloat64(n) {
 			return 0, fmt.Errorf("bound %s is not exactly representable as a JSON Schema number", value)
 		}
@@ -56,6 +58,7 @@ func parseNumericBound(value string, t reflect.Type) (float64, error) {
 		if err != nil {
 			return 0, fmt.Errorf("invalid integer %q: %w", value, err)
 		}
+
 		if !intExactlyRepresentableAsFloat64(n) {
 			return 0, fmt.Errorf("bound %s is not exactly representable as a JSON Schema number", value)
 		}
@@ -100,6 +103,7 @@ func applyNumericMinConstraint(s *jsonschema.Schema, value string, baseType refl
 
 		return fmt.Errorf("validate tag: %s: %w", name, err)
 	}
+
 	// Rules in a validate tag are ANDed, so overlapping lower bounds intersect to
 	// their maximum: a tag floor never lowers a stronger floor set elsewhere (a
 	// repeated min, or the type-derived minimum for a sized integer). Without this
@@ -129,6 +133,7 @@ func applyNumericMaxConstraint(s *jsonschema.Schema, value string, baseType refl
 
 		return fmt.Errorf("validate tag: %s: %w", name, err)
 	}
+
 	// Rules in a validate tag are ANDed, so overlapping upper bounds intersect to
 	// their minimum: a tag ceiling never raises a stronger ceiling set elsewhere (a
 	// repeated max, or the type-derived maximum for a sized integer). Without this
@@ -202,6 +207,7 @@ func forbidValue(s *jsonschema.Schema, v any) {
 			// duplicate.
 			return
 		}
+
 		// Promote the existing single forbidden value into an enum set.
 		s.Not.Enum = []any{*s.Not.Const, v}
 		s.Not.Const = nil
@@ -245,11 +251,13 @@ func numericEqual(a, b any) bool {
 	if aIsUint && bIsUint {
 		return au == bu
 	}
+
 	// A signed and an unsigned value can still match when the signed value is
 	// non-negative and equals the unsigned magnitude.
 	if aIsInt && bIsUint {
 		return ai >= 0 && uint64(ai) == bu
 	}
+
 	if aIsUint && bIsInt {
 		return bi >= 0 && uint64(bi) == au
 	}

@@ -272,6 +272,7 @@ func TestIDNHostnameRejectsOver253Octets(t *testing.T) {
 	// Create a hostname that exceeds 253 octets in A-label form.
 	// Each label is under 63 chars but total exceeds 253.
 	var long strings.Builder
+
 	for i := range 30 {
 		if i > 0 {
 			long.WriteString(".")
@@ -279,6 +280,7 @@ func TestIDNHostnameRejectsOver253Octets(t *testing.T) {
 
 		long.WriteString("abcdefgh")
 	}
+
 	// This is 30*8 + 29 dots = 269 characters, exceeding 253 octets.
 	err := jsonschema.Validate(schema, long.String(), jsonschema.WithFormats(true))
 	require.Error(t, err,

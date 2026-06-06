@@ -14,6 +14,7 @@ func applyStringMinConstraint(s *jsonschema.Schema, value string, exclusive bool
 	if err != nil {
 		return fmt.Errorf("validate tag: invalid number %q: %w", value, err)
 	}
+
 	// Gt=N means minLength N+1, clamped to a non-negative bound as JSON Schema
 	// requires.
 	n = clampNonNegative(inclusiveLowerBound(n, exclusive))
@@ -33,6 +34,7 @@ func applyStringMaxConstraint(s *jsonschema.Schema, value string, exclusive bool
 	if err != nil {
 		return fmt.Errorf("validate tag: invalid number %q: %w", value, err)
 	}
+
 	// Lt=N means maxLength N-1, clamped to a non-negative bound as JSON Schema
 	// requires.
 	n = clampNonNegative(inclusiveUpperBound(n, exclusive))
@@ -52,6 +54,7 @@ func applyStringLenConstraint(s *jsonschema.Schema, value string) error {
 	if err != nil {
 		return fmt.Errorf("validate tag: invalid number %q: %w", value, err)
 	}
+
 	// MinLength and MaxLength MUST be non-negative per JSON Schema; a negative
 	// length collapses to 0.
 	n = clampNonNegative(n)

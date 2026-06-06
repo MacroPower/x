@@ -79,6 +79,7 @@ type ValidationError struct {
 // For a single-error case the output is one line.
 func (e *ValidationError) Error() string {
 	var b strings.Builder
+
 	e.writeError(&b, 0, map[*ValidationError]bool{})
 
 	return b.String()
@@ -101,9 +102,11 @@ func (e *ValidationError) writeError(b *strings.Builder, depth int, seen map[*Va
 	//nolint:nestif // Rendering nested error tree requires conditional nesting.
 	if hasHeader {
 		b.WriteString(indent)
+
 		if e.InstancePath != "" {
 			b.WriteString(e.InstancePath)
 		}
+
 		if e.Keyword != "" {
 			if e.InstancePath != "" {
 				b.WriteString(" ")
@@ -113,6 +116,7 @@ func (e *ValidationError) writeError(b *strings.Builder, depth int, seen map[*Va
 			b.WriteString(e.Keyword)
 			b.WriteString(")")
 		}
+
 		if e.Message != "" {
 			if e.InstancePath != "" || e.Keyword != "" {
 				b.WriteString(": ")
@@ -140,6 +144,7 @@ func (e *ValidationError) writeError(b *strings.Builder, depth int, seen map[*Va
 		if seen[cause] {
 			continue
 		}
+
 		if wrote {
 			b.WriteString("\n")
 		}
@@ -162,6 +167,7 @@ func (e *ValidationError) writeError(b *strings.Builder, depth int, seen map[*Va
 // [errors.As] loop without bound or revisit a node exponentially.
 func (e *ValidationError) Unwrap() []error {
 	var errs []error
+
 	e.collectAttached(&errs, map[*ValidationError]bool{})
 
 	return errs

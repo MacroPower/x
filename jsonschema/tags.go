@@ -20,29 +20,29 @@ var (
 	// treated as a bare description. This prevents a plain description such as
 	// "a=b is the formula" from being misparsed as key-value.
 	jsonSchemaTagKeys = map[string]bool{
-		"description":      true,
-		"title":            true,
-		"pattern":          true,
-		"format":           true,
-		"deprecated":       true,
-		"readOnly":         true,
-		"writeOnly":        true,
-		"uniqueItems":      true,
-		"minimum":          true,
-		"maximum":          true,
-		"exclusiveMinimum": true,
-		"exclusiveMaximum": true,
-		"multipleOf":       true,
-		"minLength":        true,
-		"maxLength":        true,
-		"minItems":         true,
-		"maxItems":         true,
-		"minProperties":    true,
-		"maxProperties":    true,
-		"default":          true,
-		"const":            true,
-		"enum":             true,
-		"examples":         true,
+		keywordDescription:      true,
+		keywordTitle:            true,
+		keywordPattern:          true,
+		keywordFormat:           true,
+		keywordDeprecated:       true,
+		keywordReadOnly:         true,
+		keywordWriteOnly:        true,
+		keywordUniqueItems:      true,
+		keywordMinimum:          true,
+		keywordMaximum:          true,
+		keywordExclusiveMinimum: true,
+		keywordExclusiveMaximum: true,
+		keywordMultipleOf:       true,
+		keywordMinLength:        true,
+		keywordMaxLength:        true,
+		keywordMinItems:         true,
+		keywordMaxItems:         true,
+		keywordMinProperties:    true,
+		keywordMaxProperties:    true,
+		keywordDefault:          true,
+		keywordConst:            true,
+		keywordEnum:             true,
+		keywordExamples:         true,
 	}
 )
 
@@ -69,6 +69,7 @@ func isKeyValueTag(tag string) bool {
 	if !found {
 		return false
 	}
+
 	if jsonSchemaTagKeys[key] {
 		return true
 	}
@@ -95,6 +96,7 @@ func applyJSONSchemaTag(tag string, fieldType reflect.Type, s *Schema) error {
 		if !found {
 			return fmt.Errorf("jsonschema tag: segment %q missing '='", pair)
 		}
+
 		if key == "" {
 			return fmt.Errorf("jsonschema tag: empty key in %q", pair)
 		}
@@ -163,16 +165,16 @@ func splitTagPairs(tag string) []string {
 // applyTagKeyValue applies a single key=value pair from the jsonschema tag.
 func applyTagKeyValue(key, value string, fieldType reflect.Type, s *Schema) error {
 	switch key {
-	case "description":
+	case keywordDescription:
 		s.Description = value
-	case "title":
+	case keywordTitle:
 		s.Title = value
-	case "pattern":
+	case keywordPattern:
 		s.Pattern = value
-	case "format":
+	case keywordFormat:
 		s.Format = value
 
-	case "deprecated":
+	case keywordDeprecated:
 		b, err := parseBoolValue(key, value)
 		if err != nil {
 			return err
@@ -180,7 +182,7 @@ func applyTagKeyValue(key, value string, fieldType reflect.Type, s *Schema) erro
 
 		s.Deprecated = b
 
-	case "readOnly":
+	case keywordReadOnly:
 		b, err := parseBoolValue(key, value)
 		if err != nil {
 			return err
@@ -188,7 +190,7 @@ func applyTagKeyValue(key, value string, fieldType reflect.Type, s *Schema) erro
 
 		s.ReadOnly = b
 
-	case "writeOnly":
+	case keywordWriteOnly:
 		b, err := parseBoolValue(key, value)
 		if err != nil {
 			return err
@@ -196,7 +198,7 @@ func applyTagKeyValue(key, value string, fieldType reflect.Type, s *Schema) erro
 
 		s.WriteOnly = b
 
-	case "uniqueItems":
+	case keywordUniqueItems:
 		b, err := parseBoolValue(key, value)
 		if err != nil {
 			return err
@@ -204,7 +206,7 @@ func applyTagKeyValue(key, value string, fieldType reflect.Type, s *Schema) erro
 
 		s.UniqueItems = b
 
-	case "minimum":
+	case keywordMinimum:
 		n, err := parseFloat(key, value)
 		if err != nil {
 			return err
@@ -212,7 +214,7 @@ func applyTagKeyValue(key, value string, fieldType reflect.Type, s *Schema) erro
 
 		s.Minimum = &n
 
-	case "maximum":
+	case keywordMaximum:
 		n, err := parseFloat(key, value)
 		if err != nil {
 			return err
@@ -220,7 +222,7 @@ func applyTagKeyValue(key, value string, fieldType reflect.Type, s *Schema) erro
 
 		s.Maximum = &n
 
-	case "exclusiveMinimum":
+	case keywordExclusiveMinimum:
 		n, err := parseFloat(key, value)
 		if err != nil {
 			return err
@@ -228,7 +230,7 @@ func applyTagKeyValue(key, value string, fieldType reflect.Type, s *Schema) erro
 
 		s.ExclusiveMinimum = &n
 
-	case "exclusiveMaximum":
+	case keywordExclusiveMaximum:
 		n, err := parseFloat(key, value)
 		if err != nil {
 			return err
@@ -236,18 +238,19 @@ func applyTagKeyValue(key, value string, fieldType reflect.Type, s *Schema) erro
 
 		s.ExclusiveMaximum = &n
 
-	case "multipleOf":
+	case keywordMultipleOf:
 		n, err := parseFloat(key, value)
 		if err != nil {
 			return err
 		}
+
 		if n <= 0 {
 			return fmt.Errorf("jsonschema tag: key %q must be greater than 0, got %v", key, n)
 		}
 
 		s.MultipleOf = &n
 
-	case "minLength":
+	case keywordMinLength:
 		n, err := parseInt(key, value)
 		if err != nil {
 			return err
@@ -255,7 +258,7 @@ func applyTagKeyValue(key, value string, fieldType reflect.Type, s *Schema) erro
 
 		s.MinLength = &n
 
-	case "maxLength":
+	case keywordMaxLength:
 		n, err := parseInt(key, value)
 		if err != nil {
 			return err
@@ -263,7 +266,7 @@ func applyTagKeyValue(key, value string, fieldType reflect.Type, s *Schema) erro
 
 		s.MaxLength = &n
 
-	case "minItems":
+	case keywordMinItems:
 		n, err := parseInt(key, value)
 		if err != nil {
 			return err
@@ -271,7 +274,7 @@ func applyTagKeyValue(key, value string, fieldType reflect.Type, s *Schema) erro
 
 		s.MinItems = &n
 
-	case "maxItems":
+	case keywordMaxItems:
 		n, err := parseInt(key, value)
 		if err != nil {
 			return err
@@ -279,7 +282,7 @@ func applyTagKeyValue(key, value string, fieldType reflect.Type, s *Schema) erro
 
 		s.MaxItems = &n
 
-	case "minProperties":
+	case keywordMinProperties:
 		n, err := parseInt(key, value)
 		if err != nil {
 			return err
@@ -287,7 +290,7 @@ func applyTagKeyValue(key, value string, fieldType reflect.Type, s *Schema) erro
 
 		s.MinProperties = &n
 
-	case "maxProperties":
+	case keywordMaxProperties:
 		n, err := parseInt(key, value)
 		if err != nil {
 			return err
@@ -295,7 +298,7 @@ func applyTagKeyValue(key, value string, fieldType reflect.Type, s *Schema) erro
 
 		s.MaxProperties = &n
 
-	case "default":
+	case keywordDefault:
 		if value == "" {
 			return fmt.Errorf("jsonschema tag: key %q requires a non-empty value", key)
 		}
@@ -312,7 +315,7 @@ func applyTagKeyValue(key, value string, fieldType reflect.Type, s *Schema) erro
 
 		s.Default = raw
 
-	case "const":
+	case keywordConst:
 		if value == "" {
 			return fmt.Errorf("jsonschema tag: key %q requires a non-empty value", key)
 		}
@@ -324,7 +327,7 @@ func applyTagKeyValue(key, value string, fieldType reflect.Type, s *Schema) erro
 
 		s.Const = &v
 
-	case "enum":
+	case keywordEnum:
 		if value == "" {
 			return fmt.Errorf("jsonschema tag: key %q requires a non-empty value", key)
 		}
@@ -347,7 +350,7 @@ func applyTagKeyValue(key, value string, fieldType reflect.Type, s *Schema) erro
 
 		s.Enum = enumVals
 
-	case "examples":
+	case keywordExamples:
 		if value == "" {
 			return fmt.Errorf("jsonschema tag: key %q requires a non-empty value", key)
 		}
@@ -403,6 +406,7 @@ func parseFloat(key, value string) (float64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("jsonschema tag: key %q: %w", key, err)
 	}
+
 	if math.IsNaN(n) || math.IsInf(n, 0) {
 		return 0, fmt.Errorf("jsonschema tag: key %q: %q is not a finite number", key, value)
 	}
@@ -421,6 +425,7 @@ func parseInt(key, value string) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("jsonschema tag: key %q: %w", key, err)
 	}
+
 	if n < 0 {
 		return 0, fmt.Errorf("jsonschema tag: key %q must be non-negative, got %d", key, n)
 	}
@@ -470,6 +475,7 @@ func parseTypedScalar(value string, t reflect.Type) (any, error) {
 		if err != nil {
 			return nil, fmt.Errorf("invalid integer %q: %w", value, err)
 		}
+
 		// Return as int to preserve integer precision (float64 cannot represent
 		// all int64 values exactly) and to match the int-typed values the
 		// validate-tag interpreter produces, so both tag dialects yield the same
@@ -483,6 +489,7 @@ func parseTypedScalar(value string, t reflect.Type) (any, error) {
 		if err != nil {
 			return nil, fmt.Errorf("invalid unsigned integer %q: %w", value, err)
 		}
+
 		// Return as uint64 to preserve integer precision (neither int nor
 		// float64 can represent all uint64 values exactly).
 		return n, nil

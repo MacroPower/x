@@ -579,7 +579,7 @@ func TestGenerateFor_JSONTagDash(t *testing.T) {
 	type Config struct {
 		Name   string `json:"name"`
 		Hidden string `json:"-"`
-		DashID string `json:"-,"`
+		DashID string `json:"-,"` //nolint:staticcheck // Tag under test: "-," names the field "-" in encoding/json v1.
 	}
 
 	s, err := jsonschema.GenerateFor[Config]()

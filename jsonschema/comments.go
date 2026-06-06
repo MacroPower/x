@@ -63,11 +63,13 @@ func (ce *commentExtractor) typeComment(t reflect.Type) string {
 				if !ok || ts.Name.Name != name {
 					continue
 				}
+
 				// Doc comment can be on the GenDecl (for single-spec decls)
 				// or on the TypeSpec itself.
 				if ts.Doc != nil {
 					return strings.TrimSpace(ts.Doc.Text())
 				}
+
 				if gd.Doc != nil && len(gd.Specs) == 1 {
 					return strings.TrimSpace(gd.Doc.Text())
 				}

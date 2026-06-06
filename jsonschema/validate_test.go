@@ -1005,6 +1005,7 @@ func TestValidateConstEnumFloatEquality(t *testing.T) {
 			t.Parallel()
 
 			var s jsonschema.Schema
+
 			require.NoError(t, json.Unmarshal([]byte(tt.schema), &s))
 
 			err := jsonschema.ValidateJSON(&s, []byte(tt.instance))
@@ -1037,6 +1038,7 @@ func TestValidateMultiError(t *testing.T) {
 	require.Error(t, err)
 
 	var ve *jsonschema.ValidationError
+
 	require.ErrorAs(t, err, &ve)
 
 	// Should have two causes (one for name type, one for age minimum).
@@ -1054,6 +1056,7 @@ func TestValidateErrorAs(t *testing.T) {
 	require.Error(t, err)
 
 	var ve *jsonschema.ValidationError
+
 	require.ErrorAs(t, err, &ve)
 	assert.Equal(t, "type", ve.Keyword)
 }
@@ -1289,6 +1292,7 @@ func TestValidateWithContent(t *testing.T) {
 			t.Parallel()
 
 			var opts []jsonschema.ValidateOption
+
 			if tt.enabled {
 				opts = append(opts, jsonschema.WithContent(true))
 			}
@@ -1913,6 +1917,7 @@ func TestValidateRefCausesNesting(t *testing.T) {
 	require.Error(t, err)
 
 	var ve *jsonschema.ValidationError
+
 	require.ErrorAs(t, err, &ve)
 	assert.Equal(t, "$ref", ve.Keyword)
 	require.NotEmpty(t, ve.Causes)
@@ -1942,6 +1947,7 @@ func TestValidateInstancePaths(t *testing.T) {
 	require.Error(t, err)
 
 	var ve *jsonschema.ValidationError
+
 	require.ErrorAs(t, err, &ve)
 	assert.Contains(t, err.Error(), "/address/city")
 }
@@ -2460,6 +2466,7 @@ func TestValidateWithRefResolver(t *testing.T) {
 			t.Parallel()
 
 			var opts []jsonschema.ValidateOption
+
 			if tt.resolver != nil {
 				opts = append(opts, jsonschema.WithRefResolver(tt.resolver))
 			}
@@ -2520,6 +2527,7 @@ type countingResolver struct {
 
 func (r *countingResolver) ResolveRef(uri string) (*jsonschema.Schema, error) {
 	r.callCount.Add(1)
+
 	if s, ok := r.schemas[uri]; ok {
 		return s, nil
 	}
@@ -2805,6 +2813,7 @@ func TestAllOfAnnotationMergeOnPartialFailure(t *testing.T) {
 	// The error should mention unevaluatedProperties for "a" since allOf failed
 	// and its annotations should have been rolled back.
 	var ve *jsonschema.ValidationError
+
 	require.ErrorAs(t, err, &ve)
 
 	found := findErrorByKeyword(ve, "unevaluatedProperties")
@@ -2881,6 +2890,7 @@ func TestPrefixItemsAnnotationGatedOnSuccess(t *testing.T) {
 	require.Error(t, err)
 
 	var ve *jsonschema.ValidationError
+
 	require.ErrorAs(t, err, &ve)
 
 	assert.False(t, findErrorByKeyword(ve, "unevaluatedItems"),
@@ -2909,6 +2919,7 @@ func TestContainsAnnotationsLeakOnFailure(t *testing.T) {
 
 	// The unevaluatedItems keyword should catch all items since contains failed.
 	var ve *jsonschema.ValidationError
+
 	require.ErrorAs(t, err, &ve)
 
 	found := findErrorByKeyword(ve, "unevaluatedItems")
@@ -3143,6 +3154,7 @@ func TestBothFormatVocabsActiveAssertsFormat(t *testing.T) {
 	require.Error(t, err)
 
 	var ve *jsonschema.ValidationError
+
 	require.ErrorAs(t, err, &ve)
 	assert.True(t, findErrorByKeyword(ve, "format"),
 		"failure must be the format assertion, got: %s", err)
@@ -3157,6 +3169,7 @@ func TestDraftEnumZeroValue(t *testing.T) {
 	// The Draft zero value is Draft2020 (Draft2020 = 0, Draft7 = -1), so an
 	// uninitialized Draft targets Draft 2020-12.
 	var d jsonschema.Draft
+
 	assert.Equal(t, jsonschema.Draft2020, d,
 		"zero value of Draft should be Draft2020 (the documented default)")
 }
@@ -3408,6 +3421,7 @@ type countingRefResolver struct {
 
 func (r *countingRefResolver) ResolveRef(_ string) (*jsonschema.Schema, error) {
 	r.count.Add(1)
+
 	return r.schema, nil
 }
 
@@ -3663,6 +3677,7 @@ func TestDraft07ItemsSingleSchema(t *testing.T) {
 	require.Error(t, err, "a non-string element must violate items: {type: string}")
 
 	var ve *jsonschema.ValidationError
+
 	require.ErrorAs(t, err, &ve)
 	assert.True(t, findError(ve, "type", "/1"),
 		"expected a type error at element index 1, got: %s", err)
@@ -3962,6 +3977,7 @@ func TestKeywordAndInstancePathTogether(t *testing.T) {
 	require.Error(t, err)
 
 	var ve *jsonschema.ValidationError
+
 	require.ErrorAs(t, err, &ve)
 
 	// Find the minLength error and verify both keyword and path.
@@ -4148,6 +4164,7 @@ func TestDeeplyNestedErrors(t *testing.T) {
 	require.Error(t, err)
 
 	var ve *jsonschema.ValidationError
+
 	require.ErrorAs(t, err, &ve)
 
 	// Use structured matching to verify the 3-level path.
@@ -4316,6 +4333,7 @@ func TestCircularRefErrorAtDepth(t *testing.T) {
 	require.Error(t, err, "deep validation errors should bubble up through recursive refs")
 
 	var ve *jsonschema.ValidationError
+
 	require.ErrorAs(t, err, &ve)
 
 	found := findErrorByKeyword(ve, "type")
@@ -4339,6 +4357,7 @@ func TestValidateJSONStructuredError(t *testing.T) {
 	require.Error(t, err)
 
 	var ve *jsonschema.ValidationError
+
 	require.ErrorAs(t, err, &ve)
 
 	// Find the type error at /count.
@@ -4390,6 +4409,7 @@ func TestRefToRootReportsNestedInstancePath(t *testing.T) {
 	require.Error(t, err)
 
 	var ve *jsonschema.ValidationError
+
 	require.ErrorAs(t, err, &ve)
 
 	// The error should report /child/name, not just /name.
@@ -4554,6 +4574,7 @@ func TestFormatAssertion(t *testing.T) {
 				"invalid %s instance %q should fail", tt.format, tt.invalid)
 
 			var ve *jsonschema.ValidationError
+
 			require.ErrorAs(t, err, &ve)
 			assert.True(t, findErrorByKeyword(ve, "format"),
 				"failure should be attributed to the format keyword")
@@ -4594,6 +4615,7 @@ func TestValidationErrorStructure(t *testing.T) {
 		err := jsonschema.Validate(schema, map[string]any{})
 
 		var ve *jsonschema.ValidationError
+
 		require.ErrorAs(t, err, &ve)
 
 		// A single failure surfaces as the leaf itself: the required keyword
@@ -4612,6 +4634,7 @@ func TestValidationErrorStructure(t *testing.T) {
 		err := jsonschema.Validate(schema, 11.0)
 
 		var ve *jsonschema.ValidationError
+
 		require.ErrorAs(t, err, &ve)
 
 		assert.Equal(t, "maximum", ve.Keyword)
@@ -4639,6 +4662,7 @@ func TestValidationErrorStructure(t *testing.T) {
 		})
 
 		var ve *jsonschema.ValidationError
+
 		require.ErrorAs(t, err, &ve)
 
 		// Container keywords flatten a single child failure into the parent, so
@@ -4666,6 +4690,7 @@ func TestValidationErrorStructure(t *testing.T) {
 		})
 
 		var ve *jsonschema.ValidationError
+
 		require.ErrorAs(t, err, &ve)
 
 		// With more than one failure the root is an intermediate node whose
@@ -4701,6 +4726,7 @@ func TestValidationErrorStructure(t *testing.T) {
 		err := jsonschema.Validate(schema, 5.0)
 
 		var ve *jsonschema.ValidationError
+
 		require.ErrorAs(t, err, &ve)
 
 		// Compositional keywords wrap their child failures: the root is the
@@ -4778,6 +4804,7 @@ func TestContainsBasedErrorMatchingScope(t *testing.T) {
 	require.Error(t, err)
 
 	var ve *jsonschema.ValidationError
+
 	require.ErrorAs(t, err, &ve)
 
 	found := findErrorByKeyword(ve, "required")
@@ -5050,6 +5077,7 @@ func collectLeaves(ve *jsonschema.ValidationError) []*jsonschema.ValidationError
 	}
 
 	var leaves []*jsonschema.ValidationError
+
 	for _, cause := range ve.Causes {
 		leaves = append(leaves, collectLeaves(cause)...)
 	}
@@ -5149,6 +5177,7 @@ func TestValidationErrorSchemaPath(t *testing.T) {
 	require.Error(t, err)
 
 	var ve *jsonschema.ValidationError
+
 	require.ErrorAs(t, err, &ve)
 
 	leaf := findValidationNode(ve, "minLength")
@@ -5179,6 +5208,7 @@ func TestValidateCollectsAllErrors(t *testing.T) {
 	require.Error(t, err)
 
 	var ve *jsonschema.ValidationError
+
 	require.ErrorAs(t, err, &ve)
 
 	leaves := collectLeaves(ve)
@@ -5255,6 +5285,7 @@ func TestValidateRefIntoUnknownKeyword(t *testing.T) {
 			t.Parallel()
 
 			var schema jsonschema.Schema
+
 			require.NoError(t, json.Unmarshal([]byte(tc.schema), &schema))
 
 			err := jsonschema.ValidateJSON(&schema, []byte(tc.data))
@@ -5312,6 +5343,7 @@ func TestValidateRefTargetWellFormed(t *testing.T) {
 			t.Parallel()
 
 			var schema jsonschema.Schema
+
 			require.NoError(t, json.Unmarshal([]byte(tc.schema), &schema))
 
 			err := jsonschema.ValidateJSON(&schema, []byte(tc.data))

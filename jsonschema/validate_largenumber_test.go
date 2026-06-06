@@ -72,6 +72,7 @@ func TestValidateLargeNumberGuarded(t *testing.T) {
 			t.Parallel()
 
 			var s jsonschema.Schema
+
 			require.NoError(t, json.Unmarshal([]byte(c.schema), &s))
 
 			v, err := jsonschema.Compile(&s)

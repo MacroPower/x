@@ -602,6 +602,7 @@ func TestFloat32ScalarKeepsDecimal(t *testing.T) {
 			require.NotNil(t, prop)
 
 			var got []byte
+
 			switch tc.key {
 			case "const":
 				require.NotNil(t, prop.Const)

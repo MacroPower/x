@@ -101,6 +101,7 @@ func validateTime(s string) error {
 	if err != nil {
 		_, err = time.Parse("15:04:05.999999999Z07:00", normalized)
 	}
+
 	if err != nil {
 		return errors.New("invalid time")
 	}
@@ -271,15 +272,18 @@ func splitEmail(s string) (string, string, bool) {
 				i += 2
 				continue
 			}
+
 			if s[i] == '"' {
 				break
 			}
 
 			i++
 		}
+
 		if i >= len(s) || s[i] != '"' {
 			return "", "", false // unterminated quoted string
 		}
+
 		if i+1 >= len(s) || s[i+1] != '@' {
 			return "", "", false // quoted local part must be followed by '@'
 		}
@@ -301,6 +305,7 @@ func validateEmailLocal(s string) error {
 	if s == "" || len(s) > 64 {
 		return errors.New("invalid email: local part length")
 	}
+
 	if s[0] == '"' {
 		return validateQuotedLocal(s)
 	}
@@ -321,6 +326,7 @@ func validateQuotedLocal(s string) error {
 			i++ // skip the escaped character
 			continue
 		}
+
 		if c < 0x20 || c == 0x7F {
 			return errors.New("invalid email: control character in local part")
 		}
@@ -346,6 +352,7 @@ func validateDotAtom(s string, isText func(rune) bool, msgs dotAtomErrors) error
 	if s[0] == '.' || s[len(s)-1] == '.' {
 		return errors.New(msgs.edgeDot)
 	}
+
 	if strings.Contains(s, "..") {
 		return errors.New(msgs.doubleDot)
 	}
@@ -391,6 +398,7 @@ func validateEmailDomain(d string) error {
 	if d == "" {
 		return errors.New("invalid email: empty domain")
 	}
+
 	if strings.HasPrefix(d, "[") && strings.HasSuffix(d, "]") {
 		lit := d[1 : len(d)-1]
 		if rest, found := strings.CutPrefix(lit, "IPv6:"); found {
@@ -506,12 +514,15 @@ func validateURI(s string) error {
 	if err != nil {
 		return errors.New("invalid URI")
 	}
+
 	if u.Scheme == "" {
 		return errors.New("invalid URI: missing scheme")
 	}
+
 	if containsInvalidURIChars(s) {
 		return errors.New("invalid URI: forbidden characters")
 	}
+
 	// Bare IPv6 addresses must be enclosed in brackets per RFC 3986 §3.2.2,
 	// mirroring validateIRI so "uri" and "iri" agree on this case.
 	if strings.Count(u.Host, ":") > 1 && !strings.HasPrefix(u.Host, "[") {
@@ -526,6 +537,7 @@ func validateURIReference(s string) error {
 	if err != nil {
 		return errors.New("invalid URI reference")
 	}
+
 	if containsInvalidURIChars(s) {
 		return errors.New("invalid URI reference: forbidden characters")
 	}
@@ -590,6 +602,7 @@ func validateIPv4(s string) error {
 	if ip == nil || ip.To4() == nil {
 		return errors.New("invalid IPv4 address")
 	}
+
 	// Ensure it's actually written in dotted-decimal, not ::ffff:a.b.c.d.
 	if strings.Contains(s, ":") {
 		return errors.New("invalid IPv4 address")
@@ -603,6 +616,7 @@ func validateIPv6(s string) error {
 	if ip == nil {
 		return errors.New("invalid IPv6 address")
 	}
+
 	// Must contain a colon to be IPv6.
 	if !strings.Contains(s, ":") {
 		return errors.New("invalid IPv6 address")
@@ -615,9 +629,11 @@ func validateJSONPointer(s string) error {
 	if s == "" {
 		return nil // empty string is a valid JSON Pointer (root)
 	}
+
 	if !strings.HasPrefix(s, "/") {
 		return errors.New("invalid JSON Pointer: must start with /")
 	}
+
 	// Check for invalid escape sequences.
 	for i := range len(s) {
 		if s[i] == '~' {
@@ -677,9 +693,11 @@ func validateRegex(s string) error {
 
 		i++
 	}
+
 	if depth != 0 {
 		return errors.New("invalid regex: unbalanced parenthesis")
 	}
+
 	if inClass {
 		return errors.New("invalid regex: unterminated character class")
 	}
@@ -700,6 +718,7 @@ func validateRegexEscape(c rune, size int) error {
 	if c == utf8.RuneError && size == 1 {
 		return errors.New("invalid regex: invalid escape sequence")
 	}
+
 	if c >= utf8.RuneSelf {
 		return nil
 	}
@@ -740,9 +759,11 @@ func validateRelativeJSONPointer(s string) error {
 	for i < len(s) && s[i] >= '0' && s[i] <= '9' {
 		i++
 	}
+
 	if i == 0 {
 		return errors.New("invalid relative JSON Pointer: must start with digit")
 	}
+
 	// No leading zeros on multi-digit numbers.
 	if i > 1 && s[0] == '0' {
 		return errors.New("invalid relative JSON Pointer: leading zero")
@@ -798,6 +819,7 @@ func validateDuration(s string) error {
 		for i < len(s) && s[i] >= '0' && s[i] <= '9' {
 			i++
 		}
+
 		if i == 0 || i >= len(s) {
 			return errors.New("invalid duration: missing designator")
 		}
@@ -872,12 +894,15 @@ func validateIRI(s string) error {
 	if err != nil {
 		return errors.New("invalid IRI")
 	}
+
 	if u.Scheme == "" {
 		return errors.New("invalid IRI: missing scheme")
 	}
+
 	if containsInvalidIRIChars(s) {
 		return errors.New("invalid IRI: forbidden characters")
 	}
+
 	// Bare IPv6 addresses must be enclosed in brackets per RFC 3986 §3.2.2.
 	if strings.Count(u.Host, ":") > 1 && !strings.HasPrefix(u.Host, "[") {
 		return errors.New("invalid IRI: bare IPv6 address")
@@ -893,6 +918,7 @@ func validateIRIReference(s string) error {
 	if err != nil {
 		return errors.New("invalid IRI reference")
 	}
+
 	if containsInvalidIRIChars(s) {
 		return errors.New("invalid IRI reference: forbidden characters")
 	}
@@ -943,6 +969,7 @@ func validateURITemplate(s string) error {
 			inExpr = false
 		}
 	}
+
 	if inExpr {
 		return errors.New("invalid URI template: unmatched opening brace")
 	}
@@ -975,6 +1002,7 @@ func validateURITemplateExpr(e string) error {
 		'=', ',', '!', '@', '|': // op-reserve (reserved, accepted)
 		e = e[1:]
 	}
+
 	if e == "" {
 		return errors.New("invalid URI template: operator without variable list")
 	}
@@ -1025,9 +1053,11 @@ func validateURITemplateMaxLength(s string) error {
 	if s == "" {
 		return errors.New("invalid URI template: empty max-length")
 	}
+
 	if len(s) > 4 {
 		return errors.New("invalid URI template: max-length too long")
 	}
+
 	if s[0] == '0' {
 		return errors.New("invalid URI template: max-length leading zero")
 	}
@@ -1048,9 +1078,11 @@ func validateURITemplateVarname(name string) error {
 	if name == "" {
 		return errors.New("invalid URI template: empty varname")
 	}
+
 	if name[0] == '.' || name[len(name)-1] == '.' {
 		return errors.New("invalid URI template: misplaced dot in varname")
 	}
+
 	if strings.Contains(name, "..") {
 		return errors.New("invalid URI template: consecutive dots in varname")
 	}
@@ -1115,12 +1147,14 @@ func validateIDNHostnameLabels(s string, banNumericTLD bool) error {
 		if err != nil {
 			return errors.New("invalid IDN hostname: " + err.Error())
 		}
+
 		// A non-empty label whose A-label form is empty is a degenerate
 		// A-label (e.g. "xn--" with an empty Punycode payload), which decodes
 		// to an empty Unicode label and is malformed per RFC 5890.
 		if ascii == "" {
 			return errors.New("invalid IDN hostname: empty A-label")
 		}
+
 		// RFC 5890: A-labels must be at most 63 octets.
 		if len(ascii) > 63 {
 			return errors.New("invalid IDN hostname: label too long")
@@ -1266,9 +1300,11 @@ func validateIDNEmailLocal(s string) error {
 	if s == "" {
 		return errors.New("invalid IDN email: empty local part")
 	}
+
 	if len(s) > 64 {
 		return errors.New("invalid IDN email: local part too long")
 	}
+
 	if s[0] == '"' {
 		return validateQuotedLocal(s)
 	}
@@ -1291,6 +1327,7 @@ func validateIDNEmailDomain(d string) error {
 	if d == "" {
 		return errors.New("invalid IDN email: empty domain")
 	}
+
 	if strings.HasPrefix(d, "[") && strings.HasSuffix(d, "]") {
 		return validateEmailDomain(d)
 	}

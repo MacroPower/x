@@ -438,6 +438,7 @@ func TestGenerateFor_EmbeddedPointerToNonStruct(t *testing.T) {
 	// *MyInt becomes a regular field named "MyInt" with a nullable schema.
 	assert.Contains(t, s.Properties, "MyInt")
 	assert.Contains(t, s.Properties, "other")
+
 	// Nullable pointers are expressed via anyOf with a null alternative.
 	myInt := s.Properties["MyInt"]
 	require.Len(t, myInt.AnyOf, 2)
@@ -646,7 +647,7 @@ type embedOptionsOnly struct {
 }
 
 type embedEmptyName struct {
-	embedPromoteInner `json:","` //nolint:unused // Promoted via reflection in the generated schema.
+	embedPromoteInner `json:","` //nolint:unused,staticcheck // Tag under test: "," carries no name, so the embed is promoted via reflection.
 }
 
 type embedExplicitName struct {

@@ -256,6 +256,7 @@ func moduleDir(t *testing.T) string {
 	require.NoError(t, err)
 
 	var info moduleInfo
+
 	require.NoError(t, json.Unmarshal(out, &info))
 
 	return info.Dir
@@ -510,6 +511,7 @@ func cmdStderr(err error) string {
 	}
 
 	var exitErr *exec.ExitError
+
 	if ok := errors.As(err, &exitErr); ok {
 		return string(exitErr.Stderr)
 	}
@@ -635,6 +637,7 @@ func TestCmdErrorExtractsStderr(t *testing.T) {
 	wrapped := cmdError(exitErr)
 
 	var extracted *exec.ExitError
+
 	require.ErrorAs(t, wrapped, &extracted,
 		"cmdError wraps the original *exec.ExitError so it stays recoverable")
 

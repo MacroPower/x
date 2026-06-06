@@ -75,6 +75,7 @@ func TestCompileEquivalentToValidate(t *testing.T) {
 
 			// Compiling once and validating must agree with the one-shot helper.
 			assert.Equal(t, directErr == nil, compiledErr == nil)
+
 			if tt.valid {
 				assert.NoError(t, compiledErr)
 			} else {
@@ -165,6 +166,7 @@ func TestCompileConcurrent(t *testing.T) {
 	// Many goroutines share one compiled validator. Run under -race to catch any
 	// data race on shared state; the per-instance results must stay correct.
 	var wg sync.WaitGroup
+
 	for range 32 {
 		wg.Go(func() {
 			for range 25 {
@@ -236,6 +238,7 @@ func TestCompileNumericAndPatternCaches(t *testing.T) {
 
 			assert.Equalf(t, directErr == nil, compiledErr == nil,
 				"compiled and direct disagree for %v", c.instance)
+
 			if c.valid {
 				assert.NoErrorf(t, compiledErr, "instance %v", c.instance)
 			} else {
@@ -266,6 +269,7 @@ func TestCompileNumericAndPatternConcurrent(t *testing.T) {
 	}
 
 	var wg sync.WaitGroup
+
 	for range 32 {
 		wg.Go(func() {
 			for range 25 {
@@ -351,6 +355,7 @@ func TestCompileConcurrentWithRefResolver(t *testing.T) {
 	require.NoError(t, err)
 
 	var wg sync.WaitGroup
+
 	for range 16 {
 		wg.Go(func() {
 			for range 25 {

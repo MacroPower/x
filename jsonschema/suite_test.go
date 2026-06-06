@@ -122,6 +122,7 @@ func init() {
 		if err != nil {
 			return err
 		}
+
 		if info.IsDir() || !strings.HasSuffix(path, ".json") {
 			return nil
 		}
@@ -165,6 +166,7 @@ func init() {
 		if err != nil {
 			return err
 		}
+
 		if info.IsDir() || !strings.HasSuffix(path, ".json") {
 			return nil
 		}
@@ -203,6 +205,7 @@ func (suiteRemoteResolver) ResolveRef(uri string) (*jsonschema.Schema, error) {
 	if s, ok := remoteSchemas[uri]; ok {
 		return s, nil
 	}
+
 	// Try with trailing "#" for schemas whose $id includes an empty
 	// fragment (e.g. Draft 7 metaschema "http://json-schema.org/draft-07/schema#").
 	if s, ok := remoteSchemas[uri+"#"]; ok {
@@ -293,6 +296,7 @@ func TestSuiteFormat(t *testing.T) {
 				fileName := filepath.Base(file)
 				t.Run(fileName, func(t *testing.T) {
 					t.Parallel()
+
 					// The optional format suite tests format as an assertion.
 					// Under Draft 2020-12 format is annotation-only by default,
 					// so opt in explicitly; Draft-07 asserts regardless.
@@ -362,6 +366,7 @@ func runSuiteFile(t *testing.T, path, pathKey, schemaURI string, opts ...jsonsch
 	require.NoError(t, err)
 
 	var groups []suiteGroup
+
 	require.NoError(t, json.Unmarshal(data, &groups))
 
 	for _, group := range groups {
@@ -404,11 +409,13 @@ func unmarshalTestSchema(t *testing.T, raw json.RawMessage, schemaURI string) *j
 	if trimmed == "true" {
 		return &jsonschema.Schema{Schema: schemaURI}
 	}
+
 	if trimmed == "false" {
 		return &jsonschema.Schema{Schema: schemaURI, Not: &jsonschema.Schema{}}
 	}
 
 	var s jsonschema.Schema
+
 	require.NoError(t, json.Unmarshal(raw, &s))
 
 	// Inject $schema if not present.
@@ -427,12 +434,14 @@ func shouldSkip(fileKey, group, test string) (skipReason, bool) {
 			return reason, true
 		}
 	}
+
 	// Group level.
 	if group != "" {
 		if reason, ok := suiteSkips[fileKey+"/"+group]; ok {
 			return reason, true
 		}
 	}
+
 	// File level (least specific).
 	if reason, ok := suiteSkips[fileKey]; ok {
 		return reason, true
@@ -471,6 +480,7 @@ func TestSuiteSkipsAreLive(t *testing.T) {
 			}
 
 			var groups []suiteGroup
+
 			require.NoError(t, json.Unmarshal(data, &groups))
 
 			// A remainder is valid if it matches a group description or a

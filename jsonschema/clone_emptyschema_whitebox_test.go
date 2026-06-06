@@ -306,6 +306,7 @@ func assertFieldPartition(t *testing.T, label string, checked, ignored []string)
 
 	// Disjoint: no field appears in both sets.
 	var overlap []string
+
 	for name, count := range union {
 		if count > 1 {
 			overlap = append(overlap, name)
@@ -322,6 +323,7 @@ func assertFieldPartition(t *testing.T, label string, checked, ignored []string)
 	}
 
 	var missing []string
+
 	for _, name := range reflected {
 		if !classified[name] {
 			missing = append(missing, name)
@@ -341,6 +343,7 @@ func assertFieldPartition(t *testing.T, label string, checked, ignored []string)
 	}
 
 	var stale []string
+
 	for name := range union {
 		if !reflectedSet[name] {
 			stale = append(stale, name)

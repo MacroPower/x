@@ -50,6 +50,7 @@ func applyParts(
 	isDive bool,
 ) error {
 	var inKeys bool
+
 	for idx := range parts {
 		part := strings.TrimSpace(parts[idx])
 		if part == "" || part == "-" {
@@ -85,6 +86,7 @@ func applyParts(
 		if isCrossFieldValidator(key) {
 			continue
 		}
+
 		// Skip control tags that govern when validation runs rather than
 		// expressing a value constraint (e.g. omitempty, structonly). These
 		// have no schema representation and must not be treated as unknown
@@ -92,6 +94,7 @@ func applyParts(
 		if isControlTag(key) {
 			continue
 		}
+
 		// Map key validators: constraints between keys and endkeys apply to
 		// the map's keys (not modeled here) and are skipped. A keys without a
 		// matching endkeys is malformed; rather than swallowing every later
@@ -104,10 +107,12 @@ func applyParts(
 
 			continue
 		}
+
 		if key == "endkeys" {
 			inKeys = false
 			continue
 		}
+
 		if inKeys {
 			continue
 		}
@@ -137,6 +142,7 @@ func applyValidator(key, value string, s, parent *jsonschema.Schema, fieldName s
 		if parent != nil && fieldName != "" {
 			addRequired(parent, fieldName)
 		}
+
 		if !isPointer {
 			return applyRequiredConstraint(s, baseType)
 		}
@@ -398,6 +404,7 @@ func applyBoolEq(s *jsonschema.Schema, value string) error {
 	if err != nil {
 		return err
 	}
+
 	if s.Const != nil {
 		if existing, ok := (*s.Const).(bool); ok && existing != b {
 			return fmt.Errorf("%w: eq=%t conflicts with an existing bool constraint", ErrConflictingConstraints, b)
