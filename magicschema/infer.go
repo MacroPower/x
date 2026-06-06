@@ -190,10 +190,13 @@ func isHelmDocsOldStyleComment(s string) bool {
 	}
 
 	// The part before " -- " should look like a dotted key path (e.g.,
-	// "image.tag", "controller.service.annotations.\"key\"").
+	// "image.tag", "controller.service.annotations.\"key\""). A key path
+	// is a single token: prose that happens to contain a dot, such as
+	// "Use the v1.2 API -- stable", has spaces and is a legitimate
+	// description.
 	prefix := strings.TrimSpace(s[:idx])
 
-	return strings.Contains(prefix, ".")
+	return strings.Contains(prefix, ".") && !strings.ContainsAny(prefix, " \t")
 }
 
 // inferItemsSchema creates an items schema from a sequence node's elements.

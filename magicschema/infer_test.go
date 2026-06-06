@@ -77,6 +77,14 @@ func TestIsAnnotationComment(t *testing.T) {
 			input: "This is a regular comment",
 			want:  false,
 		},
+		"old-style helm-docs key path": {
+			input: "image.tag -- the image tag",
+			want:  true,
+		},
+		"prose with dotted word before dashes": {
+			input: "Use the v1.2 API -- it is stable",
+			want:  false,
+		},
 		"empty string": {
 			input: "",
 			want:  false,
