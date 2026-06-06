@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/parser"
@@ -327,17 +328,7 @@ func (g *Generator) handleMergeKey(
 
 	switch mv := mergeValue.(type) {
 	case *ast.MappingNode:
-		mergeSchema := g.walkMapping(mv, keyPath, anchors)
-		for _, k := range propertyKeys(mergeSchema) {
-			if _, exists := schema.Properties[k]; !exists {
-				schema.Properties[k] = mergeSchema.Properties[k]
-				addToOrder(k)
-			}
-		}
-
-		if mergeSchema.Required != nil {
-			schema.Required = append(schema.Required, mergeSchema.Required...)
-		}
+		g.mergeMappingInto(schema, g.walkMapping(mv, keyPath, anchors), addToOrder)
 
 	case *ast.SequenceNode:
 		for _, seqVal := range mv.Values {
@@ -349,14 +340,34 @@ func (g *Generator) handleMergeKey(
 				continue
 			}
 
-			mergeSchema := g.walkMapping(mappingNode, keyPath, anchors)
-			for _, k := range propertyKeys(mergeSchema) {
-				if _, exists := schema.Properties[k]; !exists {
-					schema.Properties[k] = mergeSchema.Properties[k]
-					addToOrder(k)
-				}
-			}
+			g.mergeMappingInto(schema, g.walkMapping(mappingNode, keyPath, anchors), addToOrder)
 		}
+	}
+}
+
+// mergeMappingInto adds a merge-key mapping's properties and required keys
+// into schema. Existing properties win (explicit keys override '<<' merges
+// regardless of position) and required keys are deduplicated.
+func (g *Generator) mergeMappingInto(
+	schema, mergeSchema *jsonschema.Schema,
+	addToOrder func(string),
+) {
+	for _, k := range propertyKeys(mergeSchema) {
+		if _, exists := schema.Properties[k]; !exists {
+			schema.Properties[k] = mergeSchema.Properties[k]
+			addToOrder(k)
+		}
+	}
+
+	for _, k := range mergeSchema.Required {
+		addRequired(schema, k)
+	}
+}
+
+// addRequired appends key to schema.Required unless already present.
+func addRequired(schema *jsonschema.Schema, key string) {
+	if !slices.Contains(schema.Required, key) {
+		schema.Required = append(schema.Required, key)
 	}
 }
 
@@ -394,7 +405,7 @@ func (g *Generator) handleProperty(
 	addToOrder(keyName)
 
 	if annotation != nil && annotation.HasRequired != nil && *annotation.HasRequired {
-		schema.Required = append(schema.Required, keyName)
+		addRequired(schema, keyName)
 	}
 }
 
