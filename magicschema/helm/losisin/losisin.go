@@ -354,11 +354,13 @@ func splitSemicolons(line string) []string {
 	return parts
 }
 
-// parseStringList parses a list value where all elements are coerced to strings.
-// It first tries YAML array parsing for bracket-prefixed values, then falls back
-// to comma-splitting. This matches the upstream processList(comment, stringsOnly=true)
-// behavior.
-func parseStringList(val string) []string {
+// splitListValue implements the list scaffold shared by parseStringList and
+// parseAnyList, matching the upstream processList: YAML array parsing for
+// bracket-prefixed values, with a comma-splitting fallback that strips
+// brackets (handling malformed YAML arrays) and surrounding space from each
+// non-empty item. When the boolean is true the YAML elements are returned;
+// otherwise the fallback items are.
+func splitListValue(val string) ([]any, []string, bool) {
 	val = strings.TrimSpace(val)
 
 	// Try YAML parse first for bracket-prefixed values.
@@ -367,36 +369,46 @@ func parseStringList(val string) []string {
 
 		err := yaml.Unmarshal([]byte(val), &list)
 		if err == nil {
-			result := make([]string, 0, len(list))
-
-			for _, v := range list {
-				switch v := v.(type) {
-				case string:
-					result = append(result, v)
-				case nil:
-					result = append(result, yamlNull)
-				default:
-					result = append(result, fmt.Sprint(v))
-				}
-			}
-
-			return result
+			return list, nil, true
 		}
 	}
 
-	// Fall back to comma-splitting. Strip brackets if present (handles
-	// malformed YAML arrays that failed to parse above).
 	inner := val
-	if after, ok := strings.CutPrefix(val, "["); ok {
+	if after, found := strings.CutPrefix(val, "["); found {
 		inner = strings.TrimSuffix(after, "]")
 	}
 
-	var result []string
+	var items []string
 
 	for item := range strings.SplitSeq(inner, ",") {
 		item = strings.TrimSpace(item)
 		if item != "" {
-			result = append(result, item)
+			items = append(items, item)
+		}
+	}
+
+	return nil, items, false
+}
+
+// parseStringList parses a list value where all elements are coerced to
+// strings. This matches the upstream processList(comment, stringsOnly=true)
+// behavior.
+func parseStringList(val string) []string {
+	parsed, items, ok := splitListValue(val)
+	if !ok {
+		return items
+	}
+
+	result := make([]string, 0, len(parsed))
+
+	for _, v := range parsed {
+		switch v := v.(type) {
+		case string:
+			result = append(result, v)
+		case nil:
+			result = append(result, yamlNull)
+		default:
+			result = append(result, fmt.Sprint(v))
 		}
 	}
 
@@ -404,38 +416,20 @@ func parseStringList(val string) []string {
 }
 
 // parseAnyList parses a list value preserving native types (null stays nil,
-// numbers stay numeric, booleans stay booleans). It first tries YAML array
-// parsing for bracket-prefixed values, then falls back to comma-splitting.
-// This matches the upstream processList(comment, stringsOnly=false) behavior.
+// numbers stay numeric, booleans stay booleans). This matches the upstream
+// processList(comment, stringsOnly=false) behavior.
 func parseAnyList(val string) []any {
-	val = strings.TrimSpace(val)
-
-	// Try YAML parse first for bracket-prefixed values.
-	if strings.HasPrefix(val, "[") {
-		var list []any
-
-		err := yaml.Unmarshal([]byte(val), &list)
-		if err == nil {
-			return list
-		}
-	}
-
-	// Fall back to comma-splitting. Strip brackets if present.
-	inner := val
-	if after, ok := strings.CutPrefix(val, "["); ok {
-		inner = strings.TrimSuffix(after, "]")
+	parsed, items, ok := splitListValue(val)
+	if ok {
+		return parsed
 	}
 
 	var list []any
 
-	for item := range strings.SplitSeq(inner, ",") {
-		item = strings.TrimSpace(item)
-		if item == "" {
-			continue
-		}
-
+	for _, item := range items {
 		if item == yamlNull {
 			list = append(list, nil)
+
 			continue
 		}
 
@@ -444,6 +438,7 @@ func parseAnyList(val string) []any {
 			unquoted, err := strconv.Unquote(item)
 			if err == nil {
 				list = append(list, unquoted)
+
 				continue
 			}
 		}
