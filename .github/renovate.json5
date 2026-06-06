@@ -14,4 +14,19 @@
     "gomodTidy",
     "gomodUpdateImportPaths",
   ],
+  customManagers: [
+    // Tool and image versions pinned as Go constants in the Dagger
+    // toolchain modules, annotated with `// renovate:` comments, e.g.:
+    //   golangciLintVersion = "v2.12" // renovate: datasource=github-releases depName=golangci/golangci-lint
+    //   defaultTrivyImage = "aquasec/trivy:0.68.2" // renovate: datasource=docker depName=aquasec/trivy
+    // For image references, the version is the tag after the last colon.
+    {
+      customType: "regex",
+      managerFilePatterns: ["/^toolchains/.+\\.go$/"],
+      matchStrings: [
+        '"(?:[^"]*:)?(?<currentValue>[^":]+)"\\s*// renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)',
+      ],
+      versioningTemplate: "{{#if (equals datasource 'docker')}}docker{{else}}semver-coerced{{/if}}",
+    },
+  ],
 }
