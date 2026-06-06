@@ -134,8 +134,9 @@ func cleanComment(s string) string {
 			continue
 		}
 
-		// Skip helm-docs annotation markers.
-		if strings.HasPrefix(cleaned, "-- ") || cleaned == "--" {
+		// Skip annotation markers from any supported annotator format so
+		// they never leak into descriptions.
+		if IsAnnotationComment(cleaned) {
 			continue
 		}
 
