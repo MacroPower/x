@@ -282,12 +282,14 @@ func TestInferEdgeCases(t *testing.T) {
 			want:  "string",
 		},
 		"tagged string": {
+			// The explicit tag is authoritative over the literal's
+			// apparent type, since loaders coerce to the tagged type.
 			input: "val: !!str 123\n",
-			want:  "integer",
+			want:  "string",
 		},
 		"tagged int": {
 			input: "val: !!int \"42\"\n",
-			want:  "string",
+			want:  "integer",
 		},
 		"positive infinity": {
 			input: "val: .inf\n",

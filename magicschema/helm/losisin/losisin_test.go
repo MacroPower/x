@@ -1941,7 +1941,8 @@ func TestHelmValuesSchemaAnnotatorAlignment(t *testing.T) {
 		},
 		"default with empty string value": {
 			// Default (YAML value) -> Default.
-			// Empty value after colon should produce null default.
+			// An empty value carries no default (explicit null is written
+			// as "default:null"), so the field stays unset.
 			input: stringtest.Input(`
 				# @schema type:string;default:
 				val: test
@@ -1956,9 +1957,7 @@ func TestHelmValuesSchemaAnnotatorAlignment(t *testing.T) {
 				require.True(t, ok)
 
 				assert.Equal(t, "string", v["type"])
-				// Empty YAML value unmarshals to nil, so default is null.
-				assert.Contains(t, v, "default")
-				assert.Nil(t, v["default"])
+				assert.NotContains(t, v, "default")
 			},
 		},
 		"skipProperties with explicit false does not strip properties": {
@@ -2913,9 +2912,10 @@ func TestHelmValuesSchemaAnnotatorUpstreamAlignment(t *testing.T) {
 				assert.Contains(t, enum, "tcp")
 			},
 		},
-		"default empty value produces null divergence": {
+		"default empty value skipped divergence": {
 			// Upstream: processObjectComment errors on empty value.
-			// Our behavior: ParseYAMLValue("") produces null (fail-open).
+			// Our behavior: an empty value carries no default (fail-open:
+			// skip the unparseable pair instead of erroring).
 			input: stringtest.Input(`
 				# @schema type:string;default:
 				name: test
@@ -2930,8 +2930,7 @@ func TestHelmValuesSchemaAnnotatorUpstreamAlignment(t *testing.T) {
 				require.True(t, ok)
 
 				assert.Equal(t, "string", n["type"])
-				assert.Contains(t, n, "default")
-				assert.Nil(t, n["default"])
+				assert.NotContains(t, n, "default")
 			},
 		},
 		"invalid boolean for required treated as false": {
