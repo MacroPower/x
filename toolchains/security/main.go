@@ -11,7 +11,7 @@ import (
 const (
 	// Official Trivy image from GHCR (listed alongside Docker Hub and ECR
 	// in Trivy's install docs), avoiding Docker Hub pull rate limits.
-	defaultTrivyImage = "ghcr.io/aquasecurity/trivy:0.68.2" // renovate: datasource=docker depName=ghcr.io/aquasecurity/trivy
+	defaultTrivyImage = "ghcr.io/aquasecurity/trivy:0.71.0" // renovate: datasource=docker depName=ghcr.io/aquasecurity/trivy
 
 	defaultSeverity       = "CRITICAL,HIGH"
 	defaultScanners       = "vuln"
