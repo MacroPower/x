@@ -1,6 +1,8 @@
 package magicschema
 
 import (
+	"maps"
+
 	"github.com/goccy/go-yaml/ast"
 	"github.com/google/jsonschema-go/jsonschema"
 )
@@ -52,6 +54,8 @@ type RootAnnotator interface {
 
 // mergeAnnotations merges multiple AnnotationResults in priority order
 // (first element has highest priority). Returns nil if all inputs are nil.
+// The merged schema is a copy, so downstream mutation never reaches into a
+// schema owned by an annotator.
 func mergeAnnotations(results []*AnnotationResult) *AnnotationResult {
 	var merged *AnnotationResult
 
@@ -62,7 +66,7 @@ func mergeAnnotations(results []*AnnotationResult) *AnnotationResult {
 
 		if merged == nil {
 			merged = &AnnotationResult{
-				Schema:          r.Schema,
+				Schema:          copySchema(r.Schema),
 				HasRequired:     r.HasRequired,
 				Skip:            r.Skip,
 				SkipProperties:  r.SkipProperties,
@@ -95,7 +99,7 @@ func mergeAnnotations(results []*AnnotationResult) *AnnotationResult {
 		}
 
 		if merged.Schema == nil {
-			merged.Schema = r.Schema
+			merged.Schema = copySchema(r.Schema)
 
 			continue
 		}
@@ -105,6 +109,21 @@ func mergeAnnotations(results []*AnnotationResult) *AnnotationResult {
 	}
 
 	return merged
+}
+
+// copySchema returns a shallow copy of s with its own Extra map, so in-place
+// merging of the copy never mutates the original.
+func copySchema(s *jsonschema.Schema) *jsonschema.Schema {
+	if s == nil {
+		return nil
+	}
+
+	c := *s
+	if s.Extra != nil {
+		c.Extra = maps.Clone(s.Extra)
+	}
+
+	return &c
 }
 
 // mergeSchemaFields merges fields from src into dst where dst has zero values.
