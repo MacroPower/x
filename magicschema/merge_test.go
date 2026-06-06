@@ -592,6 +592,43 @@ func TestMergeAnnotatedConstraints(t *testing.T) {
 				assert.Equal(t, "^[a-z]+$", ap["pattern"])
 			},
 		},
+		"identical patternProperties kept across merge": {
+			inputA: "# @schema\n# patternProperties:\n#   ^x-:\n#     type: string\n# @schema\nconf:\n  a: x\n",
+			inputB: "# @schema\n# patternProperties:\n#   ^x-:\n#     type: string\n# @schema\nconf:\n  b: y\n",
+			opts:   []magicschema.Option{magicschema.WithAnnotators(dadav.New())},
+			check: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				conf, ok := props["conf"].(map[string]any)
+				require.True(t, ok)
+
+				pp, ok := conf["patternProperties"].(map[string]any)
+				require.True(t, ok, "identical patternProperties should survive the merge, got %v", conf)
+
+				sub, ok := pp["^x-"].(map[string]any)
+				require.True(t, ok)
+				assert.Equal(t, "string", sub["type"])
+			},
+		},
+		"differing patternProperties dropped": {
+			inputA: "# @schema\n# patternProperties:\n#   ^x-:\n#     type: string\n# @schema\nconf:\n  a: x\n",
+			inputB: "# @schema\n# patternProperties:\n#   ^x-:\n#     type: integer\n# @schema\nconf:\n  b: y\n",
+			opts:   []magicschema.Option{magicschema.WithAnnotators(dadav.New())},
+			check: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				conf, ok := props["conf"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Nil(t, conf["patternProperties"], "conflicting patternProperties should drop")
+			},
+		},
 		"root annotations apply from the first input": {
 			inputA: "# @schema.root\n# title: My Chart\n# @schema.root\nreplicas: 3\n",
 			inputB: "name: x\n",

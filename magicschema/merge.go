@@ -14,13 +14,15 @@ import (
 // only when both sides constrain -- a side without a constraint already
 // permits everything, so keeping a one-sided constraint would fail closed.
 // Bounds widen toward the permissive end, enums union, and exact-value
-// constraints (pattern, format, const, multipleOf) are kept only when both
-// sides agree. When the two types are incompatible the type constraint is
+// constraints (pattern, format, const, multipleOf, patternProperties, and
+// other keywords with no widening rule) are kept only when both sides
+// agree. When the two types are incompatible the type constraint is
 // dropped entirely, and every type-specific keyword (properties, items,
 // bounds, pattern) drops with it -- a schema with no type but residual
 // object or array constraints would still fail closed for those instances.
-// Combinators and references ($ref, allOf/anyOf/oneOf, not, if/then/else)
-// are dropped entirely, which is the most permissive behavior.
+// Combinators and references ($ref, allOf/anyOf/oneOf, not) are dropped
+// entirely, which is the most permissive behavior; the if/then/else
+// conditional is kept as a unit when both sides agree exactly.
 func mergeSchemas(a, b *jsonschema.Schema) *jsonschema.Schema {
 	if a == nil {
 		return b
@@ -87,15 +89,9 @@ func mergeSchemas(a, b *jsonschema.Schema) *jsonschema.Schema {
 	}
 
 	// Validation constraints: union, widen, or keep-when-equal.
-	if a.Pattern == b.Pattern {
-		result.Pattern = a.Pattern
-	}
-
-	if a.Format == b.Format {
-		result.Format = a.Format
-	}
-
-	result.MultipleOf = equalFloat64Ptr(a.MultipleOf, b.MultipleOf)
+	result.Pattern = keepEqual(a.Pattern, b.Pattern)
+	result.Format = keepEqual(a.Format, b.Format)
+	result.MultipleOf = keepEqual(a.MultipleOf, b.MultipleOf)
 	result.Minimum = minFloat64Ptr(a.Minimum, b.Minimum)
 	result.Maximum = maxFloat64Ptr(a.Maximum, b.Maximum)
 	result.ExclusiveMinimum = minFloat64Ptr(a.ExclusiveMinimum, b.ExclusiveMinimum)
@@ -129,7 +125,51 @@ func mergeSchemas(a, b *jsonschema.Schema) *jsonschema.Schema {
 		result.Items = b.Items
 	}
 
+	// Keywords with no widening rule are kept only when both sides agree
+	// exactly, mirroring the pattern/format/const rule: identical
+	// constraints union to themselves, anything else drops (fail open).
+	result.PatternProperties = keepEqual(a.PatternProperties, b.PatternProperties)
+	result.PropertyNames = keepEqual(a.PropertyNames, b.PropertyNames)
+	result.DependentRequired = keepEqual(a.DependentRequired, b.DependentRequired)
+	result.DependentSchemas = keepEqual(a.DependentSchemas, b.DependentSchemas)
+	result.DependencySchemas = keepEqual(a.DependencySchemas, b.DependencySchemas)
+	result.DependencyStrings = keepEqual(a.DependencyStrings, b.DependencyStrings)
+	result.UnevaluatedProperties = keepEqual(a.UnevaluatedProperties, b.UnevaluatedProperties)
+	result.UnevaluatedItems = keepEqual(a.UnevaluatedItems, b.UnevaluatedItems)
+	result.PrefixItems = keepEqual(a.PrefixItems, b.PrefixItems)
+	result.ItemsArray = keepEqual(a.ItemsArray, b.ItemsArray)
+	result.AdditionalItems = keepEqual(a.AdditionalItems, b.AdditionalItems)
+	result.Contains = keepEqual(a.Contains, b.Contains)
+	result.MinContains = keepEqual(a.MinContains, b.MinContains)
+	result.MaxContains = keepEqual(a.MaxContains, b.MaxContains)
+	result.Definitions = keepEqual(a.Definitions, b.Definitions)
+	result.Defs = keepEqual(a.Defs, b.Defs)
+	result.ContentEncoding = keepEqual(a.ContentEncoding, b.ContentEncoding)
+	result.ContentMediaType = keepEqual(a.ContentMediaType, b.ContentMediaType)
+	result.ContentSchema = keepEqual(a.ContentSchema, b.ContentSchema)
+
+	// The if/then/else conditional only has meaning as a unit, so it is
+	// kept only when the whole trio agrees.
+	if reflect.DeepEqual(a.If, b.If) &&
+		reflect.DeepEqual(a.Then, b.Then) &&
+		reflect.DeepEqual(a.Else, b.Else) {
+		result.If, result.Then, result.Else = a.If, a.Then, a.Else
+	}
+
 	return result
+}
+
+// keepEqual returns the shared value when both sides agree exactly, or the
+// zero value otherwise. A constraint present on only one side, or differing
+// between sides, drops from the union (fail open).
+func keepEqual[T any](a, b T) T {
+	if reflect.DeepEqual(a, b) {
+		return a
+	}
+
+	var zero T
+
+	return zero
 }
 
 // unionEnums merges enum constraints. The value set is kept only when both
@@ -187,16 +227,6 @@ func maxFloat64Ptr(a, b *float64) *float64 {
 
 	if *b > *a {
 		return b
-	}
-
-	return a
-}
-
-// equalFloat64Ptr returns the shared value when both sides agree, nil
-// otherwise.
-func equalFloat64Ptr(a, b *float64) *float64 {
-	if a == nil || b == nil || *a != *b {
-		return nil
 	}
 
 	return a

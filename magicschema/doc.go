@@ -76,10 +76,11 @@
 //     is merged fail-open (true wins over false, false yields to a
 //     constrained schema). Validation constraints survive a merge only
 //     when both sides constrain: bounds widen toward the permissive end,
-//     enums union, and exact-value constraints such as pattern are kept
-//     only when both sides agree. Property order in the output is
-//     deterministic: properties appear in YAML source order via the
-//     PropertyOrder field on each schema node.
+//     enums union, and exact-value constraints (pattern, format, const,
+//     multipleOf, patternProperties, and other keywords with no widening
+//     rule) are kept only when both sides agree. Property order in the
+//     output is deterministic: properties appear in YAML source order
+//     via the PropertyOrder field on each schema node.
 //
 //  5. Emit JSON Schema: the root schema is configured with the Draft 7
 //     $schema URI, optional title/description/$id from [Option] values,
