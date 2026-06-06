@@ -518,6 +518,13 @@ func (g *Generator) buildChildSchema(
 		childSchema.PropertyOrder = nil
 	}
 
+	// A plain comment fills in the description when no annotator set one:
+	// extract as much as possible (best-effort) rather than letting an
+	// annotation without a description suppress the comment fallback.
+	if childSchema.Description == "" {
+		childSchema.Description = extractComment(mvn)
+	}
+
 	return childSchema
 }
 

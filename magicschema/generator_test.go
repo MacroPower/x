@@ -910,6 +910,34 @@ func TestGeneratorRootAdditionalPropertiesNonObject(t *testing.T) {
 	}
 }
 
+func TestGeneratorAnnotatedNodeKeepsPlainComment(t *testing.T) {
+	t.Parallel()
+
+	// An annotation that sets only a type must not suppress the plain
+	// comment description sitting in the same comment group.
+	input := "# A helpful description\n# @schema type:integer\nfoo: 1\n"
+
+	gen := magicschema.NewGenerator(magicschema.WithAnnotators(losisin.New()))
+	schema, err := gen.Generate([]byte(input))
+	require.NoError(t, err)
+
+	out, err := json.Marshal(schema)
+	require.NoError(t, err)
+
+	var got map[string]any
+
+	require.NoError(t, json.Unmarshal(out, &got))
+
+	props, ok := got["properties"].(map[string]any)
+	require.True(t, ok)
+
+	foo, ok := props["foo"].(map[string]any)
+	require.True(t, ok)
+
+	assert.Equal(t, "integer", foo["type"])
+	assert.Equal(t, "A helpful description", foo["description"])
+}
+
 func TestGeneratorDepthBoundUniform(t *testing.T) {
 	t.Parallel()
 

@@ -69,6 +69,8 @@
 //     into children. Arrays infer items from element types. Plain YAML
 //     comments that do not look like annotation markers become the
 //     description; [IsAnnotationComment] identifies markers to skip.
+//     Comments also fill in the description when annotators produce
+//     output without one.
 //
 //  4. Merge multiple inputs: when multiple YAML files are provided,
 //     schemas are generated independently and then merged with union
