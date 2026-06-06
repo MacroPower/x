@@ -2791,6 +2791,39 @@ func TestHelmSchemaUpstreamBehavior(t *testing.T) {
 				}
 			},
 		},
+		"null type inside oneOf branch": {
+			// A YAML null inside a nested type array (cilium's
+			// envoy.log.defaultLevel) must become the "null" type string,
+			// not an empty string, across the ToSubSchema round trip.
+			input: stringtest.Input(`
+				# @schema
+				# oneOf:
+				# - type: [null]
+				# - enum: [trace, debug, info]
+				# @schema
+				field: ~
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				f, ok := props["field"].(map[string]any)
+				require.True(t, ok)
+
+				oneOf, ok := f["oneOf"].([]any)
+				require.True(t, ok)
+				require.Len(t, oneOf, 2)
+
+				branch, ok := oneOf[0].(map[string]any)
+				require.True(t, ok)
+
+				types, ok := branch["type"].([]any)
+				require.True(t, ok)
+				assert.Equal(t, []any{"null"}, types)
+			},
+		},
 		"multiple blocks with regular comments between them": {
 			// Upstream and our implementation both use toggle semantics.
 			// Regular comments between blocks should not interfere.

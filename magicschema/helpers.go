@@ -38,7 +38,9 @@ func FalseSchema() *jsonschema.Schema {
 // ToSubSchema converts an arbitrary Go value (a map[string]any, bool, or any
 // other JSON-marshalable value) to a [*jsonschema.Schema] by round-tripping
 // through JSON. Returns nil for values that do not survive the round trip
-// (annotation parse failures are skipped, never fatal).
+// (annotation parse failures are skipped, never fatal). YAML nulls inside
+// type arrays (e.g. "type: [null, string]") become the "null" type string,
+// matching how annotators translate the YAML null literal at the top level.
 func ToSubSchema(val any) *jsonschema.Schema {
 	if val == nil {
 		return nil
@@ -56,7 +58,51 @@ func ToSubSchema(val any) *jsonschema.Schema {
 		return nil
 	}
 
+	normalizeNullTypes(&schema)
+
 	return &schema
+}
+
+// normalizeNullTypes rewrites empty strings in Types to the "null" type
+// across the schema tree. A YAML null inside a type array survives the JSON
+// round trip as an empty string in Types, which is not a valid JSON Schema
+// type. Walking the typed tree keeps non-schema values (defaults, enums,
+// consts) untouched.
+func normalizeNullTypes(s *jsonschema.Schema) {
+	if s == nil {
+		return
+	}
+
+	for i, t := range s.Types {
+		if t == "" {
+			s.Types[i] = typeNull
+		}
+	}
+
+	for _, sub := range [...]*jsonschema.Schema{
+		s.Items, s.AdditionalItems, s.Contains, s.UnevaluatedItems,
+		s.AdditionalProperties, s.PropertyNames, s.UnevaluatedProperties,
+		s.Not, s.If, s.Then, s.Else, s.ContentSchema,
+	} {
+		normalizeNullTypes(sub)
+	}
+
+	for _, subs := range [...][]*jsonschema.Schema{
+		s.PrefixItems, s.ItemsArray, s.AllOf, s.AnyOf, s.OneOf,
+	} {
+		for _, sub := range subs {
+			normalizeNullTypes(sub)
+		}
+	}
+
+	for _, subs := range [...]map[string]*jsonschema.Schema{
+		s.Defs, s.Definitions, s.DependencySchemas, s.Properties,
+		s.PatternProperties, s.DependentSchemas,
+	} {
+		for _, sub := range subs {
+			normalizeNullTypes(sub)
+		}
+	}
 }
 
 // ToSubSchemaArray converts a []any to []*jsonschema.Schema.
