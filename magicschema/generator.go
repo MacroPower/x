@@ -440,7 +440,7 @@ func (g *Generator) buildChildSchema(
 
 	// Apply mergeProperties: merge child properties into additionalProperties.
 	if annotation.MergeProperties && childSchema.Properties != nil {
-		childSchema.AdditionalProperties = mergePropertySchemas(childSchema.Properties)
+		childSchema.AdditionalProperties = mergePropertySchemas(childSchema)
 		childSchema.Properties = nil
 		childSchema.PropertyOrder = nil
 	}
@@ -596,19 +596,20 @@ func (g *Generator) applyRootAnnotations(schema *jsonschema.Schema) {
 	}
 }
 
-// mergePropertySchemas combines all property schemas into a single schema
-// for use as additionalProperties.
-func mergePropertySchemas(properties map[string]*jsonschema.Schema) *jsonschema.Schema {
+// mergePropertySchemas combines a schema's property schemas into a single
+// schema for use as additionalProperties. Properties merge in propertyKeys
+// order so the result is deterministic.
+func mergePropertySchemas(s *jsonschema.Schema) *jsonschema.Schema {
 	var merged *jsonschema.Schema
 
-	for _, propSchema := range properties {
+	for _, k := range propertyKeys(s) {
 		if merged == nil {
-			merged = propSchema
+			merged = s.Properties[k]
 
 			continue
 		}
 
-		merged = mergeSchemas(merged, propSchema)
+		merged = mergeSchemas(merged, s.Properties[k])
 	}
 
 	if merged == nil {

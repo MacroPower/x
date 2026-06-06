@@ -310,7 +310,7 @@ func firstNonEmpty(a, b string) string {
 }
 
 // propertyKeys returns property keys in PropertyOrder, then any remaining
-// keys in an undefined order.
+// keys sorted lexically so the result is deterministic.
 func propertyKeys(s *jsonschema.Schema) []string {
 	if s.Properties == nil {
 		return nil
@@ -328,13 +328,17 @@ func propertyKeys(s *jsonschema.Schema) []string {
 			}
 		}
 
+		var rest []string
+
 		for k := range s.Properties {
 			if !seen[k] {
-				keys = append(keys, k)
+				rest = append(rest, k)
 			}
 		}
 
-		return keys
+		slices.Sort(rest)
+
+		return append(keys, rest...)
 	}
 
 	keys := make([]string, 0, len(s.Properties))
@@ -342,6 +346,8 @@ func propertyKeys(s *jsonschema.Schema) []string {
 	for k := range s.Properties {
 		keys = append(keys, k)
 	}
+
+	slices.Sort(keys)
 
 	return keys
 }
