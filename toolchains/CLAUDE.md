@@ -9,9 +9,16 @@ referenced remotely as `github.com/MacroPower/x/toolchains/<module>@<ref>`.
 - **`go`** — Go CI toolchain: `build`/`binary`, `test`/`test-unit`/
   `test-integration`/`test-coverage`, `lint` (golangci-lint), `lint-deadcode`
   (advisory `golang.org/x/tools` deadcode analysis, not a `+check`),
-  `format-go`, `generate`, `tidy`/`check-tidy`, multi-module discovery
-  (`modules`), `ensure-git-init`/`ensure-git-repo`, and benchmark stages
-  (timed via the shared `bench` module).
+  `format-go` (not `+generate`; consumers compose it into their own `*-ci`
+  Format alongside prettier), `generate`, `tidy`/`check-tidy`, multi-module
+  discovery (`modules`), `ensure-git-init`/`ensure-git-repo`, and benchmark
+  stages (timed via the shared `bench` module). Understands `go.work`
+  workspaces: the `goMod` sync includes `go.work`/`go.work.sum` and nested
+  `go.mod`/`go.sum` files (excluding worktree/toolchain/testdata trees so
+  stray module files do not bust the download cache), and the default
+  `./...` package pattern expands into per-module `./<dir>/...` patterns
+  when the source root has a `go.work` but no `go.mod` (where `./...` would
+  match nothing).
 - **`security`** — Trivy scanner: `scan-source`/`scan-image` (gate scans that
   fail on findings) and `scan-source-sarif`/`scan-image-sarif` (non-gating,
   emit SARIF for GitHub Code Scanning).
@@ -61,6 +68,15 @@ referenced remotely as `github.com/MacroPower/x/toolchains/<module>@<ref>`.
   renders the table. Consumed by `go` and every `*-ci` module, which supply the
   project-specific stages and apply cache-busting before handing the container
   over.
+- **`xci`** — This repository's own CI module (registered as `ci` in the
+  root `dagger.json`), mirroring the `*-ci` modules consumers write. It is
+  not designed for remote consumption: `test-unit`/`test-integration`
+  (+check) surface the workspace test suite with the race detector,
+  `lint-renovate` (+check) validates the Renovate configuration through the
+  `devbox` module so CI uses the same Renovate version developers install
+  locally, and `format` (+generate) merges `go.format-go` with
+  `prettier.format`. It has no `tests/` submodule; `dagger check` in this
+  repo's CI exercises every function directly.
 - **`devbox`** — Runs commands inside a project's Devbox (Nix-backed)
   environment so CI uses the same toolchain as local development: `base` (the
   devbox image with the Nix store mounted as a seeded cache volume), `install`

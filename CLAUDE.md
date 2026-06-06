@@ -5,10 +5,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build & Test Commands
 
 ```bash
-task format # Format and lint
-task lint   # Lint only
-task test   # Run all tests
+task format # Format, tidy, and generate (dagger generate --auto-apply)
+task lint   # Lint only (dagger check, lint checks)
+task test   # Run all tests (dagger check ci:test-unit)
+task check  # Everything CI runs (dagger check)
 ```
+
+Quality gates run through this repo's own Dagger toolchains (see
+`toolchains/CLAUDE.md`); the `dagger` CLI must be on PATH and match the
+`engineVersion` pinned in `dagger.json`.
 
 ## Architecture
 
