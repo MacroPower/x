@@ -146,7 +146,12 @@ func (a *Annotator) applyPair(
 	case "description":
 		schema.Description = val
 	case "default":
-		schema.Default = magicschema.ParseYAMLValue(val)
+		// An empty value carries no default (explicit null is written as
+		// "default:null"); setting it would emit a spurious null default.
+		if val != "" {
+			schema.Default = magicschema.ParseYAMLValue(val)
+		}
+
 	case "enum":
 		schema.Enum = parseAnyList(val)
 	case "const":

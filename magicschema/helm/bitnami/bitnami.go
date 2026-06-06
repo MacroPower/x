@@ -153,7 +153,12 @@ func parseModifiers(param *bitnamiParam, modifiers string) {
 		case strings.HasPrefix(part, "default:"):
 			val := strings.TrimPrefix(part, "default:")
 			val = strings.TrimSpace(val)
-			param.defaultVal = &val
+
+			// An empty "[default:]" carries no value; setting it would
+			// emit a spurious "default": null.
+			if val != "" {
+				param.defaultVal = &val
+			}
 		}
 
 		// Unknown modifiers silently ignored (best-effort).

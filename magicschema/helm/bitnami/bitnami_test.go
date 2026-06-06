@@ -800,9 +800,9 @@ func TestBitnamiAnnotator(t *testing.T) {
 
 				assert.Equal(t, "string", v["type"])
 				assert.Equal(t, "Empty default", v["description"])
-				// Empty default should be null (YAML unmarshals empty string
-				// to nil).
-				assert.Nil(t, v["default"])
+				// An empty default carries no value, so the key must be
+				// absent entirely rather than emitted as "default": null.
+				assert.NotContains(t, v, "default")
 			},
 		},
 		"param with nested path no modifiers": {

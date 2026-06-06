@@ -1044,6 +1044,27 @@ func TestHelmValuesSchemaAnnotatorConstAndDefault(t *testing.T) {
 				assert.Nil(t, v["default"])
 			},
 		},
+		"default with empty value sets no default": {
+			// Explicit null is written as "default:null"; a bare
+			// "default:" carries no value and must not emit
+			// "default": null.
+			input: stringtest.Input(`
+				# @schema type:string;default:
+				val: actual
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				v, ok := props["val"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "string", v["type"])
+				assert.NotContains(t, v, "default")
+			},
+		},
 		"default boolean value": {
 			input: stringtest.Input(`
 				# @schema type:boolean;default:true
