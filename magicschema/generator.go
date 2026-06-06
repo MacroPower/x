@@ -368,7 +368,7 @@ func (g *Generator) handleProperty(
 	schema *jsonschema.Schema,
 	addToOrder func(string),
 ) {
-	keyName := mvn.Key.String()
+	keyName := keyText(mvn.Key)
 
 	childPath := keyName
 	if keyPath != "" {
@@ -396,6 +396,16 @@ func (g *Generator) handleProperty(
 	if annotation != nil && annotation.HasRequired != nil && *annotation.HasRequired {
 		schema.Required = append(schema.Required, keyName)
 	}
+}
+
+// keyText returns the plain text of a mapping key, unwrapping quoted string
+// keys so property names and key paths carry no quote characters.
+func keyText(key ast.MapKeyNode) string {
+	if s, ok := key.(*ast.StringNode); ok {
+		return s.Value
+	}
+
+	return key.String()
 }
 
 // buildChildSchema creates a schema for a child property, combining annotations
