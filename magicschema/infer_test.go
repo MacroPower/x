@@ -57,6 +57,13 @@ func TestIsAnnotationComment(t *testing.T) {
 			input: "--",
 			want:  true,
 		},
+		"helm-docs double dash without space": {
+			// The norwoodj annotator accepts "# --" with no following
+			// space, so the stripped form must be treated as a marker
+			// too; otherwise "--text" leaks into descriptions.
+			input: "--text",
+			want:  true,
+		},
 		"@ignore helm-docs": {
 			input: "@ignore",
 			want:  true,

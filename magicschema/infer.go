@@ -201,8 +201,7 @@ func IsAnnotationComment(s string) bool {
 		strings.HasPrefix(s, "@ignore") ||
 		strings.HasPrefix(s, "@notationType") ||
 		strings.HasPrefix(s, "@default") ||
-		strings.HasPrefix(s, "-- ") ||
-		s == "--" ||
+		strings.HasPrefix(s, "--") ||
 		isHelmDocsOldStyleComment(s)
 }
 
