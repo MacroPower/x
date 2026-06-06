@@ -18,6 +18,17 @@ import (
 func TestValidateLargeNumberGuarded(t *testing.T) {
 	t.Parallel()
 
+	// The guarded path runs in tens of milliseconds, but coverage
+	// instrumentation counts every statement in the digit-by-digit scans of
+	// these multi-megabyte literals and inflates that to ~20s. The timing
+	// bound exists to catch a regression that drops into an unguarded
+	// big.Rat parse (~25s uninstrumented, far worse instrumented), so relax
+	// it under coverage while keeping it tight for ordinary runs.
+	bound := 5 * time.Second
+	if testing.CoverMode() != "" {
+		bound = 60 * time.Second
+	}
+
 	big := strings.Repeat("9", 5_000_000)
 
 	cases := map[string]struct {
@@ -80,9 +91,8 @@ func TestValidateLargeNumberGuarded(t *testing.T) {
 
 			start := time.Now()
 			err = v.ValidateJSON([]byte(c.instance))
-			// A generous bound: the guarded path runs in tens of milliseconds,
-			// whereas an unguarded big.Rat parse of this input takes ~25 seconds.
-			assert.Less(t, time.Since(start), 5*time.Second)
+
+			assert.Less(t, time.Since(start), bound)
 
 			if c.valid {
 				assert.NoError(t, err)
