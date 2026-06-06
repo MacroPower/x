@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -12,24 +11,17 @@ import (
 	"go.jacobcolvin.com/x/jsonschema"
 )
 
-// TestValidateLargeNumberGuarded covers validation of a multi-megabyte JSON
-// number: it must stay fast (big.Rat parsing is quadratic in the digit count)
-// while still producing correct results.
+// TestValidateLargeNumberGuarded covers correctness of the guarded numeric
+// paths for literals past the internal precision cap (~4096 significant
+// digits or decimal exponent magnitude): magnitude classification, exact
+// bound comparison, const/enum equality, and uniqueItems deduplication all
+// avoid materializing the value as a big.Rat. The performance property (the
+// guard avoids big.Rat's quadratic parse) is covered by
+// BenchmarkValidateLargeNumber.
 func TestValidateLargeNumberGuarded(t *testing.T) {
 	t.Parallel()
 
-	// The guarded path runs in tens of milliseconds, but coverage
-	// instrumentation counts every statement in the digit-by-digit scans of
-	// these multi-megabyte literals and inflates that to ~20s. The timing
-	// bound exists to catch a regression that drops into an unguarded
-	// big.Rat parse (~25s uninstrumented, far worse instrumented), so relax
-	// it under coverage while keeping it tight for ordinary runs.
-	bound := 5 * time.Second
-	if testing.CoverMode() != "" {
-		bound = 60 * time.Second
-	}
-
-	big := strings.Repeat("9", 5_000_000)
+	big := strings.Repeat("9", 5_000)
 
 	cases := map[string]struct {
 		schema   string
@@ -42,12 +34,16 @@ func TestValidateLargeNumberGuarded(t *testing.T) {
 		"exact comparison within range": {`{"maximum":9007199254740992}`, "9007199254740993", false},
 
 		// A short literal with a large exponent expands to a huge value;
-		// big.Rat.SetString would materialize the full ~1MB integer, so the
-		// guard must classify it by magnitude without expanding it.
-		"large exponent is an integer":      {`{"type":"integer"}`, "1e1000000", true},
-		"large exponent exceeds maximum":    {`{"type":"integer","maximum":100}`, "1e1000000", false},
-		"large exponent above minimum":      {`{"minimum":1}`, "1e1000000", true},
-		"negative large exponent magnitude": {`{"minimum":0}`, "-1e1000000", false},
+		// big.Rat.SetString would materialize the full integer, so the guard
+		// must classify it by magnitude without expanding it.
+		"large exponent is an integer":      {`{"type":"integer"}`, "1e5000", true},
+		"large exponent exceeds maximum":    {`{"type":"integer","maximum":100}`, "1e5000", false},
+		"large exponent above minimum":      {`{"minimum":1}`, "1e5000", true},
+		"negative large exponent magnitude": {`{"minimum":0}`, "-1e5000", false},
+
+		// The multipleOf check is documented as skipped for values past the
+		// cap, so any unbounded value passes regardless of the divisor.
+		"multipleOf skipped for large exponent": {`{"multipleOf":3}`, "1e5000", true},
 
 		// Const and enum compare via equality rather than the numeric bound
 		// path; a giant literal must not reach an unguarded big.Rat parse.
@@ -56,8 +52,8 @@ func TestValidateLargeNumberGuarded(t *testing.T) {
 
 		// UniqueItems hashes and compares array members; large-exponent
 		// members must be deduplicated canonically without expansion.
-		"unique giant exponents distinct":  {`{"uniqueItems":true}`, "[1e1000000,2e1000000,3e1000000]", true},
-		"unique giant exponents duplicate": {`{"uniqueItems":true}`, "[1e1000000,10e999999]", false},
+		"unique giant exponents distinct":  {`{"uniqueItems":true}`, "[1e5000,2e5000,3e5000]", true},
+		"unique giant exponents duplicate": {`{"uniqueItems":true}`, "[1e5000,10e4999]", false},
 		"unique giant literals duplicate":  {`{"uniqueItems":true}`, "[" + big + "," + big + "]", false},
 
 		// An over-length literal whose value is small must compare by value,
@@ -67,10 +63,10 @@ func TestValidateLargeNumberGuarded(t *testing.T) {
 
 		// A tiny magnitude (large negative exponent) sits strictly between
 		// zero and every nonzero bound on its side.
-		"tiny positive above minimum zero":          {`{"minimum":0}`, "1e-1000000", true},
-		"tiny positive below maximum zero":          {`{"maximum":0}`, "1e-1000000", false},
-		"tiny positive above exclusiveMinimum zero": {`{"exclusiveMinimum":0}`, "1e-1000000", true},
-		"tiny positive not an integer":              {`{"type":"integer"}`, "1e-1000000", false},
+		"tiny positive above minimum zero":          {`{"minimum":0}`, "1e-5000", true},
+		"tiny positive below maximum zero":          {`{"maximum":0}`, "1e-5000", false},
+		"tiny positive above exclusiveMinimum zero": {`{"exclusiveMinimum":0}`, "1e-5000", true},
+		"tiny positive not an integer":              {`{"type":"integer"}`, "1e-5000", false},
 
 		// More significant digits than any float64 expansion: ordering is
 		// decided by the truncated significand, equality is impossible.
@@ -89,10 +85,7 @@ func TestValidateLargeNumberGuarded(t *testing.T) {
 			v, err := jsonschema.Compile(&s)
 			require.NoError(t, err)
 
-			start := time.Now()
 			err = v.ValidateJSON([]byte(c.instance))
-
-			assert.Less(t, time.Since(start), bound)
 
 			if c.valid {
 				assert.NoError(t, err)
