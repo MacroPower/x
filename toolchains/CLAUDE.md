@@ -7,7 +7,9 @@ referenced remotely as `github.com/MacroPower/x/toolchains/<module>@<ref>`.
 ## Modules
 
 - **`go`** — Go CI toolchain: `build`/`binary`, `test`/`test-unit`/
-  `test-integration`/`test-coverage`, `lint` (golangci-lint), `lint-deadcode`
+  `test-integration`/`test-coverage`, `lint` (golangci-lint, installed onto
+  the Go base from the GitHub release binary to avoid a Docker Hub pull and
+  reuse the Go caches), `lint-deadcode`
   (advisory `golang.org/x/tools` deadcode analysis, not a `+check`),
   `format-go` (not `+generate`; consumers compose it into their own `*-ci`
   Format alongside prettier), `generate`, `tidy`/`check-tidy`, multi-module
@@ -39,8 +41,12 @@ referenced remotely as `github.com/MacroPower/x/toolchains/<module>@<ref>`.
   mounted, optionally against a message file (e.g. `.git/COMMIT_EDITMSG` from
   a commit-msg hook). It is a Callable, not a `+check` — `source` and
   `args`/`msg-file` are per-invocation inputs, so consumers wire it into git
-  hooks (e.g. lefthook) rather than `dagger check`. `image` is an optional
-  override. This repo dogfoods it: the `.lefthook.yaml` commit-msg hook runs
+  hooks (e.g. lefthook) rather than `dagger check`. The default container is
+  built in-module: the node image (ECR Public) with `@commitlint/cli` and
+  `@commitlint/config-conventional` npm-installed at a pinned version
+  (commitlint publishes its image only to Docker Hub). `image` overrides it
+  with a prebuilt image that has commitlint on its entrypoint. This repo
+  dogfoods it: the `.lefthook.yaml` commit-msg hook runs
   `dagger call commitlint lint` against `.commitlintrc.yaml`.
 - **`goreleaser`** — Reusable GoReleaser primitives (Tier A): `goreleaser-base`
   (a Go base + the goreleaser binary), `binary`/`with-goreleaser` (install the
@@ -92,9 +98,15 @@ referenced remotely as `github.com/MacroPower/x/toolchains/<module>@<ref>`.
   on the lockfile so the package-realisation layer caches), `with-source` (the
   installed environment with full source overlaid, for chaining or benchmark
   wrapping), and `run` (executes an arbitrary command via `devbox run --`,
-  returning stdout). The `/nix` cache volume is seeded from the image's own
-  store so the bootstrap Nix install keeps working and realised packages persist
-  across runs. `image`/`cache-namespace` are optional overrides. Like the other
+  returning stdout). The default image is built in-module on the debian base
+  (ECR Public) with a pinned single-user Nix install owned by the `devbox`
+  user and the pinned devbox release binary, mirroring jetify's upstream
+  Dockerfile (jetify publishes the image only to Docker Hub); `image`
+  overrides it with a prebuilt equivalent. The `/nix` cache volume is seeded
+  from the image's own store so the bootstrap Nix install keeps working and
+  realised packages persist across runs, keyed on the devbox+nix versions (or
+  the override image ref) so version bumps rotate it.
+  `image`/`cache-namespace` are optional overrides. Like the other
   tool wrappers it has no `+check` — the commands are project-defined.
 
 Each module is self-contained: its own `go.mod`/`go.sum` and no relative

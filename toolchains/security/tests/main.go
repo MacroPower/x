@@ -56,7 +56,7 @@ func (t *Tests) ScanSourceClean(ctx context.Context) error {
 // ScanImageGate verifies the gating image scan fails (returns an error) on a
 // known end-of-life image, proving --exit-code=1 is honored.
 func (t *Tests) ScanImageGate(ctx context.Context) error {
-	target := dag.Container().From("alpine:3.10")
+	target := dag.Container().From("public.ecr.aws/docker/library/alpine:3.10")
 	if err := t.subject().ScanImage(ctx, target); err == nil {
 		return fmt.Errorf("expected ScanImage gate to fail on a vulnerable image")
 	}
@@ -76,7 +76,7 @@ func (t *Tests) ScanSourceSarif(ctx context.Context) error {
 // ScanImageSarif verifies the SARIF image scan produces structurally valid
 // Trivy output without failing on findings (it omits --exit-code=1).
 func (t *Tests) ScanImageSarif(ctx context.Context) error {
-	target := dag.Container().From("alpine:3.10")
+	target := dag.Container().From("public.ecr.aws/docker/library/alpine:3.10")
 	contents, err := t.subject().ScanImageSarif(target).Contents(ctx)
 	if err != nil {
 		return err

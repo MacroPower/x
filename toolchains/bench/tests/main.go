@@ -36,7 +36,9 @@ func (t *Tests) All(ctx context.Context) error {
 	return nil
 }
 
-func base() *dagger.Container { return dag.Container().From("alpine:3.20") }
+func base() *dagger.Container {
+	return dag.Container().From("public.ecr.aws/docker/library/alpine:3.20")
+}
 
 // bust forces re-execution so timings reflect real work, not cache hits.
 func bust(ctr *dagger.Container) *dagger.Container {

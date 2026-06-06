@@ -18,7 +18,7 @@ import (
 
 const (
 	defaultGoVersion    = "1.26"    // renovate: datasource=golang-version depName=go
-	golangciLintVersion = "v2.12"   // renovate: datasource=github-releases depName=golangci/golangci-lint
+	golangciLintVersion = "v2.12.2" // renovate: datasource=github-releases depName=golangci/golangci-lint
 	deadcodeVersion     = "v0.45.0" // renovate: datasource=go depName=golang.org/x/tools
 
 	// defaultGoImage is the Docker Official golang image, pulled from
@@ -43,7 +43,9 @@ const (
 type Go struct {
 	// Go version used for base images.
 	Version string
-	// LintVersion is the golangci-lint version used for the lint base image.
+	// LintVersion is the golangci-lint release installed onto the lint base.
+	// It is a full version (e.g. v2.12.2) so the GitHub release tarball URL
+	// resolves.
 	LintVersion string
 	// Project source directory.
 	Source *dagger.Directory
@@ -98,8 +100,9 @@ func New(
 	// this module.
 	// +optional
 	version string,
-	// golangci-lint version for the lint base image. Defaults to the
-	// version pinned in this module.
+	// golangci-lint version installed onto the lint base. Must be a full
+	// release version (e.g. v2.12.2). Defaults to the version pinned in
+	// this module.
 	// +optional
 	lintVersion string,
 	// Cache volume for Go module downloads (GOMODCACHE). Defaults to
@@ -118,10 +121,8 @@ func New(
 	// container. Installed via apt-get before the Go module cache layer
 	// so subsequent operations see them on PATH. Ignored when a custom
 	// base is provided; in that case the caller owns the container.
-	// Applies to the build/test base only. The lint base (see
-	// golangci-lint container) uses a separate image and does not
-	// consume this parameter. The name leaks the apt-get install path:
-	// an Alpine custom base would silently ignore this parameter.
+	// The name leaks the apt-get install path: an Alpine custom base
+	// would silently ignore this parameter.
 	// +optional
 	aptPackages []string,
 	// Arguments passed to go build -ldflags.
@@ -173,11 +174,7 @@ func New(
 			cmd := "apt-get update && apt-get install -y --no-install-recommends " + strings.Join(aptPackages, " ")
 			base = base.WithExec([]string{"sh", "-c", cmd})
 		}
-		base = base.
-			WithMountedCache("/go/pkg/mod", moduleCache).
-			WithEnvVariable("GOMODCACHE", "/go/pkg/mod").
-			WithMountedCache("/go/build-cache", buildCache).
-			WithEnvVariable("GOCACHE", "/go/build-cache").
+		base = withGoCaches(base, moduleCache, buildCache).
 			WithDirectory("/src", goMod).
 			WithWorkdir("/src").
 			WithExec([]string{"go", "mod", "download"})
@@ -633,11 +630,14 @@ func (m *Go) Tidy(
 // Base containers
 // ---------------------------------------------------------------------------
 
-// LintBase returns a golangci-lint container with source and caches mounted,
-// ready to run `golangci-lint run`. The Debian-based image is used (not Alpine)
-// because it includes kernel headers needed by CGO transitive dependencies. The
-// golangci-lint cache volume includes the linter version so that version bumps
-// start fresh.
+// LintBase returns the Go base with the golangci-lint binary installed and
+// source and caches mounted, ready to run `golangci-lint run`. The binary is
+// downloaded from the GitHub release for the container's architecture, which
+// avoids a Docker Hub pull and shares this toolchain's Go module and build
+// caches. The install step assumes a Debian-derived base (dpkg and wget
+// present), which holds for the default golang image; Alpine custom bases are
+// not supported here. The golangci-lint cache volume includes the linter
+// version so that version bumps start fresh.
 //
 // It is exposed so consumers can build a lint stage (e.g. for benchmarks) on
 // the same base and cache this toolchain uses, instead of reconstructing it.
@@ -649,12 +649,7 @@ func (m *Go) LintBase(
 	// +optional
 	mod string,
 ) *dagger.Container {
-	ctr := dag.Container().
-		From("golangci/golangci-lint:"+m.LintVersion).
-		WithMountedCache("/go/pkg/mod", m.ModuleCache).
-		WithEnvVariable("GOMODCACHE", "/go/pkg/mod").
-		WithMountedCache("/go/build-cache", m.BuildCache).
-		WithEnvVariable("GOCACHE", "/go/build-cache").
+	ctr := withGoCaches(m.withGolangciLint(m.Base), m.ModuleCache, m.BuildCache).
 		WithMountedDirectory("/src", m.Source).
 		WithWorkdir("/src").
 		WithMountedCache("/root/.cache/golangci-lint", dag.CacheVolume(m.CacheNamespace+":golangci-lint-"+m.LintVersion))
@@ -664,6 +659,36 @@ func (m *Go) LintBase(
 	}
 
 	return ctr
+}
+
+// withGoCaches mounts the toolchain's Go module and build cache volumes and
+// points GOMODCACHE/GOCACHE at them. It is applied to the default base in
+// [New] and again in [Go.LintBase], where a consumer-supplied base may not
+// have the mounts; remounting the same volumes is idempotent.
+func withGoCaches(ctr *dagger.Container, moduleCache, buildCache *dagger.CacheVolume) *dagger.Container {
+	return ctr.
+		WithMountedCache("/go/pkg/mod", moduleCache).
+		WithEnvVariable("GOMODCACHE", "/go/pkg/mod").
+		WithMountedCache("/go/build-cache", buildCache).
+		WithEnvVariable("GOCACHE", "/go/build-cache")
+}
+
+// withGolangciLint installs the golangci-lint binary at
+// /usr/local/bin/golangci-lint, downloaded from the GitHub release tarball
+// for the container's architecture (golangci-lint publishes images only to
+// Docker Hub, so the release binary is the rate-limit-free source). The
+// tarball unpacks to a directory named after the asset stem, which contains
+// the binary.
+func (m *Go) withGolangciLint(ctr *dagger.Container) *dagger.Container {
+	script := fmt.Sprintf(
+		`arch="$(dpkg --print-architecture)"`+
+			` && stem="golangci-lint-%[1]s-linux-${arch}"`+
+			` && wget -qO /tmp/golangci-lint.tar.gz "https://github.com/golangci/golangci-lint/releases/download/v%[1]s/${stem}.tar.gz"`+
+			` && tar -xzf /tmp/golangci-lint.tar.gz -C /usr/local/bin --strip-components=1 "${stem}/golangci-lint"`+
+			` && rm /tmp/golangci-lint.tar.gz`,
+		strings.TrimPrefix(m.LintVersion, "v"),
+	)
+	return ctr.WithExec([]string{"sh", "-c", script})
 }
 
 // isNestedModule reports whether mod names a module subdirectory other

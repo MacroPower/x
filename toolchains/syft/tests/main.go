@@ -47,7 +47,7 @@ func (t *Tests) SbomDetectsPackage(ctx context.Context) error {
 // WithSyftInstalls verifies the installed binary is runnable in another image.
 func (t *Tests) WithSyftInstalls(ctx context.Context) error {
 	_, err := dag.Syft().
-		WithSyft(dag.Container().From("debian:13-slim")).
+		WithSyft(dag.Container().From("public.ecr.aws/docker/library/debian:13-slim")).
 		WithExec([]string{"syft", "version"}).
 		Sync(ctx)
 	return err
