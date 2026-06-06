@@ -122,8 +122,11 @@
 //	any type   same type           same type
 //
 // The key insight: incompatible types result in removing the type constraint
-// entirely, which is the most permissive (fail-open) behavior. Null or empty
-// values in one file do not constrain the merged type from another file.
+// entirely, which is the most permissive (fail-open) behavior. Type-specific
+// keywords (properties, items, bounds, pattern) are dropped along with the
+// type constraint, since they would otherwise still constrain instances of
+// the now-unconstrained union. Null or empty values in one file do not
+// constrain the merged type from another file.
 //
 // Object properties are unioned across files. Array items schemas are merged
 // recursively. The required array is intersected so that a property is only

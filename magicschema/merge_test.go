@@ -142,6 +142,47 @@ func TestMergeMultipleInputs(t *testing.T) {
 				// "no type constraint".
 			},
 		},
+		"incompatible widen drops object constraints": {
+			// When object + string widens away the type, the object-specific
+			// keywords must drop too: a schema with properties but no type
+			// still constrains object instances, failing closed.
+			inputA: "val:\n  key: x\n",
+			inputB: "val: hello\n",
+			check: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				val, isMap := props["val"].(map[string]any)
+				if !isMap {
+					return // true schema satisfies "no constraint"
+				}
+
+				assert.Nil(t, val["type"])
+				assert.Nil(t, val["properties"])
+				assert.Nil(t, val["additionalProperties"])
+				assert.Nil(t, val["required"])
+			},
+		},
+		"incompatible widen drops array items": {
+			inputA: "val:\n  - a\n",
+			inputB: "val: hello\n",
+			check: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				val, isMap := props["val"].(map[string]any)
+				if !isMap {
+					return // true schema satisfies "no constraint"
+				}
+
+				assert.Nil(t, val["type"])
+				assert.Nil(t, val["items"])
+			},
+		},
 		"required intersection": {
 			inputA: "# @schema\n# required: true\n# @schema\nname: test\nval: a\n",
 			inputB: "name: other\nval: b\n",
@@ -196,8 +237,15 @@ func TestMergeMultipleInputs(t *testing.T) {
 				props, ok := got["properties"].(map[string]any)
 				require.True(t, ok)
 
-				config, ok := props["config"].(map[string]any)
-				require.True(t, ok)
+				config, isMap := props["config"].(map[string]any)
+				if !isMap {
+					// Dropping the type drops the object-specific keywords
+					// with it, so the fully unconstrained merge marshals as
+					// the true schema, which also fails open.
+					assert.Equal(t, true, props["config"])
+
+					return
+				}
 
 				// Type should be widened away (incompatible: string + object).
 				assert.Nil(t, config["type"], "incompatible types should widen to no type constraint")
@@ -484,6 +532,25 @@ func TestMergeAnnotatedConstraints(t *testing.T) {
 				require.True(t, ok)
 
 				assert.InEpsilon(t, float64(1), port["minimum"], 0.0001)
+			},
+		},
+		"type-specific bounds drop when types are incompatible": {
+			inputA: "# @schema minimum:1\nport: 8080\n",
+			inputB: "# @schema minimum:2\nport: hello\n",
+			opts:   []magicschema.Option{magicschema.WithAnnotators(losisin.New())},
+			check: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				port, isMap := props["port"].(map[string]any)
+				if !isMap {
+					return // true schema satisfies "no constraint"
+				}
+
+				assert.Nil(t, port["type"])
+				assert.Nil(t, port["minimum"])
 			},
 		},
 		"false additionalProperties yields to constrained schema": {

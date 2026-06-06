@@ -15,8 +15,12 @@ import (
 // permits everything, so keeping a one-sided constraint would fail closed.
 // Bounds widen toward the permissive end, enums union, and exact-value
 // constraints (pattern, format, const, multipleOf) are kept only when both
-// sides agree. Combinators and references ($ref, allOf/anyOf/oneOf, not,
-// if/then/else) are dropped entirely, which is the most permissive behavior.
+// sides agree. When the two types are incompatible the type constraint is
+// dropped entirely, and every type-specific keyword (properties, items,
+// bounds, pattern) drops with it -- a schema with no type but residual
+// object or array constraints would still fail closed for those instances.
+// Combinators and references ($ref, allOf/anyOf/oneOf, not, if/then/else)
+// are dropped entirely, which is the most permissive behavior.
 func mergeSchemas(a, b *jsonschema.Schema) *jsonschema.Schema {
 	if a == nil {
 		return b
@@ -29,7 +33,10 @@ func mergeSchemas(a, b *jsonschema.Schema) *jsonschema.Schema {
 	result := &jsonschema.Schema{}
 
 	// Merge types with widening.
-	switch merged := widenTypeList(typeList(a), typeList(b)); len(merged) {
+	typesA, typesB := typeList(a), typeList(b)
+	merged := widenTypeList(typesA, typesB)
+
+	switch len(merged) {
 	case 0:
 	case 1:
 		result.Type = merged[0]
@@ -59,13 +66,27 @@ func mergeSchemas(a, b *jsonschema.Schema) *jsonschema.Schema {
 	result.ReadOnly = a.ReadOnly && b.ReadOnly
 	result.WriteOnly = a.WriteOnly && b.WriteOnly
 
-	// Validation constraints: union, widen, or keep-when-equal.
+	// Enum and const constrain value sets independent of type, so they
+	// union even across a type conflict.
 	result.Enum = unionEnums(a.Enum, b.Enum)
 
 	if a.Const != nil && b.Const != nil && reflect.DeepEqual(*a.Const, *b.Const) {
 		result.Const = a.Const
 	}
 
+	// Merge x-* custom annotations per key, a wins.
+	result.Extra = mergeExtra(a.Extra, b.Extra)
+
+	// When both sides constrain the type but the union is incompatible,
+	// the type constraint is dropped entirely (fail open). Type-specific
+	// validation keywords drop with it: keeping properties, items, or
+	// bounds would still constrain instances of the now-unconstrained
+	// union, failing closed.
+	if len(merged) == 0 && len(typesA) > 0 && len(typesB) > 0 {
+		return result
+	}
+
+	// Validation constraints: union, widen, or keep-when-equal.
 	if a.Pattern == b.Pattern {
 		result.Pattern = a.Pattern
 	}
@@ -107,9 +128,6 @@ func mergeSchemas(a, b *jsonschema.Schema) *jsonschema.Schema {
 	default:
 		result.Items = b.Items
 	}
-
-	// Merge x-* custom annotations per key, a wins.
-	result.Extra = mergeExtra(a.Extra, b.Extra)
 
 	return result
 }
