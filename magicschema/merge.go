@@ -1,11 +1,22 @@
 package magicschema
 
 import (
+	"maps"
+	"reflect"
+	"slices"
+
 	"github.com/google/jsonschema-go/jsonschema"
 )
 
-// mergeSchemas merges two schemas using union semantics.
-// Properties from both schemas are included. Conflicting types are widened.
+// mergeSchemas merges two schemas using union semantics: the result accepts
+// everything either input accepts. Properties from both schemas are included
+// and conflicting types are widened. Validation constraints survive the merge
+// only when both sides constrain -- a side without a constraint already
+// permits everything, so keeping a one-sided constraint would fail closed.
+// Bounds widen toward the permissive end, enums union, and exact-value
+// constraints (pattern, format, const, multipleOf) are kept only when both
+// sides agree. Combinators and references ($ref, allOf/anyOf/oneOf, not,
+// if/then/else) are dropped entirely, which is the most permissive behavior.
 func mergeSchemas(a, b *jsonschema.Schema) *jsonschema.Schema {
 	if a == nil {
 		return b
@@ -36,6 +47,46 @@ func mergeSchemas(a, b *jsonschema.Schema) *jsonschema.Schema {
 		result.Default = b.Default
 	}
 
+	if a.Examples != nil {
+		result.Examples = a.Examples
+	} else {
+		result.Examples = b.Examples
+	}
+
+	// Deprecated is informational and sticky; readOnly/writeOnly restrict
+	// usage, so they hold only when both sides agree.
+	result.Deprecated = a.Deprecated || b.Deprecated
+	result.ReadOnly = a.ReadOnly && b.ReadOnly
+	result.WriteOnly = a.WriteOnly && b.WriteOnly
+
+	// Validation constraints: union, widen, or keep-when-equal.
+	result.Enum = unionEnums(a.Enum, b.Enum)
+
+	if a.Const != nil && b.Const != nil && reflect.DeepEqual(*a.Const, *b.Const) {
+		result.Const = a.Const
+	}
+
+	if a.Pattern == b.Pattern {
+		result.Pattern = a.Pattern
+	}
+
+	if a.Format == b.Format {
+		result.Format = a.Format
+	}
+
+	result.MultipleOf = equalFloat64Ptr(a.MultipleOf, b.MultipleOf)
+	result.Minimum = minFloat64Ptr(a.Minimum, b.Minimum)
+	result.Maximum = maxFloat64Ptr(a.Maximum, b.Maximum)
+	result.ExclusiveMinimum = minFloat64Ptr(a.ExclusiveMinimum, b.ExclusiveMinimum)
+	result.ExclusiveMaximum = maxFloat64Ptr(a.ExclusiveMaximum, b.ExclusiveMaximum)
+	result.MinLength = minIntPtr(a.MinLength, b.MinLength)
+	result.MaxLength = maxIntPtr(a.MaxLength, b.MaxLength)
+	result.MinItems = minIntPtr(a.MinItems, b.MinItems)
+	result.MaxItems = maxIntPtr(a.MaxItems, b.MaxItems)
+	result.MinProperties = minIntPtr(a.MinProperties, b.MinProperties)
+	result.MaxProperties = maxIntPtr(a.MaxProperties, b.MaxProperties)
+	result.UniqueItems = a.UniqueItems && b.UniqueItems
+
 	// Merge object properties (union).
 	if a.Properties != nil || b.Properties != nil {
 		mergeProperties(result, a, b)
@@ -57,26 +108,116 @@ func mergeSchemas(a, b *jsonschema.Schema) *jsonschema.Schema {
 		result.Items = b.Items
 	}
 
+	// Merge x-* custom annotations per key, a wins.
+	result.Extra = mergeExtra(a.Extra, b.Extra)
+
 	return result
 }
 
-// schemaType returns the effective type string from a schema.
-func schemaType(s *jsonschema.Schema) string {
-	if s.Type != "" {
-		return s.Type
+// unionEnums merges enum constraints. The value set is kept only when both
+// sides constrain: an unconstrained side already allows everything, so the
+// union has no enum at all.
+func unionEnums(a, b []any) []any {
+	if a == nil || b == nil {
+		return nil
 	}
 
-	if len(s.Types) == 1 {
-		return s.Types[0]
+	out := slices.Clone(a)
+
+	for _, v := range b {
+		if !slices.ContainsFunc(out, func(x any) bool { return reflect.DeepEqual(x, v) }) {
+			out = append(out, v)
+		}
 	}
 
-	return ""
+	return out
+}
+
+// mergeExtra merges two x-* annotation maps per key, with a winning conflicts.
+func mergeExtra(a, b map[string]any) map[string]any {
+	if a == nil && b == nil {
+		return nil
+	}
+
+	out := make(map[string]any, len(a)+len(b))
+	maps.Copy(out, b)
+	maps.Copy(out, a)
+
+	return out
+}
+
+// minFloat64Ptr returns the smaller of two bounds, or nil if either side is
+// unconstrained.
+func minFloat64Ptr(a, b *float64) *float64 {
+	if a == nil || b == nil {
+		return nil
+	}
+
+	if *b < *a {
+		return b
+	}
+
+	return a
+}
+
+// maxFloat64Ptr returns the larger of two bounds, or nil if either side is
+// unconstrained.
+func maxFloat64Ptr(a, b *float64) *float64 {
+	if a == nil || b == nil {
+		return nil
+	}
+
+	if *b > *a {
+		return b
+	}
+
+	return a
+}
+
+// equalFloat64Ptr returns the shared value when both sides agree, nil
+// otherwise.
+func equalFloat64Ptr(a, b *float64) *float64 {
+	if a == nil || b == nil || *a != *b {
+		return nil
+	}
+
+	return a
+}
+
+// minIntPtr returns the smaller of two bounds, or nil if either side is
+// unconstrained.
+func minIntPtr(a, b *int) *int {
+	if a == nil || b == nil {
+		return nil
+	}
+
+	if *b < *a {
+		return b
+	}
+
+	return a
+}
+
+// maxIntPtr returns the larger of two bounds, or nil if either side is
+// unconstrained.
+func maxIntPtr(a, b *int) *int {
+	if a == nil || b == nil {
+		return nil
+	}
+
+	if *b > *a {
+		return b
+	}
+
+	return a
 }
 
 // mergeAdditionalProperties merges two additionalProperties values.
 // Uses fail-open semantics: if either side allows additional properties,
 // the result allows them. In JSON Schema, nil (unset) means no constraint,
-// which is equivalent to allowing everything.
+// which is equivalent to allowing everything. A false schema yields to the
+// other side (the union of "nothing extra" and a constraint is the
+// constraint), and two constrained schemas merge recursively.
 func mergeAdditionalProperties(a, b *jsonschema.Schema) *jsonschema.Schema {
 	if a == nil && b == nil {
 		return nil
