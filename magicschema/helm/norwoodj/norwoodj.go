@@ -61,14 +61,7 @@ var (
 type Annotator struct {
 	// OldStyleDescs maps key paths to descriptions found via old-style
 	// "# key.path -- description" format during ForContent.
-	oldStyleDescs map[string]*helmDocsEntry
-}
-
-type helmDocsEntry struct {
-	defaultVal  *string
-	description string
-	typeName    string
-	skip        bool
+	oldStyleDescs map[string]*parsedComment
 }
 
 // New creates a new helm-docs annotator.
@@ -85,7 +78,7 @@ func (a *Annotator) Name() string {
 // "# key.path -- description" entries parsed from the given file content.
 func (a *Annotator) ForContent(content []byte) (magicschema.Annotator, error) {
 	clone := &Annotator{
-		oldStyleDescs: make(map[string]*helmDocsEntry),
+		oldStyleDescs: make(map[string]*parsedComment),
 	}
 
 	allLines := strings.Split(string(content), "\n")
@@ -141,7 +134,8 @@ func (a *Annotator) ForContent(content []byte) (magicschema.Annotator, error) {
 }
 
 // finishOldStyleBlock parses a collected old-style comment block
-// (initial "# key -- desc" plus continuation lines) into a helmDocsEntry.
+// (initial "# key -- desc" plus continuation lines) into an entry keyed by
+// its key path.
 func (a *Annotator) finishOldStyleBlock(commentLines []string) {
 	if len(commentLines) == 0 {
 		return
@@ -152,12 +146,7 @@ func (a *Annotator) finishOldStyleBlock(commentLines []string) {
 		return
 	}
 
-	a.oldStyleDescs[entry.keyPath] = &helmDocsEntry{
-		description: entry.description,
-		typeName:    entry.typeName,
-		defaultVal:  entry.defaultVal,
-		skip:        entry.skip,
-	}
+	a.oldStyleDescs[entry.keyPath] = entry
 }
 
 // parsedComment holds the result of parsing a comment block (old-style or
@@ -406,7 +395,7 @@ func collectComments(mvn *ast.MappingValueNode) string {
 // a comment block. Delegates to parseCommentBlock which handles the "last
 // # -- group" workaround, continuation, @raw, @default, etc.
 // Also extracts standalone @default when no "# --" line is present.
-func (a *Annotator) parseNewStyleComment(commentStr string) *helmDocsEntry {
+func (a *Annotator) parseNewStyleComment(commentStr string) *parsedComment {
 	lines := strings.Split(commentStr, "\n")
 
 	// Check if there's any "# --" line at all.
@@ -426,7 +415,7 @@ func (a *Annotator) parseNewStyleComment(commentStr string) *helmDocsEntry {
 		for _, line := range lines {
 			if dm := defaultValueRegex.FindStringSubmatch(line); len(dm) > 1 {
 				val := dm[1]
-				return &helmDocsEntry{defaultVal: &val}
+				return &parsedComment{defaultVal: &val}
 			}
 		}
 
@@ -447,12 +436,7 @@ func (a *Annotator) parseNewStyleComment(commentStr string) *helmDocsEntry {
 		return nil
 	}
 
-	return &helmDocsEntry{
-		description: pc.description,
-		typeName:    pc.typeName,
-		defaultVal:  pc.defaultVal,
-		skip:        pc.skip,
-	}
+	return pc
 }
 
 // mapHelmDocsType maps a helm-docs type hint to a JSON Schema type.
