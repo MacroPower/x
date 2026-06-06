@@ -487,15 +487,7 @@ func (g *Generator) buildChildSchema(
 
 	// For object types, recurse into children.
 	if (childSchema.Type == typeObject || isObjectType(childSchema)) && childSchema.Properties == nil {
-		if mappingNode, ok := structuralNode.(*ast.MappingNode); ok {
-			structural := g.walkMapping(mappingNode, childPath, anchors)
-			childSchema.Properties = structural.Properties
-			childSchema.PropertyOrder = structural.PropertyOrder
-
-			if childSchema.AdditionalProperties == nil {
-				childSchema.AdditionalProperties = structural.AdditionalProperties
-			}
-		}
+		g.fillObjectFromStructure(childSchema, structuralNode, childPath, anchors, annotation)
 	}
 
 	// For array types, recurse into items.
@@ -526,6 +518,40 @@ func (g *Generator) buildChildSchema(
 	}
 
 	return childSchema
+}
+
+// fillObjectFromStructure copies the structural recursion's object schema
+// (properties, order, required, additionalProperties) onto an annotated
+// object schema whose annotation left those fields unset.
+func (g *Generator) fillObjectFromStructure(
+	childSchema *jsonschema.Schema,
+	structuralNode ast.Node,
+	childPath string,
+	anchors map[string]ast.Node,
+	annotation *AnnotationResult,
+) {
+	mappingNode, ok := structuralNode.(*ast.MappingNode)
+	if !ok {
+		return
+	}
+
+	structural := g.walkMapping(mappingNode, childPath, anchors)
+	childSchema.Properties = structural.Properties
+	childSchema.PropertyOrder = structural.PropertyOrder
+
+	// Child annotations mark their keys required on the structural schema;
+	// carry them onto the annotated schema. Skipped when the property map
+	// is stripped afterwards, since the required keys would reference
+	// properties the annotation deliberately leaves open.
+	if !annotation.SkipProperties && !annotation.MergeProperties {
+		for _, k := range structural.Required {
+			addRequired(childSchema, k)
+		}
+	}
+
+	if childSchema.AdditionalProperties == nil {
+		childSchema.AdditionalProperties = structural.AdditionalProperties
+	}
 }
 
 // walkSequence processes a sequence node into an array schema.

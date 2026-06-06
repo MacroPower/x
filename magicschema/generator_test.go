@@ -1405,6 +1405,40 @@ func TestGeneratorMergeKeyRequired(t *testing.T) {
 	}
 }
 
+func TestGeneratorRequiredUnderAnnotatedParent(t *testing.T) {
+	t.Parallel()
+
+	// A child's required:true accumulates on the structural schema; an
+	// annotation on the parent object (here additionalProperties:false)
+	// must not drop it (traefik's hub.namespaces).
+	input := "# @schema additionalProperties:false\n" +
+		"hub:\n" +
+		"  # @schema required:true\n" +
+		"  namespaces: []\n"
+
+	gen := magicschema.NewGenerator(
+		magicschema.WithAnnotators(losisin.New()),
+	)
+	schema, err := gen.Generate([]byte(input))
+	require.NoError(t, err)
+
+	out, err := json.Marshal(schema)
+	require.NoError(t, err)
+
+	var got map[string]any
+
+	require.NoError(t, json.Unmarshal(out, &got))
+
+	props, ok := got["properties"].(map[string]any)
+	require.True(t, ok)
+
+	hub, ok := props["hub"].(map[string]any)
+	require.True(t, ok)
+
+	assert.Equal(t, false, hub["additionalProperties"])
+	assert.Equal(t, []any{"namespaces"}, hub["required"])
+}
+
 func TestGeneratorAnnotationMarkersExcludedFromDescriptions(t *testing.T) {
 	t.Parallel()
 
