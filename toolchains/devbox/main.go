@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	defaultImage = "jetpackio/devbox:0.13.7" // renovate: datasource=docker depName=jetpackio/devbox
+	defaultImage = "jetpackio/devbox:0.17.2" // renovate: datasource=docker depName=jetpackio/devbox
 
 	defaultCacheNamespace = "go.jacobcolvin.com/x/toolchains/devbox"
 
