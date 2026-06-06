@@ -88,24 +88,31 @@ func WithStrict(strict bool) Option {
 // Generate produces a JSON Schema from one or more YAML inputs.
 // Each input is a byte slice of YAML content.
 func (g *Generator) Generate(inputs ...[]byte) (*jsonschema.Schema, error) {
-	// Work on a shallow copy so the receiver is never mutated.
-	// This keeps Generator safe for concurrent use.
-	local := *g
-
-	var result *jsonschema.Schema
+	var (
+		result *jsonschema.Schema
+		roots  []RootAnnotator
+	)
 
 	if len(inputs) == 0 {
-		result = local.emptySchema()
+		result = TrueSchema()
 	} else {
 		var schemas []*jsonschema.Schema
 
 		for i, input := range inputs {
-			schema, err := local.generateSingle(input)
+			schema, prepared, err := g.generateSingle(input)
 			if err != nil {
 				return nil, fmt.Errorf("input %d: %w", i, err)
 			}
 
 			schemas = append(schemas, schema)
+
+			// Collect prepared root annotators in priority order:
+			// input order first, annotator order within each input.
+			for _, ann := range prepared {
+				if ra, ok := ann.(RootAnnotator); ok {
+					roots = append(roots, ra)
+				}
+			}
 		}
 
 		result = schemas[0]
@@ -119,56 +126,85 @@ func (g *Generator) Generate(inputs ...[]byte) (*jsonschema.Schema, error) {
 	result.Schema = "http://json-schema.org/draft-07/schema#"
 
 	// Apply root schema from annotators (before CLI flag overrides).
-	local.applyRootAnnotations(result)
+	applyRootAnnotations(result, roots)
 
-	if local.title != "" {
-		result.Title = local.title
+	if g.title != "" {
+		result.Title = g.title
 	}
 
-	if local.description != "" {
-		result.Description = local.description
+	if g.description != "" {
+		result.Description = g.description
 	}
 
-	if local.id != "" {
-		result.ID = local.id
-	}
-
-	// Set additionalProperties on the root object.
-	if (result.Type == typeObject || result.Properties != nil) && result.AdditionalProperties == nil {
-		if local.strict {
-			result.AdditionalProperties = FalseSchema()
-		} else {
-			result.AdditionalProperties = TrueSchema()
-		}
+	if g.id != "" {
+		result.ID = g.id
 	}
 
 	return result, nil
 }
 
-// generateSingle processes a single YAML input into a schema.
-func (g *Generator) generateSingle(input []byte) (*jsonschema.Schema, error) {
+// generateSingle processes a single YAML input into a schema. It returns the
+// prepared annotators alongside the schema so Generate can apply root
+// annotations from every input, not just the last one.
+func (g *Generator) generateSingle(input []byte) (*jsonschema.Schema, []Annotator, error) {
 	if len(input) == 0 || isBlank(input) {
-		return g.emptySchema(), nil
+		return TrueSchema(), nil, nil
 	}
 
 	file, err := parser.ParseBytes(input, parser.ParseComments)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInvalidYAML, err)
+		return nil, nil, fmt.Errorf("%w: %w", ErrInvalidYAML, err)
 	}
 
-	if len(file.Docs) == 0 {
-		return g.emptySchema(), nil
+	// Process each document and merge schemas with union semantics.
+	var (
+		schemas     []*jsonschema.Schema
+		allPrepared []Annotator
+	)
+
+	for _, doc := range file.Docs {
+		if doc.Body == nil {
+			continue
+		}
+
+		// Prepare annotators per document so per-document state (e.g.
+		// dadav's root-block tracking) resets at document boundaries.
+		// The walk runs on a per-document copy so the receiver -- and the
+		// prototype annotators it holds -- are never mutated, keeping
+		// Generator safe for concurrent use.
+		prepared := prepareAnnotators(g.annotators, input)
+		allPrepared = append(allPrepared, prepared...)
+
+		docGen := *g
+		docGen.annotators = prepared
+
+		anchors := buildAnchorMap(doc.Body)
+		schemas = append(schemas, docGen.walkNode(doc.Body, "", anchors))
 	}
 
-	// Prepare annotators with the full file content (once per file).
-	prepared := make([]Annotator, 0, len(g.annotators))
+	if len(schemas) == 0 {
+		return TrueSchema(), allPrepared, nil
+	}
 
-	for _, ann := range g.annotators {
-		p, prepErr := ann.ForContent(input)
-		if prepErr != nil {
+	result := schemas[0]
+	for i := 1; i < len(schemas); i++ {
+		result = mergeSchemas(result, schemas[i])
+	}
+
+	return result, allPrepared, nil
+}
+
+// prepareAnnotators calls ForContent on each prototype annotator, dropping
+// (with a warning) any annotator whose preparation fails.
+func prepareAnnotators(annotators []Annotator, content []byte) []Annotator {
+	prepared := make([]Annotator, 0, len(annotators))
+
+	for _, ann := range annotators {
+		p, err := ann.ForContent(content)
+		if err != nil {
 			slog.Warn("annotator prepare",
 				slog.String("annotator", ann.Name()),
-				slog.Any("error", prepErr),
+				slog.Any("error", err),
 			)
 
 			continue
@@ -177,30 +213,7 @@ func (g *Generator) generateSingle(input []byte) (*jsonschema.Schema, error) {
 		prepared = append(prepared, p)
 	}
 
-	g.annotators = prepared
-
-	// Process each document and merge schemas with union semantics.
-	var schemas []*jsonschema.Schema
-
-	for _, doc := range file.Docs {
-		if doc.Body == nil {
-			continue
-		}
-
-		anchors := buildAnchorMap(doc.Body)
-		schemas = append(schemas, g.walkNode(doc.Body, "", anchors))
-	}
-
-	if len(schemas) == 0 {
-		return g.emptySchema(), nil
-	}
-
-	result := schemas[0]
-	for i := 1; i < len(schemas); i++ {
-		result = mergeSchemas(result, schemas[i])
-	}
-
-	return result, nil
+	return prepared
 }
 
 // walkNode recursively generates a schema from a YAML AST node.
@@ -534,17 +547,17 @@ func (g *Generator) annotate(node ast.Node, keyPath string) *AnnotationResult {
 	return mergeAnnotations(results)
 }
 
-// applyRootAnnotations merges root-level schema properties from annotators
-// that implement the RootAnnotator interface. Only a specific subset
-// of fields are propagated: title, description, $ref, examples, deprecated,
-// readOnly, writeOnly, additionalProperties, and x-* custom annotations.
-func (g *Generator) applyRootAnnotations(schema *jsonschema.Schema) {
-	for _, ann := range g.annotators {
-		ra, ok := ann.(RootAnnotator)
-		if !ok {
-			continue
-		}
+// applyRootAnnotations merges root-level schema properties from prepared
+// root annotators, in priority order (first annotator wins per field). Only
+// a specific subset of fields are propagated: title, description, $ref,
+// examples, deprecated, readOnly, writeOnly, additionalProperties, and x-*
+// custom annotations. AdditionalProperties overrides the structural default
+// already set during the walk, so the first annotator that sets it wins
+// rather than the first non-nil check.
+func applyRootAnnotations(schema *jsonschema.Schema, roots []RootAnnotator) {
+	apSet := false
 
+	for _, ra := range roots {
 		root := ra.RootSchema()
 		if root == nil {
 			continue
@@ -578,8 +591,9 @@ func (g *Generator) applyRootAnnotations(schema *jsonschema.Schema) {
 			schema.WriteOnly = root.WriteOnly
 		}
 
-		if root.AdditionalProperties != nil {
+		if !apSet && root.AdditionalProperties != nil {
 			schema.AdditionalProperties = root.AdditionalProperties
+			apSet = true
 		}
 
 		if root.Extra != nil {
@@ -617,11 +631,6 @@ func mergePropertySchemas(s *jsonschema.Schema) *jsonschema.Schema {
 	}
 
 	return merged
-}
-
-// emptySchema returns a schema for empty input (validates everything).
-func (g *Generator) emptySchema() *jsonschema.Schema {
-	return &jsonschema.Schema{}
 }
 
 // buildAnchorMap walks the AST and collects all anchor definitions.

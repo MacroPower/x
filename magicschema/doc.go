@@ -160,10 +160,11 @@
 //
 // Annotators that need file-level context (e.g., the bitnami annotator
 // which scans for ## @param lines not attached to AST nodes) implement
-// [Annotator.ForContent], which is called once per input file before any
-// [Annotator.Annotate] calls. Annotators that can provide root-level
-// schema properties (e.g., from @schema.root blocks) implement the optional
-// [RootAnnotator] interface.
+// [Annotator.ForContent], which is called once per document of each input
+// file before any [Annotator.Annotate] calls. Annotators that can provide
+// root-level schema properties (e.g., from @schema.root blocks) implement
+// the optional [RootAnnotator] interface; root properties from every input
+// apply in priority order (first input, first annotator wins per field).
 //
 // Four built-in annotator sub-packages are provided:
 //

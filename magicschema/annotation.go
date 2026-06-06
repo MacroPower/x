@@ -31,7 +31,9 @@ type Annotator interface {
 	// mutated. Annotators that need file-level context (e.g., bitnami's
 	// ## @param annotations) return a clone populated with parsed state.
 	// Stateless annotators may return a new zero-value instance.
-	// Called once per input file, before any Annotate calls for that file.
+	// Called once per document of each input file, before any Annotate
+	// calls for that document, so per-document state resets at document
+	// boundaries.
 	ForContent(content []byte) (Annotator, error)
 
 	// Annotate extracts schema annotations from the given AST node.
