@@ -62,7 +62,9 @@
 //  3. Infer schema (structural fallback): when no annotator produces
 //     output for a node, the schema is derived entirely from YAML
 //     structure and comments. Boolean, integer, float, and string
-//     literals map to their JSON Schema types. Null and empty values
+//     literals map to their JSON Schema types; explicit YAML tags
+//     (!!str, !!int, ...) override the literal's apparent type, since
+//     loaders coerce the value to the tagged type. Null and empty values
 //     emit no type constraint (maximally permissive). Objects recurse
 //     into children. Arrays infer items from element types. Plain YAML
 //     comments that do not look like annotation markers become the

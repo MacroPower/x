@@ -21,8 +21,27 @@ const (
 
 // inferType returns the JSON Schema type string for the given YAML AST node.
 // Returns an empty string for null/empty values (maximally permissive).
+// An explicit YAML tag (such as !!str or !!int) is authoritative: YAML
+// loaders coerce the scalar to the tagged type, so the schema reflects the
+// tag even when the literal looks like another type. Unknown tags fall
+// through to the underlying value node.
 func inferType(node ast.Node) string {
-	node = unwrapNode(node)
+unwrap:
+	for {
+		switch n := node.(type) {
+		case *ast.AnchorNode:
+			node = n.Value
+		case *ast.TagNode:
+			if t, ok := tagType(n.Start.Value); ok {
+				return t
+			}
+
+			node = n.Value
+
+		default:
+			break unwrap
+		}
+	}
 
 	switch node.(type) {
 	case *ast.BoolNode:
@@ -44,6 +63,31 @@ func inferType(node ast.Node) string {
 	}
 
 	return ""
+}
+
+// tagType maps an explicit YAML tag to its JSON Schema type. The boolean
+// reports whether the tag determines a type; custom tags (!foo) and tags
+// outside the core schema do not, and inference falls through to the
+// underlying value node.
+func tagType(tag string) (string, bool) {
+	switch tag {
+	case "!!str", "!!binary", "!!timestamp":
+		return typeString, true
+	case "!!int":
+		return typeInteger, true
+	case "!!float":
+		return typeNumber, true
+	case "!!bool":
+		return typeBoolean, true
+	case "!!null":
+		return "", true
+	case "!!seq":
+		return typeArray, true
+	case "!!map":
+		return typeObject, true
+	}
+
+	return "", false
 }
 
 // unwrapNode resolves TagNode and AnchorNode wrappers to the underlying

@@ -253,13 +253,13 @@ func (g *Generator) walkNode(
 	}
 
 	node = resolveAliases(node, anchors)
-	node = unwrapNode(node)
+	unwrapped := unwrapNode(node)
 
-	if node == nil {
+	if unwrapped == nil {
 		return &jsonschema.Schema{}
 	}
 
-	switch n := node.(type) {
+	switch n := unwrapped.(type) {
 	case *ast.MappingNode:
 		return g.walkMapping(n, keyPath, anchors)
 	case *ast.MappingValueNode:
@@ -267,6 +267,7 @@ func (g *Generator) walkNode(
 	case *ast.SequenceNode:
 		return g.walkSequence(n, keyPath, anchors)
 	default:
+		// Pass the wrapped node so explicit tags reach inferType.
 		return g.walkScalar(node)
 	}
 }
@@ -415,8 +416,9 @@ func (g *Generator) handleProperty(
 		return
 	}
 
+	// Keep tag and anchor wrappers on the value node so explicit tags
+	// reach inferType; buildChildSchema unwraps for structural checks.
 	valueNode := resolveAliases(mvn.Value, anchors)
-	valueNode = unwrapNode(valueNode)
 
 	childSchema := g.buildChildSchema(mvn, childPath, anchors, valueNode, annotation)
 
@@ -480,9 +482,12 @@ func (g *Generator) buildChildSchema(
 		}
 	}
 
+	// Structural recursion looks through tag and anchor wrappers.
+	structuralNode := unwrapNode(valueNode)
+
 	// For object types, recurse into children.
 	if (childSchema.Type == typeObject || isObjectType(childSchema)) && childSchema.Properties == nil {
-		if mappingNode, ok := valueNode.(*ast.MappingNode); ok {
+		if mappingNode, ok := structuralNode.(*ast.MappingNode); ok {
 			structural := g.walkMapping(mappingNode, childPath, anchors)
 			childSchema.Properties = structural.Properties
 			childSchema.PropertyOrder = structural.PropertyOrder
@@ -495,7 +500,7 @@ func (g *Generator) buildChildSchema(
 
 	// For array types, recurse into items.
 	if (childSchema.Type == typeArray || isArrayType(childSchema)) && childSchema.Items == nil {
-		if seqNode, ok := valueNode.(*ast.SequenceNode); ok {
+		if seqNode, ok := structuralNode.(*ast.SequenceNode); ok {
 			childSchema.Items = g.inferItemsFromSequence(seqNode, childPath, anchors)
 		}
 	}

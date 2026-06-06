@@ -390,21 +390,53 @@ func TestGeneratorLiteralBlocks(t *testing.T) {
 func TestGeneratorTaggedValues(t *testing.T) {
 	t.Parallel()
 
-	// Tags are unwrapped by unwrapNode, so inference uses the underlying
-	// value node type rather than the YAML tag itself.
+	// Explicit YAML tags are authoritative: a loader coerces the scalar to
+	// the tagged type, so the schema must reflect the tag even when the
+	// literal looks like another type. Unknown tags fall through to the
+	// underlying value node.
 	tcs := map[string]struct {
 		input    string
 		wantKey  string
-		wantType string
+		wantType string // empty means no type constraint
 	}{
-		"!!str tag unwraps to underlying integer": {
+		"!!str tag forces string": {
 			input:    "val: !!str 123\n",
 			wantKey:  "val",
-			wantType: "integer",
+			wantType: "string",
 		},
-		"!!int tag unwraps to underlying string": {
+		"!!int tag forces integer": {
 			input:    "count: !!int \"42\"\n",
 			wantKey:  "count",
+			wantType: "integer",
+		},
+		"!!float tag forces number": {
+			input:    "ratio: !!float 1\n",
+			wantKey:  "ratio",
+			wantType: "number",
+		},
+		"!!bool tag forces boolean": {
+			input:    "flag: !!bool \"true\"\n",
+			wantKey:  "flag",
+			wantType: "boolean",
+		},
+		"!!null tag yields no constraint": {
+			input:    "nothing: !!null whatever\n",
+			wantKey:  "nothing",
+			wantType: "",
+		},
+		"!!timestamp tag forces string": {
+			input:    "when: !!timestamp 2024-01-01\n",
+			wantKey:  "when",
+			wantType: "string",
+		},
+		"custom tag falls through to value": {
+			input:    "custom: !mytag hello\n",
+			wantKey:  "custom",
+			wantType: "string",
+		},
+		"anchored tag keeps the tag type": {
+			input:    "a: &x !!str 123\nb: *x\n",
+			wantKey:  "b",
 			wantType: "string",
 		},
 	}
@@ -426,6 +458,16 @@ func TestGeneratorTaggedValues(t *testing.T) {
 
 			props, ok := got["properties"].(map[string]any)
 			require.True(t, ok, "expected properties in output")
+
+			if tc.wantType == "" {
+				// No type constraint: the property may marshal as the
+				// true schema or a map without a type key.
+				if prop, isMap := props[tc.wantKey].(map[string]any); isMap {
+					assert.Nil(t, prop["type"], "property %s should have no type", tc.wantKey)
+				}
+
+				return
+			}
 
 			prop, ok := props[tc.wantKey].(map[string]any)
 			require.True(t, ok, "missing property: %s", tc.wantKey)
