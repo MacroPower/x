@@ -24,7 +24,10 @@
       "additionalProperties": true
     },
     "nameOverride": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "description": "Override the name"
     },
     "service": {
@@ -47,7 +50,10 @@
       "additionalProperties": true
     },
     "tolerations": {
-      "type": ["array", "null"],
+      "type": [
+        "array",
+        "null"
+      ],
       "description": "Tolerations for pod assignment"
     },
     "resources": {
@@ -116,7 +122,10 @@
       "default": "myval"
     },
     "nullableNoType": {
-      "type": ["null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "description": "Nullable without explicit type"
     },
     "registryUrl": {
@@ -143,7 +152,10 @@
       "additionalProperties": true
     },
     "optionalObj": {
-      "type": ["object", "null"],
+      "type": [
+        "object",
+        "null"
+      ],
       "description": "Optional config object",
       "additionalProperties": true
     }

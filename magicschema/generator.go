@@ -425,6 +425,16 @@ func (g *Generator) buildChildSchema(
 		}
 	}
 
+	// A null-only annotated type (e.g. bitnami's [nullable] without a type,
+	// or an inline type:null) widens with the value's inferred type so the
+	// schema does not reject the concrete value present in the source.
+	if isNullOnlyType(childSchema) {
+		if inferred := inferType(valueNode); inferred != "" && inferred != typeNull {
+			childSchema.Type = ""
+			childSchema.Types = []string{inferred, typeNull}
+		}
+	}
+
 	// For object types, recurse into children.
 	if (childSchema.Type == typeObject || isObjectType(childSchema)) && childSchema.Properties == nil {
 		if mappingNode, ok := valueNode.(*ast.MappingNode); ok {
@@ -608,6 +618,26 @@ func applyRootAnnotations(schema *jsonschema.Schema, roots []RootAnnotator) {
 			}
 		}
 	}
+}
+
+// isNullOnlyType reports whether a schema's type constraint permits only
+// null values.
+func isNullOnlyType(s *jsonschema.Schema) bool {
+	if s.Type == typeNull && len(s.Types) == 0 {
+		return true
+	}
+
+	if s.Type != "" || len(s.Types) == 0 {
+		return false
+	}
+
+	for _, t := range s.Types {
+		if t != typeNull {
+			return false
+		}
+	}
+
+	return true
 }
 
 // mergePropertySchemas combines a schema's property schemas into a single
