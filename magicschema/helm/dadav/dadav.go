@@ -298,6 +298,7 @@ func extractSchemaBlock(comment string) string {
 		stripped = strings.TrimSpace(stripped)
 
 		// Check for @schema.root delimiter (toggle root block state).
+		// Lines with trailing content are not delimiters and are skipped.
 		if after, ok := strings.CutPrefix(stripped, "@schema.root"); ok {
 			if strings.TrimSpace(after) == "" {
 				inRootBlock = !inRootBlock
@@ -306,23 +307,25 @@ func extractSchemaBlock(comment string) string {
 			continue
 		}
 
-		// Skip lines inside @schema.root blocks.
-		if inRootBlock {
-			continue
-		}
-
 		if after, ok := strings.CutPrefix(stripped, "@schema"); ok {
 			rest := strings.TrimSpace(after)
 
 			if rest == "" {
-				// Toggle delimiter -- supports multiple blocks.
+				// Toggle delimiter -- supports multiple blocks. A bare
+				// @schema delimiter also ends an unclosed @schema.root
+				// block, so a missing root close cannot swallow every
+				// following schema block.
+				inRootBlock = false
 				inBlock = !inBlock
-
-				continue
 			}
 
-			// @schema with content on same line -- not this annotator
-			// (that's helm-values-schema inline format).
+			// Otherwise @schema with content on same line -- not this
+			// annotator (that's helm-values-schema inline format).
+			continue
+		}
+
+		// Skip lines inside @schema.root blocks.
+		if inRootBlock {
 			continue
 		}
 
@@ -381,6 +384,12 @@ func extractSchemaRootBlock(comment string) string {
 			continue
 		}
 
+		// A bare @schema delimiter ends an unclosed root block: root
+		// content cannot extend into schema blocks.
+		if after, ok := strings.CutPrefix(stripped, "@schema"); ok && inBlock && strings.TrimSpace(after) == "" {
+			break
+		}
+
 		if inBlock {
 			// Strip up to two leading '#' characters plus optional space.
 			contentLine := strings.TrimSpace(line)
@@ -434,8 +443,10 @@ func extractNonAnnotationDescription(comment string) string {
 				continue
 			}
 
-			// Bare @schema delimiter (no content after it).
+			// Bare @schema delimiter (no content after it). It also ends
+			// an unclosed @schema.root block.
 			if rest == "" {
+				inRootBlock = false
 				inSchemaBlock = !inSchemaBlock
 
 				continue
