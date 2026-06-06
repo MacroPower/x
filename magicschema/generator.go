@@ -260,13 +260,14 @@ func (g *Generator) walkMapping(
 		schema.AdditionalProperties = TrueSchema()
 	}
 
-	var values []*ast.MappingValueNode
+	// Callers pass either a mapping node or extra values, never both, so
+	// no append is needed (appending to mn.Values could mutate the AST's
+	// backing array).
+	values := extraValues
 
 	if mn != nil {
 		values = mn.Values
 	}
-
-	values = append(values, extraValues...)
 
 	var (
 		propertyOrder []string
