@@ -1,17 +1,24 @@
 {
   "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.13.7/.schema/devbox.schema.json",
   "packages": {
-    "go-task": "3.48.0",
-    "goreleaser": "2.16.0",
-    "golangci-lint": "2.12.2",
     "go": "1.26.3",
-    "git": "2.54.0",
-    "nodejs": "25.9.0",
-    "nodePackages.prettier": "3.5.3",
-    "zizmor": "1.25.2",
-    "vhs": "0.11.0",
-    "renovate": "43.150.1",
+    "go-task": "3.48.0",
     "lefthook": "2.1.5",
-    "jq": "1.8.1"
+    "github:dagger/nix/89dee52f7839a290326eb1f929a4ac99d4a1aae1#packages.aarch64-darwin.dagger": {
+      "version": "",
+      "platforms": ["aarch64-darwin"]
+    },
+    "github:dagger/nix/89dee52f7839a290326eb1f929a4ac99d4a1aae1#packages.aarch64-linux.dagger": {
+      "version": "",
+      "platforms": ["aarch64-linux"]
+    },
+    "github:dagger/nix/89dee52f7839a290326eb1f929a4ac99d4a1aae1#packages.x86_64-darwin.dagger": {
+      "version": "",
+      "platforms": ["x86_64-darwin"]
+    },
+    "github:dagger/nix/89dee52f7839a290326eb1f929a4ac99d4a1aae1#packages.x86_64-linux.dagger": {
+      "version": "",
+      "platforms": ["x86_64-linux"]
+    }
   }
 }

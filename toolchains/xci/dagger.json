@@ -10,10 +10,6 @@
       "source": "../go"
     },
     {
-      "name": "devbox",
-      "source": "../devbox"
-    },
-    {
       "name": "prettier",
       "source": "../prettier"
     }

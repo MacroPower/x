@@ -80,9 +80,9 @@ referenced remotely as `github.com/MacroPower/x/toolchains/<module>@<ref>`.
   root `dagger.json`), mirroring the `*-ci` modules consumers write. It is
   not designed for remote consumption: `test-unit`/`test-integration`
   (+check) surface the workspace test suite with the race detector,
-  `lint-renovate` (+check) validates the Renovate configuration through the
-  `devbox` module so CI uses the same Renovate version developers install
-  locally, and `format` (+generate) merges `go.format-go` with
+  `lint-renovate` (+check) validates the Renovate configuration with
+  renovate-config-validator installed at a pinned version in a Node
+  container, and `format` (+generate) merges `go.format-go` with
   `prettier.format`. It has no `tests/` submodule; `dagger check` in this
   repo's CI exercises every function directly.
 - **`devbox`** — Runs commands inside a project's Devbox (Nix-backed)

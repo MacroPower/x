@@ -3,7 +3,7 @@
 // the root dagger.json registers directly; this module adds only what direct
 // registration cannot express: surfacing unit tests as a check with the
 // project's Go configuration, and validating the Renovate configuration
-// inside the project's Devbox environment.
+// with a pinned renovate-config-validator.
 package main
 
 import (
@@ -12,9 +12,19 @@ import (
 	"dagger/xci/internal/dagger"
 )
 
-// renovateConfig is the Renovate configuration file validated by
-// [Xci.LintRenovate], relative to the source root.
-const renovateConfig = ".github/renovate.json5"
+const (
+	// renovateConfig is the Renovate configuration file validated by
+	// [Xci.LintRenovate], relative to the source root.
+	renovateConfig = ".github/renovate.json5"
+
+	// Docker Official Image, pulled from Docker's verified publisher
+	// space on ECR Public to avoid Docker Hub pull rate limits.
+	renovateImage   = "public.ecr.aws/docker/library/node:22-slim" // renovate: datasource=docker depName=public.ecr.aws/docker/library/node
+	renovateVersion = "43.150.0"                                   // renovate: datasource=npm depName=renovate
+
+	// cacheNamespace prefixes this module's cache volumes.
+	cacheNamespace = "go.jacobcolvin.com/x/toolchains/xci"
+)
 
 // Xci provides CI functions for the x repository. Create instances with [New].
 type Xci struct {
@@ -22,8 +32,6 @@ type Xci struct {
 	Source *dagger.Directory
 	// Go toolchain module instance for delegation.
 	Go *dagger.Go // +private
-	// Devbox toolchain module instance for running project tooling.
-	Devbox *dagger.Devbox // +private
 	// Prettier toolchain module instance for non-Go formatting.
 	Prettier *dagger.Prettier // +private
 }
@@ -49,7 +57,6 @@ func New(
 			GoMod:  goMod,
 			Race:   true,
 		}),
-		Devbox:   dag.Devbox(dagger.DevboxOpts{Source: source}),
 		Prettier: dag.Prettier(dagger.PrettierOpts{Source: source}),
 	}
 }
@@ -74,12 +81,19 @@ func (m *Xci) TestIntegration(ctx context.Context) error {
 }
 
 // LintRenovate validates the Renovate configuration with
-// renovate-config-validator, running inside the project's Devbox
-// environment so CI validates with the same Renovate version developers
-// install locally.
+// renovate-config-validator, installed at a pinned version in a Node
+// container so the check is self-contained and Renovate can bump its own
+// validator version.
 //
 // +check
 func (m *Xci) LintRenovate(ctx context.Context) error {
-	_, err := m.Devbox.Run(ctx, []string{"renovate-config-validator", renovateConfig})
+	_, err := dag.Container().
+		From(renovateImage).
+		WithMountedCache("/root/.npm", dag.CacheVolume(cacheNamespace+":npm")).
+		WithExec([]string{"npm", "install", "-g", "renovate@" + renovateVersion}).
+		WithMountedFile("/src/"+renovateConfig, m.Source.File(renovateConfig)).
+		WithWorkdir("/src").
+		WithExec([]string{"renovate-config-validator", renovateConfig}).
+		Sync(ctx)
 	return err
 }
