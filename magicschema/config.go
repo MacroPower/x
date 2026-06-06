@@ -76,7 +76,7 @@ func (c *Config) RegisterFlags(flags *pflag.FlagSet) {
 	flags.IntVar(&c.Draft, c.Flags.Draft, 7,
 		"JSON Schema draft version")
 	flags.IntVar(&c.Indent, c.Flags.Indent, 2,
-		"JSON indentation spaces")
+		"JSON indentation spaces (0 for compact output)")
 	flags.StringVar(&c.Title, c.Flags.Title, "",
 		"schema title field")
 	flags.StringVar(&c.Description, c.Flags.Description, "",

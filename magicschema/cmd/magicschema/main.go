@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -77,15 +78,14 @@ func run(cfg *magicschema.Config, args []string) error {
 		return err
 	}
 
-	indent := "  "
+	var out []byte
+
 	if cfg.Indent > 0 {
-		indent = ""
-		for range cfg.Indent {
-			indent += " "
-		}
+		out, err = json.MarshalIndent(schema, "", strings.Repeat(" ", cfg.Indent))
+	} else {
+		out, err = json.Marshal(schema)
 	}
 
-	out, err := json.MarshalIndent(schema, "", indent)
 	if err != nil {
 		return fmt.Errorf("%w: %w", magicschema.ErrWriteOutput, err)
 	}
