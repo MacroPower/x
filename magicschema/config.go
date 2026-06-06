@@ -74,7 +74,7 @@ func (c *Config) RegisterFlags(flags *pflag.FlagSet) {
 	flags.StringVarP(&c.Output, c.Flags.Output, "o", "-",
 		"output file path (- for stdout)")
 	flags.IntVar(&c.Draft, c.Flags.Draft, 7,
-		"JSON Schema draft version")
+		"JSON Schema draft version (only 7 is supported)")
 	flags.IntVar(&c.Indent, c.Flags.Indent, 2,
 		"JSON indentation spaces (0 for compact output)")
 	flags.StringVar(&c.Title, c.Flags.Title, "",
@@ -129,6 +129,14 @@ func (c *Config) RegisterCompletions(cmd *cobra.Command) error {
 
 // NewGenerator creates a [Generator] using this [Config].
 func (c *Config) NewGenerator() (*Generator, error) {
+	// Only Draft 7 output is implemented; reject other requested drafts
+	// instead of silently emitting draft-07. Zero means the flag was never
+	// registered.
+	if c.Draft != 0 && c.Draft != 7 {
+		return nil, fmt.Errorf("%w: unsupported JSON Schema draft %d (only 7 is supported)",
+			ErrInvalidOption, c.Draft)
+	}
+
 	annotators, err := c.parseAnnotatorNames(c.Annotators)
 	if err != nil {
 		return nil, err
