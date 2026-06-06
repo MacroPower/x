@@ -6,6 +6,7 @@ shopt: [globstar]
 # The .taskfiles/ segmentation is intentional, even where a namespace holds
 # only thin Dagger wrappers — do not flatten it into this file.
 includes:
+  dagger: ./.taskfiles/dagger/Taskfile.yaml
   dev: ./.taskfiles/dev/Taskfile.yaml
   fmt: ./.taskfiles/fmt/Taskfile.yaml
   gh: ./.taskfiles/gh/Taskfile.yaml
