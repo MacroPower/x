@@ -233,20 +233,12 @@ func inferItemsSchema(seq *ast.SequenceNode) *jsonschema.Schema {
 		return nil
 	}
 
+	// The empty string widens to the other side, so the first element
+	// needs no special case.
 	var resultType string
 
-	first := true
-
 	for _, val := range seq.Values {
-		elemType := inferType(val)
-		if first {
-			resultType = elemType
-			first = false
-
-			continue
-		}
-
-		resultType = widenType(resultType, elemType)
+		resultType = widenType(resultType, inferType(val))
 	}
 
 	if resultType == "" {

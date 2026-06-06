@@ -561,35 +561,29 @@ func (g *Generator) inferItemsFromSequence(
 		return nil
 	}
 
-	// Check if all elements are mappings -- if so, merge their schemas.
+	// Resolve each element once; the resolved nodes drive both the
+	// all-mappings check and the walk. If all elements are mappings,
+	// merge their schemas.
+	resolved := make([]ast.Node, 0, len(seq.Values))
 	allMappings := true
 
 	for _, val := range seq.Values {
-		resolved := resolveAliases(val, anchors)
-		resolved = unwrapNode(resolved)
+		node := unwrapNode(resolveAliases(val, anchors))
 
-		if _, ok := resolved.(*ast.MappingNode); !ok {
+		if _, ok := node.(*ast.MappingNode); !ok {
 			allMappings = false
 
 			break
 		}
+
+		resolved = append(resolved, node)
 	}
 
 	if allMappings {
-		var itemSchemas []*jsonschema.Schema
+		result := g.walkNode(resolved[0], keyPath, anchors)
 
-		for _, val := range seq.Values {
-			resolved := resolveAliases(val, anchors)
-			resolved = unwrapNode(resolved)
-
-			s := g.walkNode(resolved, keyPath, anchors)
-			itemSchemas = append(itemSchemas, s)
-		}
-
-		result := itemSchemas[0]
-
-		for i := 1; i < len(itemSchemas); i++ {
-			result = mergeSchemas(result, itemSchemas[i])
+		for _, node := range resolved[1:] {
+			result = mergeSchemas(result, g.walkNode(node, keyPath, anchors))
 		}
 
 		return result
