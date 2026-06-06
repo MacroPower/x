@@ -2354,3 +2354,24 @@ func TestHelmDocsAnnotatorFromFile(t *testing.T) {
 
 	assertGolden(t, "testdata/helm_docs.schema.json", schema)
 }
+
+// TestHelmDocsAnnotatorRealWorld generates a schema for the grafana loki
+// chart's values.yaml, which carries helm-docs # -- annotations on over a
+// thousand properties, including (type) hints and @default overrides.
+//
+// Vendored via `helm show values loki --repo
+// https://grafana.github.io/helm-charts --version 6.55.0`.
+func TestHelmDocsAnnotatorRealWorld(t *testing.T) {
+	t.Parallel()
+
+	data, err := os.ReadFile("testdata/loki_values.yaml")
+	require.NoError(t, err)
+
+	gen := magicschema.NewGenerator(
+		magicschema.WithAnnotators(norwoodj.New()),
+	)
+	schema, err := gen.Generate(data)
+	require.NoError(t, err)
+
+	assertGolden(t, "testdata/loki_values.schema.json", schema)
+}
