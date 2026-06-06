@@ -230,8 +230,15 @@ func mergeAdditionalProperties(a, b *jsonschema.Schema) *jsonschema.Schema {
 		return TrueSchema()
 	}
 
-	// Both are non-nil and non-true (e.g., both are false schemas).
-	return a
+	if isFalseSchema(a) {
+		return b
+	}
+
+	if isFalseSchema(b) {
+		return a
+	}
+
+	return mergeSchemas(a, b)
 }
 
 // isTrueSchema checks if a schema is the "true" schema (validates everything).
@@ -241,6 +248,23 @@ func isTrueSchema(s *jsonschema.Schema) bool {
 	}
 
 	return s.Not == nil &&
+		s.Type == "" &&
+		len(s.Types) == 0 &&
+		s.Properties == nil &&
+		s.Items == nil &&
+		len(s.AllOf) == 0 &&
+		len(s.AnyOf) == 0 &&
+		len(s.OneOf) == 0
+}
+
+// isFalseSchema checks if a schema is the "false" schema (validates nothing),
+// i.e. exactly {"not": {}} as produced by [FalseSchema].
+func isFalseSchema(s *jsonschema.Schema) bool {
+	if s == nil || s.Not == nil {
+		return false
+	}
+
+	return isTrueSchema(s.Not) &&
 		s.Type == "" &&
 		len(s.Types) == 0 &&
 		s.Properties == nil &&
