@@ -2,10 +2,10 @@
 
 pre-commit:
   commands:
-    pre-commit:
-      run: devbox run -- task pre-commit
+    check:
+      run: devbox run -- dagger check
 
 commit-msg:
   commands:
-    conform:
-      run: devbox run -- conform enforce --commit-msg-file {1}
+    commitlint:
+      run: devbox run -- dagger --progress=logs call commitlint lint --source=. --msg-file={1}

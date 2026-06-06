@@ -34,6 +34,14 @@ referenced remotely as `github.com/MacroPower/x/toolchains/<module>@<ref>`.
   merges with its other formatters, e.g. gofmt), and `lint-base` (the configured
   container, for benchmarks). `image`/`version`/`config-path`/`patterns`/
   `cache-namespace` are optional overrides.
+- **`commitlint`** — Commit-message validation against a project's
+  conventional commit policy: `lint` runs commitlint with the project's config
+  mounted, optionally against a message file (e.g. `.git/COMMIT_EDITMSG` from
+  a commit-msg hook). It is a Callable, not a `+check` — `source` and
+  `args`/`msg-file` are per-invocation inputs, so consumers wire it into git
+  hooks (e.g. lefthook) rather than `dagger check`. `image` is an optional
+  override. This repo dogfoods it: the `.lefthook.yaml` commit-msg hook runs
+  `dagger call commitlint lint` against `.commitlintrc.yaml`.
 - **`goreleaser`** — Reusable GoReleaser primitives (Tier A): `goreleaser-base`
   (a Go base + the goreleaser binary), `binary`/`with-goreleaser` (install the
   goreleaser binary onto another container, mirroring cosign/syft), `check-base`,
@@ -91,9 +99,10 @@ referenced remotely as `github.com/MacroPower/x/toolchains/<module>@<ref>`.
 
 Each module is self-contained: its own `go.mod`/`go.sum` and no relative
 `include`, so it can be sourced remotely. Tests live in per-module `tests/`
-submodules that run against a synthetic fixture (`tests/testdata/fixture`)
-rather than any real project layout. Run them with `dagger call -m tests all`
-from a module directory.
+submodules that run against synthetic fixtures rather than any real project
+layout — most from a `tests/testdata/fixture` directory, though some modules
+(bench, commitlint, cosign) construct fixtures inline. Run them with
+`dagger call -m tests all` from a module directory.
 
 ## Conventions
 
@@ -110,7 +119,7 @@ from a module directory.
   `dagger check` wrap it in their own CI toolchain (so they can supply a base
   with project-specific `aptPackages`). Only `lint` and `check-tidy` are
   checks here.
-- No `go.work`: the two `tests/` submodules share the Dagger-conventional
+- No `go.work`: the `tests/` submodules share the Dagger-conventional
   module path `dagger/tests`, so they cannot share one workspace, and a
   `go.work` at this level would pull the non-member test dirs into workspace
   scope. Develop each module with the `dagger` CLI instead.

@@ -8,7 +8,17 @@
       "customizations": [
         {
           "argument": "source",
-          "ignore": [".git", ".claude", ".worktrees", ".devbox", ".task", ".test", ".tmp", "dist", "toolchains"]
+          "ignore": [
+            ".git",
+            ".claude",
+            ".worktrees",
+            ".devbox",
+            ".task",
+            ".test",
+            ".tmp",
+            "dist",
+            "toolchains"
+          ]
         },
         {
           "argument": "race",
@@ -22,7 +32,17 @@
       "customizations": [
         {
           "argument": "source",
-          "ignore": [".git", ".claude", ".worktrees", ".devbox", ".task", ".test", ".tmp", "dist", "toolchains"]
+          "ignore": [
+            ".git",
+            ".claude",
+            ".worktrees",
+            ".devbox",
+            ".task",
+            ".test",
+            ".tmp",
+            "dist",
+            "toolchains"
+          ]
         }
       ]
     },
@@ -32,7 +52,17 @@
       "customizations": [
         {
           "argument": "source",
-          "ignore": [".git", ".claude", ".worktrees", ".devbox", ".task", ".test", ".tmp", "dist", "toolchains"]
+          "ignore": [
+            ".git",
+            ".claude",
+            ".worktrees",
+            ".devbox",
+            ".task",
+            ".test",
+            ".tmp",
+            "dist",
+            "toolchains"
+          ]
         }
       ]
     },
@@ -42,7 +72,16 @@
       "customizations": [
         {
           "argument": "source",
-          "ignore": [".git", ".claude", ".worktrees", ".devbox", ".task", ".test", ".tmp", "dist"]
+          "ignore": [
+            ".git",
+            ".claude",
+            ".worktrees",
+            ".devbox",
+            ".task",
+            ".test",
+            ".tmp",
+            "dist"
+          ]
         }
       ]
     },
@@ -52,7 +91,17 @@
       "customizations": [
         {
           "argument": "source",
-          "ignore": [".git", ".claude", ".worktrees", ".devbox", ".task", ".test", ".tmp", "dist", "toolchains"]
+          "ignore": [
+            ".git",
+            ".claude",
+            ".worktrees",
+            ".devbox",
+            ".task",
+            ".test",
+            ".tmp",
+            "dist",
+            "toolchains"
+          ]
         },
         {
           "argument": "configPath",
@@ -61,12 +110,26 @@
       ]
     },
     {
+      "name": "commitlint",
+      "source": "toolchains/commitlint"
+    },
+    {
       "name": "ci",
       "source": "toolchains/xci",
       "customizations": [
         {
           "argument": "source",
-          "ignore": [".git", ".claude", ".worktrees", ".devbox", ".task", ".test", ".tmp", "dist", "toolchains"]
+          "ignore": [
+            ".git",
+            ".claude",
+            ".worktrees",
+            ".devbox",
+            ".task",
+            ".test",
+            ".tmp",
+            "dist",
+            "toolchains"
+          ]
         }
       ]
     }
