@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	syftVersion = "v1.41.1" // renovate: datasource=github-releases depName=anchore/syft
+	syftVersion = "v1.45.1" // renovate: datasource=github-releases depName=anchore/syft
 
 	defaultImage = "ghcr.io/anchore/syft:" + syftVersion
 
