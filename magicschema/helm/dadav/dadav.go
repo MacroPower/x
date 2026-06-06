@@ -469,24 +469,25 @@ func extractNonAnnotationDescription(comment string) string {
 		descLines = append(descLines, cleaned)
 	}
 
-	// Use only lines after the last blank line.
+	// Keep only the last comment group, ignoring trailing blank lines so a
+	// blank final line cannot discard the whole description.
+	end := len(descLines)
+	for end > 0 && strings.TrimSpace(descLines[end-1]) == "" {
+		end--
+	}
+
 	lastBlank := -1
 
-	for i, line := range descLines {
+	for i, line := range descLines[:end] {
 		if strings.TrimSpace(line) == "" {
 			lastBlank = i
 		}
 	}
 
-	start := 0
-	if lastBlank >= 0 {
-		start = lastBlank + 1
-	}
-
 	// Filter blank lines from the final result.
 	var nonBlank []string
 
-	for _, l := range descLines[start:] {
+	for _, l := range descLines[lastBlank+1 : end] {
 		if strings.TrimSpace(l) != "" {
 			nonBlank = append(nonBlank, l)
 		}
