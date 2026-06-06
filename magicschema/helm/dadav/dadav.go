@@ -288,14 +288,7 @@ func extractSchemaBlock(comment string) string {
 	)
 
 	for _, line := range lines {
-		stripped := strings.TrimSpace(line)
-
-		// Strip up to two leading '#' characters.
-		for range 2 {
-			stripped = strings.TrimPrefix(stripped, "#")
-		}
-
-		stripped = strings.TrimSpace(stripped)
+		stripped := strings.TrimSpace(stripCommentHash(line))
 
 		// Check for @schema.root delimiter (toggle root block state).
 		// Lines with trailing content are not delimiters and are skipped.
@@ -332,16 +325,7 @@ func extractSchemaBlock(comment string) string {
 		}
 
 		if inBlock {
-			// Strip up to two leading '#' characters plus optional space.
-			contentLine := strings.TrimSpace(line)
-
-			for range 2 {
-				contentLine = strings.TrimPrefix(contentLine, "#")
-			}
-
-			contentLine = strings.TrimPrefix(contentLine, " ")
-
-			content = append(content, contentLine)
+			content = append(content, stripCommentHash(line))
 		}
 	}
 
@@ -363,13 +347,7 @@ func extractSchemaRootBlock(comment string) string {
 	)
 
 	for _, line := range lines {
-		stripped := strings.TrimSpace(line)
-
-		for range 2 {
-			stripped = strings.TrimPrefix(stripped, "#")
-		}
-
-		stripped = strings.TrimSpace(stripped)
+		stripped := strings.TrimSpace(stripCommentHash(line))
 
 		if after, ok := strings.CutPrefix(stripped, "@schema.root"); ok {
 			rest := strings.TrimSpace(after)
@@ -408,16 +386,7 @@ func extractSchemaRootBlock(comment string) string {
 		}
 
 		if inBlock {
-			// Strip up to two leading '#' characters plus optional space.
-			contentLine := strings.TrimSpace(line)
-
-			for range 2 {
-				contentLine = strings.TrimPrefix(contentLine, "#")
-			}
-
-			contentLine = strings.TrimPrefix(contentLine, " ")
-
-			content = append(content, contentLine)
+			content = append(content, stripCommentHash(line))
 		}
 	}
 
@@ -440,13 +409,7 @@ func extractNonAnnotationDescription(comment string) string {
 	)
 
 	for _, line := range lines {
-		stripped := strings.TrimSpace(line)
-
-		for range 2 {
-			stripped = strings.TrimPrefix(stripped, "#")
-		}
-
-		stripped = strings.TrimSpace(stripped)
+		stripped := strings.TrimSpace(stripCommentHash(line))
 
 		if after, ok := strings.CutPrefix(stripped, "@schema"); ok {
 			rest := strings.TrimSpace(after)
@@ -498,6 +461,19 @@ func extractNonAnnotationDescription(comment string) string {
 	return strings.Join(group, " ")
 }
 
+// stripCommentHash removes leading whitespace, up to two leading '#'
+// characters, and a single following space. Keeping only one space means
+// deeper indentation after "# " survives for nested YAML block content.
+func stripCommentHash(line string) string {
+	line = strings.TrimSpace(line)
+
+	for range 2 {
+		line = strings.TrimPrefix(line, "#")
+	}
+
+	return strings.TrimPrefix(line, " ")
+}
+
 // cleanCommentLine strips up to two leading '#' characters plus optional space
 // from a single comment line.
 func cleanCommentLine(line string) string {
@@ -506,12 +482,7 @@ func cleanCommentLine(line string) string {
 		return line
 	}
 
-	// Strip up to two leading '#' characters.
-	for range 2 {
-		line = strings.TrimPrefix(line, "#")
-	}
-
-	line = strings.TrimPrefix(line, " ")
+	line = stripCommentHash(line)
 
 	// Strip helm-docs "-- " prefix.
 	line = strings.TrimPrefix(line, "-- ")
