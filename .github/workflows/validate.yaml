@@ -6,72 +6,76 @@ on:
       - "main"
   pull_request:
 
+concurrency:
+  group: validate-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 permissions:
   contents: read
 
 jobs:
-  test:
-    name: test
+  check:
+    name: check
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
           persist-credentials: false
-          fetch-depth: 2
 
-      - name: Set up Go
-        uses: actions/setup-go@v6
+      - name: Run all checks
+        uses: dagger/dagger-for-github@v8.4.1
         with:
-          go-version: stable
+          version: "v0.21.4"
+          verb: check
+          cloud-token: ${{ secrets.DAGGER_CLOUD_TOKEN }}
+          enable-github-summary: "true"
 
-      - name: Install gotestsum
-        run: go install gotest.tools/gotestsum@latest
-
-      - name: Run Go test
-        run: gotestsum --junitfile=junit.xml --format=pkgname -- -race -vet=all -coverprofile=coverage.txt go.jacobcolvin.com/x/...
+      - name: Export coverage profile
+        if: ${{ !cancelled() }}
+        uses: dagger/dagger-for-github@v8.4.1
+        with:
+          version: "v0.21.4"
+          call: go test-coverage --output=coverage.txt
+          cloud-token: ${{ secrets.DAGGER_CLOUD_TOKEN }}
+          enable-github-summary: "true"
 
       - name: Upload coverage reports to Codecov
+        if: ${{ !cancelled() }}
         uses: codecov/codecov-action@v6
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
 
-      - name: Upload test results to Codecov
-        if: ${{ !cancelled() }}
-        uses: codecov/test-results-action@v1
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-
-  lint:
-    name: lint (${{ matrix.module }})
+  toolchains:
+    name: toolchains (${{ matrix.module }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        # golangci-lint does not span a go.work workspace; its gci formatter
-        # reads go.mod from the working directory, so lint each module on its
-        # own. Config discovery walks up to the root .golangci.yaml.
-        # Keep this list in sync with the use block in go.work.
+        # Every shared toolchain module with a tests/ submodule. Keep this
+        # list in sync with the directories under toolchains/.
         module:
-          - ansivideo
-          - log
-          - magicschema
-          - profile
-          - stringtest
-          - version
+          - bench
+          - cosign
+          - devbox
+          - go
+          - goreleaser
+          - prettier
+          - security
+          - syft
+          - zizmor
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
           persist-credentials: false
 
-      - name: Set up Go
-        uses: actions/setup-go@v6
+      - name: Run toolchain tests
+        uses: dagger/dagger-for-github@v8.4.1
         with:
-          go-version: stable
-
-      - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v9
-        with:
-          version: v2.12.2
-          working-directory: ${{ matrix.module }}
+          version: "v0.21.4"
+          verb: call
+          module: toolchains/${{ matrix.module }}/tests
+          args: all
+          cloud-token: ${{ secrets.DAGGER_CLOUD_TOKEN }}
+          enable-github-summary: "true"
