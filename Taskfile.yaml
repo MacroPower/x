@@ -70,20 +70,6 @@ tasks:
     desc: Runs all install targets
     deps: [dev:install, git:hooks:install]
 
-  shell:
-    desc: Launches a shell in the devcontainer
-    aliases: [sh]
-    interactive: true
-    cmd:
-      task: dev:shell
-
-  claude:
-    desc: Launches a Claude Code session in the devcontainer
-    aliases: [cc]
-    interactive: true
-    cmd:
-      task: dev:claude
-
   clean:
     desc: Removes build artifacts and caches
     cmds:
