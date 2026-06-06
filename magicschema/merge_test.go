@@ -518,6 +518,59 @@ func TestMergeAnnotatedConstraints(t *testing.T) {
 				assert.Nil(t, size["enum"])
 			},
 		},
+		"const and enum union as value sets": {
+			// A const is a single-value enum, so const:a + enum:[a, b]
+			// unions to enum:[a, b] instead of dropping both constraints.
+			inputA: "# @schema const:a\nsize: a\n",
+			inputB: "# @schema enum:[a, b]\nsize: b\n",
+			opts:   []magicschema.Option{magicschema.WithAnnotators(losisin.New())},
+			check: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				size, ok := props["size"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, []any{"a", "b"}, size["enum"])
+				assert.Nil(t, size["const"])
+			},
+		},
+		"differing consts union to enum": {
+			inputA: "# @schema const:a\nsize: a\n",
+			inputB: "# @schema const:b\nsize: b\n",
+			opts:   []magicschema.Option{magicschema.WithAnnotators(losisin.New())},
+			check: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				size, ok := props["size"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, []any{"a", "b"}, size["enum"])
+				assert.Nil(t, size["const"])
+			},
+		},
+		"equal consts stay const": {
+			inputA: "# @schema const:a\nsize: a\n",
+			inputB: "# @schema const:a\nsize: a\n",
+			opts:   []magicschema.Option{magicschema.WithAnnotators(losisin.New())},
+			check: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				size, ok := props["size"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "a", size["const"])
+				assert.Nil(t, size["enum"])
+			},
+		},
 		"minimum widens to the smaller bound": {
 			inputA: "# @schema minimum:3\nport: 8080\n",
 			inputB: "# @schema minimum:1\nport: 8081\n",

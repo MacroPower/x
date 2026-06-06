@@ -13,10 +13,11 @@ import (
 // and conflicting types are widened. Validation constraints survive the merge
 // only when both sides constrain -- a side without a constraint already
 // permits everything, so keeping a one-sided constraint would fail closed.
-// Bounds widen toward the permissive end, enums union, and exact-value
-// constraints (pattern, format, const, multipleOf, patternProperties, and
-// other keywords with no widening rule) are kept only when both sides
-// agree. When the two types are incompatible the type constraint is
+// Bounds widen toward the permissive end, enums union (a const counts as a
+// single-value enum), and exact-value constraints (pattern, format,
+// multipleOf, patternProperties, and other keywords with no widening rule)
+// are kept only when both sides agree. When the two types are incompatible
+// the type constraint is
 // dropped entirely, and every type-specific keyword (properties, items,
 // bounds, pattern) drops with it -- a schema with no type but residual
 // object or array constraints would still fail closed for those instances.
@@ -68,12 +69,13 @@ func mergeSchemas(a, b *jsonschema.Schema) *jsonschema.Schema {
 	result.ReadOnly = a.ReadOnly && b.ReadOnly
 	result.WriteOnly = a.WriteOnly && b.WriteOnly
 
-	// Enum and const constrain value sets independent of type, so they
-	// union even across a type conflict.
-	result.Enum = unionEnums(a.Enum, b.Enum)
-
+	// Enum and const both constrain value sets (const is a single-value
+	// enum), so they union with each other, independent of type. Equal
+	// consts stay const; any other both-sides combination unions to enum.
 	if a.Const != nil && b.Const != nil && reflect.DeepEqual(*a.Const, *b.Const) {
 		result.Const = a.Const
+	} else {
+		result.Enum = unionEnums(enumValues(a), enumValues(b))
 	}
 
 	// Merge x-* custom annotations per key, a wins.
@@ -170,6 +172,20 @@ func keepEqual[T any](a, b T) T {
 	var zero T
 
 	return zero
+}
+
+// enumValues returns a schema's value-set constraint: the enum, or the
+// const as a single-value enum.
+func enumValues(s *jsonschema.Schema) []any {
+	if s.Enum != nil {
+		return s.Enum
+	}
+
+	if s.Const != nil {
+		return []any{*s.Const}
+	}
+
+	return nil
 }
 
 // unionEnums merges enum constraints. The value set is kept only when both
