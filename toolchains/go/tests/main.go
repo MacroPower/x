@@ -32,6 +32,24 @@ func (t *Tests) subject() *dagger.Go {
 	})
 }
 
+// workspaceFixture returns the synthetic go.work workspace used as test
+// input. Its root has a go.work but no go.mod, so the default "./..."
+// package pattern matches nothing there and must be expanded into
+// per-module patterns.
+func (t *Tests) workspaceFixture() *dagger.Directory {
+	return dag.CurrentModule().Source().Directory("testdata/workspace")
+}
+
+// workspaceSubject constructs the go module under test with the workspace
+// fixture as source.
+func (t *Tests) workspaceSubject() *dagger.Go {
+	fixture := t.workspaceFixture()
+	return dag.Go(dagger.GoOpts{
+		Source: fixture,
+		GoMod:  fixture,
+	})
+}
+
 // All runs every test in sequence and reports the first failure. Stages
 // share cached container layers, so sequential execution stays cheap.
 func (t *Tests) All(ctx context.Context) error {
@@ -48,6 +66,12 @@ func (t *Tests) All(ctx context.Context) error {
 		{"tidy", t.Tidy},
 		{"generate", t.Generate},
 		{"ensure-git", t.EnsureGit},
+		{"workspace-modules", t.WorkspaceModules},
+		{"workspace-build", t.WorkspaceBuild},
+		{"workspace-test-unit", t.WorkspaceTestUnit},
+		{"workspace-lint", t.WorkspaceLint},
+		{"workspace-check-tidy", t.WorkspaceCheckTidy},
+		{"workspace-generate", t.WorkspaceGenerate},
 	}
 	for _, tc := range cases {
 		if err := tc.fn(ctx); err != nil {
@@ -140,4 +164,66 @@ func (t *Tests) Lint(ctx context.Context) error {
 // CheckTidy verifies the dependency-free fixture is reported tidy.
 func (t *Tests) CheckTidy(ctx context.Context) error {
 	return t.subject().CheckTidy(ctx)
+}
+
+// WorkspaceModules verifies discovery finds the workspace's member modules
+// (and not a root module, since the workspace root has no go.mod).
+func (t *Tests) WorkspaceModules(ctx context.Context) error {
+	got, err := t.workspaceSubject().Modules(ctx)
+	if err != nil {
+		return err
+	}
+	for _, want := range []string{"alpha", "beta"} {
+		if !slices.Contains(got, want) {
+			return fmt.Errorf("discovery missing %q in %v", want, got)
+		}
+	}
+	if slices.Contains(got, ".") {
+		return fmt.Errorf("discovery found a root module in %v", got)
+	}
+	return nil
+}
+
+// WorkspaceBuild verifies the default "./..." pattern expands across the
+// workspace and compiles the alpha main package to a binary.
+func (t *Tests) WorkspaceBuild(ctx context.Context) error {
+	bins, err := t.workspaceSubject().Build().Glob(ctx, "bin/*")
+	if err != nil {
+		return err
+	}
+	if len(bins) == 0 {
+		return fmt.Errorf("no binary produced")
+	}
+	return nil
+}
+
+// WorkspaceTestUnit verifies the unit test path runs every workspace
+// module's tests via the expanded package patterns.
+func (t *Tests) WorkspaceTestUnit(ctx context.Context) error {
+	return t.workspaceSubject().TestUnit(ctx)
+}
+
+// WorkspaceLint verifies golangci-lint runs clean across the workspace's
+// member modules.
+func (t *Tests) WorkspaceLint(ctx context.Context) error {
+	return t.workspaceSubject().Lint(ctx)
+}
+
+// WorkspaceCheckTidy verifies per-module tidy checks work inside a
+// workspace (go mod tidy operates on each member module).
+func (t *Tests) WorkspaceCheckTidy(ctx context.Context) error {
+	return t.workspaceSubject().CheckTidy(ctx)
+}
+
+// WorkspaceGenerate verifies go generate resolves the expanded workspace
+// patterns and produces no changes for a fixture without directives.
+func (t *Tests) WorkspaceGenerate(ctx context.Context) error {
+	patch, err := t.workspaceSubject().Generate().AsPatch().Contents(ctx)
+	if err != nil {
+		return err
+	}
+	if patch != "" {
+		return fmt.Errorf("unexpected generate output:\n%s", patch)
+	}
+	return nil
 }

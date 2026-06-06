@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"path/filepath"
 	"time"
 
 	"dagger/go/internal/dagger"
@@ -20,19 +21,42 @@ func (m *Go) BenchmarkSummary(
 	// +default=false
 	parallel bool,
 ) (string, error) {
-	return m.benchSuite().Summary(ctx, dagger.BenchSummaryOpts{Parallel: parallel})
+	suite, err := m.benchSuite(ctx)
+	if err != nil {
+		return "", err
+	}
+	return suite.Summary(ctx, dagger.BenchSummaryOpts{Parallel: parallel})
 }
 
 // benchSuite builds the Go toolchain's benchmark stages, delegating timing and
 // reporting to the shared [Bench] module. Each stage is a cache-busted
-// container whose evaluation is the work to time.
-func (m *Go) benchSuite() *dagger.Bench {
+// container whose evaluation is the work to time. The lint stage runs each
+// discovered module sequentially in one container, mirroring [Go.Lint]'s
+// per-module invocations as a single timed unit.
+func (m *Go) benchSuite(ctx context.Context) (*dagger.Bench, error) {
+	pkgs, err := m.resolvePkgs(ctx, []string{defaultPkgs})
+	if err != nil {
+		return nil, err
+	}
+	mods, err := m.Modules(ctx, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	lint := m.CacheBust(m.LintBase(""))
+	for _, mod := range mods {
+		cmd := []string{"golangci-lint", "run"}
+		if isNestedModule(mod) {
+			cmd = append(cmd, "--path-prefix", mod)
+		}
+		lint = lint.WithWorkdir(filepath.Join("/src", mod)).WithExec(cmd)
+	}
+
 	return dag.Bench().
 		WithStage("env", m.CacheBust(m.Env(""))).
-		WithStage("lint", m.CacheBust(m.LintBase("")).
-			WithExec([]string{"golangci-lint", "run"})).
+		WithStage("lint", lint).
 		WithStage("test", m.CacheBust(m.Env("")).
-			WithExec([]string{"go", "test", "./..."}))
+			WithExec(append([]string{"go", "test"}, pkgs...))), nil
 }
 
 // CacheBust returns a container with a unique cache-busting environment

@@ -50,10 +50,20 @@ func (m *Go) FormatGoModule(
 // against the original source.
 //
 // +generate
-func (m *Go) Generate() *dagger.Changeset {
+func (m *Go) Generate(
+	ctx context.Context,
+	// Packages to run go generate against.
+	// +optional
+	// +default=["./..."]
+	pkgs []string,
+) (*dagger.Changeset, error) {
+	pkgs, err := m.resolvePkgs(ctx, pkgs)
+	if err != nil {
+		return nil, err
+	}
 	generated := m.Env("").
-		WithExec([]string{"go", "generate", "./..."}).
+		WithExec(append([]string{"go", "generate"}, pkgs...)).
 		Directory("/src").
 		WithoutDirectory(".git")
-	return generated.Changes(m.Source)
+	return generated.Changes(m.Source), nil
 }

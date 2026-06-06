@@ -67,9 +67,9 @@ type Go struct {
 	// Namespace prefix for cache volume names, used to avoid collisions
 	// when multiple projects consume this module.
 	CacheNamespace string // +private
-	// Directory containing only go.mod and go.sum, synced independently
-	// of [Go.Source] so that its content hash changes only when
-	// dependency files change.
+	// Directory containing only go.mod, go.sum, and go.work files, synced
+	// independently of [Go.Source] so that its content hash changes only
+	// when dependency files change.
 	GoMod *dagger.Directory // +private
 }
 
@@ -79,11 +79,14 @@ func New(
 	// in the consuming project's root dagger.json customizations, not here.
 	// +defaultPath="/"
 	source *dagger.Directory,
-	// Go module files (go.mod and go.sum only). Synced separately from
-	// source so that the go mod download layer is cached independently
-	// of source code changes.
+	// Go module files (go.mod, go.sum, and go.work files). Synced
+	// separately from source so that the go mod download layer is cached
+	// independently of source code changes. Nested go.mod/go.sum files are
+	// included so go.work workspaces resolve every use directive; common
+	// non-member trees (worktrees, vendored toolchain modules, fixtures)
+	// are excluded so their module files do not bust the download cache.
 	// +defaultPath="/"
-	// +ignore=["*", "!go.mod", "!go.sum"]
+	// +ignore=["**", "!go.work", "!go.work.sum", "!**/go.mod", "!**/go.sum", ".git", ".claude", ".worktrees", ".workmux", ".devbox", ".task", ".test", ".tmp", "dist", "toolchains", "**/testdata"]
 	goMod *dagger.Directory,
 	// Go version for base images. Defaults to the version pinned in
 	// this module.
@@ -277,6 +280,11 @@ func (m *Go) Build(
 	// +default="./bin/"
 	outDir string,
 ) (*dagger.Directory, error) {
+	pkgs, err := m.resolvePkgs(ctx, pkgs)
+	if err != nil {
+		return nil, err
+	}
+
 	ldflags := slices.Clone(m.Ldflags)
 	if noSymbols {
 		ldflags = append(ldflags, "-s")
@@ -285,11 +293,13 @@ func (m *Go) Build(
 		ldflags = append(ldflags, "-w")
 	}
 
-	env := m.Env(platform)
-	cmd := []string{"go", "build", "-buildvcs=false", "-o", outDir}
-	for _, pkg := range pkgs {
-		env = env.WithExec(goCommand(cmd, []string{pkg}, ldflags, m.Values, m.Race))
-	}
+	// A single invocation spans all patterns so library-only patterns are
+	// compiled alongside main packages; go build -o errors only when the
+	// whole set contains no main package (as with a lone "./...").
+	env := m.Env(platform).WithExec(goCommand(
+		[]string{"go", "build", "-buildvcs=false", "-o", outDir},
+		pkgs, ldflags, m.Values, m.Race,
+	))
 	return dag.Directory().WithDirectory(outDir, env.Directory(outDir)), nil
 }
 

@@ -50,6 +50,11 @@ func (m *Go) Test(
 	// +default=["./..."]
 	pkgs []string,
 ) error {
+	pkgs, err := m.resolvePkgs(ctx, pkgs)
+	if err != nil {
+		return err
+	}
+
 	cmd := []string{"go", "test"}
 	if parallel != 0 {
 		cmd = append(cmd, fmt.Sprintf("-parallel=%d", parallel))
@@ -67,7 +72,7 @@ func (m *Go) Test(
 	if skip != "" {
 		cmd = append(cmd, "-skip", skip)
 	}
-	_, err := m.Env("").
+	_, err = m.Env("").
 		WithExec(goCommand(cmd, pkgs, m.Ldflags, m.Values, m.Race)).
 		Sync(ctx)
 	return err
@@ -167,13 +172,23 @@ func (m *Go) TestIntegration(
 // disables Go's internal test result caching. Dagger's layer caching
 // still shares the base container layers (image, module download) with
 // [Go.Test].
-func (m *Go) TestCoverage() *dagger.File {
+func (m *Go) TestCoverage(
+	ctx context.Context,
+	// Packages to test.
+	// +optional
+	// +default=["./..."]
+	pkgs []string,
+) (*dagger.File, error) {
+	pkgs, err := m.resolvePkgs(ctx, pkgs)
+	if err != nil {
+		return nil, err
+	}
+
+	cmd := []string{"go", "test", "-race", "-coverprofile=/tmp/coverage.txt"}
 	return m.Env("").
 		WithEnvVariable("CGO_ENABLED", "1").
-		WithExec([]string{
-			"go", "test", "-race", "-coverprofile=/tmp/coverage.txt", "./...",
-		}).
-		File("/tmp/coverage.txt")
+		WithExec(append(cmd, pkgs...)).
+		File("/tmp/coverage.txt"), nil
 }
 
 // ---------------------------------------------------------------------------
@@ -244,7 +259,11 @@ func (m *Go) LintDeadcode(
 	if version == "" {
 		version = deadcodeVersion
 	}
-	_, err := m.Env("").
+	pkgs, err := m.resolvePkgs(ctx, pkgs)
+	if err != nil {
+		return err
+	}
+	_, err = m.Env("").
 		WithExec([]string{"go", "install", "golang.org/x/tools/cmd/deadcode@" + version}).
 		WithExec(append([]string{"deadcode"}, pkgs...)).
 		Sync(ctx)
