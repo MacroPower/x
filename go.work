@@ -6,4 +6,5 @@ use (
 	./jsonschema
 	./magicschema
 	./stringtest
+	./version
 )

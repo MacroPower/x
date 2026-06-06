@@ -29,6 +29,7 @@ rules:
       - stringtest
       - tasks
       - toolchains
+      - version
   header-max-length:
     - 2
     - always

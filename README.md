@@ -16,9 +16,10 @@ Each top-level directory is an independent Go module, versioned and tagged
 separately (e.g. `magicschema/v0.1.0`). Some modules contain multiple
 packages.
 
-| Module                                                               | Description                                                       |
-| -------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| [`ansivideo`](https://pkg.go.dev/go.jacobcolvin.com/x/ansivideo)     | Renders video in the terminal with ANSI half-blocks.              |
-| [`cobras`](https://pkg.go.dev/go.jacobcolvin.com/x/cobras)           | CLI app helpers: structured logging, profiling, and version info. |
-| [`magicschema`](https://pkg.go.dev/go.jacobcolvin.com/x/magicschema) | Generates JSON Schema from YAML files.                            |
-| [`stringtest`](https://pkg.go.dev/go.jacobcolvin.com/x/stringtest)   | Test helpers for multi-line strings.                              |
+| Module                                                               | Description                                                    |
+| -------------------------------------------------------------------- | -------------------------------------------------------------- |
+| [`ansivideo`](https://pkg.go.dev/go.jacobcolvin.com/x/ansivideo)     | Renders video in the terminal with ANSI half-blocks.           |
+| [`cobras`](https://pkg.go.dev/go.jacobcolvin.com/x/cobras)           | CLI app helpers: structured logging and profiling.             |
+| [`magicschema`](https://pkg.go.dev/go.jacobcolvin.com/x/magicschema) | Generates JSON Schema from YAML files.                         |
+| [`stringtest`](https://pkg.go.dev/go.jacobcolvin.com/x/stringtest)   | Test helpers for multi-line strings.                           |
+| [`version`](https://pkg.go.dev/go.jacobcolvin.com/x/version)         | Exposes build version information from ldflags and build info. |

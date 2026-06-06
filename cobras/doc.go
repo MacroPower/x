@@ -7,6 +7,4 @@
 //     and completion integration.
 //   - [go.jacobcolvin.com/x/cobras/profile] manages runtime profiling for the
 //     lifetime of a command.
-//   - [go.jacobcolvin.com/x/cobras/version] exposes build version information
-//     from ldflags and build info.
 package cobras
