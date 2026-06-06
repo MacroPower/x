@@ -19,7 +19,7 @@ import (
 const (
 	defaultGoVersion    = "1.26"    // renovate: datasource=golang-version depName=go
 	golangciLintVersion = "v2.12"   // renovate: datasource=github-releases depName=golangci/golangci-lint
-	deadcodeVersion     = "v0.42.0" // renovate: datasource=go depName=golang.org/x/tools
+	deadcodeVersion     = "v0.45.0" // renovate: datasource=go depName=golang.org/x/tools
 
 	// defaultGoImage is the Docker Official golang image, pulled from
 	// Docker's verified publisher space on ECR Public to avoid Docker Hub
