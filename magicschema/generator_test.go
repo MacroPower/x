@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/x/magicschema"
 	"go.jacobcolvin.com/x/magicschema/helm"
@@ -255,6 +256,312 @@ func TestGeneratorOptions(t *testing.T) {
 			tc.check(t, got)
 		})
 	}
+}
+
+func TestGeneratorInferDefaults(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		opts   []magicschema.Option
+		inputs []string
+		check  func(*testing.T, map[string]any, string)
+	}{
+		"scalars record their values": {
+			opts: []magicschema.Option{magicschema.WithInferDefaults(true)},
+			inputs: []string{stringtest.Input(`
+				name: test
+				count: 3
+				ratio: 1.5
+				enabled: true
+			`)},
+			check: func(t *testing.T, got map[string]any, _ string) {
+				t.Helper()
+
+				assertJSONValue(t, `"test"`, propertyAt(t, got, "name")["default"])
+				assertJSONValue(t, `3`, propertyAt(t, got, "count")["default"])
+				assertJSONValue(t, `1.5`, propertyAt(t, got, "ratio")["default"])
+				assertJSONValue(t, `true`, propertyAt(t, got, "enabled")["default"])
+			},
+		},
+		"null and empty values record a null default": {
+			opts: []magicschema.Option{magicschema.WithInferDefaults(true)},
+			inputs: []string{stringtest.Input(`
+				empty:
+				explicit: null
+			`)},
+			check: func(t *testing.T, got map[string]any, _ string) {
+				t.Helper()
+
+				for _, key := range []string{"empty", "explicit"} {
+					prop := propertyAt(t, got, key)
+					d, ok := prop["default"]
+					require.True(t, ok, "expected a default on %s", key)
+					assert.Nil(t, d, "expected a null default on %s", key)
+				}
+			},
+		},
+		"scalar array records the full observed list": {
+			opts: []magicschema.Option{magicschema.WithInferDefaults(true)},
+			inputs: []string{stringtest.Input(`
+				tags:
+				  - one
+				  - two
+			`)},
+			check: func(t *testing.T, got map[string]any, _ string) {
+				t.Helper()
+
+				tags := propertyAt(t, got, "tags")
+				assertJSONValue(t, `["one", "two"]`, tags["default"])
+
+				items, ok := tags["items"].(map[string]any)
+				require.True(t, ok)
+				assert.NotContains(t, items, "default")
+			},
+		},
+		"empty array records an empty list": {
+			opts:   []magicschema.Option{magicschema.WithInferDefaults(true)},
+			inputs: []string{"tags: []\n"},
+			check: func(t *testing.T, got map[string]any, _ string) {
+				t.Helper()
+
+				assertJSONValue(t, `[]`, propertyAt(t, got, "tags")["default"])
+			},
+		},
+		"objects record no default but their children do": {
+			opts: []magicschema.Option{magicschema.WithInferDefaults(true)},
+			inputs: []string{stringtest.Input(`
+				parent:
+				  child: value
+			`)},
+			check: func(t *testing.T, got map[string]any, _ string) {
+				t.Helper()
+
+				assert.NotContains(t, propertyAt(t, got, "parent"), "default")
+				assertJSONValue(t, `"value"`, propertyAt(t, got, "parent", "child")["default"])
+			},
+		},
+		"sequence of mappings records the list but not items": {
+			opts: []magicschema.Option{magicschema.WithInferDefaults(true)},
+			inputs: []string{stringtest.Input(`
+				containers:
+				  - name: app
+				    port: 8080
+			`)},
+			check: func(t *testing.T, got map[string]any, _ string) {
+				t.Helper()
+
+				containers := propertyAt(t, got, "containers")
+				assertJSONValue(t, `[{"name": "app", "port": 8080}]`, containers["default"])
+
+				items, ok := containers["items"].(map[string]any)
+				require.True(t, ok)
+
+				itemProps, ok := items["properties"].(map[string]any)
+				require.True(t, ok)
+
+				for key, prop := range itemProps {
+					propMap, ok := prop.(map[string]any)
+					require.True(t, ok)
+					assert.NotContains(t, propMap, "default", "items property %s", key)
+				}
+			},
+		},
+		"annotator default wins over the observed value": {
+			opts: []magicschema.Option{
+				magicschema.WithAnnotators(losisin.New()),
+				magicschema.WithInferDefaults(true),
+			},
+			inputs: []string{stringtest.Input(`
+				# @schema default:99
+				port: 8080
+			`)},
+			check: func(t *testing.T, got map[string]any, _ string) {
+				t.Helper()
+
+				assertJSONValue(t, `99`, propertyAt(t, got, "port")["default"])
+			},
+		},
+		"annotation without a default records the observed value": {
+			opts: []magicschema.Option{
+				magicschema.WithAnnotators(losisin.New()),
+				magicschema.WithInferDefaults(true),
+			},
+			inputs: []string{stringtest.Input(`
+				# @schema type:integer
+				port: 8080
+			`)},
+			check: func(t *testing.T, got map[string]any, _ string) {
+				t.Helper()
+
+				port := propertyAt(t, got, "port")
+				assert.Equal(t, "integer", port["type"])
+				assertJSONValue(t, `8080`, port["default"])
+			},
+		},
+		"merge key properties record observed values": {
+			opts: []magicschema.Option{magicschema.WithInferDefaults(true)},
+			inputs: []string{stringtest.Input(`
+				defaults: &defaults
+				  timeout: 30
+				  retries: 3
+				production:
+				  <<: *defaults
+				  timeout: 60
+			`)},
+			check: func(t *testing.T, got map[string]any, _ string) {
+				t.Helper()
+
+				assertJSONValue(t, `3`, propertyAt(t, got, "production", "retries")["default"])
+				// The explicit key overrides the merged-in property.
+				assertJSONValue(t, `60`, propertyAt(t, got, "production", "timeout")["default"])
+			},
+		},
+		"mergeProperties surfaces the first property default": {
+			opts: []magicschema.Option{
+				magicschema.WithAnnotators(losisin.New()),
+				magicschema.WithInferDefaults(true),
+			},
+			inputs: []string{stringtest.Input(`
+				# @schema mergeProperties:true
+				env:
+				  a: 1
+				  b: 2
+			`)},
+			check: func(t *testing.T, got map[string]any, _ string) {
+				t.Helper()
+
+				// Locks in current behavior: schema merge keeps the first
+				// property's default in additionalProperties, as arbitrary
+				// as the first-wins type or description there.
+				ap, ok := propertyAt(t, got, "env")["additionalProperties"].(map[string]any)
+				require.True(t, ok)
+				assertJSONValue(t, `1`, ap["default"])
+			},
+		},
+		"multi-input merge keeps the first default": {
+			opts:   []magicschema.Option{magicschema.WithInferDefaults(true)},
+			inputs: []string{"port: 1\n", "port: 2\n"},
+			check: func(t *testing.T, got map[string]any, _ string) {
+				t.Helper()
+
+				assertJSONValue(t, `1`, propertyAt(t, got, "port")["default"])
+			},
+		},
+		"null first input keeps the null default": {
+			opts:   []magicschema.Option{magicschema.WithInferDefaults(true)},
+			inputs: []string{"port:\n", "port: 2\n"},
+			check: func(t *testing.T, got map[string]any, _ string) {
+				t.Helper()
+
+				port := propertyAt(t, got, "port")
+				d, ok := port["default"]
+				require.True(t, ok, "expected a default on port")
+				assert.Nil(t, d, "expected a null default on port")
+			},
+		},
+		"option off records no defaults": {
+			inputs: []string{stringtest.Input(`
+				name: test
+				tags:
+				  - a
+				empty:
+			`)},
+			check: func(t *testing.T, _ map[string]any, raw string) {
+				t.Helper()
+
+				assert.NotContains(t, raw, `"default"`)
+			},
+		},
+		"explicit tags coerce recorded values": {
+			opts:   []magicschema.Option{magicschema.WithInferDefaults(true)},
+			inputs: []string{"tagged: !!str 123\ncount: !!int \"5\"\n"},
+			check: func(t *testing.T, got map[string]any, _ string) {
+				t.Helper()
+
+				assertJSONValue(t, `"123"`, propertyAt(t, got, "tagged")["default"])
+				assertJSONValue(t, `5`, propertyAt(t, got, "count")["default"])
+			},
+		},
+		"non-finite floats record no default": {
+			opts:   []magicschema.Option{magicschema.WithInferDefaults(true)},
+			inputs: []string{"nan: .nan\ninf: .inf\n"},
+			check: func(t *testing.T, got map[string]any, _ string) {
+				t.Helper()
+
+				for _, key := range []string{"nan", "inf"} {
+					prop := propertyAt(t, got, key)
+					assert.Equal(t, "number", prop["type"])
+					assert.NotContains(t, prop, "default")
+				}
+			},
+		},
+		"sequence alias to an outside anchor resolves in the default": {
+			opts: []magicschema.Option{magicschema.WithInferDefaults(true)},
+			inputs: []string{stringtest.Input(`
+				anchor: &vals
+				  - 1
+				  - 2
+				wrapper:
+				  - *vals
+			`)},
+			check: func(t *testing.T, got map[string]any, _ string) {
+				t.Helper()
+
+				assertJSONValue(t, `[[1, 2]]`, propertyAt(t, got, "wrapper")["default"])
+			},
+		},
+		"alias cycle inside a sequence records no default": {
+			opts: []magicschema.Option{magicschema.WithInferDefaults(true)},
+			inputs: []string{stringtest.Input(`
+				cyc: &c
+				  - *c
+				  - 1
+			`)},
+			check: func(t *testing.T, got map[string]any, _ string) {
+				t.Helper()
+
+				cyc := propertyAt(t, got, "cyc")
+				assert.Equal(t, "array", cyc["type"])
+				assert.NotContains(t, cyc, "default")
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			inputs := make([][]byte, 0, len(tc.inputs))
+			for _, input := range tc.inputs {
+				inputs = append(inputs, []byte(input))
+			}
+
+			gen := magicschema.NewGenerator(tc.opts...)
+			schema, err := gen.Generate(inputs...)
+			require.NoError(t, err)
+
+			out, err := json.Marshal(schema)
+			require.NoError(t, err)
+
+			var got map[string]any
+
+			require.NoError(t, json.Unmarshal(out, &got))
+			tc.check(t, got, string(out))
+		})
+	}
+}
+
+func TestGeneratorInferDefaultsGolden(t *testing.T) {
+	t.Parallel()
+
+	data, err := os.ReadFile("testdata/infer_defaults.yaml")
+	require.NoError(t, err)
+
+	gen := magicschema.NewGenerator(magicschema.WithInferDefaults(true))
+	schema, err := gen.Generate(data)
+	require.NoError(t, err)
+
+	assertGolden(t, "testdata/infer_defaults.schema.json", schema)
 }
 
 func TestGeneratorFromFile(t *testing.T) {
@@ -1224,6 +1531,35 @@ func TestGeneratorMultipleInputsWithOneEmpty(t *testing.T) {
 	// A blank input contributes the true schema (no type constraint), so
 	// the typeless side widens the merged root to accept null as well.
 	assert.Equal(t, []any{"object", "null"}, got["type"])
+}
+
+// propertyAt walks a marshaled schema map down the named properties and
+// returns the schema at the end of the path.
+func propertyAt(t *testing.T, schema map[string]any, names ...string) map[string]any {
+	t.Helper()
+
+	cur := schema
+
+	for _, name := range names {
+		props, ok := cur["properties"].(map[string]any)
+		require.True(t, ok, "expected properties")
+
+		cur, ok = props[name].(map[string]any)
+		require.True(t, ok, "missing property: %s", name)
+	}
+
+	return cur
+}
+
+// assertJSONValue asserts that a decoded JSON value matches the expected
+// JSON text when re-marshaled, sidestepping float64 round-trip types.
+func assertJSONValue(t *testing.T, want string, got any) {
+	t.Helper()
+
+	b, err := json.Marshal(got)
+	require.NoError(t, err)
+
+	assert.JSONEq(t, want, string(b))
 }
 
 // assertPropertiesMatch checks that all expected properties exist in got

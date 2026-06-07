@@ -1,0 +1,78 @@
+{
+  "type": "object",
+  "properties": {
+    "replicas": {
+      "type": "integer",
+      "description": "Number of pod replicas",
+      "default": 3
+    },
+    "name": {
+      "type": "string",
+      "default": "app"
+    },
+    "ratio": {
+      "type": "number",
+      "default": 1.5
+    },
+    "debug": {
+      "type": "boolean",
+      "default": false
+    },
+    "empty": {
+      "default": null
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [
+        "alpha",
+        "beta"
+      ]
+    },
+    "containers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer"
+          }
+        },
+        "additionalProperties": true
+      },
+      "default": [
+        {
+          "name": "app",
+          "port": 8080
+        }
+      ]
+    },
+    "nested": {
+      "type": "object",
+      "properties": {
+        "child": {
+          "type": "string",
+          "default": "value"
+        },
+        "values": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "default": [
+            1,
+            2
+          ]
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": true
+}

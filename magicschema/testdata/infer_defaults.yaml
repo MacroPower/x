@@ -1,0 +1,21 @@
+# Number of pod replicas
+replicas: 3
+
+name: app
+ratio: 1.5
+debug: false
+empty:
+
+tags:
+  - alpha
+  - beta
+
+containers:
+  - name: app
+    port: 8080
+
+nested:
+  child: value
+  values:
+    - 1
+    - 2

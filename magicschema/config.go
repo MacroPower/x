@@ -12,14 +12,15 @@ import (
 // Flags holds CLI flag names for schema generation configuration, allowing
 // callers to customize flag names while keeping sensible defaults.
 type Flags struct {
-	Output      string
-	Draft       string
-	Indent      string
-	Title       string
-	Description string
-	ID          string
-	Annotators  string
-	Strict      string
+	Output        string
+	Draft         string
+	Indent        string
+	Title         string
+	Description   string
+	ID            string
+	Annotators    string
+	Strict        string
+	InferDefaults string
 }
 
 // Registry maps annotator names (as used in the --annotators flag) to
@@ -41,29 +42,31 @@ func (r Registry) Add(annotators ...Annotator) {
 // Create instances with [NewConfig] and register CLI flags with
 // [Config.RegisterFlags]. Use [Config.NewGenerator] to create a [Generator].
 type Config struct {
-	Flags       Flags
-	Registry    Registry
-	Output      string
-	Title       string
-	Description string
-	ID          string
-	Annotators  string
-	Draft       int
-	Indent      int
-	Strict      bool
+	Flags         Flags
+	Registry      Registry
+	Output        string
+	Title         string
+	Description   string
+	ID            string
+	Annotators    string
+	Draft         int
+	Indent        int
+	Strict        bool
+	InferDefaults bool
 }
 
 // NewConfig returns a new [Config] with default flag names.
 func NewConfig() *Config {
 	f := Flags{
-		Output:      "output",
-		Draft:       "draft",
-		Indent:      "indent",
-		Title:       "title",
-		Description: "description",
-		ID:          "id",
-		Annotators:  "annotators",
-		Strict:      "strict",
+		Output:        "output",
+		Draft:         "draft",
+		Indent:        "indent",
+		Title:         "title",
+		Description:   "description",
+		ID:            "id",
+		Annotators:    "annotators",
+		Strict:        "strict",
+		InferDefaults: "infer-defaults",
 	}
 
 	return &Config{Flags: f}
@@ -88,6 +91,8 @@ func (c *Config) RegisterFlags(flags *pflag.FlagSet) {
 		"comma-separated list of enabled annotation parsers (in priority order)")
 	flags.BoolVar(&c.Strict, c.Flags.Strict, false,
 		"set additionalProperties: false on objects")
+	flags.BoolVar(&c.InferDefaults, c.Flags.InferDefaults, false,
+		"record observed YAML values as schema defaults")
 }
 
 // RegisterCompletions registers shell completions for schema generation flags
@@ -162,6 +167,10 @@ func (c *Config) NewGenerator() (*Generator, error) {
 
 	if c.Strict {
 		opts = append(opts, WithStrict(true))
+	}
+
+	if c.InferDefaults {
+		opts = append(opts, WithInferDefaults(true))
 	}
 
 	return NewGenerator(opts...), nil

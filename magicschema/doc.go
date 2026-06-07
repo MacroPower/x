@@ -57,7 +57,9 @@
 //     [AnnotationResult.MergeProperties] are OR'd across all results.
 //     [AnnotationResult.HasRequired] uses the highest-priority annotator
 //     that explicitly sets it (non-nil). Description uses the first
-//     non-empty value. Extra maps are merged per key.
+//     non-empty value. Extra maps are merged per key. With
+//     [WithInferDefaults], an annotated node without a default records
+//     the observed value, same as the structural fallback below.
 //
 //  3. Infer schema (structural fallback): when no annotator produces
 //     output for a node, the schema is derived entirely from YAML
@@ -72,7 +74,16 @@
 //     comments that do not look like annotation markers become the
 //     description; [IsAnnotationComment] identifies markers to skip.
 //     Comments also fill in the description when annotators produce
-//     output without one.
+//     output without one. With [WithInferDefaults], each scalar records
+//     its observed value and each array its full observed list as the
+//     default when no annotator set one; null and empty values record a
+//     null default. Recording is all-or-nothing: an array whose contents
+//     cannot be fully resolved (alias cycles, merge keys, exceeded walk
+//     budgets) records no default rather than a partial one. Objects
+//     record no default, since their children carry their own. Defaults
+//     inside array items schemas are suppressed, since items describes
+//     every element and a default lifted from one observed element would
+//     be arbitrary.
 //
 //  4. Merge multiple inputs: when multiple YAML files are provided,
 //     schemas are generated independently and then merged with union

@@ -2,11 +2,13 @@ package magicschema
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
 
+	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/parser"
 	"github.com/google/jsonschema-go/jsonschema"
@@ -22,11 +24,12 @@ var (
 
 // Generator produces JSON Schema from YAML input.
 type Generator struct {
-	title       string
-	description string
-	id          string
-	annotators  []Annotator
-	strict      bool
+	title         string
+	description   string
+	id            string
+	annotators    []Annotator
+	strict        bool
+	inferDefaults bool
 
 	// Walk recursion depth on the per-document copy of the Generator,
 	// bounding alias cycles and nesting deeper than maxWalkDepth.
@@ -36,6 +39,12 @@ type Generator struct {
 	// bounding total work when aliases fan out exponentially (chained
 	// anchors each referenced multiple times, billion-laughs style).
 	visits int
+
+	// Items-schema nesting level on the per-document copy of the
+	// Generator. An items schema describes every element of a sequence,
+	// so a default lifted from one observed element would be arbitrary;
+	// default recording is suppressed while non-zero.
+	inItems int
 }
 
 // maxWalkDepth bounds schema-walk recursion, counted once per container
@@ -96,6 +105,18 @@ func WithID(id string) Option {
 func WithStrict(strict bool) Option {
 	return func(g *Generator) {
 		g.strict = strict
+	}
+}
+
+// WithInferDefaults records observed YAML values as schema defaults
+// when no annotator sets one. Scalars record their value, sequences the
+// full observed list, and null or empty values a null default; objects
+// record no default, since their children carry their own. Defaults are
+// not recorded inside array items schemas, which describe every element
+// rather than a single observed value.
+func WithInferDefaults(enabled bool) Option {
+	return func(g *Generator) {
+		g.inferDefaults = enabled
 	}
 }
 
@@ -259,16 +280,45 @@ func (g *Generator) walkNode(
 		return &jsonschema.Schema{}
 	}
 
+	var schema *jsonschema.Schema
+
 	switch n := unwrapped.(type) {
 	case *ast.MappingNode:
-		return g.walkMapping(n, keyPath, anchors)
+		schema = g.walkMapping(n, keyPath, anchors)
 	case *ast.MappingValueNode:
-		return g.walkMapping(nil, keyPath, anchors, n)
+		schema = g.walkMapping(nil, keyPath, anchors, n)
 	case *ast.SequenceNode:
-		return g.walkSequence(n, keyPath, anchors)
+		schema = g.walkSequence(n, keyPath, anchors)
 	default:
 		// Pass the wrapped node so explicit tags reach inferType.
-		return g.walkScalar(node)
+		schema = g.walkScalar(node)
+	}
+
+	g.recordDefault(schema, node, anchors)
+
+	return schema
+}
+
+// recordDefault fills in the schema default from the observed value when
+// default inference is enabled, no annotator set one, and the walk is
+// outside an items schema (see the inItems field). Objects record no
+// default, since their children carry their own.
+func (g *Generator) recordDefault(
+	schema *jsonschema.Schema,
+	node ast.Node,
+	anchors map[string]ast.Node,
+) {
+	if !g.inferDefaults || g.inItems != 0 || schema.Default != nil {
+		return
+	}
+
+	switch unwrapNode(node).(type) {
+	case *ast.MappingNode, *ast.MappingValueNode:
+	case *ast.SequenceNode:
+		schema.Default = g.nodeDefault(node, anchors)
+	default:
+		// Pass the wrapped node so explicit tags coerce the value.
+		schema.Default = scalarDefault(node)
 	}
 }
 
@@ -510,6 +560,10 @@ func (g *Generator) buildChildSchema(
 		childSchema.PropertyOrder = nil
 	}
 
+	// The observed value fills in the default when no annotator set one,
+	// regardless of the annotated type (descriptive, fail-open).
+	g.recordDefault(childSchema, valueNode, anchors)
+
 	// A plain comment fills in the description when no annotator set one:
 	// extract as much as possible (best-effort) rather than letting an
 	// annotation without a description suppress the comment fallback.
@@ -583,6 +637,12 @@ func (g *Generator) inferItemsFromSequence(
 		return nil
 	}
 
+	// Suppress per-element defaults inside the items schema (see the
+	// inItems field); the sequence node itself already carries the full
+	// list as its default.
+	g.inItems++
+	defer func() { g.inItems-- }()
+
 	if len(seq.Values) == 0 {
 		return nil
 	}
@@ -627,6 +687,143 @@ func (g *Generator) walkScalar(node ast.Node) *jsonschema.Schema {
 	}
 
 	return &jsonschema.Schema{Type: t}
+}
+
+// scalarDefault converts a scalar node's observed value to a JSON default.
+// The node arrives alias-resolved but still wrapped, so explicit tags
+// coerce the value the same way a YAML loader would. Values with no JSON
+// representation (NaN, infinities) yield no default.
+func scalarDefault(node ast.Node) json.RawMessage {
+	v, ok := scalarGoValue(node)
+	if !ok {
+		return nil
+	}
+
+	return DefaultValue(v)
+}
+
+// scalarGoValue converts a scalar node to its plain Go value. Block
+// scalars read the inner string node's text directly; both the literal
+// node and its re-serialized forms carry the block header.
+func scalarGoValue(node ast.Node) (any, bool) {
+	if isNullNode(node) {
+		return nil, true
+	}
+
+	if lit, ok := unwrapNode(node).(*ast.LiteralNode); ok {
+		return lit.Value.Value, true
+	}
+
+	var v any
+
+	err := yaml.NodeToValue(node, &v)
+	if err != nil {
+		return nil, false
+	}
+
+	return v, true
+}
+
+// nodeDefault converts a container node's observed value to a JSON
+// default, resolving aliases along the way. Conversion is all-or-nothing:
+// any unconvertible part (alias cycles, merge keys, exceeded walk
+// budgets) yields no default rather than a partial value.
+func (g *Generator) nodeDefault(node ast.Node, anchors map[string]ast.Node) json.RawMessage {
+	v, ok := g.astToGoValue(node, anchors)
+	if !ok {
+		return nil
+	}
+
+	return DefaultValue(v)
+}
+
+// astToGoValue converts an AST subtree to a plain Go value, resolving
+// aliases via the anchor map. Sequences may alias anchors defined outside
+// the subtree, which [yaml.NodeToValue] cannot resolve, so containers
+// convert manually. They consume the walk depth and visit budgets -- the
+// only guard against alias cycles inside sequences -- so pathological
+// inputs fail open to no default instead of hanging.
+func (g *Generator) astToGoValue(node ast.Node, anchors map[string]ast.Node) (any, bool) {
+	g.visits++
+
+	if g.visits > maxNodeVisits {
+		return nil, false
+	}
+
+	node = resolveAliases(node, anchors)
+
+	switch n := unwrapNode(node).(type) {
+	case nil:
+		return nil, false
+	case *ast.SequenceNode:
+		return g.sequenceToGoValue(n, anchors)
+	case *ast.MappingNode:
+		return g.mappingToGoValue(n.Values, anchors)
+	case *ast.MappingValueNode:
+		return g.mappingToGoValue([]*ast.MappingValueNode{n}, anchors)
+	default:
+		// Pass the wrapped node so explicit tags coerce the value.
+		return scalarGoValue(node)
+	}
+}
+
+// sequenceToGoValue converts a sequence node to a []any, initialized
+// non-nil so an empty sequence marshals as [] rather than null.
+func (g *Generator) sequenceToGoValue(
+	seq *ast.SequenceNode,
+	anchors map[string]ast.Node,
+) (any, bool) {
+	g.depth++
+	defer func() { g.depth-- }()
+
+	if g.depth > maxWalkDepth {
+		return nil, false
+	}
+
+	out := make([]any, 0, len(seq.Values))
+
+	for _, val := range seq.Values {
+		v, ok := g.astToGoValue(val, anchors)
+		if !ok {
+			return nil, false
+		}
+
+		out = append(out, v)
+	}
+
+	return out, true
+}
+
+// mappingToGoValue converts mapping entries to a map[string]any. Merge
+// keys (<<) fail open to no value: they are rare inside sequences, and
+// expanding them here would duplicate the schema walk's merge handling.
+func (g *Generator) mappingToGoValue(
+	values []*ast.MappingValueNode,
+	anchors map[string]ast.Node,
+) (any, bool) {
+	g.depth++
+	defer func() { g.depth-- }()
+
+	if g.depth > maxWalkDepth {
+		return nil, false
+	}
+
+	out := make(map[string]any, len(values))
+
+	for _, mvn := range values {
+		if _, ok := mvn.Key.(*ast.MergeKeyNode); ok {
+			return nil, false
+		}
+
+		v, ok := g.astToGoValue(mvn.Value, anchors)
+		if !ok {
+			return nil, false
+		}
+
+		out[keyText(mvn.Key)] = v
+	}
+
+	return out, true
 }
 
 // annotate runs all enabled annotators on a node and returns the merged result.
