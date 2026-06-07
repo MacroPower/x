@@ -397,7 +397,10 @@ func extractSchemaRootBlock(comment string) string {
 }
 
 // extractNonAnnotationDescription extracts description text from comments
-// that are not part of @schema or @schema.root blocks.
+// that are not part of @schema or @schema.root blocks. Lines join with
+// newlines and keep their indentation beyond the comment marker and single
+// following space, matching upstream helm-schema, so YAML snippets embedded
+// in comments keep their structure.
 func extractNonAnnotationDescription(comment string) string {
 	lines := strings.Split(comment, "\n")
 
@@ -408,7 +411,10 @@ func extractNonAnnotationDescription(comment string) string {
 	)
 
 	for _, line := range lines {
-		stripped := strings.TrimSpace(stripCommentHash(line))
+		// Markers are matched on a fully trimmed copy; the content keeps
+		// its indentation.
+		content := stripCommentHash(line)
+		stripped := strings.TrimSpace(content)
 
 		if after, ok := strings.CutPrefix(stripped, "@schema"); ok {
 			rest := strings.TrimSpace(after)
@@ -441,8 +447,9 @@ func extractNonAnnotationDescription(comment string) string {
 			continue
 		}
 
-		// Regular comment line.
-		cleaned := cleanCommentLine(line)
+		// Regular comment line: strip the helm-docs "-- " prefix off the
+		// indentation-preserving copy.
+		cleaned := strings.TrimPrefix(content, "-- ")
 		if magicschema.IsAnnotationComment(cleaned) {
 			continue
 		}
@@ -457,7 +464,7 @@ func extractNonAnnotationDescription(comment string) string {
 		return ""
 	}
 
-	return strings.Join(group, " ")
+	return strings.Join(group, "\n")
 }
 
 // isDelimiterSuffix reports whether the text following the "@schema" token
@@ -481,22 +488,6 @@ func stripCommentHash(line string) string {
 	}
 
 	return strings.TrimPrefix(line, " ")
-}
-
-// cleanCommentLine strips up to two leading '#' characters plus optional space
-// from a single comment line.
-func cleanCommentLine(line string) string {
-	line = strings.TrimSpace(line)
-	if !strings.HasPrefix(line, "#") {
-		return line
-	}
-
-	line = stripCommentHash(line)
-
-	// Strip helm-docs "-- " prefix.
-	line = strings.TrimPrefix(line, "-- ")
-
-	return strings.TrimSpace(line)
 }
 
 // applyType sets Type or Types on the schema from a YAML value.

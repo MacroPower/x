@@ -389,17 +389,6 @@
 //     because we already omit the auto-generated fields (title, default,
 //     required, additionalProperties) by design.
 //
-//   - Description line joining: The upstream joins multi-line description
-//     comments with newline characters ("\n"), preserving the original
-//     line structure in the JSON output. Our implementation joins
-//     description lines with spaces, producing single-line descriptions.
-//     This is intentional: JSON Schema descriptions are typically rendered
-//     as single-line prose in editor tooltips and documentation generators,
-//     and collapsing to a single line produces cleaner output. Users who
-//     need multi-line descriptions can use the explicit description field
-//     in the @schema block with literal block scalar syntax.
-//     (Upstream: "Line one\nLine two"; ours: "Line one Line two".)
-//
 //   - No helm-docs compatibility mode: We do not support the upstream's
 //     --helm-docs-compatibility-mode flag, which uses the helm-docs
 //     library's ParseComment function to extract @default, (type) prefix,
@@ -443,9 +432,10 @@
 //     upstream regex ((?s)(?m)(?:.*\n{2,})+) greedily strips everything
 //     before the last double-newline; our implementation achieves the
 //     same result by finding the last blank line in the collected
-//     description lines and using only lines after it. (Note: the line
-//     joining character differs -- see the "Description line joining"
-//     divergence above.)
+//     description lines and using only lines after it. Description lines
+//     join with newlines and keep their indentation beyond the comment
+//     marker and single following space, matching the upstream, so YAML
+//     snippets embedded in comments keep their structure.
 //
 //   - Helm-docs prefix stripping: The "-- " prefix from helm-docs style
 //     comments is stripped from descriptions. Helm-docs @tag lines (e.g.,

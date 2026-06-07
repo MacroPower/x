@@ -150,11 +150,13 @@ func extractFromComment(comment *ast.CommentGroupNode) string {
 }
 
 // cleanComment strips comment markers and whitespace from a comment string.
-// Multi-line comments are joined with spaces, using only the last comment
+// Multi-line comments are joined with newlines, using only the last comment
 // group (the lines after the last blank line, ignoring trailing blanks).
-// Annotation lines are dropped before group selection: bare @schema and
-// @schema.root lines fence helm-schema blocks whose content is annotation
-// data, not prose, and lines matching [IsAnnotationComment] are markers.
+// Indentation beyond the single space after "#" survives, so YAML snippets
+// embedded in comments keep their structure. Annotation lines are dropped
+// before group selection: bare @schema and @schema.root lines fence
+// helm-schema blocks whose content is annotation data, not prose, and lines
+// matching [IsAnnotationComment] are markers.
 func cleanComment(s string) string {
 	var (
 		lines         []string
@@ -163,7 +165,10 @@ func cleanComment(s string) string {
 	)
 
 	for line := range strings.SplitSeq(s, "\n") {
-		cleaned := strings.TrimSpace(stripCommentPrefix(line))
+		// Markers are matched on a fully trimmed copy; the content keeps
+		// its indentation.
+		content := stripCommentPrefix(line)
+		cleaned := strings.TrimSpace(content)
 
 		// Track helm-schema block fences so block content never leaks
 		// into descriptions. A root marker inside an open @schema block
@@ -203,20 +208,12 @@ func cleanComment(s string) string {
 			continue
 		}
 
-		lines = append(lines, cleaned)
+		lines = append(lines, content)
 	}
 
-	var parts []string
-
-	for _, line := range LastCommentGroup(lines) {
-		if line == "" {
-			continue
-		}
-
-		parts = append(parts, line)
-	}
-
-	return strings.Join(parts, " ")
+	// The returned group contains no blank lines (blanks delimit groups),
+	// so the lines join directly.
+	return strings.Join(LastCommentGroup(lines), "\n")
 }
 
 // stripCommentPrefix removes leading "#" characters and a single space.

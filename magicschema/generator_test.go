@@ -1002,7 +1002,7 @@ func TestGeneratorFallbackInference(t *testing.T) {
 				assert.Equal(t, "Image tag to deploy", tag["description"])
 			},
 		},
-		"multi-line head comments joined with spaces": {
+		"multi-line head comments joined with newlines": {
 			input: "# First line of description\n# Second line of description\nval: 42\n",
 			check: func(t *testing.T, got map[string]any) {
 				t.Helper()
@@ -1014,10 +1014,44 @@ func TestGeneratorFallbackInference(t *testing.T) {
 				require.True(t, ok)
 				assert.Equal(t, "integer", val["type"])
 
-				desc, ok := val["description"].(string)
+				assert.Equal(t, stringtest.JoinLF(
+					"First line of description",
+					"Second line of description",
+				), val["description"])
+			},
+		},
+		"comment with yaml example keeps newlines and indentation": {
+			input: "# Example config:\n#   foo: bar\n#   baz:\n#     - 1\nfield: {}\n",
+			check: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
 				require.True(t, ok)
-				assert.Contains(t, desc, "First line of description")
-				assert.Contains(t, desc, "Second line of description")
+
+				field, ok := props["field"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, stringtest.JoinLF(
+					"Example config:",
+					"  foo: bar",
+					"  baz:",
+					"    - 1",
+				), field["description"])
+			},
+		},
+		"whitespace-only comment line separates groups": {
+			// A whitespace-only comment line is a group separator even with
+			// indentation preserved, so only the last group survives.
+			input: "#   earlier text\n#  \n#   kept text\nval: 1\n",
+			check: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				val, ok := props["val"].(map[string]any)
+				require.True(t, ok)
+				assert.Equal(t, "  kept text", val["description"])
 			},
 		},
 		"inline comment on same-line key-value": {

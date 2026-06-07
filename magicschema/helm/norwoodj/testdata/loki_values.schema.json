@@ -355,7 +355,7 @@
           "properties": {
             "type": {
               "type": "string",
-              "description": "Loki requires a bucket for chunks and the ruler. GEL requires a third bucket for the admin API. Please provide these values if you are using object storage. bucketNames: chunks: FIXME ruler: FIXME admin: FIXME"
+              "description": "Loki requires a bucket for chunks and the ruler. GEL requires a third bucket for the admin API.\nPlease provide these values if you are using object storage.\nbucketNames:\n  chunks: FIXME\n  ruler: FIXME\n  admin: FIXME"
             },
             "s3": {
               "type": "object",
@@ -460,7 +460,7 @@
             },
             "use_thanos_objstore": {
               "type": "boolean",
-              "description": "Loki now supports using thanos storage clients for connecting to object storage backend. This will become the default way to configure storage in a future releases."
+              "description": "Loki now supports using thanos storage clients for connecting to object storage backend.\nThis will become the default way to configure storage in a future releases."
             },
             "object_store": {
               "type": "object",
@@ -1283,7 +1283,7 @@
           "description": "Replicas for `loki-canary` when using a Deployment"
         }
       },
-      "description": "The Loki canary pushes logs to and queries from this loki installation to test that it's working correctly",
+      "description": "The Loki canary pushes logs to and queries from this loki installation to test\nthat it's working correctly",
       "additionalProperties": true
     },
     "serviceAccount": {
@@ -2369,7 +2369,7 @@
         },
         "labels": {
           "type": "object",
-          "description": "nginx.ingress.kubernetes.io/auth-type: basic nginx.ingress.kubernetes.io/auth-secret: loki-distributed-basic-auth nginx.ingress.kubernetes.io/auth-secret-type: auth-map nginx.ingress.kubernetes.io/configuration-snippet: | proxy_set_header X-Scope-OrgID $remote_user;",
+          "description": "   nginx.ingress.kubernetes.io/auth-type: basic\n   nginx.ingress.kubernetes.io/auth-secret: loki-distributed-basic-auth\n   nginx.ingress.kubernetes.io/auth-secret-type: auth-map\n   nginx.ingress.kubernetes.io/configuration-snippet: |\n     proxy_set_header X-Scope-OrgID $remote_user;",
           "additionalProperties": true
         },
         "paths": {
@@ -2404,7 +2404,7 @@
               "description": "Paths that are exposed by Loki Compactor. If deployment mode is Distributed, the requests are forwarded to the service: `{{\"loki.compactorFullname\"}}`. If deployment mode is SimpleScalable, the requests are forwarded to k8s service: `{{\"loki.backendFullname\"}}`. If deployment mode is SingleBinary, the requests are forwarded to the central/single k8s service: `{{\"loki.singleBinaryFullname\"}}`"
             }
           },
-          "description": "blackbox.monitoring.exclude: \"true\"",
+          "description": "   blackbox.monitoring.exclude: \"true\"",
           "additionalProperties": true
         },
         "hosts": {
@@ -3665,7 +3665,7 @@
                   "additionalProperties": true
                 }
               },
-              "description": "- type: Pods pods: metric: name: loki_lines_total target: type: AverageValue averageValue: 10k",
+              "description": "- type: Pods\n  pods:\n    metric:\n      name: loki_lines_total\n    target:\n      type: AverageValue\n      averageValue: 10k",
               "additionalProperties": true
             }
           },
@@ -3917,7 +3917,7 @@
                     "type": "string"
                   },
                   "storageClass": {
-                    "description": "If defined, storageClassName: \u003cstorageClass\u003e. If set to \"-\", storageClassName: \"\", which disables dynamic provisioning. If empty or set to null, no storageClassName spec is set, choosing the default provisioner (gp2 on AWS, standard on GKE, AWS, and OpenStack)."
+                    "description": "  If defined, storageClassName: \u003cstorageClass\u003e.\n  If set to \"-\", storageClassName: \"\", which disables dynamic provisioning.\n  If empty or set to null, no storageClassName spec is\n  set, choosing the default provisioner (gp2 on AWS, standard on GKE, AWS, and OpenStack)."
                   },
                   "volumeAttributesClassName": {
                     "description": "Volume attributes class name to be used. If empty or set to null, no volumeAttributesClassName spec is set. Requires Kubernetes 1.31"
@@ -4137,7 +4137,7 @@
                   "additionalProperties": true
                 }
               },
-              "description": "- type: Pods pods: metric: name: loki_lines_total target: type: AverageValue averageValue: 10k",
+              "description": "- type: Pods\n  pods:\n    metric:\n      name: loki_lines_total\n    target:\n      type: AverageValue\n      averageValue: 10k",
               "additionalProperties": true
             }
           },
@@ -4370,7 +4370,7 @@
                   "additionalProperties": true
                 }
               },
-              "description": "- type: External external: metric: name: loki_inflight_queries target: type: AverageValue averageValue: 12",
+              "description": "- type: External\n  external:\n    metric:\n      name: loki_inflight_queries\n    target:\n      type: AverageValue\n      averageValue: 12",
               "additionalProperties": true
             }
           },
@@ -4645,7 +4645,7 @@
                   "additionalProperties": true
                 }
               },
-              "description": "- type: Pods pods: metric: name: loki_query_rate target: type: AverageValue averageValue: 100",
+              "description": "- type: Pods\n  pods:\n    metric:\n      name: loki_query_rate\n    target:\n      type: AverageValue\n      averageValue: 100",
               "additionalProperties": true
             }
           },
@@ -5462,7 +5462,7 @@
                     "type": "string"
                   },
                   "storageClass": {
-                    "description": "If defined, storageClassName: \u003cstorageClass\u003e. If set to \"-\", storageClassName: \"\", which disables dynamic provisioning. If empty or set to null, no storageClassName spec is set, choosing the default provisioner (gp2 on AWS, standard on GKE, AWS, and OpenStack)."
+                    "description": "  If defined, storageClassName: \u003cstorageClass\u003e.\n  If set to \"-\", storageClassName: \"\", which disables dynamic provisioning.\n  If empty or set to null, no storageClassName spec is\n  set, choosing the default provisioner (gp2 on AWS, standard on GKE, AWS, and OpenStack)."
                   },
                   "volumeAttributesClassName": {
                     "description": "Volume attributes class name to be used. If empty or set to null, no volumeAttributesClassName spec is set. Requires Kubernetes 1.31"
@@ -5740,7 +5740,7 @@
                     "description": "Size of persistent disk"
                   },
                   "storageClass": {
-                    "description": "If defined, storageClassName: \u003cstorageClass\u003e. If set to \"-\", storageClassName: \"\", which disables dynamic provisioning. If empty or set to null, no storageClassName spec is set, choosing the default provisioner (gp2 on AWS, standard on GKE, AWS, and OpenStack)."
+                    "description": "  If defined, storageClassName: \u003cstorageClass\u003e.\n  If set to \"-\", storageClassName: \"\", which disables dynamic provisioning.\n  If empty or set to null, no storageClassName spec is\n  set, choosing the default provisioner (gp2 on AWS, standard on GKE, AWS, and OpenStack)."
                   },
                   "volumeAttributesClassName": {
                     "description": "Volume attributes class name to be used. If empty or set to null, no volumeAttributesClassName spec is set. Requires Kubernetes 1.31"
@@ -5998,7 +5998,7 @@
                     "description": "Size of persistent disk"
                   },
                   "storageClass": {
-                    "description": "If defined, storageClassName: \u003cstorageClass\u003e. If set to \"-\", storageClassName: \"\", which disables dynamic provisioning. If empty or set to null, no storageClassName spec is set, choosing the default provisioner (gp2 on AWS, standard on GKE, AWS, and OpenStack)."
+                    "description": "  If defined, storageClassName: \u003cstorageClass\u003e.\n  If set to \"-\", storageClassName: \"\", which disables dynamic provisioning.\n  If empty or set to null, no storageClassName spec is\n  set, choosing the default provisioner (gp2 on AWS, standard on GKE, AWS, and OpenStack)."
                   },
                   "volumeAttributesClassName": {
                     "description": "Volume attributes class name to be used. If empty or set to null, no volumeAttributesClassName spec is set. Requires Kubernetes 1.31"
@@ -6124,7 +6124,7 @@
                   "additionalProperties": true
                 }
               },
-              "description": "- type: Pods pods: metric: name: loki_query_rate target: type: AverageValue averageValue: 100",
+              "description": "- type: Pods\n  pods:\n    metric:\n      name: loki_query_rate\n    target:\n      type: AverageValue\n      averageValue: 100",
               "additionalProperties": true
             }
           },
@@ -6501,7 +6501,7 @@
                     "type": "string"
                   },
                   "storageClass": {
-                    "description": "If defined, storageClassName: \u003cstorageClass\u003e. If set to \"-\", storageClassName: \"\", which disables dynamic provisioning. If empty or set to null, no storageClassName spec is set, choosing the default provisioner (gp2 on AWS, standard on GKE, AWS, and OpenStack)."
+                    "description": "  If defined, storageClassName: \u003cstorageClass\u003e.\n  If set to \"-\", storageClassName: \"\", which disables dynamic provisioning.\n  If empty or set to null, no storageClassName spec is\n  set, choosing the default provisioner (gp2 on AWS, standard on GKE, AWS, and OpenStack)."
                   },
                   "volumeAttributesClassName": {
                     "description": "Volume attributes class name to be used. If empty or set to null, no volumeAttributesClassName spec is set. Requires Kubernetes 1.31"
@@ -7935,7 +7935,7 @@
         },
         "drivesPerNode": {
           "type": "integer",
-          "description": "Minio requires 2 to 16 drives for erasure code (drivesPerNode * replicas) https://docs.min.io/docs/minio-erasure-code-quickstart-guide Since we only have 1 replica, that means 2 drives must be used."
+          "description": "Minio requires 2 to 16 drives for erasure code (drivesPerNode * replicas)\nhttps://docs.min.io/docs/minio-erasure-code-quickstart-guide\nSince we only have 1 replica, that means 2 drives must be used."
         },
         "rootUser": {
           "type": "string",
@@ -7961,7 +7961,7 @@
             },
             "additionalProperties": true
           },
-          "description": "The first user in the list below is used for Loki/GEL authentication. You can add additional users if desired; they will not impact Loki/GEL. `accessKey` = username, `secretKey` = password"
+          "description": "The first user in the list below is used for Loki/GEL authentication.\nYou can add additional users if desired; they will not impact Loki/GEL.\n`accessKey` = username, `secretKey` = password"
         },
         "buckets": {
           "type": "array",
@@ -8020,7 +8020,7 @@
       "additionalProperties": true
     },
     "extraObjects": {
-      "description": "Create extra manifests via values Can be a list or dictionary, both are passed through `tpl`.  If dict, keys are ignored and only values are used. Objects can also be defined as multiline strings, useful for templating field names"
+      "description": "Create extra manifests via values\nCan be a list or dictionary, both are passed through `tpl`.  If dict, keys are ignored and only values are used.\nObjects can also be defined as multiline strings, useful for templating field names"
     },
     "sidecar": {
       "type": "object",
@@ -8159,7 +8159,7 @@
           "additionalProperties": true
         }
       },
-      "description": "- apiVersion: v1 kind: ConfigMap metadata: name: loki-alerting-rules data: loki-alerting-rules.yaml: |- groups: - name: example rules: - alert: example expr: | sum(count_over_time({app=\"loki\"} |~ \"error\")) \u003e 0 for: 3m labels: severity: warning category: logs annotations: message: \"loki has encountered errors\" - | apiVersion: v1 kind: Secret type: Opaque metadata: name: loki-distributed-basic-auth data: {{- range .Values.loki.tenants }} {{ .name }}: {{ b64enc .password | quote }} {{- end }}",
+      "description": "- apiVersion: v1\n  kind: ConfigMap\n  metadata:\n    name: loki-alerting-rules\n  data:\n    loki-alerting-rules.yaml: |-\n      groups:\n        - name: example\n          rules:\n          - alert: example\n            expr: |\n              sum(count_over_time({app=\"loki\"} |~ \"error\")) \u003e 0\n            for: 3m\n            labels:\n              severity: warning\n              category: logs\n            annotations:\n              message: \"loki has encountered errors\"\n- |\n    apiVersion: v1\n    kind: Secret\n    type: Opaque\n    metadata:\n      name: loki-distributed-basic-auth\n    data:\n      {{- range .Values.loki.tenants }}\n      {{ .name }}: {{ b64enc .password | quote }}\n      {{- end }}",
       "additionalProperties": true
     },
     "monitoring": {
@@ -8307,7 +8307,7 @@
                   "additionalProperties": true
                 }
               },
-              "description": "LokiRequestErrors: true LokiRequestPanics: true",
+              "description": " LokiRequestErrors: true\n LokiRequestPanics: true",
               "additionalProperties": true
             },
             "namespace": {

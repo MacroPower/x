@@ -33,12 +33,20 @@
       "additionalProperties": false
     },
     "optionalField": {
-      "type": ["string", "null"]
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "logLevel": {
       "type": "string",
       "default": "info",
-      "enum": ["debug", "info", "warn", "error"]
+      "enum": [
+        "debug",
+        "info",
+        "warn",
+        "error"
+      ]
     },
     "apiVersion": {
       "type": "string",
@@ -64,7 +72,10 @@
     },
     "sampleField": {
       "type": "string",
-      "examples": ["example1", "example2"]
+      "examples": [
+        "example1",
+        "example2"
+      ]
     },
     "port": {
       "type": "integer",
@@ -112,7 +123,10 @@
         }
       },
       "dependencies": {
-        "enabled": ["host", "port"]
+        "enabled": [
+          "host",
+          "port"
+        ]
       },
       "additionalProperties": true
     },
@@ -130,7 +144,9 @@
               "type": "object"
             }
           },
-          "required": ["config"]
+          "required": [
+            "config"
+          ]
         }
       },
       "additionalProperties": true
@@ -145,7 +161,10 @@
           "type": "string"
         }
       },
-      "required": ["name", "version"],
+      "required": [
+        "name",
+        "version"
+      ],
       "additionalProperties": true
     },
     "flexibleValue": {
@@ -185,7 +204,9 @@
           "type": "object"
         },
         {
-          "required": ["id"]
+          "required": [
+            "id"
+          ]
         }
       ]
     },
@@ -205,7 +226,9 @@
         }
       },
       "then": {
-        "required": ["config"]
+        "required": [
+          "config"
+        ]
       },
       "else": {
         "properties": {
@@ -261,7 +284,9 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "My Chart",
   "description": "A comprehensive chart",
-  "required": ["name"],
+  "required": [
+    "name"
+  ],
   "additionalProperties": true,
   "x-generated-by": "magic_schema"
 }

@@ -50,7 +50,7 @@
           "additionalProperties": true
         }
       },
-      "description": "Copyright Broadcom, Inc. All Rights Reserved. SPDX-License-Identifier: APACHE-2.0 Global Docker image parameters Please, note that this will override the image parameters, including dependencies, configured to use the global value Current available global Docker image parameters: imageRegistry, imagePullSecrets and storageClass",
+      "description": "Copyright Broadcom, Inc. All Rights Reserved.\nSPDX-License-Identifier: APACHE-2.0\nGlobal Docker image parameters\nPlease, note that this will override the image parameters, including dependencies, configured to use the global value\nCurrent available global Docker image parameters: imageRegistry, imagePullSecrets and storageClass",
       "additionalProperties": true
     },
     "kubeVersion": {
@@ -117,7 +117,7 @@
           "description": "Grafana image pull secrets"
         }
       },
-      "description": "Bitnami Grafana image version ref: https://hub.docker.com/r/bitnami/grafana/tags/",
+      "description": "Bitnami Grafana image version\nref: https://hub.docker.com/r/bitnami/grafana/tags/",
       "additionalProperties": true
     },
     "admin": {
@@ -322,7 +322,7 @@
           "description": "Name of the Secret containing the `grafana.ini` file"
         }
       },
-      "description": "Parameters to override the default grafana.ini file. It is needed to create a configmap or a secret containing the grafana.ini file.",
+      "description": "Parameters to override the default grafana.ini file.\nIt is needed to create a configmap or a secret containing the grafana.ini file.",
       "additionalProperties": true
     },
     "dashboardsProvider": {
@@ -337,7 +337,7 @@
           "description": "Name of a ConfigMap containing a custom dashboard provider"
         }
       },
-      "description": "Create dasboard provider to load dashboards, a default one is created to load dashboards from \"/opt/bitnami/grafana/dashboards\"",
+      "description": "Create dasboard provider to load dashboards, a default one is created to load dashboards\nfrom \"/opt/bitnami/grafana/dashboards\"",
       "additionalProperties": true
     },
     "dashboardsConfigMaps": {
@@ -368,7 +368,7 @@
           "description": "Name of a ConfigMap containing Grafana notifiers configuration"
         }
       },
-      "description": "Create notifiers from a configMap The notifiersName must contain the files",
+      "description": "Create notifiers from a configMap\nThe notifiersName must contain the files",
       "additionalProperties": true
     },
     "alerting": {
@@ -405,7 +405,7 @@
               "description": "Set up update strategy for Grafana installation."
             }
           },
-          "description": "Set to Recreate if you use persistent volume that cannot be mounted by more than one pods to make sure the pods is destroyed first. ref: https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#strategy Example: updateStrategy: type: RollingUpdate rollingUpdate: maxSurge: 25% maxUnavailable: 25%",
+          "description": "Set to Recreate if you use persistent volume that cannot be mounted by more than one pods to make sure the pods is destroyed first.\nref: https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#strategy\nExample:\nupdateStrategy:\n type: RollingUpdate\n rollingUpdate:\n   maxSurge: 25%\n   maxUnavailable: 25%",
           "additionalProperties": true
         },
         "automountServiceAccountToken": {
@@ -476,7 +476,7 @@
               "description": "Node label values to match. Ignored if `affinity` is set."
             }
           },
-          "description": "Node affinity preset Ref: https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#node-affinity",
+          "description": "Node affinity preset\nRef: https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#node-affinity",
           "additionalProperties": true
         },
         "affinity": {
@@ -586,7 +586,7 @@
               "additionalProperties": true
             }
           },
-          "description": "Configure Container Security Context ref: https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-pod",
+          "description": "Configure Container Security Context\nref: https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-pod",
           "additionalProperties": true
         },
         "resourcesPreset": {
@@ -626,7 +626,7 @@
               "description": "Success threshold for livenessProbe"
             }
           },
-          "description": "Grafana containers' liveness probe ref: https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-probes/#configure-probes",
+          "description": "Grafana containers' liveness probe\nref: https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-probes/#configure-probes",
           "additionalProperties": true
         },
         "readinessProbe": {
@@ -665,7 +665,7 @@
               "description": "Success threshold for readinessProbe"
             }
           },
-          "description": "Grafana containers' readinessProbe probe ref: https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-probes/#configure-probes",
+          "description": "Grafana containers' readinessProbe probe\nref: https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-probes/#configure-probes",
           "additionalProperties": true
         },
         "startupProbe": {
@@ -794,7 +794,7 @@
               "description": "Maximum number/percentage of pods that may be made unavailable. Defaults to `1` if both `grafana.pdb.minAvailable` and `grafana.pdb.maxUnavailable` are empty."
             }
           },
-          "description": "Pod Disruption Budget configuration ref: https://kubernetes.io/docs/tasks/run-application/configure-pdb",
+          "description": "Pod Disruption Budget configuration\nref: https://kubernetes.io/docs/tasks/run-application/configure-pdb",
           "additionalProperties": true
         }
       },
@@ -833,7 +833,7 @@
           "description": "Size for the PV"
         }
       },
-      "description": "Enable persistence using Persistent Volume Claims ref: https://kubernetes.io/docs/concepts/storage/persistent-volumes/",
+      "description": "Enable persistence using Persistent Volume Claims\nref: https://kubernetes.io/docs/concepts/storage/persistent-volumes/",
       "additionalProperties": true
     },
     "serviceAccount": {
@@ -972,7 +972,7 @@
           "additionalProperties": true
         }
       },
-      "description": "Network Policies Ref: https://kubernetes.io/docs/concepts/services-networking/network-policies/",
+      "description": "Network Policies\nRef: https://kubernetes.io/docs/concepts/services-networking/network-policies/",
       "additionalProperties": true
     },
     "ingress": {
@@ -1036,7 +1036,7 @@
           "description": "Additional rules to be covered with this ingress record"
         }
       },
-      "description": "Configure the ingress resource that allows you to access the Grafana installation. Set up the URL ref: https://kubernetes.io/docs/concepts/services-networking/ingress/",
+      "description": "Configure the ingress resource that allows you to access the\nGrafana installation. Set up the URL\nref: https://kubernetes.io/docs/concepts/services-networking/ingress/",
       "additionalProperties": true
     },
     "metrics": {
@@ -1178,7 +1178,7 @@
               "description": "OS Shell + Utility image pull secrets"
             }
           },
-          "description": "OS Shell + Utility image ref: https://hub.docker.com/r/bitnami/os-shell/tags/",
+          "description": "OS Shell + Utility image\nref: https://hub.docker.com/r/bitnami/os-shell/tags/",
           "additionalProperties": true
         },
         "resourcesPreset": {
@@ -1206,11 +1206,11 @@
               "description": "Set init container's Security Context runAsUser"
             }
           },
-          "description": "Init container Container Security Context ref: https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-container NOTE: when runAsUser is set to special value \"auto\", init container will try to chown the data folder to auto-determined user\u0026group, using commands: `id -u`:`id -G | cut -d\" \" -f2` \"auto\" is especially useful for OpenShift which has scc with dynamic user ids (and 0 is not allowed)",
+          "description": "Init container Container Security Context\nref: https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-container\nNOTE: when runAsUser is set to special value \"auto\", init container will try to chown the\n  data folder to auto-determined user\u0026group, using commands: `id -u`:`id -G | cut -d\" \" -f2`\n  \"auto\" is especially useful for OpenShift which has scc with dynamic user ids (and 0 is not allowed)",
           "additionalProperties": true
         }
       },
-      "description": "'volumePermissions' init container parameters Changes the owner and group of the persistent volume mount point to runAsUser:fsGroup values based on the `grafana:podSecurityContext`/`grafana:containerSecurityContext`` parameters May require setting `grafana:podSecurityContext:runAsNonRoot` to false",
+      "description": "'volumePermissions' init container parameters\nChanges the owner and group of the persistent volume mount point to runAsUser:fsGroup values\n  based on the `grafana:podSecurityContext`/`grafana:containerSecurityContext`` parameters\nMay require setting `grafana:podSecurityContext:runAsNonRoot` to false",
       "additionalProperties": true
     },
     "diagnosticMode": {

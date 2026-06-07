@@ -2447,7 +2447,7 @@ func TestHelmSchemaAnnotatorUnit(t *testing.T) {
 				assert.Equal(t, "Test", got["title"])
 			},
 		},
-		"multi-line non-annotation comment joined with spaces": {
+		"multi-line non-annotation comment joined with newlines": {
 			input: stringtest.Input(`
 				# First line of description
 				# Second line of description
@@ -2465,7 +2465,38 @@ func TestHelmSchemaAnnotatorUnit(t *testing.T) {
 				f, ok := props["field"].(map[string]any)
 				require.True(t, ok)
 
-				assert.Equal(t, "First line of description Second line of description", f["description"])
+				assert.Equal(t, stringtest.JoinLF(
+					"First line of description",
+					"Second line of description",
+				), f["description"])
+			},
+		},
+		"description with yaml example keeps newlines and indentation": {
+			input: stringtest.Input(`
+				# Example config:
+				#   foo: bar
+				#   baz:
+				#     - 1
+				# @schema
+				# type: object
+				# @schema
+				field: {}
+			`),
+			want: func(t *testing.T, _ *dadav.Annotator, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				f, ok := props["field"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, stringtest.JoinLF(
+					"Example config:",
+					"  foo: bar",
+					"  baz:",
+					"    - 1",
+				), f["description"])
 			},
 		},
 		"empty root block produces no root schema fields": {
@@ -2607,7 +2638,10 @@ func TestHelmSchemaAnnotatorUnit(t *testing.T) {
 				f, ok := props["field"].(map[string]any)
 				require.True(t, ok)
 
-				assert.Equal(t, "Line one of actual desc Line two of actual desc", f["description"])
+				assert.Equal(t, stringtest.JoinLF(
+					"Line one of actual desc",
+					"Line two of actual desc",
+				), f["description"])
 			},
 		},
 		"type as single-element array normalizes to string": {
