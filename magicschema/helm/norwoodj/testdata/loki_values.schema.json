@@ -8159,7 +8159,6 @@
           "additionalProperties": true
         }
       },
-      "description": "- apiVersion: v1\n  kind: ConfigMap\n  metadata:\n    name: loki-alerting-rules\n  data:\n    loki-alerting-rules.yaml: |-\n      groups:\n        - name: example\n          rules:\n          - alert: example\n            expr: |\n              sum(count_over_time({app=\"loki\"} |~ \"error\")) \u003e 0\n            for: 3m\n            labels:\n              severity: warning\n              category: logs\n            annotations:\n              message: \"loki has encountered errors\"\n- |\n    apiVersion: v1\n    kind: Secret\n    type: Opaque\n    metadata:\n      name: loki-distributed-basic-auth\n    data:\n      {{- range .Values.loki.tenants }}\n      {{ .name }}: {{ b64enc .password | quote }}\n      {{- end }}",
       "additionalProperties": true
     },
     "monitoring": {
@@ -8307,7 +8306,6 @@
                   "additionalProperties": true
                 }
               },
-              "description": " LokiRequestErrors: true\n LokiRequestPanics: true",
               "additionalProperties": true
             },
             "namespace": {

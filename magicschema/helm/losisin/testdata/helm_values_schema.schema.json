@@ -6,7 +6,10 @@
       "minLength": 1
     },
     "replicas": {
-      "type": ["integer", "null"],
+      "type": [
+        "integer",
+        "null"
+      ],
       "minimum": 0,
       "maximum": 100
     },
@@ -27,7 +30,11 @@
     },
     "serviceType": {
       "type": "string",
-      "enum": ["ClusterIP", "NodePort", "LoadBalancer"]
+      "enum": [
+        "ClusterIP",
+        "NodePort",
+        "LoadBalancer"
+      ]
     },
     "httpsPort": {
       "type": "integer",
@@ -50,13 +57,20 @@
     "nullableTags": {
       "type": "array",
       "items": {
-        "type": ["string", "null"]
+        "type": [
+          "string",
+          "null"
+        ]
       }
     },
     "protocols": {
       "type": "array",
       "items": {
-        "enum": ["http", "https", "tcp"]
+        "enum": [
+          "http",
+          "https",
+          "tcp"
+        ]
       }
     },
     "ports": {
@@ -156,10 +170,17 @@
     },
     "sampleValue": {
       "type": "string",
-      "examples": ["foo", "bar", "baz"]
+      "examples": [
+        "foo",
+        "bar",
+        "baz"
+      ]
     },
     "validated": {
-      "type": ["string", "integer"],
+      "type": [
+        "string",
+        "integer"
+      ],
       "allOf": [
         {
           "minLength": 1
@@ -210,7 +231,11 @@
     },
     "region": {
       "type": "string",
-      "enum": ["us-east-1", "us-west-2", "eu-west-1"]
+      "enum": [
+        "us-east-1",
+        "us-west-2",
+        "eu-west-1"
+      ]
     },
     "nodeCount": {
       "type": "integer",
@@ -230,7 +255,12 @@
     },
     "mixedEnum": {
       "type": "integer",
-      "enum": [null, 1, "two", true]
+      "enum": [
+        null,
+        1,
+        "two",
+        true
+      ]
     },
     "mergedLabels": {
       "type": "object",
@@ -249,6 +279,8 @@
     }
   },
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "required": ["name"],
+  "required": [
+    "name"
+  ],
   "additionalProperties": true
 }

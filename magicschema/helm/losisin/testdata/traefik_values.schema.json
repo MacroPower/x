@@ -28,7 +28,6 @@
           "type": "string"
         }
       },
-      "description": "Default values for Traefik This is a YAML-formatted file. Declare variables to be passed into templates",
       "additionalProperties": false
     },
     "commonLabels": {
@@ -65,7 +64,7 @@
             "integer",
             "null"
           ],
-          "description": "with an external Load Balancer that performs healthchecks. Default: ports.traefik.port",
+          "description": "with an external Load Balancer that performs healthchecks.\nDefault: ports.traefik.port",
           "minimum": 0
         },
         "healthchecksHost": {
@@ -116,22 +115,22 @@
         },
         "additionalVolumes": {
           "type": "array",
-          "description": "https://docs.datadoghq.com/developers/dogstatsd/unix_socket/?tab=host - name: socat-proxy image: alpine/socat:1.0.5 args: [\"-s\", \"-u\", \"udp-recv:8125\", \"unix-sendto:/socket/socket\"] volumeMounts: - name: dsdsocket mountPath: /socket"
+          "description": "https://docs.datadoghq.com/developers/dogstatsd/unix_socket/?tab=host\n- name: socat-proxy\n  image: alpine/socat:1.0.5\n  args: [\"-s\", \"-u\", \"udp-recv:8125\", \"unix-sendto:/socket/socket\"]\n  volumeMounts:\n    - name: dsdsocket\n      mountPath: /socket"
         },
         "initContainers": {
           "type": "array",
-          "description": "- name: dsdsocket hostPath: path: /var/run/statsd-exporter"
+          "description": "- name: dsdsocket\n  hostPath:\n    path: /var/run/statsd-exporter"
         },
         "shareProcessNamespace": {
           "type": "boolean",
-          "description": "The \"volume-permissions\" init container is required if you run into permission issues. Related issue: https://github.com/traefik/traefik-helm-chart/issues/396 - name: volume-permissions image: busybox:latest command: [\"sh\", \"-c\", \"touch /data/acme.json; chmod -v 600 /data/acme.json\"] volumeMounts: - name: data mountPath: /data"
+          "description": "The \"volume-permissions\" init container is required if you run into permission issues.\nRelated issue: https://github.com/traefik/traefik-helm-chart/issues/396\n- name: volume-permissions\n  image: busybox:latest\n  command: [\"sh\", \"-c\", \"touch /data/acme.json; chmod -v 600 /data/acme.json\"]\n  volumeMounts:\n    - name: data\n      mountPath: /data"
         },
         "hostUsers": {
           "type": [
             "boolean",
             "null"
           ],
-          "description": "which can improve security by isolating the pod's users from the host. See https://kubernetes.io/docs/concepts/workloads/pods/user-namespaces/"
+          "description": "which can improve security by isolating the pod's users from the host.\nSee https://kubernetes.io/docs/concepts/workloads/pods/user-namespaces/"
         },
         "dnsPolicy": {
           "type": "string"
@@ -152,7 +151,7 @@
         },
         "runtimeClassName": {
           "type": "string",
-          "description": "preStop: sleep: seconds: 20 postStart: httpGet: path: /ping port: 8080 host: localhost scheme: HTTP"
+          "description": "preStop:\n  sleep:\n    seconds: 20\npostStart:\n  httpGet:\n    path: /ping\n    port: 8080\n    host: localhost\n    scheme: HTTP"
         },
         "goMemLimitPercentage": {
           "type": "number"
@@ -416,7 +415,7 @@
               "items": {
                 "type": "string"
               },
-              "description": "By default, it's using traefik entrypoint, which is not exposed. /!\\ Do not expose your dashboard without any protection over the internet /!\\"
+              "description": "By default, it's using traefik entrypoint, which is not exposed.\n/!\\ Do not expose your dashboard without any protection over the internet /!\\"
             },
             "middlewares": {
               "type": "array"
@@ -955,11 +954,10 @@
     },
     "volumes": {
       "type": "array",
-      "description": "This can be used to mount a cert pair or a configmap that holds a config.toml file. After the volume has been mounted, add the configs into traefik by using the `additionalArguments` list below, eg: `additionalArguments: - \"--providers.file.filename=/config/dynamic.toml\" - \"--ping\" - \"--ping.entrypoint=web\"`"
+      "description": "This can be used to mount a cert pair or a configmap that holds a config.toml file.\nAfter the volume has been mounted, add the configs into traefik by using the `additionalArguments` list below, eg:\n`additionalArguments:\n- \"--providers.file.filename=/config/dynamic.toml\"\n- \"--ping\"\n- \"--ping.entrypoint=web\"`"
     },
     "additionalVolumeMounts": {
-      "type": "array",
-      "description": "- name: public-cert mountPath: \"/certs\" type: secret - name: '{{ printf \"%s-configs\" .Release.Name }}' mountPath: \"/config\" type: configMap"
+      "type": "array"
     },
     "logs": {
       "type": "object",
@@ -1288,7 +1286,6 @@
           "additionalProperties": true
         }
       },
-      "description": "- name: traefik-logs mountPath: /var/log/traefik",
       "additionalProperties": true
     },
     "metrics": {
@@ -1428,7 +1425,7 @@
               "additionalProperties": true
             }
           },
-          "description": "Prometheus is enabled by default. It can be disabled by setting \"prometheus: null\"",
+          "description": "Prometheus is enabled by default.\nIt can be disabled by setting \"prometheus: null\"",
           "additionalProperties": true
         },
         "otlp": {
@@ -1547,7 +1544,7 @@
               "additionalProperties": true
             }
           },
-          "description": "datadog: ## Address instructs exporter to send metrics to datadog-agent at this address. address: \"127.0.0.1:8125\" ## The interval used by the exporter to push metrics to datadog-agent. Default=10s # pushInterval: 30s ## The prefix to use for metrics collection. Default=\"traefik\" # prefix: traefik ## Enable metrics on entry points. Default=true # addEntryPointsLabels: false ## Enable metrics on routers. Default=false # addRoutersLabels: true ## Enable metrics on services. Default=true # addServicesLabels: false influxdb2: ## Address instructs exporter to send metrics to influxdb v2 at this address. address: localhost:8086 ## Token with which to connect to InfluxDB v2. token: xxx ## Organisation where metrics will be stored. org: \"\" ## Bucket where metrics will be stored. bucket: \"\" ## The interval used by the exporter to push metrics to influxdb. Default=10s # pushInterval: 30s ## Additional labels (influxdb tags) on all metrics. # additionalLabels: #   env: production #   foo: bar ## Enable metrics on entry points. Default=true # addEntryPointsLabels: false ## Enable metrics on routers. Default=false # addRoutersLabels: true ## Enable metrics on services. Default=true # addServicesLabels: false statsd: ## Address instructs exporter to send metrics to statsd at this address. address: localhost:8125 ## The interval used by the exporter to push metrics to influxdb. Default=10s # pushInterval: 30s ## The prefix to use for metrics collection. Default=\"traefik\" # prefix: traefik ## Enable metrics on entry points. Default=true # addEntryPointsLabels: false ## Enable metrics on routers. Default=false # addRoutersLabels: true ## Enable metrics on services. Default=true # addServicesLabels: false",
+          "description": " datadog:\n   ## Address instructs exporter to send metrics to datadog-agent at this address.\n   address: \"127.0.0.1:8125\"\n   ## The interval used by the exporter to push metrics to datadog-agent. Default=10s\n   # pushInterval: 30s\n   ## The prefix to use for metrics collection. Default=\"traefik\"\n   # prefix: traefik\n   ## Enable metrics on entry points. Default=true\n   # addEntryPointsLabels: false\n   ## Enable metrics on routers. Default=false\n   # addRoutersLabels: true\n   ## Enable metrics on services. Default=true\n   # addServicesLabels: false\n influxdb2:\n   ## Address instructs exporter to send metrics to influxdb v2 at this address.\n   address: localhost:8086\n   ## Token with which to connect to InfluxDB v2.\n   token: xxx\n   ## Organisation where metrics will be stored.\n   org: \"\"\n   ## Bucket where metrics will be stored.\n   bucket: \"\"\n   ## The interval used by the exporter to push metrics to influxdb. Default=10s\n   # pushInterval: 30s\n   ## Additional labels (influxdb tags) on all metrics.\n   # additionalLabels:\n   #   env: production\n   #   foo: bar\n   ## Enable metrics on entry points. Default=true\n   # addEntryPointsLabels: false\n   ## Enable metrics on routers. Default=false\n   # addRoutersLabels: true\n   ## Enable metrics on services. Default=true\n   # addServicesLabels: false\n statsd:\n   ## Address instructs exporter to send metrics to statsd at this address.\n   address: localhost:8125\n   ## The interval used by the exporter to push metrics to influxdb. Default=10s\n   # pushInterval: 30s\n   ## The prefix to use for metrics collection. Default=\"traefik\"\n   # prefix: traefik\n   ## Enable metrics on entry points. Default=true\n   # addEntryPointsLabels: false\n   ## Enable metrics on routers. Default=false\n   # addRoutersLabels: true\n   ## Enable metrics on services. Default=true\n   # addServicesLabels: false",
           "additionalProperties": true
         }
       },
@@ -1752,11 +1749,10 @@
     },
     "additionalArguments": {
       "type": "array",
-      "description": "See [CLI Reference](https://docs.traefik.io/reference/static-configuration/cli/) Use curly braces to pass values: `helm install --set=\"additionalArguments={--providers.kubernetesingress.ingressclass=traefik-internal,--log.level=DEBUG}\"`"
+      "description": "See [CLI Reference](https://docs.traefik.io/reference/static-configuration/cli/)\nUse curly braces to pass values: `helm install --set=\"additionalArguments={--providers.kubernetesingress.ingressclass=traefik-internal,--log.level=DEBUG}\"`"
     },
     "env": {
-      "type": "array",
-      "description": "- \"--providers.kubernetesingress.ingressclass=traefik-internal\" - \"--log.level=DEBUG\""
+      "type": "array"
     },
     "envFrom": {
       "type": "array"
@@ -1782,7 +1778,7 @@
               "string",
               "null"
             ],
-            "description": "means it's listening on all your interfaces and all your IPs. You may want to set this value if you need traefik to listen on specific interface only."
+            "description": "means it's listening on all your interfaces and all your IPs. You may want\nto set this value if you need traefik to listen on specific interface\nonly."
           },
           "expose": {
             "type": "object",
@@ -1791,7 +1787,7 @@
                 "type": "boolean"
               }
             },
-            "description": "If you want to access it from outside your cluster, use `kubectl port-forward` or create a secure ingress",
+            "description": "Defines whether the port is exposed if service.type is LoadBalancer or\nNodePort.\n\nIf you want to access it from outside your cluster,\nuse `kubectl port-forward` or create a secure ingress",
             "additionalProperties": true
           },
           "exposedPort": {
@@ -1873,7 +1869,7 @@
                 "properties": {
                   "entryPoint": {
                     "type": "object",
-                    "description": "Added in 2.2, one can make permanent redirects via entrypoints. Same sets of parameters: to, scheme, permanent and priority. https://doc.traefik.io/traefik/reference/install-configuration/entrypoints/#configuration-example",
+                    "description": "Added in 2.2, one can make permanent redirects via entrypoints.\nSame sets of parameters: to, scheme, permanent and priority.\nhttps://doc.traefik.io/traefik/reference/install-configuration/entrypoints/#configuration-example",
                     "additionalProperties": true
                   }
                 },
@@ -2087,7 +2083,7 @@
             "properties": {
               "enabled": {
                 "type": "boolean",
-                "description": "Enabling it will also enable http3 experimental feature https://doc.traefik.io/traefik/reference/install-configuration/entrypoints/#opt-http3 There are known limitations when trying to listen on same ports for TCP \u0026 UDP (Http3). There is a workaround in this chart using dual Service. https://github.com/kubernetes/kubernetes/issues/47249#issuecomment-587960741"
+                "description": "Enabling it will also enable http3 experimental feature\nhttps://doc.traefik.io/traefik/reference/install-configuration/entrypoints/#opt-http3\nThere are known limitations when trying to listen on same ports for\nTCP \u0026 UDP (Http3). There is a workaround in this chart using dual Service.\nhttps://github.com/kubernetes/kubernetes/issues/47249#issuecomment-587960741"
               },
               "advertisedPort": {
                 "type": [
@@ -2105,7 +2101,7 @@
     },
     "tlsOptions": {
       "type": "object",
-      "description": "When using `labelSelector`, you'll need to set labels on tlsOption accordingly. See EXAMPLE.md for details.",
+      "description": "When using `labelSelector`, you'll need to set labels on tlsOption accordingly.\nSee EXAMPLE.md for details.",
       "additionalProperties": true
     },
     "tlsStore": {
@@ -2213,7 +2209,7 @@
       "properties": {
         "enabled": {
           "type": "boolean",
-          "description": "ref: http://kubernetes.io/docs/user-guide/persistent-volumes/. It can be used to store TLS certificates along with `certificatesResolvers.\u003cname\u003e.acme.storage`  option"
+          "description": "ref: http://kubernetes.io/docs/user-guide/persistent-volumes/.\nIt can be used to store TLS certificates along with `certificatesResolvers.\u003cname\u003e.acme.storage`  option"
         },
         "name": {
           "type": "string"
@@ -2251,12 +2247,12 @@
     },
     "certificatesResolvers": {
       "type": "object",
-      "description": "Ref: https://doc.traefik.io/traefik/reference/install-configuration/tls/certificate-resolvers/acme/ See EXAMPLES.md for more details.",
+      "description": "Ref: https://doc.traefik.io/traefik/reference/install-configuration/tls/certificate-resolvers/acme/\nSee EXAMPLES.md for more details.",
       "additionalProperties": true
     },
     "hostNetwork": {
       "type": "boolean",
-      "description": "To prevent unschedulable pods due to port collisions, if hostNetwork=true and replicas\u003e1, a pod anti-affinity is recommended and will be set if the affinity is left as default."
+      "description": "To prevent unschedulable pods due to port collisions, if hostNetwork=true\nand replicas\u003e1, a pod anti-affinity is recommended and will be set if the\naffinity is left as default."
     },
     "rbac": {
       "type": "object",
@@ -2266,7 +2262,7 @@
         },
         "namespaced": {
           "type": "boolean",
-          "description": "1. It switches respectively the use of `ClusterRole` and `ClusterRoleBinding` to `Role` and `RoleBinding`.\u003cbr /\u003e 2. It adds `disableClusterScopeResources` on Ingress and CRD (Kubernetes) providers\u003cbr /\u003e **NOTE**: `IngressClass`, `NodePortLB` and **Gateway** provider cannot be used with namespaced RBAC. \u003cbr /\u003e See [upstream documentation](https://doc.traefik.io/traefik/reference/install-configuration/providers/kubernetes/kubernetes-ingress/#opt-providers-kubernetesIngress-disableClusterScopeResources) for more details."
+          "description": "1. It switches respectively the use of `ClusterRole` and `ClusterRoleBinding` to `Role` and `RoleBinding`.\u003cbr /\u003e\n2. It adds `disableClusterScopeResources` on Ingress and CRD (Kubernetes) providers\u003cbr /\u003e\n**NOTE**: `IngressClass`, `NodePortLB` and **Gateway** provider cannot be used with namespaced RBAC. \u003cbr /\u003e\nSee [upstream documentation](https://doc.traefik.io/traefik/reference/install-configuration/providers/kubernetes/kubernetes-ingress/#opt-providers-kubernetesIngress-disableClusterScopeResources) for more details."
         },
         "aggregateTo": {
           "type": "array",
@@ -2280,7 +2276,7 @@
       "properties": {
         "name": {
           "type": "string",
-          "description": "If set, an existing service account is used If not set, a service account is created automatically using the fullname template"
+          "description": "If set, an existing service account is used\nIf not set, a service account is created automatically using the fullname template"
         }
       },
       "additionalProperties": false
@@ -2300,7 +2296,6 @@
     },
     "nodeSelector": {
       "type": "object",
-      "description": "podAntiAffinity: requiredDuringSchedulingIgnoredDuringExecution: - labelSelector: matchLabels: app.kubernetes.io/name: '{{ template \"traefik.name\" . }}' app.kubernetes.io/instance: '{{ .Release.Name }}-{{ include \"traefik.namespace\" . }}' topologyKey: kubernetes.io/hostname",
       "additionalProperties": true
     },
     "tolerations": {
@@ -2311,8 +2306,7 @@
       "description": "how Pods are spread across your cluster among failure-domains."
     },
     "priorityClassName": {
-      "type": "string",
-      "description": "This example topologySpreadConstraints forces the scheduler to put traefik pods on nodes where no other traefik pods are scheduled. - labelSelector: matchLabels: app.kubernetes.io/name: '{{ template \"traefik.name\" . }}' maxSkew: 1 topologyKey: kubernetes.io/hostname whenUnsatisfiable: DoNotSchedule"
+      "type": "string"
     },
     "securityContext": {
       "type": "object",
@@ -2364,7 +2358,7 @@
     },
     "extraObjects": {
       "type": "array",
-      "description": "In some cases, it can avoid the need for additional, extended or adhoc deployments. See #595 for more details and traefik/tests/values/extra.yaml for example."
+      "description": "In some cases, it can avoid the need for additional, extended or adhoc deployments.\nSee #595 for more details and traefik/tests/values/extra.yaml for example."
     },
     "namespaceOverride": {
       "type": "string",

@@ -59,8 +59,7 @@
       "type": "array"
     },
     "iptablesRandomFully": {
-      "type": "boolean",
-      "description": "- name: \"image-pull-secret\""
+      "type": "boolean"
     },
     "kubeConfigPath": {
       "type": "string"
@@ -517,8 +516,7 @@
       "type": "array"
     },
     "extraVolumes": {
-      "type": "array",
-      "description": "- name: host-mnt-data\n  mountPath: /host/mnt/data\n  hostPath: /mnt/data\n  hostPathType: Directory\n  readOnly: true\n  mountPropagation: HostToContainer"
+      "type": "array"
     },
     "extraVolumeMounts": {
       "type": "array"
@@ -530,7 +528,6 @@
     },
     "annotations": {
       "type": "object",
-      "description": " my-config-a: \"1234\"\n my-config-b: |-\n   test 1\n   test 2\n   test 3",
       "additionalProperties": true
     },
     "podSecurityContext": {
@@ -572,7 +569,6 @@
     },
     "initResources": {
       "type": "object",
-      "description": "  limits:\n    cpu: 4000m\n    memory: 4Gi\n  requests:\n    cpu: 100m\n    memory: 512Mi",
       "additionalProperties": true
     },
     "securityContext": {
@@ -1042,11 +1038,11 @@
     },
     "cleanBpfState": {
       "type": "boolean",
-      "description": "WARNING: Use with care!"
+      "description": "DaemonSet.\n\nWARNING: Use with care!"
     },
     "cleanState": {
       "type": "boolean",
-      "description": "WARNING: Use with care!"
+      "description": "DaemonSet. Implies cleanBpfState: true.\n\nWARNING: Use with care!"
     },
     "waitForKubeProxy": {
       "type": "boolean",
@@ -1096,7 +1092,7 @@
         },
         "configMap": {
           "type": "string",
-          "description": "This can be useful if you want to manage your CNI\nconfiguration outside of a Kubernetes environment. This parameter is\nmutually exclusive with the 'cni.configMap' parameter. The agent will\nwrite this to 05-cilium.conflist on startup.\nreadCniConf: /host/etc/cni/net.d/05-sample.conflist.input\ninterpret the 'cni.configMapKey' value as CNI configuration file and write it\nwhen the agent starts up."
+          "description": "interpret the 'cni.configMapKey' value as CNI configuration file and write it\nwhen the agent starts up."
         },
         "configMapKey": {
           "type": "string",
@@ -1201,8 +1197,7 @@
       "additionalProperties": true
     },
     "forceDeviceDetection": {
-      "type": "boolean",
-      "description": "that a packet sent from a pod to a destination outside the cluster will be\nmasqueraded (to an output device IPv4 address), if the output device runs the\nprogram. When not specified, probing will automatically detect devices that have\na non-local route. This should be used only when autodetection is not suitable.\ndevices: \"\""
+      "type": "boolean"
     },
     "ciliumEndpointSlice": {
       "type": "object",
@@ -1230,7 +1225,6 @@
           "description": "Each object in the list must have the following fields:\nnodes: Count of nodes at which to apply the rate limit.\nlimit: The sustained request rate in requests per second. The maximum rate that can be configured is 50.\nburst: The burst request rate in requests per second. The maximum burst that can be configured is 100."
         }
       },
-      "description": "disableIptablesFeederRules: \"\"\negressMasqueradeInterfaces: \"\"\nenableIdentityMark: true\nenableK8sEndpointSlice: true",
       "additionalProperties": true
     },
     "identityManagementMode": {
@@ -1969,7 +1963,7 @@
               "additionalProperties": true
             }
           },
-          "description": "value is not set, the queue size is set to the default monitor queue size.\neventQueueSize: \"\"\nPossible values are:\n  1, 3, 7, 15, 31, 63, 127, 255, 511, 1023,\n  2047, 4095, 8191, 16383, 32767, 65535\neventBufferCapacity: \"4095\"\nSee https://docs.cilium.io/en/stable/observability/metrics/#hubble-metrics\nfor more comprehensive documentation about Hubble metrics.",
+          "description": "See https://docs.cilium.io/en/stable/observability/metrics/#hubble-metrics\nfor more comprehensive documentation about Hubble metrics.",
           "additionalProperties": true
         },
         "socketPath": {
@@ -1995,22 +1989,22 @@
               "properties": {
                 "urlQuery": {
                   "type": "boolean",
-                  "description": "You can specify the options from the helm CLI:"
+                  "description": "Example:\n\n  redact:\n    enabled: true\n    http:\n      urlQuery: true\n\nYou can specify the options from the helm CLI:"
                 },
                 "userInfo": {
                   "type": "boolean",
-                  "description": "You can specify the options from the helm CLI:"
+                  "description": "Example:\n\n  redact:\n    enabled: true\n    http:\n      userInfo: true\n\nYou can specify the options from the helm CLI:"
                 },
                 "headers": {
                   "type": "object",
                   "properties": {
                     "allow": {
                       "type": "array",
-                      "description": "You can specify the options from the helm CLI:"
+                      "description": "Example:\n  redact:\n    enabled: true\n    http:\n      headers:\n        allow:\n          - traceparent\n          - tracestate\n          - Cache-Control\n\nYou can specify the options from the helm CLI:"
                     },
                     "deny": {
                       "type": "array",
-                      "description": "You can specify the options from the helm CLI:"
+                      "description": "Example:\n  redact:\n    enabled: true\n    http:\n      headers:\n        deny:\n          - Authorization\n          - Proxy-Authorization\n\nYou can specify the options from the helm CLI:"
                     }
                   },
                   "additionalProperties": true
@@ -2023,7 +2017,7 @@
               "properties": {
                 "apiKey": {
                   "type": "boolean",
-                  "description": "You can specify the options from the helm CLI:"
+                  "description": "Example:\n\n  redact:\n    enabled: true\n    kafka:\n      apiKey: true\n\nYou can specify the options from the helm CLI:"
                 }
               },
               "additionalProperties": true
@@ -2083,7 +2077,7 @@
                 },
                 "schedule": {
                   "type": "string",
-                  "description": "Defaults to midnight of the first day of every fourth month. For syntax, see\nhttps://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/#schedule-syntax"
+                  "description": "Only used if method is \"cronJob\". If nil, then no recurring job will be created.\nInstead, only the one-shot job is deployed to generate the certificates at\ninstallation time.\n\nDefaults to midnight of the first day of every fourth month. For syntax, see\nhttps://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/#schedule-syntax"
                 },
                 "certManagerIssuerRef": {
                   "type": "object",
@@ -2213,7 +2207,7 @@
                   "type": "string"
                 }
               },
-              "description": "  - maxSkew: 1\n    topologyKey: topology.kubernetes.io/zone\n    whenUnsatisfiable: DoNotSchedule\nref: https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#nodeselector",
+              "description": "ref: https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#nodeselector",
               "additionalProperties": true
             },
             "tolerations": {
@@ -2512,7 +2506,7 @@
                   "additionalProperties": true
                 }
               },
-              "description": "If not set, it is dynamically assigned to port 443 if TLS is enabled and to\nport 80 if not.\nservicePort: 80\n/metrics",
+              "description": "/metrics",
               "additionalProperties": true
             },
             "gops": {
@@ -2830,7 +2824,7 @@
                   "type": "string"
                 }
               },
-              "description": "  - maxSkew: 1\n    topologyKey: topology.kubernetes.io/zone\n    whenUnsatisfiable: DoNotSchedule\nref: https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#nodeselector",
+              "description": "ref: https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#nodeselector",
               "additionalProperties": true
             },
             "tolerations": {
@@ -3168,7 +3162,7 @@
           "type": "boolean"
         }
       },
-      "description": "the config of nonMasqueradeCIDRs\nconfig:\n  nonMasqueradeCIDRs: []\n  masqLinkLocal: false\n  masqLinkLocalIPv6: false\niptablesLockTimeout defines the iptables \"--wait\" option when invoked from Cilium.\niptablesLockTimeout: \"5s\"",
+      "description": "iptablesLockTimeout defines the iptables \"--wait\" option when invoked from Cilium.\niptablesLockTimeout: \"5s\"",
       "additionalProperties": true
     },
     "ipv6": {
@@ -3283,8 +3277,7 @@
       "additionalProperties": true
     },
     "logSystemLoad": {
-      "type": "boolean",
-      "description": "To include or exclude matched resources from cilium identity evaluation\nlabels: \"\"\nlogOptions allows you to define logging options. eg:\nlogOptions:\n  format: json"
+      "type": "boolean"
     },
     "maglev": {
       "type": "object",
@@ -3378,14 +3371,14 @@
       "properties": {
         "acceleration": {
           "type": "string",
-          "description": "kube-apiserver.\nstandalone: false\nselection e.g. random or maglev\nalgorithm: random\ne.g. snat, dsr, hybrid\nmode: snat\nApplicable values can be: disabled (do not use XDP), native (XDP BPF\nprogram is run directly out of the networking driver's early receive\npath), or best-effort (use native mode XDP acceleration on devices\nthat support it)."
+          "description": "Applicable values can be: disabled (do not use XDP), native (XDP BPF\nprogram is run directly out of the networking driver's early receive\npath), or best-effort (use native mode XDP acceleration on devices\nthat support it)."
         },
         "l7": {
           "type": "object",
           "properties": {
             "backend": {
               "type": "string",
-              "description": "Applicable values:\n  - envoy: Enable L7 load balancing via envoy proxy. This will automatically set enable-envoy-config as well.\n  - disabled: Disable L7 load balancing by way of service annotation."
+              "description": "The request to a k8s service, which has specific annotation e.g. service.cilium.io/lb-l7,\nwill be forwarded to the local backend proxy to be load balanced to the service endpoints.\nPlease refer to docs for supported annotations for more configuration.\n\nApplicable values:\n  - envoy: Enable L7 load balancing via envoy proxy. This will automatically set enable-envoy-config as well.\n  - disabled: Disable L7 load balancing by way of service annotation."
             },
             "ports": {
               "type": "array",
@@ -3396,7 +3389,6 @@
               "description": "The default LB algorithm to be used for services, which can be overridden by the\nservice annotation (e.g. service.cilium.io/lb-l7-algorithm)\nApplicable values: round_robin, least_request, random"
             }
           },
-          "description": "Geneve Class Option (geneve) used to pass a service IP and port to remote backend\ndsrDispatch: opt\nendpoints filtering\nserviceTopology: false",
           "additionalProperties": true
         }
       },
@@ -3435,7 +3427,7 @@
     },
     "policyEnforcementMode": {
       "type": "string",
-      "description": "policyAuditMode: false\ndefault, always and never.\nref: https://docs.cilium.io/en/stable/security/policy/intro/#policy-enforcement-modes"
+      "description": "default, always and never.\nref: https://docs.cilium.io/en/stable/security/policy/intro/#policy-enforcement-modes"
     },
     "policyCIDRMatchMode": {
       "type": [
@@ -3727,8 +3719,7 @@
           "type": "array"
         },
         "extraVolumes": {
-          "type": "array",
-          "description": "- name: host-mnt-data\n  mountPath: /host/mnt/data\n  hostPath: /mnt/data\n  hostPathType: Directory\n  readOnly: true\n  mountPropagation: HostToContainer"
+          "type": "array"
         },
         "extraVolumeMounts": {
           "type": "array"
@@ -3817,7 +3808,6 @@
               "type": "integer"
             }
           },
-          "description": "  limits:\n    cpu: 4000m\n    memory: 4Gi\n  requests:\n    cpu: 100m\n    memory: 512Mi",
           "additionalProperties": true
         },
         "livenessProbe": {
@@ -4175,12 +4165,10 @@
           "additionalProperties": true
         }
       },
-      "description": "To include or exclude matched resources from cilium node identity evaluation\nList of labels just like --labels flag (.Values.labels)\nnodeLabels: \"\"",
       "additionalProperties": true
     },
     "secretsNamespaceAnnotations": {
       "type": "object",
-      "description": "sessionAffinity: false",
       "additionalProperties": true
     },
     "sleepAfterInit": {
@@ -4469,7 +4457,7 @@
               "type": "string"
             }
           },
-          "description": "  - maxSkew: 1\n    topologyKey: topology.kubernetes.io/zone\n    whenUnsatisfiable: DoNotSchedule\nref: https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#nodeselector",
+          "description": "ref: https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#nodeselector",
           "additionalProperties": true
         },
         "tolerations": {
@@ -4502,8 +4490,7 @@
           "type": "array"
         },
         "extraVolumes": {
-          "type": "array",
-          "description": "- name: host-mnt-data\n  mountPath: /host/mnt/data\n  hostPath: /mnt/data\n  hostPathType: Directory\n  readOnly: true\n  mountPropagation: HostToContainer"
+          "type": "array"
         },
         "extraVolumeMounts": {
           "type": "array"
@@ -4596,12 +4583,10 @@
               "type": "boolean"
             }
           },
-          "description": "  limits:\n    cpu: 1000m\n    memory: 1Gi\n  requests:\n    cpu: 100m\n    memory: 128Mi",
           "additionalProperties": true
         },
         "endpointGCInterval": {
-          "type": "string",
-          "description": "runAsUser: 0"
+          "type": "string"
         },
         "nodeGCInterval": {
           "type": "string"
@@ -5159,7 +5144,6 @@
               "type": "integer"
             }
           },
-          "description": "  limits:\n    cpu: 4000m\n    memory: 4Gi\n  requests:\n    cpu: 100m\n    memory: 512Mi",
           "additionalProperties": true
         },
         "securityContext": {
@@ -5172,8 +5156,7 @@
           "additionalProperties": true
         },
         "tofqdnsPreCache": {
-          "type": "string",
-          "description": "  runAsUser: 0"
+          "type": "string"
         },
         "terminationGracePeriodSeconds": {
           "type": "integer"
@@ -5272,7 +5255,6 @@
               "properties": {
                 "resources": {
                   "type": "object",
-                  "description": "The etcd binary is included in the clustermesh API server image, so the same image from above is reused.\nIndependent override isn't supported, because clustermesh-apiserver is tested against the etcd version it is\nbuilt with.",
                   "additionalProperties": true
                 },
                 "securityContext": {
@@ -5294,7 +5276,6 @@
                       "additionalProperties": true
                     }
                   },
-                  "description": "  requests:\n    cpu: 200m\n    memory: 256Mi\n  limits:\n    cpu: 1000m\n    memory: 256Mi",
                   "additionalProperties": true
                 },
                 "lifecycle": {
@@ -5309,8 +5290,7 @@
                       "additionalProperties": true
                     },
                     "extraArgs": {
-                      "type": "array",
-                      "description": "  requests:\n    cpu: 100m\n    memory: 100Mi\n  limits:\n    cpu: 100m\n    memory: 100Mi"
+                      "type": "array"
                     },
                     "extraEnv": {
                       "type": "array"
@@ -5354,8 +5334,7 @@
                   "additionalProperties": true
                 },
                 "extraVolumeMounts": {
-                  "type": "array",
-                  "description": "  requests:\n    cpu: 100m\n    memory: 64Mi\n  limits:\n    cpu: 1000m\n    memory: 1024M"
+                  "type": "array"
                 },
                 "securityContext": {
                   "type": "object",
@@ -5607,7 +5586,6 @@
                   "additionalProperties": true
                 }
               },
-              "description": "  requests:\n    cpu: 100m\n    memory: 64Mi\n  limits:\n    cpu: 1000m\n    memory: 1024M",
               "additionalProperties": true
             },
             "topologySpreadConstraints": {
@@ -5620,7 +5598,7 @@
                   "type": "string"
                 }
               },
-              "description": "  - maxSkew: 1\n    topologyKey: topology.kubernetes.io/zone\n    whenUnsatisfiable: DoNotSchedule\nref: https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#nodeselector",
+              "description": "ref: https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#nodeselector",
               "additionalProperties": true
             },
             "tolerations": {
@@ -5684,7 +5662,7 @@
                     },
                     "certManagerIssuerRef": {
                       "type": "object",
-                      "description": "Defaults to none. Commented syntax gives midnight of the first day of every\nfourth month. For syntax, see\nhttps://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/#schedule-syntax\nschedule: \"0 0 1 */4 *\"\n[Example]\ncertManagerIssuerRef:\n  group: cert-manager.io\n  kind: ClusterIssuer\n  name: ca-issuer",
+                      "description": "[Example]\ncertManagerIssuerRef:\n  group: cert-manager.io\n  kind: ClusterIssuer\n  name: ca-issuer",
                       "additionalProperties": true
                     }
                   },
@@ -5804,8 +5782,7 @@
                       "additionalProperties": true
                     },
                     "interval": {
-                      "type": "string",
-                      "description": "service monitors configured.\nnamespace: \"\""
+                      "type": "string"
                     },
                     "scrapeTimeout": {
                       "type": [
@@ -5936,7 +5913,7 @@
     },
     "agentNotReadyTaintKey": {
       "type": "string",
-      "description": "dnsPolicyUnloadOnShutdown: false\nWhen set to a value starting with `ignore-taint.cluster-autoscaler.kubernetes.io/`, the Cluster Autoscaler will ignore the taint on its decisions, allowing the cluster to scale up."
+      "description": "When set to a value starting with `ignore-taint.cluster-autoscaler.kubernetes.io/`, the Cluster Autoscaler will ignore the taint on its decisions, allowing the cluster to scale up."
     },
     "dnsProxy": {
       "type": "object",

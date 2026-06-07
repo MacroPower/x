@@ -40,7 +40,10 @@
 // [Generator.Generate] processes YAML inputs through a five-phase pipeline:
 //
 //  1. Parse YAML: each input is parsed using goccy/go-yaml with comment
-//     preservation. Multi-document files are merged with union semantics,
+//     preservation. A leading UTF-8 byte-order mark is stripped and CRLF
+//     and lone-CR line breaks are folded to LF first, so node line
+//     positions (which comment attribution depends on) stay aligned with
+//     the source. Multi-document files are merged with union semantics,
 //     the same as multiple input files. Empty files produce the "true" schema
 //     (validates everything). YAML anchors and aliases are resolved by
 //     walking the AST; alias cycles and pathologically deep nesting are cut
@@ -83,7 +86,14 @@
 //     record no default, since their children carry their own. Defaults
 //     inside array items schemas are suppressed, since items describes
 //     every element and a default lifted from one observed element would
-//     be arbitrary.
+//     be arbitrary. A description is the comment block physically touching
+//     the key. The parser merges separate comment blocks (file headers,
+//     commented-out examples for a previous key) into one head comment
+//     group on the following key; comment token positions then narrow the
+//     group to the run of lines at one indentation level ending directly
+//     above the key, and a run indented past the key's column is
+//     discarded as a stray block. Within that block, "#"-only lines
+//     separate paragraphs of one description.
 //
 //  4. Merge multiple inputs: when multiple YAML files are provided,
 //     schemas are generated independently and then merged with union

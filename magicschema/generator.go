@@ -186,6 +186,15 @@ func (g *Generator) generateSingle(input []byte) (*jsonschema.Schema, []Annotato
 	// as part of the first property key.
 	input = bytes.TrimPrefix(input, []byte("\xef\xbb\xbf"))
 
+	// Normalize line endings to LF. The YAML spec folds all line breaks to
+	// LF on input, but goccy's lexer counts each CR toward its line number,
+	// so under CRLF a node's reported Position.Line no longer matches its
+	// physical line. Comment attribution (see [adjacentCommentRun]) reasons
+	// about exact line adjacency, so on a CRLF-encoded chart it would
+	// silently drop every description. Folding here keeps all
+	// position-dependent logic aligned with the source.
+	input = normalizeLineEndings(input)
+
 	if len(input) == 0 || isBlank(input) {
 		return TrueSchema(), nil, nil
 	}
@@ -1030,6 +1039,18 @@ func dropEmptyDocuments(input []byte) []byte {
 	}
 
 	return bytes.Join(out, []byte("\n"))
+}
+
+// normalizeLineEndings folds CRLF and lone CR line breaks to LF. Returns the
+// input unchanged when it contains no carriage returns.
+func normalizeLineEndings(input []byte) []byte {
+	if !bytes.ContainsRune(input, '\r') {
+		return input
+	}
+
+	input = bytes.ReplaceAll(input, []byte("\r\n"), []byte("\n"))
+
+	return bytes.ReplaceAll(input, []byte("\r"), []byte("\n"))
 }
 
 // isSeparatorLine reports whether a line is a bare YAML document separator:

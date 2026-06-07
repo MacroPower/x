@@ -22,11 +22,16 @@
           "description": "Image pull policy"
         }
       },
-      "required": ["repository"],
+      "required": [
+        "repository"
+      ],
       "additionalProperties": true
     },
     "nameOverride": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "description": "Override chart name"
     },
     "fullnameOverride": {
@@ -38,7 +43,11 @@
       "properties": {
         "type": {
           "type": "string",
-          "enum": ["ClusterIP", "NodePort", "LoadBalancer"]
+          "enum": [
+            "ClusterIP",
+            "NodePort",
+            "LoadBalancer"
+          ]
         },
         "port": {
           "type": "integer"

@@ -1039,9 +1039,10 @@ func TestGeneratorFallbackInference(t *testing.T) {
 				), field["description"])
 			},
 		},
-		"whitespace-only comment line separates groups": {
-			// A whitespace-only comment line is a group separator even with
-			// indentation preserved, so only the last group survives.
+		"whitespace-only comment line separates paragraphs": {
+			// A whitespace-only comment line inside a contiguous block is a
+			// paragraph separator, so both paragraphs survive with a blank
+			// line between them and per-line indentation preserved.
 			input: "#   earlier text\n#  \n#   kept text\nval: 1\n",
 			check: func(t *testing.T, got map[string]any) {
 				t.Helper()
@@ -1051,7 +1052,11 @@ func TestGeneratorFallbackInference(t *testing.T) {
 
 				val, ok := props["val"].(map[string]any)
 				require.True(t, ok)
-				assert.Equal(t, "  kept text", val["description"])
+				assert.Equal(t, stringtest.JoinLF(
+					"  earlier text",
+					"",
+					"  kept text",
+				), val["description"])
 			},
 		},
 		"inline comment on same-line key-value": {
@@ -1171,6 +1176,232 @@ func TestGeneratorFallbackInference(t *testing.T) {
 
 			require.NoError(t, json.Unmarshal(out, &got))
 			tc.check(t, got)
+		})
+	}
+}
+
+func TestGeneratorHeadCommentAttribution(t *testing.T) {
+	t.Parallel()
+
+	// The goccy parser bundles separate comment blocks (file headers,
+	// commented-out examples for a previous key) into one head comment
+	// group on the following key, erasing the blank lines between them.
+	// Only the comment run physically touching the key documents it; a
+	// "#"-only line inside that run separates paragraphs of one
+	// description. Property paths are dot-separated; an empty want means
+	// the property must have no description.
+	tcs := map[string]struct {
+		input string
+		want  map[string]string
+	}{
+		"file header not attributed to first key": {
+			input: stringtest.Input(`
+				# Default values for my-chart.
+				# This is a YAML-formatted file.
+
+				# Number of replicas.
+				replicaCount: 1
+			`),
+			want: map[string]string{
+				"replicaCount": "Number of replicas.",
+			},
+		},
+		"non-adjacent comment block dropped": {
+			input: stringtest.Input(`
+				# Example on how to configure extraEnvs
+				# - name: FOO
+				#   value: bar
+
+				tls: false
+			`),
+			want: map[string]string{
+				"tls": "",
+			},
+		},
+		"indented stray comment not attributed to next key": {
+			input: stringtest.Input(`
+				some_map: {}
+				  # commented example for some_map's children
+				nodeSelector: {}
+			`),
+			want: map[string]string{
+				"some_map":     "",
+				"nodeSelector": "",
+			},
+		},
+		"adjacent comment kept": {
+			input: stringtest.Input(`
+				# Redis address.
+				cache: ""
+			`),
+			want: map[string]string{
+				"cache": "Redis address.",
+			},
+		},
+		"non-adjacent example dropped and adjacent description kept": {
+			input: stringtest.Input(`
+				# Example on how to configure extraEnvs
+				# - name: FOO
+				#   value: bar
+
+				# enable tls on the podinfo service
+				tls: false
+			`),
+			want: map[string]string{
+				"tls": "enable tls on the podinfo service",
+			},
+		},
+		"deeper-indented run directly above adjacent description dropped": {
+			input: stringtest.Input(`
+				foo: {}
+				  # commented child for foo
+				# real doc for bar
+				bar: 1
+			`),
+			want: map[string]string{
+				"foo": "",
+				"bar": "real doc for bar",
+			},
+		},
+		"under-indented comment attributed to nested key": {
+			input: stringtest.Input(`
+				foo:
+				# doc for bar
+				  bar: 1
+			`),
+			want: map[string]string{
+				"foo.bar": "doc for bar",
+			},
+		},
+		"hash-only lines separate paragraphs and all paragraphs kept": {
+			input: stringtest.Input(`
+				# assertNoLeakedSecrets checks that secret values are not exposed.
+				#
+				# To pass values without exposing them, use variable expansion.
+				#
+				# Alternatively, disable this check by setting assertNoLeakedSecrets to false.
+				assertNoLeakedSecrets: true
+			`),
+			want: map[string]string{
+				"assertNoLeakedSecrets": stringtest.JoinLF(
+					"assertNoLeakedSecrets checks that secret values are not exposed.",
+					"",
+					"To pass values without exposing them, use variable expansion.",
+					"",
+					"Alternatively, disable this check by setting assertNoLeakedSecrets to false.",
+				),
+			},
+		},
+		"unrelated block dropped and both paragraphs kept": {
+			input: stringtest.Input(`
+				# Unrelated block for the previous key.
+
+				# Real docs paragraph one.
+				#
+				# Real docs paragraph two.
+				key: 1
+			`),
+			want: map[string]string{
+				"key": stringtest.JoinLF(
+					"Real docs paragraph one.",
+					"",
+					"Real docs paragraph two.",
+				),
+			},
+		},
+		"consecutive separator lines collapse to one paragraph break": {
+			input: stringtest.Input(`
+				# para one
+				#
+				#
+				# para two
+				key: 1
+			`),
+			want: map[string]string{
+				"key": stringtest.JoinLF(
+					"para one",
+					"",
+					"para two",
+				),
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			gen := magicschema.NewGenerator()
+			schema, err := gen.Generate([]byte(tc.input))
+			require.NoError(t, err)
+
+			out, err := json.Marshal(schema)
+			require.NoError(t, err)
+
+			var got map[string]any
+
+			require.NoError(t, json.Unmarshal(out, &got))
+
+			for path, want := range tc.want {
+				prop := propertyAt(t, got, strings.Split(path, ".")...)
+
+				if want == "" {
+					assert.NotContains(t, prop, "description", "property %s", path)
+				} else {
+					assert.Equal(t, want, prop["description"], "property %s", path)
+				}
+			}
+		})
+	}
+}
+
+func TestGeneratorCRLFHeadComments(t *testing.T) {
+	t.Parallel()
+
+	// The goccy lexer counts each carriage return toward its line number, so
+	// CRLF and lone-CR input desynchronize the Position.Line that comment
+	// attribution reasons about. The generator folds line endings before
+	// parsing, so every line-ending style yields the same descriptions as
+	// its LF twin: a multi-line head comment stays intact and a file header
+	// is still dropped.
+	lines := []string{
+		"# Default values for my-chart.",
+		"",
+		"# How many replicas to run.",
+		"# Increase for high availability.",
+		"replicaCount: 1",
+		"",
+	}
+	lf := stringtest.JoinLF(lines...)
+
+	want := stringtest.JoinLF(
+		"How many replicas to run.",
+		"Increase for high availability.",
+	)
+
+	inputs := map[string]string{
+		"lf":   lf,
+		"crlf": stringtest.JoinCRLF(lines...),
+		"cr":   strings.ReplaceAll(lf, "\n", "\r"),
+	}
+
+	for name, input := range inputs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			gen := magicschema.NewGenerator()
+			schema, err := gen.Generate([]byte(input))
+			require.NoError(t, err)
+
+			out, err := json.Marshal(schema)
+			require.NoError(t, err)
+
+			var got map[string]any
+
+			require.NoError(t, json.Unmarshal(out, &got))
+
+			replicaCount := propertyAt(t, got, "replicaCount")
+			assert.Equal(t, want, replicaCount["description"])
 		})
 	}
 }

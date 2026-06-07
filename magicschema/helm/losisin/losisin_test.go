@@ -2326,6 +2326,25 @@ func TestHelmValuesSchemaAnnotatorFromFile(t *testing.T) {
 	assertGolden(t, "testdata/helm_values_schema.schema.json", schema)
 }
 
+// TestHelmValuesSchemaAnnotatorRealWorld locks in the generated schema for the
+// traefik chart, the canonical heavy user of inline @schema annotations (type
+// unions, enums, patterns, required, defaults). Vendored via `helm show values
+// traefik --repo https://traefik.github.io/charts` (version 40.2.0).
+func TestHelmValuesSchemaAnnotatorRealWorld(t *testing.T) {
+	t.Parallel()
+
+	data, err := os.ReadFile("testdata/traefik_values.yaml")
+	require.NoError(t, err)
+
+	gen := magicschema.NewGenerator(
+		magicschema.WithAnnotators(losisin.New()),
+	)
+	schema, err := gen.Generate(data)
+	require.NoError(t, err)
+
+	assertGolden(t, "testdata/traefik_values.schema.json", schema)
+}
+
 func TestHelmValuesSchemaAnnotatorUpstreamAlignment(t *testing.T) {
 	t.Parallel()
 

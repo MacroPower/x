@@ -50,7 +50,6 @@
           "additionalProperties": true
         }
       },
-      "description": "Copyright Broadcom, Inc. All Rights Reserved.\nSPDX-License-Identifier: APACHE-2.0\nGlobal Docker image parameters\nPlease, note that this will override the image parameters, including dependencies, configured to use the global value\nCurrent available global Docker image parameters: imageRegistry, imagePullSecrets and storageClass",
       "additionalProperties": true
     },
     "kubeVersion": {

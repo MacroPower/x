@@ -113,9 +113,12 @@ func extractComment(node ast.Node) string {
 		return ""
 	}
 
-	// Try head comment on the MappingValueNode itself.
-	if desc := extractFromComment(mvn.GetComment()); desc != "" {
-		return desc
+	// Head comment block above the key, narrowed to the run that
+	// physically documents it.
+	if run := adjacentCommentRun(mvn.GetComment(), mvn.Key); len(run) > 0 {
+		if desc := commentDescription(strings.Join(run, "\n")); desc != "" {
+			return desc
+		}
 	}
 
 	// Try inline comment on the value node.
@@ -141,7 +144,13 @@ func extractFromComment(comment *ast.CommentGroupNode) string {
 		return ""
 	}
 
-	desc := cleanComment(comment.String())
+	return commentDescription(comment.String())
+}
+
+// commentDescription cleans a comment string and rejects results that are
+// annotation markers rather than prose.
+func commentDescription(s string) string {
+	desc := cleanComment(s)
 	if desc != "" && !IsAnnotationComment(desc) {
 		return desc
 	}
@@ -149,14 +158,78 @@ func extractFromComment(comment *ast.CommentGroupNode) string {
 	return ""
 }
 
+// adjacentCommentRun returns the lines ("#"-prefixed, matching
+// [ast.CommentGroupNode.String] output) of the head comment run that
+// documents the key. The goccy parser merges separate comment blocks -- a
+// file header, a commented-out example for the previous key -- into one
+// head comment group on the following key, erasing the physical blank
+// lines between them. Token positions reconstruct the layout: a run is a
+// maximal sequence of comment tokens on consecutive lines at the same
+// column, so a jump in line numbers is an erased blank line and a column
+// change is a comment from a different nesting level (such as a
+// commented-out child of the previous key). A description is the comment
+// block touching the key, so only the final run counts, and only when its
+// last line sits directly above the key and is not indented past the key's
+// column; anything else is a stray block that documents nothing here.
+// Comment tokens without position information cannot be placed, so the
+// whole group is attributed (fail open).
+func adjacentCommentRun(comment *ast.CommentGroupNode, key ast.MapKeyNode) []string {
+	if comment == nil {
+		return nil
+	}
+
+	var (
+		all, run          []string
+		prevLine, prevCol int
+		unpositioned      bool
+	)
+
+	for _, c := range comment.Comments {
+		tok := c.GetToken()
+		if tok == nil {
+			return nil
+		}
+
+		line := "#" + tok.Value
+		all = append(all, line)
+
+		if tok.Position == nil {
+			unpositioned = true
+
+			continue
+		}
+
+		if len(run) > 0 && (tok.Position.Line != prevLine+1 || tok.Position.Column != prevCol) {
+			run = run[:0]
+		}
+
+		run = append(run, line)
+		prevLine, prevCol = tok.Position.Line, tok.Position.Column
+	}
+
+	keyTok := key.GetToken()
+	if unpositioned || keyTok == nil || keyTok.Position == nil {
+		return all
+	}
+
+	if len(run) == 0 || prevLine != keyTok.Position.Line-1 || prevCol > keyTok.Position.Column {
+		return nil
+	}
+
+	return run
+}
+
 // cleanComment strips comment markers and whitespace from a comment string.
-// Multi-line comments are joined with newlines, using only the last comment
-// group (the lines after the last blank line, ignoring trailing blanks).
-// Indentation beyond the single space after "#" survives, so YAML snippets
-// embedded in comments keep their structure. Annotation lines are dropped
-// before group selection: bare @schema and @schema.root lines fence
-// helm-schema blocks whose content is annotation data, not prose, and lines
-// matching [IsAnnotationComment] are markers.
+// Multi-line comments are joined with newlines, and "#"-only lines separate
+// paragraphs (rendered as blank lines, with runs collapsed and the ends
+// trimmed): callers pass only the comment block that documents one key (see
+// [adjacentCommentRun]), so a "#"-only line inside it is a paragraph
+// separator within one description, not a boundary between unrelated
+// comment groups. Indentation beyond the single space after "#" survives,
+// so YAML snippets embedded in comments keep their structure. Annotation
+// lines are dropped: bare @schema and @schema.root lines fence helm-schema
+// blocks whose content is annotation data, not prose, and lines matching
+// [IsAnnotationComment] are markers.
 func cleanComment(s string) string {
 	var (
 		lines         []string
@@ -203,7 +276,7 @@ func cleanComment(s string) string {
 
 		// Skip annotation markers from any supported annotator format so
 		// they never leak into descriptions. Blank lines stay: they
-		// separate comment groups.
+		// separate paragraphs.
 		if cleaned != "" && IsAnnotationComment(cleaned) {
 			continue
 		}
@@ -211,9 +284,31 @@ func cleanComment(s string) string {
 		lines = append(lines, content)
 	}
 
-	// The returned group contains no blank lines (blanks delimit groups),
-	// so the lines join directly.
-	return strings.Join(LastCommentGroup(lines), "\n")
+	// Render paragraph separators as blank lines, collapsing runs and
+	// trimming the ends so the description neither starts nor ends with
+	// a separator.
+	var (
+		out       []string
+		separator bool
+	)
+
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			separator = len(out) > 0
+
+			continue
+		}
+
+		if separator {
+			out = append(out, "")
+
+			separator = false
+		}
+
+		out = append(out, line)
+	}
+
+	return strings.Join(out, "\n")
 }
 
 // stripCommentPrefix removes leading "#" characters and a single space.
