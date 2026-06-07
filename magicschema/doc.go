@@ -66,7 +66,9 @@
 //     (!!str, !!int, ...) override the literal's apparent type, since
 //     loaders coerce the value to the tagged type. Null and empty values
 //     emit no type constraint (maximally permissive). Objects recurse
-//     into children. Arrays infer items from element types. Plain YAML
+//     into children. Arrays infer items from element types; a null or
+//     empty element among typed elements widens the items type to
+//     [type, null] so the source list validates. Plain YAML
 //     comments that do not look like annotation markers become the
 //     description; [IsAnnotationComment] identifies markers to skip.
 //     Comments also fill in the description when annotators produce
@@ -76,7 +78,9 @@
 //     schemas are generated independently and then merged with union
 //     semantics. Properties are unioned. Conflicting types are widened
 //     (integer + number becomes number; incompatible types drop the
-//     type constraint entirely). Required is intersected (a property
+//     type constraint entirely; a value that is null or empty in one
+//     input and typed in another widens to a [type, null] union so the
+//     null input still validates). Required is intersected (a property
 //     is required only if required in all inputs). additionalProperties
 //     is merged fail-open (true wins over false, false yields to a
 //     constrained schema). Validation constraints survive a merge only
@@ -125,15 +129,17 @@
 //	number     string              (no type constraint)
 //	array      string              (no type constraint)
 //	object     anything non-object (no type constraint)
-//	any type   null                same type (null means "was empty in one file")
+//	any type   null                [type, null] (the null input must stay valid)
 //	any type   same type           same type
 //
-// The key insight: incompatible types result in removing the type constraint
-// entirely, which is the most permissive (fail-open) behavior. Type-specific
-// keywords (properties, items, bounds, pattern) are dropped along with the
-// type constraint, since they would otherwise still constrain instances of
-// the now-unconstrained union. Null or empty values in one file do not
-// constrain the merged type from another file.
+// Incompatible types drop the type constraint entirely, the most permissive
+// (fail-open) behavior. Type-specific keywords (properties, items, bounds,
+// pattern) are dropped along with the type constraint, since they would
+// otherwise still constrain instances of the now-unconstrained union. A
+// value that is null or empty in one file but typed in another widens to a
+// [type, null] union, so the file containing the null -- a Helm overlay
+// clearing a base value, for example -- still validates against the merged
+// schema.
 //
 // Object properties are unioned across files. Array items schemas are merged
 // recursively. The required array is intersected so that a property is only

@@ -205,9 +205,10 @@ func TestInferArrayItems(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		input    string
-		wantType string
-		hasItems bool
+		input     string
+		wantType  string
+		wantTypes []any // type union; takes precedence over wantType
+		hasItems  bool
 	}{
 		"string array": {
 			input:    "items:\n  - hello\n  - world\n",
@@ -230,6 +231,24 @@ func TestInferArrayItems(t *testing.T) {
 		},
 		"empty array": {
 			input:    "items: []\n",
+			hasItems: false,
+		},
+		"typed array with null element": {
+			input:     "items:\n  - 1\n  - null\n",
+			wantTypes: []any{"integer", "null"},
+			hasItems:  true,
+		},
+		"typed array with empty element": {
+			input:     "items:\n  - hello\n  -\n",
+			wantTypes: []any{"string", "null"},
+			hasItems:  true,
+		},
+		"all-null array": {
+			input:    "items:\n  - null\n  - ~\n",
+			hasItems: false,
+		},
+		"mixed incompatible array with null element": {
+			input:    "items:\n  - hello\n  - 42\n  - null\n",
 			hasItems: false,
 		},
 	}
@@ -255,11 +274,18 @@ func TestInferArrayItems(t *testing.T) {
 			items, ok := props["items"].(map[string]any)
 			require.True(t, ok)
 
-			if tc.hasItems {
+			switch {
+			case len(tc.wantTypes) > 0:
+				itemSchema, ok := items["items"].(map[string]any)
+				require.True(t, ok, "expected items schema")
+				assert.Equal(t, tc.wantTypes, itemSchema["type"])
+
+			case tc.hasItems:
 				itemSchema, ok := items["items"].(map[string]any)
 				require.True(t, ok, "expected items schema")
 				assert.Equal(t, tc.wantType, itemSchema["type"])
-			} else {
+
+			default:
 				assert.Nil(t, items["items"])
 			}
 		})

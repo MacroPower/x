@@ -16,11 +16,13 @@ import (
 // Bounds widen toward the permissive end, enums union (a const counts as a
 // single-value enum), and exact-value constraints (pattern, format,
 // multipleOf, patternProperties, and other keywords with no widening rule)
-// are kept only when both sides agree. When the two types are incompatible
-// the type constraint is
-// dropped entirely, and every type-specific keyword (properties, items,
-// bounds, pattern) drops with it -- a schema with no type but residual
-// object or array constraints would still fail closed for those instances.
+// are kept only when both sides agree. A type that is null or empty on one
+// side and concrete on the other widens to a [type, null] union so the null
+// input still validates. When the two types are incompatible the type
+// constraint is dropped entirely, and every type-specific keyword
+// (properties, items, bounds, pattern) drops with it -- a schema with no
+// type but residual object or array constraints would still fail closed for
+// those instances.
 // Combinators and references ($ref, allOf/anyOf/oneOf, not) are dropped
 // entirely, which is the most permissive behavior; the if/then/else
 // conditional is kept as a unit when both sides agree exactly.

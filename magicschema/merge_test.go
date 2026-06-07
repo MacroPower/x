@@ -83,7 +83,7 @@ func TestMergeMultipleInputs(t *testing.T) {
 				}
 			},
 		},
-		"null merges transparently": {
+		"null widens to a nullable type union": {
 			inputA: "val: null\n",
 			inputB: "val: hello\n",
 			check: func(t *testing.T, got map[string]any) {
@@ -95,7 +95,36 @@ func TestMergeMultipleInputs(t *testing.T) {
 				val, ok := props["val"].(map[string]any)
 				require.True(t, ok)
 
-				assert.Equal(t, "string", val["type"])
+				assert.Equal(t, []any{"string", "null"}, val["type"])
+			},
+		},
+		"overlay null keeps base object valid": {
+			// The Helm idiom: an overlay clears a base value by setting
+			// it to null, and that overlay must still validate against
+			// the merged schema.
+			inputA: "resources:\n  limits: null\n",
+			inputB: "resources:\n  limits:\n    cpu: 100m\n",
+			check: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				resources, ok := props["resources"].(map[string]any)
+				require.True(t, ok)
+
+				resourcesProps, ok := resources["properties"].(map[string]any)
+				require.True(t, ok)
+
+				limits, ok := resourcesProps["limits"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, []any{"object", "null"}, limits["type"])
+
+				limitsProps, ok := limits["properties"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Contains(t, limitsProps, "cpu")
 			},
 		},
 		"nested object union": {
@@ -281,9 +310,10 @@ func TestMergeTypeWidening(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		inputA   string
-		inputB   string
-		wantType string // empty means no type constraint
+		inputA    string
+		inputB    string
+		wantType  string // single type; empty means no type constraint
+		wantTypes []any  // type union; takes precedence over wantType
 	}{
 		"integer + number -> number": {
 			inputA:   "val: 1\n",
@@ -345,35 +375,48 @@ func TestMergeTypeWidening(t *testing.T) {
 			inputB:   "val: 42\n",
 			wantType: "",
 		},
-		"any type + null -> same type (string)": {
-			inputA:   "val: hello\n",
+		"string + null -> [string, null]": {
+			inputA:    "val: hello\n",
+			inputB:    "val: null\n",
+			wantTypes: []any{"string", "null"},
+		},
+		"null + integer -> [integer, null]": {
+			inputA:    "val: null\n",
+			inputB:    "val: 42\n",
+			wantTypes: []any{"integer", "null"},
+		},
+		"null + boolean -> [boolean, null]": {
+			inputA:    "val: null\n",
+			inputB:    "val: true\n",
+			wantTypes: []any{"boolean", "null"},
+		},
+		"null + number -> [number, null]": {
+			inputA:    "val: null\n",
+			inputB:    "val: 3.14\n",
+			wantTypes: []any{"number", "null"},
+		},
+		"null + array -> [array, null]": {
+			inputA:    "val: null\n",
+			inputB:    "val:\n  - a\n",
+			wantTypes: []any{"array", "null"},
+		},
+		"null + object -> [object, null]": {
+			inputA:    "val: null\n",
+			inputB:    "val:\n  key: x\n",
+			wantTypes: []any{"object", "null"},
+		},
+		"null + null -> no constraint": {
+			inputA:   "val: null\n",
 			inputB:   "val: null\n",
-			wantType: "string",
+			wantType: "",
 		},
-		"null + any type (integer)": {
-			inputA:   "val: null\n",
-			inputB:   "val: 42\n",
-			wantType: "integer",
-		},
-		"null + any type (boolean)": {
-			inputA:   "val: null\n",
-			inputB:   "val: true\n",
-			wantType: "boolean",
-		},
-		"null + any type (number)": {
-			inputA:   "val: null\n",
-			inputB:   "val: 3.14\n",
-			wantType: "number",
-		},
-		"null + any type (array)": {
-			inputA:   "val: null\n",
-			inputB:   "val:\n  - a\n",
-			wantType: "array",
-		},
-		"null + any type (object)": {
-			inputA:   "val: null\n",
-			inputB:   "val:\n  key: x\n",
-			wantType: "object",
+		"empty value + integer -> [integer, null]": {
+			// An empty value parses to the same null node as the explicit
+			// null, ~, Null, and NULL spellings, so all of them carry null
+			// into the union.
+			inputA:    "val:\n",
+			inputB:    "val: 42\n",
+			wantTypes: []any{"integer", "null"},
 		},
 		"same type (string) -> string": {
 			inputA:   "val: hello\n",
@@ -445,18 +488,69 @@ func TestMergeTypeWidening(t *testing.T) {
 			props, ok := got["properties"].(map[string]any)
 			require.True(t, ok)
 
-			if tc.wantType == "" {
+			switch {
+			case len(tc.wantTypes) > 0:
+				val, ok := props["val"].(map[string]any)
+				require.True(t, ok, "expected val to be a map")
+				assert.Equal(t, tc.wantTypes, val["type"])
+
+			case tc.wantType == "":
 				// No type constraint: property may be true (true schema)
 				// or a map without a "type" key.
 				val, isMap := props["val"].(map[string]any)
 				if isMap {
 					assert.Nil(t, val["type"], "expected no type constraint")
 				}
-			} else {
+
+			default:
 				val, ok := props["val"].(map[string]any)
 				require.True(t, ok, "expected val to be a map")
 				assert.Equal(t, tc.wantType, val["type"])
 			}
+		})
+	}
+}
+
+func TestMergeNullCarryThreeInputs(t *testing.T) {
+	t.Parallel()
+
+	// The null carry is order-independent: a null in any one input widens
+	// the merged type the same way regardless of merge order.
+	tcs := map[string]struct {
+		inputs []string
+	}{
+		"null first":  {inputs: []string{"val: null\n", "val: a\n", "val: b\n"}},
+		"null middle": {inputs: []string{"val: a\n", "val: null\n", "val: b\n"}},
+		"null last":   {inputs: []string{"val: a\n", "val: b\n", "val: null\n"}},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			inputs := make([][]byte, len(tc.inputs))
+			for i, in := range tc.inputs {
+				inputs[i] = []byte(in)
+			}
+
+			gen := magicschema.NewGenerator()
+			schema, err := gen.Generate(inputs...)
+			require.NoError(t, err)
+
+			out, err := json.Marshal(schema)
+			require.NoError(t, err)
+
+			var got map[string]any
+
+			require.NoError(t, json.Unmarshal(out, &got))
+
+			props, ok := got["properties"].(map[string]any)
+			require.True(t, ok)
+
+			val, ok := props["val"].(map[string]any)
+			require.True(t, ok)
+
+			assert.Equal(t, []any{"string", "null"}, val["type"])
 		})
 	}
 }
@@ -483,6 +577,25 @@ func TestMergeAnnotatedConstraints(t *testing.T) {
 				host, ok := props["host"].(map[string]any)
 				require.True(t, ok)
 
+				assert.Equal(t, []any{"string", "null"}, host["type"])
+			},
+		},
+		"null-only annotated type widens with typed file": {
+			inputA: "# @schema type:null\nhost:\n",
+			inputB: "host: example.com\n",
+			opts:   []magicschema.Option{magicschema.WithAnnotators(losisin.New())},
+			check: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				host, ok := props["host"].(map[string]any)
+				require.True(t, ok)
+
+				// A single null, not ["string","null","null"]: the null
+				// member from the annotation and the null carried for the
+				// typeless side deduplicate.
 				assert.Equal(t, []any{"string", "null"}, host["type"])
 			},
 		},

@@ -528,10 +528,23 @@ func TestGeneratorMultiDocument(t *testing.T) {
 	tcs := map[string]struct {
 		input    string
 		wantKeys []string
+		check    func(*testing.T, map[string]any)
 	}{
 		"merges all documents with union semantics": {
 			input:    "key1: value1\n---\nkey2: value2\n",
 			wantKeys: []string{"key1", "key2"},
+		},
+		"null in one document widens to a nullable union": {
+			input:    "val: null\n---\nval: hello\n",
+			wantKeys: []string{"val"},
+			check: func(t *testing.T, props map[string]any) {
+				t.Helper()
+
+				val, ok := props["val"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, []any{"string", "null"}, val["type"])
+			},
 		},
 	}
 
@@ -555,6 +568,10 @@ func TestGeneratorMultiDocument(t *testing.T) {
 
 			for _, key := range tc.wantKeys {
 				assert.Contains(t, props, key)
+			}
+
+			if tc.check != nil {
+				tc.check(t, props)
 			}
 		})
 	}
@@ -1203,6 +1220,10 @@ func TestGeneratorMultipleInputsWithOneEmpty(t *testing.T) {
 	require.True(t, ok)
 	assert.Contains(t, props, "replicas")
 	assert.Contains(t, props, "name")
+
+	// A blank input contributes the true schema (no type constraint), so
+	// the typeless side widens the merged root to accept null as well.
+	assert.Equal(t, []any{"object", "null"}, got["type"])
 }
 
 // assertPropertiesMatch checks that all expected properties exist in got

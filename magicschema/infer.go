@@ -272,36 +272,80 @@ func isHelmDocsOldStyleComment(s string) bool {
 }
 
 // inferItemsSchema creates an items schema from a sequence node's elements.
-// If elements have mixed types, the type is widened. Returns nil for empty
-// sequences.
+// Mixed element types widen, and a null or empty element among typed
+// elements adds "null" to the items type so the source list validates.
+// Returns nil (no constraint) for empty sequences, all-null sequences, and
+// incompatible element types.
 func inferItemsSchema(seq *ast.SequenceNode) *jsonschema.Schema {
 	if len(seq.Values) == 0 {
 		return nil
 	}
 
-	// The empty string widens to the other side, so the first element
-	// needs no special case.
-	var resultType string
+	var (
+		resultType string
+		hasNull    bool
+	)
 
+	// Genuine nulls mark the list nullable; unknown nodes (aliases) stay
+	// transparent via the empty string, which widens to the other side.
 	for _, val := range seq.Values {
+		if isNullNode(val) {
+			hasNull = true
+
+			continue
+		}
+
 		resultType = widenType(resultType, inferType(val))
 	}
 
+	// No positive type evidence, or incompatible types: fail open.
 	if resultType == "" {
 		return nil
+	}
+
+	if hasNull {
+		return &jsonschema.Schema{Types: []string{resultType, typeNull}}
 	}
 
 	return &jsonschema.Schema{Type: resultType}
 }
 
+// isNullNode reports whether a node is a YAML null value: a null literal or
+// a !!null-tagged scalar, looking through anchor wrappers. Aliases and other
+// unresolved nodes are not nulls; they stay transparent to inference.
+func isNullNode(node ast.Node) bool {
+	for {
+		switch n := node.(type) {
+		case *ast.AnchorNode:
+			node = n.Value
+		case *ast.TagNode:
+			// A known tag is authoritative: !!null is a null, any other
+			// core tag is not. Unknown tags fall through to the value.
+			if t, ok := tagType(n.Start.Value); ok {
+				return t == ""
+			}
+
+			node = n.Value
+
+		default:
+			_, ok := node.(*ast.NullNode)
+
+			return ok
+		}
+	}
+}
+
 // widenType returns the widened type when merging two type strings.
-// Returns empty string (no constraint) for incompatible types.
+// Returns empty string (no constraint) for incompatible types. The empty
+// string means unknown and merges transparently; callers separate genuine
+// nulls before folding (see [inferItemsSchema]), and [widenTypeList] is the
+// cross-input primitive that carries null instead.
 func widenType(a, b string) string {
 	if a == b {
 		return a
 	}
 
-	// Null/empty merges transparently.
+	// Unknown merges transparently.
 	if a == "" {
 		return b
 	}
@@ -330,18 +374,26 @@ func typeList(s *jsonschema.Schema) []string {
 }
 
 // widenTypeList merges two type lists, generalizing [widenType] to type
-// unions. An empty list (no constraint) adopts the other side, matching the
-// "null means the value was empty in one file" rule, and the "null" member
-// carries through whenever either side allows null. Beyond that, identical
-// sets merge, all-numeric sets widen to number, and anything else drops the
-// constraint entirely (fail open).
+// unions. A side with no type constraint means the value was null or empty
+// in that input, so the result is the other side's types plus "null" -- the
+// null input must still validate against the merged schema. Two empty sides
+// stay empty. Beyond that, identical sets merge, all-numeric sets widen to
+// number, anything else drops the constraint entirely (fail open), and the
+// "null" member carries through whenever either side allows null.
 func widenTypeList(a, b []string) []string {
+	if len(a) == 0 && len(b) == 0 {
+		return nil
+	}
+
+	// Exactly one side has no type constraint: the value was null or
+	// empty in that input, so the merged type keeps the typed side and
+	// adds "null".
 	if len(a) == 0 {
-		return b
+		return appendNull(b)
 	}
 
 	if len(b) == 0 {
-		return a
+		return appendNull(a)
 	}
 
 	coreA, nullA := splitNullType(a)
@@ -367,6 +419,17 @@ func widenTypeList(a, b []string) []string {
 	}
 
 	return core
+}
+
+// appendNull returns the type list with "null" appended. An already-nullable
+// list is returned as-is, and appending clones first so the input's backing
+// array is never mutated.
+func appendNull(types []string) []string {
+	if slices.Contains(types, typeNull) {
+		return types
+	}
+
+	return append(slices.Clone(types), typeNull)
 }
 
 // splitNullType separates the "null" member from a type list, returning the
