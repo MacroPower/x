@@ -123,19 +123,19 @@ entries never do.
 
 ### Type mapping
 
-| Go type                              | JSON Schema                                                                            |
-| ------------------------------------ | -------------------------------------------------------------------------------------- |
-| `string`, `bool`, `float64`          | `string`, `boolean`, `number`                                                          |
-| `int`                                | `integer`                                                                              |
-| `int8`...`int64`, `uint8`...`uint64` | `integer` with `minimum`/`maximum` bounds                                              |
-| `uint`, `uintptr`                    | `integer` with `minimum: 0`                                                            |
-| `*T`                                 | nullable: base schema wrapped in `anyOf` with a `{"type":"null"}` branch               |
-| `[]T`                                | nullable `array` with an `items` schema                                                |
-| `[]byte`                             | nullable base64-encoded `string` (`contentEncoding`)                                   |
-| `[N]T`                               | fixed-size array via `prefixItems` with `minItems`/`maxItems` = N                      |
-| `map[K]V`                            | nullable `object` with `additionalProperties` (K: string, integer, or `TextMarshaler`) |
-| `any` / interface                    | unrestricted (`{}`)                                                                    |
-| `struct`                             | `object` with `properties`, `required`, and `additionalProperties: false`              |
+| Go type                              | JSON Schema                                                                                                 |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
+| `string`, `bool`, `float64`          | `string`, `boolean`, `number`                                                                               |
+| `int`                                | `integer`                                                                                                   |
+| `int8`...`int64`, `uint8`...`uint64` | `integer` with `minimum`/`maximum` bounds                                                                   |
+| `uint`, `uintptr`                    | `integer` with `minimum: 0`                                                                                 |
+| `*T`                                 | nullable: base schema wrapped in `anyOf` with a `{"type":"null"}` branch (see `WithNullable`)               |
+| `[]T`                                | nullable `array` with an `items` schema (see `WithNullable`)                                                |
+| `[]byte`                             | nullable base64-encoded `string` (`contentEncoding`) (see `WithNullable`)                                   |
+| `[N]T`                               | fixed-size array via `prefixItems` with `minItems`/`maxItems` = N                                           |
+| `map[K]V`                            | nullable `object` with `additionalProperties` (K: string, integer, or `TextMarshaler`) (see `WithNullable`) |
+| `any` / interface                    | unrestricted (`{}`)                                                                                         |
+| `struct`                             | `object` with `properties`, `required`, and `additionalProperties: false`                                   |
 
 Well-known types have built-in overrides matched by exact `reflect.Type`:
 `time.Time` -> `{"type":"string","format":"date-time"}`,
@@ -150,15 +150,16 @@ Unsupported types (`func`, `chan`, `complex`, `unsafe.Pointer`) return
 
 ### Configuration options
 
-| Option                           | Effect                                                            |
-| -------------------------------- | ----------------------------------------------------------------- |
-| `WithDraft(Draft)`               | Target draft: `Draft2020` (default) or `Draft7`.                  |
-| `WithTagInterpreter(t)`          | Register a `TagInterpreter`; multiple are applied in order.       |
-| `WithComments(bool)`             | Extract Go doc comments as `description` (requires source files). |
-| `WithTypeSchema(t, s)`           | Override the schema for a specific Go type (highest priority).    |
-| `WithNamer(fn)`                  | Custom function for naming `$defs` entries.                       |
-| `WithDefinitions(bool)`          | Extract named types into `$defs`/`$ref` (default `true`).         |
-| `WithAdditionalProperties(bool)` | Allow extra object keys (default `false`, disallowing them).      |
+| Option                           | Effect                                                                        |
+| -------------------------------- | ----------------------------------------------------------------------------- |
+| `WithDraft(Draft)`               | Target draft: `Draft2020` (default) or `Draft7`.                              |
+| `WithTagInterpreter(t)`          | Register a `TagInterpreter`; multiple are applied in order.                   |
+| `WithComments(bool)`             | Extract Go doc comments as `description` (requires source files).             |
+| `WithTypeSchema(t, s)`           | Override the schema for a specific Go type (highest priority).                |
+| `WithNamer(fn)`                  | Custom function for naming `$defs` entries.                                   |
+| `WithDefinitions(bool)`          | Extract named types into `$defs`/`$ref` (default `true`).                     |
+| `WithAdditionalProperties(bool)` | Allow extra object keys (default `false`, disallowing them).                  |
+| `WithNullable(bool)`             | Make nil-able types (`*T`, `[]T`, `map`, `[]byte`) nullable (default `true`). |
 
 ### Customization interfaces
 
@@ -558,8 +559,9 @@ refs.
 - **`anyOf` for nullable `$ref`**: conventional, and avoids `oneOf` overhead.
 - **`additionalProperties: false` by default**: a Go struct defines exactly what
   is allowed; opt in to permissive schemas with `WithAdditionalProperties`.
-- **Nullable maps and slices**: both emit null-typed schemas, matching
-  `encoding/json` nil behavior.
+- **Nullable maps and slices**: both emit null-typed schemas by default,
+  matching `encoding/json` nil behavior; `WithNullable(false)` drops the null
+  branch for callers whose absent values are never serialized as `null`.
 - **Hierarchical `ValidationError`**: a tree mirrors the schema/instance
   structure so callers can inspect failures at any depth or flatten them.
 - **Pluggable format validation**: formats are checked by registered

@@ -54,6 +54,8 @@
 //   - [WithDefinitions] controls $defs/$ref extraction (default: true).
 //   - [WithAdditionalProperties] controls whether extra keys are allowed on
 //     object schemas (default: false, disallowing extra keys).
+//   - [WithNullable] controls whether nil-able types (pointers, slices, maps,
+//     []byte) accept null (default: true; false drops the null branch).
 //
 // # Type Mapping
 //
@@ -77,6 +79,10 @@
 //   - Interfaces: any interface type produces an unrestricted schema ({}).
 //   - Structs: produce objects with properties, required, and
 //     additionalProperties: false by default.
+//
+// The "nullable" behavior of pointers, slices, maps, and []byte above is the
+// default; [WithNullable](false) drops the null branch so *T yields the bare
+// value schema, []T yields {"type":"array"}, and map yields {"type":"object"}.
 //
 // Well-known types have built-in overrides: [time.Time] maps to
 // {"type": "string", "format": "date-time"}, [encoding/json.RawMessage] to {},

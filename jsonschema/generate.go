@@ -75,6 +75,13 @@ func WithAdditionalProperties(allowed bool) Option {
 	return func(g *generator) { g.additionalProperties = allowed }
 }
 
+// WithNullable controls whether nil-able Go types (slices, maps, pointers,
+// []byte) are made nullable. Default: true. When false, []T -> {"type":"array"},
+// map -> {"type":"object"}, *T -> the bare value schema, no null branch.
+func WithNullable(allowed bool) Option {
+	return func(g *generator) { g.nullable = allowed }
+}
+
 // GenerateFor generates a JSON Schema for the type parameter T.
 func GenerateFor[T any](opts ...Option) (*Schema, error) {
 	return Generate(reflect.TypeFor[T](), opts...)

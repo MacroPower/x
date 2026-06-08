@@ -46,6 +46,7 @@ type generator struct {
 	comments             bool
 	definitions          bool
 	additionalProperties bool
+	nullable             bool
 }
 
 // refRecord tracks a $ref schema and the Go type it references, enabling
@@ -61,6 +62,7 @@ func newGenerator(opts []Option) *generator {
 		typeSchemas: map[reflect.Type]*Schema{},
 		namer:       defaultNamer,
 		definitions: true,
+		nullable:    true,
 
 		defs:            map[string]*Schema{},
 		defsNameToTypes: map[string][]reflect.Type{},
@@ -180,7 +182,7 @@ func schemaContainsRef(s *Schema, target string) bool {
 func (g *generator) schemaForType(t reflect.Type, nullable bool) (*Schema, error) {
 	// Follow pointers.
 	for t.Kind() == reflect.Pointer {
-		nullable = true
+		nullable = g.nullable
 		t = t.Elem()
 	}
 
@@ -447,7 +449,11 @@ func (g *generator) handleBuiltinType(t reflect.Type, s *Schema, nullable bool) 
 func (g *generator) builtinOverride(t reflect.Type) (*Schema, bool) {
 	switch t {
 	case typeByteSlice:
-		return &Schema{Types: []string{typeNameNull, typeNameString}, ContentEncoding: contentEncodingBase64}, true
+		s := &Schema{ContentEncoding: contentEncodingBase64}
+		g.applyContainerType(s, typeNameString)
+
+		return s, true
+
 	case typeTime:
 		return &Schema{Type: typeNameString, Format: formatDateTime}, true
 	case typeJSONRawMessage:
@@ -579,7 +585,10 @@ func (g *generator) schemaForSlice(t reflect.Type, nullable bool) (*Schema, erro
 	if el := t.Elem(); el.Kind() == reflect.Uint8 {
 		pt := reflect.PointerTo(el)
 		if !pt.Implements(typeJSONMarshaler) && !pt.Implements(typeTextMarshaler) {
-			return &Schema{Types: []string{typeNameNull, typeNameString}, ContentEncoding: contentEncodingBase64}, nil
+			s := &Schema{ContentEncoding: contentEncodingBase64}
+			g.applyContainerType(s, typeNameString)
+
+			return s, nil
 		}
 	}
 
@@ -588,10 +597,8 @@ func (g *generator) schemaForSlice(t reflect.Type, nullable bool) (*Schema, erro
 		return nil, fmt.Errorf("element type: %w", err)
 	}
 
-	s := &Schema{
-		Types: []string{typeNameNull, typeNameArray},
-		Items: items,
-	}
+	s := &Schema{Items: items}
+	g.applyContainerType(s, typeNameArray)
 
 	return s, nil
 }
@@ -641,10 +648,8 @@ func (g *generator) schemaForMap(t reflect.Type, nullable bool) (*Schema, error)
 		return nil, fmt.Errorf("map value type: %w", err)
 	}
 
-	s := &Schema{
-		Types:                []string{typeNameNull, typeNameObject},
-		AdditionalProperties: valSchema,
-	}
+	s := &Schema{AdditionalProperties: valSchema}
+	g.applyContainerType(s, typeNameObject)
 
 	return s, nil
 }
@@ -1147,10 +1152,14 @@ func (g *generator) buildFieldSchema(parentType reflect.Type, fi structFieldInfo
 	tagType := fieldType
 	if fi.jsonString {
 		if isStringableType(fieldType) {
+			// A pointer to a stringable type is a nilable container, so it shares
+			// the slice/map null-branch policy; a non-pointer is always a bare
+			// string.
+			fieldSchema = &Schema{}
 			if isPointer {
-				fieldSchema = &Schema{Types: []string{typeNameNull, typeNameString}}
+				g.applyContainerType(fieldSchema, typeNameString)
 			} else {
-				fieldSchema = &Schema{Type: typeNameString}
+				fieldSchema.Type = typeNameString
 			}
 
 			tagType = reflect.TypeFor[string]()
@@ -1396,6 +1405,19 @@ func (g *generator) refForType(t reflect.Type, nullable bool) *Schema {
 	g.refRecords = append(g.refRecords, refRecord{schema: refSchema, target: t})
 
 	return refSchema
+}
+
+// applyContainerType sets the type keyword on s for a nilable container whose
+// non-null JSON type is base: ["null", base] when nullability is enabled,
+// otherwise the bare base type. Such containers are nil-able in Go and so
+// accept null unless WithNullable(false) opts out.
+func (g *generator) applyContainerType(s *Schema, base string) {
+	if g.nullable {
+		s.Types = []string{typeNameNull, base}
+		return
+	}
+
+	s.Type = base
 }
 
 // applyNullable makes a schema nullable. Nullability is expressed by wrapping
