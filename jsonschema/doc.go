@@ -315,9 +315,9 @@
 //
 // On success all return nil. A validation failure returns an error that
 // unwraps to [*ValidationError] via [errors.As]. Non-validation failures — JSON
-// decoding, an unaccepted instance type, Schema.Resolve errors, and
-// [ErrUnknownVocabulary] — return ordinary wrapped errors that do not unwrap to
-// [*ValidationError].
+// decoding, an unaccepted instance type, Schema.Resolve errors,
+// [ErrInvalidType], and [ErrUnknownVocabulary] — return ordinary wrapped
+// errors that do not unwrap to [*ValidationError].
 //
 // Compile rejects a type keyword naming anything other than the seven JSON
 // Schema types ("null", "boolean", "string", "integer", "number", "object",
