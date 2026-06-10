@@ -378,6 +378,11 @@ Three entry points are provided:
   construction, `Schema.Resolve`, draft and vocabulary detection) and returns a
   reusable `*Validator` with `Validate` and `ValidateJSON` methods.
 
+`Compile` (and therefore the one-shot helpers) rejects a `type` keyword that
+names anything other than the seven JSON Schema types with `ErrInvalidType`,
+so a typo'd type surfaces at construction instead of silently rejecting every
+instance at runtime.
+
 `Validate` and `ValidateJSON` compile a fresh validator on every call; to
 validate many instances against the same schema, `Compile` once and reuse the
 result. A `*Validator` is safe for concurrent use by multiple goroutines.

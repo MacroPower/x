@@ -14,6 +14,13 @@ var (
 	// string, an integer type, nor an [encoding.TextMarshaler].
 	ErrUnsupportedMapKey = errors.New("unsupported map key type")
 
+	// ErrInvalidType is returned by [Compile] (and the one-shot [Validate] /
+	// [ValidateJSON] helpers) when a schema's type keyword names something
+	// other than the seven JSON Schema type names ("null", "boolean",
+	// "string", "integer", "number", "object", "array"). A typo'd type would
+	// otherwise compile cleanly and then reject every instance at runtime.
+	ErrInvalidType = errors.New("invalid type name")
+
 	// ErrUnknownVocabulary is returned when the resolved $vocabulary set is
 	// unsatisfiable: it marks true a vocabulary that this implementation does
 	// not recognize, or it includes the 2020-12 core vocabulary without marking

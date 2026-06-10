@@ -758,6 +758,15 @@ func Compile(schema *Schema, opts ...ValidateOption) (*Validator, error) {
 		return nil, err
 	}
 
+	// Reject unknown type names up front. Schema.Resolve does not check the
+	// type vocabulary, and a typo'd type otherwise compiles cleanly and then
+	// rejects every instance — a confusing runtime failure instead of a clear
+	// construction error.
+	err = checkTypeNames(schema, "", map[*Schema]bool{})
+	if err != nil {
+		return nil, err
+	}
+
 	// Precompute derived per-schema state (numeric bounds and compiled
 	// patterns) while still single-threaded, so the returned Validator only
 	// reads these caches once shared across goroutines.
@@ -786,6 +795,102 @@ func Compile(schema *Schema, opts ...ValidateOption) (*Validator, error) {
 	}
 
 	return &Validator{proto: v}, nil
+}
+
+// checkTypeNames verifies that every type keyword reachable from schema names
+// one of the seven JSON Schema types, returning an error wrapping
+// [ErrInvalidType] for the first violation. The traversal mirrors
+// [validator.walkSchema]'s sub-schema recursion but additionally tracks the
+// schema path so the error locates the offending keyword; visited guards
+// against schema graph cycles. The check is draft-agnostic: neither draft
+// defines type names beyond the canonical seven.
+func checkTypeNames(schema *Schema, schemaPath string, visited map[*Schema]bool) error {
+	if schema == nil || visited[schema] {
+		return nil
+	}
+
+	visited[schema] = true
+
+	if schema.Type != "" && !validTypeName(schema.Type) {
+		return fmt.Errorf("%w: %q at %s/type", ErrInvalidType, schema.Type, schemaPath)
+	}
+
+	for _, name := range schema.Types {
+		if !validTypeName(name) {
+			return fmt.Errorf("%w: %q at %s/type", ErrInvalidType, name, schemaPath)
+		}
+	}
+
+	subMaps := []struct {
+		m       map[string]*Schema
+		keyword string
+	}{
+		{schema.Properties, keywordProperties},
+		{schema.PatternProperties, keywordPatternProperties},
+		{schema.Defs, keywordDefs},
+		{schema.Definitions, keywordDefinitions},
+		{schema.DependentSchemas, keywordDependentSchemas},
+		{schema.DependencySchemas, keywordDependencies},
+	}
+	for _, entry := range subMaps {
+		// Sorted keys keep the reported violation deterministic when a map
+		// holds more than one offending sub-schema.
+		for _, key := range slices.Sorted(maps.Keys(entry.m)) {
+			childPath := schemaPath + "/" + entry.keyword + "/" + escapeJSONPointer(key)
+
+			err := checkTypeNames(entry.m[key], childPath, visited)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	lists := []struct {
+		keyword string
+		s       []*Schema
+	}{
+		{keywordAllOf, schema.AllOf},
+		{keywordAnyOf, schema.AnyOf},
+		{keywordOneOf, schema.OneOf},
+		{keywordPrefixItems, schema.PrefixItems},
+		{keywordItems, schema.ItemsArray},
+	}
+	for _, entry := range lists {
+		for i, s := range entry.s {
+			childPath := schemaPath + "/" + entry.keyword + "/" + strconv.Itoa(i)
+
+			err := checkTypeNames(s, childPath, visited)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	singles := []struct {
+		s       *Schema
+		keyword string
+	}{
+		{schema.Items, keywordItems},
+		{schema.AdditionalProperties, keywordAdditionalProperties},
+		{schema.AdditionalItems, keywordAdditionalItems},
+		{schema.Not, keywordNot},
+		{schema.If, keywordIf},
+		{schema.Then, keywordThen},
+		{schema.Else, keywordElse},
+		{schema.Contains, keywordContains},
+		{schema.PropertyNames, keywordPropertyNames},
+		{schema.UnevaluatedProperties, keywordUnevaluatedProperties},
+		{schema.UnevaluatedItems, keywordUnevaluatedItems},
+		{schema.ContentSchema, keywordContentSchema},
+	}
+	for _, entry := range singles {
+		err := checkTypeNames(entry.s, schemaPath+"/"+entry.keyword, visited)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // Validate validates a pre-parsed Go value against the compiled schema.

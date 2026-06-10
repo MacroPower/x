@@ -12,19 +12,36 @@ const (
 	typeNameArray   = "array"
 )
 
+// validTypeName reports whether s is one of the seven JSON Schema type names.
+func validTypeName(s string) bool {
+	switch s {
+	case typeNameNull, typeNameBoolean, typeNameString, typeNameInteger,
+		typeNameNumber, typeNameObject, typeNameArray:
+		return true
+	default:
+		return false
+	}
+}
+
 // JSON Schema keyword name constants. The generator recognizes a subset as
 // jsonschema struct tag keys; the validator reports assertion keywords on
 // [ValidationError.Keyword].
 const (
+	keywordAdditionalItems       = "additionalItems"
+	keywordAdditionalProperties  = "additionalProperties"
 	keywordAllOf                 = "allOf"
 	keywordAnyOf                 = "anyOf"
 	keywordConst                 = "const"
 	keywordContains              = "contains"
 	keywordContentEncoding       = "contentEncoding"
 	keywordContentMediaType      = "contentMediaType"
+	keywordContentSchema         = "contentSchema"
 	keywordDefault               = "default"
+	keywordDefinitions           = "definitions"
+	keywordDefs                  = "$defs"
 	keywordDependencies          = "dependencies"
 	keywordDependentRequired     = "dependentRequired"
+	keywordDependentSchemas      = "dependentSchemas"
 	keywordDeprecated            = "deprecated"
 	keywordDescription           = "description"
 	keywordElse                  = "else"
@@ -33,6 +50,8 @@ const (
 	keywordExclusiveMaximum      = "exclusiveMaximum"
 	keywordExclusiveMinimum      = "exclusiveMinimum"
 	keywordFormat                = "format"
+	keywordIf                    = "if"
+	keywordItems                 = "items"
 	keywordMaxContains           = "maxContains"
 	keywordMaximum               = "maximum"
 	keywordMaxItems              = "maxItems"
@@ -48,6 +67,9 @@ const (
 	keywordOneOf                 = "oneOf"
 	keywordPattern               = "pattern"
 	keywordPatternProperties     = "patternProperties"
+	keywordPrefixItems           = "prefixItems"
+	keywordProperties            = "properties"
+	keywordPropertyNames         = "propertyNames"
 	keywordReadOnly              = "readOnly"
 	keywordRequired              = "required"
 	keywordThen                  = "then"

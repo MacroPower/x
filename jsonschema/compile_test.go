@@ -147,6 +147,90 @@ func TestCompileError(t *testing.T) {
 	assert.Contains(t, err.Error(), "core vocabulary must be required")
 }
 
+// TestCompileRejectsUnknownTypeNames pins that a typo'd type keyword fails at
+// Compile with ErrInvalidType instead of compiling into a validator that
+// rejects every instance at runtime.
+func TestCompileRejectsUnknownTypeNames(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		schema   *jsonschema.Schema
+		err      error
+		contains string
+	}{
+		"top-level typo": {
+			schema:   &jsonschema.Schema{Type: "interger"},
+			err:      jsonschema.ErrInvalidType,
+			contains: `"interger" at /type`,
+		},
+		"nested under properties": {
+			schema: &jsonschema.Schema{
+				Type: "object",
+				Properties: map[string]*jsonschema.Schema{
+					"age": {Type: "numbr"},
+				},
+			},
+			err:      jsonschema.ErrInvalidType,
+			contains: `"numbr" at /properties/age/type`,
+		},
+		"bad entry in types array": {
+			schema: &jsonschema.Schema{
+				Types: []string{"string", "nul"},
+			},
+			err:      jsonschema.ErrInvalidType,
+			contains: `"nul" at /type`,
+		},
+		"nested under items and anyOf": {
+			schema: &jsonschema.Schema{
+				Type: "array",
+				Items: &jsonschema.Schema{
+					AnyOf: []*jsonschema.Schema{
+						{Type: "string"},
+						{Type: "Object"},
+					},
+				},
+			},
+			err:      jsonschema.ErrInvalidType,
+			contains: `"Object" at /items/anyOf/1/type`,
+		},
+		"all seven valid names": {
+			schema: &jsonschema.Schema{
+				Properties: map[string]*jsonschema.Schema{
+					"a": {Type: "null"},
+					"b": {Type: "boolean"},
+					"c": {Type: "string"},
+					"d": {Type: "integer"},
+					"e": {Type: "number"},
+					"f": {Type: "object"},
+					"g": {Type: "array"},
+				},
+			},
+		},
+		"valid types array": {
+			schema: &jsonschema.Schema{Types: []string{"string", "null"}},
+		},
+		"absent type": {
+			schema: &jsonschema.Schema{MinLength: jsonschema.Ptr(1)},
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := jsonschema.Compile(tt.schema)
+			if tt.err == nil {
+				require.NoError(t, err)
+
+				return
+			}
+
+			require.ErrorIs(t, err, tt.err)
+			assert.Contains(t, err.Error(), tt.contains)
+		})
+	}
+}
+
 func TestCompileConcurrent(t *testing.T) {
 	t.Parallel()
 

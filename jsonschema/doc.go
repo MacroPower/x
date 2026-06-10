@@ -299,6 +299,11 @@
 // [ErrUnknownVocabulary] — return ordinary wrapped errors that do not unwrap to
 // [*ValidationError].
 //
+// Compile rejects a type keyword naming anything other than the seven JSON
+// Schema types ("null", "boolean", "string", "integer", "number", "object",
+// "array") with an error wrapping [ErrInvalidType], so a typo'd type surfaces
+// at construction instead of silently rejecting every instance.
+//
 // Instance numbers are compared exactly (decoded with UseNumber, compared as
 // [math/big.Rat]), with one bound on the work an adversarial literal can demand:
 // for a JSON number whose exact value exceeds an internal cap (about 4096
