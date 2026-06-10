@@ -241,7 +241,7 @@ produces (abridged):
 }
 ```
 
-Supported keys include `description`, `title`, `default`, `examples`,
+Supported keys include `type`, `description`, `title`, `default`, `examples`,
 `deprecated`, `readOnly`, `writeOnly`, `minimum`, `maximum`, `exclusiveMinimum`,
 `exclusiveMaximum`, `multipleOf`, `minLength`, `maxLength`, `pattern`, `format`,
 `minItems`, `maxItems`, `uniqueItems`, `minProperties`, `maxProperties`, `enum`,
@@ -250,6 +250,16 @@ according to the field's Go type. `enum` and `examples` values are separated by
 `|`; commas separate pairs, so a value containing a comma escapes it with a
 backslash (`\,`, and `\\` for a literal backslash). For complex values, use
 `JSONSchemaExtender` or doc comments with `WithComments`.
+
+`type=` overrides the reflected type entirely, for a Go type whose JSON
+representation differs from its reflection: it must name one of the seven
+JSON Schema types, and it removes the nullable `anyOf` wrapper a pointer
+field generates plus — when the new type is not numeric — the numeric bounds
+derived from the Go kind. So a `*time.Duration` field (reflected as a
+nullable integer) with `jsonschema:"type=string,pattern=..."` produces a
+clean `{"type":"string","pattern":"..."}` without needing
+`JSONSchemaExtend`. Tag pairs apply in order; keys after `type=` still take
+effect.
 
 On a slice or array field, `enum` constrains each element rather than the
 array value: the values parse against the element type and land on the item

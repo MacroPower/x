@@ -231,10 +231,19 @@
 //
 //	Port int `jsonschema:"description=Server port,minimum=1,maximum=65535"`
 //
-// Supported keys include description, title, default, examples, deprecated,
-// readOnly, writeOnly, minimum, maximum, exclusiveMinimum, exclusiveMaximum,
-// multipleOf, minLength, maxLength, pattern, format, minItems, maxItems,
-// uniqueItems, minProperties, maxProperties, enum, and const.
+// Supported keys include type, description, title, default, examples,
+// deprecated, readOnly, writeOnly, minimum, maximum, exclusiveMinimum,
+// exclusiveMaximum, multipleOf, minLength, maxLength, pattern, format,
+// minItems, maxItems, uniqueItems, minProperties, maxProperties, enum, and
+// const.
+//
+// The type key overrides the reflected type entirely: it must name one of
+// the seven JSON Schema types, and it removes the nullable anyOf wrapper a
+// pointer field generates plus, when the new type is not numeric, the
+// numeric bounds derived from the Go kind. A pointer [time.Duration] field
+// with jsonschema:"type=string,pattern=..." therefore produces a clean string
+// schema without needing [JSONSchemaExtender]. Tag pairs apply in order;
+// keys after type= still take effect.
 //
 // Values for default, const, enum, and examples are parsed using type-aware
 // parsing based on the field's Go type. Enum and examples values are

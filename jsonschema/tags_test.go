@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"math"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -680,6 +681,90 @@ func TestFloat32ScalarOverflow(t *testing.T) {
 				"out-of-range float32 tag scalar should be rejected at generation")
 		})
 	}
+}
+
+// TestTagTypeOverride pins the type= tag key: it replaces the reflected type
+// assertion, removes the nullable anyOf wrapper a pointer field generates,
+// and drops kind-derived numeric bounds when the new type is not numeric, so
+// a Go type whose JSON representation differs from its reflection (such as a
+// duration encoded as a string) needs no JSONSchemaExtend.
+func TestTagTypeOverride(t *testing.T) {
+	t.Parallel()
+
+	t.Run("pointer duration as string", func(t *testing.T) {
+		t.Parallel()
+
+		type T struct {
+			SLA *time.Duration `json:"sla" jsonschema:"type=string,pattern=^[0-9]+(ms|s|m|h)$"`
+		}
+
+		s, err := jsonschema.GenerateFor[T]()
+		require.NoError(t, err)
+
+		got, err := json.Marshal(s.Properties["sla"])
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"type":"string","pattern":"^[0-9]+(ms|s|m|h)$"}`, string(got),
+			"no anyOf/null wrapper and no leftover integer bounds")
+	})
+
+	t.Run("non-pointer duration as string", func(t *testing.T) {
+		t.Parallel()
+
+		type T struct {
+			Dur time.Duration `json:"dur" jsonschema:"type=string"`
+		}
+
+		s, err := jsonschema.GenerateFor[T]()
+		require.NoError(t, err)
+
+		got, err := json.Marshal(s.Properties["dur"])
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"type":"string"}`, string(got),
+			"the int64-derived range bounds are dropped with the type")
+	})
+
+	t.Run("numeric override keeps bounds", func(t *testing.T) {
+		t.Parallel()
+
+		type T struct {
+			N int64 `json:"n" jsonschema:"type=number"`
+		}
+
+		s, err := jsonschema.GenerateFor[T]()
+		require.NoError(t, err)
+
+		field := s.Properties["n"]
+		assert.Equal(t, "number", field.Type)
+		assert.NotNil(t, field.Minimum, "kind-derived bounds stay for a numeric type")
+	})
+
+	t.Run("container types array replaced", func(t *testing.T) {
+		t.Parallel()
+
+		type T struct {
+			Tags []string `json:"tags" jsonschema:"type=array"`
+		}
+
+		s, err := jsonschema.GenerateFor[T]()
+		require.NoError(t, err)
+
+		field := s.Properties["tags"]
+		assert.Equal(t, "array", field.Type, "the explicit type suppresses null in the type")
+		assert.Nil(t, field.Types)
+		require.NotNil(t, field.Items, "the element schema is preserved")
+		assert.Equal(t, "string", field.Items.Type)
+	})
+
+	t.Run("unknown type name rejected", func(t *testing.T) {
+		t.Parallel()
+
+		type T struct {
+			V string `json:"v" jsonschema:"type=interger"`
+		}
+
+		_, err := jsonschema.GenerateFor[T]()
+		require.ErrorIs(t, err, jsonschema.ErrInvalidType)
+	})
 }
 
 // TestTagEnumOnSequenceFields pins that an enum tag on a slice or array field

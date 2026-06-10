@@ -23,6 +23,7 @@ var (
 	jsonSchemaTagKeys = map[string]bool{
 		keywordDescription:      true,
 		keywordTitle:            true,
+		keywordType:             true,
 		keywordPattern:          true,
 		keywordFormat:           true,
 		keywordDeprecated:       true,
@@ -170,6 +171,14 @@ func applyTagKeyValue(key, value string, fieldType reflect.Type, s *Schema) erro
 		s.Description = value
 	case keywordTitle:
 		s.Title = value
+
+	case keywordType:
+		if !validTypeName(value) {
+			return fmt.Errorf("jsonschema tag: key %q: %w: %q", key, ErrInvalidType, value)
+		}
+
+		applyTypeOverride(s, value)
+
 	case keywordPattern:
 		s.Pattern = value
 	case keywordFormat:
@@ -375,6 +384,33 @@ func applyTagKeyValue(key, value string, fieldType reflect.Type, s *Schema) erro
 	}
 
 	return nil
+}
+
+// applyTypeOverride applies a type= tag value, replacing the reflected type
+// assertion: it sets Type, clears a Types array, removes the nullable anyOf
+// wrapper a pointer field generates, and — when the new type is not numeric —
+// drops the numeric bounds derived from the Go kind (an int64-reflected field
+// such as [time.Duration] carries range bounds that would otherwise survive
+// as noise on a string schema). Tag pairs apply in order, so keys after type=
+// still take effect.
+func applyTypeOverride(s *Schema, typeName string) {
+	// A nullable pointer field wraps the value schema in anyOf[value, null];
+	// an explicit type replaces the whole construct, including the wrapped
+	// value branch and its kind-derived constraints.
+	if nullableInnerSchema(s) != nil {
+		s.AnyOf = nil
+	}
+
+	s.Type = typeName
+	s.Types = nil
+
+	if typeName != typeNameInteger && typeName != typeNameNumber {
+		s.Minimum = nil
+		s.Maximum = nil
+		s.ExclusiveMinimum = nil
+		s.ExclusiveMaximum = nil
+		s.MultipleOf = nil
+	}
 }
 
 // parseEnumValues parses a pipe-separated enum tag value against t, returning
