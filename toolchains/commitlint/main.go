@@ -19,7 +19,7 @@ const (
 	// commitlintVersion pins @commitlint/cli and @commitlint/config-conventional
 	// (released in lockstep) installed into the node container. This is the
 	// npm package version, which trails the commitlint monorepo release tags.
-	commitlintVersion = "19.8.1" // renovate: datasource=npm depName=@commitlint/cli
+	commitlintVersion = "21.0.2" // renovate: datasource=npm depName=@commitlint/cli
 
 	// globalNodeModules is the node image's npm global root. commitlint
 	// resolves `extends` presets via node module resolution from the config
