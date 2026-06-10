@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	charm.land/bubbletea/v2 v2.0.7
-	golang.org/x/image v0.41.0
+	golang.org/x/image v0.42.0
 	golang.org/x/term v0.43.0
 )
 
