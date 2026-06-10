@@ -290,7 +290,11 @@
 // Two one-shot entry points are provided:
 //
 //   - [Validate] validates a pre-parsed Go value (map[string]any, []any,
-//     string, float64, [encoding/json.Number], bool, nil).
+//     string, float64, [encoding/json.Number], bool, nil). Go numeric kinds
+//     that encoding/json does not produce — the signed and unsigned integer
+//     types and float32 — are accepted too and normalized via [Normalize], so
+//     values decoded from YAML or TOML validate directly (integers exactly,
+//     at any magnitude).
 //   - [ValidateJSON] unmarshals raw JSON bytes with [encoding/json.Decoder]
 //     using UseNumber() to preserve integer vs number distinction, then
 //     validates.

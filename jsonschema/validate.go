@@ -896,16 +896,21 @@ func checkTypeNames(schema *Schema, schemaPath string, visited map[*Schema]bool)
 // Validate validates a pre-parsed Go value against the compiled schema.
 //
 // Accepted instance types: map[string]any, []any, string, float64,
-// [json.Number], bool, nil. Go structs are not accepted; passing any other type
-// returns an error (marshal to JSON or use [Validator.ValidateJSON] instead).
+// [json.Number], bool, nil. Go numeric kinds that encoding/json does not
+// produce — the signed and unsigned integer types and float32 — are accepted
+// too and normalized via [Normalize], so values decoded from YAML or TOML or
+// built by hand validate directly (integers exactly, at any magnitude). Go
+// structs are not accepted; passing any other type returns an error (marshal
+// to JSON or use [Validator.ValidateJSON] instead).
 //
 // Returns nil on success or an error that can be unwrapped to *[ValidationError]
 // via [errors.As].
 func (c *Validator) Validate(instance any) error {
+	instance = Normalize(instance)
 	if !acceptedInstance(instance) {
 		return fmt.Errorf(
 			"instance of type %T is not accepted: accepted types are map[string]any, "+
-				"[]any, string, float64, json.Number, bool, and nil; marshal to JSON or use ValidateJSON",
+				"[]any, string, bool, nil, and the numeric types; marshal to JSON or use ValidateJSON",
 			instance,
 		)
 	}
@@ -940,18 +945,21 @@ func (c *Validator) ValidateJSON(data []byte) error {
 // the same schema, call [Compile] once and reuse the returned [Validator].
 //
 // Accepted instance types: map[string]any, []any, string, float64,
-// [json.Number], bool, nil. Go structs are not accepted; passing any other
-// type returns an error (marshal to JSON or use [ValidateJSON] instead).
+// [json.Number], bool, nil. Go numeric kinds that encoding/json does not
+// produce — the signed and unsigned integer types and float32 — are accepted
+// too and normalized via [Normalize]. Go structs are not accepted; passing any
+// other type returns an error (marshal to JSON or use [ValidateJSON] instead).
 //
 // Returns nil on success or an error that can be unwrapped to
 // *[ValidationError] via [errors.As].
 func Validate(schema *Schema, instance any, opts ...ValidateOption) error {
 	// Check the instance type before compiling so an unaccepted instance is
 	// reported without the cost of (or any error from) schema preparation.
+	instance = Normalize(instance)
 	if !acceptedInstance(instance) {
 		return fmt.Errorf(
 			"instance of type %T is not accepted: accepted types are map[string]any, "+
-				"[]any, string, float64, json.Number, bool, and nil; marshal to JSON or use ValidateJSON",
+				"[]any, string, bool, nil, and the numeric types; marshal to JSON or use ValidateJSON",
 			instance,
 		)
 	}
@@ -1524,11 +1532,13 @@ func isEmptySchema(s *Schema) bool {
 }
 
 // acceptedInstance reports whether instance is one of the JSON-compatible Go
-// types [Validate] accepts: map[string]any, []any, string, float64,
-// [json.Number], bool, or nil. Other types — notably Go structs, and numeric
-// types such as int or [time.Time] — are not accepted, because they are not
-// produced by encoding/json when unmarshaling into an any. The check is on the
-// top-level value only; [ValidateJSON] always supplies accepted types.
+// types the validation walk works with: map[string]any, []any, string,
+// float64, [json.Number], bool, or nil. [Validate] runs [Normalize] first, so
+// Go integer kinds and float32 have already been converted by the time this
+// check runs. Other types — notably Go structs and [time.Time] — are not
+// accepted, because they are not produced by encoding/json when unmarshaling
+// into an any. The check is on the top-level value only; [ValidateJSON]
+// always supplies accepted types.
 func acceptedInstance(instance any) bool {
 	switch instance.(type) {
 	case nil, bool, string, float64, json.Number, map[string]any, []any:

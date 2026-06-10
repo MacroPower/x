@@ -379,7 +379,12 @@ Three entry points are provided:
 
 - `Validate(schema, instance, opts...)` validates a pre-parsed Go value
   (`map[string]any`, `[]any`, `string`, `float64`, `json.Number`, `bool`,
-  `nil`).
+  `nil`). Go numeric kinds that `encoding/json` does not produce — the signed
+  and unsigned integer types and `float32` — are accepted too and normalized
+  via `Normalize`, so values decoded from YAML or TOML validate directly:
+  integers convert to `json.Number` (exact at any magnitude) and `float32`
+  widens to `float64`. `Normalize` is exported for callers that want to
+  pre-normalize a value once and reuse it.
 - `ValidateJSON(schema, data, opts...)` unmarshals raw JSON with a
   `json.Decoder` using `UseNumber()` (preserving the integer-vs-number
   distinction), then validates.
