@@ -88,6 +88,63 @@ func TestValidateInterpreter_NumericConstraints(t *testing.T) {
 	}`, string(got))
 }
 
+// TestValidateInterpreter_OneOfOnSequenceFields pins that oneof on a slice or
+// array field constrains each element, mirroring the jsonschema tag's enum
+// behavior for sequence fields.
+func TestValidateInterpreter_OneOfOnSequenceFields(t *testing.T) {
+	t.Parallel()
+
+	type Lists struct {
+		Days  []string  `json:"days"  validate:"oneof=monday tuesday wednesday"`
+		Codes []int     `json:"codes" validate:"oneof=1 2 3"`
+		Pair  [2]string `json:"pair"  validate:"oneof=a b"`
+	}
+
+	s, err := jsonschema.GenerateFor[Lists](
+		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+	)
+	require.NoError(t, err)
+
+	got, err := json.Marshal(s)
+	require.NoError(t, err)
+
+	assert.JSONEq(t, `{
+		"$schema":"https://json-schema.org/draft/2020-12/schema",
+		"type":"object",
+		"properties":{
+			"days":{"type":["null","array"],"items":{"type":"string","enum":["monday","tuesday","wednesday"]}},
+			"codes":{"type":["null","array"],"items":{"type":"integer","enum":[1,2,3]}},
+			"pair":{
+				"type":"array",
+				"minItems":2,"maxItems":2,
+				"prefixItems":[
+					{"type":"string","enum":["a","b"]},
+					{"type":"string","enum":["a","b"]}
+				]
+			}
+		},
+		"required":["days","codes","pair"],
+		"additionalProperties":false
+	}`, string(got))
+}
+
+// TestValidateInterpreter_OneOfOnByteSlice pins that oneof on a []byte field is
+// rejected: the field encodes as a single base64 string, so there is no item
+// schema to constrain and silently dropping the rule would be misleading.
+func TestValidateInterpreter_OneOfOnByteSlice(t *testing.T) {
+	t.Parallel()
+
+	type Data struct {
+		Raw []byte `json:"raw" validate:"oneof=a b"`
+	}
+
+	_, err := jsonschema.GenerateFor[Data](
+		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+	)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no item schema")
+}
+
 func TestValidateInterpreter_SliceConstraints(t *testing.T) {
 	t.Parallel()
 

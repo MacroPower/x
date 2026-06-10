@@ -339,10 +339,13 @@ func applyLenConstraint(s *jsonschema.Schema, value string, baseType reflect.Typ
 	}
 }
 
-// applyOneOf applies oneof constraint based on the type. A field whose base
-// type is neither numeric, bool, nor string (for example a struct, [time.Time],
-// slice, or map) cannot carry a string enum without producing an unsatisfiable
-// schema, so it is rejected rather than silently mis-stamped.
+// applyOneOf applies oneof constraint based on the type. On a slice or array
+// the constraint applies to each element (mirroring the jsonschema tag's enum
+// behavior for sequence fields), so it lands on the item schemas parsed
+// against the element type. A field whose base type is none of these (for
+// example a struct, [time.Time], or map) cannot carry a string enum without
+// producing an unsatisfiable schema, so it is rejected rather than silently
+// mis-stamped.
 func applyOneOf(s *jsonschema.Schema, value string, baseType reflect.Type) error {
 	switch {
 	case isNumericKind(baseType):
@@ -351,9 +354,38 @@ func applyOneOf(s *jsonschema.Schema, value string, baseType reflect.Type) error
 		return applyBoolOneOf(s, value)
 	case isStringKind(baseType):
 		return applyStringOneOf(s, value)
+	case isSequenceKind(baseType):
+		return applySequenceOneOf(s, value, baseType)
 	default:
 		return fmt.Errorf("validate tag: oneof not supported for type %s", baseType.Kind())
 	}
+}
+
+// applySequenceOneOf applies oneof on a slice or array field to its item
+// schemas, parsing the values against the element type. The element schemas
+// mirror diveIntoSequence's shapes: Items for slices, prefixItems
+// (Draft 2020-12) or the items-as-array form (Draft-07) for fixed arrays. A
+// []byte field encodes as a single base64 string with no element schema, so
+// oneof on it is rejected rather than silently dropped.
+func applySequenceOneOf(s *jsonschema.Schema, value string, baseType reflect.Type) error {
+	items := sequenceItemSchemas(s)
+	if len(items) == 0 {
+		return fmt.Errorf("validate tag: oneof: %s field has no item schema to constrain", baseType.Kind())
+	}
+
+	elem := baseType.Elem()
+	for elem.Kind() == reflect.Pointer {
+		elem = elem.Elem()
+	}
+
+	for _, item := range items {
+		err := applyOneOf(item, value, elem)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // applyEq applies eq constraint based on the type. A non-numeric, non-bool,

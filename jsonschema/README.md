@@ -251,6 +251,15 @@ according to the field's Go type. `enum` and `examples` values are separated by
 backslash (`\,`, and `\\` for a literal backslash). For complex values, use
 `JSONSchemaExtender` or doc comments with `WithComments`.
 
+On a slice or array field, `enum` constrains each element rather than the
+array value: the values parse against the element type and land on the item
+schemas, so `Days []string` with `enum=monday|tuesday` produces
+`{"items":{"type":"string","enum":["monday","tuesday"]}}`. Nested sequences
+(`[][]T`) descend to the innermost element schema. `const`, `default`, and
+`examples` remain whole-value constraints and are still errors on sequence
+fields, as is `enum` on `[]byte` (which encodes as a base64 string with no
+item schema).
+
 ### Struct field rules
 
 Fields follow `encoding/json` conventions: the `json` tag sets the property

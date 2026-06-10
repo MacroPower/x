@@ -682,6 +682,184 @@ func TestFloat32ScalarOverflow(t *testing.T) {
 	}
 }
 
+// TestTagEnumOnSequenceFields pins that an enum tag on a slice or array field
+// constrains each element ("array of enum values"): the values parse against
+// the element type and land on the item schemas rather than erroring or
+// constraining the array value itself.
+func TestTagEnumOnSequenceFields(t *testing.T) {
+	t.Parallel()
+
+	itemsOf := func(s *jsonschema.Schema, prop string) []*jsonschema.Schema {
+		t.Helper()
+
+		field := s.Properties[prop]
+		require.NotNil(t, field)
+
+		// Follow the nullable pointer wrapper if present.
+		if len(field.AnyOf) == 2 && field.AnyOf[1] != nil && field.AnyOf[1].Type == "null" {
+			field = field.AnyOf[0]
+		}
+
+		switch {
+		case field.Items != nil:
+			return []*jsonschema.Schema{field.Items}
+		case len(field.PrefixItems) > 0:
+			return field.PrefixItems
+		case len(field.ItemsArray) > 0:
+			return field.ItemsArray
+		default:
+			return nil
+		}
+	}
+
+	t.Run("slice of strings", func(t *testing.T) {
+		t.Parallel()
+
+		type T struct {
+			Days []string `json:"days" jsonschema:"enum=monday|tuesday|wednesday"`
+		}
+
+		s, err := jsonschema.GenerateFor[T]()
+		require.NoError(t, err)
+
+		items := itemsOf(s, "days")
+		require.Len(t, items, 1)
+		assert.Equal(t, []any{"monday", "tuesday", "wednesday"}, items[0].Enum)
+		assert.Equal(t, "string", items[0].Type)
+		assert.Nil(t, s.Properties["days"].Enum, "the array schema itself carries no enum")
+	})
+
+	t.Run("slice of ints", func(t *testing.T) {
+		t.Parallel()
+
+		type T struct {
+			Codes []int `json:"codes" jsonschema:"enum=1|2|3"`
+		}
+
+		s, err := jsonschema.GenerateFor[T]()
+		require.NoError(t, err)
+
+		items := itemsOf(s, "codes")
+		require.Len(t, items, 1)
+		assert.Equal(t, []any{1, 2, 3}, items[0].Enum)
+	})
+
+	t.Run("pointer to slice", func(t *testing.T) {
+		t.Parallel()
+
+		type T struct {
+			Days *[]string `json:"days" jsonschema:"enum=monday|tuesday"`
+		}
+
+		s, err := jsonschema.GenerateFor[T]()
+		require.NoError(t, err)
+
+		items := itemsOf(s, "days")
+		require.Len(t, items, 1)
+		assert.Equal(t, []any{"monday", "tuesday"}, items[0].Enum)
+	})
+
+	t.Run("fixed array uses prefixItems", func(t *testing.T) {
+		t.Parallel()
+
+		type T struct {
+			Pair [2]string `json:"pair" jsonschema:"enum=a|b"`
+		}
+
+		s, err := jsonschema.GenerateFor[T]()
+		require.NoError(t, err)
+
+		items := itemsOf(s, "pair")
+		require.Len(t, items, 2)
+
+		for _, item := range items {
+			assert.Equal(t, []any{"a", "b"}, item.Enum)
+		}
+	})
+
+	t.Run("fixed array draft7 uses items array", func(t *testing.T) {
+		t.Parallel()
+
+		type T struct {
+			Pair [2]string `json:"pair" jsonschema:"enum=a|b"`
+		}
+
+		s, err := jsonschema.GenerateFor[T](jsonschema.WithDraft(jsonschema.Draft7))
+		require.NoError(t, err)
+
+		field := s.Properties["pair"]
+		require.NotNil(t, field)
+		require.Len(t, field.ItemsArray, 2)
+
+		for _, item := range field.ItemsArray {
+			assert.Equal(t, []any{"a", "b"}, item.Enum)
+		}
+	})
+
+	t.Run("nested slice constrains innermost items", func(t *testing.T) {
+		t.Parallel()
+
+		type T struct {
+			Groups [][]string `json:"groups" jsonschema:"enum=x|y"`
+		}
+
+		s, err := jsonschema.GenerateFor[T]()
+		require.NoError(t, err)
+
+		items := itemsOf(s, "groups")
+		require.Len(t, items, 1)
+		assert.Nil(t, items[0].Enum, "the inner array schema carries no enum")
+		require.NotNil(t, items[0].Items)
+		assert.Equal(t, []any{"x", "y"}, items[0].Items.Enum)
+	})
+
+	t.Run("byte slice has no item schema", func(t *testing.T) {
+		t.Parallel()
+
+		type T struct {
+			Data []byte `json:"data" jsonschema:"enum=a|b"`
+		}
+
+		_, err := jsonschema.GenerateFor[T]()
+		require.Error(t, err, "a []byte field encodes as a base64 string with no items")
+		assert.Contains(t, err.Error(), "no item schema")
+	})
+
+	t.Run("element type still checked", func(t *testing.T) {
+		t.Parallel()
+
+		type T struct {
+			Codes []int `json:"codes" jsonschema:"enum=1|oops"`
+		}
+
+		_, err := jsonschema.GenerateFor[T]()
+		require.Error(t, err)
+	})
+
+	t.Run("const on slice remains an error", func(t *testing.T) {
+		t.Parallel()
+
+		type T struct {
+			Days []string `json:"days" jsonschema:"const=monday"`
+		}
+
+		_, err := jsonschema.GenerateFor[T]()
+		require.Error(t, err, "const is a whole-value constraint and is not redirected to items")
+	})
+
+	t.Run("scalar enum unchanged", func(t *testing.T) {
+		t.Parallel()
+
+		type T struct {
+			Day string `json:"day" jsonschema:"enum=monday|tuesday"`
+		}
+
+		s, err := jsonschema.GenerateFor[T]()
+		require.NoError(t, err)
+		assert.Equal(t, []any{"monday", "tuesday"}, s.Properties["day"].Enum)
+	})
+}
+
 func TestTagEnumExamplesEmptySegment(t *testing.T) {
 	t.Parallel()
 

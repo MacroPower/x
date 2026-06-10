@@ -245,6 +245,13 @@
 // complex values, use [JSONSchemaExtender] or AST doc comments with
 // [WithComments].
 //
+// On a slice or array field, enum constrains each element rather than the
+// array value: the values parse against the element type and land on the item
+// schemas. Nested sequences descend to the innermost element schema. Const,
+// default, and examples remain whole-value constraints and are still errors
+// on sequence fields, as is enum on []byte (a base64 string with no item
+// schema).
+//
 // # Comment Extraction
 //
 // When [WithComments](true) is set, Go doc comments are extracted from source

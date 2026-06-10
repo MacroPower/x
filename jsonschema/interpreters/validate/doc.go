@@ -83,6 +83,10 @@
 //   - eq=N: minItems and maxItems (length equals N)
 //   - ne=N: not (forbids length N)
 //   - unique: uniqueItems: true
+//   - oneof=a b c: enum on the item schemas, parsed against the element type
+//     (each element must be one of the values; [][]T descends to the innermost
+//     element schema). A []byte field has no item schema (it encodes as a
+//     base64 string), so oneof on it is an error.
 //
 // Map constraints:
 //

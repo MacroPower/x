@@ -6,6 +6,7 @@ import (
 	"math"
 	"reflect"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -332,20 +333,16 @@ func applyTagKeyValue(key, value string, fieldType reflect.Type, s *Schema) erro
 			return fmt.Errorf("jsonschema tag: key %q requires a non-empty value", key)
 		}
 
-		parts := strings.Split(value, "|")
+		// On a slice or array field the enum constrains each element, not the
+		// array value itself, so the values parse against the element type and
+		// land on the item schemas ("array of enum values").
+		if base := derefType(fieldType); base.Kind() == reflect.Slice || base.Kind() == reflect.Array {
+			return applyEnumToItems(key, value, base, s)
+		}
 
-		enumVals := make([]any, len(parts))
-		for i, p := range parts {
-			if p == "" {
-				return fmt.Errorf("jsonschema tag: key %q has an empty value segment", key)
-			}
-
-			v, err := parseTypedScalar(p, fieldType)
-			if err != nil {
-				return fmt.Errorf("jsonschema tag: key %q: %w", key, err)
-			}
-
-			enumVals[i] = v
+		enumVals, err := parseEnumValues(key, value, fieldType)
+		if err != nil {
+			return err
 		}
 
 		s.Enum = enumVals
@@ -378,6 +375,99 @@ func applyTagKeyValue(key, value string, fieldType reflect.Type, s *Schema) erro
 	}
 
 	return nil
+}
+
+// parseEnumValues parses a pipe-separated enum tag value against t, returning
+// the parsed values in tag order.
+func parseEnumValues(key, value string, t reflect.Type) ([]any, error) {
+	parts := strings.Split(value, "|")
+
+	enumVals := make([]any, len(parts))
+	for i, p := range parts {
+		if p == "" {
+			return nil, fmt.Errorf("jsonschema tag: key %q has an empty value segment", key)
+		}
+
+		v, err := parseTypedScalar(p, t)
+		if err != nil {
+			return nil, fmt.Errorf("jsonschema tag: key %q: %w", key, err)
+		}
+
+		enumVals[i] = v
+	}
+
+	return enumVals, nil
+}
+
+// applyEnumToItems applies an enum tag on a slice or array field to the
+// field's item schemas, parsing each value against the element type. A nested
+// sequence element descends recursively, so the enum always lands on the
+// innermost (scalar) item schemas. The other scalar tag keys (const, default,
+// examples) remain whole-value constraints and are not redirected this way.
+func applyEnumToItems(key, value string, t reflect.Type, s *Schema) error {
+	items := itemSchemas(s)
+	if len(items) == 0 {
+		// A []byte field encodes as a single base64 string, leaving no
+		// per-element schema for the enum to constrain.
+		return fmt.Errorf("jsonschema tag: key %q: %s field has no item schema to constrain", key, t.Kind())
+	}
+
+	elem := derefType(t.Elem())
+	if elem.Kind() == reflect.Slice || elem.Kind() == reflect.Array {
+		for _, item := range items {
+			err := applyEnumToItems(key, value, elem, item)
+			if err != nil {
+				return err
+			}
+		}
+
+		return nil
+	}
+
+	enumVals, err := parseEnumValues(key, value, elem)
+	if err != nil {
+		return err
+	}
+
+	for _, item := range items {
+		// Each item schema gets its own value slice so no slice is shared
+		// across schema nodes.
+		item.Enum = slices.Clone(enumVals)
+	}
+
+	return nil
+}
+
+// itemSchemas returns the per-element schemas of a generated slice or array
+// field schema: Items for slices, prefixItems (Draft 2020-12) or the
+// items-as-array form (Draft-07) for fixed arrays. A nullable pointer field
+// wraps the value schema in anyOf[value, null]; the lookup follows that
+// wrapper. A []byte field (a base64 string) has no element schema and yields
+// nil.
+func itemSchemas(s *Schema) []*Schema {
+	if inner := nullableInnerSchema(s); inner != nil {
+		s = inner
+	}
+
+	switch {
+	case s.Items != nil:
+		return []*Schema{s.Items}
+	case len(s.PrefixItems) > 0:
+		return s.PrefixItems
+	case len(s.ItemsArray) > 0:
+		return s.ItemsArray
+	default:
+		return nil
+	}
+}
+
+// derefType follows pointers to the underlying non-pointer type.
+func derefType(t reflect.Type) reflect.Type {
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+
+	return t
 }
 
 // parseBoolValue parses a boolean tag value.

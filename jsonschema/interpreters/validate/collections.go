@@ -148,29 +148,32 @@ func applyDive(remaining []string, s *jsonschema.Schema, fieldType reflect.Type)
 	}
 }
 
-// diveIntoSequence applies the remaining dive constraints to the element schema
-// of a slice or fixed array. The generator represents element schemas
-// differently depending on the field kind: plain slices use Items, fixed arrays
-// use prefixItems (Draft 2020-12) or the items-as-array form (Draft-07), and
-// []byte becomes a single base64 string with no element schema at all. Each of
-// these is dived into so a dive tag on those kinds does not abort generation.
-func diveIntoSequence(remaining []string, s *jsonschema.Schema, elem reflect.Type) error {
+// sequenceItemSchemas returns the per-element schemas of a generated slice or
+// fixed-array field schema. The generator represents element schemas
+// differently depending on the field kind: plain slices use Items, fixed
+// arrays use prefixItems (Draft 2020-12) or the items-as-array form
+// (Draft-07), and []byte becomes a single base64 string with no element
+// schema at all (yielding nil).
+func sequenceItemSchemas(s *jsonschema.Schema) []*jsonschema.Schema {
 	switch {
 	case s.Items != nil:
-		return applyParts(remaining, s.Items, nil, "", elem, true)
-
+		return []*jsonschema.Schema{s.Items}
 	case len(s.PrefixItems) > 0:
-		for _, item := range s.PrefixItems {
-			err := applyParts(remaining, item, nil, "", elem, true)
-			if err != nil {
-				return err
-			}
-		}
-
-		return nil
-
+		return s.PrefixItems
 	case len(s.ItemsArray) > 0:
-		for _, item := range s.ItemsArray {
+		return s.ItemsArray
+	default:
+		return nil
+	}
+}
+
+// diveIntoSequence applies the remaining dive constraints to the element schema
+// of a slice or fixed array. Each of the element-schema shapes
+// (see sequenceItemSchemas) is dived into so a dive tag on those kinds does not
+// abort generation.
+func diveIntoSequence(remaining []string, s *jsonschema.Schema, elem reflect.Type) error {
+	if items := sequenceItemSchemas(s); len(items) > 0 {
+		for _, item := range items {
 			err := applyParts(remaining, item, nil, "", elem, true)
 			if err != nil {
 				return err
@@ -178,16 +181,16 @@ func diveIntoSequence(remaining []string, s *jsonschema.Schema, elem reflect.Typ
 		}
 
 		return nil
+	}
 
-	case s.ContentEncoding == base64Encoding:
+	if s.ContentEncoding == base64Encoding {
 		// A []byte field marshals to a single base64 string, so there is no
 		// per-element schema to constrain. The dive has no representable target;
 		// accept it as a no-op rather than aborting generation.
 		return nil
-
-	default:
-		return fmt.Errorf("validate tag: cannot dive: array schema has no items")
 	}
+
+	return fmt.Errorf("validate tag: cannot dive: array schema has no items")
 }
 
 // isCollectionKind reports whether the type is a slice, array, or map kind.
