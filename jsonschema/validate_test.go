@@ -4594,6 +4594,128 @@ func TestBooleanSchemaRepresentation(t *testing.T) {
 	require.Error(t, err, "false schema should reject all instances")
 }
 
+// falseSchema returns the boolean false schema in the parsed form the
+// upstream library uses, an empty not subschema.
+func falseSchema() *jsonschema.Schema {
+	return &jsonschema.Schema{Not: &jsonschema.Schema{}}
+}
+
+// TestFalseSchemaKeyword pins that a violation of a false subschema carries
+// the applicator keyword that applied it, so a consumer can tell an
+// additionalProperties:false failure from a false property or item subschema
+// without parsing SchemaPath. A standalone false schema has no applicator
+// context and keeps an empty Keyword.
+func TestFalseSchemaKeyword(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		schema       *jsonschema.Schema
+		instance     any
+		keyword      string
+		instancePath string
+		schemaPath   string
+	}{
+		"additionalProperties false": {
+			schema: &jsonschema.Schema{
+				Type:                 "object",
+				AdditionalProperties: falseSchema(),
+			},
+			instance:     map[string]any{"extra": 1.0},
+			keyword:      "additionalProperties",
+			instancePath: "/extra",
+			schemaPath:   "/additionalProperties",
+		},
+		"false property subschema": {
+			schema: &jsonschema.Schema{
+				Type: "object",
+				Properties: map[string]*jsonschema.Schema{
+					"forbidden": falseSchema(),
+				},
+			},
+			instance:     map[string]any{"forbidden": 1.0},
+			keyword:      "properties",
+			instancePath: "/forbidden",
+			schemaPath:   "/properties/forbidden",
+		},
+		"false patternProperties subschema": {
+			schema: &jsonschema.Schema{
+				Type: "object",
+				PatternProperties: map[string]*jsonschema.Schema{
+					"^x-": falseSchema(),
+				},
+			},
+			instance:     map[string]any{"x-a": 1.0},
+			keyword:      "patternProperties",
+			instancePath: "/x-a",
+			schemaPath:   "/patternProperties/^x-",
+		},
+		"items false": {
+			schema: &jsonschema.Schema{
+				Type:     "array",
+				Items:    falseSchema(),
+				MaxItems: jsonschema.Ptr(10),
+			},
+			instance:     []any{1.0},
+			keyword:      "items",
+			instancePath: "/0",
+			schemaPath:   "/items",
+		},
+		"prefixItems false": {
+			schema: &jsonschema.Schema{
+				Type:        "array",
+				PrefixItems: []*jsonschema.Schema{falseSchema()},
+			},
+			instance:     []any{1.0},
+			keyword:      "prefixItems",
+			instancePath: "/0",
+			schemaPath:   "/prefixItems/0",
+		},
+		"draft7 additionalItems false": {
+			schema: &jsonschema.Schema{
+				Schema:          "http://json-schema.org/draft-07/schema#",
+				Type:            "array",
+				ItemsArray:      []*jsonschema.Schema{{Type: "number"}},
+				AdditionalItems: falseSchema(),
+			},
+			instance:     []any{1.0, 2.0},
+			keyword:      "additionalItems",
+			instancePath: "/1",
+			schemaPath:   "/additionalItems",
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := jsonschema.Validate(tt.schema, tt.instance)
+
+			var ve *jsonschema.ValidationError
+
+			require.ErrorAs(t, err, &ve)
+
+			assert.Equal(t, tt.keyword, ve.Keyword)
+			assert.Equal(t, tt.instancePath, ve.InstancePath)
+			assert.Equal(t, tt.schemaPath, ve.SchemaPath)
+			assert.Equal(t, "value is not allowed", ve.Message)
+			assert.Empty(t, ve.Causes)
+		})
+	}
+
+	t.Run("standalone false schema keeps empty keyword", func(t *testing.T) {
+		t.Parallel()
+
+		err := jsonschema.Validate(falseSchema(), "anything")
+
+		var ve *jsonschema.ValidationError
+
+		require.ErrorAs(t, err, &ve)
+
+		assert.Empty(t, ve.Keyword, "a root false schema has no applicator context")
+		assert.Equal(t, "value is not allowed", ve.Message)
+	})
+}
+
 // TestValidationErrorStructure inspects the *ValidationError tree produced by
 // specific failures rather than merely asserting that an error occurred. It
 // pins the Keyword, InstancePath, SchemaPath, and Causes shape so a regression

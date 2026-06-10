@@ -443,6 +443,14 @@ flatten child failures into the parent's `Causes`, each retaining its full path.
 schema yields a root error with `Keyword == "$ref"` whose `Causes[0].Keyword ==
 "minLength"`.
 
+A `false` subschema failure ("value is not allowed") carries the applicator
+keyword that applied it — `additionalProperties` for
+`additionalProperties: false`, and likewise `properties`,
+`patternProperties`, `items`, `prefixItems`, and `additionalItems` — so the
+common rejected-extra-property case is distinguishable without inspecting
+`SchemaPath`. A standalone boolean `false` schema has no applicator context
+and leaves `Keyword` empty.
+
 ### Validation options
 
 | Option                          | Effect                                                                     |

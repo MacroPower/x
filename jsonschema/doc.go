@@ -356,7 +356,10 @@
 // child failures in intermediate [ValidationError.Causes] nodes, while container
 // keywords (properties, items, additionalProperties) flatten child failures into
 // the parent's Causes, each retaining its full instance and schema path. The not
-// keyword produces a childless leaf error.
+// keyword produces a childless leaf error. A false subschema failure ("value is
+// not allowed") carries the applicator keyword that applied it (for example
+// additionalProperties for additionalProperties: false); a standalone boolean
+// false schema has no applicator context and leaves Keyword empty.
 //
 // Built-in format checkers are provided for: date-time, date, time, duration,
 // email, idn-email, hostname, idn-hostname, uri, uri-reference, uri-template,

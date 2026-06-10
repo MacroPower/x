@@ -1304,6 +1304,9 @@ func (v *validator) validate(
 	// that vocabulary is disabled, which is worse than ignoring the much rarer
 	// explicit `{"not":{}}` under the same configuration.
 	if isFalseSchema(schema) {
+		// Keyword is left empty here: this point cannot know which applicator
+		// (if any) handed it the false schema. The applicator call sites stamp
+		// it via labelFalseSchemaKeyword.
 		return []*ValidationError{{
 			InstancePath: instancePath,
 			SchemaPath:   schemaPath,
@@ -1479,6 +1482,25 @@ func (v *validator) validateUnevaluated(
 	}
 
 	return errs
+}
+
+// labelFalseSchemaKeyword stamps keyword on the leaf error a false subschema
+// emitted, so a consumer can tell an additionalProperties:false violation (or
+// a false property/item subschema) apart from other failures without parsing
+// SchemaPath. The false-schema short-circuit in [validator.validate] cannot
+// know which applicator handed it the schema, so the applicator call sites
+// label the result; a root or standalone boolean false schema has no
+// applicator context and its leaf keeps an empty Keyword.
+func labelFalseSchemaKeyword(errs []*ValidationError, sub *Schema, keyword string) {
+	if !isFalseSchema(sub) {
+		return
+	}
+
+	for _, e := range errs {
+		if e.Keyword == "" {
+			e.Keyword = keyword
+		}
+	}
 }
 
 // isFalseSchema reports whether a schema is equivalent to boolean false (rejects
@@ -2679,15 +2701,15 @@ func (v *validator) validateArray(
 		// PrefixItems (2020-12) or items as array (draft-07).
 		var (
 			prefixSchemas []*Schema
-			prefixPath    string
+			prefixKeyword string
 		)
 
 		if v.draft == Draft2020 && len(schema.PrefixItems) > 0 {
 			prefixSchemas = schema.PrefixItems
-			prefixPath = "/prefixItems"
+			prefixKeyword = keywordPrefixItems
 		} else if v.draft == Draft7 && len(schema.ItemsArray) > 0 {
 			prefixSchemas = schema.ItemsArray
-			prefixPath = "/items"
+			prefixKeyword = keywordItems
 		}
 
 		for i, ps := range prefixSchemas {
@@ -2696,8 +2718,10 @@ func (v *validator) validateArray(
 			}
 
 			childPath := fmt.Sprintf("%s/%d", instancePath, i)
-			childSchemaPath := fmt.Sprintf("%s%s/%d", schemaPath, prefixPath, i)
+			childSchemaPath := fmt.Sprintf("%s/%s/%d", schemaPath, prefixKeyword, i)
 			childErrs := v.validate(ps, arr[i], childPath, childSchemaPath, nil)
+			labelFalseSchemaKeyword(childErrs, ps, prefixKeyword)
+
 			errs = append(errs, childErrs...)
 		}
 
@@ -2721,6 +2745,8 @@ func (v *validator) validateArray(
 				childPath := fmt.Sprintf("%s/%d", instancePath, i)
 				childSchemaPath := schemaPath + "/items"
 				childErrs := v.validate(schema.Items, item, childPath, childSchemaPath, nil)
+				labelFalseSchemaKeyword(childErrs, schema.Items, keywordItems)
+
 				errs = append(errs, childErrs...)
 			}
 
@@ -2735,6 +2761,8 @@ func (v *validator) validateArray(
 					childPath := fmt.Sprintf("%s/%d", instancePath, i)
 					childSchemaPath := schemaPath + "/items"
 					childErrs := v.validate(schema.Items, arr[i], childPath, childSchemaPath, nil)
+					labelFalseSchemaKeyword(childErrs, schema.Items, keywordItems)
+
 					errs = append(errs, childErrs...)
 				}
 
@@ -2750,6 +2778,8 @@ func (v *validator) validateArray(
 				childPath := fmt.Sprintf("%s/%d", instancePath, i)
 				childSchemaPath := schemaPath + "/additionalItems"
 				childErrs := v.validate(schema.AdditionalItems, arr[i], childPath, childSchemaPath, nil)
+				labelFalseSchemaKeyword(childErrs, schema.AdditionalItems, keywordAdditionalItems)
+
 				errs = append(errs, childErrs...)
 			}
 		}
@@ -3019,6 +3049,8 @@ func (v *validator) validateObject(
 			childPath := instancePath + "/" + escapeJSONPointer(propName)
 			childSchemaPath := schemaPath + "/properties/" + escapeJSONPointer(propName)
 			childErrs := v.validate(propSchema, val, childPath, childSchemaPath, nil)
+			labelFalseSchemaKeyword(childErrs, propSchema, keywordProperties)
+
 			errs = append(errs, childErrs...)
 		}
 
@@ -3052,6 +3084,8 @@ func (v *validator) validateObject(
 				childPath := instancePath + "/" + escapeJSONPointer(propName)
 				childSchemaPath := schemaPath + "/patternProperties/" + escapeJSONPointer(pattern)
 				childErrs := v.validate(patternSchema, val, childPath, childSchemaPath, nil)
+				labelFalseSchemaKeyword(childErrs, patternSchema, keywordPatternProperties)
+
 				errs = append(errs, childErrs...)
 			}
 		}
@@ -3070,6 +3104,8 @@ func (v *validator) validateObject(
 				childPath := instancePath + "/" + escapeJSONPointer(propName)
 				childSchemaPath := schemaPath + "/additionalProperties"
 				childErrs := v.validate(schema.AdditionalProperties, val, childPath, childSchemaPath, nil)
+				labelFalseSchemaKeyword(childErrs, schema.AdditionalProperties, keywordAdditionalProperties)
+
 				errs = append(errs, childErrs...)
 			}
 
