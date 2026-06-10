@@ -451,6 +451,13 @@ common rejected-extra-property case is distinguishable without inspecting
 `SchemaPath`. A standalone boolean `false` schema has no applicator context
 and leaves `Keyword` empty.
 
+A `propertyNames` violation constrains a key, which has no JSON Pointer of
+its own (RFC 6901), so it borrows the property's location: the surfaced
+error carries `Keyword == "propertyNames"` and an `InstancePath` pointing at
+the offending property (e.g. `/settings/BadKey`), with the inner keyword
+failure (`pattern`, `maxLength`, ...) in `Causes`. The failing key and its
+containing object are both identifiable from `InstancePath` alone.
+
 ### Validation options
 
 | Option                          | Effect                                                                     |

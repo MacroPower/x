@@ -4716,6 +4716,105 @@ func TestFalseSchemaKeyword(t *testing.T) {
 	})
 }
 
+// TestPropertyNamesViolationIdentifiesKey pins the propertyNames error
+// contract: the surfaced error carries Keyword "propertyNames" and an
+// InstancePath pointing at the offending property's location, so a consumer
+// can determine which key failed (and, by stripping the last segment, which
+// object it belongs to) from stable fields rather than message parsing. The
+// inner keyword failure (pattern, maxLength, and so on) stays in Causes.
+func TestPropertyNamesViolationIdentifiesKey(t *testing.T) {
+	t.Parallel()
+
+	t.Run("pattern violation", func(t *testing.T) {
+		t.Parallel()
+
+		schema := &jsonschema.Schema{
+			Type:          "object",
+			PropertyNames: &jsonschema.Schema{Pattern: "^[a-z]+$"},
+		}
+
+		err := jsonschema.Validate(schema, map[string]any{"BadKey": 1.0, "good": 2.0})
+
+		var ve *jsonschema.ValidationError
+
+		require.ErrorAs(t, err, &ve)
+
+		assert.Equal(t, "propertyNames", ve.Keyword)
+		assert.Equal(t, "/BadKey", ve.InstancePath,
+			"the violation borrows the property's location")
+		assert.Equal(t, "/propertyNames", ve.SchemaPath)
+		assert.Contains(t, ve.Message, `"BadKey"`)
+
+		require.Len(t, ve.Causes, 1)
+		assert.Equal(t, "pattern", ve.Causes[0].Keyword,
+			"the inner keyword failure stays available in Causes")
+		assert.Equal(t, "/BadKey", ve.Causes[0].InstancePath)
+	})
+
+	t.Run("nested object", func(t *testing.T) {
+		t.Parallel()
+
+		schema := &jsonschema.Schema{
+			Type: "object",
+			Properties: map[string]*jsonschema.Schema{
+				"settings": {
+					Type:          "object",
+					PropertyNames: &jsonschema.Schema{MaxLength: jsonschema.Ptr(3)},
+				},
+			},
+		}
+
+		err := jsonschema.Validate(schema, map[string]any{
+			"settings": map[string]any{"toolong": 1.0},
+		})
+
+		var ve *jsonschema.ValidationError
+
+		require.ErrorAs(t, err, &ve)
+
+		assert.Equal(t, "propertyNames", ve.Keyword)
+		assert.Equal(t, "/settings/toolong", ve.InstancePath,
+			"the path identifies both the key and its containing object")
+	})
+
+	t.Run("key requiring pointer escaping", func(t *testing.T) {
+		t.Parallel()
+
+		schema := &jsonschema.Schema{
+			Type:          "object",
+			PropertyNames: &jsonschema.Schema{MaxLength: jsonschema.Ptr(1)},
+		}
+
+		err := jsonschema.Validate(schema, map[string]any{"a/b": 1.0})
+
+		var ve *jsonschema.ValidationError
+
+		require.ErrorAs(t, err, &ve)
+
+		assert.Equal(t, "/a~1b", ve.InstancePath,
+			"the key is escaped per RFC 6901")
+		assert.Contains(t, ve.Message, `"a/b"`)
+	})
+
+	t.Run("propertyNames false", func(t *testing.T) {
+		t.Parallel()
+
+		schema := &jsonschema.Schema{
+			Type:          "object",
+			PropertyNames: falseSchema(),
+		}
+
+		err := jsonschema.Validate(schema, map[string]any{"any": 1.0})
+
+		var ve *jsonschema.ValidationError
+
+		require.ErrorAs(t, err, &ve)
+
+		assert.Equal(t, "propertyNames", ve.Keyword)
+		assert.Equal(t, "/any", ve.InstancePath)
+	})
+}
+
 // TestValidationErrorStructure inspects the *ValidationError tree produced by
 // specific failures rather than merely asserting that an error occurred. It
 // pins the Keyword, InstancePath, SchemaPath, and Causes shape so a regression

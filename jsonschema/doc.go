@@ -359,7 +359,11 @@
 // keyword produces a childless leaf error. A false subschema failure ("value is
 // not allowed") carries the applicator keyword that applied it (for example
 // additionalProperties for additionalProperties: false); a standalone boolean
-// false schema has no applicator context and leaves Keyword empty.
+// false schema has no applicator context and leaves Keyword empty. A
+// propertyNames violation constrains a key, which has no JSON Pointer of its
+// own, so it borrows the property's location: the surfaced error carries
+// Keyword "propertyNames" and an InstancePath pointing at the offending
+// property, with the inner keyword failure in its Causes.
 //
 // Built-in format checkers are provided for: date-time, date, time, duration,
 // email, idn-email, hostname, idn-hostname, uri, uri-reference, uri-template,

@@ -3114,20 +3114,32 @@ func (v *validator) validateObject(
 			}
 		}
 
-		// PropertyNames. The constraint is on the key, not its value, and a key
-		// has no JSON Pointer of its own, so a violation is reported at the
-		// containing object's instance path rather than at the property value.
+		// PropertyNames. The constraint is on the key, not its value, and RFC
+		// 6901 gives a key no JSON Pointer of its own, so a violation borrows
+		// the property's location: the wrapping error (and its causes) carry
+		// the property's instance path, with Keyword "propertyNames" and the
+		// offending name in the message identifying which key failed and which
+		// object it belongs to.
 		if schema.PropertyNames != nil {
 			for propName := range obj {
+				childPath := instancePath + "/" + escapeJSONPointer(propName)
 				childSchemaPath := schemaPath + "/propertyNames"
 				childErrs := v.validate(
 					schema.PropertyNames,
 					propName,
-					instancePath,
+					childPath,
 					childSchemaPath,
 					nil,
 				)
-				errs = append(errs, childErrs...)
+				if len(childErrs) > 0 {
+					errs = append(errs, &ValidationError{
+						InstancePath: childPath,
+						SchemaPath:   childSchemaPath,
+						Keyword:      keywordPropertyNames,
+						Message:      fmt.Sprintf("property name %q is invalid", propName),
+						Causes:       childErrs,
+					})
+				}
 			}
 		}
 
