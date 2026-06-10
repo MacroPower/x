@@ -20,7 +20,7 @@ const (
 	// Docker Official Image, pulled from Docker's verified publisher
 	// space on ECR Public to avoid Docker Hub pull rate limits.
 	renovateImage   = "public.ecr.aws/docker/library/node:22-slim" // renovate: datasource=docker depName=public.ecr.aws/docker/library/node
-	renovateVersion = "43.217.0"                                   // renovate: datasource=npm depName=renovate
+	renovateVersion = "43.218.0"                                   // renovate: datasource=npm depName=renovate
 
 	// cacheNamespace prefixes this module's cache volumes.
 	cacheNamespace = "go.jacobcolvin.com/x/toolchains/xci"
