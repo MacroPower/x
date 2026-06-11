@@ -53,7 +53,7 @@ type inliner struct {
 
 	// The per-reference failure policy from [WithInlineRefFallback]; nil
 	// means every expansion failure is fatal.
-	fallback func(path, ref string, err error) (*Schema, bool)
+	fallback func(RefFailure) (*Schema, bool)
 
 	baseURI string
 
@@ -111,12 +111,28 @@ func WithInlineRetrievalBase(enabled bool) InlineOption {
 	return func(in *inliner) { in.retrievalBase = enabled }
 }
 
+// RefFailure describes one reference expansion failure to a
+// [WithInlineRefFallback] policy.
+type RefFailure struct {
+	// Err is the expansion failure, wrapping [ErrRefResolve], [ErrRefCycle],
+	// or [ErrRefInline].
+	Err error
+
+	// Path is the JSON Pointer of the referencing schema within its
+	// containing document.
+	Path string
+
+	// Ref is the reference value that failed to expand.
+	Ref string
+}
+
 // WithInlineRefFallback sets a per-reference failure policy for [Inline].
 // When expanding a reference fails - the target is unresolvable
 // ([ErrRefResolve]), the expansion is cyclic ([ErrRefCycle]), or the
 // construct has no static expansion ([ErrRefInline], $dynamicRef) - fn is
-// consulted with the JSON Pointer path of the referencing schema within
-// its containing document, the reference value, and the error.
+// consulted with a [RefFailure] carrying the JSON Pointer path of the
+// referencing schema within its containing document, the reference value,
+// and the error.
 //
 // Returning ok=false propagates the original error, ending the Inline
 // call. Returning ok=true with a nil schema drops the failing reference
@@ -132,7 +148,7 @@ func WithInlineRetrievalBase(enabled bool) InlineOption {
 // and is itself inlined recursively, its refs resolving in the context of
 // the document containing the failing ref; a cycle introduced by the
 // returned schema is an ordinary [ErrRefCycle].
-func WithInlineRefFallback(fn func(path, ref string, err error) (*Schema, bool)) InlineOption {
+func WithInlineRefFallback(fn func(RefFailure) (*Schema, bool)) InlineOption {
 	return func(in *inliner) { in.fallback = fn }
 }
 
@@ -451,7 +467,7 @@ func (in *inliner) substitute(pristine *Schema, path, ref string, inlineErr erro
 		return nil, inlineErr
 	}
 
-	sub, ok := in.fallback(path, ref, inlineErr)
+	sub, ok := in.fallback(RefFailure{Path: path, Ref: ref, Err: inlineErr})
 	if !ok {
 		return nil, inlineErr
 	}

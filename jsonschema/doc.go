@@ -629,9 +629,10 @@
 // wrapping [ErrRefResolve].
 //
 // [WithInlineRefFallback] sets a per-reference failure policy consulted
-// when expanding a reference fails for any of those reasons, with the JSON
-// Pointer path of the referencing schema within its containing document,
-// the reference value, and the error. The fallback declines (propagating
+// when expanding a reference fails for any of those reasons, with a
+// [RefFailure] carrying the JSON Pointer path of the referencing schema
+// within its containing document, the reference value, and the error.
+// The fallback declines (propagating
 // the original error and ending the Inline call), drops the failing
 // reference keyword while keeping the node's remaining keywords (a nil
 // schema), or supplies a substitute schema the reference expands to as if
