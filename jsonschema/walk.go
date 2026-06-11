@@ -144,22 +144,38 @@ func SubschemaRefs(s *Schema) []SubschemaRef {
 // once, so aliased or cyclic graphs terminate. Walk stops at and returns
 // the first error from fn, except [SkipChildren], which prunes the walk at
 // that schema and continues. A nil s is a no-op.
+//
+// Walk is [WalkRefs] without the path.
 func Walk(s *Schema, fn func(*Schema) error) error {
-	return walk(s, fn, map[*Schema]bool{})
+	return WalkRefs(s, func(_ string, s *Schema) error { return fn(s) })
 }
 
-// walk implements [Walk], threading the visited set through the recursion so
-// each distinct schema pointer runs fn at most once. A pruned schema stays
-// visited: another path reaching it later finds it handled, exactly as if
-// the walk had descended through it.
-func walk(s *Schema, fn func(*Schema) error, visited map[*Schema]bool) error {
+// WalkRefs is [Walk] with path tracking: fn also receives the RFC 6901 JSON
+// Pointer addressing each visited schema from s (the root itself is ""),
+// built by appending each descended child's [SubschemaRef.Pointer], so it
+// matches the schema path the package's own errors report. The [Walk]
+// semantics apply unchanged: pre-order with the walk following updated
+// children, one visit per distinct schema pointer, [SkipChildren] pruning,
+// and stop at the first error. A schema reachable through several paths is
+// visited with the first path the traversal encounters; [SubschemaRefs]
+// orders map-held children by sorted key, so that path is deterministic.
+// A nil s is a no-op.
+func WalkRefs(s *Schema, fn func(path string, s *Schema) error) error {
+	return walkRefs(s, "", fn, map[*Schema]bool{})
+}
+
+// walkRefs implements [WalkRefs], threading the visited set through the
+// recursion so each distinct schema pointer runs fn at most once. A pruned
+// schema stays visited: another path reaching it later finds it handled,
+// exactly as if the walk had descended through it.
+func walkRefs(s *Schema, path string, fn func(string, *Schema) error, visited map[*Schema]bool) error {
 	if s == nil || visited[s] {
 		return nil
 	}
 
 	visited[s] = true
 
-	err := fn(s)
+	err := fn(path, s)
 	if errors.Is(err, SkipChildren) {
 		return nil
 	}
@@ -168,8 +184,8 @@ func walk(s *Schema, fn func(*Schema) error, visited map[*Schema]bool) error {
 		return err
 	}
 
-	for _, child := range Subschemas(s) {
-		err := walk(child, fn, visited)
+	for _, ref := range SubschemaRefs(s) {
+		err := walkRefs(ref.Schema, path+ref.Pointer, fn, visited)
 		if err != nil {
 			return err
 		}

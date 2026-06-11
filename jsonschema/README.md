@@ -677,6 +677,13 @@ err := jsonschema.Walk(s, func(s *jsonschema.Schema) error {
 
 	return nil
 })
+
+// WalkRefs is Walk with path tracking: the JSON Pointer from the root.
+err = jsonschema.WalkRefs(s, func(path string, s *jsonschema.Schema) error {
+	fmt.Println(path, s.Type) // "/properties/a string", ...
+
+	return nil
+})
 ```
 
 `Subschemas` is the package's single source of truth for which `Schema` fields
@@ -702,6 +709,15 @@ first error from the function; a `nil` schema is a no-op. Returning the
 the current schema — its sub-schemas are not visited — and continues with its
 siblings, which suits rewriting passes that splice in a subtree the walk
 should not descend into.
+
+`WalkRefs` is `Walk` with path tracking: the function also receives the JSON
+Pointer addressing each visited schema from the root (the root itself is
+`""`), built by appending each descended child's `SubschemaRef.Pointer`, so
+path-tracking traversals need not re-implement the walk and its cycle guard.
+A schema reachable through several paths is visited with the first path the
+traversal encounters; map-held children walk in sorted-key order, so that
+path is deterministic. `Walk` delegates to `WalkRefs`, so the two visit the
+same schemas in the same order.
 
 Three predicates answer common shape questions:
 

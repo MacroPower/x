@@ -382,6 +382,105 @@ func TestWalk(t *testing.T) {
 	})
 }
 
+func TestWalkRefs(t *testing.T) {
+	t.Parallel()
+
+	t.Run("paths accumulate SubschemaRef pointers from the root", func(t *testing.T) {
+		t.Parallel()
+
+		leaf := &jsonschema.Schema{Type: "string"}
+		mid := &jsonschema.Schema{Items: leaf}
+		root := &jsonschema.Schema{
+			Properties: map[string]*jsonschema.Schema{"a/b": mid},
+			AllOf:      []*jsonschema.Schema{{Type: "integer"}},
+		}
+
+		paths := map[*jsonschema.Schema]string{}
+
+		err := jsonschema.WalkRefs(root, func(path string, s *jsonschema.Schema) error {
+			paths[s] = path
+
+			return nil
+		})
+
+		require.NoError(t, err)
+		assert.Empty(t, paths[root], "the root is the empty pointer")
+		assert.Equal(t, "/properties/a~1b", paths[mid], "map keys are RFC 6901-escaped")
+		assert.Equal(t, "/properties/a~1b/items", paths[leaf])
+		assert.Equal(t, "/allOf/0", paths[root.AllOf[0]])
+	})
+
+	t.Run("shared schema keeps the first path encountered", func(t *testing.T) {
+		t.Parallel()
+
+		shared := &jsonschema.Schema{Type: "string"}
+		root := &jsonschema.Schema{Items: shared, Not: shared}
+
+		var paths []string
+
+		err := jsonschema.WalkRefs(root, func(path string, s *jsonschema.Schema) error {
+			if s == shared {
+				paths = append(paths, path)
+			}
+
+			return nil
+		})
+
+		require.NoError(t, err)
+		assert.Equal(t, []string{"/items"}, paths,
+			"one visit, with the path of the first traversal order arrival")
+	})
+
+	t.Run("SkipChildren prunes by path", func(t *testing.T) {
+		t.Parallel()
+
+		root := &jsonschema.Schema{
+			Properties: map[string]*jsonschema.Schema{
+				"skip": {Items: &jsonschema.Schema{Type: "string"}},
+				"walk": {Items: &jsonschema.Schema{Type: "integer"}},
+			},
+		}
+
+		var visited []string
+
+		err := jsonschema.WalkRefs(root, func(path string, _ *jsonschema.Schema) error {
+			visited = append(visited, path)
+			if path == "/properties/skip" {
+				return jsonschema.SkipChildren
+			}
+
+			return nil
+		})
+
+		require.NoError(t, err)
+		assert.Equal(t, []string{"", "/properties/skip", "/properties/walk", "/properties/walk/items"}, visited)
+	})
+
+	t.Run("Walk visits the same schemas in the same order", func(t *testing.T) {
+		t.Parallel()
+
+		root := &jsonschema.Schema{
+			Properties: map[string]*jsonschema.Schema{"p": {Items: &jsonschema.Schema{Type: "string"}}},
+			Not:        &jsonschema.Schema{Type: "integer"},
+		}
+
+		var fromWalk, fromWalkRefs []*jsonschema.Schema
+
+		require.NoError(t, jsonschema.Walk(root, func(s *jsonschema.Schema) error {
+			fromWalk = append(fromWalk, s)
+
+			return nil
+		}))
+		require.NoError(t, jsonschema.WalkRefs(root, func(_ string, s *jsonschema.Schema) error {
+			fromWalkRefs = append(fromWalkRefs, s)
+
+			return nil
+		}))
+
+		assert.Equal(t, fromWalk, fromWalkRefs, "Walk delegates to WalkRefs, so the two can never diverge")
+	})
+}
+
 // TestSubschemasFieldCoverage is a maintenance guard over [jsonschema.Subschemas],
 // the single source of truth for which Schema fields hold sub-schemas. It
 // enumerates Schema's fields via reflection, populates every field of type

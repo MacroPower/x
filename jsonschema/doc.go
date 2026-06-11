@@ -493,6 +493,12 @@
 //     stops at and returns the first error from the function, except
 //     [SkipChildren], which prunes the walk at that schema and continues with
 //     its siblings.
+//   - [WalkRefs] is [Walk] with path tracking: the function also receives the
+//     JSON Pointer addressing each visited schema from the root, built by
+//     appending each descended child's [SubschemaRef.Pointer], so
+//     path-tracking traversals need not re-implement the walk and its cycle
+//     guard. A schema reachable through several paths is visited with the
+//     first path the traversal encounters.
 //   - [CheckTypeNames] verifies that every type keyword reachable from a
 //     schema names one of the seven JSON Schema type names, returning nil or
 //     an error wrapping [ErrInvalidType] that includes the schema path of the
