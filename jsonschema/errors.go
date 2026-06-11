@@ -34,8 +34,21 @@ var (
 	ErrUnknownVocabulary = errors.New("unknown required vocabulary")
 
 	// ErrRefResolve is returned when a [RefResolver] returns an error while
-	// resolving a remote $ref URI.
+	// resolving a remote $ref URI. [Inline] also wraps it for a non-local ref
+	// with no resolver configured and for any ref whose target cannot be
+	// found.
 	ErrRefResolve = errors.New("ref resolve")
+
+	// ErrRefCycle is returned by [Inline] when expanding a $ref reaches a
+	// schema whose own expansion is still in progress: the reference graph
+	// is cyclic, so it has no finite static expansion.
+	ErrRefCycle = errors.New("reference cycle")
+
+	// ErrRefInline is returned by [Inline] for a reference construct with no
+	// faithful static expansion. $dynamicRef resolves through the dynamic
+	// scope at validation time, so no single replacement preserves its
+	// semantics.
+	ErrRefInline = errors.New("cannot inline reference")
 
 	// ErrProviderPanic is returned when a user-supplied JSONSchemaProvider or
 	// JSONSchemaExtender method panics during generation (for example by

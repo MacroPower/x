@@ -482,4 +482,64 @@
 // returns an error yields one wrapping [ErrRefResolve]. Only an unresolvable
 // local fragment ref is silently skipped.
 // Circular refs are detected and treated as passing to avoid infinite recursion.
+//
+// A resolver that also implements [RefResolverContext] receives a context with
+// every resolution call: the [CompileContext] context for refs resolved while
+// compiling, and the [Validator.ValidateContext] (or other Context entry
+// point) context for refs reached during that validation run, so a resolver
+// that fetches over the network can honor cancellation and deadlines. The
+// context is never retained by a compiled [Validator] — each run carries its
+// own — and the context-less entry points pass [context.Background]. The
+// package ships no network resolver; fetching remains the caller's concern.
+//
+// # Reference Inlining
+//
+// [Inline] returns a deep copy of a schema in which every $ref — in the
+// schema body, $defs, and definitions alike — is replaced by a copy of the
+// schema it targets, producing a single self-contained document for
+// consumers that cannot follow references, such as code generators. The
+// input and any resolver-returned schemas are never mutated.
+//
+// Fragment-only refs (#/pointer, #anchor) resolve within the enclosing
+// document using the same $id/$anchor registry the validator builds, and
+// every ref resolves against its document's original structure, exactly as
+// the validator would: expanding one ref never changes what a later ref's
+// JSON Pointer or anchor addresses. Other refs are absolutized against the
+// enclosing resource's base URI — its $id, or the base given via
+// [WithInlineBaseURI], with a schemeless base normalized against file:///
+// so a back-reference to the root document finds the in-memory copy — and
+// fetched through the [RefResolver] given via [WithInlineResolver]; any
+// fragment is then evaluated against the fetched document. Fetched
+// documents are inlined recursively using their own base URIs (a relative
+// ref inside a fetched document resolves against that document's URI, so
+// files can reference each other by relative path), and each document is
+// fetched at most once per call. [FileResolver] adapts an [io/fs.FS] to
+// this interface, serving file-path and relative URIs from the fs root;
+// pair [os.DirFS] with [WithInlineBaseURI] to inline a directory of
+// schemas. Inline always calls ResolveRef, even on a resolver that also
+// implements [RefResolverContext]; context-aware inlining can be added when
+// a consumer needs it.
+//
+// Sibling keywords beside $ref follow draft semantics, with the draft
+// detected from the root schema's $schema exactly as the validator detects
+// it (fetched documents follow the root document's draft, matching how
+// validation applies one draft throughout). Under Draft 2020-12 the node
+// keeps its sibling keywords and the target copy joins the node's allOf,
+// preserving both the conjunction and the annotation flow the unevaluated*
+// keywords depend on. Under Draft 7 siblings of $ref are ignored, so the
+// node is replaced by the target copy alone, as it also is under either
+// draft when $ref is the node's only keyword. A spliced copy never carries
+// a $schema keyword, and the returned root keeps the input's $schema. Refs
+// are inlined only in typed sub-schema positions (those [Subschemas]
+// covers); a $ref carried as raw JSON inside an unknown keyword is left
+// as-is, although a ref pointing into such a position still resolves.
+//
+// A ref whose expansion reaches its own target — a recursive schema —
+// returns an error wrapping [ErrRefCycle]: a cyclic reference graph has no
+// finite expansion. A $dynamicRef under Draft 2020-12 returns an error
+// wrapping [ErrRefInline], since its target depends on the dynamic scope at
+// validation time and no single replacement preserves that (Draft 7 ignores
+// the keyword, as the validator does). A non-local ref with no resolver
+// configured, or any ref whose target cannot be found, returns an error
+// wrapping [ErrRefResolve].
 package jsonschema
