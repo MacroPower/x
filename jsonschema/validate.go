@@ -171,7 +171,7 @@ type validator struct {
 	refResolver   RefResolver // optional remote ref resolver
 
 	// The caller's context for the current compile or validation run, passed
-	// to the resolver when it implements [RefResolverContext]. It has the
+	// to the resolver with every resolution call. It has the
 	// same lifetime discipline as the other per-run state: CompileContext
 	// sets it for the duration of compilation and clears it before the
 	// validator is cached, and forInstance sets it per run, so a stored
@@ -269,7 +269,7 @@ func newValidator(schema *Schema, opts []ValidateOption) (*validator, error) {
 // ref-resolution scratch), so a [Validator] can be reused and is safe for
 // concurrent use. The immutable per-schema state — registries, resolved
 // vocabularies, draft, and format configuration — is shared. The caller's ctx
-// is carried on the per-run copy so a [RefResolverContext] resolving a remote
+// is carried on the per-run copy so a [RefResolver] resolving a remote
 // ref at validation time sees the context of the run that triggered it.
 //
 // When a [RefResolver] is configured the registries can still gain entries
@@ -637,23 +637,16 @@ func computeBounds(schema *Schema) *precomputedBounds {
 	return b
 }
 
-// callResolver invokes the configured resolver for uri. A resolver that also
-// implements [RefResolverContext] receives the context of the current compile
-// or validation run via ResolveRefContext; a plain [RefResolver] is called
-// without one.
+// callResolver invokes the configured resolver for uri under the context of
+// the current compile or validation run.
 func (v *validator) callResolver(uri string) (*Schema, error) {
-	if rc, ok := v.refResolver.(RefResolverContext); ok {
-		ctx := v.ctx
-		if ctx == nil {
-			ctx = context.Background()
-		}
-
-		//nolint:wrapcheck // resolveRemote wraps the error with ErrRefResolve; remoteLoader tolerates it.
-		return rc.ResolveRefContext(ctx, uri)
+	ctx := v.ctx
+	if ctx == nil {
+		ctx = context.Background()
 	}
 
 	//nolint:wrapcheck // resolveRemote wraps the error with ErrRefResolve; remoteLoader tolerates it.
-	return v.refResolver.ResolveRef(uri)
+	return v.refResolver.ResolveRef(ctx, uri)
 }
 
 // resolveRemote calls the configured [RefResolver] to fetch a remote schema,
@@ -838,7 +831,7 @@ func Compile(schema *Schema, opts ...ValidateOption) (*Validator, error) {
 }
 
 // CompileContext is [Compile] with a caller-supplied context. The context is
-// passed to a [RefResolverContext] resolver (see [WithRefResolver]) for refs
+// passed to the [RefResolver] (see [WithRefResolver]) for refs
 // resolved during compilation. It is not retained by the returned [Validator]:
 // refs reached only at validation time resolve under the context passed to
 // [Validator.ValidateContext] or [Validator.ValidateJSONContext] (the
@@ -977,7 +970,7 @@ func CompileJSON(data []byte, opts ...ValidateOption) (*Validator, error) {
 }
 
 // CompileJSONContext is [CompileJSON] with a caller-supplied context, passed
-// to a [RefResolverContext] resolver for refs resolved during compilation
+// to the [RefResolver] for refs resolved during compilation
 // (see [CompileContext]).
 func CompileJSONContext(ctx context.Context, data []byte, opts ...ValidateOption) (*Validator, error) {
 	schema, err := ParseSchema(data)
@@ -1117,7 +1110,7 @@ func (c *Validator) Validate(instance any) error {
 }
 
 // ValidateContext is [Validator.Validate] with a caller-supplied context. The
-// context is passed to a [RefResolverContext] resolver (see [WithRefResolver])
+// context is passed to the [RefResolver] (see [WithRefResolver])
 // for remote refs reached during this validation run, so a resolver that
 // fetches over the network can honor cancellation and deadlines. The context
 // is held only for the duration of the run, never by the [Validator] itself.
@@ -1157,7 +1150,7 @@ func (c *Validator) ValidateJSON(data []byte) error {
 }
 
 // ValidateJSONContext is [Validator.ValidateJSON] with a caller-supplied
-// context, passed to a [RefResolverContext] resolver for remote refs reached
+// context, passed to the [RefResolver] for remote refs reached
 // during this validation run (see [Validator.ValidateContext]).
 func (c *Validator) ValidateJSONContext(ctx context.Context, data []byte) error {
 	instance, err := decodeJSONInstance(data)
@@ -1186,8 +1179,8 @@ func Validate(schema *Schema, instance any, opts ...ValidateOption) error {
 	return ValidateContext(context.Background(), schema, instance, opts...)
 }
 
-// ValidateContext is [Validate] with a caller-supplied context, passed to a
-// [RefResolverContext] resolver (see [WithRefResolver]) for refs resolved both
+// ValidateContext is [Validate] with a caller-supplied context, passed to the
+// [RefResolver] (see [WithRefResolver]) for refs resolved both
 // while compiling schema and during the validation run.
 func ValidateContext(ctx context.Context, schema *Schema, instance any, opts ...ValidateOption) error {
 	// Check the instance type before compiling so an unaccepted instance is
@@ -1406,7 +1399,7 @@ func ValidateJSON(schema *Schema, data []byte, opts ...ValidateOption) error {
 }
 
 // ValidateJSONContext is [ValidateJSON] with a caller-supplied context, passed
-// to a [RefResolverContext] resolver (see [WithRefResolver]) for refs resolved
+// to the [RefResolver] (see [WithRefResolver]) for refs resolved
 // both while compiling schema and during the validation run.
 func ValidateJSONContext(ctx context.Context, schema *Schema, data []byte, opts ...ValidateOption) error {
 	instance, err := decodeJSONInstance(data)

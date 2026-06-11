@@ -24,9 +24,8 @@ import (
 type inliner struct {
 	resolver RefResolver
 
-	// The context of the [InlineContext] call, passed to a
-	// [RefResolverContext] resolver with every document fetch; [Inline]
-	// supplies [context.Background].
+	// The context of the [InlineContext] call, passed to the resolver with
+	// every document fetch; [Inline] supplies [context.Background].
 	ctx context.Context
 
 	// The scratch validator resolving references. Its URI, anchor, and
@@ -72,10 +71,9 @@ type InlineOption func(*inliner)
 // use and never mutated. The same resolver value also serves validation via
 // [WithRefResolver].
 //
-// A resolver that also implements [RefResolverContext] receives the
-// [InlineContext] context with every fetch, so a resolver that fetches over
-// the network can honor cancellation and deadlines; [Inline] passes
-// [context.Background].
+// The resolver receives the [InlineContext] context with every fetch, so a
+// resolver that fetches over the network can honor cancellation and
+// deadlines; [Inline] passes [context.Background].
 func WithInlineResolver(r RefResolver) InlineOption {
 	return func(in *inliner) { in.resolver = r }
 }
@@ -219,8 +217,8 @@ func Inline(s *Schema, opts ...InlineOption) (*Schema, error) {
 	return InlineContext(context.Background(), s, opts...)
 }
 
-// InlineContext is [Inline] with a caller-supplied context, passed to a
-// [RefResolverContext] resolver (see [WithInlineResolver]) with every
+// InlineContext is [Inline] with a caller-supplied context, passed to the
+// [RefResolver] (see [WithInlineResolver]) with every
 // document fetch, so a resolver that fetches over the network can honor
 // cancellation and deadlines. The behavior is otherwise identical.
 func InlineContext(ctx context.Context, s *Schema, opts ...InlineOption) (*Schema, error) {
@@ -286,10 +284,9 @@ func InlineContext(ctx context.Context, s *Schema, opts ...InlineOption) (*Schem
 		}
 	}
 
-	// The context reaches a RefResolverContext resolver through the ctx
-	// field set above: document fetches happen deep inside the expansion
-	// walk, which cannot thread a parameter through the shared resolution
-	// machinery.
+	// The context reaches the resolver through the ctx field set above:
+	// document fetches happen deep inside the expansion walk, which cannot
+	// thread a parameter through the shared resolution machinery.
 	//nolint:contextcheck // See the comment above.
 	err = in.walkPair(working, pristine, "")
 	if err != nil {
@@ -586,23 +583,16 @@ func (in *inliner) resolveTarget(node *Schema, ref string) (*Schema, error) {
 	return nil, fmt.Errorf("%w: cannot resolve %q", ErrRefResolve, ref)
 }
 
-// callResolver invokes the configured resolver for uri. A resolver that also
-// implements [RefResolverContext] receives the [InlineContext] context via
-// ResolveRefContext; a plain [RefResolver] is called without one. It mirrors
-// [validator.callResolver].
+// callResolver invokes the configured resolver for uri under the
+// [InlineContext] context. It mirrors [validator.callResolver].
 func (in *inliner) callResolver(uri string) (*Schema, error) {
-	if rc, ok := in.resolver.(RefResolverContext); ok {
-		ctx := in.ctx
-		if ctx == nil {
-			ctx = context.Background()
-		}
-
-		//nolint:wrapcheck // fetchDoc wraps the error with ErrRefResolve.
-		return rc.ResolveRefContext(ctx, uri)
+	ctx := in.ctx
+	if ctx == nil {
+		ctx = context.Background()
 	}
 
 	//nolint:wrapcheck // fetchDoc wraps the error with ErrRefResolve.
-	return in.resolver.ResolveRef(uri)
+	return in.resolver.ResolveRef(ctx, uri)
 }
 
 // fetchDoc fetches the document at baseURI through the configured resolver,
@@ -667,8 +657,9 @@ func NewFileResolver(fsys fs.FS) *FileResolver {
 }
 
 // ResolveRef reads and unmarshals the schema document stored at the file
-// path named by uri. See [FileResolver] for the path semantics.
-func (r *FileResolver) ResolveRef(uri string) (*Schema, error) {
+// path named by uri. Reads are local and not cancellable, so the context is
+// unused. See [FileResolver] for the path semantics.
+func (r *FileResolver) ResolveRef(_ context.Context, uri string) (*Schema, error) {
 	name := strings.TrimPrefix(uri, "file://")
 	name = strings.TrimPrefix(name, "/")
 

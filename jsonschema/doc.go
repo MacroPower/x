@@ -384,7 +384,7 @@
 // [CompileContext], [CompileJSONContext], [ValidateContext],
 // [ValidateJSONContext], and the [Validator.ValidateContext] and
 // [Validator.ValidateJSONContext] methods — that carries a caller-supplied
-// context to a [RefResolverContext] resolver (see Remote References below);
+// context to the [RefResolver] (see Remote References below);
 // the context-less forms pass [context.Background]. The behavior is otherwise
 // identical.
 //
@@ -417,9 +417,8 @@
 //
 //   - [WithRefResolver] sets a [RefResolver] for resolving remote $ref URIs.
 //     The resolver is called only when local fragment resolution fails. Resolved
-//     schemas are cached within the validation run. A resolver that also
-//     implements [RefResolverContext] receives the context from the Context
-//     entry points (see Remote References below).
+//     schemas are cached within the validation run. The resolver receives the
+//     context from the Context entry points (see Remote References below).
 //   - [WithFormatValidator] registers a custom format checker: a
 //     [FormatValidator] that declares the format name it handles, with
 //     [FormatFunc] adapting a bare function.
@@ -557,7 +556,7 @@
 // local fragment ref is silently skipped.
 // Circular refs are detected and treated as passing to avoid infinite recursion.
 //
-// A resolver that also implements [RefResolverContext] receives a context with
+// The resolver receives a context with
 // every resolution call: the [CompileContext] context for refs resolved while
 // compiling, and the [Validator.ValidateContext] (or other Context entry
 // point) context for refs reached during that validation run, so a resolver
@@ -565,9 +564,6 @@
 // context is never retained by a compiled [Validator] — each run carries its
 // own — and the context-less entry points pass [context.Background]. The
 // package ships no network resolver; fetching remains the caller's concern.
-// A wrapper that decorates a [RefResolver] (caching, logging) should also
-// forward [RefResolverContext] when the wrapped resolver implements it;
-// wrapping with only ResolveRef silently severs this context path.
 //
 // # Reference Inlining
 //
@@ -599,10 +595,10 @@
 // [WithInlineBaseURI] to inline a directory of schemas; the same resolver
 // also serves file-path and relative refs during validation via
 // [WithRefResolver]. [InlineContext] is
-// Inline with a caller-supplied context, passed to a [RefResolverContext]
-// resolver with every document fetch, so a resolver that fetches over the
+// Inline with a caller-supplied context, passed to the resolver with every
+// document fetch, so a resolver that fetches over the
 // network can honor cancellation and deadlines; Inline passes
-// [context.Background], and a plain [RefResolver] is called without one.
+// [context.Background].
 //
 // [WithInlineRetrievalBase] makes refs resolve against each document's
 // retrieval URI instead, treating $id as an inert annotation: $id neither

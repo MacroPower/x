@@ -1,6 +1,7 @@
 package jsonschema_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math/big"
@@ -23,7 +24,7 @@ import (
 // $dynamicRef targets resolve during validation.
 type metaSchemaResolver map[string]*jsonschema.Schema
 
-func (m metaSchemaResolver) ResolveRef(uri string) (*jsonschema.Schema, error) {
+func (m metaSchemaResolver) ResolveRef(_ context.Context, uri string) (*jsonschema.Schema, error) {
 	if s, ok := m[uri]; ok {
 		return s, nil
 	}

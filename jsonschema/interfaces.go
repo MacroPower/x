@@ -73,27 +73,15 @@ func (f formatFunc) ValidateFormat(value string) error { return f.fn(value) }
 // to multiple Validate calls.
 //
 // The same resolver value serves both validation ([WithRefResolver]) and
-// inlining ([WithInlineResolver]). A wrapper that decorates a RefResolver
-// (caching, logging) should also forward [RefResolverContext] when the
-// wrapped resolver implements it; wrapping with only ResolveRef silently
-// severs the context path of the Context entry points.
+// inlining ([WithInlineResolver]).
 type RefResolver interface {
-	ResolveRef(uri string) (*Schema, error)
-}
-
-// RefResolverContext is an optional extension of [RefResolver]. When the
-// resolver passed to [WithRefResolver] also implements RefResolverContext,
-// resolution calls ResolveRefContext with the context from [CompileContext]
-// or [Validator.ValidateContext]; context-less entry points pass
-// [context.Background]. The caching and concurrency contract of [RefResolver]
-// applies unchanged.
-type RefResolverContext interface {
-	RefResolver
-
-	// ResolveRefContext resolves a remote schema URI under the caller's
-	// context, so a resolver that fetches over the network can honor
-	// cancellation and deadlines.
-	ResolveRefContext(ctx context.Context, uri string) (*Schema, error)
+	// ResolveRef resolves a remote schema URI under the caller's context, so
+	// a resolver that fetches over the network can honor cancellation and
+	// deadlines. The context comes from the Context entry point in effect
+	// ([CompileContext], [Validator.ValidateContext], [InlineContext]);
+	// context-less entry points pass [context.Background]. A resolver that
+	// performs no cancellable work can ignore it.
+	ResolveRef(ctx context.Context, uri string) (*Schema, error)
 }
 
 // FieldContext provides context about a struct field to tag interpreters.

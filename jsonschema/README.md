@@ -491,7 +491,7 @@ schema. Malformed JSON returns the wrapped decode error without the sentinel.
 Every compile and validate entry point has a `Context` variant —
 `CompileContext`, `CompileJSONContext`, `ValidateContext`,
 `ValidateJSONContext`, and the `Validator` methods of the same names — that
-carries a caller-supplied context to a `RefResolverContext` resolver (see
+carries a caller-supplied context to the `RefResolver` (see
 [Remote references](#remote-references)); the context-less forms pass
 `context.Background()`.
 
@@ -591,15 +591,15 @@ containing object are both identifiable from `InstancePath` alone.
 
 ### Validation options
 
-| Option                     | Effect                                                                                                                                |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `WithRefResolver(r)`       | Resolve remote/absolute `$ref` URIs (called only when local lookup fails); a `RefResolverContext` also receives the caller's context. |
-| `WithFormatValidator(f)`   | Register a custom `format` checker (a `FormatValidator`; `FormatFunc` adapts a bare function).                                        |
-| `WithFormats(bool)`        | Force `format` assertion on or off.                                                                                                   |
-| `WithContent(bool)`        | Assert `contentEncoding`/`contentMediaType` (annotation-only by default).                                                             |
-| `WithResolveOptions(opts)` | Pass `ResolveOptions` (aliased from the upstream package) to `Schema.Resolve`.                                                        |
-| `WithVocabularies(map)`    | Directly set active vocabularies (highest precedence).                                                                                |
-| `WithMetaSchema(ms)`       | Register a metaschema whose `$vocabulary` gates keyword groups.                                                                       |
+| Option                     | Effect                                                                                                                 |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `WithRefResolver(r)`       | Resolve remote/absolute `$ref` URIs (called only when local lookup fails); the resolver receives the caller's context. |
+| `WithFormatValidator(f)`   | Register a custom `format` checker (a `FormatValidator`; `FormatFunc` adapts a bare function).                         |
+| `WithFormats(bool)`        | Force `format` assertion on or off.                                                                                    |
+| `WithContent(bool)`        | Assert `contentEncoding`/`contentMediaType` (annotation-only by default).                                              |
+| `WithResolveOptions(opts)` | Pass `ResolveOptions` (aliased from the upstream package) to `Schema.Resolve`.                                         |
+| `WithVocabularies(map)`    | Directly set active vocabularies (highest precedence).                                                                 |
+| `WithMetaSchema(ms)`       | Register a metaschema whose `$vocabulary` gates keyword groups.                                                        |
 
 ### Formats
 
@@ -637,13 +637,11 @@ resolver error surfaces as `ErrRefResolve`; an unresolvable remote/absolute ref
 with no resolver is reported as a `*ValidationError`. Circular refs are detected
 and treated as passing.
 
-A resolver that also implements `RefResolverContext` receives a context with
-every resolution call:
+The resolver receives a context with every resolution call:
 
 ```go
-type RefResolverContext interface {
-	RefResolver
-	ResolveRefContext(ctx context.Context, uri string) (*Schema, error)
+type RefResolver interface {
+	ResolveRef(ctx context.Context, uri string) (*Schema, error)
 }
 ```
 
@@ -653,10 +651,7 @@ entry point) context, so a resolver that fetches over the network can honor
 cancellation and deadlines. A compiled `*Validator` never retains a context —
 each run carries its own — and the context-less entry points pass
 `context.Background()`. The package ships no network resolver; fetching
-remains the caller's concern. A wrapper that decorates a `RefResolver`
-(caching, logging) should also forward `RefResolverContext` when the wrapped
-resolver implements it; wrapping with only `ResolveRef` silently severs this
-context path. The same resolver value serves both validation
+remains the caller's concern. The same resolver value serves both validation
 (`WithRefResolver`) and inlining (`WithInlineResolver`).
 
 ## Schema traversal and predicates
@@ -785,10 +780,9 @@ wrapping `ErrRefResolve`. The same resolver also serves file-path and
 relative refs during validation via `WithRefResolver`; refs that absolutize
 to another scheme (an http `$id`, for example) are not valid fs paths and
 resolve to an error. `InlineContext` is `Inline` with a caller-supplied
-context, passed to a resolver that also implements `RefResolverContext` with
+context, passed to the resolver with
 every document fetch, so a resolver that fetches over the network can honor
-cancellation and deadlines; `Inline` passes `context.Background()`, and a
-plain `RefResolver` is called without one.
+cancellation and deadlines; `Inline` passes `context.Background()`.
 
 `WithInlineRetrievalBase` makes refs resolve against each document's
 retrieval URI instead, treating `$id` as an inert annotation: `$id` neither

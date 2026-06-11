@@ -38,28 +38,19 @@ func remoteIntegerPropertySchema() *jsonschema.Schema {
 	}
 }
 
-// recordingResolver implements both [jsonschema.RefResolver] and
-// [jsonschema.RefResolverContext], recording every context received by
-// ResolveRefContext and counting calls to the context-less ResolveRef. While
-// disabled it misses (returns nil, nil), so a schema can be compiled without
-// caching the remote target and the validation-time resolution path is
-// exercised. A canceled context propagates its error, mimicking a resolver
-// that fetches over the network.
+// recordingResolver implements [jsonschema.RefResolver], recording every
+// context received by ResolveRef. While disabled it misses (returns nil,
+// nil), so a schema can be compiled without caching the remote target and
+// the validation-time resolution path is exercised. A canceled context
+// propagates its error, mimicking a resolver that fetches over the network.
 type recordingResolver struct {
 	schemas  map[string]*jsonschema.Schema
 	mu       sync.Mutex
 	ctxs     []context.Context
-	plain    int
 	disabled bool
 }
 
-func (r *recordingResolver) ResolveRef(uri string) (*jsonschema.Schema, error) {
-	r.countPlain()
-
-	return r.lookup(uri)
-}
-
-func (r *recordingResolver) ResolveRefContext(ctx context.Context, uri string) (*jsonschema.Schema, error) {
+func (r *recordingResolver) ResolveRef(ctx context.Context, uri string) (*jsonschema.Schema, error) {
 	r.recordCtx(ctx)
 
 	err := ctx.Err()
@@ -69,14 +60,6 @@ func (r *recordingResolver) ResolveRefContext(ctx context.Context, uri string) (
 	}
 
 	return r.lookup(uri)
-}
-
-// countPlain counts a call to the context-less ResolveRef.
-func (r *recordingResolver) countPlain() {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	r.plain++
 }
 
 // recordCtx appends ctx to the received-context log.
@@ -113,7 +96,7 @@ func (r *recordingResolver) setDisabled(disabled bool) {
 	r.disabled = disabled
 }
 
-// recordedCtxs returns a copy of the contexts ResolveRefContext received.
+// recordedCtxs returns a copy of the contexts ResolveRef received.
 func (r *recordingResolver) recordedCtxs() []context.Context {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -121,18 +104,9 @@ func (r *recordingResolver) recordedCtxs() []context.Context {
 	return append([]context.Context(nil), r.ctxs...)
 }
 
-// plainCalls returns how many times the context-less ResolveRef ran.
-func (r *recordingResolver) plainCalls() int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	return r.plain
-}
-
 // TestCompileContextPassesContextToResolver pins the compile-time resolution
-// path: refs resolved while compiling reach a RefResolverContext through
-// ResolveRefContext carrying the context given to CompileContext, and the
-// context-less ResolveRef is never used.
+// path: refs resolved while compiling reach the resolver carrying the
+// context given to CompileContext.
 func TestCompileContextPassesContextToResolver(t *testing.T) {
 	t.Parallel()
 
@@ -149,14 +123,11 @@ func TestCompileContextPassesContextToResolver(t *testing.T) {
 	require.NoError(t, err)
 
 	ctxs := resolver.recordedCtxs()
-	require.NotEmpty(t, ctxs, "compile-time resolution should call ResolveRefContext")
+	require.NotEmpty(t, ctxs, "compile-time resolution should call ResolveRef")
 
 	for _, got := range ctxs {
 		assert.Equal(t, "compile", got.Value(ctxMarkerKey{}))
 	}
-
-	assert.Zero(t, resolver.plainCalls(),
-		"a RefResolverContext should never be called through ResolveRef")
 
 	// The compile-time result is cached, so validation works without the
 	// resolver being consulted again.
@@ -205,7 +176,6 @@ func TestValidateContextPassesContextToResolver(t *testing.T) {
 
 	assert.NotZero(t, validateCalls,
 		"validation-time resolution should carry the ValidateContext context")
-	assert.Zero(t, resolver.plainCalls())
 }
 
 // TestValidateJSONContextPassesContextToResolver covers the byte-decoding
@@ -294,8 +264,6 @@ func TestPackageLevelContextHelpers(t *testing.T) {
 	for _, got := range ctxs {
 		assert.Equal(t, "one-shot", got.Value(ctxMarkerKey{}))
 	}
-
-	assert.Zero(t, resolver.plainCalls())
 }
 
 // TestCompileJSONContextPassesContextToResolver pins that the schema-document
@@ -327,8 +295,7 @@ func TestCompileJSONContextPassesContextToResolver(t *testing.T) {
 }
 
 // TestContextlessEntryPointsPassBackground pins the documented default: the
-// context-less entry points hand a RefResolverContext context.Background, not
-// nil.
+// context-less entry points hand the resolver context.Background, not nil.
 func TestContextlessEntryPointsPassBackground(t *testing.T) {
 	t.Parallel()
 
@@ -353,9 +320,8 @@ func TestContextlessEntryPointsPassBackground(t *testing.T) {
 }
 
 // TestInlineContextPassesContextToResolver pins the inlining resolution path:
-// document fetches reach a RefResolverContext through ResolveRefContext
-// carrying the context given to InlineContext, and the context-less
-// ResolveRef is never used.
+// document fetches reach the resolver carrying the context given to
+// InlineContext.
 func TestInlineContextPassesContextToResolver(t *testing.T) {
 	t.Parallel()
 
@@ -373,14 +339,11 @@ func TestInlineContextPassesContextToResolver(t *testing.T) {
 	assert.Equal(t, "integer", inlined.Properties["count"].Type)
 
 	ctxs := resolver.recordedCtxs()
-	require.NotEmpty(t, ctxs, "document fetches should call ResolveRefContext")
+	require.NotEmpty(t, ctxs, "document fetches should call ResolveRef")
 
 	for _, got := range ctxs {
 		assert.Equal(t, "inline", got.Value(ctxMarkerKey{}))
 	}
-
-	assert.Zero(t, resolver.plainCalls(),
-		"a RefResolverContext should never be called through ResolveRef")
 }
 
 // TestInlineContextCancellation pins that a canceled context surfaces from
@@ -407,8 +370,7 @@ func TestInlineContextCancellation(t *testing.T) {
 }
 
 // TestInlinePassesBackgroundToContextResolver pins the documented default:
-// the context-less Inline hands a RefResolverContext context.Background, not
-// nil.
+// the context-less Inline hands the resolver context.Background, not nil.
 func TestInlinePassesBackgroundToContextResolver(t *testing.T) {
 	t.Parallel()
 
@@ -433,10 +395,9 @@ func TestInlinePassesBackgroundToContextResolver(t *testing.T) {
 	}
 }
 
-// TestPlainRefResolverThroughContextEntryPoints pins that a resolver
-// implementing only RefResolver keeps working through every context entry
-// point.
-func TestPlainRefResolverThroughContextEntryPoints(t *testing.T) {
+// TestResolverThroughContextEntryPoints pins that a minimal resolver works
+// through every context entry point.
+func TestResolverThroughContextEntryPoints(t *testing.T) {
 	t.Parallel()
 
 	resolver := mapResolver{

@@ -1,6 +1,7 @@
 package jsonschema_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -201,7 +202,7 @@ func init() {
 // suiteRemoteResolver resolves URIs from the remoteSchemas map.
 type suiteRemoteResolver struct{}
 
-func (suiteRemoteResolver) ResolveRef(uri string) (*jsonschema.Schema, error) {
+func (suiteRemoteResolver) ResolveRef(_ context.Context, uri string) (*jsonschema.Schema, error) {
 	if s, ok := remoteSchemas[uri]; ok {
 		return s, nil
 	}

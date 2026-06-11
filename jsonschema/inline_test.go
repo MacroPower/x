@@ -1015,7 +1015,7 @@ func TestFileResolver(t *testing.T) {
 
 			resolver := jsonschema.NewFileResolver(mapFS(files))
 
-			got, err := resolver.ResolveRef(tc.uri)
+			got, err := resolver.ResolveRef(t.Context(), tc.uri)
 			if tc.want == "" {
 				require.Error(t, err)
 

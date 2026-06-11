@@ -1,6 +1,7 @@
 package jsonschema_test
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"math"
@@ -2386,7 +2387,7 @@ func TestValidateVocabularyApplicatorActiveValidationDisabled(t *testing.T) {
 // mapResolver is a test helper that resolves URIs from a static map.
 type mapResolver map[string]*jsonschema.Schema
 
-func (m mapResolver) ResolveRef(uri string) (*jsonschema.Schema, error) {
+func (m mapResolver) ResolveRef(_ context.Context, uri string) (*jsonschema.Schema, error) {
 	if s, ok := m[uri]; ok {
 		return s, nil
 	}
@@ -2525,7 +2526,7 @@ func TestValidateWithRefResolver(t *testing.T) {
 // errResolver always returns an error.
 type errResolver struct{}
 
-func (errResolver) ResolveRef(string) (*jsonschema.Schema, error) {
+func (errResolver) ResolveRef(context.Context, string) (*jsonschema.Schema, error) {
 	return nil, errors.New("connection refused")
 }
 
@@ -2565,7 +2566,7 @@ type countingResolver struct {
 	callCount *atomic.Int64
 }
 
-func (r *countingResolver) ResolveRef(uri string) (*jsonschema.Schema, error) {
+func (r *countingResolver) ResolveRef(_ context.Context, uri string) (*jsonschema.Schema, error) {
 	r.callCount.Add(1)
 
 	if s, ok := r.schemas[uri]; ok {
@@ -3295,14 +3296,14 @@ type errorResolver struct {
 	err error
 }
 
-func (r *errorResolver) ResolveRef(_ string) (*jsonschema.Schema, error) {
+func (r *errorResolver) ResolveRef(_ context.Context, _ string) (*jsonschema.Schema, error) {
 	return nil, r.err
 }
 
 // nilResolver always returns (nil, nil).
 type nilResolver struct{}
 
-func (r *nilResolver) ResolveRef(_ string) (*jsonschema.Schema, error) {
+func (r *nilResolver) ResolveRef(_ context.Context, _ string) (*jsonschema.Schema, error) {
 	//nolint:nilnil // Deliberately returns (nil, nil) to exercise the unresolved-ref path.
 	return nil, nil
 }
@@ -3399,7 +3400,7 @@ type cloningResolver struct {
 	schema *jsonschema.Schema
 }
 
-func (r *cloningResolver) ResolveRef(_ string) (*jsonschema.Schema, error) {
+func (r *cloningResolver) ResolveRef(_ context.Context, _ string) (*jsonschema.Schema, error) {
 	// Return a different pointer to the same logical schema. A round-trip of a
 	// known-good schema cannot fail, so the errors are deliberately ignored.
 	data, _ := json.Marshal(r.schema) //nolint:errcheck,errchkjson // Round-tripping a known-good schema.
@@ -3459,7 +3460,7 @@ type countingRefResolver struct {
 	schema *jsonschema.Schema
 }
 
-func (r *countingRefResolver) ResolveRef(_ string) (*jsonschema.Schema, error) {
+func (r *countingRefResolver) ResolveRef(_ context.Context, _ string) (*jsonschema.Schema, error) {
 	r.count.Add(1)
 
 	return r.schema, nil
@@ -3858,7 +3859,7 @@ type mutatingResolver struct {
 	schema *jsonschema.Schema
 }
 
-func (r *mutatingResolver) ResolveRef(_ string) (*jsonschema.Schema, error) {
+func (r *mutatingResolver) ResolveRef(_ context.Context, _ string) (*jsonschema.Schema, error) {
 	return r.schema, nil
 }
 
@@ -5349,7 +5350,9 @@ func collectLeaves(ve *jsonschema.ValidationError) []*jsonschema.ValidationError
 // fixedResolver is a concurrency-safe RefResolver returning one fixed schema.
 type fixedResolver struct{ schema *jsonschema.Schema }
 
-func (r fixedResolver) ResolveRef(string) (*jsonschema.Schema, error) { return r.schema, nil }
+func (r fixedResolver) ResolveRef(context.Context, string) (*jsonschema.Schema, error) {
+	return r.schema, nil
+}
 
 func TestConcurrentValidationSharedSchema(t *testing.T) {
 	t.Parallel()
