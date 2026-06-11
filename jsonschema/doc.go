@@ -61,7 +61,7 @@
 //   - [WithComments] enables Go doc comment extraction as description fields.
 //   - [WithTypeSchema] overrides the schema for a specific Go type;
 //     [WithTypeSchemaFor] is its generic form for statically known types.
-//   - [WithNamer] sets a custom definition naming function.
+//   - [WithNamer] sets a custom definition naming function (a [Namer]).
 //   - [WithDefinitions] controls $defs/$ref extraction (default: true).
 //   - [WithAdditionalProperties] controls whether extra keys are allowed on
 //     object schemas (default: false, disallowing extra keys).
@@ -640,10 +640,11 @@
 // configured, or any ref whose target cannot be found, returns an error
 // wrapping [ErrRefResolve].
 //
-// [WithInlineRefFallback] sets a per-reference failure policy consulted
-// when expanding a reference fails for any of those reasons, with a
-// [RefFailure] carrying the JSON Pointer path of the referencing schema
-// within its containing document, the reference value, and the error.
+// [WithInlineRefFallback] sets a per-reference failure policy (a
+// [RefFallback]) consulted when expanding a reference fails for any of those
+// reasons, with a [RefFailure] carrying the JSON Pointer path of the
+// referencing schema within its containing document, the reference value,
+// and the error.
 // The fallback declines (propagating
 // the original error and ending the Inline call), drops the failing
 // reference keyword while keeping the node's remaining keywords (a nil

@@ -75,10 +75,17 @@ func WithTypeSchemaFor[T any](s *Schema) GenerateOption {
 	return WithTypeSchema(reflect.TypeFor[T](), s)
 }
 
-// WithNamer sets a custom function for producing definition names from
+// Namer produces the definition name for a Go type: the key the type's
+// schema is stored under in $defs (or definitions for [Draft7]) and the
+// reference token its $ref uses, plus, with [WithRootTitle], the root
+// schema's title (where an empty result leaves the title unset). Name
+// collisions between types are still disambiguated automatically.
+type Namer func(t reflect.Type) string
+
+// WithNamer sets a custom [Namer] for producing definition names from
 // Go types. Default: uses the type's short name (e.g., "MyStruct").
 // A nil fn is ignored, keeping the default.
-func WithNamer(fn func(reflect.Type) string) GenerateOption {
+func WithNamer(fn Namer) GenerateOption {
 	return generateOptionFunc(func(g *generator) {
 		if fn != nil {
 			g.namer = fn

@@ -52,7 +52,7 @@ type inliner struct {
 
 	// The per-reference failure policy from [WithInlineRefFallback]; nil
 	// means every expansion failure is fatal.
-	fallback func(RefFailure) (*Schema, bool)
+	fallback RefFallback
 
 	baseURI string
 
@@ -121,19 +121,23 @@ type RefFailure struct {
 	Ref string
 }
 
+// RefFallback decides what happens when [Inline] fails to expand one
+// reference, described by the [RefFailure]. Returning ok=false propagates
+// the original error, ending the Inline call. Returning ok=true with a nil
+// schema drops the failing reference keyword and keeps the node's remaining
+// keywords. Returning ok=true with a non-nil schema expands the reference as
+// if it had resolved to a copy of that schema, with the usual draft sibling
+// semantics.
+type RefFallback func(failure RefFailure) (s *Schema, ok bool)
+
 // WithInlineRefFallback sets a per-reference failure policy for [Inline].
 // When expanding a reference fails - the target is unresolvable
 // ([ErrRefResolve]), the expansion is cyclic ([ErrRefCycle]), or the
 // construct has no static expansion ([ErrRefInline], $dynamicRef) - fn is
 // consulted with a [RefFailure] carrying the JSON Pointer path of the
 // referencing schema within its containing document, the reference value,
-// and the error.
-//
-// Returning ok=false propagates the original error, ending the Inline
-// call. Returning ok=true with a nil schema drops the failing reference
-// keyword and keeps the node's remaining keywords. Returning ok=true with
-// a non-nil schema expands the reference as if it had resolved to a copy
-// of that schema, with the usual draft sibling semantics.
+// and the error, and its [RefFallback] result decides between propagating
+// the error, dropping the reference keyword, and expanding a substitute.
 //
 // Fn is consulted once per failure, at the reference that directly failed:
 // when a failure surfaces while expanding a nested target, the innermost
@@ -143,7 +147,7 @@ type RefFailure struct {
 // and is itself inlined recursively, its refs resolving in the context of
 // the document containing the failing ref; a cycle introduced by the
 // returned schema is an ordinary [ErrRefCycle].
-func WithInlineRefFallback(fn func(RefFailure) (*Schema, bool)) InlineOption {
+func WithInlineRefFallback(fn RefFallback) InlineOption {
 	return inlineOptionFunc(func(in *inliner) { in.fallback = fn })
 }
 

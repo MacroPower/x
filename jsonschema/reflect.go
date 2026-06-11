@@ -34,7 +34,7 @@ var (
 type generator struct {
 	typeToDefName   map[reflect.Type]string
 	typeSchemas     map[reflect.Type]*Schema
-	namer           func(reflect.Type) string
+	namer           Namer
 	defs            map[string]*Schema
 	defsNameToTypes map[string][]reflect.Type
 	typeToDefSchema map[reflect.Type]*Schema
