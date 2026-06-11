@@ -212,6 +212,13 @@ type validator struct {
 	formatsEnabled bool
 	contentVocab   bool // content vocabulary active (gates validateContent)
 	contentEnabled bool // assert contentEncoding/contentMediaType (WithContent)
+
+	// Treat $id as an inert annotation in walkSchema: no URI or anchor
+	// registration, no base-URI change, in any form including the
+	// Draft 7 fragment-only anchor form. Only the inliner's scratch
+	// validators set it, for [WithInlineRetrievalBase]; Compile never does,
+	// so validation behavior is unaffected.
+	inertIDs bool
 }
 
 func newValidator(schema *Schema, opts []ValidateOption) (*validator, error) {
@@ -391,7 +398,7 @@ func (v *validator) walkSchema(schema *Schema, parentBase string) {
 
 	currentBase := parentBase
 
-	if schema.ID != "" {
+	if schema.ID != "" && !v.inertIDs {
 		if isFragmentOnly(schema.ID) {
 			// Draft-07: fragment-only $id acts as an anchor.
 			anchor := schema.ID[1:] // strip leading '#'
@@ -4123,6 +4130,7 @@ func (v *validator) resolveJSONPointerViaJSON(root *Schema, segments []string) *
 func (v *validator) registerFallbackSchema(s *Schema, base string) {
 	scratch := &validator{
 		draft:                 v.draft,
+		inertIDs:              v.inertIDs,
 		uriRegistry:           map[string]*Schema{},
 		anchorRegistry:        map[string]*Schema{},
 		dynamicAnchorRegistry: map[string]*Schema{},

@@ -562,10 +562,26 @@
 // files can reference each other by relative path), and each document is
 // fetched at most once per call. [FileResolver] adapts an [io/fs.FS] to
 // this interface, serving file-path and relative URIs from the fs root;
-// pair [os.DirFS] with [WithInlineBaseURI] to inline a directory of
-// schemas. Inline always calls ResolveRef, even on a resolver that also
-// implements [RefResolverContext]; context-aware inlining can be added when
-// a consumer needs it.
+// each referenced file must contain a JSON schema document, and [io/fs]
+// confines resolution to the fs root, so a ref escaping above it returns
+// an error wrapping [ErrRefResolve]. Pair [os.DirFS] with
+// [WithInlineBaseURI] to inline a directory of schemas. Inline always
+// calls ResolveRef, even on a resolver that also implements
+// [RefResolverContext]; context-aware inlining can be added when a
+// consumer needs it.
+//
+// [WithInlineRetrievalBase] makes refs resolve against each document's
+// retrieval URI instead, treating $id as an inert annotation: $id neither
+// establishes a base URI nor registers a resolution target, in any
+// document, including the Draft 7 fragment-only $id form that otherwise
+// acts as an anchor. $anchor and $dynamicAnchor still resolve within their
+// document, and $id keywords pass through to the output verbatim.
+// Real-world schemas commonly declare a published remote $id while
+// shipping the files their refs name alongside the schema; under the
+// default RFC behavior those refs absolutize against the remote $id and
+// cannot be served from disk. With this option the root document's refs
+// absolutize against the base from [WithInlineBaseURI] and each fetched
+// document's refs against the URI it was fetched from.
 //
 // Sibling keywords beside $ref follow draft semantics, with the draft
 // detected from the root schema's $schema exactly as the validator detects
@@ -589,4 +605,21 @@
 // the keyword, as the validator does). A non-local ref with no resolver
 // configured, or any ref whose target cannot be found, returns an error
 // wrapping [ErrRefResolve].
+//
+// [WithInlineRefFallback] sets a per-reference failure policy consulted
+// when expanding a reference fails for any of those reasons, with the JSON
+// Pointer path of the referencing schema within its containing document,
+// the reference value, and the error. The fallback declines (propagating
+// the original error and ending the Inline call), drops the failing
+// reference keyword while keeping the node's remaining keywords (a nil
+// schema), or supplies a substitute schema the reference expands to as if
+// it had resolved there, with the usual draft sibling semantics. The
+// fallback is consulted once per failure, at the reference that directly
+// failed: a failure inside a nested expansion consults the innermost
+// failing ref with its path in its containing document, and a declined
+// consultation propagates outward without re-consulting at the enclosing
+// refs. A substitute is deep-copied before splicing and is itself inlined
+// recursively, its refs resolving in the context of the document containing
+// the failing ref; a cycle introduced by the substitute is an ordinary
+// [ErrRefCycle].
 package jsonschema

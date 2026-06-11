@@ -2,6 +2,7 @@ package jsonschema_test
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 	"testing/fstest"
 
@@ -26,12 +27,13 @@ func TestInline(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]struct {
-		resolver jsonschema.RefResolver
-		files    map[string]string
-		schema   string
-		baseURI  string
-		want     string
-		err      error
+		resolver      jsonschema.RefResolver
+		files         map[string]string
+		schema        string
+		baseURI       string
+		retrievalBase bool
+		want          string
+		err           error
 	}{
 		"pointer ref within document": {
 			schema: stringtest.Input(`
@@ -355,6 +357,110 @@ func TestInline(t *testing.T) {
 			},
 			err: jsonschema.ErrRefResolve,
 		},
+		"remote root $id absolutizes refs away from disk by default": {
+			schema: stringtest.Input(`
+				{
+					"$id": "https://example.com/schemas/main.json",
+					"properties": {"child": {"$ref": "sub/child.json"}}
+				}
+			`),
+			baseURI: "main.json",
+			files: map[string]string{
+				"sub/child.json": `{"type": "string"}`,
+			},
+			err: jsonschema.ErrRefResolve,
+		},
+		"retrieval base resolves refs from disk despite a remote root $id": {
+			schema: stringtest.Input(`
+				{
+					"$id": "https://example.com/schemas/main.json",
+					"properties": {"child": {"$ref": "sub/child.json"}}
+				}
+			`),
+			baseURI:       "main.json",
+			retrievalBase: true,
+			files: map[string]string{
+				"sub/child.json": `{"type": "string"}`,
+			},
+			want: stringtest.Input(`
+				{
+					"$id": "https://example.com/schemas/main.json",
+					"properties": {"child": {"type": "string"}}
+				}
+			`),
+		},
+		"retrieval base keeps nested $id verbatim and resolves fetched refs against the fetch URI": {
+			schema:        `{"$ref": "sub/child.json"}`,
+			baseURI:       "main.json",
+			retrievalBase: true,
+			files: map[string]string{
+				"sub/child.json": stringtest.Input(`
+					{
+						"$id": "https://example.com/child.json",
+						"properties": {"x": {"$ref": "leaf.json"}}
+					}
+				`),
+				"sub/leaf.json": `{"type": "boolean"}`,
+			},
+			want: stringtest.Input(`
+				{
+					"$id": "https://example.com/child.json",
+					"properties": {"x": {"type": "boolean"}}
+				}
+			`),
+		},
+		"retrieval base keeps anchors resolving within their document": {
+			schema: stringtest.Input(`
+				{
+					"$id": "https://example.com/x.json",
+					"$defs": {"s": {"$anchor": "leaf", "type": "string"}},
+					"items": {"$ref": "#leaf"}
+				}
+			`),
+			retrievalBase: true,
+			want: stringtest.Input(`
+				{
+					"$id": "https://example.com/x.json",
+					"$defs": {"s": {"$anchor": "leaf", "type": "string"}},
+					"items": {"$anchor": "leaf", "type": "string"}
+				}
+			`),
+		},
+		"ref to a nested $id URI resolves from the registry by default": {
+			schema: stringtest.Input(`
+				{
+					"$defs": {"s": {"$id": "https://example.com/y.json", "type": "string"}},
+					"properties": {"a": {"$ref": "https://example.com/y.json"}}
+				}
+			`),
+			want: stringtest.Input(`
+				{
+					"$defs": {"s": {"$id": "https://example.com/y.json", "type": "string"}},
+					"properties": {"a": {"$id": "https://example.com/y.json", "type": "string"}}
+				}
+			`),
+		},
+		"retrieval base does not register $id as a resolution target": {
+			schema: stringtest.Input(`
+				{
+					"$defs": {"s": {"$id": "https://example.com/y.json", "type": "string"}},
+					"properties": {"a": {"$ref": "https://example.com/y.json"}}
+				}
+			`),
+			retrievalBase: true,
+			err:           jsonschema.ErrRefResolve,
+		},
+		"retrieval base makes the draft-7 fragment-only $id anchor form inert": {
+			schema: stringtest.Input(`
+				{
+					"$schema": "http://json-schema.org/draft-07/schema#",
+					"definitions": {"s": {"$id": "#frag", "type": "string"}},
+					"properties": {"a": {"$ref": "#frag"}}
+				}
+			`),
+			retrievalBase: true,
+			err:           jsonschema.ErrRefResolve,
+		},
 	}
 
 	for name, tc := range tests {
@@ -379,7 +485,324 @@ func TestInline(t *testing.T) {
 				opts = append(opts, jsonschema.WithInlineBaseURI(tc.baseURI))
 			}
 
+			if tc.retrievalBase {
+				opts = append(opts, jsonschema.WithInlineRetrievalBase(true))
+			}
+
 			got, err := jsonschema.Inline(&schema, opts...)
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+
+				return
+			}
+
+			require.NoError(t, err)
+
+			data, err := json.Marshal(got)
+			require.NoError(t, err)
+			assert.JSONEq(t, tc.want, string(data))
+		})
+	}
+}
+
+// refFallbackCall records one consultation of a [jsonschema.WithInlineRefFallback]
+// policy: the JSON Pointer path of the referencing schema within its
+// containing document, the reference value, and the sentinel the error wraps.
+type refFallbackCall struct {
+	path string
+	ref  string
+	err  error
+}
+
+func TestInlineRefFallback(t *testing.T) {
+	t.Parallel()
+
+	drop := func(string, string, error) (*jsonschema.Schema, bool) { return nil, true }
+	decline := func(string, string, error) (*jsonschema.Schema, bool) { return nil, false }
+	replaceWith := func(s *jsonschema.Schema) func(string, string, error) (*jsonschema.Schema, bool) {
+		return func(string, string, error) (*jsonschema.Schema, bool) { return s, true }
+	}
+
+	tests := map[string]struct {
+		files         map[string]string
+		schema        string
+		baseURI       string
+		retrievalBase bool
+		fallback      func(path, ref string, err error) (*jsonschema.Schema, bool)
+		wantCalls     []refFallbackCall
+		want          string
+		err           error
+	}{
+		"no fallback keeps strict resolve errors": {
+			schema: `{"$ref": "#/$defs/missing"}`,
+			err:    jsonschema.ErrRefResolve,
+		},
+		"drop on a dangling local pointer keeps siblings and clears the ref": {
+			schema: stringtest.Input(`
+				{
+					"properties": {"a": {"$ref": "#/$defs/missing", "minLength": 3}}
+				}
+			`),
+			fallback: drop,
+			wantCalls: []refFallbackCall{
+				{path: "/properties/a", ref: "#/$defs/missing", err: jsonschema.ErrRefResolve},
+			},
+			want: `{"properties": {"a": {"minLength": 3}}}`,
+		},
+		"substitute joins the node's allOf under draft 2020-12": {
+			schema: stringtest.Input(`
+				{
+					"properties": {"a": {"$ref": "#/$defs/missing", "minLength": 3}}
+				}
+			`),
+			fallback: replaceWith(&jsonschema.Schema{Type: "string"}),
+			wantCalls: []refFallbackCall{
+				{path: "/properties/a", ref: "#/$defs/missing", err: jsonschema.ErrRefResolve},
+			},
+			want: stringtest.Input(`
+				{
+					"properties": {
+						"a": {"minLength": 3, "allOf": [{"type": "string"}]}
+					}
+				}
+			`),
+		},
+		"substitute replaces the node wholesale under draft 7": {
+			schema: stringtest.Input(`
+				{
+					"$schema": "http://json-schema.org/draft-07/schema#",
+					"properties": {"a": {"$ref": "#/definitions/missing", "minLength": 3}}
+				}
+			`),
+			fallback: replaceWith(&jsonschema.Schema{Type: "string"}),
+			wantCalls: []refFallbackCall{
+				{path: "/properties/a", ref: "#/definitions/missing", err: jsonschema.ErrRefResolve},
+			},
+			want: stringtest.Input(`
+				{
+					"$schema": "http://json-schema.org/draft-07/schema#",
+					"properties": {"a": {"type": "string"}}
+				}
+			`),
+		},
+		"substitute replaces a bare ref node wholesale": {
+			schema:   `{"properties": {"a": {"$ref": "#/$defs/missing"}}}`,
+			fallback: replaceWith(&jsonschema.Schema{Type: "integer"}),
+			wantCalls: []refFallbackCall{
+				{path: "/properties/a", ref: "#/$defs/missing", err: jsonschema.ErrRefResolve},
+			},
+			want: `{"properties": {"a": {"type": "integer"}}}`,
+		},
+		"declining propagates the original error": {
+			schema:   `{"properties": {"a": {"$ref": "#/$defs/missing"}}}`,
+			fallback: decline,
+			wantCalls: []refFallbackCall{
+				{path: "/properties/a", ref: "#/$defs/missing", err: jsonschema.ErrRefResolve},
+			},
+			err: jsonschema.ErrRefResolve,
+		},
+		"cycle consults the innermost ref once and drop breaks it": {
+			schema: stringtest.Input(`
+				{
+					"$defs": {
+						"a": {"$ref": "#/$defs/b"},
+						"b": {"$ref": "#/$defs/a"}
+					}
+				}
+			`),
+			fallback: drop,
+			wantCalls: []refFallbackCall{
+				{path: "/$defs/a", ref: "#/$defs/b", err: jsonschema.ErrRefCycle},
+			},
+			want: `{"$defs": {"a": true, "b": true}}`,
+		},
+		"nested failure consults the failing ref only and a decline propagates": {
+			schema: stringtest.Input(`
+				{
+					"$defs": {"mid": {"$ref": "#/missing"}},
+					"properties": {"a": {"$ref": "#/$defs/mid"}}
+				}
+			`),
+			fallback: decline,
+			wantCalls: []refFallbackCall{
+				{path: "/$defs/mid", ref: "#/missing", err: jsonschema.ErrRefResolve},
+			},
+			err: jsonschema.ErrRefResolve,
+		},
+		"dynamicRef consults with ErrRefInline and drop keeps siblings": {
+			schema: stringtest.Input(`
+				{
+					"$defs": {"x": {"$dynamicAnchor": "it"}},
+					"items": {"$dynamicRef": "#it", "description": "d"}
+				}
+			`),
+			fallback: drop,
+			wantCalls: []refFallbackCall{
+				{path: "/items", ref: "#it", err: jsonschema.ErrRefInline},
+			},
+			want: stringtest.Input(`
+				{
+					"$defs": {"x": {"$dynamicAnchor": "it"}},
+					"items": {"description": "d"}
+				}
+			`),
+		},
+		"dynamicRef substitute replaces a bare node wholesale": {
+			schema:   `{"items": {"$dynamicRef": "#it"}}`,
+			fallback: replaceWith(&jsonschema.Schema{Type: "string"}),
+			wantCalls: []refFallbackCall{
+				{path: "/items", ref: "#it", err: jsonschema.ErrRefInline},
+			},
+			want: `{"items": {"type": "string"}}`,
+		},
+		"path names an additionalProperties position": {
+			schema:   `{"additionalProperties": {"$ref": "#/$defs/missing"}}`,
+			fallback: drop,
+			wantCalls: []refFallbackCall{
+				{path: "/additionalProperties", ref: "#/$defs/missing", err: jsonschema.ErrRefResolve},
+			},
+			want: `{"additionalProperties": true}`,
+		},
+		"path descends nested defs": {
+			schema: stringtest.Input(`
+				{
+					"$defs": {
+						"outer": {"properties": {"b": {"$ref": "#/nope", "title": "t"}}}
+					}
+				}
+			`),
+			fallback: drop,
+			wantCalls: []refFallbackCall{
+				{path: "/$defs/outer/properties/b", ref: "#/nope", err: jsonschema.ErrRefResolve},
+			},
+			want: stringtest.Input(`
+				{
+					"$defs": {
+						"outer": {"properties": {"b": {"title": "t"}}}
+					}
+				}
+			`),
+		},
+		"fallback in a fetched document gets that document's local path": {
+			schema:  `{"$ref": "child.json"}`,
+			baseURI: "main.json",
+			files: map[string]string{
+				"child.json": `{"properties": {"x": {"$ref": "#/missing", "minLength": 1}}}`,
+			},
+			fallback: drop,
+			wantCalls: []refFallbackCall{
+				{path: "/properties/x", ref: "#/missing", err: jsonschema.ErrRefResolve},
+			},
+			want: `{"properties": {"x": {"minLength": 1}}}`,
+		},
+		"substitute refs resolve in the document containing the failing ref": {
+			schema: stringtest.Input(`
+				{
+					"$defs": {"s": {"type": "string"}},
+					"properties": {"a": {"$ref": "#/missing"}}
+				}
+			`),
+			fallback: replaceWith(&jsonschema.Schema{Ref: "#/$defs/s"}),
+			wantCalls: []refFallbackCall{
+				{path: "/properties/a", ref: "#/missing", err: jsonschema.ErrRefResolve},
+			},
+			want: stringtest.Input(`
+				{
+					"$defs": {"s": {"type": "string"}},
+					"properties": {"a": {"type": "string"}}
+				}
+			`),
+		},
+		"cycle introduced by the substitute is an ordinary cycle error": {
+			schema: `{"properties": {"a": {"$ref": "#/missing"}}}`,
+			fallback: func(_, _ string, err error) (*jsonschema.Schema, bool) {
+				if errors.Is(err, jsonschema.ErrRefCycle) {
+					return nil, false
+				}
+
+				return &jsonschema.Schema{Ref: "#/properties/a"}, true
+			},
+			wantCalls: []refFallbackCall{
+				{path: "/properties/a", ref: "#/missing", err: jsonschema.ErrRefResolve},
+				{path: "/properties/a", ref: "#/missing", err: jsonschema.ErrRefResolve},
+				{path: "/properties/a", ref: "#/properties/a", err: jsonschema.ErrRefCycle},
+			},
+			err: jsonschema.ErrRefCycle,
+		},
+		"combines with retrieval base": {
+			schema: stringtest.Input(`
+				{
+					"$id": "https://example.com/main.json",
+					"properties": {
+						"bad": {"$ref": "missing.json", "description": "d"},
+						"child": {"$ref": "child.json"}
+					}
+				}
+			`),
+			baseURI:       "main.json",
+			retrievalBase: true,
+			files: map[string]string{
+				"child.json": `{"type": "string"}`,
+			},
+			fallback: drop,
+			wantCalls: []refFallbackCall{
+				{path: "/properties/bad", ref: "missing.json", err: jsonschema.ErrRefResolve},
+			},
+			want: stringtest.Input(`
+				{
+					"$id": "https://example.com/main.json",
+					"properties": {
+						"bad": {"description": "d"},
+						"child": {"type": "string"}
+					}
+				}
+			`),
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var schema jsonschema.Schema
+
+			require.NoError(t, json.Unmarshal([]byte(tc.schema), &schema))
+
+			var opts []jsonschema.InlineOption
+
+			if tc.files != nil {
+				opts = append(opts, jsonschema.WithInlineResolver(jsonschema.FileResolver(mapFS(tc.files))))
+			}
+
+			if tc.baseURI != "" {
+				opts = append(opts, jsonschema.WithInlineBaseURI(tc.baseURI))
+			}
+
+			if tc.retrievalBase {
+				opts = append(opts, jsonschema.WithInlineRetrievalBase(true))
+			}
+
+			var calls []refFallbackCall
+
+			if tc.fallback != nil {
+				opts = append(opts, jsonschema.WithInlineRefFallback(
+					func(path, ref string, err error) (*jsonschema.Schema, bool) {
+						calls = append(calls, refFallbackCall{path: path, ref: ref, err: err})
+
+						return tc.fallback(path, ref, err)
+					}))
+			}
+
+			got, err := jsonschema.Inline(&schema, opts...)
+
+			require.Len(t, calls, len(tc.wantCalls))
+
+			for i, want := range tc.wantCalls {
+				assert.Equal(t, want.path, calls[i].path, "call %d path", i)
+				assert.Equal(t, want.ref, calls[i].ref, "call %d ref", i)
+				require.ErrorIs(t, calls[i].err, want.err, "call %d error", i)
+			}
+
 			if tc.err != nil {
 				require.ErrorIs(t, err, tc.err)
 

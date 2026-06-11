@@ -3,6 +3,7 @@ package jsonschema
 import (
 	"maps"
 	"slices"
+	"strconv"
 )
 
 // Subschemas returns the direct sub-schemas of s: every non-nil schema
@@ -17,40 +18,103 @@ import (
 // hold sub-schemas: [Walk] and the internal traversals build on it, and a
 // maintenance test fails when an upstream Schema addition is not covered.
 func Subschemas(s *Schema) []*Schema {
+	refs := subschemaRefs(s)
+	if len(refs) == 0 {
+		return nil
+	}
+
+	children := make([]*Schema, len(refs))
+	for i, ref := range refs {
+		children[i] = ref.schema
+	}
+
+	return children
+}
+
+// subschemaRef pairs one direct sub-schema with the RFC 6901 JSON Pointer
+// fragment addressing it from its parent: the keyword token plus, for map
+// and list keywords, the escaped member key or the element index (for
+// example "/properties/a", "/allOf/0", "/items").
+type subschemaRef struct {
+	schema *Schema
+	token  string
+}
+
+// subschemaRefs is the keyword-labeled form of [Subschemas]: the same
+// children in the same order, each paired with the JSON Pointer token
+// addressing it. The exported function delegates here, so traversals that
+// pair children position by position and traversals that track paths can
+// never disagree on field coverage or order.
+func subschemaRefs(s *Schema) []subschemaRef {
 	if s == nil {
 		return nil
 	}
 
-	var children []*Schema
+	var children []subschemaRef
 
-	for _, m := range []map[string]*Schema{
-		s.Properties, s.PatternProperties, s.Defs, s.Definitions,
-		s.DependentSchemas, s.DependencySchemas,
+	for _, entry := range []struct {
+		m       map[string]*Schema
+		keyword string
+	}{
+		{s.Properties, keywordProperties},
+		{s.PatternProperties, keywordPatternProperties},
+		{s.Defs, keywordDefs},
+		{s.Definitions, keywordDefinitions},
+		{s.DependentSchemas, keywordDependentSchemas},
+		{s.DependencySchemas, keywordDependencies},
 	} {
-		for _, key := range slices.Sorted(maps.Keys(m)) {
-			if sub := m[key]; sub != nil {
-				children = append(children, sub)
+		for _, key := range slices.Sorted(maps.Keys(entry.m)) {
+			if sub := entry.m[key]; sub != nil {
+				children = append(children, subschemaRef{
+					token:  "/" + entry.keyword + "/" + escapeJSONPointer(key),
+					schema: sub,
+				})
 			}
 		}
 	}
 
-	for _, list := range [][]*Schema{
-		s.AllOf, s.AnyOf, s.OneOf, s.PrefixItems, s.ItemsArray,
+	for _, entry := range []struct {
+		keyword string
+		list    []*Schema
+	}{
+		{keywordAllOf, s.AllOf},
+		{keywordAnyOf, s.AnyOf},
+		{keywordOneOf, s.OneOf},
+		{keywordPrefixItems, s.PrefixItems},
+		{keywordItems, s.ItemsArray},
 	} {
-		for _, sub := range list {
+		for i, sub := range entry.list {
 			if sub != nil {
-				children = append(children, sub)
+				children = append(children, subschemaRef{
+					token:  "/" + entry.keyword + "/" + strconv.Itoa(i),
+					schema: sub,
+				})
 			}
 		}
 	}
 
-	for _, sub := range []*Schema{
-		s.Items, s.AdditionalProperties, s.AdditionalItems, s.Not,
-		s.If, s.Then, s.Else, s.Contains, s.PropertyNames,
-		s.UnevaluatedProperties, s.UnevaluatedItems, s.ContentSchema,
+	for _, entry := range []struct {
+		s       *Schema
+		keyword string
+	}{
+		{s.Items, keywordItems},
+		{s.AdditionalProperties, keywordAdditionalProperties},
+		{s.AdditionalItems, keywordAdditionalItems},
+		{s.Not, keywordNot},
+		{s.If, keywordIf},
+		{s.Then, keywordThen},
+		{s.Else, keywordElse},
+		{s.Contains, keywordContains},
+		{s.PropertyNames, keywordPropertyNames},
+		{s.UnevaluatedProperties, keywordUnevaluatedProperties},
+		{s.UnevaluatedItems, keywordUnevaluatedItems},
+		{s.ContentSchema, keywordContentSchema},
 	} {
-		if sub != nil {
-			children = append(children, sub)
+		if entry.s != nil {
+			children = append(children, subschemaRef{
+				token:  "/" + entry.keyword,
+				schema: entry.s,
+			})
 		}
 	}
 

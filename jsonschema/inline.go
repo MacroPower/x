@@ -39,7 +39,21 @@ type inliner struct {
 	// output share nodes.
 	memo map[*Schema]*Schema
 
+	// Pristine schemas mapped to their JSON Pointer path within their
+	// containing document, recorded when each document joins resolution
+	// space. The paths name ref-node locations for [WithInlineRefFallback]
+	// consultations and seed the path of each expansion walk.
+	paths map[*Schema]string
+
+	// The per-reference failure policy from [WithInlineRefFallback]; nil
+	// means every expansion failure is fatal.
+	fallback func(path, ref string, err error) (*Schema, bool)
+
 	baseURI string
+
+	// Resolve refs against each document's retrieval URI, with $id inert
+	// ([WithInlineRetrievalBase]).
+	retrievalBase bool
 }
 
 // InlineOption configures [Inline].
@@ -74,6 +88,47 @@ func WithInlineBaseURI(base string) InlineOption {
 	return func(in *inliner) { in.baseURI = stripFragment(base) }
 }
 
+// WithInlineRetrievalBase makes refs resolve against each document's
+// retrieval URI, treating $id as an inert annotation: $id neither
+// establishes a base URI nor registers a resolution target, in any
+// document. Anchors still resolve within their document, and $id keywords
+// pass through to the output verbatim.
+//
+// Real-world schemas commonly declare a published remote $id while
+// shipping the files their refs name alongside the schema; under the
+// default RFC behavior those refs absolutize against the remote $id and
+// cannot be served from disk. With this option the root document's refs
+// absolutize against the base from [WithInlineBaseURI] and each fetched
+// document's refs against the URI it was fetched from.
+func WithInlineRetrievalBase(enabled bool) InlineOption {
+	return func(in *inliner) { in.retrievalBase = enabled }
+}
+
+// WithInlineRefFallback sets a per-reference failure policy for [Inline].
+// When expanding a reference fails - the target is unresolvable
+// ([ErrRefResolve]), the expansion is cyclic ([ErrRefCycle]), or the
+// construct has no static expansion ([ErrRefInline], $dynamicRef) - fn is
+// consulted with the JSON Pointer path of the referencing schema within
+// its containing document, the reference value, and the error.
+//
+// Returning ok=false propagates the original error, ending the Inline
+// call. Returning ok=true with a nil schema drops the failing reference
+// keyword and keeps the node's remaining keywords. Returning ok=true with
+// a non-nil schema expands the reference as if it had resolved to a copy
+// of that schema, with the usual draft sibling semantics.
+//
+// Fn is consulted once per failure, at the reference that directly failed:
+// when a failure surfaces while expanding a nested target, the innermost
+// failing ref is consulted with its path in its containing document, and a
+// declined consultation propagates the error outward without re-consulting
+// at the enclosing refs. A returned schema is deep-copied before splicing
+// and is itself inlined recursively, its refs resolving in the context of
+// the document containing the failing ref; a cycle introduced by the
+// returned schema is an ordinary [ErrRefCycle].
+func WithInlineRefFallback(fn func(path, ref string, err error) (*Schema, bool)) InlineOption {
+	return func(in *inliner) { in.fallback = fn }
+}
+
 // normalizeBaseURI returns the canonical absolute form of a configured base
 // URI. A base with no URI scheme is a file path; resolving it against
 // file:/// makes RFC 3986 joining well-defined and gives the root document a
@@ -106,7 +161,9 @@ func normalizeBaseURI(base string) string {
 // URIs, and each document is fetched at most once per Inline call. Every
 // ref resolves against its document's original structure, exactly as the
 // validator would, so expanding one ref never changes what a later ref's
-// JSON Pointer or anchor addresses.
+// JSON Pointer or anchor addresses. [WithInlineRetrievalBase] switches ref
+// resolution to each document's retrieval URI, treating $id as an inert
+// annotation.
 //
 // Sibling keywords beside $ref are handled per draft semantics, with the
 // draft detected from the root schema's $schema exactly as the validator
@@ -129,6 +186,9 @@ func normalizeBaseURI(base string) string {
 // expansion and returns an error wrapping [ErrRefInline] (Draft 7 ignores
 // the keyword, as the validator does). A non-local ref with no resolver, or
 // an unresolvable target, returns an error wrapping [ErrRefResolve].
+// [WithInlineRefFallback] sets a per-reference policy that can turn any of
+// these failures into dropping the reference keyword or expanding a
+// substitute schema instead.
 func Inline(s *Schema, opts ...InlineOption) (*Schema, error) {
 	if s == nil {
 		return nil, nil //nolint:nilnil // A nil schema inlines to nil.
@@ -137,6 +197,7 @@ func Inline(s *Schema, opts ...InlineOption) (*Schema, error) {
 	in := &inliner{
 		inflight: map[*Schema]bool{},
 		memo:     map[*Schema]*Schema{},
+		paths:    map[*Schema]string{},
 	}
 
 	for _, opt := range opts {
@@ -165,10 +226,13 @@ func Inline(s *Schema, opts ...InlineOption) (*Schema, error) {
 	// $dynamicAnchor and records each schema's base URI, which is what
 	// fragment-only resolution and ref absolutization consult. Only
 	// pristine copies are registered, so no resolution can observe a
-	// mutation.
+	// mutation. In retrieval-base mode the walk treats $id as inert, so
+	// every schema's base URI stays the document's retrieval URI and $id
+	// registers nothing.
 	in.v = &validator{
 		root:                  pristine,
 		draft:                 detectDraft(pristine),
+		inertIDs:              in.retrievalBase,
 		uriRegistry:           map[string]*Schema{},
 		anchorRegistry:        map[string]*Schema{},
 		dynamicAnchorRegistry: map[string]*Schema{},
@@ -176,6 +240,7 @@ func Inline(s *Schema, opts ...InlineOption) (*Schema, error) {
 		walked:                map[*Schema]bool{},
 	}
 	in.v.walkSchema(pristine, in.baseURI)
+	in.recordPaths(pristine, "")
 
 	// Register the root document under its base URI when its own $id did
 	// not already claim one, so a ref that absolutizes back to the root
@@ -186,7 +251,7 @@ func Inline(s *Schema, opts ...InlineOption) (*Schema, error) {
 		}
 	}
 
-	err = in.walkPair(working, pristine)
+	err = in.walkPair(working, pristine, "")
 	if err != nil {
 		return nil, err
 	}
@@ -199,26 +264,75 @@ func Inline(s *Schema, opts ...InlineOption) (*Schema, error) {
 	return working, nil
 }
 
+// recordPaths maps every schema in the pristine document rooted at s to its
+// JSON Pointer path within that document, keyed by pointer identity. The
+// paths name ref-node locations for fallback consultations. An aliased or
+// cyclic graph keeps the first path recorded for a node.
+func (in *inliner) recordPaths(s *Schema, path string) {
+	if s == nil {
+		return
+	}
+
+	if _, ok := in.paths[s]; ok {
+		return
+	}
+
+	in.paths[s] = path
+
+	for _, child := range subschemaRefs(s) {
+		in.recordPaths(child.schema, path+child.token)
+	}
+}
+
 // walkPair makes working's subtree self-contained in place, reading all
 // structure from its pristine counterpart. The two trees are clones of the
 // same document and [Subschemas] returns children in deterministic order, so
-// the walk pairs nodes position by position. A $ref is resolved against
-// pristine structure, its target's self-contained copy is built by
-// inlineCopy, and the copy is spliced into working per the draft's sibling
-// rules. Spliced copies have no pristine counterpart and are already
-// self-contained, so the walk never descends into them.
-func (in *inliner) walkPair(working, pristine *Schema) error {
+// the walk pairs nodes position by position; path is the pristine node's
+// JSON Pointer location within its containing document, extended token by
+// token as the walk descends. A $ref is resolved against pristine structure,
+// its target's self-contained copy is built by inlineCopy, and the copy is
+// spliced into working per the draft's sibling rules. Spliced copies have no
+// pristine counterpart and are already self-contained, so the walk never
+// descends into them.
+func (in *inliner) walkPair(working, pristine *Schema, path string) error {
+	// Self-contained copies to join the node's allOf after its children are
+	// walked: a Draft 2020-12 $ref target, a fallback substitute for a
+	// $dynamicRef, or both.
+	var copies []*Schema
+
 	if in.v.draft == Draft2020 && pristine.DynamicRef != "" {
-		return fmt.Errorf("%w: $dynamicRef %q has no static expansion", ErrRefInline, pristine.DynamicRef)
-	}
+		inlineErr := fmt.Errorf("%w: $dynamicRef %q has no static expansion", ErrRefInline, pristine.DynamicRef)
 
-	var targetCopy *Schema
-
-	if pristine.Ref != "" {
-		tc, replace, err := in.expand(pristine)
+		tc, err := in.substitute(pristine, path, pristine.DynamicRef, inlineErr)
 		if err != nil {
 			return err
 		}
+
+		// The fallback handled the keyword: it is dropped from the node, and
+		// any substitute splices exactly as a resolved target would.
+		working.DynamicRef = ""
+
+		if tc != nil {
+			rest := *pristine
+			rest.DynamicRef = ""
+
+			if IsTrueSchema(&rest) {
+				*working = *tc
+
+				return nil
+			}
+
+			copies = append(copies, tc)
+		}
+	}
+
+	if pristine.Ref != "" {
+		tc, replace, err := in.expand(pristine, path)
+		if err != nil {
+			return err
+		}
+
+		working.Ref = ""
 
 		if replace {
 			// Draft-07 ignores siblings of $ref, so the node is replaced by
@@ -231,14 +345,18 @@ func (in *inliner) walkPair(working, pristine *Schema) error {
 			return nil
 		}
 
-		targetCopy = tc
+		// A nil tc with no error means the fallback dropped the reference
+		// keyword; the node's remaining keywords and children stay.
+		if tc != nil {
+			copies = append(copies, tc)
+		}
 	}
 
 	workingChildren := Subschemas(working)
-	pristineChildren := Subschemas(pristine)
+	pristineChildren := subschemaRefs(pristine)
 
 	for i, p := range pristineChildren {
-		err := in.walkPair(workingChildren[i], p)
+		err := in.walkPair(workingChildren[i], p.schema, path+p.token)
 		if err != nil {
 			return err
 		}
@@ -249,12 +367,9 @@ func (in *inliner) walkPair(working, pristine *Schema) error {
 	// node's allOf preserves that: every assertion still applies, and
 	// annotations from the target still surface at the node for the
 	// unevaluated* keywords, which moving the siblings into a separate
-	// allOf branch would break. The copy joins after the children are
+	// allOf branch would break. The copies join after the children are
 	// walked so the child lists stay paired during the walk.
-	if targetCopy != nil {
-		working.Ref = ""
-		working.AllOf = append(working.AllOf, targetCopy)
-	}
+	working.AllOf = append(working.AllOf, copies...)
 
 	return nil
 }
@@ -262,21 +377,11 @@ func (in *inliner) walkPair(working, pristine *Schema) error {
 // expand resolves the $ref at the pristine node and returns a self-contained
 // copy of its target, plus whether the draft's sibling rules call for
 // replacing the ref node wholesale (Draft 7, or a node whose only keyword is
-// $ref) rather than joining the copy to the node's allOf.
-func (in *inliner) expand(pristine *Schema) (*Schema, bool, error) {
-	ref := pristine.Ref
-
-	target, err := in.resolveTarget(pristine, ref)
-	if err != nil {
-		return nil, false, err
-	}
-
-	if in.inflight[target] {
-		return nil, false, fmt.Errorf("%w: %q", ErrRefCycle, ref)
-	}
-
-	tc, err := in.inlineCopy(target)
-	if err != nil {
+// $ref) rather than joining the copy to the node's allOf. A nil copy with a
+// nil error means the fallback dropped the reference keyword.
+func (in *inliner) expand(pristine *Schema, path string) (*Schema, bool, error) {
+	tc, err := in.expandTarget(pristine, path)
+	if err != nil || tc == nil {
 		return nil, false, err
 	}
 
@@ -288,15 +393,71 @@ func (in *inliner) expand(pristine *Schema) (*Schema, bool, error) {
 	return tc, replace, nil
 }
 
+// expandTarget produces the self-contained copy the $ref at the pristine
+// node expands to. A failure directly at this node (an unresolvable target
+// or a cycle closed by this ref) consults the fallback here, with the
+// node's path in its containing document; an error from a nested expansion
+// already consulted at the inner failing ref and propagates unchanged. A nil
+// copy with a nil error means the fallback dropped the reference keyword.
+func (in *inliner) expandTarget(pristine *Schema, path string) (*Schema, error) {
+	ref := pristine.Ref
+
+	target, err := in.resolveTarget(pristine, ref)
+	if err != nil {
+		return in.substitute(pristine, path, ref, err)
+	}
+
+	if in.inflight[target] {
+		return in.substitute(pristine, path, ref, fmt.Errorf("%w: %q", ErrRefCycle, ref))
+	}
+
+	return in.inlineCopy(target, in.paths[target])
+}
+
+// substitute consults the [WithInlineRefFallback] policy for a reference
+// that failed directly at the pristine node and turns its answer into a
+// spliceable self-contained copy. With no fallback configured, or when the
+// fallback declines, the original inlineErr is returned. A nil fallback
+// schema yields (nil, nil): the caller drops the reference keyword. A
+// non-nil schema is deep-copied, registered in resolution space as if
+// written at the failing node's location (its base URI is the node's, so
+// its refs resolve in the context of the document containing the failing
+// ref), and inlined recursively into a self-contained copy.
+func (in *inliner) substitute(pristine *Schema, path, ref string, inlineErr error) (*Schema, error) {
+	if in.fallback == nil {
+		return nil, inlineErr
+	}
+
+	sub, ok := in.fallback(path, ref, inlineErr)
+	if !ok {
+		return nil, inlineErr
+	}
+
+	if sub == nil {
+		return nil, nil //nolint:nilnil // The caller drops the reference keyword.
+	}
+
+	cp, err := cloneSchema(sub)
+	if err != nil {
+		return nil, err
+	}
+
+	in.v.walkSchema(cp, in.v.schemaBase(pristine))
+	in.recordPaths(cp, path)
+
+	return in.inlineCopy(cp, path)
+}
+
 // inlineCopy returns a self-contained copy of the pristine target: a fresh
 // clone whose refs are expanded by the same pristine-space resolution as the
-// rest of the run, leaving the target itself untouched. Completed targets
-// are memoized so one referenced from several places is expanded once; every
-// additional use clones the memoized copy so no two positions in the output
-// share nodes. The inflight set marks targets whose copy is still being
-// built — a ref resolving to one means the expansion reached its own target,
-// which only a reference cycle can cause.
-func (in *inliner) inlineCopy(target *Schema) (*Schema, error) {
+// rest of the run, leaving the target itself untouched; path is the target's
+// JSON Pointer location within its containing document, seeding the walk's
+// path tracking. Completed targets are memoized so one referenced from
+// several places is expanded once; every additional use clones the memoized
+// copy so no two positions in the output share nodes. The inflight set marks
+// targets whose copy is still being built: a ref resolving to one means the
+// expansion reached its own target, which only a reference cycle can cause.
+func (in *inliner) inlineCopy(target *Schema, path string) (*Schema, error) {
 	if memoized, ok := in.memo[target]; ok {
 		return cloneSchema(memoized)
 	}
@@ -313,7 +474,7 @@ func (in *inliner) inlineCopy(target *Schema) (*Schema, error) {
 	// spliced sub-schema; the output keeps the root document's dialect.
 	cp.Schema = ""
 
-	err = in.walkPair(cp, target)
+	err = in.walkPair(cp, target, path)
 	if err != nil {
 		return nil, err
 	}
@@ -411,21 +572,25 @@ func (in *inliner) fetchDoc(baseURI string) (*Schema, error) {
 
 	in.v.uriRegistry[baseURI] = cp
 	in.v.walkSchema(cp, baseURI)
+	in.recordPaths(cp, "")
 
 	return cp, nil
 }
 
 // FileResolver returns a [RefResolver] that serves file-path and relative
 // URIs from fsys, unmarshaling each referenced file as a JSON schema
-// document. Pair [os.DirFS] with [WithInlineBaseURI] to inline schemas that
-// reference each other by relative file path.
+// document; a referenced file that does not contain one is an error. Pair
+// [os.DirFS] with [WithInlineBaseURI] to inline schemas that reference each
+// other by relative file path.
 //
 // A leading "file://" scheme and a leading "/" are stripped, so URIs are
 // resolved relative to the fs root: relative refs absolutize against the
 // normalized base URI into file URIs (base "main.json" plus ref
 // "sub/child.json" yields "file:///sub/child.json"), which strip back to
 // paths addressing fsys from its root. The remaining path is used verbatim
-// as the [io/fs] file name.
+// as the [io/fs] file name, so [io/fs] confines resolution to the fs root:
+// a ref escaping above it is not a valid fs path, and [Inline] surfaces the
+// read failure as an error wrapping [ErrRefResolve].
 func FileResolver(fsys fs.FS) RefResolver {
 	return fileResolver{fsys: fsys}
 }
