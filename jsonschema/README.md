@@ -754,9 +754,11 @@ relative path; each document is fetched at most once per call.
 the fs root (a leading `file://` scheme and `/` are stripped); each
 referenced file must contain a JSON schema document, and `io/fs` confines
 resolution to the fs root, so a ref escaping above it returns an error
-wrapping `ErrRefResolve`. `Inline` always calls `ResolveRef`, even on a
-resolver that also implements `RefResolverContext`; context-aware inlining
-can be added when a consumer needs it.
+wrapping `ErrRefResolve`. `InlineContext` is `Inline` with a caller-supplied
+context, passed to a resolver that also implements `RefResolverContext` with
+every document fetch, so a resolver that fetches over the network can honor
+cancellation and deadlines; `Inline` passes `context.Background()`, and a
+plain `RefResolver` is called without one.
 
 `WithInlineRetrievalBase` makes refs resolve against each document's
 retrieval URI instead, treating `$id` as an inert annotation: `$id` neither

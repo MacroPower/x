@@ -1,6 +1,7 @@
 package jsonschema
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -22,6 +23,11 @@ import (
 // addresses.
 type inliner struct {
 	resolver RefResolver
+
+	// The context of the [InlineContext] call, passed to a
+	// [RefResolverContext] resolver with every document fetch; [Inline]
+	// supplies [context.Background].
+	ctx context.Context
 
 	// The scratch validator resolving references. Its URI, anchor, and
 	// base-URI registries are built by the same walk Compile uses, over the
@@ -65,9 +71,10 @@ type InlineOption func(*inliner)
 // URI within one Inline call; the schema it returns is deep-copied before
 // use and never mutated.
 //
-// Inline calls ResolveRef even when the resolver also implements
-// [RefResolverContext]; context-aware inlining can be added when a consumer
-// needs it.
+// A resolver that also implements [RefResolverContext] receives the
+// [InlineContext] context with every fetch, so a resolver that fetches over
+// the network can honor cancellation and deadlines; [Inline] passes
+// [context.Background].
 func WithInlineResolver(r RefResolver) InlineOption {
 	return func(in *inliner) { in.resolver = r }
 }
@@ -189,12 +196,23 @@ func normalizeBaseURI(base string) string {
 // [WithInlineRefFallback] sets a per-reference policy that can turn any of
 // these failures into dropping the reference keyword or expanding a
 // substitute schema instead.
+//
+// Inline is [InlineContext] with [context.Background].
 func Inline(s *Schema, opts ...InlineOption) (*Schema, error) {
+	return InlineContext(context.Background(), s, opts...)
+}
+
+// InlineContext is [Inline] with a caller-supplied context, passed to a
+// [RefResolverContext] resolver (see [WithInlineResolver]) with every
+// document fetch, so a resolver that fetches over the network can honor
+// cancellation and deadlines. The behavior is otherwise identical.
+func InlineContext(ctx context.Context, s *Schema, opts ...InlineOption) (*Schema, error) {
 	if s == nil {
 		return nil, nil //nolint:nilnil // A nil schema inlines to nil.
 	}
 
 	in := &inliner{
+		ctx:      ctx,
 		inflight: map[*Schema]bool{},
 		memo:     map[*Schema]*Schema{},
 		paths:    map[*Schema]string{},
@@ -251,6 +269,11 @@ func Inline(s *Schema, opts ...InlineOption) (*Schema, error) {
 		}
 	}
 
+	// The context reaches a RefResolverContext resolver through the ctx
+	// field set above: document fetches happen deep inside the expansion
+	// walk, which cannot thread a parameter through the shared resolution
+	// machinery.
+	//nolint:contextcheck // See the comment above.
 	err = in.walkPair(working, pristine, "")
 	if err != nil {
 		return nil, err
@@ -546,6 +569,25 @@ func (in *inliner) resolveTarget(node *Schema, ref string) (*Schema, error) {
 	return nil, fmt.Errorf("%w: cannot resolve %q", ErrRefResolve, ref)
 }
 
+// callResolver invokes the configured resolver for uri. A resolver that also
+// implements [RefResolverContext] receives the [InlineContext] context via
+// ResolveRefContext; a plain [RefResolver] is called without one. It mirrors
+// [validator.callResolver].
+func (in *inliner) callResolver(uri string) (*Schema, error) {
+	if rc, ok := in.resolver.(RefResolverContext); ok {
+		ctx := in.ctx
+		if ctx == nil {
+			ctx = context.Background()
+		}
+
+		//nolint:wrapcheck // fetchDoc wraps the error with ErrRefResolve.
+		return rc.ResolveRefContext(ctx, uri)
+	}
+
+	//nolint:wrapcheck // fetchDoc wraps the error with ErrRefResolve.
+	return in.resolver.ResolveRef(uri)
+}
+
 // fetchDoc fetches the document at baseURI through the configured resolver,
 // registers a pristine copy in the shared registries (walking it with
 // baseURI as its base, so its $ids, anchors, and base URIs resolve like the
@@ -556,7 +598,7 @@ func (in *inliner) fetchDoc(baseURI string) (*Schema, error) {
 		return nil, fmt.Errorf("%w: no resolver configured for %q", ErrRefResolve, baseURI)
 	}
 
-	s, err := in.resolver.ResolveRef(baseURI)
+	s, err := in.callResolver(baseURI)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrRefResolve, err)
 	}

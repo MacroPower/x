@@ -25,6 +25,19 @@ func remoteIntegerSchema() *jsonschema.Schema {
 	}
 }
 
+// remoteIntegerPropertySchema returns a schema with a property whose only
+// keyword is a remote $ref, so inlining replaces that node wholesale and the
+// fetched type is observable at Properties["count"].
+func remoteIntegerPropertySchema() *jsonschema.Schema {
+	return &jsonschema.Schema{
+		Schema: "https://json-schema.org/draft/2020-12/schema",
+		Type:   "object",
+		Properties: map[string]*jsonschema.Schema{
+			"count": {Ref: "https://example.com/integer.json"},
+		},
+	}
+}
+
 // recordingResolver implements both [jsonschema.RefResolver] and
 // [jsonschema.RefResolverContext], recording every context received by
 // ResolveRefContext and counting calls to the context-less ResolveRef. While
@@ -339,6 +352,87 @@ func TestContextlessEntryPointsPassBackground(t *testing.T) {
 	}
 }
 
+// TestInlineContextPassesContextToResolver pins the inlining resolution path:
+// document fetches reach a RefResolverContext through ResolveRefContext
+// carrying the context given to InlineContext, and the context-less
+// ResolveRef is never used.
+func TestInlineContextPassesContextToResolver(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.WithValue(t.Context(), ctxMarkerKey{}, "inline")
+	resolver := &recordingResolver{
+		schemas: map[string]*jsonschema.Schema{
+			"https://example.com/integer.json": {Type: "integer"},
+		},
+	}
+
+	inlined, err := jsonschema.InlineContext(ctx, remoteIntegerPropertySchema(),
+		jsonschema.WithInlineResolver(resolver),
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "integer", inlined.Properties["count"].Type)
+
+	ctxs := resolver.recordedCtxs()
+	require.NotEmpty(t, ctxs, "document fetches should call ResolveRefContext")
+
+	for _, got := range ctxs {
+		assert.Equal(t, "inline", got.Value(ctxMarkerKey{}))
+	}
+
+	assert.Zero(t, resolver.plainCalls(),
+		"a RefResolverContext should never be called through ResolveRef")
+}
+
+// TestInlineContextCancellation pins that a canceled context surfaces from
+// the resolver as an error wrapping both ErrRefResolve and the context's own
+// error.
+func TestInlineContextCancellation(t *testing.T) {
+	t.Parallel()
+
+	resolver := &recordingResolver{
+		schemas: map[string]*jsonschema.Schema{
+			"https://example.com/integer.json": {Type: "integer"},
+		},
+	}
+
+	canceled, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	_, err := jsonschema.InlineContext(canceled, remoteIntegerPropertySchema(),
+		jsonschema.WithInlineResolver(resolver),
+	)
+	require.Error(t, err)
+	require.ErrorIs(t, err, jsonschema.ErrRefResolve)
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+// TestInlinePassesBackgroundToContextResolver pins the documented default:
+// the context-less Inline hands a RefResolverContext context.Background, not
+// nil.
+func TestInlinePassesBackgroundToContextResolver(t *testing.T) {
+	t.Parallel()
+
+	resolver := &recordingResolver{
+		schemas: map[string]*jsonschema.Schema{
+			"https://example.com/integer.json": {Type: "integer"},
+		},
+	}
+
+	inlined, err := jsonschema.Inline(remoteIntegerPropertySchema(),
+		jsonschema.WithInlineResolver(resolver),
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "integer", inlined.Properties["count"].Type)
+
+	ctxs := resolver.recordedCtxs()
+	require.NotEmpty(t, ctxs)
+
+	for _, got := range ctxs {
+		//nolint:usetesting // The assertion is about the documented Background default.
+		assert.Equal(t, context.Background(), got)
+	}
+}
+
 // TestPlainRefResolverThroughContextEntryPoints pins that a resolver
 // implementing only RefResolver keeps working through every context entry
 // point.
@@ -367,4 +461,10 @@ func TestPlainRefResolverThroughContextEntryPoints(t *testing.T) {
 		jsonschema.WithRefResolver(resolver),
 	)
 	require.NoError(t, err)
+
+	inlined, err := jsonschema.InlineContext(t.Context(), remoteIntegerPropertySchema(),
+		jsonschema.WithInlineResolver(resolver),
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "integer", inlined.Properties["count"].Type)
 }
