@@ -47,10 +47,16 @@ func compileRegexp(pattern string) (*regexp.Regexp, error) {
 // ValidateOption configures validation behavior.
 type ValidateOption func(*validator)
 
-// WithFormatValidator registers a custom format checker for a named format.
-// The function receives the string value and returns nil if valid.
-func WithFormatValidator(name string, fn func(string) error) ValidateOption {
-	return func(v *validator) { v.formatCheckers[name] = fn }
+// WithFormatValidator registers a custom format checker. The checker
+// declares the format name it handles via [FormatValidator.Format];
+// [FormatFunc] adapts a bare function. Registering a name again, including a
+// built-in format name, replaces the previous checker. A nil f is ignored.
+func WithFormatValidator(f FormatValidator) ValidateOption {
+	return func(v *validator) {
+		if f != nil {
+			v.formatCheckers[f.Format()] = f.ValidateFormat
+		}
+	}
 }
 
 // WithFormats forces built-in format validation on or off, overriding the

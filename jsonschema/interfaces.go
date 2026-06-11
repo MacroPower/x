@@ -34,6 +34,36 @@ type TagInterpreter interface {
 	Interpret(tag string, field FieldContext) error
 }
 
+// FormatValidator checks string instances against one named format during
+// validation. Like [TagInterpreter], the value declares the name it handles,
+// so a single registration via [WithFormatValidator] carries both, and an
+// implementation can hold state such as a compiled regular expression.
+// [FormatFunc] adapts a bare function for checkers that need none.
+type FormatValidator interface {
+	// Format returns the format name this validator checks (e.g., "uuid").
+	Format() string
+
+	// ValidateFormat checks one string instance against the format,
+	// returning nil when the value conforms.
+	ValidateFormat(value string) error
+}
+
+// FormatFunc adapts a bare checking function to a [FormatValidator] for the
+// named format, following [net/http.HandlerFunc].
+func FormatFunc(name string, fn func(string) error) FormatValidator {
+	return formatFunc{name: name, fn: fn}
+}
+
+// formatFunc is the [FormatValidator] returned by [FormatFunc].
+type formatFunc struct {
+	fn   func(string) error
+	name string
+}
+
+func (f formatFunc) Format() string { return f.name }
+
+func (f formatFunc) ValidateFormat(value string) error { return f.fn(value) }
+
 // RefResolver resolves remote schema URIs during validation. The resolver
 // is called only when local resolution fails to find a target. Successfully
 // resolved schemas are cached within the validation run, so the resolver is

@@ -417,7 +417,9 @@
 //     schemas are cached within the validation run. A resolver that also
 //     implements [RefResolverContext] receives the context from the Context
 //     entry points (see Remote References below).
-//   - [WithFormatValidator] registers a custom format checker.
+//   - [WithFormatValidator] registers a custom format checker: a
+//     [FormatValidator] that declares the format name it handles, with
+//     [FormatFunc] adapting a bare function.
 //   - [WithFormats] forces built-in format assertion on or off. By default
 //     format is asserted under Draft-07 and is annotation-only under Draft
 //     2020-12 unless the format-assertion vocabulary is active.

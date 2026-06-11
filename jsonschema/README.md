@@ -589,15 +589,15 @@ containing object are both identifiable from `InstancePath` alone.
 
 ### Validation options
 
-| Option                          | Effect                                                                                                                                |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `WithRefResolver(r)`            | Resolve remote/absolute `$ref` URIs (called only when local lookup fails); a `RefResolverContext` also receives the caller's context. |
-| `WithFormatValidator(name, fn)` | Register a custom `format` checker (`func(string) error`).                                                                            |
-| `WithFormats(bool)`             | Force `format` assertion on or off.                                                                                                   |
-| `WithContent(bool)`             | Assert `contentEncoding`/`contentMediaType` (annotation-only by default).                                                             |
-| `WithResolveOptions(opts)`      | Pass `ResolveOptions` (aliased from the upstream package) to `Schema.Resolve`.                                                        |
-| `WithVocabularies(map)`         | Directly set active vocabularies (highest precedence).                                                                                |
-| `WithMetaSchema(ms)`            | Register a metaschema whose `$vocabulary` gates keyword groups.                                                                       |
+| Option                     | Effect                                                                                                                                |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `WithRefResolver(r)`       | Resolve remote/absolute `$ref` URIs (called only when local lookup fails); a `RefResolverContext` also receives the caller's context. |
+| `WithFormatValidator(f)`   | Register a custom `format` checker (a `FormatValidator`; `FormatFunc` adapts a bare function).                                        |
+| `WithFormats(bool)`        | Force `format` assertion on or off.                                                                                                   |
+| `WithContent(bool)`        | Assert `contentEncoding`/`contentMediaType` (annotation-only by default).                                                             |
+| `WithResolveOptions(opts)` | Pass `ResolveOptions` (aliased from the upstream package) to `Schema.Resolve`.                                                        |
+| `WithVocabularies(map)`    | Directly set active vocabularies (highest precedence).                                                                                |
+| `WithMetaSchema(ms)`       | Register a metaschema whose `$vocabulary` gates keyword groups.                                                                       |
 
 ### Formats
 
@@ -608,7 +608,11 @@ Built-in checkers cover `date-time`, `date`, `time`, `duration`, `email`,
 `idn-email`, `hostname`, `idn-hostname`, `uri`, `uri-reference`, `uri-template`,
 `iri`, `iri-reference`, `uuid`, `ipv4`, `ipv6`, `json-pointer`,
 `relative-json-pointer`, and `regex`. Register additional formats with
-`WithFormatValidator`.
+`WithFormatValidator`: a `FormatValidator` declares the format name it
+handles (mirroring `TagInterpreter`), so an implementation can carry state
+such as a compiled regular expression, and `FormatFunc(name, fn)` adapts a
+bare `func(string) error`. Registering a name again, including a built-in
+one, replaces the previous checker.
 
 ### Vocabularies
 
@@ -936,7 +940,7 @@ refs.
 - **Hierarchical `ValidationError`**: a tree mirrors the schema/instance
   structure so callers can inspect failures at any depth or flatten them.
 - **Pluggable format validation**: formats are checked by registered
-  `func(string) error` functions, matching the spec's recommendation that format
+  `FormatValidator` values, matching the spec's recommendation that format
   validation be optional and configurable.
 - **`unevaluatedProperties`/`unevaluatedItems`** are supported, with annotation
   tracking reimplemented in the walk (the generator emits them for Draft 2020-12

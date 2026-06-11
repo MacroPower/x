@@ -1212,16 +1212,58 @@ func TestValidateWithCustomFormatValidator(t *testing.T) {
 	schema := &jsonschema.Schema{Type: "string", Format: "custom-format"}
 	err := jsonschema.Validate(schema, "invalid",
 		jsonschema.WithFormats(true),
-		jsonschema.WithFormatValidator("custom-format", func(s string) error {
+		jsonschema.WithFormatValidator(jsonschema.FormatFunc("custom-format", func(s string) error {
 			if s != "valid" {
 				return errors.New("must be 'valid'")
 			}
 
 			return nil
-		}),
+		})),
 	)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "custom-format")
+}
+
+// evenLengthFormat implements [jsonschema.FormatValidator] directly, the
+// stateful-checker path that FormatFunc bypasses.
+type evenLengthFormat struct {
+	name string
+}
+
+func (f evenLengthFormat) Format() string { return f.name }
+
+func (f evenLengthFormat) ValidateFormat(value string) error {
+	if len(value)%2 != 0 {
+		return errors.New("length must be even")
+	}
+
+	return nil
+}
+
+func TestValidateWithFormatValidatorInterface(t *testing.T) {
+	t.Parallel()
+
+	schema := &jsonschema.Schema{Type: "string", Format: "even-length"}
+	opts := []jsonschema.ValidateOption{
+		jsonschema.WithFormats(true),
+		jsonschema.WithFormatValidator(evenLengthFormat{name: "even-length"}),
+	}
+
+	require.NoError(t, jsonschema.Validate(schema, "ab", opts...))
+
+	err := jsonschema.Validate(schema, "abc", opts...)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "even-length")
+}
+
+func TestValidateWithNilFormatValidator(t *testing.T) {
+	t.Parallel()
+
+	// A nil FormatValidator is ignored rather than panicking.
+	schema := &jsonschema.Schema{Type: "string"}
+	require.NoError(t, jsonschema.Validate(schema, "x",
+		jsonschema.WithFormatValidator(nil),
+	))
 }
 
 func TestValidateWithContent(t *testing.T) {
@@ -3541,7 +3583,7 @@ func TestCustomFormatVocabularyBypass(t *testing.T) {
 
 	// With format-annotation vocabulary only, custom formats should NOT assert.
 	err := jsonschema.Validate(schema, "bad",
-		jsonschema.WithFormatValidator("custom-format", customChecker),
+		jsonschema.WithFormatValidator(jsonschema.FormatFunc("custom-format", customChecker)),
 		jsonschema.WithVocabularies(map[string]bool{
 			jsonschema.VocabCore2020:             true,
 			jsonschema.VocabValidation2020:       true,
