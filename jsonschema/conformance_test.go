@@ -150,7 +150,7 @@ func TestGeneratedSchemaConformsToMetaschema(t *testing.T) {
 
 	drafts := []struct {
 		name    string
-		opt     jsonschema.Option
+		opt     jsonschema.GenerateOption
 		metaURI string
 	}{
 		{"draft2020-12", jsonschema.WithDraft(jsonschema.Draft2020), "https://json-schema.org/draft/2020-12/schema"},

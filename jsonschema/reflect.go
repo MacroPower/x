@@ -61,7 +61,7 @@ type refRecord struct {
 	target reflect.Type
 }
 
-func newGenerator(opts []Option) *generator {
+func newGenerator(opts []GenerateOption) *generator {
 	g := &generator{
 		draft:       Draft2020,
 		typeSchemas: map[reflect.Type]*Schema{},

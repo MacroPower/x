@@ -52,7 +52,7 @@
 //
 // # Configuration
 //
-// Configuration is via functional [Option] values passed to [GenerateFor] or
+// Configuration is via functional [GenerateOption] values passed to [GenerateFor] or
 // [Generate]:
 //
 //   - [WithDraft] sets the target JSON Schema draft ([Draft7] or [Draft2020]).

@@ -45,7 +45,7 @@ import (
 
 func main() {
 	t := reflect.TypeFor[target.Config]()
-	opts := []jsonschema.Option{
+	opts := []jsonschema.GenerateOption{
 	}
 	schema, err := jsonschema.Generate(t, opts...)
 	if err != nil {
@@ -84,7 +84,7 @@ import (
 
 func main() {
 	t := reflect.TypeFor[target.Settings]()
-	opts := []jsonschema.Option{
+	opts := []jsonschema.GenerateOption{
 		jsonschema.WithDraft(jsonschema.Draft7),
 	}
 	schema, err := jsonschema.Generate(t, opts...)
@@ -128,7 +128,7 @@ import (
 
 func main() {
 	t := reflect.TypeFor[target.MyType]()
-	opts := []jsonschema.Option{
+	opts := []jsonschema.GenerateOption{
 		jsonschema.WithComments(true),
 		jsonschema.WithAdditionalProperties(true),
 		jsonschema.WithTagInterpreter(validate.NewInterpreter()),

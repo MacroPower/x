@@ -377,7 +377,7 @@ import (
 
 func main() {
 	t := reflect.TypeFor[target.{{.TypeName}}]()
-	opts := []jsonschema.Option{
+	opts := []jsonschema.GenerateOption{
 		{{- if .Draft7}}
 		jsonschema.WithDraft(jsonschema.Draft7),
 		{{- end}}
