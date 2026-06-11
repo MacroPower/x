@@ -547,6 +547,29 @@ func TestGenerateFor_WithTypeSchema(t *testing.T) {
 	}`, string(got))
 }
 
+func TestGenerateFor_WithTypeSchemaFor(t *testing.T) {
+	t.Parallel()
+
+	// The generic form matches WithTypeSchema with reflect.TypeFor spelled
+	// out, including the highest-priority position in the resolution chain.
+	override := &jsonschema.Schema{
+		Type:   "string",
+		Format: "date",
+	}
+	s, err := jsonschema.GenerateFor[time.Time](
+		jsonschema.WithTypeSchemaFor[time.Time](override),
+	)
+	require.NoError(t, err)
+
+	got, err := json.Marshal(s)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{
+		"$schema":"https://json-schema.org/draft/2020-12/schema",
+		"type":"string",
+		"format":"date"
+	}`, string(got))
+}
+
 func TestGenerateFor_JsonStringTag(t *testing.T) {
 	t.Parallel()
 

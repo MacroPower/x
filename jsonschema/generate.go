@@ -53,6 +53,17 @@ func WithTypeSchema(t reflect.Type, s *Schema) Option {
 	}
 }
 
+// WithTypeSchemaFor is [WithTypeSchema] for a statically known type, so call
+// sites need not spell out [reflect.TypeFor]:
+//
+//	jsonschema.WithTypeSchemaFor[time.Duration](&jsonschema.Schema{Type: "string"})
+//
+// The copying and last-registration-wins semantics of [WithTypeSchema] apply
+// unchanged.
+func WithTypeSchemaFor[T any](s *Schema) Option {
+	return WithTypeSchema(reflect.TypeFor[T](), s)
+}
+
 // WithNamer sets a custom function for producing definition names from
 // Go types. Default: uses the type's short name (e.g., "MyStruct").
 func WithNamer(fn func(reflect.Type) string) Option {

@@ -59,7 +59,8 @@
 //   - [WithTagInterpreter] registers a [TagInterpreter] for mapping struct tags
 //     to schema constraints.
 //   - [WithComments] enables Go doc comment extraction as description fields.
-//   - [WithTypeSchema] overrides the schema for a specific Go type.
+//   - [WithTypeSchema] overrides the schema for a specific Go type;
+//     [WithTypeSchemaFor] is its generic form for statically known types.
 //   - [WithNamer] sets a custom definition naming function.
 //   - [WithDefinitions] controls $defs/$ref extraction (default: true).
 //   - [WithAdditionalProperties] controls whether extra keys are allowed on

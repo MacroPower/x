@@ -169,6 +169,7 @@ Unsupported types (`func`, `chan`, `complex`, `unsafe.Pointer`) return
 | `WithTagInterpreter(t)`          | Register a `TagInterpreter`; multiple are applied in order.                   |
 | `WithComments(bool)`             | Extract Go doc comments as `description` (requires source files).             |
 | `WithTypeSchema(t, s)`           | Override the schema for a specific Go type (highest priority).                |
+| `WithTypeSchemaFor[T](s)`        | `WithTypeSchema` for a statically known type, without `reflect.TypeFor`.      |
 | `WithNamer(fn)`                  | Custom function for naming `$defs` entries.                                   |
 | `WithDefinitions(bool)`          | Extract named types into `$defs`/`$ref` (default `true`).                     |
 | `WithAdditionalProperties(bool)` | Allow extra object keys (default `false`, disallowing them).                  |
