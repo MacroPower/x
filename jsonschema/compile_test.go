@@ -529,7 +529,7 @@ func TestCompileRemoteBoundsAndPatternFallback(t *testing.T) {
 	require.Error(t, v.Validate(map[string]any{"code": "abc"}), "lowercase fails the pattern")
 }
 
-func TestSchemaFromValue(t *testing.T) {
+func TestParseSchemaValue(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]struct {
@@ -602,7 +602,7 @@ func TestSchemaFromValue(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			schema, err := jsonschema.SchemaFromValue(tt.doc)
+			schema, err := jsonschema.ParseSchemaValue(tt.doc)
 			if tt.err != nil {
 				require.ErrorIs(t, err, tt.err)
 				assert.Contains(t, err.Error(), tt.contains)
@@ -622,22 +622,22 @@ func TestSchemaFromValue(t *testing.T) {
 	}
 }
 
-// TestSchemaFromValueBooleanForms pins the exact schema shapes the boolean
+// TestParseSchemaValueBooleanForms pins the exact schema shapes the boolean
 // documents convert to, so they round-trip through the package's own
 // predicates and marshal back to JSON true and false.
-func TestSchemaFromValueBooleanForms(t *testing.T) {
+func TestParseSchemaValueBooleanForms(t *testing.T) {
 	t.Parallel()
 
-	trueSchema, err := jsonschema.SchemaFromValue(true)
+	trueSchema, err := jsonschema.ParseSchemaValue(true)
 	require.NoError(t, err)
 	assert.True(t, jsonschema.IsTrueSchema(trueSchema))
 
-	falseSchema, err := jsonschema.SchemaFromValue(false)
+	falseSchema, err := jsonschema.ParseSchemaValue(false)
 	require.NoError(t, err)
 	assert.True(t, jsonschema.IsFalseSchema(falseSchema))
 }
 
-func TestSchemaFromJSON(t *testing.T) {
+func TestParseSchema(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]struct {
@@ -700,7 +700,7 @@ func TestSchemaFromJSON(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			s, err := jsonschema.SchemaFromJSON([]byte(tt.data))
+			s, err := jsonschema.ParseSchema([]byte(tt.data))
 			if tt.err != nil || tt.contains != "" {
 				require.Error(t, err)
 
@@ -725,13 +725,13 @@ func TestSchemaFromJSON(t *testing.T) {
 	}
 }
 
-// TestSchemaFromJSONPreservesLargeIntegerLiterals pins the decode discipline:
+// TestParseSchemaPreservesLargeIntegerLiterals pins the decode discipline:
 // raw-JSON fields such as default hold the json.Number literal verbatim, so an
 // integer beyond float64 precision survives into the Schema exactly.
-func TestSchemaFromJSONPreservesLargeIntegerLiterals(t *testing.T) {
+func TestParseSchemaPreservesLargeIntegerLiterals(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.SchemaFromJSON([]byte(`{"default":9007199254740993}`))
+	s, err := jsonschema.ParseSchema([]byte(`{"default":9007199254740993}`))
 	require.NoError(t, err)
 	// Assert.JSONEq would parse both sides into float64, rounding the literal
 	// and defeating the precision check; compare the raw text instead.

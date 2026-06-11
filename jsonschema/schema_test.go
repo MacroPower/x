@@ -192,7 +192,7 @@ var jsonUntaggedFields = map[string]string{
 
 // TestSchemaSerializableFieldCoverage is a maintenance guard over the JSON
 // round-trip contract that the package's public behavior relies on:
-// [jsonschema.SchemaFromValue] converts documents through encoding/json, and
+// [jsonschema.ParseSchemaValue] converts documents through encoding/json, and
 // [jsonschema.Inline] deep-copies documents the same way. Every exported
 // Schema field must either carry a non-empty `json` struct tag (so a plain
 // Marshal/Unmarshal cannot silently drop it) or be explicitly allowlisted in

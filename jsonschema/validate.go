@@ -900,14 +900,14 @@ func CompileContext(ctx context.Context, schema *Schema, opts ...ValidateOption)
 	return &Validator{proto: v}, nil
 }
 
-// SchemaFromValue converts an already-decoded JSON schema document to a
+// ParseSchemaValue converts an already-decoded JSON schema document to a
 // [*Schema]. The document doc must be a bool (true is the empty schema;
 // false is the schema that rejects every instance) or a map[string]any. Any
 // other dynamic type — including nil, the decoding of a top-level JSON null,
 // which [Schema.UnmarshalJSON] silently coerces to the false schema — returns
 // an error wrapping [ErrInvalidSchemaDocument] naming the Go type. Values
 // produced by [Normalize] ([json.Number] leaves) convert correctly.
-func SchemaFromValue(doc any) (*Schema, error) {
+func ParseSchemaValue(doc any) (*Schema, error) {
 	switch d := doc.(type) {
 	case bool:
 		if d {
@@ -941,7 +941,7 @@ func SchemaFromValue(doc any) (*Schema, error) {
 	}
 }
 
-// SchemaFromJSON decodes data as a single JSON schema document and returns it
+// ParseSchema decodes data as a single JSON schema document and returns it
 // as a [*Schema] without compiling it, for consumers that work with the schema
 // itself — [Inline], [Walk], or programmatic editing — rather than validating
 // instances against it. It applies the same decode discipline as [CompileJSON]
@@ -952,17 +952,17 @@ func SchemaFromValue(doc any) (*Schema, error) {
 // into a [Schema] directly silently coerces to the false schema — returns an
 // error wrapping [ErrInvalidSchemaDocument]; malformed JSON returns the
 // wrapped decode error without the sentinel.
-func SchemaFromJSON(data []byte) (*Schema, error) {
+func ParseSchema(data []byte) (*Schema, error) {
 	doc, err := decodeJSONInstance(data)
 	if err != nil {
 		return nil, err
 	}
 
-	return SchemaFromValue(doc)
+	return ParseSchemaValue(doc)
 }
 
 // CompileJSON decodes data as a single JSON schema document with
-// [SchemaFromJSON] and compiles it with [Compile]. It is the schema-side
+// [ParseSchema] and compiles it with [Compile]. It is the schema-side
 // counterpart of [ValidateJSON]: numbers decode as [json.Number], and trailing
 // data after the document is rejected. A top-level value that is not an object
 // or boolean — including JSON null, which unmarshaling into a [Schema]
@@ -979,7 +979,7 @@ func CompileJSON(data []byte, opts ...ValidateOption) (*Validator, error) {
 // to a [RefResolverContext] resolver for refs resolved during compilation
 // (see [CompileContext]).
 func CompileJSONContext(ctx context.Context, data []byte, opts ...ValidateOption) (*Validator, error) {
-	schema, err := SchemaFromJSON(data)
+	schema, err := ParseSchema(data)
 	if err != nil {
 		return nil, err
 	}

@@ -368,9 +368,9 @@
 // A schema arriving as a JSON document rather than a [*Schema] has symmetric
 // entry points. [CompileJSON] decodes data as a single JSON schema document
 // (numbers as [encoding/json.Number], trailing data rejected) and compiles it
-// with [Compile]; [SchemaFromJSON] is its decode half alone, returning the
+// with [Compile]; [ParseSchema] is its decode half alone, returning the
 // [*Schema] uncompiled for consumers that work with the schema itself ([Inline],
-// [Walk], programmatic editing); [SchemaFromValue] converts an already-decoded
+// [Walk], programmatic editing); [ParseSchemaValue] converts an already-decoded
 // document — a bool or a map[string]any, such as [Normalize] output — to a
 // [*Schema]. With all three, a top-level value that is not an object or
 // boolean, including JSON null (which unmarshaling into a [Schema] directly
