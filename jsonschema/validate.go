@@ -1108,45 +1108,11 @@ func (v *validator) allRefsResolvable(schema *Schema) bool {
 	return ok
 }
 
-// subschemaChildren returns the direct sub-schemas of schema reachable through
-// the keywords that hold sub-schemas (applicators plus the reserved $defs and
-// definitions locations). It includes only typed Schema fields, not sub-schemas
-// carried as raw JSON in unknown keywords. The result may contain nil entries
-// for absent keywords; callers skip them. This is the single source of truth for
-// which fields hold sub-schemas, shared by [eachSubschema] and [schemaFormsTree].
-func subschemaChildren(schema *Schema) []*Schema {
-	if schema == nil {
-		return nil
-	}
-
-	var children []*Schema
-
-	for _, m := range []map[string]*Schema{
-		schema.Properties, schema.PatternProperties, schema.Defs, schema.Definitions,
-		schema.DependentSchemas, schema.DependencySchemas,
-	} {
-		for _, sub := range m {
-			children = append(children, sub)
-		}
-	}
-
-	for _, slice := range [][]*Schema{
-		schema.AllOf, schema.AnyOf, schema.OneOf, schema.PrefixItems, schema.ItemsArray,
-	} {
-		children = append(children, slice...)
-	}
-
-	return append(children,
-		schema.Items, schema.AdditionalProperties, schema.AdditionalItems, schema.Not,
-		schema.If, schema.Then, schema.Else, schema.Contains, schema.PropertyNames,
-		schema.UnevaluatedProperties, schema.UnevaluatedItems, schema.ContentSchema,
-	)
-}
-
 // eachSubschema calls fn for schema and every sub-schema reachable through its
-// sub-schema-bearing keywords (see [subschemaChildren]). The caller must ensure
+// sub-schema-bearing keywords (see [Subschemas]). The caller must ensure
 // the schema's sub-schema pointers form a tree (see [schemaFormsTree]); an
-// aliased or cyclic structure would recurse without bound.
+// aliased or cyclic structure would recurse without bound. [Walk] is the
+// exported, cycle-safe form.
 func eachSubschema(schema *Schema, fn func(*Schema)) {
 	if schema == nil {
 		return
@@ -1154,7 +1120,7 @@ func eachSubschema(schema *Schema, fn func(*Schema)) {
 
 	fn(schema)
 
-	for _, child := range subschemaChildren(schema) {
+	for _, child := range Subschemas(schema) {
 		eachSubschema(child, fn)
 	}
 }
@@ -1181,7 +1147,7 @@ func schemaFormsTree(schema *Schema) bool {
 		}
 
 		seen[s] = true
-		for _, child := range subschemaChildren(s) {
+		for _, child := range Subschemas(s) {
 			visit(child)
 		}
 	}

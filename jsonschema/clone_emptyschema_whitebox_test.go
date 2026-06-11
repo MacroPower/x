@@ -1,4 +1,4 @@
-//nolint:testpackage // white-box: tests unexported cloneSchema/isEmptySchema.
+//nolint:testpackage // white-box: tests unexported cloneSchema/isEmptySchema and the field-partition guards.
 package jsonschema
 
 import (
@@ -76,6 +76,37 @@ var (
 		"ReadOnly", "WriteOnly", "Deprecated", "Vocabulary",
 		"Extra", "PropertyOrder",
 		"ItemsArray", "ContentSchema",
+	}
+
+	// Checked-by-IsTrueSchema fields: unlike isEmptySchema, the exported
+	// IsTrueSchema predicate is strict — the boolean true schema form has no
+	// fields set at all, so every exported Schema field is checked and none is
+	// ignored. Read directly off IsTrueSchema's body. IsFalseSchema reuses
+	// IsTrueSchema for both its Not target and the sibling check, so this one
+	// list protects both predicates.
+	trueSchemaCheckedFields = []string{
+		"ID", "Schema", "Ref", "Comment",
+		"Defs", "Definitions",
+		"DependencySchemas", "DependencyStrings",
+		"Anchor", "DynamicAnchor", "DynamicRef", "Vocabulary",
+		"Title", "Description", "Default",
+		"Deprecated", "ReadOnly", "WriteOnly", "Examples",
+		"Type", "Types", "Enum", "Const",
+		"MultipleOf", "Minimum", "Maximum",
+		"ExclusiveMinimum", "ExclusiveMaximum",
+		"MinLength", "MaxLength", "Pattern",
+		"PrefixItems", "Items", "ItemsArray",
+		"MinItems", "MaxItems",
+		"AdditionalItems", "UniqueItems", "Contains",
+		"MinContains", "MaxContains", "UnevaluatedItems",
+		"MinProperties", "MaxProperties",
+		"Required", "DependentRequired",
+		"Properties", "PatternProperties",
+		"AdditionalProperties", "PropertyNames", "UnevaluatedProperties",
+		"AllOf", "AnyOf", "OneOf", "Not",
+		"If", "Then", "Else", "DependentSchemas",
+		"ContentEncoding", "ContentMediaType", "ContentSchema",
+		"Format", "Extra", "PropertyOrder",
 	}
 )
 
@@ -283,6 +314,113 @@ func TestIsFalseSchemaUsesEmptySchema(t *testing.T) {
 
 			assert.Equal(t, tc.want, isFalseSchema(tc.schema))
 			assert.Same(t, before, tc.schema.Not, "isFalseSchema must not mutate the schema's Not pointer")
+		})
+	}
+}
+
+// TestIsTrueSchemaFieldCoverage is a maintenance guard ensuring every exported
+// Schema field is checked by IsTrueSchema. The strict predicate ignores
+// nothing — the boolean true schema form has no fields set — so the checked
+// set alone must equal the reflected field set. When upstream adds a field it
+// lands outside the set and this test fails, forcing the field to be added to
+// both this list and IsTrueSchema's body (where TestIsTrueSchemaRejectsEverySetField
+// verifies it is actually consulted).
+func TestIsTrueSchemaFieldCoverage(t *testing.T) {
+	t.Parallel()
+
+	assertFieldPartition(t, "IsTrueSchema", trueSchemaCheckedFields, nil)
+}
+
+// TestIsTrueSchemaRejectsEverySetField verifies IsTrueSchema's implementation
+// (not just the classification list): for every exported Schema field, a
+// schema with only that field set to a non-zero value must not be the true
+// schema. Maps and slices are planted non-nil but empty, pinning the strict
+// nil-versus-empty semantics — Schema{Enum: []any{}} vacuously rejects every
+// instance, so present-but-empty counts as set.
+func TestIsTrueSchemaRejectsEverySetField(t *testing.T) {
+	t.Parallel()
+
+	schemaType := reflect.TypeFor[Schema]()
+
+	for i := range schemaType.NumField() {
+		field := schemaType.Field(i)
+		if !field.IsExported() {
+			continue
+		}
+
+		t.Run(field.Name, func(t *testing.T) {
+			t.Parallel()
+
+			probe := &Schema{}
+			fieldValue := reflect.ValueOf(probe).Elem().FieldByName(field.Name)
+
+			switch field.Type.Kind() {
+			case reflect.String:
+				fieldValue.SetString("x")
+			case reflect.Bool:
+				fieldValue.SetBool(true)
+			case reflect.Pointer:
+				fieldValue.Set(reflect.New(field.Type.Elem()))
+			case reflect.Map:
+				fieldValue.Set(reflect.MakeMap(field.Type))
+			case reflect.Slice:
+				fieldValue.Set(reflect.MakeSlice(field.Type, 0, 0))
+			default:
+				t.Fatalf("Schema field %q has unhandled kind %s; extend this probe", field.Name, field.Type.Kind())
+			}
+
+			assert.False(t, IsTrueSchema(probe),
+				"a schema with only %q set must not be the boolean true schema form", field.Name)
+		})
+	}
+}
+
+// TestIsFalseSchemaUsesTrueSchema pins the exported IsFalseSchema's definition
+// in terms of IsTrueSchema: a schema is the boolean false form exactly when
+// its Not is a true schema and the schema with Not cleared is itself a true
+// schema. The strict predicate differs deliberately from the internal
+// isFalseSchema, which tolerates annotation siblings: the exported form
+// answers "does this marshal to JSON false", and a title sibling marshals to
+// an object. Because IsFalseSchema reuses IsTrueSchema's single field list,
+// the IsTrueSchema coverage guards protect it; this test pins the observable
+// classification so the delegation cannot silently regress.
+func TestIsFalseSchemaUsesTrueSchema(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		schema *Schema
+		want   bool
+	}{
+		"empty not is false schema": {
+			schema: &Schema{Not: &Schema{}},
+			want:   true,
+		},
+		"nil not is not false schema": {
+			schema: &Schema{},
+			want:   false,
+		},
+		"non-empty not is not false schema": {
+			schema: &Schema{Not: &Schema{Type: "string"}},
+			want:   false,
+		},
+		"sibling keyword defeats false schema": {
+			schema: &Schema{Not: &Schema{}, Type: "string"},
+			want:   false,
+		},
+		"annotation sibling defeats false schema unlike internal isFalseSchema": {
+			schema: &Schema{Not: &Schema{}, Title: "t", Description: "d"},
+			want:   false,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			before := tc.schema.Not
+
+			assert.Equal(t, tc.want, IsFalseSchema(tc.schema))
+			assert.Same(t, before, tc.schema.Not, "IsFalseSchema must not mutate the schema's Not pointer")
 		})
 	}
 }
