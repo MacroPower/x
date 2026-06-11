@@ -23,6 +23,10 @@
 //
 //	schema, err := jsonschema.Generate(reflect.TypeFor[MyType]())
 //
+// [MustGenerateFor] is [GenerateFor] but panics on error, for package-scope
+// variables and init-time generation where for a static type and fixed
+// options generation either always succeeds or always fails.
+//
 // Both functions accept any Go type as the root, not just structs. For
 // example, [GenerateFor] on string produces {"type": "string"}, and on
 // []int produces {"type": ["null", "array"], "items": {"type": "integer"}}.

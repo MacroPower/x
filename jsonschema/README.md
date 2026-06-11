@@ -120,11 +120,15 @@ if errors.As(err, &ve) {
 ## Generating schemas
 
 The primary entry point is the generic `GenerateFor`. A `reflect.Type` variant,
-`Generate`, is provided for dynamic use:
+`Generate`, is provided for dynamic use, and `MustGenerateFor` panics on error
+for package-scope variables, where for a static type and fixed options
+generation either always succeeds or always fails:
 
 ```go
 schema, err := jsonschema.GenerateFor[MyType](opts...)
 schema, err := jsonschema.Generate(reflect.TypeFor[MyType](), opts...)
+
+var mySchema = jsonschema.MustGenerateFor[MyType](opts...)
 ```
 
 The root schema always carries the `$schema` keyword; sub-schemas and `$defs`
