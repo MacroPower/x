@@ -91,7 +91,7 @@ func TestSubschemasDirectOnly(t *testing.T) {
 	assert.Equal(t, []*jsonschema.Schema{child}, jsonschema.Subschemas(root))
 }
 
-func TestSubschemaRefs(t *testing.T) {
+func TestSubschemaEntries(t *testing.T) {
 	t.Parallel()
 
 	propA := &jsonschema.Schema{Type: "string"}
@@ -102,7 +102,7 @@ func TestSubschemaRefs(t *testing.T) {
 
 	tests := map[string]struct {
 		schema *jsonschema.Schema
-		want   []jsonschema.SubschemaRef
+		want   []jsonschema.SubschemaEntry
 	}{
 		"nil schema": {
 			schema: nil,
@@ -118,7 +118,7 @@ func TestSubschemaRefs(t *testing.T) {
 				AllOf:      []*jsonschema.Schema{allOf0, allOf1},
 				Items:      items,
 			},
-			want: []jsonschema.SubschemaRef{
+			want: []jsonschema.SubschemaEntry{
 				{Pointer: "/properties/a", Schema: propA},
 				{Pointer: "/allOf/0", Schema: allOf0},
 				{Pointer: "/allOf/1", Schema: allOf1},
@@ -129,7 +129,7 @@ func TestSubschemaRefs(t *testing.T) {
 			schema: &jsonschema.Schema{
 				Properties: map[string]*jsonschema.Schema{"a/b~c": escaped},
 			},
-			want: []jsonschema.SubschemaRef{
+			want: []jsonschema.SubschemaEntry{
 				{Pointer: "/properties/a~1b~0c", Schema: escaped},
 			},
 		},
@@ -139,16 +139,16 @@ func TestSubschemaRefs(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tt.want, jsonschema.SubschemaRefs(tt.schema))
+			assert.Equal(t, tt.want, jsonschema.SubschemaEntries(tt.schema))
 		})
 	}
 }
 
-// TestSubschemaRefsAgreesWithSubschemas pins the delegation contract: the
+// TestSubschemaEntriesAgreesWithSubschemas pins the delegation contract: the
 // labeled and unlabeled forms return the same children in the same order, so
 // traversals that pair children position by position and traversals that
 // track paths can never disagree.
-func TestSubschemaRefsAgreesWithSubschemas(t *testing.T) {
+func TestSubschemaEntriesAgreesWithSubschemas(t *testing.T) {
 	t.Parallel()
 
 	schema := &jsonschema.Schema{
@@ -164,7 +164,7 @@ func TestSubschemaRefsAgreesWithSubschemas(t *testing.T) {
 		Not:   &jsonschema.Schema{},
 	}
 
-	refs := jsonschema.SubschemaRefs(schema)
+	refs := jsonschema.SubschemaEntries(schema)
 	children := jsonschema.Subschemas(schema)
 
 	require.Len(t, refs, len(children))
@@ -382,10 +382,10 @@ func TestWalk(t *testing.T) {
 	})
 }
 
-func TestWalkRefs(t *testing.T) {
+func TestWalkPaths(t *testing.T) {
 	t.Parallel()
 
-	t.Run("paths accumulate SubschemaRef pointers from the root", func(t *testing.T) {
+	t.Run("paths accumulate SubschemaEntry pointers from the root", func(t *testing.T) {
 		t.Parallel()
 
 		leaf := &jsonschema.Schema{Type: "string"}
@@ -397,7 +397,7 @@ func TestWalkRefs(t *testing.T) {
 
 		paths := map[*jsonschema.Schema]string{}
 
-		err := jsonschema.WalkRefs(root, func(path string, s *jsonschema.Schema) error {
+		err := jsonschema.WalkPaths(root, func(path string, s *jsonschema.Schema) error {
 			paths[s] = path
 
 			return nil
@@ -418,7 +418,7 @@ func TestWalkRefs(t *testing.T) {
 
 		var paths []string
 
-		err := jsonschema.WalkRefs(root, func(path string, s *jsonschema.Schema) error {
+		err := jsonschema.WalkPaths(root, func(path string, s *jsonschema.Schema) error {
 			if s == shared {
 				paths = append(paths, path)
 			}
@@ -443,7 +443,7 @@ func TestWalkRefs(t *testing.T) {
 
 		var visited []string
 
-		err := jsonschema.WalkRefs(root, func(path string, _ *jsonschema.Schema) error {
+		err := jsonschema.WalkPaths(root, func(path string, _ *jsonschema.Schema) error {
 			visited = append(visited, path)
 			if path == "/properties/skip" {
 				return jsonschema.SkipChildren
@@ -464,20 +464,20 @@ func TestWalkRefs(t *testing.T) {
 			Not:        &jsonschema.Schema{Type: "integer"},
 		}
 
-		var fromWalk, fromWalkRefs []*jsonschema.Schema
+		var fromWalk, fromWalkPaths []*jsonschema.Schema
 
 		require.NoError(t, jsonschema.Walk(root, func(s *jsonschema.Schema) error {
 			fromWalk = append(fromWalk, s)
 
 			return nil
 		}))
-		require.NoError(t, jsonschema.WalkRefs(root, func(_ string, s *jsonschema.Schema) error {
-			fromWalkRefs = append(fromWalkRefs, s)
+		require.NoError(t, jsonschema.WalkPaths(root, func(_ string, s *jsonschema.Schema) error {
+			fromWalkPaths = append(fromWalkPaths, s)
 
 			return nil
 		}))
 
-		assert.Equal(t, fromWalk, fromWalkRefs, "Walk delegates to WalkRefs, so the two can never diverge")
+		assert.Equal(t, fromWalk, fromWalkPaths, "Walk delegates to WalkPaths, so the two can never diverge")
 	})
 }
 

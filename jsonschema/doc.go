@@ -484,7 +484,7 @@
 //     definitions). Children held in maps are returned in sorted-key order so
 //     traversal is deterministic. It is the package's single source of truth
 //     for which Schema fields hold sub-schemas.
-//   - [SubschemaRefs] is the keyword-labeled form of [Subschemas]: the same
+//   - [SubschemaEntries] is the keyword-labeled form of [Subschemas]: the same
 //     children in the same order, each paired with the RFC 6901 JSON Pointer
 //     addressing it from the parent ("/properties/a", "/allOf/0", "/items"),
 //     so path-tracking traversals need not re-derive which keyword holds each
@@ -498,9 +498,9 @@
 //     stops at and returns the first error from the function, except
 //     [SkipChildren], which prunes the walk at that schema and continues with
 //     its siblings.
-//   - [WalkRefs] is [Walk] with path tracking: the function also receives the
+//   - [WalkPaths] is [Walk] with path tracking: the function also receives the
 //     JSON Pointer addressing each visited schema from the root, built by
-//     appending each descended child's [SubschemaRef.Pointer], so
+//     appending each descended child's [SubschemaEntry.Pointer], so
 //     path-tracking traversals need not re-implement the walk and its cycle
 //     guard. A schema reachable through several paths is visited with the
 //     first path the traversal encounters.

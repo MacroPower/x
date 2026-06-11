@@ -28,22 +28,22 @@ var SkipChildren = errors.New("skip this schema's children")
 // hold sub-schemas: [Walk] and the internal traversals build on it, and a
 // maintenance test fails when an upstream Schema addition is not covered.
 func Subschemas(s *Schema) []*Schema {
-	refs := SubschemaRefs(s)
-	if len(refs) == 0 {
+	entries := SubschemaEntries(s)
+	if len(entries) == 0 {
 		return nil
 	}
 
-	children := make([]*Schema, len(refs))
-	for i, ref := range refs {
-		children[i] = ref.Schema
+	children := make([]*Schema, len(entries))
+	for i, entry := range entries {
+		children[i] = entry.Schema
 	}
 
 	return children
 }
 
-// SubschemaRef pairs one direct sub-schema with the RFC 6901 JSON Pointer
+// SubschemaEntry pairs one direct sub-schema with the RFC 6901 JSON Pointer
 // addressing it from its parent.
-type SubschemaRef struct {
+type SubschemaEntry struct {
 	// Schema is the child schema.
 	Schema *Schema
 
@@ -55,18 +55,18 @@ type SubschemaRef struct {
 	Pointer string
 }
 
-// SubschemaRefs is the keyword-labeled form of [Subschemas]: the same
+// SubschemaEntries is the keyword-labeled form of [Subschemas]: the same
 // children in the same order, each paired with the JSON Pointer addressing
 // it from s, so path-tracking traversals need not re-derive which keyword
 // holds each child. [Subschemas] delegates here, so traversals that pair
 // children position by position and traversals that track paths can never
 // disagree on field coverage or order. A nil s returns nil.
-func SubschemaRefs(s *Schema) []SubschemaRef {
+func SubschemaEntries(s *Schema) []SubschemaEntry {
 	if s == nil {
 		return nil
 	}
 
-	var children []SubschemaRef
+	var children []SubschemaEntry
 
 	for _, entry := range []struct {
 		m       map[string]*Schema
@@ -81,7 +81,7 @@ func SubschemaRefs(s *Schema) []SubschemaRef {
 	} {
 		for _, key := range slices.Sorted(maps.Keys(entry.m)) {
 			if sub := entry.m[key]; sub != nil {
-				children = append(children, SubschemaRef{
+				children = append(children, SubschemaEntry{
 					Pointer: "/" + entry.keyword + "/" + escapeJSONPointer(key),
 					Schema:  sub,
 				})
@@ -101,7 +101,7 @@ func SubschemaRefs(s *Schema) []SubschemaRef {
 	} {
 		for i, sub := range entry.list {
 			if sub != nil {
-				children = append(children, SubschemaRef{
+				children = append(children, SubschemaEntry{
 					Pointer: "/" + entry.keyword + "/" + strconv.Itoa(i),
 					Schema:  sub,
 				})
@@ -127,7 +127,7 @@ func SubschemaRefs(s *Schema) []SubschemaRef {
 		{s.ContentSchema, keywordContentSchema},
 	} {
 		if entry.s != nil {
-			children = append(children, SubschemaRef{
+			children = append(children, SubschemaEntry{
 				Pointer: "/" + entry.keyword,
 				Schema:  entry.s,
 			})
@@ -145,30 +145,30 @@ func SubschemaRefs(s *Schema) []SubschemaRef {
 // the first error from fn, except [SkipChildren], which prunes the walk at
 // that schema and continues. A nil s is a no-op.
 //
-// Walk is [WalkRefs] without the path.
+// Walk is [WalkPaths] without the path.
 func Walk(s *Schema, fn func(*Schema) error) error {
-	return WalkRefs(s, func(_ string, s *Schema) error { return fn(s) })
+	return WalkPaths(s, func(_ string, s *Schema) error { return fn(s) })
 }
 
-// WalkRefs is [Walk] with path tracking: fn also receives the RFC 6901 JSON
+// WalkPaths is [Walk] with path tracking: fn also receives the RFC 6901 JSON
 // Pointer addressing each visited schema from s (the root itself is ""),
-// built by appending each descended child's [SubschemaRef.Pointer], so it
+// built by appending each descended child's [SubschemaEntry.Pointer], so it
 // matches the schema path the package's own errors report. The [Walk]
 // semantics apply unchanged: pre-order with the walk following updated
 // children, one visit per distinct schema pointer, [SkipChildren] pruning,
 // and stop at the first error. A schema reachable through several paths is
-// visited with the first path the traversal encounters; [SubschemaRefs]
+// visited with the first path the traversal encounters; [SubschemaEntries]
 // orders map-held children by sorted key, so that path is deterministic.
 // A nil s is a no-op.
-func WalkRefs(s *Schema, fn func(path string, s *Schema) error) error {
-	return walkRefs(s, "", fn, map[*Schema]bool{})
+func WalkPaths(s *Schema, fn func(path string, s *Schema) error) error {
+	return walkPaths(s, "", fn, map[*Schema]bool{})
 }
 
-// walkRefs implements [WalkRefs], threading the visited set through the
+// walkPaths implements [WalkPaths], threading the visited set through the
 // recursion so each distinct schema pointer runs fn at most once. A pruned
 // schema stays visited: another path reaching it later finds it handled,
 // exactly as if the walk had descended through it.
-func walkRefs(s *Schema, path string, fn func(string, *Schema) error, visited map[*Schema]bool) error {
+func walkPaths(s *Schema, path string, fn func(string, *Schema) error, visited map[*Schema]bool) error {
 	if s == nil || visited[s] {
 		return nil
 	}
@@ -184,8 +184,8 @@ func walkRefs(s *Schema, path string, fn func(string, *Schema) error, visited ma
 		return err
 	}
 
-	for _, ref := range SubschemaRefs(s) {
-		err := walkRefs(ref.Schema, path+ref.Pointer, fn, visited)
+	for _, entry := range SubschemaEntries(s) {
+		err := walkPaths(entry.Schema, path+entry.Pointer, fn, visited)
 		if err != nil {
 			return err
 		}
