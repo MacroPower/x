@@ -520,7 +520,7 @@ func TestCompileRemoteBoundsAndPatternFallback(t *testing.T) {
 		},
 	}
 
-	v, err := jsonschema.Compile(schema, jsonschema.WithRefResolver(resolver))
+	v, err := jsonschema.Compile(schema, jsonschema.WithResolver(resolver))
 	require.NoError(t, err)
 
 	require.NoError(t, v.Validate(map[string]any{"count": 4.0, "code": "ABC"}))
@@ -835,7 +835,7 @@ func TestCompileJSON(t *testing.T) {
 	}
 }
 
-func TestCompileConcurrentWithRefResolver(t *testing.T) {
+func TestCompileConcurrentWithResolver(t *testing.T) {
 	t.Parallel()
 
 	// A remote $ref forces resolveRemote during the walk, which writes the
@@ -853,7 +853,7 @@ func TestCompileConcurrentWithRefResolver(t *testing.T) {
 		Required: []string{"name"},
 	}
 
-	v, err := jsonschema.Compile(schema, jsonschema.WithRefResolver(resolver))
+	v, err := jsonschema.Compile(schema, jsonschema.WithResolver(resolver))
 	require.NoError(t, err)
 
 	var wg sync.WaitGroup

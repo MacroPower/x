@@ -474,11 +474,11 @@ func TestInline(t *testing.T) {
 			var opts []jsonschema.InlineOption
 
 			if tc.files != nil {
-				opts = append(opts, jsonschema.WithInlineResolver(jsonschema.NewFileResolver(mapFS(tc.files))))
+				opts = append(opts, jsonschema.WithResolver(jsonschema.NewFileResolver(mapFS(tc.files))))
 			}
 
 			if tc.resolver != nil {
-				opts = append(opts, jsonschema.WithInlineResolver(tc.resolver))
+				opts = append(opts, jsonschema.WithResolver(tc.resolver))
 			}
 
 			if tc.baseURI != "" {
@@ -771,7 +771,7 @@ func TestInlineRefFallback(t *testing.T) {
 			var opts []jsonschema.InlineOption
 
 			if tc.files != nil {
-				opts = append(opts, jsonschema.WithInlineResolver(jsonschema.NewFileResolver(mapFS(tc.files))))
+				opts = append(opts, jsonschema.WithResolver(jsonschema.NewFileResolver(mapFS(tc.files))))
 			}
 
 			if tc.baseURI != "" {
@@ -850,7 +850,7 @@ func TestInlineDoesNotMutateInput(t *testing.T) {
 	remoteBefore, err := json.Marshal(remote)
 	require.NoError(t, err)
 
-	got, err := jsonschema.Inline(schema, jsonschema.WithInlineResolver(mapResolver{
+	got, err := jsonschema.Inline(schema, jsonschema.WithResolver(mapResolver{
 		"http://example.com/defs.json": remote,
 	}))
 	require.NoError(t, err)
@@ -900,10 +900,10 @@ func TestInlineValidatesIdentically(t *testing.T) {
 
 	resolver := jsonschema.NewFileResolver(fsys)
 
-	inlined, err := jsonschema.Inline(&schema, jsonschema.WithInlineResolver(resolver))
+	inlined, err := jsonschema.Inline(&schema, jsonschema.WithResolver(resolver))
 	require.NoError(t, err)
 
-	original, err := jsonschema.Compile(&schema, jsonschema.WithRefResolver(resolver))
+	original, err := jsonschema.Compile(&schema, jsonschema.WithResolver(resolver))
 	require.NoError(t, err)
 
 	// No resolver: the inlined schema must be self-contained.
@@ -1033,7 +1033,7 @@ func TestFileResolver(t *testing.T) {
 
 // TestFileResolverWithValidation pins the documented dual use: the same
 // resolver Inline pairs with WithInlineBaseURI also serves file-path and
-// relative refs during validation via WithRefResolver, while a ref that
+// relative refs during validation via WithResolver, while a ref that
 // absolutizes to another scheme is not a valid fs path and surfaces as a
 // validation failure.
 func TestFileResolverWithValidation(t *testing.T) {
@@ -1059,7 +1059,7 @@ func TestFileResolverWithValidation(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			v, err := jsonschema.Compile(schema(ref), jsonschema.WithRefResolver(resolver))
+			v, err := jsonschema.Compile(schema(ref), jsonschema.WithResolver(resolver))
 			require.NoError(t, err)
 
 			require.NoError(t, v.Validate(map[string]any{"count": 1.0}))
@@ -1071,7 +1071,7 @@ func TestFileResolverWithValidation(t *testing.T) {
 		t.Parallel()
 
 		v, err := jsonschema.Compile(schema("https://example.com/child.json"),
-			jsonschema.WithRefResolver(resolver),
+			jsonschema.WithResolver(resolver),
 		)
 		require.NoError(t, err)
 

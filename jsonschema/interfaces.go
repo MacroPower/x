@@ -72,8 +72,8 @@ func (f formatFunc) ValidateFormat(value string) error { return f.fn(value) }
 // that targets it. Implementations must be safe for concurrent use if passed
 // to multiple Validate calls.
 //
-// The same resolver value serves both validation ([WithRefResolver]) and
-// inlining ([WithInlineResolver]).
+// The same resolver value serves both validation and inlining via a single
+// [WithResolver] option.
 type RefResolver interface {
 	// ResolveRef resolves a remote schema URI under the caller's context, so
 	// a resolver that fetches over the network can honor cancellation and
@@ -82,6 +82,37 @@ type RefResolver interface {
 	// context-less entry points pass [context.Background]. A resolver that
 	// performs no cancellable work can ignore it.
 	ResolveRef(ctx context.Context, uri string) (*Schema, error)
+}
+
+// ResolverOption is the option type returned by [WithResolver]: a single
+// option value that configures both validation ([ValidateOption]) and
+// inlining ([InlineOption]).
+type ResolverOption interface {
+	ValidateOption
+	InlineOption
+}
+
+// resolverOption is the [ResolverOption] returned by [WithResolver].
+type resolverOption struct {
+	r RefResolver
+}
+
+func (o resolverOption) applyValidate(v *validator) { v.refResolver = o.r }
+
+func (o resolverOption) applyInline(in *inliner) { in.resolver = o.r }
+
+// WithResolver sets the [RefResolver] used to resolve remote $ref URIs. The
+// returned option serves both validation and inlining, so one value
+// configures [Compile], [Validate], and [Inline] alike.
+//
+// During validation the resolver is called when local fragment resolution
+// fails, and resolved schemas are cached for the duration of the run. During
+// inlining it receives the fragment-stripped absolute URI and is called at
+// most once per distinct URI within one Inline call; the schema it returns
+// is deep-copied before use and never mutated. In both roles the resolver
+// receives the context of the Context entry point in effect.
+func WithResolver(r RefResolver) ResolverOption {
+	return resolverOption{r: r}
 }
 
 // FieldContext provides context about a struct field to tag interpreters.

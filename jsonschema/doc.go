@@ -415,7 +415,7 @@
 //
 // Validation is configured via [ValidateOption] values:
 //
-//   - [WithRefResolver] sets a [RefResolver] for resolving remote $ref URIs.
+//   - [WithResolver] sets a [RefResolver] for resolving remote $ref URIs.
 //     The resolver is called only when local fragment resolution fails. Resolved
 //     schemas are cached within the validation run. The resolver receives the
 //     context from the Context entry points (see Remote References below).
@@ -548,7 +548,7 @@
 //
 // By default only local fragment refs are resolved during validation (those
 // under #/$defs or #/definitions). Remote and absolute $ref URIs are resolved
-// via an optional [RefResolver] set with [WithRefResolver]. An unresolvable
+// via an optional [RefResolver] set with [WithResolver]. An unresolvable
 // remote or absolute $ref is reported as a [*ValidationError] by the validation
 // walk: with no resolver (or a resolver returning nil) the message begins with
 // "cannot resolve $ref" and includes the quoted ref, while a resolver that
@@ -581,7 +581,7 @@
 // enclosing resource's base URI — its $id, or the base given via
 // [WithInlineBaseURI], with a schemeless base normalized against file:///
 // so a back-reference to the root document finds the in-memory copy — and
-// fetched through the [RefResolver] given via [WithInlineResolver]; any
+// fetched through the [RefResolver] given via [WithResolver]; any
 // fragment is then evaluated against the fetched document. Fetched
 // documents are inlined recursively using their own base URIs (a relative
 // ref inside a fetched document resolves against that document's URI, so
@@ -594,7 +594,7 @@
 // an error wrapping [ErrRefResolve]. Pair [os.DirFS] with
 // [WithInlineBaseURI] to inline a directory of schemas; the same resolver
 // also serves file-path and relative refs during validation via
-// [WithRefResolver]. [InlineContext] is
+// [WithResolver]. [InlineContext] is
 // Inline with a caller-supplied context, passed to the resolver with every
 // document fetch, so a resolver that fetches over the
 // network can honor cancellation and deadlines; Inline passes

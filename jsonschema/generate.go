@@ -6,30 +6,40 @@ import (
 	"reflect"
 )
 
-// GenerateOption configures schema generation.
-type GenerateOption func(*generator)
+// GenerateOption configures schema generation. Options are produced by this
+// package's With* constructors; the interface form (rather than a func type)
+// lets one option value serve several entry points, the way [WithResolver]
+// serves both [ValidateOption] and [InlineOption].
+type GenerateOption interface {
+	applyGenerate(g *generator)
+}
+
+// generateOptionFunc adapts a function to [GenerateOption].
+type generateOptionFunc func(*generator)
+
+func (f generateOptionFunc) applyGenerate(g *generator) { f(g) }
 
 // WithDraft sets the target JSON Schema draft version.
 // Default: Draft2020.
 func WithDraft(d Draft) GenerateOption {
-	return func(g *generator) { g.draft = d }
+	return generateOptionFunc(func(g *generator) { g.draft = d })
 }
 
 // WithTagInterpreter registers a TagInterpreter that maps struct tags to
 // schema constraints. Multiple interpreters can be registered and are
 // applied in order. A nil t is ignored.
 func WithTagInterpreter(t TagInterpreter) GenerateOption {
-	return func(g *generator) {
+	return generateOptionFunc(func(g *generator) {
 		if t != nil {
 			g.tagInterpreters = append(g.tagInterpreters, t)
 		}
-	}
+	})
 }
 
 // WithComments enables extraction of Go doc comments as descriptions.
 // Requires access to source files at generation time.
 func WithComments(enabled bool) GenerateOption {
-	return func(g *generator) { g.comments = enabled }
+	return generateOptionFunc(func(g *generator) { g.comments = enabled })
 }
 
 // WithTypeSchema overrides the generated schema for a specific Go type.
@@ -47,11 +57,11 @@ func WithComments(enabled bool) GenerateOption {
 // nested values keep their identity, so mutating through a pointer, slice, or
 // map element held inside one of those values can still leak.
 func WithTypeSchema(t reflect.Type, s *Schema) GenerateOption {
-	return func(g *generator) {
+	return generateOptionFunc(func(g *generator) {
 		if s != nil {
 			g.typeSchemas[t] = s
 		}
-	}
+	})
 }
 
 // WithTypeSchemaFor is [WithTypeSchema] for a statically known type, so call
@@ -69,18 +79,18 @@ func WithTypeSchemaFor[T any](s *Schema) GenerateOption {
 // Go types. Default: uses the type's short name (e.g., "MyStruct").
 // A nil fn is ignored, keeping the default.
 func WithNamer(fn func(reflect.Type) string) GenerateOption {
-	return func(g *generator) {
+	return generateOptionFunc(func(g *generator) {
 		if fn != nil {
 			g.namer = fn
 		}
-	}
+	})
 }
 
 // WithDefinitions controls whether shared types are extracted into
 // $defs (or definitions for Draft-07) and referenced via $ref.
 // Default: true.
 func WithDefinitions(enabled bool) GenerateOption {
-	return func(g *generator) { g.definitions = enabled }
+	return generateOptionFunc(func(g *generator) { g.definitions = enabled })
 }
 
 // WithAdditionalProperties controls whether additional properties are allowed
@@ -89,14 +99,14 @@ func WithDefinitions(enabled bool) GenerateOption {
 // WithAdditionalProperties(true) omits both "additionalProperties": false and
 // "unevaluatedProperties": false.
 func WithAdditionalProperties(allowed bool) GenerateOption {
-	return func(g *generator) { g.additionalProperties = allowed }
+	return generateOptionFunc(func(g *generator) { g.additionalProperties = allowed })
 }
 
 // WithNullable controls whether nil-able Go types (slices, maps, pointers,
 // []byte) are made nullable. Default: true. When false, []T -> {"type":"array"},
 // map -> {"type":"object"}, *T -> the bare value schema, no null branch.
 func WithNullable(allowed bool) GenerateOption {
-	return func(g *generator) { g.nullable = allowed }
+	return generateOptionFunc(func(g *generator) { g.nullable = allowed })
 }
 
 // WithDefaultsFrom seeds property defaults on the root object schema from an
@@ -119,10 +129,10 @@ func WithNullable(allowed bool) GenerateOption {
 // the $ref into an allOf wrap, the same shape tag defaults produce, because
 // Draft-07 readers ignore keywords beside $ref.
 func WithDefaultsFrom(instance any) GenerateOption {
-	return func(g *generator) {
+	return generateOptionFunc(func(g *generator) {
 		g.defaultsFrom = instance
 		g.defaultsFromSet = true
-	}
+	})
 }
 
 // WithRootTitle controls whether the root schema's title is set to the
@@ -134,7 +144,7 @@ func WithDefaultsFrom(instance any) GenerateOption {
 // on the definitions entry instead, shared by every occurrence of the type.
 // Defaults to false.
 func WithRootTitle(enabled bool) GenerateOption {
-	return func(g *generator) { g.rootTitle = enabled }
+	return generateOptionFunc(func(g *generator) { g.rootTitle = enabled })
 }
 
 // applyInstanceDefaults marshals the [WithDefaultsFrom] instance and copies

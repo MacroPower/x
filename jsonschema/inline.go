@@ -61,22 +61,18 @@ type inliner struct {
 	retrievalBase bool
 }
 
-// InlineOption configures [Inline].
-type InlineOption func(*inliner)
-
-// WithInlineResolver sets the [RefResolver] used by [Inline] to fetch the
-// documents that non-local refs target. The resolver receives the
-// fragment-stripped absolute URI and is called at most once per distinct
-// URI within one Inline call; the schema it returns is deep-copied before
-// use and never mutated. The same resolver value also serves validation via
-// [WithRefResolver].
-//
-// The resolver receives the [InlineContext] context with every fetch, so a
-// resolver that fetches over the network can honor cancellation and
-// deadlines; [Inline] passes [context.Background].
-func WithInlineResolver(r RefResolver) InlineOption {
-	return func(in *inliner) { in.resolver = r }
+// InlineOption configures [Inline]. Options are produced by this package's
+// With* constructors; the interface form (rather than a func type) lets one
+// option value serve several entry points, the way [WithResolver] serves
+// both [ValidateOption] and InlineOption.
+type InlineOption interface {
+	applyInline(in *inliner)
 }
+
+// inlineOptionFunc adapts a function to [InlineOption].
+type inlineOptionFunc func(*inliner)
+
+func (f inlineOptionFunc) applyInline(in *inliner) { f(in) }
 
 // WithInlineBaseURI sets the base URI of the root document: the base that
 // non-local refs in the root document absolutize against when no enclosing
@@ -91,7 +87,7 @@ func WithInlineResolver(r RefResolver) InlineOption {
 // "/", so [io/fs] paths keep working; a custom resolver paired with a
 // schemeless base receives the normalized file:/// form.
 func WithInlineBaseURI(base string) InlineOption {
-	return func(in *inliner) { in.baseURI = stripFragment(base) }
+	return inlineOptionFunc(func(in *inliner) { in.baseURI = stripFragment(base) })
 }
 
 // WithInlineRetrievalBase makes refs resolve against each document's
@@ -107,7 +103,7 @@ func WithInlineBaseURI(base string) InlineOption {
 // absolutize against the base from [WithInlineBaseURI] and each fetched
 // document's refs against the URI it was fetched from.
 func WithInlineRetrievalBase(enabled bool) InlineOption {
-	return func(in *inliner) { in.retrievalBase = enabled }
+	return inlineOptionFunc(func(in *inliner) { in.retrievalBase = enabled })
 }
 
 // RefFailure describes one reference expansion failure to a
@@ -148,7 +144,7 @@ type RefFailure struct {
 // the document containing the failing ref; a cycle introduced by the
 // returned schema is an ordinary [ErrRefCycle].
 func WithInlineRefFallback(fn func(RefFailure) (*Schema, bool)) InlineOption {
-	return func(in *inliner) { in.fallback = fn }
+	return inlineOptionFunc(func(in *inliner) { in.fallback = fn })
 }
 
 // normalizeBaseURI returns the canonical absolute form of a configured base
@@ -178,7 +174,7 @@ func normalizeBaseURI(base string) string {
 // refs are absolutized against the enclosing resource's base URI (its $id,
 // or the base from [WithInlineBaseURI], with a schemeless base normalized
 // against file:///) and fetched through the resolver given via
-// [WithInlineResolver]; any fragment is then evaluated against the fetched
+// [WithResolver]; any fragment is then evaluated against the fetched
 // document. Fetched documents are inlined recursively using their own base
 // URIs, and each document is fetched at most once per Inline call. Every
 // ref resolves against its document's original structure, exactly as the
@@ -218,7 +214,7 @@ func Inline(s *Schema, opts ...InlineOption) (*Schema, error) {
 }
 
 // InlineContext is [Inline] with a caller-supplied context, passed to the
-// [RefResolver] (see [WithInlineResolver]) with every
+// [RefResolver] (see [WithResolver]) with every
 // document fetch, so a resolver that fetches over the network can honor
 // cancellation and deadlines. The behavior is otherwise identical.
 func InlineContext(ctx context.Context, s *Schema, opts ...InlineOption) (*Schema, error) {
@@ -234,7 +230,7 @@ func InlineContext(ctx context.Context, s *Schema, opts ...InlineOption) (*Schem
 	}
 
 	for _, opt := range opts {
-		opt(in)
+		opt.applyInline(in)
 	}
 
 	in.baseURI = normalizeBaseURI(in.baseURI)
@@ -642,7 +638,7 @@ func (in *inliner) fetchDoc(baseURI string) (*Schema, error) {
 // a ref escaping above it is not a valid fs path, and [Inline] surfaces the
 // read failure as an error wrapping [ErrRefResolve].
 //
-// The resolver works the same way with [WithRefResolver] during validation:
+// The resolver works the same way with [WithResolver] during validation:
 // refs that reach the resolver as relative or file URIs are served from
 // the fs. Refs that absolutize to another scheme (an http $id, for example)
 // are not valid fs paths and resolve to an error.

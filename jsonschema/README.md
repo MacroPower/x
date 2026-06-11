@@ -593,7 +593,7 @@ containing object are both identifiable from `InstancePath` alone.
 
 | Option                     | Effect                                                                                                                 |
 | -------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `WithRefResolver(r)`       | Resolve remote/absolute `$ref` URIs (called only when local lookup fails); the resolver receives the caller's context. |
+| `WithResolver(r)`          | Resolve remote/absolute `$ref` URIs (called only when local lookup fails); the resolver receives the caller's context. |
 | `WithFormatValidator(f)`   | Register a custom `format` checker (a `FormatValidator`; `FormatFunc` adapts a bare function).                         |
 | `WithFormats(bool)`        | Force `format` assertion on or off.                                                                                    |
 | `WithContent(bool)`        | Assert `contentEncoding`/`contentMediaType` (annotation-only by default).                                              |
@@ -631,7 +631,7 @@ all groups stay active.
 
 Only local fragment refs (`#/$defs/...`, `#/definitions/...`) are resolved by
 default. Remote and absolute `$ref` URIs are resolved through an optional
-`RefResolver` set with `WithRefResolver`; the resolver is called only when local
+`RefResolver` set with `WithResolver`; the resolver is called only when local
 resolution fails, and resolved schemas are cached within the validation run. A
 resolver error surfaces as `ErrRefResolve`; an unresolvable remote/absolute ref
 with no resolver is reported as a `*ValidationError`. Circular refs are detected
@@ -651,8 +651,9 @@ entry point) context, so a resolver that fetches over the network can honor
 cancellation and deadlines. A compiled `*Validator` never retains a context —
 each run carries its own — and the context-less entry points pass
 `context.Background()`. The package ships no network resolver; fetching
-remains the caller's concern. The same resolver value serves both validation
-(`WithRefResolver`) and inlining (`WithInlineResolver`).
+remains the caller's concern. The `WithResolver` option value itself serves
+both validation and inlining, so one option configures `Compile`, `Validate`,
+and `Inline` alike.
 
 ## Schema traversal and predicates
 
@@ -751,7 +752,7 @@ resolver-returned schemas are never mutated.
 fsys := os.DirFS("schemas") // main.json references sub/child.json, ...
 
 inlined, err := jsonschema.Inline(schema,
-	jsonschema.WithInlineResolver(jsonschema.NewFileResolver(fsys)),
+	jsonschema.WithResolver(jsonschema.NewFileResolver(fsys)),
 	jsonschema.WithInlineBaseURI("main.json"),
 )
 ```
@@ -766,7 +767,7 @@ URI — its `$id`, or the base from `WithInlineBaseURI`, with a schemeless
 base such as `main.json` normalized against `file:///` so RFC 3986 joining
 is well-defined and a back-reference to the root document finds the
 in-memory copy instead of re-fetching it — and fetched through the
-`RefResolver` given via `WithInlineResolver`; any fragment is then evaluated
+`RefResolver` given via `WithResolver`; any fragment is then evaluated
 against the fetched document. Fetched documents are inlined recursively
 using their own base URIs, so a relative ref inside a fetched document
 resolves against that document's URI and files can reference each other by
@@ -776,8 +777,8 @@ serving file-path and relative URIs from
 the fs root (a leading `file://` scheme and `/` are stripped); each
 referenced file must contain a JSON schema document, and `io/fs` confines
 resolution to the fs root, so a ref escaping above it returns an error
-wrapping `ErrRefResolve`. The same resolver also serves file-path and
-relative refs during validation via `WithRefResolver`; refs that absolutize
+wrapping `ErrRefResolve`. The same `WithResolver` option also serves
+file-path and relative refs during validation; refs that absolutize
 to another scheme (an http `$id`, for example) are not valid fs paths and
 resolve to an error. `InlineContext` is `Inline` with a caller-supplied
 context, passed to the resolver with
@@ -850,7 +851,7 @@ cycle introduced by the substitute is an ordinary `ErrRefCycle`.
 
 | Option                          | Effect                                                                                                                                     |
 | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `WithInlineResolver(r)`         | Set the `RefResolver` that fetches the documents non-local refs target (called at most once per distinct URI).                             |
+| `WithResolver(r)`               | Set the `RefResolver` that fetches the documents non-local refs target (called at most once per distinct URI).                             |
 | `WithInlineBaseURI(base)`       | Set the root document's base URI; a schemeless base is normalized against `file:///`.                                                      |
 | `WithInlineRetrievalBase(bool)` | Resolve refs against each document's retrieval URI, treating `$id` as an inert annotation that passes through verbatim.                    |
 | `WithInlineRefFallback(fn)`     | Per-reference failure policy: decline (propagate), drop the failing reference keyword (nil schema), or expand a substitute schema instead. |

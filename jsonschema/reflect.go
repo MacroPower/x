@@ -76,7 +76,7 @@ func newGenerator(opts []GenerateOption) *generator {
 		visiting:        map[reflect.Type]bool{},
 	}
 	for _, opt := range opts {
-		opt(g)
+		opt.applyGenerate(g)
 	}
 
 	return g

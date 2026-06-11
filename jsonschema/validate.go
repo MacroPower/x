@@ -44,19 +44,29 @@ func compileRegexp(pattern string) (*regexp.Regexp, error) {
 	return re, nil
 }
 
-// ValidateOption configures validation behavior.
-type ValidateOption func(*validator)
+// ValidateOption configures validation behavior. Options are produced by
+// this package's With* constructors; the interface form (rather than a func
+// type) lets one option value serve several entry points, the way
+// [WithResolver] serves both ValidateOption and [InlineOption].
+type ValidateOption interface {
+	applyValidate(v *validator)
+}
+
+// validateOptionFunc adapts a function to [ValidateOption].
+type validateOptionFunc func(*validator)
+
+func (f validateOptionFunc) applyValidate(v *validator) { f(v) }
 
 // WithFormatValidator registers a custom format checker. The checker
 // declares the format name it handles via [FormatValidator.Format];
 // [FormatFunc] adapts a bare function. Registering a name again, including a
 // built-in format name, replaces the previous checker. A nil f is ignored.
 func WithFormatValidator(f FormatValidator) ValidateOption {
-	return func(v *validator) {
+	return validateOptionFunc(func(v *validator) {
 		if f != nil {
 			v.formatCheckers[f.Format()] = f.ValidateFormat
 		}
-	}
+	})
 }
 
 // WithFormats forces built-in format validation on or off, overriding the
@@ -67,7 +77,7 @@ func WithFormatValidator(f FormatValidator) ValidateOption {
 // default). WithFormats(true) opts in to assertion regardless of draft or
 // vocabulary; WithFormats(false) disables it entirely.
 func WithFormats(enabled bool) ValidateOption {
-	return func(v *validator) { v.formatsForce = &enabled }
+	return validateOptionFunc(func(v *validator) { v.formatsForce = &enabled })
 }
 
 // WithContent enables assertion of the contentEncoding and contentMediaType
@@ -77,23 +87,15 @@ func WithFormats(enabled bool) ValidateOption {
 // application/json must be valid JSON; other encodings and media types remain
 // annotations. Non-string instances are unaffected. Mirrors [WithFormats].
 func WithContent(enabled bool) ValidateOption {
-	return func(v *validator) { v.contentEnabled = enabled }
-}
-
-// WithRefResolver sets a [RefResolver] for resolving remote $ref URIs during
-// validation. The resolver is called when local fragment resolution fails.
-// Resolved schemas are cached for the duration of the validation run.
-// The same resolver value also serves [Inline] via [WithInlineResolver].
-func WithRefResolver(r RefResolver) ValidateOption {
-	return func(v *validator) { v.refResolver = r }
+	return validateOptionFunc(func(v *validator) { v.contentEnabled = enabled })
 }
 
 // WithResolveOptions passes [ResolveOptions] (an alias for the upstream
 // options type) to Schema.Resolve for structural pre-validation. The
 // validation walk resolves local fragment refs directly and remote/absolute
-// refs via a configured [RefResolver] (see [WithRefResolver]).
+// refs via a configured [RefResolver] (see [WithResolver]).
 func WithResolveOptions(opts *ResolveOptions) ValidateOption {
-	return func(v *validator) { v.resolveOpts = opts }
+	return validateOptionFunc(func(v *validator) { v.resolveOpts = opts })
 }
 
 // WithVocabularies directly specifies the active vocabulary set for validation.
@@ -102,7 +104,7 @@ func WithResolveOptions(opts *ResolveOptions) ValidateOption {
 // overriding any $vocabulary found in a metaschema registered via
 // [WithMetaSchema].
 func WithVocabularies(vocabs map[string]bool) ValidateOption {
-	return func(v *validator) { v.vocabOverride = vocabs }
+	return validateOptionFunc(func(v *validator) { v.vocabOverride = vocabs })
 }
 
 // WithMetaSchema registers a metaschema for vocabulary resolution. The
@@ -111,7 +113,7 @@ func WithVocabularies(vocabs map[string]bool) ValidateOption {
 // $vocabulary map is used to determine active vocabularies. A nil metaschema is
 // a no-op.
 func WithMetaSchema(ms *Schema) ValidateOption {
-	return func(v *validator) {
+	return validateOptionFunc(func(v *validator) {
 		if ms != nil && ms.ID != "" {
 			if v.metaSchemas == nil {
 				v.metaSchemas = map[string]*Schema{}
@@ -119,7 +121,7 @@ func WithMetaSchema(ms *Schema) ValidateOption {
 
 			v.metaSchemas[ms.ID] = ms
 		}
-	}
+	})
 }
 
 // visitKey identifies a unique (schema, instance path) pair for cycle detection.
@@ -238,7 +240,7 @@ func newValidator(schema *Schema, opts []ValidateOption) (*validator, error) {
 	maps.Copy(v.formatCheckers, builtinFormats)
 
 	for _, opt := range opts {
-		opt(v)
+		opt.applyValidate(v)
 	}
 
 	// Detect draft from $schema field.
@@ -831,7 +833,7 @@ func Compile(schema *Schema, opts ...ValidateOption) (*Validator, error) {
 }
 
 // CompileContext is [Compile] with a caller-supplied context. The context is
-// passed to the [RefResolver] (see [WithRefResolver]) for refs
+// passed to the [RefResolver] (see [WithResolver]) for refs
 // resolved during compilation. It is not retained by the returned [Validator]:
 // refs reached only at validation time resolve under the context passed to
 // [Validator.ValidateContext] or [Validator.ValidateJSONContext] (the
@@ -1110,7 +1112,7 @@ func (c *Validator) Validate(instance any) error {
 }
 
 // ValidateContext is [Validator.Validate] with a caller-supplied context. The
-// context is passed to the [RefResolver] (see [WithRefResolver])
+// context is passed to the [RefResolver] (see [WithResolver])
 // for remote refs reached during this validation run, so a resolver that
 // fetches over the network can honor cancellation and deadlines. The context
 // is held only for the duration of the run, never by the [Validator] itself.
@@ -1180,7 +1182,7 @@ func Validate(schema *Schema, instance any, opts ...ValidateOption) error {
 }
 
 // ValidateContext is [Validate] with a caller-supplied context, passed to the
-// [RefResolver] (see [WithRefResolver]) for refs resolved both
+// [RefResolver] (see [WithResolver]) for refs resolved both
 // while compiling schema and during the validation run.
 func ValidateContext(ctx context.Context, schema *Schema, instance any, opts ...ValidateOption) error {
 	// Check the instance type before compiling so an unaccepted instance is
@@ -1399,7 +1401,7 @@ func ValidateJSON(schema *Schema, data []byte, opts ...ValidateOption) error {
 }
 
 // ValidateJSONContext is [ValidateJSON] with a caller-supplied context, passed
-// to the [RefResolver] (see [WithRefResolver]) for refs resolved
+// to the [RefResolver] (see [WithResolver]) for refs resolved
 // both while compiling schema and during the validation run.
 func ValidateJSONContext(ctx context.Context, schema *Schema, data []byte, opts ...ValidateOption) error {
 	instance, err := decodeJSONInstance(data)

@@ -118,7 +118,7 @@ func TestCompileContextPassesContextToResolver(t *testing.T) {
 	}
 
 	v, err := jsonschema.CompileContext(ctx, remoteIntegerSchema(),
-		jsonschema.WithRefResolver(resolver),
+		jsonschema.WithResolver(resolver),
 	)
 	require.NoError(t, err)
 
@@ -153,7 +153,7 @@ func TestValidateContextPassesContextToResolver(t *testing.T) {
 	v, err := jsonschema.CompileContext(
 		context.WithValue(t.Context(), ctxMarkerKey{}, "compile"),
 		remoteIntegerSchema(),
-		jsonschema.WithRefResolver(resolver),
+		jsonschema.WithResolver(resolver),
 	)
 	require.NoError(t, err)
 
@@ -190,7 +190,7 @@ func TestValidateJSONContextPassesContextToResolver(t *testing.T) {
 		disabled: true,
 	}
 
-	v, err := jsonschema.Compile(remoteIntegerSchema(), jsonschema.WithRefResolver(resolver))
+	v, err := jsonschema.Compile(remoteIntegerSchema(), jsonschema.WithResolver(resolver))
 	require.NoError(t, err)
 
 	resolver.setDisabled(false)
@@ -217,7 +217,7 @@ func TestValidateContextCancellation(t *testing.T) {
 		disabled: true,
 	}
 
-	v, err := jsonschema.Compile(remoteIntegerSchema(), jsonschema.WithRefResolver(resolver))
+	v, err := jsonschema.Compile(remoteIntegerSchema(), jsonschema.WithResolver(resolver))
 	require.NoError(t, err)
 
 	resolver.setDisabled(false)
@@ -249,12 +249,12 @@ func TestPackageLevelContextHelpers(t *testing.T) {
 	ctx := context.WithValue(t.Context(), ctxMarkerKey{}, "one-shot")
 
 	err := jsonschema.ValidateContext(ctx, remoteIntegerSchema(), 42.0,
-		jsonschema.WithRefResolver(resolver),
+		jsonschema.WithResolver(resolver),
 	)
 	require.NoError(t, err)
 
 	err = jsonschema.ValidateJSONContext(ctx, remoteIntegerSchema(), []byte(`"nope"`),
-		jsonschema.WithRefResolver(resolver),
+		jsonschema.WithResolver(resolver),
 	)
 	require.Error(t, err)
 
@@ -281,7 +281,7 @@ func TestCompileJSONContextPassesContextToResolver(t *testing.T) {
 
 	v, err := jsonschema.CompileJSONContext(ctx,
 		[]byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$ref":"https://example.com/integer.json"}`),
-		jsonschema.WithRefResolver(resolver),
+		jsonschema.WithResolver(resolver),
 	)
 	require.NoError(t, err)
 	require.NoError(t, v.Validate(42.0))
@@ -306,7 +306,7 @@ func TestContextlessEntryPointsPassBackground(t *testing.T) {
 	}
 
 	err := jsonschema.Validate(remoteIntegerSchema(), 42.0,
-		jsonschema.WithRefResolver(resolver),
+		jsonschema.WithResolver(resolver),
 	)
 	require.NoError(t, err)
 
@@ -333,7 +333,7 @@ func TestInlineContextPassesContextToResolver(t *testing.T) {
 	}
 
 	inlined, err := jsonschema.InlineContext(ctx, remoteIntegerPropertySchema(),
-		jsonschema.WithInlineResolver(resolver),
+		jsonschema.WithResolver(resolver),
 	)
 	require.NoError(t, err)
 	assert.Equal(t, "integer", inlined.Properties["count"].Type)
@@ -362,7 +362,7 @@ func TestInlineContextCancellation(t *testing.T) {
 	cancel()
 
 	_, err := jsonschema.InlineContext(canceled, remoteIntegerPropertySchema(),
-		jsonschema.WithInlineResolver(resolver),
+		jsonschema.WithResolver(resolver),
 	)
 	require.Error(t, err)
 	require.ErrorIs(t, err, jsonschema.ErrRefResolve)
@@ -381,7 +381,7 @@ func TestInlinePassesBackgroundToContextResolver(t *testing.T) {
 	}
 
 	inlined, err := jsonschema.Inline(remoteIntegerPropertySchema(),
-		jsonschema.WithInlineResolver(resolver),
+		jsonschema.WithResolver(resolver),
 	)
 	require.NoError(t, err)
 	assert.Equal(t, "integer", inlined.Properties["count"].Type)
@@ -405,7 +405,7 @@ func TestResolverThroughContextEntryPoints(t *testing.T) {
 	}
 
 	v, err := jsonschema.CompileContext(t.Context(), remoteIntegerSchema(),
-		jsonschema.WithRefResolver(resolver),
+		jsonschema.WithResolver(resolver),
 	)
 	require.NoError(t, err)
 
@@ -414,17 +414,17 @@ func TestResolverThroughContextEntryPoints(t *testing.T) {
 	require.NoError(t, v.ValidateJSONContext(t.Context(), []byte(`42`)))
 
 	err = jsonschema.ValidateContext(t.Context(), remoteIntegerSchema(), 42.0,
-		jsonschema.WithRefResolver(resolver),
+		jsonschema.WithResolver(resolver),
 	)
 	require.NoError(t, err)
 
 	err = jsonschema.ValidateJSONContext(t.Context(), remoteIntegerSchema(), []byte(`42`),
-		jsonschema.WithRefResolver(resolver),
+		jsonschema.WithResolver(resolver),
 	)
 	require.NoError(t, err)
 
 	inlined, err := jsonschema.InlineContext(t.Context(), remoteIntegerPropertySchema(),
-		jsonschema.WithInlineResolver(resolver),
+		jsonschema.WithResolver(resolver),
 	)
 	require.NoError(t, err)
 	assert.Equal(t, "integer", inlined.Properties["count"].Type)

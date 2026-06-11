@@ -2396,7 +2396,7 @@ func (m mapResolver) ResolveRef(_ context.Context, uri string) (*jsonschema.Sche
 	return nil, nil
 }
 
-func TestValidateWithRefResolver(t *testing.T) {
+func TestValidateWithResolver(t *testing.T) {
 	t.Parallel()
 
 	integerSchema := &jsonschema.Schema{Type: "integer"}
@@ -2509,7 +2509,7 @@ func TestValidateWithRefResolver(t *testing.T) {
 			var opts []jsonschema.ValidateOption
 
 			if tt.resolver != nil {
-				opts = append(opts, jsonschema.WithRefResolver(tt.resolver))
+				opts = append(opts, jsonschema.WithResolver(tt.resolver))
 			}
 
 			err := jsonschema.Validate(tt.schema, tt.instance, opts...)
@@ -2552,7 +2552,7 @@ func TestValidateRefResolverCaching(t *testing.T) {
 	}
 
 	err := jsonschema.Validate(schema, map[string]any{"a": 1.0, "b": 2.0},
-		jsonschema.WithRefResolver(resolver),
+		jsonschema.WithResolver(resolver),
 	)
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), callCount.Load(),
@@ -3229,7 +3229,7 @@ func TestValidationErrorUnwrapNil(t *testing.T) {
 	resolver := &errorResolver{err: resolverErr}
 
 	err := jsonschema.Validate(schema, "hello",
-		jsonschema.WithRefResolver(resolver),
+		jsonschema.WithResolver(resolver),
 	)
 	require.Error(t, err)
 
@@ -3391,7 +3391,7 @@ func TestCycleDetectionPointerIdentity(t *testing.T) {
 		"child": map[string]any{
 			"child": map[string]any{},
 		},
-	}, jsonschema.WithRefResolver(resolver))
+	}, jsonschema.WithResolver(resolver))
 	// Should not infinite-loop; cycle detection should recognize the clone.
 	require.NoError(t, err)
 }
@@ -3445,7 +3445,7 @@ func TestRemoteLoaderDoubleCall(t *testing.T) {
 	}
 
 	err := jsonschema.Validate(schema, map[string]any{"data": "hello"},
-		jsonschema.WithRefResolver(resolver),
+		jsonschema.WithResolver(resolver),
 	)
 	require.NoError(t, err)
 
@@ -3492,14 +3492,14 @@ func TestWalkSchemaSkipsRefs(t *testing.T) {
 
 	// An integer satisfies the anchor reached through the remote sub-$ref.
 	err := jsonschema.Validate(root, map[string]any{"data": 42.0},
-		jsonschema.WithRefResolver(resolver))
+		jsonschema.WithResolver(resolver))
 	require.NoError(t, err,
 		"$anchor inside a remotely-resolved schema should register and resolve")
 
 	// A non-integer fails, proving the anchored constraint is actually applied
 	// (not silently skipped as unresolved).
 	err = jsonschema.Validate(root, map[string]any{"data": "nope"},
-		jsonschema.WithRefResolver(resolver))
+		jsonschema.WithResolver(resolver))
 	require.Error(t, err,
 		"the integer constraint behind the remote anchor must be enforced")
 }
@@ -3846,7 +3846,7 @@ func TestResolveRemoteClonesConsistently(t *testing.T) {
 	}
 
 	err := jsonschema.Validate(schema, map[string]any{"a": "hello", "b": "world"},
-		jsonschema.WithRefResolver(resolver),
+		jsonschema.WithResolver(resolver),
 	)
 	require.NoError(t, err)
 
@@ -4419,7 +4419,7 @@ func TestRemoteRefNilResolverIsError(t *testing.T) {
 	}
 
 	err := jsonschema.Validate(schema, map[string]any{"data": 42},
-		jsonschema.WithRefResolver(&nilResolver{}),
+		jsonschema.WithResolver(&nilResolver{}),
 	)
 	require.Error(t, err,
 		"nil resolver returning (nil, nil) should not silently pass validation for unresolvable $ref")
@@ -5385,13 +5385,13 @@ func TestConcurrentValidationSharedSchema(t *testing.T) {
 			defer wg.Done()
 
 			valid := map[string]any{"code": "ABC", "ref": "ok", "x-tag": "v"}
-			err := jsonschema.Validate(schema, valid, jsonschema.WithRefResolver(resolver))
+			err := jsonschema.Validate(schema, valid, jsonschema.WithResolver(resolver))
 			if err != nil {
 				t.Errorf("goroutine %d: valid instance rejected: %v", i, err)
 			}
 
 			invalid := map[string]any{"code": "abc", "ref": "ok"}
-			err = jsonschema.Validate(schema, invalid, jsonschema.WithRefResolver(resolver))
+			err = jsonschema.Validate(schema, invalid, jsonschema.WithResolver(resolver))
 			if err == nil {
 				t.Errorf("goroutine %d: invalid code accepted", i)
 			}
@@ -5412,7 +5412,7 @@ func TestResolveOptionsNotMutated(t *testing.T) {
 	for range 2 {
 		require.NoError(t, jsonschema.Validate(schema, "x",
 			jsonschema.WithResolveOptions(opts),
-			jsonschema.WithRefResolver(fixedResolver{schema: &jsonschema.Schema{Type: "string"}}),
+			jsonschema.WithResolver(fixedResolver{schema: &jsonschema.Schema{Type: "string"}}),
 		))
 	}
 
