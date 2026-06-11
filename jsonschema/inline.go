@@ -633,6 +633,11 @@ func (in *inliner) fetchDoc(baseURI string) (*Schema, error) {
 // as the [io/fs] file name, so [io/fs] confines resolution to the fs root:
 // a ref escaping above it is not a valid fs path, and [Inline] surfaces the
 // read failure as an error wrapping [ErrRefResolve].
+//
+// The resolver works the same way with [WithRefResolver] during validation:
+// refs that reach the resolver as relative or file URIs are served from
+// fsys. Refs that absolutize to another scheme (an http $id, for example)
+// are not valid fs paths and resolve to an error.
 func FileResolver(fsys fs.FS) RefResolver {
 	return fileResolver{fsys: fsys}
 }

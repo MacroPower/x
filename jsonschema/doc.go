@@ -580,7 +580,9 @@
 // each referenced file must contain a JSON schema document, and [io/fs]
 // confines resolution to the fs root, so a ref escaping above it returns
 // an error wrapping [ErrRefResolve]. Pair [os.DirFS] with
-// [WithInlineBaseURI] to inline a directory of schemas. [InlineContext] is
+// [WithInlineBaseURI] to inline a directory of schemas; the same resolver
+// also serves file-path and relative refs during validation via
+// [WithRefResolver]. [InlineContext] is
 // Inline with a caller-supplied context, passed to a [RefResolverContext]
 // resolver with every document fetch, so a resolver that fetches over the
 // network can honor cancellation and deadlines; Inline passes

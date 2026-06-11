@@ -1031,6 +1031,56 @@ func TestFileResolver(t *testing.T) {
 	}
 }
 
+// TestFileResolverWithValidation pins the documented dual use: the same
+// resolver Inline pairs with WithInlineBaseURI also serves file-path and
+// relative refs during validation via WithRefResolver, while a ref that
+// absolutizes to another scheme is not a valid fs path and surfaces as a
+// validation failure.
+func TestFileResolverWithValidation(t *testing.T) {
+	t.Parallel()
+
+	resolver := jsonschema.FileResolver(mapFS(map[string]string{
+		"child.json": `{"type": "integer"}`,
+	}))
+
+	schema := func(ref string) *jsonschema.Schema {
+		return &jsonschema.Schema{
+			Type: "object",
+			Properties: map[string]*jsonschema.Schema{
+				"count": {Ref: ref},
+			},
+		}
+	}
+
+	for name, ref := range map[string]string{
+		"relative ref":      "child.json",
+		"file absolute ref": "file:///child.json",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			v, err := jsonschema.Compile(schema(ref), jsonschema.WithRefResolver(resolver))
+			require.NoError(t, err)
+
+			require.NoError(t, v.Validate(map[string]any{"count": 1.0}))
+			require.Error(t, v.Validate(map[string]any{"count": "nope"}))
+		})
+	}
+
+	t.Run("http ref misses", func(t *testing.T) {
+		t.Parallel()
+
+		v, err := jsonschema.Compile(schema("https://example.com/child.json"),
+			jsonschema.WithRefResolver(resolver),
+		)
+		require.NoError(t, err)
+
+		err = v.Validate(map[string]any{"count": 1.0})
+		require.Error(t, err)
+		require.ErrorIs(t, err, jsonschema.ErrRefResolve)
+	})
+}
+
 // TestInlineDeepCopyIndependence verifies the deep-copy contract of
 // [jsonschema.Inline] from the copy's side: mutating the returned schema must
 // never reach back into the input. Because the copy round-trips through JSON,
