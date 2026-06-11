@@ -17,7 +17,7 @@ func WithDraft(d Draft) Option {
 
 // WithTagInterpreter registers a TagInterpreter that maps struct tags to
 // schema constraints. Multiple interpreters can be registered and are
-// applied in order.
+// applied in order. A nil t is ignored.
 func WithTagInterpreter(t TagInterpreter) Option {
 	return func(g *generator) {
 		if t != nil {
@@ -37,6 +37,7 @@ func WithComments(enabled bool) Option {
 // [JSONSchemaProvider]. Useful for mapping third-party types or overriding
 // types whose [JSONSchemaProvider] schema is undesirable.
 // If called multiple times for the same type, the last registration wins.
+// A nil s is ignored, leaving any earlier registration for t in place.
 //
 // The override is copied before use: its sub-schemas are deep-copied and its
 // Enum, Const, Default, and Extra containers are cloned, so a tag interpreter
@@ -66,6 +67,7 @@ func WithTypeSchemaFor[T any](s *Schema) Option {
 
 // WithNamer sets a custom function for producing definition names from
 // Go types. Default: uses the type's short name (e.g., "MyStruct").
+// A nil fn is ignored, keeping the default.
 func WithNamer(fn func(reflect.Type) string) Option {
 	return func(g *generator) {
 		if fn != nil {
