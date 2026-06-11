@@ -835,6 +835,46 @@ func TestCompileJSON(t *testing.T) {
 	}
 }
 
+func TestMustCompile(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns the Compile validator", func(t *testing.T) {
+		t.Parallel()
+
+		v := jsonschema.MustCompile(draft2020RefSchema())
+		require.NoError(t, v.ValidateJSON([]byte(`{"name":"ada"}`)))
+		require.Error(t, v.ValidateJSON([]byte(`{"name":""}`)))
+	})
+
+	t.Run("panics on compile error", func(t *testing.T) {
+		t.Parallel()
+
+		assert.Panics(t, func() {
+			jsonschema.MustCompile(&jsonschema.Schema{Type: "strng"})
+		})
+	})
+}
+
+func TestMustCompileJSON(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns the CompileJSON validator", func(t *testing.T) {
+		t.Parallel()
+
+		v := jsonschema.MustCompileJSON([]byte(`{"type":"integer","minimum":3}`))
+		require.NoError(t, v.ValidateJSON([]byte(`4`)))
+		require.Error(t, v.ValidateJSON([]byte(`2`)))
+	})
+
+	t.Run("panics on decode error", func(t *testing.T) {
+		t.Parallel()
+
+		assert.Panics(t, func() {
+			jsonschema.MustCompileJSON([]byte(`null`))
+		})
+	})
+}
+
 func TestCompileConcurrentWithResolver(t *testing.T) {
 	t.Parallel()
 

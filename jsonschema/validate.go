@@ -832,6 +832,19 @@ func Compile(schema *Schema, opts ...ValidateOption) (*Validator, error) {
 	return CompileContext(context.Background(), schema, opts...)
 }
 
+// MustCompile is [Compile] but panics on error; intended for package-scope
+// validators, where for a static schema and fixed options compilation either
+// always succeeds or always fails, so a failure is a programming error best
+// surfaced at startup. It follows [regexp.MustCompile] and [MustGenerateFor].
+func MustCompile(schema *Schema, opts ...ValidateOption) *Validator {
+	v, err := Compile(schema, opts...)
+	if err != nil {
+		panic(err)
+	}
+
+	return v
+}
+
 // CompileContext is [Compile] with a caller-supplied context. The context is
 // passed to the [RefResolver] (see [WithResolver]) for refs
 // resolved during compilation. It is not retained by the returned [Validator]:
@@ -969,6 +982,18 @@ func ParseSchema(data []byte) (*Schema, error) {
 // CompileJSON is [CompileJSONContext] with [context.Background].
 func CompileJSON(data []byte, opts ...ValidateOption) (*Validator, error) {
 	return CompileJSONContext(context.Background(), data, opts...)
+}
+
+// MustCompileJSON is [CompileJSON] but panics on error; intended for
+// package-scope validators compiled from static schema documents, such as
+// files brought in with go:embed, following [MustCompile].
+func MustCompileJSON(data []byte, opts ...ValidateOption) *Validator {
+	v, err := CompileJSON(data, opts...)
+	if err != nil {
+		panic(err)
+	}
+
+	return v
 }
 
 // CompileJSONContext is [CompileJSON] with a caller-supplied context, passed

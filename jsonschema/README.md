@@ -467,6 +467,9 @@ The core entry points are:
 - `Compile(schema, opts...)` performs the per-schema work once (registry
   construction, `Schema.Resolve`, draft and vocabulary detection) and returns a
   reusable `*Validator` with `Validate` and `ValidateJSON` methods.
+  `MustCompile` panics on error, for package-scope validators where for a
+  static schema and fixed options compilation either always succeeds or always
+  fails (following `regexp.MustCompile` and `MustGenerateFor`).
 
 Schemas arriving as JSON documents rather than `*Schema` values have
 symmetric entry points:
@@ -474,6 +477,8 @@ symmetric entry points:
 - `CompileJSON(data, opts...)` decodes `data` as a single JSON schema document
   (numbers as `json.Number`, trailing data rejected) and compiles it with
   `Compile`. It is the schema-side counterpart of `ValidateJSON`.
+  `MustCompileJSON` panics on error, for schema documents fixed at build time
+  such as files brought in with `go:embed`.
 - `ParseSchema(data)` is the decode half of `CompileJSON` alone: it returns
   the `*Schema` uncompiled, for consumers that work with the schema itself —
   `Inline`, `Walk`, programmatic editing — rather than validating instances

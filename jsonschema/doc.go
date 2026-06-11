@@ -365,7 +365,11 @@
 // Both compile the schema on every call. To validate many instances against the
 // same schema, call [Compile] once and reuse the returned [Validator]: it
 // performs the per-schema work (registry construction, Schema.Resolve, draft and
-// vocabulary detection) up front and is safe for concurrent use.
+// vocabulary detection) up front and is safe for concurrent use. [MustCompile]
+// is [Compile] but panics on error, for package-scope validators where for a
+// static schema and fixed options compilation either always succeeds or always
+// fails; it follows [MustGenerateFor], and [MustCompileJSON] is its
+// [CompileJSON] counterpart (such as for embedded schema files).
 //
 // A schema arriving as a JSON document rather than a [*Schema] has symmetric
 // entry points. [CompileJSON] decodes data as a single JSON schema document
