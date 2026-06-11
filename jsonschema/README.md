@@ -391,8 +391,9 @@ type TagInterpreter interface {
 ```
 
 Interpreters receive a `FieldContext` (the field's schema, parent schema, JSON
-name, and Go type) and modify the schema in place. Multiple interpreters can be
-registered and run in order, after the `jsonschema` tag.
+name, Go type, and full `reflect.StructField`, for reading sibling struct tags
+such as the `json` tag's options) and modify the schema in place. Multiple
+interpreters can be registered and run in order, after the `jsonschema` tag.
 
 ### The `validate` interpreter
 

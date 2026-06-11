@@ -92,7 +92,8 @@ type RefResolverContext interface {
 
 // FieldContext provides context about a struct field to tag interpreters.
 type FieldContext struct {
-	// Type is the Go reflect.Type of the field.
+	// Type is the Go reflect.Type of the field. It mirrors StructField.Type,
+	// kept as a direct field for the common case.
 	Type reflect.Type
 	// Schema is the field's own generated schema, modified in place by the interpreter.
 	Schema *Schema
@@ -100,4 +101,8 @@ type FieldContext struct {
 	Parent *Schema
 	// Name is the JSON property name for the field.
 	Name string
+	// StructField is the full reflect.StructField, so an interpreter can read
+	// other struct tags (for example the json tag's omitempty) or the field's
+	// Go name and index.
+	StructField reflect.StructField
 }

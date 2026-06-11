@@ -401,6 +401,46 @@ func TestFieldContextParentPartiallyBuilt(t *testing.T) {
 	}
 }
 
+// structFieldInspector is a TagInterpreter that records the FieldContext it
+// receives, so the test can assert what generation populates.
+type structFieldInspector struct {
+	contexts []jsonschema.FieldContext
+}
+
+func (i *structFieldInspector) TagKey() string { return "inspect" }
+
+func (i *structFieldInspector) Interpret(_ string, field jsonschema.FieldContext) error {
+	i.contexts = append(i.contexts, field)
+
+	return nil
+}
+
+func TestFieldContextStructField(t *testing.T) {
+	t.Parallel()
+
+	// The full reflect.StructField reaches interpreters, so they can read
+	// sibling struct tags (here the json tag's omitempty) and the Go name.
+	interp := &structFieldInspector{}
+
+	type MyType struct {
+		Alpha string `inspect:"true" json:"alpha,omitempty"`
+	}
+
+	_, err := jsonschema.GenerateFor[MyType](
+		jsonschema.WithTagInterpreter(interp),
+	)
+	require.NoError(t, err)
+
+	require.Len(t, interp.contexts, 1)
+
+	field := interp.contexts[0]
+
+	assert.Equal(t, "alpha", field.Name)
+	assert.Equal(t, "Alpha", field.StructField.Name)
+	assert.Equal(t, "alpha,omitempty", field.StructField.Tag.Get("json"))
+	assert.Equal(t, field.Type, field.StructField.Type, "Type mirrors StructField.Type")
+}
+
 func TestSchemaTypeAliasBlocksExtension(t *testing.T) {
 	t.Parallel()
 

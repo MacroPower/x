@@ -1294,10 +1294,11 @@ func (g *generator) applyFieldInterpreters(fi structFieldInfo, fieldSchema, pare
 	for _, interp := range g.tagInterpreters {
 		if tag, ok := fi.field.Tag.Lookup(interp.TagKey()); ok {
 			ctx := FieldContext{
-				Name:   fi.jsonName,
-				Type:   fieldType,
-				Schema: fieldSchema,
-				Parent: parent,
+				Name:        fi.jsonName,
+				Type:        fieldType,
+				Schema:      fieldSchema,
+				Parent:      parent,
+				StructField: fi.field,
 			}
 			err := interp.Interpret(tag, ctx)
 			if err != nil {
