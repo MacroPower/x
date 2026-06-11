@@ -198,3 +198,76 @@ func (e *ValidationError) collectAttached(errs *[]error, seen map[*ValidationErr
 		cause.collectAttached(errs, seen)
 	}
 }
+
+// Leaves returns the concrete, user-facing failures in the error tree, with the
+// compositional and synthetic wrapper nodes that merely group them flattened
+// away.
+//
+// Compositional keywords (allOf, anyOf, oneOf, if/then/else, $ref, $dynamicRef,
+// the unevaluated* keywords) and the synthetic root that groups multiple
+// top-level failures hold their real failures in [ValidationError.Causes], so
+// Leaves descends through them. A childless node is a leaf, as is a
+// propertyNames error: it carries the inner name-check failure as a cause but is
+// itself the concrete failure, naming and locating the offending key. Each leaf
+// is returned once, even when it is shared or reached through a cycle.
+//
+// Leaves suits reporting that wants one entry per distinct failure rather than
+// the full nested tree. The receiver is included when it is itself a leaf, so a
+// single-failure error returns a one-element slice.
+func (e *ValidationError) Leaves() []*ValidationError {
+	var leaves []*ValidationError
+
+	e.collectLeaves(&leaves, map[*ValidationError]bool{})
+
+	return leaves
+}
+
+// collectLeaves appends the leaf failures reachable from e to out. The seen set
+// guards against cycles and shared nodes so each leaf is collected once.
+func (e *ValidationError) collectLeaves(out *[]*ValidationError, seen map[*ValidationError]bool) {
+	if e == nil || seen[e] {
+		return
+	}
+
+	seen[e] = true
+
+	if e.isLeaf() {
+		*out = append(*out, e)
+
+		return
+	}
+
+	for _, cause := range e.Causes {
+		cause.collectLeaves(out, seen)
+	}
+}
+
+// isLeaf reports whether e is a concrete failure to report rather than a wrapper
+// to descend into. A node with no causes is always a leaf; a propertyNames node
+// is a leaf despite its cause, because it is the concrete, self-describing
+// failure for an offending key.
+func (e *ValidationError) isLeaf() bool {
+	return len(e.Causes) == 0 || e.Keyword == keywordPropertyNames
+}
+
+// TargetsKey reports whether the failing keyword constrains a member's key or an
+// object's or array's structure — its presence, name, size, or membership —
+// rather than the content of a value.
+//
+// It is true for additionalProperties, propertyNames, required, the object size
+// keywords (minProperties, maxProperties), and the array size and membership
+// keywords (minItems, maxItems, uniqueItems, contains, minContains,
+// maxContains). A source-mapping consumer can use it to decide whether to
+// highlight a key (or the containing key) instead of a value when rendering a
+// failure against the original input document.
+func (e *ValidationError) TargetsKey() bool {
+	switch e.Keyword {
+	case keywordAdditionalProperties, keywordPropertyNames, keywordRequired,
+		keywordMinProperties, keywordMaxProperties,
+		keywordMinItems, keywordMaxItems, keywordUniqueItems,
+		keywordContains, keywordMinContains, keywordMaxContains:
+		return true
+	default:
+		return false
+	}
+}

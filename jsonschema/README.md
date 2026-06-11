@@ -453,6 +453,14 @@ flatten child failures into the parent's `Causes`, each retaining its full path.
 schema yields a root error with `Keyword == "$ref"` whose `Causes[0].Keyword ==
 "minLength"`.
 
+Two helpers support reporting against the source document. `Leaves()` flattens
+the wrapper nodes and returns one entry per distinct concrete failure (a
+`propertyNames` error counts as a leaf, naming the offending key).
+`TargetsKey()` reports whether the failing keyword constrains a key, name, or
+collection structure (`required`, `additionalProperties`, `propertyNames`,
+`minItems`, `minProperties`, ...) rather than a value, so a source-mapping
+consumer can highlight the key instead of the value.
+
 A `false` subschema failure ("value is not allowed") carries the applicator
 keyword that applied it — `additionalProperties` for
 `additionalProperties: false`, and likewise `properties`,
