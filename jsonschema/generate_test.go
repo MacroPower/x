@@ -7,6 +7,7 @@ import (
 	"math/big"
 	"net/url"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 	"unsafe"
@@ -1471,13 +1472,16 @@ func TestGenerateFor_RecursiveType_WithDefinitionsFalse(t *testing.T) {
 func TestGenerateFor_WithComments_TypeDescription(t *testing.T) {
 	t.Parallel()
 
-	// Draft has a doc comment: "Draft represents a JSON Schema draft version.".
+	// Draft has a doc comment; the full text is extracted, so pin its
+	// opening sentence rather than the whole comment.
 	s, err := jsonschema.GenerateFor[jsonschema.Draft](
 		jsonschema.WithComments(true),
 	)
 	require.NoError(t, err)
 
-	assert.Equal(t, "Draft represents a JSON Schema draft version.", s.Description)
+	assert.True(t,
+		strings.HasPrefix(s.Description, "Draft represents a JSON Schema draft version."),
+		"description should start with the doc comment's opening sentence, got: %s", s.Description)
 }
 
 func TestGenerateFor_WithComments_StructDescription(t *testing.T) {

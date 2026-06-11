@@ -299,15 +299,16 @@ func TestValidationErrorErrorCycleProtection(t *testing.T) {
 	}, "cyclic ValidationError tree should not cause stack overflow")
 }
 
-func TestDraftIotaOrdering(t *testing.T) {
+func TestDraftOrdering(t *testing.T) {
 	t.Parallel()
 
-	// Draft7=0, Draft2020=1. Can't insert Draft2019 between them.
 	assert.Less(t, int(jsonschema.Draft7), int(jsonschema.Draft2020),
 		"Draft7 < Draft2020 for comparison operators to work")
 
-	// If a Draft2019 were added, it would need to be between 0 and 1,
-	// which is impossible with the current iota ordering.
+	// The values are spaced so a future draft (2019-09) can slot between
+	// the existing ones without renumbering.
+	assert.Less(t, 1, int(jsonschema.Draft2020)-int(jsonschema.Draft7),
+		"adjacent integer values leave no room for intermediate drafts")
 }
 
 func TestUnknownDraftDoesNotEmit2020URI(t *testing.T) {

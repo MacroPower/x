@@ -3207,8 +3207,8 @@ func TestBothFormatVocabsActiveAssertsFormat(t *testing.T) {
 func TestDraftEnumZeroValue(t *testing.T) {
 	t.Parallel()
 
-	// The Draft zero value is Draft2020 (Draft2020 = 0, Draft7 = -1), so an
-	// uninitialized Draft targets Draft 2020-12.
+	// The Draft zero value is Draft2020 (Draft2020 = 0, Draft7 negative), so
+	// an uninitialized Draft targets Draft 2020-12.
 	var d jsonschema.Draft
 
 	assert.Equal(t, jsonschema.Draft2020, d,

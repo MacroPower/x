@@ -1,6 +1,10 @@
 package jsonschema
 
-// Draft represents a JSON Schema draft version.
+// Draft represents a JSON Schema draft version. Older drafts compare as
+// less than newer ones, so ordering comparisons are meaningful; the numeric
+// values themselves are not part of the API and may change between releases
+// (they are spaced so a future draft can slot between existing ones), so a
+// Draft must not be persisted or transmitted as an integer.
 type Draft int
 
 const (
@@ -11,8 +15,9 @@ const (
 
 	// Draft7 targets JSON Schema Draft-07
 	// (http://json-schema.org/draft-07/schema#). It sorts before Draft2020
-	// so older drafts compare as less than newer ones.
-	Draft7 Draft = -1
+	// so older drafts compare as less than newer ones, with room left
+	// between them for the drafts in between (2019-09).
+	Draft7 Draft = -100
 )
 
 // schemaURI returns the $schema URI for the draft. An unrecognized draft
