@@ -81,11 +81,11 @@ func WithRefResolver(r RefResolver) ValidateOption {
 	return func(v *validator) { v.refResolver = r }
 }
 
-// WithResolveOptions passes upstream [jsonschema.ResolveOptions] to
-// Schema.Resolve for structural pre-validation. The validation walk resolves
-// local fragment refs directly and remote/absolute refs via a configured
-// [RefResolver] (see [WithRefResolver]).
-func WithResolveOptions(opts *jsonschema.ResolveOptions) ValidateOption {
+// WithResolveOptions passes [ResolveOptions] (an alias for the upstream
+// options type) to Schema.Resolve for structural pre-validation. The
+// validation walk resolves local fragment refs directly and remote/absolute
+// refs via a configured [RefResolver] (see [WithRefResolver]).
+func WithResolveOptions(opts *ResolveOptions) ValidateOption {
 	return func(v *validator) { v.resolveOpts = opts }
 }
 
@@ -175,7 +175,7 @@ type validator struct {
 	metaSchemas           map[string]*Schema // $schema URI → metaschema
 	visiting              map[visitKey]bool
 	root                  *Schema
-	resolveOpts           *jsonschema.ResolveOptions
+	resolveOpts           *ResolveOptions
 	formatsForce          *bool           // explicit WithFormats override; nil if unset
 	vocabOverride         map[string]bool // from WithVocabularies
 	formatCheckers        map[string]func(string) error
@@ -867,7 +867,7 @@ func CompileContext(ctx context.Context, schema *Schema, opts ...ValidateOption)
 	// never re-calls the resolver for the same URI.
 	// Copy the caller's options so assigning Loader doesn't mutate a
 	// *ResolveOptions shared across calls.
-	var resolveOpts jsonschema.ResolveOptions
+	var resolveOpts ResolveOptions
 
 	if v.resolveOpts != nil {
 		resolveOpts = *v.resolveOpts
@@ -1223,7 +1223,7 @@ func ValidateContext(ctx context.Context, schema *Schema, instance any, opts ...
 //     target is itself well-formed.
 //
 // Any check failing means the original error stands.
-func (v *validator) resolveErrorIsRefOnly(schema *Schema, resolveOpts jsonschema.ResolveOptions) bool {
+func (v *validator) resolveErrorIsRefOnly(schema *Schema, resolveOpts ResolveOptions) bool {
 	// A non-tree schema must be rejected before the JSON-clone-based checks
 	// below. The clone round-trips through JSON, which silently collapses Go
 	// pointer aliasing. Upstream rejects a schema whose sub-schemas do not form
@@ -1243,7 +1243,7 @@ func (v *validator) resolveErrorIsRefOnly(schema *Schema, resolveOpts jsonschema
 // structureResolves reports whether schema resolves cleanly once every $ref and
 // $dynamicRef is removed, isolating structural and meta-schema validity from
 // reference target lookup. The caller must have confirmed [schemaFormsTree].
-func (v *validator) structureResolves(schema *Schema, resolveOpts jsonschema.ResolveOptions) bool {
+func (v *validator) structureResolves(schema *Schema, resolveOpts ResolveOptions) bool {
 	stripped, err := cloneSchema(schema)
 	if err != nil {
 		return false
@@ -1267,7 +1267,7 @@ func (v *validator) structureResolves(schema *Schema, resolveOpts jsonschema.Res
 // unknown keywords or non-applicator keyword internals, since those have no
 // typed Schema field. A reference this package cannot follow leaves refResolveErr
 // set as a side effect; it is cleared so it does not leak into a later error.
-func (v *validator) refsResolveWellFormed(schema *Schema, resolveOpts jsonschema.ResolveOptions) bool {
+func (v *validator) refsResolveWellFormed(schema *Schema, resolveOpts ResolveOptions) bool {
 	ok := true
 
 	eachSubschema(schema, func(s *Schema) {
@@ -1300,7 +1300,7 @@ func (v *validator) refsResolveWellFormed(schema *Schema, resolveOpts jsonschema
 // target whose own reference cannot be followed is rejected. The own-reference
 // check is one level deep: targets reached through the typed tree are already
 // validated by [structureResolves] on the root schema.
-func (v *validator) refTargetWellFormed(target *Schema, resolveOpts jsonschema.ResolveOptions) bool {
+func (v *validator) refTargetWellFormed(target *Schema, resolveOpts ResolveOptions) bool {
 	if target == nil || !schemaFormsTree(target) {
 		return false
 	}

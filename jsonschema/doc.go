@@ -423,7 +423,8 @@
 //     2020-12 unless the format-assertion vocabulary is active.
 //   - [WithContent] asserts contentEncoding (base64) and contentMediaType
 //     (application/json) for string instances. Annotation-only by default.
-//   - [WithResolveOptions] passes upstream ResolveOptions for structural
+//   - [WithResolveOptions] passes [ResolveOptions] (an alias for the upstream
+//     options type, so no second import is needed) for structural
 //     pre-validation.
 //   - [WithVocabularies] directly specifies active vocabularies for the
 //     validation run.

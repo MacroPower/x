@@ -11,6 +11,11 @@ import (
 // reference it without importing google/jsonschema-go directly.
 type Schema = jsonschema.Schema
 
+// ResolveOptions is an alias for the upstream [jsonschema.ResolveOptions]
+// type, so callers can configure [WithResolveOptions] without importing
+// google/jsonschema-go directly.
+type ResolveOptions = jsonschema.ResolveOptions
+
 // Ptr returns a pointer to a new variable whose value is x.
 func Ptr[T any](x T) *T { return &x }
 

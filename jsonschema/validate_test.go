@@ -11,8 +11,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	upstream "github.com/google/jsonschema-go/jsonschema"
-
 	"go.jacobcolvin.com/x/jsonschema"
 )
 
@@ -5363,7 +5361,7 @@ func TestResolveOptionsNotMutated(t *testing.T) {
 
 	// A shared *ResolveOptions is copied before a Loader is injected, so the
 	// caller's value is never mutated across calls.
-	opts := &upstream.ResolveOptions{}
+	opts := &jsonschema.ResolveOptions{}
 	schema := &jsonschema.Schema{Type: "string"}
 
 	for range 2 {

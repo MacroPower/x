@@ -595,7 +595,7 @@ containing object are both identifiable from `InstancePath` alone.
 | `WithFormatValidator(name, fn)` | Register a custom `format` checker (`func(string) error`).                                                                            |
 | `WithFormats(bool)`             | Force `format` assertion on or off.                                                                                                   |
 | `WithContent(bool)`             | Assert `contentEncoding`/`contentMediaType` (annotation-only by default).                                                             |
-| `WithResolveOptions(opts)`      | Pass upstream `ResolveOptions` to `Schema.Resolve`.                                                                                   |
+| `WithResolveOptions(opts)`      | Pass `ResolveOptions` (aliased from the upstream package) to `Schema.Resolve`.                                                        |
 | `WithVocabularies(map)`         | Directly set active vocabularies (highest precedence).                                                                                |
 | `WithMetaSchema(ms)`            | Register a metaschema whose `$vocabulary` gates keyword groups.                                                                       |
 
