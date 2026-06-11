@@ -12,7 +12,7 @@
 //
 //	cfg := log.NewConfig()
 //	cfg.RegisterFlags(rootCmd.PersistentFlags())
-//	cfg.RegisterCompletions(rootCmd)
+//	cfg.MustRegisterCompletions(rootCmd)
 //
 //	handler, err := cfg.NewHandler(os.Stderr)
 //	slog.SetDefault(slog.New(handler))

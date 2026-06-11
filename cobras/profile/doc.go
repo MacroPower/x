@@ -2,7 +2,7 @@
 //
 // It supports CPU, heap, allocs, goroutine, threadcreate, block, and mutex
 // profiles through command-line flags. Use [Config.RegisterFlags] to add CLI
-// flags and [Config.RegisterCompletions] to wire up shell completions.
+// flags and [Config.MustRegisterCompletions] to wire up shell completions.
 //
 // Typical usage creates a [Config], registers flags, then creates a [Profiler]
 // to wrap command execution:
@@ -17,9 +17,12 @@
 //	}
 //
 //	cfg.RegisterFlags(rootCmd.PersistentFlags())
-//	cfg.RegisterCompletions(rootCmd)
+//	cfg.MustRegisterCompletions(rootCmd)
 //	err := fang.Execute(ctx, rootCmd, ...)
-//	stopErr := p.Stop()
+//	err = errors.Join(err, p.Stop())
+//
+// When the configuration is already populated before execution begins,
+// [Profiler.Run] wraps the start/stop lifecycle around a single function.
 //
 // Users can then enable profiling via flags like --cpu-profile=cpu.prof.
 package profile

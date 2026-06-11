@@ -5,6 +5,8 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
+
+	"go.jacobcolvin.com/x/cobras"
 )
 
 // Flags holds CLI flag names for profiling configuration, allowing callers to
@@ -70,15 +72,30 @@ func NewConfig() *Config {
 }
 
 // RegisterFlags adds profiling flags to the given [*pflag.FlagSet].
+//
+// Profile paths already set on c become the flag defaults, both the runtime
+// value and the help-text DefValue; empty paths keep their profile disabled.
+// The rate flags always use the standard defaults, since zero is a meaningful
+// rate value rather than an unset one.
 func (c *Config) RegisterFlags(flags *pflag.FlagSet) {
 	// Profile output paths.
-	flags.StringVar(&c.CPUProfile, c.Flags.CPUProfile, "", "write CPU profile to file")
-	flags.StringVar(&c.HeapProfile, c.Flags.HeapProfile, "", "write heap profile to file")
-	flags.StringVar(&c.AllocsProfile, c.Flags.AllocsProfile, "", "write allocs profile to file")
-	flags.StringVar(&c.GoroutineProfile, c.Flags.GoroutineProfile, "", "write goroutine profile to file")
-	flags.StringVar(&c.ThreadcreateProfile, c.Flags.ThreadcreateProfile, "", "write threadcreate profile to file")
-	flags.StringVar(&c.BlockProfile, c.Flags.BlockProfile, "", "write block profile to file")
-	flags.StringVar(&c.MutexProfile, c.Flags.MutexProfile, "", "write mutex profile to file")
+	flags.StringVar(&c.CPUProfile, c.Flags.CPUProfile, c.CPUProfile, "write CPU profile to file")
+	flags.StringVar(&c.HeapProfile, c.Flags.HeapProfile, c.HeapProfile, "write heap profile to file")
+	flags.StringVar(&c.AllocsProfile, c.Flags.AllocsProfile, c.AllocsProfile, "write allocs profile to file")
+	flags.StringVar(
+		&c.GoroutineProfile,
+		c.Flags.GoroutineProfile,
+		c.GoroutineProfile,
+		"write goroutine profile to file",
+	)
+	flags.StringVar(
+		&c.ThreadcreateProfile,
+		c.Flags.ThreadcreateProfile,
+		c.ThreadcreateProfile,
+		"write threadcreate profile to file",
+	)
+	flags.StringVar(&c.BlockProfile, c.Flags.BlockProfile, c.BlockProfile, "write block profile to file")
+	flags.StringVar(&c.MutexProfile, c.Flags.MutexProfile, c.MutexProfile, "write mutex profile to file")
 
 	// Rate configuration.
 	flags.IntVar(&c.MemProfileRate, c.Flags.MemProfileRate, 524288, "memory profile rate (bytes per sample)")
@@ -109,6 +126,14 @@ func (c *Config) RegisterCompletions(cmd *cobra.Command) error {
 	}
 
 	return nil
+}
+
+// MustRegisterCompletions registers shell completions for profiling flags on
+// cmd, panicking on error. Registration only fails on programmer error: the
+// flags in c.Flags are not registered on cmd, or a completion is already
+// registered for them.
+func (c *Config) MustRegisterCompletions(cmd *cobra.Command) {
+	cobras.Must(c.RegisterCompletions(cmd))
 }
 
 // NewProfiler creates a new [Profiler] using this [Config].

@@ -1,6 +1,9 @@
 package profile_test
 
 import (
+	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -151,4 +154,218 @@ func TestProfile_RegisterFlags_Defaults(t *testing.T) {
 	assert.Equal(t, 524288, p.MemProfileRate)
 	assert.Equal(t, 1, p.BlockProfileRate)
 	assert.Equal(t, 1, p.MutexProfileFraction)
+}
+
+func TestProfile_RegisterFlags_PresetPathDefaults(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		cpuProfile string
+		args       []string
+		want       string
+		wantDef    string
+	}{
+		"empty path stays disabled": {
+			cpuProfile: "",
+			want:       "",
+			wantDef:    "",
+		},
+		"pre-set path becomes the default": {
+			cpuProfile: "preset.prof",
+			want:       "preset.prof",
+			wantDef:    "preset.prof",
+		},
+		"flag overrides pre-set path": {
+			cpuProfile: "preset.prof",
+			args:       []string{"--cpu-profile=flag.prof"},
+			want:       "flag.prof",
+			wantDef:    "preset.prof",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			p := profile.NewConfig()
+			p.CPUProfile = tc.cpuProfile
+
+			flags := pflag.NewFlagSet("test", pflag.ContinueOnError)
+			p.RegisterFlags(flags)
+
+			// DefValue drives the default shown in help text.
+			assert.Equal(t, tc.wantDef, flags.Lookup(p.Flags.CPUProfile).DefValue)
+
+			require.NoError(t, flags.Parse(tc.args))
+			assert.Equal(t, tc.want, p.CPUProfile)
+		})
+	}
+}
+
+func TestConfig_MustRegisterCompletions(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		registerFlags bool
+		panics        bool
+	}{
+		"flags registered": {
+			registerFlags: true,
+			panics:        false,
+		},
+		"flags missing panics": {
+			registerFlags: false,
+			panics:        true,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg := profile.NewConfig()
+			cmd := &cobra.Command{Use: "test"}
+
+			if tc.registerFlags {
+				cfg.RegisterFlags(cmd.Flags())
+			}
+
+			registerFn := func() { cfg.MustRegisterCompletions(cmd) }
+
+			if tc.panics {
+				require.Panics(t, registerFn)
+
+				return
+			}
+
+			require.NotPanics(t, registerFn)
+
+			_, ok := cmd.GetFlagCompletionFunc(cfg.Flags.MemProfileRate)
+			assert.True(t, ok)
+		})
+	}
+}
+
+// TestProfiler_Run is not parallel: profiling mutates process-wide runtime
+// state (sampling rates and the single global CPU profiler).
+func TestProfiler_Run(t *testing.T) { //nolint:paralleltest // See above.
+	errRun := errors.New("run")
+
+	tcs := map[string]struct {
+		cpuProfileDir string
+		fnErr         error
+		wantFnCalled  bool
+		wantProfiles  bool
+		err           error
+	}{
+		"profiles written on success": {
+			wantFnCalled: true,
+			wantProfiles: true,
+		},
+		"fn error joined with profiles still written": {
+			fnErr:        errRun,
+			wantFnCalled: true,
+			wantProfiles: true,
+			err:          errRun,
+		},
+		"start error returned without invoking fn": {
+			cpuProfileDir: "missing-dir",
+			wantFnCalled:  false,
+			wantProfiles:  false,
+		},
+	}
+
+	for name, tc := range tcs { //nolint:paralleltest // See above.
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+
+			cfg := profile.NewConfig()
+			cfg.CPUProfile = filepath.Join(dir, tc.cpuProfileDir, "cpu.prof")
+			cfg.HeapProfile = filepath.Join(dir, "heap.prof")
+			cfg.MemProfileRate = 524288
+
+			p := cfg.NewProfiler()
+
+			fnCalled := false
+			err := p.Run(func() error {
+				fnCalled = true
+
+				return tc.fnErr
+			})
+
+			assert.Equal(t, tc.wantFnCalled, fnCalled)
+
+			switch {
+			case tc.err != nil:
+				require.ErrorIs(t, err, tc.err)
+			case tc.wantFnCalled:
+				require.NoError(t, err)
+			default:
+				require.Error(t, err)
+			}
+
+			if tc.wantProfiles {
+				assert.FileExists(t, cfg.CPUProfile)
+				assert.FileExists(t, cfg.HeapProfile)
+			} else {
+				assert.NoFileExists(t, cfg.CPUProfile)
+			}
+		})
+	}
+}
+
+// TestProfiler_Stop_Idempotent is not parallel: profiling mutates
+// process-wide runtime state (sampling rates and the single global CPU
+// profiler).
+func TestProfiler_Stop_Idempotent(t *testing.T) { //nolint:paralleltest // See above.
+	dir := t.TempDir()
+
+	cfg := profile.NewConfig()
+	cfg.CPUProfile = filepath.Join(dir, "cpu.prof")
+	cfg.HeapProfile = filepath.Join(dir, "heap.prof")
+	cfg.MemProfileRate = 524288
+
+	p := cfg.NewProfiler()
+
+	require.NoError(t, p.Start())
+	require.NoError(t, p.Stop())
+
+	assert.FileExists(t, cfg.CPUProfile)
+	assert.FileExists(t, cfg.HeapProfile)
+
+	// A second Stop returns nil and does not rewrite snapshots.
+	require.NoError(t, os.Remove(cfg.HeapProfile))
+	require.NoError(t, p.Stop())
+	assert.NoFileExists(t, cfg.HeapProfile)
+}
+
+// TestProfiler_Restart is not parallel: profiling mutates process-wide
+// runtime state (sampling rates and the single global CPU profiler).
+func TestProfiler_Restart(t *testing.T) { //nolint:paralleltest // See above.
+	dir := t.TempDir()
+
+	cfg := profile.NewConfig()
+	cfg.CPUProfile = filepath.Join(dir, "cpu.prof")
+	cfg.HeapProfile = filepath.Join(dir, "heap.prof")
+	cfg.MemProfileRate = 524288
+
+	p := cfg.NewProfiler()
+
+	require.NoError(t, p.Start())
+	require.NoError(t, p.Stop())
+
+	// A new Start arms Stop again: the second session must release the
+	// global CPU profiler and write its profiles, not silently no-op.
+	require.NoError(t, os.Remove(cfg.CPUProfile))
+	require.NoError(t, os.Remove(cfg.HeapProfile))
+
+	require.NoError(t, p.Start())
+	require.NoError(t, p.Stop())
+
+	assert.FileExists(t, cfg.CPUProfile)
+	assert.FileExists(t, cfg.HeapProfile)
+
+	stat, err := os.Stat(cfg.CPUProfile)
+	require.NoError(t, err)
+	assert.Positive(t, stat.Size(), "second session must write a non-empty CPU profile")
 }

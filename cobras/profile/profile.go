@@ -1,26 +1,34 @@
 package profile
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"runtime"
 	"runtime/pprof"
+
+	"go.jacobcolvin.com/x/cobras"
 )
 
 // Profiler controls the lifecycle of runtime profiling sessions.
 //
 // Call [Profiler.Start] to begin profiling and [Profiler.Stop] to write all
-// enabled profiles.
+// enabled profiles, or use [Profiler.Run] to wrap both around a function.
 //
 // Create instances with [Config.NewProfiler].
 type Profiler struct {
 	cpuFile *os.File
 	Config
+	stopped bool
 }
 
 // Start configures runtime profiling rates and starts CPU profiling if enabled.
 // Call [Profiler.Stop] when profiling is complete to write snapshot profiles.
 func (c *Profiler) Start() error {
+	// A new session arms Stop again after a previous successful Stop, so a
+	// restarted profiler writes its profiles instead of silently no-opping.
+	c.stopped = false
+
 	// Configure profiling rates.
 	runtime.MemProfileRate = c.MemProfileRate
 	runtime.SetBlockProfileRate(c.BlockProfileRate)
@@ -37,7 +45,7 @@ func (c *Profiler) Start() error {
 
 		err = pprof.StartCPUProfile(f)
 		if err != nil {
-			must(c.cpuFile.Close())
+			cobras.Must(c.cpuFile.Close())
 
 			c.cpuFile = nil
 
@@ -48,19 +56,47 @@ func (c *Profiler) Start() error {
 	return nil
 }
 
+// Run starts the profiler, invokes fn, then stops the profiler. It returns
+// the error from fn joined with any error from [Profiler.Stop], so profiles
+// are written even when fn returns an error.
+func (c *Profiler) Run(fn func() error) error {
+	err := c.Start()
+	if err != nil {
+		return err
+	}
+
+	return errors.Join(fn(), c.Stop())
+}
+
 // Stop stops CPU profiling and writes all enabled snapshot profiles.
+//
+// Stop is idempotent: after a successful Stop, subsequent calls do nothing
+// and return nil.
 func (c *Profiler) Stop() error {
+	if c.stopped {
+		return nil
+	}
+
 	// Stop CPU profiling.
 	if c.cpuFile != nil {
 		pprof.StopCPUProfile()
 
 		err := c.cpuFile.Close()
+		c.cpuFile = nil
+
 		if err != nil {
 			return fmt.Errorf("closing CPU profile: %w", err)
 		}
 	}
 
-	return c.writeSnapshots()
+	err := c.writeSnapshots()
+	if err != nil {
+		return err
+	}
+
+	c.stopped = true
+
+	return nil
 }
 
 // writeSnapshots writes all enabled snapshot profiles (heap, allocs, goroutine,
@@ -101,14 +137,14 @@ func (c *Profiler) writeProfile(name, path string) error {
 
 	prof := pprof.Lookup(name)
 	if prof == nil {
-		must(f.Close())
+		cobras.Must(f.Close())
 
 		return fmt.Errorf("unknown profile: %s", name)
 	}
 
 	err = prof.WriteTo(f, 0)
 	if err != nil {
-		must(f.Close())
+		cobras.Must(f.Close())
 
 		return fmt.Errorf("write %s profile: %w", name, err)
 	}
@@ -119,10 +155,4 @@ func (c *Profiler) writeProfile(name, path string) error {
 	}
 
 	return nil
-}
-
-func must(err error) {
-	if err != nil {
-		panic(err)
-	}
 }
