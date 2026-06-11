@@ -655,6 +655,13 @@ generation and validation:
 // by one sub-schema-bearing keyword, with map children in sorted-key order.
 children := jsonschema.Subschemas(s)
 
+// SubschemaRefs is the keyword-labeled form: the same children in the same
+// order, each paired with the JSON Pointer addressing it from s
+// ("/properties/a", "/allOf/0", "/items"), for path-tracking traversals.
+for _, ref := range jsonschema.SubschemaRefs(s) {
+	fmt.Println(ref.Pointer, ref.Schema.Type)
+}
+
 // Walk visits s and every schema transitively reachable through Subschemas.
 err := jsonschema.Walk(s, func(s *jsonschema.Schema) error {
 	s.Description = "" // strip annotations, rewrite $refs, collect types, ...
@@ -672,7 +679,10 @@ hold sub-schemas: the applicators (`items`, `prefixItems`,
 typed `Schema` fields are included, not sub-schemas carried as raw JSON in
 unknown keywords. Children held in maps are returned in sorted-key order so
 traversal is deterministic, and a maintenance test fails when an upstream
-`Schema` field addition is not covered.
+`Schema` field addition is not covered. `Subschemas` delegates to
+`SubschemaRefs`, so the labeled and unlabeled forms can never disagree on
+field coverage or order; appending each visited child's `Pointer` while
+descending yields the schema path the package's own errors report.
 
 `Walk` is pre-order: the function runs on a schema before that schema's
 children are gathered, so it may replace or mutate sub-schema fields and the

@@ -91,6 +91,90 @@ func TestSubschemasDirectOnly(t *testing.T) {
 	assert.Equal(t, []*jsonschema.Schema{child}, jsonschema.Subschemas(root))
 }
 
+func TestSubschemaRefs(t *testing.T) {
+	t.Parallel()
+
+	propA := &jsonschema.Schema{Type: "string"}
+	escaped := &jsonschema.Schema{Type: "boolean"}
+	allOf0 := &jsonschema.Schema{MinLength: jsonschema.Ptr(1)}
+	allOf1 := &jsonschema.Schema{MaxLength: jsonschema.Ptr(2)}
+	items := &jsonschema.Schema{Type: "number"}
+
+	tests := map[string]struct {
+		schema *jsonschema.Schema
+		want   []jsonschema.SubschemaRef
+	}{
+		"nil schema": {
+			schema: nil,
+			want:   nil,
+		},
+		"no sub-schemas": {
+			schema: &jsonschema.Schema{Type: "string", Title: "leaf"},
+			want:   nil,
+		},
+		"map, list, and single keywords labeled": {
+			schema: &jsonschema.Schema{
+				Properties: map[string]*jsonschema.Schema{"a": propA},
+				AllOf:      []*jsonschema.Schema{allOf0, allOf1},
+				Items:      items,
+			},
+			want: []jsonschema.SubschemaRef{
+				{Pointer: "/properties/a", Schema: propA},
+				{Pointer: "/allOf/0", Schema: allOf0},
+				{Pointer: "/allOf/1", Schema: allOf1},
+				{Pointer: "/items", Schema: items},
+			},
+		},
+		"member keys escaped per RFC 6901": {
+			schema: &jsonschema.Schema{
+				Properties: map[string]*jsonschema.Schema{"a/b~c": escaped},
+			},
+			want: []jsonschema.SubschemaRef{
+				{Pointer: "/properties/a~1b~0c", Schema: escaped},
+			},
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tt.want, jsonschema.SubschemaRefs(tt.schema))
+		})
+	}
+}
+
+// TestSubschemaRefsAgreesWithSubschemas pins the delegation contract: the
+// labeled and unlabeled forms return the same children in the same order, so
+// traversals that pair children position by position and traversals that
+// track paths can never disagree.
+func TestSubschemaRefsAgreesWithSubschemas(t *testing.T) {
+	t.Parallel()
+
+	schema := &jsonschema.Schema{
+		Properties: map[string]*jsonschema.Schema{
+			"b": {Type: "integer"},
+			"a": {Type: "string"},
+		},
+		Defs: map[string]*jsonschema.Schema{
+			"z": {Type: "object"},
+		},
+		AllOf: []*jsonschema.Schema{{MinLength: jsonschema.Ptr(1)}, nil, {MaxLength: jsonschema.Ptr(2)}},
+		Items: &jsonschema.Schema{Type: "number"},
+		Not:   &jsonschema.Schema{},
+	}
+
+	refs := jsonschema.SubschemaRefs(schema)
+	children := jsonschema.Subschemas(schema)
+
+	require.Len(t, refs, len(children))
+
+	for i, ref := range refs {
+		assert.Same(t, children[i], ref.Schema)
+		assert.NotEmpty(t, ref.Pointer)
+	}
+}
+
 func TestWalk(t *testing.T) {
 	t.Parallel()
 

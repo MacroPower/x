@@ -28,39 +28,45 @@ var SkipChildren = errors.New("skip this schema's children")
 // hold sub-schemas: [Walk] and the internal traversals build on it, and a
 // maintenance test fails when an upstream Schema addition is not covered.
 func Subschemas(s *Schema) []*Schema {
-	refs := subschemaRefs(s)
+	refs := SubschemaRefs(s)
 	if len(refs) == 0 {
 		return nil
 	}
 
 	children := make([]*Schema, len(refs))
 	for i, ref := range refs {
-		children[i] = ref.schema
+		children[i] = ref.Schema
 	}
 
 	return children
 }
 
-// subschemaRef pairs one direct sub-schema with the RFC 6901 JSON Pointer
-// fragment addressing it from its parent: the keyword token plus, for map
-// and list keywords, the escaped member key or the element index (for
-// example "/properties/a", "/allOf/0", "/items").
-type subschemaRef struct {
-	schema *Schema
-	token  string
+// SubschemaRef pairs one direct sub-schema with the RFC 6901 JSON Pointer
+// addressing it from its parent.
+type SubschemaRef struct {
+	// Schema is the child schema.
+	Schema *Schema
+
+	// Pointer is the JSON Pointer from the parent schema to Schema: the
+	// keyword token plus, for map and list keywords, the escaped member key
+	// or the element index (for example "/properties/a", "/allOf/0",
+	// "/items"). Appending each visited child's Pointer while descending
+	// yields the schema path the package's own errors report.
+	Pointer string
 }
 
-// subschemaRefs is the keyword-labeled form of [Subschemas]: the same
-// children in the same order, each paired with the JSON Pointer token
-// addressing it. The exported function delegates here, so traversals that
-// pair children position by position and traversals that track paths can
-// never disagree on field coverage or order.
-func subschemaRefs(s *Schema) []subschemaRef {
+// SubschemaRefs is the keyword-labeled form of [Subschemas]: the same
+// children in the same order, each paired with the JSON Pointer addressing
+// it from s, so path-tracking traversals need not re-derive which keyword
+// holds each child. [Subschemas] delegates here, so traversals that pair
+// children position by position and traversals that track paths can never
+// disagree on field coverage or order. A nil s returns nil.
+func SubschemaRefs(s *Schema) []SubschemaRef {
 	if s == nil {
 		return nil
 	}
 
-	var children []subschemaRef
+	var children []SubschemaRef
 
 	for _, entry := range []struct {
 		m       map[string]*Schema
@@ -75,9 +81,9 @@ func subschemaRefs(s *Schema) []subschemaRef {
 	} {
 		for _, key := range slices.Sorted(maps.Keys(entry.m)) {
 			if sub := entry.m[key]; sub != nil {
-				children = append(children, subschemaRef{
-					token:  "/" + entry.keyword + "/" + escapeJSONPointer(key),
-					schema: sub,
+				children = append(children, SubschemaRef{
+					Pointer: "/" + entry.keyword + "/" + escapeJSONPointer(key),
+					Schema:  sub,
 				})
 			}
 		}
@@ -95,9 +101,9 @@ func subschemaRefs(s *Schema) []subschemaRef {
 	} {
 		for i, sub := range entry.list {
 			if sub != nil {
-				children = append(children, subschemaRef{
-					token:  "/" + entry.keyword + "/" + strconv.Itoa(i),
-					schema: sub,
+				children = append(children, SubschemaRef{
+					Pointer: "/" + entry.keyword + "/" + strconv.Itoa(i),
+					Schema:  sub,
 				})
 			}
 		}
@@ -121,9 +127,9 @@ func subschemaRefs(s *Schema) []subschemaRef {
 		{s.ContentSchema, keywordContentSchema},
 	} {
 		if entry.s != nil {
-			children = append(children, subschemaRef{
-				token:  "/" + entry.keyword,
-				schema: entry.s,
+			children = append(children, SubschemaRef{
+				Pointer: "/" + entry.keyword,
+				Schema:  entry.s,
 			})
 		}
 	}

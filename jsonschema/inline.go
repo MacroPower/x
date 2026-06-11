@@ -279,8 +279,8 @@ func (in *inliner) recordPaths(s *Schema, path string) {
 
 	in.paths[s] = path
 
-	for _, child := range subschemaRefs(s) {
-		in.recordPaths(child.schema, path+child.token)
+	for _, child := range SubschemaRefs(s) {
+		in.recordPaths(child.Schema, path+child.Pointer)
 	}
 }
 
@@ -353,10 +353,10 @@ func (in *inliner) walkPair(working, pristine *Schema, path string) error {
 	}
 
 	workingChildren := Subschemas(working)
-	pristineChildren := subschemaRefs(pristine)
+	pristineChildren := SubschemaRefs(pristine)
 
 	for i, p := range pristineChildren {
-		err := in.walkPair(workingChildren[i], p.schema, path+p.token)
+		err := in.walkPair(workingChildren[i], p.Schema, path+p.Pointer)
 		if err != nil {
 			return err
 		}
