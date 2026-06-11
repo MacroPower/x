@@ -1,6 +1,10 @@
 package jsonschema
 
-import "reflect"
+import (
+	"encoding/json"
+	"fmt"
+	"reflect"
+)
 
 // Option configures schema generation.
 type Option func(*generator)
@@ -80,6 +84,97 @@ func WithAdditionalProperties(allowed bool) Option {
 // map -> {"type":"object"}, *T -> the bare value schema, no null branch.
 func WithNullable(allowed bool) Option {
 	return func(g *generator) { g.nullable = allowed }
+}
+
+// WithDefaultsFrom seeds property defaults on the root object schema from an
+// instance of the generated type. After generation, instance is marshaled
+// with encoding/json; each top-level key in the output that matches a root
+// property gets its value as that property's Default, overwriting any
+// default set via struct tags. Keys omitted by omitempty or omitzero leave
+// Default unset, so presence follows the json tags exactly.
+//
+// Generate returns an error wrapping [ErrInvalidDefaultsInstance] when the
+// pointer-dereferenced dynamic type of instance is not the
+// pointer-dereferenced generated type, or when the instance does not marshal
+// to a JSON object. Nested struct, slice, and map values become whole-value
+// defaults on their top-level property. A pointer root's nullable anyOf
+// wrapper is resolved to its value branch first, so the defaults reach the
+// object schema (or its $defs entry) inside. When the root schema remains a
+// $defs entry because the type references itself, the defaults are applied to
+// that definition's properties, so every recursive occurrence of the type
+// shares them. Under [Draft7], a default landing on a $ref'd property moves
+// the $ref into an allOf wrap, the same shape tag defaults produce, because
+// Draft-07 readers ignore keywords beside $ref.
+func WithDefaultsFrom(instance any) Option {
+	return func(g *generator) {
+		g.defaultsFrom = instance
+		g.defaultsFromSet = true
+	}
+}
+
+// WithRootTitle controls whether the root schema's title is set to the
+// generated root type's name when no title is otherwise present. The
+// configured namer ([WithNamer]) is honored, so root and $defs naming stay
+// consistent. Unnamed roots (anonymous structs, maps, slices) leave the
+// title unset. Under [Draft7], a self-referential root stays a bare $ref
+// into definitions, where a sibling title would be ignored; the title is set
+// on the definitions entry instead, shared by every occurrence of the type.
+// Defaults to false.
+func WithRootTitle(enabled bool) Option {
+	return func(g *generator) { g.rootTitle = enabled }
+}
+
+// applyInstanceDefaults marshals the [WithDefaultsFrom] instance and copies
+// each top-level key of the output onto the matching property's Default in
+// schema. The instance's pointer-dereferenced dynamic type must be rootType
+// (the pointer-dereferenced generated type) and the marshaled output must be
+// a JSON object; either violation returns an error wrapping
+// [ErrInvalidDefaultsInstance]. Keys absent from the output (omitted by
+// omitempty or omitzero) leave their property untouched, and keys without a
+// matching property are ignored. Under [Draft7], a property that receives a
+// default beside a non-empty $ref has the $ref moved into an allOf wrap
+// (see [generator.wrapRefForDraft7]); Draft-07 readers ignore keywords
+// beside $ref, so the sibling default would otherwise be discarded.
+func (g *generator) applyInstanceDefaults(instance any, rootType reflect.Type, schema *Schema) error {
+	instType := reflect.TypeOf(instance)
+	for instType != nil && instType.Kind() == reflect.Pointer {
+		instType = instType.Elem()
+	}
+
+	if instType != rootType {
+		return fmt.Errorf("%w: instance type %v does not match root type %s",
+			ErrInvalidDefaultsInstance, instType, rootType)
+	}
+
+	data, err := json.Marshal(instance)
+	if err != nil {
+		return fmt.Errorf("marshal defaults instance: %w", err)
+	}
+
+	var values map[string]json.RawMessage
+
+	err = json.Unmarshal(data, &values)
+	// Unmarshaling JSON null into a map leaves it nil without an error, so a
+	// nil map means the instance marshaled to null rather than to an object.
+	if err != nil || values == nil {
+		return fmt.Errorf("%w: instance of type %s does not marshal to a JSON object",
+			ErrInvalidDefaultsInstance, instType)
+	}
+
+	for key, raw := range values {
+		if prop, ok := schema.Properties[key]; ok && prop != nil {
+			prop.Default = raw
+			// The default may now sit beside a $ref (a definitions-extracted
+			// field), where Draft-07 readers would ignore it; wrap the $ref
+			// in allOf, the same shape the tag-default path produces. This
+			// runs after disambiguateDefs, so repointing the tracked ref
+			// record inside the wrap is harmless. No-op for other drafts and
+			// for properties without a $ref.
+			g.wrapRefForDraft7(prop)
+		}
+	}
+
+	return nil
 }
 
 // GenerateFor generates a JSON Schema for the type parameter T.

@@ -1011,3 +1011,139 @@ func TestTagEnumExamplesEmptySegment(t *testing.T) {
 		})
 	}
 }
+
+// TestTagScalarAfterTypeOverride pins the effective scalar-parse type for the
+// default/const/enum/examples keys: pairs apply in order, so a scalar key
+// before type= parses against the field's Go type, while one after it parses
+// against the overridden JSON type via a stand-in. Overrides to the
+// non-scalar types (array, object, null) leave no type to parse against, so
+// scalar keys following them are errors, as is the literal null (the
+// stand-ins are never pointers).
+func TestTagScalarAfterTypeOverride(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		generate func() (*jsonschema.Schema, error)
+		prop     string
+		want     string // marshaled property schema
+		err      string // substring required in the generation error
+	}{
+		"duration default after string override": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					SLA *time.Duration `json:"sla" jsonschema:"title=SLA,type=string,default=15m"`
+				}
+
+				return jsonschema.GenerateFor[T]()
+			},
+			prop: "sla",
+			want: `{"title":"SLA","type":"string","default":"15m"}`,
+		},
+		"int const after string override": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V int `json:"v" jsonschema:"type=string,const=42"`
+				}
+
+				return jsonschema.GenerateFor[T]()
+			},
+			prop: "v",
+			want: `{"type":"string","const":"42"}`,
+		},
+		"default before override keeps Go-kind parsing": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V int `json:"v" jsonschema:"default=5,type=string"`
+				}
+
+				return jsonschema.GenerateFor[T]()
+			},
+			prop: "v",
+			want: `{"type":"string","default":5}`,
+		},
+		"examples after integer override": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V string `json:"v" jsonschema:"type=integer,examples=1|2"`
+				}
+
+				return jsonschema.GenerateFor[T]()
+			},
+			prop: "v",
+			want: `{"type":"integer","examples":[1,2]}`,
+		},
+		"enum after override applies to the value schema": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					Days []string `json:"days" jsonschema:"type=string,enum=a|b"`
+				}
+
+				return jsonschema.GenerateFor[T]()
+			},
+			prop: "days",
+			// The enum lands on the field schema itself: the stand-in is
+			// never a sequence, so the enum-to-items redirection a slice
+			// field normally gets is off after the override.
+			want: `{"type":"string","items":{"type":"string"},"enum":["a","b"]}`,
+		},
+		"default after object override": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V int `json:"v" jsonschema:"type=object,default=x"`
+				}
+
+				return jsonschema.GenerateFor[T]()
+			},
+			err: `key "default" cannot follow type=object`,
+		},
+		"enum after array override": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V []string `json:"v" jsonschema:"type=array,enum=a|b"`
+				}
+
+				return jsonschema.GenerateFor[T]()
+			},
+			err: `key "enum" cannot follow type=array`,
+		},
+		"null default after string override": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V *int `json:"v" jsonschema:"type=string,default=null"`
+				}
+
+				return jsonschema.GenerateFor[T]()
+			},
+			err: "cannot assign null",
+		},
+		"overflow still checked against stand-in": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V string `json:"v" jsonschema:"type=integer,const=99999999999999999999"`
+				}
+
+				return jsonschema.GenerateFor[T]()
+			},
+			err: "invalid integer",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			s, err := tc.generate()
+			if tc.err != "" {
+				require.ErrorContains(t, err, tc.err)
+
+				return
+			}
+
+			require.NoError(t, err)
+
+			got, err := json.Marshal(s.Properties[tc.prop])
+			require.NoError(t, err)
+			assert.JSONEq(t, tc.want, string(got))
+		})
+	}
+}

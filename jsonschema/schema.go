@@ -1,6 +1,11 @@
 package jsonschema
 
-import "github.com/google/jsonschema-go/jsonschema"
+import (
+	"encoding/json"
+	"fmt"
+
+	"github.com/google/jsonschema-go/jsonschema"
+)
 
 // Schema is an alias for the upstream [jsonschema.Schema] type, so callers can
 // reference it without importing google/jsonschema-go directly.
@@ -8,6 +13,28 @@ type Schema = jsonschema.Schema
 
 // Ptr returns a pointer to a new variable whose value is x.
 func Ptr[T any](x T) *T { return &x }
+
+// Raw marshals v with encoding/json for raw-JSON schema fields such as
+// [Schema.Default].
+func Raw(v any) (json.RawMessage, error) {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return nil, fmt.Errorf("marshal raw value: %w", err)
+	}
+
+	return data, nil
+}
+
+// MustRaw is [Raw] but panics on marshal error; intended for values known
+// valid at compile time.
+func MustRaw(v any) json.RawMessage {
+	data, err := Raw(v)
+	if err != nil {
+		panic(err)
+	}
+
+	return data
+}
 
 // IsTrueSchema reports whether s is the boolean true schema form: a schema
 // with no fields set, which marshals to JSON true and accepts every

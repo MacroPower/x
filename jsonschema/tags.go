@@ -82,6 +82,14 @@ func isKeyValueTag(tag string) bool {
 }
 
 // applyJSONSchemaTag parses and applies a jsonschema struct tag to a schema.
+//
+// Pairs apply strictly in order. The scalar keys (default, const, enum,
+// examples) parse their values against the effective scalar type: the field's
+// Go type until a type= pair overrides it, and afterward a stand-in Go type
+// for the overridden JSON type (see [standInTypeFor]), so a scalar key before
+// type= keeps Go-kind parsing while one after it parses as the overridden
+// type. The non-scalar overrides (array, object, null) have no stand-in, so a
+// scalar key following one is an error.
 func applyJSONSchemaTag(tag string, fieldType reflect.Type, s *Schema) error {
 	if tag == "" {
 		return nil
@@ -91,6 +99,10 @@ func applyJSONSchemaTag(tag string, fieldType reflect.Type, s *Schema) error {
 		s.Description = tag
 		return nil
 	}
+
+	scalarType := fieldType
+
+	var overriddenType string
 
 	pairs := splitTagPairs(tag)
 	for _, pair := range pairs {
@@ -103,13 +115,58 @@ func applyJSONSchemaTag(tag string, fieldType reflect.Type, s *Schema) error {
 			return fmt.Errorf("jsonschema tag: empty key in %q", pair)
 		}
 
-		err := applyTagKeyValue(key, value, fieldType, s)
+		if scalarType == nil && isScalarValueKey(key) {
+			return fmt.Errorf("jsonschema tag: key %q cannot follow type=%s", key, overriddenType)
+		}
+
+		err := applyTagKeyValue(key, value, scalarType, s)
 		if err != nil {
 			return err
+		}
+
+		if key == keywordType {
+			scalarType = standInTypeFor(value)
+			overriddenType = value
 		}
 	}
 
 	return nil
+}
+
+// isScalarValueKey reports whether a jsonschema tag key carries scalar values
+// parsed against the effective scalar type (see [applyJSONSchemaTag]).
+func isScalarValueKey(key string) bool {
+	switch key {
+	case keywordDefault, keywordConst, keywordEnum, keywordExamples:
+		return true
+	default:
+		return false
+	}
+}
+
+// standInTypeFor returns the Go type that scalar tag values parse against
+// after a type= pair overrides the field's reflected type: the override
+// replaces the schema's type, so subsequent scalar values must parse as the
+// overridden JSON type rather than the field's Go kind. The stand-ins are
+// never pointers, so "null" scalar values are rejected after an override, and
+// never sequences, so the enum-to-items redirection a slice or array field
+// normally gets turns off: the enum constrains the overridden value schema
+// itself. The non-scalar JSON types (array, object, null) have no scalar
+// stand-in and return nil; scalar keys following such an override are an
+// error.
+func standInTypeFor(typeName string) reflect.Type {
+	switch typeName {
+	case typeNameString:
+		return reflect.TypeFor[string]()
+	case typeNameInteger:
+		return reflect.TypeFor[int64]()
+	case typeNameNumber:
+		return reflect.TypeFor[float64]()
+	case typeNameBoolean:
+		return reflect.TypeFor[bool]()
+	default: // array, object, null
+		return nil
+	}
 }
 
 // splitTagPairs splits a tag string into key=value segments on unescaped
@@ -165,7 +222,11 @@ func splitTagPairs(tag string) []string {
 }
 
 // applyTagKeyValue applies a single key=value pair from the jsonschema tag.
-func applyTagKeyValue(key, value string, fieldType reflect.Type, s *Schema) error {
+// ScalarType is the effective type the scalar keys (default, const, enum,
+// examples) parse against: the field's Go type, or the stand-in for an
+// earlier type= override (see [applyJSONSchemaTag]). Only those keys consult
+// it.
+func applyTagKeyValue(key, value string, scalarType reflect.Type, s *Schema) error {
 	switch key {
 	case keywordDescription:
 		s.Description = value
@@ -313,7 +374,7 @@ func applyTagKeyValue(key, value string, fieldType reflect.Type, s *Schema) erro
 			return fmt.Errorf("jsonschema tag: key %q requires a non-empty value", key)
 		}
 
-		v, err := parseTypedScalar(value, fieldType)
+		v, err := parseTypedScalar(value, scalarType)
 		if err != nil {
 			return fmt.Errorf("jsonschema tag: key %q: %w", key, err)
 		}
@@ -330,7 +391,7 @@ func applyTagKeyValue(key, value string, fieldType reflect.Type, s *Schema) erro
 			return fmt.Errorf("jsonschema tag: key %q requires a non-empty value", key)
 		}
 
-		v, err := parseTypedScalar(value, fieldType)
+		v, err := parseTypedScalar(value, scalarType)
 		if err != nil {
 			return fmt.Errorf("jsonschema tag: key %q: %w", key, err)
 		}
@@ -345,11 +406,11 @@ func applyTagKeyValue(key, value string, fieldType reflect.Type, s *Schema) erro
 		// On a slice or array field the enum constrains each element, not the
 		// array value itself, so the values parse against the element type and
 		// land on the item schemas ("array of enum values").
-		if base := derefType(fieldType); base.Kind() == reflect.Slice || base.Kind() == reflect.Array {
+		if base := derefType(scalarType); base.Kind() == reflect.Slice || base.Kind() == reflect.Array {
 			return applyEnumToItems(key, value, base, s)
 		}
 
-		enumVals, err := parseEnumValues(key, value, fieldType)
+		enumVals, err := parseEnumValues(key, value, scalarType)
 		if err != nil {
 			return err
 		}
@@ -369,7 +430,7 @@ func applyTagKeyValue(key, value string, fieldType reflect.Type, s *Schema) erro
 				return fmt.Errorf("jsonschema tag: key %q has an empty value segment", key)
 			}
 
-			v, err := parseTypedScalar(p, fieldType)
+			v, err := parseTypedScalar(p, scalarType)
 			if err != nil {
 				return fmt.Errorf("jsonschema tag: key %q: %w", key, err)
 			}

@@ -32,13 +32,16 @@ var (
 
 // generator holds the state for a single schema generation run.
 type generator struct {
-	typeToDefName        map[reflect.Type]string
-	typeSchemas          map[reflect.Type]*Schema
-	namer                func(reflect.Type) string
-	defs                 map[string]*Schema
-	defsNameToTypes      map[string][]reflect.Type
-	typeToDefSchema      map[reflect.Type]*Schema
-	visiting             map[reflect.Type]bool
+	typeToDefName   map[reflect.Type]string
+	typeSchemas     map[reflect.Type]*Schema
+	namer           func(reflect.Type) string
+	defs            map[string]*Schema
+	defsNameToTypes map[string][]reflect.Type
+	typeToDefSchema map[reflect.Type]*Schema
+	visiting        map[reflect.Type]bool
+	// DefaultsFrom is the WithDefaultsFrom instance; defaultsFromSet
+	// distinguishes an explicit nil instance from the option being absent.
+	defaultsFrom         any
 	refRecords           []refRecord
 	commentExtractor     *commentExtractor
 	tagInterpreters      []TagInterpreter
@@ -47,6 +50,8 @@ type generator struct {
 	definitions          bool
 	additionalProperties bool
 	nullable             bool
+	defaultsFromSet      bool
+	rootTitle            bool
 }
 
 // refRecord tracks a $ref schema and the Go type it references, enabling
@@ -120,6 +125,30 @@ func (g *generator) generate(t reflect.Type) (*Schema, error) {
 		}
 	}
 
+	// Seed property defaults from the WithDefaultsFrom instance. A pointer
+	// root under WithNullable generates an anyOf nullable wrapper whose value
+	// branch holds the object schema, so the target resolves through the
+	// wrapper first. When the resolved target is a $ref to a $defs entry
+	// (a pointer root's value branch, or a self-reference or mutual recursion
+	// kept the root from being inlined above), the defaults land on that
+	// definition's properties, shared by every occurrence of the type.
+	if g.defaultsFromSet {
+		err := g.applyInstanceDefaults(g.defaultsFrom, rootType, g.rootDefaultsTarget(schema, rootType))
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Set the root title from the type name when WithRootTitle is enabled and
+	// nothing else (WithTypeSchema, JSONSchemaProvider, an extender, or tags)
+	// supplied one. Unnamed roots produce an empty name and stay untitled.
+	if g.rootTitle {
+		target := g.rootTitleTarget(schema, rootType)
+		if name := g.namer(rootType); name != "" && target.Title == "" {
+			target.Title = name
+		}
+	}
+
 	// Set $schema on root.
 	schema.Schema = g.draft.schemaURI()
 
@@ -133,6 +162,47 @@ func (g *generator) generate(t reflect.Type) (*Schema, error) {
 	}
 
 	return schema, nil
+}
+
+// rootDefaultsTarget resolves the schema that WithDefaultsFrom seeds. A
+// pointer root under WithNullable generates an anyOf nullable wrapper whose
+// value branch holds the object schema, so the target resolves through the
+// wrapper first. When the resolved target is a $ref to a $defs entry (a
+// pointer root's value branch, or a self-reference or mutual recursion kept
+// the root from being inlined), the defaults land on that definition's
+// properties, shared by every occurrence of the type.
+func (g *generator) rootDefaultsTarget(schema *Schema, rootType reflect.Type) *Schema {
+	target := schema
+	if inner := nullableInnerSchema(target); inner != nil {
+		target = inner
+	}
+
+	if target.Ref == "" {
+		return target
+	}
+
+	if def := g.defs[g.typeToDefName[rootType]]; def != nil {
+		return def
+	}
+
+	return target
+}
+
+// rootTitleTarget resolves the schema that WithRootTitle titles. Draft-07
+// readers ignore keywords beside $ref, so when a self-referential root stays
+// a bare $ref into definitions, the title goes on the definitions entry it
+// targets instead, shared by every occurrence of the type;
+// [generator.rootDefaultsTarget] redirects the same way.
+func (g *generator) rootTitleTarget(schema *Schema, rootType reflect.Type) *Schema {
+	if g.draft != Draft7 || schema.Ref == "" {
+		return schema
+	}
+
+	if def := g.defs[g.typeToDefName[rootType]]; def != nil {
+		return def
+	}
+
+	return schema
 }
 
 // isReferenced reports whether any $defs entry contains a $ref to the named
@@ -1253,14 +1323,14 @@ func (g *generator) applyFieldInterpreters(fi structFieldInfo, fieldSchema, pare
 // added and the draft is Draft-07 (where $ref siblings are ignored).
 // This should be called after all field-level processing has been applied.
 // It moves the $ref into allOf in-place, preserving all sibling keywords.
-func (g *generator) wrapRefForDraft7(s *Schema) *Schema {
+func (g *generator) wrapRefForDraft7(s *Schema) {
 	if g.draft != Draft7 || s.Ref == "" {
-		return s
+		return
 	}
 
 	// Check if there are any sibling keywords on the $ref.
 	if !hasRefSiblings(s) {
-		return s
+		return
 	}
 
 	// Move $ref into allOf, preserving all sibling keywords in place.
@@ -1276,8 +1346,6 @@ func (g *generator) wrapRefForDraft7(s *Schema) *Schema {
 
 	s.AllOf = append(s.AllOf, inner)
 	s.Ref = ""
-
-	return s
 }
 
 // hasRefSiblings reports whether a schema has any keyword set beyond just $ref.

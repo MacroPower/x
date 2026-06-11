@@ -154,3 +154,82 @@ func TestBoolSchemaPredicatesMatchJSONForms(t *testing.T) {
 	})
 }
 
+func TestRaw(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		v    any
+		want string
+		err  bool
+	}{
+		"string": {
+			v:    "15m",
+			want: `"15m"`,
+		},
+		"int": {
+			v:    42,
+			want: `42`,
+		},
+		"bool": {
+			v:    true,
+			want: `true`,
+		},
+		"nil": {
+			v:    nil,
+			want: `null`,
+		},
+		"map": {
+			v:    map[string]any{"replicas": 3},
+			want: `{"replicas":3}`,
+		},
+		"slice": {
+			v:    []string{"a", "b"},
+			want: `["a","b"]`,
+		},
+		"unmarshalable": {
+			v:   make(chan int),
+			err: true,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := jsonschema.Raw(tc.v)
+			if tc.err {
+				require.Error(t, err)
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.JSONEq(t, tc.want, string(got))
+		})
+	}
+}
+
+func TestMustRaw(t *testing.T) {
+	t.Parallel()
+
+	t.Run("valid value", func(t *testing.T) {
+		t.Parallel()
+
+		s := &jsonschema.Schema{
+			Type:    "string",
+			Default: jsonschema.MustRaw("15m"),
+		}
+
+		data, err := json.Marshal(s)
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"type":"string","default":"15m"}`, string(data))
+	})
+
+	t.Run("panics on marshal error", func(t *testing.T) {
+		t.Parallel()
+
+		assert.Panics(t, func() {
+			jsonschema.MustRaw(make(chan int))
+		})
+	})
+}

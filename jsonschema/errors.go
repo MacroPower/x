@@ -56,6 +56,12 @@ var (
 	// against). The panic is recovered so Generate returns this error instead
 	// of crashing.
 	ErrProviderPanic = errors.New("provider panicked")
+
+	// ErrInvalidDefaultsInstance is returned by [Generate] when the instance
+	// given to [WithDefaultsFrom] is unusable: its pointer-dereferenced dynamic
+	// type is not the pointer-dereferenced generated root type, or it does not
+	// marshal to a JSON object.
+	ErrInvalidDefaultsInstance = errors.New("invalid defaults instance")
 )
 
 // ValidationError represents a JSON Schema validation failure.

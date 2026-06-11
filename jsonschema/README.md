@@ -19,7 +19,10 @@ and structured instance validation with full instance/schema path tracking. The
 upstream `Schema` type is re-exported via a type alias, and `Ptr` is provided as
 a convenience helper for pointer-valued fields (e.g.
 `jsonschema.Ptr(float64(0))` for `Schema.Minimum`), so callers need only import
-this package.
+this package. `Raw` and `MustRaw` marshal Go values for the raw-JSON fields
+such as `Schema.Default` (e.g. `jsonschema.MustRaw("15m")` instead of a
+hand-written `json.RawMessage` literal); `MustRaw` panics on a marshal error
+and suits values known valid at compile time.
 
 ## Installation
 
@@ -166,6 +169,42 @@ Unsupported types (`func`, `chan`, `complex`, `unsafe.Pointer`) return
 | `WithDefinitions(bool)`          | Extract named types into `$defs`/`$ref` (default `true`).                     |
 | `WithAdditionalProperties(bool)` | Allow extra object keys (default `false`, disallowing them).                  |
 | `WithNullable(bool)`             | Make nil-able types (`*T`, `[]T`, `map`, `[]byte`) nullable (default `true`). |
+| `WithDefaultsFrom(instance)`     | Seed root property defaults from an instance of the generated type.           |
+| `WithRootTitle(bool)`            | Title the root schema with the root type's name (default `false`).            |
+
+`WithDefaultsFrom` marshals the instance with `encoding/json` after generation;
+each top-level key of the output that matches a root property becomes that
+property's `default`, overwriting any default set via struct tags. Keys the
+`json` tags omit (`omitempty`, `omitzero`) contribute nothing, so presence
+follows the tags exactly, and nested struct, slice, and map values become
+whole-value defaults on their top-level property. An instance whose
+pointer-dereferenced type is not the generated type, or that does not marshal
+to a JSON object, returns an error wrapping `ErrInvalidDefaultsInstance`. A
+pointer root's nullable `anyOf` wrapper is resolved to its value branch first,
+so the defaults reach the object schema (or its `$defs` entry) inside. When a
+self-referential root stays in `$defs`, the defaults apply to that definition,
+shared by every recursive occurrence. Under `Draft7`, a default landing on a
+`$ref`'d property moves the `$ref` into an `allOf` wrap — the same shape tag
+defaults produce — because Draft-07 readers ignore `$ref` siblings:
+
+```go
+schema, err := jsonschema.GenerateFor[Config](
+	jsonschema.WithDefaultsFrom(Config{Host: "localhost", Port: 8080}),
+)
+// properties.host.default == "localhost", properties.port.default == 8080
+```
+
+`WithRootTitle(true)` sets the root schema's `title` to the generated root
+type's name when nothing else (a `WithTypeSchema` override, a
+`JSONSchemaProvider`, or a `JSONSchemaExtender`) supplied one. The `WithNamer`
+namer is honored, so root and `$defs` naming stay consistent, and the root type
+is pointer-dereferenced first. Unnamed roots (anonymous structs, unnamed maps
+and slices) stay untitled. Under `Draft7`, a self-referential root stays a bare
+`$ref` into `definitions`, where a sibling title would be ignored; the title is
+set on the definitions entry instead, shared by every occurrence of the type.
+This gives consumers of `WithDefinitions(false)` output — where the inlined
+root carries no `$id` or `$defs` key — a name without re-deriving it from the
+Go type themselves.
 
 ### Customization interfaces
 
@@ -266,6 +305,21 @@ nullable integer) with `jsonschema:"type=string,pattern=..."` produces a
 clean `{"type":"string","pattern":"..."}` without needing
 `JSONSchemaExtend`. Tag pairs apply in order; keys after `type=` still take
 effect.
+
+Because pairs apply in order, `default`, `const`, `enum`, and `examples`
+values appearing after a `type=` pair parse against the overridden JSON type
+rather than the field's Go type: `string`, `integer`, `number`, and `boolean`
+overrides parse subsequent scalar values as that type, so a `time.Duration`
+field with `jsonschema:"type=string,default=15m"` yields
+`{"type":"string","default":"15m"}` where the Go int64 kind would have
+rejected `15m`. The same keys before the `type=` pair still parse against the
+Go type. After an override to `array`, `object`, or `null` there is no scalar
+type to parse against, so those keys are an error, and the literal value
+`null` is rejected after any override (the overridden type is never
+nullable). An `enum` after a `type=` override always constrains the value
+schema itself, even on a slice or array field: the redirection to the item
+schemas (next paragraph) keys on the scalar-parse type, which an override
+replaces.
 
 On a slice or array field, `enum` constrains each element rather than the
 array value: the values parse against the element type and land on the item
@@ -569,15 +623,163 @@ resolver error surfaces as `ErrRefResolve`; an unresolvable remote/absolute ref
 with no resolver is reported as a `*ValidationError`. Circular refs are detected
 and treated as passing.
 
+A resolver that also implements `RefResolverContext` receives a context with
+every resolution call:
+
+```go
+type RefResolverContext interface {
+	RefResolver
+	ResolveRefContext(ctx context.Context, uri string) (*Schema, error)
+}
+```
+
+Refs resolved while compiling get the `CompileContext` context; refs reached
+during a validation run get that run's `ValidateContext` (or other `Context`
+entry point) context, so a resolver that fetches over the network can honor
+cancellation and deadlines. A compiled `*Validator` never retains a context —
+each run carries its own — and the context-less entry points pass
+`context.Background()`. The package ships no network resolver; fetching
+remains the caller's concern.
+
+## Schema traversal and predicates
+
+Helpers are provided for working with `Schema` values directly, independent of
+generation and validation:
+
+```go
+// Subschemas returns the direct sub-schemas of s: every non-nil schema held
+// by one sub-schema-bearing keyword, with map children in sorted-key order.
+children := jsonschema.Subschemas(s)
+
+// Walk visits s and every schema transitively reachable through Subschemas.
+err := jsonschema.Walk(s, func(s *jsonschema.Schema) error {
+	s.Description = "" // strip annotations, rewrite $refs, collect types, ...
+
+	return nil
+})
+```
+
+`Subschemas` is the package's single source of truth for which `Schema` fields
+hold sub-schemas: the applicators (`items`, `prefixItems`,
+`additionalItems`, `properties`, `patternProperties`, `additionalProperties`,
+`propertyNames`, `allOf`, `anyOf`, `oneOf`, `not`, `if`/`then`/`else`,
+`dependentSchemas` and legacy `dependencies`, `contains`, `unevaluated*`,
+`contentSchema`) plus the reserved `$defs` and `definitions` locations. Only
+typed `Schema` fields are included, not sub-schemas carried as raw JSON in
+unknown keywords. Children held in maps are returned in sorted-key order so
+traversal is deterministic, and a maintenance test fails when an upstream
+`Schema` field addition is not covered.
+
+`Walk` is pre-order: the function runs on a schema before that schema's
+children are gathered, so it may replace or mutate sub-schema fields and the
+walk follows the updated children. Each distinct schema pointer is visited
+once, so aliased or cyclic graphs terminate. `Walk` stops at and returns the
+first error from the function; a `nil` schema is a no-op.
+
+Three predicates answer common shape questions:
+
+- `CheckTypeNames(schema)` verifies that every `type` keyword reachable from
+  the schema names one of the seven JSON Schema type names, returning `nil` or
+  an error wrapping `ErrInvalidType` that includes the schema path of the
+  first offending keyword. It is the standalone form of the check `Compile`
+  runs before resolution, for vetting structurally messy schemas — cyclic
+  graphs, unresolvable references — without compiling them.
+- `IsTrueSchema(s)` reports whether `s` is the boolean `true` schema form: a
+  schema with no fields set, which marshals to JSON `true` and accepts every
+  instance. Annotation-only schemas (a description but no constraints) return
+  `false`, as do schemas whose only field is a non-nil empty map or slice
+  (`Schema{Enum: []any{}}` vacuously rejects every instance). Returns `false`
+  for `nil`.
+- `IsFalseSchema(s)` reports whether `s` is the boolean `false` schema form
+  `{"not": {}}` — the shape the upstream produces when unmarshaling the JSON
+  boolean `false` — which marshals to JSON `false` and rejects every instance.
+  Any sibling field next to the `not`, including annotations, defeats the
+  form. Returns `false` for `nil`.
+
+## Inlining references
+
+`Inline` returns a deep copy of a schema in which every `$ref` — in the
+schema body, `$defs`, and `definitions` alike — is replaced by a copy of the
+schema it targets, producing one self-contained document for consumers that
+cannot follow references, such as code generators. The input and any
+resolver-returned schemas are never mutated.
+
+```go
+fsys := os.DirFS("schemas") // main.json references sub/child.json, ...
+
+inlined, err := jsonschema.Inline(schema,
+	jsonschema.WithInlineResolver(jsonschema.FileResolver(fsys)),
+	jsonschema.WithInlineBaseURI("main.json"),
+)
+```
+
+Resolution mirrors the validator's. Fragment-only refs (`#/pointer`,
+`#anchor`) resolve within the enclosing document using the same
+`$id`/`$anchor` registry the validator builds, and every ref resolves
+against its document's original structure, exactly as the validator would:
+expanding one ref never changes what a later ref's JSON Pointer or anchor
+addresses. Other refs are absolutized against the enclosing resource's base
+URI — its `$id`, or the base from `WithInlineBaseURI`, with a schemeless
+base such as `main.json` normalized against `file:///` so RFC 3986 joining
+is well-defined and a back-reference to the root document finds the
+in-memory copy instead of re-fetching it — and fetched through the
+`RefResolver` given via `WithInlineResolver`; any fragment is then evaluated
+against the fetched document. Fetched documents are inlined recursively
+using their own base URIs, so a relative ref inside a fetched document
+resolves against that document's URI and files can reference each other by
+relative path; each document is fetched at most once per call.
+`FileResolver` adapts an `fs.FS`, serving file-path and relative URIs from
+the fs root (a leading `file://` scheme and `/` are stripped). `Inline`
+always calls `ResolveRef`, even on a resolver that also implements
+`RefResolverContext`; context-aware inlining can be added when a consumer
+needs it.
+
+Sibling keywords beside `$ref` follow draft semantics, with the draft
+detected from the root schema's `$schema` exactly as the validator detects
+it (fetched documents follow the root document's draft, matching how
+validation applies one draft throughout):
+
+- **Draft 2020-12**: the node keeps its sibling keywords and the target copy
+  joins the node's `allOf`. This preserves both the conjunction and the
+  annotation flow the `unevaluated*` keywords depend on, which moving the
+  siblings into a separate `allOf` branch would break.
+- **Draft 7**: siblings of `$ref` are ignored, so the node is replaced by
+  the target copy alone.
+- A node whose only keyword is `$ref` is replaced by the target copy alone
+  under either draft.
+
+A spliced copy never carries a `$schema` keyword, and the returned root
+keeps the input's `$schema`. Refs are inlined only in typed sub-schema
+positions (those `Subschemas` covers); a `$ref` carried as raw JSON inside
+an unknown keyword is left as-is, although a ref pointing into such a
+position still resolves.
+
+Failure modes:
+
+- A ref whose expansion reaches its own target — a recursive schema — returns
+  an error wrapping `ErrRefCycle`: a cyclic reference graph has no finite
+  expansion.
+- A `$dynamicRef` under Draft 2020-12 returns an error wrapping
+  `ErrRefInline`, since its target depends on the dynamic scope at validation
+  time and no single replacement preserves that (Draft 7 ignores the keyword,
+  as the validator does).
+- A non-local ref with no resolver configured, or any ref whose target cannot
+  be found, returns an error wrapping `ErrRefResolve`.
+
 ## Errors
 
-| Error                  | Trigger                                                                                     |
-| ---------------------- | ------------------------------------------------------------------------------------------- |
-| `ErrUnsupportedType`   | A Go type with no JSON Schema representation (`func`, `chan`, `complex`, `unsafe.Pointer`). |
-| `ErrUnsupportedMapKey` | A map key that is not a string, integer type, or `encoding.TextMarshaler`.                  |
-| `ErrUnknownVocabulary` | A required `$vocabulary` URI is unrecognized (or 2020-12 core is marked optional).          |
-| `ErrRefResolve`        | A `RefResolver` returns an error resolving a remote `$ref`.                                 |
-| `ErrProviderPanic`     | A `JSONSchemaProvider`/`JSONSchemaExtender` method panics (recovered and wrapped).          |
+| Error                        | Trigger                                                                                                                                    |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ErrUnsupportedType`         | A Go type with no JSON Schema representation (`func`, `chan`, `complex`, `unsafe.Pointer`).                                                |
+| `ErrUnsupportedMapKey`       | A map key that is not a string, integer type, or `encoding.TextMarshaler`.                                                                 |
+| `ErrInvalidType`             | A `type` keyword naming something other than the seven JSON Schema type names (returned by `CheckTypeNames` and `Compile`).                |
+| `ErrInvalidSchemaDocument`   | A schema document whose top-level value is not a JSON object or boolean (returned by `CompileJSON` and `SchemaFromValue`).                 |
+| `ErrUnknownVocabulary`       | A required `$vocabulary` URI is unrecognized (or 2020-12 core is marked optional).                                                         |
+| `ErrRefResolve`              | A `RefResolver` returns an error resolving a remote `$ref`; in `Inline`, also a non-local ref with no resolver or any unresolvable target. |
+| `ErrRefCycle`                | `Inline` expands a `$ref` that reaches its own target: the reference graph is cyclic and has no finite expansion.                          |
+| `ErrRefInline`               | `Inline` encounters a reference with no faithful static expansion (`$dynamicRef` under Draft 2020-12).                                     |
+| `ErrProviderPanic`           | A `JSONSchemaProvider`/`JSONSchemaExtender` method panics (recovered and wrapped).                                                         |
+| `ErrInvalidDefaultsInstance` | The `WithDefaultsFrom` instance does not match the generated root type or does not marshal to a JSON object.                               |
 
 ## CLI: `jsonschemagen`
 

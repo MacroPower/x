@@ -8,7 +8,10 @@
 // [Schema] type is re-exported via type alias, and [Ptr] is provided
 // as a convenience helper for creating pointer values (e.g.,
 // jsonschema.Ptr(float64(0)) for [Schema.Minimum]), so users need only import
-// this package.
+// this package. [Raw] and [MustRaw] marshal Go values for the raw-JSON schema
+// fields such as [Schema.Default] (e.g., jsonschema.MustRaw("15m") instead of
+// a hand-written [encoding/json.RawMessage] literal); MustRaw panics on a marshal error
+// and is intended for values known valid at compile time.
 //
 // # Entry Points
 //
@@ -36,6 +39,9 @@
 //     an integer type, or an [encoding.TextMarshaler].
 //   - [ErrProviderPanic]: returned when a [JSONSchemaProvider] or
 //     [JSONSchemaExtender] method panics; the panic is recovered and wrapped.
+//   - [ErrInvalidDefaultsInstance]: returned when the [WithDefaultsFrom]
+//     instance does not match the generated root type or does not marshal to
+//     a JSON object.
 //
 // Errors are wrapped with context so callers see the full path
 // (e.g., "field \"data\": unsupported type").
@@ -56,6 +62,32 @@
 //     object schemas (default: false, disallowing extra keys).
 //   - [WithNullable] controls whether nil-able types (pointers, slices, maps,
 //     []byte) accept null (default: true; false drops the null branch).
+//   - [WithDefaultsFrom] seeds root property defaults from an instance of the
+//     generated type: after generation the instance is marshaled with
+//     encoding/json and each top-level key of the output that matches a root
+//     property becomes that property's default, overwriting tag defaults.
+//     Keys the json tags omit (omitempty, omitzero) contribute nothing, so
+//     presence follows the json tags exactly; nested struct, slice, and map
+//     values become whole-value defaults on their top-level property. An
+//     instance whose pointer-dereferenced type is not the generated type, or
+//     that does not marshal to a JSON object, returns an error wrapping
+//     [ErrInvalidDefaultsInstance]. A pointer root's nullable anyOf wrapper
+//     is resolved to its value branch first, so the defaults reach the
+//     object schema (or its $defs entry) inside. When a self-referential
+//     root stays in $defs, the defaults apply to that definition, shared by
+//     every recursive occurrence. Under [Draft7], a default landing on a
+//     $ref'd property moves the $ref into an allOf wrap, the same shape tag
+//     defaults produce, because Draft-07 readers ignore $ref siblings.
+//   - [WithRootTitle] sets the root schema's title to the root type's name
+//     when no title is otherwise present (default: false). The [WithNamer]
+//     namer is honored and the root type is pointer-dereferenced first;
+//     unnamed roots (anonymous structs, unnamed maps and slices) stay
+//     untitled, and an existing title (from [WithTypeSchema],
+//     [JSONSchemaProvider], or [JSONSchemaExtender]) is never overwritten.
+//     Under [Draft7], a self-referential root stays a bare $ref into
+//     definitions, where a sibling title would be ignored; the title is set
+//     on the definitions entry instead, shared by every occurrence of the
+//     type.
 //
 // # Type Mapping
 //
@@ -253,6 +285,21 @@
 // enum and examples values cannot contain "|" (used as value separator). For
 // complex values, use [JSONSchemaExtender] or AST doc comments with
 // [WithComments].
+//
+// Because pairs apply in order, a default, const, enum, or examples value
+// appearing after a type= pair parses against the overridden JSON type
+// rather than the field's Go type: string, integer, number, and boolean
+// overrides parse subsequent scalar values as that type, so a [time.Duration]
+// field with jsonschema:"type=string,default=15m" yields
+// {"type":"string","default":"15m"} where the Go int64 kind would have
+// rejected "15m". The same keys before the type= pair still parse against
+// the Go type. After an override to array, object, or null there is no
+// scalar type to parse against, so those keys are an error, and the literal
+// value null is rejected after any override (the overridden type is never
+// nullable). An enum after a type= override always constrains the value
+// schema itself: the slice/array redirection that normally sends enum values
+// to the item schemas keys on the scalar-parse type, which an override
+// replaces with a non-sequence stand-in.
 //
 // On a slice or array field, enum constrains each element rather than the
 // array value: the values parse against the element type and land on the item
