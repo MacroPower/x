@@ -1299,6 +1299,7 @@ func (g *generator) applyFieldInterpreters(fi structFieldInfo, fieldSchema, pare
 				Schema:      fieldSchema,
 				Parent:      parent,
 				StructField: fi.field,
+				Draft:       g.draft,
 			}
 			err := interp.Interpret(tag, ctx)
 			if err != nil {

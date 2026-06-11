@@ -130,4 +130,8 @@ type FieldContext struct {
 	// other struct tags (for example the json tag's omitempty) or the field's
 	// Go name and index.
 	StructField reflect.StructField
+	// Draft is the target draft of the generation run, so an interpreter can
+	// emit draft-appropriate keywords (for example dependentRequired under
+	// [Draft2020] versus dependencies under [Draft7]).
+	Draft Draft
 }

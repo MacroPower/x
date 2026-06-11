@@ -182,9 +182,10 @@
 // All struct tag interpretation beyond the json and jsonschema tags is handled
 // through the pluggable [TagInterpreter] interface. Interpreters receive a
 // [FieldContext] containing the field's schema, parent schema, JSON name, Go
-// type, and full [reflect.StructField] (for reading sibling struct tags such
-// as the json tag's options). Multiple interpreters can be registered and are
-// applied in order.
+// type, full [reflect.StructField] (for reading sibling struct tags such
+// as the json tag's options), and the target [Draft] (for emitting
+// draft-appropriate keywords). Multiple interpreters can be registered and
+// are applied in order.
 //
 // # Definitions and References
 //

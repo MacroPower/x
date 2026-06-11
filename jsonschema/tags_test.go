@@ -439,6 +439,29 @@ func TestFieldContextStructField(t *testing.T) {
 	assert.Equal(t, "Alpha", field.StructField.Name)
 	assert.Equal(t, "alpha,omitempty", field.StructField.Tag.Get("json"))
 	assert.Equal(t, field.Type, field.StructField.Type, "Type mirrors StructField.Type")
+	assert.Equal(t, jsonschema.Draft2020, field.Draft, "Draft carries the default target draft")
+}
+
+func TestFieldContextDraft7(t *testing.T) {
+	t.Parallel()
+
+	// The generation run's target draft reaches interpreters, so one emitting
+	// draft-dependent keywords (dependentRequired versus dependencies) can
+	// pick correctly.
+	interp := &structFieldInspector{}
+
+	type MyType struct {
+		Alpha string `inspect:"true" json:"alpha"`
+	}
+
+	_, err := jsonschema.GenerateFor[MyType](
+		jsonschema.WithDraft(jsonschema.Draft7),
+		jsonschema.WithTagInterpreter(interp),
+	)
+	require.NoError(t, err)
+
+	require.Len(t, interp.contexts, 1)
+	assert.Equal(t, jsonschema.Draft7, interp.contexts[0].Draft)
 }
 
 func TestSchemaTypeAliasBlocksExtension(t *testing.T) {
