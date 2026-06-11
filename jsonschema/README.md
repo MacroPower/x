@@ -730,7 +730,7 @@ resolver-returned schemas are never mutated.
 fsys := os.DirFS("schemas") // main.json references sub/child.json, ...
 
 inlined, err := jsonschema.Inline(schema,
-	jsonschema.WithInlineResolver(jsonschema.FileResolver(fsys)),
+	jsonschema.WithInlineResolver(jsonschema.NewFileResolver(fsys)),
 	jsonschema.WithInlineBaseURI("main.json"),
 )
 ```
@@ -750,7 +750,8 @@ against the fetched document. Fetched documents are inlined recursively
 using their own base URIs, so a relative ref inside a fetched document
 resolves against that document's URI and files can reference each other by
 relative path; each document is fetched at most once per call.
-`FileResolver` adapts an `fs.FS`, serving file-path and relative URIs from
+`FileResolver` (constructed with `NewFileResolver`) adapts an `fs.FS`,
+serving file-path and relative URIs from
 the fs root (a leading `file://` scheme and `/` are stripped); each
 referenced file must contain a JSON schema document, and `io/fs` confines
 resolution to the fs root, so a ref escaping above it returns an error

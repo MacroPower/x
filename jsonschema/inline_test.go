@@ -474,7 +474,7 @@ func TestInline(t *testing.T) {
 			var opts []jsonschema.InlineOption
 
 			if tc.files != nil {
-				opts = append(opts, jsonschema.WithInlineResolver(jsonschema.FileResolver(mapFS(tc.files))))
+				opts = append(opts, jsonschema.WithInlineResolver(jsonschema.NewFileResolver(mapFS(tc.files))))
 			}
 
 			if tc.resolver != nil {
@@ -771,7 +771,7 @@ func TestInlineRefFallback(t *testing.T) {
 			var opts []jsonschema.InlineOption
 
 			if tc.files != nil {
-				opts = append(opts, jsonschema.WithInlineResolver(jsonschema.FileResolver(mapFS(tc.files))))
+				opts = append(opts, jsonschema.WithInlineResolver(jsonschema.NewFileResolver(mapFS(tc.files))))
 			}
 
 			if tc.baseURI != "" {
@@ -898,7 +898,7 @@ func TestInlineValidatesIdentically(t *testing.T) {
 		}
 	`)), &schema))
 
-	resolver := jsonschema.FileResolver(fsys)
+	resolver := jsonschema.NewFileResolver(fsys)
 
 	inlined, err := jsonschema.Inline(&schema, jsonschema.WithInlineResolver(resolver))
 	require.NoError(t, err)
@@ -1013,7 +1013,7 @@ func TestFileResolver(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			resolver := jsonschema.FileResolver(mapFS(files))
+			resolver := jsonschema.NewFileResolver(mapFS(files))
 
 			got, err := resolver.ResolveRef(tc.uri)
 			if tc.want == "" {
@@ -1039,7 +1039,7 @@ func TestFileResolver(t *testing.T) {
 func TestFileResolverWithValidation(t *testing.T) {
 	t.Parallel()
 
-	resolver := jsonschema.FileResolver(mapFS(map[string]string{
+	resolver := jsonschema.NewFileResolver(mapFS(map[string]string{
 		"child.json": `{"type": "integer"}`,
 	}))
 

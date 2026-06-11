@@ -619,37 +619,39 @@ func (in *inliner) fetchDoc(baseURI string) (*Schema, error) {
 	return cp, nil
 }
 
-// FileResolver returns a [RefResolver] that serves file-path and relative
-// URIs from fsys, unmarshaling each referenced file as a JSON schema
-// document; a referenced file that does not contain one is an error. Pair
-// [os.DirFS] with [WithInlineBaseURI] to inline schemas that reference each
-// other by relative file path.
+// FileResolver is a [RefResolver] that serves file-path and relative URIs
+// from an [io/fs.FS], unmarshaling each referenced file as a JSON schema
+// document; a referenced file that does not contain one is an error.
+// Construct it with [NewFileResolver]; pair [os.DirFS] with
+// [WithInlineBaseURI] to inline schemas that reference each other by
+// relative file path.
 //
 // A leading "file://" scheme and a leading "/" are stripped, so URIs are
 // resolved relative to the fs root: relative refs absolutize against the
 // normalized base URI into file URIs (base "main.json" plus ref
 // "sub/child.json" yields "file:///sub/child.json"), which strip back to
-// paths addressing fsys from its root. The remaining path is used verbatim
+// paths addressing the fs from its root. The remaining path is used verbatim
 // as the [io/fs] file name, so [io/fs] confines resolution to the fs root:
 // a ref escaping above it is not a valid fs path, and [Inline] surfaces the
 // read failure as an error wrapping [ErrRefResolve].
 //
 // The resolver works the same way with [WithRefResolver] during validation:
 // refs that reach the resolver as relative or file URIs are served from
-// fsys. Refs that absolutize to another scheme (an http $id, for example)
+// the fs. Refs that absolutize to another scheme (an http $id, for example)
 // are not valid fs paths and resolve to an error.
-func FileResolver(fsys fs.FS) RefResolver {
-	return fileResolver{fsys: fsys}
+type FileResolver struct {
+	fsys fs.FS
 }
 
-// fileResolver implements the [RefResolver] returned by [FileResolver].
-type fileResolver struct {
-	fsys fs.FS
+// NewFileResolver returns a [FileResolver] serving schema documents from
+// fsys.
+func NewFileResolver(fsys fs.FS) *FileResolver {
+	return &FileResolver{fsys: fsys}
 }
 
 // ResolveRef reads and unmarshals the schema document stored at the file
 // path named by uri. See [FileResolver] for the path semantics.
-func (r fileResolver) ResolveRef(uri string) (*Schema, error) {
+func (r *FileResolver) ResolveRef(uri string) (*Schema, error) {
 	name := strings.TrimPrefix(uri, "file://")
 	name = strings.TrimPrefix(name, "/")
 

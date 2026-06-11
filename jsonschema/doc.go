@@ -576,8 +576,9 @@
 // documents are inlined recursively using their own base URIs (a relative
 // ref inside a fetched document resolves against that document's URI, so
 // files can reference each other by relative path), and each document is
-// fetched at most once per call. [FileResolver] adapts an [io/fs.FS] to
-// this interface, serving file-path and relative URIs from the fs root;
+// fetched at most once per call. [FileResolver] (constructed with
+// [NewFileResolver]) adapts an [io/fs.FS] to this interface, serving
+// file-path and relative URIs from the fs root;
 // each referenced file must contain a JSON schema document, and [io/fs]
 // confines resolution to the fs root, so a ref escaping above it returns
 // an error wrapping [ErrRefResolve]. Pair [os.DirFS] with
