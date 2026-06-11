@@ -69,7 +69,8 @@ type InlineOption func(*inliner)
 // documents that non-local refs target. The resolver receives the
 // fragment-stripped absolute URI and is called at most once per distinct
 // URI within one Inline call; the schema it returns is deep-copied before
-// use and never mutated.
+// use and never mutated. The same resolver value also serves validation via
+// [WithRefResolver].
 //
 // A resolver that also implements [RefResolverContext] receives the
 // [InlineContext] context with every fetch, so a resolver that fetches over

@@ -653,7 +653,11 @@ entry point) context, so a resolver that fetches over the network can honor
 cancellation and deadlines. A compiled `*Validator` never retains a context —
 each run carries its own — and the context-less entry points pass
 `context.Background()`. The package ships no network resolver; fetching
-remains the caller's concern.
+remains the caller's concern. A wrapper that decorates a `RefResolver`
+(caching, logging) should also forward `RefResolverContext` when the wrapped
+resolver implements it; wrapping with only `ResolveRef` silently severs this
+context path. The same resolver value serves both validation
+(`WithRefResolver`) and inlining (`WithInlineResolver`).
 
 ## Schema traversal and predicates
 

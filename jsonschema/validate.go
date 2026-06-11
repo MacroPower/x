@@ -83,6 +83,7 @@ func WithContent(enabled bool) ValidateOption {
 // WithRefResolver sets a [RefResolver] for resolving remote $ref URIs during
 // validation. The resolver is called when local fragment resolution fails.
 // Resolved schemas are cached for the duration of the validation run.
+// The same resolver value also serves [Inline] via [WithInlineResolver].
 func WithRefResolver(r RefResolver) ValidateOption {
 	return func(v *validator) { v.refResolver = r }
 }

@@ -71,6 +71,12 @@ func (f formatFunc) ValidateFormat(value string) error { return f.fn(value) }
 // returns nil or an error is not cached and may be queried again for each ref
 // that targets it. Implementations must be safe for concurrent use if passed
 // to multiple Validate calls.
+//
+// The same resolver value serves both validation ([WithRefResolver]) and
+// inlining ([WithInlineResolver]). A wrapper that decorates a RefResolver
+// (caching, logging) should also forward [RefResolverContext] when the
+// wrapped resolver implements it; wrapping with only ResolveRef silently
+// severs the context path of the Context entry points.
 type RefResolver interface {
 	ResolveRef(uri string) (*Schema, error)
 }

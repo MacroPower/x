@@ -565,6 +565,9 @@
 // context is never retained by a compiled [Validator] — each run carries its
 // own — and the context-less entry points pass [context.Background]. The
 // package ships no network resolver; fetching remains the caller's concern.
+// A wrapper that decorates a [RefResolver] (caching, logging) should also
+// forward [RefResolverContext] when the wrapped resolver implements it;
+// wrapping with only ResolveRef silently severs this context path.
 //
 // # Reference Inlining
 //
