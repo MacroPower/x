@@ -28,10 +28,23 @@ used for exactly two things: structural well-formedness via `Schema.Resolve`
 format checking — is implemented here, because the upstream's resolved
 reference graph is unexported and its validator stops at the first error.
 
-When bumping the upstream dependency, the whitebox clone tests
-(`clone_*_whitebox_test.go`) act as maintenance guards: they enumerate every
-`Schema` field and fail if a newly added upstream field is not classified in
-`cloneSchema`/`isEmptySchema`.
+When bumping the upstream dependency, reflection-based maintenance guards in
+the external test package enumerate every `Schema` field and fail on
+unclassified upstream additions — all through public API (the package has no
+in-package test files by policy):
+
+- `TestIsTrueSchemaRejectsEverySetField` (schema_test.go): every exported
+  field set alone must defeat `IsTrueSchema`; a new field fails until added
+  to the predicate's enumeration. This is the primary alarm — when it fires,
+  also revisit the internal `cloneSchema`/`isEmptySchema` classifications.
+- `TestSubschemasFieldCoverage` (walk_test.go): every `*Schema`-shaped field
+  must be returned by `Subschemas`, the single traversal field list.
+- `TestSchemaSerializableFieldCoverage` (schema_test.go): every field must
+  carry a json tag or be allowlisted, guarding the JSON round-trip that
+  `Inline`'s deep copy and `SchemaFromValue` rely on.
+- `TestTypeSchemaOverrideContainersUnaliased` (generate_override_test.go):
+  container fields of a `WithTypeSchema` override must not stay aliased in
+  generated schemas.
 
 ### Type resolution priority (generation)
 

@@ -2,6 +2,7 @@ package jsonschema_test
 
 import (
 	"errors"
+	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -211,4 +212,72 @@ func TestWalk(t *testing.T) {
 		assert.Equal(t, []*jsonschema.Schema{root, replacement}, visited,
 			"fn runs before children are gathered, so the walk follows the replacement")
 	})
+}
+
+// TestSubschemasFieldCoverage is a maintenance guard over [jsonschema.Subschemas],
+// the single source of truth for which Schema fields hold sub-schemas. It
+// enumerates Schema's fields via reflection, populates every field of type
+// *Schema, []*Schema, or map[string]*Schema on a probe schema with a distinct
+// child, and asserts Subschemas returns each child exactly once. When upstream
+// adds a new sub-schema-bearing field, the probe gains a child Subschemas does
+// not return and this test fails, forcing the field list to be extended -- so
+// every traversal built on Subschemas (Walk, Inline, and the internal walks)
+// picks the new keyword up in one place.
+func TestSubschemasFieldCoverage(t *testing.T) {
+	t.Parallel()
+
+	var (
+		singleType = reflect.TypeFor[*jsonschema.Schema]()
+		sliceType  = reflect.TypeFor[[]*jsonschema.Schema]()
+		mapType    = reflect.TypeFor[map[string]*jsonschema.Schema]()
+	)
+
+	probe := &jsonschema.Schema{}
+	probeValue := reflect.ValueOf(probe).Elem()
+	schemaType := probeValue.Type()
+
+	// Map each planted child to the field it was planted in, so a missing
+	// child names the uncovered field.
+	want := map[*jsonschema.Schema]string{}
+
+	for i := range schemaType.NumField() {
+		field := schemaType.Field(i)
+		if !field.IsExported() {
+			continue
+		}
+
+		child := &jsonschema.Schema{}
+
+		switch field.Type {
+		case singleType:
+			probeValue.Field(i).Set(reflect.ValueOf(child))
+		case sliceType:
+			probeValue.Field(i).Set(reflect.ValueOf([]*jsonschema.Schema{child}))
+		case mapType:
+			probeValue.Field(i).Set(reflect.ValueOf(map[string]*jsonschema.Schema{"k": child}))
+		default:
+			continue
+		}
+
+		want[child] = field.Name
+	}
+
+	// The upstream Schema currently carries 23 sub-schema-bearing fields; the
+	// exact count is not pinned, but an implausibly low one means the
+	// reflection above stopped matching the field types.
+	require.GreaterOrEqual(t, len(want), 23,
+		"reflection found fewer sub-schema-bearing fields than the known upstream set")
+
+	got := map[*jsonschema.Schema]int{}
+	for _, child := range jsonschema.Subschemas(probe) {
+		got[child]++
+	}
+
+	for child, fieldName := range want {
+		assert.Equal(t, 1, got[child],
+			"Schema field %q holds a sub-schema that Subschemas must return exactly once", fieldName)
+	}
+
+	assert.Len(t, got, len(want),
+		"Subschemas returned schemas that were not planted on the probe")
 }

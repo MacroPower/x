@@ -1,5 +1,4 @@
-//nolint:testpackage // white-box: tests unexported cloneOverrideExtras against the Schema layout.
-package jsonschema
+package jsonschema_test
 
 import (
 	"encoding/json"
@@ -10,14 +9,15 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"go.jacobcolvin.com/x/jsonschema"
 )
 
-// aliasingContainerTypes lists the non-sub-schema reference types that the
-// upstream CloneSchemas shallow-shares (it deep-copies only *Schema, []*Schema,
-// and map[string]*Schema). A Schema field of one of these types stays aliased to
-// the source after CloneSchemas, so cloneOverrideExtras must clone it or an
-// in-place append/assign by an extender or interpreter corrupts the caller's
-// schema across Generate calls.
+// aliasingContainerTypes lists the non-sub-schema reference types a registered
+// [jsonschema.WithTypeSchema] override carries. Generation must hand out
+// schemas whose containers do not alias the registered override, or an
+// in-place append/assign by an extender, interpreter, or caller would corrupt
+// the override across Generate calls.
 var aliasingContainerTypes = []reflect.Type{
 	reflect.TypeFor[[]any](),
 	reflect.TypeFor[[]string](),
@@ -28,44 +28,50 @@ var aliasingContainerTypes = []reflect.Type{
 	reflect.TypeFor[map[string]any](),
 }
 
-// isAliasingContainerType reports whether t is one of the shallow-shared
-// container types the guard tracks.
+// isAliasingContainerType reports whether t is one of the shared-container
+// types the guard tracks.
 func isAliasingContainerType(t reflect.Type) bool {
 	return slices.Contains(aliasingContainerTypes, t)
 }
 
-// TestCloneOverrideExtrasContainerCoverage is a maintenance guard ensuring every
-// exported Schema field of a shallow-shared container type is unaliased by
-// either CloneSchemas or cloneOverrideExtras. For each such field the test
-// populates it with fresh backing storage, applies the clone path, and asserts
-// the field's backing pointer changed — proving a write through the copy cannot
-// reach the source. When upstream adds a new field of one of these types and it
-// is not cloned, the test fails and forces a maintainer to extend
-// cloneOverrideExtras rather than silently aliasing.
-func TestCloneOverrideExtrasContainerCoverage(t *testing.T) {
+// TestTypeSchemaOverrideContainersUnaliased is a maintenance guard ensuring
+// every exported Schema field of a container type is unaliased by the
+// [jsonschema.WithTypeSchema] generation path. For each such field the test
+// registers an override with fresh backing storage, generates a schema from
+// it, and asserts the field's backing pointer changed -- proving a write
+// through the generated schema cannot reach the registered override. When
+// upstream adds a new field of one of these types and the override copy does
+// not cover it, the test fails rather than silently aliasing.
+func TestTypeSchemaOverrideContainersUnaliased(t *testing.T) {
 	t.Parallel()
 
-	typ := reflect.TypeFor[Schema]()
+	type overrideProbe struct{}
+
+	probeType := reflect.TypeFor[overrideProbe]()
+	schemaType := reflect.TypeFor[jsonschema.Schema]()
 
 	var (
 		covered   []string
 		uncovered []string
 	)
 
-	for i := range typ.NumField() {
-		field := typ.Field(i)
+	for i := range schemaType.NumField() {
+		field := schemaType.Field(i)
 		if !field.IsExported() || !isAliasingContainerType(field.Type) {
 			continue
 		}
 
-		// CloneSchemas runs first (the production path: handleProviderType and
-		// handleOverrideType call CloneSchemas then cloneOverrideExtras), so a
-		// future field that CloneSchemas learns to deep-copy is also counted.
-		src := populatedSchema(t, field)
-		clone := src.CloneSchemas()
-		cloneOverrideExtras(clone)
+		override := populatedSchema(t, field)
 
-		if containerPointer(t, fieldValue(src, field)) != containerPointer(t, fieldValue(clone, field)) {
+		// Definitions are disabled so the generated root is the override copy
+		// itself rather than a $ref into $defs.
+		got, err := jsonschema.Generate(probeType,
+			jsonschema.WithTypeSchema(probeType, override),
+			jsonschema.WithDefinitions(false),
+		)
+		require.NoError(t, err, "generate with override for field %s", field.Name)
+
+		if containerPointer(t, fieldValue(override, field)) != containerPointer(t, fieldValue(got, field)) {
 			covered = append(covered, field.Name)
 
 			continue
@@ -76,9 +82,9 @@ func TestCloneOverrideExtrasContainerCoverage(t *testing.T) {
 
 	sort.Strings(uncovered)
 	require.Empty(t, uncovered,
-		"exported Schema field(s) %v of a shallow-shared container type stay aliased after "+
-			"CloneSchemas+cloneOverrideExtras; a write through the clone would corrupt the "+
-			"caller's schema. Clone each in cloneOverrideExtras.",
+		"exported Schema field(s) %v of a container type stay aliased between a WithTypeSchema "+
+			"override and the generated schema; a write through the generated schema would corrupt "+
+			"the override across Generate calls",
 		uncovered)
 
 	// Sanity: the guard actually inspected the fields it is meant to protect.
@@ -88,12 +94,12 @@ func TestCloneOverrideExtrasContainerCoverage(t *testing.T) {
 
 // populatedSchema returns a *Schema with the given field set to a fresh,
 // non-empty value of the field's type, so containerPointer can read a stable
-// backing pointer. Slices and maps gain one element; the *any pointer addresses
-// a fresh value.
-func populatedSchema(t *testing.T, field reflect.StructField) *Schema {
+// backing pointer. Slices and maps gain one element; the *any pointer
+// addresses a fresh value.
+func populatedSchema(t *testing.T, field reflect.StructField) *jsonschema.Schema {
 	t.Helper()
 
-	s := &Schema{}
+	s := &jsonschema.Schema{}
 	fv := reflect.ValueOf(s).Elem().FieldByIndex(field.Index)
 
 	switch field.Type.Kind() {
@@ -147,12 +153,12 @@ func sampleElem(t *testing.T, et reflect.Type) reflect.Value {
 }
 
 // fieldValue reads the named field off a *Schema.
-func fieldValue(s *Schema, field reflect.StructField) reflect.Value {
+func fieldValue(s *jsonschema.Schema, field reflect.StructField) reflect.Value {
 	return reflect.ValueOf(s).Elem().FieldByIndex(field.Index)
 }
 
-// containerPointer returns the backing pointer that identifies a slice, map, or
-// pointer value, so two values can be compared for shared storage.
+// containerPointer returns the backing pointer that identifies a slice, map,
+// or pointer value, so two values can be compared for shared storage.
 func containerPointer(t *testing.T, v reflect.Value) uintptr {
 	t.Helper()
 

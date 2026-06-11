@@ -607,3 +607,115 @@ func TestFileResolver(t *testing.T) {
 		})
 	}
 }
+
+// TestInlineDeepCopyIndependence verifies the deep-copy contract of
+// [jsonschema.Inline] from the copy's side: mutating the returned schema must
+// never reach back into the input. Because the copy round-trips through JSON,
+// every JSON-serializable field -- including maps, slices, and pointers --
+// comes back as a fresh value. The probes are ref-free, so Inline is a pure
+// deep copy here.
+func TestInlineDeepCopyIndependence(t *testing.T) {
+	t.Parallel()
+
+	// Build a schema whose Const points at a fresh value, so each case owns its
+	// pointer and mutating the copy's *Const can't alias another case's value.
+	constSchema := func() *jsonschema.Schema {
+		var v any = "a"
+
+		return &jsonschema.Schema{Const: &v}
+	}
+
+	tests := map[string]struct {
+		schema *jsonschema.Schema
+		mutate func(inlined *jsonschema.Schema)
+		check  func(t *testing.T, original *jsonschema.Schema)
+	}{
+		"extra nested map": {
+			schema: &jsonschema.Schema{Extra: map[string]any{"x-custom": map[string]any{"nested": "value"}}},
+			mutate: func(inlined *jsonschema.Schema) {
+				if nested, ok := inlined.Extra["x-custom"].(map[string]any); ok {
+					nested["nested"] = "modified"
+				}
+			},
+			check: func(t *testing.T, original *jsonschema.Schema) {
+				t.Helper()
+
+				nested, ok := original.Extra["x-custom"].(map[string]any)
+				require.True(t, ok, "x-custom should round-trip as a map[string]any")
+				assert.Equal(t, "value", nested["nested"], "nested map inside Extra must be independent of the copy")
+			},
+		},
+		"extra top-level value": {
+			schema: &jsonschema.Schema{Extra: map[string]any{"x-custom": "value"}},
+			mutate: func(inlined *jsonschema.Schema) { inlined.Extra["x-custom"] = "modified" },
+			check: func(t *testing.T, original *jsonschema.Schema) {
+				t.Helper()
+
+				assert.Equal(t, "value", original.Extra["x-custom"],
+					"Extra map must not share backing storage with the copy")
+			},
+		},
+		"enum slice element": {
+			schema: &jsonschema.Schema{Enum: []any{"a", "b"}},
+			mutate: func(inlined *jsonschema.Schema) { inlined.Enum[0] = "modified" },
+			check: func(t *testing.T, original *jsonschema.Schema) {
+				t.Helper()
+
+				assert.Equal(t, "a", original.Enum[0], "Enum slice must not share backing storage with the copy")
+			},
+		},
+		"examples slice element": {
+			schema: &jsonschema.Schema{Examples: []any{"a", "b"}},
+			mutate: func(inlined *jsonschema.Schema) { inlined.Examples[0] = "modified" },
+			check: func(t *testing.T, original *jsonschema.Schema) {
+				t.Helper()
+
+				assert.Equal(t, "a", original.Examples[0],
+					"Examples slice must not share backing storage with the copy")
+			},
+		},
+		"const pointer": {
+			schema: constSchema(),
+			mutate: func(inlined *jsonschema.Schema) { *inlined.Const = "modified" },
+			check: func(t *testing.T, original *jsonschema.Schema) {
+				t.Helper()
+
+				require.NotNil(t, original.Const)
+				assert.Equal(t, "a", *original.Const, "Const pointer must address a distinct value from the copy")
+			},
+		},
+		"default raw message byte": {
+			schema: &jsonschema.Schema{Default: json.RawMessage(`"a"`)},
+			mutate: func(inlined *jsonschema.Schema) { inlined.Default[1] = 'X' },
+			check: func(t *testing.T, original *jsonschema.Schema) {
+				t.Helper()
+
+				assert.Equal(t, `"a"`, string(original.Default),
+					"Default bytes must not share backing storage with the copy")
+			},
+		},
+		"nested sub-schema": {
+			schema: &jsonschema.Schema{Properties: map[string]*jsonschema.Schema{"a": {Type: "string"}}},
+			mutate: func(inlined *jsonschema.Schema) { inlined.Properties["a"].Type = "integer" },
+			check: func(t *testing.T, original *jsonschema.Schema) {
+				t.Helper()
+
+				assert.Equal(t, "string", original.Properties["a"].Type,
+					"sub-schemas must not be shared with the copy")
+			},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			inlined, err := jsonschema.Inline(tc.schema)
+			require.NoError(t, err)
+			require.NotSame(t, tc.schema, inlined, "Inline must return a distinct *Schema")
+
+			tc.mutate(inlined)
+			tc.check(t, tc.schema)
+		})
+	}
+}
