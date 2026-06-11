@@ -468,13 +468,17 @@ symmetric entry points:
 - `CompileJSON(data, opts...)` decodes `data` as a single JSON schema document
   (numbers as `json.Number`, trailing data rejected) and compiles it with
   `Compile`. It is the schema-side counterpart of `ValidateJSON`.
+- `SchemaFromJSON(data)` is the decode half of `CompileJSON` alone: it returns
+  the `*Schema` uncompiled, for consumers that work with the schema itself —
+  `Inline`, `Walk`, programmatic editing — rather than validating instances
+  against it.
 - `SchemaFromValue(doc)` converts an already-decoded document — a `bool`
   (`true` is the empty schema, `false` the schema that rejects every instance)
   or a `map[string]any`, such as `Normalize` output with `json.Number` leaves —
   to a `*Schema`.
 
-With both, a top-level value that is not an object or boolean returns an error
-wrapping `ErrInvalidSchemaDocument`. That includes JSON `null`, which
+With all three, a top-level value that is not an object or boolean returns an
+error wrapping `ErrInvalidSchemaDocument`. That includes JSON `null`, which
 unmarshaling into a `Schema` directly would silently coerce to the `false`
 schema. Malformed JSON returns the wrapped decode error without the sentinel.
 
@@ -808,18 +812,18 @@ cycle introduced by the substitute is an ordinary `ErrRefCycle`.
 
 ## Errors
 
-| Error                        | Trigger                                                                                                                                    |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `ErrUnsupportedType`         | A Go type with no JSON Schema representation (`func`, `chan`, `complex`, `unsafe.Pointer`).                                                |
-| `ErrUnsupportedMapKey`       | A map key that is not a string, integer type, or `encoding.TextMarshaler`.                                                                 |
-| `ErrInvalidType`             | A `type` keyword naming something other than the seven JSON Schema type names (returned by `CheckTypeNames` and `Compile`).                |
-| `ErrInvalidSchemaDocument`   | A schema document whose top-level value is not a JSON object or boolean (returned by `CompileJSON` and `SchemaFromValue`).                 |
-| `ErrUnknownVocabulary`       | A required `$vocabulary` URI is unrecognized (or 2020-12 core is marked optional).                                                         |
-| `ErrRefResolve`              | A `RefResolver` returns an error resolving a remote `$ref`; in `Inline`, also a non-local ref with no resolver or any unresolvable target. |
-| `ErrRefCycle`                | `Inline` expands a `$ref` that reaches its own target: the reference graph is cyclic and has no finite expansion.                          |
-| `ErrRefInline`               | `Inline` encounters a reference with no faithful static expansion (`$dynamicRef` under Draft 2020-12).                                     |
-| `ErrProviderPanic`           | A `JSONSchemaProvider`/`JSONSchemaExtender` method panics (recovered and wrapped).                                                         |
-| `ErrInvalidDefaultsInstance` | The `WithDefaultsFrom` instance does not match the generated root type or does not marshal to a JSON object.                               |
+| Error                        | Trigger                                                                                                                                       |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ErrUnsupportedType`         | A Go type with no JSON Schema representation (`func`, `chan`, `complex`, `unsafe.Pointer`).                                                   |
+| `ErrUnsupportedMapKey`       | A map key that is not a string, integer type, or `encoding.TextMarshaler`.                                                                    |
+| `ErrInvalidType`             | A `type` keyword naming something other than the seven JSON Schema type names (returned by `CheckTypeNames` and `Compile`).                   |
+| `ErrInvalidSchemaDocument`   | A schema document whose top-level value is not a JSON object or boolean (returned by `CompileJSON`, `SchemaFromJSON`, and `SchemaFromValue`). |
+| `ErrUnknownVocabulary`       | A required `$vocabulary` URI is unrecognized (or 2020-12 core is marked optional).                                                            |
+| `ErrRefResolve`              | A `RefResolver` returns an error resolving a remote `$ref`; in `Inline`, also a non-local ref with no resolver or any unresolvable target.    |
+| `ErrRefCycle`                | `Inline` expands a `$ref` that reaches its own target: the reference graph is cyclic and has no finite expansion.                             |
+| `ErrRefInline`               | `Inline` encounters a reference with no faithful static expansion (`$dynamicRef` under Draft 2020-12).                                        |
+| `ErrProviderPanic`           | A `JSONSchemaProvider`/`JSONSchemaExtender` method panics (recovered and wrapped).                                                            |
+| `ErrInvalidDefaultsInstance` | The `WithDefaultsFrom` instance does not match the generated root type or does not marshal to a JSON object.                                  |
 
 ## CLI: `jsonschemagen`
 

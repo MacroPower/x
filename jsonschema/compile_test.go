@@ -637,6 +637,107 @@ func TestSchemaFromValueBooleanForms(t *testing.T) {
 	assert.True(t, jsonschema.IsFalseSchema(falseSchema))
 }
 
+func TestSchemaFromJSON(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		err      error
+		data     string
+		contains string
+		check    func(t *testing.T, s *jsonschema.Schema)
+	}{
+		"object document decodes keywords": {
+			data: `{"type":"string","minLength":2}`,
+			check: func(t *testing.T, s *jsonschema.Schema) {
+				t.Helper()
+				assert.Equal(t, "string", s.Type)
+				require.NotNil(t, s.MinLength)
+				assert.Equal(t, 2, *s.MinLength)
+			},
+		},
+		"true is the empty schema": {
+			data: `true`,
+			check: func(t *testing.T, s *jsonschema.Schema) {
+				t.Helper()
+				assert.True(t, jsonschema.IsTrueSchema(s))
+			},
+		},
+		"false is the rejecting schema": {
+			data: `false`,
+			check: func(t *testing.T, s *jsonschema.Schema) {
+				t.Helper()
+				assert.True(t, jsonschema.IsFalseSchema(s))
+			},
+		},
+		"null document": {
+			data:     `null`,
+			err:      jsonschema.ErrInvalidSchemaDocument,
+			contains: "<nil>",
+		},
+		"string document": {
+			data: `"oops"`,
+			err:  jsonschema.ErrInvalidSchemaDocument,
+		},
+		"array document": {
+			data: `[true]`,
+			err:  jsonschema.ErrInvalidSchemaDocument,
+		},
+		"number document": {
+			data: `1`,
+			err:  jsonschema.ErrInvalidSchemaDocument,
+		},
+		"malformed JSON": {
+			data:     `{"type":`,
+			contains: "JSON decode",
+		},
+		"trailing data": {
+			data:     `{"type":"object"} {}`,
+			contains: "unexpected data after top-level value",
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			s, err := jsonschema.SchemaFromJSON([]byte(tt.data))
+			if tt.err != nil || tt.contains != "" {
+				require.Error(t, err)
+
+				if tt.err != nil {
+					require.ErrorIs(t, err, tt.err)
+				} else {
+					// Decode failures carry no sentinel: the document never
+					// reached the top-level shape check.
+					require.NotErrorIs(t, err, jsonschema.ErrInvalidSchemaDocument)
+				}
+
+				if tt.contains != "" {
+					assert.Contains(t, err.Error(), tt.contains)
+				}
+
+				return
+			}
+
+			require.NoError(t, err)
+			tt.check(t, s)
+		})
+	}
+}
+
+// TestSchemaFromJSONPreservesLargeIntegerLiterals pins the decode discipline:
+// raw-JSON fields such as default hold the json.Number literal verbatim, so an
+// integer beyond float64 precision survives into the Schema exactly.
+func TestSchemaFromJSONPreservesLargeIntegerLiterals(t *testing.T) {
+	t.Parallel()
+
+	s, err := jsonschema.SchemaFromJSON([]byte(`{"default":9007199254740993}`))
+	require.NoError(t, err)
+	// Assert.JSONEq would parse both sides into float64, rounding the literal
+	// and defeating the precision check; compare the raw text instead.
+	assert.Equal(t, `9007199254740993`, string(s.Default)) //nolint:testifylint // See above.
+}
+
 func TestCompileJSON(t *testing.T) {
 	t.Parallel()
 

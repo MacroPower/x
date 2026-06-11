@@ -935,13 +935,34 @@ func SchemaFromValue(doc any) (*Schema, error) {
 	}
 }
 
-// CompileJSON decodes data as a single JSON schema document and compiles it
-// with [Compile]. It is the schema-side counterpart of [ValidateJSON]: numbers
-// decode as [json.Number], and trailing data after the document is rejected. A
-// top-level value that is not an object or boolean — including JSON null,
-// which unmarshaling into a [Schema] directly silently coerces to the false
-// schema — returns an error wrapping [ErrInvalidSchemaDocument]; malformed
-// JSON returns the wrapped decode error without the sentinel.
+// SchemaFromJSON decodes data as a single JSON schema document and returns it
+// as a [*Schema] without compiling it, for consumers that work with the schema
+// itself — [Inline], [Walk], or programmatic editing — rather than validating
+// instances against it. It applies the same decode discipline as [CompileJSON]
+// (which is equivalent to compiling its result): numbers decode as
+// [json.Number] so large integer keywords survive the round-trip into the
+// Schema, and trailing data after the document is rejected. A top-level value
+// that is not an object or boolean — including JSON null, which unmarshaling
+// into a [Schema] directly silently coerces to the false schema — returns an
+// error wrapping [ErrInvalidSchemaDocument]; malformed JSON returns the
+// wrapped decode error without the sentinel.
+func SchemaFromJSON(data []byte) (*Schema, error) {
+	doc, err := decodeJSONInstance(data)
+	if err != nil {
+		return nil, err
+	}
+
+	return SchemaFromValue(doc)
+}
+
+// CompileJSON decodes data as a single JSON schema document with
+// [SchemaFromJSON] and compiles it with [Compile]. It is the schema-side
+// counterpart of [ValidateJSON]: numbers decode as [json.Number], and trailing
+// data after the document is rejected. A top-level value that is not an object
+// or boolean — including JSON null, which unmarshaling into a [Schema]
+// directly silently coerces to the false schema — returns an error wrapping
+// [ErrInvalidSchemaDocument]; malformed JSON returns the wrapped decode error
+// without the sentinel.
 //
 // CompileJSON is [CompileJSONContext] with [context.Background].
 func CompileJSON(data []byte, opts ...ValidateOption) (*Validator, error) {
@@ -952,12 +973,7 @@ func CompileJSON(data []byte, opts ...ValidateOption) (*Validator, error) {
 // to a [RefResolverContext] resolver for refs resolved during compilation
 // (see [CompileContext]).
 func CompileJSONContext(ctx context.Context, data []byte, opts ...ValidateOption) (*Validator, error) {
-	doc, err := decodeJSONInstance(data)
-	if err != nil {
-		return nil, err
-	}
-
-	schema, err := SchemaFromValue(doc)
+	schema, err := SchemaFromJSON(data)
 	if err != nil {
 		return nil, err
 	}

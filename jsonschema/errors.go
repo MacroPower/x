@@ -22,8 +22,8 @@ var (
 	// compile cleanly and then reject every instance at runtime.
 	ErrInvalidType = errors.New("invalid type name")
 
-	// ErrInvalidSchemaDocument is returned by [CompileJSON] and
-	// [SchemaFromValue] when a schema document's top-level value is not a
+	// ErrInvalidSchemaDocument is returned by [CompileJSON], [SchemaFromJSON],
+	// and [SchemaFromValue] when a schema document's top-level value is not a
 	// JSON object or boolean.
 	ErrInvalidSchemaDocument = errors.New("schema document must be a JSON object or boolean")
 
