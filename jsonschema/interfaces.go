@@ -1,6 +1,9 @@
 package jsonschema
 
-import "reflect"
+import (
+	"context"
+	"reflect"
+)
 
 // JSONSchemaProvider allows a type to provide its own schema, bypassing
 // automatic generation entirely. When a type implements JSONSchemaProvider,
@@ -40,6 +43,21 @@ type TagInterpreter interface {
 // to multiple Validate calls.
 type RefResolver interface {
 	ResolveRef(uri string) (*Schema, error)
+}
+
+// RefResolverContext is an optional extension of [RefResolver]. When the
+// resolver passed to [WithRefResolver] also implements RefResolverContext,
+// resolution calls ResolveRefContext with the context from [CompileContext]
+// or [Validator.ValidateContext]; context-less entry points pass
+// [context.Background]. The caching and concurrency contract of [RefResolver]
+// applies unchanged.
+type RefResolverContext interface {
+	RefResolver
+
+	// ResolveRefContext resolves a remote schema URI under the caller's
+	// context, so a resolver that fetches over the network can honor
+	// cancellation and deadlines.
+	ResolveRefContext(ctx context.Context, uri string) (*Schema, error)
 }
 
 // FieldContext provides context about a struct field to tag interpreters.

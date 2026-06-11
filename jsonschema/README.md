@@ -105,7 +105,13 @@ if errors.As(err, &ve) {
 - Draft-07 and Draft 2020-12 output and validation.
 - Structured instance validation: all failures collected as a tree with instance
   and schema paths.
-- `$vocabulary` gating and pluggable, opt-in remote `$ref` resolution.
+- `$vocabulary` gating and pluggable, opt-in, context-aware remote `$ref`
+  resolution.
+- Schema traversal (`Subschemas`, `Walk`) and shape predicates
+  (`CheckTypeNames`, `IsTrueSchema`, `IsFalseSchema`) for working with
+  `Schema` values directly.
+- `$ref` inlining (`Inline`) that flattens a schema and the documents it
+  references into one self-contained document.
 - A build-time code-generation CLI (`jsonschemagen`) for `//go:generate`.
 
 ## Generating schemas
@@ -385,7 +391,7 @@ unrecognized keys return an error.
 
 ## Validating instances
 
-Three entry points are provided:
+The core entry points are:
 
 - `Validate(schema, instance, opts...)` validates a pre-parsed Go value
   (`map[string]any`, `[]any`, `string`, `float64`, `json.Number`, `bool`,
@@ -402,10 +408,35 @@ Three entry points are provided:
   construction, `Schema.Resolve`, draft and vocabulary detection) and returns a
   reusable `*Validator` with `Validate` and `ValidateJSON` methods.
 
+Schemas arriving as JSON documents rather than `*Schema` values have
+symmetric entry points:
+
+- `CompileJSON(data, opts...)` decodes `data` as a single JSON schema document
+  (numbers as `json.Number`, trailing data rejected) and compiles it with
+  `Compile`. It is the schema-side counterpart of `ValidateJSON`.
+- `SchemaFromValue(doc)` converts an already-decoded document — a `bool`
+  (`true` is the empty schema, `false` the schema that rejects every instance)
+  or a `map[string]any`, such as `Normalize` output with `json.Number` leaves —
+  to a `*Schema`.
+
+With both, a top-level value that is not an object or boolean returns an error
+wrapping `ErrInvalidSchemaDocument`. That includes JSON `null`, which
+unmarshaling into a `Schema` directly would silently coerce to the `false`
+schema. Malformed JSON returns the wrapped decode error without the sentinel.
+
+Every compile and validate entry point has a `Context` variant —
+`CompileContext`, `CompileJSONContext`, `ValidateContext`,
+`ValidateJSONContext`, and the `Validator` methods of the same names — that
+carries a caller-supplied context to a `RefResolverContext` resolver (see
+[Remote references](#remote-references)); the context-less forms pass
+`context.Background()`.
+
 `Compile` (and therefore the one-shot helpers) rejects a `type` keyword that
 names anything other than the seven JSON Schema types with `ErrInvalidType`,
 so a typo'd type surfaces at construction instead of silently rejecting every
-instance at runtime.
+instance at runtime. The same check is exported standalone as
+`CheckTypeNames` (see [Schema traversal and predicates](#schema-traversal-and-predicates));
+`Compile` routes through it, so the two produce textually identical errors.
 
 `Validate` and `ValidateJSON` compile a fresh validator on every call; to
 validate many instances against the same schema, `Compile` once and reuse the
@@ -461,6 +492,24 @@ collection structure (`required`, `additionalProperties`, `propertyNames`,
 `minItems`, `minProperties`, ...) rather than a value, so a source-mapping
 consumer can highlight the key instead of the value.
 
+`InstanceSegments()` returns the `InstancePath` location in typed form: one
+`Segment` per reference token, outermost first, each marked as an object key
+or an array index. The JSON Pointer string cannot distinguish array index `1`
+from an object property named `"1"` (YAML decoders in particular produce
+string map keys that look numeric), and its keys are RFC 6901-escaped; the
+segments carry the unescaped key and an explicit index/key distinction, so
+consumers need not re-parse the pointer and guess with `strconv.Atoi`.
+Segments are populated on every error produced by validation; hand-constructed
+errors return `nil`.
+
+```go
+type Segment struct {
+	Key     string // object property name, when IsIndex is false
+	Index   int    // array index, when IsIndex is true
+	IsIndex bool   // array element rather than object property
+}
+```
+
 A `false` subschema failure ("value is not allowed") carries the applicator
 keyword that applied it — `additionalProperties` for
 `additionalProperties: false`, and likewise `properties`,
@@ -478,15 +527,15 @@ containing object are both identifiable from `InstancePath` alone.
 
 ### Validation options
 
-| Option                          | Effect                                                                     |
-| ------------------------------- | -------------------------------------------------------------------------- |
-| `WithRefResolver(r)`            | Resolve remote/absolute `$ref` URIs (called only when local lookup fails). |
-| `WithFormatValidator(name, fn)` | Register a custom `format` checker (`func(string) error`).                 |
-| `WithFormats(bool)`             | Force `format` assertion on or off.                                        |
-| `WithContent(bool)`             | Assert `contentEncoding`/`contentMediaType` (annotation-only by default).  |
-| `WithResolveOptions(opts)`      | Pass upstream `ResolveOptions` to `Schema.Resolve`.                        |
-| `WithVocabularies(map)`         | Directly set active vocabularies (highest precedence).                     |
-| `WithMetaSchema(ms)`            | Register a metaschema whose `$vocabulary` gates keyword groups.            |
+| Option                          | Effect                                                                                                                                |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `WithRefResolver(r)`            | Resolve remote/absolute `$ref` URIs (called only when local lookup fails); a `RefResolverContext` also receives the caller's context. |
+| `WithFormatValidator(name, fn)` | Register a custom `format` checker (`func(string) error`).                                                                            |
+| `WithFormats(bool)`             | Force `format` assertion on or off.                                                                                                   |
+| `WithContent(bool)`             | Assert `contentEncoding`/`contentMediaType` (annotation-only by default).                                                             |
+| `WithResolveOptions(opts)`      | Pass upstream `ResolveOptions` to `Schema.Resolve`.                                                                                   |
+| `WithVocabularies(map)`         | Directly set active vocabularies (highest precedence).                                                                                |
+| `WithMetaSchema(ms)`            | Register a metaschema whose `$vocabulary` gates keyword groups.                                                                       |
 
 ### Formats
 

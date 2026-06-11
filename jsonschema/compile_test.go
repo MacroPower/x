@@ -1,6 +1,7 @@
 package jsonschema_test
 
 import (
+	"encoding/json"
 	"sync"
 	"testing"
 
@@ -231,6 +232,117 @@ func TestCompileRejectsUnknownTypeNames(t *testing.T) {
 	}
 }
 
+func TestCheckTypeNames(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		schema   *jsonschema.Schema
+		err      error
+		contains string
+	}{
+		"nil schema": {
+			schema: nil,
+		},
+		"valid nested schema": {
+			schema: &jsonschema.Schema{
+				Type: "object",
+				Properties: map[string]*jsonschema.Schema{
+					"age": {Type: "integer"},
+				},
+			},
+		},
+		"top-level typo": {
+			schema:   &jsonschema.Schema{Type: "interger"},
+			err:      jsonschema.ErrInvalidType,
+			contains: `"interger" at /type`,
+		},
+		"typo nested under defs": {
+			schema: &jsonschema.Schema{
+				Defs: map[string]*jsonschema.Schema{
+					"thing": {Type: "strng"},
+				},
+			},
+			err:      jsonschema.ErrInvalidType,
+			contains: `"strng" at /$defs/thing/type`,
+		},
+		"bad entry in types array": {
+			schema:   &jsonschema.Schema{Types: []string{"string", "nul"}},
+			err:      jsonschema.ErrInvalidType,
+			contains: `"nul" at /type`,
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := jsonschema.CheckTypeNames(tt.schema)
+			if tt.err == nil {
+				require.NoError(t, err)
+
+				return
+			}
+
+			require.ErrorIs(t, err, tt.err)
+			assert.Contains(t, err.Error(), tt.contains)
+		})
+	}
+}
+
+// TestCheckTypeNamesMatchesCompile pins that the standalone check and the one
+// Compile runs are the same entry point: for a schema whose only defect is a
+// bad type name, the two error strings are textually identical.
+func TestCheckTypeNamesMatchesCompile(t *testing.T) {
+	t.Parallel()
+
+	schema := &jsonschema.Schema{
+		Type: "object",
+		Properties: map[string]*jsonschema.Schema{
+			"age": {Type: "numbr"},
+		},
+	}
+
+	standaloneErr := jsonschema.CheckTypeNames(schema)
+	require.ErrorIs(t, standaloneErr, jsonschema.ErrInvalidType)
+
+	_, compileErr := jsonschema.Compile(schema)
+	require.ErrorIs(t, compileErr, jsonschema.ErrInvalidType)
+
+	assert.Equal(t, compileErr.Error(), standaloneErr.Error())
+}
+
+// TestCheckTypeNamesToleratesUncompilableSchemas pins the standalone use case:
+// CheckTypeNames vets type names without the registry, reference resolution,
+// and vocabulary work Compile performs, so schemas Compile rejects — here a
+// cyclic pointer graph upstream Resolve cannot represent — still get a
+// verdict on their type keywords.
+func TestCheckTypeNamesToleratesUncompilableSchemas(t *testing.T) {
+	t.Parallel()
+
+	t.Run("valid cyclic schema passes", func(t *testing.T) {
+		t.Parallel()
+
+		schema := &jsonschema.Schema{Type: "object"}
+		schema.Properties = map[string]*jsonschema.Schema{"self": schema}
+
+		require.NoError(t, jsonschema.CheckTypeNames(schema))
+	})
+
+	t.Run("cyclic schema with typo still rejected", func(t *testing.T) {
+		t.Parallel()
+
+		schema := &jsonschema.Schema{Type: "object"}
+		schema.Properties = map[string]*jsonschema.Schema{
+			"self": schema,
+			"age":  {Type: "numbr"},
+		}
+
+		err := jsonschema.CheckTypeNames(schema)
+		require.ErrorIs(t, err, jsonschema.ErrInvalidType)
+		assert.Contains(t, err.Error(), `"numbr" at /properties/age/type`)
+	})
+}
+
 func TestCompileConcurrent(t *testing.T) {
 	t.Parallel()
 
@@ -415,6 +527,211 @@ func TestCompileRemoteBoundsAndPatternFallback(t *testing.T) {
 	require.Error(t, v.Validate(map[string]any{"count": 3.0}), "3 is not a multiple of 2")
 	require.Error(t, v.Validate(map[string]any{"count": 12.0}), "12 exceeds the maximum")
 	require.Error(t, v.Validate(map[string]any{"code": "abc"}), "lowercase fails the pattern")
+}
+
+func TestSchemaFromValue(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		doc      any
+		instance any
+		err      error
+		contains string
+		valid    bool
+	}{
+		"true is the empty schema": {
+			doc:      true,
+			instance: "anything",
+			valid:    true,
+		},
+		"false rejects every instance": {
+			doc:      false,
+			instance: "anything",
+			valid:    false,
+		},
+		"object document": {
+			doc: map[string]any{
+				"type":      "string",
+				"minLength": 2.0,
+			},
+			instance: "x",
+			valid:    false,
+		},
+		"normalized document with json.Number leaves": {
+			doc: map[string]any{
+				"type":    "integer",
+				"minimum": json.Number("3"),
+			},
+			instance: 2.0,
+			valid:    false,
+		},
+		"json.Number survives at instance-exceeding magnitude": {
+			doc: map[string]any{
+				"type": "number",
+				// Within float64 range, so the schema-side float64 cap does
+				// not round it; the point is the marshal round-trip keeps the
+				// json.Number literal intact.
+				"minimum": json.Number("12345678901234"),
+			},
+			instance: 12345678901233.0,
+			valid:    false,
+		},
+		"nil document": {
+			doc:      nil,
+			err:      jsonschema.ErrInvalidSchemaDocument,
+			contains: "<nil>",
+		},
+		"string document": {
+			doc:      "not a schema",
+			err:      jsonschema.ErrInvalidSchemaDocument,
+			contains: "string",
+		},
+		"array document": {
+			doc:      []any{map[string]any{}},
+			err:      jsonschema.ErrInvalidSchemaDocument,
+			contains: "[]interface {}",
+		},
+		"number document": {
+			doc:      1.0,
+			err:      jsonschema.ErrInvalidSchemaDocument,
+			contains: "float64",
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			schema, err := jsonschema.SchemaFromValue(tt.doc)
+			if tt.err != nil {
+				require.ErrorIs(t, err, tt.err)
+				assert.Contains(t, err.Error(), tt.contains)
+
+				return
+			}
+
+			require.NoError(t, err)
+
+			validateErr := jsonschema.Validate(schema, tt.instance)
+			if tt.valid {
+				assert.NoError(t, validateErr)
+			} else {
+				assert.Error(t, validateErr)
+			}
+		})
+	}
+}
+
+// TestSchemaFromValueBooleanForms pins the exact schema shapes the boolean
+// documents convert to, so they round-trip through the package's own
+// predicates and marshal back to JSON true and false.
+func TestSchemaFromValueBooleanForms(t *testing.T) {
+	t.Parallel()
+
+	trueSchema, err := jsonschema.SchemaFromValue(true)
+	require.NoError(t, err)
+	assert.True(t, jsonschema.IsTrueSchema(trueSchema))
+
+	falseSchema, err := jsonschema.SchemaFromValue(false)
+	require.NoError(t, err)
+	assert.True(t, jsonschema.IsFalseSchema(falseSchema))
+}
+
+func TestCompileJSON(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		err      error
+		data     string
+		instance string
+		contains string
+		valid    bool
+	}{
+		"object schema accepts valid instance": {
+			data:     `{"type":"object","required":["name"],"properties":{"name":{"type":"string"}}}`,
+			instance: `{"name":"ada"}`,
+			valid:    true,
+		},
+		"object schema rejects invalid instance": {
+			data:     `{"type":"object","required":["name"],"properties":{"name":{"type":"string"}}}`,
+			instance: `{"name":1}`,
+			valid:    false,
+		},
+		"true accepts everything": {
+			data:     `true`,
+			instance: `[1,2,3]`,
+			valid:    true,
+		},
+		"false rejects everything": {
+			data:     `false`,
+			instance: `{}`,
+			valid:    false,
+		},
+		"numeric keywords decode": {
+			data:     `{"type":"integer","minimum":3}`,
+			instance: `2`,
+			valid:    false,
+		},
+		"null document": {
+			data:     `null`,
+			err:      jsonschema.ErrInvalidSchemaDocument,
+			contains: "<nil>",
+		},
+		"string document": {
+			data: `"oops"`,
+			err:  jsonschema.ErrInvalidSchemaDocument,
+		},
+		"array document": {
+			data: `[true]`,
+			err:  jsonschema.ErrInvalidSchemaDocument,
+		},
+		"number document": {
+			data: `1`,
+			err:  jsonschema.ErrInvalidSchemaDocument,
+		},
+		"malformed JSON": {
+			data:     `{"type":`,
+			contains: "JSON decode",
+		},
+		"trailing data": {
+			data:     `{"type":"object"} {}`,
+			contains: "unexpected data after top-level value",
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			v, err := jsonschema.CompileJSON([]byte(tt.data))
+			if tt.err != nil || tt.contains != "" {
+				require.Error(t, err)
+
+				if tt.err != nil {
+					require.ErrorIs(t, err, tt.err)
+				} else {
+					// Decode failures carry no sentinel: the document never
+					// reached the top-level shape check.
+					require.NotErrorIs(t, err, jsonschema.ErrInvalidSchemaDocument)
+				}
+
+				if tt.contains != "" {
+					assert.Contains(t, err.Error(), tt.contains)
+				}
+
+				return
+			}
+
+			require.NoError(t, err)
+
+			validateErr := v.ValidateJSON([]byte(tt.instance))
+			if tt.valid {
+				assert.NoError(t, validateErr)
+			} else {
+				assert.Error(t, validateErr)
+			}
+		})
+	}
 }
 
 func TestCompileConcurrentWithRefResolver(t *testing.T) {

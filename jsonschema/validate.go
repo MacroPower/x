@@ -2,6 +2,7 @@ package jsonschema
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -125,10 +126,52 @@ type visitKey struct {
 	instancePath string
 }
 
+// instanceLocation is the position in the instance that the validation walk is
+// currently at, carried in two synchronized representations: the RFC 6901
+// JSON Pointer string surfaced as [ValidationError.InstancePath], and the typed
+// segments surfaced as [ValidationError.InstanceSegments]. The zero value is
+// the root location (empty pointer, nil segments).
+type instanceLocation struct {
+	// The RFC 6901-encoded JSON Pointer.
+	ptr string
+	// One typed [Segment] per reference token of ptr.
+	segs []Segment
+}
+
+// key returns the location of the object member named name, extending both
+// representations. The full slice expression caps segs so sibling descents
+// append into fresh backing arrays instead of aliasing a shared one.
+func (l instanceLocation) key(name string) instanceLocation {
+	return instanceLocation{
+		ptr:  l.ptr + "/" + escapeJSONPointer(name),
+		segs: append(l.segs[:len(l.segs):len(l.segs)], Segment{Key: name}),
+	}
+}
+
+// index returns the location of the array element at index i, extending both
+// representations. The full slice expression caps segs so sibling descents
+// append into fresh backing arrays instead of aliasing a shared one.
+func (l instanceLocation) index(i int) instanceLocation {
+	return instanceLocation{
+		ptr:  l.ptr + "/" + strconv.Itoa(i),
+		segs: append(l.segs[:len(l.segs):len(l.segs)], Segment{Index: i, IsIndex: true}),
+	}
+}
+
 // validator holds state for a single validation run.
 type validator struct {
-	refResolveErr         error              // last error from refResolver, consumed by validateRef/validateDynamicRef
-	refResolver           RefResolver        // optional remote ref resolver
+	refResolveErr error       // last error from refResolver, consumed by validateRef/validateDynamicRef
+	refResolver   RefResolver // optional remote ref resolver
+
+	// The caller's context for the current compile or validation run, passed
+	// to the resolver when it implements [RefResolverContext]. It has the
+	// same lifetime discipline as the other per-run state: CompileContext
+	// sets it for the duration of compilation and clears it before the
+	// validator is cached, and forInstance sets it per run, so a stored
+	// context never outlives the call that supplied it. Context-less entry
+	// points use [context.Background].
+	ctx context.Context
+
 	metaSchemas           map[string]*Schema // $schema URI → metaschema
 	visiting              map[visitKey]bool
 	root                  *Schema
@@ -211,15 +254,18 @@ func newValidator(schema *Schema, opts []ValidateOption) (*validator, error) {
 // mutable walk state (the visiting set, dynamic scope, JSON-pointer cache, and
 // ref-resolution scratch), so a [Validator] can be reused and is safe for
 // concurrent use. The immutable per-schema state — registries, resolved
-// vocabularies, draft, and format configuration — is shared.
+// vocabularies, draft, and format configuration — is shared. The caller's ctx
+// is carried on the per-run copy so a [RefResolverContext] resolving a remote
+// ref at validation time sees the context of the run that triggered it.
 //
 // When a [RefResolver] is configured the registries can still gain entries
 // during the walk (a remote ref reached only at validation time, via
 // resolveRemote), so each run gets its own copies to keep concurrent runs from
 // racing on them. Without a resolver the walk never writes the registries, so
 // they are shared directly.
-func (v *validator) forInstance() *validator {
+func (v *validator) forInstance(ctx context.Context) *validator {
 	rv := *v
+	rv.ctx = ctx
 	rv.visiting = map[visitKey]bool{}
 	rv.jsonPointerCache = nil
 	rv.fallbackURIRegistry = nil
@@ -577,6 +623,25 @@ func computeBounds(schema *Schema) *precomputedBounds {
 	return b
 }
 
+// callResolver invokes the configured resolver for uri. A resolver that also
+// implements [RefResolverContext] receives the context of the current compile
+// or validation run via ResolveRefContext; a plain [RefResolver] is called
+// without one.
+func (v *validator) callResolver(uri string) (*Schema, error) {
+	if rc, ok := v.refResolver.(RefResolverContext); ok {
+		ctx := v.ctx
+		if ctx == nil {
+			ctx = context.Background()
+		}
+
+		//nolint:wrapcheck // resolveRemote wraps the error with ErrRefResolve; remoteLoader tolerates it.
+		return rc.ResolveRefContext(ctx, uri)
+	}
+
+	//nolint:wrapcheck // resolveRemote wraps the error with ErrRefResolve; remoteLoader tolerates it.
+	return v.refResolver.ResolveRef(uri)
+}
+
 // resolveRemote calls the configured [RefResolver] to fetch a remote schema,
 // registers it in the URI/anchor registries, and returns it. On error it
 // stores the error in refResolveErr and returns nil. Subsequent calls for
@@ -586,7 +651,7 @@ func (v *validator) resolveRemote(baseURI string) *Schema {
 		return nil
 	}
 
-	schema, err := v.refResolver.ResolveRef(baseURI)
+	schema, err := v.callResolver(baseURI)
 	if err != nil {
 		v.refResolveErr = fmt.Errorf("%w: %w", ErrRefResolve, err)
 		return nil
@@ -632,7 +697,7 @@ func (v *validator) remoteLoader() jsonschema.Loader {
 		}
 
 		if v.refResolver != nil {
-			s, err := v.refResolver.ResolveRef(uriStr)
+			s, err := v.callResolver(uriStr)
 			if err == nil && s != nil {
 				// Deep-copy so the upstream resolver's mutations don't
 				// affect the original schema from the RefResolver.
@@ -752,17 +817,33 @@ type Validator struct {
 //
 // It returns an error when the options are invalid or the schema fails
 // structural pre-validation.
+//
+// Compile is [CompileContext] with [context.Background].
 func Compile(schema *Schema, opts ...ValidateOption) (*Validator, error) {
+	return CompileContext(context.Background(), schema, opts...)
+}
+
+// CompileContext is [Compile] with a caller-supplied context. The context is
+// passed to a [RefResolverContext] resolver (see [WithRefResolver]) for refs
+// resolved during compilation. It is not retained by the returned [Validator]:
+// refs reached only at validation time resolve under the context passed to
+// [Validator.ValidateContext] or [Validator.ValidateJSONContext] (the
+// context-less methods pass [context.Background]).
+func CompileContext(ctx context.Context, schema *Schema, opts ...ValidateOption) (*Validator, error) {
 	v, err := newValidator(schema, opts)
 	if err != nil {
 		return nil, err
 	}
 
+	// Carry the compile context for resolver calls made below (remoteLoader
+	// during Schema.Resolve, and resolveRemote via resolveErrorIsRefOnly).
+	v.ctx = ctx
+
 	// Reject unknown type names up front. Schema.Resolve does not check the
 	// type vocabulary, and a typo'd type otherwise compiles cleanly and then
 	// rejects every instance — a confusing runtime failure instead of a clear
 	// construction error.
-	err = checkTypeNames(schema, "", map[*Schema]bool{})
+	err = CheckTypeNames(schema)
 	if err != nil {
 		return nil, err
 	}
@@ -786,20 +867,114 @@ func Compile(schema *Schema, opts ...ValidateOption) (*Validator, error) {
 	}
 
 	if resolveOpts.Loader == nil {
+		// The compile context reaches the resolver through the ctx field set
+		// above: the loader runs inside deep upstream Resolve machinery that
+		// cannot thread a parameter.
+		//nolint:contextcheck // See the comment above.
 		resolveOpts.Loader = v.remoteLoader()
 	}
 
 	_, err = schema.Resolve(&resolveOpts)
+	//nolint:contextcheck // The compile context rides on the ctx field set above.
 	if err != nil && !v.resolveErrorIsRefOnly(schema, resolveOpts) {
 		return nil, fmt.Errorf("schema resolve: %w", err)
 	}
 
+	// Drop the compile context so the cached validator never holds a stale or
+	// canceled context; each validation run supplies its own via forInstance.
+	v.ctx = nil
+
 	return &Validator{proto: v}, nil
 }
 
-// checkTypeNames verifies that every type keyword reachable from schema names
-// one of the seven JSON Schema types, returning an error wrapping
-// [ErrInvalidType] for the first violation. The traversal mirrors
+// SchemaFromValue converts an already-decoded JSON schema document to a
+// [*Schema]. The document doc must be a bool (true is the empty schema;
+// false is the schema that rejects every instance) or a map[string]any. Any
+// other dynamic type — including nil, the decoding of a top-level JSON null,
+// which [Schema.UnmarshalJSON] silently coerces to the false schema — returns
+// an error wrapping [ErrInvalidSchemaDocument] naming the Go type. Values
+// produced by [Normalize] ([json.Number] leaves) convert correctly.
+func SchemaFromValue(doc any) (*Schema, error) {
+	switch d := doc.(type) {
+	case bool:
+		if d {
+			return &Schema{}, nil
+		}
+
+		// The boolean false schema form {"not": {}} (see [IsFalseSchema]),
+		// matching what the upstream produces when unmarshaling JSON false.
+		return &Schema{Not: &Schema{}}, nil
+
+	case map[string]any:
+		// Round-trip through encoding/json, delegating keyword parsing to the
+		// upstream UnmarshalJSON. A [json.Number] leaf marshals verbatim as a
+		// JSON number, so a [Normalize]d document converts exactly.
+		data, err := json.Marshal(d)
+		if err != nil {
+			return nil, fmt.Errorf("encode schema document: %w", err)
+		}
+
+		var s Schema
+
+		err = json.Unmarshal(data, &s)
+		if err != nil {
+			return nil, fmt.Errorf("decode schema document: %w", err)
+		}
+
+		return &s, nil
+
+	default:
+		return nil, fmt.Errorf("%w: got %T", ErrInvalidSchemaDocument, doc)
+	}
+}
+
+// CompileJSON decodes data as a single JSON schema document and compiles it
+// with [Compile]. It is the schema-side counterpart of [ValidateJSON]: numbers
+// decode as [json.Number], and trailing data after the document is rejected. A
+// top-level value that is not an object or boolean — including JSON null,
+// which unmarshaling into a [Schema] directly silently coerces to the false
+// schema — returns an error wrapping [ErrInvalidSchemaDocument]; malformed
+// JSON returns the wrapped decode error without the sentinel.
+//
+// CompileJSON is [CompileJSONContext] with [context.Background].
+func CompileJSON(data []byte, opts ...ValidateOption) (*Validator, error) {
+	return CompileJSONContext(context.Background(), data, opts...)
+}
+
+// CompileJSONContext is [CompileJSON] with a caller-supplied context, passed
+// to a [RefResolverContext] resolver for refs resolved during compilation
+// (see [CompileContext]).
+func CompileJSONContext(ctx context.Context, data []byte, opts ...ValidateOption) (*Validator, error) {
+	doc, err := decodeJSONInstance(data)
+	if err != nil {
+		return nil, err
+	}
+
+	schema, err := SchemaFromValue(doc)
+	if err != nil {
+		return nil, err
+	}
+
+	return CompileContext(ctx, schema, opts...)
+}
+
+// CheckTypeNames verifies that every type keyword reachable from schema
+// names one of the seven JSON Schema type names ("null", "boolean",
+// "string", "integer", "number", "object", "array"). It returns nil or an
+// error wrapping [ErrInvalidType] that includes the schema path of the
+// first offending keyword. It is the standalone form of the check [Compile]
+// runs before resolution, for vetting structurally messy schemas without
+// compiling them: it needs no registry, resolves no references, follows
+// only typed sub-schema fields, and tolerates cyclic schema graphs. A nil
+// schema returns nil.
+func CheckTypeNames(schema *Schema) error {
+	return checkTypeNames(schema, "", map[*Schema]bool{})
+}
+
+// checkTypeNames implements [CheckTypeNames], verifying that every type
+// keyword reachable from schema names one of the seven JSON Schema types and
+// returning an error wrapping [ErrInvalidType] for the first violation. The
+// traversal mirrors
 // [validator.walkSchema]'s sub-schema recursion but additionally tracks the
 // schema path so the error locates the offending keyword; visited guards
 // against schema graph cycles. The check is draft-agnostic: neither draft
@@ -905,7 +1080,18 @@ func checkTypeNames(schema *Schema, schemaPath string, visited map[*Schema]bool)
 //
 // Returns nil on success or an error that can be unwrapped to *[ValidationError]
 // via [errors.As].
+//
+// Validate is [Validator.ValidateContext] with [context.Background].
 func (c *Validator) Validate(instance any) error {
+	return c.ValidateContext(context.Background(), instance)
+}
+
+// ValidateContext is [Validator.Validate] with a caller-supplied context. The
+// context is passed to a [RefResolverContext] resolver (see [WithRefResolver])
+// for remote refs reached during this validation run, so a resolver that
+// fetches over the network can honor cancellation and deadlines. The context
+// is held only for the duration of the run, never by the [Validator] itself.
+func (c *Validator) ValidateContext(ctx context.Context, instance any) error {
 	instance = Normalize(instance)
 	if !acceptedInstance(instance) {
 		return fmt.Errorf(
@@ -915,9 +1101,12 @@ func (c *Validator) Validate(instance any) error {
 		)
 	}
 
-	v := c.proto.forInstance()
+	v := c.proto.forInstance(ctx)
 
-	errs := v.validate(v.root, instance, "", "", nil)
+	// The run context reaches the resolver through the per-run ctx field set
+	// by forInstance: the recursive walk cannot thread a parameter.
+	//nolint:contextcheck // See the comment above.
+	errs := v.validate(v.root, instance, instanceLocation{}, "", nil)
 	if len(errs) == 0 {
 		return nil
 	}
@@ -931,13 +1120,22 @@ func (c *Validator) Validate(instance any) error {
 
 // ValidateJSON decodes data as a JSON instance (numbers as [json.Number]) and
 // validates it against the compiled schema.
+//
+// ValidateJSON is [Validator.ValidateJSONContext] with [context.Background].
 func (c *Validator) ValidateJSON(data []byte) error {
+	return c.ValidateJSONContext(context.Background(), data)
+}
+
+// ValidateJSONContext is [Validator.ValidateJSON] with a caller-supplied
+// context, passed to a [RefResolverContext] resolver for remote refs reached
+// during this validation run (see [Validator.ValidateContext]).
+func (c *Validator) ValidateJSONContext(ctx context.Context, data []byte) error {
 	instance, err := decodeJSONInstance(data)
 	if err != nil {
 		return err
 	}
 
-	return c.Validate(instance)
+	return c.ValidateContext(ctx, instance)
 }
 
 // Validate validates a pre-parsed Go value against a JSON Schema. It compiles
@@ -952,7 +1150,16 @@ func (c *Validator) ValidateJSON(data []byte) error {
 //
 // Returns nil on success or an error that can be unwrapped to
 // *[ValidationError] via [errors.As].
+//
+// Validate is [ValidateContext] with [context.Background].
 func Validate(schema *Schema, instance any, opts ...ValidateOption) error {
+	return ValidateContext(context.Background(), schema, instance, opts...)
+}
+
+// ValidateContext is [Validate] with a caller-supplied context, passed to a
+// [RefResolverContext] resolver (see [WithRefResolver]) for refs resolved both
+// while compiling schema and during the validation run.
+func ValidateContext(ctx context.Context, schema *Schema, instance any, opts ...ValidateOption) error {
 	// Check the instance type before compiling so an unaccepted instance is
 	// reported without the cost of (or any error from) schema preparation.
 	instance = Normalize(instance)
@@ -964,12 +1171,12 @@ func Validate(schema *Schema, instance any, opts ...ValidateOption) error {
 		)
 	}
 
-	c, err := Compile(schema, opts...)
+	c, err := CompileContext(ctx, schema, opts...)
 	if err != nil {
 		return err
 	}
 
-	return c.Validate(instance)
+	return c.ValidateContext(ctx, instance)
 }
 
 // resolveErrorIsRefOnly reports whether a [jsonschema.Schema.Resolve] failure
@@ -1162,13 +1369,22 @@ func schemaFormsTree(schema *Schema) bool {
 //
 // Returns nil on success or an error that can be unwrapped to
 // *[ValidationError] via [errors.As].
+//
+// ValidateJSON is [ValidateJSONContext] with [context.Background].
 func ValidateJSON(schema *Schema, data []byte, opts ...ValidateOption) error {
+	return ValidateJSONContext(context.Background(), schema, data, opts...)
+}
+
+// ValidateJSONContext is [ValidateJSON] with a caller-supplied context, passed
+// to a [RefResolverContext] resolver (see [WithRefResolver]) for refs resolved
+// both while compiling schema and during the validation run.
+func ValidateJSONContext(ctx context.Context, schema *Schema, data []byte, opts ...ValidateOption) error {
 	instance, err := decodeJSONInstance(data)
 	if err != nil {
 		return err
 	}
 
-	return Validate(schema, instance, opts...)
+	return ValidateContext(ctx, schema, instance, opts...)
 }
 
 // errTrailingData reports tokens after the single top-level JSON value.
@@ -1253,7 +1469,8 @@ func (a *annotations) merge(other *annotations) {
 func (v *validator) validate(
 	schema *Schema,
 	instance any,
-	instancePath, schemaPath string,
+	instancePath instanceLocation,
+	schemaPath string,
 	ann *annotations,
 ) []*ValidationError {
 	if schema == nil {
@@ -1274,14 +1491,15 @@ func (v *validator) validate(
 		// (if any) handed it the false schema. The applicator call sites stamp
 		// it via labelFalseSchemaKeyword.
 		return []*ValidationError{{
-			InstancePath: instancePath,
+			InstancePath: instancePath.ptr,
+			segments:     instancePath.segs,
 			SchemaPath:   schemaPath,
 			Message:      "value is not allowed",
 		}}
 	}
 
 	// Circular ref detection: same schema + same instance path = true cycle.
-	key := visitKey{schema, instancePath}
+	key := visitKey{schema, instancePath.ptr}
 	if v.visiting[key] {
 		return nil // treat as passing to avoid infinite recursion
 	}
@@ -1367,7 +1585,8 @@ func (v *validator) validate(
 func (v *validator) validateUnevaluated(
 	schema *Schema,
 	instance any,
-	instancePath, schemaPath string,
+	instancePath instanceLocation,
+	schemaPath string,
 	ann *annotations,
 ) []*ValidationError {
 	if v.draft != Draft2020 || ann == nil || !v.vocabs.unevaluated {
@@ -1392,14 +1611,15 @@ func (v *validator) validateUnevaluated(
 					continue
 				}
 
-				childPath := instancePath + "/" + escapeJSONPointer(propName)
+				childPath := instancePath.key(propName)
 				childSchemaPath := schemaPath + "/unevaluatedProperties"
 				childErrs := v.validate(schema.UnevaluatedProperties, val, childPath, childSchemaPath, nil)
 				if len(childErrs) == 0 {
 					ann.properties[propName] = true
 				} else {
 					errs = append(errs, &ValidationError{
-						InstancePath: childPath,
+						InstancePath: childPath.ptr,
+						segments:     childPath.segs,
 						SchemaPath:   childSchemaPath,
 						Keyword:      keywordUnevaluatedProperties,
 						Message:      fmt.Sprintf("property %q is not allowed by unevaluatedProperties", propName),
@@ -1429,14 +1649,15 @@ func (v *validator) validateUnevaluated(
 					continue
 				}
 
-				childPath := fmt.Sprintf("%s/%d", instancePath, i)
+				childPath := instancePath.index(i)
 				childSchemaPath := schemaPath + "/unevaluatedItems"
 				childErrs := v.validate(schema.UnevaluatedItems, item, childPath, childSchemaPath, nil)
 				if len(childErrs) == 0 {
 					ann.itemIndexes[i] = true
 				} else {
 					errs = append(errs, &ValidationError{
-						InstancePath: childPath,
+						InstancePath: childPath.ptr,
+						segments:     childPath.segs,
 						SchemaPath:   childSchemaPath,
 						Keyword:      keywordUnevaluatedItems,
 						Message:      fmt.Sprintf("item %d is not allowed by unevaluatedItems", i),
@@ -1907,7 +2128,12 @@ func instanceMatchesType(instance any, typ string) bool {
 }
 
 // validateType checks the type keyword.
-func (v *validator) validateType(schema *Schema, instance any, instancePath, schemaPath string) []*ValidationError {
+func (v *validator) validateType(
+	schema *Schema,
+	instance any,
+	instancePath instanceLocation,
+	schemaPath string,
+) []*ValidationError {
 	if !v.vocabs.validation {
 		return nil
 	}
@@ -1930,7 +2156,8 @@ func (v *validator) validateType(schema *Schema, instance any, instancePath, sch
 	got := instanceType(instance)
 
 	return []*ValidationError{{
-		InstancePath: instancePath,
+		InstancePath: instancePath.ptr,
+		segments:     instancePath.segs,
 		SchemaPath:   schemaPath + "/type",
 		Keyword:      keywordType,
 		Message:      fmt.Sprintf("expected %s, got %q", formatTypes(types), got),
@@ -1951,7 +2178,12 @@ func formatTypes(types []string) string {
 }
 
 // validateEnum checks the enum keyword.
-func (v *validator) validateEnum(schema *Schema, instance any, instancePath, schemaPath string) []*ValidationError {
+func (v *validator) validateEnum(
+	schema *Schema,
+	instance any,
+	instancePath instanceLocation,
+	schemaPath string,
+) []*ValidationError {
 	if !v.vocabs.validation {
 		return nil
 	}
@@ -1969,7 +2201,8 @@ func (v *validator) validateEnum(schema *Schema, instance any, instancePath, sch
 	}
 
 	return []*ValidationError{{
-		InstancePath: instancePath,
+		InstancePath: instancePath.ptr,
+		segments:     instancePath.segs,
 		SchemaPath:   schemaPath + "/enum",
 		Keyword:      keywordEnum,
 		Message:      "value does not match any enum member",
@@ -1977,7 +2210,12 @@ func (v *validator) validateEnum(schema *Schema, instance any, instancePath, sch
 }
 
 // validateConst checks the const keyword.
-func (v *validator) validateConst(schema *Schema, instance any, instancePath, schemaPath string) []*ValidationError {
+func (v *validator) validateConst(
+	schema *Schema,
+	instance any,
+	instancePath instanceLocation,
+	schemaPath string,
+) []*ValidationError {
 	if !v.vocabs.validation {
 		return nil
 	}
@@ -1992,7 +2230,8 @@ func (v *validator) validateConst(schema *Schema, instance any, instancePath, sc
 	}
 
 	return []*ValidationError{{
-		InstancePath: instancePath,
+		InstancePath: instancePath.ptr,
+		segments:     instancePath.segs,
 		SchemaPath:   schemaPath + "/const",
 		Keyword:      keywordConst,
 		Message:      "value does not match const",
@@ -2366,7 +2605,12 @@ func (v *validator) patternPropertyFor(schema *Schema, pattern string) compiledP
 }
 
 // validateNumeric checks numeric keywords.
-func (v *validator) validateNumeric(schema *Schema, instance any, instancePath, schemaPath string) []*ValidationError {
+func (v *validator) validateNumeric(
+	schema *Schema,
+	instance any,
+	instancePath instanceLocation,
+	schemaPath string,
+) []*ValidationError {
 	if !v.vocabs.validation {
 		return nil
 	}
@@ -2401,7 +2645,8 @@ func (v *validator) validateNumeric(schema *Schema, instance any, instancePath, 
 			// MultipleOf MUST be strictly greater than 0; a non-positive
 			// divisor makes the schema invalid.
 			errs = append(errs, &ValidationError{
-				InstancePath: instancePath,
+				InstancePath: instancePath.ptr,
+				segments:     instancePath.segs,
 				SchemaPath:   schemaPath + "/multipleOf",
 				Keyword:      keywordMultipleOf,
 				Message:      fmt.Sprintf("multipleOf must be greater than 0, got %v", *schema.MultipleOf),
@@ -2417,7 +2662,8 @@ func (v *validator) validateNumeric(schema *Schema, instance any, instancePath, 
 				quotient := new(big.Rat).Quo(val, divisor)
 				if !quotient.IsInt() {
 					errs = append(errs, &ValidationError{
-						InstancePath: instancePath,
+						InstancePath: instancePath.ptr,
+						segments:     instancePath.segs,
 						SchemaPath:   schemaPath + "/multipleOf",
 						Keyword:      keywordMultipleOf,
 						Message:      fmt.Sprintf("%s is not a multiple of %v", ratString(val), *schema.MultipleOf),
@@ -2433,7 +2679,8 @@ func (v *validator) validateNumeric(schema *Schema, instance any, instancePath, 
 		bound := bounds.minimum
 		if bound != nil && val.Cmp(bound) < 0 {
 			errs = append(errs, &ValidationError{
-				InstancePath: instancePath,
+				InstancePath: instancePath.ptr,
+				segments:     instancePath.segs,
 				SchemaPath:   schemaPath + "/minimum",
 				Keyword:      keywordMinimum,
 				Message:      fmt.Sprintf("%s is less than %v", ratString(val), *schema.Minimum),
@@ -2445,7 +2692,8 @@ func (v *validator) validateNumeric(schema *Schema, instance any, instancePath, 
 		bound := bounds.maximum
 		if bound != nil && val.Cmp(bound) > 0 {
 			errs = append(errs, &ValidationError{
-				InstancePath: instancePath,
+				InstancePath: instancePath.ptr,
+				segments:     instancePath.segs,
 				SchemaPath:   schemaPath + "/maximum",
 				Keyword:      keywordMaximum,
 				Message:      fmt.Sprintf("%s is greater than %v", ratString(val), *schema.Maximum),
@@ -2457,7 +2705,8 @@ func (v *validator) validateNumeric(schema *Schema, instance any, instancePath, 
 		bound := bounds.exclusiveMinimum
 		if bound != nil && val.Cmp(bound) <= 0 {
 			errs = append(errs, &ValidationError{
-				InstancePath: instancePath,
+				InstancePath: instancePath.ptr,
+				segments:     instancePath.segs,
 				SchemaPath:   schemaPath + "/exclusiveMinimum",
 				Keyword:      keywordExclusiveMinimum,
 				Message:      fmt.Sprintf("%s is less than or equal to %v", ratString(val), *schema.ExclusiveMinimum),
@@ -2469,7 +2718,8 @@ func (v *validator) validateNumeric(schema *Schema, instance any, instancePath, 
 		bound := bounds.exclusiveMaximum
 		if bound != nil && val.Cmp(bound) >= 0 {
 			errs = append(errs, &ValidationError{
-				InstancePath: instancePath,
+				InstancePath: instancePath.ptr,
+				segments:     instancePath.segs,
 				SchemaPath:   schemaPath + "/exclusiveMaximum",
 				Keyword:      keywordExclusiveMaximum,
 				Message: fmt.Sprintf(
@@ -2497,7 +2747,8 @@ func (v *validator) validateNumericUnbounded(
 	schema *Schema,
 	d decNumber,
 	literal string,
-	instancePath, schemaPath string,
+	instancePath instanceLocation,
+	schemaPath string,
 ) []*ValidationError {
 	num := truncatedNumber(literal)
 
@@ -2505,7 +2756,8 @@ func (v *validator) validateNumericUnbounded(
 
 	add := func(keyword, msg string) {
 		errs = append(errs, &ValidationError{
-			InstancePath: instancePath,
+			InstancePath: instancePath.ptr,
+			segments:     instancePath.segs,
 			SchemaPath:   schemaPath + "/" + keyword,
 			Keyword:      keyword,
 			Message:      msg,
@@ -2569,7 +2821,12 @@ func ratString(r *big.Rat) string {
 }
 
 // validateString checks string keywords.
-func (v *validator) validateString(schema *Schema, instance any, instancePath, schemaPath string) []*ValidationError {
+func (v *validator) validateString(
+	schema *Schema,
+	instance any,
+	instancePath instanceLocation,
+	schemaPath string,
+) []*ValidationError {
 	str, ok := instance.(string)
 	if !ok {
 		// Json.Number is a distinct type, so it fails this assertion and string
@@ -2588,7 +2845,8 @@ func (v *validator) validateString(schema *Schema, instance any, instancePath, s
 
 			if schema.MinLength != nil && runeLen < *schema.MinLength {
 				errs = append(errs, &ValidationError{
-					InstancePath: instancePath,
+					InstancePath: instancePath.ptr,
+					segments:     instancePath.segs,
 					SchemaPath:   schemaPath + "/minLength",
 					Keyword:      keywordMinLength,
 					Message:      fmt.Sprintf("string length %d is less than %d", runeLen, *schema.MinLength),
@@ -2597,7 +2855,8 @@ func (v *validator) validateString(schema *Schema, instance any, instancePath, s
 
 			if schema.MaxLength != nil && runeLen > *schema.MaxLength {
 				errs = append(errs, &ValidationError{
-					InstancePath: instancePath,
+					InstancePath: instancePath.ptr,
+					segments:     instancePath.segs,
 					SchemaPath:   schemaPath + "/maxLength",
 					Keyword:      keywordMaxLength,
 					Message:      fmt.Sprintf("string length %d is greater than %d", runeLen, *schema.MaxLength),
@@ -2614,7 +2873,8 @@ func (v *validator) validateString(schema *Schema, instance any, instancePath, s
 				// cannot be evaluated, so no string is accepted under it rather
 				// than silently treating every string as a match.
 				errs = append(errs, &ValidationError{
-					InstancePath: instancePath,
+					InstancePath: instancePath.ptr,
+					segments:     instancePath.segs,
 					SchemaPath:   schemaPath + "/pattern",
 					Keyword:      keywordPattern,
 					Message:      fmt.Sprintf("pattern %q cannot be compiled", schema.Pattern),
@@ -2622,7 +2882,8 @@ func (v *validator) validateString(schema *Schema, instance any, instancePath, s
 
 			case !cp.re.MatchString(str):
 				errs = append(errs, &ValidationError{
-					InstancePath: instancePath,
+					InstancePath: instancePath.ptr,
+					segments:     instancePath.segs,
 					SchemaPath:   schemaPath + "/pattern",
 					Keyword:      keywordPattern,
 					Message:      fmt.Sprintf("string does not match pattern %q", schema.Pattern),
@@ -2636,7 +2897,8 @@ func (v *validator) validateString(schema *Schema, instance any, instancePath, s
 			err := fn(str)
 			if err != nil {
 				errs = append(errs, &ValidationError{
-					InstancePath: instancePath,
+					InstancePath: instancePath.ptr,
+					segments:     instancePath.segs,
 					SchemaPath:   schemaPath + "/format",
 					Keyword:      keywordFormat,
 					Message:      fmt.Sprintf("string does not match format %q: %v", schema.Format, err),
@@ -2652,7 +2914,8 @@ func (v *validator) validateString(schema *Schema, instance any, instancePath, s
 func (v *validator) validateArray(
 	schema *Schema,
 	instance any,
-	instancePath, schemaPath string,
+	instancePath instanceLocation,
+	schemaPath string,
 	ann *annotations,
 ) []*ValidationError {
 	arr, ok := instance.([]any)
@@ -2683,7 +2946,7 @@ func (v *validator) validateArray(
 				break
 			}
 
-			childPath := fmt.Sprintf("%s/%d", instancePath, i)
+			childPath := instancePath.index(i)
 			childSchemaPath := fmt.Sprintf("%s/%s/%d", schemaPath, prefixKeyword, i)
 			childErrs := v.validate(ps, arr[i], childPath, childSchemaPath, nil)
 			labelFalseSchemaKeyword(childErrs, ps, prefixKeyword)
@@ -2708,7 +2971,7 @@ func (v *validator) validateArray(
 		if schema.Items != nil && len(prefixSchemas) == 0 {
 			// Single-schema items: applies to all elements.
 			for i, item := range arr {
-				childPath := fmt.Sprintf("%s/%d", instancePath, i)
+				childPath := instancePath.index(i)
 				childSchemaPath := schemaPath + "/items"
 				childErrs := v.validate(schema.Items, item, childPath, childSchemaPath, nil)
 				labelFalseSchemaKeyword(childErrs, schema.Items, keywordItems)
@@ -2724,7 +2987,7 @@ func (v *validator) validateArray(
 			// In draft-07: additionalItems applies to remaining elements.
 			if v.draft == Draft2020 {
 				for i := len(prefixSchemas); i < len(arr); i++ {
-					childPath := fmt.Sprintf("%s/%d", instancePath, i)
+					childPath := instancePath.index(i)
 					childSchemaPath := schemaPath + "/items"
 					childErrs := v.validate(schema.Items, arr[i], childPath, childSchemaPath, nil)
 					labelFalseSchemaKeyword(childErrs, schema.Items, keywordItems)
@@ -2741,7 +3004,7 @@ func (v *validator) validateArray(
 		// AdditionalItems (draft-07 only).
 		if v.draft == Draft7 && schema.AdditionalItems != nil && len(schema.ItemsArray) > 0 {
 			for i := len(schema.ItemsArray); i < len(arr); i++ {
-				childPath := fmt.Sprintf("%s/%d", instancePath, i)
+				childPath := instancePath.index(i)
 				childSchemaPath := schemaPath + "/additionalItems"
 				childErrs := v.validate(schema.AdditionalItems, arr[i], childPath, childSchemaPath, nil)
 				labelFalseSchemaKeyword(childErrs, schema.AdditionalItems, keywordAdditionalItems)
@@ -2760,7 +3023,7 @@ func (v *validator) validateArray(
 				childErrs := v.validate(
 					schema.Contains,
 					item,
-					fmt.Sprintf("%s/%d", instancePath, i),
+					instancePath.index(i),
 					schemaPath+"/contains",
 					nil,
 				)
@@ -2803,7 +3066,8 @@ func (v *validator) validateArray(
 				}
 
 				errs = append(errs, &ValidationError{
-					InstancePath: instancePath,
+					InstancePath: instancePath.ptr,
+					segments:     instancePath.segs,
 					SchemaPath:   schemaPath + "/" + keyword,
 					Keyword:      keyword,
 					Message:      fmt.Sprintf("array has %d matching items, minimum is %d", matchCount, minContains),
@@ -2812,7 +3076,8 @@ func (v *validator) validateArray(
 
 			if maxContains >= 0 && matchCount > maxContains {
 				errs = append(errs, &ValidationError{
-					InstancePath: instancePath,
+					InstancePath: instancePath.ptr,
+					segments:     instancePath.segs,
 					SchemaPath:   schemaPath + "/maxContains",
 					Keyword:      keywordMaxContains,
 					Message:      fmt.Sprintf("array has %d matching items, maximum is %d", matchCount, maxContains),
@@ -2827,7 +3092,8 @@ func (v *validator) validateArray(
 		// MinItems.
 		if schema.MinItems != nil && len(arr) < *schema.MinItems {
 			errs = append(errs, &ValidationError{
-				InstancePath: instancePath,
+				InstancePath: instancePath.ptr,
+				segments:     instancePath.segs,
 				SchemaPath:   schemaPath + "/minItems",
 				Keyword:      keywordMinItems,
 				Message:      fmt.Sprintf("array has %d items, minimum is %d", len(arr), *schema.MinItems),
@@ -2837,7 +3103,8 @@ func (v *validator) validateArray(
 		// MaxItems.
 		if schema.MaxItems != nil && len(arr) > *schema.MaxItems {
 			errs = append(errs, &ValidationError{
-				InstancePath: instancePath,
+				InstancePath: instancePath.ptr,
+				segments:     instancePath.segs,
 				SchemaPath:   schemaPath + "/maxItems",
 				Keyword:      keywordMaxItems,
 				Message:      fmt.Sprintf("array has %d items, maximum is %d", len(arr), *schema.MaxItems),
@@ -2848,7 +3115,8 @@ func (v *validator) validateArray(
 		if schema.UniqueItems {
 			if hasDuplicates(arr) {
 				errs = append(errs, &ValidationError{
-					InstancePath: instancePath,
+					InstancePath: instancePath.ptr,
+					segments:     instancePath.segs,
 					SchemaPath:   schemaPath + "/uniqueItems",
 					Keyword:      keywordUniqueItems,
 					Message:      "array contains duplicate items",
@@ -2983,7 +3251,8 @@ func numHash(n int64) uint64 {
 func (v *validator) validateObject(
 	schema *Schema,
 	instance any,
-	instancePath, schemaPath string,
+	instancePath instanceLocation,
+	schemaPath string,
 	ann *annotations,
 ) []*ValidationError {
 	obj, ok := instance.(map[string]any)
@@ -3012,7 +3281,7 @@ func (v *validator) validateObject(
 				ann.properties[propName] = true
 			}
 
-			childPath := instancePath + "/" + escapeJSONPointer(propName)
+			childPath := instancePath.key(propName)
 			childSchemaPath := schemaPath + "/properties/" + escapeJSONPointer(propName)
 			childErrs := v.validate(propSchema, val, childPath, childSchemaPath, nil)
 			labelFalseSchemaKeyword(childErrs, propSchema, keywordProperties)
@@ -3028,7 +3297,8 @@ func (v *validator) validateObject(
 				// cannot decide which properties it governs, so the object is
 				// rejected rather than silently dropping the subschema.
 				errs = append(errs, &ValidationError{
-					InstancePath: instancePath,
+					InstancePath: instancePath.ptr,
+					segments:     instancePath.segs,
 					SchemaPath:   schemaPath + "/patternProperties/" + escapeJSONPointer(pattern),
 					Keyword:      keywordPatternProperties,
 					Message:      fmt.Sprintf("pattern %q cannot be compiled", pattern),
@@ -3047,7 +3317,7 @@ func (v *validator) validateObject(
 					ann.properties[propName] = true
 				}
 
-				childPath := instancePath + "/" + escapeJSONPointer(propName)
+				childPath := instancePath.key(propName)
 				childSchemaPath := schemaPath + "/patternProperties/" + escapeJSONPointer(pattern)
 				childErrs := v.validate(patternSchema, val, childPath, childSchemaPath, nil)
 				labelFalseSchemaKeyword(childErrs, patternSchema, keywordPatternProperties)
@@ -3067,7 +3337,7 @@ func (v *validator) validateObject(
 					ann.properties[propName] = true
 				}
 
-				childPath := instancePath + "/" + escapeJSONPointer(propName)
+				childPath := instancePath.key(propName)
 				childSchemaPath := schemaPath + "/additionalProperties"
 				childErrs := v.validate(schema.AdditionalProperties, val, childPath, childSchemaPath, nil)
 				labelFalseSchemaKeyword(childErrs, schema.AdditionalProperties, keywordAdditionalProperties)
@@ -3088,7 +3358,7 @@ func (v *validator) validateObject(
 		// object it belongs to.
 		if schema.PropertyNames != nil {
 			for propName := range obj {
-				childPath := instancePath + "/" + escapeJSONPointer(propName)
+				childPath := instancePath.key(propName)
 				childSchemaPath := schemaPath + "/propertyNames"
 				childErrs := v.validate(
 					schema.PropertyNames,
@@ -3099,7 +3369,8 @@ func (v *validator) validateObject(
 				)
 				if len(childErrs) > 0 {
 					errs = append(errs, &ValidationError{
-						InstancePath: childPath,
+						InstancePath: childPath.ptr,
+						segments:     childPath.segs,
 						SchemaPath:   childSchemaPath,
 						Keyword:      keywordPropertyNames,
 						Message:      fmt.Sprintf("property name %q is invalid", propName),
@@ -3134,7 +3405,8 @@ func (v *validator) validateObject(
 		for _, reqProp := range schema.Required {
 			if _, exists := obj[reqProp]; !exists {
 				errs = append(errs, &ValidationError{
-					InstancePath: instancePath,
+					InstancePath: instancePath.ptr,
+					segments:     instancePath.segs,
 					SchemaPath:   schemaPath + "/required",
 					Keyword:      keywordRequired,
 					Message:      fmt.Sprintf("missing required property %q", reqProp),
@@ -3145,7 +3417,8 @@ func (v *validator) validateObject(
 		// MinProperties.
 		if schema.MinProperties != nil && len(obj) < *schema.MinProperties {
 			errs = append(errs, &ValidationError{
-				InstancePath: instancePath,
+				InstancePath: instancePath.ptr,
+				segments:     instancePath.segs,
 				SchemaPath:   schemaPath + "/minProperties",
 				Keyword:      keywordMinProperties,
 				Message:      fmt.Sprintf("object has %d properties, minimum is %d", len(obj), *schema.MinProperties),
@@ -3155,7 +3428,8 @@ func (v *validator) validateObject(
 		// MaxProperties.
 		if schema.MaxProperties != nil && len(obj) > *schema.MaxProperties {
 			errs = append(errs, &ValidationError{
-				InstancePath: instancePath,
+				InstancePath: instancePath.ptr,
+				segments:     instancePath.segs,
 				SchemaPath:   schemaPath + "/maxProperties",
 				Keyword:      keywordMaxProperties,
 				Message:      fmt.Sprintf("object has %d properties, maximum is %d", len(obj), *schema.MaxProperties),
@@ -3172,7 +3446,8 @@ func (v *validator) validateObject(
 				for _, dep := range deps {
 					if _, exists := obj[dep]; !exists {
 						errs = append(errs, &ValidationError{
-							InstancePath: instancePath,
+							InstancePath: instancePath.ptr,
+							segments:     instancePath.segs,
 							SchemaPath:   schemaPath + "/dependentRequired/" + escapeJSONPointer(prop),
 							Keyword:      keywordDependentRequired,
 							Message:      fmt.Sprintf("property %q requires property %q", prop, dep),
@@ -3211,7 +3486,8 @@ func (v *validator) validateObject(
 		for _, dep := range deps {
 			if _, exists := obj[dep]; !exists {
 				errs = append(errs, &ValidationError{
-					InstancePath: instancePath,
+					InstancePath: instancePath.ptr,
+					segments:     instancePath.segs,
 					SchemaPath:   schemaPath + "/dependencies/" + escapeJSONPointer(prop),
 					Keyword:      keywordDependencies,
 					Message:      fmt.Sprintf("property %q requires property %q", prop, dep),
@@ -3227,7 +3503,8 @@ func (v *validator) validateObject(
 func (v *validator) validateComposition(
 	schema *Schema,
 	instance any,
-	instancePath, schemaPath string,
+	instancePath instanceLocation,
+	schemaPath string,
 	ann *annotations,
 ) []*ValidationError {
 	if !v.vocabs.applicator {
@@ -3258,7 +3535,8 @@ func (v *validator) validateComposition(
 
 		if len(allCauses) > 0 {
 			errs = append(errs, &ValidationError{
-				InstancePath: instancePath,
+				InstancePath: instancePath.ptr,
+				segments:     instancePath.segs,
 				SchemaPath:   schemaPath + "/allOf",
 				Keyword:      keywordAllOf,
 				Message:      "did not validate against all subschemas",
@@ -3293,7 +3571,8 @@ func (v *validator) validateComposition(
 
 		if !matched {
 			errs = append(errs, &ValidationError{
-				InstancePath: instancePath,
+				InstancePath: instancePath.ptr,
+				segments:     instancePath.segs,
 				SchemaPath:   schemaPath + "/anyOf",
 				Keyword:      keywordAnyOf,
 				Message:      "did not validate against any subschema",
@@ -3326,7 +3605,8 @@ func (v *validator) validateComposition(
 		switch {
 		case matchCount == 0:
 			errs = append(errs, &ValidationError{
-				InstancePath: instancePath,
+				InstancePath: instancePath.ptr,
+				segments:     instancePath.segs,
 				SchemaPath:   schemaPath + "/oneOf",
 				Keyword:      keywordOneOf,
 				Message:      "did not validate against any subschema",
@@ -3335,7 +3615,8 @@ func (v *validator) validateComposition(
 
 		case matchCount > 1:
 			errs = append(errs, &ValidationError{
-				InstancePath: instancePath,
+				InstancePath: instancePath.ptr,
+				segments:     instancePath.segs,
 				SchemaPath:   schemaPath + "/oneOf",
 				Keyword:      keywordOneOf,
 				Message:      fmt.Sprintf("validated against %d subschemas, expected exactly one", matchCount),
@@ -3354,7 +3635,8 @@ func (v *validator) validateComposition(
 		childErrs := v.validate(schema.Not, instance, instancePath, schemaPath+"/not", nil)
 		if len(childErrs) == 0 {
 			errs = append(errs, &ValidationError{
-				InstancePath: instancePath,
+				InstancePath: instancePath.ptr,
+				segments:     instancePath.segs,
 				SchemaPath:   schemaPath + "/not",
 				Keyword:      keywordNot,
 				Message:      "should not validate against the schema",
@@ -3369,7 +3651,8 @@ func (v *validator) validateComposition(
 func (v *validator) validateConditional(
 	schema *Schema,
 	instance any,
-	instancePath, schemaPath string,
+	instancePath instanceLocation,
+	schemaPath string,
 	ann *annotations,
 ) []*ValidationError {
 	if !v.vocabs.applicator || schema.If == nil {
@@ -3392,7 +3675,8 @@ func (v *validator) validateConditional(
 			thenErrs := v.validate(schema.Then, instance, instancePath, schemaPath+"/then", thenAnn)
 			if len(thenErrs) > 0 {
 				errs = append(errs, &ValidationError{
-					InstancePath: instancePath,
+					InstancePath: instancePath.ptr,
+					segments:     instancePath.segs,
 					SchemaPath:   schemaPath + "/then",
 					Keyword:      keywordThen,
 					Message:      "if condition was true but then validation failed",
@@ -3407,7 +3691,8 @@ func (v *validator) validateConditional(
 		elseErrs := v.validate(schema.Else, instance, instancePath, schemaPath+"/else", elseAnn)
 		if len(elseErrs) > 0 {
 			errs = append(errs, &ValidationError{
-				InstancePath: instancePath,
+				InstancePath: instancePath.ptr,
+				segments:     instancePath.segs,
 				SchemaPath:   schemaPath + "/else",
 				Keyword:      keywordElse,
 				Message:      "if condition was false but else validation failed",
@@ -3433,7 +3718,8 @@ func (v *validator) validateConditional(
 func (v *validator) validateContent(
 	schema *Schema,
 	instance any,
-	instancePath, schemaPath string,
+	instancePath instanceLocation,
+	schemaPath string,
 ) []*ValidationError {
 	// Gated on the content vocabulary, consistent with the other keyword
 	// groups. When it is inactive the content keywords are inert.
@@ -3457,7 +3743,8 @@ func (v *validator) validateContent(
 func (v *validator) assertContent(
 	schema *Schema,
 	instance any,
-	instancePath, schemaPath string,
+	instancePath instanceLocation,
+	schemaPath string,
 ) []*ValidationError {
 	str, ok := instance.(string)
 	if !ok {
@@ -3474,7 +3761,8 @@ func (v *validator) assertContent(
 		b, err := base64.StdEncoding.DecodeString(str)
 		if err != nil {
 			return []*ValidationError{{
-				InstancePath: instancePath,
+				InstancePath: instancePath.ptr,
+				segments:     instancePath.segs,
 				SchemaPath:   schemaPath + "/contentEncoding",
 				Keyword:      keywordContentEncoding,
 				Message:      fmt.Sprintf("string is not valid base64: %v", err),
@@ -3492,7 +3780,8 @@ func (v *validator) assertContent(
 
 	if decodedKnown && schema.ContentMediaType == "application/json" && !json.Valid(decoded) {
 		return []*ValidationError{{
-			InstancePath: instancePath,
+			InstancePath: instancePath.ptr,
+			segments:     instancePath.segs,
 			SchemaPath:   schemaPath + "/contentMediaType",
 			Keyword:      keywordContentMediaType,
 			Message:      "string is not a valid application/json document",
@@ -3506,7 +3795,8 @@ func (v *validator) assertContent(
 func (v *validator) validateRef(
 	schema *Schema,
 	instance any,
-	instancePath, schemaPath string,
+	instancePath instanceLocation,
+	schemaPath string,
 	ann *annotations,
 ) []*ValidationError {
 	ref := schema.Ref
@@ -3521,7 +3811,8 @@ func (v *validator) validateRef(
 func (v *validator) validateDynamicRef(
 	schema *Schema,
 	instance any,
-	instancePath, schemaPath string,
+	instancePath instanceLocation,
+	schemaPath string,
 	ann *annotations,
 ) []*ValidationError {
 	ref := schema.DynamicRef
@@ -3547,7 +3838,8 @@ func (v *validator) validateResolvedRef(
 	target *Schema,
 	ref, keyword string,
 	instance any,
-	instancePath, schemaPath string,
+	instancePath instanceLocation,
+	schemaPath string,
 	ann *annotations,
 ) []*ValidationError {
 	if target == nil {
@@ -3556,7 +3848,8 @@ func (v *validator) validateResolvedRef(
 			v.refResolveErr = nil
 
 			return []*ValidationError{{
-				InstancePath: instancePath,
+				InstancePath: instancePath.ptr,
+				segments:     instancePath.segs,
 				SchemaPath:   schemaPath + "/" + keyword,
 				Keyword:      keyword,
 				Message:      err.Error(),
@@ -3569,7 +3862,8 @@ func (v *validator) validateResolvedRef(
 		// are already rejected by Schema.Resolve before the walk begins.
 		if !isFragmentOnly(ref) {
 			return []*ValidationError{{
-				InstancePath: instancePath,
+				InstancePath: instancePath.ptr,
+				segments:     instancePath.segs,
 				SchemaPath:   schemaPath + "/" + keyword,
 				Keyword:      keyword,
 				Message:      fmt.Sprintf("cannot resolve %s %q", keyword, ref),
@@ -3584,7 +3878,8 @@ func (v *validator) validateResolvedRef(
 	childErrs := v.validate(target, instance, instancePath, schemaPath+"/"+keyword, refAnn)
 	if len(childErrs) > 0 {
 		return []*ValidationError{{
-			InstancePath: instancePath,
+			InstancePath: instancePath.ptr,
+			segments:     instancePath.segs,
 			SchemaPath:   schemaPath + "/" + keyword,
 			Keyword:      keyword,
 			Causes:       childErrs,

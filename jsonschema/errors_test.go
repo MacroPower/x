@@ -1,6 +1,8 @@
 package jsonschema_test
 
 import (
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -104,6 +106,258 @@ func TestValidationError_Leaves_EndToEnd(t *testing.T) {
 	for _, l := range leaves {
 		assert.Equal(t, "type", l.Keyword)
 	}
+}
+
+func TestValidationError_InstanceSegments(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		schema   *jsonschema.Schema
+		instance any
+		wantPath string
+		want     []jsonschema.Segment
+	}{
+		"object property named 0": {
+			schema: &jsonschema.Schema{
+				Type:       "object",
+				Properties: map[string]*jsonschema.Schema{"0": {Type: "string"}},
+			},
+			instance: map[string]any{"0": 1},
+			wantPath: "/0",
+			want:     []jsonschema.Segment{{Key: "0"}},
+		},
+		"array index 0": {
+			schema: &jsonschema.Schema{
+				Type:  "array",
+				Items: &jsonschema.Schema{Type: "string"},
+			},
+			instance: []any{1},
+			wantPath: "/0",
+			want:     []jsonschema.Segment{{Index: 0, IsIndex: true}},
+		},
+		"key containing tilde is escaped in path but not in segment": {
+			schema: &jsonschema.Schema{
+				Type:       "object",
+				Properties: map[string]*jsonschema.Schema{"a~b": {Type: "string"}},
+			},
+			instance: map[string]any{"a~b": 1},
+			wantPath: "/a~0b",
+			want:     []jsonschema.Segment{{Key: "a~b"}},
+		},
+		"key containing slash is escaped in path but not in segment": {
+			schema: &jsonschema.Schema{
+				Type:       "object",
+				Properties: map[string]*jsonschema.Schema{"a/b": {Type: "string"}},
+			},
+			instance: map[string]any{"a/b": 1},
+			wantPath: "/a~1b",
+			want:     []jsonschema.Segment{{Key: "a/b"}},
+		},
+		"nested object, array, object": {
+			schema: &jsonschema.Schema{
+				Type: "object",
+				Properties: map[string]*jsonschema.Schema{
+					"items": {
+						Type: "array",
+						Items: &jsonschema.Schema{
+							Type: "object",
+							Properties: map[string]*jsonschema.Schema{
+								"name": {Type: "string"},
+							},
+						},
+					},
+				},
+			},
+			instance: map[string]any{"items": []any{map[string]any{"name": 1}}},
+			wantPath: "/items/0/name",
+			want: []jsonschema.Segment{
+				{Key: "items"},
+				{Index: 0, IsIndex: true},
+				{Key: "name"},
+			},
+		},
+		"root-level failure has nil segments": {
+			schema:   &jsonschema.Schema{Type: "string"},
+			instance: 1,
+			wantPath: "",
+			want:     nil,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := jsonschema.Validate(tc.schema, tc.instance)
+
+			var ve *jsonschema.ValidationError
+
+			require.ErrorAs(t, err, &ve)
+
+			leaves := ve.Leaves()
+			require.Len(t, leaves, 1)
+
+			assert.Equal(t, tc.wantPath, leaves[0].InstancePath)
+			assert.Equal(t, tc.want, leaves[0].InstanceSegments())
+		})
+	}
+}
+
+func TestValidationError_InstanceSegments_SiblingsDoNotAlias(t *testing.T) {
+	t.Parallel()
+
+	// Both leaves descend from the same parent location, so this catches an
+	// append into a shared backing array overwriting a sibling's segment.
+	// The siblings branch at depth 4 because that is where a plain append
+	// would first alias: append's doubling growth (1, 2, 4) gives the shared
+	// three-segment prefix spare capacity (len 3, cap 4), so without the full
+	// slice expression both descents would write their fourth segment into
+	// the same backing array slot. At shallower depths cap equals len and
+	// every append reallocates, hiding the bug.
+	schema := &jsonschema.Schema{
+		Type: "object",
+		Properties: map[string]*jsonschema.Schema{
+			"l1": {
+				Type: "object",
+				Properties: map[string]*jsonschema.Schema{
+					"l2": {
+						Type: "object",
+						Properties: map[string]*jsonschema.Schema{
+							"l3": {
+								Type: "object",
+								Properties: map[string]*jsonschema.Schema{
+									"a": {Type: "string"},
+									"b": {Type: "string"},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	err := jsonschema.Validate(schema, map[string]any{
+		"l1": map[string]any{
+			"l2": map[string]any{
+				"l3": map[string]any{"a": 1, "b": 2},
+			},
+		},
+	})
+
+	var ve *jsonschema.ValidationError
+
+	require.ErrorAs(t, err, &ve)
+
+	got := map[string][]jsonschema.Segment{}
+	for _, leaf := range ve.Leaves() {
+		got[leaf.InstancePath] = leaf.InstanceSegments()
+	}
+
+	assert.Equal(t, map[string][]jsonschema.Segment{
+		"/l1/l2/l3/a": {{Key: "l1"}, {Key: "l2"}, {Key: "l3"}, {Key: "a"}},
+		"/l1/l2/l3/b": {{Key: "l1"}, {Key: "l2"}, {Key: "l3"}, {Key: "b"}},
+	}, got)
+}
+
+// TestValidationError_InstanceSegments_RenderEqualsInstancePath validates one
+// schema/instance pair with failing sibling pairs at every depth from 1 to 6
+// (object keys at 1-6, array indexes at 2-7) and asserts that re-rendering
+// each leaf's InstanceSegments as an RFC 6901 pointer reproduces its
+// InstancePath byte for byte. Sibling pairs at every depth keep the test
+// independent of exactly where append growth first leaves spare capacity in a
+// shared prefix's backing array, so any aliasing between sibling descents
+// shows up as a segments/path mismatch at some depth.
+func TestValidationError_InstanceSegments_RenderEqualsInstancePath(t *testing.T) {
+	t.Parallel()
+
+	// The renderer mirrors the package's pointer construction: keys escaped
+	// per RFC 6901 ("~" -> "~0" before "/" -> "~1"), indexes via
+	// strconv.Itoa.
+	render := func(segs []jsonschema.Segment) string {
+		var b strings.Builder
+
+		for _, seg := range segs {
+			b.WriteString("/")
+
+			if seg.IsIndex {
+				b.WriteString(strconv.Itoa(seg.Index))
+			} else {
+				key := strings.ReplaceAll(seg.Key, "~", "~0")
+				b.WriteString(strings.ReplaceAll(key, "/", "~1"))
+			}
+		}
+
+		return b.String()
+	}
+
+	// Each nesting level fails its "a~x" and "b/y" keys (exercising key
+	// escaping at every depth) and both "arr" elements (exercising index
+	// segments), then recurses through "n".
+	const depth = 6
+
+	var (
+		schema   *jsonschema.Schema
+		instance map[string]any
+	)
+
+	for range depth {
+		props := map[string]*jsonschema.Schema{
+			"a~x": {Type: "string"},
+			"b/y": {Type: "string"},
+			"arr": {Type: "array", Items: &jsonschema.Schema{Type: "string"}},
+		}
+		values := map[string]any{
+			"a~x": 1,
+			"b/y": 2,
+			"arr": []any{3, 4},
+		}
+
+		if schema != nil {
+			props["n"] = schema
+			values["n"] = instance
+		}
+
+		schema = &jsonschema.Schema{Type: "object", Properties: props}
+		instance = values
+	}
+
+	err := jsonschema.Validate(schema, instance)
+
+	var ve *jsonschema.ValidationError
+
+	require.ErrorAs(t, err, &ve)
+
+	leaves := ve.Leaves()
+
+	wantPaths := make([]string, 0, 4*depth)
+
+	prefix := ""
+	for range depth {
+		wantPaths = append(wantPaths,
+			prefix+"/a~0x", prefix+"/b~1y", prefix+"/arr/0", prefix+"/arr/1")
+		prefix += "/n"
+	}
+
+	gotPaths := make([]string, 0, len(leaves))
+	for _, leaf := range leaves {
+		gotPaths = append(gotPaths, leaf.InstancePath)
+	}
+
+	require.ElementsMatch(t, wantPaths, gotPaths)
+
+	for _, leaf := range leaves {
+		assert.Equal(t, leaf.InstancePath, render(leaf.InstanceSegments()),
+			"re-rendered segments must reproduce the pointer %q", leaf.InstancePath)
+	}
+}
+
+func TestValidationError_InstanceSegments_HandConstructed(t *testing.T) {
+	t.Parallel()
+
+	ve := &jsonschema.ValidationError{InstancePath: "/a/0"}
+
+	assert.Nil(t, ve.InstanceSegments())
 }
 
 func TestValidationError_TargetsKey(t *testing.T) {

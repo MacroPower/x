@@ -313,16 +313,38 @@
 // performs the per-schema work (registry construction, Schema.Resolve, draft and
 // vocabulary detection) up front and is safe for concurrent use.
 //
+// A schema arriving as a JSON document rather than a [*Schema] has symmetric
+// entry points. [CompileJSON] decodes data as a single JSON schema document
+// (numbers as [encoding/json.Number], trailing data rejected) and compiles it
+// with [Compile]; [SchemaFromValue] converts an already-decoded document — a
+// bool or a map[string]any, such as [Normalize] output — to a [*Schema]. With
+// both, a top-level value that is not an object or boolean, including JSON
+// null (which unmarshaling into a [Schema] directly silently coerces to the
+// false schema), returns an error wrapping [ErrInvalidSchemaDocument];
+// malformed JSON returns the wrapped decode error without the sentinel.
+//
+// Every compile and validate entry point has a Context variant —
+// [CompileContext], [CompileJSONContext], [ValidateContext],
+// [ValidateJSONContext], and the [Validator.ValidateContext] and
+// [Validator.ValidateJSONContext] methods — that carries a caller-supplied
+// context to a [RefResolverContext] resolver (see Remote References below);
+// the context-less forms pass [context.Background]. The behavior is otherwise
+// identical.
+//
 // On success all return nil. A validation failure returns an error that
 // unwraps to [*ValidationError] via [errors.As]. Non-validation failures — JSON
-// decoding, an unaccepted instance type, Schema.Resolve errors,
-// [ErrInvalidType], and [ErrUnknownVocabulary] — return ordinary wrapped
-// errors that do not unwrap to [*ValidationError].
+// decoding, an unaccepted instance type, an invalid schema document
+// ([ErrInvalidSchemaDocument]), Schema.Resolve errors, [ErrInvalidType], and
+// [ErrUnknownVocabulary] — return ordinary wrapped errors that do not unwrap
+// to [*ValidationError].
 //
 // Compile rejects a type keyword naming anything other than the seven JSON
 // Schema types ("null", "boolean", "string", "integer", "number", "object",
 // "array") with an error wrapping [ErrInvalidType], so a typo'd type surfaces
-// at construction instead of silently rejecting every instance.
+// at construction instead of silently rejecting every instance. The same
+// check is exported standalone as [CheckTypeNames] (see Schema Traversal and
+// Predicates below); Compile routes through it, so the two produce textually
+// identical errors.
 //
 // Instance numbers are compared exactly (decoded with UseNumber, compared as
 // [math/big.Rat]), with one bound on the work an adversarial literal can demand:
@@ -338,7 +360,9 @@
 //
 //   - [WithRefResolver] sets a [RefResolver] for resolving remote $ref URIs.
 //     The resolver is called only when local fragment resolution fails. Resolved
-//     schemas are cached within the validation run.
+//     schemas are cached within the validation run. A resolver that also
+//     implements [RefResolverContext] receives the context from the Context
+//     entry points (see Remote References below).
 //   - [WithFormatValidator] registers a custom format checker.
 //   - [WithFormats] forces built-in format assertion on or off. By default
 //     format is asserted under Draft-07 and is annotation-only under Draft
@@ -374,10 +398,53 @@
 // Keyword "propertyNames" and an InstancePath pointing at the offending
 // property, with the inner keyword failure in its Causes.
 //
+// Alongside the InstancePath JSON Pointer, every error produced by validation
+// carries the same path in typed form: [ValidationError.InstanceSegments]
+// returns one [Segment] per reference token, each marked as an object key or
+// an array index. The pointer string cannot distinguish array index 1 from an
+// object property named "1"; the segments can, so source-mapping consumers
+// need not re-parse the pointer and guess. Hand-constructed errors return nil.
+//
 // Built-in format checkers are provided for: date-time, date, time, duration,
 // email, idn-email, hostname, idn-hostname, uri, uri-reference, uri-template,
 // iri, iri-reference, uuid, ipv4, ipv6, json-pointer, relative-json-pointer, and
 // regex.
+//
+// # Schema Traversal and Predicates
+//
+// Helpers are provided for working with [Schema] values directly, independent
+// of generation and validation:
+//
+//   - [Subschemas] returns the direct sub-schemas of a schema: every non-nil
+//     schema reachable through one sub-schema-bearing keyword (applicators
+//     such as items, properties, allOf, not, if/then/else, plus $defs and
+//     definitions). Children held in maps are returned in sorted-key order so
+//     traversal is deterministic. It is the package's single source of truth
+//     for which Schema fields hold sub-schemas.
+//   - [Walk] calls a function for a schema and every schema transitively
+//     reachable through [Subschemas], pre-order: the function runs on a schema
+//     before its children are gathered, so it may replace or mutate sub-schema
+//     fields and the walk follows the updated children. Each distinct schema
+//     pointer is visited once, so aliased or cyclic graphs terminate. Walk
+//     stops at and returns the first error from the function.
+//   - [CheckTypeNames] verifies that every type keyword reachable from a
+//     schema names one of the seven JSON Schema type names, returning nil or
+//     an error wrapping [ErrInvalidType] that includes the schema path of the
+//     first offending keyword. It is the standalone form of the check
+//     [Compile] runs before resolution, for vetting structurally messy
+//     schemas — cyclic graphs, unresolvable references — without compiling
+//     them.
+//   - [IsTrueSchema] reports whether a schema is the boolean true schema form:
+//     a schema with no fields set, which marshals to JSON true and accepts
+//     every instance. Annotation-only schemas (a description but no
+//     constraints) return false, as do schemas whose only field is a non-nil
+//     empty map or slice (Schema{Enum: []any{}} vacuously rejects every
+//     instance).
+//   - [IsFalseSchema] reports whether a schema is the boolean false schema
+//     form {"not": {}} — the shape the upstream produces when unmarshaling the
+//     JSON boolean false — which marshals to JSON false and rejects every
+//     instance. Any sibling field next to the not, including annotations,
+//     defeats the form.
 //
 // # Vocabulary Support
 //
@@ -403,6 +470,8 @@
 // does not recognize, [Validate] returns [ErrUnknownVocabulary]. The same error
 // is returned when a $vocabulary map marks the 2020-12 core vocabulary as
 // optional (false), which the spec does not permit.
+//
+// # Remote References
 //
 // By default only local fragment refs are resolved during validation (those
 // under #/$defs or #/definitions). Remote and absolute $ref URIs are resolved

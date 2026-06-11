@@ -14,12 +14,18 @@ var (
 	// string, an integer type, nor an [encoding.TextMarshaler].
 	ErrUnsupportedMapKey = errors.New("unsupported map key type")
 
-	// ErrInvalidType is returned by [Compile] (and the one-shot [Validate] /
-	// [ValidateJSON] helpers) when a schema's type keyword names something
-	// other than the seven JSON Schema type names ("null", "boolean",
-	// "string", "integer", "number", "object", "array"). A typo'd type would
-	// otherwise compile cleanly and then reject every instance at runtime.
+	// ErrInvalidType is returned by [CheckTypeNames] and by [Compile] (and
+	// the one-shot [Validate] / [ValidateJSON] helpers), which routes through
+	// the same check, when a schema's type keyword names something other than
+	// the seven JSON Schema type names ("null", "boolean", "string",
+	// "integer", "number", "object", "array"). A typo'd type would otherwise
+	// compile cleanly and then reject every instance at runtime.
 	ErrInvalidType = errors.New("invalid type name")
+
+	// ErrInvalidSchemaDocument is returned by [CompileJSON] and
+	// [SchemaFromValue] when a schema document's top-level value is not a
+	// JSON object or boolean.
+	ErrInvalidSchemaDocument = errors.New("schema document must be a JSON object or boolean")
 
 	// ErrUnknownVocabulary is returned when the resolved $vocabulary set is
 	// unsatisfiable: it marks true a vocabulary that this implementation does
@@ -54,6 +60,10 @@ type ValidationError struct {
 	// [ErrRefResolve]) that [errors.Is] and [errors.As] can match.
 	err error
 
+	// The typed form of InstancePath, captured during the validation walk;
+	// see [ValidationError.InstanceSegments].
+	segments []Segment
+
 	// InstancePath is the JSON Pointer path to the failing location in the
 	// input data (e.g., "/address/city").
 	InstancePath string
@@ -79,6 +89,31 @@ type ValidationError struct {
 	// produces a childless leaf error: it fails precisely when its subschema
 	// succeeds, so there are no child failures to wrap.
 	Causes []*ValidationError
+}
+
+// Segment is one step of an instance location: an object member key or an
+// array index.
+type Segment struct {
+	// Key is the object property name. Meaningful only when IsIndex is false.
+	Key string
+
+	// Index is the array index. Meaningful only when IsIndex is true.
+	Index int
+
+	// IsIndex reports whether the segment addresses an array element rather
+	// than an object property; it distinguishes array index 1 from the
+	// property name "1", which the InstancePath JSON Pointer cannot.
+	IsIndex bool
+}
+
+// InstanceSegments returns the typed path to the failing location in the
+// input data, one Segment per reference token of [ValidationError.InstancePath],
+// outermost first. Unlike re-parsing InstancePath, it distinguishes an array
+// index from an object key that happens to look numeric. It is populated for
+// errors produced by [Validate], [ValidateJSON], and the [Validator] methods;
+// hand-constructed errors return nil.
+func (e *ValidationError) InstanceSegments() []Segment {
+	return e.segments
 }
 
 // Error returns a multi-line string representation. The top-level message is
