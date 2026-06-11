@@ -19,3 +19,10 @@ func DefaultRegistry() magicschema.Registry {
 
 	return r
 }
+
+// DefaultNames returns the names of the built-in Helm annotators in the
+// default priority order used by [DefaultRegistry]. It returns a fresh slice
+// on each call, so callers may modify the result.
+func DefaultNames() []string {
+	return []string{dadav.Name, losisin.Name, bitnami.Name, norwoodj.Name}
+}

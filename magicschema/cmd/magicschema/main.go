@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/spf13/cobra"
 
 	"go.jacobcolvin.com/x/magicschema"
@@ -34,11 +36,7 @@ types from YAML structure when annotations are absent.`,
 	}
 
 	cfg.RegisterFlags(rootCmd.Flags())
-
-	completionErr := cfg.RegisterCompletions(rootCmd)
-	if completionErr != nil {
-		fmt.Fprintf(os.Stderr, "register completions: %v\n", completionErr)
-	}
+	cfg.MustRegisterCompletions(rootCmd)
 
 	err := rootCmd.Execute()
 	if err != nil {
@@ -53,27 +51,7 @@ func run(cfg *magicschema.Config, args []string) error {
 		return err
 	}
 
-	var inputs [][]byte
-
-	for _, arg := range args {
-		var data []byte
-
-		if arg == "-" {
-			data, err = io.ReadAll(os.Stdin)
-			if err != nil {
-				return fmt.Errorf("%w: stdin: %w", magicschema.ErrReadInput, err)
-			}
-		} else {
-			data, err = os.ReadFile(arg)
-			if err != nil {
-				return fmt.Errorf("%w: %w", magicschema.ErrReadInput, err)
-			}
-		}
-
-		inputs = append(inputs, data)
-	}
-
-	schema, err := gen.Generate(inputs...)
+	schema, err := generate(gen, args)
 	if err != nil {
 		return err
 	}
@@ -105,4 +83,39 @@ func run(cfg *magicschema.Config, args []string) error {
 	}
 
 	return nil
+}
+
+// generate produces a schema from the CLI arguments. Plain file paths go
+// through [magicschema.Generator.GenerateFiles]; an argument of "-" reads
+// stdin (a CLI concern the library does not handle), so any "-" falls back
+// to reading each input here.
+func generate(gen *magicschema.Generator, args []string) (*jsonschema.Schema, error) {
+	if !slices.Contains(args, "-") {
+		return gen.GenerateFiles(args...)
+	}
+
+	inputs := make([][]byte, 0, len(args))
+
+	for _, arg := range args {
+		var (
+			data []byte
+			err  error
+		)
+
+		if arg == "-" {
+			data, err = io.ReadAll(os.Stdin)
+			if err != nil {
+				return nil, fmt.Errorf("%w: stdin: %w", magicschema.ErrReadInput, err)
+			}
+		} else {
+			data, err = os.ReadFile(arg)
+			if err != nil {
+				return nil, fmt.Errorf("%w: %w", magicschema.ErrReadInput, err)
+			}
+		}
+
+		inputs = append(inputs, data)
+	}
+
+	return gen.Generate(inputs...)
 }

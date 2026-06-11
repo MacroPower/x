@@ -24,9 +24,13 @@ func New() *Annotator {
 	return &Annotator{}
 }
 
+// Name is the canonical annotator name, used as the registry key and in
+// the --annotators flag.
+const Name = "helm-values-schema"
+
 // Name returns the annotator name.
 func (a *Annotator) Name() string {
-	return "helm-values-schema"
+	return Name
 }
 
 // ForContent returns a new Annotator ready to process the given file.

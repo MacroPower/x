@@ -1,13 +1,20 @@
 package magicschema
 
 import (
+	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
+
+// ErrUnknownAnnotator indicates an annotator name with no registered parser.
+// Configuration paths such as [Config.NewGenerator] additionally wrap
+// [ErrInvalidOption], so their errors match both sentinels with [errors.Is].
+var ErrUnknownAnnotator = errors.New("unknown annotator")
 
 // Flags holds CLI flag names for schema generation configuration, allowing
 // callers to customize flag names while keeping sensible defaults.
@@ -35,6 +42,29 @@ func (r Registry) Add(annotators ...Annotator) {
 	for _, a := range annotators {
 		r[a.Name()] = a
 	}
+}
+
+// Lookup resolves annotator names to their registered prototypes, preserving
+// the given order. Names must match registered names exactly; a miss returns
+// an error wrapping [ErrUnknownAnnotator].
+func (r Registry) Lookup(names ...string) ([]Annotator, error) {
+	annotators := make([]Annotator, 0, len(names))
+
+	for _, name := range names {
+		annotator, ok := r[name]
+		if !ok {
+			return nil, fmt.Errorf("%w %q", ErrUnknownAnnotator, name)
+		}
+
+		annotators = append(annotators, annotator)
+	}
+
+	return annotators, nil
+}
+
+// Names returns the registered annotator names, sorted.
+func (r Registry) Names() []string {
+	return slices.Sorted(maps.Keys(r))
 }
 
 // Config holds CLI flag values for schema generation configuration.
@@ -104,16 +134,8 @@ func (c *Config) RegisterCompletions(cmd *cobra.Command) error {
 		return fmt.Errorf("registering %s completion: %w", c.Flags.Draft, err)
 	}
 
-	var names []string
-
-	for name := range c.Registry {
-		names = append(names, name)
-	}
-
-	slices.Sort(names)
-
 	err = cmd.RegisterFlagCompletionFunc(c.Flags.Annotators,
-		cobra.FixedCompletions(names, cobra.ShellCompDirectiveNoFileComp))
+		cobra.FixedCompletions(c.Registry.Names(), cobra.ShellCompDirectiveNoFileComp))
 	if err != nil {
 		return fmt.Errorf("registering %s completion: %w", c.Flags.Annotators, err)
 	}
@@ -130,6 +152,19 @@ func (c *Config) RegisterCompletions(cmd *cobra.Command) error {
 	}
 
 	return nil
+}
+
+// MustRegisterCompletions registers shell completions for schema generation
+// flags on cmd, panicking when registration returns an error. Registration
+// can only go wrong through programmer error -- a flag missing from cmd
+// because [Config.RegisterFlags] was never called, or a completion already
+// registered for the same flag -- so the panic is unreachable for a
+// correctly wired command.
+func (c *Config) MustRegisterCompletions(cmd *cobra.Command) {
+	err := c.RegisterCompletions(cmd)
+	if err != nil {
+		panic(err)
+	}
 }
 
 // NewGenerator creates a [Generator] using this [Config].
@@ -177,14 +212,16 @@ func (c *Config) NewGenerator() (*Generator, error) {
 }
 
 // parseAnnotatorNames parses a comma-separated list of annotator names and
-// returns the corresponding Annotator instances.
+// returns the corresponding Annotator instances. Whitespace around names is
+// trimmed and empty entries are dropped (CLI parsing concerns); resolution
+// itself goes through [Registry.Lookup].
 func (c *Config) parseAnnotatorNames(names string) ([]Annotator, error) {
 	if names == "" {
 		return nil, nil
 	}
 
 	parts := strings.Split(names, ",")
-	annotators := make([]Annotator, 0, len(parts))
+	cleaned := make([]string, 0, len(parts))
 
 	for _, name := range parts {
 		name = strings.TrimSpace(name)
@@ -192,12 +229,12 @@ func (c *Config) parseAnnotatorNames(names string) ([]Annotator, error) {
 			continue
 		}
 
-		annotator, ok := c.Registry[name]
-		if !ok {
-			return nil, fmt.Errorf("%w: unknown annotator %q", ErrInvalidOption, name)
-		}
+		cleaned = append(cleaned, name)
+	}
 
-		annotators = append(annotators, annotator)
+	annotators, err := c.Registry.Lookup(cleaned...)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidOption, err)
 	}
 
 	return annotators, nil

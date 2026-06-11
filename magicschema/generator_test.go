@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -1743,7 +1744,75 @@ func TestConfigNewGeneratorUnknownAnnotator(t *testing.T) {
 	gen, err := cfg.NewGenerator()
 	require.Error(t, err)
 	require.ErrorIs(t, err, magicschema.ErrInvalidOption)
+	require.ErrorIs(t, err, magicschema.ErrUnknownAnnotator)
+	require.EqualError(t, err, `invalid option: unknown annotator "nonexistent-annotator"`)
 	assert.Nil(t, gen)
+}
+
+func TestGeneratorGenerateFiles(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	pathA := filepath.Join(dir, "a.yaml")
+	require.NoError(t, os.WriteFile(pathA,
+		[]byte("# Primary description\nreplicas: 3\n"), 0o600))
+
+	pathB := filepath.Join(dir, "b.yaml")
+	require.NoError(t, os.WriteFile(pathB,
+		[]byte("# Secondary description\nreplicas: 5\nname: test\n"), 0o600))
+
+	gen := magicschema.NewGenerator()
+	schema, err := gen.GenerateFiles(pathA, pathB)
+	require.NoError(t, err)
+
+	out, err := json.Marshal(schema)
+	require.NoError(t, err)
+
+	var got map[string]any
+
+	require.NoError(t, json.Unmarshal(out, &got))
+
+	props, ok := got["properties"].(map[string]any)
+	require.True(t, ok)
+
+	// Union semantics: properties from both files appear.
+	assert.Contains(t, props, "replicas")
+	assert.Contains(t, props, "name")
+
+	// Merged metadata is first-input-wins, so the primary file's
+	// description survives the merge.
+	replicas, ok := props["replicas"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "Primary description", replicas["description"])
+}
+
+func TestGeneratorGenerateFilesReadError(t *testing.T) {
+	t.Parallel()
+
+	gen := magicschema.NewGenerator()
+
+	schema, err := gen.GenerateFiles(filepath.Join(t.TempDir(), "missing.yaml"))
+	require.ErrorIs(t, err, magicschema.ErrReadInput)
+	require.ErrorIs(t, err, os.ErrNotExist,
+		"the wrapped *os.PathError must stay inspectable")
+	assert.Nil(t, schema)
+}
+
+func TestGeneratorGenerateFilesZeroPaths(t *testing.T) {
+	t.Parallel()
+
+	gen := magicschema.NewGenerator()
+
+	schema, err := gen.GenerateFiles()
+	require.NoError(t, err)
+
+	out, err := json.Marshal(schema)
+	require.NoError(t, err)
+
+	// Zero paths behave like Generate with zero inputs: the true schema
+	// with only the draft URI set.
+	assert.JSONEq(t, `{"$schema": "http://json-schema.org/draft-07/schema#"}`, string(out))
 }
 
 func TestGeneratorEmptyMapping(t *testing.T) {

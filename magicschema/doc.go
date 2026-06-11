@@ -123,12 +123,16 @@
 //
 // # Errors
 //
-// The package defines four sentinel errors for use with [errors.Is]:
+// The package defines sentinel errors for use with [errors.Is]:
 //
 //   - [ErrInvalidYAML]: the input is not valid YAML syntax (fatal).
 //   - [ErrInvalidOption]: a configuration value is invalid, such as an
-//     unrecognized annotator name in [Config.NewGenerator].
-//   - [ErrReadInput]: an I/O error occurred reading input (fatal).
+//     unrecognized annotator name in [Config.NewGenerator] (which also
+//     wraps [ErrUnknownAnnotator], so both match).
+//   - [ErrUnknownAnnotator]: an annotator name with no registered parser,
+//     returned by [Registry.Lookup].
+//   - [ErrReadInput]: an input file could not be read in
+//     [Generator.GenerateFiles] (fatal).
 //   - [ErrWriteOutput]: an I/O error occurred writing output (fatal).
 //
 // Annotation parse failures are not fatal. They are logged as warnings
@@ -249,13 +253,19 @@
 // defaults. The [Config.Registry] field maps annotator names (as used in
 // the --annotators flag) to prototype [Annotator] instances.
 // [Config.NewGenerator] looks up each comma-separated name in Registry to
-// build the annotator list.
+// build the annotator list. Programmatic callers resolve names directly with
+// [Registry.Lookup] and enumerate them with [Registry.Names].
 //
 // # Basic Usage
 //
 //	gen := magicschema.NewGenerator()
 //	schema, err := gen.Generate(yamlBytes)
 //	out, _ := json.MarshalIndent(schema, "", "  ")
+//
+// [Generator.GenerateFiles] reads YAML files and delegates to
+// [Generator.Generate], wrapping read errors with [ErrReadInput]:
+//
+//	schema, err := gen.GenerateFiles("values.yaml", "values-prd.yaml")
 //
 // # With Options
 //
@@ -273,7 +283,7 @@
 //	cfg := magicschema.NewConfig()
 //	cfg.Registry = helm.DefaultRegistry()
 //	cfg.RegisterFlags(rootCmd.PersistentFlags())
-//	_ = cfg.RegisterCompletions(rootCmd)
+//	cfg.MustRegisterCompletions(rootCmd)
 //
 //	gen, err := cfg.NewGenerator()
 //	schema, err := gen.Generate(yamlBytes)

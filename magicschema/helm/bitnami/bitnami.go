@@ -36,9 +36,13 @@ func New() *Annotator {
 	return &Annotator{}
 }
 
+// Name is the canonical annotator name, used as the registry key and in
+// the --annotators flag.
+const Name = "bitnami"
+
 // Name returns the annotator name.
 func (a *Annotator) Name() string {
-	return "bitnami"
+	return Name
 }
 
 // ForContent returns a new Annotator populated with parsed ## @param and

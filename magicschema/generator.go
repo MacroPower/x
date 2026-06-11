@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"slices"
 
 	"github.com/goccy/go-yaml"
@@ -176,6 +177,28 @@ func (g *Generator) Generate(inputs ...[]byte) (*jsonschema.Schema, error) {
 	}
 
 	return result, nil
+}
+
+// GenerateFiles produces a JSON Schema from one or more YAML files. It reads
+// each path and delegates to [Generator.Generate]; read failures wrap
+// [ErrReadInput]. Inputs merge with union semantics in path order, and merged
+// metadata (defaults, descriptions, root annotations) is first-input-wins,
+// so callers order the primary file first.
+func (g *Generator) GenerateFiles(paths ...string) (*jsonschema.Schema, error) {
+	inputs := make([][]byte, 0, len(paths))
+
+	for _, path := range paths {
+		// The *os.PathError from os.ReadFile already carries the path.
+		//nolint:gosec // G304: reading caller-provided paths is the purpose of GenerateFiles.
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrReadInput, err)
+		}
+
+		inputs = append(inputs, data)
+	}
+
+	return g.Generate(inputs...)
 }
 
 // generateSingle processes a single YAML input into a schema. It returns the
