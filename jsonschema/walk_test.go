@@ -2,6 +2,7 @@ package jsonschema_test
 
 import (
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -211,6 +212,89 @@ func TestWalk(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, []*jsonschema.Schema{root, replacement}, visited,
 			"fn runs before children are gathered, so the walk follows the replacement")
+	})
+
+	t.Run("SkipChildren prunes the subtree and continues with siblings", func(t *testing.T) {
+		t.Parallel()
+
+		prunedChild := &jsonschema.Schema{Type: "string"}
+		pruned := &jsonschema.Schema{Items: prunedChild}
+		sibling := &jsonschema.Schema{Type: "integer"}
+		root := &jsonschema.Schema{AllOf: []*jsonschema.Schema{pruned, sibling}}
+
+		var visited []*jsonschema.Schema
+
+		err := jsonschema.Walk(root, func(s *jsonschema.Schema) error {
+			visited = append(visited, s)
+			if s == pruned {
+				return jsonschema.SkipChildren
+			}
+
+			return nil
+		})
+
+		require.NoError(t, err)
+		assert.Equal(t, []*jsonschema.Schema{root, pruned, sibling}, visited,
+			"the pruned schema's children are skipped; its siblings still walk")
+	})
+
+	t.Run("SkipChildren on the root visits only the root", func(t *testing.T) {
+		t.Parallel()
+
+		root := &jsonschema.Schema{Items: &jsonschema.Schema{Type: "string"}}
+
+		var visited []*jsonschema.Schema
+
+		err := jsonschema.Walk(root, func(s *jsonschema.Schema) error {
+			visited = append(visited, s)
+
+			return jsonschema.SkipChildren
+		})
+
+		require.NoError(t, err)
+		assert.Equal(t, []*jsonschema.Schema{root}, visited)
+	})
+
+	t.Run("wrapped SkipChildren prunes too", func(t *testing.T) {
+		t.Parallel()
+
+		root := &jsonschema.Schema{Items: &jsonschema.Schema{Type: "string"}}
+
+		count := 0
+
+		err := jsonschema.Walk(root, func(*jsonschema.Schema) error {
+			count++
+
+			return fmt.Errorf("rewrite pass: %w", jsonschema.SkipChildren)
+		})
+
+		require.NoError(t, err, "Walk matches SkipChildren with errors.Is")
+		assert.Equal(t, 1, count)
+	})
+
+	t.Run("schema pruned via one path stays visited on another", func(t *testing.T) {
+		t.Parallel()
+
+		shared := &jsonschema.Schema{Items: &jsonschema.Schema{Type: "string"}}
+		root := &jsonschema.Schema{
+			AllOf: []*jsonschema.Schema{shared},
+			Not:   shared,
+		}
+
+		count := 0
+
+		err := jsonschema.Walk(root, func(s *jsonschema.Schema) error {
+			if s == shared {
+				count++
+
+				return jsonschema.SkipChildren
+			}
+
+			return nil
+		})
+
+		require.NoError(t, err)
+		assert.Equal(t, 1, count, "pruning marks the schema visited; the second path does not re-run fn")
 	})
 }
 

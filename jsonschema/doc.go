@@ -476,7 +476,9 @@
 //     before its children are gathered, so it may replace or mutate sub-schema
 //     fields and the walk follows the updated children. Each distinct schema
 //     pointer is visited once, so aliased or cyclic graphs terminate. Walk
-//     stops at and returns the first error from the function.
+//     stops at and returns the first error from the function, except
+//     [SkipChildren], which prunes the walk at that schema and continues with
+//     its siblings.
 //   - [CheckTypeNames] verifies that every type keyword reachable from a
 //     schema names one of the seven JSON Schema type names, returning nil or
 //     an error wrapping [ErrInvalidType] that includes the schema path of the

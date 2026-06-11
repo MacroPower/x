@@ -678,7 +678,11 @@ traversal is deterministic, and a maintenance test fails when an upstream
 children are gathered, so it may replace or mutate sub-schema fields and the
 walk follows the updated children. Each distinct schema pointer is visited
 once, so aliased or cyclic graphs terminate. `Walk` stops at and returns the
-first error from the function; a `nil` schema is a no-op.
+first error from the function; a `nil` schema is a no-op. Returning the
+`SkipChildren` sentinel (the `io/fs.SkipDir` convention) prunes the walk at
+the current schema — its sub-schemas are not visited — and continues with its
+siblings, which suits rewriting passes that splice in a subtree the walk
+should not descend into.
 
 Three predicates answer common shape questions:
 

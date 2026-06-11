@@ -1,10 +1,20 @@
 package jsonschema
 
 import (
+	"errors"
 	"maps"
 	"slices"
 	"strconv"
 )
+
+// SkipChildren is returned by a [Walk] function to prune the walk at the
+// current schema: its sub-schemas are not visited, the walk continues with
+// the schema's siblings, and Walk does not treat it as an error. Returned
+// from the root, Walk visits only the root. It follows the [io/fs.SkipDir]
+// convention.
+//
+//nolint:errname,staticcheck // A control-flow sentinel, not a failure; named for its meaning, like io/fs.SkipDir.
+var SkipChildren = errors.New("skip this schema's children")
 
 // Subschemas returns the direct sub-schemas of s: every non-nil schema
 // reachable through one sub-schema-bearing keyword (applicators such as
@@ -126,13 +136,16 @@ func subschemaRefs(s *Schema) []subschemaRef {
 // gathered, so fn may replace or mutate sub-schema fields and the walk
 // follows the updated children. Each distinct schema pointer is visited
 // once, so aliased or cyclic graphs terminate. Walk stops at and returns
-// the first error from fn. A nil s is a no-op.
+// the first error from fn, except [SkipChildren], which prunes the walk at
+// that schema and continues. A nil s is a no-op.
 func Walk(s *Schema, fn func(*Schema) error) error {
 	return walk(s, fn, map[*Schema]bool{})
 }
 
 // walk implements [Walk], threading the visited set through the recursion so
-// each distinct schema pointer runs fn at most once.
+// each distinct schema pointer runs fn at most once. A pruned schema stays
+// visited: another path reaching it later finds it handled, exactly as if
+// the walk had descended through it.
 func walk(s *Schema, fn func(*Schema) error, visited map[*Schema]bool) error {
 	if s == nil || visited[s] {
 		return nil
@@ -141,6 +154,10 @@ func walk(s *Schema, fn func(*Schema) error, visited map[*Schema]bool) error {
 	visited[s] = true
 
 	err := fn(s)
+	if errors.Is(err, SkipChildren) {
+		return nil
+	}
+
 	if err != nil {
 		return err
 	}
