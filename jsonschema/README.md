@@ -275,7 +275,7 @@ interface, every type in a package — where `WithTypeSchema` names one exact
 ```go
 // Every type implementing fmt.Stringer serializes as a string.
 stringers := jsonschema.TypeSchemaResolverFunc(
-	func(t reflect.Type) (*jsonschema.Schema, bool) {
+	func(_ context.Context, t reflect.Type) (*jsonschema.Schema, bool) {
 		if !t.Implements(reflect.TypeFor[fmt.Stringer]()) {
 			return nil, false
 		}
@@ -290,7 +290,8 @@ Resolvers returning `ok == false` pass the type to the next resolver and then
 to the rest of the chain; returning `ok == true` with a nil schema marks the
 type unrestricted (`{}`), mirroring `JSONSchemaProvider`. A resolver may be
 consulted several times for the same type within one run, so it must be
-deterministic.
+deterministic. Resolvers and extenders receive the Generate call's context,
+so an implementation doing I/O can honor cancellation and deadlines.
 
 If a type implements both customization interfaces, only `JSONSchemaProvider` is
 used. When a registered resolver (`WithTypeSchemaResolver` or `WithTypeSchema`) or
@@ -306,7 +307,7 @@ what reflection produced:
 ```go
 // Add a description to a third-party type without replacing its schema.
 descriptions := jsonschema.TypeSchemaExtenderFunc(
-	func(t reflect.Type, s *jsonschema.Schema) error {
+	func(_ context.Context, t reflect.Type, s *jsonschema.Schema) error {
 		if t == reflect.TypeFor[netip.Addr]() {
 			s.Description = "An IP address."
 		}

@@ -96,7 +96,7 @@ type exactTypeResolver struct {
 	s *Schema
 }
 
-func (r exactTypeResolver) SchemaForType(t reflect.Type) (*Schema, bool) {
+func (r exactTypeResolver) SchemaForType(_ context.Context, t reflect.Type) (*Schema, bool) {
 	if t != r.t {
 		return nil, false
 	}

@@ -371,7 +371,7 @@ func isRecursiveContainerKind(k reflect.Kind) bool {
 // last-registration-wins behavior.
 func (g *generator) resolveTypeSchema(t reflect.Type) (*Schema, bool) {
 	for _, v := range slices.Backward(g.typeResolvers) {
-		if s, ok := v.SchemaForType(t); ok {
+		if s, ok := v.SchemaForType(g.ctx, t); ok {
 			return s, true
 		}
 	}
@@ -1777,7 +1777,7 @@ func (g *generator) extendType(t reflect.Type, s *Schema) error {
 	}
 
 	for _, e := range g.typeExtenders {
-		err := e.ExtendSchemaForType(t, s)
+		err := e.ExtendSchemaForType(g.ctx, t, s)
 		if err != nil {
 			return fmt.Errorf("extend type %s: %w", t, err)
 		}
