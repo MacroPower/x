@@ -295,20 +295,21 @@ interface, every type in a package — where `WithTypeSchema` names one exact
 ```go
 // Every type implementing fmt.Stringer serializes as a string.
 stringers := jsonschema.TypeSchemaProviderFunc(
-	func(_ context.Context, tc jsonschema.TypeContext) (*jsonschema.Schema, bool, error) {
+	func(_ context.Context, tc jsonschema.TypeContext) (*jsonschema.Schema, error) {
 		if !tc.Type.Implements(reflect.TypeFor[fmt.Stringer]()) {
-			return nil, false, nil
+			return nil, jsonschema.ErrTypeNotHandled
 		}
-		return &jsonschema.Schema{Type: "string"}, true, nil
+		return &jsonschema.Schema{Type: "string"}, nil
 	},
 )
 
 schema, err := jsonschema.GenerateFor[Config](ctx, jsonschema.WithTypeSchemaProvider(stringers))
 ```
 
-Providers returning `ok == false` pass the type to the next provider and then
-to the rest of the chain; returning `ok == true` with a nil schema marks the
-type unrestricted (`{}`), mirroring `JSONSchemaProvider`. A provider error
+Providers answer `ErrTypeNotHandled` (or an error wrapping it) for a type
+they do not handle, passing it to the next provider and then to the rest of
+the chain; returning a nil schema with a nil error marks the type
+unrestricted (`{}`), mirroring `JSONSchemaProvider`. Any other provider error
 aborts generation, for a provider that recognizes a type but cannot produce
 its schema (an I/O failure, for example). A provider may be consulted several
 times for the same type within one run, so it must be deterministic.
@@ -824,14 +825,14 @@ The resolver receives a context with every resolution call:
 
 ```go
 type RefResolver interface {
-	ResolveRef(ctx context.Context, uri string) (s *Schema, ok bool, err error)
+	ResolveRef(ctx context.Context, uri string) (*Schema, error)
 }
 ```
 
-`ok` reports whether the resolver resolved the URI: ok false with a nil
-error is the not-resolved answer, passing the URI to the next
-`ChainResolvers` link and ultimately to unresolvable-ref handling, while an
-error reports a resolution attempt that failed.
+`ErrNotResolved` (or an error wrapping it) is the not-resolved answer,
+passing the URI to the next `ChainResolvers` link and ultimately to
+unresolvable-ref handling, following `io/fs.ErrNotExist`; any other error
+reports a resolution attempt that failed.
 
 Refs resolved while compiling get the `Compile` context; refs reached
 during a validation run get that run's `Validate` (or other

@@ -50,18 +50,21 @@ type recordingResolver struct {
 	disabled bool
 }
 
-func (r *recordingResolver) ResolveRef(ctx context.Context, uri string) (*jsonschema.Schema, bool, error) {
+func (r *recordingResolver) ResolveRef(ctx context.Context, uri string) (*jsonschema.Schema, error) {
 	r.recordCtx(ctx)
 
 	err := ctx.Err()
 	if err != nil {
 		//nolint:wrapcheck // A real resolver surfaces ctx.Err() as-is.
-		return nil, false, err
+		return nil, err
 	}
 
 	s, ok := r.lookup(uri)
+	if !ok {
+		return nil, jsonschema.ErrNotResolved
+	}
 
-	return s, ok, nil
+	return s, nil
 }
 
 // recordCtx appends ctx to the received-context log.

@@ -663,9 +663,9 @@
 // Vocabulary resolution follows this priority:
 //  1. [WithVocabularies] direct override (highest).
 //  2. [WithMetaSchemaResolver] lookup — the resolver is consulted once per
-//     compile with the root schema's $schema URI; a miss (ok false) falls
-//     through to the default. A [SchemaMap] serves fixed metaschemas by
-//     exact $id, and [ChainResolvers] composes resolvers.
+//     compile with the root schema's $schema URI; a miss ([ErrNotResolved])
+//     falls through to the default. A [SchemaMap] serves fixed metaschemas
+//     by exact $id, and [ChainResolvers] composes resolvers.
 //  3. Default: a built-in standard vocabulary set — every group active except
 //     format-assertion, so format is annotation-only by default.
 //
@@ -680,14 +680,15 @@
 // under #/$defs or #/definitions). Remote and absolute $ref URIs are resolved
 // via an optional [RefResolver] set with [WithRefResolver]; [RefResolverFunc]
 // adapts a bare function, so a one-off resolver needs no named type. A resolver
-// reports a URI it does not serve with ok false, the not-resolved answer that
-// passes the URI along (to the next [ChainResolvers] link, and ultimately to
-// unresolvable-ref handling). An unresolvable remote or absolute $ref is
+// reports a URI it does not serve by answering [ErrNotResolved], the
+// not-resolved answer that passes the URI along (to the next
+// [ChainResolvers] link, and ultimately to unresolvable-ref handling),
+// following [io/fs.ErrNotExist]. An unresolvable remote or absolute $ref is
 // reported as a [*ValidationError] by the validation walk: with no resolver
-// (or a resolver reporting ok false) the message begins with
+// (or a resolver answering ErrNotResolved) the message begins with
 // "cannot resolve $ref" and includes the quoted ref, while a resolver that
-// returns an error yields one wrapping [ErrRefResolve]. Only an unresolvable
-// local fragment ref is silently skipped.
+// returns any other error yields one wrapping [ErrRefResolve]. Only an
+// unresolvable local fragment ref is silently skipped.
 // Circular refs are detected and treated as passing to avoid infinite recursion.
 //
 // Non-local refs absolutize against the enclosing resource's base URI — its

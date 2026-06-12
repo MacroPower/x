@@ -1048,7 +1048,7 @@ func TestFileResolver(t *testing.T) {
 
 			resolver := jsonschema.NewFileResolver(mapFS(files))
 
-			got, ok, err := resolver.ResolveRef(t.Context(), tc.uri)
+			got, err := resolver.ResolveRef(t.Context(), tc.uri)
 			if tc.want == "" {
 				require.Error(t, err)
 
@@ -1056,7 +1056,6 @@ func TestFileResolver(t *testing.T) {
 			}
 
 			require.NoError(t, err)
-			require.True(t, ok)
 
 			data, err := json.Marshal(got)
 			require.NoError(t, err)
@@ -1130,25 +1129,23 @@ func TestStripPrefix(t *testing.T) {
 	t.Run("prefixed URI serves from the fs", func(t *testing.T) {
 		t.Parallel()
 
-		s, ok, err := resolver.ResolveRef(t.Context(), "https://example.com/schemas/child.json")
+		s, err := resolver.ResolveRef(t.Context(), "https://example.com/schemas/child.json")
 		require.NoError(t, err)
-		require.True(t, ok)
 		assert.Equal(t, "integer", s.Type)
 	})
 
 	t.Run("unprefixed URI is delegated unchanged", func(t *testing.T) {
 		t.Parallel()
 
-		s, ok, err := resolver.ResolveRef(t.Context(), "file:///child.json")
+		s, err := resolver.ResolveRef(t.Context(), "file:///child.json")
 		require.NoError(t, err)
-		require.True(t, ok)
 		assert.Equal(t, "integer", s.Type)
 	})
 
 	t.Run("other remote bases still miss", func(t *testing.T) {
 		t.Parallel()
 
-		_, _, err := resolver.ResolveRef(t.Context(), "https://other.example/child.json")
+		_, err := resolver.ResolveRef(t.Context(), "https://other.example/child.json")
 		require.Error(t, err)
 	})
 }

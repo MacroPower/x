@@ -130,9 +130,10 @@ func WithVocabularies(uris ...string) ValidateOption {
 // bare function.
 //
 // The resolver is consulted once per compile, under the [Compile] context
-// (the Must* entry points pass [context.Background]). A miss (ok false)
-// leaves the default vocabulary resolution in effect; a resolver error
-// fails compilation. A nil r restores the default (no metaschema lookup).
+// (the Must* entry points pass [context.Background]). A miss
+// ([ErrNotResolved]) leaves the default vocabulary resolution in effect;
+// any other resolver error fails compilation. A nil r restores the default
+// (no metaschema lookup).
 func WithMetaSchemaResolver(r RefResolver) ValidateOption {
 	return validateOptionFunc(func(v *validator) { v.metaSchemaResolver = r })
 }
@@ -405,12 +406,12 @@ func (v *validator) resolveVocabularies() error {
 	rawVocabs := v.vocabOverride
 
 	if rawVocabs == nil && v.metaSchemaResolver != nil && v.root.Schema != "" {
-		ms, ok, err := v.metaSchemaResolver.ResolveRef(v.ctx, v.root.Schema)
-		if err != nil {
+		ms, err := v.metaSchemaResolver.ResolveRef(v.ctx, v.root.Schema)
+		if err != nil && !errors.Is(err, ErrNotResolved) {
 			return fmt.Errorf("resolve metaschema %q: %w", v.root.Schema, err)
 		}
 
-		if ok && ms != nil && len(ms.Vocabulary) > 0 {
+		if err == nil && ms != nil && len(ms.Vocabulary) > 0 {
 			rawVocabs = ms.Vocabulary
 		}
 	}
@@ -743,11 +744,17 @@ func (v *validator) runContext() context.Context {
 }
 
 // callResolver invokes the configured resolver for uri under the context of
-// the current compile or validation run. A nil schema with ok true is
-// normalized to the not-resolved answer, upholding the [RefResolver]
-// contract that no caller dereferences a nil document.
+// the current compile or validation run, with ok reporting whether the
+// resolver served the URI: an ErrNotResolved answer becomes ok false with a
+// nil error. A nil schema with a nil error is normalized to the
+// not-resolved answer too, upholding the [RefResolver] contract that no
+// caller dereferences a nil document.
 func (v *validator) callResolver(uri string) (*Schema, bool, error) {
-	s, ok, err := v.refResolver.ResolveRef(v.runContext(), uri)
+	s, err := v.refResolver.ResolveRef(v.runContext(), uri)
+	if errors.Is(err, ErrNotResolved) {
+		return nil, false, nil
+	}
+
 	if err != nil {
 		//nolint:wrapcheck // resolveRemote wraps the error with ErrRefResolve; remoteLoader tolerates it.
 		return nil, false, err
@@ -757,7 +764,7 @@ func (v *validator) callResolver(uri string) (*Schema, bool, error) {
 		return nil, false, nil
 	}
 
-	return s, ok, nil
+	return s, true, nil
 }
 
 // resolveRemote calls the configured [RefResolver] to fetch a remote schema,

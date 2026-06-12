@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"math"
@@ -388,22 +389,26 @@ func isRecursiveContainerKind(k reflect.Kind) bool {
 }
 
 // resolveTypeSchema consults the registered type providers for t, newest
-// registration first, and returns the first schema offered. The order makes a
-// later registration win for the types two providers both handle, which for
-// the exact-match providers WithTypeSchema registers preserves its
-// last-registration-wins behavior. A provider error stops the consultation
-// and aborts generation.
+// registration first, and returns the first schema offered, with ok
+// reporting whether any provider handled the type. The order makes a later
+// registration win for the types two providers both handle, which for the
+// exact-match providers WithTypeSchema registers preserves its
+// last-registration-wins behavior. An ErrTypeNotHandled answer passes the
+// type to the next provider; any other provider error stops the
+// consultation and aborts generation.
 func (g *generator) resolveTypeSchema(t reflect.Type) (*Schema, bool, error) {
 	tc := TypeContext{Type: t, Draft: g.draft}
 	for _, v := range slices.Backward(g.typeProviders) {
-		s, ok, err := v.SchemaForType(g.ctx, tc)
+		s, err := v.SchemaForType(g.ctx, tc)
+		if errors.Is(err, ErrTypeNotHandled) {
+			continue
+		}
+
 		if err != nil {
 			return nil, false, fmt.Errorf("resolve type %s: %w", t, err)
 		}
 
-		if ok {
-			return s, true, nil
-		}
+		return s, true, nil
 	}
 
 	return nil, false, nil

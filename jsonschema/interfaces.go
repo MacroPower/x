@@ -2,6 +2,8 @@ package jsonschema
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 )
@@ -63,32 +65,34 @@ type TypeContext struct {
 // interface, every type in a package — where [WithTypeSchema] names one
 // exact [reflect.Type] at a time.
 //
-// SchemaForType returns ok false when the provider does not handle the type
-// in tc, passing resolution to the next provider and then to the rest of the
-// chain. Returning ok true with a nil schema marks the type unrestricted
-// ({}), mirroring [JSONSchemaProvider]. A returned schema is copied before
-// use with the same discipline [WithTypeSchema] documents, so one schema
-// value may be shared across types, calls, and goroutines.
+// SchemaForType returns [ErrTypeNotHandled] (or an error wrapping it) when
+// the provider does not handle the type in tc, passing resolution to the
+// next provider and then to the rest of the chain, the way a [RefResolver]
+// answers [ErrNotResolved]. Returning a nil schema with a nil error marks
+// the type unrestricted ({}), mirroring [JSONSchemaProvider]. A returned
+// schema is copied before use with the same discipline [WithTypeSchema]
+// documents, so one schema value may be shared across types, calls, and
+// goroutines.
 //
-// A non-nil error aborts generation, for a provider that recognizes the type
-// but cannot produce its schema — an I/O failure while loading a schema
-// document, for example; the schema and ok values are then ignored. The
-// context comes from the Generate call in effect, so a provider doing such
-// I/O can honor cancellation and deadlines; a provider that performs no
-// cancellable work can ignore it, following [DescriptionProvider].
+// Any other non-nil error aborts generation, for a provider that recognizes
+// the type but cannot produce its schema — an I/O failure while loading a
+// schema document, for example. The context comes from the Generate call in
+// effect, so a provider doing such I/O can honor cancellation and deadlines;
+// a provider that performs no cancellable work can ignore it, following
+// [DescriptionProvider].
 //
 // A provider may be consulted several times for the same type within one
 // generation run, so SchemaForType must be deterministic.
 type TypeSchemaProvider interface {
-	SchemaForType(ctx context.Context, tc TypeContext) (s *Schema, ok bool, err error)
+	SchemaForType(ctx context.Context, tc TypeContext) (*Schema, error)
 }
 
 // TypeSchemaProviderFunc adapts a bare providing function to a
 // [TypeSchemaProvider], following [net/http.HandlerFunc].
-type TypeSchemaProviderFunc func(ctx context.Context, tc TypeContext) (*Schema, bool, error)
+type TypeSchemaProviderFunc func(ctx context.Context, tc TypeContext) (*Schema, error)
 
 // SchemaForType calls f.
-func (f TypeSchemaProviderFunc) SchemaForType(ctx context.Context, tc TypeContext) (*Schema, bool, error) {
+func (f TypeSchemaProviderFunc) SchemaForType(ctx context.Context, tc TypeContext) (*Schema, error) {
 	return f(ctx, tc)
 }
 
@@ -317,13 +321,13 @@ func (f FormatValidatorFunc) ValidateFormat(ctx context.Context, name, value str
 // The same resolver value serves both validation and inlining via a single
 // [WithRefResolver] option.
 type RefResolver interface {
-	// ResolveRef resolves a remote schema URI. Ok reports whether the
-	// resolver resolved it: ok false with a nil error is the not-resolved
-	// answer, passing the URI along (to the next [ChainResolvers] link, and
-	// ultimately to the unresolvable-ref handling of the entry point in
-	// effect), while a non-nil error reports a resolution attempt that
-	// failed. A nil schema with ok true is treated as not resolved, so no
-	// caller dereferences a nil document.
+	// ResolveRef resolves a remote schema URI. [ErrNotResolved] (or an
+	// error wrapping it) is the not-resolved answer, passing the URI along
+	// (to the next [ChainResolvers] link, and ultimately to the
+	// unresolvable-ref handling of the entry point in effect), following
+	// [io/fs.ErrNotExist]; any other error reports a resolution attempt
+	// that failed. A nil schema with a nil error is treated as not
+	// resolved, so no caller dereferences a nil document.
 	//
 	// The resolution runs under the caller's context, so a resolver that
 	// fetches over the network can honor cancellation and deadlines. The
@@ -331,7 +335,7 @@ type RefResolver interface {
 	// [Validator.Validate], [Inline]); the Must* entry points pass
 	// [context.Background]. A resolver that performs no cancellable work
 	// can ignore it.
-	ResolveRef(ctx context.Context, uri string) (s *Schema, ok bool, err error)
+	ResolveRef(ctx context.Context, uri string) (*Schema, error)
 }
 
 // RefResolverFunc adapts a bare resolution function to a [RefResolver],
@@ -340,18 +344,18 @@ type RefResolver interface {
 // covers preloaded schemas). The [RefResolver] contract applies unchanged,
 // including concurrency safety when the resolver is shared across Validate
 // calls.
-type RefResolverFunc func(ctx context.Context, uri string) (*Schema, bool, error)
+type RefResolverFunc func(ctx context.Context, uri string) (*Schema, error)
 
 // ResolveRef calls f.
-func (f RefResolverFunc) ResolveRef(ctx context.Context, uri string) (*Schema, bool, error) {
+func (f RefResolverFunc) ResolveRef(ctx context.Context, uri string) (*Schema, error) {
 	return f(ctx, uri)
 }
 
 // SchemaMap is a [RefResolver] serving preloaded schemas from a map keyed
-// by URI. A URI absent from the map reports ok false, the not-resolved
-// answer, so a SchemaMap composes with other resolvers via
-// [ChainResolvers]. The map is read directly, never mutated; callers
-// sharing one SchemaMap across goroutines must not modify it concurrently.
+// by URI. A URI absent from the map answers [ErrNotResolved], so a
+// SchemaMap composes with other resolvers via [ChainResolvers]. The map is
+// read directly, never mutated; callers sharing one SchemaMap across
+// goroutines must not modify it concurrently.
 //
 // A SchemaMap serves anywhere a resolver is accepted: preloaded remote
 // schemas for [WithRefResolver], or metaschemas for
@@ -361,38 +365,45 @@ func (f RefResolverFunc) ResolveRef(ctx context.Context, uri string) (*Schema, b
 type SchemaMap map[string]*Schema
 
 // ResolveRef returns the schema stored under uri. A URI absent from the
-// map, or stored with a nil schema, reports ok false.
-func (m SchemaMap) ResolveRef(_ context.Context, uri string) (*Schema, bool, error) {
-	s, ok := m[uri]
+// map, or stored with a nil schema, answers an error wrapping
+// [ErrNotResolved] that names the URI.
+func (m SchemaMap) ResolveRef(_ context.Context, uri string) (*Schema, error) {
+	if s := m[uri]; s != nil {
+		return s, nil
+	}
 
-	return s, ok && s != nil, nil
+	return nil, fmt.Errorf("%w: %q", ErrNotResolved, uri)
 }
 
 // ChainResolvers returns a [RefResolver] that consults each resolver in
-// order and answers with the first schema or error; a resolver reporting
-// ok false — not resolved — passes the URI to the next. When every
-// resolver misses (including an empty or all-nil chain), the chain reports
-// ok false. Nil resolvers are skipped, so optional links can be passed
-// unconditionally.
+// order and answers with the first schema or non-[ErrNotResolved] error; a
+// resolver answering [ErrNotResolved] passes the URI to the next. When
+// every resolver declines (including an empty or all-nil chain), the chain
+// answers an error wrapping ErrNotResolved. Nil resolvers are skipped, so
+// optional links can be passed unconditionally.
 func ChainResolvers(resolvers ...RefResolver) RefResolver {
-	return RefResolverFunc(func(ctx context.Context, uri string) (*Schema, bool, error) {
+	return RefResolverFunc(func(ctx context.Context, uri string) (*Schema, error) {
 		for _, r := range resolvers {
 			if r == nil {
 				continue
 			}
 
-			s, ok, err := r.ResolveRef(ctx, uri)
-			if err != nil {
-				//nolint:wrapcheck // The chain is transparent: a link's error reaches the caller verbatim.
-				return nil, false, err
+			s, err := r.ResolveRef(ctx, uri)
+			if errors.Is(err, ErrNotResolved) {
+				continue
 			}
 
-			if ok {
-				return s, true, nil
+			if err != nil {
+				//nolint:wrapcheck // The chain is transparent: a link's error reaches the caller verbatim.
+				return nil, err
+			}
+
+			if s != nil {
+				return s, nil
 			}
 		}
 
-		return nil, false, nil
+		return nil, fmt.Errorf("%w: %q", ErrNotResolved, uri)
 	})
 }
 
@@ -407,7 +418,7 @@ func ChainResolvers(resolvers ...RefResolver) RefResolver {
 //
 // A URI that does not carry the prefix is delegated unchanged.
 func StripPrefix(prefix string, r RefResolver) RefResolver {
-	return RefResolverFunc(func(ctx context.Context, uri string) (*Schema, bool, error) {
+	return RefResolverFunc(func(ctx context.Context, uri string) (*Schema, error) {
 		return r.ResolveRef(ctx, strings.TrimPrefix(uri, prefix))
 	})
 }

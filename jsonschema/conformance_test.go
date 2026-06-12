@@ -24,18 +24,18 @@ import (
 // $dynamicRef targets resolve during validation.
 type metaSchemaResolver map[string]*jsonschema.Schema
 
-func (m metaSchemaResolver) ResolveRef(_ context.Context, uri string) (*jsonschema.Schema, bool, error) {
+func (m metaSchemaResolver) ResolveRef(_ context.Context, uri string) (*jsonschema.Schema, error) {
 	if s, ok := m[uri]; ok {
-		return s, true, nil
+		return s, nil
 	}
 
 	// Some $id values carry an empty fragment (e.g. the Draft-07 meta-schema id
 	// ends in "#").
 	if s, ok := m[uri+"#"]; ok {
-		return s, true, nil
+		return s, nil
 	}
 
-	return nil, false, nil
+	return nil, jsonschema.ErrNotResolved
 }
 
 // loadMetaSchemas reads every vendored meta-schema under testdata/metaschemas,

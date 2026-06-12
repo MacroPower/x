@@ -130,12 +130,12 @@ type exactTypeProvider struct {
 	s *Schema
 }
 
-func (p exactTypeProvider) SchemaForType(_ context.Context, tc TypeContext) (*Schema, bool, error) {
+func (p exactTypeProvider) SchemaForType(_ context.Context, tc TypeContext) (*Schema, error) {
 	if tc.Type != p.t {
-		return nil, false, nil
+		return nil, fmt.Errorf("%w: %s", ErrTypeNotHandled, tc.Type)
 	}
 
-	return p.s, true, nil
+	return p.s, nil
 }
 
 // WithTypeSchema overrides the generated schema for a specific Go type: it

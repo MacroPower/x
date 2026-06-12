@@ -2094,9 +2094,9 @@ func TestValidateVocabularyResolution(t *testing.T) {
 			instance: map[string]any{},
 			opts: []jsonschema.ValidateOption{
 				jsonschema.WithMetaSchemaResolver(jsonschema.RefResolverFunc(
-					func(_ context.Context, uri string) (*jsonschema.Schema, bool, error) {
+					func(_ context.Context, uri string) (*jsonschema.Schema, error) {
 						if uri != "https://example.com/my-meta" {
-							return nil, false, nil
+							return nil, jsonschema.ErrNotResolved
 						}
 
 						return &jsonschema.Schema{
@@ -2106,7 +2106,7 @@ func TestValidateVocabularyResolution(t *testing.T) {
 								jsonschema.VocabApplicator2020: true,
 								// Validation vocab absent, so disabled.
 							},
-						}, true, nil
+						}, nil
 					})),
 			},
 			// Type and required are validation vocab, so both skipped.
@@ -2135,14 +2135,14 @@ func TestValidateVocabularyResolution(t *testing.T) {
 					// The fallback would disable the validation vocab, but
 					// the chain never reaches it.
 					jsonschema.RefResolverFunc(
-						func(_ context.Context, uri string) (*jsonschema.Schema, bool, error) {
+						func(_ context.Context, uri string) (*jsonschema.Schema, error) {
 							return &jsonschema.Schema{
 								ID: uri,
 								Vocabulary: map[string]bool{
 									jsonschema.VocabCore2020:       true,
 									jsonschema.VocabApplicator2020: true,
 								},
-							}, true, nil
+							}, nil
 						}),
 				)),
 			},
@@ -2156,8 +2156,8 @@ func TestValidateVocabularyResolution(t *testing.T) {
 			instance: 42.0,
 			opts: []jsonschema.ValidateOption{
 				jsonschema.WithMetaSchemaResolver(jsonschema.RefResolverFunc(
-					func(context.Context, string) (*jsonschema.Schema, bool, error) {
-						return nil, false, nil
+					func(context.Context, string) (*jsonschema.Schema, error) {
+						return nil, jsonschema.ErrNotResolved
 					})),
 			},
 			// Default vocabularies keep the validation vocab active.
@@ -2171,8 +2171,8 @@ func TestValidateVocabularyResolution(t *testing.T) {
 			instance: "ok",
 			opts: []jsonschema.ValidateOption{
 				jsonschema.WithMetaSchemaResolver(jsonschema.RefResolverFunc(
-					func(context.Context, string) (*jsonschema.Schema, bool, error) {
-						return nil, false, errors.New("metaschema store unreachable")
+					func(context.Context, string) (*jsonschema.Schema, error) {
+						return nil, errors.New("metaschema store unreachable")
 					})),
 			},
 			err: "resolve metaschema",
@@ -2522,10 +2522,12 @@ func TestValidateVocabularyApplicatorActiveValidationDisabled(t *testing.T) {
 // mapResolver is a test helper that resolves URIs from a static map.
 type mapResolver map[string]*jsonschema.Schema
 
-func (m mapResolver) ResolveRef(_ context.Context, uri string) (*jsonschema.Schema, bool, error) {
-	s, ok := m[uri]
+func (m mapResolver) ResolveRef(_ context.Context, uri string) (*jsonschema.Schema, error) {
+	if s, ok := m[uri]; ok {
+		return s, nil
+	}
 
-	return s, ok, nil
+	return nil, jsonschema.ErrNotResolved
 }
 
 func TestValidateWithRefResolver(t *testing.T) {
@@ -2658,8 +2660,8 @@ func TestValidateWithRefResolver(t *testing.T) {
 // errResolver always returns an error.
 type errResolver struct{}
 
-func (errResolver) ResolveRef(context.Context, string) (*jsonschema.Schema, bool, error) {
-	return nil, false, errors.New("connection refused")
+func (errResolver) ResolveRef(context.Context, string) (*jsonschema.Schema, error) {
+	return nil, errors.New("connection refused")
 }
 
 func TestValidateRefResolverCaching(t *testing.T) {
@@ -2698,12 +2700,14 @@ type countingResolver struct {
 	callCount *atomic.Int64
 }
 
-func (r *countingResolver) ResolveRef(_ context.Context, uri string) (*jsonschema.Schema, bool, error) {
+func (r *countingResolver) ResolveRef(_ context.Context, uri string) (*jsonschema.Schema, error) {
 	r.callCount.Add(1)
 
-	s, ok := r.schemas[uri]
+	if s, ok := r.schemas[uri]; ok {
+		return s, nil
+	}
 
-	return s, ok, nil
+	return nil, jsonschema.ErrNotResolved
 }
 
 func TestFormatAnnotationVocabSuppressesErrors(t *testing.T) {
@@ -3428,15 +3432,15 @@ type errorResolver struct {
 	err error
 }
 
-func (r *errorResolver) ResolveRef(_ context.Context, _ string) (*jsonschema.Schema, bool, error) {
-	return nil, false, r.err
+func (r *errorResolver) ResolveRef(_ context.Context, _ string) (*jsonschema.Schema, error) {
+	return nil, r.err
 }
 
-// nilResolver always misses, reporting ok false.
+// nilResolver always misses, answering ErrNotResolved.
 type nilResolver struct{}
 
-func (r *nilResolver) ResolveRef(_ context.Context, _ string) (*jsonschema.Schema, bool, error) {
-	return nil, false, nil
+func (r *nilResolver) ResolveRef(_ context.Context, _ string) (*jsonschema.Schema, error) {
+	return nil, jsonschema.ErrNotResolved
 }
 
 func TestValidateMutatesInputSchema(t *testing.T) {
@@ -3531,7 +3535,7 @@ type cloningResolver struct {
 	schema *jsonschema.Schema
 }
 
-func (r *cloningResolver) ResolveRef(_ context.Context, _ string) (*jsonschema.Schema, bool, error) {
+func (r *cloningResolver) ResolveRef(_ context.Context, _ string) (*jsonschema.Schema, error) {
 	// Return a different pointer to the same logical schema. A round-trip of a
 	// known-good schema cannot fail, so the errors are deliberately ignored.
 	data, _ := json.Marshal(r.schema) //nolint:errcheck,errchkjson // Round-tripping a known-good schema.
@@ -3540,7 +3544,7 @@ func (r *cloningResolver) ResolveRef(_ context.Context, _ string) (*jsonschema.S
 
 	_ = json.Unmarshal(data, &cp) //nolint:errcheck // Round-tripping a known-good schema.
 
-	return &cp, true, nil
+	return &cp, nil
 }
 
 func TestIsEmptySchemaExtraField(t *testing.T) {
@@ -3591,10 +3595,10 @@ type countingRefResolver struct {
 	schema *jsonschema.Schema
 }
 
-func (r *countingRefResolver) ResolveRef(_ context.Context, _ string) (*jsonschema.Schema, bool, error) {
+func (r *countingRefResolver) ResolveRef(_ context.Context, _ string) (*jsonschema.Schema, error) {
 	r.count.Add(1)
 
-	return r.schema, true, nil
+	return r.schema, nil
 }
 
 func TestWalkSchemaSkipsRefs(t *testing.T) {
@@ -3990,8 +3994,8 @@ type mutatingResolver struct {
 	schema *jsonschema.Schema
 }
 
-func (r *mutatingResolver) ResolveRef(_ context.Context, _ string) (*jsonschema.Schema, bool, error) {
-	return r.schema, true, nil
+func (r *mutatingResolver) ResolveRef(_ context.Context, _ string) (*jsonschema.Schema, error) {
+	return r.schema, nil
 }
 
 // The conformance suite drives ValidateJSON (the json.Number path); the tests
@@ -5481,8 +5485,8 @@ func collectLeaves(ve *jsonschema.ValidationError) []*jsonschema.ValidationError
 // fixedResolver is a concurrency-safe RefResolver returning one fixed schema.
 type fixedResolver struct{ schema *jsonschema.Schema }
 
-func (r fixedResolver) ResolveRef(context.Context, string) (*jsonschema.Schema, bool, error) {
-	return r.schema, true, nil
+func (r fixedResolver) ResolveRef(context.Context, string) (*jsonschema.Schema, error) {
+	return r.schema, nil
 }
 
 func TestConcurrentValidationSharedSchema(t *testing.T) {

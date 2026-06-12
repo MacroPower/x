@@ -33,6 +33,23 @@ var (
 	// it required (which the spec does not permit).
 	ErrUnknownVocabulary = errors.New("unknown required vocabulary")
 
+	// ErrNotResolved is returned by a [RefResolver] to report a URI it does
+	// not serve: the not-resolved answer that passes the URI along, to the
+	// next [ChainResolvers] link and ultimately to the unresolvable-ref
+	// handling of the entry point in effect. It follows [io/fs.ErrNotExist]:
+	// answer with the sentinel (or an error wrapping it) to decline, and
+	// match it with [errors.Is]. Any other error reports a resolution attempt
+	// that failed and stops resolution.
+	ErrNotResolved = errors.New("schema URI not resolved")
+
+	// ErrTypeNotHandled is returned by a [TypeSchemaProvider] to report a Go
+	// type it does not handle, passing resolution to the next provider and
+	// then to the rest of the type resolution chain. It is the
+	// [ErrNotResolved] of the generation side: answer with the sentinel (or
+	// an error wrapping it) to decline, and match it with [errors.Is]. Any
+	// other error aborts generation.
+	ErrTypeNotHandled = errors.New("type not handled")
+
 	// ErrRefResolve is returned when a [RefResolver] returns an error while
 	// resolving a remote $ref URI. [Inline] also wraps it for a non-local ref
 	// with no resolver configured and for any ref whose target cannot be

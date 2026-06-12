@@ -3,6 +3,7 @@ package jsonschema
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"net/url"
@@ -660,19 +661,21 @@ func (in *inliner) runContext() context.Context {
 
 // callResolver invokes the configured resolver for uri under the
 // [Inline] call's context. It mirrors [validator.callResolver], including
-// normalizing a nil schema with ok true to the not-resolved answer.
-func (in *inliner) callResolver(uri string) (*Schema, bool, error) {
-	s, ok, err := in.resolver.ResolveRef(in.runContext(), uri)
+// normalizing a nil schema with a nil error to the not-resolved answer
+// (ErrNotResolved), upholding the [RefResolver] contract that no caller
+// dereferences a nil document.
+func (in *inliner) callResolver(uri string) (*Schema, error) {
+	s, err := in.resolver.ResolveRef(in.runContext(), uri)
 	if err != nil {
 		//nolint:wrapcheck // fetchDoc wraps the error with ErrRefResolve.
-		return nil, false, err
+		return nil, err
 	}
 
 	if s == nil {
-		return nil, false, nil
+		return nil, fmt.Errorf("%w: %q", ErrNotResolved, uri)
 	}
 
-	return s, ok, nil
+	return s, nil
 }
 
 // fetchDoc fetches the document at baseURI through the configured resolver,
@@ -685,13 +688,13 @@ func (in *inliner) fetchDoc(baseURI string) (*Schema, error) {
 		return nil, fmt.Errorf("%w: no resolver configured for %q", ErrRefResolve, baseURI)
 	}
 
-	s, ok, err := in.callResolver(baseURI)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrRefResolve, err)
+	s, err := in.callResolver(baseURI)
+	if errors.Is(err, ErrNotResolved) {
+		return nil, fmt.Errorf("%w: cannot resolve %q", ErrRefResolve, baseURI)
 	}
 
-	if !ok {
-		return nil, fmt.Errorf("%w: cannot resolve %q", ErrRefResolve, baseURI)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrRefResolve, err)
 	}
 
 	cp, err := cloneSchema(s)
@@ -743,21 +746,21 @@ func NewFileResolver(fsys fs.FS) *FileResolver {
 // unreadable or undecodable file is an error rather than the not-resolved
 // answer. Reads are local and not cancellable, so the context is unused.
 // See [FileResolver] for the path semantics.
-func (r *FileResolver) ResolveRef(_ context.Context, uri string) (*Schema, bool, error) {
+func (r *FileResolver) ResolveRef(_ context.Context, uri string) (*Schema, error) {
 	name := strings.TrimPrefix(uri, "file://")
 	name = strings.TrimPrefix(name, "/")
 
 	data, err := fs.ReadFile(r.fsys, name)
 	if err != nil {
-		return nil, false, fmt.Errorf("read schema document: %w", err)
+		return nil, fmt.Errorf("read schema document: %w", err)
 	}
 
 	var s Schema
 
 	err = json.Unmarshal(data, &s)
 	if err != nil {
-		return nil, false, fmt.Errorf("decode schema document %q: %w", name, err)
+		return nil, fmt.Errorf("decode schema document %q: %w", name, err)
 	}
 
-	return &s, true, nil
+	return &s, nil
 }

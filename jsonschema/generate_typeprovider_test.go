@@ -14,25 +14,25 @@ import (
 	"go.jacobcolvin.com/x/jsonschema"
 )
 
-// stringerKind is a named type implementing fmt.Stringer for resolver
+// stringerKind is a named type implementing fmt.Stringer for provider
 // predicate tests.
 type stringerKind int
 
 func (stringerKind) String() string { return "kind" }
 
 // plainKind is a named type that implements nothing, so it falls through
-// every resolver predicate to kind-based reflection.
+// every provider predicate to kind-based reflection.
 type plainKind int
 
 // stringerProvider resolves every fmt.Stringer to a plain string schema.
 func stringerProvider() jsonschema.TypeSchemaProvider {
 	return jsonschema.TypeSchemaProviderFunc(
-		func(_ context.Context, tc jsonschema.TypeContext) (*jsonschema.Schema, bool, error) {
+		func(_ context.Context, tc jsonschema.TypeContext) (*jsonschema.Schema, error) {
 			if !tc.Type.Implements(reflect.TypeFor[fmt.Stringer]()) {
-				return nil, false, nil
+				return nil, jsonschema.ErrTypeNotHandled
 			}
 
-			return &jsonschema.Schema{Type: "string"}, true, nil
+			return &jsonschema.Schema{Type: "string"}, nil
 		},
 	)
 }
@@ -49,7 +49,7 @@ func TestWithTypeSchemaProvider(t *testing.T) {
 		opts []jsonschema.GenerateOption
 		want string
 	}{
-		"predicate resolver overrides matching types only": {
+		"predicate provider overrides matching types only": {
 			opts: []jsonschema.GenerateOption{jsonschema.WithTypeSchemaProvider(stringerProvider())},
 			want: `{
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -62,7 +62,7 @@ func TestWithTypeSchemaProvider(t *testing.T) {
 				"additionalProperties": false
 			}`,
 		},
-		"later WithTypeSchema wins over earlier resolver": {
+		"later WithTypeSchema wins over earlier provider": {
 			opts: []jsonschema.GenerateOption{
 				jsonschema.WithTypeSchemaProvider(stringerProvider()),
 				jsonschema.WithTypeSchemaFor[stringerKind](&jsonschema.Schema{Type: "string", Format: "uri"}),
@@ -78,7 +78,7 @@ func TestWithTypeSchemaProvider(t *testing.T) {
 				"additionalProperties": false
 			}`,
 		},
-		"later resolver wins over earlier WithTypeSchema": {
+		"later provider wins over earlier WithTypeSchema": {
 			opts: []jsonschema.GenerateOption{
 				jsonschema.WithTypeSchemaFor[stringerKind](&jsonschema.Schema{Type: "string", Format: "uri"}),
 				jsonschema.WithTypeSchemaProvider(stringerProvider()),
@@ -94,11 +94,15 @@ func TestWithTypeSchemaProvider(t *testing.T) {
 				"additionalProperties": false
 			}`,
 		},
-		"nil schema with ok true is unrestricted": {
+		"nil schema with nil error is unrestricted": {
 			opts: []jsonschema.GenerateOption{
 				jsonschema.WithTypeSchemaProvider(jsonschema.TypeSchemaProviderFunc(
-					func(_ context.Context, tc jsonschema.TypeContext) (*jsonschema.Schema, bool, error) {
-						return nil, tc.Type == reflect.TypeFor[stringerKind](), nil
+					func(_ context.Context, tc jsonschema.TypeContext) (*jsonschema.Schema, error) {
+						if tc.Type != reflect.TypeFor[stringerKind]() {
+							return nil, jsonschema.ErrTypeNotHandled
+						}
+
+						return nil, nil //nolint:nilnil // The unrestricted answer.
 					},
 				)),
 			},
@@ -113,7 +117,7 @@ func TestWithTypeSchemaProvider(t *testing.T) {
 				"additionalProperties": false
 			}`,
 		},
-		"nil resolver is ignored": {
+		"nil provider is ignored": {
 			opts: []jsonschema.GenerateOption{jsonschema.WithTypeSchemaProvider(nil)},
 			want: `{
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -161,7 +165,7 @@ func TestWithTypeSchema_LastRegistrationWins(t *testing.T) {
 
 // TestWithTypeSchema_NilUnregisters proves a nil schema restores the type's
 // default resolution: earlier exact registrations for the type are removed,
-// while predicate resolvers still apply.
+// while predicate providers still apply.
 func TestWithTypeSchema_NilUnregisters(t *testing.T) {
 	t.Parallel()
 
@@ -182,7 +186,7 @@ func TestWithTypeSchema_NilUnregisters(t *testing.T) {
 		}`, string(got))
 	})
 
-	t.Run("leaves predicate resolvers in place", func(t *testing.T) {
+	t.Run("leaves predicate providers in place", func(t *testing.T) {
 		t.Parallel()
 
 		s, err := jsonschema.GenerateFor[stringerKind](t.Context(),
@@ -201,7 +205,7 @@ func TestWithTypeSchema_NilUnregisters(t *testing.T) {
 }
 
 // TestWithTypeSchemaProvider_ReceivesDraft proves the TypeContext carries the
-// generation run's target draft, so a resolver can emit draft-appropriate
+// generation run's target draft, so a provider can emit draft-appropriate
 // keywords.
 func TestWithTypeSchemaProvider_ReceivesDraft(t *testing.T) {
 	t.Parallel()
@@ -218,9 +222,9 @@ func TestWithTypeSchemaProvider_ReceivesDraft(t *testing.T) {
 			_, err := jsonschema.GenerateFor[plainKind](t.Context(),
 				jsonschema.WithDraft(draft),
 				jsonschema.WithTypeSchemaProvider(jsonschema.TypeSchemaProviderFunc(
-					func(_ context.Context, tc jsonschema.TypeContext) (*jsonschema.Schema, bool, error) {
+					func(_ context.Context, tc jsonschema.TypeContext) (*jsonschema.Schema, error) {
 						got = append(got, tc.Draft)
-						return nil, false, nil
+						return nil, jsonschema.ErrTypeNotHandled
 					},
 				)),
 			)
@@ -236,7 +240,7 @@ func TestWithTypeSchemaProvider_ReceivesDraft(t *testing.T) {
 }
 
 // TestWithTypeSchemaProvider_EmbeddedComposition mirrors the WithTypeSchema embed
-// behavior: an embedded struct intercepted by a resolver composes via allOf
+// behavior: an embedded struct intercepted by a provider composes via allOf
 // rather than having its fields promoted.
 func TestWithTypeSchemaProvider_EmbeddedComposition(t *testing.T) {
 	t.Parallel()
@@ -253,12 +257,12 @@ func TestWithTypeSchemaProvider_EmbeddedComposition(t *testing.T) {
 
 	s, err := jsonschema.GenerateFor[doc](t.Context(),
 		jsonschema.WithTypeSchemaProvider(jsonschema.TypeSchemaProviderFunc(
-			func(_ context.Context, tc jsonschema.TypeContext) (*jsonschema.Schema, bool, error) {
+			func(_ context.Context, tc jsonschema.TypeContext) (*jsonschema.Schema, error) {
 				if tc.Type != reflect.TypeFor[base]() {
-					return nil, false, nil
+					return nil, jsonschema.ErrTypeNotHandled
 				}
 
-				return &jsonschema.Schema{Type: "object"}, true, nil
+				return &jsonschema.Schema{Type: "object"}, nil
 			},
 		)),
 	)
@@ -279,8 +283,8 @@ func TestWithTypeSchemaProvider_EmbeddedComposition(t *testing.T) {
 	}`, string(got))
 }
 
-// TestWithTypeSchemaProvider_Error proves a resolver error aborts generation
-// and reaches the caller wrapped, whether the resolver is consulted for the
+// TestWithTypeSchemaProvider_Error proves a provider error aborts generation
+// and reaches the caller wrapped, whether the provider is consulted for the
 // root type or for a type reached through a field or an embed.
 func TestWithTypeSchemaProvider_Error(t *testing.T) {
 	t.Parallel()
@@ -289,12 +293,12 @@ func TestWithTypeSchemaProvider_Error(t *testing.T) {
 
 	failFor := func(target reflect.Type) jsonschema.GenerateOption {
 		return jsonschema.WithTypeSchemaProvider(jsonschema.TypeSchemaProviderFunc(
-			func(_ context.Context, tc jsonschema.TypeContext) (*jsonschema.Schema, bool, error) {
+			func(_ context.Context, tc jsonschema.TypeContext) (*jsonschema.Schema, error) {
 				if tc.Type == target {
-					return nil, false, errLoad
+					return nil, errLoad
 				}
 
-				return nil, false, nil
+				return nil, jsonschema.ErrTypeNotHandled
 			},
 		))
 	}
@@ -350,20 +354,24 @@ func TestWithTypeSchemaProvider_Error(t *testing.T) {
 	}
 }
 
-// TestWithTypeSchemaProvider_SchemaUnaliased proves a resolver-supplied schema is
+// TestWithTypeSchemaProvider_SchemaUnaliased proves a provider-supplied schema is
 // copied before use: mutating the generated output cannot reach back into the
 // schema value the resolver returns across calls.
 func TestWithTypeSchemaProvider_SchemaUnaliased(t *testing.T) {
 	t.Parallel()
 
 	shared := &jsonschema.Schema{Type: "string", Enum: []any{"a"}}
-	resolver := jsonschema.TypeSchemaProviderFunc(
-		func(_ context.Context, tc jsonschema.TypeContext) (*jsonschema.Schema, bool, error) {
-			return shared, tc.Type == reflect.TypeFor[plainKind](), nil
+	provider := jsonschema.TypeSchemaProviderFunc(
+		func(_ context.Context, tc jsonschema.TypeContext) (*jsonschema.Schema, error) {
+			if tc.Type != reflect.TypeFor[plainKind]() {
+				return nil, jsonschema.ErrTypeNotHandled
+			}
+
+			return shared, nil
 		},
 	)
 
-	s, err := jsonschema.GenerateFor[plainKind](t.Context(), jsonschema.WithTypeSchemaProvider(resolver))
+	s, err := jsonschema.GenerateFor[plainKind](t.Context(), jsonschema.WithTypeSchemaProvider(provider))
 	require.NoError(t, err)
 
 	s.Enum = append(s.Enum, "b")
