@@ -1087,6 +1087,41 @@ func TestFileResolverWithValidation(t *testing.T) {
 	})
 }
 
+// TestFileResolverWithStripPrefix covers serving refs that absolutize
+// against a published remote base from disk: the configured prefix is
+// stripped before path normalization, so an https URI becomes an fs path,
+// while URIs without the prefix keep the default handling.
+func TestFileResolverWithStripPrefix(t *testing.T) {
+	t.Parallel()
+
+	resolver := jsonschema.NewFileResolver(mapFS(map[string]string{
+		"child.json": `{"type": "integer"}`,
+	}), jsonschema.WithStripPrefix("https://example.com/schemas/"))
+
+	t.Run("prefixed URI serves from the fs", func(t *testing.T) {
+		t.Parallel()
+
+		s, err := resolver.ResolveRef(t.Context(), "https://example.com/schemas/child.json")
+		require.NoError(t, err)
+		assert.Equal(t, "integer", s.Type)
+	})
+
+	t.Run("unprefixed URI keeps the default handling", func(t *testing.T) {
+		t.Parallel()
+
+		s, err := resolver.ResolveRef(t.Context(), "file:///child.json")
+		require.NoError(t, err)
+		assert.Equal(t, "integer", s.Type)
+	})
+
+	t.Run("other remote bases still miss", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := resolver.ResolveRef(t.Context(), "https://other.example/child.json")
+		require.Error(t, err)
+	})
+}
+
 // TestValidateWithBaseURI pins WithBaseURI as a shared option during
 // validation: the root document's relative refs absolutize against the base,
 // a relative ref inside a fetched document resolves against that document's

@@ -366,7 +366,9 @@
 // with [NewGoCommentProvider]) extracts Go doc comments from source files
 // for struct types, struct fields, and named types using [go/ast] and
 // [golang.org/x/tools/go/packages]; when source files cannot be located for
-// a type, extraction is silently skipped. Any other implementation
+// a type, extraction is silently skipped. Package loading runs in the
+// process working directory unless [WithLoadDir] points it at another
+// module's directory. Any other implementation
 // substitutes another source — comments pre-extracted at build time for a
 // binary that deploys without source files, or fixed descriptions in tests
 // — and decides its own failure behavior. Wrapping the built-in provider
@@ -675,7 +677,9 @@
 // an error wrapping [ErrRefResolve]. Pair [os.DirFS] with
 // [WithBaseURI] to inline a directory of schemas; the same resolver
 // also serves file-path and relative refs during validation via
-// [WithRefResolver]. Inline's context is passed to the resolver with every
+// [WithRefResolver]. [WithStripPrefix] strips a published remote base from
+// each URI first, so refs absolutizing against an https $id can be served
+// from the fs. Inline's context is passed to the resolver with every
 // document fetch, so a resolver that fetches over the network can honor
 // cancellation and deadlines.
 //

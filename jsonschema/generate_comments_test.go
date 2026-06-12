@@ -50,6 +50,36 @@ func TestGenericTypeDescription(t *testing.T) {
 	assert.Contains(t, s.Properties["item"].Description, "documents the boxed value")
 }
 
+// TestGoCommentProviderWithLoadDir covers the load-directory option: package
+// loading runs in the configured directory, so a directory outside any
+// module locates no sources and the provider silently supplies no comments,
+// while the package's own directory behaves like the default.
+func TestGoCommentProviderWithLoadDir(t *testing.T) {
+	t.Parallel()
+
+	t.Run("module directory extracts comments", func(t *testing.T) {
+		t.Parallel()
+
+		s, err := jsonschema.GenerateFor[alpha.Widget](t.Context(),
+			jsonschema.WithDescriptionProvider(jsonschema.NewGoCommentProvider(jsonschema.WithLoadDir("."))),
+		)
+		require.NoError(t, err)
+		require.Contains(t, s.Properties, "size")
+		assert.Contains(t, s.Properties["size"].Description, "documents the widget size")
+	})
+
+	t.Run("directory outside a module supplies no comments", func(t *testing.T) {
+		t.Parallel()
+
+		s, err := jsonschema.GenerateFor[alpha.Widget](t.Context(),
+			jsonschema.WithDescriptionProvider(jsonschema.NewGoCommentProvider(jsonschema.WithLoadDir(t.TempDir()))),
+		)
+		require.NoError(t, err)
+		require.Contains(t, s.Properties, "size")
+		assert.Empty(t, s.Properties["size"].Description)
+	})
+}
+
 // mapDescriptionProvider is a deterministic DescriptionProvider backed by maps, the
 // kind of pre-extracted comment store WithDescriptionProvider exists for.
 type mapDescriptionProvider struct {

@@ -685,20 +685,47 @@ func (in *inliner) fetchDoc(baseURI string) (*Schema, error) {
 // the fs. Refs that absolutize to another scheme (an http $id, for example)
 // are not valid fs paths and resolve to an error.
 type FileResolver struct {
-	fsys fs.FS
+	fsys        fs.FS
+	stripPrefix string
+}
+
+// FileResolverOption configures a [FileResolver] at construction.
+type FileResolverOption func(*FileResolver)
+
+// WithStripPrefix returns a [FileResolverOption] that strips prefix from
+// each URI before the file-path normalization, so a directory of schema
+// files can serve refs that absolutize against a published remote base
+// (an https $id, for example), which would otherwise not be valid fs paths:
+//
+//	jsonschema.NewFileResolver(os.DirFS("schemas"),
+//		jsonschema.WithStripPrefix("https://example.com/schemas/"))
+//
+// A URI that does not carry the prefix is handled unchanged.
+func WithStripPrefix(prefix string) FileResolverOption {
+	return func(r *FileResolver) { r.stripPrefix = prefix }
 }
 
 // NewFileResolver returns a [FileResolver] serving schema documents from
 // fsys.
-func NewFileResolver(fsys fs.FS) *FileResolver {
-	return &FileResolver{fsys: fsys}
+func NewFileResolver(fsys fs.FS, opts ...FileResolverOption) *FileResolver {
+	r := &FileResolver{fsys: fsys}
+	for _, opt := range opts {
+		opt(r)
+	}
+
+	return r
 }
 
 // ResolveRef reads and unmarshals the schema document stored at the file
 // path named by uri. Reads are local and not cancellable, so the context is
 // unused. See [FileResolver] for the path semantics.
 func (r *FileResolver) ResolveRef(_ context.Context, uri string) (*Schema, error) {
-	name := strings.TrimPrefix(uri, "file://")
+	name := uri
+	if r.stripPrefix != "" {
+		name = strings.TrimPrefix(name, r.stripPrefix)
+	}
+
+	name = strings.TrimPrefix(name, "file://")
 	name = strings.TrimPrefix(name, "/")
 
 	data, err := fs.ReadFile(r.fsys, name)

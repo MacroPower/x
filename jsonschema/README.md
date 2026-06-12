@@ -413,8 +413,10 @@ Type and field descriptions come from a `DescriptionProvider`, registered with
 `NewGoCommentProvider`) extracts Go doc comments from source files for
 struct types, fields, and named types using `go/ast` and
 `golang.org/x/tools/go/packages`; when source files cannot be located for a
-type, extraction is silently skipped. The `jsonschema` tag's `description`
-wins over a provider-supplied comment.
+type, extraction is silently skipped. Package loading runs in the process
+working directory unless `WithLoadDir` points it at another module's
+directory. The `jsonschema` tag's `description` wins over a
+provider-supplied comment.
 
 ```go
 schema, err := jsonschema.GenerateFor[MyType](ctx,
@@ -875,9 +877,10 @@ resolution to the fs root, so a ref escaping above it returns an error
 wrapping `ErrRefResolve`. The same `WithRefResolver` option also serves
 file-path and relative refs during validation; refs that absolutize
 to another scheme (an http `$id`, for example) are not valid fs paths and
-resolve to an error. `Inline`'s context is passed to the resolver with every
-document fetch, so a resolver that fetches over the network can honor
-cancellation and deadlines.
+resolve to an error, unless `WithStripPrefix` strips the published remote
+base from each URI first so those refs can be served from the fs.
+`Inline`'s context is passed to the resolver with every document fetch, so a
+resolver that fetches over the network can honor cancellation and deadlines.
 
 `WithRetrievalBase` makes refs resolve against each document's
 retrieval URI instead, treating `$id` as an inert annotation: `$id` neither

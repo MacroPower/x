@@ -25,16 +25,35 @@ import (
 // provider shared across Generate calls loads each package once. The cache
 // mutex makes the provider safe for concurrent use.
 type GoCommentProvider struct {
-	cache map[string][]*ast.File
-	mu    sync.Mutex
+	cache   map[string][]*ast.File
+	loadDir string
+	mu      sync.Mutex
+}
+
+// GoCommentProviderOption configures a [GoCommentProvider] at construction.
+type GoCommentProviderOption func(*GoCommentProvider)
+
+// WithLoadDir returns a [GoCommentProviderOption] setting the directory
+// package loading runs in, the way the go tool's -C flag does. Package paths
+// resolve against that directory's module; the default is the process
+// working directory, which finds nothing when the types' module lives
+// elsewhere (a generator invoked from another module, a test binary run from
+// a temporary directory).
+func WithLoadDir(dir string) GoCommentProviderOption {
+	return func(p *GoCommentProvider) { p.loadDir = dir }
 }
 
 // NewGoCommentProvider returns a [GoCommentProvider] with an empty package
 // cache.
-func NewGoCommentProvider() *GoCommentProvider {
-	return &GoCommentProvider{
+func NewGoCommentProvider(opts ...GoCommentProviderOption) *GoCommentProvider {
+	p := &GoCommentProvider{
 		cache: map[string][]*ast.File{},
 	}
+	for _, opt := range opts {
+		opt(p)
+	}
+
+	return p
 }
 
 // baseTypeName strips the type-argument list from a reflect type name so an
@@ -169,6 +188,7 @@ func (ce *GoCommentProvider) sourceFiles(ctx context.Context, pkgPath string) []
 func (ce *GoCommentProvider) loadPackage(ctx context.Context, pkgPath string) []*ast.File {
 	cfg := &packages.Config{
 		Context: ctx,
+		Dir:     ce.loadDir,
 		Mode:    packages.NeedName | packages.NeedFiles | packages.NeedSyntax,
 		ParseFile: func(fset *token.FileSet, filename string, src []byte) (*ast.File, error) {
 			return parser.ParseFile(fset, filename, src, parser.ParseComments)
