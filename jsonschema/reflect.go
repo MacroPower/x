@@ -73,7 +73,7 @@ type refRecord struct {
 func newGenerator(opts []GenerateOption) *generator {
 	g := &generator{
 		draft:       Draft2020,
-		namer:       NamerFunc(defaultNamer),
+		namer:       defaultNamerFunc(),
 		definitions: true,
 		nullable:    true,
 	}
@@ -1931,7 +1931,7 @@ func (g *generator) applyTypeDescription(t reflect.Type, s *Schema) {
 		return
 	}
 
-	if comment := g.descriptionProvider.TypeDescription(g.ctx, t); comment != "" {
+	if comment := g.descriptionProvider.TypeDescription(g.ctx, TypeContext{Type: t, Draft: g.draft}); comment != "" {
 		s.Description = comment
 	}
 }
@@ -1944,7 +1944,8 @@ func (g *generator) applyFieldDescription(structType reflect.Type, f reflect.Str
 		return
 	}
 
-	if comment := g.descriptionProvider.FieldDescription(g.ctx, declaringType(structType, f), f.Name); comment != "" {
+	tc := TypeContext{Type: declaringType(structType, f), Draft: g.draft}
+	if comment := g.descriptionProvider.FieldDescription(g.ctx, tc, f.Name); comment != "" {
 		s.Description = comment
 	}
 }

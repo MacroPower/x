@@ -164,8 +164,8 @@ func TestWithRootTitle(t *testing.T) {
 
 		s, err := jsonschema.GenerateFor[rootTitleStruct](t.Context(),
 			jsonschema.WithRootTitle(true),
-			jsonschema.WithNamer(jsonschema.NamerFunc(func(t reflect.Type) string {
-				return "My" + t.Name()
+			jsonschema.WithNamer(jsonschema.NamerFunc(func(tc jsonschema.TypeContext) string {
+				return "My" + tc.Type.Name()
 			})),
 		)
 		require.NoError(t, err)

@@ -5,7 +5,6 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"reflect"
 	"strings"
 	"sync"
 
@@ -85,7 +84,8 @@ func baseTypeName(name string) string {
 // not expose source positions. A non-package-scope type (for example one
 // declared inside a function) that shadows a package-level name may therefore
 // receive the package-level type's comment.
-func (ce *GoCommentProvider) TypeDescription(ctx context.Context, t reflect.Type) string {
+func (ce *GoCommentProvider) TypeDescription(ctx context.Context, tc TypeContext) string {
+	t := tc.Type
 	if t.Name() == "" || t.PkgPath() == "" {
 		return ""
 	}
@@ -127,7 +127,8 @@ func (ce *GoCommentProvider) TypeDescription(ctx context.Context, t reflect.Type
 // As with TypeDescription, matching is by package path and unqualified type name,
 // so a non-package-scope struct that shadows a package-level name may receive
 // the package-level struct's field comments.
-func (ce *GoCommentProvider) FieldDescription(ctx context.Context, structType reflect.Type, fieldName string) string {
+func (ce *GoCommentProvider) FieldDescription(ctx context.Context, tc TypeContext, fieldName string) string {
+	structType := tc.Type
 	if structType.Name() == "" || structType.PkgPath() == "" {
 		return ""
 	}

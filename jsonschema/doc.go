@@ -223,13 +223,16 @@
 // runs at the same point in the pipeline, after the type's own
 // JSONSchemaExtend, under the same not-called-when-replaced rule.
 //
-// All four hooks — [JSONSchemaProvider] and [JSONSchemaExtender] alongside
-// their registered counterparts [TypeSchemaResolver] and [TypeSchemaExtender]
-// — receive the context of the Generate call in effect and a [TypeContext]
-// carrying the Go type and the target [Draft] of the generation run — the
-// type-level counterpart of the [FieldContext] tag interpreters receive — so
-// an implementation can do cancellable work (loading a schema document, for
-// example) and emit draft-appropriate keywords.
+// Every type-level hook — [JSONSchemaProvider] and [JSONSchemaExtender]
+// alongside their registered counterparts [TypeSchemaResolver] and
+// [TypeSchemaExtender], plus [Namer] and [DescriptionProvider] — receives a
+// [TypeContext] carrying the Go type and the target [Draft] of the
+// generation run — the type-level counterpart of the [FieldContext] tag
+// interpreters receive — so an implementation can emit draft-appropriate
+// keywords. All but [Namer], whose work is pure, also receive the context of
+// the Generate call in effect, so an implementation doing cancellable work
+// (loading a schema document, for example) can honor cancellation and
+// deadlines.
 //
 // Every single-method extension-point interface has a conversion func type
 // adapter following [net/http.HandlerFunc] ([TagInterpreterFunc],

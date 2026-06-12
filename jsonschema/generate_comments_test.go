@@ -87,12 +87,16 @@ type mapDescriptionProvider struct {
 	fields map[reflect.Type]map[string]string
 }
 
-func (p mapDescriptionProvider) TypeDescription(_ context.Context, t reflect.Type) string {
-	return p.types[t]
+func (p mapDescriptionProvider) TypeDescription(_ context.Context, tc jsonschema.TypeContext) string {
+	return p.types[tc.Type]
 }
 
-func (p mapDescriptionProvider) FieldDescription(_ context.Context, t reflect.Type, fieldName string) string {
-	return p.fields[t][fieldName]
+func (p mapDescriptionProvider) FieldDescription(
+	_ context.Context,
+	tc jsonschema.TypeContext,
+	fieldName string,
+) string {
+	return p.fields[tc.Type][fieldName]
 }
 
 // commentedWidget is a named type for TestWithDescriptionProvider; the provider

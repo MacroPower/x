@@ -150,10 +150,10 @@ func TestDescriptionProviderFuncs(t *testing.T) {
 		t.Parallel()
 
 		provider := jsonschema.DescriptionProviderFuncs{
-			TypeFunc: func(_ context.Context, t reflect.Type) string {
-				return "type " + t.Name()
+			TypeFunc: func(_ context.Context, tc jsonschema.TypeContext) string {
+				return "type " + tc.Type.Name()
 			},
-			FieldFunc: func(_ context.Context, _ reflect.Type, fieldName string) string {
+			FieldFunc: func(_ context.Context, _ jsonschema.TypeContext, fieldName string) string {
 				return "field " + fieldName
 			},
 		}

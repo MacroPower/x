@@ -132,19 +132,21 @@ func (f TypeSchemaExtenderFunc) ExtendSchemaForType(ctx context.Context, tc Type
 // provider must be safe for concurrent use when shared across concurrent
 // Generate calls.
 type DescriptionProvider interface {
-	// TypeDescription returns the description for a named type, or "" for none.
+	// TypeDescription returns the description for the named type in tc, or
+	// "" for none. The [TypeContext] is the same value the package's other
+	// type-level hooks receive, carrying the Go type and the target [Draft].
 	// The context comes from the Generate call in effect, so a provider
 	// doing I/O (the built-in one loads package sources) can honor
 	// cancellation and deadlines; a provider that performs no cancellable
 	// work can ignore it.
-	TypeDescription(ctx context.Context, t reflect.Type) string
+	TypeDescription(ctx context.Context, tc TypeContext) string
 
-	// FieldDescription returns the description for the named Go field of struct
-	// type t, or "" for none. T is the type that declares the field: for a
-	// field promoted from an embedded struct it is the embedded type, where
-	// the field's doc comment lives, not the outer struct. The context
-	// follows the TypeDescription contract.
-	FieldDescription(ctx context.Context, t reflect.Type, fieldName string) string
+	// FieldDescription returns the description for the named Go field of the
+	// struct type in tc, or "" for none. The TypeContext carries the type
+	// that declares the field: for a field promoted from an embedded struct
+	// it is the embedded type, where the field's doc comment lives, not the
+	// outer struct. The context follows the TypeDescription contract.
+	FieldDescription(ctx context.Context, tc TypeContext, fieldName string) string
 }
 
 // DescriptionProviderFuncs adapts a pair of bare functions to a
@@ -155,36 +157,36 @@ type DescriptionProvider interface {
 // it needs:
 //
 //	jsonschema.WithDescriptionProvider(jsonschema.DescriptionProviderFuncs{
-//		TypeFunc: func(_ context.Context, t reflect.Type) string {
-//			return docs[t.Name()]
+//		TypeFunc: func(_ context.Context, tc jsonschema.TypeContext) string {
+//			return docs[tc.Type.Name()]
 //		},
 //	})
 type DescriptionProviderFuncs struct {
 	// TypeFunc backs TypeDescription. A nil TypeFunc leaves every type
 	// description unset.
-	TypeFunc func(ctx context.Context, t reflect.Type) string
+	TypeFunc func(ctx context.Context, tc TypeContext) string
 
 	// FieldFunc backs FieldDescription. A nil FieldFunc leaves every field
 	// description unset.
-	FieldFunc func(ctx context.Context, t reflect.Type, fieldName string) string
+	FieldFunc func(ctx context.Context, tc TypeContext, fieldName string) string
 }
 
 // TypeDescription calls TypeFunc, or answers "" when TypeFunc is nil.
-func (p DescriptionProviderFuncs) TypeDescription(ctx context.Context, t reflect.Type) string {
+func (p DescriptionProviderFuncs) TypeDescription(ctx context.Context, tc TypeContext) string {
 	if p.TypeFunc == nil {
 		return ""
 	}
 
-	return p.TypeFunc(ctx, t)
+	return p.TypeFunc(ctx, tc)
 }
 
 // FieldDescription calls FieldFunc, or answers "" when FieldFunc is nil.
-func (p DescriptionProviderFuncs) FieldDescription(ctx context.Context, t reflect.Type, fieldName string) string {
+func (p DescriptionProviderFuncs) FieldDescription(ctx context.Context, tc TypeContext, fieldName string) string {
 	if p.FieldFunc == nil {
 		return ""
 	}
 
-	return p.FieldFunc(ctx, t, fieldName)
+	return p.FieldFunc(ctx, tc, fieldName)
 }
 
 // ChainDescriptionProviders returns a [DescriptionProvider] that consults
@@ -208,13 +210,13 @@ func ChainDescriptionProviders(providers ...DescriptionProvider) DescriptionProv
 type descriptionProviderChain []DescriptionProvider
 
 // TypeDescription returns the first non-empty type description in the chain.
-func (c descriptionProviderChain) TypeDescription(ctx context.Context, t reflect.Type) string {
+func (c descriptionProviderChain) TypeDescription(ctx context.Context, tc TypeContext) string {
 	for _, p := range c {
 		if p == nil {
 			continue
 		}
 
-		if d := p.TypeDescription(ctx, t); d != "" {
+		if d := p.TypeDescription(ctx, tc); d != "" {
 			return d
 		}
 	}
@@ -224,13 +226,13 @@ func (c descriptionProviderChain) TypeDescription(ctx context.Context, t reflect
 
 // FieldDescription returns the first non-empty field description in the
 // chain.
-func (c descriptionProviderChain) FieldDescription(ctx context.Context, t reflect.Type, fieldName string) string {
+func (c descriptionProviderChain) FieldDescription(ctx context.Context, tc TypeContext, fieldName string) string {
 	for _, p := range c {
 		if p == nil {
 			continue
 		}
 
-		if d := p.FieldDescription(ctx, t, fieldName); d != "" {
+		if d := p.FieldDescription(ctx, tc, fieldName); d != "" {
 			return d
 		}
 	}

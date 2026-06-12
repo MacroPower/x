@@ -943,8 +943,8 @@ func TestGenerateFor_WithNamer(t *testing.T) {
 	t.Parallel()
 
 	s, err := jsonschema.GenerateFor[UserWithAddress](t.Context(),
-		jsonschema.WithNamer(jsonschema.NamerFunc(func(t reflect.Type) string {
-			return "custom_" + t.Name()
+		jsonschema.WithNamer(jsonschema.NamerFunc(func(tc jsonschema.TypeContext) string {
+			return "custom_" + tc.Type.Name()
 		})),
 	)
 	require.NoError(t, err)
@@ -959,7 +959,7 @@ func TestGenerateFor_WithNamerEmptyDefersToDefault(t *testing.T) {
 	t.Parallel()
 
 	s, err := jsonschema.GenerateFor[UserWithAddress](t.Context(),
-		jsonschema.WithNamer(jsonschema.NamerFunc(func(reflect.Type) string {
+		jsonschema.WithNamer(jsonschema.NamerFunc(func(jsonschema.TypeContext) string {
 			return ""
 		})),
 	)
@@ -984,8 +984,8 @@ func TestGenerator(t *testing.T) {
 		t.Parallel()
 
 		gen := jsonschema.NewGenerator(
-			jsonschema.WithNamer(jsonschema.NamerFunc(func(t reflect.Type) string {
-				return "custom_" + t.Name()
+			jsonschema.WithNamer(jsonschema.NamerFunc(func(tc jsonschema.TypeContext) string {
+				return "custom_" + tc.Type.Name()
 			})),
 		)
 
@@ -2867,7 +2867,7 @@ func TestWithNamerNilRestoresDefault(t *testing.T) {
 
 	// A nil namer after a custom one restores the default short-name namer.
 	s, err := jsonschema.GenerateFor[Outer](t.Context(),
-		jsonschema.WithNamer(jsonschema.NamerFunc(func(reflect.Type) string { return "Custom" })),
+		jsonschema.WithNamer(jsonschema.NamerFunc(func(jsonschema.TypeContext) string { return "Custom" })),
 		jsonschema.WithNamer(nil),
 	)
 	require.NoError(t, err)

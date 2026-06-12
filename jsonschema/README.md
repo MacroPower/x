@@ -468,24 +468,26 @@ wins, such as overrides for specific types backed by AST extraction:
 ```go
 type DescriptionProvider interface {
 	// TypeDescription returns the description for a named type, or "" for none.
-	TypeDescription(ctx context.Context, t reflect.Type) string
+	TypeDescription(ctx context.Context, tc TypeContext) string
 
-	// FieldDescription returns the description for the named Go field of struct
-	// type t (the type declaring the field), or "" for none.
-	FieldDescription(ctx context.Context, t reflect.Type, fieldName string) string
+	// FieldDescription returns the description for the named Go field of the
+	// struct type in tc (the type declaring the field), or "" for none.
+	FieldDescription(ctx context.Context, tc TypeContext, fieldName string) string
 }
 
 jsonschema.WithDescriptionProvider(jsonschema.ChainDescriptionProviders(
 	overrides, jsonschema.NewGoCommentProvider()))
 ```
 
-`DescriptionProviderFuncs` adapts a pair of bare functions, so a one-off
-provider needs no named type; a nil field answers `""` for its half:
+Both methods receive the same `TypeContext` as the package's other
+type-level hooks. `DescriptionProviderFuncs` adapts a pair of bare
+functions, so a one-off provider needs no named type; a nil field answers
+`""` for its half:
 
 ```go
 jsonschema.WithDescriptionProvider(jsonschema.DescriptionProviderFuncs{
-	TypeFunc: func(_ context.Context, t reflect.Type) string {
-		return docs[t.Name()]
+	TypeFunc: func(_ context.Context, tc jsonschema.TypeContext) string {
+		return docs[tc.Type.Name()]
 	},
 })
 ```

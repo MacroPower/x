@@ -29,13 +29,20 @@ func defaultNamer(t reflect.Type) string {
 	return defNameReplacer.Replace(t.Name())
 }
 
+// defaultNamerFunc adapts [defaultNamer] to the [Namer] interface, for the
+// default namer configuration ([WithNamer] given nil, and the initial
+// generator state).
+func defaultNamerFunc() Namer {
+	return NamerFunc(func(tc TypeContext) string { return defaultNamer(tc.Type) })
+}
+
 // schemaName returns the configured namer's name for t, deferring to the
 // default namer when the namer answers "". The deferral lets a [Namer]
 // rename some types and pass the rest through, and keeps a partial namer
 // from producing an empty definitions key and the broken "#/$defs/" ref
 // that would follow.
 func (g *generator) schemaName(t reflect.Type) string {
-	if name := g.namer.SchemaName(t); name != "" {
+	if name := g.namer.SchemaName(TypeContext{Type: t, Draft: g.draft}); name != "" {
 		return name
 	}
 
