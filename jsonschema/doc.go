@@ -210,6 +210,9 @@
 // bypassing reflection. Types may implement [JSONSchemaExtender] to modify the
 // reflection-generated schema after it is built. If both are implemented, only
 // [JSONSchemaProvider] is used. Both value and pointer receivers are checked.
+// Both methods return an error, which aborts generation, for an
+// implementation that cannot produce or adjust its schema; a panic is still
+// recovered and wrapped with [ErrProviderPanic] as a backstop.
 //
 // When a registered resolver ([WithTypeSchemaResolver] or [WithTypeSchema]) or
 // [JSONSchemaProvider] provides the schema, [JSONSchemaExtender] is not

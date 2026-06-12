@@ -1732,8 +1732,10 @@ func isPromotedMethod(m reflect.Method) bool {
 }
 
 // callProvider calls JSONSchema() on a zero value of the type. For interface
-// types it returns nil, since a nil interface cannot be called. The user method
-// runs against a zero value whose pointer fields are nil, so a method that
+// types it returns nil, since a nil interface cannot be called. An error the
+// method itself returns is wrapped with the type and method so it locates
+// the failing provider, matching [callExtender]. The user method runs
+// against a zero value whose pointer fields are nil, so a method that
 // dereferences such a field panics; the panic is recovered and returned as an
 // error wrapping [ErrProviderPanic] so it surfaces from Generate rather than
 // crashing the caller.
@@ -1759,12 +1761,18 @@ func callProvider(t reflect.Type) (s *jsonschema.Schema, err error) {
 		v = reflect.New(t)
 	}
 
-	result := v.MethodByName("JSONSchema").Call(nil)
-	if result[0].IsNil() {
+	results := v.MethodByName("JSONSchema").Call(nil)
+
+	provErr, ok := results[1].Interface().(error)
+	if ok && provErr != nil {
+		return nil, fmt.Errorf("%s.JSONSchema: %w", t, provErr)
+	}
+
+	if results[0].IsNil() {
 		return nil, nil
 	}
 
-	sc, ok := result[0].Interface().(*jsonschema.Schema)
+	sc, ok := results[0].Interface().(*jsonschema.Schema)
 	if !ok {
 		return nil, nil
 	}

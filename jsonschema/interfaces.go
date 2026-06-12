@@ -9,9 +9,15 @@ import (
 // JSONSchemaProvider allows a type to provide its own schema, bypassing
 // automatic generation entirely. When a type implements JSONSchemaProvider,
 // the returned schema replaces reflection-based generation for that type.
-// If JSONSchema returns nil, the type is treated as unrestricted ({}).
+// If JSONSchema returns a nil schema and a nil error, the type is treated as
+// unrestricted ({}). A non-nil error aborts generation, matching
+// [JSONSchemaExtender], for a provider that cannot produce its schema — one
+// loading a schema document, for example. A panic in the method is still
+// recovered and wrapped with [ErrProviderPanic], as a backstop for genuine
+// bugs such as dereferencing a nil pointer field on the zero value the
+// method is invoked against.
 type JSONSchemaProvider interface {
-	JSONSchema() *Schema
+	JSONSchema() (*Schema, error)
 }
 
 // JSONSchemaExtender allows a type to modify its auto-generated schema.

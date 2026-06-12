@@ -500,11 +500,11 @@ func TestGenerateFor_TextMarshaler(t *testing.T) {
 // JSONSchemaProvider type.
 type Status string
 
-func (Status) JSONSchema() *jsonschema.Schema {
+func (Status) JSONSchema() (*jsonschema.Schema, error) {
 	return &jsonschema.Schema{
 		Type: "string",
 		Enum: []any{"active", "inactive", "suspended"},
-	}
+	}, nil
 }
 
 func TestGenerateFor_JSONSchemaProvider(t *testing.T) {
@@ -1523,11 +1523,11 @@ func TestGenerateFor_NonStructExtender_Root(t *testing.T) {
 // NonStructProvider is a named non-struct type implementing JSONSchemaProvider.
 type NonStructProvider int
 
-func (NonStructProvider) JSONSchema() *jsonschema.Schema {
+func (NonStructProvider) JSONSchema() (*jsonschema.Schema, error) {
 	return &jsonschema.Schema{
 		Type: "integer",
 		Enum: []any{1, 2, 3},
-	}
+	}, nil
 }
 
 func TestGenerateFor_NonStructProvider_ExtractedToDefs(t *testing.T) {
@@ -1764,11 +1764,11 @@ type BothProviderAndExtender struct {
 	Value string `json:"value"`
 }
 
-func (BothProviderAndExtender) JSONSchema() *jsonschema.Schema {
+func (BothProviderAndExtender) JSONSchema() (*jsonschema.Schema, error) {
 	return &jsonschema.Schema{
 		Type:        "string",
 		Description: "from provider",
-	}
+	}, nil
 }
 
 func (BothProviderAndExtender) JSONSchemaExtend(s *jsonschema.Schema) error {
@@ -1969,7 +1969,8 @@ type NilProvider struct {
 	Field string `json:"field"`
 }
 
-func (NilProvider) JSONSchema() *jsonschema.Schema { return nil }
+//nolint:nilnil // A nil schema with a nil error is the documented unrestricted-schema answer.
+func (NilProvider) JSONSchema() (*jsonschema.Schema, error) { return nil, nil }
 
 func TestGenerateFor_JSONSchemaProviderReturnsNil(t *testing.T) {
 	t.Parallel()
@@ -2272,11 +2273,11 @@ type WithTypeSchemaProvider struct {
 	Value string `json:"value"`
 }
 
-func (WithTypeSchemaProvider) JSONSchema() *jsonschema.Schema {
+func (WithTypeSchemaProvider) JSONSchema() (*jsonschema.Schema, error) {
 	return &jsonschema.Schema{
 		Type:        "string",
 		Description: "from provider",
-	}
+	}, nil
 }
 
 func TestGenerateFor_WithTypeSchemaOverridesProvider(t *testing.T) {
@@ -2669,8 +2670,8 @@ func TestDraft07AdditionalPropertiesRetainedWithPromotedEmbed(t *testing.T) {
 
 type providerMutationTestType struct{}
 
-func (providerMutationTestType) JSONSchema() *jsonschema.Schema {
-	return &sharedProviderSchema
+func (providerMutationTestType) JSONSchema() (*jsonschema.Schema, error) {
+	return &sharedProviderSchema, nil
 }
 
 var (
@@ -2680,6 +2681,8 @@ var (
 	}
 
 	errExtendUnavailable = errors.New("constraint source unavailable")
+
+	errProviderUnavailable = errors.New("schema document unavailable")
 )
 
 func TestProviderSchemaIsolatedAcrossCalls(t *testing.T) {
@@ -3014,8 +3017,8 @@ type panickingProvider struct {
 	names []string
 }
 
-func (p panickingProvider) JSONSchema() *jsonschema.Schema {
-	return &jsonschema.Schema{Description: p.names[0]} // out of range on zero value
+func (p panickingProvider) JSONSchema() (*jsonschema.Schema, error) {
+	return &jsonschema.Schema{Description: p.names[0]}, nil // out of range on zero value
 }
 
 // embeddedProvider supplies a JSONSchema method that an outer type can both
@@ -3025,8 +3028,8 @@ func (p panickingProvider) JSONSchema() *jsonschema.Schema {
 type embeddedProvider struct{}
 
 //nolint:unused // Shadowed by outerWithDirectMethods.JSONSchema; present only to create the shadowing case.
-func (embeddedProvider) JSONSchema() *jsonschema.Schema {
-	return &jsonschema.Schema{Type: "embedded"}
+func (embeddedProvider) JSONSchema() (*jsonschema.Schema, error) {
+	return &jsonschema.Schema{Type: "embedded"}, nil
 }
 
 // outerWithDirectMethods declares JSONSchema directly and also embeds a type
@@ -3035,8 +3038,8 @@ type outerWithDirectMethods struct {
 	embeddedProvider //nolint:unused // Embedded to exercise direct-method-wins-over-promoted shadowing.
 }
 
-func (outerWithDirectMethods) JSONSchema() *jsonschema.Schema {
-	return &jsonschema.Schema{Type: "outer"}
+func (outerWithDirectMethods) JSONSchema() (*jsonschema.Schema, error) {
+	return &jsonschema.Schema{Type: "outer"}, nil
 }
 
 func TestProviderPanicOnZeroValueWrapsErrProviderPanic(t *testing.T) {
@@ -3047,6 +3050,26 @@ func TestProviderPanicOnZeroValueWrapsErrProviderPanic(t *testing.T) {
 	// panic and returns an error wrapping ErrProviderPanic rather than crashing.
 	_, err := jsonschema.GenerateFor[panickingProvider](t.Context())
 	require.ErrorIs(t, err, jsonschema.ErrProviderPanic)
+}
+
+// failingProvider returns an error from JSONSchema, the ordinary failure
+// channel for a provider that cannot produce its schema.
+type failingProvider struct{}
+
+func (failingProvider) JSONSchema() (*jsonschema.Schema, error) {
+	return nil, errProviderUnavailable
+}
+
+// TestProviderErrorAbortsGeneration proves a provider error aborts
+// generation and reaches the caller wrapped with the failing type and
+// method, matching the JSONSchemaExtend error path.
+func TestProviderErrorAbortsGeneration(t *testing.T) {
+	t.Parallel()
+
+	_, err := jsonschema.GenerateFor[failingProvider](t.Context())
+	require.ErrorIs(t, err, errProviderUnavailable)
+	assert.Contains(t, err.Error(), "JSONSchema")
+	assert.Contains(t, err.Error(), "failingProvider")
 }
 
 func TestDirectMethodWinsOverEmbeddedProvider(t *testing.T) {
@@ -3181,8 +3204,8 @@ func TestGenerateFor_JSONMarshalerNotConsulted(t *testing.T) {
 
 type ptrProvider struct{}
 
-func (*ptrProvider) JSONSchema() *jsonschema.Schema {
-	return &jsonschema.Schema{Type: "string", Format: "ptr-provider-marker"}
+func (*ptrProvider) JSONSchema() (*jsonschema.Schema, error) {
+	return &jsonschema.Schema{Type: "string", Format: "ptr-provider-marker"}, nil
 }
 
 func TestGenerateFor_ProviderPointerReceiver(t *testing.T) {

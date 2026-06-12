@@ -25,8 +25,8 @@ type ProviderSingleton struct{}
 var SharedProviderSchema = jsonschema.Schema{Type: "string"}
 
 // JSONSchema returns the shared singleton schema.
-func (ProviderSingleton) JSONSchema() *jsonschema.Schema {
-	return &SharedProviderSchema
+func (ProviderSingleton) JSONSchema() (*jsonschema.Schema, error) {
+	return &SharedProviderSchema, nil
 }
 
 // Widget is a test type with documented fields.

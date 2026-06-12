@@ -232,16 +232,16 @@ Go type themselves.
 ### Customization interfaces
 
 A type implementing `JSONSchemaProvider` supplies its own schema entirely,
-bypassing reflection:
+bypassing reflection; a non-nil error aborts generation:
 
 ```go
 type Status string
 
-func (Status) JSONSchema() *jsonschema.Schema {
+func (Status) JSONSchema() (*jsonschema.Schema, error) {
 	return &jsonschema.Schema{
 		Type: "string",
 		Enum: []any{"active", "inactive", "suspended"},
-	}
+	}, nil
 }
 ```
 

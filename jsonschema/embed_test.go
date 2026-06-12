@@ -264,13 +264,13 @@ type ProviderEmbed struct {
 	Field1 string `json:"field1"`
 }
 
-func (ProviderEmbed) JSONSchema() *jsonschema.Schema {
+func (ProviderEmbed) JSONSchema() (*jsonschema.Schema, error) {
 	return &jsonschema.Schema{
 		Type: "object",
 		Properties: map[string]*jsonschema.Schema{
 			"field1": {Type: "string"},
 		},
-	}
+	}, nil
 }
 
 type HasProviderEmbed struct {
@@ -340,7 +340,7 @@ func TestGenerateFor_EmbeddedInterfaceSkipped(t *testing.T) {
 // SchemaInterface is an interface that implements JSONSchemaProvider.
 type SchemaInterface interface {
 	fmt.Stringer
-	JSONSchema() *jsonschema.Schema
+	JSONSchema() (*jsonschema.Schema, error)
 }
 
 type HasProviderInterface struct {
@@ -795,12 +795,12 @@ type OptionalProviderEmbed struct {
 	Req string `json:"req"`
 }
 
-func (OptionalProviderEmbed) JSONSchema() *jsonschema.Schema {
+func (OptionalProviderEmbed) JSONSchema() (*jsonschema.Schema, error) {
 	return &jsonschema.Schema{
 		Type:       "object",
 		Properties: map[string]*jsonschema.Schema{"req": {Type: "string"}},
 		Required:   []string{"req"},
-	}
+	}, nil
 }
 
 type HasOptionalProviderEmbed struct {
