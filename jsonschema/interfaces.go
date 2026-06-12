@@ -170,15 +170,16 @@ func (f RefResolverFunc) ResolveRef(ctx context.Context, uri string) (*Schema, e
 	return f(ctx, uri)
 }
 
-// ResolverOption is the option type returned by [WithResolver]: a single
-// option value that configures both validation ([ValidateOption]) and
-// inlining ([InlineOption]).
-type ResolverOption interface {
+// RefOption is the option type returned by [WithResolver] and [WithBaseURI],
+// the two options configuring reference resolution: a single option value
+// that serves both validation ([ValidateOption]) and inlining
+// ([InlineOption]).
+type RefOption interface {
 	ValidateOption
 	InlineOption
 }
 
-// resolverOption is the [ResolverOption] returned by [WithResolver].
+// resolverOption is the [RefOption] returned by [WithResolver].
 type resolverOption struct {
 	r RefResolver
 }
@@ -198,8 +199,34 @@ func (o resolverOption) applyInline(in *inliner) { in.resolver = o.r }
 // most once per distinct URI within one Inline call; the schema it returns
 // is deep-copied before use and never mutated. In both roles the resolver
 // receives the context of the Context entry point in effect.
-func WithResolver(r RefResolver) ResolverOption {
+func WithResolver(r RefResolver) RefOption {
 	return resolverOption{r: r}
+}
+
+// baseURIOption is the [RefOption] returned by [WithBaseURI].
+type baseURIOption struct {
+	base string
+}
+
+func (o baseURIOption) applyValidate(v *validator) { v.baseURI = o.base }
+
+func (o baseURIOption) applyInline(in *inliner) { in.baseURI = o.base }
+
+// WithBaseURI sets the base URI of the root document: the base that
+// non-local refs in the root document absolutize against when no enclosing
+// $id establishes one, exactly as a root $id would. The returned option
+// serves both validation and inlining, so one value configures [Compile],
+// [Validate], and [Inline] alike. Any fragment on base is ignored.
+//
+// A base with no URI scheme is taken as a file path and normalized against
+// file:/// ("main.json" becomes "file:///main.json"), so RFC 3986 reference
+// joining is well-defined and a ref in a fetched document that absolutizes
+// back to the root resolves to the in-memory document instead of
+// re-fetching it. [FileResolver] strips the file:// scheme and the leading
+// "/", so [io/fs] paths keep working; a custom resolver paired with a
+// schemeless base receives the normalized file:/// form.
+func WithBaseURI(base string) RefOption {
+	return baseURIOption{base: stripFragment(base)}
 }
 
 // FieldContext provides context about a struct field to tag interpreters.

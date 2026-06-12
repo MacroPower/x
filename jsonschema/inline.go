@@ -46,11 +46,11 @@ type inliner struct {
 
 	// Pristine schemas mapped to their JSON Pointer path within their
 	// containing document, recorded when each document joins resolution
-	// space. The paths name ref-node locations for [WithInlineRefFallback]
+	// space. The paths name ref-node locations for [WithRefFallback]
 	// consultations and seed the path of each expansion walk.
 	paths map[*Schema]string
 
-	// The per-reference failure policy from [WithInlineRefFallback]; nil
+	// The per-reference failure policy from [WithRefFallback]; nil
 	// means every expansion failure is fatal.
 	fallback RefFallback
 
@@ -60,7 +60,7 @@ type inliner struct {
 	baseURI string
 
 	// Resolve refs against each document's retrieval URI, with $id inert
-	// ([WithInlineRetrievalBase]).
+	// ([WithRetrievalBase]).
 	retrievalBase bool
 }
 
@@ -77,23 +77,7 @@ type inlineOptionFunc func(*inliner)
 
 func (f inlineOptionFunc) applyInline(in *inliner) { f(in) }
 
-// WithInlineBaseURI sets the base URI of the root document: the base that
-// non-local refs in the root document absolutize against when no enclosing
-// $id establishes one, exactly as a root $id would. Any fragment on base is
-// ignored.
-//
-// A base with no URI scheme is taken as a file path and normalized against
-// file:/// ("main.json" becomes "file:///main.json"), so RFC 3986 reference
-// joining is well-defined and a ref in a fetched document that absolutizes
-// back to the root resolves to the in-memory document instead of
-// re-fetching it. [FileResolver] strips the file:// scheme and the leading
-// "/", so [io/fs] paths keep working; a custom resolver paired with a
-// schemeless base receives the normalized file:/// form.
-func WithInlineBaseURI(base string) InlineOption {
-	return inlineOptionFunc(func(in *inliner) { in.baseURI = stripFragment(base) })
-}
-
-// WithInlineRetrievalBase makes refs resolve against each document's
+// WithRetrievalBase makes refs resolve against each document's
 // retrieval URI, treating $id as an inert annotation: $id neither
 // establishes a base URI nor registers a resolution target, in any
 // document. Anchors still resolve within their document, and $id keywords
@@ -103,14 +87,14 @@ func WithInlineBaseURI(base string) InlineOption {
 // shipping the files their refs name alongside the schema; under the
 // default RFC behavior those refs absolutize against the remote $id and
 // cannot be served from disk. With this option the root document's refs
-// absolutize against the base from [WithInlineBaseURI] and each fetched
+// absolutize against the base from [WithBaseURI] and each fetched
 // document's refs against the URI it was fetched from.
-func WithInlineRetrievalBase(enabled bool) InlineOption {
+func WithRetrievalBase(enabled bool) InlineOption {
 	return inlineOptionFunc(func(in *inliner) { in.retrievalBase = enabled })
 }
 
 // RefFailure describes one reference expansion failure to a
-// [WithInlineRefFallback] policy.
+// [WithRefFallback] policy.
 type RefFailure struct {
 	// Err is the expansion failure, wrapping [ErrRefResolve], [ErrRefCycle],
 	// or [ErrRefInline].
@@ -168,7 +152,7 @@ func SubstituteRef(s *Schema) RefAction {
 // it had resolved to a copy of the given schema.
 type RefFallback func(failure RefFailure) RefAction
 
-// WithInlineRefFallback sets a per-reference failure policy for [Inline].
+// WithRefFallback sets a per-reference failure policy for [Inline].
 // When expanding a reference fails - the target is unresolvable
 // ([ErrRefResolve]), the expansion is cyclic ([ErrRefCycle]), or the
 // construct has no static expansion ([ErrRefInline], $dynamicRef) - fn is
@@ -186,7 +170,7 @@ type RefFallback func(failure RefFailure) RefAction
 // and is itself inlined recursively, its refs resolving in the context of
 // the document containing the failing ref; a cycle introduced by the
 // returned schema is an ordinary [ErrRefCycle].
-func WithInlineRefFallback(fn RefFallback) InlineOption {
+func WithRefFallback(fn RefFallback) InlineOption {
 	return inlineOptionFunc(func(in *inliner) { in.fallback = fn })
 }
 
@@ -215,14 +199,14 @@ func normalizeBaseURI(base string) string {
 // Fragment-only refs (#/pointer, #anchor) resolve within the enclosing
 // document using the same $id/$anchor registry the validator builds. Other
 // refs are absolutized against the enclosing resource's base URI (its $id,
-// or the base from [WithInlineBaseURI], with a schemeless base normalized
+// or the base from [WithBaseURI], with a schemeless base normalized
 // against file:///) and fetched through the resolver given via
 // [WithResolver]; any fragment is then evaluated against the fetched
 // document. Fetched documents are inlined recursively using their own base
 // URIs, and each document is fetched at most once per Inline call. Every
 // ref resolves against its document's original structure, exactly as the
 // validator would, so expanding one ref never changes what a later ref's
-// JSON Pointer or anchor addresses. [WithInlineRetrievalBase] switches ref
+// JSON Pointer or anchor addresses. [WithRetrievalBase] switches ref
 // resolution to each document's retrieval URI, treating $id as an inert
 // annotation.
 //
@@ -247,7 +231,7 @@ func normalizeBaseURI(base string) string {
 // expansion and returns an error wrapping [ErrRefInline] (Draft 7 ignores
 // the keyword, as the validator does). A non-local ref with no resolver, or
 // an unresolvable target, returns an error wrapping [ErrRefResolve].
-// [WithInlineRefFallback] sets a per-reference policy that can turn any of
+// [WithRefFallback] sets a per-reference policy that can turn any of
 // these failures into dropping the reference keyword or expanding a
 // substitute schema instead.
 //
@@ -489,7 +473,7 @@ func (in *inliner) expandTarget(pristine *Schema, path string) (*Schema, error) 
 	return in.inlineCopy(target, in.paths[target])
 }
 
-// substitute consults the [WithInlineRefFallback] policy for a reference
+// substitute consults the [WithRefFallback] policy for a reference
 // that failed directly at the pristine node and turns its answer into a
 // spliceable self-contained copy. With no fallback configured, or on
 // [PropagateRef], the original inlineErr is returned. [DropRef] yields
@@ -669,7 +653,7 @@ func (in *inliner) fetchDoc(baseURI string) (*Schema, error) {
 // from an [io/fs.FS], unmarshaling each referenced file as a JSON schema
 // document; a referenced file that does not contain one is an error.
 // Construct it with [NewFileResolver]; pair [os.DirFS] with
-// [WithInlineBaseURI] to inline schemas that reference each other by
+// [WithBaseURI] to inline schemas that reference each other by
 // relative file path.
 //
 // A leading "file://" scheme and a leading "/" are stripped, so URIs are

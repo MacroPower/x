@@ -462,6 +462,12 @@
 //     The resolver is called only when local fragment resolution fails. Resolved
 //     schemas are cached within the validation run. The resolver receives the
 //     caller's context (see Remote References below).
+//   - [WithBaseURI] sets the root document's base URI, the base its
+//     non-local refs absolutize against when no root $id establishes one,
+//     and registers the root under it so a ref absolutizing back to the
+//     root resolves in-memory. The returned [RefOption] also serves
+//     inlining, the way [WithResolver] and [WithDraft] serve several entry
+//     points.
 //   - [WithFormatValidator] registers a custom format checker: a
 //     [FormatValidator] that declares the format name it handles, with
 //     [FormatValidatorFunc] adapting a bare function.
@@ -602,6 +608,12 @@
 // local fragment ref is silently skipped.
 // Circular refs are detected and treated as passing to avoid infinite recursion.
 //
+// Non-local refs absolutize against the enclosing resource's base URI — its
+// $id, or the root base set with [WithBaseURI], which also registers the
+// root document under that URI so a ref absolutizing back to it resolves
+// in-memory. The same [WithBaseURI] value serves [Inline] (see Reference
+// Inlining below), so one option configures both.
+//
 // The resolver receives a context with
 // every resolution call: the [Compile] context for refs resolved while
 // compiling, and the [Validator.Validate] (or other validation entry point)
@@ -625,7 +637,7 @@
 // the validator would: expanding one ref never changes what a later ref's
 // JSON Pointer or anchor addresses. Other refs are absolutized against the
 // enclosing resource's base URI — its $id, or the base given via
-// [WithInlineBaseURI], with a schemeless base normalized against file:///
+// [WithBaseURI], with a schemeless base normalized against file:///
 // so a back-reference to the root document finds the in-memory copy — and
 // fetched through the [RefResolver] given via [WithResolver]; any
 // fragment is then evaluated against the fetched document. Fetched
@@ -638,13 +650,13 @@
 // each referenced file must contain a JSON schema document, and [io/fs]
 // confines resolution to the fs root, so a ref escaping above it returns
 // an error wrapping [ErrRefResolve]. Pair [os.DirFS] with
-// [WithInlineBaseURI] to inline a directory of schemas; the same resolver
+// [WithBaseURI] to inline a directory of schemas; the same resolver
 // also serves file-path and relative refs during validation via
 // [WithResolver]. Inline's context is passed to the resolver with every
 // document fetch, so a resolver that fetches over the network can honor
 // cancellation and deadlines.
 //
-// [WithInlineRetrievalBase] makes refs resolve against each document's
+// [WithRetrievalBase] makes refs resolve against each document's
 // retrieval URI instead, treating $id as an inert annotation: $id neither
 // establishes a base URI nor registers a resolution target, in any
 // document, including the Draft 7 fragment-only $id form that otherwise
@@ -654,7 +666,7 @@
 // shipping the files their refs name alongside the schema; under the
 // default RFC behavior those refs absolutize against the remote $id and
 // cannot be served from disk. With this option the root document's refs
-// absolutize against the base from [WithInlineBaseURI] and each fetched
+// absolutize against the base from [WithBaseURI] and each fetched
 // document's refs against the URI it was fetched from.
 //
 // Sibling keywords beside $ref follow draft semantics, with the draft
@@ -681,7 +693,7 @@
 // configured, or any ref whose target cannot be found, returns an error
 // wrapping [ErrRefResolve].
 //
-// [WithInlineRefFallback] sets a per-reference failure policy (a
+// [WithRefFallback] sets a per-reference failure policy (a
 // [RefFallback]) consulted when expanding a reference fails for any of those
 // reasons, with a [RefFailure] carrying the JSON Pointer path of the
 // referencing schema within its containing document, the reference value,

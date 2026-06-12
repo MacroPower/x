@@ -23,7 +23,7 @@ const (
 // DraftOption is the option type returned by [WithDraft]: a single option
 // value that configures generation ([GenerateOption]), validation
 // ([ValidateOption]), and inlining ([InlineOption]) alike, the way
-// [ResolverOption] serves validation and inlining.
+// [RefOption] serves validation and inlining.
 type DraftOption interface {
 	GenerateOption
 	ValidateOption

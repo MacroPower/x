@@ -482,11 +482,11 @@ func TestInline(t *testing.T) {
 			}
 
 			if tc.baseURI != "" {
-				opts = append(opts, jsonschema.WithInlineBaseURI(tc.baseURI))
+				opts = append(opts, jsonschema.WithBaseURI(tc.baseURI))
 			}
 
 			if tc.retrievalBase {
-				opts = append(opts, jsonschema.WithInlineRetrievalBase(true))
+				opts = append(opts, jsonschema.WithRetrievalBase(true))
 			}
 
 			got, err := jsonschema.Inline(t.Context(), &schema, opts...)
@@ -505,7 +505,7 @@ func TestInline(t *testing.T) {
 	}
 }
 
-// refFallbackCall records one consultation of a [jsonschema.WithInlineRefFallback]
+// refFallbackCall records one consultation of a [jsonschema.WithRefFallback]
 // policy: the JSON Pointer path of the referencing schema within its
 // containing document, the reference value, and the sentinel the error wraps.
 type refFallbackCall struct {
@@ -775,17 +775,17 @@ func TestInlineRefFallback(t *testing.T) {
 			}
 
 			if tc.baseURI != "" {
-				opts = append(opts, jsonschema.WithInlineBaseURI(tc.baseURI))
+				opts = append(opts, jsonschema.WithBaseURI(tc.baseURI))
 			}
 
 			if tc.retrievalBase {
-				opts = append(opts, jsonschema.WithInlineRetrievalBase(true))
+				opts = append(opts, jsonschema.WithRetrievalBase(true))
 			}
 
 			var calls []refFallbackCall
 
 			if tc.fallback != nil {
-				opts = append(opts, jsonschema.WithInlineRefFallback(
+				opts = append(opts, jsonschema.WithRefFallback(
 					func(f jsonschema.RefFailure) jsonschema.RefAction {
 						calls = append(calls, refFallbackCall{path: f.Path, ref: f.Ref, err: f.Err})
 
@@ -1032,7 +1032,7 @@ func TestFileResolver(t *testing.T) {
 }
 
 // TestFileResolverWithValidation pins the documented dual use: the same
-// resolver Inline pairs with WithInlineBaseURI also serves file-path and
+// resolver Inline pairs with WithBaseURI also serves file-path and
 // relative refs during validation via WithResolver, while a ref that
 // absolutizes to another scheme is not a valid fs path and surfaces as a
 // validation failure.
@@ -1079,6 +1079,49 @@ func TestFileResolverWithValidation(t *testing.T) {
 		require.Error(t, err)
 		require.ErrorIs(t, err, jsonschema.ErrRefResolve)
 	})
+}
+
+// TestValidateWithBaseURI pins WithBaseURI as a shared option during
+// validation: the root document's relative refs absolutize against the base,
+// a relative ref inside a fetched document resolves against that document's
+// URI, and a ref absolutizing back to the root resolves to the in-memory
+// document instead of being fetched (the fs serves no main.json, so the case
+// fails without that registration).
+func TestValidateWithBaseURI(t *testing.T) {
+	t.Parallel()
+
+	resolver := jsonschema.NewFileResolver(mapFS(map[string]string{
+		"sub/child.json": `{"properties": {"x": {"$ref": "leaf.json"}}}`,
+		"sub/leaf.json":  `{"type": "boolean"}`,
+	}))
+
+	schema := &jsonschema.Schema{
+		Type: "object",
+		Defs: map[string]*jsonschema.Schema{
+			"name": {Type: "string"},
+		},
+		Properties: map[string]*jsonschema.Schema{
+			"child": {Ref: "sub/child.json"},
+			"self":  {Ref: "main.json#/$defs/name"},
+		},
+	}
+
+	v, err := jsonschema.Compile(t.Context(), schema,
+		jsonschema.WithResolver(resolver),
+		jsonschema.WithBaseURI("main.json"),
+	)
+	require.NoError(t, err)
+
+	valid := map[string]any{"child": map[string]any{"x": true}, "self": "ada"}
+	require.NoError(t, v.Validate(t.Context(), valid))
+
+	badChild := map[string]any{"child": map[string]any{"x": "nope"}, "self": "ada"}
+	require.Error(t, v.Validate(t.Context(), badChild),
+		"the fetched document's leaf.json ref must constrain x")
+
+	badSelf := map[string]any{"child": map[string]any{"x": true}, "self": 1.0}
+	require.Error(t, v.Validate(t.Context(), badSelf),
+		"the back-ref into the root document must constrain self")
 }
 
 // TestInlineDeepCopyIndependence verifies the deep-copy contract of

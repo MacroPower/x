@@ -232,6 +232,10 @@ type validator struct {
 	// The WithDraft override; nil leaves the draft to $schema detection.
 	draftOverride *Draft
 
+	// The root document's base URI from [WithBaseURI]; "" leaves the base
+	// to the root schema's $id.
+	baseURI string
+
 	dynamicScope []string // stack of resource base URIs entered during validation
 	draft        Draft
 	vocabs       vocabSet // resolved active vocabularies
@@ -243,7 +247,7 @@ type validator struct {
 	// Treat $id as an inert annotation in walkSchema: no URI or anchor
 	// registration, no base-URI change, in any form including the
 	// Draft 7 fragment-only anchor form. Only the inliner's scratch
-	// validators set it, for [WithInlineRetrievalBase]; Compile never does,
+	// validators set it, for [WithRetrievalBase]; Compile never does,
 	// so validation behavior is unaffected.
 	inertIDs bool
 }
@@ -400,14 +404,27 @@ func (v *validator) resolveFormats() {
 }
 
 // buildRegistry walks the entire schema tree to build URI, anchor, and
-// base-URI registries for $id and $anchor resolution.
+// base-URI registries for $id and $anchor resolution. The walk is seeded
+// with the [WithBaseURI] base, so non-local refs absolutize against it
+// exactly as they would against a root $id.
 func (v *validator) buildRegistry() {
 	v.uriRegistry = map[string]*Schema{}
 	v.anchorRegistry = map[string]*Schema{}
 	v.dynamicAnchorRegistry = map[string]*Schema{}
 	v.baseURIs = map[*Schema]string{}
 	v.walked = map[*Schema]bool{}
-	v.walkSchema(v.root, "")
+
+	base := normalizeBaseURI(v.baseURI)
+	v.walkSchema(v.root, base)
+
+	// Register the root document under its base URI when its own $id did
+	// not already claim one, so a ref that absolutizes back to the root
+	// document resolves to this copy instead of being fetched.
+	if base != "" {
+		if _, ok := v.uriRegistry[base]; !ok {
+			v.uriRegistry[base] = v.root
+		}
+	}
 }
 
 // walkSchema recursively walks a schema tree, registering $id and $anchor

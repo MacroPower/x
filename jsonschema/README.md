@@ -666,6 +666,7 @@ containing object are both identifiable from `InstancePath` alone.
 | --------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | `WithDraft(Draft)`          | Override the draft otherwise detected from the root schema's `$schema`.                                                |
 | `WithResolver(r)`           | Resolve remote/absolute `$ref` URIs (called only when local lookup fails); the resolver receives the caller's context. |
+| `WithBaseURI(base)`         | Set the root document's base URI for ref absolutization; also serves `Inline`.                                         |
 | `WithFormatValidator(f)`    | Register a custom `format` checker (a `FormatValidator`; `FormatValidatorFunc` adapts a bare function).                |
 | `WithFormats(bool)`         | Force `format` assertion on or off.                                                                                    |
 | `WithContent(bool)`         | Assert `contentEncoding`/`contentMediaType` (annotation-only by default).                                              |
@@ -707,7 +708,11 @@ default. Remote and absolute `$ref` URIs are resolved through an optional
 resolution fails, and resolved schemas are cached within the validation run. A
 resolver error surfaces as `ErrRefResolve`; an unresolvable remote/absolute ref
 with no resolver is reported as a `*ValidationError`. Circular refs are detected
-and treated as passing.
+and treated as passing. Non-local refs absolutize against the enclosing
+resource's base URI -- its `$id`, or the root base set with `WithBaseURI`,
+which also registers the root document under that URI so a ref absolutizing
+back to it resolves in-memory. The same `WithBaseURI` value serves `Inline`,
+so one option configures both.
 
 The resolver receives a context with every resolution call:
 
@@ -827,7 +832,7 @@ fsys := os.DirFS("schemas") // main.json references sub/child.json, ...
 
 inlined, err := jsonschema.Inline(ctx, schema,
 	jsonschema.WithResolver(jsonschema.NewFileResolver(fsys)),
-	jsonschema.WithInlineBaseURI("main.json"),
+	jsonschema.WithBaseURI("main.json"),
 )
 ```
 
@@ -837,7 +842,7 @@ Resolution mirrors the validator's. Fragment-only refs (`#/pointer`,
 against its document's original structure, exactly as the validator would:
 expanding one ref never changes what a later ref's JSON Pointer or anchor
 addresses. Other refs are absolutized against the enclosing resource's base
-URI — its `$id`, or the base from `WithInlineBaseURI`, with a schemeless
+URI — its `$id`, or the base from `WithBaseURI`, with a schemeless
 base such as `main.json` normalized against `file:///` so RFC 3986 joining
 is well-defined and a back-reference to the root document finds the
 in-memory copy instead of re-fetching it — and fetched through the
@@ -858,7 +863,7 @@ resolve to an error. `Inline`'s context is passed to the resolver with every
 document fetch, so a resolver that fetches over the network can honor
 cancellation and deadlines.
 
-`WithInlineRetrievalBase` makes refs resolve against each document's
+`WithRetrievalBase` makes refs resolve against each document's
 retrieval URI instead, treating `$id` as an inert annotation: `$id` neither
 establishes a base URI nor registers a resolution target, in any document,
 including the Draft 7 fragment-only `$id` form that otherwise acts as an
@@ -868,7 +873,7 @@ commonly declare a published remote `$id` while shipping the files their
 refs name alongside the schema; under the default RFC behavior those refs
 absolutize against the remote `$id` and cannot be served from disk. With
 this option the root document's refs absolutize against the base from
-`WithInlineBaseURI` and each fetched document's refs against the URI it was
+`WithBaseURI` and each fetched document's refs against the URI it was
 fetched from.
 
 Sibling keywords beside `$ref` follow draft semantics, with the draft
@@ -904,7 +909,7 @@ Failure modes:
 - A non-local ref with no resolver configured, or any ref whose target cannot
   be found, returns an error wrapping `ErrRefResolve`.
 
-`WithInlineRefFallback` sets a per-reference failure policy consulted when
+`WithRefFallback` sets a per-reference failure policy consulted when
 expanding a reference fails for any of those reasons, with a `RefFailure`
 carrying the JSON Pointer path of the referencing schema within its
 containing document, the reference value, and the error. The fallback
@@ -923,13 +928,13 @@ cycle introduced by the substitute is an ordinary `ErrRefCycle`.
 
 ### Inlining options
 
-| Option                          | Effect                                                                                                                  |
-| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `WithDraft(Draft)`              | Override the draft otherwise detected from the root schema's `$schema`.                                                 |
-| `WithResolver(r)`               | Set the `RefResolver` that fetches the documents non-local refs target (called at most once per distinct URI).          |
-| `WithInlineBaseURI(base)`       | Set the root document's base URI; a schemeless base is normalized against `file:///`.                                   |
-| `WithInlineRetrievalBase(bool)` | Resolve refs against each document's retrieval URI, treating `$id` as an inert annotation that passes through verbatim. |
-| `WithInlineRefFallback(fn)`     | Per-reference failure policy returning a `RefAction`: `PropagateRef()`, `DropRef()`, or `SubstituteRef(s)`.             |
+| Option                    | Effect                                                                                                                  |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `WithDraft(Draft)`        | Override the draft otherwise detected from the root schema's `$schema`.                                                 |
+| `WithResolver(r)`         | Set the `RefResolver` that fetches the documents non-local refs target (called at most once per distinct URI).          |
+| `WithBaseURI(base)`       | Set the root document's base URI; a schemeless base is normalized against `file:///`. Also serves validation.           |
+| `WithRetrievalBase(bool)` | Resolve refs against each document's retrieval URI, treating `$id` as an inert annotation that passes through verbatim. |
+| `WithRefFallback(fn)`     | Per-reference failure policy returning a `RefAction`: `PropagateRef()`, `DropRef()`, or `SubstituteRef(s)`.             |
 
 ## Errors
 
