@@ -31,7 +31,17 @@ type GoCommentProvider struct {
 }
 
 // GoCommentProviderOption configures a [GoCommentProvider] at construction.
-type GoCommentProviderOption func(*GoCommentProvider)
+// Options are produced by this package's With* constructors; the sealed
+// interface form matches the package's other option types ([GenerateOption],
+// [ValidateOption], [InlineOption]).
+type GoCommentProviderOption interface {
+	applyGoCommentProvider(p *GoCommentProvider)
+}
+
+// goCommentProviderOptionFunc adapts a function to [GoCommentProviderOption].
+type goCommentProviderOptionFunc func(*GoCommentProvider)
+
+func (f goCommentProviderOptionFunc) applyGoCommentProvider(p *GoCommentProvider) { f(p) }
 
 // WithLoadDir returns a [GoCommentProviderOption] setting the directory
 // package loading runs in, the way the go tool's -C flag does. Package paths
@@ -40,17 +50,21 @@ type GoCommentProviderOption func(*GoCommentProvider)
 // elsewhere (a generator invoked from another module, a test binary run from
 // a temporary directory).
 func WithLoadDir(dir string) GoCommentProviderOption {
-	return func(p *GoCommentProvider) { p.loadDir = dir }
+	return goCommentProviderOptionFunc(func(p *GoCommentProvider) { p.loadDir = dir })
 }
 
 // NewGoCommentProvider returns a [GoCommentProvider] with an empty package
-// cache.
+// cache. Nil options are skipped, so an optional option can be passed
+// unconditionally.
 func NewGoCommentProvider(opts ...GoCommentProviderOption) *GoCommentProvider {
 	p := &GoCommentProvider{
 		cache: map[string][]*ast.File{},
 	}
+
 	for _, opt := range opts {
-		opt(p)
+		if opt != nil {
+			opt.applyGoCommentProvider(p)
+		}
 	}
 
 	return p
