@@ -237,7 +237,7 @@ bypassing reflection; a non-nil error aborts generation:
 ```go
 type Status string
 
-func (Status) JSONSchema() (*jsonschema.Schema, error) {
+func (Status) JSONSchema(context.Context, jsonschema.TypeContext) (*jsonschema.Schema, error) {
 	return &jsonschema.Schema{
 		Type: "string",
 		Enum: []any{"active", "inactive", "suspended"},
@@ -253,12 +253,17 @@ type Metadata struct {
 	Tags map[string]string `json:"tags"`
 }
 
-func (Metadata) JSONSchemaExtend(s *jsonschema.Schema) error {
+func (Metadata) JSONSchemaExtend(_ context.Context, _ jsonschema.TypeContext, s *jsonschema.Schema) error {
 	s.Description = "Arbitrary key-value metadata"
 	s.MinProperties = jsonschema.Ptr(1)
 	return nil
 }
 ```
+
+Both methods receive the same arguments as their registered counterparts
+(`TypeSchemaResolver`, `TypeSchemaExtender`): the Generate call's context and
+a `TypeContext` carrying the target draft. An implementation needing neither
+ignores them.
 
 For each type, the schema is determined by the first matching step:
 

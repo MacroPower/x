@@ -1,6 +1,7 @@
 package jsonschema_test
 
 import (
+	"context"
 	"reflect"
 	"testing"
 
@@ -30,7 +31,7 @@ type rootTitleExtender struct {
 	Name string `json:"name"`
 }
 
-func (rootTitleExtender) JSONSchemaExtend(s *jsonschema.Schema) error {
+func (rootTitleExtender) JSONSchemaExtend(_ context.Context, _ jsonschema.TypeContext, s *jsonschema.Schema) error {
 	s.Title = "Extended"
 
 	return nil

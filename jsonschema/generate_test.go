@@ -500,7 +500,7 @@ func TestGenerateFor_TextMarshaler(t *testing.T) {
 // JSONSchemaProvider type.
 type Status string
 
-func (Status) JSONSchema() (*jsonschema.Schema, error) {
+func (Status) JSONSchema(context.Context, jsonschema.TypeContext) (*jsonschema.Schema, error) {
 	return &jsonschema.Schema{
 		Type: "string",
 		Enum: []any{"active", "inactive", "suspended"},
@@ -527,7 +527,7 @@ type Metadata struct {
 	Tags map[string]string `json:"tags"`
 }
 
-func (Metadata) JSONSchemaExtend(s *jsonschema.Schema) error {
+func (Metadata) JSONSchemaExtend(_ context.Context, _ jsonschema.TypeContext, s *jsonschema.Schema) error {
 	s.Description = "Arbitrary key-value metadata"
 	s.MinProperties = jsonschema.Ptr(1)
 
@@ -564,7 +564,7 @@ type failingExtender struct {
 	Name string `json:"name"`
 }
 
-func (failingExtender) JSONSchemaExtend(*jsonschema.Schema) error {
+func (failingExtender) JSONSchemaExtend(context.Context, jsonschema.TypeContext, *jsonschema.Schema) error {
 	return errExtendUnavailable
 }
 
@@ -1468,7 +1468,7 @@ func TestGenerateFor_JSONSchemaTag_Const(t *testing.T) {
 // NonStructExtender is a named non-struct type implementing JSONSchemaExtender.
 type NonStructExtender []string
 
-func (NonStructExtender) JSONSchemaExtend(s *jsonschema.Schema) error {
+func (NonStructExtender) JSONSchemaExtend(_ context.Context, _ jsonschema.TypeContext, s *jsonschema.Schema) error {
 	s.Description = "A list of tags"
 
 	return nil
@@ -1523,7 +1523,7 @@ func TestGenerateFor_NonStructExtender_Root(t *testing.T) {
 // NonStructProvider is a named non-struct type implementing JSONSchemaProvider.
 type NonStructProvider int
 
-func (NonStructProvider) JSONSchema() (*jsonschema.Schema, error) {
+func (NonStructProvider) JSONSchema(context.Context, jsonschema.TypeContext) (*jsonschema.Schema, error) {
 	return &jsonschema.Schema{
 		Type: "integer",
 		Enum: []any{1, 2, 3},
@@ -1764,14 +1764,18 @@ type BothProviderAndExtender struct {
 	Value string `json:"value"`
 }
 
-func (BothProviderAndExtender) JSONSchema() (*jsonschema.Schema, error) {
+func (BothProviderAndExtender) JSONSchema(context.Context, jsonschema.TypeContext) (*jsonschema.Schema, error) {
 	return &jsonschema.Schema{
 		Type:        "string",
 		Description: "from provider",
 	}, nil
 }
 
-func (BothProviderAndExtender) JSONSchemaExtend(s *jsonschema.Schema) error {
+func (BothProviderAndExtender) JSONSchemaExtend(
+	_ context.Context,
+	_ jsonschema.TypeContext,
+	s *jsonschema.Schema,
+) error {
 	s.Description = "from extender"
 
 	return nil
@@ -1970,7 +1974,9 @@ type NilProvider struct {
 }
 
 //nolint:nilnil // A nil schema with a nil error is the documented unrestricted-schema answer.
-func (NilProvider) JSONSchema() (*jsonschema.Schema, error) { return nil, nil }
+func (NilProvider) JSONSchema(context.Context, jsonschema.TypeContext) (*jsonschema.Schema, error) {
+	return nil, nil
+}
 
 func TestGenerateFor_JSONSchemaProviderReturnsNil(t *testing.T) {
 	t.Parallel()
@@ -2273,7 +2279,7 @@ type WithTypeSchemaProvider struct {
 	Value string `json:"value"`
 }
 
-func (WithTypeSchemaProvider) JSONSchema() (*jsonschema.Schema, error) {
+func (WithTypeSchemaProvider) JSONSchema(context.Context, jsonschema.TypeContext) (*jsonschema.Schema, error) {
 	return &jsonschema.Schema{
 		Type:        "string",
 		Description: "from provider",
@@ -2429,7 +2435,11 @@ type TextMarshalerWithExtender int
 
 func (TextMarshalerWithExtender) MarshalText() ([]byte, error) { return nil, nil }
 
-func (TextMarshalerWithExtender) JSONSchemaExtend(s *jsonschema.Schema) error {
+func (TextMarshalerWithExtender) JSONSchemaExtend(
+	_ context.Context,
+	_ jsonschema.TypeContext,
+	s *jsonschema.Schema,
+) error {
 	s.Enum = []any{"active", "inactive", "pending"}
 
 	return nil
@@ -2670,7 +2680,7 @@ func TestDraft07AdditionalPropertiesRetainedWithPromotedEmbed(t *testing.T) {
 
 type providerMutationTestType struct{}
 
-func (providerMutationTestType) JSONSchema() (*jsonschema.Schema, error) {
+func (providerMutationTestType) JSONSchema(context.Context, jsonschema.TypeContext) (*jsonschema.Schema, error) {
 	return &sharedProviderSchema, nil
 }
 
@@ -3017,7 +3027,7 @@ type panickingProvider struct {
 	names []string
 }
 
-func (p panickingProvider) JSONSchema() (*jsonschema.Schema, error) {
+func (p panickingProvider) JSONSchema(context.Context, jsonschema.TypeContext) (*jsonschema.Schema, error) {
 	return &jsonschema.Schema{Description: p.names[0]}, nil // out of range on zero value
 }
 
@@ -3028,7 +3038,7 @@ func (p panickingProvider) JSONSchema() (*jsonschema.Schema, error) {
 type embeddedProvider struct{}
 
 //nolint:unused // Shadowed by outerWithDirectMethods.JSONSchema; present only to create the shadowing case.
-func (embeddedProvider) JSONSchema() (*jsonschema.Schema, error) {
+func (embeddedProvider) JSONSchema(context.Context, jsonschema.TypeContext) (*jsonschema.Schema, error) {
 	return &jsonschema.Schema{Type: "embedded"}, nil
 }
 
@@ -3038,7 +3048,7 @@ type outerWithDirectMethods struct {
 	embeddedProvider //nolint:unused // Embedded to exercise direct-method-wins-over-promoted shadowing.
 }
 
-func (outerWithDirectMethods) JSONSchema() (*jsonschema.Schema, error) {
+func (outerWithDirectMethods) JSONSchema(context.Context, jsonschema.TypeContext) (*jsonschema.Schema, error) {
 	return &jsonschema.Schema{Type: "outer"}, nil
 }
 
@@ -3056,7 +3066,7 @@ func TestProviderPanicOnZeroValueWrapsErrProviderPanic(t *testing.T) {
 // channel for a provider that cannot produce its schema.
 type failingProvider struct{}
 
-func (failingProvider) JSONSchema() (*jsonschema.Schema, error) {
+func (failingProvider) JSONSchema(context.Context, jsonschema.TypeContext) (*jsonschema.Schema, error) {
 	return nil, errProviderUnavailable
 }
 
@@ -3204,7 +3214,7 @@ func TestGenerateFor_JSONMarshalerNotConsulted(t *testing.T) {
 
 type ptrProvider struct{}
 
-func (*ptrProvider) JSONSchema() (*jsonschema.Schema, error) {
+func (*ptrProvider) JSONSchema(context.Context, jsonschema.TypeContext) (*jsonschema.Schema, error) {
 	return &jsonschema.Schema{Type: "string", Format: "ptr-provider-marker"}, nil
 }
 
@@ -3225,7 +3235,7 @@ type ptrExtender struct {
 	Name string `json:"name"`
 }
 
-func (*ptrExtender) JSONSchemaExtend(s *jsonschema.Schema) error {
+func (*ptrExtender) JSONSchemaExtend(_ context.Context, _ jsonschema.TypeContext, s *jsonschema.Schema) error {
 	s.Description = "ptr-extender-marker"
 
 	return nil
@@ -3242,6 +3252,59 @@ func TestGenerateFor_ExtenderPointerReceiver(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(raw), "ptr-extender-marker")
 	assert.Contains(t, string(raw), "name", "reflection-built properties must survive the extender")
+}
+
+// draftAwareProvider supplies a draft-appropriate schema from the TypeContext
+// its JSONSchema method receives.
+type draftAwareProvider struct{}
+
+func (draftAwareProvider) JSONSchema(_ context.Context, tc jsonschema.TypeContext) (*jsonschema.Schema, error) {
+	if tc.Draft == jsonschema.Draft7 {
+		return &jsonschema.Schema{Type: "string", Description: "draft-07"}, nil
+	}
+
+	return &jsonschema.Schema{Type: "string", Description: "draft-2020"}, nil
+}
+
+func TestJSONSchemaProviderReceivesTypeContext(t *testing.T) {
+	t.Parallel()
+
+	// The provider sees the target draft of the generation run, the same
+	// TypeContext its registered counterpart receives.
+	s7, err := jsonschema.GenerateFor[draftAwareProvider](t.Context(), jsonschema.WithDraft(jsonschema.Draft7))
+	require.NoError(t, err)
+	assert.Equal(t, "draft-07", s7.Description)
+
+	s20, err := jsonschema.GenerateFor[draftAwareProvider](t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, "draft-2020", s20.Description)
+}
+
+// extenderCtxKey keys the context value ctxAwareExtender reads.
+type extenderCtxKey struct{}
+
+// ctxAwareExtender copies a context value into its schema, observing that
+// JSONSchemaExtend runs under the Generate call's context.
+type ctxAwareExtender struct {
+	Value string `json:"value"`
+}
+
+func (ctxAwareExtender) JSONSchemaExtend(ctx context.Context, _ jsonschema.TypeContext, s *jsonschema.Schema) error {
+	if v, ok := ctx.Value(extenderCtxKey{}).(string); ok {
+		s.Description = v
+	}
+
+	return nil
+}
+
+func TestJSONSchemaExtenderReceivesContext(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.WithValue(t.Context(), extenderCtxKey{}, "from the Generate context")
+
+	s, err := jsonschema.GenerateFor[ctxAwareExtender](ctx)
+	require.NoError(t, err)
+	assert.Equal(t, "from the Generate context", s.Description)
 }
 
 type byteSliceNamed []byte

@@ -22,7 +22,7 @@ type extenderWithDefs struct {
 	Value string `json:"value"`
 }
 
-func (extenderWithDefs) JSONSchemaExtend(s *jsonschema.Schema) error {
+func (extenderWithDefs) JSONSchemaExtend(_ context.Context, _ jsonschema.TypeContext, s *jsonschema.Schema) error {
 	if s.Defs == nil {
 		s.Defs = map[string]*jsonschema.Schema{}
 	}

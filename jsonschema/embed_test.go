@@ -1,6 +1,7 @@
 package jsonschema_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -264,7 +265,7 @@ type ProviderEmbed struct {
 	Field1 string `json:"field1"`
 }
 
-func (ProviderEmbed) JSONSchema() (*jsonschema.Schema, error) {
+func (ProviderEmbed) JSONSchema(context.Context, jsonschema.TypeContext) (*jsonschema.Schema, error) {
 	return &jsonschema.Schema{
 		Type: "object",
 		Properties: map[string]*jsonschema.Schema{
@@ -340,7 +341,7 @@ func TestGenerateFor_EmbeddedInterfaceSkipped(t *testing.T) {
 // SchemaInterface is an interface that implements JSONSchemaProvider.
 type SchemaInterface interface {
 	fmt.Stringer
-	JSONSchema() (*jsonschema.Schema, error)
+	JSONSchema(ctx context.Context, tc jsonschema.TypeContext) (*jsonschema.Schema, error)
 }
 
 type HasProviderInterface struct {
@@ -795,7 +796,7 @@ type OptionalProviderEmbed struct {
 	Req string `json:"req"`
 }
 
-func (OptionalProviderEmbed) JSONSchema() (*jsonschema.Schema, error) {
+func (OptionalProviderEmbed) JSONSchema(context.Context, jsonschema.TypeContext) (*jsonschema.Schema, error) {
 	return &jsonschema.Schema{
 		Type:       "object",
 		Properties: map[string]*jsonschema.Schema{"req": {Type: "string"}},

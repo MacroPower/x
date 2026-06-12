@@ -4,7 +4,11 @@
 // it via go/packages.
 package alpha
 
-import "github.com/google/jsonschema-go/jsonschema"
+import (
+	"context"
+
+	"go.jacobcolvin.com/x/jsonschema"
+)
 
 // Box is a documented generic type, exercising doc-comment extraction for an
 // instantiated generic whose reflect name carries a type-argument list.
@@ -25,7 +29,7 @@ type ProviderSingleton struct{}
 var SharedProviderSchema = jsonschema.Schema{Type: "string"}
 
 // JSONSchema returns the shared singleton schema.
-func (ProviderSingleton) JSONSchema() (*jsonschema.Schema, error) {
+func (ProviderSingleton) JSONSchema(context.Context, jsonschema.TypeContext) (*jsonschema.Schema, error) {
 	return &SharedProviderSchema, nil
 }
 

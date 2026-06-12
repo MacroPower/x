@@ -16,17 +16,27 @@ import (
 // recovered and wrapped with [ErrProviderPanic], as a backstop for genuine
 // bugs such as dereferencing a nil pointer field on the zero value the
 // method is invoked against.
+//
+// The method receives the same arguments as its registered counterpart,
+// [TypeSchemaResolver.SchemaForType]: the context of the Generate call in
+// effect (so a provider loading a schema document can honor cancellation and
+// deadlines) and a [TypeContext] carrying the target [Draft] (so a provider
+// can emit draft-appropriate keywords). An implementation needing neither
+// ignores them.
 type JSONSchemaProvider interface {
-	JSONSchema() (*Schema, error)
+	JSONSchema(ctx context.Context, tc TypeContext) (*Schema, error)
 }
 
 // JSONSchemaExtender allows a type to modify its auto-generated schema.
 // The method is called after the schema has been generated via reflection,
 // allowing the type to add, remove, or modify any fields. A non-nil error
 // aborts generation, matching the registered [TypeSchemaExtender]
-// counterpart.
+// counterpart, whose [TypeSchemaExtender.ExtendSchemaForType] arguments the
+// method shares: the context of the Generate call in effect and a
+// [TypeContext] carrying the target [Draft]. An implementation needing
+// neither ignores them.
 type JSONSchemaExtender interface {
-	JSONSchemaExtend(schema *Schema) error
+	JSONSchemaExtend(ctx context.Context, tc TypeContext, schema *Schema) error
 }
 
 // TypeContext provides context about the Go type whose schema a
