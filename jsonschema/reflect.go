@@ -50,6 +50,7 @@ type generator struct {
 	refRecords           []refRecord
 	commentProvider      CommentProvider
 	tagInterpreters      []TagInterpreter
+	typeExtenders        []TypeSchemaExtender
 	draft                Draft
 	definitions          bool
 	additionalProperties bool
@@ -330,11 +331,9 @@ func (g *generator) schemaForType(t reflect.Type, nullable bool) (*Schema, error
 	if t.Kind() != reflect.Struct && t.Name() != "" {
 		g.applyTypeComment(t, s)
 
-		if implementsExtender(t) {
-			err := callExtender(t, s)
-			if err != nil {
-				return nil, err
-			}
+		err := g.extendType(t, s)
+		if err != nil {
+			return nil, err
 		}
 
 		// A cycle detected while building this type's element/value schema left a
@@ -514,11 +513,9 @@ func (g *generator) handleBuiltinType(t reflect.Type, s *Schema, nullable bool) 
 	if t.Name() != "" {
 		g.applyTypeComment(t, s)
 
-		if implementsExtender(t) {
-			err := callExtender(t, s)
-			if err != nil {
-				return nil, err
-			}
+		err := g.extendType(t, s)
+		if err != nil {
+			return nil, err
 		}
 
 		if g.shouldExtract(t) {
@@ -879,12 +876,10 @@ func (g *generator) buildStructSchema(t reflect.Type) (*Schema, error) {
 	// Type-level comment.
 	g.applyTypeComment(t, s)
 
-	// JSONSchemaExtend.
-	if implementsExtender(t) {
-		err := callExtender(t, s)
-		if err != nil {
-			return nil, err
-		}
+	// JSONSchemaExtend, then registered extenders.
+	err := g.extendType(t, s)
+	if err != nil {
+		return nil, err
 	}
 
 	return s, nil
@@ -1762,6 +1757,31 @@ func callExtender(t reflect.Type, s *jsonschema.Schema) (err error) {
 	}
 
 	v.MethodByName("JSONSchemaExtend").Call([]reflect.Value{reflect.ValueOf(s)})
+
+	return nil
+}
+
+// extendType runs type-level schema extension for a reflection-produced
+// schema: the type's own JSONSchemaExtend when implemented, then the
+// registered [TypeSchemaExtender] values ([WithTypeSchemaExtender]) in
+// registration order, so a registered extender sees — and can adjust — what
+// the type's author produced. It is called from each reflection path
+// (structs, built-in overrides, named non-struct kinds) and never from the
+// resolver or [JSONSchemaProvider] paths, which replace reflection entirely.
+func (g *generator) extendType(t reflect.Type, s *Schema) error {
+	if implementsExtender(t) {
+		err := callExtender(t, s)
+		if err != nil {
+			return err
+		}
+	}
+
+	for _, e := range g.typeExtenders {
+		err := e.ExtendSchemaForType(t, s)
+		if err != nil {
+			return fmt.Errorf("extend type %s: %w", t, err)
+		}
+	}
 
 	return nil
 }

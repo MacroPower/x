@@ -48,6 +48,33 @@ type TypeSchemaResolverFunc func(t reflect.Type) (*Schema, bool)
 // SchemaForType calls f.
 func (f TypeSchemaResolverFunc) SchemaForType(t reflect.Type) (*Schema, bool) { return f(t) }
 
+// TypeSchemaExtender modifies reflection-generated schemas during generation,
+// registered with [WithTypeSchemaExtender]. It is the registered counterpart
+// of [JSONSchemaExtender]: a type's author extends its schema by implementing
+// JSONSchemaExtend on the type, while a consumer of a type they do not own
+// registers a TypeSchemaExtender. Where a [TypeSchemaResolver] replaces a
+// type's schema wholesale, an extender adjusts what reflection produced.
+//
+// ExtendSchemaForType is called once per type whose schema kind-based
+// reflection or a built-in override produced, at the point JSONSchemaExtend
+// runs (after comment extraction, before $defs extraction) and after the
+// type's own JSONSchemaExtend. Like JSONSchemaExtender, it is not called for
+// types whose schema a registered resolver or [JSONSchemaProvider] supplied.
+// It modifies s in place; an error aborts generation. An extender that does
+// not recognize t leaves s untouched and returns nil.
+type TypeSchemaExtender interface {
+	ExtendSchemaForType(t reflect.Type, s *Schema) error
+}
+
+// TypeSchemaExtenderFunc adapts a bare extending function to a
+// [TypeSchemaExtender], following [net/http.HandlerFunc].
+type TypeSchemaExtenderFunc func(t reflect.Type, s *Schema) error
+
+// ExtendSchemaForType calls f.
+func (f TypeSchemaExtenderFunc) ExtendSchemaForType(t reflect.Type, s *Schema) error {
+	return f(t, s)
+}
+
 // CommentProvider supplies descriptions for types and struct fields during
 // generation, registered with [WithCommentProvider]. [NewGoCommentProvider]
 // constructs the built-in provider, which extracts Go doc comments by

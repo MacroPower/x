@@ -61,6 +61,24 @@ func WithTypeSchemaResolver(r TypeSchemaResolver) GenerateOption {
 	})
 }
 
+// WithTypeSchemaExtender registers a [TypeSchemaExtender] that modifies
+// reflection-generated schemas, the extend counterpart of
+// [WithTypeSchemaResolver]: a resolver replaces a type's schema wholesale,
+// while an extender adjusts what reflection produced — the way
+// [JSONSchemaExtender] does for a type's author — for types the caller does
+// not own. Multiple extenders can be registered and are applied in
+// registration order, each running after the type's own JSONSchemaExtend.
+// Like JSONSchemaExtender, an extender is not called for types whose schema
+// a registered resolver or [JSONSchemaProvider] supplied.
+// [TypeSchemaExtenderFunc] adapts a bare function. A nil e is ignored.
+func WithTypeSchemaExtender(e TypeSchemaExtender) GenerateOption {
+	return generateOptionFunc(func(g *generator) {
+		if e != nil {
+			g.typeExtenders = append(g.typeExtenders, e)
+		}
+	})
+}
+
 // exactTypeResolver is the [TypeSchemaResolver] registered by
 // [WithTypeSchema]: it offers s for exactly the type t.
 type exactTypeResolver struct {

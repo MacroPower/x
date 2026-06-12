@@ -176,6 +176,7 @@ Unsupported types (`func`, `chan`, `complex`, `unsafe.Pointer`) return
 | `WithTypeSchema(t, s)`           | Override the schema for a specific Go type (highest priority).                        |
 | `WithTypeSchemaFor[T](s)`        | `WithTypeSchema` for a statically known type, without `reflect.TypeFor`.              |
 | `WithTypeSchemaResolver(r)`      | Register a `TypeSchemaResolver` that overrides types by predicate.                    |
+| `WithTypeSchemaExtender(e)`      | Register a `TypeSchemaExtender` that modifies reflection-generated schemas.           |
 | `WithNamer(n)`                   | Custom `Namer` for `$defs` entries (`NamerFunc` adapts a bare function).              |
 | `WithDefinitions(bool)`          | Extract named types into `$defs`/`$ref` (default `true`).                             |
 | `WithAdditionalProperties(bool)` | Allow extra object keys (default `false`, disallowing them).                          |
@@ -294,6 +295,27 @@ deterministic.
 If a type implements both customization interfaces, only `JSONSchemaProvider` is
 used. When a registered resolver (`WithTypeSchemaResolver` or `WithTypeSchema`) or
 `JSONSchemaProvider` supplies the schema, `JSONSchemaExtender` is not called.
+
+`JSONSchemaExtender` requires owning the type. For types you do not own, a
+`TypeSchemaExtender` registered with `WithTypeSchemaExtender` adjusts the
+reflection-generated schema at the same point in the pipeline — after the
+type's own `JSONSchemaExtend` — under the same not-called-when-replaced rule.
+Where a resolver replaces a type's schema wholesale, an extender modifies
+what reflection produced:
+
+```go
+// Add a description to a third-party type without replacing its schema.
+descriptions := jsonschema.TypeSchemaExtenderFunc(
+	func(t reflect.Type, s *jsonschema.Schema) error {
+		if t == reflect.TypeFor[netip.Addr]() {
+			s.Description = "An IP address."
+		}
+		return nil
+	},
+)
+
+schema, err := jsonschema.GenerateFor[Config](ctx, jsonschema.WithTypeSchemaExtender(descriptions))
+```
 
 ### The `jsonschema` struct tag
 

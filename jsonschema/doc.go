@@ -71,6 +71,9 @@
 //   - [WithTypeSchemaResolver] registers a [TypeSchemaResolver] that supplies
 //     schemas for whole families of types by predicate, sharing the
 //     highest-priority resolution step with [WithTypeSchema].
+//   - [WithTypeSchemaExtender] registers a [TypeSchemaExtender] that modifies
+//     reflection-generated schemas, the way [JSONSchemaExtender] does for
+//     types the caller owns.
 //   - [WithNamer] sets a custom definition namer (a [Namer], with [NamerFunc]
 //     adapting a bare function).
 //   - [WithDefinitions] controls $defs/$ref extraction (default: true).
@@ -191,12 +194,18 @@
 // [JSONSchemaProvider] provides the schema, [JSONSchemaExtender] is not
 // called.
 //
+// [JSONSchemaExtender] requires owning the type. For types the caller does
+// not own, [WithTypeSchemaExtender] registers a [TypeSchemaExtender] that
+// runs at the same point in the pipeline, after the type's own
+// JSONSchemaExtend, under the same not-called-when-replaced rule.
+//
 // Every extension-point interface has a bare-function adapter, following one
 // of two shapes. An interface whose value declares a registration name
 // ([TagInterpreter], [FormatValidator]) has a constructor adapter taking the
 // name and the function ([TagInterpreterFunc], [FormatValidatorFunc]);
-// a single-method interface with no name ([TypeSchemaResolver], [RefResolver],
-// [Namer], [RefFallback]) has a conversion func type ([TypeSchemaResolverFunc],
+// a single-method interface with no name ([TypeSchemaResolver],
+// [TypeSchemaExtender], [RefResolver], [Namer], [RefFallback]) has a
+// conversion func type ([TypeSchemaResolverFunc], [TypeSchemaExtenderFunc],
 // [RefResolverFunc], [NamerFunc], [RefFallbackFunc]) following
 // [net/http.HandlerFunc].
 //
@@ -377,7 +386,8 @@
 //
 // Type-level processing is executed once per type, producing the type's
 // canonical schema: (1) base type reflection via the priority chain,
-// (2) comment extraction if enabled, (3) [JSONSchemaExtender] if implemented.
+// (2) comment extraction if enabled, (3) [JSONSchemaExtender] if implemented,
+// (4) registered [TypeSchemaExtender] values in registration order.
 //
 // Field-level processing is executed per struct field, after the field's type
 // schema is resolved: (1) json:",string" override, (2) comment extraction,
