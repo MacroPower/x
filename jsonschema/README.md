@@ -72,18 +72,20 @@ schema := &jsonschema.Schema{
 	},
 }
 
+ctx := context.Background()
+
 // Compile once, then reuse -- the returned *Validator is safe for concurrent use.
-v, err := jsonschema.Compile(schema)
+v, err := jsonschema.Compile(ctx, schema)
 if err != nil {
 	log.Fatal(err)
 }
 
-if err := v.ValidateJSON([]byte(`{"name":"Ada","age":36}`)); err != nil {
+if err := v.ValidateJSON(ctx, []byte(`{"name":"Ada","age":36}`)); err != nil {
 	log.Fatal(err) // valid: not reached
 }
 
 // Validation failures unwrap to *ValidationError and carry full paths.
-err = v.ValidateJSON([]byte(`{"name":"","age":-1}`))
+err = v.ValidateJSON(ctx, []byte(`{"name":"","age":-1}`))
 
 var ve *jsonschema.ValidationError
 if errors.As(err, &ve) {
@@ -516,7 +518,7 @@ unrecognized keys return an error.
 
 The core entry points are:
 
-- `Validate(schema, instance, opts...)` validates a pre-parsed Go value
+- `Validate(ctx, schema, instance, opts...)` validates a pre-parsed Go value
   (`map[string]any`, `[]any`, `string`, `float64`, `json.Number`, `bool`,
   `nil`). Go numeric kinds that `encoding/json` does not produce — the signed
   and unsigned integer types and `float32` — are accepted too and normalized
@@ -524,10 +526,10 @@ The core entry points are:
   integers convert to `json.Number` (exact at any magnitude) and `float32`
   widens to `float64`. `Normalize` is exported for callers that want to
   pre-normalize a value once and reuse it.
-- `ValidateJSON(schema, data, opts...)` unmarshals raw JSON with a
+- `ValidateJSON(ctx, schema, data, opts...)` unmarshals raw JSON with a
   `json.Decoder` using `UseNumber()` (preserving the integer-vs-number
   distinction), then validates.
-- `Compile(schema, opts...)` performs the per-schema work once (registry
+- `Compile(ctx, schema, opts...)` performs the per-schema work once (registry
   construction, `Schema.Resolve`, draft and vocabulary detection) and returns a
   reusable `*Validator` with `Validate` and `ValidateJSON` methods.
   `MustCompile` panics on error, for package-scope validators where for a
@@ -537,7 +539,7 @@ The core entry points are:
 Schemas arriving as JSON documents rather than `*Schema` values have
 symmetric entry points:
 
-- `CompileJSON(data, opts...)` decodes `data` as a single JSON schema document
+- `CompileJSON(ctx, data, opts...)` decodes `data` as a single JSON schema document
   (numbers as `json.Number`, trailing data rejected) and compiles it with
   `Compile`. It is the schema-side counterpart of `ValidateJSON`.
   `MustCompileJSON` panics on error, for schema documents fixed at build time
@@ -556,12 +558,11 @@ error wrapping `ErrInvalidSchemaDocument`. That includes JSON `null`, which
 unmarshaling into a `Schema` directly would silently coerce to the `false`
 schema. Malformed JSON returns the wrapped decode error without the sentinel.
 
-Every compile and validate entry point has a `Context` variant —
-`CompileContext`, `CompileJSONContext`, `ValidateContext`,
-`ValidateJSONContext`, and the `Validator` methods of the same names — that
-carries a caller-supplied context to the `RefResolver` (see
-[Remote references](#remote-references)); the context-less forms pass
-`context.Background()`.
+Every compile and validate entry point takes a `context.Context` as its
+first parameter, carried to the `RefResolver` (see
+[Remote references](#remote-references)); the `Must*` forms pass
+`context.Background()`, the right context for the package-scope use they
+serve.
 
 `Compile` (and therefore the one-shot helpers) rejects a `type` keyword that
 names anything other than the seven JSON Schema types with `ErrInvalidType`,
@@ -714,11 +715,11 @@ type RefResolver interface {
 }
 ```
 
-Refs resolved while compiling get the `CompileContext` context; refs reached
-during a validation run get that run's `ValidateContext` (or other `Context`
+Refs resolved while compiling get the `Compile` context; refs reached
+during a validation run get that run's `Validate` (or other
 entry point) context, so a resolver that fetches over the network can honor
 cancellation and deadlines. A compiled `*Validator` never retains a context —
-each run carries its own — and the context-less entry points pass
+each run carries its own — and the `Must*` entry points pass
 `context.Background()`. The package ships no network resolver; fetching
 remains the caller's concern. The `WithResolver` option value itself serves
 both validation and inlining, so one option configures `Compile`, `Validate`,
@@ -822,7 +823,7 @@ resolver-returned schemas are never mutated.
 ```go
 fsys := os.DirFS("schemas") // main.json references sub/child.json, ...
 
-inlined, err := jsonschema.Inline(schema,
+inlined, err := jsonschema.Inline(ctx, schema,
 	jsonschema.WithResolver(jsonschema.NewFileResolver(fsys)),
 	jsonschema.WithInlineBaseURI("main.json"),
 )
@@ -851,10 +852,9 @@ resolution to the fs root, so a ref escaping above it returns an error
 wrapping `ErrRefResolve`. The same `WithResolver` option also serves
 file-path and relative refs during validation; refs that absolutize
 to another scheme (an http `$id`, for example) are not valid fs paths and
-resolve to an error. `InlineContext` is `Inline` with a caller-supplied
-context, passed to the resolver with
-every document fetch, so a resolver that fetches over the network can honor
-cancellation and deadlines; `Inline` passes `context.Background()`.
+resolve to an error. `Inline`'s context is passed to the resolver with every
+document fetch, so a resolver that fetches over the network can honor
+cancellation and deadlines.
 
 `WithInlineRetrievalBase` makes refs resolve against each document's
 retrieval URI instead, treating `$id` as an inert annotation: `$id` neither

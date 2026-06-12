@@ -42,7 +42,7 @@ func TestRegexFormatAcceptsECMA262Constructs(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := jsonschema.Validate(schema, tc.instance, jsonschema.WithFormats(true))
+			err := jsonschema.Validate(t.Context(), schema, tc.instance, jsonschema.WithFormats(true))
 			if tc.valid {
 				require.NoError(t, err,
 					"valid ECMA 262 regex should pass format=regex validation")
@@ -113,7 +113,7 @@ func TestRegexFormatIdentityEscapesNonASCII(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := jsonschema.Validate(schema, tc.instance, jsonschema.WithFormats(true))
+			err := jsonschema.Validate(t.Context(), schema, tc.instance, jsonschema.WithFormats(true))
 			if tc.valid {
 				require.NoError(t, err,
 					"valid ECMA 262 regex should pass format=regex validation")
@@ -151,7 +151,7 @@ func TestEmailFormatAcceptsQuotedLocalAndAddressLiteral(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := jsonschema.Validate(schema, tc.instance, jsonschema.WithFormats(true))
+			err := jsonschema.Validate(t.Context(), schema, tc.instance, jsonschema.WithFormats(true))
 			if tc.valid {
 				require.NoError(t, err,
 					"valid RFC 5321 email should pass format=email validation")
@@ -187,21 +187,21 @@ func TestEmailAcceptsNumericTLD(t *testing.T) {
 		Format: "idn-hostname",
 	}
 
-	err := jsonschema.Validate(emailSchema, "user@example.123", jsonschema.WithFormats(true))
+	err := jsonschema.Validate(t.Context(), emailSchema, "user@example.123", jsonschema.WithFormats(true))
 	require.NoError(t, err,
 		"email with an all-numeric TLD should be accepted (RFC 5321 sub-domain grammar)")
 
-	err = jsonschema.Validate(idnEmailSchema, "user@example.123", jsonschema.WithFormats(true))
+	err = jsonschema.Validate(t.Context(), idnEmailSchema, "user@example.123", jsonschema.WithFormats(true))
 	require.NoError(t, err,
 		"idn-email with an all-numeric TLD should be accepted (RFC 6531/5321)")
 
 	// The same domain stays invalid for the hostname and idn-hostname formats,
 	// which ban an all-numeric TLD to disambiguate from an IPv4 address.
-	err = jsonschema.Validate(hostnameSchema, "example.123", jsonschema.WithFormats(true))
+	err = jsonschema.Validate(t.Context(), hostnameSchema, "example.123", jsonschema.WithFormats(true))
 	require.Error(t, err,
 		"hostname with an all-numeric TLD should be rejected")
 
-	err = jsonschema.Validate(idnHostnameSchema, "example.123", jsonschema.WithFormats(true))
+	err = jsonschema.Validate(t.Context(), idnHostnameSchema, "example.123", jsonschema.WithFormats(true))
 	require.Error(t, err,
 		"idn-hostname with an all-numeric TLD should be rejected")
 }
@@ -215,7 +215,7 @@ func TestValidateDateExtendedYear(t *testing.T) {
 	}
 
 	// RFC 3339 full-date requires exactly 4-digit year.
-	err := jsonschema.Validate(schema, "12345-06-19", jsonschema.WithFormats(true))
+	err := jsonschema.Validate(t.Context(), schema, "12345-06-19", jsonschema.WithFormats(true))
 	require.Error(t, err,
 		"extended year (>4 digits) should be rejected for format=date")
 }
@@ -228,7 +228,7 @@ func TestValidateDateTimeExtendedYear(t *testing.T) {
 		Format: "date-time",
 	}
 
-	err := jsonschema.Validate(schema, "12345-01-01T00:00:00Z", jsonschema.WithFormats(true))
+	err := jsonschema.Validate(t.Context(), schema, "12345-01-01T00:00:00Z", jsonschema.WithFormats(true))
 	require.Error(t, err,
 		"extended year (>4 digits) should be rejected for format=date-time")
 }
@@ -242,7 +242,7 @@ func TestHostnameRejectsTrailingDotFQDN(t *testing.T) {
 	}
 
 	// RFC 1123 and RFC 5890 allow trailing dots in FQDNs.
-	err := jsonschema.Validate(schema, "example.com.", jsonschema.WithFormats(true))
+	err := jsonschema.Validate(t.Context(), schema, "example.com.", jsonschema.WithFormats(true))
 	require.NoError(t, err,
 		"trailing-dot FQDN should be accepted for format=hostname")
 }
@@ -257,7 +257,7 @@ func TestHostnameRejectsAllNumericTLD(t *testing.T) {
 
 	// An all-numeric top-level label is rejected to disambiguate from an IPv4
 	// address (RFC 1123 2.1).
-	err := jsonschema.Validate(schema, "999.999.999", jsonschema.WithFormats(true))
+	err := jsonschema.Validate(t.Context(), schema, "999.999.999", jsonschema.WithFormats(true))
 	require.Error(t, err,
 		"all-numeric hostname should be rejected for format=hostname")
 }
@@ -283,7 +283,7 @@ func TestIDNHostnameRejectsOver253Octets(t *testing.T) {
 	}
 
 	// This is 30*8 + 29 dots = 269 characters, exceeding 253 octets.
-	err := jsonschema.Validate(schema, long.String(), jsonschema.WithFormats(true))
+	err := jsonschema.Validate(t.Context(), schema, long.String(), jsonschema.WithFormats(true))
 	require.Error(t, err,
 		"idn-hostname exceeding 253 octets should be rejected")
 }
@@ -298,7 +298,7 @@ func TestIDNEmailRejectsOver64OctetLocalPart(t *testing.T) {
 
 	// Local part with 65 characters exceeds the 64-octet limit.
 	longLocal := "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklm" // 65 chars
-	err := jsonschema.Validate(schema, longLocal+"@example.com", jsonschema.WithFormats(true))
+	err := jsonschema.Validate(t.Context(), schema, longLocal+"@example.com", jsonschema.WithFormats(true))
 	require.Error(t, err,
 		"idn-email with >64 octet local part should be rejected")
 }
@@ -312,7 +312,7 @@ func TestIDNEmailRejectsSpacesInLocalPart(t *testing.T) {
 	}
 
 	// Spaces in local part should be rejected per RFC 6531/5321.
-	err := jsonschema.Validate(schema, "user name with spaces@example.com", jsonschema.WithFormats(true))
+	err := jsonschema.Validate(t.Context(), schema, "user name with spaces@example.com", jsonschema.WithFormats(true))
 	require.Error(t, err,
 		"spaces in idn-email local part should be rejected")
 }
@@ -396,7 +396,7 @@ func TestIDNEmailSharesEmailMachinery(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := jsonschema.Validate(schema, tc.instance, jsonschema.WithFormats(true))
+			err := jsonschema.Validate(t.Context(), schema, tc.instance, jsonschema.WithFormats(true))
 			if tc.want {
 				require.NoError(t, err,
 					"valid RFC 6531 idn-email should pass format=idn-email validation")
@@ -434,7 +434,7 @@ func TestURITemplateMinimalValidation(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := jsonschema.Validate(schema, tc.instance, jsonschema.WithFormats(true))
+			err := jsonschema.Validate(t.Context(), schema, tc.instance, jsonschema.WithFormats(true))
 			if tc.valid {
 				require.NoError(t, err)
 			} else {
@@ -488,7 +488,7 @@ func TestURITemplateExprGrammar(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := jsonschema.Validate(schema, tc.instance, jsonschema.WithFormats(true))
+			err := jsonschema.Validate(t.Context(), schema, tc.instance, jsonschema.WithFormats(true))
 			if tc.valid {
 				require.NoError(t, err,
 					"grammatically valid URI template expression should be accepted")
@@ -509,7 +509,7 @@ func TestURICharsControlCharacters(t *testing.T) {
 	}
 
 	// Tab character in URI should be rejected per RFC 3986.
-	err := jsonschema.Validate(schema, "http://example.com/path\twith\ttabs", jsonschema.WithFormats(true))
+	err := jsonschema.Validate(t.Context(), schema, "http://example.com/path\twith\ttabs", jsonschema.WithFormats(true))
 	require.Error(t, err,
 		"URI with control characters should be rejected")
 }
@@ -523,7 +523,7 @@ func TestIRIRejectsDoubleQuote(t *testing.T) {
 	}
 
 	// Double quote in IRI should be rejected per RFC 3987 (inherits from RFC 3986).
-	err := jsonschema.Validate(schema, `http://example.com/path"with"quotes`, jsonschema.WithFormats(true))
+	err := jsonschema.Validate(t.Context(), schema, `http://example.com/path"with"quotes`, jsonschema.WithFormats(true))
 	require.Error(t, err,
 		"IRI with double quotes should be rejected")
 }
@@ -537,7 +537,7 @@ func TestURIRejectsInvalidPercentEncoding(t *testing.T) {
 	}
 
 	// %ZZ is not valid percent-encoding (Z is not a hex digit).
-	err := jsonschema.Validate(schema, "http://example.com/%ZZ", jsonschema.WithFormats(true))
+	err := jsonschema.Validate(t.Context(), schema, "http://example.com/%ZZ", jsonschema.WithFormats(true))
 	require.Error(t, err,
 		"URI with invalid percent-encoding should be rejected")
 }
@@ -552,7 +552,7 @@ func TestHostnameRejectsFullwidthFullStop(t *testing.T) {
 
 	// A fullwidth full stop (U+FF0E) is not an ASCII label separator and is
 	// rejected.
-	err := jsonschema.Validate(schema, "example\uFF0Ecom", jsonschema.WithFormats(true))
+	err := jsonschema.Validate(t.Context(), schema, "example\uFF0Ecom", jsonschema.WithFormats(true))
 	require.Error(t, err)
 }
 
@@ -565,7 +565,7 @@ func TestTimeRequiresOffset(t *testing.T) {
 	}
 
 	// RFC 3339 requires a zone offset; an offsetless time is rejected.
-	err := jsonschema.Validate(schema, "12:00:00", jsonschema.WithFormats(true))
+	err := jsonschema.Validate(t.Context(), schema, "12:00:00", jsonschema.WithFormats(true))
 	require.Error(t, err,
 		"time without offset should be rejected (RFC 3339 requires offset)")
 }
@@ -590,7 +590,7 @@ func TestURIRejectsMalformedForms(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := jsonschema.Validate(schema, tc.instance, jsonschema.WithFormats(true))
+			err := jsonschema.Validate(t.Context(), schema, tc.instance, jsonschema.WithFormats(true))
 			require.Error(t, err,
 				"malformed URI should be rejected by format=uri")
 		})
@@ -623,7 +623,7 @@ func TestURIAcceptsEmptyPathSegments(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := jsonschema.Validate(schema, tc.instance, jsonschema.WithFormats(true))
+			err := jsonschema.Validate(t.Context(), schema, tc.instance, jsonschema.WithFormats(true))
 			require.NoError(t, err,
 				"URI with empty path segments should be accepted for format=uri")
 		})
@@ -639,7 +639,7 @@ func TestIRIRejectsInvalidPercentEncoding(t *testing.T) {
 	}
 
 	// %ZZ is not valid percent-encoding.
-	err := jsonschema.Validate(schema, "http://example.com/%ZZ", jsonschema.WithFormats(true))
+	err := jsonschema.Validate(t.Context(), schema, "http://example.com/%ZZ", jsonschema.WithFormats(true))
 	require.Error(t, err,
 		"IRI with invalid percent-encoding should be rejected")
 }
@@ -654,7 +654,7 @@ func TestIPv4LeadingZeros(t *testing.T) {
 		Format: "ipv4",
 	}
 
-	err := jsonschema.Validate(schema, "01.02.03.04", jsonschema.WithFormats(true))
+	err := jsonschema.Validate(t.Context(), schema, "01.02.03.04", jsonschema.WithFormats(true))
 	require.Error(t, err,
 		"IPv4 with leading zeros should be rejected")
 }
@@ -701,7 +701,7 @@ func TestHostnameInteriorDoubleHyphen(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := jsonschema.Validate(schema, tc.instance, jsonschema.WithFormats(true))
+			err := jsonschema.Validate(t.Context(), schema, tc.instance, jsonschema.WithFormats(true))
 			if tc.want {
 				require.NoError(t, err,
 					"RFC 1123 hostname should be accepted for format=hostname")
@@ -746,7 +746,7 @@ func TestIDNHostnameRejectsNumericTopLabel(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := jsonschema.Validate(schema, tc.instance, jsonschema.WithFormats(true))
+			err := jsonschema.Validate(t.Context(), schema, tc.instance, jsonschema.WithFormats(true))
 			if tc.want {
 				require.NoError(t, err,
 					"idn-hostname with non-numeric TLD should be accepted")
@@ -774,16 +774,16 @@ func TestURIRejectsBareIPv6(t *testing.T) {
 		Format: "iri",
 	}
 
-	err := jsonschema.Validate(uriSchema, bareIPv6, jsonschema.WithFormats(true))
+	err := jsonschema.Validate(t.Context(), uriSchema, bareIPv6, jsonschema.WithFormats(true))
 	require.Error(t, err,
 		"uri with an unbracketed IPv6 authority should be rejected")
 
-	err = jsonschema.Validate(iriSchema, bareIPv6, jsonschema.WithFormats(true))
+	err = jsonschema.Validate(t.Context(), iriSchema, bareIPv6, jsonschema.WithFormats(true))
 	require.Error(t, err,
 		"iri with an unbracketed IPv6 authority should be rejected (consistency check)")
 
 	// A bracketed IPv6 authority remains valid for uri.
-	err = jsonschema.Validate(uriSchema, "http://[2001:db8::1]/path", jsonschema.WithFormats(true))
+	err = jsonschema.Validate(t.Context(), uriSchema, "http://[2001:db8::1]/path", jsonschema.WithFormats(true))
 	require.NoError(t, err,
 		"uri with a bracketed IPv6 authority should be accepted")
 }
@@ -828,10 +828,10 @@ func TestBuiltinFormatChecks(t *testing.T) {
 
 			schema := &jsonschema.Schema{Type: "string", Format: tc.format}
 
-			err := jsonschema.Validate(schema, tc.valid, jsonschema.WithFormats(true))
+			err := jsonschema.Validate(t.Context(), schema, tc.valid, jsonschema.WithFormats(true))
 			require.NoError(t, err, "format %q must accept %q", tc.format, tc.valid)
 
-			err = jsonschema.Validate(schema, tc.invalid, jsonschema.WithFormats(true))
+			err = jsonschema.Validate(t.Context(), schema, tc.invalid, jsonschema.WithFormats(true))
 			require.Error(t, err, "format %q must reject %q", tc.format, tc.invalid)
 
 			var ve *jsonschema.ValidationError
@@ -846,7 +846,7 @@ func TestBuiltinFormatChecks(t *testing.T) {
 
 		schema := &jsonschema.Schema{Type: "string", Format: "no-such-format"}
 
-		err := jsonschema.Validate(schema, "anything at all", jsonschema.WithFormats(true))
+		err := jsonschema.Validate(t.Context(), schema, "anything at all", jsonschema.WithFormats(true))
 		require.NoError(t, err, "an unregistered format name must be annotation-only")
 	})
 }

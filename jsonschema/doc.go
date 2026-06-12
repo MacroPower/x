@@ -419,13 +419,10 @@
 // [ErrInvalidSchemaDocument]; malformed JSON returns the wrapped decode error
 // without the sentinel.
 //
-// Every compile and validate entry point has a Context variant —
-// [CompileContext], [CompileJSONContext], [ValidateContext],
-// [ValidateJSONContext], and the [Validator.ValidateContext] and
-// [Validator.ValidateJSONContext] methods — that carries a caller-supplied
-// context to the [RefResolver] (see Remote References below);
-// the context-less forms pass [context.Background]. The behavior is otherwise
-// identical.
+// Every compile and validate entry point takes a [context.Context] as its
+// first parameter, carried to the [RefResolver] (see Remote References
+// below); the Must* forms pass [context.Background], the right context for
+// the package-scope use they serve.
 //
 // On success all return nil. A validation failure returns an error that
 // unwraps to [*ValidationError] via [errors.As]. Non-validation failures — JSON
@@ -461,7 +458,7 @@
 //   - [WithResolver] sets a [RefResolver] for resolving remote $ref URIs.
 //     The resolver is called only when local fragment resolution fails. Resolved
 //     schemas are cached within the validation run. The resolver receives the
-//     context from the Context entry points (see Remote References below).
+//     caller's context (see Remote References below).
 //   - [WithFormatValidator] registers a custom format checker: a
 //     [FormatValidator] that declares the format name it handles, with
 //     [FormatValidatorFunc] adapting a bare function.
@@ -603,13 +600,13 @@
 // Circular refs are detected and treated as passing to avoid infinite recursion.
 //
 // The resolver receives a context with
-// every resolution call: the [CompileContext] context for refs resolved while
-// compiling, and the [Validator.ValidateContext] (or other Context entry
-// point) context for refs reached during that validation run, so a resolver
-// that fetches over the network can honor cancellation and deadlines. The
+// every resolution call: the [Compile] context for refs resolved while
+// compiling, and the [Validator.Validate] (or other validation entry point)
+// context for refs reached during that validation run, so a resolver that
+// fetches over the network can honor cancellation and deadlines. The
 // context is never retained by a compiled [Validator] — each run carries its
-// own — and the context-less entry points pass [context.Background]. The
-// package ships no network resolver; fetching remains the caller's concern.
+// own — and the Must* entry points pass [context.Background]. The package
+// ships no network resolver; fetching remains the caller's concern.
 //
 // # Reference Inlining
 //
@@ -640,11 +637,9 @@
 // an error wrapping [ErrRefResolve]. Pair [os.DirFS] with
 // [WithInlineBaseURI] to inline a directory of schemas; the same resolver
 // also serves file-path and relative refs during validation via
-// [WithResolver]. [InlineContext] is
-// Inline with a caller-supplied context, passed to the resolver with every
-// document fetch, so a resolver that fetches over the
-// network can honor cancellation and deadlines; Inline passes
-// [context.Background].
+// [WithResolver]. Inline's context is passed to the resolver with every
+// document fetch, so a resolver that fetches over the network can honor
+// cancellation and deadlines.
 //
 // [WithInlineRetrievalBase] makes refs resolve against each document's
 // retrieval URI instead, treating $id as an inert annotation: $id neither

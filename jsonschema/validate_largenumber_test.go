@@ -82,10 +82,10 @@ func TestValidateLargeNumberGuarded(t *testing.T) {
 
 			require.NoError(t, json.Unmarshal([]byte(c.schema), &s))
 
-			v, err := jsonschema.Compile(&s)
+			v, err := jsonschema.Compile(t.Context(), &s)
 			require.NoError(t, err)
 
-			err = v.ValidateJSON([]byte(c.instance))
+			err = v.ValidateJSON(t.Context(), []byte(c.instance))
 
 			if c.valid {
 				assert.NoError(t, err)

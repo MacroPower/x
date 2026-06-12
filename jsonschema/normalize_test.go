@@ -173,10 +173,10 @@ func TestValidateGoNumericKinds(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			v, err := jsonschema.Compile(tt.schema)
+			v, err := jsonschema.Compile(t.Context(), tt.schema)
 			require.NoError(t, err)
 
-			err = v.Validate(tt.instance)
+			err = v.Validate(t.Context(), tt.instance)
 			if tt.valid {
 				require.NoError(t, err)
 			} else {
@@ -184,7 +184,7 @@ func TestValidateGoNumericKinds(t *testing.T) {
 			}
 
 			// The one-shot helper must agree.
-			oneShot := jsonschema.Validate(tt.schema, tt.instance)
+			oneShot := jsonschema.Validate(t.Context(), tt.schema, tt.instance)
 			assert.Equal(t, err == nil, oneShot == nil)
 		})
 	}
@@ -196,10 +196,10 @@ func TestValidateGoNumericKinds(t *testing.T) {
 func TestValidateStructStillRejected(t *testing.T) {
 	t.Parallel()
 
-	v, err := jsonschema.Compile(&jsonschema.Schema{Type: "object"})
+	v, err := jsonschema.Compile(t.Context(), &jsonschema.Schema{Type: "object"})
 	require.NoError(t, err)
 
-	err = v.Validate(struct{ X int }{X: 1})
+	err = v.Validate(t.Context(), struct{ X int }{X: 1})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "is not accepted")
 

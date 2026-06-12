@@ -68,11 +68,11 @@ func TestCompileEquivalentToValidate(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			v, err := jsonschema.Compile(tt.schema)
+			v, err := jsonschema.Compile(t.Context(), tt.schema)
 			require.NoError(t, err)
 
-			compiledErr := v.Validate(tt.instance)
-			directErr := jsonschema.Validate(tt.schema, tt.instance)
+			compiledErr := v.Validate(t.Context(), tt.instance)
+			directErr := jsonschema.Validate(t.Context(), tt.schema, tt.instance)
 
 			// Compiling once and validating must agree with the one-shot helper.
 			assert.Equal(t, directErr == nil, compiledErr == nil)
@@ -89,7 +89,7 @@ func TestCompileEquivalentToValidate(t *testing.T) {
 func TestCompileReuseAcrossInstances(t *testing.T) {
 	t.Parallel()
 
-	v, err := jsonschema.Compile(draft2020RefSchema())
+	v, err := jsonschema.Compile(t.Context(), draft2020RefSchema())
 	require.NoError(t, err)
 
 	cases := []struct {
@@ -107,7 +107,7 @@ func TestCompileReuseAcrossInstances(t *testing.T) {
 	// between calls.
 	for range 2 {
 		for _, c := range cases {
-			err := v.Validate(c.instance)
+			err := v.Validate(t.Context(), c.instance)
 			if c.valid {
 				assert.NoErrorf(t, err, "instance %v", c.instance)
 			} else {
@@ -120,13 +120,13 @@ func TestCompileReuseAcrossInstances(t *testing.T) {
 func TestCompileValidateJSON(t *testing.T) {
 	t.Parallel()
 
-	v, err := jsonschema.Compile(draft2020RefSchema())
+	v, err := jsonschema.Compile(t.Context(), draft2020RefSchema())
 	require.NoError(t, err)
 
-	require.NoError(t, v.ValidateJSON([]byte(`{"name":"ada"}`)))
-	require.Error(t, v.ValidateJSON([]byte(`{"name":""}`)))
+	require.NoError(t, v.ValidateJSON(t.Context(), []byte(`{"name":"ada"}`)))
+	require.Error(t, v.ValidateJSON(t.Context(), []byte(`{"name":""}`)))
 
-	err = v.ValidateJSON([]byte(`{not json`))
+	err = v.ValidateJSON(t.Context(), []byte(`{not json`))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "JSON decode")
 }
@@ -147,7 +147,7 @@ func TestCompileError(t *testing.T) {
 		Type:   "string",
 	}
 
-	_, err := jsonschema.Compile(schema, jsonschema.WithMetaSchema(meta))
+	_, err := jsonschema.Compile(t.Context(), schema, jsonschema.WithMetaSchema(meta))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "core vocabulary must be required")
 }
@@ -223,7 +223,7 @@ func TestCompileRejectsUnknownTypeNames(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := jsonschema.Compile(tt.schema)
+			_, err := jsonschema.Compile(t.Context(), tt.schema)
 			if tt.err == nil {
 				require.NoError(t, err)
 
@@ -309,7 +309,7 @@ func TestCheckTypeNamesMatchesCompile(t *testing.T) {
 	standaloneErr := jsonschema.CheckTypeNames(schema)
 	require.ErrorIs(t, standaloneErr, jsonschema.ErrInvalidType)
 
-	_, compileErr := jsonschema.Compile(schema)
+	_, compileErr := jsonschema.Compile(t.Context(), schema)
 	require.ErrorIs(t, compileErr, jsonschema.ErrInvalidType)
 
 	assert.Equal(t, compileErr.Error(), standaloneErr.Error())
@@ -350,7 +350,7 @@ func TestCheckTypeNamesToleratesUncompilableSchemas(t *testing.T) {
 func TestCompileConcurrent(t *testing.T) {
 	t.Parallel()
 
-	v, err := jsonschema.Compile(draft2020RefSchema())
+	v, err := jsonschema.Compile(t.Context(), draft2020RefSchema())
 	require.NoError(t, err)
 
 	cases := []struct {
@@ -371,7 +371,7 @@ func TestCompileConcurrent(t *testing.T) {
 		wg.Go(func() {
 			for range 25 {
 				for _, c := range cases {
-					gotValid := v.Validate(c.instance) == nil
+					gotValid := v.Validate(t.Context(), c.instance) == nil
 					if gotValid != c.valid {
 						t.Errorf("instance %v: got valid=%v, want %v", c.instance, gotValid, c.valid)
 					}
@@ -427,14 +427,14 @@ func TestCompileNumericAndPatternCaches(t *testing.T) {
 		{map[string]any{"x-tag": "ok"}, true},
 	}
 
-	v, err := jsonschema.Compile(numericPatternSchema())
+	v, err := jsonschema.Compile(t.Context(), numericPatternSchema())
 	require.NoError(t, err)
 
 	// Two passes prove the caches carry no per-run state and stay consistent.
 	for range 2 {
 		for _, c := range cases {
-			compiledErr := v.Validate(c.instance)
-			directErr := jsonschema.Validate(numericPatternSchema(), c.instance)
+			compiledErr := v.Validate(t.Context(), c.instance)
+			directErr := jsonschema.Validate(t.Context(), numericPatternSchema(), c.instance)
 
 			assert.Equalf(t, directErr == nil, compiledErr == nil,
 				"compiled and direct disagree for %v", c.instance)
@@ -455,7 +455,7 @@ func TestCompileNumericAndPatternCaches(t *testing.T) {
 func TestCompileNumericAndPatternConcurrent(t *testing.T) {
 	t.Parallel()
 
-	v, err := jsonschema.Compile(numericPatternSchema())
+	v, err := jsonschema.Compile(t.Context(), numericPatternSchema())
 	require.NoError(t, err)
 
 	cases := []struct {
@@ -474,7 +474,7 @@ func TestCompileNumericAndPatternConcurrent(t *testing.T) {
 		wg.Go(func() {
 			for range 25 {
 				for _, c := range cases {
-					gotValid := v.Validate(c.instance) == nil
+					gotValid := v.Validate(t.Context(), c.instance) == nil
 					if gotValid != c.valid {
 						t.Errorf("instance %v: got valid=%v, want %v", c.instance, gotValid, c.valid)
 					}
@@ -494,7 +494,7 @@ func TestCompileNumericAndPatternConcurrent(t *testing.T) {
 func TestCompileInvalidPatternRejected(t *testing.T) {
 	t.Parallel()
 
-	_, err := jsonschema.Compile(&jsonschema.Schema{Type: "string", Pattern: "[invalid"})
+	_, err := jsonschema.Compile(t.Context(), &jsonschema.Schema{Type: "string", Pattern: "[invalid"})
 	require.Error(t, err, "an uncompilable pattern must not yield an accept-all validator")
 }
 
@@ -524,13 +524,13 @@ func TestCompileRemoteBoundsAndPatternFallback(t *testing.T) {
 		},
 	}
 
-	v, err := jsonschema.Compile(schema, jsonschema.WithResolver(resolver))
+	v, err := jsonschema.Compile(t.Context(), schema, jsonschema.WithResolver(resolver))
 	require.NoError(t, err)
 
-	require.NoError(t, v.Validate(map[string]any{"count": 4.0, "code": "ABC"}))
-	require.Error(t, v.Validate(map[string]any{"count": 3.0}), "3 is not a multiple of 2")
-	require.Error(t, v.Validate(map[string]any{"count": 12.0}), "12 exceeds the maximum")
-	require.Error(t, v.Validate(map[string]any{"code": "abc"}), "lowercase fails the pattern")
+	require.NoError(t, v.Validate(t.Context(), map[string]any{"count": 4.0, "code": "ABC"}))
+	require.Error(t, v.Validate(t.Context(), map[string]any{"count": 3.0}), "3 is not a multiple of 2")
+	require.Error(t, v.Validate(t.Context(), map[string]any{"count": 12.0}), "12 exceeds the maximum")
+	require.Error(t, v.Validate(t.Context(), map[string]any{"code": "abc"}), "lowercase fails the pattern")
 }
 
 func TestParseSchemaValue(t *testing.T) {
@@ -616,7 +616,7 @@ func TestParseSchemaValue(t *testing.T) {
 
 			require.NoError(t, err)
 
-			validateErr := jsonschema.Validate(schema, tt.instance)
+			validateErr := jsonschema.Validate(t.Context(), schema, tt.instance)
 			if tt.valid {
 				assert.NoError(t, validateErr)
 			} else {
@@ -808,7 +808,7 @@ func TestCompileJSON(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			v, err := jsonschema.CompileJSON([]byte(tt.data))
+			v, err := jsonschema.CompileJSON(t.Context(), []byte(tt.data))
 			if tt.err != nil || tt.contains != "" {
 				require.Error(t, err)
 
@@ -829,7 +829,7 @@ func TestCompileJSON(t *testing.T) {
 
 			require.NoError(t, err)
 
-			validateErr := v.ValidateJSON([]byte(tt.instance))
+			validateErr := v.ValidateJSON(t.Context(), []byte(tt.instance))
 			if tt.valid {
 				assert.NoError(t, validateErr)
 			} else {
@@ -846,8 +846,8 @@ func TestMustCompile(t *testing.T) {
 		t.Parallel()
 
 		v := jsonschema.MustCompile(draft2020RefSchema())
-		require.NoError(t, v.ValidateJSON([]byte(`{"name":"ada"}`)))
-		require.Error(t, v.ValidateJSON([]byte(`{"name":""}`)))
+		require.NoError(t, v.ValidateJSON(t.Context(), []byte(`{"name":"ada"}`)))
+		require.Error(t, v.ValidateJSON(t.Context(), []byte(`{"name":""}`)))
 	})
 
 	t.Run("panics on compile error", func(t *testing.T) {
@@ -866,8 +866,8 @@ func TestMustCompileJSON(t *testing.T) {
 		t.Parallel()
 
 		v := jsonschema.MustCompileJSON([]byte(`{"type":"integer","minimum":3}`))
-		require.NoError(t, v.ValidateJSON([]byte(`4`)))
-		require.Error(t, v.ValidateJSON([]byte(`2`)))
+		require.NoError(t, v.ValidateJSON(t.Context(), []byte(`4`)))
+		require.Error(t, v.ValidateJSON(t.Context(), []byte(`2`)))
 	})
 
 	t.Run("panics on decode error", func(t *testing.T) {
@@ -897,7 +897,7 @@ func TestCompileConcurrentWithResolver(t *testing.T) {
 		Required: []string{"name"},
 	}
 
-	v, err := jsonschema.Compile(schema, jsonschema.WithResolver(resolver))
+	v, err := jsonschema.Compile(t.Context(), schema, jsonschema.WithResolver(resolver))
 	require.NoError(t, err)
 
 	var wg sync.WaitGroup
@@ -905,12 +905,12 @@ func TestCompileConcurrentWithResolver(t *testing.T) {
 	for range 16 {
 		wg.Go(func() {
 			for range 25 {
-				err := v.Validate(map[string]any{"name": "ada"})
+				err := v.Validate(t.Context(), map[string]any{"name": "ada"})
 				if err != nil {
 					t.Errorf("valid instance rejected: %v", err)
 				}
 
-				err = v.Validate(map[string]any{"name": ""})
+				err = v.Validate(t.Context(), map[string]any{"name": ""})
 				if err == nil {
 					t.Errorf("empty name should fail minLength")
 				}

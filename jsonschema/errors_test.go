@@ -91,7 +91,7 @@ func TestValidationError_Leaves_EndToEnd(t *testing.T) {
 		},
 	}
 
-	err := jsonschema.Validate(schema, map[string]any{"name": 1, "age": "x"})
+	err := jsonschema.Validate(t.Context(), schema, map[string]any{"name": 1, "age": "x"})
 
 	var ve *jsonschema.ValidationError
 
@@ -188,7 +188,7 @@ func TestValidationError_InstanceSegments(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := jsonschema.Validate(tc.schema, tc.instance)
+			err := jsonschema.Validate(t.Context(), tc.schema, tc.instance)
 
 			var ve *jsonschema.ValidationError
 
@@ -237,7 +237,7 @@ func TestValidationError_InstanceSegments_SiblingsDoNotAlias(t *testing.T) {
 		},
 	}
 
-	err := jsonschema.Validate(schema, map[string]any{
+	err := jsonschema.Validate(t.Context(), schema, map[string]any{
 		"l1": map[string]any{
 			"l2": map[string]any{
 				"l3": map[string]any{"a": 1, "b": 2},
@@ -322,7 +322,7 @@ func TestValidationError_InstanceSegments_RenderEqualsInstancePath(t *testing.T)
 		instance = values
 	}
 
-	err := jsonschema.Validate(schema, instance)
+	err := jsonschema.Validate(t.Context(), schema, instance)
 
 	var ve *jsonschema.ValidationError
 

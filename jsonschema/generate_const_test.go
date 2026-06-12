@@ -37,11 +37,11 @@ func TestNullablePointerEnumPermitsNull(t *testing.T) {
 		"additionalProperties":false
 	}`, string(got))
 
-	v, err := jsonschema.Compile(s)
+	v, err := jsonschema.Compile(t.Context(), s)
 	require.NoError(t, err)
-	assert.NoError(t, v.Validate(map[string]any{"kind": nil}))
-	assert.NoError(t, v.Validate(map[string]any{"kind": "a"}))
-	assert.Error(t, v.Validate(map[string]any{"kind": "z"}))
+	assert.NoError(t, v.Validate(t.Context(), map[string]any{"kind": nil}))
+	assert.NoError(t, v.Validate(t.Context(), map[string]any{"kind": "a"}))
+	assert.Error(t, v.Validate(t.Context(), map[string]any{"kind": "z"}))
 }
 
 // TestNullablePointerInterpreterEnumPermitsNull covers a nullable pointer field
@@ -75,12 +75,12 @@ func TestNullablePointerInterpreterEnumPermitsNull(t *testing.T) {
 		"additionalProperties":false
 	}`, string(got))
 
-	v, err := jsonschema.Compile(s)
+	v, err := jsonschema.Compile(t.Context(), s)
 	require.NoError(t, err)
-	assert.NoError(t, v.Validate(map[string]any{"color": nil}),
+	assert.NoError(t, v.Validate(t.Context(), map[string]any{"color": nil}),
 		"null is the value an omitempty pointer field permits")
-	assert.NoError(t, v.Validate(map[string]any{"color": "red"}))
-	assert.Error(t, v.Validate(map[string]any{"color": "purple"}))
+	assert.NoError(t, v.Validate(t.Context(), map[string]any{"color": "red"}))
+	assert.Error(t, v.Validate(t.Context(), map[string]any{"color": "purple"}))
 }
 
 // TestIntegerConstAtTypeBoundary covers a const set to a sized integer type's
@@ -110,9 +110,9 @@ func TestIntegerConstAtTypeBoundary(t *testing.T) {
 		"additionalProperties":false
 	}`, string(got))
 
-	v, err := jsonschema.Compile(s)
+	v, err := jsonschema.Compile(t.Context(), s)
 	require.NoError(t, err)
-	assert.NoError(t, v.ValidateJSON([]byte(`{"n":18446744073709551615}`)))
+	assert.NoError(t, v.ValidateJSON(t.Context(), []byte(`{"n":18446744073709551615}`)))
 }
 
 // TestTagScalarOutOfRange covers const, enum, and default tag values that lie
@@ -246,10 +246,10 @@ func TestTagScalarInRange(t *testing.T) {
 		"additionalProperties":false
 	}`, string(got))
 
-	v, err := jsonschema.Compile(s)
+	v, err := jsonschema.Compile(t.Context(), s)
 	require.NoError(t, err)
-	assert.NoError(t, v.ValidateJSON([]byte(`{"a":127,"b":255,"c":5,"d":1.5}`)))
-	assert.Error(t, v.ValidateJSON([]byte(`{"a":126,"b":255,"c":5,"d":1.5}`)),
+	assert.NoError(t, v.ValidateJSON(t.Context(), []byte(`{"a":127,"b":255,"c":5,"d":1.5}`)))
+	assert.Error(t, v.ValidateJSON(t.Context(), []byte(`{"a":126,"b":255,"c":5,"d":1.5}`)),
 		"const pins the value, so a different in-range integer is rejected")
 }
 
@@ -346,14 +346,14 @@ func TestJSONStringTagScalarsParseAsStrings(t *testing.T) {
 			require.NoError(t, err)
 			assert.JSONEq(t, tc.want, string(got))
 
-			v, err := jsonschema.Compile(s)
+			v, err := jsonschema.Compile(t.Context(), s)
 			require.NoError(t, err)
 
-			assert.NoError(t, v.ValidateJSON([]byte(tc.valid)),
+			assert.NoError(t, v.ValidateJSON(t.Context(), []byte(tc.valid)),
 				"schema must accept the string-encoded value")
 
 			if tc.invalid != "" {
-				assert.Error(t, v.ValidateJSON([]byte(tc.invalid)),
+				assert.Error(t, v.ValidateJSON(t.Context(), []byte(tc.invalid)),
 					"schema must reject the unquoted value")
 			}
 		})

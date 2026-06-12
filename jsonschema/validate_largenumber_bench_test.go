@@ -32,7 +32,7 @@ func BenchmarkValidateLargeNumber(b *testing.B) {
 				b.Fatal(err)
 			}
 
-			v, err := jsonschema.Compile(&s)
+			v, err := jsonschema.Compile(b.Context(), &s)
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -45,7 +45,7 @@ func BenchmarkValidateLargeNumber(b *testing.B) {
 			// Both cases validate an instance that violates the schema, so a
 			// nil error means the benchmark stopped measuring the real path.
 			for b.Loop() {
-				if v.ValidateJSON(instance) == nil {
+				if v.ValidateJSON(b.Context(), instance) == nil {
 					b.Fatal("expected a validation error")
 				}
 			}

@@ -186,10 +186,10 @@ type validator struct {
 
 	// The caller's context for the current compile or validation run, passed
 	// to the resolver with every resolution call. It has the
-	// same lifetime discipline as the other per-run state: CompileContext
+	// same lifetime discipline as the other per-run state: Compile
 	// sets it for the duration of compilation and clears it before the
 	// validator is cached, and forInstance sets it per run, so a stored
-	// context never outlives the call that supplied it. Context-less entry
+	// context never outlives the call that supplied it. The Must* entry
 	// points use [context.Background].
 	ctx context.Context
 
@@ -848,31 +848,13 @@ type Validator struct {
 // It returns an error when the options are invalid or the schema fails
 // structural pre-validation.
 //
-// Compile is [CompileContext] with [context.Background].
-func Compile(schema *Schema, opts ...ValidateOption) (*Validator, error) {
-	return CompileContext(context.Background(), schema, opts...)
-}
-
-// MustCompile is [Compile] but panics on error; intended for package-scope
-// validators, where for a static schema and fixed options compilation either
-// always succeeds or always fails, so a failure is a programming error best
-// surfaced at startup. It follows [regexp.MustCompile] and [MustGenerateFor].
-func MustCompile(schema *Schema, opts ...ValidateOption) *Validator {
-	v, err := Compile(schema, opts...)
-	if err != nil {
-		panic(err)
-	}
-
-	return v
-}
-
-// CompileContext is [Compile] with a caller-supplied context. The context is
-// passed to the [RefResolver] (see [WithResolver]) for refs
-// resolved during compilation. It is not retained by the returned [Validator]:
-// refs reached only at validation time resolve under the context passed to
-// [Validator.ValidateContext] or [Validator.ValidateJSONContext] (the
-// context-less methods pass [context.Background]).
-func CompileContext(ctx context.Context, schema *Schema, opts ...ValidateOption) (*Validator, error) {
+// The context is passed to the [RefResolver] (see [WithResolver]) for refs
+// resolved during compilation. It is not retained by the returned
+// [Validator]: refs reached only at validation time resolve under the
+// context passed to [Validator.Validate] or [Validator.ValidateJSON].
+//
+// MustCompile is Compile with [context.Background], panicking on error.
+func Compile(ctx context.Context, schema *Schema, opts ...ValidateOption) (*Validator, error) {
 	v, err := newValidator(schema, opts)
 	if err != nil {
 		return nil, err
@@ -928,6 +910,20 @@ func CompileContext(ctx context.Context, schema *Schema, opts ...ValidateOption)
 	v.ctx = nil
 
 	return &Validator{proto: v}, nil
+}
+
+// MustCompile is [Compile] with [context.Background] but panics on error;
+// intended for package-scope validators, where for a static schema and fixed
+// options compilation either always succeeds or always fails, so a failure
+// is a programming error best surfaced at startup. It follows
+// [regexp.MustCompile] and [MustGenerateFor].
+func MustCompile(schema *Schema, opts ...ValidateOption) *Validator {
+	v, err := Compile(context.Background(), schema, opts...)
+	if err != nil {
+		panic(err)
+	}
+
+	return v
 }
 
 // ParseSchemaValue converts an already-decoded JSON schema document to a
@@ -1000,33 +996,28 @@ func ParseSchema(data []byte) (*Schema, error) {
 // [ErrInvalidSchemaDocument]; malformed JSON returns the wrapped decode error
 // without the sentinel.
 //
-// CompileJSON is [CompileJSONContext] with [context.Background].
-func CompileJSON(data []byte, opts ...ValidateOption) (*Validator, error) {
-	return CompileJSONContext(context.Background(), data, opts...)
-}
-
-// MustCompileJSON is [CompileJSON] but panics on error; intended for
-// package-scope validators compiled from static schema documents, such as
-// files brought in with go:embed, following [MustCompile].
-func MustCompileJSON(data []byte, opts ...ValidateOption) *Validator {
-	v, err := CompileJSON(data, opts...)
-	if err != nil {
-		panic(err)
-	}
-
-	return v
-}
-
-// CompileJSONContext is [CompileJSON] with a caller-supplied context, passed
-// to the [RefResolver] for refs resolved during compilation
-// (see [CompileContext]).
-func CompileJSONContext(ctx context.Context, data []byte, opts ...ValidateOption) (*Validator, error) {
+// The context is passed to the [RefResolver] for refs resolved during
+// compilation (see [Compile]).
+func CompileJSON(ctx context.Context, data []byte, opts ...ValidateOption) (*Validator, error) {
 	schema, err := ParseSchema(data)
 	if err != nil {
 		return nil, err
 	}
 
-	return CompileContext(ctx, schema, opts...)
+	return Compile(ctx, schema, opts...)
+}
+
+// MustCompileJSON is [CompileJSON] with [context.Background] but panics on
+// error; intended for package-scope validators compiled from static schema
+// documents, such as files brought in with go:embed, following
+// [MustCompile].
+func MustCompileJSON(data []byte, opts ...ValidateOption) *Validator {
+	v, err := CompileJSON(context.Background(), data, opts...)
+	if err != nil {
+		panic(err)
+	}
+
+	return v
 }
 
 // CheckTypeNames verifies that every type keyword reachable from schema
@@ -1152,17 +1143,11 @@ func checkTypeNames(schema *Schema, schemaPath string, visited map[*Schema]bool)
 // Returns nil on success or an error that can be unwrapped to *[ValidationError]
 // via [errors.As].
 //
-// Validate is [Validator.ValidateContext] with [context.Background].
-func (c *Validator) Validate(instance any) error {
-	return c.ValidateContext(context.Background(), instance)
-}
-
-// ValidateContext is [Validator.Validate] with a caller-supplied context. The
-// context is passed to the [RefResolver] (see [WithResolver])
-// for remote refs reached during this validation run, so a resolver that
-// fetches over the network can honor cancellation and deadlines. The context
-// is held only for the duration of the run, never by the [Validator] itself.
-func (c *Validator) ValidateContext(ctx context.Context, instance any) error {
+// The context is passed to the [RefResolver] (see [WithResolver]) for remote
+// refs reached during this validation run, so a resolver that fetches over
+// the network can honor cancellation and deadlines. The context is held only
+// for the duration of the run, never by the [Validator] itself.
+func (c *Validator) Validate(ctx context.Context, instance any) error {
 	instance = Normalize(instance)
 	if !acceptedInstance(instance) {
 		return fmt.Errorf(
@@ -1192,21 +1177,15 @@ func (c *Validator) ValidateContext(ctx context.Context, instance any) error {
 // ValidateJSON decodes data as a JSON instance (numbers as [json.Number]) and
 // validates it against the compiled schema.
 //
-// ValidateJSON is [Validator.ValidateJSONContext] with [context.Background].
-func (c *Validator) ValidateJSON(data []byte) error {
-	return c.ValidateJSONContext(context.Background(), data)
-}
-
-// ValidateJSONContext is [Validator.ValidateJSON] with a caller-supplied
-// context, passed to the [RefResolver] for remote refs reached
-// during this validation run (see [Validator.ValidateContext]).
-func (c *Validator) ValidateJSONContext(ctx context.Context, data []byte) error {
+// The context is passed to the [RefResolver] for remote refs reached during
+// this validation run (see [Validator.Validate]).
+func (c *Validator) ValidateJSON(ctx context.Context, data []byte) error {
 	instance, err := decodeJSONInstance(data)
 	if err != nil {
 		return err
 	}
 
-	return c.ValidateContext(ctx, instance)
+	return c.Validate(ctx, instance)
 }
 
 // Validate validates a pre-parsed Go value against a JSON Schema. It compiles
@@ -1222,15 +1201,9 @@ func (c *Validator) ValidateJSONContext(ctx context.Context, data []byte) error 
 // Returns nil on success or an error that can be unwrapped to
 // *[ValidationError] via [errors.As].
 //
-// Validate is [ValidateContext] with [context.Background].
-func Validate(schema *Schema, instance any, opts ...ValidateOption) error {
-	return ValidateContext(context.Background(), schema, instance, opts...)
-}
-
-// ValidateContext is [Validate] with a caller-supplied context, passed to the
-// [RefResolver] (see [WithResolver]) for refs resolved both
-// while compiling schema and during the validation run.
-func ValidateContext(ctx context.Context, schema *Schema, instance any, opts ...ValidateOption) error {
+// The context is passed to the [RefResolver] (see [WithResolver]) for refs
+// resolved both while compiling schema and during the validation run.
+func Validate(ctx context.Context, schema *Schema, instance any, opts ...ValidateOption) error {
 	// Check the instance type before compiling so an unaccepted instance is
 	// reported without the cost of (or any error from) schema preparation.
 	instance = Normalize(instance)
@@ -1242,12 +1215,12 @@ func ValidateContext(ctx context.Context, schema *Schema, instance any, opts ...
 		)
 	}
 
-	c, err := CompileContext(ctx, schema, opts...)
+	c, err := Compile(ctx, schema, opts...)
 	if err != nil {
 		return err
 	}
 
-	return c.ValidateContext(ctx, instance)
+	return c.Validate(ctx, instance)
 }
 
 // resolveErrorIsRefOnly reports whether a [jsonschema.Schema.Resolve] failure
@@ -1441,21 +1414,15 @@ func schemaFormsTree(schema *Schema) bool {
 // Returns nil on success or an error that can be unwrapped to
 // *[ValidationError] via [errors.As].
 //
-// ValidateJSON is [ValidateJSONContext] with [context.Background].
-func ValidateJSON(schema *Schema, data []byte, opts ...ValidateOption) error {
-	return ValidateJSONContext(context.Background(), schema, data, opts...)
-}
-
-// ValidateJSONContext is [ValidateJSON] with a caller-supplied context, passed
-// to the [RefResolver] (see [WithResolver]) for refs resolved
-// both while compiling schema and during the validation run.
-func ValidateJSONContext(ctx context.Context, schema *Schema, data []byte, opts ...ValidateOption) error {
+// The context is passed to the [RefResolver] (see [WithResolver]) for refs
+// resolved both while compiling schema and during the validation run.
+func ValidateJSON(ctx context.Context, schema *Schema, data []byte, opts ...ValidateOption) error {
 	instance, err := decodeJSONInstance(data)
 	if err != nil {
 		return err
 	}
 
-	return ValidateContext(ctx, schema, instance, opts...)
+	return Validate(ctx, schema, instance, opts...)
 }
 
 // errTrailingData reports tokens after the single top-level JSON value.

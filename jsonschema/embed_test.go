@@ -694,7 +694,7 @@ func TestGenerateFor_EmbeddedOptionsOnlyTagPromotesFields(t *testing.T) {
 			require.NoError(t, err)
 
 			// The schema must accept the type's own serialized form.
-			require.NoError(t, jsonschema.ValidateJSON(s, data),
+			require.NoError(t, jsonschema.ValidateJSON(t.Context(), s, data),
 				"generated schema rejected the value the type serializes to: %s", data)
 
 			got, err := json.Marshal(s)
@@ -753,7 +753,7 @@ func TestGenerateFor_EmbeddedShallowestTypeWins(t *testing.T) {
 
 	require.Contains(t, s.Properties, "X")
 	assert.Equal(t, "integer", s.Properties["X"].Type, "schema: %s", marshalSchema(t, s))
-	require.NoError(t, jsonschema.ValidateJSON(s, doc))
+	require.NoError(t, jsonschema.ValidateJSON(t.Context(), s, doc))
 }
 
 // The same type embedded twice at the same depth via distinct paths: its
@@ -786,7 +786,7 @@ func TestGenerateFor_EmbeddedRepeatedTypeAnnihilates(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.NotContains(t, s.Properties, "X", "schema: %s", marshalSchema(t, s))
-	require.NoError(t, jsonschema.ValidateJSON(s, doc))
+	require.NoError(t, jsonschema.ValidateJSON(t.Context(), s, doc))
 }
 
 // Pointer-embedded provider: a nil embed contributes nothing to the marshaled
@@ -819,7 +819,7 @@ func TestGenerateFor_EmbeddedPointerProviderOptional(t *testing.T) {
 	nilDoc, err := json.Marshal(HasOptionalProviderEmbed{Name: "x"})
 	require.NoError(t, err)
 	require.JSONEq(t, `{"name":"x"}`, string(nilDoc))
-	require.NoError(t, jsonschema.ValidateJSON(s, nilDoc), "schema: %s", marshalSchema(t, s))
+	require.NoError(t, jsonschema.ValidateJSON(t.Context(), s, nilDoc), "schema: %s", marshalSchema(t, s))
 
 	// Non-nil embed: the provider's branch matches and its annotations keep
 	// the embedded properties evaluated.
@@ -829,5 +829,5 @@ func TestGenerateFor_EmbeddedPointerProviderOptional(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.JSONEq(t, `{"req":"r","name":"x"}`, string(fullDoc))
-	require.NoError(t, jsonschema.ValidateJSON(s, fullDoc), "schema: %s", marshalSchema(t, s))
+	require.NoError(t, jsonschema.ValidateJSON(t.Context(), s, fullDoc), "schema: %s", marshalSchema(t, s))
 }

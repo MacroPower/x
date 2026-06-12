@@ -106,7 +106,7 @@ func TestValidate(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := jsonschema.Validate(tt.schema, tt.instance)
+			err := jsonschema.Validate(t.Context(), tt.schema, tt.instance)
 			if tt.err == "" {
 				require.NoError(t, err)
 			} else {
@@ -143,7 +143,7 @@ func TestValidateEnum(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := jsonschema.Validate(tt.schema, tt.instance)
+			err := jsonschema.Validate(t.Context(), tt.schema, tt.instance)
 			if tt.err == "" {
 				require.NoError(t, err)
 			} else {
@@ -185,7 +185,7 @@ func TestValidateConst(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := jsonschema.Validate(tt.schema, tt.instance)
+			err := jsonschema.Validate(t.Context(), tt.schema, tt.instance)
 			if tt.err == "" {
 				require.NoError(t, err)
 			} else {
@@ -267,7 +267,7 @@ func TestValidateNumeric(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := jsonschema.Validate(tt.schema, tt.instance)
+			err := jsonschema.Validate(t.Context(), tt.schema, tt.instance)
 			if tt.err == "" {
 				require.NoError(t, err)
 			} else {
@@ -340,7 +340,7 @@ func TestValidateString(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := jsonschema.Validate(tt.schema, tt.instance)
+			err := jsonschema.Validate(t.Context(), tt.schema, tt.instance)
 			if tt.err == "" {
 				require.NoError(t, err)
 			} else {
@@ -439,7 +439,7 @@ func TestValidateArray(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := jsonschema.Validate(tt.schema, tt.instance)
+			err := jsonschema.Validate(t.Context(), tt.schema, tt.instance)
 			if tt.err == "" {
 				require.NoError(t, err)
 			} else {
@@ -595,7 +595,7 @@ func TestValidateObject(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := jsonschema.Validate(tt.schema, tt.instance)
+			err := jsonschema.Validate(t.Context(), tt.schema, tt.instance)
 			if tt.err == "" {
 				require.NoError(t, err)
 			} else {
@@ -699,7 +699,7 @@ func TestValidateComposition(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := jsonschema.Validate(tt.schema, tt.instance)
+			err := jsonschema.Validate(t.Context(), tt.schema, tt.instance)
 			if tt.err == "" {
 				require.NoError(t, err)
 			} else {
@@ -760,7 +760,7 @@ func TestValidateConditional(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := jsonschema.Validate(tt.schema, tt.instance)
+			err := jsonschema.Validate(t.Context(), tt.schema, tt.instance)
 			if tt.err == "" {
 				require.NoError(t, err)
 			} else {
@@ -834,7 +834,7 @@ func TestValidateRef(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := jsonschema.Validate(tt.schema, tt.instance)
+			err := jsonschema.Validate(t.Context(), tt.schema, tt.instance)
 			if tt.err == "" {
 				require.NoError(t, err)
 			} else {
@@ -902,7 +902,7 @@ func TestValidateJSON(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := jsonschema.ValidateJSON(tt.schema, []byte(tt.json))
+			err := jsonschema.ValidateJSON(t.Context(), tt.schema, []byte(tt.json))
 			if tt.err == "" {
 				require.NoError(t, err)
 			} else {
@@ -1007,7 +1007,7 @@ func TestValidateConstEnumFloatEquality(t *testing.T) {
 
 			require.NoError(t, json.Unmarshal([]byte(tt.schema), &s))
 
-			err := jsonschema.ValidateJSON(&s, []byte(tt.instance))
+			err := jsonschema.ValidateJSON(t.Context(), &s, []byte(tt.instance))
 			if tt.want {
 				assert.NoError(t, err)
 			} else {
@@ -1030,7 +1030,7 @@ func TestValidateMultiError(t *testing.T) {
 		},
 	}
 
-	err := jsonschema.Validate(schema, map[string]any{
+	err := jsonschema.Validate(t.Context(), schema, map[string]any{
 		"name": 123.0,
 		"age":  -1.0,
 	})
@@ -1051,7 +1051,7 @@ func TestValidateErrorAs(t *testing.T) {
 	t.Parallel()
 
 	schema := &jsonschema.Schema{Type: "string"}
-	err := jsonschema.Validate(schema, 42.0)
+	err := jsonschema.Validate(t.Context(), schema, 42.0)
 	require.Error(t, err)
 
 	var ve *jsonschema.ValidationError
@@ -1188,7 +1188,7 @@ func TestValidateFormats(t *testing.T) {
 			t.Parallel()
 
 			schema := &jsonschema.Schema{Type: "string", Format: tt.format}
-			err := jsonschema.Validate(schema, tt.value, jsonschema.WithFormats(true))
+			err := jsonschema.Validate(t.Context(), schema, tt.value, jsonschema.WithFormats(true))
 			if tt.err == "" {
 				require.NoError(t, err)
 			} else {
@@ -1203,7 +1203,7 @@ func TestValidateWithFormatsDisabled(t *testing.T) {
 	t.Parallel()
 
 	schema := &jsonschema.Schema{Type: "string", Format: "email"}
-	err := jsonschema.Validate(schema, "not-an-email", jsonschema.WithFormats(false))
+	err := jsonschema.Validate(t.Context(), schema, "not-an-email", jsonschema.WithFormats(false))
 	require.NoError(t, err)
 }
 
@@ -1211,7 +1211,7 @@ func TestValidateWithCustomFormatValidator(t *testing.T) {
 	t.Parallel()
 
 	schema := &jsonschema.Schema{Type: "string", Format: "custom-format"}
-	err := jsonschema.Validate(schema, "invalid",
+	err := jsonschema.Validate(t.Context(), schema, "invalid",
 		jsonschema.WithFormats(true),
 		jsonschema.WithFormatValidator(jsonschema.FormatValidatorFunc("custom-format", func(s string) error {
 			if s != "valid" {
@@ -1250,9 +1250,9 @@ func TestValidateWithFormatValidatorInterface(t *testing.T) {
 		jsonschema.WithFormatValidator(evenLengthFormat{name: "even-length"}),
 	}
 
-	require.NoError(t, jsonschema.Validate(schema, "ab", opts...))
+	require.NoError(t, jsonschema.Validate(t.Context(), schema, "ab", opts...))
 
-	err := jsonschema.Validate(schema, "abc", opts...)
+	err := jsonschema.Validate(t.Context(), schema, "abc", opts...)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "even-length")
 }
@@ -1262,7 +1262,7 @@ func TestValidateWithNilFormatValidator(t *testing.T) {
 
 	// A nil FormatValidator is ignored rather than panicking.
 	schema := &jsonschema.Schema{Type: "string"}
-	require.NoError(t, jsonschema.Validate(schema, "x",
+	require.NoError(t, jsonschema.Validate(t.Context(), schema, "x",
 		jsonschema.WithFormatValidator(nil),
 	))
 }
@@ -1338,7 +1338,7 @@ func TestValidateWithContent(t *testing.T) {
 				opts = append(opts, jsonschema.WithContent(true))
 			}
 
-			err := jsonschema.Validate(tt.schema, tt.instance, opts...)
+			err := jsonschema.Validate(t.Context(), tt.schema, tt.instance, opts...)
 			if tt.err == "" {
 				require.NoError(t, err)
 			} else {
@@ -1380,7 +1380,7 @@ func TestValidateDynamicRefUnresolvableErrors(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := jsonschema.Validate(tt.schema, map[string]any{"x": 1.0})
+			err := jsonschema.Validate(t.Context(), tt.schema, map[string]any{"x": 1.0})
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tt.err)
 		})
@@ -1414,15 +1414,15 @@ func TestValidateJSONPointerFallbackBaseURI(t *testing.T) {
 		},
 	}
 
-	v, err := jsonschema.Compile(root)
+	v, err := jsonschema.Compile(t.Context(), root)
 	require.NoError(t, err)
 
 	// The sub resource's target requires a string; resolving against the
 	// document root would find the integer schema instead and invert both
 	// verdicts.
-	require.NoError(t, v.Validate(map[string]any{"bar": "ok"}))
+	require.NoError(t, v.Validate(t.Context(), map[string]any{"bar": "ok"}))
 
-	err = v.Validate(map[string]any{"bar": 7.0})
+	err = v.Validate(t.Context(), map[string]any{"bar": 7.0})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "expected")
 }
@@ -1445,11 +1445,11 @@ func TestFormatAssertionVocabularyAssertsWhenRecognized(t *testing.T) {
 
 	schema := &jsonschema.Schema{Schema: metaID, Format: "ipv4"}
 
-	err := jsonschema.Validate(schema, "not-an-ipv4", jsonschema.WithMetaSchema(meta))
+	err := jsonschema.Validate(t.Context(), schema, "not-an-ipv4", jsonschema.WithMetaSchema(meta))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "(format)")
 
-	err = jsonschema.Validate(schema, "127.0.0.1", jsonschema.WithMetaSchema(meta))
+	err = jsonschema.Validate(t.Context(), schema, "127.0.0.1", jsonschema.WithMetaSchema(meta))
 	require.NoError(t, err)
 }
 
@@ -1471,7 +1471,7 @@ func TestValidateDraft7RefIgnoresSiblings(t *testing.T) {
 		},
 	}
 
-	err := jsonschema.Validate(schema, map[string]any{"name": "hi"})
+	err := jsonschema.Validate(t.Context(), schema, map[string]any{"name": "hi"})
 	require.NoError(t, err)
 }
 
@@ -1493,7 +1493,7 @@ func TestValidateDraft2020RefWithSiblings(t *testing.T) {
 		},
 	}
 
-	err := jsonschema.Validate(schema, map[string]any{"name": "hi"})
+	err := jsonschema.Validate(t.Context(), schema, map[string]any{"name": "hi"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "minLength")
 }
@@ -1541,7 +1541,7 @@ func TestValidateUnevaluatedProperties(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := jsonschema.Validate(tt.schema, tt.instance)
+			err := jsonschema.Validate(t.Context(), tt.schema, tt.instance)
 			if tt.err == "" {
 				require.NoError(t, err)
 			} else {
@@ -1672,7 +1672,7 @@ func TestValidateDependencies(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := jsonschema.Validate(tt.schema, tt.instance)
+			err := jsonschema.Validate(t.Context(), tt.schema, tt.instance)
 			if tt.err == "" {
 				require.NoError(t, err)
 			} else {
@@ -1714,7 +1714,7 @@ func TestValidateCircularRef(t *testing.T) {
 		},
 	}
 
-	err := jsonschema.Validate(schema, instance)
+	err := jsonschema.Validate(t.Context(), schema, instance)
 	require.NoError(t, err)
 }
 
@@ -1780,7 +1780,7 @@ func TestValidateUnevaluatedItems(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := jsonschema.Validate(tt.schema, tt.instance)
+			err := jsonschema.Validate(t.Context(), tt.schema, tt.instance)
 			if tt.err == "" {
 				require.NoError(t, err)
 			} else {
@@ -1830,7 +1830,7 @@ func TestValidateMaxContains(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := jsonschema.Validate(tt.schema, tt.instance)
+			err := jsonschema.Validate(t.Context(), tt.schema, tt.instance)
 			if tt.err == "" {
 				require.NoError(t, err)
 			} else {
@@ -1894,7 +1894,7 @@ func TestValidateDraft7AdditionalItems(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := jsonschema.Validate(tt.schema, tt.instance)
+			err := jsonschema.Validate(t.Context(), tt.schema, tt.instance)
 			if tt.err == "" {
 				require.NoError(t, err)
 			} else {
@@ -1923,7 +1923,7 @@ func TestValidateRefToRoot(t *testing.T) {
 	}
 
 	// Valid: nested child matches root schema.
-	err := jsonschema.Validate(schema, map[string]any{
+	err := jsonschema.Validate(t.Context(), schema, map[string]any{
 		"name": "parent",
 		"child": map[string]any{
 			"name": "child",
@@ -1933,7 +1933,7 @@ func TestValidateRefToRoot(t *testing.T) {
 
 	// Invalid: child.name is not a string — the recursive $ref correctly
 	// validates the nested object against the root schema.
-	err = jsonschema.Validate(schema, map[string]any{
+	err = jsonschema.Validate(t.Context(), schema, map[string]any{
 		"name": "parent",
 		"child": map[string]any{
 			"name": 123.0,
@@ -1954,7 +1954,7 @@ func TestValidateRefCausesNesting(t *testing.T) {
 		},
 	}
 
-	err := jsonschema.Validate(schema, "hi")
+	err := jsonschema.Validate(t.Context(), schema, "hi")
 	require.Error(t, err)
 
 	var ve *jsonschema.ValidationError
@@ -1980,7 +1980,7 @@ func TestValidateInstancePaths(t *testing.T) {
 		},
 	}
 
-	err := jsonschema.Validate(schema, map[string]any{
+	err := jsonschema.Validate(t.Context(), schema, map[string]any{
 		"address": map[string]any{
 			"city": "",
 		},
@@ -2080,7 +2080,7 @@ func TestValidateVocabularyResolution(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := jsonschema.Validate(tt.schema, tt.instance, tt.opts...)
+			err := jsonschema.Validate(t.Context(), tt.schema, tt.instance, tt.opts...)
 			if tt.err == "" {
 				require.NoError(t, err)
 			} else {
@@ -2104,10 +2104,10 @@ func TestWithMetaSchemaNil(t *testing.T) {
 	var withNil, without error
 
 	require.NotPanics(t, func() {
-		withNil = jsonschema.Validate(schema, 42.0, jsonschema.WithMetaSchema(nil))
+		withNil = jsonschema.Validate(t.Context(), schema, 42.0, jsonschema.WithMetaSchema(nil))
 	}, "WithMetaSchema(nil) must not panic")
 
-	without = jsonschema.Validate(schema, 42.0)
+	without = jsonschema.Validate(t.Context(), schema, 42.0)
 
 	require.Error(t, withNil, "the type constraint still applies with a nil metaschema")
 	assert.Contains(t, withNil.Error(), "(type)")
@@ -2194,7 +2194,7 @@ func TestValidateVocabularyValidationDisabled(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := jsonschema.Validate(tt.schema, tt.instance, noValidation...)
+			err := jsonschema.Validate(t.Context(), tt.schema, tt.instance, noValidation...)
 			require.NoError(t, err)
 		})
 	}
@@ -2253,7 +2253,7 @@ func TestValidateVocabularyApplicatorDisabled(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := jsonschema.Validate(tt.schema, tt.instance, noApplicator...)
+			err := jsonschema.Validate(t.Context(), tt.schema, tt.instance, noApplicator...)
 			require.NoError(t, err)
 		})
 	}
@@ -2272,7 +2272,7 @@ func TestValidateVocabularyUnevaluatedDisabled(t *testing.T) {
 	}
 
 	// With unevaluated vocab disabled, extra properties are not flagged.
-	err := jsonschema.Validate(schema, map[string]any{"name": "Alice", "extra": "field"},
+	err := jsonschema.Validate(t.Context(), schema, map[string]any{"name": "Alice", "extra": "field"},
 		jsonschema.WithVocabularies(
 			jsonschema.VocabCore2020,
 			jsonschema.VocabApplicator2020,
@@ -2286,7 +2286,7 @@ func TestValidateVocabularyUnknownRequired(t *testing.T) {
 	t.Parallel()
 
 	schema := &jsonschema.Schema{Schema: "https://json-schema.org/draft/2020-12/schema"}
-	err := jsonschema.Validate(schema, "anything",
+	err := jsonschema.Validate(t.Context(), schema, "anything",
 		jsonschema.WithVocabularies(
 			jsonschema.VocabCore2020,
 			"https://example.com/vocab/unknown-required-vocab",
@@ -2315,7 +2315,7 @@ func TestValidateVocabularyUnknownOptional(t *testing.T) {
 		Type:   "string",
 	}
 
-	err := jsonschema.Validate(schema, "hello", jsonschema.WithMetaSchema(meta))
+	err := jsonschema.Validate(t.Context(), schema, "hello", jsonschema.WithMetaSchema(meta))
 	require.NoError(t, err)
 }
 
@@ -2344,13 +2344,13 @@ func TestValidateVocabularyMetaSchemaIntegration(t *testing.T) {
 	// the metaschema only declares core + applicator.
 	// Properties still apply (applicator vocab), but the type constraint
 	// inside the property schema is also skipped.
-	err := jsonschema.Validate(schema, map[string]any{"name": "hi"},
+	err := jsonschema.Validate(t.Context(), schema, map[string]any{"name": "hi"},
 		jsonschema.WithMetaSchema(metaSchema),
 	)
 	require.NoError(t, err)
 
 	// Missing property entirely is also fine (required is validation vocab).
-	err = jsonschema.Validate(schema, map[string]any{},
+	err = jsonschema.Validate(t.Context(), schema, map[string]any{},
 		jsonschema.WithMetaSchema(metaSchema),
 	)
 	require.NoError(t, err)
@@ -2380,11 +2380,11 @@ func TestValidateVocabularyApplicatorActiveValidationDisabled(t *testing.T) {
 	// Known properties pass — type constraints inside property schemas are
 	// validation vocab and therefore skipped, but properties itself (applicator)
 	// still tracks which properties were evaluated.
-	err := jsonschema.Validate(schema, map[string]any{"name": 42.0, "age": "not-int"}, opts...)
+	err := jsonschema.Validate(t.Context(), schema, map[string]any{"name": 42.0, "age": "not-int"}, opts...)
 	require.NoError(t, err)
 
 	// Unknown property is still rejected by additionalProperties (applicator).
-	err = jsonschema.Validate(schema, map[string]any{"name": "Alice", "unknown": true}, opts...)
+	err = jsonschema.Validate(t.Context(), schema, map[string]any{"name": "Alice", "unknown": true}, opts...)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "value is not allowed")
 }
@@ -2517,7 +2517,7 @@ func TestValidateWithResolver(t *testing.T) {
 				opts = append(opts, jsonschema.WithResolver(tt.resolver))
 			}
 
-			err := jsonschema.Validate(tt.schema, tt.instance, opts...)
+			err := jsonschema.Validate(t.Context(), tt.schema, tt.instance, opts...)
 			if tt.err == "" {
 				require.NoError(t, err)
 			} else {
@@ -2556,7 +2556,7 @@ func TestValidateRefResolverCaching(t *testing.T) {
 		},
 	}
 
-	err := jsonschema.Validate(schema, map[string]any{"a": 1.0, "b": 2.0},
+	err := jsonschema.Validate(t.Context(), schema, map[string]any{"a": 1.0, "b": 2.0},
 		jsonschema.WithResolver(resolver),
 	)
 	require.NoError(t, err)
@@ -2594,7 +2594,7 @@ func TestFormatAnnotationVocabSuppressesErrors(t *testing.T) {
 	}
 
 	// With only format-annotation active, invalid formats should NOT produce errors.
-	err := jsonschema.Validate(schema, "not-an-email",
+	err := jsonschema.Validate(t.Context(), schema, "not-an-email",
 		jsonschema.WithVocabularies(
 			jsonschema.VocabCore2020,
 			jsonschema.VocabApplicator2020,
@@ -2618,7 +2618,7 @@ func TestInstanceTypeRecognizesLargeFloat64Integer(t *testing.T) {
 	}
 
 	largeFloat := float64(math.MaxInt64) + 1024 // Exceeds int64, but is an integer
-	err := jsonschema.Validate(schema, largeFloat)
+	err := jsonschema.Validate(t.Context(), schema, largeFloat)
 	require.NoError(t, err, "large float64 integers should be recognized as integers")
 }
 
@@ -2632,7 +2632,7 @@ func TestInstanceMatchesTypeRecognizesLargeFloat64Integer(t *testing.T) {
 	}
 
 	largeFloat := float64(math.MaxInt64) + 1024
-	err := jsonschema.Validate(schema, largeFloat)
+	err := jsonschema.Validate(t.Context(), schema, largeFloat)
 	require.NoError(t, err, "large float64 integers should match 'integer' type")
 }
 
@@ -2648,7 +2648,7 @@ func TestHashValueDistinguishesLargeFloat64Integers(t *testing.T) {
 
 	a := float64(math.MaxInt64) + 1024
 	b := float64(math.MaxInt64) + 2048
-	err := jsonschema.Validate(schema, []any{a, b})
+	err := jsonschema.Validate(t.Context(), schema, []any{a, b})
 	require.NoError(t, err, "distinct large float64 integers should be treated as unique")
 }
 
@@ -2663,7 +2663,7 @@ func TestHashValueDistinguishesLargeJSONNumbers(t *testing.T) {
 	}
 
 	data := `[9999999999999999999, 9999999999999999998]`
-	err := jsonschema.ValidateJSON(schema, []byte(data))
+	err := jsonschema.ValidateJSON(t.Context(), schema, []byte(data))
 	require.NoError(t, err, "distinct large json.Number integers should be treated as unique")
 }
 
@@ -2678,9 +2678,9 @@ func TestContentSchemaIsAnnotationOnly(t *testing.T) {
 		ContentSchema: &jsonschema.Schema{Type: "string"},
 	}
 
-	require.NoError(t, jsonschema.Validate(schema, 42.0),
+	require.NoError(t, jsonschema.Validate(t.Context(), schema, 42.0),
 		"contentSchema must not be asserted against the raw instance")
-	require.NoError(t, jsonschema.Validate(schema, "anything"),
+	require.NoError(t, jsonschema.Validate(t.Context(), schema, "anything"),
 		"contentSchema is an annotation even for string instances")
 }
 
@@ -2697,7 +2697,7 @@ func TestUnresolvableRefIsError(t *testing.T) {
 		},
 	}
 
-	err := jsonschema.Validate(schema, map[string]any{"name": 42})
+	err := jsonschema.Validate(t.Context(), schema, map[string]any{"name": 42})
 	require.Error(t, err, "unresolvable $ref should produce a validation error")
 }
 
@@ -2748,7 +2748,7 @@ func TestRefArrayIndexRFC6901Canonical(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := jsonschema.Validate(newSchema(tt.ref), "not-only-this")
+			err := jsonschema.Validate(t.Context(), newSchema(tt.ref), "not-only-this")
 			if tt.wantErr == "" {
 				require.NoError(t, err,
 					"non-canonical array index %q must not resolve to the const subschema", tt.ref)
@@ -2799,7 +2799,7 @@ func TestSchemaAtJSONPointerArrayIndexCanonical(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := jsonschema.Validate(newSchema(tt.ref), "not-only-this")
+			err := jsonschema.Validate(t.Context(), newSchema(tt.ref), "not-only-this")
 			if tt.wantErr == "" {
 				require.NoError(t, err,
 					"non-canonical array index %q must not resolve through the JSON fallback", tt.ref)
@@ -2822,7 +2822,7 @@ func TestInvalidPatternFailsClosed(t *testing.T) {
 		Pattern: "[invalid",
 	}
 
-	err := jsonschema.Validate(schema, "anything")
+	err := jsonschema.Validate(t.Context(), schema, "anything")
 	require.Error(t, err, "invalid pattern regex should produce a validation error")
 }
 
@@ -2853,7 +2853,7 @@ func TestAllOfAnnotationMergeOnPartialFailure(t *testing.T) {
 	// Since allOf fails, "a" should NOT be considered evaluated.
 	// Then unevaluatedProperties should reject "a".
 	instance := map[string]any{"a": "hello"}
-	err := jsonschema.Validate(schema, instance)
+	err := jsonschema.Validate(t.Context(), schema, instance)
 	require.Error(t, err)
 
 	// The error should mention unevaluatedProperties for "a" since allOf failed
@@ -2890,7 +2890,7 @@ func TestIfAnnotationsMergedBeforeThen(t *testing.T) {
 	// Instance: if passes (type=="a"), but then fails (missing "value").
 	// Properties matched by if should NOT be marked evaluated.
 	instance := map[string]any{"type": "a"}
-	err := jsonschema.Validate(schema, instance)
+	err := jsonschema.Validate(t.Context(), schema, instance)
 	require.Error(t, err, "if+then failure should not mark if-properties as evaluated")
 }
 
@@ -2910,7 +2910,7 @@ func TestItemsAfterPrefixItemsAnnotationOnFailure(t *testing.T) {
 	// Array with prefix item valid, but remaining item failing items validation.
 	// The items keyword should not annotate allItems=true since validation failed.
 	instance := []any{1.0, 42.0} // 42.0 is not a string
-	err := jsonschema.Validate(schema, instance)
+	err := jsonschema.Validate(t.Context(), schema, instance)
 	require.Error(t, err, "items failure should not suppress unevaluatedItems")
 }
 
@@ -2932,7 +2932,7 @@ func TestPrefixItemsAnnotationGatedOnSuccess(t *testing.T) {
 
 	// First item fails prefixItems but is still evaluated by it.
 	instance := []any{42.0}
-	err := jsonschema.Validate(schema, instance)
+	err := jsonschema.Validate(t.Context(), schema, instance)
 	require.Error(t, err)
 
 	var ve *jsonschema.ValidationError
@@ -2960,7 +2960,7 @@ func TestContainsAnnotationsLeakOnFailure(t *testing.T) {
 	// Only 1 string item: contains matches it but overall fails (need 3).
 	// The string item should NOT be marked as evaluated.
 	instance := []any{"hello", 1.0, 2.0}
-	err := jsonschema.Validate(schema, instance)
+	err := jsonschema.Validate(t.Context(), schema, instance)
 	require.Error(t, err)
 
 	// The unevaluatedItems keyword should catch all items since contains failed.
@@ -3020,7 +3020,7 @@ func TestMinMaxContainsDraftGated(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := jsonschema.Validate(tc.schema, tc.instance)
+			err := jsonschema.Validate(t.Context(), tc.schema, tc.instance)
 			if tc.wantErr {
 				require.Error(t, err)
 			} else {
@@ -3045,7 +3045,7 @@ func TestRefPercentEncodedPointer(t *testing.T) {
 		},
 	}
 
-	err := jsonschema.Validate(schema, map[string]any{"x": "not-an-integer"})
+	err := jsonschema.Validate(t.Context(), schema, map[string]any{"x": "not-an-integer"})
 	require.Error(t, err, "the $ref must resolve to the integer schema and reject the string")
 }
 
@@ -3079,7 +3079,7 @@ func TestValidateNonFiniteFloat(t *testing.T) {
 			}
 
 			for label, f := range nonFinite {
-				err := jsonschema.Validate(schema, map[string]any{"x": f})
+				err := jsonschema.Validate(t.Context(), schema, map[string]any{"x": f})
 				assert.NoError(t, err, "%s should skip numeric keyword %s, not fail or panic", label, kw)
 			}
 		})
@@ -3091,7 +3091,7 @@ func TestValidateNonFiniteFloat(t *testing.T) {
 		schema := &jsonschema.Schema{Type: "array", UniqueItems: true}
 
 		for label, f := range nonFinite {
-			err := jsonschema.Validate(schema, []any{f, 1.0})
+			err := jsonschema.Validate(t.Context(), schema, []any{f, 1.0})
 			assert.NoError(t, err, "%s must hash without panicking", label)
 		}
 	})
@@ -3115,7 +3115,7 @@ func TestAdditionalPropertiesAnnotationUnconditional(t *testing.T) {
 	// "a" is validated by properties.
 	// The unevaluatedProperties keyword should see that all are covered.
 	instance := map[string]any{"a": "hello", "b": 42.0}
-	err := jsonschema.Validate(schema, instance)
+	err := jsonschema.Validate(t.Context(), schema, instance)
 	require.NoError(t, err)
 }
 
@@ -3139,7 +3139,7 @@ func TestDetectDraftMissingTrailingHash(t *testing.T) {
 	}
 
 	// Should be recognized as Draft7 and use "definitions" not "$defs".
-	err := jsonschema.Validate(schema, map[string]any{})
+	err := jsonschema.Validate(t.Context(), schema, map[string]any{})
 	require.NoError(t, err)
 }
 
@@ -3152,7 +3152,7 @@ func TestDetectDraftHTTPSVariant(t *testing.T) {
 	}
 
 	// Should be detected as Draft7, not fall through to Draft2020.
-	err := jsonschema.Validate(schema, "hello")
+	err := jsonschema.Validate(t.Context(), schema, "hello")
 	require.NoError(t, err)
 }
 
@@ -3173,7 +3173,7 @@ func TestResolveVocabulariesCoreNotRequired(t *testing.T) {
 		Type:   "string",
 	}
 
-	err := jsonschema.Validate(schema, "hello", jsonschema.WithMetaSchema(meta))
+	err := jsonschema.Validate(t.Context(), schema, "hello", jsonschema.WithMetaSchema(meta))
 	require.Error(t, err, "core vocabulary set to false should be rejected")
 }
 
@@ -3198,7 +3198,7 @@ func TestBothFormatVocabsActiveAssertsFormat(t *testing.T) {
 
 	// An invalid value fails specifically on the format assertion (not on any
 	// nonexistent mutual-exclusion rule).
-	err := jsonschema.Validate(schema, "not-an-email", vocabs)
+	err := jsonschema.Validate(t.Context(), schema, "not-an-email", vocabs)
 	require.Error(t, err)
 
 	var ve *jsonschema.ValidationError
@@ -3208,7 +3208,7 @@ func TestBothFormatVocabsActiveAssertsFormat(t *testing.T) {
 		"failure must be the format assertion, got: %s", err)
 
 	// A valid value passes: declaring both vocabularies is not rejected.
-	require.NoError(t, jsonschema.Validate(schema, "user@example.com", vocabs))
+	require.NoError(t, jsonschema.Validate(t.Context(), schema, "user@example.com", vocabs))
 }
 
 func TestDraftEnumZeroValue(t *testing.T) {
@@ -3235,7 +3235,7 @@ func TestValidationErrorUnwrapNil(t *testing.T) {
 	resolverErr := errors.New("network timeout")
 	resolver := &errorResolver{err: resolverErr}
 
-	err := jsonschema.Validate(schema, "hello",
+	err := jsonschema.Validate(t.Context(), schema, "hello",
 		jsonschema.WithResolver(resolver),
 	)
 	require.Error(t, err)
@@ -3263,7 +3263,7 @@ func TestDynamicScopeDeduplication(t *testing.T) {
 	}
 
 	// This exercises the dynamic scope tracking.
-	err := jsonschema.Validate(schema, "hello")
+	err := jsonschema.Validate(t.Context(), schema, "hello")
 	require.NoError(t, err)
 }
 
@@ -3279,7 +3279,7 @@ func TestFloat64MultipleOfRoundTrip(t *testing.T) {
 	}
 
 	// Using Validate (not ValidateJSON) passes a float64 directly.
-	err := jsonschema.Validate(schema, float64(1.01))
+	err := jsonschema.Validate(t.Context(), schema, float64(1.01))
 	require.NoError(t, err, "float64(1.01) should be a valid multiple of 0.01")
 }
 
@@ -3294,7 +3294,7 @@ func TestTraverseSchemaRejectsNonIntegerIndex(t *testing.T) {
 	}
 
 	// Should fail to resolve the ref since "0abc" is not a valid index.
-	err := jsonschema.Validate(schema, "hello")
+	err := jsonschema.Validate(t.Context(), schema, "hello")
 	require.Error(t, err, "JSON Pointer segment '0abc' should not parse as index 0")
 }
 
@@ -3329,7 +3329,7 @@ func TestValidateMutatesInputSchema(t *testing.T) {
 	before, err := json.Marshal(schema)
 	require.NoError(t, err)
 
-	err = jsonschema.Validate(schema, map[string]any{"name": "test"})
+	err = jsonschema.Validate(t.Context(), schema, map[string]any{"name": "test"})
 	require.NoError(t, err)
 
 	after, err := json.Marshal(schema)
@@ -3350,7 +3350,7 @@ func TestRemoteLoaderReturnsEmptyOnFailure(t *testing.T) {
 		},
 	}
 
-	err := jsonschema.Validate(schema, map[string]any{"data": 42})
+	err := jsonschema.Validate(t.Context(), schema, map[string]any{"data": 42})
 	// Should produce an error because the $ref cannot be resolved.
 	require.Error(t, err, "unresolvable remote $ref should not silently accept all values")
 }
@@ -3370,7 +3370,7 @@ func TestRegexCacheKeyedByPattern(t *testing.T) {
 			Pattern: "^test" + letter + "$",
 		}
 
-		err := jsonschema.Validate(schema, "testA")
+		err := jsonschema.Validate(t.Context(), schema, "testA")
 		if letter == "A" {
 			require.NoError(t, err, "pattern %q should match %q", schema.Pattern, "testA")
 		} else {
@@ -3394,7 +3394,7 @@ func TestCycleDetectionPointerIdentity(t *testing.T) {
 	// Create a resolver that returns a clone of the same schema.
 	resolver := &cloningResolver{schema: schema}
 
-	err := jsonschema.Validate(schema, map[string]any{
+	err := jsonschema.Validate(t.Context(), schema, map[string]any{
 		"child": map[string]any{
 			"child": map[string]any{},
 		},
@@ -3430,7 +3430,7 @@ func TestIsEmptySchemaExtraField(t *testing.T) {
 		},
 	}
 
-	err := jsonschema.Validate(schema, 42.0)
+	err := jsonschema.Validate(t.Context(), schema, 42.0)
 	require.NoError(t, err)
 }
 
@@ -3451,7 +3451,7 @@ func TestRemoteLoaderDoubleCall(t *testing.T) {
 		},
 	}
 
-	err := jsonschema.Validate(schema, map[string]any{"data": "hello"},
+	err := jsonschema.Validate(t.Context(), schema, map[string]any{"data": "hello"},
 		jsonschema.WithResolver(resolver),
 	)
 	require.NoError(t, err)
@@ -3498,14 +3498,14 @@ func TestWalkSchemaSkipsRefs(t *testing.T) {
 	resolver := mapResolver{"http://example.com/remote.json": remote}
 
 	// An integer satisfies the anchor reached through the remote sub-$ref.
-	err := jsonschema.Validate(root, map[string]any{"data": 42.0},
+	err := jsonschema.Validate(t.Context(), root, map[string]any{"data": 42.0},
 		jsonschema.WithResolver(resolver))
 	require.NoError(t, err,
 		"$anchor inside a remotely-resolved schema should register and resolve")
 
 	// A non-integer fails, proving the anchored constraint is actually applied
 	// (not silently skipped as unresolved).
-	err = jsonschema.Validate(root, map[string]any{"data": "nope"},
+	err = jsonschema.Validate(t.Context(), root, map[string]any{"data": "nope"},
 		jsonschema.WithResolver(resolver))
 	require.Error(t, err,
 		"the integer constraint behind the remote anchor must be enforced")
@@ -3526,7 +3526,7 @@ func TestTraverseSchemaEmptySegments(t *testing.T) {
 	}
 
 	// The $ref "#/properties/" should resolve to the "" property.
-	err := jsonschema.Validate(schema, map[string]any{"": "hello"})
+	err := jsonschema.Validate(t.Context(), schema, map[string]any{"": "hello"})
 	require.NoError(t, err)
 }
 
@@ -3545,7 +3545,7 @@ func TestResolveJSONPointerDoubleDecoding(t *testing.T) {
 		},
 	}
 
-	err := jsonschema.Validate(schema, map[string]any{"a/b": "hello"})
+	err := jsonschema.Validate(t.Context(), schema, map[string]any{"a/b": "hello"})
 	require.NoError(t, err)
 }
 
@@ -3564,7 +3564,7 @@ func TestTraverseSchemaCrossDraftConfusion(t *testing.T) {
 
 	// #/items/0 should NOT resolve in 2020-12 since items is a single schema.
 	// The ref should fail to resolve since you can't index into a single schema.
-	err := jsonschema.Validate(schema, []any{"hello"})
+	err := jsonschema.Validate(t.Context(), schema, []any{"hello"})
 	require.Error(t, err,
 		"#/items/0 should not resolve in 2020-12 where items is a single schema, not an array")
 }
@@ -3590,7 +3590,7 @@ func TestCustomFormatVocabularyBypass(t *testing.T) {
 	}
 
 	// With format-annotation vocabulary only, custom formats should NOT assert.
-	err := jsonschema.Validate(schema, "bad",
+	err := jsonschema.Validate(t.Context(), schema, "bad",
 		jsonschema.WithFormatValidator(jsonschema.FormatValidatorFunc("custom-format", customChecker)),
 		jsonschema.WithVocabularies(
 			jsonschema.VocabCore2020,
@@ -3672,15 +3672,15 @@ func TestDynamicRefBookendingCheck(t *testing.T) {
 
 	// With the bookend, the nested "baz" is validated against the root, so a
 	// nested foo == "pass" passes and foo == "fail" fails.
-	require.NoError(t, jsonschema.Validate(withBookend, recursivePass),
+	require.NoError(t, jsonschema.Validate(t.Context(), withBookend, recursivePass),
 		"nested value matching the root bookend should validate")
-	require.Error(t, jsonschema.Validate(withBookend, recursiveFail),
+	require.Error(t, jsonschema.Validate(t.Context(), withBookend, recursiveFail),
 		"bookending must validate the nested value against the root $dynamicAnchor")
 
 	// Without the bookend the same $dynamicRef resolves statically to "extended",
 	// which imposes no foo constraint, so the otherwise-failing instance passes.
 	// This control confirms the difference is the dynamic-scope walk, not $ref.
-	require.NoError(t, jsonschema.Validate(withoutBookend, recursiveFail),
+	require.NoError(t, jsonschema.Validate(t.Context(), withoutBookend, recursiveFail),
 		"without a root bookend, $dynamicRef degrades to its static target")
 }
 
@@ -3701,7 +3701,7 @@ func TestResolveRefURNStyle(t *testing.T) {
 		Ref: "#/$defs/sub",
 	}
 
-	err := jsonschema.Validate(schema, "hello")
+	err := jsonschema.Validate(t.Context(), schema, "hello")
 	require.NoError(t, err)
 }
 
@@ -3717,11 +3717,11 @@ func TestDraft07ItemsSingleSchema(t *testing.T) {
 	}
 
 	// Every element is a string: valid.
-	err := jsonschema.Validate(schema, []any{"a", "b"})
+	err := jsonschema.Validate(t.Context(), schema, []any{"a", "b"})
 	require.NoError(t, err, "all-string array should satisfy items: {type: string}")
 
 	// A non-string element fails, and the error points at that element's index.
-	err = jsonschema.Validate(schema, []any{"a", 1.0})
+	err = jsonschema.Validate(t.Context(), schema, []any{"a", 1.0})
 	require.Error(t, err, "a non-string element must violate items: {type: string}")
 
 	var ve *jsonschema.ValidationError
@@ -3754,15 +3754,15 @@ func TestRegistryResolvesAnchorAfterResolve(t *testing.T) {
 	}
 
 	// A string of length >= 2 satisfies the anchored constraints.
-	require.NoError(t, jsonschema.Validate(schema, "hello"),
+	require.NoError(t, jsonschema.Validate(t.Context(), schema, "hello"),
 		"#namedAnchor should resolve to the $defs schema after the full pipeline")
 
 	// Wrong type: the anchored type constraint must still apply.
-	require.Error(t, jsonschema.Validate(schema, 42.0),
+	require.Error(t, jsonschema.Validate(t.Context(), schema, 42.0),
 		"anchored type constraint must be enforced (registry not stale)")
 
 	// Right type but too short: the anchored minLength must still apply.
-	require.Error(t, jsonschema.Validate(schema, "x"),
+	require.Error(t, jsonschema.Validate(t.Context(), schema, "x"),
 		"anchored minLength constraint must be enforced (registry not stale)")
 }
 
@@ -3820,7 +3820,7 @@ func TestFormatsEnabledTriState(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := jsonschema.Validate(schema, "not-an-email", tt.opts...)
+			err := jsonschema.Validate(t.Context(), schema, "not-an-email", tt.opts...)
 			if tt.assertErr {
 				require.Error(t, err, "expected format to be asserted")
 				assert.Contains(t, err.Error(), "format")
@@ -3852,7 +3852,7 @@ func TestResolveRemoteClonesConsistently(t *testing.T) {
 		},
 	}
 
-	err := jsonschema.Validate(schema, map[string]any{"a": "hello", "b": "world"},
+	err := jsonschema.Validate(t.Context(), schema, map[string]any{"a": "hello", "b": "world"},
 		jsonschema.WithResolver(resolver),
 	)
 	require.NoError(t, err)
@@ -3935,7 +3935,7 @@ func TestValidateFloat64PathForNumericKeywords(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := jsonschema.Validate(tc.schema, tc.instance)
+			err := jsonschema.Validate(t.Context(), tc.schema, tc.instance)
 			if tc.err {
 				require.Error(t, err)
 			} else {
@@ -3961,7 +3961,7 @@ func TestVocabularyGatedBehavior(t *testing.T) {
 	}
 
 	// Normally this would fail (42 is not a string).
-	err := jsonschema.Validate(schema, 42.0,
+	err := jsonschema.Validate(t.Context(), schema, 42.0,
 		jsonschema.WithVocabularies(
 			jsonschema.VocabCore2020,
 			jsonschema.VocabApplicator2020,
@@ -3982,7 +3982,7 @@ func TestSchemaUnrecognizedURI(t *testing.T) {
 		Type:   "string",
 	}
 
-	err := jsonschema.Validate(schema, "hello")
+	err := jsonschema.Validate(t.Context(), schema, "hello")
 	require.NoError(t, err)
 }
 
@@ -4003,10 +4003,10 @@ func TestDynamicRefHandCrafted(t *testing.T) {
 		},
 	}
 
-	err := jsonschema.Validate(schema, "hello")
+	err := jsonschema.Validate(t.Context(), schema, "hello")
 	require.NoError(t, err)
 
-	err = jsonschema.Validate(schema, 42.0)
+	err = jsonschema.Validate(t.Context(), schema, 42.0)
 	require.Error(t, err, "$dynamicRef should enforce the resolved schema")
 }
 
@@ -4021,7 +4021,7 @@ func TestKeywordAndInstancePathTogether(t *testing.T) {
 		},
 	}
 
-	err := jsonschema.Validate(schema, map[string]any{"name": "ab"})
+	err := jsonschema.Validate(t.Context(), schema, map[string]any{"name": "ab"})
 	require.Error(t, err)
 
 	var ve *jsonschema.ValidationError
@@ -4125,7 +4125,7 @@ func TestJSONNumberAcrossNumericKeywords(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := jsonschema.ValidateJSON(tc.schema, []byte(tc.data))
+			err := jsonschema.ValidateJSON(t.Context(), tc.schema, []byte(tc.data))
 			if tc.err {
 				require.Error(t, err)
 			} else {
@@ -4167,7 +4167,7 @@ func TestUniqueItemsNumericRepresentation(t *testing.T) {
 			t.Parallel()
 
 			schema := &jsonschema.Schema{Type: "array", UniqueItems: true}
-			err := jsonschema.Validate(schema, tt.instance)
+			err := jsonschema.Validate(t.Context(), schema, tt.instance)
 			if tt.err {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), "uniqueItems")
@@ -4208,7 +4208,7 @@ func TestDeeplyNestedErrors(t *testing.T) {
 		},
 	}
 
-	err := jsonschema.Validate(schema, instance)
+	err := jsonschema.Validate(t.Context(), schema, instance)
 	require.Error(t, err)
 
 	var ve *jsonschema.ValidationError
@@ -4238,10 +4238,10 @@ func TestLocalAnchorResolution(t *testing.T) {
 		},
 	}
 
-	err := jsonschema.Validate(schema, 42.0)
+	err := jsonschema.Validate(t.Context(), schema, 42.0)
 	require.NoError(t, err, "local $anchor resolution should work")
 
-	err = jsonschema.Validate(schema, "not an integer")
+	err = jsonschema.Validate(t.Context(), schema, "not an integer")
 	require.Error(t, err, "local $anchor should enforce the resolved schema")
 }
 
@@ -4331,7 +4331,7 @@ func TestDependentSchemasWithTypeCheck(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := jsonschema.Validate(tc.schema, tc.instance)
+			err := jsonschema.Validate(t.Context(), tc.schema, tc.instance)
 			if tc.err {
 				require.Error(t, err)
 			} else {
@@ -4377,7 +4377,7 @@ func TestCircularRefErrorAtDepth(t *testing.T) {
 		},
 	}
 
-	err := jsonschema.Validate(schema, instance)
+	err := jsonschema.Validate(t.Context(), schema, instance)
 	require.Error(t, err, "deep validation errors should bubble up through recursive refs")
 
 	var ve *jsonschema.ValidationError
@@ -4401,7 +4401,7 @@ func TestValidateJSONStructuredError(t *testing.T) {
 		},
 	}
 
-	err := jsonschema.ValidateJSON(schema, []byte(`{"count": "not a number"}`))
+	err := jsonschema.ValidateJSON(t.Context(), schema, []byte(`{"count": "not a number"}`))
 	require.Error(t, err)
 
 	var ve *jsonschema.ValidationError
@@ -4425,7 +4425,7 @@ func TestRemoteRefNilResolverIsError(t *testing.T) {
 		},
 	}
 
-	err := jsonschema.Validate(schema, map[string]any{"data": 42},
+	err := jsonschema.Validate(t.Context(), schema, map[string]any{"data": 42},
 		jsonschema.WithResolver(&nilResolver{}),
 	)
 	require.Error(t, err,
@@ -4453,7 +4453,7 @@ func TestRefToRootReportsNestedInstancePath(t *testing.T) {
 		},
 	}
 
-	err := jsonschema.Validate(schema, instance)
+	err := jsonschema.Validate(t.Context(), schema, instance)
 	require.Error(t, err)
 
 	var ve *jsonschema.ValidationError
@@ -4484,7 +4484,7 @@ func TestVocabularyViaMetaSchemaPath(t *testing.T) {
 		Type:   "string",
 	}
 
-	err := jsonschema.Validate(schema, "hello",
+	err := jsonschema.Validate(t.Context(), schema, "hello",
 		jsonschema.WithMetaSchema(metaschema),
 	)
 	// Should fail with ErrUnknownVocabulary via the metaschema path.
@@ -4614,10 +4614,10 @@ func TestFormatAssertion(t *testing.T) {
 			}
 
 			require.NoError(t,
-				jsonschema.Validate(schema, tt.valid, jsonschema.WithFormats(true)),
+				jsonschema.Validate(t.Context(), schema, tt.valid, jsonschema.WithFormats(true)),
 				"valid %s instance %q should pass", tt.format, tt.valid)
 
-			err := jsonschema.Validate(schema, tt.invalid, jsonschema.WithFormats(true))
+			err := jsonschema.Validate(t.Context(), schema, tt.invalid, jsonschema.WithFormats(true))
 			require.Error(t, err,
 				"invalid %s instance %q should fail", tt.format, tt.invalid)
 
@@ -4638,7 +4638,7 @@ func TestBooleanSchemaRepresentation(t *testing.T) {
 	// this specific representation. If a user constructs a false schema
 	// differently, detection could fail.
 	falseSchema := &jsonschema.Schema{Not: &jsonschema.Schema{}}
-	err := jsonschema.Validate(falseSchema, "anything")
+	err := jsonschema.Validate(t.Context(), falseSchema, "anything")
 	require.Error(t, err, "false schema should reject all instances")
 }
 
@@ -4736,7 +4736,7 @@ func TestFalseSchemaKeyword(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := jsonschema.Validate(tt.schema, tt.instance)
+			err := jsonschema.Validate(t.Context(), tt.schema, tt.instance)
 
 			var ve *jsonschema.ValidationError
 
@@ -4753,7 +4753,7 @@ func TestFalseSchemaKeyword(t *testing.T) {
 	t.Run("standalone false schema keeps empty keyword", func(t *testing.T) {
 		t.Parallel()
 
-		err := jsonschema.Validate(falseSchema(), "anything")
+		err := jsonschema.Validate(t.Context(), falseSchema(), "anything")
 
 		var ve *jsonschema.ValidationError
 
@@ -4781,7 +4781,7 @@ func TestPropertyNamesViolationIdentifiesKey(t *testing.T) {
 			PropertyNames: &jsonschema.Schema{Pattern: "^[a-z]+$"},
 		}
 
-		err := jsonschema.Validate(schema, map[string]any{"BadKey": 1.0, "good": 2.0})
+		err := jsonschema.Validate(t.Context(), schema, map[string]any{"BadKey": 1.0, "good": 2.0})
 
 		var ve *jsonschema.ValidationError
 
@@ -4812,7 +4812,7 @@ func TestPropertyNamesViolationIdentifiesKey(t *testing.T) {
 			},
 		}
 
-		err := jsonschema.Validate(schema, map[string]any{
+		err := jsonschema.Validate(t.Context(), schema, map[string]any{
 			"settings": map[string]any{"toolong": 1.0},
 		})
 
@@ -4833,7 +4833,7 @@ func TestPropertyNamesViolationIdentifiesKey(t *testing.T) {
 			PropertyNames: &jsonschema.Schema{MaxLength: jsonschema.Ptr(1)},
 		}
 
-		err := jsonschema.Validate(schema, map[string]any{"a/b": 1.0})
+		err := jsonschema.Validate(t.Context(), schema, map[string]any{"a/b": 1.0})
 
 		var ve *jsonschema.ValidationError
 
@@ -4852,7 +4852,7 @@ func TestPropertyNamesViolationIdentifiesKey(t *testing.T) {
 			PropertyNames: falseSchema(),
 		}
 
-		err := jsonschema.Validate(schema, map[string]any{"any": 1.0})
+		err := jsonschema.Validate(t.Context(), schema, map[string]any{"any": 1.0})
 
 		var ve *jsonschema.ValidationError
 
@@ -4881,7 +4881,7 @@ func TestValidationErrorStructure(t *testing.T) {
 			},
 		}
 
-		err := jsonschema.Validate(schema, map[string]any{})
+		err := jsonschema.Validate(t.Context(), schema, map[string]any{})
 
 		var ve *jsonschema.ValidationError
 
@@ -4900,7 +4900,7 @@ func TestValidationErrorStructure(t *testing.T) {
 
 		schema := &jsonschema.Schema{Type: "number", Maximum: jsonschema.Ptr(10.0)}
 
-		err := jsonschema.Validate(schema, 11.0)
+		err := jsonschema.Validate(t.Context(), schema, 11.0)
 
 		var ve *jsonschema.ValidationError
 
@@ -4926,7 +4926,7 @@ func TestValidationErrorStructure(t *testing.T) {
 			},
 		}
 
-		err := jsonschema.Validate(schema, map[string]any{
+		err := jsonschema.Validate(t.Context(), schema, map[string]any{
 			"address": map[string]any{"city": "x"},
 		})
 
@@ -4954,7 +4954,7 @@ func TestValidationErrorStructure(t *testing.T) {
 			},
 		}
 
-		err := jsonschema.Validate(schema, map[string]any{
+		err := jsonschema.Validate(t.Context(), schema, map[string]any{
 			"meta": map[string]any{"n": "not-a-number"},
 		})
 
@@ -4992,7 +4992,7 @@ func TestValidationErrorStructure(t *testing.T) {
 			},
 		}
 
-		err := jsonschema.Validate(schema, 5.0)
+		err := jsonschema.Validate(t.Context(), schema, 5.0)
 
 		var ve *jsonschema.ValidationError
 
@@ -5040,7 +5040,7 @@ func TestDefaultDraftValidationRuns(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := jsonschema.Validate(schema, tt.instance)
+			err := jsonschema.Validate(t.Context(), schema, tt.instance)
 			if tt.err == "" {
 				require.NoError(t, err)
 			} else {
@@ -5069,7 +5069,7 @@ func TestContainsBasedErrorMatchingScope(t *testing.T) {
 
 	// Missing required property produces a "required" error, but the
 	// rendered error tree may also mention "type" in a different context.
-	err := jsonschema.Validate(schema, map[string]any{})
+	err := jsonschema.Validate(t.Context(), schema, map[string]any{})
 	require.Error(t, err)
 
 	var ve *jsonschema.ValidationError
@@ -5143,7 +5143,7 @@ func TestDefaultDraftIsDraft2020(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := jsonschema.Validate(tt.schema, tt.instance)
+			err := jsonschema.Validate(t.Context(), tt.schema, tt.instance)
 			if tt.siblingApplied {
 				require.Error(t, err, "sibling maximum should reject 10 under 2020-12")
 				assert.Contains(t, err.Error(), "(maximum)")
@@ -5218,7 +5218,7 @@ func TestSubSchemaInheritsRootDraft(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := jsonschema.Validate(tt.schema, tt.instance)
+			err := jsonschema.Validate(t.Context(), tt.schema, tt.instance)
 			if tt.err == "" {
 				require.NoError(t, err)
 			} else {
@@ -5273,7 +5273,7 @@ func TestDraftSpecificSemanticsApplied(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := jsonschema.Validate(tt.schema, float64(10))
+			err := jsonschema.Validate(t.Context(), tt.schema, float64(10))
 			if tt.rejected {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), "(maximum)")
@@ -5392,13 +5392,13 @@ func TestConcurrentValidationSharedSchema(t *testing.T) {
 			defer wg.Done()
 
 			valid := map[string]any{"code": "ABC", "ref": "ok", "x-tag": "v"}
-			err := jsonschema.Validate(schema, valid, jsonschema.WithResolver(resolver))
+			err := jsonschema.Validate(t.Context(), schema, valid, jsonschema.WithResolver(resolver))
 			if err != nil {
 				t.Errorf("goroutine %d: valid instance rejected: %v", i, err)
 			}
 
 			invalid := map[string]any{"code": "abc", "ref": "ok"}
-			err = jsonschema.Validate(schema, invalid, jsonschema.WithResolver(resolver))
+			err = jsonschema.Validate(t.Context(), schema, invalid, jsonschema.WithResolver(resolver))
 			if err == nil {
 				t.Errorf("goroutine %d: invalid code accepted", i)
 			}
@@ -5417,7 +5417,7 @@ func TestResolveOptionsNotMutated(t *testing.T) {
 	schema := &jsonschema.Schema{Type: "string"}
 
 	for range 2 {
-		require.NoError(t, jsonschema.Validate(schema, "x",
+		require.NoError(t, jsonschema.Validate(t.Context(), schema, "x",
 			jsonschema.WithResolveOptions(opts),
 			jsonschema.WithResolver(fixedResolver{schema: &jsonschema.Schema{Type: "string"}}),
 		))
@@ -5442,7 +5442,7 @@ func TestValidationErrorSchemaPath(t *testing.T) {
 		},
 	}
 
-	err := jsonschema.Validate(schema, map[string]any{
+	err := jsonschema.Validate(t.Context(), schema, map[string]any{
 		"address": map[string]any{"city": "NY"},
 	})
 	require.Error(t, err)
@@ -5471,7 +5471,7 @@ func TestValidateCollectsAllErrors(t *testing.T) {
 		},
 	}
 
-	err := jsonschema.Validate(schema, map[string]any{
+	err := jsonschema.Validate(t.Context(), schema, map[string]any{
 		"name": 123.0,   // wrong type
 		"age":  -1.0,    // below minimum
 		"tags": []any{}, // too few items
@@ -5559,7 +5559,7 @@ func TestValidateRefIntoUnknownKeyword(t *testing.T) {
 
 			require.NoError(t, json.Unmarshal([]byte(tc.schema), &schema))
 
-			err := jsonschema.ValidateJSON(&schema, []byte(tc.data))
+			err := jsonschema.ValidateJSON(t.Context(), &schema, []byte(tc.data))
 			if tc.valid {
 				assert.NoError(t, err, "expected valid")
 			} else {
@@ -5617,7 +5617,7 @@ func TestValidateRefTargetWellFormed(t *testing.T) {
 
 			require.NoError(t, json.Unmarshal([]byte(tc.schema), &schema))
 
-			err := jsonschema.ValidateJSON(&schema, []byte(tc.data))
+			err := jsonschema.ValidateJSON(t.Context(), &schema, []byte(tc.data))
 			switch {
 			case tc.err:
 				require.Error(t, err, "a malformed ref-only target must keep the error fatal")
@@ -5685,7 +5685,7 @@ func TestValidateResolveErrorStillFatal(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := jsonschema.Validate(tc.schema, tc.instance)
+			err := jsonschema.Validate(t.Context(), tc.schema, tc.instance)
 			require.Error(t, err,
 				"an unresolvable ref must not be reclassified as a tolerable ref-only Resolve error")
 		})

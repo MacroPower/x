@@ -832,9 +832,9 @@ func TestGenerateFor_SelfEmbeddingStruct(t *testing.T) {
 	}`, string(got))
 
 	// The schema must accept exactly what encoding/json produces.
-	v, err := jsonschema.Compile(s)
+	v, err := jsonschema.Compile(t.Context(), s)
 	require.NoError(t, err)
-	assert.NoError(t, v.ValidateJSON(encoded))
+	assert.NoError(t, v.ValidateJSON(t.Context(), encoded))
 }
 
 func TestGenerateFor_IntegerMapKeys(t *testing.T) {
@@ -2412,9 +2412,9 @@ func TestUint64BoundExclusiveMaximum(t *testing.T) {
 	assert.InDelta(t, float64(1<<64), *s.ExclusiveMaximum, 0, "exclusive maximum should be 2^64")
 
 	// The boundary value MaxUint64 must validate against its own schema.
-	v, err := jsonschema.Compile(s)
+	v, err := jsonschema.Compile(t.Context(), s)
 	require.NoError(t, err)
-	assert.NoError(t, v.ValidateJSON([]byte("18446744073709551615")),
+	assert.NoError(t, v.ValidateJSON(t.Context(), []byte("18446744073709551615")),
 		"MaxUint64 must satisfy the uint64 schema")
 }
 
@@ -2436,11 +2436,11 @@ func TestInt64BoundExclusiveMaximum(t *testing.T) {
 	assert.InDelta(t, float64(1<<63), *s.ExclusiveMaximum, 0, "exclusive maximum should be 2^63")
 
 	// Both boundary values must validate against their own schema.
-	v, err := jsonschema.Compile(s)
+	v, err := jsonschema.Compile(t.Context(), s)
 	require.NoError(t, err)
-	assert.NoError(t, v.ValidateJSON([]byte("9223372036854775807")),
+	assert.NoError(t, v.ValidateJSON(t.Context(), []byte("9223372036854775807")),
 		"MaxInt64 must satisfy the int64 schema")
-	assert.NoError(t, v.ValidateJSON([]byte("-9223372036854775808")),
+	assert.NoError(t, v.ValidateJSON(t.Context(), []byte("-9223372036854775808")),
 		"MinInt64 must satisfy the int64 schema")
 }
 
@@ -2653,7 +2653,7 @@ func TestPointerEmbeddedStructFieldsAreOptional(t *testing.T) {
 	// A nil *Embedded causes encoding/json to omit embedded fields.
 	// The schema should reflect this optionality.
 	data := `{"name": "test"}`
-	err = jsonschema.ValidateJSON(s, []byte(data))
+	err = jsonschema.ValidateJSON(t.Context(), s, []byte(data))
 	require.NoError(t, err, "nil pointer-to-embedded-struct fields should be optional")
 }
 
@@ -2759,7 +2759,7 @@ func TestMutualRecursionNoDanglingRef(t *testing.T) {
 	assert.Contains(t, s.Defs, "mutualB", "mutualB must remain in $defs")
 
 	// A dangling $ref would surface as a resolve error during validation.
-	err = jsonschema.Validate(s, map[string]any{"b": map[string]any{"a": nil}})
+	err = jsonschema.Validate(t.Context(), s, map[string]any{"b": map[string]any{"a": nil}})
 	require.NoError(t, err, "generated schema must resolve with no dangling $ref")
 }
 
@@ -2824,17 +2824,17 @@ func TestGenerateThenValidateRoundTrip(t *testing.T) {
 
 	// Valid instance should pass.
 	valid := `{"name":"Alice","age":30,"address":{"street":"123 Main","city":"NY"}}`
-	err = jsonschema.ValidateJSON(s, []byte(valid))
+	err = jsonschema.ValidateJSON(t.Context(), s, []byte(valid))
 	require.NoError(t, err, "valid instance should pass generated schema")
 
 	// Invalid instance (extra property) should fail.
 	invalid := `{"name":"Alice","age":30,"address":{"street":"123 Main","city":"NY"},"extra":"bad"}`
-	err = jsonschema.ValidateJSON(s, []byte(invalid))
+	err = jsonschema.ValidateJSON(t.Context(), s, []byte(invalid))
 	require.Error(t, err, "instance with extra properties should fail generated schema")
 
 	// Invalid type should fail.
 	wrongType := `{"name":42,"age":30,"address":{"street":"123 Main","city":"NY"}}`
-	err = jsonschema.ValidateJSON(s, []byte(wrongType))
+	err = jsonschema.ValidateJSON(t.Context(), s, []byte(wrongType))
 	require.Error(t, err, "instance with wrong type should fail generated schema")
 }
 
@@ -2911,12 +2911,12 @@ func TestEmbeddedStructSchemaValidatesInstances(t *testing.T) {
 
 	// Validate a conforming instance.
 	valid := `{"value":"hello","name":"test"}`
-	err = jsonschema.ValidateJSON(s, []byte(valid))
+	err = jsonschema.ValidateJSON(t.Context(), s, []byte(valid))
 	require.NoError(t, err, "valid embedded struct instance should pass")
 
 	// Validate a non-conforming instance.
 	invalid := `{"value":"hello","name":"test","extra":"bad"}`
-	err = jsonschema.ValidateJSON(s, []byte(invalid))
+	err = jsonschema.ValidateJSON(t.Context(), s, []byte(invalid))
 	require.Error(t, err, "extra properties on embedded struct should fail")
 }
 
@@ -3085,7 +3085,7 @@ func TestGenerateFor_NamedByteSlice(t *testing.T) {
 		// The schema accepts the type's own serialized form (a base64 string).
 		data, err := json.Marshal(byteSliceNamed("hello"))
 		require.NoError(t, err)
-		require.NoError(t, jsonschema.ValidateJSON(s, data))
+		require.NoError(t, jsonschema.ValidateJSON(t.Context(), s, data))
 	})
 
 	t.Run("slice of named uint8 is base64 string", func(t *testing.T) {
@@ -3130,7 +3130,7 @@ func TestGenerateFor_URLReflectsAsObject(t *testing.T) {
 
 	assert.Equal(t, "object", s.Type)
 	assert.Contains(t, s.Properties, "Scheme")
-	assert.NoError(t, jsonschema.ValidateJSON(s, doc),
+	assert.NoError(t, jsonschema.ValidateJSON(t.Context(), s, doc),
 		"generated schema rejected url.URL's actual serialization: %s", doc)
 }
 
@@ -3148,6 +3148,6 @@ func TestGenerateFor_BigIntMatchesMarshalOutput(t *testing.T) {
 
 	s, err := jsonschema.GenerateFor[bigIntDoc]()
 	require.NoError(t, err)
-	assert.NoError(t, jsonschema.ValidateJSON(s, data),
+	assert.NoError(t, jsonschema.ValidateJSON(t.Context(), s, data),
 		"generated schema rejected big.Int's actual serialization: %s", data)
 }

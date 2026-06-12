@@ -341,7 +341,7 @@ func TestVocabSetOmitsMetaData(t *testing.T) {
 		Description: "My Description",
 	}
 
-	err := jsonschema.Validate(schema, "hello",
+	err := jsonschema.Validate(t.Context(), schema, "hello",
 		jsonschema.WithVocabularies(
 			jsonschema.VocabCore2020,
 			jsonschema.VocabValidation2020,
@@ -480,7 +480,7 @@ func TestSchemaTypeAliasBlocksExtension(t *testing.T) {
 	}
 
 	// $recursiveAnchor is ignored, so any object instance validates.
-	err := jsonschema.Validate(schema, map[string]any{})
+	err := jsonschema.Validate(t.Context(), schema, map[string]any{})
 	require.NoError(t, err)
 }
 
@@ -495,7 +495,7 @@ func TestParseFloatMultipleOfNegative(t *testing.T) {
 
 	// Validating with a negative multipleOf should produce an error.
 	// Per JSON Schema (Section 6.2.1), multipleOf MUST be > 0.
-	err := jsonschema.Validate(schema, 5.0)
+	err := jsonschema.Validate(t.Context(), schema, 5.0)
 	require.Error(t, err,
 		"negative multipleOf should be rejected during validation")
 }

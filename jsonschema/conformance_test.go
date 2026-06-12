@@ -194,7 +194,7 @@ func TestGeneratedSchemaConformsToMetaschema(t *testing.T) {
 				t.Parallel()
 
 				bad := []byte(`{"type":42,"minLength":-1}`)
-				err := jsonschema.ValidateJSON(meta, bad, opts...)
+				err := jsonschema.ValidateJSON(t.Context(), meta, bad, opts...)
 				require.Error(t, err, "meta-schema must reject a structurally invalid schema")
 			})
 
@@ -210,7 +210,7 @@ func TestGeneratedSchemaConformsToMetaschema(t *testing.T) {
 
 					// Validate the generated schema document as an instance of the
 					// official meta-schema, using the package's own validator.
-					err = jsonschema.ValidateJSON(meta, raw, opts...)
+					err = jsonschema.ValidateJSON(t.Context(), meta, raw, opts...)
 					require.NoErrorf(t, err, "generated %s schema must conform to %s:\n%s", name, draft.metaURI, raw)
 
 					// Meta-schema conformance alone cannot catch a wrong-draft

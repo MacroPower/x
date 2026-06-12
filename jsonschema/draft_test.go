@@ -45,7 +45,7 @@ func TestWithDraft_ValidationOverride(t *testing.T) {
 
 			schema := &jsonschema.Schema{Schema: tc.schemaURI, Format: "email"}
 
-			err := jsonschema.Validate(schema, "definitely not an email", tc.opts...)
+			err := jsonschema.Validate(t.Context(), schema, "definitely not an email", tc.opts...)
 			if tc.valid {
 				assert.NoError(t, err)
 
@@ -81,7 +81,7 @@ func TestWithDraft_InlineOverride(t *testing.T) {
 	t.Run("no $schema defaults to 2020 sibling handling", func(t *testing.T) {
 		t.Parallel()
 
-		got, err := jsonschema.Inline(newSchema())
+		got, err := jsonschema.Inline(t.Context(), newSchema())
 		require.NoError(t, err)
 
 		prop := got.Properties["a"]
@@ -95,7 +95,7 @@ func TestWithDraft_InlineOverride(t *testing.T) {
 	t.Run("Draft7 override drops siblings", func(t *testing.T) {
 		t.Parallel()
 
-		got, err := jsonschema.Inline(newSchema(), jsonschema.WithDraft(jsonschema.Draft7))
+		got, err := jsonschema.Inline(t.Context(), newSchema(), jsonschema.WithDraft(jsonschema.Draft7))
 		require.NoError(t, err)
 
 		prop := got.Properties["a"]

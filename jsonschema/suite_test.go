@@ -388,7 +388,7 @@ func runSuiteFile(t *testing.T, path, pathKey, schemaURI string, opts ...jsonsch
 						t.Skip(reason)
 					}
 
-					err := jsonschema.ValidateJSON(schema, tc.Data, opts...)
+					err := jsonschema.ValidateJSON(t.Context(), schema, tc.Data, opts...)
 					if tc.Valid {
 						assert.NoError(t, err, "expected valid, got: %v", err)
 					} else {

@@ -24,8 +24,8 @@ import (
 type inliner struct {
 	resolver RefResolver
 
-	// The context of the [InlineContext] call, passed to the resolver with
-	// every document fetch; [Inline] supplies [context.Background].
+	// The context of the [Inline] call, passed to the resolver with every
+	// document fetch.
 	ctx context.Context
 
 	// The scratch validator resolving references. Its URI, anchor, and
@@ -251,16 +251,10 @@ func normalizeBaseURI(base string) string {
 // these failures into dropping the reference keyword or expanding a
 // substitute schema instead.
 //
-// Inline is [InlineContext] with [context.Background].
-func Inline(s *Schema, opts ...InlineOption) (*Schema, error) {
-	return InlineContext(context.Background(), s, opts...)
-}
-
-// InlineContext is [Inline] with a caller-supplied context, passed to the
-// [RefResolver] (see [WithResolver]) with every
-// document fetch, so a resolver that fetches over the network can honor
-// cancellation and deadlines. The behavior is otherwise identical.
-func InlineContext(ctx context.Context, s *Schema, opts ...InlineOption) (*Schema, error) {
+// The context is passed to the [RefResolver] (see [WithResolver]) with
+// every document fetch, so a resolver that fetches over the network can
+// honor cancellation and deadlines.
+func Inline(ctx context.Context, s *Schema, opts ...InlineOption) (*Schema, error) {
 	if s == nil {
 		return nil, nil //nolint:nilnil // A nil schema inlines to nil.
 	}

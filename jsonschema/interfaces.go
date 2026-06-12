@@ -146,10 +146,10 @@ func (f formatFunc) ValidateFormat(value string) error { return f.fn(value) }
 type RefResolver interface {
 	// ResolveRef resolves a remote schema URI under the caller's context, so
 	// a resolver that fetches over the network can honor cancellation and
-	// deadlines. The context comes from the Context entry point in effect
-	// ([CompileContext], [Validator.ValidateContext], [InlineContext]);
-	// context-less entry points pass [context.Background]. A resolver that
-	// performs no cancellable work can ignore it.
+	// deadlines. The context comes from the entry point in effect
+	// ([Compile], [Validator.Validate], [Inline]); the Must* entry points
+	// pass [context.Background]. A resolver that performs no cancellable
+	// work can ignore it.
 	ResolveRef(ctx context.Context, uri string) (*Schema, error)
 }
 

@@ -11,8 +11,8 @@ import (
 	"go.jacobcolvin.com/x/jsonschema"
 )
 
-// ctxMarkerKey keys a marker value placed on contexts handed to the context
-// entry points, so a recording resolver can verify it received the same
+// ctxMarkerKey keys a marker value placed on contexts handed to the entry
+// points, so a recording resolver can verify it received the same
 // context the caller supplied.
 type ctxMarkerKey struct{}
 
@@ -104,10 +104,10 @@ func (r *recordingResolver) recordedCtxs() []context.Context {
 	return append([]context.Context(nil), r.ctxs...)
 }
 
-// TestCompileContextPassesContextToResolver pins the compile-time resolution
+// TestCompilePassesContextToResolver pins the compile-time resolution
 // path: refs resolved while compiling reach the resolver carrying the
-// context given to CompileContext.
-func TestCompileContextPassesContextToResolver(t *testing.T) {
+// context given to Compile.
+func TestCompilePassesContextToResolver(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.WithValue(t.Context(), ctxMarkerKey{}, "compile")
@@ -117,7 +117,7 @@ func TestCompileContextPassesContextToResolver(t *testing.T) {
 		},
 	}
 
-	v, err := jsonschema.CompileContext(ctx, remoteIntegerSchema(),
+	v, err := jsonschema.Compile(ctx, remoteIntegerSchema(),
 		jsonschema.WithResolver(resolver),
 	)
 	require.NoError(t, err)
@@ -131,14 +131,14 @@ func TestCompileContextPassesContextToResolver(t *testing.T) {
 
 	// The compile-time result is cached, so validation works without the
 	// resolver being consulted again.
-	require.NoError(t, v.ValidateContext(t.Context(), 42.0))
+	require.NoError(t, v.Validate(t.Context(), 42.0))
 }
 
-// TestValidateContextPassesContextToResolver pins the validation-time
+// TestValidatePassesContextToResolver pins the validation-time
 // resolution path: a remote ref the compile could not resolve is fetched
-// during the run under the context given to ValidateContext, not the compile
+// during the run under the context given to Validate, not the compile
 // context and not a context captured at configuration time.
-func TestValidateContextPassesContextToResolver(t *testing.T) {
+func TestValidatePassesContextToResolver(t *testing.T) {
 	t.Parallel()
 
 	resolver := &recordingResolver{
@@ -150,7 +150,7 @@ func TestValidateContextPassesContextToResolver(t *testing.T) {
 
 	// The resolver misses during Compile, so the remote target is not cached
 	// and each validation run must resolve it itself.
-	v, err := jsonschema.CompileContext(
+	v, err := jsonschema.Compile(
 		context.WithValue(t.Context(), ctxMarkerKey{}, "compile"),
 		remoteIntegerSchema(),
 		jsonschema.WithResolver(resolver),
@@ -160,8 +160,8 @@ func TestValidateContextPassesContextToResolver(t *testing.T) {
 	resolver.setDisabled(false)
 
 	ctx := context.WithValue(t.Context(), ctxMarkerKey{}, "validate")
-	require.NoError(t, v.ValidateContext(ctx, 42.0))
-	require.Error(t, v.ValidateContext(ctx, "not an integer"))
+	require.NoError(t, v.Validate(ctx, 42.0))
+	require.Error(t, v.Validate(ctx, "not an integer"))
 
 	ctxs := resolver.recordedCtxs()
 	require.NotEmpty(t, ctxs)
@@ -175,12 +175,12 @@ func TestValidateContextPassesContextToResolver(t *testing.T) {
 	}
 
 	assert.NotZero(t, validateCalls,
-		"validation-time resolution should carry the ValidateContext context")
+		"validation-time resolution should carry the Validate context")
 }
 
-// TestValidateJSONContextPassesContextToResolver covers the byte-decoding
+// TestValidateJSONPassesContextToResolver covers the byte-decoding
 // context entry point delegating into the same per-run context plumbing.
-func TestValidateJSONContextPassesContextToResolver(t *testing.T) {
+func TestValidateJSONPassesContextToResolver(t *testing.T) {
 	t.Parallel()
 
 	resolver := &recordingResolver{
@@ -190,24 +190,24 @@ func TestValidateJSONContextPassesContextToResolver(t *testing.T) {
 		disabled: true,
 	}
 
-	v, err := jsonschema.Compile(remoteIntegerSchema(), jsonschema.WithResolver(resolver))
+	v, err := jsonschema.Compile(t.Context(), remoteIntegerSchema(), jsonschema.WithResolver(resolver))
 	require.NoError(t, err)
 
 	resolver.setDisabled(false)
 
 	ctx := context.WithValue(t.Context(), ctxMarkerKey{}, "validate-json")
-	require.NoError(t, v.ValidateJSONContext(ctx, []byte(`42`)))
+	require.NoError(t, v.ValidateJSON(ctx, []byte(`42`)))
 
 	ctxs := resolver.recordedCtxs()
 	require.NotEmpty(t, ctxs)
 	assert.Equal(t, "validate-json", ctxs[len(ctxs)-1].Value(ctxMarkerKey{}))
 }
 
-// TestValidateContextCancellation pins that a canceled context surfaces from
+// TestValidateCancellation pins that a canceled context surfaces from
 // the resolver as a validation error wrapping both ErrRefResolve and the
 // context's own error, and that the failure is not cached: a later run with a
 // live context succeeds.
-func TestValidateContextCancellation(t *testing.T) {
+func TestValidateCancellation(t *testing.T) {
 	t.Parallel()
 
 	resolver := &recordingResolver{
@@ -217,7 +217,7 @@ func TestValidateContextCancellation(t *testing.T) {
 		disabled: true,
 	}
 
-	v, err := jsonschema.Compile(remoteIntegerSchema(), jsonschema.WithResolver(resolver))
+	v, err := jsonschema.Compile(t.Context(), remoteIntegerSchema(), jsonschema.WithResolver(resolver))
 	require.NoError(t, err)
 
 	resolver.setDisabled(false)
@@ -225,18 +225,18 @@ func TestValidateContextCancellation(t *testing.T) {
 	canceled, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	err = v.ValidateContext(canceled, 42.0)
+	err = v.Validate(canceled, 42.0)
 	require.Error(t, err)
 	require.ErrorIs(t, err, jsonschema.ErrRefResolve)
 	require.ErrorIs(t, err, context.Canceled)
 
 	// The canceled run must not poison the validator: a live context resolves
 	// and validates cleanly.
-	require.NoError(t, v.ValidateContext(t.Context(), 42.0))
+	require.NoError(t, v.Validate(t.Context(), 42.0))
 }
 
-// TestPackageLevelContextHelpers covers the one-shot ValidateContext and
-// ValidateJSONContext variants end to end with a context-aware resolver.
+// TestPackageLevelContextHelpers covers the one-shot Validate and
+// ValidateJSON entry points end to end with a context-aware resolver.
 func TestPackageLevelContextHelpers(t *testing.T) {
 	t.Parallel()
 
@@ -248,12 +248,12 @@ func TestPackageLevelContextHelpers(t *testing.T) {
 
 	ctx := context.WithValue(t.Context(), ctxMarkerKey{}, "one-shot")
 
-	err := jsonschema.ValidateContext(ctx, remoteIntegerSchema(), 42.0,
+	err := jsonschema.Validate(ctx, remoteIntegerSchema(), 42.0,
 		jsonschema.WithResolver(resolver),
 	)
 	require.NoError(t, err)
 
-	err = jsonschema.ValidateJSONContext(ctx, remoteIntegerSchema(), []byte(`"nope"`),
+	err = jsonschema.ValidateJSON(ctx, remoteIntegerSchema(), []byte(`"nope"`),
 		jsonschema.WithResolver(resolver),
 	)
 	require.Error(t, err)
@@ -266,9 +266,9 @@ func TestPackageLevelContextHelpers(t *testing.T) {
 	}
 }
 
-// TestCompileJSONContextPassesContextToResolver pins that the schema-document
+// TestCompileJSONPassesContextToResolver pins that the schema-document
 // entry point forwards its context to compile-time resolution.
-func TestCompileJSONContextPassesContextToResolver(t *testing.T) {
+func TestCompileJSONPassesContextToResolver(t *testing.T) {
 	t.Parallel()
 
 	resolver := &recordingResolver{
@@ -279,12 +279,12 @@ func TestCompileJSONContextPassesContextToResolver(t *testing.T) {
 
 	ctx := context.WithValue(t.Context(), ctxMarkerKey{}, "compile-json")
 
-	v, err := jsonschema.CompileJSONContext(ctx,
+	v, err := jsonschema.CompileJSON(ctx,
 		[]byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$ref":"https://example.com/integer.json"}`),
 		jsonschema.WithResolver(resolver),
 	)
 	require.NoError(t, err)
-	require.NoError(t, v.Validate(42.0))
+	require.NoError(t, v.Validate(t.Context(), 42.0))
 
 	ctxs := resolver.recordedCtxs()
 	require.NotEmpty(t, ctxs)
@@ -294,9 +294,10 @@ func TestCompileJSONContextPassesContextToResolver(t *testing.T) {
 	}
 }
 
-// TestContextlessEntryPointsPassBackground pins the documented default: the
-// context-less entry points hand the resolver context.Background, not nil.
-func TestContextlessEntryPointsPassBackground(t *testing.T) {
+// TestMustCompilePassesBackground pins the documented default: the Must*
+// entry points, the only context-less forms, hand the resolver
+// context.Background, not nil.
+func TestMustCompilePassesBackground(t *testing.T) {
 	t.Parallel()
 
 	resolver := &recordingResolver{
@@ -305,10 +306,8 @@ func TestContextlessEntryPointsPassBackground(t *testing.T) {
 		},
 	}
 
-	err := jsonschema.Validate(remoteIntegerSchema(), 42.0,
-		jsonschema.WithResolver(resolver),
-	)
-	require.NoError(t, err)
+	v := jsonschema.MustCompile(remoteIntegerSchema(), jsonschema.WithResolver(resolver))
+	require.NoError(t, v.Validate(t.Context(), 42.0))
 
 	ctxs := resolver.recordedCtxs()
 	require.NotEmpty(t, ctxs)
@@ -319,10 +318,9 @@ func TestContextlessEntryPointsPassBackground(t *testing.T) {
 	}
 }
 
-// TestInlineContextPassesContextToResolver pins the inlining resolution path:
-// document fetches reach the resolver carrying the context given to
-// InlineContext.
-func TestInlineContextPassesContextToResolver(t *testing.T) {
+// TestInlinePassesContextToResolver pins the inlining resolution path:
+// document fetches reach the resolver carrying the context given to Inline.
+func TestInlinePassesContextToResolver(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.WithValue(t.Context(), ctxMarkerKey{}, "inline")
@@ -332,7 +330,7 @@ func TestInlineContextPassesContextToResolver(t *testing.T) {
 		},
 	}
 
-	inlined, err := jsonschema.InlineContext(ctx, remoteIntegerPropertySchema(),
+	inlined, err := jsonschema.Inline(ctx, remoteIntegerPropertySchema(),
 		jsonschema.WithResolver(resolver),
 	)
 	require.NoError(t, err)
@@ -346,10 +344,10 @@ func TestInlineContextPassesContextToResolver(t *testing.T) {
 	}
 }
 
-// TestInlineContextCancellation pins that a canceled context surfaces from
+// TestInlineCancellation pins that a canceled context surfaces from
 // the resolver as an error wrapping both ErrRefResolve and the context's own
 // error.
-func TestInlineContextCancellation(t *testing.T) {
+func TestInlineCancellation(t *testing.T) {
 	t.Parallel()
 
 	resolver := &recordingResolver{
@@ -361,7 +359,7 @@ func TestInlineContextCancellation(t *testing.T) {
 	canceled, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	_, err := jsonschema.InlineContext(canceled, remoteIntegerPropertySchema(),
+	_, err := jsonschema.Inline(canceled, remoteIntegerPropertySchema(),
 		jsonschema.WithResolver(resolver),
 	)
 	require.Error(t, err)
@@ -369,61 +367,35 @@ func TestInlineContextCancellation(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 }
 
-// TestInlinePassesBackgroundToContextResolver pins the documented default:
-// the context-less Inline hands the resolver context.Background, not nil.
-func TestInlinePassesBackgroundToContextResolver(t *testing.T) {
-	t.Parallel()
-
-	resolver := &recordingResolver{
-		schemas: map[string]*jsonschema.Schema{
-			"https://example.com/integer.json": {Type: "integer"},
-		},
-	}
-
-	inlined, err := jsonschema.Inline(remoteIntegerPropertySchema(),
-		jsonschema.WithResolver(resolver),
-	)
-	require.NoError(t, err)
-	assert.Equal(t, "integer", inlined.Properties["count"].Type)
-
-	ctxs := resolver.recordedCtxs()
-	require.NotEmpty(t, ctxs)
-
-	for _, got := range ctxs {
-		//nolint:usetesting // The assertion is about the documented Background default.
-		assert.Equal(t, context.Background(), got)
-	}
-}
-
-// TestResolverThroughContextEntryPoints pins that a minimal resolver works
-// through every context entry point.
-func TestResolverThroughContextEntryPoints(t *testing.T) {
+// TestResolverThroughEntryPoints pins that a minimal resolver works
+// through every entry point.
+func TestResolverThroughEntryPoints(t *testing.T) {
 	t.Parallel()
 
 	resolver := mapResolver{
 		"https://example.com/integer.json": {Type: "integer"},
 	}
 
-	v, err := jsonschema.CompileContext(t.Context(), remoteIntegerSchema(),
+	v, err := jsonschema.Compile(t.Context(), remoteIntegerSchema(),
 		jsonschema.WithResolver(resolver),
 	)
 	require.NoError(t, err)
 
-	require.NoError(t, v.ValidateContext(t.Context(), 42.0))
-	require.Error(t, v.ValidateContext(t.Context(), "not an integer"))
-	require.NoError(t, v.ValidateJSONContext(t.Context(), []byte(`42`)))
+	require.NoError(t, v.Validate(t.Context(), 42.0))
+	require.Error(t, v.Validate(t.Context(), "not an integer"))
+	require.NoError(t, v.ValidateJSON(t.Context(), []byte(`42`)))
 
-	err = jsonschema.ValidateContext(t.Context(), remoteIntegerSchema(), 42.0,
+	err = jsonschema.Validate(t.Context(), remoteIntegerSchema(), 42.0,
 		jsonschema.WithResolver(resolver),
 	)
 	require.NoError(t, err)
 
-	err = jsonschema.ValidateJSONContext(t.Context(), remoteIntegerSchema(), []byte(`42`),
+	err = jsonschema.ValidateJSON(t.Context(), remoteIntegerSchema(), []byte(`42`),
 		jsonschema.WithResolver(resolver),
 	)
 	require.NoError(t, err)
 
-	inlined, err := jsonschema.InlineContext(t.Context(), remoteIntegerPropertySchema(),
+	inlined, err := jsonschema.Inline(t.Context(), remoteIntegerPropertySchema(),
 		jsonschema.WithResolver(resolver),
 	)
 	require.NoError(t, err)

@@ -489,7 +489,7 @@ func TestInline(t *testing.T) {
 				opts = append(opts, jsonschema.WithInlineRetrievalBase(true))
 			}
 
-			got, err := jsonschema.Inline(&schema, opts...)
+			got, err := jsonschema.Inline(t.Context(), &schema, opts...)
 			if tc.err != nil {
 				require.ErrorIs(t, err, tc.err)
 
@@ -793,7 +793,7 @@ func TestInlineRefFallback(t *testing.T) {
 					}))
 			}
 
-			got, err := jsonschema.Inline(&schema, opts...)
+			got, err := jsonschema.Inline(t.Context(), &schema, opts...)
 
 			require.Len(t, calls, len(tc.wantCalls))
 
@@ -821,7 +821,7 @@ func TestInlineRefFallback(t *testing.T) {
 func TestInlineNil(t *testing.T) {
 	t.Parallel()
 
-	got, err := jsonschema.Inline(nil)
+	got, err := jsonschema.Inline(t.Context(), nil)
 	require.NoError(t, err)
 	assert.Nil(t, got)
 }
@@ -850,7 +850,7 @@ func TestInlineDoesNotMutateInput(t *testing.T) {
 	remoteBefore, err := json.Marshal(remote)
 	require.NoError(t, err)
 
-	got, err := jsonschema.Inline(schema, jsonschema.WithResolver(mapResolver{
+	got, err := jsonschema.Inline(t.Context(), schema, jsonschema.WithResolver(mapResolver{
 		"http://example.com/defs.json": remote,
 	}))
 	require.NoError(t, err)
@@ -900,14 +900,14 @@ func TestInlineValidatesIdentically(t *testing.T) {
 
 	resolver := jsonschema.NewFileResolver(fsys)
 
-	inlined, err := jsonschema.Inline(&schema, jsonschema.WithResolver(resolver))
+	inlined, err := jsonschema.Inline(t.Context(), &schema, jsonschema.WithResolver(resolver))
 	require.NoError(t, err)
 
-	original, err := jsonschema.Compile(&schema, jsonschema.WithResolver(resolver))
+	original, err := jsonschema.Compile(t.Context(), &schema, jsonschema.WithResolver(resolver))
 	require.NoError(t, err)
 
 	// No resolver: the inlined schema must be self-contained.
-	standalone, err := jsonschema.Compile(inlined)
+	standalone, err := jsonschema.Compile(t.Context(), inlined)
 	require.NoError(t, err)
 
 	instances := map[string]any{
@@ -923,8 +923,8 @@ func TestInlineValidatesIdentically(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			origErr := original.Validate(instance)
-			inlinedErr := standalone.Validate(instance)
+			origErr := original.Validate(t.Context(), instance)
+			inlinedErr := standalone.Validate(t.Context(), instance)
 
 			if origErr == nil {
 				assert.NoError(t, inlinedErr)
@@ -959,22 +959,22 @@ func TestInlineValidatesIdenticallyWithRefSiblingDefinitions(t *testing.T) {
 		}
 	`)), &schema))
 
-	inlined, err := jsonschema.Inline(&schema)
+	inlined, err := jsonschema.Inline(t.Context(), &schema)
 	require.NoError(t, err)
 
-	original, err := jsonschema.Compile(&schema)
+	original, err := jsonschema.Compile(t.Context(), &schema)
 	require.NoError(t, err)
 
-	standalone, err := jsonschema.Compile(inlined)
+	standalone, err := jsonschema.Compile(t.Context(), inlined)
 	require.NoError(t, err)
 
 	valid := map[string]any{"p": "hello"}
-	require.NoError(t, original.Validate(valid), "the original accepts a string p")
-	assert.NoError(t, standalone.Validate(valid), "the inlined schema accepts a string p")
+	require.NoError(t, original.Validate(t.Context(), valid), "the original accepts a string p")
+	assert.NoError(t, standalone.Validate(t.Context(), valid), "the inlined schema accepts a string p")
 
 	invalid := map[string]any{"p": 5.0}
-	require.Error(t, original.Validate(invalid), "the original rejects a numeric p")
-	assert.Error(t, standalone.Validate(invalid), "the inlined schema rejects a numeric p")
+	require.Error(t, original.Validate(t.Context(), invalid), "the original rejects a numeric p")
+	assert.Error(t, standalone.Validate(t.Context(), invalid), "the inlined schema rejects a numeric p")
 }
 
 func TestFileResolver(t *testing.T) {
@@ -1059,23 +1059,23 @@ func TestFileResolverWithValidation(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			v, err := jsonschema.Compile(schema(ref), jsonschema.WithResolver(resolver))
+			v, err := jsonschema.Compile(t.Context(), schema(ref), jsonschema.WithResolver(resolver))
 			require.NoError(t, err)
 
-			require.NoError(t, v.Validate(map[string]any{"count": 1.0}))
-			require.Error(t, v.Validate(map[string]any{"count": "nope"}))
+			require.NoError(t, v.Validate(t.Context(), map[string]any{"count": 1.0}))
+			require.Error(t, v.Validate(t.Context(), map[string]any{"count": "nope"}))
 		})
 	}
 
 	t.Run("http ref misses", func(t *testing.T) {
 		t.Parallel()
 
-		v, err := jsonschema.Compile(schema("https://example.com/child.json"),
+		v, err := jsonschema.Compile(t.Context(), schema("https://example.com/child.json"),
 			jsonschema.WithResolver(resolver),
 		)
 		require.NoError(t, err)
 
-		err = v.Validate(map[string]any{"count": 1.0})
+		err = v.Validate(t.Context(), map[string]any{"count": 1.0})
 		require.Error(t, err)
 		require.ErrorIs(t, err, jsonschema.ErrRefResolve)
 	})
@@ -1183,7 +1183,7 @@ func TestInlineDeepCopyIndependence(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			inlined, err := jsonschema.Inline(tc.schema)
+			inlined, err := jsonschema.Inline(t.Context(), tc.schema)
 			require.NoError(t, err)
 			require.NotSame(t, tc.schema, inlined, "Inline must return a distinct *Schema")
 
