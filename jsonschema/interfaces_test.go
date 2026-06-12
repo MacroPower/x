@@ -16,12 +16,12 @@ func TestRefResolverFunc(t *testing.T) {
 	t.Parallel()
 
 	resolver := jsonschema.RefResolverFunc(
-		func(_ context.Context, uri string) (*jsonschema.Schema, error) {
+		func(_ context.Context, uri string) (*jsonschema.Schema, bool, error) {
 			if uri != "https://example.com/s.json" {
-				return nil, fmt.Errorf("unexpected uri %q", uri)
+				return nil, false, fmt.Errorf("unexpected uri %q", uri)
 			}
 
-			return &jsonschema.Schema{Type: "string"}, nil
+			return &jsonschema.Schema{Type: "string"}, true, nil
 		},
 	)
 
@@ -41,8 +41,8 @@ func TestRefResolverFunc_Error(t *testing.T) {
 
 	errBoom := errors.New("boom")
 	resolver := jsonschema.RefResolverFunc(
-		func(_ context.Context, _ string) (*jsonschema.Schema, error) {
-			return nil, errBoom
+		func(_ context.Context, _ string) (*jsonschema.Schema, bool, error) {
+			return nil, false, errBoom
 		},
 	)
 
@@ -54,21 +54,29 @@ func TestRefResolverFunc_Error(t *testing.T) {
 }
 
 // TestSchemaMap pins the map resolver contract: a hit returns the stored
-// schema, a miss returns (nil, nil) so the validator treats it as
-// unresolved rather than failing.
+// schema with ok true, while a missing URI or a nil stored schema reports
+// ok false so the validator treats it as unresolved rather than failing.
 func TestSchemaMap(t *testing.T) {
 	t.Parallel()
 
 	resolver := jsonschema.SchemaMap{
-		"https://example.com/s.json": {Type: "string"},
+		"https://example.com/s.json":   {Type: "string"},
+		"https://example.com/nil.json": nil,
 	}
 
-	s, err := resolver.ResolveRef(t.Context(), "https://example.com/s.json")
+	s, ok, err := resolver.ResolveRef(t.Context(), "https://example.com/s.json")
 	require.NoError(t, err)
+	require.True(t, ok)
 	assert.Equal(t, "string", s.Type)
 
-	s, err = resolver.ResolveRef(t.Context(), "https://example.com/missing.json")
+	s, ok, err = resolver.ResolveRef(t.Context(), "https://example.com/missing.json")
 	require.NoError(t, err)
+	require.False(t, ok)
+	assert.Nil(t, s)
+
+	s, ok, err = resolver.ResolveRef(t.Context(), "https://example.com/nil.json")
+	require.NoError(t, err)
+	require.False(t, ok)
 	assert.Nil(t, s)
 }
 
@@ -82,8 +90,8 @@ func TestChainResolvers(t *testing.T) {
 	miss := jsonschema.SchemaMap{}
 	hit := jsonschema.SchemaMap{"https://example.com/s.json": {Type: "string"}}
 	failing := jsonschema.RefResolverFunc(
-		func(context.Context, string) (*jsonschema.Schema, error) {
-			return nil, errBoom
+		func(context.Context, string) (*jsonschema.Schema, bool, error) {
+			return nil, false, errBoom
 		})
 
 	t.Run("miss falls through to the first answer", func(t *testing.T) {
@@ -91,8 +99,9 @@ func TestChainResolvers(t *testing.T) {
 
 		chain := jsonschema.ChainResolvers(nil, miss, hit, failing)
 
-		s, err := chain.ResolveRef(t.Context(), "https://example.com/s.json")
+		s, ok, err := chain.ResolveRef(t.Context(), "https://example.com/s.json")
 		require.NoError(t, err)
+		require.True(t, ok)
 		assert.Equal(t, "string", s.Type)
 	})
 
@@ -101,7 +110,7 @@ func TestChainResolvers(t *testing.T) {
 
 		chain := jsonschema.ChainResolvers(miss, failing, hit)
 
-		_, err := chain.ResolveRef(t.Context(), "https://example.com/s.json")
+		_, _, err := chain.ResolveRef(t.Context(), "https://example.com/s.json")
 		require.ErrorIs(t, err, errBoom)
 	})
 
@@ -110,16 +119,18 @@ func TestChainResolvers(t *testing.T) {
 
 		chain := jsonschema.ChainResolvers(nil, miss)
 
-		s, err := chain.ResolveRef(t.Context(), "https://example.com/s.json")
+		s, ok, err := chain.ResolveRef(t.Context(), "https://example.com/s.json")
 		require.NoError(t, err)
+		require.False(t, ok)
 		assert.Nil(t, s)
 	})
 
 	t.Run("empty chain misses", func(t *testing.T) {
 		t.Parallel()
 
-		s, err := jsonschema.ChainResolvers().ResolveRef(t.Context(), "https://example.com/s.json")
+		s, ok, err := jsonschema.ChainResolvers().ResolveRef(t.Context(), "https://example.com/s.json")
 		require.NoError(t, err)
+		require.False(t, ok)
 		assert.Nil(t, s)
 	})
 }

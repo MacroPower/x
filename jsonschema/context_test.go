@@ -39,8 +39,8 @@ func remoteIntegerPropertySchema() *jsonschema.Schema {
 }
 
 // recordingResolver implements [jsonschema.RefResolver], recording every
-// context received by ResolveRef. While disabled it misses (returns nil,
-// nil), so a schema can be compiled without caching the remote target and
+// context received by ResolveRef. While disabled it misses (reports ok
+// false), so a schema can be compiled without caching the remote target and
 // the validation-time resolution path is exercised. A canceled context
 // propagates its error, mimicking a resolver that fetches over the network.
 type recordingResolver struct {
@@ -50,16 +50,18 @@ type recordingResolver struct {
 	disabled bool
 }
 
-func (r *recordingResolver) ResolveRef(ctx context.Context, uri string) (*jsonschema.Schema, error) {
+func (r *recordingResolver) ResolveRef(ctx context.Context, uri string) (*jsonschema.Schema, bool, error) {
 	r.recordCtx(ctx)
 
 	err := ctx.Err()
 	if err != nil {
 		//nolint:wrapcheck // A real resolver surfaces ctx.Err() as-is.
-		return nil, err
+		return nil, false, err
 	}
 
-	return r.lookup(uri)
+	s, ok := r.lookup(uri)
+
+	return s, ok, nil
 }
 
 // recordCtx appends ctx to the received-context log.
@@ -70,21 +72,17 @@ func (r *recordingResolver) recordCtx(ctx context.Context) {
 	r.ctxs = append(r.ctxs, ctx)
 }
 
-func (r *recordingResolver) lookup(uri string) (*jsonschema.Schema, error) {
+func (r *recordingResolver) lookup(uri string) (*jsonschema.Schema, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	if r.disabled {
-		//nolint:nilnil // A miss returns (nil, nil): the validator treats it as "unresolved, skip".
-		return nil, nil
+		return nil, false
 	}
 
-	if s, ok := r.schemas[uri]; ok {
-		return s, nil
-	}
+	s, ok := r.schemas[uri]
 
-	//nolint:nilnil // A miss returns (nil, nil): the validator treats it as "unresolved, skip".
-	return nil, nil
+	return s, ok
 }
 
 // setDisabled flips whether lookups miss, so a test can hide the remote

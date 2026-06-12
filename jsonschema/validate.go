@@ -130,10 +130,9 @@ func WithVocabularies(uris ...string) ValidateOption {
 // bare function.
 //
 // The resolver is consulted once per compile, under the [Compile] context
-// (the Must* entry points pass [context.Background]). A resolver returning
-// nil with no error leaves the default vocabulary resolution in effect;
-// a resolver error fails compilation. A nil r restores the default
-// (no metaschema lookup).
+// (the Must* entry points pass [context.Background]). A miss (ok false)
+// leaves the default vocabulary resolution in effect; a resolver error
+// fails compilation. A nil r restores the default (no metaschema lookup).
 func WithMetaSchemaResolver(r RefResolver) ValidateOption {
 	return validateOptionFunc(func(v *validator) { v.metaSchemaResolver = r })
 }
@@ -360,12 +359,12 @@ func (v *validator) resolveVocabularies() error {
 	rawVocabs := v.vocabOverride
 
 	if rawVocabs == nil && v.metaSchemaResolver != nil && v.root.Schema != "" {
-		ms, err := v.metaSchemaResolver.ResolveRef(v.ctx, v.root.Schema)
+		ms, ok, err := v.metaSchemaResolver.ResolveRef(v.ctx, v.root.Schema)
 		if err != nil {
 			return fmt.Errorf("resolve metaschema %q: %w", v.root.Schema, err)
 		}
 
-		if ms != nil && len(ms.Vocabulary) > 0 {
+		if ok && ms != nil && len(ms.Vocabulary) > 0 {
 			rawVocabs = ms.Vocabulary
 		}
 	}
@@ -687,15 +686,26 @@ func computeBounds(schema *Schema) *precomputedBounds {
 }
 
 // callResolver invokes the configured resolver for uri under the context of
-// the current compile or validation run.
-func (v *validator) callResolver(uri string) (*Schema, error) {
+// the current compile or validation run. A nil schema with ok true is
+// normalized to the not-resolved answer, upholding the [RefResolver]
+// contract that no caller dereferences a nil document.
+func (v *validator) callResolver(uri string) (*Schema, bool, error) {
 	ctx := v.ctx
 	if ctx == nil {
 		ctx = context.Background()
 	}
 
-	//nolint:wrapcheck // resolveRemote wraps the error with ErrRefResolve; remoteLoader tolerates it.
-	return v.refResolver.ResolveRef(ctx, uri)
+	s, ok, err := v.refResolver.ResolveRef(ctx, uri)
+	if err != nil {
+		//nolint:wrapcheck // resolveRemote wraps the error with ErrRefResolve; remoteLoader tolerates it.
+		return nil, false, err
+	}
+
+	if s == nil {
+		return nil, false, nil
+	}
+
+	return s, ok, nil
 }
 
 // resolveRemote calls the configured [RefResolver] to fetch a remote schema,
@@ -707,13 +717,13 @@ func (v *validator) resolveRemote(baseURI string) *Schema {
 		return nil
 	}
 
-	schema, err := v.callResolver(baseURI)
+	schema, ok, err := v.callResolver(baseURI)
 	if err != nil {
 		v.refResolveErr = fmt.Errorf("%w: %w", ErrRefResolve, err)
 		return nil
 	}
 
-	if schema == nil {
+	if !ok {
 		return nil
 	}
 
@@ -737,9 +747,9 @@ func (v *validator) resolveRemote(baseURI string) *Schema {
 
 // remoteLoader returns a [jsonschema.Loader] for upstream Schema.Resolve.
 // When a [RefResolver] is configured, resolved schemas are registered in the
-// URI/anchor registries (caching them for the validation walk). If no resolver
-// is configured or the resolver returns nil/error, an empty schema is returned
-// so Schema.Resolve doesn't fail.
+// URI/anchor registries (caching them for the validation walk). If no
+// resolver is configured or the resolver misses or fails, an empty schema is
+// returned so Schema.Resolve doesn't fail.
 //
 // Schemas returned to the upstream resolver are deep-copied via JSON
 // round-trip so that Schema.Resolve's internal mutations (e.g. $schema
@@ -753,8 +763,8 @@ func (v *validator) remoteLoader() jsonschema.Loader {
 		}
 
 		if v.refResolver != nil {
-			s, err := v.callResolver(uriStr)
-			if err == nil && s != nil {
+			s, ok, err := v.callResolver(uriStr)
+			if err == nil && ok {
 				// Deep-copy so the upstream resolver's mutations don't
 				// affect the original schema from the RefResolver.
 				cp, cpErr := cloneSchema(s)

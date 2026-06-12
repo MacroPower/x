@@ -202,19 +202,18 @@ func init() {
 // suiteRemoteResolver resolves URIs from the remoteSchemas map.
 type suiteRemoteResolver struct{}
 
-func (suiteRemoteResolver) ResolveRef(_ context.Context, uri string) (*jsonschema.Schema, error) {
+func (suiteRemoteResolver) ResolveRef(_ context.Context, uri string) (*jsonschema.Schema, bool, error) {
 	if s, ok := remoteSchemas[uri]; ok {
-		return s, nil
+		return s, true, nil
 	}
 
 	// Try with trailing "#" for schemas whose $id includes an empty
 	// fragment (e.g. Draft 7 metaschema "http://json-schema.org/draft-07/schema#").
 	if s, ok := remoteSchemas[uri+"#"]; ok {
-		return s, nil
+		return s, true, nil
 	}
 
-	//nolint:nilnil // A miss returns (nil, nil): the validator treats it as "unresolved, skip".
-	return nil, nil
+	return nil, false, nil
 }
 
 // suiteBaseOpts returns the standard ValidateOption set for suite tests,

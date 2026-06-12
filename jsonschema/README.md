@@ -753,9 +753,14 @@ The resolver receives a context with every resolution call:
 
 ```go
 type RefResolver interface {
-	ResolveRef(ctx context.Context, uri string) (*Schema, error)
+	ResolveRef(ctx context.Context, uri string) (s *Schema, ok bool, err error)
 }
 ```
+
+`ok` reports whether the resolver resolved the URI: ok false with a nil
+error is the not-resolved answer, passing the URI to the next
+`ChainResolvers` link and ultimately to unresolvable-ref handling, while an
+error reports a resolution attempt that failed.
 
 Refs resolved while compiling get the `Compile` context; refs reached
 during a validation run get that run's `Validate` (or other

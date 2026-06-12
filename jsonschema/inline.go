@@ -622,15 +622,25 @@ func (in *inliner) resolveTarget(node *Schema, ref string) (*Schema, error) {
 }
 
 // callResolver invokes the configured resolver for uri under the
-// [InlineContext] context. It mirrors [validator.callResolver].
-func (in *inliner) callResolver(uri string) (*Schema, error) {
+// [Inline] call's context. It mirrors [validator.callResolver], including
+// normalizing a nil schema with ok true to the not-resolved answer.
+func (in *inliner) callResolver(uri string) (*Schema, bool, error) {
 	ctx := in.ctx
 	if ctx == nil {
 		ctx = context.Background()
 	}
 
-	//nolint:wrapcheck // fetchDoc wraps the error with ErrRefResolve.
-	return in.resolver.ResolveRef(ctx, uri)
+	s, ok, err := in.resolver.ResolveRef(ctx, uri)
+	if err != nil {
+		//nolint:wrapcheck // fetchDoc wraps the error with ErrRefResolve.
+		return nil, false, err
+	}
+
+	if s == nil {
+		return nil, false, nil
+	}
+
+	return s, ok, nil
 }
 
 // fetchDoc fetches the document at baseURI through the configured resolver,
@@ -643,12 +653,12 @@ func (in *inliner) fetchDoc(baseURI string) (*Schema, error) {
 		return nil, fmt.Errorf("%w: no resolver configured for %q", ErrRefResolve, baseURI)
 	}
 
-	s, err := in.callResolver(baseURI)
+	s, ok, err := in.callResolver(baseURI)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrRefResolve, err)
 	}
 
-	if s == nil {
+	if !ok {
 		return nil, fmt.Errorf("%w: cannot resolve %q", ErrRefResolve, baseURI)
 	}
 
@@ -697,23 +707,25 @@ func NewFileResolver(fsys fs.FS) *FileResolver {
 }
 
 // ResolveRef reads and unmarshals the schema document stored at the file
-// path named by uri. Reads are local and not cancellable, so the context is
-// unused. See [FileResolver] for the path semantics.
-func (r *FileResolver) ResolveRef(_ context.Context, uri string) (*Schema, error) {
+// path named by uri. The resolver is authoritative for its fs, so an
+// unreadable or undecodable file is an error rather than the not-resolved
+// answer. Reads are local and not cancellable, so the context is unused.
+// See [FileResolver] for the path semantics.
+func (r *FileResolver) ResolveRef(_ context.Context, uri string) (*Schema, bool, error) {
 	name := strings.TrimPrefix(uri, "file://")
 	name = strings.TrimPrefix(name, "/")
 
 	data, err := fs.ReadFile(r.fsys, name)
 	if err != nil {
-		return nil, fmt.Errorf("read schema document: %w", err)
+		return nil, false, fmt.Errorf("read schema document: %w", err)
 	}
 
 	var s Schema
 
 	err = json.Unmarshal(data, &s)
 	if err != nil {
-		return nil, fmt.Errorf("decode schema document %q: %w", name, err)
+		return nil, false, fmt.Errorf("decode schema document %q: %w", name, err)
 	}
 
-	return &s, nil
+	return &s, true, nil
 }
