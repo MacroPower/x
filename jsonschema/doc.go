@@ -77,7 +77,7 @@
 //     AST-backed provider that extracts Go doc comments.
 //   - [WithTypeSchema] overrides the schema for a specific Go type;
 //     [WithTypeSchemaFor] is its generic form for statically known types.
-//   - [WithTypeSchemaResolver] registers a [TypeSchemaResolver] that supplies
+//   - [WithTypeSchemaProvider] registers a [TypeSchemaProvider] that supplies
 //     schemas for whole families of types by predicate, sharing the
 //     highest-priority resolution step with [WithTypeSchema].
 //   - [WithTypeSchemaExtender] registers a [TypeSchemaExtender] that modifies
@@ -128,7 +128,7 @@
 // [WithTypeSchema] with a nil schema the type's default resolution
 // (unregistering earlier exact registrations for the type). The exception is
 // additive registrations that a nil cannot identify anything to remove from
-// ([WithTagInterpreter], [WithTypeSchemaResolver], [WithTypeSchemaExtender],
+// ([WithTagInterpreter], [WithTypeSchemaProvider], [WithTypeSchemaExtender],
 // [WithFormatValidator]); these ignore a nil registration.
 //
 // # Type Mapping
@@ -183,8 +183,8 @@
 //
 // For each type, the schema is determined by the first matching step:
 //
-//  1. Registered [TypeSchemaResolver] values ([WithTypeSchemaResolver], and the
-//     exact-match resolvers [WithTypeSchema] registers), consulted newest
+//  1. Registered [TypeSchemaProvider] values ([WithTypeSchemaProvider], and the
+//     exact-match providers [WithTypeSchema] registers), consulted newest
 //     registration first (highest priority).
 //  2. [JSONSchemaProvider] interface.
 //  3. Built-in overrides ([]byte, [time.Time], [encoding/json.Number], etc.).
@@ -216,7 +216,7 @@
 // implementation that cannot produce or adjust its schema; a panic is still
 // recovered and wrapped with [ErrProviderPanic] as a backstop.
 //
-// When a registered resolver ([WithTypeSchemaResolver] or [WithTypeSchema]) or
+// When a registered provider ([WithTypeSchemaProvider] or [WithTypeSchema]) or
 // [JSONSchemaProvider] provides the schema, [JSONSchemaExtender] is not
 // called.
 //
@@ -226,7 +226,7 @@
 // JSONSchemaExtend, under the same not-called-when-replaced rule.
 //
 // Every type-level hook — [JSONSchemaProvider] and [JSONSchemaExtender]
-// alongside their registered counterparts [TypeSchemaResolver] and
+// alongside their registered counterparts [TypeSchemaProvider] and
 // [TypeSchemaExtender], plus [Namer] and the type half of
 // [DescriptionProvider] — receives a [TypeContext] carrying the Go type and
 // the target [Draft] of the generation run, so an implementation can emit
@@ -240,7 +240,7 @@
 //
 // Every single-method extension-point interface has a conversion func type
 // adapter following [net/http.HandlerFunc] ([TagInterpreterFunc],
-// [FormatValidatorFunc], [TypeSchemaResolverFunc], [TypeSchemaExtenderFunc],
+// [FormatValidatorFunc], [TypeSchemaProviderFunc], [TypeSchemaExtenderFunc],
 // [RefResolverFunc], [NamerFunc], [RefFallbackFunc]). [DescriptionProvider],
 // the one two-method interface, has the struct adapter
 // [DescriptionProviderFuncs] instead, whose nil fields answer "". An
@@ -308,11 +308,11 @@
 // MarshalText promoted from an embedded field is not reflected field by field
 // at all — the promoted marshaler serializes the whole outer value (see the
 // resolution priority above). Embedded types intercepted by earlier priority
-// chain steps (a registered [TypeSchemaResolver] or [JSONSchemaProvider]) are
+// chain steps (a registered [TypeSchemaProvider] or [JSONSchemaProvider]) are
 // composed via allOf rather than having their fields promoted; an embed
 // reached through a pointer composes as anyOf[schema, {}] instead, since a
-// nil pointer contributes nothing to the marshaled object. A resolver or
-// [JSONSchemaProvider] schema used for such an embedded type must leave the
+// nil pointer contributes nothing to the marshaled object. A provider schema
+// (registered or on-type) used for such an embedded type must leave the
 // object open (no additionalProperties: false): allOf evaluates each branch
 // against the whole object, so a closed branch rejects the parent's sibling
 // properties and the generated schema then rejects the struct's own marshaled

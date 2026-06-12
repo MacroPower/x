@@ -18,7 +18,7 @@ import (
 // method is invoked against.
 //
 // The method receives the same arguments as its registered counterpart,
-// [TypeSchemaResolver.SchemaForType]: the context of the Generate call in
+// [TypeSchemaProvider.SchemaForType]: the context of the Generate call in
 // effect (so a provider loading a schema document can honor cancellation and
 // deadlines) and a [TypeContext] carrying the target [Draft] (so a provider
 // can emit draft-appropriate keywords). An implementation needing neither
@@ -40,7 +40,7 @@ type JSONSchemaExtender interface {
 }
 
 // TypeContext provides context about the Go type whose schema a
-// [TypeSchemaResolver] or [TypeSchemaExtender] is consulted for. It is the
+// [TypeSchemaProvider] or [TypeSchemaExtender] is consulted for. It is the
 // type-level counterpart of [FieldContext]: a struct rather than positional
 // parameters, so the context can grow without changing the hook signatures.
 type TypeContext struct {
@@ -52,40 +52,43 @@ type TypeContext struct {
 	Draft Draft
 }
 
-// TypeSchemaResolver supplies schemas for Go types it recognizes during
-// generation. Resolvers are registered with [WithTypeSchemaResolver] and consulted
-// at the highest-priority step of the type resolution chain, before
-// [JSONSchemaProvider] and the built-in overrides, so a resolver can map
+// TypeSchemaProvider supplies schemas for Go types it recognizes during
+// generation, the registered counterpart of [JSONSchemaProvider]: a type's
+// author provides its schema by implementing JSONSchema on the type, while a
+// consumer of types they do not own registers a TypeSchemaProvider. Providers
+// are registered with [WithTypeSchemaProvider] and consulted at the
+// highest-priority step of the type resolution chain, before
+// [JSONSchemaProvider] and the built-in overrides, so a provider can map
 // whole families of types — every type implementing some third-party
 // interface, every type in a package — where [WithTypeSchema] names one
 // exact [reflect.Type] at a time.
 //
-// SchemaForType returns ok false when the resolver does not handle the type
-// in tc, passing resolution to the next resolver and then to the rest of the
+// SchemaForType returns ok false when the provider does not handle the type
+// in tc, passing resolution to the next provider and then to the rest of the
 // chain. Returning ok true with a nil schema marks the type unrestricted
 // ({}), mirroring [JSONSchemaProvider]. A returned schema is copied before
 // use with the same discipline [WithTypeSchema] documents, so one schema
 // value may be shared across types, calls, and goroutines.
 //
-// A non-nil error aborts generation, for a resolver that recognizes the type
+// A non-nil error aborts generation, for a provider that recognizes the type
 // but cannot produce its schema — an I/O failure while loading a schema
 // document, for example; the schema and ok values are then ignored. The
-// context comes from the Generate call in effect, so a resolver doing such
-// I/O can honor cancellation and deadlines; a resolver that performs no
+// context comes from the Generate call in effect, so a provider doing such
+// I/O can honor cancellation and deadlines; a provider that performs no
 // cancellable work can ignore it, following [DescriptionProvider].
 //
-// A resolver may be consulted several times for the same type within one
+// A provider may be consulted several times for the same type within one
 // generation run, so SchemaForType must be deterministic.
-type TypeSchemaResolver interface {
+type TypeSchemaProvider interface {
 	SchemaForType(ctx context.Context, tc TypeContext) (s *Schema, ok bool, err error)
 }
 
-// TypeSchemaResolverFunc adapts a bare resolution function to a
-// [TypeSchemaResolver], following [net/http.HandlerFunc].
-type TypeSchemaResolverFunc func(ctx context.Context, tc TypeContext) (*Schema, bool, error)
+// TypeSchemaProviderFunc adapts a bare providing function to a
+// [TypeSchemaProvider], following [net/http.HandlerFunc].
+type TypeSchemaProviderFunc func(ctx context.Context, tc TypeContext) (*Schema, bool, error)
 
 // SchemaForType calls f.
-func (f TypeSchemaResolverFunc) SchemaForType(ctx context.Context, tc TypeContext) (*Schema, bool, error) {
+func (f TypeSchemaProviderFunc) SchemaForType(ctx context.Context, tc TypeContext) (*Schema, bool, error) {
 	return f(ctx, tc)
 }
 
@@ -93,17 +96,17 @@ func (f TypeSchemaResolverFunc) SchemaForType(ctx context.Context, tc TypeContex
 // registered with [WithTypeSchemaExtender]. It is the registered counterpart
 // of [JSONSchemaExtender]: a type's author extends its schema by implementing
 // JSONSchemaExtend on the type, while a consumer of a type they do not own
-// registers a TypeSchemaExtender. Where a [TypeSchemaResolver] replaces a
+// registers a TypeSchemaExtender. Where a [TypeSchemaProvider] replaces a
 // type's schema wholesale, an extender adjusts what reflection produced.
 //
 // ExtendSchemaForType is called once per type whose schema kind-based
 // reflection or a built-in override produced, at the point JSONSchemaExtend
 // runs (after comment extraction, before $defs extraction) and after the
 // type's own JSONSchemaExtend. Like JSONSchemaExtender, it is not called for
-// types whose schema a registered resolver or [JSONSchemaProvider] supplied.
+// types whose schema a registered provider or [JSONSchemaProvider] supplied.
 // It modifies s in place; an error aborts generation. An extender that does
 // not recognize the type in tc leaves s untouched and returns nil. The
-// context follows the [TypeSchemaResolver.SchemaForType] contract.
+// context follows the [TypeSchemaProvider.SchemaForType] contract.
 type TypeSchemaExtender interface {
 	ExtendSchemaForType(ctx context.Context, tc TypeContext, s *Schema) error
 }
@@ -257,7 +260,7 @@ type TagInterpreter interface {
 	// carries the struct tag key the call runs under ([FieldContext.TagKey]),
 	// so an implementation serving several keys can tell them apart, the way
 	// an [net/http.Handler] reads the request path. The context follows the
-	// [TypeSchemaResolver.SchemaForType] contract: it comes from the Generate
+	// [TypeSchemaProvider.SchemaForType] contract: it comes from the Generate
 	// call in effect, and an interpreter that performs no cancellable work
 	// can ignore it.
 	Interpret(ctx context.Context, field FieldContext) error

@@ -53,33 +53,33 @@ func WithDescriptionProvider(p DescriptionProvider) GenerateOption {
 	})
 }
 
-// WithTypeSchemaResolver registers a [TypeSchemaResolver]. Resolvers occupy the
+// WithTypeSchemaProvider registers a [TypeSchemaProvider]. Providers occupy the
 // highest-priority step of the type resolution chain, overriding even
 // [JSONSchemaProvider], and are consulted newest registration first, so a
 // later registration takes precedence over an earlier one for the types both
-// handle ([WithTypeSchema] registers an exact-match resolver into the same
-// chain). A nil r is ignored.
+// handle ([WithTypeSchema] registers an exact-match provider into the same
+// chain). A nil p is ignored.
 //
-// A schema the resolver supplies is copied before use with the same
+// A schema the provider supplies is copied before use with the same
 // discipline [WithTypeSchema] documents, and [JSONSchemaExtender] is not
-// called for types it resolves.
-func WithTypeSchemaResolver(r TypeSchemaResolver) GenerateOption {
+// called for types it provides.
+func WithTypeSchemaProvider(p TypeSchemaProvider) GenerateOption {
 	return generateOptionFunc(func(g *generator) {
-		if r != nil {
-			g.typeResolvers = append(g.typeResolvers, r)
+		if p != nil {
+			g.typeProviders = append(g.typeProviders, p)
 		}
 	})
 }
 
 // WithTypeSchemaExtender registers a [TypeSchemaExtender] that modifies
 // reflection-generated schemas, the extend counterpart of
-// [WithTypeSchemaResolver]: a resolver replaces a type's schema wholesale,
+// [WithTypeSchemaProvider]: a provider replaces a type's schema wholesale,
 // while an extender adjusts what reflection produced — the way
 // [JSONSchemaExtender] does for a type's author — for types the caller does
 // not own. Multiple extenders can be registered and are applied in
 // registration order, each running after the type's own JSONSchemaExtend.
 // Like JSONSchemaExtender, an extender is not called for types whose schema
-// a registered resolver or [JSONSchemaProvider] supplied.
+// a registered provider or [JSONSchemaProvider] supplied.
 // [TypeSchemaExtenderFunc] adapts a bare function. A nil e is ignored.
 func WithTypeSchemaExtender(e TypeSchemaExtender) GenerateOption {
 	return generateOptionFunc(func(g *generator) {
@@ -123,30 +123,30 @@ func WithTypeSchemaExtenderFor[T any](
 		}))
 }
 
-// exactTypeResolver is the [TypeSchemaResolver] registered by
+// exactTypeProvider is the [TypeSchemaProvider] registered by
 // [WithTypeSchema]: it offers s for exactly the type t.
-type exactTypeResolver struct {
+type exactTypeProvider struct {
 	t reflect.Type
 	s *Schema
 }
 
-func (r exactTypeResolver) SchemaForType(_ context.Context, tc TypeContext) (*Schema, bool, error) {
-	if tc.Type != r.t {
+func (p exactTypeProvider) SchemaForType(_ context.Context, tc TypeContext) (*Schema, bool, error) {
+	if tc.Type != p.t {
 		return nil, false, nil
 	}
 
-	return r.s, true, nil
+	return p.s, true, nil
 }
 
 // WithTypeSchema overrides the generated schema for a specific Go type: it
-// registers an exact-match [TypeSchemaResolver], so it shares the
-// highest-priority step of the type resolution chain with [WithTypeSchemaResolver],
+// registers an exact-match [TypeSchemaProvider], so it shares the
+// highest-priority step of the type resolution chain with [WithTypeSchemaProvider],
 // overriding even [JSONSchemaProvider]. Useful for mapping third-party types
 // or overriding types whose [JSONSchemaProvider] schema is undesirable.
-// Resolvers are consulted newest registration first, so if called multiple
+// Providers are consulted newest registration first, so if called multiple
 // times for the same type, the last registration wins. A nil s restores the
 // type's default resolution: earlier WithTypeSchema registrations for t are
-// removed, while predicate resolvers ([WithTypeSchemaResolver]) and the rest
+// removed, while predicate providers ([WithTypeSchemaProvider]) and the rest
 // of the chain still apply.
 //
 // The override is copied before use: its sub-schemas are deep-copied and its
@@ -159,15 +159,15 @@ func (r exactTypeResolver) SchemaForType(_ context.Context, tc TypeContext) (*Sc
 func WithTypeSchema(t reflect.Type, s *Schema) GenerateOption {
 	return generateOptionFunc(func(g *generator) {
 		if s == nil {
-			g.typeResolvers = slices.DeleteFunc(g.typeResolvers, func(r TypeSchemaResolver) bool {
-				er, ok := r.(exactTypeResolver)
-				return ok && er.t == t
+			g.typeProviders = slices.DeleteFunc(g.typeProviders, func(p TypeSchemaProvider) bool {
+				ep, ok := p.(exactTypeProvider)
+				return ok && ep.t == t
 			})
 
 			return
 		}
 
-		g.typeResolvers = append(g.typeResolvers, exactTypeResolver{t: t, s: s})
+		g.typeProviders = append(g.typeProviders, exactTypeProvider{t: t, s: s})
 	})
 }
 
@@ -192,7 +192,7 @@ func WithTypeSchemaFor[T any](s *Schema) GenerateOption {
 // disambiguated automatically. [NamerFunc] adapts a bare function.
 //
 // SchemaName receives the same [TypeContext] as the package's other
-// type-level hooks ([TypeSchemaResolver], [TypeSchemaExtender],
+// type-level hooks ([TypeSchemaProvider], [TypeSchemaExtender],
 // [DescriptionProvider]), carrying the Go type to name and the target
 // [Draft] of the generation run.
 type Namer interface {

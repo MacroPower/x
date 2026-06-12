@@ -38,7 +38,7 @@ type generator struct {
 	ctx context.Context
 
 	typeToDefName   map[reflect.Type]string
-	typeResolvers   []TypeSchemaResolver
+	typeProviders   []TypeSchemaProvider
 	namer           Namer
 	defs            map[string]*Schema
 	defsNameToTypes map[string][]reflect.Type
@@ -88,7 +88,7 @@ func newGenerator(opts []GenerateOption) *generator {
 }
 
 // forRun derives one generation run from the prototype: the configuration —
-// resolvers, extenders, interpreters, namer, flags — is shared, since
+// providers, extenders, interpreters, namer, flags — is shared, since
 // generation only reads it, while the per-run maps and the context are
 // fresh, so concurrent runs from one prototype never share mutable state.
 func (g *generator) forRun(ctx context.Context) *generator {
@@ -275,7 +275,7 @@ func (g *generator) schemaForType(t reflect.Type, nullable bool) (*Schema, error
 		t = t.Elem()
 	}
 
-	// 1. Type resolver override (WithTypeSchemaResolver / WithTypeSchema).
+	// 1. Type provider override (WithTypeSchemaProvider / WithTypeSchema).
 	s, ok, err := g.resolveTypeSchema(t)
 	if err != nil {
 		return nil, err
@@ -387,15 +387,15 @@ func isRecursiveContainerKind(k reflect.Kind) bool {
 	}
 }
 
-// resolveTypeSchema consults the registered type resolvers for t, newest
+// resolveTypeSchema consults the registered type providers for t, newest
 // registration first, and returns the first schema offered. The order makes a
-// later registration win for the types two resolvers both handle, which for
-// the exact-match resolvers WithTypeSchema registers preserves its
-// last-registration-wins behavior. A resolver error stops the consultation
+// later registration win for the types two providers both handle, which for
+// the exact-match providers WithTypeSchema registers preserves its
+// last-registration-wins behavior. A provider error stops the consultation
 // and aborts generation.
 func (g *generator) resolveTypeSchema(t reflect.Type) (*Schema, bool, error) {
 	tc := TypeContext{Type: t, Draft: g.draft}
-	for _, v := range slices.Backward(g.typeResolvers) {
+	for _, v := range slices.Backward(g.typeProviders) {
 		s, ok, err := v.SchemaForType(g.ctx, tc)
 		if err != nil {
 			return nil, false, fmt.Errorf("resolve type %s: %w", t, err)
@@ -410,7 +410,7 @@ func (g *generator) resolveTypeSchema(t reflect.Type) (*Schema, bool, error) {
 }
 
 // handleOverrideType processes a type resolved by a registered
-// TypeSchemaResolver (WithTypeSchemaResolver or WithTypeSchema). A nil override
+// TypeSchemaProvider (WithTypeSchemaProvider or WithTypeSchema). A nil override
 // marks the type unrestricted, mirroring a JSONSchemaProvider returning nil.
 //
 // The override is copied with the upstream shallow CloneSchemas, not the JSON
@@ -1213,9 +1213,9 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 // needsAllOfComposition reports whether an embedded struct type should be
 // composed via allOf rather than having its fields promoted.
 func (g *generator) needsAllOfComposition(t reflect.Type) bool {
-	// Check type resolver overrides (WithTypeSchemaResolver / WithTypeSchema).
-	// A resolver error counts as intercepted: the embed composes via allOf and
-	// the deterministic resolver reports the same error when the embedded
+	// Check type provider overrides (WithTypeSchemaProvider / WithTypeSchema).
+	// A provider error counts as intercepted: the embed composes via allOf and
+	// the deterministic provider reports the same error when the embedded
 	// type's schema is generated, where it aborts generation.
 	_, resolved, err := g.resolveTypeSchema(t)
 	if resolved || err != nil {
@@ -1828,7 +1828,7 @@ func callExtender(ctx context.Context, tc TypeContext, s *jsonschema.Schema) (er
 // registration order, so a registered extender sees — and can adjust — what
 // the type's author produced. It is called from each reflection path
 // (structs, built-in overrides, named non-struct kinds) and never from the
-// resolver or [JSONSchemaProvider] paths, which replace reflection entirely.
+// provider paths (registered or on-type), which replace reflection entirely.
 func (g *generator) extendType(t reflect.Type, s *Schema) error {
 	tc := TypeContext{Type: t, Draft: g.draft}
 
