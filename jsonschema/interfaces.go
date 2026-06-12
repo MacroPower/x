@@ -141,12 +141,15 @@ type DescriptionProvider interface {
 	// work can ignore it.
 	TypeDescription(ctx context.Context, tc TypeContext) string
 
-	// FieldDescription returns the description for the named Go field of the
-	// struct type in tc, or "" for none. The TypeContext carries the type
-	// that declares the field: for a field promoted from an embedded struct
-	// it is the embedded type, where the field's doc comment lives, not the
-	// outer struct. The context follows the TypeDescription contract.
-	FieldDescription(ctx context.Context, tc TypeContext, fieldName string) string
+	// FieldDescription returns the description for the struct field in fc,
+	// or "" for none. The [FieldContext] is the same value tag interpreters
+	// receive, with [FieldContext.TagKey] and [FieldContext.TagValue] empty:
+	// [FieldContext.Owner] carries the type that declares the field (for a
+	// field promoted from an embedded struct, the embedded type, where the
+	// field's doc comment lives, not the outer struct) and
+	// [FieldContext.StructField] names the Go field. The context follows the
+	// TypeDescription contract.
+	FieldDescription(ctx context.Context, fc FieldContext) string
 }
 
 // DescriptionProviderFuncs adapts a pair of bare functions to a
@@ -168,7 +171,7 @@ type DescriptionProviderFuncs struct {
 
 	// FieldFunc backs FieldDescription. A nil FieldFunc leaves every field
 	// description unset.
-	FieldFunc func(ctx context.Context, tc TypeContext, fieldName string) string
+	FieldFunc func(ctx context.Context, fc FieldContext) string
 }
 
 // TypeDescription calls TypeFunc, or answers "" when TypeFunc is nil.
@@ -181,12 +184,12 @@ func (p DescriptionProviderFuncs) TypeDescription(ctx context.Context, tc TypeCo
 }
 
 // FieldDescription calls FieldFunc, or answers "" when FieldFunc is nil.
-func (p DescriptionProviderFuncs) FieldDescription(ctx context.Context, tc TypeContext, fieldName string) string {
+func (p DescriptionProviderFuncs) FieldDescription(ctx context.Context, fc FieldContext) string {
 	if p.FieldFunc == nil {
 		return ""
 	}
 
-	return p.FieldFunc(ctx, tc, fieldName)
+	return p.FieldFunc(ctx, fc)
 }
 
 // ChainDescriptionProviders returns a [DescriptionProvider] that consults
@@ -226,13 +229,13 @@ func (c descriptionProviderChain) TypeDescription(ctx context.Context, tc TypeCo
 
 // FieldDescription returns the first non-empty field description in the
 // chain.
-func (c descriptionProviderChain) FieldDescription(ctx context.Context, tc TypeContext, fieldName string) string {
+func (c descriptionProviderChain) FieldDescription(ctx context.Context, fc FieldContext) string {
 	for _, p := range c {
 		if p == nil {
 			continue
 		}
 
-		if d := p.FieldDescription(ctx, tc, fieldName); d != "" {
+		if d := p.FieldDescription(ctx, fc); d != "" {
 			return d
 		}
 	}
@@ -466,15 +469,19 @@ func WithBaseURI(base string) RefOption {
 	return baseURIOption{base: stripFragment(base)}
 }
 
-// FieldContext provides context about a struct field to tag interpreters.
+// FieldContext provides context about a struct field to the field-level
+// hooks: tag interpreters ([TagInterpreter.Interpret]) and description
+// providers ([DescriptionProvider.FieldDescription]). It is the field-level
+// counterpart of [TypeContext]: a struct rather than positional parameters,
+// so the context can grow without changing the hook signatures.
 type FieldContext struct {
 	// Type is the Go reflect.Type of the field. It mirrors StructField.Type,
 	// kept as a direct field for the common case.
 	Type reflect.Type
 	// Owner is the struct type declaring the field. For a field promoted from
-	// an embedded struct it is the embedded type, where the field is declared,
-	// not the outer struct — the type a [DescriptionProvider] receives for the
-	// same field.
+	// an embedded struct it is the embedded type, where the field is declared
+	// (and where a [GoCommentProvider] finds its doc comment), not the outer
+	// struct.
 	Owner reflect.Type
 	// Schema is the field's own generated schema, modified in place by the interpreter.
 	Schema *Schema
@@ -485,11 +492,11 @@ type FieldContext struct {
 	// TagKey is the struct tag key the interpreter was registered under and
 	// the field carries (e.g. "validate"), so an implementation serving
 	// several keys can tell which one fired. It is set only for
-	// [TagInterpreter] calls.
+	// [TagInterpreter] calls; a [DescriptionProvider] receives it empty.
 	TagKey string
 	// TagValue is the field's value for TagKey, the input an interpreter
 	// translates into schema constraints. It is set only for [TagInterpreter]
-	// calls.
+	// calls; a [DescriptionProvider] receives it empty.
 	TagValue string
 	// StructField is the full reflect.StructField, so an interpreter can read
 	// other struct tags (for example the json tag's omitempty) or the field's

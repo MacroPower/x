@@ -122,13 +122,15 @@ func (ce *GoCommentProvider) TypeDescription(ctx context.Context, tc TypeContext
 	return ""
 }
 
-// FieldDescription returns the doc comment for a struct field.
+// FieldDescription returns the doc comment for a struct field, located via
+// the declaring type ([FieldContext.Owner]) and the Go field name
+// ([FieldContext.StructField]).
 //
 // As with TypeDescription, matching is by package path and unqualified type name,
 // so a non-package-scope struct that shadows a package-level name may receive
 // the package-level struct's field comments.
-func (ce *GoCommentProvider) FieldDescription(ctx context.Context, tc TypeContext, fieldName string) string {
-	structType := tc.Type
+func (ce *GoCommentProvider) FieldDescription(ctx context.Context, fc FieldContext) string {
+	structType, fieldName := fc.Owner, fc.StructField.Name
 	if structType.Name() == "" || structType.PkgPath() == "" {
 		return ""
 	}

@@ -91,12 +91,8 @@ func (p mapDescriptionProvider) TypeDescription(_ context.Context, tc jsonschema
 	return p.types[tc.Type]
 }
 
-func (p mapDescriptionProvider) FieldDescription(
-	_ context.Context,
-	tc jsonschema.TypeContext,
-	fieldName string,
-) string {
-	return p.fields[tc.Type][fieldName]
+func (p mapDescriptionProvider) FieldDescription(_ context.Context, fc jsonschema.FieldContext) string {
+	return p.fields[fc.Owner][fc.StructField.Name]
 }
 
 // commentedWidget is a named type for TestWithDescriptionProvider; the provider
@@ -201,6 +197,41 @@ func TestWithDescriptionProvider_LastRegistrationWins(t *testing.T) {
 		assert.Empty(t, s.Description)
 		assert.Empty(t, s.Properties["size"].Description)
 	})
+}
+
+// TestWithDescriptionProvider_FieldContext pins the FieldContext a
+// description provider receives: the same value tag interpreters get, with
+// the tag pair empty.
+func TestWithDescriptionProvider_FieldContext(t *testing.T) {
+	t.Parallel()
+
+	type doc struct {
+		Size int `json:"size,omitempty" jsonschema:"minimum=1"`
+	}
+
+	var got jsonschema.FieldContext
+
+	s, err := jsonschema.GenerateFor[doc](t.Context(),
+		jsonschema.WithDescriptionProvider(jsonschema.DescriptionProviderFuncs{
+			FieldFunc: func(_ context.Context, fc jsonschema.FieldContext) string {
+				got = fc
+
+				return "captured"
+			},
+		}),
+	)
+	require.NoError(t, err)
+	require.Contains(t, s.Properties, "size")
+	assert.Equal(t, "captured", s.Properties["size"].Description)
+
+	assert.Equal(t, reflect.TypeFor[doc](), got.Owner)
+	assert.Equal(t, "Size", got.StructField.Name)
+	assert.Equal(t, "size", got.Name)
+	assert.Equal(t, reflect.TypeFor[int](), got.Type)
+	assert.NotNil(t, got.Schema)
+	assert.NotNil(t, got.Parent)
+	assert.Empty(t, got.TagKey, "the tag pair is set only for TagInterpreter calls")
+	assert.Empty(t, got.TagValue, "the tag pair is set only for TagInterpreter calls")
 }
 
 // TestWithDescriptionProvider_PromotedFieldDeclaringType covers the FieldDescription

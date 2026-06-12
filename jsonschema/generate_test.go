@@ -1635,13 +1635,16 @@ func TestGenerateFor_WithComments_TypeDescription(t *testing.T) {
 func TestGenerateFor_WithComments_StructDescription(t *testing.T) {
 	t.Parallel()
 
-	// FieldContext has a type-level doc comment.
+	// FieldContext has a type-level doc comment; the full text is extracted,
+	// so pin its opening words rather than the whole comment.
 	s, err := jsonschema.GenerateFor[jsonschema.FieldContext](t.Context(),
 		jsonschema.WithDescriptionProvider(jsonschema.NewGoCommentProvider()),
 	)
 	require.NoError(t, err)
 
-	assert.Equal(t, "FieldContext provides context about a struct field to tag interpreters.", s.Description)
+	assert.True(t,
+		strings.HasPrefix(s.Description, "FieldContext provides context about a struct field"),
+		"description should start with the doc comment's opening words, got: %s", s.Description)
 }
 
 func TestGenerateFor_BigRatAndBigFloat(t *testing.T) {

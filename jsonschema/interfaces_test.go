@@ -153,8 +153,8 @@ func TestDescriptionProviderFuncs(t *testing.T) {
 			TypeFunc: func(_ context.Context, tc jsonschema.TypeContext) string {
 				return "type " + tc.Type.Name()
 			},
-			FieldFunc: func(_ context.Context, _ jsonschema.TypeContext, fieldName string) string {
-				return "field " + fieldName
+			FieldFunc: func(_ context.Context, fc jsonschema.FieldContext) string {
+				return "field " + fc.StructField.Name
 			},
 		}
 
@@ -237,7 +237,7 @@ func TestTagInterpreterFieldContextOwner(t *testing.T) {
 
 	// A field declared on the struct itself is owned by that struct; a
 	// promoted field is owned by the embedded type declaring it, matching
-	// the type a DescriptionProvider receives for the same field.
+	// the Owner a DescriptionProvider reads for the same field.
 	assert.Equal(t, reflect.TypeFor[ownerOuter](), owners["outer"])
 	assert.Equal(t, reflect.TypeFor[ownerEmbedded](), owners["inner"])
 }

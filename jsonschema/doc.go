@@ -227,13 +227,15 @@
 //
 // Every type-level hook — [JSONSchemaProvider] and [JSONSchemaExtender]
 // alongside their registered counterparts [TypeSchemaResolver] and
-// [TypeSchemaExtender], plus [Namer] and [DescriptionProvider] — receives a
-// [TypeContext] carrying the Go type and the target [Draft] of the
-// generation run — the type-level counterpart of the [FieldContext] tag
-// interpreters receive — so an implementation can emit draft-appropriate
-// keywords. All but [Namer], whose work is pure, also receive the context of
-// the Generate call in effect, so an implementation doing cancellable work
-// (loading a schema document, for example) can honor cancellation and
+// [TypeSchemaExtender], plus [Namer] and the type half of
+// [DescriptionProvider] — receives a [TypeContext] carrying the Go type and
+// the target [Draft] of the generation run, so an implementation can emit
+// draft-appropriate keywords. The field-level hooks — tag interpreters and
+// [DescriptionProvider.FieldDescription] — receive the [FieldContext]
+// counterpart, carrying the field's schema and surroundings alongside the
+// same Draft. All but [Namer], whose work is pure, also receive the context
+// of the Generate call in effect, so an implementation doing cancellable
+// work (loading a schema document, for example) can honor cancellation and
 // deadlines.
 //
 // Every single-method extension-point interface has a conversion func type
@@ -257,8 +259,8 @@
 // Generate call's context, like the other generation-time hooks, and a
 // [FieldContext] containing the struct tag key and value the call runs under,
 // the field's schema, parent schema, JSON name, Go type, declaring struct
-// type (the embedded type for a promoted field, the type a
-// [DescriptionProvider] receives for the same field), full
+// type (the embedded type for a promoted field — [FieldContext.Owner], which
+// a [DescriptionProvider] reads for the same field), full
 // [reflect.StructField] (for reading sibling struct tags such
 // as the json tag's options), and the target [Draft] (for emitting
 // draft-appropriate keywords). Each interpreter is registered under the
@@ -410,9 +412,10 @@
 // — and decides its own failure behavior. [ChainDescriptionProviders]
 // composes providers, first non-empty description wins, such as overrides
 // for specific types backed by AST extraction.
-// For a field promoted from an embedded struct, the provider
-// receives the embedded type, where the field's doc comment lives. The
-// jsonschema struct tag description overrides a provider-supplied comment.
+// Field lookups receive the [FieldContext] tag interpreters get (with the
+// tag pair empty); for a field promoted from an embedded struct, its Owner
+// is the embedded type, where the field's doc comment lives. The jsonschema
+// struct tag description overrides a provider-supplied comment.
 //
 // # Draft Support
 //

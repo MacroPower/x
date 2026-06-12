@@ -474,19 +474,22 @@ type DescriptionProvider interface {
 	// TypeDescription returns the description for a named type, or "" for none.
 	TypeDescription(ctx context.Context, tc TypeContext) string
 
-	// FieldDescription returns the description for the named Go field of the
-	// struct type in tc (the type declaring the field), or "" for none.
-	FieldDescription(ctx context.Context, tc TypeContext, fieldName string) string
+	// FieldDescription returns the description for the struct field in fc,
+	// or "" for none.
+	FieldDescription(ctx context.Context, fc FieldContext) string
 }
 
 jsonschema.WithDescriptionProvider(jsonschema.ChainDescriptionProviders(
 	overrides, jsonschema.NewGoCommentProvider()))
 ```
 
-Both methods receive the same `TypeContext` as the package's other
-type-level hooks. `DescriptionProviderFuncs` adapts a pair of bare
-functions, so a one-off provider needs no named type; a nil field answers
-`""` for its half:
+`TypeDescription` receives the same `TypeContext` as the package's other
+type-level hooks. `FieldDescription` receives the same `FieldContext` as tag
+interpreters, with the tag pair (`TagKey`, `TagValue`) empty: `Owner` carries
+the type declaring the field — for a promoted field the embedded type, where
+the doc comment lives — and `StructField` names the Go field.
+`DescriptionProviderFuncs` adapts a pair of bare functions, so a one-off
+provider needs no named type; a nil field answers `""` for its half:
 
 ```go
 jsonschema.WithDescriptionProvider(jsonschema.DescriptionProviderFuncs{

@@ -1278,7 +1278,7 @@ func (g *generator) buildFieldSchema(parentType reflect.Type, fi structFieldInfo
 	}
 
 	// 2. Field-level comment.
-	g.applyFieldDescription(parentType, fi.field, fieldSchema)
+	g.applyFieldDescription(parentType, fi, fieldSchema, parent)
 
 	// 3. Schema struct tag.
 	if tag, ok := fi.field.Tag.Lookup("jsonschema"); ok {
@@ -1937,16 +1937,25 @@ func (g *generator) applyTypeDescription(t reflect.Type, s *Schema) {
 }
 
 // applyFieldDescription sets the description from the comment provider on a
-// field's schema. The provider receives the type declaring the field (see
+// field's schema. The provider receives the [FieldContext] tag interpreters
+// get, with the tag pair empty and Owner the type declaring the field (see
 // [declaringType]); an empty comment leaves the description unset.
-func (g *generator) applyFieldDescription(structType reflect.Type, f reflect.StructField, s *Schema) {
+func (g *generator) applyFieldDescription(parentType reflect.Type, fi structFieldInfo, fieldSchema, parent *Schema) {
 	if g.descriptionProvider == nil {
 		return
 	}
 
-	tc := TypeContext{Type: declaringType(structType, f), Draft: g.draft}
-	if comment := g.descriptionProvider.FieldDescription(g.ctx, tc, f.Name); comment != "" {
-		s.Description = comment
+	fc := FieldContext{
+		Name:        fi.jsonName,
+		Type:        fi.field.Type,
+		Owner:       declaringType(parentType, fi.field),
+		Schema:      fieldSchema,
+		Parent:      parent,
+		StructField: fi.field,
+		Draft:       g.draft,
+	}
+	if comment := g.descriptionProvider.FieldDescription(g.ctx, fc); comment != "" {
+		fieldSchema.Description = comment
 	}
 }
 
