@@ -123,7 +123,8 @@ func WithVocabularies(uris ...string) ValidateOption {
 // metaschema's $id is used to match against the root schema's $schema field.
 // If the root schema's $schema matches the metaschema's $id, the metaschema's
 // $vocabulary map is used to determine active vocabularies. A nil metaschema is
-// a no-op.
+// a no-op. [WithMetaSchemaResolver] is the lookup form, for serving a family
+// of metaschemas without registering each by exact $id.
 func WithMetaSchema(ms *Schema) ValidateOption {
 	return validateOptionFunc(func(v *validator) {
 		if ms != nil && ms.ID != "" {
@@ -134,6 +135,24 @@ func WithMetaSchema(ms *Schema) ValidateOption {
 			v.metaSchemas[ms.ID] = ms
 		}
 	})
+}
+
+// WithMetaSchemaResolver sets a [RefResolver] consulted with the root
+// schema's $schema URI when no metaschema registered via [WithMetaSchema]
+// matches it. The resolved metaschema's $vocabulary map determines the
+// active vocabularies, exactly as a matching WithMetaSchema registration
+// would, so one resolver serves a whole family of metaschemas — a directory
+// of documents via [FileResolver], or a lazily fetched set —
+// without registering each by exact $id. [RefResolverFunc] adapts a bare
+// function.
+//
+// The resolver is consulted once per compile, under the [Compile] context
+// (the Must* entry points pass [context.Background]). A resolver returning
+// nil with no error leaves the default vocabulary resolution in effect;
+// a resolver error fails compilation. A nil r restores the default
+// (no metaschema lookup).
+func WithMetaSchemaResolver(r RefResolver) ValidateOption {
+	return validateOptionFunc(func(v *validator) { v.metaSchemaResolver = r })
 }
 
 // visitKey identifies a unique (schema, instance path) pair for cycle detection.
@@ -215,6 +234,7 @@ type validator struct {
 	dynamicAnchorRegistry map[string]*Schema         // baseURI#name → schema ($dynamicAnchor only)
 	baseURIs              map[*Schema]string         // schema → its base URI
 	metaSchemas           map[string]*Schema         // $schema URI → metaschema
+	metaSchemaResolver    RefResolver                // metaschema lookup by $schema URI (WithMetaSchemaResolver)
 	jsonPointerCache      map[jsonPointerKey]*Schema // JSON-pointer fallback results, keyed by (root, pointer)
 	visiting              map[visitKey]bool
 	patternCache          map[*Schema]compiledPattern            // schema.Pattern compiled (see numericBounds)
@@ -252,11 +272,16 @@ type validator struct {
 	inertIDs bool
 }
 
-func newValidator(schema *Schema, opts []ValidateOption) (*validator, error) {
+func newValidator(ctx context.Context, schema *Schema, opts []ValidateOption) (*validator, error) {
 	v := &validator{
 		root:           schema,
 		formatCheckers: map[string]func(string) error{},
 		visiting:       map[visitKey]bool{},
+		// The compile context, for resolver calls made while compiling: the
+		// metaschema lookup below, and the remoteLoader and resolveRemote
+		// calls Compile makes after construction. Compile drops it before the
+		// validator is cached.
+		ctx: ctx,
 	}
 	// Register built-in format checkers.
 	maps.Copy(v.formatCheckers, builtinFormats)
@@ -337,7 +362,9 @@ func (v *validator) forInstance(ctx context.Context) *validator {
 // Resolution priority:
 //  1. WithVocabularies direct override (highest).
 //  2. WithMetaSchema lookup (root $schema matches a registered metaschema $id).
-//  3. Default: allVocabs (backward compatible).
+//  3. WithMetaSchemaResolver lookup (the resolver is consulted with the root
+//     $schema URI).
+//  4. Default: allVocabs (backward compatible).
 //
 // Draft-07 always gets allVocabs — vocabulary is a 2020-12 concept.
 func (v *validator) resolveVocabularies() error {
@@ -349,14 +376,21 @@ func (v *validator) resolveVocabularies() error {
 		return nil
 	}
 
-	var rawVocabs map[string]bool
+	rawVocabs := v.vocabOverride
 
-	switch {
-	case v.vocabOverride != nil:
-		rawVocabs = v.vocabOverride
-
-	case v.metaSchemas != nil:
+	if rawVocabs == nil {
 		if ms, ok := v.metaSchemas[v.root.Schema]; ok && len(ms.Vocabulary) > 0 {
+			rawVocabs = ms.Vocabulary
+		}
+	}
+
+	if rawVocabs == nil && v.metaSchemaResolver != nil && v.root.Schema != "" {
+		ms, err := v.metaSchemaResolver.ResolveRef(v.ctx, v.root.Schema)
+		if err != nil {
+			return fmt.Errorf("resolve metaschema %q: %w", v.root.Schema, err)
+		}
+
+		if ms != nil && len(ms.Vocabulary) > 0 {
 			rawVocabs = ms.Vocabulary
 		}
 	}
@@ -872,14 +906,13 @@ type Validator struct {
 //
 // MustCompile is Compile with [context.Background], panicking on error.
 func Compile(ctx context.Context, schema *Schema, opts ...ValidateOption) (*Validator, error) {
-	v, err := newValidator(schema, opts)
+	// The compile context rides on the validator's ctx field for resolver
+	// calls made while compiling (the metaschema lookup, remoteLoader during
+	// Schema.Resolve, and resolveRemote via resolveErrorIsRefOnly).
+	v, err := newValidator(ctx, schema, opts)
 	if err != nil {
 		return nil, err
 	}
-
-	// Carry the compile context for resolver calls made below (remoteLoader
-	// during Schema.Resolve, and resolveRemote via resolveErrorIsRefOnly).
-	v.ctx = ctx
 
 	// Reject unknown type names up front. Schema.Resolve does not check the
 	// type vocabulary, and a typo'd type otherwise compiles cleanly and then

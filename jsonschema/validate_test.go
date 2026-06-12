@@ -2051,6 +2051,93 @@ func TestValidateVocabularyResolution(t *testing.T) {
 			},
 			// Type and required are validation vocab, so both skipped.
 		},
+		"WithMetaSchemaResolver lookup": {
+			schema: &jsonschema.Schema{
+				Schema:   "https://example.com/my-meta",
+				Type:     "string",
+				Required: []string{"foo"},
+			},
+			instance: map[string]any{},
+			opts: []jsonschema.ValidateOption{
+				jsonschema.WithMetaSchemaResolver(jsonschema.RefResolverFunc(
+					//nolint:nilnil // A miss returns (nil, nil): vocabulary resolution falls through to the default.
+					func(_ context.Context, uri string) (*jsonschema.Schema, error) {
+						if uri != "https://example.com/my-meta" {
+							return nil, nil
+						}
+
+						return &jsonschema.Schema{
+							ID: uri,
+							Vocabulary: map[string]bool{
+								jsonschema.VocabCore2020:       true,
+								jsonschema.VocabApplicator2020: true,
+								// Validation vocab absent, so disabled.
+							},
+						}, nil
+					})),
+			},
+			// Type and required are validation vocab, so both skipped.
+		},
+		"WithMetaSchema overrides WithMetaSchemaResolver": {
+			schema: &jsonschema.Schema{
+				Schema: "https://example.com/my-meta",
+				Type:   "string",
+			},
+			instance: 42.0,
+			opts: []jsonschema.ValidateOption{
+				// The resolver would disable the validation vocab.
+				jsonschema.WithMetaSchemaResolver(jsonschema.RefResolverFunc(
+					func(_ context.Context, uri string) (*jsonschema.Schema, error) {
+						return &jsonschema.Schema{
+							ID: uri,
+							Vocabulary: map[string]bool{
+								jsonschema.VocabCore2020:       true,
+								jsonschema.VocabApplicator2020: true,
+							},
+						}, nil
+					})),
+				// The exact registration wins and keeps validation active.
+				jsonschema.WithMetaSchema(&jsonschema.Schema{
+					ID: "https://example.com/my-meta",
+					Vocabulary: map[string]bool{
+						jsonschema.VocabCore2020:       true,
+						jsonschema.VocabApplicator2020: true,
+						jsonschema.VocabValidation2020: true,
+					},
+				}),
+			},
+			err: "(type)",
+		},
+		"WithMetaSchemaResolver nil result falls through to default": {
+			schema: &jsonschema.Schema{
+				Schema: "https://example.com/unknown-meta",
+				Type:   "string",
+			},
+			instance: 42.0,
+			opts: []jsonschema.ValidateOption{
+				jsonschema.WithMetaSchemaResolver(jsonschema.RefResolverFunc(
+					//nolint:nilnil // A miss returns (nil, nil): vocabulary resolution falls through to the default.
+					func(context.Context, string) (*jsonschema.Schema, error) {
+						return nil, nil
+					})),
+			},
+			// Default vocabularies keep the validation vocab active.
+			err: "(type)",
+		},
+		"WithMetaSchemaResolver error fails compilation": {
+			schema: &jsonschema.Schema{
+				Schema: "https://example.com/my-meta",
+				Type:   "string",
+			},
+			instance: "ok",
+			opts: []jsonschema.ValidateOption{
+				jsonschema.WithMetaSchemaResolver(jsonschema.RefResolverFunc(
+					func(context.Context, string) (*jsonschema.Schema, error) {
+						return nil, errors.New("metaschema store unreachable")
+					})),
+			},
+			err: "resolve metaschema",
+		},
 		"WithVocabularies overrides WithMetaSchema": {
 			schema: &jsonschema.Schema{
 				Schema: "https://example.com/my-meta",

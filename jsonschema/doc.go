@@ -485,6 +485,10 @@
 //     inactive.
 //   - [WithMetaSchema] registers a metaschema whose $vocabulary map controls
 //     which keyword groups are active.
+//   - [WithMetaSchemaResolver] sets a [RefResolver] consulted with the root
+//     schema's $schema URI when no registered metaschema matches it, so one
+//     resolver serves a family of metaschemas without registering each by
+//     exact $id.
 //
 // The draft is detected from the root schema's $schema field; a [WithDraft]
 // option overrides the detection. [Draft7] and
@@ -588,7 +592,10 @@
 //  1. [WithVocabularies] direct override (highest).
 //  2. [WithMetaSchema] lookup — the root schema's $schema is matched against
 //     registered metaschema $id values to extract $vocabulary.
-//  3. Default: a built-in standard vocabulary set — every group active except
+//  3. [WithMetaSchemaResolver] lookup — the resolver is consulted once per
+//     compile with the root schema's $schema URI; a nil result without error
+//     falls through to the default.
+//  4. Default: a built-in standard vocabulary set — every group active except
 //     format-assertion, so format is annotation-only by default.
 //
 // If a schema requires (marks true) a vocabulary URI that this implementation

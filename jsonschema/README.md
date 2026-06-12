@@ -674,6 +674,7 @@ containing object are both identifiable from `InstancePath` alone.
 | `WithResolveOptions(opts)`  | Pass `ResolveOptions` (aliased from the upstream package) to `Schema.Resolve`.                                         |
 | `WithVocabularies(uris...)` | Directly set the active vocabularies (highest precedence); unlisted ones are inactive.                                 |
 | `WithMetaSchema(ms)`        | Register a metaschema whose `$vocabulary` gates keyword groups.                                                        |
+| `WithMetaSchemaResolver(r)` | Set a `RefResolver` that looks up the metaschema by the root schema's `$schema` URI.                                   |
 
 ### Formats
 
@@ -695,8 +696,10 @@ one, replaces the previous checker.
 Draft 2020-12 `$vocabulary` gates which keyword groups run: inactive
 vocabularies have their keywords silently skipped. Vocabulary resolution
 priority is `WithVocabularies` (direct override) > `WithMetaSchema` (matched
-against the root schema's `$schema`) > a built-in default set (every group
-active except format-assertion). A schema that requires (`true`) a vocabulary
+against the root schema's `$schema`) > `WithMetaSchemaResolver` (a
+`RefResolver` consulted with the root schema's `$schema` URI, so one
+resolver serves a family of metaschemas) > a built-in default set (every
+group active except format-assertion). A schema that requires (`true`) a vocabulary
 this implementation does not recognize, or marks the 2020-12 core vocabulary
 optional, fails with `ErrUnknownVocabulary`. Draft-07 has no `$vocabulary`, so
 all groups stay active.
