@@ -28,17 +28,17 @@ func NewInterpreter() *Interpreter {
 	return &Interpreter{}
 }
 
-// Interpret parses the validate tag from [jsonschema.FieldContext.TagValue]
-// and applies constraints to the field schema. Interpretation is pure tag
-// parsing, so the context is unused.
-func (i *Interpreter) Interpret(_ context.Context, field jsonschema.FieldContext) error {
-	tag := field.TagValue
+// Interpret parses the validate tag value from [jsonschema.Tag] and applies
+// constraints to the field schema. Interpretation is pure tag parsing, so
+// the context is unused.
+func (i *Interpreter) Interpret(_ context.Context, field jsonschema.FieldContext, tag jsonschema.Tag) error {
+	value := tag.Value
 	// Strip everything after | (OR operator — unsupported, use first group only).
-	if idx := strings.Index(tag, "|"); idx >= 0 {
-		tag = tag[:idx]
+	if idx := strings.Index(value, "|"); idx >= 0 {
+		value = value[:idx]
 	}
 
-	parts := strings.Split(tag, ",")
+	parts := strings.Split(value, ",")
 
 	return applyParts(parts, field.Schema, field.Parent, field.Name, field.Type, false)
 }

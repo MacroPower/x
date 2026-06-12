@@ -491,9 +491,9 @@ jsonschema.WithDescriptionProvider(jsonschema.ChainDescriptionProviders(
 
 `TypeDescription` receives the same `TypeContext` as the package's other
 type-level hooks. `FieldDescription` receives the same `FieldContext` as tag
-interpreters, with the tag pair (`TagKey`, `TagValue`) empty: `Owner` carries
-the type declaring the field — for a promoted field the embedded type, where
-the doc comment lives — and `StructField` names the Go field.
+interpreters: `Owner` carries the type declaring the field — for a promoted
+field the embedded type, where the doc comment lives — and `StructField`
+names the Go field.
 `DescriptionProviderFuncs` adapts a pair of bare functions, so a one-off
 provider needs no named type; a nil field answers `""` for its half:
 
@@ -537,17 +537,17 @@ through the `TagInterpreter` interface:
 
 ```go
 type TagInterpreter interface {
-	Interpret(ctx context.Context, field FieldContext) error
+	Interpret(ctx context.Context, field FieldContext, tag Tag) error
 }
 ```
 
 Interpreters receive the Generate call's context (like the other
 generation-time hooks; an interpreter that performs no cancellable work
-ignores it) and a `FieldContext` (the struct tag key and value the call
-runs under, the field's schema, parent schema, JSON name, Go type,
-declaring struct type — the embedded type for a promoted field — full
-`reflect.StructField` for reading sibling struct tags such as the `json`
-tag's options, and the target `Draft` for emitting draft-appropriate
+ignores it), a `Tag` carrying the struct tag key and value the call runs
+under, and a `FieldContext` (the field's schema, parent schema, JSON name,
+Go type, declaring struct type — the embedded type for a promoted field —
+full `reflect.StructField` for reading sibling struct tags such as the
+`json` tag's options, and the target `Draft` for emitting draft-appropriate
 keywords), and modify the schema in place. Each interpreter
 is registered under the struct tag key it reads (following `net/http.Handle`,
 so one implementation can serve several keys); multiple interpreters can be

@@ -692,12 +692,11 @@ func TestApplyDiveErrorsWhenItemsNil(t *testing.T) {
 
 	interp := validate.NewInterpreter()
 	err := interp.Interpret(t.Context(), jsonschema.FieldContext{
-		Type:     reflect.TypeFor[[]string](),
-		Schema:   s.Properties["items"],
-		Parent:   s,
-		Name:     "items",
-		TagValue: "dive,min=1",
-	})
+		Type:   reflect.TypeFor[[]string](),
+		Schema: s.Properties["items"],
+		Parent: s,
+		Name:   "items",
+	}, jsonschema.Tag{Key: "validate", Value: "dive,min=1"})
 
 	require.Error(t, err,
 		"dive into nil Items returns an error rather than discarding the constraints")
@@ -1230,12 +1229,11 @@ func TestCollectionGtMaxIntDoesNotWrap(t *testing.T) {
 			parent := &jsonschema.Schema{}
 			interp := validate.NewInterpreter()
 			err := interp.Interpret(t.Context(), jsonschema.FieldContext{
-				Type:     tc.fieldType,
-				Schema:   schema,
-				Parent:   parent,
-				Name:     "field",
-				TagValue: "gt=" + strconv.Itoa(math.MaxInt),
-			})
+				Type:   tc.fieldType,
+				Schema: schema,
+				Parent: parent,
+				Name:   "field",
+			}, jsonschema.Tag{Key: "validate", Value: "gt=" + strconv.Itoa(math.MaxInt)})
 			require.NoError(t, err)
 
 			if tc.fieldType.Kind() == reflect.Map {
@@ -1270,12 +1268,11 @@ func TestCollectionLtMinIntDoesNotWrap(t *testing.T) {
 			parent := &jsonschema.Schema{}
 			interp := validate.NewInterpreter()
 			err := interp.Interpret(t.Context(), jsonschema.FieldContext{
-				Type:     tc.fieldType,
-				Schema:   schema,
-				Parent:   parent,
-				Name:     "field",
-				TagValue: "lt=" + strconv.Itoa(math.MinInt),
-			})
+				Type:   tc.fieldType,
+				Schema: schema,
+				Parent: parent,
+				Name:   "field",
+			}, jsonschema.Tag{Key: "validate", Value: "lt=" + strconv.Itoa(math.MinInt)})
 			require.NoError(t, err)
 
 			if tc.fieldType.Kind() == reflect.Map {
@@ -1333,12 +1330,11 @@ func TestValidateInterpreter_ParamEscapes(t *testing.T) {
 
 			interp := validate.NewInterpreter()
 			err := interp.Interpret(t.Context(), jsonschema.FieldContext{
-				Type:     reflect.TypeFor[string](),
-				Schema:   schema,
-				Parent:   parent,
-				Name:     "value",
-				TagValue: tc.tag,
-			})
+				Type:   reflect.TypeFor[string](),
+				Schema: schema,
+				Parent: parent,
+				Name:   "value",
+			}, jsonschema.Tag{Key: "validate", Value: tc.tag})
 			require.NoError(t, err)
 
 			if tc.wantEnum != nil {

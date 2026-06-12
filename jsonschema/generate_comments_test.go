@@ -264,8 +264,6 @@ func TestWithDescriptionProvider_FieldContext(t *testing.T) {
 	assert.Equal(t, reflect.TypeFor[int](), got.Type)
 	assert.NotNil(t, got.Schema)
 	assert.NotNil(t, got.Parent)
-	assert.Empty(t, got.TagKey, "the tag pair is set only for TagInterpreter calls")
-	assert.Empty(t, got.TagValue, "the tag pair is set only for TagInterpreter calls")
 }
 
 // TestWithDescriptionProvider_PromotedFieldDeclaringType covers the FieldDescription

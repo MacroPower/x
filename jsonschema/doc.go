@@ -249,20 +249,20 @@
 // key, [FormatValidator] for a format name) takes the name at the
 // registration site ([WithTagInterpreter], [WithFormatValidator]), following
 // [net/http.Handle], so one implementation can serve several names, and is
-// told the name each call runs under — [FieldContext.TagKey] for an
-// interpreter, the name parameter for a format checker — the way an
-// [net/http.Handler] reads the request path.
+// told the name each call runs under — [Tag.Key] for an interpreter, the
+// name parameter for a format checker — the way an [net/http.Handler] reads
+// the request path.
 //
 // # Tag Interpretation
 //
 // All struct tag interpretation beyond the json and jsonschema tags is handled
 // through the pluggable [TagInterpreter] interface. Interpreters receive the
-// Generate call's context, like the other generation-time hooks, and a
-// [FieldContext] containing the struct tag key and value the call runs under,
-// the field's schema, parent schema, JSON name, Go type, declaring struct
-// type (the embedded type for a promoted field — [FieldContext.Owner], which
-// a [DescriptionProvider] reads for the same field), full
-// [reflect.StructField] (for reading sibling struct tags such
+// Generate call's context, like the other generation-time hooks, a [Tag]
+// carrying the struct tag key and value the call runs under, and a
+// [FieldContext] containing the field's schema, parent schema, JSON name,
+// Go type, declaring struct type (the embedded type for a promoted field —
+// [FieldContext.Owner], which a [DescriptionProvider] reads for the same
+// field), full [reflect.StructField] (for reading sibling struct tags such
 // as the json tag's options), and the target [Draft] (for emitting
 // draft-appropriate keywords). Each interpreter is registered under the
 // struct tag key it reads; multiple interpreters can be registered and are
@@ -418,10 +418,10 @@
 // [ChainDescriptionProviders] composes providers, first non-empty
 // description or first error wins, such as overrides for specific types
 // backed by AST extraction.
-// Field lookups receive the [FieldContext] tag interpreters get (with the
-// tag pair empty); for a field promoted from an embedded struct, its Owner
-// is the embedded type, where the field's doc comment lives. The jsonschema
-// struct tag description overrides a provider-supplied comment.
+// Field lookups receive the [FieldContext] tag interpreters get; for a
+// field promoted from an embedded struct, its Owner is the embedded type,
+// where the field's doc comment lives. The jsonschema struct tag
+// description overrides a provider-supplied comment.
 //
 // # Draft Support
 //
