@@ -237,7 +237,7 @@ func normalizeBaseURI(base string) string {
 // draft. A spliced copy never carries a $schema keyword, and the returned
 // root keeps the input's $schema.
 //
-// Refs are inlined only in the typed sub-schema positions [Subschemas]
+// Refs are inlined only in the typed sub-schema positions [SubschemaEntries]
 // covers; a $ref carried as raw JSON inside an unknown keyword is left
 // as-is, although a ref pointing into such a position still resolves.
 //
@@ -360,7 +360,7 @@ func (in *inliner) recordPaths(s *Schema, path string) {
 
 // walkPair makes working's subtree self-contained in place, reading all
 // structure from its pristine counterpart. The two trees are clones of the
-// same document and [Subschemas] returns children in deterministic order, so
+// same document and [SubschemaEntries] returns children in deterministic order, so
 // the walk pairs nodes position by position; path is the pristine node's
 // JSON Pointer location within its containing document, extended token by
 // token as the walk descends. A $ref is resolved against pristine structure,
@@ -426,11 +426,11 @@ func (in *inliner) walkPair(working, pristine *Schema, path string) error {
 		}
 	}
 
-	workingChildren := Subschemas(working)
+	workingChildren := SubschemaEntries(working)
 	pristineChildren := SubschemaEntries(pristine)
 
 	for i, p := range pristineChildren {
-		err := in.walkPair(workingChildren[i], p.Schema, path+p.Pointer)
+		err := in.walkPair(workingChildren[i].Schema, p.Schema, path+p.Pointer)
 		if err != nil {
 			return err
 		}

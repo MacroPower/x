@@ -37,8 +37,9 @@ in-package test files by policy):
   field set alone must defeat `IsTrueSchema`; a new field fails until added
   to the predicate's enumeration. This is the primary alarm — when it fires,
   also revisit the internal `cloneSchema`/`isEmptySchema` classifications.
-- `TestSubschemasFieldCoverage` (walk_test.go): every `*Schema`-shaped field
-  must be returned by `Subschemas`, the single traversal field list.
+- `TestSubschemaEntriesFieldCoverage` (walk_test.go): every `*Schema`-shaped
+  field must be returned by `SubschemaEntries`, the single traversal field
+  list.
 - `TestSchemaSerializableFieldCoverage` (schema_test.go): every field must
   carry a json tag or be allowlisted, guarding the JSON round-trip that
   `Inline`'s deep copy and `ParseSchemaValue` rely on.

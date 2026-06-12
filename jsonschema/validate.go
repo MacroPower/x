@@ -1410,7 +1410,7 @@ func (v *validator) allRefsResolvable(schema *Schema) bool {
 }
 
 // eachSubschema calls fn for schema and every sub-schema reachable through its
-// sub-schema-bearing keywords (see [Subschemas]). The caller must ensure
+// sub-schema-bearing keywords (see [SubschemaEntries]). The caller must ensure
 // the schema's sub-schema pointers form a tree (see [schemaFormsTree]); an
 // aliased or cyclic structure would recurse without bound. [Walk] is the
 // exported, cycle-safe form.
@@ -1421,8 +1421,8 @@ func eachSubschema(schema *Schema, fn func(*Schema)) {
 
 	fn(schema)
 
-	for _, child := range Subschemas(schema) {
-		eachSubschema(child, fn)
+	for _, entry := range SubschemaEntries(schema) {
+		eachSubschema(entry.Schema, fn)
 	}
 }
 
@@ -1448,8 +1448,8 @@ func schemaFormsTree(schema *Schema) bool {
 		}
 
 		seen[s] = true
-		for _, child := range Subschemas(s) {
-			visit(child)
+		for _, entry := range SubschemaEntries(s) {
+			visit(entry.Schema)
 		}
 	}
 

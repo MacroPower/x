@@ -112,7 +112,7 @@ if errors.As(err, &ve) {
   and schema paths.
 - `$vocabulary` gating and pluggable, opt-in, context-aware remote `$ref`
   resolution.
-- Schema traversal (`Subschemas`, `Walk`) and shape predicates
+- Schema traversal (`SubschemaEntries`, `Walk`) and shape predicates
   (`CheckTypeNames`, `IsTrueSchema`, `IsFalseSchema`) for working with
   `Schema` values directly.
 - `$ref` inlining (`Inline`) that flattens a schema and the documents it
@@ -766,34 +766,26 @@ Helpers are provided for working with `Schema` values directly, independent of
 generation and validation:
 
 ```go
-// Subschemas returns the direct sub-schemas of s: every non-nil schema held
-// by one sub-schema-bearing keyword, with map children in sorted-key order.
-children := jsonschema.Subschemas(s)
-
-// SubschemaEntries is the keyword-labeled form: the same children in the same
-// order, each paired with the JSON Pointer addressing it from s
-// ("/properties/a", "/allOf/0", "/items"), for path-tracking traversals.
+// SubschemaEntries returns the direct sub-schemas of s: every non-nil schema
+// held by one sub-schema-bearing keyword, each paired with the JSON Pointer
+// addressing it from s ("/properties/a", "/allOf/0", "/items"), with map
+// children in sorted-key order.
 for _, entry := range jsonschema.SubschemaEntries(s) {
 	fmt.Println(entry.Pointer, entry.Schema.Type)
 }
 
-// Walk visits s and every schema transitively reachable through Subschemas.
-err := jsonschema.Walk(s, func(s *jsonschema.Schema) error {
+// Walk visits s and every schema transitively reachable through
+// SubschemaEntries, with the JSON Pointer from the root.
+err := jsonschema.Walk(s, func(path string, s *jsonschema.Schema) error {
 	s.Description = "" // strip annotations, rewrite $refs, collect types, ...
-
-	return nil
-})
-
-// WalkPaths is Walk with path tracking: the JSON Pointer from the root.
-err = jsonschema.WalkPaths(s, func(path string, s *jsonschema.Schema) error {
 	fmt.Println(path, s.Type) // "/properties/a string", ...
 
 	return nil
 })
 ```
 
-`Subschemas` is the package's single source of truth for which `Schema` fields
-hold sub-schemas: the applicators (`items`, `prefixItems`,
+`SubschemaEntries` is the package's single source of truth for which `Schema`
+fields hold sub-schemas: the applicators (`items`, `prefixItems`,
 `additionalItems`, `properties`, `patternProperties`, `additionalProperties`,
 `propertyNames`, `allOf`, `anyOf`, `oneOf`, `not`, `if`/`then`/`else`,
 `dependentSchemas` and legacy `dependencies`, `contains`, `unevaluated*`,
@@ -801,10 +793,9 @@ hold sub-schemas: the applicators (`items`, `prefixItems`,
 typed `Schema` fields are included, not sub-schemas carried as raw JSON in
 unknown keywords. Children held in maps are returned in sorted-key order so
 traversal is deterministic, and a maintenance test fails when an upstream
-`Schema` field addition is not covered. `Subschemas` delegates to
-`SubschemaEntries`, so the labeled and unlabeled forms can never disagree on
-field coverage or order; appending each visited child's `Pointer` while
-descending yields the schema path the package's own errors report.
+`Schema` field addition is not covered. Appending each visited child's
+`Pointer` while descending yields the schema path the package's own errors
+report.
 
 `Walk` is pre-order: the function runs on a schema before that schema's
 children are gathered, so it may replace or mutate sub-schema fields and the
@@ -816,14 +807,13 @@ the current schema — its sub-schemas are not visited — and continues with it
 siblings, which suits rewriting passes that splice in a subtree the walk
 should not descend into.
 
-`WalkPaths` is `Walk` with path tracking: the function also receives the JSON
-Pointer addressing each visited schema from the root (the root itself is
-`""`), built by appending each descended child's `SubschemaEntry.Pointer`, so
-path-tracking traversals need not re-implement the walk and its cycle guard.
-A schema reachable through several paths is visited with the first path the
-traversal encounters; map-held children walk in sorted-key order, so that
-path is deterministic. `Walk` delegates to `WalkPaths`, so the two visit the
-same schemas in the same order.
+The function receives the JSON Pointer addressing each visited schema from
+the root (the root itself is `""`), built by appending each descended child's
+`SubschemaEntry.Pointer`, so path-tracking traversals need not re-implement
+the walk and its cycle guard; a traversal with no use for the path ignores
+the parameter, following `io/fs.WalkDir`. A schema reachable through several
+paths is visited with the first path the traversal encounters; map-held
+children walk in sorted-key order, so that path is deterministic.
 
 Three predicates answer common shape questions:
 
@@ -919,7 +909,7 @@ one draft throughout):
 
 A spliced copy never carries a `$schema` keyword, and the returned root
 keeps the input's `$schema`. Refs are inlined only in typed sub-schema
-positions (those `Subschemas` covers); a `$ref` carried as raw JSON inside
+positions (those `SubschemaEntries` covers); a `$ref` carried as raw JSON inside
 an unknown keyword is left as-is, although a ref pointing into such a
 position still resolves.
 

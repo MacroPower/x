@@ -221,7 +221,7 @@ func (g *generator) isReferenced(defName string) bool {
 }
 
 // schemaContainsRef recursively checks if a schema contains a $ref to the
-// given target. It walks the sub-schema-bearing fields via [Subschemas],
+// given target. It walks the sub-schema-bearing fields via [SubschemaEntries],
 // the single source of truth for which keywords hold sub-schemas, so a
 // reference through any keyword is found and the field list stays in one place.
 // The freshly generated $defs trees this runs over are acyclic, so the walk
@@ -235,8 +235,8 @@ func schemaContainsRef(s *Schema, target string) bool {
 		return true
 	}
 
-	for _, child := range Subschemas(s) {
-		if schemaContainsRef(child, target) {
+	for _, entry := range SubschemaEntries(s) {
+		if schemaContainsRef(entry.Schema, target) {
 			return true
 		}
 	}

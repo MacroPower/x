@@ -550,32 +550,27 @@
 // Helpers are provided for working with [Schema] values directly, independent
 // of generation and validation:
 //
-//   - [Subschemas] returns the direct sub-schemas of a schema: every non-nil
-//     schema reachable through one sub-schema-bearing keyword (applicators
-//     such as items, properties, allOf, not, if/then/else, plus $defs and
-//     definitions). Children held in maps are returned in sorted-key order so
-//     traversal is deterministic. It is the package's single source of truth
-//     for which Schema fields hold sub-schemas.
-//   - [SubschemaEntries] is the keyword-labeled form of [Subschemas]: the same
-//     children in the same order, each paired with the RFC 6901 JSON Pointer
-//     addressing it from the parent ("/properties/a", "/allOf/0", "/items"),
-//     so path-tracking traversals need not re-derive which keyword holds each
-//     child. Appending each visited child's pointer while descending yields
-//     the schema path the package's own errors report.
+//   - [SubschemaEntries] returns the direct sub-schemas of a schema: every
+//     non-nil schema reachable through one sub-schema-bearing keyword
+//     (applicators such as items, properties, allOf, not, if/then/else, plus
+//     $defs and definitions), each paired with the RFC 6901 JSON Pointer
+//     addressing it from the parent ("/properties/a", "/allOf/0", "/items").
+//     Children held in maps are returned in sorted-key order so traversal is
+//     deterministic, and appending each visited child's pointer while
+//     descending yields the schema path the package's own errors report.
+//     It is the package's single source of truth for which Schema fields hold
+//     sub-schemas.
 //   - [Walk] calls a function for a schema and every schema transitively
-//     reachable through [Subschemas], pre-order: the function runs on a schema
-//     before its children are gathered, so it may replace or mutate sub-schema
-//     fields and the walk follows the updated children. Each distinct schema
-//     pointer is visited once, so aliased or cyclic graphs terminate. Walk
-//     stops at and returns the first error from the function, except
-//     [SkipChildren], which prunes the walk at that schema and continues with
-//     its siblings.
-//   - [WalkPaths] is [Walk] with path tracking: the function also receives the
-//     JSON Pointer addressing each visited schema from the root, built by
-//     appending each descended child's [SubschemaEntry.Pointer], so
-//     path-tracking traversals need not re-implement the walk and its cycle
-//     guard. A schema reachable through several paths is visited with the
-//     first path the traversal encounters.
+//     reachable through [SubschemaEntries], pre-order: the function runs on a
+//     schema before its children are gathered, so it may replace or mutate
+//     sub-schema fields and the walk follows the updated children. Each
+//     distinct schema pointer is visited once, so aliased or cyclic graphs
+//     terminate. Walk stops at and returns the first error from the function,
+//     except [SkipChildren], which prunes the walk at that schema and
+//     continues with its siblings. The function receives the JSON Pointer
+//     addressing each visited schema from the root, built by appending each
+//     descended child's [SubschemaEntry.Pointer]; a traversal with no use for
+//     the path ignores the parameter, following [io/fs.WalkDir].
 //   - [CheckTypeNames] verifies that every type keyword reachable from a
 //     schema names one of the seven JSON Schema type names, returning nil or
 //     an error wrapping [ErrInvalidType] that includes the schema path of the
@@ -708,7 +703,7 @@
 // node is replaced by the target copy alone, as it also is under either
 // draft when $ref is the node's only keyword. A spliced copy never carries
 // a $schema keyword, and the returned root keeps the input's $schema. Refs
-// are inlined only in typed sub-schema positions (those [Subschemas]
+// are inlined only in typed sub-schema positions (those [SubschemaEntries]
 // covers); a $ref carried as raw JSON inside an unknown keyword is left
 // as-is, although a ref pointing into such a position still resolves.
 //

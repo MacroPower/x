@@ -12,7 +12,23 @@ import (
 	"go.jacobcolvin.com/x/jsonschema"
 )
 
-func TestSubschemas(t *testing.T) {
+// childSchemas projects SubschemaEntries onto the bare child schemas, for
+// assertions about coverage and order that do not care about pointers.
+func childSchemas(s *jsonschema.Schema) []*jsonschema.Schema {
+	entries := jsonschema.SubschemaEntries(s)
+	if len(entries) == 0 {
+		return nil
+	}
+
+	children := make([]*jsonschema.Schema, len(entries))
+	for i, entry := range entries {
+		children[i] = entry.Schema
+	}
+
+	return children
+}
+
+func TestSubschemaEntriesChildren(t *testing.T) {
 	t.Parallel()
 
 	propA := &jsonschema.Schema{Type: "string"}
@@ -70,25 +86,26 @@ func TestSubschemas(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tc.want, jsonschema.Subschemas(tc.schema))
+			assert.Equal(t, tc.want, childSchemas(tc.schema))
 
 			// A second call must return the same order: map children are
 			// emitted in sorted-key order, so traversal is deterministic.
-			assert.Equal(t, tc.want, jsonschema.Subschemas(tc.schema))
+			assert.Equal(t, tc.want, childSchemas(tc.schema))
 		})
 	}
 }
 
-// TestSubschemasDirectOnly pins that Subschemas returns only direct children:
-// a grandchild is reachable through Walk, not through one Subschemas call.
-func TestSubschemasDirectOnly(t *testing.T) {
+// TestSubschemaEntriesDirectOnly pins that SubschemaEntries returns only
+// direct children: a grandchild is reachable through Walk, not through one
+// SubschemaEntries call.
+func TestSubschemaEntriesDirectOnly(t *testing.T) {
 	t.Parallel()
 
 	grandchild := &jsonschema.Schema{Type: "string"}
 	child := &jsonschema.Schema{Items: grandchild}
 	root := &jsonschema.Schema{Not: child}
 
-	assert.Equal(t, []*jsonschema.Schema{child}, jsonschema.Subschemas(root))
+	assert.Equal(t, []*jsonschema.Schema{child}, childSchemas(root))
 }
 
 func TestSubschemaEntries(t *testing.T) {
@@ -144,37 +161,6 @@ func TestSubschemaEntries(t *testing.T) {
 	}
 }
 
-// TestSubschemaEntriesAgreesWithSubschemas pins the delegation contract: the
-// labeled and unlabeled forms return the same children in the same order, so
-// traversals that pair children position by position and traversals that
-// track paths can never disagree.
-func TestSubschemaEntriesAgreesWithSubschemas(t *testing.T) {
-	t.Parallel()
-
-	schema := &jsonschema.Schema{
-		Properties: map[string]*jsonschema.Schema{
-			"b": {Type: "integer"},
-			"a": {Type: "string"},
-		},
-		Defs: map[string]*jsonschema.Schema{
-			"z": {Type: "object"},
-		},
-		AllOf: []*jsonschema.Schema{{MinLength: jsonschema.Ptr(1)}, nil, {MaxLength: jsonschema.Ptr(2)}},
-		Items: &jsonschema.Schema{Type: "number"},
-		Not:   &jsonschema.Schema{},
-	}
-
-	refs := jsonschema.SubschemaEntries(schema)
-	children := jsonschema.Subschemas(schema)
-
-	require.Len(t, refs, len(children))
-
-	for i, ref := range refs {
-		assert.Same(t, children[i], ref.Schema)
-		assert.NotEmpty(t, ref.Pointer)
-	}
-}
-
 func TestWalk(t *testing.T) {
 	t.Parallel()
 
@@ -182,7 +168,7 @@ func TestWalk(t *testing.T) {
 		t.Parallel()
 
 		called := false
-		err := jsonschema.Walk(nil, func(*jsonschema.Schema) error {
+		err := jsonschema.Walk(nil, func(string, *jsonschema.Schema) error {
 			called = true
 
 			return nil
@@ -203,7 +189,7 @@ func TestWalk(t *testing.T) {
 
 		var visited []*jsonschema.Schema
 
-		err := jsonschema.Walk(root, func(s *jsonschema.Schema) error {
+		err := jsonschema.Walk(root, func(_ string, s *jsonschema.Schema) error {
 			visited = append(visited, s)
 
 			return nil
@@ -221,7 +207,7 @@ func TestWalk(t *testing.T) {
 
 		count := 0
 
-		err := jsonschema.Walk(root, func(s *jsonschema.Schema) error {
+		err := jsonschema.Walk(root, func(_ string, s *jsonschema.Schema) error {
 			if s == shared {
 				count++
 			}
@@ -241,7 +227,7 @@ func TestWalk(t *testing.T) {
 
 		count := 0
 
-		err := jsonschema.Walk(root, func(*jsonschema.Schema) error {
+		err := jsonschema.Walk(root, func(string, *jsonschema.Schema) error {
 			count++
 
 			return nil
@@ -261,7 +247,7 @@ func TestWalk(t *testing.T) {
 
 		var visited []*jsonschema.Schema
 
-		err := jsonschema.Walk(root, func(s *jsonschema.Schema) error {
+		err := jsonschema.Walk(root, func(_ string, s *jsonschema.Schema) error {
 			visited = append(visited, s)
 			if s == first {
 				return errStop
@@ -283,7 +269,7 @@ func TestWalk(t *testing.T) {
 
 		var visited []*jsonschema.Schema
 
-		err := jsonschema.Walk(root, func(s *jsonschema.Schema) error {
+		err := jsonschema.Walk(root, func(_ string, s *jsonschema.Schema) error {
 			if s.Items == original {
 				s.Items = replacement
 			}
@@ -308,7 +294,7 @@ func TestWalk(t *testing.T) {
 
 		var visited []*jsonschema.Schema
 
-		err := jsonschema.Walk(root, func(s *jsonschema.Schema) error {
+		err := jsonschema.Walk(root, func(_ string, s *jsonschema.Schema) error {
 			visited = append(visited, s)
 			if s == pruned {
 				return jsonschema.SkipChildren
@@ -329,7 +315,7 @@ func TestWalk(t *testing.T) {
 
 		var visited []*jsonschema.Schema
 
-		err := jsonschema.Walk(root, func(s *jsonschema.Schema) error {
+		err := jsonschema.Walk(root, func(_ string, s *jsonschema.Schema) error {
 			visited = append(visited, s)
 
 			return jsonschema.SkipChildren
@@ -346,7 +332,7 @@ func TestWalk(t *testing.T) {
 
 		count := 0
 
-		err := jsonschema.Walk(root, func(*jsonschema.Schema) error {
+		err := jsonschema.Walk(root, func(string, *jsonschema.Schema) error {
 			count++
 
 			return fmt.Errorf("rewrite pass: %w", jsonschema.SkipChildren)
@@ -367,7 +353,7 @@ func TestWalk(t *testing.T) {
 
 		count := 0
 
-		err := jsonschema.Walk(root, func(s *jsonschema.Schema) error {
+		err := jsonschema.Walk(root, func(_ string, s *jsonschema.Schema) error {
 			if s == shared {
 				count++
 
@@ -380,10 +366,6 @@ func TestWalk(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, 1, count, "pruning marks the schema visited; the second path does not re-run fn")
 	})
-}
-
-func TestWalkPaths(t *testing.T) {
-	t.Parallel()
 
 	t.Run("paths accumulate SubschemaEntry pointers from the root", func(t *testing.T) {
 		t.Parallel()
@@ -397,7 +379,7 @@ func TestWalkPaths(t *testing.T) {
 
 		paths := map[*jsonschema.Schema]string{}
 
-		err := jsonschema.WalkPaths(root, func(path string, s *jsonschema.Schema) error {
+		err := jsonschema.Walk(root, func(path string, s *jsonschema.Schema) error {
 			paths[s] = path
 
 			return nil
@@ -418,7 +400,7 @@ func TestWalkPaths(t *testing.T) {
 
 		var paths []string
 
-		err := jsonschema.WalkPaths(root, func(path string, s *jsonschema.Schema) error {
+		err := jsonschema.Walk(root, func(path string, s *jsonschema.Schema) error {
 			if s == shared {
 				paths = append(paths, path)
 			}
@@ -443,7 +425,7 @@ func TestWalkPaths(t *testing.T) {
 
 		var visited []string
 
-		err := jsonschema.WalkPaths(root, func(path string, _ *jsonschema.Schema) error {
+		err := jsonschema.Walk(root, func(path string, _ *jsonschema.Schema) error {
 			visited = append(visited, path)
 			if path == "/properties/skip" {
 				return jsonschema.SkipChildren
@@ -455,42 +437,19 @@ func TestWalkPaths(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, []string{"", "/properties/skip", "/properties/walk", "/properties/walk/items"}, visited)
 	})
-
-	t.Run("Walk visits the same schemas in the same order", func(t *testing.T) {
-		t.Parallel()
-
-		root := &jsonschema.Schema{
-			Properties: map[string]*jsonschema.Schema{"p": {Items: &jsonschema.Schema{Type: "string"}}},
-			Not:        &jsonschema.Schema{Type: "integer"},
-		}
-
-		var fromWalk, fromWalkPaths []*jsonschema.Schema
-
-		require.NoError(t, jsonschema.Walk(root, func(s *jsonschema.Schema) error {
-			fromWalk = append(fromWalk, s)
-
-			return nil
-		}))
-		require.NoError(t, jsonschema.WalkPaths(root, func(_ string, s *jsonschema.Schema) error {
-			fromWalkPaths = append(fromWalkPaths, s)
-
-			return nil
-		}))
-
-		assert.Equal(t, fromWalk, fromWalkPaths, "Walk delegates to WalkPaths, so the two can never diverge")
-	})
 }
 
-// TestSubschemasFieldCoverage is a maintenance guard over [jsonschema.Subschemas],
-// the single source of truth for which Schema fields hold sub-schemas. It
-// enumerates Schema's fields via reflection, populates every field of type
-// *Schema, []*Schema, or map[string]*Schema on a probe schema with a distinct
-// child, and asserts Subschemas returns each child exactly once. When upstream
-// adds a new sub-schema-bearing field, the probe gains a child Subschemas does
-// not return and this test fails, forcing the field list to be extended -- so
-// every traversal built on Subschemas (Walk, Inline, and the internal walks)
-// picks the new keyword up in one place.
-func TestSubschemasFieldCoverage(t *testing.T) {
+// TestSubschemaEntriesFieldCoverage is a maintenance guard over
+// [jsonschema.SubschemaEntries], the single source of truth for which Schema
+// fields hold sub-schemas. It enumerates Schema's fields via reflection,
+// populates every field of type *Schema, []*Schema, or map[string]*Schema on
+// a probe schema with a distinct child, and asserts SubschemaEntries returns
+// each child exactly once. When upstream adds a new sub-schema-bearing field,
+// the probe gains a child SubschemaEntries does not return and this test
+// fails, forcing the field list to be extended -- so every traversal built on
+// SubschemaEntries (Walk, Inline, and the internal walks) picks the new
+// keyword up in one place.
+func TestSubschemaEntriesFieldCoverage(t *testing.T) {
 	t.Parallel()
 
 	var (
@@ -536,15 +495,15 @@ func TestSubschemasFieldCoverage(t *testing.T) {
 		"reflection found fewer sub-schema-bearing fields than the known upstream set")
 
 	got := map[*jsonschema.Schema]int{}
-	for _, child := range jsonschema.Subschemas(probe) {
-		got[child]++
+	for _, entry := range jsonschema.SubschemaEntries(probe) {
+		got[entry.Schema]++
 	}
 
 	for child, fieldName := range want {
 		assert.Equal(t, 1, got[child],
-			"Schema field %q holds a sub-schema that Subschemas must return exactly once", fieldName)
+			"Schema field %q holds a sub-schema that SubschemaEntries must return exactly once", fieldName)
 	}
 
 	assert.Len(t, got, len(want),
-		"Subschemas returned schemas that were not planted on the probe")
+		"SubschemaEntries returned schemas that were not planted on the probe")
 }
