@@ -101,9 +101,9 @@ func WithResolveOptions(opts *ResolveOptions) ValidateOption {
 // WithVocabularies directly specifies the active vocabulary set for
 // validation: the listed vocabulary URIs (e.g. [VocabValidation2020]) are
 // active and every other vocabulary is inactive. This takes highest
-// precedence, overriding any $vocabulary found in a metaschema registered
-// via [WithMetaSchema]. Calling it with no URIs is a no-op, leaving the
-// metaschema or default resolution in effect.
+// precedence, overriding any $vocabulary found in a metaschema resolved
+// via [WithMetaSchemaResolver]. Calling it with no URIs is a no-op, leaving
+// the metaschema or default resolution in effect.
 func WithVocabularies(uris ...string) ValidateOption {
 	return validateOptionFunc(func(v *validator) {
 		if len(uris) == 0 {
@@ -119,32 +119,13 @@ func WithVocabularies(uris ...string) ValidateOption {
 	})
 }
 
-// WithMetaSchema registers a metaschema for vocabulary resolution. The
-// metaschema's $id is used to match against the root schema's $schema field.
-// If the root schema's $schema matches the metaschema's $id, the metaschema's
-// $vocabulary map is used to determine active vocabularies. A nil metaschema is
-// a no-op. [WithMetaSchemaResolver] is the lookup form, for serving a family
-// of metaschemas without registering each by exact $id.
-func WithMetaSchema(ms *Schema) ValidateOption {
-	return validateOptionFunc(func(v *validator) {
-		if ms != nil && ms.ID != "" {
-			if v.metaSchemas == nil {
-				v.metaSchemas = map[string]*Schema{}
-			}
-
-			v.metaSchemas[ms.ID] = ms
-		}
-	})
-}
-
 // WithMetaSchemaResolver sets a [RefResolver] consulted with the root
-// schema's $schema URI when no metaschema registered via [WithMetaSchema]
-// matches it. The resolved metaschema's $vocabulary map determines the
-// active vocabularies, exactly as a matching WithMetaSchema registration
-// would, so one resolver serves a whole family of metaschemas — a directory
-// of documents via [FileResolver], or a lazily fetched set —
-// without registering each by exact $id. [RefResolverFunc] adapts a bare
-// function.
+// schema's $schema URI to look up its metaschema. The resolved metaschema's
+// $vocabulary map determines the active vocabularies. The resolver decides
+// the lookup's shape: a [SchemaMap] serves fixed metaschemas by exact $id,
+// a [FileResolver] serves a directory of documents, and [ChainResolvers]
+// composes the two with any lazily fetched set. [RefResolverFunc] adapts a
+// bare function.
 //
 // The resolver is consulted once per compile, under the [Compile] context
 // (the Must* entry points pass [context.Background]). A resolver returning
@@ -233,7 +214,6 @@ type validator struct {
 	anchorRegistry        map[string]*Schema         // baseURI#anchor → schema
 	dynamicAnchorRegistry map[string]*Schema         // baseURI#name → schema ($dynamicAnchor only)
 	baseURIs              map[*Schema]string         // schema → its base URI
-	metaSchemas           map[string]*Schema         // $schema URI → metaschema
 	metaSchemaResolver    RefResolver                // metaschema lookup by $schema URI (WithMetaSchemaResolver)
 	jsonPointerCache      map[jsonPointerKey]*Schema // JSON-pointer fallback results, keyed by (root, pointer)
 	visiting              map[visitKey]bool
@@ -361,10 +341,9 @@ func (v *validator) forInstance(ctx context.Context) *validator {
 //
 // Resolution priority:
 //  1. WithVocabularies direct override (highest).
-//  2. WithMetaSchema lookup (root $schema matches a registered metaschema $id).
-//  3. WithMetaSchemaResolver lookup (the resolver is consulted with the root
+//  2. WithMetaSchemaResolver lookup (the resolver is consulted with the root
 //     $schema URI).
-//  4. Default: allVocabs (backward compatible).
+//  3. Default: allVocabs (backward compatible).
 //
 // Draft-07 always gets allVocabs — vocabulary is a 2020-12 concept.
 func (v *validator) resolveVocabularies() error {
@@ -377,12 +356,6 @@ func (v *validator) resolveVocabularies() error {
 	}
 
 	rawVocabs := v.vocabOverride
-
-	if rawVocabs == nil {
-		if ms, ok := v.metaSchemas[v.root.Schema]; ok && len(ms.Vocabulary) > 0 {
-			rawVocabs = ms.Vocabulary
-		}
-	}
 
 	if rawVocabs == nil && v.metaSchemaResolver != nil && v.root.Schema != "" {
 		ms, err := v.metaSchemaResolver.ResolveRef(v.ctx, v.root.Schema)

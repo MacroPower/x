@@ -1445,11 +1445,13 @@ func TestFormatAssertionVocabularyAssertsWhenRecognized(t *testing.T) {
 
 	schema := &jsonschema.Schema{Schema: metaID, Format: "ipv4"}
 
-	err := jsonschema.Validate(t.Context(), schema, "not-an-ipv4", jsonschema.WithMetaSchema(meta))
+	err := jsonschema.Validate(t.Context(), schema, "not-an-ipv4",
+		jsonschema.WithMetaSchemaResolver(jsonschema.SchemaMap{meta.ID: meta}))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "(format)")
 
-	err = jsonschema.Validate(t.Context(), schema, "127.0.0.1", jsonschema.WithMetaSchema(meta))
+	err = jsonschema.Validate(t.Context(), schema, "127.0.0.1",
+		jsonschema.WithMetaSchemaResolver(jsonschema.SchemaMap{meta.ID: meta}))
 	require.NoError(t, err)
 }
 
@@ -2032,7 +2034,7 @@ func TestValidateVocabularyResolution(t *testing.T) {
 				),
 			},
 		},
-		"WithMetaSchema lookup": {
+		"SchemaMap metaschema lookup": {
 			schema: &jsonschema.Schema{
 				Schema:   "https://example.com/my-meta",
 				Type:     "string",
@@ -2040,12 +2042,14 @@ func TestValidateVocabularyResolution(t *testing.T) {
 			},
 			instance: map[string]any{},
 			opts: []jsonschema.ValidateOption{
-				jsonschema.WithMetaSchema(&jsonschema.Schema{
-					ID: "https://example.com/my-meta",
-					Vocabulary: map[string]bool{
-						jsonschema.VocabCore2020:       true,
-						jsonschema.VocabApplicator2020: true,
-						// Validation vocab absent, so disabled.
+				jsonschema.WithMetaSchemaResolver(jsonschema.SchemaMap{
+					"https://example.com/my-meta": {
+						ID: "https://example.com/my-meta",
+						Vocabulary: map[string]bool{
+							jsonschema.VocabCore2020:       true,
+							jsonschema.VocabApplicator2020: true,
+							// Validation vocab absent, so disabled.
+						},
 					},
 				}),
 			},
@@ -2078,33 +2082,40 @@ func TestValidateVocabularyResolution(t *testing.T) {
 			},
 			// Type and required are validation vocab, so both skipped.
 		},
-		"WithMetaSchema overrides WithMetaSchemaResolver": {
+		"ChainResolvers first answer wins": {
 			schema: &jsonschema.Schema{
 				Schema: "https://example.com/my-meta",
 				Type:   "string",
 			},
 			instance: 42.0,
 			opts: []jsonschema.ValidateOption{
-				// The resolver would disable the validation vocab.
-				jsonschema.WithMetaSchemaResolver(jsonschema.RefResolverFunc(
-					func(_ context.Context, uri string) (*jsonschema.Schema, error) {
-						return &jsonschema.Schema{
-							ID: uri,
+				jsonschema.WithMetaSchemaResolver(jsonschema.ChainResolvers(
+					// The exact entry answers first and keeps validation
+					// active; nil links are skipped.
+					nil,
+					jsonschema.SchemaMap{
+						"https://example.com/my-meta": {
+							ID: "https://example.com/my-meta",
 							Vocabulary: map[string]bool{
 								jsonschema.VocabCore2020:       true,
 								jsonschema.VocabApplicator2020: true,
+								jsonschema.VocabValidation2020: true,
 							},
-						}, nil
-					})),
-				// The exact registration wins and keeps validation active.
-				jsonschema.WithMetaSchema(&jsonschema.Schema{
-					ID: "https://example.com/my-meta",
-					Vocabulary: map[string]bool{
-						jsonschema.VocabCore2020:       true,
-						jsonschema.VocabApplicator2020: true,
-						jsonschema.VocabValidation2020: true,
+						},
 					},
-				}),
+					// The fallback would disable the validation vocab, but
+					// the chain never reaches it.
+					jsonschema.RefResolverFunc(
+						func(_ context.Context, uri string) (*jsonschema.Schema, error) {
+							return &jsonschema.Schema{
+								ID: uri,
+								Vocabulary: map[string]bool{
+									jsonschema.VocabCore2020:       true,
+									jsonschema.VocabApplicator2020: true,
+								},
+							}, nil
+						}),
+				)),
 			},
 			err: "(type)",
 		},
@@ -2138,19 +2149,21 @@ func TestValidateVocabularyResolution(t *testing.T) {
 			},
 			err: "resolve metaschema",
 		},
-		"WithVocabularies overrides WithMetaSchema": {
+		"WithVocabularies overrides WithMetaSchemaResolver": {
 			schema: &jsonschema.Schema{
 				Schema: "https://example.com/my-meta",
 				Type:   "string",
 			},
 			instance: 42.0,
 			opts: []jsonschema.ValidateOption{
-				jsonschema.WithMetaSchema(&jsonschema.Schema{
-					ID: "https://example.com/my-meta",
-					Vocabulary: map[string]bool{
-						jsonschema.VocabCore2020:       true,
-						jsonschema.VocabApplicator2020: true,
-						// Validation disabled in metaschema.
+				jsonschema.WithMetaSchemaResolver(jsonschema.SchemaMap{
+					"https://example.com/my-meta": {
+						ID: "https://example.com/my-meta",
+						Vocabulary: map[string]bool{
+							jsonschema.VocabCore2020:       true,
+							jsonschema.VocabApplicator2020: true,
+							// Validation disabled in metaschema.
+						},
 					},
 				}),
 				// Override re-enables validation.
@@ -2178,11 +2191,12 @@ func TestValidateVocabularyResolution(t *testing.T) {
 	}
 }
 
-func TestWithMetaSchemaNil(t *testing.T) {
+func TestWithMetaSchemaResolverNil(t *testing.T) {
 	t.Parallel()
 
-	// A nil metaschema is a no-op: it must not panic and must leave validation
-	// behaving exactly as if the option were absent.
+	// A nil resolver restores the default (no metaschema lookup): it must not
+	// panic and must leave validation behaving exactly as if the option were
+	// absent.
 	schema := &jsonschema.Schema{
 		Schema: "https://json-schema.org/draft/2020-12/schema",
 		Type:   "string",
@@ -2191,19 +2205,19 @@ func TestWithMetaSchemaNil(t *testing.T) {
 	var withNil, without error
 
 	require.NotPanics(t, func() {
-		withNil = jsonschema.Validate(t.Context(), schema, 42.0, jsonschema.WithMetaSchema(nil))
-	}, "WithMetaSchema(nil) must not panic")
+		withNil = jsonschema.Validate(t.Context(), schema, 42.0, jsonschema.WithMetaSchemaResolver(nil))
+	}, "WithMetaSchemaResolver(nil) must not panic")
 
 	without = jsonschema.Validate(t.Context(), schema, 42.0)
 
-	require.Error(t, withNil, "the type constraint still applies with a nil metaschema")
+	require.Error(t, withNil, "the type constraint still applies with a nil resolver")
 	assert.Contains(t, withNil.Error(), "(type)")
 
 	if without == nil {
 		assert.NoError(t, withNil)
 	} else {
 		assert.Equal(t, without.Error(), withNil.Error(),
-			"WithMetaSchema(nil) must match validation with the option absent")
+			"WithMetaSchemaResolver(nil) must match validation with the option absent")
 	}
 }
 
@@ -2402,7 +2416,8 @@ func TestValidateVocabularyUnknownOptional(t *testing.T) {
 		Type:   "string",
 	}
 
-	err := jsonschema.Validate(t.Context(), schema, "hello", jsonschema.WithMetaSchema(meta))
+	err := jsonschema.Validate(t.Context(), schema, "hello",
+		jsonschema.WithMetaSchemaResolver(jsonschema.SchemaMap{meta.ID: meta}))
 	require.NoError(t, err)
 }
 
@@ -2432,13 +2447,13 @@ func TestValidateVocabularyMetaSchemaIntegration(t *testing.T) {
 	// Properties still apply (applicator vocab), but the type constraint
 	// inside the property schema is also skipped.
 	err := jsonschema.Validate(t.Context(), schema, map[string]any{"name": "hi"},
-		jsonschema.WithMetaSchema(metaSchema),
+		jsonschema.WithMetaSchemaResolver(jsonschema.SchemaMap{metaSchema.ID: metaSchema}),
 	)
 	require.NoError(t, err)
 
 	// Missing property entirely is also fine (required is validation vocab).
 	err = jsonschema.Validate(t.Context(), schema, map[string]any{},
-		jsonschema.WithMetaSchema(metaSchema),
+		jsonschema.WithMetaSchemaResolver(jsonschema.SchemaMap{metaSchema.ID: metaSchema}),
 	)
 	require.NoError(t, err)
 }
@@ -3260,7 +3275,8 @@ func TestResolveVocabulariesCoreNotRequired(t *testing.T) {
 		Type:   "string",
 	}
 
-	err := jsonschema.Validate(t.Context(), schema, "hello", jsonschema.WithMetaSchema(meta))
+	err := jsonschema.Validate(t.Context(), schema, "hello",
+		jsonschema.WithMetaSchemaResolver(jsonschema.SchemaMap{meta.ID: meta}))
 	require.Error(t, err, "core vocabulary set to false should be rejected")
 }
 
@@ -4557,7 +4573,7 @@ func TestVocabularyViaMetaSchemaPath(t *testing.T) {
 	t.Parallel()
 
 	// The existing test uses WithVocabularies to inject unknown vocabulary.
-	// This tests the same via WithMetaSchema (the $vocabulary in a metaschema).
+	// This tests the same via a metaschema lookup (the $vocabulary in a metaschema).
 	metaschema := &jsonschema.Schema{
 		ID: "https://example.com/custom-meta",
 		Vocabulary: map[string]bool{
@@ -4572,11 +4588,11 @@ func TestVocabularyViaMetaSchemaPath(t *testing.T) {
 	}
 
 	err := jsonschema.Validate(t.Context(), schema, "hello",
-		jsonschema.WithMetaSchema(metaschema),
+		jsonschema.WithMetaSchemaResolver(jsonschema.SchemaMap{metaschema.ID: metaschema}),
 	)
 	// Should fail with ErrUnknownVocabulary via the metaschema path.
 	require.ErrorIs(t, err, jsonschema.ErrUnknownVocabulary,
-		"unknown required vocabulary via WithMetaSchema should be rejected")
+		"unknown required vocabulary via the metaschema path should be rejected")
 }
 
 // TestFormatAssertion exercises the built-in format checkers as assertions.

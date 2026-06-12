@@ -41,14 +41,12 @@ func (m metaSchemaResolver) ResolveRef(_ context.Context, uri string) (*jsonsche
 
 // loadMetaSchemas reads every vendored meta-schema under testdata/metaschemas,
 // indexes them by $id, and returns the index plus the validate options needed to
-// validate a document against them (a resolver for the sub-schema refs and the
-// $vocabulary registrations).
+// validate a document against them (a resolver for the sub-schema refs that
+// doubles as the $vocabulary metaschema lookup).
 func loadMetaSchemas(t *testing.T) (map[string]*jsonschema.Schema, []jsonschema.ValidateOption) {
 	t.Helper()
 
 	byID := metaSchemaResolver{}
-
-	var opts []jsonschema.ValidateOption
 
 	walk := func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -75,18 +73,15 @@ func loadMetaSchemas(t *testing.T) (map[string]*jsonschema.Schema, []jsonschema.
 			byID[s.ID] = &s
 		}
 
-		if len(s.Vocabulary) > 0 {
-			opts = append(opts, jsonschema.WithMetaSchema(&s))
-		}
-
 		return nil
 	}
 
 	require.NoError(t, filepath.Walk("testdata/metaschemas", walk))
 
-	opts = append(opts, jsonschema.WithRefResolver(byID))
-
-	return byID, opts
+	return byID, []jsonschema.ValidateOption{
+		jsonschema.WithRefResolver(byID),
+		jsonschema.WithMetaSchemaResolver(byID),
+	}
 }
 
 // The following package-level types form a corpus exercising the distinct

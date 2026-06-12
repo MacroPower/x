@@ -687,18 +687,17 @@ containing object are both identifiable from `InstancePath` alone.
 
 ### Validation options
 
-| Option                      | Effect                                                                                                                 |
-| --------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `WithDraft(Draft)`          | Override the draft otherwise detected from the root schema's `$schema`.                                                |
-| `WithRefResolver(r)`        | Resolve remote/absolute `$ref` URIs (called only when local lookup fails); the resolver receives the caller's context. |
-| `WithBaseURI(base)`         | Set the root document's base URI for ref absolutization; also serves `Inline`.                                         |
-| `WithFormatValidator(f)`    | Register a custom `format` checker (a `FormatValidator`; `FormatValidatorFunc` adapts a bare function).                |
-| `WithFormats(bool)`         | Force `format` assertion on or off.                                                                                    |
-| `WithContent(bool)`         | Assert `contentEncoding`/`contentMediaType` (annotation-only by default).                                              |
-| `WithResolveOptions(opts)`  | Pass `ResolveOptions` (aliased from the upstream package) to `Schema.Resolve`.                                         |
-| `WithVocabularies(uris...)` | Directly set the active vocabularies (highest precedence); unlisted ones are inactive.                                 |
-| `WithMetaSchema(ms)`        | Register a metaschema whose `$vocabulary` gates keyword groups.                                                        |
-| `WithMetaSchemaResolver(r)` | Set a `RefResolver` that looks up the metaschema by the root schema's `$schema` URI.                                   |
+| Option                      | Effect                                                                                                                   |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `WithDraft(Draft)`          | Override the draft otherwise detected from the root schema's `$schema`.                                                  |
+| `WithRefResolver(r)`        | Resolve remote/absolute `$ref` URIs (called only when local lookup fails); the resolver receives the caller's context.   |
+| `WithBaseURI(base)`         | Set the root document's base URI for ref absolutization; also serves `Inline`.                                           |
+| `WithFormatValidator(f)`    | Register a custom `format` checker (a `FormatValidator`; `FormatValidatorFunc` adapts a bare function).                  |
+| `WithFormats(bool)`         | Force `format` assertion on or off.                                                                                      |
+| `WithContent(bool)`         | Assert `contentEncoding`/`contentMediaType` (annotation-only by default).                                                |
+| `WithResolveOptions(opts)`  | Pass `ResolveOptions` (aliased from the upstream package) to `Schema.Resolve`.                                           |
+| `WithVocabularies(uris...)` | Directly set the active vocabularies (highest precedence); unlisted ones are inactive.                                   |
+| `WithMetaSchemaResolver(r)` | Set a `RefResolver` that looks up the metaschema (whose `$vocabulary` gates keyword groups) by the root's `$schema` URI. |
 
 ### Formats
 
@@ -719,10 +718,10 @@ one, replaces the previous checker.
 
 Draft 2020-12 `$vocabulary` gates which keyword groups run: inactive
 vocabularies have their keywords silently skipped. Vocabulary resolution
-priority is `WithVocabularies` (direct override) > `WithMetaSchema` (matched
-against the root schema's `$schema`) > `WithMetaSchemaResolver` (a
-`RefResolver` consulted with the root schema's `$schema` URI, so one
-resolver serves a family of metaschemas) > a built-in default set (every
+priority is `WithVocabularies` (direct override) > `WithMetaSchemaResolver`
+(a `RefResolver` consulted with the root schema's `$schema` URI; a
+`SchemaMap` serves fixed metaschemas by exact `$id`, and `ChainResolvers`
+composes resolvers) > a built-in default set (every
 group active except format-assertion). A schema that requires (`true`) a vocabulary
 this implementation does not recognize, or marks the 2020-12 core vocabulary
 optional, fails with `ErrUnknownVocabulary`. Draft-07 has no `$vocabulary`, so
@@ -760,7 +759,9 @@ remains the caller's concern. The `WithRefResolver` option value itself serves
 both validation and inlining, so one option configures `Compile`, `Validate`,
 and `Inline` alike. `RefResolverFunc` adapts a bare function (following
 `net/http.HandlerFunc`), so a one-off resolver — a closure over an HTTP
-client or a map of preloaded schemas — needs no named type.
+client, for example — needs no named type; `SchemaMap` (a `RefResolver`
+serving preloaded schemas from a map keyed by URI) covers fixed sets, and
+`ChainResolvers` composes resolvers, first answer wins.
 
 ## Schema traversal and predicates
 

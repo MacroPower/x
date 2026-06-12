@@ -147,7 +147,8 @@ func TestCompileError(t *testing.T) {
 		Type:   "string",
 	}
 
-	_, err := jsonschema.Compile(t.Context(), schema, jsonschema.WithMetaSchema(meta))
+	_, err := jsonschema.Compile(t.Context(), schema,
+		jsonschema.WithMetaSchemaResolver(jsonschema.SchemaMap{meta.ID: meta}))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "core vocabulary must be required")
 }

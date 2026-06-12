@@ -218,16 +218,17 @@ func (suiteRemoteResolver) ResolveRef(_ context.Context, uri string) (*jsonschem
 }
 
 // suiteBaseOpts returns the standard ValidateOption set for suite tests,
-// including the remote ref resolver and registered metaschemas.
+// including the remote ref resolver and the metaschema lookup.
 func suiteBaseOpts() []jsonschema.ValidateOption {
-	opts := []jsonschema.ValidateOption{
-		jsonschema.WithRefResolver(suiteRemoteResolver{}),
-	}
+	metaSchemas := jsonschema.SchemaMap{}
 	for _, ms := range remoteMetaSchemas {
-		opts = append(opts, jsonschema.WithMetaSchema(ms))
+		metaSchemas[ms.ID] = ms
 	}
 
-	return opts
+	return []jsonschema.ValidateOption{
+		jsonschema.WithRefResolver(suiteRemoteResolver{}),
+		jsonschema.WithMetaSchemaResolver(metaSchemas),
+	}
 }
 
 // TestSuite runs the JSON Schema Test Suite for draft7 and draft2020-12.

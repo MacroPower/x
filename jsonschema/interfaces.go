@@ -188,14 +188,58 @@ type RefResolver interface {
 
 // RefResolverFunc adapts a bare resolution function to a [RefResolver],
 // following [net/http.HandlerFunc], so a one-off resolver — a closure over
-// an HTTP client or a map of preloaded schemas — needs no named type. The
-// [RefResolver] contract applies unchanged, including concurrency safety
-// when the resolver is shared across Validate calls.
+// an HTTP client, for example — needs no named type ([SchemaMap] already
+// covers preloaded schemas). The [RefResolver] contract applies unchanged,
+// including concurrency safety when the resolver is shared across Validate
+// calls.
 type RefResolverFunc func(ctx context.Context, uri string) (*Schema, error)
 
 // ResolveRef calls f.
 func (f RefResolverFunc) ResolveRef(ctx context.Context, uri string) (*Schema, error) {
 	return f(ctx, uri)
+}
+
+// SchemaMap is a [RefResolver] serving preloaded schemas from a map keyed
+// by URI. A URI absent from the map resolves to (nil, nil), the
+// not-resolved answer, so a SchemaMap composes with other resolvers via
+// [ChainResolvers]. The map is read directly, never mutated; callers
+// sharing one SchemaMap across goroutines must not modify it concurrently.
+//
+// A SchemaMap serves anywhere a resolver is accepted: preloaded remote
+// schemas for [WithRefResolver], or metaschemas for
+// [WithMetaSchemaResolver], keyed by the $schema URI they serve:
+//
+//	jsonschema.WithMetaSchemaResolver(jsonschema.SchemaMap{meta.ID: meta})
+type SchemaMap map[string]*Schema
+
+// ResolveRef returns the schema stored under uri, or (nil, nil) when the
+// map holds none.
+func (m SchemaMap) ResolveRef(_ context.Context, uri string) (*Schema, error) {
+	return m[uri], nil
+}
+
+// ChainResolvers returns a [RefResolver] that consults each resolver in
+// order and answers with the first schema or error; a resolver returning
+// (nil, nil) — not resolved — passes the URI to the next. When every
+// resolver misses (including an empty or all-nil chain), the chain returns
+// (nil, nil). Nil resolvers are skipped, so optional links can be passed
+// unconditionally.
+func ChainResolvers(resolvers ...RefResolver) RefResolver {
+	return RefResolverFunc(func(ctx context.Context, uri string) (*Schema, error) {
+		for _, r := range resolvers {
+			if r == nil {
+				continue
+			}
+
+			s, err := r.ResolveRef(ctx, uri)
+			if s != nil || err != nil {
+				//nolint:wrapcheck // The chain is transparent: a link's error reaches the caller verbatim.
+				return s, err
+			}
+		}
+
+		return nil, nil
+	})
 }
 
 // StripPrefix returns a [RefResolver] that strips prefix from each URI and

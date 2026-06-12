@@ -53,6 +53,77 @@ func TestRefResolverFunc_Error(t *testing.T) {
 	require.ErrorIs(t, err, errBoom)
 }
 
+// TestSchemaMap pins the map resolver contract: a hit returns the stored
+// schema, a miss returns (nil, nil) so the validator treats it as
+// unresolved rather than failing.
+func TestSchemaMap(t *testing.T) {
+	t.Parallel()
+
+	resolver := jsonschema.SchemaMap{
+		"https://example.com/s.json": {Type: "string"},
+	}
+
+	s, err := resolver.ResolveRef(t.Context(), "https://example.com/s.json")
+	require.NoError(t, err)
+	assert.Equal(t, "string", s.Type)
+
+	s, err = resolver.ResolveRef(t.Context(), "https://example.com/missing.json")
+	require.NoError(t, err)
+	assert.Nil(t, s)
+}
+
+// TestChainResolvers pins the chain contract: nil links are skipped, a miss
+// falls through to the next link, the first schema or error answers, and a
+// chain of misses is itself a miss.
+func TestChainResolvers(t *testing.T) {
+	t.Parallel()
+
+	errBoom := errors.New("boom")
+	miss := jsonschema.SchemaMap{}
+	hit := jsonschema.SchemaMap{"https://example.com/s.json": {Type: "string"}}
+	failing := jsonschema.RefResolverFunc(
+		func(context.Context, string) (*jsonschema.Schema, error) {
+			return nil, errBoom
+		})
+
+	t.Run("miss falls through to the first answer", func(t *testing.T) {
+		t.Parallel()
+
+		chain := jsonschema.ChainResolvers(nil, miss, hit, failing)
+
+		s, err := chain.ResolveRef(t.Context(), "https://example.com/s.json")
+		require.NoError(t, err)
+		assert.Equal(t, "string", s.Type)
+	})
+
+	t.Run("error stops the chain", func(t *testing.T) {
+		t.Parallel()
+
+		chain := jsonschema.ChainResolvers(miss, failing, hit)
+
+		_, err := chain.ResolveRef(t.Context(), "https://example.com/s.json")
+		require.ErrorIs(t, err, errBoom)
+	})
+
+	t.Run("all misses miss", func(t *testing.T) {
+		t.Parallel()
+
+		chain := jsonschema.ChainResolvers(nil, miss)
+
+		s, err := chain.ResolveRef(t.Context(), "https://example.com/s.json")
+		require.NoError(t, err)
+		assert.Nil(t, s)
+	})
+
+	t.Run("empty chain misses", func(t *testing.T) {
+		t.Parallel()
+
+		s, err := jsonschema.ChainResolvers().ResolveRef(t.Context(), "https://example.com/s.json")
+		require.NoError(t, err)
+		assert.Nil(t, s)
+	})
+}
+
 func TestTagInterpreterFunc(t *testing.T) {
 	t.Parallel()
 

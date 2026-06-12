@@ -116,7 +116,7 @@
 // (unregistering earlier exact registrations for the type). The exception is
 // additive registrations that a nil cannot identify anything to remove from
 // ([WithTagInterpreter], [WithTypeSchemaResolver], [WithTypeSchemaExtender],
-// [WithFormatValidator], [WithMetaSchema]); these ignore a nil registration.
+// [WithFormatValidator]); these ignore a nil registration.
 //
 // # Type Mapping
 //
@@ -505,12 +505,10 @@
 //   - [WithVocabularies] directly specifies the active vocabularies for the
 //     validation run: the listed URIs are active, every other vocabulary is
 //     inactive.
-//   - [WithMetaSchema] registers a metaschema whose $vocabulary map controls
-//     which keyword groups are active.
 //   - [WithMetaSchemaResolver] sets a [RefResolver] consulted with the root
-//     schema's $schema URI when no registered metaschema matches it, so one
-//     resolver serves a family of metaschemas without registering each by
-//     exact $id.
+//     schema's $schema URI to look up the metaschema whose $vocabulary map
+//     controls which keyword groups are active: a [SchemaMap] serves fixed
+//     metaschemas by exact $id, and [ChainResolvers] composes resolvers.
 //
 // The draft is detected from the root schema's $schema field; a [WithDraft]
 // option overrides the detection. [Draft7] and
@@ -607,12 +605,11 @@
 //
 // Vocabulary resolution follows this priority:
 //  1. [WithVocabularies] direct override (highest).
-//  2. [WithMetaSchema] lookup — the root schema's $schema is matched against
-//     registered metaschema $id values to extract $vocabulary.
-//  3. [WithMetaSchemaResolver] lookup — the resolver is consulted once per
+//  2. [WithMetaSchemaResolver] lookup — the resolver is consulted once per
 //     compile with the root schema's $schema URI; a nil result without error
-//     falls through to the default.
-//  4. Default: a built-in standard vocabulary set — every group active except
+//     falls through to the default. A [SchemaMap] serves fixed metaschemas
+//     by exact $id, and [ChainResolvers] composes resolvers.
+//  3. Default: a built-in standard vocabulary set — every group active except
 //     format-assertion, so format is annotation-only by default.
 //
 // If a schema requires (marks true) a vocabulary URI that this implementation
