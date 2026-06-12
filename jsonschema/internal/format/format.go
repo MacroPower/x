@@ -1,7 +1,9 @@
-package jsonschema
+// Package format implements the built-in JSON Schema string-format
+// validators (date-time, email, hostname, uri, uuid, ...). Each validator
+// checks a single string value against its format's defining specification.
+package format
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -14,13 +16,10 @@ import (
 	"golang.org/x/net/idna"
 )
 
-// builtinFormat adapts a bare value-checking function to [FormatValidator]
-// for the built-in formats, which use neither the context nor the name.
-type builtinFormat func(string) error
-
-// ValidateFormat calls f on value.
-func (f builtinFormat) ValidateFormat(_ context.Context, _, value string) error {
-	return f(value)
+// Validators returns the built-in format validators keyed by JSON Schema
+// format name. The returned map is shared; callers must not modify it.
+func Validators() map[string]func(string) error {
+	return builtinFormats
 }
 
 var (

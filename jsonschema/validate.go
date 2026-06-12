@@ -21,6 +21,10 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/jsonschema-go/jsonschema"
+
+	"go.jacobcolvin.com/x/jsonschema/internal/format"
+	"go.jacobcolvin.com/x/jsonschema/internal/jsonptr"
+	"go.jacobcolvin.com/x/jsonschema/internal/vocab"
 )
 
 // regexCache caches compiled regexps keyed by pattern string.
@@ -166,7 +170,7 @@ type instanceLocation struct {
 // append into fresh backing arrays instead of aliasing a shared one.
 func (l instanceLocation) key(name string) instanceLocation {
 	return instanceLocation{
-		ptr:  l.ptr + "/" + escapeJSONPointer(name),
+		ptr:  l.ptr + "/" + jsonptr.Escape(name),
 		segs: append(l.segs[:len(l.segs):len(l.segs)], Segment{Key: name}),
 	}
 }
@@ -210,7 +214,7 @@ func (l schemaLocation) kw(keyword string) schemaLocation {
 // representations with the aliasing discipline of [schemaLocation.kw].
 func (l schemaLocation) key(name string) schemaLocation {
 	return schemaLocation{
-		ptr:  l.ptr + "/" + escapeJSONPointer(name),
+		ptr:  l.ptr + "/" + jsonptr.Escape(name),
 		segs: append(l.segs[:len(l.segs):len(l.segs)], Segment{Key: name}),
 	}
 }
@@ -223,6 +227,15 @@ func (l schemaLocation) idx(i int) schemaLocation {
 		ptr:  l.ptr + "/" + strconv.Itoa(i),
 		segs: append(l.segs[:len(l.segs):len(l.segs)], Segment{Index: i, IsIndex: true}),
 	}
+}
+
+// builtinFormat adapts a bare value-checking function to [FormatValidator]
+// for the built-in formats, which use neither the context nor the name.
+type builtinFormat func(string) error
+
+// ValidateFormat calls f on value.
+func (f builtinFormat) ValidateFormat(_ context.Context, _, value string) error {
+	return f(value)
 }
 
 // validator holds state for a single validation run.
@@ -284,7 +297,7 @@ type validator struct {
 
 	dynamicScope []string // stack of resource base URIs entered during validation
 	draft        Draft
-	vocabs       vocabSet // resolved active vocabularies
+	vocabs       vocab.Set // resolved active vocabularies
 
 	formatsEnabled bool
 	contentVocab   bool // content vocabulary active (gates validateContent)
@@ -310,7 +323,7 @@ func newValidator(ctx context.Context, schema *Schema, opts []ValidateOption) (*
 		ctx: ctx,
 	}
 	// Register built-in format checkers.
-	for name, fn := range builtinFormats {
+	for name, fn := range format.Validators() {
 		v.formatCheckers[name] = builtinFormat(fn)
 	}
 
@@ -391,13 +404,13 @@ func (v *validator) forInstance(ctx context.Context) *validator {
 //  1. WithVocabularies direct override (highest).
 //  2. WithMetaSchemaResolver lookup (the resolver is consulted with the root
 //     $schema URI).
-//  3. Default: allVocabs (backward compatible).
+//  3. Default: vocab.All (backward compatible).
 //
-// Draft-07 always gets allVocabs — vocabulary is a 2020-12 concept.
+// Draft-07 always gets vocab.All — vocabulary is a 2020-12 concept.
 func (v *validator) resolveVocabularies() error {
 	// Draft-07 has no vocabulary concept.
 	if v.draft != Draft2020 {
-		v.vocabs = allVocabs()
+		v.vocabs = vocab.All()
 		v.contentVocab = true
 
 		return nil
@@ -417,15 +430,14 @@ func (v *validator) resolveVocabularies() error {
 	}
 
 	if rawVocabs == nil {
-		v.vocabs = allVocabs()
+		v.vocabs = vocab.All()
 		v.contentVocab = true
 
 		return nil
 	}
 
-	err := checkUnknownVocabularies(rawVocabs)
-	if err != nil {
-		return err
+	if uri := vocab.CheckUnknown(rawVocabs); uri != "" {
+		return fmt.Errorf("%w: %s", ErrUnknownVocabulary, uri)
 	}
 
 	// The core vocabulary MUST be required (true) when present in $vocabulary.
@@ -433,8 +445,8 @@ func (v *validator) resolveVocabularies() error {
 		return fmt.Errorf("%w: core vocabulary must be required", ErrUnknownVocabulary)
 	}
 
-	v.vocabs = resolveVocabs(rawVocabs)
-	// The content vocabulary gates validateContent. VocabSet omits it (content
+	v.vocabs = vocab.Resolve(rawVocabs)
+	// The content vocabulary gates validateContent. The vocab set omits it (content
 	// is annotation-only in the common path), so its active state is tracked
 	// here directly from the raw map.
 	v.contentVocab = rawVocabs[VocabContent2020]
@@ -454,7 +466,7 @@ func (v *validator) resolveFormats() {
 	case v.draft == Draft7:
 		v.formatsEnabled = true
 	default:
-		v.formatsEnabled = v.vocabs.formatAssertion
+		v.formatsEnabled = v.vocabs.FormatAssertion
 	}
 }
 
@@ -1186,7 +1198,7 @@ func checkTypeNames(schema *Schema, schemaPath string, visited map[*Schema]bool)
 		// Sorted keys keep the reported violation deterministic when a map
 		// holds more than one offending sub-schema.
 		for _, key := range slices.Sorted(maps.Keys(entry.m)) {
-			childPath := schemaPath + "/" + entry.keyword + "/" + escapeJSONPointer(key)
+			childPath := schemaPath + "/" + entry.keyword + "/" + jsonptr.Escape(key)
 
 			err := checkTypeNames(entry.m[key], childPath, visited)
 			if err != nil {
@@ -1750,7 +1762,7 @@ func (v *validator) validateUnevaluated(
 	schemaPath schemaLocation,
 	ann *annotations,
 ) []*ValidationError {
-	if v.draft != Draft2020 || ann == nil || !v.vocabs.unevaluated {
+	if v.draft != Draft2020 || ann == nil || !v.vocabs.Unevaluated {
 		return nil
 	}
 
@@ -2297,7 +2309,7 @@ func (v *validator) validateType(
 	instancePath instanceLocation,
 	schemaPath schemaLocation,
 ) []*ValidationError {
-	if !v.vocabs.validation {
+	if !v.vocabs.Validation {
 		return nil
 	}
 
@@ -2348,7 +2360,7 @@ func (v *validator) validateEnum(
 	instancePath instanceLocation,
 	schemaPath schemaLocation,
 ) []*ValidationError {
-	if !v.vocabs.validation {
+	if !v.vocabs.Validation {
 		return nil
 	}
 
@@ -2381,7 +2393,7 @@ func (v *validator) validateConst(
 	instancePath instanceLocation,
 	schemaPath schemaLocation,
 ) []*ValidationError {
-	if !v.vocabs.validation {
+	if !v.vocabs.Validation {
 		return nil
 	}
 
@@ -2777,7 +2789,7 @@ func (v *validator) validateNumeric(
 	instancePath instanceLocation,
 	schemaPath schemaLocation,
 ) []*ValidationError {
-	if !v.vocabs.validation {
+	if !v.vocabs.Validation {
 		return nil
 	}
 
@@ -3010,7 +3022,7 @@ func (v *validator) validateString(
 	var errs []*ValidationError
 
 	//nolint:nestif // One branch per string validation keyword.
-	if v.vocabs.validation {
+	if v.vocabs.Validation {
 		// RuneCountInString avoids allocating a []rune; only count when a
 		// length keyword is present.
 		if schema.MinLength != nil || schema.MaxLength != nil {
@@ -3104,7 +3116,7 @@ func (v *validator) validateArray(
 	var errs []*ValidationError
 
 	// Applicator vocab: prefixItems, items, additionalItems, contains.
-	if v.vocabs.applicator { //nolint:nestif // Vocabulary-gated applicator keywords require nesting.
+	if v.vocabs.Applicator { //nolint:nestif // Vocabulary-gated applicator keywords require nesting.
 		// PrefixItems (2020-12) or items as array (draft-07).
 		var (
 			prefixSchemas []*Schema
@@ -3217,12 +3229,12 @@ func (v *validator) validateArray(
 			// and they are skipped when the validation vocabulary is disabled; the
 			// defaults are then minContains=1 and no maxContains.
 			minContains := 1
-			if v.draft == Draft2020 && v.vocabs.validation && schema.MinContains != nil {
+			if v.draft == Draft2020 && v.vocabs.Validation && schema.MinContains != nil {
 				minContains = *schema.MinContains
 			}
 
 			maxContains := -1
-			if v.draft == Draft2020 && v.vocabs.validation && schema.MaxContains != nil {
+			if v.draft == Draft2020 && v.vocabs.Validation && schema.MaxContains != nil {
 				maxContains = *schema.MaxContains
 			}
 
@@ -3239,7 +3251,7 @@ func (v *validator) validateArray(
 				// An explicit minContains owns the violation; without it the
 				// shortfall is a plain contains failure (default minContains=1).
 				keyword := KeywordContains
-				if v.draft == Draft2020 && v.vocabs.validation && schema.MinContains != nil {
+				if v.draft == Draft2020 && v.vocabs.Validation && schema.MinContains != nil {
 					keyword = KeywordMinContains
 				}
 
@@ -3268,7 +3280,7 @@ func (v *validator) validateArray(
 
 	// Validation vocab: minItems, maxItems, uniqueItems.
 	//nolint:nestif // One branch per array validation keyword.
-	if v.vocabs.validation {
+	if v.vocabs.Validation {
 		// MinItems.
 		if schema.MinItems != nil && len(arr) < *schema.MinItems {
 			errs = append(errs, &ValidationError{
@@ -3451,7 +3463,7 @@ func (v *validator) validateObject(
 	// Applicator vocab: properties, patternProperties, additionalProperties,
 	// propertyNames, dependentSchemas.
 	//nolint:nestif // One branch per object applicator keyword; flattening would not reduce the inherent fan-out.
-	if v.vocabs.applicator {
+	if v.vocabs.Applicator {
 		// Properties.
 		for propName, propSchema := range schema.Properties {
 			val, exists := obj[propName]
@@ -3585,7 +3597,7 @@ func (v *validator) validateObject(
 
 	// Validation vocab: required, minProperties, maxProperties, dependentRequired.
 	//nolint:nestif // One branch per object validation keyword.
-	if v.vocabs.validation {
+	if v.vocabs.Validation {
 		// Required.
 		for _, reqProp := range schema.Required {
 			if _, exists := obj[reqProp]; !exists {
@@ -3697,7 +3709,7 @@ func (v *validator) validateComposition(
 	schemaPath schemaLocation,
 	ann *annotations,
 ) []*ValidationError {
-	if !v.vocabs.applicator {
+	if !v.vocabs.Applicator {
 		return nil
 	}
 
@@ -3850,7 +3862,7 @@ func (v *validator) validateConditional(
 	schemaPath schemaLocation,
 	ann *annotations,
 ) []*ValidationError {
-	if !v.vocabs.applicator || schema.If == nil {
+	if !v.vocabs.Applicator || schema.If == nil {
 		return nil
 	}
 
@@ -4246,7 +4258,7 @@ func (v *validator) resolveJSONPointer(root *Schema, fragment string, encoded bo
 			// then simply does not match.
 		}
 
-		segments[i] = unescapeJSONPointer(seg)
+		segments[i] = jsonptr.Unescape(seg)
 	}
 
 	if target := v.traverseSchema(root, segments); target != nil {
@@ -4679,26 +4691,6 @@ func (v *validator) traverseSchema(schema *Schema, segments []string) *Schema {
 	}
 
 	return nil
-}
-
-// jsonPointerEscaper and jsonPointerUnescaper apply the RFC 6901 ~0/~1
-// transforms in a single pass. NewReplacer matches leftmost-longest without
-// rescanning its own output, so unescaping "~1" before "~0" is order-correct.
-//
-//nolint:grouper // Kept apart from the package regexCache var; merging unrelated globals hurts readability.
-var (
-	jsonPointerEscaper   = strings.NewReplacer("~", "~0", "/", "~1")
-	jsonPointerUnescaper = strings.NewReplacer("~1", "/", "~0", "~")
-)
-
-// escapeJSONPointer escapes a string per RFC 6901.
-func escapeJSONPointer(s string) string {
-	return jsonPointerEscaper.Replace(s)
-}
-
-// unescapeJSONPointer unescapes a JSON Pointer segment per RFC 6901.
-func unescapeJSONPointer(s string) string {
-	return jsonPointerUnescaper.Replace(s)
 }
 
 // parseArrayIndex parses a JSON Pointer reference token as an RFC 6901 array

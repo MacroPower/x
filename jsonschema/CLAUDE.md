@@ -12,11 +12,14 @@ The package has two independent halves sharing the `Schema` type:
   `comments.go`): Go types -> JSON Schema via reflection. `generator` in
   `reflect.go` is the core; `generate.go` holds the functional options and
   the `GenerateFor`/`Generate` entry points.
-- **Validation** (`validate.go`, `validate_formats.go`, `vocabulary.go`,
-  `errors.go`): JSON instances -> structured `*ValidationError` trees.
-  `Compile` builds a `validator` once (registry construction from
-  `$id`/`$anchor`, precomputed numeric bounds and compiled regexes, draft and
-  vocabulary detection); `validator.forInstance` derives cheap per-run state.
+- **Validation** (`validate.go`, `errors.go`): JSON instances -> structured
+  `*ValidationError` trees. `Compile` builds a `validator` once (registry
+  construction from `$id`/`$anchor`, precomputed numeric bounds and compiled
+  regexes, draft and vocabulary detection); `validator.forInstance` derives
+  cheap per-run state. Self-contained helpers live under `internal/`:
+  `internal/format` (built-in string-format validators), `internal/vocab`
+  (vocabulary modelling and resolution), `internal/jsonptr` (RFC 6901
+  escaping).
 
 ### Relationship to google/jsonschema-go
 
