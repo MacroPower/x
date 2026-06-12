@@ -40,10 +40,12 @@
 // schemas for many types under one option set, [NewGenerator] applies the
 // options once and the returned [Generator] is reused — the generation-side
 // counterpart of [Compile] and [Validator] — safe for concurrent use
-// provided the configured hooks are:
+// provided the configured hooks are. [GenerateWith] is GenerateFor under a
+// reusable Generator, keeping the generic form available (Go methods cannot
+// take type parameters):
 //
 //	gen := jsonschema.NewGenerator(opts...)
-//	schema, err := gen.Generate(ctx, reflect.TypeFor[MyType]())
+//	schema, err := jsonschema.GenerateWith[MyType](ctx, gen)
 //
 // # Errors
 //

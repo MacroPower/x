@@ -361,9 +361,9 @@ func NewGenerator(opts ...GenerateOption) *Generator {
 
 // Generate generates a JSON Schema for the given [reflect.Type] under the
 // Generator's options. The context follows the [GenerateFor] contract. For
-// a statically known type, pass [reflect.TypeFor]:
+// a statically known type, [GenerateWith] is the generic form:
 //
-//	gen.Generate(ctx, reflect.TypeFor[MyType]())
+//	jsonschema.GenerateWith[MyType](ctx, gen)
 func (gn *Generator) Generate(ctx context.Context, t reflect.Type) (*Schema, error) {
 	return gn.proto.forRun(ctx).generate(t)
 }
@@ -375,6 +375,18 @@ func (gn *Generator) Generate(ctx context.Context, t reflect.Type) (*Schema, err
 // honor cancellation and deadlines.
 func GenerateFor[T any](ctx context.Context, opts ...GenerateOption) (*Schema, error) {
 	return Generate(ctx, reflect.TypeFor[T](), opts...)
+}
+
+// GenerateWith is [GenerateFor] under a reusable [Generator]: gen's options
+// apply and the type comes from the type parameter, so a caller who built
+// the Generator once keeps the generic entry point instead of spelling out
+// [reflect.TypeFor] at every [Generator.Generate] call. It exists as a
+// package function because Go methods cannot take type parameters.
+//
+//	gen := jsonschema.NewGenerator(opts...)
+//	schema, err := jsonschema.GenerateWith[MyType](ctx, gen)
+func GenerateWith[T any](ctx context.Context, gen *Generator) (*Schema, error) {
+	return gen.Generate(ctx, reflect.TypeFor[T]())
 }
 
 // MustGenerateFor is [GenerateFor] with [context.Background] but panics on

@@ -1047,6 +1047,24 @@ func TestGenerator(t *testing.T) {
 			assert.NoError(t, err)
 		})
 	})
+
+	t.Run("GenerateWith is the generic form", func(t *testing.T) {
+		t.Parallel()
+
+		gen := jsonschema.NewGenerator(
+			jsonschema.WithNamer(jsonschema.NamerFunc(func(tc jsonschema.TypeContext) string {
+				return "custom_" + tc.Type.Name()
+			})),
+		)
+
+		s, err := jsonschema.GenerateWith[UserWithAddress](t.Context(), gen)
+		require.NoError(t, err)
+		assert.NotNil(t, s.Defs["custom_Address"], "the Generator's options apply")
+
+		want, err := gen.Generate(t.Context(), reflect.TypeFor[UserWithAddress]())
+		require.NoError(t, err)
+		assert.Equal(t, want, s, "GenerateWith matches Generator.Generate for the same type")
+	})
 }
 
 func TestGenerateFor_ValidateInterpreter(t *testing.T) {

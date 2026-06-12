@@ -140,11 +140,13 @@ These one-shot forms apply their options per call. To generate schemas for
 many types under one option set, `NewGenerator` applies the options once and
 the returned `Generator` is reused — the generation-side counterpart of
 `Compile`/`Validator` — safe for concurrent use provided the configured
-hooks are:
+hooks are. `GenerateWith` is `GenerateFor` under a reusable `Generator`,
+keeping the generic form available (Go methods cannot take type
+parameters); `Generator.Generate` is its `reflect.Type` form:
 
 ```go
 gen := jsonschema.NewGenerator(opts...)
-schema, err := gen.Generate(ctx, reflect.TypeFor[MyType]())
+schema, err := jsonschema.GenerateWith[MyType](ctx, gen)
 ```
 
 The root schema always carries the `$schema` keyword; sub-schemas and `$defs`
