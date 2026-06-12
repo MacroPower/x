@@ -48,6 +48,28 @@ type TypeResolverFunc func(t reflect.Type) (*Schema, bool)
 // SchemaForType calls f.
 func (f TypeResolverFunc) SchemaForType(t reflect.Type) (*Schema, bool) { return f(t) }
 
+// CommentProvider supplies descriptions for types and struct fields during
+// generation. [WithComments](true) registers the built-in provider, which
+// extracts Go doc comments by loading and parsing package sources at
+// generation time; [WithCommentProvider] substitutes any other source — for
+// example comments pre-extracted at build time and shipped with a binary
+// that deploys without source files, or fixed descriptions in tests.
+//
+// An empty result leaves the description unset, letting later field-level
+// processing (the jsonschema struct tag, tag interpreters) supply one. A
+// provider must be safe for concurrent use when shared across concurrent
+// Generate calls.
+type CommentProvider interface {
+	// TypeComment returns the description for a named type, or "" for none.
+	TypeComment(t reflect.Type) string
+
+	// FieldComment returns the description for the named Go field of struct
+	// type t, or "" for none. T is the type that declares the field: for a
+	// field promoted from an embedded struct it is the embedded type, where
+	// the field's doc comment lives, not the outer struct.
+	FieldComment(t reflect.Type, fieldName string) string
+}
+
 // TagInterpreter translates struct field tags into JSON Schema constraints.
 type TagInterpreter interface {
 	// TagKey returns the struct tag key this interpreter reads (e.g., "validate").

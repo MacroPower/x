@@ -11,11 +11,13 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
-// commentExtractor extracts Go doc comments from source files.
+// commentExtractor is the AST-backed [CommentProvider] that [WithComments]
+// registers: it extracts Go doc comments from source files.
 //
-// Generation drives the extractor from a single goroutine, so the mutex
-// guarding the cache is a forward-looking guard that keeps the extractor safe
-// should generation ever fan out across goroutines.
+// Each WithComments registration constructs its own extractor, so the mutex
+// guarding the cache only serves concurrent use of one generation run's
+// extractor, which today is driven from a single goroutine; it is a
+// forward-looking guard should generation ever fan out across goroutines.
 type commentExtractor struct {
 	cache map[string][]*ast.File
 	mu    sync.Mutex
@@ -37,13 +39,13 @@ func baseTypeName(name string) string {
 	return base
 }
 
-// typeComment returns the doc comment for a named type.
+// TypeComment returns the doc comment for a named type.
 //
 // Matching is by package path and unqualified type name, since reflection does
 // not expose source positions. A non-package-scope type (for example one
 // declared inside a function) that shadows a package-level name may therefore
 // receive the package-level type's comment.
-func (ce *commentExtractor) typeComment(t reflect.Type) string {
+func (ce *commentExtractor) TypeComment(t reflect.Type) string {
 	if t.Name() == "" || t.PkgPath() == "" {
 		return ""
 	}
@@ -80,12 +82,12 @@ func (ce *commentExtractor) typeComment(t reflect.Type) string {
 	return ""
 }
 
-// fieldComment returns the doc comment for a struct field.
+// FieldComment returns the doc comment for a struct field.
 //
-// As with typeComment, matching is by package path and unqualified type name, so
-// a non-package-scope struct that shadows a package-level name may receive the
-// package-level struct's field comments.
-func (ce *commentExtractor) fieldComment(structType reflect.Type, fieldName string) string {
+// As with TypeComment, matching is by package path and unqualified type name,
+// so a non-package-scope struct that shadows a package-level name may receive
+// the package-level struct's field comments.
+func (ce *commentExtractor) FieldComment(structType reflect.Type, fieldName string) string {
 	if structType.Name() == "" || structType.PkgPath() == "" {
 		return ""
 	}

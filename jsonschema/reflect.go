@@ -43,10 +43,9 @@ type generator struct {
 	// distinguishes an explicit nil instance from the option being absent.
 	defaultsFrom         any
 	refRecords           []refRecord
-	commentExtractor     *commentExtractor
+	commentProvider      CommentProvider
 	tagInterpreters      []TagInterpreter
 	draft                Draft
-	comments             bool
 	definitions          bool
 	additionalProperties bool
 	nullable             bool
@@ -83,10 +82,6 @@ func newGenerator(opts []GenerateOption) *generator {
 
 // generate produces the root schema for the given type.
 func (g *generator) generate(t reflect.Type) (*Schema, error) {
-	if g.comments {
-		g.commentExtractor = newCommentExtractor()
-	}
-
 	// Follow pointers for root type identity.
 	rootType := t
 	for rootType.Kind() == reflect.Pointer {
@@ -327,9 +322,7 @@ func (g *generator) schemaForType(t reflect.Type, nullable bool) (*Schema, error
 	// in buildStructSchema/schemaForStruct.
 	//nolint:nestif // Sequential post-processing steps; flattening adds no clarity.
 	if t.Kind() != reflect.Struct && t.Name() != "" {
-		if g.comments {
-			g.applyTypeComment(t, s)
-		}
+		g.applyTypeComment(t, s)
 
 		if implementsExtender(t) {
 			err := callExtender(t, s)
@@ -404,9 +397,7 @@ func (g *generator) handleOverrideType(t reflect.Type, override *Schema, nullabl
 	cloneOverrideExtras(s)
 
 	// Apply type-level comments.
-	if g.comments {
-		g.applyTypeComment(t, s)
-	}
+	g.applyTypeComment(t, s)
 
 	if g.shouldExtract(t) {
 		return g.extractToDefs(t, s, nullable)
@@ -500,9 +491,7 @@ func (g *generator) handleProviderType(t reflect.Type, nullable bool) (*Schema, 
 	cloneOverrideExtras(s)
 
 	// Apply type-level comments.
-	if g.comments {
-		g.applyTypeComment(t, s)
-	}
+	g.applyTypeComment(t, s)
 
 	if g.shouldExtract(t) {
 		return g.extractToDefs(t, s, nullable)
@@ -517,9 +506,7 @@ func (g *generator) handleProviderType(t reflect.Type, nullable bool) (*Schema, 
 func (g *generator) handleBuiltinType(t reflect.Type, s *Schema, nullable bool) (*Schema, error) {
 	//nolint:nestif // Sequential post-processing steps; flattening adds no clarity.
 	if t.Name() != "" {
-		if g.comments {
-			g.applyTypeComment(t, s)
-		}
+		g.applyTypeComment(t, s)
 
 		if implementsExtender(t) {
 			err := callExtender(t, s)
@@ -884,9 +871,7 @@ func (g *generator) buildStructSchema(t reflect.Type) (*Schema, error) {
 	}
 
 	// Type-level comment.
-	if g.comments {
-		g.applyTypeComment(t, s)
-	}
+	g.applyTypeComment(t, s)
 
 	// JSONSchemaExtend.
 	if implementsExtender(t) {
@@ -1258,9 +1243,7 @@ func (g *generator) buildFieldSchema(parentType reflect.Type, fi structFieldInfo
 	}
 
 	// 2. Field-level comment.
-	if g.comments {
-		g.applyFieldComment(parentType, fi.field, fieldSchema)
-	}
+	g.applyFieldComment(parentType, fi.field, fieldSchema)
 
 	// 3. Schema struct tag.
 	if tag, ok := fi.field.Tag.Lookup("jsonschema"); ok {
@@ -1852,24 +1835,27 @@ func parseJSONTag(f reflect.StructField) jsonTagInfo {
 	return info
 }
 
-// applyTypeComment sets the description from a doc comment on a type's schema.
+// applyTypeComment sets the description from the comment provider on a
+// type's schema. An empty comment leaves the description unset.
 func (g *generator) applyTypeComment(t reflect.Type, s *Schema) {
-	if g.commentExtractor == nil {
+	if g.commentProvider == nil {
 		return
 	}
 
-	if comment := g.commentExtractor.typeComment(t); comment != "" {
+	if comment := g.commentProvider.TypeComment(t); comment != "" {
 		s.Description = comment
 	}
 }
 
-// applyFieldComment sets the description from a doc comment on a field's schema.
+// applyFieldComment sets the description from the comment provider on a
+// field's schema. The provider receives the type declaring the field (see
+// [declaringType]); an empty comment leaves the description unset.
 func (g *generator) applyFieldComment(structType reflect.Type, f reflect.StructField, s *Schema) {
-	if g.commentExtractor == nil {
+	if g.commentProvider == nil {
 		return
 	}
 
-	if comment := g.commentExtractor.fieldComment(declaringType(structType, f), f.Name); comment != "" {
+	if comment := g.commentProvider.FieldComment(declaringType(structType, f), f.Name); comment != "" {
 		s.Description = comment
 	}
 }

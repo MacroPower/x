@@ -59,6 +59,9 @@
 //   - [WithTagInterpreter] registers a [TagInterpreter] for mapping struct tags
 //     to schema constraints.
 //   - [WithComments] enables Go doc comment extraction as description fields.
+//   - [WithCommentProvider] sets a custom [CommentProvider] as the source of
+//     type and field descriptions, replacing the AST-backed provider
+//     [WithComments] registers.
 //   - [WithTypeSchema] overrides the schema for a specific Go type;
 //     [WithTypeSchemaFor] is its generic form for statically known types.
 //   - [WithTypeResolver] registers a [TypeSchemaResolver] that supplies
@@ -324,11 +327,17 @@
 //
 // # Comment Extraction
 //
-// When [WithComments](true) is set, Go doc comments are extracted from source
-// files for struct types, struct fields, and named types using [go/ast] and
-// [golang.org/x/tools/go/packages]. The jsonschema struct tag description
-// overrides AST-extracted comments. When source files cannot be located for
-// a type, comment extraction is silently skipped.
+// Type and field descriptions come from a [CommentProvider]. When
+// [WithComments](true) is set, the built-in provider extracts Go doc
+// comments from source files for struct types, struct fields, and named
+// types using [go/ast] and [golang.org/x/tools/go/packages]; when source
+// files cannot be located for a type, extraction is silently skipped.
+// [WithCommentProvider] substitutes any other source — comments
+// pre-extracted at build time for a binary that deploys without source
+// files, or fixed descriptions in tests — and decides its own failure
+// behavior. For a field promoted from an embedded struct, the provider
+// receives the embedded type, where the field's doc comment lives. The
+// jsonschema struct tag description overrides a provider-supplied comment.
 //
 // # Draft Support
 //

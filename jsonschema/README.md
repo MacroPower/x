@@ -168,6 +168,7 @@ Unsupported types (`func`, `chan`, `complex`, `unsafe.Pointer`) return
 | `WithDraft(Draft)`               | Target draft: `Draft2020` (default) or `Draft7`.                              |
 | `WithTagInterpreter(t)`          | Register a `TagInterpreter`; multiple are applied in order.                   |
 | `WithComments(bool)`             | Extract Go doc comments as `description` (requires source files).             |
+| `WithCommentProvider(p)`         | Set a custom `CommentProvider` as the source of descriptions.                 |
 | `WithTypeSchema(t, s)`           | Override the schema for a specific Go type (highest priority).                |
 | `WithTypeSchemaFor[T](s)`        | `WithTypeSchema` for a statically known type, without `reflect.TypeFor`.      |
 | `WithTypeResolver(r)`            | Register a `TypeSchemaResolver` that overrides types by predicate.            |
@@ -381,11 +382,27 @@ JSON.
 
 ### Comment extraction
 
-`WithComments(true)` extracts Go doc comments from source files for struct
-types, fields, and named types using `go/ast` and
-`golang.org/x/tools/go/packages`. The `jsonschema` tag's `description` wins over
-an extracted comment. When source files cannot be located for a type, extraction
-is silently skipped.
+Type and field descriptions come from a `CommentProvider`.
+`WithComments(true)` registers the built-in provider, which extracts Go doc
+comments from source files for struct types, fields, and named types using
+`go/ast` and `golang.org/x/tools/go/packages`; when source files cannot be
+located for a type, extraction is silently skipped. The `jsonschema` tag's
+`description` wins over a provider-supplied comment.
+
+`WithCommentProvider` substitutes any other source — comments pre-extracted at
+build time for a binary that deploys without source files, or fixed
+descriptions in tests — and decides its own failure behavior:
+
+```go
+type CommentProvider interface {
+	// TypeComment returns the description for a named type, or "" for none.
+	TypeComment(t reflect.Type) string
+
+	// FieldComment returns the description for the named Go field of struct
+	// type t (the type declaring the field), or "" for none.
+	FieldComment(t reflect.Type, fieldName string) string
+}
+```
 
 ### Definitions and references
 
