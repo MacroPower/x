@@ -3,6 +3,7 @@ package jsonschema
 import (
 	"context"
 	"reflect"
+	"strings"
 )
 
 // JSONSchemaProvider allows a type to provide its own schema, bypassing
@@ -195,6 +196,22 @@ type RefResolverFunc func(ctx context.Context, uri string) (*Schema, error)
 // ResolveRef calls f.
 func (f RefResolverFunc) ResolveRef(ctx context.Context, uri string) (*Schema, error) {
 	return f(ctx, uri)
+}
+
+// StripPrefix returns a [RefResolver] that strips prefix from each URI and
+// delegates to r, following [net/http.StripPrefix]. It serves refs that
+// absolutize against a published remote base (an https $id, for example)
+// from a resolver that addresses documents differently, such as a
+// [FileResolver] over a local directory of schema files:
+//
+//	jsonschema.StripPrefix("https://example.com/schemas/",
+//		jsonschema.NewFileResolver(os.DirFS("schemas")))
+//
+// A URI that does not carry the prefix is delegated unchanged.
+func StripPrefix(prefix string, r RefResolver) RefResolver {
+	return RefResolverFunc(func(ctx context.Context, uri string) (*Schema, error) {
+		return r.ResolveRef(ctx, strings.TrimPrefix(uri, prefix))
+	})
 }
 
 // RefOption is the option type returned by [WithRefResolver] and [WithBaseURI],

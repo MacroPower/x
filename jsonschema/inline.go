@@ -683,49 +683,24 @@ func (in *inliner) fetchDoc(baseURI string) (*Schema, error) {
 // The resolver works the same way with [WithRefResolver] during validation:
 // refs that reach the resolver as relative or file URIs are served from
 // the fs. Refs that absolutize to another scheme (an http $id, for example)
-// are not valid fs paths and resolve to an error.
+// are not valid fs paths and resolve to an error; [StripPrefix] wraps the
+// resolver to strip the published remote base from each URI first so those
+// refs can be served from the fs.
 type FileResolver struct {
-	fsys        fs.FS
-	stripPrefix string
-}
-
-// FileResolverOption configures a [FileResolver] at construction.
-type FileResolverOption func(*FileResolver)
-
-// WithStripPrefix returns a [FileResolverOption] that strips prefix from
-// each URI before the file-path normalization, so a directory of schema
-// files can serve refs that absolutize against a published remote base
-// (an https $id, for example), which would otherwise not be valid fs paths:
-//
-//	jsonschema.NewFileResolver(os.DirFS("schemas"),
-//		jsonschema.WithStripPrefix("https://example.com/schemas/"))
-//
-// A URI that does not carry the prefix is handled unchanged.
-func WithStripPrefix(prefix string) FileResolverOption {
-	return func(r *FileResolver) { r.stripPrefix = prefix }
+	fsys fs.FS
 }
 
 // NewFileResolver returns a [FileResolver] serving schema documents from
 // fsys.
-func NewFileResolver(fsys fs.FS, opts ...FileResolverOption) *FileResolver {
-	r := &FileResolver{fsys: fsys}
-	for _, opt := range opts {
-		opt(r)
-	}
-
-	return r
+func NewFileResolver(fsys fs.FS) *FileResolver {
+	return &FileResolver{fsys: fsys}
 }
 
 // ResolveRef reads and unmarshals the schema document stored at the file
 // path named by uri. Reads are local and not cancellable, so the context is
 // unused. See [FileResolver] for the path semantics.
 func (r *FileResolver) ResolveRef(_ context.Context, uri string) (*Schema, error) {
-	name := uri
-	if r.stripPrefix != "" {
-		name = strings.TrimPrefix(name, r.stripPrefix)
-	}
-
-	name = strings.TrimPrefix(name, "file://")
+	name := strings.TrimPrefix(uri, "file://")
 	name = strings.TrimPrefix(name, "/")
 
 	data, err := fs.ReadFile(r.fsys, name)

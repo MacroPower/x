@@ -877,8 +877,9 @@ resolution to the fs root, so a ref escaping above it returns an error
 wrapping `ErrRefResolve`. The same `WithRefResolver` option also serves
 file-path and relative refs during validation; refs that absolutize
 to another scheme (an http `$id`, for example) are not valid fs paths and
-resolve to an error, unless `WithStripPrefix` strips the published remote
-base from each URI first so those refs can be served from the fs.
+resolve to an error, unless the `StripPrefix` middleware (following
+`net/http.StripPrefix`) strips the published remote base from each URI
+first so those refs can be served from the fs.
 `Inline`'s context is passed to the resolver with every document fetch, so a
 resolver that fetches over the network can honor cancellation and deadlines.
 

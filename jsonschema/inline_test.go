@@ -1087,16 +1087,17 @@ func TestFileResolverWithValidation(t *testing.T) {
 	})
 }
 
-// TestFileResolverWithStripPrefix covers serving refs that absolutize
-// against a published remote base from disk: the configured prefix is
-// stripped before path normalization, so an https URI becomes an fs path,
-// while URIs without the prefix keep the default handling.
-func TestFileResolverWithStripPrefix(t *testing.T) {
+// TestStripPrefix covers serving refs that absolutize against a published
+// remote base from disk: the middleware strips the prefix before delegating,
+// so an https URI becomes an fs path, while URIs without the prefix are
+// delegated unchanged.
+func TestStripPrefix(t *testing.T) {
 	t.Parallel()
 
-	resolver := jsonschema.NewFileResolver(mapFS(map[string]string{
-		"child.json": `{"type": "integer"}`,
-	}), jsonschema.WithStripPrefix("https://example.com/schemas/"))
+	resolver := jsonschema.StripPrefix("https://example.com/schemas/",
+		jsonschema.NewFileResolver(mapFS(map[string]string{
+			"child.json": `{"type": "integer"}`,
+		})))
 
 	t.Run("prefixed URI serves from the fs", func(t *testing.T) {
 		t.Parallel()
@@ -1106,7 +1107,7 @@ func TestFileResolverWithStripPrefix(t *testing.T) {
 		assert.Equal(t, "integer", s.Type)
 	})
 
-	t.Run("unprefixed URI keeps the default handling", func(t *testing.T) {
+	t.Run("unprefixed URI is delegated unchanged", func(t *testing.T) {
 		t.Parallel()
 
 		s, err := resolver.ResolveRef(t.Context(), "file:///child.json")

@@ -677,9 +677,9 @@
 // an error wrapping [ErrRefResolve]. Pair [os.DirFS] with
 // [WithBaseURI] to inline a directory of schemas; the same resolver
 // also serves file-path and relative refs during validation via
-// [WithRefResolver]. [WithStripPrefix] strips a published remote base from
-// each URI first, so refs absolutizing against an https $id can be served
-// from the fs. Inline's context is passed to the resolver with every
+// [WithRefResolver]. [StripPrefix] wraps any resolver to strip a published
+// remote base from each URI first, so refs absolutizing against an https
+// $id can be served from the fs. Inline's context is passed to the resolver with every
 // document fetch, so a resolver that fetches over the network can honor
 // cancellation and deadlines.
 //
