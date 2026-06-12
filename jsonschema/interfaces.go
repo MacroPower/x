@@ -255,17 +255,28 @@ func (f TagInterpreterFunc) Interpret(ctx context.Context, tag string, field Fie
 // state such as a compiled regular expression; [FormatValidatorFunc] adapts
 // a bare function for checkers that need none.
 type FormatValidator interface {
-	// ValidateFormat checks one string instance against the format,
-	// returning nil when the value conforms.
-	ValidateFormat(value string) error
+	// ValidateFormat checks one string instance against the named format,
+	// returning nil when the value conforms. Name is the format name the
+	// checker was registered under, so an implementation serving several
+	// names can tell them apart, the way an [net/http.Handler] reads the
+	// request path.
+	//
+	// The context comes from the validation entry point in effect
+	// ([Validator.Validate], [Validate], [ValidateJSON]; the Must* forms
+	// pass [context.Background]), so a checker that consults an external
+	// system can honor cancellation and deadlines; a checker that performs
+	// no cancellable work can ignore it.
+	ValidateFormat(ctx context.Context, name, value string) error
 }
 
 // FormatValidatorFunc adapts a bare checking function to a
 // [FormatValidator], following [net/http.HandlerFunc].
-type FormatValidatorFunc func(value string) error
+type FormatValidatorFunc func(ctx context.Context, name, value string) error
 
 // ValidateFormat calls f.
-func (f FormatValidatorFunc) ValidateFormat(value string) error { return f(value) }
+func (f FormatValidatorFunc) ValidateFormat(ctx context.Context, name, value string) error {
+	return f(ctx, name, value)
+}
 
 // RefResolver resolves remote schema URIs during validation. The resolver
 // is called only when local resolution fails to find a target. Successfully

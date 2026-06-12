@@ -761,9 +761,12 @@ Built-in checkers cover `date-time`, `date`, `time`, `duration`, `email`,
 `WithFormatValidator`: the checker is registered under the format name it
 checks (following `net/http.Handle`, so one implementation can serve several
 names), an implementation can carry state such as a compiled regular
-expression, and `FormatValidatorFunc` adapts a bare `func(string) error`.
-Registering a name again, including a built-in one, replaces the previous
-checker.
+expression, and `FormatValidatorFunc` adapts a bare function. Each check
+receives the validation run's context and the format name it runs under, the
+way an `http.Handler` reads the request path, so a multi-name checker can
+tell its names apart and a checker consulting an external system can honor
+cancellation. Registering a name again, including a built-in one, replaces
+the previous checker.
 
 ### Vocabularies
 

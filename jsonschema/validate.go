@@ -66,7 +66,7 @@ func (f validateOptionFunc) applyValidate(v *validator) { f(v) }
 func WithFormatValidator(name string, f FormatValidator) ValidateOption {
 	return validateOptionFunc(func(v *validator) {
 		if f != nil && name != "" {
-			v.formatCheckers[name] = f.ValidateFormat
+			v.formatCheckers[name] = f
 		}
 	})
 }
@@ -254,7 +254,7 @@ type validator struct {
 	resolveOpts           *ResolveOptions
 	formatsForce          *bool           // explicit WithFormats override; nil if unset
 	vocabOverride         map[string]bool // from WithVocabularies
-	formatCheckers        map[string]func(string) error
+	formatCheckers        map[string]FormatValidator
 	uriRegistry           map[string]*Schema         // absolute URI → schema
 	anchorRegistry        map[string]*Schema         // baseURI#anchor → schema
 	dynamicAnchorRegistry map[string]*Schema         // baseURI#name → schema ($dynamicAnchor only)
@@ -300,7 +300,7 @@ type validator struct {
 func newValidator(ctx context.Context, schema *Schema, opts []ValidateOption) (*validator, error) {
 	v := &validator{
 		root:           schema,
-		formatCheckers: map[string]func(string) error{},
+		formatCheckers: map[string]FormatValidator{},
 		visiting:       map[visitKey]bool{},
 		// The compile context, for resolver calls made while compiling: the
 		// metaschema lookup below, and the remoteLoader and resolveRemote
@@ -309,7 +309,9 @@ func newValidator(ctx context.Context, schema *Schema, opts []ValidateOption) (*
 		ctx: ctx,
 	}
 	// Register built-in format checkers.
-	maps.Copy(v.formatCheckers, builtinFormats)
+	for name, fn := range builtinFormats {
+		v.formatCheckers[name] = builtinFormat(fn)
+	}
 
 	for _, opt := range opts {
 		opt.applyValidate(v)
@@ -729,17 +731,23 @@ func computeBounds(schema *Schema) *precomputedBounds {
 	return b
 }
 
+// runContext returns the context of the current compile or validation run
+// for hook invocations (the [RefResolver], registered [FormatValidator]
+// values), falling back to [context.Background] when no entry point set one.
+func (v *validator) runContext() context.Context {
+	if v.ctx == nil {
+		return context.Background()
+	}
+
+	return v.ctx
+}
+
 // callResolver invokes the configured resolver for uri under the context of
 // the current compile or validation run. A nil schema with ok true is
 // normalized to the not-resolved answer, upholding the [RefResolver]
 // contract that no caller dereferences a nil document.
 func (v *validator) callResolver(uri string) (*Schema, bool, error) {
-	ctx := v.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
-
-	s, ok, err := v.refResolver.ResolveRef(ctx, uri)
+	s, ok, err := v.refResolver.ResolveRef(v.runContext(), uri)
 	if err != nil {
 		//nolint:wrapcheck // resolveRemote wraps the error with ErrRefResolve; remoteLoader tolerates it.
 		return nil, false, err
@@ -3027,8 +3035,8 @@ func (v *validator) validateString(
 	}
 
 	if schema.Format != "" && v.formatsEnabled {
-		if fn, exists := v.formatCheckers[schema.Format]; exists {
-			err := fn(str)
+		if fv, exists := v.formatCheckers[schema.Format]; exists {
+			err := fv.ValidateFormat(v.runContext(), schema.Format, str)
 			if err != nil {
 				errs = append(errs, &ValidationError{
 					InstancePath: instancePath.ptr,

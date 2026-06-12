@@ -234,7 +234,9 @@
 // interface serving a named registration ([TagInterpreter] for a struct tag
 // key, [FormatValidator] for a format name) takes the name at the
 // registration site ([WithTagInterpreter], [WithFormatValidator]), following
-// [net/http.Handle], so one implementation can serve several names.
+// [net/http.Handle], so one implementation can serve several names, and is
+// told the name each call runs under, the way an [net/http.Handler] reads
+// the request path.
 //
 // # Tag Interpretation
 //
@@ -513,7 +515,8 @@
 //     points.
 //   - [WithFormatValidator] registers a custom format checker (a
 //     [FormatValidator]) under the format name it checks, with
-//     [FormatValidatorFunc] adapting a bare function.
+//     [FormatValidatorFunc] adapting a bare function. The checker receives
+//     the validation run's context and the name each check runs under.
 //   - [WithFormats] forces built-in format assertion on or off. By default
 //     format is asserted under Draft-07 and is annotation-only under Draft
 //     2020-12 unless the format-assertion vocabulary is active.

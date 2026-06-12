@@ -1213,23 +1213,55 @@ func TestValidateWithCustomFormatValidator(t *testing.T) {
 	schema := &jsonschema.Schema{Type: "string", Format: "custom-format"}
 	err := jsonschema.Validate(t.Context(), schema, "invalid",
 		jsonschema.WithFormats(true),
-		jsonschema.WithFormatValidator("custom-format", jsonschema.FormatValidatorFunc(func(s string) error {
-			if s != "valid" {
-				return errors.New("must be 'valid'")
-			}
+		jsonschema.WithFormatValidator("custom-format", jsonschema.FormatValidatorFunc(
+			func(_ context.Context, _, s string) error {
+				if s != "valid" {
+					return errors.New("must be 'valid'")
+				}
 
-			return nil
-		})),
+				return nil
+			})),
 	)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "custom-format")
+}
+
+// TestValidateFormatValidatorReceivesName proves one checker implementation
+// registered under several names is told which name each check runs under,
+// the way an http.Handler reads the request path.
+func TestValidateFormatValidatorReceivesName(t *testing.T) {
+	t.Parallel()
+
+	var got []string
+
+	record := jsonschema.FormatValidatorFunc(func(_ context.Context, name, _ string) error {
+		got = append(got, name)
+		return nil
+	})
+
+	schema := &jsonschema.Schema{
+		Type: "object",
+		Properties: map[string]*jsonschema.Schema{
+			"a": {Type: "string", Format: "format-a"},
+			"b": {Type: "string", Format: "format-b"},
+		},
+	}
+
+	err := jsonschema.Validate(t.Context(),
+		schema, map[string]any{"a": "x", "b": "y"},
+		jsonschema.WithFormats(true),
+		jsonschema.WithFormatValidator("format-a", record),
+		jsonschema.WithFormatValidator("format-b", record),
+	)
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{"format-a", "format-b"}, got)
 }
 
 // evenLengthFormat implements [jsonschema.FormatValidator] directly, the
 // stateful-checker path that FormatValidatorFunc bypasses.
 type evenLengthFormat struct{}
 
-func (f evenLengthFormat) ValidateFormat(value string) error {
+func (f evenLengthFormat) ValidateFormat(_ context.Context, _, value string) error {
 	if len(value)%2 != 0 {
 		return errors.New("length must be even")
 	}
@@ -3673,7 +3705,7 @@ func TestCustomFormatVocabularyBypass(t *testing.T) {
 		Format: "custom-format",
 	}
 
-	customChecker := func(s string) error {
+	customChecker := func(_ context.Context, _, s string) error {
 		if s == "bad" {
 			return errors.New("invalid custom format")
 		}

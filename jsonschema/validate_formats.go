@@ -1,6 +1,7 @@
 package jsonschema
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -12,6 +13,15 @@ import (
 
 	"golang.org/x/net/idna"
 )
+
+// builtinFormat adapts a bare value-checking function to [FormatValidator]
+// for the built-in formats, which use neither the context nor the name.
+type builtinFormat func(string) error
+
+// ValidateFormat calls f on value.
+func (f builtinFormat) ValidateFormat(_ context.Context, _, value string) error {
+	return f(value)
+}
 
 var (
 	// Built-in format validators keyed by JSON Schema format name.
