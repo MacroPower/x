@@ -26,13 +26,15 @@ type plainKind int
 
 // stringerResolver resolves every fmt.Stringer to a plain string schema.
 func stringerResolver() jsonschema.TypeSchemaResolver {
-	return jsonschema.TypeSchemaResolverFunc(func(_ context.Context, t reflect.Type) (*jsonschema.Schema, bool, error) {
-		if !t.Implements(reflect.TypeFor[fmt.Stringer]()) {
-			return nil, false, nil
-		}
+	return jsonschema.TypeSchemaResolverFunc(
+		func(_ context.Context, tc jsonschema.TypeContext) (*jsonschema.Schema, bool, error) {
+			if !tc.Type.Implements(reflect.TypeFor[fmt.Stringer]()) {
+				return nil, false, nil
+			}
 
-		return &jsonschema.Schema{Type: "string"}, true, nil
-	})
+			return &jsonschema.Schema{Type: "string"}, true, nil
+		},
+	)
 }
 
 func TestWithTypeSchemaResolver(t *testing.T) {
@@ -95,8 +97,8 @@ func TestWithTypeSchemaResolver(t *testing.T) {
 		"nil schema with ok true is unrestricted": {
 			opts: []jsonschema.GenerateOption{
 				jsonschema.WithTypeSchemaResolver(jsonschema.TypeSchemaResolverFunc(
-					func(_ context.Context, t reflect.Type) (*jsonschema.Schema, bool, error) {
-						return nil, t == reflect.TypeFor[stringerKind](), nil
+					func(_ context.Context, tc jsonschema.TypeContext) (*jsonschema.Schema, bool, error) {
+						return nil, tc.Type == reflect.TypeFor[stringerKind](), nil
 					},
 				)),
 			},
@@ -198,6 +200,41 @@ func TestWithTypeSchema_NilUnregisters(t *testing.T) {
 	})
 }
 
+// TestWithTypeSchemaResolver_ReceivesDraft proves the TypeContext carries the
+// generation run's target draft, so a resolver can emit draft-appropriate
+// keywords.
+func TestWithTypeSchemaResolver_ReceivesDraft(t *testing.T) {
+	t.Parallel()
+
+	for name, draft := range map[string]jsonschema.Draft{
+		"draft7":    jsonschema.Draft7,
+		"draft2020": jsonschema.Draft2020,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var got []jsonschema.Draft
+
+			_, err := jsonschema.GenerateFor[plainKind](t.Context(),
+				jsonschema.WithDraft(draft),
+				jsonschema.WithTypeSchemaResolver(jsonschema.TypeSchemaResolverFunc(
+					func(_ context.Context, tc jsonschema.TypeContext) (*jsonschema.Schema, bool, error) {
+						got = append(got, tc.Draft)
+						return nil, false, nil
+					},
+				)),
+			)
+			require.NoError(t, err)
+
+			require.NotEmpty(t, got)
+
+			for _, d := range got {
+				assert.Equal(t, draft, d)
+			}
+		})
+	}
+}
+
 // TestWithTypeSchemaResolver_EmbeddedComposition mirrors the WithTypeSchema embed
 // behavior: an embedded struct intercepted by a resolver composes via allOf
 // rather than having its fields promoted.
@@ -216,8 +253,8 @@ func TestWithTypeSchemaResolver_EmbeddedComposition(t *testing.T) {
 
 	s, err := jsonschema.GenerateFor[doc](t.Context(),
 		jsonschema.WithTypeSchemaResolver(jsonschema.TypeSchemaResolverFunc(
-			func(_ context.Context, t reflect.Type) (*jsonschema.Schema, bool, error) {
-				if t != reflect.TypeFor[base]() {
+			func(_ context.Context, tc jsonschema.TypeContext) (*jsonschema.Schema, bool, error) {
+				if tc.Type != reflect.TypeFor[base]() {
 					return nil, false, nil
 				}
 
@@ -252,8 +289,8 @@ func TestWithTypeSchemaResolver_Error(t *testing.T) {
 
 	failFor := func(target reflect.Type) jsonschema.GenerateOption {
 		return jsonschema.WithTypeSchemaResolver(jsonschema.TypeSchemaResolverFunc(
-			func(_ context.Context, t reflect.Type) (*jsonschema.Schema, bool, error) {
-				if t == target {
+			func(_ context.Context, tc jsonschema.TypeContext) (*jsonschema.Schema, bool, error) {
+				if tc.Type == target {
 					return nil, false, errLoad
 				}
 
@@ -321,8 +358,8 @@ func TestWithTypeSchemaResolver_SchemaUnaliased(t *testing.T) {
 
 	shared := &jsonschema.Schema{Type: "string", Enum: []any{"a"}}
 	resolver := jsonschema.TypeSchemaResolverFunc(
-		func(_ context.Context, t reflect.Type) (*jsonschema.Schema, bool, error) {
-			return shared, t == reflect.TypeFor[plainKind](), nil
+		func(_ context.Context, tc jsonschema.TypeContext) (*jsonschema.Schema, bool, error) {
+			return shared, tc.Type == reflect.TypeFor[plainKind](), nil
 		},
 	)
 

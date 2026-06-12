@@ -287,8 +287,8 @@ interface, every type in a package — where `WithTypeSchema` names one exact
 ```go
 // Every type implementing fmt.Stringer serializes as a string.
 stringers := jsonschema.TypeSchemaResolverFunc(
-	func(_ context.Context, t reflect.Type) (*jsonschema.Schema, bool, error) {
-		if !t.Implements(reflect.TypeFor[fmt.Stringer]()) {
+	func(_ context.Context, tc jsonschema.TypeContext) (*jsonschema.Schema, bool, error) {
+		if !tc.Type.Implements(reflect.TypeFor[fmt.Stringer]()) {
 			return nil, false, nil
 		}
 		return &jsonschema.Schema{Type: "string"}, true, nil
@@ -305,7 +305,10 @@ aborts generation, for a resolver that recognizes a type but cannot produce
 its schema (an I/O failure, for example). A resolver may be consulted several
 times for the same type within one run, so it must be deterministic.
 Resolvers and extenders receive the Generate call's context, so an
-implementation doing I/O can honor cancellation and deadlines.
+implementation doing I/O can honor cancellation and deadlines. Both receive a
+`TypeContext` carrying the Go type and the target draft, so an implementation
+can emit draft-appropriate keywords, the way tag interpreters use
+`FieldContext.Draft`.
 
 If a type implements both customization interfaces, only `JSONSchemaProvider` is
 used. When a registered resolver (`WithTypeSchemaResolver` or `WithTypeSchema`) or
@@ -321,8 +324,8 @@ what reflection produced:
 ```go
 // Add a description to a third-party type without replacing its schema.
 descriptions := jsonschema.TypeSchemaExtenderFunc(
-	func(_ context.Context, t reflect.Type, s *jsonschema.Schema) error {
-		if t == reflect.TypeFor[netip.Addr]() {
+	func(_ context.Context, tc jsonschema.TypeContext, s *jsonschema.Schema) error {
+		if tc.Type == reflect.TypeFor[netip.Addr]() {
 			s.Description = "An IP address."
 		}
 		return nil

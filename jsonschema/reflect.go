@@ -394,8 +394,9 @@ func isRecursiveContainerKind(k reflect.Kind) bool {
 // last-registration-wins behavior. A resolver error stops the consultation
 // and aborts generation.
 func (g *generator) resolveTypeSchema(t reflect.Type) (*Schema, bool, error) {
+	tc := TypeContext{Type: t, Draft: g.draft}
 	for _, v := range slices.Backward(g.typeResolvers) {
-		s, ok, err := v.SchemaForType(g.ctx, t)
+		s, ok, err := v.SchemaForType(g.ctx, tc)
 		if err != nil {
 			return nil, false, fmt.Errorf("resolve type %s: %w", t, err)
 		}
@@ -1816,8 +1817,9 @@ func (g *generator) extendType(t reflect.Type, s *Schema) error {
 		}
 	}
 
+	tc := TypeContext{Type: t, Draft: g.draft}
 	for _, e := range g.typeExtenders {
-		err := e.ExtendSchemaForType(g.ctx, t, s)
+		err := e.ExtendSchemaForType(g.ctx, tc, s)
 		if err != nil {
 			return fmt.Errorf("extend type %s: %w", t, err)
 		}

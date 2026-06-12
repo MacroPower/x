@@ -220,6 +220,11 @@
 // runs at the same point in the pipeline, after the type's own
 // JSONSchemaExtend, under the same not-called-when-replaced rule.
 //
+// [TypeSchemaResolver] and [TypeSchemaExtender] receive a [TypeContext]
+// carrying the Go type and the target [Draft] of the generation run — the
+// type-level counterpart of the [FieldContext] tag interpreters receive — so
+// an implementation can emit draft-appropriate keywords.
+//
 // Every single-method extension-point interface has a conversion func type
 // adapter following [net/http.HandlerFunc] ([TagInterpreterFunc],
 // [FormatValidatorFunc], [TypeSchemaResolverFunc], [TypeSchemaExtenderFunc],

@@ -26,13 +26,15 @@ func (extendedKind) JSONSchemaExtend(s *jsonschema.Schema) error {
 // describePlainKind extends plainKind with a description and leaves every
 // other type untouched.
 func describePlainKind() jsonschema.TypeSchemaExtender {
-	return jsonschema.TypeSchemaExtenderFunc(func(_ context.Context, t reflect.Type, s *jsonschema.Schema) error {
-		if t == reflect.TypeFor[plainKind]() {
-			s.Description = "extended"
-		}
+	return jsonschema.TypeSchemaExtenderFunc(
+		func(_ context.Context, tc jsonschema.TypeContext, s *jsonschema.Schema) error {
+			if tc.Type == reflect.TypeFor[plainKind]() {
+				s.Description = "extended"
+			}
 
-		return nil
-	})
+			return nil
+		},
+	)
 }
 
 func TestWithTypeSchemaExtender(t *testing.T) {
@@ -62,8 +64,8 @@ func TestWithTypeSchemaExtender(t *testing.T) {
 			opts: []jsonschema.GenerateOption{
 				jsonschema.WithTypeSchemaExtender(describePlainKind()),
 				jsonschema.WithTypeSchemaExtender(jsonschema.TypeSchemaExtenderFunc(
-					func(_ context.Context, t reflect.Type, s *jsonschema.Schema) error {
-						if t == reflect.TypeFor[plainKind]() {
+					func(_ context.Context, tc jsonschema.TypeContext, s *jsonschema.Schema) error {
+						if tc.Type == reflect.TypeFor[plainKind]() {
 							s.Description += ", then refined"
 						}
 
@@ -85,8 +87,8 @@ func TestWithTypeSchemaExtender(t *testing.T) {
 			opts: []jsonschema.GenerateOption{
 				jsonschema.WithTypeSchemaFor[plainKind](&jsonschema.Schema{Type: "string"}),
 				jsonschema.WithTypeSchemaExtender(jsonschema.TypeSchemaExtenderFunc(
-					func(_ context.Context, t reflect.Type, _ *jsonschema.Schema) error {
-						if t == reflect.TypeFor[plainKind]() {
+					func(_ context.Context, tc jsonschema.TypeContext, _ *jsonschema.Schema) error {
+						if tc.Type == reflect.TypeFor[plainKind]() {
 							return errors.New("extender reached a replaced type")
 						}
 
@@ -198,8 +200,8 @@ func TestWithTypeSchemaExtender_AfterJSONSchemaExtend(t *testing.T) {
 
 	s, err := jsonschema.GenerateFor[extendedKind](t.Context(),
 		jsonschema.WithTypeSchemaExtender(jsonschema.TypeSchemaExtenderFunc(
-			func(_ context.Context, t reflect.Type, s *jsonschema.Schema) error {
-				if t == reflect.TypeFor[extendedKind]() {
+			func(_ context.Context, tc jsonschema.TypeContext, s *jsonschema.Schema) error {
+				if tc.Type == reflect.TypeFor[extendedKind]() {
 					s.Description += ", then extended"
 				}
 
@@ -218,6 +220,31 @@ func TestWithTypeSchemaExtender_AfterJSONSchemaExtend(t *testing.T) {
 	}`, string(got))
 }
 
+// TestWithTypeSchemaExtender_ReceivesDraft proves the TypeContext carries the
+// generation run's target draft, matching the resolver contract.
+func TestWithTypeSchemaExtender_ReceivesDraft(t *testing.T) {
+	t.Parallel()
+
+	var got []jsonschema.Draft
+
+	_, err := jsonschema.GenerateFor[plainKind](t.Context(),
+		jsonschema.WithDraft(jsonschema.Draft7),
+		jsonschema.WithTypeSchemaExtender(jsonschema.TypeSchemaExtenderFunc(
+			func(_ context.Context, tc jsonschema.TypeContext, _ *jsonschema.Schema) error {
+				got = append(got, tc.Draft)
+				return nil
+			},
+		)),
+	)
+	require.NoError(t, err)
+
+	require.NotEmpty(t, got)
+
+	for _, d := range got {
+		assert.Equal(t, jsonschema.Draft7, d)
+	}
+}
+
 // TestWithTypeSchemaExtender_Error proves an extender error aborts generation
 // and surfaces with the failing type named.
 func TestWithTypeSchemaExtender_Error(t *testing.T) {
@@ -227,7 +254,7 @@ func TestWithTypeSchemaExtender_Error(t *testing.T) {
 
 	_, err := jsonschema.GenerateFor[plainKind](t.Context(),
 		jsonschema.WithTypeSchemaExtender(jsonschema.TypeSchemaExtenderFunc(
-			func(context.Context, reflect.Type, *jsonschema.Schema) error { return errBoom },
+			func(context.Context, jsonschema.TypeContext, *jsonschema.Schema) error { return errBoom },
 		)),
 	)
 	require.ErrorIs(t, err, errBoom)

@@ -110,8 +110,8 @@ func WithTypeSchemaExtenderFor[T any](f func(ctx context.Context, s *Schema) err
 	target := reflect.TypeFor[T]()
 
 	return WithTypeSchemaExtender(TypeSchemaExtenderFunc(
-		func(ctx context.Context, t reflect.Type, s *Schema) error {
-			if t != target {
+		func(ctx context.Context, tc TypeContext, s *Schema) error {
+			if tc.Type != target {
 				return nil
 			}
 
@@ -126,8 +126,8 @@ type exactTypeResolver struct {
 	s *Schema
 }
 
-func (r exactTypeResolver) SchemaForType(_ context.Context, t reflect.Type) (*Schema, bool, error) {
-	if t != r.t {
+func (r exactTypeResolver) SchemaForType(_ context.Context, tc TypeContext) (*Schema, bool, error) {
+	if tc.Type != r.t {
 		return nil, false, nil
 	}
 

@@ -23,6 +23,19 @@ type JSONSchemaExtender interface {
 	JSONSchemaExtend(schema *Schema) error
 }
 
+// TypeContext provides context about the Go type whose schema a
+// [TypeSchemaResolver] or [TypeSchemaExtender] is consulted for. It is the
+// type-level counterpart of [FieldContext]: a struct rather than positional
+// parameters, so the context can grow without changing the hook signatures.
+type TypeContext struct {
+	// Type is the Go type whose schema is being resolved or extended.
+	Type reflect.Type
+	// Draft is the target draft of the generation run, so a hook can emit
+	// draft-appropriate keywords (for example dependentRequired under
+	// [Draft2020] versus dependencies under [Draft7]).
+	Draft Draft
+}
+
 // TypeSchemaResolver supplies schemas for Go types it recognizes during
 // generation. Resolvers are registered with [WithTypeSchemaResolver] and consulted
 // at the highest-priority step of the type resolution chain, before
@@ -31,15 +44,15 @@ type JSONSchemaExtender interface {
 // interface, every type in a package — where [WithTypeSchema] names one
 // exact [reflect.Type] at a time.
 //
-// SchemaForType returns ok false when the resolver does not handle t,
-// passing resolution to the next resolver and then to the rest of the
+// SchemaForType returns ok false when the resolver does not handle the type
+// in tc, passing resolution to the next resolver and then to the rest of the
 // chain. Returning ok true with a nil schema marks the type unrestricted
 // ({}), mirroring [JSONSchemaProvider]. A returned schema is copied before
 // use with the same discipline [WithTypeSchema] documents, so one schema
 // value may be shared across types, calls, and goroutines.
 //
-// A non-nil error aborts generation, for a resolver that recognizes t but
-// cannot produce its schema — an I/O failure while loading a schema
+// A non-nil error aborts generation, for a resolver that recognizes the type
+// but cannot produce its schema — an I/O failure while loading a schema
 // document, for example; the schema and ok values are then ignored. The
 // context comes from the Generate call in effect, so a resolver doing such
 // I/O can honor cancellation and deadlines; a resolver that performs no
@@ -48,16 +61,16 @@ type JSONSchemaExtender interface {
 // A resolver may be consulted several times for the same type within one
 // generation run, so SchemaForType must be deterministic.
 type TypeSchemaResolver interface {
-	SchemaForType(ctx context.Context, t reflect.Type) (s *Schema, ok bool, err error)
+	SchemaForType(ctx context.Context, tc TypeContext) (s *Schema, ok bool, err error)
 }
 
 // TypeSchemaResolverFunc adapts a bare resolution function to a
 // [TypeSchemaResolver], following [net/http.HandlerFunc].
-type TypeSchemaResolverFunc func(ctx context.Context, t reflect.Type) (*Schema, bool, error)
+type TypeSchemaResolverFunc func(ctx context.Context, tc TypeContext) (*Schema, bool, error)
 
 // SchemaForType calls f.
-func (f TypeSchemaResolverFunc) SchemaForType(ctx context.Context, t reflect.Type) (*Schema, bool, error) {
-	return f(ctx, t)
+func (f TypeSchemaResolverFunc) SchemaForType(ctx context.Context, tc TypeContext) (*Schema, bool, error) {
+	return f(ctx, tc)
 }
 
 // TypeSchemaExtender modifies reflection-generated schemas during generation,
@@ -73,19 +86,19 @@ func (f TypeSchemaResolverFunc) SchemaForType(ctx context.Context, t reflect.Typ
 // type's own JSONSchemaExtend. Like JSONSchemaExtender, it is not called for
 // types whose schema a registered resolver or [JSONSchemaProvider] supplied.
 // It modifies s in place; an error aborts generation. An extender that does
-// not recognize t leaves s untouched and returns nil. The context follows
-// the [TypeSchemaResolver.SchemaForType] contract.
+// not recognize the type in tc leaves s untouched and returns nil. The
+// context follows the [TypeSchemaResolver.SchemaForType] contract.
 type TypeSchemaExtender interface {
-	ExtendSchemaForType(ctx context.Context, t reflect.Type, s *Schema) error
+	ExtendSchemaForType(ctx context.Context, tc TypeContext, s *Schema) error
 }
 
 // TypeSchemaExtenderFunc adapts a bare extending function to a
 // [TypeSchemaExtender], following [net/http.HandlerFunc].
-type TypeSchemaExtenderFunc func(ctx context.Context, t reflect.Type, s *Schema) error
+type TypeSchemaExtenderFunc func(ctx context.Context, tc TypeContext, s *Schema) error
 
 // ExtendSchemaForType calls f.
-func (f TypeSchemaExtenderFunc) ExtendSchemaForType(ctx context.Context, t reflect.Type, s *Schema) error {
-	return f(ctx, t, s)
+func (f TypeSchemaExtenderFunc) ExtendSchemaForType(ctx context.Context, tc TypeContext, s *Schema) error {
+	return f(ctx, tc, s)
 }
 
 // DescriptionProvider supplies descriptions for types and struct fields during
