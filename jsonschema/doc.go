@@ -472,8 +472,9 @@
 //   - [WithResolveOptions] passes [ResolveOptions] (an alias for the upstream
 //     options type, so no second import is needed) for structural
 //     pre-validation.
-//   - [WithVocabularies] directly specifies active vocabularies for the
-//     validation run.
+//   - [WithVocabularies] directly specifies the active vocabularies for the
+//     validation run: the listed URIs are active, every other vocabulary is
+//     inactive.
 //   - [WithMetaSchema] registers a metaschema whose $vocabulary map controls
 //     which keyword groups are active.
 //

@@ -98,13 +98,25 @@ func WithResolveOptions(opts *ResolveOptions) ValidateOption {
 	return validateOptionFunc(func(v *validator) { v.resolveOpts = opts })
 }
 
-// WithVocabularies directly specifies the active vocabulary set for validation.
-// The map keys are vocabulary URIs (e.g. [VocabValidation2020]) and values
-// indicate whether the vocabulary is active. This takes highest precedence,
-// overriding any $vocabulary found in a metaschema registered via
-// [WithMetaSchema].
-func WithVocabularies(vocabs map[string]bool) ValidateOption {
-	return validateOptionFunc(func(v *validator) { v.vocabOverride = vocabs })
+// WithVocabularies directly specifies the active vocabulary set for
+// validation: the listed vocabulary URIs (e.g. [VocabValidation2020]) are
+// active and every other vocabulary is inactive. This takes highest
+// precedence, overriding any $vocabulary found in a metaschema registered
+// via [WithMetaSchema]. Calling it with no URIs is a no-op, leaving the
+// metaschema or default resolution in effect.
+func WithVocabularies(uris ...string) ValidateOption {
+	return validateOptionFunc(func(v *validator) {
+		if len(uris) == 0 {
+			return
+		}
+
+		vocabs := make(map[string]bool, len(uris))
+		for _, uri := range uris {
+			vocabs[uri] = true
+		}
+
+		v.vocabOverride = vocabs
+	})
 }
 
 // WithMetaSchema registers a metaschema for vocabulary resolution. The

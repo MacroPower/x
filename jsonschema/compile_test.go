@@ -136,14 +136,18 @@ func TestCompileError(t *testing.T) {
 
 	// A 2020-12 $vocabulary map that does not require core is invalid, so the
 	// failure surfaces at compile time rather than per validation.
+	meta := &jsonschema.Schema{
+		ID: "https://example.com/core-not-required-meta",
+		Vocabulary: map[string]bool{
+			jsonschema.VocabCore2020: false,
+		},
+	}
 	schema := &jsonschema.Schema{
-		Schema: "https://json-schema.org/draft/2020-12/schema",
+		Schema: "https://example.com/core-not-required-meta",
 		Type:   "string",
 	}
 
-	_, err := jsonschema.Compile(schema,
-		jsonschema.WithVocabularies(map[string]bool{jsonschema.VocabCore2020: false}),
-	)
+	_, err := jsonschema.Compile(schema, jsonschema.WithMetaSchema(meta))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "core vocabulary must be required")
 }

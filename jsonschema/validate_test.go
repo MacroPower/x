@@ -2012,9 +2012,9 @@ func TestValidateVocabularyResolution(t *testing.T) {
 			schema:   &jsonschema.Schema{Schema: "http://json-schema.org/draft-07/schema#", Type: "string"},
 			instance: 42.0,
 			opts: []jsonschema.ValidateOption{
-				jsonschema.WithVocabularies(map[string]bool{
-					jsonschema.VocabCore2020: true,
-				}),
+				jsonschema.WithVocabularies(
+					jsonschema.VocabCore2020,
+				),
 			},
 			err: "(type)",
 		},
@@ -2026,10 +2026,10 @@ func TestValidateVocabularyResolution(t *testing.T) {
 			},
 			instance: "hi",
 			opts: []jsonschema.ValidateOption{
-				jsonschema.WithVocabularies(map[string]bool{
-					jsonschema.VocabCore2020:       true,
-					jsonschema.VocabApplicator2020: true,
-				}),
+				jsonschema.WithVocabularies(
+					jsonschema.VocabCore2020,
+					jsonschema.VocabApplicator2020,
+				),
 			},
 		},
 		"WithMetaSchema lookup": {
@@ -2067,11 +2067,11 @@ func TestValidateVocabularyResolution(t *testing.T) {
 					},
 				}),
 				// Override re-enables validation.
-				jsonschema.WithVocabularies(map[string]bool{
-					jsonschema.VocabCore2020:       true,
-					jsonschema.VocabApplicator2020: true,
-					jsonschema.VocabValidation2020: true,
-				}),
+				jsonschema.WithVocabularies(
+					jsonschema.VocabCore2020,
+					jsonschema.VocabApplicator2020,
+					jsonschema.VocabValidation2020,
+				),
 			},
 			err: "(type)",
 		},
@@ -2124,11 +2124,11 @@ func TestValidateVocabularyValidationDisabled(t *testing.T) {
 	t.Parallel()
 
 	noValidation := []jsonschema.ValidateOption{
-		jsonschema.WithVocabularies(map[string]bool{
-			jsonschema.VocabCore2020:        true,
-			jsonschema.VocabApplicator2020:  true,
-			jsonschema.VocabUnevaluated2020: true,
-		}),
+		jsonschema.WithVocabularies(
+			jsonschema.VocabCore2020,
+			jsonschema.VocabApplicator2020,
+			jsonschema.VocabUnevaluated2020,
+		),
 	}
 
 	tests := map[string]struct {
@@ -2204,10 +2204,10 @@ func TestValidateVocabularyApplicatorDisabled(t *testing.T) {
 	t.Parallel()
 
 	noApplicator := []jsonschema.ValidateOption{
-		jsonschema.WithVocabularies(map[string]bool{
-			jsonschema.VocabCore2020:       true,
-			jsonschema.VocabValidation2020: true,
-		}),
+		jsonschema.WithVocabularies(
+			jsonschema.VocabCore2020,
+			jsonschema.VocabValidation2020,
+		),
 	}
 
 	tests := map[string]struct {
@@ -2273,11 +2273,11 @@ func TestValidateVocabularyUnevaluatedDisabled(t *testing.T) {
 
 	// With unevaluated vocab disabled, extra properties are not flagged.
 	err := jsonschema.Validate(schema, map[string]any{"name": "Alice", "extra": "field"},
-		jsonschema.WithVocabularies(map[string]bool{
-			jsonschema.VocabCore2020:       true,
-			jsonschema.VocabApplicator2020: true,
-			jsonschema.VocabValidation2020: true,
-		}),
+		jsonschema.WithVocabularies(
+			jsonschema.VocabCore2020,
+			jsonschema.VocabApplicator2020,
+			jsonschema.VocabValidation2020,
+		),
 	)
 	require.NoError(t, err)
 }
@@ -2287,10 +2287,10 @@ func TestValidateVocabularyUnknownRequired(t *testing.T) {
 
 	schema := &jsonschema.Schema{Schema: "https://json-schema.org/draft/2020-12/schema"}
 	err := jsonschema.Validate(schema, "anything",
-		jsonschema.WithVocabularies(map[string]bool{
-			jsonschema.VocabCore2020:                           true,
-			"https://example.com/vocab/unknown-required-vocab": true,
-		}),
+		jsonschema.WithVocabularies(
+			jsonschema.VocabCore2020,
+			"https://example.com/vocab/unknown-required-vocab",
+		),
 	)
 	require.Error(t, err)
 	require.ErrorIs(t, err, jsonschema.ErrUnknownVocabulary)
@@ -2299,18 +2299,23 @@ func TestValidateVocabularyUnknownRequired(t *testing.T) {
 func TestValidateVocabularyUnknownOptional(t *testing.T) {
 	t.Parallel()
 
-	schema := &jsonschema.Schema{
-		Schema: "https://json-schema.org/draft/2020-12/schema",
-		Type:   "string",
-	}
-	// Unknown optional vocabulary (false) is silently ignored.
-	err := jsonschema.Validate(schema, "hello",
-		jsonschema.WithVocabularies(map[string]bool{
+	// Unknown optional vocabulary (false) is silently ignored. Optional
+	// entries arrive via a metaschema's $vocabulary map; WithVocabularies
+	// only lists active vocabularies.
+	meta := &jsonschema.Schema{
+		ID: "https://example.com/unknown-optional-meta",
+		Vocabulary: map[string]bool{
 			jsonschema.VocabCore2020:                           true,
 			jsonschema.VocabValidation2020:                     true,
 			"https://example.com/vocab/unknown-optional-vocab": false,
-		}),
-	)
+		},
+	}
+	schema := &jsonschema.Schema{
+		Schema: "https://example.com/unknown-optional-meta",
+		Type:   "string",
+	}
+
+	err := jsonschema.Validate(schema, "hello", jsonschema.WithMetaSchema(meta))
 	require.NoError(t, err)
 }
 
@@ -2366,10 +2371,10 @@ func TestValidateVocabularyApplicatorActiveValidationDisabled(t *testing.T) {
 	}
 
 	opts := []jsonschema.ValidateOption{
-		jsonschema.WithVocabularies(map[string]bool{
-			jsonschema.VocabCore2020:       true,
-			jsonschema.VocabApplicator2020: true,
-		}),
+		jsonschema.WithVocabularies(
+			jsonschema.VocabCore2020,
+			jsonschema.VocabApplicator2020,
+		),
 	}
 
 	// Known properties pass — type constraints inside property schemas are
@@ -2590,13 +2595,13 @@ func TestFormatAnnotationVocabSuppressesErrors(t *testing.T) {
 
 	// With only format-annotation active, invalid formats should NOT produce errors.
 	err := jsonschema.Validate(schema, "not-an-email",
-		jsonschema.WithVocabularies(map[string]bool{
-			jsonschema.VocabCore2020:             true,
-			jsonschema.VocabApplicator2020:       true,
-			jsonschema.VocabValidation2020:       true,
-			jsonschema.VocabFormatAnnotation2020: true,
+		jsonschema.WithVocabularies(
+			jsonschema.VocabCore2020,
+			jsonschema.VocabApplicator2020,
+			jsonschema.VocabValidation2020,
+			jsonschema.VocabFormatAnnotation2020,
 			// The format-assertion vocabulary is NOT active.
-		}),
+		),
 	)
 	// Per spec, format-annotation means collect as annotation, not validate.
 	require.NoError(t, err, "format-annotation should not produce validation errors")
@@ -3155,18 +3160,20 @@ func TestResolveVocabulariesCoreNotRequired(t *testing.T) {
 	t.Parallel()
 
 	// Per spec, core vocabulary MUST be required (true) in $vocabulary.
-	// Setting core to false should be rejected.
+	// A metaschema marking core optional should be rejected.
+	meta := &jsonschema.Schema{
+		ID: "https://example.com/core-not-required-meta",
+		Vocabulary: map[string]bool{
+			jsonschema.VocabCore2020:       false, // core set to false -- should be an error
+			jsonschema.VocabValidation2020: true,
+		},
+	}
 	schema := &jsonschema.Schema{
-		Schema: "https://json-schema.org/draft/2020-12/schema",
+		Schema: "https://example.com/core-not-required-meta",
 		Type:   "string",
 	}
 
-	err := jsonschema.Validate(schema, "hello",
-		jsonschema.WithVocabularies(map[string]bool{
-			jsonschema.VocabCore2020:       false, // core set to false -- should be an error
-			jsonschema.VocabValidation2020: true,
-		}),
-	)
+	err := jsonschema.Validate(schema, "hello", jsonschema.WithMetaSchema(meta))
 	require.Error(t, err, "core vocabulary set to false should be rejected")
 }
 
@@ -3182,12 +3189,12 @@ func TestBothFormatVocabsActiveAssertsFormat(t *testing.T) {
 	// Declaring both the format-annotation and format-assertion vocabularies is
 	// not itself an error: the package implements no mutual-exclusion check.
 	// With format-assertion active, format is asserted.
-	vocabs := jsonschema.WithVocabularies(map[string]bool{
-		jsonschema.VocabCore2020:             true,
-		jsonschema.VocabValidation2020:       true,
-		jsonschema.VocabFormatAnnotation2020: true,
-		jsonschema.VocabFormatAssertion2020:  true,
-	})
+	vocabs := jsonschema.WithVocabularies(
+		jsonschema.VocabCore2020,
+		jsonschema.VocabValidation2020,
+		jsonschema.VocabFormatAnnotation2020,
+		jsonschema.VocabFormatAssertion2020,
+	)
 
 	// An invalid value fails specifically on the format assertion (not on any
 	// nonexistent mutual-exclusion rule).
@@ -3585,12 +3592,12 @@ func TestCustomFormatVocabularyBypass(t *testing.T) {
 	// With format-annotation vocabulary only, custom formats should NOT assert.
 	err := jsonschema.Validate(schema, "bad",
 		jsonschema.WithFormatValidator(jsonschema.FormatValidatorFunc("custom-format", customChecker)),
-		jsonschema.WithVocabularies(map[string]bool{
-			jsonschema.VocabCore2020:             true,
-			jsonschema.VocabValidation2020:       true,
-			jsonschema.VocabFormatAnnotation2020: true,
+		jsonschema.WithVocabularies(
+			jsonschema.VocabCore2020,
+			jsonschema.VocabValidation2020,
+			jsonschema.VocabFormatAnnotation2020,
 			// The format-assertion vocabulary is NOT active.
-		}),
+		),
 	)
 	require.NoError(t, err,
 		"custom format should respect format-annotation vocabulary and not assert")
@@ -3789,21 +3796,21 @@ func TestFormatsEnabledTriState(t *testing.T) {
 		},
 		"format-annotation vocabulary only is annotation-only": {
 			opts: []jsonschema.ValidateOption{
-				jsonschema.WithVocabularies(map[string]bool{
-					jsonschema.VocabCore2020:             true,
-					jsonschema.VocabValidation2020:       true,
-					jsonschema.VocabFormatAnnotation2020: true,
-				}),
+				jsonschema.WithVocabularies(
+					jsonschema.VocabCore2020,
+					jsonschema.VocabValidation2020,
+					jsonschema.VocabFormatAnnotation2020,
+				),
 			},
 			assertErr: false,
 		},
 		"format-assertion vocabulary asserts": {
 			opts: []jsonschema.ValidateOption{
-				jsonschema.WithVocabularies(map[string]bool{
-					jsonschema.VocabCore2020:            true,
-					jsonschema.VocabValidation2020:      true,
-					jsonschema.VocabFormatAssertion2020: true,
-				}),
+				jsonschema.WithVocabularies(
+					jsonschema.VocabCore2020,
+					jsonschema.VocabValidation2020,
+					jsonschema.VocabFormatAssertion2020,
+				),
 			},
 			assertErr: true,
 		},
@@ -3955,11 +3962,11 @@ func TestVocabularyGatedBehavior(t *testing.T) {
 
 	// Normally this would fail (42 is not a string).
 	err := jsonschema.Validate(schema, 42.0,
-		jsonschema.WithVocabularies(map[string]bool{
-			jsonschema.VocabCore2020:       true,
-			jsonschema.VocabApplicator2020: true,
+		jsonschema.WithVocabularies(
+			jsonschema.VocabCore2020,
+			jsonschema.VocabApplicator2020,
 			// Validation vocabulary NOT active -- type should not be checked.
-		}),
+		),
 	)
 	require.NoError(t, err,
 		"with validation vocabulary disabled, type keyword should not be enforced")

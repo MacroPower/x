@@ -342,11 +342,11 @@ func TestVocabSetOmitsMetaData(t *testing.T) {
 	}
 
 	err := jsonschema.Validate(schema, "hello",
-		jsonschema.WithVocabularies(map[string]bool{
-			jsonschema.VocabCore2020:       true,
-			jsonschema.VocabValidation2020: true,
+		jsonschema.WithVocabularies(
+			jsonschema.VocabCore2020,
+			jsonschema.VocabValidation2020,
 			// The metaData vocabulary is NOT active.
-		}),
+		),
 	)
 	require.NoError(t, err)
 }

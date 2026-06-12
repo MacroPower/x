@@ -651,16 +651,16 @@ containing object are both identifiable from `InstancePath` alone.
 
 ### Validation options
 
-| Option                     | Effect                                                                                                                 |
-| -------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `WithDraft(Draft)`         | Override the draft otherwise detected from the root schema's `$schema`.                                                |
-| `WithResolver(r)`          | Resolve remote/absolute `$ref` URIs (called only when local lookup fails); the resolver receives the caller's context. |
-| `WithFormatValidator(f)`   | Register a custom `format` checker (a `FormatValidator`; `FormatValidatorFunc` adapts a bare function).                |
-| `WithFormats(bool)`        | Force `format` assertion on or off.                                                                                    |
-| `WithContent(bool)`        | Assert `contentEncoding`/`contentMediaType` (annotation-only by default).                                              |
-| `WithResolveOptions(opts)` | Pass `ResolveOptions` (aliased from the upstream package) to `Schema.Resolve`.                                         |
-| `WithVocabularies(map)`    | Directly set active vocabularies (highest precedence).                                                                 |
-| `WithMetaSchema(ms)`       | Register a metaschema whose `$vocabulary` gates keyword groups.                                                        |
+| Option                      | Effect                                                                                                                 |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `WithDraft(Draft)`          | Override the draft otherwise detected from the root schema's `$schema`.                                                |
+| `WithResolver(r)`           | Resolve remote/absolute `$ref` URIs (called only when local lookup fails); the resolver receives the caller's context. |
+| `WithFormatValidator(f)`    | Register a custom `format` checker (a `FormatValidator`; `FormatValidatorFunc` adapts a bare function).                |
+| `WithFormats(bool)`         | Force `format` assertion on or off.                                                                                    |
+| `WithContent(bool)`         | Assert `contentEncoding`/`contentMediaType` (annotation-only by default).                                              |
+| `WithResolveOptions(opts)`  | Pass `ResolveOptions` (aliased from the upstream package) to `Schema.Resolve`.                                         |
+| `WithVocabularies(uris...)` | Directly set the active vocabularies (highest precedence); unlisted ones are inactive.                                 |
+| `WithMetaSchema(ms)`        | Register a metaschema whose `$vocabulary` gates keyword groups.                                                        |
 
 ### Formats
 
