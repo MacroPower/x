@@ -653,7 +653,9 @@ the wrapper nodes and returns one entry per distinct concrete failure (a
 `TargetsKey()` reports whether the failing keyword constrains a key, name, or
 collection structure (`required`, `additionalProperties`, `propertyNames`,
 `minItems`, `minProperties`, ...) rather than a value, so a source-mapping
-consumer can highlight the key instead of the value.
+consumer can highlight the key instead of the value. The keyword names
+themselves are exported as `Keyword*` constants (`KeywordRequired`,
+`KeywordRef`, ...), so code branching on `Keyword` needs no raw strings.
 
 `InstanceSegments()` returns the `InstancePath` location in typed form: one
 `Segment` per reference token, outermost first, each marked as an object key

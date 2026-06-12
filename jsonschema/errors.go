@@ -303,7 +303,7 @@ func (e *ValidationError) collectLeaves(out *[]*ValidationError, seen map[*Valid
 // is a leaf despite its cause, because it is the concrete, self-describing
 // failure for an offending key.
 func (e *ValidationError) isLeaf() bool {
-	return len(e.Causes) == 0 || e.Keyword == keywordPropertyNames
+	return len(e.Causes) == 0 || e.Keyword == KeywordPropertyNames
 }
 
 // TargetsKey reports whether the failing keyword constrains a member's key or an
@@ -318,10 +318,10 @@ func (e *ValidationError) isLeaf() bool {
 // failure against the original input document.
 func (e *ValidationError) TargetsKey() bool {
 	switch e.Keyword {
-	case keywordAdditionalProperties, keywordPropertyNames, keywordRequired,
-		keywordMinProperties, keywordMaxProperties,
-		keywordMinItems, keywordMaxItems, keywordUniqueItems,
-		keywordContains, keywordMinContains, keywordMaxContains:
+	case KeywordAdditionalProperties, KeywordPropertyNames, KeywordRequired,
+		KeywordMinProperties, KeywordMaxProperties,
+		KeywordMinItems, KeywordMaxItems, KeywordUniqueItems,
+		KeywordContains, KeywordMinContains, KeywordMaxContains:
 		return true
 	default:
 		return false

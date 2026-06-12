@@ -21,30 +21,30 @@ var (
 	// treated as a bare description. This prevents a plain description such as
 	// "a=b is the formula" from being misparsed as key-value.
 	jsonSchemaTagKeys = map[string]bool{
-		keywordDescription:      true,
-		keywordTitle:            true,
-		keywordType:             true,
-		keywordPattern:          true,
-		keywordFormat:           true,
-		keywordDeprecated:       true,
-		keywordReadOnly:         true,
-		keywordWriteOnly:        true,
-		keywordUniqueItems:      true,
-		keywordMinimum:          true,
-		keywordMaximum:          true,
-		keywordExclusiveMinimum: true,
-		keywordExclusiveMaximum: true,
-		keywordMultipleOf:       true,
-		keywordMinLength:        true,
-		keywordMaxLength:        true,
-		keywordMinItems:         true,
-		keywordMaxItems:         true,
-		keywordMinProperties:    true,
-		keywordMaxProperties:    true,
-		keywordDefault:          true,
-		keywordConst:            true,
-		keywordEnum:             true,
-		keywordExamples:         true,
+		KeywordDescription:      true,
+		KeywordTitle:            true,
+		KeywordType:             true,
+		KeywordPattern:          true,
+		KeywordFormat:           true,
+		KeywordDeprecated:       true,
+		KeywordReadOnly:         true,
+		KeywordWriteOnly:        true,
+		KeywordUniqueItems:      true,
+		KeywordMinimum:          true,
+		KeywordMaximum:          true,
+		KeywordExclusiveMinimum: true,
+		KeywordExclusiveMaximum: true,
+		KeywordMultipleOf:       true,
+		KeywordMinLength:        true,
+		KeywordMaxLength:        true,
+		KeywordMinItems:         true,
+		KeywordMaxItems:         true,
+		KeywordMinProperties:    true,
+		KeywordMaxProperties:    true,
+		KeywordDefault:          true,
+		KeywordConst:            true,
+		KeywordEnum:             true,
+		KeywordExamples:         true,
 	}
 )
 
@@ -124,7 +124,7 @@ func applyJSONSchemaTag(tag string, fieldType reflect.Type, s *Schema) error {
 			return err
 		}
 
-		if key == keywordType {
+		if key == KeywordType {
 			scalarType = standInTypeFor(value)
 			overriddenType = value
 		}
@@ -137,7 +137,7 @@ func applyJSONSchemaTag(tag string, fieldType reflect.Type, s *Schema) error {
 // parsed against the effective scalar type (see [applyJSONSchemaTag]).
 func isScalarValueKey(key string) bool {
 	switch key {
-	case keywordDefault, keywordConst, keywordEnum, keywordExamples:
+	case KeywordDefault, KeywordConst, KeywordEnum, KeywordExamples:
 		return true
 	default:
 		return false
@@ -228,24 +228,24 @@ func splitTagPairs(tag string) []string {
 // it.
 func applyTagKeyValue(key, value string, scalarType reflect.Type, s *Schema) error {
 	switch key {
-	case keywordDescription:
+	case KeywordDescription:
 		s.Description = value
-	case keywordTitle:
+	case KeywordTitle:
 		s.Title = value
 
-	case keywordType:
+	case KeywordType:
 		if !validTypeName(value) {
 			return fmt.Errorf("jsonschema tag: key %q: %w: %q", key, ErrInvalidType, value)
 		}
 
 		applyTypeOverride(s, value)
 
-	case keywordPattern:
+	case KeywordPattern:
 		s.Pattern = value
-	case keywordFormat:
+	case KeywordFormat:
 		s.Format = value
 
-	case keywordDeprecated:
+	case KeywordDeprecated:
 		b, err := parseBoolValue(key, value)
 		if err != nil {
 			return err
@@ -253,7 +253,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *Schema) err
 
 		s.Deprecated = b
 
-	case keywordReadOnly:
+	case KeywordReadOnly:
 		b, err := parseBoolValue(key, value)
 		if err != nil {
 			return err
@@ -261,7 +261,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *Schema) err
 
 		s.ReadOnly = b
 
-	case keywordWriteOnly:
+	case KeywordWriteOnly:
 		b, err := parseBoolValue(key, value)
 		if err != nil {
 			return err
@@ -269,7 +269,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *Schema) err
 
 		s.WriteOnly = b
 
-	case keywordUniqueItems:
+	case KeywordUniqueItems:
 		b, err := parseBoolValue(key, value)
 		if err != nil {
 			return err
@@ -277,7 +277,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *Schema) err
 
 		s.UniqueItems = b
 
-	case keywordMinimum:
+	case KeywordMinimum:
 		n, err := parseFloat(key, value)
 		if err != nil {
 			return err
@@ -285,7 +285,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *Schema) err
 
 		s.Minimum = &n
 
-	case keywordMaximum:
+	case KeywordMaximum:
 		n, err := parseFloat(key, value)
 		if err != nil {
 			return err
@@ -293,7 +293,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *Schema) err
 
 		s.Maximum = &n
 
-	case keywordExclusiveMinimum:
+	case KeywordExclusiveMinimum:
 		n, err := parseFloat(key, value)
 		if err != nil {
 			return err
@@ -301,7 +301,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *Schema) err
 
 		s.ExclusiveMinimum = &n
 
-	case keywordExclusiveMaximum:
+	case KeywordExclusiveMaximum:
 		n, err := parseFloat(key, value)
 		if err != nil {
 			return err
@@ -309,7 +309,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *Schema) err
 
 		s.ExclusiveMaximum = &n
 
-	case keywordMultipleOf:
+	case KeywordMultipleOf:
 		n, err := parseFloat(key, value)
 		if err != nil {
 			return err
@@ -321,7 +321,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *Schema) err
 
 		s.MultipleOf = &n
 
-	case keywordMinLength:
+	case KeywordMinLength:
 		n, err := parseInt(key, value)
 		if err != nil {
 			return err
@@ -329,7 +329,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *Schema) err
 
 		s.MinLength = &n
 
-	case keywordMaxLength:
+	case KeywordMaxLength:
 		n, err := parseInt(key, value)
 		if err != nil {
 			return err
@@ -337,7 +337,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *Schema) err
 
 		s.MaxLength = &n
 
-	case keywordMinItems:
+	case KeywordMinItems:
 		n, err := parseInt(key, value)
 		if err != nil {
 			return err
@@ -345,7 +345,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *Schema) err
 
 		s.MinItems = &n
 
-	case keywordMaxItems:
+	case KeywordMaxItems:
 		n, err := parseInt(key, value)
 		if err != nil {
 			return err
@@ -353,7 +353,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *Schema) err
 
 		s.MaxItems = &n
 
-	case keywordMinProperties:
+	case KeywordMinProperties:
 		n, err := parseInt(key, value)
 		if err != nil {
 			return err
@@ -361,7 +361,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *Schema) err
 
 		s.MinProperties = &n
 
-	case keywordMaxProperties:
+	case KeywordMaxProperties:
 		n, err := parseInt(key, value)
 		if err != nil {
 			return err
@@ -369,7 +369,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *Schema) err
 
 		s.MaxProperties = &n
 
-	case keywordDefault:
+	case KeywordDefault:
 		if value == "" {
 			return fmt.Errorf("jsonschema tag: key %q requires a non-empty value", key)
 		}
@@ -386,7 +386,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *Schema) err
 
 		s.Default = raw
 
-	case keywordConst:
+	case KeywordConst:
 		if value == "" {
 			return fmt.Errorf("jsonschema tag: key %q requires a non-empty value", key)
 		}
@@ -398,7 +398,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *Schema) err
 
 		s.Const = &v
 
-	case keywordEnum:
+	case KeywordEnum:
 		if value == "" {
 			return fmt.Errorf("jsonschema tag: key %q requires a non-empty value", key)
 		}
@@ -417,7 +417,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *Schema) err
 
 		s.Enum = enumVals
 
-	case keywordExamples:
+	case KeywordExamples:
 		if value == "" {
 			return fmt.Errorf("jsonschema tag: key %q requires a non-empty value", key)
 		}

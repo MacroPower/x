@@ -64,12 +64,12 @@ func SubschemaEntries(s *Schema) []SubschemaEntry {
 		m       map[string]*Schema
 		keyword string
 	}{
-		{s.Properties, keywordProperties},
-		{s.PatternProperties, keywordPatternProperties},
-		{s.Defs, keywordDefs},
-		{s.Definitions, keywordDefinitions},
-		{s.DependentSchemas, keywordDependentSchemas},
-		{s.DependencySchemas, keywordDependencies},
+		{s.Properties, KeywordProperties},
+		{s.PatternProperties, KeywordPatternProperties},
+		{s.Defs, KeywordDefs},
+		{s.Definitions, KeywordDefinitions},
+		{s.DependentSchemas, KeywordDependentSchemas},
+		{s.DependencySchemas, KeywordDependencies},
 	} {
 		for _, key := range slices.Sorted(maps.Keys(entry.m)) {
 			if sub := entry.m[key]; sub != nil {
@@ -86,11 +86,11 @@ func SubschemaEntries(s *Schema) []SubschemaEntry {
 		keyword string
 		list    []*Schema
 	}{
-		{keywordAllOf, s.AllOf},
-		{keywordAnyOf, s.AnyOf},
-		{keywordOneOf, s.OneOf},
-		{keywordPrefixItems, s.PrefixItems},
-		{keywordItems, s.ItemsArray},
+		{KeywordAllOf, s.AllOf},
+		{KeywordAnyOf, s.AnyOf},
+		{KeywordOneOf, s.OneOf},
+		{KeywordPrefixItems, s.PrefixItems},
+		{KeywordItems, s.ItemsArray},
 	} {
 		for i, sub := range entry.list {
 			if sub != nil {
@@ -107,18 +107,18 @@ func SubschemaEntries(s *Schema) []SubschemaEntry {
 		s       *Schema
 		keyword string
 	}{
-		{s.Items, keywordItems},
-		{s.AdditionalProperties, keywordAdditionalProperties},
-		{s.AdditionalItems, keywordAdditionalItems},
-		{s.Not, keywordNot},
-		{s.If, keywordIf},
-		{s.Then, keywordThen},
-		{s.Else, keywordElse},
-		{s.Contains, keywordContains},
-		{s.PropertyNames, keywordPropertyNames},
-		{s.UnevaluatedProperties, keywordUnevaluatedProperties},
-		{s.UnevaluatedItems, keywordUnevaluatedItems},
-		{s.ContentSchema, keywordContentSchema},
+		{s.Items, KeywordItems},
+		{s.AdditionalProperties, KeywordAdditionalProperties},
+		{s.AdditionalItems, KeywordAdditionalItems},
+		{s.Not, KeywordNot},
+		{s.If, KeywordIf},
+		{s.Then, KeywordThen},
+		{s.Else, KeywordElse},
+		{s.Contains, KeywordContains},
+		{s.PropertyNames, KeywordPropertyNames},
+		{s.UnevaluatedProperties, KeywordUnevaluatedProperties},
+		{s.UnevaluatedItems, KeywordUnevaluatedItems},
+		{s.ContentSchema, KeywordContentSchema},
 	} {
 		if entry.s != nil {
 			children = append(children, SubschemaEntry{

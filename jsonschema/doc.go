@@ -541,6 +541,10 @@
 // object property named "1"; the segments can, so source-mapping consumers
 // need not re-parse the pointer and guess. Hand-constructed errors return nil.
 //
+// The keyword names validation reports are exported as Keyword* constants
+// ([KeywordRequired], [KeywordRef], ...), so code branching on
+// [ValidationError.Keyword] needs no raw keyword strings.
+//
 // Built-in format checkers are provided for: date-time, date, time, duration,
 // email, idn-email, hostname, idn-hostname, uri, uri-reference, uri-template,
 // iri, iri-reference, uuid, ipv4, ipv6, json-pointer, relative-json-pointer, and
