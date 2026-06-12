@@ -886,7 +886,7 @@ func (g *generator) buildStructSchema(t reflect.Type) (*Schema, error) {
 
 	for i := range pending {
 		pf := &pending[i]
-		err := g.applyFieldInterpreters(pf.fi, pf.schema, s)
+		err := g.applyFieldInterpreters(t, pf.fi, pf.schema, s)
 		if err != nil {
 			return nil, fmt.Errorf("field %q: %w", pf.fi.jsonName, err)
 		}
@@ -1326,7 +1326,11 @@ func (g *generator) buildFieldSchema(parentType reflect.Type, fi structFieldInfo
 // then wraps a bare $ref with allOf for Draft-07 when siblings were added. It
 // runs after all field schemas are in place so interpreters see the full
 // parent.Properties.
-func (g *generator) applyFieldInterpreters(fi structFieldInfo, fieldSchema, parent *Schema) error {
+func (g *generator) applyFieldInterpreters(
+	parentType reflect.Type,
+	fi structFieldInfo,
+	fieldSchema, parent *Schema,
+) error {
 	fieldType := fi.field.Type
 
 	for _, reg := range g.tagInterpreters {
@@ -1334,6 +1338,7 @@ func (g *generator) applyFieldInterpreters(fi structFieldInfo, fieldSchema, pare
 			fc := FieldContext{
 				Name:        fi.jsonName,
 				Type:        fieldType,
+				Owner:       declaringType(parentType, fi.field),
 				Schema:      fieldSchema,
 				Parent:      parent,
 				StructField: fi.field,

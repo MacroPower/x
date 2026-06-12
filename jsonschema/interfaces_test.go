@@ -210,3 +210,34 @@ func TestTagInterpreterFunc(t *testing.T) {
 		assert.ErrorContains(t, err, `tag interpreter "units"`)
 	})
 }
+
+type ownerEmbedded struct {
+	Inner string `json:"inner" units:"seconds"`
+}
+
+type ownerOuter struct {
+	ownerEmbedded //nolint:unused // Exercised via reflection.
+
+	Outer string `json:"outer" units:"meters"`
+}
+
+func TestTagInterpreterFieldContextOwner(t *testing.T) {
+	t.Parallel()
+
+	owners := map[string]reflect.Type{}
+	interp := jsonschema.TagInterpreterFunc(
+		func(_ context.Context, _ string, field jsonschema.FieldContext) error {
+			owners[field.Name] = field.Owner
+			return nil
+		},
+	)
+
+	_, err := jsonschema.GenerateFor[ownerOuter](t.Context(), jsonschema.WithTagInterpreter("units", interp))
+	require.NoError(t, err)
+
+	// A field declared on the struct itself is owned by that struct; a
+	// promoted field is owned by the embedded type declaring it, matching
+	// the type a DescriptionProvider receives for the same field.
+	assert.Equal(t, reflect.TypeFor[ownerOuter](), owners["outer"])
+	assert.Equal(t, reflect.TypeFor[ownerEmbedded](), owners["inner"])
+}

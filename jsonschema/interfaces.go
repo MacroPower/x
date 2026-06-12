@@ -455,6 +455,11 @@ type FieldContext struct {
 	// Type is the Go reflect.Type of the field. It mirrors StructField.Type,
 	// kept as a direct field for the common case.
 	Type reflect.Type
+	// Owner is the struct type declaring the field. For a field promoted from
+	// an embedded struct it is the embedded type, where the field is declared,
+	// not the outer struct — the type a [DescriptionProvider] receives for the
+	// same field.
+	Owner reflect.Type
 	// Schema is the field's own generated schema, modified in place by the interpreter.
 	Schema *Schema
 	// Parent is the enclosing object schema, so an interpreter can append to its Required list.

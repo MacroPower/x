@@ -247,7 +247,9 @@
 // through the pluggable [TagInterpreter] interface. Interpreters receive the
 // Generate call's context, like the other generation-time hooks, and a
 // [FieldContext] containing the field's schema, parent schema, JSON name, Go
-// type, full [reflect.StructField] (for reading sibling struct tags such
+// type, declaring struct type (the embedded type for a promoted field, the
+// type a [DescriptionProvider] receives for the same field), full
+// [reflect.StructField] (for reading sibling struct tags such
 // as the json tag's options), and the target [Draft] (for emitting
 // draft-appropriate keywords). Each interpreter is registered under the
 // struct tag key it reads; multiple interpreters can be registered and are
