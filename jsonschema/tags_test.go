@@ -44,7 +44,7 @@ type parentInspector struct {
 	snapshots []parentSnapshot
 }
 
-func (p *parentInspector) Interpret(_ context.Context, tag string, field jsonschema.FieldContext) error {
+func (p *parentInspector) Interpret(_ context.Context, field jsonschema.FieldContext) error {
 	count := 0
 	if field.Parent != nil {
 		count = len(field.Parent.Properties)
@@ -409,7 +409,7 @@ type structFieldInspector struct {
 	contexts []jsonschema.FieldContext
 }
 
-func (i *structFieldInspector) Interpret(_ context.Context, _ string, field jsonschema.FieldContext) error {
+func (i *structFieldInspector) Interpret(_ context.Context, field jsonschema.FieldContext) error {
 	i.contexts = append(i.contexts, field)
 
 	return nil

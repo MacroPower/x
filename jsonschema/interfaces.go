@@ -233,25 +233,29 @@ func (c descriptionProviderChain) FieldDescription(ctx context.Context, t reflec
 // reads, following [net/http.Handle]'s name-at-registration shape, so one
 // implementation can serve several keys.
 type TagInterpreter interface {
-	// Interpret reads the tag value and the field context, then modifies
-	// the schema in place. It is called during field-level processing, after
-	// the type schema, comments, and jsonschema struct tag have been applied.
-	// The FieldContext provides access to both the field's own schema and the
-	// parent object schema, enabling constraints like "required" that modify
-	// the parent. The context follows the [TypeSchemaResolver.SchemaForType]
-	// contract: it comes from the Generate call in effect, and an
-	// interpreter that performs no cancellable work can ignore it.
-	Interpret(ctx context.Context, tag string, field FieldContext) error
+	// Interpret reads the tag value ([FieldContext.TagValue]) and the rest of
+	// the field context, then modifies the schema in place. It is called
+	// during field-level processing, after the type schema, comments, and
+	// jsonschema struct tag have been applied. The FieldContext provides
+	// access to both the field's own schema and the parent object schema,
+	// enabling constraints like "required" that modify the parent, and
+	// carries the struct tag key the call runs under ([FieldContext.TagKey]),
+	// so an implementation serving several keys can tell them apart, the way
+	// an [net/http.Handler] reads the request path. The context follows the
+	// [TypeSchemaResolver.SchemaForType] contract: it comes from the Generate
+	// call in effect, and an interpreter that performs no cancellable work
+	// can ignore it.
+	Interpret(ctx context.Context, field FieldContext) error
 }
 
 // TagInterpreterFunc adapts a bare interpreting function to a
 // [TagInterpreter], following [net/http.HandlerFunc], so a one-off
 // interpreter needs no named type.
-type TagInterpreterFunc func(ctx context.Context, tag string, field FieldContext) error
+type TagInterpreterFunc func(ctx context.Context, field FieldContext) error
 
 // Interpret calls f.
-func (f TagInterpreterFunc) Interpret(ctx context.Context, tag string, field FieldContext) error {
-	return f(ctx, tag, field)
+func (f TagInterpreterFunc) Interpret(ctx context.Context, field FieldContext) error {
+	return f(ctx, field)
 }
 
 // FormatValidator checks string instances against one format during
@@ -466,6 +470,15 @@ type FieldContext struct {
 	Parent *Schema
 	// Name is the JSON property name for the field.
 	Name string
+	// TagKey is the struct tag key the interpreter was registered under and
+	// the field carries (e.g. "validate"), so an implementation serving
+	// several keys can tell which one fired. It is set only for
+	// [TagInterpreter] calls.
+	TagKey string
+	// TagValue is the field's value for TagKey, the input an interpreter
+	// translates into schema constraints. It is set only for [TagInterpreter]
+	// calls.
+	TagValue string
 	// StructField is the full reflect.StructField, so an interpreter can read
 	// other struct tags (for example the json tag's omitempty) or the field's
 	// Go name and index.

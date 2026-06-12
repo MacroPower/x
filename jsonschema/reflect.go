@@ -1343,9 +1343,11 @@ func (g *generator) applyFieldInterpreters(
 				Parent:      parent,
 				StructField: fi.field,
 				Draft:       g.draft,
+				TagKey:      reg.key,
+				TagValue:    tag,
 			}
 
-			err := reg.interp.Interpret(g.ctx, tag, fc)
+			err := reg.interp.Interpret(g.ctx, fc)
 			if err != nil {
 				return fmt.Errorf("tag interpreter %q: %w", reg.key, err)
 			}

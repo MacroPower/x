@@ -2878,7 +2878,7 @@ func TestWithTagInterpreterNilDoesNotPanic(t *testing.T) {
 		_, _ = jsonschema.GenerateFor[Simple](t.Context(),
 			jsonschema.WithTagInterpreter("inspect", nil),
 			jsonschema.WithTagInterpreter("", jsonschema.TagInterpreterFunc(
-				func(context.Context, string, jsonschema.FieldContext) error { return nil })))
+				func(context.Context, jsonschema.FieldContext) error { return nil })))
 	}, "WithTagInterpreter with a nil interpreter or empty key should not panic")
 }
 

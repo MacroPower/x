@@ -691,11 +691,12 @@ func TestApplyDiveErrorsWhenItemsNil(t *testing.T) {
 	}
 
 	interp := validate.NewInterpreter()
-	err := interp.Interpret(t.Context(), "dive,min=1", jsonschema.FieldContext{
-		Type:   reflect.TypeFor[[]string](),
-		Schema: s.Properties["items"],
-		Parent: s,
-		Name:   "items",
+	err := interp.Interpret(t.Context(), jsonschema.FieldContext{
+		Type:     reflect.TypeFor[[]string](),
+		Schema:   s.Properties["items"],
+		Parent:   s,
+		Name:     "items",
+		TagValue: "dive,min=1",
 	})
 
 	require.Error(t, err,
@@ -1228,12 +1229,12 @@ func TestCollectionGtMaxIntDoesNotWrap(t *testing.T) {
 			schema := &jsonschema.Schema{}
 			parent := &jsonschema.Schema{}
 			interp := validate.NewInterpreter()
-			tag := "gt=" + strconv.Itoa(math.MaxInt)
-			err := interp.Interpret(t.Context(), tag, jsonschema.FieldContext{
-				Type:   tc.fieldType,
-				Schema: schema,
-				Parent: parent,
-				Name:   "field",
+			err := interp.Interpret(t.Context(), jsonschema.FieldContext{
+				Type:     tc.fieldType,
+				Schema:   schema,
+				Parent:   parent,
+				Name:     "field",
+				TagValue: "gt=" + strconv.Itoa(math.MaxInt),
 			})
 			require.NoError(t, err)
 
@@ -1268,12 +1269,12 @@ func TestCollectionLtMinIntDoesNotWrap(t *testing.T) {
 			schema := &jsonschema.Schema{}
 			parent := &jsonschema.Schema{}
 			interp := validate.NewInterpreter()
-			tag := "lt=" + strconv.Itoa(math.MinInt)
-			err := interp.Interpret(t.Context(), tag, jsonschema.FieldContext{
-				Type:   tc.fieldType,
-				Schema: schema,
-				Parent: parent,
-				Name:   "field",
+			err := interp.Interpret(t.Context(), jsonschema.FieldContext{
+				Type:     tc.fieldType,
+				Schema:   schema,
+				Parent:   parent,
+				Name:     "field",
+				TagValue: "lt=" + strconv.Itoa(math.MinInt),
 			})
 			require.NoError(t, err)
 
@@ -1331,11 +1332,12 @@ func TestValidateInterpreter_ParamEscapes(t *testing.T) {
 			parent := &jsonschema.Schema{Type: "object"}
 
 			interp := validate.NewInterpreter()
-			err := interp.Interpret(t.Context(), tc.tag, jsonschema.FieldContext{
-				Type:   reflect.TypeFor[string](),
-				Schema: schema,
-				Parent: parent,
-				Name:   "value",
+			err := interp.Interpret(t.Context(), jsonschema.FieldContext{
+				Type:     reflect.TypeFor[string](),
+				Schema:   schema,
+				Parent:   parent,
+				Name:     "value",
+				TagValue: tc.tag,
 			})
 			require.NoError(t, err)
 

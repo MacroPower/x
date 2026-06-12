@@ -186,15 +186,15 @@ func TestTagInterpreterFunc(t *testing.T) {
 		t.Parallel()
 
 		interp := jsonschema.TagInterpreterFunc(
-			func(_ context.Context, tag string, field jsonschema.FieldContext) error {
-				field.Schema.Description = "in " + tag
+			func(_ context.Context, field jsonschema.FieldContext) error {
+				field.Schema.Description = "in " + field.TagValue + " via " + field.TagKey
 				return nil
 			},
 		)
 
 		s, err := jsonschema.GenerateFor[doc](t.Context(), jsonschema.WithTagInterpreter("units", interp))
 		require.NoError(t, err)
-		assert.Equal(t, "in meters", s.Properties["size"].Description)
+		assert.Equal(t, "in meters via units", s.Properties["size"].Description)
 	})
 
 	t.Run("propagates errors", func(t *testing.T) {
@@ -202,7 +202,7 @@ func TestTagInterpreterFunc(t *testing.T) {
 
 		errBad := errors.New("bad tag")
 		interp := jsonschema.TagInterpreterFunc(
-			func(context.Context, string, jsonschema.FieldContext) error { return errBad },
+			func(context.Context, jsonschema.FieldContext) error { return errBad },
 		)
 
 		_, err := jsonschema.GenerateFor[doc](t.Context(), jsonschema.WithTagInterpreter("units", interp))
@@ -226,7 +226,7 @@ func TestTagInterpreterFieldContextOwner(t *testing.T) {
 
 	owners := map[string]reflect.Type{}
 	interp := jsonschema.TagInterpreterFunc(
-		func(_ context.Context, _ string, field jsonschema.FieldContext) error {
+		func(_ context.Context, field jsonschema.FieldContext) error {
 			owners[field.Name] = field.Owner
 			return nil
 		},
