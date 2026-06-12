@@ -249,6 +249,11 @@ func WithNullable(allowed bool) GenerateOption {
 // default set via struct tags. Keys omitted by omitempty or omitzero leave
 // Default unset, so presence follows the json tags exactly.
 //
+// A nil instance restores the default, where no defaults are seeded,
+// following the package's nil convention. A typed nil pointer is a value,
+// not a reset: it marshals to JSON null rather than to an object, so it
+// returns the error below.
+//
 // Generate returns an error wrapping [ErrInvalidDefaultsInstance] when the
 // pointer-dereferenced dynamic type of instance is not the
 // pointer-dereferenced generated type, or when the instance does not marshal
@@ -264,7 +269,7 @@ func WithNullable(allowed bool) GenerateOption {
 func WithDefaultsFrom(instance any) GenerateOption {
 	return generateOptionFunc(func(g *generator) {
 		g.defaultsFrom = instance
-		g.defaultsFromSet = true
+		g.defaultsFromSet = instance != nil
 	})
 }
 

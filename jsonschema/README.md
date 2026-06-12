@@ -202,7 +202,10 @@ property's `default`, overwriting any default set via struct tags. Keys the
 follows the tags exactly, and nested struct, slice, and map values become
 whole-value defaults on their top-level property. An instance whose
 pointer-dereferenced type is not the generated type, or that does not marshal
-to a JSON object, returns an error wrapping `ErrInvalidDefaultsInstance`. A
+to a JSON object, returns an error wrapping `ErrInvalidDefaultsInstance`; a
+nil instance instead restores the default, where no defaults are seeded (a
+typed nil pointer is a value, not a reset — it marshals to JSON null and fails
+as a non-object instance). A
 pointer root's nullable `anyOf` wrapper is resolved to its value branch first,
 so the defaults reach the object schema (or its `$defs` entry) inside. When a
 self-referential root stays in `$defs`, the defaults apply to that definition,

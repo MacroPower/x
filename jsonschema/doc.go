@@ -122,7 +122,9 @@
 // Across every entry point, an option given a nil interface or pointer value
 // restores the default behavior: [WithNamer] the built-in namer,
 // [WithDescriptionProvider] no descriptions, [WithRefResolver] local-only ref
-// resolution, [WithRefFallback] fatal expansion failures, and
+// resolution, [WithRefFallback] fatal expansion failures, [WithDefaultsFrom]
+// no seeded defaults (a typed nil pointer is a value, not a reset: it
+// marshals to JSON null and fails as a non-object instance), and
 // [WithTypeSchema] with a nil schema the type's default resolution
 // (unregistering earlier exact registrations for the type). The exception is
 // additive registrations that a nil cannot identify anything to remove from

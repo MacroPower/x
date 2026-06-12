@@ -170,13 +170,16 @@ func TestWithDefaultsFrom(t *testing.T) {
 		require.ErrorIs(t, err, jsonschema.ErrInvalidDefaultsInstance)
 	})
 
-	t.Run("nil instance", func(t *testing.T) {
+	t.Run("nil instance restores the default", func(t *testing.T) {
 		t.Parallel()
 
-		_, err := jsonschema.GenerateFor[defaultsConfig](t.Context(),
+		s, err := jsonschema.GenerateFor[defaultsConfig](t.Context(),
+			jsonschema.WithDefaultsFrom(defaultsConfig{Host: "localhost"}),
 			jsonschema.WithDefaultsFrom(nil),
 		)
-		require.ErrorIs(t, err, jsonschema.ErrInvalidDefaultsInstance)
+		require.NoError(t, err)
+		assert.Nil(t, s.Properties["host"].Default,
+			"a nil instance clears an earlier registration, seeding no defaults")
 	})
 
 	t.Run("non-object marshal", func(t *testing.T) {
