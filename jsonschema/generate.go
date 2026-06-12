@@ -42,12 +42,47 @@ func WithComments(enabled bool) GenerateOption {
 	return generateOptionFunc(func(g *generator) { g.comments = enabled })
 }
 
-// WithTypeSchema overrides the generated schema for a specific Go type.
-// Takes the highest priority in the type resolution chain, overriding even
-// [JSONSchemaProvider]. Useful for mapping third-party types or overriding
-// types whose [JSONSchemaProvider] schema is undesirable.
-// If called multiple times for the same type, the last registration wins.
-// A nil s is ignored, leaving any earlier registration for t in place.
+// WithTypeResolver registers a [TypeSchemaResolver]. Resolvers occupy the
+// highest-priority step of the type resolution chain, overriding even
+// [JSONSchemaProvider], and are consulted newest registration first, so a
+// later registration takes precedence over an earlier one for the types both
+// handle ([WithTypeSchema] registers an exact-match resolver into the same
+// chain). A nil r is ignored.
+//
+// A schema the resolver supplies is copied before use with the same
+// discipline [WithTypeSchema] documents, and [JSONSchemaExtender] is not
+// called for types it resolves.
+func WithTypeResolver(r TypeSchemaResolver) GenerateOption {
+	return generateOptionFunc(func(g *generator) {
+		if r != nil {
+			g.typeResolvers = append(g.typeResolvers, r)
+		}
+	})
+}
+
+// exactTypeResolver is the [TypeSchemaResolver] registered by
+// [WithTypeSchema]: it offers s for exactly the type t.
+type exactTypeResolver struct {
+	t reflect.Type
+	s *Schema
+}
+
+func (r exactTypeResolver) SchemaForType(t reflect.Type) (*Schema, bool) {
+	if t != r.t {
+		return nil, false
+	}
+
+	return r.s, true
+}
+
+// WithTypeSchema overrides the generated schema for a specific Go type: it
+// registers an exact-match [TypeSchemaResolver], so it shares the
+// highest-priority step of the type resolution chain with [WithTypeResolver],
+// overriding even [JSONSchemaProvider]. Useful for mapping third-party types
+// or overriding types whose [JSONSchemaProvider] schema is undesirable.
+// Resolvers are consulted newest registration first, so if called multiple
+// times for the same type, the last registration wins. A nil s is ignored,
+// leaving any earlier registration for t in place.
 //
 // The override is copied before use: its sub-schemas are deep-copied and its
 // Enum, Const, Default, and Extra containers are cloned, so a tag interpreter
@@ -59,7 +94,7 @@ func WithComments(enabled bool) GenerateOption {
 func WithTypeSchema(t reflect.Type, s *Schema) GenerateOption {
 	return generateOptionFunc(func(g *generator) {
 		if s != nil {
-			g.typeSchemas[t] = s
+			g.typeResolvers = append(g.typeResolvers, exactTypeResolver{t: t, s: s})
 		}
 	})
 }

@@ -61,6 +61,9 @@
 //   - [WithComments] enables Go doc comment extraction as description fields.
 //   - [WithTypeSchema] overrides the schema for a specific Go type;
 //     [WithTypeSchemaFor] is its generic form for statically known types.
+//   - [WithTypeResolver] registers a [TypeSchemaResolver] that supplies
+//     schemas for whole families of types by predicate, sharing the
+//     highest-priority resolution step with [WithTypeSchema].
 //   - [WithNamer] sets a custom definition naming function (a [Namer]).
 //   - [WithDefinitions] controls $defs/$ref extraction (default: true).
 //   - [WithAdditionalProperties] controls whether extra keys are allowed on
@@ -146,7 +149,9 @@
 //
 // For each type, the schema is determined by the first matching step:
 //
-//  1. [WithTypeSchema] override (highest priority).
+//  1. Registered [TypeSchemaResolver] values ([WithTypeResolver], and the
+//     exact-match resolvers [WithTypeSchema] registers), consulted newest
+//     registration first (highest priority).
 //  2. [JSONSchemaProvider] interface.
 //  3. Built-in overrides ([]byte, [time.Time], [encoding/json.Number], etc.).
 //  4. Marshaler methods promoted from an embedded field: a promoted
@@ -174,8 +179,9 @@
 // reflection-generated schema after it is built. If both are implemented, only
 // [JSONSchemaProvider] is used. Both value and pointer receivers are checked.
 //
-// When [WithTypeSchema] or [JSONSchemaProvider] provides the schema,
-// [JSONSchemaExtender] is not called.
+// When a registered resolver ([WithTypeResolver] or [WithTypeSchema]) or
+// [JSONSchemaProvider] provides the schema, [JSONSchemaExtender] is not
+// called.
 //
 // # Tag Interpretation
 //
@@ -227,10 +233,10 @@
 // MarshalText promoted from an embedded field is not reflected field by field
 // at all — the promoted marshaler serializes the whole outer value (see the
 // resolution priority above). Embedded types intercepted by earlier priority
-// chain steps ([WithTypeSchema] or [JSONSchemaProvider]) are composed via
-// allOf rather than having their fields promoted; an embed reached through a
-// pointer composes as anyOf[schema, {}] instead, since a nil pointer
-// contributes nothing to the marshaled object. A [WithTypeSchema] or
+// chain steps (a registered [TypeSchemaResolver] or [JSONSchemaProvider]) are
+// composed via allOf rather than having their fields promoted; an embed
+// reached through a pointer composes as anyOf[schema, {}] instead, since a
+// nil pointer contributes nothing to the marshaled object. A resolver or
 // [JSONSchemaProvider] schema used for such an embedded type must leave the
 // object open (no additionalProperties: false): allOf evaluates each branch
 // against the whole object, so a closed branch rejects the parent's sibling

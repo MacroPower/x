@@ -33,7 +33,7 @@ var (
 // generator holds the state for a single schema generation run.
 type generator struct {
 	typeToDefName   map[reflect.Type]string
-	typeSchemas     map[reflect.Type]*Schema
+	typeResolvers   []TypeSchemaResolver
 	namer           Namer
 	defs            map[string]*Schema
 	defsNameToTypes map[string][]reflect.Type
@@ -64,7 +64,6 @@ type refRecord struct {
 func newGenerator(opts []GenerateOption) *generator {
 	g := &generator{
 		draft:       Draft2020,
-		typeSchemas: map[reflect.Type]*Schema{},
 		namer:       defaultNamer,
 		definitions: true,
 		nullable:    true,
@@ -256,8 +255,8 @@ func (g *generator) schemaForType(t reflect.Type, nullable bool) (*Schema, error
 		t = t.Elem()
 	}
 
-	// 1. WithTypeSchema override.
-	if s, ok := g.typeSchemas[t]; ok {
+	// 1. Type resolver override (WithTypeResolver / WithTypeSchema).
+	if s, ok := g.resolveTypeSchema(t); ok {
 		return g.handleOverrideType(t, s, nullable)
 	}
 
@@ -367,7 +366,24 @@ func isRecursiveContainerKind(k reflect.Kind) bool {
 	}
 }
 
-// handleOverrideType processes a type with a WithTypeSchema override.
+// resolveTypeSchema consults the registered type resolvers for t, newest
+// registration first, and returns the first schema offered. The order makes a
+// later registration win for the types two resolvers both handle, which for
+// the exact-match resolvers WithTypeSchema registers preserves its
+// last-registration-wins behavior.
+func (g *generator) resolveTypeSchema(t reflect.Type) (*Schema, bool) {
+	for _, v := range slices.Backward(g.typeResolvers) {
+		if s, ok := v.SchemaForType(t); ok {
+			return s, true
+		}
+	}
+
+	return nil, false
+}
+
+// handleOverrideType processes a type resolved by a registered
+// TypeSchemaResolver (WithTypeResolver or WithTypeSchema). A nil override
+// marks the type unrestricted, mirroring a JSONSchemaProvider returning nil.
 //
 // The override is copied with the upstream shallow CloneSchemas, not the JSON
 // round-trip cloneSchema used for remote refs: CloneSchemas preserves the
@@ -380,6 +396,10 @@ func isRecursiveContainerKind(k reflect.Kind) bool {
 // in place (appending to Enum, reassigning Const, writing into Extra) cannot
 // reach back into an override reused across Generate calls.
 func (g *generator) handleOverrideType(t reflect.Type, override *Schema, nullable bool) (*Schema, error) {
+	if override == nil {
+		override = &Schema{} // unrestricted
+	}
+
 	s := override.CloneSchemas()
 	cloneOverrideExtras(s)
 
@@ -1177,8 +1197,8 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 // needsAllOfComposition reports whether an embedded struct type should be
 // composed via allOf rather than having its fields promoted.
 func (g *generator) needsAllOfComposition(t reflect.Type) bool {
-	// Check WithTypeSchema override.
-	if _, ok := g.typeSchemas[t]; ok {
+	// Check type resolver overrides (WithTypeResolver / WithTypeSchema).
+	if _, ok := g.resolveTypeSchema(t); ok {
 		return true
 	}
 

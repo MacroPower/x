@@ -170,6 +170,7 @@ Unsupported types (`func`, `chan`, `complex`, `unsafe.Pointer`) return
 | `WithComments(bool)`             | Extract Go doc comments as `description` (requires source files).             |
 | `WithTypeSchema(t, s)`           | Override the schema for a specific Go type (highest priority).                |
 | `WithTypeSchemaFor[T](s)`        | `WithTypeSchema` for a statically known type, without `reflect.TypeFor`.      |
+| `WithTypeResolver(r)`            | Register a `TypeSchemaResolver` that overrides types by predicate.            |
 | `WithNamer(fn)`                  | Custom function for naming `$defs` entries.                                   |
 | `WithDefinitions(bool)`          | Extract named types into `$defs`/`$ref` (default `true`).                     |
 | `WithAdditionalProperties(bool)` | Allow extra object keys (default `false`, disallowing them).                  |
@@ -243,7 +244,9 @@ func (Metadata) JSONSchemaExtend(s *jsonschema.Schema) {
 
 For each type, the schema is determined by the first matching step:
 
-1. `WithTypeSchema` override (highest priority).
+1. Registered `TypeSchemaResolver` values (`WithTypeResolver`, and the
+   exact-match resolvers `WithTypeSchema` registers), consulted newest
+   registration first (highest priority).
 2. `JSONSchemaProvider`.
 3. Built-in overrides (`[]byte`, `time.Time`, `encoding/json.Number`, ...).
 4. Marshaler methods promoted from an embedded field: a promoted
@@ -258,9 +261,34 @@ A direct `encoding/json.Marshaler` implementation is not consulted: it falls
 through to kind-based reflection, since MarshalJSON can return any JSON type.
 Use `WithTypeSchema` or `JSONSchemaProvider` to describe its real shape.
 
+A `TypeSchemaResolver` registered with `WithTypeResolver` supplies schemas for
+whole families of types by predicate — every type implementing a third-party
+interface, every type in a package — where `WithTypeSchema` names one exact
+`reflect.Type` at a time:
+
+```go
+// Every type implementing fmt.Stringer serializes as a string.
+stringers := jsonschema.TypeResolverFunc(
+	func(t reflect.Type) (*jsonschema.Schema, bool) {
+		if !t.Implements(reflect.TypeFor[fmt.Stringer]()) {
+			return nil, false
+		}
+		return &jsonschema.Schema{Type: "string"}, true
+	},
+)
+
+schema, err := jsonschema.GenerateFor[Config](jsonschema.WithTypeResolver(stringers))
+```
+
+Resolvers returning `ok == false` pass the type to the next resolver and then
+to the rest of the chain; returning `ok == true` with a nil schema marks the
+type unrestricted (`{}`), mirroring `JSONSchemaProvider`. A resolver may be
+consulted several times for the same type within one run, so it must be
+deterministic.
+
 If a type implements both customization interfaces, only `JSONSchemaProvider` is
-used. When `WithTypeSchema` or `JSONSchemaProvider` supplies the schema,
-`JSONSchemaExtender` is not called.
+used. When a registered resolver (`WithTypeResolver` or `WithTypeSchema`) or
+`JSONSchemaProvider` supplies the schema, `JSONSchemaExtender` is not called.
 
 ### The `jsonschema` struct tag
 
@@ -345,7 +373,7 @@ without a `json` tag have their fields promoted; embedded types intercepted by
 an earlier resolution step are composed via `allOf` (wrapped as
 `anyOf[schema, {}]` for a pointer embed, since a nil pointer contributes
 nothing to the marshaled object). A provider or
-`WithTypeSchema` override used for such an embedded type must leave the object
+resolver schema used for such an embedded type must leave the object
 open (no `additionalProperties: false`), since `allOf` evaluates each branch
 against the whole object: a closed branch rejects the parent's sibling
 properties and the generated schema then rejects the struct's own marshaled

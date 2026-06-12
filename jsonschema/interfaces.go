@@ -20,6 +20,34 @@ type JSONSchemaExtender interface {
 	JSONSchemaExtend(schema *Schema)
 }
 
+// TypeSchemaResolver supplies schemas for Go types it recognizes during
+// generation. Resolvers are registered with [WithTypeResolver] and consulted
+// at the highest-priority step of the type resolution chain, before
+// [JSONSchemaProvider] and the built-in overrides, so a resolver can map
+// whole families of types — every type implementing some third-party
+// interface, every type in a package — where [WithTypeSchema] names one
+// exact [reflect.Type] at a time.
+//
+// SchemaForType returns ok false when the resolver does not handle t,
+// passing resolution to the next resolver and then to the rest of the
+// chain. Returning ok true with a nil schema marks the type unrestricted
+// ({}), mirroring [JSONSchemaProvider]. A returned schema is copied before
+// use with the same discipline [WithTypeSchema] documents, so one schema
+// value may be shared across types, calls, and goroutines.
+//
+// A resolver may be consulted several times for the same type within one
+// generation run, so SchemaForType must be deterministic.
+type TypeSchemaResolver interface {
+	SchemaForType(t reflect.Type) (s *Schema, ok bool)
+}
+
+// TypeResolverFunc adapts a bare resolution function to a
+// [TypeSchemaResolver], following [net/http.HandlerFunc].
+type TypeResolverFunc func(t reflect.Type) (*Schema, bool)
+
+// SchemaForType calls f.
+func (f TypeResolverFunc) SchemaForType(t reflect.Type) (*Schema, bool) { return f(t) }
+
 // TagInterpreter translates struct field tags into JSON Schema constraints.
 type TagInterpreter interface {
 	// TagKey returns the struct tag key this interpreter reads (e.g., "validate").
