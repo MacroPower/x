@@ -878,6 +878,12 @@ err := jsonschema.Walk(s, func(loc jsonschema.Location, s *jsonschema.Schema) er
 
 	return nil
 })
+
+// Schemas is the iterator form of Walk for read-only traversals: the same
+// locations and schemas in the same pre-order, to a range loop.
+for loc, sub := range jsonschema.Schemas(s) {
+	fmt.Println(loc.Pointer, sub.Type)
+}
 ```
 
 `SubschemaEntries` is the package's single source of truth for which `Schema`
@@ -918,6 +924,12 @@ parameter, following `io/fs.WalkDir`. The segments slice must not be
 mutated. A schema reachable through several paths is visited with the first
 path the traversal encounters; map-held children walk in sorted-key order,
 so that path is deterministic.
+
+`Schemas` yields what `Walk` visits — same pre-order, same locations, same
+cycle guard — as an `iter.Seq2[Location, *Schema]`, so a read-only traversal
+ranges instead of threading state through a callback, and breaking out of
+the loop stops the iteration. Mutating traversals and `SkipChildren` pruning
+stay with `Walk`.
 
 Three predicates answer common shape questions:
 

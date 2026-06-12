@@ -2,19 +2,27 @@ package jsonschema
 
 import (
 	"errors"
+	"iter"
 	"maps"
 	"slices"
 	"strconv"
 )
 
-// SkipChildren is returned by a [Walk] function to prune the walk at the
-// current schema: its sub-schemas are not visited, the walk continues with
-// the schema's siblings, and Walk does not treat it as an error. Returned
-// from the root, Walk visits only the root. It follows the [io/fs.SkipDir]
-// convention.
-//
-//nolint:errname,staticcheck // A control-flow sentinel, not a failure; named for its meaning, like io/fs.SkipDir.
-var SkipChildren = errors.New("skip this schema's children")
+var (
+	// SkipChildren is returned by a [Walk] function to prune the walk at the
+	// current schema: its sub-schemas are not visited, the walk continues
+	// with the schema's siblings, and Walk does not treat it as an error.
+	// Returned from the root, Walk visits only the root. It follows the
+	// [io/fs.SkipDir] convention.
+	//
+	//nolint:errname,staticcheck // A control-flow sentinel, not a failure; named for its meaning, like io/fs.SkipDir.
+	SkipChildren = errors.New("skip this schema's children")
+
+	// The internal control-flow error [Schemas] uses to stop the underlying
+	// walk when the range loop breaks. It never escapes: the iterator
+	// discards the walk's return value.
+	errStopIteration = errors.New("stop iteration")
+)
 
 // Location is the position of a schema within a containing schema document,
 // in the two synchronized forms the package uses everywhere (mirroring how
@@ -146,13 +154,21 @@ func SubschemaEntries(s *Schema) []SubschemaEntry {
 	return children
 }
 
+// WalkFunc is the function [Walk] calls for each visited schema, following
+// [io/fs.WalkDirFunc]. It receives the schema's [Location] within the walk's
+// root and the schema itself. Returning [SkipChildren] prunes the walk at
+// that schema; any other non-nil error stops the walk and becomes Walk's
+// return value.
+type WalkFunc func(loc Location, s *Schema) error
+
 // Walk calls fn for s and every schema transitively reachable through
 // [SubschemaEntries], pre-order: fn runs on a schema before its children are
 // gathered, so fn may replace or mutate sub-schema fields and the walk
 // follows the updated children. Each distinct schema pointer is visited
 // once, so aliased or cyclic graphs terminate. Walk stops at and returns
 // the first error from fn, except [SkipChildren], which prunes the walk at
-// that schema and continues. A nil s is a no-op.
+// that schema and continues. A nil s is a no-op. [Schemas] is the iterator
+// form, for read-only traversals that prefer a range loop.
 //
 // Fn receives each visited schema's [Location] within s (the zero Location
 // for the root itself), built by appending each descended child's
@@ -164,8 +180,37 @@ func SubschemaEntries(s *Schema) []SubschemaEntry {
 // A schema reachable through several paths is visited with the first path
 // the traversal encounters; [SubschemaEntries] orders map-held children by
 // sorted key, so that path is deterministic.
-func Walk(s *Schema, fn func(loc Location, s *Schema) error) error {
+func Walk(s *Schema, fn WalkFunc) error {
 	return walkPaths(s, Location{}, fn, map[*Schema]bool{})
+}
+
+// Schemas returns an iterator over s and every schema transitively reachable
+// through [SubschemaEntries], yielding each visited schema's [Location] and
+// the schema itself in [Walk]'s pre-order: the iterator form of Walk, so a
+// read-only traversal ranges instead of threading state through a callback.
+// The traversal contract is Walk's — each distinct schema pointer is yielded
+// once, cyclic graphs terminate, map-held children come in sorted-key order
+// — and breaking out of the range loop simply stops the iteration. A nil s
+// yields nothing.
+//
+//	for loc, sub := range jsonschema.Schemas(root) {
+//		fmt.Println(loc.Pointer, sub.Type)
+//	}
+//
+// Walk remains the form for traversals that mutate sub-schema fields and
+// need the walk to follow the updated children, or that prune with
+// [SkipChildren].
+func Schemas(s *Schema) iter.Seq2[Location, *Schema] {
+	return func(yield func(Location, *Schema) bool) {
+		//nolint:errcheck // The only possible error is errStopIteration, raised to stop the walk on break.
+		_ = walkPaths(s, Location{}, func(loc Location, sub *Schema) error {
+			if !yield(loc, sub) {
+				return errStopIteration
+			}
+
+			return nil
+		}, map[*Schema]bool{})
+	}
 }
 
 // walkPaths implements [Walk], threading the visited set through the
@@ -175,7 +220,7 @@ func Walk(s *Schema, fn func(loc Location, s *Schema) error) error {
 func walkPaths(
 	s *Schema,
 	loc Location,
-	fn func(Location, *Schema) error,
+	fn WalkFunc,
 	visited map[*Schema]bool,
 ) error {
 	if s == nil || visited[s] {

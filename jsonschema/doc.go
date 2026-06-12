@@ -624,7 +624,7 @@
 //     reference token, mirroring [ValidationError.InstanceSegments]), so
 //     consumers need not re-parse the pointer string. It is the package's
 //     single source of truth for which Schema fields hold sub-schemas.
-//   - [Walk] calls a function for a schema and every schema transitively
+//   - [Walk] calls a [WalkFunc] for a schema and every schema transitively
 //     reachable through [SubschemaEntries], pre-order: the function runs on a
 //     schema before its children are gathered, so it may replace or mutate
 //     sub-schema fields and the walk follows the updated children. Each
@@ -636,6 +636,10 @@
 //     [Segment] slice in one value, built by appending each descended
 //     child's [SubschemaEntry] location; a traversal with no use for the
 //     location ignores the parameter, following [io/fs.WalkDir].
+//   - [Schemas] is the iterator form of Walk, yielding the same locations
+//     and schemas in the same pre-order to a range loop, for read-only
+//     traversals; breaking out of the loop stops the iteration. Mutating
+//     traversals and [SkipChildren] pruning stay with Walk.
 //   - [CheckTypeNames] verifies that every type keyword reachable from a
 //     schema names one of the seven JSON Schema type names, returning nil or
 //     an error wrapping [ErrInvalidType] that includes the schema path of the

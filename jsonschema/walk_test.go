@@ -528,6 +528,85 @@ func TestWalk(t *testing.T) {
 	})
 }
 
+// TestSchemas pins the iterator form of Walk: the same pre-order visit over
+// the transitive closure with the same locations, cycle termination, and an
+// early break that simply stops the iteration.
+func TestSchemas(t *testing.T) {
+	t.Parallel()
+
+	t.Run("matches Walk's visit order and locations", func(t *testing.T) {
+		t.Parallel()
+
+		leaf := &jsonschema.Schema{Type: "string"}
+		mid := &jsonschema.Schema{Items: leaf}
+		root := &jsonschema.Schema{
+			Properties: map[string]*jsonschema.Schema{"p": mid},
+		}
+
+		var (
+			walkedSchemas, rangedSchemas []*jsonschema.Schema
+			walkedPaths, rangedPaths     []string
+		)
+
+		err := jsonschema.Walk(root, func(loc jsonschema.Location, s *jsonschema.Schema) error {
+			walkedSchemas = append(walkedSchemas, s)
+			walkedPaths = append(walkedPaths, loc.Pointer)
+
+			return nil
+		})
+		require.NoError(t, err)
+
+		for loc, s := range jsonschema.Schemas(root) {
+			rangedSchemas = append(rangedSchemas, s)
+			rangedPaths = append(rangedPaths, loc.Pointer)
+		}
+
+		assert.Equal(t, walkedSchemas, rangedSchemas)
+		assert.Equal(t, walkedPaths, rangedPaths)
+	})
+
+	t.Run("break stops the iteration", func(t *testing.T) {
+		t.Parallel()
+
+		first := &jsonschema.Schema{Type: "string"}
+		second := &jsonschema.Schema{Type: "integer"}
+		root := &jsonschema.Schema{AllOf: []*jsonschema.Schema{first, second}}
+
+		var visited []*jsonschema.Schema
+
+		for _, s := range jsonschema.Schemas(root) {
+			visited = append(visited, s)
+			if s == first {
+				break
+			}
+		}
+
+		assert.Equal(t, []*jsonschema.Schema{root, first}, visited)
+	})
+
+	t.Run("cyclic graph terminates", func(t *testing.T) {
+		t.Parallel()
+
+		root := &jsonschema.Schema{Type: "object"}
+		root.Properties = map[string]*jsonschema.Schema{"self": root}
+
+		count := 0
+		for range jsonschema.Schemas(root) {
+			count++
+		}
+
+		assert.Equal(t, 1, count)
+	})
+
+	t.Run("nil schema yields nothing", func(t *testing.T) {
+		t.Parallel()
+
+		for range jsonschema.Schemas(nil) {
+			t.Fatal("a nil schema must yield nothing")
+		}
+	})
+}
+
 // TestSubschemaEntriesFieldCoverage is a maintenance guard over
 // [jsonschema.SubschemaEntries], the single source of truth for which Schema
 // fields hold sub-schemas. It enumerates Schema's fields via reflection,
