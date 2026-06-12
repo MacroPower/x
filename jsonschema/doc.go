@@ -733,7 +733,10 @@
 // schema body, $defs, and definitions alike — is replaced by a copy of the
 // schema it targets, producing a single self-contained document for
 // consumers that cannot follow references, such as code generators. The
-// input and any resolver-returned schemas are never mutated.
+// input and any resolver-returned schemas are never mutated. Inline applies
+// its options per call; [NewInliner] applies them once and the returned
+// [Inliner] is reused, completing the reusable trio with [Generator] and
+// [Validator].
 //
 // Fragment-only refs (#/pointer, #anchor) resolve within the enclosing
 // document using the same $id/$anchor registry the validator builds, and

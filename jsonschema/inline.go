@@ -276,25 +276,77 @@ func normalizeBaseURI(base string) string {
 // The context is passed to the [RefResolver] (see [WithRefResolver]) with
 // every document fetch, so a resolver that fetches over the network can
 // honor cancellation and deadlines.
+//
+// Inline is one-shot sugar for [NewInliner] plus [Inliner.Inline], applying
+// its options per call; to inline many documents under one option set,
+// build the [Inliner] once and reuse it.
 func Inline(ctx context.Context, s *Schema, opts ...InlineOption) (*Schema, error) {
+	return NewInliner(opts...).Inline(ctx, s)
+}
+
+// Inliner inlines schemas under one fixed option set, completing the
+// reusable trio with [Generator] and [Validator]: [NewInliner] applies the
+// options once and the returned Inliner is reused, so a caller inlining
+// many documents against one resolver configuration neither re-passes nor
+// re-applies the option slice per call.
+//
+// An Inliner is safe for concurrent use by multiple goroutines, provided
+// the configured hooks are: the configuration is only read during inlining,
+// and every run keeps its own state — including its own document fetches,
+// since fetched documents are resolved relative to each input.
+type Inliner struct {
+	proto *inliner
+}
+
+// NewInliner returns an [Inliner] with the given options applied. Nil
+// options are skipped, so an optional option can be passed unconditionally.
+func NewInliner(opts ...InlineOption) *Inliner {
+	proto := &inliner{}
+
+	for _, opt := range opts {
+		if opt != nil {
+			opt.applyInline(proto)
+		}
+	}
+
+	proto.baseURI = normalizeBaseURI(proto.baseURI)
+
+	return &Inliner{proto: proto}
+}
+
+// Inline returns a deep copy of s with every $ref expanded under the
+// Inliner's options. The semantics, including the nil result for a nil s,
+// follow the package-level [Inline], whose documentation is authoritative.
+func (il *Inliner) Inline(ctx context.Context, s *Schema) (*Schema, error) {
 	if s == nil {
 		return nil, nil //nolint:nilnil // A nil schema inlines to nil.
 	}
 
+	// The run copies the prototype's configuration and carries fresh
+	// per-call state, so concurrent runs from one Inliner never share
+	// mutable state.
 	in := &inliner{
-		ctx:      ctx,
-		inflight: map[*Schema]bool{},
-		memo:     map[*Schema]*Schema{},
-		paths:    map[*Schema]string{},
-		docs:     map[*Schema]string{},
+		ctx:           ctx,
+		resolver:      il.proto.resolver,
+		fallback:      il.proto.fallback,
+		draftOverride: il.proto.draftOverride,
+		baseURI:       il.proto.baseURI,
+		retrievalBase: il.proto.retrievalBase,
+		inflight:      map[*Schema]bool{},
+		memo:          map[*Schema]*Schema{},
+		paths:         map[*Schema]string{},
+		docs:          map[*Schema]string{},
 	}
 
-	for _, opt := range opts {
-		opt.applyInline(in)
-	}
+	// The context reaches the resolver through the ctx field set above:
+	// document fetches happen deep inside the expansion walk, which cannot
+	// thread a parameter through the shared resolution machinery.
+	//nolint:contextcheck // See the comment above.
+	return in.run(s)
+}
 
-	in.baseURI = normalizeBaseURI(in.baseURI)
-
+// run inlines s under the receiver's configuration and per-call state.
+func (in *inliner) run(s *Schema) (*Schema, error) {
 	// Two clones of the document: the pristine copy carries the registries
 	// and answers every ref-target resolution, while the working copy
 	// receives the expansions and becomes the result. Both are clones of

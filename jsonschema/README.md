@@ -1005,6 +1005,9 @@ resolve to an error, unless the `StripPrefix` middleware (following
 first so those refs can be served from the fs.
 `Inline`'s context is passed to the resolver with every document fetch, so a
 resolver that fetches over the network can honor cancellation and deadlines.
+`Inline` applies its options per call; `NewInliner` applies them once and
+the returned `Inliner` is reused, completing the reusable trio with
+`Generator` and `Validator`.
 
 `WithRetrievalBase` makes refs resolve against each document's
 retrieval URI instead, treating `$id` as an inert annotation: `$id` neither

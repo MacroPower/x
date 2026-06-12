@@ -1304,3 +1304,55 @@ func TestInlineDeepCopyIndependence(t *testing.T) {
 		})
 	}
 }
+
+// TestInliner pins the reusable form: NewInliner applies the options once,
+// the returned Inliner matches the one-shot Inline for the same input, runs
+// share no state across calls, and a nil schema inlines to nil.
+func TestInliner(t *testing.T) {
+	t.Parallel()
+
+	resolver := jsonschema.SchemaMap{
+		"https://example.com/child.json": {Type: "integer"},
+	}
+	schema := &jsonschema.Schema{
+		Properties: map[string]*jsonschema.Schema{
+			"a": {Ref: "https://example.com/child.json"},
+		},
+	}
+
+	il := jsonschema.NewInliner(jsonschema.WithRefResolver(resolver), nil)
+
+	t.Run("matches the one-shot Inline", func(t *testing.T) {
+		t.Parallel()
+
+		got, err := il.Inline(t.Context(), schema)
+		require.NoError(t, err)
+
+		want, err := jsonschema.Inline(t.Context(), schema, jsonschema.WithRefResolver(resolver))
+		require.NoError(t, err)
+
+		assert.Equal(t, want, got)
+	})
+
+	t.Run("runs share no state", func(t *testing.T) {
+		t.Parallel()
+
+		first, err := il.Inline(t.Context(), schema)
+		require.NoError(t, err)
+
+		second, err := il.Inline(t.Context(), schema)
+		require.NoError(t, err)
+
+		require.Equal(t, first, second)
+		assert.NotSame(t, first.Properties["a"], second.Properties["a"],
+			"each run must produce an independent copy")
+	})
+
+	t.Run("nil schema inlines to nil", func(t *testing.T) {
+		t.Parallel()
+
+		got, err := il.Inline(t.Context(), nil)
+		require.NoError(t, err)
+		assert.Nil(t, got)
+	})
+}
