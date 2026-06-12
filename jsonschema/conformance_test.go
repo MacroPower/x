@@ -202,7 +202,7 @@ func TestGeneratedSchemaConformsToMetaschema(t *testing.T) {
 				t.Run(name, func(t *testing.T) {
 					t.Parallel()
 
-					schema, err := jsonschema.Generate(typ, draft.opt)
+					schema, err := jsonschema.Generate(t.Context(), typ, draft.opt)
 					require.NoError(t, err)
 
 					raw, err := json.Marshal(schema)

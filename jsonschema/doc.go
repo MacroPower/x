@@ -17,15 +17,18 @@
 //
 // The primary API is the generic function [GenerateFor]:
 //
-//	schema, err := jsonschema.GenerateFor[MyType]()
+//	schema, err := jsonschema.GenerateFor[MyType](ctx)
 //
 // A runtime [reflect.Type] variant is also provided for dynamic use cases:
 //
-//	schema, err := jsonschema.Generate(reflect.TypeFor[MyType]())
+//	schema, err := jsonschema.Generate(ctx, reflect.TypeFor[MyType]())
 //
-// [MustGenerateFor] is [GenerateFor] but panics on error, for package-scope
-// variables and init-time generation where for a static type and fixed
-// options generation either always succeeds or always fails.
+// The context is passed to the [CommentProvider] with every comment lookup,
+// so the built-in provider's package loading can honor cancellation and
+// deadlines. [MustGenerateFor] is [GenerateFor] with [context.Background]
+// but panics on error, for package-scope variables and init-time generation
+// where for a static type and fixed options generation either always
+// succeeds or always fails.
 //
 // Both functions accept any Go type as the root, not just structs. For
 // example, [GenerateFor] on string produces {"type": "string"}, and on

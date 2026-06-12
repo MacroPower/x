@@ -112,7 +112,7 @@ func TestWithDraft_InlineOverride(t *testing.T) {
 func TestWithDraft_GenerateUnchanged(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[string](jsonschema.WithDraft(jsonschema.Draft7))
+	s, err := jsonschema.GenerateFor[string](t.Context(), jsonschema.WithDraft(jsonschema.Draft7))
 	require.NoError(t, err)
 
 	assert.Equal(t, "http://json-schema.org/draft-07/schema#", s.Schema)

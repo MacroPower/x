@@ -1,6 +1,7 @@
 package jsonschema
 
 import (
+	"context"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -51,14 +52,14 @@ func baseTypeName(name string) string {
 // not expose source positions. A non-package-scope type (for example one
 // declared inside a function) that shadows a package-level name may therefore
 // receive the package-level type's comment.
-func (ce *GoCommentProvider) TypeComment(t reflect.Type) string {
+func (ce *GoCommentProvider) TypeComment(ctx context.Context, t reflect.Type) string {
 	if t.Name() == "" || t.PkgPath() == "" {
 		return ""
 	}
 
 	name := baseTypeName(t.Name())
 
-	files := ce.sourceFiles(t.PkgPath())
+	files := ce.sourceFiles(ctx, t.PkgPath())
 	for _, f := range files {
 		for _, decl := range f.Decls {
 			gd, ok := decl.(*ast.GenDecl)
@@ -93,14 +94,14 @@ func (ce *GoCommentProvider) TypeComment(t reflect.Type) string {
 // As with TypeComment, matching is by package path and unqualified type name,
 // so a non-package-scope struct that shadows a package-level name may receive
 // the package-level struct's field comments.
-func (ce *GoCommentProvider) FieldComment(structType reflect.Type, fieldName string) string {
+func (ce *GoCommentProvider) FieldComment(ctx context.Context, structType reflect.Type, fieldName string) string {
 	if structType.Name() == "" || structType.PkgPath() == "" {
 		return ""
 	}
 
 	name := baseTypeName(structType.Name())
 
-	files := ce.sourceFiles(structType.PkgPath())
+	files := ce.sourceFiles(ctx, structType.PkgPath())
 	for _, f := range files {
 		for _, decl := range f.Decls {
 			gd, ok := decl.(*ast.GenDecl)
@@ -136,7 +137,7 @@ func (ce *GoCommentProvider) FieldComment(structType reflect.Type, fieldName str
 // sourceFiles returns parsed AST files for the package at the given import path.
 // It uses go/packages for source resolution, which handles module cache and
 // standard library packages. Results are cached per package path.
-func (ce *GoCommentProvider) sourceFiles(pkgPath string) []*ast.File {
+func (ce *GoCommentProvider) sourceFiles(ctx context.Context, pkgPath string) []*ast.File {
 	if pkgPath == "" {
 		return nil
 	}
@@ -148,7 +149,7 @@ func (ce *GoCommentProvider) sourceFiles(pkgPath string) []*ast.File {
 		return files
 	}
 
-	files := ce.loadPackage(pkgPath)
+	files := ce.loadPackage(ctx, pkgPath)
 	ce.cache[pkgPath] = files
 
 	return files
@@ -165,9 +166,10 @@ func (ce *GoCommentProvider) sourceFiles(pkgPath string) []*ast.File {
 // parsed cleanly while aggregating per-file problems separately in Errors.
 // Best-effort comment extraction uses whatever parsed, so a single bad file in
 // the package does not drop doc comments for the types that did parse.
-func (ce *GoCommentProvider) loadPackage(pkgPath string) []*ast.File {
+func (ce *GoCommentProvider) loadPackage(ctx context.Context, pkgPath string) []*ast.File {
 	cfg := &packages.Config{
-		Mode: packages.NeedName | packages.NeedFiles | packages.NeedSyntax,
+		Context: ctx,
+		Mode:    packages.NeedName | packages.NeedFiles | packages.NeedSyntax,
 		ParseFile: func(fset *token.FileSet, filename string, src []byte) (*ast.File, error) {
 			return parser.ParseFile(fset, filename, src, parser.ParseComments)
 		},

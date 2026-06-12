@@ -1,6 +1,7 @@
 package jsonschema
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -253,17 +254,21 @@ func (g *generator) applyInstanceDefaults(instance any, rootType reflect.Type, s
 }
 
 // GenerateFor generates a JSON Schema for the type parameter T.
-func GenerateFor[T any](opts ...GenerateOption) (*Schema, error) {
-	return Generate(reflect.TypeFor[T](), opts...)
+//
+// The context is passed to the [CommentProvider] (see [WithCommentProvider])
+// with every comment lookup, so the built-in provider's package loading can
+// honor cancellation and deadlines.
+func GenerateFor[T any](ctx context.Context, opts ...GenerateOption) (*Schema, error) {
+	return Generate(ctx, reflect.TypeFor[T](), opts...)
 }
 
-// MustGenerateFor is [GenerateFor] but panics on error; intended for
-// package-scope variables and init-time generation, where for a static type
-// and fixed options generation either always succeeds or always fails, so a
-// failure is a programming error best surfaced at startup. It follows
-// [MustRaw].
+// MustGenerateFor is [GenerateFor] with [context.Background] but panics on
+// error; intended for package-scope variables and init-time generation,
+// where for a static type and fixed options generation either always
+// succeeds or always fails, so a failure is a programming error best
+// surfaced at startup. It follows [MustRaw].
 func MustGenerateFor[T any](opts ...GenerateOption) *Schema {
-	s, err := GenerateFor[T](opts...)
+	s, err := GenerateFor[T](context.Background(), opts...)
 	if err != nil {
 		panic(err)
 	}
@@ -271,8 +276,9 @@ func MustGenerateFor[T any](opts ...GenerateOption) *Schema {
 	return s
 }
 
-// Generate generates a JSON Schema for the given [reflect.Type].
-func Generate(t reflect.Type, opts ...GenerateOption) (*Schema, error) {
-	g := newGenerator(opts)
+// Generate generates a JSON Schema for the given [reflect.Type]. The
+// context follows the [GenerateFor] contract.
+func Generate(ctx context.Context, t reflect.Type, opts ...GenerateOption) (*Schema, error) {
+	g := newGenerator(ctx, opts)
 	return g.generate(t)
 }

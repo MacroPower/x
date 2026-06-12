@@ -22,7 +22,7 @@ func TestNullablePointerEnumPermitsNull(t *testing.T) {
 		Kind *string `json:"kind,omitempty" jsonschema:"enum=a|b"`
 	}
 
-	s, err := jsonschema.GenerateFor[doc]()
+	s, err := jsonschema.GenerateFor[doc](t.Context())
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -57,7 +57,7 @@ func TestNullablePointerInterpreterEnumPermitsNull(t *testing.T) {
 		Color *string `json:"color,omitempty" validate:"oneof=red green"`
 	}
 
-	s, err := jsonschema.GenerateFor[doc](
+	s, err := jsonschema.GenerateFor[doc](t.Context(),
 		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
@@ -94,7 +94,7 @@ func TestIntegerConstAtTypeBoundary(t *testing.T) {
 		N uint64 `json:"n" jsonschema:"const=18446744073709551615"`
 	}
 
-	s, err := jsonschema.GenerateFor[doc]()
+	s, err := jsonschema.GenerateFor[doc](t.Context())
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -133,7 +133,7 @@ func TestTagScalarOutOfRange(t *testing.T) {
 					V int8 `json:"v" jsonschema:"const=200"`
 				}
 
-				return jsonschema.GenerateFor[doc]()
+				return jsonschema.GenerateFor[doc](t.Context())
 			},
 		},
 		"int8 const below min": {
@@ -142,7 +142,7 @@ func TestTagScalarOutOfRange(t *testing.T) {
 					V int8 `json:"v" jsonschema:"const=-200"`
 				}
 
-				return jsonschema.GenerateFor[doc]()
+				return jsonschema.GenerateFor[doc](t.Context())
 			},
 		},
 		"uint8 enum above max": {
@@ -151,7 +151,7 @@ func TestTagScalarOutOfRange(t *testing.T) {
 					V uint8 `json:"v" jsonschema:"enum=100|300"`
 				}
 
-				return jsonschema.GenerateFor[doc]()
+				return jsonschema.GenerateFor[doc](t.Context())
 			},
 		},
 		"uint8 negative": {
@@ -160,7 +160,7 @@ func TestTagScalarOutOfRange(t *testing.T) {
 					V uint8 `json:"v" jsonschema:"const=-1"`
 				}
 
-				return jsonschema.GenerateFor[doc]()
+				return jsonschema.GenerateFor[doc](t.Context())
 			},
 		},
 		"int16 default above max": {
@@ -169,7 +169,7 @@ func TestTagScalarOutOfRange(t *testing.T) {
 					V int16 `json:"v" jsonschema:"default=40000"`
 				}
 
-				return jsonschema.GenerateFor[doc]()
+				return jsonschema.GenerateFor[doc](t.Context())
 			},
 		},
 		"int32 const above max": {
@@ -178,7 +178,7 @@ func TestTagScalarOutOfRange(t *testing.T) {
 					V int32 `json:"v" jsonschema:"const=3000000000"`
 				}
 
-				return jsonschema.GenerateFor[doc]()
+				return jsonschema.GenerateFor[doc](t.Context())
 			},
 		},
 		"uint16 const above max": {
@@ -187,7 +187,7 @@ func TestTagScalarOutOfRange(t *testing.T) {
 					V uint16 `json:"v" jsonschema:"const=70000"`
 				}
 
-				return jsonschema.GenerateFor[doc]()
+				return jsonschema.GenerateFor[doc](t.Context())
 			},
 		},
 		"float32 const overflow": {
@@ -196,7 +196,7 @@ func TestTagScalarOutOfRange(t *testing.T) {
 					V float32 `json:"v" jsonschema:"const=1e40"`
 				}
 
-				return jsonschema.GenerateFor[doc]()
+				return jsonschema.GenerateFor[doc](t.Context())
 			},
 		},
 	}
@@ -225,7 +225,7 @@ func TestTagScalarInRange(t *testing.T) {
 		D float32 `json:"d" jsonschema:"const=1.5"`
 	}
 
-	s, err := jsonschema.GenerateFor[doc]()
+	s, err := jsonschema.GenerateFor[doc](t.Context())
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -274,7 +274,7 @@ func TestJSONStringTagScalarsParseAsStrings(t *testing.T) {
 					N int `json:"n,string" jsonschema:"const=5"`
 				}
 
-				return jsonschema.GenerateFor[doc]()
+				return jsonschema.GenerateFor[doc](t.Context())
 			},
 			field:   "n",
 			want:    `{"type":"string","const":"5"}`,
@@ -287,7 +287,7 @@ func TestJSONStringTagScalarsParseAsStrings(t *testing.T) {
 					N int `json:"n,string" jsonschema:"enum=1|2|3"`
 				}
 
-				return jsonschema.GenerateFor[doc]()
+				return jsonschema.GenerateFor[doc](t.Context())
 			},
 			field:   "n",
 			want:    `{"type":"string","enum":["1","2","3"]}`,
@@ -300,7 +300,7 @@ func TestJSONStringTagScalarsParseAsStrings(t *testing.T) {
 					N int `json:"n,string" jsonschema:"default=7"`
 				}
 
-				return jsonschema.GenerateFor[doc]()
+				return jsonschema.GenerateFor[doc](t.Context())
 			},
 			field:   "n",
 			want:    `{"type":"string","default":"7"}`,
@@ -313,7 +313,7 @@ func TestJSONStringTagScalarsParseAsStrings(t *testing.T) {
 					B bool `json:"b,string" jsonschema:"const=true"`
 				}
 
-				return jsonschema.GenerateFor[doc]()
+				return jsonschema.GenerateFor[doc](t.Context())
 			},
 			field:   "b",
 			want:    `{"type":"string","const":"true"}`,
@@ -326,7 +326,7 @@ func TestJSONStringTagScalarsParseAsStrings(t *testing.T) {
 					B bool `json:"b,string" jsonschema:"enum=true|false"`
 				}
 
-				return jsonschema.GenerateFor[doc]()
+				return jsonschema.GenerateFor[doc](t.Context())
 			},
 			field:   "b",
 			want:    `{"type":"string","enum":["true","false"]}`,

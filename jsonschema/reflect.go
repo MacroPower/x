@@ -1,6 +1,7 @@
 package jsonschema
 
 import (
+	"context"
 	"encoding"
 	"encoding/json"
 	"fmt"
@@ -32,6 +33,10 @@ var (
 
 // generator holds the state for a single schema generation run.
 type generator struct {
+	// The caller's context for this generation run, passed to the
+	// CommentProvider with every comment lookup.
+	ctx context.Context
+
 	typeToDefName   map[reflect.Type]string
 	typeResolvers   []TypeSchemaResolver
 	namer           Namer
@@ -60,8 +65,9 @@ type refRecord struct {
 	target reflect.Type
 }
 
-func newGenerator(opts []GenerateOption) *generator {
+func newGenerator(ctx context.Context, opts []GenerateOption) *generator {
 	g := &generator{
+		ctx:         ctx,
 		draft:       Draft2020,
 		namer:       NamerFunc(defaultNamer),
 		definitions: true,
@@ -1842,7 +1848,7 @@ func (g *generator) applyTypeComment(t reflect.Type, s *Schema) {
 		return
 	}
 
-	if comment := g.commentProvider.TypeComment(t); comment != "" {
+	if comment := g.commentProvider.TypeComment(g.ctx, t); comment != "" {
 		s.Description = comment
 	}
 }
@@ -1855,7 +1861,7 @@ func (g *generator) applyFieldComment(structType reflect.Type, f reflect.StructF
 		return
 	}
 
-	if comment := g.commentProvider.FieldComment(declaringType(structType, f), f.Name); comment != "" {
+	if comment := g.commentProvider.FieldComment(g.ctx, declaringType(structType, f), f.Name); comment != "" {
 		s.Description = comment
 	}
 }

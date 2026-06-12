@@ -65,7 +65,7 @@ func TestTypeSchemaOverrideContainersUnaliased(t *testing.T) {
 
 		// Definitions are disabled so the generated root is the override copy
 		// itself rather than a $ref into $defs.
-		got, err := jsonschema.Generate(probeType,
+		got, err := jsonschema.Generate(t.Context(), probeType,
 			jsonschema.WithTypeSchema(probeType, override),
 			jsonschema.WithDefinitions(false),
 		)

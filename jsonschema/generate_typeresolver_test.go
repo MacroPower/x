@@ -128,7 +128,7 @@ func TestWithTypeResolver(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			s, err := jsonschema.GenerateFor[doc](tc.opts...)
+			s, err := jsonschema.GenerateFor[doc](t.Context(), tc.opts...)
 			require.NoError(t, err)
 
 			got, err := json.Marshal(s)
@@ -141,7 +141,7 @@ func TestWithTypeResolver(t *testing.T) {
 func TestWithTypeSchema_LastRegistrationWins(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[plainKind](
+	s, err := jsonschema.GenerateFor[plainKind](t.Context(),
 		jsonschema.WithTypeSchemaFor[plainKind](&jsonschema.Schema{Type: "string"}),
 		jsonschema.WithTypeSchemaFor[plainKind](&jsonschema.Schema{Type: "number"}),
 	)
@@ -171,7 +171,7 @@ func TestWithTypeResolver_EmbeddedComposition(t *testing.T) {
 		Extra int `json:"extra"`
 	}
 
-	s, err := jsonschema.GenerateFor[doc](
+	s, err := jsonschema.GenerateFor[doc](t.Context(),
 		jsonschema.WithTypeResolver(jsonschema.TypeSchemaResolverFunc(
 			func(t reflect.Type) (*jsonschema.Schema, bool) {
 				if t != reflect.TypeFor[base]() {
@@ -210,7 +210,7 @@ func TestWithTypeResolver_SchemaUnaliased(t *testing.T) {
 		return shared, t == reflect.TypeFor[plainKind]()
 	})
 
-	s, err := jsonschema.GenerateFor[plainKind](jsonschema.WithTypeResolver(resolver))
+	s, err := jsonschema.GenerateFor[plainKind](t.Context(), jsonschema.WithTypeResolver(resolver))
 	require.NoError(t, err)
 
 	s.Enum = append(s.Enum, "b")

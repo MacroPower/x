@@ -66,7 +66,7 @@ func TestSplitTagPairsCommasInValues(t *testing.T) {
 		Name string `json:"name" jsonschema:"description=Hello World,minimum=1"`
 	}
 
-	s, err := jsonschema.GenerateFor[MyType]()
+	s, err := jsonschema.GenerateFor[MyType](t.Context())
 	require.NoError(t, err)
 
 	prop := s.Properties["name"]
@@ -85,7 +85,7 @@ func TestBareDescriptionWithEqualsSign(t *testing.T) {
 		Name string `json:"name" jsonschema:"a=b is the formula"`
 	}
 
-	s, err := jsonschema.GenerateFor[MyType]()
+	s, err := jsonschema.GenerateFor[MyType](t.Context())
 	require.NoError(t, err,
 		"bare description starting with word= should not produce an error")
 
@@ -109,7 +109,7 @@ func TestParseIntRejectsNegativeValues(t *testing.T) {
 					V string `json:"v" jsonschema:"minLength=-1"`
 				}
 
-				return jsonschema.GenerateFor[T]()
+				return jsonschema.GenerateFor[T](t.Context())
 			},
 		},
 		"negative maxLength": {
@@ -118,7 +118,7 @@ func TestParseIntRejectsNegativeValues(t *testing.T) {
 					V string `json:"v" jsonschema:"maxLength=-1"`
 				}
 
-				return jsonschema.GenerateFor[T]()
+				return jsonschema.GenerateFor[T](t.Context())
 			},
 		},
 		"negative minItems": {
@@ -127,7 +127,7 @@ func TestParseIntRejectsNegativeValues(t *testing.T) {
 					V []string `json:"v" jsonschema:"minItems=-1"`
 				}
 
-				return jsonschema.GenerateFor[T]()
+				return jsonschema.GenerateFor[T](t.Context())
 			},
 		},
 		"negative maxItems": {
@@ -136,7 +136,7 @@ func TestParseIntRejectsNegativeValues(t *testing.T) {
 					V []string `json:"v" jsonschema:"maxItems=-1"`
 				}
 
-				return jsonschema.GenerateFor[T]()
+				return jsonschema.GenerateFor[T](t.Context())
 			},
 		},
 		"negative minProperties": {
@@ -145,7 +145,7 @@ func TestParseIntRejectsNegativeValues(t *testing.T) {
 					V map[string]string `json:"v" jsonschema:"minProperties=-1"`
 				}
 
-				return jsonschema.GenerateFor[T]()
+				return jsonschema.GenerateFor[T](t.Context())
 			},
 		},
 		"negative maxProperties": {
@@ -154,7 +154,7 @@ func TestParseIntRejectsNegativeValues(t *testing.T) {
 					V map[string]string `json:"v" jsonschema:"maxProperties=-1"`
 				}
 
-				return jsonschema.GenerateFor[T]()
+				return jsonschema.GenerateFor[T](t.Context())
 			},
 		},
 	}
@@ -184,7 +184,7 @@ func TestParseFloatRejectsNaNInf(t *testing.T) {
 					V float64 `json:"v" jsonschema:"minimum=NaN"`
 				}
 
-				return jsonschema.GenerateFor[T]()
+				return jsonschema.GenerateFor[T](t.Context())
 			},
 		},
 		"maximum=+Inf": {
@@ -193,7 +193,7 @@ func TestParseFloatRejectsNaNInf(t *testing.T) {
 					V float64 `json:"v" jsonschema:"maximum=+Inf"`
 				}
 
-				return jsonschema.GenerateFor[T]()
+				return jsonschema.GenerateFor[T](t.Context())
 			},
 		},
 		"minimum=-Inf": {
@@ -202,7 +202,7 @@ func TestParseFloatRejectsNaNInf(t *testing.T) {
 					V float64 `json:"v" jsonschema:"minimum=-Inf"`
 				}
 
-				return jsonschema.GenerateFor[T]()
+				return jsonschema.GenerateFor[T](t.Context())
 			},
 		},
 	}
@@ -225,7 +225,7 @@ func TestMultipleOfZero(t *testing.T) {
 		Value float64 `json:"value" jsonschema:"multipleOf=0"`
 	}
 
-	_, err := jsonschema.GenerateFor[MyType]()
+	_, err := jsonschema.GenerateFor[MyType](t.Context())
 	// The multipleOf value MUST be strictly > 0 per JSON Schema spec.
 	require.Error(t, err,
 		"multipleOf=0 should be rejected")
@@ -238,7 +238,7 @@ func TestMultipleOfNegative(t *testing.T) {
 		Value float64 `json:"value" jsonschema:"multipleOf=-1"`
 	}
 
-	_, err := jsonschema.GenerateFor[MyType]()
+	_, err := jsonschema.GenerateFor[MyType](t.Context())
 	// The multipleOf value MUST be strictly > 0 per JSON Schema spec.
 	require.Error(t, err,
 		"negative multipleOf should be rejected")
@@ -252,7 +252,7 @@ func TestParseTypedScalarPrecisionLoss(t *testing.T) {
 		Value int64 `json:"value" jsonschema:"const=9007199254740993"`
 	}
 
-	s, err := jsonschema.GenerateFor[MyType]()
+	s, err := jsonschema.GenerateFor[MyType](t.Context())
 	require.NoError(t, err)
 
 	prop := s.Properties["value"]
@@ -277,7 +277,7 @@ func TestParseTypedScalarRejectsUnknownKinds(t *testing.T) {
 		Data Inner `json:"data" jsonschema:"default=foo"`
 	}
 
-	_, err := jsonschema.GenerateFor[MyType]()
+	_, err := jsonschema.GenerateFor[MyType](t.Context())
 	// A scalar tag value on a non-primitive (struct) field is rejected rather
 	// than coerced to a string.
 	require.Error(t, err,
@@ -320,7 +320,7 @@ func TestUnknownDraftDoesNotEmit2020URI(t *testing.T) {
 	}
 
 	unknownDraft := jsonschema.Draft(99)
-	s, err := jsonschema.GenerateFor[MyType](
+	s, err := jsonschema.GenerateFor[MyType](t.Context(),
 		jsonschema.WithDraft(unknownDraft),
 	)
 	require.NoError(t, err)
@@ -361,7 +361,7 @@ func TestJSONSchemaExtenderReceivesMutableSchema(t *testing.T) {
 		Item extenderWithDefs `json:"item"`
 	}
 
-	s, err := jsonschema.GenerateFor[MyType]()
+	s, err := jsonschema.GenerateFor[MyType](t.Context())
 	require.NoError(t, err)
 
 	// The extender sets a $defs entry; verify it survives extraction.
@@ -389,7 +389,7 @@ func TestFieldContextParentPartiallyBuilt(t *testing.T) {
 		Beta  string `inspect:"true" json:"beta"`
 	}
 
-	_, err := jsonschema.GenerateFor[MyType](
+	_, err := jsonschema.GenerateFor[MyType](t.Context(),
 		jsonschema.WithTagInterpreter(interp),
 	)
 	require.NoError(t, err)
@@ -427,7 +427,7 @@ func TestFieldContextStructField(t *testing.T) {
 		Alpha string `inspect:"true" json:"alpha,omitempty"`
 	}
 
-	_, err := jsonschema.GenerateFor[MyType](
+	_, err := jsonschema.GenerateFor[MyType](t.Context(),
 		jsonschema.WithTagInterpreter(interp),
 	)
 	require.NoError(t, err)
@@ -455,7 +455,7 @@ func TestFieldContextDraft7(t *testing.T) {
 		Alpha string `inspect:"true" json:"alpha"`
 	}
 
-	_, err := jsonschema.GenerateFor[MyType](
+	_, err := jsonschema.GenerateFor[MyType](t.Context(),
 		jsonschema.WithDraft(jsonschema.Draft7),
 		jsonschema.WithTagInterpreter(interp),
 	)
@@ -529,7 +529,7 @@ func TestTagProcessingErrorPaths(t *testing.T) {
 					V float64 `json:"v" jsonschema:"minimum=notanumber"`
 				}
 
-				return jsonschema.GenerateFor[T]()
+				return jsonschema.GenerateFor[T](t.Context())
 			},
 		},
 		"maxLength=notanumber": {
@@ -538,7 +538,7 @@ func TestTagProcessingErrorPaths(t *testing.T) {
 					V string `json:"v" jsonschema:"maxLength=notanumber"`
 				}
 
-				return jsonschema.GenerateFor[T]()
+				return jsonschema.GenerateFor[T](t.Context())
 			},
 		},
 		"minItems=notanumber": {
@@ -547,7 +547,7 @@ func TestTagProcessingErrorPaths(t *testing.T) {
 					V []string `json:"v" jsonschema:"minItems=notanumber"`
 				}
 
-				return jsonschema.GenerateFor[T]()
+				return jsonschema.GenerateFor[T](t.Context())
 			},
 		},
 	}
@@ -583,7 +583,7 @@ func TestFloat32ScalarKeepsDecimal(t *testing.T) {
 					V float32 `json:"v" jsonschema:"const=0.1"`
 				}
 
-				return jsonschema.GenerateFor[doc]()
+				return jsonschema.GenerateFor[doc](t.Context())
 			},
 			key:  "const",
 			want: `0.1`,
@@ -594,7 +594,7 @@ func TestFloat32ScalarKeepsDecimal(t *testing.T) {
 					V float32 `json:"v" jsonschema:"default=0.1"`
 				}
 
-				return jsonschema.GenerateFor[doc]()
+				return jsonschema.GenerateFor[doc](t.Context())
 			},
 			key:  "default",
 			want: `0.1`,
@@ -605,7 +605,7 @@ func TestFloat32ScalarKeepsDecimal(t *testing.T) {
 					V float32 `json:"v" jsonschema:"enum=0.1|0.2"`
 				}
 
-				return jsonschema.GenerateFor[doc]()
+				return jsonschema.GenerateFor[doc](t.Context())
 			},
 			key:  "enum",
 			want: `[0.1,0.2]`,
@@ -616,7 +616,7 @@ func TestFloat32ScalarKeepsDecimal(t *testing.T) {
 					V float32 `json:"v" jsonschema:"examples=0.1|0.2"`
 				}
 
-				return jsonschema.GenerateFor[doc]()
+				return jsonschema.GenerateFor[doc](t.Context())
 			},
 			key:  "examples",
 			want: `[0.1,0.2]`,
@@ -627,7 +627,7 @@ func TestFloat32ScalarKeepsDecimal(t *testing.T) {
 					V float32 `json:"v" jsonschema:"const=0.5"`
 				}
 
-				return jsonschema.GenerateFor[doc]()
+				return jsonschema.GenerateFor[doc](t.Context())
 			},
 			key:  "const",
 			want: `0.5`,
@@ -638,7 +638,7 @@ func TestFloat32ScalarKeepsDecimal(t *testing.T) {
 					V float32 `json:"v" jsonschema:"const=1.5"`
 				}
 
-				return jsonschema.GenerateFor[doc]()
+				return jsonschema.GenerateFor[doc](t.Context())
 			},
 			key:  "const",
 			want: `1.5`,
@@ -649,7 +649,7 @@ func TestFloat32ScalarKeepsDecimal(t *testing.T) {
 					V float64 `json:"v" jsonschema:"const=0.1"`
 				}
 
-				return jsonschema.GenerateFor[doc]()
+				return jsonschema.GenerateFor[doc](t.Context())
 			},
 			key:  "const",
 			want: `0.1`,
@@ -704,7 +704,7 @@ func TestFloat32ScalarOverflow(t *testing.T) {
 					V float32 `json:"v" jsonschema:"const=1e300"`
 				}
 
-				return jsonschema.GenerateFor[doc]()
+				return jsonschema.GenerateFor[doc](t.Context())
 			},
 		},
 		"default overflow": {
@@ -713,7 +713,7 @@ func TestFloat32ScalarOverflow(t *testing.T) {
 					V float32 `json:"v" jsonschema:"default=1e300"`
 				}
 
-				return jsonschema.GenerateFor[doc]()
+				return jsonschema.GenerateFor[doc](t.Context())
 			},
 		},
 		"enum overflow": {
@@ -722,7 +722,7 @@ func TestFloat32ScalarOverflow(t *testing.T) {
 					V float32 `json:"v" jsonschema:"enum=1.0|1e300"`
 				}
 
-				return jsonschema.GenerateFor[doc]()
+				return jsonschema.GenerateFor[doc](t.Context())
 			},
 		},
 		"examples overflow": {
@@ -731,7 +731,7 @@ func TestFloat32ScalarOverflow(t *testing.T) {
 					V float32 `json:"v" jsonschema:"examples=1e300"`
 				}
 
-				return jsonschema.GenerateFor[doc]()
+				return jsonschema.GenerateFor[doc](t.Context())
 			},
 		},
 	}
@@ -762,7 +762,7 @@ func TestTagTypeOverride(t *testing.T) {
 			SLA *time.Duration `json:"sla" jsonschema:"type=string,pattern=^[0-9]+(ms|s|m|h)$"`
 		}
 
-		s, err := jsonschema.GenerateFor[T]()
+		s, err := jsonschema.GenerateFor[T](t.Context())
 		require.NoError(t, err)
 
 		got, err := json.Marshal(s.Properties["sla"])
@@ -778,7 +778,7 @@ func TestTagTypeOverride(t *testing.T) {
 			Dur time.Duration `json:"dur" jsonschema:"type=string"`
 		}
 
-		s, err := jsonschema.GenerateFor[T]()
+		s, err := jsonschema.GenerateFor[T](t.Context())
 		require.NoError(t, err)
 
 		got, err := json.Marshal(s.Properties["dur"])
@@ -794,7 +794,7 @@ func TestTagTypeOverride(t *testing.T) {
 			N int64 `json:"n" jsonschema:"type=number"`
 		}
 
-		s, err := jsonschema.GenerateFor[T]()
+		s, err := jsonschema.GenerateFor[T](t.Context())
 		require.NoError(t, err)
 
 		field := s.Properties["n"]
@@ -809,7 +809,7 @@ func TestTagTypeOverride(t *testing.T) {
 			Tags []string `json:"tags" jsonschema:"type=array"`
 		}
 
-		s, err := jsonschema.GenerateFor[T]()
+		s, err := jsonschema.GenerateFor[T](t.Context())
 		require.NoError(t, err)
 
 		field := s.Properties["tags"]
@@ -826,7 +826,7 @@ func TestTagTypeOverride(t *testing.T) {
 			V string `json:"v" jsonschema:"type=interger"`
 		}
 
-		_, err := jsonschema.GenerateFor[T]()
+		_, err := jsonschema.GenerateFor[T](t.Context())
 		require.ErrorIs(t, err, jsonschema.ErrInvalidType)
 	})
 }
@@ -868,7 +868,7 @@ func TestTagEnumOnSequenceFields(t *testing.T) {
 			Days []string `json:"days" jsonschema:"enum=monday|tuesday|wednesday"`
 		}
 
-		s, err := jsonschema.GenerateFor[T]()
+		s, err := jsonschema.GenerateFor[T](t.Context())
 		require.NoError(t, err)
 
 		items := itemsOf(s, "days")
@@ -885,7 +885,7 @@ func TestTagEnumOnSequenceFields(t *testing.T) {
 			Codes []int `json:"codes" jsonschema:"enum=1|2|3"`
 		}
 
-		s, err := jsonschema.GenerateFor[T]()
+		s, err := jsonschema.GenerateFor[T](t.Context())
 		require.NoError(t, err)
 
 		items := itemsOf(s, "codes")
@@ -900,7 +900,7 @@ func TestTagEnumOnSequenceFields(t *testing.T) {
 			Days *[]string `json:"days" jsonschema:"enum=monday|tuesday"`
 		}
 
-		s, err := jsonschema.GenerateFor[T]()
+		s, err := jsonschema.GenerateFor[T](t.Context())
 		require.NoError(t, err)
 
 		items := itemsOf(s, "days")
@@ -915,7 +915,7 @@ func TestTagEnumOnSequenceFields(t *testing.T) {
 			Pair [2]string `json:"pair" jsonschema:"enum=a|b"`
 		}
 
-		s, err := jsonschema.GenerateFor[T]()
+		s, err := jsonschema.GenerateFor[T](t.Context())
 		require.NoError(t, err)
 
 		items := itemsOf(s, "pair")
@@ -933,7 +933,7 @@ func TestTagEnumOnSequenceFields(t *testing.T) {
 			Pair [2]string `json:"pair" jsonschema:"enum=a|b"`
 		}
 
-		s, err := jsonschema.GenerateFor[T](jsonschema.WithDraft(jsonschema.Draft7))
+		s, err := jsonschema.GenerateFor[T](t.Context(), jsonschema.WithDraft(jsonschema.Draft7))
 		require.NoError(t, err)
 
 		field := s.Properties["pair"]
@@ -952,7 +952,7 @@ func TestTagEnumOnSequenceFields(t *testing.T) {
 			Groups [][]string `json:"groups" jsonschema:"enum=x|y"`
 		}
 
-		s, err := jsonschema.GenerateFor[T]()
+		s, err := jsonschema.GenerateFor[T](t.Context())
 		require.NoError(t, err)
 
 		items := itemsOf(s, "groups")
@@ -969,7 +969,7 @@ func TestTagEnumOnSequenceFields(t *testing.T) {
 			Data []byte `json:"data" jsonschema:"enum=a|b"`
 		}
 
-		_, err := jsonschema.GenerateFor[T]()
+		_, err := jsonschema.GenerateFor[T](t.Context())
 		require.Error(t, err, "a []byte field encodes as a base64 string with no items")
 		assert.Contains(t, err.Error(), "no item schema")
 	})
@@ -981,7 +981,7 @@ func TestTagEnumOnSequenceFields(t *testing.T) {
 			Codes []int `json:"codes" jsonschema:"enum=1|oops"`
 		}
 
-		_, err := jsonschema.GenerateFor[T]()
+		_, err := jsonschema.GenerateFor[T](t.Context())
 		require.Error(t, err)
 	})
 
@@ -992,7 +992,7 @@ func TestTagEnumOnSequenceFields(t *testing.T) {
 			Days []string `json:"days" jsonschema:"const=monday"`
 		}
 
-		_, err := jsonschema.GenerateFor[T]()
+		_, err := jsonschema.GenerateFor[T](t.Context())
 		require.Error(t, err, "const is a whole-value constraint and is not redirected to items")
 	})
 
@@ -1003,7 +1003,7 @@ func TestTagEnumOnSequenceFields(t *testing.T) {
 			Day string `json:"day" jsonschema:"enum=monday|tuesday"`
 		}
 
-		s, err := jsonschema.GenerateFor[T]()
+		s, err := jsonschema.GenerateFor[T](t.Context())
 		require.NoError(t, err)
 		assert.Equal(t, []any{"monday", "tuesday"}, s.Properties["day"].Enum)
 	})
@@ -1026,7 +1026,7 @@ func TestTagEnumExamplesEmptySegment(t *testing.T) {
 					F string `json:"f" jsonschema:"enum=red|green|"`
 				}
 
-				return jsonschema.GenerateFor[T]()
+				return jsonschema.GenerateFor[T](t.Context())
 			},
 			wantErr: true,
 		},
@@ -1036,7 +1036,7 @@ func TestTagEnumExamplesEmptySegment(t *testing.T) {
 					F string `json:"f" jsonschema:"enum=red||green"`
 				}
 
-				return jsonschema.GenerateFor[T]()
+				return jsonschema.GenerateFor[T](t.Context())
 			},
 			wantErr: true,
 		},
@@ -1046,7 +1046,7 @@ func TestTagEnumExamplesEmptySegment(t *testing.T) {
 					F string `json:"f" jsonschema:"examples=a|"`
 				}
 
-				return jsonschema.GenerateFor[T]()
+				return jsonschema.GenerateFor[T](t.Context())
 			},
 			wantErr: true,
 		},
@@ -1056,7 +1056,7 @@ func TestTagEnumExamplesEmptySegment(t *testing.T) {
 					F string `json:"f" jsonschema:"enum=red|green"`
 				}
 
-				return jsonschema.GenerateFor[T]()
+				return jsonschema.GenerateFor[T](t.Context())
 			},
 			wantErr: false,
 		},
@@ -1098,7 +1098,7 @@ func TestTagScalarAfterTypeOverride(t *testing.T) {
 					SLA *time.Duration `json:"sla" jsonschema:"title=SLA,type=string,default=15m"`
 				}
 
-				return jsonschema.GenerateFor[T]()
+				return jsonschema.GenerateFor[T](t.Context())
 			},
 			prop: "sla",
 			want: `{"title":"SLA","type":"string","default":"15m"}`,
@@ -1109,7 +1109,7 @@ func TestTagScalarAfterTypeOverride(t *testing.T) {
 					V int `json:"v" jsonschema:"type=string,const=42"`
 				}
 
-				return jsonschema.GenerateFor[T]()
+				return jsonschema.GenerateFor[T](t.Context())
 			},
 			prop: "v",
 			want: `{"type":"string","const":"42"}`,
@@ -1120,7 +1120,7 @@ func TestTagScalarAfterTypeOverride(t *testing.T) {
 					V int `json:"v" jsonschema:"default=5,type=string"`
 				}
 
-				return jsonschema.GenerateFor[T]()
+				return jsonschema.GenerateFor[T](t.Context())
 			},
 			prop: "v",
 			want: `{"type":"string","default":5}`,
@@ -1131,7 +1131,7 @@ func TestTagScalarAfterTypeOverride(t *testing.T) {
 					V string `json:"v" jsonschema:"type=integer,examples=1|2"`
 				}
 
-				return jsonschema.GenerateFor[T]()
+				return jsonschema.GenerateFor[T](t.Context())
 			},
 			prop: "v",
 			want: `{"type":"integer","examples":[1,2]}`,
@@ -1142,7 +1142,7 @@ func TestTagScalarAfterTypeOverride(t *testing.T) {
 					Days []string `json:"days" jsonschema:"type=string,enum=a|b"`
 				}
 
-				return jsonschema.GenerateFor[T]()
+				return jsonschema.GenerateFor[T](t.Context())
 			},
 			prop: "days",
 			// The enum lands on the field schema itself: the stand-in is
@@ -1156,7 +1156,7 @@ func TestTagScalarAfterTypeOverride(t *testing.T) {
 					V int `json:"v" jsonschema:"type=object,default=x"`
 				}
 
-				return jsonschema.GenerateFor[T]()
+				return jsonschema.GenerateFor[T](t.Context())
 			},
 			err: `key "default" cannot follow type=object`,
 		},
@@ -1166,7 +1166,7 @@ func TestTagScalarAfterTypeOverride(t *testing.T) {
 					V []string `json:"v" jsonschema:"type=array,enum=a|b"`
 				}
 
-				return jsonschema.GenerateFor[T]()
+				return jsonschema.GenerateFor[T](t.Context())
 			},
 			err: `key "enum" cannot follow type=array`,
 		},
@@ -1176,7 +1176,7 @@ func TestTagScalarAfterTypeOverride(t *testing.T) {
 					V *int `json:"v" jsonschema:"type=string,default=null"`
 				}
 
-				return jsonschema.GenerateFor[T]()
+				return jsonschema.GenerateFor[T](t.Context())
 			},
 			err: "cannot assign null",
 		},
@@ -1186,7 +1186,7 @@ func TestTagScalarAfterTypeOverride(t *testing.T) {
 					V string `json:"v" jsonschema:"type=integer,const=99999999999999999999"`
 				}
 
-				return jsonschema.GenerateFor[T]()
+				return jsonschema.GenerateFor[T](t.Context())
 			},
 			err: "invalid integer",
 		},

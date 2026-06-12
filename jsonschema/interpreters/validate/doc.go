@@ -10,7 +10,7 @@
 //
 // Register the interpreter when generating a schema:
 //
-//	schema, err := jsonschema.GenerateFor[MyType](
+//	schema, err := jsonschema.GenerateFor[MyType](ctx,
 //	    jsonschema.WithTagInterpreter(validate.NewInterpreter()),
 //	)
 //

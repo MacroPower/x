@@ -40,7 +40,7 @@ func TestWithRootTitle(t *testing.T) {
 	t.Run("named struct root", func(t *testing.T) {
 		t.Parallel()
 
-		s, err := jsonschema.GenerateFor[rootTitleStruct](
+		s, err := jsonschema.GenerateFor[rootTitleStruct](t.Context(),
 			jsonschema.WithRootTitle(true),
 		)
 		require.NoError(t, err)
@@ -51,7 +51,7 @@ func TestWithRootTitle(t *testing.T) {
 	t.Run("defaults to off", func(t *testing.T) {
 		t.Parallel()
 
-		s, err := jsonschema.GenerateFor[rootTitleStruct]()
+		s, err := jsonschema.GenerateFor[rootTitleStruct](t.Context())
 		require.NoError(t, err)
 
 		assert.Empty(t, s.Title)
@@ -60,7 +60,7 @@ func TestWithRootTitle(t *testing.T) {
 	t.Run("pointer root", func(t *testing.T) {
 		t.Parallel()
 
-		s, err := jsonschema.GenerateFor[*rootTitleStruct](
+		s, err := jsonschema.GenerateFor[*rootTitleStruct](t.Context(),
 			jsonschema.WithRootTitle(true),
 		)
 		require.NoError(t, err)
@@ -73,7 +73,7 @@ func TestWithRootTitle(t *testing.T) {
 	t.Run("self-referential Draft-07 root titles the definitions entry", func(t *testing.T) {
 		t.Parallel()
 
-		s, err := jsonschema.GenerateFor[rootTitleRecursive](
+		s, err := jsonschema.GenerateFor[rootTitleRecursive](t.Context(),
 			jsonschema.WithDraft(jsonschema.Draft7),
 			jsonschema.WithRootTitle(true),
 		)
@@ -93,7 +93,7 @@ func TestWithRootTitle(t *testing.T) {
 	t.Run("self-referential Draft 2020-12 root titles the root", func(t *testing.T) {
 		t.Parallel()
 
-		s, err := jsonschema.GenerateFor[rootTitleRecursive](
+		s, err := jsonschema.GenerateFor[rootTitleRecursive](t.Context(),
 			jsonschema.WithRootTitle(true),
 		)
 		require.NoError(t, err)
@@ -113,7 +113,7 @@ func TestWithRootTitle(t *testing.T) {
 
 		s, err := jsonschema.GenerateFor[struct {
 			Name string `json:"name"`
-		}](jsonschema.WithRootTitle(true))
+		}](t.Context(), jsonschema.WithRootTitle(true))
 		require.NoError(t, err)
 
 		assert.Empty(t, s.Title, "an unnamed root type yields no name to title")
@@ -122,7 +122,7 @@ func TestWithRootTitle(t *testing.T) {
 	t.Run("unnamed map root has no title", func(t *testing.T) {
 		t.Parallel()
 
-		s, err := jsonschema.GenerateFor[map[string]int](
+		s, err := jsonschema.GenerateFor[map[string]int](t.Context(),
 			jsonschema.WithRootTitle(true),
 		)
 		require.NoError(t, err)
@@ -133,7 +133,7 @@ func TestWithRootTitle(t *testing.T) {
 	t.Run("existing title preserved", func(t *testing.T) {
 		t.Parallel()
 
-		s, err := jsonschema.GenerateFor[rootTitleStruct](
+		s, err := jsonschema.GenerateFor[rootTitleStruct](t.Context(),
 			jsonschema.WithRootTitle(true),
 			jsonschema.WithTypeSchema(
 				reflect.TypeFor[rootTitleStruct](),
@@ -148,7 +148,7 @@ func TestWithRootTitle(t *testing.T) {
 	t.Run("extender title preserved", func(t *testing.T) {
 		t.Parallel()
 
-		s, err := jsonschema.GenerateFor[rootTitleExtender](
+		s, err := jsonschema.GenerateFor[rootTitleExtender](t.Context(),
 			jsonschema.WithRootTitle(true),
 		)
 		require.NoError(t, err)
@@ -159,7 +159,7 @@ func TestWithRootTitle(t *testing.T) {
 	t.Run("custom namer honored", func(t *testing.T) {
 		t.Parallel()
 
-		s, err := jsonschema.GenerateFor[rootTitleStruct](
+		s, err := jsonschema.GenerateFor[rootTitleStruct](t.Context(),
 			jsonschema.WithRootTitle(true),
 			jsonschema.WithNamer(jsonschema.NamerFunc(func(t reflect.Type) string {
 				return "My" + t.Name()
@@ -173,7 +173,7 @@ func TestWithRootTitle(t *testing.T) {
 	t.Run("definitions disabled", func(t *testing.T) {
 		t.Parallel()
 
-		s, err := jsonschema.GenerateFor[rootTitleStruct](
+		s, err := jsonschema.GenerateFor[rootTitleStruct](t.Context(),
 			jsonschema.WithRootTitle(true),
 			jsonschema.WithDefinitions(false),
 		)

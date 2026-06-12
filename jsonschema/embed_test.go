@@ -26,7 +26,7 @@ type WithEmbedded struct {
 func TestGenerateFor_EmbeddedStructPromoted(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[WithEmbedded]()
+	s, err := jsonschema.GenerateFor[WithEmbedded](t.Context())
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -54,7 +54,7 @@ type EmbeddedWithTag struct {
 func TestGenerateFor_EmbeddedStructWithTag(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[EmbeddedWithTag]()
+	s, err := jsonschema.GenerateFor[EmbeddedWithTag](t.Context())
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -92,7 +92,7 @@ type EmbeddedPointer struct {
 func TestGenerateFor_EmbeddedPointerToStruct(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[EmbeddedPointer]()
+	s, err := jsonschema.GenerateFor[EmbeddedPointer](t.Context())
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -127,7 +127,7 @@ type Outer struct {
 func TestGenerateFor_FieldShadowing(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[Outer]()
+	s, err := jsonschema.GenerateFor[Outer](t.Context())
 	require.NoError(t, err)
 
 	// Outer.Name should shadow Inner.Name.
@@ -152,7 +152,7 @@ type AmbigParent struct {
 func TestGenerateFor_FieldAmbiguity(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[AmbigParent]()
+	s, err := jsonschema.GenerateFor[AmbigParent](t.Context())
 	require.NoError(t, err)
 
 	// X is ambiguous (same depth, different embedded types) → dropped.
@@ -218,7 +218,7 @@ func TestGenerateFor_SameDepthTagTieBreak(t *testing.T) {
 	assert.JSONEq(t, `{"Shared":"from-tag"}`, string(mixed),
 		"encoding/json keeps the explicitly tagged field on a same-depth collision")
 
-	s, err := jsonschema.GenerateFor[tieBreakParent]()
+	s, err := jsonschema.GenerateFor[tieBreakParent](t.Context())
 	require.NoError(t, err)
 	assert.Contains(t, s.Properties, "Shared",
 		"schema must include the property encoding/json marshals")
@@ -233,7 +233,7 @@ func TestGenerateFor_SameDepthTagTieBreak(t *testing.T) {
 	assert.JSONEq(t, `{}`, string(both),
 		"encoding/json drops the field when two same-depth fields are tagged")
 
-	bs, err := jsonschema.GenerateFor[bothTaggedParent]()
+	bs, err := jsonschema.GenerateFor[bothTaggedParent](t.Context())
 	require.NoError(t, err)
 	assert.NotContains(t, bs.Properties, "Dup",
 		"schema must drop the property encoding/json omits")
@@ -250,7 +250,7 @@ type HasEmbeddedNonStruct struct {
 func TestGenerateFor_EmbeddedNonStructType(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[HasEmbeddedNonStruct]()
+	s, err := jsonschema.GenerateFor[HasEmbeddedNonStruct](t.Context())
 	require.NoError(t, err)
 
 	// MyString becomes a regular field named "MyString".
@@ -281,7 +281,7 @@ type HasProviderEmbed struct {
 func TestGenerateFor_EmbeddedStructWithProvider(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[HasProviderEmbed]()
+	s, err := jsonschema.GenerateFor[HasProviderEmbed](t.Context())
 	require.NoError(t, err)
 
 	// ProviderEmbed should be composed via allOf.
@@ -302,7 +302,7 @@ type HasUnexportedEmbed struct {
 func TestGenerateFor_UnexportedEmbeddedStruct(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[HasUnexportedEmbed]()
+	s, err := jsonschema.GenerateFor[HasUnexportedEmbed](t.Context())
 	require.NoError(t, err)
 
 	// Unexported embedded struct's exported fields should be promoted.
@@ -319,7 +319,7 @@ type HasEmbeddedInterface struct {
 func TestGenerateFor_EmbeddedInterfaceSkipped(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[HasEmbeddedInterface]()
+	s, err := jsonschema.GenerateFor[HasEmbeddedInterface](t.Context())
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -351,7 +351,7 @@ type HasProviderInterface struct {
 func TestGenerateFor_EmbeddedInterfaceWithProvider(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[HasProviderInterface]()
+	s, err := jsonschema.GenerateFor[HasProviderInterface](t.Context())
 	require.NoError(t, err)
 
 	// SchemaInterface implements JSONSchemaProvider → composed via allOf.
@@ -375,7 +375,7 @@ type HasTextMarshalerEmbed struct {
 func TestGenerateFor_EmbeddedTextMarshalerStruct(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[HasTextMarshalerEmbed]()
+	s, err := jsonschema.GenerateFor[HasTextMarshalerEmbed](t.Context())
 	require.NoError(t, err)
 
 	// HasTextMarshalerEmbed's method set includes the promoted MarshalText,
@@ -388,7 +388,7 @@ func TestGenerateFor_EmbeddedTextMarshalerStruct(t *testing.T) {
 func TestGenerateFor_EmbeddedTextMarshalerStruct_Draft2020(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[HasTextMarshalerEmbed](
+	s, err := jsonschema.GenerateFor[HasTextMarshalerEmbed](t.Context(),
 		jsonschema.WithDraft(jsonschema.Draft2020),
 	)
 	require.NoError(t, err)
@@ -406,7 +406,7 @@ func TestGenerateFor_EmbeddedTextMarshalerStruct_Draft2020(t *testing.T) {
 func TestGenerateFor_EmbeddedTextMarshalerStruct_Draft7(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[HasTextMarshalerEmbed](
+	s, err := jsonschema.GenerateFor[HasTextMarshalerEmbed](t.Context(),
 		jsonschema.WithDraft(jsonschema.Draft7),
 	)
 	require.NoError(t, err)
@@ -432,7 +432,7 @@ type HasEmbeddedPointerNonStruct struct {
 func TestGenerateFor_EmbeddedPointerToNonStruct(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[HasEmbeddedPointerNonStruct]()
+	s, err := jsonschema.GenerateFor[HasEmbeddedPointerNonStruct](t.Context())
 	require.NoError(t, err)
 
 	// *MyInt becomes a regular field named "MyInt" with a nullable schema.
@@ -457,7 +457,7 @@ type HasUnexportedEmbeddedNonStruct struct {
 func TestGenerateFor_UnexportedEmbeddedNonStructExcluded(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[HasUnexportedEmbeddedNonStruct]()
+	s, err := jsonschema.GenerateFor[HasUnexportedEmbeddedNonStruct](t.Context())
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -488,7 +488,7 @@ type HasUnexportedEmbeddedInterface struct {
 func TestGenerateFor_UnexportedEmbeddedInterfaceExcluded(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[HasUnexportedEmbeddedInterface]()
+	s, err := jsonschema.GenerateFor[HasUnexportedEmbeddedInterface](t.Context())
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -519,7 +519,7 @@ type HasOverriddenEmbed struct {
 func TestGenerateFor_EmbeddedStructWithTypeSchemaOverride(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[HasOverriddenEmbed](
+	s, err := jsonschema.GenerateFor[HasOverriddenEmbed](t.Context(),
 		jsonschema.WithTypeSchema(
 			reflect.TypeFor[OverriddenEmbed](),
 			&jsonschema.Schema{Type: "string", Format: "custom"},
@@ -536,7 +536,7 @@ func TestGenerateFor_EmbeddedStructWithTypeSchemaOverride(t *testing.T) {
 func TestGenerateFor_AllOfWithAdditionalPropertiesTrue(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[HasProviderEmbed](
+	s, err := jsonschema.GenerateFor[HasProviderEmbed](t.Context(),
 		jsonschema.WithAdditionalProperties(true),
 	)
 	require.NoError(t, err)
@@ -582,7 +582,7 @@ func TestGenerateFor_EmbeddedBuiltinOverrideType(t *testing.T) {
 	// value in general), and the schema is unrestricted. Reflecting an object
 	// with an "extra" property composed with the date-time string via allOf
 	// would be unsatisfiable and reject every actual serialization.
-	s, err := jsonschema.GenerateFor[HasEmbeddedTime]()
+	s, err := jsonschema.GenerateFor[HasEmbeddedTime](t.Context())
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -607,7 +607,7 @@ func TestGenerateFor_EmbeddedWithTypeSchemaOverride(t *testing.T) {
 	t.Parallel()
 
 	// Embedded struct with WithTypeSchema override should be composed via allOf.
-	s, err := jsonschema.GenerateFor[HasWithTypeSchemaEmbed](
+	s, err := jsonschema.GenerateFor[HasWithTypeSchemaEmbed](t.Context(),
 		jsonschema.WithTypeSchema(
 			reflect.TypeFor[OverrideTarget](),
 			&jsonschema.Schema{Type: "string", Format: "custom"},
@@ -667,17 +667,17 @@ func TestGenerateFor_EmbeddedOptionsOnlyTagPromotesFields(t *testing.T) {
 		promoted bool
 	}{
 		"options-only tag is promoted": {
-			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[embedOptionsOnly]() },
+			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[embedOptionsOnly](t.Context()) },
 			marshal:  func() ([]byte, error) { return json.Marshal(embedOptionsOnly{embedPromoteInner{A: 5}}) },
 			promoted: true,
 		},
 		"empty name is promoted": {
-			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[embedEmptyName]() },
+			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[embedEmptyName](t.Context()) },
 			marshal:  func() ([]byte, error) { return json.Marshal(embedEmptyName{embedPromoteInner{A: 5}}) },
 			promoted: true,
 		},
 		"explicit name is a named field": {
-			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[embedExplicitName]() },
+			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[embedExplicitName](t.Context()) },
 			marshal:  func() ([]byte, error) { return json.Marshal(embedExplicitName{embedPromoteInner{A: 5}}) },
 			promoted: false,
 		},
@@ -748,7 +748,7 @@ func TestGenerateFor_EmbeddedShallowestTypeWins(t *testing.T) {
 	require.NoError(t, err)
 	require.JSONEq(t, `{"X":99}`, string(doc))
 
-	s, err := jsonschema.GenerateFor[ShallowWins]()
+	s, err := jsonschema.GenerateFor[ShallowWins](t.Context())
 	require.NoError(t, err)
 
 	require.Contains(t, s.Properties, "X")
@@ -782,7 +782,7 @@ func TestGenerateFor_EmbeddedRepeatedTypeAnnihilates(t *testing.T) {
 	require.NoError(t, err)
 	require.JSONEq(t, `{"name":"n"}`, string(doc))
 
-	s, err := jsonschema.GenerateFor[HasAnnihilatedEmbeds]()
+	s, err := jsonschema.GenerateFor[HasAnnihilatedEmbeds](t.Context())
 	require.NoError(t, err)
 
 	assert.NotContains(t, s.Properties, "X", "schema: %s", marshalSchema(t, s))
@@ -811,7 +811,7 @@ type HasOptionalProviderEmbed struct {
 func TestGenerateFor_EmbeddedPointerProviderOptional(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[HasOptionalProviderEmbed]()
+	s, err := jsonschema.GenerateFor[HasOptionalProviderEmbed](t.Context())
 	require.NoError(t, err)
 
 	// Nil embed: encoding/json omits the provider's properties entirely, and

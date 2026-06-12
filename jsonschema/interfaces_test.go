@@ -70,7 +70,7 @@ func TestTagInterpreterFunc(t *testing.T) {
 			},
 		)
 
-		s, err := jsonschema.GenerateFor[doc](jsonschema.WithTagInterpreter(interp))
+		s, err := jsonschema.GenerateFor[doc](t.Context(), jsonschema.WithTagInterpreter(interp))
 		require.NoError(t, err)
 		assert.Equal(t, "in meters", s.Properties["size"].Description)
 	})
@@ -83,7 +83,7 @@ func TestTagInterpreterFunc(t *testing.T) {
 			func(string, jsonschema.FieldContext) error { return errBad },
 		)
 
-		_, err := jsonschema.GenerateFor[doc](jsonschema.WithTagInterpreter(interp))
+		_, err := jsonschema.GenerateFor[doc](t.Context(), jsonschema.WithTagInterpreter(interp))
 		require.ErrorIs(t, err, errBad)
 		assert.ErrorContains(t, err, `tag interpreter "units"`)
 	})

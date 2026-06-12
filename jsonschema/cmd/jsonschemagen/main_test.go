@@ -33,6 +33,7 @@ func TestRenderMainGo(t *testing.T) {
 			want: `package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -47,7 +48,7 @@ func main() {
 	t := reflect.TypeFor[target.Config]()
 	opts := []jsonschema.GenerateOption{
 	}
-	schema, err := jsonschema.Generate(t, opts...)
+	schema, err := jsonschema.Generate(context.Background(), t, opts...)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
@@ -72,6 +73,7 @@ func main() {
 			want: `package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -87,7 +89,7 @@ func main() {
 	opts := []jsonschema.GenerateOption{
 		jsonschema.WithDraft(jsonschema.Draft7),
 	}
-	schema, err := jsonschema.Generate(t, opts...)
+	schema, err := jsonschema.Generate(context.Background(), t, opts...)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
@@ -115,6 +117,7 @@ func main() {
 			want: `package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -133,7 +136,7 @@ func main() {
 		jsonschema.WithAdditionalProperties(true),
 		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
 	}
-	schema, err := jsonschema.Generate(t, opts...)
+	schema, err := jsonschema.Generate(context.Background(), t, opts...)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)

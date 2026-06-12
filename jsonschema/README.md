@@ -41,7 +41,7 @@ type SimpleStruct struct {
 	Age   int    `json:"age,omitempty"`
 }
 
-schema, err := jsonschema.GenerateFor[SimpleStruct]()
+schema, err := jsonschema.GenerateFor[SimpleStruct](ctx)
 ```
 
 produces:
@@ -122,13 +122,15 @@ if errors.As(err, &ve) {
 ## Generating schemas
 
 The primary entry point is the generic `GenerateFor`. A `reflect.Type` variant,
-`Generate`, is provided for dynamic use, and `MustGenerateFor` panics on error
-for package-scope variables, where for a static type and fixed options
-generation either always succeeds or always fails:
+`Generate`, is provided for dynamic use, and `MustGenerateFor` (which passes
+`context.Background()`) panics on error for package-scope variables, where for
+a static type and fixed options generation either always succeeds or always
+fails. The context is passed to the `CommentProvider` with every comment
+lookup:
 
 ```go
-schema, err := jsonschema.GenerateFor[MyType](opts...)
-schema, err := jsonschema.Generate(reflect.TypeFor[MyType](), opts...)
+schema, err := jsonschema.GenerateFor[MyType](ctx, opts...)
+schema, err := jsonschema.Generate(ctx, reflect.TypeFor[MyType](), opts...)
 
 var mySchema = jsonschema.MustGenerateFor[MyType](opts...)
 ```
@@ -196,7 +198,7 @@ shared by every recursive occurrence. Under `Draft7`, a default landing on a
 defaults produce — because Draft-07 readers ignore `$ref` siblings:
 
 ```go
-schema, err := jsonschema.GenerateFor[Config](
+schema, err := jsonschema.GenerateFor[Config](ctx,
 	jsonschema.WithDefaultsFrom(Config{Host: "localhost", Port: 8080}),
 )
 // properties.host.default == "localhost", properties.port.default == 8080
@@ -279,7 +281,7 @@ stringers := jsonschema.TypeSchemaResolverFunc(
 	},
 )
 
-schema, err := jsonschema.GenerateFor[Config](jsonschema.WithTypeResolver(stringers))
+schema, err := jsonschema.GenerateFor[Config](ctx, jsonschema.WithTypeResolver(stringers))
 ```
 
 Resolvers returning `ok == false` pass the type to the next resolver and then
@@ -392,7 +394,7 @@ type, extraction is silently skipped. The `jsonschema` tag's `description`
 wins over a provider-supplied comment.
 
 ```go
-schema, err := jsonschema.GenerateFor[MyType](
+schema, err := jsonschema.GenerateFor[MyType](ctx,
 	jsonschema.WithCommentProvider(jsonschema.NewGoCommentProvider()),
 )
 ```
@@ -475,7 +477,7 @@ type CreateUser struct {
 	Age   int    `json:"age"   validate:"gte=0,lte=150"`
 }
 
-schema, err := jsonschema.GenerateFor[CreateUser](
+schema, err := jsonschema.GenerateFor[CreateUser](ctx,
 	jsonschema.WithTagInterpreter(validate.NewInterpreter()),
 )
 ```

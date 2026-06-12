@@ -1,6 +1,7 @@
 package jsonschema_test
 
 import (
+	"context"
 	"reflect"
 	"testing"
 
@@ -22,7 +23,10 @@ func TestPromotedEmbeddedFieldComment(t *testing.T) {
 		Extra string `json:"extra"`
 	}
 
-	s, err := jsonschema.GenerateFor[doc](jsonschema.WithCommentProvider(jsonschema.NewGoCommentProvider()))
+	s, err := jsonschema.GenerateFor[doc](
+		t.Context(),
+		jsonschema.WithCommentProvider(jsonschema.NewGoCommentProvider()),
+	)
 	require.NoError(t, err)
 
 	require.Contains(t, s.Properties, "size")
@@ -35,7 +39,10 @@ func TestPromotedEmbeddedFieldComment(t *testing.T) {
 func TestGenericTypeComment(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[alpha.Box[int]](jsonschema.WithCommentProvider(jsonschema.NewGoCommentProvider()))
+	s, err := jsonschema.GenerateFor[alpha.Box[int]](
+		t.Context(),
+		jsonschema.WithCommentProvider(jsonschema.NewGoCommentProvider()),
+	)
 	require.NoError(t, err)
 
 	assert.Contains(t, s.Description, "documented generic type")
@@ -50,9 +57,11 @@ type mapCommentProvider struct {
 	fields map[reflect.Type]map[string]string
 }
 
-func (p mapCommentProvider) TypeComment(t reflect.Type) string { return p.types[t] }
+func (p mapCommentProvider) TypeComment(_ context.Context, t reflect.Type) string {
+	return p.types[t]
+}
 
-func (p mapCommentProvider) FieldComment(t reflect.Type, fieldName string) string {
+func (p mapCommentProvider) FieldComment(_ context.Context, t reflect.Type, fieldName string) string {
 	return p.fields[t][fieldName]
 }
 
@@ -77,7 +86,7 @@ func commentedWidgetProvider() mapCommentProvider {
 func TestWithCommentProvider(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[commentedWidget](
+	s, err := jsonschema.GenerateFor[commentedWidget](t.Context(),
 		jsonschema.WithCommentProvider(commentedWidgetProvider()),
 	)
 	require.NoError(t, err)
@@ -99,7 +108,7 @@ func TestWithCommentProvider_LastRegistrationWins(t *testing.T) {
 	t.Run("provider replaces AST extraction", func(t *testing.T) {
 		t.Parallel()
 
-		s, err := jsonschema.GenerateFor[commentedWidget](
+		s, err := jsonschema.GenerateFor[commentedWidget](t.Context(),
 			jsonschema.WithCommentProvider(jsonschema.NewGoCommentProvider()),
 			jsonschema.WithCommentProvider(provider),
 		)
@@ -110,7 +119,7 @@ func TestWithCommentProvider_LastRegistrationWins(t *testing.T) {
 	t.Run("nil provider clears earlier registration", func(t *testing.T) {
 		t.Parallel()
 
-		s, err := jsonschema.GenerateFor[commentedWidget](
+		s, err := jsonschema.GenerateFor[commentedWidget](t.Context(),
 			jsonschema.WithCommentProvider(provider),
 			jsonschema.WithCommentProvider(nil),
 		)
@@ -138,7 +147,7 @@ func TestWithCommentProvider_PromotedFieldDeclaringType(t *testing.T) {
 		},
 	}
 
-	s, err := jsonschema.GenerateFor[doc](jsonschema.WithCommentProvider(provider))
+	s, err := jsonschema.GenerateFor[doc](t.Context(), jsonschema.WithCommentProvider(provider))
 	require.NoError(t, err)
 
 	require.Contains(t, s.Properties, "size")

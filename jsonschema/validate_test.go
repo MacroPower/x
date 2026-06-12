@@ -5310,7 +5310,7 @@ func TestEmbeddedStructFieldShadowing(t *testing.T) {
 		Child
 	}
 
-	s, err := jsonschema.GenerateFor[Parent]()
+	s, err := jsonschema.GenerateFor[Parent](t.Context())
 	require.NoError(t, err)
 
 	// "name" should come from Child (which shadows GrandChild.Name).

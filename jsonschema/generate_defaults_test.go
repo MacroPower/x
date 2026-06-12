@@ -44,7 +44,7 @@ func TestWithDefaultsFrom(t *testing.T) {
 	t.Run("instance values become property defaults", func(t *testing.T) {
 		t.Parallel()
 
-		s, err := jsonschema.GenerateFor[defaultsConfig](
+		s, err := jsonschema.GenerateFor[defaultsConfig](t.Context(),
 			jsonschema.WithDefaultsFrom(defaultsConfig{
 				Host:   "localhost",
 				Port:   8080,
@@ -59,7 +59,7 @@ func TestWithDefaultsFrom(t *testing.T) {
 	t.Run("omitempty zero value leaves default unset", func(t *testing.T) {
 		t.Parallel()
 
-		s, err := jsonschema.GenerateFor[defaultsConfig](
+		s, err := jsonschema.GenerateFor[defaultsConfig](t.Context(),
 			jsonschema.WithDefaultsFrom(defaultsConfig{Host: "localhost"}),
 		)
 		require.NoError(t, err)
@@ -72,7 +72,7 @@ func TestWithDefaultsFrom(t *testing.T) {
 			"a key omitted by omitempty contributes no default")
 
 		// A present omitempty key still contributes its value.
-		s, err = jsonschema.GenerateFor[defaultsConfig](
+		s, err = jsonschema.GenerateFor[defaultsConfig](t.Context(),
 			jsonschema.WithDefaultsFrom(defaultsConfig{Debug: true}),
 		)
 		require.NoError(t, err)
@@ -82,7 +82,7 @@ func TestWithDefaultsFrom(t *testing.T) {
 	t.Run("instance overwrites tag default", func(t *testing.T) {
 		t.Parallel()
 
-		s, err := jsonschema.GenerateFor[defaultsConfig](
+		s, err := jsonschema.GenerateFor[defaultsConfig](t.Context(),
 			jsonschema.WithDefaultsFrom(defaultsConfig{Port: 8080}),
 		)
 		require.NoError(t, err)
@@ -94,7 +94,7 @@ func TestWithDefaultsFrom(t *testing.T) {
 	t.Run("tag default survives without the option", func(t *testing.T) {
 		t.Parallel()
 
-		s, err := jsonschema.GenerateFor[defaultsConfig]()
+		s, err := jsonschema.GenerateFor[defaultsConfig](t.Context())
 		require.NoError(t, err)
 
 		assert.JSONEq(t, `80`, string(s.Properties["port"].Default))
@@ -103,7 +103,7 @@ func TestWithDefaultsFrom(t *testing.T) {
 	t.Run("nested struct becomes whole-value default", func(t *testing.T) {
 		t.Parallel()
 
-		s, err := jsonschema.GenerateFor[defaultsConfig](
+		s, err := jsonschema.GenerateFor[defaultsConfig](t.Context(),
 			jsonschema.WithDefaultsFrom(defaultsConfig{
 				Nested: defaultsNested{Path: "/var/data"},
 			}),
@@ -118,7 +118,7 @@ func TestWithDefaultsFrom(t *testing.T) {
 	t.Run("pointer instance", func(t *testing.T) {
 		t.Parallel()
 
-		s, err := jsonschema.GenerateFor[defaultsConfig](
+		s, err := jsonschema.GenerateFor[defaultsConfig](t.Context(),
 			jsonschema.WithDefaultsFrom(&defaultsConfig{Host: "localhost"}),
 		)
 		require.NoError(t, err)
@@ -129,7 +129,7 @@ func TestWithDefaultsFrom(t *testing.T) {
 	t.Run("pointer root applies through nullable wrapper", func(t *testing.T) {
 		t.Parallel()
 
-		s, err := jsonschema.GenerateFor[*defaultsConfig](
+		s, err := jsonschema.GenerateFor[*defaultsConfig](t.Context(),
 			jsonschema.WithDefaultsFrom(defaultsConfig{Host: "localhost", Port: 8080}),
 		)
 		require.NoError(t, err)
@@ -150,7 +150,7 @@ func TestWithDefaultsFrom(t *testing.T) {
 	t.Run("pointer root with nullability disabled", func(t *testing.T) {
 		t.Parallel()
 
-		s, err := jsonschema.GenerateFor[*defaultsConfig](
+		s, err := jsonschema.GenerateFor[*defaultsConfig](t.Context(),
 			jsonschema.WithNullable(false),
 			jsonschema.WithDefaultsFrom(defaultsConfig{Host: "localhost"}),
 		)
@@ -164,7 +164,7 @@ func TestWithDefaultsFrom(t *testing.T) {
 	t.Run("type mismatch", func(t *testing.T) {
 		t.Parallel()
 
-		_, err := jsonschema.GenerateFor[defaultsConfig](
+		_, err := jsonschema.GenerateFor[defaultsConfig](t.Context(),
 			jsonschema.WithDefaultsFrom(defaultsNested{Path: "/var/data"}),
 		)
 		require.ErrorIs(t, err, jsonschema.ErrInvalidDefaultsInstance)
@@ -173,7 +173,7 @@ func TestWithDefaultsFrom(t *testing.T) {
 	t.Run("nil instance", func(t *testing.T) {
 		t.Parallel()
 
-		_, err := jsonschema.GenerateFor[defaultsConfig](
+		_, err := jsonschema.GenerateFor[defaultsConfig](t.Context(),
 			jsonschema.WithDefaultsFrom(nil),
 		)
 		require.ErrorIs(t, err, jsonschema.ErrInvalidDefaultsInstance)
@@ -182,7 +182,7 @@ func TestWithDefaultsFrom(t *testing.T) {
 	t.Run("non-object marshal", func(t *testing.T) {
 		t.Parallel()
 
-		_, err := jsonschema.GenerateFor[defaultsString](
+		_, err := jsonschema.GenerateFor[defaultsString](t.Context(),
 			jsonschema.WithDefaultsFrom(defaultsString("hello")),
 		)
 		require.ErrorIs(t, err, jsonschema.ErrInvalidDefaultsInstance,
@@ -192,7 +192,7 @@ func TestWithDefaultsFrom(t *testing.T) {
 	t.Run("nil pointer instance marshals to null", func(t *testing.T) {
 		t.Parallel()
 
-		_, err := jsonschema.GenerateFor[defaultsConfig](
+		_, err := jsonschema.GenerateFor[defaultsConfig](t.Context(),
 			jsonschema.WithDefaultsFrom((*defaultsConfig)(nil)),
 		)
 		require.ErrorIs(t, err, jsonschema.ErrInvalidDefaultsInstance,
@@ -202,7 +202,7 @@ func TestWithDefaultsFrom(t *testing.T) {
 	t.Run("Draft-07 wraps a defaulted ref property in allOf", func(t *testing.T) {
 		t.Parallel()
 
-		s, err := jsonschema.GenerateFor[defaultsConfig](
+		s, err := jsonschema.GenerateFor[defaultsConfig](t.Context(),
 			jsonschema.WithDraft(jsonschema.Draft7),
 			jsonschema.WithDefaultsFrom(defaultsConfig{
 				Nested: defaultsNested{Path: "/var/data"},
@@ -224,7 +224,7 @@ func TestWithDefaultsFrom(t *testing.T) {
 	t.Run("self-referential root applies to definition", func(t *testing.T) {
 		t.Parallel()
 
-		s, err := jsonschema.GenerateFor[defaultsRecursive](
+		s, err := jsonschema.GenerateFor[defaultsRecursive](t.Context(),
 			jsonschema.WithDefaultsFrom(defaultsRecursive{Name: "head"}),
 		)
 		require.NoError(t, err)

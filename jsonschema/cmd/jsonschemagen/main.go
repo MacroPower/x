@@ -362,6 +362,7 @@ func quotePath(p string) string {
 var mainGoTmpl = template.Must(template.New("main.go").Parse(`package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -391,7 +392,7 @@ func main() {
 		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
 		{{- end}}
 	}
-	schema, err := jsonschema.Generate(t, opts...)
+	schema, err := jsonschema.Generate(context.Background(), t, opts...)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)

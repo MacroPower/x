@@ -39,27 +39,27 @@ func TestGenerateFor_PrimitiveTypes(t *testing.T) {
 		want     string
 	}{
 		"string": {
-			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[string]() },
+			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[string](t.Context()) },
 			want:     `{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"string"}`,
 		},
 		"bool": {
-			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[bool]() },
+			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[bool](t.Context()) },
 			want:     `{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"boolean"}`,
 		},
 		"int": {
-			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[int]() },
+			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[int](t.Context()) },
 			want:     `{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"integer"}`,
 		},
 		"int8": {
-			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[int8]() },
+			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[int8](t.Context()) },
 			want:     `{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"integer","minimum":-128,"maximum":127}`,
 		},
 		"uint16": {
-			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[uint16]() },
+			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[uint16](t.Context()) },
 			want:     `{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"integer","minimum":0,"maximum":65535}`,
 		},
 		"float64": {
-			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[float64]() },
+			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[float64](t.Context()) },
 			want:     `{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"number"}`,
 		},
 	}
@@ -81,7 +81,7 @@ func TestGenerateFor_PrimitiveTypes(t *testing.T) {
 func TestGenerateFor_Pointer(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[*string]()
+	s, err := jsonschema.GenerateFor[*string](t.Context())
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -96,7 +96,7 @@ func TestGenerateFor_Pointer(t *testing.T) {
 func TestGenerateFor_Slice(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[[]int]()
+	s, err := jsonschema.GenerateFor[[]int](t.Context())
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -111,7 +111,7 @@ func TestGenerateFor_Slice(t *testing.T) {
 func TestGenerateFor_Array(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[[3]string]()
+	s, err := jsonschema.GenerateFor[[3]string](t.Context())
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -128,7 +128,7 @@ func TestGenerateFor_Array(t *testing.T) {
 func TestGenerateFor_Map(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[map[string]int]()
+	s, err := jsonschema.GenerateFor[map[string]int](t.Context())
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -143,7 +143,7 @@ func TestGenerateFor_Map(t *testing.T) {
 func TestGenerateFor_Interface(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[any]()
+	s, err := jsonschema.GenerateFor[any](t.Context())
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -160,7 +160,7 @@ type SimpleStruct struct {
 func TestGenerateFor_SimpleStruct(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[SimpleStruct]()
+	s, err := jsonschema.GenerateFor[SimpleStruct](t.Context())
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -186,25 +186,25 @@ func TestGenerateFor_BuiltinOverrides(t *testing.T) {
 		want     string
 	}{
 		"time.Time": {
-			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[time.Time]() },
+			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[time.Time](t.Context()) },
 			want:     `{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"string","format":"date-time"}`,
 		},
 		"json.RawMessage": {
-			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[json.RawMessage]() },
+			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[json.RawMessage](t.Context()) },
 			want:     `{"$schema":"https://json-schema.org/draft/2020-12/schema"}`,
 		},
 		"json.Number": {
-			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[json.Number]() },
+			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[json.Number](t.Context()) },
 			want:     `{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"number"}`,
 		},
 		"[]byte": {
-			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[[]byte]() },
+			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[[]byte](t.Context()) },
 			want:     `{"$schema":"https://json-schema.org/draft/2020-12/schema","type":["null","string"],"contentEncoding":"base64"}`,
 		},
 		"big.Int": {
 			// Big.Int.MarshalJSON emits a bare JSON number, so the schema is an
 			// unbounded integer rather than a string.
-			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[big.Int]() },
+			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[big.Int](t.Context()) },
 			want:     `{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"integer"}`,
 		},
 	}
@@ -248,7 +248,7 @@ func TestGenerateFor_UnsupportedTypes(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := jsonschema.Generate(tc.t)
+			_, err := jsonschema.Generate(t.Context(), tc.t)
 			require.ErrorIs(t, err, tc.err)
 		})
 	}
@@ -264,7 +264,7 @@ func TestMustGenerateFor(t *testing.T) {
 			Name string `json:"name"`
 		}
 
-		want, err := jsonschema.GenerateFor[Config]()
+		want, err := jsonschema.GenerateFor[Config](t.Context())
 		require.NoError(t, err)
 
 		got := jsonschema.MustGenerateFor[Config]()
@@ -285,14 +285,14 @@ func TestGenerateFor_UnsupportedMapKey(t *testing.T) {
 
 	type BadMap map[float64]string
 
-	_, err := jsonschema.GenerateFor[BadMap]()
+	_, err := jsonschema.GenerateFor[BadMap](t.Context())
 	require.ErrorIs(t, err, jsonschema.ErrUnsupportedMapKey)
 }
 
 func TestGenerateFor_Draft7(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[SimpleStruct](jsonschema.WithDraft(jsonschema.Draft7))
+	s, err := jsonschema.GenerateFor[SimpleStruct](t.Context(), jsonschema.WithDraft(jsonschema.Draft7))
 	require.NoError(t, err)
 	assert.Equal(t, "http://json-schema.org/draft-07/schema#", s.Schema)
 }
@@ -311,7 +311,7 @@ type UserWithAddress struct {
 func TestGenerateFor_DefsAndRef(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[UserWithAddress]()
+	s, err := jsonschema.GenerateFor[UserWithAddress](t.Context())
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -350,7 +350,7 @@ func TestGenerateFor_DefsAndRef(t *testing.T) {
 func TestGenerateFor_Draft7DefsAndRef(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[UserWithAddress](jsonschema.WithDraft(jsonschema.Draft7))
+	s, err := jsonschema.GenerateFor[UserWithAddress](t.Context(), jsonschema.WithDraft(jsonschema.Draft7))
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -389,7 +389,7 @@ func TestGenerateFor_Draft7DefsAndRef(t *testing.T) {
 func TestGenerateFor_WithDefinitionsFalse(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[UserWithAddress](jsonschema.WithDefinitions(false))
+	s, err := jsonschema.GenerateFor[UserWithAddress](t.Context(), jsonschema.WithDefinitions(false))
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -433,7 +433,7 @@ func TestGenerateFor_WithDefinitionsFalse(t *testing.T) {
 func TestGenerateFor_WithAdditionalProperties(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[SimpleStruct](jsonschema.WithAdditionalProperties(true))
+	s, err := jsonschema.GenerateFor[SimpleStruct](t.Context(), jsonschema.WithAdditionalProperties(true))
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -460,7 +460,7 @@ func (MyEnum) MarshalText() ([]byte, error) { return nil, nil }
 func TestGenerateFor_TextMarshaler(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[MyEnum]()
+	s, err := jsonschema.GenerateFor[MyEnum](t.Context())
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -481,7 +481,7 @@ func (Status) JSONSchema() *jsonschema.Schema {
 func TestGenerateFor_JSONSchemaProvider(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[Status]()
+	s, err := jsonschema.GenerateFor[Status](t.Context())
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -506,7 +506,7 @@ func (Metadata) JSONSchemaExtend(s *jsonschema.Schema) {
 func TestGenerateFor_JSONSchemaExtender(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[Metadata]()
+	s, err := jsonschema.GenerateFor[Metadata](t.Context())
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -534,7 +534,7 @@ func TestGenerateFor_WithTypeSchema(t *testing.T) {
 		Type:   "string",
 		Format: "date",
 	}
-	s, err := jsonschema.GenerateFor[time.Time](
+	s, err := jsonschema.GenerateFor[time.Time](t.Context(),
 		jsonschema.WithTypeSchema(reflect.TypeFor[time.Time](), override),
 	)
 	require.NoError(t, err)
@@ -557,7 +557,7 @@ func TestGenerateFor_WithTypeSchemaFor(t *testing.T) {
 		Type:   "string",
 		Format: "date",
 	}
-	s, err := jsonschema.GenerateFor[time.Time](
+	s, err := jsonschema.GenerateFor[time.Time](t.Context(),
 		jsonschema.WithTypeSchemaFor[time.Time](override),
 	)
 	require.NoError(t, err)
@@ -580,7 +580,7 @@ func TestGenerateFor_JsonStringTag(t *testing.T) {
 		Name    string `json:"name,string"`
 	}
 
-	s, err := jsonschema.GenerateFor[Config]()
+	s, err := jsonschema.GenerateFor[Config](t.Context())
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -606,7 +606,7 @@ func TestGenerateFor_OmitzeroTag(t *testing.T) {
 		Value int    `json:"value,omitzero"`
 	}
 
-	s, err := jsonschema.GenerateFor[Config]()
+	s, err := jsonschema.GenerateFor[Config](t.Context())
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -632,7 +632,7 @@ func TestGenerateFor_JSONTagDash(t *testing.T) {
 		DashID string `json:"-,"` //nolint:staticcheck // Tag under test: "-," names the field "-" in encoding/json v1.
 	}
 
-	s, err := jsonschema.GenerateFor[Config]()
+	s, err := jsonschema.GenerateFor[Config](t.Context())
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -654,7 +654,7 @@ func TestGenerateFor_EmptyStruct(t *testing.T) {
 
 	type Empty struct{}
 
-	s, err := jsonschema.GenerateFor[Empty]()
+	s, err := jsonschema.GenerateFor[Empty](t.Context())
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -674,7 +674,7 @@ type RecursiveNode struct {
 func TestGenerateFor_RecursiveType(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[RecursiveNode]()
+	s, err := jsonschema.GenerateFor[RecursiveNode](t.Context())
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -723,7 +723,7 @@ type recursiveArray [2]*recursiveArray
 func TestGenerateFor_RecursiveSlice(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[recursiveSlice]()
+	s, err := jsonschema.GenerateFor[recursiveSlice](t.Context())
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -746,7 +746,7 @@ func TestGenerateFor_RecursiveSlice(t *testing.T) {
 func TestGenerateFor_RecursiveMap(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[recursiveMap]()
+	s, err := jsonschema.GenerateFor[recursiveMap](t.Context())
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -770,7 +770,7 @@ func TestGenerateFor_RecursiveMap(t *testing.T) {
 func TestGenerateFor_RecursiveArray(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[recursiveArray]()
+	s, err := jsonschema.GenerateFor[recursiveArray](t.Context())
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -814,7 +814,7 @@ func TestGenerateFor_SelfEmbeddingStruct(t *testing.T) {
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"x":5}`, string(encoded))
 
-	s, err := jsonschema.GenerateFor[selfEmbeddingStruct]()
+	s, err := jsonschema.GenerateFor[selfEmbeddingStruct](t.Context())
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -840,7 +840,7 @@ func TestGenerateFor_SelfEmbeddingStruct(t *testing.T) {
 func TestGenerateFor_IntegerMapKeys(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[map[int]string]()
+	s, err := jsonschema.GenerateFor[map[int]string](t.Context())
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -856,7 +856,7 @@ func TestGenerateFor_PointerToUnrestricted(t *testing.T) {
 	t.Parallel()
 
 	// *interface{} → {}.
-	s, err := jsonschema.Generate(reflect.TypeFor[*any]())
+	s, err := jsonschema.Generate(t.Context(), reflect.TypeFor[*any]())
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -871,7 +871,7 @@ func TestGenerateFor_NullableByteSlice(t *testing.T) {
 		Data []byte `json:"data"`
 	}
 
-	s, err := jsonschema.GenerateFor[Msg]()
+	s, err := jsonschema.GenerateFor[Msg](t.Context())
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -893,7 +893,7 @@ func TestGenerateFor_NullableByteSlice(t *testing.T) {
 func TestGenerateFor_WithNamer(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[UserWithAddress](
+	s, err := jsonschema.GenerateFor[UserWithAddress](t.Context(),
 		jsonschema.WithNamer(jsonschema.NamerFunc(func(t reflect.Type) string {
 			return "custom_" + t.Name()
 		})),
@@ -912,7 +912,7 @@ func TestGenerateFor_ValidateInterpreter(t *testing.T) {
 		Age   int    `json:"age"   validate:"gte=0,lte=150"`
 	}
 
-	s, err := jsonschema.GenerateFor[CreateUser](
+	s, err := jsonschema.GenerateFor[CreateUser](t.Context(),
 		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
@@ -953,7 +953,7 @@ func TestGenerateFor_JSONSchemaTag_KeyValue(t *testing.T) {
 		Mode    string `json:"mode"    jsonschema:"enum=debug|release|test"`
 	}
 
-	s, err := jsonschema.GenerateFor[Config]()
+	s, err := jsonschema.GenerateFor[Config](t.Context())
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -989,7 +989,7 @@ func TestGenerateFor_JSONSchemaTag_BareDescription(t *testing.T) {
 		Name string `json:"name" jsonschema:"The user's display name"`
 	}
 
-	s, err := jsonschema.GenerateFor[Config]()
+	s, err := jsonschema.GenerateFor[Config](t.Context())
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -1015,7 +1015,7 @@ func TestGenerateFor_JSONSchemaTag_DescriptionWithEqualsAfterSpace(t *testing.T)
 		Name string `json:"name" jsonschema:"Formula: x=y"`
 	}
 
-	s, err := jsonschema.GenerateFor[Config]()
+	s, err := jsonschema.GenerateFor[Config](t.Context())
 	require.NoError(t, err)
 	require.NotNil(t, s.Properties, "schema: %s", marshalSchema(t, s))
 	require.NotNil(t, s.Properties["name"], "properties: %v", s.Properties)
@@ -1029,7 +1029,7 @@ func TestGenerateFor_JSONSchemaTag_UnrecognizedKey(t *testing.T) {
 		Name string `json:"name" jsonschema:"descrption=typo"`
 	}
 
-	_, err := jsonschema.GenerateFor[Config]()
+	_, err := jsonschema.GenerateFor[Config](t.Context())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unrecognized key")
 }
@@ -1037,7 +1037,7 @@ func TestGenerateFor_JSONSchemaTag_UnrecognizedKey(t *testing.T) {
 func TestGenerateFor_MultiplePointerIndirection(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.Generate(reflect.TypeFor[**string]())
+	s, err := jsonschema.Generate(t.Context(), reflect.TypeFor[**string]())
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -1052,7 +1052,7 @@ func TestGenerateFor_MultiplePointerIndirection(t *testing.T) {
 func TestGenerateFor_MapNullable(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[map[string]string]()
+	s, err := jsonschema.GenerateFor[map[string]string](t.Context())
 	require.NoError(t, err)
 	// Maps should be nullable.
 	assert.Equal(t, []string{"null", "object"}, s.Types)
@@ -1061,7 +1061,7 @@ func TestGenerateFor_MapNullable(t *testing.T) {
 func TestGenerateFor_SliceNullable(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[[]string]()
+	s, err := jsonschema.GenerateFor[[]string](t.Context())
 	require.NoError(t, err)
 	// Slices should be nullable.
 	assert.Equal(t, []string{"null", "array"}, s.Types)
@@ -1090,7 +1090,7 @@ func TestGenerateFor_WithNullable(t *testing.T) {
 		}{
 			"slice": {
 				generate: func() (*jsonschema.Schema, error) {
-					return jsonschema.GenerateFor[[]string](jsonschema.WithNullable(false))
+					return jsonschema.GenerateFor[[]string](t.Context(), jsonschema.WithNullable(false))
 				},
 				want: `{
 					"$schema":"https://json-schema.org/draft/2020-12/schema",
@@ -1100,7 +1100,7 @@ func TestGenerateFor_WithNullable(t *testing.T) {
 			},
 			"map": {
 				generate: func() (*jsonschema.Schema, error) {
-					return jsonschema.GenerateFor[map[string]int](jsonschema.WithNullable(false))
+					return jsonschema.GenerateFor[map[string]int](t.Context(), jsonschema.WithNullable(false))
 				},
 				want: `{
 					"$schema":"https://json-schema.org/draft/2020-12/schema",
@@ -1110,7 +1110,7 @@ func TestGenerateFor_WithNullable(t *testing.T) {
 			},
 			"byteSlice": {
 				generate: func() (*jsonschema.Schema, error) {
-					return jsonschema.GenerateFor[[]byte](jsonschema.WithNullable(false))
+					return jsonschema.GenerateFor[[]byte](t.Context(), jsonschema.WithNullable(false))
 				},
 				want: `{
 					"$schema":"https://json-schema.org/draft/2020-12/schema",
@@ -1122,7 +1122,7 @@ func TestGenerateFor_WithNullable(t *testing.T) {
 			// entry must also drop the null branch and the root ref stays bare.
 			"recursiveSliceDefs": {
 				generate: func() (*jsonschema.Schema, error) {
-					return jsonschema.GenerateFor[recursiveSlice](jsonschema.WithNullable(false))
+					return jsonschema.GenerateFor[recursiveSlice](t.Context(), jsonschema.WithNullable(false))
 				},
 				want: `{
 					"$schema":"https://json-schema.org/draft/2020-12/schema",
@@ -1157,7 +1157,7 @@ func TestGenerateFor_WithNullable(t *testing.T) {
 	t.Run("pointers", func(t *testing.T) {
 		t.Parallel()
 
-		s, err := jsonschema.GenerateFor[NullableOptOut](jsonschema.WithNullable(false))
+		s, err := jsonschema.GenerateFor[NullableOptOut](t.Context(), jsonschema.WithNullable(false))
 		require.NoError(t, err)
 
 		got, err := json.Marshal(s)
@@ -1190,7 +1190,7 @@ func TestGenerateFor_WithNullable(t *testing.T) {
 	t.Run("defaultStillNullable", func(t *testing.T) {
 		t.Parallel()
 
-		s, err := jsonschema.GenerateFor[[]string](jsonschema.WithNullable(true))
+		s, err := jsonschema.GenerateFor[[]string](t.Context(), jsonschema.WithNullable(true))
 		require.NoError(t, err)
 		assert.Equal(t, []string{"null", "array"}, s.Types)
 	})
@@ -1203,7 +1203,7 @@ func TestGenerateFor_Draft7_RefWithAnnotation(t *testing.T) {
 		Home Address `json:"home" jsonschema:"description=Home address"`
 	}
 
-	s, err := jsonschema.GenerateFor[Container](jsonschema.WithDraft(jsonschema.Draft7))
+	s, err := jsonschema.GenerateFor[Container](t.Context(), jsonschema.WithDraft(jsonschema.Draft7))
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -1242,7 +1242,7 @@ func TestGenerateFor_Draft2020_RefWithAnnotation(t *testing.T) {
 		Home Address `json:"home" jsonschema:"description=Home address"`
 	}
 
-	s, err := jsonschema.GenerateFor[Container]()
+	s, err := jsonschema.GenerateFor[Container](t.Context())
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -1283,7 +1283,7 @@ func TestGenerateFor_PropertyOrder(t *testing.T) {
 		Third  bool   `json:"third"`
 	}
 
-	s, err := jsonschema.GenerateFor[Ordered]()
+	s, err := jsonschema.GenerateFor[Ordered](t.Context())
 	require.NoError(t, err)
 
 	// PropertyOrder should match Go struct field order.
@@ -1298,7 +1298,7 @@ func TestGenerateFor_JSONSchemaTag_Default(t *testing.T) {
 		Host string `json:"host" jsonschema:"default=localhost"`
 	}
 
-	s, err := jsonschema.GenerateFor[Config]()
+	s, err := jsonschema.GenerateFor[Config](t.Context())
 	require.NoError(t, err)
 
 	assert.JSONEq(t, `8080`, string(s.Properties["port"].Default))
@@ -1312,7 +1312,7 @@ func TestGenerateFor_JSONSchemaTag_Const(t *testing.T) {
 		Version string `json:"version" jsonschema:"const=v1"`
 	}
 
-	s, err := jsonschema.GenerateFor[Config]()
+	s, err := jsonschema.GenerateFor[Config](t.Context())
 	require.NoError(t, err)
 
 	constVal := *s.Properties["version"].Const
@@ -1335,7 +1335,7 @@ func TestGenerateFor_NonStructExtender(t *testing.T) {
 		Tags NonStructExtender `json:"tags"`
 	}
 
-	s, err := jsonschema.GenerateFor[Container]()
+	s, err := jsonschema.GenerateFor[Container](t.Context())
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -1365,7 +1365,7 @@ func TestGenerateFor_NonStructExtender_Root(t *testing.T) {
 	t.Parallel()
 
 	// Non-struct type with JSONSchemaExtender used as root type.
-	s, err := jsonschema.GenerateFor[NonStructExtender]()
+	s, err := jsonschema.GenerateFor[NonStructExtender](t.Context())
 	require.NoError(t, err)
 
 	assert.Equal(t, "A list of tags", s.Description)
@@ -1389,7 +1389,7 @@ func TestGenerateFor_NonStructProvider_ExtractedToDefs(t *testing.T) {
 		Level NonStructProvider `json:"level"`
 	}
 
-	s, err := jsonschema.GenerateFor[Container]()
+	s, err := jsonschema.GenerateFor[Container](t.Context())
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -1425,7 +1425,7 @@ func TestGenerateFor_NamedPrimitiveInlined(t *testing.T) {
 		P2 Priority `json:"p2"`
 	}
 
-	s, err := jsonschema.GenerateFor[Config]()
+	s, err := jsonschema.GenerateFor[Config](t.Context())
 	require.NoError(t, err)
 
 	// No $defs — named primitive types are inlined.
@@ -1438,7 +1438,7 @@ func TestGenerateFor_RecursiveType_WithDefinitionsFalse(t *testing.T) {
 	t.Parallel()
 
 	// Cyclic types must still emit $defs/$ref even when WithDefinitions(false).
-	s, err := jsonschema.GenerateFor[RecursiveNode](jsonschema.WithDefinitions(false))
+	s, err := jsonschema.GenerateFor[RecursiveNode](t.Context(), jsonschema.WithDefinitions(false))
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -1474,7 +1474,7 @@ func TestGenerateFor_WithComments_TypeDescription(t *testing.T) {
 
 	// Draft has a doc comment; the full text is extracted, so pin its
 	// opening sentence rather than the whole comment.
-	s, err := jsonschema.GenerateFor[jsonschema.Draft](
+	s, err := jsonschema.GenerateFor[jsonschema.Draft](t.Context(),
 		jsonschema.WithCommentProvider(jsonschema.NewGoCommentProvider()),
 	)
 	require.NoError(t, err)
@@ -1488,7 +1488,7 @@ func TestGenerateFor_WithComments_StructDescription(t *testing.T) {
 	t.Parallel()
 
 	// FieldContext has a type-level doc comment.
-	s, err := jsonschema.GenerateFor[jsonschema.FieldContext](
+	s, err := jsonschema.GenerateFor[jsonschema.FieldContext](t.Context(),
 		jsonschema.WithCommentProvider(jsonschema.NewGoCommentProvider()),
 	)
 	require.NoError(t, err)
@@ -1504,11 +1504,11 @@ func TestGenerateFor_BigRatAndBigFloat(t *testing.T) {
 		want     string
 	}{
 		"big.Rat": {
-			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[big.Rat]() },
+			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[big.Rat](t.Context()) },
 			want:     `{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"string","pattern":"^-?[0-9]+(/[0-9]+)?$"}`,
 		},
 		"big.Float": {
-			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[big.Float]() },
+			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[big.Float](t.Context()) },
 			want:     `{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"string","pattern":"^-?[0-9]+(\\.[0-9]+)?([eE][-+]?[0-9]+)?$"}`,
 		},
 	}
@@ -1530,14 +1530,14 @@ func TestGenerateFor_BigRatAndBigFloat(t *testing.T) {
 func TestGenerateFor_UnsafePointer(t *testing.T) {
 	t.Parallel()
 
-	_, err := jsonschema.Generate(reflect.TypeFor[unsafe.Pointer]())
+	_, err := jsonschema.Generate(t.Context(), reflect.TypeFor[unsafe.Pointer]())
 	require.ErrorIs(t, err, jsonschema.ErrUnsupportedType)
 }
 
 func TestGenerateFor_Complex64(t *testing.T) {
 	t.Parallel()
 
-	_, err := jsonschema.GenerateFor[complex64]()
+	_, err := jsonschema.GenerateFor[complex64](t.Context())
 	require.ErrorIs(t, err, jsonschema.ErrUnsupportedType)
 }
 
@@ -1551,7 +1551,7 @@ func TestGenerateFor_NamedTypeWrappingBuiltinNoOverride(t *testing.T) {
 	// NamedTime wraps time.Time but is a distinct type — it should NOT get
 	// the time.Time override. Since time.Time is a struct, NamedTime will
 	// also be reflected as a struct.
-	s, err := jsonschema.GenerateFor[NamedTime]()
+	s, err := jsonschema.GenerateFor[NamedTime](t.Context())
 	require.NoError(t, err)
 
 	// Should NOT have format: "date-time" (that's the time.Time override).
@@ -1566,7 +1566,7 @@ func TestGenerateFor_JsonStringOnNonApplicableType(t *testing.T) {
 		Data []int `json:"data,string"` //nolint:staticcheck // Intentional: exercises ",string" on a non-applicable type.
 	}
 
-	s, err := jsonschema.GenerateFor[Config]()
+	s, err := jsonschema.GenerateFor[Config](t.Context())
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -1592,7 +1592,7 @@ func TestGenerateFor_JsonStringOnPointerType(t *testing.T) {
 		Port *int `json:"port,string"`
 	}
 
-	s, err := jsonschema.GenerateFor[Config]()
+	s, err := jsonschema.GenerateFor[Config](t.Context())
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -1630,7 +1630,7 @@ func (BothProviderAndExtender) JSONSchemaExtend(s *jsonschema.Schema) {
 func TestGenerateFor_ProviderTakesPriorityOverExtender(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[BothProviderAndExtender]()
+	s, err := jsonschema.GenerateFor[BothProviderAndExtender](t.Context())
 	require.NoError(t, err)
 
 	// Provider takes priority — description should be "from provider", not "from extender".
@@ -1649,7 +1649,7 @@ func TestGenerateFor_WithTypeSchema_NamedStructExtractedToDefs(t *testing.T) {
 		Addr Address `json:"addr"`
 	}
 
-	s, err := jsonschema.GenerateFor[Container](
+	s, err := jsonschema.GenerateFor[Container](t.Context(),
 		jsonschema.WithTypeSchema(reflect.TypeFor[Address](), override),
 	)
 	require.NoError(t, err)
@@ -1680,7 +1680,10 @@ func TestGenerateFor_JSONSchemaTagOverridesExtractedComment(t *testing.T) {
 
 	// Alpha.Widget is a real package-level type, so its doc comments are
 	// extracted by go/packages (a function-local type's comments are not).
-	s, err := jsonschema.GenerateFor[alpha.Widget](jsonschema.WithCommentProvider(jsonschema.NewGoCommentProvider()))
+	s, err := jsonschema.GenerateFor[alpha.Widget](
+		t.Context(),
+		jsonschema.WithCommentProvider(jsonschema.NewGoCommentProvider()),
+	)
 	require.NoError(t, err)
 
 	// The unannotated field gets its extracted doc comment.
@@ -1703,7 +1706,7 @@ func TestGenerateFor_TagInterpreterIntersectsJSONSchemaTagBounds(t *testing.T) {
 		Loose string `json:"loose" jsonschema:"minLength=2" validate:"min=3"`
 	}
 
-	s, err := jsonschema.GenerateFor[Config](
+	s, err := jsonschema.GenerateFor[Config](t.Context(),
 		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
@@ -1725,7 +1728,7 @@ func TestGenerateFor_GenericTypeNaming(t *testing.T) {
 		Pair GenericPair[int, string] `json:"pair"`
 	}
 
-	s, err := jsonschema.GenerateFor[Container]()
+	s, err := jsonschema.GenerateFor[Container](t.Context())
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -1762,7 +1765,7 @@ func TestGenerateFor_NullableRefWithAnnotation(t *testing.T) {
 		Work *Address `json:"work" jsonschema:"description=Work address"`
 	}
 
-	s, err := jsonschema.GenerateFor[Container]()
+	s, err := jsonschema.GenerateFor[Container](t.Context())
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -1802,7 +1805,7 @@ func TestGenerateFor_NullableRefWithAnnotation(t *testing.T) {
 func TestGenerateFor_SlogLevel(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.Generate(reflect.TypeFor[slog.Level]())
+	s, err := jsonschema.Generate(t.Context(), reflect.TypeFor[slog.Level]())
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -1821,7 +1824,7 @@ func (NilProvider) JSONSchema() *jsonschema.Schema { return nil }
 func TestGenerateFor_JSONSchemaProviderReturnsNil(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[NilProvider]()
+	s, err := jsonschema.GenerateFor[NilProvider](t.Context())
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -1834,7 +1837,7 @@ func TestGenerateFor_PointerToJSONRawMessage(t *testing.T) {
 	t.Parallel()
 
 	// *json.RawMessage → {} (unrestricted, not nullable-wrapped).
-	s, err := jsonschema.Generate(reflect.TypeFor[*json.RawMessage]())
+	s, err := jsonschema.Generate(t.Context(), reflect.TypeFor[*json.RawMessage]())
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -1854,7 +1857,7 @@ func TestGenerateFor_TextMarshalerPointerReceiver(t *testing.T) {
 	t.Parallel()
 
 	// *T implements TextMarshaler → T should produce {"type": "string"}.
-	s, err := jsonschema.GenerateFor[PointerReceiverMarshaler]()
+	s, err := jsonschema.GenerateFor[PointerReceiverMarshaler](t.Context())
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -1879,7 +1882,7 @@ func TestGenerateFor_NamedCompositeTypesInlined(t *testing.T) {
 		Matrix Matrix `json:"matrix"`
 	}
 
-	s, err := jsonschema.GenerateFor[Container]()
+	s, err := jsonschema.GenerateFor[Container](t.Context())
 	require.NoError(t, err)
 
 	// No $defs — named composite types are inlined.
@@ -1898,7 +1901,7 @@ func (k TextMarshalerKey) MarshalText() ([]byte, error) { return nil, nil }
 func TestGenerateFor_TextMarshalerMapKey(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[map[TextMarshalerKey]string]()
+	s, err := jsonschema.GenerateFor[map[TextMarshalerKey]string](t.Context())
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -1919,7 +1922,7 @@ func TestGenerateFor_JSONSchemaTag_Examples(t *testing.T) {
 		Mode string `json:"mode" jsonschema:"examples=debug|release"`
 	}
 
-	s, err := jsonschema.GenerateFor[Config]()
+	s, err := jsonschema.GenerateFor[Config](t.Context())
 	require.NoError(t, err)
 
 	// Integer examples should be parsed as integers (precision-preserving).
@@ -1933,7 +1936,7 @@ func TestGenerateFor_ExtenderDescriptionPreservedWithComments(t *testing.T) {
 
 	// JSONSchemaExtend runs after comment extraction, so the extender's
 	// description takes precedence over the AST doc comment.
-	s, err := jsonschema.GenerateFor[NonStructExtender](
+	s, err := jsonschema.GenerateFor[NonStructExtender](t.Context(),
 		jsonschema.WithCommentProvider(jsonschema.NewGoCommentProvider()),
 	)
 	require.NoError(t, err)
@@ -1952,7 +1955,7 @@ func TestGenerateFor_ExtenderDescriptionPreservedWithComments_InDefs(t *testing.
 		Tags NonStructExtender `json:"tags"`
 	}
 
-	s, err := jsonschema.GenerateFor[Container](
+	s, err := jsonschema.GenerateFor[Container](t.Context(),
 		jsonschema.WithCommentProvider(jsonschema.NewGoCommentProvider()),
 	)
 	require.NoError(t, err)
@@ -1990,7 +1993,7 @@ func TestGenerateFor_Draft7_RefWithValidationKeywords(t *testing.T) {
 		Home Address `json:"home" jsonschema:"pattern=^[A-Z],format=custom"`
 	}
 
-	s, err := jsonschema.GenerateFor[Container](jsonschema.WithDraft(jsonschema.Draft7))
+	s, err := jsonschema.GenerateFor[Container](t.Context(), jsonschema.WithDraft(jsonschema.Draft7))
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -2031,7 +2034,7 @@ func TestGenerateFor_Draft7_RefWithValidateInterpreter(t *testing.T) {
 		Home Address `json:"home" validate:"required"`
 	}
 
-	s, err := jsonschema.GenerateFor[Container](
+	s, err := jsonschema.GenerateFor[Container](t.Context(),
 		jsonschema.WithDraft(jsonschema.Draft7),
 		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
 	)
@@ -2077,7 +2080,7 @@ func TestGenerateFor_Draft7_RefWithInterpreterNot(t *testing.T) {
 		Level NonStructProvider `json:"level" validate:"ne=0"`
 	}
 
-	s, err := jsonschema.GenerateFor[Container](
+	s, err := jsonschema.GenerateFor[Container](t.Context(),
 		jsonschema.WithDraft(jsonschema.Draft7),
 		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
 	)
@@ -2134,7 +2137,7 @@ func TestGenerateFor_WithTypeSchemaOverridesProvider(t *testing.T) {
 		Type:        "object",
 		Description: "from override",
 	}
-	s, err := jsonschema.GenerateFor[WithTypeSchemaProvider](
+	s, err := jsonschema.GenerateFor[WithTypeSchemaProvider](t.Context(),
 		jsonschema.WithTypeSchema(reflect.TypeFor[WithTypeSchemaProvider](), override),
 	)
 	require.NoError(t, err)
@@ -2154,7 +2157,7 @@ func TestGenerateFor_JsonStringOverridesRef(t *testing.T) {
 		S Status `json:"s,string"`
 	}
 
-	s, err := jsonschema.GenerateFor[Container]()
+	s, err := jsonschema.GenerateFor[Container](t.Context())
 	require.NoError(t, err)
 
 	// The field schema should be {type: string}, NOT a $ref to Status.
@@ -2180,7 +2183,7 @@ func TestGenerateFor_WithTypeSchemaNamedNonStructInlined(t *testing.T) {
 		Enum: []any{1, 2, 3},
 	}
 
-	s, err := jsonschema.GenerateFor[Container](
+	s, err := jsonschema.GenerateFor[Container](t.Context(),
 		jsonschema.WithTypeSchema(reflect.TypeFor[Priority](), override),
 	)
 	require.NoError(t, err)
@@ -2202,7 +2205,7 @@ func TestGenerateFor_Draft7_NullableRefWithAnnotation(t *testing.T) {
 		Work *Address `json:"work" jsonschema:"description=Work address"`
 	}
 
-	s, err := jsonschema.GenerateFor[Container](
+	s, err := jsonschema.GenerateFor[Container](t.Context(),
 		jsonschema.WithDraft(jsonschema.Draft7),
 	)
 	require.NoError(t, err)
@@ -2242,7 +2245,7 @@ func TestGenerateFor_WithComments_FieldDescription(t *testing.T) {
 	t.Parallel()
 
 	// FieldContext has doc comments on both the type and its fields.
-	s, err := jsonschema.GenerateFor[jsonschema.FieldContext](
+	s, err := jsonschema.GenerateFor[jsonschema.FieldContext](t.Context(),
 		jsonschema.WithCommentProvider(jsonschema.NewGoCommentProvider()),
 	)
 	require.NoError(t, err)
@@ -2261,7 +2264,7 @@ func TestGenerateFor_WithComments_HandlesTypesWithoutSource(t *testing.T) {
 		T time.Time `json:"t"`
 	}
 
-	s, err := jsonschema.GenerateFor[Container](
+	s, err := jsonschema.GenerateFor[Container](t.Context(),
 		jsonschema.WithCommentProvider(jsonschema.NewGoCommentProvider()),
 	)
 	require.NoError(t, err)
@@ -2285,7 +2288,7 @@ func TestGenerateFor_TextMarshalerWithExtender(t *testing.T) {
 	// TextMarshaler produces {"type": "string"}, then JSONSchemaExtend
 	// should add enum values. The type also implements JSONSchemaExtender,
 	// so it should be extracted to $defs when used in a struct field.
-	s, err := jsonschema.GenerateFor[TextMarshalerWithExtender]()
+	s, err := jsonschema.GenerateFor[TextMarshalerWithExtender](t.Context())
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -2306,7 +2309,7 @@ func TestGenerateFor_TextMarshalerWithExtender_ExtractedToDefs(t *testing.T) {
 		Status TextMarshalerWithExtender `json:"status"`
 	}
 
-	s, err := jsonschema.GenerateFor[Container]()
+	s, err := jsonschema.GenerateFor[Container](t.Context())
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -2338,7 +2341,7 @@ func TestGenerateFor_TextMarshalerNamedStructExtractedToDefs(t *testing.T) {
 		TM PointerReceiverMarshaler `json:"tm"`
 	}
 
-	s, err := jsonschema.GenerateFor[Container]()
+	s, err := jsonschema.GenerateFor[Container](t.Context())
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -2368,7 +2371,7 @@ func TestGenerateFor_BuiltinOverrideExtractedToDefs(t *testing.T) {
 		End   *time.Time `json:"end,omitempty"`
 	}
 
-	s, err := jsonschema.GenerateFor[Event]()
+	s, err := jsonschema.GenerateFor[Event](t.Context())
 	require.NoError(t, err)
 
 	got, err := json.Marshal(s)
@@ -2397,7 +2400,7 @@ func TestGenerateFor_BuiltinOverrideExtractedToDefs(t *testing.T) {
 func TestUint64BoundExclusiveMaximum(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[uint64]()
+	s, err := jsonschema.GenerateFor[uint64](t.Context())
 	require.NoError(t, err)
 
 	// Float64 cannot represent MaxUint64 exactly: it rounds up to 2^64, which is
@@ -2425,7 +2428,7 @@ func TestUint64BoundExclusiveMaximum(t *testing.T) {
 func TestInt64BoundExclusiveMaximum(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[int64]()
+	s, err := jsonschema.GenerateFor[int64](t.Context())
 	require.NoError(t, err)
 
 	require.NotNil(t, s.Minimum, "int64 should have an inclusive minimum bound")
@@ -2447,7 +2450,7 @@ func TestInt64BoundExclusiveMaximum(t *testing.T) {
 func TestArrayGenerationUsesPrefixItems(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[[3]string]()
+	s, err := jsonschema.GenerateFor[[3]string](t.Context())
 	require.NoError(t, err)
 
 	got := marshalSchema(t, s)
@@ -2477,7 +2480,7 @@ func TestCollectStructFieldsTaggedFieldWinsAtSameDepth(t *testing.T) {
 		Untagged
 	}
 
-	s, err := jsonschema.GenerateFor[Outer]()
+	s, err := jsonschema.GenerateFor[Outer](t.Context())
 	require.NoError(t, err)
 
 	// Encoding/json resolves same-depth ambiguity by preferring the tagged
@@ -2500,7 +2503,7 @@ func TestDraft07AdditionalPropertiesRetainedWithPromotedEmbed(t *testing.T) {
 		Name string `json:"name"`
 	}
 
-	s, err := jsonschema.Generate(reflect.TypeFor[Outer](), jsonschema.WithDraft(jsonschema.Draft7))
+	s, err := jsonschema.Generate(t.Context(), reflect.TypeFor[Outer](), jsonschema.WithDraft(jsonschema.Draft7))
 	require.NoError(t, err)
 
 	got := marshalSchema(t, s)
@@ -2527,13 +2530,13 @@ func TestProviderSchemaIsolatedAcrossCalls(t *testing.T) {
 	t.Parallel()
 
 	// First generation call.
-	s1, err := jsonschema.GenerateFor[providerMutationTestType]()
+	s1, err := jsonschema.GenerateFor[providerMutationTestType](t.Context())
 	require.NoError(t, err)
 
 	desc1 := s1.Description
 
 	// Second generation call -- should not see mutations from first.
-	s2, err := jsonschema.GenerateFor[providerMutationTestType]()
+	s2, err := jsonschema.GenerateFor[providerMutationTestType](t.Context())
 	require.NoError(t, err)
 
 	assert.Equal(t, desc1, s2.Description,
@@ -2552,7 +2555,7 @@ func TestProviderSchemaIsolatedAcrossCalls(t *testing.T) {
 func TestProviderSchemaIsolatedWithComments(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[alpha.ProviderSingleton](
+	s, err := jsonschema.GenerateFor[alpha.ProviderSingleton](t.Context(),
 		jsonschema.WithCommentProvider(jsonschema.NewGoCommentProvider()),
 	)
 	require.NoError(t, err)
@@ -2576,10 +2579,10 @@ func TestBigNumericSchemaHasFormatOrPattern(t *testing.T) {
 		generate func() (*jsonschema.Schema, error)
 	}{
 		"big.Rat": {
-			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[big.Rat]() },
+			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[big.Rat](t.Context()) },
 		},
 		"big.Float": {
-			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[big.Float]() },
+			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[big.Float](t.Context()) },
 		},
 	}
 
@@ -2612,7 +2615,7 @@ func TestNullablePointerFieldsUseConsistentPattern(t *testing.T) {
 		Plain *string `json:"plain"`
 	}
 
-	s, err := jsonschema.GenerateFor[Outer]()
+	s, err := jsonschema.GenerateFor[Outer](t.Context())
 	require.NoError(t, err)
 
 	got := marshalSchema(t, s)
@@ -2645,7 +2648,7 @@ func TestPointerEmbeddedStructFieldsAreOptional(t *testing.T) {
 		Name string `json:"name"`
 	}
 
-	s, err := jsonschema.GenerateFor[Outer]()
+	s, err := jsonschema.GenerateFor[Outer](t.Context())
 	require.NoError(t, err)
 
 	_ = marshalSchema(t, s)
@@ -2671,7 +2674,7 @@ func TestDefaultNamerSpacesForGenerics(t *testing.T) {
 		G Generic[int, string] `json:"g"`
 	}
 
-	s, err := jsonschema.GenerateFor[Container]()
+	s, err := jsonschema.GenerateFor[Container](t.Context())
 	require.NoError(t, err)
 
 	// Check that no $defs key contains a space.
@@ -2691,7 +2694,7 @@ func TestWithNamerNilDoesNotPanic(t *testing.T) {
 	// WithNamer(nil) should produce a clear error, not a panic.
 	assert.NotPanics(t, func() {
 		//nolint:errcheck // Asserting only that the call does not panic.
-		_, _ = jsonschema.GenerateFor[Simple](jsonschema.WithNamer(nil))
+		_, _ = jsonschema.GenerateFor[Simple](t.Context(), jsonschema.WithNamer(nil))
 	}, "WithNamer(nil) should not panic")
 }
 
@@ -2705,7 +2708,7 @@ func TestWithTagInterpreterNilDoesNotPanic(t *testing.T) {
 	// WithTagInterpreter(nil) should produce a clear error, not a panic.
 	assert.NotPanics(t, func() {
 		//nolint:errcheck // Asserting only that the call does not panic.
-		_, _ = jsonschema.GenerateFor[Simple](jsonschema.WithTagInterpreter(nil))
+		_, _ = jsonschema.GenerateFor[Simple](t.Context(), jsonschema.WithTagInterpreter(nil))
 	}, "WithTagInterpreter(nil) should not panic")
 }
 
@@ -2720,7 +2723,7 @@ func TestJSONStringOnStructLeavesNoOrphanedDefs(t *testing.T) {
 		Data Inner `json:"data,string"` //nolint:staticcheck // Intentional: exercises ",string" on a non-applicable type.
 	}
 
-	s, err := jsonschema.GenerateFor[Outer]()
+	s, err := jsonschema.GenerateFor[Outer](t.Context())
 	require.NoError(t, err)
 
 	// json:",string" does not apply to a struct field, so Inner keeps its normal
@@ -2751,7 +2754,7 @@ func TestMutualRecursionNoDanglingRef(t *testing.T) {
 	// A root reached only through another definition (here mutualA is reached
 	// via mutualB) must stay in $defs rather than being inlined and deleted,
 	// which would leave mutualB's $ref to it dangling.
-	s, err := jsonschema.GenerateFor[mutualA]()
+	s, err := jsonschema.GenerateFor[mutualA](t.Context())
 	require.NoError(t, err)
 
 	require.NotNil(t, s.Defs)
@@ -2768,10 +2771,10 @@ func TestSliceAndPointerSliceProduceIdenticalSchemas(t *testing.T) {
 
 	// Slices always emit ["null","array"], so []T and *[]T produce identical
 	// schemas.
-	sliceSchema, err := jsonschema.GenerateFor[[]string]()
+	sliceSchema, err := jsonschema.GenerateFor[[]string](t.Context())
 	require.NoError(t, err)
 
-	ptrSliceSchema, err := jsonschema.GenerateFor[*[]string]()
+	ptrSliceSchema, err := jsonschema.GenerateFor[*[]string](t.Context())
 	require.NoError(t, err)
 
 	sliceJSON, err := json.Marshal(sliceSchema)
@@ -2789,10 +2792,10 @@ func TestMapAndPointerMapProduceIdenticalSchemas(t *testing.T) {
 
 	// Maps always emit ["null","object"], so map and *map produce identical
 	// schemas.
-	mapSchema, err := jsonschema.GenerateFor[map[string]string]()
+	mapSchema, err := jsonschema.GenerateFor[map[string]string](t.Context())
 	require.NoError(t, err)
 
-	ptrMapSchema, err := jsonschema.GenerateFor[*map[string]string]()
+	ptrMapSchema, err := jsonschema.GenerateFor[*map[string]string](t.Context())
 	require.NoError(t, err)
 
 	mapJSON, err := json.Marshal(mapSchema)
@@ -2819,7 +2822,7 @@ func TestGenerateThenValidateRoundTrip(t *testing.T) {
 		Address Address `json:"address"`
 	}
 
-	s, err := jsonschema.GenerateFor[Person]()
+	s, err := jsonschema.GenerateFor[Person](t.Context())
 	require.NoError(t, err)
 
 	// Valid instance should pass.
@@ -2875,7 +2878,7 @@ func TestProviderPanicOnZeroValueWrapsErrProviderPanic(t *testing.T) {
 	// A JSONSchema() method that dereferences a nil pointer field panics when
 	// called on the zero value during generation. The generator recovers the
 	// panic and returns an error wrapping ErrProviderPanic rather than crashing.
-	_, err := jsonschema.GenerateFor[panickingProvider]()
+	_, err := jsonschema.GenerateFor[panickingProvider](t.Context())
 	require.ErrorIs(t, err, jsonschema.ErrProviderPanic)
 }
 
@@ -2886,7 +2889,7 @@ func TestDirectMethodWinsOverEmbeddedProvider(t *testing.T) {
 	// that provides it, Go's method resolution gives the outer type's directly-
 	// declared method precedence. The generator honors that: the outer schema
 	// wins over the embedded provider's schema.
-	s, err := jsonschema.GenerateFor[outerWithDirectMethods]()
+	s, err := jsonschema.GenerateFor[outerWithDirectMethods](t.Context())
 	require.NoError(t, err)
 
 	assert.Equal(t, "outer", s.Type, "outer's direct JSONSchema must win over the embedded provider")
@@ -2906,7 +2909,7 @@ func TestEmbeddedStructSchemaValidatesInstances(t *testing.T) {
 		Name string `json:"name"`
 	}
 
-	s, err := jsonschema.GenerateFor[Outer]()
+	s, err := jsonschema.GenerateFor[Outer](t.Context())
 	require.NoError(t, err)
 
 	// Validate a conforming instance.
@@ -2932,7 +2935,7 @@ func TestExtenderOnlyEmbedHasFieldsPromoted(t *testing.T) {
 		Name string `json:"name"`
 	}
 
-	s, err := jsonschema.GenerateFor[Outer]()
+	s, err := jsonschema.GenerateFor[Outer](t.Context())
 	require.NoError(t, err)
 
 	got := marshalSchema(t, s)
@@ -2957,7 +2960,7 @@ func TestFieldShadowingOuterWinsOverEmbedded(t *testing.T) {
 		Name string `json:"name"` // string -- should shadow Inner.Name
 	}
 
-	s, err := jsonschema.GenerateFor[Outer]()
+	s, err := jsonschema.GenerateFor[Outer](t.Context())
 	require.NoError(t, err)
 
 	prop := s.Properties["name"]
@@ -2979,7 +2982,7 @@ func TestGenerateFor_CrossPackageNameDisambiguation(t *testing.T) {
 		B beta.Widget  `json:"b"`
 	}
 
-	s, err := jsonschema.GenerateFor[Root]()
+	s, err := jsonschema.GenerateFor[Root](t.Context())
 	require.NoError(t, err)
 
 	require.Contains(t, s.Defs, "alpha_Widget")
@@ -3002,7 +3005,7 @@ func TestGenerateFor_JSONMarshalerNotConsulted(t *testing.T) {
 
 	// A type implementing only json.Marshaler (not encoding.TextMarshaler) falls
 	// through to kind-based reflection; MarshalJSON does not influence the schema.
-	s, err := jsonschema.GenerateFor[jsonMarshalerOnly]()
+	s, err := jsonschema.GenerateFor[jsonMarshalerOnly](t.Context())
 	require.NoError(t, err)
 
 	assert.Equal(t, "object", s.Type)
@@ -3019,7 +3022,7 @@ func TestGenerateFor_ProviderPointerReceiver(t *testing.T) {
 	t.Parallel()
 
 	// JSONSchemaProvider declared on a pointer receiver still applies.
-	s, err := jsonschema.GenerateFor[ptrProvider]()
+	s, err := jsonschema.GenerateFor[ptrProvider](t.Context())
 	require.NoError(t, err)
 
 	raw, err := json.Marshal(s)
@@ -3040,7 +3043,7 @@ func TestGenerateFor_ExtenderPointerReceiver(t *testing.T) {
 	t.Parallel()
 
 	// JSONSchemaExtender declared on a pointer receiver still applies.
-	s, err := jsonschema.GenerateFor[ptrExtender]()
+	s, err := jsonschema.GenerateFor[ptrExtender](t.Context())
 	require.NoError(t, err)
 
 	raw, err := json.Marshal(s)
@@ -3075,7 +3078,7 @@ func TestGenerateFor_NamedByteSlice(t *testing.T) {
 	t.Run("named []byte is base64 string", func(t *testing.T) {
 		t.Parallel()
 
-		s, err := jsonschema.GenerateFor[byteSliceNamed]()
+		s, err := jsonschema.GenerateFor[byteSliceNamed](t.Context())
 		require.NoError(t, err)
 
 		got, err := json.Marshal(s)
@@ -3091,7 +3094,7 @@ func TestGenerateFor_NamedByteSlice(t *testing.T) {
 	t.Run("slice of named uint8 is base64 string", func(t *testing.T) {
 		t.Parallel()
 
-		s, err := jsonschema.GenerateFor[byteSliceOfNamed]()
+		s, err := jsonschema.GenerateFor[byteSliceOfNamed](t.Context())
 		require.NoError(t, err)
 
 		got, err := json.Marshal(s)
@@ -3102,7 +3105,7 @@ func TestGenerateFor_NamedByteSlice(t *testing.T) {
 	t.Run("uint8 element implementing json.Marshaler is not base64", func(t *testing.T) {
 		t.Parallel()
 
-		s, err := jsonschema.GenerateFor[byteSliceOfMarshaler]()
+		s, err := jsonschema.GenerateFor[byteSliceOfMarshaler](t.Context())
 		require.NoError(t, err)
 
 		got, err := json.Marshal(s)
@@ -3125,7 +3128,7 @@ func TestGenerateFor_URLReflectsAsObject(t *testing.T) {
 	doc, err := json.Marshal(*u)
 	require.NoError(t, err)
 
-	s, err := jsonschema.GenerateFor[url.URL]()
+	s, err := jsonschema.GenerateFor[url.URL](t.Context())
 	require.NoError(t, err)
 
 	assert.Equal(t, "object", s.Type)
@@ -3146,7 +3149,7 @@ func TestGenerateFor_BigIntMatchesMarshalOutput(t *testing.T) {
 	require.NoError(t, err)
 	require.JSONEq(t, `{"i":123}`, string(data))
 
-	s, err := jsonschema.GenerateFor[bigIntDoc]()
+	s, err := jsonschema.GenerateFor[bigIntDoc](t.Context())
 	require.NoError(t, err)
 	assert.NoError(t, jsonschema.ValidateJSON(t.Context(), s, data),
 		"generated schema rejected big.Int's actual serialization: %s", data)

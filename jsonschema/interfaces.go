@@ -62,13 +62,18 @@ func (f TypeSchemaResolverFunc) SchemaForType(t reflect.Type) (*Schema, bool) { 
 // Generate calls.
 type CommentProvider interface {
 	// TypeComment returns the description for a named type, or "" for none.
-	TypeComment(t reflect.Type) string
+	// The context comes from the Generate call in effect, so a provider
+	// doing I/O (the built-in one loads package sources) can honor
+	// cancellation and deadlines; a provider that performs no cancellable
+	// work can ignore it.
+	TypeComment(ctx context.Context, t reflect.Type) string
 
 	// FieldComment returns the description for the named Go field of struct
 	// type t, or "" for none. T is the type that declares the field: for a
 	// field promoted from an embedded struct it is the embedded type, where
-	// the field's doc comment lives, not the outer struct.
-	FieldComment(t reflect.Type, fieldName string) string
+	// the field's doc comment lives, not the outer struct. The context
+	// follows the TypeComment contract.
+	FieldComment(ctx context.Context, t reflect.Type, fieldName string) string
 }
 
 // TagInterpreter translates struct field tags into JSON Schema constraints.
