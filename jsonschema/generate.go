@@ -21,7 +21,8 @@ func (f generateOptionFunc) applyGenerate(g *generator) { f(g) }
 
 // WithTagInterpreter registers a TagInterpreter that maps struct tags to
 // schema constraints. Multiple interpreters can be registered and are
-// applied in order. A nil t is ignored.
+// applied in order. [TagInterpreterFunc] adapts a bare function. A nil t is
+// ignored.
 func WithTagInterpreter(t TagInterpreter) GenerateOption {
 	return generateOptionFunc(func(g *generator) {
 		if t != nil {

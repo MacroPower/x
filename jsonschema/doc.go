@@ -196,7 +196,8 @@
 // type, full [reflect.StructField] (for reading sibling struct tags such
 // as the json tag's options), and the target [Draft] (for emitting
 // draft-appropriate keywords). Multiple interpreters can be registered and
-// are applied in order.
+// are applied in order. [TagInterpreterFunc] adapts a bare function and a
+// tag key to the interface, so a one-off interpreter needs no named type.
 //
 // # Definitions and References
 //
@@ -581,7 +582,8 @@
 //
 // By default only local fragment refs are resolved during validation (those
 // under #/$defs or #/definitions). Remote and absolute $ref URIs are resolved
-// via an optional [RefResolver] set with [WithResolver]. An unresolvable
+// via an optional [RefResolver] set with [WithResolver]; [RefResolverFunc]
+// adapts a bare function, so a one-off resolver needs no named type. An unresolvable
 // remote or absolute $ref is reported as a [*ValidationError] by the validation
 // walk: with no resolver (or a resolver returning nil) the message begins with
 // "cannot resolve $ref" and includes the quoted ref, while a resolver that

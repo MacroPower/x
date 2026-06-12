@@ -84,6 +84,24 @@ type TagInterpreter interface {
 	Interpret(tag string, field FieldContext) error
 }
 
+// TagInterpreterFunc adapts a bare interpreting function to a
+// [TagInterpreter] for the named struct tag key, following [FormatFunc].
+func TagInterpreterFunc(key string, fn func(tag string, field FieldContext) error) TagInterpreter {
+	return tagInterpreterFunc{key: key, fn: fn}
+}
+
+// tagInterpreterFunc is the [TagInterpreter] returned by [TagInterpreterFunc].
+type tagInterpreterFunc struct {
+	fn  func(string, FieldContext) error
+	key string
+}
+
+func (t tagInterpreterFunc) TagKey() string { return t.key }
+
+func (t tagInterpreterFunc) Interpret(tag string, field FieldContext) error {
+	return t.fn(tag, field)
+}
+
 // FormatValidator checks string instances against one named format during
 // validation. Like [TagInterpreter], the value declares the name it handles,
 // so a single registration via [WithFormatValidator] carries both, and an
@@ -134,6 +152,18 @@ type RefResolver interface {
 	ResolveRef(ctx context.Context, uri string) (*Schema, error)
 }
 
+// RefResolverFunc adapts a bare resolution function to a [RefResolver],
+// following [net/http.HandlerFunc], so a one-off resolver — a closure over
+// an HTTP client or a map of preloaded schemas — needs no named type. The
+// [RefResolver] contract applies unchanged, including concurrency safety
+// when the resolver is shared across Validate calls.
+type RefResolverFunc func(ctx context.Context, uri string) (*Schema, error)
+
+// ResolveRef calls f.
+func (f RefResolverFunc) ResolveRef(ctx context.Context, uri string) (*Schema, error) {
+	return f(ctx, uri)
+}
+
 // ResolverOption is the option type returned by [WithResolver]: a single
 // option value that configures both validation ([ValidateOption]) and
 // inlining ([InlineOption]).
@@ -153,7 +183,8 @@ func (o resolverOption) applyInline(in *inliner) { in.resolver = o.r }
 
 // WithResolver sets the [RefResolver] used to resolve remote $ref URIs. The
 // returned option serves both validation and inlining, so one value
-// configures [Compile], [Validate], and [Inline] alike.
+// configures [Compile], [Validate], and [Inline] alike. [RefResolverFunc]
+// adapts a bare function.
 //
 // During validation the resolver is called when local fragment resolution
 // fails, and resolved schemas are cached for the duration of the run. During

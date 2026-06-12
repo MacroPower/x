@@ -446,6 +446,9 @@ name, Go type, full `reflect.StructField` for reading sibling struct tags
 such as the `json` tag's options, and the target `Draft` for emitting
 draft-appropriate keywords) and modify the schema in place. Multiple
 interpreters can be registered and run in order, after the `jsonschema` tag.
+`TagInterpreterFunc(key, fn)` adapts a bare function and a tag key to the
+interface (following `FormatFunc`), so a one-off interpreter needs no named
+type.
 
 ### The `validate` interpreter
 
@@ -711,7 +714,9 @@ each run carries its own — and the context-less entry points pass
 `context.Background()`. The package ships no network resolver; fetching
 remains the caller's concern. The `WithResolver` option value itself serves
 both validation and inlining, so one option configures `Compile`, `Validate`,
-and `Inline` alike.
+and `Inline` alike. `RefResolverFunc` adapts a bare function (following
+`net/http.HandlerFunc`), so a one-off resolver — a closure over an HTTP
+client or a map of preloaded schemas — needs no named type.
 
 ## Schema traversal and predicates
 
