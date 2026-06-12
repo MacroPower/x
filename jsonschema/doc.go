@@ -539,12 +539,15 @@
 // Keyword "propertyNames" and an InstancePath pointing at the offending
 // property, with the inner keyword failure in its Causes.
 //
-// Alongside the InstancePath JSON Pointer, every error produced by validation
-// carries the same path in typed form: [ValidationError.InstanceSegments]
-// returns one [Segment] per reference token, each marked as an object key or
-// an array index. The pointer string cannot distinguish array index 1 from an
-// object property named "1"; the segments can, so source-mapping consumers
-// need not re-parse the pointer and guess. Hand-constructed errors return nil.
+// Alongside the InstancePath and SchemaPath JSON Pointers, every error
+// produced by validation carries both paths in typed form:
+// [ValidationError.InstanceSegments] and [ValidationError.SchemaSegments]
+// return one [Segment] per reference token, each marked as an object key or
+// an array index. The pointer strings cannot distinguish array index 1 from
+// an object property named "1" (or an allOf branch from a property named
+// "allOf"'s member), and member keys carry ~0/~1 escaping; the segments
+// resolve both, so source-mapping consumers need not re-parse the pointers
+// and guess. Hand-constructed errors return nil from both.
 //
 // The keyword names validation reports are exported as Keyword* constants
 // ([KeywordRequired], [KeywordRef], ...), so code branching on

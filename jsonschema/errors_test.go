@@ -360,6 +360,159 @@ func TestValidationError_InstanceSegments_HandConstructed(t *testing.T) {
 	assert.Nil(t, ve.InstanceSegments())
 }
 
+func TestValidationError_SchemaSegments(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		schema   *jsonschema.Schema
+		instance any
+		wantPath string
+		want     []jsonschema.Segment
+	}{
+		"root keyword": {
+			schema:   &jsonschema.Schema{Type: "string"},
+			instance: 1,
+			wantPath: "/type",
+			want:     []jsonschema.Segment{{Key: "type"}},
+		},
+		"property key escaped in path but verbatim in segment": {
+			schema: &jsonschema.Schema{
+				Type:       "object",
+				Properties: map[string]*jsonschema.Schema{"a/b": {Type: "string"}},
+			},
+			instance: map[string]any{"a/b": 1},
+			wantPath: "/properties/a~1b/type",
+			want: []jsonschema.Segment{
+				{Key: "properties"},
+				{Key: "a/b"},
+				{Key: "type"},
+			},
+		},
+		"list applicator branch carries the index in typed form": {
+			schema: &jsonschema.Schema{
+				AllOf: []*jsonschema.Schema{{Type: "string"}, {Type: "integer"}},
+			},
+			instance: "x",
+			wantPath: "/allOf/1/type",
+			want: []jsonschema.Segment{
+				{Key: "allOf"},
+				{Index: 1, IsIndex: true},
+				{Key: "type"},
+			},
+		},
+		"property named like a keyword stays a key segment": {
+			schema: &jsonschema.Schema{
+				Type: "object",
+				Properties: map[string]*jsonschema.Schema{
+					"items": {Type: "string"},
+				},
+			},
+			instance: map[string]any{"items": 1},
+			wantPath: "/properties/items/type",
+			want: []jsonschema.Segment{
+				{Key: "properties"},
+				{Key: "items"},
+				{Key: "type"},
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := jsonschema.Validate(t.Context(), tc.schema, tc.instance)
+
+			var ve *jsonschema.ValidationError
+
+			require.ErrorAs(t, err, &ve)
+
+			leaves := ve.Leaves()
+			require.Len(t, leaves, 1)
+
+			assert.Equal(t, tc.wantPath, leaves[0].SchemaPath)
+			assert.Equal(t, tc.want, leaves[0].SchemaSegments())
+		})
+	}
+}
+
+// TestValidationError_SchemaSegments_RenderEqualsSchemaPath asserts that
+// re-rendering every error node's SchemaSegments as an RFC 6901 pointer
+// reproduces its SchemaPath byte for byte, across the whole error tree of a
+// schema mixing map applicators, list applicators, and leaf keywords.
+func TestValidationError_SchemaSegments_RenderEqualsSchemaPath(t *testing.T) {
+	t.Parallel()
+
+	render := func(segs []jsonschema.Segment) string {
+		var b strings.Builder
+
+		for _, seg := range segs {
+			b.WriteString("/")
+
+			if seg.IsIndex {
+				b.WriteString(strconv.Itoa(seg.Index))
+			} else {
+				key := strings.ReplaceAll(seg.Key, "~", "~0")
+				b.WriteString(strings.ReplaceAll(key, "/", "~1"))
+			}
+		}
+
+		return b.String()
+	}
+
+	schema := &jsonschema.Schema{
+		Type: "object",
+		Properties: map[string]*jsonschema.Schema{
+			"a~x": {Type: "string", MinLength: jsonschema.Ptr(3)},
+			"b/y": {
+				AnyOf: []*jsonschema.Schema{
+					{Type: "integer"},
+					{Type: "object", Required: []string{"z"}},
+				},
+			},
+			"arr": {
+				Type:  "array",
+				Items: &jsonschema.Schema{Pattern: "^x"},
+			},
+		},
+	}
+
+	err := jsonschema.Validate(t.Context(), schema, map[string]any{
+		"a~x": "no",
+		"b/y": "neither",
+		"arr": []any{"y"},
+	})
+
+	var ve *jsonschema.ValidationError
+
+	require.ErrorAs(t, err, &ve)
+
+	var walkTree func(e *jsonschema.ValidationError)
+
+	checked := 0
+	walkTree = func(e *jsonschema.ValidationError) {
+		assert.Equal(t, e.SchemaPath, render(e.SchemaSegments()),
+			"re-rendered segments must reproduce the pointer %q", e.SchemaPath)
+
+		checked++
+
+		for _, cause := range e.Causes {
+			walkTree(cause)
+		}
+	}
+	walkTree(ve)
+
+	assert.Greater(t, checked, 4, "the error tree should exercise several locations")
+}
+
+func TestValidationError_SchemaSegments_HandConstructed(t *testing.T) {
+	t.Parallel()
+
+	ve := &jsonschema.ValidationError{SchemaPath: "/properties/a/type"}
+
+	assert.Nil(t, ve.SchemaSegments())
+}
+
 func TestValidationError_TargetsKey(t *testing.T) {
 	t.Parallel()
 

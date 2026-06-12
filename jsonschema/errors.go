@@ -83,6 +83,10 @@ type ValidationError struct {
 	// see [ValidationError.InstanceSegments].
 	segments []Segment
 
+	// The typed form of SchemaPath, captured during the validation walk;
+	// see [ValidationError.SchemaSegments].
+	schemaSegs []Segment
+
 	// InstancePath is the JSON Pointer path to the failing location in the
 	// input data (e.g., "/address/city").
 	InstancePath string
@@ -135,6 +139,19 @@ type Segment struct {
 // hand-constructed errors return nil.
 func (e *ValidationError) InstanceSegments() []Segment {
 	return e.segments
+}
+
+// SchemaSegments returns the typed path to the keyword that triggered the
+// failure within the schema, one Segment per reference token of
+// [ValidationError.SchemaPath], outermost first — the schema-side
+// counterpart of [ValidationError.InstanceSegments], mirroring
+// [SubschemaEntry.Segments]. Unlike re-parsing SchemaPath, it carries member
+// keys verbatim (no ~0/~1 escaping to undo) and distinguishes a list index
+// (an allOf branch) from a property named like a number. It is populated for
+// errors produced by [Validate], [ValidateJSON], and the [Validator]
+// methods; hand-constructed errors return nil.
+func (e *ValidationError) SchemaSegments() []Segment {
+	return e.schemaSegs
 }
 
 // Error returns a multi-line string representation. The top-level message is

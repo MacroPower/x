@@ -692,8 +692,11 @@ from an object property named `"1"` (YAML decoders in particular produce
 string map keys that look numeric), and its keys are RFC 6901-escaped; the
 segments carry the unescaped key and an explicit index/key distinction, so
 consumers need not re-parse the pointer and guess with `strconv.Atoi`.
-Segments are populated on every error produced by validation; hand-constructed
-errors return `nil`.
+`SchemaSegments()` is the schema-side counterpart for `SchemaPath`,
+distinguishing an `allOf` branch index from a property named like a number
+and carrying property names under `properties` verbatim. Segments are
+populated on every error produced by validation; hand-constructed errors
+return `nil`.
 
 ```go
 type Segment struct {

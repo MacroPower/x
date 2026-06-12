@@ -180,6 +180,50 @@ func (l instanceLocation) index(i int) instanceLocation {
 	}
 }
 
+// schemaLocation is the position in the schema that the validation walk is
+// currently at, the schema-side counterpart of [instanceLocation]: the RFC
+// 6901 JSON Pointer surfaced as [ValidationError.SchemaPath], and the typed
+// segments surfaced as [ValidationError.SchemaSegments]. The zero value is
+// the root location (empty pointer, nil segments).
+type schemaLocation struct {
+	// The RFC 6901-encoded JSON Pointer.
+	ptr string
+	// One typed [Segment] per reference token of ptr.
+	segs []Segment
+}
+
+// kw returns the location of the keyword token named keyword, extending both
+// representations. Keyword tokens contain no JSON Pointer specials, so no
+// escaping is needed. The full slice expression caps segs so sibling
+// descents append into fresh backing arrays instead of aliasing a shared
+// one.
+func (l schemaLocation) kw(keyword string) schemaLocation {
+	return schemaLocation{
+		ptr:  l.ptr + "/" + keyword,
+		segs: append(l.segs[:len(l.segs):len(l.segs)], Segment{Key: keyword}),
+	}
+}
+
+// key returns the location of the member named name under a map keyword
+// (properties, patternProperties, dependentSchemas, ...), extending both
+// representations with the aliasing discipline of [schemaLocation.kw].
+func (l schemaLocation) key(name string) schemaLocation {
+	return schemaLocation{
+		ptr:  l.ptr + "/" + escapeJSONPointer(name),
+		segs: append(l.segs[:len(l.segs):len(l.segs)], Segment{Key: name}),
+	}
+}
+
+// idx returns the location of the element at index i under a list keyword
+// (allOf, anyOf, oneOf, prefixItems, ...), extending both representations
+// with the aliasing discipline of [schemaLocation.kw].
+func (l schemaLocation) idx(i int) schemaLocation {
+	return schemaLocation{
+		ptr:  l.ptr + "/" + strconv.Itoa(i),
+		segs: append(l.segs[:len(l.segs):len(l.segs)], Segment{Index: i, IsIndex: true}),
+	}
+}
+
 // validator holds state for a single validation run.
 type validator struct {
 	refResolveErr error       // last error from refResolver, consumed by validateRef/validateDynamicRef
@@ -1197,7 +1241,7 @@ func (c *Validator) Validate(ctx context.Context, instance any) error {
 	// The run context reaches the resolver through the per-run ctx field set
 	// by forInstance: the recursive walk cannot thread a parameter.
 	//nolint:contextcheck // See the comment above.
-	errs := v.validate(v.root, instance, instanceLocation{}, "", nil)
+	errs := v.validate(v.root, instance, instanceLocation{}, schemaLocation{}, nil)
 	if len(errs) == 0 {
 		return nil
 	}
@@ -1543,7 +1587,7 @@ func (v *validator) validate(
 	schema *Schema,
 	instance any,
 	instancePath instanceLocation,
-	schemaPath string,
+	schemaPath schemaLocation,
 	ann *annotations,
 ) []*ValidationError {
 	if schema == nil {
@@ -1566,7 +1610,8 @@ func (v *validator) validate(
 		return []*ValidationError{{
 			InstancePath: instancePath.ptr,
 			segments:     instancePath.segs,
-			SchemaPath:   schemaPath,
+			SchemaPath:   schemaPath.ptr,
+			schemaSegs:   schemaPath.segs,
 			Message:      "value is not allowed",
 		}}
 	}
@@ -1659,7 +1704,7 @@ func (v *validator) validateUnevaluated(
 	schema *Schema,
 	instance any,
 	instancePath instanceLocation,
-	schemaPath string,
+	schemaPath schemaLocation,
 	ann *annotations,
 ) []*ValidationError {
 	if v.draft != Draft2020 || ann == nil || !v.vocabs.unevaluated {
@@ -1685,7 +1730,7 @@ func (v *validator) validateUnevaluated(
 				}
 
 				childPath := instancePath.key(propName)
-				childSchemaPath := schemaPath + "/unevaluatedProperties"
+				childSchemaPath := schemaPath.kw("unevaluatedProperties")
 				childErrs := v.validate(schema.UnevaluatedProperties, val, childPath, childSchemaPath, nil)
 				if len(childErrs) == 0 {
 					ann.properties[propName] = true
@@ -1693,7 +1738,8 @@ func (v *validator) validateUnevaluated(
 					errs = append(errs, &ValidationError{
 						InstancePath: childPath.ptr,
 						segments:     childPath.segs,
-						SchemaPath:   childSchemaPath,
+						SchemaPath:   childSchemaPath.ptr,
+						schemaSegs:   childSchemaPath.segs,
 						Keyword:      KeywordUnevaluatedProperties,
 						Message:      fmt.Sprintf("property %q is not allowed by unevaluatedProperties", propName),
 						Causes:       childErrs,
@@ -1723,7 +1769,7 @@ func (v *validator) validateUnevaluated(
 				}
 
 				childPath := instancePath.index(i)
-				childSchemaPath := schemaPath + "/unevaluatedItems"
+				childSchemaPath := schemaPath.kw("unevaluatedItems")
 				childErrs := v.validate(schema.UnevaluatedItems, item, childPath, childSchemaPath, nil)
 				if len(childErrs) == 0 {
 					ann.itemIndexes[i] = true
@@ -1731,7 +1777,8 @@ func (v *validator) validateUnevaluated(
 					errs = append(errs, &ValidationError{
 						InstancePath: childPath.ptr,
 						segments:     childPath.segs,
-						SchemaPath:   childSchemaPath,
+						SchemaPath:   childSchemaPath.ptr,
+						schemaSegs:   childSchemaPath.segs,
 						Keyword:      KeywordUnevaluatedItems,
 						Message:      fmt.Sprintf("item %d is not allowed by unevaluatedItems", i),
 						Causes:       childErrs,
@@ -2205,7 +2252,7 @@ func (v *validator) validateType(
 	schema *Schema,
 	instance any,
 	instancePath instanceLocation,
-	schemaPath string,
+	schemaPath schemaLocation,
 ) []*ValidationError {
 	if !v.vocabs.validation {
 		return nil
@@ -2231,7 +2278,8 @@ func (v *validator) validateType(
 	return []*ValidationError{{
 		InstancePath: instancePath.ptr,
 		segments:     instancePath.segs,
-		SchemaPath:   schemaPath + "/type",
+		SchemaPath:   schemaPath.kw("type").ptr,
+		schemaSegs:   schemaPath.kw("type").segs,
 		Keyword:      KeywordType,
 		Message:      fmt.Sprintf("expected %s, got %q", formatTypes(types), got),
 	}}
@@ -2255,7 +2303,7 @@ func (v *validator) validateEnum(
 	schema *Schema,
 	instance any,
 	instancePath instanceLocation,
-	schemaPath string,
+	schemaPath schemaLocation,
 ) []*ValidationError {
 	if !v.vocabs.validation {
 		return nil
@@ -2276,7 +2324,8 @@ func (v *validator) validateEnum(
 	return []*ValidationError{{
 		InstancePath: instancePath.ptr,
 		segments:     instancePath.segs,
-		SchemaPath:   schemaPath + "/enum",
+		SchemaPath:   schemaPath.kw("enum").ptr,
+		schemaSegs:   schemaPath.kw("enum").segs,
 		Keyword:      KeywordEnum,
 		Message:      "value does not match any enum member",
 	}}
@@ -2287,7 +2336,7 @@ func (v *validator) validateConst(
 	schema *Schema,
 	instance any,
 	instancePath instanceLocation,
-	schemaPath string,
+	schemaPath schemaLocation,
 ) []*ValidationError {
 	if !v.vocabs.validation {
 		return nil
@@ -2305,7 +2354,8 @@ func (v *validator) validateConst(
 	return []*ValidationError{{
 		InstancePath: instancePath.ptr,
 		segments:     instancePath.segs,
-		SchemaPath:   schemaPath + "/const",
+		SchemaPath:   schemaPath.kw("const").ptr,
+		schemaSegs:   schemaPath.kw("const").segs,
 		Keyword:      KeywordConst,
 		Message:      "value does not match const",
 	}}
@@ -2682,7 +2732,7 @@ func (v *validator) validateNumeric(
 	schema *Schema,
 	instance any,
 	instancePath instanceLocation,
-	schemaPath string,
+	schemaPath schemaLocation,
 ) []*ValidationError {
 	if !v.vocabs.validation {
 		return nil
@@ -2720,7 +2770,8 @@ func (v *validator) validateNumeric(
 			errs = append(errs, &ValidationError{
 				InstancePath: instancePath.ptr,
 				segments:     instancePath.segs,
-				SchemaPath:   schemaPath + "/multipleOf",
+				SchemaPath:   schemaPath.kw("multipleOf").ptr,
+				schemaSegs:   schemaPath.kw("multipleOf").segs,
 				Keyword:      KeywordMultipleOf,
 				Message:      fmt.Sprintf("multipleOf must be greater than 0, got %v", *schema.MultipleOf),
 			})
@@ -2737,7 +2788,8 @@ func (v *validator) validateNumeric(
 					errs = append(errs, &ValidationError{
 						InstancePath: instancePath.ptr,
 						segments:     instancePath.segs,
-						SchemaPath:   schemaPath + "/multipleOf",
+						SchemaPath:   schemaPath.kw("multipleOf").ptr,
+						schemaSegs:   schemaPath.kw("multipleOf").segs,
 						Keyword:      KeywordMultipleOf,
 						Message:      fmt.Sprintf("%s is not a multiple of %v", ratString(val), *schema.MultipleOf),
 					})
@@ -2754,7 +2806,8 @@ func (v *validator) validateNumeric(
 			errs = append(errs, &ValidationError{
 				InstancePath: instancePath.ptr,
 				segments:     instancePath.segs,
-				SchemaPath:   schemaPath + "/minimum",
+				SchemaPath:   schemaPath.kw("minimum").ptr,
+				schemaSegs:   schemaPath.kw("minimum").segs,
 				Keyword:      KeywordMinimum,
 				Message:      fmt.Sprintf("%s is less than %v", ratString(val), *schema.Minimum),
 			})
@@ -2767,7 +2820,8 @@ func (v *validator) validateNumeric(
 			errs = append(errs, &ValidationError{
 				InstancePath: instancePath.ptr,
 				segments:     instancePath.segs,
-				SchemaPath:   schemaPath + "/maximum",
+				SchemaPath:   schemaPath.kw("maximum").ptr,
+				schemaSegs:   schemaPath.kw("maximum").segs,
 				Keyword:      KeywordMaximum,
 				Message:      fmt.Sprintf("%s is greater than %v", ratString(val), *schema.Maximum),
 			})
@@ -2780,7 +2834,8 @@ func (v *validator) validateNumeric(
 			errs = append(errs, &ValidationError{
 				InstancePath: instancePath.ptr,
 				segments:     instancePath.segs,
-				SchemaPath:   schemaPath + "/exclusiveMinimum",
+				SchemaPath:   schemaPath.kw("exclusiveMinimum").ptr,
+				schemaSegs:   schemaPath.kw("exclusiveMinimum").segs,
 				Keyword:      KeywordExclusiveMinimum,
 				Message:      fmt.Sprintf("%s is less than or equal to %v", ratString(val), *schema.ExclusiveMinimum),
 			})
@@ -2793,7 +2848,8 @@ func (v *validator) validateNumeric(
 			errs = append(errs, &ValidationError{
 				InstancePath: instancePath.ptr,
 				segments:     instancePath.segs,
-				SchemaPath:   schemaPath + "/exclusiveMaximum",
+				SchemaPath:   schemaPath.kw("exclusiveMaximum").ptr,
+				schemaSegs:   schemaPath.kw("exclusiveMaximum").segs,
 				Keyword:      KeywordExclusiveMaximum,
 				Message: fmt.Sprintf(
 					"%s is greater than or equal to %v",
@@ -2821,7 +2877,7 @@ func (v *validator) validateNumericUnbounded(
 	d decNumber,
 	literal string,
 	instancePath instanceLocation,
-	schemaPath string,
+	schemaPath schemaLocation,
 ) []*ValidationError {
 	num := truncatedNumber(literal)
 
@@ -2831,7 +2887,8 @@ func (v *validator) validateNumericUnbounded(
 		errs = append(errs, &ValidationError{
 			InstancePath: instancePath.ptr,
 			segments:     instancePath.segs,
-			SchemaPath:   schemaPath + "/" + keyword,
+			SchemaPath:   schemaPath.kw(keyword).ptr,
+			schemaSegs:   schemaPath.kw(keyword).segs,
 			Keyword:      keyword,
 			Message:      msg,
 		})
@@ -2898,7 +2955,7 @@ func (v *validator) validateString(
 	schema *Schema,
 	instance any,
 	instancePath instanceLocation,
-	schemaPath string,
+	schemaPath schemaLocation,
 ) []*ValidationError {
 	str, ok := instance.(string)
 	if !ok {
@@ -2920,7 +2977,8 @@ func (v *validator) validateString(
 				errs = append(errs, &ValidationError{
 					InstancePath: instancePath.ptr,
 					segments:     instancePath.segs,
-					SchemaPath:   schemaPath + "/minLength",
+					SchemaPath:   schemaPath.kw("minLength").ptr,
+					schemaSegs:   schemaPath.kw("minLength").segs,
 					Keyword:      KeywordMinLength,
 					Message:      fmt.Sprintf("string length %d is less than %d", runeLen, *schema.MinLength),
 				})
@@ -2930,7 +2988,8 @@ func (v *validator) validateString(
 				errs = append(errs, &ValidationError{
 					InstancePath: instancePath.ptr,
 					segments:     instancePath.segs,
-					SchemaPath:   schemaPath + "/maxLength",
+					SchemaPath:   schemaPath.kw("maxLength").ptr,
+					schemaSegs:   schemaPath.kw("maxLength").segs,
 					Keyword:      KeywordMaxLength,
 					Message:      fmt.Sprintf("string length %d is greater than %d", runeLen, *schema.MaxLength),
 				})
@@ -2948,7 +3007,8 @@ func (v *validator) validateString(
 				errs = append(errs, &ValidationError{
 					InstancePath: instancePath.ptr,
 					segments:     instancePath.segs,
-					SchemaPath:   schemaPath + "/pattern",
+					SchemaPath:   schemaPath.kw("pattern").ptr,
+					schemaSegs:   schemaPath.kw("pattern").segs,
 					Keyword:      KeywordPattern,
 					Message:      fmt.Sprintf("pattern %q cannot be compiled", schema.Pattern),
 				})
@@ -2957,7 +3017,8 @@ func (v *validator) validateString(
 				errs = append(errs, &ValidationError{
 					InstancePath: instancePath.ptr,
 					segments:     instancePath.segs,
-					SchemaPath:   schemaPath + "/pattern",
+					SchemaPath:   schemaPath.kw("pattern").ptr,
+					schemaSegs:   schemaPath.kw("pattern").segs,
 					Keyword:      KeywordPattern,
 					Message:      fmt.Sprintf("string does not match pattern %q", schema.Pattern),
 				})
@@ -2972,7 +3033,8 @@ func (v *validator) validateString(
 				errs = append(errs, &ValidationError{
 					InstancePath: instancePath.ptr,
 					segments:     instancePath.segs,
-					SchemaPath:   schemaPath + "/format",
+					SchemaPath:   schemaPath.kw("format").ptr,
+					schemaSegs:   schemaPath.kw("format").segs,
 					Keyword:      KeywordFormat,
 					Message:      fmt.Sprintf("string does not match format %q: %v", schema.Format, err),
 				})
@@ -2988,7 +3050,7 @@ func (v *validator) validateArray(
 	schema *Schema,
 	instance any,
 	instancePath instanceLocation,
-	schemaPath string,
+	schemaPath schemaLocation,
 	ann *annotations,
 ) []*ValidationError {
 	arr, ok := instance.([]any)
@@ -3020,7 +3082,7 @@ func (v *validator) validateArray(
 			}
 
 			childPath := instancePath.index(i)
-			childSchemaPath := fmt.Sprintf("%s/%s/%d", schemaPath, prefixKeyword, i)
+			childSchemaPath := schemaPath.kw(prefixKeyword).idx(i)
 			childErrs := v.validate(ps, arr[i], childPath, childSchemaPath, nil)
 			labelFalseSchemaKeyword(childErrs, ps, prefixKeyword)
 
@@ -3045,7 +3107,7 @@ func (v *validator) validateArray(
 			// Single-schema items: applies to all elements.
 			for i, item := range arr {
 				childPath := instancePath.index(i)
-				childSchemaPath := schemaPath + "/items"
+				childSchemaPath := schemaPath.kw("items")
 				childErrs := v.validate(schema.Items, item, childPath, childSchemaPath, nil)
 				labelFalseSchemaKeyword(childErrs, schema.Items, KeywordItems)
 
@@ -3061,7 +3123,7 @@ func (v *validator) validateArray(
 			if v.draft == Draft2020 {
 				for i := len(prefixSchemas); i < len(arr); i++ {
 					childPath := instancePath.index(i)
-					childSchemaPath := schemaPath + "/items"
+					childSchemaPath := schemaPath.kw("items")
 					childErrs := v.validate(schema.Items, arr[i], childPath, childSchemaPath, nil)
 					labelFalseSchemaKeyword(childErrs, schema.Items, KeywordItems)
 
@@ -3078,7 +3140,7 @@ func (v *validator) validateArray(
 		if v.draft == Draft7 && schema.AdditionalItems != nil && len(schema.ItemsArray) > 0 {
 			for i := len(schema.ItemsArray); i < len(arr); i++ {
 				childPath := instancePath.index(i)
-				childSchemaPath := schemaPath + "/additionalItems"
+				childSchemaPath := schemaPath.kw("additionalItems")
 				childErrs := v.validate(schema.AdditionalItems, arr[i], childPath, childSchemaPath, nil)
 				labelFalseSchemaKeyword(childErrs, schema.AdditionalItems, KeywordAdditionalItems)
 
@@ -3097,7 +3159,7 @@ func (v *validator) validateArray(
 					schema.Contains,
 					item,
 					instancePath.index(i),
-					schemaPath+"/contains",
+					schemaPath.kw("contains"),
 					nil,
 				)
 				if len(childErrs) == 0 {
@@ -3141,7 +3203,8 @@ func (v *validator) validateArray(
 				errs = append(errs, &ValidationError{
 					InstancePath: instancePath.ptr,
 					segments:     instancePath.segs,
-					SchemaPath:   schemaPath + "/" + keyword,
+					SchemaPath:   schemaPath.kw(keyword).ptr,
+					schemaSegs:   schemaPath.kw(keyword).segs,
 					Keyword:      keyword,
 					Message:      fmt.Sprintf("array has %d matching items, minimum is %d", matchCount, minContains),
 				})
@@ -3151,7 +3214,8 @@ func (v *validator) validateArray(
 				errs = append(errs, &ValidationError{
 					InstancePath: instancePath.ptr,
 					segments:     instancePath.segs,
-					SchemaPath:   schemaPath + "/maxContains",
+					SchemaPath:   schemaPath.kw("maxContains").ptr,
+					schemaSegs:   schemaPath.kw("maxContains").segs,
 					Keyword:      KeywordMaxContains,
 					Message:      fmt.Sprintf("array has %d matching items, maximum is %d", matchCount, maxContains),
 				})
@@ -3167,7 +3231,8 @@ func (v *validator) validateArray(
 			errs = append(errs, &ValidationError{
 				InstancePath: instancePath.ptr,
 				segments:     instancePath.segs,
-				SchemaPath:   schemaPath + "/minItems",
+				SchemaPath:   schemaPath.kw("minItems").ptr,
+				schemaSegs:   schemaPath.kw("minItems").segs,
 				Keyword:      KeywordMinItems,
 				Message:      fmt.Sprintf("array has %d items, minimum is %d", len(arr), *schema.MinItems),
 			})
@@ -3178,7 +3243,8 @@ func (v *validator) validateArray(
 			errs = append(errs, &ValidationError{
 				InstancePath: instancePath.ptr,
 				segments:     instancePath.segs,
-				SchemaPath:   schemaPath + "/maxItems",
+				SchemaPath:   schemaPath.kw("maxItems").ptr,
+				schemaSegs:   schemaPath.kw("maxItems").segs,
 				Keyword:      KeywordMaxItems,
 				Message:      fmt.Sprintf("array has %d items, maximum is %d", len(arr), *schema.MaxItems),
 			})
@@ -3190,7 +3256,8 @@ func (v *validator) validateArray(
 				errs = append(errs, &ValidationError{
 					InstancePath: instancePath.ptr,
 					segments:     instancePath.segs,
-					SchemaPath:   schemaPath + "/uniqueItems",
+					SchemaPath:   schemaPath.kw("uniqueItems").ptr,
+					schemaSegs:   schemaPath.kw("uniqueItems").segs,
 					Keyword:      KeywordUniqueItems,
 					Message:      "array contains duplicate items",
 				})
@@ -3325,7 +3392,7 @@ func (v *validator) validateObject(
 	schema *Schema,
 	instance any,
 	instancePath instanceLocation,
-	schemaPath string,
+	schemaPath schemaLocation,
 	ann *annotations,
 ) []*ValidationError {
 	obj, ok := instance.(map[string]any)
@@ -3355,7 +3422,7 @@ func (v *validator) validateObject(
 			}
 
 			childPath := instancePath.key(propName)
-			childSchemaPath := schemaPath + "/properties/" + escapeJSONPointer(propName)
+			childSchemaPath := schemaPath.kw("properties").key(propName)
 			childErrs := v.validate(propSchema, val, childPath, childSchemaPath, nil)
 			labelFalseSchemaKeyword(childErrs, propSchema, KeywordProperties)
 
@@ -3372,7 +3439,8 @@ func (v *validator) validateObject(
 				errs = append(errs, &ValidationError{
 					InstancePath: instancePath.ptr,
 					segments:     instancePath.segs,
-					SchemaPath:   schemaPath + "/patternProperties/" + escapeJSONPointer(pattern),
+					SchemaPath:   schemaPath.kw("patternProperties").key(pattern).ptr,
+					schemaSegs:   schemaPath.kw("patternProperties").key(pattern).segs,
 					Keyword:      KeywordPatternProperties,
 					Message:      fmt.Sprintf("pattern %q cannot be compiled", pattern),
 				})
@@ -3391,7 +3459,7 @@ func (v *validator) validateObject(
 				}
 
 				childPath := instancePath.key(propName)
-				childSchemaPath := schemaPath + "/patternProperties/" + escapeJSONPointer(pattern)
+				childSchemaPath := schemaPath.kw("patternProperties").key(pattern)
 				childErrs := v.validate(patternSchema, val, childPath, childSchemaPath, nil)
 				labelFalseSchemaKeyword(childErrs, patternSchema, KeywordPatternProperties)
 
@@ -3411,7 +3479,7 @@ func (v *validator) validateObject(
 				}
 
 				childPath := instancePath.key(propName)
-				childSchemaPath := schemaPath + "/additionalProperties"
+				childSchemaPath := schemaPath.kw("additionalProperties")
 				childErrs := v.validate(schema.AdditionalProperties, val, childPath, childSchemaPath, nil)
 				labelFalseSchemaKeyword(childErrs, schema.AdditionalProperties, KeywordAdditionalProperties)
 
@@ -3432,7 +3500,7 @@ func (v *validator) validateObject(
 		if schema.PropertyNames != nil {
 			for propName := range obj {
 				childPath := instancePath.key(propName)
-				childSchemaPath := schemaPath + "/propertyNames"
+				childSchemaPath := schemaPath.kw("propertyNames")
 				childErrs := v.validate(
 					schema.PropertyNames,
 					propName,
@@ -3444,7 +3512,8 @@ func (v *validator) validateObject(
 					errs = append(errs, &ValidationError{
 						InstancePath: childPath.ptr,
 						segments:     childPath.segs,
-						SchemaPath:   childSchemaPath,
+						SchemaPath:   childSchemaPath.ptr,
+						schemaSegs:   childSchemaPath.segs,
 						Keyword:      KeywordPropertyNames,
 						Message:      fmt.Sprintf("property name %q is invalid", propName),
 						Causes:       childErrs,
@@ -3461,7 +3530,7 @@ func (v *validator) validateObject(
 				}
 
 				depAnn := newAnnotations()
-				childSchemaPath := schemaPath + "/dependentSchemas/" + escapeJSONPointer(prop)
+				childSchemaPath := schemaPath.kw("dependentSchemas").key(prop)
 				childErrs := v.validate(depSchema, instance, instancePath, childSchemaPath, depAnn)
 				errs = append(errs, childErrs...)
 				if len(childErrs) == 0 && ann != nil {
@@ -3480,7 +3549,8 @@ func (v *validator) validateObject(
 				errs = append(errs, &ValidationError{
 					InstancePath: instancePath.ptr,
 					segments:     instancePath.segs,
-					SchemaPath:   schemaPath + "/required",
+					SchemaPath:   schemaPath.kw("required").ptr,
+					schemaSegs:   schemaPath.kw("required").segs,
 					Keyword:      KeywordRequired,
 					Message:      fmt.Sprintf("missing required property %q", reqProp),
 				})
@@ -3492,7 +3562,8 @@ func (v *validator) validateObject(
 			errs = append(errs, &ValidationError{
 				InstancePath: instancePath.ptr,
 				segments:     instancePath.segs,
-				SchemaPath:   schemaPath + "/minProperties",
+				SchemaPath:   schemaPath.kw("minProperties").ptr,
+				schemaSegs:   schemaPath.kw("minProperties").segs,
 				Keyword:      KeywordMinProperties,
 				Message:      fmt.Sprintf("object has %d properties, minimum is %d", len(obj), *schema.MinProperties),
 			})
@@ -3503,7 +3574,8 @@ func (v *validator) validateObject(
 			errs = append(errs, &ValidationError{
 				InstancePath: instancePath.ptr,
 				segments:     instancePath.segs,
-				SchemaPath:   schemaPath + "/maxProperties",
+				SchemaPath:   schemaPath.kw("maxProperties").ptr,
+				schemaSegs:   schemaPath.kw("maxProperties").segs,
 				Keyword:      KeywordMaxProperties,
 				Message:      fmt.Sprintf("object has %d properties, maximum is %d", len(obj), *schema.MaxProperties),
 			})
@@ -3521,7 +3593,8 @@ func (v *validator) validateObject(
 						errs = append(errs, &ValidationError{
 							InstancePath: instancePath.ptr,
 							segments:     instancePath.segs,
-							SchemaPath:   schemaPath + "/dependentRequired/" + escapeJSONPointer(prop),
+							SchemaPath:   schemaPath.kw("dependentRequired").key(prop).ptr,
+							schemaSegs:   schemaPath.kw("dependentRequired").key(prop).segs,
 							Keyword:      KeywordDependentRequired,
 							Message:      fmt.Sprintf("property %q requires property %q", prop, dep),
 						})
@@ -3543,7 +3616,7 @@ func (v *validator) validateObject(
 		}
 
 		depAnn := newAnnotations()
-		childSchemaPath := schemaPath + "/dependencies/" + escapeJSONPointer(prop)
+		childSchemaPath := schemaPath.kw("dependencies").key(prop)
 		childErrs := v.validate(depSchema, instance, instancePath, childSchemaPath, depAnn)
 		errs = append(errs, childErrs...)
 		if len(childErrs) == 0 && ann != nil {
@@ -3561,7 +3634,8 @@ func (v *validator) validateObject(
 				errs = append(errs, &ValidationError{
 					InstancePath: instancePath.ptr,
 					segments:     instancePath.segs,
-					SchemaPath:   schemaPath + "/dependencies/" + escapeJSONPointer(prop),
+					SchemaPath:   schemaPath.kw("dependencies").key(prop).ptr,
+					schemaSegs:   schemaPath.kw("dependencies").key(prop).segs,
 					Keyword:      KeywordDependencies,
 					Message:      fmt.Sprintf("property %q requires property %q", prop, dep),
 				})
@@ -3577,7 +3651,7 @@ func (v *validator) validateComposition(
 	schema *Schema,
 	instance any,
 	instancePath instanceLocation,
-	schemaPath string,
+	schemaPath schemaLocation,
 	ann *annotations,
 ) []*ValidationError {
 	if !v.vocabs.applicator {
@@ -3597,7 +3671,7 @@ func (v *validator) validateComposition(
 
 		for i, sub := range schema.AllOf {
 			subAnn := newAnnotations()
-			childSchemaPath := fmt.Sprintf("%s/allOf/%d", schemaPath, i)
+			childSchemaPath := schemaPath.kw("allOf").idx(i)
 			childErrs := v.validate(sub, instance, instancePath, childSchemaPath, subAnn)
 			if len(childErrs) > 0 {
 				allCauses = append(allCauses, childErrs...)
@@ -3610,7 +3684,8 @@ func (v *validator) validateComposition(
 			errs = append(errs, &ValidationError{
 				InstancePath: instancePath.ptr,
 				segments:     instancePath.segs,
-				SchemaPath:   schemaPath + "/allOf",
+				SchemaPath:   schemaPath.kw("allOf").ptr,
+				schemaSegs:   schemaPath.kw("allOf").segs,
 				Keyword:      KeywordAllOf,
 				Message:      "did not validate against all subschemas",
 				Causes:       allCauses,
@@ -3630,7 +3705,7 @@ func (v *validator) validateComposition(
 
 		for i, sub := range schema.AnyOf {
 			subAnn := newAnnotations()
-			childSchemaPath := fmt.Sprintf("%s/anyOf/%d", schemaPath, i)
+			childSchemaPath := schemaPath.kw("anyOf").idx(i)
 			childErrs := v.validate(sub, instance, instancePath, childSchemaPath, subAnn)
 			if len(childErrs) == 0 {
 				matched = true
@@ -3646,7 +3721,8 @@ func (v *validator) validateComposition(
 			errs = append(errs, &ValidationError{
 				InstancePath: instancePath.ptr,
 				segments:     instancePath.segs,
-				SchemaPath:   schemaPath + "/anyOf",
+				SchemaPath:   schemaPath.kw("anyOf").ptr,
+				schemaSegs:   schemaPath.kw("anyOf").segs,
 				Keyword:      KeywordAnyOf,
 				Message:      "did not validate against any subschema",
 				Causes:       allCauses,
@@ -3665,7 +3741,7 @@ func (v *validator) validateComposition(
 
 		for i, sub := range schema.OneOf {
 			subAnn := newAnnotations()
-			childSchemaPath := fmt.Sprintf("%s/oneOf/%d", schemaPath, i)
+			childSchemaPath := schemaPath.kw("oneOf").idx(i)
 			childErrs := v.validate(sub, instance, instancePath, childSchemaPath, subAnn)
 			if len(childErrs) == 0 {
 				matchCount++
@@ -3680,7 +3756,8 @@ func (v *validator) validateComposition(
 			errs = append(errs, &ValidationError{
 				InstancePath: instancePath.ptr,
 				segments:     instancePath.segs,
-				SchemaPath:   schemaPath + "/oneOf",
+				SchemaPath:   schemaPath.kw("oneOf").ptr,
+				schemaSegs:   schemaPath.kw("oneOf").segs,
 				Keyword:      KeywordOneOf,
 				Message:      "did not validate against any subschema",
 				Causes:       allCauses,
@@ -3690,7 +3767,8 @@ func (v *validator) validateComposition(
 			errs = append(errs, &ValidationError{
 				InstancePath: instancePath.ptr,
 				segments:     instancePath.segs,
-				SchemaPath:   schemaPath + "/oneOf",
+				SchemaPath:   schemaPath.kw("oneOf").ptr,
+				schemaSegs:   schemaPath.kw("oneOf").segs,
 				Keyword:      KeywordOneOf,
 				Message:      fmt.Sprintf("validated against %d subschemas, expected exactly one", matchCount),
 			})
@@ -3705,12 +3783,13 @@ func (v *validator) validateComposition(
 	// Not.
 	if schema.Not != nil {
 		// Not never contributes annotations.
-		childErrs := v.validate(schema.Not, instance, instancePath, schemaPath+"/not", nil)
+		childErrs := v.validate(schema.Not, instance, instancePath, schemaPath.kw("not"), nil)
 		if len(childErrs) == 0 {
 			errs = append(errs, &ValidationError{
 				InstancePath: instancePath.ptr,
 				segments:     instancePath.segs,
-				SchemaPath:   schemaPath + "/not",
+				SchemaPath:   schemaPath.kw("not").ptr,
+				schemaSegs:   schemaPath.kw("not").segs,
 				Keyword:      KeywordNot,
 				Message:      "should not validate against the schema",
 			})
@@ -3725,7 +3804,7 @@ func (v *validator) validateConditional(
 	schema *Schema,
 	instance any,
 	instancePath instanceLocation,
-	schemaPath string,
+	schemaPath schemaLocation,
 	ann *annotations,
 ) []*ValidationError {
 	if !v.vocabs.applicator || schema.If == nil {
@@ -3735,7 +3814,7 @@ func (v *validator) validateConditional(
 	var errs []*ValidationError
 
 	ifAnn := newAnnotations()
-	ifErrs := v.validate(schema.If, instance, instancePath, schemaPath+"/if", ifAnn)
+	ifErrs := v.validate(schema.If, instance, instancePath, schemaPath.kw("if"), ifAnn)
 	ifPassed := len(ifErrs) == 0
 
 	if ifPassed { //nolint:nestif // Conditional branching with annotation tracking requires nesting.
@@ -3745,12 +3824,13 @@ func (v *validator) validateConditional(
 
 		if schema.Then != nil {
 			thenAnn := newAnnotations()
-			thenErrs := v.validate(schema.Then, instance, instancePath, schemaPath+"/then", thenAnn)
+			thenErrs := v.validate(schema.Then, instance, instancePath, schemaPath.kw("then"), thenAnn)
 			if len(thenErrs) > 0 {
 				errs = append(errs, &ValidationError{
 					InstancePath: instancePath.ptr,
 					segments:     instancePath.segs,
-					SchemaPath:   schemaPath + "/then",
+					SchemaPath:   schemaPath.kw("then").ptr,
+					schemaSegs:   schemaPath.kw("then").segs,
 					Keyword:      KeywordThen,
 					Message:      "if condition was true but then validation failed",
 					Causes:       thenErrs,
@@ -3761,12 +3841,13 @@ func (v *validator) validateConditional(
 		}
 	} else if schema.Else != nil {
 		elseAnn := newAnnotations()
-		elseErrs := v.validate(schema.Else, instance, instancePath, schemaPath+"/else", elseAnn)
+		elseErrs := v.validate(schema.Else, instance, instancePath, schemaPath.kw("else"), elseAnn)
 		if len(elseErrs) > 0 {
 			errs = append(errs, &ValidationError{
 				InstancePath: instancePath.ptr,
 				segments:     instancePath.segs,
-				SchemaPath:   schemaPath + "/else",
+				SchemaPath:   schemaPath.kw("else").ptr,
+				schemaSegs:   schemaPath.kw("else").segs,
 				Keyword:      KeywordElse,
 				Message:      "if condition was false but else validation failed",
 				Causes:       elseErrs,
@@ -3792,7 +3873,7 @@ func (v *validator) validateContent(
 	schema *Schema,
 	instance any,
 	instancePath instanceLocation,
-	schemaPath string,
+	schemaPath schemaLocation,
 ) []*ValidationError {
 	// Gated on the content vocabulary, consistent with the other keyword
 	// groups. When it is inactive the content keywords are inert.
@@ -3817,7 +3898,7 @@ func (v *validator) assertContent(
 	schema *Schema,
 	instance any,
 	instancePath instanceLocation,
-	schemaPath string,
+	schemaPath schemaLocation,
 ) []*ValidationError {
 	str, ok := instance.(string)
 	if !ok {
@@ -3836,7 +3917,8 @@ func (v *validator) assertContent(
 			return []*ValidationError{{
 				InstancePath: instancePath.ptr,
 				segments:     instancePath.segs,
-				SchemaPath:   schemaPath + "/contentEncoding",
+				SchemaPath:   schemaPath.kw("contentEncoding").ptr,
+				schemaSegs:   schemaPath.kw("contentEncoding").segs,
 				Keyword:      KeywordContentEncoding,
 				Message:      fmt.Sprintf("string is not valid base64: %v", err),
 			}}
@@ -3855,7 +3937,8 @@ func (v *validator) assertContent(
 		return []*ValidationError{{
 			InstancePath: instancePath.ptr,
 			segments:     instancePath.segs,
-			SchemaPath:   schemaPath + "/contentMediaType",
+			SchemaPath:   schemaPath.kw("contentMediaType").ptr,
+			schemaSegs:   schemaPath.kw("contentMediaType").segs,
 			Keyword:      KeywordContentMediaType,
 			Message:      "string is not a valid application/json document",
 		}}
@@ -3869,7 +3952,7 @@ func (v *validator) validateRef(
 	schema *Schema,
 	instance any,
 	instancePath instanceLocation,
-	schemaPath string,
+	schemaPath schemaLocation,
 	ann *annotations,
 ) []*ValidationError {
 	ref := schema.Ref
@@ -3885,7 +3968,7 @@ func (v *validator) validateDynamicRef(
 	schema *Schema,
 	instance any,
 	instancePath instanceLocation,
-	schemaPath string,
+	schemaPath schemaLocation,
 	ann *annotations,
 ) []*ValidationError {
 	ref := schema.DynamicRef
@@ -3912,7 +3995,7 @@ func (v *validator) validateResolvedRef(
 	ref, keyword string,
 	instance any,
 	instancePath instanceLocation,
-	schemaPath string,
+	schemaPath schemaLocation,
 	ann *annotations,
 ) []*ValidationError {
 	if target == nil {
@@ -3923,7 +4006,8 @@ func (v *validator) validateResolvedRef(
 			return []*ValidationError{{
 				InstancePath: instancePath.ptr,
 				segments:     instancePath.segs,
-				SchemaPath:   schemaPath + "/" + keyword,
+				SchemaPath:   schemaPath.kw(keyword).ptr,
+				schemaSegs:   schemaPath.kw(keyword).segs,
 				Keyword:      keyword,
 				Message:      err.Error(),
 				err:          err,
@@ -3937,7 +4021,8 @@ func (v *validator) validateResolvedRef(
 			return []*ValidationError{{
 				InstancePath: instancePath.ptr,
 				segments:     instancePath.segs,
-				SchemaPath:   schemaPath + "/" + keyword,
+				SchemaPath:   schemaPath.kw(keyword).ptr,
+				schemaSegs:   schemaPath.kw(keyword).segs,
 				Keyword:      keyword,
 				Message:      fmt.Sprintf("cannot resolve %s %q", keyword, ref),
 			}}
@@ -3948,12 +4033,13 @@ func (v *validator) validateResolvedRef(
 	}
 
 	refAnn := newAnnotations()
-	childErrs := v.validate(target, instance, instancePath, schemaPath+"/"+keyword, refAnn)
+	childErrs := v.validate(target, instance, instancePath, schemaPath.kw(keyword), refAnn)
 	if len(childErrs) > 0 {
 		return []*ValidationError{{
 			InstancePath: instancePath.ptr,
 			segments:     instancePath.segs,
-			SchemaPath:   schemaPath + "/" + keyword,
+			SchemaPath:   schemaPath.kw(keyword).ptr,
+			schemaSegs:   schemaPath.kw(keyword).segs,
 			Keyword:      keyword,
 			Causes:       childErrs,
 		}}
