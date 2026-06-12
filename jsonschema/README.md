@@ -427,19 +427,22 @@ schema, err := jsonschema.GenerateFor[MyType](ctx,
 
 Any other implementation substitutes another source — comments pre-extracted
 at build time for a binary that deploys without source files, or fixed
-descriptions in tests — and decides its own failure behavior. Wrapping
-`GoCommentProvider` composes the two, such as overrides for specific types
-backed by AST extraction:
+descriptions in tests — and decides its own failure behavior.
+`ChainDescriptionProviders` composes providers, first non-empty description
+wins, such as overrides for specific types backed by AST extraction:
 
 ```go
 type DescriptionProvider interface {
 	// TypeDescription returns the description for a named type, or "" for none.
-	TypeDescription(t reflect.Type) string
+	TypeDescription(ctx context.Context, t reflect.Type) string
 
 	// FieldDescription returns the description for the named Go field of struct
 	// type t (the type declaring the field), or "" for none.
-	FieldDescription(t reflect.Type, fieldName string) string
+	FieldDescription(ctx context.Context, t reflect.Type, fieldName string) string
 }
+
+jsonschema.WithDescriptionProvider(jsonschema.ChainDescriptionProviders(
+	overrides, jsonschema.NewGoCommentProvider()))
 ```
 
 ### Definitions and references

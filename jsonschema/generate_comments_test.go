@@ -127,6 +127,46 @@ func TestWithDescriptionProvider(t *testing.T) {
 	assert.Equal(t, "tag wins", s.Properties["label"].Description)
 }
 
+// TestChainDescriptionProviders pins the chain contract: nil links are
+// skipped, an empty answer falls through to the next provider per lookup,
+// and the first non-empty description wins.
+func TestChainDescriptionProviders(t *testing.T) {
+	t.Parallel()
+
+	widgetType := reflect.TypeFor[commentedWidget]()
+	overrides := mapDescriptionProvider{
+		types: map[reflect.Type]string{widgetType: "override widget"},
+		// No field entries: field lookups fall through to the next link.
+	}
+
+	t.Run("first non-empty answer wins per lookup", func(t *testing.T) {
+		t.Parallel()
+
+		s, err := jsonschema.GenerateFor[commentedWidget](t.Context(),
+			jsonschema.WithDescriptionProvider(jsonschema.ChainDescriptionProviders(
+				nil, overrides, commentedWidgetProvider())),
+		)
+		require.NoError(t, err)
+
+		assert.Equal(t, "override widget", s.Description,
+			"the first link's type description wins")
+		assert.Equal(t, "the size", s.Properties["size"].Description,
+			"a field lookup the first link cannot answer falls through")
+	})
+
+	t.Run("all-empty chain leaves descriptions unset", func(t *testing.T) {
+		t.Parallel()
+
+		s, err := jsonschema.GenerateFor[commentedWidget](t.Context(),
+			jsonschema.WithDescriptionProvider(jsonschema.ChainDescriptionProviders()),
+		)
+		require.NoError(t, err)
+
+		assert.Empty(t, s.Description)
+		assert.Empty(t, s.Properties["size"].Description)
+	})
+}
+
 // TestWithDescriptionProvider_LastRegistrationWins covers the registration
 // semantics: the last registration wins, and a nil provider clears an
 // earlier one.

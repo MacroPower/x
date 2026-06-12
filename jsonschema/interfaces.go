@@ -91,6 +91,8 @@ func (f TypeSchemaExtenderFunc) ExtendSchemaForType(ctx context.Context, t refle
 // implementation substitutes another source — for example comments
 // pre-extracted at build time and shipped with a binary that deploys
 // without source files, or fixed descriptions in tests.
+// [ChainDescriptionProviders] composes providers, first non-empty
+// description wins.
 //
 // An empty result leaves the description unset, letting later field-level
 // processing (the jsonschema struct tag, tag interpreters) supply one. A
@@ -110,6 +112,57 @@ type DescriptionProvider interface {
 	// the field's doc comment lives, not the outer struct. The context
 	// follows the TypeDescription contract.
 	FieldDescription(ctx context.Context, t reflect.Type, fieldName string) string
+}
+
+// ChainDescriptionProviders returns a [DescriptionProvider] that consults
+// each provider in order and answers with the first non-empty description;
+// when every provider answers "" (including an empty or all-nil chain), the
+// description stays unset. Nil providers are skipped, so optional links can
+// be passed unconditionally, following [ChainResolvers].
+//
+// It makes the composition the [DescriptionProvider] docs describe a
+// one-liner — fixed overrides for specific types consulted first, backed by
+// AST extraction:
+//
+//	jsonschema.WithDescriptionProvider(jsonschema.ChainDescriptionProviders(
+//		overrides, jsonschema.NewGoCommentProvider()))
+func ChainDescriptionProviders(providers ...DescriptionProvider) DescriptionProvider {
+	return descriptionProviderChain(providers)
+}
+
+// descriptionProviderChain is the [DescriptionProvider] returned by
+// [ChainDescriptionProviders].
+type descriptionProviderChain []DescriptionProvider
+
+// TypeDescription returns the first non-empty type description in the chain.
+func (c descriptionProviderChain) TypeDescription(ctx context.Context, t reflect.Type) string {
+	for _, p := range c {
+		if p == nil {
+			continue
+		}
+
+		if d := p.TypeDescription(ctx, t); d != "" {
+			return d
+		}
+	}
+
+	return ""
+}
+
+// FieldDescription returns the first non-empty field description in the
+// chain.
+func (c descriptionProviderChain) FieldDescription(ctx context.Context, t reflect.Type, fieldName string) string {
+	for _, p := range c {
+		if p == nil {
+			continue
+		}
+
+		if d := p.FieldDescription(ctx, t, fieldName); d != "" {
+			return d
+		}
+	}
+
+	return ""
 }
 
 // TagInterpreter translates struct field tags into JSON Schema constraints.

@@ -371,9 +371,10 @@
 // module's directory. Any other implementation
 // substitutes another source — comments pre-extracted at build time for a
 // binary that deploys without source files, or fixed descriptions in tests
-// — and decides its own failure behavior. Wrapping the built-in provider
-// composes the two, such as overrides for specific types backed by AST
-// extraction. For a field promoted from an embedded struct, the provider
+// — and decides its own failure behavior. [ChainDescriptionProviders]
+// composes providers, first non-empty description wins, such as overrides
+// for specific types backed by AST extraction.
+// For a field promoted from an embedded struct, the provider
 // receives the embedded type, where the field's doc comment lives. The
 // jsonschema struct tag description overrides a provider-supplied comment.
 //
