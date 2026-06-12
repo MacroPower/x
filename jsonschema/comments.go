@@ -12,12 +12,12 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
-// GoCommentProvider is the AST-backed [CommentProvider]: it extracts Go doc
+// GoCommentProvider is the AST-backed [DescriptionProvider]: it extracts Go doc
 // comments from source files by loading and parsing package sources with
 // [golang.org/x/tools/go/packages] at generation time, so it requires access
 // to source files; when sources cannot be located for a type, it silently
 // supplies no comment. Construct it with [NewGoCommentProvider] and register
-// it with [WithCommentProvider]. Wrapping it composes other sources with AST
+// it with [WithDescriptionProvider]. Wrapping it composes other sources with AST
 // extraction — overrides for specific types, or a pre-extracted map
 // consulted first.
 //
@@ -46,13 +46,13 @@ func baseTypeName(name string) string {
 	return base
 }
 
-// TypeComment returns the doc comment for a named type.
+// TypeDescription returns the doc comment for a named type.
 //
 // Matching is by package path and unqualified type name, since reflection does
 // not expose source positions. A non-package-scope type (for example one
 // declared inside a function) that shadows a package-level name may therefore
 // receive the package-level type's comment.
-func (ce *GoCommentProvider) TypeComment(ctx context.Context, t reflect.Type) string {
+func (ce *GoCommentProvider) TypeDescription(ctx context.Context, t reflect.Type) string {
 	if t.Name() == "" || t.PkgPath() == "" {
 		return ""
 	}
@@ -89,12 +89,12 @@ func (ce *GoCommentProvider) TypeComment(ctx context.Context, t reflect.Type) st
 	return ""
 }
 
-// FieldComment returns the doc comment for a struct field.
+// FieldDescription returns the doc comment for a struct field.
 //
-// As with TypeComment, matching is by package path and unqualified type name,
+// As with TypeDescription, matching is by package path and unqualified type name,
 // so a non-package-scope struct that shadows a package-level name may receive
 // the package-level struct's field comments.
-func (ce *GoCommentProvider) FieldComment(ctx context.Context, structType reflect.Type, fieldName string) string {
+func (ce *GoCommentProvider) FieldDescription(ctx context.Context, structType reflect.Type, fieldName string) string {
 	if structType.Name() == "" || structType.PkgPath() == "" {
 		return ""
 	}

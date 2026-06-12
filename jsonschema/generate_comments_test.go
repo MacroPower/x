@@ -12,10 +12,10 @@ import (
 	"go.jacobcolvin.com/x/jsonschema/internal/testtypes/alpha"
 )
 
-// TestPromotedEmbeddedFieldComment covers doc-comment extraction for a field
+// TestPromotedEmbeddedFieldDescription covers doc-comment extraction for a field
 // promoted from an embedded struct declared in another package: the comment
 // lives in the embedded type's source, not the outer type's.
-func TestPromotedEmbeddedFieldComment(t *testing.T) {
+func TestPromotedEmbeddedFieldDescription(t *testing.T) {
 	t.Parallel()
 
 	type doc struct {
@@ -25,7 +25,7 @@ func TestPromotedEmbeddedFieldComment(t *testing.T) {
 
 	s, err := jsonschema.GenerateFor[doc](
 		t.Context(),
-		jsonschema.WithCommentProvider(jsonschema.NewGoCommentProvider()),
+		jsonschema.WithDescriptionProvider(jsonschema.NewGoCommentProvider()),
 	)
 	require.NoError(t, err)
 
@@ -33,15 +33,15 @@ func TestPromotedEmbeddedFieldComment(t *testing.T) {
 	assert.Contains(t, s.Properties["size"].Description, "documents the widget size")
 }
 
-// TestGenericTypeComment covers doc-comment extraction for an instantiated
+// TestGenericTypeDescription covers doc-comment extraction for an instantiated
 // generic type, whose reflect name ("Box[int]") carries a type-argument list
 // that must be stripped to match the source declaration ("Box").
-func TestGenericTypeComment(t *testing.T) {
+func TestGenericTypeDescription(t *testing.T) {
 	t.Parallel()
 
 	s, err := jsonschema.GenerateFor[alpha.Box[int]](
 		t.Context(),
-		jsonschema.WithCommentProvider(jsonschema.NewGoCommentProvider()),
+		jsonschema.WithDescriptionProvider(jsonschema.NewGoCommentProvider()),
 	)
 	require.NoError(t, err)
 
@@ -50,32 +50,32 @@ func TestGenericTypeComment(t *testing.T) {
 	assert.Contains(t, s.Properties["item"].Description, "documents the boxed value")
 }
 
-// mapCommentProvider is a deterministic CommentProvider backed by maps, the
-// kind of pre-extracted comment store WithCommentProvider exists for.
-type mapCommentProvider struct {
+// mapDescriptionProvider is a deterministic DescriptionProvider backed by maps, the
+// kind of pre-extracted comment store WithDescriptionProvider exists for.
+type mapDescriptionProvider struct {
 	types  map[reflect.Type]string
 	fields map[reflect.Type]map[string]string
 }
 
-func (p mapCommentProvider) TypeComment(_ context.Context, t reflect.Type) string {
+func (p mapDescriptionProvider) TypeDescription(_ context.Context, t reflect.Type) string {
 	return p.types[t]
 }
 
-func (p mapCommentProvider) FieldComment(_ context.Context, t reflect.Type, fieldName string) string {
+func (p mapDescriptionProvider) FieldDescription(_ context.Context, t reflect.Type, fieldName string) string {
 	return p.fields[t][fieldName]
 }
 
-// commentedWidget is a named type for TestWithCommentProvider; the provider
+// commentedWidget is a named type for TestWithDescriptionProvider; the provider
 // keys on its reflect.Type.
 type commentedWidget struct {
 	Size  int    `json:"size"`
 	Label string `json:"label" jsonschema:"description=tag wins"`
 }
 
-func commentedWidgetProvider() mapCommentProvider {
+func commentedWidgetProvider() mapDescriptionProvider {
 	widgetType := reflect.TypeFor[commentedWidget]()
 
-	return mapCommentProvider{
+	return mapDescriptionProvider{
 		types: map[reflect.Type]string{widgetType: "a widget"},
 		fields: map[reflect.Type]map[string]string{
 			widgetType: {"Size": "the size", "Label": "provider comment"},
@@ -83,11 +83,11 @@ func commentedWidgetProvider() mapCommentProvider {
 	}
 }
 
-func TestWithCommentProvider(t *testing.T) {
+func TestWithDescriptionProvider(t *testing.T) {
 	t.Parallel()
 
 	s, err := jsonschema.GenerateFor[commentedWidget](t.Context(),
-		jsonschema.WithCommentProvider(commentedWidgetProvider()),
+		jsonschema.WithDescriptionProvider(commentedWidgetProvider()),
 	)
 	require.NoError(t, err)
 
@@ -97,10 +97,10 @@ func TestWithCommentProvider(t *testing.T) {
 	assert.Equal(t, "tag wins", s.Properties["label"].Description)
 }
 
-// TestWithCommentProvider_LastRegistrationWins covers the registration
+// TestWithDescriptionProvider_LastRegistrationWins covers the registration
 // semantics: the last registration wins, and a nil provider clears an
 // earlier one.
-func TestWithCommentProvider_LastRegistrationWins(t *testing.T) {
+func TestWithDescriptionProvider_LastRegistrationWins(t *testing.T) {
 	t.Parallel()
 
 	provider := commentedWidgetProvider()
@@ -109,8 +109,8 @@ func TestWithCommentProvider_LastRegistrationWins(t *testing.T) {
 		t.Parallel()
 
 		s, err := jsonschema.GenerateFor[commentedWidget](t.Context(),
-			jsonschema.WithCommentProvider(jsonschema.NewGoCommentProvider()),
-			jsonschema.WithCommentProvider(provider),
+			jsonschema.WithDescriptionProvider(jsonschema.NewGoCommentProvider()),
+			jsonschema.WithDescriptionProvider(provider),
 		)
 		require.NoError(t, err)
 		assert.Equal(t, "a widget", s.Description)
@@ -120,8 +120,8 @@ func TestWithCommentProvider_LastRegistrationWins(t *testing.T) {
 		t.Parallel()
 
 		s, err := jsonschema.GenerateFor[commentedWidget](t.Context(),
-			jsonschema.WithCommentProvider(provider),
-			jsonschema.WithCommentProvider(nil),
+			jsonschema.WithDescriptionProvider(provider),
+			jsonschema.WithDescriptionProvider(nil),
 		)
 		require.NoError(t, err)
 		assert.Empty(t, s.Description)
@@ -129,10 +129,10 @@ func TestWithCommentProvider_LastRegistrationWins(t *testing.T) {
 	})
 }
 
-// TestWithCommentProvider_PromotedFieldDeclaringType covers the FieldComment
+// TestWithDescriptionProvider_PromotedFieldDeclaringType covers the FieldDescription
 // contract for promoted fields: the provider receives the embedded type that
 // declares the field, not the outer struct.
-func TestWithCommentProvider_PromotedFieldDeclaringType(t *testing.T) {
+func TestWithDescriptionProvider_PromotedFieldDeclaringType(t *testing.T) {
 	t.Parallel()
 
 	type doc struct {
@@ -141,13 +141,13 @@ func TestWithCommentProvider_PromotedFieldDeclaringType(t *testing.T) {
 		Extra string `json:"extra"`
 	}
 
-	provider := mapCommentProvider{
+	provider := mapDescriptionProvider{
 		fields: map[reflect.Type]map[string]string{
 			reflect.TypeFor[alpha.Widget](): {"Size": "embedded size"},
 		},
 	}
 
-	s, err := jsonschema.GenerateFor[doc](t.Context(), jsonschema.WithCommentProvider(provider))
+	s, err := jsonschema.GenerateFor[doc](t.Context(), jsonschema.WithDescriptionProvider(provider))
 	require.NoError(t, err)
 
 	require.Contains(t, s.Properties, "size")

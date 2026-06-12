@@ -34,7 +34,7 @@ var (
 // generator holds the state for a single schema generation run.
 type generator struct {
 	// The caller's context for this generation run, passed to the
-	// CommentProvider with every comment lookup.
+	// DescriptionProvider with every comment lookup.
 	ctx context.Context
 
 	typeToDefName   map[reflect.Type]string
@@ -48,7 +48,7 @@ type generator struct {
 	// distinguishes an explicit nil instance from the option being absent.
 	defaultsFrom         any
 	refRecords           []refRecord
-	commentProvider      CommentProvider
+	descriptionProvider  DescriptionProvider
 	tagInterpreters      []TagInterpreter
 	typeExtenders        []TypeSchemaExtender
 	draft                Draft
@@ -329,7 +329,7 @@ func (g *generator) schemaForType(t reflect.Type, nullable bool) (*Schema, error
 	// in buildStructSchema/schemaForStruct.
 	//nolint:nestif // Sequential post-processing steps; flattening adds no clarity.
 	if t.Kind() != reflect.Struct && t.Name() != "" {
-		g.applyTypeComment(t, s)
+		g.applyTypeDescription(t, s)
 
 		err := g.extendType(t, s)
 		if err != nil {
@@ -402,7 +402,7 @@ func (g *generator) handleOverrideType(t reflect.Type, override *Schema, nullabl
 	cloneOverrideExtras(s)
 
 	// Apply type-level comments.
-	g.applyTypeComment(t, s)
+	g.applyTypeDescription(t, s)
 
 	if g.shouldExtract(t) {
 		return g.extractToDefs(t, s, nullable)
@@ -477,7 +477,7 @@ func cloneOverrideExtras(s *Schema) {
 //
 // The provider's JSONSchema method returns its exact *Schema, which it may share
 // across fields and Generate calls (for example a package-level singleton).
-// Downstream steps mutate it: applyTypeComment writes Description in place and
+// Downstream steps mutate it: applyTypeDescription writes Description in place and
 // extractToDefs aliases the pointer into g.defs. The same clone the override
 // path uses (CloneSchemas to deep-copy sub-schemas, cloneOverrideExtras to copy
 // the aliased Enum/Const/Default/Extra containers) isolates the generator's copy
@@ -496,7 +496,7 @@ func (g *generator) handleProviderType(t reflect.Type, nullable bool) (*Schema, 
 	cloneOverrideExtras(s)
 
 	// Apply type-level comments.
-	g.applyTypeComment(t, s)
+	g.applyTypeDescription(t, s)
 
 	if g.shouldExtract(t) {
 		return g.extractToDefs(t, s, nullable)
@@ -511,7 +511,7 @@ func (g *generator) handleProviderType(t reflect.Type, nullable bool) (*Schema, 
 func (g *generator) handleBuiltinType(t reflect.Type, s *Schema, nullable bool) (*Schema, error) {
 	//nolint:nestif // Sequential post-processing steps; flattening adds no clarity.
 	if t.Name() != "" {
-		g.applyTypeComment(t, s)
+		g.applyTypeDescription(t, s)
 
 		err := g.extendType(t, s)
 		if err != nil {
@@ -874,7 +874,7 @@ func (g *generator) buildStructSchema(t reflect.Type) (*Schema, error) {
 	}
 
 	// Type-level comment.
-	g.applyTypeComment(t, s)
+	g.applyTypeDescription(t, s)
 
 	// JSONSchemaExtend, then registered extenders.
 	err := g.extendType(t, s)
@@ -1244,7 +1244,7 @@ func (g *generator) buildFieldSchema(parentType reflect.Type, fi structFieldInfo
 	}
 
 	// 2. Field-level comment.
-	g.applyFieldComment(parentType, fi.field, fieldSchema)
+	g.applyFieldDescription(parentType, fi.field, fieldSchema)
 
 	// 3. Schema struct tag.
 	if tag, ok := fi.field.Tag.Lookup("jsonschema"); ok {
@@ -1861,27 +1861,27 @@ func parseJSONTag(f reflect.StructField) jsonTagInfo {
 	return info
 }
 
-// applyTypeComment sets the description from the comment provider on a
+// applyTypeDescription sets the description from the comment provider on a
 // type's schema. An empty comment leaves the description unset.
-func (g *generator) applyTypeComment(t reflect.Type, s *Schema) {
-	if g.commentProvider == nil {
+func (g *generator) applyTypeDescription(t reflect.Type, s *Schema) {
+	if g.descriptionProvider == nil {
 		return
 	}
 
-	if comment := g.commentProvider.TypeComment(g.ctx, t); comment != "" {
+	if comment := g.descriptionProvider.TypeDescription(g.ctx, t); comment != "" {
 		s.Description = comment
 	}
 }
 
-// applyFieldComment sets the description from the comment provider on a
+// applyFieldDescription sets the description from the comment provider on a
 // field's schema. The provider receives the type declaring the field (see
 // [declaringType]); an empty comment leaves the description unset.
-func (g *generator) applyFieldComment(structType reflect.Type, f reflect.StructField, s *Schema) {
-	if g.commentProvider == nil {
+func (g *generator) applyFieldDescription(structType reflect.Type, f reflect.StructField, s *Schema) {
+	if g.descriptionProvider == nil {
 		return
 	}
 
-	if comment := g.commentProvider.FieldComment(g.ctx, declaringType(structType, f), f.Name); comment != "" {
+	if comment := g.descriptionProvider.FieldDescription(g.ctx, declaringType(structType, f), f.Name); comment != "" {
 		s.Description = comment
 	}
 }

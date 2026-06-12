@@ -23,7 +23,7 @@
 //
 //	schema, err := jsonschema.Generate(ctx, reflect.TypeFor[MyType]())
 //
-// The context is passed to the [CommentProvider] with every comment lookup,
+// The context is passed to the [DescriptionProvider] with every comment lookup,
 // so the built-in provider's package loading can honor cancellation and
 // deadlines. [MustGenerateFor] is [GenerateFor] with [context.Background]
 // but panics on error, for package-scope variables and init-time generation
@@ -63,7 +63,7 @@
 //     it overrides $schema draft detection (see Draft Support below).
 //   - [WithTagInterpreter] registers a [TagInterpreter] for mapping struct tags
 //     to schema constraints.
-//   - [WithCommentProvider] sets the [CommentProvider] used as the source of
+//   - [WithDescriptionProvider] sets the [DescriptionProvider] used as the source of
 //     type and field descriptions; [NewGoCommentProvider] constructs the
 //     AST-backed provider that extracts Go doc comments.
 //   - [WithTypeSchema] overrides the schema for a specific Go type;
@@ -110,7 +110,7 @@
 //
 // Across every entry point, an option given a nil interface or pointer value
 // restores the default behavior: [WithNamer] the built-in namer,
-// [WithCommentProvider] no descriptions, [WithRefResolver] local-only ref
+// [WithDescriptionProvider] no descriptions, [WithRefResolver] local-only ref
 // resolution, [WithRefFallback] fatal expansion failures, and
 // [WithTypeSchema] with a nil schema the type's default resolution
 // (unregistering earlier exact registrations for the type). The exception is
@@ -335,7 +335,7 @@
 // jsonschema:"description=Hello\, World" sets the description "Hello, World";
 // enum and examples values cannot contain "|" (used as value separator). For
 // complex values, use [JSONSchemaExtender] or AST doc comments with
-// [WithCommentProvider].
+// [WithDescriptionProvider].
 //
 // Because pairs apply in order, a default, const, enum, or examples value
 // appearing after a type= pair parses against the overridden JSON type
@@ -361,8 +361,8 @@
 //
 // # Comment Extraction
 //
-// Type and field descriptions come from a [CommentProvider], registered
-// with [WithCommentProvider]. The built-in [GoCommentProvider] (constructed
+// Type and field descriptions come from a [DescriptionProvider], registered
+// with [WithDescriptionProvider]. The built-in [GoCommentProvider] (constructed
 // with [NewGoCommentProvider]) extracts Go doc comments from source files
 // for struct types, struct fields, and named types using [go/ast] and
 // [golang.org/x/tools/go/packages]; when source files cannot be located for

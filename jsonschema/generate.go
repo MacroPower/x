@@ -33,14 +33,14 @@ func WithTagInterpreter(t TagInterpreter) GenerateOption {
 	})
 }
 
-// WithCommentProvider sets the [CommentProvider] consulted for type and
+// WithDescriptionProvider sets the [DescriptionProvider] consulted for type and
 // field descriptions. [NewGoCommentProvider] constructs the AST-backed
 // provider that extracts Go doc comments; any other implementation
 // substitutes another source. The last registration wins, and a nil p
 // restores the default (no provider), leaving descriptions unset.
-func WithCommentProvider(p CommentProvider) GenerateOption {
+func WithDescriptionProvider(p DescriptionProvider) GenerateOption {
 	return generateOptionFunc(func(g *generator) {
-		g.commentProvider = p
+		g.descriptionProvider = p
 	})
 }
 
@@ -285,7 +285,7 @@ func (g *generator) applyInstanceDefaults(instance any, rootType reflect.Type, s
 
 // GenerateFor generates a JSON Schema for the type parameter T.
 //
-// The context is passed to the [CommentProvider] (see [WithCommentProvider])
+// The context is passed to the [DescriptionProvider] (see [WithDescriptionProvider])
 // with every comment lookup, so the built-in provider's package loading can
 // honor cancellation and deadlines.
 func GenerateFor[T any](ctx context.Context, opts ...GenerateOption) (*Schema, error) {

@@ -125,7 +125,7 @@ The primary entry point is the generic `GenerateFor`. A `reflect.Type` variant,
 `Generate`, is provided for dynamic use, and `MustGenerateFor` (which passes
 `context.Background()`) panics on error for package-scope variables, where for
 a static type and fixed options generation either always succeeds or always
-fails. The context is passed to the `CommentProvider` with every comment
+fails. The context is passed to the `DescriptionProvider` with every comment
 lookup:
 
 ```go
@@ -172,7 +172,7 @@ Unsupported types (`func`, `chan`, `complex`, `unsafe.Pointer`) return
 | -------------------------------- | ------------------------------------------------------------------------------------- |
 | `WithDraft(Draft)`               | Target draft: `Draft2020` (default) or `Draft7`; also serves validation and `Inline`. |
 | `WithTagInterpreter(t)`          | Register a `TagInterpreter`; multiple are applied in order.                           |
-| `WithCommentProvider(p)`         | Set the `CommentProvider` used as the source of descriptions.                         |
+| `WithDescriptionProvider(p)`     | Set the `DescriptionProvider` used as the source of descriptions.                     |
 | `WithTypeSchema(t, s)`           | Override the schema for a specific Go type (highest priority).                        |
 | `WithTypeSchemaFor[T](s)`        | `WithTypeSchema` for a statically known type, without `reflect.TypeFor`.              |
 | `WithTypeSchemaResolver(r)`      | Register a `TypeSchemaResolver` that overrides types by predicate.                    |
@@ -354,7 +354,7 @@ and `const`. Values for `default`, `const`, `enum`, and `examples` are parsed
 according to the field's Go type. `enum` and `examples` values are separated by
 `|`; commas separate pairs, so a value containing a comma escapes it with a
 backslash (`\,`, and `\\` for a literal backslash). For complex values, use
-`JSONSchemaExtender` or doc comments with `WithCommentProvider`.
+`JSONSchemaExtender` or doc comments with `WithDescriptionProvider`.
 
 `type=` overrides the reflected type entirely, for a Go type whose JSON
 representation differs from its reflection: it must name one of the seven
@@ -408,8 +408,8 @@ JSON.
 
 ### Comment extraction
 
-Type and field descriptions come from a `CommentProvider`, registered with
-`WithCommentProvider`. The built-in `GoCommentProvider` (constructed with
+Type and field descriptions come from a `DescriptionProvider`, registered with
+`WithDescriptionProvider`. The built-in `GoCommentProvider` (constructed with
 `NewGoCommentProvider`) extracts Go doc comments from source files for
 struct types, fields, and named types using `go/ast` and
 `golang.org/x/tools/go/packages`; when source files cannot be located for a
@@ -418,7 +418,7 @@ wins over a provider-supplied comment.
 
 ```go
 schema, err := jsonschema.GenerateFor[MyType](ctx,
-	jsonschema.WithCommentProvider(jsonschema.NewGoCommentProvider()),
+	jsonschema.WithDescriptionProvider(jsonschema.NewGoCommentProvider()),
 )
 ```
 
@@ -429,13 +429,13 @@ descriptions in tests — and decides its own failure behavior. Wrapping
 backed by AST extraction:
 
 ```go
-type CommentProvider interface {
-	// TypeComment returns the description for a named type, or "" for none.
-	TypeComment(t reflect.Type) string
+type DescriptionProvider interface {
+	// TypeDescription returns the description for a named type, or "" for none.
+	TypeDescription(t reflect.Type) string
 
-	// FieldComment returns the description for the named Go field of struct
+	// FieldDescription returns the description for the named Go field of struct
 	// type t (the type declaring the field), or "" for none.
-	FieldComment(t reflect.Type, fieldName string) string
+	FieldDescription(t reflect.Type, fieldName string) string
 }
 ```
 

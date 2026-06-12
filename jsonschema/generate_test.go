@@ -1501,7 +1501,7 @@ func TestGenerateFor_WithComments_TypeDescription(t *testing.T) {
 	// Draft has a doc comment; the full text is extracted, so pin its
 	// opening sentence rather than the whole comment.
 	s, err := jsonschema.GenerateFor[jsonschema.Draft](t.Context(),
-		jsonschema.WithCommentProvider(jsonschema.NewGoCommentProvider()),
+		jsonschema.WithDescriptionProvider(jsonschema.NewGoCommentProvider()),
 	)
 	require.NoError(t, err)
 
@@ -1515,7 +1515,7 @@ func TestGenerateFor_WithComments_StructDescription(t *testing.T) {
 
 	// FieldContext has a type-level doc comment.
 	s, err := jsonschema.GenerateFor[jsonschema.FieldContext](t.Context(),
-		jsonschema.WithCommentProvider(jsonschema.NewGoCommentProvider()),
+		jsonschema.WithDescriptionProvider(jsonschema.NewGoCommentProvider()),
 	)
 	require.NoError(t, err)
 
@@ -1708,7 +1708,7 @@ func TestGenerateFor_JSONSchemaTagOverridesExtractedComment(t *testing.T) {
 	// extracted by go/packages (a function-local type's comments are not).
 	s, err := jsonschema.GenerateFor[alpha.Widget](
 		t.Context(),
-		jsonschema.WithCommentProvider(jsonschema.NewGoCommentProvider()),
+		jsonschema.WithDescriptionProvider(jsonschema.NewGoCommentProvider()),
 	)
 	require.NoError(t, err)
 
@@ -1963,7 +1963,7 @@ func TestGenerateFor_ExtenderDescriptionPreservedWithComments(t *testing.T) {
 	// JSONSchemaExtend runs after comment extraction, so the extender's
 	// description takes precedence over the AST doc comment.
 	s, err := jsonschema.GenerateFor[NonStructExtender](t.Context(),
-		jsonschema.WithCommentProvider(jsonschema.NewGoCommentProvider()),
+		jsonschema.WithDescriptionProvider(jsonschema.NewGoCommentProvider()),
 	)
 	require.NoError(t, err)
 
@@ -1982,7 +1982,7 @@ func TestGenerateFor_ExtenderDescriptionPreservedWithComments_InDefs(t *testing.
 	}
 
 	s, err := jsonschema.GenerateFor[Container](t.Context(),
-		jsonschema.WithCommentProvider(jsonschema.NewGoCommentProvider()),
+		jsonschema.WithDescriptionProvider(jsonschema.NewGoCommentProvider()),
 	)
 	require.NoError(t, err)
 
@@ -2272,7 +2272,7 @@ func TestGenerateFor_WithComments_FieldDescription(t *testing.T) {
 
 	// FieldContext has doc comments on both the type and its fields.
 	s, err := jsonschema.GenerateFor[jsonschema.FieldContext](t.Context(),
-		jsonschema.WithCommentProvider(jsonschema.NewGoCommentProvider()),
+		jsonschema.WithDescriptionProvider(jsonschema.NewGoCommentProvider()),
 	)
 	require.NoError(t, err)
 
@@ -2291,7 +2291,7 @@ func TestGenerateFor_WithComments_HandlesTypesWithoutSource(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[Container](t.Context(),
-		jsonschema.WithCommentProvider(jsonschema.NewGoCommentProvider()),
+		jsonschema.WithDescriptionProvider(jsonschema.NewGoCommentProvider()),
 	)
 	require.NoError(t, err)
 	assert.NotNil(t, s)
@@ -2582,7 +2582,7 @@ func TestProviderSchemaIsolatedWithComments(t *testing.T) {
 	t.Parallel()
 
 	s, err := jsonschema.GenerateFor[alpha.ProviderSingleton](t.Context(),
-		jsonschema.WithCommentProvider(jsonschema.NewGoCommentProvider()),
+		jsonschema.WithDescriptionProvider(jsonschema.NewGoCommentProvider()),
 	)
 	require.NoError(t, err)
 

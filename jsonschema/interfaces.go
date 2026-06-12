@@ -75,8 +75,8 @@ func (f TypeSchemaExtenderFunc) ExtendSchemaForType(t reflect.Type, s *Schema) e
 	return f(t, s)
 }
 
-// CommentProvider supplies descriptions for types and struct fields during
-// generation, registered with [WithCommentProvider]. [NewGoCommentProvider]
+// DescriptionProvider supplies descriptions for types and struct fields during
+// generation, registered with [WithDescriptionProvider]. [NewGoCommentProvider]
 // constructs the built-in provider, which extracts Go doc comments by
 // loading and parsing package sources at generation time; any other
 // implementation substitutes another source — for example comments
@@ -87,20 +87,20 @@ func (f TypeSchemaExtenderFunc) ExtendSchemaForType(t reflect.Type, s *Schema) e
 // processing (the jsonschema struct tag, tag interpreters) supply one. A
 // provider must be safe for concurrent use when shared across concurrent
 // Generate calls.
-type CommentProvider interface {
-	// TypeComment returns the description for a named type, or "" for none.
+type DescriptionProvider interface {
+	// TypeDescription returns the description for a named type, or "" for none.
 	// The context comes from the Generate call in effect, so a provider
 	// doing I/O (the built-in one loads package sources) can honor
 	// cancellation and deadlines; a provider that performs no cancellable
 	// work can ignore it.
-	TypeComment(ctx context.Context, t reflect.Type) string
+	TypeDescription(ctx context.Context, t reflect.Type) string
 
-	// FieldComment returns the description for the named Go field of struct
+	// FieldDescription returns the description for the named Go field of struct
 	// type t, or "" for none. T is the type that declares the field: for a
 	// field promoted from an embedded struct it is the embedded type, where
 	// the field's doc comment lives, not the outer struct. The context
-	// follows the TypeComment contract.
-	FieldComment(ctx context.Context, t reflect.Type, fieldName string) string
+	// follows the TypeDescription contract.
+	FieldDescription(ctx context.Context, t reflect.Type, fieldName string) string
 }
 
 // TagInterpreter translates struct field tags into JSON Schema constraints.
