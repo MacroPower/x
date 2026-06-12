@@ -591,11 +591,11 @@
 //     Children held in maps are returned in sorted-key order so traversal is
 //     deterministic, and appending each visited child's pointer while
 //     descending yields the schema path the package's own errors report.
-//     Each entry also carries the same location in typed form
-//     ([SubschemaEntry.Segments], one [Segment] per reference token,
-//     mirroring [ValidationError.InstanceSegments]), so consumers need not
-//     re-parse the pointer string. It is the package's single source of
-//     truth for which Schema fields hold sub-schemas.
+//     Each entry carries its [Location], pairing the pointer with the same
+//     location in typed form ([Location.Segments], one [Segment] per
+//     reference token, mirroring [ValidationError.InstanceSegments]), so
+//     consumers need not re-parse the pointer string. It is the package's
+//     single source of truth for which Schema fields hold sub-schemas.
 //   - [Walk] calls a function for a schema and every schema transitively
 //     reachable through [SubschemaEntries], pre-order: the function runs on a
 //     schema before its children are gathered, so it may replace or mutate
@@ -604,11 +604,10 @@
 //     terminate. Walk stops at and returns the first error from the function,
 //     except [SkipChildren], which prunes the walk at that schema and
 //     continues with its siblings. The function receives each visited
-//     schema's location from the root in both synchronized forms: the JSON
-//     Pointer and the typed [Segment] slice, built by appending each
-//     descended child's [SubschemaEntry.Pointer] and
-//     [SubschemaEntry.Segments]; a traversal with no use for the location
-//     ignores the parameters, following [io/fs.WalkDir].
+//     schema's [Location] from the root — the JSON Pointer and the typed
+//     [Segment] slice in one value, built by appending each descended
+//     child's [SubschemaEntry] location; a traversal with no use for the
+//     location ignores the parameter, following [io/fs.WalkDir].
 //   - [CheckTypeNames] verifies that every type keyword reachable from a
 //     schema names one of the seven JSON Schema type names, returning nil or
 //     an error wrapping [ErrInvalidType] that includes the schema path of the

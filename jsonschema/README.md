@@ -837,11 +837,11 @@ for _, entry := range jsonschema.SubschemaEntries(s) {
 }
 
 // Walk visits s and every schema transitively reachable through
-// SubschemaEntries, with the location from the root in both forms: the JSON
-// Pointer and the typed Segment slice.
-err := jsonschema.Walk(s, func(path string, segments []jsonschema.Segment, s *jsonschema.Schema) error {
+// SubschemaEntries, with each schema's Location from the root: the JSON
+// Pointer and the typed Segment slice in one value.
+err := jsonschema.Walk(s, func(loc jsonschema.Location, s *jsonschema.Schema) error {
 	s.Description = "" // strip annotations, rewrite $refs, collect types, ...
-	fmt.Println(path, s.Type) // "/properties/a string", ...
+	fmt.Println(loc.Pointer, s.Type) // "/properties/a string", ...
 
 	return nil
 })
@@ -858,12 +858,12 @@ unknown keywords. Children held in maps are returned in sorted-key order so
 traversal is deterministic, and a maintenance test fails when an upstream
 `Schema` field addition is not covered. Appending each visited child's
 `Pointer` while descending yields the schema path the package's own errors
-report. Each entry also carries the same location in typed form
-(`SubschemaEntry.Segments`, one `Segment` per reference token, mirroring
-`InstanceSegments` on validation errors): the member key is verbatim — no
-`~0`/`~1` escaping to undo — and a list index is distinguished from a
-property named like a number, so consumers building on the location need
-not re-parse the pointer string.
+report. Each entry carries its `Location`, pairing the pointer with the
+same location in typed form (`Location.Segments`, one `Segment` per
+reference token, mirroring `InstanceSegments` on validation errors): the
+member key is verbatim — no `~0`/`~1` escaping to undo — and a list index
+is distinguished from a property named like a number, so consumers building
+on the location need not re-parse the pointer string.
 
 `Walk` is pre-order: the function runs on a schema before that schema's
 children are gathered, so it may replace or mutate sub-schema fields and the
@@ -875,16 +875,16 @@ the current schema — its sub-schemas are not visited — and continues with it
 siblings, which suits rewriting passes that splice in a subtree the walk
 should not descend into.
 
-The function receives each visited schema's location from the root in both
-synchronized forms (the root itself is `""` and a nil slice): the JSON
-Pointer and the typed `Segment` slice, built by appending each descended
-child's `SubschemaEntry.Pointer` and `SubschemaEntry.Segments`. Path-tracking
-traversals need not re-implement the walk and its cycle guard, and
-segment-based consumers need not re-parse the pointer; a traversal with no
-use for the location ignores the parameters, following `io/fs.WalkDir`. The
-segments slice must not be mutated. A schema reachable through several paths
-is visited with the first path the traversal encounters; map-held children
-walk in sorted-key order, so that path is deterministic.
+The function receives each visited schema's `Location` from the root (the
+zero `Location` for the root itself): the JSON Pointer and the typed
+`Segment` slice in one value, built by appending each descended child's
+`SubschemaEntry` location. Path-tracking traversals need not re-implement
+the walk and its cycle guard, and segment-based consumers need not re-parse
+the pointer; a traversal with no use for the location ignores the
+parameter, following `io/fs.WalkDir`. The segments slice must not be
+mutated. A schema reachable through several paths is visited with the first
+path the traversal encounters; map-held children walk in sorted-key order,
+so that path is deterministic.
 
 Three predicates answer common shape questions:
 

@@ -16,29 +16,37 @@ import (
 //nolint:errname,staticcheck // A control-flow sentinel, not a failure; named for its meaning, like io/fs.SkipDir.
 var SkipChildren = errors.New("skip this schema's children")
 
-// SubschemaEntry pairs one direct sub-schema with the location addressing
-// it from its parent, in two synchronized forms: the RFC 6901 JSON Pointer
-// string and the typed [Segment] slice, mirroring how validation errors
-// carry [ValidationError.InstancePath] alongside
-// [ValidationError.InstanceSegments].
+// Location is the position of a schema within a containing schema document,
+// in the two synchronized forms the package uses everywhere (mirroring how
+// validation errors carry [ValidationError.InstancePath] alongside
+// [ValidationError.InstanceSegments]): the RFC 6901 JSON Pointer string and
+// the typed [Segment] slice. The zero value addresses the root. [Walk]
+// passes one to its callback, and [SubschemaEntry] carries one per child;
+// appending a child's Location to its parent's while descending yields the
+// schema path the package's own errors report.
+type Location struct {
+	// Pointer is the RFC 6901 JSON Pointer ("" addresses the root). Member
+	// keys carry ~0/~1 escaping.
+	Pointer string
+
+	// Segments is the typed form of Pointer, one [Segment] per reference
+	// token (nil addresses the root). Unlike Pointer, a member key is
+	// carried verbatim — no ~0/~1 escaping to undo — and a list index is
+	// distinguished from a property named like a number, so consumers
+	// building on the location need not re-parse the pointer string.
+	Segments []Segment
+}
+
+// SubschemaEntry pairs one direct sub-schema with the embedded [Location]
+// addressing it from its parent: the keyword token plus, for map and list
+// keywords, the member key or the element index (for example
+// "/properties/a", "/allOf/0", "/items").
 type SubschemaEntry struct {
 	// Schema is the child schema.
 	Schema *Schema
 
-	// Pointer is the JSON Pointer from the parent schema to Schema: the
-	// keyword token plus, for map and list keywords, the escaped member key
-	// or the element index (for example "/properties/a", "/allOf/0",
-	// "/items"). Appending each visited child's Pointer while descending
-	// yields the schema path the package's own errors report.
-	Pointer string
-
-	// Segments is the typed form of Pointer: one Segment for the keyword
-	// token plus, for map and list keywords, one for the member key or the
-	// element index. Unlike Pointer, a member key is carried verbatim — no
-	// ~0/~1 escaping to undo — and a list index is distinguished from a
-	// property named like a number, so consumers building on the location
-	// need not re-parse the pointer string.
-	Segments []Segment
+	// Location addresses Schema from its parent.
+	Location
 }
 
 // SubschemaEntries returns the direct sub-schemas of s: every non-nil schema
@@ -74,9 +82,11 @@ func SubschemaEntries(s *Schema) []SubschemaEntry {
 		for _, key := range slices.Sorted(maps.Keys(entry.m)) {
 			if sub := entry.m[key]; sub != nil {
 				children = append(children, SubschemaEntry{
-					Pointer:  "/" + entry.keyword + "/" + escapeJSONPointer(key),
-					Segments: []Segment{{Key: entry.keyword}, {Key: key}},
-					Schema:   sub,
+					Location: Location{
+						Pointer:  "/" + entry.keyword + "/" + escapeJSONPointer(key),
+						Segments: []Segment{{Key: entry.keyword}, {Key: key}},
+					},
+					Schema: sub,
 				})
 			}
 		}
@@ -95,9 +105,11 @@ func SubschemaEntries(s *Schema) []SubschemaEntry {
 		for i, sub := range entry.list {
 			if sub != nil {
 				children = append(children, SubschemaEntry{
-					Pointer:  "/" + entry.keyword + "/" + strconv.Itoa(i),
-					Segments: []Segment{{Key: entry.keyword}, {Index: i, IsIndex: true}},
-					Schema:   sub,
+					Location: Location{
+						Pointer:  "/" + entry.keyword + "/" + strconv.Itoa(i),
+						Segments: []Segment{{Key: entry.keyword}, {Index: i, IsIndex: true}},
+					},
+					Schema: sub,
 				})
 			}
 		}
@@ -122,9 +134,11 @@ func SubschemaEntries(s *Schema) []SubschemaEntry {
 	} {
 		if entry.s != nil {
 			children = append(children, SubschemaEntry{
-				Pointer:  "/" + entry.keyword,
-				Segments: []Segment{{Key: entry.keyword}},
-				Schema:   entry.s,
+				Location: Location{
+					Pointer:  "/" + entry.keyword,
+					Segments: []Segment{{Key: entry.keyword}},
+				},
+				Schema: entry.s,
 			})
 		}
 	}
@@ -140,21 +154,18 @@ func SubschemaEntries(s *Schema) []SubschemaEntry {
 // the first error from fn, except [SkipChildren], which prunes the walk at
 // that schema and continues. A nil s is a no-op.
 //
-// Fn receives the location of each visited schema within s in the two
-// synchronized forms the package uses everywhere ([SubschemaEntry],
-// [ValidationError]): the RFC 6901 JSON Pointer (the root itself is "") and
-// the typed [Segment] slice (the root is nil), built by appending each
-// descended child's [SubschemaEntry.Pointer] and [SubschemaEntry.Segments].
-// The pointer matches the schema path the package's own errors report; the
-// segments carry member keys verbatim and distinguish list indexes from
-// numeric-looking keys, so fn need not re-parse the pointer. Fn must not
-// mutate the segments slice. A traversal with no use for the location
-// ignores the parameters, following [io/fs.WalkDir]. A schema reachable
-// through several paths is visited with the first path the traversal
-// encounters; [SubschemaEntries] orders map-held children by sorted key, so
-// that path is deterministic.
-func Walk(s *Schema, fn func(path string, segments []Segment, s *Schema) error) error {
-	return walkPaths(s, "", nil, fn, map[*Schema]bool{})
+// Fn receives each visited schema's [Location] within s (the zero Location
+// for the root itself), built by appending each descended child's
+// [SubschemaEntry] location. The pointer matches the schema path the
+// package's own errors report; the segments carry member keys verbatim and
+// distinguish list indexes from numeric-looking keys, so fn need not
+// re-parse the pointer. Fn must not mutate loc.Segments. A traversal with no
+// use for the location ignores the parameter, following [io/fs.WalkDir].
+// A schema reachable through several paths is visited with the first path
+// the traversal encounters; [SubschemaEntries] orders map-held children by
+// sorted key, so that path is deterministic.
+func Walk(s *Schema, fn func(loc Location, s *Schema) error) error {
+	return walkPaths(s, Location{}, fn, map[*Schema]bool{})
 }
 
 // walkPaths implements [Walk], threading the visited set through the
@@ -163,9 +174,8 @@ func Walk(s *Schema, fn func(path string, segments []Segment, s *Schema) error) 
 // exactly as if the walk had descended through it.
 func walkPaths(
 	s *Schema,
-	path string,
-	segs []Segment,
-	fn func(string, []Segment, *Schema) error,
+	loc Location,
+	fn func(Location, *Schema) error,
 	visited map[*Schema]bool,
 ) error {
 	if s == nil || visited[s] {
@@ -174,7 +184,7 @@ func walkPaths(
 
 	visited[s] = true
 
-	err := fn(path, segs, s)
+	err := fn(loc, s)
 	if errors.Is(err, SkipChildren) {
 		return nil
 	}
@@ -184,11 +194,14 @@ func walkPaths(
 	}
 
 	for _, entry := range SubschemaEntries(s) {
-		// Concat allocates a fresh backing array per child, so sibling
-		// descents never alias the slices fn may have retained.
-		childSegs := slices.Concat(segs, entry.Segments)
+		childLoc := Location{
+			Pointer: loc.Pointer + entry.Pointer,
+			// Concat allocates a fresh backing array per child, so sibling
+			// descents never alias the slices fn may have retained.
+			Segments: slices.Concat(loc.Segments, entry.Segments),
+		}
 
-		err := walkPaths(entry.Schema, path+entry.Pointer, childSegs, fn, visited)
+		err := walkPaths(entry.Schema, childLoc, fn, visited)
 		if err != nil {
 			return err
 		}

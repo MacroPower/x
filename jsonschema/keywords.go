@@ -25,7 +25,7 @@ func validTypeName(s string) bool {
 
 // JSON Schema keyword name constants, so a consumer branching on
 // [ValidationError.Keyword] or building schema locations from
-// [SubschemaEntry.Segments] needs no raw keyword strings. The generator
+// [Location.Segments] needs no raw keyword strings. The generator
 // recognizes a subset as jsonschema struct tag keys; the validator reports
 // the failing keyword on [ValidationError.Keyword].
 const (

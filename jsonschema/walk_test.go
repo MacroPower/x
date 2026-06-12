@@ -137,24 +137,32 @@ func TestSubschemaEntries(t *testing.T) {
 			},
 			want: []jsonschema.SubschemaEntry{
 				{
-					Pointer:  "/properties/a",
-					Segments: []jsonschema.Segment{{Key: "properties"}, {Key: "a"}},
-					Schema:   propA,
+					Location: jsonschema.Location{
+						Pointer:  "/properties/a",
+						Segments: []jsonschema.Segment{{Key: "properties"}, {Key: "a"}},
+					},
+					Schema: propA,
 				},
 				{
-					Pointer:  "/allOf/0",
-					Segments: []jsonschema.Segment{{Key: "allOf"}, {Index: 0, IsIndex: true}},
-					Schema:   allOf0,
+					Location: jsonschema.Location{
+						Pointer:  "/allOf/0",
+						Segments: []jsonschema.Segment{{Key: "allOf"}, {Index: 0, IsIndex: true}},
+					},
+					Schema: allOf0,
 				},
 				{
-					Pointer:  "/allOf/1",
-					Segments: []jsonschema.Segment{{Key: "allOf"}, {Index: 1, IsIndex: true}},
-					Schema:   allOf1,
+					Location: jsonschema.Location{
+						Pointer:  "/allOf/1",
+						Segments: []jsonschema.Segment{{Key: "allOf"}, {Index: 1, IsIndex: true}},
+					},
+					Schema: allOf1,
 				},
 				{
-					Pointer:  "/items",
-					Segments: []jsonschema.Segment{{Key: "items"}},
-					Schema:   items,
+					Location: jsonschema.Location{
+						Pointer:  "/items",
+						Segments: []jsonschema.Segment{{Key: "items"}},
+					},
+					Schema: items,
 				},
 			},
 		},
@@ -164,9 +172,11 @@ func TestSubschemaEntries(t *testing.T) {
 			},
 			want: []jsonschema.SubschemaEntry{
 				{
-					Pointer:  "/properties/a~1b~0c",
-					Segments: []jsonschema.Segment{{Key: "properties"}, {Key: "a/b~c"}},
-					Schema:   escaped,
+					Location: jsonschema.Location{
+						Pointer:  "/properties/a~1b~0c",
+						Segments: []jsonschema.Segment{{Key: "properties"}, {Key: "a/b~c"}},
+					},
+					Schema: escaped,
 				},
 			},
 		},
@@ -188,7 +198,7 @@ func TestWalk(t *testing.T) {
 		t.Parallel()
 
 		called := false
-		err := jsonschema.Walk(nil, func(string, []jsonschema.Segment, *jsonschema.Schema) error {
+		err := jsonschema.Walk(nil, func(jsonschema.Location, *jsonschema.Schema) error {
 			called = true
 
 			return nil
@@ -209,7 +219,7 @@ func TestWalk(t *testing.T) {
 
 		var visited []*jsonschema.Schema
 
-		err := jsonschema.Walk(root, func(_ string, _ []jsonschema.Segment, s *jsonschema.Schema) error {
+		err := jsonschema.Walk(root, func(_ jsonschema.Location, s *jsonschema.Schema) error {
 			visited = append(visited, s)
 
 			return nil
@@ -227,7 +237,7 @@ func TestWalk(t *testing.T) {
 
 		count := 0
 
-		err := jsonschema.Walk(root, func(_ string, _ []jsonschema.Segment, s *jsonschema.Schema) error {
+		err := jsonschema.Walk(root, func(_ jsonschema.Location, s *jsonschema.Schema) error {
 			if s == shared {
 				count++
 			}
@@ -247,7 +257,7 @@ func TestWalk(t *testing.T) {
 
 		count := 0
 
-		err := jsonschema.Walk(root, func(string, []jsonschema.Segment, *jsonschema.Schema) error {
+		err := jsonschema.Walk(root, func(jsonschema.Location, *jsonschema.Schema) error {
 			count++
 
 			return nil
@@ -267,7 +277,7 @@ func TestWalk(t *testing.T) {
 
 		var visited []*jsonschema.Schema
 
-		err := jsonschema.Walk(root, func(_ string, _ []jsonschema.Segment, s *jsonschema.Schema) error {
+		err := jsonschema.Walk(root, func(_ jsonschema.Location, s *jsonschema.Schema) error {
 			visited = append(visited, s)
 			if s == first {
 				return errStop
@@ -289,7 +299,7 @@ func TestWalk(t *testing.T) {
 
 		var visited []*jsonschema.Schema
 
-		err := jsonschema.Walk(root, func(_ string, _ []jsonschema.Segment, s *jsonschema.Schema) error {
+		err := jsonschema.Walk(root, func(_ jsonschema.Location, s *jsonschema.Schema) error {
 			if s.Items == original {
 				s.Items = replacement
 			}
@@ -314,7 +324,7 @@ func TestWalk(t *testing.T) {
 
 		var visited []*jsonschema.Schema
 
-		err := jsonschema.Walk(root, func(_ string, _ []jsonschema.Segment, s *jsonschema.Schema) error {
+		err := jsonschema.Walk(root, func(_ jsonschema.Location, s *jsonschema.Schema) error {
 			visited = append(visited, s)
 			if s == pruned {
 				return jsonschema.SkipChildren
@@ -335,7 +345,7 @@ func TestWalk(t *testing.T) {
 
 		var visited []*jsonschema.Schema
 
-		err := jsonschema.Walk(root, func(_ string, _ []jsonschema.Segment, s *jsonschema.Schema) error {
+		err := jsonschema.Walk(root, func(_ jsonschema.Location, s *jsonschema.Schema) error {
 			visited = append(visited, s)
 
 			return jsonschema.SkipChildren
@@ -352,7 +362,7 @@ func TestWalk(t *testing.T) {
 
 		count := 0
 
-		err := jsonschema.Walk(root, func(string, []jsonschema.Segment, *jsonschema.Schema) error {
+		err := jsonschema.Walk(root, func(jsonschema.Location, *jsonschema.Schema) error {
 			count++
 
 			return fmt.Errorf("rewrite pass: %w", jsonschema.SkipChildren)
@@ -373,7 +383,7 @@ func TestWalk(t *testing.T) {
 
 		count := 0
 
-		err := jsonschema.Walk(root, func(_ string, _ []jsonschema.Segment, s *jsonschema.Schema) error {
+		err := jsonschema.Walk(root, func(_ jsonschema.Location, s *jsonschema.Schema) error {
 			if s == shared {
 				count++
 
@@ -399,8 +409,8 @@ func TestWalk(t *testing.T) {
 
 		paths := map[*jsonschema.Schema]string{}
 
-		err := jsonschema.Walk(root, func(path string, _ []jsonschema.Segment, s *jsonschema.Schema) error {
-			paths[s] = path
+		err := jsonschema.Walk(root, func(loc jsonschema.Location, s *jsonschema.Schema) error {
+			paths[s] = loc.Pointer
 
 			return nil
 		})
@@ -424,8 +434,8 @@ func TestWalk(t *testing.T) {
 
 		segs := map[*jsonschema.Schema][]jsonschema.Segment{}
 
-		err := jsonschema.Walk(root, func(_ string, segments []jsonschema.Segment, s *jsonschema.Schema) error {
-			segs[s] = segments
+		err := jsonschema.Walk(root, func(loc jsonschema.Location, s *jsonschema.Schema) error {
+			segs[s] = loc.Segments
 
 			return nil
 		})
@@ -455,8 +465,8 @@ func TestWalk(t *testing.T) {
 
 		segs := map[*jsonschema.Schema][]jsonschema.Segment{}
 
-		err := jsonschema.Walk(root, func(_ string, segments []jsonschema.Segment, s *jsonschema.Schema) error {
-			segs[s] = segments
+		err := jsonschema.Walk(root, func(loc jsonschema.Location, s *jsonschema.Schema) error {
+			segs[s] = loc.Segments
 
 			return nil
 		})
@@ -479,9 +489,9 @@ func TestWalk(t *testing.T) {
 
 		var paths []string
 
-		err := jsonschema.Walk(root, func(path string, _ []jsonschema.Segment, s *jsonschema.Schema) error {
+		err := jsonschema.Walk(root, func(loc jsonschema.Location, s *jsonschema.Schema) error {
 			if s == shared {
-				paths = append(paths, path)
+				paths = append(paths, loc.Pointer)
 			}
 
 			return nil
@@ -504,9 +514,9 @@ func TestWalk(t *testing.T) {
 
 		var visited []string
 
-		err := jsonschema.Walk(root, func(path string, _ []jsonschema.Segment, _ *jsonschema.Schema) error {
-			visited = append(visited, path)
-			if path == "/properties/skip" {
+		err := jsonschema.Walk(root, func(loc jsonschema.Location, _ *jsonschema.Schema) error {
+			visited = append(visited, loc.Pointer)
+			if loc.Pointer == "/properties/skip" {
 				return jsonschema.SkipChildren
 			}
 

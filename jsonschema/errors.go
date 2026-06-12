@@ -116,7 +116,7 @@ type ValidationError struct {
 
 // Segment is one step of a JSON Pointer location: an object member key or
 // an array index. Validation errors carry instance locations as segments
-// ([ValidationError.InstanceSegments]), and [SubschemaEntry.Segments]
+// ([ValidationError.InstanceSegments]), and [Location.Segments]
 // carries schema locations the same way.
 type Segment struct {
 	// Key is the object property name. Meaningful only when IsIndex is false.
@@ -145,7 +145,7 @@ func (e *ValidationError) InstanceSegments() []Segment {
 // failure within the schema, one Segment per reference token of
 // [ValidationError.SchemaPath], outermost first — the schema-side
 // counterpart of [ValidationError.InstanceSegments], mirroring
-// [SubschemaEntry.Segments]. Unlike re-parsing SchemaPath, it carries member
+// [Location.Segments]. Unlike re-parsing SchemaPath, it carries member
 // keys verbatim (no ~0/~1 escaping to undo) and distinguishes a list index
 // (an allOf branch) from a property named like a number. It is populated for
 // errors produced by [Validate], [ValidateJSON], and the [Validator]
