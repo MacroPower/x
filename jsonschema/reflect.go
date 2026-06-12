@@ -49,7 +49,7 @@ type generator struct {
 	defaultsFrom         any
 	refRecords           []refRecord
 	descriptionProvider  DescriptionProvider
-	tagInterpreters      []TagInterpreter
+	tagInterpreters      []tagInterpreterRegistration
 	typeExtenders        []TypeSchemaExtender
 	draft                Draft
 	definitions          bool
@@ -1295,8 +1295,8 @@ func (g *generator) buildFieldSchema(parentType reflect.Type, fi structFieldInfo
 func (g *generator) applyFieldInterpreters(fi structFieldInfo, fieldSchema, parent *Schema) error {
 	fieldType := fi.field.Type
 
-	for _, interp := range g.tagInterpreters {
-		if tag, ok := fi.field.Tag.Lookup(interp.TagKey()); ok {
+	for _, reg := range g.tagInterpreters {
+		if tag, ok := fi.field.Tag.Lookup(reg.key); ok {
 			ctx := FieldContext{
 				Name:        fi.jsonName,
 				Type:        fieldType,
@@ -1305,9 +1305,9 @@ func (g *generator) applyFieldInterpreters(fi structFieldInfo, fieldSchema, pare
 				StructField: fi.field,
 				Draft:       g.draft,
 			}
-			err := interp.Interpret(tag, ctx)
+			err := reg.interp.Interpret(tag, ctx)
 			if err != nil {
-				return fmt.Errorf("tag interpreter %q: %w", interp.TagKey(), err)
+				return fmt.Errorf("tag interpreter %q: %w", reg.key, err)
 			}
 		}
 	}

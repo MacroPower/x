@@ -11,7 +11,7 @@
 // Register the interpreter when generating a schema:
 //
 //	schema, err := jsonschema.GenerateFor[MyType](ctx,
-//	    jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+//	    jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 //	)
 //
 // # Supported Tags

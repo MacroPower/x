@@ -389,7 +389,7 @@ func main() {
 		jsonschema.WithAdditionalProperties(true),
 		{{- end}}
 		{{- if .Validate}}
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 		{{- end}}
 	}
 	schema, err := jsonschema.Generate(context.Background(), t, opts...)

@@ -105,10 +105,10 @@ type DescriptionProvider interface {
 }
 
 // TagInterpreter translates struct field tags into JSON Schema constraints.
+// It is registered with [WithTagInterpreter] under the struct tag key it
+// reads, following [net/http.Handle]'s name-at-registration shape, so one
+// implementation can serve several keys.
 type TagInterpreter interface {
-	// TagKey returns the struct tag key this interpreter reads (e.g., "validate").
-	TagKey() string
-
 	// Interpret reads the tag value and the field context, then modifies
 	// the schema in place. It is called during field-level processing, after
 	// the type schema, comments, and jsonschema struct tag have been applied.
@@ -119,52 +119,33 @@ type TagInterpreter interface {
 }
 
 // TagInterpreterFunc adapts a bare interpreting function to a
-// [TagInterpreter] for the named struct tag key, following [FormatValidatorFunc].
-func TagInterpreterFunc(key string, fn func(tag string, field FieldContext) error) TagInterpreter {
-	return tagInterpreterFunc{key: key, fn: fn}
+// [TagInterpreter], following [net/http.HandlerFunc], so a one-off
+// interpreter needs no named type.
+type TagInterpreterFunc func(tag string, field FieldContext) error
+
+// Interpret calls f.
+func (f TagInterpreterFunc) Interpret(tag string, field FieldContext) error {
+	return f(tag, field)
 }
 
-// tagInterpreterFunc is the [TagInterpreter] returned by [TagInterpreterFunc].
-type tagInterpreterFunc struct {
-	fn  func(string, FieldContext) error
-	key string
-}
-
-func (t tagInterpreterFunc) TagKey() string { return t.key }
-
-func (t tagInterpreterFunc) Interpret(tag string, field FieldContext) error {
-	return t.fn(tag, field)
-}
-
-// FormatValidator checks string instances against one named format during
-// validation. Like [TagInterpreter], the value declares the name it handles,
-// so a single registration via [WithFormatValidator] carries both, and an
-// implementation can hold state such as a compiled regular expression.
-// [FormatValidatorFunc] adapts a bare function for checkers that need none.
+// FormatValidator checks string instances against one format during
+// validation. It is registered with [WithFormatValidator] under the format
+// name it checks, following [net/http.Handle]'s name-at-registration shape,
+// so one implementation can serve several names. An implementation can hold
+// state such as a compiled regular expression; [FormatValidatorFunc] adapts
+// a bare function for checkers that need none.
 type FormatValidator interface {
-	// Format returns the format name this validator checks (e.g., "uuid").
-	Format() string
-
 	// ValidateFormat checks one string instance against the format,
 	// returning nil when the value conforms.
 	ValidateFormat(value string) error
 }
 
-// FormatValidatorFunc adapts a bare checking function to a [FormatValidator] for the
-// named format, following [net/http.HandlerFunc].
-func FormatValidatorFunc(name string, fn func(string) error) FormatValidator {
-	return formatFunc{name: name, fn: fn}
-}
+// FormatValidatorFunc adapts a bare checking function to a
+// [FormatValidator], following [net/http.HandlerFunc].
+type FormatValidatorFunc func(value string) error
 
-// formatFunc is the [FormatValidator] returned by [FormatValidatorFunc].
-type formatFunc struct {
-	fn   func(string) error
-	name string
-}
-
-func (f formatFunc) Format() string { return f.name }
-
-func (f formatFunc) ValidateFormat(value string) error { return f.fn(value) }
+// ValidateFormat calls f.
+func (f FormatValidatorFunc) ValidateFormat(value string) error { return f(value) }
 
 // RefResolver resolves remote schema URIs during validation. The resolver
 // is called only when local resolution fails to find a target. Successfully

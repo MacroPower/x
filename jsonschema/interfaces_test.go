@@ -131,17 +131,17 @@ func TestTagInterpreterFunc(t *testing.T) {
 		Size int `json:"size" units:"meters"`
 	}
 
-	t.Run("interprets the named tag", func(t *testing.T) {
+	t.Run("interprets the registered tag", func(t *testing.T) {
 		t.Parallel()
 
-		interp := jsonschema.TagInterpreterFunc("units",
+		interp := jsonschema.TagInterpreterFunc(
 			func(tag string, field jsonschema.FieldContext) error {
 				field.Schema.Description = "in " + tag
 				return nil
 			},
 		)
 
-		s, err := jsonschema.GenerateFor[doc](t.Context(), jsonschema.WithTagInterpreter(interp))
+		s, err := jsonschema.GenerateFor[doc](t.Context(), jsonschema.WithTagInterpreter("units", interp))
 		require.NoError(t, err)
 		assert.Equal(t, "in meters", s.Properties["size"].Description)
 	})
@@ -150,11 +150,11 @@ func TestTagInterpreterFunc(t *testing.T) {
 		t.Parallel()
 
 		errBad := errors.New("bad tag")
-		interp := jsonschema.TagInterpreterFunc("units",
+		interp := jsonschema.TagInterpreterFunc(
 			func(string, jsonschema.FieldContext) error { return errBad },
 		)
 
-		_, err := jsonschema.GenerateFor[doc](t.Context(), jsonschema.WithTagInterpreter(interp))
+		_, err := jsonschema.GenerateFor[doc](t.Context(), jsonschema.WithTagInterpreter("units", interp))
 		require.ErrorIs(t, err, errBad)
 		assert.ErrorContains(t, err, `tag interpreter "units"`)
 	})

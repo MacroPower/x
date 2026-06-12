@@ -28,7 +28,7 @@ func TestValidateInterpreter_StringConstraints(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[Form](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -65,7 +65,7 @@ func TestValidateInterpreter_NumericConstraints(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[Ranges](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -101,7 +101,7 @@ func TestValidateInterpreter_OneOfOnSequenceFields(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[Lists](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -139,7 +139,7 @@ func TestValidateInterpreter_OneOfOnByteSlice(t *testing.T) {
 	}
 
 	_, err := jsonschema.GenerateFor[Data](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no item schema")
@@ -155,7 +155,7 @@ func TestValidateInterpreter_SliceConstraints(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[Lists](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -183,7 +183,7 @@ func TestValidateInterpreter_MapConstraints(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[Config](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -215,7 +215,7 @@ func TestValidateInterpreter_FormatTags(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[Contact](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -240,7 +240,7 @@ func TestValidateInterpreter_PatternTags(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[Patterns](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -260,7 +260,7 @@ func TestValidateInterpreter_ContentTags(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[Content](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -276,7 +276,7 @@ func TestValidateInterpreter_RequiredOnOmitempty(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[Config](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -294,7 +294,7 @@ func TestValidateInterpreter_RequiredOnPointer(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[Config](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -311,7 +311,7 @@ func TestValidateInterpreter_Dive(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[Config](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -341,7 +341,7 @@ func TestValidateInterpreter_NestedDive(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[Config](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -378,7 +378,7 @@ func TestValidateInterpreter_DivePointerElement(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[Config](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -413,7 +413,7 @@ func TestValidateInterpreter_DiveMap(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[Config](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -444,7 +444,7 @@ func TestValidateInterpreter_OrOperator(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[Config](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -462,7 +462,7 @@ func TestValidateInterpreter_CrossFieldIgnored(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[Config](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -479,7 +479,7 @@ func TestValidateInterpreter_MapKeyValidatorsIgnored(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[Config](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -502,7 +502,7 @@ func TestValidateInterpreter_ExclusiveCollectionConstraints(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[Config](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -522,7 +522,7 @@ func TestValidateInterpreter_MapLenConstraint(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[Config](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -539,7 +539,7 @@ func TestValidateInterpreter_RequiredOnPointerSlice(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[Config](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -556,7 +556,7 @@ func TestValidateInterpreter_RequiredOnPointerMap(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[Config](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -573,7 +573,7 @@ func TestValidateInterpreter_RequiredOnNonPointerSlice(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[Config](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -590,7 +590,7 @@ func TestValidateInterpreter_RequiredOnNonPointerMap(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[Config](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -609,7 +609,7 @@ func TestNumericConstPreservesLargeIntegers(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[Large](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -632,7 +632,7 @@ func TestNumericConstPreservesLargeUnsignedIntegers(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[Large](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -658,7 +658,7 @@ func TestValidateAndJSONSchemaTagsProduceSameConstType(t *testing.T) {
 	}
 
 	sInt, err := jsonschema.GenerateFor[IntField](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -712,7 +712,7 @@ func TestUnrecognizedValidateTagErrors(t *testing.T) {
 	}
 
 	_, err := jsonschema.GenerateFor[MyType](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.Error(t, err,
 		"unrecognized validate tag 'emial' produces an error")
@@ -728,7 +728,7 @@ func TestCollectionGtLtClampsBoundsToZero(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[MyType](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -751,7 +751,7 @@ func TestStringGtLtClampsLengthToZero(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[MyType](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -774,7 +774,7 @@ func TestRequiredOnNumericForbidsZero(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[MyType](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -796,7 +796,7 @@ func TestLenOnNumericProducesConst(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[MyType](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -818,7 +818,7 @@ func TestOneOfEmptyValueErrors(t *testing.T) {
 	}
 
 	_, err := jsonschema.GenerateFor[MyType](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.Error(t, err,
 		"oneof= with no values produces an error")
@@ -834,7 +834,7 @@ func TestUniqueOnNonCollectionLeavesUniqueItemsUnset(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[MyType](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -855,7 +855,7 @@ func TestEqOnCollectionProducesLengthBounds(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[MyType](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -877,7 +877,7 @@ func TestEqOnBoolProducesBooleanConst(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[MyType](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -899,7 +899,7 @@ func TestOneOfOnBoolProducesBooleanEnum(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[MyType](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -923,7 +923,7 @@ func TestRequiredOnBoolProducesConstTrue(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[MyType](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -945,7 +945,7 @@ func TestTrailingDiveErrors(t *testing.T) {
 	}
 
 	_, err := jsonschema.GenerateFor[MyType](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.Error(t, err,
 		"trailing dive with no subsequent constraints produces an error")
@@ -963,7 +963,7 @@ func TestMissingEndkeysStillAppliesValueConstraints(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[MyType](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -987,7 +987,7 @@ func TestExplicitJSONSchemaTagTakesPrecedenceOverValidate(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[MyType](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -1012,7 +1012,7 @@ func TestMinMaxOnUnsupportedTypeErrors(t *testing.T) {
 	}
 
 	_, err := jsonschema.GenerateFor[MyType](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.Error(t, err,
 		"min on a struct type produces an error")
@@ -1033,7 +1033,7 @@ func TestValidateInterpreter_RequiredPreservesStrongerBound(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[Form](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -1066,7 +1066,7 @@ func TestValidateInterpreter_CollectionNe(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[Lists](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -1091,7 +1091,7 @@ func TestValidateInterpreter_CollectionNeComposesWithAllOf(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[Lists](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -1114,7 +1114,7 @@ func TestValidateInterpreter_DiveIntoFixedArray(t *testing.T) {
 	}
 
 	s2020, err := jsonschema.GenerateFor[Arr](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -1127,7 +1127,7 @@ func TestValidateInterpreter_DiveIntoFixedArray(t *testing.T) {
 
 	s7, err := jsonschema.GenerateFor[Arr](t.Context(),
 		jsonschema.WithDraft(jsonschema.Draft7),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -1149,7 +1149,7 @@ func TestValidateInterpreter_DiveIntoByteSliceIsNoOp(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[B](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -1166,7 +1166,7 @@ func TestValidateInterpreter_StringKeywordOnByteSlice(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[Doc](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 	assert.Equal(t, "base64", s.Properties["blob"].ContentEncoding)
@@ -1178,7 +1178,7 @@ func TestValidateInterpreter_StringKeywordOnByteSlice(t *testing.T) {
 	}
 
 	_, err = jsonschema.GenerateFor[Bad](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.Error(t, err)
 }
@@ -1193,7 +1193,7 @@ func TestValidateInterpreter_PatternKeywordDoesNotOverwrite(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[P](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -1366,7 +1366,7 @@ func TestValidateInterpreter_RequiredNeZeroOnUnsignedDedups(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[MyType](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -1401,7 +1401,7 @@ func TestValidateInterpreter_RequiredMinZeroKeepsFloor(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[Form](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -1440,7 +1440,7 @@ func TestValidateInterpreter_RepeatedMinIntersects(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[Form](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -1474,7 +1474,7 @@ func TestValidateInterpreter_UniqueOnMapIsNoOp(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[MyType](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -1512,7 +1512,7 @@ func TestValidateInterpreter_IntegerBoundExactRepresentability(t *testing.T) {
 		t.Parallel()
 
 		s, err := jsonschema.GenerateFor[exactInt](t.Context(),
-			jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+			jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 		)
 		require.NoError(t, err)
 
@@ -1525,7 +1525,7 @@ func TestValidateInterpreter_IntegerBoundExactRepresentability(t *testing.T) {
 		t.Parallel()
 
 		_, err := jsonschema.GenerateFor[inexactInt](t.Context(),
-			jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+			jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 		)
 		require.Error(t, err,
 			"a min bound beyond 2^53 is not exactly representable")
@@ -1536,7 +1536,7 @@ func TestValidateInterpreter_IntegerBoundExactRepresentability(t *testing.T) {
 		t.Parallel()
 
 		_, err := jsonschema.GenerateFor[inexactUint](t.Context(),
-			jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+			jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 		)
 		require.Error(t, err,
 			"MaxUint64 rounds up past the float64 mantissa and is rejected")
@@ -1547,7 +1547,7 @@ func TestValidateInterpreter_IntegerBoundExactRepresentability(t *testing.T) {
 		t.Parallel()
 
 		s, err := jsonschema.GenerateFor[smallInt](t.Context(),
-			jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+			jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 		)
 		require.NoError(t, err)
 
@@ -1587,7 +1587,7 @@ func TestValidateInterpreter_RequiredOnBoolPreservesConst(t *testing.T) {
 		t.Parallel()
 
 		_, err := jsonschema.GenerateFor[eqFalseRequired](t.Context(),
-			jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+			jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 		)
 		require.Error(t, err,
 			"required on a bool already pinned to false is an impossible combination")
@@ -1597,7 +1597,7 @@ func TestValidateInterpreter_RequiredOnBoolPreservesConst(t *testing.T) {
 		t.Parallel()
 
 		_, err := jsonschema.GenerateFor[requiredEqFalse](t.Context(),
-			jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+			jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 		)
 		require.Error(t, err,
 			"the conflict is detected regardless of tag order")
@@ -1607,7 +1607,7 @@ func TestValidateInterpreter_RequiredOnBoolPreservesConst(t *testing.T) {
 		t.Parallel()
 
 		s, err := jsonschema.GenerateFor[eqTrueRequired](t.Context(),
-			jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+			jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 		)
 		require.NoError(t, err)
 
@@ -1621,7 +1621,7 @@ func TestValidateInterpreter_RequiredOnBoolPreservesConst(t *testing.T) {
 		t.Parallel()
 
 		s, err := jsonschema.GenerateFor[bareRequired](t.Context(),
-			jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+			jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 		)
 		require.NoError(t, err)
 
@@ -1648,7 +1648,7 @@ func TestValidateInterpreter_NumericBoundsIntersectTypeBounds(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[Form](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -1705,7 +1705,7 @@ func TestValidateInterpreter_NumericValueOverflowErrors(t *testing.T) {
 		"eq overflow on int8": {
 			gen: func() (*jsonschema.Schema, error) {
 				return jsonschema.GenerateFor[eqInt8](t.Context(),
-					jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+					jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 				)
 			},
 			err: true,
@@ -1713,7 +1713,7 @@ func TestValidateInterpreter_NumericValueOverflowErrors(t *testing.T) {
 		"ne overflow on int16": {
 			gen: func() (*jsonschema.Schema, error) {
 				return jsonschema.GenerateFor[neInt16](t.Context(),
-					jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+					jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 				)
 			},
 			err: true,
@@ -1721,7 +1721,7 @@ func TestValidateInterpreter_NumericValueOverflowErrors(t *testing.T) {
 		"oneof overflow on uint8": {
 			gen: func() (*jsonschema.Schema, error) {
 				return jsonschema.GenerateFor[oneofUint8](t.Context(),
-					jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+					jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 				)
 			},
 			err: true,
@@ -1729,7 +1729,7 @@ func TestValidateInterpreter_NumericValueOverflowErrors(t *testing.T) {
 		"len overflow on int8": {
 			gen: func() (*jsonschema.Schema, error) {
 				return jsonschema.GenerateFor[lenInt8](t.Context(),
-					jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+					jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 				)
 			},
 			err: true,
@@ -1737,7 +1737,7 @@ func TestValidateInterpreter_NumericValueOverflowErrors(t *testing.T) {
 		"in-range eq on int8": {
 			gen: func() (*jsonschema.Schema, error) {
 				return jsonschema.GenerateFor[inRangeInt8](t.Context(),
-					jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+					jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 				)
 			},
 			err: false,
@@ -1775,7 +1775,7 @@ func TestValidateInterpreter_LenOnCollectionUnaffectedByFieldWidth(t *testing.T)
 	}
 
 	s, err := jsonschema.GenerateFor[Form](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 

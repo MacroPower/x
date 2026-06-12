@@ -21,16 +21,25 @@ type generateOptionFunc func(*generator)
 
 func (f generateOptionFunc) applyGenerate(g *generator) { f(g) }
 
-// WithTagInterpreter registers a TagInterpreter that maps struct tags to
-// schema constraints. Multiple interpreters can be registered and are
-// applied in order. [TagInterpreterFunc] adapts a bare function. A nil t is
+// WithTagInterpreter registers a [TagInterpreter] under the struct tag key
+// it reads (e.g. "validate"), following [net/http.Handle]: the name lives at
+// the registration site, so one interpreter implementation can serve several
+// keys. Multiple interpreters can be registered and are applied in order.
+// [TagInterpreterFunc] adapts a bare function. A nil t or an empty key is
 // ignored.
-func WithTagInterpreter(t TagInterpreter) GenerateOption {
+func WithTagInterpreter(key string, t TagInterpreter) GenerateOption {
 	return generateOptionFunc(func(g *generator) {
-		if t != nil {
-			g.tagInterpreters = append(g.tagInterpreters, t)
+		if t != nil && key != "" {
+			g.tagInterpreters = append(g.tagInterpreters, tagInterpreterRegistration{key: key, interp: t})
 		}
 	})
+}
+
+// tagInterpreterRegistration pairs a [TagInterpreter] with the struct tag
+// key it was registered under.
+type tagInterpreterRegistration struct {
+	interp TagInterpreter
+	key    string
 }
 
 // WithDescriptionProvider sets the [DescriptionProvider] consulted for type and

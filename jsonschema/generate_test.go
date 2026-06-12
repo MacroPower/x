@@ -939,7 +939,7 @@ func TestGenerateFor_ValidateInterpreter(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[CreateUser](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -1733,7 +1733,7 @@ func TestGenerateFor_TagInterpreterIntersectsJSONSchemaTagBounds(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[Config](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -2062,7 +2062,7 @@ func TestGenerateFor_Draft7_RefWithValidateInterpreter(t *testing.T) {
 
 	s, err := jsonschema.GenerateFor[Container](t.Context(),
 		jsonschema.WithDraft(jsonschema.Draft7),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -2108,7 +2108,7 @@ func TestGenerateFor_Draft7_RefWithInterpreterNot(t *testing.T) {
 
 	s, err := jsonschema.GenerateFor[Container](t.Context(),
 		jsonschema.WithDraft(jsonschema.Draft7),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 
@@ -2739,11 +2739,14 @@ func TestWithTagInterpreterNilDoesNotPanic(t *testing.T) {
 		Name string `json:"name"`
 	}
 
-	// WithTagInterpreter(nil) should produce a clear error, not a panic.
+	// A nil interpreter or an empty key is ignored, not a panic.
 	assert.NotPanics(t, func() {
 		//nolint:errcheck // Asserting only that the call does not panic.
-		_, _ = jsonschema.GenerateFor[Simple](t.Context(), jsonschema.WithTagInterpreter(nil))
-	}, "WithTagInterpreter(nil) should not panic")
+		_, _ = jsonschema.GenerateFor[Simple](t.Context(),
+			jsonschema.WithTagInterpreter("inspect", nil),
+			jsonschema.WithTagInterpreter("", jsonschema.TagInterpreterFunc(
+				func(string, jsonschema.FieldContext) error { return nil })))
+	}, "WithTagInterpreter with a nil interpreter or empty key should not panic")
 }
 
 func TestJSONStringOnStructLeavesNoOrphanedDefs(t *testing.T) {

@@ -41,8 +41,6 @@ type parentInspector struct {
 	snapshots []parentSnapshot
 }
 
-func (p *parentInspector) TagKey() string { return "inspect" }
-
 func (p *parentInspector) Interpret(tag string, field jsonschema.FieldContext) error {
 	count := 0
 	if field.Parent != nil {
@@ -390,7 +388,7 @@ func TestFieldContextParentPartiallyBuilt(t *testing.T) {
 	}
 
 	_, err := jsonschema.GenerateFor[MyType](t.Context(),
-		jsonschema.WithTagInterpreter(interp),
+		jsonschema.WithTagInterpreter("inspect", interp),
 	)
 	require.NoError(t, err)
 
@@ -407,8 +405,6 @@ func TestFieldContextParentPartiallyBuilt(t *testing.T) {
 type structFieldInspector struct {
 	contexts []jsonschema.FieldContext
 }
-
-func (i *structFieldInspector) TagKey() string { return "inspect" }
 
 func (i *structFieldInspector) Interpret(_ string, field jsonschema.FieldContext) error {
 	i.contexts = append(i.contexts, field)
@@ -428,7 +424,7 @@ func TestFieldContextStructField(t *testing.T) {
 	}
 
 	_, err := jsonschema.GenerateFor[MyType](t.Context(),
-		jsonschema.WithTagInterpreter(interp),
+		jsonschema.WithTagInterpreter("inspect", interp),
 	)
 	require.NoError(t, err)
 
@@ -457,7 +453,7 @@ func TestFieldContextDraft7(t *testing.T) {
 
 	_, err := jsonschema.GenerateFor[MyType](t.Context(),
 		jsonschema.WithDraft(jsonschema.Draft7),
-		jsonschema.WithTagInterpreter(interp),
+		jsonschema.WithTagInterpreter("inspect", interp),
 	)
 	require.NoError(t, err)
 

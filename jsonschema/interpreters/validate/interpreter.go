@@ -16,16 +16,16 @@ import (
 var ErrConflictingConstraints = errors.New("validate tag: conflicting constraints")
 
 // Interpreter implements [jsonschema.TagInterpreter] for go-playground/validator
-// tag syntax. Create one with [NewInterpreter].
+// tag syntax. Create one with [NewInterpreter] and register it under the
+// "validate" tag key:
+//
+//	jsonschema.WithTagInterpreter("validate", validate.NewInterpreter())
 type Interpreter struct{}
 
 // NewInterpreter returns a new validate tag interpreter.
 func NewInterpreter() *Interpreter {
 	return &Interpreter{}
 }
-
-// TagKey returns "validate".
-func (i *Interpreter) TagKey() string { return "validate" }
 
 // Interpret parses a validate tag and applies constraints to the field schema.
 func (i *Interpreter) Interpret(tag string, field jsonschema.FieldContext) error {

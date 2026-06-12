@@ -168,21 +168,21 @@ Unsupported types (`func`, `chan`, `complex`, `unsafe.Pointer`) return
 
 ### Configuration options
 
-| Option                           | Effect                                                                                |
-| -------------------------------- | ------------------------------------------------------------------------------------- |
-| `WithDraft(Draft)`               | Target draft: `Draft2020` (default) or `Draft7`; also serves validation and `Inline`. |
-| `WithTagInterpreter(t)`          | Register a `TagInterpreter`; multiple are applied in order.                           |
-| `WithDescriptionProvider(p)`     | Set the `DescriptionProvider` used as the source of descriptions.                     |
-| `WithTypeSchema(t, s)`           | Override the schema for a specific Go type (highest priority).                        |
-| `WithTypeSchemaFor[T](s)`        | `WithTypeSchema` for a statically known type, without `reflect.TypeFor`.              |
-| `WithTypeSchemaResolver(r)`      | Register a `TypeSchemaResolver` that overrides types by predicate.                    |
-| `WithTypeSchemaExtender(e)`      | Register a `TypeSchemaExtender` that modifies reflection-generated schemas.           |
-| `WithNamer(n)`                   | Custom `Namer` for `$defs` entries (`NamerFunc` adapts a bare function).              |
-| `WithDefinitions(bool)`          | Extract named types into `$defs`/`$ref` (default `true`).                             |
-| `WithAdditionalProperties(bool)` | Allow extra object keys (default `false`, disallowing them).                          |
-| `WithNullable(bool)`             | Make nil-able types (`*T`, `[]T`, `map`, `[]byte`) nullable (default `true`).         |
-| `WithDefaultsFrom(instance)`     | Seed root property defaults from an instance of the generated type.                   |
-| `WithRootTitle(bool)`            | Title the root schema with the root type's name (default `false`).                    |
+| Option                           | Effect                                                                                        |
+| -------------------------------- | --------------------------------------------------------------------------------------------- |
+| `WithDraft(Draft)`               | Target draft: `Draft2020` (default) or `Draft7`; also serves validation and `Inline`.         |
+| `WithTagInterpreter(key, t)`     | Register a `TagInterpreter` under the struct tag key it reads; multiple are applied in order. |
+| `WithDescriptionProvider(p)`     | Set the `DescriptionProvider` used as the source of descriptions.                             |
+| `WithTypeSchema(t, s)`           | Override the schema for a specific Go type (highest priority).                                |
+| `WithTypeSchemaFor[T](s)`        | `WithTypeSchema` for a statically known type, without `reflect.TypeFor`.                      |
+| `WithTypeSchemaResolver(r)`      | Register a `TypeSchemaResolver` that overrides types by predicate.                            |
+| `WithTypeSchemaExtender(e)`      | Register a `TypeSchemaExtender` that modifies reflection-generated schemas.                   |
+| `WithNamer(n)`                   | Custom `Namer` for `$defs` entries (`NamerFunc` adapts a bare function).                      |
+| `WithDefinitions(bool)`          | Extract named types into `$defs`/`$ref` (default `true`).                                     |
+| `WithAdditionalProperties(bool)` | Allow extra object keys (default `false`, disallowing them).                                  |
+| `WithNullable(bool)`             | Make nil-able types (`*T`, `[]T`, `map`, `[]byte`) nullable (default `true`).                 |
+| `WithDefaultsFrom(instance)`     | Seed root property defaults from an instance of the generated type.                           |
+| `WithRootTitle(bool)`            | Title the root schema with the root type's name (default `false`).                            |
 
 `WithDefaultsFrom` marshals the instance with `encoding/json` after generation;
 each top-level key of the output that matches a root property becomes that
@@ -473,7 +473,6 @@ through the `TagInterpreter` interface:
 
 ```go
 type TagInterpreter interface {
-	TagKey() string
 	Interpret(tag string, field FieldContext) error
 }
 ```
@@ -481,11 +480,11 @@ type TagInterpreter interface {
 Interpreters receive a `FieldContext` (the field's schema, parent schema, JSON
 name, Go type, full `reflect.StructField` for reading sibling struct tags
 such as the `json` tag's options, and the target `Draft` for emitting
-draft-appropriate keywords) and modify the schema in place. Multiple
-interpreters can be registered and run in order, after the `jsonschema` tag.
-`TagInterpreterFunc(key, fn)` adapts a bare function and a tag key to the
-interface (following `FormatValidatorFunc`), so a one-off interpreter needs no named
-type.
+draft-appropriate keywords) and modify the schema in place. Each interpreter
+is registered under the struct tag key it reads (following `net/http.Handle`,
+so one implementation can serve several keys); multiple interpreters can be
+registered and run in order, after the `jsonschema` tag. `TagInterpreterFunc`
+adapts a bare function, so a one-off interpreter needs no named type.
 
 ### The `validate` interpreter
 
@@ -503,7 +502,7 @@ type CreateUser struct {
 }
 
 schema, err := jsonschema.GenerateFor[CreateUser](ctx,
-	jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+	jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 )
 ```
 
@@ -687,17 +686,17 @@ containing object are both identifiable from `InstancePath` alone.
 
 ### Validation options
 
-| Option                      | Effect                                                                                                                   |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `WithDraft(Draft)`          | Override the draft otherwise detected from the root schema's `$schema`.                                                  |
-| `WithRefResolver(r)`        | Resolve remote/absolute `$ref` URIs (called only when local lookup fails); the resolver receives the caller's context.   |
-| `WithBaseURI(base)`         | Set the root document's base URI for ref absolutization; also serves `Inline`.                                           |
-| `WithFormatValidator(f)`    | Register a custom `format` checker (a `FormatValidator`; `FormatValidatorFunc` adapts a bare function).                  |
-| `WithFormats(bool)`         | Force `format` assertion on or off.                                                                                      |
-| `WithContent(bool)`         | Assert `contentEncoding`/`contentMediaType` (annotation-only by default).                                                |
-| `WithResolveOptions(opts)`  | Pass `ResolveOptions` (aliased from the upstream package) to `Schema.Resolve`.                                           |
-| `WithVocabularies(uris...)` | Directly set the active vocabularies (highest precedence); unlisted ones are inactive.                                   |
-| `WithMetaSchemaResolver(r)` | Set a `RefResolver` that looks up the metaschema (whose `$vocabulary` gates keyword groups) by the root's `$schema` URI. |
+| Option                         | Effect                                                                                                                   |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| `WithDraft(Draft)`             | Override the draft otherwise detected from the root schema's `$schema`.                                                  |
+| `WithRefResolver(r)`           | Resolve remote/absolute `$ref` URIs (called only when local lookup fails); the resolver receives the caller's context.   |
+| `WithBaseURI(base)`            | Set the root document's base URI for ref absolutization; also serves `Inline`.                                           |
+| `WithFormatValidator(name, f)` | Register a custom `format` checker (a `FormatValidator`; `FormatValidatorFunc` adapts a bare function) under `name`.     |
+| `WithFormats(bool)`            | Force `format` assertion on or off.                                                                                      |
+| `WithContent(bool)`            | Assert `contentEncoding`/`contentMediaType` (annotation-only by default).                                                |
+| `WithResolveOptions(opts)`     | Pass `ResolveOptions` (aliased from the upstream package) to `Schema.Resolve`.                                           |
+| `WithVocabularies(uris...)`    | Directly set the active vocabularies (highest precedence); unlisted ones are inactive.                                   |
+| `WithMetaSchemaResolver(r)`    | Set a `RefResolver` that looks up the metaschema (whose `$vocabulary` gates keyword groups) by the root's `$schema` URI. |
 
 ### Formats
 
@@ -708,11 +707,12 @@ Built-in checkers cover `date-time`, `date`, `time`, `duration`, `email`,
 `idn-email`, `hostname`, `idn-hostname`, `uri`, `uri-reference`, `uri-template`,
 `iri`, `iri-reference`, `uuid`, `ipv4`, `ipv6`, `json-pointer`,
 `relative-json-pointer`, and `regex`. Register additional formats with
-`WithFormatValidator`: a `FormatValidator` declares the format name it
-handles (mirroring `TagInterpreter`), so an implementation can carry state
-such as a compiled regular expression, and `FormatValidatorFunc(name, fn)` adapts a
-bare `func(string) error`. Registering a name again, including a built-in
-one, replaces the previous checker.
+`WithFormatValidator`: the checker is registered under the format name it
+checks (following `net/http.Handle`, so one implementation can serve several
+names), an implementation can carry state such as a compiled regular
+expression, and `FormatValidatorFunc` adapts a bare `func(string) error`.
+Registering a name again, including a built-in one, replaces the previous
+checker.
 
 ### Vocabularies
 

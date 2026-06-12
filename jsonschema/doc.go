@@ -61,8 +61,8 @@
 //   - [WithDraft] sets the target JSON Schema draft ([Draft7] or [Draft2020]).
 //     The returned [DraftOption] also serves validation and inlining, where
 //     it overrides $schema draft detection (see Draft Support below).
-//   - [WithTagInterpreter] registers a [TagInterpreter] for mapping struct tags
-//     to schema constraints.
+//   - [WithTagInterpreter] registers a [TagInterpreter] under the struct tag
+//     key it reads, for mapping struct tags to schema constraints.
 //   - [WithDescriptionProvider] sets the [DescriptionProvider] used as the source of
 //     type and field descriptions; [NewGoCommentProvider] constructs the
 //     AST-backed provider that extracts Go doc comments.
@@ -209,15 +209,14 @@
 // runs at the same point in the pipeline, after the type's own
 // JSONSchemaExtend, under the same not-called-when-replaced rule.
 //
-// Every extension-point interface has a bare-function adapter, following one
-// of two shapes. An interface whose value declares a registration name
-// ([TagInterpreter], [FormatValidator]) has a constructor adapter taking the
-// name and the function ([TagInterpreterFunc], [FormatValidatorFunc]);
-// a single-method interface with no name ([TypeSchemaResolver],
-// [TypeSchemaExtender], [RefResolver], [Namer], [RefFallback]) has a
-// conversion func type ([TypeSchemaResolverFunc], [TypeSchemaExtenderFunc],
-// [RefResolverFunc], [NamerFunc], [RefFallbackFunc]) following
-// [net/http.HandlerFunc].
+// Every extension-point interface is a single method with a conversion func
+// type adapter following [net/http.HandlerFunc] ([TagInterpreterFunc],
+// [FormatValidatorFunc], [TypeSchemaResolverFunc], [TypeSchemaExtenderFunc],
+// [RefResolverFunc], [NamerFunc], [RefFallbackFunc]). An interface serving a
+// named registration ([TagInterpreter] for a struct tag key,
+// [FormatValidator] for a format name) takes the name at the registration
+// site ([WithTagInterpreter], [WithFormatValidator]), following
+// [net/http.Handle], so one implementation can serve several names.
 //
 // # Tag Interpretation
 //
@@ -226,9 +225,10 @@
 // [FieldContext] containing the field's schema, parent schema, JSON name, Go
 // type, full [reflect.StructField] (for reading sibling struct tags such
 // as the json tag's options), and the target [Draft] (for emitting
-// draft-appropriate keywords). Multiple interpreters can be registered and
-// are applied in order. [TagInterpreterFunc] adapts a bare function and a
-// tag key to the interface, so a one-off interpreter needs no named type.
+// draft-appropriate keywords). Each interpreter is registered under the
+// struct tag key it reads; multiple interpreters can be registered and are
+// applied in order. [TagInterpreterFunc] adapts a bare function, so a
+// one-off interpreter needs no named type.
 //
 // # Definitions and References
 //
@@ -491,8 +491,8 @@
 //     root resolves in-memory. The returned [RefOption] also serves
 //     inlining, the way [WithRefResolver] and [WithDraft] serve several entry
 //     points.
-//   - [WithFormatValidator] registers a custom format checker: a
-//     [FormatValidator] that declares the format name it handles, with
+//   - [WithFormatValidator] registers a custom format checker (a
+//     [FormatValidator]) under the format name it checks, with
 //     [FormatValidatorFunc] adapting a bare function.
 //   - [WithFormats] forces built-in format assertion on or off. By default
 //     format is asserted under Draft-07 and is annotation-only under Draft

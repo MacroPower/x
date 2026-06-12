@@ -1213,7 +1213,7 @@ func TestValidateWithCustomFormatValidator(t *testing.T) {
 	schema := &jsonschema.Schema{Type: "string", Format: "custom-format"}
 	err := jsonschema.Validate(t.Context(), schema, "invalid",
 		jsonschema.WithFormats(true),
-		jsonschema.WithFormatValidator(jsonschema.FormatValidatorFunc("custom-format", func(s string) error {
+		jsonschema.WithFormatValidator("custom-format", jsonschema.FormatValidatorFunc(func(s string) error {
 			if s != "valid" {
 				return errors.New("must be 'valid'")
 			}
@@ -1227,11 +1227,7 @@ func TestValidateWithCustomFormatValidator(t *testing.T) {
 
 // evenLengthFormat implements [jsonschema.FormatValidator] directly, the
 // stateful-checker path that FormatValidatorFunc bypasses.
-type evenLengthFormat struct {
-	name string
-}
-
-func (f evenLengthFormat) Format() string { return f.name }
+type evenLengthFormat struct{}
 
 func (f evenLengthFormat) ValidateFormat(value string) error {
 	if len(value)%2 != 0 {
@@ -1247,7 +1243,7 @@ func TestValidateWithFormatValidatorInterface(t *testing.T) {
 	schema := &jsonschema.Schema{Type: "string", Format: "even-length"}
 	opts := []jsonschema.ValidateOption{
 		jsonschema.WithFormats(true),
-		jsonschema.WithFormatValidator(evenLengthFormat{name: "even-length"}),
+		jsonschema.WithFormatValidator("even-length", evenLengthFormat{}),
 	}
 
 	require.NoError(t, jsonschema.Validate(t.Context(), schema, "ab", opts...))
@@ -1260,10 +1256,12 @@ func TestValidateWithFormatValidatorInterface(t *testing.T) {
 func TestValidateWithNilFormatValidator(t *testing.T) {
 	t.Parallel()
 
-	// A nil FormatValidator is ignored rather than panicking.
+	// A nil FormatValidator and an empty name are ignored rather than
+	// panicking.
 	schema := &jsonschema.Schema{Type: "string"}
 	require.NoError(t, jsonschema.Validate(t.Context(), schema, "x",
-		jsonschema.WithFormatValidator(nil),
+		jsonschema.WithFormatValidator("even-length", nil),
+		jsonschema.WithFormatValidator("", evenLengthFormat{}),
 	))
 }
 
@@ -3694,7 +3692,7 @@ func TestCustomFormatVocabularyBypass(t *testing.T) {
 
 	// With format-annotation vocabulary only, custom formats should NOT assert.
 	err := jsonschema.Validate(t.Context(), schema, "bad",
-		jsonschema.WithFormatValidator(jsonschema.FormatValidatorFunc("custom-format", customChecker)),
+		jsonschema.WithFormatValidator("custom-format", jsonschema.FormatValidatorFunc(customChecker)),
 		jsonschema.WithVocabularies(
 			jsonschema.VocabCore2020,
 			jsonschema.VocabValidation2020,

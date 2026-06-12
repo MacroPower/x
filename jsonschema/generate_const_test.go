@@ -58,7 +58,7 @@ func TestNullablePointerInterpreterEnumPermitsNull(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[doc](t.Context(),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
 	require.NoError(t, err)
 

@@ -134,7 +134,7 @@ func main() {
 	opts := []jsonschema.GenerateOption{
 		jsonschema.WithDescriptionProvider(jsonschema.NewGoCommentProvider()),
 		jsonschema.WithAdditionalProperties(true),
-		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	}
 	schema, err := jsonschema.Generate(context.Background(), t, opts...)
 	if err != nil {

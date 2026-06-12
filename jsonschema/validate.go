@@ -57,14 +57,16 @@ type validateOptionFunc func(*validator)
 
 func (f validateOptionFunc) applyValidate(v *validator) { f(v) }
 
-// WithFormatValidator registers a custom format checker. The checker
-// declares the format name it handles via [FormatValidator.Format];
-// [FormatValidatorFunc] adapts a bare function. Registering a name again, including a
-// built-in format name, replaces the previous checker. A nil f is ignored.
-func WithFormatValidator(f FormatValidator) ValidateOption {
+// WithFormatValidator registers a custom format checker under the format
+// name it checks (e.g. "uuid"), following [net/http.Handle]: the name lives
+// at the registration site, so one checker implementation can serve several
+// names. [FormatValidatorFunc] adapts a bare function. Registering a name
+// again, including a built-in format name, replaces the previous checker. A
+// nil f or an empty name is ignored.
+func WithFormatValidator(name string, f FormatValidator) ValidateOption {
 	return validateOptionFunc(func(v *validator) {
-		if f != nil {
-			v.formatCheckers[f.Format()] = f.ValidateFormat
+		if f != nil && name != "" {
+			v.formatCheckers[name] = f.ValidateFormat
 		}
 	})
 }
