@@ -110,8 +110,10 @@ type ValidationError struct {
 	Causes []*ValidationError
 }
 
-// Segment is one step of an instance location: an object member key or an
-// array index.
+// Segment is one step of a JSON Pointer location: an object member key or
+// an array index. Validation errors carry instance locations as segments
+// ([ValidationError.InstanceSegments]), and [SubschemaEntry.Segments]
+// carries schema locations the same way.
 type Segment struct {
 	// Key is the object property name. Meaningful only when IsIndex is false.
 	Key string

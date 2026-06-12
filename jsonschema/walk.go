@@ -16,8 +16,11 @@ import (
 //nolint:errname,staticcheck // A control-flow sentinel, not a failure; named for its meaning, like io/fs.SkipDir.
 var SkipChildren = errors.New("skip this schema's children")
 
-// SubschemaEntry pairs one direct sub-schema with the RFC 6901 JSON Pointer
-// addressing it from its parent.
+// SubschemaEntry pairs one direct sub-schema with the location addressing
+// it from its parent, in two synchronized forms: the RFC 6901 JSON Pointer
+// string and the typed [Segment] slice, mirroring how validation errors
+// carry [ValidationError.InstancePath] alongside
+// [ValidationError.InstanceSegments].
 type SubschemaEntry struct {
 	// Schema is the child schema.
 	Schema *Schema
@@ -28,6 +31,14 @@ type SubschemaEntry struct {
 	// "/items"). Appending each visited child's Pointer while descending
 	// yields the schema path the package's own errors report.
 	Pointer string
+
+	// Segments is the typed form of Pointer: one Segment for the keyword
+	// token plus, for map and list keywords, one for the member key or the
+	// element index. Unlike Pointer, a member key is carried verbatim — no
+	// ~0/~1 escaping to undo — and a list index is distinguished from a
+	// property named like a number, so consumers building on the location
+	// need not re-parse the pointer string.
+	Segments []Segment
 }
 
 // SubschemaEntries returns the direct sub-schemas of s: every non-nil schema
@@ -63,8 +74,9 @@ func SubschemaEntries(s *Schema) []SubschemaEntry {
 		for _, key := range slices.Sorted(maps.Keys(entry.m)) {
 			if sub := entry.m[key]; sub != nil {
 				children = append(children, SubschemaEntry{
-					Pointer: "/" + entry.keyword + "/" + escapeJSONPointer(key),
-					Schema:  sub,
+					Pointer:  "/" + entry.keyword + "/" + escapeJSONPointer(key),
+					Segments: []Segment{{Key: entry.keyword}, {Key: key}},
+					Schema:   sub,
 				})
 			}
 		}
@@ -83,8 +95,9 @@ func SubschemaEntries(s *Schema) []SubschemaEntry {
 		for i, sub := range entry.list {
 			if sub != nil {
 				children = append(children, SubschemaEntry{
-					Pointer: "/" + entry.keyword + "/" + strconv.Itoa(i),
-					Schema:  sub,
+					Pointer:  "/" + entry.keyword + "/" + strconv.Itoa(i),
+					Segments: []Segment{{Key: entry.keyword}, {Index: i, IsIndex: true}},
+					Schema:   sub,
 				})
 			}
 		}
@@ -109,8 +122,9 @@ func SubschemaEntries(s *Schema) []SubschemaEntry {
 	} {
 		if entry.s != nil {
 			children = append(children, SubschemaEntry{
-				Pointer: "/" + entry.keyword,
-				Schema:  entry.s,
+				Pointer:  "/" + entry.keyword,
+				Segments: []Segment{{Key: entry.keyword}},
+				Schema:   entry.s,
 			})
 		}
 	}

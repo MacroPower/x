@@ -559,8 +559,11 @@
 //     Children held in maps are returned in sorted-key order so traversal is
 //     deterministic, and appending each visited child's pointer while
 //     descending yields the schema path the package's own errors report.
-//     It is the package's single source of truth for which Schema fields hold
-//     sub-schemas.
+//     Each entry also carries the same location in typed form
+//     ([SubschemaEntry.Segments], one [Segment] per reference token,
+//     mirroring [ValidationError.InstanceSegments]), so consumers need not
+//     re-parse the pointer string. It is the package's single source of
+//     truth for which Schema fields hold sub-schemas.
 //   - [Walk] calls a function for a schema and every schema transitively
 //     reachable through [SubschemaEntries], pre-order: the function runs on a
 //     schema before its children are gathered, so it may replace or mutate

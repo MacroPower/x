@@ -802,7 +802,12 @@ unknown keywords. Children held in maps are returned in sorted-key order so
 traversal is deterministic, and a maintenance test fails when an upstream
 `Schema` field addition is not covered. Appending each visited child's
 `Pointer` while descending yields the schema path the package's own errors
-report.
+report. Each entry also carries the same location in typed form
+(`SubschemaEntry.Segments`, one `Segment` per reference token, mirroring
+`InstanceSegments` on validation errors): the member key is verbatim — no
+`~0`/`~1` escaping to undo — and a list index is distinguished from a
+property named like a number, so consumers building on the location need
+not re-parse the pointer string.
 
 `Walk` is pre-order: the function runs on a schema before that schema's
 children are gathered, so it may replace or mutate sub-schema fields and the

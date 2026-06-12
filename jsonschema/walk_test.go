@@ -136,18 +136,38 @@ func TestSubschemaEntries(t *testing.T) {
 				Items:      items,
 			},
 			want: []jsonschema.SubschemaEntry{
-				{Pointer: "/properties/a", Schema: propA},
-				{Pointer: "/allOf/0", Schema: allOf0},
-				{Pointer: "/allOf/1", Schema: allOf1},
-				{Pointer: "/items", Schema: items},
+				{
+					Pointer:  "/properties/a",
+					Segments: []jsonschema.Segment{{Key: "properties"}, {Key: "a"}},
+					Schema:   propA,
+				},
+				{
+					Pointer:  "/allOf/0",
+					Segments: []jsonschema.Segment{{Key: "allOf"}, {Index: 0, IsIndex: true}},
+					Schema:   allOf0,
+				},
+				{
+					Pointer:  "/allOf/1",
+					Segments: []jsonschema.Segment{{Key: "allOf"}, {Index: 1, IsIndex: true}},
+					Schema:   allOf1,
+				},
+				{
+					Pointer:  "/items",
+					Segments: []jsonschema.Segment{{Key: "items"}},
+					Schema:   items,
+				},
 			},
 		},
-		"member keys escaped per RFC 6901": {
+		"member keys escaped per RFC 6901, segments verbatim": {
 			schema: &jsonschema.Schema{
 				Properties: map[string]*jsonschema.Schema{"a/b~c": escaped},
 			},
 			want: []jsonschema.SubschemaEntry{
-				{Pointer: "/properties/a~1b~0c", Schema: escaped},
+				{
+					Pointer:  "/properties/a~1b~0c",
+					Segments: []jsonschema.Segment{{Key: "properties"}, {Key: "a/b~c"}},
+					Schema:   escaped,
+				},
 			},
 		},
 	}
