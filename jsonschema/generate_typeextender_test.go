@@ -17,7 +17,11 @@ import (
 // JSONSchemaExtend, for ordering tests against registered extenders.
 type extendedKind int
 
-func (extendedKind) JSONSchemaExtend(s *jsonschema.Schema) { s.Description = "by author" }
+func (extendedKind) JSONSchemaExtend(s *jsonschema.Schema) error {
+	s.Description = "by author"
+
+	return nil
+}
 
 // describePlainKind extends plainKind with a description and leaves every
 // other type untouched.

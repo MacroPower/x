@@ -16,9 +16,11 @@ type JSONSchemaProvider interface {
 
 // JSONSchemaExtender allows a type to modify its auto-generated schema.
 // The method is called after the schema has been generated via reflection,
-// allowing the type to add, remove, or modify any fields.
+// allowing the type to add, remove, or modify any fields. A non-nil error
+// aborts generation, matching the registered [TypeSchemaExtender]
+// counterpart.
 type JSONSchemaExtender interface {
-	JSONSchemaExtend(schema *Schema)
+	JSONSchemaExtend(schema *Schema) error
 }
 
 // TypeSchemaResolver supplies schemas for Go types it recognizes during

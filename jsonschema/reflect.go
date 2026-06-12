@@ -1755,7 +1755,8 @@ func callProvider(t reflect.Type) (s *jsonschema.Schema, err error) {
 // callExtender calls JSONSchemaExtend() on a zero value of the type. As with
 // [callProvider], the method runs against a zero value, so a panic (for example
 // dereferencing a nil pointer field) is recovered and returned as an error
-// wrapping [ErrProviderPanic].
+// wrapping [ErrProviderPanic]. An error the method itself returns is wrapped
+// with the type and method so it locates the failing extender.
 func callExtender(t reflect.Type, s *jsonschema.Schema) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -1771,7 +1772,12 @@ func callExtender(t reflect.Type, s *jsonschema.Schema) (err error) {
 		v = reflect.New(t)
 	}
 
-	v.MethodByName("JSONSchemaExtend").Call([]reflect.Value{reflect.ValueOf(s)})
+	results := v.MethodByName("JSONSchemaExtend").Call([]reflect.Value{reflect.ValueOf(s)})
+
+	extErr, ok := results[0].Interface().(error)
+	if ok && extErr != nil {
+		return fmt.Errorf("%s.JSONSchemaExtend: %w", t, extErr)
+	}
 
 	return nil
 }

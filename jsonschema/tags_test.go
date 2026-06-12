@@ -21,12 +21,14 @@ type extenderWithDefs struct {
 	Value string `json:"value"`
 }
 
-func (extenderWithDefs) JSONSchemaExtend(s *jsonschema.Schema) {
+func (extenderWithDefs) JSONSchemaExtend(s *jsonschema.Schema) error {
 	if s.Defs == nil {
 		s.Defs = map[string]*jsonschema.Schema{}
 	}
 
 	s.Defs["customDef"] = &jsonschema.Schema{Type: "string"}
+
+	return nil
 }
 
 // parentSnapshot records what a tag interpreter saw in Parent.Properties.

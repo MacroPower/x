@@ -235,16 +235,17 @@ func (Status) JSONSchema() *jsonschema.Schema {
 ```
 
 A type implementing `JSONSchemaExtender` modifies its reflection-generated schema
-after it is built:
+after it is built; a non-nil error aborts generation:
 
 ```go
 type Metadata struct {
 	Tags map[string]string `json:"tags"`
 }
 
-func (Metadata) JSONSchemaExtend(s *jsonschema.Schema) {
+func (Metadata) JSONSchemaExtend(s *jsonschema.Schema) error {
 	s.Description = "Arbitrary key-value metadata"
 	s.MinProperties = jsonschema.Ptr(1)
+	return nil
 }
 ```
 

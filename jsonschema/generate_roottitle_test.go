@@ -30,8 +30,10 @@ type rootTitleExtender struct {
 	Name string `json:"name"`
 }
 
-func (rootTitleExtender) JSONSchemaExtend(s *jsonschema.Schema) {
+func (rootTitleExtender) JSONSchemaExtend(s *jsonschema.Schema) error {
 	s.Title = "Extended"
+
+	return nil
 }
 
 func TestWithRootTitle(t *testing.T) {

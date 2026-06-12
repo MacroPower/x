@@ -2,6 +2,7 @@ package jsonschema_test
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"math"
 	"math/big"
@@ -524,9 +525,11 @@ type Metadata struct {
 	Tags map[string]string `json:"tags"`
 }
 
-func (Metadata) JSONSchemaExtend(s *jsonschema.Schema) {
+func (Metadata) JSONSchemaExtend(s *jsonschema.Schema) error {
 	s.Description = "Arbitrary key-value metadata"
 	s.MinProperties = jsonschema.Ptr(1)
+
+	return nil
 }
 
 func TestGenerateFor_JSONSchemaExtender(t *testing.T) {
@@ -551,6 +554,24 @@ func TestGenerateFor_JSONSchemaExtender(t *testing.T) {
 		"additionalProperties":false,
 		"minProperties":1
 	}`, string(got))
+}
+
+// failingExtender returns an error from JSONSchemaExtend, proving the error
+// aborts generation and reaches the caller wrapped with the type and method.
+type failingExtender struct {
+	Name string `json:"name"`
+}
+
+func (failingExtender) JSONSchemaExtend(*jsonschema.Schema) error {
+	return errExtendUnavailable
+}
+
+func TestGenerateFor_JSONSchemaExtenderError(t *testing.T) {
+	t.Parallel()
+
+	_, err := jsonschema.GenerateFor[failingExtender](t.Context())
+	require.ErrorIs(t, err, errExtendUnavailable)
+	assert.ErrorContains(t, err, "failingExtender.JSONSchemaExtend")
 }
 
 func TestGenerateFor_WithTypeSchema(t *testing.T) {
@@ -1348,8 +1369,10 @@ func TestGenerateFor_JSONSchemaTag_Const(t *testing.T) {
 // NonStructExtender is a named non-struct type implementing JSONSchemaExtender.
 type NonStructExtender []string
 
-func (NonStructExtender) JSONSchemaExtend(s *jsonschema.Schema) {
+func (NonStructExtender) JSONSchemaExtend(s *jsonschema.Schema) error {
 	s.Description = "A list of tags"
+
+	return nil
 }
 
 func TestGenerateFor_NonStructExtender(t *testing.T) {
@@ -1649,8 +1672,10 @@ func (BothProviderAndExtender) JSONSchema() *jsonschema.Schema {
 	}
 }
 
-func (BothProviderAndExtender) JSONSchemaExtend(s *jsonschema.Schema) {
+func (BothProviderAndExtender) JSONSchemaExtend(s *jsonschema.Schema) error {
 	s.Description = "from extender"
+
+	return nil
 }
 
 func TestGenerateFor_ProviderTakesPriorityOverExtender(t *testing.T) {
@@ -2304,8 +2329,10 @@ type TextMarshalerWithExtender int
 
 func (TextMarshalerWithExtender) MarshalText() ([]byte, error) { return nil, nil }
 
-func (TextMarshalerWithExtender) JSONSchemaExtend(s *jsonschema.Schema) {
+func (TextMarshalerWithExtender) JSONSchemaExtend(s *jsonschema.Schema) error {
 	s.Enum = []any{"active", "inactive", "pending"}
+
+	return nil
 }
 
 func TestGenerateFor_TextMarshalerWithExtender(t *testing.T) {
@@ -2547,10 +2574,14 @@ func (providerMutationTestType) JSONSchema() *jsonschema.Schema {
 	return &sharedProviderSchema
 }
 
-var sharedProviderSchema = jsonschema.Schema{
-	Type:        "string",
-	Description: "original",
-}
+var (
+	sharedProviderSchema = jsonschema.Schema{
+		Type:        "string",
+		Description: "original",
+	}
+
+	errExtendUnavailable = errors.New("constraint source unavailable")
+)
 
 func TestProviderSchemaIsolatedAcrossCalls(t *testing.T) {
 	t.Parallel()
@@ -3072,8 +3103,10 @@ type ptrExtender struct {
 	Name string `json:"name"`
 }
 
-func (*ptrExtender) JSONSchemaExtend(s *jsonschema.Schema) {
+func (*ptrExtender) JSONSchemaExtend(s *jsonschema.Schema) error {
 	s.Description = "ptr-extender-marker"
+
+	return nil
 }
 
 func TestGenerateFor_ExtenderPointerReceiver(t *testing.T) {
