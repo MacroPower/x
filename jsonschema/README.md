@@ -172,7 +172,7 @@ Unsupported types (`func`, `chan`, `complex`, `unsafe.Pointer`) return
 | `WithTypeSchema(t, s)`           | Override the schema for a specific Go type (highest priority).                        |
 | `WithTypeSchemaFor[T](s)`        | `WithTypeSchema` for a statically known type, without `reflect.TypeFor`.              |
 | `WithTypeResolver(r)`            | Register a `TypeSchemaResolver` that overrides types by predicate.                    |
-| `WithNamer(fn)`                  | Custom function for naming `$defs` entries.                                           |
+| `WithNamer(n)`                   | Custom `Namer` for `$defs` entries (`NamerFunc` adapts a bare function).              |
 | `WithDefinitions(bool)`          | Extract named types into `$defs`/`$ref` (default `true`).                             |
 | `WithAdditionalProperties(bool)` | Allow extra object keys (default `false`, disallowing them).                          |
 | `WithNullable(bool)`             | Make nil-able types (`*T`, `[]T`, `map`, `[]byte`) nullable (default `true`).         |

@@ -69,7 +69,8 @@
 //   - [WithTypeResolver] registers a [TypeSchemaResolver] that supplies
 //     schemas for whole families of types by predicate, sharing the
 //     highest-priority resolution step with [WithTypeSchema].
-//   - [WithNamer] sets a custom definition naming function (a [Namer]).
+//   - [WithNamer] sets a custom definition namer (a [Namer], with [NamerFunc]
+//     adapting a bare function).
 //   - [WithDefinitions] controls $defs/$ref extraction (default: true).
 //   - [WithAdditionalProperties] controls whether extra keys are allowed on
 //     object schemas (default: false, disallowing extra keys).
@@ -192,9 +193,9 @@
 // of two shapes. An interface whose value declares a registration name
 // ([TagInterpreter], [FormatValidator]) has a constructor adapter taking the
 // name and the function ([TagInterpreterFunc], [FormatValidatorFunc]);
-// a single-method interface with no name ([TypeSchemaResolver], [RefResolver])
-// has a conversion func type ([TypeSchemaResolverFunc], [RefResolverFunc])
-// following [net/http.HandlerFunc].
+// a single-method interface with no name ([TypeSchemaResolver], [RefResolver],
+// [Namer]) has a conversion func type ([TypeSchemaResolverFunc],
+// [RefResolverFunc], [NamerFunc]) following [net/http.HandlerFunc].
 //
 // # Tag Interpretation
 //

@@ -894,9 +894,9 @@ func TestGenerateFor_WithNamer(t *testing.T) {
 	t.Parallel()
 
 	s, err := jsonschema.GenerateFor[UserWithAddress](
-		jsonschema.WithNamer(func(t reflect.Type) string {
+		jsonschema.WithNamer(jsonschema.NamerFunc(func(t reflect.Type) string {
 			return "custom_" + t.Name()
-		}),
+		})),
 	)
 	require.NoError(t, err)
 	// Check that the custom namer was used.

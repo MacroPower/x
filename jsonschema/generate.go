@@ -134,15 +134,25 @@ func WithTypeSchemaFor[T any](s *Schema) GenerateOption {
 // reference token its $ref uses, plus, with [WithRootTitle], the root
 // schema's title (where an empty result leaves the title unset). Name
 // collisions between types are still disambiguated automatically.
-type Namer func(t reflect.Type) string
+// [NamerFunc] adapts a bare function.
+type Namer interface {
+	SchemaName(t reflect.Type) string
+}
+
+// NamerFunc adapts a bare naming function to a [Namer], following
+// [net/http.HandlerFunc].
+type NamerFunc func(t reflect.Type) string
+
+// SchemaName calls f.
+func (f NamerFunc) SchemaName(t reflect.Type) string { return f(t) }
 
 // WithNamer sets a custom [Namer] for producing definition names from
 // Go types. Default: uses the type's short name (e.g., "MyStruct").
-// A nil fn is ignored, keeping the default.
-func WithNamer(fn Namer) GenerateOption {
+// A nil n is ignored, keeping the default.
+func WithNamer(n Namer) GenerateOption {
 	return generateOptionFunc(func(g *generator) {
-		if fn != nil {
-			g.namer = fn
+		if n != nil {
+			g.namer = n
 		}
 	})
 }

@@ -63,7 +63,7 @@ type refRecord struct {
 func newGenerator(opts []GenerateOption) *generator {
 	g := &generator{
 		draft:       Draft2020,
-		namer:       defaultNamer,
+		namer:       NamerFunc(defaultNamer),
 		definitions: true,
 		nullable:    true,
 
@@ -138,7 +138,7 @@ func (g *generator) generate(t reflect.Type) (*Schema, error) {
 	// supplied one. Unnamed roots produce an empty name and stay untitled.
 	if g.rootTitle {
 		target := g.rootTitleTarget(schema, rootType)
-		if name := g.namer(rootType); name != "" && target.Title == "" {
+		if name := g.namer.SchemaName(rootType); name != "" && target.Title == "" {
 			target.Title = name
 		}
 	}
@@ -1425,7 +1425,7 @@ func (g *generator) processAllOfField(fi structFieldInfo, parent *Schema) error 
 
 // extractToDefs places a type's schema in $defs and returns a $ref.
 func (g *generator) extractToDefs(t reflect.Type, s *Schema, nullable bool) (*Schema, error) {
-	name := g.namer(t)
+	name := g.namer.SchemaName(t)
 
 	// Check if already defined (e.g., from a cycle placeholder).
 	if existingName, exists := g.typeToDefName[t]; exists {
@@ -1454,7 +1454,7 @@ func (g *generator) refForType(t reflect.Type, nullable bool) *Schema {
 	name := g.typeToDefName[t]
 	if name == "" {
 		// Placeholder for cycle — register now.
-		name = g.namer(t)
+		name = g.namer.SchemaName(t)
 		g.typeToDefName[t] = name
 		g.defsNameToTypes[name] = append(g.defsNameToTypes[name], t)
 		// Placeholder: nil schema, to be filled later.
