@@ -817,8 +817,9 @@ for _, entry := range jsonschema.SubschemaEntries(s) {
 }
 
 // Walk visits s and every schema transitively reachable through
-// SubschemaEntries, with the JSON Pointer from the root.
-err := jsonschema.Walk(s, func(path string, s *jsonschema.Schema) error {
+// SubschemaEntries, with the location from the root in both forms: the JSON
+// Pointer and the typed Segment slice.
+err := jsonschema.Walk(s, func(path string, segments []jsonschema.Segment, s *jsonschema.Schema) error {
 	s.Description = "" // strip annotations, rewrite $refs, collect types, ...
 	fmt.Println(path, s.Type) // "/properties/a string", ...
 
@@ -854,13 +855,16 @@ the current schema — its sub-schemas are not visited — and continues with it
 siblings, which suits rewriting passes that splice in a subtree the walk
 should not descend into.
 
-The function receives the JSON Pointer addressing each visited schema from
-the root (the root itself is `""`), built by appending each descended child's
-`SubschemaEntry.Pointer`, so path-tracking traversals need not re-implement
-the walk and its cycle guard; a traversal with no use for the path ignores
-the parameter, following `io/fs.WalkDir`. A schema reachable through several
-paths is visited with the first path the traversal encounters; map-held
-children walk in sorted-key order, so that path is deterministic.
+The function receives each visited schema's location from the root in both
+synchronized forms (the root itself is `""` and a nil slice): the JSON
+Pointer and the typed `Segment` slice, built by appending each descended
+child's `SubschemaEntry.Pointer` and `SubschemaEntry.Segments`. Path-tracking
+traversals need not re-implement the walk and its cycle guard, and
+segment-based consumers need not re-parse the pointer; a traversal with no
+use for the location ignores the parameters, following `io/fs.WalkDir`. The
+segments slice must not be mutated. A schema reachable through several paths
+is visited with the first path the traversal encounters; map-held children
+walk in sorted-key order, so that path is deterministic.
 
 Three predicates answer common shape questions:
 

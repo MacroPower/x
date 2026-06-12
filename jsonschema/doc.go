@@ -580,10 +580,12 @@
 //     distinct schema pointer is visited once, so aliased or cyclic graphs
 //     terminate. Walk stops at and returns the first error from the function,
 //     except [SkipChildren], which prunes the walk at that schema and
-//     continues with its siblings. The function receives the JSON Pointer
-//     addressing each visited schema from the root, built by appending each
-//     descended child's [SubschemaEntry.Pointer]; a traversal with no use for
-//     the path ignores the parameter, following [io/fs.WalkDir].
+//     continues with its siblings. The function receives each visited
+//     schema's location from the root in both synchronized forms: the JSON
+//     Pointer and the typed [Segment] slice, built by appending each
+//     descended child's [SubschemaEntry.Pointer] and
+//     [SubschemaEntry.Segments]; a traversal with no use for the location
+//     ignores the parameters, following [io/fs.WalkDir].
 //   - [CheckTypeNames] verifies that every type keyword reachable from a
 //     schema names one of the seven JSON Schema type names, returning nil or
 //     an error wrapping [ErrInvalidType] that includes the schema path of the

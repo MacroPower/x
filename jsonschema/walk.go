@@ -140,29 +140,41 @@ func SubschemaEntries(s *Schema) []SubschemaEntry {
 // the first error from fn, except [SkipChildren], which prunes the walk at
 // that schema and continues. A nil s is a no-op.
 //
-// Fn receives the RFC 6901 JSON Pointer addressing each visited schema from
-// s (the root itself is ""), built by appending each descended child's
-// [SubschemaEntry.Pointer], so it matches the schema path the package's own
-// errors report; a traversal with no use for it ignores the parameter,
-// following [io/fs.WalkDir]. A schema reachable through several paths is
-// visited with the first path the traversal encounters; [SubschemaEntries]
-// orders map-held children by sorted key, so that path is deterministic.
-func Walk(s *Schema, fn func(path string, s *Schema) error) error {
-	return walkPaths(s, "", fn, map[*Schema]bool{})
+// Fn receives the location of each visited schema within s in the two
+// synchronized forms the package uses everywhere ([SubschemaEntry],
+// [ValidationError]): the RFC 6901 JSON Pointer (the root itself is "") and
+// the typed [Segment] slice (the root is nil), built by appending each
+// descended child's [SubschemaEntry.Pointer] and [SubschemaEntry.Segments].
+// The pointer matches the schema path the package's own errors report; the
+// segments carry member keys verbatim and distinguish list indexes from
+// numeric-looking keys, so fn need not re-parse the pointer. Fn must not
+// mutate the segments slice. A traversal with no use for the location
+// ignores the parameters, following [io/fs.WalkDir]. A schema reachable
+// through several paths is visited with the first path the traversal
+// encounters; [SubschemaEntries] orders map-held children by sorted key, so
+// that path is deterministic.
+func Walk(s *Schema, fn func(path string, segments []Segment, s *Schema) error) error {
+	return walkPaths(s, "", nil, fn, map[*Schema]bool{})
 }
 
 // walkPaths implements [Walk], threading the visited set through the
 // recursion so each distinct schema pointer runs fn at most once. A pruned
 // schema stays visited: another path reaching it later finds it handled,
 // exactly as if the walk had descended through it.
-func walkPaths(s *Schema, path string, fn func(string, *Schema) error, visited map[*Schema]bool) error {
+func walkPaths(
+	s *Schema,
+	path string,
+	segs []Segment,
+	fn func(string, []Segment, *Schema) error,
+	visited map[*Schema]bool,
+) error {
 	if s == nil || visited[s] {
 		return nil
 	}
 
 	visited[s] = true
 
-	err := fn(path, s)
+	err := fn(path, segs, s)
 	if errors.Is(err, SkipChildren) {
 		return nil
 	}
@@ -172,7 +184,11 @@ func walkPaths(s *Schema, path string, fn func(string, *Schema) error, visited m
 	}
 
 	for _, entry := range SubschemaEntries(s) {
-		err := walkPaths(entry.Schema, path+entry.Pointer, fn, visited)
+		// Concat allocates a fresh backing array per child, so sibling
+		// descents never alias the slices fn may have retained.
+		childSegs := slices.Concat(segs, entry.Segments)
+
+		err := walkPaths(entry.Schema, path+entry.Pointer, childSegs, fn, visited)
 		if err != nil {
 			return err
 		}

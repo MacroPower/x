@@ -188,7 +188,7 @@ func TestWalk(t *testing.T) {
 		t.Parallel()
 
 		called := false
-		err := jsonschema.Walk(nil, func(string, *jsonschema.Schema) error {
+		err := jsonschema.Walk(nil, func(string, []jsonschema.Segment, *jsonschema.Schema) error {
 			called = true
 
 			return nil
@@ -209,7 +209,7 @@ func TestWalk(t *testing.T) {
 
 		var visited []*jsonschema.Schema
 
-		err := jsonschema.Walk(root, func(_ string, s *jsonschema.Schema) error {
+		err := jsonschema.Walk(root, func(_ string, _ []jsonschema.Segment, s *jsonschema.Schema) error {
 			visited = append(visited, s)
 
 			return nil
@@ -227,7 +227,7 @@ func TestWalk(t *testing.T) {
 
 		count := 0
 
-		err := jsonschema.Walk(root, func(_ string, s *jsonschema.Schema) error {
+		err := jsonschema.Walk(root, func(_ string, _ []jsonschema.Segment, s *jsonschema.Schema) error {
 			if s == shared {
 				count++
 			}
@@ -247,7 +247,7 @@ func TestWalk(t *testing.T) {
 
 		count := 0
 
-		err := jsonschema.Walk(root, func(string, *jsonschema.Schema) error {
+		err := jsonschema.Walk(root, func(string, []jsonschema.Segment, *jsonschema.Schema) error {
 			count++
 
 			return nil
@@ -267,7 +267,7 @@ func TestWalk(t *testing.T) {
 
 		var visited []*jsonschema.Schema
 
-		err := jsonschema.Walk(root, func(_ string, s *jsonschema.Schema) error {
+		err := jsonschema.Walk(root, func(_ string, _ []jsonschema.Segment, s *jsonschema.Schema) error {
 			visited = append(visited, s)
 			if s == first {
 				return errStop
@@ -289,7 +289,7 @@ func TestWalk(t *testing.T) {
 
 		var visited []*jsonschema.Schema
 
-		err := jsonschema.Walk(root, func(_ string, s *jsonschema.Schema) error {
+		err := jsonschema.Walk(root, func(_ string, _ []jsonschema.Segment, s *jsonschema.Schema) error {
 			if s.Items == original {
 				s.Items = replacement
 			}
@@ -314,7 +314,7 @@ func TestWalk(t *testing.T) {
 
 		var visited []*jsonschema.Schema
 
-		err := jsonschema.Walk(root, func(_ string, s *jsonschema.Schema) error {
+		err := jsonschema.Walk(root, func(_ string, _ []jsonschema.Segment, s *jsonschema.Schema) error {
 			visited = append(visited, s)
 			if s == pruned {
 				return jsonschema.SkipChildren
@@ -335,7 +335,7 @@ func TestWalk(t *testing.T) {
 
 		var visited []*jsonschema.Schema
 
-		err := jsonschema.Walk(root, func(_ string, s *jsonschema.Schema) error {
+		err := jsonschema.Walk(root, func(_ string, _ []jsonschema.Segment, s *jsonschema.Schema) error {
 			visited = append(visited, s)
 
 			return jsonschema.SkipChildren
@@ -352,7 +352,7 @@ func TestWalk(t *testing.T) {
 
 		count := 0
 
-		err := jsonschema.Walk(root, func(string, *jsonschema.Schema) error {
+		err := jsonschema.Walk(root, func(string, []jsonschema.Segment, *jsonschema.Schema) error {
 			count++
 
 			return fmt.Errorf("rewrite pass: %w", jsonschema.SkipChildren)
@@ -373,7 +373,7 @@ func TestWalk(t *testing.T) {
 
 		count := 0
 
-		err := jsonschema.Walk(root, func(_ string, s *jsonschema.Schema) error {
+		err := jsonschema.Walk(root, func(_ string, _ []jsonschema.Segment, s *jsonschema.Schema) error {
 			if s == shared {
 				count++
 
@@ -399,7 +399,7 @@ func TestWalk(t *testing.T) {
 
 		paths := map[*jsonschema.Schema]string{}
 
-		err := jsonschema.Walk(root, func(path string, s *jsonschema.Schema) error {
+		err := jsonschema.Walk(root, func(path string, _ []jsonschema.Segment, s *jsonschema.Schema) error {
 			paths[s] = path
 
 			return nil
@@ -412,6 +412,65 @@ func TestWalk(t *testing.T) {
 		assert.Equal(t, "/allOf/0", paths[root.AllOf[0]])
 	})
 
+	t.Run("segments mirror the pointer in typed form", func(t *testing.T) {
+		t.Parallel()
+
+		leaf := &jsonschema.Schema{Type: "string"}
+		mid := &jsonschema.Schema{Items: leaf}
+		root := &jsonschema.Schema{
+			Properties: map[string]*jsonschema.Schema{"a/b": mid},
+			AllOf:      []*jsonschema.Schema{{Type: "integer"}},
+		}
+
+		segs := map[*jsonschema.Schema][]jsonschema.Segment{}
+
+		err := jsonschema.Walk(root, func(_ string, segments []jsonschema.Segment, s *jsonschema.Schema) error {
+			segs[s] = segments
+
+			return nil
+		})
+
+		require.NoError(t, err)
+		assert.Nil(t, segs[root], "the root is the nil segment slice")
+		assert.Equal(t, []jsonschema.Segment{{Key: "properties"}, {Key: "a/b"}}, segs[mid],
+			"member keys are carried verbatim, no RFC 6901 escaping to undo")
+		assert.Equal(t,
+			[]jsonschema.Segment{{Key: "properties"}, {Key: "a/b"}, {Key: "items"}},
+			segs[leaf])
+		assert.Equal(t,
+			[]jsonschema.Segment{{Key: "allOf"}, {Index: 0, IsIndex: true}},
+			segs[root.AllOf[0]],
+			"list elements carry the index in typed form")
+	})
+
+	t.Run("sibling segment slices do not alias", func(t *testing.T) {
+		t.Parallel()
+
+		root := &jsonschema.Schema{
+			Properties: map[string]*jsonschema.Schema{
+				"a": {Items: &jsonschema.Schema{Type: "string"}},
+				"b": {Items: &jsonschema.Schema{Type: "integer"}},
+			},
+		}
+
+		segs := map[*jsonschema.Schema][]jsonschema.Segment{}
+
+		err := jsonschema.Walk(root, func(_ string, segments []jsonschema.Segment, s *jsonschema.Schema) error {
+			segs[s] = segments
+
+			return nil
+		})
+
+		require.NoError(t, err)
+		assert.Equal(t,
+			[]jsonschema.Segment{{Key: "properties"}, {Key: "a"}, {Key: "items"}},
+			segs[root.Properties["a"].Items],
+			"the b subtree's descent must not overwrite a's retained segments")
+		assert.Equal(t,
+			[]jsonschema.Segment{{Key: "properties"}, {Key: "b"}, {Key: "items"}},
+			segs[root.Properties["b"].Items])
+	})
+
 	t.Run("shared schema keeps the first path encountered", func(t *testing.T) {
 		t.Parallel()
 
@@ -420,7 +479,7 @@ func TestWalk(t *testing.T) {
 
 		var paths []string
 
-		err := jsonschema.Walk(root, func(path string, s *jsonschema.Schema) error {
+		err := jsonschema.Walk(root, func(path string, _ []jsonschema.Segment, s *jsonschema.Schema) error {
 			if s == shared {
 				paths = append(paths, path)
 			}
@@ -445,7 +504,7 @@ func TestWalk(t *testing.T) {
 
 		var visited []string
 
-		err := jsonschema.Walk(root, func(path string, _ *jsonschema.Schema) error {
+		err := jsonschema.Walk(root, func(path string, _ []jsonschema.Segment, _ *jsonschema.Schema) error {
 			visited = append(visited, path)
 			if path == "/properties/skip" {
 				return jsonschema.SkipChildren
