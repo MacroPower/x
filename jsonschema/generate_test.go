@@ -2710,18 +2710,26 @@ func TestDefaultNamerSpacesForGenerics(t *testing.T) {
 	}
 }
 
-func TestWithNamerNilDoesNotPanic(t *testing.T) {
+func TestWithNamerNilRestoresDefault(t *testing.T) {
 	t.Parallel()
 
-	type Simple struct {
+	type Inner struct {
 		Name string `json:"name"`
 	}
 
-	// WithNamer(nil) should produce a clear error, not a panic.
-	assert.NotPanics(t, func() {
-		//nolint:errcheck // Asserting only that the call does not panic.
-		_, _ = jsonschema.GenerateFor[Simple](t.Context(), jsonschema.WithNamer(nil))
-	}, "WithNamer(nil) should not panic")
+	type Outer struct {
+		A Inner `json:"a"`
+		B Inner `json:"b"`
+	}
+
+	// A nil namer after a custom one restores the default short-name namer.
+	s, err := jsonschema.GenerateFor[Outer](t.Context(),
+		jsonschema.WithNamer(jsonschema.NamerFunc(func(reflect.Type) string { return "Custom" })),
+		jsonschema.WithNamer(nil),
+	)
+	require.NoError(t, err)
+	assert.Contains(t, s.Defs, "Inner")
+	assert.NotContains(t, s.Defs, "Custom")
 }
 
 func TestWithTagInterpreterNilDoesNotPanic(t *testing.T) {

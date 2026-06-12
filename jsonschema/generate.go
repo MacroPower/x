@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
 )
 
 // GenerateOption configures schema generation. Options are produced by this
@@ -36,7 +37,7 @@ func WithTagInterpreter(t TagInterpreter) GenerateOption {
 // field descriptions. [NewGoCommentProvider] constructs the AST-backed
 // provider that extracts Go doc comments; any other implementation
 // substitutes another source. The last registration wins, and a nil p
-// clears any earlier registration, leaving descriptions unset.
+// restores the default (no provider), leaving descriptions unset.
 func WithCommentProvider(p CommentProvider) GenerateOption {
 	return generateOptionFunc(func(g *generator) {
 		g.commentProvider = p
@@ -100,8 +101,10 @@ func (r exactTypeResolver) SchemaForType(t reflect.Type) (*Schema, bool) {
 // overriding even [JSONSchemaProvider]. Useful for mapping third-party types
 // or overriding types whose [JSONSchemaProvider] schema is undesirable.
 // Resolvers are consulted newest registration first, so if called multiple
-// times for the same type, the last registration wins. A nil s is ignored,
-// leaving any earlier registration for t in place.
+// times for the same type, the last registration wins. A nil s restores the
+// type's default resolution: earlier WithTypeSchema registrations for t are
+// removed, while predicate resolvers ([WithTypeSchemaResolver]) and the rest
+// of the chain still apply.
 //
 // The override is copied before use: its sub-schemas are deep-copied and its
 // Enum, Const, Default, and Extra containers are cloned, so a tag interpreter
@@ -112,9 +115,16 @@ func (r exactTypeResolver) SchemaForType(t reflect.Type) (*Schema, bool) {
 // map element held inside one of those values can still leak.
 func WithTypeSchema(t reflect.Type, s *Schema) GenerateOption {
 	return generateOptionFunc(func(g *generator) {
-		if s != nil {
-			g.typeResolvers = append(g.typeResolvers, exactTypeResolver{t: t, s: s})
+		if s == nil {
+			g.typeResolvers = slices.DeleteFunc(g.typeResolvers, func(r TypeSchemaResolver) bool {
+				er, ok := r.(exactTypeResolver)
+				return ok && er.t == t
+			})
+
+			return
 		}
+
+		g.typeResolvers = append(g.typeResolvers, exactTypeResolver{t: t, s: s})
 	})
 }
 
@@ -148,12 +158,14 @@ func (f NamerFunc) SchemaName(t reflect.Type) string { return f(t) }
 
 // WithNamer sets a custom [Namer] for producing definition names from
 // Go types. Default: uses the type's short name (e.g., "MyStruct").
-// A nil n is ignored, keeping the default.
+// A nil n restores the default namer.
 func WithNamer(n Namer) GenerateOption {
 	return generateOptionFunc(func(g *generator) {
-		if n != nil {
-			g.namer = n
+		if n == nil {
+			n = NamerFunc(defaultNamer)
 		}
+
+		g.namer = n
 	})
 }
 

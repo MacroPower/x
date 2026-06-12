@@ -108,6 +108,16 @@
 //     on the definitions entry instead, shared by every occurrence of the
 //     type.
 //
+// Across every entry point, an option given a nil interface or pointer value
+// restores the default behavior: [WithNamer] the built-in namer,
+// [WithCommentProvider] no descriptions, [WithRefResolver] local-only ref
+// resolution, [WithRefFallback] fatal expansion failures, and
+// [WithTypeSchema] with a nil schema the type's default resolution
+// (unregistering earlier exact registrations for the type). The exception is
+// additive registrations that a nil cannot identify anything to remove from
+// ([WithTagInterpreter], [WithTypeSchemaResolver], [WithTypeSchemaExtender],
+// [WithFormatValidator], [WithMetaSchema]); these ignore a nil registration.
+//
 // # Type Mapping
 //
 // Go types are mapped to JSON Schema types following these rules:

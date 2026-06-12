@@ -174,7 +174,8 @@ func (f RefFallbackFunc) ResolveRefFailure(failure RefFailure) RefAction { retur
 // and the error, and its [RefAction] result decides between propagating
 // the error ([PropagateRef]), dropping the reference keyword ([DropRef]),
 // and expanding a substitute ([SubstituteRef]). [RefFallbackFunc] adapts a
-// bare function.
+// bare function. A nil f restores the default, where every expansion failure
+// is fatal.
 //
 // F is consulted once per failure, at the reference that directly failed:
 // when a failure surfaces while expanding a nested target, the innermost

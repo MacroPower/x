@@ -155,6 +155,47 @@ func TestWithTypeSchema_LastRegistrationWins(t *testing.T) {
 	}`, string(got))
 }
 
+// TestWithTypeSchema_NilUnregisters proves a nil schema restores the type's
+// default resolution: earlier exact registrations for the type are removed,
+// while predicate resolvers still apply.
+func TestWithTypeSchema_NilUnregisters(t *testing.T) {
+	t.Parallel()
+
+	t.Run("removes earlier exact registration", func(t *testing.T) {
+		t.Parallel()
+
+		s, err := jsonschema.GenerateFor[plainKind](t.Context(),
+			jsonschema.WithTypeSchemaFor[plainKind](&jsonschema.Schema{Type: "string"}),
+			jsonschema.WithTypeSchemaFor[plainKind](nil),
+		)
+		require.NoError(t, err)
+
+		got, err := json.Marshal(s)
+		require.NoError(t, err)
+		assert.JSONEq(t, `{
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"type": "integer"
+		}`, string(got))
+	})
+
+	t.Run("leaves predicate resolvers in place", func(t *testing.T) {
+		t.Parallel()
+
+		s, err := jsonschema.GenerateFor[stringerKind](t.Context(),
+			jsonschema.WithTypeSchemaResolver(stringerResolver()),
+			jsonschema.WithTypeSchemaFor[stringerKind](nil),
+		)
+		require.NoError(t, err)
+
+		got, err := json.Marshal(s)
+		require.NoError(t, err)
+		assert.JSONEq(t, `{
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"type": "string"
+		}`, string(got))
+	})
+}
+
 // TestWithTypeSchemaResolver_EmbeddedComposition mirrors the WithTypeSchema embed
 // behavior: an embedded struct intercepted by a resolver composes via allOf
 // rather than having its fields promoted.

@@ -225,7 +225,8 @@ func (o refResolverOption) applyInline(in *inliner) { in.resolver = o.r }
 // inlining it receives the fragment-stripped absolute URI and is called at
 // most once per distinct URI within one Inline call; the schema it returns
 // is deep-copied before use and never mutated. In both roles the resolver
-// receives the context of the Context entry point in effect.
+// receives the context of the Context entry point in effect. A nil r
+// restores the default, where only local refs resolve.
 func WithRefResolver(r RefResolver) RefOption {
 	return refResolverOption{r: r}
 }
