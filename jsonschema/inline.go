@@ -124,14 +124,49 @@ type RefFailure struct {
 	Ref string
 }
 
+// RefAction is a [RefFallback]'s decision for one failed reference
+// expansion. Construct it with [PropagateRef], [DropRef], or
+// [SubstituteRef]; the zero value propagates.
+type RefAction struct {
+	substitute *Schema
+	kind       refActionKind
+}
+
+// refActionKind discriminates the three [RefAction] behaviors.
+type refActionKind int
+
+const (
+	refActionPropagate refActionKind = iota
+	refActionDrop
+	refActionSubstitute
+)
+
+// PropagateRef returns the [RefAction] that propagates the original
+// expansion error, ending the [Inline] call. It is the zero RefAction.
+func PropagateRef() RefAction { return RefAction{} }
+
+// DropRef returns the [RefAction] that drops the failing reference keyword
+// while keeping the node's remaining keywords.
+func DropRef() RefAction { return RefAction{kind: refActionDrop} }
+
+// SubstituteRef returns the [RefAction] that expands the reference as if it
+// had resolved to a copy of s, with the usual draft sibling semantics.
+// A nil s drops the reference keyword, as [DropRef] does.
+func SubstituteRef(s *Schema) RefAction {
+	if s == nil {
+		return DropRef()
+	}
+
+	return RefAction{kind: refActionSubstitute, substitute: s}
+}
+
 // RefFallback decides what happens when [Inline] fails to expand one
-// reference, described by the [RefFailure]. Returning ok=false propagates
-// the original error, ending the Inline call. Returning ok=true with a nil
-// schema drops the failing reference keyword and keeps the node's remaining
-// keywords. Returning ok=true with a non-nil schema expands the reference as
-// if it had resolved to a copy of that schema, with the usual draft sibling
-// semantics.
-type RefFallback func(failure RefFailure) (s *Schema, ok bool)
+// reference, described by the [RefFailure]. It returns one of the three
+// [RefAction] values: [PropagateRef] propagates the original error, ending
+// the Inline call; [DropRef] drops the failing reference keyword and keeps
+// the node's remaining keywords; [SubstituteRef] expands the reference as if
+// it had resolved to a copy of the given schema.
+type RefFallback func(failure RefFailure) RefAction
 
 // WithInlineRefFallback sets a per-reference failure policy for [Inline].
 // When expanding a reference fails - the target is unresolvable
@@ -139,8 +174,9 @@ type RefFallback func(failure RefFailure) (s *Schema, ok bool)
 // construct has no static expansion ([ErrRefInline], $dynamicRef) - fn is
 // consulted with a [RefFailure] carrying the JSON Pointer path of the
 // referencing schema within its containing document, the reference value,
-// and the error, and its [RefFallback] result decides between propagating
-// the error, dropping the reference keyword, and expanding a substitute.
+// and the error, and its [RefAction] result decides between propagating
+// the error ([PropagateRef]), dropping the reference keyword ([DropRef]),
+// and expanding a substitute ([SubstituteRef]).
 //
 // Fn is consulted once per failure, at the reference that directly failed:
 // when a failure surfaces while expanding a nested target, the innermost
@@ -461,28 +497,29 @@ func (in *inliner) expandTarget(pristine *Schema, path string) (*Schema, error) 
 
 // substitute consults the [WithInlineRefFallback] policy for a reference
 // that failed directly at the pristine node and turns its answer into a
-// spliceable self-contained copy. With no fallback configured, or when the
-// fallback declines, the original inlineErr is returned. A nil fallback
-// schema yields (nil, nil): the caller drops the reference keyword. A
-// non-nil schema is deep-copied, registered in resolution space as if
-// written at the failing node's location (its base URI is the node's, so
-// its refs resolve in the context of the document containing the failing
-// ref), and inlined recursively into a self-contained copy.
+// spliceable self-contained copy. With no fallback configured, or on
+// [PropagateRef], the original inlineErr is returned. [DropRef] yields
+// (nil, nil): the caller drops the reference keyword. A [SubstituteRef]
+// schema is deep-copied, registered in resolution space as if written at
+// the failing node's location (its base URI is the node's, so its refs
+// resolve in the context of the document containing the failing ref), and
+// inlined recursively into a self-contained copy.
 func (in *inliner) substitute(pristine *Schema, path, ref string, inlineErr error) (*Schema, error) {
 	if in.fallback == nil {
 		return nil, inlineErr
 	}
 
-	sub, ok := in.fallback(RefFailure{Path: path, Ref: ref, Err: inlineErr})
-	if !ok {
+	action := in.fallback(RefFailure{Path: path, Ref: ref, Err: inlineErr})
+
+	if action.kind == refActionPropagate {
 		return nil, inlineErr
 	}
 
-	if sub == nil {
+	if action.kind == refActionDrop {
 		return nil, nil //nolint:nilnil // The caller drops the reference keyword.
 	}
 
-	cp, err := cloneSchema(sub)
+	cp, err := cloneSchema(action.substitute)
 	if err != nil {
 		return nil, err
 	}

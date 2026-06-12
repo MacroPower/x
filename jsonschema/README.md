@@ -898,11 +898,11 @@ Failure modes:
 expanding a reference fails for any of those reasons, with a `RefFailure`
 carrying the JSON Pointer path of the referencing schema within its
 containing document, the reference value, and the error. The fallback
-declines (propagating the
-original error and ending the `Inline` call), drops the failing
-reference keyword while keeping the node's remaining keywords (a nil
-schema), or supplies a substitute schema the reference expands to as if it
-had resolved there, with the usual draft sibling semantics. The fallback is
+answers with a `RefAction`: `PropagateRef()` propagates the original error
+and ends the `Inline` call, `DropRef()` drops the failing reference keyword
+while keeping the node's remaining keywords, and `SubstituteRef(s)` supplies
+a substitute schema the reference expands to as if it had resolved there,
+with the usual draft sibling semantics. The fallback is
 consulted once per failure, at the reference that directly failed: a
 failure inside a nested expansion consults the innermost failing ref with
 its path in its containing document, and a declined consultation propagates
@@ -913,13 +913,13 @@ cycle introduced by the substitute is an ordinary `ErrRefCycle`.
 
 ### Inlining options
 
-| Option                          | Effect                                                                                                                                     |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `WithDraft(Draft)`              | Override the draft otherwise detected from the root schema's `$schema`.                                                                    |
-| `WithResolver(r)`               | Set the `RefResolver` that fetches the documents non-local refs target (called at most once per distinct URI).                             |
-| `WithInlineBaseURI(base)`       | Set the root document's base URI; a schemeless base is normalized against `file:///`.                                                      |
-| `WithInlineRetrievalBase(bool)` | Resolve refs against each document's retrieval URI, treating `$id` as an inert annotation that passes through verbatim.                    |
-| `WithInlineRefFallback(fn)`     | Per-reference failure policy: decline (propagate), drop the failing reference keyword (nil schema), or expand a substitute schema instead. |
+| Option                          | Effect                                                                                                                  |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `WithDraft(Draft)`              | Override the draft otherwise detected from the root schema's `$schema`.                                                 |
+| `WithResolver(r)`               | Set the `RefResolver` that fetches the documents non-local refs target (called at most once per distinct URI).          |
+| `WithInlineBaseURI(base)`       | Set the root document's base URI; a schemeless base is normalized against `file:///`.                                   |
+| `WithInlineRetrievalBase(bool)` | Resolve refs against each document's retrieval URI, treating `$id` as an inert annotation that passes through verbatim. |
+| `WithInlineRefFallback(fn)`     | Per-reference failure policy returning a `RefAction`: `PropagateRef()`, `DropRef()`, or `SubstituteRef(s)`.             |
 
 ## Errors
 

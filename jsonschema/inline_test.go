@@ -517,10 +517,10 @@ type refFallbackCall struct {
 func TestInlineRefFallback(t *testing.T) {
 	t.Parallel()
 
-	drop := func(jsonschema.RefFailure) (*jsonschema.Schema, bool) { return nil, true }
-	decline := func(jsonschema.RefFailure) (*jsonschema.Schema, bool) { return nil, false }
-	replaceWith := func(s *jsonschema.Schema) func(jsonschema.RefFailure) (*jsonschema.Schema, bool) {
-		return func(jsonschema.RefFailure) (*jsonschema.Schema, bool) { return s, true }
+	drop := func(jsonschema.RefFailure) jsonschema.RefAction { return jsonschema.DropRef() }
+	decline := func(jsonschema.RefFailure) jsonschema.RefAction { return jsonschema.PropagateRef() }
+	replaceWith := func(s *jsonschema.Schema) jsonschema.RefFallback {
+		return func(jsonschema.RefFailure) jsonschema.RefAction { return jsonschema.SubstituteRef(s) }
 	}
 
 	tests := map[string]struct {
@@ -528,7 +528,7 @@ func TestInlineRefFallback(t *testing.T) {
 		schema        string
 		baseURI       string
 		retrievalBase bool
-		fallback      func(jsonschema.RefFailure) (*jsonschema.Schema, bool)
+		fallback      jsonschema.RefFallback
 		wantCalls     []refFallbackCall
 		want          string
 		err           error
@@ -715,12 +715,12 @@ func TestInlineRefFallback(t *testing.T) {
 		},
 		"cycle introduced by the substitute is an ordinary cycle error": {
 			schema: `{"properties": {"a": {"$ref": "#/missing"}}}`,
-			fallback: func(f jsonschema.RefFailure) (*jsonschema.Schema, bool) {
+			fallback: func(f jsonschema.RefFailure) jsonschema.RefAction {
 				if errors.Is(f.Err, jsonschema.ErrRefCycle) {
-					return nil, false
+					return jsonschema.PropagateRef()
 				}
 
-				return &jsonschema.Schema{Ref: "#/properties/a"}, true
+				return jsonschema.SubstituteRef(&jsonschema.Schema{Ref: "#/properties/a"})
 			},
 			wantCalls: []refFallbackCall{
 				{path: "/properties/a", ref: "#/missing", err: jsonschema.ErrRefResolve},
@@ -786,7 +786,7 @@ func TestInlineRefFallback(t *testing.T) {
 
 			if tc.fallback != nil {
 				opts = append(opts, jsonschema.WithInlineRefFallback(
-					func(f jsonschema.RefFailure) (*jsonschema.Schema, bool) {
+					func(f jsonschema.RefFailure) jsonschema.RefAction {
 						calls = append(calls, refFallbackCall{path: f.Path, ref: f.Ref, err: f.Err})
 
 						return tc.fallback(f)

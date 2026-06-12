@@ -686,12 +686,11 @@
 // [RefFallback]) consulted when expanding a reference fails for any of those
 // reasons, with a [RefFailure] carrying the JSON Pointer path of the
 // referencing schema within its containing document, the reference value,
-// and the error.
-// The fallback declines (propagating
-// the original error and ending the Inline call), drops the failing
-// reference keyword while keeping the node's remaining keywords (a nil
-// schema), or supplies a substitute schema the reference expands to as if
-// it had resolved there, with the usual draft sibling semantics. The
+// and the error. The fallback answers with a [RefAction]: [PropagateRef]
+// propagates the original error and ends the Inline call, [DropRef] drops
+// the failing reference keyword while keeping the node's remaining keywords,
+// and [SubstituteRef] supplies a substitute schema the reference expands to
+// as if it had resolved there, with the usual draft sibling semantics. The
 // fallback is consulted once per failure, at the reference that directly
 // failed: a failure inside a nested expansion consults the innermost
 // failing ref with its path in its containing document, and a declined
