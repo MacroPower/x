@@ -321,6 +321,18 @@ descriptions := jsonschema.TypeSchemaExtenderFunc(
 schema, err := jsonschema.GenerateFor[Config](ctx, jsonschema.WithTypeSchemaExtender(descriptions))
 ```
 
+`WithTypeSchemaExtenderFor` is the generic form for one statically known
+type, so the type guard above disappears:
+
+```go
+schema, err := jsonschema.GenerateFor[Config](ctx,
+	jsonschema.WithTypeSchemaExtenderFor[netip.Addr](
+		func(_ context.Context, s *jsonschema.Schema) error {
+			s.Description = "An IP address."
+			return nil
+		}))
+```
+
 ### The `jsonschema` struct tag
 
 The `jsonschema` tag sets schema properties directly on a field. A bare value

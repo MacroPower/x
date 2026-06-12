@@ -89,6 +89,36 @@ func WithTypeSchemaExtender(e TypeSchemaExtender) GenerateOption {
 	})
 }
 
+// WithTypeSchemaExtenderFor is [WithTypeSchemaExtender] for a statically
+// known type, so call sites need not guard on [reflect.TypeFor] themselves:
+// f runs only for T, receiving the reflection-generated schema to modify in
+// place, and every other type passes through untouched.
+//
+//	jsonschema.WithTypeSchemaExtenderFor[pkg.Money](
+//		func(_ context.Context, s *jsonschema.Schema) error {
+//			s.Pattern = `^\d+\.\d{2}$`
+//			return nil
+//		})
+//
+// The registration-order and not-called-when-replaced semantics of
+// [WithTypeSchemaExtender] apply unchanged. A nil f is ignored.
+func WithTypeSchemaExtenderFor[T any](f func(ctx context.Context, s *Schema) error) GenerateOption {
+	if f == nil {
+		return WithTypeSchemaExtender(nil)
+	}
+
+	target := reflect.TypeFor[T]()
+
+	return WithTypeSchemaExtender(TypeSchemaExtenderFunc(
+		func(ctx context.Context, t reflect.Type, s *Schema) error {
+			if t != target {
+				return nil
+			}
+
+			return f(ctx, s)
+		}))
+}
+
 // exactTypeResolver is the [TypeSchemaResolver] registered by
 // [WithTypeSchema]: it offers s for exactly the type t.
 type exactTypeResolver struct {

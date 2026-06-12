@@ -73,7 +73,8 @@
 //     highest-priority resolution step with [WithTypeSchema].
 //   - [WithTypeSchemaExtender] registers a [TypeSchemaExtender] that modifies
 //     reflection-generated schemas, the way [JSONSchemaExtender] does for
-//     types the caller owns.
+//     types the caller owns; [WithTypeSchemaExtenderFor] is its generic form
+//     for extending one statically known type.
 //   - [WithNamer] sets a custom definition namer (a [Namer], with [NamerFunc]
 //     adapting a bare function).
 //   - [WithDefinitions] controls $defs/$ref extraction (default: true).
