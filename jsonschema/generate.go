@@ -282,3 +282,15 @@ func Generate(ctx context.Context, t reflect.Type, opts ...GenerateOption) (*Sch
 	g := newGenerator(ctx, opts)
 	return g.generate(t)
 }
+
+// MustGenerate is [Generate] with [context.Background] but panics on error;
+// it is the [reflect.Type] form of [MustGenerateFor], for package-scope
+// variables and init-time generation from dynamically obtained types.
+func MustGenerate(t reflect.Type, opts ...GenerateOption) *Schema {
+	s, err := Generate(context.Background(), t, opts...)
+	if err != nil {
+		panic(err)
+	}
+
+	return s
+}

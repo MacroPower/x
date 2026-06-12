@@ -133,6 +133,7 @@ schema, err := jsonschema.GenerateFor[MyType](ctx, opts...)
 schema, err := jsonschema.Generate(ctx, reflect.TypeFor[MyType](), opts...)
 
 var mySchema = jsonschema.MustGenerateFor[MyType](opts...)
+var dynSchema = jsonschema.MustGenerate(reflect.TypeFor[MyType](), opts...)
 ```
 
 The root schema always carries the `$schema` keyword; sub-schemas and `$defs`

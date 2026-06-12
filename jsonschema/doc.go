@@ -28,7 +28,7 @@
 // deadlines. [MustGenerateFor] is [GenerateFor] with [context.Background]
 // but panics on error, for package-scope variables and init-time generation
 // where for a static type and fixed options generation either always
-// succeeds or always fails.
+// succeeds or always fails; [MustGenerate] is its [reflect.Type] form.
 //
 // Both functions accept any Go type as the root, not just structs. For
 // example, [GenerateFor] on string produces {"type": "string"}, and on

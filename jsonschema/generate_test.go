@@ -280,6 +280,32 @@ func TestMustGenerateFor(t *testing.T) {
 	})
 }
 
+func TestMustGenerate(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns the Generate schema", func(t *testing.T) {
+		t.Parallel()
+
+		type Config struct {
+			Name string `json:"name"`
+		}
+
+		want, err := jsonschema.Generate(t.Context(), reflect.TypeFor[Config]())
+		require.NoError(t, err)
+
+		got := jsonschema.MustGenerate(reflect.TypeFor[Config]())
+		assert.Equal(t, marshalSchema(t, want), marshalSchema(t, got))
+	})
+
+	t.Run("panics on generation error", func(t *testing.T) {
+		t.Parallel()
+
+		assert.Panics(t, func() {
+			jsonschema.MustGenerate(reflect.TypeFor[func()]())
+		})
+	})
+}
+
 func TestGenerateFor_UnsupportedMapKey(t *testing.T) {
 	t.Parallel()
 
