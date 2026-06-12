@@ -145,24 +145,38 @@ func SubstituteRef(s *Schema) RefAction {
 }
 
 // RefFallback decides what happens when [Inline] fails to expand one
-// reference, described by the [RefFailure]. It returns one of the three
-// [RefAction] values: [PropagateRef] propagates the original error, ending
-// the Inline call; [DropRef] drops the failing reference keyword and keeps
-// the node's remaining keywords; [SubstituteRef] expands the reference as if
-// it had resolved to a copy of the given schema.
-type RefFallback func(failure RefFailure) RefAction
+// reference, described by the [RefFailure]. ResolveRefFailure returns one of
+// the three [RefAction] values: [PropagateRef] propagates the original error,
+// ending the Inline call; [DropRef] drops the failing reference keyword and
+// keeps the node's remaining keywords; [SubstituteRef] expands the reference
+// as if it had resolved to a copy of the given schema. An implementation can
+// hold state such as a logger or a table of substitute schemas;
+// [RefFallbackFunc] adapts a bare function for policies that need none.
+type RefFallback interface {
+	// ResolveRefFailure decides the action for one failed reference
+	// expansion.
+	ResolveRefFailure(failure RefFailure) RefAction
+}
+
+// RefFallbackFunc adapts a bare decision function to a [RefFallback],
+// following [net/http.HandlerFunc].
+type RefFallbackFunc func(failure RefFailure) RefAction
+
+// ResolveRefFailure calls f.
+func (f RefFallbackFunc) ResolveRefFailure(failure RefFailure) RefAction { return f(failure) }
 
 // WithRefFallback sets a per-reference failure policy for [Inline].
 // When expanding a reference fails - the target is unresolvable
 // ([ErrRefResolve]), the expansion is cyclic ([ErrRefCycle]), or the
-// construct has no static expansion ([ErrRefInline], $dynamicRef) - fn is
+// construct has no static expansion ([ErrRefInline], $dynamicRef) - f is
 // consulted with a [RefFailure] carrying the JSON Pointer path of the
 // referencing schema within its containing document, the reference value,
 // and the error, and its [RefAction] result decides between propagating
 // the error ([PropagateRef]), dropping the reference keyword ([DropRef]),
-// and expanding a substitute ([SubstituteRef]).
+// and expanding a substitute ([SubstituteRef]). [RefFallbackFunc] adapts a
+// bare function.
 //
-// Fn is consulted once per failure, at the reference that directly failed:
+// F is consulted once per failure, at the reference that directly failed:
 // when a failure surfaces while expanding a nested target, the innermost
 // failing ref is consulted with its path in its containing document, and a
 // declined consultation propagates the error outward without re-consulting
@@ -170,8 +184,8 @@ type RefFallback func(failure RefFailure) RefAction
 // and is itself inlined recursively, its refs resolving in the context of
 // the document containing the failing ref; a cycle introduced by the
 // returned schema is an ordinary [ErrRefCycle].
-func WithRefFallback(fn RefFallback) InlineOption {
-	return inlineOptionFunc(func(in *inliner) { in.fallback = fn })
+func WithRefFallback(f RefFallback) InlineOption {
+	return inlineOptionFunc(func(in *inliner) { in.fallback = f })
 }
 
 // normalizeBaseURI returns the canonical absolute form of a configured base
@@ -487,7 +501,7 @@ func (in *inliner) substitute(pristine *Schema, path, ref string, inlineErr erro
 		return nil, inlineErr
 	}
 
-	action := in.fallback(RefFailure{Path: path, Ref: ref, Err: inlineErr})
+	action := in.fallback.ResolveRefFailure(RefFailure{Path: path, Ref: ref, Err: inlineErr})
 
 	if action.kind == refActionPropagate {
 		return nil, inlineErr

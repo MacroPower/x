@@ -910,7 +910,8 @@ Failure modes:
 - A non-local ref with no resolver configured, or any ref whose target cannot
   be found, returns an error wrapping `ErrRefResolve`.
 
-`WithRefFallback` sets a per-reference failure policy consulted when
+`WithRefFallback` sets a per-reference failure policy (a `RefFallback`,
+with `RefFallbackFunc` adapting a bare function) consulted when
 expanding a reference fails for any of those reasons, with a `RefFailure`
 carrying the JSON Pointer path of the referencing schema within its
 containing document, the reference value, and the error. The fallback
@@ -929,13 +930,13 @@ cycle introduced by the substitute is an ordinary `ErrRefCycle`.
 
 ### Inlining options
 
-| Option                    | Effect                                                                                                                  |
-| ------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `WithDraft(Draft)`        | Override the draft otherwise detected from the root schema's `$schema`.                                                 |
-| `WithRefResolver(r)`      | Set the `RefResolver` that fetches the documents non-local refs target (called at most once per distinct URI).          |
-| `WithBaseURI(base)`       | Set the root document's base URI; a schemeless base is normalized against `file:///`. Also serves validation.           |
-| `WithRetrievalBase(bool)` | Resolve refs against each document's retrieval URI, treating `$id` as an inert annotation that passes through verbatim. |
-| `WithRefFallback(fn)`     | Per-reference failure policy returning a `RefAction`: `PropagateRef()`, `DropRef()`, or `SubstituteRef(s)`.             |
+| Option                    | Effect                                                                                                                                                |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `WithDraft(Draft)`        | Override the draft otherwise detected from the root schema's `$schema`.                                                                               |
+| `WithRefResolver(r)`      | Set the `RefResolver` that fetches the documents non-local refs target (called at most once per distinct URI).                                        |
+| `WithBaseURI(base)`       | Set the root document's base URI; a schemeless base is normalized against `file:///`. Also serves validation.                                         |
+| `WithRetrievalBase(bool)` | Resolve refs against each document's retrieval URI, treating `$id` as an inert annotation that passes through verbatim.                               |
+| `WithRefFallback(f)`      | Per-reference failure policy returning a `RefAction`: `PropagateRef()`, `DropRef()`, or `SubstituteRef(s)`. `RefFallbackFunc` adapts a bare function. |
 
 ## Errors
 

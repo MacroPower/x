@@ -196,8 +196,9 @@
 // ([TagInterpreter], [FormatValidator]) has a constructor adapter taking the
 // name and the function ([TagInterpreterFunc], [FormatValidatorFunc]);
 // a single-method interface with no name ([TypeSchemaResolver], [RefResolver],
-// [Namer]) has a conversion func type ([TypeSchemaResolverFunc],
-// [RefResolverFunc], [NamerFunc]) following [net/http.HandlerFunc].
+// [Namer], [RefFallback]) has a conversion func type ([TypeSchemaResolverFunc],
+// [RefResolverFunc], [NamerFunc], [RefFallbackFunc]) following
+// [net/http.HandlerFunc].
 //
 // # Tag Interpretation
 //
