@@ -1227,7 +1227,7 @@ func checkTypeNames(schema *Schema, schemaPath string, visited map[*Schema]bool)
 // structs are not accepted; passing any other type returns an error (marshal
 // to JSON or use [Validator.ValidateJSON] instead).
 //
-// Returns nil on success or an error that can be unwrapped to *[ValidationError]
+// Returns nil on success or an error that can be unwrapped to [*ValidationError]
 // via [errors.As].
 //
 // The context is passed to the [RefResolver] (see [WithRefResolver]) for remote
@@ -1311,7 +1311,7 @@ func (c *Validator) ValidateValue(ctx context.Context, v any) error {
 // other type returns an error (marshal to JSON or use [ValidateJSON] instead).
 //
 // Returns nil on success or an error that can be unwrapped to
-// *[ValidationError] via [errors.As].
+// [*ValidationError] via [errors.As].
 //
 // The context is passed to the [RefResolver] (see [WithRefResolver]) for refs
 // resolved both while compiling schema and during the validation run.
@@ -1524,7 +1524,7 @@ func schemaFormsTree(schema *Schema) bool {
 // to preserve integer vs number distinction, then validates.
 //
 // Returns nil on success or an error that can be unwrapped to
-// *[ValidationError] via [errors.As].
+// [*ValidationError] via [errors.As].
 //
 // The context is passed to the [RefResolver] (see [WithRefResolver]) for refs
 // resolved both while compiling schema and during the validation run.
@@ -2673,7 +2673,7 @@ func numericRat(v any) (*big.Rat, bool) {
 	return r, true
 }
 
-// toBigRat converts a numeric value to *[big.Rat] for precise comparison.
+// toBigRat converts a numeric value to [*big.Rat] for precise comparison.
 func toBigRat(v any) (*big.Rat, bool) {
 	switch val := v.(type) {
 	case float64:

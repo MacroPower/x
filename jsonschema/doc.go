@@ -142,7 +142,7 @@
 //   - Pointers: *T produces a nullable schema by wrapping the base schema in an
 //     anyOf with a {"type": "null"} branch. Multiple levels of pointer
 //     indirection (e.g., **T) are treated identically to *T. Pointers to
-//     unrestricted types (*interface{}, *[encoding/json.RawMessage]) produce an
+//     unrestricted types (*interface{}, [*encoding/json.RawMessage]) produce an
 //     unrestricted schema ({}) since it already permits null.
 //   - Slices: []T produces a nullable array with items schema. []byte is a
 //     special case producing a nullable base64-encoded string.
