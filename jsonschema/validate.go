@@ -931,8 +931,27 @@ func detectDraft(s *Schema) Draft {
 // subsequent validation only walks the instance.
 //
 // A Validator is safe for concurrent use by multiple goroutines.
+// [Validator.Schema] and [Validator.Draft] expose what it validates, so a
+// compiled validator can be passed across package boundaries without the
+// schema riding alongside it.
 type Validator struct {
 	proto *validator
+}
+
+// Schema returns the root schema the Validator was compiled for: the very
+// *Schema given to [Compile], not a copy, so a consumer handed only the
+// Validator can still inspect, marshal, or [Inline] what it validates.
+// The compiled caches are derived from the schema at Compile time; treat the
+// returned schema as read-only, and recompile after any mutation.
+func (c *Validator) Schema() *Schema {
+	return c.proto.root
+}
+
+// Draft returns the draft the Validator validates under: the [WithDraft]
+// override when one was given, otherwise the draft detected from the root
+// schema's $schema field (defaulting to [Draft2020]).
+func (c *Validator) Draft() Draft {
+	return c.proto.draft
 }
 
 // Compile prepares a [Validator] for schema, performing all per-schema work up

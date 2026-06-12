@@ -480,6 +480,11 @@
 //     implementations all applying exactly as a JSON consumer of the value
 //     would see them.
 //
+// A compiled Validator also reports what it validates: [Validator.Schema]
+// returns the root schema it was compiled for (read-only; recompile after
+// mutating) and [Validator.Draft] the draft in effect, so a validator can
+// be passed across package boundaries without the schema riding alongside.
+//
 // The package-level [Validate] is the one one-shot form, compiling the
 // schema and validating one pre-parsed instance in a single call, for the
 // quick check that does not warrant holding a Validator; raw bytes or a

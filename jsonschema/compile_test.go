@@ -921,3 +921,52 @@ func TestCompileConcurrentWithRefResolver(t *testing.T) {
 
 	wg.Wait()
 }
+
+// TestValidatorAccessors pins Schema and Draft: a compiled validator exposes
+// the very schema it was compiled for and the draft it validates under, so
+// it can be passed across package boundaries without the schema riding
+// alongside it.
+func TestValidatorAccessors(t *testing.T) {
+	t.Parallel()
+
+	t.Run("Schema returns the compiled root", func(t *testing.T) {
+		t.Parallel()
+
+		schema := &jsonschema.Schema{Type: "string"}
+		v, err := jsonschema.Compile(t.Context(), schema)
+		require.NoError(t, err)
+
+		assert.Same(t, schema, v.Schema())
+	})
+
+	t.Run("Draft detects from the root $schema", func(t *testing.T) {
+		t.Parallel()
+
+		v, err := jsonschema.Compile(t.Context(), &jsonschema.Schema{
+			Schema: "http://json-schema.org/draft-07/schema#",
+			Type:   "string",
+		})
+		require.NoError(t, err)
+
+		assert.Equal(t, jsonschema.Draft7, v.Draft())
+	})
+
+	t.Run("Draft defaults to Draft2020 without $schema", func(t *testing.T) {
+		t.Parallel()
+
+		v, err := jsonschema.Compile(t.Context(), &jsonschema.Schema{Type: "string"})
+		require.NoError(t, err)
+
+		assert.Equal(t, jsonschema.Draft2020, v.Draft())
+	})
+
+	t.Run("Draft reports the WithDraft override", func(t *testing.T) {
+		t.Parallel()
+
+		v, err := jsonschema.Compile(t.Context(), &jsonschema.Schema{Type: "string"},
+			jsonschema.WithDraft(jsonschema.Draft7))
+		require.NoError(t, err)
+
+		assert.Equal(t, jsonschema.Draft7, v.Draft())
+	})
+}
