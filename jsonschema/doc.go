@@ -188,6 +188,14 @@
 // [JSONSchemaProvider] provides the schema, [JSONSchemaExtender] is not
 // called.
 //
+// Every extension-point interface has a bare-function adapter, following one
+// of two shapes. An interface whose value declares a registration name
+// ([TagInterpreter], [FormatValidator]) has a constructor adapter taking the
+// name and the function ([TagInterpreterFunc], [FormatValidatorFunc]);
+// a single-method interface with no name ([TypeSchemaResolver], [RefResolver])
+// has a conversion func type ([TypeSchemaResolverFunc], [RefResolverFunc])
+// following [net/http.HandlerFunc].
+//
 // # Tag Interpretation
 //
 // All struct tag interpretation beyond the json and jsonschema tags is handled
@@ -454,7 +462,7 @@
 //     context from the Context entry points (see Remote References below).
 //   - [WithFormatValidator] registers a custom format checker: a
 //     [FormatValidator] that declares the format name it handles, with
-//     [FormatFunc] adapting a bare function.
+//     [FormatValidatorFunc] adapting a bare function.
 //   - [WithFormats] forces built-in format assertion on or off. By default
 //     format is asserted under Draft-07 and is annotation-only under Draft
 //     2020-12 unless the format-assertion vocabulary is active.

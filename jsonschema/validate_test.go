@@ -1213,7 +1213,7 @@ func TestValidateWithCustomFormatValidator(t *testing.T) {
 	schema := &jsonschema.Schema{Type: "string", Format: "custom-format"}
 	err := jsonschema.Validate(schema, "invalid",
 		jsonschema.WithFormats(true),
-		jsonschema.WithFormatValidator(jsonschema.FormatFunc("custom-format", func(s string) error {
+		jsonschema.WithFormatValidator(jsonschema.FormatValidatorFunc("custom-format", func(s string) error {
 			if s != "valid" {
 				return errors.New("must be 'valid'")
 			}
@@ -1226,7 +1226,7 @@ func TestValidateWithCustomFormatValidator(t *testing.T) {
 }
 
 // evenLengthFormat implements [jsonschema.FormatValidator] directly, the
-// stateful-checker path that FormatFunc bypasses.
+// stateful-checker path that FormatValidatorFunc bypasses.
 type evenLengthFormat struct {
 	name string
 }
@@ -3584,7 +3584,7 @@ func TestCustomFormatVocabularyBypass(t *testing.T) {
 
 	// With format-annotation vocabulary only, custom formats should NOT assert.
 	err := jsonschema.Validate(schema, "bad",
-		jsonschema.WithFormatValidator(jsonschema.FormatFunc("custom-format", customChecker)),
+		jsonschema.WithFormatValidator(jsonschema.FormatValidatorFunc("custom-format", customChecker)),
 		jsonschema.WithVocabularies(map[string]bool{
 			jsonschema.VocabCore2020:             true,
 			jsonschema.VocabValidation2020:       true,

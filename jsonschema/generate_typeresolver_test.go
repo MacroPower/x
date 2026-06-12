@@ -24,7 +24,7 @@ type plainKind int
 
 // stringerResolver resolves every fmt.Stringer to a plain string schema.
 func stringerResolver() jsonschema.TypeSchemaResolver {
-	return jsonschema.TypeResolverFunc(func(t reflect.Type) (*jsonschema.Schema, bool) {
+	return jsonschema.TypeSchemaResolverFunc(func(t reflect.Type) (*jsonschema.Schema, bool) {
 		if !t.Implements(reflect.TypeFor[fmt.Stringer]()) {
 			return nil, false
 		}
@@ -92,7 +92,7 @@ func TestWithTypeResolver(t *testing.T) {
 		},
 		"nil schema with ok true is unrestricted": {
 			opts: []jsonschema.GenerateOption{
-				jsonschema.WithTypeResolver(jsonschema.TypeResolverFunc(
+				jsonschema.WithTypeResolver(jsonschema.TypeSchemaResolverFunc(
 					func(t reflect.Type) (*jsonschema.Schema, bool) {
 						return nil, t == reflect.TypeFor[stringerKind]()
 					},
@@ -172,7 +172,7 @@ func TestWithTypeResolver_EmbeddedComposition(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[doc](
-		jsonschema.WithTypeResolver(jsonschema.TypeResolverFunc(
+		jsonschema.WithTypeResolver(jsonschema.TypeSchemaResolverFunc(
 			func(t reflect.Type) (*jsonschema.Schema, bool) {
 				if t != reflect.TypeFor[base]() {
 					return nil, false
@@ -206,7 +206,7 @@ func TestWithTypeResolver_SchemaUnaliased(t *testing.T) {
 	t.Parallel()
 
 	shared := &jsonschema.Schema{Type: "string", Enum: []any{"a"}}
-	resolver := jsonschema.TypeResolverFunc(func(t reflect.Type) (*jsonschema.Schema, bool) {
+	resolver := jsonschema.TypeSchemaResolverFunc(func(t reflect.Type) (*jsonschema.Schema, bool) {
 		return shared, t == reflect.TypeFor[plainKind]()
 	})
 

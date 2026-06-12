@@ -59,7 +59,7 @@ func (f validateOptionFunc) applyValidate(v *validator) { f(v) }
 
 // WithFormatValidator registers a custom format checker. The checker
 // declares the format name it handles via [FormatValidator.Format];
-// [FormatFunc] adapts a bare function. Registering a name again, including a
+// [FormatValidatorFunc] adapts a bare function. Registering a name again, including a
 // built-in format name, replaces the previous checker. A nil f is ignored.
 func WithFormatValidator(f FormatValidator) ValidateOption {
 	return validateOptionFunc(func(v *validator) {

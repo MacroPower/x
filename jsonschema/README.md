@@ -269,7 +269,7 @@ interface, every type in a package — where `WithTypeSchema` names one exact
 
 ```go
 // Every type implementing fmt.Stringer serializes as a string.
-stringers := jsonschema.TypeResolverFunc(
+stringers := jsonschema.TypeSchemaResolverFunc(
 	func(t reflect.Type) (*jsonschema.Schema, bool) {
 		if !t.Implements(reflect.TypeFor[fmt.Stringer]()) {
 			return nil, false
@@ -447,7 +447,7 @@ such as the `json` tag's options, and the target `Draft` for emitting
 draft-appropriate keywords) and modify the schema in place. Multiple
 interpreters can be registered and run in order, after the `jsonschema` tag.
 `TagInterpreterFunc(key, fn)` adapts a bare function and a tag key to the
-interface (following `FormatFunc`), so a one-off interpreter needs no named
+interface (following `FormatValidatorFunc`), so a one-off interpreter needs no named
 type.
 
 ### The `validate` interpreter
@@ -655,7 +655,7 @@ containing object are both identifiable from `InstancePath` alone.
 | -------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | `WithDraft(Draft)`         | Override the draft otherwise detected from the root schema's `$schema`.                                                |
 | `WithResolver(r)`          | Resolve remote/absolute `$ref` URIs (called only when local lookup fails); the resolver receives the caller's context. |
-| `WithFormatValidator(f)`   | Register a custom `format` checker (a `FormatValidator`; `FormatFunc` adapts a bare function).                         |
+| `WithFormatValidator(f)`   | Register a custom `format` checker (a `FormatValidator`; `FormatValidatorFunc` adapts a bare function).                |
 | `WithFormats(bool)`        | Force `format` assertion on or off.                                                                                    |
 | `WithContent(bool)`        | Assert `contentEncoding`/`contentMediaType` (annotation-only by default).                                              |
 | `WithResolveOptions(opts)` | Pass `ResolveOptions` (aliased from the upstream package) to `Schema.Resolve`.                                         |
@@ -673,7 +673,7 @@ Built-in checkers cover `date-time`, `date`, `time`, `duration`, `email`,
 `relative-json-pointer`, and `regex`. Register additional formats with
 `WithFormatValidator`: a `FormatValidator` declares the format name it
 handles (mirroring `TagInterpreter`), so an implementation can carry state
-such as a compiled regular expression, and `FormatFunc(name, fn)` adapts a
+such as a compiled regular expression, and `FormatValidatorFunc(name, fn)` adapts a
 bare `func(string) error`. Registering a name again, including a built-in
 one, replaces the previous checker.
 

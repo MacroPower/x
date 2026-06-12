@@ -41,12 +41,12 @@ type TypeSchemaResolver interface {
 	SchemaForType(t reflect.Type) (s *Schema, ok bool)
 }
 
-// TypeResolverFunc adapts a bare resolution function to a
+// TypeSchemaResolverFunc adapts a bare resolution function to a
 // [TypeSchemaResolver], following [net/http.HandlerFunc].
-type TypeResolverFunc func(t reflect.Type) (*Schema, bool)
+type TypeSchemaResolverFunc func(t reflect.Type) (*Schema, bool)
 
 // SchemaForType calls f.
-func (f TypeResolverFunc) SchemaForType(t reflect.Type) (*Schema, bool) { return f(t) }
+func (f TypeSchemaResolverFunc) SchemaForType(t reflect.Type) (*Schema, bool) { return f(t) }
 
 // CommentProvider supplies descriptions for types and struct fields during
 // generation. [WithComments](true) registers the built-in provider, which
@@ -85,7 +85,7 @@ type TagInterpreter interface {
 }
 
 // TagInterpreterFunc adapts a bare interpreting function to a
-// [TagInterpreter] for the named struct tag key, following [FormatFunc].
+// [TagInterpreter] for the named struct tag key, following [FormatValidatorFunc].
 func TagInterpreterFunc(key string, fn func(tag string, field FieldContext) error) TagInterpreter {
 	return tagInterpreterFunc{key: key, fn: fn}
 }
@@ -106,7 +106,7 @@ func (t tagInterpreterFunc) Interpret(tag string, field FieldContext) error {
 // validation. Like [TagInterpreter], the value declares the name it handles,
 // so a single registration via [WithFormatValidator] carries both, and an
 // implementation can hold state such as a compiled regular expression.
-// [FormatFunc] adapts a bare function for checkers that need none.
+// [FormatValidatorFunc] adapts a bare function for checkers that need none.
 type FormatValidator interface {
 	// Format returns the format name this validator checks (e.g., "uuid").
 	Format() string
@@ -116,13 +116,13 @@ type FormatValidator interface {
 	ValidateFormat(value string) error
 }
 
-// FormatFunc adapts a bare checking function to a [FormatValidator] for the
+// FormatValidatorFunc adapts a bare checking function to a [FormatValidator] for the
 // named format, following [net/http.HandlerFunc].
-func FormatFunc(name string, fn func(string) error) FormatValidator {
+func FormatValidatorFunc(name string, fn func(string) error) FormatValidator {
 	return formatFunc{name: name, fn: fn}
 }
 
-// formatFunc is the [FormatValidator] returned by [FormatFunc].
+// formatFunc is the [FormatValidator] returned by [FormatValidatorFunc].
 type formatFunc struct {
 	fn   func(string) error
 	name string
