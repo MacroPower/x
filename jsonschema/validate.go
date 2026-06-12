@@ -181,8 +181,18 @@ type validator struct {
 	// points use [context.Background].
 	ctx context.Context
 
-	metaSchemas           map[string]*Schema // $schema URI → metaschema
-	visiting              map[visitKey]bool
+	walked map[*Schema]bool // schemas already visited by walkSchema (cycle guard)
+
+	// NumericBounds, patternCache, and patternProps below are compile-time
+	// caches of derived per-schema state. They are populated once during
+	// Compile by precompute, which runs single-threaded, and are read-only
+	// afterward; forInstance shares them by reference across runs, so
+	// concurrent Validate calls only read them. A schema reached only at
+	// validation time (a remote or JSON-pointer fallback schema) is absent
+	// from these maps, and the validation path falls back to computing the
+	// value directly.
+	numericBounds map[*Schema]*precomputedBounds // numeric bound keywords as rationals
+
 	root                  *Schema
 	resolveOpts           *ResolveOptions
 	formatsForce          *bool           // explicit WithFormats override; nil if unset
@@ -192,19 +202,11 @@ type validator struct {
 	anchorRegistry        map[string]*Schema         // baseURI#anchor → schema
 	dynamicAnchorRegistry map[string]*Schema         // baseURI#name → schema ($dynamicAnchor only)
 	baseURIs              map[*Schema]string         // schema → its base URI
-	walked                map[*Schema]bool           // schemas already visited by walkSchema (cycle guard)
+	metaSchemas           map[string]*Schema         // $schema URI → metaschema
 	jsonPointerCache      map[jsonPointerKey]*Schema // JSON-pointer fallback results, keyed by (root, pointer)
-
-	// Compile-time caches of derived per-schema state. They are populated once
-	// during Compile by precompute, which runs single-threaded, and are
-	// read-only afterward; forInstance shares them by reference across runs, so
-	// concurrent Validate calls only read them. A schema reached only at
-	// validation time (a remote or JSON-pointer fallback schema) is absent from
-	// these maps, and the validation path falls back to computing the value
-	// directly.
-	numericBounds map[*Schema]*precomputedBounds         // numeric bound keywords as rationals
-	patternCache  map[*Schema]compiledPattern            // schema.Pattern compiled
-	patternProps  map[*Schema]map[string]compiledPattern // patternProperties keys compiled
+	visiting              map[visitKey]bool
+	patternCache          map[*Schema]compiledPattern            // schema.Pattern compiled (see numericBounds)
+	patternProps          map[*Schema]map[string]compiledPattern // patternProperties keys compiled (see numericBounds)
 
 	// Registrations for schemas materialized by the JSON-pointer fallback
 	// (resolveJSONPointerViaJSON). Like jsonPointerCache they are per-run
@@ -215,9 +217,13 @@ type validator struct {
 	fallbackDynamicAnchors map[string]*Schema
 	fallbackBaseURIs       map[*Schema]string
 
-	dynamicScope   []string // stack of resource base URIs entered during validation
-	draft          Draft
-	vocabs         vocabSet // resolved active vocabularies
+	// The WithDraft override; nil leaves the draft to $schema detection.
+	draftOverride *Draft
+
+	dynamicScope []string // stack of resource base URIs entered during validation
+	draft        Draft
+	vocabs       vocabSet // resolved active vocabularies
+
 	formatsEnabled bool
 	contentVocab   bool // content vocabulary active (gates validateContent)
 	contentEnabled bool // assert contentEncoding/contentMediaType (WithContent)
@@ -243,8 +249,11 @@ func newValidator(schema *Schema, opts []ValidateOption) (*validator, error) {
 		opt.applyValidate(v)
 	}
 
-	// Detect draft from $schema field.
+	// Detect draft from $schema field; a WithDraft override wins.
 	v.draft = detectDraft(schema)
+	if v.draftOverride != nil {
+		v.draft = *v.draftOverride
+	}
 
 	// Resolve active vocabularies.
 	err := v.resolveVocabularies()

@@ -56,6 +56,8 @@
 // [Generate]:
 //
 //   - [WithDraft] sets the target JSON Schema draft ([Draft7] or [Draft2020]).
+//     The returned [DraftOption] also serves validation and inlining, where
+//     it overrides $schema draft detection (see Draft Support below).
 //   - [WithTagInterpreter] registers a [TagInterpreter] for mapping struct tags
 //     to schema constraints.
 //   - [WithComments] enables Go doc comment extraction as description fields.
@@ -348,6 +350,12 @@
 // from struct tags, the $ref is wrapped in an allOf. In [Draft2020], sibling
 // keywords are placed directly alongside $ref.
 //
+// The [WithDraft] option serves generation, validation, and inlining alike:
+// generation targets the given draft, while validation and [Inline] use it
+// in place of the draft they otherwise detect from the root schema's $schema
+// field, for schema documents that omit $schema or carry one that does not
+// reflect their dialect.
+//
 // # Processing Order
 //
 // Schema generation involves two levels of processing:
@@ -435,6 +443,10 @@
 //
 // Validation is configured via [ValidateOption] values:
 //
+//   - [WithDraft] overrides the draft otherwise detected from the root
+//     schema's $schema field, for schemas that omit $schema (which would
+//     default to [Draft2020]) or carry one that does not reflect their
+//     dialect.
 //   - [WithResolver] sets a [RefResolver] for resolving remote $ref URIs.
 //     The resolver is called only when local fragment resolution fails. Resolved
 //     schemas are cached within the validation run. The resolver receives the
@@ -455,7 +467,8 @@
 //   - [WithMetaSchema] registers a metaschema whose $vocabulary map controls
 //     which keyword groups are active.
 //
-// The draft is detected from the root schema's $schema field. [Draft7] and
+// The draft is detected from the root schema's $schema field; a [WithDraft]
+// option overrides the detection. [Draft7] and
 // [Draft2020] semantics are applied for keyword selection (items/additionalItems
 // vs prefixItems/items; dependentRequired/dependentSchemas under 2020-12) and
 // $ref sibling behavior (Draft-07 ignores siblings; 2020-12 processes them). The
@@ -635,7 +648,8 @@
 //
 // Sibling keywords beside $ref follow draft semantics, with the draft
 // detected from the root schema's $schema exactly as the validator detects
-// it (fetched documents follow the root document's draft, matching how
+// it, and a [WithDraft] option overriding the detection the same way
+// (fetched documents follow the root document's draft, matching how
 // validation applies one draft throughout). Under Draft 2020-12 the node
 // keeps its sibling keywords and the target copy joins the node's allOf,
 // preserving both the conjunction and the annotation flow the unevaluated*

@@ -19,12 +19,6 @@ type generateOptionFunc func(*generator)
 
 func (f generateOptionFunc) applyGenerate(g *generator) { f(g) }
 
-// WithDraft sets the target JSON Schema draft version.
-// Default: Draft2020.
-func WithDraft(d Draft) GenerateOption {
-	return generateOptionFunc(func(g *generator) { g.draft = d })
-}
-
 // WithTagInterpreter registers a TagInterpreter that maps struct tags to
 // schema constraints. Multiple interpreters can be registered and are
 // applied in order. A nil t is ignored.

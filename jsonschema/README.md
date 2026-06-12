@@ -163,21 +163,21 @@ Unsupported types (`func`, `chan`, `complex`, `unsafe.Pointer`) return
 
 ### Configuration options
 
-| Option                           | Effect                                                                        |
-| -------------------------------- | ----------------------------------------------------------------------------- |
-| `WithDraft(Draft)`               | Target draft: `Draft2020` (default) or `Draft7`.                              |
-| `WithTagInterpreter(t)`          | Register a `TagInterpreter`; multiple are applied in order.                   |
-| `WithComments(bool)`             | Extract Go doc comments as `description` (requires source files).             |
-| `WithCommentProvider(p)`         | Set a custom `CommentProvider` as the source of descriptions.                 |
-| `WithTypeSchema(t, s)`           | Override the schema for a specific Go type (highest priority).                |
-| `WithTypeSchemaFor[T](s)`        | `WithTypeSchema` for a statically known type, without `reflect.TypeFor`.      |
-| `WithTypeResolver(r)`            | Register a `TypeSchemaResolver` that overrides types by predicate.            |
-| `WithNamer(fn)`                  | Custom function for naming `$defs` entries.                                   |
-| `WithDefinitions(bool)`          | Extract named types into `$defs`/`$ref` (default `true`).                     |
-| `WithAdditionalProperties(bool)` | Allow extra object keys (default `false`, disallowing them).                  |
-| `WithNullable(bool)`             | Make nil-able types (`*T`, `[]T`, `map`, `[]byte`) nullable (default `true`). |
-| `WithDefaultsFrom(instance)`     | Seed root property defaults from an instance of the generated type.           |
-| `WithRootTitle(bool)`            | Title the root schema with the root type's name (default `false`).            |
+| Option                           | Effect                                                                                |
+| -------------------------------- | ------------------------------------------------------------------------------------- |
+| `WithDraft(Draft)`               | Target draft: `Draft2020` (default) or `Draft7`; also serves validation and `Inline`. |
+| `WithTagInterpreter(t)`          | Register a `TagInterpreter`; multiple are applied in order.                           |
+| `WithComments(bool)`             | Extract Go doc comments as `description` (requires source files).                     |
+| `WithCommentProvider(p)`         | Set a custom `CommentProvider` as the source of descriptions.                         |
+| `WithTypeSchema(t, s)`           | Override the schema for a specific Go type (highest priority).                        |
+| `WithTypeSchemaFor[T](s)`        | `WithTypeSchema` for a statically known type, without `reflect.TypeFor`.              |
+| `WithTypeResolver(r)`            | Register a `TypeSchemaResolver` that overrides types by predicate.                    |
+| `WithNamer(fn)`                  | Custom function for naming `$defs` entries.                                           |
+| `WithDefinitions(bool)`          | Extract named types into `$defs`/`$ref` (default `true`).                             |
+| `WithAdditionalProperties(bool)` | Allow extra object keys (default `false`, disallowing them).                          |
+| `WithNullable(bool)`             | Make nil-able types (`*T`, `[]T`, `map`, `[]byte`) nullable (default `true`).         |
+| `WithDefaultsFrom(instance)`     | Seed root property defaults from an instance of the generated type.                   |
+| `WithRootTitle(bool)`            | Title the root schema with the root type's name (default `false`).                    |
 
 `WithDefaultsFrom` marshals the instance with `encoding/json` after generation;
 each top-level key of the output that matches a root property becomes that
@@ -423,6 +423,12 @@ handling, and `unevaluatedProperties` vs `additionalProperties` in `allOf`
 compositions. In Draft-07, a `$ref`'d field with extra annotations is wrapped in
 an `allOf`; in Draft 2020-12 sibling keywords sit directly alongside `$ref`.
 
+The `WithDraft` option serves generation, validation, and `Inline` alike:
+generation targets the given draft, while validation and inlining use it in
+place of the draft they otherwise detect from the root schema's `$schema`
+field, for schema documents that omit `$schema` (which would default to
+`Draft2020`) or carry one that does not reflect their dialect.
+
 ## Tag interpreters
 
 All struct-tag interpretation beyond the `json` and `jsonschema` tags goes
@@ -644,6 +650,7 @@ containing object are both identifiable from `InstancePath` alone.
 
 | Option                     | Effect                                                                                                                 |
 | -------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `WithDraft(Draft)`         | Override the draft otherwise detected from the root schema's `$schema`.                                                |
 | `WithResolver(r)`          | Resolve remote/absolute `$ref` URIs (called only when local lookup fails); the resolver receives the caller's context. |
 | `WithFormatValidator(f)`   | Register a custom `format` checker (a `FormatValidator`; `FormatFunc` adapts a bare function).                         |
 | `WithFormats(bool)`        | Force `format` assertion on or off.                                                                                    |
@@ -851,8 +858,9 @@ fetched from.
 
 Sibling keywords beside `$ref` follow draft semantics, with the draft
 detected from the root schema's `$schema` exactly as the validator detects
-it (fetched documents follow the root document's draft, matching how
-validation applies one draft throughout):
+it, and a `WithDraft` option overriding the detection the same way (fetched
+documents follow the root document's draft, matching how validation applies
+one draft throughout):
 
 - **Draft 2020-12**: the node keeps its sibling keywords and the target copy
   joins the node's `allOf`. This preserves both the conjunction and the
@@ -902,6 +910,7 @@ cycle introduced by the substitute is an ordinary `ErrRefCycle`.
 
 | Option                          | Effect                                                                                                                                     |
 | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `WithDraft(Draft)`              | Override the draft otherwise detected from the root schema's `$schema`.                                                                    |
 | `WithResolver(r)`               | Set the `RefResolver` that fetches the documents non-local refs target (called at most once per distinct URI).                             |
 | `WithInlineBaseURI(base)`       | Set the root document's base URI; a schemeless base is normalized against `file:///`.                                                      |
 | `WithInlineRetrievalBase(bool)` | Resolve refs against each document's retrieval URI, treating `$id` as an inert annotation that passes through verbatim.                    |

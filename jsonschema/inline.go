@@ -54,6 +54,9 @@ type inliner struct {
 	// means every expansion failure is fatal.
 	fallback RefFallback
 
+	// The WithDraft override; nil leaves the draft to $schema detection.
+	draftOverride *Draft
+
 	baseURI string
 
 	// Resolve refs against each document's retrieval URI, with $id inert
@@ -262,9 +265,14 @@ func InlineContext(ctx context.Context, s *Schema, opts ...InlineOption) (*Schem
 	// mutation. In retrieval-base mode the walk treats $id as inert, so
 	// every schema's base URI stays the document's retrieval URI and $id
 	// registers nothing.
+	draft := detectDraft(pristine)
+	if in.draftOverride != nil {
+		draft = *in.draftOverride
+	}
+
 	in.v = &validator{
 		root:                  pristine,
-		draft:                 detectDraft(pristine),
+		draft:                 draft,
 		inertIDs:              in.retrievalBase,
 		uriRegistry:           map[string]*Schema{},
 		anchorRegistry:        map[string]*Schema{},
