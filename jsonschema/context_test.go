@@ -254,7 +254,7 @@ func TestPackageLevelContextHelpers(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	err = jsonschema.ValidateJSON(ctx, remoteIntegerSchema(), []byte(`"nope"`),
+	err = validateJSON(ctx, remoteIntegerSchema(), []byte(`"nope"`),
 		jsonschema.WithRefResolver(resolver),
 	)
 	require.Error(t, err)
@@ -391,7 +391,7 @@ func TestResolverThroughEntryPoints(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	err = jsonschema.ValidateJSON(t.Context(), remoteIntegerSchema(), []byte(`42`),
+	err = validateJSON(t.Context(), remoteIntegerSchema(), []byte(`42`),
 		jsonschema.WithRefResolver(resolver),
 	)
 	require.NoError(t, err)

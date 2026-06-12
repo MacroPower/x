@@ -2846,7 +2846,7 @@ func TestPointerEmbeddedStructFieldsAreOptional(t *testing.T) {
 	// A nil *Embedded causes encoding/json to omit embedded fields.
 	// The schema should reflect this optionality.
 	data := `{"name": "test"}`
-	err = jsonschema.ValidateJSON(t.Context(), s, []byte(data))
+	err = validateJSON(t.Context(), s, []byte(data))
 	require.NoError(t, err, "nil pointer-to-embedded-struct fields should be optional")
 }
 
@@ -3028,17 +3028,17 @@ func TestGenerateThenValidateRoundTrip(t *testing.T) {
 
 	// Valid instance should pass.
 	valid := `{"name":"Alice","age":30,"address":{"street":"123 Main","city":"NY"}}`
-	err = jsonschema.ValidateJSON(t.Context(), s, []byte(valid))
+	err = validateJSON(t.Context(), s, []byte(valid))
 	require.NoError(t, err, "valid instance should pass generated schema")
 
 	// Invalid instance (extra property) should fail.
 	invalid := `{"name":"Alice","age":30,"address":{"street":"123 Main","city":"NY"},"extra":"bad"}`
-	err = jsonschema.ValidateJSON(t.Context(), s, []byte(invalid))
+	err = validateJSON(t.Context(), s, []byte(invalid))
 	require.Error(t, err, "instance with extra properties should fail generated schema")
 
 	// Invalid type should fail.
 	wrongType := `{"name":42,"age":30,"address":{"street":"123 Main","city":"NY"}}`
-	err = jsonschema.ValidateJSON(t.Context(), s, []byte(wrongType))
+	err = validateJSON(t.Context(), s, []byte(wrongType))
 	require.Error(t, err, "instance with wrong type should fail generated schema")
 }
 
@@ -3135,12 +3135,12 @@ func TestEmbeddedStructSchemaValidatesInstances(t *testing.T) {
 
 	// Validate a conforming instance.
 	valid := `{"value":"hello","name":"test"}`
-	err = jsonschema.ValidateJSON(t.Context(), s, []byte(valid))
+	err = validateJSON(t.Context(), s, []byte(valid))
 	require.NoError(t, err, "valid embedded struct instance should pass")
 
 	// Validate a non-conforming instance.
 	invalid := `{"value":"hello","name":"test","extra":"bad"}`
-	err = jsonschema.ValidateJSON(t.Context(), s, []byte(invalid))
+	err = validateJSON(t.Context(), s, []byte(invalid))
 	require.Error(t, err, "extra properties on embedded struct should fail")
 }
 
@@ -3364,7 +3364,7 @@ func TestGenerateFor_NamedByteSlice(t *testing.T) {
 		// The schema accepts the type's own serialized form (a base64 string).
 		data, err := json.Marshal(byteSliceNamed("hello"))
 		require.NoError(t, err)
-		require.NoError(t, jsonschema.ValidateJSON(t.Context(), s, data))
+		require.NoError(t, validateJSON(t.Context(), s, data))
 	})
 
 	t.Run("slice of named uint8 is base64 string", func(t *testing.T) {
@@ -3409,7 +3409,7 @@ func TestGenerateFor_URLReflectsAsObject(t *testing.T) {
 
 	assert.Equal(t, "object", s.Type)
 	assert.Contains(t, s.Properties, "Scheme")
-	assert.NoError(t, jsonschema.ValidateJSON(t.Context(), s, doc),
+	assert.NoError(t, validateJSON(t.Context(), s, doc),
 		"generated schema rejected url.URL's actual serialization: %s", doc)
 }
 
@@ -3427,6 +3427,6 @@ func TestGenerateFor_BigIntMatchesMarshalOutput(t *testing.T) {
 
 	s, err := jsonschema.GenerateFor[bigIntDoc](t.Context())
 	require.NoError(t, err)
-	assert.NoError(t, jsonschema.ValidateJSON(t.Context(), s, data),
+	assert.NoError(t, validateJSON(t.Context(), s, data),
 		"generated schema rejected big.Int's actual serialization: %s", data)
 }

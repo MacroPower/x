@@ -15,6 +15,39 @@ import (
 	"go.jacobcolvin.com/x/jsonschema"
 )
 
+// validateJSON compiles schema and validates data against it, the
+// Compile-then-ValidateJSON composition tests reach for when a case needs
+// exactly one validation of raw JSON bytes. The helper is transparent:
+// compile and validation errors reach the caller verbatim.
+//
+//nolint:wrapcheck // Transparent test helper; assertions match the original errors.
+func validateJSON(
+	ctx context.Context, schema *jsonschema.Schema, data []byte, opts ...jsonschema.ValidateOption,
+) error {
+	v, err := jsonschema.Compile(ctx, schema, opts...)
+	if err != nil {
+		return err
+	}
+
+	return v.ValidateJSON(ctx, data)
+}
+
+// validateValue compiles schema and validates v's marshaled JSON form
+// against it, the Compile-then-ValidateValue composition, transparent like
+// validateJSON.
+//
+//nolint:wrapcheck // Transparent test helper; assertions match the original errors.
+func validateValue(
+	ctx context.Context, schema *jsonschema.Schema, v any, opts ...jsonschema.ValidateOption,
+) error {
+	c, err := jsonschema.Compile(ctx, schema, opts...)
+	if err != nil {
+		return err
+	}
+
+	return c.ValidateValue(ctx, v)
+}
+
 func TestValidate(t *testing.T) {
 	t.Parallel()
 
@@ -902,7 +935,7 @@ func TestValidateJSON(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := jsonschema.ValidateJSON(t.Context(), tt.schema, []byte(tt.json))
+			err := validateJSON(t.Context(), tt.schema, []byte(tt.json))
 			if tt.err == "" {
 				require.NoError(t, err)
 			} else {
@@ -1007,7 +1040,7 @@ func TestValidateConstEnumFloatEquality(t *testing.T) {
 
 			require.NoError(t, json.Unmarshal([]byte(tt.schema), &s))
 
-			err := jsonschema.ValidateJSON(t.Context(), &s, []byte(tt.instance))
+			err := validateJSON(t.Context(), &s, []byte(tt.instance))
 			if tt.want {
 				assert.NoError(t, err)
 			} else {
@@ -2791,7 +2824,7 @@ func TestHashValueDistinguishesLargeJSONNumbers(t *testing.T) {
 	}
 
 	data := `[9999999999999999999, 9999999999999999998]`
-	err := jsonschema.ValidateJSON(t.Context(), schema, []byte(data))
+	err := validateJSON(t.Context(), schema, []byte(data))
 	require.NoError(t, err, "distinct large json.Number integers should be treated as unique")
 }
 
@@ -4253,7 +4286,7 @@ func TestJSONNumberAcrossNumericKeywords(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := jsonschema.ValidateJSON(t.Context(), tc.schema, []byte(tc.data))
+			err := validateJSON(t.Context(), tc.schema, []byte(tc.data))
 			if tc.err {
 				require.Error(t, err)
 			} else {
@@ -4529,7 +4562,7 @@ func TestValidateJSONStructuredError(t *testing.T) {
 		},
 	}
 
-	err := jsonschema.ValidateJSON(t.Context(), schema, []byte(`{"count": "not a number"}`))
+	err := validateJSON(t.Context(), schema, []byte(`{"count": "not a number"}`))
 	require.Error(t, err)
 
 	var ve *jsonschema.ValidationError
@@ -5687,7 +5720,7 @@ func TestValidateRefIntoUnknownKeyword(t *testing.T) {
 
 			require.NoError(t, json.Unmarshal([]byte(tc.schema), &schema))
 
-			err := jsonschema.ValidateJSON(t.Context(), &schema, []byte(tc.data))
+			err := validateJSON(t.Context(), &schema, []byte(tc.data))
 			if tc.valid {
 				assert.NoError(t, err, "expected valid")
 			} else {
@@ -5745,7 +5778,7 @@ func TestValidateRefTargetWellFormed(t *testing.T) {
 
 			require.NoError(t, json.Unmarshal([]byte(tc.schema), &schema))
 
-			err := jsonschema.ValidateJSON(t.Context(), &schema, []byte(tc.data))
+			err := validateJSON(t.Context(), &schema, []byte(tc.data))
 			switch {
 			case tc.err:
 				require.Error(t, err, "a malformed ref-only target must keep the error fatal")

@@ -459,27 +459,31 @@
 //
 // The package validates JSON instances against schemas and returns structured
 // errors with full path information and hierarchical multi-error support.
-// Three one-shot entry points are provided:
+// [Compile] builds the [Validator] once — registry construction,
+// Schema.Resolve, draft and vocabulary detection — and the returned
+// Validator is reused across instances, safe for concurrent use, with one
+// method per instance shape:
 //
-//   - [Validate] validates a pre-parsed Go value (map[string]any, []any,
-//     string, float64, [encoding/json.Number], bool, nil). Go numeric kinds
-//     that encoding/json does not produce — the signed and unsigned integer
-//     types and float32 — are accepted too and normalized via [Normalize], so
-//     values decoded from YAML or TOML validate directly (integers exactly,
-//     at any magnitude).
-//   - [ValidateJSON] unmarshals raw JSON bytes with [encoding/json.Decoder]
-//     using UseNumber() to preserve integer vs number distinction, then
-//     validates.
-//   - [ValidateValue] marshals a Go value with encoding/json and validates
-//     its JSON form, closing the loop with generation: an instance of the
-//     very type a schema was generated for validates in one call, with json
-//     tags, omitempty and omitzero, and MarshalJSON implementations all
-//     applying exactly as a JSON consumer of the value would see them.
+//   - [Validator.Validate] validates a pre-parsed Go value (map[string]any,
+//     []any, string, float64, [encoding/json.Number], bool, nil). Go numeric
+//     kinds that encoding/json does not produce — the signed and unsigned
+//     integer types and float32 — are accepted too and normalized via
+//     [Normalize], so values decoded from YAML or TOML validate directly
+//     (integers exactly, at any magnitude).
+//   - [Validator.ValidateJSON] unmarshals raw JSON bytes with
+//     [encoding/json.Decoder] using UseNumber() to preserve integer vs
+//     number distinction, then validates.
+//   - [Validator.ValidateValue] marshals a Go value with encoding/json and
+//     validates its JSON form, closing the loop with generation: an instance
+//     of the very type a schema was generated for validates in one call,
+//     with json tags, omitempty and omitzero, and MarshalJSON
+//     implementations all applying exactly as a JSON consumer of the value
+//     would see them.
 //
-// All three compile the schema on every call. To validate many instances against the
-// same schema, call [Compile] once and reuse the returned [Validator]: it
-// performs the per-schema work (registry construction, Schema.Resolve, draft and
-// vocabulary detection) up front and is safe for concurrent use. [MustCompile]
+// The package-level [Validate] is the one one-shot form, compiling the
+// schema and validating one pre-parsed instance in a single call, for the
+// quick check that does not warrant holding a Validator; raw bytes or a
+// marshalable value are one Compile away. [MustCompile]
 // is [Compile] but panics on error, for package-scope validators where for a
 // static schema and fixed options compilation either always succeeds or always
 // fails; it follows [MustGenerateFor], and [MustCompileJSON] is its

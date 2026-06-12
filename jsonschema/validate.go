@@ -1083,7 +1083,7 @@ func ParseSchema(data []byte) (*Schema, error) {
 
 // CompileJSON decodes data as a single JSON schema document with
 // [ParseSchema] and compiles it with [Compile]. It is the schema-side
-// counterpart of [ValidateJSON]: numbers decode as [json.Number], and trailing
+// counterpart of [Validator.ValidateJSON]: numbers decode as [json.Number], and trailing
 // data after the document is rejected. A top-level value that is not an object
 // or boolean — including JSON null, which unmarshaling into a [Schema]
 // directly silently coerces to the false schema — returns an error wrapping
@@ -1246,7 +1246,7 @@ func (c *Validator) Validate(ctx context.Context, instance any) error {
 	if !acceptedInstance(instance) {
 		return fmt.Errorf(
 			"instance of type %T is not accepted: accepted types are map[string]any, "+
-				"[]any, string, bool, nil, and the numeric types; marshal to JSON or use ValidateJSON",
+				"[]any, string, bool, nil, and the numeric types; marshal to JSON or use Validator.ValidateJSON",
 			instance,
 		)
 	}
@@ -1315,7 +1315,8 @@ func (c *Validator) ValidateValue(ctx context.Context, v any) error {
 // [json.Number], bool, nil. Go numeric kinds that encoding/json does not
 // produce — the signed and unsigned integer types and float32 — are accepted
 // too and normalized via [Normalize]. Go structs are not accepted; passing any
-// other type returns an error (marshal to JSON or use [ValidateJSON] instead).
+// other type returns an error (marshal to JSON or use [Validator.ValidateJSON]
+// instead).
 //
 // Returns nil on success or an error that can be unwrapped to
 // [*ValidationError] via [errors.As].
@@ -1329,7 +1330,7 @@ func Validate(ctx context.Context, schema *Schema, instance any, opts ...Validat
 	if !acceptedInstance(instance) {
 		return fmt.Errorf(
 			"instance of type %T is not accepted: accepted types are map[string]any, "+
-				"[]any, string, bool, nil, and the numeric types; marshal to JSON or use ValidateJSON",
+				"[]any, string, bool, nil, and the numeric types; marshal to JSON or use Validator.ValidateJSON",
 			instance,
 		)
 	}
@@ -1525,42 +1526,6 @@ func schemaFormsTree(schema *Schema) bool {
 	visit(schema)
 
 	return tree
-}
-
-// ValidateJSON unmarshals JSON bytes using [json.Decoder] with UseNumber()
-// to preserve integer vs number distinction, then validates.
-//
-// Returns nil on success or an error that can be unwrapped to
-// [*ValidationError] via [errors.As].
-//
-// The context is passed to the [RefResolver] (see [WithRefResolver]) for refs
-// resolved both while compiling schema and during the validation run.
-func ValidateJSON(ctx context.Context, schema *Schema, data []byte, opts ...ValidateOption) error {
-	instance, err := decodeJSONInstance(data)
-	if err != nil {
-		return err
-	}
-
-	return Validate(ctx, schema, instance, opts...)
-}
-
-// ValidateValue marshals v with encoding/json and validates its JSON form
-// against a JSON Schema, the one-shot form of [Validator.ValidateValue],
-// whose marshaling contract it shares: structs and other types
-// encoding/json can marshal are accepted, and what is validated is the
-// value's marshaled form. It compiles schema on every call, following
-// [Validate]; to validate many values against the same schema, call
-// [Compile] once and use [Validator.ValidateValue].
-//
-// The context is passed to the [RefResolver] (see [WithRefResolver]) for refs
-// resolved both while compiling schema and during the validation run.
-func ValidateValue(ctx context.Context, schema *Schema, v any, opts ...ValidateOption) error {
-	data, err := json.Marshal(v)
-	if err != nil {
-		return fmt.Errorf("marshal instance: %w", err)
-	}
-
-	return ValidateJSON(ctx, schema, data, opts...)
 }
 
 // errTrailingData reports tokens after the single top-level JSON value.
@@ -1925,7 +1890,7 @@ func isEmptySchema(s *Schema) bool {
 // Go integer kinds and float32 have already been converted by the time this
 // check runs. Other types — notably Go structs and [time.Time] — are not
 // accepted, because they are not produced by encoding/json when unmarshaling
-// into an any. The check is on the top-level value only; [ValidateJSON]
+// into an any. The check is on the top-level value only; [Validator.ValidateJSON]
 // always supplies accepted types.
 func acceptedInstance(instance any) bool {
 	switch instance.(type) {

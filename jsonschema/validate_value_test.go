@@ -53,7 +53,7 @@ func TestValidateValue(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := jsonschema.ValidateValue(t.Context(), schema, tc.instance)
+			err := validateValue(t.Context(), schema, tc.instance)
 			if tc.err == "" {
 				require.NoError(t, err)
 
@@ -72,7 +72,7 @@ func TestValidateValue(t *testing.T) {
 	t.Run("unmarshalable value returns the marshal error", func(t *testing.T) {
 		t.Parallel()
 
-		err := jsonschema.ValidateValue(t.Context(), schema, make(chan int))
+		err := validateValue(t.Context(), schema, make(chan int))
 		require.Error(t, err)
 
 		var ve *jsonschema.ValidationError
@@ -104,7 +104,7 @@ func TestValidateValue(t *testing.T) {
 		// string schema sees a number, not the Go value's container shape.
 		s := &jsonschema.Schema{Type: "string"}
 
-		err := jsonschema.ValidateValue(t.Context(), s, marshalsToNumber{})
+		err := validateValue(t.Context(), s, marshalsToNumber{})
 		require.Error(t, err)
 
 		var ve *jsonschema.ValidationError

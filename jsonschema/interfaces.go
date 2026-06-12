@@ -318,7 +318,7 @@ type FormatValidator interface {
 	// request path.
 	//
 	// The context comes from the validation entry point in effect
-	// ([Validator.Validate], [Validate], [ValidateJSON]; the Must* forms
+	// ([Validator.Validate], [Validate]; the Must* forms
 	// pass [context.Background]), so a checker that consults an external
 	// system can honor cancellation and deadlines; a checker that performs
 	// no cancellable work can ignore it.

@@ -15,7 +15,7 @@ var (
 	ErrUnsupportedMapKey = errors.New("unsupported map key type")
 
 	// ErrInvalidType is returned by [CheckTypeNames] and by [Compile] (and
-	// the one-shot [Validate] / [ValidateJSON] helpers), which routes through
+	// the one-shot [Validate] helper), which routes through
 	// the same check, when a schema's type keyword names something other than
 	// the seven JSON Schema type names ("null", "boolean", "string",
 	// "integer", "number", "object", "array"). A typo'd type would otherwise
@@ -89,7 +89,7 @@ var (
 // keywords populate [ValidationError.Causes] with child errors forming a tree
 // that mirrors the schema/instance structure.
 //
-// The returned error from [Validate], [ValidateJSON], and [ValidateValue]
+// The returned error from [Validate] and the [Validator] methods
 // can be unwrapped to *ValidationError via [errors.As].
 type ValidationError struct {
 	// Optional wrapped error (e.g. a [RefResolver] failure wrapping
@@ -152,7 +152,7 @@ type Segment struct {
 // input data, one Segment per reference token of [ValidationError.InstancePath],
 // outermost first. Unlike re-parsing InstancePath, it distinguishes an array
 // index from an object key that happens to look numeric. It is populated for
-// errors produced by [Validate], [ValidateJSON], and the [Validator] methods;
+// errors produced by [Validate] and the [Validator] methods;
 // hand-constructed errors return nil.
 func (e *ValidationError) InstanceSegments() []Segment {
 	return e.segments
@@ -165,7 +165,7 @@ func (e *ValidationError) InstanceSegments() []Segment {
 // [Location.Segments]. Unlike re-parsing SchemaPath, it carries member
 // keys verbatim (no ~0/~1 escaping to undo) and distinguishes a list index
 // (an allOf branch) from a property named like a number. It is populated for
-// errors produced by [Validate], [ValidateJSON], and the [Validator]
+// errors produced by [Validate] and the [Validator]
 // methods; hand-constructed errors return nil.
 func (e *ValidationError) SchemaSegments() []Segment {
 	return e.schemaSegs

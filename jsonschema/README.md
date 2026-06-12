@@ -612,9 +612,15 @@ unrecognized keys return an error.
 
 ## Validating instances
 
-The core entry points are:
+The core entry point is `Compile(ctx, schema, opts...)`: it performs the
+per-schema work once (registry construction, `Schema.Resolve`, draft and
+vocabulary detection) and returns a reusable `*Validator` with one method
+per instance shape. `MustCompile` panics on error, for package-scope
+validators where for a static schema and fixed options compilation either
+always succeeds or always fails (following `regexp.MustCompile` and
+`MustGenerateFor`).
 
-- `Validate(ctx, schema, instance, opts...)` validates a pre-parsed Go value
+- `Validator.Validate(ctx, instance)` validates a pre-parsed Go value
   (`map[string]any`, `[]any`, `string`, `float64`, `json.Number`, `bool`,
   `nil`). Go numeric kinds that `encoding/json` does not produce — the signed
   and unsigned integer types and `float32` — are accepted too and normalized
@@ -622,30 +628,28 @@ The core entry points are:
   integers convert to `json.Number` (exact at any magnitude) and `float32`
   widens to `float64`. `Normalize` is exported for callers that want to
   pre-normalize a value once and reuse it.
-- `ValidateJSON(ctx, schema, data, opts...)` unmarshals raw JSON with a
+- `Validator.ValidateJSON(ctx, data)` unmarshals raw JSON with a
   `json.Decoder` using `UseNumber()` (preserving the integer-vs-number
   distinction), then validates.
-- `ValidateValue(ctx, schema, v, opts...)` marshals a Go value with
+- `Validator.ValidateValue(ctx, v)` marshals a Go value with
   `encoding/json` and validates its JSON form, closing the loop with
   generation: an instance of the very type a schema was generated for
   validates in one call. `json` tags, `omitempty` and `omitzero`, and
   `MarshalJSON` implementations all apply, so what is validated is exactly
   what a JSON consumer of the value would see. A value `encoding/json` cannot
   marshal returns the wrapped marshal error.
-- `Compile(ctx, schema, opts...)` performs the per-schema work once (registry
-  construction, `Schema.Resolve`, draft and vocabulary detection) and returns a
-  reusable `*Validator` with `Validate`, `ValidateJSON`, and `ValidateValue`
-  methods.
-  `MustCompile` panics on error, for package-scope validators where for a
-  static schema and fixed options compilation either always succeeds or always
-  fails (following `regexp.MustCompile` and `MustGenerateFor`).
+
+The package-level `Validate(ctx, schema, instance, opts...)` is the one
+one-shot form, compiling the schema and validating one pre-parsed instance
+in a single call, for the quick check that does not warrant holding a
+`Validator`; raw bytes or a marshalable value are one `Compile` away.
 
 Schemas arriving as JSON documents rather than `*Schema` values have
 symmetric entry points:
 
 - `CompileJSON(ctx, data, opts...)` decodes `data` as a single JSON schema document
   (numbers as `json.Number`, trailing data rejected) and compiles it with
-  `Compile`. It is the schema-side counterpart of `ValidateJSON`.
+  `Compile`. It is the schema-side counterpart of `Validator.ValidateJSON`.
   `MustCompileJSON` panics on error, for schema documents fixed at build time
   such as files brought in with `go:embed`.
 - `ParseSchema(data)` is the decode half of `CompileJSON` alone: it returns
@@ -668,16 +672,16 @@ first parameter, carried to the `RefResolver` (see
 `context.Background()`, the right context for the package-scope use they
 serve.
 
-`Compile` (and therefore the one-shot helpers) rejects a `type` keyword that
+`Compile` (and therefore the one-shot `Validate`) rejects a `type` keyword that
 names anything other than the seven JSON Schema types with `ErrInvalidType`,
 so a typo'd type surfaces at construction instead of silently rejecting every
 instance at runtime. The same check is exported standalone as
 `CheckTypeNames` (see [Schema traversal and predicates](#schema-traversal-and-predicates));
 `Compile` routes through it, so the two produce textually identical errors.
 
-`Validate`, `ValidateJSON`, and `ValidateValue` compile a fresh validator on
-every call; to validate many instances against the same schema, `Compile` once
-and reuse the result. A `*Validator` is safe for concurrent use by multiple
+The one-shot `Validate` compiles a fresh validator on every call; to
+validate many instances against the same schema, `Compile` once and reuse
+the result. A `*Validator` is safe for concurrent use by multiple
 goroutines.
 
 On success all return `nil`. A validation failure returns an error that unwraps
@@ -1182,7 +1186,7 @@ refs.
 - **Go RE2 for patterns**: `pattern` and `patternProperties` use Go's `regexp`,
   not ECMA 262; this matches the upstream and is a known deviation from the
   spec.
-- **`ValidateJSON` uses `UseNumber`** to preserve the integer-vs-number
+- **`Validator.ValidateJSON` uses `UseNumber`** to preserve the integer-vs-number
   distinction that default `float64` unmarshaling would lose.
 
 ### Non-goals
