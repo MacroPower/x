@@ -2,6 +2,7 @@ package jsonschema
 
 import (
 	"context"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -15,7 +16,11 @@ import (
 // comments from source files by loading and parsing package sources with
 // [golang.org/x/tools/go/packages] at generation time, so it requires access
 // to source files; when sources cannot be located for a type, it silently
-// supplies no comment. Construct it with [NewGoCommentProvider] and register
+// supplies no comment, so a binary deployed without sources generates
+// schemas without descriptions rather than failing. A canceled or expired
+// context is the exception: it is reported as an error, aborting
+// generation, since package loading is the cancellable work the Generate
+// context exists for. Construct it with [NewGoCommentProvider] and register
 // it with [WithDescriptionProvider]. Wrapping it composes other sources with AST
 // extraction — overrides for specific types, or a pre-extracted map
 // consulted first.
@@ -84,15 +89,19 @@ func baseTypeName(name string) string {
 // not expose source positions. A non-package-scope type (for example one
 // declared inside a function) that shadows a package-level name may therefore
 // receive the package-level type's comment.
-func (ce *GoCommentProvider) TypeDescription(ctx context.Context, tc TypeContext) string {
+func (ce *GoCommentProvider) TypeDescription(ctx context.Context, tc TypeContext) (string, error) {
 	t := tc.Type
 	if t.Name() == "" || t.PkgPath() == "" {
-		return ""
+		return "", nil
 	}
 
 	name := baseTypeName(t.Name())
 
-	files := ce.sourceFiles(ctx, t.PkgPath())
+	files, err := ce.sourceFiles(ctx, t.PkgPath())
+	if err != nil {
+		return "", err
+	}
+
 	for _, f := range files {
 		for _, decl := range f.Decls {
 			gd, ok := decl.(*ast.GenDecl)
@@ -109,17 +118,17 @@ func (ce *GoCommentProvider) TypeDescription(ctx context.Context, tc TypeContext
 				// Doc comment can be on the GenDecl (for single-spec decls)
 				// or on the TypeSpec itself.
 				if ts.Doc != nil {
-					return strings.TrimSpace(ts.Doc.Text())
+					return strings.TrimSpace(ts.Doc.Text()), nil
 				}
 
 				if gd.Doc != nil && len(gd.Specs) == 1 {
-					return strings.TrimSpace(gd.Doc.Text())
+					return strings.TrimSpace(gd.Doc.Text()), nil
 				}
 			}
 		}
 	}
 
-	return ""
+	return "", nil
 }
 
 // FieldDescription returns the doc comment for a struct field, located via
@@ -129,15 +138,19 @@ func (ce *GoCommentProvider) TypeDescription(ctx context.Context, tc TypeContext
 // As with TypeDescription, matching is by package path and unqualified type name,
 // so a non-package-scope struct that shadows a package-level name may receive
 // the package-level struct's field comments.
-func (ce *GoCommentProvider) FieldDescription(ctx context.Context, fc FieldContext) string {
+func (ce *GoCommentProvider) FieldDescription(ctx context.Context, fc FieldContext) (string, error) {
 	structType, fieldName := fc.Owner, fc.StructField.Name
 	if structType.Name() == "" || structType.PkgPath() == "" {
-		return ""
+		return "", nil
 	}
 
 	name := baseTypeName(structType.Name())
 
-	files := ce.sourceFiles(ctx, structType.PkgPath())
+	files, err := ce.sourceFiles(ctx, structType.PkgPath())
+	if err != nil {
+		return "", err
+	}
+
 	for _, f := range files {
 		for _, decl := range f.Decls {
 			gd, ok := decl.(*ast.GenDecl)
@@ -159,7 +172,7 @@ func (ce *GoCommentProvider) FieldDescription(ctx context.Context, fc FieldConte
 				for _, field := range st.Fields.List {
 					for _, ident := range field.Names {
 						if ident.Name == fieldName && field.Doc != nil {
-							return strings.TrimSpace(field.Doc.Text())
+							return strings.TrimSpace(field.Doc.Text()), nil
 						}
 					}
 				}
@@ -167,32 +180,40 @@ func (ce *GoCommentProvider) FieldDescription(ctx context.Context, fc FieldConte
 		}
 	}
 
-	return ""
+	return "", nil
 }
 
 // sourceFiles returns parsed AST files for the package at the given import path.
 // It uses go/packages for source resolution, which handles module cache and
-// standard library packages. Results are cached per package path.
-func (ce *GoCommentProvider) sourceFiles(ctx context.Context, pkgPath string) []*ast.File {
+// standard library packages. Results are cached per package path; a load cut
+// short by context cancellation is reported as an error and not cached, so a
+// later call under a live context still loads the package.
+func (ce *GoCommentProvider) sourceFiles(ctx context.Context, pkgPath string) ([]*ast.File, error) {
 	if pkgPath == "" {
-		return nil
+		return nil, nil
 	}
 
 	ce.mu.Lock()
 	defer ce.mu.Unlock()
 
 	if files, ok := ce.cache[pkgPath]; ok {
-		return files
+		return files, nil
 	}
 
-	files := ce.loadPackage(ctx, pkgPath)
+	files, err := ce.loadPackage(ctx, pkgPath)
+	if err != nil {
+		return nil, err
+	}
+
 	ce.cache[pkgPath] = files
 
-	return files
+	return files, nil
 }
 
 // loadPackage uses go/packages to load and parse source files for a package.
-// Returns nil if the package cannot be loaded.
+// A load attempted under a done context reports the context's error;
+// every other load failure returns nil files, the silent skip the
+// [GoCommentProvider] docs describe.
 //
 // The configured Mode (NeedName | NeedFiles | NeedSyntax) parses but does not
 // type-check, so the only per-file problems that arise are parse errors and
@@ -202,7 +223,7 @@ func (ce *GoCommentProvider) sourceFiles(ctx context.Context, pkgPath string) []
 // parsed cleanly while aggregating per-file problems separately in Errors.
 // Best-effort comment extraction uses whatever parsed, so a single bad file in
 // the package does not drop doc comments for the types that did parse.
-func (ce *GoCommentProvider) loadPackage(ctx context.Context, pkgPath string) []*ast.File {
+func (ce *GoCommentProvider) loadPackage(ctx context.Context, pkgPath string) ([]*ast.File, error) {
 	cfg := &packages.Config{
 		Context: ctx,
 		Dir:     ce.loadDir,
@@ -213,9 +234,16 @@ func (ce *GoCommentProvider) loadPackage(ctx context.Context, pkgPath string) []
 	}
 
 	pkgs, err := packages.Load(cfg, pkgPath)
-	if err != nil || len(pkgs) == 0 {
-		return nil
+
+	ctxErr := ctx.Err()
+	if ctxErr != nil {
+		return nil, fmt.Errorf("load package %s: %w", pkgPath, ctxErr)
 	}
 
-	return pkgs[0].Syntax
+	if err != nil || len(pkgs) == 0 {
+		//nolint:nilerr // A live-context load failure is the documented silent skip.
+		return nil, nil
+	}
+
+	return pkgs[0].Syntax, nil
 }

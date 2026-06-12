@@ -145,11 +145,11 @@ func TestDescriptionProviderFuncs(t *testing.T) {
 		t.Parallel()
 
 		provider := jsonschema.DescriptionProviderFuncs{
-			TypeFunc: func(_ context.Context, tc jsonschema.TypeContext) string {
-				return "type " + tc.Type.Name()
+			TypeFunc: func(_ context.Context, tc jsonschema.TypeContext) (string, error) {
+				return "type " + tc.Type.Name(), nil
 			},
-			FieldFunc: func(_ context.Context, fc jsonschema.FieldContext) string {
-				return "field " + fc.StructField.Name
+			FieldFunc: func(_ context.Context, fc jsonschema.FieldContext) (string, error) {
+				return "field " + fc.StructField.Name, nil
 			},
 		}
 
@@ -167,6 +167,33 @@ func TestDescriptionProviderFuncs(t *testing.T) {
 		require.NoError(t, err)
 		assert.Empty(t, s.Description)
 		assert.Empty(t, s.Properties["name"].Description)
+	})
+
+	t.Run("type error aborts generation", func(t *testing.T) {
+		t.Parallel()
+
+		errLookup := errors.New("description store unreachable")
+		_, err := jsonschema.GenerateFor[doc](t.Context(),
+			jsonschema.WithDescriptionProvider(jsonschema.DescriptionProviderFuncs{
+				TypeFunc: func(context.Context, jsonschema.TypeContext) (string, error) {
+					return "", errLookup
+				},
+			}))
+		require.ErrorIs(t, err, errLookup)
+	})
+
+	t.Run("field error aborts generation", func(t *testing.T) {
+		t.Parallel()
+
+		errLookup := errors.New("description store unreachable")
+		_, err := jsonschema.GenerateFor[doc](t.Context(),
+			jsonschema.WithDescriptionProvider(jsonschema.DescriptionProviderFuncs{
+				FieldFunc: func(context.Context, jsonschema.FieldContext) (string, error) {
+					return "", errLookup
+				},
+			}))
+		require.ErrorIs(t, err, errLookup)
+		require.ErrorContains(t, err, `describe field "name"`)
 	})
 }
 

@@ -2,6 +2,7 @@ package jsonschema_test
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"testing"
 
@@ -80,6 +81,22 @@ func TestGoCommentProviderWithLoadDir(t *testing.T) {
 	})
 }
 
+// TestGoCommentProviderCanceledContext pins the one load failure the
+// provider reports instead of silently skipping: a Generate context that is
+// already done surfaces as an error, since package loading is the
+// cancellable work the context exists for.
+func TestGoCommentProviderCanceledContext(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	_, err := jsonschema.GenerateFor[alpha.Widget](ctx,
+		jsonschema.WithDescriptionProvider(jsonschema.NewGoCommentProvider()),
+	)
+	require.ErrorIs(t, err, context.Canceled)
+}
+
 // mapDescriptionProvider is a deterministic DescriptionProvider backed by maps, the
 // kind of pre-extracted comment store WithDescriptionProvider exists for.
 type mapDescriptionProvider struct {
@@ -87,12 +104,12 @@ type mapDescriptionProvider struct {
 	fields map[reflect.Type]map[string]string
 }
 
-func (p mapDescriptionProvider) TypeDescription(_ context.Context, tc jsonschema.TypeContext) string {
-	return p.types[tc.Type]
+func (p mapDescriptionProvider) TypeDescription(_ context.Context, tc jsonschema.TypeContext) (string, error) {
+	return p.types[tc.Type], nil
 }
 
-func (p mapDescriptionProvider) FieldDescription(_ context.Context, fc jsonschema.FieldContext) string {
-	return p.fields[fc.Owner][fc.StructField.Name]
+func (p mapDescriptionProvider) FieldDescription(_ context.Context, fc jsonschema.FieldContext) (string, error) {
+	return p.fields[fc.Owner][fc.StructField.Name], nil
 }
 
 // commentedWidget is a named type for TestWithDescriptionProvider; the provider
@@ -165,6 +182,23 @@ func TestChainDescriptionProviders(t *testing.T) {
 		assert.Empty(t, s.Description)
 		assert.Empty(t, s.Properties["size"].Description)
 	})
+
+	t.Run("error stops the chain", func(t *testing.T) {
+		t.Parallel()
+
+		errLookup := errors.New("description store unreachable")
+		failing := jsonschema.DescriptionProviderFuncs{
+			TypeFunc: func(context.Context, jsonschema.TypeContext) (string, error) {
+				return "", errLookup
+			},
+		}
+
+		_, err := jsonschema.GenerateFor[commentedWidget](t.Context(),
+			jsonschema.WithDescriptionProvider(jsonschema.ChainDescriptionProviders(
+				mapDescriptionProvider{}, failing, commentedWidgetProvider())),
+		)
+		require.ErrorIs(t, err, errLookup)
+	})
 }
 
 // TestWithDescriptionProvider_LastRegistrationWins covers the registration
@@ -213,10 +247,10 @@ func TestWithDescriptionProvider_FieldContext(t *testing.T) {
 
 	s, err := jsonschema.GenerateFor[doc](t.Context(),
 		jsonschema.WithDescriptionProvider(jsonschema.DescriptionProviderFuncs{
-			FieldFunc: func(_ context.Context, fc jsonschema.FieldContext) string {
+			FieldFunc: func(_ context.Context, fc jsonschema.FieldContext) (string, error) {
 				got = fc
 
-				return "captured"
+				return "captured", nil
 			},
 		}),
 	)

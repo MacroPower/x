@@ -243,7 +243,8 @@
 // [FormatValidatorFunc], [TypeSchemaProviderFunc], [TypeSchemaExtenderFunc],
 // [RefResolverFunc], [NamerFunc], [RefFallbackFunc]). [DescriptionProvider],
 // the one two-method interface, has the struct adapter
-// [DescriptionProviderFuncs] instead, whose nil fields answer "". An
+// [DescriptionProviderFuncs] instead, whose nil fields answer "" with no
+// error. An
 // interface serving a named registration ([TagInterpreter] for a struct tag
 // key, [FormatValidator] for a format name) takes the name at the
 // registration site ([WithTagInterpreter], [WithFormatValidator]), following
@@ -400,18 +401,23 @@
 // # Comment Extraction
 //
 // Type and field descriptions come from a [DescriptionProvider], registered
-// with [WithDescriptionProvider]. The built-in [GoCommentProvider] (constructed
-// with [NewGoCommentProvider]) extracts Go doc comments from source files
-// for struct types, struct fields, and named types using [go/ast] and
+// with [WithDescriptionProvider]. A provider error aborts generation,
+// matching the package's other generation hooks, so a provider doing I/O
+// reports a failed lookup instead of silently dropping descriptions. The
+// built-in [GoCommentProvider] (constructed with [NewGoCommentProvider])
+// extracts Go doc comments from source files for struct types, struct
+// fields, and named types using [go/ast] and
 // [golang.org/x/tools/go/packages]; when source files cannot be located for
-// a type, extraction is silently skipped. Package loading runs in the
-// process working directory unless [WithLoadDir] points it at another
+// a type, extraction is silently skipped, so a binary deployed without
+// sources generates schemas without descriptions, while a canceled or
+// expired Generate context is reported as an error. Package loading runs in
+// the process working directory unless [WithLoadDir] points it at another
 // module's directory. Any other implementation
 // substitutes another source — comments pre-extracted at build time for a
-// binary that deploys without source files, or fixed descriptions in tests
-// — and decides its own failure behavior. [ChainDescriptionProviders]
-// composes providers, first non-empty description wins, such as overrides
-// for specific types backed by AST extraction.
+// binary that deploys without source files, or fixed descriptions in tests.
+// [ChainDescriptionProviders] composes providers, first non-empty
+// description or first error wins, such as overrides for specific types
+// backed by AST extraction.
 // Field lookups receive the [FieldContext] tag interpreters get (with the
 // tag pair empty); for a field promoted from an embedded struct, its Owner
 // is the embedded type, where the field's doc comment lives. The jsonschema

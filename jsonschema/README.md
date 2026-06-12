@@ -453,9 +453,11 @@ Type and field descriptions come from a `DescriptionProvider`, registered with
 `NewGoCommentProvider`) extracts Go doc comments from source files for
 struct types, fields, and named types using `go/ast` and
 `golang.org/x/tools/go/packages`; when source files cannot be located for a
-type, extraction is silently skipped. Package loading runs in the process
-working directory unless `WithLoadDir` points it at another module's
-directory. The `jsonschema` tag's `description` wins over a
+type, extraction is silently skipped, so a binary deployed without sources
+generates schemas without descriptions, while a cancelled or expired
+Generate context is reported as an error. Package loading runs in the
+process working directory unless `WithLoadDir` points it at another
+module's directory. The `jsonschema` tag's `description` wins over a
 provider-supplied comment.
 
 ```go
@@ -466,18 +468,21 @@ schema, err := jsonschema.GenerateFor[MyType](ctx,
 
 Any other implementation substitutes another source — comments pre-extracted
 at build time for a binary that deploys without source files, or fixed
-descriptions in tests — and decides its own failure behavior.
+descriptions in tests. A provider error aborts generation, matching the
+package's other generation hooks, so a provider doing I/O reports a failed
+lookup instead of silently dropping descriptions.
 `ChainDescriptionProviders` composes providers, first non-empty description
-wins, such as overrides for specific types backed by AST extraction:
+or first error wins, such as overrides for specific types backed by AST
+extraction:
 
 ```go
 type DescriptionProvider interface {
 	// TypeDescription returns the description for a named type, or "" for none.
-	TypeDescription(ctx context.Context, tc TypeContext) string
+	TypeDescription(ctx context.Context, tc TypeContext) (string, error)
 
 	// FieldDescription returns the description for the struct field in fc,
 	// or "" for none.
-	FieldDescription(ctx context.Context, fc FieldContext) string
+	FieldDescription(ctx context.Context, fc FieldContext) (string, error)
 }
 
 jsonschema.WithDescriptionProvider(jsonschema.ChainDescriptionProviders(
@@ -494,8 +499,8 @@ provider needs no named type; a nil field answers `""` for its half:
 
 ```go
 jsonschema.WithDescriptionProvider(jsonschema.DescriptionProviderFuncs{
-	TypeFunc: func(_ context.Context, tc jsonschema.TypeContext) string {
-		return docs[tc.Type.Name()]
+	TypeFunc: func(_ context.Context, tc jsonschema.TypeContext) (string, error) {
+		return docs[tc.Type.Name()], nil
 	},
 })
 ```

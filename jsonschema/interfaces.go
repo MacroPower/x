@@ -145,8 +145,11 @@ type DescriptionProvider interface {
 	// The context comes from the Generate call in effect, so a provider
 	// doing I/O (the built-in one loads package sources) can honor
 	// cancellation and deadlines; a provider that performs no cancellable
-	// work can ignore it.
-	TypeDescription(ctx context.Context, tc TypeContext) string
+	// work can ignore it. A non-nil error aborts generation, matching the
+	// package's other generation hooks, so a provider doing I/O reports a
+	// failed lookup instead of silently dropping descriptions; a provider
+	// with no failure mode returns nil.
+	TypeDescription(ctx context.Context, tc TypeContext) (string, error)
 
 	// FieldDescription returns the description for the struct field in fc,
 	// or "" for none. The [FieldContext] is the same value tag interpreters
@@ -154,9 +157,9 @@ type DescriptionProvider interface {
 	// [FieldContext.Owner] carries the type that declares the field (for a
 	// field promoted from an embedded struct, the embedded type, where the
 	// field's doc comment lives, not the outer struct) and
-	// [FieldContext.StructField] names the Go field. The context follows the
-	// TypeDescription contract.
-	FieldDescription(ctx context.Context, fc FieldContext) string
+	// [FieldContext.StructField] names the Go field. The context and error
+	// follow the TypeDescription contract.
+	FieldDescription(ctx context.Context, fc FieldContext) (string, error)
 }
 
 // DescriptionProviderFuncs adapts a pair of bare functions to a
@@ -167,43 +170,44 @@ type DescriptionProvider interface {
 // it needs:
 //
 //	jsonschema.WithDescriptionProvider(jsonschema.DescriptionProviderFuncs{
-//		TypeFunc: func(_ context.Context, tc jsonschema.TypeContext) string {
-//			return docs[tc.Type.Name()]
+//		TypeFunc: func(_ context.Context, tc jsonschema.TypeContext) (string, error) {
+//			return docs[tc.Type.Name()], nil
 //		},
 //	})
 type DescriptionProviderFuncs struct {
 	// TypeFunc backs TypeDescription. A nil TypeFunc leaves every type
 	// description unset.
-	TypeFunc func(ctx context.Context, tc TypeContext) string
+	TypeFunc func(ctx context.Context, tc TypeContext) (string, error)
 
 	// FieldFunc backs FieldDescription. A nil FieldFunc leaves every field
 	// description unset.
-	FieldFunc func(ctx context.Context, fc FieldContext) string
+	FieldFunc func(ctx context.Context, fc FieldContext) (string, error)
 }
 
 // TypeDescription calls TypeFunc, or answers "" when TypeFunc is nil.
-func (p DescriptionProviderFuncs) TypeDescription(ctx context.Context, tc TypeContext) string {
+func (p DescriptionProviderFuncs) TypeDescription(ctx context.Context, tc TypeContext) (string, error) {
 	if p.TypeFunc == nil {
-		return ""
+		return "", nil
 	}
 
 	return p.TypeFunc(ctx, tc)
 }
 
 // FieldDescription calls FieldFunc, or answers "" when FieldFunc is nil.
-func (p DescriptionProviderFuncs) FieldDescription(ctx context.Context, fc FieldContext) string {
+func (p DescriptionProviderFuncs) FieldDescription(ctx context.Context, fc FieldContext) (string, error) {
 	if p.FieldFunc == nil {
-		return ""
+		return "", nil
 	}
 
 	return p.FieldFunc(ctx, fc)
 }
 
 // ChainDescriptionProviders returns a [DescriptionProvider] that consults
-// each provider in order and answers with the first non-empty description;
-// when every provider answers "" (including an empty or all-nil chain), the
-// description stays unset. Nil providers are skipped, so optional links can
-// be passed unconditionally, following [ChainResolvers].
+// each provider in order and answers with the first non-empty description
+// or the first error; when every provider answers "" (including an empty
+// or all-nil chain), the description stays unset. Nil providers are
+// skipped, so optional links can be passed unconditionally, following
+// [ChainResolvers].
 //
 // It makes the composition the [DescriptionProvider] docs describe a
 // one-liner — fixed overrides for specific types consulted first, backed by
@@ -219,35 +223,40 @@ func ChainDescriptionProviders(providers ...DescriptionProvider) DescriptionProv
 // [ChainDescriptionProviders].
 type descriptionProviderChain []DescriptionProvider
 
-// TypeDescription returns the first non-empty type description in the chain.
-func (c descriptionProviderChain) TypeDescription(ctx context.Context, tc TypeContext) string {
+// TypeDescription returns the first non-empty type description or the
+// first error in the chain.
+func (c descriptionProviderChain) TypeDescription(ctx context.Context, tc TypeContext) (string, error) {
 	for _, p := range c {
 		if p == nil {
 			continue
 		}
 
-		if d := p.TypeDescription(ctx, tc); d != "" {
-			return d
+		d, err := p.TypeDescription(ctx, tc)
+		if d != "" || err != nil {
+			//nolint:wrapcheck // The chain is transparent: a link's error reaches the caller verbatim.
+			return d, err
 		}
 	}
 
-	return ""
+	return "", nil
 }
 
-// FieldDescription returns the first non-empty field description in the
-// chain.
-func (c descriptionProviderChain) FieldDescription(ctx context.Context, fc FieldContext) string {
+// FieldDescription returns the first non-empty field description or the
+// first error in the chain.
+func (c descriptionProviderChain) FieldDescription(ctx context.Context, fc FieldContext) (string, error) {
 	for _, p := range c {
 		if p == nil {
 			continue
 		}
 
-		if d := p.FieldDescription(ctx, fc); d != "" {
-			return d
+		d, err := p.FieldDescription(ctx, fc)
+		if d != "" || err != nil {
+			//nolint:wrapcheck // The chain is transparent: a link's error reaches the caller verbatim.
+			return d, err
 		}
 	}
 
-	return ""
+	return "", nil
 }
 
 // TagInterpreter translates struct field tags into JSON Schema constraints.

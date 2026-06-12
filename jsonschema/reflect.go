@@ -353,9 +353,12 @@ func (g *generator) schemaForType(t reflect.Type, nullable bool) (*Schema, error
 	// in buildStructSchema/schemaForStruct.
 	//nolint:nestif // Sequential post-processing steps; flattening adds no clarity.
 	if t.Kind() != reflect.Struct && t.Name() != "" {
-		g.applyTypeDescription(t, s)
+		err := g.applyTypeDescription(t, s)
+		if err != nil {
+			return nil, err
+		}
 
-		err := g.extendType(t, s)
+		err = g.extendType(t, s)
 		if err != nil {
 			return nil, err
 		}
@@ -437,7 +440,10 @@ func (g *generator) handleOverrideType(t reflect.Type, override *Schema, nullabl
 	cloneOverrideExtras(s)
 
 	// Apply type-level comments.
-	g.applyTypeDescription(t, s)
+	err := g.applyTypeDescription(t, s)
+	if err != nil {
+		return nil, err
+	}
 
 	if g.shouldExtract(t) {
 		return g.extractToDefs(t, s, nullable)
@@ -531,7 +537,10 @@ func (g *generator) handleProviderType(t reflect.Type, nullable bool) (*Schema, 
 	cloneOverrideExtras(s)
 
 	// Apply type-level comments.
-	g.applyTypeDescription(t, s)
+	err = g.applyTypeDescription(t, s)
+	if err != nil {
+		return nil, err
+	}
 
 	if g.shouldExtract(t) {
 		return g.extractToDefs(t, s, nullable)
@@ -546,9 +555,12 @@ func (g *generator) handleProviderType(t reflect.Type, nullable bool) (*Schema, 
 func (g *generator) handleBuiltinType(t reflect.Type, s *Schema, nullable bool) (*Schema, error) {
 	//nolint:nestif // Sequential post-processing steps; flattening adds no clarity.
 	if t.Name() != "" {
-		g.applyTypeDescription(t, s)
+		err := g.applyTypeDescription(t, s)
+		if err != nil {
+			return nil, err
+		}
 
-		err := g.extendType(t, s)
+		err = g.extendType(t, s)
 		if err != nil {
 			return nil, err
 		}
@@ -909,10 +921,13 @@ func (g *generator) buildStructSchema(t reflect.Type) (*Schema, error) {
 	}
 
 	// Type-level comment.
-	g.applyTypeDescription(t, s)
+	err := g.applyTypeDescription(t, s)
+	if err != nil {
+		return nil, err
+	}
 
 	// JSONSchemaExtend, then registered extenders.
-	err := g.extendType(t, s)
+	err = g.extendType(t, s)
 	if err != nil {
 		return nil, err
 	}
@@ -1283,7 +1298,10 @@ func (g *generator) buildFieldSchema(parentType reflect.Type, fi structFieldInfo
 	}
 
 	// 2. Field-level comment.
-	g.applyFieldDescription(parentType, fi, fieldSchema, parent)
+	err = g.applyFieldDescription(parentType, fi, fieldSchema, parent)
+	if err != nil {
+		return nil, err
+	}
 
 	// 3. Schema struct tag.
 	if tag, ok := fi.field.Tag.Lookup("jsonschema"); ok {
@@ -1930,24 +1948,35 @@ func parseJSONTag(f reflect.StructField) jsonTagInfo {
 }
 
 // applyTypeDescription sets the description from the comment provider on a
-// type's schema. An empty comment leaves the description unset.
-func (g *generator) applyTypeDescription(t reflect.Type, s *Schema) {
+// type's schema. An empty comment leaves the description unset; a provider
+// error aborts generation.
+func (g *generator) applyTypeDescription(t reflect.Type, s *Schema) error {
 	if g.descriptionProvider == nil {
-		return
+		return nil
 	}
 
-	if comment := g.descriptionProvider.TypeDescription(g.ctx, TypeContext{Type: t, Draft: g.draft}); comment != "" {
+	comment, err := g.descriptionProvider.TypeDescription(g.ctx, TypeContext{Type: t, Draft: g.draft})
+	if err != nil {
+		return fmt.Errorf("describe type %s: %w", t, err)
+	}
+
+	if comment != "" {
 		s.Description = comment
 	}
+
+	return nil
 }
 
 // applyFieldDescription sets the description from the comment provider on a
 // field's schema. The provider receives the [FieldContext] tag interpreters
 // get, with the tag pair empty and Owner the type declaring the field (see
-// [declaringType]); an empty comment leaves the description unset.
-func (g *generator) applyFieldDescription(parentType reflect.Type, fi structFieldInfo, fieldSchema, parent *Schema) {
+// [declaringType]); an empty comment leaves the description unset, and a
+// provider error aborts generation.
+func (g *generator) applyFieldDescription(
+	parentType reflect.Type, fi structFieldInfo, fieldSchema, parent *Schema,
+) error {
 	if g.descriptionProvider == nil {
-		return
+		return nil
 	}
 
 	fc := FieldContext{
@@ -1959,9 +1988,17 @@ func (g *generator) applyFieldDescription(parentType reflect.Type, fi structFiel
 		StructField: fi.field,
 		Draft:       g.draft,
 	}
-	if comment := g.descriptionProvider.FieldDescription(g.ctx, fc); comment != "" {
+
+	comment, err := g.descriptionProvider.FieldDescription(g.ctx, fc)
+	if err != nil {
+		return fmt.Errorf("describe field %q of %s: %w", fi.jsonName, parentType, err)
+	}
+
+	if comment != "" {
 		fieldSchema.Description = comment
 	}
+
+	return nil
 }
 
 // declaringType returns the struct type that actually declares field f. For a
