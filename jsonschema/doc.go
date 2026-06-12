@@ -757,9 +757,10 @@
 //
 // [WithRefFallback] sets a per-reference failure policy (a
 // [RefFallback]) consulted when expanding a reference fails for any of those
-// reasons, with a [RefFailure] carrying the JSON Pointer path of the
-// referencing schema within its containing document, the reference value,
-// and the error. The fallback answers with a [RefAction]: [PropagateRef]
+// reasons, with a [RefFailure] carrying the URI of the containing document,
+// the JSON Pointer path of the referencing schema within that document, the
+// reference value, and the error; the consultation runs under the Inline
+// call's context. The fallback answers with a [RefAction]: [PropagateRef]
 // propagates the original error and ends the Inline call, [DropRef] drops
 // the failing reference keyword while keeping the node's remaining keywords,
 // and [SubstituteRef] supplies a substitute schema the reference expands to

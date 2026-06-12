@@ -50,6 +50,13 @@ type inliner struct {
 	// consultations and seed the path of each expansion walk.
 	paths map[*Schema]string
 
+	// Pristine schemas mapped to the URI of their containing document,
+	// recorded alongside paths: the root document's $id or [WithBaseURI]
+	// base ("" when it has neither), and each fetched document's $id or
+	// retrieval URI. The URIs identify the failing document in
+	// [WithRefFallback] consultations.
+	docs map[*Schema]string
+
 	// The per-reference failure policy from [WithRefFallback]; nil
 	// means every expansion failure is fatal.
 	fallback RefFallback
@@ -99,6 +106,14 @@ type RefFailure struct {
 	// Err is the expansion failure, wrapping [ErrRefResolve], [ErrRefCycle],
 	// or [ErrRefInline].
 	Err error
+
+	// Document is the URI of the document containing the referencing
+	// schema, distinguishing failures in different documents whose Path
+	// values coincide: for the root document its $id or the [WithBaseURI]
+	// base ("" when it has neither), and for a fetched document its $id or
+	// the URI it was fetched from (under [WithRetrievalBase], always the
+	// retrieval URI).
+	Document string
 
 	// Path is the JSON Pointer of the referencing schema within its
 	// containing document.
@@ -154,28 +169,35 @@ func SubstituteRef(s *Schema) RefAction {
 // [RefFallbackFunc] adapts a bare function for policies that need none.
 type RefFallback interface {
 	// ResolveRefFailure decides the action for one failed reference
-	// expansion.
-	ResolveRefFailure(failure RefFailure) RefAction
+	// expansion. The context comes from the [Inline] call in effect, so a
+	// policy that fetches a substitute from an external system can honor
+	// cancellation and deadlines; a policy that performs no cancellable
+	// work can ignore it.
+	ResolveRefFailure(ctx context.Context, failure RefFailure) RefAction
 }
 
 // RefFallbackFunc adapts a bare decision function to a [RefFallback],
 // following [net/http.HandlerFunc].
-type RefFallbackFunc func(failure RefFailure) RefAction
+type RefFallbackFunc func(ctx context.Context, failure RefFailure) RefAction
 
 // ResolveRefFailure calls f.
-func (f RefFallbackFunc) ResolveRefFailure(failure RefFailure) RefAction { return f(failure) }
+func (f RefFallbackFunc) ResolveRefFailure(ctx context.Context, failure RefFailure) RefAction {
+	return f(ctx, failure)
+}
 
 // WithRefFallback sets a per-reference failure policy for [Inline].
 // When expanding a reference fails - the target is unresolvable
 // ([ErrRefResolve]), the expansion is cyclic ([ErrRefCycle]), or the
 // construct has no static expansion ([ErrRefInline], $dynamicRef) - f is
-// consulted with a [RefFailure] carrying the JSON Pointer path of the
-// referencing schema within its containing document, the reference value,
-// and the error, and its [RefAction] result decides between propagating
-// the error ([PropagateRef]), dropping the reference keyword ([DropRef]),
-// and expanding a substitute ([SubstituteRef]). [RefFallbackFunc] adapts a
-// bare function. A nil f restores the default, where every expansion failure
-// is fatal.
+// consulted with a [RefFailure] carrying the URI of the containing document,
+// the JSON Pointer path of the referencing schema within that document, the
+// reference value, and the error, and its [RefAction] result decides between
+// propagating the error ([PropagateRef]), dropping the reference keyword
+// ([DropRef]), and expanding a substitute ([SubstituteRef]).
+// [RefFallbackFunc] adapts a bare function. A nil f restores the default,
+// where every expansion failure is fatal. The consultation runs under the
+// Inline call's context, so a policy fetching a substitute can honor
+// cancellation and deadlines.
 //
 // F is consulted once per failure, at the reference that directly failed:
 // when a failure surfaces while expanding a nested target, the innermost
@@ -263,6 +285,7 @@ func Inline(ctx context.Context, s *Schema, opts ...InlineOption) (*Schema, erro
 		inflight: map[*Schema]bool{},
 		memo:     map[*Schema]*Schema{},
 		paths:    map[*Schema]string{},
+		docs:     map[*Schema]string{},
 	}
 
 	for _, opt := range opts {
@@ -310,7 +333,7 @@ func Inline(ctx context.Context, s *Schema, opts ...InlineOption) (*Schema, erro
 		walked:                map[*Schema]bool{},
 	}
 	in.v.walkSchema(pristine, in.baseURI)
-	in.recordPaths(pristine, "")
+	in.recordPaths(pristine, "", in.v.schemaBase(pristine))
 
 	// Register the root document under its base URI when its own $id did
 	// not already claim one, so a ref that absolutizes back to the root
@@ -339,10 +362,11 @@ func Inline(ctx context.Context, s *Schema, opts ...InlineOption) (*Schema, erro
 }
 
 // recordPaths maps every schema in the pristine document rooted at s to its
-// JSON Pointer path within that document, keyed by pointer identity. The
-// paths name ref-node locations for fallback consultations. An aliased or
-// cyclic graph keeps the first path recorded for a node.
-func (in *inliner) recordPaths(s *Schema, path string) {
+// JSON Pointer path within that document and to doc, the document's URI,
+// keyed by pointer identity. The paths and document URIs name ref-node
+// locations for fallback consultations. An aliased or cyclic graph keeps the
+// first location recorded for a node.
+func (in *inliner) recordPaths(s *Schema, path, doc string) {
 	if s == nil {
 		return
 	}
@@ -352,9 +376,10 @@ func (in *inliner) recordPaths(s *Schema, path string) {
 	}
 
 	in.paths[s] = path
+	in.docs[s] = doc
 
 	for _, child := range SubschemaEntries(s) {
-		in.recordPaths(child.Schema, path+child.Pointer)
+		in.recordPaths(child.Schema, path+child.Pointer, doc)
 	}
 }
 
@@ -502,7 +527,8 @@ func (in *inliner) substitute(pristine *Schema, path, ref string, inlineErr erro
 		return nil, inlineErr
 	}
 
-	action := in.fallback.ResolveRefFailure(RefFailure{Path: path, Ref: ref, Err: inlineErr})
+	action := in.fallback.ResolveRefFailure(in.runContext(),
+		RefFailure{Document: in.docs[pristine], Path: path, Ref: ref, Err: inlineErr})
 
 	if action.kind == refActionPropagate {
 		return nil, inlineErr
@@ -518,7 +544,7 @@ func (in *inliner) substitute(pristine *Schema, path, ref string, inlineErr erro
 	}
 
 	in.v.walkSchema(cp, in.v.schemaBase(pristine))
-	in.recordPaths(cp, path)
+	in.recordPaths(cp, path, in.docs[pristine])
 
 	return in.inlineCopy(cp, path)
 }
@@ -621,16 +647,22 @@ func (in *inliner) resolveTarget(node *Schema, ref string) (*Schema, error) {
 	return nil, fmt.Errorf("%w: cannot resolve %q", ErrRefResolve, ref)
 }
 
+// runContext returns the [Inline] call's context for hook invocations (the
+// [RefResolver], the [RefFallback] policy), falling back to
+// [context.Background] when none was set.
+func (in *inliner) runContext() context.Context {
+	if in.ctx == nil {
+		return context.Background()
+	}
+
+	return in.ctx
+}
+
 // callResolver invokes the configured resolver for uri under the
 // [Inline] call's context. It mirrors [validator.callResolver], including
 // normalizing a nil schema with ok true to the not-resolved answer.
 func (in *inliner) callResolver(uri string) (*Schema, bool, error) {
-	ctx := in.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
-
-	s, ok, err := in.resolver.ResolveRef(ctx, uri)
+	s, ok, err := in.resolver.ResolveRef(in.runContext(), uri)
 	if err != nil {
 		//nolint:wrapcheck // fetchDoc wraps the error with ErrRefResolve.
 		return nil, false, err
@@ -669,7 +701,7 @@ func (in *inliner) fetchDoc(baseURI string) (*Schema, error) {
 
 	in.v.uriRegistry[baseURI] = cp
 	in.v.walkSchema(cp, baseURI)
-	in.recordPaths(cp, "")
+	in.recordPaths(cp, "", in.v.schemaBase(cp))
 
 	return cp, nil
 }

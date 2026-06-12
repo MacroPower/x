@@ -1,6 +1,7 @@
 package jsonschema_test
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"testing"
@@ -506,9 +507,11 @@ func TestInline(t *testing.T) {
 }
 
 // refFallbackCall records one consultation of a [jsonschema.WithRefFallback]
-// policy: the JSON Pointer path of the referencing schema within its
-// containing document, the reference value, and the sentinel the error wraps.
+// policy: the URI of the containing document, the JSON Pointer path of the
+// referencing schema within that document, the reference value, and the
+// sentinel the error wraps.
 type refFallbackCall struct {
+	doc  string
 	path string
 	ref  string
 	err  error
@@ -517,14 +520,14 @@ type refFallbackCall struct {
 func TestInlineRefFallback(t *testing.T) {
 	t.Parallel()
 
-	drop := jsonschema.RefFallbackFunc(func(jsonschema.RefFailure) jsonschema.RefAction {
+	drop := jsonschema.RefFallbackFunc(func(context.Context, jsonschema.RefFailure) jsonschema.RefAction {
 		return jsonschema.DropRef()
 	})
-	decline := jsonschema.RefFallbackFunc(func(jsonschema.RefFailure) jsonschema.RefAction {
+	decline := jsonschema.RefFallbackFunc(func(context.Context, jsonschema.RefFailure) jsonschema.RefAction {
 		return jsonschema.PropagateRef()
 	})
 	replaceWith := func(s *jsonschema.Schema) jsonschema.RefFallback {
-		return jsonschema.RefFallbackFunc(func(jsonschema.RefFailure) jsonschema.RefAction {
+		return jsonschema.RefFallbackFunc(func(context.Context, jsonschema.RefFailure) jsonschema.RefAction {
 			return jsonschema.SubstituteRef(s)
 		})
 	}
@@ -689,6 +692,29 @@ func TestInlineRefFallback(t *testing.T) {
 				}
 			`),
 		},
+		"document is the root's id when it declares one": {
+			schema: stringtest.Input(`
+				{
+					"$id": "https://example.com/root.json",
+					"properties": {"a": {"$ref": "#/$defs/missing", "minLength": 3}}
+				}
+			`),
+			fallback: drop,
+			wantCalls: []refFallbackCall{
+				{
+					doc:  "https://example.com/root.json",
+					path: "/properties/a",
+					ref:  "#/$defs/missing",
+					err:  jsonschema.ErrRefResolve,
+				},
+			},
+			want: stringtest.Input(`
+				{
+					"$id": "https://example.com/root.json",
+					"properties": {"a": {"minLength": 3}}
+				}
+			`),
+		},
 		"fallback in a fetched document gets that document's local path": {
 			schema:  `{"$ref": "child.json"}`,
 			baseURI: "main.json",
@@ -697,7 +723,7 @@ func TestInlineRefFallback(t *testing.T) {
 			},
 			fallback: drop,
 			wantCalls: []refFallbackCall{
-				{path: "/properties/x", ref: "#/missing", err: jsonschema.ErrRefResolve},
+				{doc: "file:///child.json", path: "/properties/x", ref: "#/missing", err: jsonschema.ErrRefResolve},
 			},
 			want: `{"properties": {"x": {"minLength": 1}}}`,
 		},
@@ -721,7 +747,7 @@ func TestInlineRefFallback(t *testing.T) {
 		},
 		"cycle introduced by the substitute is an ordinary cycle error": {
 			schema: `{"properties": {"a": {"$ref": "#/missing"}}}`,
-			fallback: jsonschema.RefFallbackFunc(func(f jsonschema.RefFailure) jsonschema.RefAction {
+			fallback: jsonschema.RefFallbackFunc(func(_ context.Context, f jsonschema.RefFailure) jsonschema.RefAction {
 				if errors.Is(f.Err, jsonschema.ErrRefCycle) {
 					return jsonschema.PropagateRef()
 				}
@@ -752,7 +778,7 @@ func TestInlineRefFallback(t *testing.T) {
 			},
 			fallback: drop,
 			wantCalls: []refFallbackCall{
-				{path: "/properties/bad", ref: "missing.json", err: jsonschema.ErrRefResolve},
+				{doc: "file:///main.json", path: "/properties/bad", ref: "missing.json", err: jsonschema.ErrRefResolve},
 			},
 			want: stringtest.Input(`
 				{
@@ -792,10 +818,10 @@ func TestInlineRefFallback(t *testing.T) {
 
 			if tc.fallback != nil {
 				opts = append(opts, jsonschema.WithRefFallback(jsonschema.RefFallbackFunc(
-					func(f jsonschema.RefFailure) jsonschema.RefAction {
-						calls = append(calls, refFallbackCall{path: f.Path, ref: f.Ref, err: f.Err})
+					func(ctx context.Context, f jsonschema.RefFailure) jsonschema.RefAction {
+						calls = append(calls, refFallbackCall{doc: f.Document, path: f.Path, ref: f.Ref, err: f.Err})
 
-						return tc.fallback.ResolveRefFailure(f)
+						return tc.fallback.ResolveRefFailure(ctx, f)
 					})))
 			}
 
@@ -804,6 +830,7 @@ func TestInlineRefFallback(t *testing.T) {
 			require.Len(t, calls, len(tc.wantCalls))
 
 			for i, want := range tc.wantCalls {
+				assert.Equal(t, want.doc, calls[i].doc, "call %d document", i)
 				assert.Equal(t, want.path, calls[i].path, "call %d path", i)
 				assert.Equal(t, want.ref, calls[i].ref, "call %d ref", i)
 				require.ErrorIs(t, calls[i].err, want.err, "call %d error", i)
