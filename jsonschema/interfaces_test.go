@@ -27,9 +27,9 @@ func TestRefResolverFunc(t *testing.T) {
 
 	schema := &jsonschema.Schema{Ref: "https://example.com/s.json"}
 
-	require.NoError(t, jsonschema.Validate(t.Context(), schema, "ok", jsonschema.WithResolver(resolver)))
+	require.NoError(t, jsonschema.Validate(t.Context(), schema, "ok", jsonschema.WithRefResolver(resolver)))
 
-	err := jsonschema.Validate(t.Context(), schema, float64(5), jsonschema.WithResolver(resolver))
+	err := jsonschema.Validate(t.Context(), schema, float64(5), jsonschema.WithRefResolver(resolver))
 
 	var verr *jsonschema.ValidationError
 
@@ -48,7 +48,7 @@ func TestRefResolverFunc_Error(t *testing.T) {
 
 	schema := &jsonschema.Schema{Ref: "https://example.com/missing.json"}
 
-	err := jsonschema.Validate(t.Context(), schema, "ok", jsonschema.WithResolver(resolver))
+	err := jsonschema.Validate(t.Context(), schema, "ok", jsonschema.WithRefResolver(resolver))
 	require.ErrorIs(t, err, jsonschema.ErrRefResolve)
 	require.ErrorIs(t, err, errBoom)
 }

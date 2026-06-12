@@ -118,7 +118,7 @@ func TestCompilePassesContextToResolver(t *testing.T) {
 	}
 
 	v, err := jsonschema.Compile(ctx, remoteIntegerSchema(),
-		jsonschema.WithResolver(resolver),
+		jsonschema.WithRefResolver(resolver),
 	)
 	require.NoError(t, err)
 
@@ -153,7 +153,7 @@ func TestValidatePassesContextToResolver(t *testing.T) {
 	v, err := jsonschema.Compile(
 		context.WithValue(t.Context(), ctxMarkerKey{}, "compile"),
 		remoteIntegerSchema(),
-		jsonschema.WithResolver(resolver),
+		jsonschema.WithRefResolver(resolver),
 	)
 	require.NoError(t, err)
 
@@ -190,7 +190,7 @@ func TestValidateJSONPassesContextToResolver(t *testing.T) {
 		disabled: true,
 	}
 
-	v, err := jsonschema.Compile(t.Context(), remoteIntegerSchema(), jsonschema.WithResolver(resolver))
+	v, err := jsonschema.Compile(t.Context(), remoteIntegerSchema(), jsonschema.WithRefResolver(resolver))
 	require.NoError(t, err)
 
 	resolver.setDisabled(false)
@@ -217,7 +217,7 @@ func TestValidateCancellation(t *testing.T) {
 		disabled: true,
 	}
 
-	v, err := jsonschema.Compile(t.Context(), remoteIntegerSchema(), jsonschema.WithResolver(resolver))
+	v, err := jsonschema.Compile(t.Context(), remoteIntegerSchema(), jsonschema.WithRefResolver(resolver))
 	require.NoError(t, err)
 
 	resolver.setDisabled(false)
@@ -249,12 +249,12 @@ func TestPackageLevelContextHelpers(t *testing.T) {
 	ctx := context.WithValue(t.Context(), ctxMarkerKey{}, "one-shot")
 
 	err := jsonschema.Validate(ctx, remoteIntegerSchema(), 42.0,
-		jsonschema.WithResolver(resolver),
+		jsonschema.WithRefResolver(resolver),
 	)
 	require.NoError(t, err)
 
 	err = jsonschema.ValidateJSON(ctx, remoteIntegerSchema(), []byte(`"nope"`),
-		jsonschema.WithResolver(resolver),
+		jsonschema.WithRefResolver(resolver),
 	)
 	require.Error(t, err)
 
@@ -281,7 +281,7 @@ func TestCompileJSONPassesContextToResolver(t *testing.T) {
 
 	v, err := jsonschema.CompileJSON(ctx,
 		[]byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$ref":"https://example.com/integer.json"}`),
-		jsonschema.WithResolver(resolver),
+		jsonschema.WithRefResolver(resolver),
 	)
 	require.NoError(t, err)
 	require.NoError(t, v.Validate(t.Context(), 42.0))
@@ -306,7 +306,7 @@ func TestMustCompilePassesBackground(t *testing.T) {
 		},
 	}
 
-	v := jsonschema.MustCompile(remoteIntegerSchema(), jsonschema.WithResolver(resolver))
+	v := jsonschema.MustCompile(remoteIntegerSchema(), jsonschema.WithRefResolver(resolver))
 	require.NoError(t, v.Validate(t.Context(), 42.0))
 
 	ctxs := resolver.recordedCtxs()
@@ -331,7 +331,7 @@ func TestInlinePassesContextToResolver(t *testing.T) {
 	}
 
 	inlined, err := jsonschema.Inline(ctx, remoteIntegerPropertySchema(),
-		jsonschema.WithResolver(resolver),
+		jsonschema.WithRefResolver(resolver),
 	)
 	require.NoError(t, err)
 	assert.Equal(t, "integer", inlined.Properties["count"].Type)
@@ -360,7 +360,7 @@ func TestInlineCancellation(t *testing.T) {
 	cancel()
 
 	_, err := jsonschema.Inline(canceled, remoteIntegerPropertySchema(),
-		jsonschema.WithResolver(resolver),
+		jsonschema.WithRefResolver(resolver),
 	)
 	require.Error(t, err)
 	require.ErrorIs(t, err, jsonschema.ErrRefResolve)
@@ -377,7 +377,7 @@ func TestResolverThroughEntryPoints(t *testing.T) {
 	}
 
 	v, err := jsonschema.Compile(t.Context(), remoteIntegerSchema(),
-		jsonschema.WithResolver(resolver),
+		jsonschema.WithRefResolver(resolver),
 	)
 	require.NoError(t, err)
 
@@ -386,17 +386,17 @@ func TestResolverThroughEntryPoints(t *testing.T) {
 	require.NoError(t, v.ValidateJSON(t.Context(), []byte(`42`)))
 
 	err = jsonschema.Validate(t.Context(), remoteIntegerSchema(), 42.0,
-		jsonschema.WithResolver(resolver),
+		jsonschema.WithRefResolver(resolver),
 	)
 	require.NoError(t, err)
 
 	err = jsonschema.ValidateJSON(t.Context(), remoteIntegerSchema(), []byte(`42`),
-		jsonschema.WithResolver(resolver),
+		jsonschema.WithRefResolver(resolver),
 	)
 	require.NoError(t, err)
 
 	inlined, err := jsonschema.Inline(t.Context(), remoteIntegerPropertySchema(),
-		jsonschema.WithResolver(resolver),
+		jsonschema.WithRefResolver(resolver),
 	)
 	require.NoError(t, err)
 	assert.Equal(t, "integer", inlined.Properties["count"].Type)

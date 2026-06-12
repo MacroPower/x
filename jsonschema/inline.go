@@ -66,7 +66,7 @@ type inliner struct {
 
 // InlineOption configures [Inline]. Options are produced by this package's
 // With* constructors; the interface form (rather than a func type) lets one
-// option value serve several entry points, the way [WithResolver] serves
+// option value serve several entry points, the way [WithRefResolver] serves
 // both [ValidateOption] and InlineOption.
 type InlineOption interface {
 	applyInline(in *inliner)
@@ -201,7 +201,7 @@ func normalizeBaseURI(base string) string {
 // refs are absolutized against the enclosing resource's base URI (its $id,
 // or the base from [WithBaseURI], with a schemeless base normalized
 // against file:///) and fetched through the resolver given via
-// [WithResolver]; any fragment is then evaluated against the fetched
+// [WithRefResolver]; any fragment is then evaluated against the fetched
 // document. Fetched documents are inlined recursively using their own base
 // URIs, and each document is fetched at most once per Inline call. Every
 // ref resolves against its document's original structure, exactly as the
@@ -235,7 +235,7 @@ func normalizeBaseURI(base string) string {
 // these failures into dropping the reference keyword or expanding a
 // substitute schema instead.
 //
-// The context is passed to the [RefResolver] (see [WithResolver]) with
+// The context is passed to the [RefResolver] (see [WithRefResolver]) with
 // every document fetch, so a resolver that fetches over the network can
 // honor cancellation and deadlines.
 func Inline(ctx context.Context, s *Schema, opts ...InlineOption) (*Schema, error) {
@@ -665,7 +665,7 @@ func (in *inliner) fetchDoc(baseURI string) (*Schema, error) {
 // a ref escaping above it is not a valid fs path, and [Inline] surfaces the
 // read failure as an error wrapping [ErrRefResolve].
 //
-// The resolver works the same way with [WithResolver] during validation:
+// The resolver works the same way with [WithRefResolver] during validation:
 // refs that reach the resolver as relative or file URIs are served from
 // the fs. Refs that absolutize to another scheme (an http $id, for example)
 // are not valid fs paths and resolve to an error.

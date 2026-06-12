@@ -21,7 +21,7 @@ type JSONSchemaExtender interface {
 }
 
 // TypeSchemaResolver supplies schemas for Go types it recognizes during
-// generation. Resolvers are registered with [WithTypeResolver] and consulted
+// generation. Resolvers are registered with [WithTypeSchemaResolver] and consulted
 // at the highest-priority step of the type resolution chain, before
 // [JSONSchemaProvider] and the built-in overrides, so a resolver can map
 // whole families of types — every type implementing some third-party
@@ -147,7 +147,7 @@ func (f formatFunc) ValidateFormat(value string) error { return f.fn(value) }
 // to multiple Validate calls.
 //
 // The same resolver value serves both validation and inlining via a single
-// [WithResolver] option.
+// [WithRefResolver] option.
 type RefResolver interface {
 	// ResolveRef resolves a remote schema URI under the caller's context, so
 	// a resolver that fetches over the network can honor cancellation and
@@ -170,7 +170,7 @@ func (f RefResolverFunc) ResolveRef(ctx context.Context, uri string) (*Schema, e
 	return f(ctx, uri)
 }
 
-// RefOption is the option type returned by [WithResolver] and [WithBaseURI],
+// RefOption is the option type returned by [WithRefResolver] and [WithBaseURI],
 // the two options configuring reference resolution: a single option value
 // that serves both validation ([ValidateOption]) and inlining
 // ([InlineOption]).
@@ -179,16 +179,16 @@ type RefOption interface {
 	InlineOption
 }
 
-// resolverOption is the [RefOption] returned by [WithResolver].
-type resolverOption struct {
+// refResolverOption is the [RefOption] returned by [WithRefResolver].
+type refResolverOption struct {
 	r RefResolver
 }
 
-func (o resolverOption) applyValidate(v *validator) { v.refResolver = o.r }
+func (o refResolverOption) applyValidate(v *validator) { v.refResolver = o.r }
 
-func (o resolverOption) applyInline(in *inliner) { in.resolver = o.r }
+func (o refResolverOption) applyInline(in *inliner) { in.resolver = o.r }
 
-// WithResolver sets the [RefResolver] used to resolve remote $ref URIs. The
+// WithRefResolver sets the [RefResolver] used to resolve remote $ref URIs. The
 // returned option serves both validation and inlining, so one value
 // configures [Compile], [Validate], and [Inline] alike. [RefResolverFunc]
 // adapts a bare function.
@@ -199,8 +199,8 @@ func (o resolverOption) applyInline(in *inliner) { in.resolver = o.r }
 // most once per distinct URI within one Inline call; the schema it returns
 // is deep-copied before use and never mutated. In both roles the resolver
 // receives the context of the Context entry point in effect.
-func WithResolver(r RefResolver) RefOption {
-	return resolverOption{r: r}
+func WithRefResolver(r RefResolver) RefOption {
+	return refResolverOption{r: r}
 }
 
 // baseURIOption is the [RefOption] returned by [WithBaseURI].

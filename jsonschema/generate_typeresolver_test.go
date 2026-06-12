@@ -33,7 +33,7 @@ func stringerResolver() jsonschema.TypeSchemaResolver {
 	})
 }
 
-func TestWithTypeResolver(t *testing.T) {
+func TestWithTypeSchemaResolver(t *testing.T) {
 	t.Parallel()
 
 	type doc struct {
@@ -46,7 +46,7 @@ func TestWithTypeResolver(t *testing.T) {
 		want string
 	}{
 		"predicate resolver overrides matching types only": {
-			opts: []jsonschema.GenerateOption{jsonschema.WithTypeResolver(stringerResolver())},
+			opts: []jsonschema.GenerateOption{jsonschema.WithTypeSchemaResolver(stringerResolver())},
 			want: `{
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"type": "object",
@@ -60,7 +60,7 @@ func TestWithTypeResolver(t *testing.T) {
 		},
 		"later WithTypeSchema wins over earlier resolver": {
 			opts: []jsonschema.GenerateOption{
-				jsonschema.WithTypeResolver(stringerResolver()),
+				jsonschema.WithTypeSchemaResolver(stringerResolver()),
 				jsonschema.WithTypeSchemaFor[stringerKind](&jsonschema.Schema{Type: "string", Format: "uri"}),
 			},
 			want: `{
@@ -77,7 +77,7 @@ func TestWithTypeResolver(t *testing.T) {
 		"later resolver wins over earlier WithTypeSchema": {
 			opts: []jsonschema.GenerateOption{
 				jsonschema.WithTypeSchemaFor[stringerKind](&jsonschema.Schema{Type: "string", Format: "uri"}),
-				jsonschema.WithTypeResolver(stringerResolver()),
+				jsonschema.WithTypeSchemaResolver(stringerResolver()),
 			},
 			want: `{
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -92,7 +92,7 @@ func TestWithTypeResolver(t *testing.T) {
 		},
 		"nil schema with ok true is unrestricted": {
 			opts: []jsonschema.GenerateOption{
-				jsonschema.WithTypeResolver(jsonschema.TypeSchemaResolverFunc(
+				jsonschema.WithTypeSchemaResolver(jsonschema.TypeSchemaResolverFunc(
 					func(t reflect.Type) (*jsonschema.Schema, bool) {
 						return nil, t == reflect.TypeFor[stringerKind]()
 					},
@@ -110,7 +110,7 @@ func TestWithTypeResolver(t *testing.T) {
 			}`,
 		},
 		"nil resolver is ignored": {
-			opts: []jsonschema.GenerateOption{jsonschema.WithTypeResolver(nil)},
+			opts: []jsonschema.GenerateOption{jsonschema.WithTypeSchemaResolver(nil)},
 			want: `{
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"type": "object",
@@ -155,10 +155,10 @@ func TestWithTypeSchema_LastRegistrationWins(t *testing.T) {
 	}`, string(got))
 }
 
-// TestWithTypeResolver_EmbeddedComposition mirrors the WithTypeSchema embed
+// TestWithTypeSchemaResolver_EmbeddedComposition mirrors the WithTypeSchema embed
 // behavior: an embedded struct intercepted by a resolver composes via allOf
 // rather than having its fields promoted.
-func TestWithTypeResolver_EmbeddedComposition(t *testing.T) {
+func TestWithTypeSchemaResolver_EmbeddedComposition(t *testing.T) {
 	t.Parallel()
 
 	type base struct {
@@ -172,7 +172,7 @@ func TestWithTypeResolver_EmbeddedComposition(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[doc](t.Context(),
-		jsonschema.WithTypeResolver(jsonschema.TypeSchemaResolverFunc(
+		jsonschema.WithTypeSchemaResolver(jsonschema.TypeSchemaResolverFunc(
 			func(t reflect.Type) (*jsonschema.Schema, bool) {
 				if t != reflect.TypeFor[base]() {
 					return nil, false
@@ -199,10 +199,10 @@ func TestWithTypeResolver_EmbeddedComposition(t *testing.T) {
 	}`, string(got))
 }
 
-// TestWithTypeResolver_SchemaUnaliased proves a resolver-supplied schema is
+// TestWithTypeSchemaResolver_SchemaUnaliased proves a resolver-supplied schema is
 // copied before use: mutating the generated output cannot reach back into the
 // schema value the resolver returns across calls.
-func TestWithTypeResolver_SchemaUnaliased(t *testing.T) {
+func TestWithTypeSchemaResolver_SchemaUnaliased(t *testing.T) {
 	t.Parallel()
 
 	shared := &jsonschema.Schema{Type: "string", Enum: []any{"a"}}
@@ -210,7 +210,7 @@ func TestWithTypeResolver_SchemaUnaliased(t *testing.T) {
 		return shared, t == reflect.TypeFor[plainKind]()
 	})
 
-	s, err := jsonschema.GenerateFor[plainKind](t.Context(), jsonschema.WithTypeResolver(resolver))
+	s, err := jsonschema.GenerateFor[plainKind](t.Context(), jsonschema.WithTypeSchemaResolver(resolver))
 	require.NoError(t, err)
 
 	s.Enum = append(s.Enum, "b")

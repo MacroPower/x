@@ -68,7 +68,7 @@
 //     AST-backed provider that extracts Go doc comments.
 //   - [WithTypeSchema] overrides the schema for a specific Go type;
 //     [WithTypeSchemaFor] is its generic form for statically known types.
-//   - [WithTypeResolver] registers a [TypeSchemaResolver] that supplies
+//   - [WithTypeSchemaResolver] registers a [TypeSchemaResolver] that supplies
 //     schemas for whole families of types by predicate, sharing the
 //     highest-priority resolution step with [WithTypeSchema].
 //   - [WithNamer] sets a custom definition namer (a [Namer], with [NamerFunc]
@@ -157,7 +157,7 @@
 //
 // For each type, the schema is determined by the first matching step:
 //
-//  1. Registered [TypeSchemaResolver] values ([WithTypeResolver], and the
+//  1. Registered [TypeSchemaResolver] values ([WithTypeSchemaResolver], and the
 //     exact-match resolvers [WithTypeSchema] registers), consulted newest
 //     registration first (highest priority).
 //  2. [JSONSchemaProvider] interface.
@@ -187,7 +187,7 @@
 // reflection-generated schema after it is built. If both are implemented, only
 // [JSONSchemaProvider] is used. Both value and pointer receivers are checked.
 //
-// When a registered resolver ([WithTypeResolver] or [WithTypeSchema]) or
+// When a registered resolver ([WithTypeSchemaResolver] or [WithTypeSchema]) or
 // [JSONSchemaProvider] provides the schema, [JSONSchemaExtender] is not
 // called.
 //
@@ -458,7 +458,7 @@
 //     schema's $schema field, for schemas that omit $schema (which would
 //     default to [Draft2020]) or carry one that does not reflect their
 //     dialect.
-//   - [WithResolver] sets a [RefResolver] for resolving remote $ref URIs.
+//   - [WithRefResolver] sets a [RefResolver] for resolving remote $ref URIs.
 //     The resolver is called only when local fragment resolution fails. Resolved
 //     schemas are cached within the validation run. The resolver receives the
 //     caller's context (see Remote References below).
@@ -466,7 +466,7 @@
 //     non-local refs absolutize against when no root $id establishes one,
 //     and registers the root under it so a ref absolutizing back to the
 //     root resolves in-memory. The returned [RefOption] also serves
-//     inlining, the way [WithResolver] and [WithDraft] serve several entry
+//     inlining, the way [WithRefResolver] and [WithDraft] serve several entry
 //     points.
 //   - [WithFormatValidator] registers a custom format checker: a
 //     [FormatValidator] that declares the format name it handles, with
@@ -599,7 +599,7 @@
 //
 // By default only local fragment refs are resolved during validation (those
 // under #/$defs or #/definitions). Remote and absolute $ref URIs are resolved
-// via an optional [RefResolver] set with [WithResolver]; [RefResolverFunc]
+// via an optional [RefResolver] set with [WithRefResolver]; [RefResolverFunc]
 // adapts a bare function, so a one-off resolver needs no named type. An unresolvable
 // remote or absolute $ref is reported as a [*ValidationError] by the validation
 // walk: with no resolver (or a resolver returning nil) the message begins with
@@ -639,7 +639,7 @@
 // enclosing resource's base URI — its $id, or the base given via
 // [WithBaseURI], with a schemeless base normalized against file:///
 // so a back-reference to the root document finds the in-memory copy — and
-// fetched through the [RefResolver] given via [WithResolver]; any
+// fetched through the [RefResolver] given via [WithRefResolver]; any
 // fragment is then evaluated against the fetched document. Fetched
 // documents are inlined recursively using their own base URIs (a relative
 // ref inside a fetched document resolves against that document's URI, so
@@ -652,7 +652,7 @@
 // an error wrapping [ErrRefResolve]. Pair [os.DirFS] with
 // [WithBaseURI] to inline a directory of schemas; the same resolver
 // also serves file-path and relative refs during validation via
-// [WithResolver]. Inline's context is passed to the resolver with every
+// [WithRefResolver]. Inline's context is passed to the resolver with every
 // document fetch, so a resolver that fetches over the network can honor
 // cancellation and deadlines.
 //

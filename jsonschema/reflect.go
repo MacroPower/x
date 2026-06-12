@@ -256,7 +256,7 @@ func (g *generator) schemaForType(t reflect.Type, nullable bool) (*Schema, error
 		t = t.Elem()
 	}
 
-	// 1. Type resolver override (WithTypeResolver / WithTypeSchema).
+	// 1. Type resolver override (WithTypeSchemaResolver / WithTypeSchema).
 	if s, ok := g.resolveTypeSchema(t); ok {
 		return g.handleOverrideType(t, s, nullable)
 	}
@@ -381,7 +381,7 @@ func (g *generator) resolveTypeSchema(t reflect.Type) (*Schema, bool) {
 }
 
 // handleOverrideType processes a type resolved by a registered
-// TypeSchemaResolver (WithTypeResolver or WithTypeSchema). A nil override
+// TypeSchemaResolver (WithTypeSchemaResolver or WithTypeSchema). A nil override
 // marks the type unrestricted, mirroring a JSONSchemaProvider returning nil.
 //
 // The override is copied with the upstream shallow CloneSchemas, not the JSON
@@ -1188,7 +1188,7 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 // needsAllOfComposition reports whether an embedded struct type should be
 // composed via allOf rather than having its fields promoted.
 func (g *generator) needsAllOfComposition(t reflect.Type) bool {
-	// Check type resolver overrides (WithTypeResolver / WithTypeSchema).
+	// Check type resolver overrides (WithTypeSchemaResolver / WithTypeSchema).
 	if _, ok := g.resolveTypeSchema(t); ok {
 		return true
 	}

@@ -47,7 +47,7 @@ func compileRegexp(pattern string) (*regexp.Regexp, error) {
 // ValidateOption configures validation behavior. Options are produced by
 // this package's With* constructors; the interface form (rather than a func
 // type) lets one option value serve several entry points, the way
-// [WithResolver] serves both ValidateOption and [InlineOption].
+// [WithRefResolver] serves both ValidateOption and [InlineOption].
 type ValidateOption interface {
 	applyValidate(v *validator)
 }
@@ -93,7 +93,7 @@ func WithContent(enabled bool) ValidateOption {
 // WithResolveOptions passes [ResolveOptions] (an alias for the upstream
 // options type) to Schema.Resolve for structural pre-validation. The
 // validation walk resolves local fragment refs directly and remote/absolute
-// refs via a configured [RefResolver] (see [WithResolver]).
+// refs via a configured [RefResolver] (see [WithRefResolver]).
 func WithResolveOptions(opts *ResolveOptions) ValidateOption {
 	return validateOptionFunc(func(v *validator) { v.resolveOpts = opts })
 }
@@ -865,7 +865,7 @@ type Validator struct {
 // It returns an error when the options are invalid or the schema fails
 // structural pre-validation.
 //
-// The context is passed to the [RefResolver] (see [WithResolver]) for refs
+// The context is passed to the [RefResolver] (see [WithRefResolver]) for refs
 // resolved during compilation. It is not retained by the returned
 // [Validator]: refs reached only at validation time resolve under the
 // context passed to [Validator.Validate] or [Validator.ValidateJSON].
@@ -1160,7 +1160,7 @@ func checkTypeNames(schema *Schema, schemaPath string, visited map[*Schema]bool)
 // Returns nil on success or an error that can be unwrapped to *[ValidationError]
 // via [errors.As].
 //
-// The context is passed to the [RefResolver] (see [WithResolver]) for remote
+// The context is passed to the [RefResolver] (see [WithRefResolver]) for remote
 // refs reached during this validation run, so a resolver that fetches over
 // the network can honor cancellation and deadlines. The context is held only
 // for the duration of the run, never by the [Validator] itself.
@@ -1218,7 +1218,7 @@ func (c *Validator) ValidateJSON(ctx context.Context, data []byte) error {
 // Returns nil on success or an error that can be unwrapped to
 // *[ValidationError] via [errors.As].
 //
-// The context is passed to the [RefResolver] (see [WithResolver]) for refs
+// The context is passed to the [RefResolver] (see [WithRefResolver]) for refs
 // resolved both while compiling schema and during the validation run.
 func Validate(ctx context.Context, schema *Schema, instance any, opts ...ValidateOption) error {
 	// Check the instance type before compiling so an unaccepted instance is
@@ -1431,7 +1431,7 @@ func schemaFormsTree(schema *Schema) bool {
 // Returns nil on success or an error that can be unwrapped to
 // *[ValidationError] via [errors.As].
 //
-// The context is passed to the [RefResolver] (see [WithResolver]) for refs
+// The context is passed to the [RefResolver] (see [WithRefResolver]) for refs
 // resolved both while compiling schema and during the validation run.
 func ValidateJSON(ctx context.Context, schema *Schema, data []byte, opts ...ValidateOption) error {
 	instance, err := decodeJSONInstance(data)

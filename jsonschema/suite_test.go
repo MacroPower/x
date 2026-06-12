@@ -221,7 +221,7 @@ func (suiteRemoteResolver) ResolveRef(_ context.Context, uri string) (*jsonschem
 // including the remote ref resolver and registered metaschemas.
 func suiteBaseOpts() []jsonschema.ValidateOption {
 	opts := []jsonschema.ValidateOption{
-		jsonschema.WithResolver(suiteRemoteResolver{}),
+		jsonschema.WithRefResolver(suiteRemoteResolver{}),
 	}
 	for _, ms := range remoteMetaSchemas {
 		opts = append(opts, jsonschema.WithMetaSchema(ms))

@@ -84,7 +84,7 @@ func loadMetaSchemas(t *testing.T) (map[string]*jsonschema.Schema, []jsonschema.
 
 	require.NoError(t, filepath.Walk("testdata/metaschemas", walk))
 
-	opts = append(opts, jsonschema.WithResolver(byID))
+	opts = append(opts, jsonschema.WithRefResolver(byID))
 
 	return byID, opts
 }

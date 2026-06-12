@@ -175,7 +175,7 @@ Unsupported types (`func`, `chan`, `complex`, `unsafe.Pointer`) return
 | `WithCommentProvider(p)`         | Set the `CommentProvider` used as the source of descriptions.                         |
 | `WithTypeSchema(t, s)`           | Override the schema for a specific Go type (highest priority).                        |
 | `WithTypeSchemaFor[T](s)`        | `WithTypeSchema` for a statically known type, without `reflect.TypeFor`.              |
-| `WithTypeResolver(r)`            | Register a `TypeSchemaResolver` that overrides types by predicate.                    |
+| `WithTypeSchemaResolver(r)`      | Register a `TypeSchemaResolver` that overrides types by predicate.                    |
 | `WithNamer(n)`                   | Custom `Namer` for `$defs` entries (`NamerFunc` adapts a bare function).              |
 | `WithDefinitions(bool)`          | Extract named types into `$defs`/`$ref` (default `true`).                             |
 | `WithAdditionalProperties(bool)` | Allow extra object keys (default `false`, disallowing them).                          |
@@ -249,7 +249,7 @@ func (Metadata) JSONSchemaExtend(s *jsonschema.Schema) {
 
 For each type, the schema is determined by the first matching step:
 
-1. Registered `TypeSchemaResolver` values (`WithTypeResolver`, and the
+1. Registered `TypeSchemaResolver` values (`WithTypeSchemaResolver`, and the
    exact-match resolvers `WithTypeSchema` registers), consulted newest
    registration first (highest priority).
 2. `JSONSchemaProvider`.
@@ -266,7 +266,7 @@ A direct `encoding/json.Marshaler` implementation is not consulted: it falls
 through to kind-based reflection, since MarshalJSON can return any JSON type.
 Use `WithTypeSchema` or `JSONSchemaProvider` to describe its real shape.
 
-A `TypeSchemaResolver` registered with `WithTypeResolver` supplies schemas for
+A `TypeSchemaResolver` registered with `WithTypeSchemaResolver` supplies schemas for
 whole families of types by predicate — every type implementing a third-party
 interface, every type in a package — where `WithTypeSchema` names one exact
 `reflect.Type` at a time:
@@ -282,7 +282,7 @@ stringers := jsonschema.TypeSchemaResolverFunc(
 	},
 )
 
-schema, err := jsonschema.GenerateFor[Config](ctx, jsonschema.WithTypeResolver(stringers))
+schema, err := jsonschema.GenerateFor[Config](ctx, jsonschema.WithTypeSchemaResolver(stringers))
 ```
 
 Resolvers returning `ok == false` pass the type to the next resolver and then
@@ -292,7 +292,7 @@ consulted several times for the same type within one run, so it must be
 deterministic.
 
 If a type implements both customization interfaces, only `JSONSchemaProvider` is
-used. When a registered resolver (`WithTypeResolver` or `WithTypeSchema`) or
+used. When a registered resolver (`WithTypeSchemaResolver` or `WithTypeSchema`) or
 `JSONSchemaProvider` supplies the schema, `JSONSchemaExtender` is not called.
 
 ### The `jsonschema` struct tag
@@ -666,7 +666,7 @@ containing object are both identifiable from `InstancePath` alone.
 | Option                      | Effect                                                                                                                 |
 | --------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | `WithDraft(Draft)`          | Override the draft otherwise detected from the root schema's `$schema`.                                                |
-| `WithResolver(r)`           | Resolve remote/absolute `$ref` URIs (called only when local lookup fails); the resolver receives the caller's context. |
+| `WithRefResolver(r)`        | Resolve remote/absolute `$ref` URIs (called only when local lookup fails); the resolver receives the caller's context. |
 | `WithBaseURI(base)`         | Set the root document's base URI for ref absolutization; also serves `Inline`.                                         |
 | `WithFormatValidator(f)`    | Register a custom `format` checker (a `FormatValidator`; `FormatValidatorFunc` adapts a bare function).                |
 | `WithFormats(bool)`         | Force `format` assertion on or off.                                                                                    |
@@ -705,7 +705,7 @@ all groups stay active.
 
 Only local fragment refs (`#/$defs/...`, `#/definitions/...`) are resolved by
 default. Remote and absolute `$ref` URIs are resolved through an optional
-`RefResolver` set with `WithResolver`; the resolver is called only when local
+`RefResolver` set with `WithRefResolver`; the resolver is called only when local
 resolution fails, and resolved schemas are cached within the validation run. A
 resolver error surfaces as `ErrRefResolve`; an unresolvable remote/absolute ref
 with no resolver is reported as a `*ValidationError`. Circular refs are detected
@@ -729,7 +729,7 @@ entry point) context, so a resolver that fetches over the network can honor
 cancellation and deadlines. A compiled `*Validator` never retains a context —
 each run carries its own — and the `Must*` entry points pass
 `context.Background()`. The package ships no network resolver; fetching
-remains the caller's concern. The `WithResolver` option value itself serves
+remains the caller's concern. The `WithRefResolver` option value itself serves
 both validation and inlining, so one option configures `Compile`, `Validate`,
 and `Inline` alike. `RefResolverFunc` adapts a bare function (following
 `net/http.HandlerFunc`), so a one-off resolver — a closure over an HTTP
@@ -832,7 +832,7 @@ resolver-returned schemas are never mutated.
 fsys := os.DirFS("schemas") // main.json references sub/child.json, ...
 
 inlined, err := jsonschema.Inline(ctx, schema,
-	jsonschema.WithResolver(jsonschema.NewFileResolver(fsys)),
+	jsonschema.WithRefResolver(jsonschema.NewFileResolver(fsys)),
 	jsonschema.WithBaseURI("main.json"),
 )
 ```
@@ -847,7 +847,7 @@ URI — its `$id`, or the base from `WithBaseURI`, with a schemeless
 base such as `main.json` normalized against `file:///` so RFC 3986 joining
 is well-defined and a back-reference to the root document finds the
 in-memory copy instead of re-fetching it — and fetched through the
-`RefResolver` given via `WithResolver`; any fragment is then evaluated
+`RefResolver` given via `WithRefResolver`; any fragment is then evaluated
 against the fetched document. Fetched documents are inlined recursively
 using their own base URIs, so a relative ref inside a fetched document
 resolves against that document's URI and files can reference each other by
@@ -857,7 +857,7 @@ serving file-path and relative URIs from
 the fs root (a leading `file://` scheme and `/` are stripped); each
 referenced file must contain a JSON schema document, and `io/fs` confines
 resolution to the fs root, so a ref escaping above it returns an error
-wrapping `ErrRefResolve`. The same `WithResolver` option also serves
+wrapping `ErrRefResolve`. The same `WithRefResolver` option also serves
 file-path and relative refs during validation; refs that absolutize
 to another scheme (an http `$id`, for example) are not valid fs paths and
 resolve to an error. `Inline`'s context is passed to the resolver with every
@@ -932,7 +932,7 @@ cycle introduced by the substitute is an ordinary `ErrRefCycle`.
 | Option                    | Effect                                                                                                                  |
 | ------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
 | `WithDraft(Draft)`        | Override the draft otherwise detected from the root schema's `$schema`.                                                 |
-| `WithResolver(r)`         | Set the `RefResolver` that fetches the documents non-local refs target (called at most once per distinct URI).          |
+| `WithRefResolver(r)`      | Set the `RefResolver` that fetches the documents non-local refs target (called at most once per distinct URI).          |
 | `WithBaseURI(base)`       | Set the root document's base URI; a schemeless base is normalized against `file:///`. Also serves validation.           |
 | `WithRetrievalBase(bool)` | Resolve refs against each document's retrieval URI, treating `$id` as an inert annotation that passes through verbatim. |
 | `WithRefFallback(fn)`     | Per-reference failure policy returning a `RefAction`: `PropagateRef()`, `DropRef()`, or `SubstituteRef(s)`.             |

@@ -9,7 +9,7 @@ import (
 
 // GenerateOption configures schema generation. Options are produced by this
 // package's With* constructors; the interface form (rather than a func type)
-// lets one option value serve several entry points, the way [WithResolver]
+// lets one option value serve several entry points, the way [WithRefResolver]
 // serves both [ValidateOption] and [InlineOption].
 type GenerateOption interface {
 	applyGenerate(g *generator)
@@ -43,7 +43,7 @@ func WithCommentProvider(p CommentProvider) GenerateOption {
 	})
 }
 
-// WithTypeResolver registers a [TypeSchemaResolver]. Resolvers occupy the
+// WithTypeSchemaResolver registers a [TypeSchemaResolver]. Resolvers occupy the
 // highest-priority step of the type resolution chain, overriding even
 // [JSONSchemaProvider], and are consulted newest registration first, so a
 // later registration takes precedence over an earlier one for the types both
@@ -53,7 +53,7 @@ func WithCommentProvider(p CommentProvider) GenerateOption {
 // A schema the resolver supplies is copied before use with the same
 // discipline [WithTypeSchema] documents, and [JSONSchemaExtender] is not
 // called for types it resolves.
-func WithTypeResolver(r TypeSchemaResolver) GenerateOption {
+func WithTypeSchemaResolver(r TypeSchemaResolver) GenerateOption {
 	return generateOptionFunc(func(g *generator) {
 		if r != nil {
 			g.typeResolvers = append(g.typeResolvers, r)
@@ -78,7 +78,7 @@ func (r exactTypeResolver) SchemaForType(t reflect.Type) (*Schema, bool) {
 
 // WithTypeSchema overrides the generated schema for a specific Go type: it
 // registers an exact-match [TypeSchemaResolver], so it shares the
-// highest-priority step of the type resolution chain with [WithTypeResolver],
+// highest-priority step of the type resolution chain with [WithTypeSchemaResolver],
 // overriding even [JSONSchemaProvider]. Useful for mapping third-party types
 // or overriding types whose [JSONSchemaProvider] schema is undesirable.
 // Resolvers are consulted newest registration first, so if called multiple
