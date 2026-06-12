@@ -22,7 +22,7 @@ func TestPromotedEmbeddedFieldComment(t *testing.T) {
 		Extra string `json:"extra"`
 	}
 
-	s, err := jsonschema.GenerateFor[doc](jsonschema.WithComments(true))
+	s, err := jsonschema.GenerateFor[doc](jsonschema.WithCommentProvider(jsonschema.NewGoCommentProvider()))
 	require.NoError(t, err)
 
 	require.Contains(t, s.Properties, "size")
@@ -35,7 +35,7 @@ func TestPromotedEmbeddedFieldComment(t *testing.T) {
 func TestGenericTypeComment(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[alpha.Box[int]](jsonschema.WithComments(true))
+	s, err := jsonschema.GenerateFor[alpha.Box[int]](jsonschema.WithCommentProvider(jsonschema.NewGoCommentProvider()))
 	require.NoError(t, err)
 
 	assert.Contains(t, s.Description, "documented generic type")
@@ -88,9 +88,9 @@ func TestWithCommentProvider(t *testing.T) {
 	assert.Equal(t, "tag wins", s.Properties["label"].Description)
 }
 
-// TestWithCommentProvider_LastRegistrationWins covers the interplay with
-// WithComments: the last registration wins, and WithComments(false) clears a
-// registered provider.
+// TestWithCommentProvider_LastRegistrationWins covers the registration
+// semantics: the last registration wins, and a nil provider clears an
+// earlier one.
 func TestWithCommentProvider_LastRegistrationWins(t *testing.T) {
 	t.Parallel()
 
@@ -100,26 +100,14 @@ func TestWithCommentProvider_LastRegistrationWins(t *testing.T) {
 		t.Parallel()
 
 		s, err := jsonschema.GenerateFor[commentedWidget](
-			jsonschema.WithComments(true),
+			jsonschema.WithCommentProvider(jsonschema.NewGoCommentProvider()),
 			jsonschema.WithCommentProvider(provider),
 		)
 		require.NoError(t, err)
 		assert.Equal(t, "a widget", s.Description)
 	})
 
-	t.Run("WithComments false clears provider", func(t *testing.T) {
-		t.Parallel()
-
-		s, err := jsonschema.GenerateFor[commentedWidget](
-			jsonschema.WithCommentProvider(provider),
-			jsonschema.WithComments(false),
-		)
-		require.NoError(t, err)
-		assert.Empty(t, s.Description)
-		assert.Empty(t, s.Properties["size"].Description)
-	})
-
-	t.Run("nil provider is ignored", func(t *testing.T) {
+	t.Run("nil provider clears earlier registration", func(t *testing.T) {
 		t.Parallel()
 
 		s, err := jsonschema.GenerateFor[commentedWidget](
@@ -127,7 +115,8 @@ func TestWithCommentProvider_LastRegistrationWins(t *testing.T) {
 			jsonschema.WithCommentProvider(nil),
 		)
 		require.NoError(t, err)
-		assert.Equal(t, "a widget", s.Description)
+		assert.Empty(t, s.Description)
+		assert.Empty(t, s.Properties["size"].Description)
 	})
 }
 

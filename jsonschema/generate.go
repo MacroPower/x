@@ -31,33 +31,14 @@ func WithTagInterpreter(t TagInterpreter) GenerateOption {
 	})
 }
 
-// WithComments controls extraction of Go doc comments as descriptions.
-// WithComments(true) registers the built-in [CommentProvider], which loads
-// and parses package sources with [golang.org/x/tools/go/packages] at
-// generation time and so requires access to source files; when sources
-// cannot be located for a type, it silently supplies no comment.
-// WithComments(false) clears any registered provider. Between WithComments
-// and [WithCommentProvider], the last registration wins.
-func WithComments(enabled bool) GenerateOption {
-	return generateOptionFunc(func(g *generator) {
-		if enabled {
-			g.commentProvider = newCommentExtractor()
-		} else {
-			g.commentProvider = nil
-		}
-	})
-}
-
 // WithCommentProvider sets the [CommentProvider] consulted for type and
-// field descriptions, replacing the AST-backed provider [WithComments]
-// registers. A nil p is ignored, leaving any earlier registration in place;
-// otherwise the last registration wins, so a later WithComments call
-// replaces (or, with false, clears) the provider.
+// field descriptions. [NewGoCommentProvider] constructs the AST-backed
+// provider that extracts Go doc comments; any other implementation
+// substitutes another source. The last registration wins, and a nil p
+// clears any earlier registration, leaving descriptions unset.
 func WithCommentProvider(p CommentProvider) GenerateOption {
 	return generateOptionFunc(func(g *generator) {
-		if p != nil {
-			g.commentProvider = p
-		}
+		g.commentProvider = p
 	})
 }
 

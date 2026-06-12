@@ -167,8 +167,7 @@ Unsupported types (`func`, `chan`, `complex`, `unsafe.Pointer`) return
 | -------------------------------- | ------------------------------------------------------------------------------------- |
 | `WithDraft(Draft)`               | Target draft: `Draft2020` (default) or `Draft7`; also serves validation and `Inline`. |
 | `WithTagInterpreter(t)`          | Register a `TagInterpreter`; multiple are applied in order.                           |
-| `WithComments(bool)`             | Extract Go doc comments as `description` (requires source files).                     |
-| `WithCommentProvider(p)`         | Set a custom `CommentProvider` as the source of descriptions.                         |
+| `WithCommentProvider(p)`         | Set the `CommentProvider` used as the source of descriptions.                         |
 | `WithTypeSchema(t, s)`           | Override the schema for a specific Go type (highest priority).                        |
 | `WithTypeSchemaFor[T](s)`        | `WithTypeSchema` for a statically known type, without `reflect.TypeFor`.              |
 | `WithTypeResolver(r)`            | Register a `TypeSchemaResolver` that overrides types by predicate.                    |
@@ -328,7 +327,7 @@ and `const`. Values for `default`, `const`, `enum`, and `examples` are parsed
 according to the field's Go type. `enum` and `examples` values are separated by
 `|`; commas separate pairs, so a value containing a comma escapes it with a
 backslash (`\,`, and `\\` for a literal backslash). For complex values, use
-`JSONSchemaExtender` or doc comments with `WithComments`.
+`JSONSchemaExtender` or doc comments with `WithCommentProvider`.
 
 `type=` overrides the reflected type entirely, for a Go type whose JSON
 representation differs from its reflection: it must name one of the seven
@@ -382,16 +381,25 @@ JSON.
 
 ### Comment extraction
 
-Type and field descriptions come from a `CommentProvider`.
-`WithComments(true)` registers the built-in provider, which extracts Go doc
-comments from source files for struct types, fields, and named types using
-`go/ast` and `golang.org/x/tools/go/packages`; when source files cannot be
-located for a type, extraction is silently skipped. The `jsonschema` tag's
-`description` wins over a provider-supplied comment.
+Type and field descriptions come from a `CommentProvider`, registered with
+`WithCommentProvider`. The built-in `GoCommentProvider` (constructed with
+`NewGoCommentProvider`) extracts Go doc comments from source files for
+struct types, fields, and named types using `go/ast` and
+`golang.org/x/tools/go/packages`; when source files cannot be located for a
+type, extraction is silently skipped. The `jsonschema` tag's `description`
+wins over a provider-supplied comment.
 
-`WithCommentProvider` substitutes any other source — comments pre-extracted at
-build time for a binary that deploys without source files, or fixed
-descriptions in tests — and decides its own failure behavior:
+```go
+schema, err := jsonschema.GenerateFor[MyType](
+	jsonschema.WithCommentProvider(jsonschema.NewGoCommentProvider()),
+)
+```
+
+Any other implementation substitutes another source — comments pre-extracted
+at build time for a binary that deploys without source files, or fixed
+descriptions in tests — and decides its own failure behavior. Wrapping
+`GoCommentProvider` composes the two, such as overrides for specific types
+backed by AST extraction:
 
 ```go
 type CommentProvider interface {

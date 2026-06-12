@@ -11,21 +11,27 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
-// commentExtractor is the AST-backed [CommentProvider] that [WithComments]
-// registers: it extracts Go doc comments from source files.
+// GoCommentProvider is the AST-backed [CommentProvider]: it extracts Go doc
+// comments from source files by loading and parsing package sources with
+// [golang.org/x/tools/go/packages] at generation time, so it requires access
+// to source files; when sources cannot be located for a type, it silently
+// supplies no comment. Construct it with [NewGoCommentProvider] and register
+// it with [WithCommentProvider]. Wrapping it composes other sources with AST
+// extraction — overrides for specific types, or a pre-extracted map
+// consulted first.
 //
-// Each WithComments registration constructs its own extractor, so the mutex
-// guarding the cache only serves concurrent use of one generation run's
-// extractor, which today is driven from a single goroutine; it is a
-// forward-looking guard should generation ever fan out across goroutines.
-type commentExtractor struct {
+// Parsed packages are cached on the provider, keyed by import path, so a
+// provider shared across Generate calls loads each package once. The cache
+// mutex makes the provider safe for concurrent use.
+type GoCommentProvider struct {
 	cache map[string][]*ast.File
 	mu    sync.Mutex
 }
 
-// newCommentExtractor returns a new commentExtractor with an empty cache.
-func newCommentExtractor() *commentExtractor {
-	return &commentExtractor{
+// NewGoCommentProvider returns a [GoCommentProvider] with an empty package
+// cache.
+func NewGoCommentProvider() *GoCommentProvider {
+	return &GoCommentProvider{
 		cache: map[string][]*ast.File{},
 	}
 }
@@ -45,7 +51,7 @@ func baseTypeName(name string) string {
 // not expose source positions. A non-package-scope type (for example one
 // declared inside a function) that shadows a package-level name may therefore
 // receive the package-level type's comment.
-func (ce *commentExtractor) TypeComment(t reflect.Type) string {
+func (ce *GoCommentProvider) TypeComment(t reflect.Type) string {
 	if t.Name() == "" || t.PkgPath() == "" {
 		return ""
 	}
@@ -87,7 +93,7 @@ func (ce *commentExtractor) TypeComment(t reflect.Type) string {
 // As with TypeComment, matching is by package path and unqualified type name,
 // so a non-package-scope struct that shadows a package-level name may receive
 // the package-level struct's field comments.
-func (ce *commentExtractor) FieldComment(structType reflect.Type, fieldName string) string {
+func (ce *GoCommentProvider) FieldComment(structType reflect.Type, fieldName string) string {
 	if structType.Name() == "" || structType.PkgPath() == "" {
 		return ""
 	}
@@ -130,7 +136,7 @@ func (ce *commentExtractor) FieldComment(structType reflect.Type, fieldName stri
 // sourceFiles returns parsed AST files for the package at the given import path.
 // It uses go/packages for source resolution, which handles module cache and
 // standard library packages. Results are cached per package path.
-func (ce *commentExtractor) sourceFiles(pkgPath string) []*ast.File {
+func (ce *GoCommentProvider) sourceFiles(pkgPath string) []*ast.File {
 	if pkgPath == "" {
 		return nil
 	}
@@ -159,7 +165,7 @@ func (ce *commentExtractor) sourceFiles(pkgPath string) []*ast.File {
 // parsed cleanly while aggregating per-file problems separately in Errors.
 // Best-effort comment extraction uses whatever parsed, so a single bad file in
 // the package does not drop doc comments for the types that did parse.
-func (ce *commentExtractor) loadPackage(pkgPath string) []*ast.File {
+func (ce *GoCommentProvider) loadPackage(pkgPath string) []*ast.File {
 	cfg := &packages.Config{
 		Mode: packages.NeedName | packages.NeedFiles | packages.NeedSyntax,
 		ParseFile: func(fset *token.FileSet, filename string, src []byte) (*ast.File, error) {

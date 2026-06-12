@@ -129,7 +129,7 @@ import (
 func main() {
 	t := reflect.TypeFor[target.MyType]()
 	opts := []jsonschema.GenerateOption{
-		jsonschema.WithComments(true),
+		jsonschema.WithCommentProvider(jsonschema.NewGoCommentProvider()),
 		jsonschema.WithAdditionalProperties(true),
 		jsonschema.WithTagInterpreter(validate.NewInterpreter()),
 	}

@@ -49,11 +49,12 @@ type TypeSchemaResolverFunc func(t reflect.Type) (*Schema, bool)
 func (f TypeSchemaResolverFunc) SchemaForType(t reflect.Type) (*Schema, bool) { return f(t) }
 
 // CommentProvider supplies descriptions for types and struct fields during
-// generation. [WithComments](true) registers the built-in provider, which
-// extracts Go doc comments by loading and parsing package sources at
-// generation time; [WithCommentProvider] substitutes any other source — for
-// example comments pre-extracted at build time and shipped with a binary
-// that deploys without source files, or fixed descriptions in tests.
+// generation, registered with [WithCommentProvider]. [NewGoCommentProvider]
+// constructs the built-in provider, which extracts Go doc comments by
+// loading and parsing package sources at generation time; any other
+// implementation substitutes another source — for example comments
+// pre-extracted at build time and shipped with a binary that deploys
+// without source files, or fixed descriptions in tests.
 //
 // An empty result leaves the description unset, letting later field-level
 // processing (the jsonschema struct tag, tag interpreters) supply one. A

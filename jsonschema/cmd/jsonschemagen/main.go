@@ -382,7 +382,7 @@ func main() {
 		jsonschema.WithDraft(jsonschema.Draft7),
 		{{- end}}
 		{{- if .Comments}}
-		jsonschema.WithComments(true),
+		jsonschema.WithCommentProvider(jsonschema.NewGoCommentProvider()),
 		{{- end}}
 		{{- if .AdditionalProperties}}
 		jsonschema.WithAdditionalProperties(true),
