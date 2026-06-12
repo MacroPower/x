@@ -150,7 +150,7 @@ func TestWithTypeSchemaExtenderFor(t *testing.T) {
 
 		s, err := jsonschema.GenerateFor[doc](t.Context(),
 			jsonschema.WithTypeSchemaExtenderFor[plainKind](
-				func(_ context.Context, s *jsonschema.Schema) error {
+				func(_ context.Context, _ jsonschema.TypeContext, s *jsonschema.Schema) error {
 					s.Description = "extended"
 					return nil
 				}),
@@ -178,7 +178,7 @@ func TestWithTypeSchemaExtenderFor(t *testing.T) {
 
 		_, err := jsonschema.GenerateFor[doc](t.Context(),
 			jsonschema.WithTypeSchemaExtenderFor[plainKind](
-				func(context.Context, *jsonschema.Schema) error { return errBoom }),
+				func(context.Context, jsonschema.TypeContext, *jsonschema.Schema) error { return errBoom }),
 		)
 		require.ErrorIs(t, err, errBoom)
 	})

@@ -341,12 +341,13 @@ schema, err := jsonschema.GenerateFor[Config](ctx, jsonschema.WithTypeSchemaExte
 ```
 
 `WithTypeSchemaExtenderFor` is the generic form for one statically known
-type, so the type guard above disappears:
+type, so the type guard above disappears (and only the guard: the callback
+keeps the `TypeContext`, so it stays draft-aware):
 
 ```go
 schema, err := jsonschema.GenerateFor[Config](ctx,
 	jsonschema.WithTypeSchemaExtenderFor[netip.Addr](
-		func(_ context.Context, s *jsonschema.Schema) error {
+		func(_ context.Context, _ jsonschema.TypeContext, s *jsonschema.Schema) error {
 			s.Description = "An IP address."
 			return nil
 		}))
