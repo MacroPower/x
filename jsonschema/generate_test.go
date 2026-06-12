@@ -951,6 +951,24 @@ func TestGenerateFor_WithNamer(t *testing.T) {
 	assert.NotNil(t, s.Defs["custom_Address"])
 }
 
+// TestGenerateFor_WithNamerEmptyDefersToDefault pins the partial-namer
+// contract: an empty answer defers to the built-in namer instead of
+// producing an empty $defs key and a broken "#/$defs/" ref.
+func TestGenerateFor_WithNamerEmptyDefersToDefault(t *testing.T) {
+	t.Parallel()
+
+	s, err := jsonschema.GenerateFor[UserWithAddress](t.Context(),
+		jsonschema.WithNamer(jsonschema.NamerFunc(func(reflect.Type) string {
+			return ""
+		})),
+	)
+	require.NoError(t, err)
+	assert.NotNil(t, s.Defs["Address"], "empty namer answers should fall back to the default name")
+
+	_, exists := s.Defs[""]
+	assert.False(t, exists, "no empty definitions key should be created")
+}
+
 func TestGenerateFor_ValidateInterpreter(t *testing.T) {
 	t.Parallel()
 

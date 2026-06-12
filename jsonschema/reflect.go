@@ -142,10 +142,11 @@ func (g *generator) generate(t reflect.Type) (*Schema, error) {
 
 	// Set the root title from the type name when WithRootTitle is enabled and
 	// nothing else (WithTypeSchema, JSONSchemaProvider, an extender, or tags)
-	// supplied one. Unnamed roots produce an empty name and stay untitled.
+	// supplied one. Unnamed roots produce an empty name even after the
+	// empty-answer deferral to the default namer, and stay untitled.
 	if g.rootTitle {
 		target := g.rootTitleTarget(schema, rootType)
-		if name := g.namer.SchemaName(rootType); name != "" && target.Title == "" {
+		if name := g.schemaName(rootType); name != "" && target.Title == "" {
 			target.Title = name
 		}
 	}
@@ -1442,7 +1443,7 @@ func (g *generator) processAllOfField(fi structFieldInfo, parent *Schema) error 
 
 // extractToDefs places a type's schema in $defs and returns a $ref.
 func (g *generator) extractToDefs(t reflect.Type, s *Schema, nullable bool) (*Schema, error) {
-	name := g.namer.SchemaName(t)
+	name := g.schemaName(t)
 
 	// Check if already defined (e.g., from a cycle placeholder).
 	if existingName, exists := g.typeToDefName[t]; exists {
@@ -1471,7 +1472,7 @@ func (g *generator) refForType(t reflect.Type, nullable bool) *Schema {
 	name := g.typeToDefName[t]
 	if name == "" {
 		// Placeholder for cycle — register now.
-		name = g.namer.SchemaName(t)
+		name = g.schemaName(t)
 		g.typeToDefName[t] = name
 		g.defsNameToTypes[name] = append(g.defsNameToTypes[name], t)
 		// Placeholder: nil schema, to be filled later.

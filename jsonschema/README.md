@@ -177,7 +177,7 @@ Unsupported types (`func`, `chan`, `complex`, `unsafe.Pointer`) return
 | `WithTypeSchemaFor[T](s)`        | `WithTypeSchema` for a statically known type, without `reflect.TypeFor`.                      |
 | `WithTypeSchemaResolver(r)`      | Register a `TypeSchemaResolver` that overrides types by predicate.                            |
 | `WithTypeSchemaExtender(e)`      | Register a `TypeSchemaExtender` that modifies reflection-generated schemas.                   |
-| `WithNamer(n)`                   | Custom `Namer` for `$defs` entries (`NamerFunc` adapts a bare function).                      |
+| `WithNamer(n)`                   | Custom `Namer` for `$defs` entries; an empty name defers to the built-in namer.               |
 | `WithDefinitions(bool)`          | Extract named types into `$defs`/`$ref` (default `true`).                                     |
 | `WithAdditionalProperties(bool)` | Allow extra object keys (default `false`, disallowing them).                                  |
 | `WithNullable(bool)`             | Make nil-able types (`*T`, `[]T`, `map`, `[]byte`) nullable (default `true`).                 |

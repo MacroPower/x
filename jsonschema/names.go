@@ -29,6 +29,19 @@ func defaultNamer(t reflect.Type) string {
 	return defNameReplacer.Replace(t.Name())
 }
 
+// schemaName returns the configured namer's name for t, deferring to the
+// default namer when the namer answers "". The deferral lets a [Namer]
+// rename some types and pass the rest through, and keeps a partial namer
+// from producing an empty definitions key and the broken "#/$defs/" ref
+// that would follow.
+func (g *generator) schemaName(t reflect.Type) string {
+	if name := g.namer.SchemaName(t); name != "" {
+		return name
+	}
+
+	return defaultNamer(t)
+}
+
 // shouldExtract reports whether a type should be extracted to the definitions
 // map and referenced via $ref (as opposed to being inlined).
 func (g *generator) shouldExtract(t reflect.Type) bool {

@@ -76,7 +76,8 @@
 //     types the caller owns; [WithTypeSchemaExtenderFor] is its generic form
 //     for extending one statically known type.
 //   - [WithNamer] sets a custom definition namer (a [Namer], with [NamerFunc]
-//     adapting a bare function).
+//     adapting a bare function); an empty name defers to the built-in namer,
+//     so a partial namer renames only the types it recognizes.
 //   - [WithDefinitions] controls $defs/$ref extraction (default: true).
 //   - [WithAdditionalProperties] controls whether extra keys are allowed on
 //     object schemas (default: false, disallowing extra keys).

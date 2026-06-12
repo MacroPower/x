@@ -181,9 +181,11 @@ func WithTypeSchemaFor[T any](s *Schema) GenerateOption {
 // Namer produces the definition name for a Go type: the key the type's
 // schema is stored under in $defs (or definitions for [Draft7]) and the
 // reference token its $ref uses, plus, with [WithRootTitle], the root
-// schema's title (where an empty result leaves the title unset). Name
-// collisions between types are still disambiguated automatically.
-// [NamerFunc] adapts a bare function.
+// schema's title. An empty result defers to the built-in namer, so a Namer
+// can rename the types it recognizes and pass the rest through (unnamed
+// types produce an empty name from the built-in namer too, which leaves a
+// [WithRootTitle] title unset). Name collisions between types are still
+// disambiguated automatically. [NamerFunc] adapts a bare function.
 type Namer interface {
 	SchemaName(t reflect.Type) string
 }
