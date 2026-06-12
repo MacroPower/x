@@ -72,8 +72,8 @@ var (
 // keywords populate [ValidationError.Causes] with child errors forming a tree
 // that mirrors the schema/instance structure.
 //
-// The returned error from [Validate] and [ValidateJSON] can be unwrapped
-// to *ValidationError via [errors.As].
+// The returned error from [Validate], [ValidateJSON], and [ValidateValue]
+// can be unwrapped to *ValidationError via [errors.As].
 type ValidationError struct {
 	// Optional wrapped error (e.g. a [RefResolver] failure wrapping
 	// [ErrRefResolve]) that [errors.Is] and [errors.As] can match.

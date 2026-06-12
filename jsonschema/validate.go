@@ -1275,6 +1275,31 @@ func (c *Validator) ValidateJSON(ctx context.Context, data []byte) error {
 	return c.Validate(ctx, instance)
 }
 
+// ValidateValue marshals v with encoding/json and validates its JSON form
+// against the compiled schema. It accepts the Go values [Validator.Validate]
+// rejects — structs and other types encoding/json can marshal — so an
+// instance of the very type a schema was generated for validates in one
+// call. What is validated is the value's marshaled form, exactly what a JSON
+// consumer of the value would see: json tags, omitempty and omitzero, and
+// MarshalJSON implementations all apply. The bytes are decoded back with the
+// [Validator.ValidateJSON] discipline (numbers as [json.Number]).
+//
+// Returns nil on success or an error that can be unwrapped to
+// [*ValidationError] via [errors.As]. A value encoding/json cannot marshal —
+// a channel, a cyclic value, an unsupported float — returns the wrapped
+// marshal error, which does not unwrap to [*ValidationError].
+//
+// The context is passed to the [RefResolver] for remote refs reached during
+// this validation run (see [Validator.Validate]).
+func (c *Validator) ValidateValue(ctx context.Context, v any) error {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Errorf("marshal instance: %w", err)
+	}
+
+	return c.ValidateJSON(ctx, data)
+}
+
 // Validate validates a pre-parsed Go value against a JSON Schema. It compiles
 // schema and validates instance in one call; to validate many instances against
 // the same schema, call [Compile] once and reuse the returned [Validator].
@@ -1510,6 +1535,25 @@ func ValidateJSON(ctx context.Context, schema *Schema, data []byte, opts ...Vali
 	}
 
 	return Validate(ctx, schema, instance, opts...)
+}
+
+// ValidateValue marshals v with encoding/json and validates its JSON form
+// against a JSON Schema, the one-shot form of [Validator.ValidateValue],
+// whose marshaling contract it shares: structs and other types
+// encoding/json can marshal are accepted, and what is validated is the
+// value's marshaled form. It compiles schema on every call, following
+// [Validate]; to validate many values against the same schema, call
+// [Compile] once and use [Validator.ValidateValue].
+//
+// The context is passed to the [RefResolver] (see [WithRefResolver]) for refs
+// resolved both while compiling schema and during the validation run.
+func ValidateValue(ctx context.Context, schema *Schema, v any, opts ...ValidateOption) error {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Errorf("marshal instance: %w", err)
+	}
+
+	return ValidateJSON(ctx, schema, data, opts...)
 }
 
 // errTrailingData reports tokens after the single top-level JSON value.

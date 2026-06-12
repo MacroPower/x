@@ -448,7 +448,7 @@
 //
 // The package validates JSON instances against schemas and returns structured
 // errors with full path information and hierarchical multi-error support.
-// Two one-shot entry points are provided:
+// Three one-shot entry points are provided:
 //
 //   - [Validate] validates a pre-parsed Go value (map[string]any, []any,
 //     string, float64, [encoding/json.Number], bool, nil). Go numeric kinds
@@ -459,8 +459,13 @@
 //   - [ValidateJSON] unmarshals raw JSON bytes with [encoding/json.Decoder]
 //     using UseNumber() to preserve integer vs number distinction, then
 //     validates.
+//   - [ValidateValue] marshals a Go value with encoding/json and validates
+//     its JSON form, closing the loop with generation: an instance of the
+//     very type a schema was generated for validates in one call, with json
+//     tags, omitempty and omitzero, and MarshalJSON implementations all
+//     applying exactly as a JSON consumer of the value would see them.
 //
-// Both compile the schema on every call. To validate many instances against the
+// All three compile the schema on every call. To validate many instances against the
 // same schema, call [Compile] once and reuse the returned [Validator]: it
 // performs the per-schema work (registry construction, Schema.Resolve, draft and
 // vocabulary detection) up front and is safe for concurrent use. [MustCompile]

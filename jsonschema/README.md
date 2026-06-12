@@ -614,9 +614,17 @@ The core entry points are:
 - `ValidateJSON(ctx, schema, data, opts...)` unmarshals raw JSON with a
   `json.Decoder` using `UseNumber()` (preserving the integer-vs-number
   distinction), then validates.
+- `ValidateValue(ctx, schema, v, opts...)` marshals a Go value with
+  `encoding/json` and validates its JSON form, closing the loop with
+  generation: an instance of the very type a schema was generated for
+  validates in one call. `json` tags, `omitempty` and `omitzero`, and
+  `MarshalJSON` implementations all apply, so what is validated is exactly
+  what a JSON consumer of the value would see. A value `encoding/json` cannot
+  marshal returns the wrapped marshal error.
 - `Compile(ctx, schema, opts...)` performs the per-schema work once (registry
   construction, `Schema.Resolve`, draft and vocabulary detection) and returns a
-  reusable `*Validator` with `Validate` and `ValidateJSON` methods.
+  reusable `*Validator` with `Validate`, `ValidateJSON`, and `ValidateValue`
+  methods.
   `MustCompile` panics on error, for package-scope validators where for a
   static schema and fixed options compilation either always succeeds or always
   fails (following `regexp.MustCompile` and `MustGenerateFor`).
@@ -656,9 +664,10 @@ instance at runtime. The same check is exported standalone as
 `CheckTypeNames` (see [Schema traversal and predicates](#schema-traversal-and-predicates));
 `Compile` routes through it, so the two produce textually identical errors.
 
-`Validate` and `ValidateJSON` compile a fresh validator on every call; to
-validate many instances against the same schema, `Compile` once and reuse the
-result. A `*Validator` is safe for concurrent use by multiple goroutines.
+`Validate`, `ValidateJSON`, and `ValidateValue` compile a fresh validator on
+every call; to validate many instances against the same schema, `Compile` once
+and reuse the result. A `*Validator` is safe for concurrent use by multiple
+goroutines.
 
 On success all return `nil`. A validation failure returns an error that unwraps
 to `*ValidationError` via `errors.As`. Non-validation failures (JSON decoding,
