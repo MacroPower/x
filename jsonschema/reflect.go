@@ -258,7 +258,12 @@ func (g *generator) schemaForType(t reflect.Type, nullable bool) (*Schema, error
 	}
 
 	// 1. Type resolver override (WithTypeSchemaResolver / WithTypeSchema).
-	if s, ok := g.resolveTypeSchema(t); ok {
+	s, ok, err := g.resolveTypeSchema(t)
+	if err != nil {
+		return nil, err
+	}
+
+	if ok {
 		return g.handleOverrideType(t, s, nullable)
 	}
 
@@ -315,7 +320,7 @@ func (g *generator) schemaForType(t reflect.Type, nullable bool) (*Schema, error
 	}
 
 	// 7. Kind-based reflection.
-	s, err := g.schemaForKind(t, nullable)
+	s, err = g.schemaForKind(t, nullable)
 	if guarded {
 		delete(g.visiting, t)
 	}
@@ -368,15 +373,21 @@ func isRecursiveContainerKind(k reflect.Kind) bool {
 // registration first, and returns the first schema offered. The order makes a
 // later registration win for the types two resolvers both handle, which for
 // the exact-match resolvers WithTypeSchema registers preserves its
-// last-registration-wins behavior.
-func (g *generator) resolveTypeSchema(t reflect.Type) (*Schema, bool) {
+// last-registration-wins behavior. A resolver error stops the consultation
+// and aborts generation.
+func (g *generator) resolveTypeSchema(t reflect.Type) (*Schema, bool, error) {
 	for _, v := range slices.Backward(g.typeResolvers) {
-		if s, ok := v.SchemaForType(g.ctx, t); ok {
-			return s, true
+		s, ok, err := v.SchemaForType(g.ctx, t)
+		if err != nil {
+			return nil, false, fmt.Errorf("resolve type %s: %w", t, err)
+		}
+
+		if ok {
+			return s, true, nil
 		}
 	}
 
-	return nil, false
+	return nil, false, nil
 }
 
 // handleOverrideType processes a type resolved by a registered
@@ -1184,7 +1195,11 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 // composed via allOf rather than having its fields promoted.
 func (g *generator) needsAllOfComposition(t reflect.Type) bool {
 	// Check type resolver overrides (WithTypeSchemaResolver / WithTypeSchema).
-	if _, ok := g.resolveTypeSchema(t); ok {
+	// A resolver error counts as intercepted: the embed composes via allOf and
+	// the deterministic resolver reports the same error when the embedded
+	// type's schema is generated, where it aborts generation.
+	_, resolved, err := g.resolveTypeSchema(t)
+	if resolved || err != nil {
 		return true
 	}
 

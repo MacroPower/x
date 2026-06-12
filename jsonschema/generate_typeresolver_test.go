@@ -3,6 +3,7 @@ package jsonschema_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"testing"
@@ -25,12 +26,12 @@ type plainKind int
 
 // stringerResolver resolves every fmt.Stringer to a plain string schema.
 func stringerResolver() jsonschema.TypeSchemaResolver {
-	return jsonschema.TypeSchemaResolverFunc(func(_ context.Context, t reflect.Type) (*jsonschema.Schema, bool) {
+	return jsonschema.TypeSchemaResolverFunc(func(_ context.Context, t reflect.Type) (*jsonschema.Schema, bool, error) {
 		if !t.Implements(reflect.TypeFor[fmt.Stringer]()) {
-			return nil, false
+			return nil, false, nil
 		}
 
-		return &jsonschema.Schema{Type: "string"}, true
+		return &jsonschema.Schema{Type: "string"}, true, nil
 	})
 }
 
@@ -94,8 +95,8 @@ func TestWithTypeSchemaResolver(t *testing.T) {
 		"nil schema with ok true is unrestricted": {
 			opts: []jsonschema.GenerateOption{
 				jsonschema.WithTypeSchemaResolver(jsonschema.TypeSchemaResolverFunc(
-					func(_ context.Context, t reflect.Type) (*jsonschema.Schema, bool) {
-						return nil, t == reflect.TypeFor[stringerKind]()
+					func(_ context.Context, t reflect.Type) (*jsonschema.Schema, bool, error) {
+						return nil, t == reflect.TypeFor[stringerKind](), nil
 					},
 				)),
 			},
@@ -215,12 +216,12 @@ func TestWithTypeSchemaResolver_EmbeddedComposition(t *testing.T) {
 
 	s, err := jsonschema.GenerateFor[doc](t.Context(),
 		jsonschema.WithTypeSchemaResolver(jsonschema.TypeSchemaResolverFunc(
-			func(_ context.Context, t reflect.Type) (*jsonschema.Schema, bool) {
+			func(_ context.Context, t reflect.Type) (*jsonschema.Schema, bool, error) {
 				if t != reflect.TypeFor[base]() {
-					return nil, false
+					return nil, false, nil
 				}
 
-				return &jsonschema.Schema{Type: "object"}, true
+				return &jsonschema.Schema{Type: "object"}, true, nil
 			},
 		)),
 	)
@@ -241,6 +242,77 @@ func TestWithTypeSchemaResolver_EmbeddedComposition(t *testing.T) {
 	}`, string(got))
 }
 
+// TestWithTypeSchemaResolver_Error proves a resolver error aborts generation
+// and reaches the caller wrapped, whether the resolver is consulted for the
+// root type or for a type reached through a field or an embed.
+func TestWithTypeSchemaResolver_Error(t *testing.T) {
+	t.Parallel()
+
+	errLoad := errors.New("schema document unavailable")
+
+	failFor := func(target reflect.Type) jsonschema.GenerateOption {
+		return jsonschema.WithTypeSchemaResolver(jsonschema.TypeSchemaResolverFunc(
+			func(_ context.Context, t reflect.Type) (*jsonschema.Schema, bool, error) {
+				if t == target {
+					return nil, false, errLoad
+				}
+
+				return nil, false, nil
+			},
+		))
+	}
+
+	type inner struct {
+		Kind stringerKind `json:"kind"`
+	}
+
+	type withField struct {
+		Kind stringerKind `json:"kind"`
+	}
+
+	type withEmbed struct {
+		inner //nolint:unused // Exercised via reflection.
+
+		Extra int `json:"extra"`
+	}
+
+	tests := map[string]struct {
+		generate func(opt jsonschema.GenerateOption) error
+		target   reflect.Type
+	}{
+		"root type": {
+			target: reflect.TypeFor[stringerKind](),
+			generate: func(opt jsonschema.GenerateOption) error {
+				_, err := jsonschema.GenerateFor[stringerKind](t.Context(), opt)
+				return err
+			},
+		},
+		"field type": {
+			target: reflect.TypeFor[stringerKind](),
+			generate: func(opt jsonschema.GenerateOption) error {
+				_, err := jsonschema.GenerateFor[withField](t.Context(), opt)
+				return err
+			},
+		},
+		"embedded type": {
+			target: reflect.TypeFor[inner](),
+			generate: func(opt jsonschema.GenerateOption) error {
+				_, err := jsonschema.GenerateFor[withEmbed](t.Context(), opt)
+				return err
+			},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := tc.generate(failFor(tc.target))
+			require.ErrorIs(t, err, errLoad)
+		})
+	}
+}
+
 // TestWithTypeSchemaResolver_SchemaUnaliased proves a resolver-supplied schema is
 // copied before use: mutating the generated output cannot reach back into the
 // schema value the resolver returns across calls.
@@ -248,9 +320,11 @@ func TestWithTypeSchemaResolver_SchemaUnaliased(t *testing.T) {
 	t.Parallel()
 
 	shared := &jsonschema.Schema{Type: "string", Enum: []any{"a"}}
-	resolver := jsonschema.TypeSchemaResolverFunc(func(_ context.Context, t reflect.Type) (*jsonschema.Schema, bool) {
-		return shared, t == reflect.TypeFor[plainKind]()
-	})
+	resolver := jsonschema.TypeSchemaResolverFunc(
+		func(_ context.Context, t reflect.Type) (*jsonschema.Schema, bool, error) {
+			return shared, t == reflect.TypeFor[plainKind](), nil
+		},
+	)
 
 	s, err := jsonschema.GenerateFor[plainKind](t.Context(), jsonschema.WithTypeSchemaResolver(resolver))
 	require.NoError(t, err)

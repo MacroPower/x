@@ -36,23 +36,25 @@ type JSONSchemaExtender interface {
 // use with the same discipline [WithTypeSchema] documents, so one schema
 // value may be shared across types, calls, and goroutines.
 //
-// The context comes from the Generate call in effect, so a resolver doing
-// I/O — loading schema documents per type, for example — can honor
-// cancellation and deadlines; a resolver that performs no cancellable work
-// can ignore it, following [DescriptionProvider].
+// A non-nil error aborts generation, for a resolver that recognizes t but
+// cannot produce its schema — an I/O failure while loading a schema
+// document, for example; the schema and ok values are then ignored. The
+// context comes from the Generate call in effect, so a resolver doing such
+// I/O can honor cancellation and deadlines; a resolver that performs no
+// cancellable work can ignore it, following [DescriptionProvider].
 //
 // A resolver may be consulted several times for the same type within one
 // generation run, so SchemaForType must be deterministic.
 type TypeSchemaResolver interface {
-	SchemaForType(ctx context.Context, t reflect.Type) (s *Schema, ok bool)
+	SchemaForType(ctx context.Context, t reflect.Type) (s *Schema, ok bool, err error)
 }
 
 // TypeSchemaResolverFunc adapts a bare resolution function to a
 // [TypeSchemaResolver], following [net/http.HandlerFunc].
-type TypeSchemaResolverFunc func(ctx context.Context, t reflect.Type) (*Schema, bool)
+type TypeSchemaResolverFunc func(ctx context.Context, t reflect.Type) (*Schema, bool, error)
 
 // SchemaForType calls f.
-func (f TypeSchemaResolverFunc) SchemaForType(ctx context.Context, t reflect.Type) (*Schema, bool) {
+func (f TypeSchemaResolverFunc) SchemaForType(ctx context.Context, t reflect.Type) (*Schema, bool, error) {
 	return f(ctx, t)
 }
 

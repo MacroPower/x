@@ -96,12 +96,12 @@ type exactTypeResolver struct {
 	s *Schema
 }
 
-func (r exactTypeResolver) SchemaForType(_ context.Context, t reflect.Type) (*Schema, bool) {
+func (r exactTypeResolver) SchemaForType(_ context.Context, t reflect.Type) (*Schema, bool, error) {
 	if t != r.t {
-		return nil, false
+		return nil, false, nil
 	}
 
-	return r.s, true
+	return r.s, true, nil
 }
 
 // WithTypeSchema overrides the generated schema for a specific Go type: it

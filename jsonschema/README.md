@@ -275,11 +275,11 @@ interface, every type in a package — where `WithTypeSchema` names one exact
 ```go
 // Every type implementing fmt.Stringer serializes as a string.
 stringers := jsonschema.TypeSchemaResolverFunc(
-	func(_ context.Context, t reflect.Type) (*jsonschema.Schema, bool) {
+	func(_ context.Context, t reflect.Type) (*jsonschema.Schema, bool, error) {
 		if !t.Implements(reflect.TypeFor[fmt.Stringer]()) {
-			return nil, false
+			return nil, false, nil
 		}
-		return &jsonschema.Schema{Type: "string"}, true
+		return &jsonschema.Schema{Type: "string"}, true, nil
 	},
 )
 
@@ -288,10 +288,12 @@ schema, err := jsonschema.GenerateFor[Config](ctx, jsonschema.WithTypeSchemaReso
 
 Resolvers returning `ok == false` pass the type to the next resolver and then
 to the rest of the chain; returning `ok == true` with a nil schema marks the
-type unrestricted (`{}`), mirroring `JSONSchemaProvider`. A resolver may be
-consulted several times for the same type within one run, so it must be
-deterministic. Resolvers and extenders receive the Generate call's context,
-so an implementation doing I/O can honor cancellation and deadlines.
+type unrestricted (`{}`), mirroring `JSONSchemaProvider`. A resolver error
+aborts generation, for a resolver that recognizes a type but cannot produce
+its schema (an I/O failure, for example). A resolver may be consulted several
+times for the same type within one run, so it must be deterministic.
+Resolvers and extenders receive the Generate call's context, so an
+implementation doing I/O can honor cancellation and deadlines.
 
 If a type implements both customization interfaces, only `JSONSchemaProvider` is
 used. When a registered resolver (`WithTypeSchemaResolver` or `WithTypeSchema`) or
