@@ -146,7 +146,7 @@ func TestTagInterpreterFunc(t *testing.T) {
 		t.Parallel()
 
 		interp := jsonschema.TagInterpreterFunc(
-			func(tag string, field jsonschema.FieldContext) error {
+			func(_ context.Context, tag string, field jsonschema.FieldContext) error {
 				field.Schema.Description = "in " + tag
 				return nil
 			},
@@ -162,7 +162,7 @@ func TestTagInterpreterFunc(t *testing.T) {
 
 		errBad := errors.New("bad tag")
 		interp := jsonschema.TagInterpreterFunc(
-			func(string, jsonschema.FieldContext) error { return errBad },
+			func(context.Context, string, jsonschema.FieldContext) error { return errBad },
 		)
 
 		_, err := jsonschema.GenerateFor[doc](t.Context(), jsonschema.WithTagInterpreter("units", interp))

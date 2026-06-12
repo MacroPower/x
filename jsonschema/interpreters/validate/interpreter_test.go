@@ -691,7 +691,7 @@ func TestApplyDiveErrorsWhenItemsNil(t *testing.T) {
 	}
 
 	interp := validate.NewInterpreter()
-	err := interp.Interpret("dive,min=1", jsonschema.FieldContext{
+	err := interp.Interpret(t.Context(), "dive,min=1", jsonschema.FieldContext{
 		Type:   reflect.TypeFor[[]string](),
 		Schema: s.Properties["items"],
 		Parent: s,
@@ -1229,7 +1229,7 @@ func TestCollectionGtMaxIntDoesNotWrap(t *testing.T) {
 			parent := &jsonschema.Schema{}
 			interp := validate.NewInterpreter()
 			tag := "gt=" + strconv.Itoa(math.MaxInt)
-			err := interp.Interpret(tag, jsonschema.FieldContext{
+			err := interp.Interpret(t.Context(), tag, jsonschema.FieldContext{
 				Type:   tc.fieldType,
 				Schema: schema,
 				Parent: parent,
@@ -1269,7 +1269,7 @@ func TestCollectionLtMinIntDoesNotWrap(t *testing.T) {
 			parent := &jsonschema.Schema{}
 			interp := validate.NewInterpreter()
 			tag := "lt=" + strconv.Itoa(math.MinInt)
-			err := interp.Interpret(tag, jsonschema.FieldContext{
+			err := interp.Interpret(t.Context(), tag, jsonschema.FieldContext{
 				Type:   tc.fieldType,
 				Schema: schema,
 				Parent: parent,
@@ -1331,7 +1331,7 @@ func TestValidateInterpreter_ParamEscapes(t *testing.T) {
 			parent := &jsonschema.Schema{Type: "object"}
 
 			interp := validate.NewInterpreter()
-			err := interp.Interpret(tc.tag, jsonschema.FieldContext{
+			err := interp.Interpret(t.Context(), tc.tag, jsonschema.FieldContext{
 				Type:   reflect.TypeFor[string](),
 				Schema: schema,
 				Parent: parent,

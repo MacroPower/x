@@ -480,14 +480,16 @@ through the `TagInterpreter` interface:
 
 ```go
 type TagInterpreter interface {
-	Interpret(tag string, field FieldContext) error
+	Interpret(ctx context.Context, tag string, field FieldContext) error
 }
 ```
 
-Interpreters receive a `FieldContext` (the field's schema, parent schema, JSON
+Interpreters receive the Generate call's context (like the other
+generation-time hooks; an interpreter that performs no cancellable work
+ignores it) and a `FieldContext` (the field's schema, parent schema, JSON
 name, Go type, full `reflect.StructField` for reading sibling struct tags
 such as the `json` tag's options, and the target `Draft` for emitting
-draft-appropriate keywords) and modify the schema in place. Each interpreter
+draft-appropriate keywords), and modify the schema in place. Each interpreter
 is registered under the struct tag key it reads (following `net/http.Handle`,
 so one implementation can serve several keys); multiple interpreters can be
 registered and run in order, after the `jsonschema` tag. `TagInterpreterFunc`

@@ -179,18 +179,20 @@ type TagInterpreter interface {
 	// the type schema, comments, and jsonschema struct tag have been applied.
 	// The FieldContext provides access to both the field's own schema and the
 	// parent object schema, enabling constraints like "required" that modify
-	// the parent.
-	Interpret(tag string, field FieldContext) error
+	// the parent. The context follows the [TypeSchemaResolver.SchemaForType]
+	// contract: it comes from the Generate call in effect, and an
+	// interpreter that performs no cancellable work can ignore it.
+	Interpret(ctx context.Context, tag string, field FieldContext) error
 }
 
 // TagInterpreterFunc adapts a bare interpreting function to a
 // [TagInterpreter], following [net/http.HandlerFunc], so a one-off
 // interpreter needs no named type.
-type TagInterpreterFunc func(tag string, field FieldContext) error
+type TagInterpreterFunc func(ctx context.Context, tag string, field FieldContext) error
 
 // Interpret calls f.
-func (f TagInterpreterFunc) Interpret(tag string, field FieldContext) error {
-	return f(tag, field)
+func (f TagInterpreterFunc) Interpret(ctx context.Context, tag string, field FieldContext) error {
+	return f(ctx, tag, field)
 }
 
 // FormatValidator checks string instances against one format during

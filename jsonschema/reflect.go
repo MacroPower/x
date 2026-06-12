@@ -1312,7 +1312,7 @@ func (g *generator) applyFieldInterpreters(fi structFieldInfo, fieldSchema, pare
 
 	for _, reg := range g.tagInterpreters {
 		if tag, ok := fi.field.Tag.Lookup(reg.key); ok {
-			ctx := FieldContext{
+			fc := FieldContext{
 				Name:        fi.jsonName,
 				Type:        fieldType,
 				Schema:      fieldSchema,
@@ -1320,7 +1320,8 @@ func (g *generator) applyFieldInterpreters(fi structFieldInfo, fieldSchema, pare
 				StructField: fi.field,
 				Draft:       g.draft,
 			}
-			err := reg.interp.Interpret(tag, ctx)
+
+			err := reg.interp.Interpret(g.ctx, tag, fc)
 			if err != nil {
 				return fmt.Errorf("tag interpreter %q: %w", reg.key, err)
 			}
