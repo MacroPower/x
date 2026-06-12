@@ -448,6 +448,17 @@ jsonschema.WithDescriptionProvider(jsonschema.ChainDescriptionProviders(
 	overrides, jsonschema.NewGoCommentProvider()))
 ```
 
+`DescriptionProviderFuncs` adapts a pair of bare functions, so a one-off
+provider needs no named type; a nil field answers `""` for its half:
+
+```go
+jsonschema.WithDescriptionProvider(jsonschema.DescriptionProviderFuncs{
+	TypeFunc: func(_ context.Context, t reflect.Type) string {
+		return docs[t.Name()]
+	},
+})
+```
+
 ### Definitions and references
 
 By default, named struct types (and named types implementing the customization

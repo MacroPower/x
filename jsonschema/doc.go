@@ -209,13 +209,15 @@
 // runs at the same point in the pipeline, after the type's own
 // JSONSchemaExtend, under the same not-called-when-replaced rule.
 //
-// Every extension-point interface is a single method with a conversion func
-// type adapter following [net/http.HandlerFunc] ([TagInterpreterFunc],
+// Every single-method extension-point interface has a conversion func type
+// adapter following [net/http.HandlerFunc] ([TagInterpreterFunc],
 // [FormatValidatorFunc], [TypeSchemaResolverFunc], [TypeSchemaExtenderFunc],
-// [RefResolverFunc], [NamerFunc], [RefFallbackFunc]). An interface serving a
-// named registration ([TagInterpreter] for a struct tag key,
-// [FormatValidator] for a format name) takes the name at the registration
-// site ([WithTagInterpreter], [WithFormatValidator]), following
+// [RefResolverFunc], [NamerFunc], [RefFallbackFunc]). [DescriptionProvider],
+// the one two-method interface, has the struct adapter
+// [DescriptionProviderFuncs] instead, whose nil fields answer "". An
+// interface serving a named registration ([TagInterpreter] for a struct tag
+// key, [FormatValidator] for a format name) takes the name at the
+// registration site ([WithTagInterpreter], [WithFormatValidator]), following
 // [net/http.Handle], so one implementation can serve several names.
 //
 // # Tag Interpretation

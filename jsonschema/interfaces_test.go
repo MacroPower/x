@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -132,6 +133,45 @@ func TestChainResolvers(t *testing.T) {
 		require.NoError(t, err)
 		require.False(t, ok)
 		assert.Nil(t, s)
+	})
+}
+
+// TestDescriptionProviderFuncs pins the struct adapter contract: each
+// function backs its method, and a nil function answers "" so the
+// description stays unset for that half.
+func TestDescriptionProviderFuncs(t *testing.T) {
+	t.Parallel()
+
+	type doc struct {
+		Name string `json:"name"`
+	}
+
+	t.Run("both functions set", func(t *testing.T) {
+		t.Parallel()
+
+		provider := jsonschema.DescriptionProviderFuncs{
+			TypeFunc: func(_ context.Context, t reflect.Type) string {
+				return "type " + t.Name()
+			},
+			FieldFunc: func(_ context.Context, _ reflect.Type, fieldName string) string {
+				return "field " + fieldName
+			},
+		}
+
+		s, err := jsonschema.GenerateFor[doc](t.Context(), jsonschema.WithDescriptionProvider(provider))
+		require.NoError(t, err)
+		assert.Equal(t, "type doc", s.Description)
+		assert.Equal(t, "field Name", s.Properties["name"].Description)
+	})
+
+	t.Run("nil functions leave descriptions unset", func(t *testing.T) {
+		t.Parallel()
+
+		s, err := jsonschema.GenerateFor[doc](t.Context(),
+			jsonschema.WithDescriptionProvider(jsonschema.DescriptionProviderFuncs{}))
+		require.NoError(t, err)
+		assert.Empty(t, s.Description)
+		assert.Empty(t, s.Properties["name"].Description)
 	})
 }
 

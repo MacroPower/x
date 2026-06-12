@@ -118,6 +118,46 @@ type DescriptionProvider interface {
 	FieldDescription(ctx context.Context, t reflect.Type, fieldName string) string
 }
 
+// DescriptionProviderFuncs adapts a pair of bare functions to a
+// [DescriptionProvider]. It is the struct-adapter form of the package's
+// Func adapters, since a two-method interface has no single-function
+// conversion. A nil function answers "" for its half, so a one-off provider
+// — fixed type descriptions in a test, for example — sets only the function
+// it needs:
+//
+//	jsonschema.WithDescriptionProvider(jsonschema.DescriptionProviderFuncs{
+//		TypeFunc: func(_ context.Context, t reflect.Type) string {
+//			return docs[t.Name()]
+//		},
+//	})
+type DescriptionProviderFuncs struct {
+	// TypeFunc backs TypeDescription. A nil TypeFunc leaves every type
+	// description unset.
+	TypeFunc func(ctx context.Context, t reflect.Type) string
+
+	// FieldFunc backs FieldDescription. A nil FieldFunc leaves every field
+	// description unset.
+	FieldFunc func(ctx context.Context, t reflect.Type, fieldName string) string
+}
+
+// TypeDescription calls TypeFunc, or answers "" when TypeFunc is nil.
+func (p DescriptionProviderFuncs) TypeDescription(ctx context.Context, t reflect.Type) string {
+	if p.TypeFunc == nil {
+		return ""
+	}
+
+	return p.TypeFunc(ctx, t)
+}
+
+// FieldDescription calls FieldFunc, or answers "" when FieldFunc is nil.
+func (p DescriptionProviderFuncs) FieldDescription(ctx context.Context, t reflect.Type, fieldName string) string {
+	if p.FieldFunc == nil {
+		return ""
+	}
+
+	return p.FieldFunc(ctx, t, fieldName)
+}
+
 // ChainDescriptionProviders returns a [DescriptionProvider] that consults
 // each provider in order and answers with the first non-empty description;
 // when every provider answers "" (including an empty or all-nil chain), the
