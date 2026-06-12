@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 	"unsafe"
@@ -967,6 +968,85 @@ func TestGenerateFor_WithNamerEmptyDefersToDefault(t *testing.T) {
 
 	_, exists := s.Defs[""]
 	assert.False(t, exists, "no empty definitions key should be created")
+}
+
+// TestGenerator pins the reusable form: one option set applied at
+// construction serves every call, runs never share state, and the zero
+// option case behaves like the package-level entry points.
+func TestGenerator(t *testing.T) {
+	t.Parallel()
+
+	type plain struct {
+		Name string `json:"name"`
+	}
+
+	t.Run("options apply to every call", func(t *testing.T) {
+		t.Parallel()
+
+		gen := jsonschema.NewGenerator(
+			jsonschema.WithNamer(jsonschema.NamerFunc(func(t reflect.Type) string {
+				return "custom_" + t.Name()
+			})),
+		)
+
+		s, err := gen.Generate(t.Context(), reflect.TypeFor[UserWithAddress]())
+		require.NoError(t, err)
+		assert.NotNil(t, s.Defs["custom_Address"])
+
+		s, err = gen.Generate(t.Context(), reflect.TypeFor[Address]())
+		require.NoError(t, err)
+		assert.Equal(t, "object", s.Type)
+	})
+
+	t.Run("runs do not share state", func(t *testing.T) {
+		t.Parallel()
+
+		gen := jsonschema.NewGenerator()
+
+		s, err := gen.Generate(t.Context(), reflect.TypeFor[UserWithAddress]())
+		require.NoError(t, err)
+		require.NotNil(t, s.Defs["Address"], "the first run extracts Address into $defs")
+
+		s, err = gen.Generate(t.Context(), reflect.TypeFor[plain]())
+		require.NoError(t, err)
+		assert.Empty(t, s.Defs, "a later run must not carry the first run's $defs")
+	})
+
+	t.Run("concurrent use", func(t *testing.T) {
+		t.Parallel()
+
+		gen := jsonschema.NewGenerator()
+
+		const runs = 8
+
+		var (
+			wg      sync.WaitGroup
+			schemas [runs]*jsonschema.Schema
+			errs    [runs]error
+		)
+
+		for i := range runs {
+			wg.Go(func() {
+				schemas[i], errs[i] = gen.Generate(t.Context(), reflect.TypeFor[UserWithAddress]())
+			})
+		}
+
+		wg.Wait()
+
+		for i := range runs {
+			require.NoError(t, errs[i])
+			assert.NotNil(t, schemas[i].Defs["Address"])
+		}
+	})
+
+	t.Run("nil option is skipped", func(t *testing.T) {
+		t.Parallel()
+
+		assert.NotPanics(t, func() {
+			_, err := jsonschema.NewGenerator(nil).Generate(t.Context(), reflect.TypeFor[plain]())
+			assert.NoError(t, err)
+		})
+	})
 }
 
 func TestGenerateFor_ValidateInterpreter(t *testing.T) {

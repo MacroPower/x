@@ -136,6 +136,17 @@ var mySchema = jsonschema.MustGenerateFor[MyType](opts...)
 var dynSchema = jsonschema.MustGenerate(reflect.TypeFor[MyType](), opts...)
 ```
 
+These one-shot forms apply their options per call. To generate schemas for
+many types under one option set, `NewGenerator` applies the options once and
+the returned `Generator` is reused — the generation-side counterpart of
+`Compile`/`Validator` — safe for concurrent use provided the configured
+hooks are:
+
+```go
+gen := jsonschema.NewGenerator(opts...)
+schema, err := gen.Generate(ctx, reflect.TypeFor[MyType]())
+```
+
 The root schema always carries the `$schema` keyword; sub-schemas and `$defs`
 entries never do.
 

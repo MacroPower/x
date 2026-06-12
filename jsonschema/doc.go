@@ -36,6 +36,15 @@
 // The root schema always carries the $schema keyword; sub-schemas and $defs
 // entries never do.
 //
+// Both are one-shot forms that apply their options per call. To generate
+// schemas for many types under one option set, [NewGenerator] applies the
+// options once and the returned [Generator] is reused — the generation-side
+// counterpart of [Compile] and [Validator] — safe for concurrent use
+// provided the configured hooks are:
+//
+//	gen := jsonschema.NewGenerator(opts...)
+//	schema, err := gen.Generate(ctx, reflect.TypeFor[MyType]())
+//
 // # Errors
 //
 // Sentinel errors are defined for error matching with [errors.Is]:

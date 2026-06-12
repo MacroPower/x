@@ -324,6 +324,36 @@ func (g *generator) applyInstanceDefaults(instance any, rootType reflect.Type, s
 	return nil
 }
 
+// Generator generates schemas from one fixed option set, the
+// generation-side counterpart of [Validator]: [NewGenerator] applies the
+// options once and the returned Generator is reused, so a caller generating
+// schemas for many types neither re-passes nor re-applies the option slice
+// per call.
+//
+// A Generator is safe for concurrent use by multiple goroutines, provided
+// the configured hooks are: the configuration is only read during
+// generation, every run keeps its own state, and the hook interfaces
+// document their own concurrency contracts ([DescriptionProvider],
+// [RefResolver]).
+type Generator struct {
+	proto *generator
+}
+
+// NewGenerator returns a [Generator] with the given options applied. Nil
+// options are skipped, so an optional option can be passed unconditionally.
+func NewGenerator(opts ...GenerateOption) *Generator {
+	return &Generator{proto: newGenerator(opts)}
+}
+
+// Generate generates a JSON Schema for the given [reflect.Type] under the
+// Generator's options. The context follows the [GenerateFor] contract. For
+// a statically known type, pass [reflect.TypeFor]:
+//
+//	gen.Generate(ctx, reflect.TypeFor[MyType]())
+func (gn *Generator) Generate(ctx context.Context, t reflect.Type) (*Schema, error) {
+	return gn.proto.forRun(ctx).generate(t)
+}
+
 // GenerateFor generates a JSON Schema for the type parameter T.
 //
 // The context is passed to the [DescriptionProvider] (see [WithDescriptionProvider])
@@ -348,10 +378,11 @@ func MustGenerateFor[T any](opts ...GenerateOption) *Schema {
 }
 
 // Generate generates a JSON Schema for the given [reflect.Type]. The
-// context follows the [GenerateFor] contract.
+// context follows the [GenerateFor] contract. It is one-shot sugar for
+// [NewGenerator] plus [Generator.Generate]; to generate schemas for many
+// types under one option set, build the [Generator] once and reuse it.
 func Generate(ctx context.Context, t reflect.Type, opts ...GenerateOption) (*Schema, error) {
-	g := newGenerator(ctx, opts)
-	return g.generate(t)
+	return NewGenerator(opts...).Generate(ctx, t)
 }
 
 // MustGenerate is [Generate] with [context.Background] but panics on error;

@@ -66,25 +66,42 @@ type refRecord struct {
 	target reflect.Type
 }
 
-func newGenerator(ctx context.Context, opts []GenerateOption) *generator {
+// newGenerator returns a configuration-only generator prototype: the options
+// are applied, but no per-run state is initialized. Each generation run
+// derives its state from the prototype via [generator.forRun]. Nil options
+// are skipped, so an optional option can be passed unconditionally.
+func newGenerator(opts []GenerateOption) *generator {
 	g := &generator{
-		ctx:         ctx,
 		draft:       Draft2020,
 		namer:       NamerFunc(defaultNamer),
 		definitions: true,
 		nullable:    true,
-
-		defs:            map[string]*Schema{},
-		defsNameToTypes: map[string][]reflect.Type{},
-		typeToDefName:   map[reflect.Type]string{},
-		typeToDefSchema: map[reflect.Type]*Schema{},
-		visiting:        map[reflect.Type]bool{},
 	}
+
 	for _, opt := range opts {
-		opt.applyGenerate(g)
+		if opt != nil {
+			opt.applyGenerate(g)
+		}
 	}
 
 	return g
+}
+
+// forRun derives one generation run from the prototype: the configuration —
+// resolvers, extenders, interpreters, namer, flags — is shared, since
+// generation only reads it, while the per-run maps and the context are
+// fresh, so concurrent runs from one prototype never share mutable state.
+func (g *generator) forRun(ctx context.Context) *generator {
+	run := *g
+	run.ctx = ctx
+	run.defs = map[string]*Schema{}
+	run.defsNameToTypes = map[string][]reflect.Type{}
+	run.typeToDefName = map[reflect.Type]string{}
+	run.typeToDefSchema = map[reflect.Type]*Schema{}
+	run.visiting = map[reflect.Type]bool{}
+	run.refRecords = nil
+
+	return &run
 }
 
 // generate produces the root schema for the given type.
