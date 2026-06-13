@@ -229,10 +229,3 @@ linters:
       - path: internal/
         linters:
           - wrapcheck
-      - path: examples/
-        text: "printf"
-        linters:
-          - govet
-      - path: style/theme/
-        linters:
-          - dupl
