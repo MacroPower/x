@@ -37,11 +37,11 @@
 //
 // Both are one-shot forms that apply their options per call. To generate
 // schemas for many types under one option set, [NewGenerator] applies the
-// options once and the returned [Generator] is reused — the generation-side
-// counterpart of [Compile] and [Validator] — safe for concurrent use
-// provided the configured hooks are. [GenerateWith] is GenerateFor under a
-// reusable Generator, keeping the generic form available (Go methods cannot
-// take type parameters):
+// options once and returns a reusable [Generator], the generation-side
+// counterpart of [Compile] and [Validator]. A Generator is safe for
+// concurrent use provided the configured hooks are. [GenerateWith] runs
+// GenerateFor under a reusable Generator, keeping the generic form available
+// (Go methods cannot take type parameters):
 //
 //	gen := jsonschema.NewGenerator(opts...)
 //	schema, err := jsonschema.GenerateWith[MyType](ctx, gen)
@@ -198,8 +198,8 @@
 // A direct [encoding/json.Marshaler] implementation is not in this chain.
 // Types directly implementing only [encoding/json.Marshaler] (not
 // [encoding.TextMarshaler]) are handled by kind-based reflection, since
-// MarshalJSON can return any JSON type — the output type is unknowable via
-// reflection. Specific well-known [encoding/json.Marshaler] types are handled
+// MarshalJSON can return any JSON type, leaving the output type unknowable
+// via reflection. Specific well-known [encoding/json.Marshaler] types are handled
 // via built-in overrides. Other [encoding/json.Marshaler] types should use
 // [WithTypeSchema] or implement [JSONSchemaProvider]. A marshaler promoted
 // from an embedded field is different (step 4): encoding/json resolves
@@ -226,18 +226,18 @@
 // runs at the same point in the pipeline, after the type's own
 // JSONSchemaExtend, under the same not-called-when-replaced rule.
 //
-// Every type-level hook — [JSONSchemaProvider] and [JSONSchemaExtender]
-// alongside their registered counterparts [TypeSchemaProvider] and
-// [TypeSchemaExtender], plus [Namer] and the type half of
-// [DescriptionProvider] — receives a [TypeContext] carrying the Go type and
+// Every type-level hook receives a [TypeContext] carrying the Go type and
 // the target [Draft] of the generation run, so an implementation can emit
-// draft-appropriate keywords. The field-level hooks — tag interpreters and
-// [DescriptionProvider.FieldDescription] — receive the [FieldContext]
-// counterpart, carrying the field's schema and surroundings alongside the
-// same Draft. All but [Namer], whose work is pure, also receive the context
-// of the Generate call in effect, so an implementation doing cancellable
-// work (loading a schema document, for example) can honor cancellation and
-// deadlines.
+// draft-appropriate keywords. The type-level hooks are [JSONSchemaProvider]
+// and [JSONSchemaExtender] alongside their registered counterparts
+// [TypeSchemaProvider] and [TypeSchemaExtender], plus [Namer] and the type
+// half of [DescriptionProvider]. The field-level hooks, namely tag
+// interpreters and [DescriptionProvider.FieldDescription], receive the
+// [FieldContext] counterpart, carrying the field's schema and surroundings
+// alongside the same Draft. All but [Namer], whose work is pure, also
+// receive the context of the Generate call in effect, so an implementation
+// doing cancellable work (loading a schema document, for example) can honor
+// cancellation and deadlines.
 //
 // Every single-method extension-point interface has a conversion func type
 // adapter following [net/http.HandlerFunc] ([TagInterpreterFunc],
@@ -245,14 +245,13 @@
 // [RefResolverFunc], [NamerFunc], [RefFallbackFunc]). [DescriptionProvider],
 // the one two-method interface, has the struct adapter
 // [DescriptionProviderFuncs] instead, whose nil fields answer "" with no
-// error. An
-// interface serving a named registration ([TagInterpreter] for a struct tag
-// key, [FormatValidator] for a format name) takes the name at the
+// error. An interface serving a named registration ([TagInterpreter] for a
+// struct tag key, [FormatValidator] for a format name) takes the name at the
 // registration site ([WithTagInterpreter], [WithFormatValidator]), following
-// [net/http.Handle], so one implementation can serve several names, and is
-// told the name each call runs under — [Tag.Key] for an interpreter, the
-// name parameter for a format checker — the way an [net/http.Handler] reads
-// the request path.
+// [net/http.Handle], so one implementation can serve several names. Each call
+// is then told the name it runs under, the way a [net/http.Handler] reads
+// the request path: [Tag.Key] for an interpreter, the name parameter for a
+// format checker.
 //
 // # Tag Interpretation
 //
@@ -261,14 +260,15 @@
 // Generate call's context, like the other generation-time hooks, a [Tag]
 // carrying the struct tag key and value the call runs under, and a
 // [FieldContext] containing the field's schema, parent schema, JSON name,
-// Go type, declaring struct type (the embedded type for a promoted field —
+// Go type, declaring struct type, full [reflect.StructField] (for reading
+// sibling struct tags such as the json tag's options), and the target
+// [Draft] (for emitting draft-appropriate keywords). For a promoted field,
+// the declaring struct type is the embedded type, exposed as
 // [FieldContext.Owner], which a [DescriptionProvider] reads for the same
-// field), full [reflect.StructField] (for reading sibling struct tags such
-// as the json tag's options), and the target [Draft] (for emitting
-// draft-appropriate keywords). Each interpreter is registered under the
-// struct tag key it reads; multiple interpreters can be registered and are
-// applied in order. [TagInterpreterFunc] adapts a bare function, so a
-// one-off interpreter needs no named type.
+// field. Each interpreter is registered under the struct tag key it reads;
+// multiple interpreters can be registered and are applied in order.
+// [TagInterpreterFunc] adapts a bare function, so a one-off interpreter needs
+// no named type.
 //
 // # Definitions and References
 //
@@ -308,20 +308,19 @@
 // identically, except the promoted fields are not required: a nil embed omits
 // them from the output. A struct whose method set includes a MarshalJSON or
 // MarshalText promoted from an embedded field is not reflected field by field
-// at all — the promoted marshaler serializes the whole outer value (see the
+// at all; the promoted marshaler serializes the whole outer value (see the
 // resolution priority above). Embedded types intercepted by earlier priority
 // chain steps (a registered [TypeSchemaProvider] or [JSONSchemaProvider]) are
-// composed via allOf rather than having their fields promoted; an embed
-// reached through a pointer composes as anyOf[schema, {}] instead, since a
-// nil pointer contributes nothing to the marshaled object. A provider schema
-// (registered or on-type) used for such an embedded type must leave the
-// object open (no additionalProperties: false): allOf evaluates each branch
-// against the whole object, so a closed branch rejects the parent's sibling
-// properties and the generated schema then rejects the struct's own marshaled
-// JSON. Embedded structs with an explicit json name
-// (e.g. json:"base") are treated as regular named fields, not promoted; an
-// options-only tag with no name (e.g. json:",omitempty") promotes the fields,
-// matching encoding/json.
+// composed via allOf rather than having their fields promoted; an embed reached
+// through a pointer composes as anyOf[schema, {}] instead, since a nil pointer
+// contributes nothing to the marshaled object. A provider schema (registered or
+// on-type) used for such an embedded type must leave the object open (no
+// additionalProperties: false): allOf evaluates each branch against the whole
+// object, so a closed branch rejects the parent's sibling properties and the
+// generated schema then rejects the struct's own marshaled JSON. Embedded
+// structs with an explicit json name (e.g. json:"base") are treated as regular
+// named fields, not promoted; an options-only tag with no name (e.g.
+// json:",omitempty") promotes the fields, matching encoding/json.
 //
 // Embedded non-struct named types (e.g., type MyString string) are treated as
 // regular fields with the type name as the JSON key, not promoted. Embedded
@@ -342,9 +341,8 @@
 //
 // Property ordering in the output matches the order fields appear in the Go
 // struct definition (via the upstream PropertyOrder field). Empty structs and
-// structs with no exported fields produce
-// {"type": "object", "additionalProperties": false} with no properties or
-// required fields.
+// structs with no exported fields produce {"type": "object",
+// "additionalProperties": false} with no properties or required fields.
 //
 // # jsonschema Struct Tag
 //
@@ -402,27 +400,24 @@
 // # Comment Extraction
 //
 // Type and field descriptions come from a [DescriptionProvider], registered
-// with [WithDescriptionProvider]. A provider error aborts generation,
-// matching the package's other generation hooks, so a provider doing I/O
-// reports a failed lookup instead of silently dropping descriptions. The
-// built-in [GoCommentProvider] (constructed with [NewGoCommentProvider])
-// extracts Go doc comments from source files for struct types, struct
-// fields, and named types using [go/ast] and
-// [golang.org/x/tools/go/packages]; when source files cannot be located for
-// a type, extraction is silently skipped, so a binary deployed without
-// sources generates schemas without descriptions, while a canceled or
-// expired Generate context is reported as an error. Package loading runs in
-// the process working directory unless [WithLoadDir] points it at another
-// module's directory. Any other implementation
-// substitutes another source — comments pre-extracted at build time for a
-// binary that deploys without source files, or fixed descriptions in tests.
-// [ChainDescriptionProviders] composes providers, first non-empty
-// description or first error wins, such as overrides for specific types
-// backed by AST extraction.
-// Field lookups receive the [FieldContext] tag interpreters get; for a
-// field promoted from an embedded struct, its Owner is the embedded type,
-// where the field's doc comment lives. The jsonschema struct tag
-// description overrides a provider-supplied comment.
+// with [WithDescriptionProvider]. A provider error aborts generation, matching
+// the package's other generation hooks, so a provider doing I/O reports a
+// failed lookup instead of silently dropping descriptions. The built-in
+// [GoCommentProvider] (constructed with [NewGoCommentProvider]) extracts Go doc
+// comments from source files for struct types, struct fields, and named types
+// using [go/ast] and [golang.org/x/tools/go/packages]; when source files cannot
+// be located for a type, extraction is silently skipped, so a binary deployed
+// without sources generates schemas without descriptions, while a canceled or
+// expired Generate context is reported as an error. Package loading runs in the
+// process working directory unless [WithLoadDir] points it at another module's
+// directory. Any other implementation substitutes another source: comments
+// pre-extracted at build time for a binary that deploys without source files,
+// or fixed descriptions in tests. [ChainDescriptionProviders] composes
+// providers, first non-empty description or first error wins, such as overrides
+// for specific types backed by AST extraction. Field lookups receive the
+// [FieldContext] tag interpreters get; for a field promoted from an embedded
+// struct, its Owner is the embedded type, where the field's doc comment lives.
+// The jsonschema struct tag description overrides a provider-supplied comment.
 //
 // # Draft Support
 //
@@ -458,15 +453,15 @@
 //
 // The package validates JSON instances against schemas and returns structured
 // errors with full path information and hierarchical multi-error support.
-// [Compile] builds the [Validator] once — registry construction,
-// Schema.Resolve, draft and vocabulary detection — and the returned
-// Validator is reused across instances, safe for concurrent use, with one
+// [Compile] builds the [Validator] once, doing registry construction,
+// Schema.Resolve, and draft and vocabulary detection up front. The returned
+// Validator is reused across instances and safe for concurrent use, with one
 // method per instance shape:
 //
 //   - [Validator.Validate] validates a pre-parsed Go value (map[string]any,
 //     []any, string, float64, [encoding/json.Number], bool, nil). Go numeric
-//     kinds that encoding/json does not produce — the signed and unsigned
-//     integer types and float32 — are accepted too and normalized via
+//     kinds that encoding/json does not produce (the signed and unsigned
+//     integer types and float32) are accepted too and normalized via
 //     [Normalize], so values decoded from YAML or TOML validate directly
 //     (integers exactly, at any magnitude).
 //   - [Validator.ValidateJSON] unmarshals raw JSON bytes with
@@ -499,12 +494,12 @@
 // with [Compile]; [ParseSchema] is its decode half alone, returning the
 // [*Schema] uncompiled for consumers that work with the schema itself ([Inline],
 // [Walk], programmatic editing); [ParseSchemaValue] converts an already-decoded
-// document — a bool or a map[string]any, such as [Normalize] output — to a
+// document (a bool or a map[string]any, such as [Normalize] output) to a
 // [*Schema]. With all three, a top-level value that is not an object or
-// boolean, including JSON null (which unmarshaling into a [Schema] directly
-// silently coerces to the false schema), returns an error wrapping
-// [ErrInvalidSchemaDocument]; malformed JSON returns the wrapped decode error
-// without the sentinel.
+// boolean returns an error wrapping [ErrInvalidSchemaDocument]; this includes
+// JSON null, which unmarshaling into a [Schema] directly silently coerces to
+// the false schema. Malformed JSON returns the wrapped decode error without
+// the sentinel.
 //
 // Every compile and validate entry point takes a [context.Context] as its
 // first parameter, carried to the [RefResolver] (see Remote References
@@ -512,11 +507,11 @@
 // the package-scope use they serve.
 //
 // On success all return nil. A validation failure returns an error that
-// unwraps to [*ValidationError] via [errors.As]. Non-validation failures — JSON
-// decoding, an unaccepted instance type, an invalid schema document
-// ([ErrInvalidSchemaDocument]), Schema.Resolve errors, [ErrInvalidType], and
-// [ErrUnknownVocabulary] — return ordinary wrapped errors that do not unwrap
-// to [*ValidationError].
+// unwraps to [*ValidationError] via [errors.As]. Non-validation failures
+// return ordinary wrapped errors that do not unwrap to [*ValidationError];
+// these cover JSON decoding, an unaccepted instance type, an invalid schema
+// document ([ErrInvalidSchemaDocument]), Schema.Resolve errors,
+// [ErrInvalidType], and [ErrUnknownVocabulary].
 //
 // Compile rejects a type keyword naming anything other than the seven JSON
 // Schema types ("null", "boolean", "string", "integer", "number", "object",
@@ -573,14 +568,14 @@
 //     metaschemas by exact $id, and [ChainResolvers] composes resolvers.
 //
 // The draft is detected from the root schema's $schema field; a [WithDraft]
-// option overrides the detection. [Draft7] and
-// [Draft2020] semantics are applied for keyword selection (items/additionalItems
-// vs prefixItems/items; dependentRequired/dependentSchemas under 2020-12) and
-// $ref sibling behavior (Draft-07 ignores siblings; 2020-12 processes them). The
-// legacy dependencies keyword is honored under both drafts: under 2020-12 it is
-// accepted for backward compatibility alongside dependentRequired/dependentSchemas.
+// option overrides the detection. [Draft7] and [Draft2020] semantics are
+// applied for keyword selection (items/additionalItems vs prefixItems/items;
+// dependentRequired/dependentSchemas under 2020-12) and $ref sibling behavior
+// (Draft-07 ignores siblings; 2020-12 processes them). The legacy dependencies
+// keyword is honored under both drafts: under 2020-12 it is accepted for
+// backward compatibility alongside dependentRequired/dependentSchemas.
 //
-// All validation failures are collected — validation does not stop on the first
+// All validation failures are collected; validation does not stop on the first
 // error. The returned [*ValidationError] forms a tree: compositional keywords
 // (allOf, anyOf, oneOf, if/then/else, $ref, $dynamicRef, unevaluated*) wrap their
 // child failures in intermediate [ValidationError.Causes] nodes, while container
@@ -640,7 +635,7 @@
 //     terminate. Walk stops at and returns the first error from the function,
 //     except [SkipChildren], which prunes the walk at that schema and
 //     continues with its siblings. The function receives each visited
-//     schema's [Location] from the root — the JSON Pointer and the typed
+//     schema's [Location] from the root: the JSON Pointer and the typed
 //     [Segment] slice in one value, built by appending each descended
 //     child's [SubschemaEntry] location; a traversal with no use for the
 //     location ignores the parameter, following [io/fs.WalkDir].
@@ -653,7 +648,7 @@
 //     an error wrapping [ErrInvalidType] that includes the schema path of the
 //     first offending keyword. It is the standalone form of the check
 //     [Compile] runs before resolution, for vetting structurally messy
-//     schemas — cyclic graphs, unresolvable references — without compiling
+//     schemas (cyclic graphs, unresolvable references) without compiling
 //     them.
 //   - [IsTrueSchema] reports whether a schema is the boolean true schema form:
 //     a schema with no fields set, which marshals to JSON true and accepts
@@ -662,8 +657,8 @@
 //     empty map or slice (Schema{Enum: []any{}} vacuously rejects every
 //     instance).
 //   - [IsFalseSchema] reports whether a schema is the boolean false schema
-//     form {"not": {}} — the shape the upstream produces when unmarshaling the
-//     JSON boolean false — which marshals to JSON false and rejects every
+//     form {"not": {}} (the shape the upstream produces when unmarshaling the
+//     JSON boolean false), which marshals to JSON false and rejects every
 //     instance. Any sibling field next to the not, including annotations,
 //     defeats the form.
 //
@@ -682,11 +677,11 @@
 //
 // Vocabulary resolution follows this priority:
 //  1. [WithVocabularies] direct override (highest).
-//  2. [WithMetaSchemaResolver] lookup — the resolver is consulted once per
+//  2. [WithMetaSchemaResolver] lookup: the resolver is consulted once per
 //     compile with the root schema's $schema URI; a miss ([ErrNotResolved])
 //     falls through to the default. A [SchemaMap] serves fixed metaschemas
 //     by exact $id, and [ChainResolvers] composes resolvers.
-//  3. Default: a built-in standard vocabulary set — every group active except
+//  3. Default: a built-in standard vocabulary set, every group active except
 //     format-assertion, so format is annotation-only by default.
 //
 // If a schema requires (marks true) a vocabulary URI that this implementation
@@ -711,25 +706,24 @@
 // unresolvable local fragment ref is silently skipped.
 // Circular refs are detected and treated as passing to avoid infinite recursion.
 //
-// Non-local refs absolutize against the enclosing resource's base URI — its
+// Non-local refs absolutize against the enclosing resource's base URI: its
 // $id, or the root base set with [WithBaseURI], which also registers the
 // root document under that URI so a ref absolutizing back to it resolves
 // in-memory. The same [WithBaseURI] value serves [Inline] (see Reference
 // Inlining below), so one option configures both.
 //
-// The resolver receives a context with
-// every resolution call: the [Compile] context for refs resolved while
-// compiling, and the [Validator.Validate] (or other validation entry point)
-// context for refs reached during that validation run, so a resolver that
-// fetches over the network can honor cancellation and deadlines. The
-// context is never retained by a compiled [Validator] — each run carries its
-// own — and the Must* entry points pass [context.Background]. The package
-// ships no network resolver; fetching remains the caller's concern.
+// The resolver receives a context with every resolution call: the [Compile]
+// context for refs resolved while compiling, and the [Validator.Validate] (or
+// other validation entry point) context for refs reached during that validation
+// run, so a resolver that fetches over the network can honor cancellation and
+// deadlines. The context is never retained by a compiled [Validator] (each run
+// carries its own), and the Must* entry points pass [context.Background]. The
+// package ships no network resolver; fetching remains the caller's concern.
 //
 // # Reference Inlining
 //
-// [Inline] returns a deep copy of a schema in which every $ref — in the
-// schema body, $defs, and definitions alike — is replaced by a copy of the
+// [Inline] returns a deep copy of a schema in which every $ref (in the
+// schema body, $defs, and definitions alike) is replaced by a copy of the
 // schema it targets, producing a single self-contained document for
 // consumers that cannot follow references, such as code generators. The
 // input and any resolver-returned schemas are never mutated. Inline applies
@@ -737,32 +731,30 @@
 // [Inliner] is reused, completing the reusable trio with [Generator] and
 // [Validator].
 //
-// Fragment-only refs (#/pointer, #anchor) resolve within the enclosing
-// document using the same $id/$anchor registry the validator builds, and
-// every ref resolves against its document's original structure, exactly as
-// the validator would: expanding one ref never changes what a later ref's
-// JSON Pointer or anchor addresses. Other refs are absolutized against the
-// enclosing resource's base URI — its $id, or the base given via
-// [WithBaseURI], with a schemeless base normalized against file:///
-// so a back-reference to the root document finds the in-memory copy — and
-// fetched through the [RefResolver] given via [WithRefResolver]; any
-// fragment is then evaluated against the fetched document. Fetched
-// documents are inlined recursively using their own base URIs (a relative
-// ref inside a fetched document resolves against that document's URI, so
-// files can reference each other by relative path), and each document is
-// fetched at most once per call. [FileResolver] (constructed with
-// [NewFileResolver]) adapts an [io/fs.FS] to this interface, serving
-// file-path and relative URIs from the fs root;
-// each referenced file must contain a JSON schema document, and [io/fs]
-// confines resolution to the fs root, so a ref escaping above it returns
-// an error wrapping [ErrRefResolve]. Pair [os.DirFS] with
-// [WithBaseURI] to inline a directory of schemas; the same resolver
-// also serves file-path and relative refs during validation via
-// [WithRefResolver]. [StripPrefix] wraps any resolver to strip a published
-// remote base from each URI first, so refs absolutizing against an https
-// $id can be served from the fs. Inline's context is passed to the resolver with every
-// document fetch, so a resolver that fetches over the network can honor
-// cancellation and deadlines.
+// Fragment-only refs (#/pointer, #anchor) resolve within the enclosing document
+// using the same $id/$anchor registry the validator builds, and every ref
+// resolves against its document's original structure, exactly as the validator
+// would: expanding one ref never changes what a later ref's JSON Pointer or
+// anchor addresses. Other refs are absolutized against the enclosing resource's
+// base URI, then fetched through the [RefResolver] given via [WithRefResolver];
+// any fragment is then evaluated against the fetched document. That base URI is
+// the resource's $id, or the base given via [WithBaseURI]; a schemeless base is
+// normalized against file:/// so a back-reference to the root document finds
+// the in-memory copy. Fetched documents are inlined recursively using their own
+// base URIs (a relative ref inside a fetched document resolves against that
+// document's URI, so files can reference each other by relative path), and each
+// document is fetched at most once per call. [FileResolver] (constructed with
+// [NewFileResolver]) adapts an [io/fs.FS] to this interface, serving file-path
+// and relative URIs from the fs root; each referenced file must contain a JSON
+// schema document, and [io/fs] confines resolution to the fs root, so a ref
+// escaping above it returns an error wrapping [ErrRefResolve]. Pair [os.DirFS]
+// with [WithBaseURI] to inline a directory of schemas; the same resolver also
+// serves file-path and relative refs during validation via [WithRefResolver].
+// [StripPrefix] wraps any resolver to strip a published remote base from each
+// URI first, so refs absolutizing against an https $id can be served from the
+// fs. Inline's context is passed to the resolver with every document fetch, so
+// a resolver that fetches over the network can honor cancellation and
+// deadlines.
 //
 // [WithRetrievalBase] makes refs resolve against each document's
 // retrieval URI instead, treating $id as an inert annotation: $id neither
@@ -792,7 +784,7 @@
 // covers); a $ref carried as raw JSON inside an unknown keyword is left
 // as-is, although a ref pointing into such a position still resolves.
 //
-// A ref whose expansion reaches its own target — a recursive schema —
+// A ref whose expansion reaches its own target, a recursive schema,
 // returns an error wrapping [ErrRefCycle]: a cyclic reference graph has no
 // finite expansion. A $dynamicRef under Draft 2020-12 returns an error
 // wrapping [ErrRefInline], since its target depends on the dynamic scope at

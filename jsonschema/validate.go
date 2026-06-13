@@ -360,8 +360,8 @@ func newValidator(ctx context.Context, schema *Schema, opts []ValidateOption) (*
 // forInstance returns a per-validation view of a compiled validator with fresh
 // mutable walk state (the visiting set, dynamic scope, JSON-pointer cache, and
 // ref-resolution scratch), so a [Validator] can be reused and is safe for
-// concurrent use. The immutable per-schema state — registries, resolved
-// vocabularies, draft, and format configuration — is shared. The caller's ctx
+// concurrent use. The immutable per-schema state (registries, resolved
+// vocabularies, draft, and format configuration) is shared. The caller's ctx
 // is carried on the per-run copy so a [RefResolver] resolving a remote
 // ref at validation time sees the context of the run that triggered it.
 //
@@ -406,7 +406,7 @@ func (v *validator) forInstance(ctx context.Context) *validator {
 //     $schema URI).
 //  3. Default: vocab.All (backward compatible).
 //
-// Draft-07 always gets vocab.All — vocabulary is a 2020-12 concept.
+// Draft-07 always gets vocab.All; vocabulary is a 2020-12 concept.
 func (v *validator) resolveVocabularies() error {
 	// Draft-07 has no vocabulary concept.
 	if v.draft != Draft2020 {
@@ -457,7 +457,7 @@ func (v *validator) resolveVocabularies() error {
 // resolveFormats determines whether the format keyword is asserted during the
 // walk. An explicit WithFormats choice wins. Otherwise Draft-07 asserts format
 // (validation §7.2 permits it), while Draft 2020-12 asserts only when the
-// format-assertion vocabulary is active — annotation-only by default under the
+// format-assertion vocabulary is active, annotation-only by default under the
 // standard meta-schema, per validation §7.2.1's "MUST be disabled by default".
 func (v *validator) resolveFormats() {
 	switch {
@@ -937,10 +937,10 @@ func detectDraft(s *Schema) Draft {
 }
 
 // Validator is a schema compiled for repeated validation. Constructing it does
-// the per-schema work once — walking the schema to build the URI/anchor
+// the per-schema work once, so each subsequent validation only walks the
+// instance. That work is walking the schema to build the URI/anchor
 // registries, running [jsonschema.Schema.Resolve] for structural
-// pre-validation, and detecting the draft and active vocabularies — so each
-// subsequent validation only walks the instance.
+// pre-validation, and detecting the draft and active vocabularies.
 //
 // A Validator is safe for concurrent use by multiple goroutines.
 // [Validator.Schema] and [Validator.Draft] expose what it validates, so a
@@ -991,7 +991,7 @@ func Compile(ctx context.Context, schema *Schema, opts ...ValidateOption) (*Vali
 
 	// Reject unknown type names up front. Schema.Resolve does not check the
 	// type vocabulary, and a typo'd type otherwise compiles cleanly and then
-	// rejects every instance — a confusing runtime failure instead of a clear
+	// rejects every instance: a confusing runtime failure instead of a clear
 	// construction error.
 	err = CheckTypeNames(schema)
 	if err != nil {
@@ -1054,10 +1054,10 @@ func MustCompile(schema *Schema, opts ...ValidateOption) *Validator {
 // ParseSchemaValue converts an already-decoded JSON schema document to a
 // [*Schema]. The document doc must be a bool (true is the empty schema;
 // false is the schema that rejects every instance) or a map[string]any. Any
-// other dynamic type — including nil, the decoding of a top-level JSON null,
-// which [Schema.UnmarshalJSON] silently coerces to the false schema — returns
-// an error wrapping [ErrInvalidSchemaDocument] naming the Go type. Values
-// produced by [Normalize] ([json.Number] leaves) convert correctly.
+// other dynamic type returns an error wrapping [ErrInvalidSchemaDocument]
+// naming the Go type. This includes nil, the decoding of a top-level JSON
+// null, which [Schema.UnmarshalJSON] silently coerces to the false schema.
+// Values produced by [Normalize] ([json.Number] leaves) convert correctly.
 func ParseSchemaValue(doc any) (*Schema, error) {
 	switch d := doc.(type) {
 	case bool:
@@ -1094,15 +1094,15 @@ func ParseSchemaValue(doc any) (*Schema, error) {
 
 // ParseSchema decodes data as a single JSON schema document and returns it
 // as a [*Schema] without compiling it, for consumers that work with the schema
-// itself — [Inline], [Walk], or programmatic editing — rather than validating
-// instances against it. It applies the same decode discipline as [CompileJSON]
-// (which is equivalent to compiling its result): numbers decode as
-// [json.Number] so large integer keywords survive the round-trip into the
-// Schema, and trailing data after the document is rejected. A top-level value
-// that is not an object or boolean — including JSON null, which unmarshaling
-// into a [Schema] directly silently coerces to the false schema — returns an
-// error wrapping [ErrInvalidSchemaDocument]; malformed JSON returns the
-// wrapped decode error without the sentinel.
+// itself, through [Inline], [Walk], or programmatic editing, rather than
+// validating instances against it. It applies the same decode
+// discipline as [CompileJSON] (which is equivalent to compiling its result):
+// numbers decode as [json.Number] so large integer keywords survive the
+// round-trip into the Schema, and trailing data after the document is rejected.
+// A top-level value that is not an object or boolean returns an error wrapping
+// [ErrInvalidSchemaDocument]; this includes JSON null, which unmarshaling into
+// a [Schema] directly silently coerces to the false schema. Malformed JSON
+// returns the wrapped decode error without the sentinel.
 func ParseSchema(data []byte) (*Schema, error) {
 	doc, err := decodeJSONInstance(data)
 	if err != nil {
@@ -1116,9 +1116,9 @@ func ParseSchema(data []byte) (*Schema, error) {
 // [ParseSchema] and compiles it with [Compile]. It is the schema-side
 // counterpart of [Validator.ValidateJSON]: numbers decode as [json.Number], and trailing
 // data after the document is rejected. A top-level value that is not an object
-// or boolean — including JSON null, which unmarshaling into a [Schema]
-// directly silently coerces to the false schema — returns an error wrapping
-// [ErrInvalidSchemaDocument]; malformed JSON returns the wrapped decode error
+// or boolean returns an error wrapping [ErrInvalidSchemaDocument]; this
+// includes JSON null, which unmarshaling into a [Schema] directly silently
+// coerces to the false schema. Malformed JSON returns the wrapped decode error
 // without the sentinel.
 //
 // The context is passed to the [RefResolver] for refs resolved during
@@ -1158,12 +1158,11 @@ func CheckTypeNames(schema *Schema) error {
 	return checkTypeNames(schema, "", map[*Schema]bool{})
 }
 
-// checkTypeNames implements [CheckTypeNames], verifying that every type
-// keyword reachable from schema names one of the seven JSON Schema types and
-// returning an error wrapping [ErrInvalidType] for the first violation. The
-// traversal mirrors
-// [validator.walkSchema]'s sub-schema recursion but additionally tracks the
-// schema path so the error locates the offending keyword; visited guards
+// checkTypeNames implements [CheckTypeNames], verifying that every type keyword
+// reachable from schema names one of the seven JSON Schema types and returning
+// an error wrapping [ErrInvalidType] for the first violation. The traversal
+// mirrors [validator.walkSchema]'s sub-schema recursion but additionally tracks
+// the schema path so the error locates the offending keyword; visited guards
 // against schema graph cycles. The check is draft-agnostic: neither draft
 // defines type names beyond the canonical seven.
 func checkTypeNames(schema *Schema, schemaPath string, visited map[*Schema]bool) error {
@@ -1258,12 +1257,12 @@ func checkTypeNames(schema *Schema, schemaPath string, visited map[*Schema]bool)
 // Validate validates a pre-parsed Go value against the compiled schema.
 //
 // Accepted instance types: map[string]any, []any, string, float64,
-// [json.Number], bool, nil. Go numeric kinds that encoding/json does not
-// produce — the signed and unsigned integer types and float32 — are accepted
-// too and normalized via [Normalize], so values decoded from YAML or TOML or
-// built by hand validate directly (integers exactly, at any magnitude). Go
-// structs are not accepted; passing any other type returns an error (marshal
-// to JSON or use [Validator.ValidateJSON] instead).
+// [json.Number], bool, nil. The Go numeric kinds that encoding/json does not
+// produce are accepted too, namely the signed and unsigned integer types and
+// float32; they are normalized via [Normalize], so values decoded from YAML or
+// TOML or built by hand validate directly (integers exactly, at any
+// magnitude). Go structs are not accepted; passing any other type returns an
+// error (marshal to JSON or use [Validator.ValidateJSON] instead).
 //
 // Returns nil on success or an error that can be unwrapped to [*ValidationError]
 // via [errors.As].
@@ -1315,7 +1314,7 @@ func (c *Validator) ValidateJSON(ctx context.Context, data []byte) error {
 
 // ValidateValue marshals v with encoding/json and validates its JSON form
 // against the compiled schema. It accepts the Go values [Validator.Validate]
-// rejects — structs and other types encoding/json can marshal — so an
+// rejects, namely structs and other types encoding/json can marshal, so an
 // instance of the very type a schema was generated for validates in one
 // call. What is validated is the value's marshaled form, exactly what a JSON
 // consumer of the value would see: json tags, omitempty and omitzero, and
@@ -1323,9 +1322,10 @@ func (c *Validator) ValidateJSON(ctx context.Context, data []byte) error {
 // [Validator.ValidateJSON] discipline (numbers as [json.Number]).
 //
 // Returns nil on success or an error that can be unwrapped to
-// [*ValidationError] via [errors.As]. A value encoding/json cannot marshal —
-// a channel, a cyclic value, an unsupported float — returns the wrapped
-// marshal error, which does not unwrap to [*ValidationError].
+// [*ValidationError] via [errors.As]. A value encoding/json cannot marshal
+// returns the wrapped marshal error, which does not unwrap to
+// [*ValidationError]; this covers channels, cyclic values, and unsupported
+// floats.
 //
 // The context is passed to the [RefResolver] for remote refs reached during
 // this validation run (see [Validator.Validate]).
@@ -1343,11 +1343,11 @@ func (c *Validator) ValidateValue(ctx context.Context, v any) error {
 // the same schema, call [Compile] once and reuse the returned [Validator].
 //
 // Accepted instance types: map[string]any, []any, string, float64,
-// [json.Number], bool, nil. Go numeric kinds that encoding/json does not
-// produce — the signed and unsigned integer types and float32 — are accepted
-// too and normalized via [Normalize]. Go structs are not accepted; passing any
-// other type returns an error (marshal to JSON or use [Validator.ValidateJSON]
-// instead).
+// [json.Number], bool, nil. The Go numeric kinds that encoding/json does not
+// produce are accepted too, namely the signed and unsigned integer types and
+// float32; they are normalized via [Normalize]. Go structs are not accepted;
+// passing any other type returns an error (marshal to JSON or use
+// [Validator.ValidateJSON] instead).
 //
 // Returns nil on success or an error that can be unwrapped to
 // [*ValidationError] via [errors.As].
@@ -1379,7 +1379,7 @@ func Validate(ctx context.Context, schema *Schema, instance any, opts ...Validat
 // itself.
 //
 // Upstream Resolve performs reference resolution as part of pre-validation and
-// rejects refs it cannot follow — for example a JSON Pointer that targets an
+// rejects refs it cannot follow. One example is a JSON Pointer that targets an
 // unknown keyword or the internals of a non-applicator keyword such as
 // examples. This package resolves $ref/$dynamicRef targets itself (see
 // [validator.resolveRef]), so such a failure must not be fatal when the schema
@@ -1435,10 +1435,11 @@ func (v *validator) structureResolves(schema *Schema, resolveOpts ResolveOptions
 // $dynamicRef reachable from schema, and whether each resolved target is itself
 // well-formed (see [validator.refTargetWellFormed]). The target check re-imposes
 // the structural and meta-schema validation that upstream performs by
-// dereferencing refs — which [structureResolves] skips for targets carried in
-// unknown keywords or non-applicator keyword internals, since those have no
-// typed Schema field. A reference this package cannot follow leaves refResolveErr
-// set as a side effect; it is cleared so it does not leak into a later error.
+// dereferencing refs. [structureResolves] skips that validation for targets
+// carried in unknown keywords or non-applicator keyword internals, since those
+// have no typed Schema field. A reference this package cannot follow leaves
+// refResolveErr set as a side effect; it is cleared so it does not leak into a
+// later error.
 func (v *validator) refsResolveWellFormed(schema *Schema, resolveOpts ResolveOptions) bool {
 	ok := true
 
@@ -1467,11 +1468,12 @@ func (v *validator) refsResolveWellFormed(schema *Schema, resolveOpts ResolveOpt
 // refTargetWellFormed reports whether a resolved ref target is structurally
 // well-formed. A nil target (an unresolvable ref) is not. Otherwise the target
 // must be structurally sound and each of its own references must resolve against
-// the root document, so a malformed target — for example an uncompilable
-// pattern, which upstream rejects but typed-only traversal never reaches — or a
-// target whose own reference cannot be followed is rejected. The own-reference
-// check is one level deep: targets reached through the typed tree are already
-// validated by [structureResolves] on the root schema.
+// the root document. Two kinds of target are therefore rejected: a malformed
+// one and a target whose own reference cannot be followed. A malformed target
+// is, for example, a schema with an uncompilable pattern that upstream rejects
+// but typed-only traversal never reaches. The own-reference check is one level
+// deep: targets reached through the typed tree are already validated by
+// [structureResolves] on the root schema.
 func (v *validator) refTargetWellFormed(target *Schema, resolveOpts ResolveOptions) bool {
 	if target == nil || !schemaFormsTree(target) {
 		return false
@@ -1745,7 +1747,7 @@ func (v *validator) validate(
 	// Content keywords.
 	errs = append(errs, v.validateContent(schema, instance, instancePath, schemaPath)...)
 
-	// Unevaluated keywords — must run after all other applicator keywords
+	// Unevaluated keywords: must run after all other applicator keywords
 	// (properties, patternProperties, additionalProperties, allOf, anyOf,
 	// oneOf, if/then/else, dependentSchemas) so annotations are fully merged.
 	errs = append(errs, v.validateUnevaluated(schema, instance, instancePath, schemaPath, ann)...)
@@ -1919,7 +1921,7 @@ func isEmptySchema(s *Schema) bool {
 // types the validation walk works with: map[string]any, []any, string,
 // float64, [json.Number], bool, or nil. [Validate] runs [Normalize] first, so
 // Go integer kinds and float32 have already been converted by the time this
-// check runs. Other types — notably Go structs and [time.Time] — are not
+// check runs. Other types, notably Go structs and [time.Time], are not
 // accepted, because they are not produced by encoding/json when unmarshaling
 // into an any. The check is on the top-level value only; [Validator.ValidateJSON]
 // always supplies accepted types.
@@ -2141,8 +2143,8 @@ func (d decNumber) rat() *big.Rat {
 
 // cmpRat orders a value that is not exactlyComparable against an exact
 // rational derived from a float64 bound, returning -1 (below) or +1 (above).
-// Exact equality cannot occur — every float64 expands to at most ~767
-// significant decimal digits within exponent ±324, inside the caps — so 0 is
+// Exact equality cannot occur, because every float64 expands to at most ~767
+// significant decimal digits within exponent ±324, inside the caps. So 0 is
 // never returned and inclusive/exclusive bounds behave identically.
 func (d decNumber) cmpRat(b *big.Rat) int {
 	sign := 1
@@ -2801,9 +2803,9 @@ func (v *validator) validateNumeric(
 	if !ok {
 		// A JSON number outside the cheap-expansion bounds (the DoS guard)
 		// still orders deterministically against every bound; compare it by
-		// magnitude class and truncated significand. Anything unparseable —
-		// including a non-finite float64, which JSON cannot represent — has no
-		// value to compare and skips the numeric keywords.
+		// magnitude class and truncated significand. Anything unparseable has no
+		// value to compare and skips the numeric keywords. This includes a
+		// non-finite float64, which JSON cannot represent.
 		if n, isNum := instance.(json.Number); isNum {
 			if d, dok := parseDecNumber(string(n)); dok {
 				return v.validateNumericUnbounded(schema, d, string(n), instancePath, schemaPath)
@@ -3357,7 +3359,7 @@ func hashValue(v any) uint64 {
 		return stringHash(val)
 	case float64:
 		// Normalize: integers hash the same regardless of representation. The
-		// fast path is restricted to the int64 range — an out-of-range float to
+		// fast path is restricted to the int64 range; an out-of-range float to
 		// int64 conversion is platform-defined (saturates or wraps), so larger
 		// integers fall through to the big.Rat path and stay consistent with the
 		// json.Number branch (and with jsonschema.Equal).
@@ -3522,7 +3524,7 @@ func (v *validator) validateObject(
 			}
 		}
 
-		// AdditionalProperties — only considers sibling properties and patternProperties.
+		// AdditionalProperties: only considers sibling properties and patternProperties.
 		if schema.AdditionalProperties != nil {
 			for propName, val := range obj {
 				if localEvaluated[propName] {
@@ -4128,7 +4130,7 @@ func (v *validator) resolveDynamicRef(schema *Schema, ref string) *Schema {
 		return staticTarget
 	}
 
-	// Phase 2: Bookending check — the static target must have a
+	// Phase 2: Bookending check. The static target must have a
 	// $dynamicAnchor matching the fragment name.
 	staticBase := v.schemaBase(staticTarget)
 	if _, ok := v.lookupDynamicAnchor(staticBase + "#" + fragment); !ok {
@@ -4234,19 +4236,20 @@ func (v *validator) resolveRef(schema *Schema, ref string) *Schema {
 //
 // Typed traversal handles the common case, matching pointer segments to known
 // Schema fields. When that fails the pointer may still target a referenceable
-// location that has no typed field — a sub-schema carried as raw JSON in an
+// location that has no typed field, so resolution falls back to walking the
+// schema's JSON form. Such locations are a sub-schema carried as raw JSON in an
 // unknown keyword, or the internals of a non-applicator keyword such as
-// examples — so resolution falls back to walking the schema's JSON form.
+// examples.
 func (v *validator) resolveJSONPointer(root *Schema, fragment string, encoded bool) *Schema {
 	path := fragment[1:] // strip leading '/'
 	segments := strings.Split(path, "/")
 
 	// When the fragment is still percent-encoded (the caller had a RawFragment),
-	// RFC 6901 requires splitting on '/' first — so a member name escaped as
-	// %2F survives as one segment rather than splitting the pointer — then
-	// percent-decoding each segment. When [url.Parse] already decoded the fragment
-	// (RawFragment empty), a second decode would corrupt a name that legitimately
-	// contains '%', so only the ~0/~1 unescape is applied.
+	// RFC 6901 requires splitting on '/' first, then percent-decoding each
+	// segment. Splitting first keeps a member name escaped as %2F as one
+	// segment rather than splitting the pointer. When [url.Parse] already
+	// decoded the fragment (RawFragment empty), a second decode would corrupt a
+	// name that legitimately contains '%', so only the ~0/~1 unescape is applied.
 	for i, seg := range segments {
 		if encoded {
 			decoded, err := url.PathUnescape(seg)
@@ -4270,10 +4273,9 @@ func (v *validator) resolveJSONPointer(root *Schema, fragment string, encoded bo
 
 // rawFragment returns the JSON Pointer fragment to resolve plus whether it is
 // still percent-encoded. The [url.Parse] result populates RawFragment only when
-// the fragment
-// carries an encoding it could not canonicalize (e.g. a %2F separator escape);
-// that form must be split before decoding. Otherwise Fragment is already the
-// single-decoded value and must not be decoded again.
+// the fragment carries an encoding it could not canonicalize (e.g. a %2F
+// separator escape); that form must be split before decoding. Otherwise
+// Fragment is already the single-decoded value and must not be decoded again.
 func rawFragment(u *url.URL) (string, bool) {
 	if u.RawFragment != "" {
 		return u.RawFragment, true
@@ -4295,7 +4297,7 @@ type jsonPointerKey struct {
 // encoding rather than its typed fields, so it reaches locations that typed
 // traversal cannot: sub-schemas held in unknown keywords (the Extra map) and
 // the internals of non-applicator keywords such as examples. The target
-// resolves only when it is itself a schema — a JSON object or boolean. Any
+// resolves only when it is itself a schema: a JSON object or boolean. Any
 // other target (a string, number, or missing member) yields nil, so a pointer
 // into a non-schema value or a typo stays unresolved.
 //

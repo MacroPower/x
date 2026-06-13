@@ -880,9 +880,9 @@ func validateDuration(s string) error {
 // the given kind ("date" or "time"). Components must form a contiguous chain in
 // canonical order: the first component (last < 0) may be any designator, but
 // each subsequent one must immediately follow the previous (no gaps, repeats,
-// or reordering). This enforces the RFC 3339 ABNF nesting — for example
-// dur-year = nY [dur-month] — so a sequence like P1Y2D (year then day, skipping
-// month) is rejected. It returns the designator's order index.
+// or reordering). This enforces the RFC 3339 ABNF nesting, where dur-year =
+// nY [dur-month]. A sequence like P1Y2D (year then day, skipping month) is
+// therefore rejected. It returns the designator's order index.
 func checkDurationOrder(order map[byte]int, designator byte, last int, kind string) (int, error) {
 	cur, ok := order[designator]
 	if !ok {

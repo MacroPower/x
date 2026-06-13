@@ -1824,7 +1824,7 @@ func TestValidateUnevaluatedItems(t *testing.T) {
 				},
 				AllOf: []*jsonschema.Schema{
 					{
-						// Empty items schema accepts all — sets allItems annotation.
+						// The empty items schema accepts all and sets the allItems annotation.
 						Items: &jsonschema.Schema{},
 					},
 				},
@@ -1997,7 +1997,7 @@ func TestValidateRefToRoot(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Invalid: child.name is not a string — the recursive $ref correctly
+	// Invalid: child.name is not a string. The recursive $ref correctly
 	// validates the nested object against the root schema.
 	err = jsonschema.Validate(t.Context(), schema, map[string]any{
 		"name": "parent",
@@ -2486,7 +2486,7 @@ func TestValidateVocabularyUnknownOptional(t *testing.T) {
 func TestValidateVocabularyMetaSchemaIntegration(t *testing.T) {
 	t.Parallel()
 
-	// Metaschema that disables validation vocab — type/required/minimum are skipped.
+	// Metaschema that disables validation vocab: type/required/minimum are skipped.
 	metaSchema := &jsonschema.Schema{
 		ID: "https://example.com/meta/no-validation",
 		Vocabulary: map[string]bool{
@@ -2541,9 +2541,9 @@ func TestValidateVocabularyApplicatorActiveValidationDisabled(t *testing.T) {
 		),
 	}
 
-	// Known properties pass — type constraints inside property schemas are
-	// validation vocab and therefore skipped, but properties itself (applicator)
-	// still tracks which properties were evaluated.
+	// Known properties pass. The type constraints inside property schemas are
+	// validation vocab and so skipped, but the properties keyword is an
+	// applicator and still tracks which properties were evaluated.
 	err := jsonschema.Validate(t.Context(), schema, map[string]any{"name": 42.0, "age": "not-int"}, opts...)
 	require.NoError(t, err)
 
@@ -3082,7 +3082,7 @@ func TestPrefixItemsAnnotationGatedOnSuccess(t *testing.T) {
 	// PrefixItems annotates every index it applied a subschema to, even when the
 	// item fails validation, so unevaluatedItems must not re-validate it. With
 	// unevaluatedItems:false the index draws a second, spurious error if the
-	// annotation is (wrongly) gated on per-item success — so this asserts its
+	// annotation is (wrongly) gated on per-item success. This asserts its
 	// absence rather than relying on a permissive unevaluatedItems subschema.
 	schema := &jsonschema.Schema{
 		Type: "array",
@@ -3198,7 +3198,7 @@ func TestRefPercentEncodedPointer(t *testing.T) {
 	// A $ref whose JSON Pointer targets a property whose name contains '%' must
 	// resolve to that property's schema. Url.Parse percent-decodes the fragment
 	// once; decoding a second time corrupts the name, drops the target, and the
-	// unresolved local ref is silently skipped — under-validating the instance.
+	// unresolved local ref is silently skipped, under-validating the instance.
 	schema := &jsonschema.Schema{
 		Type: "object",
 		Properties: map[string]*jsonschema.Schema{
@@ -3638,10 +3638,11 @@ func (r *countingRefResolver) ResolveRef(_ context.Context, _ string) (*jsonsche
 func TestWalkSchemaSkipsRefs(t *testing.T) {
 	t.Parallel()
 
-	// Anchors defined inside a remotely-resolved schema — and that document's own
-	// sub-$ref to them — are registered and usable, because resolveRemote walks
-	// the fetched document before use. WalkSchema itself does not follow $ref;
-	// the registration happens when the remote document is walked on fetch.
+	// Anchors defined inside a remotely-resolved schema become registered and
+	// usable, because resolveRemote walks the fetched document before use. The
+	// same holds for that document's own sub-$ref to those anchors. WalkSchema
+	// itself does not follow $ref; the registration happens when the remote
+	// document is walked on fetch.
 	remote := &jsonschema.Schema{
 		// The remote doc's own root $ref points at an $anchor it defines, so the
 		// anchor is reachable only after walkSchema registers the fetched remote.
@@ -5733,9 +5734,10 @@ func TestValidateRefIntoUnknownKeyword(t *testing.T) {
 
 // TestValidateRefTargetWellFormed covers the structural validation of ref
 // targets reached through untyped locations (unknown keywords, non-applicator
-// internals). A malformed target — an uncompilable pattern or a broken nested
-// ref — must keep the upstream pre-validation error fatal, while a target whose
-// nested ref resolves against the root is accepted and its constraint applied.
+// internals). A malformed target must keep the upstream pre-validation error
+// fatal, whether the flaw is an uncompilable pattern or a broken nested ref. A
+// target whose nested ref resolves against the root is instead accepted and its
+// constraint applied.
 func TestValidateRefTargetWellFormed(t *testing.T) {
 	t.Parallel()
 
@@ -6159,11 +6161,11 @@ func TestCheckTypeNamesMatchesCompile(t *testing.T) {
 	assert.Equal(t, compileErr.Error(), standaloneErr.Error())
 }
 
-// TestCheckTypeNamesToleratesUncompilableSchemas pins the standalone use case:
+// TestCheckTypeNamesToleratesUncompilableSchemas pins the standalone use case.
 // CheckTypeNames vets type names without the registry, reference resolution,
-// and vocabulary work Compile performs, so schemas Compile rejects — here a
-// cyclic pointer graph upstream Resolve cannot represent — still get a
-// verdict on their type keywords.
+// and vocabulary work Compile performs, so schemas Compile rejects still get a
+// verdict on their type keywords. The case here is a cyclic pointer graph that
+// upstream Resolve cannot represent.
 func TestCheckTypeNamesToleratesUncompilableSchemas(t *testing.T) {
 	t.Parallel()
 

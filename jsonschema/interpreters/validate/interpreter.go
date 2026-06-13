@@ -33,7 +33,7 @@ func NewInterpreter() *Interpreter {
 // the context is unused.
 func (i *Interpreter) Interpret(_ context.Context, field jsonschema.FieldContext, tag jsonschema.Tag) error {
 	value := tag.Value
-	// Strip everything after | (OR operator — unsupported, use first group only).
+	// Strip everything after | (OR operator, unsupported; use first group only).
 	if idx := strings.Index(value, "|"); idx >= 0 {
 		value = value[:idx]
 	}
@@ -433,8 +433,8 @@ func parseBool(v string) (bool, error) {
 // applyBoolEq applies eq=true/false → const for a bool schema. A const already
 // pinned to the opposite value by another rule (for example required, which pins
 // it to true) is a conflict the two rules can never both satisfy, so it is
-// reported rather than silently overwritten — keeping the result independent of
-// tag order.
+// reported rather than silently overwritten. This keeps the result independent
+// of tag order.
 func applyBoolEq(s *jsonschema.Schema, value string) error {
 	b, err := parseBool(value)
 	if err != nil {

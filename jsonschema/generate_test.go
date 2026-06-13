@@ -1318,9 +1318,9 @@ func TestGenerateFor_WithNullable(t *testing.T) {
 		}
 	})
 
-	// Pointer fields produce bare value schemas: *int inlines, pointer-to-struct
-	// is a bare $ref, and json:",string" yields a plain string — none wrapped in
-	// anyOf.
+	// Pointer fields produce bare value schemas, none wrapped in anyOf: *int
+	// inlines, pointer-to-struct is a bare $ref, and json:",string" yields a
+	// plain string.
 	t.Run("pointers", func(t *testing.T) {
 		t.Parallel()
 
@@ -1597,7 +1597,7 @@ func TestGenerateFor_NamedPrimitiveInlined(t *testing.T) {
 	s, err := jsonschema.GenerateFor[Config](t.Context())
 	require.NoError(t, err)
 
-	// No $defs — named primitive types are inlined.
+	// No $defs: named primitive types are inlined.
 	assert.Nil(t, s.Defs)
 	assert.Equal(t, "integer", s.Properties["p1"].Type)
 	assert.Equal(t, "integer", s.Properties["p2"].Type)
@@ -1720,7 +1720,7 @@ type NamedTime time.Time
 func TestGenerateFor_NamedTypeWrappingBuiltinNoOverride(t *testing.T) {
 	t.Parallel()
 
-	// NamedTime wraps time.Time but is a distinct type — it should NOT get
+	// NamedTime wraps time.Time but is a distinct type; it should NOT get
 	// the time.Time override. Since time.Time is a struct, NamedTime will
 	// also be reflected as a struct.
 	s, err := jsonschema.GenerateFor[NamedTime](t.Context())
@@ -1744,7 +1744,7 @@ func TestGenerateFor_JsonStringOnNonApplicableType(t *testing.T) {
 	got, err := json.Marshal(s)
 	require.NoError(t, err)
 
-	// json:",string" on a slice should be silently ignored — schema is
+	// json:",string" on a slice should be silently ignored. The schema is
 	// the normal slice schema.
 	assert.JSONEq(t, `{
 		"$schema":"https://json-schema.org/draft/2020-12/schema",
@@ -1783,7 +1783,7 @@ func TestGenerateFor_JsonStringOnPointerType(t *testing.T) {
 }
 
 // BothProviderAndExtender implements both JSONSchemaProvider and JSONSchemaExtender.
-// Provider should take priority — Extender should NOT be called.
+// Provider should take priority; Extender should NOT be called.
 type BothProviderAndExtender struct {
 	Value string `json:"value"`
 }
@@ -1811,7 +1811,7 @@ func TestGenerateFor_ProviderTakesPriorityOverExtender(t *testing.T) {
 	s, err := jsonschema.GenerateFor[BothProviderAndExtender](t.Context())
 	require.NoError(t, err)
 
-	// Provider takes priority — description should be "from provider", not "from extender".
+	// Provider takes priority: description should be "from provider", not "from extender".
 	assert.Equal(t, "from provider", s.Description)
 }
 
@@ -2066,7 +2066,7 @@ func TestGenerateFor_NamedCompositeTypesInlined(t *testing.T) {
 	s, err := jsonschema.GenerateFor[Container](t.Context())
 	require.NoError(t, err)
 
-	// No $defs — named composite types are inlined.
+	// No $defs. Named composite types are inlined.
 	assert.Nil(t, s.Defs)
 	assert.Equal(t, []string{"null", "array"}, s.Properties["tags"].Types)
 	assert.Equal(t, []string{"null", "object"}, s.Properties["config"].Types)
@@ -2122,7 +2122,7 @@ func TestGenerateFor_ExtenderDescriptionPreservedWithComments(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	// The extender sets Description to "A list of tags" — this must not be
+	// The extender sets Description to "A list of tags"; this must not be
 	// overwritten by comment re-extraction during $defs placement.
 	assert.Equal(t, "A list of tags", s.Description)
 }
@@ -3361,11 +3361,11 @@ type byteSliceOfMarshaler []marshalByte
 func TestGenerateFor_NamedByteSlice(t *testing.T) {
 	t.Parallel()
 
-	// Encoding/json base64-encodes any byte slice — selected by the element kind
-	// (uint8), not the exact type — so named byte slices and slices of named
-	// uint8 elements are base64 strings too. The exception is an element type
-	// implementing json.Marshaler/encoding.TextMarshaler, which is encoded via
-	// that method rather than as base64.
+	// Encoding/json base64-encodes any byte slice. It chooses that path by the
+	// element kind (uint8) rather than the exact type, so named byte slices and
+	// slices of named uint8 elements are base64 strings too. The exception is an
+	// element type implementing json.Marshaler/encoding.TextMarshaler, which is
+	// encoded via that method rather than as base64.
 	const base64Schema = `{"$schema":"https://json-schema.org/draft/2020-12/schema",` +
 		`"type":["null","string"],"contentEncoding":"base64"}`
 
@@ -5399,7 +5399,8 @@ func TestGenerateFor_EmbeddedPointerToNonStruct(t *testing.T) {
 	assert.Equal(t, "null", myInt.AnyOf[1].Type)
 }
 
-// Unexported embedded non-struct type — should be excluded per encoding/json.
+// unexportedString is an unexported embedded non-struct type. Per
+// encoding/json, it is excluded from the generated schema.
 type unexportedString string //nolint:unused // Used as embedded field.
 
 type HasUnexportedEmbeddedNonStruct struct {
@@ -5428,7 +5429,8 @@ func TestGenerateFor_UnexportedEmbeddedNonStructExcluded(t *testing.T) {
 	}`, string(got))
 }
 
-// Unexported embedded interface — should be excluded per encoding/json.
+// unexportedIface is an unexported embedded interface. Per encoding/json, it
+// is excluded from the generated schema.
 type unexportedIface interface { //nolint:unused // Used as embedded field.
 	doSomething()
 }
@@ -5530,11 +5532,11 @@ func TestGenerateFor_EmbeddedBuiltinOverrideType(t *testing.T) {
 	t.Parallel()
 
 	// HasEmbeddedTime's method set includes time.Time's promoted MarshalJSON,
-	// so encoding/json serializes the whole struct via that method (a bare
-	// date-time string here — but a promoted MarshalJSON can emit any JSON
-	// value in general), and the schema is unrestricted. Reflecting an object
-	// with an "extra" property composed with the date-time string via allOf
-	// would be unsatisfiable and reject every actual serialization.
+	// so encoding/json serializes the whole struct via that method, and the
+	// schema is unrestricted. The output here is a bare date-time string, but
+	// a promoted MarshalJSON can emit any JSON value in general. Reflecting an
+	// object with an "extra" property composed with the date-time string via
+	// allOf would be unsatisfiable and reject every actual serialization.
 	s, err := jsonschema.GenerateFor[HasEmbeddedTime](t.Context())
 	require.NoError(t, err)
 

@@ -88,10 +88,10 @@ func newGenerator(opts []GenerateOption) *generator {
 	return g
 }
 
-// forRun derives one generation run from the prototype: the configuration —
-// providers, extenders, interpreters, namer, flags — is shared, since
-// generation only reads it, while the per-run maps and the context are
-// fresh, so concurrent runs from one prototype never share mutable state.
+// forRun derives one generation run from the prototype. The configuration
+// (providers, extenders, interpreters, namer, and flags) is shared, since
+// generation only reads it. The per-run maps and the context are fresh, so
+// concurrent runs from one prototype never share mutable state.
 func (g *generator) forRun(ctx context.Context) *generator {
 	run := *g
 	run.ctx = ctx
@@ -298,8 +298,8 @@ func (g *generator) schemaForType(t reflect.Type, nullable bool) (*Schema, error
 
 	// 4. Marshaler methods promoted from an embedded field. A struct whose
 	// method set includes a promoted MarshalJSON or MarshalText is serialized
-	// by that method — encoding/json resolves marshalers through the method
-	// set, so the embedded type's marshaler takes over the whole struct and
+	// by that method. Encoding/json resolves marshalers through the method set,
+	// so the embedded type's marshaler takes over the whole struct, and
 	// reflecting its fields would describe a shape that never appears.
 	// A promoted json.Marshaler can emit any JSON value, so the schema is
 	// unrestricted; a promoted TextMarshaler always emits a string. A type
@@ -1075,7 +1075,7 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 					if ft.Kind() == reflect.Interface {
 						// Embedded interface types: if they implement
 						// JSONSchemaProvider, compose via allOf. Otherwise,
-						// skip — an unrestricted schema adds no useful info.
+						// skip, since an unrestricted schema adds no useful info.
 						if g.needsAllOfComposition(ft) {
 							name := "__allof__" + ft.Name() + fmt.Sprintf("__%d", len(order))
 							record(name, fieldLevel{field: f, depth: depth, optional: e.optional}, false)
@@ -1087,7 +1087,7 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 					if ft.Kind() == reflect.Struct {
 						// Check if this embedded struct needs to be composed via allOf.
 						if g.needsAllOfComposition(ft) {
-							// Compose via allOf — treat as a single entry. A pointer
+							// Compose via allOf: treat as a single entry. A pointer
 							// embed makes the composition optional: a nil pointer
 							// contributes nothing to the marshaled object.
 							name := "__allof__" + ft.Name() + fmt.Sprintf("__%d", len(order))
@@ -1221,8 +1221,8 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 
 	// The breadth-first walk sights names level by level, so `order` lists all
 	// depth-0 names before any promoted ones. Sorting the winners by their
-	// index path restores source declaration order — a promoted field sorts at
-	// its embed's position — matching encoding/json's byIndex ordering.
+	// index path restores source declaration order, matching encoding/json's
+	// byIndex ordering. A promoted field sorts at its embed's position.
 	slices.SortStableFunc(result, func(a, b structFieldInfo) int {
 		return slices.Compare(a.field.Index, b.field.Index)
 	})
@@ -1278,7 +1278,7 @@ func (g *generator) buildFieldSchema(parentType reflect.Type, fi structFieldInfo
 	// jsonschema tag's const/enum/default values) defaults to the field's Go
 	// type. When the override coerces the field schema to a string, encoding/json
 	// also serializes the value as a quoted string, so the tag scalars must parse
-	// as strings too — otherwise a numeric const on an int field would be
+	// as strings too; otherwise a numeric const on an int field would be
 	// {"type":"string","const":5}, which the string-encoded "5" can never satisfy.
 	tagType := fieldType
 	if fi.jsonString {
@@ -1453,11 +1453,11 @@ func hasRefSiblings(s *Schema) bool {
 //
 // An embed reached through a pointer (fi.optional) contributes nothing to the
 // marshaled object when the pointer is nil, so its schema cannot be an
-// unconditional allOf branch — that would require the embed's properties in
-// every instance and reject the nil-embed serialization. The branch is
-// wrapped as anyOf[embedded, {}] instead: a non-nil embed matches the schema
-// (and its annotations still flow to unevaluatedProperties), while a nil
-// embed satisfies the empty alternative. The empty branch also admits a
+// unconditional allOf branch. Such a branch would require the embed's
+// properties in every instance and reject the nil-embed serialization. The
+// branch is wrapped as anyOf[embedded, {}] instead: a non-nil embed matches
+// the schema (and its annotations still flow to unevaluatedProperties), while
+// a nil embed satisfies the empty alternative. The empty branch also admits a
 // partial embed serialization under Draft-07 (which lacks unevaluated
 // semantics); accepting those is the price of not rejecting valid documents.
 func (g *generator) processAllOfField(fi structFieldInfo, parent *Schema) error {
@@ -1517,7 +1517,7 @@ func (g *generator) extractToDefs(t reflect.Type, s *Schema, nullable bool) (*Sc
 func (g *generator) refForType(t reflect.Type, nullable bool) *Schema {
 	name := g.typeToDefName[t]
 	if name == "" {
-		// Placeholder for cycle — register now.
+		// No entry yet: register a placeholder to break the cycle.
 		name = g.schemaName(t)
 		g.typeToDefName[t] = name
 		g.defsNameToTypes[name] = append(g.defsNameToTypes[name], t)
@@ -1572,7 +1572,7 @@ func (g *generator) applyNullable(s *Schema, t reflect.Type, nullable bool) *Sch
 		return s
 	}
 
-	// Unconstrained schema — already accepts null, so wrapping adds nothing.
+	// Unconstrained schema: already accepts null, so wrapping adds nothing.
 	if isEmptySchema(s) {
 		return s
 	}
@@ -1615,8 +1615,8 @@ func relocateConstEnumToValueBranch(s *Schema) *Schema {
 }
 
 // nullableInnerSchema returns the value (non-null) branch of a schema produced
-// by [generator.applyNullable] — an anyOf of a value schema and
-// {"type":"null"} — or nil if s does not have that exact shape.
+// by [generator.applyNullable], which is an anyOf of a value schema and
+// {"type":"null"}. It returns nil if s does not have that exact shape.
 func nullableInnerSchema(s *Schema) *Schema {
 	if len(s.AnyOf) != 2 || s.AnyOf[0] == nil || s.AnyOf[1] == nil {
 		return nil
@@ -1846,8 +1846,8 @@ func callExtender(ctx context.Context, tc TypeContext, s *jsonschema.Schema) (er
 // extendType runs type-level schema extension for a reflection-produced
 // schema: the type's own JSONSchemaExtend when implemented, then the
 // registered [TypeSchemaExtender] values ([WithTypeSchemaExtender]) in
-// registration order, so a registered extender sees — and can adjust — what
-// the type's author produced. It is called from each reflection path
+// registration order, so a registered extender sees what the type's author
+// produced and can adjust it. It is called from each reflection path
 // (structs, built-in overrides, named non-struct kinds) and never from the
 // provider paths (registered or on-type), which replace reflection entirely.
 func (g *generator) extendType(t reflect.Type, s *Schema) error {

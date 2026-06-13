@@ -25,9 +25,9 @@
 //     fields it also adds a type-specific non-zero constraint: minLength: 1 for
 //     strings, minItems: 1 for slices/arrays, minProperties: 1 for maps,
 //     const: true for bools, and a not forbidding 0 for numbers. Pointer fields
-//     only get the required constraint (not the type-specific non-zero check),
-//     since in go-playground/validator required on a pointer means "must be
-//     non-nil" — the pointed-to value may be zero. The required tag adds the
+//     only get the required constraint, not the type-specific non-zero check.
+//     In go-playground/validator, required on a pointer means "must be
+//     non-nil", so the pointed-to value may be zero. The required tag adds the
 //     field to the parent's required array even when json:",omitempty" or
 //     json:",omitzero" would normally exclude it.
 //

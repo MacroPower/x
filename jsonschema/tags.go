@@ -449,7 +449,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *Schema) err
 
 // applyTypeOverride applies a type= tag value, replacing the reflected type
 // assertion: it sets Type, clears a Types array, removes the nullable anyOf
-// wrapper a pointer field generates, and — when the new type is not numeric —
+// wrapper a pointer field generates, and, when the new type is not numeric,
 // drops the numeric bounds derived from the Go kind (an int64-reflected field
 // such as [time.Duration] carries range bounds that would otherwise survive
 // as noise on a string schema). Tag pairs apply in order, so keys after type=

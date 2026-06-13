@@ -22,7 +22,7 @@ import (
 // generation, since package loading is the cancellable work the Generate
 // context exists for. Construct it with [NewGoCommentProvider] and register
 // it with [WithDescriptionProvider]. Wrapping it composes other sources with AST
-// extraction — overrides for specific types, or a pre-extracted map
+// extraction: overrides for specific types, or a pre-extracted map
 // consulted first.
 //
 // Parsed packages are cached on the provider, keyed by import path, so a

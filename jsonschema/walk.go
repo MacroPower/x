@@ -26,24 +26,25 @@ var (
 	errStopIteration = errors.New("stop iteration")
 )
 
-// Location is the position of a schema within a containing schema document,
-// in the two synchronized forms the package uses everywhere (mirroring how
-// validation errors carry [ValidationError.InstancePath] alongside
-// [ValidationError.InstanceSegments]): the RFC 6901 JSON Pointer string and
-// the typed [Segment] slice. The zero value addresses the root. [Walk]
-// passes one to its callback, and [SubschemaEntry] carries one per child;
-// appending a child's Location to its parent's while descending yields the
-// schema path the package's own errors report.
+// Location is the position of a schema within a containing schema document.
+// It carries that position in two synchronized forms the package uses
+// everywhere: the RFC 6901 JSON Pointer string and the typed [Segment] slice.
+// This mirrors how validation errors carry [ValidationError.InstancePath]
+// alongside [ValidationError.InstanceSegments]. The zero value addresses the
+// root. [Walk] passes one to its callback, and [SubschemaEntry] carries one
+// per child; appending a child's Location to its parent's while descending
+// yields the schema path the package's own errors report.
 type Location struct {
 	// Pointer is the RFC 6901 JSON Pointer ("" addresses the root). Member
 	// keys carry ~0/~1 escaping.
 	Pointer string
 
 	// Segments is the typed form of Pointer, one [Segment] per reference
-	// token (nil addresses the root). Unlike Pointer, a member key is
-	// carried verbatim — no ~0/~1 escaping to undo — and a list index is
-	// distinguished from a property named like a number, so consumers
-	// building on the location need not re-parse the pointer string.
+	// token (nil addresses the root). It differs from Pointer in two ways: a
+	// member key is carried verbatim, with no ~0/~1 escaping to undo, and a
+	// list index is distinguished from a property named like a number.
+	// Consumers building on the location thus need not re-parse the pointer
+	// string.
 	Segments []Segment
 }
 
@@ -188,12 +189,12 @@ func Walk(s *Schema, fn WalkFunc) error {
 
 // Schemas returns an iterator over s and every schema transitively reachable
 // through [SubschemaEntries], yielding each visited schema's [Location] and
-// the schema itself in [Walk]'s pre-order: the iterator form of Walk, so a
-// read-only traversal ranges instead of threading state through a callback.
-// The traversal contract is Walk's — each distinct schema pointer is yielded
-// once, cyclic graphs terminate, map-held children come in sorted-key order
-// — and breaking out of the range loop simply stops the iteration. A nil s
-// yields nothing.
+// the schema itself in [Walk]'s pre-order. It is the iterator form of Walk:
+// a read-only traversal ranges over it instead of threading state through a
+// callback. The traversal contract is Walk's: each distinct schema pointer
+// is yielded once, cyclic graphs terminate, and map-held children come in
+// sorted-key order. Breaking out of the range loop simply stops the
+// iteration. A nil s yields nothing.
 //
 //	for loc, sub := range jsonschema.Schemas(root) {
 //		fmt.Println(loc.Pointer, sub.Type)

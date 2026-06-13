@@ -103,9 +103,9 @@ func TestNormalizeCopyOnWrite(t *testing.T) {
 	})
 }
 
-// TestValidateGoNumericKinds pins that Validate accepts Go numeric kinds that
-// encoding/json does not produce — values decoded from YAML/TOML or built by
-// hand — by normalizing them up front.
+// TestValidateGoNumericKinds pins that Validate normalizes its input up front
+// so it accepts Go numeric kinds that encoding/json does not produce. Such
+// kinds arise from values decoded from YAML/TOML or built by hand.
 func TestValidateGoNumericKinds(t *testing.T) {
 	t.Parallel()
 

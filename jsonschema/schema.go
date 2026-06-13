@@ -44,9 +44,9 @@ func MustRaw(v any) json.RawMessage {
 // return false. Returns false for nil.
 //
 // The check is strict about JSON's nil-versus-empty distinction, matching
-// the upstream Schema docs: a non-nil empty map or slice counts as set, so
-// for example Schema{Enum: []any{}} — which vacuously rejects every
-// instance — is not the true schema. The field enumeration below covers
+// the upstream Schema docs: a non-nil empty map or slice counts as set. So
+// Schema{Enum: []any{}}, for example, is not the true schema, even though it
+// vacuously rejects every instance. The field enumeration below covers
 // every exported Schema field; a maintenance test fails when an upstream
 // addition is not classified.
 func IsTrueSchema(s *Schema) bool {
@@ -96,8 +96,8 @@ func IsTrueSchema(s *Schema) bool {
 //
 // This is the shape the upstream produces when unmarshaling the JSON
 // boolean false: a Not pointing at a true schema (see [IsTrueSchema]) with
-// every sibling field zero. Any sibling — including annotations such as a
-// title — defeats the form, because the schema then marshals to an object
+// every sibling field zero. Any sibling at all defeats the form, including
+// annotations such as a title, because the schema then marshals to an object
 // rather than to false.
 func IsFalseSchema(s *Schema) bool {
 	if s == nil || s.Not == nil || !IsTrueSchema(s.Not) {

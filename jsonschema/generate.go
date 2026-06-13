@@ -72,14 +72,14 @@ func WithTypeSchemaProvider(p TypeSchemaProvider) GenerateOption {
 }
 
 // WithTypeSchemaExtender registers a [TypeSchemaExtender] that modifies
-// reflection-generated schemas, the extend counterpart of
+// reflection-generated schemas. It is the extending counterpart to
 // [WithTypeSchemaProvider]: a provider replaces a type's schema wholesale,
-// while an extender adjusts what reflection produced — the way
-// [JSONSchemaExtender] does for a type's author — for types the caller does
-// not own. Multiple extenders can be registered and are applied in
-// registration order, each running after the type's own JSONSchemaExtend.
-// Like JSONSchemaExtender, an extender is not called for types whose schema
-// a registered provider or [JSONSchemaProvider] supplied.
+// while an extender adjusts what reflection produced for types the caller does
+// not own. For those types it serves the purpose that [JSONSchemaExtender]
+// serves for a type's own author. Multiple extenders can be registered and are
+// applied in registration order, each running after the type's own
+// JSONSchemaExtend. Like JSONSchemaExtender, an extender is not called for
+// types whose schema a registered provider or [JSONSchemaProvider] supplied.
 // [TypeSchemaExtenderFunc] adapts a bare function. A nil e is ignored.
 func WithTypeSchemaExtender(e TypeSchemaExtender) GenerateOption {
 	return generateOptionFunc(func(g *generator) {

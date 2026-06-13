@@ -59,12 +59,11 @@ func buildSuiteSkips() map[string]skipReason {
 }
 
 // addECMARegexSkips records the ECMA-262 regex cases that diverge because
-// patterns use Go's RE2. RE2's \s matches only
-// [\t\n\f\r ] — not vertical tab, non-breaking space, or Unicode separators —
-// and \S is its inverse, so the membership of those characters flips. RE2 also
-// rejects the \cX control escape. The divergence is identical for both drafts,
-// and every other case in these files (\d, \w, ASCII/Unicode semantics) still
-// runs.
+// patterns use Go's RE2. RE2's \s matches only [\t\n\f\r ]; it does not match
+// vertical tab, non-breaking space, or the Unicode separators. Because \S is
+// its inverse, the membership of those characters flips. RE2 also rejects the
+// \cX control escape. The divergence is identical for both drafts, and every
+// other case in these files (\d, \w, ASCII/Unicode semantics) still runs.
 func addECMARegexSkips(skips map[string]skipReason) {
 	// Characters that ECMA 262 treats as whitespace but RE2 does not. In the
 	// \s group the "matches" case for each expects a match RE2 won't make; in

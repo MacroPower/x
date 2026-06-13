@@ -14,11 +14,11 @@ var (
 	// string, an integer type, nor an [encoding.TextMarshaler].
 	ErrUnsupportedMapKey = errors.New("unsupported map key type")
 
-	// ErrInvalidType is returned by [CheckTypeNames] and by [Compile] (and
-	// the one-shot [Validate] helper), which routes through
-	// the same check, when a schema's type keyword names something other than
-	// the seven JSON Schema type names ("null", "boolean", "string",
-	// "integer", "number", "object", "array"). A typo'd type would otherwise
+	// ErrInvalidType is returned when a schema's type keyword names something
+	// other than the seven JSON Schema type names ("null", "boolean", "string",
+	// "integer", "number", "object", "array"). It is reported by
+	// [CheckTypeNames] and by [Compile], as well as by the one-shot [Validate]
+	// helper, which routes through the same check. A typo'd type would otherwise
 	// compile cleanly and then reject every instance at runtime.
 	ErrInvalidType = errors.New("invalid type name")
 
@@ -34,12 +34,12 @@ var (
 	ErrUnknownVocabulary = errors.New("unknown required vocabulary")
 
 	// ErrNotResolved is returned by a [RefResolver] to report a URI it does
-	// not serve: the not-resolved answer that passes the URI along, to the
-	// next [ChainResolvers] link and ultimately to the unresolvable-ref
-	// handling of the entry point in effect. It follows [io/fs.ErrNotExist]:
-	// answer with the sentinel (or an error wrapping it) to decline, and
-	// match it with [errors.Is]. Any other error reports a resolution attempt
-	// that failed and stops resolution.
+	// not serve. The not-resolved answer passes the URI along to the next
+	// [ChainResolvers] link, and ultimately to the unresolvable-ref handling of
+	// the entry point in effect. It follows [io/fs.ErrNotExist]: answer with the
+	// sentinel (or an error wrapping it) to decline, and match it with
+	// [errors.Is]. Any other error reports a resolution attempt that failed and
+	// stops resolution.
 	ErrNotResolved = errors.New("schema URI not resolved")
 
 	// ErrTypeNotHandled is returned by a [TypeSchemaProvider] to report a Go
@@ -160,13 +160,13 @@ func (e *ValidationError) InstanceSegments() []Segment {
 
 // SchemaSegments returns the typed path to the keyword that triggered the
 // failure within the schema, one Segment per reference token of
-// [ValidationError.SchemaPath], outermost first — the schema-side
-// counterpart of [ValidationError.InstanceSegments], mirroring
-// [Location.Segments]. Unlike re-parsing SchemaPath, it carries member
-// keys verbatim (no ~0/~1 escaping to undo) and distinguishes a list index
-// (an allOf branch) from a property named like a number. It is populated for
-// errors produced by [Validate] and the [Validator]
-// methods; hand-constructed errors return nil.
+// [ValidationError.SchemaPath], outermost first. It is the schema-side
+// counterpart of [ValidationError.InstanceSegments] and mirrors
+// [Location.Segments]. Unlike re-parsing SchemaPath, it carries member keys
+// verbatim (no ~0/~1 escaping to undo) and distinguishes a list index (an allOf
+// branch) from a property named like a number. It is populated for errors
+// produced by [Validate] and the [Validator] methods; hand-constructed errors
+// return nil.
 func (e *ValidationError) SchemaSegments() []Segment {
 	return e.schemaSegs
 }
@@ -341,8 +341,8 @@ func (e *ValidationError) isLeaf() bool {
 }
 
 // TargetsKey reports whether the failing keyword constrains a member's key or an
-// object's or array's structure — its presence, name, size, or membership —
-// rather than the content of a value.
+// object's or array's structure rather than the content of a value. Structure
+// here means presence, name, size, or membership.
 //
 // It is true for additionalProperties, propertyNames, required, the object size
 // keywords (minProperties, maxProperties), and the array size and membership

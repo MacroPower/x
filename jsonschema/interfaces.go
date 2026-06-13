@@ -13,11 +13,11 @@ import (
 // the returned schema replaces reflection-based generation for that type.
 // If JSONSchema returns a nil schema and a nil error, the type is treated as
 // unrestricted ({}). A non-nil error aborts generation, matching
-// [JSONSchemaExtender], for a provider that cannot produce its schema — one
-// loading a schema document, for example. A panic in the method is still
-// recovered and wrapped with [ErrProviderPanic], as a backstop for genuine
-// bugs such as dereferencing a nil pointer field on the zero value the
-// method is invoked against.
+// [JSONSchemaExtender]; this lets a provider report that it cannot produce
+// its schema, as when it loads a schema document. A panic in the method
+// is still recovered and wrapped with [ErrProviderPanic], as a backstop for
+// genuine bugs such as dereferencing a nil pointer field on the zero value
+// the method is invoked against.
 //
 // The method receives the same arguments as its registered counterpart,
 // [TypeSchemaProvider.SchemaForType]: the context of the Generate call in
@@ -61,8 +61,8 @@ type TypeContext struct {
 // are registered with [WithTypeSchemaProvider] and consulted at the
 // highest-priority step of the type resolution chain, before
 // [JSONSchemaProvider] and the built-in overrides, so a provider can map
-// whole families of types — every type implementing some third-party
-// interface, every type in a package — where [WithTypeSchema] names one
+// whole families of types, such as every type implementing some third-party
+// interface or every type in a package, where [WithTypeSchema] names one
 // exact [reflect.Type] at a time.
 //
 // SchemaForType returns [ErrTypeNotHandled] (or an error wrapping it) when
@@ -74,12 +74,12 @@ type TypeContext struct {
 // documents, so one schema value may be shared across types, calls, and
 // goroutines.
 //
-// Any other non-nil error aborts generation, for a provider that recognizes
-// the type but cannot produce its schema — an I/O failure while loading a
-// schema document, for example. The context comes from the Generate call in
-// effect, so a provider doing such I/O can honor cancellation and deadlines;
-// a provider that performs no cancellable work can ignore it, following
-// [DescriptionProvider].
+// Any other non-nil error aborts generation. This lets a provider report
+// that it recognizes the type but cannot produce its schema, such as on an
+// I/O failure while loading a schema document. The context comes from the
+// Generate call in effect, so a provider doing such I/O can honor
+// cancellation and deadlines; a provider that performs no cancellable work
+// can ignore it, following [DescriptionProvider].
 //
 // A provider may be consulted several times for the same type within one
 // generation run, so SchemaForType must be deterministic.
@@ -127,12 +127,11 @@ func (f TypeSchemaExtenderFunc) ExtendSchemaForType(ctx context.Context, tc Type
 // DescriptionProvider supplies descriptions for types and struct fields during
 // generation, registered with [WithDescriptionProvider]. [NewGoCommentProvider]
 // constructs the built-in provider, which extracts Go doc comments by
-// loading and parsing package sources at generation time; any other
-// implementation substitutes another source — for example comments
-// pre-extracted at build time and shipped with a binary that deploys
-// without source files, or fixed descriptions in tests.
-// [ChainDescriptionProviders] composes providers, first non-empty
-// description wins.
+// loading and parsing package sources at generation time. Any other
+// implementation substitutes another source, such as comments pre-extracted
+// at build time and shipped with a binary that deploys without source files,
+// or fixed descriptions in tests. [ChainDescriptionProviders] composes
+// providers; the first non-empty description wins.
 //
 // An empty result leaves the description unset, letting later field-level
 // processing (the jsonschema struct tag, tag interpreters) supply one. A
@@ -166,8 +165,8 @@ type DescriptionProvider interface {
 // [DescriptionProvider]. It is the struct-adapter form of the package's
 // Func adapters, since a two-method interface has no single-function
 // conversion. A nil function answers "" for its half, so a one-off provider
-// — fixed type descriptions in a test, for example — sets only the function
-// it needs:
+// sets only the function it needs, as when a test supplies fixed type
+// descriptions:
 //
 //	jsonschema.WithDescriptionProvider(jsonschema.DescriptionProviderFuncs{
 //		TypeFunc: func(_ context.Context, tc jsonschema.TypeContext) (string, error) {
@@ -209,9 +208,9 @@ func (p DescriptionProviderFuncs) FieldDescription(ctx context.Context, fc Field
 // skipped, so optional links can be passed unconditionally, following
 // [ChainResolvers].
 //
-// It makes the composition the [DescriptionProvider] docs describe a
-// one-liner — fixed overrides for specific types consulted first, backed by
-// AST extraction:
+// The [DescriptionProvider] docs describe one such composition, which this
+// builds in a single line. Fixed overrides for specific types are consulted
+// first, backed by AST extraction:
 //
 //	jsonschema.WithDescriptionProvider(jsonschema.ChainDescriptionProviders(
 //		overrides, jsonschema.NewGoCommentProvider()))
@@ -262,9 +261,8 @@ func (c descriptionProviderChain) FieldDescription(ctx context.Context, fc Field
 // Tag is one struct tag pair handed to a [TagInterpreter]: the tag key the
 // interpreter was registered under and the field's value for it. It rides
 // beside the [FieldContext] rather than inside it, so the field context
-// stays one value shared by every field-level hook — a
-// [DescriptionProvider] receives the same FieldContext with no tag pair at
-// all.
+// stays one value shared by every field-level hook. A [DescriptionProvider],
+// for instance, receives the same FieldContext with no tag pair at all.
 type Tag struct {
 	// Key is the struct tag key the interpreter was registered under and
 	// the field carries (e.g. "validate"), so an implementation serving
@@ -363,9 +361,9 @@ type RefResolver interface {
 }
 
 // RefResolverFunc adapts a bare resolution function to a [RefResolver],
-// following [net/http.HandlerFunc], so a one-off resolver — a closure over
-// an HTTP client, for example — needs no named type ([SchemaMap] already
-// covers preloaded schemas). The [RefResolver] contract applies unchanged,
+// following [net/http.HandlerFunc], so a one-off resolver such as a closure
+// over an HTTP client needs no named type. [SchemaMap] already covers
+// preloaded schemas. The [RefResolver] contract applies unchanged,
 // including concurrency safety when the resolver is shared across Validate
 // calls.
 type RefResolverFunc func(ctx context.Context, uri string) (*Schema, error)

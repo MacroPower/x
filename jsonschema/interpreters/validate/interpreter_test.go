@@ -684,7 +684,7 @@ func TestApplyDiveErrorsWhenItemsNil(t *testing.T) {
 		Type: "object",
 		Properties: map[string]*jsonschema.Schema{
 			"items": {
-				// Items is nil — no sub-schema to dive into.
+				// Items is nil: no sub-schema to dive into.
 				Types: []string{"null", "array"},
 			},
 		},
@@ -1486,9 +1486,9 @@ func TestValidateInterpreter_UniqueOnMapIsNoOp(t *testing.T) {
 func TestValidateInterpreter_IntegerBoundExactRepresentability(t *testing.T) {
 	t.Parallel()
 
-	// Integer min/max bounds are parsed exactly and rejected when they cannot be
-	// stored as a float64 without rounding (the upstream Minimum/Maximum are
-	// *float64). A bound within +/-2^53 round-trips; one beyond it would silently
+	// The upstream Minimum/Maximum are *float64, so integer min/max bounds are
+	// parsed exactly and rejected when they cannot be stored as a float64 without
+	// rounding. A bound within +/-2^53 round-trips; one beyond it would silently
 	// round, turning a forbidden value into an accepted one, so it errors.
 	type exactInt struct {
 		Value int64 `json:"value" validate:"min=9007199254740992"`
@@ -1560,11 +1560,12 @@ func TestValidateInterpreter_IntegerBoundExactRepresentability(t *testing.T) {
 func TestValidateInterpreter_RequiredOnBoolPreservesConst(t *testing.T) {
 	t.Parallel()
 
-	// On a bool field, "required" means the value must be true. An earlier eq tag
-	// on the same field that pins the const must not be silently overwritten:
-	// eq=false,required is an impossible combination (the value cannot be both
-	// false and true) and is rejected, matching how conflicting rules are handled
-	// elsewhere; eq=true,required and bare required still yield const:true.
+	// On a bool field, "required" means the value must be true, and an earlier eq
+	// tag on the same field that pins the const must not be silently overwritten.
+	// So eq=false,required is rejected as an impossible combination, since the
+	// value cannot be both false and true; this matches how conflicting rules are
+	// handled elsewhere. Both eq=true,required and bare required still yield
+	// const:true.
 	type eqFalseRequired struct {
 		Flag bool `json:"flag" validate:"eq=false,required"`
 	}

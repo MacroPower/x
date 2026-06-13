@@ -20,7 +20,7 @@ import (
 // registries are built over it and every ref-target resolution happens
 // against it, while the output is assembled in separate working copies.
 // Resolving against pristine structure keeps one ref's expansion from
-// changing — or removing — what a later ref's JSON Pointer or anchor
+// changing (or removing) what a later ref's JSON Pointer or anchor
 // addresses.
 type inliner struct {
 	resolver RefResolver
@@ -187,9 +187,9 @@ func (f RefFallbackFunc) ResolveRefFailure(ctx context.Context, failure RefFailu
 }
 
 // WithRefFallback sets a per-reference failure policy for [Inline].
-// When expanding a reference fails - the target is unresolvable
+// When expanding a reference fails (the target is unresolvable
 // ([ErrRefResolve]), the expansion is cyclic ([ErrRefCycle]), or the
-// construct has no static expansion ([ErrRefInline], $dynamicRef) - f is
+// construct has no static expansion ([ErrRefInline], $dynamicRef)), f is
 // consulted with a [RefFailure] carrying the URI of the containing document,
 // the JSON Pointer path of the referencing schema within that document, the
 // reference value, and the error, and its [RefAction] result decides between
@@ -292,7 +292,7 @@ func Inline(ctx context.Context, s *Schema, opts ...InlineOption) (*Schema, erro
 //
 // An Inliner is safe for concurrent use by multiple goroutines, provided
 // the configured hooks are: the configuration is only read during inlining,
-// and every run keeps its own state — including its own document fetches,
+// and every run keeps its own state, including its own document fetches,
 // since fetched documents are resolved relative to each input.
 type Inliner struct {
 	proto *inliner
