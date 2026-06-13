@@ -13,31 +13,46 @@ tasks:
       - lefthook install
 
   worktree:add:
-    desc: Adds a git worktree
+    desc: Adds a git worktree for the given branch
     summary: |
-      Adds a git worktree for a branch.
+      Adds a git worktree under .worktrees/ for the given branch.
+      Creates the branch if it doesn't already exist.
 
       Args:
-        BRANCH: Branch name (required)
+        BRANCH: Branch name (required, e.g. feat/foo)
     requires:
       vars: [BRANCH]
+    vars:
+      # Branch names may contain slashes; flatten them so each worktree
+      # is a single directory under .worktrees/.
+      DIR: '{{.BRANCH | replace "/" "-"}}'
     cmds:
-      - git worktree add .worktrees/{{.BRANCH}} {{.BRANCH}}
+      - mkdir -p .worktrees
+      - cmd: git worktree add ".worktrees/{{.DIR}}" "{{.BRANCH}}"
+        if: 'git show-ref --verify --quiet "refs/heads/{{.BRANCH}}" || git show-ref --verify --quiet "refs/remotes/origin/{{.BRANCH}}"'
+      - cmd: git worktree add -b "{{.BRANCH}}" ".worktrees/{{.DIR}}"
+        if: '! git show-ref --verify --quiet "refs/heads/{{.BRANCH}}" && ! git show-ref --verify --quiet "refs/remotes/origin/{{.BRANCH}}"'
 
   worktree:ls:
-    desc: Lists git worktrees
+    desc: Lists all git worktrees
     cmds:
       - git worktree list
 
   worktree:rm:
-    desc: Removes a git worktree
-    prompt: "Remove worktree for branch '{{.BRANCH}}'?"
+    desc: Removes a git worktree and deletes the branch
+    prompt: "Remove worktree and branch '{{.BRANCH}}'?"
     summary: |
-      Removes a git worktree.
+      Removes the worktree under .worktrees/ for the given branch
+      and deletes the branch.
 
       Args:
-        BRANCH: Branch name (required)
+        BRANCH: Branch name (required, e.g. feat/foo)
     requires:
       vars: [BRANCH]
+    vars:
+      DIR: '{{.BRANCH | replace "/" "-"}}'
     cmds:
-      - git worktree remove .worktrees/{{.BRANCH}}
+      - cmd: git worktree remove ".worktrees/{{.DIR}}"
+        if: '[ -d ".worktrees/{{.DIR}}" ]'
+      - cmd: git branch -D "{{.BRANCH}}"
+        if: 'git show-ref --verify --quiet "refs/heads/{{.BRANCH}}"'
