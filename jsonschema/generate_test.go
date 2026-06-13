@@ -532,7 +532,7 @@ type Metadata struct {
 
 func (Metadata) JSONSchemaExtend(_ context.Context, _ jsonschema.TypeContext, s *jsonschema.Schema) error {
 	s.Description = "Arbitrary key-value metadata"
-	s.MinProperties = jsonschema.Ptr(1)
+	s.MinProperties = new(1)
 
 	return nil
 }
@@ -1889,8 +1889,8 @@ func TestGenerateFor_TagInterpreterIntersectsJSONSchemaTagBounds(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	assert.Equal(t, jsonschema.Ptr(5), s.Properties["strict"].MinLength)
-	assert.Equal(t, jsonschema.Ptr(3), s.Properties["loose"].MinLength)
+	assert.Equal(t, new(5), s.Properties["strict"].MinLength)
+	assert.Equal(t, new(3), s.Properties["loose"].MinLength)
 }
 
 // GenericPair is a generic type for testing $defs name transformation.
@@ -4058,8 +4058,7 @@ func TestTypeSchemaOverrideContainersUnaliased(t *testing.T) {
 		uncovered []string
 	)
 
-	for i := range schemaType.NumField() {
-		field := schemaType.Field(i)
+	for field := range schemaType.Fields() {
 		if !field.IsExported() || !isAliasingContainerType(field.Type) {
 			continue
 		}

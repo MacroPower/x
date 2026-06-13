@@ -15,14 +15,7 @@ validates JSON instances against schemas. It builds on
 [`github.com/google/jsonschema-go`](https://github.com/google/jsonschema-go) and
 adds higher-level features: customization interfaces, pluggable struct-tag
 interpretation, Go doc comment extraction, Draft-07 and Draft 2020-12 support,
-and structured instance validation with full instance/schema path tracking. The
-upstream `Schema` type is re-exported via a type alias, and `Ptr` is provided as
-a convenience helper for pointer-valued fields (e.g.
-`jsonschema.Ptr(float64(0))` for `Schema.Minimum`), so callers need only import
-this package. `Raw` and `MustRaw` marshal Go values for the raw-JSON fields
-such as `Schema.Default` (e.g. `jsonschema.MustRaw("15m")` instead of a
-hand-written `json.RawMessage` literal); `MustRaw` panics on a marshal error
-and suits values known valid at compile time.
+and structured instance validation with full instance/schema path tracking.
 
 ## Installation
 
@@ -67,8 +60,8 @@ schema := &jsonschema.Schema{
 	Type:     "object",
 	Required: []string{"name"},
 	Properties: map[string]*jsonschema.Schema{
-		"name": {Type: "string", MinLength: jsonschema.Ptr(1)},
-		"age":  {Type: "integer", Minimum: jsonschema.Ptr(0.0)},
+		"name": {Type: "string", MinLength: new(1)},
+		"age":  {Type: "integer", Minimum: new(0.0)},
 	},
 }
 
@@ -260,7 +253,7 @@ type Metadata struct {
 
 func (Metadata) JSONSchemaExtend(_ context.Context, _ jsonschema.TypeContext, s *jsonschema.Schema) error {
 	s.Description = "Arbitrary key-value metadata"
-	s.MinProperties = jsonschema.Ptr(1)
+	s.MinProperties = new(1)
 	return nil
 }
 ```

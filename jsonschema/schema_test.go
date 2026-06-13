@@ -138,8 +138,7 @@ func TestIsTrueSchemaRejectsEverySetField(t *testing.T) {
 
 	schemaType := reflect.TypeFor[jsonschema.Schema]()
 
-	for i := range schemaType.NumField() {
-		field := schemaType.Field(i)
+	for field := range schemaType.Fields() {
 		if !field.IsExported() {
 			continue
 		}
@@ -204,8 +203,7 @@ func TestSchemaSerializableFieldCoverage(t *testing.T) {
 
 	typ := reflect.TypeFor[jsonschema.Schema]()
 
-	for i := range typ.NumField() {
-		field := typ.Field(i)
+	for field := range typ.Fields() {
 		if !field.IsExported() {
 			continue
 		}

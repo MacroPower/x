@@ -489,7 +489,7 @@ func TestParseFloatMultipleOfNegative(t *testing.T) {
 	// Negative multipleOf should be rejected.
 	schema := &jsonschema.Schema{
 		Type:       "number",
-		MultipleOf: jsonschema.Ptr(-1.0),
+		MultipleOf: new(-1.0),
 	}
 
 	// Validating with a negative multipleOf should produce an error.
@@ -505,7 +505,7 @@ func TestNaNInfInSchema(t *testing.T) {
 	// NaN and Inf in schema fields corrupt JSON serialization.
 	schema := &jsonschema.Schema{
 		Type:    "number",
-		Minimum: jsonschema.Ptr(math.NaN()),
+		Minimum: new(math.NaN()),
 	}
 
 	// JSON marshaling should fail or produce invalid JSON for NaN.

@@ -22,7 +22,7 @@ func DefaultValue(v any) json.RawMessage {
 // ConstValue converts a Go value to a pointer-to-any suitable for use
 // as a JSON Schema const value.
 func ConstValue(v any) *any {
-	return jsonschema.Ptr(v)
+	return new(v)
 }
 
 // TrueSchema returns a schema that validates everything (marshals to JSON true).

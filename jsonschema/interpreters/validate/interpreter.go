@@ -255,17 +255,17 @@ func applyRequiredConstraint(s *jsonschema.Schema, baseType reflect.Type) error 
 	switch {
 	case baseType.Kind() == reflect.String:
 		if s.MinLength == nil || *s.MinLength < 1 {
-			s.MinLength = jsonschema.Ptr(1)
+			s.MinLength = new(1)
 		}
 
 	case baseType.Kind() == reflect.Slice, baseType.Kind() == reflect.Array:
 		if s.MinItems == nil || *s.MinItems < 1 {
-			s.MinItems = jsonschema.Ptr(1)
+			s.MinItems = new(1)
 		}
 
 	case baseType.Kind() == reflect.Map:
 		if s.MinProperties == nil || *s.MinProperties < 1 {
-			s.MinProperties = jsonschema.Ptr(1)
+			s.MinProperties = new(1)
 		}
 
 	case baseType.Kind() == reflect.Bool:
@@ -280,7 +280,7 @@ func applyRequiredConstraint(s *jsonschema.Schema, baseType reflect.Type) error 
 			}
 		}
 
-		s.Const = jsonschema.Ptr[any](true)
+		s.Const = new(any(true))
 
 	case isIntegerKind(baseType):
 		// Required on a numeric type means the value must not be zero.
@@ -447,7 +447,7 @@ func applyBoolEq(s *jsonschema.Schema, value string) error {
 		}
 	}
 
-	s.Const = jsonschema.Ptr[any](b)
+	s.Const = new(any(b))
 
 	return nil
 }

@@ -463,7 +463,7 @@ func TestValidationError_SchemaSegments_RenderEqualsSchemaPath(t *testing.T) {
 	schema := &jsonschema.Schema{
 		Type: "object",
 		Properties: map[string]*jsonschema.Schema{
-			"a~x": {Type: "string", MinLength: jsonschema.Ptr(3)},
+			"a~x": {Type: "string", MinLength: new(3)},
 			"b/y": {
 				AnyOf: []*jsonschema.Schema{
 					{Type: "integer"},

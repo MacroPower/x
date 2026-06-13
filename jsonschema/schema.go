@@ -16,9 +16,6 @@ type Schema = jsonschema.Schema
 // google/jsonschema-go directly.
 type ResolveOptions = jsonschema.ResolveOptions
 
-// Ptr returns a pointer to a new variable whose value is x.
-func Ptr[T any](x T) *T { return &x }
-
 // Raw marshals v with encoding/json for raw-JSON schema fields such as
 // [Schema.Default].
 func Raw(v any) (json.RawMessage, error) {

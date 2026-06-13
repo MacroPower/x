@@ -283,7 +283,7 @@ func TestValidateInterpreter_RequiredOnOmitempty(t *testing.T) {
 	// validate:"required" should add to required even with omitempty.
 	assert.Contains(t, s.Required, "name")
 	// Non-pointer string: minLength=1.
-	assert.Equal(t, jsonschema.Ptr(1), s.Properties["name"].MinLength)
+	assert.Equal(t, new(1), s.Properties["name"].MinLength)
 }
 
 func TestValidateInterpreter_RequiredOnPointer(t *testing.T) {
@@ -449,7 +449,7 @@ func TestValidateInterpreter_OrOperator(t *testing.T) {
 	require.NoError(t, err)
 
 	// Only first group before | is used.
-	assert.Equal(t, jsonschema.Ptr(float64(1)), s.Properties["value"].Minimum)
+	assert.Equal(t, new(float64(1)), s.Properties["value"].Minimum)
 	assert.Nil(t, s.Properties["value"].Maximum)
 }
 
@@ -487,8 +487,8 @@ func TestValidateInterpreter_MapKeyValidatorsIgnored(t *testing.T) {
 	// Min=1 applies to the map (minProperties), dive descends into
 	// additionalProperties (value type), keys...endkeys block (including
 	// min=3) is skipped, min=2 applies to value's minLength.
-	assert.Equal(t, jsonschema.Ptr(1), s.Properties["data"].MinProperties)
-	assert.Equal(t, jsonschema.Ptr(2), s.Properties["data"].AdditionalProperties.MinLength)
+	assert.Equal(t, new(1), s.Properties["data"].MinProperties)
+	assert.Equal(t, new(2), s.Properties["data"].AdditionalProperties.MinLength)
 }
 
 func TestValidateInterpreter_ExclusiveCollectionConstraints(t *testing.T) {
@@ -507,11 +507,11 @@ func TestValidateInterpreter_ExclusiveCollectionConstraints(t *testing.T) {
 	require.NoError(t, err)
 
 	// Gt=N → minItems: N+1 (exclusive), lt=N → maxItems: N-1 (exclusive).
-	assert.Equal(t, jsonschema.Ptr(3), s.Properties["slice_gt"].MinItems)
-	assert.Equal(t, jsonschema.Ptr(9), s.Properties["slice_lt"].MaxItems)
+	assert.Equal(t, new(3), s.Properties["slice_gt"].MinItems)
+	assert.Equal(t, new(9), s.Properties["slice_lt"].MaxItems)
 	// Gt=N → minProperties: N+1, lt=N → maxProperties: N-1.
-	assert.Equal(t, jsonschema.Ptr(1), s.Properties["map_gt"].MinProperties)
-	assert.Equal(t, jsonschema.Ptr(4), s.Properties["map_lt"].MaxProperties)
+	assert.Equal(t, new(1), s.Properties["map_gt"].MinProperties)
+	assert.Equal(t, new(4), s.Properties["map_lt"].MaxProperties)
 }
 
 func TestValidateInterpreter_MapLenConstraint(t *testing.T) {
@@ -527,8 +527,8 @@ func TestValidateInterpreter_MapLenConstraint(t *testing.T) {
 	require.NoError(t, err)
 
 	// Len=N → both minProperties and maxProperties.
-	assert.Equal(t, jsonschema.Ptr(3), s.Properties["labels"].MinProperties)
-	assert.Equal(t, jsonschema.Ptr(3), s.Properties["labels"].MaxProperties)
+	assert.Equal(t, new(3), s.Properties["labels"].MinProperties)
+	assert.Equal(t, new(3), s.Properties["labels"].MaxProperties)
 }
 
 func TestValidateInterpreter_RequiredOnPointerSlice(t *testing.T) {
@@ -579,7 +579,7 @@ func TestValidateInterpreter_RequiredOnNonPointerSlice(t *testing.T) {
 
 	// Non-pointer slice: required + minItems=1.
 	assert.Contains(t, s.Required, "tags")
-	assert.Equal(t, jsonschema.Ptr(1), s.Properties["tags"].MinItems)
+	assert.Equal(t, new(1), s.Properties["tags"].MinItems)
 }
 
 func TestValidateInterpreter_RequiredOnNonPointerMap(t *testing.T) {
@@ -596,7 +596,7 @@ func TestValidateInterpreter_RequiredOnNonPointerMap(t *testing.T) {
 
 	// Non-pointer map: required + minProperties=1.
 	assert.Contains(t, s.Required, "labels")
-	assert.Equal(t, jsonschema.Ptr(1), s.Properties["labels"].MinProperties)
+	assert.Equal(t, new(1), s.Properties["labels"].MinProperties)
 }
 
 func TestNumericConstPreservesLargeIntegers(t *testing.T) {
@@ -1072,13 +1072,13 @@ func TestValidateInterpreter_CollectionNe(t *testing.T) {
 
 	tags := s.Properties["tags"]
 	require.NotNil(t, tags.Not)
-	assert.Equal(t, jsonschema.Ptr(3), tags.Not.MinItems)
-	assert.Equal(t, jsonschema.Ptr(3), tags.Not.MaxItems)
+	assert.Equal(t, new(3), tags.Not.MinItems)
+	assert.Equal(t, new(3), tags.Not.MaxItems)
 
 	labels := s.Properties["labels"]
 	require.NotNil(t, labels.Not)
-	assert.Equal(t, jsonschema.Ptr(2), labels.Not.MinProperties)
-	assert.Equal(t, jsonschema.Ptr(2), labels.Not.MaxProperties)
+	assert.Equal(t, new(2), labels.Not.MinProperties)
+	assert.Equal(t, new(2), labels.Not.MaxProperties)
 }
 
 func TestValidateInterpreter_CollectionNeComposesWithAllOf(t *testing.T) {
@@ -1100,8 +1100,8 @@ func TestValidateInterpreter_CollectionNeComposesWithAllOf(t *testing.T) {
 	require.Len(t, tags.AllOf, 2)
 	require.NotNil(t, tags.AllOf[0].Not)
 	require.NotNil(t, tags.AllOf[1].Not)
-	assert.Equal(t, jsonschema.Ptr(2), tags.AllOf[0].Not.MinItems)
-	assert.Equal(t, jsonschema.Ptr(3), tags.AllOf[1].Not.MinItems)
+	assert.Equal(t, new(2), tags.AllOf[0].Not.MinItems)
+	assert.Equal(t, new(3), tags.AllOf[1].Not.MinItems)
 }
 
 func TestValidateInterpreter_DiveIntoFixedArray(t *testing.T) {
@@ -1122,7 +1122,7 @@ func TestValidateInterpreter_DiveIntoFixedArray(t *testing.T) {
 	require.NotEmpty(t, codes.PrefixItems, "draft 2020-12 fixed arrays use prefixItems")
 
 	for _, item := range codes.PrefixItems {
-		assert.Equal(t, jsonschema.Ptr(2), item.MinLength)
+		assert.Equal(t, new(2), item.MinLength)
 	}
 
 	s7, err := jsonschema.GenerateFor[Arr](t.Context(),
@@ -1135,7 +1135,7 @@ func TestValidateInterpreter_DiveIntoFixedArray(t *testing.T) {
 	require.NotEmpty(t, codes7.ItemsArray, "draft-07 fixed arrays use the items-array form")
 
 	for _, item := range codes7.ItemsArray {
-		assert.Equal(t, jsonschema.Ptr(2), item.MinLength)
+		assert.Equal(t, new(2), item.MinLength)
 	}
 }
 
@@ -1213,11 +1213,11 @@ func TestCollectionGtMaxIntDoesNotWrap(t *testing.T) {
 	}{
 		"slice": {
 			fieldType: reflect.TypeFor[[]string](),
-			wantMin:   jsonschema.Ptr(math.MaxInt),
+			wantMin:   new(math.MaxInt),
 		},
 		"map": {
 			fieldType: reflect.TypeFor[map[string]string](),
-			wantMin:   jsonschema.Ptr(math.MaxInt),
+			wantMin:   new(math.MaxInt),
 		},
 	}
 

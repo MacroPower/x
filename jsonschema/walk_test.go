@@ -35,8 +35,8 @@ func TestSubschemaEntriesChildren(t *testing.T) {
 	propB := &jsonschema.Schema{Type: "integer"}
 	defY := &jsonschema.Schema{Type: "object"}
 	defZ := &jsonschema.Schema{Type: "array"}
-	allOf0 := &jsonschema.Schema{MinLength: jsonschema.Ptr(1)}
-	allOf1 := &jsonschema.Schema{MaxLength: jsonschema.Ptr(2)}
+	allOf0 := &jsonschema.Schema{MinLength: new(1)}
+	allOf1 := &jsonschema.Schema{MaxLength: new(2)}
 	items := &jsonschema.Schema{Type: "number"}
 	not := &jsonschema.Schema{}
 
@@ -113,8 +113,8 @@ func TestSubschemaEntries(t *testing.T) {
 
 	propA := &jsonschema.Schema{Type: "string"}
 	escaped := &jsonschema.Schema{Type: "boolean"}
-	allOf0 := &jsonschema.Schema{MinLength: jsonschema.Ptr(1)}
-	allOf1 := &jsonschema.Schema{MaxLength: jsonschema.Ptr(2)}
+	allOf0 := &jsonschema.Schema{MinLength: new(1)}
+	allOf1 := &jsonschema.Schema{MaxLength: new(2)}
 	items := &jsonschema.Schema{Type: "number"}
 
 	tests := map[string]struct {

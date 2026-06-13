@@ -23,11 +23,11 @@ func applyCollectionMinConstraint(s *jsonschema.Schema, value string, baseType r
 	// lowers a stronger floor set by another part of the tag, regardless of order.
 	if isMapKind(baseType) {
 		if s.MinProperties == nil || n > *s.MinProperties {
-			s.MinProperties = jsonschema.Ptr(n)
+			s.MinProperties = new(n)
 		}
 	} else {
 		if s.MinItems == nil || n > *s.MinItems {
-			s.MinItems = jsonschema.Ptr(n)
+			s.MinItems = new(n)
 		}
 	}
 
@@ -49,11 +49,11 @@ func applyCollectionMaxConstraint(s *jsonschema.Schema, value string, baseType r
 	// max never raises a stronger ceiling set by another part of the tag.
 	if isMapKind(baseType) {
 		if s.MaxProperties == nil || n < *s.MaxProperties {
-			s.MaxProperties = jsonschema.Ptr(n)
+			s.MaxProperties = new(n)
 		}
 	} else {
 		if s.MaxItems == nil || n < *s.MaxItems {
-			s.MaxItems = jsonschema.Ptr(n)
+			s.MaxItems = new(n)
 		}
 	}
 
@@ -71,11 +71,11 @@ func applyCollectionLenConstraint(s *jsonschema.Schema, value string, baseType r
 	// a negative length collapses to 0.
 	n = clampNonNegative(n)
 	if isMapKind(baseType) {
-		s.MinProperties = jsonschema.Ptr(n)
-		s.MaxProperties = jsonschema.Ptr(n)
+		s.MinProperties = new(n)
+		s.MaxProperties = new(n)
 	} else {
-		s.MinItems = jsonschema.Ptr(n)
-		s.MaxItems = jsonschema.Ptr(n)
+		s.MinItems = new(n)
+		s.MaxItems = new(n)
 	}
 
 	return nil
@@ -97,11 +97,11 @@ func applyCollectionNe(s *jsonschema.Schema, value string, baseType reflect.Type
 
 	forbidden := &jsonschema.Schema{}
 	if isMapKind(baseType) {
-		forbidden.MinProperties = jsonschema.Ptr(n)
-		forbidden.MaxProperties = jsonschema.Ptr(n)
+		forbidden.MinProperties = new(n)
+		forbidden.MaxProperties = new(n)
 	} else {
-		forbidden.MinItems = jsonschema.Ptr(n)
-		forbidden.MaxItems = jsonschema.Ptr(n)
+		forbidden.MinItems = new(n)
+		forbidden.MaxItems = new(n)
 	}
 
 	if s.Not == nil {

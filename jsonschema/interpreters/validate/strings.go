@@ -22,7 +22,7 @@ func applyStringMinConstraint(s *jsonschema.Schema, value string, exclusive bool
 	// to their maximum. The floor only ever rises: a weaker (lower) min never
 	// lowers a stronger floor set by another part of the tag, regardless of order.
 	if s.MinLength == nil || n > *s.MinLength {
-		s.MinLength = jsonschema.Ptr(n)
+		s.MinLength = new(n)
 	}
 
 	return nil
@@ -42,7 +42,7 @@ func applyStringMaxConstraint(s *jsonschema.Schema, value string, exclusive bool
 	// intersect to their minimum. The ceiling only ever falls: a weaker (higher)
 	// max never raises a stronger ceiling set by another part of the tag.
 	if s.MaxLength == nil || n < *s.MaxLength {
-		s.MaxLength = jsonschema.Ptr(n)
+		s.MaxLength = new(n)
 	}
 
 	return nil
@@ -59,8 +59,8 @@ func applyStringLenConstraint(s *jsonschema.Schema, value string) error {
 	// length collapses to 0.
 	n = clampNonNegative(n)
 
-	s.MinLength = jsonschema.Ptr(n)
-	s.MaxLength = jsonschema.Ptr(n)
+	s.MinLength = new(n)
+	s.MaxLength = new(n)
 
 	return nil
 }

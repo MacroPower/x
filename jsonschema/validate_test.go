@@ -197,20 +197,20 @@ func TestValidateConst(t *testing.T) {
 		err      string
 	}{
 		"const match": {
-			schema:   &jsonschema.Schema{Const: jsonschema.Ptr(any("hello"))},
+			schema:   &jsonschema.Schema{Const: new(any("hello"))},
 			instance: "hello",
 		},
 		"const no match": {
-			schema:   &jsonschema.Schema{Const: jsonschema.Ptr(any("hello"))},
+			schema:   &jsonschema.Schema{Const: new(any("hello"))},
 			instance: "world",
 			err:      "(const)",
 		},
 		"const null": {
-			schema:   &jsonschema.Schema{Const: jsonschema.Ptr(any(nil))},
+			schema:   &jsonschema.Schema{Const: new(any(nil))},
 			instance: nil,
 		},
 		"const null rejects non-null": {
-			schema:   &jsonschema.Schema{Const: jsonschema.Ptr(any(nil))},
+			schema:   &jsonschema.Schema{Const: new(any(nil))},
 			instance: "hello",
 			err:      "(const)",
 		},
@@ -239,60 +239,60 @@ func TestValidateNumeric(t *testing.T) {
 		err      string
 	}{
 		"minimum pass": {
-			schema:   &jsonschema.Schema{Type: "number", Minimum: jsonschema.Ptr(0.0)},
+			schema:   &jsonschema.Schema{Type: "number", Minimum: new(0.0)},
 			instance: 5.0,
 		},
 		"minimum fail": {
-			schema:   &jsonschema.Schema{Type: "number", Minimum: jsonschema.Ptr(0.0)},
+			schema:   &jsonschema.Schema{Type: "number", Minimum: new(0.0)},
 			instance: -1.0,
 			err:      "(minimum)",
 		},
 		"minimum boundary": {
-			schema:   &jsonschema.Schema{Type: "number", Minimum: jsonschema.Ptr(0.0)},
+			schema:   &jsonschema.Schema{Type: "number", Minimum: new(0.0)},
 			instance: 0.0,
 		},
 		"maximum pass": {
-			schema:   &jsonschema.Schema{Type: "number", Maximum: jsonschema.Ptr(100.0)},
+			schema:   &jsonschema.Schema{Type: "number", Maximum: new(100.0)},
 			instance: 50.0,
 		},
 		"maximum fail": {
-			schema:   &jsonschema.Schema{Type: "number", Maximum: jsonschema.Ptr(100.0)},
+			schema:   &jsonschema.Schema{Type: "number", Maximum: new(100.0)},
 			instance: 101.0,
 			err:      "(maximum)",
 		},
 		"exclusiveMinimum pass": {
-			schema:   &jsonschema.Schema{Type: "number", ExclusiveMinimum: jsonschema.Ptr(0.0)},
+			schema:   &jsonschema.Schema{Type: "number", ExclusiveMinimum: new(0.0)},
 			instance: 0.1,
 		},
 		"exclusiveMinimum fail at boundary": {
-			schema:   &jsonschema.Schema{Type: "number", ExclusiveMinimum: jsonschema.Ptr(0.0)},
+			schema:   &jsonschema.Schema{Type: "number", ExclusiveMinimum: new(0.0)},
 			instance: 0.0,
 			err:      "(exclusiveMinimum)",
 		},
 		"exclusiveMaximum pass": {
-			schema:   &jsonschema.Schema{Type: "number", ExclusiveMaximum: jsonschema.Ptr(100.0)},
+			schema:   &jsonschema.Schema{Type: "number", ExclusiveMaximum: new(100.0)},
 			instance: 99.0,
 		},
 		"exclusiveMaximum fail at boundary": {
-			schema:   &jsonschema.Schema{Type: "number", ExclusiveMaximum: jsonschema.Ptr(100.0)},
+			schema:   &jsonschema.Schema{Type: "number", ExclusiveMaximum: new(100.0)},
 			instance: 100.0,
 			err:      "(exclusiveMaximum)",
 		},
 		"multipleOf pass": {
-			schema:   &jsonschema.Schema{Type: "number", MultipleOf: jsonschema.Ptr(3.0)},
+			schema:   &jsonschema.Schema{Type: "number", MultipleOf: new(3.0)},
 			instance: 9.0,
 		},
 		"multipleOf fail": {
-			schema:   &jsonschema.Schema{Type: "number", MultipleOf: jsonschema.Ptr(3.0)},
+			schema:   &jsonschema.Schema{Type: "number", MultipleOf: new(3.0)},
 			instance: 10.0,
 			err:      "(multipleOf)",
 		},
 		"json.Number integer": {
-			schema:   &jsonschema.Schema{Type: "integer", Minimum: jsonschema.Ptr(0.0)},
+			schema:   &jsonschema.Schema{Type: "integer", Minimum: new(0.0)},
 			instance: json.Number("5"),
 		},
 		"json.Number negative fail minimum": {
-			schema:   &jsonschema.Schema{Type: "integer", Minimum: jsonschema.Ptr(0.0)},
+			schema:   &jsonschema.Schema{Type: "integer", Minimum: new(0.0)},
 			instance: json.Number("-1"),
 			err:      "(minimum)",
 		},
@@ -321,20 +321,20 @@ func TestValidateString(t *testing.T) {
 		err      string
 	}{
 		"minLength pass": {
-			schema:   &jsonschema.Schema{Type: "string", MinLength: jsonschema.Ptr(3)},
+			schema:   &jsonschema.Schema{Type: "string", MinLength: new(3)},
 			instance: "abc",
 		},
 		"minLength fail": {
-			schema:   &jsonschema.Schema{Type: "string", MinLength: jsonschema.Ptr(3)},
+			schema:   &jsonschema.Schema{Type: "string", MinLength: new(3)},
 			instance: "ab",
 			err:      "(minLength)",
 		},
 		"maxLength pass": {
-			schema:   &jsonschema.Schema{Type: "string", MaxLength: jsonschema.Ptr(5)},
+			schema:   &jsonschema.Schema{Type: "string", MaxLength: new(5)},
 			instance: "hello",
 		},
 		"maxLength fail": {
-			schema:   &jsonschema.Schema{Type: "string", MaxLength: jsonschema.Ptr(5)},
+			schema:   &jsonschema.Schema{Type: "string", MaxLength: new(5)},
 			instance: "toolong",
 			err:      "(maxLength)",
 		},
@@ -366,7 +366,7 @@ func TestValidateString(t *testing.T) {
 			err:      "(format)",
 		},
 		"unicode length": {
-			schema:   &jsonschema.Schema{Type: "string", MinLength: jsonschema.Ptr(3)},
+			schema:   &jsonschema.Schema{Type: "string", MinLength: new(3)},
 			instance: "\u00e9\u00e9\u00e9",
 		},
 	}
@@ -403,20 +403,20 @@ func TestValidateArray(t *testing.T) {
 			err:      "(type)",
 		},
 		"minItems pass": {
-			schema:   &jsonschema.Schema{Type: "array", MinItems: jsonschema.Ptr(2)},
+			schema:   &jsonschema.Schema{Type: "array", MinItems: new(2)},
 			instance: []any{1.0, 2.0},
 		},
 		"minItems fail": {
-			schema:   &jsonschema.Schema{Type: "array", MinItems: jsonschema.Ptr(2)},
+			schema:   &jsonschema.Schema{Type: "array", MinItems: new(2)},
 			instance: []any{1.0},
 			err:      "(minItems)",
 		},
 		"maxItems pass": {
-			schema:   &jsonschema.Schema{Type: "array", MaxItems: jsonschema.Ptr(3)},
+			schema:   &jsonschema.Schema{Type: "array", MaxItems: new(3)},
 			instance: []any{1.0, 2.0},
 		},
 		"maxItems fail": {
-			schema:   &jsonschema.Schema{Type: "array", MaxItems: jsonschema.Ptr(1)},
+			schema:   &jsonschema.Schema{Type: "array", MaxItems: new(1)},
 			instance: []any{1.0, 2.0},
 			err:      "(maxItems)",
 		},
@@ -447,7 +447,7 @@ func TestValidateArray(t *testing.T) {
 			schema: &jsonschema.Schema{
 				Type:        "array",
 				Contains:    &jsonschema.Schema{Type: "string"},
-				MinContains: jsonschema.Ptr(0),
+				MinContains: new(0),
 			},
 			instance: []any{1.0, 2.0, 3.0},
 		},
@@ -552,20 +552,20 @@ func TestValidateObject(t *testing.T) {
 			instance: map[string]any{"name": "Alice", "extra": 42.0},
 		},
 		"minProperties pass": {
-			schema:   &jsonschema.Schema{Type: "object", MinProperties: jsonschema.Ptr(1)},
+			schema:   &jsonschema.Schema{Type: "object", MinProperties: new(1)},
 			instance: map[string]any{"a": 1.0},
 		},
 		"minProperties fail": {
-			schema:   &jsonschema.Schema{Type: "object", MinProperties: jsonschema.Ptr(1)},
+			schema:   &jsonschema.Schema{Type: "object", MinProperties: new(1)},
 			instance: map[string]any{},
 			err:      "(minProperties)",
 		},
 		"maxProperties pass": {
-			schema:   &jsonschema.Schema{Type: "object", MaxProperties: jsonschema.Ptr(2)},
+			schema:   &jsonschema.Schema{Type: "object", MaxProperties: new(2)},
 			instance: map[string]any{"a": 1.0, "b": 2.0},
 		},
 		"maxProperties fail": {
-			schema:   &jsonschema.Schema{Type: "object", MaxProperties: jsonschema.Ptr(1)},
+			schema:   &jsonschema.Schema{Type: "object", MaxProperties: new(1)},
 			instance: map[string]any{"a": 1.0, "b": 2.0},
 			err:      "(maxProperties)",
 		},
@@ -591,14 +591,14 @@ func TestValidateObject(t *testing.T) {
 		"propertyNames pass": {
 			schema: &jsonschema.Schema{
 				Type:          "object",
-				PropertyNames: &jsonschema.Schema{MaxLength: jsonschema.Ptr(3)},
+				PropertyNames: &jsonschema.Schema{MaxLength: new(3)},
 			},
 			instance: map[string]any{"foo": 1.0, "bar": 2.0},
 		},
 		"propertyNames fail": {
 			schema: &jsonschema.Schema{
 				Type:          "object",
-				PropertyNames: &jsonschema.Schema{MaxLength: jsonschema.Ptr(3)},
+				PropertyNames: &jsonschema.Schema{MaxLength: new(3)},
 			},
 			instance: map[string]any{"toolong": 1.0},
 			err:      "(maxLength)",
@@ -652,7 +652,7 @@ func TestValidateComposition(t *testing.T) {
 			schema: &jsonschema.Schema{
 				AllOf: []*jsonschema.Schema{
 					{Type: "number"},
-					{Minimum: jsonschema.Ptr(0.0)},
+					{Minimum: new(0.0)},
 				},
 			},
 			instance: 5.0,
@@ -661,7 +661,7 @@ func TestValidateComposition(t *testing.T) {
 			schema: &jsonschema.Schema{
 				AllOf: []*jsonschema.Schema{
 					{Type: "number"},
-					{Minimum: jsonschema.Ptr(10.0)},
+					{Minimum: new(10.0)},
 				},
 			},
 			instance: 5.0,
@@ -755,14 +755,14 @@ func TestValidateConditional(t *testing.T) {
 		"if-then pass": {
 			schema: &jsonschema.Schema{
 				If:   &jsonschema.Schema{Type: "string"},
-				Then: &jsonschema.Schema{MinLength: jsonschema.Ptr(3)},
+				Then: &jsonschema.Schema{MinLength: new(3)},
 			},
 			instance: "hello",
 		},
 		"if-then fail": {
 			schema: &jsonschema.Schema{
 				If:   &jsonschema.Schema{Type: "string"},
-				Then: &jsonschema.Schema{MinLength: jsonschema.Ptr(10)},
+				Then: &jsonschema.Schema{MinLength: new(10)},
 			},
 			instance: "hi",
 			err:      "(then)",
@@ -770,14 +770,14 @@ func TestValidateConditional(t *testing.T) {
 		"if-else pass": {
 			schema: &jsonschema.Schema{
 				If:   &jsonschema.Schema{Type: "string"},
-				Else: &jsonschema.Schema{Minimum: jsonschema.Ptr(0.0)},
+				Else: &jsonschema.Schema{Minimum: new(0.0)},
 			},
 			instance: 5.0,
 		},
 		"if-else fail": {
 			schema: &jsonschema.Schema{
 				If:   &jsonschema.Schema{Type: "string"},
-				Else: &jsonschema.Schema{Minimum: jsonschema.Ptr(0.0)},
+				Else: &jsonschema.Schema{Minimum: new(0.0)},
 			},
 			instance: -5.0,
 			err:      "(else)",
@@ -785,7 +785,7 @@ func TestValidateConditional(t *testing.T) {
 		"if false no then check": {
 			schema: &jsonschema.Schema{
 				If:   &jsonschema.Schema{Type: "string"},
-				Then: &jsonschema.Schema{MinLength: jsonschema.Ptr(100)},
+				Then: &jsonschema.Schema{MinLength: new(100)},
 			},
 			instance: 42.0,
 		},
@@ -821,7 +821,7 @@ func TestValidateRef(t *testing.T) {
 					"name": {Ref: "#/$defs/nameType"},
 				},
 				Defs: map[string]*jsonschema.Schema{
-					"nameType": {Type: "string", MinLength: jsonschema.Ptr(1)},
+					"nameType": {Type: "string", MinLength: new(1)},
 				},
 			},
 			instance: map[string]any{"name": "Alice"},
@@ -834,7 +834,7 @@ func TestValidateRef(t *testing.T) {
 					"name": {Ref: "#/$defs/nameType"},
 				},
 				Defs: map[string]*jsonschema.Schema{
-					"nameType": {Type: "string", MinLength: jsonschema.Ptr(1)},
+					"nameType": {Type: "string", MinLength: new(1)},
 				},
 			},
 			instance: map[string]any{"name": ""},
@@ -893,7 +893,7 @@ func TestValidateJSON(t *testing.T) {
 				Required: []string{"name"},
 				Properties: map[string]*jsonschema.Schema{
 					"name": {Type: "string"},
-					"age":  {Type: "integer", Minimum: jsonschema.Ptr(0.0)},
+					"age":  {Type: "integer", Minimum: new(0.0)},
 				},
 			},
 			json: `{"name": "Alice", "age": 30}`,
@@ -1060,7 +1060,7 @@ func TestValidateMultiError(t *testing.T) {
 		Required: []string{"name", "age"},
 		Properties: map[string]*jsonschema.Schema{
 			"name": {Type: "string"},
-			"age":  {Type: "integer", Minimum: jsonschema.Ptr(0.0)},
+			"age":  {Type: "integer", Minimum: new(0.0)},
 		},
 	}
 
@@ -1529,7 +1529,7 @@ func TestValidateDraft7RefIgnoresSiblings(t *testing.T) {
 		Properties: map[string]*jsonschema.Schema{
 			"name": {
 				Ref:       "#/definitions/nameType",
-				MinLength: jsonschema.Ptr(100), // Should be ignored in Draft-07.
+				MinLength: new(100), // Should be ignored in Draft-07.
 			},
 		},
 		Definitions: map[string]*jsonschema.Schema{
@@ -1551,7 +1551,7 @@ func TestValidateDraft2020RefWithSiblings(t *testing.T) {
 		Properties: map[string]*jsonschema.Schema{
 			"name": {
 				Ref:       "#/$defs/nameType",
-				MinLength: jsonschema.Ptr(100),
+				MinLength: new(100),
 			},
 		},
 		Defs: map[string]*jsonschema.Schema{
@@ -1869,7 +1869,7 @@ func TestValidateMaxContains(t *testing.T) {
 			schema: &jsonschema.Schema{
 				Type:        "array",
 				Contains:    &jsonschema.Schema{Type: "string"},
-				MaxContains: jsonschema.Ptr(2),
+				MaxContains: new(2),
 			},
 			instance: []any{"a", "b", 1.0},
 		},
@@ -1877,7 +1877,7 @@ func TestValidateMaxContains(t *testing.T) {
 			schema: &jsonschema.Schema{
 				Type:        "array",
 				Contains:    &jsonschema.Schema{Type: "string"},
-				MaxContains: jsonschema.Ptr(1),
+				MaxContains: new(1),
 			},
 			instance: []any{"a", "b", 1.0},
 			err:      "(maxContains)",
@@ -1886,8 +1886,8 @@ func TestValidateMaxContains(t *testing.T) {
 			schema: &jsonschema.Schema{
 				Type:        "array",
 				Contains:    &jsonschema.Schema{Type: "string"},
-				MinContains: jsonschema.Ptr(1),
-				MaxContains: jsonschema.Ptr(2),
+				MinContains: new(1),
+				MaxContains: new(2),
 			},
 			instance: []any{"a", 1.0, 2.0},
 		},
@@ -2016,7 +2016,7 @@ func TestValidateRefCausesNesting(t *testing.T) {
 		Schema: "https://json-schema.org/draft/2020-12/schema",
 		Ref:    "#/$defs/name",
 		Defs: map[string]*jsonschema.Schema{
-			"name": {Type: "string", MinLength: jsonschema.Ptr(3)},
+			"name": {Type: "string", MinLength: new(3)},
 		},
 	}
 
@@ -2040,7 +2040,7 @@ func TestValidateInstancePaths(t *testing.T) {
 			"address": {
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
-					"city": {Type: "string", MinLength: jsonschema.Ptr(1)},
+					"city": {Type: "string", MinLength: new(1)},
 				},
 			},
 		},
@@ -2088,7 +2088,7 @@ func TestValidateVocabularyResolution(t *testing.T) {
 			schema: &jsonschema.Schema{
 				Schema:    "https://json-schema.org/draft/2020-12/schema",
 				Type:      "string",
-				MinLength: jsonschema.Ptr(10),
+				MinLength: new(10),
 			},
 			instance: "hi",
 			opts: []jsonschema.ValidateOption{
@@ -2309,14 +2309,14 @@ func TestValidateVocabularyValidationDisabled(t *testing.T) {
 		"const skipped": {
 			schema: &jsonschema.Schema{
 				Schema: "https://json-schema.org/draft/2020-12/schema",
-				Const:  jsonschema.Ptr(any("hello")),
+				Const:  new(any("hello")),
 			},
 			instance: "world",
 		},
 		"minimum skipped": {
 			schema: &jsonschema.Schema{
 				Schema:  "https://json-schema.org/draft/2020-12/schema",
-				Minimum: jsonschema.Ptr(10.0),
+				Minimum: new(10.0),
 			},
 			instance: 1.0,
 		},
@@ -2330,14 +2330,14 @@ func TestValidateVocabularyValidationDisabled(t *testing.T) {
 		"minLength skipped": {
 			schema: &jsonschema.Schema{
 				Schema:    "https://json-schema.org/draft/2020-12/schema",
-				MinLength: jsonschema.Ptr(10),
+				MinLength: new(10),
 			},
 			instance: "hi",
 		},
 		"minItems skipped": {
 			schema: &jsonschema.Schema{
 				Schema:   "https://json-schema.org/draft/2020-12/schema",
-				MinItems: jsonschema.Ptr(5),
+				MinItems: new(5),
 			},
 			instance: []any{1.0},
 		},
@@ -2348,7 +2348,7 @@ func TestValidateVocabularyValidationDisabled(t *testing.T) {
 		"minProperties skipped": {
 			schema: &jsonschema.Schema{
 				Schema:        "https://json-schema.org/draft/2020-12/schema",
-				MinProperties: jsonschema.Ptr(5),
+				MinProperties: new(5),
 			},
 			instance: map[string]any{},
 		},
@@ -2400,7 +2400,7 @@ func TestValidateVocabularyApplicatorDisabled(t *testing.T) {
 			schema: &jsonschema.Schema{
 				Schema: "https://json-schema.org/draft/2020-12/schema",
 				If:     &jsonschema.Schema{Type: "string"},
-				Then:   &jsonschema.Schema{MinLength: jsonschema.Ptr(100)},
+				Then:   &jsonschema.Schema{MinLength: new(100)},
 			},
 			instance: "short",
 		},
@@ -2500,7 +2500,7 @@ func TestValidateVocabularyMetaSchemaIntegration(t *testing.T) {
 		Type:     "object",
 		Required: []string{"name"},
 		Properties: map[string]*jsonschema.Schema{
-			"name": {Type: "string", MinLength: jsonschema.Ptr(10)},
+			"name": {Type: "string", MinLength: new(10)},
 		},
 	}
 
@@ -2605,7 +2605,7 @@ func TestValidateWithRefResolver(t *testing.T) {
 			resolver: mapResolver{
 				"http://example.com/schemas.json": {
 					Defs: map[string]*jsonschema.Schema{
-						"name": {Type: "string", MinLength: jsonschema.Ptr(1)},
+						"name": {Type: "string", MinLength: new(1)},
 					},
 				},
 			},
@@ -2882,7 +2882,7 @@ func TestRefArrayIndexRFC6901Canonical(t *testing.T) {
 			AllOf: []*jsonschema.Schema{
 				{},
 				{Defs: map[string]*jsonschema.Schema{
-					"strict": {Const: jsonschema.Ptr[any]("only-this")},
+					"strict": {Const: new(any("only-this"))},
 				}},
 			},
 		}
@@ -3037,7 +3037,7 @@ func TestIfAnnotationsMergedBeforeThen(t *testing.T) {
 		Type: "object",
 		If: &jsonschema.Schema{
 			Properties: map[string]*jsonschema.Schema{
-				"type": {Const: jsonschema.Ptr[any]("a")},
+				"type": {Const: new(any("a"))},
 			},
 		},
 		Then: &jsonschema.Schema{
@@ -3115,7 +3115,7 @@ func TestContainsAnnotationsLeakOnFailure(t *testing.T) {
 	schema := &jsonschema.Schema{
 		Type:             "array",
 		Contains:         &jsonschema.Schema{Type: "string"},
-		MinContains:      jsonschema.Ptr(3),                             // Requires 3 string items
+		MinContains:      new(3),                                        // Requires 3 string items
 		UnevaluatedItems: &jsonschema.Schema{Not: &jsonschema.Schema{}}, // false
 	}
 
@@ -3150,8 +3150,8 @@ func TestMinMaxContainsDraftGated(t *testing.T) {
 			schema: &jsonschema.Schema{
 				Schema:      "http://json-schema.org/draft-07/schema#",
 				Type:        "array",
-				Contains:    &jsonschema.Schema{Const: jsonschema.Ptr[any](1.0)},
-				MinContains: jsonschema.Ptr(2),
+				Contains:    &jsonschema.Schema{Const: new(any(1.0))},
+				MinContains: new(2),
 			},
 			instance: []any{1.0},
 			wantErr:  false,
@@ -3160,8 +3160,8 @@ func TestMinMaxContainsDraftGated(t *testing.T) {
 			schema: &jsonschema.Schema{
 				Schema:      "http://json-schema.org/draft-07/schema#",
 				Type:        "array",
-				Contains:    &jsonschema.Schema{Const: jsonschema.Ptr[any](1.0)},
-				MaxContains: jsonschema.Ptr(1),
+				Contains:    &jsonschema.Schema{Const: new(any(1.0))},
+				MaxContains: new(1),
 			},
 			instance: []any{1.0, 1.0},
 			wantErr:  false,
@@ -3170,8 +3170,8 @@ func TestMinMaxContainsDraftGated(t *testing.T) {
 			schema: &jsonschema.Schema{
 				Schema:      "https://json-schema.org/draft/2020-12/schema",
 				Type:        "array",
-				Contains:    &jsonschema.Schema{Const: jsonschema.Ptr[any](1.0)},
-				MinContains: jsonschema.Ptr(2),
+				Contains:    &jsonschema.Schema{Const: new(any(1.0))},
+				MinContains: new(2),
 			},
 			instance: []any{1.0},
 			wantErr:  true,
@@ -3224,11 +3224,11 @@ func TestValidateNonFiniteFloat(t *testing.T) {
 	}
 
 	numeric := map[string]*jsonschema.Schema{
-		"minimum":          {Minimum: jsonschema.Ptr(0.0)},
-		"maximum":          {Maximum: jsonschema.Ptr(10.0)},
-		"exclusiveMinimum": {ExclusiveMinimum: jsonschema.Ptr(0.0)},
-		"exclusiveMaximum": {ExclusiveMaximum: jsonschema.Ptr(10.0)},
-		"multipleOf":       {MultipleOf: jsonschema.Ptr(2.0)},
+		"minimum":          {Minimum: new(0.0)},
+		"maximum":          {Maximum: new(10.0)},
+		"exclusiveMinimum": {ExclusiveMinimum: new(0.0)},
+		"exclusiveMaximum": {ExclusiveMaximum: new(10.0)},
+		"multipleOf":       {MultipleOf: new(2.0)},
 	}
 
 	for kw, sub := range numeric {
@@ -3438,7 +3438,7 @@ func TestFloat64MultipleOfRoundTrip(t *testing.T) {
 	// clean multiple of 0.01.
 	schema := &jsonschema.Schema{
 		Type:       "number",
-		MultipleOf: jsonschema.Ptr(0.01),
+		MultipleOf: new(0.01),
 	}
 
 	// Using Validate (not ValidateJSON) passes a float64 directly.
@@ -3805,7 +3805,7 @@ func TestDynamicRefBookendingCheck(t *testing.T) {
 		DynamicAnchor: "meta", // outermost bookend
 		Type:          "object",
 		Properties: map[string]*jsonschema.Schema{
-			"foo": {Const: jsonschema.Ptr[any]("pass")},
+			"foo": {Const: new(any("pass"))},
 		},
 		Ref:  "extended",
 		Defs: defs(),
@@ -3817,7 +3817,7 @@ func TestDynamicRefBookendingCheck(t *testing.T) {
 		// No root $dynamicAnchor: nothing to bookend to, so $dynamicRef stays static.
 		Type: "object",
 		Properties: map[string]*jsonschema.Schema{
-			"foo": {Const: jsonschema.Ptr[any]("pass")},
+			"foo": {Const: new(any("pass"))},
 		},
 		Ref:  "extended",
 		Defs: defs(),
@@ -3909,7 +3909,7 @@ func TestRegistryResolvesAnchorAfterResolve(t *testing.T) {
 			"named": {
 				Anchor:    "namedAnchor",
 				Type:      "string",
-				MinLength: jsonschema.Ptr(2),
+				MinLength: new(2),
 			},
 		},
 		Ref: "#namedAnchor",
@@ -4047,47 +4047,47 @@ func TestValidateFloat64PathForNumericKeywords(t *testing.T) {
 		err      bool
 	}{
 		"minimum pass": {
-			schema:   &jsonschema.Schema{Type: "number", Minimum: jsonschema.Ptr(1.0)},
+			schema:   &jsonschema.Schema{Type: "number", Minimum: new(1.0)},
 			instance: 2.0,
 		},
 		"minimum fail": {
-			schema:   &jsonschema.Schema{Type: "number", Minimum: jsonschema.Ptr(5.0)},
+			schema:   &jsonschema.Schema{Type: "number", Minimum: new(5.0)},
 			instance: 3.0,
 			err:      true,
 		},
 		"maximum pass": {
-			schema:   &jsonschema.Schema{Type: "number", Maximum: jsonschema.Ptr(10.0)},
+			schema:   &jsonschema.Schema{Type: "number", Maximum: new(10.0)},
 			instance: 5.0,
 		},
 		"maximum fail": {
-			schema:   &jsonschema.Schema{Type: "number", Maximum: jsonschema.Ptr(3.0)},
+			schema:   &jsonschema.Schema{Type: "number", Maximum: new(3.0)},
 			instance: 5.0,
 			err:      true,
 		},
 		"exclusiveMinimum pass": {
-			schema:   &jsonschema.Schema{Type: "number", ExclusiveMinimum: jsonschema.Ptr(1.0)},
+			schema:   &jsonschema.Schema{Type: "number", ExclusiveMinimum: new(1.0)},
 			instance: 2.0,
 		},
 		"exclusiveMinimum fail": {
-			schema:   &jsonschema.Schema{Type: "number", ExclusiveMinimum: jsonschema.Ptr(5.0)},
+			schema:   &jsonschema.Schema{Type: "number", ExclusiveMinimum: new(5.0)},
 			instance: 5.0,
 			err:      true,
 		},
 		"exclusiveMaximum pass": {
-			schema:   &jsonschema.Schema{Type: "number", ExclusiveMaximum: jsonschema.Ptr(10.0)},
+			schema:   &jsonschema.Schema{Type: "number", ExclusiveMaximum: new(10.0)},
 			instance: 5.0,
 		},
 		"exclusiveMaximum fail": {
-			schema:   &jsonschema.Schema{Type: "number", ExclusiveMaximum: jsonschema.Ptr(5.0)},
+			schema:   &jsonschema.Schema{Type: "number", ExclusiveMaximum: new(5.0)},
 			instance: 5.0,
 			err:      true,
 		},
 		"multipleOf pass": {
-			schema:   &jsonschema.Schema{Type: "number", MultipleOf: jsonschema.Ptr(3.0)},
+			schema:   &jsonschema.Schema{Type: "number", MultipleOf: new(3.0)},
 			instance: 9.0,
 		},
 		"multipleOf fail": {
-			schema:   &jsonschema.Schema{Type: "number", MultipleOf: jsonschema.Ptr(3.0)},
+			schema:   &jsonschema.Schema{Type: "number", MultipleOf: new(3.0)},
 			instance: 10.0,
 			err:      true,
 		},
@@ -4179,7 +4179,7 @@ func TestKeywordAndInstancePathTogether(t *testing.T) {
 	schema := &jsonschema.Schema{
 		Type: "object",
 		Properties: map[string]*jsonschema.Schema{
-			"name": {Type: "string", MinLength: jsonschema.Ptr(3)},
+			"name": {Type: "string", MinLength: new(3)},
 		},
 	}
 
@@ -4237,38 +4237,38 @@ func TestJSONNumberAcrossNumericKeywords(t *testing.T) {
 		err    bool
 	}{
 		"multipleOf pass": {
-			schema: &jsonschema.Schema{Type: "number", MultipleOf: jsonschema.Ptr(3.0)},
+			schema: &jsonschema.Schema{Type: "number", MultipleOf: new(3.0)},
 			data:   `9`,
 		},
 		"multipleOf fail": {
-			schema: &jsonschema.Schema{Type: "number", MultipleOf: jsonschema.Ptr(3.0)},
+			schema: &jsonschema.Schema{Type: "number", MultipleOf: new(3.0)},
 			data:   `10`,
 			err:    true,
 		},
 		"exclusiveMinimum pass": {
-			schema: &jsonschema.Schema{Type: "number", ExclusiveMinimum: jsonschema.Ptr(5.0)},
+			schema: &jsonschema.Schema{Type: "number", ExclusiveMinimum: new(5.0)},
 			data:   `6`,
 		},
 		"exclusiveMinimum fail": {
-			schema: &jsonschema.Schema{Type: "number", ExclusiveMinimum: jsonschema.Ptr(5.0)},
+			schema: &jsonschema.Schema{Type: "number", ExclusiveMinimum: new(5.0)},
 			data:   `5`,
 			err:    true,
 		},
 		"exclusiveMaximum pass": {
-			schema: &jsonschema.Schema{Type: "number", ExclusiveMaximum: jsonschema.Ptr(10.0)},
+			schema: &jsonschema.Schema{Type: "number", ExclusiveMaximum: new(10.0)},
 			data:   `9`,
 		},
 		"exclusiveMaximum fail": {
-			schema: &jsonschema.Schema{Type: "number", ExclusiveMaximum: jsonschema.Ptr(10.0)},
+			schema: &jsonschema.Schema{Type: "number", ExclusiveMaximum: new(10.0)},
 			data:   `10`,
 			err:    true,
 		},
 		"maximum pass": {
-			schema: &jsonschema.Schema{Type: "number", Maximum: jsonschema.Ptr(10.0)},
+			schema: &jsonschema.Schema{Type: "number", Maximum: new(10.0)},
 			data:   `10`,
 		},
 		"maximum fail": {
-			schema: &jsonschema.Schema{Type: "number", Maximum: jsonschema.Ptr(10.0)},
+			schema: &jsonschema.Schema{Type: "number", Maximum: new(10.0)},
 			data:   `11`,
 			err:    true,
 		},
@@ -4354,7 +4354,7 @@ func TestDeeplyNestedErrors(t *testing.T) {
 					"level2": {
 						Type: "object",
 						Properties: map[string]*jsonschema.Schema{
-							"level3": {Type: "string", MinLength: jsonschema.Ptr(1)},
+							"level3": {Type: "string", MinLength: new(1)},
 						},
 					},
 				},
@@ -4424,7 +4424,7 @@ func TestDependentSchemasWithTypeCheck(t *testing.T) {
 				DependentSchemas: map[string]*jsonschema.Schema{
 					"credit_card": {
 						Properties: map[string]*jsonschema.Schema{
-							"billing_address": {Type: "string", MinLength: jsonschema.Ptr(1)},
+							"billing_address": {Type: "string", MinLength: new(1)},
 						},
 						Required: []string{"billing_address"},
 					},
@@ -4442,7 +4442,7 @@ func TestDependentSchemasWithTypeCheck(t *testing.T) {
 				DependentSchemas: map[string]*jsonschema.Schema{
 					"credit_card": {
 						Properties: map[string]*jsonschema.Schema{
-							"billing_address": {Type: "string", MinLength: jsonschema.Ptr(1)},
+							"billing_address": {Type: "string", MinLength: new(1)},
 						},
 						Required: []string{"billing_address"},
 					},
@@ -4863,7 +4863,7 @@ func TestFalseSchemaKeyword(t *testing.T) {
 			schema: &jsonschema.Schema{
 				Type:     "array",
 				Items:    falseSchema(),
-				MaxItems: jsonschema.Ptr(10),
+				MaxItems: new(10),
 			},
 			instance:     []any{1.0},
 			keyword:      "items",
@@ -4969,7 +4969,7 @@ func TestPropertyNamesViolationIdentifiesKey(t *testing.T) {
 			Properties: map[string]*jsonschema.Schema{
 				"settings": {
 					Type:          "object",
-					PropertyNames: &jsonschema.Schema{MaxLength: jsonschema.Ptr(3)},
+					PropertyNames: &jsonschema.Schema{MaxLength: new(3)},
 				},
 			},
 		}
@@ -4992,7 +4992,7 @@ func TestPropertyNamesViolationIdentifiesKey(t *testing.T) {
 
 		schema := &jsonschema.Schema{
 			Type:          "object",
-			PropertyNames: &jsonschema.Schema{MaxLength: jsonschema.Ptr(1)},
+			PropertyNames: &jsonschema.Schema{MaxLength: new(1)},
 		}
 
 		err := jsonschema.Validate(t.Context(), schema, map[string]any{"a/b": 1.0})
@@ -5060,7 +5060,7 @@ func TestValidationErrorStructure(t *testing.T) {
 	t.Run("maximum exceeded", func(t *testing.T) {
 		t.Parallel()
 
-		schema := &jsonschema.Schema{Type: "number", Maximum: jsonschema.Ptr(10.0)}
+		schema := &jsonschema.Schema{Type: "number", Maximum: new(10.0)}
 
 		err := jsonschema.Validate(t.Context(), schema, 11.0)
 
@@ -5082,7 +5082,7 @@ func TestValidationErrorStructure(t *testing.T) {
 				"address": {
 					Type: "object",
 					Properties: map[string]*jsonschema.Schema{
-						"city": {Type: "string", MinLength: jsonschema.Ptr(3)},
+						"city": {Type: "string", MinLength: new(3)},
 					},
 				},
 			},
@@ -5261,7 +5261,7 @@ func TestDefaultDraftIsDraft2020(t *testing.T) {
 		return &jsonschema.Schema{
 			Schema:  schemaURI,
 			Ref:     "#/$defs/x",
-			Maximum: jsonschema.Ptr(5.0),
+			Maximum: new(5.0),
 			Defs: map[string]*jsonschema.Schema{
 				"x": {Type: "integer"},
 			},
@@ -5272,7 +5272,7 @@ func TestDefaultDraftIsDraft2020(t *testing.T) {
 	draft7 := &jsonschema.Schema{
 		Schema:  "http://json-schema.org/draft-07/schema#",
 		Ref:     "#/definitions/x",
-		Maximum: jsonschema.Ptr(5.0),
+		Maximum: new(5.0),
 		Definitions: map[string]*jsonschema.Schema{
 			"x": {Type: "integer"},
 		},
@@ -5330,7 +5330,7 @@ func TestSubSchemaInheritsRootDraft(t *testing.T) {
 		Schema: "http://json-schema.org/draft-07/schema#",
 		Type:   "object",
 		Properties: map[string]*jsonschema.Schema{
-			"a": {Ref: "#/definitions/x", Maximum: jsonschema.Ptr(5.0)},
+			"a": {Ref: "#/definitions/x", Maximum: new(5.0)},
 		},
 		Definitions: map[string]*jsonschema.Schema{
 			"x": {Type: "integer"},
@@ -5340,7 +5340,7 @@ func TestSubSchemaInheritsRootDraft(t *testing.T) {
 		Schema: "https://json-schema.org/draft/2020-12/schema",
 		Type:   "object",
 		Properties: map[string]*jsonschema.Schema{
-			"a": {Ref: "#/$defs/x", Maximum: jsonschema.Ptr(5.0)},
+			"a": {Ref: "#/$defs/x", Maximum: new(5.0)},
 		},
 		Defs: map[string]*jsonschema.Schema{
 			"x": {Type: "integer"},
@@ -5412,7 +5412,7 @@ func TestDraftSpecificSemanticsApplied(t *testing.T) {
 			schema: &jsonschema.Schema{
 				Schema:  "https://json-schema.org/draft/2020-12/schema",
 				Ref:     "#/$defs/x",
-				Maximum: jsonschema.Ptr(5.0),
+				Maximum: new(5.0),
 				Defs: map[string]*jsonschema.Schema{
 					"x": {Type: "integer"},
 				},
@@ -5423,7 +5423,7 @@ func TestDraftSpecificSemanticsApplied(t *testing.T) {
 			schema: &jsonschema.Schema{
 				Schema:  "http://json-schema.org/draft-07/schema#",
 				Ref:     "#/definitions/x",
-				Maximum: jsonschema.Ptr(5.0),
+				Maximum: new(5.0),
 				Definitions: map[string]*jsonschema.Schema{
 					"x": {Type: "integer"},
 				},
@@ -5598,7 +5598,7 @@ func TestValidationErrorSchemaPath(t *testing.T) {
 			"address": {
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
-					"city": {Type: "string", MinLength: jsonschema.Ptr(3)},
+					"city": {Type: "string", MinLength: new(3)},
 				},
 			},
 		},
@@ -5628,8 +5628,8 @@ func TestValidateCollectsAllErrors(t *testing.T) {
 		Required: []string{"name", "age", "tags"},
 		Properties: map[string]*jsonschema.Schema{
 			"name": {Type: "string"},
-			"age":  {Type: "integer", Minimum: jsonschema.Ptr(0.0)},
-			"tags": {Type: "array", MinItems: jsonschema.Ptr(1)},
+			"age":  {Type: "integer", Minimum: new(0.0)},
+			"tags": {Type: "array", MinItems: new(1)},
 		},
 	}
 
@@ -5867,7 +5867,7 @@ func draft2020RefSchema() *jsonschema.Schema {
 		Required:              []string{"name"},
 		UnevaluatedProperties: &jsonschema.Schema{Not: &jsonschema.Schema{}},
 		Defs: map[string]*jsonschema.Schema{
-			"nonEmpty": {Type: "string", MinLength: jsonschema.Ptr(1)},
+			"nonEmpty": {Type: "string", MinLength: new(1)},
 		},
 	}
 }
@@ -6059,7 +6059,7 @@ func TestCompileRejectsUnknownTypeNames(t *testing.T) {
 			schema: &jsonschema.Schema{Types: []string{"string", "null"}},
 		},
 		"absent type": {
-			schema: &jsonschema.Schema{MinLength: jsonschema.Ptr(1)},
+			schema: &jsonschema.Schema{MinLength: new(1)},
 		},
 	}
 
@@ -6236,11 +6236,11 @@ func numericPatternSchema() *jsonschema.Schema {
 		Properties: map[string]*jsonschema.Schema{
 			"count": {
 				Type:             "number",
-				MultipleOf:       jsonschema.Ptr(2.0),
-				Minimum:          jsonschema.Ptr(0.0),
-				Maximum:          jsonschema.Ptr(10.0),
-				ExclusiveMinimum: jsonschema.Ptr(-1.0),
-				ExclusiveMaximum: jsonschema.Ptr(11.0),
+				MultipleOf:       new(2.0),
+				Minimum:          new(0.0),
+				Maximum:          new(10.0),
+				ExclusiveMinimum: new(-1.0),
+				ExclusiveMaximum: new(11.0),
 			},
 			"code": {Type: "string", Pattern: "^[A-Z]{3}$"},
 		},
@@ -6353,9 +6353,9 @@ func TestCompileRemoteBoundsAndPatternFallback(t *testing.T) {
 	resolver := mapResolver{
 		"https://example.com/bounded.json": {
 			Type:       "number",
-			Minimum:    jsonschema.Ptr(0.0),
-			Maximum:    jsonschema.Ptr(10.0),
-			MultipleOf: jsonschema.Ptr(2.0),
+			Minimum:    new(0.0),
+			Maximum:    new(10.0),
+			MultipleOf: new(2.0),
 		},
 		"https://example.com/code.json": {Type: "string", Pattern: "^[A-Z]{3}$"},
 	}
@@ -6730,7 +6730,7 @@ func TestCompileConcurrentWithRefResolver(t *testing.T) {
 	// registries; forInstance gives each run its own copies, so concurrent use
 	// must remain race-free and correct.
 	resolver := mapResolver{
-		"https://example.com/name.json": {Type: "string", MinLength: jsonschema.Ptr(1)},
+		"https://example.com/name.json": {Type: "string", MinLength: new(1)},
 	}
 	schema := &jsonschema.Schema{
 		Schema: "https://json-schema.org/draft/2020-12/schema",

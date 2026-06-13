@@ -162,7 +162,7 @@ func TestValidateGoNumericKinds(t *testing.T) {
 			// round the instance down to the bound and wrongly pass.
 			schema: &jsonschema.Schema{
 				Type:    "integer",
-				Maximum: jsonschema.Ptr(9007199254740992.0),
+				Maximum: new(9007199254740992.0),
 			},
 			instance: int64(9007199254740993),
 			valid:    false,

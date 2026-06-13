@@ -4,14 +4,13 @@
 // It builds on top of [github.com/google/jsonschema-go/jsonschema] and adds
 // higher-level features: customization interfaces, pluggable struct tag
 // interpretation, Go doc comment extraction, multi-draft support, and
-// structured instance validation with full path tracking. The upstream
-// [Schema] type is re-exported via type alias, and [Ptr] is provided
-// as a convenience helper for creating pointer values (e.g.,
-// jsonschema.Ptr(float64(0)) for [Schema.Minimum]), so users need only import
-// this package. [Raw] and [MustRaw] marshal Go values for the raw-JSON schema
-// fields such as [Schema.Default] (e.g., jsonschema.MustRaw("15m") instead of
-// a hand-written [encoding/json.RawMessage] literal); MustRaw panics on a marshal error
-// and is intended for values known valid at compile time.
+// structured instance validation with full path tracking. The upstream [Schema]
+// type is re-exported via a type alias, so users need only import this package
+// (use the builtin new for pointer fields, e.g. new(float64(0)) for
+// [Schema.Minimum]). [Raw] and [MustRaw] marshal Go values for the raw-JSON
+// schema fields such as [Schema.Default] (e.g., jsonschema.MustRaw("15m")
+// instead of a hand-written [encoding/json.RawMessage] literal); MustRaw panics
+// on a marshal error and is intended for values known valid at compile time.
 //
 // # Entry Points
 //

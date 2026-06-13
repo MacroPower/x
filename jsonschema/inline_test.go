@@ -864,7 +864,7 @@ func TestInlineDoesNotMutateInput(t *testing.T) {
 
 	remote := &jsonschema.Schema{
 		Defs: map[string]*jsonschema.Schema{
-			"port": {Type: "integer", Minimum: jsonschema.Ptr(float64(1))},
+			"port": {Type: "integer", Minimum: new(float64(1))},
 		},
 	}
 	schema := &jsonschema.Schema{

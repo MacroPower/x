@@ -111,11 +111,11 @@ func applyNumericMinConstraint(s *jsonschema.Schema, value string, baseType refl
 	// overwrite the type floor and admit out-of-range values.
 	if exclusive {
 		if s.ExclusiveMinimum == nil || n > *s.ExclusiveMinimum {
-			s.ExclusiveMinimum = jsonschema.Ptr(n)
+			s.ExclusiveMinimum = new(n)
 		}
 	} else {
 		if s.Minimum == nil || n > *s.Minimum {
-			s.Minimum = jsonschema.Ptr(n)
+			s.Minimum = new(n)
 		}
 	}
 
@@ -141,11 +141,11 @@ func applyNumericMaxConstraint(s *jsonschema.Schema, value string, baseType refl
 	// overwrite the type ceiling and admit out-of-range values.
 	if exclusive {
 		if s.ExclusiveMaximum == nil || n < *s.ExclusiveMaximum {
-			s.ExclusiveMaximum = jsonschema.Ptr(n)
+			s.ExclusiveMaximum = new(n)
 		}
 	} else {
 		if s.Maximum == nil || n < *s.Maximum {
-			s.Maximum = jsonschema.Ptr(n)
+			s.Maximum = new(n)
 		}
 	}
 

@@ -624,46 +624,46 @@ func (g *generator) schemaForKind(t reflect.Type, nullable bool) (*Schema, error
 		// representable exactly, so the minimum stays inclusive.
 		s := &Schema{
 			Type:             typeNameInteger,
-			Minimum:          Ptr(float64(math.MinInt64)),
-			ExclusiveMaximum: Ptr(exclusiveMaxInt64),
+			Minimum:          new(float64(math.MinInt64)),
+			ExclusiveMaximum: new(exclusiveMaxInt64),
 		}
 
 		return g.applyNullable(s, t, nullable), nil
 
 	case reflect.Int8:
-		s := &Schema{Type: typeNameInteger, Minimum: Ptr(float64(math.MinInt8)), Maximum: Ptr(float64(math.MaxInt8))}
+		s := &Schema{Type: typeNameInteger, Minimum: new(float64(math.MinInt8)), Maximum: new(float64(math.MaxInt8))}
 		return g.applyNullable(s, t, nullable), nil
 
 	case reflect.Int16:
-		s := &Schema{Type: typeNameInteger, Minimum: Ptr(float64(math.MinInt16)), Maximum: Ptr(float64(math.MaxInt16))}
+		s := &Schema{Type: typeNameInteger, Minimum: new(float64(math.MinInt16)), Maximum: new(float64(math.MaxInt16))}
 		return g.applyNullable(s, t, nullable), nil
 
 	case reflect.Int32:
-		s := &Schema{Type: typeNameInteger, Minimum: Ptr(float64(math.MinInt32)), Maximum: Ptr(float64(math.MaxInt32))}
+		s := &Schema{Type: typeNameInteger, Minimum: new(float64(math.MinInt32)), Maximum: new(float64(math.MaxInt32))}
 		return g.applyNullable(s, t, nullable), nil
 
 	case reflect.Uint, reflect.Uintptr:
 		// Uint/uintptr are platform-dependent; only a lower bound is certain.
-		s := &Schema{Type: typeNameInteger, Minimum: Ptr(float64(0))}
+		s := &Schema{Type: typeNameInteger, Minimum: new(float64(0))}
 		return g.applyNullable(s, t, nullable), nil
 
 	case reflect.Uint64:
 		// Float64 cannot represent MaxUint64 (2^64-1) exactly; see the Int64 case.
 		// 2^64 is exactly representable, so an exclusive maximum of 2^64 admits
 		// exactly v <= 2^64-1 = MaxUint64, including the boundary value.
-		s := &Schema{Type: typeNameInteger, Minimum: Ptr(float64(0)), ExclusiveMaximum: Ptr(exclusiveMaxUint64)}
+		s := &Schema{Type: typeNameInteger, Minimum: new(float64(0)), ExclusiveMaximum: new(exclusiveMaxUint64)}
 		return g.applyNullable(s, t, nullable), nil
 
 	case reflect.Uint8:
-		s := &Schema{Type: typeNameInteger, Minimum: Ptr(float64(0)), Maximum: Ptr(float64(math.MaxUint8))}
+		s := &Schema{Type: typeNameInteger, Minimum: new(float64(0)), Maximum: new(float64(math.MaxUint8))}
 		return g.applyNullable(s, t, nullable), nil
 
 	case reflect.Uint16:
-		s := &Schema{Type: typeNameInteger, Minimum: Ptr(float64(0)), Maximum: Ptr(float64(math.MaxUint16))}
+		s := &Schema{Type: typeNameInteger, Minimum: new(float64(0)), Maximum: new(float64(math.MaxUint16))}
 		return g.applyNullable(s, t, nullable), nil
 
 	case reflect.Uint32:
-		s := &Schema{Type: typeNameInteger, Minimum: Ptr(float64(0)), Maximum: Ptr(float64(math.MaxUint32))}
+		s := &Schema{Type: typeNameInteger, Minimum: new(float64(0)), Maximum: new(float64(math.MaxUint32))}
 		return g.applyNullable(s, t, nullable), nil
 
 	case reflect.Float32, reflect.Float64:
@@ -751,8 +751,8 @@ func (g *generator) schemaForArray(t reflect.Type, nullable bool) (*Schema, erro
 
 	s := &Schema{
 		Type:     typeNameArray,
-		MinItems: Ptr(n),
-		MaxItems: Ptr(n),
+		MinItems: new(n),
+		MaxItems: new(n),
 	}
 	if g.draft == Draft7 {
 		s.ItemsArray = elems
