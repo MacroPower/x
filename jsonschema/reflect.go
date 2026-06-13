@@ -465,7 +465,7 @@ func (g *generator) handleOverrideType(t reflect.Type, override *Schema, nullabl
 // caller's exact typed values. Every Schema field whose type is []any, []string,
 // map[string]bool, map[string][]string, [json.RawMessage], *any, or
 // map[string]any is covered here; TestTypeSchemaOverrideContainersUnaliased in
-// generate_override_test.go fails if a future upstream field of one of those
+// generate_test.go fails if a future upstream field of one of those
 // types is added without being cloned.
 func cloneOverrideExtras(s *Schema) {
 	if s.Enum != nil {

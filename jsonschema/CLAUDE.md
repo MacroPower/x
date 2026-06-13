@@ -46,7 +46,7 @@ in-package test files by policy):
 - `TestSchemaSerializableFieldCoverage` (schema_test.go): every field must
   carry a json tag or be allowlisted, guarding the JSON round-trip that
   `Inline`'s deep copy and `ParseSchemaValue` rely on.
-- `TestTypeSchemaOverrideContainersUnaliased` (generate_override_test.go):
+- `TestTypeSchemaOverrideContainersUnaliased` (generate_test.go):
   container fields of a `WithTypeSchema` override must not stay aliased in
   generated schemas.
 
