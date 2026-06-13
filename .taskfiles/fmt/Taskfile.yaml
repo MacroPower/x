@@ -3,13 +3,20 @@ version: "3"
 set: [errexit, nounset, pipefail]
 shopt: [globstar]
 
-tasks:
-  format:
-    desc: Formats YAML, JSON, and Markdown files via Dagger
-    cmds:
-      - dagger call -y prettier format
+# Prettier checks and formats YAML, JSON, and Markdown; devbox provides it on
+# PATH (it bundles its own Node runtime). Patterns are quoted so prettier does
+# its own globbing; .prettierignore excludes dagger.json files and testdata.
+vars:
+  PRETTIER_CONFIG: ./.prettierrc.yaml
+  PRETTIER_PATTERNS: '"*.yaml" "*.md" "*.json" "**/*.yaml" "**/*.md" "**/*.json"'
 
+tasks:
   lint:
-    desc: Lints YAML, JSON, and Markdown files via Dagger
+    desc: Lints YAML, JSON, and Markdown formatting with prettier
     cmds:
-      - dagger check prettier:lint
+      - prettier --config {{.PRETTIER_CONFIG}} --check {{.PRETTIER_PATTERNS}}
+
+  format:
+    desc: Formats YAML, JSON, and Markdown with prettier
+    cmds:
+      - prettier --config {{.PRETTIER_CONFIG}} -w {{.PRETTIER_PATTERNS}}

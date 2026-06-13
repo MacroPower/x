@@ -3,8 +3,6 @@ version: "3"
 set: [errexit, nounset, pipefail]
 shopt: [globstar]
 
-# The .taskfiles/ segmentation is intentional, even where a namespace holds
-# only thin Dagger wrappers — do not flatten it into this file.
 includes:
   dagger: ./.taskfiles/dagger/Taskfile.yaml
   dev: ./.taskfiles/dev/Taskfile.yaml
@@ -12,53 +10,40 @@ includes:
   gh: ./.taskfiles/gh/Taskfile.yaml
   git: ./.taskfiles/git/Taskfile.yaml
   go: ./.taskfiles/go/Taskfile.yaml
-
-vars:
-  # Shared toolchain modules with a tests/ submodule. Keep this list in
-  # sync with the directories under toolchains/ and the toolchains matrix
-  # in .github/workflows/validate.yaml.
-  TOOLCHAIN_MODULES: bench commitlint cosign devbox go goreleaser prettier security syft zizmor
+  security: ./.taskfiles/security/Taskfile.yaml
 
 tasks:
   default:
     cmd: task -l
 
   format:
-    desc: Formats, tidies, and generates code via Dagger
-    summary: |
-      Runs every registered Dagger generator (go:tidy, go:generate,
-      ci:format) and applies the changes. Supersedes go:format and
-      fmt:format, which remain for selective runs.
+    desc: Runs all format and generate targets
     cmds:
-      - dagger generate --auto-apply
+      - task: go:tidy
+      - task: go:generate
+      - task: go:format
+      - task: fmt:format
 
   lint:
     desc: Runs all lint targets
-    deps: [go:lint, gh:lint, fmt:lint]
+    deps: [go:lint, go:tidy:check, fmt:lint, gh:actions:lint]
+
+  test:
+    desc: Runs all test targets (unit and integration)
+    deps: [go:test, go:test:integration]
 
   docs:
     desc: Runs all docs targets
     deps: [go:docs]
 
-  test:
-    desc: Runs all test targets
-    deps: [go:test]
-
-  test:toolchains:
-    desc: Runs every toolchain's fixture tests via Dagger
-    cmds:
-      - for: { var: TOOLCHAIN_MODULES }
-        cmd: dagger call -m toolchains/{{.ITEM}}/tests all
-
   check:
-    desc: Runs all checks via Dagger
-    cmds:
-      - dagger check
+    desc: Runs all checks
+    deps: [lint, test, security:scan, gh:renovate:lint]
 
   scan:
-    desc: Scans source dependencies for vulnerabilities via Dagger
+    desc: Scans source dependencies for vulnerabilities
     cmds:
-      - dagger call security scan-source
+      - task: security:scan
 
   pre-commit:
     desc: Runs all pre-commit targets

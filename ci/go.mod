@@ -1,4 +1,4 @@
-module dagger/xci
+module dagger/ci
 
 go 1.26.4
 

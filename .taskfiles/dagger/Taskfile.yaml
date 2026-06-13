@@ -8,6 +8,17 @@ vars:
   NIX_CLONE: .tmp/dagger-nix
 
 tasks:
+  test:
+    desc: Runs every published toolchain's fixture tests via Dagger
+    vars:
+      TOOLCHAIN_MODULES:
+        sh: >-
+          git ls-files 'toolchains/*/tests/dagger.json'
+          | sed -E 's#toolchains/(.+)/tests/dagger.json#\1#'
+    cmds:
+      - for: { var: TOOLCHAIN_MODULES }
+        cmd: dagger call -m toolchains/{{.ITEM}}/tests all
+
   update:
     desc: Updates the Dagger version pins and regenerates all modules
     summary: |

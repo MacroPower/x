@@ -82,15 +82,6 @@ referenced remotely as `github.com/MacroPower/x/toolchains/<module>@<ref>`.
   renders the table. Consumed by `go` and every `*-ci` module, which supply the
   project-specific stages and apply cache-busting before handing the container
   over.
-- **`xci`** — This repository's own CI module (registered as `ci` in the
-  root `dagger.json`), mirroring the `*-ci` modules consumers write. It is
-  not designed for remote consumption: `test-unit`/`test-integration`
-  (+check) surface the workspace test suite with the race detector,
-  `lint-renovate` (+check) validates the Renovate configuration with
-  renovate-config-validator installed at a pinned version in a Node
-  container, and `format` (+generate) merges `go.format-go` with
-  `prettier.format`. It has no `tests/` submodule; `dagger check` in this
-  repo's CI exercises every function directly.
 - **`devbox`** — Runs commands inside a project's Devbox (Nix-backed)
   environment so CI uses the same toolchain as local development: `base` (the
   devbox image with the Nix store mounted as a seeded cache volume), `install`
@@ -113,12 +104,14 @@ Each module is self-contained: its own `go.mod`/`go.sum` and no relative
 `include`, so it can be sourced remotely. Tests live in per-module `tests/`
 submodules that run against synthetic fixtures rather than any real project
 layout — most from a `tests/testdata/fixture` directory, though some modules
-(bench, commitlint, cosign) construct fixtures inline. Run them with
-`dagger call -m tests all` from a module directory.
+(bench, commitlint, cosign) construct fixtures inline. Run a single module's
+suite with `dagger call -m tests all` from its directory, or `task dagger:test`
+from the repo root to run every published toolchain's suite — it discovers them
+from the `tests/` submodules.
 
 ## Conventions
 
-- **engineVersion** is pinned to `v0.21.4` across every `dagger.json` here.
+- **engineVersion** is pinned across every `dagger.json` here.
   A consumer's root `dagger.json` and CI must match exactly (the engine
   enforces it), so engine bumps are coordinated across all adopters.
 - **Ignore patterns belong in the consumer's root `dagger.json`**
@@ -127,10 +120,6 @@ layout — most from a `tests/testdata/fixture` directory, though some modules
 - **`cacheNamespace`** defaults to each module's canonical path. Consumers
   should override it to their own repo path so cache volumes do not collide
   between projects sharing an engine.
-- **`go.test-unit` is not a `+check`.** Consuming projects that want it under
-  `dagger check` wrap it in their own CI toolchain (so they can supply a base
-  with project-specific `aptPackages`). Only `lint` and `check-tidy` are
-  checks here.
 - No `go.work`: the `tests/` submodules share the Dagger-conventional
   module path `dagger/tests`, so they cannot share one workspace, and a
   `go.work` at this level would pull the non-member test dirs into workspace

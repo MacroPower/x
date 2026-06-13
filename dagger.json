@@ -3,32 +3,8 @@
   "engineVersion": "v0.21.4",
   "toolchains": [
     {
-      "name": "go",
-      "source": "toolchains/go",
-      "customizations": [
-        {
-          "argument": "source",
-          "ignore": [
-            ".git",
-            ".claude",
-            ".worktrees",
-            ".devbox",
-            ".task",
-            ".test",
-            ".tmp",
-            "dist",
-            "toolchains"
-          ]
-        },
-        {
-          "argument": "race",
-          "default": "true"
-        }
-      ]
-    },
-    {
-      "name": "security",
-      "source": "toolchains/security",
+      "name": "ci",
+      "source": "ci",
       "customizations": [
         {
           "argument": "source",
@@ -67,71 +43,8 @@
       ]
     },
     {
-      "name": "prettier",
-      "source": "toolchains/prettier",
-      "customizations": [
-        {
-          "argument": "source",
-          "ignore": [
-            ".git",
-            ".claude",
-            ".worktrees",
-            ".devbox",
-            ".task",
-            ".test",
-            ".tmp",
-            "dist"
-          ]
-        }
-      ]
-    },
-    {
-      "name": "zizmor",
-      "source": "toolchains/zizmor",
-      "customizations": [
-        {
-          "argument": "source",
-          "ignore": [
-            ".git",
-            ".claude",
-            ".worktrees",
-            ".devbox",
-            ".task",
-            ".test",
-            ".tmp",
-            "dist",
-            "toolchains"
-          ]
-        },
-        {
-          "argument": "configPath",
-          "default": ".github/zizmor.yaml"
-        }
-      ]
-    },
-    {
       "name": "commitlint",
       "source": "toolchains/commitlint"
-    },
-    {
-      "name": "ci",
-      "source": "toolchains/xci",
-      "customizations": [
-        {
-          "argument": "source",
-          "ignore": [
-            ".git",
-            ".claude",
-            ".worktrees",
-            ".devbox",
-            ".task",
-            ".test",
-            ".tmp",
-            "dist",
-            "toolchains"
-          ]
-        }
-      ]
     }
   ]
 }

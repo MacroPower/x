@@ -3,54 +3,108 @@ version: "3"
 set: [errexit, nounset, pipefail]
 shopt: [globstar]
 
+# Go tasks call the local toolchain (go, golangci-lint) directly; devbox
+# provides both on PATH. The repo is a go.work workspace with no root go.mod,
+# so the default ./... pattern matches nothing at the root and is instead
+# expressed as per-module ./<dir>/... patterns. GO_MODULES is the list of
+# workspace module directories, derived from go.work so it never drifts.
+vars:
+  GO_MODULES:
+    sh: |
+      go work edit -json | grep -oE '"DiskPath": *"[^"]*"' | sed -E 's/^"DiskPath": *"//; s/"$//; s|^\./||' | xargs
+  GO_PKGS:
+    sh: for m in {{.GO_MODULES}}; do printf './%s/... ' "$m"; done
+  TEST_TIMEOUT: 30m
+  # Test names matching this regex are integration tests: go:test skips them,
+  # go:test:integration selects them.
+  INTEGRATION_PATTERN: Integration
+  DEADCODE_VERSION: v0.45.0 # renovate: datasource=go depName=golang.org/x/tools
+
 tasks:
-  format:
-    desc: Formats Go code via Dagger
-    cmds:
-      - dagger call -y go format-go
-
   lint:
-    desc: Lints Go code and module files via Dagger
+    desc: Lints Go code with golangci-lint across all workspace modules
     cmds:
-      - dagger check go:lint go:check-tidy
+      - for: { var: GO_MODULES }
+        cmd: cd {{.ITEM}} && golangci-lint run
 
-  test:
-    desc: Runs Go tests via Dagger
-    summary: |
-      Runs Go tests via Dagger.
-
-      For a single package or extra flags, call the toolchain directly:
-        dagger call go test --pkgs=./magicschema/... --run=TestName
+  format:
+    desc: Formats Go code with golangci-lint --fix across all workspace modules
     cmds:
-      - dagger check ci:test-unit ci:test-integration
-
-  cover:
-    desc: Runs Go tests with coverage via Dagger
-    cmds:
-      - dagger call go test-coverage --output=.test/coverage.txt
+      - for: { var: GO_MODULES }
+        cmd: cd {{.ITEM}} && golangci-lint run --fix
 
   tidy:
-    desc: Tidies go.mod and go.sum across all modules via Dagger
+    desc: Tidies go.mod and go.sum across all workspace modules
     cmds:
-      - dagger call -y go tidy
+      - for: { var: GO_MODULES }
+        cmd: cd {{.ITEM}} && go mod tidy
 
-  gen:
-    desc: Generates Go code via Dagger
+  tidy:check:
+    desc: Verifies go.mod and go.sum are tidy across all workspace modules
+    summary: |
+      Runs `go mod tidy -diff` in each module, which reports the changes tidy
+      would make and exits non-zero if any are needed, without modifying the
+      files. Being read-only, it is safe to run alongside go:lint and go:test
+      and needs no .git (the check runs inside the devbox container in CI).
     cmds:
-      - dagger call -y go generate
+      - for: { var: GO_MODULES }
+        cmd: cd {{.ITEM}} && go mod tidy -diff
+
+  test:
+    desc: Runs Go unit tests (skips integration tests) with the race detector
+    summary: |
+      Runs the workspace unit tests with the race detector.
+
+      For a single package or extra flags, call go directly:
+        go test -run TestName ./magicschema/...
+    cmds:
+      - go test -timeout={{.TEST_TIMEOUT}} -skip {{.INTEGRATION_PATTERN}} -race {{.GO_PKGS}}
+
+  test:integration:
+    desc: Runs Go integration tests with the race detector
+    cmds:
+      - go test -timeout={{.TEST_TIMEOUT}} -run {{.INTEGRATION_PATTERN}} -race {{.GO_PKGS}}
+
+  test:cover:
+    desc: Runs all Go tests with coverage profiling
+    summary: |
+      Runs every test (unit and integration) with -coverprofile, which
+      disables Go's test result cache. Writes the profile to OUTPUT.
+
+      Args:
+        OUTPUT: Coverage profile path (default: .test/coverage.txt)
+    vars:
+      OUTPUT: '{{.OUTPUT | default ".test/coverage.txt"}}'
+    env:
+      CGO_ENABLED: "1"
+    cmds:
+      - mkdir -p .test
+      - go test -timeout={{.TEST_TIMEOUT}} -race -coverprofile={{.OUTPUT}} {{.GO_PKGS}}
+
+  generate:
+    desc: Runs go generate across all workspace modules
+    cmds:
+      - go generate {{.GO_PKGS}}
 
   deadcode:
-    desc: Finds dead code in Go via Dagger
+    desc: Reports unreachable Go functions (advisory)
+    label: "go:deadcode {{.PKG}}"
+    summary: |
+      Reports unreachable functions via the golang.org/x/tools deadcode
+      analyzer. Advisory only; not part of the standard gate.
+
+      Args:
+        PKG: Go package(s) to analyze (default: every workspace module)
+    vars:
+      PKG: "{{.PKG | default .GO_PKGS}}"
     cmds:
-      - dagger call go lint-deadcode
+      - go run golang.org/x/tools/cmd/deadcode@{{.DEADCODE_VERSION}} {{.PKG}}
 
   bench:
-    desc: Runs Go benchmarks on the host
+    desc: Runs Go benchmarks
     label: "go:bench {{.PKG}}"
     summary: |
-      Runs Go benchmarks on the host. Benchmarks measure host performance,
-      so they stay outside Dagger where containerization would distort
-      results.
+      Runs Go benchmarks.
 
       Args:
         PKG: Go package to benchmark (default: go.jacobcolvin.com/x/...)
@@ -64,22 +118,11 @@ tasks:
     cmds:
       - go test -bench=. -benchmem {{.FLAGS}} {{.PKG}}
 
-  benchmark:
-    desc: Measures pipeline stage timings via Dagger
-    cmds:
-      - dagger call go benchmark-summary
-
-  benchmark:parallel:
-    desc: Measures full-pipeline wall-clock time via Dagger (parallel)
-    cmds:
-      - dagger call go benchmark-summary --parallel
-
   docs:
     desc: Prints Go documentation for all packages
     label: "go:docs {{.PKG}}"
     summary: |
-      Prints Go documentation for all packages. Runs on the host for fast,
-      interactive reading.
+      Prints Go documentation for all packages.
 
       Args:
         PKG: Go package(s) to document (default: go.jacobcolvin.com/x/...)

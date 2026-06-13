@@ -15,7 +15,37 @@ permissions:
 
 jobs:
   check:
-    name: check
+    name: check (${{ matrix.task }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Each entry is a function on the `ci` toolchain that runs the matching
+        # Taskfile target inside the devbox environment (dagger -> devbox ->
+        # task), except lint-renovate, which runs renovate-config-validator in
+        # a Node container. Mirrors the gates developers run via `task check`.
+        task:
+          - lint
+          - test
+          - test-integration
+          - security
+          - lint-renovate
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Run ci ${{ matrix.task }}
+        uses: dagger/dagger-for-github@v8.4.1
+        with:
+          version: "v0.21.4"
+          call: ci ${{ matrix.task }}
+          cloud-token: ${{ secrets.DAGGER_CLOUD_TOKEN }}
+          enable-github-summary: "true"
+
+  coverage:
+    name: coverage
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -23,20 +53,12 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Run all checks
-        uses: dagger/dagger-for-github@v8.4.1
-        with:
-          version: "v0.21.4"
-          verb: check
-          cloud-token: ${{ secrets.DAGGER_CLOUD_TOKEN }}
-          enable-github-summary: "true"
-
       - name: Export coverage profile
         if: ${{ !cancelled() }}
         uses: dagger/dagger-for-github@v8.4.1
         with:
           version: "v0.21.4"
-          call: go test-coverage --output=coverage.txt
+          call: ci test-coverage --output=coverage.txt
           cloud-token: ${{ secrets.DAGGER_CLOUD_TOKEN }}
           enable-github-summary: "true"
 

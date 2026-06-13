@@ -5,23 +5,24 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build & Test Commands
 
 ```bash
-task format # Format, tidy, and generate (dagger generate --auto-apply)
-task lint   # Lint only (dagger check, lint checks)
-task test   # Run all tests (dagger check ci:test-unit)
-task check  # Everything CI runs (dagger check)
+task format # Format and tidy code, run generators
+task lint   # golangci-lint, go mod tidy check, prettier, zizmor
+task test   # Run all tests (unit + integration)
+task check  # Everything CI runs (lint + test + renovate validation)
 ```
 
-Quality gates run through this repo's own Dagger toolchains (see
-`toolchains/CLAUDE.md`); the `dagger` CLI must be on PATH and match the
-`engineVersion` pinned in `dagger.json`.
+Devbox provides all required tools on PATH automatically.
+
+CI runs these same tasks inside the devbox environment via the `ci` Dagger
+toolchain (`dagger call ci <task>`), so local and CI execute identical commands.
 
 ## Architecture
 
-```bash
-task docs # Print all package docs
-```
+Monorepo. Packages have their own CLAUDE.md file with more information.
 
 ## Code Style
+
+All packages follow similar conventions.
 
 ### Go Conventions
 
