@@ -1,6 +1,6 @@
 module go.jacobcolvin.com/x/jsonschema
 
-go 1.25.5
+go 1.26.0
 
 require (
 	github.com/google/jsonschema-go v0.4.3
