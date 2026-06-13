@@ -17,7 +17,7 @@ vars:
   # Shared toolchain modules with a tests/ submodule. Keep this list in
   # sync with the directories under toolchains/ and the toolchains matrix
   # in .github/workflows/validate.yaml.
-  TOOLCHAIN_MODULES: bench cosign devbox go goreleaser prettier security syft zizmor
+  TOOLCHAIN_MODULES: bench commitlint cosign devbox go goreleaser prettier security syft zizmor
 
 tasks:
   default:
