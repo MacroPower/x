@@ -92,64 +92,54 @@ func uintExactlyRepresentableAsFloat64(n uint64) bool {
 	return n <= maxExact
 }
 
-// applyNumericMinConstraint applies min/gte or gt to a numeric schema.
-func applyNumericMinConstraint(s *jsonschema.Schema, value string, baseType reflect.Type, exclusive bool) error {
+// tightenNumericBound parses a numeric tag bound and intersects it with any
+// bound already on the schema. The rule's strictness selects the target field:
+// the exclusive pointer for gt/lt, otherwise the inclusive one. The tightens
+// predicate reports whether the new bound n is stronger than an existing one
+// (n > existing for a floor, n < existing for a ceiling), so rules in a validate
+// tag are ANDed and a tag bound never weakens a stronger bound set elsewhere (a
+// repeated rule, or the type-derived bound for a sized integer);
+// inclusiveName/exclusiveName label a parse error.
+func tightenNumericBound(value string, baseType reflect.Type, exclusive bool,
+	inclusiveField, exclusiveField **float64, inclusiveName, exclusiveName string,
+	tightens func(n, existing float64) bool,
+) error {
 	n, err := parseNumericBound(value, baseType)
 	if err != nil {
-		name := "min"
+		name := inclusiveName
 		if exclusive {
-			name = "gt"
+			name = exclusiveName
 		}
 
 		return fmt.Errorf("validate tag: %s: %w", name, err)
 	}
 
-	// Rules in a validate tag are ANDed, so overlapping lower bounds intersect to
-	// their maximum: a tag floor never lowers a stronger floor set elsewhere (a
-	// repeated min, or the type-derived minimum for a sized integer). Without this
-	// a tag bound the field's Go type can never reach (min=-300 on an int8) would
-	// overwrite the type floor and admit out-of-range values.
+	field := inclusiveField
 	if exclusive {
-		if s.ExclusiveMinimum == nil || n > *s.ExclusiveMinimum {
-			s.ExclusiveMinimum = new(n)
-		}
-	} else {
-		if s.Minimum == nil || n > *s.Minimum {
-			s.Minimum = new(n)
-		}
+		field = exclusiveField
+	}
+
+	if *field == nil || tightens(n, **field) {
+		*field = new(n)
 	}
 
 	return nil
 }
 
-// applyNumericMaxConstraint applies max/lte or lt to a numeric schema.
+// applyNumericMinConstraint applies min/gte or gt to a numeric schema by raising
+// the minimum (or exclusiveMinimum) floor. A tag bound the field's Go type can
+// never reach (min=-300 on an int8) does not lower the stronger type floor.
+func applyNumericMinConstraint(s *jsonschema.Schema, value string, baseType reflect.Type, exclusive bool) error {
+	return tightenNumericBound(value, baseType, exclusive, &s.Minimum, &s.ExclusiveMinimum, "min", "gt",
+		func(n, existing float64) bool { return n > existing })
+}
+
+// applyNumericMaxConstraint applies max/lte or lt to a numeric schema by lowering
+// the maximum (or exclusiveMaximum) ceiling. A tag bound the field's Go type can
+// never reach (max=200 on an int8) does not raise the stronger type ceiling.
 func applyNumericMaxConstraint(s *jsonschema.Schema, value string, baseType reflect.Type, exclusive bool) error {
-	n, err := parseNumericBound(value, baseType)
-	if err != nil {
-		name := "max"
-		if exclusive {
-			name = "lt"
-		}
-
-		return fmt.Errorf("validate tag: %s: %w", name, err)
-	}
-
-	// Rules in a validate tag are ANDed, so overlapping upper bounds intersect to
-	// their minimum: a tag ceiling never raises a stronger ceiling set elsewhere (a
-	// repeated max, or the type-derived maximum for a sized integer). Without this
-	// a tag bound the field's Go type can never reach (max=200 on an int8) would
-	// overwrite the type ceiling and admit out-of-range values.
-	if exclusive {
-		if s.ExclusiveMaximum == nil || n < *s.ExclusiveMaximum {
-			s.ExclusiveMaximum = new(n)
-		}
-	} else {
-		if s.Maximum == nil || n < *s.Maximum {
-			s.Maximum = new(n)
-		}
-	}
-
-	return nil
+	return tightenNumericBound(value, baseType, exclusive, &s.Maximum, &s.ExclusiveMaximum, "max", "lt",
+		func(n, existing float64) bool { return n < existing })
 }
 
 // applyNumericOneOf applies oneof=1 2 3 to a numeric schema.
