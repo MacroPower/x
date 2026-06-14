@@ -6,21 +6,6 @@ referenced remotely as `github.com/MacroPower/x/toolchains/<module>@<ref>`.
 
 ## Modules
 
-- **`go`** — Go CI toolchain: `build`/`binary`, `test`/`test-unit`/
-  `test-integration`/`test-coverage`, `lint` (golangci-lint, installed onto
-  the Go base from the GitHub release binary to avoid a Docker Hub pull and
-  reuse the Go caches), `lint-deadcode`
-  (advisory `golang.org/x/tools` deadcode analysis, not a `+check`),
-  `format-go` (not `+generate`; consumers compose it into their own `*-ci`
-  Format alongside prettier), `generate`, `tidy`/`check-tidy`, multi-module
-  discovery (`modules`), `ensure-git-init`/`ensure-git-repo`, and benchmark
-  stages (timed via the shared `bench` module). Understands `go.work`
-  workspaces: the `goMod` sync includes `go.work`/`go.work.sum` and nested
-  `go.mod`/`go.sum` files (excluding worktree/toolchain/testdata trees so
-  stray module files do not bust the download cache), and the default
-  `./...` package pattern expands into per-module `./<dir>/...` patterns
-  when the source root has a `go.work` but no `go.mod` (where `./...` would
-  match nothing).
 - **`security`** — Trivy scanner: `scan-source`/`scan-image` (gate scans that
   fail on findings) and `scan-source-sarif`/`scan-image-sarif` (non-gating,
   emit SARIF for GitHub Code Scanning).
@@ -31,11 +16,6 @@ referenced remotely as `github.com/MacroPower/x/toolchains/<module>@<ref>`.
   container, exposed so consumers can wrap it for benchmarks without a `go`
   dependency). `image`/`config-path`/`workflows-dir` are optional overrides.
   Mirrors `security`'s self-contained, literal-defaulting shape.
-- **`prettier`** — Prettier formatter/linter for YAML/JSON/Markdown: `lint`
-  (+check, `prettier --check`), `format` (returns a `Changeset` the consumer
-  merges with its other formatters, e.g. gofmt), and `lint-base` (the configured
-  container, for benchmarks). `image`/`version`/`config-path`/`patterns`/
-  `cache-namespace` are optional overrides.
 - **`commitlint`** — Commit-message validation against a project's
   conventional commit policy: `lint` runs commitlint with the project's config
   mounted, optionally against a message file (e.g. `.git/COMMIT_EDITMSG` from
