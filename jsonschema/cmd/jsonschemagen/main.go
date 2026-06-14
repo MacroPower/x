@@ -348,10 +348,13 @@ func goDirectiveVersion() string {
 	return m[1] + "." + m[2]
 }
 
-// quotePath quotes a filesystem path for use in a go.mod replace directive
-// when it contains whitespace, which would otherwise break parsing.
+// quotePath quotes a filesystem path for use in a go.mod replace directive when
+// it contains whitespace or a quote or backtick character. The go.mod lexer
+// splits a bare token on whitespace and rejects an unquoted token that contains
+// a quote ("unquoted string cannot contain quote"), so any of these characters,
+// all legal in POSIX filenames, would otherwise break parsing of the directive.
 func quotePath(p string) string {
-	if strings.ContainsAny(p, " \t") {
+	if strings.ContainsAny(p, " \t\"`") {
 		return strconv.Quote(p)
 	}
 

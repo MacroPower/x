@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -215,6 +216,30 @@ replace go.jacobcolvin.com/x/jsonschema => /home/user/jsonschema
 
 			got := renderGoMod(tc.modPath, tc.modDir, tc.jsonschemaDir)
 			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestRenderGoModQuotesSpecialPaths(t *testing.T) {
+	t.Parallel()
+
+	// A double-quote, backtick, or space (all legal in POSIX filenames) must be
+	// quoted in the replace directive, or the go.mod lexer rejects the unquoted
+	// token with "invalid quoted string".
+	tests := map[string]string{
+		"double quote": `/home/user/we"ird/proj`,
+		"backtick":     "/home/user/we`ird/proj",
+		"space":        "/home/user/we ird/proj",
+	}
+
+	for name, dir := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := renderGoMod("example.com/app", dir, "/home/user/jsonschema")
+			want := "replace example.com/app => " + strconv.Quote(dir) + "\n"
+			assert.Contains(t, got, want,
+				"a path with a special character must be quoted in the replace directive")
 		})
 	}
 }
