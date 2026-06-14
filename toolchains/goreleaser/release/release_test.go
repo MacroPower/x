@@ -95,13 +95,15 @@ func TestFileArch(t *testing.T) {
 	t.Parallel()
 	cases := map[string]struct {
 		platform string
-		want     string
+		want     []string
 		err      bool
 	}{
-		"linux amd64": {"linux/amd64", "x86-64", false},
-		"linux arm64": {"linux/arm64", "aarch64", false},
-		"bare amd64":  {"amd64", "x86-64", false},
-		"unknown":     {"linux/riscv64", "", true},
+		"linux amd64":  {"linux/amd64", []string{"x86-64", "x86_64"}, false},
+		"linux arm64":  {"linux/arm64", []string{"aarch64", "arm64"}, false},
+		"darwin amd64": {"darwin/amd64", []string{"x86-64", "x86_64"}, false},
+		"darwin arm64": {"darwin/arm64", []string{"aarch64", "arm64"}, false},
+		"bare amd64":   {"amd64", []string{"x86-64", "x86_64"}, false},
+		"unknown":      {"linux/riscv64", nil, true},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -109,15 +111,15 @@ func TestFileArch(t *testing.T) {
 			got, err := FileArch(tc.platform)
 			if tc.err {
 				if err == nil {
-					t.Errorf("FileArch(%q) expected error, got %q", tc.platform, got)
+					t.Errorf("FileArch(%q) expected error, got %v", tc.platform, got)
 				}
 				return
 			}
 			if err != nil {
 				t.Errorf("FileArch(%q) unexpected error: %v", tc.platform, err)
 			}
-			if got != tc.want {
-				t.Errorf("FileArch(%q) = %q, want %q", tc.platform, got, tc.want)
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("FileArch(%q) = %v, want %v", tc.platform, got, tc.want)
 			}
 		})
 	}

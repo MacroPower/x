@@ -96,17 +96,20 @@ func RegistryHost(registry string) string {
 }
 
 // platformToFileArch maps a Go platform architecture (GOARCH) to the
-// architecture token printed by the `file` command.
-var platformToFileArch = map[string]string{
-	"amd64": "x86-64",
-	"arm64": "aarch64",
+// architecture tokens the `file` command may print for it. ELF (Linux) and
+// Mach-O (darwin) spell the same architecture differently -- amd64 is "x86-64"
+// in ELF but "x86_64" in Mach-O, and arm64 is "aarch64" in ELF but "arm64" in
+// Mach-O -- so both spellings are accepted.
+var platformToFileArch = map[string][]string{
+	"amd64": {"x86-64", "x86_64"},
+	"arm64": {"aarch64", "arm64"},
 }
 
-// FileArch returns the architecture token that `file` prints for the given Go
-// platform string. It accepts a bare GOARCH ("amd64") or a full platform
+// FileArch returns the architecture tokens that `file` may print for the given
+// Go platform string. It accepts a bare GOARCH ("amd64") or a full platform
 // ("linux/amd64") and uses the GOARCH component. An unrecognized architecture
 // returns an error.
-func FileArch(platform string) (string, error) {
+func FileArch(platform string) ([]string, error) {
 	parts := strings.Split(platform, "/")
 	arch := parts[len(parts)-1]
 	if len(parts) >= 2 {
@@ -114,7 +117,7 @@ func FileArch(platform string) (string, error) {
 	}
 	expected, ok := platformToFileArch[arch]
 	if !ok {
-		return "", fmt.Errorf("unknown platform architecture %q", arch)
+		return nil, fmt.Errorf("unknown platform architecture %q", arch)
 	}
 	return expected, nil
 }

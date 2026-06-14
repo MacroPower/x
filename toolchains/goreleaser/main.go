@@ -206,8 +206,16 @@ func (m *Goreleaser) VerifyBinaryPlatform(
 		return fmt.Errorf("run file on binary %s: %w", name, err)
 	}
 
-	if !strings.Contains(out, expected) {
-		return fmt.Errorf("binary %s: expected architecture %q (%s) not found in file output: %s", name, expected, platform, out)
+	matched := false
+	for _, token := range expected {
+		if strings.Contains(out, token) {
+			matched = true
+
+			break
+		}
+	}
+	if !matched {
+		return fmt.Errorf("binary %s: none of the expected architecture tokens %v (%s) found in file output: %s", name, expected, platform, out)
 	}
 
 	return nil
