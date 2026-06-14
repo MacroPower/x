@@ -888,6 +888,27 @@ func TestInlineSubstituteIDDoesNotCorruptResolution(t *testing.T) {
 		"b must resolve to the real root's $defs/Real, not the colliding substitute")
 }
 
+func TestInlineSubstituteRecursionIsBounded(t *testing.T) {
+	t.Parallel()
+
+	// A fallback that always substitutes a schema carrying its own dangling ref
+	// would recurse without bound, since each clone is a fresh schema the cycle
+	// guard never matches. The depth cap surfaces ErrRefInline instead of
+	// exhausting the stack.
+	always := jsonschema.RefFallbackFunc(func(context.Context, jsonschema.RefFailure) jsonschema.RefAction {
+		return jsonschema.SubstituteRef(&jsonschema.Schema{Ref: "#/$defs/missing"})
+	})
+
+	root := &jsonschema.Schema{
+		Properties: map[string]*jsonschema.Schema{
+			"a": {Ref: "#/$defs/missing"},
+		},
+	}
+
+	_, err := jsonschema.Inline(t.Context(), root, jsonschema.WithRefFallback(always))
+	require.ErrorIs(t, err, jsonschema.ErrRefInline)
+}
+
 func TestInlineNil(t *testing.T) {
 	t.Parallel()
 

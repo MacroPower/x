@@ -67,6 +67,12 @@ type inliner struct {
 
 	baseURI string
 
+	// Current depth of nested substitute expansions. Each [SubstituteRef]
+	// clone is a fresh schema the pointer-identity inflight guard never
+	// matches, so a fallback that substitutes a schema with its own failing
+	// ref would recurse without bound; the depth caps it.
+	substituteDepth int
+
 	// Resolve refs against each document's retrieval URI, with $id inert
 	// ([WithRetrievalBase]).
 	retrievalBase bool
@@ -207,7 +213,10 @@ func (f RefFallbackFunc) ResolveRefFailure(ctx context.Context, failure RefFailu
 // at the enclosing refs. A returned schema is deep-copied before splicing
 // and is itself inlined recursively, its refs resolving in the context of
 // the document containing the failing ref; a cycle introduced by the
-// returned schema is an ordinary [ErrRefCycle].
+// returned schema is an ordinary [ErrRefCycle]. A fallback that keeps
+// substituting a schema carrying its own failing ref is bounded: nesting beyond
+// an internal depth limit surfaces [ErrRefInline] rather than exhausting the
+// stack.
 func WithRefFallback(f RefFallback) InlineOption {
 	return inlineOptionFunc(func(in *inliner) { in.fallback = f })
 }
@@ -566,6 +575,11 @@ func (in *inliner) expandTarget(pristine *Schema, path string) (*Schema, error) 
 	return in.inlineCopy(target, in.paths[target])
 }
 
+// maxSubstituteDepth bounds nested [SubstituteRef] expansions so a fallback
+// that always substitutes a schema carrying its own failing ref surfaces an
+// [ErrRefInline] rather than recursing until the stack is exhausted.
+const maxSubstituteDepth = 100
+
 // substitute consults the [WithRefFallback] policy for a reference
 // that failed directly at the pristine node and turns its answer into a
 // spliceable self-contained copy. With no fallback configured, or on
@@ -579,6 +593,18 @@ func (in *inliner) substitute(pristine *Schema, path, ref string, inlineErr erro
 	if in.fallback == nil {
 		return nil, inlineErr
 	}
+
+	// A substitute can itself contain a failing ref whose fallback substitutes
+	// again, and each clone is a fresh schema the inflight cycle guard cannot
+	// match, so bound the nesting to keep a pathological fallback from
+	// exhausting the stack.
+	if in.substituteDepth >= maxSubstituteDepth {
+		return nil, fmt.Errorf("%w: substitution exceeded %d nested levels at %q",
+			ErrRefInline, maxSubstituteDepth, ref)
+	}
+
+	in.substituteDepth++
+	defer func() { in.substituteDepth-- }()
 
 	action := in.fallback.ResolveRefFailure(in.runContext(),
 		RefFailure{Document: in.docs[pristine], Path: path, Ref: ref, Err: inlineErr})
