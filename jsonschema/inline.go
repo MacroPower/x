@@ -516,6 +516,16 @@ func (in *inliner) walkPair(working, pristine *Schema, path string) error {
 	workingChildren := SubschemaEntries(working)
 	pristineChildren := SubschemaEntries(pristine)
 
+	// The working and pristine nodes are structurally identical here: pristine
+	// is a deep copy taken before any keyword was cleared, and clearing a scalar
+	// ref keyword does not change the subschema child set. The guard is defensive
+	// against a future divergence, so positional pairing cannot panic on a
+	// length mismatch or silently misalign children.
+	if len(workingChildren) != len(pristineChildren) {
+		return fmt.Errorf("%w: subschema child count diverged at %q (%d vs %d)",
+			ErrRefInline, path, len(workingChildren), len(pristineChildren))
+	}
+
 	for i, p := range pristineChildren {
 		err := in.walkPair(workingChildren[i].Schema, p.Schema, path+p.Pointer)
 		if err != nil {
@@ -676,7 +686,11 @@ func (in *inliner) inlineCopy(target *Schema, path string) (*Schema, error) {
 
 	in.memo[target] = cp
 
-	return cp, nil
+	// Clone on the first use too, so the memo entry is never aliased to a
+	// position in the output tree. Every caller, first or later, then gets an
+	// independent copy, and no downstream mutation of one placement can leak
+	// into another through a shared memo node.
+	return cloneSchema(cp)
 }
 
 // resolveTarget resolves the ref at the pristine node to its pristine target
