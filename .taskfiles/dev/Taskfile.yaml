@@ -4,6 +4,9 @@ set: [errexit, nounset, pipefail]
 shopt: [globstar]
 
 tasks:
+  # install is not fingerprinted with `sources`: `devbox install` already
+  # no-ops quickly when devbox.lock matches the installed packages, and it
+  # installs into the gitignored .devbox/ profile rather than a tracked file.
   install:
     desc: Installs development dependencies
     cmds:

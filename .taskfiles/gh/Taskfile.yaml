@@ -14,6 +14,13 @@ tasks:
       Linting runs zizmor via the `ci` toolchain's zizmor toolchain dependency,
       against .github/workflows with .github/zizmor.yaml. It runs through Dagger
       because zizmor is not on the devbox PATH.
+    # `sources` skips the Dagger invocation when no workflow or zizmor config
+    # changed. A zizmor version bump (pinned in the `ci` module) is not tracked
+    # here; re-run with --force or `task clean` after upgrading the toolchain.
+    sources:
+      - .github/workflows/*.yaml
+      - .github/workflows/*.yml
+      - .github/zizmor.yaml
     cmds:
       - dagger call ci lint-actions
 
@@ -23,6 +30,11 @@ tasks:
       Validation runs renovate-config-validator at a pinned version in a Node
       container via the `ci` toolchain. It runs through Dagger because neither
       devbox nor a shared toolchain provides the validator.
+    # `sources` skips the Dagger invocation when the Renovate config is
+    # unchanged. The validator version is pinned in the `ci` module and is not
+    # tracked here; re-run with --force or `task clean` after upgrading it.
+    sources:
+      - .github/renovate.json5
     cmds:
       - dagger call ci lint-renovate
 

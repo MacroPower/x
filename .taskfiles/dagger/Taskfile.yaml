@@ -8,6 +8,9 @@ vars:
   NIX_CLONE: .tmp/dagger-nix
 
 tasks:
+  # test is not fingerprinted with `sources`: each toolchain runs through
+  # Dagger, whose content-addressed cache already skips fixture runs whose
+  # inputs are unchanged and reruns exactly those that changed.
   test:
     desc: Runs every published toolchain's fixture tests via Dagger
     vars:

@@ -11,8 +11,15 @@ vars:
 tasks:
   check:
     desc: Validates the ansivideo GoReleaser configuration
+    # Validation depends only on the GoReleaser config, so `sources` skips the
+    # Dagger invocation when it is unchanged.
+    sources:
+      - ansivideo/.goreleaser.yaml
     cmd: dagger call ci lint-releaser
 
+  # snapshot is not fingerprinted here: it cross-compiles ansivideo, whose
+  # build inputs span sibling workspace modules, and Dagger's content-addressed
+  # cache already rebuilds only when an input changes.
   snapshot:
     desc: Cross-compiles ansivideo for all targets without publishing
     cmd: dagger call ci build export --path={{.DIST}}

@@ -9,5 +9,11 @@ tasks:
     preconditions:
       - sh: command -v lefthook
         msg: "lefthook is not installed. Run 'task install' first."
+    # Intentionally not gated by `status` or `sources`. `lefthook install`
+    # only writes the hook stubs (no network, idempotent, sub-second) and runs
+    # once via `task install`, not in any inner loop, so there is nothing to
+    # cache. A file-based status would also have to enumerate every hook type
+    # in .lefthook.yaml (pre-commit and commit-msg today) or it would silently
+    # skip installing a newly added one.
     cmds:
       - lefthook install

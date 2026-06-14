@@ -21,23 +21,77 @@ vars:
   DEADCODE_VERSION: v0.45.0 # renovate: datasource=go depName=golang.org/x/tools
 
 tasks:
+  # lint, format, tidy, and tidy:check fan out to one internal invocation per
+  # module so each module is fingerprinted independently: editing one module
+  # re-runs only that module's check, and a no-op `task check` skips them all.
+  # Each internal task carries the module in its `label` so Task stores a
+  # separate checksum per module (a single name would share one checksum and
+  # the modules would clobber each other). Checksums live in .task/, which
+  # `task clean` removes and .gitignore excludes.
+  #
+  # Each task's `sources` list is scoped to exactly what changes its result.
+  # lint and format additionally read .golangci.yaml and depend on the
+  # golangci-lint binary, so devbox.lock is a source (a Go or golangci-lint
+  # version bump invalidates their cache). tidy reads neither, so its sources
+  # stop at the module files and the workspace files; the Go version it cares
+  # about is already pinned in go.work, and CI's `go mod tidy -diff` is the
+  # backstop against any binary-patch drift.
+  _lint:
+    internal: true
+    label: "go:lint ({{.MODULE}})"
+    sources: &go-lint-sources
+      - "{{.MODULE}}/**/*.go"
+      - "{{.MODULE}}/go.mod"
+      - "{{.MODULE}}/go.sum"
+      - go.work
+      - go.work.sum
+      - .golangci.yaml
+      - devbox.lock
+    cmd: cd {{.MODULE}} && golangci-lint run
+
+  _format:
+    internal: true
+    label: "go:format ({{.MODULE}})"
+    sources: *go-lint-sources
+    cmd: cd {{.MODULE}} && golangci-lint run --fix
+
+  _tidy:
+    internal: true
+    label: "go:tidy ({{.MODULE}})"
+    sources: &go-tidy-sources
+      - "{{.MODULE}}/**/*.go"
+      - "{{.MODULE}}/go.mod"
+      - "{{.MODULE}}/go.sum"
+      - go.work
+      - go.work.sum
+    cmd: cd {{.MODULE}} && go mod tidy
+
+  _tidy:check:
+    internal: true
+    label: "go:tidy:check ({{.MODULE}})"
+    sources: *go-tidy-sources
+    cmd: cd {{.MODULE}} && go mod tidy -diff
+
   lint:
     desc: Lints Go code with golangci-lint across all workspace modules
     cmds:
       - for: { var: GO_MODULES }
-        cmd: cd {{.ITEM}} && golangci-lint run
+        task: _lint
+        vars: { MODULE: "{{.ITEM}}" }
 
   format:
     desc: Formats Go code with golangci-lint --fix across all workspace modules
     cmds:
       - for: { var: GO_MODULES }
-        cmd: cd {{.ITEM}} && golangci-lint run --fix
+        task: _format
+        vars: { MODULE: "{{.ITEM}}" }
 
   tidy:
     desc: Tidies go.mod and go.sum across all workspace modules
     cmds:
       - for: { var: GO_MODULES }
-        cmd: cd {{.ITEM}} && go mod tidy
+        task: _tidy
+        vars: { MODULE: "{{.ITEM}}" }
 
   tidy:check:
     desc: Verifies go.mod and go.sum are tidy across all workspace modules
@@ -48,8 +102,14 @@ tasks:
       and needs no .git (the check runs inside the devbox container in CI).
     cmds:
       - for: { var: GO_MODULES }
-        cmd: cd {{.ITEM}} && go mod tidy -diff
+        task: _tidy:check
+        vars: { MODULE: "{{.ITEM}}" }
 
+  # test, test:integration, and test:cover are deliberately not fingerprinted
+  # with `sources`. Go's build/test cache is content-addressed over the full
+  # transitive dependency graph (including cross-module imports such as
+  # magicschema -> jsonschema) and re-runs exactly the packages that changed;
+  # a file-glob fingerprint here would be coarser and could skip a stale test.
   test:
     desc: Runs Go unit tests (skips integration tests) with the race detector
     summary: |
@@ -86,6 +146,10 @@ tasks:
     cmds:
       - go generate {{.GO_PKGS}}
 
+  # deadcode, bench, and docs are advisory tasks whose whole purpose is the
+  # report they print to stdout. They are deliberately not fingerprinted: a
+  # `sources` cache hit would skip the command and suppress that output, which
+  # is the opposite of useful. Run them on demand.
   deadcode:
     desc: Reports unreachable Go functions (advisory)
     label: "go:deadcode {{.PKG}}"
