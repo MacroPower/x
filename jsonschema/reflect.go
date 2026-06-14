@@ -108,10 +108,7 @@ func (g *generator) forRun(ctx context.Context) *generator {
 // generate produces the root schema for the given type.
 func (g *generator) generate(t reflect.Type) (*Schema, error) {
 	// Follow pointers for root type identity.
-	rootType := t
-	for rootType.Kind() == reflect.Pointer {
-		rootType = rootType.Elem()
-	}
+	rootType := derefType(t)
 
 	schema, err := g.schemaForType(t, false)
 	if err != nil {
@@ -270,11 +267,12 @@ func schemaContainsRef(s *Schema, target string) bool {
 //
 //nolint:unparam // nullable is part of the API contract; callers pass false but the parameter is used internally after pointer unwrapping.
 func (g *generator) schemaForType(t reflect.Type, nullable bool) (*Schema, error) {
-	// Follow pointers.
-	for t.Kind() == reflect.Pointer {
+	// Follow pointers. A pointer at any level makes the schema nullable.
+	if t.Kind() == reflect.Pointer {
 		nullable = g.nullable
-		t = t.Elem()
 	}
+
+	t = derefType(t)
 
 	// 1. Type provider override (WithTypeSchemaProvider / WithTypeSchema).
 	s, ok, err := g.resolveTypeSchema(t)
@@ -1653,9 +1651,7 @@ func nullableInnerSchema(s *Schema) *Schema {
 
 // isStringableType reports whether json:",string" applies to the given type.
 func isStringableType(t reflect.Type) bool {
-	for t.Kind() == reflect.Pointer {
-		t = t.Elem()
-	}
+	t = derefType(t)
 
 	if isIntegerKind(t.Kind()) {
 		return true
@@ -2030,16 +2026,11 @@ func declaringType(outer reflect.Type, f reflect.StructField) reflect.Type {
 	t := outer
 
 	for _, i := range f.Index[:max(len(f.Index)-1, 0)] {
-		for t.Kind() == reflect.Pointer {
-			t = t.Elem()
-		}
-
+		t = derefType(t)
 		t = t.Field(i).Type
 	}
 
-	for t.Kind() == reflect.Pointer {
-		t = t.Elem()
-	}
+	t = derefType(t)
 
 	return t
 }

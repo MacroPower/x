@@ -2334,6 +2334,19 @@ func TestGenerateFor_Draft7_NullableRefWithInterpreterConst(t *testing.T) {
 	require.NoError(t, err, "level=2 satisfies the const")
 }
 
+// selfPointer is a self-referential pointer type: its element type is itself,
+// so reflect reports t.Elem() == t.
+type selfPointer *selfPointer
+
+func TestGenerateFor_SelfReferentialPointerTypeDoesNotHang(t *testing.T) {
+	t.Parallel()
+
+	// Following pointers on selfPointer must terminate (t.Elem() == t) rather
+	// than spinning forever. Generation ends with an unsupported-type error.
+	_, err := jsonschema.Generate(t.Context(), reflect.TypeFor[selfPointer]())
+	require.ErrorIs(t, err, jsonschema.ErrUnsupportedType)
+}
+
 // WithTypeSchemaProvider implements JSONSchemaProvider but will be overridden
 // by WithTypeSchema.
 type WithTypeSchemaProvider struct {

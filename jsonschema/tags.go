@@ -561,7 +561,14 @@ func itemSchemas(s *Schema) []*Schema {
 // derefType follows pointers to the underlying non-pointer type.
 func derefType(t reflect.Type) reflect.Type {
 	for t.Kind() == reflect.Pointer {
-		t = t.Elem()
+		elem := t.Elem()
+		// A self-referential pointer type (type T *T) has t.Elem() == t, which
+		// would spin this loop forever; stop at it.
+		if elem == t {
+			break
+		}
+
+		t = elem
 	}
 
 	return t
@@ -628,9 +635,7 @@ func parseTypedScalar(value string, t reflect.Type) (any, error) {
 	// "null" via its kind switch instead of silently accepting JSON null.
 	nullable := t.Kind() == reflect.Pointer
 
-	for t.Kind() == reflect.Pointer {
-		t = t.Elem()
-	}
+	t = derefType(t)
 
 	if value == typeNameNull {
 		if !nullable {
