@@ -7206,6 +7206,35 @@ func TestValidateLargeNumberGuarded(t *testing.T) {
 	}
 }
 
+// TestValidateRationalBoundMessageExact covers a numeric bound failure whose
+// instance magnitude exceeds the float64 range yet stays within the exact
+// comparison cap, so it takes the bounded path that formats the value through
+// ratString. The value is non-integer, so a float64 conversion overflows to
+// +Inf; the error message must report the exact rational instead.
+func TestValidateRationalBoundMessageExact(t *testing.T) {
+	t.Parallel()
+
+	// 10^350 + 0.5: past the float64 range (~1.8e308), non-integer, and well
+	// within the ~4096-digit cap so it does not divert to the unbounded path.
+	instance := "1" + strings.Repeat("0", 350) + ".5"
+
+	// The exact value in lowest terms is (2*10^350 + 1)/2, the rational form
+	// ratString falls back to when float64 conversion would overflow to +Inf.
+	want := "2" + strings.Repeat("0", 349) + "1/2"
+
+	var s jsonschema.Schema
+
+	require.NoError(t, json.Unmarshal([]byte(`{"maximum":10}`), &s))
+
+	err := validateJSON(t.Context(), &s, []byte(instance))
+	require.Error(t, err)
+
+	msg := err.Error()
+	assert.NotContains(t, msg, "Inf")
+	assert.Contains(t, msg, want)
+	assert.Contains(t, msg, "is greater than 10")
+}
+
 // BenchmarkValidateLargeNumber exercises validation of multi-megabyte JSON
 // number literals. The guarded paths classify such values in a single O(n)
 // scan; a regression into an unguarded big.Rat parse (quadratic in the digit

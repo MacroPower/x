@@ -3112,13 +3112,19 @@ func truncatedNumber(s string) string {
 	return fmt.Sprintf("%s... (%d digits)", s[:keep], len(s))
 }
 
-// ratString returns a compact string representation of a [big.Rat].
+// ratString returns a compact string representation of a [big.Rat]. An integer
+// renders exactly; a fraction renders through its shortest float64 decimal,
+// except when the magnitude exceeds the float64 range, where that conversion
+// yields a meaningless +Inf and the exact rational form is used instead.
 func ratString(r *big.Rat) string {
 	if r.IsInt() {
 		return r.Num().String()
 	}
 
 	f, _ := r.Float64()
+	if math.IsInf(f, 0) {
+		return r.RatString()
+	}
 
 	return fmt.Sprintf("%v", f)
 }
