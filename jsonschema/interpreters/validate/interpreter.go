@@ -218,9 +218,20 @@ func unescapeParam(value string) string {
 func hasConstraint(parts []string) bool {
 	for _, p := range parts {
 		p = strings.TrimSpace(p)
-		if p != "" && p != "-" {
-			return true
+		if p == "" || p == "-" {
+			continue
 		}
+
+		// A control tag such as omitempty or structonly, or a cross-field
+		// validator, governs when validation runs rather than constraining a
+		// value, so it does not satisfy a trailing dive. Match on the key before
+		// any equals sign.
+		key, _, _ := strings.Cut(p, "=")
+		if isControlTag(key) || isCrossFieldValidator(key) {
+			continue
+		}
+
+		return true
 	}
 
 	return false
