@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"github.com/google/jsonschema-go/jsonschema"
+
+	"go.jacobcolvin.com/x/jsonschema/internal/schemashape"
 )
 
 var (
@@ -1635,15 +1637,7 @@ func relocateConstEnumToValueBranch(s *Schema) *Schema {
 // by [generator.applyNullable], which is an anyOf of a value schema and
 // {"type":"null"}. It returns nil if s does not have that exact shape.
 func nullableInnerSchema(s *Schema) *Schema {
-	if len(s.AnyOf) != 2 || s.AnyOf[0] == nil || s.AnyOf[1] == nil {
-		return nil
-	}
-
-	if s.AnyOf[1].Type == typeNameNull {
-		return s.AnyOf[0]
-	}
-
-	return nil
+	return schemashape.NullableInnerSchema(s)
 }
 
 // isStringableType reports whether json:",string" applies to the given type.

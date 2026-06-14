@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"go.jacobcolvin.com/x/jsonschema"
+	"go.jacobcolvin.com/x/jsonschema/internal/schemashape"
 )
 
 // collectionBoundFields returns the schema's size-bound field pointers for the
@@ -111,31 +112,12 @@ func applyDive(remaining []string, s *jsonschema.Schema, fieldType reflect.Type)
 	}
 }
 
-// sequenceItemSchemas returns the per-element schemas of a generated slice or
-// fixed-array field schema. The generator represents element schemas
-// differently depending on the field kind: plain slices use Items, fixed
-// arrays use prefixItems (Draft 2020-12) or the items-as-array form
-// (Draft-07), and []byte becomes a single base64 string with no element
-// schema at all (yielding nil).
-func sequenceItemSchemas(s *jsonschema.Schema) []*jsonschema.Schema {
-	switch {
-	case s.Items != nil:
-		return []*jsonschema.Schema{s.Items}
-	case len(s.PrefixItems) > 0:
-		return s.PrefixItems
-	case len(s.ItemsArray) > 0:
-		return s.ItemsArray
-	default:
-		return nil
-	}
-}
-
 // diveIntoSequence applies the remaining dive constraints to the element schema
 // of a slice or fixed array. Each of the element-schema shapes
-// (see sequenceItemSchemas) is dived into so a dive tag on those kinds does not
-// abort generation.
+// (see [schemashape.ItemSchemas]) is dived into so a dive tag on those kinds
+// does not abort generation.
 func diveIntoSequence(remaining []string, s *jsonschema.Schema, elem reflect.Type) error {
-	if items := sequenceItemSchemas(s); len(items) > 0 {
+	if items := schemashape.ItemSchemas(s); len(items) > 0 {
 		for _, item := range items {
 			err := applyParts(remaining, item, nil, "", elem, true)
 			if err != nil {

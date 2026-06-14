@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"go.jacobcolvin.com/x/jsonschema/internal/schemashape"
 )
 
 var (
@@ -542,20 +544,7 @@ func applyEnumToItems(key, value string, t reflect.Type, s *Schema) error {
 // wrapper. A []byte field (a base64 string) has no element schema and yields
 // nil.
 func itemSchemas(s *Schema) []*Schema {
-	if inner := nullableInnerSchema(s); inner != nil {
-		s = inner
-	}
-
-	switch {
-	case s.Items != nil:
-		return []*Schema{s.Items}
-	case len(s.PrefixItems) > 0:
-		return s.PrefixItems
-	case len(s.ItemsArray) > 0:
-		return s.ItemsArray
-	default:
-		return nil
-	}
+	return schemashape.ItemSchemas(s)
 }
 
 // derefType follows pointers to the underlying non-pointer type.

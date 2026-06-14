@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"go.jacobcolvin.com/x/jsonschema"
+	"go.jacobcolvin.com/x/jsonschema/internal/schemashape"
 )
 
 // ErrConflictingConstraints reports two tag rules on one field that can never
@@ -383,7 +384,7 @@ func applyOneOf(s *jsonschema.Schema, value string, baseType reflect.Type) error
 // []byte field encodes as a single base64 string with no element schema, so
 // oneof on it is rejected rather than silently dropped.
 func applySequenceOneOf(s *jsonschema.Schema, value string, baseType reflect.Type) error {
-	items := sequenceItemSchemas(s)
+	items := schemashape.ItemSchemas(s)
 	if len(items) == 0 {
 		return fmt.Errorf("validate tag: oneof: %s field has no item schema to constrain", baseType.Kind())
 	}
