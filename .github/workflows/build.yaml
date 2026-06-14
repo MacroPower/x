@@ -9,11 +9,15 @@ on:
     paths:
       - ansivideo/**
       - ci/**
+      # `ci build` composes the goreleaser toolchain, so its changes can break
+      # cross-compilation too.
+      - toolchains/goreleaser/**
       - .github/workflows/build.yaml
   pull_request:
     paths:
       - ansivideo/**
       - ci/**
+      - toolchains/goreleaser/**
       - .github/workflows/build.yaml
 
 concurrency:
