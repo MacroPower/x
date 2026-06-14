@@ -1,18 +1,18 @@
-// Release orchestration for the ansivideo binary. Unlike the +check functions
-// in main.go (which run Taskfile targets inside devbox), these compose the
-// shared goreleaser toolchain directly -- including its folded-in cosign
-// signing and syft SBOM helpers -- to build, sign, and publish ansivideo: the
-// monorepo's first released artifact. ansivideo is pure
-// Go (it shells out to ffmpeg at runtime), so every target cross-compiles
-// statically and the only runtime dependency, ffmpeg, is bundled into the
-// container image rather than linked.
+// Release orchestration for the monorepo's binary packages. Unlike the +check
+// functions in main.go (which run Taskfile targets inside devbox), these compose
+// the shared goreleaser toolchain directly -- including its folded-in cosign
+// signing and syft SBOM helpers -- to build, sign, and publish a release. The
+// pipeline is package-agnostic: the package to act on is resolved from a
+// release.yaml manifest (see packages.go), so adding a releasable package is a
+// matter of dropping a manifest, not editing this file.
 //
-// ansivideo is tagged ansivideo/vX.Y.Z (a Go submodule prefix). GoReleaser's
+// A package is tagged <package>/vX.Y.Z (a Go submodule prefix). GoReleaser's
 // OSS build cannot strip that prefix (monorepo mode is Pro only), so GoReleaser
-// runs from the ansivideo/ directory with GORELEASER_CURRENT_TAG set to the
+// runs from the package directory with GORELEASER_CURRENT_TAG set to the
 // stripped version and only builds, archives, checksums, SBOMs, and signs;
 // [Ci.Release] then creates the GitHub release against the real prefixed tag
-// with the gh CLI and publishes the multi-arch image natively via Dagger.
+// with the gh CLI and publishes the multi-arch image (when the package declares
+// one) natively via Dagger.
 package main
 
 import (
@@ -27,42 +27,29 @@ import (
 )
 
 const (
-	// goreleaserVersion pins the GoReleaser release used for ansivideo builds.
+	// goreleaserVersion pins the GoReleaser release used for package builds.
 	goreleaserVersion = "v2.16.0" // renovate: datasource=github-releases depName=goreleaser/goreleaser
 
-	// ghVersion pins the GitHub CLI used to create the ansivideo GitHub release.
+	// ghVersion pins the GitHub CLI used to create GitHub releases.
 	ghVersion = "v2.94.0" // renovate: datasource=github-releases depName=cli/cli
 
-	// debianImage is the runtime base for the ansivideo container image and the
+	// debianImage is the runtime base for package container images and the
 	// tool-download containers, pulled from Docker's verified publisher space on
 	// ECR Public to avoid Docker Hub pull rate limits.
 	debianImage = "public.ecr.aws/docker/library/debian:13-slim" // renovate: datasource=docker depName=public.ecr.aws/docker/library/debian
 
-	// ansivideoRegistry is the container image registry for ansivideo.
-	ansivideoRegistry = "ghcr.io/macropower/ansivideo"
+	// repoRemoteURL is configured as origin on the bootstrapped release repo so
+	// GoReleaser resolves the repository for git state.
+	repoRemoteURL = "https://github.com/MacroPower/x.git"
 
-	// ansivideoRemoteURL is configured as origin on the bootstrapped release
-	// repo so GoReleaser resolves the repository for git state.
-	ansivideoRemoteURL = "https://github.com/MacroPower/x.git"
+	// repoURL is the canonical project URL stamped into image OCI metadata.
+	repoURL = "https://github.com/MacroPower/x"
 
-	// githubRepo is the GitHub repository the ansivideo release is published to.
+	// repoLicense is the SPDX license expression stamped into image OCI metadata.
+	repoLicense = "Apache-2.0"
+
+	// githubRepo is the GitHub repository releases are published to.
 	githubRepo = "MacroPower/x"
-
-	// goreleaserConfig is the ansivideo GoReleaser config, relative to the repo
-	// root, used by [Ci.LintReleaser].
-	goreleaserConfig = "ansivideo/.goreleaser.yaml"
-
-	// ansivideoDir is the ansivideo module directory inside the release
-	// container; GoReleaser runs here so its config and build paths resolve.
-	ansivideoDir = "/src/ansivideo"
-
-	// ansivideoDistDir is the GoReleaser output directory inside the release
-	// container.
-	ansivideoDistDir = ansivideoDir + "/dist"
-
-	// ansivideoTagPrefix is the Go submodule tag prefix stripped to recover the
-	// SemVer version (e.g. "ansivideo/v1.2.3" -> "v1.2.3").
-	ansivideoTagPrefix = "ansivideo/"
 )
 
 // releaserBase builds the release toolchain: the goreleaser-equipped Go base
@@ -72,9 +59,8 @@ const (
 // before source is mounted so source changes only invalidate the git-bootstrap
 // layer onward.
 //
-// GOWORK is disabled so the build resolves the versions pinned in
-// ansivideo/go.mod rather than the go.work overlay, keeping releases
-// reproducible.
+// GOWORK is disabled so the build resolves the versions pinned in the package's
+// go.mod rather than the go.work overlay, keeping releases reproducible.
 func (m *Ci) releaserBase(_ context.Context) *dagger.Container {
 	ctr := m.Goreleaser.GoreleaserBase()
 	ctr = m.Goreleaser.WithCosign(ctr)
@@ -87,73 +73,116 @@ func (m *Ci) releaserBase(_ context.Context) *dagger.Container {
 		WithMountedDirectory("/src", m.Source).
 		WithWorkdir("/src")
 	return m.Goreleaser.EnsureGitRepo(ctr, dagger.GoreleaserEnsureGitRepoOpts{
-		RemoteURL: ansivideoRemoteURL,
+		RemoteURL: repoRemoteURL,
 	})
 }
 
-// LintReleaser validates the ansivideo GoReleaser configuration with
-// `goreleaser check`. The goreleaser toolchain's own Check expects
-// .goreleaser.yaml at the source root, so the subdirectory config is passed
-// explicitly.
+// LintReleaser validates every releasable package's GoReleaser configuration
+// with `goreleaser check`. The goreleaser toolchain's own Check expects
+// .goreleaser.yaml at the source root, so each package's subdirectory config is
+// passed explicitly. Discovering the packages also parses their manifests, so a
+// malformed release.yaml fails here too.
 //
 // +check
 func (m *Ci) LintReleaser(ctx context.Context) error {
-	_, err := m.Goreleaser.CheckBase().
-		WithExec([]string{"goreleaser", "check", "-f", goreleaserConfig}).
-		Sync(ctx)
-	return err
+	pkgs, err := m.discoverPackages(ctx)
+	if err != nil {
+		return err
+	}
+
+	base := m.Goreleaser.CheckBase()
+	for _, p := range pkgs {
+		_, err := base.
+			WithExec([]string{"goreleaser", "check", "-f", p.goreleaserConfig()}).
+			Sync(ctx)
+		if err != nil {
+			return fmt.Errorf("check %s: %w", p.name, err)
+		}
+	}
+
+	return nil
 }
 
-// Build runs GoReleaser in snapshot mode, cross-compiling ansivideo for all
-// targets and producing archives and checksums. Docker, signing, and SBOM
+// Build runs GoReleaser in snapshot mode, cross-compiling the given package for
+// all targets and producing archives and checksums. Docker, signing, and SBOM
 // steps are skipped (snapshot builds do not publish). Returns the dist/
 // directory.
-func (m *Ci) Build(ctx context.Context) (*dagger.Directory, error) {
+func (m *Ci) Build(
+	ctx context.Context,
+	// Package to build (a directory with a release.yaml manifest, e.g. "ansivideo").
+	pkg string,
+) (*dagger.Directory, error) {
+	p, err := m.loadPackage(ctx, pkg)
+	if err != nil {
+		return nil, err
+	}
+
 	return m.releaserBase(ctx).
-		WithWorkdir(ansivideoDir).
+		WithWorkdir(p.dir()).
 		WithExec([]string{
 			"goreleaser", "release", "--snapshot", "--clean",
 			"--skip=docker,sign,sbom",
 			"--parallelism=0",
 		}).
-		Directory(ansivideoDistDir), nil
+		Directory(p.distDir()), nil
 }
 
-// SecurityImageSarif builds the ansivideo runtime image and scans it for known
-// vulnerabilities, returning the results as a SARIF file for upload to GitHub
-// Code Scanning. It composes the release image builder ([Ci.Build] plus
+// SecurityImageSarif builds the given package's runtime image and scans it for
+// known vulnerabilities, returning the results as a SARIF file for upload to
+// GitHub Code Scanning. It composes the release image builder ([Ci.Build] plus
 // runtimeImages) so it scans exactly what a release publishes, then scans the
 // native linux/amd64 variant (Dagger evaluates only that variant lazily). Unlike
 // the gating scans it does not fail on findings, and it surfaces OS-layer CVEs
-// (debian, ffmpeg) that the source scan, seeing only Go modules, cannot.
-func (m *Ci) SecurityImageSarif(ctx context.Context) (*dagger.File, error) {
-	dist, err := m.Build(ctx)
+// (the runtime base and apt packages) that the source scan, seeing only Go
+// modules, cannot. The package must declare an image.
+func (m *Ci) SecurityImageSarif(
+	ctx context.Context,
+	// Package whose image to scan (must declare an image block, e.g. "ansivideo").
+	pkg string,
+) (*dagger.File, error) {
+	p, err := m.loadPackage(ctx, pkg)
 	if err != nil {
 		return nil, err
 	}
+	if p.image == nil {
+		return nil, fmt.Errorf("package %q builds no container image to scan", pkg)
+	}
+
+	dist, err := m.Build(ctx, pkg)
+	if err != nil {
+		return nil, err
+	}
+
 	// The version only feeds cosmetic OCI labels on an image that is never
 	// published, so a fixed placeholder is fine.
-	variants := runtimeImages(dist, "0.0.0-scan")
+	variants, err := p.runtimeImages(ctx, dist, "0.0.0-scan")
+	if err != nil {
+		return nil, err
+	}
+
 	return m.Scanner.ScanImageSarif(variants[0]), nil
 }
 
-// Release builds, signs, and publishes a tagged ansivideo release:
+// Release builds, signs, and publishes a tagged release. The package is
+// resolved from the tag's prefix (<package>/vX.Y.Z), so the same function
+// releases any releasable package:
 //
 //   - GoReleaser cross-compiles the binaries, builds archives and checksums,
 //     generates SBOMs (syft), and signs the checksums (cosign keyless, when an
 //     OIDC token is provided). The version is taken from the prefix-stripped tag
 //     via GORELEASER_CURRENT_TAG; GoReleaser's own release step is disabled.
-//   - The GitHub release is created against the real ansivideo/vX.Y.Z tag with
+//   - The GitHub release is created against the real <package>/vX.Y.Z tag with
 //     the gh CLI and the archives, checksums, SBOMs, and signature are uploaded.
-//   - The multi-arch container image (debian + ffmpeg + binary) is built and
-//     published natively via Dagger and signed with cosign keyless signing.
+//   - When the package declares an image, the multi-arch container image is
+//     built and published natively via Dagger and signed with cosign keyless
+//     signing. Binary-only packages skip this step.
 //
 // Both the checksums and the image are signed with Sigstore keyless signing
 // (Fulcio + Rekor) when OIDC request credentials are provided; signing is
 // skipped otherwise.
 //
 // Returns the dist directory, including digests.txt (the published image
-// digests in checksum format) for attestation.
+// digests in checksum format) for attestation when an image was published.
 //
 // +cache="never"
 func (m *Ci) Release(
@@ -176,7 +205,15 @@ func (m *Ci) Release(
 	// +optional
 	oidcRequestToken *dagger.Secret,
 ) (*dagger.Directory, error) {
-	version := strings.TrimPrefix(tag, ansivideoTagPrefix)
+	name, version, err := splitReleaseTag(tag)
+	if err != nil {
+		return nil, err
+	}
+
+	p, err := m.loadPackage(ctx, name)
+	if err != nil {
+		return nil, err
+	}
 
 	prerelease, err := m.Goreleaser.IsPrerelease(ctx, version)
 	if err != nil {
@@ -200,17 +237,30 @@ func (m *Ci) Release(
 		WithEnvVariable("GORELEASER_CURRENT_TAG", version).
 		WithEnvVariable("ACTIONS_ID_TOKEN_REQUEST_URL", oidcRequestURL).
 		With(optSecretVariable("ACTIONS_ID_TOKEN_REQUEST_TOKEN", oidcRequestToken)).
-		WithWorkdir(ansivideoDir)
+		WithWorkdir(p.dir())
 
 	built := ctr.WithExec([]string{"goreleaser", "release", "--clean", "--skip=" + skip})
-	dist := built.Directory(ansivideoDistDir)
+	dist := built.Directory(p.distDir())
 
-	dist, err = m.publishRelease(ctx, built, dist, tag, version, prerelease)
+	dist, err = m.publishRelease(ctx, built, dist, p, tag, version, prerelease)
 	if err != nil {
 		return nil, err
 	}
 
-	return m.publishImage(ctx, dist, version, registryUsername, registryPassword, oidcRequestURL, oidcRequestToken)
+	return m.publishImage(ctx, p, dist, version, registryUsername, registryPassword, oidcRequestURL, oidcRequestToken)
+}
+
+// splitReleaseTag splits a prefixed release tag "<package>/vX.Y.Z" into the
+// package name and the prefix-stripped SemVer version. It rejects unprefixed or
+// malformed tags; the workflow validates the SemVer shape before calling, so
+// this guards against a missing or empty prefix.
+func splitReleaseTag(tag string) (string, string, error) {
+	name, version, ok := strings.Cut(tag, "/")
+	if !ok || name == "" || version == "" {
+		return "", "", fmt.Errorf("tag %q is not of the form <package>/vX.Y.Z", tag)
+	}
+
+	return name, version, nil
 }
 
 // publishRelease creates (or reuses) the GitHub release for the real prefixed
@@ -221,6 +271,7 @@ func (m *Ci) publishRelease(
 	ctx context.Context,
 	built *dagger.Container,
 	dist *dagger.Directory,
+	p *pkg,
 	tag, version string,
 	prerelease bool,
 ) (*dagger.Directory, error) {
@@ -243,7 +294,7 @@ func (m *Ci) publishRelease(
 	script := strings.Join([]string{
 		"set -e",
 		`gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1 ||`,
-		`  gh release create "$TAG" --repo "$REPO" --title "ansivideo $VERSION"` +
+		`  gh release create "$TAG" --repo "$REPO" --title "$NAME $VERSION"` +
 			` --generate-notes --verify-tag $PRERELEASE ||`,
 		`  gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1`,
 		`gh release upload "$TAG" --repo "$REPO" --clobber $ASSETS`,
@@ -253,6 +304,7 @@ func (m *Ci) publishRelease(
 		WithFile("/usr/local/bin/gh", ghBinary()).
 		WithEnvVariable("TAG", tag).
 		WithEnvVariable("REPO", githubRepo).
+		WithEnvVariable("NAME", p.name).
 		WithEnvVariable("VERSION", version).
 		WithEnvVariable("PRERELEASE", prereleaseFlag).
 		WithEnvVariable("ASSETS", strings.Join(assets, " ")).
@@ -265,30 +317,40 @@ func (m *Ci) publishRelease(
 	return dist, nil
 }
 
-// publishImage builds the multi-arch ansivideo container image from the dist
+// publishImage builds the package's multi-arch container image from the dist
 // binaries, publishes it to the registry under the derived tags, signs the
 // digests with cosign keyless signing, and records the digests in
-// dist/digests.txt for attestation.
+// dist/digests.txt for attestation. Binary-only packages (no image block) are a
+// no-op: dist is returned unchanged with no digests.txt.
 func (m *Ci) publishImage(
 	ctx context.Context,
+	p *pkg,
 	dist *dagger.Directory,
 	version, registryUsername string,
 	registryPassword *dagger.Secret,
 	oidcRequestURL string,
 	oidcRequestToken *dagger.Secret,
 ) (*dagger.Directory, error) {
+	if p.image == nil {
+		return dist, nil
+	}
+
 	tags, err := m.Goreleaser.VersionTags(ctx, version)
 	if err != nil {
 		return nil, fmt.Errorf("derive version tags: %w", err)
 	}
 
-	variants := runtimeImages(dist, version)
-	digests, err := m.publishImages(ctx, variants, tags, registryUsername, registryPassword)
+	variants, err := p.runtimeImages(ctx, dist, version)
+	if err != nil {
+		return nil, err
+	}
+
+	digests, err := m.publishImages(ctx, p, variants, tags, registryUsername, registryPassword)
 	if err != nil {
 		return nil, fmt.Errorf("publish images: %w", err)
 	}
 
-	if err := m.signImages(ctx, digests, registryUsername, registryPassword, oidcRequestURL, oidcRequestToken); err != nil {
+	if err := m.signImages(ctx, p, digests, registryUsername, registryPassword, oidcRequestURL, oidcRequestToken); err != nil {
 		return nil, err
 	}
 
@@ -344,51 +406,82 @@ func ghBinary() *dagger.File {
 		File("/gh")
 }
 
-// runtimeImages builds the multi-arch ansivideo container image variants from a
-// GoReleaser dist directory. Each variant is debian-slim with ffmpeg (the only
-// runtime dependency) and the matching cross-compiled binary.
-func runtimeImages(dist *dagger.Directory, version string) []*dagger.Container {
-	platforms := []dagger.Platform{"linux/amd64", "linux/arm64"}
+// runtimeImages builds the package's multi-arch container image variants from a
+// GoReleaser dist directory. Each variant is debian-slim with the package's
+// declared runtime apt packages and the matching cross-compiled binary.
+func (p *pkg) runtimeImages(ctx context.Context, dist *dagger.Directory, version string) ([]*dagger.Container, error) {
+	platforms := []struct {
+		platform dagger.Platform
+		goarch   string
+	}{
+		{"linux/amd64", "amd64"},
+		{"linux/arm64", "arm64"},
+	}
 	variants := make([]*dagger.Container, len(platforms))
 	created := time.Now().UTC().Format(time.RFC3339)
 
-	for i, platform := range platforms {
-		// GoReleaser writes each target to <build-id>_<os>_<arch>_<variant>/.
-		distDir := "ansivideo_linux_amd64_v1"
-		if platform == "linux/arm64" {
-			distDir = "ansivideo_linux_arm64_v8.0"
+	for i, pl := range platforms {
+		bin, err := p.distBinary(ctx, dist, pl.goarch)
+		if err != nil {
+			return nil, err
 		}
 
-		variants[i] = runtimeBase(platform).
+		variants[i] = p.runtimeBase(pl.platform).
 			WithLabel("org.opencontainers.image.version", version).
 			WithLabel("org.opencontainers.image.created", created).
 			WithAnnotation("org.opencontainers.image.version", version).
 			WithAnnotation("org.opencontainers.image.created", created).
-			WithFile("/usr/local/bin/ansivideo", dist.File(distDir+"/ansivideo")).
-			WithEntrypoint([]string{"ansivideo"})
+			WithFile("/usr/local/bin/"+p.binary, bin).
+			WithEntrypoint([]string{p.binary})
 	}
 
-	return variants
+	return variants, nil
 }
 
-// runtimeBase returns a debian-slim container for the given platform with
-// ffmpeg installed and ansivideo's OCI metadata applied.
-func runtimeBase(platform dagger.Platform) *dagger.Container {
-	return dag.Container(dagger.ContainerOpts{Platform: platform}).
+// distBinary locates the linux/<goarch> binary in a GoReleaser dist directory.
+// GoReleaser writes each target to <build-id>_<os>_<arch>_<variant>/<binary>;
+// globbing for it rather than reconstructing the directory avoids assuming the
+// build id matches the package name or that the GOAMD64/GOARM64 variant suffix
+// takes its default value.
+func (p *pkg) distBinary(ctx context.Context, dist *dagger.Directory, goarch string) (*dagger.File, error) {
+	pattern := "*_linux_" + goarch + "_*/" + p.binary
+	matches, err := dist.Glob(ctx, pattern)
+	if err != nil {
+		return nil, fmt.Errorf("glob dist for %s: %w", pattern, err)
+	}
+	if len(matches) == 0 {
+		return nil, fmt.Errorf("no linux/%s binary %q in dist (pattern %s)", goarch, p.binary, pattern)
+	}
+
+	return dist.File(matches[0]), nil
+}
+
+// runtimeBase returns a debian-slim container for the given platform with the
+// package's runtime apt packages installed and its OCI metadata applied. The
+// title is the package name and the repository-level OCI metadata (source, url,
+// license) is shared across packages; the description and runtime dependencies
+// come from the package's manifest.
+func (p *pkg) runtimeBase(platform dagger.Platform) *dagger.Container {
+	ctr := dag.Container(dagger.ContainerOpts{Platform: platform}).
 		From(debianImage).
-		WithLabel("org.opencontainers.image.title", "ansivideo").
-		WithLabel("org.opencontainers.image.description", "Play video in the terminal with ANSI half-block characters").
-		WithLabel("org.opencontainers.image.source", "https://github.com/MacroPower/x").
-		WithLabel("org.opencontainers.image.url", "https://github.com/MacroPower/x").
-		WithLabel("org.opencontainers.image.licenses", "Apache-2.0").
-		WithAnnotation("org.opencontainers.image.title", "ansivideo").
-		WithAnnotation("org.opencontainers.image.source", "https://github.com/MacroPower/x").
-		// ffmpeg is ansivideo's sole runtime dependency.
-		WithExec([]string{
+		WithLabel("org.opencontainers.image.title", p.name).
+		WithLabel("org.opencontainers.image.description", p.image.description).
+		WithLabel("org.opencontainers.image.source", repoURL).
+		WithLabel("org.opencontainers.image.url", repoURL).
+		WithLabel("org.opencontainers.image.licenses", repoLicense).
+		WithAnnotation("org.opencontainers.image.title", p.name).
+		WithAnnotation("org.opencontainers.image.source", repoURL)
+
+	if len(p.image.runtimeAptPackages) > 0 {
+		ctr = ctr.WithExec([]string{
 			"sh", "-c",
-			"apt-get update && apt-get install -y --no-install-recommends ffmpeg && " +
+			"apt-get update && apt-get install -y --no-install-recommends " +
+				strings.Join(p.image.runtimeAptPackages, " ") + " && " +
 				"rm -rf /var/lib/apt/lists/* /tmp/*",
 		})
+	}
+
+	return ctr
 }
 
 // publishImages publishes the pre-built image variants under each tag. Returns
@@ -396,6 +489,7 @@ func runtimeBase(platform dagger.Platform) *dagger.Container {
 // e.g. "registry/image:tag@sha256:hex").
 func (m *Ci) publishImages(
 	ctx context.Context,
+	p *pkg,
 	variants []*dagger.Container,
 	tags []string,
 	registryUsername string,
@@ -403,7 +497,7 @@ func (m *Ci) publishImages(
 ) ([]string, error) {
 	publisher := dag.Container()
 	if registryPassword != nil {
-		host, err := m.Goreleaser.RegistryHost(ctx, ansivideoRegistry)
+		host, err := m.Goreleaser.RegistryHost(ctx, p.image.registry)
 		if err != nil {
 			return nil, fmt.Errorf("resolve registry host: %w", err)
 		}
@@ -414,7 +508,7 @@ func (m *Ci) publishImages(
 	digests := make([]string, len(tags))
 	g, gCtx := errgroup.WithContext(ctx)
 	for i, t := range tags {
-		ref := fmt.Sprintf("%s:%s", ansivideoRegistry, t)
+		ref := fmt.Sprintf("%s:%s", p.image.registry, t)
 		g.Go(func() error {
 			digest, err := publisher.Publish(gCtx, ref, dagger.ContainerPublishOpts{
 				PlatformVariants: variants,
@@ -440,6 +534,7 @@ func (m *Ci) publishImages(
 // share a manifest. Does nothing when no OIDC token is provided.
 func (m *Ci) signImages(
 	ctx context.Context,
+	p *pkg,
 	digests []string,
 	registryUsername string,
 	registryPassword *dagger.Secret,
@@ -457,7 +552,7 @@ func (m *Ci) signImages(
 
 	host := ""
 	if registryPassword != nil {
-		host, err = m.Goreleaser.RegistryHost(ctx, ansivideoRegistry)
+		host, err = m.Goreleaser.RegistryHost(ctx, p.image.registry)
 		if err != nil {
 			return fmt.Errorf("resolve registry host: %w", err)
 		}

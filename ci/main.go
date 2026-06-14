@@ -51,9 +51,9 @@ type Ci struct {
 	Source *dagger.Directory
 	// Devbox toolchain instance the task-based checks run inside.
 	Devbox *dagger.Devbox // +private
-	// Goreleaser toolchain used to build, validate, and release the ansivideo
-	// binary, including its folded-in cosign signing and syft SBOM helpers
-	// (see release.go).
+	// Goreleaser toolchain used to build, validate, and release the monorepo's
+	// binary packages, including its folded-in cosign signing and syft SBOM
+	// helpers (see release.go).
 	Goreleaser *dagger.Goreleaser // +private
 	// Scanner is the security toolchain (Trivy) backing [Ci.Security]. Named
 	// Scanner rather than Security to avoid colliding with that method.
@@ -78,7 +78,7 @@ func New(
 		Goreleaser: dag.Goreleaser(dagger.GoreleaserOpts{
 			Source:    source,
 			Version:   goreleaserVersion,
-			RemoteURL: ansivideoRemoteURL,
+			RemoteURL: repoRemoteURL,
 		}),
 		Scanner: dag.Security(dagger.SecurityOpts{
 			Source:         source,
