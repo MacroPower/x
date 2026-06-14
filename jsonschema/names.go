@@ -130,16 +130,18 @@ func (g *generator) disambiguateDefs() {
 			baseCandidates[i] = path.Base(t.PkgPath()) + "_" + name
 		}
 
-		// Candidate scheme 2 (fallback): prefix with the full import path.
-		fullCandidates := make([]string, len(types))
-		for i, t := range types {
-			fullCandidates[i] = strings.ReplaceAll(t.PkgPath(), "/", "_") + "_" + name
-		}
-
 		// Pick the first scheme whose names are unique within the group and do
-		// not clash with any name already reserved in newDefs.
+		// not clash with any name already reserved in newDefs. The full-path
+		// fallback is constructed only on escalation, the uncommon case, so the
+		// usual base-scheme path does not build a second candidate slice.
 		chosen := baseCandidates
 		if !g.candidatesUsable(baseCandidates, used) {
+			// Candidate scheme 2 (fallback): prefix with the full import path.
+			fullCandidates := make([]string, len(types))
+			for i, t := range types {
+				fullCandidates[i] = strings.ReplaceAll(t.PkgPath(), "/", "_") + "_" + name
+			}
+
 			chosen = fullCandidates
 		}
 
