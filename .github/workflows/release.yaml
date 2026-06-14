@@ -1,13 +1,20 @@
 name: release
 
-# Releases the ansivideo binary, container image, SBOMs, and signatures. ci
-# release builds and signs the artifacts with GoReleaser (via the goreleaser
-# toolchain, which also installs cosign and syft), creates the GitHub release
-# for the prefixed tag, and publishes the multi-arch image to ghcr.io.
+# Releases a package's binaries, container image (when it declares one), SBOMs,
+# and signatures. ci release resolves the package from the tag prefix, builds
+# and signs the artifacts with GoReleaser (via the goreleaser toolchain, which
+# also installs cosign and syft), creates the GitHub release for the prefixed
+# tag, and publishes the multi-arch image to ghcr.io. Any <package>/vX.Y.Z tag
+# triggers it, so releasing a new package needs no workflow edits.
+#
+# Library modules are also tagged <module>/vX.Y.Z for Go module versioning, so
+# the prepare job gates the release on the tagged package actually being
+# releasable (having a release.yaml); a library tag skips the release job rather
+# than failing it.
 on:
   push:
     tags:
-      - ansivideo/v*
+      - "*/v*"
   workflow_dispatch:
     inputs:
       tag:
@@ -25,8 +32,58 @@ permissions:
   contents: read
 
 jobs:
+  prepare:
+    name: prepare
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.value }}
+      releasable: ${{ steps.tag.outputs.releasable }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.inputs.tag != '' && format('refs/tags/{0}', github.event.inputs.tag) || github.ref }}
+          persist-credentials: false
+
+      - name: Determine tag
+        id: tag
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          if [ -n "$INPUT_TAG" ]; then
+            value="$INPUT_TAG"
+          else
+            value="${GITHUB_REF#refs/tags/}"
+          fi
+          # The '*/v*' trigger also matches library module tags (e.g.
+          # version/v0.2.0); only a tag whose package directory declares a
+          # release.yaml is releasable. This check runs first, so a
+          # non-releasable tag skips the release job below rather than failing
+          # the run (and the unsanitized tag is never used). The prefix is taken
+          # verbatim for a filesystem test only, never interpolated into a
+          # command.
+          package="${value%%/*}"
+          if [ ! -f "$package/release.yaml" ]; then
+            echo "releasable=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::$value is not a releasable package (no $package/release.yaml); skipping release"
+            exit 0
+          fi
+          # The tag is interpolated into the `ci release` call string, which
+          # dagger-for-github expands unquoted inside a shell. A pushed git tag
+          # may legally contain shell metacharacters ($(), ;, |, "), so pin a
+          # releasable tag to the <package>/vX.Y.Z SemVer shape before using it;
+          # anything else is a mistyped tag or an injection attempt and fails.
+          if ! printf '%s' "$value" | grep -Eq '^[a-z0-9._-]+/v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)*$'; then
+            echo "refusing to release malformed tag: $value" >&2
+            exit 1
+          fi
+          echo "value=$value" >> "$GITHUB_OUTPUT"
+          echo "releasable=true" >> "$GITHUB_OUTPUT"
+
   release:
     name: release
+    needs: prepare
+    if: ${{ needs.prepare.outputs.releasable == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write # create the GitHub release
@@ -40,27 +97,6 @@ jobs:
           ref: ${{ github.event.inputs.tag != '' && format('refs/tags/{0}', github.event.inputs.tag) || github.ref }}
           fetch-depth: 0
           persist-credentials: false
-
-      - name: Determine tag
-        id: tag
-        env:
-          INPUT_TAG: ${{ github.event.inputs.tag }}
-        run: |
-          if [ -n "$INPUT_TAG" ]; then
-            value="$INPUT_TAG"
-          else
-            value="${GITHUB_REF#refs/tags/}"
-          fi
-          # The tag is interpolated into the `ci release` call string, which
-          # dagger-for-github expands unquoted inside a shell. A pushed git tag
-          # may legally contain shell metacharacters ($(), ;, |, "), so pin the
-          # value to the ansivideo/vX.Y.Z SemVer shape before using it; anything
-          # else is a mistyped tag or an injection attempt and is rejected.
-          if ! printf '%s' "$value" | grep -Eq '^ansivideo/v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)*$'; then
-            echo "refusing to release malformed tag: $value" >&2
-            exit 1
-          fi
-          echo "value=$value" >> "$GITHUB_OUTPUT"
 
       - name: Capture OIDC request URL
         id: oidc
@@ -77,7 +113,7 @@ jobs:
             --github-token=env://GITHUB_TOKEN
             --registry-username="${{ github.actor }}"
             --registry-password=env://REGISTRY_PASSWORD
-            --tag="${{ steps.tag.outputs.value }}"
+            --tag="${{ needs.prepare.outputs.tag }}"
             --oidc-request-url="${{ steps.oidc.outputs.request-url }}"
             --oidc-request-token=env://ACTIONS_ID_TOKEN_REQUEST_TOKEN
             --output=./dist
