@@ -26,8 +26,12 @@ import (
 // consulted first.
 //
 // Parsed packages are cached on the provider, keyed by import path, so a
-// provider shared across Generate calls loads each package once. The cache
-// mutex makes the provider safe for concurrent use.
+// provider shared across Generate calls loads each package once in the steady
+// state. Loading runs outside the cache mutex so distinct packages load in
+// parallel and a cache hit never blocks behind a slow load; concurrent first
+// calls for the same uncached path may therefore load it more than once, with
+// equivalent results. The mutex still makes the provider safe for concurrent
+// use.
 type GoCommentProvider struct {
 	cache   map[string][]*ast.File
 	loadDir string
@@ -194,13 +198,21 @@ func (ce *GoCommentProvider) sourceFiles(ctx context.Context, pkgPath string) ([
 		return nil, nil
 	}
 
+	// Fast path: serve a cached result under a short lock.
 	ce.mu.Lock()
-	defer ce.mu.Unlock()
 
-	if files, ok := ce.cache[pkgPath]; ok {
+	files, ok := ce.cache[pkgPath]
+
+	ce.mu.Unlock()
+
+	if ok {
 		return files, nil
 	}
 
+	// Load outside the lock so distinct packages load in parallel and a cache
+	// hit never blocks behind an unrelated (possibly slow or hung) load. Two
+	// goroutines racing on the same uncached path may both load it; the result
+	// is equivalent and the second store overwrites the first.
 	files, loaded, err := ce.loadPackage(ctx, pkgPath)
 	if err != nil {
 		return nil, err
@@ -211,7 +223,11 @@ func (ce *GoCommentProvider) sourceFiles(ctx context.Context, pkgPath string) ([
 	// the cache with a nil that hides the package's comments for the rest of the
 	// provider's lifetime.
 	if loaded {
+		ce.mu.Lock()
+
 		ce.cache[pkgPath] = files
+
+		ce.mu.Unlock()
 	}
 
 	return files, nil
