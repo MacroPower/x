@@ -5,22 +5,5 @@ shopt: [globstar]
 
 tasks:
   scan:
-    desc: Scans source dependencies for known vulnerabilities with trivy
-    summary: |-
-      Trivy scans source dependencies for known vulnerabilities; devbox provides it
-      on PATH. Trivy auto-discovers a .trivyignore in the scanned directory for CVE
-      suppression and fetches its vulnerability database at runtime. testdata trees
-      hold intentionally-vulnerable fixtures for negative tests, so they are skipped.
-    vars:
-      TRIVY_SEVERITY: CRITICAL,HIGH
-      TRIVY_SKIP_DIRS: "**/testdata/**"
-    cmds:
-      - |-
-        trivy fs \
-          --scanners=vuln \
-          --pkg-types=library \
-          --exit-code=1 \
-          --severity={{.TRIVY_SEVERITY}} \
-          --skip-dirs="{{.TRIVY_SKIP_DIRS}}" \
-          --skip-version-check \
-          {{.ROOT_DIR}}
+    desc: Scans source dependencies for vulnerabilities via the security toolchain
+    cmd: dagger call ci security

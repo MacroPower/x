@@ -4,8 +4,9 @@ set: [errexit, nounset, pipefail]
 shopt: [globstar]
 
 # GitHub configuration linting. zizmor runs locally (devbox provides it);
-# Renovate config validation stays in Dagger (a pinned renovate-config-validator
-# in a Node container), the one quality check devbox does not provide.
+# Renovate config validation runs through Dagger (a pinned
+# renovate-config-validator in a Node container), as neither devbox nor a shared
+# toolchain provides the validator.
 tasks:
   actions:lint:
     desc: Lints GitHub Actions workflows with zizmor
@@ -16,8 +17,8 @@ tasks:
     desc: Validates the Renovate configuration with renovate-config-validator
     summary: |
       Validation runs renovate-config-validator at a pinned version in a Node
-      container via the `ci` toolchain. This is the only check that runs
-      through Dagger rather than directly from devbox.
+      container via the `ci` toolchain. It runs through Dagger because neither
+      devbox nor a shared toolchain provides the validator.
     cmds:
       - dagger call ci lint-renovate
 

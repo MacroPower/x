@@ -12,6 +12,10 @@
     {
       "name": "goreleaser",
       "source": "../toolchains/goreleaser"
+    },
+    {
+      "name": "security",
+      "source": "../toolchains/security"
     }
   ]
 }

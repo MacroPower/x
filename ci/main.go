@@ -1,13 +1,16 @@
-// CI functions specific to the x repository. The repository's quality gates
-// are Taskfile targets that call local tools (go, golangci-lint, prettier,
-// trivy, zizmor) provided by devbox. These functions run those same tasks
-// inside the project's devbox environment via the devbox toolchain, so CI
-// reproduces exactly what developers run locally: local skips the container
-// for speed, CI keeps it for reproducibility.
+// CI functions specific to the x repository. Most quality gates are Taskfile
+// targets that call local tools (go, golangci-lint, prettier, zizmor) provided
+// by devbox. These functions run those same tasks inside the project's devbox
+// environment via the devbox toolchain, so CI reproduces exactly what
+// developers run locally: local skips the container for speed, CI keeps it for
+// reproducibility.
 //
+// Two gates instead compose a sibling toolchain directly because their tools
+// are not on the devbox PATH: Security runs the security toolchain (Trivy), and
+// the release functions in release.go run the goreleaser toolchain.
 // Renovate-config validation stays self-contained here (a pinned
 // renovate-config-validator in a Node container) because it is the one check
-// devbox does not provide.
+// neither devbox nor a shared toolchain provides.
 package main
 
 import (
@@ -47,6 +50,9 @@ type Ci struct {
 	// binary, including its folded-in cosign signing and syft SBOM helpers
 	// (see release.go).
 	Goreleaser *dagger.Goreleaser // +private
+	// Scanner is the security toolchain (Trivy) backing [Ci.Security]. Named
+	// Scanner rather than Security to avoid colliding with that method.
+	Scanner *dagger.Security // +private
 }
 
 // New creates an [Ci] module with the given project source directory.
@@ -66,6 +72,10 @@ func New(
 			Source:    source,
 			Version:   goreleaserVersion,
 			RemoteURL: ansivideoRemoteURL,
+		}),
+		Scanner: dag.Security(dagger.SecurityOpts{
+			Source:         source,
+			CacheNamespace: cacheNamespace + ":security",
 		}),
 	}
 }
@@ -117,12 +127,15 @@ func (m *Ci) TestIntegration(ctx context.Context) error {
 	return m.runTask(ctx, "go:test:integration")
 }
 
-// Security scans source dependencies for known vulnerabilities with trivy
-// inside the devbox environment, mirroring `task security:scan`.
+// Security scans source dependencies for known vulnerabilities by composing the
+// security toolchain (Trivy) directly, the way the release functions compose
+// the goreleaser toolchain. The scanned source is the `ci` toolchain's source,
+// whose root dagger.json customization already excludes toolchains and
+// .worktrees (where the intentionally-vulnerable test fixtures live).
 //
 // +check
 func (m *Ci) Security(ctx context.Context) error {
-	return m.runTask(ctx, "security:scan")
+	return m.Scanner.ScanSource(ctx)
 }
 
 // TestCoverage runs all tests with coverage profiling inside the devbox
@@ -137,7 +150,8 @@ func (m *Ci) TestCoverage() *dagger.File {
 // LintRenovate validates the Renovate configuration with
 // renovate-config-validator, installed at a pinned version in a Node container
 // so the check is self-contained and Renovate can bump its own validator
-// version. This is the one quality check that does not run through devbox.
+// version. It is the one check that composes neither devbox nor a shared
+// toolchain.
 //
 // +check
 func (m *Ci) LintRenovate(ctx context.Context) error {

@@ -10,18 +10,29 @@ release pipeline.
 
 ### Checks (run via devbox)
 
-- `lint`, `test`, `test-integration`, `security` (all +check) run the matching
-  Taskfile target inside the project's devbox environment via the `devbox`
-  toolchain, with the Go module/build and golangci-lint caches mounted.
+- `lint`, `test`, `test-integration` (all +check) run the matching Taskfile
+  target inside the project's devbox environment via the `devbox` toolchain,
+  with the Go module/build and golangci-lint caches mounted.
 - `test-coverage` runs the coverage target the same way and returns the
   coverage profile file.
 - `lint-renovate` (+check) validates the Renovate configuration with
   renovate-config-validator at a pinned version in a Node container — the one
-  gate that does not run through devbox, so Renovate can bump its own validator.
+  gate that runs through neither devbox nor a shared toolchain, so Renovate can
+  bump its own validator.
 
 Because the gates are Taskfile targets calling local tools, CI reproduces
 exactly what developers run locally: `local` skips the container for speed, CI
 keeps it for reproducibility.
+
+### Security (composes the security toolchain)
+
+- `security` (+check) scans source dependencies for known vulnerabilities by
+  composing the `security` toolchain (Trivy) directly, the same pattern the
+  release functions use for `goreleaser`. Trivy is not on the devbox PATH, so
+  the scan does not run through devbox. It scans the `ci` toolchain's source,
+  whose root `dagger.json` customization already excludes `toolchains` and
+  `.worktrees`, so the intentionally-vulnerable test fixtures are not scanned
+  and no skip-dir filter is needed.
 
 ### ansivideo release (composes the shared toolchains; see `release.go`)
 
@@ -58,9 +69,10 @@ functions locally.
 
 - `main.go` defines the `Ci` module (Go module path `dagger/ci`) and the check
   functions; `release.go` holds the ansivideo release functions.
-- Dependencies in `dagger.json`: the `devbox` toolchain (checks) plus the
+- Dependencies in `dagger.json`: the `devbox` toolchain (checks), the
   `goreleaser` toolchain (release, which carries the folded-in cosign and syft
-  tooling), both referenced relatively under `../toolchains/`.
+  tooling), and the `security` toolchain (the vulnerability scan), all
+  referenced relatively under `../toolchains/`.
 - It has no `tests/` submodule, so `task dagger:test` (which discovers suites
   under `toolchains/*/tests`) does not cover it.
 

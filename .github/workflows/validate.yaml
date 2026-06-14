@@ -22,10 +22,10 @@ jobs:
       matrix:
         # Each entry is a function on the `ci` toolchain. Most run the matching
         # Taskfile target inside the devbox environment (dagger -> devbox ->
-        # task); the exceptions are lint-renovate (renovate-config-validator in
-        # a Node container) and lint-releaser (goreleaser check via the
-        # goreleaser toolchain). Mirrors the gates developers run via
-        # `task check`.
+        # task); the exceptions are security (Trivy via the security toolchain),
+        # lint-releaser (goreleaser check via the goreleaser toolchain), and
+        # lint-renovate (renovate-config-validator in a Node container). Mirrors
+        # the gates developers run via `task check`.
         task:
           - lint
           - test
