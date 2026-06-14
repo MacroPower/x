@@ -3,7 +3,7 @@
 This repository's own CI module, registered as `ci` in the root `dagger.json`.
 Unlike the shared modules under `toolchains/`, it is not designed for remote
 consumption: it orchestrates the repo's `dagger -> devbox -> task` flow so CI
-reproduces exactly what `task check` runs locally, and it owns the ansivideo
+reproduces exactly what `task check` runs locally, and it owns the monorepo's
 release pipeline.
 
 ## Functions
@@ -41,48 +41,69 @@ release functions use for `goreleaser`.
 - `security-source-sarif` and `security-image-sarif` are the non-gating
   counterparts: they return SARIF files rather than failing on findings.
   `security-source-sarif` scans the same source as `security`;
-  `security-image-sarif` scans the ansivideo container image, built the same way
-  a release publishes it, so the scan matches the real artifact. The `security.yaml`
-  workflow exports both on push to `main` and uploads them to GitHub Code
-  Scanning under the `trivy-source` and `trivy-image` categories; the gating
-  `security` check above is unaffected. The image scan also surfaces OS-layer
-  CVEs (debian, ffmpeg) that the source scan cannot see.
+  `security-image-sarif --pkg=<name>` scans a package's container image, built
+  the same way a release publishes it, so the scan matches the real artifact.
+  The `security.yaml` workflow exports the source SARIF and one image SARIF per
+  image-producing package (discovered via `ci image-packages`) on push to `main`
+  and uploads them to GitHub Code Scanning under the `trivy-source` and
+  `trivy-image-<package>` categories; the gating `security` check above is
+  unaffected. The image scan also surfaces OS-layer CVEs (the runtime base and
+  apt packages) that the source scan cannot see.
 
-### ansivideo release (composes the shared toolchains; see `release.go`)
+### Release pipeline (composes the shared toolchains; see `release.go` + `packages.go`)
 
-ansivideo is the monorepo's first released binary. These functions compose the
-`goreleaser` toolchain directly rather than going through devbox, because those
-tools are not on the devbox PATH. The goreleaser toolchain also installs cosign
-and syft (via its `with-cosign`/`with-syft`) and signs image digests (its
-`sign-keyless`), so the release pipeline depends on it alone.
+The release functions are package-agnostic. A package opts in by dropping a
+`release.yaml` manifest at its module root; `packages.go` discovers every
+`<package>/release.yaml` under the source root and resolves each into a spec.
+Everything else — the Go submodule tag prefix (`<package>/vX.Y.Z`), the
+GoReleaser config (`<package>/.goreleaser.yaml`), the project/build id, and the
+built binary — derives from the package's directory name by convention. The
+manifest's optional `image` block (registry, description, runtime apt packages)
+opts the package into a published, signed container image; without it the
+package is binary-only. Adding a releasable package needs no edits here.
 
-- `lint-releaser` (+check) runs `goreleaser check` against
-  `ansivideo/.goreleaser.yaml`.
-- `build` snapshot-cross-compiles ansivideo for linux/darwin × amd64/arm64 and
-  returns the GoReleaser `dist/` directory (no publishing).
-- `release` builds, signs, and publishes a tagged release: GoReleaser produces
-  the binaries, archives, checksums, SBOMs (syft), and signs the checksums
-  (cosign) — syft and cosign installed via the goreleaser toolchain; the GitHub
-  release is created against the real `ansivideo/vX.Y.Z`
-  tag with the gh CLI; the multi-arch image (debian + ffmpeg + binary) is
-  published to `ghcr.io/macropower/ansivideo` and signed. Returns the `dist/`
-  directory including `digests.txt` for attestation.
+These functions compose the `goreleaser` toolchain directly rather than going
+through devbox, because those tools are not on the devbox PATH. The goreleaser
+toolchain also installs cosign and syft (via its `with-cosign`/`with-syft`) and
+signs image digests (its `sign-keyless`), so the release pipeline depends on it
+alone.
+
+- `packages` / `image-packages` return the discovered package names (all, and
+  those that build an image) as JSON arrays. The `build.yaml` and `security.yaml`
+  workflows consume them to build their matrices, so a new package flows through
+  CI with no workflow edits.
+- `lint-releaser` (+check) runs `goreleaser check` against every package's
+  `<package>/.goreleaser.yaml`; discovery also parses the manifests, so a
+  malformed `release.yaml` fails here too.
+- `build --pkg=<name>` snapshot-cross-compiles a package for linux/darwin ×
+  amd64/arm64 and returns the GoReleaser `dist/` directory (no publishing).
+- `release --tag=<package>/vX.Y.Z` resolves the package from the tag prefix,
+  then builds, signs, and publishes the release: GoReleaser produces the
+  binaries, archives, checksums, SBOMs (syft), and signs the checksums (cosign)
+  — syft and cosign installed via the goreleaser toolchain; the GitHub release
+  is created against the real `<package>/vX.Y.Z` tag with the gh CLI; and, when
+  the package declares an image, the multi-arch image (debian + runtime apt
+  packages + binary) is published to the manifest's registry and signed.
+  Returns the `dist/` directory, including `digests.txt` for attestation when an
+  image was published.
 
 GoReleaser's monorepo tag-prefix handling is Pro-only, so `release` runs
-GoReleaser from `ansivideo/` with `GORELEASER_CURRENT_TAG` set to the
+GoReleaser from the package directory with `GORELEASER_CURRENT_TAG` set to the
 prefix-stripped version and `release.disable: true`, then publishes the GitHub
 release itself. Signing is keyless (Sigstore Fulcio + Rekor): the workflow
 forwards the GitHub Actions OIDC token (`ACTIONS_ID_TOKEN_REQUEST_URL`/`_TOKEN`)
 into the container so cosign mints a short-lived, workflow-identity-bound cert
 on demand — no long-lived secrets. With no OIDC token the release is unsigned.
-The `release.yaml` workflow (tag `ansivideo/v*`) and `build.yaml` (snapshot) are
-thin callers; `task release:check` / `task release:snapshot` wrap the same
-functions locally.
+The `release.yaml` workflow (tag `*/v*`) and `build.yaml` (snapshot) are thin
+callers; `task release:check` validates every package and
+`task release:snapshot PACKAGE=<name>` wraps the snapshot build locally.
 
 ## Layout
 
 - `main.go` defines the `Ci` module (Go module path `dagger/ci`) and the check
-  functions; `release.go` holds the ansivideo release functions.
+  functions; `release.go` holds the release orchestration; `packages.go` holds
+  the `release.yaml` manifest model, discovery, and the `packages`/
+  `image-packages` accessors.
 - Dependencies in `dagger.json`: the `devbox` toolchain (checks), the
   `goreleaser` toolchain (release, which carries the folded-in cosign and syft
   tooling), the `security` toolchain (the vulnerability scan), and the `zizmor`
