@@ -8,87 +8,40 @@ import (
 	"go.jacobcolvin.com/x/jsonschema"
 )
 
-// applyCollectionMinConstraint applies min/gte or gt to a collection schema.
+// collectionBoundFields returns the schema's size-bound field pointers for the
+// collection's base type: the min/maxProperties pair for a map, otherwise the
+// min/maxItems pair for a slice or array. The first result is the floor field,
+// the second the ceiling field.
+func collectionBoundFields(s *jsonschema.Schema, baseType reflect.Type) (**int, **int) {
+	if isMapKind(baseType) {
+		return &s.MinProperties, &s.MaxProperties
+	}
+
+	return &s.MinItems, &s.MaxItems
+}
+
+// applyCollectionMinConstraint applies min/gte or gt to a collection schema by
+// raising its size floor (minItems or minProperties).
 func applyCollectionMinConstraint(s *jsonschema.Schema, value string, baseType reflect.Type, exclusive bool) error {
-	n, err := strconv.Atoi(value)
-	if err != nil {
-		return fmt.Errorf("validate tag: invalid number %q: %w", value, err)
-	}
+	minField, _ := collectionBoundFields(s, baseType)
 
-	// Gt=N means minItems N+1, clamped to a non-negative bound as JSON Schema
-	// requires.
-	n = clampNonNegative(inclusiveLowerBound(n, exclusive))
-	// Rules in a validate tag are ANDed, so overlapping minimum floors intersect
-	// to their maximum. The floor only ever rises: a weaker (lower) min never
-	// lowers a stronger floor set by another part of the tag, regardless of order.
-	if isMapKind(baseType) {
-		if s.MinProperties == nil || n > *s.MinProperties {
-			s.MinProperties = new(n)
-		}
-	} else {
-		if s.MinItems == nil || n > *s.MinItems {
-			s.MinItems = new(n)
-		}
-	}
-
-	return nil
+	return applyMinBound(minField, value, exclusive)
 }
 
-// applyCollectionMaxConstraint applies max/lte or lt to a collection schema.
+// applyCollectionMaxConstraint applies max/lte or lt to a collection schema by
+// lowering its size ceiling (maxItems or maxProperties).
 func applyCollectionMaxConstraint(s *jsonschema.Schema, value string, baseType reflect.Type, exclusive bool) error {
-	n, err := strconv.Atoi(value)
-	if err != nil {
-		return fmt.Errorf("validate tag: invalid number %q: %w", value, err)
-	}
+	_, maxField := collectionBoundFields(s, baseType)
 
-	// Lt=N means maxItems N-1, clamped to a non-negative bound as JSON Schema
-	// requires (so lt=0 collapses to 0).
-	n = clampNonNegative(inclusiveUpperBound(n, exclusive))
-	// Rules in a validate tag are ANDed, so overlapping maximum ceilings
-	// intersect to their minimum. The ceiling only ever falls: a weaker (higher)
-	// max never raises a stronger ceiling set by another part of the tag.
-	if isMapKind(baseType) {
-		if s.MaxProperties == nil || n < *s.MaxProperties {
-			s.MaxProperties = new(n)
-		}
-	} else {
-		if s.MaxItems == nil || n < *s.MaxItems {
-			s.MaxItems = new(n)
-		}
-	}
-
-	return nil
+	return applyMaxBound(maxField, value, exclusive)
 }
 
-// applyCollectionLenConstraint applies len=N to a collection schema.
+// applyCollectionLenConstraint applies len=N to a collection schema by pinning
+// both size bounds to the intersected value.
 func applyCollectionLenConstraint(s *jsonschema.Schema, value string, baseType reflect.Type) error {
-	n, err := strconv.Atoi(value)
-	if err != nil {
-		return fmt.Errorf("validate tag: invalid number %q: %w", value, err)
-	}
+	minField, maxField := collectionBoundFields(s, baseType)
 
-	// Min/maxItems and min/maxProperties MUST be non-negative per JSON Schema;
-	// a negative length collapses to 0.
-	n = clampNonNegative(n)
-
-	minField, maxField := &s.MinItems, &s.MaxItems
-	if isMapKind(baseType) {
-		minField, maxField = &s.MinProperties, &s.MaxProperties
-	}
-
-	// A len=N tag pins the size to exactly N: raise the floor and lower the
-	// ceiling to N, each only when it tightens an existing bound, so the result
-	// is the order-independent intersection with any min/max set elsewhere in the
-	// tag.
-	if *minField == nil || n > **minField {
-		*minField = new(n)
-	}
-
-	if *maxField == nil || n < **maxField {
-		*maxField = new(n)
-	}
-
-	return nil
+	return applyLenBound(minField, maxField, value)
 }
 
 // applyCollectionNe applies ne=N to a collection schema, forbidding the length

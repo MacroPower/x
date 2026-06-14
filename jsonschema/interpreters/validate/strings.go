@@ -3,76 +3,26 @@ package validate
 import (
 	"fmt"
 	"reflect"
-	"strconv"
 
 	"go.jacobcolvin.com/x/jsonschema"
 )
 
-// applyStringMinConstraint applies min/gte or gt to a string schema.
+// applyStringMinConstraint applies min/gte or gt to a string schema by raising
+// its minLength floor.
 func applyStringMinConstraint(s *jsonschema.Schema, value string, exclusive bool) error {
-	n, err := strconv.Atoi(value)
-	if err != nil {
-		return fmt.Errorf("validate tag: invalid number %q: %w", value, err)
-	}
-
-	// Gt=N means minLength N+1, clamped to a non-negative bound as JSON Schema
-	// requires.
-	n = clampNonNegative(inclusiveLowerBound(n, exclusive))
-	// Rules in a validate tag are ANDed, so overlapping minimum floors intersect
-	// to their maximum. The floor only ever rises: a weaker (lower) min never
-	// lowers a stronger floor set by another part of the tag, regardless of order.
-	if s.MinLength == nil || n > *s.MinLength {
-		s.MinLength = new(n)
-	}
-
-	return nil
+	return applyMinBound(&s.MinLength, value, exclusive)
 }
 
-// applyStringMaxConstraint applies max/lte or lt to a string schema.
+// applyStringMaxConstraint applies max/lte or lt to a string schema by lowering
+// its maxLength ceiling.
 func applyStringMaxConstraint(s *jsonschema.Schema, value string, exclusive bool) error {
-	n, err := strconv.Atoi(value)
-	if err != nil {
-		return fmt.Errorf("validate tag: invalid number %q: %w", value, err)
-	}
-
-	// Lt=N means maxLength N-1, clamped to a non-negative bound as JSON Schema
-	// requires.
-	n = clampNonNegative(inclusiveUpperBound(n, exclusive))
-	// Rules in a validate tag are ANDed, so overlapping maximum ceilings
-	// intersect to their minimum. The ceiling only ever falls: a weaker (higher)
-	// max never raises a stronger ceiling set by another part of the tag.
-	if s.MaxLength == nil || n < *s.MaxLength {
-		s.MaxLength = new(n)
-	}
-
-	return nil
+	return applyMaxBound(&s.MaxLength, value, exclusive)
 }
 
-// applyStringLenConstraint applies len=N to a string schema.
+// applyStringLenConstraint applies len=N to a string schema by pinning minLength
+// and maxLength to the intersected bound.
 func applyStringLenConstraint(s *jsonschema.Schema, value string) error {
-	n, err := strconv.Atoi(value)
-	if err != nil {
-		return fmt.Errorf("validate tag: invalid number %q: %w", value, err)
-	}
-
-	// MinLength and MaxLength MUST be non-negative per JSON Schema; a negative
-	// length collapses to 0.
-	n = clampNonNegative(n)
-
-	// A len=N tag pins the length to exactly N: raise the floor and lower the
-	// ceiling to N, each only when it tightens an existing bound. Rules in a
-	// validate tag are ANDed, so this intersects with any min/max/required
-	// regardless of tag order, and an incompatible len yields an unsatisfiable
-	// range just as a conflicting min/max pair does.
-	if s.MinLength == nil || n > *s.MinLength {
-		s.MinLength = new(n)
-	}
-
-	if s.MaxLength == nil || n < *s.MaxLength {
-		s.MaxLength = new(n)
-	}
-
-	return nil
+	return applyLenBound(&s.MinLength, &s.MaxLength, value)
 }
 
 // applyStringOneOf applies oneof=a b c to a string schema. Single-quoted runs
