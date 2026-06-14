@@ -119,6 +119,24 @@ func (m *Ci) Build(ctx context.Context) (*dagger.Directory, error) {
 		Directory(ansivideoDistDir), nil
 }
 
+// SecurityImageSarif builds the ansivideo runtime image and scans it for known
+// vulnerabilities, returning the results as a SARIF file for upload to GitHub
+// Code Scanning. It composes the release image builder ([Ci.Build] plus
+// runtimeImages) so it scans exactly what a release publishes, then scans the
+// native linux/amd64 variant (Dagger evaluates only that variant lazily). Unlike
+// the gating scans it does not fail on findings, and it surfaces OS-layer CVEs
+// (debian, ffmpeg) that the source scan, seeing only Go modules, cannot.
+func (m *Ci) SecurityImageSarif(ctx context.Context) (*dagger.File, error) {
+	dist, err := m.Build(ctx)
+	if err != nil {
+		return nil, err
+	}
+	// The version only feeds cosmetic OCI labels on an image that is never
+	// published, so a fixed placeholder is fine.
+	variants := runtimeImages(dist, "0.0.0-scan")
+	return m.Scanner.ScanImageSarif(variants[0]), nil
+}
+
 // Release builds, signs, and publishes a tagged ansivideo release:
 //
 //   - GoReleaser cross-compiles the binaries, builds archives and checksums,

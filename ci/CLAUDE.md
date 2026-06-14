@@ -38,6 +38,15 @@ release functions use for `goreleaser`.
   source, whose root `dagger.json` customization already excludes `toolchains`
   and `.worktrees`, so the intentionally-vulnerable test fixtures are not
   scanned and no skip-dir filter is needed.
+- `security-source-sarif` and `security-image-sarif` are the non-gating
+  counterparts: they return SARIF files rather than failing on findings.
+  `security-source-sarif` scans the same source as `security`;
+  `security-image-sarif` scans the ansivideo container image, built the same way
+  a release publishes it, so the scan matches the real artifact. The `security.yaml`
+  workflow exports both on push to `main` and uploads them to GitHub Code
+  Scanning under the `trivy-source` and `trivy-image` categories; the gating
+  `security` check above is unaffected. The image scan also surfaces OS-layer
+  CVEs (debian, ffmpeg) that the source scan cannot see.
 
 ### ansivideo release (composes the shared toolchains; see `release.go`)
 

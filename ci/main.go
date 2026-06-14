@@ -149,6 +149,15 @@ func (m *Ci) Security(ctx context.Context) error {
 	return m.Scanner.ScanSource(ctx)
 }
 
+// SecuritySourceSarif scans source dependencies for known vulnerabilities and
+// returns the results as a SARIF file for upload to GitHub Code Scanning. Unlike
+// [Ci.Security], it does not gate on findings: SARIF capture must produce the
+// file even when vulnerabilities are present, so they can be published to the
+// Security tab. It scans the same source as the gate.
+func (m *Ci) SecuritySourceSarif() *dagger.File {
+	return m.Scanner.ScanSourceSarif()
+}
+
 // LintActions lints the GitHub Actions workflows for security issues by
 // composing the zizmor toolchain directly, the way Security composes the
 // security toolchain. zizmor is not on the devbox PATH, so this gate does not

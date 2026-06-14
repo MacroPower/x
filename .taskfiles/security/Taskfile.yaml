@@ -7,3 +7,11 @@ tasks:
   scan:
     desc: Scans source dependencies for vulnerabilities via the security toolchain
     cmd: dagger call ci security
+
+  sarif-source:
+    desc: Generates the source-dependency SARIF report (GitHub Code Scanning)
+    cmd: dagger call ci security-source-sarif export --path trivy-source.sarif
+
+  sarif-image:
+    desc: Generates the container-image SARIF report (GitHub Code Scanning)
+    cmd: dagger call ci security-image-sarif export --path trivy-image.sarif
