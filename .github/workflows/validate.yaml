@@ -20,16 +20,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Each entry is a function on the `ci` toolchain that runs the matching
+        # Each entry is a function on the `ci` toolchain. Most run the matching
         # Taskfile target inside the devbox environment (dagger -> devbox ->
-        # task), except lint-renovate, which runs renovate-config-validator in
-        # a Node container. Mirrors the gates developers run via `task check`.
+        # task); the exceptions are lint-renovate (renovate-config-validator in
+        # a Node container) and lint-releaser (goreleaser check via the
+        # goreleaser toolchain). Mirrors the gates developers run via
+        # `task check`.
         task:
           - lint
           - test
           - test-integration
           - security
           - lint-renovate
+          - lint-releaser
     steps:
       - name: Checkout
         uses: actions/checkout@v6

@@ -10,6 +10,7 @@ includes:
   gh: ./.taskfiles/gh/Taskfile.yaml
   git: ./.taskfiles/git/Taskfile.yaml
   go: ./.taskfiles/go/Taskfile.yaml
+  release: ./.taskfiles/release/Taskfile.yaml
   security: ./.taskfiles/security/Taskfile.yaml
 
 tasks:
@@ -38,7 +39,7 @@ tasks:
 
   check:
     desc: Runs all checks
-    deps: [lint, test, security:scan, gh:renovate:lint]
+    deps: [lint, test, security:scan, gh:renovate:lint, release:check]
 
   scan:
     desc: Scans source dependencies for vulnerabilities

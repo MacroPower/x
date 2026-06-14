@@ -29,6 +29,16 @@ func TestRunReturnsUsageExitCode(t *testing.T) {
 	}
 }
 
+func TestRunVersionFlagExitsZero(t *testing.T) {
+	t.Parallel()
+
+	// -version prints build info and exits successfully without requiring a
+	// video file argument.
+	code := run([]string{"-version"})
+
+	assert.Equal(t, 0, code)
+}
+
 func TestTerminalSizeFromWidth(t *testing.T) {
 	t.Parallel()
 

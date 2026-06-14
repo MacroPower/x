@@ -3,3 +3,5 @@ rules:
     ignore:
       - validate.yaml
       - renovate.yaml
+      - release.yaml
+      - build.yaml

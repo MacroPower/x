@@ -43,6 +43,13 @@ type Ci struct {
 	Source *dagger.Directory
 	// Devbox toolchain instance the task-based checks run inside.
 	Devbox *dagger.Devbox // +private
+	// Goreleaser toolchain used to build, validate, and release the ansivideo
+	// binary (see release.go).
+	Goreleaser *dagger.Goreleaser // +private
+	// Cosign toolchain used to sign release checksums and container images.
+	Cosign *dagger.Cosign // +private
+	// Syft toolchain used to generate SBOMs during a release.
+	Syft *dagger.Syft // +private
 }
 
 // New creates an [Ci] module with the given project source directory.
@@ -58,6 +65,13 @@ func New(
 			Source:         source,
 			CacheNamespace: cacheNamespace,
 		}),
+		Goreleaser: dag.Goreleaser(dagger.GoreleaserOpts{
+			Source:    source,
+			Version:   goreleaserVersion,
+			RemoteURL: ansivideoRemoteURL,
+		}),
+		Cosign: dag.Cosign(),
+		Syft:   dag.Syft(),
 	}
 }
 

@@ -9,9 +9,10 @@
 //
 // # Flags
 //
-//	-fps int   playback frame rate (default 24)
-//	-w int     render width in columns (0 = auto-detect terminal width)
-//	-loop      loop playback continuously
+//	-fps int    playback frame rate (default 24)
+//	-w int      render width in columns (0 = auto-detect terminal width)
+//	-loop       loop playback continuously
+//	-version    print version information and exit
 package main
 
 import (
@@ -20,6 +21,7 @@ import (
 	"fmt"
 	"os"
 
+	"go.jacobcolvin.com/x/version"
 	"golang.org/x/term"
 
 	tea "charm.land/bubbletea/v2"
@@ -40,6 +42,7 @@ func run(args []string) int {
 	fps := fs.Int("fps", 24, "playback frame rate")
 	width := fs.Int("w", 0, "render width in columns (0 = auto-detect terminal width)")
 	loop := fs.Bool("loop", false, "loop playback continuously")
+	showVersion := fs.Bool("version", false, "print version information and exit")
 
 	fs.Usage = func() {
 		fmt.Fprint(os.Stderr, "Usage: ansivideo [flags] <video_file>\n\nFlags:\n")
@@ -49,6 +52,12 @@ func run(args []string) int {
 	err := fs.Parse(args)
 	if err != nil {
 		return 2
+	}
+
+	if *showVersion {
+		fmt.Println(version.Get().String())
+
+		return 0
 	}
 
 	if fs.NArg() != 1 {

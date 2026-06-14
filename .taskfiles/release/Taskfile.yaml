@@ -1,0 +1,18 @@
+version: "3"
+
+set: [errexit, nounset, pipefail]
+shopt: [globstar]
+
+vars:
+  # Host directory the snapshot build is exported to; cleaned by the root
+  # `clean` task and ignored by .gitignore.
+  DIST: ./dist
+
+tasks:
+  check:
+    desc: Validates the ansivideo GoReleaser configuration
+    cmd: dagger call ci lint-releaser
+
+  snapshot:
+    desc: Cross-compiles ansivideo for all targets without publishing
+    cmd: dagger call ci build export --path={{.DIST}}

@@ -1,0 +1,82 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+version: 2
+
+project_name: ansivideo
+
+# ansivideo is a Go submodule of the x monorepo, tagged ansivideo/vX.Y.Z so
+# `go install go.jacobcolvin.com/x/ansivideo/cmd/ansivideo@vX.Y.Z` resolves.
+# GoReleaser's monorepo tag-prefix handling is Pro only and the OSS build treats
+# the slash in "ansivideo/v1.2.3" as a path separator, so the ci Release function
+# runs GoReleaser from the ansivideo/ directory with GORELEASER_CURRENT_TAG set to
+# the prefix-stripped version (v1.2.3). GoReleaser builds, archives, checksums,
+# SBOMs, and signs; release is disabled here and the ci function creates the
+# GitHub release against the real ansivideo/vX.Y.Z tag via the gh CLI.
+release:
+  disable: true
+
+builds:
+  - id: ansivideo
+    main: ./cmd/ansivideo
+    binary: ansivideo
+    # ansivideo shells out to ffmpeg at runtime; the binary itself is pure Go,
+    # so every target cross-compiles statically with no C toolchain.
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    ldflags:
+      - -s -w
+      - -X go.jacobcolvin.com/x/version.Version={{.Version}}
+      - -X go.jacobcolvin.com/x/version.Branch={{.Branch}}
+      - -X go.jacobcolvin.com/x/version.BuildUser={{.Env.USER}}@{{.Env.HOSTNAME}}
+      - -X go.jacobcolvin.com/x/version.BuildDate={{.Date}}
+    flags:
+      - -trimpath
+
+archives:
+  - formats: [tar.gz]
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+    files:
+      - LICENSE
+
+checksum:
+  name_template: "checksums.txt"
+
+# syft generates an SPDX SBOM per archive. The syft binary is installed onto
+# the release container by the ci toolchain via the syft toolchain module.
+sboms:
+  - artifacts: archive
+
+# Keyless Sigstore signing (Fulcio + Rekor) of checksums.txt. The release
+# workflow forwards the GitHub Actions OIDC token (ACTIONS_ID_TOKEN_REQUEST_URL
+# and _TOKEN) into the Dagger container, so cosign's built-in GitHub Actions
+# provider mints a short-lived, workflow-identity-bound certificate on demand.
+# The ci Release function skips signing entirely when no OIDC token is provided.
+signs:
+  - cmd: cosign
+    signature: "${artifact}.sigstore.json"
+    args:
+      - sign-blob
+      - "--bundle=${signature}"
+      - "${artifact}"
+      - "--yes"
+    artifacts: checksum
+    output: true
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+# The GitHub release is created by the ci Release function (gh --generate-notes
+# against the ansivideo/vX.Y.Z tag), so GoReleaser's own changelog is unused.
+changelog:
+  disable: true

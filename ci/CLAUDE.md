@@ -3,9 +3,12 @@
 This repository's own CI module, registered as `ci` in the root `dagger.json`.
 Unlike the shared modules under `toolchains/`, it is not designed for remote
 consumption: it orchestrates the repo's `dagger -> devbox -> task` flow so CI
-reproduces exactly what `task check` runs locally.
+reproduces exactly what `task check` runs locally, and it owns the ansivideo
+release pipeline.
 
 ## Functions
+
+### Checks (run via devbox)
 
 - `lint`, `test`, `test-integration`, `security` (all +check) run the matching
   Taskfile target inside the project's devbox environment via the `devbox`
@@ -20,11 +23,41 @@ Because the gates are Taskfile targets calling local tools, CI reproduces
 exactly what developers run locally: `local` skips the container for speed, CI
 keeps it for reproducibility.
 
+### ansivideo release (composes the shared toolchains; see `release.go`)
+
+ansivideo is the monorepo's first released binary. These functions compose the
+`goreleaser`, `syft`, and `cosign` toolchains directly rather than going through
+devbox, because those tools are not on the devbox PATH.
+
+- `lint-releaser` (+check) runs `goreleaser check` against
+  `ansivideo/.goreleaser.yaml`.
+- `build` snapshot-cross-compiles ansivideo for linux/darwin × amd64/arm64 and
+  returns the GoReleaser `dist/` directory (no publishing).
+- `release` builds, signs, and publishes a tagged release: GoReleaser produces
+  the binaries, archives, checksums, SBOMs (syft), and signs the checksums
+  (cosign); the GitHub release is created against the real `ansivideo/vX.Y.Z`
+  tag with the gh CLI; the multi-arch image (debian + ffmpeg + binary) is
+  published to `ghcr.io/macropower/ansivideo` and signed. Returns the `dist/`
+  directory including `digests.txt` for attestation.
+
+GoReleaser's monorepo tag-prefix handling is Pro-only, so `release` runs
+GoReleaser from `ansivideo/` with `GORELEASER_CURRENT_TAG` set to the
+prefix-stripped version and `release.disable: true`, then publishes the GitHub
+release itself. Signing is keyless (Sigstore Fulcio + Rekor): the workflow
+forwards the GitHub Actions OIDC token (`ACTIONS_ID_TOKEN_REQUEST_URL`/`_TOKEN`)
+into the container so cosign mints a short-lived, workflow-identity-bound cert
+on demand — no long-lived secrets. With no OIDC token the release is unsigned.
+The `release.yaml` workflow (tag `ansivideo/v*`) and `build.yaml` (snapshot) are
+thin callers; `task release:check` / `task release:snapshot` wrap the same
+functions locally.
+
 ## Layout
 
-- `main.go` defines the `Ci` module (Go module path `dagger/ci`).
-- Its only dependency is the `devbox` toolchain, referenced relatively as
-  `../toolchains/devbox` in `dagger.json`.
+- `main.go` defines the `Ci` module (Go module path `dagger/ci`) and the check
+  functions; `release.go` holds the ansivideo release functions.
+- Dependencies in `dagger.json`: the `devbox` toolchain (checks) plus the
+  `goreleaser`, `cosign`, and `syft` toolchains (release), all referenced
+  relatively under `../toolchains/`.
 - It has no `tests/` submodule, so `task dagger:test` (which discovers suites
   under `toolchains/*/tests`) does not cover it.
 

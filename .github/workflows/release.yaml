@@ -1,0 +1,93 @@
+name: release
+
+# Releases the ansivideo binary, container image, SBOMs, and signatures. ci
+# release builds and signs the artifacts with GoReleaser (via the goreleaser,
+# syft, and cosign toolchains), creates the GitHub release for the prefixed tag,
+# and publishes the multi-arch image to ghcr.io.
+on:
+  push:
+    tags:
+      - ansivideo/v*
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to release (e.g. ansivideo/v1.2.3)
+        required: true
+
+concurrency:
+  # Serialize releases for the same tag. On workflow_dispatch github.ref is the
+  # default branch, so key on the input tag when present; the ci Release step is
+  # also idempotent and race-safe as a backstop.
+  group: release-${{ github.event.inputs.tag || github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the GitHub release
+      packages: write # push the image to ghcr.io
+      id-token: write # actions/attest-build-provenance
+      attestations: write # actions/attest-build-provenance
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.inputs.tag != '' && format('refs/tags/{0}', github.event.inputs.tag) || github.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Determine tag
+        id: tag
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          if [ -n "$INPUT_TAG" ]; then
+            echo "value=$INPUT_TAG" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Capture OIDC request URL
+        id: oidc
+        # ACTIONS_ID_TOKEN_REQUEST_URL is only present in the runner env (not the
+        # ${{ }} context), so surface it as a step output for the Dagger call.
+        run: echo "request-url=$ACTIONS_ID_TOKEN_REQUEST_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Release via Dagger
+        uses: dagger/dagger-for-github@v8.4.1
+        with:
+          version: "v0.21.4"
+          call: >-
+            ci release
+            --github-token=env://GITHUB_TOKEN
+            --registry-username="${{ github.actor }}"
+            --registry-password=env://REGISTRY_PASSWORD
+            --tag="${{ steps.tag.outputs.value }}"
+            --oidc-request-url="${{ steps.oidc.outputs.request-url }}"
+            --oidc-request-token=env://ACTIONS_ID_TOKEN_REQUEST_TOKEN
+            --output=./dist
+          cloud-token: ${{ secrets.DAGGER_CLOUD_TOKEN }}
+          enable-github-summary: "true"
+        env:
+          # The built-in token has contents:write (release) and packages:write
+          # (ghcr) for this repository, so no GitHub App token is needed.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+          # ACTIONS_ID_TOKEN_REQUEST_TOKEN is auto-injected by id-token: write;
+          # cosign's GitHub Actions provider uses it for keyless signing.
+
+      - name: Attest checksums
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-checksums: ./dist/checksums.txt
+
+      - name: Attest image digests
+        if: ${{ hashFiles('./dist/digests.txt') != '' }}
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-checksums: ./dist/digests.txt
