@@ -219,6 +219,64 @@ func TestParseFloatRejectsNaNInf(t *testing.T) {
 	}
 }
 
+func TestParseTypedScalarRejectsNaNInf(t *testing.T) {
+	t.Parallel()
+
+	// The const, enum, and examples keywords flow through parseTypedScalar.
+	// NaN/Inf parse without error but cannot be marshaled into a schema and a NaN
+	// const matches nothing, so they are rejected like the bound keywords.
+	tests := map[string]struct {
+		generate func() (*jsonschema.Schema, error)
+	}{
+		"const=NaN": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V float64 `json:"v" jsonschema:"const=NaN"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+		},
+		"const=+Inf": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V float64 `json:"v" jsonschema:"const=+Inf"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+		},
+		"enum=NaN": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V float64 `json:"v" jsonschema:"enum=NaN"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+		},
+		"examples=-Inf": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V float64 `json:"v" jsonschema:"examples=-Inf"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := tc.generate()
+			require.Error(t, err,
+				"NaN/Inf should be rejected as const/enum/examples values")
+		})
+	}
+}
+
 func TestMultipleOfZero(t *testing.T) {
 	t.Parallel()
 

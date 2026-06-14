@@ -691,6 +691,13 @@ func parseTypedScalar(value string, t reflect.Type) (any, error) {
 			return nil, fmt.Errorf("invalid number %q: %w", value, err)
 		}
 
+		// NaN and the infinities parse without error but cannot be marshaled into
+		// a schema (encoding/json rejects them) and a NaN const matches nothing,
+		// so reject them here as parseFloat does for the bound keywords.
+		if math.IsNaN(n) || math.IsInf(n, 0) {
+			return nil, fmt.Errorf("%q is not a finite number", value)
+		}
+
 		// A float32 field cannot hold a value outside its range, so reparse at 32
 		// bits purely as an overflow check: const=1e300 on a float32 still surfaces
 		// strconv.ErrRange as a tag value error rather than a schema that accepts a
