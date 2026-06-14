@@ -3,6 +3,8 @@
 // run, and resolution of a raw $vocabulary map into that set.
 package vocab
 
+import "slices"
+
 // Standard vocabulary URIs for JSON Schema Draft 2020-12.
 const (
 	Core2020             = "https://json-schema.org/draft/2020-12/vocab/core"
@@ -85,16 +87,24 @@ func Resolve(vocabs map[string]bool) Set {
 	return vs
 }
 
-// CheckUnknown returns the first required (true) URI in the $vocabulary map
+// CheckUnknown returns the smallest required (true) URI in the $vocabulary map
 // that this implementation does not recognize, or "" when every required
 // vocabulary is known. Optional (false) unknown vocabularies are silently
-// ignored.
+// ignored. The smallest is chosen so the reported URI is deterministic when a
+// document declares more than one unknown required vocabulary, rather than
+// depending on map iteration order.
 func CheckUnknown(vocabs map[string]bool) string {
+	var unknown []string
+
 	for uri, required := range vocabs {
 		if required && !knownVocabularies[uri] {
-			return uri
+			unknown = append(unknown, uri)
 		}
 	}
 
-	return ""
+	if len(unknown) == 0 {
+		return ""
+	}
+
+	return slices.Min(unknown)
 }
