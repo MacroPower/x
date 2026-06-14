@@ -623,6 +623,39 @@ func TestRenderMainGoRejectsInjectedImportPath(t *testing.T) {
 	require.Error(t, err, "renderMainGo should reject ImportPath with injection characters")
 }
 
+func TestGoVersionPatternAnchored(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		version string
+		want    []string // nil means no match; otherwise [major, minor].
+	}{
+		"release":           {"go1.26.0", []string{"1", "26"}},
+		"release candidate": {"go1.25rc1", []string{"1", "25"}},
+		"devel build":       {"devel go1.26-abc123 X:Y", []string{"1", "26"}},
+		// The anchor reads only the leading version: a goMAJOR.MINOR embedded
+		// later, or a leading token that merely ends in "go", does not match.
+		"leading garbage":     {"prefix go1.9", nil},
+		"embedded after word": {"cargo1.5", nil},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := goVersionPattern.FindStringSubmatch(tc.version)
+			if tc.want == nil {
+				assert.Nil(t, m)
+
+				return
+			}
+
+			require.Len(t, m, 3)
+			assert.Equal(t, tc.want, []string{m[1], m[2]})
+		})
+	}
+}
+
 func TestGoModUsesDetectedGoVersion(t *testing.T) {
 	t.Parallel()
 

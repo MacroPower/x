@@ -346,10 +346,12 @@ func renderGoMod(modPath, modDir, jsonschemaDir string) string {
 }
 
 // goVersionPattern matches the "goMAJOR.MINOR" prefix of a toolchain version
-// string. It anchors on the leading "go" so it ignores the trailing build
-// metadata in non-release versions such as "go1.25rc1" or the embedded version
-// in development builds like "devel go1.26-abc123 ...".
-var goVersionPattern = regexp.MustCompile(`go(\d+)\.(\d+)`)
+// string. It anchors at the start, after an optional "devel " token, so it
+// reads only the leading version and never a "goMAJOR.MINOR" sequence embedded
+// later in the build metadata. This covers every form runtime.Version()
+// produces: "go1.26.0", a release candidate "go1.25rc1", and a development
+// build "devel go1.26-abc123 ...".
+var goVersionPattern = regexp.MustCompile(`^(?:devel )?go(\d+)\.(\d+)`)
 
 // defaultGoDirectiveVersion is the fallback "go" directive value used when the
 // running toolchain version cannot be parsed. It must be a valid directive so
