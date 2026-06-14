@@ -1169,7 +1169,20 @@ func validateIDNHostnameLabels(s string, banNumericTLD bool) error {
 			return errors.New("invalid IDN hostname: label too long")
 		}
 
-		err = checkContextualRules(label)
+		// RFC 5892 contextual rules apply to the decoded Unicode (U-label) form.
+		// An A-label is decoded with ToUnicode first, because the ToASCII call
+		// above leaves an already-ASCII A-label untouched and never re-checks the
+		// contextual rules its U-label would fail. A plain U-label is already
+		// Unicode and is checked as written, mirroring validateHostnameLabels.
+		decoded := label
+		if hasACEPrefix(label) {
+			decoded, err = idna.Lookup.ToUnicode(label)
+			if err != nil {
+				return errors.New("invalid IDN hostname: " + err.Error())
+			}
+		}
+
+		err = checkContextualRules(decoded)
 		if err != nil {
 			return errors.New("invalid IDN hostname: " + err.Error())
 		}

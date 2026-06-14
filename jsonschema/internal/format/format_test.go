@@ -228,6 +228,32 @@ func TestHostnameRejectsAllNumericTLD(t *testing.T) {
 		"all-numeric hostname should be rejected by the hostname validator")
 }
 
+func TestIDNHostnameRejectsALabelContextualViolation(t *testing.T) {
+	t.Parallel()
+
+	// An A-label that decodes to an RFC 5892 contextual-rule violation must be
+	// rejected just like its U-label spelling. The label xn--aa-0ea decodes to
+	// "a<MIDDLE DOT>a" (U+00B7 not between two 'l'), and xn--a-jib decodes to a
+	// GREEK KERAIA (U+0375) not followed by a Greek character. ToASCII leaves
+	// these ASCII A-labels untouched, so the contextual check must run on the
+	// decoded U-label, not the raw A-label.
+	for _, host := range []string{"xn--aa-0ea.com", "xn--a-jib.com"} {
+		err := validator(t, "idn-hostname")(host)
+		require.Error(t, err,
+			"A-label %q encoding a contextual-rule violation should be rejected", host)
+	}
+
+	// The same bypass reaches idn-email domains via validateIDNHostnameLabels.
+	err := validator(t, "idn-email")("user@xn--aa-0ea.com")
+	require.Error(t, err,
+		"idn-email with a contextual-violating A-label domain should be rejected")
+
+	// A valid A-label (xn--mnchen-3ya = "muenchen") still validates.
+	err = validator(t, "idn-hostname")("xn--mnchen-3ya.de")
+	require.NoError(t, err,
+		"a valid IDN A-label should still be accepted")
+}
+
 func TestIDNHostnameRejectsOver253Octets(t *testing.T) {
 	t.Parallel()
 
