@@ -275,6 +275,7 @@ type validator struct {
 	baseURIs              map[*Schema]string         // schema → its base URI
 	metaSchemaResolver    RefResolver                // metaschema lookup by $schema URI (WithMetaSchemaResolver)
 	jsonPointerCache      map[jsonPointerKey]*Schema // JSON-pointer fallback results, keyed by (root, pointer)
+	refCache              map[refCacheKey]*Schema    // plain $ref resolutions, keyed by (schema, ref); successes only
 	visiting              map[visitKey]bool
 	patternCache          map[*Schema]compiledPattern            // schema.Pattern compiled (see numericBounds)
 	patternProps          map[*Schema]map[string]compiledPattern // patternProperties keys compiled (see numericBounds)
@@ -375,6 +376,7 @@ func (v *validator) forInstance(ctx context.Context) *validator {
 	rv.ctx = ctx
 	rv.visiting = map[visitKey]bool{}
 	rv.jsonPointerCache = nil
+	rv.refCache = nil
 	rv.fallbackURIRegistry = nil
 	rv.fallbackAnchorRegistry = nil
 	rv.fallbackDynamicAnchors = nil
@@ -4179,9 +4181,46 @@ func (v *validator) resolveDynamicRef(schema *Schema, ref string) *Schema {
 	return staticTarget
 }
 
-// resolveRef resolves a $ref string to a target schema using the URI and
-// anchor registries.
+// refCacheKey identifies a plain $ref resolution, used to cache its result
+// within a validation run. The containing schema fixes the base URI the ref
+// resolves against, so the pair is sufficient to key the lookup.
+type refCacheKey struct {
+	//nolint:unused // Read via struct equality when used as a map key.
+	schema *Schema
+	//nolint:unused // Read via struct equality when used as a map key.
+	ref string
+}
+
+// resolveRef resolves a $ref string to a target schema using the URI and anchor
+// registries, caching the result per (schema, ref) for the validation run.
+//
+// The same ref is re-resolved for every instance node it is evaluated against,
+// and resolution is deterministic within a run because the registries are fixed
+// at compile time (or cloned once per run when a [RefResolver] is configured).
+// Only successful resolutions are cached: an unresolved remote ref records its
+// failure in refResolveErr as a side effect that the caller consumes once, so
+// caching a nil would suppress that error on later evaluations.
 func (v *validator) resolveRef(schema *Schema, ref string) *Schema {
+	key := refCacheKey{schema: schema, ref: ref}
+	if cached, ok := v.refCache[key]; ok {
+		return cached
+	}
+
+	target := v.resolveRefUncached(schema, ref)
+	if target != nil {
+		if v.refCache == nil {
+			v.refCache = map[refCacheKey]*Schema{}
+		}
+
+		v.refCache[key] = target
+	}
+
+	return target
+}
+
+// resolveRefUncached performs the actual $ref resolution behind resolveRef's
+// per-run cache.
+func (v *validator) resolveRefUncached(schema *Schema, ref string) *Schema {
 	parsed, err := url.Parse(ref)
 	if err != nil {
 		return nil
