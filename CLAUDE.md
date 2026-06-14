@@ -6,9 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 task format # Format and tidy code, run generators
-task lint   # golangci-lint, go mod tidy check, prettier, zizmor
+task lint   # golangci-lint, go mod tidy check, prettier
 task test   # Run all tests (unit + integration)
-task check  # Everything CI runs (lint + test + renovate validation)
+task check  # Everything CI runs (lint + test + security + GitHub config + releaser checks)
 ```
 
 Devbox provides all required tools on PATH automatically.

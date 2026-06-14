@@ -27,7 +27,7 @@ tasks:
 
   lint:
     desc: Runs all lint targets
-    deps: [go:lint, go:tidy:check, fmt:lint, gh:actions:lint]
+    deps: [go:lint, go:tidy:check, fmt:lint]
 
   test:
     desc: Runs all test targets (unit and integration)
@@ -39,7 +39,7 @@ tasks:
 
   check:
     desc: Runs all checks
-    deps: [lint, test, security:scan, gh:renovate:lint, release:check]
+    deps: [lint, test, security:scan, gh:lint, release:check]
 
   scan:
     desc: Scans source dependencies for vulnerabilities

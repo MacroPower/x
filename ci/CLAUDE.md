@@ -24,15 +24,20 @@ Because the gates are Taskfile targets calling local tools, CI reproduces
 exactly what developers run locally: `local` skips the container for speed, CI
 keeps it for reproducibility.
 
-### Security (composes the security toolchain)
+### Lint actions & Security (compose sibling toolchains)
 
+Both gates compose a sibling toolchain directly rather than running through
+devbox, because their tools are not on the devbox PATH — the same pattern the
+release functions use for `goreleaser`.
+
+- `lint-actions` (+check) lints the GitHub Actions workflows for security issues
+  by composing the `zizmor` toolchain. It pins `.github/zizmor.yaml` as the
+  config path rather than relying on zizmor's auto-discovery.
 - `security` (+check) scans source dependencies for known vulnerabilities by
-  composing the `security` toolchain (Trivy) directly, the same pattern the
-  release functions use for `goreleaser`. Trivy is not on the devbox PATH, so
-  the scan does not run through devbox. It scans the `ci` toolchain's source,
-  whose root `dagger.json` customization already excludes `toolchains` and
-  `.worktrees`, so the intentionally-vulnerable test fixtures are not scanned
-  and no skip-dir filter is needed.
+  composing the `security` toolchain (Trivy). It scans the `ci` toolchain's
+  source, whose root `dagger.json` customization already excludes `toolchains`
+  and `.worktrees`, so the intentionally-vulnerable test fixtures are not
+  scanned and no skip-dir filter is needed.
 
 ### ansivideo release (composes the shared toolchains; see `release.go`)
 
@@ -71,8 +76,9 @@ functions locally.
   functions; `release.go` holds the ansivideo release functions.
 - Dependencies in `dagger.json`: the `devbox` toolchain (checks), the
   `goreleaser` toolchain (release, which carries the folded-in cosign and syft
-  tooling), and the `security` toolchain (the vulnerability scan), all
-  referenced relatively under `../toolchains/`.
+  tooling), the `security` toolchain (the vulnerability scan), and the `zizmor`
+  toolchain (the Actions workflow lint), all referenced relatively under
+  `../toolchains/`.
 - It has no `tests/` submodule, so `task dagger:test` (which discovers suites
   under `toolchains/*/tests`) does not cover it.
 

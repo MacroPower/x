@@ -16,6 +16,10 @@
     {
       "name": "security",
       "source": "../toolchains/security"
+    },
+    {
+      "name": "zizmor",
+      "source": "../toolchains/zizmor"
     }
   ]
 }

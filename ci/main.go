@@ -1,13 +1,14 @@
 // CI functions specific to the x repository. Most quality gates are Taskfile
-// targets that call local tools (go, golangci-lint, prettier, zizmor) provided
-// by devbox. These functions run those same tasks inside the project's devbox
+// targets that call local tools (go, golangci-lint, prettier) provided by
+// devbox. These functions run those same tasks inside the project's devbox
 // environment via the devbox toolchain, so CI reproduces exactly what
 // developers run locally: local skips the container for speed, CI keeps it for
 // reproducibility.
 //
-// Two gates instead compose a sibling toolchain directly because their tools
-// are not on the devbox PATH: Security runs the security toolchain (Trivy), and
-// the release functions in release.go run the goreleaser toolchain.
+// Three gates instead compose a sibling toolchain directly because their tools
+// are not on the devbox PATH: LintActions runs the zizmor toolchain, Security
+// runs the security toolchain (Trivy), and the release functions in release.go
+// run the goreleaser toolchain.
 // Renovate-config validation stays self-contained here (a pinned
 // renovate-config-validator in a Node container) because it is the one check
 // neither devbox nor a shared toolchain provides.
@@ -28,6 +29,10 @@ const (
 	// space on ECR Public to avoid Docker Hub pull rate limits.
 	renovateImage   = "public.ecr.aws/docker/library/node:22-slim" // renovate: datasource=docker depName=public.ecr.aws/docker/library/node
 	renovateVersion = "43.218.0"                                   // renovate: datasource=npm depName=renovate
+
+	// zizmorConfig is the zizmor configuration file used by [Ci.LintActions],
+	// relative to the source root.
+	zizmorConfig = ".github/zizmor.yaml"
 
 	// cacheNamespace prefixes this module's cache volumes.
 	cacheNamespace = "go.jacobcolvin.com/x/ci"
@@ -53,6 +58,8 @@ type Ci struct {
 	// Scanner is the security toolchain (Trivy) backing [Ci.Security]. Named
 	// Scanner rather than Security to avoid colliding with that method.
 	Scanner *dagger.Security // +private
+	// Zizmor is the zizmor toolchain backing [Ci.LintActions].
+	Zizmor *dagger.Zizmor // +private
 }
 
 // New creates an [Ci] module with the given project source directory.
@@ -76,6 +83,10 @@ func New(
 		Scanner: dag.Security(dagger.SecurityOpts{
 			Source:         source,
 			CacheNamespace: cacheNamespace + ":security",
+		}),
+		Zizmor: dag.Zizmor(dagger.ZizmorOpts{
+			Source:     source,
+			ConfigPath: zizmorConfig,
 		}),
 	}
 }
@@ -103,8 +114,8 @@ func (m *Ci) runTask(ctx context.Context, target string) error {
 	return err
 }
 
-// Lint runs the lint gate (golangci-lint, go mod tidy check, prettier, zizmor)
-// inside the devbox environment, mirroring `task lint`.
+// Lint runs the lint gate (golangci-lint, go mod tidy check, prettier) inside
+// the devbox environment, mirroring `task lint`.
 //
 // +check
 func (m *Ci) Lint(ctx context.Context) error {
@@ -136,6 +147,17 @@ func (m *Ci) TestIntegration(ctx context.Context) error {
 // +check
 func (m *Ci) Security(ctx context.Context) error {
 	return m.Scanner.ScanSource(ctx)
+}
+
+// LintActions lints the GitHub Actions workflows for security issues by
+// composing the zizmor toolchain directly, the way Security composes the
+// security toolchain. zizmor is not on the devbox PATH, so this gate does not
+// run through devbox. It pins .github/zizmor.yaml as the config path rather than
+// relying on zizmor's auto-discovery.
+//
+// +check
+func (m *Ci) LintActions(ctx context.Context) error {
+	return m.Zizmor.Lint(ctx)
 }
 
 // TestCoverage runs all tests with coverage profiling inside the devbox
