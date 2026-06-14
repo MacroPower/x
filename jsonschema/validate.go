@@ -4513,8 +4513,15 @@ func schemaAtJSONPointer(root *Schema, segments []string, base string) (*Schema,
 	}
 }
 
-// traverseSchema navigates the schema tree by matching segment names to
-// JSON tag names.
+// traverseSchema navigates the schema tree by matching segment names to JSON
+// tag names, the typed fast path for JSON-pointer resolution.
+//
+// Its keyword set parallels the other per-keyword field lists and must stay in
+// sync with them when a sub-schema keyword is added to Schema: SubschemaEntries
+// (walk.go), walkSchema, precomputeSchema, and checkTypeNames. A keyword missing
+// here is not a correctness bug, because resolveJSONPointer backstops it by
+// walking the schema's JSON form (resolveJSONPointerViaJSON), but the omission
+// silently bypasses this faster typed path.
 func (v *validator) traverseSchema(schema *Schema, segments []string) *Schema {
 	if len(segments) == 0 || schema == nil {
 		return schema
