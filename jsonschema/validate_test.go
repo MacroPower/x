@@ -1907,6 +1907,29 @@ func TestValidateMaxContains(t *testing.T) {
 	}
 }
 
+func TestValidateRelativeRefAgainstOpaqueBase(t *testing.T) {
+	t.Parallel()
+
+	// A relative $ref resolved against an opaque (URN) base resolves to the
+	// nested $id, which registered through the same resolveURI, rather than
+	// collapsing to a bogus urn:/// authority form that would fail resolution.
+	root, err := jsonschema.ParseSchema([]byte(`{
+		"$id": "urn:example:root",
+		"properties": {"a": {"$ref": "child"}},
+		"$defs": {"c": {"$id": "child", "type": "integer"}}
+	}`))
+	require.NoError(t, err)
+
+	v, err := jsonschema.Compile(t.Context(), root)
+	require.NoError(t, err)
+
+	require.NoError(t, v.Validate(t.Context(), map[string]any{"a": 5.0}),
+		"an integer satisfies the resolved child schema")
+
+	err = v.Validate(t.Context(), map[string]any{"a": "not an int"})
+	require.Error(t, err, "a must resolve to the integer child, not an unresolved ref")
+}
+
 func TestValidateContainsAnnotatesMatchedRegardlessOfCount(t *testing.T) {
 	t.Parallel()
 

@@ -905,7 +905,36 @@ func resolveURI(base, ref string) string {
 		return ref
 	}
 
+	// The ResolveReference call mishandles an opaque base (a URN such as
+	// urn:example:foo): a relative, non-fragment ref against it collapses to a
+	// bogus authority form like "urn:///bar". An opaque URI has no hierarchical
+	// path to merge, so resolve a relative non-fragment ref by applying the RFC
+	// 3986 path-merge to the opaque part. Registration and lookup share this
+	// function, so the result stays symmetric. Absolute and fragment-only refs
+	// resolve correctly through ResolveReference.
+	if baseURL.Opaque != "" && refURL.Scheme == "" && refURL.Opaque == "" &&
+		refURL.Host == "" && refURL.Path != "" {
+		resolved := url.URL{
+			Scheme:   baseURL.Scheme,
+			Opaque:   mergeOpaquePath(baseURL.Opaque, refURL.Path),
+			Fragment: refURL.Fragment,
+		}
+
+		return resolved.String()
+	}
+
 	return baseURL.ResolveReference(refURL).String()
+}
+
+// mergeOpaquePath merges a relative path ref into an opaque URI part using the
+// RFC 3986 merge step, treating the opaque part as a path: the ref replaces
+// everything after the final slash, or the whole part when it has none.
+func mergeOpaquePath(base, ref string) string {
+	if i := strings.LastIndex(base, "/"); i >= 0 {
+		return base[:i+1] + ref
+	}
+
+	return ref
 }
 
 // stripFragment removes the fragment component from a URI.
