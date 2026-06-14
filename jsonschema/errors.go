@@ -186,7 +186,7 @@ func (e *ValidationError) Error() string {
 // guards against cycles in the cause graph so a malformed (cyclic) tree does
 // not recurse without bound.
 func (e *ValidationError) writeError(b *strings.Builder, depth int, seen map[*ValidationError]bool) {
-	if seen[e] {
+	if e == nil || seen[e] {
 		return
 	}
 
@@ -234,11 +234,21 @@ func (e *ValidationError) writeError(b *strings.Builder, depth int, seen map[*Va
 
 	// Wrote tracks whether the header line or an earlier sibling already emitted
 	// output, so a separating newline is inserted only between non-empty renders.
-	// A cause already in seen (a shared or cyclic node) renders nothing, so
-	// skipping it here avoids leaving a stray blank line behind it.
+	// Each cause renders into a scratch builder first: a cause that produces no
+	// output (a nil entry, one already in seen, or a header-less node whose
+	// descendants all render nothing) is skipped entirely and leaves no stray
+	// separator before or after it.
 	wrote := hasHeader
 	for _, cause := range e.Causes {
 		if seen[cause] {
+			continue
+		}
+
+		var cb strings.Builder
+
+		cause.writeError(&cb, childDepth, seen)
+
+		if cb.Len() == 0 {
 			continue
 		}
 
@@ -246,7 +256,7 @@ func (e *ValidationError) writeError(b *strings.Builder, depth int, seen map[*Va
 			b.WriteString("\n")
 		}
 
-		cause.writeError(b, childDepth, seen)
+		b.WriteString(cb.String())
 
 		wrote = true
 	}

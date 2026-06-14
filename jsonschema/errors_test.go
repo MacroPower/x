@@ -66,6 +66,37 @@ func TestValidationError_Leaves(t *testing.T) {
 	}
 }
 
+func TestValidationError_ErrorNilCauseDoesNotPanic(t *testing.T) {
+	t.Parallel()
+
+	// The Causes field is exported, so a consumer aggregating errors can build a
+	// tree with a nil entry. Rendering it must not panic on the nil receiver,
+	// matching the nil-guarded Unwrap/Leaves traversals.
+	ve := &jsonschema.ValidationError{
+		Keyword: "type",
+		Causes:  []*jsonschema.ValidationError{nil},
+	}
+
+	assert.NotPanics(t, func() {
+		_ = ve.Error()
+	})
+}
+
+func TestValidationError_ErrorSkipsEmptyCause(t *testing.T) {
+	t.Parallel()
+
+	// A header-less cause that renders nothing must not insert a separating blank
+	// line before the next, real sibling.
+	ve := &jsonschema.ValidationError{
+		Causes: []*jsonschema.ValidationError{
+			{}, // header-less with no children: renders nothing.
+			{InstancePath: "/b", Keyword: "type", Message: "bad"},
+		},
+	}
+
+	assert.Equal(t, "/b (type): bad", ve.Error())
+}
+
 func TestValidationError_Leaves_SharedNodeReturnedOnce(t *testing.T) {
 	t.Parallel()
 
