@@ -888,6 +888,35 @@ func TestInlineSubstituteIDDoesNotCorruptResolution(t *testing.T) {
 		"b must resolve to the real root's $defs/Real, not the colliding substitute")
 }
 
+func TestInlineRefFailurePathForExtraKeywordTarget(t *testing.T) {
+	t.Parallel()
+
+	// A $ref into an unknown (Extra) keyword materializes a fresh schema that
+	// recordPaths never saw. A nested failing ref inside it must still report a
+	// non-empty RefFailure location, seeded from the referencing node, rather
+	// than empty path and document fields.
+	var captured jsonschema.RefFailure
+
+	fallback := jsonschema.RefFallbackFunc(func(_ context.Context, f jsonschema.RefFailure) jsonschema.RefAction {
+		captured = f
+
+		return jsonschema.DropRef()
+	})
+
+	root, err := jsonschema.ParseSchema([]byte(`{
+		"properties": {"a": {"$ref": "#/x/sub"}},
+		"x": {"sub": {"$ref": "#/$defs/missing"}}
+	}`))
+	require.NoError(t, err)
+
+	_, err = jsonschema.Inline(t.Context(), root, jsonschema.WithRefFallback(fallback))
+	require.NoError(t, err)
+
+	assert.Equal(t, "#/$defs/missing", captured.Ref, "the inner ref is the one consulted")
+	assert.NotEmpty(t, captured.Path,
+		"a RefFailure for an Extra-keyword target must carry the referencing node's path")
+}
+
 func TestInlineSubstituteRecursionIsBounded(t *testing.T) {
 	t.Parallel()
 

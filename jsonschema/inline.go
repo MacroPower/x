@@ -572,6 +572,15 @@ func (in *inliner) expandTarget(pristine *Schema, path string) (*Schema, error) 
 		return in.substitute(pristine, path, ref, fmt.Errorf("%w: %q", ErrRefCycle, ref))
 	}
 
+	// A target materialized from an unknown (Extra) keyword via a JSON pointer
+	// is a fresh schema recordPaths never walked, so it has no recorded path or
+	// document. Seed it (idempotently) with the referencing node's location and
+	// document so a nested ref failure reports a meaningful RefFailure instead
+	// of empty fields.
+	if _, ok := in.paths[target]; !ok {
+		in.recordPaths(target, path, in.docs[pristine])
+	}
+
 	return in.inlineCopy(target, in.paths[target])
 }
 
