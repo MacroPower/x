@@ -1907,6 +1907,70 @@ func TestValidateMaxContains(t *testing.T) {
 	}
 }
 
+func TestValidateContainsAnnotatesMatchedRegardlessOfCount(t *testing.T) {
+	t.Parallel()
+
+	// A contains-matched index counts as evaluated for unevaluatedItems even when
+	// the match count violates min/maxContains (which are separate assertions), so
+	// unevaluatedItems re-fires only on the genuinely unmatched indexes.
+	tests := map[string]struct {
+		schema        *jsonschema.Schema
+		instance      any
+		wantKeyword   string
+		flaggedItems  []string
+		unflaggedItem string
+	}{
+		"maxContains exceeded": {
+			schema: &jsonschema.Schema{
+				Schema:           "https://json-schema.org/draft/2020-12/schema",
+				Type:             "array",
+				Contains:         &jsonschema.Schema{Type: "integer"},
+				MaxContains:      new(1),
+				UnevaluatedItems: &jsonschema.Schema{Not: &jsonschema.Schema{}},
+			},
+			instance:      []any{1.0, 2.0, "x"},
+			wantKeyword:   "(maxContains)",
+			flaggedItems:  []string{"item 2 is not allowed by unevaluatedItems"},
+			unflaggedItem: "item 0 is not allowed by unevaluatedItems",
+		},
+		"minContains shortfall": {
+			schema: &jsonschema.Schema{
+				Schema:           "https://json-schema.org/draft/2020-12/schema",
+				Type:             "array",
+				Contains:         &jsonschema.Schema{Type: "integer"},
+				MinContains:      new(3),
+				UnevaluatedItems: &jsonschema.Schema{Not: &jsonschema.Schema{}},
+			},
+			instance:    []any{1.0, "a", "b"},
+			wantKeyword: "(minContains)",
+			flaggedItems: []string{
+				"item 1 is not allowed by unevaluatedItems",
+				"item 2 is not allowed by unevaluatedItems",
+			},
+			unflaggedItem: "item 0 is not allowed by unevaluatedItems",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := jsonschema.Validate(t.Context(), tc.schema, tc.instance)
+			require.Error(t, err)
+
+			msg := err.Error()
+			assert.Contains(t, msg, tc.wantKeyword, "the count violation is still reported")
+
+			for _, want := range tc.flaggedItems {
+				assert.Contains(t, msg, want, "an unmatched item stays unevaluated")
+			}
+
+			assert.NotContains(t, msg, tc.unflaggedItem,
+				"a contains-matched item must not re-fire unevaluatedItems")
+		})
+	}
+}
+
 func TestValidateDraft7NotWithItemsArray(t *testing.T) {
 	t.Parallel()
 

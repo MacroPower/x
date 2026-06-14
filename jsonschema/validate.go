@@ -3240,10 +3240,12 @@ func (v *validator) validateArray(
 				maxContains = *schema.MaxContains
 			}
 
-			// Record contains annotations only when the keyword as a whole
-			// succeeds; otherwise the matched items must not count as evaluated.
-			containsOK := matchCount >= minContains && (maxContains < 0 || matchCount <= maxContains)
-			if containsOK && ann != nil {
+			// The contains annotation is the set of indexes the subschema matched,
+			// produced per element independently of min/maxContains (JSON Schema
+			// 2020-12 core 10.3.1.3). Record it unconditionally so a matched item
+			// stays evaluated for unevaluatedItems even when the count violates
+			// min/maxContains; those are separate assertions, emitted below.
+			if ann != nil {
 				for _, i := range matchedIdx {
 					ann.itemIndexes[i] = true
 				}
