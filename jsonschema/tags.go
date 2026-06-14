@@ -663,11 +663,11 @@ func parseTypedScalar(value string, t reflect.Type) (any, error) {
 			return nil, fmt.Errorf("invalid integer %q: %w", value, err)
 		}
 
-		// Return as int to preserve integer precision (float64 cannot represent
-		// all int64 values exactly) and to match the int-typed values the
-		// validate-tag interpreter produces, so both tag dialects yield the same
-		// const/enum/example type.
-		return int(n), nil
+		// Return int64, not a platform int, so a value above 2^31-1 survives on a
+		// 32-bit build (float64 also cannot represent all int64 values exactly).
+		// The validate-tag interpreter returns int64 too, so both tag dialects
+		// yield the same const/enum/example type.
+		return n, nil
 
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
 		// Parse at the field kind's bit size so a value the field cannot hold (for

@@ -618,7 +618,7 @@ func TestNumericConstPreservesLargeIntegers(t *testing.T) {
 
 	// 9007199254740993 (2^53 + 1) keeps full precision.
 	require.NotNil(t, prop.Const)
-	assert.Equal(t, int(9007199254740993), *prop.Const,
+	assert.Equal(t, int64(9007199254740993), *prop.Const,
 		"large int64 const keeps full precision")
 }
 

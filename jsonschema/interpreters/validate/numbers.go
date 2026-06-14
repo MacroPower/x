@@ -335,7 +335,9 @@ func parseNumericValue(value string, t reflect.Type) (any, error) {
 			return nil, fmt.Errorf("invalid integer %q: %w", value, err)
 		}
 
-		return int(n), nil
+		// Return int64, not a platform int: a value above 2^31-1 would truncate
+		// on a 32-bit build. The numeric comparison handles every integer kind.
+		return n, nil
 	}
 
 	n, err := parseBoundFloat(value)

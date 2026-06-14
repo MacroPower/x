@@ -2107,7 +2107,7 @@ func TestGenerateFor_JSONSchemaTag_Examples(t *testing.T) {
 	require.NoError(t, err)
 
 	// Integer examples should be parsed as integers (precision-preserving).
-	assert.Equal(t, []any{8080, 3000, 443}, s.Properties["port"].Examples)
+	assert.Equal(t, []any{int64(8080), int64(3000), int64(443)}, s.Properties["port"].Examples)
 	// String examples should be strings.
 	assert.Equal(t, []any{"debug", "release"}, s.Properties["mode"].Examples)
 }

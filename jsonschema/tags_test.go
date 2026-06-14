@@ -947,7 +947,7 @@ func TestTagEnumOnSequenceFields(t *testing.T) {
 
 		items := itemsOf(s, "codes")
 		require.Len(t, items, 1)
-		assert.Equal(t, []any{1, 2, 3}, items[0].Enum)
+		assert.Equal(t, []any{int64(1), int64(2), int64(3)}, items[0].Enum)
 	})
 
 	t.Run("pointer to slice", func(t *testing.T) {
