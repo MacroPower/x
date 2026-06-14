@@ -266,6 +266,12 @@ func createTempDir(cfg config, importPath, modPath, modDir, jsonschemaDir string
 // mergeGoSum reads the given go.sum files and returns their union, preserving
 // first-seen order and dropping duplicate and blank lines. Missing files are
 // skipped. The result is empty when no file yields any entry.
+//
+// Deduplication keys on a line's module-and-version prefix (its first two
+// fields) rather than the whole line, so a second file offering a different
+// checksum for the same module@version does not append a conflicting entry. The
+// first checksum seen wins, keeping the merged go.sum internally consistent
+// instead of carrying two h1: lines the go tool would reject.
 func mergeGoSum(paths ...string) []byte {
 	seen := make(map[string]struct{})
 
@@ -282,11 +288,12 @@ func mergeGoSum(paths ...string) []byte {
 				continue
 			}
 
-			if _, dup := seen[line]; dup {
+			key := goSumKey(line)
+			if _, dup := seen[key]; dup {
 				continue
 			}
 
-			seen[line] = struct{}{}
+			seen[key] = struct{}{}
 
 			b.WriteString(line)
 			b.WriteByte('\n')
@@ -294,6 +301,24 @@ func mergeGoSum(paths ...string) []byte {
 	}
 
 	return b.Bytes()
+}
+
+// goSumKey returns the deduplication key for a go.sum line: its
+// module-and-version prefix, the first two space-separated fields (the second
+// carries the optional /go.mod suffix that distinguishes the module-zip and
+// go.mod checksums). A line without two fields keys on its whole self.
+func goSumKey(line string) string {
+	first := strings.IndexByte(line, ' ')
+	if first < 0 {
+		return line
+	}
+
+	second := strings.IndexByte(line[first+1:], ' ')
+	if second < 0 {
+		return line
+	}
+
+	return line[:first+1+second]
 }
 
 func renderGoMod(modPath, modDir, jsonschemaDir string) string {

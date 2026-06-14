@@ -244,6 +244,43 @@ func TestRenderGoModQuotesSpecialPaths(t *testing.T) {
 	}
 }
 
+func TestMergeGoSumKeysOnModuleVersion(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	writeSum := func(name, content string) string {
+		t.Helper()
+
+		p := filepath.Join(dir, name)
+		require.NoError(t, os.WriteFile(p, []byte(content), 0o600))
+
+		return p
+	}
+
+	// The two files disagree on the module-zip checksum for the same
+	// module@version. The merge keeps the first and drops the conflicting
+	// second, while preserving the distinct go.mod line, the unrelated module,
+	// and dropping an exact duplicate.
+	first := writeSum("a.sum",
+		"example.com/m v1.0.0 h1:AAAA=\n"+
+			"example.com/m v1.0.0/go.mod h1:BBBB=\n")
+	second := writeSum("b.sum",
+		"example.com/m v1.0.0 h1:CONFLICT=\n"+
+			"example.com/other v2.0.0 h1:DDDD=\n"+
+			"example.com/m v1.0.0/go.mod h1:BBBB=\n")
+
+	got := string(mergeGoSum(first, second))
+
+	want := "example.com/m v1.0.0 h1:AAAA=\n" +
+		"example.com/m v1.0.0/go.mod h1:BBBB=\n" +
+		"example.com/other v2.0.0 h1:DDDD=\n"
+
+	assert.Equal(t, want, got)
+	assert.NotContains(t, got, "CONFLICT",
+		"a conflicting checksum for an already-seen module@version must be dropped")
+}
+
 func TestRun_MissingType(t *testing.T) {
 	t.Parallel()
 
