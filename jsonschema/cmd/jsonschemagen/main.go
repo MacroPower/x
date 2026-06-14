@@ -472,14 +472,20 @@ func renderMainGo(w io.Writer, cfg config, importPath string) error {
 }
 
 // isValidImportPath reports whether p is a plausible Go import path, rejecting
-// characters that could break out of the import declaration string literal.
+// characters that could break out of the import declaration string literal. It
+// also rejects the DEL (0x7f) and C1 (0x80-0x9f) control characters, which have
+// no place in an import path and could corrupt the generated source or a
+// terminal rendering an error that echoes the path.
 func isValidImportPath(p string) bool {
 	if p == "" {
 		return false
 	}
 
 	for _, r := range p {
-		if r < 0x20 || r == '"' || r == '`' || r == '\\' || r == ' ' || r == '\t' {
+		switch {
+		case r < 0x20, r == 0x7f, r >= 0x80 && r <= 0x9f:
+			return false
+		case r == '"', r == '`', r == '\\', r == ' ', r == '\t':
 			return false
 		}
 	}

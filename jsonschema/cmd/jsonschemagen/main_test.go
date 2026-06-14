@@ -623,6 +623,33 @@ func TestRenderMainGoRejectsInjectedImportPath(t *testing.T) {
 	require.Error(t, err, "renderMainGo should reject ImportPath with injection characters")
 }
 
+func TestIsValidImportPathRejectsControlBytes(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		path string
+		want bool
+	}{
+		"plain path": {"example.com/myapp/pkg", true},
+		"empty":      {"", false},
+		"null byte":  {"example.com/\x00pkg", false},
+		"DEL byte":   {"example.com/\x7fpkg", false},
+		"C1 low":     {"example.com/\u0080pkg", false},
+		"C1 high":    {"example.com/\u009fpkg", false},
+		// 0xa0 (NBSP) is the first code point above the C1 range, so it is not a
+		// control character and the permissive check leaves it alone.
+		"just above C1": {"example.com/\u00a0pkg", true},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, isValidImportPath(tc.path))
+		})
+	}
+}
+
 func TestGoVersionPatternAnchored(t *testing.T) {
 	t.Parallel()
 
