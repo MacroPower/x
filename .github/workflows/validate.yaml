@@ -82,13 +82,11 @@ jobs:
         module:
           - bench
           - commitlint
-          - cosign
           - devbox
           - go
           - goreleaser
           - prettier
           - security
-          - syft
           - zizmor
     steps:
       - name: Checkout

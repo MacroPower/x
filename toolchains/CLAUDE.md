@@ -48,32 +48,29 @@ referenced remotely as `github.com/MacroPower/x/toolchains/<module>@<ref>`.
   with a prebuilt image that has commitlint on its entrypoint. This repo
   dogfoods it: the `.lefthook.yaml` commit-msg hook runs
   `dagger call commitlint lint` against `.commitlintrc.yaml`.
-- **`goreleaser`** — Reusable GoReleaser primitives (Tier A): `goreleaser-base`
-  (a Go base + the goreleaser binary), `binary`/`with-goreleaser` (install the
-  goreleaser binary onto another container, mirroring cosign/syft), `check-base`,
-  `check` (+check, validates `.goreleaser.yaml`), `ensure-git-repo`
-  (worktree-aware git bootstrap),
+- **`goreleaser`** — Reusable GoReleaser primitives plus the cosign/syft release
+  tooling they pair with (Tier A): `goreleaser-base` (a Go base + the goreleaser
+  binary), `binary`/`with-goreleaser` (install the goreleaser binary onto another
+  container), `check-base`, `check` (+check, validates `.goreleaser.yaml`),
+  `ensure-git-repo` (worktree-aware git bootstrap),
   `verify-binary-platform` (asserts a built binary's arch matches its target,
   catching cross-compilation mismatches), and the pure tag/digest helpers
   `version-tags`/`is-prerelease`/`deduplicate-digests`/`format-digest-checksums`/
   `registry-host` (logic lives in the `release` subpackage with plain `go test`
-  unit tests). It is **independent** of the `go` toolchain — pass the consumer's
-  Go base via the `base` arg so it reuses those caches. The full release
-  pipeline (publish/sign/runtime images) stays in each project's `*-ci` module,
-  which composes these primitives. `release-base` + `snapshot` are the planned
-  Tier B follow-up.
-- **`cosign`** — Sigstore image signing: `sign-keyless` (Fulcio + Rekor via an
-  OIDC token, for GitHub Actions) and `sign-with-key` (a cosign private key).
-  Both sign image digests concurrently and mount a Docker config for cosign's
-  own registry requests when credentials are supplied; callers deduplicate
-  digests first. Pins the cosign version once. It is **not** unit-tested in
-  isolation — real signing needs a reachable registry plus OIDC/key
-  credentials, so it is exercised through the consumer release pipelines. It
-  also exposes `binary`/`with-cosign` to install the cosign binary into a
-  release container, where goreleaser drives its own blob signing.
-- **`syft`** — Anchore syft SBOM generator: `binary`/`with-syft` install the
-  syft binary into a release container (where goreleaser's sbom step drives it),
-  and `sbom` scans a directory to an SBOM file. Pins the syft version once.
+  unit tests). The cosign and syft tooling lives here too, since the release
+  pipeline drives all three together: `with-cosign`/`with-syft` install those
+  binaries onto a release container (where GoReleaser's sign and sbom steps
+  invoke them), and `sign-keyless` signs published image digests with Sigstore
+  keyless signing (Fulcio + Rekor; signs concurrently, callers deduplicate
+  digests first, and a Docker config is mounted for cosign's own registry
+  requests when credentials are supplied). The cosign and syft versions are
+  pinned once here; the `tests/` submodule exercises `with-cosign`/`with-syft`
+  (the binaries run) and the `sign-keyless` empty-digest no-op, while real
+  signing is covered through the consumer release pipelines. It is
+  **independent** of the `go` toolchain — pass the consumer's Go base via the
+  `base` arg so it reuses those caches. The full release pipeline (publish/sign/
+  runtime images) stays in each project's `*-ci` module, which composes these
+  primitives. `release-base` + `snapshot` are the planned Tier B follow-up.
 - **`bench`** — Pipeline benchmark harness. A stage is a `*dagger.Container`
   rather than a closure, which is what lets the harness be shared at all
   (containers cross module boundaries, closures do not): `with-stage`
@@ -104,7 +101,7 @@ Each module is self-contained: its own `go.mod`/`go.sum` and no relative
 `include`, so it can be sourced remotely. Tests live in per-module `tests/`
 submodules that run against synthetic fixtures rather than any real project
 layout — most from a `tests/testdata/fixture` directory, though some modules
-(bench, commitlint, cosign) construct fixtures inline. Run a single module's
+(bench, commitlint) construct fixtures inline. Run a single module's
 suite with `dagger call -m tests all` from its directory, or `task dagger:test`
 from the repo root to run every published toolchain's suite — it discovers them
 from the `tests/` submodules.

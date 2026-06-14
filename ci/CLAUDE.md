@@ -26,8 +26,10 @@ keeps it for reproducibility.
 ### ansivideo release (composes the shared toolchains; see `release.go`)
 
 ansivideo is the monorepo's first released binary. These functions compose the
-`goreleaser`, `syft`, and `cosign` toolchains directly rather than going through
-devbox, because those tools are not on the devbox PATH.
+`goreleaser` toolchain directly rather than going through devbox, because those
+tools are not on the devbox PATH. The goreleaser toolchain also installs cosign
+and syft (via its `with-cosign`/`with-syft`) and signs image digests (its
+`sign-keyless`), so the release pipeline depends on it alone.
 
 - `lint-releaser` (+check) runs `goreleaser check` against
   `ansivideo/.goreleaser.yaml`.
@@ -35,7 +37,8 @@ devbox, because those tools are not on the devbox PATH.
   returns the GoReleaser `dist/` directory (no publishing).
 - `release` builds, signs, and publishes a tagged release: GoReleaser produces
   the binaries, archives, checksums, SBOMs (syft), and signs the checksums
-  (cosign); the GitHub release is created against the real `ansivideo/vX.Y.Z`
+  (cosign) — syft and cosign installed via the goreleaser toolchain; the GitHub
+  release is created against the real `ansivideo/vX.Y.Z`
   tag with the gh CLI; the multi-arch image (debian + ffmpeg + binary) is
   published to `ghcr.io/macropower/ansivideo` and signed. Returns the `dist/`
   directory including `digests.txt` for attestation.
@@ -56,8 +59,8 @@ functions locally.
 - `main.go` defines the `Ci` module (Go module path `dagger/ci`) and the check
   functions; `release.go` holds the ansivideo release functions.
 - Dependencies in `dagger.json`: the `devbox` toolchain (checks) plus the
-  `goreleaser`, `cosign`, and `syft` toolchains (release), all referenced
-  relatively under `../toolchains/`.
+  `goreleaser` toolchain (release, which carries the folded-in cosign and syft
+  tooling), both referenced relatively under `../toolchains/`.
 - It has no `tests/` submodule, so `task dagger:test` (which discovers suites
   under `toolchains/*/tests`) does not cover it.
 

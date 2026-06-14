@@ -29,6 +29,9 @@ func (t *Tests) All(ctx context.Context) error {
 		{"check-valid", t.CheckValid},
 		{"check-invalid", t.CheckInvalid},
 		{"version-tags", t.VersionTags},
+		{"with-cosign-installs", t.WithCosignInstalls},
+		{"with-syft-installs", t.WithSyftInstalls},
+		{"sign-keyless-no-op", t.SignKeylessNoOp},
 	}
 	for _, tc := range cases {
 		if err := tc.fn(ctx); err != nil {
@@ -73,6 +76,42 @@ func (t *Tests) VersionTags(ctx context.Context) error {
 	want := []string{"latest", "v1.2.3", "v1", "v1.2"}
 	if !slices.Equal(got, want) {
 		return fmt.Errorf("VersionTags = %v, want %v", got, want)
+	}
+	return nil
+}
+
+// debianImage is a neutral base used to verify the installed cosign and syft
+// binaries are runnable outside their own images.
+const debianImage = "public.ecr.aws/docker/library/debian:13-slim"
+
+// WithCosignInstalls verifies the cosign binary installed by the goreleaser
+// toolchain is runnable in another image.
+func (t *Tests) WithCosignInstalls(ctx context.Context) error {
+	_, err := dag.Goreleaser(dagger.GoreleaserOpts{Source: t.fixture()}).
+		WithCosign(dag.Container().From(debianImage)).
+		WithExec([]string{"cosign", "version"}).
+		Sync(ctx)
+	return err
+}
+
+// WithSyftInstalls verifies the syft binary installed by the goreleaser
+// toolchain is runnable in another image.
+func (t *Tests) WithSyftInstalls(ctx context.Context) error {
+	_, err := dag.Goreleaser(dagger.GoreleaserOpts{Source: t.fixture()}).
+		WithSyft(dag.Container().From(debianImage)).
+		WithExec([]string{"syft", "version"}).
+		Sync(ctx)
+	return err
+}
+
+// SignKeylessNoOp verifies SignKeyless short-circuits to nil when there are no
+// digests to sign (so a release with nothing to sign does not invoke cosign or
+// require credentials), confirming the function is wired and callable.
+func (t *Tests) SignKeylessNoOp(ctx context.Context) error {
+	secret := dag.SetSecret("goreleaser-test-oidc", "unused")
+	if err := dag.Goreleaser(dagger.GoreleaserOpts{Source: t.fixture()}).
+		SignKeyless(ctx, []string{}, "", secret); err != nil {
+		return fmt.Errorf("SignKeyless([]) = %w, want nil", err)
 	}
 	return nil
 }

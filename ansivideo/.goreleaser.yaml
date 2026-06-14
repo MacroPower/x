@@ -53,7 +53,8 @@ checksum:
   name_template: "checksums.txt"
 
 # syft generates an SPDX SBOM per archive. The syft binary is installed onto
-# the release container by the ci toolchain via the syft toolchain module.
+# the release container by the ci toolchain via the goreleaser toolchain's
+# WithSyft.
 sboms:
   - artifacts: archive
 

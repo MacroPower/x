@@ -1,7 +1,8 @@
 // Release orchestration for the ansivideo binary. Unlike the +check functions
 // in main.go (which run Taskfile targets inside devbox), these compose the
-// shared goreleaser, syft, and cosign toolchains directly to build, sign, and
-// publish ansivideo: the monorepo's first released artifact. ansivideo is pure
+// shared goreleaser toolchain directly -- including its folded-in cosign
+// signing and syft SBOM helpers -- to build, sign, and publish ansivideo: the
+// monorepo's first released artifact. ansivideo is pure
 // Go (it shells out to ffmpeg at runtime), so every target cross-compiles
 // statically and the only runtime dependency, ffmpeg, is bundled into the
 // container image rather than linked.
@@ -65,18 +66,19 @@ const (
 )
 
 // releaserBase builds the release toolchain: the goreleaser-equipped Go base
-// (from the goreleaser toolchain) extended with the cosign and syft binaries
-// (so GoReleaser's sign and sbom steps can invoke them), the source mounted at
-// /src, and a bootstrapped git repo. Tools are installed before source is
-// mounted so source changes only invalidate the git-bootstrap layer onward.
+// extended with the cosign and syft binaries via the goreleaser toolchain's
+// WithCosign/WithSyft (so GoReleaser's sign and sbom steps can invoke them),
+// the source mounted at /src, and a bootstrapped git repo. Tools are installed
+// before source is mounted so source changes only invalidate the git-bootstrap
+// layer onward.
 //
 // GOWORK is disabled so the build resolves the versions pinned in
 // ansivideo/go.mod rather than the go.work overlay, keeping releases
 // reproducible.
 func (m *Ci) releaserBase(_ context.Context) *dagger.Container {
 	ctr := m.Goreleaser.GoreleaserBase()
-	ctr = m.Cosign.WithCosign(ctr)
-	ctr = m.Syft.WithSyft(ctr)
+	ctr = m.Goreleaser.WithCosign(ctr)
+	ctr = m.Goreleaser.WithSyft(ctr)
 	ctr = ctr.
 		WithEnvVariable("GOWORK", "off").
 		// USER and HOSTNAME feed the GoReleaser BuildUser ldflag template.
@@ -414,7 +416,7 @@ func (m *Ci) publishImages(
 }
 
 // signImages signs the published image digests with cosign keyless signing
-// (Fulcio + Rekor) via the shared cosign toolchain. Cosign's built-in GitHub
+// (Fulcio + Rekor) via the goreleaser toolchain. Cosign's built-in GitHub
 // Actions provider uses the OIDC request URL and token to mint fresh tokens on
 // demand, avoiding expiry. Digests are deduplicated first since tags often
 // share a manifest. Does nothing when no OIDC token is provided.
@@ -443,8 +445,8 @@ func (m *Ci) signImages(
 		}
 	}
 
-	return m.Cosign.SignKeyless(ctx, toSign, oidcRequestURL, oidcRequestToken,
-		dagger.CosignSignKeylessOpts{
+	return m.Goreleaser.SignKeyless(ctx, toSign, oidcRequestURL, oidcRequestToken,
+		dagger.GoreleaserSignKeylessOpts{
 			RegistryHost:     host,
 			RegistryUsername: registryUsername,
 			RegistryPassword: registryPassword,

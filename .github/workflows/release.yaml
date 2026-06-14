@@ -1,9 +1,9 @@
 name: release
 
 # Releases the ansivideo binary, container image, SBOMs, and signatures. ci
-# release builds and signs the artifacts with GoReleaser (via the goreleaser,
-# syft, and cosign toolchains), creates the GitHub release for the prefixed tag,
-# and publishes the multi-arch image to ghcr.io.
+# release builds and signs the artifacts with GoReleaser (via the goreleaser
+# toolchain, which also installs cosign and syft), creates the GitHub release
+# for the prefixed tag, and publishes the multi-arch image to ghcr.io.
 on:
   push:
     tags:

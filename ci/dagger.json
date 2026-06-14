@@ -12,14 +12,6 @@
     {
       "name": "goreleaser",
       "source": "../toolchains/goreleaser"
-    },
-    {
-      "name": "cosign",
-      "source": "../toolchains/cosign"
-    },
-    {
-      "name": "syft",
-      "source": "../toolchains/syft"
     }
   ]
 }

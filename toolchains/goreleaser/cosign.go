@@ -1,7 +1,10 @@
-// Cosign signs published container image digests with Sigstore cosign, either
-// keyless (Fulcio + Rekor, via an OIDC token) or with a private key. Digests
-// are signed concurrently. Callers deduplicate digests before signing, since
-// multiple tags often share one manifest.
+// Sigstore cosign signing, folded into the goreleaser toolchain because it is
+// part of the same release pipeline: WithCosign installs the cosign binary into
+// a release container (where GoReleaser's sign step drives it for blob
+// signing), and SignKeyless signs published image digests directly (Fulcio +
+// Rekor, via an OIDC token). Digests are signed concurrently; callers
+// deduplicate digests before signing, since multiple tags often share one
+// manifest.
 package main
 
 import (
@@ -9,7 +12,7 @@ import (
 	"errors"
 	"fmt"
 
-	"dagger/cosign/internal/dagger"
+	"dagger/goreleaser/internal/dagger"
 
 	"golang.org/x/sync/errgroup"
 )
@@ -18,14 +21,11 @@ const (
 	// cosignVersion is the pinned cosign release used for the default image.
 	cosignVersion = "v3.1.1" // renovate: datasource=github-releases depName=sigstore/cosign
 
-	defaultImage = "gcr.io/projectsigstore/cosign:" + cosignVersion
+	// cosignImage is the official cosign image the binary is extracted from.
+	cosignImage = "gcr.io/projectsigstore/cosign:" + cosignVersion
 
-	// Docker Official Image, pulled from Docker's verified publisher
-	// space on ECR Public to avoid Docker Hub pull rate limits.
-	debianImage = "public.ecr.aws/docker/library/debian:13-slim" // renovate: datasource=docker depName=public.ecr.aws/docker/library/debian
-
-	// binPath is the cosign executable path inside the official image.
-	binPath = "/ko-app/cosign"
+	// cosignBinPath is the cosign executable path inside the official image.
+	cosignBinPath = "/ko-app/cosign"
 
 	// maxParallelSigns bounds the number of concurrent cosign invocations so a
 	// large multi-arch, multi-image release does not burst unbounded.
@@ -37,39 +37,20 @@ const (
 // would silently produce an unusable entry and fall back to anonymous access.
 var ErrRegistryHostRequired = errors.New("registry host is required when a registry password is set")
 
-// Cosign signs container image digests with Sigstore cosign. Create instances
-// with [New].
-type Cosign struct {
-	// cosign container image reference.
-	Image string
-}
-
-// New creates a new [Cosign] module.
-func New(
-	// cosign container image.
-	// +optional
-	image string,
-) *Cosign {
-	if image == "" {
-		image = defaultImage
-	}
-	return &Cosign{Image: image}
-}
-
-// Binary returns the cosign executable, extracted from the official image so it
-// can be layered onto another container (e.g. a goreleaser release base, where
-// goreleaser invokes cosign for blob signing).
-func (m *Cosign) Binary() *dagger.File {
-	return dag.Container().From(m.Image).File(binPath)
+// cosignBinary returns the cosign executable, extracted from the official image
+// so it can be layered onto a release container (where GoReleaser drives its
+// own blob signing).
+func (m *Goreleaser) cosignBinary() *dagger.File {
+	return dag.Container().From(cosignImage).File(cosignBinPath)
 }
 
 // WithCosign installs the cosign binary at /usr/local/bin/cosign in the given
-// container, for tools (like goreleaser's sign step) that invoke it directly.
-func (m *Cosign) WithCosign(
+// container, for tools (like GoReleaser's sign step) that invoke it directly.
+func (m *Goreleaser) WithCosign(
 	// Container to install cosign into.
 	ctr *dagger.Container,
 ) *dagger.Container {
-	return ctr.WithFile("/usr/local/bin/cosign", m.Binary())
+	return ctr.WithFile("/usr/local/bin/cosign", m.cosignBinary())
 }
 
 // SignKeyless signs each digest using cosign keyless signing (Fulcio + Rekor).
@@ -78,7 +59,7 @@ func (m *Cosign) WithCosign(
 // credentials are supplied, a Docker config is mounted so cosign can push
 // signatures to a private registry (cosign makes its own HTTP requests, which
 // Dagger's registry auth does not cover).
-func (m *Cosign) SignKeyless(
+func (m *Goreleaser) SignKeyless(
 	ctx context.Context,
 	// Image digests to sign (e.g. "registry/image:tag@sha256:hex"). Caller
 	// should deduplicate by digest first.
@@ -105,7 +86,7 @@ func (m *Cosign) SignKeyless(
 	if registryPassword != nil && registryHost == "" {
 		return ErrRegistryHostRequired
 	}
-	ctr := m.base(registryHost, registryUsername, registryPassword).
+	ctr := m.cosignBase(registryHost, registryUsername, registryPassword).
 		WithEnvVariable("ACTIONS_ID_TOKEN_REQUEST_URL", oidcRequestURL).
 		WithSecretVariable("ACTIONS_ID_TOKEN_REQUEST_TOKEN", oidcRequestToken)
 	return m.signAll(ctx, digests, ctr, func(digest string) []string {
@@ -113,50 +94,10 @@ func (m *Cosign) SignKeyless(
 	})
 }
 
-// SignWithKey signs each digest using a cosign private key (env://COSIGN_KEY).
-// When registry credentials are supplied, a Docker config is mounted so cosign
-// can push signatures to a private registry.
-func (m *Cosign) SignWithKey(
-	ctx context.Context,
-	// Image digests to sign (e.g. "registry/image:tag@sha256:hex"). Caller
-	// should deduplicate by digest first.
-	digests []string,
-	// cosign private key (the contents of a cosign.key file).
-	key *dagger.Secret,
-	// Password for the cosign private key, if it is encrypted.
-	// +optional
-	password *dagger.Secret,
-	// Registry host for cosign auth (e.g. "ghcr.io"). Required with a password.
-	// +optional
-	registryHost string,
-	// Registry username for cosign auth.
-	// +optional
-	registryUsername string,
-	// Registry password/token for cosign auth. When set, a Docker config is
-	// mounted for cosign's own registry requests.
-	// +optional
-	registryPassword *dagger.Secret,
-) error {
-	if len(digests) == 0 {
-		return nil
-	}
-	if registryPassword != nil && registryHost == "" {
-		return ErrRegistryHostRequired
-	}
-	ctr := m.base(registryHost, registryUsername, registryPassword).
-		WithSecretVariable("COSIGN_KEY", key)
-	if password != nil {
-		ctr = ctr.WithSecretVariable("COSIGN_PASSWORD", password)
-	}
-	return m.signAll(ctx, digests, ctr, func(digest string) []string {
-		return []string{"cosign", "sign", "--key", "env://COSIGN_KEY", digest, "--yes"}
-	})
-}
-
-// base returns the cosign container, optionally mounting a Docker config so
-// cosign can authenticate its own HTTP requests to a private registry.
-func (m *Cosign) base(registryHost, registryUsername string, registryPassword *dagger.Secret) *dagger.Container {
-	ctr := dag.Container().From(m.Image)
+// cosignBase returns the cosign container, optionally mounting a Docker config
+// so cosign can authenticate its own HTTP requests to a private registry.
+func (m *Goreleaser) cosignBase(registryHost, registryUsername string, registryPassword *dagger.Secret) *dagger.Container {
+	ctr := dag.Container().From(cosignImage)
 	if registryPassword != nil {
 		cfg := dockerConfigFile(registryHost, registryUsername, registryPassword)
 		ctr = ctr.
@@ -168,7 +109,7 @@ func (m *Cosign) base(registryHost, registryUsername string, registryPassword *d
 
 // signAll runs `cosign sign` for every digest concurrently using args(digest)
 // as the command, and reports the first failure.
-func (m *Cosign) signAll(
+func (m *Goreleaser) signAll(
 	ctx context.Context,
 	digests []string,
 	ctr *dagger.Container,
