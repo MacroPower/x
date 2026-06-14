@@ -1893,7 +1893,7 @@ func isEmptySchema(s *Schema) bool {
 		s.Type == "" && s.Types == nil &&
 		s.Ref == "" && s.DynamicRef == "" &&
 		s.Properties == nil && s.Required == nil &&
-		s.Items == nil && s.PrefixItems == nil &&
+		s.Items == nil && s.PrefixItems == nil && s.ItemsArray == nil &&
 		s.AllOf == nil && s.AnyOf == nil && s.OneOf == nil && s.Not == nil &&
 		s.If == nil && s.Then == nil && s.Else == nil &&
 		s.Enum == nil && s.Const == nil &&

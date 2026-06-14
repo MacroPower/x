@@ -1907,6 +1907,48 @@ func TestValidateMaxContains(t *testing.T) {
 	}
 }
 
+func TestValidateDraft7NotWithItemsArray(t *testing.T) {
+	t.Parallel()
+
+	// The draft-7 tuple form {"items":[...]} parses into ItemsArray with a nil
+	// Items field. A constraint-bearing ItemsArray must defeat the empty-schema
+	// check; otherwise a not-wrapped tuple is misread as the boolean-false schema
+	// and rejects every instance with "value is not allowed".
+	schema := &jsonschema.Schema{
+		Schema: "http://json-schema.org/draft-07/schema#",
+		Not: &jsonschema.Schema{
+			ItemsArray: []*jsonschema.Schema{{Type: "string"}},
+		},
+	}
+
+	tests := map[string]struct {
+		instance any
+		err      string
+	}{
+		"non-matching tuple is accepted by not": {
+			instance: []any{42.0, 3.14},
+		},
+		"matching tuple is rejected by not": {
+			instance: []any{"hi"},
+			err:      "should not validate against the schema",
+		},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := jsonschema.Validate(t.Context(), schema, tt.instance)
+			if tt.err == "" {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.err)
+				assert.NotContains(t, err.Error(), "value is not allowed")
+			}
+		})
+	}
+}
+
 func TestValidateDraft7AdditionalItems(t *testing.T) {
 	t.Parallel()
 
