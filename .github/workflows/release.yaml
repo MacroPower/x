@@ -47,10 +47,20 @@ jobs:
           INPUT_TAG: ${{ github.event.inputs.tag }}
         run: |
           if [ -n "$INPUT_TAG" ]; then
-            echo "value=$INPUT_TAG" >> "$GITHUB_OUTPUT"
+            value="$INPUT_TAG"
           else
-            echo "value=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+            value="${GITHUB_REF#refs/tags/}"
           fi
+          # The tag is interpolated into the `ci release` call string, which
+          # dagger-for-github expands unquoted inside a shell. A pushed git tag
+          # may legally contain shell metacharacters ($(), ;, |, "), so pin the
+          # value to the ansivideo/vX.Y.Z SemVer shape before using it; anything
+          # else is a mistyped tag or an injection attempt and is rejected.
+          if ! printf '%s' "$value" | grep -Eq '^ansivideo/v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)*$'; then
+            echo "refusing to release malformed tag: $value" >&2
+            exit 1
+          fi
+          echo "value=$value" >> "$GITHUB_OUTPUT"
 
       - name: Capture OIDC request URL
         id: oidc
