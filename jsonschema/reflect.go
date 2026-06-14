@@ -1547,10 +1547,10 @@ func (g *generator) refForType(t reflect.Type, nullable bool) *Schema {
 
 	ref := g.draft.refPrefix() + name
 
-	if nullable {
-		refSchema := &Schema{Ref: ref}
-		g.refRecords = append(g.refRecords, refRecord{schema: refSchema, target: t})
+	refSchema := &Schema{Ref: ref}
+	g.refRecords = append(g.refRecords, refRecord{schema: refSchema, target: t})
 
+	if nullable {
 		return &Schema{
 			AnyOf: []*Schema{
 				refSchema,
@@ -1558,9 +1558,6 @@ func (g *generator) refForType(t reflect.Type, nullable bool) *Schema {
 			},
 		}
 	}
-
-	refSchema := &Schema{Ref: ref}
-	g.refRecords = append(g.refRecords, refRecord{schema: refSchema, target: t})
 
 	return refSchema
 }
