@@ -16,6 +16,7 @@ jobs:
     name: scan-source
     runs-on: ubuntu-latest
     permissions:
+      contents: read # checkout (top-level permissions: {} resets it to none)
       security-events: write
     steps:
       - name: Checkout
@@ -43,6 +44,7 @@ jobs:
     name: scan-image
     runs-on: ubuntu-latest
     permissions:
+      contents: read # checkout (top-level permissions: {} resets it to none)
       security-events: write
     steps:
       - name: Checkout
