@@ -514,7 +514,9 @@ overrides how definition keys are derived.
 `$schema` URI, keyword selection (`$defs` vs `definitions`), `$ref` sibling
 handling, and `unevaluatedProperties` vs `additionalProperties` in `allOf`
 compositions. In Draft-07, a `$ref`'d field with extra annotations is wrapped in
-an `allOf`; in Draft 2020-12 sibling keywords sit directly alongside `$ref`.
+an `allOf`; for a nullable `$ref` field the wrap applies to the value branch of
+the `anyOf`, where a relocated `const`/`enum` lands. In Draft 2020-12 sibling
+keywords sit directly alongside `$ref`.
 
 The `WithDraft` option serves generation, validation, and `Inline` alike:
 generation targets the given draft, while validation and inlining use it in

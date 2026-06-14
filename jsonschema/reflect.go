@@ -1379,12 +1379,31 @@ func (g *generator) applyFieldInterpreters(
 	// pointer field is the anyOf wrapper. Const and enum test the instance value
 	// regardless of its type, so on the wrapper they reject the permitted null;
 	// relocate them onto the value branch, matching the jsonschema-tag path.
-	relocateConstEnumToValueBranch(fieldSchema)
+	target := relocateConstEnumToValueBranch(fieldSchema)
+
+	// An interpreter-set const/enum fully constrains the value, so the
+	// type-derived numeric bounds are redundant and are dropped, matching the
+	// jsonschema-tag path in buildFieldSchema.
+	if target.Const != nil || target.Enum != nil {
+		target.Minimum = nil
+		target.Maximum = nil
+		target.ExclusiveMinimum = nil
+		target.ExclusiveMaximum = nil
+	}
 
 	// Wrap bare $ref with allOf for Draft-07 if annotations were added. This
 	// mutates the schema in place, so the entry already in parent.Properties
 	// reflects the change.
 	g.wrapRefForDraft7(fieldSchema)
+
+	// For a nullable pointer field, a relocated const/enum (or any sibling
+	// keyword) lands on the inner value branch of the anyOf wrapper, which is
+	// itself a bare $ref. Under Draft-07 a $ref ignores its siblings, so the
+	// inner branch needs the same allOf wrap; otherwise the relocated keyword is
+	// silently dropped at validation time.
+	if inner := nullableInnerSchema(fieldSchema); inner != nil {
+		g.wrapRefForDraft7(inner)
+	}
 
 	return nil
 }

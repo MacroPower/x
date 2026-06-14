@@ -2297,6 +2297,43 @@ func TestGenerateFor_Draft7_RefWithInterpreterNot(t *testing.T) {
 	}`, string(got))
 }
 
+func TestGenerateFor_Draft7_NullableRefWithInterpreterConst(t *testing.T) {
+	t.Parallel()
+
+	// A nullable ($ref) field whose value branch carries an interpreter-set
+	// const must wrap that inner branch in allOf under Draft-07. Otherwise the
+	// const is a $ref sibling the Draft-07 validator ignores, and a value that
+	// violates it is wrongly accepted.
+	type Container struct {
+		Level *NonStructProvider `json:"level" validate:"eq=2"`
+	}
+
+	s, err := jsonschema.GenerateFor[Container](t.Context(),
+		jsonschema.WithDraft(jsonschema.Draft7),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
+	)
+	require.NoError(t, err)
+
+	// The const landed on the inner value branch, which must be allOf-wrapped so
+	// the $ref does not shadow it.
+	field := s.Properties["level"]
+	require.Len(t, field.AnyOf, 2)
+
+	inner := field.AnyOf[0]
+	require.Empty(t, inner.Ref, "inner $ref must be wrapped in allOf, not left as a const sibling")
+	require.Len(t, inner.AllOf, 1)
+	assert.Equal(t, "#/definitions/NonStructProvider", inner.AllOf[0].Ref)
+	require.NotNil(t, inner.Const)
+
+	// The generated schema, validated by this package, must reject a value that
+	// violates the const and accept the one that satisfies it.
+	err = jsonschema.Validate(t.Context(), s, map[string]any{"level": 1.0})
+	require.Error(t, err, "level=1 violates the eq=2 const and must be rejected")
+
+	err = jsonschema.Validate(t.Context(), s, map[string]any{"level": 2.0})
+	require.NoError(t, err, "level=2 satisfies the const")
+}
+
 // WithTypeSchemaProvider implements JSONSchemaProvider but will be overridden
 // by WithTypeSchema.
 type WithTypeSchemaProvider struct {

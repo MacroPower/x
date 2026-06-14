@@ -425,8 +425,10 @@
 // $schema URI, keyword selection (definitions vs $defs), $ref sibling
 // behavior, and additionalProperties/unevaluatedProperties handling with allOf
 // composition. In [Draft7], when a $ref'd field has additional annotations
-// from struct tags, the $ref is wrapped in an allOf. In [Draft2020], sibling
-// keywords are placed directly alongside $ref.
+// from struct tags, the $ref is wrapped in an allOf; for a nullable $ref field
+// the wrap applies to the value branch of the anyOf, where a relocated
+// const/enum lands. In [Draft2020], sibling keywords are placed directly
+// alongside $ref.
 //
 // The [WithDraft] option serves generation, validation, and inlining alike:
 // generation targets the given draft, while validation and [Inline] use it
