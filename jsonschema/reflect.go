@@ -1242,8 +1242,11 @@ func (g *generator) needsAllOfComposition(t reflect.Type) bool {
 		return true
 	}
 
-	// Check JSONSchemaProvider.
-	if implementsProvider(t) {
+	// Check JSONSchemaProvider. An interface type's method set can include
+	// JSONSchema, but callProvider cannot instantiate an interface to call it and
+	// returns nil, which would compose a vacuous empty allOf branch. A genuine
+	// override for the interface is handled by resolveTypeSchema above.
+	if t.Kind() != reflect.Interface && implementsProvider(t) {
 		return true
 	}
 

@@ -5344,9 +5344,22 @@ func TestGenerateFor_EmbeddedInterfaceWithProvider(t *testing.T) {
 	s, err := jsonschema.GenerateFor[HasProviderInterface](t.Context())
 	require.NoError(t, err)
 
-	// SchemaInterface implements JSONSchemaProvider → composed via allOf.
-	assert.NotNil(t, s.AllOf, "schema: %s", marshalSchema(t, s))
-	assert.Contains(t, s.Properties, "extra")
+	// SchemaInterface declares JSONSchemaProvider, but an interface cannot be
+	// instantiated to call it (callProvider returns nil), so the embed is skipped
+	// rather than composed into a vacuous allOf:[{}] branch that constrains
+	// nothing.
+	assert.Empty(t, s.AllOf, "schema: %s", marshalSchema(t, s))
+
+	got, err := json.Marshal(s)
+	require.NoError(t, err)
+
+	assert.JSONEq(t, `{
+		"$schema":"https://json-schema.org/draft/2020-12/schema",
+		"type":"object",
+		"properties":{"extra":{"type":"string"}},
+		"required":["extra"],
+		"additionalProperties":false
+	}`, string(got))
 }
 
 // Embedded struct implementing TextMarshaler → the promoted MarshalText
