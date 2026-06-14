@@ -37,7 +37,9 @@ type Security struct {
 	Image string
 	// Comma-separated Trivy severity filter applied to all scans.
 	Severity string
-	// Trivy --scanners value for filesystem (source) scans.
+	// Trivy --scanners value applied to all scans (source and image). Defaults
+	// to vuln only, so neither scan gates on Trivy's image-default secret
+	// scanner.
 	Scanners string
 	// Trivy --pkg-types value for source/filesystem scans.
 	SourcePkgTypes string
@@ -59,7 +61,7 @@ func New(
 	// Comma-separated Trivy severity filter applied to all scan functions.
 	// +optional
 	severity string,
-	// Trivy --scanners value for filesystem (source) scans.
+	// Trivy --scanners value applied to all scans (source and image).
 	// +optional
 	scanners string,
 	// Trivy --pkg-types value for source/filesystem scans.
@@ -147,6 +149,7 @@ func (m *Security) ScanImage(
 		WithMountedFile("target.tar", target.AsTarball()).
 		WithExec([]string{
 			"trivy", "image",
+			"--scanners=" + m.Scanners,
 			"--pkg-types=" + m.ImagePkgTypes,
 			"--exit-code=1",
 			"--severity=" + m.Severity,
@@ -196,6 +199,7 @@ func (m *Security) ScanImageSarif(
 		WithMountedFile("target.tar", target.AsTarball()).
 		WithExec([]string{
 			"trivy", "image",
+			"--scanners=" + m.Scanners,
 			"--pkg-types=" + m.ImagePkgTypes,
 			"--severity=" + m.Severity,
 			"--format=sarif",
