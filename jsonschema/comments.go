@@ -185,9 +185,10 @@ func (ce *GoCommentProvider) FieldDescription(ctx context.Context, fc FieldConte
 
 // sourceFiles returns parsed AST files for the package at the given import path.
 // It uses go/packages for source resolution, which handles module cache and
-// standard library packages. Results are cached per package path; a load cut
-// short by context cancellation is reported as an error and not cached, so a
-// later call under a live context still loads the package.
+// standard library packages. A successful load is cached per package path,
+// including a package that legitimately has no source files; a load cut short by
+// context cancellation or a transient load failure is not cached, so a later
+// call under a live context retries it instead of permanently serving nil.
 func (ce *GoCommentProvider) sourceFiles(ctx context.Context, pkgPath string) ([]*ast.File, error) {
 	if pkgPath == "" {
 		return nil, nil
@@ -200,20 +201,29 @@ func (ce *GoCommentProvider) sourceFiles(ctx context.Context, pkgPath string) ([
 		return files, nil
 	}
 
-	files, err := ce.loadPackage(ctx, pkgPath)
+	files, loaded, err := ce.loadPackage(ctx, pkgPath)
 	if err != nil {
 		return nil, err
 	}
 
-	ce.cache[pkgPath] = files
+	// Only cache a definitive result. A transient failure returns loaded=false
+	// so the key stays absent and the next call retries, rather than poisoning
+	// the cache with a nil that hides the package's comments for the rest of the
+	// provider's lifetime.
+	if loaded {
+		ce.cache[pkgPath] = files
+	}
 
 	return files, nil
 }
 
 // loadPackage uses go/packages to load and parse source files for a package.
-// A load attempted under a done context reports the context's error;
-// every other load failure returns nil files, the silent skip the
-// [GoCommentProvider] docs describe.
+// The returned bool reports whether the load reached a definitive result worth
+// caching. A load attempted under a done context reports the context's error
+// (and false); any other load failure returns no files and false, the silent
+// skip the [GoCommentProvider] docs describe, so a transient failure is retried
+// rather than cached. A successful load returns its parsed files and true, even
+// when the package legitimately has no source files.
 //
 // The configured Mode (NeedName | NeedFiles | NeedSyntax) parses but does not
 // type-check, so the only per-file problems that arise are parse errors and
@@ -223,7 +233,7 @@ func (ce *GoCommentProvider) sourceFiles(ctx context.Context, pkgPath string) ([
 // parsed cleanly while aggregating per-file problems separately in Errors.
 // Best-effort comment extraction uses whatever parsed, so a single bad file in
 // the package does not drop doc comments for the types that did parse.
-func (ce *GoCommentProvider) loadPackage(ctx context.Context, pkgPath string) ([]*ast.File, error) {
+func (ce *GoCommentProvider) loadPackage(ctx context.Context, pkgPath string) ([]*ast.File, bool, error) {
 	cfg := &packages.Config{
 		Context: ctx,
 		Dir:     ce.loadDir,
@@ -237,13 +247,13 @@ func (ce *GoCommentProvider) loadPackage(ctx context.Context, pkgPath string) ([
 
 	ctxErr := ctx.Err()
 	if ctxErr != nil {
-		return nil, fmt.Errorf("load package %s: %w", pkgPath, ctxErr)
+		return nil, false, fmt.Errorf("load package %s: %w", pkgPath, ctxErr)
 	}
 
 	if err != nil || len(pkgs) == 0 {
-		//nolint:nilerr // A live-context load failure is the documented silent skip.
-		return nil, nil
+		//nolint:nilerr // A live-context load failure is the documented silent skip; loaded=false keeps it out of the cache so a later call retries.
+		return nil, false, nil
 	}
 
-	return pkgs[0].Syntax, nil
+	return pkgs[0].Syntax, true, nil
 }
