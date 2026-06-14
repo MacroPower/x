@@ -279,6 +279,8 @@ type validator struct {
 	visiting              map[visitKey]bool
 	patternCache          map[*Schema]compiledPattern            // schema.Pattern compiled (see numericBounds)
 	patternProps          map[*Schema]map[string]compiledPattern // patternProperties keys compiled (see numericBounds)
+	constRats             map[*Schema]*big.Rat                   // numeric const value as a rational (see numericBounds)
+	enumRats              map[*Schema][]*big.Rat                 // numeric enum members as rationals by index (see numericBounds)
 
 	// Registrations for schemas materialized by the JSON-pointer fallback
 	// (resolveJSONPointerViaJSON). Like jsonPointerCache they are per-run
@@ -632,6 +634,8 @@ func (v *validator) precompute() {
 	v.numericBounds = map[*Schema]*precomputedBounds{}
 	v.patternCache = map[*Schema]compiledPattern{}
 	v.patternProps = map[*Schema]map[string]compiledPattern{}
+	v.constRats = map[*Schema]*big.Rat{}
+	v.enumRats = map[*Schema][]*big.Rat{}
 
 	visited := map[*Schema]bool{}
 	v.precomputeSchema(v.root, visited)
@@ -663,6 +667,16 @@ func (v *validator) precomputeSchema(schema *Schema, visited map[*Schema]bool) {
 		}
 
 		v.patternProps[schema] = compiled
+	}
+
+	if schema.Const != nil {
+		if r, ok := schemaNumberRat(*schema.Const); ok {
+			v.constRats[schema] = r
+		}
+	}
+
+	if rats := enumMemberRats(schema.Enum); rats != nil {
+		v.enumRats[schema] = rats
 	}
 
 	v.precomputeSchemaMap(schema.Properties, visited)
@@ -2403,8 +2417,16 @@ func (v *validator) validateEnum(
 		return nil
 	}
 
-	for _, allowed := range schema.Enum {
-		if equalSchemaInstance(allowed, instance) {
+	rats := v.enumRats[schema]
+
+	for i, allowed := range schema.Enum {
+		var allowedRat *big.Rat
+
+		if rats != nil {
+			allowedRat = rats[i]
+		}
+
+		if equalWithRat(allowed, allowedRat, instance) {
 			return nil
 		}
 	}
@@ -2435,7 +2457,7 @@ func (v *validator) validateConst(
 	}
 
 	constVal := *schema.Const
-	if equalSchemaInstance(constVal, instance) {
+	if equalWithRat(constVal, v.constRats[schema], instance) {
 		return nil
 	}
 
@@ -2467,12 +2489,7 @@ func (v *validator) validateConst(
 // numeric kinds.
 func equalSchemaInstance(schemaVal, instance any) bool {
 	if sr, ok := schemaNumberRat(schemaVal); ok {
-		ir, ok := toBigRat(instance)
-		if !ok {
-			return false
-		}
-
-		return sr.Cmp(ir) == 0
+		return equalRatInstance(sr, instance)
 	}
 
 	switch sv := schemaVal.(type) {
@@ -2523,6 +2540,31 @@ func equalSchemaInstance(schemaVal, instance any) bool {
 	return jsonschema.Equal(schemaVal, instance)
 }
 
+// equalRatInstance reports whether a schema value, already expanded to the
+// rational sr, equals the numeric instance. It mirrors the numeric branch of
+// [equalSchemaInstance]: a non-numeric instance never matches.
+func equalRatInstance(sr *big.Rat, instance any) bool {
+	ir, ok := toBigRat(instance)
+	if !ok {
+		return false
+	}
+
+	return sr.Cmp(ir) == 0
+}
+
+// equalWithRat compares a schema-authored const or enum value to an instance,
+// using a rational precomputed for the value's top-level numeric form when one
+// is available. A nil schemaRat runs the general [equalSchemaInstance]
+// comparison, which for a non-numeric value is identical and for a numeric value
+// recomputes the same rational; the cache only removes that repeated work.
+func equalWithRat(schemaVal any, schemaRat *big.Rat, instance any) bool {
+	if schemaRat == nil {
+		return equalSchemaInstance(schemaVal, instance)
+	}
+
+	return equalRatInstance(schemaRat, instance)
+}
+
 // schemaNumberRat converts a schema-authored numeric value to an exact
 // rational. A float64 expands through its shortest decimal ([float64ToRat]) so
 // that, e.g., schema 0.1 compares as 1/10 rather than its binary expansion,
@@ -2550,6 +2592,29 @@ func schemaNumberRat(v any) (*big.Rat, bool) {
 	}
 
 	return nil, false
+}
+
+// enumMemberRats returns the rational forms of an enum's numeric members,
+// aligned by index with enum (nil for a non-numeric member). It returns nil
+// when no member is numeric, so [precomputeSchema] stores an entry only for an
+// enum that can take the fast numeric-comparison path.
+func enumMemberRats(enum []any) []*big.Rat {
+	var rats []*big.Rat
+
+	for i, member := range enum {
+		r, ok := schemaNumberRat(member)
+		if !ok {
+			continue
+		}
+
+		if rats == nil {
+			rats = make([]*big.Rat, len(enum))
+		}
+
+		rats[i] = r
+	}
+
+	return rats
 }
 
 // equalJSONValues reports JSON-semantic equality like [jsonschema.Equal], with
