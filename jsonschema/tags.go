@@ -579,10 +579,23 @@ func parseBoolValue(key, value string) (bool, error) {
 	}
 }
 
+// nonDecimalFloat reports a value that [strconv.ParseFloat] accepts beyond plain
+// decimal notation: the underscore digit separator (1_000.5) and the
+// hexadecimal float forms (0x1p-2). The integer keywords parse in base 10 and
+// reject both, so the float keywords reject them too, keeping a numeric tag
+// value accepted or rejected the same way regardless of the field's type.
+func nonDecimalFloat(value string) bool {
+	return strings.ContainsAny(value, "_xX")
+}
+
 // parseFloat parses a float64 tag value.
 func parseFloat(key, value string) (float64, error) {
 	if value == "" {
 		return 0, fmt.Errorf("jsonschema tag: key %q requires a non-empty value", key)
+	}
+
+	if nonDecimalFloat(value) {
+		return 0, fmt.Errorf("jsonschema tag: key %q: %q is not a decimal number", key, value)
 	}
 
 	n, err := strconv.ParseFloat(value, 64)
@@ -676,6 +689,13 @@ func parseTypedScalar(value string, t reflect.Type) (any, error) {
 		return n, nil
 
 	case reflect.Float32, reflect.Float64:
+		// Reject the underscore and hexadecimal float forms [strconv.ParseFloat]
+		// would accept, matching the base-10 integer keys so a numeric tag value
+		// parses the same way across field types.
+		if nonDecimalFloat(value) {
+			return nil, fmt.Errorf("invalid number %q: not a decimal number", value)
+		}
+
 		// Parse at 64 bits for storage so the stored value is the float64 closest
 		// to the decimal the author wrote, not its float32-rounded approximation.
 		// Rounding const=0.1 to float32 would store 0.10000000149011612, which a

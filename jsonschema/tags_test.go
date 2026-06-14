@@ -277,6 +277,75 @@ func TestParseTypedScalarRejectsNaNInf(t *testing.T) {
 	}
 }
 
+// TestParseFloatRejectsNonDecimalForms verifies the float keys reject the
+// underscore digit separator and hexadecimal float forms that
+// strconv.ParseFloat accepts, matching the base-10 integer keys. It covers both
+// float-parsing paths: parseFloat for the bound keys and parseTypedScalar for
+// const.
+func TestParseFloatRejectsNonDecimalForms(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		generate func() (*jsonschema.Schema, error)
+	}{
+		"minimum underscore": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V float64 `json:"v" jsonschema:"minimum=1_000.5"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+		},
+		"maximum hex float": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V float64 `json:"v" jsonschema:"maximum=0x1p-2"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+		},
+		"multipleOf underscore": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V float64 `json:"v" jsonschema:"multipleOf=1_0"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+		},
+		"const underscore": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V float64 `json:"v" jsonschema:"const=1_000.5"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+		},
+		"const hex float": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V float64 `json:"v" jsonschema:"const=0x1p4"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := tc.generate()
+			require.Error(t, err,
+				"underscore and hex float forms should be rejected like base-10 integers")
+		})
+	}
+}
+
 func TestMultipleOfZero(t *testing.T) {
 	t.Parallel()
 
