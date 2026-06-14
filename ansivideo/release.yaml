@@ -1,0 +1,12 @@
+# Declares ansivideo as a releasable package. The ci module discovers every
+# <package>/release.yaml under the source root; this file's presence is what
+# makes the package releasable, and the image block opts it into a published,
+# signed container image. The package name, tag prefix (ansivideo/vX.Y.Z),
+# GoReleaser config (ansivideo/.goreleaser.yaml), and built binary all derive
+# from the directory name by convention. See ci/CLAUDE.md.
+image:
+  registry: ghcr.io/macropower/ansivideo
+  description: Play video in the terminal with ANSI half-block characters
+  # ffmpeg is ansivideo's sole runtime dependency, installed into the image.
+  runtimeAptPackages:
+    - ffmpeg
