@@ -851,6 +851,43 @@ func TestInlineRefFallback(t *testing.T) {
 	}
 }
 
+func TestInlineSubstituteIDDoesNotCorruptResolution(t *testing.T) {
+	t.Parallel()
+
+	// A SubstituteRef whose $id collides with an already-registered document URI
+	// must not overwrite that registration. Property "a"'s dangling ref triggers
+	// a substitute carrying $id https://example.com/doc (the root's own id), and
+	// property "b" then refs that id; b must still resolve to the real root's
+	// $defs/Real, not the substitute, which the substitute does not contain.
+	input := stringtest.Input(`
+		{
+			"$id": "https://example.com/doc",
+			"$defs": {"Real": {"type": "integer"}},
+			"properties": {
+				"a": {"$ref": "#/$defs/missing"},
+				"b": {"$ref": "https://example.com/doc#/$defs/Real"}
+			}
+		}
+	`)
+
+	substitute := jsonschema.RefFallbackFunc(func(context.Context, jsonschema.RefFailure) jsonschema.RefAction {
+		return jsonschema.SubstituteRef(&jsonschema.Schema{
+			ID:   "https://example.com/doc",
+			Type: "string",
+		})
+	})
+
+	root, err := jsonschema.ParseSchema([]byte(input))
+	require.NoError(t, err)
+
+	got, err := jsonschema.Inline(t.Context(), root, jsonschema.WithRefFallback(substitute))
+	require.NoError(t, err)
+
+	require.Contains(t, got.Properties, "b")
+	assert.Equal(t, "integer", got.Properties["b"].Type,
+		"b must resolve to the real root's $defs/Real, not the colliding substitute")
+}
+
 func TestInlineNil(t *testing.T) {
 	t.Parallel()
 

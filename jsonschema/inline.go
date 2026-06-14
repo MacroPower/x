@@ -596,7 +596,13 @@ func (in *inliner) substitute(pristine *Schema, path, ref string, inlineErr erro
 		return nil, err
 	}
 
-	in.v.walkSchema(cp, in.v.schemaBase(pristine))
+	// Register the substitute's $id/$anchor in the per-run fallback registries
+	// via a scratch validator rather than the shared ones. A caller-supplied
+	// substitute whose $id collides with an already-loaded document URI must not
+	// overwrite that entry; the fallback is consulted only after the shared
+	// registry, so the real document keeps priority while the substitute's own
+	// nested refs still resolve.
+	in.v.registerFallbackSchema(cp, in.v.schemaBase(pristine))
 	in.recordPaths(cp, path, in.docs[pristine])
 
 	return in.inlineCopy(cp, path)
