@@ -63,6 +63,12 @@
 // range-checked against the field's Go type, and a value the type cannot hold
 // is an error, mirroring the jsonschema tag's const/enum behavior.
 //
+// Length and size bounds (minLength/maxLength, minItems/maxItems,
+// minProperties/maxProperties) from several rules in one tag intersect
+// independently of order: a floor only rises and a ceiling only falls, and len=N
+// pins both to N. A len incompatible with a min/max or required therefore yields
+// an unsatisfiable range rather than overriding the other bound.
+//
 // Boolean constraints:
 //
 //   - eq=true / eq=false: const

@@ -59,8 +59,18 @@ func applyStringLenConstraint(s *jsonschema.Schema, value string) error {
 	// length collapses to 0.
 	n = clampNonNegative(n)
 
-	s.MinLength = new(n)
-	s.MaxLength = new(n)
+	// A len=N tag pins the length to exactly N: raise the floor and lower the
+	// ceiling to N, each only when it tightens an existing bound. Rules in a
+	// validate tag are ANDed, so this intersects with any min/max/required
+	// regardless of tag order, and an incompatible len yields an unsatisfiable
+	// range just as a conflicting min/max pair does.
+	if s.MinLength == nil || n > *s.MinLength {
+		s.MinLength = new(n)
+	}
+
+	if s.MaxLength == nil || n < *s.MaxLength {
+		s.MaxLength = new(n)
+	}
 
 	return nil
 }

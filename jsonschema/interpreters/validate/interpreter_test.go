@@ -1055,6 +1055,47 @@ func TestValidateInterpreter_RequiredPreservesStrongerBound(t *testing.T) {
 	}`, string(got))
 }
 
+func TestValidateInterpreter_LenIntersectsBounds(t *testing.T) {
+	t.Parallel()
+
+	// A len tag pins the length/size to exactly N by intersecting with any
+	// min/max or required set elsewhere in the same tag, regardless of order. An
+	// incompatible len yields an unsatisfiable range (floor above ceiling), as a
+	// conflicting min/max pair already does, rather than clobbering the other
+	// bound.
+	type Form struct {
+		MaxThenLen string            `json:"max_then_len" validate:"max=3,len=5"`
+		LenThenMax string            `json:"len_then_max" validate:"len=5,max=3"`
+		ReqThenLen string            `json:"req_then_len" validate:"required,len=0"`
+		LenThenReq string            `json:"len_then_req" validate:"len=0,required"`
+		ItemsMax   []string          `json:"items_max"    validate:"max=3,len=5"`
+		PropsMax   map[string]string `json:"props_max"    validate:"max=3,len=5"`
+	}
+
+	s, err := jsonschema.GenerateFor[Form](t.Context(),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
+	)
+	require.NoError(t, err)
+
+	got, err := json.Marshal(s)
+	require.NoError(t, err)
+
+	assert.JSONEq(t, `{
+		"$schema":"https://json-schema.org/draft/2020-12/schema",
+		"type":"object",
+		"properties":{
+			"max_then_len":{"type":"string","minLength":5,"maxLength":3},
+			"len_then_max":{"type":"string","minLength":5,"maxLength":3},
+			"req_then_len":{"type":"string","minLength":1,"maxLength":0},
+			"len_then_req":{"type":"string","minLength":1,"maxLength":0},
+			"items_max":{"type":["null","array"],"items":{"type":"string"},"minItems":5,"maxItems":3},
+			"props_max":{"type":["null","object"],"additionalProperties":{"type":"string"},"minProperties":5,"maxProperties":3}
+		},
+		"required":["max_then_len","len_then_max","req_then_len","len_then_req","items_max","props_max"],
+		"additionalProperties":false
+	}`, string(got))
+}
+
 func TestValidateInterpreter_CollectionNe(t *testing.T) {
 	t.Parallel()
 

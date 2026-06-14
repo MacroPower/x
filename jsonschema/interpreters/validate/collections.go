@@ -70,12 +70,22 @@ func applyCollectionLenConstraint(s *jsonschema.Schema, value string, baseType r
 	// Min/maxItems and min/maxProperties MUST be non-negative per JSON Schema;
 	// a negative length collapses to 0.
 	n = clampNonNegative(n)
+
+	minField, maxField := &s.MinItems, &s.MaxItems
 	if isMapKind(baseType) {
-		s.MinProperties = new(n)
-		s.MaxProperties = new(n)
-	} else {
-		s.MinItems = new(n)
-		s.MaxItems = new(n)
+		minField, maxField = &s.MinProperties, &s.MaxProperties
+	}
+
+	// A len=N tag pins the size to exactly N: raise the floor and lower the
+	// ceiling to N, each only when it tightens an existing bound, so the result
+	// is the order-independent intersection with any min/max set elsewhere in the
+	// tag.
+	if *minField == nil || n > **minField {
+		*minField = new(n)
+	}
+
+	if *maxField == nil || n < **maxField {
+		*maxField = new(n)
 	}
 
 	return nil
