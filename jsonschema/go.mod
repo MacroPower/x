@@ -5,7 +5,7 @@ go 1.26.0
 require (
 	github.com/google/jsonschema-go v0.4.3
 	github.com/stretchr/testify v1.11.1
-	go.jacobcolvin.com/x/stringtest v0.1.0
+	go.jacobcolvin.com/x/stringtest v0.2.0
 	golang.org/x/net v0.55.0
 	golang.org/x/tools v0.45.0
 )

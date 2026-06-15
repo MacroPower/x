@@ -8,7 +8,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	github.com/stretchr/testify v1.11.1
-	go.jacobcolvin.com/x/stringtest v0.1.0
+	go.jacobcolvin.com/x/stringtest v0.2.0
 )
 
 require (
