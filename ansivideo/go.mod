@@ -5,7 +5,7 @@ go 1.26.0
 require (
 	charm.land/bubbletea/v2 v2.0.7
 	github.com/stretchr/testify v1.11.1
-	go.jacobcolvin.com/x/stringtest v0.1.0
+	go.jacobcolvin.com/x/stringtest v0.2.0
 	go.jacobcolvin.com/x/version v0.2.0
 	golang.org/x/image v0.41.0
 	golang.org/x/term v0.43.0

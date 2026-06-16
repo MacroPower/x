@@ -36,8 +36,8 @@ github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
 github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e h1:JVG44RsyaB9T2KIHavMF/ppJZNG9ZpyihvCd0w101no=
 github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e/go.mod h1:RbqR21r5mrJuqunuUZ/Dhy/avygyECGrLceyNeo4LiM=
-go.jacobcolvin.com/x/stringtest v0.1.0 h1:CokQSICcFmywBapU5p1SsA2YBD+aSL3R/EPM1FRv5IM=
-go.jacobcolvin.com/x/stringtest v0.1.0/go.mod h1:hXDTRkMBRvOXc4e02XRL2b9F1Te1OWJ/NgjIOn+jmMY=
+go.jacobcolvin.com/x/stringtest v0.2.0 h1:GoZXZrDlKqDIqpxbQm3EQXlhxmZCqb+I38p99fBng/c=
+go.jacobcolvin.com/x/stringtest v0.2.0/go.mod h1:UrXpCrus1kkRqd+qk1RGMWZ14lukttnvtsGVhmk5a0U=
 go.jacobcolvin.com/x/version v0.2.0 h1:9C4+4OQwJTY4DCuYihivoMAovNUnxVJ5vAUsVK0op38=
 go.jacobcolvin.com/x/version v0.2.0/go.mod h1:G2z+11tfrkHoXoJjgLCtBt/FlQs9zdS9N9jQxLz+/Tk=
 golang.org/x/exp v0.0.0-20231006140011-7918f672742d h1:jtJma62tbqLibJ5sFQz8bKtEM8rJBtfilJ2qTU199MI=
