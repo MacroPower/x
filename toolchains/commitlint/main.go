@@ -14,7 +14,7 @@ const (
 	// verified publisher space on ECR Public to avoid Docker Hub pull rate
 	// limits. commitlint publishes its image only to Docker Hub, so the
 	// default container is built here from node + npm instead.
-	nodeImage = "public.ecr.aws/docker/library/node:22-slim" // renovate: datasource=docker depName=public.ecr.aws/docker/library/node
+	nodeImage = "public.ecr.aws/docker/library/node:24-slim" // renovate: datasource=docker depName=public.ecr.aws/docker/library/node
 
 	// commitlintVersion pins @commitlint/cli and @commitlint/config-conventional
 	// (released in lockstep) installed into the node container. This is the
