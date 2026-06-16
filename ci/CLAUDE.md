@@ -3,7 +3,7 @@
 This repository's own CI module, registered as `ci` in the root `dagger.json`.
 Unlike the shared modules under `toolchains/`, it is not designed for remote
 consumption: it orchestrates the repo's `dagger -> devbox -> task` flow so CI
-reproduces exactly what `task check` runs locally, and it owns the monorepo's
+reproduces exactly what `task check:all` runs locally, and it owns the monorepo's
 release pipeline.
 
 ## Functions

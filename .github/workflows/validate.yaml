@@ -27,7 +27,7 @@ jobs:
         # the zizmor toolchain), lint-renovate (renovate-config-validator in a
         # Node container), and lint-releaser (goreleaser check via the
         # goreleaser toolchain). Mirrors the gates developers run via
-        # `task check`.
+        # `task check:all`.
         task:
           - lint
           - test
