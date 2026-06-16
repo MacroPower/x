@@ -1310,7 +1310,7 @@ func checkTypeNames(schema *Schema, schemaPath string, visited map[*Schema]bool)
 // error (marshal to JSON or use [Validator.ValidateJSON] instead).
 //
 // Returns nil on success or an error that can be unwrapped to [*ValidationError]
-// via [errors.As].
+// via [errors.AsType].
 //
 // The context is passed to the [RefResolver] (see [WithRefResolver]) for remote
 // refs reached during this validation run, so a resolver that fetches over
@@ -1367,7 +1367,7 @@ func (c *Validator) ValidateJSON(ctx context.Context, data []byte) error {
 // [Validator.ValidateJSON] discipline (numbers as [json.Number]).
 //
 // Returns nil on success or an error that can be unwrapped to
-// [*ValidationError] via [errors.As]. A value encoding/json cannot marshal
+// [*ValidationError] via [errors.AsType]. A value encoding/json cannot marshal
 // returns the wrapped marshal error, which does not unwrap to
 // [*ValidationError]; this covers channels, cyclic values, and unsupported
 // floats.
@@ -1395,7 +1395,7 @@ func (c *Validator) ValidateValue(ctx context.Context, v any) error {
 // [Validator.ValidateJSON] instead).
 //
 // Returns nil on success or an error that can be unwrapped to
-// [*ValidationError] via [errors.As].
+// [*ValidationError] via [errors.AsType].
 //
 // The context is passed to the [RefResolver] (see [WithRefResolver]) for refs
 // resolved both while compiling schema and during the validation run.

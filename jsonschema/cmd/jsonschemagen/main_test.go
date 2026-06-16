@@ -575,9 +575,7 @@ func cmdStderr(err error) string {
 		return ""
 	}
 
-	var exitErr *exec.ExitError
-
-	if ok := errors.As(err, &exitErr); ok {
+	if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
 		return string(exitErr.Stderr)
 	}
 

@@ -90,7 +90,7 @@ var (
 // that mirrors the schema/instance structure.
 //
 // The returned error from [Validate] and the [Validator] methods
-// can be unwrapped to *ValidationError via [errors.As].
+// can be unwrapped to *ValidationError via [errors.AsType].
 type ValidationError struct {
 	// Optional wrapped error (e.g. a [RefResolver] failure wrapping
 	// [ErrRefResolve]) that [errors.Is] and [errors.As] can match.

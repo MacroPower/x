@@ -512,7 +512,7 @@
 // the package-scope use they serve.
 //
 // On success all return nil. A validation failure returns an error that
-// unwraps to [*ValidationError] via [errors.As]. Non-validation failures
+// unwraps to [*ValidationError] via [errors.AsType]. Non-validation failures
 // return ordinary wrapped errors that do not unwrap to [*ValidationError];
 // these cover JSON decoding, an unaccepted instance type, an invalid schema
 // document ([ErrInvalidSchemaDocument]), Schema.Resolve errors,

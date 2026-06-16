@@ -518,9 +518,8 @@ func runGenerate(tempDir string) ([]byte, error) {
 // status via errors.As. A non-ExitError (or one without stderr) is returned
 // unchanged.
 func cmdError(err error) error {
-	var exitErr *exec.ExitError
-
-	if ok := errors.As(err, &exitErr); ok && len(exitErr.Stderr) > 0 {
+	exitErr, ok := errors.AsType[*exec.ExitError](err)
+	if ok && len(exitErr.Stderr) > 0 {
 		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(exitErr.Stderr)))
 	}
 

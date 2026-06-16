@@ -80,8 +80,7 @@ if err := v.ValidateJSON(ctx, []byte(`{"name":"Ada","age":36}`)); err != nil {
 // Validation failures unwrap to *ValidationError and carry full paths.
 err = v.ValidateJSON(ctx, []byte(`{"name":"","age":-1}`))
 
-var ve *jsonschema.ValidationError
-if errors.As(err, &ve) {
+if ve, ok := errors.AsType[*jsonschema.ValidationError](err); ok {
 	// ve is the root of an error tree; every failure keeps its instance path.
 	for _, cause := range ve.Causes {
 		fmt.Printf("%s at %s: %s\n", cause.Keyword, cause.InstancePath, cause.Message)
@@ -683,7 +682,7 @@ the result. A `*Validator` is safe for concurrent use by multiple
 goroutines.
 
 On success all return `nil`. A validation failure returns an error that unwraps
-to `*ValidationError` via `errors.As`. Non-validation failures (JSON decoding,
+to `*ValidationError` via `errors.AsType`. Non-validation failures (JSON decoding,
 an unaccepted instance type, `Schema.Resolve` errors, `ErrInvalidType`, and
 `ErrUnknownVocabulary`) return ordinary wrapped errors that do not unwrap to
 `*ValidationError`.
