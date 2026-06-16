@@ -19,7 +19,8 @@ packages.
 | Module                                                               | Description                                                    |
 | -------------------------------------------------------------------- | -------------------------------------------------------------- |
 | [`ansivideo`](https://pkg.go.dev/go.jacobcolvin.com/x/ansivideo)     | Renders video in the terminal with ANSI half-blocks.           |
-| [`cobras`](https://pkg.go.dev/go.jacobcolvin.com/x/cobras)           | CLI app helpers: structured logging and profiling.             |
+| [`cobras`](https://pkg.go.dev/go.jacobcolvin.com/x/cobras)           | Cobra helpers: command wiring, structured logging, profiling.  |
+| [`jsonschema`](https://pkg.go.dev/go.jacobcolvin.com/x/jsonschema)   | Generates JSON Schema from Go types and validates instances.   |
 | [`magicschema`](https://pkg.go.dev/go.jacobcolvin.com/x/magicschema) | Generates JSON Schema from YAML files.                         |
 | [`stringtest`](https://pkg.go.dev/go.jacobcolvin.com/x/stringtest)   | Test helpers for multi-line strings.                           |
 | [`version`](https://pkg.go.dev/go.jacobcolvin.com/x/version)         | Exposes build version information from ldflags and build info. |
