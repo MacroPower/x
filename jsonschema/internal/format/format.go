@@ -443,7 +443,7 @@ func validateHostname(s string) error {
 // rejects an all-numeric top-level label, which the hostname format requires
 // (RFC 1123 §2.1) but the RFC 5321 email domain grammar permits.
 func validateHostnameLabels(s string, banNumericTLD bool) error {
-	if s == "" || len(s) > 253 {
+	if s == "" {
 		return errors.New("invalid hostname")
 	}
 
@@ -456,6 +456,12 @@ func validateHostnameLabels(s string, banNumericTLD bool) error {
 		}
 
 		s = trimmed
+	}
+
+	// Measure the 253-octet limit after trimming the trailing dot, which RFC
+	// 1035/1123 do not count toward it.
+	if len(s) > 253 {
+		return errors.New("invalid hostname")
 	}
 
 	labels := strings.Split(s, ".")
