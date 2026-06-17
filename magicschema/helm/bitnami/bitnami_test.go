@@ -1859,3 +1859,38 @@ func TestBitnamiAnnotatorRealWorld(t *testing.T) {
 
 	assertGolden(t, "testdata/grafana_values.schema.json", schema)
 }
+
+// TestBitnamiAnnotatorDefaultWithComma covers a default: modifier whose value
+// contains commas. Because default: takes the remainder of the bracket
+// contents, the value is preserved rather than truncated at the first comma.
+func TestBitnamiAnnotatorDefaultWithComma(t *testing.T) {
+	t.Parallel()
+
+	input := stringtest.Input(`
+		## @param greeting [string, default: hello, world] A greeting
+		greeting: hi
+	`)
+
+	gen := magicschema.NewGenerator(
+		magicschema.WithAnnotators(bitnami.New()),
+	)
+	schema, err := gen.Generate([]byte(input))
+	require.NoError(t, err)
+
+	out, err := json.Marshal(schema)
+	require.NoError(t, err)
+
+	var got map[string]any
+
+	require.NoError(t, json.Unmarshal(out, &got))
+
+	props, ok := got["properties"].(map[string]any)
+	require.True(t, ok)
+
+	g, ok := props["greeting"].(map[string]any)
+	require.True(t, ok)
+
+	assert.Equal(t, "string", g["type"])
+	assert.Equal(t, "hello, world", g["default"],
+		"default value must keep its comma, not truncate to \"hello\"")
+}

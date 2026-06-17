@@ -130,39 +130,33 @@ func normalizeKeyPath(keyPath string) string {
 }
 
 // parseModifiers parses the comma-separated modifiers within brackets.
+//
+// The default: modifier takes the remainder of the bracket contents rather than
+// a single comma-delimited token, so a default value containing commas (e.g.
+// "[array, default: a,b,c]") is preserved instead of truncated at the first
+// comma. This follows the bitnami convention of writing default: last; the
+// modifiers before it are the type and nullable flags.
 func parseModifiers(param *bitnamiParam, modifiers string) {
-	parts := strings.SplitSeq(modifiers, ",")
+	if idx := strings.Index(modifiers, "default:"); idx >= 0 {
+		val := strings.TrimSpace(modifiers[idx+len("default:"):])
 
-	for part := range parts {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
+		// An empty "[default:]" carries no value; setting it would emit a
+		// spurious "default": null.
+		if val != "" {
+			param.defaultVal = &val
 		}
 
-		switch {
-		case part == "nullable":
-			param.nullable = true
-		case part == "string":
-			param.typeName = "string"
-		case part == "array":
-			param.typeName = "array"
-		case part == "object":
-			param.typeName = "object"
-		case part == "number":
-			param.typeName = "number"
-		case part == "integer":
-			param.typeName = "integer"
-		case part == "boolean":
-			param.typeName = "boolean"
-		case strings.HasPrefix(part, "default:"):
-			val := strings.TrimPrefix(part, "default:")
-			val = strings.TrimSpace(val)
+		modifiers = modifiers[:idx]
+	}
 
-			// An empty "[default:]" carries no value; setting it would
-			// emit a spurious "default": null.
-			if val != "" {
-				param.defaultVal = &val
-			}
+	for part := range strings.SplitSeq(modifiers, ",") {
+		part = strings.TrimSpace(part)
+
+		switch part {
+		case "nullable":
+			param.nullable = true
+		case "string", "array", "object", "number", "integer", "boolean":
+			param.typeName = part
 		}
 
 		// Unknown modifiers silently ignored (best-effort).
