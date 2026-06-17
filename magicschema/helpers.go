@@ -19,10 +19,34 @@ func DefaultValue(v any) json.RawMessage {
 	return b
 }
 
-// ConstValue converts a Go value to a pointer-to-any suitable for use
-// as a JSON Schema const value.
+// ConstValue converts a Go value to a pointer-to-any suitable for use as a
+// JSON Schema const value. It returns nil when the value cannot be marshaled
+// to JSON -- a NaN or infinite float, which encoding/json rejects -- so a
+// non-finite const never reaches the schema and breaks its final marshal.
 func ConstValue(v any) *any {
+	if DefaultValue(v) == nil {
+		return nil
+	}
+
 	return new(v)
+}
+
+// FilterJSONSafe returns the values that can be marshaled to JSON, dropping any
+// that carry a NaN or infinite float anywhere in their structure -- values that
+// encoding/json rejects, so one left in an enum or examples list would break the
+// whole schema's final marshal. The result is nil when no value survives, which
+// clears the constraint (fail-open) rather than emitting an empty enum that
+// validates nothing.
+func FilterJSONSafe(vals []any) []any {
+	var out []any
+
+	for _, v := range vals {
+		if DefaultValue(v) != nil {
+			out = append(out, v)
+		}
+	}
+
+	return out
 }
 
 // TrueSchema returns a schema that validates everything (marshals to JSON true).

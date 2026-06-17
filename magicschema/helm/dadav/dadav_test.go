@@ -3506,6 +3506,47 @@ func TestHelmSchemaAnnotatorNumericCoercion(t *testing.T) {
 				}
 			},
 		},
+		"non-finite enum value is dropped, schema still marshals": {
+			input: stringtest.Input(`
+				# @schema
+				# enum: [.nan, 1]
+				# @schema
+				count: 5
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				count, ok := props["count"].(map[string]any)
+				require.True(t, ok)
+
+				// The NaN cannot marshal to JSON; dropping it leaves the
+				// finite member rather than poisoning the whole schema.
+				assert.Equal(t, []any{float64(1)}, count["enum"])
+			},
+		},
+		"non-finite const is dropped": {
+			input: stringtest.Input(`
+				# @schema
+				# const: .inf
+				# @schema
+				count: 5
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				count, ok := props["count"].(map[string]any)
+				require.True(t, ok)
+
+				_, has := count["const"]
+				assert.False(t, has, "a non-finite const must be dropped, not break marshal")
+			},
+		},
 	}
 
 	for name, tc := range tcs {

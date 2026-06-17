@@ -157,7 +157,7 @@ func (a *Annotator) applyPair(
 		}
 
 	case "enum":
-		schema.Enum = parseAnyList(val)
+		schema.Enum = magicschema.FilterJSONSafe(parseAnyList(val))
 	case "const":
 		// An empty value carries no const (explicit null is "const:null");
 		// emitting const:null would reject the real value (fail-closed),
@@ -198,7 +198,7 @@ func (a *Annotator) applyPair(
 	case "readOnly":
 		schema.ReadOnly = parseBoolDefault(val)
 	case "examples":
-		schema.Examples = parseAnyList(val)
+		schema.Examples = magicschema.FilterJSONSafe(parseAnyList(val))
 	case "additionalProperties":
 		switch {
 		case !hasVal || val == "":

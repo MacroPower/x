@@ -139,7 +139,7 @@ func (a *Annotator) parseRootBlock(content string) {
 			schema.Ref = toString(val)
 		case "examples":
 			if arr, ok := val.([]any); ok {
-				schema.Examples = arr
+				schema.Examples = magicschema.FilterJSONSafe(arr)
 			}
 
 		case "deprecated":
@@ -179,7 +179,7 @@ func (a *Annotator) applyField(schema *jsonschema.Schema, result *magicschema.An
 		schema.Default = magicschema.DefaultValue(val)
 	case "enum":
 		if arr, ok := val.([]any); ok {
-			schema.Enum = arr
+			schema.Enum = magicschema.FilterJSONSafe(arr)
 		}
 
 	case "const":
@@ -222,7 +222,7 @@ func (a *Annotator) applyField(schema *jsonschema.Schema, result *magicschema.An
 		schema.WriteOnly = toBool(val)
 	case "examples":
 		if arr, ok := val.([]any); ok {
-			schema.Examples = arr
+			schema.Examples = magicschema.FilterJSONSafe(arr)
 		}
 
 	case "items":

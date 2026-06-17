@@ -226,7 +226,9 @@
 //   - [DefaultValue] converts a Go value to a [json.RawMessage] for use as
 //     a JSON Schema default.
 //   - [ConstValue] converts a Go value to a *any for use as a JSON Schema
-//     const.
+//     const, returning nil for values JSON cannot represent (NaN, infinities).
+//   - [FilterJSONSafe] drops values JSON cannot represent (NaN, infinities)
+//     from an enum or examples list, so one cannot break the final marshal.
 //   - [TrueSchema] returns a schema that validates everything (the JSON
 //     Schema "true" value, represented as &jsonschema.Schema{}).
 //   - [FalseSchema] returns a schema that validates nothing (the JSON
