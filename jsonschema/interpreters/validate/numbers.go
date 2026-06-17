@@ -18,6 +18,13 @@ import (
 // no rational form, so a non-finite Minimum/Maximum is a silent no-op. Such a
 // bound is rejected at generation time so it never reaches the schema.
 func parseBoundFloat(value string) (float64, error) {
+	// Reject the non-decimal float forms Go's strconv accepts (underscore digit
+	// separators and hexadecimal floats such as 0x1p4) so the validate tag
+	// parses decimal numbers only, matching the jsonschema-tag path.
+	if strings.ContainsAny(value, "_xX") {
+		return 0, fmt.Errorf("%q is not a decimal number", value)
+	}
+
 	n, err := strconv.ParseFloat(value, 64)
 	if err != nil {
 		return 0, fmt.Errorf("invalid number %q: %w", value, err)
