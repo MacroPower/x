@@ -189,7 +189,10 @@ func WithTypeSchemaFor[T any](s *Schema) GenerateOption {
 // can rename the types it recognizes and pass the rest through (unnamed
 // types produce an empty name from the built-in namer too, which leaves a
 // [WithRootTitle] title unset). Name collisions between types are still
-// disambiguated automatically. [NamerFunc] adapts a bare function.
+// disambiguated automatically. [NamerFunc] adapts a bare function. The
+// returned name is sanitized for $defs-key and $ref-token safety: characters
+// invalid in a JSON Pointer token, such as '/' and '~' (and the generic-type
+// brackets and commas the default namer replaces), become underscores.
 //
 // SchemaName receives the same [TypeContext] as the package's other
 // type-level hooks ([TypeSchemaProvider], [TypeSchemaExtender],

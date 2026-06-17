@@ -40,10 +40,14 @@ func defaultNamerFunc() Namer {
 // default namer when the namer answers "". The deferral lets a [Namer]
 // rename some types and pass the rest through, and keeps a partial namer
 // from producing an empty definitions key and the broken "#/$defs/" ref
-// that would follow.
+// that would follow. A non-empty answer is run through the same replacer
+// the default namer uses, so characters invalid in a definitions key or its
+// JSON Pointer $ref token (such as '/' and '~') cannot produce a dangling or
+// misresolving reference. The replacer never empties a non-empty name, so the
+// deferral semantics are preserved.
 func (g *generator) schemaName(t reflect.Type) string {
 	if name := g.namer.SchemaName(TypeContext{Type: t, Draft: g.draft}); name != "" {
-		return name
+		return defNameReplacer.Replace(name)
 	}
 
 	return defaultNamer(t)
