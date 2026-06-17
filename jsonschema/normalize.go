@@ -3,6 +3,7 @@ package jsonschema
 import (
 	"encoding/json"
 	"maps"
+	"reflect"
 	"strconv"
 )
 
@@ -27,8 +28,14 @@ import (
 // mutated. [Validator.Validate] and [Validate] normalize their instance
 // automatically; Normalize is exported so a caller can pre-normalize a value
 // once and reuse it across many validations.
+//
+// A self-referential instance (a map or slice that contains itself) is not
+// descended past the cycle, so Normalize terminates instead of overflowing the
+// stack. Validating such an instance against a recursive schema may still
+// recurse without bound, so callers building cyclic instances by hand should
+// avoid recursive schemas.
 func Normalize(instance any) any {
-	normalized, _ := normalizeInstance(instance)
+	normalized, _ := normalizeInstance(instance, map[uintptr]bool{})
 
 	return normalized
 }
@@ -37,7 +44,7 @@ func Normalize(instance any) any {
 // the input. The changed flag lets container normalization share unchanged
 // children with the input instead of comparing interface values (which would
 // panic on uncomparable types like maps and slices).
-func normalizeInstance(instance any) (any, bool) {
+func normalizeInstance(instance any, onPath map[uintptr]bool) (any, bool) {
 	switch v := instance.(type) {
 	case int:
 		return json.Number(strconv.FormatInt(int64(v), 10)), true
@@ -65,9 +72,9 @@ func normalizeInstance(instance any) (any, bool) {
 		return float64(v), true
 
 	case map[string]any:
-		return normalizeMap(v)
+		return normalizeMap(v, onPath)
 	case []any:
-		return normalizeSlice(v)
+		return normalizeSlice(v, onPath)
 
 	default:
 		return instance, false
@@ -76,11 +83,24 @@ func normalizeInstance(instance any) (any, bool) {
 
 // normalizeMap normalizes a map's values, returning the input map untouched
 // when no value changes.
-func normalizeMap(m map[string]any) (any, bool) {
+func normalizeMap(m map[string]any, onPath map[uintptr]bool) (any, bool) {
+	// Cycle guard: a self-referential instance (a map that contains itself,
+	// directly or transitively) would otherwise recurse without bound and abort
+	// the process with a stack overflow that recover cannot catch. Track the
+	// containers on the current path and stop at a back-edge, leaving the value
+	// unchanged.
+	ptr := reflect.ValueOf(m).Pointer()
+	if onPath[ptr] {
+		return m, false
+	}
+
+	onPath[ptr] = true
+	defer delete(onPath, ptr)
+
 	var out map[string]any
 
 	for k, val := range m {
-		nv, changed := normalizeInstance(val)
+		nv, changed := normalizeInstance(val, onPath)
 		if !changed {
 			if out != nil {
 				out[k] = val
@@ -107,11 +127,21 @@ func normalizeMap(m map[string]any) (any, bool) {
 
 // normalizeSlice normalizes a slice's elements, returning the input slice
 // untouched when no element changes.
-func normalizeSlice(s []any) (any, bool) {
+func normalizeSlice(s []any, onPath map[uintptr]bool) (any, bool) {
+	// Cycle guard: see normalizeMap. A slice that contains itself would
+	// otherwise recurse without bound and crash the process.
+	ptr := reflect.ValueOf(s).Pointer()
+	if onPath[ptr] {
+		return s, false
+	}
+
+	onPath[ptr] = true
+	defer delete(onPath, ptr)
+
 	var out []any
 
 	for i, val := range s {
-		nv, changed := normalizeInstance(val)
+		nv, changed := normalizeInstance(val, onPath)
 		if !changed {
 			if out != nil {
 				out[i] = val
