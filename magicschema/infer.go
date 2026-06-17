@@ -514,12 +514,12 @@ func widenTypeList(a, b []string) []string {
 	return core
 }
 
-// appendNull returns the type list with "null" appended. An already-nullable
-// list is returned as-is, and appending clones first so the input's backing
-// array is never mutated.
+// appendNull returns the type list with "null" appended. Both branches clone,
+// so the result never aliases the input's backing array -- widenTypeList must
+// not hand back a slice still owned by an input schema's Types.
 func appendNull(types []string) []string {
 	if slices.Contains(types, typeNull) {
-		return types
+		return slices.Clone(types)
 	}
 
 	return append(slices.Clone(types), typeNull)

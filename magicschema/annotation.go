@@ -2,6 +2,7 @@ package magicschema
 
 import (
 	"maps"
+	"slices"
 
 	"github.com/goccy/go-yaml/ast"
 	"github.com/google/jsonschema-go/jsonschema"
@@ -111,11 +112,12 @@ func mergeAnnotations(results []*AnnotationResult) *AnnotationResult {
 	return merged
 }
 
-// copySchema returns a shallow copy of s with its own Extra map. The copy
-// supports the two mutations merging performs -- field reassignment and
-// writes into Extra -- without reaching the original. All other map, slice,
-// and sub-schema fields still alias the original, so downstream code must
-// only reassign those fields on the copy, never write into their contents.
+// copySchema returns a shallow copy of s with its own Extra map and Required
+// slice. The copy supports the mutations the build pipeline performs -- field
+// reassignment, writes into Extra, and appends to Required (via addRequired in
+// fillObjectFromStructure) -- without reaching the original. All other map,
+// slice, and sub-schema fields still alias the original, so downstream code
+// must only reassign those fields on the copy, never write into their contents.
 func copySchema(s *jsonschema.Schema) *jsonschema.Schema {
 	if s == nil {
 		return nil
@@ -124,6 +126,12 @@ func copySchema(s *jsonschema.Schema) *jsonschema.Schema {
 	c := *s
 	if s.Extra != nil {
 		c.Extra = maps.Clone(s.Extra)
+	}
+
+	// Required is the one slice the pipeline appends to; clone it so an append
+	// with spare capacity never writes into the annotator's backing array.
+	if s.Required != nil {
+		c.Required = slices.Clone(s.Required)
 	}
 
 	return &c
