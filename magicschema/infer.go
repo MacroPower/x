@@ -573,12 +573,8 @@ func allNumeric(types []string) bool {
 	return true
 }
 
-// isObjectType checks if a schema represents an object type via Types array.
-func isObjectType(s *jsonschema.Schema) bool {
-	return slices.Contains(s.Types, typeObject)
-}
-
-// isArrayType checks if a schema represents an array type via Types array.
-func isArrayType(s *jsonschema.Schema) bool {
-	return slices.Contains(s.Types, typeArray)
+// hasType reports whether a schema constrains its instance to type t, via
+// either the scalar Type field or the Types union.
+func hasType(s *jsonschema.Schema, t string) bool {
+	return s.Type == t || slices.Contains(s.Types, t)
 }

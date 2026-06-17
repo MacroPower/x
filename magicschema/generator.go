@@ -523,10 +523,10 @@ func (g *Generator) handleProperty(
 
 	childSchema := g.buildChildSchema(mvn, childPath, anchors, valueNode, annotation)
 
-	// If annotation provided a description, prefer it.
-	if annotation != nil && annotation.Schema != nil && annotation.Schema.Description != "" {
-		childSchema.Description = annotation.Schema.Description
-	}
+	// Description precedence lives entirely in buildChildSchema: in the
+	// annotated path childSchema is annotation.Schema itself, so its
+	// description is already the annotator's, with the comment fallback
+	// filling only an empty one.
 
 	schema.Properties[keyName] = childSchema
 	addToOrder(keyName)
@@ -587,12 +587,12 @@ func (g *Generator) buildChildSchema(
 	structuralNode := unwrapNode(valueNode)
 
 	// For object types, recurse into children.
-	if (childSchema.Type == typeObject || isObjectType(childSchema)) && childSchema.Properties == nil {
+	if hasType(childSchema, typeObject) && childSchema.Properties == nil {
 		g.fillObjectFromStructure(childSchema, structuralNode, childPath, anchors, annotation)
 	}
 
 	// For array types, recurse into items.
-	if (childSchema.Type == typeArray || isArrayType(childSchema)) && childSchema.Items == nil {
+	if hasType(childSchema, typeArray) && childSchema.Items == nil {
 		if seqNode, ok := structuralNode.(*ast.SequenceNode); ok {
 			childSchema.Items = g.inferItemsFromSequence(seqNode, childPath, anchors)
 		}
@@ -959,23 +959,12 @@ func applyRootAnnotations(schema *jsonschema.Schema, roots []RootAnnotator, stri
 }
 
 // isNullOnlyType reports whether a schema's type constraint permits only
-// null values.
+// null values, normalizing the scalar Type and the Types union through the
+// same splitter the merge logic uses.
 func isNullOnlyType(s *jsonschema.Schema) bool {
-	if s.Type == typeNull && len(s.Types) == 0 {
-		return true
-	}
+	core, nullable := splitNullType(typeList(s))
 
-	if s.Type != "" || len(s.Types) == 0 {
-		return false
-	}
-
-	for _, t := range s.Types {
-		if t != typeNull {
-			return false
-		}
-	}
-
-	return true
+	return nullable && len(core) == 0
 }
 
 // mergePropertySchemas combines a schema's property schemas into a single
@@ -1052,6 +1041,12 @@ func resolveAliases(node ast.Node, anchors map[string]ast.Node) ast.Node {
 // the union (a nil document body is skipped), so removing them up front
 // preserves semantics while keeping later documents in the stream.
 func dropEmptyDocuments(input []byte) []byte {
+	// A bare separator line requires the "---" substring, so its absence means
+	// there are no documents to collapse and the split/join would be a no-op.
+	if !bytes.Contains(input, []byte("---")) {
+		return input
+	}
+
 	lines := bytes.Split(input, []byte("\n"))
 
 	out := make([][]byte, 0, len(lines))
