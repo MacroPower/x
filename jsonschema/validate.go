@@ -3603,8 +3603,13 @@ func (v *validator) validateObject(
 
 	var errs []*ValidationError
 
-	// Track locally evaluated properties for additionalProperties.
-	localEvaluated := map[string]bool{}
+	// Track locally evaluated properties for additionalProperties. Only that
+	// keyword reads the map, so allocate it lazily and leave it nil otherwise.
+	var localEvaluated map[string]bool
+
+	if schema.AdditionalProperties != nil {
+		localEvaluated = map[string]bool{}
+	}
 
 	// Applicator vocab: properties, patternProperties, additionalProperties,
 	// propertyNames, dependentSchemas.
@@ -3619,7 +3624,10 @@ func (v *validator) validateObject(
 				continue
 			}
 
-			localEvaluated[propName] = true
+			if localEvaluated != nil {
+				localEvaluated[propName] = true
+			}
+
 			if ann != nil {
 				ann.properties[propName] = true
 			}
@@ -3660,7 +3668,10 @@ func (v *validator) validateObject(
 					continue
 				}
 
-				localEvaluated[propName] = true
+				if localEvaluated != nil {
+					localEvaluated[propName] = true
+				}
+
 				if ann != nil {
 					ann.properties[propName] = true
 				}
