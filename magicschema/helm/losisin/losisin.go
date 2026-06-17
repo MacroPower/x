@@ -461,13 +461,6 @@ func parseAnyList(val string) []any {
 	return list
 }
 
-// parseYAMLAny parses a YAML string into any Go value.
-func parseYAMLAny(val string) any {
-	v, _ := parseYAMLValue(val)
-
-	return v
-}
-
 // parseYAMLValue parses a YAML string into any Go value, distinguishing
 // between parse errors and explicit null values.
 func parseYAMLValue(val string) (any, bool) {
@@ -481,32 +474,24 @@ func parseYAMLValue(val string) (any, bool) {
 	return v, true
 }
 
-// parseYAMLSchema parses a YAML object string into *jsonschema.Schema.
+// parseYAMLSchema parses a YAML object string into *jsonschema.Schema. A parse
+// failure or explicit null yields a nil value, which ToSubSchema maps to nil.
 func parseYAMLSchema(val string) *jsonschema.Schema {
-	v := parseYAMLAny(val)
-	if v == nil {
-		return nil
-	}
+	v, _ := parseYAMLValue(val)
 
 	return magicschema.ToSubSchema(v)
 }
 
 // parseYAMLSchemaArray parses a YAML array string into []*jsonschema.Schema.
 func parseYAMLSchemaArray(val string) []*jsonschema.Schema {
-	v := parseYAMLAny(val)
-	if v == nil {
-		return nil
-	}
+	v, _ := parseYAMLValue(val)
 
 	return magicschema.ToSubSchemaArray(v)
 }
 
 // parseYAMLSchemaMap parses a YAML object string into map[string]*jsonschema.Schema.
 func parseYAMLSchemaMap(val string) map[string]*jsonschema.Schema {
-	v := parseYAMLAny(val)
-	if v == nil {
-		return nil
-	}
+	v, _ := parseYAMLValue(val)
 
 	return magicschema.ToSubSchemaMap(v)
 }
