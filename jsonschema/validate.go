@@ -11,6 +11,7 @@ import (
 	"maps"
 	"math"
 	"math/big"
+	"mime"
 	"net/url"
 	"reflect"
 	"regexp"
@@ -4185,7 +4186,7 @@ func (v *validator) assertContent(
 		decodedKnown = false
 	}
 
-	if decodedKnown && schema.ContentMediaType == "application/json" && !json.Valid(decoded) {
+	if decodedKnown && mediaTypeIsJSON(schema.ContentMediaType) && !json.Valid(decoded) {
 		kwPath := schemaPath.kw("contentMediaType")
 
 		return []*ValidationError{{
@@ -4199,6 +4200,26 @@ func (v *validator) assertContent(
 	}
 
 	return nil
+}
+
+// mediaTypeIsJSON reports whether a contentMediaType denotes application/json.
+// Per RFC 2045 the type/subtype is case-insensitive and any parameters (for
+// example "; charset=utf-8") are not part of it, so "Application/JSON" and
+// "application/json; charset=utf-8" both match.
+func mediaTypeIsJSON(mediaType string) bool {
+	parsed, _, err := mime.ParseMediaType(mediaType)
+	if err == nil {
+		// ParseMediaType lowercases the type/subtype and strips parameters.
+		return parsed == "application/json"
+	}
+
+	// ParseMediaType rejects some malformed-but-recognizable values, so fall
+	// back to stripping parameters and folding case by hand.
+	if i := strings.IndexByte(mediaType, ';'); i >= 0 {
+		mediaType = mediaType[:i]
+	}
+
+	return strings.EqualFold(strings.TrimSpace(mediaType), "application/json")
 }
 
 // validateRef resolves and validates a $ref.
