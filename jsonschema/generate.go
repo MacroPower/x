@@ -318,10 +318,15 @@ func (g *generator) applyInstanceDefaults(instance any, rootType reflect.Type, s
 	var values map[string]json.RawMessage
 
 	err = json.Unmarshal(data, &values)
+	if err != nil {
+		return fmt.Errorf("%w: instance of type %s does not marshal to a JSON object: %w",
+			ErrInvalidDefaultsInstance, instType, err)
+	}
+
 	// Unmarshaling JSON null into a map leaves it nil without an error, so a
 	// nil map means the instance marshaled to null rather than to an object.
-	if err != nil || values == nil {
-		return fmt.Errorf("%w: instance of type %s does not marshal to a JSON object",
+	if values == nil {
+		return fmt.Errorf("%w: instance of type %s marshals to JSON null, not an object",
 			ErrInvalidDefaultsInstance, instType)
 	}
 
