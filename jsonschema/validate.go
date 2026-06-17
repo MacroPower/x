@@ -628,9 +628,10 @@ type compiledPattern struct {
 // precompute populates the read-only per-schema caches (numeric bounds and
 // compiled patterns) by traversing every schema reachable from the root once.
 // It runs single-threaded during Compile, before the [Validator] is shared, so
-// the caches it builds are never written concurrently. The traversal mirrors
-// [walkSchema]'s sub-schema recursion but consults only schema fields and its
-// own visited set; it does not touch the URI, anchor, or base-URI registries,
+// the caches it builds are never written concurrently. The traversal delegates
+// to [SubschemaEntries] for the sub-schema field list and consults only schema
+// fields and its own visited set; it does not touch the URI, anchor, or
+// base-URI registries,
 // which keeps the validation-time fallback walk ([registerFallbackSchema]) from
 // populating these caches.
 func (v *validator) precompute() {
@@ -682,51 +683,8 @@ func (v *validator) precomputeSchema(schema *Schema, visited map[*Schema]bool) {
 		v.enumRats[schema] = rats
 	}
 
-	v.precomputeSchemaMap(schema.Properties, visited)
-	v.precomputeSchemaMap(schema.PatternProperties, visited)
-	v.precomputeSchemaMap(schema.Defs, visited)
-	v.precomputeSchemaMap(schema.Definitions, visited)
-	v.precomputeSchemaMap(schema.DependentSchemas, visited)
-	v.precomputeSchemaMap(schema.DependencySchemas, visited)
-
-	for _, s := range schema.AllOf {
-		v.precomputeSchema(s, visited)
-	}
-
-	for _, s := range schema.AnyOf {
-		v.precomputeSchema(s, visited)
-	}
-
-	for _, s := range schema.OneOf {
-		v.precomputeSchema(s, visited)
-	}
-
-	for _, s := range schema.PrefixItems {
-		v.precomputeSchema(s, visited)
-	}
-
-	for _, s := range schema.ItemsArray {
-		v.precomputeSchema(s, visited)
-	}
-
-	v.precomputeSchema(schema.Items, visited)
-	v.precomputeSchema(schema.AdditionalProperties, visited)
-	v.precomputeSchema(schema.AdditionalItems, visited)
-	v.precomputeSchema(schema.Not, visited)
-	v.precomputeSchema(schema.If, visited)
-	v.precomputeSchema(schema.Then, visited)
-	v.precomputeSchema(schema.Else, visited)
-	v.precomputeSchema(schema.Contains, visited)
-	v.precomputeSchema(schema.PropertyNames, visited)
-	v.precomputeSchema(schema.UnevaluatedProperties, visited)
-	v.precomputeSchema(schema.UnevaluatedItems, visited)
-	v.precomputeSchema(schema.ContentSchema, visited)
-}
-
-// precomputeSchemaMap precomputes a map of named sub-schemas.
-func (v *validator) precomputeSchemaMap(m map[string]*Schema, visited map[*Schema]bool) {
-	for _, s := range m {
-		v.precomputeSchema(s, visited)
+	for _, e := range SubschemaEntries(schema) {
+		v.precomputeSchema(e.Schema, visited)
 	}
 }
 
