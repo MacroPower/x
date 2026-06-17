@@ -1525,8 +1525,12 @@ func (g *generator) extractToDefs(t reflect.Type, s *Schema, nullable bool) (*Sc
 
 	// Check if already defined (e.g., from a cycle placeholder).
 	if existingName, exists := g.typeToDefName[t]; exists {
-		// Already in defs; update if it was a placeholder.
-		if g.defs[existingName] == nil {
+		// Fill this type's placeholder if it has no schema yet. Key on the
+		// per-type schema, not g.defs[name]: under a name collision g.defs[name]
+		// holds another colliding type's schema, so testing it would wrongly
+		// leave this type's placeholder unfilled (and later assign it the wrong
+		// schema during disambiguation).
+		if g.typeToDefSchema[t] == nil {
 			g.defs[existingName] = s
 			g.typeToDefSchema[t] = s
 		}
