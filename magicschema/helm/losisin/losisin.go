@@ -3,6 +3,7 @@ package losisin
 import (
 	"fmt"
 	"log/slog"
+	"math"
 	"strconv"
 	"strings"
 
@@ -504,18 +505,25 @@ func parseYAMLSchemaMap(val string) map[string]*jsonschema.Schema {
 	return magicschema.ToSubSchemaMap(v)
 }
 
-// parseFloat64Ptr parses a string into *float64. Returns nil for "null"
-// (matching upstream behavior where null clears the constraint) and for
-// unparseable values.
+// parseFloat64Ptr parses a string into *float64. Returns nil for an empty or
+// "null" value (both clear the constraint, matching upstream and keeping the
+// bare-keyword form fail-open), for unparseable values, and for non-finite
+// results (.inf/.nan), which YAML accepts but JSON cannot marshal -- letting
+// one through would fail the whole schema's final marshal.
 func parseFloat64Ptr(val string) *float64 {
-	if strings.TrimSpace(val) == yamlNull {
+	s := strings.TrimSpace(val)
+	if s == "" || s == yamlNull {
 		return nil
 	}
 
 	var v float64
 
-	err := yaml.Unmarshal([]byte(val), &v)
+	err := yaml.Unmarshal([]byte(s), &v)
 	if err != nil {
+		return nil
+	}
+
+	if math.IsInf(v, 0) || math.IsNaN(v) {
 		return nil
 	}
 
@@ -534,17 +542,21 @@ func parsePositiveFloat64Ptr(val string) *float64 {
 	return v
 }
 
-// parseIntPtr parses a string into *int, returning nil for negative values
-// and "null". Upstream uses uint64 for length/count constraints, rejecting
-// negatives and accepting "null" to clear the constraint.
+// parseIntPtr parses a string into *int, returning nil for an empty or "null"
+// value and for negative values. An empty value clears the constraint (a bare
+// "maxItems:" must not become the fail-closed maxItems:0). Floats are truncated
+// rather than rejected, an intentional divergence from upstream's ParseUint
+// (see the upstream-alignment tests): the generator accepts more input rather
+// than dropping a usable-but-imprecise constraint.
 func parseIntPtr(val string) *int {
-	if strings.TrimSpace(val) == yamlNull {
+	s := strings.TrimSpace(val)
+	if s == "" || s == yamlNull {
 		return nil
 	}
 
 	var v int
 
-	err := yaml.Unmarshal([]byte(val), &v)
+	err := yaml.Unmarshal([]byte(s), &v)
 	if err != nil {
 		return nil
 	}

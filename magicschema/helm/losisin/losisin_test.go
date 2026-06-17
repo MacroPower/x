@@ -3279,3 +3279,99 @@ func TestHelmValuesSchemaAnnotatorUpstreamAlignment(t *testing.T) {
 		})
 	}
 }
+
+// TestHelmValuesSchemaAnnotatorNumericConstraints covers the value parsers for
+// numeric keywords. A blank value must clear the constraint (fail-open) rather
+// than emit a zero-valued, fail-closed constraint, non-finite floats must be
+// dropped (they break the final JSON marshal), and non-integer numerics must be
+// rejected rather than silently truncated.
+func TestHelmValuesSchemaAnnotatorNumericConstraints(t *testing.T) {
+	t.Parallel()
+
+	prop := func(t *testing.T, got map[string]any, key string) map[string]any {
+		t.Helper()
+
+		props, ok := got["properties"].(map[string]any)
+		require.True(t, ok)
+
+		p, ok := props[key].(map[string]any)
+		require.True(t, ok)
+
+		return p
+	}
+
+	tcs := map[string]struct {
+		input string
+		want  func(*testing.T, map[string]any)
+	}{
+		"blank maxItems clears constraint": {
+			input: stringtest.Input(`
+				# @schema type:array;maxItems:
+				tags:
+				  - a
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				_, has := prop(t, got, "tags")["maxItems"]
+				assert.False(t, has, "blank maxItems must not emit a fail-closed maxItems:0")
+			},
+		},
+		"blank maximum clears constraint": {
+			input: stringtest.Input(`
+				# @schema maximum:
+				count: 5
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				_, has := prop(t, got, "count")["maximum"]
+				assert.False(t, has, "blank maximum must not emit a fail-closed maximum:0")
+			},
+		},
+		"infinite minimum is dropped and schema still marshals": {
+			input: stringtest.Input(`
+				# @schema minimum:.inf
+				count: 5
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				_, has := prop(t, got, "count")["minimum"]
+				assert.False(t, has, "non-finite minimum must be dropped")
+			},
+		},
+		"blank maxLength clears constraint": {
+			input: stringtest.Input(`
+				# @schema type:string;maxLength:
+				name: test
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				_, has := prop(t, got, "name")["maxLength"]
+				assert.False(t, has, "blank maxLength must not emit a fail-closed maxLength:0")
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			gen := magicschema.NewGenerator(
+				magicschema.WithAnnotators(losisin.New()),
+			)
+			schema, err := gen.Generate([]byte(tc.input))
+			require.NoError(t, err)
+
+			out, err := json.Marshal(schema)
+			require.NoError(t, err)
+
+			var got map[string]any
+
+			require.NoError(t, json.Unmarshal(out, &got))
+			tc.want(t, got)
+		})
+	}
+}
