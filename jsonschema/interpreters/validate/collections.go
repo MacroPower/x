@@ -3,7 +3,6 @@ package validate
 import (
 	"fmt"
 	"reflect"
-	"strconv"
 
 	"go.jacobcolvin.com/x/jsonschema"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemashape"
@@ -49,9 +48,9 @@ func applyCollectionLenConstraint(s *jsonschema.Schema, value string, baseType r
 // N. The exclusion is expressed as a not subschema pinning the length so a
 // collection of exactly N elements (or entries, for a map) is rejected.
 func applyCollectionNe(s *jsonschema.Schema, value string, baseType reflect.Type) error {
-	n, err := strconv.Atoi(value)
+	n, err := parseBoundValue(value)
 	if err != nil {
-		return fmt.Errorf("validate tag: invalid number %q: %w", value, err)
+		return err
 	}
 
 	// A negative length can never occur, so ne=<negative> excludes nothing.
