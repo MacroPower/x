@@ -98,6 +98,15 @@ func validateTime(s string) error {
 		return errors.New("invalid time")
 	}
 
+	// RFC 3339 time-secfrac permits only a period as the fractional-second
+	// separator, but Go's time.Parse also accepts a comma. After the
+	// fixed-width "hh:mm:ss" prefix, byte 8 is the only position a fractional
+	// separator can occupy, so reject a comma there explicitly (before leap-
+	// second normalization, so "23:59:60,5Z" is caught too).
+	if len(upper) > 8 && upper[8] == ',' {
+		return errors.New("invalid time")
+	}
+
 	// Handle leap second: temporarily replace :60 with :59 for parsing.
 	isLeap := false
 	normalized := upper
