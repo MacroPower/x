@@ -438,8 +438,16 @@ func ChainResolvers(resolvers ...RefResolver) RefResolver {
 //	jsonschema.StripPrefix("https://example.com/schemas/",
 //		jsonschema.NewFileResolver(os.DirFS("schemas")))
 //
-// A URI that does not carry the prefix is delegated unchanged.
+// A URI that does not carry the prefix is delegated unchanged. A nil r answers
+// [ErrNotResolved] for every URI, so an optional resolver can be passed
+// unconditionally, matching [ChainResolvers].
 func StripPrefix(prefix string, r RefResolver) RefResolver {
+	if r == nil {
+		return RefResolverFunc(func(_ context.Context, uri string) (*Schema, error) {
+			return nil, fmt.Errorf("%w: %q", ErrNotResolved, uri)
+		})
+	}
+
 	return RefResolverFunc(func(ctx context.Context, uri string) (*Schema, error) {
 		return r.ResolveRef(ctx, strings.TrimPrefix(uri, prefix))
 	})
