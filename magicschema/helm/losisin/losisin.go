@@ -1,7 +1,6 @@
 package losisin
 
 import (
-	"fmt"
 	"log/slog"
 	"math"
 	"strconv"
@@ -160,9 +159,14 @@ func (a *Annotator) applyPair(
 	case "enum":
 		schema.Enum = parseAnyList(val)
 	case "const":
-		v, ok := parseYAMLValue(val)
-		if ok {
-			schema.Const = magicschema.ConstValue(v)
+		// An empty value carries no const (explicit null is "const:null");
+		// emitting const:null would reject the real value (fail-closed),
+		// mirroring the default: guard above.
+		if val != "" {
+			v, ok := parseYAMLValue(val)
+			if ok {
+				schema.Const = magicschema.ConstValue(v)
+			}
 		}
 
 	case "pattern":
@@ -406,14 +410,16 @@ func parseStringList(val string) []string {
 
 	result := make([]string, 0, len(parsed))
 
+	// Non-string, non-null elements are dropped rather than stringified:
+	// parseStringList feeds type and item lists, where a coerced "1" or
+	// "true" would be an invalid JSON Schema type token. Dropping it fails
+	// open, matching dadav's applyType.
 	for _, v := range parsed {
 		switch v := v.(type) {
 		case string:
 			result = append(result, v)
 		case nil:
 			result = append(result, yamlNull)
-		default:
-			result = append(result, fmt.Sprint(v))
 		}
 	}
 

@@ -3375,3 +3375,74 @@ func TestHelmValuesSchemaAnnotatorNumericConstraints(t *testing.T) {
 		})
 	}
 }
+
+// TestHelmValuesSchemaAnnotatorFailOpenParsing covers value parsing that must
+// fail open: a blank const carries no constraint, and a non-string element in
+// a type list is dropped rather than coerced into an invalid type token.
+func TestHelmValuesSchemaAnnotatorFailOpenParsing(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		want  func(*testing.T, map[string]any)
+	}{
+		"blank const carries no constraint": {
+			input: stringtest.Input(`
+				# @schema const:
+				name: real
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				name, ok := props["name"].(map[string]any)
+				require.True(t, ok)
+
+				_, has := name["const"]
+				assert.False(t, has, "blank const must not emit const:null")
+			},
+		},
+		"non-string type element is dropped": {
+			input: stringtest.Input(`
+				# @schema type:[string, 1]
+				name: test
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				name, ok := props["name"].(map[string]any)
+				require.True(t, ok)
+
+				// Only "string" survives; the numeric 1 is not a valid JSON
+				// Schema type token, so it is dropped, collapsing the list to
+				// a single scalar type.
+				assert.Equal(t, "string", name["type"])
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			gen := magicschema.NewGenerator(
+				magicschema.WithAnnotators(losisin.New()),
+			)
+			schema, err := gen.Generate([]byte(tc.input))
+			require.NoError(t, err)
+
+			out, err := json.Marshal(schema)
+			require.NoError(t, err)
+
+			var got map[string]any
+
+			require.NoError(t, json.Unmarshal(out, &got))
+			tc.want(t, got)
+		})
+	}
+}
