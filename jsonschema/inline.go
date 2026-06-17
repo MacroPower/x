@@ -591,7 +591,7 @@ func (in *inliner) expandTarget(pristine *Schema, path string) (*Schema, error) 
 		in.recordPaths(target, path, in.docs[pristine])
 	}
 
-	return in.inlineCopy(target, in.paths[target])
+	return in.inlineCopy(target, in.paths[target], true)
 }
 
 // maxSubstituteDepth bounds nested [SubstituteRef] expansions so a fallback
@@ -650,19 +650,22 @@ func (in *inliner) substitute(pristine *Schema, path, ref string, inlineErr erro
 	in.v.registerFallbackSchema(cp, in.v.schemaBase(pristine))
 	in.recordPaths(cp, path, in.docs[pristine])
 
-	return in.inlineCopy(cp, path)
+	return in.inlineCopy(cp, path, false)
 }
 
 // inlineCopy returns a self-contained copy of the pristine target: a fresh
 // clone whose refs are expanded by the same pristine-space resolution as the
 // rest of the run, leaving the target itself untouched; path is the target's
 // JSON Pointer location within its containing document, seeding the walk's
-// path tracking. Completed targets are memoized so one referenced from
-// several places is expanded once; every additional use clones the memoized
-// copy so no two positions in the output share nodes. The inflight set marks
-// targets whose copy is still being built: a ref resolving to one means the
-// expansion reached its own target, which only a reference cycle can cause.
-func (in *inliner) inlineCopy(target *Schema, path string) (*Schema, error) {
+// path tracking. When memoize is set, the completed target is recorded so one
+// referenced from several places is expanded once; every additional use clones
+// the memoized copy so no two positions in the output share nodes. A
+// substitute-originated copy passes memoize false: its pointer is fresh and
+// never resolved again, so memoizing it would only accumulate dead entries. The
+// inflight set marks targets whose copy is still being built: a ref resolving
+// to one means the expansion reached its own target, which only a reference
+// cycle can cause.
+func (in *inliner) inlineCopy(target *Schema, path string, memoize bool) (*Schema, error) {
 	if memoized, ok := in.memo[target]; ok {
 		return cloneSchema(memoized)
 	}
@@ -684,7 +687,9 @@ func (in *inliner) inlineCopy(target *Schema, path string) (*Schema, error) {
 		return nil, err
 	}
 
-	in.memo[target] = cp
+	if memoize {
+		in.memo[target] = cp
+	}
 
 	// Clone on the first use too, so the memo entry is never aliased to a
 	// position in the output tree. Every caller, first or later, then gets an
