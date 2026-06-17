@@ -119,8 +119,9 @@ func (ce *GoCommentProvider) TypeDescription(ctx context.Context, tc TypeContext
 					continue
 				}
 
-				// Doc comment can be on the GenDecl (for single-spec decls)
-				// or on the TypeSpec itself.
+				// Doc comment can be on the GenDecl (for single-spec decls) or
+				// on the TypeSpec itself. The type name is unique per package, so
+				// return as soon as it matches instead of scanning the rest.
 				if ts.Doc != nil {
 					return strings.TrimSpace(ts.Doc.Text()), nil
 				}
@@ -128,6 +129,8 @@ func (ce *GoCommentProvider) TypeDescription(ctx context.Context, tc TypeContext
 				if gd.Doc != nil && len(gd.Specs) == 1 {
 					return strings.TrimSpace(gd.Doc.Text()), nil
 				}
+
+				return "", nil
 			}
 		}
 	}
@@ -168,9 +171,11 @@ func (ce *GoCommentProvider) FieldDescription(ctx context.Context, fc FieldConte
 					continue
 				}
 
+				// The type name is unique per package, so the scan ends at this
+				// match whether or not the field's comment is found.
 				st, ok := ts.Type.(*ast.StructType)
 				if !ok {
-					continue
+					return "", nil
 				}
 
 				for _, field := range st.Fields.List {
@@ -180,6 +185,8 @@ func (ce *GoCommentProvider) FieldDescription(ctx context.Context, fc FieldConte
 						}
 					}
 				}
+
+				return "", nil
 			}
 		}
 	}
