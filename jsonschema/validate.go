@@ -445,8 +445,10 @@ func (v *validator) resolveVocabularies() error {
 		return fmt.Errorf("%w: %s", ErrUnknownVocabulary, uri)
 	}
 
-	// The core vocabulary MUST be required (true) when present in $vocabulary.
-	if required, ok := rawVocabs[VocabCore2020]; ok && !required {
+	// The core vocabulary MUST be present and required (true): JSON Schema
+	// 2020-12 section 8.1.2 makes a $vocabulary that omits or disables core
+	// non-conformant.
+	if required, ok := rawVocabs[VocabCore2020]; !ok || !required {
 		return fmt.Errorf("%w: core vocabulary must be required", ErrUnknownVocabulary)
 	}
 
