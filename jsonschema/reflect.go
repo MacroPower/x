@@ -580,6 +580,14 @@ func (g *generator) handleBuiltinType(t reflect.Type, s *Schema, nullable bool) 
 		}
 	}
 
+	// A builtin whose type list already carries null (the []byte override uses
+	// applyContainerType, which folds null into the type list when nullable)
+	// already accepts null, so applyNullable's anyOf wrapper would be redundant
+	// and would diverge from the bare []byte form.
+	if slices.Contains(s.Types, typeNameNull) {
+		return s, nil
+	}
+
 	return g.applyNullable(s, t, nullable), nil
 }
 
