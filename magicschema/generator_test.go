@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -863,6 +864,59 @@ func TestGeneratorSpecialFloats(t *testing.T) {
 			assert.Equal(t, "number", prop["type"], "property %s should be number", tc.wantKey)
 		})
 	}
+}
+
+func TestGeneratorConcurrentUse(t *testing.T) {
+	t.Parallel()
+
+	// Generator documents that it is safe for concurrent use, resting on the
+	// per-document copy plus annotator cloning. This exercises that guarantee
+	// under -race with all four prototype annotators and inputs that touch the
+	// shared paths: annotations, anchors/merge keys, and multi-document streams.
+	cfg := magicschema.NewConfig()
+	cfg.Registry = helm.DefaultRegistry()
+	cfg.Annotators = strings.Join(helm.DefaultNames(), ",")
+
+	gen, err := cfg.NewGenerator()
+	require.NoError(t, err)
+
+	inputs := [][]byte{
+		[]byte(stringtest.Input(`
+			## @param replicas Number of replicas
+			# @schema minimum:1
+			replicas: 3
+			defaults: &d
+			  timeout: 30
+			production:
+			  <<: *d
+			  timeout: 60
+		`)),
+		[]byte("a: 1\n---\nb: 2\n"),
+		[]byte(stringtest.Input(`
+			# -- A description
+			name: test
+			tags:
+			  - a
+			  - b
+		`)),
+	}
+
+	var wg sync.WaitGroup
+
+	for range 50 {
+		for _, in := range inputs {
+			wg.Add(1)
+
+			go func(in []byte) {
+				defer wg.Done()
+
+				_, genErr := gen.Generate(in)
+				assert.NoError(t, genErr)
+			}(in)
+		}
+	}
+
+	wg.Wait()
 }
 
 func TestGeneratorMultiDocumentAnnotatorIsolation(t *testing.T) {
