@@ -363,13 +363,14 @@ func isHelmDocsOldStyleComment(s string) bool {
 	return strings.Contains(prefix, ".") && !strings.ContainsAny(prefix, " \t")
 }
 
-// inferItemsSchema creates an items schema from a sequence node's elements.
-// Mixed element types widen, and a null or empty element among typed
+// inferItemsSchema creates an items schema from a sequence's elements. The
+// values arrive alias-resolved but still tag-wrapped, so explicit tags reach
+// inferType. Mixed element types widen, and a null or empty element among typed
 // elements adds "null" to the items type so the source list validates.
 // Returns nil (no constraint) for empty sequences, all-null sequences, and
 // incompatible element types.
-func inferItemsSchema(seq *ast.SequenceNode) *jsonschema.Schema {
-	if len(seq.Values) == 0 {
+func inferItemsSchema(values []ast.Node) *jsonschema.Schema {
+	if len(values) == 0 {
 		return nil
 	}
 
@@ -378,9 +379,9 @@ func inferItemsSchema(seq *ast.SequenceNode) *jsonschema.Schema {
 		hasNull    bool
 	)
 
-	// Genuine nulls mark the list nullable; unknown nodes (aliases) stay
-	// transparent via the empty string, which widens to the other side.
-	for _, val := range seq.Values {
+	// Genuine nulls mark the list nullable; unknown nodes stay transparent
+	// via the empty string, which widens to the other side.
+	for _, val := range values {
 		if isNullNode(val) {
 			hasNull = true
 

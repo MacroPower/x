@@ -679,22 +679,21 @@ func (g *Generator) inferItemsFromSequence(
 		return nil
 	}
 
-	// Resolve each element once; the resolved nodes drive both the
-	// all-mappings check and the walk. If all elements are mappings,
-	// merge their schemas.
+	// Resolve each element's aliases once, keeping tag/anchor wrappers so
+	// explicit tags still reach inferType. The resolved nodes drive both the
+	// all-mappings check and the walk; resolving here (not just in the
+	// all-mappings branch) means alias-valued scalar elements keep their type
+	// in the structural fallback below.
 	resolved := make([]ast.Node, 0, len(seq.Values))
 	allMappings := true
 
 	for _, val := range seq.Values {
-		node := unwrapNode(resolveAliases(val, anchors))
-
-		if _, ok := node.(*ast.MappingNode); !ok {
-			allMappings = false
-
-			break
-		}
-
+		node := resolveAliases(val, anchors)
 		resolved = append(resolved, node)
+
+		if _, ok := unwrapNode(node).(*ast.MappingNode); !ok {
+			allMappings = false
+		}
 	}
 
 	if allMappings {
@@ -708,7 +707,7 @@ func (g *Generator) inferItemsFromSequence(
 	}
 
 	// For scalar arrays, just use type inference.
-	return inferItemsSchema(seq)
+	return inferItemsSchema(resolved)
 }
 
 // walkScalar generates a schema for a scalar value node.

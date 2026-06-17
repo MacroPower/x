@@ -651,6 +651,40 @@ production:
 	assert.Contains(t, prodProps, "retries")
 }
 
+func TestGeneratorScalarArrayAliasItems(t *testing.T) {
+	t.Parallel()
+
+	// The single scalar element is an alias to an integer anchor. Items
+	// inference must resolve the alias so the element keeps its type, the same
+	// way the all-mappings branch resolves aliases.
+	input := `
+base: &port 8080
+ports:
+  - *port
+`
+
+	gen := magicschema.NewGenerator()
+	schema, err := gen.Generate([]byte(input))
+	require.NoError(t, err)
+
+	out, err := json.Marshal(schema)
+	require.NoError(t, err)
+
+	var got map[string]any
+
+	require.NoError(t, json.Unmarshal(out, &got))
+
+	props, ok := got["properties"].(map[string]any)
+	require.True(t, ok)
+
+	ports, ok := props["ports"].(map[string]any)
+	require.True(t, ok)
+
+	items, ok := ports["items"].(map[string]any)
+	require.True(t, ok, "alias-valued scalar element should still yield an items type")
+	assert.Equal(t, "integer", items["type"])
+}
+
 func TestGeneratorLiteralBlocks(t *testing.T) {
 	t.Parallel()
 
