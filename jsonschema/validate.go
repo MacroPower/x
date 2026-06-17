@@ -2590,6 +2590,19 @@ func schemaNumberRat(v any) (*big.Rat, bool) {
 		return r, true
 	}
 
+	if n, ok := v.(json.Number); ok {
+		// A hand-built const/enum may carry a json.Number rather than the
+		// float64 the schema parser yields. Expand it the way toBigRat expands
+		// instance numbers so both take the shortest-decimal rational path
+		// rather than upstream's exact-binary float semantics.
+		d, parsed := parseDecNumber(string(n))
+		if !parsed || !d.exactlyComparable() {
+			return nil, false
+		}
+
+		return d.rat(), true
+	}
+
 	rv := reflect.ValueOf(v)
 	switch {
 	case !rv.IsValid():
