@@ -2375,3 +2375,67 @@ func TestHelmDocsAnnotatorRealWorld(t *testing.T) {
 
 	assertGolden(t, "testdata/loki_values.schema.json", schema)
 }
+
+// TestHelmDocsAnnotatorNewStyleSeparatorInDescription covers a new-style
+// "# -- description" whose text itself contains " -- ". The shared helm-docs
+// regex needs whitespace before the "--" separator, so it would bind the last
+// " -- " on the line and misread the leading text as an old-style key path,
+// dropping the description entirely. The marker must be recognized by position
+// so the full description survives.
+func TestHelmDocsAnnotatorNewStyleSeparatorInDescription(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		want  string
+	}{
+		"internal separator": {
+			input: stringtest.Input(`
+				# -- See the docs -- section 3 for details
+				name: test
+			`),
+			want: "See the docs -- section 3 for details",
+		},
+		"trailing separator": {
+			input: stringtest.Input(`
+				# -- A description ending in a marker --
+				name: test
+			`),
+			want: "A description ending in a marker --",
+		},
+		"plain description still works": {
+			input: stringtest.Input(`
+				# -- A normal description
+				name: test
+			`),
+			want: "A normal description",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			gen := magicschema.NewGenerator(
+				magicschema.WithAnnotators(norwoodj.New()),
+			)
+			schema, err := gen.Generate([]byte(tc.input))
+			require.NoError(t, err)
+
+			out, err := json.Marshal(schema)
+			require.NoError(t, err)
+
+			var got map[string]any
+
+			require.NoError(t, json.Unmarshal(out, &got))
+
+			props, ok := got["properties"].(map[string]any)
+			require.True(t, ok)
+
+			n, ok := props["name"].(map[string]any)
+			require.True(t, ok)
+
+			assert.Equal(t, tc.want, n["description"])
+		})
+	}
+}

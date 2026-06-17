@@ -1117,7 +1117,8 @@
           "description": "The type of the loki canary k8s rollout. This can be a DaemonSet or Deployment."
         },
         "push": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "If false, it will write to stdout and an Agent will be needed to scrape and send the logs --"
         },
         "lokiurl": {
           "description": "If set overwrites the default value set by loki.host helper function. Use this if gateway not enabled."

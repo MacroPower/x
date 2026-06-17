@@ -163,6 +163,21 @@ type parsedComment struct {
 	skip        bool
 }
 
+// cutNewStyleMarker reports whether a comment line is a new-style
+// "# -- description" marker and, if so, returns the description text after it.
+// The marker is recognized on the trimmed line, matching the "# --" detection
+// used elsewhere (the issue #96 workaround and parseNewStyleComment), so old-
+// style "# key.path -- desc" lines (which do not start with "# --") fall
+// through to the regex.
+func cutNewStyleMarker(line string) (string, bool) {
+	rest, ok := strings.CutPrefix(strings.TrimSpace(line), "# --")
+	if !ok {
+		return "", false
+	}
+
+	return strings.TrimSpace(rest), true
+}
+
 // parseCommentBlock parses a block of comment lines using the same algorithm
 // as upstream helm-docs ParseComment. It handles the "last # -- group"
 // workaround, continuation lines, @raw, @default, @notationType, and @section.
@@ -213,6 +228,20 @@ func parseCommentBlock(commentLines []string) *parsedComment {
 	)
 
 	for i, line := range commentLines {
+		// New-style "# -- description" is detected before the regex,
+		// which requires whitespace before "--": the new-style marker sits
+		// directly after the comment hash, so the regex would instead bind
+		// the LAST " -- " on the line, misreading a description that itself
+		// contains " -- " (e.g. "# -- see -- here") as an old-style key path
+		// and dropping the real description.
+		if rest, ok := cutNewStyleMarker(line); ok {
+			keyPath = ""
+			description = rest
+			docStartIdx = i
+
+			break
+		}
+
 		m := helmDocsDescRegex.FindStringSubmatch(line)
 		if m == nil {
 			continue
