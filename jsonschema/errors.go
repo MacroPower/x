@@ -182,15 +182,18 @@ func (e *ValidationError) Error() string {
 	return b.String()
 }
 
-// writeError recursively writes the error tree with indentation. The seen set
-// guards against cycles in the cause graph so a malformed (cyclic) tree does
-// not recurse without bound.
-func (e *ValidationError) writeError(b *strings.Builder, depth int, seen map[*ValidationError]bool) {
-	if e == nil || seen[e] {
+// writeError recursively writes the error tree with indentation. The onStack
+// set holds the ancestors on the current render path: a node is added on entry
+// and removed on exit, so a cyclic cause graph terminates while a node shared
+// by disjoint branches (a DAG) still renders under each branch rather than
+// being suppressed after its first occurrence.
+func (e *ValidationError) writeError(b *strings.Builder, depth int, onStack map[*ValidationError]bool) {
+	if e == nil || onStack[e] {
 		return
 	}
 
-	seen[e] = true
+	onStack[e] = true
+	defer delete(onStack, e)
 
 	indent := strings.Repeat("  ", depth)
 
@@ -240,13 +243,13 @@ func (e *ValidationError) writeError(b *strings.Builder, depth int, seen map[*Va
 	// separator before or after it.
 	wrote := hasHeader
 	for _, cause := range e.Causes {
-		if seen[cause] {
+		if onStack[cause] {
 			continue
 		}
 
 		var cb strings.Builder
 
-		cause.writeError(&cb, childDepth, seen)
+		cause.writeError(&cb, childDepth, onStack)
 
 		if cb.Len() == 0 {
 			continue
