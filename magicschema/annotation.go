@@ -227,6 +227,7 @@ func mergeSchemaFields(dst, src *jsonschema.Schema) {
 
 	if dst.Properties == nil {
 		dst.Properties = src.Properties
+		dst.PropertyOrder = src.PropertyOrder
 	}
 
 	if dst.AdditionalProperties == nil {
@@ -241,8 +242,12 @@ func mergeSchemaFields(dst, src *jsonschema.Schema) {
 		dst.PropertyNames = src.PropertyNames
 	}
 
+	// Clone rather than alias: addRequired appends to the merged schema's
+	// Required downstream (via fillObjectFromStructure), and a lower-priority
+	// annotator may return a shared prototype schema whose backing array must
+	// not be written through -- the same contract copySchema upholds.
 	if dst.Required == nil {
-		dst.Required = src.Required
+		dst.Required = slices.Clone(src.Required)
 	}
 
 	if dst.AllOf == nil {
