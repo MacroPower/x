@@ -235,7 +235,21 @@ func (g *Generator) generateSingle(input []byte) (*jsonschema.Schema, []Annotato
 		allPrepared []Annotator
 	)
 
-	for _, doc := range file.Docs {
+	// Scope each document's content to the annotators that scan it (bitnami's
+	// ## @param lines, norwoodj's old-style descriptions) so a multi-document
+	// stream does not bleed one document's annotations into another. The split
+	// is used only when it aligns 1:1 with the parsed documents; otherwise the
+	// whole stream is passed, preserving prior behavior.
+	var docBytes [][]byte
+
+	if len(file.Docs) > 1 {
+		docBytes = splitDocumentBytes(input)
+		if len(docBytes) != len(file.Docs) {
+			docBytes = nil
+		}
+	}
+
+	for i, doc := range file.Docs {
 		if doc.Body == nil {
 			continue
 		}
@@ -245,7 +259,12 @@ func (g *Generator) generateSingle(input []byte) (*jsonschema.Schema, []Annotato
 		// The walk runs on a per-document copy so the receiver -- and the
 		// prototype annotators it holds -- are never mutated, keeping
 		// Generator safe for concurrent use.
-		prepared := prepareAnnotators(g.annotators, input)
+		content := input
+		if docBytes != nil {
+			content = docBytes[i]
+		}
+
+		prepared := prepareAnnotators(g.annotators, content)
 		allPrepared = append(allPrepared, prepared...)
 
 		docGen := *g
@@ -1061,6 +1080,41 @@ func dropEmptyDocuments(input []byte) []byte {
 	}
 
 	return bytes.Join(out, []byte("\n"))
+}
+
+// splitDocumentBytes splits a normalized, empty-document-stripped YAML stream
+// into per-document byte slices in source order, intended to align 1:1 with
+// parser.ParseBytes's file.Docs. Documents are separated by bare "---" lines
+// (see [isSeparatorLine]); a leading separator opens the stream with a blank
+// segment that corresponds to no document and is dropped. Callers guard on the
+// returned length matching the parsed document count and fall back to the whole
+// input when it does not, so an imperfect split never changes behavior.
+func splitDocumentBytes(input []byte) [][]byte {
+	lines := bytes.Split(input, []byte("\n"))
+
+	segments := [][][]byte{nil}
+
+	for _, line := range lines {
+		if isSeparatorLine(line) {
+			segments = append(segments, nil)
+
+			continue
+		}
+
+		last := len(segments) - 1
+		segments[last] = append(segments[last], line)
+	}
+
+	if isBlank(bytes.Join(segments[0], []byte("\n"))) {
+		segments = segments[1:]
+	}
+
+	out := make([][]byte, 0, len(segments))
+	for _, seg := range segments {
+		out = append(out, bytes.Join(seg, []byte("\n")))
+	}
+
+	return out
 }
 
 // normalizeLineEndings folds CRLF and lone CR line breaks to LF. Returns the

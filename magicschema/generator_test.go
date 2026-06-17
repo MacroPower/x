@@ -15,6 +15,7 @@ import (
 
 	"go.jacobcolvin.com/x/magicschema"
 	"go.jacobcolvin.com/x/magicschema/helm"
+	"go.jacobcolvin.com/x/magicschema/helm/bitnami"
 	"go.jacobcolvin.com/x/magicschema/helm/dadav"
 	"go.jacobcolvin.com/x/magicschema/helm/losisin"
 )
@@ -862,6 +863,43 @@ func TestGeneratorSpecialFloats(t *testing.T) {
 			assert.Equal(t, "number", prop["type"], "property %s should be number", tc.wantKey)
 		})
 	}
+}
+
+func TestGeneratorMultiDocumentAnnotatorIsolation(t *testing.T) {
+	t.Parallel()
+
+	// The first document declares a bitnami @param for "foo" but its only key
+	// is "unrelated"; the second has key "foo" with no annotation. A
+	// content-scanning annotator must see only its own document, so the @param
+	// must not bleed across the boundary and attach a description to foo.
+	input := stringtest.Input(`
+		## @param foo A leaked description
+		unrelated: 1
+		---
+		foo: 2
+	`)
+
+	gen := magicschema.NewGenerator(
+		magicschema.WithAnnotators(bitnami.New()),
+	)
+	schema, err := gen.Generate([]byte(input))
+	require.NoError(t, err)
+
+	out, err := json.Marshal(schema)
+	require.NoError(t, err)
+
+	var got map[string]any
+
+	require.NoError(t, json.Unmarshal(out, &got))
+
+	props, ok := got["properties"].(map[string]any)
+	require.True(t, ok)
+
+	foo, ok := props["foo"].(map[string]any)
+	require.True(t, ok)
+
+	_, hasDesc := foo["description"]
+	assert.False(t, hasDesc, "doc1's @param must not bleed into doc2's foo")
 }
 
 func TestGeneratorMultiDocument(t *testing.T) {
