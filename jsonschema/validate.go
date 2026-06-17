@@ -3511,10 +3511,13 @@ func hashValue(v any) uint64 {
 			return numHash(int64(val))
 		}
 
-		// Non-finite floats have no big.Rat form (SetFloat64 returns nil); hash
-		// them by their textual form so uniqueItems stays panic-free.
+		// Non-finite floats have no big.Rat form: SetFloat64 returns nil and
+		// leaves the rational at 0/1, so jsonschema.Equal (and thus
+		// equalJSONValues) treats every NaN/Inf as equal to each other and to
+		// numeric zero. Hash them to numHash(0) so equal values share a bucket,
+		// keeping uniqueItems consistent (and panic-free).
 		if math.IsInf(val, 0) || math.IsNaN(val) {
-			return stringHash(strconv.FormatFloat(val, 'g', -1, 64)) + 4
+			return numHash(0)
 		}
 
 		r := new(big.Rat).SetFloat64(val)
