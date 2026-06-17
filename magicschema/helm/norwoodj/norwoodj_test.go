@@ -1923,6 +1923,35 @@ func TestHelmDocsAnnotator(t *testing.T) {
 				assert.Equal(t, "standalone-val", k["default"])
 			},
 		},
+		"standalone default keeps old-style description": {
+			// A standalone "# @default --" on a node must not shadow the
+			// old-style "# key.path -- desc" description scanned from the file;
+			// the description survives and the @default supplies the default.
+			input: stringtest.Input(`
+				# image.tag -- The image tag
+				image:
+				  # @default -- 1.2.3
+				  tag: latest
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				image, ok := props["image"].(map[string]any)
+				require.True(t, ok)
+
+				imageProps, ok := image["properties"].(map[string]any)
+				require.True(t, ok)
+
+				tag, ok := imageProps["tag"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "The image tag", tag["description"])
+				assert.Equal(t, "1.2.3", tag["default"])
+			},
+		},
 		"multiline raw description matches upstream": {
 			// From upstream TestMultilineRawDescription: description with @raw and
 			// @default. Verifies raw joining with blank comment lines.

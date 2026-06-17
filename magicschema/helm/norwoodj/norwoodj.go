@@ -368,10 +368,19 @@ func (a *Annotator) Annotate(node ast.Node, keyPath string) *magicschema.Annotat
 
 	entry := a.parseNewStyleComment(headComment)
 
-	// Fall back to old-style key-prefixed comment from ForContent.
-	if entry == nil {
-		if e, ok := a.oldStyleDescs[keyPath]; ok {
-			entry = e
+	// Reconcile with the old-style "# key.path -- desc" entry parsed in
+	// ForContent. A head comment that contributes only a @default (a
+	// standalone "# @default --" with no "# --" description line) must not
+	// shadow the old-style description and type; combine them instead, with
+	// the node-level @default overriding any old-style default.
+	if old, ok := a.oldStyleDescs[keyPath]; ok {
+		switch {
+		case entry == nil:
+			entry = old
+		case entry.description == "" && entry.typeName == "" && !entry.skip && entry.defaultVal != nil:
+			merged := *old
+			merged.defaultVal = entry.defaultVal
+			entry = &merged
 		}
 	}
 
