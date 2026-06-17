@@ -945,6 +945,29 @@ func TestTagTypeOverride(t *testing.T) {
 		assert.Equal(t, "string", field.Items.Type)
 	})
 
+	t.Run("definition ref replaced", func(t *testing.T) {
+		t.Parallel()
+
+		type Inner struct {
+			A string `json:"a"`
+		}
+
+		type T struct {
+			Field Inner `json:"field" jsonschema:"type=string"`
+		}
+
+		s, err := jsonschema.GenerateFor[T](t.Context())
+		require.NoError(t, err)
+
+		field := s.Properties["field"]
+		require.NotNil(t, field)
+
+		got, err := json.Marshal(field)
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"type":"string"}`, string(got),
+			"the bare $ref to the definition is dropped, not left as an unsatisfiable {$ref,type}")
+	})
+
 	t.Run("unknown type name rejected", func(t *testing.T) {
 		t.Parallel()
 

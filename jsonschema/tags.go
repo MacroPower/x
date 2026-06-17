@@ -466,12 +466,12 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *Schema) err
 }
 
 // applyTypeOverride applies a type= tag value, replacing the reflected type
-// assertion: it sets Type, clears a Types array, removes the nullable anyOf
-// wrapper a pointer field generates, and, when the new type is not numeric,
-// drops the numeric bounds derived from the Go kind (an int64-reflected field
-// such as [time.Duration] carries range bounds that would otherwise survive
-// as noise on a string schema). Tag pairs apply in order, so keys after type=
-// still take effect.
+// assertion: it sets Type, clears a Types array, drops a bare $ref to a
+// definition, removes the nullable anyOf wrapper a pointer field generates,
+// and, when the new type is not numeric, drops the numeric bounds derived from
+// the Go kind (an int64-reflected field such as [time.Duration] carries range
+// bounds that would otherwise survive as noise on a string schema). Tag pairs
+// apply in order, so keys after type= still take effect.
 func applyTypeOverride(s *Schema, typeName string) {
 	// A nullable pointer field wraps the value schema in anyOf[value, null];
 	// an explicit type replaces the whole construct, including the wrapped
@@ -479,6 +479,12 @@ func applyTypeOverride(s *Schema, typeName string) {
 	if nullableInnerSchema(s) != nil {
 		s.AnyOf = nil
 	}
+
+	// A field whose type was extracted to $defs reflects to a bare {$ref}; the
+	// explicit type replaces that assertion, so drop the ref. Leaving it would
+	// emit {$ref, type}, which under 2020-12 requires both to hold and is
+	// unsatisfiable when the referenced definition is a different type.
+	s.Ref = ""
 
 	s.Type = typeName
 	s.Types = nil
