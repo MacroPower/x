@@ -1167,8 +1167,8 @@ func CheckTypeNames(schema *Schema) error {
 // checkTypeNames implements [CheckTypeNames], verifying that every type keyword
 // reachable from schema names one of the seven JSON Schema types and returning
 // an error wrapping [ErrInvalidType] for the first violation. The traversal
-// mirrors [validator.walkSchema]'s sub-schema recursion but additionally tracks
-// the schema path so the error locates the offending keyword; visited guards
+// uses [SubschemaEntries] for the sub-schema field list, appending each entry's
+// Pointer so the error locates the offending keyword; visited guards
 // against schema graph cycles. The check is draft-agnostic: neither draft
 // defines type names beyond the canonical seven.
 func checkTypeNames(schema *Schema, schemaPath string, visited map[*Schema]bool) error {
@@ -1188,70 +1188,12 @@ func checkTypeNames(schema *Schema, schemaPath string, visited map[*Schema]bool)
 		}
 	}
 
-	subMaps := []struct {
-		m       map[string]*Schema
-		keyword string
-	}{
-		{schema.Properties, KeywordProperties},
-		{schema.PatternProperties, KeywordPatternProperties},
-		{schema.Defs, KeywordDefs},
-		{schema.Definitions, KeywordDefinitions},
-		{schema.DependentSchemas, KeywordDependentSchemas},
-		{schema.DependencySchemas, KeywordDependencies},
-	}
-	for _, entry := range subMaps {
-		// Sorted keys keep the reported violation deterministic when a map
-		// holds more than one offending sub-schema.
-		for _, key := range slices.Sorted(maps.Keys(entry.m)) {
-			childPath := schemaPath + "/" + entry.keyword + "/" + jsonptr.Escape(key)
-
-			err := checkTypeNames(entry.m[key], childPath, visited)
-			if err != nil {
-				return err
-			}
-		}
-	}
-
-	lists := []struct {
-		keyword string
-		s       []*Schema
-	}{
-		{KeywordAllOf, schema.AllOf},
-		{KeywordAnyOf, schema.AnyOf},
-		{KeywordOneOf, schema.OneOf},
-		{KeywordPrefixItems, schema.PrefixItems},
-		{KeywordItems, schema.ItemsArray},
-	}
-	for _, entry := range lists {
-		for i, s := range entry.s {
-			childPath := schemaPath + "/" + entry.keyword + "/" + strconv.Itoa(i)
-
-			err := checkTypeNames(s, childPath, visited)
-			if err != nil {
-				return err
-			}
-		}
-	}
-
-	singles := []struct {
-		s       *Schema
-		keyword string
-	}{
-		{schema.Items, KeywordItems},
-		{schema.AdditionalProperties, KeywordAdditionalProperties},
-		{schema.AdditionalItems, KeywordAdditionalItems},
-		{schema.Not, KeywordNot},
-		{schema.If, KeywordIf},
-		{schema.Then, KeywordThen},
-		{schema.Else, KeywordElse},
-		{schema.Contains, KeywordContains},
-		{schema.PropertyNames, KeywordPropertyNames},
-		{schema.UnevaluatedProperties, KeywordUnevaluatedProperties},
-		{schema.UnevaluatedItems, KeywordUnevaluatedItems},
-		{schema.ContentSchema, KeywordContentSchema},
-	}
-	for _, entry := range singles {
-		err := checkTypeNames(entry.s, schemaPath+"/"+entry.keyword, visited)
+	// SubschemaEntries is the single source of truth for the sub-schema field
+	// list, and its Pointer reproduces the "/keyword[/key-or-index]" tokens
+	// this check previously built by hand (member keys carry ~0/~1 escaping,
+	// map children come in sorted-key order for deterministic violations).
+	for _, entry := range SubschemaEntries(schema) {
+		err := checkTypeNames(entry.Schema, schemaPath+entry.Pointer, visited)
 		if err != nil {
 			return err
 		}
