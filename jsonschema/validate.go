@@ -553,52 +553,12 @@ func (v *validator) walkSchema(schema *Schema, parentBase string) {
 		v.baseURIs[schema] = currentBase
 	}
 
-	// Recurse into all sub-schema fields.
-	v.walkSchemaMap(schema.Properties, currentBase)
-	v.walkSchemaMap(schema.PatternProperties, currentBase)
-	v.walkSchemaMap(schema.Defs, currentBase)
-	v.walkSchemaMap(schema.Definitions, currentBase)
-	v.walkSchemaMap(schema.DependentSchemas, currentBase)
-	v.walkSchemaMap(schema.DependencySchemas, currentBase)
-
-	for _, s := range schema.AllOf {
-		v.walkSchema(s, currentBase)
-	}
-
-	for _, s := range schema.AnyOf {
-		v.walkSchema(s, currentBase)
-	}
-
-	for _, s := range schema.OneOf {
-		v.walkSchema(s, currentBase)
-	}
-
-	for _, s := range schema.PrefixItems {
-		v.walkSchema(s, currentBase)
-	}
-
-	for _, s := range schema.ItemsArray {
-		v.walkSchema(s, currentBase)
-	}
-
-	v.walkSchema(schema.Items, currentBase)
-	v.walkSchema(schema.AdditionalProperties, currentBase)
-	v.walkSchema(schema.AdditionalItems, currentBase)
-	v.walkSchema(schema.Not, currentBase)
-	v.walkSchema(schema.If, currentBase)
-	v.walkSchema(schema.Then, currentBase)
-	v.walkSchema(schema.Else, currentBase)
-	v.walkSchema(schema.Contains, currentBase)
-	v.walkSchema(schema.PropertyNames, currentBase)
-	v.walkSchema(schema.UnevaluatedProperties, currentBase)
-	v.walkSchema(schema.UnevaluatedItems, currentBase)
-	v.walkSchema(schema.ContentSchema, currentBase)
-}
-
-// walkSchemaMap walks a map of named sub-schemas.
-func (v *validator) walkSchemaMap(m map[string]*Schema, base string) {
-	for _, s := range m {
-		v.walkSchema(s, base)
+	// Recurse into all sub-schema fields. Every child inherits currentBase, so
+	// iterating SubschemaEntries (the single source of truth for the field
+	// list) reproduces the previous per-keyword recursion; its sorted-key map
+	// order also makes registry construction deterministic.
+	for _, e := range SubschemaEntries(schema) {
+		v.walkSchema(e.Schema, currentBase)
 	}
 }
 
