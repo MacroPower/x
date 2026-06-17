@@ -2126,6 +2126,28 @@ func jsonNumberIsIntegral(n json.Number) bool {
 	return ok && d.isIntegral()
 }
 
+// isIntegralInstance reports whether a numeric instance (a [json.Number] or a
+// float64) has an integer value. A [json.Number] parses its decimal exactly via
+// [big.Rat], so integrality holds at any magnitude; a float64 uses Trunc to avoid
+// the int64() saturation that misclassifies large integral floats (e.g. 1e30).
+// It is the single definition shared by instanceType and instanceMatchesType.
+func isIntegralInstance(v any) bool {
+	switch val := v.(type) {
+	case json.Number:
+		_, err := val.Int64()
+		if err == nil {
+			return true
+		}
+
+		return jsonNumberIsIntegral(val)
+
+	case float64:
+		return !math.IsInf(val, 0) && val == math.Trunc(val)
+	}
+
+	return false
+}
+
 // instanceType returns the JSON Schema type name for a Go value.
 func instanceType(v any) string {
 	if v == nil {
@@ -2137,26 +2159,8 @@ func instanceType(v any) string {
 		return typeNameBoolean
 	case string:
 		return typeNameString
-	case json.Number:
-		_, err := val.Int64()
-		if err == nil {
-			return typeNameInteger
-		}
-
-		// Handle cases like "1.0" where Int64 fails but the value
-		// is mathematically an integer. A big.Rat parses the decimal
-		// exactly, so its integrality test holds at any magnitude or
-		// precision, unlike a fixed-width big.Float.
-		if jsonNumberIsIntegral(val) {
-			return typeNameInteger
-		}
-
-		return typeNameNumber
-
-	case float64:
-		// Trunc avoids the int64() saturation that misclassifies large
-		// integral floats (e.g. 1e30) as non-integers.
-		if !math.IsInf(val, 0) && val == math.Trunc(val) {
+	case json.Number, float64:
+		if isIntegralInstance(val) {
 			return typeNameInteger
 		}
 
@@ -2188,24 +2192,7 @@ func instanceMatchesType(instance any, typ string) bool {
 		return isStr
 
 	case typeNameInteger:
-		switch val := instance.(type) {
-		case float64:
-			// Trunc avoids int64() saturation for large integral floats.
-			return !math.IsInf(val, 0) && val == math.Trunc(val)
-		case json.Number:
-			_, err := val.Int64()
-			if err == nil {
-				return true
-			}
-
-			// Handle cases like "1.0" where Int64 fails but the value
-			// is mathematically an integer. A big.Rat parses the decimal
-			// exactly, so its integrality test holds at any magnitude or
-			// precision, unlike a fixed-width big.Float.
-			return jsonNumberIsIntegral(val)
-		}
-
-		return false
+		return isIntegralInstance(instance)
 
 	case typeNameNumber:
 		switch instance.(type) {
