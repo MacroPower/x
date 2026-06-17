@@ -329,6 +329,38 @@ func mergeSchemaFields(dst, src *jsonschema.Schema) {
 		dst.UnevaluatedProperties = src.UnevaluatedProperties
 	}
 
+	if dst.UnevaluatedItems == nil {
+		dst.UnevaluatedItems = src.UnevaluatedItems
+	}
+
+	if dst.PrefixItems == nil {
+		dst.PrefixItems = src.PrefixItems
+	}
+
+	if dst.ItemsArray == nil {
+		dst.ItemsArray = src.ItemsArray
+	}
+
+	if dst.MinContains == nil {
+		dst.MinContains = src.MinContains
+	}
+
+	if dst.MaxContains == nil {
+		dst.MaxContains = src.MaxContains
+	}
+
+	if dst.DependentRequired == nil {
+		dst.DependentRequired = src.DependentRequired
+	}
+
+	if dst.DependentSchemas == nil {
+		dst.DependentSchemas = src.DependentSchemas
+	}
+
+	if dst.ContentSchema == nil {
+		dst.ContentSchema = src.ContentSchema
+	}
+
 	// Merge Extra maps.
 	if src.Extra != nil {
 		if dst.Extra == nil {
