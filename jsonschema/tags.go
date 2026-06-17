@@ -105,7 +105,10 @@ func applyJSONSchemaTag(tag string, fieldType reflect.Type, s *Schema) error {
 
 	scalarType := fieldType
 
-	var overriddenType string
+	var (
+		overriddenType  string
+		numericBoundSet bool
+	)
 
 	for _, pair := range pairs {
 		key, value, found := strings.Cut(pair, "=")
@@ -121,9 +124,22 @@ func applyJSONSchemaTag(tag string, fieldType reflect.Type, s *Schema) error {
 			return fmt.Errorf("jsonschema tag: key %q cannot follow type=%s", key, overriddenType)
 		}
 
+		// A non-numeric type= override drops numeric bounds. Dropping the bounds
+		// derived from the Go kind is intended, but a bound an earlier tag pair
+		// set is the author's explicit input, so report the conflict rather than
+		// discarding it silently.
+		if key == KeywordType && numericBoundSet &&
+			validTypeName(value) && value != typeNameInteger && value != typeNameNumber {
+			return fmt.Errorf("jsonschema tag: numeric bound conflicts with type=%s", value)
+		}
+
 		err := applyTagKeyValue(key, value, scalarType, s)
 		if err != nil {
 			return err
+		}
+
+		if isNumericBoundKey(key) {
+			numericBoundSet = true
 		}
 
 		if key == KeywordType {
@@ -140,6 +156,17 @@ func applyJSONSchemaTag(tag string, fieldType reflect.Type, s *Schema) error {
 func isScalarValueKey(key string) bool {
 	switch key {
 	case KeywordDefault, KeywordConst, KeywordEnum, KeywordExamples:
+		return true
+	default:
+		return false
+	}
+}
+
+// isNumericBoundKey reports whether a jsonschema tag key sets one of the
+// numeric bound keywords that a non-numeric type= override drops.
+func isNumericBoundKey(key string) bool {
+	switch key {
+	case KeywordMinimum, KeywordMaximum, KeywordExclusiveMinimum, KeywordExclusiveMaximum, KeywordMultipleOf:
 		return true
 	default:
 		return false

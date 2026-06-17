@@ -397,7 +397,9 @@ numeric bounds derived from the Go kind. So a `*time.Duration` field
 (reflected as a nullable integer) with `jsonschema:"type=string,pattern=..."`
 produces a clean `{"type":"string","pattern":"..."}` without needing
 `JSONSchemaExtend`. Tag pairs apply in order; keys after `type=` still take
-effect.
+effect. A numeric bound set by an earlier pair and then dropped by a
+non-numeric `type=` override is reported as an error rather than silently
+discarded, since it is the author's explicit input.
 
 Because pairs apply in order, `default`, `const`, `enum`, and `examples`
 values appearing after a `type=` pair parse against the overridden JSON type
