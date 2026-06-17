@@ -239,16 +239,7 @@ func (a *Annotator) applyPair(
 			schema.Items = &jsonschema.Schema{}
 		}
 
-		types := parseStringList(val)
-
-		switch len(types) {
-		case 0:
-			// Empty or unparseable value; skip.
-		case 1:
-			schema.Items.Type = types[0]
-		default:
-			schema.Items.Types = types
-		}
+		setSchemaType(schema.Items, parseStringList(val))
 
 	case "itemProperties":
 		if schema.Items == nil {
@@ -302,15 +293,25 @@ func (a *Annotator) applyPair(
 // The upstream tool uses processList with stringsOnly=true, which first tries YAML
 // parse for bracket-prefixed values, then falls back to comma-splitting.
 func (a *Annotator) applyType(schema *jsonschema.Schema, val string) {
-	types := parseStringList(val)
+	setSchemaType(schema, parseStringList(val))
+}
 
+// setSchemaType assigns a parsed type list to a schema as either the scalar
+// Type or the Types union, clearing the sibling field. A repeated type: or
+// item: pair within one annotation would otherwise leave both Type and Types
+// set, which the schema rejects when the document is marshaled. An empty list
+// leaves the schema untouched.
+func setSchemaType(s *jsonschema.Schema, types []string) {
 	switch len(types) {
 	case 0:
 		// Empty or unparseable value; skip.
 	case 1:
-		schema.Type = types[0]
+		s.Type = types[0]
+		s.Types = nil
+
 	default:
-		schema.Types = types
+		s.Type = ""
+		s.Types = types
 	}
 }
 

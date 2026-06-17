@@ -3479,6 +3479,29 @@ func TestHelmValuesSchemaAnnotatorFailOpenParsing(t *testing.T) {
 				assert.False(t, has, "a non-finite const must be dropped, not break marshal")
 			},
 		},
+		"repeated type pair does not set both type and types": {
+			input: stringtest.Input(`
+				# @schema type:[string, integer];type:boolean
+				name: test
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				name, ok := props["name"].(map[string]any)
+				require.True(t, ok)
+
+				// The later scalar wins and clears the earlier union, so the
+				// schema marshals (a schema with both type and types is
+				// rejected by the library).
+				assert.Equal(t, "boolean", name["type"])
+
+				_, hasTypes := name["types"]
+				assert.False(t, hasTypes)
+			},
+		},
 	}
 
 	for name, tc := range tcs {
