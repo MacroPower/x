@@ -1661,6 +1661,21 @@ func newAnnotations() *annotations {
 	}
 }
 
+// childAnnotations returns a fresh annotations set when the parent tracks
+// annotations, or nil when it does not. A composition, conditional, reference,
+// or dependency keyword collects a subschema's evaluation only to merge it into
+// the parent; when the parent is nil that result is discarded, so skipping the
+// allocation avoids two maps per subschema on schemas with no
+// unevaluatedProperties/Items to satisfy. Passing nil to [validator.validate]
+// is safe: it self-allocates a local set if the subschema itself needs one.
+func childAnnotations(parent *annotations) *annotations {
+	if parent == nil {
+		return nil
+	}
+
+	return newAnnotations()
+}
+
 func (a *annotations) merge(other *annotations) {
 	if other == nil {
 		return
@@ -3771,7 +3786,7 @@ func (v *validator) validateObject(
 					continue
 				}
 
-				depAnn := newAnnotations()
+				depAnn := childAnnotations(ann)
 				childSchemaPath := schemaPath.kw("dependentSchemas").key(prop)
 				childErrs := v.validate(depSchema, instance, instancePath, childSchemaPath, depAnn)
 				errs = append(errs, childErrs...)
@@ -3867,7 +3882,7 @@ func (v *validator) validateObject(
 			continue
 		}
 
-		depAnn := newAnnotations()
+		depAnn := childAnnotations(ann)
 		childSchemaPath := schemaPath.kw("dependencies").key(prop)
 		childErrs := v.validate(depSchema, instance, instancePath, childSchemaPath, depAnn)
 		errs = append(errs, childErrs...)
@@ -3925,7 +3940,7 @@ func (v *validator) validateComposition(
 		)
 
 		for i, sub := range schema.AllOf {
-			subAnn := newAnnotations()
+			subAnn := childAnnotations(ann)
 			childSchemaPath := schemaPath.kw("allOf").idx(i)
 			childErrs := v.validate(sub, instance, instancePath, childSchemaPath, subAnn)
 			if len(childErrs) > 0 {
@@ -3961,7 +3976,7 @@ func (v *validator) validateComposition(
 		var allCauses []*ValidationError
 
 		for i, sub := range schema.AnyOf {
-			subAnn := newAnnotations()
+			subAnn := childAnnotations(ann)
 			childSchemaPath := schemaPath.kw("anyOf").idx(i)
 			childErrs := v.validate(sub, instance, instancePath, childSchemaPath, subAnn)
 			if len(childErrs) == 0 {
@@ -3999,7 +4014,7 @@ func (v *validator) validateComposition(
 		)
 
 		for i, sub := range schema.OneOf {
-			subAnn := newAnnotations()
+			subAnn := childAnnotations(ann)
 			childSchemaPath := schemaPath.kw("oneOf").idx(i)
 			childErrs := v.validate(sub, instance, instancePath, childSchemaPath, subAnn)
 			if len(childErrs) == 0 {
@@ -4078,7 +4093,7 @@ func (v *validator) validateConditional(
 
 	var errs []*ValidationError
 
-	ifAnn := newAnnotations()
+	ifAnn := childAnnotations(ann)
 	ifErrs := v.validate(schema.If, instance, instancePath, schemaPath.kw("if"), ifAnn)
 	ifPassed := len(ifErrs) == 0
 
@@ -4088,7 +4103,7 @@ func (v *validator) validateConditional(
 		}
 
 		if schema.Then != nil {
-			thenAnn := newAnnotations()
+			thenAnn := childAnnotations(ann)
 			thenErrs := v.validate(schema.Then, instance, instancePath, schemaPath.kw("then"), thenAnn)
 			if len(thenErrs) > 0 {
 				kwPath := schemaPath.kw("then")
@@ -4107,7 +4122,7 @@ func (v *validator) validateConditional(
 			}
 		}
 	} else if schema.Else != nil {
-		elseAnn := newAnnotations()
+		elseAnn := childAnnotations(ann)
 		elseErrs := v.validate(schema.Else, instance, instancePath, schemaPath.kw("else"), elseAnn)
 		if len(elseErrs) > 0 {
 			kwPath := schemaPath.kw("else")
@@ -4329,7 +4344,7 @@ func (v *validator) validateResolvedRef(
 		return nil
 	}
 
-	refAnn := newAnnotations()
+	refAnn := childAnnotations(ann)
 	childErrs := v.validate(target, instance, instancePath, schemaPath.kw(keyword), refAnn)
 	if len(childErrs) > 0 {
 		kwPath := schemaPath.kw(keyword)
