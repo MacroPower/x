@@ -33,6 +33,18 @@ func (ProviderSingleton) JSONSchema(context.Context, jsonschema.TypeContext) (*j
 	return &SharedProviderSchema, nil
 }
 
+// Stamp is a documented named scalar embedded by [Envelope].
+type Stamp string
+
+// Envelope embeds a named type under an explicit JSON name, so the embedded
+// field becomes a single named property instead of being promoted. Its doc
+// comment must still be extracted for that property even though the field has
+// no name identifier in the source.
+type Envelope struct {
+	// Stamp documents the envelope stamp.
+	Stamp `json:"stamp"`
+}
+
 // Widget is a test type with documented fields.
 type Widget struct {
 	// Label documents the widget label. A jsonschema tag also sets a

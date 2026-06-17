@@ -179,6 +179,16 @@ func (ce *GoCommentProvider) FieldDescription(ctx context.Context, fc FieldConte
 				}
 
 				for _, field := range st.Fields.List {
+					// An embedded field has no name idents; Go names it after the
+					// embedded type, and a doc comment hangs off the field itself.
+					if len(field.Names) == 0 {
+						if field.Doc != nil && embeddedFieldName(field.Type) == fieldName {
+							return strings.TrimSpace(field.Doc.Text()), nil
+						}
+
+						continue
+					}
+
 					for _, ident := range field.Names {
 						if ident.Name == fieldName && field.Doc != nil {
 							return strings.TrimSpace(field.Doc.Text()), nil
@@ -192,6 +202,26 @@ func (ce *GoCommentProvider) FieldDescription(ctx context.Context, fc FieldConte
 	}
 
 	return "", nil
+}
+
+// embeddedFieldName returns the field name Go assigns to an embedded
+// (anonymous) struct field, which is the unqualified name of the embedded type.
+// It unwraps a leading pointer and a package qualifier; an unrecognized shape
+// (such as a generic instantiation) yields "", leaving the field undescribed
+// rather than mismatched.
+func embeddedFieldName(expr ast.Expr) string {
+	if star, ok := expr.(*ast.StarExpr); ok {
+		expr = star.X
+	}
+
+	switch t := expr.(type) {
+	case *ast.Ident:
+		return t.Name
+	case *ast.SelectorExpr:
+		return t.Sel.Name
+	default:
+		return ""
+	}
 }
 
 // sourceFiles returns parsed AST files for the package at the given import path.

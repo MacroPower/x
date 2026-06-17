@@ -34,6 +34,24 @@ func TestPromotedEmbeddedFieldDescription(t *testing.T) {
 	assert.Contains(t, s.Properties["size"].Description, "documents the widget size")
 }
 
+// TestEmbeddedNamedFieldDescription covers doc-comment extraction for an
+// embedded field that becomes a single named property (embedded under an
+// explicit JSON name rather than promoted). Such a field has no name
+// identifier in the source AST, so its comment is located by the embedded
+// type's name.
+func TestEmbeddedNamedFieldDescription(t *testing.T) {
+	t.Parallel()
+
+	s, err := jsonschema.GenerateFor[alpha.Envelope](
+		t.Context(),
+		jsonschema.WithDescriptionProvider(jsonschema.NewGoCommentProvider()),
+	)
+	require.NoError(t, err)
+
+	require.Contains(t, s.Properties, "stamp")
+	assert.Contains(t, s.Properties["stamp"].Description, "documents the envelope stamp")
+}
+
 // TestGenericTypeDescription covers doc-comment extraction for an instantiated
 // generic type, whose reflect name ("Box[int]") carries a type-argument list
 // that must be stripped to match the source declaration ("Box").
