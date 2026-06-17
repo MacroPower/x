@@ -3335,7 +3335,10 @@ func (v *validator) validateArray(
 					errs = append(errs, childErrs...)
 				}
 
-				if ann != nil {
+				// Mark all items evaluated only when items actually applied to a
+				// trailing element; for an array no longer than prefixItems the
+				// prefix already covers every index via itemsEnd.
+				if ann != nil && len(arr) > len(prefixSchemas) {
 					ann.allItems = true
 				}
 			}
