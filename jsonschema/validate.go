@@ -3610,8 +3610,10 @@ func (v *validator) validateObject(
 	// propertyNames, dependentSchemas.
 	//nolint:nestif // One branch per object applicator keyword; flattening would not reduce the inherent fan-out.
 	if v.vocabs.Applicator {
-		// Properties.
-		for propName, propSchema := range schema.Properties {
+		// Properties. Iterate in sorted-key order so the emitted error order is
+		// deterministic; Go map iteration is randomized.
+		for _, propName := range slices.Sorted(maps.Keys(schema.Properties)) {
+			propSchema := schema.Properties[propName]
 			val, exists := obj[propName]
 			if !exists {
 				continue
@@ -3630,8 +3632,9 @@ func (v *validator) validateObject(
 			errs = append(errs, childErrs...)
 		}
 
-		// PatternProperties.
-		for pattern, patternSchema := range schema.PatternProperties {
+		// PatternProperties. Sorted iteration keeps the error order deterministic.
+		for _, pattern := range slices.Sorted(maps.Keys(schema.PatternProperties)) {
+			patternSchema := schema.PatternProperties[pattern]
 			cp := v.patternPropertyFor(schema, pattern)
 			if cp.err != nil {
 				// A pattern Go's RE2 cannot compile fails closed: the keyword
@@ -3651,7 +3654,8 @@ func (v *validator) validateObject(
 				continue
 			}
 
-			for propName, val := range obj {
+			for _, propName := range slices.Sorted(maps.Keys(obj)) {
+				val := obj[propName]
 				if !cp.re.MatchString(propName) {
 					continue
 				}
@@ -3672,7 +3676,8 @@ func (v *validator) validateObject(
 
 		// AdditionalProperties: only considers sibling properties and patternProperties.
 		if schema.AdditionalProperties != nil {
-			for propName, val := range obj {
+			for _, propName := range slices.Sorted(maps.Keys(obj)) {
+				val := obj[propName]
 				if localEvaluated[propName] {
 					continue
 				}
@@ -3701,7 +3706,7 @@ func (v *validator) validateObject(
 		// offending name in the message identifying which key failed and which
 		// object it belongs to.
 		if schema.PropertyNames != nil {
-			for propName := range obj {
+			for _, propName := range slices.Sorted(maps.Keys(obj)) {
 				childPath := instancePath.key(propName)
 				childSchemaPath := schemaPath.kw("propertyNames")
 				childErrs := v.validate(
@@ -3727,7 +3732,8 @@ func (v *validator) validateObject(
 
 		// DependentSchemas (2020-12).
 		if v.draft == Draft2020 {
-			for prop, depSchema := range schema.DependentSchemas {
+			for _, prop := range slices.Sorted(maps.Keys(schema.DependentSchemas)) {
+				depSchema := schema.DependentSchemas[prop]
 				if _, exists := obj[prop]; !exists {
 					continue
 				}
@@ -3792,7 +3798,8 @@ func (v *validator) validateObject(
 
 		// DependentRequired (2020-12).
 		if v.draft == Draft2020 {
-			for prop, deps := range schema.DependentRequired {
+			for _, prop := range slices.Sorted(maps.Keys(schema.DependentRequired)) {
+				deps := schema.DependentRequired[prop]
 				if _, exists := obj[prop]; !exists {
 					continue
 				}
@@ -3821,7 +3828,8 @@ func (v *validator) validateObject(
 	// and dependentRequired there, but accepting the legacy form aids migration and
 	// matches the optional dependencies-compatibility suite). Ungated by vocabulary:
 	// vocabulary is a 2020-12 concept and the legacy keyword predates it.
-	for prop, depSchema := range schema.DependencySchemas {
+	for _, prop := range slices.Sorted(maps.Keys(schema.DependencySchemas)) {
+		depSchema := schema.DependencySchemas[prop]
 		if _, exists := obj[prop]; !exists {
 			continue
 		}
@@ -3835,7 +3843,8 @@ func (v *validator) validateObject(
 		}
 	}
 
-	for prop, deps := range schema.DependencyStrings {
+	for _, prop := range slices.Sorted(maps.Keys(schema.DependencyStrings)) {
+		deps := schema.DependencyStrings[prop]
 		if _, exists := obj[prop]; !exists {
 			continue
 		}
