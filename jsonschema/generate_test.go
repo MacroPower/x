@@ -1706,6 +1706,15 @@ func TestGenerateFor_UnsafePointer(t *testing.T) {
 	require.ErrorIs(t, err, jsonschema.ErrUnsupportedType)
 }
 
+func TestGenerate_NilType(t *testing.T) {
+	t.Parallel()
+
+	// A nil reflect.Type carries no kind to reflect on; it is reported through
+	// the error contract rather than panicking inside reflection.
+	_, err := jsonschema.Generate(t.Context(), nil)
+	require.ErrorIs(t, err, jsonschema.ErrUnsupportedType)
+}
+
 func TestGenerateFor_Complex64(t *testing.T) {
 	t.Parallel()
 

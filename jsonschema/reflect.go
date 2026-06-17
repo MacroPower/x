@@ -109,6 +109,12 @@ func (g *generator) forRun(ctx context.Context) *generator {
 
 // generate produces the root schema for the given type.
 func (g *generator) generate(t reflect.Type) (*Schema, error) {
+	// A nil type carries no kind to reflect on; report it through the error
+	// contract instead of panicking in derefType.
+	if t == nil {
+		return nil, fmt.Errorf("%w: nil type", ErrUnsupportedType)
+	}
+
 	// Follow pointers for root type identity.
 	rootType := derefType(t)
 
