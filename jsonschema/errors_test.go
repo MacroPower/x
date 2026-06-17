@@ -549,6 +549,7 @@ func TestValidationError_TargetsKey(t *testing.T) {
 
 	key := []string{
 		"additionalProperties", "propertyNames", "required",
+		"dependentRequired", "dependencies",
 		"minProperties", "maxProperties",
 		"minItems", "maxItems", "uniqueItems",
 		"contains", "minContains", "maxContains",

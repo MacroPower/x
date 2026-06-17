@@ -357,15 +357,18 @@ func (e *ValidationError) isLeaf() bool {
 // object's or array's structure rather than the content of a value. Structure
 // here means presence, name, size, or membership.
 //
-// It is true for additionalProperties, propertyNames, required, the object size
-// keywords (minProperties, maxProperties), and the array size and membership
-// keywords (minItems, maxItems, uniqueItems, contains, minContains,
-// maxContains). A source-mapping consumer can use it to decide whether to
-// highlight a key (or the containing key) instead of a value when rendering a
-// failure against the original input document.
+// It is true for additionalProperties, propertyNames, required, the dependency
+// keywords that report a missing property (dependentRequired and the legacy
+// string-array form of dependencies), the object size keywords (minProperties,
+// maxProperties), and the array size and membership keywords (minItems,
+// maxItems, uniqueItems, contains, minContains, maxContains). A source-mapping
+// consumer can use it to decide whether to highlight a key (or the containing
+// key) instead of a value when rendering a failure against the original input
+// document.
 func (e *ValidationError) TargetsKey() bool {
 	switch e.Keyword {
 	case KeywordAdditionalProperties, KeywordPropertyNames, KeywordRequired,
+		KeywordDependentRequired, KeywordDependencies,
 		KeywordMinProperties, KeywordMaxProperties,
 		KeywordMinItems, KeywordMaxItems, KeywordUniqueItems,
 		KeywordContains, KeywordMinContains, KeywordMaxContains:
