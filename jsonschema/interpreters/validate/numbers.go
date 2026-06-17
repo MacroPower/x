@@ -262,6 +262,17 @@ func numericEqual(a, b any) bool {
 	af, aIsFloat := asFloat64(a)
 	bf, bIsFloat := asFloat64(b)
 	if (aIsInt || aIsUint || aIsFloat) && (bIsInt || bIsUint || bIsFloat) {
+		// An integer operand compared against a float converts to float64. A
+		// magnitude beyond 2^53 has no exact float64 form, so two distinct
+		// values could collide; treat such a pair as unequal rather than risk a
+		// false match (which would drop a forbidden value from forbidValue).
+		if (aIsInt && !intExactlyRepresentableAsFloat64(ai)) ||
+			(aIsUint && !uintExactlyRepresentableAsFloat64(au)) ||
+			(bIsInt && !intExactlyRepresentableAsFloat64(bi)) ||
+			(bIsUint && !uintExactlyRepresentableAsFloat64(bu)) {
+			return false
+		}
+
 		return af == bf
 	}
 
