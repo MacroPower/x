@@ -31,16 +31,15 @@ var knownVocabularies = map[string]bool{
 }
 
 // Set is the resolved set of active vocabularies for a validation run.
-// Named bools avoid map lookups in the hot validation path, so it tracks only
-// the groups consulted there: applicator, validation, unevaluated, and
-// format-assertion. The content vocabulary also gates a keyword group, but it
-// runs off the hot path and is tracked separately on the validator. Core is
-// always required and meta-data carries no assertion behavior, so neither
-// needs a field here.
+// Named bools avoid map lookups in the hot validation path. It tracks the
+// groups that gate keyword behavior: applicator, validation, unevaluated,
+// content, and format-assertion. Core is always required and meta-data carries
+// no assertion behavior, so neither needs a field here.
 type Set struct {
 	Applicator      bool
 	Validation      bool
 	Unevaluated     bool
+	Content         bool
 	FormatAssertion bool
 }
 
@@ -53,6 +52,7 @@ func All() Set {
 		Applicator:      true,
 		Validation:      true,
 		Unevaluated:     true,
+		Content:         true,
 		FormatAssertion: false,
 	}
 }
@@ -81,6 +81,8 @@ func Resolve(vocabs map[string]bool) Set {
 			vs.Validation = true
 		case Unevaluated2020:
 			vs.Unevaluated = true
+		case Content2020:
+			vs.Content = true
 		}
 	}
 

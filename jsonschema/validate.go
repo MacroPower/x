@@ -311,7 +311,6 @@ type validator struct {
 	vocabs       vocab.Set // resolved active vocabularies
 
 	formatsEnabled bool
-	contentVocab   bool // content vocabulary active (gates validateContent)
 	contentEnabled bool // assert contentEncoding/contentMediaType (WithContent)
 
 	// Treat $id as an inert annotation in walkSchema: no URI or anchor
@@ -423,7 +422,6 @@ func (v *validator) resolveVocabularies() error {
 	// Draft-07 has no vocabulary concept.
 	if v.draft != Draft2020 {
 		v.vocabs = vocab.All()
-		v.contentVocab = true
 
 		return nil
 	}
@@ -443,7 +441,6 @@ func (v *validator) resolveVocabularies() error {
 
 	if rawVocabs == nil {
 		v.vocabs = vocab.All()
-		v.contentVocab = true
 
 		return nil
 	}
@@ -460,10 +457,6 @@ func (v *validator) resolveVocabularies() error {
 	}
 
 	v.vocabs = vocab.Resolve(rawVocabs)
-	// The content vocabulary gates validateContent. The vocab set omits it (content
-	// is annotation-only in the common path), so its active state is tracked
-	// here directly from the raw map.
-	v.contentVocab = rawVocabs[VocabContent2020]
 
 	return nil
 }
@@ -4015,7 +4008,7 @@ func (v *validator) validateContent(
 ) []*ValidationError {
 	// Gated on the content vocabulary, consistent with the other keyword
 	// groups. When it is inactive the content keywords are inert.
-	if !v.contentVocab {
+	if !v.vocabs.Content {
 		return nil
 	}
 
