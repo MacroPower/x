@@ -111,6 +111,9 @@ func WithResolveOptions(opts *ResolveOptions) ValidateOption {
 // precedence, overriding any $vocabulary found in a metaschema resolved
 // via [WithMetaSchemaResolver]. Calling it with no URIs is a no-op, leaving
 // the metaschema or default resolution in effect.
+//
+// Vocabularies are a Draft 2020-12 concept: under Draft 7 the active set is
+// always the full built-in set and this option has no effect.
 func WithVocabularies(uris ...string) ValidateOption {
 	return validateOptionFunc(func(v *validator) {
 		if len(uris) == 0 {
@@ -139,6 +142,10 @@ func WithVocabularies(uris ...string) ValidateOption {
 // ([ErrNotResolved]) leaves the default vocabulary resolution in effect;
 // any other resolver error fails compilation. A nil r restores the default
 // (no metaschema lookup).
+//
+// Like [WithVocabularies], this affects only Draft 2020-12; under Draft 7 the
+// metaschema's $vocabulary is ignored and the full built-in vocabulary set is
+// used.
 func WithMetaSchemaResolver(r RefResolver) ValidateOption {
 	return validateOptionFunc(func(v *validator) { v.metaSchemaResolver = r })
 }

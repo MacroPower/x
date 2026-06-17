@@ -812,8 +812,9 @@ priority is `WithVocabularies` (direct override) > `WithMetaSchemaResolver`
 composes resolvers) > a built-in default set (every
 group active except format-assertion). A schema that requires (`true`) a vocabulary
 this implementation does not recognize, or marks the 2020-12 core vocabulary
-optional, fails with `ErrUnknownVocabulary`. Draft-07 has no `$vocabulary`, so
-all groups stay active.
+optional or omits it, fails with `ErrUnknownVocabulary`. Draft-07 has no
+`$vocabulary`, so all groups stay active and `WithVocabularies` and
+`WithMetaSchemaResolver` have no effect.
 
 ### Remote references
 

@@ -680,7 +680,10 @@
 // understand the vocabulary, so a metaschema with format-assertion: false still
 // asserts format here.
 //
-// Vocabulary resolution follows this priority:
+// Vocabulary support is a Draft 2020-12 feature; under Draft 7 the full
+// built-in vocabulary set is always used and [WithVocabularies] and
+// [WithMetaSchemaResolver] have no effect on it. Under Draft 2020-12,
+// vocabulary resolution follows this priority:
 //  1. [WithVocabularies] direct override (highest).
 //  2. [WithMetaSchemaResolver] lookup: the resolver is consulted once per
 //     compile with the root schema's $schema URI; a miss ([ErrNotResolved])
@@ -692,7 +695,7 @@
 // If a schema requires (marks true) a vocabulary URI that this implementation
 // does not recognize, [Validate] returns [ErrUnknownVocabulary]. The same error
 // is returned when a $vocabulary map marks the 2020-12 core vocabulary as
-// optional (false), which the spec does not permit.
+// optional (false) or omits it entirely, neither of which the spec permits.
 //
 // # Remote References
 //
