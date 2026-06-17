@@ -2,6 +2,7 @@ package dadav
 
 import (
 	"log/slog"
+	"math"
 	"strings"
 
 	"github.com/goccy/go-yaml"
@@ -613,11 +614,18 @@ func toBool(val any) bool {
 	return false
 }
 
-// toFloat64Ptr converts a numeric value to *float64.
+// toFloat64Ptr converts a numeric value to *float64. Non-finite floats
+// (Inf/NaN, which YAML accepts but JSON cannot represent) are rejected: one
+// reaching a schema field would break the whole document's final json.Marshal.
 func toFloat64Ptr(val any) *float64 {
 	switch v := val.(type) {
 	case float64:
+		if math.IsInf(v, 0) || math.IsNaN(v) {
+			return nil
+		}
+
 		return &v
+
 	case int:
 		f := float64(v)
 
@@ -637,22 +645,38 @@ func toFloat64Ptr(val any) *float64 {
 	return nil
 }
 
-// toIntPtr converts a numeric value to *int.
+// toIntPtr converts a numeric value to *int. Values outside the int range are
+// rejected rather than wrapped: goccy decodes integers above MaxInt64 as
+// uint64, and a bare int(v) cast would turn a large positive bound into a
+// negative one. Non-integral or non-finite floats are likewise dropped.
 func toIntPtr(val any) *int {
 	switch v := val.(type) {
 	case int:
 		return &v
 	case int64:
-		i := int(v) //nolint:gosec // JSON Schema constraints are small values
+		if v < math.MinInt || v > math.MaxInt {
+			return nil
+		}
+
+		i := int(v) //nolint:gosec // bounded by the MinInt/MaxInt check above
 
 		return &i
 
 	case uint64:
-		i := int(v) //nolint:gosec // JSON Schema constraints are small values
+		if v > math.MaxInt {
+			return nil
+		}
+
+		i := int(v) //nolint:gosec // bounded by the MaxInt check above
 
 		return &i
 
 	case float64:
+		if math.IsInf(v, 0) || math.IsNaN(v) || v != math.Trunc(v) ||
+			v < math.MinInt || v > math.MaxInt {
+			return nil
+		}
+
 		i := int(v)
 
 		return &i

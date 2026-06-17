@@ -3429,3 +3429,102 @@ func TestHelmSchemaAnnotatorRealWorld(t *testing.T) {
 
 	assertGolden(t, "testdata/cilium_values.schema.json", schema)
 }
+
+// TestHelmSchemaAnnotatorNumericCoercion covers the numeric coercers. Non-finite
+// floats must be dropped (they break the whole schema's final JSON marshal), and
+// integer constraints above the int range must be rejected rather than wrapped
+// to a negative value.
+func TestHelmSchemaAnnotatorNumericCoercion(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		want  func(*testing.T, map[string]any)
+	}{
+		"infinite minimum is dropped": {
+			input: stringtest.Input(`
+				# @schema
+				# minimum: .inf
+				# @schema
+				count: 5
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				count, ok := props["count"].(map[string]any)
+				require.True(t, ok)
+
+				_, has := count["minimum"]
+				assert.False(t, has, "non-finite minimum must be dropped")
+			},
+		},
+		"NaN maximum is dropped": {
+			input: stringtest.Input(`
+				# @schema
+				# maximum: .nan
+				# @schema
+				count: 5
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				count, ok := props["count"].(map[string]any)
+				require.True(t, ok)
+
+				_, has := count["maximum"]
+				assert.False(t, has, "non-finite maximum must be dropped")
+			},
+		},
+		"overflowing maxLength is rejected not wrapped": {
+			input: stringtest.Input(`
+				# @schema
+				# maxLength: 18446744073709551615
+				# @schema
+				name: test
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				name, ok := props["name"].(map[string]any)
+				require.True(t, ok)
+
+				ml, has := name["maxLength"]
+				if has {
+					n, ok := ml.(float64)
+					require.True(t, ok)
+					assert.GreaterOrEqual(t, n, float64(0),
+						"an out-of-range maxLength must never wrap to a negative bound")
+				}
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			gen := magicschema.NewGenerator(
+				magicschema.WithAnnotators(dadav.New()),
+			)
+			schema, err := gen.Generate([]byte(tc.input))
+			require.NoError(t, err)
+
+			out, err := json.Marshal(schema)
+			require.NoError(t, err)
+
+			var got map[string]any
+
+			require.NoError(t, json.Unmarshal(out, &got))
+			tc.want(t, got)
+		})
+	}
+}
