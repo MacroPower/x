@@ -12,6 +12,7 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -94,12 +95,48 @@ func run(cfg config, stdout io.Writer) error {
 	}
 
 	if cfg.Output != "" {
-		return os.WriteFile(cfg.Output, output, 0o644)
+		return writeFileAtomic(cfg.Output, output, 0o644)
 	}
 
 	_, err = stdout.Write(output)
 
 	return err
+}
+
+// writeFileAtomic writes data to path by writing a temp file in the same
+// directory and renaming it into place, so a failed write never truncates or
+// corrupts a file already at path (unlike os.WriteFile, which opens with
+// O_TRUNC first). The rename is atomic within a filesystem; the temp file
+// shares path's directory to keep it on the same one.
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("create temp file: %w", err)
+	}
+
+	tmpName := tmp.Name()
+
+	// A close error can mean unflushed data, so it matters as much as a write
+	// error; take whichever failed first.
+	_, writeErr := tmp.Write(data)
+	err = cmp.Or(writeErr, tmp.Close())
+
+	// CreateTemp makes the file 0600, so set the requested mode explicitly.
+	if err == nil {
+		err = os.Chmod(tmpName, perm)
+	}
+
+	if err == nil {
+		err = os.Rename(tmpName, path)
+	}
+
+	if err != nil {
+		_ = os.Remove(tmpName)
+
+		return fmt.Errorf("write %q: %w", path, err)
+	}
+
+	return nil
 }
 
 // resolveImportPath returns the import path of the current package.
