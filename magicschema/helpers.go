@@ -144,7 +144,7 @@ func ToSubSchemaMap(val any) map[string]*jsonschema.Schema {
 }
 
 // ParseYAMLValue parses a YAML value string into [json.RawMessage].
-func ParseYAMLValue(val string) []byte {
+func ParseYAMLValue(val string) json.RawMessage {
 	var v any
 
 	err := yaml.Unmarshal([]byte(val), &v)

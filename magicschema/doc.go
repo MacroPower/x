@@ -235,7 +235,7 @@
 //     by round-tripping through JSON.
 //   - [ToSubSchemaArray] converts a []any to []*jsonschema.Schema.
 //   - [ToSubSchemaMap] converts a map[string]any to map[string]*jsonschema.Schema.
-//   - [ParseYAMLValue] parses a YAML value string into a []byte of JSON.
+//   - [ParseYAMLValue] parses a YAML value string into a [json.RawMessage].
 //   - [IsAnnotationComment] reports whether a comment string looks like an
 //     annotation marker from any supported annotator format (@schema,
 //     @param, @skip, @default, --, etc.), allowing annotators and the
