@@ -424,20 +424,9 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *Schema) err
 			return fmt.Errorf("jsonschema tag: key %q requires a non-empty value", key)
 		}
 
-		parts := strings.Split(value, "|")
-
-		examples := make([]any, len(parts))
-		for i, p := range parts {
-			if p == "" {
-				return fmt.Errorf("jsonschema tag: key %q has an empty value segment", key)
-			}
-
-			v, err := parseTypedScalar(p, scalarType)
-			if err != nil {
-				return fmt.Errorf("jsonschema tag: key %q: %w", key, err)
-			}
-
-			examples[i] = v
+		examples, err := parseEnumValues(key, value, scalarType)
+		if err != nil {
+			return err
 		}
 
 		s.Examples = examples
