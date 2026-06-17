@@ -50,26 +50,19 @@ var (
 	}
 )
 
-// isKeyValueTag reports whether a jsonschema tag should be parsed as
-// comma-separated key=value pairs (as opposed to a bare description).
+// isKeyValueTag reports whether a jsonschema tag, already split into pairs by
+// [splitTagPairs], should be parsed as comma-separated key=value pairs (as
+// opposed to a bare description). The caller gates on [kvPrefixRegexp] first,
+// so a tag with no "WORD=" prefix never reaches here.
 //
-// A tag is key-value when its first segment is WORD=VALUE (no space before the
-// '=') and either the key is a recognized keyword, or the value is space-free.
-// This keeps recognized keywords with spaced values (e.g.
-// "description=Hello World,minimum=1") in key-value mode, surfaces typos like
-// "descrption=typo" as unrecognized-key errors, yet treats prose such as
-// "a=b is the formula" as a bare description.
-func isKeyValueTag(tag string) bool {
-	if !kvPrefixRegexp.MatchString(tag) {
-		return false
-	}
-
-	// Inspect only the first key=value segment, honoring the same escaped-comma
-	// rules splitTagPairs applies so an escaped comma in the value does not
-	// prematurely end the segment.
-	first := splitTagPairs(tag)[0]
-
-	key, value, found := strings.Cut(first, "=")
+// A tag is key-value when its first segment is WORD=VALUE and either the key is
+// a recognized keyword, or the value is space-free. This keeps recognized
+// keywords with spaced values (e.g. "description=Hello World,minimum=1") in
+// key-value mode, surfaces typos like "descrption=typo" as unrecognized-key
+// errors, yet treats prose such as "a=b is the formula" as a bare description.
+func isKeyValueTag(pairs []string) bool {
+	// Inspect only the first key=value segment.
+	key, value, found := strings.Cut(pairs[0], "=")
 	if !found {
 		return false
 	}
@@ -97,7 +90,15 @@ func applyJSONSchemaTag(tag string, fieldType reflect.Type, s *Schema) error {
 		return nil
 	}
 
-	if !isKeyValueTag(tag) {
+	// Gate on the cheap regex before paying for splitTagPairs, then split once
+	// and reuse the pairs for both the key-value decision and the apply loop.
+	if !kvPrefixRegexp.MatchString(tag) {
+		s.Description = tag
+		return nil
+	}
+
+	pairs := splitTagPairs(tag)
+	if !isKeyValueTag(pairs) {
 		s.Description = tag
 		return nil
 	}
@@ -106,7 +107,6 @@ func applyJSONSchemaTag(tag string, fieldType reflect.Type, s *Schema) error {
 
 	var overriddenType string
 
-	pairs := splitTagPairs(tag)
 	for _, pair := range pairs {
 		key, value, found := strings.Cut(pair, "=")
 		if !found {
