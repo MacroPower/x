@@ -228,6 +228,24 @@ func TestHostnameRejectsAllNumericTLD(t *testing.T) {
 		"all-numeric hostname should be rejected by the hostname validator")
 }
 
+func TestIDNHostnameRejectsFullwidthNumericTLD(t *testing.T) {
+	t.Parallel()
+
+	// A top-level label of fullwidth digits IDNA-maps to ASCII digits
+	// (U+FF11 U+FF12 U+FF13 -> "123"), so it is indistinguishable from an IPv4
+	// label and must be rejected like its ASCII spelling. The ban checks the
+	// A-label form, not the raw U-label, which isAllDigits would miss.
+	fullwidth := "１２３" // fullwidth "123"
+
+	err := validator(t, "idn-hostname")(fullwidth)
+	require.Error(t, err,
+		"idn-hostname with a fullwidth-digit TLD should be rejected")
+
+	err = validator(t, "idn-hostname")("example." + fullwidth)
+	require.Error(t, err,
+		"idn-hostname with a fullwidth-digit TLD on a multi-label name should be rejected")
+}
+
 func TestIDNHostnameRejectsALabelContextualViolation(t *testing.T) {
 	t.Parallel()
 

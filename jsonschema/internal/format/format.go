@@ -1215,11 +1215,17 @@ func validateIDNHostnameLabels(s string, banNumericTLD bool) error {
 
 	// When banNumericTLD is set, the top-level label must not be all-numeric,
 	// mirroring validateHostname so that an idn-hostname cannot be confused with
-	// an IPv4 address (RFC 1123 §2.1 / RFC 5890). The check applies to the label
-	// as written: a numeric U-label is ASCII digits, so an all-ASCII-digit final
-	// label is rejected.
-	if banNumericTLD && isAllDigits(labels[len(labels)-1]) {
-		return errors.New("invalid IDN hostname: numeric top-level label")
+	// an IPv4 address (RFC 1123 §2.1 / RFC 5890). The check uses the A-label
+	// (IDNA-mapped) form, so a label of fullwidth digits (which IDNA-maps to
+	// ASCII "123") is rejected too, not only a literal ASCII-digit label.
+	// ToASCII already succeeded for every label in the loop.
+	if banNumericTLD {
+		tld := labels[len(labels)-1]
+
+		ascii, err := idna.Lookup.ToASCII(tld)
+		if err == nil && isAllDigits(ascii) {
+			return errors.New("invalid IDN hostname: numeric top-level label")
+		}
 	}
 
 	return nil
