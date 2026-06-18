@@ -107,8 +107,8 @@ func applyJSONSchemaTag(tag string, fieldType reflect.Type, s *Schema) error {
 	scalarType := fieldType
 
 	var (
-		overriddenType  string
-		numericBoundSet bool
+		overriddenType string
+		groupsSet      = map[string]bool{}
 	)
 
 	for _, pair := range pairs {
@@ -125,13 +125,14 @@ func applyJSONSchemaTag(tag string, fieldType reflect.Type, s *Schema) error {
 			return fmt.Errorf("jsonschema tag: key %q cannot follow type=%s", key, overriddenType)
 		}
 
-		// A non-numeric type= override drops numeric bounds. Dropping the bounds
-		// derived from the Go kind is intended, but a bound an earlier tag pair
-		// set is the author's explicit input, so report the conflict rather than
-		// discarding it silently.
-		if key == KeywordType && numericBoundSet &&
-			validTypeName(value) && value != typeNameInteger && value != typeNameNumber {
-			return fmt.Errorf("jsonschema tag: numeric bound conflicts with type=%s", value)
+		// A type= override drops the constraint groups the new type cannot use.
+		// Dropping the keywords derived from the Go kind is intended, but a
+		// keyword an earlier tag pair set is the author's explicit input, so
+		// report the conflict rather than discarding it silently.
+		if key == KeywordType && validTypeName(value) {
+			if g := conflictingGroup(groupsSet, value); g != "" {
+				return fmt.Errorf("jsonschema tag: %s constraint conflicts with type=%s", g, value)
+			}
 		}
 
 		err := applyTagKeyValue(key, value, scalarType, s)
@@ -139,8 +140,8 @@ func applyJSONSchemaTag(tag string, fieldType reflect.Type, s *Schema) error {
 			return err
 		}
 
-		if isNumericBoundKey(key) {
-			numericBoundSet = true
+		if g := constraintGroup(key); g != "" {
+			groupsSet[g] = true
 		}
 
 		if key == KeywordType {
@@ -163,15 +164,66 @@ func isScalarValueKey(key string) bool {
 	}
 }
 
-// isNumericBoundKey reports whether a jsonschema tag key sets one of the
-// numeric bound keywords that a non-numeric type= override drops.
-func isNumericBoundKey(key string) bool {
+// Constraint group names: the JSON type family whose keywords a type= override
+// keeps. A keyword outside the override's family is dropped, so an explicitly
+// tagged keyword in a dropped family is a conflict.
+const (
+	groupNumeric = "numeric"
+	groupString  = "string"
+	groupArray   = "array"
+	groupObject  = "object"
+)
+
+// constraintGroup returns the constraint group a jsonschema tag key belongs to,
+// or "" for an annotation key such as description or default that survives any
+// type. Only the tag-settable constraint keywords are classified; the
+// kind-derived keywords a type= override also drops never originate from a tag.
+func constraintGroup(key string) string {
 	switch key {
 	case KeywordMinimum, KeywordMaximum, KeywordExclusiveMinimum, KeywordExclusiveMaximum, KeywordMultipleOf:
-		return true
+		return groupNumeric
+	case KeywordMinLength, KeywordMaxLength, KeywordPattern, KeywordFormat:
+		return groupString
+	case KeywordUniqueItems, KeywordMinItems, KeywordMaxItems:
+		return groupArray
+	case KeywordMinProperties, KeywordMaxProperties:
+		return groupObject
 	default:
-		return false
+		return ""
 	}
+}
+
+// typeConstraintGroup returns the one constraint group whose keywords a type=
+// value keeps: integer and number both keep the numeric group, the others keep
+// their own, and boolean or null keep none.
+func typeConstraintGroup(typeName string) string {
+	switch typeName {
+	case typeNameInteger, typeNameNumber:
+		return groupNumeric
+	case typeNameString:
+		return groupString
+	case typeNameArray:
+		return groupArray
+	case typeNameObject:
+		return groupObject
+	default:
+		return ""
+	}
+}
+
+// conflictingGroup returns the first constraint group in groupsSet that a type=
+// override to typeName would drop, or "" when every set group survives. The
+// fixed iteration order keeps the reported conflict deterministic.
+func conflictingGroup(groupsSet map[string]bool, typeName string) string {
+	kept := typeConstraintGroup(typeName)
+
+	for _, g := range []string{groupNumeric, groupString, groupArray, groupObject} {
+		if groupsSet[g] && g != kept {
+			return g
+		}
+	}
+
+	return ""
 }
 
 // standInTypeFor returns the Go type that scalar tag values parse against
