@@ -1028,6 +1028,25 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 		}
 	}
 
+	// Embedded types composed via allOf get a synthetic byName key from
+	// allOfName. The key is stable per type, so the same type composed at one
+	// depth collides into a single name and its two sightings annihilate as
+	// ambiguous, matching encoding/json's treatment of a type embedded twice at
+	// the same depth; a deeper re-occurrence is shadowed by the shallower one.
+	// The per-type index keeps distinct types apart even when their names match
+	// across packages.
+	allOfNames := map[reflect.Type]string{}
+	allOfName := func(ft reflect.Type) string {
+		if n, ok := allOfNames[ft]; ok {
+			return n
+		}
+
+		n := fmt.Sprintf("__allof__%s__%d", ft.Name(), len(allOfNames))
+		allOfNames[ft] = n
+
+		return n
+	}
+
 	// EmbedEntry is a struct type queued for processing at the next depth.
 	type embedEntry struct {
 		typ      reflect.Type
@@ -1107,9 +1126,8 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 						// JSONSchemaProvider, compose via allOf. Otherwise,
 						// skip, since an unrestricted schema adds no useful info.
 						if g.needsAllOfComposition(ft) {
-							name := "__allof__" + ft.Name() + fmt.Sprintf("__%d", len(order))
 							record(
-								name,
+								allOfName(ft),
 								fieldLevel{field: f, depth: depth, optional: e.optional, composeAllOf: true},
 								false,
 							)
@@ -1124,9 +1142,8 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 							// Compose via allOf: treat as a single entry. A pointer
 							// embed makes the composition optional: a nil pointer
 							// contributes nothing to the marshaled object.
-							name := "__allof__" + ft.Name() + fmt.Sprintf("__%d", len(order))
 							record(
-								name,
+								allOfName(ft),
 								fieldLevel{
 									field:        f,
 									depth:        depth,

@@ -2457,6 +2457,66 @@ func TestGenerateFor_AllofPrefixFieldNotMisclassified(t *testing.T) {
 	assert.Empty(t, s.AllOf, "no spurious allOf composition is created")
 }
 
+// allOfEmbed implements JSONSchemaProvider, so it is composed via allOf rather
+// than having its fields promoted.
+//
+//nolint:unused // Embedded into allOfDupOuter; exercised via reflection.
+type allOfEmbed struct {
+	X int `json:"x"`
+}
+
+//nolint:unused // Provider method invoked via reflection during generation.
+func (allOfEmbed) JSONSchema(context.Context, jsonschema.TypeContext) (*jsonschema.Schema, error) {
+	return &jsonschema.Schema{
+		Type:       "object",
+		Properties: map[string]*jsonschema.Schema{"x": {Type: "integer"}},
+		Required:   []string{"x"},
+	}, nil
+}
+
+// allOfWrapM and allOfWrapN each embed allOfEmbed so it reaches allOfDupOuter
+// twice at the same depth.
+//
+//nolint:unused // Routes allOfEmbed to allOfDupOuter; exercised via reflection.
+type allOfWrapM struct{ allOfEmbed }
+
+//nolint:unused // Routes allOfEmbed to allOfDupOuter; exercised via reflection.
+type allOfWrapN struct{ allOfEmbed }
+
+type allOfDupOuter struct {
+	allOfWrapM //nolint:unused // Embedded only; exercised via reflection.
+	allOfWrapN //nolint:unused // Embedded only; exercised via reflection.
+}
+
+func TestGenerateFor_SameDepthDuplicateAllOfEmbedAnnihilated(t *testing.T) {
+	t.Parallel()
+
+	// The allOfEmbed type reaches allOfDupOuter twice at the same depth (through
+	// wrapM and wrapN). Encoding/json annihilates its promoted field, so the
+	// type marshals to {}. The schema must annihilate the composition too rather
+	// than emit two allOf branches requiring x, which would reject the type's
+	// own output.
+	s, err := jsonschema.GenerateFor[allOfDupOuter](t.Context())
+	require.NoError(t, err)
+
+	assert.Empty(t, s.AllOf,
+		"a provider type embedded twice at one depth is annihilated, like encoding/json")
+	assert.NotContains(t, s.Defs, "allOfEmbed",
+		"the annihilated composition leaves no $defs entry")
+
+	marshaled, err := json.Marshal(allOfDupOuter{
+		allOfWrapM{allOfEmbed{X: 10}},
+		allOfWrapN{allOfEmbed{X: 20}},
+	})
+	require.NoError(t, err)
+	assert.JSONEq(t, "{}", string(marshaled),
+		"encoding/json annihilates the duplicated field")
+
+	v := jsonschema.MustCompile(s)
+	assert.NoError(t, v.ValidateJSON(t.Context(), marshaled),
+		"the schema accepts the type's own marshaled output")
+}
+
 func TestGenerateFor_WithTypeSchemaNamedNonStructInlined(t *testing.T) {
 	t.Parallel()
 
