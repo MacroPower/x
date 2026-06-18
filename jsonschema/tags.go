@@ -522,11 +522,13 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *Schema) err
 // assertion: it sets Type, clears a Types array, drops a bare $ref to a
 // definition, removes the nullable anyOf wrapper a pointer field generates,
 // and drops the keyword groups the new type cannot use. The numeric bounds,
-// array keywords, and object keywords each derive from the original Go kind
-// (an int64-reflected field such as [time.Duration] carries range bounds, a
-// slice carries items, a struct carries properties); left on a schema of a
-// different type they are vacuous but emit as confusing dead structure. Tag
-// pairs apply in order, so keys after type= still take effect.
+// array keywords, object keywords, and string constraints each derive from the
+// original Go kind (an int64-reflected field such as [time.Duration] carries
+// range bounds, a slice carries items, a struct carries properties, and a
+// string-reflected field such as [time.Time] or [big.Rat] carries a
+// format/pattern); left on a schema of a different type they are vacuous but
+// emit as confusing dead structure. Tag pairs apply in order, so keys after
+// type= still take effect.
 func applyTypeOverride(s *Schema, typeName string) {
 	// A nullable pointer field wraps the value schema in anyOf[value, null];
 	// an explicit type replaces the whole construct, including the wrapped
@@ -550,6 +552,13 @@ func applyTypeOverride(s *Schema, typeName string) {
 		s.ExclusiveMinimum = nil
 		s.ExclusiveMaximum = nil
 		s.MultipleOf = nil
+	}
+
+	if typeName != typeNameString {
+		s.Format = ""
+		s.Pattern = ""
+		s.MinLength = nil
+		s.MaxLength = nil
 	}
 
 	if typeName != typeNameArray {

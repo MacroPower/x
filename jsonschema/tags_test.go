@@ -913,6 +913,26 @@ func TestTagTypeOverride(t *testing.T) {
 			"the int64-derived range bounds are dropped with the type")
 	})
 
+	t.Run("string keywords dropped for non-string type", func(t *testing.T) {
+		t.Parallel()
+
+		// A time.Time reflects to {"type":"string","format":"date-time"}; an
+		// integer override must not leave the stale string format behind.
+		// WithDefinitions(false) keeps the schema inline so the keyword is
+		// visible (in $defs mode the field would be a bare $ref).
+		type T struct {
+			D time.Time `json:"d" jsonschema:"type=integer"`
+		}
+
+		s, err := jsonschema.GenerateFor[T](t.Context(), jsonschema.WithDefinitions(false))
+		require.NoError(t, err)
+
+		got, err := json.Marshal(s.Properties["d"])
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"type":"integer"}`, string(got),
+			"the string-derived format is dropped with the type")
+	})
+
 	t.Run("numeric override keeps bounds", func(t *testing.T) {
 		t.Parallel()
 
