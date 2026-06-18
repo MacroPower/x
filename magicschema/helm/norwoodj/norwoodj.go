@@ -515,12 +515,21 @@ func (a *Annotator) parseNewStyleComment(commentStr string) *parsedComment {
 	}
 
 	if !hasDesc {
-		// No "# --" line, but check for standalone @default.
+		// No "# --" line, but check for standalone @default. Multiple @default
+		// lines resolve last-wins, matching parseCommentBlock's scan on the
+		// "# --" path so the result does not depend on whether a description
+		// line is present.
+		var lastDefault *string
+
 		for _, line := range lines {
 			if dm := defaultValueRegex.FindStringSubmatch(line); len(dm) > 1 {
 				val := dm[1]
-				return &parsedComment{defaultVal: &val}
+				lastDefault = &val
 			}
+		}
+
+		if lastDefault != nil {
+			return &parsedComment{defaultVal: lastDefault}
 		}
 
 		return nil

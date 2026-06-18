@@ -141,6 +141,27 @@ func TestHelmDocsAnnotator(t *testing.T) {
 				}
 			},
 		},
+		"standalone @default uses last when no description line": {
+			// Without a "# --" line the @default scan must still be last-wins,
+			// matching the "# --" path, so the resolved default does not depend
+			// on whether a description line is present.
+			input: stringtest.Input(`
+				# @default -- first
+				# @default -- second
+				val: x
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				v, ok := props["val"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "second", v["default"])
+			},
+		},
 		"type hint string": {
 			input: stringtest.Input(`
 				# -- (string) Container image
