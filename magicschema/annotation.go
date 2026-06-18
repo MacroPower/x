@@ -308,6 +308,26 @@ func mergeSchemaFields(dst, src *jsonschema.Schema) {
 		dst.Comment = src.Comment
 	}
 
+	if dst.Schema == "" {
+		dst.Schema = src.Schema
+	}
+
+	if dst.Anchor == "" {
+		dst.Anchor = src.Anchor
+	}
+
+	if dst.DynamicAnchor == "" {
+		dst.DynamicAnchor = src.DynamicAnchor
+	}
+
+	if dst.DynamicRef == "" {
+		dst.DynamicRef = src.DynamicRef
+	}
+
+	if dst.Vocabulary == nil {
+		dst.Vocabulary = src.Vocabulary
+	}
+
 	if dst.ContentEncoding == "" {
 		dst.ContentEncoding = src.ContentEncoding
 	}
