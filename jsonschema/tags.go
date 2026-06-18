@@ -468,10 +468,12 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *Schema) err
 // applyTypeOverride applies a type= tag value, replacing the reflected type
 // assertion: it sets Type, clears a Types array, drops a bare $ref to a
 // definition, removes the nullable anyOf wrapper a pointer field generates,
-// and, when the new type is not numeric, drops the numeric bounds derived from
-// the Go kind (an int64-reflected field such as [time.Duration] carries range
-// bounds that would otherwise survive as noise on a string schema). Tag pairs
-// apply in order, so keys after type= still take effect.
+// and drops the keyword groups the new type cannot use. The numeric bounds,
+// array keywords, and object keywords each derive from the original Go kind
+// (an int64-reflected field such as [time.Duration] carries range bounds, a
+// slice carries items, a struct carries properties); left on a schema of a
+// different type they are vacuous but emit as confusing dead structure. Tag
+// pairs apply in order, so keys after type= still take effect.
 func applyTypeOverride(s *Schema, typeName string) {
 	// A nullable pointer field wraps the value schema in anyOf[value, null];
 	// an explicit type replaces the whole construct, including the wrapped
@@ -495,6 +497,33 @@ func applyTypeOverride(s *Schema, typeName string) {
 		s.ExclusiveMinimum = nil
 		s.ExclusiveMaximum = nil
 		s.MultipleOf = nil
+	}
+
+	if typeName != typeNameArray {
+		s.Items = nil
+		s.PrefixItems = nil
+		s.ItemsArray = nil
+		s.AdditionalItems = nil
+		s.UnevaluatedItems = nil
+		s.MinItems = nil
+		s.MaxItems = nil
+		s.UniqueItems = false
+		s.Contains = nil
+		s.MinContains = nil
+		s.MaxContains = nil
+	}
+
+	if typeName != typeNameObject {
+		s.Properties = nil
+		s.PatternProperties = nil
+		s.AdditionalProperties = nil
+		s.PropertyNames = nil
+		s.UnevaluatedProperties = nil
+		s.Required = nil
+		s.MinProperties = nil
+		s.MaxProperties = nil
+		s.DependentRequired = nil
+		s.DependentSchemas = nil
 	}
 }
 

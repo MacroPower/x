@@ -1319,8 +1319,34 @@ func TestTagScalarAfterTypeOverride(t *testing.T) {
 			prop: "days",
 			// The enum lands on the field schema itself: the stand-in is
 			// never a sequence, so the enum-to-items redirection a slice
-			// field normally gets is off after the override.
-			want: `{"type":"string","items":{"type":"string"},"enum":["a","b"]}`,
+			// field normally gets is off after the override. The override
+			// also drops the reflected items keyword, which no longer
+			// applies to a string.
+			want: `{"type":"string","enum":["a","b"]}`,
+		},
+		"map override to scalar drops additionalProperties": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V map[string]int `json:"v" jsonschema:"type=string"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			prop: "v",
+			want: `{"type":"string"}`,
+		},
+		"inline struct override to scalar drops properties": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V struct {
+						X string `json:"x"`
+					} `json:"v" jsonschema:"type=string"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			prop: "v",
+			want: `{"type":"string"}`,
 		},
 		"default after object override": {
 			generate: func() (*jsonschema.Schema, error) {
