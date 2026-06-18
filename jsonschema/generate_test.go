@@ -2,6 +2,7 @@ package jsonschema_test
 
 import (
 	"context"
+	"encoding"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -577,6 +578,59 @@ func TestGenerateFor_JSONSchemaExtenderError(t *testing.T) {
 	_, err := jsonschema.GenerateFor[failingExtender](t.Context())
 	require.ErrorIs(t, err, errExtendUnavailable)
 	assert.ErrorContains(t, err, "failingExtender.JSONSchemaExtend")
+}
+
+// nullableDefStatus is a named scalar implementing JSONSchemaExtender, so it is
+// extracted to $defs and shared by every reference. The shared definition must
+// stay nullability-free: nullability belongs on each reference (a pointer field
+// wraps the $ref in an anyOf null branch), not on the single shared entry.
+type nullableDefStatus string
+
+func (nullableDefStatus) JSONSchemaExtend(context.Context, jsonschema.TypeContext, *jsonschema.Schema) error {
+	return nil
+}
+
+type ptrFirstHolder struct {
+	Optional *nullableDefStatus `json:"optional"`
+	Required nullableDefStatus  `json:"required"`
+}
+
+type valueFirstHolder struct {
+	Required nullableDefStatus  `json:"required"`
+	Optional *nullableDefStatus `json:"optional"`
+}
+
+func TestGenerateFor_SharedDefNullabilityIndependentOfFieldOrder(t *testing.T) {
+	t.Parallel()
+
+	// The shared $defs entry must be identical whichever reference is generated
+	// first, and must never bake in a null branch: baking nullability into the
+	// shared definition would let field declaration order decide it for every
+	// reference.
+	ptrFirst, err := jsonschema.GenerateFor[ptrFirstHolder](t.Context())
+	require.NoError(t, err)
+
+	valueFirst, err := jsonschema.GenerateFor[valueFirstHolder](t.Context())
+	require.NoError(t, err)
+
+	defPtrFirst := ptrFirst.Defs["nullableDefStatus"]
+	require.NotNil(t, defPtrFirst)
+
+	defValueFirst := valueFirst.Defs["nullableDefStatus"]
+	require.NotNil(t, defValueFirst)
+
+	assert.Equal(t, "string", defPtrFirst.Type, "def: %s", marshalSchema(t, defPtrFirst))
+	assert.Empty(t, defPtrFirst.AnyOf)
+	assert.JSONEq(t, marshalSchema(t, defValueFirst), marshalSchema(t, defPtrFirst))
+
+	// A non-pointer field is never nullable, regardless of field order.
+	for name, s := range map[string]*jsonschema.Schema{"ptrFirst": ptrFirst, "valueFirst": valueFirst} {
+		v, cerr := jsonschema.Compile(t.Context(), s)
+		require.NoError(t, cerr, name)
+
+		verr := v.Validate(t.Context(), map[string]any{"required": nil, "optional": "x"})
+		require.Error(t, verr, "%s: a null non-pointer field must be rejected", name)
+	}
 }
 
 func TestGenerateFor_WithTypeSchema(t *testing.T) {
@@ -5575,6 +5629,49 @@ func TestGenerateFor_EmbeddedInterfaceWithProvider(t *testing.T) {
 		"type":"object",
 		"properties":{"extra":{"type":"string"}},
 		"required":["extra"],
+		"additionalProperties":false
+	}`, string(got))
+}
+
+// textMarshalerIface is an interface whose method set includes
+// encoding.TextMarshaler. An interface cannot serialize as a string the way a
+// concrete TextMarshaler does, so an embed of it must be skipped, not composed
+// into an unsatisfiable allOf:[{"type":"string"}] branch.
+type textMarshalerIface interface {
+	encoding.TextMarshaler
+}
+
+// embedsTextMarshalerIface declares a direct MarshalJSON so the outer-level
+// promoted-TextMarshaler short-circuit does not fire (it would emit
+// {"type":"string"} and mask how the embedded interface is handled), forcing
+// the struct to reflect its fields.
+type embedsTextMarshalerIface struct {
+	textMarshalerIface
+
+	Name string `json:"name"`
+}
+
+func (embedsTextMarshalerIface) MarshalJSON() ([]byte, error) { return []byte(`{}`), nil }
+
+func TestGenerateFor_EmbeddedTextMarshalerInterfaceSkipped(t *testing.T) {
+	t.Parallel()
+
+	s, err := jsonschema.GenerateFor[embedsTextMarshalerIface](t.Context())
+	require.NoError(t, err)
+
+	// The embed matches TextMarshaler only through the interface method set, so
+	// it is skipped rather than composed into an allOf branch that would make the
+	// schema unsatisfiable.
+	assert.Empty(t, s.AllOf, "schema: %s", marshalSchema(t, s))
+
+	got, err := json.Marshal(s)
+	require.NoError(t, err)
+
+	assert.JSONEq(t, `{
+		"$schema":"https://json-schema.org/draft/2020-12/schema",
+		"type":"object",
+		"properties":{"name":{"type":"string"}},
+		"required":["name"],
 		"additionalProperties":false
 	}`, string(got))
 }
