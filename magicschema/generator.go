@@ -151,11 +151,7 @@ func (g *Generator) Generate(inputs ...[]byte) (*jsonschema.Schema, error) {
 			}
 		}
 
-		result = schemas[0]
-
-		for i := 1; i < len(schemas); i++ {
-			result = mergeSchemas(result, schemas[i])
-		}
+		result = reduceSchemas(schemas)
 	}
 
 	// Apply root-level settings.
@@ -278,12 +274,18 @@ func (g *Generator) generateSingle(input []byte) (*jsonschema.Schema, []Annotato
 		return TrueSchema(), allPrepared, nil
 	}
 
+	return reduceSchemas(schemas), allPrepared, nil
+}
+
+// reduceSchemas folds a non-empty slice of schemas into one with union
+// semantics, merging left to right. Callers guard against an empty slice.
+func reduceSchemas(schemas []*jsonschema.Schema) *jsonschema.Schema {
 	result := schemas[0]
-	for i := 1; i < len(schemas); i++ {
-		result = mergeSchemas(result, schemas[i])
+	for _, s := range schemas[1:] {
+		result = mergeSchemas(result, s)
 	}
 
-	return result, allPrepared, nil
+	return result
 }
 
 // prepareAnnotators calls ForContent on each prototype annotator, dropping
