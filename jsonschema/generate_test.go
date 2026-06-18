@@ -2391,8 +2391,8 @@ func TestGenerateFor_JsonStringOverridesRef(t *testing.T) {
 
 	// json:",string" is a field-level override that takes precedence regardless
 	// of the type-level schema, including $ref extraction. The field uses
-	// {type: string} directly, not a $ref. The type's $defs entry may still
-	// exist as a side effect of type-level processing (orphaned but harmless).
+	// {type: string} directly, not a $ref, and the type's own schema is not
+	// generated at all, so no orphan $defs entry is left behind.
 	type Container struct {
 		S Status `json:"s,string"`
 	}
@@ -2403,6 +2403,8 @@ func TestGenerateFor_JsonStringOverridesRef(t *testing.T) {
 	// The field schema should be {type: string}, NOT a $ref to Status.
 	assert.Equal(t, "string", s.Properties["s"].Type)
 	assert.Empty(t, s.Properties["s"].Ref)
+	assert.NotContains(t, s.Defs, "Status",
+		"the overridden type must not leave an orphan $defs entry")
 }
 
 func TestGenerateFor_WithTypeSchemaNamedNonStructInlined(t *testing.T) {

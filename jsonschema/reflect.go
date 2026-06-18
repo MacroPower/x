@@ -1293,13 +1293,7 @@ func (g *generator) needsAllOfComposition(t reflect.Type) bool {
 // later in applyFieldInterpreters once all sibling properties exist.
 func (g *generator) buildFieldSchema(parentType reflect.Type, fi structFieldInfo, parent *Schema) (*Schema, error) {
 	fieldType := fi.field.Type
-
-	// Generate schema for the field's type.
 	isPointer := fieldType.Kind() == reflect.Pointer
-	fieldSchema, err := g.schemaForType(fieldType, false)
-	if err != nil {
-		return nil, err
-	}
 
 	// 1. JSON ",string" override. The tag-scalar type (used to parse the
 	// jsonschema tag's const/enum/default values) defaults to the field's Go
@@ -1307,20 +1301,34 @@ func (g *generator) buildFieldSchema(parentType reflect.Type, fi structFieldInfo
 	// also serializes the value as a quoted string, so the tag scalars must parse
 	// as strings too; otherwise a numeric const on an int field would be
 	// {"type":"string","const":5}, which the string-encoded "5" can never satisfy.
+	//
+	// On a stringable type the override fully replaces the field schema, so
+	// generating the field's own type is skipped: it would be wasted work and,
+	// for a type extracted to $defs (a provider or extender), would register an
+	// orphan definition and drop the provider's constraints.
 	tagType := fieldType
-	if fi.jsonString {
-		if isStringableType(fieldType) {
-			// A pointer to a stringable type is a nilable container, so it shares
-			// the slice/map null-branch policy; a non-pointer is always a bare
-			// string.
-			fieldSchema = &Schema{}
-			if isPointer {
-				g.applyContainerType(fieldSchema, typeNameString)
-			} else {
-				fieldSchema.Type = typeNameString
-			}
+	stringOverride := fi.jsonString && isStringableType(fieldType)
 
-			tagType = reflect.TypeFor[string]()
+	var (
+		fieldSchema *Schema
+		err         error
+	)
+
+	if stringOverride {
+		// A pointer to a stringable type is a nilable container, so it shares the
+		// slice/map null-branch policy; a non-pointer is always a bare string.
+		fieldSchema = &Schema{}
+		if isPointer {
+			g.applyContainerType(fieldSchema, typeNameString)
+		} else {
+			fieldSchema.Type = typeNameString
+		}
+
+		tagType = reflect.TypeFor[string]()
+	} else {
+		fieldSchema, err = g.schemaForType(fieldType, false)
+		if err != nil {
+			return nil, err
 		}
 	}
 
