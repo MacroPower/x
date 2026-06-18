@@ -449,8 +449,16 @@ func (g *generator) resolveTypeSchema(t reflect.Type) (*Schema, bool, error) {
 // handleOverrideType processes a type resolved by a registered
 // TypeSchemaProvider (WithTypeSchemaProvider or WithTypeSchema). A nil override
 // marks the type unrestricted, mirroring a JSONSchemaProvider returning nil.
+func (g *generator) handleOverrideType(t reflect.Type, override *Schema, nullable bool) (*Schema, error) {
+	return g.finishTypeOverride(t, override, nullable)
+}
+
+// finishTypeOverride applies the post-processing shared by the WithTypeSchema
+// override path and the JSONSchemaProvider path: clone the caller-shared schema,
+// apply type-level comments, then either extract to $defs (returning a $ref) or
+// make the result nullable inline. A nil src marks the type unrestricted.
 //
-// The override is copied with the upstream shallow CloneSchemas, not the JSON
+// The source is copied with the upstream shallow CloneSchemas, not the JSON
 // round-trip cloneSchema used for remote refs: CloneSchemas preserves the
 // caller's exact any-typed Enum/Const/Default values, whereas a round-trip
 // would rewrite them (a Go int enum value would decode back as float64).
@@ -459,13 +467,13 @@ func (g *generator) resolveTypeSchema(t reflect.Type) (*Schema, bool, error) {
 // Default, and Extra headers aliased to the caller's schema. CloneOverrideExtras
 // copies those too, so a tag interpreter or JSONSchemaExtender that mutates them
 // in place (appending to Enum, reassigning Const, writing into Extra) cannot
-// reach back into an override reused across Generate calls.
-func (g *generator) handleOverrideType(t reflect.Type, override *Schema, nullable bool) (*Schema, error) {
-	if override == nil {
-		override = &Schema{} // unrestricted
+// reach back into an override or provider schema reused across Generate calls.
+func (g *generator) finishTypeOverride(t reflect.Type, src *Schema, nullable bool) (*Schema, error) {
+	if src == nil {
+		src = &Schema{} // unrestricted
 	}
 
-	s := override.CloneSchemas()
+	s := src.CloneSchemas()
 	cloneOverrideExtras(s)
 
 	// Apply type-level comments.
@@ -548,34 +556,15 @@ func cloneOverrideExtras(s *Schema) {
 // The provider's JSONSchema method returns its exact *Schema, which it may share
 // across fields and Generate calls (for example a package-level singleton).
 // Downstream steps mutate it: applyTypeDescription writes Description in place and
-// extractToDefs aliases the pointer into g.defs. The same clone the override
-// path uses (CloneSchemas to deep-copy sub-schemas, cloneOverrideExtras to copy
-// the aliased Enum/Const/Default/Extra containers) isolates the generator's copy
-// so the provider's source schema is never corrupted.
+// extractToDefs aliases the pointer into g.defs. The shared finishTypeOverride
+// clones it first, so the provider's source schema is never corrupted.
 func (g *generator) handleProviderType(t reflect.Type, nullable bool) (*Schema, error) {
 	provided, err := callProvider(g.ctx, TypeContext{Type: t, Draft: g.draft})
 	if err != nil {
 		return nil, err
 	}
 
-	if provided == nil {
-		provided = &Schema{} // unrestricted
-	}
-
-	s := provided.CloneSchemas()
-	cloneOverrideExtras(s)
-
-	// Apply type-level comments.
-	err = g.applyTypeDescription(t, s)
-	if err != nil {
-		return nil, err
-	}
-
-	if g.shouldExtract(t) {
-		return g.extractToDefs(t, s, nullable)
-	}
-
-	return g.applyNullable(s, t, nullable), nil
+	return g.finishTypeOverride(t, provided, nullable)
 }
 
 // handleBuiltinType processes a type with a built-in override, applying
