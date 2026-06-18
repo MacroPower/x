@@ -157,9 +157,7 @@ func applyNumericOneOf(s *jsonschema.Schema, value string, baseType reflect.Type
 		return fmt.Errorf("validate tag: oneof: %w", err)
 	}
 
-	s.Enum = vals
-
-	return nil
+	return setOneOfEnum(s, vals)
 }
 
 // applyNumericEq applies eq=N → const for a numeric schema.

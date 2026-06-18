@@ -869,6 +869,40 @@ func TestStringEqConflictRejected(t *testing.T) {
 	})
 }
 
+func TestOneOfConflictsWithJSONSchemaEnum(t *testing.T) {
+	t.Parallel()
+
+	// A jsonschema enum tag and a validate oneof both fully enumerate the
+	// allowed values, so two different enumerations can never both hold. The
+	// conflict is reported rather than letting oneof silently overwrite the
+	// tag's enum, matching the eq/const family.
+	t.Run("numeric", func(t *testing.T) {
+		t.Parallel()
+
+		type T struct {
+			N int `json:"n" jsonschema:"enum=1|2|3" validate:"oneof=4 5"`
+		}
+
+		_, err := jsonschema.GenerateFor[T](t.Context(),
+			jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
+		)
+		require.ErrorIs(t, err, validate.ErrConflictingConstraints)
+	})
+
+	t.Run("string", func(t *testing.T) {
+		t.Parallel()
+
+		type T struct {
+			S string `json:"s" jsonschema:"enum=a|b" validate:"oneof=c d"`
+		}
+
+		_, err := jsonschema.GenerateFor[T](t.Context(),
+			jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
+		)
+		require.ErrorIs(t, err, validate.ErrConflictingConstraints)
+	})
+}
+
 func TestCollectionLtZeroIsUnsatisfiable(t *testing.T) {
 	t.Parallel()
 

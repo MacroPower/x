@@ -504,7 +504,20 @@ func applyBoolOneOf(s *jsonschema.Schema, value string) error {
 		enum[i] = b
 	}
 
-	s.Enum = enum
+	return setOneOfEnum(s, enum)
+}
+
+// setOneOfEnum pins the schema's enum to a oneof value list, reporting a
+// conflict rather than silently overwriting an enum an earlier rule (such as a
+// jsonschema enum tag) already set. Both oneof and enum fully enumerate the
+// allowed values, so two different enumerations can never both hold; this
+// mirrors the const family (eq) instead of letting whichever rule runs last win.
+func setOneOfEnum(s *jsonschema.Schema, vals []any) error {
+	if s.Enum != nil {
+		return fmt.Errorf("%w: oneof conflicts with an existing enum constraint", ErrConflictingConstraints)
+	}
+
+	s.Enum = vals
 
 	return nil
 }

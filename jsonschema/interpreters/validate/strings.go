@@ -38,9 +38,7 @@ func applyStringOneOf(s *jsonschema.Schema, value string) error {
 		enum[i] = v
 	}
 
-	s.Enum = enum
-
-	return nil
+	return setOneOfEnum(s, enum)
 }
 
 // applyStringEq applies eq=val → const for a string schema. A const already
