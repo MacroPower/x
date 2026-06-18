@@ -141,8 +141,10 @@ func (a *Annotator) ForContent(content []byte) (magicschema.Annotator, error) {
 		foundComment = false
 	}
 
-	// Handle trailing block at end of file.
-	if foundComment && len(commentLines) > 0 {
+	// Handle the trailing block at end of file. The finishOldStyleBlock helper
+	// no-ops on an empty slice, and commentLines is non-empty whenever
+	// foundComment is set.
+	if foundComment {
 		clone.finishOldStyleBlock(commentLines)
 	}
 
