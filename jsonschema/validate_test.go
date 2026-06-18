@@ -3962,6 +3962,28 @@ func TestResolveJSONPointerDoubleDecoding(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestResolveJSONPointerEncodedRootSeparator(t *testing.T) {
+	t.Parallel()
+
+	// A $ref whose leading pointer separator is percent-encoded (%2F) must
+	// resolve like the literal "/" form. Stripping the raw fragment's first byte
+	// would mangle "%2F$defs/foo" into a "2F$defs" segment that never matches;
+	// the root separator is recognized as either "/" or "%2F".
+	schema := &jsonschema.Schema{
+		Schema: "https://json-schema.org/draft/2020-12/schema",
+		Ref:    "#%2F$defs/foo",
+		Defs: map[string]*jsonschema.Schema{
+			"foo": {Type: "string"},
+		},
+	}
+
+	err := jsonschema.Validate(t.Context(), schema, "hello")
+	require.NoError(t, err, "the %2F-encoded root separator must resolve like /")
+
+	err = jsonschema.Validate(t.Context(), schema, 42.0)
+	require.Error(t, err, "the resolved $defs/foo must reject a non-string")
+}
+
 func TestTraverseSchemaCrossDraftConfusion(t *testing.T) {
 	t.Parallel()
 

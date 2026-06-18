@@ -4531,7 +4531,22 @@ func (v *validator) resolveRefUncached(schema *Schema, ref string) *Schema {
 // unknown keyword, or the internals of a non-applicator keyword such as
 // examples.
 func (v *validator) resolveJSONPointer(root *Schema, fragment string, encoded bool) *Schema {
-	path := fragment[1:] // strip leading '/'
+	// Strip the leading '/' root separator. The caller passes only fragments
+	// whose decoded form starts with it, but in the still-encoded form that
+	// separator may be a literal '/' or a percent-escaped %2F. Dropping the
+	// first byte blindly would mangle %2Ffoo into the "2Ffoo" segment, so match
+	// either spelling.
+	var path string
+
+	switch {
+	case strings.HasPrefix(fragment, "/"):
+		path = fragment[1:]
+	case encoded && len(fragment) >= 3 && strings.EqualFold(fragment[:3], "%2f"):
+		path = fragment[3:]
+	default:
+		return nil
+	}
+
 	segments := strings.Split(path, "/")
 
 	// When the fragment is still percent-encoded (the caller had a RawFragment),
