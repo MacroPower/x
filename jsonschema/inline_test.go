@@ -989,6 +989,35 @@ func TestInlineDoesNotMutateInput(t *testing.T) {
 	assert.NotEqual(t, string(schemaBefore), string(gotJSON), "the result is a distinct, inlined copy")
 }
 
+func TestInlineFetchedDocIDDoesNotClobber(t *testing.T) {
+	t.Parallel()
+
+	// Document B is fetched for the ref to /b but declares $id /a. Registering
+	// it must not overwrite the already-loaded document A in the shared
+	// registry, so the later ref to /a still inlines A's content, not B's.
+	docA := &jsonschema.Schema{Type: "string"}
+	docB := &jsonschema.Schema{ID: "https://example.com/a", Type: "integer"}
+
+	root := &jsonschema.Schema{
+		AllOf: []*jsonschema.Schema{
+			{Ref: "https://example.com/a"},
+			{Ref: "https://example.com/b"},
+			{Ref: "https://example.com/a"},
+		},
+	}
+
+	got, err := jsonschema.Inline(t.Context(), root, jsonschema.WithRefResolver(mapResolver{
+		"https://example.com/a": docA,
+		"https://example.com/b": docB,
+	}))
+	require.NoError(t, err)
+
+	require.Len(t, got.AllOf, 3)
+	assert.Equal(t, "string", got.AllOf[0].Type, "the first ref to /a inlines A")
+	assert.Equal(t, "string", got.AllOf[2].Type,
+		"the later ref to /a still inlines A, not the clobbering B")
+}
+
 // TestInlineValidatesIdentically pins the behavior contract: the inlined
 // schema, compiled without any resolver, accepts and rejects the same
 // instances as the original compiled with one.

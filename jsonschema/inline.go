@@ -791,10 +791,16 @@ func (in *inliner) callResolver(uri string) (*Schema, error) {
 }
 
 // fetchDoc fetches the document at baseURI through the configured resolver,
-// registers a pristine copy in the shared registries (walking it with
-// baseURI as its base, so its $ids, anchors, and base URIs resolve like the
-// root document's), and returns the copy. The copy is resolution space only
-// and is never mutated; output material is cloned from it on demand.
+// registers a pristine copy under baseURI, and returns the copy. The copy is
+// resolution space only and is never mutated; output material is cloned from it
+// on demand.
+//
+// Its own $ids, anchors, and base URIs are registered through the per-run
+// fallback registries rather than walked into the shared ones: a fetched
+// document whose nested $id resolves to an already-loaded URI (the root base or
+// an earlier document) must not overwrite that entry, so the already-loaded
+// document keeps priority while the fetched document's own refs still resolve.
+// This mirrors the substitute path's convention.
 func (in *inliner) fetchDoc(baseURI string) (*Schema, error) {
 	if in.resolver == nil {
 		return nil, fmt.Errorf("%w: no resolver configured for %q", ErrRefResolve, baseURI)
@@ -815,7 +821,7 @@ func (in *inliner) fetchDoc(baseURI string) (*Schema, error) {
 	}
 
 	in.v.uriRegistry[baseURI] = cp
-	in.v.walkSchema(cp, baseURI)
+	in.v.registerFallbackSchema(cp, baseURI)
 	in.recordPaths(cp, "", in.v.schemaBase(cp))
 
 	return cp, nil
