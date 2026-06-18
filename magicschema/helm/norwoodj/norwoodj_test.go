@@ -972,6 +972,38 @@ func TestHelmDocsAnnotator(t *testing.T) {
 				assert.Equal(t, "custom", p["default"])
 			},
 		},
+		"empty node default keeps old-style default": {
+			// A node-level standalone "# @default -- " with no value must not
+			// overwrite the old-style default with null; the real old-style
+			// default survives.
+			input: stringtest.JoinLF(
+				"# foo.bar -- (int) desc",
+				"# @default -- 5",
+				"",
+				"foo:",
+				"  # @default -- ",
+				"  bar: 1",
+			),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				foo, ok := props["foo"].(map[string]any)
+				require.True(t, ok)
+
+				fooProps, ok := foo["properties"].(map[string]any)
+				require.True(t, ok)
+
+				bar, ok := fooProps["bar"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "desc", bar["description"])
+				assert.Equal(t, "integer", bar["type"])
+				assert.InEpsilon(t, float64(5), bar["default"], 0.0001)
+			},
+		},
 		"old-style with section consumed": {
 			input: stringtest.Input(`
 				# key.path -- Description

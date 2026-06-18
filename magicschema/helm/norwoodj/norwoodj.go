@@ -381,9 +381,16 @@ func (a *Annotator) Annotate(node ast.Node, keyPath string) *magicschema.Annotat
 		case entry == nil:
 			entry = old
 		case entry.description == "" && entry.typeName == "" && !entry.skip && entry.defaultVal != nil:
-			merged := *old
-			merged.defaultVal = entry.defaultVal
-			entry = &merged
+			if strings.TrimSpace(*entry.defaultVal) == "" {
+				// A standalone empty "# @default --" carries no value; it must
+				// not replace a meaningful old-style default with null. Keep
+				// the old-style entry, default and all.
+				entry = old
+			} else {
+				merged := *old
+				merged.defaultVal = entry.defaultVal
+				entry = &merged
+			}
 		}
 	}
 
