@@ -2490,6 +2490,28 @@ func TestGenerateFor_AllofPrefixFieldNotMisclassified(t *testing.T) {
 	assert.Empty(t, s.AllOf, "no spurious allOf composition is created")
 }
 
+func TestGenerateFor_AllofKeyCollisionKeepsComposition(t *testing.T) {
+	t.Parallel()
+
+	// A user field whose JSON name equals the synthetic key of an allOf-composed
+	// embed at the same depth must not shadow the composition. The composition's
+	// key lives in a namespace disjoint from real JSON names, so both survive:
+	// the embed composes via allOf and the field stays a normal property.
+	type T struct {
+		allOfEmbed        // composes via allOf -> synthetic key __allof__allOfEmbed__0
+		Weird      string `json:"__allof__allOfEmbed__0"`
+	}
+
+	s, err := jsonschema.GenerateFor[T](t.Context())
+	require.NoError(t, err)
+
+	require.Len(t, s.AllOf, 1, "the allOf composition survives the name collision")
+	assert.Equal(t, "#/$defs/allOfEmbed", s.AllOf[0].Ref)
+	require.Contains(t, s.Properties, "__allof__allOfEmbed__0",
+		"the colliding user field stays a normal property")
+	assert.Equal(t, "string", s.Properties["__allof__allOfEmbed__0"].Type)
+}
+
 // allOfEmbed implements JSONSchemaProvider, so it is composed via allOf rather
 // than having its fields promoted.
 //

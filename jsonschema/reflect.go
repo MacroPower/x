@@ -1002,10 +1002,21 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 		composeAllOf bool
 	}
 
-	// Collect all visible fields grouped by JSON name.
-	byName := map[string][]fieldLevel{}
+	// A fieldKey groups sightings; the composeAllOf flag puts synthetic allOf
+	// compositions in a namespace disjoint from real JSON names, so a user field
+	// whose JSON name equals a composition's synthetic key cannot collide with it
+	// and shadow the composition in the same-depth tie-break.
+	type fieldKey struct {
+		//nolint:unused // Read via struct equality when used as a map key.
+		name string
+		//nolint:unused // Read via struct equality when used as a map key.
+		composeAllOf bool
+	}
 
-	var order []string
+	// Collect all visible fields grouped by JSON name.
+	byName := map[fieldKey][]fieldLevel{}
+
+	var order []fieldKey
 
 	// Record adds a sighting of a JSON name. The dup flag marks fields of a
 	// struct type embedded more than once at the same depth: the sighting is
@@ -1013,13 +1024,14 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 	// name, matching encoding/json's annihilation of fields from repeated
 	// embeds.
 	record := func(name string, fl fieldLevel, dup bool) {
-		if _, seen := byName[name]; !seen {
-			order = append(order, name)
+		key := fieldKey{composeAllOf: fl.composeAllOf, name: name}
+		if _, seen := byName[key]; !seen {
+			order = append(order, key)
 		}
 
-		byName[name] = append(byName[name], fl)
+		byName[key] = append(byName[key], fl)
 		if dup {
-			byName[name] = append(byName[name], fl)
+			byName[key] = append(byName[key], fl)
 		}
 	}
 
@@ -1199,8 +1211,8 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 	// Resolve shadowing and ambiguity.
 	var result []structFieldInfo
 
-	for _, name := range order {
-		candidates := byName[name]
+	for _, key := range order {
+		candidates := byName[key]
 		if len(candidates) == 0 {
 			continue
 		}
