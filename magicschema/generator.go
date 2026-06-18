@@ -358,7 +358,7 @@ func (g *Generator) walkNode(
 		schema = g.walkSequence(n, keyPath, anchors)
 	default:
 		// Pass the wrapped node so explicit tags reach inferType.
-		schema = g.walkScalar(node)
+		schema = walkScalar(node)
 	}
 
 	g.recordDefault(schema, node, anchors)
@@ -828,7 +828,7 @@ func (g *Generator) inferItemsFromSequence(
 }
 
 // walkScalar generates a schema for a scalar value node.
-func (g *Generator) walkScalar(node ast.Node) *jsonschema.Schema {
+func walkScalar(node ast.Node) *jsonschema.Schema {
 	t := inferType(node)
 	if t == "" {
 		return &jsonschema.Schema{}
