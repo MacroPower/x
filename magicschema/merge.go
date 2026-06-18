@@ -1,6 +1,7 @@
 package magicschema
 
 import (
+	"cmp"
 	"maps"
 	"reflect"
 	"slices"
@@ -101,16 +102,16 @@ func mergeSchemas(a, b *jsonschema.Schema) *jsonschema.Schema {
 	result.Pattern = keepEqual(a.Pattern, b.Pattern)
 	result.Format = keepEqual(a.Format, b.Format)
 	result.MultipleOf = keepEqual(a.MultipleOf, b.MultipleOf)
-	result.Minimum = minFloat64Ptr(a.Minimum, b.Minimum)
-	result.Maximum = maxFloat64Ptr(a.Maximum, b.Maximum)
-	result.ExclusiveMinimum = minFloat64Ptr(a.ExclusiveMinimum, b.ExclusiveMinimum)
-	result.ExclusiveMaximum = maxFloat64Ptr(a.ExclusiveMaximum, b.ExclusiveMaximum)
-	result.MinLength = minIntPtr(a.MinLength, b.MinLength)
-	result.MaxLength = maxIntPtr(a.MaxLength, b.MaxLength)
-	result.MinItems = minIntPtr(a.MinItems, b.MinItems)
-	result.MaxItems = maxIntPtr(a.MaxItems, b.MaxItems)
-	result.MinProperties = minIntPtr(a.MinProperties, b.MinProperties)
-	result.MaxProperties = maxIntPtr(a.MaxProperties, b.MaxProperties)
+	result.Minimum = minPtr(a.Minimum, b.Minimum)
+	result.Maximum = maxPtr(a.Maximum, b.Maximum)
+	result.ExclusiveMinimum = minPtr(a.ExclusiveMinimum, b.ExclusiveMinimum)
+	result.ExclusiveMaximum = maxPtr(a.ExclusiveMaximum, b.ExclusiveMaximum)
+	result.MinLength = minPtr(a.MinLength, b.MinLength)
+	result.MaxLength = maxPtr(a.MaxLength, b.MaxLength)
+	result.MinItems = minPtr(a.MinItems, b.MinItems)
+	result.MaxItems = maxPtr(a.MaxItems, b.MaxItems)
+	result.MinProperties = minPtr(a.MinProperties, b.MinProperties)
+	result.MaxProperties = maxPtr(a.MaxProperties, b.MaxProperties)
 	result.UniqueItems = a.UniqueItems && b.UniqueItems
 
 	// Merge object properties (union).
@@ -227,9 +228,9 @@ func mergeExtra(a, b map[string]any) map[string]any {
 	return out
 }
 
-// minFloat64Ptr returns the smaller of two bounds, or nil if either side is
+// minPtr returns the smaller of two bounds, or nil if either side is
 // unconstrained.
-func minFloat64Ptr(a, b *float64) *float64 {
+func minPtr[T cmp.Ordered](a, b *T) *T {
 	if a == nil || b == nil {
 		return nil
 	}
@@ -241,37 +242,9 @@ func minFloat64Ptr(a, b *float64) *float64 {
 	return a
 }
 
-// maxFloat64Ptr returns the larger of two bounds, or nil if either side is
+// maxPtr returns the larger of two bounds, or nil if either side is
 // unconstrained.
-func maxFloat64Ptr(a, b *float64) *float64 {
-	if a == nil || b == nil {
-		return nil
-	}
-
-	if *b > *a {
-		return b
-	}
-
-	return a
-}
-
-// minIntPtr returns the smaller of two bounds, or nil if either side is
-// unconstrained.
-func minIntPtr(a, b *int) *int {
-	if a == nil || b == nil {
-		return nil
-	}
-
-	if *b < *a {
-		return b
-	}
-
-	return a
-}
-
-// maxIntPtr returns the larger of two bounds, or nil if either side is
-// unconstrained.
-func maxIntPtr(a, b *int) *int {
+func maxPtr[T cmp.Ordered](a, b *T) *T {
 	if a == nil || b == nil {
 		return nil
 	}
