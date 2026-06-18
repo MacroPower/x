@@ -274,7 +274,7 @@ func (g *Generator) generateSingle(input []byte) (*jsonschema.Schema, []Annotato
 		docGen := *g
 		docGen.annotators = prepared
 
-		anchors := buildAnchorMap(doc.Body)
+		anchors := buildAliasResolutions(doc.Body)
 		schemas = append(schemas, docGen.walkNode(doc.Body, "", anchors))
 	}
 
@@ -326,7 +326,7 @@ func prepareAnnotators(annotators []Annotator, content []byte) []Annotator {
 func (g *Generator) walkNode(
 	node ast.Node,
 	keyPath string,
-	anchors map[string]ast.Node,
+	anchors aliasResolutions,
 ) *jsonschema.Schema {
 	g.visits++
 
@@ -367,7 +367,7 @@ func (g *Generator) walkNode(
 func (g *Generator) recordDefault(
 	schema *jsonschema.Schema,
 	node ast.Node,
-	anchors map[string]ast.Node,
+	anchors aliasResolutions,
 ) {
 	if !g.inferDefaults || g.inItems != 0 || schema.Default != nil {
 		return
@@ -387,7 +387,7 @@ func (g *Generator) recordDefault(
 func (g *Generator) walkMapping(
 	mn *ast.MappingNode,
 	keyPath string,
-	anchors map[string]ast.Node,
+	anchors aliasResolutions,
 	extraValues ...*ast.MappingValueNode,
 ) *jsonschema.Schema {
 	g.depth++
@@ -455,7 +455,7 @@ func (g *Generator) walkMapping(
 func (g *Generator) handleMergeKey(
 	mvn *ast.MappingValueNode,
 	keyPath string,
-	anchors map[string]ast.Node,
+	anchors aliasResolutions,
 	schema *jsonschema.Schema,
 	addToOrder func(string),
 ) {
@@ -511,7 +511,7 @@ func addRequired(schema *jsonschema.Schema, key string) {
 func (g *Generator) handleProperty(
 	mvn *ast.MappingValueNode,
 	keyPath string,
-	anchors map[string]ast.Node,
+	anchors aliasResolutions,
 	schema *jsonschema.Schema,
 	addToOrder func(string),
 ) {
@@ -561,7 +561,7 @@ func keyText(key ast.MapKeyNode) string {
 func (g *Generator) buildChildSchema(
 	mvn *ast.MappingValueNode,
 	childPath string,
-	anchors map[string]ast.Node,
+	anchors aliasResolutions,
 	valueNode ast.Node,
 	annotation *AnnotationResult,
 ) *jsonschema.Schema {
@@ -642,7 +642,7 @@ func (g *Generator) fillObjectFromStructure(
 	childSchema *jsonschema.Schema,
 	structuralNode ast.Node,
 	childPath string,
-	anchors map[string]ast.Node,
+	anchors aliasResolutions,
 	annotation *AnnotationResult,
 ) {
 	mappingNode, ok := structuralNode.(*ast.MappingNode)
@@ -673,7 +673,7 @@ func (g *Generator) fillObjectFromStructure(
 func (g *Generator) walkSequence(
 	seq *ast.SequenceNode,
 	keyPath string,
-	anchors map[string]ast.Node,
+	anchors aliasResolutions,
 ) *jsonschema.Schema {
 	return &jsonschema.Schema{
 		Type:  typeArray,
@@ -687,7 +687,7 @@ func (g *Generator) walkSequence(
 func (g *Generator) inferItemsFromSequence(
 	seq *ast.SequenceNode,
 	keyPath string,
-	anchors map[string]ast.Node,
+	anchors aliasResolutions,
 ) *jsonschema.Schema {
 	g.depth++
 	defer func() { g.depth-- }()
@@ -788,7 +788,7 @@ func scalarGoValue(node ast.Node) (any, bool) {
 // default, resolving aliases along the way. Conversion is all-or-nothing:
 // any unconvertible part (alias cycles, merge keys, exceeded walk
 // budgets) yields no default rather than a partial value.
-func (g *Generator) nodeDefault(node ast.Node, anchors map[string]ast.Node) json.RawMessage {
+func (g *Generator) nodeDefault(node ast.Node, anchors aliasResolutions) json.RawMessage {
 	v, ok := g.astToGoValue(node, anchors)
 	if !ok {
 		return nil
@@ -805,7 +805,7 @@ func (g *Generator) nodeDefault(node ast.Node, anchors map[string]ast.Node) json
 // sequences -- so pathological inputs fail open to no default instead of
 // hanging. The default-visit budget is kept distinct from the structural
 // walk's so recording defaults never shrinks structural coverage.
-func (g *Generator) astToGoValue(node ast.Node, anchors map[string]ast.Node) (any, bool) {
+func (g *Generator) astToGoValue(node ast.Node, anchors aliasResolutions) (any, bool) {
 	g.defaultVisits++
 
 	if g.defaultVisits > maxNodeVisits {
@@ -833,7 +833,7 @@ func (g *Generator) astToGoValue(node ast.Node, anchors map[string]ast.Node) (an
 // non-nil so an empty sequence marshals as [] rather than null.
 func (g *Generator) sequenceToGoValue(
 	seq *ast.SequenceNode,
-	anchors map[string]ast.Node,
+	anchors aliasResolutions,
 ) (any, bool) {
 	g.depth++
 	defer func() { g.depth-- }()
@@ -861,7 +861,7 @@ func (g *Generator) sequenceToGoValue(
 // expanding them here would duplicate the schema walk's merge handling.
 func (g *Generator) mappingToGoValue(
 	values []*ast.MappingValueNode,
-	anchors map[string]ast.Node,
+	anchors aliasResolutions,
 ) (any, bool) {
 	g.depth++
 	defer func() { g.depth-- }()
@@ -992,31 +992,53 @@ func mergePropertySchemas(s *jsonschema.Schema) *jsonschema.Schema {
 	return merged
 }
 
-// buildAnchorMap walks the AST and collects all anchor definitions.
-func buildAnchorMap(node ast.Node) map[string]ast.Node {
-	anchors := make(map[string]ast.Node)
+// aliasResolutions maps each alias node to the anchor value it resolves to.
+// YAML binds an alias to the nearest anchor of the same name defined before
+// it, so a single document-global map keyed by name would resolve every alias
+// to the last definition and leak a redefined anchor's later value back to
+// earlier alias sites. Keying by alias node instead records each alias's own
+// nearest preceding definition; a nil entry means no anchor was in scope and
+// the alias resolves to null.
+type aliasResolutions map[*ast.AliasNode]ast.Node
 
-	ast.Walk(&anchorVisitor{anchors: anchors}, node)
+// buildAliasResolutions walks the document in source order, tracking the
+// anchor definition in scope for each name, and records what every alias
+// resolves to at its own position. [ast.Walk] is pre-order and visits
+// children in source order, so an anchor is recorded before any alias that
+// follows it and a redefinition only affects aliases after it.
+func buildAliasResolutions(node ast.Node) aliasResolutions {
+	v := &aliasResolver{
+		current:  make(map[string]ast.Node),
+		resolved: make(aliasResolutions),
+	}
 
-	return anchors
+	ast.Walk(v, node)
+
+	return v.resolved
 }
 
-type anchorVisitor struct {
-	anchors map[string]ast.Node
+type aliasResolver struct {
+	current  map[string]ast.Node
+	resolved aliasResolutions
 }
 
-// Visit implements the [ast.Visitor] interface.
-func (v *anchorVisitor) Visit(node ast.Node) ast.Visitor {
-	if anchor, ok := node.(*ast.AnchorNode); ok {
-		name := anchor.Name.String()
-		v.anchors[name] = anchor.Value
+// Visit implements the [ast.Visitor] interface, threading the running anchor
+// scope through the document-order walk.
+func (v *aliasResolver) Visit(node ast.Node) ast.Visitor {
+	switch n := node.(type) {
+	case *ast.AnchorNode:
+		v.current[n.Name.String()] = n.Value
+	case *ast.AliasNode:
+		v.resolved[n] = v.current[n.Value.String()]
 	}
 
 	return v
 }
 
-// resolveAliases resolves alias nodes using the anchor map.
-func resolveAliases(node ast.Node, anchors map[string]ast.Node) ast.Node {
+// resolveAliases returns the value an alias node resolves to, or the node
+// unchanged when it is not an alias. An alias with no in-scope anchor (an
+// unrecorded or nil resolution) is treated as null.
+func resolveAliases(node ast.Node, resolved aliasResolutions) ast.Node {
 	if node == nil {
 		return nil
 	}
@@ -1026,13 +1048,7 @@ func resolveAliases(node ast.Node, anchors map[string]ast.Node) ast.Node {
 		return node
 	}
 
-	name := alias.Value.String()
-	if resolved, found := anchors[name]; found {
-		return resolved
-	}
-
-	// Unresolvable alias treated as null.
-	return nil
+	return resolved[alias]
 }
 
 // dropEmptyDocuments removes empty documents from a multi-document YAML

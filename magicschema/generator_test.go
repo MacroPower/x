@@ -653,6 +653,37 @@ production:
 	assert.Contains(t, prodProps, "retries")
 }
 
+func TestGeneratorRedefinedAnchorNearestPreceding(t *testing.T) {
+	t.Parallel()
+
+	// A redefined anchor name binds each alias to the nearest preceding
+	// definition, not the last one: useFirst sees the integer, useSecond the
+	// string, matching the YAML spec and goccy's own loader.
+	input := "first:\n  v: &a 1\nuseFirst: *a\nsecond:\n  v: &a \"hello\"\nuseSecond: *a\n"
+
+	gen := magicschema.NewGenerator()
+	schema, err := gen.Generate([]byte(input))
+	require.NoError(t, err)
+
+	out, err := json.Marshal(schema)
+	require.NoError(t, err)
+
+	var got map[string]any
+
+	require.NoError(t, json.Unmarshal(out, &got))
+
+	props, ok := got["properties"].(map[string]any)
+	require.True(t, ok)
+
+	useFirst, ok := props["useFirst"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "integer", useFirst["type"])
+
+	useSecond, ok := props["useSecond"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "string", useSecond["type"])
+}
+
 func TestGeneratorScalarArrayAliasItems(t *testing.T) {
 	t.Parallel()
 
