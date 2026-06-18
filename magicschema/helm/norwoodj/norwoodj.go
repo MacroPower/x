@@ -257,7 +257,10 @@ func parseCommentBlock(commentLines []string) *parsedComment {
 	// Extract type hint from description.
 	var typeName string
 
-	if tm := helmDocsTypeRegex.FindStringSubmatch(description); tm != nil {
+	// Only strip the leading parenthetical when it actually names a type:
+	// an empty "()" carries no type, and upstream helm-docs keeps it in the
+	// description (it gates on valueTypeMatch[1] != "").
+	if tm := helmDocsTypeRegex.FindStringSubmatch(description); len(tm) > 2 && tm[1] != "" {
 		typeName = mapHelmDocsType(strings.TrimSpace(tm[1]))
 		description = strings.TrimSpace(tm[2])
 	}

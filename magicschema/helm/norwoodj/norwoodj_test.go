@@ -149,6 +149,25 @@ func TestHelmDocsAnnotator(t *testing.T) {
 				assert.Equal(t, "string", f["type"])
 			},
 		},
+		"empty parens kept in description": {
+			// An empty "()" names no type, so upstream helm-docs keeps it in
+			// the description rather than stripping it as a type hint.
+			input: stringtest.Input(`
+				# -- () the value
+				mode: x
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				m, ok := props["mode"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "() the value", m["description"])
+			},
+		},
 		"ignore annotation": {
 			input: stringtest.Input(`
 				# @ignore
