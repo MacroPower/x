@@ -3443,6 +3443,29 @@ func TestHelmValuesSchemaAnnotatorFailOpenParsing(t *testing.T) {
 				assert.Equal(t, []any{float64(1)}, count["enum"])
 			},
 		},
+		"non-finite itemEnum value is dropped, schema still marshals": {
+			input: stringtest.Input(`
+				# @schema type:array;itemEnum:[.inf, 1]
+				ports: []
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				ports, ok := props["ports"].(map[string]any)
+				require.True(t, ok)
+
+				items, ok := ports["items"].(map[string]any)
+				require.True(t, ok)
+
+				// +Inf cannot marshal to JSON; without the FilterJSONSafe
+				// guard it poisons the whole document's marshal, so the test
+				// reaching this assertion proves the schema still marshals.
+				assert.Equal(t, []any{float64(1)}, items["enum"])
+			},
+		},
 		"all-non-finite enum clears the constraint": {
 			input: stringtest.Input(`
 				# @schema enum:[.nan, .inf]

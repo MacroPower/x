@@ -253,7 +253,7 @@ func (a *Annotator) applyPair(
 			schema.Items = &jsonschema.Schema{}
 		}
 
-		schema.Items.Enum = parseAnyList(val)
+		schema.Items.Enum = magicschema.FilterJSONSafe(parseAnyList(val))
 
 	case "itemRef":
 		if schema.Items == nil {
