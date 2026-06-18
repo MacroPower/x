@@ -161,8 +161,11 @@ func mergeSchemaFields(dst, src *jsonschema.Schema) {
 	// enum), so they fill as a unit. If dst already constrains the value set,
 	// the higher-priority annotator wins outright; filling them independently
 	// could leave a higher-priority enum beside a lower-priority const, which
-	// AND-combine to reject every value (fail closed).
-	if dst.Enum == nil && dst.Const == nil {
+	// AND-combine to reject every value (fail closed). The fill is likewise
+	// skipped when the value set contradicts dst's resolved type: grafting a
+	// lower-priority const or enum onto a higher-priority incompatible type
+	// would reject every value just the same.
+	if dst.Enum == nil && dst.Const == nil && valueSetFitsType(enumValues(src), dst) {
 		dst.Enum = src.Enum
 		dst.Const = src.Const
 	}

@@ -1123,6 +1123,33 @@ func TestGeneratorAllAnnotators(t *testing.T) {
 				assert.False(t, hasEnum, "enum must not accompany const")
 			},
 		},
+		"lower-priority const incompatible with higher type is dropped": {
+			// The helm-schema annotator (higher priority) sets type:string;
+			// helm-values-schema (lower) sets type:integer;const:5. Filling the
+			// const beside the string type would emit
+			// {"type":"string","const":5}, which no value satisfies (fail
+			// closed). The incompatible const is dropped.
+			input: "" +
+				"# @schema type:integer;const:5\n" +
+				"# @schema\n" +
+				"# type: string\n" +
+				"# @schema\n" +
+				"mode: hello\n",
+			check: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				mode, ok := props["mode"].(map[string]any)
+				require.True(t, ok, "missing property: mode")
+
+				assert.Equal(t, "string", mode["type"])
+
+				_, hasConst := mode["const"]
+				assert.False(t, hasConst, "incompatible const must be dropped")
+			},
+		},
 	}
 
 	for name, tc := range tcs {

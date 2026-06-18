@@ -3,6 +3,7 @@ package magicschema
 import (
 	"cmp"
 	"maps"
+	"math"
 	"reflect"
 	"slices"
 
@@ -226,6 +227,67 @@ func unionEnums(a, b []any) []any {
 	}
 
 	return out
+}
+
+// valueSetFitsType reports whether every value in the set is valid for the
+// schema's type constraint. A schema with no type accepts any value set, and a
+// value whose decoded Go type maps to no JSON type is treated as a fit (fail
+// open). It lets a merge skip grafting a lower-priority const or enum onto a
+// higher-priority incompatible type, which would reject every value.
+func valueSetFitsType(values []any, s *jsonschema.Schema) bool {
+	types := typeList(s)
+	if len(types) == 0 {
+		return true
+	}
+
+	for _, v := range values {
+		jts := jsonTypesOf(v)
+		if len(jts) == 0 {
+			continue
+		}
+
+		if !slices.ContainsFunc(jts, func(jt string) bool { return slices.Contains(types, jt) }) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// jsonTypesOf returns the JSON Schema type tokens a decoded YAML/JSON value may
+// satisfy. A whole-number float counts as both number and integer; an empty
+// result means the Go type is unknown and the caller should treat it as a fit.
+func jsonTypesOf(v any) []string {
+	switch n := v.(type) {
+	case nil:
+		return []string{typeNull}
+	case bool:
+		return []string{typeBoolean}
+	case string:
+		return []string{typeString}
+	case float32:
+		return floatTypes(float64(n))
+	case float64:
+		return floatTypes(n)
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+		return []string{typeNumber, typeInteger}
+	case []any:
+		return []string{typeArray}
+	case map[string]any:
+		return []string{typeObject}
+	default:
+		return nil
+	}
+}
+
+// floatTypes classifies a float: a finite whole number satisfies both number
+// and integer, anything else only number.
+func floatTypes(f float64) []string {
+	if !math.IsInf(f, 0) && !math.IsNaN(f) && f == math.Trunc(f) {
+		return []string{typeNumber, typeInteger}
+	}
+
+	return []string{typeNumber}
 }
 
 // mergeExtra merges two x-* annotation maps per key, with a winning conflicts.
