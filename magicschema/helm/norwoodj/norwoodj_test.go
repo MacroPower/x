@@ -936,6 +936,39 @@ func TestHelmDocsAnnotator(t *testing.T) {
 				assert.Empty(t, p["description"])
 			},
 		},
+		"stacked old-style comments do not merge": {
+			// Two old-style "# key.path -- desc" lines with no YAML between them
+			// must each annotate their own key. Treating the second as a
+			// continuation of the first pollutes image.repository's description
+			// and leaves image.tag undocumented.
+			input: stringtest.Input(`
+				# image.repository -- The image repository
+				# image.tag -- The image tag
+				image:
+				  repository: nginx
+				  tag: latest
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				image, ok := props["image"].(map[string]any)
+				require.True(t, ok)
+
+				imageProps, ok := image["properties"].(map[string]any)
+				require.True(t, ok)
+
+				repo, ok := imageProps["repository"].(map[string]any)
+				require.True(t, ok)
+				assert.Equal(t, "The image repository", repo["description"])
+
+				tag, ok := imageProps["tag"].(map[string]any)
+				require.True(t, ok)
+				assert.Equal(t, "The image tag", tag["description"])
+			},
+		},
 		"old-style with multi-line continuation": {
 			input: stringtest.Input(`
 				# key.path -- First line

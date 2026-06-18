@@ -116,6 +116,19 @@ func (a *Annotator) ForContent(content []byte) (magicschema.Annotator, error) {
 		// commentContinuationRegex (^\\s*#(\\s?)(.*)$), @default,
 		// @section, @raw, or @notationType patterns.
 		trimmed := strings.TrimSpace(line)
+
+		// A second old-style "# key.path -- desc" line begins a new block
+		// rather than continuing the current one. Without this, two stacked
+		// old-style comments merge: the first key absorbs the second comment's
+		// text and the second key gets no annotation at all.
+		if startsOldStyleBlock(line) {
+			clone.finishOldStyleBlock(commentLines)
+
+			commentLines = []string{line}
+
+			continue
+		}
+
 		if commentContinuationRegex.MatchString(trimmed) {
 			commentLines = append(commentLines, line)
 
@@ -517,6 +530,23 @@ func mapHelmDocsType(hint string) string {
 
 	// Unrecognized type: silently ignored.
 	return ""
+}
+
+// startsOldStyleBlock reports whether a comment line begins a new old-style
+// "# key.path -- description" block: it matches the description regex and the
+// text before " -- " is a single key-path-like token (no spaces) that is not a
+// recognized annotation marker. A continuation line, or prose that merely
+// contains " -- ", does not qualify, so a single block's continuation stays
+// intact while two stacked old-style comments split into separate blocks.
+func startsOldStyleBlock(line string) bool {
+	m := helmDocsDescRegex.FindStringSubmatch(strings.TrimSpace(line))
+	if len(m) == 0 {
+		return false
+	}
+
+	key := strings.TrimSpace(m[1])
+
+	return key != "" && !strings.ContainsAny(key, " \t") && !isIgnoredHelmDocsAnnotation(key)
 }
 
 // isIgnoredHelmDocsAnnotation returns true if the content (after stripping
