@@ -591,24 +591,24 @@ func splitNullType(types []string) ([]string, bool) {
 	return core, nullable
 }
 
-// sameStringSet reports whether two slices contain the same elements,
-// ignoring order. Containment is checked in both directions so a duplicated
-// member cannot stand in for a missing one: ["string", "string"] and
-// ["string", "integer"] are equal length and each "string" is contained in
-// the other, yet they are not the same set.
+// sameStringSet reports whether two slices contain the same elements with the
+// same multiplicity, ignoring order. Counting occurrences keeps a duplicated
+// member from standing in for a missing one: ["string", "string"] and
+// ["string", "integer"] are equal length but not the same multiset. Equal
+// lengths plus no negative count after subtracting a means the multisets match.
 func sameStringSet(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
 	}
 
-	for _, s := range a {
-		if !slices.Contains(b, s) {
-			return false
-		}
+	counts := make(map[string]int, len(b))
+	for _, s := range b {
+		counts[s]++
 	}
 
-	for _, s := range b {
-		if !slices.Contains(a, s) {
+	for _, s := range a {
+		counts[s]--
+		if counts[s] < 0 {
 			return false
 		}
 	}
