@@ -573,16 +573,23 @@ func validateURIReference(s string) error {
 	return nil
 }
 
-// containsInvalidURIChars checks for characters forbidden by RFC 3986. A URI is
-// limited to ASCII, so any code point above '~' (0x7E) is also rejected.
-func containsInvalidURIChars(s string) bool {
+// containsForbiddenURIIRIChars scans s for characters forbidden by RFC 3986
+// (URI) and RFC 3987 (IRI). When asciiOnly is true it additionally rejects any
+// code point above '~' (0x7E), the one rule URIs add over IRIs.
+func containsForbiddenURIIRIChars(s string, asciiOnly bool) bool {
 	for _, c := range s {
-		if c > 0x7E || isForbiddenURIIRIChar(c) {
+		if (asciiOnly && c > 0x7E) || isForbiddenURIIRIChar(c) {
 			return true
 		}
 	}
 
 	return false
+}
+
+// containsInvalidURIChars checks for characters forbidden by RFC 3986. A URI is
+// limited to ASCII, so any code point above '~' (0x7E) is also rejected.
+func containsInvalidURIChars(s string) bool {
+	return containsForbiddenURIIRIChars(s, true)
 }
 
 // isForbiddenURIIRIChar reports whether c is one of the gen-delims/sub-delims
@@ -958,13 +965,7 @@ func validateIRIReference(s string) error {
 // Unlike URIs, IRIs allow non-ASCII Unicode characters, so only the shared
 // forbidden set applies.
 func containsInvalidIRIChars(s string) bool {
-	for _, c := range s {
-		if isForbiddenURIIRIChar(c) {
-			return true
-		}
-	}
-
-	return false
+	return containsForbiddenURIIRIChars(s, false)
 }
 
 // validateURITemplate validates a URI Template per RFC 6570. It checks for
