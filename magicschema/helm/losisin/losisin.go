@@ -204,19 +204,7 @@ func (a *Annotator) applyPair(
 	case "examples":
 		schema.Examples = magicschema.FilterJSONSafe(parseAnyList(val))
 	case "additionalProperties":
-		switch {
-		case !hasVal || val == "" || val == "true":
-			schema.AdditionalProperties = magicschema.TrueSchema()
-		case val == "false":
-			schema.AdditionalProperties = magicschema.FalseSchema()
-		default:
-			// Try parsing as a schema object.
-			if s := parseYAMLSchema(val); s != nil {
-				schema.AdditionalProperties = s
-			} else {
-				schema.AdditionalProperties = magicschema.TrueSchema()
-			}
-		}
+		schema.AdditionalProperties = parseBoolOrSchema(val, hasVal)
 
 	case "patternProperties":
 		schema.PatternProperties = parseYAMLSchemaMap(val)
@@ -255,19 +243,7 @@ func (a *Annotator) applyPair(
 	case "mergeProperties":
 		result.MergeProperties = parseBoolDefault(val)
 	case "unevaluatedProperties":
-		switch val {
-		case "false":
-			schema.UnevaluatedProperties = magicschema.FalseSchema()
-		case "", "true":
-			schema.UnevaluatedProperties = magicschema.TrueSchema()
-		default:
-			// Try parsing as a schema object.
-			if s := parseYAMLSchema(val); s != nil {
-				schema.UnevaluatedProperties = s
-			} else {
-				schema.UnevaluatedProperties = magicschema.TrueSchema()
-			}
-		}
+		schema.UnevaluatedProperties = parseBoolOrSchema(val, hasVal)
 
 	default:
 		slog.Warn("unknown helm-values-schema key", slog.String("key", key))
@@ -310,6 +286,26 @@ func ensureItems(s *jsonschema.Schema) *jsonschema.Schema {
 	}
 
 	return s.Items
+}
+
+// parseBoolOrSchema resolves a bool-or-schema annotation value, shared by the
+// additionalProperties and unevaluatedProperties keys: a bare keyword, empty
+// value, or "true" permits everything; "false" forbids everything; anything
+// else parses as a schema object, falling back to permit-everything (fail-open)
+// when it does not parse.
+func parseBoolOrSchema(val string, hasVal bool) *jsonschema.Schema {
+	switch {
+	case !hasVal || val == "" || val == "true":
+		return magicschema.TrueSchema()
+	case val == "false":
+		return magicschema.FalseSchema()
+	default:
+		if s := parseYAMLSchema(val); s != nil {
+			return s
+		}
+
+		return magicschema.TrueSchema()
+	}
 }
 
 // splitSemicolons splits a line by semicolons, respecting brackets. When the
