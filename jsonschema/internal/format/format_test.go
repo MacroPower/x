@@ -531,6 +531,42 @@ func TestTimeRequiresOffset(t *testing.T) {
 		"time without offset should be rejected (RFC 3339 requires offset)")
 }
 
+func TestTimeLeapSecondAnchoredToSecondsField(t *testing.T) {
+	t.Parallel()
+
+	validate := validator(t, "time")
+
+	valid := map[string]string{
+		"leap second UTC":             "23:59:60Z",
+		"leap second explicit offset": "23:59:60+00:00",
+		"leap second fractional":      "23:59:60.5Z",
+	}
+
+	for name, instance := range valid {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			require.NoError(t, validate(instance))
+		})
+	}
+
+	// A ":60" in the zone offset's minute field must not be mistaken for a leap
+	// second; the offset minute is out of range and the time is rejected.
+	invalid := map[string]string{
+		"offset minute 60":          "12:30:45+00:60",
+		"negative offset minute 60": "12:30:45-00:60",
+	}
+
+	for name, instance := range invalid {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			require.Error(t, validate(instance),
+				"a :60 in the offset minute field is not a leap second")
+		})
+	}
+}
+
 func TestURIRejectsMalformedForms(t *testing.T) {
 	t.Parallel()
 

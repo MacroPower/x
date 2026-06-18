@@ -107,12 +107,16 @@ func validateTime(s string) error {
 		return errors.New("invalid time")
 	}
 
-	// Handle leap second: temporarily replace :60 with :59 for parsing.
-	isLeap := false
+	// Handle leap second: temporarily replace the seconds ":60" with ":59" for
+	// parsing. The fixed-width "hh:mm:ss" prefix is guaranteed by
+	// hasTwoDigitClock, so the seconds field is bytes [5:8]; anchoring the match
+	// there avoids treating a ":60" in the trailing zone offset's minute field
+	// (e.g. "12:30:45+00:60") as a leap second. Such an offset is independently
+	// rejected by validateTimeOffset.
+	isLeap := upper[5:8] == ":60"
 	normalized := upper
-	if i := strings.Index(upper, ":60"); i >= 3 {
-		isLeap = true
-		normalized = upper[:i+1] + "59" + upper[i+3:]
+	if isLeap {
+		normalized = upper[:6] + "59" + upper[8:]
 	}
 
 	_, err := time.Parse("15:04:05Z07:00", normalized)
