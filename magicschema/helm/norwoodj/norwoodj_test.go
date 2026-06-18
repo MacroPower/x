@@ -82,6 +82,37 @@ func TestHelmDocsAnnotator(t *testing.T) {
 				assert.Contains(t, k["description"], "sections of the chart are documented below")
 			},
 		},
+		"new-style description keeps the old-style type hint": {
+			// The old-style file scan records a type hint; a new-style "# --"
+			// override that omits the type inherits it (per-field precedence)
+			// rather than letting structural inference backfill a different
+			// type from the value.
+			input: stringtest.Input(`
+				# config.mode -- (int) old description
+
+				config:
+				  # -- new description
+				  mode: hello
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				config, ok := props["config"].(map[string]any)
+				require.True(t, ok)
+
+				cprops, ok := config["properties"].(map[string]any)
+				require.True(t, ok)
+
+				mode, ok := cprops["mode"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "integer", mode["type"])
+				assert.Equal(t, "new description", mode["description"])
+			},
+		},
 		"type hint string": {
 			input: stringtest.Input(`
 				# -- (string) Container image

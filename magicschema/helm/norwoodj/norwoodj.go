@@ -385,32 +385,9 @@ func (a *Annotator) Annotate(node ast.Node, keyPath string) *magicschema.Annotat
 	entry := a.parseNewStyleComment(headComment)
 
 	// Reconcile with the old-style "# key.path -- desc" entry parsed in
-	// ForContent. A head comment that contributes only a @default (a
-	// standalone "# @default --" with no "# --" description line) must not
-	// shadow the old-style description and type; combine them instead, with
-	// the node-level @default overriding any old-style default.
+	// ForContent.
 	if old, ok := a.oldStyleDescs[keyPath]; ok {
-		switch {
-		case entry == nil:
-			entry = old
-		case entry.description == "" && entry.typeName == "" && !entry.skip && entry.defaultVal != nil:
-			if strings.TrimSpace(*entry.defaultVal) == "" {
-				// A standalone empty "# @default --" carries no value; it must
-				// not replace a meaningful old-style default with null. Keep
-				// the old-style entry, default and all.
-				entry = old
-			} else {
-				merged := *old
-				merged.defaultVal = entry.defaultVal
-				entry = &merged
-			}
-
-		case entry.defaultVal == nil:
-			// A new-style entry that sets a description or type but no default
-			// still inherits the old-style @default (per-field precedence),
-			// rather than discarding it along with the rest of the old entry.
-			entry.defaultVal = old.defaultVal
-		}
+		entry = reconcileOldStyle(entry, old)
 	}
 
 	if entry == nil {
@@ -436,6 +413,48 @@ func (a *Annotator) Annotate(node ast.Node, keyPath string) *magicschema.Annotat
 	}
 
 	return &magicschema.AnnotationResult{Schema: schema}
+}
+
+// reconcileOldStyle combines a new-style entry parsed from a node's head
+// comment with the old-style entry the file scan recorded for the same key.
+// A head comment contributing only a @default (a standalone "# @default --"
+// with no "# --" description line) must not shadow the old-style description
+// and type, so it combines with the old entry, the node-level @default winning.
+// Otherwise the new-style entry wins per field, with the old-style entry
+// filling only the fields it leaves unset (a description-only override keeps the
+// old type hint and @default; a type-only override keeps the old description).
+func reconcileOldStyle(entry, old *parsedComment) *parsedComment {
+	switch {
+	case entry == nil:
+		return old
+
+	case entry.description == "" && entry.typeName == "" && !entry.skip && entry.defaultVal != nil:
+		if strings.TrimSpace(*entry.defaultVal) == "" {
+			// A standalone empty "# @default --" carries no value; it must not
+			// replace a meaningful old-style default with null.
+			return old
+		}
+
+		merged := *old
+		merged.defaultVal = entry.defaultVal
+
+		return &merged
+
+	default:
+		if entry.description == "" {
+			entry.description = old.description
+		}
+
+		if entry.typeName == "" {
+			entry.typeName = old.typeName
+		}
+
+		if entry.defaultVal == nil {
+			entry.defaultVal = old.defaultVal
+		}
+
+		return entry
+	}
 }
 
 // collectComments gathers all comment text from a MappingValueNode,
