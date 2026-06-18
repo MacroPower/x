@@ -3032,9 +3032,11 @@ func (v *validator) validateNumeric(
 // the negative cap), or a significand longer than the cap. Every such value
 // still orders deterministically against any float64 bound via
 // [decNumber.cmpRat], and equality with a bound is impossible, so the
-// inclusive and exclusive variants of each bound coincide. MultipleOf needs
-// the exact value and is skipped. A zero value is always exactlyComparable, so
-// it never reaches this path.
+// inclusive and exclusive variants of each bound coincide. The multipleOf
+// divisibility computation needs the exact value and is skipped, but its
+// schema-validity check (a non-positive divisor) does not depend on the
+// instance and still fires. A zero value is always exactlyComparable, so it
+// never reaches this path.
 func (v *validator) validateNumericUnbounded(
 	schema *Schema,
 	d decNumber,
@@ -3057,6 +3059,13 @@ func (v *validator) validateNumericUnbounded(
 			Keyword:      keyword,
 			Message:      msg,
 		})
+	}
+
+	// A non-positive multipleOf makes the schema invalid independent of the
+	// instance value, so it is reported here even though the divisibility
+	// computation itself is skipped for an over-cap number.
+	if schema.MultipleOf != nil && *schema.MultipleOf <= 0 {
+		add(KeywordMultipleOf, fmt.Sprintf("multipleOf must be greater than 0, got %v", *schema.MultipleOf))
 	}
 
 	bounds := v.boundsFor(schema)

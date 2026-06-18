@@ -7307,9 +7307,13 @@ func TestValidateLargeNumberGuarded(t *testing.T) {
 		"large exponent above minimum":      {`{"minimum":1}`, "1e5000", true},
 		"negative large exponent magnitude": {`{"minimum":0}`, "-1e5000", false},
 
-		// The multipleOf check is documented as skipped for values past the
-		// cap, so any unbounded value passes regardless of the divisor.
-		"multipleOf skipped for large exponent": {`{"multipleOf":3}`, "1e5000", true},
+		// The multipleOf divisibility computation is skipped for values past
+		// the cap, so an over-cap value passes any positive divisor. A
+		// non-positive divisor is a schema-validity error independent of the
+		// instance, so it still fails on the unbounded path.
+		"multipleOf skipped for large exponent":      {`{"multipleOf":3}`, "1e5000", true},
+		"multipleOf negative rejects large exponent": {`{"multipleOf":-1}`, "1e5000", false},
+		"multipleOf zero rejects large exponent":     {`{"multipleOf":0}`, "1e5000", false},
 
 		// Const and enum compare via equality rather than the numeric bound
 		// path; a giant literal must not reach an unguarded big.Rat parse.
