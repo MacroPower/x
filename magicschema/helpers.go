@@ -129,10 +129,16 @@ func normalizeNullTypes(s *jsonschema.Schema) {
 	}
 }
 
-// ToSubSchemaArray converts a []any to []*jsonschema.Schema.
+// ToSubSchemaArray converts a []any to []*jsonschema.Schema. Conversion is
+// all-or-nothing: if any element does not survive the round trip (or the list
+// is empty), the whole result is nil. This suits the combinator keywords
+// (anyOf/oneOf/allOf) it feeds, where silently dropping one branch would change
+// the keyword's cardinality -- an anyOf or oneOf would lose an alternative and
+// reject values it should accept (fail closed) -- so clearing the keyword
+// entirely is the fail-open choice.
 func ToSubSchemaArray(val any) []*jsonschema.Schema {
 	arr, ok := val.([]any)
-	if !ok {
+	if !ok || len(arr) == 0 {
 		return nil
 	}
 
@@ -140,9 +146,11 @@ func ToSubSchemaArray(val any) []*jsonschema.Schema {
 
 	for _, item := range arr {
 		s := ToSubSchema(item)
-		if s != nil {
-			schemas = append(schemas, s)
+		if s == nil {
+			return nil
 		}
+
+		schemas = append(schemas, s)
 	}
 
 	return schemas
