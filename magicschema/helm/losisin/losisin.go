@@ -55,17 +55,21 @@ func (a *Annotator) Annotate(node ast.Node, _ string) *magicschema.AnnotationRes
 			magicschema.LastCommentGroup(strings.Split(comment.String(), "\n"))...)
 	}
 
-	if mvn.Value != nil {
-		if comment := mvn.Value.GetComment(); comment != nil {
-			commentLines = append(commentLines, strings.Split(comment.String(), "\n")...)
-		}
-	}
-
+	// Key-line comment before value-line comment so that, under last-wins
+	// resolution, the value-line annotation wins -- the order upstream
+	// helm-values-schema collects them (keyNode.LineComment, then
+	// valNode.LineComment).
 	if mvn.Key != nil {
 		if keyNode, ok := mvn.Key.(ast.Node); ok {
 			if comment := keyNode.GetComment(); comment != nil {
 				commentLines = append(commentLines, strings.Split(comment.String(), "\n")...)
 			}
+		}
+	}
+
+	if mvn.Value != nil {
+		if comment := mvn.Value.GetComment(); comment != nil {
+			commentLines = append(commentLines, strings.Split(comment.String(), "\n")...)
 		}
 	}
 

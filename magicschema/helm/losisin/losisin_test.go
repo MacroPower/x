@@ -3037,6 +3037,24 @@ func TestHelmValuesSchemaAnnotatorUpstreamAlignment(t *testing.T) {
 				assert.Equal(t, "integer", v["type"])
 			},
 		},
+		"value-line annotation wins over key-line": {
+			// When both the key line and the value line carry a @schema
+			// annotation, upstream collects the key line first so the value
+			// line wins under last-wins resolution.
+			input: "\"name\": # @schema type:string\n" +
+				"  test # @schema type:integer\n",
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				name, ok := props["name"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "integer", name["type"])
+			},
+		},
 		"invalid float for minimum is ignored": {
 			// Upstream: invalid numbers are hard errors.
 			// Our behavior: silently skip.
