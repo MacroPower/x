@@ -99,7 +99,7 @@ func (a *Annotator) ForContent(content []byte) (magicschema.Annotator, error) {
 
 			// Verify key is not empty and not a recognized annotation.
 			keyPart := strings.TrimSpace(m[1])
-			if keyPart == "" || isIgnoredHelmDocsAnnotation(keyPart) {
+			if keyPart == "" || magicschema.IsAnnotationComment(keyPart) {
 				continue
 			}
 
@@ -596,14 +596,5 @@ func startsOldStyleBlock(line string) bool {
 
 	key := strings.TrimSpace(m[1])
 
-	return key != "" && !strings.ContainsAny(key, " \t") && !isIgnoredHelmDocsAnnotation(key)
-}
-
-// isIgnoredHelmDocsAnnotation returns true if the content (after stripping
-// the comment prefix) is a recognized annotation marker that should not
-// leak into descriptions or be parsed as old-style key descriptions.
-// Recognition delegates to the central [magicschema.IsAnnotationComment]
-// list rather than maintaining a second marker set here.
-func isIgnoredHelmDocsAnnotation(content string) bool {
-	return magicschema.IsAnnotationComment(content)
+	return key != "" && !strings.ContainsAny(key, " \t") && !magicschema.IsAnnotationComment(key)
 }
