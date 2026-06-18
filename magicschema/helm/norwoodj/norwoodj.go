@@ -440,6 +440,13 @@ func collectComments(mvn *ast.MappingValueNode) string {
 		}
 	}
 
+	// A trailing comment after the last key attaches as the foot comment;
+	// include it so @ignore placed there is honored, matching how the
+	// losisin annotator scans foot comments.
+	if mvn.FootComment != nil {
+		parts = append(parts, mvn.FootComment.String())
+	}
+
 	return strings.Join(parts, "\n")
 }
 

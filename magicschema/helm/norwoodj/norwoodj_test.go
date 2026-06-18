@@ -184,6 +184,24 @@ func TestHelmDocsAnnotator(t *testing.T) {
 				assert.Contains(t, props, "name")
 			},
 		},
+		"ignore as foot comment on last key": {
+			// A trailing "# @ignore" after the last key attaches as a foot
+			// comment; it must still skip the key.
+			input: stringtest.Input(`
+				keep: yes
+				name: test
+				# @ignore
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Contains(t, props, "keep")
+				assert.NotContains(t, props, "name")
+			},
+		},
 		"multi-line continuation with blank comment": {
 			input: stringtest.Input(`
 				# -- First line
