@@ -228,6 +228,29 @@ func mergeExtra(a, b map[string]any) map[string]any {
 	return out
 }
 
+// mergeExtraInto folds src into dst in place, keeping dst's value on a key
+// conflict (first-wins), and allocating dst when it is nil and src is not. It
+// returns the resulting map. Unlike mergeExtra it mutates dst rather than
+// allocating a fresh map, for callers filling a higher-priority schema's x-*
+// annotations from a lower-priority one.
+func mergeExtraInto(dst, src map[string]any) map[string]any {
+	if src == nil {
+		return dst
+	}
+
+	if dst == nil {
+		dst = make(map[string]any, len(src))
+	}
+
+	for k, v := range src {
+		if _, exists := dst[k]; !exists {
+			dst[k] = v
+		}
+	}
+
+	return dst
+}
+
 // minPtr returns the smaller of two bounds, or nil if either side is
 // unconstrained.
 func minPtr[T cmp.Ordered](a, b *T) *T {

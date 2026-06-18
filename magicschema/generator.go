@@ -946,17 +946,7 @@ func applyRootAnnotations(schema *jsonschema.Schema, roots []RootAnnotator, stri
 			apSet = true
 		}
 
-		if root.Extra != nil {
-			if schema.Extra == nil {
-				schema.Extra = make(map[string]any)
-			}
-
-			for k, v := range root.Extra {
-				if _, exists := schema.Extra[k]; !exists {
-					schema.Extra[k] = v
-				}
-			}
-		}
+		schema.Extra = mergeExtraInto(schema.Extra, root.Extra)
 	}
 }
 

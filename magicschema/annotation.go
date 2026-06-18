@@ -374,16 +374,5 @@ func mergeSchemaFields(dst, src *jsonschema.Schema) {
 		dst.ContentSchema = src.ContentSchema
 	}
 
-	// Merge Extra maps.
-	if src.Extra != nil {
-		if dst.Extra == nil {
-			dst.Extra = make(map[string]any)
-		}
-
-		for k, v := range src.Extra {
-			if _, exists := dst.Extra[k]; !exists {
-				dst.Extra[k] = v
-			}
-		}
-	}
+	dst.Extra = mergeExtraInto(dst.Extra, src.Extra)
 }
