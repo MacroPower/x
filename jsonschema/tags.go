@@ -563,10 +563,14 @@ func applyEnumToItems(key, value string, t reflect.Type, s *Schema) error {
 		return fmt.Errorf("jsonschema tag: key %q: %s field has no item schema to constrain", key, t.Kind())
 	}
 
-	elem := derefType(t.Elem())
-	if elem.Kind() == reflect.Slice || elem.Kind() == reflect.Array {
+	// Descend nested sequences on the dereferenced element type, but parse the
+	// enum against the pointer-preserving element type: a nullable-pointer
+	// element ([]*string) must accept a "null" enum member, which parseTypedScalar
+	// only permits when it sees the pointer rather than the dereferenced value.
+	elem := t.Elem()
+	if derefElem := derefType(elem); derefElem.Kind() == reflect.Slice || derefElem.Kind() == reflect.Array {
 		for _, item := range items {
-			err := applyEnumToItems(key, value, elem, item)
+			err := applyEnumToItems(key, value, derefElem, item)
 			if err != nil {
 				return err
 			}
