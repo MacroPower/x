@@ -201,6 +201,22 @@ func adjacentCommentRun(comment *ast.CommentGroupNode, key ast.MapKeyNode) []str
 			continue
 		}
 
+		// A "#"-only line is a paragraph separator within one description, not
+		// a comment from a different nesting level, so its column carries no
+		// meaning: it must neither reset the run on a column change nor move
+		// the column baseline the next prose line is compared against. Only a
+		// line gap (an erased blank line) still ends the run.
+		if strings.TrimSpace(tok.Value) == "" {
+			if len(run) > 0 && tok.Position.Line != prevLine+1 {
+				run = run[:0]
+			}
+
+			run = append(run, line)
+			prevLine = tok.Position.Line
+
+			continue
+		}
+
 		if len(run) > 0 && (tok.Position.Line != prevLine+1 || tok.Position.Column != prevCol) {
 			run = run[:0]
 		}

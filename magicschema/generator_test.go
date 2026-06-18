@@ -1512,6 +1512,29 @@ func TestGeneratorHeadCommentAttribution(t *testing.T) {
 				),
 			},
 		},
+		"misaligned hash-only separator keeps both paragraphs": {
+			// The "#"-only separator sits flush-left while the prose comments
+			// are indented to the nested key's column. Its column is
+			// meaningless, so it must not reset the run and drop the leading
+			// paragraph.
+			input: stringtest.JoinLF(
+				"service:",
+				"  # Para one A",
+				"  # Para one B",
+				"#",
+				"  # Para two",
+				"  type: ClusterIP",
+				"",
+			),
+			want: map[string]string{
+				"service.type": stringtest.JoinLF(
+					"Para one A",
+					"Para one B",
+					"",
+					"Para two",
+				),
+			},
+		},
 	}
 
 	for name, tc := range tcs {
