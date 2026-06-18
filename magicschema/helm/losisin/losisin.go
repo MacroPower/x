@@ -205,9 +205,7 @@ func (a *Annotator) applyPair(
 		schema.Examples = magicschema.FilterJSONSafe(parseAnyList(val))
 	case "additionalProperties":
 		switch {
-		case !hasVal || val == "":
-			schema.AdditionalProperties = magicschema.TrueSchema()
-		case val == "true":
+		case !hasVal || val == "" || val == "true":
 			schema.AdditionalProperties = magicschema.TrueSchema()
 		case val == "false":
 			schema.AdditionalProperties = magicschema.FalseSchema()
