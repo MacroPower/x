@@ -321,33 +321,38 @@ func parseBoolOrSchema(val string, hasVal bool) *jsonschema.Schema {
 	}
 }
 
-// splitSemicolons splits a line by semicolons, respecting brackets. When the
-// brackets are unbalanced, bracket-aware splitting is unreliable, so the
-// line is split on every semicolon instead -- a malformed value then only
-// corrupts its own pair rather than swallowing every pair after it.
+// splitSemicolons splits a line by semicolons, respecting nested brackets.
+// Nesting is tracked with a type-aware stack, so a stray closer of one kind
+// (a "}" inside a "[...]" value) does not cancel an opener of the other kind
+// and expose an inner semicolon as a delimiter. When openers are left
+// unbalanced the bracket-aware split is unreliable, so the line is split on
+// every semicolon instead -- a malformed value then only corrupts its own
+// pair rather than swallowing every pair after it.
 func splitSemicolons(line string) []string {
 	var (
 		parts   []string
 		current strings.Builder
-		depth   int
+		stack   []rune
 	)
 
 	for _, ch := range line {
 		switch ch {
 		case '[', '{':
-			depth++
+			stack = append(stack, ch)
 
 			current.WriteRune(ch)
 
 		case ']', '}':
-			if depth > 0 {
-				depth--
+			// Pop only a matching opener; a stray closer of the other kind
+			// is a literal and leaves the nesting depth untouched.
+			if n := len(stack); n > 0 && stack[n-1] == matchingOpen(ch) {
+				stack = stack[:n-1]
 			}
 
 			current.WriteRune(ch)
 
 		case ';':
-			if depth == 0 {
+			if len(stack) == 0 {
 				parts = append(parts, current.String())
 				current.Reset()
 			} else {
@@ -363,11 +368,20 @@ func splitSemicolons(line string) []string {
 		parts = append(parts, current.String())
 	}
 
-	if depth != 0 {
+	if len(stack) != 0 {
 		return strings.Split(line, ";")
 	}
 
 	return parts
+}
+
+// matchingOpen returns the opening bracket that pairs with a closing bracket.
+func matchingOpen(closer rune) rune {
+	if closer == '}' {
+		return '{'
+	}
+
+	return '['
 }
 
 // splitListValue implements the list scaffold shared by parseStringList and

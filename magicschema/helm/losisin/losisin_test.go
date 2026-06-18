@@ -1783,6 +1783,28 @@ func TestHelmValuesSchemaAnnotatorAlignment(t *testing.T) {
 				assert.Contains(t, pp, "^x-")
 			},
 		},
+		"semicolon inside a mismatched-bracket value preserved": {
+			// A character class like [};] holds a "}" (a closer of the other
+			// kind) and a ";". A depth counter that ignores bracket type would
+			// drop to zero on the "}" and split the value at the inner ";";
+			// the type-aware stack keeps the pattern intact.
+			input: stringtest.Input(`
+				# @schema type:string;pattern:[};]
+				val: x
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				v, ok := props["val"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "string", v["type"])
+				assert.Equal(t, "[};]", v["pattern"])
+			},
+		},
 		"$ref without type annotation": {
 			// $ref -> Ref. Should be set without requiring type.
 			input: stringtest.Input(`
