@@ -65,7 +65,7 @@ func run(cfg *magicschema.Config, args []string) error {
 	}
 
 	if err != nil {
-		return fmt.Errorf("%w: %w", magicschema.ErrWriteOutput, err)
+		return fmt.Errorf("%w: %w", magicschema.ErrMarshalSchema, err)
 	}
 
 	out = append(out, '\n')

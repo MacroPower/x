@@ -20,6 +20,7 @@ var (
 	ErrInvalidYAML   = errors.New("invalid yaml")
 	ErrInvalidOption = errors.New("invalid option")
 	ErrReadInput     = errors.New("read input")
+	ErrMarshalSchema = errors.New("marshal schema")
 	ErrWriteOutput   = errors.New("write output")
 )
 

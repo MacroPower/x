@@ -133,6 +133,9 @@
 //     returned by [Registry.Lookup].
 //   - [ErrReadInput]: an input file could not be read in
 //     [Generator.GenerateFiles] (fatal).
+//   - [ErrMarshalSchema]: the generated schema could not be marshaled to
+//     JSON, such as a schema an annotator built with conflicting keywords
+//     (fatal).
 //   - [ErrWriteOutput]: an I/O error occurred writing output (fatal).
 //
 // Annotation parse failures are not fatal. They are logged as warnings
