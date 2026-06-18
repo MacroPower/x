@@ -434,6 +434,7 @@ func (v *validator) resolveVocabularies() error {
 	}
 
 	rawVocabs := v.vocabOverride
+	fromOverride := rawVocabs != nil
 
 	if rawVocabs == nil && v.metaSchemaResolver != nil && v.root.Schema != "" {
 		ms, err := v.metaSchemaResolver.ResolveRef(v.ctx, v.root.Schema)
@@ -458,9 +459,13 @@ func (v *validator) resolveVocabularies() error {
 
 	// The core vocabulary MUST be present and required (true): JSON Schema
 	// 2020-12 section 8.1.2 makes a $vocabulary that omits or disables core
-	// non-conformant.
-	if required, ok := rawVocabs[VocabCore2020]; !ok || !required {
-		return fmt.Errorf("%w: core vocabulary must be required", ErrUnknownVocabulary)
+	// non-conformant. This constrains a metaschema's $vocabulary map, not the
+	// WithVocabularies API override, which selects the active set directly and
+	// carries no such requirement (its doc lists the active set, full stop).
+	if !fromOverride {
+		if required, ok := rawVocabs[VocabCore2020]; !ok || !required {
+			return fmt.Errorf("%w: core vocabulary must be required", ErrUnknownVocabulary)
+		}
 	}
 
 	v.vocabs = vocab.Resolve(rawVocabs)

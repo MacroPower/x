@@ -6141,6 +6141,29 @@ func TestCompileNilSchema(t *testing.T) {
 	assert.Panics(t, func() { jsonschema.MustCompile(nil) })
 }
 
+// TestWithVocabulariesWithoutCore pins that the WithVocabularies override
+// selects the active set directly: listing only non-core vocabularies
+// compiles and applies them. The spec's "core must be required" rule
+// constrains a metaschema's $vocabulary map, not this API override.
+func TestWithVocabulariesWithoutCore(t *testing.T) {
+	t.Parallel()
+
+	schema := &jsonschema.Schema{
+		Schema:    "https://json-schema.org/draft/2020-12/schema",
+		Type:      "string",
+		MinLength: new(5),
+	}
+
+	_, err := jsonschema.Compile(t.Context(), schema,
+		jsonschema.WithVocabularies(jsonschema.VocabValidation2020))
+	require.NoError(t, err)
+
+	// The validation vocabulary is active, so the length bound still applies.
+	err = jsonschema.Validate(t.Context(), schema, "hi",
+		jsonschema.WithVocabularies(jsonschema.VocabValidation2020))
+	require.Error(t, err)
+}
+
 // TestCompileRejectsUnknownTypeNames pins that a typo'd type keyword fails at
 // Compile with ErrInvalidType instead of compiling into a validator that
 // rejects every instance at runtime.
