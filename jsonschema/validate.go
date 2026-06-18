@@ -2418,9 +2418,14 @@ func equalSchemaInstance(schemaVal, instance any) bool {
 		return true
 	}
 
-	// Schema values outside the JSON shapes above (none are produced by the
-	// upstream parser) fall back to upstream equality.
-	return jsonschema.Equal(schemaVal, instance)
+	// Schema values outside the JSON shapes above reach here only from a
+	// hand-built const/enum, since the upstream parser yields float64 for a
+	// schema number; the common case is a json.Number whose magnitude exceeds
+	// the cheap-expansion bounds (an in-bounds one is already handled by
+	// schemaNumberRat above). Route through equalJSONValues so such a literal
+	// is compared canonically rather than through upstream's uncapped
+	// big.Rat.SetString, which would cost quadratic time (see maxNumberLen).
+	return equalJSONValues(schemaVal, instance)
 }
 
 // equalRatInstance reports whether a schema value, already expanded to the

@@ -6141,6 +6141,27 @@ func TestCompileNilSchema(t *testing.T) {
 	assert.Panics(t, func() { jsonschema.MustCompile(nil) })
 }
 
+// TestValidateConstUnboundedJSONNumber pins that a hand-built const carrying a
+// json.Number whose exponent is far outside the cheap-expansion bounds is
+// compared through the unbounded-number guard rather than upstream's uncapped
+// big.Rat expansion (a quadratic-time DoS). The calls must answer promptly.
+func TestValidateConstUnboundedJSONNumber(t *testing.T) {
+	t.Parallel()
+
+	schema := &jsonschema.Schema{
+		Const: new(any(json.Number("1e90000000"))),
+	}
+
+	v, err := jsonschema.Compile(t.Context(), schema)
+	require.NoError(t, err)
+
+	// An equal literal matches without expanding it into ~10^90000000 digits.
+	require.NoError(t, v.ValidateJSON(t.Context(), []byte("1e90000000")))
+
+	// A different number is rejected, again without expansion.
+	require.Error(t, v.ValidateJSON(t.Context(), []byte("5")))
+}
+
 // TestWithVocabulariesWithoutCore pins that the WithVocabularies override
 // selects the active set directly: listing only non-core vocabularies
 // compiles and applies them. The spec's "core must be required" rule
