@@ -85,12 +85,11 @@ func (a *Annotator) ForContent(content []byte) (magicschema.Annotator, error) {
 		oldStyleDescs: make(map[string]*parsedComment),
 	}
 
-	allLines := strings.Split(string(content), "\n")
 	foundComment := false
 
 	var commentLines []string
 
-	for _, line := range allLines {
+	for line := range strings.SplitSeq(string(content), "\n") {
 		if !foundComment {
 			// Look for an old-style "# key -- description" line.
 			m := helmDocsDescRegex.FindStringSubmatch(strings.TrimSpace(line))
