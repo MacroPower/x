@@ -3424,6 +3424,29 @@ func TestHelmValuesSchemaAnnotatorFailOpenParsing(t *testing.T) {
 				assert.Equal(t, "string", name["type"])
 			},
 		},
+		"non-string type element is dropped in comma form": {
+			// The comma form must agree with the bracket form above: the
+			// numeric token is dropped rather than kept as the invalid type
+			// token "1".
+			input: stringtest.Input(`
+				# @schema type:string, 1
+				name: test
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				name, ok := props["name"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "string", name["type"])
+
+				_, hasTypes := name["types"]
+				assert.False(t, hasTypes)
+			},
+		},
 		"non-finite enum value is dropped, schema still marshals": {
 			input: stringtest.Input(`
 				# @schema enum:[.nan, 1]

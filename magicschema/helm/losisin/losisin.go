@@ -406,7 +406,22 @@ func splitListValue(val string) ([]any, []string, bool) {
 func parseStringList(val string) []string {
 	parsed, items, ok := splitListValue(val)
 	if !ok {
-		return items
+		// The comma-split fallback returns raw tokens. Coerce each through
+		// YAML the same way the bracket path does so the two forms agree:
+		// without this, "type:string, 1" kept the invalid token "1" while
+		// "type:[string, 1]" dropped it.
+		parsed = make([]any, 0, len(items))
+
+		for _, item := range items {
+			var v any
+
+			err := yaml.Unmarshal([]byte(item), &v)
+			if err != nil {
+				v = item
+			}
+
+			parsed = append(parsed, v)
+		}
 	}
 
 	result := make([]string, 0, len(parsed))
