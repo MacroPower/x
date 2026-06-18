@@ -611,6 +611,25 @@ func TestRenderMainGoRejectsInjectedTypeName(t *testing.T) {
 	require.Error(t, err, "renderMainGo should reject TypeName with special characters")
 }
 
+func TestRenderMainGoRejectsUnexportedTypeName(t *testing.T) {
+	t.Parallel()
+
+	// An unexported type is inaccessible as target.<name> from the generated
+	// package, so renderMainGo rejects it up front with a clear message instead
+	// of deferring to an opaque "undefined: target.myConfig" compiler error.
+	cfg := config{
+		TypeName: "myConfig",
+		Draft:    "2020",
+		Indent:   "  ",
+	}
+
+	var b strings.Builder
+
+	err := renderMainGo(&b, cfg, "example.com/myapp")
+	require.Error(t, err, "renderMainGo should reject an unexported TypeName")
+	assert.Contains(t, err.Error(), "exported")
+}
+
 func TestRenderMainGoRejectsInjectedImportPath(t *testing.T) {
 	t.Parallel()
 
