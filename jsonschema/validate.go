@@ -3541,21 +3541,34 @@ func (v *validator) validateObject(
 			errs = append(errs, childErrs...)
 		}
 
+		// PatternProperties, additionalProperties, and propertyNames all iterate
+		// the instance keys in sorted order; compute that ordering once and share
+		// it rather than re-sorting per pattern and per keyword. The applicator
+		// walk never mutates obj.
+		var sortedObjKeys []string
+
+		if len(schema.PatternProperties) > 0 || schema.AdditionalProperties != nil || schema.PropertyNames != nil {
+			sortedObjKeys = slices.Sorted(maps.Keys(obj))
+		}
+
 		// PatternProperties. Sorted iteration keeps the error order deterministic.
 		for _, pattern := range slices.Sorted(maps.Keys(schema.PatternProperties)) {
 			patternSchema := schema.PatternProperties[pattern]
+
+			// One schema-path location per pattern, shared by the error branch
+			// and every matching property rather than rebuilt for each.
+			patternSchemaPath := schemaPath.kw("patternProperties").key(pattern)
+
 			cp := v.patternPropertyFor(schema, pattern)
 			if cp.err != nil {
 				// A pattern Go's RE2 cannot compile fails closed: the keyword
 				// cannot decide which properties it governs, so the object is
 				// rejected rather than silently dropping the subschema.
-				kwPath := schemaPath.kw("patternProperties").key(pattern)
-
 				errs = append(errs, &ValidationError{
 					InstancePath: instancePath.ptr,
 					segments:     instancePath.segs,
-					SchemaPath:   kwPath.ptr,
-					schemaSegs:   kwPath.segs,
+					SchemaPath:   patternSchemaPath.ptr,
+					schemaSegs:   patternSchemaPath.segs,
 					Keyword:      KeywordPatternProperties,
 					Message:      fmt.Sprintf("pattern %q cannot be compiled", pattern),
 				})
@@ -3563,7 +3576,7 @@ func (v *validator) validateObject(
 				continue
 			}
 
-			for _, propName := range slices.Sorted(maps.Keys(obj)) {
+			for _, propName := range sortedObjKeys {
 				val := obj[propName]
 				if !cp.re.MatchString(propName) {
 					continue
@@ -3578,8 +3591,7 @@ func (v *validator) validateObject(
 				}
 
 				childPath := instancePath.key(propName)
-				childSchemaPath := schemaPath.kw("patternProperties").key(pattern)
-				childErrs := v.validate(patternSchema, val, childPath, childSchemaPath, nil)
+				childErrs := v.validate(patternSchema, val, childPath, patternSchemaPath, nil)
 				labelFalseSchemaKeyword(childErrs, patternSchema, KeywordPatternProperties)
 
 				errs = append(errs, childErrs...)
@@ -3588,7 +3600,7 @@ func (v *validator) validateObject(
 
 		// AdditionalProperties: only considers sibling properties and patternProperties.
 		if schema.AdditionalProperties != nil {
-			for _, propName := range slices.Sorted(maps.Keys(obj)) {
+			for _, propName := range sortedObjKeys {
 				val := obj[propName]
 				if localEvaluated[propName] {
 					continue
@@ -3618,7 +3630,7 @@ func (v *validator) validateObject(
 		// offending name in the message identifying which key failed and which
 		// object it belongs to.
 		if schema.PropertyNames != nil {
-			for _, propName := range slices.Sorted(maps.Keys(obj)) {
+			for _, propName := range sortedObjKeys {
 				childPath := instancePath.key(propName)
 				childSchemaPath := schemaPath.kw("propertyNames")
 				childErrs := v.validate(
