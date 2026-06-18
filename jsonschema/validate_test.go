@@ -3158,6 +3158,25 @@ func TestAllOfAnnotationMergeOnPartialFailure(t *testing.T) {
 		"allOf failure should roll back annotations; unevaluatedProperties should reject 'a', got: %s", err)
 }
 
+func TestUniqueItemsDistinctHugeExponents(t *testing.T) {
+	t.Parallel()
+
+	// Two numbers whose decimal exponents both exceed the internal exponent
+	// clamp but differ are distinct values, so uniqueItems accepts the array
+	// rather than collapsing them onto one clamped decomposition. The same huge
+	// value written two ways is still caught as a duplicate.
+	schema := &jsonschema.Schema{Type: "array", UniqueItems: true}
+	validator := jsonschema.MustCompile(schema)
+
+	require.NoError(t,
+		validator.ValidateJSON(t.Context(), []byte("[1e1073741824, 1e2147483648]")),
+		"distinct huge magnitudes are not duplicates")
+
+	require.Error(t,
+		validator.ValidateJSON(t.Context(), []byte("[1e1073741824, 10e1073741823]")),
+		"the same huge value written two ways is a duplicate")
+}
+
 func TestUnevaluatedPropertiesCauseOrderDeterministic(t *testing.T) {
 	t.Parallel()
 

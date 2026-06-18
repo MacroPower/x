@@ -2035,6 +2035,70 @@ func parseDecNumber(s string) (decNumber, bool) {
 	return d, true
 }
 
+// decCanonicalExp returns the exact base-10 exponent of s in its canonical
+// 0.sig x 10^exp form, as an unclamped [big.Int]: parsedExp + len(intDigits) -
+// lead, where lead is the count of leading zeros across the integer and fraction
+// digits. The exponent parseDecNumber stores is clamped so arithmetic on it
+// stays bounded, which is correct when comparing a huge number against an
+// in-range value but collapses two distinct huge magnitudes onto one decNumber.
+// This exact form is used on the rare path where two such literals share a
+// clamped decNumber, so distinct values stay distinct. The argument s must
+// already be a valid decimal literal (parseDecNumber returned true).
+func decCanonicalExp(s string) *big.Int {
+	i := 0
+	if i < len(s) && (s[i] == '+' || s[i] == '-') {
+		i++
+	}
+
+	intStart := i
+	for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+		i++
+	}
+
+	intLen := i - intStart
+
+	lead := 0
+	for j := intStart; j < i && s[j] == '0'; j++ {
+		lead++
+	}
+
+	if i < len(s) && s[i] == '.' {
+		i++
+
+		// All integer digits were zero, so leading zeros continue into the
+		// fraction (e.g. 0.05 has two leading zeros across "005").
+		if lead == intLen {
+			for i < len(s) && s[i] == '0' {
+				lead++
+				i++
+			}
+		}
+
+		for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+			i++
+		}
+	}
+
+	exp := new(big.Int)
+	if i < len(s) && (s[i] == 'e' || s[i] == 'E') {
+		i++
+
+		neg := false
+		if i < len(s) && (s[i] == '+' || s[i] == '-') {
+			neg = s[i] == '-'
+			i++
+		}
+
+		exp.SetString(s[i:], 10)
+
+		if neg {
+			exp.Neg(exp)
+		}
+	}
+
+	return exp.Add(exp, big.NewInt(int64(intLen-lead)))
+}
+
 // isIntegral reports whether the value is a mathematical integer: zero, or a
 // significand that sits entirely left of the decimal point.
 func (d decNumber) isIntegral() bool {
@@ -2590,7 +2654,22 @@ func equalGuarded(a, b any) bool {
 			return oka == okb && string(an) == string(bn)
 		}
 
-		return da == db
+		if da != db {
+			return false
+		}
+
+		if da.exactlyComparable() {
+			// Within the cheap-expansion bounds the canonical decomposition is
+			// exact, so equal structs denote equal values.
+			return true
+		}
+
+		// Both magnitudes exceed the clamp, so equal structs only prove the
+		// clamped exponents match. Two distinct huge numbers (1e1073741824 and
+		// 1e2147483648) share a clamped decNumber, so confirm their exact,
+		// unclamped exponents agree to keep them distinct, matching upstream's
+		// uncapped big.Rat comparison.
+		return decCanonicalExp(string(an)).Cmp(decCanonicalExp(string(bn))) == 0
 
 	case aNum:
 		return guardedNumberEqual(an, b)
