@@ -134,8 +134,7 @@ func (c *Config) RegisterCompletions(cmd *cobra.Command) error {
 		return fmt.Errorf("registering %s completion: %w", c.Flags.Draft, err)
 	}
 
-	err = cmd.RegisterFlagCompletionFunc(c.Flags.Annotators,
-		cobra.FixedCompletions(c.Registry.Names(), cobra.ShellCompDirectiveNoFileComp))
+	err = cmd.RegisterFlagCompletionFunc(c.Flags.Annotators, c.annotatorsCompletion)
 	if err != nil {
 		return fmt.Errorf("registering %s completion: %w", c.Flags.Annotators, err)
 	}
@@ -152,6 +151,34 @@ func (c *Config) RegisterCompletions(cmd *cobra.Command) error {
 	}
 
 	return nil
+}
+
+// annotatorsCompletion completes the comma-separated --annotators flag. It
+// suggests the next annotator name after each comma rather than replacing
+// the whole value (the behavior of a fixed completion on a list flag), and
+// omits names already present. The no-space directive lets the user keep
+// appending names after each comma.
+func (c *Config) annotatorsCompletion(
+	_ *cobra.Command, _ []string, toComplete string,
+) ([]string, cobra.ShellCompDirective) {
+	base, partial := "", toComplete
+
+	if idx := strings.LastIndex(toComplete, ","); idx >= 0 {
+		base, partial = toComplete[:idx+1], toComplete[idx+1:]
+	}
+
+	partial = strings.TrimSpace(partial)
+	used := strings.Split(base, ",")
+
+	var out []string
+
+	for _, name := range c.Registry.Names() {
+		if strings.HasPrefix(name, partial) && !slices.Contains(used, name) {
+			out = append(out, base+name)
+		}
+	}
+
+	return out, cobra.ShellCompDirectiveNoSpace | cobra.ShellCompDirectiveNoFileComp
 }
 
 // MustRegisterCompletions registers shell completions for schema generation

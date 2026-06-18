@@ -1,6 +1,8 @@
 package magicschema_test
 
 import (
+	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -144,4 +146,36 @@ func TestConfigMustRegisterCompletions(t *testing.T) {
 
 		require.Panics(t, func() { cfg.MustRegisterCompletions(cmd) })
 	})
+}
+
+func TestConfigAnnotatorsCompletion(t *testing.T) {
+	t.Parallel()
+
+	cfg := magicschema.NewConfig()
+	cfg.Registry = helm.DefaultRegistry()
+
+	rootCmd := &cobra.Command{Use: "magicschema", Run: func(*cobra.Command, []string) {}}
+	cfg.RegisterFlags(rootCmd.Flags())
+	require.NoError(t, cfg.RegisterCompletions(rootCmd))
+
+	var buf bytes.Buffer
+
+	rootCmd.SetOut(&buf)
+	rootCmd.SetArgs([]string{cobra.ShellCompNoDescRequestCmd, "--annotators", "helm-schema,"})
+	require.NoError(t, rootCmd.Execute())
+
+	var candidates []string
+
+	for line := range strings.SplitSeq(strings.TrimSpace(buf.String()), "\n") {
+		if line == "" || strings.HasPrefix(line, ":") {
+			continue
+		}
+
+		candidates = append(candidates, strings.SplitN(line, "\t", 2)[0])
+	}
+
+	// The already-typed "helm-schema," prefix is preserved and the next
+	// name is appended; helm-schema itself is filtered out.
+	assert.Contains(t, candidates, "helm-schema,bitnami")
+	assert.NotContains(t, candidates, "helm-schema,helm-schema")
 }
