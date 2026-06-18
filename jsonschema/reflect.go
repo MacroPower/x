@@ -1331,8 +1331,14 @@ func (g *generator) needsAllOfComposition(t reflect.Type) bool {
 		return true
 	}
 
-	// Check TextMarshaler (direct only, not promoted).
-	if isDirectTextMarshaler(t) {
+	// Check TextMarshaler (direct only, not promoted). An interface type whose
+	// method set includes MarshalText is reported as a direct implementer by
+	// isDirectTextMarshaler (hasDirectMethod short-circuits to true for any
+	// non-struct kind), but an embedded interface cannot be marshaled as a
+	// string the way a concrete TextMarshaler is, so composing one into an
+	// allOf:[{"type":"string"}] branch makes the schema unsatisfiable. Skip it,
+	// mirroring the JSONSchemaProvider guard above.
+	if t.Kind() != reflect.Interface && isDirectTextMarshaler(t) {
 		return true
 	}
 
