@@ -94,23 +94,8 @@ func generate(gen *magicschema.Generator, args []string) (*jsonschema.Schema, er
 		return gen.GenerateFiles(args...)
 	}
 
-	// Stdin can only be consumed once. A second "-" would read the
-	// already-drained stream as empty, which becomes a permit-everything
-	// TrueSchema and silently widens the merged result (and overrides
-	// --strict), so reject the misuse outright.
-	stdinArgs := 0
-
-	for _, arg := range args {
-		if arg == "-" {
-			stdinArgs++
-		}
-	}
-
-	if stdinArgs > 1 {
-		return nil, fmt.Errorf("%w: stdin (\"-\") may be given at most once", magicschema.ErrReadInput)
-	}
-
 	inputs := make([][]byte, 0, len(args))
+	stdinSeen := false
 
 	for _, arg := range args {
 		var (
@@ -119,6 +104,16 @@ func generate(gen *magicschema.Generator, args []string) (*jsonschema.Schema, er
 		)
 
 		if arg == "-" {
+			// Stdin can only be consumed once. A second "-" would read the
+			// already-drained stream as empty, which becomes a permit-everything
+			// TrueSchema and silently widens the merged result (and overrides
+			// --strict), so reject the misuse outright.
+			if stdinSeen {
+				return nil, fmt.Errorf("%w: stdin (\"-\") may be given at most once", magicschema.ErrReadInput)
+			}
+
+			stdinSeen = true
+
 			data, err = io.ReadAll(os.Stdin)
 			if err != nil {
 				return nil, fmt.Errorf("%w: stdin: %w", magicschema.ErrReadInput, err)
