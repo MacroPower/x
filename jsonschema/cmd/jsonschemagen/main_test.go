@@ -227,9 +227,12 @@ func TestRenderGoModQuotesSpecialPaths(t *testing.T) {
 	// quoted in the replace directive, or the go.mod lexer rejects the unquoted
 	// token with "invalid quoted string".
 	tests := map[string]string{
-		"double quote": `/home/user/we"ird/proj`,
-		"backtick":     "/home/user/we`ird/proj",
-		"space":        "/home/user/we ird/proj",
+		"double quote":    `/home/user/we"ird/proj`,
+		"backtick":        "/home/user/we`ird/proj",
+		"space":           "/home/user/we ird/proj",
+		"tab":             "/home/user/we\tird/proj",
+		"newline":         "/home/user/we\nird/proj",
+		"carriage return": "/home/user/we\rird/proj",
 	}
 
 	for name, dir := range tests {

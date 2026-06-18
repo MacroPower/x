@@ -420,12 +420,16 @@ func goDirectiveVersion() string {
 }
 
 // quotePath quotes a filesystem path for use in a go.mod replace directive when
-// it contains whitespace or a quote or backtick character. The go.mod lexer
-// splits a bare token on whitespace and rejects an unquoted token that contains
-// a quote ("unquoted string cannot contain quote"), so any of these characters,
-// all legal in POSIX filenames, would otherwise break parsing of the directive.
+// a bare token would be misparsed. The go.mod lexer splits a bare token on
+// whitespace and rejects an unquoted token that contains a quote ("unquoted
+// string cannot contain quote"), so the path is quoted when it holds a space,
+// quote, or backtick, or any control character (a newline or carriage return
+// would otherwise inject a bare line break into the directive). All of these
+// are legal in POSIX filenames.
 func quotePath(p string) string {
-	if strings.ContainsAny(p, " \t\"`") {
+	if strings.ContainsAny(p, " \"`") || strings.ContainsFunc(p, func(r rune) bool {
+		return r < 0x20
+	}) {
 		return strconv.Quote(p)
 	}
 
