@@ -2443,6 +2443,23 @@ func TestGenerateFor_SelfReferentialPointerTypeDoesNotHang(t *testing.T) {
 	require.ErrorIs(t, err, jsonschema.ErrUnsupportedType)
 }
 
+// cyclicPointerA and cyclicPointerB form a multi-step pointer cycle: neither
+// type's Elem is itself, so the single-step elem == t guard never fires.
+type (
+	cyclicPointerA *cyclicPointerB
+	cyclicPointerB *cyclicPointerA
+)
+
+func TestGenerateFor_MultiStepPointerCycleDoesNotHang(t *testing.T) {
+	t.Parallel()
+
+	// Following pointers through a mutually recursive pair must terminate on the
+	// repeated type rather than spinning forever, ending in an unsupported-type
+	// error like the single-step case.
+	_, err := jsonschema.Generate(t.Context(), reflect.TypeFor[cyclicPointerA]())
+	require.ErrorIs(t, err, jsonschema.ErrUnsupportedType)
+}
+
 // WithTypeSchemaProvider implements JSONSchemaProvider but will be overridden
 // by WithTypeSchema.
 type WithTypeSchemaProvider struct {
