@@ -139,9 +139,7 @@ func (c *Config) RegisterCompletions(cmd *cobra.Command) error {
 		return fmt.Errorf("registering %s completion: %w", c.Flags.Annotators, err)
 	}
 
-	noFileComp := func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
-		return nil, cobra.ShellCompDirectiveNoFileComp
-	}
+	noFileComp := cobra.FixedCompletions(nil, cobra.ShellCompDirectiveNoFileComp)
 
 	for _, flag := range []string{c.Flags.Indent, c.Flags.Title, c.Flags.Description, c.Flags.ID} {
 		regErr := cmd.RegisterFlagCompletionFunc(flag, noFileComp)
