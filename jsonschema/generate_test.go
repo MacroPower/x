@@ -2437,6 +2437,26 @@ func TestGenerateFor_NullablePointerJSONStringConstAcceptsNull(t *testing.T) {
 		"a different value is rejected")
 }
 
+func TestGenerateFor_AllofPrefixFieldNotMisclassified(t *testing.T) {
+	t.Parallel()
+
+	// A user field whose JSON name happens to start with the synthetic allOf
+	// composition marker must be treated as an ordinary property, not as an
+	// embedded composition.
+	type T struct {
+		Normal string `json:"normal"`
+		Weird  string `json:"__allof__Foo__0"`
+	}
+
+	s, err := jsonschema.GenerateFor[T](t.Context())
+	require.NoError(t, err)
+
+	require.Contains(t, s.Properties, "__allof__Foo__0",
+		"a field named like the synthetic marker stays a normal property")
+	assert.Equal(t, "string", s.Properties["__allof__Foo__0"].Type)
+	assert.Empty(t, s.AllOf, "no spurious allOf composition is created")
+}
+
 func TestGenerateFor_WithTypeSchemaNamedNonStructInlined(t *testing.T) {
 	t.Parallel()
 

@@ -999,6 +999,12 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 		// fields colliding on a JSON name at the same depth keeps the field only
 		// if exactly one of them is tagged; this records the input to that rule.
 		tagged bool
+		// ComposeAllOf marks a synthetic sighting for an embedded type composed
+		// via allOf rather than a real promoted field. It is carried explicitly
+		// instead of being inferred from the synthetic name's prefix, so a user
+		// field whose JSON name happens to start with that prefix is not
+		// misclassified as a composition.
+		composeAllOf bool
 	}
 
 	// Collect all visible fields grouped by JSON name.
@@ -1102,7 +1108,11 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 						// skip, since an unrestricted schema adds no useful info.
 						if g.needsAllOfComposition(ft) {
 							name := "__allof__" + ft.Name() + fmt.Sprintf("__%d", len(order))
-							record(name, fieldLevel{field: f, depth: depth, optional: e.optional}, false)
+							record(
+								name,
+								fieldLevel{field: f, depth: depth, optional: e.optional, composeAllOf: true},
+								false,
+							)
 						}
 
 						continue
@@ -1117,7 +1127,12 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 							name := "__allof__" + ft.Name() + fmt.Sprintf("__%d", len(order))
 							record(
 								name,
-								fieldLevel{field: f, depth: depth, optional: e.optional || embeddedViaPointer},
+								fieldLevel{
+									field:        f,
+									depth:        depth,
+									optional:     e.optional || embeddedViaPointer,
+									composeAllOf: true,
+								},
 								false,
 							)
 
@@ -1216,7 +1231,7 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 		}
 
 		f := atMin[0].field
-		isAllOf := strings.HasPrefix(name, "__allof__")
+		isAllOf := atMin[0].composeAllOf
 
 		if isAllOf {
 			result = append(result, structFieldInfo{
