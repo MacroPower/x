@@ -225,16 +225,29 @@ func (a *Annotator) applyPair(
 	case "$ref":
 		schema.Ref = val
 	case "item":
-		setSchemaType(ensureItems(schema), parseStringList(val))
+		// Guard ensureItems on a non-empty value: a bare or empty-valued
+		// item* key would otherwise create an empty Items schema, which
+		// marshals to "true" and suppresses the generator's element
+		// inference, leaving the array less described than the un-annotated
+		// form.
+		if types := parseStringList(val); len(types) > 0 {
+			setSchemaType(ensureItems(schema), types)
+		}
 
 	case "itemProperties":
-		ensureItems(schema).Properties = parseYAMLSchemaMap(val)
+		if props := parseYAMLSchemaMap(val); len(props) > 0 {
+			ensureItems(schema).Properties = props
+		}
 
 	case "itemEnum":
-		ensureItems(schema).Enum = magicschema.FilterJSONSafe(parseAnyList(val))
+		if enum := magicschema.FilterJSONSafe(parseAnyList(val)); len(enum) > 0 {
+			ensureItems(schema).Enum = enum
+		}
 
 	case "itemRef":
-		ensureItems(schema).Ref = val
+		if val != "" {
+			ensureItems(schema).Ref = val
+		}
 
 	case "hidden":
 		result.Skip = parseBoolDefault(val)

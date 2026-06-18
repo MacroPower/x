@@ -307,6 +307,35 @@ func TestHelmValuesSchemaAnnotatorEdgeCases(t *testing.T) {
 				assert.Contains(t, itemProps, "name")
 			},
 		},
+		"empty itemProperties keeps the inferred element schema": {
+			// An empty item* value must not create an empty Items schema:
+			// that marshals to "true" and suppresses the generator's element
+			// inference, leaving the array less described than the
+			// un-annotated form.
+			input: stringtest.Input(`
+				# @schema type:array;itemProperties:
+				tags:
+				  - name: a
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				tags, ok := props["tags"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "array", tags["type"])
+
+				items, ok := tags["items"].(map[string]any)
+				require.True(t, ok, "items must be the inferred element schema, not true")
+
+				itemProps, ok := items["properties"].(map[string]any)
+				require.True(t, ok)
+				assert.Contains(t, itemProps, "name")
+			},
+		},
 		"unevaluatedProperties false": {
 			input: stringtest.Input(`
 				# @schema type:object;unevaluatedProperties:false
