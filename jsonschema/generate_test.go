@@ -2306,6 +2306,39 @@ func TestGenerateFor_Draft7_RefWithInterpreterNot(t *testing.T) {
 	}`, string(got))
 }
 
+func TestGenerateFor_Draft7_RefWithInterpreterComment(t *testing.T) {
+	t.Parallel()
+
+	// A bare $ref field that a tag interpreter decorates with $comment (a
+	// non-constraint annotation isEmptySchema ignores) must still be wrapped in
+	// allOf under Draft-07. Otherwise the comment is a sibling of $ref, which a
+	// Draft-07 consumer ignores; wrapping moves $ref into allOf and keeps the
+	// comment on the outer schema.
+	type Container struct {
+		Level NonStructProvider `json:"level" note:"x"`
+	}
+
+	interp := jsonschema.TagInterpreterFunc(
+		func(_ context.Context, field jsonschema.FieldContext, _ jsonschema.Tag) error {
+			field.Schema.Comment = "a note"
+
+			return nil
+		},
+	)
+
+	s, err := jsonschema.GenerateFor[Container](t.Context(),
+		jsonschema.WithDraft(jsonschema.Draft7),
+		jsonschema.WithTagInterpreter("note", interp),
+	)
+	require.NoError(t, err)
+
+	field := s.Properties["level"]
+	require.Empty(t, field.Ref, "the $ref must be wrapped, not left as a bare $comment sibling")
+	require.Len(t, field.AllOf, 1)
+	assert.Equal(t, "#/definitions/NonStructProvider", field.AllOf[0].Ref)
+	assert.Equal(t, "a note", field.Comment, "the $comment survives on the outer schema")
+}
+
 func TestGenerateFor_Draft7_NullableRefWithInterpreterConst(t *testing.T) {
 	t.Parallel()
 
