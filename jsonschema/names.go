@@ -131,7 +131,11 @@ func (g *generator) disambiguateDefs() {
 		// force an unnecessary escalation to the full-path scheme.
 		baseCandidates := make([]string, len(types))
 		for i, t := range types {
-			baseCandidates[i] = path.Base(t.PkgPath()) + "_" + name
+			// Run the prefix through the same replacer the rest of the package
+			// uses: a package path element may legally contain a JSON Pointer
+			// special character (the tilde, allowed in module paths), which
+			// would otherwise misresolve the generated $ref token.
+			baseCandidates[i] = defNameReplacer.Replace(path.Base(t.PkgPath())) + "_" + name
 		}
 
 		// Pick the first scheme whose names are unique within the group and do
@@ -141,9 +145,11 @@ func (g *generator) disambiguateDefs() {
 		chosen := baseCandidates
 		if !g.candidatesUsable(baseCandidates, used) {
 			// Candidate scheme 2 (fallback): prefix with the full import path.
+			// The replacer subsumes the slash replacement and also handles the
+			// tilde and the other characters invalid in a $ref token.
 			fullCandidates := make([]string, len(types))
 			for i, t := range types {
-				fullCandidates[i] = strings.ReplaceAll(t.PkgPath(), "/", "_") + "_" + name
+				fullCandidates[i] = defNameReplacer.Replace(t.PkgPath()) + "_" + name
 			}
 
 			chosen = fullCandidates
