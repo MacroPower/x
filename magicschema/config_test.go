@@ -95,6 +95,34 @@ func TestRegistryNames(t *testing.T) {
 	}
 }
 
+func TestConfigNewGeneratorDraft(t *testing.T) {
+	t.Parallel()
+
+	t.Run("NewConfig defaults to the supported draft", func(t *testing.T) {
+		t.Parallel()
+
+		cfg := magicschema.NewConfig()
+		assert.Equal(t, 7, cfg.Draft)
+
+		gen, err := cfg.NewGenerator()
+		require.NoError(t, err)
+		assert.NotNil(t, gen)
+	})
+
+	t.Run("explicit unsupported draft is rejected", func(t *testing.T) {
+		t.Parallel()
+
+		for _, draft := range []int{0, 4, 2020} {
+			cfg := magicschema.NewConfig()
+			cfg.Draft = draft
+
+			_, err := cfg.NewGenerator()
+			require.ErrorIs(t, err, magicschema.ErrInvalidOption,
+				"draft %d must be rejected", draft)
+		}
+	})
+}
+
 func TestConfigMustRegisterCompletions(t *testing.T) {
 	t.Parallel()
 

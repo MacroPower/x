@@ -99,7 +99,7 @@ func NewConfig() *Config {
 		InferDefaults: "infer-defaults",
 	}
 
-	return &Config{Flags: f}
+	return &Config{Flags: f, Draft: 7}
 }
 
 // RegisterFlags adds schema generation flags to the given [*pflag.FlagSet].
@@ -169,10 +169,12 @@ func (c *Config) MustRegisterCompletions(cmd *cobra.Command) {
 
 // NewGenerator creates a [Generator] using this [Config].
 func (c *Config) NewGenerator() (*Generator, error) {
-	// Only Draft 7 output is implemented; reject other requested drafts
-	// instead of silently emitting draft-07. Zero means the flag was never
-	// registered.
-	if c.Draft != 0 && c.Draft != 7 {
+	// Only Draft 7 output is implemented; reject any other requested draft
+	// instead of silently emitting draft-07. NewConfig defaults Draft to 7 and
+	// RegisterFlags registers 7 as the flag default, so any other value -- 0
+	// included -- is an explicit, unsupported request rather than an unset
+	// field.
+	if c.Draft != 7 {
 		return nil, fmt.Errorf("%w: unsupported JSON Schema draft %d (only 7 is supported)",
 			ErrInvalidOption, c.Draft)
 	}
