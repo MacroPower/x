@@ -173,6 +173,10 @@ func applyValidator(key, value string, s, parent *jsonschema.Schema, fieldName s
 		return applyNe(s, value, baseType)
 
 	case "unique":
+		if isByteSliceField(baseType) {
+			return errByteSliceLengthConstraint
+		}
+
 		// UniqueItems is only meaningful for array/slice types. Maps are
 		// excluded: JSON Schema's uniqueItems is array-only, and
 		// go-playground/validator's unique-on-map checks unique values, which

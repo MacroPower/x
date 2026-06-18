@@ -1298,6 +1298,36 @@ func TestValidateInterpreter_DiveIntoByteSliceIsNoOp(t *testing.T) {
 	assert.Equal(t, "base64", s.Properties["data"].ContentEncoding)
 }
 
+// TestValidateInterpreter_LengthConstraintOnByteSlice pins that a direct
+// length, size, or uniqueness validator on a []byte field is rejected rather
+// than silently stamped as an inert array keyword on the base64 string schema,
+// matching how oneof on a []byte field is handled.
+func TestValidateInterpreter_LengthConstraintOnByteSlice(t *testing.T) {
+	t.Parallel()
+
+	for _, tag := range []string{"min=4", "max=10", "len=8", "eq=8", "ne=8", "unique"} {
+		t.Run(tag, func(t *testing.T) {
+			t.Parallel()
+
+			s := &jsonschema.Schema{
+				Type: "object",
+				Properties: map[string]*jsonschema.Schema{
+					"data": {Types: []string{"null", "string"}, ContentEncoding: "base64"},
+				},
+			}
+
+			interp := validate.NewInterpreter()
+			err := interp.Interpret(t.Context(), jsonschema.FieldContext{
+				Type:   reflect.TypeFor[[]byte](),
+				Schema: s.Properties["data"],
+				Parent: s,
+				Name:   "data",
+			}, jsonschema.Tag{Key: "validate", Value: tag})
+			require.Error(t, err)
+		})
+	}
+}
+
 func TestValidateInterpreter_StringKeywordOnByteSlice(t *testing.T) {
 	t.Parallel()
 

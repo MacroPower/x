@@ -1,6 +1,7 @@
 package validate
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 
@@ -20,9 +21,29 @@ func collectionBoundFields(s *jsonschema.Schema, baseType reflect.Type) (**int, 
 	return &s.MinItems, &s.MaxItems
 }
 
+// errByteSliceLengthConstraint reports a length, size, or uniqueness validator
+// applied to a []byte field. A []byte marshals to a single base64 string, so
+// the array keywords such a validator would set (minItems, maxItems,
+// uniqueItems) have no effect on the string instance. Rejecting the tag
+// surfaces the unrepresentable constraint rather than silently dropping it,
+// matching how oneof on a []byte field is handled.
+var errByteSliceLengthConstraint = errors.New(
+	"validate tag: a length or uniqueness constraint on a []byte field has no array length to constrain (it encodes as a base64 string)",
+)
+
+// isByteSliceField reports whether baseType is a []byte, which marshals to a
+// single base64 string rather than a JSON array.
+func isByteSliceField(baseType reflect.Type) bool {
+	return baseType.Kind() == reflect.Slice && baseType.Elem().Kind() == reflect.Uint8
+}
+
 // applyCollectionMinConstraint applies min/gte or gt to a collection schema by
 // raising its size floor (minItems or minProperties).
 func applyCollectionMinConstraint(s *jsonschema.Schema, value string, baseType reflect.Type, exclusive bool) error {
+	if isByteSliceField(baseType) {
+		return errByteSliceLengthConstraint
+	}
+
 	minField, _ := collectionBoundFields(s, baseType)
 
 	return applyMinBound(minField, value, exclusive)
@@ -31,6 +52,10 @@ func applyCollectionMinConstraint(s *jsonschema.Schema, value string, baseType r
 // applyCollectionMaxConstraint applies max/lte or lt to a collection schema by
 // lowering its size ceiling (maxItems or maxProperties).
 func applyCollectionMaxConstraint(s *jsonschema.Schema, value string, baseType reflect.Type, exclusive bool) error {
+	if isByteSliceField(baseType) {
+		return errByteSliceLengthConstraint
+	}
+
 	_, maxField := collectionBoundFields(s, baseType)
 
 	return applyMaxBound(maxField, value, exclusive)
@@ -39,6 +64,10 @@ func applyCollectionMaxConstraint(s *jsonschema.Schema, value string, baseType r
 // applyCollectionLenConstraint applies len=N to a collection schema by pinning
 // both size bounds to the intersected value.
 func applyCollectionLenConstraint(s *jsonschema.Schema, value string, baseType reflect.Type) error {
+	if isByteSliceField(baseType) {
+		return errByteSliceLengthConstraint
+	}
+
 	minField, maxField := collectionBoundFields(s, baseType)
 
 	return applyLenBound(minField, maxField, value)
@@ -48,6 +77,10 @@ func applyCollectionLenConstraint(s *jsonschema.Schema, value string, baseType r
 // N. The exclusion is expressed as a not subschema pinning the length so a
 // collection of exactly N elements (or entries, for a map) is rejected.
 func applyCollectionNe(s *jsonschema.Schema, value string, baseType reflect.Type) error {
+	if isByteSliceField(baseType) {
+		return errByteSliceLengthConstraint
+	}
+
 	n, err := parseBoundValue(value)
 	if err != nil {
 		return err
