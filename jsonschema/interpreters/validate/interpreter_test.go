@@ -787,11 +787,13 @@ func TestUnrecognizedValidateTagErrors(t *testing.T) {
 		"unrecognized validate tag 'emial' produces an error")
 }
 
-func TestCollectionGtLtClampsBoundsToZero(t *testing.T) {
+func TestCollectionLtZeroIsUnsatisfiable(t *testing.T) {
 	t.Parallel()
 
-	// Lt=0 on a collection sets an exclusive upper bound of one below zero,
-	// which is clamped to a non-negative maxItems as JSON Schema requires.
+	// Lt=0 on a collection demands a length below zero, which no array can
+	// have, so go-playground rejects every value, including the empty array.
+	// The schema mirrors that with an unsatisfiable minItems/maxItems range
+	// rather than clamping to a permissive maxItems:0 that would accept [].
 	type MyType struct {
 		Items []string `json:"items" validate:"lt=0"`
 	}
@@ -804,17 +806,23 @@ func TestCollectionGtLtClampsBoundsToZero(t *testing.T) {
 	prop := s.Properties["items"]
 	require.NotNil(t, prop)
 	require.NotNil(t, prop.MaxItems, "lt=0 on collection sets maxItems")
+	require.NotNil(t, prop.MinItems, "lt=0 on collection sets a contradicting minItems")
 
-	// MaxItems must be a non-negative integer per the JSON Schema spec.
+	// Both bounds stay non-negative per the JSON Schema spec, and the floor
+	// exceeds the ceiling so even the empty array is rejected.
 	assert.GreaterOrEqual(t, *prop.MaxItems, 0,
 		"maxItems must be non-negative per JSON Schema spec")
+	assert.Greater(t, *prop.MinItems, *prop.MaxItems,
+		"the range must reject every array, including the empty one")
 }
 
-func TestStringGtLtClampsLengthToZero(t *testing.T) {
+func TestStringLtZeroIsUnsatisfiable(t *testing.T) {
 	t.Parallel()
 
-	// Lt=0 on a string sets an exclusive upper bound of one below zero, which is
-	// clamped to a non-negative maxLength as JSON Schema requires.
+	// Lt=0 on a string demands a length below zero, which no string can have,
+	// so go-playground rejects every value, including the empty string. The
+	// schema mirrors that with an unsatisfiable minLength/maxLength range rather
+	// than clamping to a permissive maxLength:0 that would accept "".
 	type MyType struct {
 		Name string `json:"name" validate:"lt=0"`
 	}
@@ -827,10 +835,14 @@ func TestStringGtLtClampsLengthToZero(t *testing.T) {
 	prop := s.Properties["name"]
 	require.NotNil(t, prop)
 	require.NotNil(t, prop.MaxLength, "lt=0 on string sets maxLength")
+	require.NotNil(t, prop.MinLength, "lt=0 on string sets a contradicting minLength")
 
-	// MaxLength must be a non-negative integer per the JSON Schema spec.
+	// Both bounds stay non-negative per the JSON Schema spec, and the floor
+	// exceeds the ceiling so even the empty string is rejected.
 	assert.GreaterOrEqual(t, *prop.MaxLength, 0,
 		"maxLength must be non-negative per JSON Schema spec")
+	assert.Greater(t, *prop.MinLength, *prop.MaxLength,
+		"the range must reject every string, including the empty one")
 }
 
 func TestRequiredOnNumericForbidsZero(t *testing.T) {

@@ -16,7 +16,7 @@ func applyStringMinConstraint(s *jsonschema.Schema, value string, exclusive bool
 // applyStringMaxConstraint applies max/lte or lt to a string schema by lowering
 // its maxLength ceiling.
 func applyStringMaxConstraint(s *jsonschema.Schema, value string, exclusive bool) error {
-	return applyMaxBound(&s.MaxLength, value, exclusive)
+	return applyMaxBound(&s.MinLength, &s.MaxLength, value, exclusive)
 }
 
 // applyStringLenConstraint applies len=N to a string schema by pinning minLength

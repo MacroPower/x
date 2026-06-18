@@ -67,7 +67,10 @@
 // minProperties/maxProperties) from several rules in one tag intersect
 // independently of order: a floor only rises and a ceiling only falls, and len=N
 // pins both to N. A len incompatible with a min/max or required therefore yields
-// an unsatisfiable range rather than overriding the other bound.
+// an unsatisfiable range rather than overriding the other bound. A ceiling rule
+// that resolves below zero (lt<=0, or a negative max/lte) likewise yields an
+// unsatisfiable range, since go-playground rejects every value of such a field
+// including the empty one, rather than clamping to a permissive maxLength: 0.
 //
 // Boolean constraints:
 //

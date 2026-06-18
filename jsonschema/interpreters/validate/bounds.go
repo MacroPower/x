@@ -51,15 +51,29 @@ func applyMinBound(field **int, value string, exclusive bool) error {
 	return nil
 }
 
-// applyMaxBound lowers the ceiling at field from a max/lte (inclusive) or lt
-// (exclusive) rule. Lt=N is the inclusive bound N-1, clamped non-negative.
-func applyMaxBound(field **int, value string, exclusive bool) error {
+// applyMaxBound lowers the ceiling at maxField from a max/lte (inclusive) or lt
+// (exclusive) rule. Lt=N is the inclusive bound N-1. When that inclusive ceiling
+// is negative the rule demands a length below zero, which no string or
+// collection can have, so the constraint is unsatisfiable. Clamping the ceiling
+// to a non-negative zero would instead accept the empty value the rule forbids
+// (go-playground's lt=0 rejects every value, including the empty one), so the
+// contradiction is expressed as a floor of one against a ceiling of zero,
+// mirroring how an incompatible len yields an unsatisfiable min/max range.
+func applyMaxBound(minField, maxField **int, value string, exclusive bool) error {
 	n, err := parseBoundValue(value)
 	if err != nil {
 		return err
 	}
 
-	lowerCeiling(field, clampNonNegative(inclusiveUpperBound(n, exclusive)))
+	ceiling := inclusiveUpperBound(n, exclusive)
+	if ceiling < 0 {
+		raiseFloor(minField, 1)
+		lowerCeiling(maxField, 0)
+
+		return nil
+	}
+
+	lowerCeiling(maxField, ceiling)
 
 	return nil
 }

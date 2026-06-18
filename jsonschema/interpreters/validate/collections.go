@@ -56,9 +56,9 @@ func applyCollectionMaxConstraint(s *jsonschema.Schema, value string, baseType r
 		return errByteSliceLengthConstraint
 	}
 
-	_, maxField := collectionBoundFields(s, baseType)
+	minField, maxField := collectionBoundFields(s, baseType)
 
-	return applyMaxBound(maxField, value, exclusive)
+	return applyMaxBound(minField, maxField, value, exclusive)
 }
 
 // applyCollectionLenConstraint applies len=N to a collection schema by pinning
