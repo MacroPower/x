@@ -453,6 +453,13 @@ func reconcileOldStyle(entry, old *parsedComment) *parsedComment {
 			entry.defaultVal = old.defaultVal
 		}
 
+		// An old-style @ignore still hides the key even when the node carries
+		// its own new-style comment; the node-level entry only overrides the
+		// fields it sets, and skip is never cleared by a description override.
+		if old.skip {
+			entry.skip = true
+		}
+
 		return entry
 	}
 }

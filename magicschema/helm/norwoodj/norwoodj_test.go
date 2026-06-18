@@ -113,6 +113,34 @@ func TestHelmDocsAnnotator(t *testing.T) {
 				assert.Equal(t, "new description", mode["description"])
 			},
 		},
+		"detached old-style @ignore is honored despite a new-style child comment": {
+			// The old-style file scan records @ignore for image.tag from a block
+			// attached to a different key, so @ignore is not in the tag node's own
+			// head comment. The node's new-style "# --" comment overrides the
+			// description but must not clear the inherited skip.
+			input: stringtest.Input(`
+				# image.tag -- Old desc
+				# @ignore
+				unrelated: 1
+				image:
+				  # -- The image tag
+				  tag: latest
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				image, ok := props["image"].(map[string]any)
+				require.True(t, ok)
+
+				iprops, hasProps := image["properties"].(map[string]any)
+				if hasProps {
+					assert.NotContains(t, iprops, "tag")
+				}
+			},
+		},
 		"type hint string": {
 			input: stringtest.Input(`
 				# -- (string) Container image
