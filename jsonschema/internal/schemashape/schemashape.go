@@ -14,6 +14,10 @@ const typeNameNull = "null"
 // for a nullable field: an anyOf of a value schema and {"type":"null"}. It
 // returns nil when s does not have that exact shape.
 func NullableInnerSchema(s *jsonschema.Schema) *jsonschema.Schema {
+	if s == nil {
+		return nil
+	}
+
 	if len(s.AnyOf) != 2 || s.AnyOf[0] == nil || s.AnyOf[1] == nil {
 		return nil
 	}
