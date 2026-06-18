@@ -6127,6 +6127,20 @@ func TestCompileError(t *testing.T) {
 	assert.Contains(t, err.Error(), "core vocabulary must be required")
 }
 
+// TestCompileNilSchema pins that a nil *Schema is reported through the error
+// contract rather than panicking inside draft detection or the registry walk.
+func TestCompileNilSchema(t *testing.T) {
+	t.Parallel()
+
+	_, err := jsonschema.Compile(t.Context(), nil)
+	require.ErrorIs(t, err, jsonschema.ErrNilSchema)
+
+	err = jsonschema.Validate(t.Context(), nil, "anything")
+	require.ErrorIs(t, err, jsonschema.ErrNilSchema)
+
+	assert.Panics(t, func() { jsonschema.MustCompile(nil) })
+}
+
 // TestCompileRejectsUnknownTypeNames pins that a typo'd type keyword fails at
 // Compile with ErrInvalidType instead of compiling into a validator that
 // rejects every instance at runtime.

@@ -27,6 +27,12 @@ var (
 	// JSON object or boolean.
 	ErrInvalidSchemaDocument = errors.New("schema document must be a JSON object or boolean")
 
+	// ErrNilSchema is returned by [Compile] (and the one-shot [Validate]
+	// helper) when the schema argument is nil. A nil *Schema carries no draft,
+	// vocabulary, or structure to compile; it is reported through the error
+	// contract rather than dereferenced into a panic.
+	ErrNilSchema = errors.New("nil schema")
+
 	// ErrUnknownVocabulary is returned when the resolved $vocabulary set is
 	// unsatisfiable: it marks true a vocabulary that this implementation does
 	// not recognize, or it includes the 2020-12 core vocabulary without marking

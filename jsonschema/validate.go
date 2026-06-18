@@ -322,6 +322,13 @@ type validator struct {
 }
 
 func newValidator(ctx context.Context, schema *Schema, opts []ValidateOption) (*validator, error) {
+	// A nil schema has no $schema, vocabulary, or structure to compile;
+	// detectDraft and the registry walk would dereference it. Report it
+	// through the error contract instead of panicking.
+	if schema == nil {
+		return nil, ErrNilSchema
+	}
+
 	v := &validator{
 		root:           schema,
 		formatCheckers: map[string]FormatValidator{},
