@@ -354,10 +354,7 @@ func cleanComment(s string, inSchemaBlock, inRootBlock bool) string {
 // stripCommentPrefix removes leading "#" characters and a single space.
 func stripCommentPrefix(line string) string {
 	line = strings.TrimSpace(line)
-	for strings.HasPrefix(line, "#") {
-		line = strings.TrimPrefix(line, "#")
-	}
-
+	line = strings.TrimLeft(line, "#")
 	line = strings.TrimPrefix(line, " ")
 
 	return line
