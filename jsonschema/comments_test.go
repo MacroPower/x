@@ -52,6 +52,22 @@ func TestEmbeddedNamedFieldDescription(t *testing.T) {
 	assert.Contains(t, s.Properties["stamp"].Description, "documents the envelope stamp")
 }
 
+// TestZeroValueGoCommentProvider covers using the exported type as a zero-value
+// literal (&GoCommentProvider{}) instead of the constructor: the comment cache
+// must initialize lazily on first store rather than panicking on a nil map.
+func TestZeroValueGoCommentProvider(t *testing.T) {
+	t.Parallel()
+
+	s, err := jsonschema.GenerateFor[alpha.Widget](
+		t.Context(),
+		jsonschema.WithDescriptionProvider(&jsonschema.GoCommentProvider{}),
+	)
+	require.NoError(t, err)
+
+	require.Contains(t, s.Properties, "size")
+	assert.Contains(t, s.Properties["size"].Description, "documents the widget size")
+}
+
 // TestEmbeddedGenericFieldDescription covers comment extraction for an embedded
 // generic instantiation. The source AST embeds the type as an index expression
 // (Box[int]) with no name identifier, so embeddedFieldName must unwrap it to

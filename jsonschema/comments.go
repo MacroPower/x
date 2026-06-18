@@ -267,6 +267,12 @@ func (ce *GoCommentProvider) sourceFiles(ctx context.Context, pkgPath string) ([
 	if loaded {
 		ce.mu.Lock()
 
+		// Lazily allocate so a zero-value &GoCommentProvider{} (the exported type
+		// with a usable empty literal) does not panic on the first store.
+		if ce.cache == nil {
+			ce.cache = map[string][]*ast.File{}
+		}
+
 		ce.cache[pkgPath] = files
 
 		ce.mu.Unlock()
