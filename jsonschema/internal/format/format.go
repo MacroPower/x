@@ -537,40 +537,54 @@ func isAllDigits(s string) bool {
 	return true
 }
 
-func validateURI(s string) error {
+// validateURIAbs validates an absolute URI/IRI: it must parse, carry a scheme,
+// contain no forbidden characters, and bracket any bare IPv6 host. The badChars
+// predicate and label select the URI-vs-IRI character rule and error wording.
+func validateURIAbs(s string, badChars func(string) bool, label string) error {
 	u, err := url.Parse(s)
 	if err != nil {
-		return errors.New("invalid URI")
+		return fmt.Errorf("invalid %s", label)
 	}
 
 	if u.Scheme == "" {
-		return errors.New("invalid URI: missing scheme")
+		return fmt.Errorf("invalid %s: missing scheme", label)
 	}
 
-	if containsInvalidURIChars(s) {
-		return errors.New("invalid URI: forbidden characters")
+	if badChars(s) {
+		return fmt.Errorf("invalid %s: forbidden characters", label)
 	}
 
-	// Bare IPv6 addresses must be enclosed in brackets per RFC 3986 §3.2.2,
-	// mirroring validateIRI so "uri" and "iri" agree on this case.
+	// Bare IPv6 addresses must be enclosed in brackets per RFC 3986 §3.2.2.
 	if strings.Count(u.Host, ":") > 1 && !strings.HasPrefix(u.Host, "[") {
-		return errors.New("invalid URI: bare IPv6 address")
+		return fmt.Errorf("invalid %s: bare IPv6 address", label)
 	}
 
 	return nil
 }
 
-func validateURIReference(s string) error {
+// validateURIRef validates a URI/IRI reference: it must parse and contain no
+// forbidden characters, but needs no scheme (relative references are allowed).
+func validateURIRef(s string, badChars func(string) bool, label string) error {
 	_, err := url.Parse(s)
 	if err != nil {
-		return errors.New("invalid URI reference")
+		return fmt.Errorf("invalid %s reference", label)
 	}
 
-	if containsInvalidURIChars(s) {
-		return errors.New("invalid URI reference: forbidden characters")
+	if badChars(s) {
+		return fmt.Errorf("invalid %s reference: forbidden characters", label)
 	}
 
 	return nil
+}
+
+// validateURI validates an absolute URI per RFC 3986.
+func validateURI(s string) error {
+	return validateURIAbs(s, containsInvalidURIChars, "URI")
+}
+
+// validateURIReference validates a URI-reference per RFC 3986 (relative allowed).
+func validateURIReference(s string) error {
+	return validateURIRef(s, containsInvalidURIChars, "URI")
 }
 
 // containsForbiddenURIIRIChars scans s for characters forbidden by RFC 3986
@@ -922,43 +936,15 @@ func checkDurationOrder(order map[byte]int, designator byte, last int, kind stri
 	return cur, nil
 }
 
-// validateIRI validates an IRI per RFC 3987. IRIs allow non-ASCII Unicode
-// characters but otherwise follow URI structure (must have a scheme).
+// validateIRI validates an absolute IRI per RFC 3987. IRIs allow non-ASCII
+// Unicode characters but otherwise follow URI structure (must have a scheme).
 func validateIRI(s string) error {
-	u, err := url.Parse(s)
-	if err != nil {
-		return errors.New("invalid IRI")
-	}
-
-	if u.Scheme == "" {
-		return errors.New("invalid IRI: missing scheme")
-	}
-
-	if containsInvalidIRIChars(s) {
-		return errors.New("invalid IRI: forbidden characters")
-	}
-
-	// Bare IPv6 addresses must be enclosed in brackets per RFC 3986 §3.2.2.
-	if strings.Count(u.Host, ":") > 1 && !strings.HasPrefix(u.Host, "[") {
-		return errors.New("invalid IRI: bare IPv6 address")
-	}
-
-	return nil
+	return validateURIAbs(s, containsInvalidIRIChars, "IRI")
 }
 
-// validateIRIReference validates an IRI-reference per RFC 3987. Same as IRI
-// but allows relative references (no scheme requirement).
+// validateIRIReference validates an IRI-reference per RFC 3987 (relative allowed).
 func validateIRIReference(s string) error {
-	_, err := url.Parse(s)
-	if err != nil {
-		return errors.New("invalid IRI reference")
-	}
-
-	if containsInvalidIRIChars(s) {
-		return errors.New("invalid IRI reference: forbidden characters")
-	}
-
-	return nil
+	return validateURIRef(s, containsInvalidIRIChars, "IRI")
 }
 
 // containsInvalidIRIChars checks for characters forbidden by RFC 3987.
