@@ -2580,6 +2580,34 @@ func TestGenerateFor_WithTypeSchemaNamedNonStructInlined(t *testing.T) {
 	assert.Equal(t, []any{1, 2, 3}, s.Properties["p2"].Enum)
 }
 
+func TestGenerateFor_WithTypeSchemaNullBearingPointerNotDoubleWrapped(t *testing.T) {
+	t.Parallel()
+
+	// A WithTypeSchema override that already accepts null (its type list includes
+	// "null") on a pointer field must not be wrapped in a redundant
+	// anyOf[override, {"type":"null"}]. The override is emitted as-is, matching
+	// the []byte builtin form, since applyNullable leaves a null-bearing schema
+	// alone.
+	type MyID string
+
+	type Container struct {
+		ID *MyID `json:"id"`
+	}
+
+	override := &jsonschema.Schema{
+		Types: []string{"null", "string"},
+	}
+
+	s, err := jsonschema.GenerateFor[Container](t.Context(),
+		jsonschema.WithTypeSchema(reflect.TypeFor[MyID](), override),
+	)
+	require.NoError(t, err)
+
+	field := s.Properties["id"]
+	assert.Nil(t, field.AnyOf, "a null-bearing override must not be wrapped in anyOf")
+	assert.Equal(t, []string{"null", "string"}, field.Types)
+}
+
 func TestGenerateFor_Draft7_NullableRefWithAnnotation(t *testing.T) {
 	t.Parallel()
 

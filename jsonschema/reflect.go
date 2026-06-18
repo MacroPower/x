@@ -586,14 +586,9 @@ func (g *generator) handleBuiltinType(t reflect.Type, s *Schema, nullable bool) 
 		}
 	}
 
-	// A builtin whose type list already carries null (the []byte override uses
-	// applyContainerType, which folds null into the type list when nullable)
-	// already accepts null, so applyNullable's anyOf wrapper would be redundant
-	// and would diverge from the bare []byte form.
-	if slices.Contains(s.Types, typeNameNull) {
-		return s, nil
-	}
-
+	// A null-bearing schema (the []byte override folds null into its type list)
+	// is returned by applyNullable unchanged, so the bare form is preserved
+	// without a redundant second null branch.
 	return g.applyNullable(s, t, nullable), nil
 }
 
@@ -1665,15 +1660,20 @@ func (g *generator) applyNullable(s *Schema, t reflect.Type, nullable bool) *Sch
 		return s
 	}
 
-	// Unconstrained schema: already accepts null, so wrapping adds nothing.
-	if isEmptySchema(s) {
+	// Already accepts null, so the anyOf wrapper adds nothing: an unconstrained
+	// (true) schema accepts every value, and a schema whose type declaration
+	// includes null already admits it. The latter covers a builtin that folds
+	// null into its type list (the []byte override) and an override or provider
+	// that returns a null-bearing type, keeping the output the bare form instead
+	// of a redundant second null branch.
+	if isEmptySchema(s) || s.Type == typeNameNull || slices.Contains(s.Types, typeNameNull) {
 		return s
 	}
 
 	return &Schema{
 		AnyOf: []*Schema{
 			s,
-			{Type: "null"},
+			{Type: typeNameNull},
 		},
 	}
 }
