@@ -3158,6 +3158,48 @@ func TestAllOfAnnotationMergeOnPartialFailure(t *testing.T) {
 		"allOf failure should roll back annotations; unevaluatedProperties should reject 'a', got: %s", err)
 }
 
+func TestUnevaluatedPropertiesCauseOrderDeterministic(t *testing.T) {
+	t.Parallel()
+
+	// An unevaluatedProperties:false schema reports its rejected properties in
+	// sorted key order, matching the sibling object keywords, so the error tree
+	// is stable across runs rather than following Go's randomized map iteration.
+	schema := &jsonschema.Schema{
+		Type:                  "object",
+		UnevaluatedProperties: &jsonschema.Schema{Not: &jsonschema.Schema{}}, // false
+	}
+
+	instance := map[string]any{
+		"delta": 1, "alpha": 2, "charlie": 3, "bravo": 4, "echo": 5,
+	}
+
+	err := jsonschema.Validate(t.Context(), schema, instance)
+	require.Error(t, err)
+
+	var ve *jsonschema.ValidationError
+
+	require.ErrorAs(t, err, &ve)
+
+	var got []string
+
+	var walk func(e *jsonschema.ValidationError)
+
+	walk = func(e *jsonschema.ValidationError) {
+		if e.Keyword == "unevaluatedProperties" {
+			got = append(got, e.InstancePath)
+		}
+
+		for _, c := range e.Causes {
+			walk(c)
+		}
+	}
+
+	walk(ve)
+
+	want := []string{"/alpha", "/bravo", "/charlie", "/delta", "/echo"}
+	assert.Equal(t, want, got)
+}
+
 func TestIfAnnotationsMergedBeforeThen(t *testing.T) {
 	t.Parallel()
 

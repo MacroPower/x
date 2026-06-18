@@ -1718,10 +1718,15 @@ func (v *validator) validateUnevaluated(
 
 			childSchemaPath := schemaPath.kw("unevaluatedProperties")
 
-			for propName, val := range obj {
+			// Iterate in sorted key order so the emitted cause errors are
+			// deterministic, matching the sibling object keywords (properties,
+			// patternProperties, additionalProperties, propertyNames).
+			for _, propName := range slices.Sorted(maps.Keys(obj)) {
 				if ann.properties[propName] {
 					continue
 				}
+
+				val := obj[propName]
 
 				childPath := instancePath.key(propName)
 				childErrs := v.validate(schema.UnevaluatedProperties, val, childPath, childSchemaPath, nil)
