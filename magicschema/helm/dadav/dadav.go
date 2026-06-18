@@ -590,11 +590,16 @@ func applyDependencies(schema *jsonschema.Schema, val any) {
 			schema.DependencyStrings[key] = strs
 
 		case map[string]any:
-			if schema.DependencySchemas == nil {
-				schema.DependencySchemas = make(map[string]*jsonschema.Schema)
-			}
+			// Drop a dependency whose schema cannot round-trip rather than
+			// store a nil that marshals to an invalid "key": null, matching the
+			// nil-guard in ToSubSchemaMap.
+			if s := magicschema.ToSubSchema(dv); s != nil {
+				if schema.DependencySchemas == nil {
+					schema.DependencySchemas = make(map[string]*jsonschema.Schema)
+				}
 
-			schema.DependencySchemas[key] = magicschema.ToSubSchema(dv)
+				schema.DependencySchemas[key] = s
+			}
 		}
 	}
 }

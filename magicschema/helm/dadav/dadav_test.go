@@ -210,6 +210,35 @@ func TestHelmSchemaAnnotator(t *testing.T) {
 				assert.Contains(t, enabled, "port")
 			},
 		},
+		"dependency schema that cannot round-trip is dropped": {
+			// The "bad" dependency carries a non-finite number, so ToSubSchema
+			// returns nil; it must be dropped rather than stored as an invalid
+			// "bad": null, while the valid "good" dependency survives.
+			input: stringtest.Input(`
+				# @schema
+				# dependencies:
+				#   good: [a, b]
+				#   bad:
+				#     const: .nan
+				# @schema
+				field: value
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				f, ok := props["field"].(map[string]any)
+				require.True(t, ok)
+
+				deps, ok := f["dependencies"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, []any{"a", "b"}, deps["good"])
+				assert.NotContains(t, deps, "bad")
+			},
+		},
 		"blank line separates description context": {
 			input: stringtest.Input(`
 				# Old context about something
