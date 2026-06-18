@@ -547,7 +547,10 @@ func splitNullType(types []string) ([]string, bool) {
 }
 
 // sameStringSet reports whether two slices contain the same elements,
-// ignoring order.
+// ignoring order. Containment is checked in both directions so a duplicated
+// member cannot stand in for a missing one: ["string", "string"] and
+// ["string", "integer"] are equal length and each "string" is contained in
+// the other, yet they are not the same set.
 func sameStringSet(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
@@ -555,6 +558,12 @@ func sameStringSet(a, b []string) bool {
 
 	for _, s := range a {
 		if !slices.Contains(b, s) {
+			return false
+		}
+	}
+
+	for _, s := range b {
+		if !slices.Contains(a, s) {
 			return false
 		}
 	}

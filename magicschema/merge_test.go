@@ -599,6 +599,27 @@ func TestMergeAnnotatedConstraints(t *testing.T) {
 				assert.Equal(t, []any{"string", "null"}, host["type"])
 			},
 		},
+		"duplicate type member does not swallow the other input's type": {
+			// A degenerate [string, string] union must not compare equal to
+			// [string, integer] and drop integer: that would emit a
+			// non-permissive schema rejecting the integer the other input
+			// allows. The incompatible merge instead fails open.
+			inputA: "# @schema type:[string, string]\nhost:\n",
+			inputB: "# @schema type:[string, integer]\nhost:\n",
+			opts:   []magicschema.Option{magicschema.WithAnnotators(losisin.New())},
+			check: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				// Host fails open to no type constraint (the true schema or
+				// a typeless map); it must never be ["string", "string"].
+				if host, ok := props["host"].(map[string]any); ok {
+					assert.Nil(t, host["type"], "expected no type constraint")
+				}
+			},
+		},
 		"enum union when both sides constrain": {
 			inputA: "# @schema enum:[a, b]\nsize: a\n",
 			inputB: "# @schema enum:[b, c]\nsize: c\n",
