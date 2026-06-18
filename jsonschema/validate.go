@@ -4383,10 +4383,14 @@ func (v *validator) resolveDynamicRef(schema *Schema, ref string) *Schema {
 		return staticTarget
 	}
 
-	// Phase 2: Bookending check. The static target must have a
-	// $dynamicAnchor matching the fragment name.
+	// Phase 2: Bookending check. Dynamic resolution engages only when static
+	// resolution actually landed on the schema that bears a $dynamicAnchor of the
+	// fragment name, not merely when the static target's resource defines one
+	// somewhere. Otherwise a plain $anchor that wins static resolution would be
+	// treated dynamically just because a same-named $dynamicAnchor sits elsewhere
+	// in the resource.
 	staticBase := v.schemaBase(staticTarget)
-	if _, ok := v.lookupDynamicAnchor(staticBase + "#" + fragment); !ok {
+	if anchored, ok := v.lookupDynamicAnchor(staticBase + "#" + fragment); !ok || anchored != staticTarget {
 		return staticTarget // no bookend → behave like $ref
 	}
 
