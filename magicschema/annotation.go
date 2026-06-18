@@ -66,13 +66,13 @@ func mergeAnnotations(results []*AnnotationResult) *AnnotationResult {
 		}
 
 		if merged == nil {
-			merged = &AnnotationResult{
-				Schema:          copySchema(r.Schema),
-				HasRequired:     r.HasRequired,
-				Skip:            r.Skip,
-				SkipProperties:  r.SkipProperties,
-				MergeProperties: r.MergeProperties,
-			}
+			// Copy every field, then replace Schema with a copy so downstream
+			// mutation never reaches the annotator's. Copying the whole struct
+			// keeps a new AnnotationResult field carried by the highest-priority
+			// result without a separate edit here.
+			clone := *r
+			clone.Schema = copySchema(r.Schema)
+			merged = &clone
 
 			continue
 		}
