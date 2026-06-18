@@ -997,6 +997,37 @@ func TestHelmDocsAnnotator(t *testing.T) {
 				assert.Contains(t, desc, "More details")
 			},
 		},
+		"new-style description keeps old-style default": {
+			// A node with a new-style "# -- desc" head comment and a file-level
+			// old-style entry carrying a @default must keep the new-style
+			// description and the old-style default (per-field precedence),
+			// rather than discarding the old entry wholesale.
+			input: stringtest.Input(`
+				# key.path -- (string) old description
+				# @default -- olddefault
+				key:
+				  # -- new description
+				  path: actual
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				k, ok := props["key"].(map[string]any)
+				require.True(t, ok)
+
+				kProps, ok := k["properties"].(map[string]any)
+				require.True(t, ok)
+
+				p, ok := kProps["path"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "new description", p["description"])
+				assert.Equal(t, "olddefault", p["default"])
+			},
+		},
 		"old-style with default override": {
 			input: stringtest.Input(`
 				# key.path -- Description

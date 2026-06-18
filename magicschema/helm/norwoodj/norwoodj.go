@@ -404,6 +404,12 @@ func (a *Annotator) Annotate(node ast.Node, keyPath string) *magicschema.Annotat
 				merged.defaultVal = entry.defaultVal
 				entry = &merged
 			}
+
+		case entry.defaultVal == nil:
+			// A new-style entry that sets a description or type but no default
+			// still inherits the old-style @default (per-field precedence),
+			// rather than discarding it along with the rest of the old entry.
+			entry.defaultVal = old.defaultVal
 		}
 	}
 
