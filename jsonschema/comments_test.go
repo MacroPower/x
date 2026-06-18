@@ -52,6 +52,23 @@ func TestEmbeddedNamedFieldDescription(t *testing.T) {
 	assert.Contains(t, s.Properties["stamp"].Description, "documents the envelope stamp")
 }
 
+// TestEmbeddedGenericFieldDescription covers comment extraction for an embedded
+// generic instantiation. The source AST embeds the type as an index expression
+// (Box[int]) with no name identifier, so embeddedFieldName must unwrap it to
+// "Box" to match reflect's field name and recover the field's doc comment.
+func TestEmbeddedGenericFieldDescription(t *testing.T) {
+	t.Parallel()
+
+	s, err := jsonschema.GenerateFor[alpha.GenericEnvelope](
+		t.Context(),
+		jsonschema.WithDescriptionProvider(jsonschema.NewGoCommentProvider()),
+	)
+	require.NoError(t, err)
+
+	require.Contains(t, s.Properties, "crate")
+	assert.Contains(t, s.Properties["crate"].Description, "documents the embedded generic box")
+}
+
 // TestGenericTypeDescription covers doc-comment extraction for an instantiated
 // generic type, whose reflect name ("Box[int]") carries a type-argument list
 // that must be stripped to match the source declaration ("Box").

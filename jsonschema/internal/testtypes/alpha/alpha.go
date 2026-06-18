@@ -45,6 +45,15 @@ type Envelope struct {
 	Stamp `json:"stamp"`
 }
 
+// GenericEnvelope embeds an instantiated generic type under an explicit JSON
+// name. It exercises embedded-field comment extraction when the embedded type
+// is a generic instantiation: reflect names the field "Box" while the source
+// AST embeds it as an index expression, which embeddedFieldName must unwrap.
+type GenericEnvelope struct {
+	// Crate documents the embedded generic box.
+	Box[int] `json:"crate"`
+}
+
 // Widget is a test type with documented fields.
 type Widget struct {
 	// Label documents the widget label. A jsonschema tag also sets a

@@ -206,9 +206,10 @@ func (ce *GoCommentProvider) FieldDescription(ctx context.Context, fc FieldConte
 
 // embeddedFieldName returns the field name Go assigns to an embedded
 // (anonymous) struct field, which is the unqualified name of the embedded type.
-// It unwraps a leading pointer and a package qualifier; an unrecognized shape
-// (such as a generic instantiation) yields "", leaving the field undescribed
-// rather than mismatched.
+// It unwraps a leading pointer, a package qualifier, and a generic
+// instantiation (Box[T] or Box[T, U]) down to the base type name; an
+// unrecognized shape yields "", leaving the field undescribed rather than
+// mismatched.
 func embeddedFieldName(expr ast.Expr) string {
 	if star, ok := expr.(*ast.StarExpr); ok {
 		expr = star.X
@@ -219,6 +220,10 @@ func embeddedFieldName(expr ast.Expr) string {
 		return t.Name
 	case *ast.SelectorExpr:
 		return t.Sel.Name
+	case *ast.IndexExpr:
+		return embeddedFieldName(t.X)
+	case *ast.IndexListExpr:
+		return embeddedFieldName(t.X)
 	default:
 		return ""
 	}
