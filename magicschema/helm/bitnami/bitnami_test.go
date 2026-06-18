@@ -222,6 +222,42 @@ func TestBitnamiAnnotator(t *testing.T) {
 				assert.Equal(t, "custom", v["default"])
 			},
 		},
+		"default value containing commas is preserved": {
+			input: stringtest.Input(`
+				## @param tags [array, default: a,b,c] Tags
+				tags: actual
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				v, ok := props["tags"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "array", v["type"])
+				assert.Equal(t, "a,b,c", v["default"])
+			},
+		},
+		"token ending in default is not the default modifier": {
+			input: stringtest.Input(`
+				## @param val [somedefault: y] Description
+				val: real
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				v, ok := props["val"].(map[string]any)
+				require.True(t, ok)
+
+				// "somedefault:" must not be read as the default modifier.
+				assert.NotContains(t, v, "default")
+			},
+		},
 		"unrecognized modifiers ignored": {
 			input: stringtest.Input(`
 				## @param val [string, foobar] Description

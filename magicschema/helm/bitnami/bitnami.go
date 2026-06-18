@@ -135,9 +135,11 @@ func normalizeKeyPath(keyPath string) string {
 // a single comma-delimited token, so a default value containing commas (e.g.
 // "[array, default: a,b,c]") is preserved instead of truncated at the first
 // comma. This follows the bitnami convention of writing default: last; the
-// modifiers before it are the type and nullable flags.
+// modifiers before it are the type and nullable flags. The marker is matched at
+// a comma boundary (see [defaultModifierIndex]) so a token such as
+// "somedefault:" cannot stand in for it.
 func parseModifiers(param *bitnamiParam, modifiers string) {
-	if idx := strings.Index(modifiers, "default:"); idx >= 0 {
+	if idx := defaultModifierIndex(modifiers); idx >= 0 {
 		val := strings.TrimSpace(modifiers[idx+len("default:"):])
 
 		// An empty "[default:]" carries no value; setting it would emit a
@@ -161,4 +163,31 @@ func parseModifiers(param *bitnamiParam, modifiers string) {
 
 		// Unknown modifiers silently ignored (best-effort).
 	}
+}
+
+// defaultModifierIndex returns the byte offset of the "default:" modifier --
+// the marker at the start of the bracket contents or directly after a comma,
+// ignoring surrounding spaces -- or -1 when it is absent. Anchoring to a comma
+// boundary keeps another token such as "somedefault:" from matching as a
+// substring, while still letting the default value itself contain commas (the
+// modifier takes the remainder of the bracket).
+func defaultModifierIndex(modifiers string) int {
+	const marker = "default:"
+
+	for i := 0; i+len(marker) <= len(modifiers); i++ {
+		if modifiers[i:i+len(marker)] != marker {
+			continue
+		}
+
+		j := i - 1
+		for j >= 0 && (modifiers[j] == ' ' || modifiers[j] == '\t') {
+			j--
+		}
+
+		if j < 0 || modifiers[j] == ',' {
+			return i
+		}
+	}
+
+	return -1
 }
