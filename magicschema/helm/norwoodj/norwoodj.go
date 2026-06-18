@@ -315,7 +315,7 @@ func parseCommentBlock(commentLines []string) *parsedComment {
 		stripped = strings.TrimPrefix(stripped, "#")
 		stripped = strings.TrimSpace(stripped)
 
-		if strings.HasPrefix(stripped, "@ignore") {
+		if markerToken(stripped, "@ignore") {
 			skip = true
 
 			continue
@@ -325,7 +325,7 @@ func parseCommentBlock(commentLines []string) *parsedComment {
 		// divergence from upstream. Upstream would let these fall through to
 		// continuation text. We consume them to avoid annotation markers
 		// leaking into schema descriptions.
-		if strings.HasPrefix(stripped, "@notationType") || strings.HasPrefix(stripped, "@section") {
+		if markerToken(stripped, "@notationType") || markerToken(stripped, "@section") {
 			continue
 		}
 
@@ -515,6 +515,19 @@ func (a *Annotator) parseNewStyleComment(commentStr string) *parsedComment {
 	}
 
 	return pc
+}
+
+// markerToken reports whether s begins with marker as a whole token -- the
+// marker exactly, or followed by whitespace. A continuation line such as
+// "@sections of the chart are documented below" then stays in the description
+// instead of being silently consumed as an "@section" annotation.
+func markerToken(s, marker string) bool {
+	rest, ok := strings.CutPrefix(s, marker)
+	if !ok {
+		return false
+	}
+
+	return rest == "" || rest[0] == ' ' || rest[0] == '\t'
 }
 
 // mapHelmDocsType maps a helm-docs type hint to a JSON Schema type.

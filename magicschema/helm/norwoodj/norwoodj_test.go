@@ -61,6 +61,27 @@ func TestHelmDocsAnnotator(t *testing.T) {
 				assert.Equal(t, "Number of replicas", r["description"])
 			},
 		},
+		"prose continuation starting with a marker word is kept": {
+			// "@sections" begins with "@section" but is prose, not the
+			// "@section" annotation (which needs a " -- " separator). It must
+			// stay in the description rather than be silently consumed.
+			input: stringtest.Input(`
+				# -- Main description.
+				# @sections of the chart are documented below.
+				key: value
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				k, ok := props["key"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Contains(t, k["description"], "sections of the chart are documented below")
+			},
+		},
 		"type hint string": {
 			input: stringtest.Input(`
 				# -- (string) Container image
