@@ -166,7 +166,15 @@ func (c *Config) annotatorsCompletion(
 	}
 
 	partial = strings.TrimSpace(partial)
-	used := strings.Split(base, ",")
+
+	// The base value is "" or a run ending in ",", so a plain Split would leave
+	// a spurious "" entry; trim the trailing comma and skip the split when empty
+	// so used holds only real annotator names.
+	var used []string
+
+	if base != "" {
+		used = strings.Split(strings.TrimRight(base, ","), ",")
+	}
 
 	var out []string
 
