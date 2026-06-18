@@ -630,15 +630,20 @@ func (g *Generator) buildChildSchema(
 		}
 	}
 
-	// Apply skipProperties: strip Properties from output.
-	if annotation.SkipProperties {
+	// Apply mergeProperties before skipProperties. Both can be set at once --
+	// mergeAnnotations ORs them, so two annotators can each contribute one, or
+	// one losisin line can set both -- and stripping first would leave
+	// mergeProperties with no Properties to fold, silently dropping the child
+	// schemas. Folding first preserves them in additionalProperties; the strip
+	// then clears the now-empty Properties map.
+	if annotation.MergeProperties && childSchema.Properties != nil {
+		childSchema.AdditionalProperties = mergePropertySchemas(childSchema)
 		childSchema.Properties = nil
 		childSchema.PropertyOrder = nil
 	}
 
-	// Apply mergeProperties: merge child properties into additionalProperties.
-	if annotation.MergeProperties && childSchema.Properties != nil {
-		childSchema.AdditionalProperties = mergePropertySchemas(childSchema)
+	// Apply skipProperties: strip Properties from output.
+	if annotation.SkipProperties {
 		childSchema.Properties = nil
 		childSchema.PropertyOrder = nil
 	}

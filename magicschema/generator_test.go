@@ -636,6 +636,37 @@ func TestGeneratorBrokenAlias(t *testing.T) {
 	}
 }
 
+func TestGeneratorSkipAndMergePropertiesTogether(t *testing.T) {
+	t.Parallel()
+
+	// Both skipProperties and mergeProperties can be set on one node. The
+	// merge fold must run first so the child schemas survive in
+	// additionalProperties rather than being dropped by the strip.
+	gen := magicschema.NewGenerator(magicschema.WithAnnotators(losisin.New()))
+
+	schema, err := gen.Generate([]byte(stringtest.Input(`
+		# @schema skipProperties:true;mergeProperties:true
+		config:
+		  a: 1
+		  b: 2
+	`)))
+	require.NoError(t, err)
+
+	out, err := json.Marshal(schema)
+	require.NoError(t, err)
+
+	var got map[string]any
+
+	require.NoError(t, json.Unmarshal(out, &got))
+
+	config := propertyAt(t, got, "config")
+	assert.NotContains(t, config, "properties")
+
+	ap, ok := config["additionalProperties"].(map[string]any)
+	require.True(t, ok, "child schemas should fold into additionalProperties")
+	assert.Equal(t, "integer", ap["type"])
+}
+
 func TestGeneratorInferDefaultsGolden(t *testing.T) {
 	t.Parallel()
 
