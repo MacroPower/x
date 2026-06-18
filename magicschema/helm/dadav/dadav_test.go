@@ -404,6 +404,28 @@ func TestHelmSchemaRootAnnotation(t *testing.T) {
 				assert.Equal(t, "A chart description", got["description"])
 			},
 		},
+		"inline schema annotation inside root block is skipped": {
+			// An inline "# @schema key:value" (helm-values-schema format)
+			// landing inside a root block must be skipped, not appended into
+			// the root YAML where its '@' makes goccy reject the whole block
+			// and drop the legitimate title and description with it.
+			input: stringtest.Input(`
+				# @schema.root
+				# title: My Chart
+				# @schema type:string
+				# description: A chart description
+				# @schema.root
+				# @schema
+				# type: integer
+				# @schema
+				replicas: 3
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+				assert.Equal(t, "My Chart", got["title"])
+				assert.Equal(t, "A chart description", got["description"])
+			},
+		},
 		"cli flags override root values": {
 			input: stringtest.Input(`
 				# @schema.root

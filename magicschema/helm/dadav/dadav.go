@@ -384,13 +384,18 @@ func extractSchemaRootBlock(comment string) string {
 		// A @schema delimiter ends an unclosed root block (root content
 		// cannot extend into schema blocks) and otherwise toggles
 		// schema-block state so root markers inside a schema block are
-		// ignored as junk.
-		if after, ok := strings.CutPrefix(trimmed, "@schema"); ok && isDelimiterSuffix(after) {
-			if inBlock {
-				break
-			}
+		// ignored as junk. An inline "@schema key:value" (helm-values-schema
+		// format) is not a delimiter, but it is still skipped rather than
+		// appended, mirroring extractSchemaBlock: letting it land in the root
+		// YAML would make goccy reject the whole block as invalid.
+		if after, ok := strings.CutPrefix(trimmed, "@schema"); ok {
+			if isDelimiterSuffix(after) {
+				if inBlock {
+					break
+				}
 
-			inSchemaBlock = !inSchemaBlock
+				inSchemaBlock = !inSchemaBlock
+			}
 
 			continue
 		}
