@@ -787,6 +787,54 @@ func TestUnrecognizedValidateTagErrors(t *testing.T) {
 		"unrecognized validate tag 'emial' produces an error")
 }
 
+func TestNumericEqLenConflictRejected(t *testing.T) {
+	t.Parallel()
+
+	// Both eq=N and len=N pin a numeric field to a single value, so two rules
+	// pinning different values can never both hold. The conflict is reported
+	// rather than silently letting whichever rule runs last win, regardless of
+	// tag order; equal values agree and are accepted.
+	t.Run("eq then len conflict", func(t *testing.T) {
+		t.Parallel()
+
+		type T struct {
+			N int `json:"n" validate:"eq=5,len=10"`
+		}
+
+		_, err := jsonschema.GenerateFor[T](t.Context(),
+			jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
+		)
+		require.ErrorIs(t, err, validate.ErrConflictingConstraints)
+	})
+
+	t.Run("len then eq conflict", func(t *testing.T) {
+		t.Parallel()
+
+		type T struct {
+			N int `json:"n" validate:"len=10,eq=5"`
+		}
+
+		_, err := jsonschema.GenerateFor[T](t.Context(),
+			jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
+		)
+		require.ErrorIs(t, err, validate.ErrConflictingConstraints)
+	})
+
+	t.Run("matching values agree", func(t *testing.T) {
+		t.Parallel()
+
+		type T struct {
+			N int `json:"n" validate:"eq=5,len=5"`
+		}
+
+		s, err := jsonschema.GenerateFor[T](t.Context(),
+			jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
+		)
+		require.NoError(t, err)
+		require.NotNil(t, s.Properties["n"].Const)
+	})
+}
+
 func TestCollectionLtZeroIsUnsatisfiable(t *testing.T) {
 	t.Parallel()
 

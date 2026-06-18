@@ -350,9 +350,7 @@ func applyLenConstraint(s *jsonschema.Schema, value string, baseType reflect.Typ
 			return fmt.Errorf("validate tag: len: %w", err)
 		}
 
-		s.Const = &parsed
-
-		return nil
+		return setNumericConst(s, parsed)
 
 	default:
 		return fmt.Errorf("validate tag: len not supported for type %s", baseType.Kind())

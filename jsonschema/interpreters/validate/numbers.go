@@ -169,6 +169,22 @@ func applyNumericEq(s *jsonschema.Schema, value string, baseType reflect.Type) e
 		return fmt.Errorf("validate tag: eq: %w", err)
 	}
 
+	return setNumericConst(s, parsed)
+}
+
+// setNumericConst pins the schema's const to a numeric value, reporting a
+// conflict rather than silently overwriting a const that a previous rule
+// already pinned to a different number. A numeric field's eq and len rules
+// both pin the value (eq=N and len=N each mean "equals N"), so eq=5,len=10 --
+// or eq=3,eq=9 -- can never both hold; rejecting the clash keeps the result
+// order-independent and matches applyBoolEq instead of letting whichever rule
+// runs last win.
+func setNumericConst(s *jsonschema.Schema, parsed any) error {
+	if s.Const != nil && !numericEqual(*s.Const, parsed) {
+		return fmt.Errorf("%w: eq/len=%v conflicts with an existing value constraint",
+			ErrConflictingConstraints, parsed)
+	}
+
 	s.Const = &parsed
 
 	return nil
