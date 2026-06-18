@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"go.jacobcolvin.com/x/jsonschema"
+	"go.jacobcolvin.com/x/jsonschema/internal/numkind"
 )
 
 // parseBoundFloat parses a numeric bound, rejecting non-finite values
@@ -330,7 +331,7 @@ func asFloat64(v any) (float64, bool) {
 func parseNumericValue(value string, t reflect.Type) (any, error) {
 	switch {
 	case isUnsignedKind(t):
-		n, err := strconv.ParseUint(value, 10, uintBitSize(t.Kind()))
+		n, err := strconv.ParseUint(value, 10, numkind.UintBitSize(t.Kind()))
 		if err != nil {
 			return nil, fmt.Errorf("invalid unsigned integer %q: %w", value, err)
 		}
@@ -338,7 +339,7 @@ func parseNumericValue(value string, t reflect.Type) (any, error) {
 		return n, nil
 
 	case isIntegerKind(t):
-		n, err := strconv.ParseInt(value, 10, intBitSize(t.Kind()))
+		n, err := strconv.ParseInt(value, 10, numkind.IntBitSize(t.Kind()))
 		if err != nil {
 			return nil, fmt.Errorf("invalid integer %q: %w", value, err)
 		}
@@ -354,46 +355,6 @@ func parseNumericValue(value string, t reflect.Type) (any, error) {
 	}
 
 	return n, nil
-}
-
-// intBitSize returns the bit width to parse a signed-integer field value at, so a
-// value the field cannot hold overflows during parsing. Plain int is platform-
-// dependent ([strconv.IntSize]); the sized kinds map to their fixed widths. The
-// parent package keeps the same mapping for the jsonschema tag; this subpackage
-// cannot import that unexported helper, so it carries a local equivalent.
-func intBitSize(k reflect.Kind) int {
-	switch k {
-	case reflect.Int8:
-		return 8
-	case reflect.Int16:
-		return 16
-	case reflect.Int32:
-		return 32
-	case reflect.Int64:
-		return 64
-	default: // reflect.Int
-		return strconv.IntSize
-	}
-}
-
-// uintBitSize returns the bit width to parse an unsigned-integer field value at,
-// so a value the field cannot hold overflows during parsing. Plain uint and
-// uintptr are platform-dependent ([strconv.IntSize]); the sized kinds map to
-// their fixed widths. It mirrors the parent package's unexported helper for the
-// jsonschema tag, kept local because the subpackage cannot import it.
-func uintBitSize(k reflect.Kind) int {
-	switch k {
-	case reflect.Uint8:
-		return 8
-	case reflect.Uint16:
-		return 16
-	case reflect.Uint32:
-		return 32
-	case reflect.Uint64:
-		return 64
-	default: // reflect.Uint, reflect.Uintptr
-		return strconv.IntSize
-	}
 }
 
 // parseNumericValues parses space-separated numeric values.
