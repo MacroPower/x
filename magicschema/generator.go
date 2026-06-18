@@ -254,7 +254,13 @@ func (g *Generator) generateSingle(input []byte) (*jsonschema.Schema, []Annotato
 	}
 
 	for i, doc := range file.Docs {
-		if doc.Body == nil {
+		// A comment-only "---" block parses to a *ast.CommentGroupNode body and
+		// a leading directive (such as %YAML) to a *ast.DirectiveNode body.
+		// Neither is a value, so walking it would fold a spurious empty schema
+		// -- and, through the merge, a stray "null" type that defeats strict
+		// mode -- into the union. Skip them like a nil body.
+		switch doc.Body.(type) {
+		case nil, *ast.CommentGroupNode, *ast.DirectiveNode:
 			continue
 		}
 

@@ -1868,6 +1868,50 @@ func TestGeneratorEmptyMidStreamDocument(t *testing.T) {
 	}
 }
 
+func TestGeneratorNonValueDocumentBodies(t *testing.T) {
+	t.Parallel()
+
+	// A comment-only "---" block or a leading directive parses to a non-value
+	// document body. It must contribute nothing to the union rather than fold
+	// in an empty schema that widens the root to [object, null] (and, under
+	// strict mode, flips additionalProperties back to permissive).
+	tcs := map[string]struct {
+		input string
+	}{
+		"comment-only mid-stream document": {
+			input: "replicas: 3\n---\n# just a comment\n---\nreplicas: 1\n",
+		},
+		"comment-only trailing document": {
+			input: "replicas: 3\n---\n# trailing comment\n",
+		},
+		"leading directive": {
+			input: "%YAML 1.2\n---\nreplicas: 3\n",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			gen := magicschema.NewGenerator(magicschema.WithStrict(true))
+			schema, err := gen.Generate([]byte(tc.input))
+			require.NoError(t, err)
+
+			out, err := json.Marshal(schema)
+			require.NoError(t, err)
+
+			var got map[string]any
+
+			require.NoError(t, json.Unmarshal(out, &got))
+
+			// The root stays a plain object: the non-value body neither widens
+			// the type to include null nor defeats strict mode.
+			assert.Equal(t, "object", got["type"])
+			assert.Equal(t, false, got["additionalProperties"])
+		})
+	}
+}
+
 func TestGeneratorByteOrderMark(t *testing.T) {
 	t.Parallel()
 
