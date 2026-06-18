@@ -293,13 +293,16 @@ func extractSchemaBlock(comment string) string {
 	)
 
 	for _, line := range lines {
-		stripped := strings.TrimSpace(stripCommentHash(line))
+		// Strip once; markers match on a fully trimmed copy while content
+		// keeps its indentation beyond the marker and single space.
+		stripped := stripCommentHash(line)
+		trimmed := strings.TrimSpace(stripped)
 
 		// Check for @schema.root delimiter (toggle root block state).
 		// Lines with trailing content are not delimiters and are skipped.
 		// Inside an open @schema block the marker is junk content, not a
 		// delimiter: toggling there would swallow the rest of the block.
-		if after, ok := strings.CutPrefix(stripped, "@schema.root"); ok {
+		if after, ok := strings.CutPrefix(trimmed, "@schema.root"); ok {
 			if !inBlock && strings.TrimSpace(after) == "" {
 				inRootBlock = !inRootBlock
 			}
@@ -307,7 +310,7 @@ func extractSchemaBlock(comment string) string {
 			continue
 		}
 
-		if after, ok := strings.CutPrefix(stripped, "@schema"); ok {
+		if after, ok := strings.CutPrefix(trimmed, "@schema"); ok {
 			if isDelimiterSuffix(after) {
 				// Toggle delimiter -- supports multiple blocks. A
 				// @schema delimiter also ends an unclosed @schema.root
@@ -329,7 +332,7 @@ func extractSchemaBlock(comment string) string {
 		}
 
 		if inBlock {
-			content = append(content, stripCommentHash(line))
+			content = append(content, stripped)
 		}
 	}
 
@@ -351,9 +354,12 @@ func extractSchemaRootBlock(comment string) string {
 	)
 
 	for _, line := range lines {
-		stripped := strings.TrimSpace(stripCommentHash(line))
+		// Strip once; markers match on a fully trimmed copy while content
+		// keeps its indentation beyond the marker and single space.
+		stripped := stripCommentHash(line)
+		trimmed := strings.TrimSpace(stripped)
 
-		if after, ok := strings.CutPrefix(stripped, "@schema.root"); ok {
+		if after, ok := strings.CutPrefix(trimmed, "@schema.root"); ok {
 			rest := strings.TrimSpace(after)
 			if rest != "" {
 				// @schema.root with trailing content -- skip.
@@ -379,7 +385,7 @@ func extractSchemaRootBlock(comment string) string {
 		// cannot extend into schema blocks) and otherwise toggles
 		// schema-block state so root markers inside a schema block are
 		// ignored as junk.
-		if after, ok := strings.CutPrefix(stripped, "@schema"); ok && isDelimiterSuffix(after) {
+		if after, ok := strings.CutPrefix(trimmed, "@schema"); ok && isDelimiterSuffix(after) {
 			if inBlock {
 				break
 			}
@@ -390,7 +396,7 @@ func extractSchemaRootBlock(comment string) string {
 		}
 
 		if inBlock {
-			content = append(content, stripCommentHash(line))
+			content = append(content, stripped)
 		}
 	}
 
