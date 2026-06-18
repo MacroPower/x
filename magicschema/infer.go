@@ -128,9 +128,11 @@ func extractComment(node ast.Node) string {
 		}
 	}
 
-	// Try inline comment on the key node.
-	if keyNode, ok := mvn.Key.(ast.Node); ok {
-		if desc := extractFromComment(keyNode.GetComment()); desc != "" {
+	// Try inline comment on the key node. MapKeyNode embeds ast.Node, so
+	// GetComment is callable directly; the nil guard is the only protection
+	// the old comma-ok assertion provided.
+	if mvn.Key != nil {
+		if desc := extractFromComment(mvn.Key.GetComment()); desc != "" {
 			return desc
 		}
 	}
