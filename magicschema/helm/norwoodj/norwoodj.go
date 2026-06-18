@@ -572,11 +572,8 @@ func mapHelmDocsType(hint string) string {
 	}
 
 	// Compound types: use the last segment.
-	if strings.Contains(hint, "/") {
-		parts := strings.Split(hint, "/")
-		last := parts[len(parts)-1]
-
-		if t, ok := typeMapping[last]; ok {
+	if i := strings.LastIndex(hint, "/"); i >= 0 {
+		if t, ok := typeMapping[hint[i+1:]]; ok {
 			return t
 		}
 	}
