@@ -1664,6 +1664,32 @@ func TestHelmSchemaAnnotatorEdgeCases(t *testing.T) {
 				assert.InDelta(t, float64(100), v["maximum"], 0.001)
 			},
 		},
+		"space-separated @schema .root is the inline form, not a root delimiter": {
+			// "@schema .root" with a space is the helm-values-schema inline
+			// form, which the block annotator ignores. It must not open a
+			// root block and swallow the following description, the way the
+			// contiguous "@schema.root" delimiter would.
+			input: stringtest.Input(`
+				# @schema .root
+				# My real description
+				# @schema
+				# type: integer
+				# @schema
+				val: 50
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				v, ok := props["val"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "integer", v["type"])
+				assert.Equal(t, "My real description", v["description"])
+			},
+		},
 	}
 
 	for name, tc := range tcs {

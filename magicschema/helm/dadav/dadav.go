@@ -432,30 +432,32 @@ func extractNonAnnotationDescription(comment string) string {
 		content := stripCommentHash(line)
 		stripped := strings.TrimSpace(content)
 
-		if after, ok := strings.CutPrefix(stripped, "@schema"); ok {
-			rest := strings.TrimSpace(after)
-
-			// Check for @schema.root delimiter (no trailing content).
-			// Inside an open @schema block the marker is junk content,
-			// not a delimiter, mirroring extractSchemaBlock.
-			if rootAfter, isRoot := strings.CutPrefix(rest, ".root"); isRoot {
-				if !inSchemaBlock && strings.TrimSpace(rootAfter) == "" {
-					inRootBlock = !inRootBlock
-				}
-
-				continue
+		// Check for @schema.root delimiter (toggle root block state).
+		// The contiguous "@schema.root" literal is required, matching
+		// extractSchemaBlock and extractSchemaRootBlock: a space-separated
+		// "@schema .root" is the helm-values-schema inline form, not a
+		// delimiter. Trimming the suffix before matching ".root" here would
+		// misread that inline form as a root delimiter and skip every
+		// following line as block content, dropping the real description.
+		// Inside an open @schema block the marker is junk content, not a
+		// delimiter.
+		if after, ok := strings.CutPrefix(stripped, "@schema.root"); ok {
+			if !inSchemaBlock && strings.TrimSpace(after) == "" {
+				inRootBlock = !inRootBlock
 			}
 
-			// @schema delimiter. It also ends an unclosed @schema.root
-			// block.
+			continue
+		}
+
+		if after, ok := strings.CutPrefix(stripped, "@schema"); ok {
+			// @schema delimiter. It also ends an unclosed @schema.root block.
 			if isDelimiterSuffix(after) {
 				inRootBlock = false
 				inSchemaBlock = !inSchemaBlock
-
-				continue
 			}
 
-			// @schema with inline content (losisin format) -- skip.
+			// Otherwise @schema with whitespace-separated inline content
+			// (helm-values-schema format) -- skip.
 			continue
 		}
 
