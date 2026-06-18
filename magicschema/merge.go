@@ -304,16 +304,10 @@ func floatTypes(f float64) []string {
 }
 
 // mergeExtra merges two x-* annotation maps per key, with a winning conflicts.
+// Cloning a first keeps the inputs untouched; mergeExtraInto then fills in b's
+// keys that a lacks, which is the same first-wins union.
 func mergeExtra(a, b map[string]any) map[string]any {
-	if a == nil && b == nil {
-		return nil
-	}
-
-	out := make(map[string]any, len(a)+len(b))
-	maps.Copy(out, b)
-	maps.Copy(out, a)
-
-	return out
+	return mergeExtraInto(maps.Clone(a), b)
 }
 
 // mergeExtraInto folds src into dst in place, keeping dst's value on a key
