@@ -43,11 +43,24 @@ func applyStringOneOf(s *jsonschema.Schema, value string) error {
 	return nil
 }
 
-// applyStringEq applies eq=val → const for a string schema.
-func applyStringEq(s *jsonschema.Schema, value string) {
+// applyStringEq applies eq=val → const for a string schema. A const already
+// pinned to a different value by an earlier rule is a conflict the two rules can
+// never both satisfy, so it is reported rather than silently overwritten. This
+// keeps the result independent of tag order and matches setNumericConst and
+// applyBoolEq.
+func applyStringEq(s *jsonschema.Schema, value string) error {
+	if s.Const != nil {
+		if existing, ok := (*s.Const).(string); ok && existing != value {
+			return fmt.Errorf("%w: eq=%q conflicts with an existing value constraint",
+				ErrConflictingConstraints, value)
+		}
+	}
+
 	var v any = value
 
 	s.Const = &v
+
+	return nil
 }
 
 // applyStringNe applies ne=val → not for a string schema.

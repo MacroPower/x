@@ -443,9 +443,7 @@ func applyEq(s *jsonschema.Schema, value string, baseType reflect.Type) error {
 		// Eq=N on a collection means the length equals N.
 		return applyCollectionLenConstraint(s, value, baseType)
 	case isStringKind(baseType):
-		applyStringEq(s, value)
-
-		return nil
+		return applyStringEq(s, value)
 
 	default:
 		return fmt.Errorf("validate tag: eq not supported for type %s", baseType.Kind())

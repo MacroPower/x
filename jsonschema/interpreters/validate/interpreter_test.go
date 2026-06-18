@@ -835,6 +835,40 @@ func TestNumericEqLenConflictRejected(t *testing.T) {
 	})
 }
 
+func TestStringEqConflictRejected(t *testing.T) {
+	t.Parallel()
+
+	// An eq=val rule pins a string field's const, so two eq rules pinning
+	// different values can never both hold. The conflict is reported rather than
+	// letting whichever rule runs last win, matching the numeric and bool paths.
+	t.Run("conflicting eq values", func(t *testing.T) {
+		t.Parallel()
+
+		type T struct {
+			S string `json:"s" validate:"eq=foo,eq=bar"`
+		}
+
+		_, err := jsonschema.GenerateFor[T](t.Context(),
+			jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
+		)
+		require.ErrorIs(t, err, validate.ErrConflictingConstraints)
+	})
+
+	t.Run("matching eq values agree", func(t *testing.T) {
+		t.Parallel()
+
+		type T struct {
+			S string `json:"s" validate:"eq=foo,eq=foo"`
+		}
+
+		s, err := jsonschema.GenerateFor[T](t.Context(),
+			jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
+		)
+		require.NoError(t, err)
+		require.NotNil(t, s.Properties["s"].Const)
+	})
+}
+
 func TestCollectionLtZeroIsUnsatisfiable(t *testing.T) {
 	t.Parallel()
 
