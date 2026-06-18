@@ -152,11 +152,7 @@ func (a *Annotator) parseRootBlock(content string) {
 			schema.AdditionalProperties = toAdditionalProperties(val)
 		default:
 			if strings.HasPrefix(key, "x-") {
-				if schema.Extra == nil {
-					schema.Extra = make(map[string]any)
-				}
-
-				schema.Extra[key] = val
+				setExtra(schema, key, val)
 			}
 		}
 	}
@@ -271,13 +267,20 @@ func (a *Annotator) applyField(schema *jsonschema.Schema, result *magicschema.An
 		schema.ContentMediaType = toString(val)
 	default:
 		if strings.HasPrefix(key, "x-") {
-			if schema.Extra == nil {
-				schema.Extra = make(map[string]any)
-			}
-
-			schema.Extra[key] = val
+			setExtra(schema, key, val)
 		}
 	}
+}
+
+// setExtra stores a custom "x-" prefixed keyword in the schema's Extra map,
+// lazily allocating the map on first use. Shared by parseRootBlock and
+// applyField.
+func setExtra(schema *jsonschema.Schema, key string, val any) {
+	if schema.Extra == nil {
+		schema.Extra = make(map[string]any)
+	}
+
+	schema.Extra[key] = val
 }
 
 // extractSchemaBlock extracts the content between # @schema delimiters.
