@@ -515,9 +515,20 @@ func applyType(schema *jsonschema.Schema, val any) {
 			}
 		}
 
-		if len(types) == 1 {
+		switch len(types) {
+		case 0:
+			// No usable type strings remain (e.g. type: [], type: [1, 2]).
+			// Leave Type and Types unset so structural inference and the
+			// fail-open default apply: setting a non-nil empty Types here
+			// would emit an invalid "type": [] and, once value inference
+			// fills Type, collide as "both Type and Types are set", which
+			// breaks the whole document's final marshal.
+		case 1:
 			schema.Type = types[0]
-		} else {
+			schema.Types = nil
+
+		default:
+			schema.Type = ""
 			schema.Types = types
 		}
 	}

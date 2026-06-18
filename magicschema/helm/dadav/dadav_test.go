@@ -2665,6 +2665,52 @@ func TestHelmSchemaAnnotatorUnit(t *testing.T) {
 				assert.Equal(t, "string", f["type"])
 			},
 		},
+		"type array with no usable members defers to inference": {
+			// A type array whose members are all non-string and non-null
+			// (e.g. [1, 2]) yields no usable type strings. The schema must
+			// leave Type/Types unset so value inference fills the type,
+			// rather than setting an empty Types that collides with the
+			// inferred Type and breaks the whole document's marshal.
+			input: stringtest.Input(`
+				# @schema
+				# type: [1, 2]
+				# @schema
+				field: hello
+			`),
+			want: func(t *testing.T, _ *dadav.Annotator, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				f, ok := props["field"].(map[string]any)
+				require.True(t, ok)
+
+				// Type is inferred from the value, and the schema marshals.
+				assert.Equal(t, "string", f["type"])
+			},
+		},
+		"empty type array does not emit an empty type keyword": {
+			// type: [] must not surface as the invalid Draft-7 "type": [].
+			input: stringtest.Input(`
+				# @schema
+				# type: []
+				# @schema
+				field: hello
+			`),
+			want: func(t *testing.T, _ *dadav.Annotator, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				f, ok := props["field"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "string", f["type"])
+				assert.NotEmpty(t, f["type"], "type must not be an empty array")
+			},
+		},
 		"double-hash description outside block stripped correctly": {
 			// Double-hash comments used as descriptions must not
 			// leave a stray '#' in the description text.
