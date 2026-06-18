@@ -3113,6 +3113,35 @@ func TestRefArrayIndexRFC6901Canonical(t *testing.T) {
 	}
 }
 
+func TestJSONPointerFallbackCacheKeyNoCollision(t *testing.T) {
+	t.Parallel()
+
+	// Two untyped-location pointers whose decoded segment lists differ only by
+	// where a NUL byte sits -- ["a\x00b"] from "#/a%00b" versus ["a","b"] from
+	// "#/a/b" -- must resolve to their own targets. A cache key that joined
+	// segments on NUL would map both to "a\x00b" and let the second ref reuse the
+	// first's cached schema.
+	data := []byte(`{
+		"$id": "https://example.com/nul-pointer",
+		"allOf": [{"$ref": "#/a%00b"}, {"$ref": "#/a/b"}],
+		"a\u0000b": {"type": "string"},
+		"a": {"b": {"type": "integer"}}
+	}`)
+
+	v, err := jsonschema.CompileJSON(t.Context(), data)
+	require.NoError(t, err)
+
+	// #/a/b targets the integer schema, so a string must be rejected by it. With
+	// a colliding key it would resolve to the string target at #/a%00b and the
+	// string would wrongly pass.
+	err = v.Validate(t.Context(), "hello")
+	require.Error(t, err, "#/a/b must resolve to its own integer target, not collide with #/a%00b")
+
+	// #/a%00b targets the string schema, so an integer must be rejected by it.
+	err = v.Validate(t.Context(), 42)
+	require.Error(t, err, "#/a%00b must resolve to its own string target")
+}
+
 func TestSchemaAtJSONPointerArrayIndexCanonical(t *testing.T) {
 	t.Parallel()
 
