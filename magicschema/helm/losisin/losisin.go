@@ -237,32 +237,16 @@ func (a *Annotator) applyPair(
 	case "$ref":
 		schema.Ref = val
 	case "item":
-		if schema.Items == nil {
-			schema.Items = &jsonschema.Schema{}
-		}
-
-		setSchemaType(schema.Items, parseStringList(val))
+		setSchemaType(ensureItems(schema), parseStringList(val))
 
 	case "itemProperties":
-		if schema.Items == nil {
-			schema.Items = &jsonschema.Schema{}
-		}
-
-		schema.Items.Properties = parseYAMLSchemaMap(val)
+		ensureItems(schema).Properties = parseYAMLSchemaMap(val)
 
 	case "itemEnum":
-		if schema.Items == nil {
-			schema.Items = &jsonschema.Schema{}
-		}
-
-		schema.Items.Enum = magicschema.FilterJSONSafe(parseAnyList(val))
+		ensureItems(schema).Enum = magicschema.FilterJSONSafe(parseAnyList(val))
 
 	case "itemRef":
-		if schema.Items == nil {
-			schema.Items = &jsonschema.Schema{}
-		}
-
-		schema.Items.Ref = val
+		ensureItems(schema).Ref = val
 
 	case "hidden":
 		result.Skip = parseBoolDefault(val)
@@ -315,6 +299,17 @@ func setSchemaType(s *jsonschema.Schema, types []string) {
 		s.Type = ""
 		s.Types = types
 	}
+}
+
+// ensureItems lazily initializes and returns the schema's Items, so the item*
+// annotation keys (item, itemProperties, itemEnum, itemRef) populate one shared
+// items schema without each repeating the nil guard.
+func ensureItems(s *jsonschema.Schema) *jsonschema.Schema {
+	if s.Items == nil {
+		s.Items = &jsonschema.Schema{}
+	}
+
+	return s.Items
 }
 
 // splitSemicolons splits a line by semicolons, respecting brackets. When the
