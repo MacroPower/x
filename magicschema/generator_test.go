@@ -2349,6 +2349,41 @@ func TestGeneratorMergeKeyRequired(t *testing.T) {
 	}
 }
 
+func TestGeneratorExplicitNotRequiredOverridesMergeKey(t *testing.T) {
+	t.Parallel()
+
+	// A "<<" merge brings in a key its source mapping marked required:true.
+	// An explicit required:false on the merged-in key must clear it: the
+	// fail-open principle never marks a property required against intent.
+	input := "base: &base\n" +
+		"  # @schema required:true\n" +
+		"  name: x\n" +
+		"spec:\n" +
+		"  <<: *base\n" +
+		"  # @schema required:false\n" +
+		"  name: y\n"
+
+	gen := magicschema.NewGenerator(magicschema.WithAnnotators(losisin.New()))
+	schema, err := gen.Generate([]byte(input))
+	require.NoError(t, err)
+
+	out, err := json.Marshal(schema)
+	require.NoError(t, err)
+
+	var got map[string]any
+
+	require.NoError(t, json.Unmarshal(out, &got))
+
+	props, ok := got["properties"].(map[string]any)
+	require.True(t, ok)
+
+	spec, ok := props["spec"].(map[string]any)
+	require.True(t, ok)
+
+	assert.NotContains(t, spec, "required",
+		"explicit required:false must clear the merge-key-inherited required")
+}
+
 func TestGeneratorRequiredUnderAnnotatedParent(t *testing.T) {
 	t.Parallel()
 

@@ -513,6 +513,14 @@ func addRequired(schema *jsonschema.Schema, key string) {
 	}
 }
 
+// removeRequired deletes key from schema.Required if present, so an explicit
+// required:false can clear a key a merge mapping marked required.
+func removeRequired(schema *jsonschema.Schema, key string) {
+	schema.Required = slices.DeleteFunc(schema.Required, func(k string) bool {
+		return k == key
+	})
+}
+
 // handleProperty processes a single key-value pair in a mapping.
 func (g *Generator) handleProperty(
 	mvn *ast.MappingValueNode,
@@ -547,8 +555,16 @@ func (g *Generator) handleProperty(
 	schema.Properties[keyName] = childSchema
 	addToOrder(keyName)
 
-	if annotation != nil && annotation.HasRequired != nil && *annotation.HasRequired {
+	switch {
+	case annotation == nil || annotation.HasRequired == nil:
+		// No explicit signal: leave any merge-key-inherited required as is.
+	case *annotation.HasRequired:
 		addRequired(schema, keyName)
+	default:
+		// An explicit required:false overrides a required key a "<<" merge
+		// brought in from the merged mapping: the property must not stay
+		// required against the annotation's intent.
+		removeRequired(schema, keyName)
 	}
 }
 
