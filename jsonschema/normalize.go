@@ -35,7 +35,7 @@ import (
 // recurse without bound, so callers building cyclic instances by hand should
 // avoid recursive schemas.
 func Normalize(instance any) any {
-	normalized, _ := normalizeInstance(instance, map[uintptr]bool{})
+	normalized, _ := normalizeInstance(instance, map[[2]uintptr]bool{})
 
 	return normalized
 }
@@ -44,7 +44,7 @@ func Normalize(instance any) any {
 // the input. The changed flag lets container normalization share unchanged
 // children with the input instead of comparing interface values (which would
 // panic on uncomparable types like maps and slices).
-func normalizeInstance(instance any, onPath map[uintptr]bool) (any, bool) {
+func normalizeInstance(instance any, onPath map[[2]uintptr]bool) (any, bool) {
 	switch v := instance.(type) {
 	case int:
 		return json.Number(strconv.FormatInt(int64(v), 10)), true
@@ -83,19 +83,20 @@ func normalizeInstance(instance any, onPath map[uintptr]bool) (any, bool) {
 
 // normalizeMap normalizes a map's values, returning the input map untouched
 // when no value changes.
-func normalizeMap(m map[string]any, onPath map[uintptr]bool) (any, bool) {
+func normalizeMap(m map[string]any, onPath map[[2]uintptr]bool) (any, bool) {
 	// Cycle guard: a self-referential instance (a map that contains itself,
 	// directly or transitively) would otherwise recurse without bound and abort
 	// the process with a stack overflow that recover cannot catch. Track the
 	// containers on the current path and stop at a back-edge, leaving the value
-	// unchanged.
-	ptr := reflect.ValueOf(m).Pointer()
-	if onPath[ptr] {
+	// unchanged. The key carries len alongside the pointer to stay uniform with
+	// normalizeSlice, where the length distinguishes a reslice from a true cycle.
+	key := [2]uintptr{reflect.ValueOf(m).Pointer(), uintptr(len(m))}
+	if onPath[key] {
 		return m, false
 	}
 
-	onPath[ptr] = true
-	defer delete(onPath, ptr)
+	onPath[key] = true
+	defer delete(onPath, key)
 
 	var out map[string]any
 
@@ -127,16 +128,21 @@ func normalizeMap(m map[string]any, onPath map[uintptr]bool) (any, bool) {
 
 // normalizeSlice normalizes a slice's elements, returning the input slice
 // untouched when no element changes.
-func normalizeSlice(s []any, onPath map[uintptr]bool) (any, bool) {
+func normalizeSlice(s []any, onPath map[[2]uintptr]bool) (any, bool) {
 	// Cycle guard: see normalizeMap. A slice that contains itself would
-	// otherwise recurse without bound and crash the process.
-	ptr := reflect.ValueOf(s).Pointer()
-	if onPath[ptr] {
+	// otherwise recurse without bound and crash the process. The guard keys on
+	// {data pointer, len} rather than the data pointer alone: a reslice such as
+	// c[:1] shares c's data pointer but is a distinct, acyclic value, so keying
+	// on the pointer alone would wrongly treat it as a back-edge and return it
+	// un-normalized. A genuine self-reference re-enters with the same pointer
+	// and length, so it is still caught.
+	key := [2]uintptr{reflect.ValueOf(s).Pointer(), uintptr(len(s))}
+	if onPath[key] {
 		return s, false
 	}
 
-	onPath[ptr] = true
-	defer delete(onPath, ptr)
+	onPath[key] = true
+	defer delete(onPath, key)
 
 	var out []any
 

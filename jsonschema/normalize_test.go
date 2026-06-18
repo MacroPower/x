@@ -103,6 +103,46 @@ func TestNormalizeCopyOnWrite(t *testing.T) {
 	})
 }
 
+// TestNormalizeResliceAliasing pins that a slice element that is a shorter
+// reslice of an ancestor (sharing its data pointer but not a true cycle) is
+// still descended and normalized. The cycle guard keys on {pointer, len}, so
+// the reslice is distinguished from a genuine self-reference.
+func TestNormalizeResliceAliasing(t *testing.T) {
+	t.Parallel()
+
+	t.Run("reslice element is normalized", func(t *testing.T) {
+		t.Parallel()
+
+		c := make([]any, 2)
+		c[0] = int(7)
+		c[1] = c[:1] // shares c's data pointer but has a different length
+
+		got, ok := jsonschema.Normalize(c).([]any)
+		require.True(t, ok)
+		require.Len(t, got, 2)
+		assert.Equal(t, json.Number("7"), got[0])
+
+		inner, ok := got[1].([]any)
+		require.True(t, ok, "the reslice element must be descended, not returned raw")
+		require.Len(t, inner, 1)
+		assert.Equal(t, json.Number("7"), inner[0],
+			"the int inside the reslice must be normalized to json.Number")
+	})
+
+	t.Run("true self-reference terminates", func(t *testing.T) {
+		t.Parallel()
+
+		c := make([]any, 1)
+		c[0] = c // a slice that contains itself
+
+		// The cycle guard must stop at the back-edge rather than recursing
+		// without bound; the value is returned unchanged.
+		got, ok := jsonschema.Normalize(c).([]any)
+		require.True(t, ok)
+		require.Len(t, got, 1)
+	})
+}
+
 // TestValidateGoNumericKinds pins that Validate normalizes its input up front
 // so it accepts Go numeric kinds that encoding/json does not produce. Such
 // kinds arise from values decoded from YAML/TOML or built by hand.
