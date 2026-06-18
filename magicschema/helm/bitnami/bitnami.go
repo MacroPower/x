@@ -11,7 +11,11 @@ import (
 )
 
 var (
-	paramRegex     = regexp.MustCompile(`^\s*##\s*@param\s+(\S+)\s*(?:\[(.*?)\])?\s*(.*)$`)
+	// The modifiers capture allows one level of nested brackets so a bracketed
+	// default value (a YAML flow sequence such as "[array, default: [a, b]]") is
+	// kept whole; a non-greedy [^]]* would stop at the inner "]" and leak the
+	// rest into the description while dropping the default.
+	paramRegex     = regexp.MustCompile(`^\s*##\s*@param\s+(\S+)\s*(?:\[((?:[^\[\]]|\[[^\]]*\])*)\])?\s*(.*)$`)
 	skipRegex      = regexp.MustCompile(`^\s*##\s*@skip\s+(\S+)`)
 	ignoredTagExpr = regexp.MustCompile(`^\s*##\s*@(section|descriptionStart|descriptionEnd|extra)\b`)
 	arrayIndexExpr = regexp.MustCompile(`\[\d+\]`)

@@ -1759,11 +1759,11 @@ func TestBitnamiPrepare(t *testing.T) {
 				require.NotNil(t, result)
 				require.NotNil(t, result.Schema)
 				assert.Equal(t, "array", result.Schema.Type)
-				// Comma in default value interacts with modifier splitting:
-				// "default: [a" is parsed as default, " b]" is unknown and ignored.
-				// YAML unmarshal of "[a" fails, so Default is nil.
-				// This is a known limitation of the bitnami comma-separated format.
-				assert.Nil(t, result.Schema.Default)
+				// The bracketed default is a YAML flow sequence; the modifiers
+				// capture keeps "[a, b]" whole, so the inner comma no longer
+				// truncates the value and the full list is recorded.
+				assert.JSONEq(t, `["a","b"]`, string(result.Schema.Default))
+				assert.Equal(t, "Desc", result.Schema.Description)
 			},
 		},
 		"param with multiple whitespace before hash": {
