@@ -295,7 +295,7 @@ func extractSchemaBlock(comment string) string {
 	for _, line := range lines {
 		// Strip once; markers match on a fully trimmed copy while content
 		// keeps its indentation beyond the marker and single space.
-		stripped := stripCommentHash(line)
+		stripped := magicschema.StripCommentMarker(line)
 		trimmed := strings.TrimSpace(stripped)
 
 		// Check for @schema.root delimiter (toggle root block state).
@@ -356,7 +356,7 @@ func extractSchemaRootBlock(comment string) string {
 	for _, line := range lines {
 		// Strip once; markers match on a fully trimmed copy while content
 		// keeps its indentation beyond the marker and single space.
-		stripped := stripCommentHash(line)
+		stripped := magicschema.StripCommentMarker(line)
 		trimmed := strings.TrimSpace(stripped)
 
 		if after, ok := strings.CutPrefix(trimmed, "@schema.root"); ok {
@@ -429,7 +429,7 @@ func extractNonAnnotationDescription(comment string) string {
 	for _, line := range lines {
 		// Markers are matched on a fully trimmed copy; the content keeps
 		// its indentation.
-		content := stripCommentHash(line)
+		content := magicschema.StripCommentMarker(line)
 		stripped := strings.TrimSpace(content)
 
 		// Check for @schema.root delimiter (toggle root block state).
@@ -493,19 +493,6 @@ func extractNonAnnotationDescription(comment string) string {
 // helm-values-schema inline annotation.
 func isDelimiterSuffix(after string) bool {
 	return after == "" || (after[0] != ' ' && after[0] != '\t')
-}
-
-// stripCommentHash removes leading whitespace, up to two leading '#'
-// characters, and a single following space. Keeping only one space means
-// deeper indentation after "# " survives for nested YAML block content.
-func stripCommentHash(line string) string {
-	line = strings.TrimSpace(line)
-
-	for range 2 {
-		line = strings.TrimPrefix(line, "#")
-	}
-
-	return strings.TrimPrefix(line, " ")
 }
 
 // applyType sets Type or Types on the schema from a YAML value.

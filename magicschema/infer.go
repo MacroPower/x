@@ -249,7 +249,7 @@ func adjacentCommentRun(comment *ast.CommentGroupNode, key ast.MapKeyNode) ([]st
 	// block state.
 	inSchema, inRoot := false, false
 	for _, line := range all[:len(all)-len(run)] {
-		inSchema, inRoot, _ = schemaFenceState(strings.TrimSpace(stripCommentPrefix(line)), inSchema, inRoot)
+		inSchema, inRoot, _ = schemaFenceState(strings.TrimSpace(StripCommentMarker(line)), inSchema, inRoot)
 	}
 
 	return run, inSchema, inRoot
@@ -301,15 +301,20 @@ func cleanComment(s string, inSchemaBlock, inRootBlock bool) string {
 
 	for line := range strings.SplitSeq(s, "\n") {
 		// Markers are matched on a fully trimmed copy; the content keeps
-		// its indentation.
+		// its indentation. Fence markers are matched on a two-hash-capped
+		// strip (see [StripCommentMarker]) so a "### @schema" line, which the
+		// dadav annotator does not treat as a delimiter, is likewise not a
+		// fence here; the content uses the all-hash [stripCommentPrefix] so
+		// decorative hash banners still collapse to blank lines.
 		content := stripCommentPrefix(line)
 		cleaned := strings.TrimSpace(content)
+		marker := strings.TrimSpace(StripCommentMarker(line))
 
 		// Track helm-schema block fences so block content never leaks into
 		// descriptions (see [schemaFenceState]).
 		var fence bool
 
-		inSchemaBlock, inRootBlock, fence = schemaFenceState(cleaned, inSchemaBlock, inRootBlock)
+		inSchemaBlock, inRootBlock, fence = schemaFenceState(marker, inSchemaBlock, inRootBlock)
 		if fence || inSchemaBlock || inRootBlock {
 			continue
 		}

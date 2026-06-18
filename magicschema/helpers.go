@@ -216,3 +216,21 @@ func LastCommentGroup(lines []string) []string {
 
 	return lines[lastBlank+1 : end]
 }
+
+// StripCommentMarker removes leading whitespace, up to two leading '#'
+// characters, and a single following space from a comment line. Capping the
+// hashes at two is how block markers such as "# @schema" and "## @param" are
+// recognized, so a line with three or more hashes ("### @schema") is treated
+// as prose, not a marker. Keeping only one trailing space means deeper
+// indentation after "# " survives for nested YAML block content. Annotators
+// and the structural fence detector strip markers with this helper so a
+// marker is recognized consistently across the package.
+func StripCommentMarker(line string) string {
+	line = strings.TrimSpace(line)
+
+	for range 2 {
+		line = strings.TrimPrefix(line, "#")
+	}
+
+	return strings.TrimPrefix(line, " ")
+}

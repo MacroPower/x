@@ -249,6 +249,9 @@
 //   - [LastCommentGroup] returns the lines of the final comment group (the
 //     lines after the last blank comment line, ignoring trailing blanks),
 //     which is the group annotation formats scope to.
+//   - [StripCommentMarker] removes the leading "#" marker (capped at two
+//     hashes) and one following space from a comment line, the strip used to
+//     recognize block markers consistently across annotators.
 //
 // # CLI Integration
 //
