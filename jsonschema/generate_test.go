@@ -2407,6 +2407,36 @@ func TestGenerateFor_JsonStringOverridesRef(t *testing.T) {
 		"the overridden type must not leave an orphan $defs entry")
 }
 
+func TestGenerateFor_NullablePointerJSONStringConstAcceptsNull(t *testing.T) {
+	t.Parallel()
+
+	// A nullable pointer carrying json:",string" generates the type-list
+	// {"type":["null","string"]} shape. A const/enum tag on it must land on the
+	// non-null branch so the permitted null is not rejected, mirroring the anyOf
+	// nullable shape.
+	type Container struct {
+		F *int `json:"f,string" jsonschema:"const=5"`
+	}
+
+	s, err := jsonschema.GenerateFor[Container](t.Context())
+	require.NoError(t, err)
+
+	field := s.Properties["f"]
+	require.NotNil(t, field)
+	require.Len(t, field.AnyOf, 2)
+	assert.Nil(t, field.Const, "const must not sit on the nullable wrapper")
+
+	validator, err := jsonschema.Compile(t.Context(), s)
+	require.NoError(t, err)
+
+	assert.NoError(t, validator.ValidateJSON(t.Context(), []byte(`{"f": null}`)),
+		"a null pointer is permitted")
+	assert.NoError(t, validator.ValidateJSON(t.Context(), []byte(`{"f": "5"}`)),
+		"the string-encoded const is permitted")
+	assert.Error(t, validator.ValidateJSON(t.Context(), []byte(`{"f": "6"}`)),
+		"a different value is rejected")
+}
+
 func TestGenerateFor_WithTypeSchemaNamedNonStructInlined(t *testing.T) {
 	t.Parallel()
 

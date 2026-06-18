@@ -1641,32 +1641,73 @@ func (g *generator) applyNullable(s *Schema, t reflect.Type, nullable bool) *Sch
 }
 
 // relocateConstEnumToValueBranch moves any Const and Enum keywords set on a
-// nullable pointer field's anyOf wrapper onto its value (non-null) branch and
-// returns the schema that holds them afterward. A pointer field is generated as
-// anyOf[value, {"type":"null"}] with field-level keywords kept as siblings of
-// anyOf. Const and enum test the instance value regardless of its type, so on
-// the wrapper they reject the permitted null; relocating them onto the value
-// branch keeps null valid. Type-gated keywords such as minimum and pattern do
-// not apply to null and stay on the wrapper.
+// nullable pointer field onto its value (non-null) branch and returns the schema
+// that holds them afterward. Const and enum test the instance value regardless
+// of its type, so left on the nullable wrapper they reject the permitted null;
+// relocating them onto the value branch keeps null valid. Type-gated keywords
+// such as minimum and pattern do not apply to null and stay on the wrapper.
 //
-// When s is not a nullable wrapper, or carries neither Const nor Enum, s is
-// returned unchanged. Each keyword moves only when set on the wrapper, so a nil
-// wrapper keyword never clobbers a value-branch keyword.
+// Two nullable shapes occur: the anyOf[value, {"type":"null"}] wrapper (nullable
+// $ref and value pointers), and the {"type":["null", base]} type list that
+// applyContainerType emits for a nullable pointer to a container or a ",string"
+// stringable. The type-list shape cannot gate const/enum to the non-null type,
+// so it is rewritten into the anyOf form when it carries either.
+//
+// When s is not a nullable schema, or carries neither Const nor Enum, s is
+// returned unchanged. Each keyword moves only when set, so a nil keyword never
+// clobbers a value-branch keyword.
 func relocateConstEnumToValueBranch(s *Schema) *Schema {
-	inner := nullableInnerSchema(s)
-	if inner == nil || (s.Const == nil && s.Enum == nil) {
+	if s.Const == nil && s.Enum == nil {
 		return s
 	}
 
-	if s.Const != nil {
-		inner.Const, s.Const = s.Const, nil
+	if inner := nullableInnerSchema(s); inner != nil {
+		moveConstEnum(s, inner)
+
+		return inner
 	}
 
-	if s.Enum != nil {
-		inner.Enum, s.Enum = s.Enum, nil
+	if base, ok := nullableTypeListBase(s); ok {
+		inner := &Schema{Type: base}
+		moveConstEnum(s, inner)
+
+		s.Types = nil
+		s.AnyOf = []*Schema{inner, {Type: typeNameNull}}
+
+		return inner
 	}
 
-	return inner
+	return s
+}
+
+// moveConstEnum transfers any Const and Enum set on src onto dst, clearing them
+// on src.
+func moveConstEnum(src, dst *Schema) {
+	if src.Const != nil {
+		dst.Const, src.Const = src.Const, nil
+	}
+
+	if src.Enum != nil {
+		dst.Enum, src.Enum = src.Enum, nil
+	}
+}
+
+// nullableTypeListBase reports whether s is a two-element type list pairing
+// "null" with one other type (the shape applyContainerType emits for a nullable
+// pointer container), returning the non-null type.
+func nullableTypeListBase(s *Schema) (string, bool) {
+	if len(s.Types) != 2 {
+		return "", false
+	}
+
+	switch {
+	case s.Types[0] == typeNameNull:
+		return s.Types[1], true
+	case s.Types[1] == typeNameNull:
+		return s.Types[0], true
+	default:
+		return "", false
+	}
 }
 
 // nullableInnerSchema returns the value (non-null) branch of a schema produced
