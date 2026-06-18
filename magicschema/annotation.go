@@ -78,17 +78,9 @@ func mergeAnnotations(results []*AnnotationResult) *AnnotationResult {
 		}
 
 		// Skip, SkipProperties, MergeProperties are OR'd.
-		if r.Skip {
-			merged.Skip = true
-		}
-
-		if r.SkipProperties {
-			merged.SkipProperties = true
-		}
-
-		if r.MergeProperties {
-			merged.MergeProperties = true
-		}
+		merged.Skip = merged.Skip || r.Skip
+		merged.SkipProperties = merged.SkipProperties || r.SkipProperties
+		merged.MergeProperties = merged.MergeProperties || r.MergeProperties
 
 		// HasRequired: highest-priority annotator that explicitly sets it wins.
 		if merged.HasRequired == nil && r.HasRequired != nil {
