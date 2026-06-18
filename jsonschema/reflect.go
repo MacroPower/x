@@ -354,8 +354,21 @@ func (g *generator) schemaForType(t reflect.Type, nullable bool) (*Schema, error
 		g.visiting[t] = true
 	}
 
-	// 7. Kind-based reflection.
-	s, err = g.schemaForKind(t, nullable)
+	// 7. Kind-based reflection. A named non-struct type bound for $defs builds its
+	// schema bare: the definition is shared by every reference, so nullability
+	// belongs on each reference (applied by refForType), not baked into the single
+	// shared entry. Baking it in would let whichever reference is processed first
+	// decide the definition's nullability for all of them, making the output
+	// depend on field declaration order. Inlined types keep nullability on the
+	// schema itself, exactly as the built-in and provider paths do.
+	extractBare := t.Kind() != reflect.Struct && t.Name() != "" && g.shouldExtract(t)
+
+	kindNullable := nullable
+	if extractBare {
+		kindNullable = false
+	}
+
+	s, err = g.schemaForKind(t, kindNullable)
 	if guarded {
 		delete(g.visiting, t)
 	}
