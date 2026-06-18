@@ -736,21 +736,33 @@ func (g *Generator) inferItemsFromSequence(
 	// all-mappings branch) means alias-valued scalar elements keep their type
 	// in the structural fallback below.
 	resolved := make([]ast.Node, 0, len(seq.Values))
-	allMappings := true
+	anyMapping, onlyMappingsAndNulls := false, true
 
 	for _, val := range seq.Values {
 		node := resolveAliases(val, anchors)
 		resolved = append(resolved, node)
 
-		if _, ok := unwrapNode(node).(*ast.MappingNode); !ok {
-			allMappings = false
+		_, isMapping := unwrapNode(node).(*ast.MappingNode)
+
+		// A null element does not break the all-mappings path: it widens the
+		// merged item schema to allow null while keeping the property schemas.
+		switch {
+		case isMapping:
+			anyMapping = true
+		case isNullNode(node):
+		default:
+			onlyMappingsAndNulls = false
 		}
 	}
 
-	if allMappings {
-		result := g.walkNode(resolved[0], keyPath, anchors)
+	// When every element is a mapping (nulls allowed among them), merge their
+	// object schemas so the per-property item schemas survive; each null walks
+	// to the empty schema and widens the result to [object, null]. Falling
+	// back to inferItemsSchema here would drop every property schema.
+	if anyMapping && onlyMappingsAndNulls {
+		var result *jsonschema.Schema
 
-		for _, node := range resolved[1:] {
+		for _, node := range resolved {
 			result = mergeSchemas(result, g.walkNode(node, keyPath, anchors))
 		}
 

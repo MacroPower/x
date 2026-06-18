@@ -1650,6 +1650,47 @@ func TestGeneratorArrayOfMappingObjects(t *testing.T) {
 	assert.Contains(t, itemProps, "port")
 }
 
+func TestGeneratorArrayOfMappingObjectsWithNull(t *testing.T) {
+	t.Parallel()
+
+	// A null element among mappings must not collapse the items schema to a
+	// bare object-or-null: the per-property schemas survive and the null only
+	// widens the item type to allow null.
+	input := "containers:\n  - name: app\n    image: nginx\n  -\n  - name: sidecar\n    port: 8080\n"
+
+	gen := magicschema.NewGenerator()
+	schema, err := gen.Generate([]byte(input))
+	require.NoError(t, err)
+
+	out, err := json.Marshal(schema)
+	require.NoError(t, err)
+
+	var got map[string]any
+
+	require.NoError(t, json.Unmarshal(out, &got))
+
+	props, ok := got["properties"].(map[string]any)
+	require.True(t, ok)
+
+	containers, ok := props["containers"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "array", containers["type"])
+
+	items, ok := containers["items"].(map[string]any)
+	require.True(t, ok)
+
+	// Property schemas are preserved despite the null element.
+	itemProps, ok := items["properties"].(map[string]any)
+	require.True(t, ok)
+	assert.Contains(t, itemProps, "name")
+	assert.Contains(t, itemProps, "image")
+	assert.Contains(t, itemProps, "port")
+
+	// The null widens the item type to [object, null].
+	assert.Contains(t, items["type"], "object")
+	assert.Contains(t, items["type"], "null")
+}
+
 func TestGeneratorDeeplyNested(t *testing.T) {
 	t.Parallel()
 
