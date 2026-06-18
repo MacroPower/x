@@ -2816,6 +2816,21 @@ func (v *validator) validateNumeric(
 
 	var errs []*ValidationError
 
+	// One error per failed bound, sharing the instance path and keyword
+	// schema-path location; mirrors validateNumericUnbounded's add closure.
+	add := func(keyword, msg string) {
+		kwPath := schemaPath.kw(keyword)
+
+		errs = append(errs, &ValidationError{
+			InstancePath: instancePath.ptr,
+			segments:     instancePath.segs,
+			SchemaPath:   kwPath.ptr,
+			schemaSegs:   kwPath.segs,
+			Keyword:      keyword,
+			Message:      msg,
+		})
+	}
+
 	bounds := v.boundsFor(schema)
 
 	if schema.MultipleOf != nil {
@@ -2823,16 +2838,7 @@ func (v *validator) validateNumeric(
 		case *schema.MultipleOf <= 0:
 			// MultipleOf MUST be strictly greater than 0; a non-positive
 			// divisor makes the schema invalid.
-			kwPath := schemaPath.kw("multipleOf")
-
-			errs = append(errs, &ValidationError{
-				InstancePath: instancePath.ptr,
-				segments:     instancePath.segs,
-				SchemaPath:   kwPath.ptr,
-				schemaSegs:   kwPath.segs,
-				Keyword:      KeywordMultipleOf,
-				Message:      fmt.Sprintf("multipleOf must be greater than 0, got %v", *schema.MultipleOf),
-			})
+			add(KeywordMultipleOf, fmt.Sprintf("multipleOf must be greater than 0, got %v", *schema.MultipleOf))
 
 		default:
 			// A NaN/Inf divisor has no rational form (float64ToRat returns
@@ -2843,16 +2849,10 @@ func (v *validator) validateNumeric(
 			if divisor != nil {
 				quotient := new(big.Rat).Quo(val, divisor)
 				if !quotient.IsInt() {
-					kwPath := schemaPath.kw("multipleOf")
-
-					errs = append(errs, &ValidationError{
-						InstancePath: instancePath.ptr,
-						segments:     instancePath.segs,
-						SchemaPath:   kwPath.ptr,
-						schemaSegs:   kwPath.segs,
-						Keyword:      KeywordMultipleOf,
-						Message:      fmt.Sprintf("%s is not a multiple of %v", ratString(val), *schema.MultipleOf),
-					})
+					add(
+						KeywordMultipleOf,
+						fmt.Sprintf("%s is not a multiple of %v", ratString(val), *schema.MultipleOf),
+					)
 				}
 			}
 		}
@@ -2861,70 +2861,32 @@ func (v *validator) validateNumeric(
 	// A nil bound denotes a NaN/Inf value with no rational form; such a bound
 	// cannot constrain a finite instance, so the comparison is skipped.
 	if schema.Minimum != nil {
-		bound := bounds.minimum
-		if bound != nil && val.Cmp(bound) < 0 {
-			kwPath := schemaPath.kw("minimum")
-
-			errs = append(errs, &ValidationError{
-				InstancePath: instancePath.ptr,
-				segments:     instancePath.segs,
-				SchemaPath:   kwPath.ptr,
-				schemaSegs:   kwPath.segs,
-				Keyword:      KeywordMinimum,
-				Message:      fmt.Sprintf("%s is less than %v", ratString(val), *schema.Minimum),
-			})
+		if bound := bounds.minimum; bound != nil && val.Cmp(bound) < 0 {
+			add(KeywordMinimum, fmt.Sprintf("%s is less than %v", ratString(val), *schema.Minimum))
 		}
 	}
 
 	if schema.Maximum != nil {
-		bound := bounds.maximum
-		if bound != nil && val.Cmp(bound) > 0 {
-			kwPath := schemaPath.kw("maximum")
-
-			errs = append(errs, &ValidationError{
-				InstancePath: instancePath.ptr,
-				segments:     instancePath.segs,
-				SchemaPath:   kwPath.ptr,
-				schemaSegs:   kwPath.segs,
-				Keyword:      KeywordMaximum,
-				Message:      fmt.Sprintf("%s is greater than %v", ratString(val), *schema.Maximum),
-			})
+		if bound := bounds.maximum; bound != nil && val.Cmp(bound) > 0 {
+			add(KeywordMaximum, fmt.Sprintf("%s is greater than %v", ratString(val), *schema.Maximum))
 		}
 	}
 
 	if schema.ExclusiveMinimum != nil {
-		bound := bounds.exclusiveMinimum
-		if bound != nil && val.Cmp(bound) <= 0 {
-			kwPath := schemaPath.kw("exclusiveMinimum")
-
-			errs = append(errs, &ValidationError{
-				InstancePath: instancePath.ptr,
-				segments:     instancePath.segs,
-				SchemaPath:   kwPath.ptr,
-				schemaSegs:   kwPath.segs,
-				Keyword:      KeywordExclusiveMinimum,
-				Message:      fmt.Sprintf("%s is less than or equal to %v", ratString(val), *schema.ExclusiveMinimum),
-			})
+		if bound := bounds.exclusiveMinimum; bound != nil && val.Cmp(bound) <= 0 {
+			add(
+				KeywordExclusiveMinimum,
+				fmt.Sprintf("%s is less than or equal to %v", ratString(val), *schema.ExclusiveMinimum),
+			)
 		}
 	}
 
 	if schema.ExclusiveMaximum != nil {
-		bound := bounds.exclusiveMaximum
-		if bound != nil && val.Cmp(bound) >= 0 {
-			kwPath := schemaPath.kw("exclusiveMaximum")
-
-			errs = append(errs, &ValidationError{
-				InstancePath: instancePath.ptr,
-				segments:     instancePath.segs,
-				SchemaPath:   kwPath.ptr,
-				schemaSegs:   kwPath.segs,
-				Keyword:      KeywordExclusiveMaximum,
-				Message: fmt.Sprintf(
-					"%s is greater than or equal to %v",
-					ratString(val),
-					*schema.ExclusiveMaximum,
-				),
-			})
+		if bound := bounds.exclusiveMaximum; bound != nil && val.Cmp(bound) >= 0 {
+			add(
+				KeywordExclusiveMaximum,
+				fmt.Sprintf("%s is greater than or equal to %v", ratString(val), *schema.ExclusiveMaximum),
+			)
 		}
 	}
 
