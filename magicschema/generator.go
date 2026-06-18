@@ -46,6 +46,13 @@ type Generator struct {
 	// so a default lifted from one observed element would be arbitrary;
 	// default recording is suppressed while non-zero.
 	inItems int
+
+	// Walked node count for default inference (astToGoValue), kept separate
+	// from visits so re-walking a subtree to record its default never
+	// deducts from the structural walk's budget. Sharing one counter let
+	// WithInferDefaults exhaust the budget mid-document and fail later
+	// properties' structural schemas open that inferDefaults=off would emit.
+	defaultVisits int
 }
 
 // maxWalkDepth bounds schema-walk recursion, counted once per container
@@ -792,13 +799,15 @@ func (g *Generator) nodeDefault(node ast.Node, anchors map[string]ast.Node) json
 // astToGoValue converts an AST subtree to a plain Go value, resolving
 // aliases via the anchor map. Sequences may alias anchors defined outside
 // the subtree, which [yaml.NodeToValue] cannot resolve, so containers
-// convert manually. They consume the walk depth and visit budgets -- the
-// only guard against alias cycles inside sequences -- so pathological
-// inputs fail open to no default instead of hanging.
+// convert manually. They consume the walk depth budget and a separate
+// default-visit budget -- the only guard against alias cycles inside
+// sequences -- so pathological inputs fail open to no default instead of
+// hanging. The default-visit budget is kept distinct from the structural
+// walk's so recording defaults never shrinks structural coverage.
 func (g *Generator) astToGoValue(node ast.Node, anchors map[string]ast.Node) (any, bool) {
-	g.visits++
+	g.defaultVisits++
 
-	if g.visits > maxNodeVisits {
+	if g.defaultVisits > maxNodeVisits {
 		return nil, false
 	}
 
