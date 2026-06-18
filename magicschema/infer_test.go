@@ -112,6 +112,36 @@ func TestIsAnnotationComment(t *testing.T) {
 	}
 }
 
+func TestSchemaBlockNotLeakedAsDescription(t *testing.T) {
+	t.Parallel()
+
+	// A blank line inside a @schema block splits the head comment run, so the
+	// kept run begins mid-block. The block content (annotation data, not prose)
+	// must not leak into the structural description even though its opening
+	// fence was discarded with the earlier run.
+	input := "# @schema\n# type: string\n\n# enum:\n#   - a\n# @schema\nkey: 1\n"
+
+	gen := magicschema.NewGenerator()
+	schema, err := gen.Generate([]byte(input))
+	require.NoError(t, err)
+
+	out, err := json.Marshal(schema)
+	require.NoError(t, err)
+
+	var got map[string]any
+
+	require.NoError(t, json.Unmarshal(out, &got))
+
+	props, ok := got["properties"].(map[string]any)
+	require.True(t, ok)
+
+	key, ok := props["key"].(map[string]any)
+	require.True(t, ok)
+
+	assert.Equal(t, "integer", key["type"])
+	assert.NotContains(t, key, "description")
+}
+
 func TestInferTypes(t *testing.T) {
 	t.Parallel()
 

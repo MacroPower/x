@@ -114,9 +114,11 @@ func extractComment(node ast.Node) string {
 	}
 
 	// Head comment block above the key, narrowed to the run that
-	// physically documents it.
-	if run := adjacentCommentRun(mvn.GetComment(), mvn.Key); len(run) > 0 {
-		if desc := commentDescription(strings.Join(run, "\n")); desc != "" {
+	// physically documents it. The run may begin inside a @schema block whose
+	// opening fence was discarded with an earlier run, so the run's starting
+	// fence state travels with it.
+	if run, inSchema, inRoot := adjacentCommentRun(mvn.GetComment(), mvn.Key); len(run) > 0 {
+		if desc := commentDescription(strings.Join(run, "\n"), inSchema, inRoot); desc != "" {
 			return desc
 		}
 	}
@@ -140,19 +142,22 @@ func extractComment(node ast.Node) string {
 	return ""
 }
 
-// extractFromComment extracts a description from a comment group node.
+// extractFromComment extracts a description from a comment group node. An
+// inline comment is a self-contained group, so it starts outside any block.
 func extractFromComment(comment *ast.CommentGroupNode) string {
 	if comment == nil {
 		return ""
 	}
 
-	return commentDescription(comment.String())
+	return commentDescription(comment.String(), false, false)
 }
 
 // commentDescription cleans a comment string and rejects results that are
-// annotation markers rather than prose.
-func commentDescription(s string) string {
-	desc := cleanComment(s)
+// annotation markers rather than prose. The inSchema and inRoot flags seed the
+// @schema / @schema.root fence state for callers handing over a run that
+// already begins inside a block.
+func commentDescription(s string, inSchema, inRoot bool) string {
+	desc := cleanComment(s, inSchema, inRoot)
 	if desc != "" && !IsAnnotationComment(desc) {
 		return desc
 	}
@@ -175,9 +180,14 @@ func commentDescription(s string) string {
 // column; anything else is a stray block that documents nothing here.
 // Comment tokens without position information cannot be placed, so the
 // whole group is attributed (fail open).
-func adjacentCommentRun(comment *ast.CommentGroupNode, key ast.MapKeyNode) []string {
+//
+// The kept run may begin partway through a @schema / @schema.root block whose
+// opening fence sat in a discarded earlier run; the returned booleans report
+// the fence state at the run's first line so [cleanComment] starts inside the
+// block and does not emit the orphaned block content as a description.
+func adjacentCommentRun(comment *ast.CommentGroupNode, key ast.MapKeyNode) ([]string, bool, bool) {
 	if comment == nil {
-		return nil
+		return nil, false, false
 	}
 
 	var (
@@ -189,7 +199,7 @@ func adjacentCommentRun(comment *ast.CommentGroupNode, key ast.MapKeyNode) []str
 	for _, c := range comment.Comments {
 		tok := c.GetToken()
 		if tok == nil {
-			return nil
+			return nil, false, false
 		}
 
 		line := "#" + tok.Value
@@ -227,14 +237,52 @@ func adjacentCommentRun(comment *ast.CommentGroupNode, key ast.MapKeyNode) []str
 
 	keyTok := key.GetToken()
 	if unpositioned || keyTok == nil || keyTok.Position == nil {
-		return all
+		return all, false, false
 	}
 
 	if len(run) == 0 || prevLine != keyTok.Position.Line-1 || prevCol > keyTok.Position.Column {
-		return nil
+		return nil, false, false
 	}
 
-	return run
+	// The run is the trailing suffix of all; replay the discarded prefix's
+	// fence toggles so the run starts with the correct @schema / @schema.root
+	// block state.
+	inSchema, inRoot := false, false
+	for _, line := range all[:len(all)-len(run)] {
+		inSchema, inRoot, _ = schemaFenceState(strings.TrimSpace(stripCommentPrefix(line)), inSchema, inRoot)
+	}
+
+	return run, inSchema, inRoot
+}
+
+// schemaFenceState applies the @schema / @schema.root block-fence toggles for
+// one already-stripped, trimmed comment line and reports whether the line is a
+// fence delimiter (which carries no description text). A root marker inside an
+// open @schema block is junk content, not a delimiter, and a @schema delimiter
+// also ends an unclosed @schema.root block, mirroring the dadav annotator's
+// block extraction. Like upstream helm-schema, junk suffixes such as "@schema@"
+// still delimit a block; only a whitespace-separated suffix is excluded, since
+// that form is the helm-values-schema inline annotation. It returns the updated
+// (inSchema, inRoot) state and whether the line was a fence delimiter.
+func schemaFenceState(cleaned string, inSchema, inRoot bool) (bool, bool, bool) {
+	if after, ok := strings.CutPrefix(cleaned, "@schema.root"); ok {
+		if !inSchema && after == "" {
+			inRoot = !inRoot
+		}
+
+		return inSchema, inRoot, true
+	}
+
+	if after, ok := strings.CutPrefix(cleaned, "@schema"); ok {
+		if after == "" || (after[0] != ' ' && after[0] != '\t') {
+			inRoot = false
+			inSchema = !inSchema
+		}
+
+		return inSchema, inRoot, true
+	}
+
+	return inSchema, inRoot, false
 }
 
 // cleanComment strips comment markers and whitespace from a comment string.
@@ -248,12 +296,8 @@ func adjacentCommentRun(comment *ast.CommentGroupNode, key ast.MapKeyNode) []str
 // lines are dropped: bare @schema and @schema.root lines fence helm-schema
 // blocks whose content is annotation data, not prose, and lines matching
 // [IsAnnotationComment] are markers.
-func cleanComment(s string) string {
-	var (
-		lines         []string
-		inSchemaBlock bool
-		inRootBlock   bool
-	)
+func cleanComment(s string, inSchemaBlock, inRootBlock bool) string {
+	var lines []string
 
 	for line := range strings.SplitSeq(s, "\n") {
 		// Markers are matched on a fully trimmed copy; the content keeps
@@ -261,34 +305,12 @@ func cleanComment(s string) string {
 		content := stripCommentPrefix(line)
 		cleaned := strings.TrimSpace(content)
 
-		// Track helm-schema block fences so block content never leaks
-		// into descriptions. A root marker inside an open @schema block
-		// is junk content, not a delimiter, and a @schema delimiter also
-		// ends an unclosed @schema.root block, mirroring the dadav
-		// annotator's block extraction. Like upstream helm-schema, junk
-		// suffixes such as "@schema@" still delimit a block; only a
-		// whitespace-separated suffix is excluded, since that form is the
-		// helm-values-schema inline annotation.
-		if after, ok := strings.CutPrefix(cleaned, "@schema.root"); ok {
-			if !inSchemaBlock && after == "" {
-				inRootBlock = !inRootBlock
-			}
+		// Track helm-schema block fences so block content never leaks into
+		// descriptions (see [schemaFenceState]).
+		var fence bool
 
-			continue
-		}
-
-		if after, ok := strings.CutPrefix(cleaned, "@schema"); ok {
-			if after == "" || (after[0] != ' ' && after[0] != '\t') {
-				inRootBlock = false
-				inSchemaBlock = !inSchemaBlock
-			}
-
-			// Inline @schema annotations (helm-values-schema format) are
-			// annotation markers either way.
-			continue
-		}
-
-		if inSchemaBlock || inRootBlock {
+		inSchemaBlock, inRootBlock, fence = schemaFenceState(cleaned, inSchemaBlock, inRootBlock)
+		if fence || inSchemaBlock || inRootBlock {
 			continue
 		}
 
