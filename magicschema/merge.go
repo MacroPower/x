@@ -158,15 +158,9 @@ func mergeSchemas(a, b *jsonschema.Schema) *jsonschema.Schema {
 	// Merge required: intersection.
 	result.Required = intersectStrings(a.Required, b.Required)
 
-	// Merge items.
-	switch {
-	case a.Items != nil && b.Items != nil:
-		result.Items = mergeSchemas(a.Items, b.Items)
-	case a.Items != nil:
-		result.Items = a.Items
-	default:
-		result.Items = b.Items
-	}
+	// Merge items; mergeSchemas already returns the non-nil side when the other
+	// is nil (and nil when both are), so the call covers every case.
+	result.Items = mergeSchemas(a.Items, b.Items)
 
 	// Keywords with no widening rule are kept only when both sides agree
 	// exactly, mirroring the pattern/format/const rule: identical
