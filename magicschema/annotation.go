@@ -157,11 +157,13 @@ func mergeSchemaFields(dst, src *jsonschema.Schema) {
 		dst.Default = src.Default
 	}
 
-	if dst.Enum == nil {
+	// Enum and const are one value-set constraint (a const is a single-value
+	// enum), so they fill as a unit. If dst already constrains the value set,
+	// the higher-priority annotator wins outright; filling them independently
+	// could leave a higher-priority enum beside a lower-priority const, which
+	// AND-combine to reject every value (fail closed).
+	if dst.Enum == nil && dst.Const == nil {
 		dst.Enum = src.Enum
-	}
-
-	if dst.Const == nil {
 		dst.Const = src.Const
 	}
 

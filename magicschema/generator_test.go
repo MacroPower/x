@@ -1063,6 +1063,35 @@ func TestGeneratorAllAnnotators(t *testing.T) {
 				assert.Equal(t, "boolean", debug["type"])
 			},
 		},
+		"enum and const across annotators do not combine": {
+			// The helm-values-schema annotator (lower priority) sets enum
+			// while helm-schema (higher priority) sets const on the same
+			// key. The higher-priority value-set constraint must win
+			// outright: emitting both enum and const AND-combines to reject
+			// every value (fail closed).
+			input: "" +
+				"# @schema enum:[a, b]\n" +
+				"# @schema\n" +
+				"# const: c\n" +
+				"# @schema\n" +
+				"mode: a\n",
+			check: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				mode, ok := props["mode"].(map[string]any)
+				require.True(t, ok, "missing property: mode")
+
+				// Because helm-schema is highest priority, its const wins and
+				// the lower-priority enum is not pulled in alongside it.
+				assert.Equal(t, "c", mode["const"])
+
+				_, hasEnum := mode["enum"]
+				assert.False(t, hasEnum, "enum must not accompany const")
+			},
+		},
 	}
 
 	for name, tc := range tcs {
