@@ -39,13 +39,18 @@ func ItemSchemas(s *jsonschema.Schema) []*jsonschema.Schema {
 		s = inner
 	}
 
+	// Per-position element schemas win over a bare items schema: under Draft
+	// 2020-12 a tuple sets prefixItems for the elements and items only as the
+	// additional-trailing-element constraint, so returning items there would
+	// drop the real element schemas. Generator output sets exactly one of these
+	// fields, so the order is a no-op today and a guard against that shape.
 	switch {
-	case s.Items != nil:
-		return []*jsonschema.Schema{s.Items}
 	case len(s.PrefixItems) > 0:
 		return s.PrefixItems
 	case len(s.ItemsArray) > 0:
 		return s.ItemsArray
+	case s.Items != nil:
+		return []*jsonschema.Schema{s.Items}
 	default:
 		return nil
 	}
