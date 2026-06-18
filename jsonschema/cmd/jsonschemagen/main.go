@@ -168,13 +168,6 @@ type moduleInfo struct {
 
 // resolveModuleInfo returns the path and directory of the main module that
 // contains the current package.
-//
-// Under a Go workspace (go.work), `go list -m -json` with no module argument
-// emits a concatenated JSON stream with one object per workspace module, all
-// flagged as main. The stream is decoded with a [json.Decoder] loop and the
-// module whose go.mod matches `go env GOMOD` (the current directory's module)
-// is selected, so generation targets the right module rather than whichever
-// object happens to appear first.
 func resolveModuleInfo() (string, string, error) {
 	cmd := exec.CommandContext(context.Background(), "go", "list", "-m", "-json")
 	out, err := cmd.Output()
@@ -182,11 +175,24 @@ func resolveModuleInfo() (string, string, error) {
 		return "", "", cmdError(err)
 	}
 
-	// GoMod is the current directory's module file; it is empty outside a
-	// module, in which case the first decoded object is used as a fallback.
-	goMod := currentGoMod()
+	return selectMainModule(out, currentGoMod())
+}
 
-	dec := json.NewDecoder(bytes.NewReader(out))
+// selectMainModule picks the main module from a `go list -m -json` stream.
+//
+// Under a Go workspace (go.work), `go list -m -json` with no module argument
+// emits a concatenated JSON stream with one object per workspace module, all
+// flagged as main. The module whose go.mod matches goMod (the current
+// directory's module, from `go env GOMOD`) is selected, so generation targets
+// the right module rather than whichever object appears first.
+//
+// An empty goMod means the caller is outside a module, where the first object
+// is the right answer. Inside a module a stream with no matching object means
+// the current module is absent, so returning an arbitrary module would point
+// generation at the wrong source tree; that is reported as an error rather than
+// silently falling back to the first object.
+func selectMainModule(stream []byte, goMod string) (string, string, error) {
+	dec := json.NewDecoder(bytes.NewReader(stream))
 
 	var (
 		firstPath, firstDir string
@@ -196,7 +202,7 @@ func resolveModuleInfo() (string, string, error) {
 	for dec.More() {
 		var info moduleInfo
 
-		err = dec.Decode(&info)
+		err := dec.Decode(&info)
 		if err != nil {
 			return "", "", fmt.Errorf("parse module info: %w", err)
 		}
@@ -212,6 +218,10 @@ func resolveModuleInfo() (string, string, error) {
 
 	if !haveFirst {
 		return "", "", fmt.Errorf("parse module info: no module reported")
+	}
+
+	if goMod != "" {
+		return "", "", fmt.Errorf("parse module info: no module matches %q", goMod)
 	}
 
 	return firstPath, firstDir, nil

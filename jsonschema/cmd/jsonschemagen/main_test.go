@@ -284,6 +284,50 @@ func TestMergeGoSumKeysOnModuleVersion(t *testing.T) {
 		"a conflicting checksum for an already-seen module@version must be dropped")
 }
 
+func TestSelectMainModule(t *testing.T) {
+	t.Parallel()
+
+	stream := `{"Path":"example.com/a","Dir":"/ws/a","GoMod":"/ws/a/go.mod"}
+{"Path":"example.com/b","Dir":"/ws/b","GoMod":"/ws/b/go.mod"}`
+
+	t.Run("matches the current module in a workspace", func(t *testing.T) {
+		t.Parallel()
+
+		path, dir, err := selectMainModule([]byte(stream), "/ws/b/go.mod")
+		require.NoError(t, err)
+		assert.Equal(t, "example.com/b", path)
+		assert.Equal(t, "/ws/b", dir)
+	})
+
+	t.Run("falls back to the first object outside a module", func(t *testing.T) {
+		t.Parallel()
+
+		path, dir, err := selectMainModule([]byte(stream), "")
+		require.NoError(t, err)
+		assert.Equal(t, "example.com/a", path, "an empty GOMOD means outside a module")
+		assert.Equal(t, "/ws/a", dir)
+	})
+
+	t.Run("errors when no object matches the current module", func(t *testing.T) {
+		t.Parallel()
+
+		// Inside a module, no match means the current module is absent from the
+		// stream; falling back to an arbitrary module would target the wrong
+		// source tree, so this is an error rather than a silent first-object pick.
+		_, _, err := selectMainModule([]byte(stream), "/ws/missing/go.mod")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "/ws/missing/go.mod")
+	})
+
+	t.Run("errors on an empty stream", func(t *testing.T) {
+		t.Parallel()
+
+		_, _, err := selectMainModule(nil, "")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no module reported")
+	})
+}
+
 func TestRun_MissingType(t *testing.T) {
 	t.Parallel()
 
