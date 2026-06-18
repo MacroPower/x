@@ -644,6 +644,28 @@ func TestMergeAnnotatedConstraints(t *testing.T) {
 				}
 			},
 		},
+		"typeless additionalProperties-only schema does not inject null": {
+			// A typeless schema whose only constraint is additionalProperties
+			// permits every non-object value, so merging it against a typed
+			// object must stay fail-open rather than widen to [object, null]
+			// and reject the strings/numbers the typeless side accepted.
+			inputA: "# @schema\n# additionalProperties:\n#   type: string\n# @schema\nconf:\n",
+			inputB: "conf:\n  a: 1\n",
+			opts:   []magicschema.Option{magicschema.WithAnnotators(dadav.New())},
+			check: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				conf, ok := props["conf"].(map[string]any)
+				require.True(t, ok)
+
+				// Conf stays typeless (fail-open); it must never gain a
+				// ["object", "null"] type from the additionalProperties-only side.
+				assert.Nil(t, conf["type"])
+			},
+		},
 		"enum union when both sides constrain": {
 			inputA: "# @schema enum:[a, b]\nsize: a\n",
 			inputB: "# @schema enum:[b, c]\nsize: c\n",

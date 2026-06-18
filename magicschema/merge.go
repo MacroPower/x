@@ -356,6 +356,12 @@ func isFalseSchema(s *jsonschema.Schema) bool {
 // annotation-only constraint schema that already permits every type (so the
 // union is typeless). Metadata such as title, description, default, and
 // examples does not constrain the value set and is ignored.
+//
+// Every value-constraining keyword counts, including the object- and
+// array-shaped ones (additionalProperties, contains, propertyNames,
+// if/then/else, ...): a typeless schema constrained only by one of them still
+// permits every other type, so widening it to a [type, null] union would
+// reject values it currently accepts (fail closed).
 func constrainsValue(s *jsonschema.Schema) bool {
 	return s.Pattern != "" || s.Format != "" ||
 		s.Enum != nil || s.Const != nil ||
@@ -364,11 +370,18 @@ func constrainsValue(s *jsonschema.Schema) bool {
 		s.MultipleOf != nil ||
 		s.MinLength != nil || s.MaxLength != nil ||
 		s.MinItems != nil || s.MaxItems != nil || s.UniqueItems ||
-		s.Items != nil ||
+		s.Items != nil || s.PrefixItems != nil || s.ItemsArray != nil ||
+		s.AdditionalItems != nil || s.Contains != nil ||
+		s.MinContains != nil || s.MaxContains != nil || s.UnevaluatedItems != nil ||
 		s.MinProperties != nil || s.MaxProperties != nil ||
 		s.Properties != nil || s.PatternProperties != nil ||
+		s.AdditionalProperties != nil || s.PropertyNames != nil ||
+		s.UnevaluatedProperties != nil ||
 		len(s.Required) > 0 ||
-		s.AllOf != nil || s.AnyOf != nil || s.OneOf != nil || s.Not != nil
+		s.DependentRequired != nil || s.DependentSchemas != nil ||
+		s.DependencySchemas != nil || s.DependencyStrings != nil ||
+		s.AllOf != nil || s.AnyOf != nil || s.OneOf != nil || s.Not != nil ||
+		s.If != nil || s.Then != nil || s.Else != nil
 }
 
 // intersectStrings returns the intersection of two string slices.
