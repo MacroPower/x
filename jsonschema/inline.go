@@ -689,13 +689,18 @@ func (in *inliner) inlineCopy(target *Schema, path string, memoize bool) (*Schem
 
 	if memoize {
 		in.memo[target] = cp
+
+		// Clone on the first use too, so the memo entry is never aliased to a
+		// position in the output tree. Every caller, first or later, then gets an
+		// independent copy, and no downstream mutation of one placement can leak
+		// into another through a shared memo node.
+		return cloneSchema(cp)
 	}
 
-	// Clone on the first use too, so the memo entry is never aliased to a
-	// position in the output tree. Every caller, first or later, then gets an
-	// independent copy, and no downstream mutation of one placement can leak
-	// into another through a shared memo node.
-	return cloneSchema(cp)
+	// A non-memoized copy (a substitute or $dynamicRef expansion) is freshly
+	// built here and never stored in the memo or aliased anywhere, so it is
+	// returned directly: a second deep clone would only duplicate work.
+	return cp, nil
 }
 
 // resolveTarget resolves the ref at the pristine node to its pristine target
