@@ -1716,13 +1716,14 @@ func (v *validator) validateUnevaluated(
 				ann.allProperties = true
 			}
 
+			childSchemaPath := schemaPath.kw("unevaluatedProperties")
+
 			for propName, val := range obj {
 				if ann.properties[propName] {
 					continue
 				}
 
 				childPath := instancePath.key(propName)
-				childSchemaPath := schemaPath.kw("unevaluatedProperties")
 				childErrs := v.validate(schema.UnevaluatedProperties, val, childPath, childSchemaPath, nil)
 				if len(childErrs) == 0 {
 					ann.properties[propName] = true
@@ -1751,6 +1752,8 @@ func (v *validator) validateUnevaluated(
 				ann.allItems = true
 			}
 
+			childSchemaPath := schemaPath.kw("unevaluatedItems")
+
 			for i, item := range arr {
 				if i < ann.itemsEnd {
 					continue
@@ -1761,7 +1764,6 @@ func (v *validator) validateUnevaluated(
 				}
 
 				childPath := instancePath.index(i)
-				childSchemaPath := schemaPath.kw("unevaluatedItems")
 				childErrs := v.validate(schema.UnevaluatedItems, item, childPath, childSchemaPath, nil)
 				if len(childErrs) == 0 {
 					ann.itemIndexes[i] = true
@@ -3189,9 +3191,10 @@ func (v *validator) validateArray(
 		// Items (single schema).
 		if schema.Items != nil && len(prefixSchemas) == 0 {
 			// Single-schema items: applies to all elements.
+			childSchemaPath := schemaPath.kw("items")
+
 			for i, item := range arr {
 				childPath := instancePath.index(i)
-				childSchemaPath := schemaPath.kw("items")
 				childErrs := v.validate(schema.Items, item, childPath, childSchemaPath, nil)
 				labelFalseSchemaKeyword(childErrs, schema.Items, KeywordItems)
 
@@ -3205,9 +3208,10 @@ func (v *validator) validateArray(
 			// In 2020-12: items after prefixItems applies to remaining elements.
 			// In draft-07: additionalItems applies to remaining elements.
 			if v.draft == Draft2020 {
+				childSchemaPath := schemaPath.kw("items")
+
 				for i := len(prefixSchemas); i < len(arr); i++ {
 					childPath := instancePath.index(i)
-					childSchemaPath := schemaPath.kw("items")
 					childErrs := v.validate(schema.Items, arr[i], childPath, childSchemaPath, nil)
 					labelFalseSchemaKeyword(childErrs, schema.Items, KeywordItems)
 
@@ -3225,9 +3229,10 @@ func (v *validator) validateArray(
 
 		// AdditionalItems (draft-07 only).
 		if v.draft == Draft7 && schema.AdditionalItems != nil && len(schema.ItemsArray) > 0 {
+			childSchemaPath := schemaPath.kw("additionalItems")
+
 			for i := len(schema.ItemsArray); i < len(arr); i++ {
 				childPath := instancePath.index(i)
-				childSchemaPath := schemaPath.kw("additionalItems")
 				childErrs := v.validate(schema.AdditionalItems, arr[i], childPath, childSchemaPath, nil)
 				labelFalseSchemaKeyword(childErrs, schema.AdditionalItems, KeywordAdditionalItems)
 
@@ -3600,6 +3605,8 @@ func (v *validator) validateObject(
 
 		// AdditionalProperties: only considers sibling properties and patternProperties.
 		if schema.AdditionalProperties != nil {
+			childSchemaPath := schemaPath.kw("additionalProperties")
+
 			for _, propName := range sortedObjKeys {
 				val := obj[propName]
 				if localEvaluated[propName] {
@@ -3611,7 +3618,6 @@ func (v *validator) validateObject(
 				}
 
 				childPath := instancePath.key(propName)
-				childSchemaPath := schemaPath.kw("additionalProperties")
 				childErrs := v.validate(schema.AdditionalProperties, val, childPath, childSchemaPath, nil)
 				labelFalseSchemaKeyword(childErrs, schema.AdditionalProperties, KeywordAdditionalProperties)
 
