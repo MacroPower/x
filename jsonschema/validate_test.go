@@ -2036,6 +2036,29 @@ func TestValidateDraft7NotWithItemsArray(t *testing.T) {
 	}
 }
 
+func TestValidateNotWithUnknownKeywordIsNotFalseSchema(t *testing.T) {
+	t.Parallel()
+
+	// {"not": {"x-custom": 1}} is not the bare boolean-false schema: the unknown
+	// keyword (Extra) defeats the form, matching IsFalseSchema. The validator
+	// ignores the unknown keyword, so the inner schema accepts every instance and
+	// the not rejects every instance -- but through the not keyword, reported as a
+	// not failure rather than the short-circuited false-schema message.
+	schema := &jsonschema.Schema{
+		Not: &jsonschema.Schema{
+			Extra: map[string]any{"x-custom": 1.0},
+		},
+	}
+
+	require.False(t, jsonschema.IsFalseSchema(schema),
+		"a not carrying an unknown keyword is not the false schema")
+
+	err := jsonschema.Validate(t.Context(), schema, "anything")
+	require.Error(t, err, "the not still rejects every instance")
+	assert.Contains(t, err.Error(), "should not validate against the schema")
+	assert.NotContains(t, err.Error(), "value is not allowed")
+}
+
 func TestValidateDraft7AdditionalItems(t *testing.T) {
 	t.Parallel()
 
