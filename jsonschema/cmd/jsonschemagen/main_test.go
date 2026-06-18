@@ -297,6 +297,14 @@ func TestRun_InvalidDraft(t *testing.T) {
 	assert.Contains(t, err.Error(), "unsupported draft")
 }
 
+func TestRun_InvalidIndent(t *testing.T) {
+	t.Parallel()
+
+	err := run(config{TypeName: "Foo", Draft: "2020", Indent: "xx"}, &bytes.Buffer{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid -indent")
+}
+
 // buildBinary builds the jsonschemagen binary and returns its path.
 func buildBinary(t *testing.T) string {
 	t.Helper()

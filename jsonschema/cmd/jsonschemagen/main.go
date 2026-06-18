@@ -68,6 +68,13 @@ func run(cfg config, stdout io.Writer) error {
 		return fmt.Errorf("unsupported draft %q: must be \"7\" or \"2020\"", cfg.Draft)
 	}
 
+	// The indent string is embedded verbatim into json.MarshalIndent, which does
+	// not validate it. A non-whitespace indent is repeated between JSON tokens
+	// and produces output that no longer parses, so reject it up front.
+	if strings.TrimLeft(cfg.Indent, " \t\n\r") != "" {
+		return fmt.Errorf("invalid -indent %q: must contain only whitespace", cfg.Indent)
+	}
+
 	importPath, err := resolveImportPath()
 	if err != nil {
 		return fmt.Errorf("resolve import path: %w", err)
