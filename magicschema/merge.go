@@ -25,9 +25,12 @@ import (
 // (properties, items, bounds, pattern) drops with it -- a schema with no
 // type but residual object or array constraints would still fail closed for
 // those instances.
-// Combinators and references ($ref, allOf/anyOf/oneOf, not) are dropped
-// entirely, which is the most permissive behavior; the if/then/else
-// conditional is kept as a unit when both sides agree exactly.
+// Combinators and references ($ref, $dynamicRef, allOf/anyOf/oneOf, not) are
+// dropped entirely, which is the most permissive behavior; the if/then/else
+// conditional is kept as a unit when both sides agree exactly. Identity and
+// informational keywords ($id, $comment, $anchor, $dynamicAnchor, $vocabulary)
+// carry first-wins like title and description, since they annotate rather than
+// constrain.
 //
 // The result aliases sub-structures of both inputs (one-sided properties,
 // items, and kept-when-equal keywords are not cloned), so neither the
@@ -72,6 +75,22 @@ func mergeSchemas(a, b *jsonschema.Schema) *jsonschema.Schema {
 	// Merge metadata: prefer a, fall back to b.
 	result.Title = firstNonEmpty(a.Title, b.Title)
 	result.Description = firstNonEmpty(a.Description, b.Description)
+
+	// Identity and informational keywords annotate rather than constrain, so
+	// they carry first-wins like title and description. The annotator-merge
+	// path (mergeSchemaFields) already keeps them; a later union merge must not
+	// silently drop what survived single-input generation. References ($ref,
+	// $dynamicRef) stay dropped (see the doc comment).
+	result.ID = firstNonEmpty(a.ID, b.ID)
+	result.Comment = firstNonEmpty(a.Comment, b.Comment)
+	result.Anchor = firstNonEmpty(a.Anchor, b.Anchor)
+	result.DynamicAnchor = firstNonEmpty(a.DynamicAnchor, b.DynamicAnchor)
+
+	if a.Vocabulary != nil {
+		result.Vocabulary = a.Vocabulary
+	} else {
+		result.Vocabulary = b.Vocabulary
+	}
 
 	if a.Default != nil {
 		result.Default = a.Default

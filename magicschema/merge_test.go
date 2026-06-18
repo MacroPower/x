@@ -580,6 +580,26 @@ func TestMergeAnnotatedConstraints(t *testing.T) {
 				assert.Equal(t, []any{"string", "null"}, host["type"])
 			},
 		},
+		"identity keywords survive a union merge": {
+			// $comment is set by a higher-priority annotator on the first input
+			// and must not vanish when a second input is merged in: it
+			// annotates rather than constrains, so it carries first-wins like
+			// description.
+			inputA: "# @schema\n# $comment: keepme\n# type: string\n# @schema\nmode: x\n",
+			inputB: "mode: y\n",
+			opts:   []magicschema.Option{magicschema.WithAnnotators(dadav.New())},
+			check: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				mode, ok := props["mode"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "keepme", mode["$comment"])
+			},
+		},
 		"null-only annotated type widens with typed file": {
 			inputA: "# @schema type:null\nhost:\n",
 			inputB: "host: example.com\n",
