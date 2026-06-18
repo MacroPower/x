@@ -422,10 +422,18 @@ func inferItemsSchema(values []ast.Node) *jsonschema.Schema {
 }
 
 // isNullNode reports whether a node is a YAML null value: a null literal or
-// a !!null-tagged scalar, looking through anchor wrappers. Aliases and other
-// unresolved nodes are not nulls; they stay transparent to inference.
+// a !!null-tagged scalar, looking through anchor wrappers. A nil node counts
+// as null: [resolveAliases] returns nil for an alias with no in-scope anchor,
+// which the package treats as null, and anchor or tag wrappers can bottom out
+// at a nil value the same way. Treating nil as null keeps a broken alias
+// consistent with a genuine null everywhere inference gates on it -- item-list
+// nullability and the all-mappings property-preserving merge alike.
 func isNullNode(node ast.Node) bool {
 	for {
+		if node == nil {
+			return true
+		}
+
 		switch n := node.(type) {
 		case *ast.AnchorNode:
 			node = n.Value

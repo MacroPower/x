@@ -554,6 +554,88 @@ func TestGeneratorInferDefaults(t *testing.T) {
 	}
 }
 
+func TestGeneratorBrokenAlias(t *testing.T) {
+	t.Parallel()
+
+	// An alias with no in-scope anchor resolves to null (see resolveAliases),
+	// so it must behave like a genuine null everywhere inference gates on it:
+	// never panic, widen item types to include null, and keep the sibling
+	// mappings' property schemas.
+	tcs := map[string]struct {
+		opts  []magicschema.Option
+		input string
+		check func(*testing.T, map[string]any)
+	}{
+		"annotated broken-alias value records a null default": {
+			opts: []magicschema.Option{
+				magicschema.WithAnnotators(losisin.New()),
+				magicschema.WithInferDefaults(true),
+			},
+			input: stringtest.Input(`
+				# @schema type:string
+				foo: *missing
+			`),
+			check: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				foo := propertyAt(t, got, "foo")
+				assert.Equal(t, "string", foo["type"])
+
+				d, ok := foo["default"]
+				require.True(t, ok, "expected a default on foo")
+				assert.Nil(t, d)
+			},
+		},
+		"broken alias among mappings keeps properties and widens to null": {
+			input: stringtest.Input(`
+				items:
+				  - a: 1
+				  - *missing
+			`),
+			check: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				items, ok := propertyAt(t, got, "items")["items"].(map[string]any)
+				require.True(t, ok)
+				assert.ElementsMatch(t, []any{"object", "null"}, items["type"])
+				assert.Equal(t, "integer", propertyAt(t, items, "a")["type"])
+			},
+		},
+		"broken alias in a scalar list widens the item type to null": {
+			input: stringtest.Input(`
+				nums:
+				  - 1
+				  - *missing
+			`),
+			check: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				items, ok := propertyAt(t, got, "nums")["items"].(map[string]any)
+				require.True(t, ok)
+				assert.ElementsMatch(t, []any{"integer", "null"}, items["type"])
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			gen := magicschema.NewGenerator(tc.opts...)
+			schema, err := gen.Generate([]byte(tc.input))
+			require.NoError(t, err)
+
+			out, err := json.Marshal(schema)
+			require.NoError(t, err)
+
+			var got map[string]any
+
+			require.NoError(t, json.Unmarshal(out, &got))
+			tc.check(t, got)
+		})
+	}
+}
+
 func TestGeneratorInferDefaultsGolden(t *testing.T) {
 	t.Parallel()
 
