@@ -47,6 +47,19 @@ func mergeSchemas(a, b *jsonschema.Schema) *jsonschema.Schema {
 	typesA, typesB := typeList(a), typeList(b)
 	merged := widenTypeList(typesA, typesB)
 
+	// An absent type on one side reads as a null or empty value, widening
+	// the other side to a type-or-null union. That is right for value-derived
+	// schemas, where a null records as the empty schema, but wrong for an
+	// annotation-only constraint schema (pattern, enum, bounds with no type):
+	// it already permits every type, so the union is typeless and injecting
+	// null would claim a null is valid when neither input allowed one.
+	switch {
+	case len(typesA) == 0 && len(typesB) > 0 && constrainsValue(a):
+		merged = nil
+	case len(typesB) == 0 && len(typesA) > 0 && constrainsValue(b):
+		merged = nil
+	}
+
 	switch len(merged) {
 	case 0:
 	case 1:
@@ -333,6 +346,29 @@ func isFalseSchema(s *jsonschema.Schema) bool {
 	c.Not = nil
 
 	return reflect.DeepEqual(c, jsonschema.Schema{})
+}
+
+// constrainsValue reports whether a typeless schema carries a value
+// constraint -- pattern, enum, bounds, sub-schemas, and the like -- rather
+// than being an empty or metadata-only placeholder for a null or absent
+// value. The merge uses it to tell an absent type that means the value was
+// null (widen to a type-or-null union) from an absent type on an
+// annotation-only constraint schema that already permits every type (so the
+// union is typeless). Metadata such as title, description, default, and
+// examples does not constrain the value set and is ignored.
+func constrainsValue(s *jsonschema.Schema) bool {
+	return s.Pattern != "" || s.Format != "" ||
+		s.Enum != nil || s.Const != nil ||
+		s.Minimum != nil || s.Maximum != nil ||
+		s.ExclusiveMinimum != nil || s.ExclusiveMaximum != nil ||
+		s.MultipleOf != nil ||
+		s.MinLength != nil || s.MaxLength != nil ||
+		s.MinItems != nil || s.MaxItems != nil || s.UniqueItems ||
+		s.Items != nil ||
+		s.MinProperties != nil || s.MaxProperties != nil ||
+		s.Properties != nil || s.PatternProperties != nil ||
+		len(s.Required) > 0 ||
+		s.AllOf != nil || s.AnyOf != nil || s.OneOf != nil || s.Not != nil
 }
 
 // intersectStrings returns the intersection of two string slices.
