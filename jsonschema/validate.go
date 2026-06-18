@@ -514,8 +514,31 @@ func (v *validator) buildRegistry() {
 }
 
 // walkSchema recursively walks a schema tree, registering $id and $anchor
-// entries and computing base URIs.
+// entries and computing base URIs. An $id/$anchor that repeats a key already in
+// the registry overwrites it, which is the right behavior for the single
+// authoritative document buildRegistry walks.
 func (v *validator) walkSchema(schema *Schema, parentBase string) {
+	v.walkSchemaInto(schema, parentBase, false)
+}
+
+// walkFetchedSchema walks a document fetched from a [RefResolver], registering
+// its nested $id/$anchor/$dynamicAnchor entries only when the key is not already
+// claimed. A fetched document whose nested $id resolves to an already-loaded URI
+// (the root base or an earlier fetched document) must not overwrite that entry,
+// so the already-loaded document keeps priority while the fetched document's own
+// refs still resolve. Unlike [validator.registerFallbackSchema] these
+// registrations land in the shared registry, so they survive the per-run clone
+// forInstance makes for the compile-time loader path; at validation time the
+// registry is already that per-run clone.
+func (v *validator) walkFetchedSchema(schema *Schema, parentBase string) {
+	v.walkSchemaInto(schema, parentBase, true)
+}
+
+// walkSchemaInto is the shared walk core. When onlyIfAbsent is true, a
+// string-keyed registration ($id URI, $anchor, $dynamicAnchor) yields to an
+// existing entry instead of overwriting it; the pointer-keyed base URI is always
+// recorded so every node still resolves its own relative refs.
+func (v *validator) walkSchemaInto(schema *Schema, parentBase string, onlyIfAbsent bool) {
 	if schema == nil {
 		return
 	}
@@ -535,26 +558,27 @@ func (v *validator) walkSchema(schema *Schema, parentBase string) {
 		if isFragmentOnly(schema.ID) {
 			// Draft-07: fragment-only $id acts as an anchor.
 			anchor := schema.ID[1:] // strip leading '#'
-			v.anchorRegistry[currentBase+"#"+anchor] = schema
+			registerSchema(v.anchorRegistry, currentBase+"#"+anchor, schema, onlyIfAbsent)
 		} else {
 			resolved := resolveURI(currentBase, schema.ID)
 			resolved = stripFragment(resolved)
-			v.uriRegistry[resolved] = schema
+			registerSchema(v.uriRegistry, resolved, schema, onlyIfAbsent)
+
 			currentBase = resolved
 		}
 	}
 
 	// 2020-12: $anchor keyword.
 	if schema.Anchor != "" {
-		v.anchorRegistry[currentBase+"#"+schema.Anchor] = schema
+		registerSchema(v.anchorRegistry, currentBase+"#"+schema.Anchor, schema, onlyIfAbsent)
 	}
 
 	// 2020-12: $dynamicAnchor keyword.
 	// Also registered as a regular anchor (accessible via $ref).
 	if schema.DynamicAnchor != "" {
 		key := currentBase + "#" + schema.DynamicAnchor
-		v.anchorRegistry[key] = schema
-		v.dynamicAnchorRegistry[key] = schema
+		registerSchema(v.anchorRegistry, key, schema, onlyIfAbsent)
+		registerSchema(v.dynamicAnchorRegistry, key, schema, onlyIfAbsent)
 	}
 
 	// Store base URI for this schema (used during $ref resolution).
@@ -570,8 +594,21 @@ func (v *validator) walkSchema(schema *Schema, parentBase string) {
 	// list) reproduces the previous per-keyword recursion; its sorted-key map
 	// order also makes registry construction deterministic.
 	for _, e := range SubschemaEntries(schema) {
-		v.walkSchema(e.Schema, currentBase)
+		v.walkSchemaInto(e.Schema, currentBase, onlyIfAbsent)
 	}
+}
+
+// registerSchema stores s under key in reg. When onlyIfAbsent is true an
+// existing entry is preserved, so a fetched document cannot overwrite a URI or
+// anchor already claimed by the root or an earlier document.
+func registerSchema(reg map[string]*Schema, key string, s *Schema, onlyIfAbsent bool) {
+	if onlyIfAbsent {
+		if _, ok := reg[key]; ok {
+			return
+		}
+	}
+
+	reg[key] = s
 }
 
 // precomputedBounds holds the numeric bound keywords of a schema as rationals,
@@ -729,9 +766,15 @@ func (v *validator) callResolver(uri string) (*Schema, bool, error) {
 }
 
 // resolveRemote calls the configured [RefResolver] to fetch a remote schema,
-// registers it in the URI/anchor registries, and returns it. On error it
-// stores the error in refResolveErr and returns nil. Subsequent calls for
-// the same baseURI are served from the registry (cached).
+// registers it under baseURI, and returns it. On error it stores the error in
+// refResolveErr and returns nil. Subsequent calls for the same baseURI are
+// served from the registry (cached).
+//
+// The fetched document's own nested $ids and anchors are registered in
+// only-if-absent mode (see [validator.walkFetchedSchema]), so a document whose
+// nested $id resolves to an already-loaded URI (the root base or an earlier
+// fetched document) keeps the already-loaded entry's priority while the fetched
+// document's own refs still resolve.
 func (v *validator) resolveRemote(baseURI string) *Schema {
 	if v.refResolver == nil {
 		return nil
@@ -757,10 +800,12 @@ func (v *validator) resolveRemote(baseURI string) *Schema {
 		return nil
 	}
 
-	// Register and walk the copy so that $id, $anchor, and $dynamicAnchor
-	// entries become available for subsequent resolution.
+	// Register the copy under baseURI, walking its own nested $id/$anchor
+	// entries in only-if-absent mode so they cannot clobber an already-loaded
+	// entry. At validation time uriRegistry is the per-run clone, so these
+	// registrations live only for this run.
 	v.uriRegistry[baseURI] = cp
-	v.walkSchema(cp, baseURI)
+	v.walkFetchedSchema(cp, baseURI)
 
 	return cp
 }
@@ -792,11 +837,15 @@ func (v *validator) remoteLoader() jsonschema.Loader {
 					return nil, fmt.Errorf("clone resolved schema: %w", cpErr)
 				}
 
-				// Register and walk the copy so subsequent lookups
+				// Register the copy under uriStr so subsequent lookups
 				// during both Schema.Resolve and the validation walk
-				// find it without re-calling the resolver.
+				// find it without re-calling the resolver. Its own nested
+				// $ids/anchors are walked in only-if-absent mode so a
+				// fetched doc cannot clobber an already-loaded entry, yet
+				// the registrations still land in the shared registry that
+				// forInstance clones per run.
 				v.uriRegistry[uriStr] = cp
-				v.walkSchema(cp, uriStr)
+				v.walkFetchedSchema(cp, uriStr)
 
 				return cp, nil
 			}

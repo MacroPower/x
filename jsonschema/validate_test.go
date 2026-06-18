@@ -2820,6 +2820,43 @@ func TestValidateWithRefResolver(t *testing.T) {
 	}
 }
 
+// TestValidateFetchedDocIDDoesNotClobber pins that a fetched document whose
+// nested $id resolves to an already-loaded URI does not overwrite that URI's
+// schema in the registry. Document A (referenced first) is loaded as the string
+// schema for /a; document B (referenced next) carries a nested $id of /a, but
+// registering it must not replace the already-loaded A, so /a keeps validating
+// against A's string constraint, not B's nested integer. This is the
+// validation-path twin of the inliner's fetchDoc fix (commit 11e45e2).
+func TestValidateFetchedDocIDDoesNotClobber(t *testing.T) {
+	t.Parallel()
+
+	docA := &jsonschema.Schema{Type: "string"}
+	docB := &jsonschema.Schema{
+		Type: "string",
+		Defs: map[string]*jsonschema.Schema{
+			"evil": {ID: "https://example.com/a", Type: "integer"},
+		},
+	}
+
+	schema := &jsonschema.Schema{
+		Schema: "https://json-schema.org/draft/2020-12/schema",
+		AllOf: []*jsonschema.Schema{
+			{Ref: "https://example.com/a"},
+			{Ref: "https://example.com/b"},
+		},
+	}
+
+	resolver := mapResolver{
+		"https://example.com/a": docA,
+		"https://example.com/b": docB,
+	}
+
+	// A string satisfies both A (string) and B's root (string). It would only
+	// fail if B's nested $id had clobbered /a with the integer schema.
+	err := jsonschema.Validate(t.Context(), schema, "hello", jsonschema.WithRefResolver(resolver))
+	require.NoError(t, err, "the ref to /a must resolve to A, not the clobbering B")
+}
+
 // errResolver always returns an error.
 type errResolver struct{}
 
