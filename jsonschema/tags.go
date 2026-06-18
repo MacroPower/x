@@ -554,6 +554,12 @@ func applyEnumToItems(key, value string, t reflect.Type, s *Schema) error {
 		// Each item schema gets its own value slice so no slice is shared
 		// across schema nodes.
 		item.Enum = slices.Clone(enumVals)
+
+		// A nullable-pointer element ([]*string) wraps its value schema in
+		// anyOf[value, null]; the enum belongs on the value branch, not as a
+		// sibling of anyOf where it would reject a valid null element. This is
+		// a no-op for a non-nullable item.
+		relocateConstEnumToValueBranch(item)
 	}
 
 	return nil

@@ -104,7 +104,14 @@ func applyDive(remaining []string, s *jsonschema.Schema, fieldType reflect.Type)
 			return fmt.Errorf("validate tag: cannot dive: map schema has no additionalProperties")
 		}
 
-		return applyParts(remaining, s.AdditionalProperties, nil, "", ft.Elem(), true)
+		err := applyParts(remaining, s.AdditionalProperties, nil, "", ft.Elem(), true)
+		if err != nil {
+			return err
+		}
+
+		relocateNullableValueConstraint(s.AdditionalProperties)
+
+		return nil
 
 	default:
 		return fmt.Errorf("validate tag: cannot dive into non-collection type %s", ft.Kind())
@@ -122,6 +129,8 @@ func diveIntoSequence(remaining []string, s *jsonschema.Schema, elem reflect.Typ
 			if err != nil {
 				return err
 			}
+
+			relocateNullableValueConstraint(item)
 		}
 
 		return nil

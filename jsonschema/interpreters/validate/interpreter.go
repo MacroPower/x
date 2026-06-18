@@ -399,9 +399,32 @@ func applySequenceOneOf(s *jsonschema.Schema, value string, baseType reflect.Typ
 		if err != nil {
 			return err
 		}
+
+		relocateNullableValueConstraint(item)
 	}
 
 	return nil
+}
+
+// relocateNullableValueConstraint moves a Const or Enum stamped on a nullable
+// wrapper schema (anyOf[value, null], the shape a pointer element generates)
+// onto its value branch. A type-agnostic const/enum left as a sibling of anyOf
+// is evaluated against the instance directly and so rejects a valid null
+// element; on the value branch it constrains the value alone. It is a no-op for
+// a schema that is not a nullable wrapper or carries neither keyword.
+func relocateNullableValueConstraint(s *jsonschema.Schema) {
+	inner := schemashape.NullableInnerSchema(s)
+	if inner == nil {
+		return
+	}
+
+	if s.Const != nil {
+		inner.Const, s.Const = s.Const, nil
+	}
+
+	if s.Enum != nil {
+		inner.Enum, s.Enum = s.Enum, nil
+	}
 }
 
 // applyEq applies eq constraint based on the type. A non-numeric, non-bool,

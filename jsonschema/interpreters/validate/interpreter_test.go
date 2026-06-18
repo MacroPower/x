@@ -405,6 +405,75 @@ func TestValidateInterpreter_DivePointerElement(t *testing.T) {
 	}`, string(got))
 }
 
+// TestValidateInterpreter_OneOfOnPointerElement pins that oneof on a slice of
+// nullable pointers lands the enum on the element's value branch, not as a
+// sibling of the anyOf[value, null] wrapper where it would reject a valid null
+// element.
+func TestValidateInterpreter_OneOfOnPointerElement(t *testing.T) {
+	t.Parallel()
+
+	type Config struct {
+		Tags []*string `json:"tags" validate:"oneof=a b c"`
+	}
+
+	s, err := jsonschema.GenerateFor[Config](t.Context(),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
+	)
+	require.NoError(t, err)
+
+	got, err := json.Marshal(s)
+	require.NoError(t, err)
+
+	assert.JSONEq(t, `{
+		"$schema":"https://json-schema.org/draft/2020-12/schema",
+		"type":"object",
+		"properties":{
+			"tags":{
+				"type":["null","array"],
+				"items":{
+					"anyOf":[{"type":"string","enum":["a","b","c"]},{"type":"null"}]
+				}
+			}
+		},
+		"required":["tags"],
+		"additionalProperties":false
+	}`, string(got))
+}
+
+// TestValidateInterpreter_DiveEqOnPointerElement pins that dive,eq on a slice of
+// nullable pointers lands the const on the element's value branch rather than
+// the anyOf wrapper, keeping a null element valid.
+func TestValidateInterpreter_DiveEqOnPointerElement(t *testing.T) {
+	t.Parallel()
+
+	type Config struct {
+		Values []*int `json:"values" validate:"dive,eq=5"`
+	}
+
+	s, err := jsonschema.GenerateFor[Config](t.Context(),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
+	)
+	require.NoError(t, err)
+
+	got, err := json.Marshal(s)
+	require.NoError(t, err)
+
+	assert.JSONEq(t, `{
+		"$schema":"https://json-schema.org/draft/2020-12/schema",
+		"type":"object",
+		"properties":{
+			"values":{
+				"type":["null","array"],
+				"items":{
+					"anyOf":[{"type":"integer","const":5},{"type":"null"}]
+				}
+			}
+		},
+		"required":["values"],
+		"additionalProperties":false
+	}`, string(got))
+}
+
 func TestValidateInterpreter_DiveMap(t *testing.T) {
 	t.Parallel()
 

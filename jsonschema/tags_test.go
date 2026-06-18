@@ -1057,6 +1057,29 @@ func TestTagEnumOnSequenceFields(t *testing.T) {
 		assert.Equal(t, []any{"monday", "tuesday"}, items[0].Enum)
 	})
 
+	t.Run("slice of nullable pointers puts enum on the value branch", func(t *testing.T) {
+		t.Parallel()
+
+		type T struct {
+			Days []*string `json:"days" jsonschema:"enum=monday|tuesday"`
+		}
+
+		s, err := jsonschema.GenerateFor[T](t.Context())
+		require.NoError(t, err)
+
+		items := itemsOf(s, "days")
+		require.Len(t, items, 1)
+
+		// The element is a nullable pointer, so its schema is anyOf[value,
+		// null]. The enum must land on the value branch, not as a sibling of
+		// anyOf where it would reject a valid null element.
+		item := items[0]
+		assert.Nil(t, item.Enum, "the anyOf wrapper carries no enum")
+		require.Len(t, item.AnyOf, 2)
+		assert.Equal(t, []any{"monday", "tuesday"}, item.AnyOf[0].Enum)
+		assert.Equal(t, "null", item.AnyOf[1].Type)
+	})
+
 	t.Run("fixed array uses prefixItems", func(t *testing.T) {
 		t.Parallel()
 
