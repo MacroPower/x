@@ -2565,6 +2565,72 @@ func TestGeneratorExplicitNotRequiredOverridesMergeKey(t *testing.T) {
 		"explicit required:false must clear the merge-key-inherited required")
 }
 
+func TestGeneratorExplicitNotRequiredBeforeMergeKey(t *testing.T) {
+	t.Parallel()
+
+	// The mirror of TestGeneratorExplicitNotRequiredOverridesMergeKey: the
+	// explicit required:false precedes the "<<" merge key in source order, so
+	// the merge must not re-add the required key it would otherwise inherit.
+	input := "base: &base\n" +
+		"  # @schema required:true\n" +
+		"  name: x\n" +
+		"spec:\n" +
+		"  # @schema required:false\n" +
+		"  name: y\n" +
+		"  <<: *base\n"
+
+	gen := magicschema.NewGenerator(magicschema.WithAnnotators(losisin.New()))
+	schema, err := gen.Generate([]byte(input))
+	require.NoError(t, err)
+
+	out, err := json.Marshal(schema)
+	require.NoError(t, err)
+
+	var got map[string]any
+
+	require.NoError(t, json.Unmarshal(out, &got))
+
+	spec := propertyAt(t, got, "spec")
+	assert.NotContains(t, spec, "required",
+		"required:false before a merge key must still clear the inherited required")
+}
+
+func TestGeneratorHiddenPropertyOverridesMergeKey(t *testing.T) {
+	t.Parallel()
+
+	// An explicit hidden:true omits a property even when a "<<" merge key
+	// supplies the same key, in either source order: a merge key before the
+	// property must not survive the skip, and one after must not re-insert it.
+	tcs := map[string]string{
+		"merge key after the hidden property": "base: &base\n  name: x\n" +
+			"spec:\n  # @schema hidden:true\n  name: y\n  <<: *base\n",
+		"merge key before the hidden property": "base: &base\n  name: x\n" +
+			"spec:\n  <<: *base\n  # @schema hidden:true\n  name: y\n",
+	}
+
+	for name, input := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			gen := magicschema.NewGenerator(magicschema.WithAnnotators(losisin.New()))
+			schema, err := gen.Generate([]byte(input))
+			require.NoError(t, err)
+
+			out, err := json.Marshal(schema)
+			require.NoError(t, err)
+
+			var got map[string]any
+
+			require.NoError(t, json.Unmarshal(out, &got))
+
+			spec := propertyAt(t, got, "spec")
+			if props, ok := spec["properties"].(map[string]any); ok {
+				assert.NotContains(t, props, "name", "a hidden property must not be re-inserted by a merge key")
+			}
+		})
+	}
+}
+
 func TestGeneratorRequiredUnderAnnotatedParent(t *testing.T) {
 	t.Parallel()
 

@@ -437,15 +437,32 @@ func (g *Generator) walkMapping(
 		}
 	}
 
+	// Explicit property annotations settle whether a key is omitted or
+	// required; a "<<" merge key must honor those decisions no matter which
+	// side the parser reached first.
+	decisions := &explicitDecisions{
+		skipped:  make(map[string]bool),
+		optedOut: make(map[string]bool),
+	}
+
 	for _, mvn := range values {
 		if _, ok := mvn.Key.(*ast.MergeKeyNode); ok {
-			g.handleMergeKey(mvn, keyPath, anchors, schema, addToOrder)
+			g.handleMergeKey(mvn, keyPath, anchors, schema, addToOrder, decisions)
 
 			continue
 		}
 
-		g.handleProperty(mvn, keyPath, anchors, schema, addToOrder)
+		g.handleProperty(mvn, keyPath, anchors, schema, addToOrder, decisions)
 	}
+
+	// A skipped key may have been inserted (and ordered) by a merge key before
+	// the explicit annotation removed it; drop any order entry whose property
+	// no longer exists so order and properties stay in sync.
+	propertyOrder = slices.DeleteFunc(propertyOrder, func(k string) bool {
+		_, ok := schema.Properties[k]
+
+		return !ok
+	})
 
 	schema.PropertyOrder = propertyOrder
 
@@ -457,6 +474,16 @@ func (g *Generator) walkMapping(
 	return schema
 }
 
+// explicitDecisions records the keys an explicit property annotation has
+// settled within one mapping, so a "<<" merge key processed in a different
+// source position cannot override them: a skipped key stays omitted and a
+// de-required key stays optional, regardless of which side the parser saw
+// first.
+type explicitDecisions struct {
+	skipped  map[string]bool // keys an explicit annotation omitted (hidden/@skip)
+	optedOut map[string]bool // keys an explicit required:false de-required
+}
+
 // handleMergeKey processes a YAML merge key (<<) and adds its properties.
 func (g *Generator) handleMergeKey(
 	mvn *ast.MappingValueNode,
@@ -464,13 +491,14 @@ func (g *Generator) handleMergeKey(
 	anchors aliasResolutions,
 	schema *jsonschema.Schema,
 	addToOrder func(string),
+	decisions *explicitDecisions,
 ) {
 	mergeValue := resolveAliases(mvn.Value, anchors)
 	mergeValue = unwrapNode(mergeValue)
 
 	switch mv := mergeValue.(type) {
 	case *ast.MappingNode:
-		g.mergeMappingInto(schema, g.walkMapping(mv, keyPath, anchors), addToOrder)
+		g.mergeMappingInto(schema, g.walkMapping(mv, keyPath, anchors), addToOrder, decisions)
 
 	case *ast.SequenceNode:
 		for _, seqVal := range mv.Values {
@@ -482,26 +510,35 @@ func (g *Generator) handleMergeKey(
 				continue
 			}
 
-			g.mergeMappingInto(schema, g.walkMapping(mappingNode, keyPath, anchors), addToOrder)
+			g.mergeMappingInto(schema, g.walkMapping(mappingNode, keyPath, anchors), addToOrder, decisions)
 		}
 	}
 }
 
 // mergeMappingInto adds a merge-key mapping's properties and required keys
 // into schema. Existing properties win (explicit keys override '<<' merges
-// regardless of position) and required keys are deduplicated.
+// regardless of position), a key an explicit annotation skipped is never
+// re-inserted, required keys are deduplicated, and a key an explicit
+// required:false de-required (or skipped) is not marked required.
 func (g *Generator) mergeMappingInto(
 	schema, mergeSchema *jsonschema.Schema,
 	addToOrder func(string),
+	decisions *explicitDecisions,
 ) {
 	for _, k := range propertyKeys(mergeSchema) {
-		if _, exists := schema.Properties[k]; !exists {
-			schema.Properties[k] = mergeSchema.Properties[k]
-			addToOrder(k)
+		if _, exists := schema.Properties[k]; exists || decisions.skipped[k] {
+			continue
 		}
+
+		schema.Properties[k] = mergeSchema.Properties[k]
+		addToOrder(k)
 	}
 
 	for _, k := range mergeSchema.Required {
+		if decisions.optedOut[k] || decisions.skipped[k] {
+			continue
+		}
+
 		addRequired(schema, k)
 	}
 }
@@ -528,6 +565,7 @@ func (g *Generator) handleProperty(
 	anchors aliasResolutions,
 	schema *jsonschema.Schema,
 	addToOrder func(string),
+	decisions *explicitDecisions,
 ) {
 	keyName := keyText(mvn.Key)
 
@@ -538,6 +576,14 @@ func (g *Generator) handleProperty(
 
 	annotation := g.annotate(mvn, childPath)
 	if annotation != nil && annotation.Skip {
+		// Record the skip and undo any property a preceding "<<" merge key
+		// already inserted, so the subtree is omitted regardless of source
+		// order. A merge key after this point also honors decisions.skipped.
+		decisions.skipped[keyName] = true
+
+		delete(schema.Properties, keyName)
+		removeRequired(schema, keyName)
+
 		return
 	}
 
@@ -563,7 +609,10 @@ func (g *Generator) handleProperty(
 	default:
 		// An explicit required:false overrides a required key a "<<" merge
 		// brought in from the merged mapping: the property must not stay
-		// required against the annotation's intent.
+		// required against the annotation's intent. Recording the opt-out
+		// keeps a merge key processed after this point from re-adding it.
+		decisions.optedOut[keyName] = true
+
 		removeRequired(schema, keyName)
 	}
 }
