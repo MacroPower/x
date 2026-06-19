@@ -2614,6 +2614,36 @@ func TestGenerateFor_EnumKeepsAuthoredBound(t *testing.T) {
 		"20 satisfies both the enum and the minimum")
 }
 
+func TestGenerateFor_EnumKeepsAuthoredBoundWithInterpreter(t *testing.T) {
+	t.Parallel()
+
+	// The author-kept bound (enum intersected with minimum) must survive even
+	// when an unrelated tag interpreter also runs on the field. The re-drop that
+	// applyFieldInterpreters performs after interpreters run threads the
+	// jsonschema tag's provenance, so a no-op interpreter registered on another
+	// key does not silently wipe the minimum the tag deliberately kept.
+	type Container struct {
+		Score int `json:"score" jsonschema:"enum=10|20,minimum=15" note:"x"`
+	}
+
+	interp := jsonschema.TagInterpreterFunc(
+		func(_ context.Context, _ jsonschema.FieldContext, _ jsonschema.Tag) error {
+			return nil
+		},
+	)
+
+	s, err := jsonschema.GenerateFor[Container](t.Context(),
+		jsonschema.WithTagInterpreter("note", interp),
+	)
+	require.NoError(t, err)
+
+	field := s.Properties["score"]
+	require.NotNil(t, field)
+	require.NotNil(t, field.Minimum,
+		"the author-set minimum must survive when an interpreter also runs on the field")
+	assert.InEpsilon(t, 15.0, *field.Minimum, 0)
+}
+
 func TestGenerateFor_AllofPrefixFieldNotMisclassified(t *testing.T) {
 	t.Parallel()
 

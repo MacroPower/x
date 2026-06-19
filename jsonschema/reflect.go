@@ -953,8 +953,9 @@ func (g *generator) buildStructSchema(t reflect.Type) (*Schema, error) {
 	var hasAllOf bool
 
 	type pendingField struct {
-		schema *Schema
-		fi     structFieldInfo
+		schema        *Schema
+		fi            structFieldInfo
+		boundAuthored bool
 	}
 
 	var pending []pendingField
@@ -971,17 +972,21 @@ func (g *generator) buildStructSchema(t reflect.Type) (*Schema, error) {
 			continue
 		}
 
-		fieldSchema, err := g.buildFieldSchema(t, fields[idx], s)
+		fieldSchema, boundAuthored, err := g.buildFieldSchema(t, fields[idx], s)
 		if err != nil {
 			return nil, fmt.Errorf("field %q: %w", fields[idx].jsonName, err)
 		}
 
-		pending = append(pending, pendingField{fi: fields[idx], schema: fieldSchema})
+		pending = append(pending, pendingField{
+			fi:            fields[idx],
+			schema:        fieldSchema,
+			boundAuthored: boundAuthored,
+		})
 	}
 
 	for i := range pending {
 		pf := &pending[i]
-		err := g.applyFieldInterpreters(t, pf.fi, pf.schema, s)
+		err := g.applyFieldInterpreters(t, pf.fi, pf.schema, s, pf.boundAuthored)
 		if err != nil {
 			return nil, fmt.Errorf("field %q: %w", pf.fi.jsonName, err)
 		}
@@ -1394,8 +1399,14 @@ func (g *generator) needsAllOfComposition(t reflect.Type) bool {
 // buildFieldSchema generates a struct field's schema, applies the json:",string"
 // override, comment extraction, and jsonschema struct tag, then registers it in
 // the parent's Properties/PropertyOrder and required list. Tag interpreters run
-// later in applyFieldInterpreters once all sibling properties exist.
-func (g *generator) buildFieldSchema(parentType reflect.Type, fi structFieldInfo, parent *Schema) (*Schema, error) {
+// later in applyFieldInterpreters once all sibling properties exist. The returned
+// bool reports whether the jsonschema tag authored a numeric bound kept alongside
+// an enum, so applyFieldInterpreters can preserve it when it re-drops bounds.
+func (g *generator) buildFieldSchema(
+	parentType reflect.Type,
+	fi structFieldInfo,
+	parent *Schema,
+) (*Schema, bool, error) {
 	fieldType := fi.field.Type
 	isPointer := fieldType.Kind() == reflect.Pointer
 
@@ -1414,8 +1425,9 @@ func (g *generator) buildFieldSchema(parentType reflect.Type, fi structFieldInfo
 	stringOverride := fi.jsonString && isStringableType(fieldType)
 
 	var (
-		fieldSchema *Schema
-		err         error
+		fieldSchema   *Schema
+		boundAuthored bool
+		err           error
 	)
 
 	if stringOverride {
@@ -1432,21 +1444,21 @@ func (g *generator) buildFieldSchema(parentType reflect.Type, fi structFieldInfo
 	} else {
 		fieldSchema, err = g.schemaForType(fieldType, false)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 	}
 
 	// 2. Field-level comment.
 	err = g.applyFieldDescription(parentType, fi, fieldSchema, parent)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	// 3. Schema struct tag.
 	if tag, ok := fi.field.Tag.Lookup("jsonschema"); ok {
-		boundAuthored, err := applyJSONSchemaTag(tag, tagType, fieldSchema)
+		boundAuthored, err = applyJSONSchemaTag(tag, tagType, fieldSchema)
 		if err != nil {
-			return nil, fmt.Errorf("jsonschema tag: %w", err)
+			return nil, false, fmt.Errorf("jsonschema tag: %w", err)
 		}
 
 		// A nullable pointer field is generated as anyOf[value, null] with
@@ -1472,7 +1484,7 @@ func (g *generator) buildFieldSchema(parentType reflect.Type, fi structFieldInfo
 	parent.Properties[fi.jsonName] = fieldSchema
 	parent.PropertyOrder = append(parent.PropertyOrder, fi.jsonName)
 
-	return fieldSchema, nil
+	return fieldSchema, boundAuthored, nil
 }
 
 // fieldContext builds the FieldContext passed to tag interpreters and the
@@ -1501,6 +1513,7 @@ func (g *generator) applyFieldInterpreters(
 	parentType reflect.Type,
 	fi structFieldInfo,
 	fieldSchema, parent *Schema,
+	boundAuthored bool,
 ) error {
 	ranInterpreter := false
 
@@ -1520,14 +1533,16 @@ func (g *generator) applyFieldInterpreters(
 	// pointer field is the anyOf wrapper. Const and enum test the instance value
 	// regardless of its type, so on the wrapper they reject the permitted null;
 	// relocate them onto the value branch and drop the now-redundant type-derived
-	// numeric bounds, matching the jsonschema-tag path in buildFieldSchema. The
-	// interpreter API exposes no per-keyword provenance, so an interpreter-set
-	// bound cannot be distinguished from a kind-derived one and is dropped. This
-	// runs only when an interpreter touched the field; otherwise buildFieldSchema
-	// already dropped with the jsonschema tag's provenance, and re-dropping here
-	// would discard a bound that tag deliberately kept alongside an enum.
+	// numeric bounds, matching the jsonschema-tag path in buildFieldSchema. This
+	// reuses the jsonschema tag's boundAuthored provenance: a bound that tag kept
+	// alongside an enum survives this second pass, while a purely kind-derived
+	// bound (boundAuthored false, the common case with no value-narrowing
+	// jsonschema tag) is dropped. The interpreter API exposes no per-keyword
+	// provenance of its own, so an interpreter-set bound rides on whatever
+	// boundAuthored the jsonschema tag established. Re-dropping runs only when an
+	// interpreter touched the field; otherwise buildFieldSchema already dropped.
 	if ranInterpreter {
-		dropTypeBoundsForConstEnum(fieldSchema, false)
+		dropTypeBoundsForConstEnum(fieldSchema, boundAuthored)
 	}
 
 	// Wrap bare $ref with allOf for Draft-07 if annotations were added. This
