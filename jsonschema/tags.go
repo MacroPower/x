@@ -13,6 +13,7 @@ import (
 
 	"go.jacobcolvin.com/x/jsonschema/internal/numkind"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemashape"
+	"go.jacobcolvin.com/x/jsonschema/internal/typename"
 )
 
 var (
@@ -135,7 +136,7 @@ func applyJSONSchemaTag(tag string, fieldType reflect.Type, s *Schema) (bool, er
 		// conflict rather than discarding it silently. This in-loop check catches
 		// a conflicting keyword set before type=; one set after type= records its
 		// group only on the next iteration, so a post-loop check covers it.
-		if key == KeywordType && validTypeName(value) {
+		if key == KeywordType && typename.Valid(value) {
 			if g := conflictingGroup(groupsSet, value); g != "" {
 				return false, fmt.Errorf("jsonschema tag: %s constraint conflicts with type=%s", g, value)
 			}
@@ -230,13 +231,13 @@ func constraintGroup(key string) string {
 // their own, and boolean or null keep none.
 func typeConstraintGroup(typeName string) string {
 	switch typeName {
-	case typeNameInteger, typeNameNumber:
+	case typename.Integer, typename.Number:
 		return groupNumeric
-	case typeNameString:
+	case typename.String:
 		return groupString
-	case typeNameArray:
+	case typename.Array:
 		return groupArray
-	case typeNameObject:
+	case typename.Object:
 		return groupObject
 	default:
 		return ""
@@ -270,13 +271,13 @@ func conflictingGroup(groupsSet map[string]bool, typeName string) string {
 // error.
 func standInTypeFor(typeName string) reflect.Type {
 	switch typeName {
-	case typeNameString:
+	case typename.String:
 		return reflect.TypeFor[string]()
-	case typeNameInteger:
+	case typename.Integer:
 		return reflect.TypeFor[int64]()
-	case typeNameNumber:
+	case typename.Number:
 		return reflect.TypeFor[float64]()
-	case typeNameBoolean:
+	case typename.Boolean:
 		return reflect.TypeFor[bool]()
 	default: // array, object, null
 		return nil
@@ -348,7 +349,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *Schema) err
 		s.Title = value
 
 	case KeywordType:
-		if !validTypeName(value) {
+		if !typename.Valid(value) {
 			return fmt.Errorf("jsonschema tag: key %q: %w: %q", key, ErrInvalidType, value)
 		}
 
@@ -578,7 +579,7 @@ func applyTypeOverride(s *Schema, typeName string) {
 	s.Type = typeName
 	s.Types = nil
 
-	if typeName != typeNameInteger && typeName != typeNameNumber {
+	if typeName != typename.Integer && typeName != typename.Number {
 		s.Minimum = nil
 		s.Maximum = nil
 		s.ExclusiveMinimum = nil
@@ -586,14 +587,14 @@ func applyTypeOverride(s *Schema, typeName string) {
 		s.MultipleOf = nil
 	}
 
-	if typeName != typeNameString {
+	if typeName != typename.String {
 		s.Format = ""
 		s.Pattern = ""
 		s.MinLength = nil
 		s.MaxLength = nil
 	}
 
-	if typeName != typeNameArray {
+	if typeName != typename.Array {
 		s.Items = nil
 		s.PrefixItems = nil
 		s.ItemsArray = nil
@@ -607,7 +608,7 @@ func applyTypeOverride(s *Schema, typeName string) {
 		s.MaxContains = nil
 	}
 
-	if typeName != typeNameObject {
+	if typeName != typename.Object {
 		s.Properties = nil
 		s.PatternProperties = nil
 		s.AdditionalProperties = nil
@@ -834,7 +835,7 @@ func parseTypedScalar(value string, t reflect.Type) (any, error) {
 
 	t = derefType(t)
 
-	if value == typeNameNull {
+	if value == typename.Null {
 		if !nullable {
 			return nil, fmt.Errorf("cannot assign null to non-nullable type %s", t.Kind())
 		}

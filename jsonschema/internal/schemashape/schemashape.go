@@ -4,11 +4,11 @@
 // so the lookups are centralized here to keep a single source of truth.
 package schemashape
 
-import "github.com/google/jsonschema-go/jsonschema"
+import (
+	"github.com/google/jsonschema-go/jsonschema"
 
-// typeNameNull is the JSON Schema type name for the null branch of a nullable
-// schema.
-const typeNameNull = "null"
+	"go.jacobcolvin.com/x/jsonschema/internal/typename"
+)
 
 // NullableInnerSchema returns the value (non-null) branch of a schema produced
 // for a nullable field: an anyOf of a value schema and {"type":"null"}. It
@@ -22,7 +22,7 @@ func NullableInnerSchema(s *jsonschema.Schema) *jsonschema.Schema {
 		return nil
 	}
 
-	if s.AnyOf[1].Type == typeNameNull {
+	if s.AnyOf[1].Type == typename.Null {
 		return s.AnyOf[0]
 	}
 

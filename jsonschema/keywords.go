@@ -1,28 +1,5 @@
 package jsonschema
 
-// JSON Schema type name constants, shared by the generator (schema type
-// fields) and the validator (instance type checks).
-const (
-	typeNameNull    = "null"
-	typeNameBoolean = "boolean"
-	typeNameString  = "string"
-	typeNameInteger = "integer"
-	typeNameNumber  = "number"
-	typeNameObject  = "object"
-	typeNameArray   = "array"
-)
-
-// validTypeName reports whether s is one of the seven JSON Schema type names.
-func validTypeName(s string) bool {
-	switch s {
-	case typeNameNull, typeNameBoolean, typeNameString, typeNameInteger,
-		typeNameNumber, typeNameObject, typeNameArray:
-		return true
-	default:
-		return false
-	}
-}
-
 // JSON Schema keyword name constants, so a consumer branching on
 // [ValidationError.Keyword] or building schema locations from
 // [Location.Segments] needs no raw keyword strings. The generator

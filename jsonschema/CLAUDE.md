@@ -22,8 +22,10 @@ The package has two independent halves sharing the `Schema` type:
   escaping), `internal/numrat` (exact-decimal arithmetic core for JSON
   numbers: canonical decomposition, bounded `big.Rat` expansion, modular
   `multipleOf`), `internal/numkind` (Go integer reflect kind -> parse
-  bit-width mapping, shared by both halves), and `internal/schemashape`
-  (structural shape classification of a `Schema`).
+  bit-width mapping, shared by both halves), `internal/typename` (the seven
+  canonical JSON Schema type-name constants and their predicate, shared by
+  both halves and schemashape), and `internal/schemashape` (structural shape
+  classification of a `Schema`).
 
 ### Relationship to google/jsonschema-go
 

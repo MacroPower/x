@@ -25,6 +25,7 @@ import (
 	"go.jacobcolvin.com/x/jsonschema/internal/format"
 	"go.jacobcolvin.com/x/jsonschema/internal/jsonptr"
 	"go.jacobcolvin.com/x/jsonschema/internal/numrat"
+	"go.jacobcolvin.com/x/jsonschema/internal/typename"
 	"go.jacobcolvin.com/x/jsonschema/internal/vocab"
 )
 
@@ -1330,12 +1331,12 @@ func checkTypeNames(schema *Schema, schemaPath string, visited map[*Schema]bool)
 
 	visited[schema] = true
 
-	if schema.Type != "" && !validTypeName(schema.Type) {
+	if schema.Type != "" && !typename.Valid(schema.Type) {
 		return fmt.Errorf("%w: %q at %s/type", ErrInvalidType, schema.Type, schemaPath)
 	}
 
 	for _, name := range schema.Types {
-		if !validTypeName(name) {
+		if !typename.Valid(name) {
 			return fmt.Errorf("%w: %q at %s/type", ErrInvalidType, name, schemaPath)
 		}
 	}
@@ -2095,25 +2096,25 @@ func acceptedInstance(instance any) bool {
 // instanceType returns the JSON Schema type name for a Go value.
 func instanceType(v any) string {
 	if v == nil {
-		return typeNameNull
+		return typename.Null
 	}
 
 	switch val := v.(type) {
 	case bool:
-		return typeNameBoolean
+		return typename.Boolean
 	case string:
-		return typeNameString
+		return typename.String
 	case json.Number, float64:
 		if numrat.IsIntegralInstance(val) {
-			return typeNameInteger
+			return typename.Integer
 		}
 
-		return typeNameNumber
+		return typename.Number
 
 	case map[string]any:
-		return typeNameObject
+		return typename.Object
 	case []any:
-		return typeNameArray
+		return typename.Array
 	default:
 		return ""
 	}
@@ -2122,23 +2123,23 @@ func instanceType(v any) string {
 // instanceMatchesType checks if an instance matches a JSON Schema type string.
 func instanceMatchesType(instance any, typ string) bool {
 	switch typ {
-	case typeNameNull:
+	case typename.Null:
 		return instance == nil
-	case typeNameBoolean:
+	case typename.Boolean:
 		_, ok := instance.(bool)
 		return ok
 
-	case typeNameString:
+	case typename.String:
 		// Json.Number is a distinct type, so a string assertion already
 		// excludes it; no separate numeric guard is needed.
 		_, isStr := instance.(string)
 
 		return isStr
 
-	case typeNameInteger:
+	case typename.Integer:
 		return numrat.IsIntegralInstance(instance)
 
-	case typeNameNumber:
+	case typename.Number:
 		switch instance.(type) {
 		case float64, json.Number:
 			return true
@@ -2146,11 +2147,11 @@ func instanceMatchesType(instance any, typ string) bool {
 
 		return false
 
-	case typeNameObject:
+	case typename.Object:
 		_, ok := instance.(map[string]any)
 		return ok
 
-	case typeNameArray:
+	case typename.Array:
 		_, ok := instance.([]any)
 		return ok
 	}
