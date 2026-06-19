@@ -1260,15 +1260,36 @@ func checkTypeNames(schema *Schema, schemaPath string, visited map[*Schema]bool)
 // the network can honor cancellation and deadlines. The context is held only
 // for the duration of the run, never by the [Validator] itself.
 func (c *Validator) Validate(ctx context.Context, instance any) error {
+	instance, err := normalizeAndCheck(instance)
+	if err != nil {
+		return err
+	}
+
+	return c.validateNormalized(ctx, instance)
+}
+
+// normalizeAndCheck normalizes instance and reports an error if, after
+// normalization, its type or a nested container leaf is not one the validation
+// walk accepts. The message lists the accepted types in one place so the two
+// entry points cannot drift.
+func normalizeAndCheck(instance any) (any, error) {
 	instance = Normalize(instance)
 	if !acceptedInstance(instance) {
-		return fmt.Errorf(
+		return nil, fmt.Errorf(
 			"instance of type %T is not accepted: accepted types are map[string]any, "+
 				"[]any, string, bool, nil, and the numeric types; marshal to JSON or use Validator.ValidateJSON",
 			instance,
 		)
 	}
 
+	return instance, nil
+}
+
+// validateNormalized validates an already-normalized, accepted instance,
+// returning nil on success or the assembled *ValidationError. The one-shot
+// [Validate] entry point calls it directly so an instance it already normalized
+// is not walked a second time.
+func (c *Validator) validateNormalized(ctx context.Context, instance any) error {
 	v := c.proto.forInstance(ctx)
 
 	// The run context reaches the resolver through the per-run ctx field set
@@ -1345,13 +1366,9 @@ func (c *Validator) ValidateValue(ctx context.Context, v any) error {
 func Validate(ctx context.Context, schema *Schema, instance any, opts ...ValidateOption) error {
 	// Check the instance type before compiling so an unaccepted instance is
 	// reported without the cost of (or any error from) schema preparation.
-	instance = Normalize(instance)
-	if !acceptedInstance(instance) {
-		return fmt.Errorf(
-			"instance of type %T is not accepted: accepted types are map[string]any, "+
-				"[]any, string, bool, nil, and the numeric types; marshal to JSON or use Validator.ValidateJSON",
-			instance,
-		)
+	instance, err := normalizeAndCheck(instance)
+	if err != nil {
+		return err
 	}
 
 	c, err := Compile(ctx, schema, opts...)
@@ -1359,7 +1376,9 @@ func Validate(ctx context.Context, schema *Schema, instance any, opts ...Validat
 		return err
 	}
 
-	return c.Validate(ctx, instance)
+	// Call validateNormalized, not c.Validate, so the instance normalized just
+	// above is not walked by Normalize a second time.
+	return c.validateNormalized(ctx, instance)
 }
 
 // resolveErrorIsRefOnly reports whether a [jsonschema.Schema.Resolve] failure
