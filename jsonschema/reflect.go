@@ -809,7 +809,12 @@ func isValidMapKey(t reflect.Type) bool {
 		return true
 	}
 
-	if t.Implements(typeTextMarshaler) || reflect.PointerTo(t).Implements(typeTextMarshaler) {
+	// Map keys are not addressable, so encoding/json requires the key type
+	// itself to implement TextMarshaler; a method set satisfied only via a
+	// pointer receiver does not count and json.Marshal rejects such a map. This
+	// deliberately differs from implementsTextMarshaler, which serves addressable
+	// struct fields where the pointer-receiver form is usable.
+	if t.Implements(typeTextMarshaler) {
 		return true
 	}
 

@@ -2158,6 +2158,23 @@ func TestGenerateFor_TextMarshalerMapKey(t *testing.T) {
 	}`, string(got))
 }
 
+// PtrTextMarshalerKey implements encoding.TextMarshaler only with a pointer
+// receiver, so it is NOT a valid map key: map keys are not addressable, and
+// json.Marshal rejects map[PtrTextMarshalerKey]V outright.
+type PtrTextMarshalerKey struct{ ID int }
+
+func (k *PtrTextMarshalerKey) MarshalText() ([]byte, error) { return nil, nil }
+
+func TestGenerateFor_PointerReceiverTextMarshalerMapKeyRejected(t *testing.T) {
+	t.Parallel()
+
+	// A key type whose TextMarshaler is satisfied only via a pointer receiver
+	// cannot be marshaled, so the generator must reject it rather than emit an
+	// object schema for an unmarshalable map.
+	_, err := jsonschema.GenerateFor[map[PtrTextMarshalerKey]string](t.Context())
+	require.ErrorIs(t, err, jsonschema.ErrUnsupportedMapKey)
+}
+
 func TestGenerateFor_JSONSchemaTag_Examples(t *testing.T) {
 	t.Parallel()
 
