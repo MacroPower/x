@@ -1471,6 +1471,36 @@ func TestTagScalarAfterTypeOverride(t *testing.T) {
 			prop: "v",
 			want: `{"type":"number","minimum":1}`,
 		},
+		"numeric bound after a string override conflicts": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V string `json:"v" jsonschema:"type=string,minimum=5"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			err: "numeric constraint conflicts with type=string",
+		},
+		"pattern after an integer override conflicts": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V int `json:"v" jsonschema:"type=integer,pattern=^x$"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			err: "string constraint conflicts with type=integer",
+		},
+		"uniqueItems after a string override conflicts": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V string `json:"v" jsonschema:"type=string,uniqueItems=true"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			err: "array constraint conflicts with type=string",
+		},
 	}
 
 	for name, tc := range tests {

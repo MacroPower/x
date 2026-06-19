@@ -127,8 +127,10 @@ func applyJSONSchemaTag(tag string, fieldType reflect.Type, s *Schema) error {
 
 		// A type= override drops the constraint groups the new type cannot use.
 		// Dropping the keywords derived from the Go kind is intended, but a
-		// keyword an earlier tag pair set is the author's explicit input, so
-		// report the conflict rather than discarding it silently.
+		// keyword the tag set explicitly is the author's input, so report the
+		// conflict rather than discarding it silently. This in-loop check catches
+		// a conflicting keyword set before type=; one set after type= records its
+		// group only on the next iteration, so a post-loop check covers it.
 		if key == KeywordType && validTypeName(value) {
 			if g := conflictingGroup(groupsSet, value); g != "" {
 				return fmt.Errorf("jsonschema tag: %s constraint conflicts with type=%s", g, value)
@@ -147,6 +149,16 @@ func applyJSONSchemaTag(tag string, fieldType reflect.Type, s *Schema) error {
 		if key == KeywordType {
 			scalarType = standInTypeFor(value)
 			overriddenType = value
+		}
+	}
+
+	// Re-check the final override against every constraint group set across the
+	// whole tag, so a conflicting keyword placed after type= is reported with the
+	// same error as one placed before it (the in-loop guard runs before the group
+	// is recorded, so it cannot see the later ordering).
+	if overriddenType != "" {
+		if g := conflictingGroup(groupsSet, overriddenType); g != "" {
+			return fmt.Errorf("jsonschema tag: %s constraint conflicts with type=%s", g, overriddenType)
 		}
 	}
 

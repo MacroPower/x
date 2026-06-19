@@ -367,11 +367,12 @@
 // numeric bounds derived from the Go kind. A pointer [time.Duration] field
 // with jsonschema:"type=string,pattern=..." therefore produces a clean string
 // schema without needing [JSONSchemaExtender]. Tag pairs apply in order;
-// keys after type= still take effect. A numeric bound (minimum, maximum,
-// exclusiveMinimum, exclusiveMaximum, multipleOf) set by an earlier tag pair
-// and then dropped by a non-numeric type= override is the author's explicit
-// input, so the combination is reported as an error rather than silently
-// discarded.
+// keys after type= still take effect. A constraint keyword the tag sets
+// explicitly (a numeric bound such as minimum or multipleOf, or a string,
+// array, or object constraint) is the author's input, so combining it with a
+// type= override whose JSON type cannot use it is reported as an error rather
+// than silently discarded. This holds regardless of whether the keyword
+// appears before or after the type= pair.
 //
 // Values for default, const, enum, and examples are parsed using type-aware
 // parsing based on the field's Go type. Enum and examples values are
