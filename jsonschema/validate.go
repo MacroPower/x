@@ -962,7 +962,8 @@ func detectDraft(s *Schema) Draft {
 		"https://json-schema.org/draft-07/schema#",
 		"https://json-schema.org/draft-07/schema":
 		return Draft7
-	case Draft2020.schemaURI():
+	case Draft2020.schemaURI(),
+		"https://json-schema.org/draft/2020-12/schema#":
 		return Draft2020
 	default:
 		return Draft2020
