@@ -919,9 +919,11 @@ func resolveURI(base, ref string) string {
 	if baseURL.Opaque != "" && refURL.Scheme == "" && refURL.Opaque == "" &&
 		refURL.Host == "" && refURL.Path != "" {
 		resolved := url.URL{
-			Scheme:   baseURL.Scheme,
-			Opaque:   mergeOpaquePath(baseURL.Opaque, refURL.Path),
-			Fragment: refURL.Fragment,
+			Scheme:     baseURL.Scheme,
+			Opaque:     mergeOpaquePath(baseURL.Opaque, refURL.Path),
+			RawQuery:   refURL.RawQuery,
+			ForceQuery: refURL.ForceQuery,
+			Fragment:   refURL.Fragment,
 		}
 
 		return resolved.String()
