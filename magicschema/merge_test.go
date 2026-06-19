@@ -171,6 +171,26 @@ func TestMergeMultipleInputs(t *testing.T) {
 				// "no type constraint".
 			},
 		},
+		"one-sided items drops the constraint (fail open)": {
+			// A typed list merged with an empty list: the empty side places
+			// no items constraint, so the union must accept any element. A
+			// one-sided items schema grafted onto the union would fail closed,
+			// rejecting elements the empty side accepted.
+			inputA: "list:\n  - hello\n  - world\n",
+			inputB: "list: []\n",
+			check: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				list, ok := props["list"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "array", list["type"])
+				assert.Nil(t, list["items"], "a one-sided items constraint must not survive the union")
+			},
+		},
 		"incompatible widen drops object constraints": {
 			// When object + string widens away the type, the object-specific
 			// keywords must drop too: a schema with properties but no type
