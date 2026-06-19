@@ -113,9 +113,35 @@ func (a *Annotator) parseBlock(content, fullComment string) *magicschema.Annotat
 	return result
 }
 
-// parseRootBlock parses @schema.root content into the root schema.
-//
-//nolint:goconst // JSON Schema field names repeated intentionally across switch cases
+// rootAllowedKeys is the subset of @schema fields a @schema.root block
+// propagates to the document-level schema. Type-, value-, and structure-level
+// keywords are intentionally excluded; x-* extensions are allowed by prefix
+// (see rootAllowed).
+var rootAllowedKeys = map[string]struct{}{
+	"title":                {},
+	"description":          {},
+	"$ref":                 {},
+	"examples":             {},
+	"deprecated":           {},
+	"readOnly":             {},
+	"writeOnly":            {},
+	"additionalProperties": {},
+}
+
+// rootAllowed reports whether a @schema.root key propagates to the
+// document-level schema.
+func rootAllowed(key string) bool {
+	if _, ok := rootAllowedKeys[key]; ok {
+		return true
+	}
+
+	return strings.HasPrefix(key, "x-")
+}
+
+// parseRootBlock parses @schema.root content into the root schema. Only the
+// documented rootAllowed subset propagates; each allowed key is dispatched
+// through applyField so its handling stays identical to a property-level
+// @schema block rather than a second copy that can drift.
 func (a *Annotator) parseRootBlock(content string) {
 	var raw map[string]any
 
@@ -128,32 +154,13 @@ func (a *Annotator) parseRootBlock(content string) {
 
 	schema := &jsonschema.Schema{}
 
-	// Only propagate a subset of fields from root blocks.
-	for key, val := range raw {
-		switch key {
-		case "title":
-			schema.Title = toString(val)
-		case "description":
-			schema.Description = toString(val)
-		case "$ref":
-			schema.Ref = toString(val)
-		case "examples":
-			if arr, ok := val.([]any); ok {
-				schema.Examples = magicschema.FilterJSONSafe(arr)
-			}
+	// A throwaway result captures applyField's required/skip signals, which no
+	// rootAllowed key sets, so root blocks contribute none.
+	result := &magicschema.AnnotationResult{Schema: schema}
 
-		case "deprecated":
-			schema.Deprecated = toBool(val)
-		case "readOnly":
-			schema.ReadOnly = toBool(val)
-		case "writeOnly":
-			schema.WriteOnly = toBool(val)
-		case "additionalProperties":
-			schema.AdditionalProperties = toAdditionalProperties(val)
-		default:
-			if strings.HasPrefix(key, "x-") {
-				setExtra(schema, key, val)
-			}
+	for key, val := range raw {
+		if rootAllowed(key) {
+			a.applyField(schema, result, key, val)
 		}
 	}
 
