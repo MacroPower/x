@@ -306,7 +306,6 @@ type validator struct {
 	// lookups consult the shared registry first and these second.
 	fallbackURIRegistry    map[string]*Schema
 	fallbackAnchorRegistry map[string]*Schema
-	fallbackDynamicAnchors map[string]*Schema
 	fallbackBaseURIs       map[*Schema]string
 
 	// The WithDraft override; nil leaves the draft to $schema detection.
@@ -405,7 +404,6 @@ func (v *validator) forInstance(ctx context.Context) *validator {
 	rv.refCache = nil
 	rv.fallbackURIRegistry = nil
 	rv.fallbackAnchorRegistry = nil
-	rv.fallbackDynamicAnchors = nil
 	rv.fallbackBaseURIs = nil
 	rv.refResolveErr = nil
 
@@ -4734,13 +4732,15 @@ func (v *validator) registerFallbackSchema(s *Schema, base string) {
 	if v.fallbackBaseURIs == nil {
 		v.fallbackURIRegistry = map[string]*Schema{}
 		v.fallbackAnchorRegistry = map[string]*Schema{}
-		v.fallbackDynamicAnchors = map[string]*Schema{}
 		v.fallbackBaseURIs = map[*Schema]string{}
 	}
 
+	// $dynamicAnchor registrations are deliberately not carried into the fallback
+	// scope: lookupDynamicAnchor resolves only against the shared registry, so a
+	// dynamic anchor a fallback materialized cannot pollute an unrelated
+	// $dynamicRef's dynamic scope.
 	maps.Copy(v.fallbackURIRegistry, scratch.uriRegistry)
 	maps.Copy(v.fallbackAnchorRegistry, scratch.anchorRegistry)
-	maps.Copy(v.fallbackDynamicAnchors, scratch.dynamicAnchorRegistry)
 	maps.Copy(v.fallbackBaseURIs, scratch.baseURIs)
 }
 
@@ -4779,14 +4779,12 @@ func (v *validator) lookupAnchor(key string) (*Schema, bool) {
 }
 
 // lookupDynamicAnchor resolves a baseURI#name key against $dynamicAnchor
-// registrations, consulting the shared registry first and the per-run fallback
-// registrations second.
+// registrations in the shared compile-time registry only. Unlike URI and anchor
+// lookups it does not consult the per-run JSON-pointer fallback: a $dynamicAnchor
+// that a fallback materialized for an unrelated ref is outside the dynamic scope
+// of any $dynamicRef and must not be selectable as its target.
 func (v *validator) lookupDynamicAnchor(key string) (*Schema, bool) {
-	if s, ok := v.dynamicAnchorRegistry[key]; ok {
-		return s, true
-	}
-
-	s, ok := v.fallbackDynamicAnchors[key]
+	s, ok := v.dynamicAnchorRegistry[key]
 
 	return s, ok
 }
