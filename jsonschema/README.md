@@ -425,6 +425,13 @@ schemas, so `Days []string` with `enum=monday|tuesday` produces
 fields, as is `enum` on `[]byte` (which encodes as a base64 string with no
 item schema).
 
+A `const` or `enum` makes the kind-derived numeric bounds (an `int8`'s
+`minimum`/`maximum`, for instance) redundant, so they are dropped. A `const`
+also subsumes an explicit bound the tag sets, since it pins a single value, so
+that bound is dropped too. An `enum` only restricts the value to a set, so an
+explicit bound the tag sets narrows it further and is kept:
+`enum=10|20,minimum=15` keeps `minimum` and so admits only `20`.
+
 ### Struct field rules
 
 Fields follow `encoding/json` conventions: the `json` tag sets the property

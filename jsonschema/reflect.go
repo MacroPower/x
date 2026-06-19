@@ -1444,7 +1444,7 @@ func (g *generator) buildFieldSchema(parentType reflect.Type, fi structFieldInfo
 
 	// 3. Schema struct tag.
 	if tag, ok := fi.field.Tag.Lookup("jsonschema"); ok {
-		err := applyJSONSchemaTag(tag, tagType, fieldSchema)
+		boundAuthored, err := applyJSONSchemaTag(tag, tagType, fieldSchema)
 		if err != nil {
 			return nil, fmt.Errorf("jsonschema tag: %w", err)
 		}
@@ -1453,9 +1453,10 @@ func (g *generator) buildFieldSchema(parentType reflect.Type, fi structFieldInfo
 		// annotations kept as siblings of anyOf. Const and enum test the instance
 		// value regardless of its type, so on the wrapper they also reject the
 		// permitted null; relocate them onto the value branch and drop the now-
-		// redundant type-derived numeric bounds. Type-gated keywords such as
-		// pattern do not apply to null and stay put.
-		dropTypeBoundsForConstEnum(fieldSchema)
+		// redundant numeric bounds. An author-set bound combined with enum is
+		// kept (it narrows the enum). Type-gated keywords such as pattern do not
+		// apply to null and stay put.
+		dropTypeBoundsForConstEnum(fieldSchema, boundAuthored)
 	}
 
 	// Add to parent.
@@ -1501,8 +1502,11 @@ func (g *generator) applyFieldInterpreters(
 	fi structFieldInfo,
 	fieldSchema, parent *Schema,
 ) error {
+	ranInterpreter := false
+
 	for _, reg := range g.tagInterpreters {
 		if tag, ok := fi.field.Tag.Lookup(reg.key); ok {
+			ranInterpreter = true
 			fc := g.fieldContext(parentType, fi, fieldSchema, parent)
 
 			err := reg.interp.Interpret(g.ctx, fc, Tag{Key: reg.key, Value: tag})
@@ -1512,12 +1516,19 @@ func (g *generator) applyFieldInterpreters(
 		}
 	}
 
-	// Interpreters set Const/Enum on the field schema, which for a nullable
+	// An interpreter may set Const/Enum on the field schema, which for a nullable
 	// pointer field is the anyOf wrapper. Const and enum test the instance value
 	// regardless of its type, so on the wrapper they reject the permitted null;
 	// relocate them onto the value branch and drop the now-redundant type-derived
-	// numeric bounds, matching the jsonschema-tag path in buildFieldSchema.
-	dropTypeBoundsForConstEnum(fieldSchema)
+	// numeric bounds, matching the jsonschema-tag path in buildFieldSchema. The
+	// interpreter API exposes no per-keyword provenance, so an interpreter-set
+	// bound cannot be distinguished from a kind-derived one and is dropped. This
+	// runs only when an interpreter touched the field; otherwise buildFieldSchema
+	// already dropped with the jsonschema tag's provenance, and re-dropping here
+	// would discard a bound that tag deliberately kept alongside an enum.
+	if ranInterpreter {
+		dropTypeBoundsForConstEnum(fieldSchema, false)
+	}
 
 	// Wrap bare $ref with allOf for Draft-07 if annotations were added. This
 	// mutates the schema in place, so the entry already in parent.Properties
@@ -1806,13 +1817,25 @@ func clearNumericBounds(s *Schema) {
 }
 
 // dropTypeBoundsForConstEnum relocates a nullable pointer's const/enum onto the
-// value branch, then drops the type-derived numeric bounds once a const or enum
-// pins the value. The bounds may sit on the relocated value branch or, for a
-// nullable pointer, on the anyOf/type-list wrapper, so both are cleared. The
-// jsonschema-tag path and the tag-interpreter path share this policy.
-func dropTypeBoundsForConstEnum(fieldSchema *Schema) {
+// value branch, then drops the redundant numeric bounds. The bounds may sit on
+// the relocated value branch or, for a nullable pointer, on the anyOf/type-list
+// wrapper, so both are cleared.
+//
+// A const fully pins the value, so every bound it carries is subsumed and
+// dropped, even one the author set explicitly. An enum only restricts the value
+// to a set, so an author-set bound narrows it further (enum ∩ bound) and is kept
+// (boundAuthored); only the kind-derived bounds an enum makes redundant are
+// dropped. The tag-interpreter path passes boundAuthored false: it has no
+// per-keyword provenance, so it keeps the prior drop-all behavior.
+func dropTypeBoundsForConstEnum(fieldSchema *Schema, boundAuthored bool) {
 	target := relocateConstEnumToValueBranch(fieldSchema)
-	if target.Const != nil || target.Enum != nil {
+
+	switch {
+	case target.Const != nil:
+		clearNumericBounds(target)
+		clearNumericBounds(fieldSchema)
+
+	case target.Enum != nil && !boundAuthored:
 		clearNumericBounds(target)
 		clearNumericBounds(fieldSchema)
 	}

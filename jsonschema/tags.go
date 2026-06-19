@@ -87,22 +87,24 @@ func isKeyValueTag(pairs []string) bool {
 // type= keeps Go-kind parsing while one after it parses as the overridden
 // type. The non-scalar overrides (array, object, null) have no stand-in, so a
 // scalar key following one is an error.
-func applyJSONSchemaTag(tag string, fieldType reflect.Type, s *Schema) error {
+func applyJSONSchemaTag(tag string, fieldType reflect.Type, s *Schema) (bool, error) {
 	if tag == "" {
-		return nil
+		return false, nil
 	}
 
 	// Gate on the cheap regex before paying for splitTagPairs, then split once
 	// and reuse the pairs for both the key-value decision and the apply loop.
 	if !kvPrefixRegexp.MatchString(tag) {
 		s.Description = tag
-		return nil
+
+		return false, nil
 	}
 
 	pairs := splitTagPairs(tag)
 	if !isKeyValueTag(pairs) {
 		s.Description = tag
-		return nil
+
+		return false, nil
 	}
 
 	scalarType := fieldType
@@ -110,20 +112,21 @@ func applyJSONSchemaTag(tag string, fieldType reflect.Type, s *Schema) error {
 	var (
 		overriddenType string
 		groupsSet      = map[string]bool{}
+		boundAuthored  bool
 	)
 
 	for _, pair := range pairs {
 		key, value, found := strings.Cut(pair, "=")
 		if !found {
-			return fmt.Errorf("jsonschema tag: segment %q missing '='", pair)
+			return false, fmt.Errorf("jsonschema tag: segment %q missing '='", pair)
 		}
 
 		if key == "" {
-			return fmt.Errorf("jsonschema tag: empty key in %q", pair)
+			return false, fmt.Errorf("jsonschema tag: empty key in %q", pair)
 		}
 
 		if scalarType == nil && isScalarValueKey(key) {
-			return fmt.Errorf("jsonschema tag: key %q cannot follow type=%s", key, overriddenType)
+			return false, fmt.Errorf("jsonschema tag: key %q cannot follow type=%s", key, overriddenType)
 		}
 
 		// A type= override drops the constraint groups the new type cannot use.
@@ -134,17 +137,21 @@ func applyJSONSchemaTag(tag string, fieldType reflect.Type, s *Schema) error {
 		// group only on the next iteration, so a post-loop check covers it.
 		if key == KeywordType && validTypeName(value) {
 			if g := conflictingGroup(groupsSet, value); g != "" {
-				return fmt.Errorf("jsonschema tag: %s constraint conflicts with type=%s", g, value)
+				return false, fmt.Errorf("jsonschema tag: %s constraint conflicts with type=%s", g, value)
 			}
 		}
 
 		err := applyTagKeyValue(key, value, scalarType, s)
 		if err != nil {
-			return err
+			return false, err
 		}
 
 		if g := constraintGroup(key); g != "" {
 			groupsSet[g] = true
+		}
+
+		if isNumericBoundKey(key) {
+			boundAuthored = true
 		}
 
 		if key == KeywordType {
@@ -159,11 +166,23 @@ func applyJSONSchemaTag(tag string, fieldType reflect.Type, s *Schema) error {
 	// is recorded, so it cannot see the later ordering).
 	if overriddenType != "" {
 		if g := conflictingGroup(groupsSet, overriddenType); g != "" {
-			return fmt.Errorf("jsonschema tag: %s constraint conflicts with type=%s", g, overriddenType)
+			return false, fmt.Errorf("jsonschema tag: %s constraint conflicts with type=%s", g, overriddenType)
 		}
 	}
 
-	return nil
+	return boundAuthored, nil
+}
+
+// isNumericBoundKey reports whether key is one of the four range-bound keywords
+// that [clearNumericBounds] drops, used to tell an author-set bound (kept when
+// it narrows an enum) from a kind-derived one (always redundant once pinned).
+func isNumericBoundKey(key string) bool {
+	switch key {
+	case KeywordMinimum, KeywordMaximum, KeywordExclusiveMinimum, KeywordExclusiveMaximum:
+		return true
+	default:
+		return false
+	}
 }
 
 // isScalarValueKey reports whether a jsonschema tag key carries scalar values

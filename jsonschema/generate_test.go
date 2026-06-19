@@ -2587,6 +2587,33 @@ func TestGenerateFor_NullablePointerConstDropsTypeBounds(t *testing.T) {
 		"a non-const value is rejected")
 }
 
+func TestGenerateFor_EnumKeepsAuthoredBound(t *testing.T) {
+	t.Parallel()
+
+	// An explicit numeric bound combined with enum narrows the enum (enum ∩
+	// bound) rather than being redundant, so unlike a const the author's bound
+	// survives. Here 10 is in the enum but below the minimum, leaving only 20.
+	type Container struct {
+		Score int `json:"score" jsonschema:"enum=10|20,minimum=15"`
+	}
+
+	s, err := jsonschema.GenerateFor[Container](t.Context())
+	require.NoError(t, err)
+
+	field := s.Properties["score"]
+	require.NotNil(t, field)
+	require.NotNil(t, field.Minimum, "the author-set minimum must survive alongside enum")
+	assert.InEpsilon(t, 15.0, *field.Minimum, 0)
+
+	validator, err := jsonschema.Compile(t.Context(), s)
+	require.NoError(t, err)
+
+	require.Error(t, validator.ValidateJSON(t.Context(), []byte(`{"score": 10}`)),
+		"10 is in the enum but below the minimum, so it is rejected")
+	require.NoError(t, validator.ValidateJSON(t.Context(), []byte(`{"score": 20}`)),
+		"20 satisfies both the enum and the minimum")
+}
+
 func TestGenerateFor_AllofPrefixFieldNotMisclassified(t *testing.T) {
 	t.Parallel()
 
