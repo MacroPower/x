@@ -3617,13 +3617,18 @@ func hashValue(v any) uint64 {
 			return numHash(int64(val))
 		}
 
-		// Non-finite floats have no big.Rat form: SetFloat64 returns nil and
-		// leaves the rational at 0/1, so jsonschema.Equal (and thus
-		// equalJSONValues) treats every NaN/Inf as equal to each other and to
-		// numeric zero. Hash them to numHash(0) so equal values share a bucket,
-		// keeping uniqueItems consistent (and panic-free).
-		if math.IsInf(val, 0) || math.IsNaN(val) {
-			return numHash(0)
+		// Non-finite floats (NaN, ±Inf) have no big.Rat form, and equalJSONValues
+		// short-circuits them to never-equal (even to themselves), so they need
+		// not share a bucket. Give each a distinct constant so they avoid
+		// colliding with numeric zero and each other, sparing the wasted equality
+		// comparisons that a shared bucket would force.
+		switch {
+		case math.IsNaN(val):
+			return 0x9e3779b97f4a7c15
+		case math.IsInf(val, 1):
+			return 0x9e3779b97f4a7c16
+		case math.IsInf(val, -1):
+			return 0x9e3779b97f4a7c17
 		}
 
 		r := new(big.Rat).SetFloat64(val)
