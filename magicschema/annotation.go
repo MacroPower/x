@@ -132,12 +132,16 @@ func copySchema(s *jsonschema.Schema) *jsonschema.Schema {
 // mergeSchemaFields merges fields from src into dst where dst has zero values.
 // Dst has higher priority; src fills in gaps.
 func mergeSchemaFields(dst, src *jsonschema.Schema) {
-	// Fill the type from the lower-priority src only when it does not
-	// contradict a value set the higher-priority dst already carries. Grafting
-	// type:string onto an existing const:5 (or an integer enum) would leave a
-	// schema no value satisfies (fail closed) -- the mirror of the enum/const
-	// fill guard below, which the type fill must apply in the other direction.
+	// Fill the type from the lower-priority src only when src actually carries
+	// one and it does not contradict a value set the higher-priority dst already
+	// carries. Requiring a real src type keeps a non-nil but empty src.Types from
+	// being grafted on: it would emit an invalid "type": [] and, once structural
+	// inference fills Type, set both Type and Types and break the document's
+	// final marshal. Grafting type:string onto an existing const:5 (or an integer
+	// enum) would instead leave a schema no value satisfies (fail closed) -- the
+	// mirror of the enum/const fill guard below.
 	if dst.Type == "" && len(dst.Types) == 0 &&
+		(src.Type != "" || len(src.Types) > 0) &&
 		valueSetFitsType(enumValues(dst), &jsonschema.Schema{Type: src.Type, Types: src.Types}) {
 		dst.Type = src.Type
 		dst.Types = src.Types

@@ -80,6 +80,45 @@ func TestGeneratorAnnotatorTypeFillRespectsValueSet(t *testing.T) {
 	}
 }
 
+func TestGeneratorAnnotatorEmptyTypesNotGrafted(t *testing.T) {
+	t.Parallel()
+
+	// A lower-priority annotator returns a non-nil but empty Types slice.
+	// Grafting it onto a higher-priority schema with no type would set Types to
+	// the empty slice; structural inference then fills Type, leaving both Type
+	// and Types set, which the jsonschema marshaler rejects. The empty slice
+	// must not be grafted, so structural inference alone supplies the type.
+	high := stubAnnotator{
+		name:   "high",
+		result: &magicschema.AnnotationResult{Schema: &jsonschema.Schema{Description: "desc"}},
+	}
+	low := stubAnnotator{
+		name:   "low",
+		result: &magicschema.AnnotationResult{Schema: &jsonschema.Schema{Types: []string{}}},
+	}
+
+	gen := magicschema.NewGenerator(magicschema.WithAnnotators(high, low))
+
+	schema, err := gen.Generate([]byte("key: value\n"))
+	require.NoError(t, err)
+
+	out, err := json.Marshal(schema)
+	require.NoError(t, err)
+
+	var got map[string]any
+
+	require.NoError(t, json.Unmarshal(out, &got))
+
+	props, ok := got["properties"].(map[string]any)
+	require.True(t, ok)
+
+	prop, ok := props["key"].(map[string]any)
+	require.True(t, ok)
+
+	assert.Equal(t, "string", prop["type"])
+	assert.Equal(t, "desc", prop["description"])
+}
+
 func TestGeneratorAnnotatorRootKeywordsMerge(t *testing.T) {
 	t.Parallel()
 
