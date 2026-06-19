@@ -1175,18 +1175,19 @@ func dropEmptyDocuments(input []byte) []byte {
 
 // splitDocumentBytes splits a normalized, empty-document-stripped YAML stream
 // into per-document byte slices in source order, intended to align 1:1 with
-// parser.ParseBytes's file.Docs. Documents are separated by bare "---" lines
-// (see [isSeparatorLine]); a leading separator opens the stream with a blank
-// segment that corresponds to no document and is dropped. Callers guard on the
-// returned length matching the parsed document count and fall back to the whole
-// input when it does not, so an imperfect split never changes behavior.
+// parser.ParseBytes's file.Docs. Documents are separated by bare "---" start
+// markers or "..." end markers (see [isDocBoundaryLine]); a leading separator
+// opens the stream with a blank segment that corresponds to no document and is
+// dropped. Callers guard on the returned length matching the parsed document
+// count and fall back to the whole input when it does not, so an imperfect
+// split (an empty document, or "..." abutting "---") never changes behavior.
 func splitDocumentBytes(input []byte) [][]byte {
 	lines := bytes.Split(input, []byte("\n"))
 
 	segments := [][][]byte{nil}
 
 	for _, line := range lines {
-		if isSeparatorLine(line) {
+		if isDocBoundaryLine(line) {
 			segments = append(segments, nil)
 
 			continue
@@ -1225,6 +1226,18 @@ func normalizeLineEndings(input []byte) []byte {
 // ("--- value") opens a non-empty document and is not bare.
 func isSeparatorLine(line []byte) bool {
 	return bytes.Equal(bytes.TrimRight(line, " \t\r"), []byte("---"))
+}
+
+// isDocBoundaryLine reports whether a line is a bare YAML document delimiter:
+// the "---" start marker or the "..." end marker. Either separates two
+// documents, so splitting on both keeps the per-document byte segments aligned
+// with the parsed document list for "..."-delimited streams. It is kept
+// distinct from [isSeparatorLine] because the two markers collapse differently
+// when an empty document is dropped.
+func isDocBoundaryLine(line []byte) bool {
+	trimmed := bytes.TrimRight(line, " \t\r")
+
+	return bytes.Equal(trimmed, []byte("---")) || bytes.Equal(trimmed, []byte("..."))
 }
 
 // isBlank returns true if the byte slice contains only whitespace.
