@@ -311,6 +311,52 @@ func setExtra(schema *jsonschema.Schema, key string, val any) {
 	schema.Extra[key] = val
 }
 
+// schemaLineKind classifies a comment line's role in the @schema/@schema.root
+// delimiter grammar, after the comment marker is stripped and the remainder
+// fully trimmed.
+type schemaLineKind int
+
+const (
+	// A line that is not a @schema or @schema.root marker.
+	schemaLinePlain schemaLineKind = iota
+	// A bare "@schema.root" block delimiter.
+	schemaLineRoot
+	// A bare "@schema" block delimiter, including a junk suffix such as
+	// "@schema@" that upstream still treats as a delimiter.
+	schemaLineSchema
+	// A @schema- or @schema.root-prefixed line that is not a delimiter --
+	// trailing content or the whitespace-separated helm-values-schema inline
+	// form -- so it is never collected as block content.
+	schemaLineInline
+)
+
+// classifySchemaLine reports the delimiter role of a stripped, fully trimmed
+// comment line. The three block extractors share it so the grammar -- which
+// bare markers delimit a block, and which @schema-prefixed lines are the inline
+// form rather than a delimiter -- lives in one place; each extractor still
+// applies its own block-state transitions. The "@schema.root" literal must be
+// contiguous and bare: "@schema .root" with a space is the inline form, and
+// trailing content after either marker is inline rather than a delimiter.
+func classifySchemaLine(trimmed string) schemaLineKind {
+	if after, ok := strings.CutPrefix(trimmed, "@schema.root"); ok {
+		if strings.TrimSpace(after) == "" {
+			return schemaLineRoot
+		}
+
+		return schemaLineInline
+	}
+
+	if after, ok := strings.CutPrefix(trimmed, "@schema"); ok {
+		if isDelimiterSuffix(after) {
+			return schemaLineSchema
+		}
+
+		return schemaLineInline
+	}
+
+	return schemaLinePlain
+}
+
 // extractSchemaBlock extracts the content between # @schema delimiters.
 // Multiple @schema blocks in the same comment are concatenated (toggle behavior).
 // Content inside @schema.root blocks is excluded.
@@ -329,41 +375,28 @@ func extractSchemaBlock(comment string) string {
 		stripped := magicschema.StripCommentMarker(line)
 		trimmed := strings.TrimSpace(stripped)
 
-		// Check for @schema.root delimiter (toggle root block state).
-		// Lines with trailing content are not delimiters and are skipped.
-		// Inside an open @schema block the marker is junk content, not a
-		// delimiter: toggling there would swallow the rest of the block.
-		if after, ok := strings.CutPrefix(trimmed, "@schema.root"); ok {
-			if !inBlock && strings.TrimSpace(after) == "" {
+		switch classifySchemaLine(trimmed) {
+		case schemaLineRoot:
+			// Inside an open @schema block the marker is junk content, not a
+			// delimiter: toggling there would swallow the rest of the block.
+			if !inBlock {
 				inRootBlock = !inRootBlock
 			}
 
-			continue
-		}
+		case schemaLineSchema:
+			// Toggle delimiter -- supports multiple blocks. A @schema delimiter
+			// also ends an unclosed @schema.root block, so a missing root close
+			// cannot swallow every following schema block.
+			inRootBlock = false
+			inBlock = !inBlock
 
-		if after, ok := strings.CutPrefix(trimmed, "@schema"); ok {
-			if isDelimiterSuffix(after) {
-				// Toggle delimiter -- supports multiple blocks. A
-				// @schema delimiter also ends an unclosed @schema.root
-				// block, so a missing root close cannot swallow every
-				// following schema block.
-				inRootBlock = false
-				inBlock = !inBlock
+		case schemaLineInline:
+			// Not a delimiter (inline helm-values-schema form), never collected.
+
+		default: // schemaLinePlain
+			if inBlock && !inRootBlock {
+				content = append(content, stripped)
 			}
-
-			// Otherwise @schema with whitespace-separated content on the
-			// same line -- not this annotator (that's helm-values-schema
-			// inline format).
-			continue
-		}
-
-		// Skip lines inside @schema.root blocks.
-		if inRootBlock {
-			continue
-		}
-
-		if inBlock {
-			content = append(content, stripped)
 		}
 	}
 
@@ -384,55 +417,47 @@ func extractSchemaRootBlock(comment string) string {
 		content       []string
 	)
 
+scan:
 	for _, line := range lines {
 		// Strip once; markers match on a fully trimmed copy while content
 		// keeps its indentation beyond the marker and single space.
 		stripped := magicschema.StripCommentMarker(line)
 		trimmed := strings.TrimSpace(stripped)
 
-		if after, ok := strings.CutPrefix(trimmed, "@schema.root"); ok {
-			rest := strings.TrimSpace(after)
-			if rest != "" {
-				// @schema.root with trailing content -- skip.
-				continue
-			}
-
-			// Inside an open @schema block the marker is junk content,
-			// not a delimiter, mirroring extractSchemaBlock.
+		switch classifySchemaLine(trimmed) {
+		case schemaLineRoot:
+			// Inside an open @schema block the marker is junk content, not a
+			// delimiter, mirroring extractSchemaBlock.
 			if inSchemaBlock {
 				continue
 			}
 
 			if inBlock {
-				break // Closing delimiter.
+				break scan // Closing delimiter -- only the first root block.
 			}
 
 			inBlock = true
 
-			continue
-		}
-
-		// A @schema delimiter ends an unclosed root block (root content
-		// cannot extend into schema blocks) and otherwise toggles
-		// schema-block state so root markers inside a schema block are
-		// ignored as junk. An inline "@schema key:value" (helm-values-schema
-		// format) is not a delimiter, but it is still skipped rather than
-		// appended, mirroring extractSchemaBlock: letting it land in the root
-		// YAML would make goccy reject the whole block as invalid.
-		if after, ok := strings.CutPrefix(trimmed, "@schema"); ok {
-			if isDelimiterSuffix(after) {
-				if inBlock {
-					break
-				}
-
-				inSchemaBlock = !inSchemaBlock
+		case schemaLineSchema:
+			// A @schema delimiter ends an unclosed root block (root content
+			// cannot extend into schema blocks) and otherwise toggles
+			// schema-block state so root markers inside a schema block are
+			// ignored as junk.
+			if inBlock {
+				break scan
 			}
 
-			continue
-		}
+			inSchemaBlock = !inSchemaBlock
 
-		if inBlock {
-			content = append(content, stripped)
+		case schemaLineInline:
+			// An inline "@schema key:value" is not a delimiter, but it is still
+			// skipped rather than appended: letting it land in the root YAML
+			// would make goccy reject the whole block as invalid.
+
+		default: // schemaLinePlain
+			if inBlock {
+				content = append(content, stripped)
+			}
 		}
 	}
 
@@ -463,47 +488,36 @@ func extractNonAnnotationDescription(comment string) string {
 		content := magicschema.StripCommentMarker(line)
 		stripped := strings.TrimSpace(content)
 
-		// Check for @schema.root delimiter (toggle root block state).
-		// The contiguous "@schema.root" literal is required, matching
-		// extractSchemaBlock and extractSchemaRootBlock: a space-separated
-		// "@schema .root" is the helm-values-schema inline form, not a
-		// delimiter. Trimming the suffix before matching ".root" here would
-		// misread that inline form as a root delimiter and skip every
-		// following line as block content, dropping the real description.
-		// Inside an open @schema block the marker is junk content, not a
-		// delimiter.
-		if after, ok := strings.CutPrefix(stripped, "@schema.root"); ok {
-			if !inSchemaBlock && strings.TrimSpace(after) == "" {
+		switch classifySchemaLine(stripped) {
+		case schemaLineRoot:
+			// Inside an open @schema block the marker is junk content, not a
+			// delimiter.
+			if !inSchemaBlock {
 				inRootBlock = !inRootBlock
 			}
 
-			continue
-		}
+		case schemaLineSchema:
+			// A @schema delimiter also ends an unclosed @schema.root block.
+			inRootBlock = false
+			inSchemaBlock = !inSchemaBlock
 
-		if after, ok := strings.CutPrefix(stripped, "@schema"); ok {
-			// @schema delimiter. It also ends an unclosed @schema.root block.
-			if isDelimiterSuffix(after) {
-				inRootBlock = false
-				inSchemaBlock = !inSchemaBlock
+		case schemaLineInline:
+			// Inline helm-values-schema content -- skipped, not a description.
+
+		default: // schemaLinePlain
+			if inSchemaBlock || inRootBlock {
+				continue
 			}
 
-			// Otherwise @schema with whitespace-separated inline content
-			// (helm-values-schema format) -- skip.
-			continue
-		}
+			// Regular comment line: strip the helm-docs "-- " prefix off the
+			// indentation-preserving copy.
+			cleaned := strings.TrimPrefix(content, "-- ")
+			if magicschema.IsAnnotationComment(cleaned) {
+				continue
+			}
 
-		if inSchemaBlock || inRootBlock {
-			continue
+			descLines = append(descLines, cleaned)
 		}
-
-		// Regular comment line: strip the helm-docs "-- " prefix off the
-		// indentation-preserving copy.
-		cleaned := strings.TrimPrefix(content, "-- ")
-		if magicschema.IsAnnotationComment(cleaned) {
-			continue
-		}
-
-		descLines = append(descLines, cleaned)
 	}
 
 	// Keep only the last comment group, ignoring trailing blank lines so a
