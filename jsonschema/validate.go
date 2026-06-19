@@ -247,6 +247,24 @@ func (l schemaLocation) idx(i int) schemaLocation {
 	}
 }
 
+// leafError builds a terminal validation error at the given instance location
+// and the keyword token under the given schema location, copying both path
+// representations from the typed locations so the four private path fields can
+// never be mismatched at a call site. It is a fresh value each call, keeping
+// validation safe to run concurrently on a shared [Validator].
+func leafError(instancePath instanceLocation, schemaPath schemaLocation, keyword, msg string) *ValidationError {
+	kwPath := schemaPath.kw(keyword)
+
+	return &ValidationError{
+		InstancePath: instancePath.ptr,
+		segments:     instancePath.segs,
+		SchemaPath:   kwPath.ptr,
+		schemaSegs:   kwPath.segs,
+		Keyword:      keyword,
+		Message:      msg,
+	}
+}
+
 // builtinFormat adapts a bare value-checking function to [FormatValidator]
 // for the built-in formats, which use neither the context nor the name.
 type builtinFormat func(string) error
@@ -2433,16 +2451,10 @@ func (v *validator) validateType(
 
 	got := instanceType(instance)
 
-	kwPath := schemaPath.kw("type")
-
-	return []*ValidationError{{
-		InstancePath: instancePath.ptr,
-		segments:     instancePath.segs,
-		SchemaPath:   kwPath.ptr,
-		schemaSegs:   kwPath.segs,
-		Keyword:      KeywordType,
-		Message:      fmt.Sprintf("expected %s, got %q", formatTypes(types), got),
-	}}
+	return []*ValidationError{
+		leafError(instancePath, schemaPath, KeywordType,
+			fmt.Sprintf("expected %s, got %q", formatTypes(types), got)),
+	}
 }
 
 func formatTypes(types []string) string {
@@ -2489,16 +2501,9 @@ func (v *validator) validateEnum(
 		}
 	}
 
-	kwPath := schemaPath.kw("enum")
-
-	return []*ValidationError{{
-		InstancePath: instancePath.ptr,
-		segments:     instancePath.segs,
-		SchemaPath:   kwPath.ptr,
-		schemaSegs:   kwPath.segs,
-		Keyword:      KeywordEnum,
-		Message:      "value does not match any enum member",
-	}}
+	return []*ValidationError{
+		leafError(instancePath, schemaPath, KeywordEnum, "value does not match any enum member"),
+	}
 }
 
 // validateConst checks the const keyword.
@@ -2521,16 +2526,9 @@ func (v *validator) validateConst(
 		return nil
 	}
 
-	kwPath := schemaPath.kw("const")
-
-	return []*ValidationError{{
-		InstancePath: instancePath.ptr,
-		segments:     instancePath.segs,
-		SchemaPath:   kwPath.ptr,
-		schemaSegs:   kwPath.segs,
-		Keyword:      KeywordConst,
-		Message:      "value does not match const",
-	}}
+	return []*ValidationError{
+		leafError(instancePath, schemaPath, KeywordConst, "value does not match const"),
+	}
 }
 
 // equalSchemaInstance reports JSON-semantic equality between a schema-authored
@@ -3042,18 +3040,9 @@ func (v *validator) validateNumeric(
 	var errs []*ValidationError
 
 	// One error per failed bound, sharing the instance path and keyword
-	// schema-path location; mirrors validateNumericUnbounded's add closure.
+	// schema-path location.
 	add := func(keyword, msg string) {
-		kwPath := schemaPath.kw(keyword)
-
-		errs = append(errs, &ValidationError{
-			InstancePath: instancePath.ptr,
-			segments:     instancePath.segs,
-			SchemaPath:   kwPath.ptr,
-			schemaSegs:   kwPath.segs,
-			Keyword:      keyword,
-			Message:      msg,
-		})
+		errs = append(errs, leafError(instancePath, schemaPath, keyword, msg))
 	}
 
 	bounds := v.boundsFor(schema)
@@ -3141,16 +3130,7 @@ func (v *validator) validateNumericUnbounded(
 	var errs []*ValidationError
 
 	add := func(keyword, msg string) {
-		kwPath := schemaPath.kw(keyword)
-
-		errs = append(errs, &ValidationError{
-			InstancePath: instancePath.ptr,
-			segments:     instancePath.segs,
-			SchemaPath:   kwPath.ptr,
-			schemaSegs:   kwPath.segs,
-			Keyword:      keyword,
-			Message:      msg,
-		})
+		errs = append(errs, leafError(instancePath, schemaPath, keyword, msg))
 	}
 
 	// A non-positive multipleOf makes the schema invalid independent of the
