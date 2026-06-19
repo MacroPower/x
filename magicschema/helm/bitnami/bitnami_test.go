@@ -1293,9 +1293,8 @@ func TestBitnamiAnnotator(t *testing.T) {
 				n, ok := props["nullable"].(map[string]any)
 				require.True(t, ok)
 
-				types, ok := n["type"].([]any)
-				require.True(t, ok)
-				assert.Contains(t, types, "null")
+				// A lone "null" type collapses to the scalar form.
+				assert.Equal(t, "null", n["type"])
 				assert.Equal(t, "Nullable parameter", n["description"])
 			},
 		},
@@ -1505,8 +1504,8 @@ func TestBitnamiPrepare(t *testing.T) {
 				t.Helper()
 				require.NotNil(t, result)
 				require.NotNil(t, result.Schema)
-				assert.Equal(t, []string{"null"}, result.Schema.Types)
-				assert.Empty(t, result.Schema.Type)
+				assert.Equal(t, "null", result.Schema.Type)
+				assert.Empty(t, result.Schema.Types)
 			},
 		},
 		"default modifier value": {

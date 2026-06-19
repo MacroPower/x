@@ -118,7 +118,9 @@ func (a *Annotator) Annotate(_ ast.Node, keyPath string) *magicschema.Annotation
 			schema.Type = param.typeName
 		}
 	} else if param.nullable {
-		schema.Types = []string{"null"}
+		// A single type collapses to the scalar Type, like the other annotators
+		// and mergeSchemas, rather than a one-element ["null"] array.
+		schema.Type = "null"
 	}
 
 	if param.defaultVal != nil {
