@@ -156,7 +156,14 @@ func (g *generator) generate(t reflect.Type) (*Schema, error) {
 			if inlined != nil {
 				schema = inlined
 
+				// Drop the type's registration along with its def so the
+				// invariant "every typeToDefName entry has a live def" holds; a
+				// later re-resolution of rootType would otherwise produce a $ref
+				// to the deleted entry.
 				delete(g.defs, defName)
+				delete(g.typeToDefName, rootType)
+				delete(g.typeToDefSchema, rootType)
+				delete(g.defsNameToTypes, defName)
 			}
 		}
 	}
