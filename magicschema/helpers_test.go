@@ -27,6 +27,14 @@ func TestSetSchemaType(t *testing.T) {
 			types:     []string{"string", "null"},
 			wantTypes: []string{"string", "null"},
 		},
+		"duplicate type collapses to scalar": {
+			types:    []string{"string", "string"},
+			wantType: "string",
+		},
+		"duplicates drop while first-seen order is kept": {
+			types:     []string{"string", "null", "string"},
+			wantTypes: []string{"string", "null"},
+		},
 	}
 
 	for name, tc := range tcs {

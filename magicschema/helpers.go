@@ -240,7 +240,29 @@ func StripCommentMarker(line string) string {
 // carries both -- a combination the jsonschema marshaler rejects, which would
 // break the whole document's final marshal. An empty list leaves Type and Types
 // unset, so structural inference and the fail-open default still apply.
+//
+// Repeated entries are dropped while first-seen order is preserved: a JSON
+// Schema type array must have unique members, so a duplicate (type:
+// [string, string], or a type written twice across repeated pairs) collapses to
+// the scalar Type rather than emitting an array the spec rejects.
 func SetSchemaType(s *jsonschema.Schema, types []string) {
+	if len(types) > 1 {
+		seen := make(map[string]struct{}, len(types))
+		deduped := make([]string, 0, len(types))
+
+		for _, t := range types {
+			if _, ok := seen[t]; ok {
+				continue
+			}
+
+			seen[t] = struct{}{}
+
+			deduped = append(deduped, t)
+		}
+
+		types = deduped
+	}
+
 	switch len(types) {
 	case 0:
 		// Empty or unparseable value; leave Type and Types unset.
