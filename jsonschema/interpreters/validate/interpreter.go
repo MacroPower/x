@@ -142,6 +142,19 @@ func applyValidator(key, value string, s, parent *jsonschema.Schema, fieldName s
 		baseType = baseType.Elem()
 	}
 
+	// A json:",string" field serializes its numeric or bool value as a quoted
+	// string, so the generator emits a string schema. Value-equality constraints
+	// must compare against that serialized form; dispatching on the raw Go kind
+	// would stamp a numeric or bool const/enum onto a string schema that no
+	// instance can match. Route eq/ne/oneof through the string path. Bound and
+	// length constraints keep their kind dispatch.
+	if isStringCoercedValue(s, baseType) {
+		switch key {
+		case "eq", "ne", "oneof":
+			baseType = reflect.TypeFor[string]()
+		}
+	}
+
 	switch key {
 	case "required":
 		if parent != nil && fieldName != "" {
@@ -427,6 +440,14 @@ func relocateNullableValueConstraint(s *jsonschema.Schema) {
 	if s.Enum != nil {
 		inner.Enum, s.Enum = s.Enum, nil
 	}
+}
+
+// isStringCoercedValue reports whether the generated schema is a string while
+// the Go kind is numeric or bool, the shape a json:",string" field (or a
+// string-marshaling type) produces. A value-equality constraint then compares
+// against the serialized string, not the underlying numeric or bool value.
+func isStringCoercedValue(s *jsonschema.Schema, baseType reflect.Type) bool {
+	return schemaPermitsString(s) && (isNumericKind(baseType) || isBoolKind(baseType))
 }
 
 // applyEq applies eq constraint based on the type. A non-numeric, non-bool,

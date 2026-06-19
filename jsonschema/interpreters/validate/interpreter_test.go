@@ -52,6 +52,49 @@ func TestValidateInterpreter_StringConstraints(t *testing.T) {
 	}`, string(got))
 }
 
+func TestValidateInterpreter_StringCoercedValueConstraints(t *testing.T) {
+	t.Parallel()
+
+	// A json:",string" field serializes its numeric or bool value as a quoted
+	// string, so the generated schema is a string. The eq/ne/oneof family must
+	// compare against that serialized form (a string const/enum), not the
+	// numeric or bool value, or the constraint is unsatisfiable against the
+	// quoted instance.
+	type Form struct {
+		Count   int  `json:"count,string"    validate:"eq=5"`
+		Choice  int  `json:"choice,string"   validate:"oneof=1 2 3"`
+		NotZero int  `json:"not_zero,string" validate:"ne=0"`
+		Flag    bool `json:"flag,string"     validate:"eq=true"`
+	}
+
+	s, err := jsonschema.GenerateFor[Form](t.Context(),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
+	)
+	require.NoError(t, err)
+
+	got, err := json.Marshal(s)
+	require.NoError(t, err)
+
+	assert.JSONEq(t, `{
+		"$schema":"https://json-schema.org/draft/2020-12/schema",
+		"type":"object",
+		"properties":{
+			"count":{"type":"string","const":"5"},
+			"choice":{"type":"string","enum":["1","2","3"]},
+			"not_zero":{"type":"string","not":{"const":"0"}},
+			"flag":{"type":"string","const":"true"}
+		},
+		"required":["count","choice","not_zero","flag"],
+		"additionalProperties":false
+	}`, string(got))
+
+	v, err := jsonschema.Compile(t.Context(), s)
+	require.NoError(t, err)
+	require.NoError(t, v.ValidateJSON(t.Context(),
+		[]byte(`{"count":"5","choice":"2","not_zero":"3","flag":"true"}`)),
+		"the serialized string form satisfies the coerced constraints")
+}
+
 func TestValidateInterpreter_NumericConstraints(t *testing.T) {
 	t.Parallel()
 
