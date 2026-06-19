@@ -125,6 +125,33 @@ func TestConfigNewGeneratorDraft(t *testing.T) {
 	})
 }
 
+func TestConfigNewGeneratorIndent(t *testing.T) {
+	t.Parallel()
+
+	t.Run("zero and positive indent are accepted", func(t *testing.T) {
+		t.Parallel()
+
+		for _, indent := range []int{0, 2, 4} {
+			cfg := magicschema.NewConfig()
+			cfg.Indent = indent
+
+			gen, err := cfg.NewGenerator()
+			require.NoError(t, err, "indent %d must be accepted", indent)
+			assert.NotNil(t, gen)
+		}
+	})
+
+	t.Run("negative indent is rejected", func(t *testing.T) {
+		t.Parallel()
+
+		cfg := magicschema.NewConfig()
+		cfg.Indent = -2
+
+		_, err := cfg.NewGenerator()
+		require.ErrorIs(t, err, magicschema.ErrInvalidOption)
+	})
+}
+
 func TestConfigMustRegisterCompletions(t *testing.T) {
 	t.Parallel()
 

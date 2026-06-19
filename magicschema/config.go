@@ -209,6 +209,14 @@ func (c *Config) NewGenerator() (*Generator, error) {
 			ErrInvalidOption, c.Draft)
 	}
 
+	// A negative indent is meaningless. Reject it explicitly instead of letting
+	// it fall through to compact output (the writer only indents when Indent is
+	// positive), so a typo surfaces as an error rather than silently dropping
+	// the requested indentation.
+	if c.Indent < 0 {
+		return nil, fmt.Errorf("%w: negative JSON indentation %d", ErrInvalidOption, c.Indent)
+	}
+
 	annotators, err := c.parseAnnotatorNames(c.Annotators)
 	if err != nil {
 		return nil, err
