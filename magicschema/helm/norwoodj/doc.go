@@ -256,11 +256,15 @@
 //     int->integer, float->number, bool->boolean, list->array,
 //     dict->object, object->object, string->string, tpl->string,
 //     yaml->string. Additional mappings (integer, number, boolean, array)
-//     are accepted for convenience. Compound types use the last
-//     /-separated segment for mapping (e.g., tpl/string->string,
-//     tpl/array->array). Unrecognized types (e.g., "path", "map",
-//     "list/csv") are silently ignored -- the type comes from structural
-//     inference instead.
+//     are accepted for convenience. Compound "X/Y" hints are mapped in two
+//     tiers (see mapHelmDocsType and isContainerType): when the leading
+//     segment X maps to a container type (array/object) and the trailing
+//     segment Y is itself a known type, the CONTAINER type wins, including
+//     nested hints (list/string->array, dict/foo/string->object);
+//     otherwise the last /-separated segment is used (tpl/string->string,
+//     tpl/array->array, where "tpl" is a scalar modifier). Unrecognized
+//     types (e.g., "path", "map", "list/csv") are silently ignored -- the
+//     type comes from structural inference instead.
 //
 //   - @ignore scope extended: Matching the upstream, @ignore is detected
 //     via substring check on comment text. However, the upstream checks
