@@ -276,6 +276,16 @@ func (a *Annotator) applyField(schema *jsonschema.Schema, result *magicschema.An
 // lazily allocating the map on first use. Shared by parseRootBlock and
 // applyField.
 func setExtra(schema *jsonschema.Schema, key string, val any) {
+	// A non-finite float (NaN/Inf) anywhere in val cannot be marshaled to JSON
+	// and would break the whole document's final marshal, so drop the key
+	// rather than store an unmarshalable value -- matching ConstValue and the
+	// numeric-bound guards (toFloat64Ptr, toIntPtr). The marshal probe rejects
+	// the value at any nesting depth, so an x- annotation carrying a non-finite
+	// float, even nested inside a list or map, is skipped entirely (fail open).
+	if magicschema.DefaultValue(val) == nil {
+		return
+	}
+
 	if schema.Extra == nil {
 		schema.Extra = make(map[string]any)
 	}

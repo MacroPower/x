@@ -184,6 +184,32 @@ func TestHelmSchemaAnnotator(t *testing.T) {
 				assert.InDelta(t, float64(10), f["x-order"], 0.001)
 			},
 		},
+		"x-custom annotation with non-finite float is dropped": {
+			// A NaN/Inf cannot be marshaled to JSON; storing it in Extra would
+			// break the whole document's final marshal, so the key is dropped
+			// (fail open) like every other value path.
+			input: stringtest.Input(`
+				# @schema
+				# type: object
+				# x-bad: .nan
+				# x-ok: 10
+				# @schema
+				field: {}
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				f, ok := props["field"].(map[string]any)
+				require.True(t, ok)
+
+				_, hasBad := f["x-bad"]
+				assert.False(t, hasBad, "non-finite x- value must be dropped")
+				assert.InDelta(t, float64(10), f["x-ok"], 0.001)
+			},
+		},
 		"dependencies string array": {
 			input: stringtest.Input(`
 				# @schema
