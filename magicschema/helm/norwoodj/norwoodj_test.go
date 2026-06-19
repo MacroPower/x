@@ -455,6 +455,48 @@ func TestHelmDocsAnnotator(t *testing.T) {
 				assert.Equal(t, "Template object", p["description"])
 			},
 		},
+		"compound type list/string maps to array": {
+			// The container segment wins for "list/<known type>": the value is
+			// a list of strings, so the structural type is array. Last-segment
+			// resolution alone mislabeled it as the trailing "string".
+			input: stringtest.Input(`
+				# -- (list/string) The names
+				names:
+				  - a
+				  - b
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				n, ok := props["names"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "array", n["type"])
+				assert.Equal(t, "The names", n["description"])
+			},
+		},
+		"compound type list/int maps to array": {
+			input: stringtest.Input(`
+				# -- (list/int) The ports
+				ports:
+				  - 80
+				  - 443
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				p, ok := props["ports"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "array", p["type"])
+			},
+		},
 		"old-style with unknown type hint": {
 			input: stringtest.Input(`
 				# key.path -- (unknown) Description

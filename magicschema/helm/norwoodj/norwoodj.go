@@ -594,8 +594,20 @@ func mapHelmDocsType(hint string) string {
 		return t
 	}
 
-	// Compound types: use the last segment.
 	if i := strings.LastIndex(hint, "/"); i >= 0 {
+		// A "container/element" hint (e.g. "list/string") names a list or map
+		// of a known element type, so the leading container is the structural
+		// type -- resolved only when the element segment is itself a known
+		// type. A custom notation like "list/csv" (a CSV-encoded string) keeps
+		// falling through to structural inference, and a modifier-first hint
+		// like "tpl/string" uses last-segment resolution since "tpl" is scalar.
+		if container, ok := typeMapping[hint[:i]]; ok && isContainerType(container) {
+			if _, known := typeMapping[hint[i+1:]]; known {
+				return container
+			}
+		}
+
+		// Compound types: use the last segment.
 		if t, ok := typeMapping[hint[i+1:]]; ok {
 			return t
 		}
@@ -603,6 +615,12 @@ func mapHelmDocsType(hint string) string {
 
 	// Unrecognized type: silently ignored.
 	return ""
+}
+
+// isContainerType reports whether a JSON Schema type is a container (array or
+// object) -- the kinds whose leading segment wins in a compound type hint.
+func isContainerType(t string) bool {
+	return t == "array" || t == "object" //nolint:goconst // JSON Schema type names
 }
 
 // startsOldStyleBlock reports whether a comment line begins a new old-style
