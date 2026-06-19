@@ -73,18 +73,18 @@ func mergeSchemas(a, b *jsonschema.Schema) *jsonschema.Schema {
 	}
 
 	// Merge metadata: prefer a, fall back to b.
-	result.Title = firstNonEmpty(a.Title, b.Title)
-	result.Description = firstNonEmpty(a.Description, b.Description)
+	result.Title = cmp.Or(a.Title, b.Title)
+	result.Description = cmp.Or(a.Description, b.Description)
 
 	// Identity and informational keywords annotate rather than constrain, so
 	// they carry first-wins like title and description. The annotator-merge
 	// path (mergeSchemaFields) already keeps them; a later union merge must not
 	// silently drop what survived single-input generation. References ($ref,
 	// $dynamicRef) stay dropped (see the doc comment).
-	result.ID = firstNonEmpty(a.ID, b.ID)
-	result.Comment = firstNonEmpty(a.Comment, b.Comment)
-	result.Anchor = firstNonEmpty(a.Anchor, b.Anchor)
-	result.DynamicAnchor = firstNonEmpty(a.DynamicAnchor, b.DynamicAnchor)
+	result.ID = cmp.Or(a.ID, b.ID)
+	result.Comment = cmp.Or(a.Comment, b.Comment)
+	result.Anchor = cmp.Or(a.Anchor, b.Anchor)
+	result.DynamicAnchor = cmp.Or(a.DynamicAnchor, b.DynamicAnchor)
 
 	if a.Vocabulary != nil {
 		result.Vocabulary = a.Vocabulary
@@ -484,15 +484,6 @@ func intersectStrings(a, b []string) []string {
 	slices.Sort(result)
 
 	return result
-}
-
-// firstNonEmpty returns the first non-empty string.
-func firstNonEmpty(a, b string) string {
-	if a != "" {
-		return a
-	}
-
-	return b
 }
 
 // propertyKeys returns property keys in PropertyOrder, then any remaining
