@@ -572,8 +572,17 @@ func isValidImportPath(p string) bool {
 }
 
 func runGenerate(tempDir string) ([]byte, error) {
+	// The temp module is self-contained, so neutralize an inherited workspace or
+	// vendor mode before invoking the go tool in it: an exported GOWORK lists the
+	// user's modules rather than this throwaway one, and GOFLAGS=-mod=vendor
+	// demands a vendor dir the temp module lacks. Either would fail the commands
+	// below. Appending to os.Environ() keeps GOPATH, GOCACHE, PATH, and proxy
+	// settings intact.
+	hermeticEnv := append(os.Environ(), "GOWORK=off", "GOFLAGS=")
+
 	tidy := exec.CommandContext(context.Background(), "go", "mod", "tidy")
 	tidy.Dir = tempDir
+	tidy.Env = hermeticEnv
 
 	out, err := tidy.CombinedOutput()
 	if err != nil {
@@ -582,6 +591,7 @@ func runGenerate(tempDir string) ([]byte, error) {
 
 	run := exec.CommandContext(context.Background(), "go", "run", ".")
 	run.Dir = tempDir
+	run.Env = hermeticEnv
 
 	out, err = run.Output()
 	if err != nil {
