@@ -393,10 +393,9 @@ func newValidator(ctx context.Context, schema *Schema, opts []ValidateOption) (*
 
 	v.buildRegistry()
 
-	// Initialize dynamic scope with the root resource's base URI.
-	if v.draft == Draft2020 {
-		v.dynamicScope = []string{v.baseURIs[v.root]}
-	}
+	// The dynamic scope is seeded per run by forInstance, the single source for
+	// the rule; the compiled validator is never walked directly, so it needs no
+	// scope here.
 
 	return v, nil
 }
