@@ -2243,7 +2243,13 @@ func (d decNumber) cmpRat(b *big.Rat) int {
 	// float64 fits strictly between the truncated and full values (that would
 	// take more than maxNumberLen significant digits). The truncated ordering
 	// therefore decides, with ties broken away from zero.
-	t := decNumber{sig: d.sig[:maxNumberLen], exp: d.exp, neg: d.neg}
+	//
+	// The only inputs that reach this line have len(sig) > maxNumberLen (the
+	// huge/tiny branches above caught every out-of-range exponent, so the
+	// remaining non-exactlyComparable reason is excess precision). Clamp the cut
+	// anyway so a future caller passing a shorter significand degrades to an
+	// exact compare instead of a slice-bounds panic.
+	t := decNumber{sig: d.sig[:min(maxNumberLen, len(d.sig))], exp: d.exp, neg: d.neg}
 	if c := t.rat().Cmp(b); c != 0 {
 		return c
 	}
