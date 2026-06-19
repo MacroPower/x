@@ -1045,6 +1045,29 @@ func TestInlineFetchedDocIDDoesNotClobber(t *testing.T) {
 		"the later ref to /a still inlines A, not the clobbering B")
 }
 
+// TestInlinePreservesPropertyOrder pins that Inline keeps the render-only
+// PropertyOrder field. Inline deep-copies through cloneSchema, whose JSON
+// round-trip drops PropertyOrder (json:"-"); without restoring it the inlined
+// schema would re-order properties instead of preserving the input's order.
+func TestInlinePreservesPropertyOrder(t *testing.T) {
+	t.Parallel()
+
+	schema := &jsonschema.Schema{
+		Type: "object",
+		Properties: map[string]*jsonschema.Schema{
+			"zebra": {Type: "string"},
+			"mango": {Type: "string"},
+			"apple": {Type: "string"},
+		},
+		PropertyOrder: []string{"zebra", "mango", "apple"},
+	}
+
+	got, err := jsonschema.Inline(t.Context(), schema)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"zebra", "mango", "apple"}, got.PropertyOrder,
+		"Inline must preserve PropertyOrder, which controls marshaled property order")
+}
+
 // TestInlineAnchorInFetchedDocWithCanonicalID pins that an $anchor ref into a
 // fetched document still inlines when that document declares its own canonical
 // $id. The walk registers the anchor under that canonical base rather than the

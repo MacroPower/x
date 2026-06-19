@@ -918,8 +918,9 @@ func (v *validator) remoteLoader() jsonschema.Loader {
 // maps, slices, and pointers with the original. A round-trip through JSON
 // instead yields an independent copy of every serializable field, which is
 // what remote-ref isolation requires so [jsonschema.Schema.Resolve]'s in-place
-// mutations can't corrupt the caller's schema. The trade-off is that any field
-// omitted from the JSON encoding (such as PropertyOrder) is dropped; every
+// mutations can't corrupt the caller's schema. The render-only PropertyOrder
+// field carries json:"-", so the round-trip drops it; it is restored afterward
+// (see [restorePropertyOrder]) so a clone preserves property ordering. Every
 // other serializable field round-trips as an independent copy.
 func cloneSchema(s *Schema) (*Schema, error) {
 	data, err := json.Marshal(s)
@@ -934,7 +935,37 @@ func cloneSchema(s *Schema) (*Schema, error) {
 		return nil, fmt.Errorf("clone schema: %w", err)
 	}
 
+	restorePropertyOrder(s, &cp)
+
 	return &cp, nil
+}
+
+// restorePropertyOrder copies the render-only PropertyOrder field (json:"-", so
+// dropped by [cloneSchema]'s JSON round-trip) from src onto cp at every node,
+// walking both in lockstep through [SubschemaEntries]. Because cp is a JSON
+// clone of src, the two share an identical sub-schema structure and
+// SubschemaEntries (which orders map-held children by sorted key) yields
+// matching entry orders. Each slice is cloned so cp stays unaliased from src. A
+// JSON clone is always a finite tree, so the recursion terminates.
+func restorePropertyOrder(src, cp *Schema) {
+	if src == nil || cp == nil {
+		return
+	}
+
+	if src.PropertyOrder != nil {
+		cp.PropertyOrder = slices.Clone(src.PropertyOrder)
+	}
+
+	srcChildren := SubschemaEntries(src)
+	cpChildren := SubschemaEntries(cp)
+
+	if len(srcChildren) != len(cpChildren) {
+		return // Structural mismatch; nothing safe to pair.
+	}
+
+	for i := range srcChildren {
+		restorePropertyOrder(srcChildren[i].Schema, cpChildren[i].Schema)
+	}
 }
 
 // isFragmentOnly reports whether a URI is fragment-only (e.g. "#foo").
