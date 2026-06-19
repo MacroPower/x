@@ -476,6 +476,13 @@ func intersectStrings(a, b []string) []string {
 		return nil
 	}
 
+	// Sort so the merged required array does not depend on input order: the
+	// intersection is otherwise built in b's iteration order, so swapping two
+	// equivalent input files would emit a byte-different required array,
+	// breaking the deterministic-output guarantee. The required array is an
+	// unordered set in JSON Schema, so sorting changes nothing semantically.
+	slices.Sort(result)
+
 	return result
 }
 

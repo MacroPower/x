@@ -229,6 +229,29 @@ func TestMergeMultipleInputs(t *testing.T) {
 				}
 			},
 		},
+		"required intersection is sorted deterministically": {
+			// Both inputs require the same children but list them in opposite
+			// order. The merged required array must be sorted so the output
+			// does not depend on which file is merged first.
+			inputA: "# @schema\n# required: [alpha, beta]\n# @schema\nparent:\n  alpha: 1\n  beta: 2\n",
+			inputB: "# @schema\n# required: [beta, alpha]\n# @schema\nparent:\n  alpha: 1\n  beta: 2\n",
+			opts: []magicschema.Option{
+				magicschema.WithAnnotators(dadav.New()),
+			},
+			check: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				parent, ok := props["parent"].(map[string]any)
+				require.True(t, ok)
+
+				req, ok := parent["required"].([]any)
+				require.True(t, ok)
+				assert.Equal(t, []any{"alpha", "beta"}, req)
+			},
+		},
 		"additionalProperties fail-open": {
 			inputA: "# @schema\n# type: object\n# additionalProperties: false\n# @schema\nconfig:\n  key: value\n",
 			inputB: "config:\n  key: value\n",
