@@ -1865,33 +1865,18 @@ func labelFalseSchemaKeyword(errs []*ValidationError, sub *Schema, keyword strin
 }
 
 // isFalseSchema reports whether a schema is equivalent to boolean false (rejects
-// all). The upstream library represents the JSON boolean `false` schema as
-// {"not": {}}: an empty "not" with no other keyword. A schema is that form when
-// its Not is non-nil and empty and the schema with Not removed is itself empty,
-// which reuses the single [isEmptySchema] field list rather than duplicating it.
-//
-// An unknown keyword (Extra) on either the schema or its Not defeats the form,
-// matching the exported [IsFalseSchema]. Although isEmptySchema ignores Extra
-// (an unknown keyword does not constrain a value), a schema carrying one does
-// not serialize to the bare `false`, so it is validated through its `not` keyword
-// (which still rejects every instance) rather than short-circuited, and the
-// error then names the keyword instead of the bare false-schema message.
+// all). It delegates to the exported [IsFalseSchema] so the single field
+// enumeration in [IsTrueSchema] governs both halves of the package: the boolean
+// false form is {"not": {}} with no other keyword, and any sibling at all — an
+// unknown keyword (Extra) or an annotation such as a title or $id — defeats the
+// form, since the schema then marshals to an object rather than to bare false.
+// Such a schema is validated through its `not` keyword (which still rejects every
+// instance), and the error names that keyword instead of the bare false-schema
+// message. A nil schema is not the false form. (isEmptySchema, which ignores
+// annotations, intentionally answers a different question for the always-true
+// unevaluated* subschema checks and is not used here.)
 func isFalseSchema(s *Schema) bool {
-	if s.Not == nil || s.Extra != nil || s.Not.Extra != nil {
-		return false
-	}
-
-	if !isEmptySchema(s.Not) {
-		return false
-	}
-
-	// A value copy shares the sub-schema pointers with s, but isEmptySchema
-	// reads fields without mutating them, so clearing Not on the copy leaves s
-	// untouched while letting the one field list decide emptiness.
-	rest := *s
-	rest.Not = nil
-
-	return isEmptySchema(&rest)
+	return IsFalseSchema(s)
 }
 
 // isEmptySchema checks if a schema is empty (no keywords set).
