@@ -838,11 +838,12 @@ func (in *inliner) fetchDoc(baseURI string) (*Schema, error) {
 // [WithBaseURI] to inline schemas that reference each other by
 // relative file path.
 //
-// A leading "file://" scheme and a leading "/" are stripped, so URIs are
-// resolved relative to the fs root: relative refs absolutize against the
+// A "file://" scheme, any authority, and leading slashes are dropped, so URIs
+// are resolved relative to the fs root: relative refs absolutize against the
 // normalized base URI into file URIs (base "main.json" plus ref
-// "sub/child.json" yields "file:///sub/child.json"), which strip back to
-// paths addressing the fs from its root. The remaining path is used verbatim
+// "sub/child.json" yields "file:///sub/child.json"), which reduce back to
+// paths addressing the fs from its root (file://host/sub.json and
+// file:////sub.json both map to "sub.json"). The remaining path is used verbatim
 // as the [io/fs] file name, so [io/fs] confines resolution to the fs root:
 // a ref escaping above it is not a valid fs path, and [Inline] surfaces the
 // read failure as an error wrapping [ErrRefResolve].
@@ -871,8 +872,18 @@ func NewFileResolver(fsys fs.FS) *FileResolver {
 // silently producing a degenerate schema. Reads are local and not cancellable,
 // so the context is unused. See [FileResolver] for the path semantics.
 func (r *FileResolver) ResolveRef(_ context.Context, uri string) (*Schema, error) {
-	name := strings.TrimPrefix(uri, "file://")
-	name = strings.TrimPrefix(name, "/")
+	// Drop a file:// scheme and any authority via url.Parse so file://host/x,
+	// file:///x, and file:////x all map to the fs path "x"; TrimPrefix alone
+	// mishandled an authority and extra leading slashes. Non-file and relative
+	// inputs fall back to the prior strip so they address the fs as before.
+	name := uri
+
+	u, perr := url.Parse(uri)
+	if perr == nil && u.Scheme == "file" {
+		name = strings.TrimLeft(u.Path, "/")
+	} else {
+		name = strings.TrimPrefix(strings.TrimPrefix(name, "file://"), "/")
+	}
 
 	data, err := fs.ReadFile(r.fsys, name)
 	if err != nil {

@@ -1133,6 +1133,7 @@ func TestFileResolver(t *testing.T) {
 		"schemas/a.json": `{"type": "string"}`,
 		"broken.json":    `{not json`,
 		"null.json":      `null`,
+		"sub.json":       `{"type": "number"}`,
 	}
 
 	tests := map[string]struct {
@@ -1161,6 +1162,15 @@ func TestFileResolver(t *testing.T) {
 			// A file whose top-level JSON is null is not a schema document; it
 			// must be an error, not a silently-degenerate reject-everything schema.
 			uri: "null.json",
+		},
+		"file uri with authority maps to fs root": {
+			// An authority in a file URI is dropped, addressing sub.json at root.
+			uri:  "file://host/sub.json",
+			want: `{"type": "number"}`,
+		},
+		"file uri with extra leading slashes": {
+			uri:  "file:////sub.json",
+			want: `{"type": "number"}`,
 		},
 	}
 
