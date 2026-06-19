@@ -28,25 +28,35 @@ import (
 	"go.jacobcolvin.com/x/jsonschema/internal/vocab"
 )
 
-// regexCache caches compiled regexps keyed by pattern string.
+// regexCache caches the outcome of compiling each pattern (the regexp or the
+// compile error), keyed by pattern string.
 var regexCache sync.Map
+
+// cachedRegexp is the memoized result of compiling one pattern.
+type cachedRegexp struct {
+	re  *regexp.Regexp
+	err error
+}
 
 func compileRegexp(pattern string) (*regexp.Regexp, error) {
 	if v, ok := regexCache.Load(pattern); ok {
-		re, ok := v.(*regexp.Regexp)
-		if ok {
-			return re, nil
+		if c, ok := v.(cachedRegexp); ok {
+			return c.re, c.err
 		}
 	}
 
 	re, err := regexp.Compile(pattern)
 	if err != nil {
-		return nil, fmt.Errorf("compile regexp: %w", err)
+		err = fmt.Errorf("compile regexp: %w", err)
 	}
 
-	regexCache.Store(pattern, re)
+	// Cache the outcome including failures, so an invalid pattern reached
+	// through the validation-time fallback (a remote/uncached schema) compiles
+	// at most once. The cached error is shared across runs; callers only test it
+	// for non-nil and never mutate it.
+	regexCache.Store(pattern, cachedRegexp{re: re, err: err})
 
-	return re, nil
+	return re, err
 }
 
 // ValidateOption configures validation behavior. Options are produced by
