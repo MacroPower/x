@@ -457,10 +457,13 @@ struct types, fields, and named types using `go/ast` and
 `golang.org/x/tools/go/packages`; when source files cannot be located for a
 type, extraction is silently skipped, so a binary deployed without sources
 generates schemas without descriptions, while a cancelled or expired
-Generate context is reported as an error. Package loading runs in the
-process working directory unless `WithLoadDir` points it at another
-module's directory. The `jsonschema` tag's `description` wins over a
-provider-supplied comment.
+Generate context is reported as an error. Loading uses the generator
+process's build context (its `GOOS`, `GOARCH`, and active build tags), so a
+type declared in a platform- or build-tag-gated file the current context
+excludes is also extracted without descriptions even when reflection sees
+it. Package loading runs in the process working directory unless `WithLoadDir`
+points it at another module's directory. The `jsonschema` tag's `description`
+wins over a provider-supplied comment.
 
 ```go
 schema, err := jsonschema.GenerateFor[MyType](ctx,

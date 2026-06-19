@@ -17,9 +17,12 @@ import (
 // [golang.org/x/tools/go/packages] at generation time, so it requires access
 // to source files; when sources cannot be located for a type, it silently
 // supplies no comment, so a binary deployed without sources generates
-// schemas without descriptions rather than failing. A canceled or expired
-// context is the exception: it is reported as an error, aborting
-// generation, since package loading is the cancellable work the Generate
+// schemas without descriptions rather than failing. Loading uses the generator
+// process's build context (its GOOS, GOARCH, and active build tags), so a type
+// declared in a platform- or build-tag-gated file the current context excludes
+// is likewise extracted without descriptions even when reflection sees it. A
+// canceled or expired context is the exception: it is reported as an error,
+// aborting generation, since package loading is the cancellable work the Generate
 // context exists for. Construct it with [NewGoCommentProvider] and register
 // it with [WithDescriptionProvider]. Wrapping it composes other sources with AST
 // extraction: overrides for specific types, or a pre-extracted map
