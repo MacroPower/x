@@ -1425,6 +1425,24 @@ func (g *generator) buildFieldSchema(parentType reflect.Type, fi structFieldInfo
 	return fieldSchema, nil
 }
 
+// fieldContext builds the FieldContext passed to tag interpreters and the
+// description provider for one struct field, computing the declaring type once.
+func (g *generator) fieldContext(
+	parentType reflect.Type,
+	fi structFieldInfo,
+	fieldSchema, parent *Schema,
+) FieldContext {
+	return FieldContext{
+		Name:        fi.jsonName,
+		Type:        fi.field.Type,
+		Owner:       declaringType(parentType, fi.field),
+		Schema:      fieldSchema,
+		Parent:      parent,
+		StructField: fi.field,
+		Draft:       g.draft,
+	}
+}
+
 // applyFieldInterpreters runs the registered tag interpreters for a field and
 // then wraps a bare $ref with allOf for Draft-07 when siblings were added. It
 // runs after all field schemas are in place so interpreters see the full
@@ -1434,19 +1452,9 @@ func (g *generator) applyFieldInterpreters(
 	fi structFieldInfo,
 	fieldSchema, parent *Schema,
 ) error {
-	fieldType := fi.field.Type
-
 	for _, reg := range g.tagInterpreters {
 		if tag, ok := fi.field.Tag.Lookup(reg.key); ok {
-			fc := FieldContext{
-				Name:        fi.jsonName,
-				Type:        fieldType,
-				Owner:       declaringType(parentType, fi.field),
-				Schema:      fieldSchema,
-				Parent:      parent,
-				StructField: fi.field,
-				Draft:       g.draft,
-			}
+			fc := g.fieldContext(parentType, fi, fieldSchema, parent)
 
 			err := reg.interp.Interpret(g.ctx, fc, Tag{Key: reg.key, Value: tag})
 			if err != nil {
@@ -2133,15 +2141,7 @@ func (g *generator) applyFieldDescription(
 		return nil
 	}
 
-	fc := FieldContext{
-		Name:        fi.jsonName,
-		Type:        fi.field.Type,
-		Owner:       declaringType(parentType, fi.field),
-		Schema:      fieldSchema,
-		Parent:      parent,
-		StructField: fi.field,
-		Draft:       g.draft,
-	}
+	fc := g.fieldContext(parentType, fi, fieldSchema, parent)
 
 	comment, err := g.descriptionProvider.FieldDescription(g.ctx, fc)
 	if err != nil {
