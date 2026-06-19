@@ -24,3 +24,27 @@ func Escape(s string) string {
 func Unescape(s string) string {
 	return unescaper.Replace(s)
 }
+
+// SafeToken restricts a token to the conservative unreserved set [A-Za-z0-9._-]
+// so the generated $ref resolves in external tools as both an RFC 6901 pointer
+// token and an RFC 3986 URI fragment. Generic type names embed characters that
+// are invalid in one or both: brackets, commas, spaces, and braces from
+// type-argument lists; the slash and tilde (the pointer separator and escape);
+// and quotes, asterisks, and the like from anonymous struct tags and pointer
+// arguments (a reflect name such as Box[struct { A int <tag> }] carries spaces,
+// braces, and tag quotes). Every rune outside the unreserved set is mapped to
+// '_' so the generated $ref resolves in external tools, not only the calling
+// package's own resolver.
+func SafeToken(s string) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'A' && r <= 'Z',
+			r >= 'a' && r <= 'z',
+			r >= '0' && r <= '9',
+			r == '.', r == '_', r == '-':
+			return r
+		default:
+			return '_'
+		}
+	}, s)
+}

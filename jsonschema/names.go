@@ -5,38 +5,15 @@ import (
 	"reflect"
 	"sort"
 	"strconv"
-	"strings"
-)
 
-// sanitizeDefName rewrites a definitions key, and the JSON Pointer $ref token
-// that points at it, so it is safe as both an RFC 6901 pointer token and an RFC
-// 3986 URI fragment. Generic type names embed characters that are invalid in one
-// or both: brackets, commas, spaces, and braces from type-argument lists; the
-// slash and tilde (the pointer separator and escape); and quotes, asterisks, and
-// the like from anonymous struct tags and pointer arguments (a reflect name such
-// as Box[struct { A int <tag> }] carries spaces, braces, and tag quotes). Every
-// rune outside the conservative unreserved set [A-Za-z0-9._-] is mapped to '_'
-// so the generated $ref resolves in external tools, not only this package's own
-// resolver.
-func sanitizeDefName(s string) string {
-	return strings.Map(func(r rune) rune {
-		switch {
-		case r >= 'A' && r <= 'Z',
-			r >= 'a' && r <= 'z',
-			r >= '0' && r <= '9',
-			r == '.', r == '_', r == '-':
-			return r
-		default:
-			return '_'
-		}
-	}, s)
-}
+	"go.jacobcolvin.com/x/jsonschema/internal/jsonptr"
+)
 
 // defaultNamer returns a definition name for a Go type. Characters that are not
 // valid in a definitions key or its JSON Pointer $ref token are replaced with
 // underscores so the generated reference resolves.
 func defaultNamer(t reflect.Type) string {
-	return sanitizeDefName(t.Name())
+	return jsonptr.SafeToken(t.Name())
 }
 
 // defaultNamerFunc adapts [defaultNamer] to the [Namer] interface, for the
@@ -57,7 +34,7 @@ func defaultNamerFunc() Namer {
 // deferral semantics are preserved.
 func (g *generator) schemaName(t reflect.Type) string {
 	if name := g.namer.SchemaName(TypeContext{Type: t, Draft: g.draft}); name != "" {
-		return sanitizeDefName(name)
+		return jsonptr.SafeToken(name)
 	}
 
 	return defaultNamer(t)
@@ -145,7 +122,7 @@ func (g *generator) disambiguateDefs() {
 			// uses: a package path element may legally contain a JSON Pointer
 			// special character (the tilde, allowed in module paths), which
 			// would otherwise misresolve the generated $ref token.
-			baseCandidates[i] = sanitizeDefName(path.Base(t.PkgPath())) + "_" + name
+			baseCandidates[i] = jsonptr.SafeToken(path.Base(t.PkgPath())) + "_" + name
 		}
 
 		// Pick the first scheme whose names are unique within the group and do
@@ -159,7 +136,7 @@ func (g *generator) disambiguateDefs() {
 			// tilde and the other characters invalid in a $ref token.
 			fullCandidates := make([]string, len(types))
 			for i, t := range types {
-				fullCandidates[i] = sanitizeDefName(t.PkgPath()) + "_" + name
+				fullCandidates[i] = jsonptr.SafeToken(t.PkgPath()) + "_" + name
 			}
 
 			chosen = fullCandidates

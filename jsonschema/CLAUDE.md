@@ -19,7 +19,8 @@ The package has two independent halves sharing the `Schema` type:
   cheap per-run state. Self-contained helpers live under `internal/`:
   `internal/format` (built-in string-format validators), `internal/vocab`
   (vocabulary modelling and resolution), `internal/jsonptr` (RFC 6901
-  escaping), `internal/numrat` (exact-decimal arithmetic core for JSON
+  escaping, plus `SafeToken` for $ref/$defs token sanitization),
+  `internal/numrat` (exact-decimal arithmetic core for JSON
   numbers: canonical decomposition, bounded `big.Rat` expansion, modular
   `multipleOf`), `internal/numkind` (Go reflect kind classification
   shared by both halves: integer parse-bit-width mapping plus the
