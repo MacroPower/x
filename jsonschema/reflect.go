@@ -1575,12 +1575,12 @@ func (g *generator) processAllOfField(fi structFieldInfo, parent *Schema) error 
 		return err
 	}
 
+	// The schemaForType call already returned a fresh, distinct schema for ft: a
+	// bare $ref for an extracted type (tracked by refForType against ft) or an
+	// inline schema otherwise. Use it directly; re-wrapping a $ref in another
+	// tracked node would leave the first refRecord orphaned, pointing at a schema
+	// that is not in the output tree.
 	branch := embeddedSchema
-	if embeddedSchema.Ref != "" {
-		ref := &Schema{Ref: embeddedSchema.Ref}
-		g.refRecords = append(g.refRecords, refRecord{schema: ref, target: ft})
-		branch = ref
-	}
 
 	if fi.optional {
 		branch = &Schema{AnyOf: []*Schema{branch, {}}}
