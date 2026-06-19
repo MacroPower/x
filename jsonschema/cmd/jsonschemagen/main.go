@@ -54,6 +54,14 @@ func main() {
 	flag.BoolVar(&cfg.Validate, "validate", false, "add validate tag interpreter")
 	flag.Parse()
 
+	// Reject leftover positional arguments so a mistyped invocation (a stray
+	// token in a //go:generate line, a value given without its flag) fails
+	// loudly instead of generating against the default configuration.
+	if flag.NArg() > 0 {
+		fmt.Fprintf(os.Stderr, "jsonschemagen: unexpected arguments: %v\n", flag.Args())
+		os.Exit(2)
+	}
+
 	err := run(cfg, os.Stdout)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "jsonschemagen: %v\n", err)
