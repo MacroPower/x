@@ -1805,6 +1805,28 @@ func TestHelmValuesSchemaAnnotatorAlignment(t *testing.T) {
 				assert.Equal(t, "[};]", v["pattern"])
 			},
 		},
+		"semicolon inside a double-quoted value preserved": {
+			// A double-quoted default holding a ";" must not split at the inner
+			// semicolon; quote tracking keeps the value, and the later pairs,
+			// intact.
+			input: stringtest.Input(`
+				# @schema type:string;default:"a;b";pattern:^x$
+				val: x
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				v, ok := props["val"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "string", v["type"])
+				assert.Equal(t, "a;b", v["default"])
+				assert.Equal(t, "^x$", v["pattern"])
+			},
+		},
 		"$ref without type annotation": {
 			// $ref -> Ref. Should be set without requiring type.
 			input: stringtest.Input(`

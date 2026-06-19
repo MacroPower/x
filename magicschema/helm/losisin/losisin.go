@@ -321,22 +321,42 @@ func parseBoolOrSchema(val string, hasVal bool) *jsonschema.Schema {
 	}
 }
 
-// splitSemicolons splits a line by semicolons, respecting nested brackets.
-// Nesting is tracked with a type-aware stack, so a stray closer of one kind
-// (a "}" inside a "[...]" value) does not cancel an opener of the other kind
-// and expose an inner semicolon as a delimiter. When openers are left
-// unbalanced the bracket-aware split is unreliable, so the line is split on
-// every semicolon instead -- a malformed value then only corrupts its own
-// pair rather than swallowing every pair after it.
+// splitSemicolons splits a line by semicolons, respecting nested brackets and
+// double-quoted runs. Bracket nesting is tracked with a type-aware stack, so a
+// stray closer of one kind (a "}" inside a "[...]" value) does not cancel an
+// opener of the other kind and expose an inner semicolon as a delimiter. A
+// double-quoted value likewise keeps a ";" (or a bracket) it contains literal,
+// so an annotation such as default:"a;b" survives intact. When openers or a
+// quote are left unbalanced the split is unreliable, so the line is split on
+// every semicolon instead -- a malformed value then only corrupts its own pair
+// rather than swallowing every pair after it.
 func splitSemicolons(line string) []string {
 	var (
 		parts   []string
 		current strings.Builder
 		stack   []rune
+		inQuote bool
 	)
 
 	for _, ch := range line {
+		// Inside a double-quoted run every character is literal: a ";" or a
+		// bracket there is part of the value, not a delimiter or nesting token.
+		if inQuote {
+			current.WriteRune(ch)
+
+			if ch == '"' {
+				inQuote = false
+			}
+
+			continue
+		}
+
 		switch ch {
+		case '"':
+			inQuote = true
+
+			current.WriteRune(ch)
+
 		case '[', '{':
 			stack = append(stack, ch)
 
@@ -368,7 +388,7 @@ func splitSemicolons(line string) []string {
 		parts = append(parts, current.String())
 	}
 
-	if len(stack) != 0 {
+	if len(stack) != 0 || inQuote {
 		return strings.Split(line, ";")
 	}
 
