@@ -4035,6 +4035,26 @@ func TestResolveJSONPointerEncodedRootSeparator(t *testing.T) {
 	require.Error(t, err, "the resolved $defs/foo must reject a non-string")
 }
 
+func TestResolveJSONPointerFullyEncodedSeparators(t *testing.T) {
+	t.Parallel()
+
+	// A pointer whose separators are all percent-encoded ("%2F") must resolve
+	// identically to its literal "/" form: %2F is the URI encoding of the
+	// pointer separator, not a member-name escape (which RFC 6901 spells ~1).
+	schema := &jsonschema.Schema{
+		Schema: "https://json-schema.org/draft/2020-12/schema",
+		Ref:    "#%2F$defs%2Ffoo",
+		Defs: map[string]*jsonschema.Schema{
+			"foo": {Type: "string"},
+		},
+	}
+
+	require.NoError(t, jsonschema.Validate(t.Context(), schema, "hello"),
+		"a fully %2F-encoded pointer must resolve like /$defs/foo")
+	require.Error(t, jsonschema.Validate(t.Context(), schema, 42.0),
+		"the resolved $defs/foo must reject a non-string")
+}
+
 func TestTraverseSchemaCrossDraftConfusion(t *testing.T) {
 	t.Parallel()
 
