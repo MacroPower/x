@@ -3020,20 +3020,34 @@ func (v *validator) validateNumeric(
 		return nil
 	}
 
-	val, ok := toBigRat(instance)
-	if !ok {
-		// A JSON number outside the cheap-expansion bounds (the DoS guard)
-		// still orders deterministically against every bound; compare it by
-		// magnitude class and truncated significand. Anything unparseable has no
-		// value to compare and skips the numeric keywords. This includes a
-		// non-finite float64, which JSON cannot represent.
-		if n, isNum := instance.(json.Number); isNum {
-			if d, dok := parseDecNumber(string(n)); dok {
-				return v.validateNumericUnbounded(schema, d, string(n), instancePath, schemaPath)
-			}
+	// Decompose a JSON number exactly once. An over-cap literal (the DoS guard)
+	// takes the magnitude-class comparison without a second scan of the literal;
+	// an unparseable one has no value to compare and skips the numeric keywords;
+	// an exactly-comparable one yields the rational the bounded checks use. A
+	// float64 (the default) converts through its shortest decimal, and a
+	// non-finite float yields no rational and is likewise skipped.
+	var val *big.Rat
+
+	switch n := instance.(type) {
+	case json.Number:
+		d, ok := parseDecNumber(string(n))
+		if !ok {
+			return nil
 		}
 
-		return nil
+		if !d.exactlyComparable() {
+			return v.validateNumericUnbounded(schema, d, string(n), instancePath, schemaPath)
+		}
+
+		val = d.rat()
+
+	default:
+		var ok bool
+
+		val, ok = toBigRat(instance)
+		if !ok {
+			return nil
+		}
 	}
 
 	var errs []*ValidationError
