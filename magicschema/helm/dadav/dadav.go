@@ -222,7 +222,18 @@ func (a *Annotator) applyField(schema *jsonschema.Schema, result *magicschema.An
 		}
 
 	case "items":
-		schema.Items = magicschema.ToSubSchema(val)
+		// Draft 7 allows items as a single schema (constrains every element) or
+		// an array of schemas (tuple validation). A []any is the tuple form, so
+		// route it to ItemsArray, which marshals to "items": [...]. ToSubSchema
+		// only decodes a single object schema and would drop the tuple, leaving
+		// items unset while a sibling additionalItems survives -- an
+		// over-restrictive, fail-closed schema.
+		if _, ok := val.([]any); ok {
+			schema.ItemsArray = magicschema.ToSubSchemaArray(val)
+		} else {
+			schema.Items = magicschema.ToSubSchema(val)
+		}
+
 	case "anyOf":
 		schema.AnyOf = magicschema.ToSubSchemaArray(val)
 	case "oneOf":

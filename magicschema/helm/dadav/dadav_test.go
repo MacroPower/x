@@ -1366,6 +1366,43 @@ func TestHelmSchemaAnnotatorEdgeCases(t *testing.T) {
 				assert.Equal(t, "required-item", contains["const"])
 			},
 		},
+		"items tuple form is preserved as an array of schemas": {
+			// Draft 7 tuple validation: items as an array of schemas. It must be
+			// kept as a positional items array, not dropped -- dropping it loses
+			// the tuple constraint while a sibling additionalItems survives,
+			// yielding an over-restrictive, fail-closed schema.
+			input: stringtest.Input(`
+				# @schema
+				# type: array
+				# items:
+				#   - type: string
+				#   - type: integer
+				# @schema
+				tuple:
+				  - first
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				tup, ok := props["tuple"].(map[string]any)
+				require.True(t, ok)
+
+				items, ok := tup["items"].([]any)
+				require.True(t, ok, "tuple items must marshal as an array of schemas")
+				require.Len(t, items, 2)
+
+				first, ok := items[0].(map[string]any)
+				require.True(t, ok)
+				assert.Equal(t, "string", first["type"])
+
+				second, ok := items[1].(map[string]any)
+				require.True(t, ok)
+				assert.Equal(t, "integer", second["type"])
+			},
+		},
 		"additionalItems sub-schema": {
 			input: stringtest.Input(`
 				# @schema

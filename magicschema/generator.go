@@ -672,8 +672,10 @@ func (g *Generator) buildChildSchema(
 		g.fillObjectFromStructure(childSchema, structuralNode, childPath, anchors, annotation)
 	}
 
-	// For array types, recurse into items.
-	if hasType(childSchema, typeArray) && childSchema.Items == nil {
+	// For array types, recurse into items. Skip when an annotator already set a
+	// tuple items array (ItemsArray): a single inferred Items schema beside it
+	// sets both forms of the keyword, which the marshaler rejects (fail closed).
+	if hasType(childSchema, typeArray) && childSchema.Items == nil && childSchema.ItemsArray == nil {
 		if seqNode, ok := structuralNode.(*ast.SequenceNode); ok {
 			childSchema.Items = g.inferItemsFromSequence(seqNode, childPath, anchors)
 		}
