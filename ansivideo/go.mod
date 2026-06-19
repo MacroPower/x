@@ -7,7 +7,7 @@ require (
 	github.com/stretchr/testify v1.11.1
 	go.jacobcolvin.com/x/stringtest v0.2.0
 	go.jacobcolvin.com/x/version v0.2.0
-	golang.org/x/image v0.42.0
+	golang.org/x/image v0.43.0
 	golang.org/x/term v0.44.0
 )
 
