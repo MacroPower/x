@@ -536,10 +536,13 @@
 // for a JSON number whose exact value exceeds an internal cap (about 4096
 // significant digits or decimal exponent magnitude), the multipleOf check is
 // skipped, while minimum, maximum, exclusiveMinimum, and exclusiveMaximum are
-// still enforced exactly. Schema-side numeric keyword values are limited to
-// float64 precision: integers beyond 2^53 in keywords like const, minimum, or
-// multipleOf round when the schema is decoded, even though the instance value
-// they are compared against is exact.
+// still enforced exactly. The float64-typed bound keywords (minimum, maximum,
+// exclusiveMinimum, exclusiveMaximum, multipleOf) are limited to float64
+// precision: integers beyond 2^53 round when the schema is decoded, even though
+// the instance value they are compared against is exact. Both const and enum
+// values are preserved exactly (decoded as [json.Number]); on the generation
+// side a jsonschema tag bound that would round is rejected rather than silently
+// loosened.
 //
 // Validation is configured via [ValidateOption] values:
 //

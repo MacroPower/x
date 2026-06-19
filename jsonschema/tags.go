@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"math/big"
 	"reflect"
 	"regexp"
 	"slices"
@@ -750,6 +751,23 @@ func parseFloat(key, value string) (float64, error) {
 
 	if math.IsNaN(n) || math.IsInf(n, 0) {
 		return 0, fmt.Errorf("jsonschema tag: key %q: %q is not a finite number", key, value)
+	}
+
+	// An integer-literal bound the float64 cannot represent exactly (magnitude
+	// above 2^53, e.g. an int64 field's own max) silently rounds to a different
+	// value when stored as the schema's *float64 bound, loosening the constraint.
+	// Reject it rather than ship a bound that differs from the tag, keeping the
+	// bound keywords consistent with the exact-precision const/enum parsing on
+	// the same field. Fractional and exponent literals are left alone.
+	if !strings.ContainsAny(value, ".eE") {
+		if exact, ok := new(big.Int).SetString(value, 10); ok {
+			if new(big.Float).SetInt(exact).Cmp(big.NewFloat(n)) != 0 {
+				return 0, fmt.Errorf(
+					"jsonschema tag: key %q: integer bound %q exceeds exact float64 precision (>2^53)",
+					key, value,
+				)
+			}
+		}
 	}
 
 	return n, nil

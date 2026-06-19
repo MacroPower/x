@@ -219,6 +219,30 @@ func TestParseFloatRejectsNaNInf(t *testing.T) {
 	}
 }
 
+func TestParseFloatRejectsImpreciseIntegerBound(t *testing.T) {
+	t.Parallel()
+
+	// An integer bound the float64 cannot represent exactly would silently round
+	// and loosen the constraint, so it is rejected rather than shipped.
+	type TooBig struct {
+		V int64 `json:"v" jsonschema:"maximum=9223372036854775807"`
+	}
+
+	_, err := jsonschema.GenerateFor[TooBig](t.Context())
+	require.ErrorContains(t, err, "exceeds exact float64 precision")
+
+	// An integer that IS exactly representable (a power of two above 2^53) is
+	// accepted unchanged.
+	type Representable struct {
+		V int64 `json:"v" jsonschema:"maximum=1152921504606846976"` // 2^60
+	}
+
+	s, err := jsonschema.GenerateFor[Representable](t.Context())
+	require.NoError(t, err)
+	require.NotNil(t, s.Properties["v"].Maximum)
+	assert.InDelta(t, 1152921504606846976.0, *s.Properties["v"].Maximum, 0)
+}
+
 func TestParseTypedScalarRejectsNaNInf(t *testing.T) {
 	t.Parallel()
 
