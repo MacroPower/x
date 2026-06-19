@@ -27,7 +27,10 @@ The package has two independent halves sharing the `Schema` type:
   both halves and schemashape), `internal/uriref` (RFC 3986 URI-reference
   resolution and fragment handling for the `$ref` absolutization layer,
   including the opaque/URN merge that corrects `net/url.ResolveReference`),
-  and `internal/schemashape` (structural shape classification of a `Schema`).
+  `internal/normalize` (Go value -> JSON-shaped value normalization: integer
+  widths to `json.Number`, float32 widening, recursive container coercion with
+  copy-on-change and a cycle guard), and `internal/schemashape` (structural
+  shape classification of a `Schema`).
 
 ### Relationship to google/jsonschema-go
 
