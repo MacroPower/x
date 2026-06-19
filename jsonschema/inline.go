@@ -486,12 +486,14 @@ func (in *inliner) walkPair(working, pristine *Schema, path string) error {
 
 		working.Ref = ""
 
-		if replace {
+		if replace && len(copies) == 0 {
 			// Draft-07 ignores siblings of $ref, so the node is replaced by
 			// the target copy alone; a bare ref (no siblings) is replaced
 			// directly under either draft. The copy is self-contained and
 			// the node's pristine children no longer correspond to anything
-			// in working, so the walk stops here.
+			// in working, so the walk stops here. A $dynamicRef substitute
+			// already queued in copies must not be discarded, so the wholesale
+			// replace is taken only when nothing else needs joining.
 			*working = *tc
 
 			return nil
@@ -549,6 +551,11 @@ func (in *inliner) expand(pristine *Schema, path string) (*Schema, bool, error) 
 
 	rest := *pristine
 	rest.Ref = ""
+
+	// A Draft 2020-12 $dynamicRef is resolved before the $ref and already
+	// cleared from working, so it no longer counts as a sibling that would keep
+	// the node from being a bare ref eligible for wholesale replacement.
+	rest.DynamicRef = ""
 
 	replace := in.v.draft == Draft7 || IsTrueSchema(&rest)
 

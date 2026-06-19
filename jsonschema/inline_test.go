@@ -851,6 +851,33 @@ func TestInlineRefFallback(t *testing.T) {
 	}
 }
 
+func TestInlineDynamicRefDroppedBesideRef(t *testing.T) {
+	t.Parallel()
+
+	// A Draft 2020-12 node carrying both $ref and $dynamicRef, where the
+	// $dynamicRef is dropped by the fallback, has $ref as its only effective
+	// keyword and must be replaced by the target alone, not allOf-wrapped.
+	root, err := jsonschema.ParseSchema([]byte(`{
+		"$defs": {"t": {"type": "integer"}},
+		"properties": {"a": {"$ref": "#/$defs/t", "$dynamicRef": "#nope"}}
+	}`))
+	require.NoError(t, err)
+
+	drop := jsonschema.RefFallbackFunc(func(context.Context, jsonschema.RefFailure) jsonschema.RefAction {
+		return jsonschema.DropRef()
+	})
+
+	out, err := jsonschema.Inline(t.Context(), root, jsonschema.WithRefFallback(drop))
+	require.NoError(t, err)
+
+	a := out.Properties["a"]
+	require.NotNil(t, a)
+	assert.Equal(t, "integer", a.Type, "the ref target should replace the node")
+	assert.Empty(t, a.AllOf, "no redundant allOf wrapper around the target")
+	assert.Empty(t, a.Ref)
+	assert.Empty(t, a.DynamicRef)
+}
+
 func TestInlineSubstituteIDDoesNotCorruptResolution(t *testing.T) {
 	t.Parallel()
 
