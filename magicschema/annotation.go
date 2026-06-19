@@ -228,8 +228,15 @@ func mergeSchemaFields(dst, src *jsonschema.Schema) {
 		dst.MaxProperties = src.MaxProperties
 	}
 
-	if dst.Items == nil {
+	// Items (single-schema array form) and ItemsArray (tuple form) are the two
+	// mutually-exclusive shapes of the items keyword; jsonschema's basicChecks
+	// rejects a schema carrying both, which would fail the whole document's
+	// final marshal. Fill them as a unit so a higher-priority dst shape is never
+	// crossed with a lower-priority src's other shape, mirroring the Type/Types
+	// and Enum/Const unit guards above.
+	if dst.Items == nil && dst.ItemsArray == nil {
 		dst.Items = src.Items
+		dst.ItemsArray = src.ItemsArray
 	}
 
 	if dst.Properties == nil {
@@ -349,21 +356,16 @@ func mergeSchemaFields(dst, src *jsonschema.Schema) {
 		dst.AdditionalItems = src.AdditionalItems
 	}
 
-	if dst.Definitions == nil {
+	// $defs and definitions are mutually exclusive in the jsonschema-go model
+	// (basicChecks rejects a schema with both set, which would break the
+	// document's marshal), so fill them together only when dst constrains
+	// neither -- the same unit-fill contract used for Type/Types above.
+	if dst.Defs == nil && dst.Definitions == nil {
+		dst.Defs = src.Defs
 		dst.Definitions = src.Definitions
 	}
 
-	if dst.Defs == nil {
-		dst.Defs = src.Defs
-	}
-
-	if dst.DependencySchemas == nil {
-		dst.DependencySchemas = src.DependencySchemas
-	}
-
-	if dst.DependencyStrings == nil {
-		dst.DependencyStrings = src.DependencyStrings
-	}
+	mergeDependencies(dst, src)
 
 	if dst.UnevaluatedProperties == nil {
 		dst.UnevaluatedProperties = src.UnevaluatedProperties
@@ -375,10 +377,6 @@ func mergeSchemaFields(dst, src *jsonschema.Schema) {
 
 	if dst.PrefixItems == nil {
 		dst.PrefixItems = src.PrefixItems
-	}
-
-	if dst.ItemsArray == nil {
-		dst.ItemsArray = src.ItemsArray
 	}
 
 	if dst.MinContains == nil {
@@ -402,4 +400,70 @@ func mergeSchemaFields(dst, src *jsonschema.Schema) {
 	}
 
 	dst.Extra = mergeExtraInto(dst.Extra, src.Extra)
+}
+
+// mergeDependencies fills dst's dependency maps from src while preserving the
+// invariant that no key appears in both DependencySchemas and
+// DependencyStrings. The two maps are the schema and string-array shapes of a
+// single dependencies key, and jsonschema's basicChecks rejects a key present
+// in both, which would fail the whole document's marshal. The higher-priority
+// dst keeps every key it already defines in either shape; a src key fills a gap
+// only when dst constrains it in neither map. A src map is never mutated, since
+// a lower-priority annotator may return a shared prototype schema.
+func mergeDependencies(dst, src *jsonschema.Schema) {
+	if src.DependencySchemas == nil && src.DependencyStrings == nil {
+		return
+	}
+
+	claimed := func(key string) bool {
+		if _, ok := dst.DependencySchemas[key]; ok {
+			return true
+		}
+
+		_, ok := dst.DependencyStrings[key]
+
+		return ok
+	}
+
+	// Per copySchema, dst's maps alias the annotator's prototype, so each map is
+	// cloned before its first insert (clone-on-write) rather than mutated in
+	// place. A nil map clones to nil, so a fresh map is allocated when dst had
+	// none.
+	schemasCloned := false
+
+	for key, schema := range src.DependencySchemas {
+		if claimed(key) {
+			continue
+		}
+
+		if !schemasCloned {
+			dst.DependencySchemas = maps.Clone(dst.DependencySchemas)
+			if dst.DependencySchemas == nil {
+				dst.DependencySchemas = make(map[string]*jsonschema.Schema)
+			}
+
+			schemasCloned = true
+		}
+
+		dst.DependencySchemas[key] = schema
+	}
+
+	stringsCloned := false
+
+	for key, strs := range src.DependencyStrings {
+		if claimed(key) {
+			continue
+		}
+
+		if !stringsCloned {
+			dst.DependencyStrings = maps.Clone(dst.DependencyStrings)
+			if dst.DependencyStrings == nil {
+				dst.DependencyStrings = make(map[string][]string)
+			}
+
+			stringsCloned = true
+		}
+
+		dst.DependencyStrings[key] = strs
+	}
 }
