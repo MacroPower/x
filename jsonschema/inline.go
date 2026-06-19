@@ -755,7 +755,16 @@ func (in *inliner) resolveTarget(node *Schema, ref string) (*Schema, error) {
 		return target, nil
 	}
 
-	// Anchor within the fetched document.
+	// Anchor within the fetched document. The anchor is registered under the
+	// document's canonical base, which is the fetch URI unless the document
+	// declares a distinct $id, so try the canonical base before falling back to
+	// the retrieval URI.
+	if canonBase := in.v.schemaBase(docRoot); canonBase != "" && canonBase != baseURI {
+		if target, ok := in.v.lookupAnchor(canonBase + "#" + fragment); ok {
+			return target, nil
+		}
+	}
+
 	if target, ok := in.v.lookupAnchor(baseURI + "#" + fragment); ok {
 		return target, nil
 	}

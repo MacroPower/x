@@ -1045,6 +1045,28 @@ func TestInlineFetchedDocIDDoesNotClobber(t *testing.T) {
 		"the later ref to /a still inlines A, not the clobbering B")
 }
 
+// TestInlineAnchorInFetchedDocWithCanonicalID pins that an $anchor ref into a
+// fetched document still inlines when that document declares its own canonical
+// $id. The walk registers the anchor under that canonical base rather than the
+// retrieval URI, so resolveTarget must consult the canonical base too.
+func TestInlineAnchorInFetchedDocWithCanonicalID(t *testing.T) {
+	t.Parallel()
+
+	doc := &jsonschema.Schema{
+		ID:     "https://canonical.example/c",
+		Anchor: "myanchor",
+		Type:   "integer",
+	}
+
+	root := &jsonschema.Schema{Ref: "https://fetch.example/doc#myanchor"}
+
+	got, err := jsonschema.Inline(t.Context(), root, jsonschema.WithRefResolver(mapResolver{
+		"https://fetch.example/doc": doc,
+	}))
+	require.NoError(t, err, "the anchor must resolve under the document's canonical base")
+	assert.Equal(t, "integer", got.Type, "the anchored integer schema is inlined")
+}
+
 // TestInlineValidatesIdentically pins the behavior contract: the inlined
 // schema, compiled without any resolver, accepts and rejects the same
 // instances as the original compiled with one.
