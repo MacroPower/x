@@ -3268,7 +3268,7 @@ func truncatedNumber(s string) string {
 		return s
 	}
 
-	return fmt.Sprintf("%s... (%d digits)", s[:keep], len(s))
+	return fmt.Sprintf("%s... (%d chars)", s[:keep], len(s))
 }
 
 // ratString returns a compact string representation of a [big.Rat]. An integer
