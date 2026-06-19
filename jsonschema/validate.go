@@ -4739,8 +4739,25 @@ func (v *validator) registerFallbackSchema(s *Schema, base string) {
 	// scope: lookupDynamicAnchor resolves only against the shared registry, so a
 	// dynamic anchor a fallback materialized cannot pollute an unrelated
 	// $dynamicRef's dynamic scope.
-	maps.Copy(v.fallbackURIRegistry, scratch.uriRegistry)
-	maps.Copy(v.fallbackAnchorRegistry, scratch.anchorRegistry)
+	//
+	// Merge first-write-wins so two distinct fallback schemas registering the
+	// same absolute $id/$anchor key (only reachable from a malformed duplicate-key
+	// schema) resolve deterministically to the earliest-materialized one, matching
+	// registerSchema's onlyIfAbsent precedence rather than a map-iteration race.
+	for k, s := range scratch.uriRegistry {
+		if _, ok := v.fallbackURIRegistry[k]; !ok {
+			v.fallbackURIRegistry[k] = s
+		}
+	}
+
+	for k, s := range scratch.anchorRegistry {
+		if _, ok := v.fallbackAnchorRegistry[k]; !ok {
+			v.fallbackAnchorRegistry[k] = s
+		}
+	}
+
+	// Base URIs key on the schema pointer, which is unique per node, so no
+	// cross-schema collision is possible and a plain copy is correct.
 	maps.Copy(v.fallbackBaseURIs, scratch.baseURIs)
 }
 
