@@ -11,11 +11,13 @@ import (
 )
 
 var (
-	// The modifiers capture allows one level of nested brackets so a bracketed
-	// default value (a YAML flow sequence such as "[array, default: [a, b]]") is
-	// kept whole; a non-greedy [^]]* would stop at the inner "]" and leak the
-	// rest into the description while dropping the default.
-	paramRegex     = regexp.MustCompile(`^\s*##\s*@param\s+(\S+)\s*(?:\[((?:[^\[\]]|\[[^\]]*\])*)\])?\s*(.*)$`)
+	// The key and the remaining text are captured separately; splitModifiers
+	// then peels off a leading "[...]" modifier group by balanced-bracket scan,
+	// which keeps an arbitrarily nested flow-sequence default (such as
+	// "[array, default: [a, [b], c]]") whole. A fixed regex can only balance a
+	// bounded nesting depth, so it would cut a deeper default at an inner "]"
+	// and leak the rest into the description.
+	paramRegex     = regexp.MustCompile(`^\s*##\s*@param\s+(\S+)\s*(.*)$`)
 	skipRegex      = regexp.MustCompile(`^\s*##\s*@skip\s+(\S+)`)
 	ignoredTagExpr = regexp.MustCompile(`^\s*##\s*@(section|descriptionStart|descriptionEnd|extra)\b`)
 	arrayIndexExpr = regexp.MustCompile(`\[\d+\]`)
@@ -76,8 +78,7 @@ func (a *Annotator) ForContent(content []byte) (magicschema.Annotator, error) {
 		// Check for @param.
 		if m := paramRegex.FindStringSubmatch(line); m != nil {
 			keyPath := normalizeKeyPath(m[1])
-			modifiers := m[2]
-			description := strings.TrimSpace(m[3])
+			modifiers, description := splitModifiers(m[2])
 
 			param := &bitnamiParam{
 				description: description,
@@ -131,6 +132,36 @@ func (a *Annotator) Annotate(_ ast.Node, keyPath string) *magicschema.Annotation
 // paths like "jobs[0].nameOverride" to "jobs.nameOverride".
 func normalizeKeyPath(keyPath string) string {
 	return arrayIndexExpr.ReplaceAllString(keyPath, "")
+}
+
+// splitModifiers separates a leading "[...]" modifier group from the
+// description that follows it. It scans for the bracket that balances the
+// opening "[", so a default value that is itself a nested flow sequence
+// ("[array, default: [a, [b], c]]") stays whole instead of being cut at the
+// first inner "]". When the brackets do not balance, the whole text is taken
+// as the description (no modifiers), failing open.
+func splitModifiers(rest string) (string, string) {
+	rest = strings.TrimSpace(rest)
+	if !strings.HasPrefix(rest, "[") {
+		return "", rest
+	}
+
+	depth := 0
+
+	for i, ch := range rest {
+		switch ch {
+		case '[':
+			depth++
+		case ']':
+			depth--
+
+			if depth == 0 {
+				return rest[1:i], strings.TrimSpace(rest[i+1:])
+			}
+		}
+	}
+
+	return "", rest
 }
 
 // parseModifiers parses the comma-separated modifiers within brackets.

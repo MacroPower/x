@@ -240,6 +240,29 @@ func TestBitnamiAnnotator(t *testing.T) {
 				assert.Equal(t, "a,b,c", v["default"])
 			},
 		},
+		"deeply nested flow-sequence default is preserved": {
+			// The default is a nested flow sequence; a balanced-bracket scan
+			// keeps it whole instead of cutting at the first inner "]", which
+			// the previous one-level regex did (corrupting both default and
+			// description).
+			input: stringtest.Input(`
+				## @param foo [array, default: [a, [b], c]] My description
+				foo: real
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				v, ok := props["foo"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "array", v["type"])
+				assert.Equal(t, "My description", v["description"])
+				assert.Equal(t, []any{"a", []any{"b"}, "c"}, v["default"])
+			},
+		},
 		"token ending in default is not the default modifier": {
 			input: stringtest.Input(`
 				## @param val [somedefault: y] Description
