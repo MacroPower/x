@@ -2541,6 +2541,35 @@ func TestGenerateFor_NullablePointerJSONStringConstAcceptsNull(t *testing.T) {
 		"a different value is rejected")
 }
 
+func TestGenerateFor_NullablePointerConstDropsTypeBounds(t *testing.T) {
+	t.Parallel()
+
+	// A const fully pins the value, so the type-derived/tag numeric bounds are
+	// redundant. They must be dropped from both the relocated value branch and
+	// the nullable wrapper; a bound stranded on the wrapper would reject a const
+	// that sits outside it.
+	type Container struct {
+		F *int `json:"f" jsonschema:"minimum=10,const=5"`
+	}
+
+	s, err := jsonschema.GenerateFor[Container](t.Context())
+	require.NoError(t, err)
+
+	field := s.Properties["f"]
+	require.NotNil(t, field)
+	assert.Nil(t, field.Minimum, "the wrapper must not strand the type-derived bound")
+
+	validator, err := jsonschema.Compile(t.Context(), s)
+	require.NoError(t, err)
+
+	assert.NoError(t, validator.ValidateJSON(t.Context(), []byte(`{"f": 5}`)),
+		"the const value must validate even though it is below the dropped minimum")
+	assert.NoError(t, validator.ValidateJSON(t.Context(), []byte(`{"f": null}`)),
+		"a null pointer is permitted")
+	assert.Error(t, validator.ValidateJSON(t.Context(), []byte(`{"f": 6}`)),
+		"a non-const value is rejected")
+}
+
 func TestGenerateFor_AllofPrefixFieldNotMisclassified(t *testing.T) {
 	t.Parallel()
 

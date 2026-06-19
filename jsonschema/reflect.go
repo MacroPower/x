@@ -1395,20 +1395,10 @@ func (g *generator) buildFieldSchema(parentType reflect.Type, fi structFieldInfo
 		// A nullable pointer field is generated as anyOf[value, null] with
 		// annotations kept as siblings of anyOf. Const and enum test the instance
 		// value regardless of its type, so on the wrapper they also reject the
-		// permitted null; relocate them onto the value branch. Type-gated keywords
-		// such as minimum and pattern do not apply to null and stay put.
-		target := relocateConstEnumToValueBranch(fieldSchema)
-
-		// An explicit const/enum fully constrains the value, so the type-derived
-		// numeric bounds are redundant and are dropped. Keeping them would risk
-		// rejecting a const/enum set to the type's own boundary value, and they add
-		// nothing once the value is pinned to a fixed set.
-		if target.Const != nil || target.Enum != nil {
-			target.Minimum = nil
-			target.Maximum = nil
-			target.ExclusiveMinimum = nil
-			target.ExclusiveMaximum = nil
-		}
+		// permitted null; relocate them onto the value branch and drop the now-
+		// redundant type-derived numeric bounds. Type-gated keywords such as
+		// pattern do not apply to null and stay put.
+		dropTypeBoundsForConstEnum(fieldSchema)
 	}
 
 	// Add to parent.
@@ -1460,18 +1450,9 @@ func (g *generator) applyFieldInterpreters(
 	// Interpreters set Const/Enum on the field schema, which for a nullable
 	// pointer field is the anyOf wrapper. Const and enum test the instance value
 	// regardless of its type, so on the wrapper they reject the permitted null;
-	// relocate them onto the value branch, matching the jsonschema-tag path.
-	target := relocateConstEnumToValueBranch(fieldSchema)
-
-	// An interpreter-set const/enum fully constrains the value, so the
-	// type-derived numeric bounds are redundant and are dropped, matching the
-	// jsonschema-tag path in buildFieldSchema.
-	if target.Const != nil || target.Enum != nil {
-		target.Minimum = nil
-		target.Maximum = nil
-		target.ExclusiveMinimum = nil
-		target.ExclusiveMaximum = nil
-	}
+	// relocate them onto the value branch and drop the now-redundant type-derived
+	// numeric bounds, matching the jsonschema-tag path in buildFieldSchema.
+	dropTypeBoundsForConstEnum(fieldSchema)
 
 	// Wrap bare $ref with allOf for Draft-07 if annotations were added. This
 	// mutates the schema in place, so the entry already in parent.Properties
@@ -1736,6 +1717,29 @@ func relocateConstEnumToValueBranch(s *Schema) *Schema {
 	}
 
 	return s
+}
+
+// clearNumericBounds drops the four numeric range keywords from s. Used once a
+// const/enum pins the value, where the type-derived bounds are redundant and
+// could reject a value set to the type's own boundary.
+func clearNumericBounds(s *Schema) {
+	s.Minimum = nil
+	s.Maximum = nil
+	s.ExclusiveMinimum = nil
+	s.ExclusiveMaximum = nil
+}
+
+// dropTypeBoundsForConstEnum relocates a nullable pointer's const/enum onto the
+// value branch, then drops the type-derived numeric bounds once a const or enum
+// pins the value. The bounds may sit on the relocated value branch or, for a
+// nullable pointer, on the anyOf/type-list wrapper, so both are cleared. The
+// jsonschema-tag path and the tag-interpreter path share this policy.
+func dropTypeBoundsForConstEnum(fieldSchema *Schema) {
+	target := relocateConstEnumToValueBranch(fieldSchema)
+	if target.Const != nil || target.Enum != nil {
+		clearNumericBounds(target)
+		clearNumericBounds(fieldSchema)
+	}
 }
 
 // moveConstEnum transfers any Const and Enum set on src onto dst, clearing them
