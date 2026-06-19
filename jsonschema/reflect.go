@@ -594,14 +594,20 @@ func (g *generator) handleBuiltinType(t reflect.Type, s *Schema, nullable bool) 
 	return g.applyNullable(s, t, nullable), nil
 }
 
+// byteSliceSchema returns the schema for a byte slice, which encoding/json
+// renders as a base64-encoded string.
+func (g *generator) byteSliceSchema() *Schema {
+	s := &Schema{ContentEncoding: contentEncodingBase64}
+	g.applyContainerType(s, typeNameString)
+
+	return s
+}
+
 // builtinOverride returns a schema for well-known types, if applicable.
 func (g *generator) builtinOverride(t reflect.Type) (*Schema, bool) {
 	switch t {
 	case typeByteSlice:
-		s := &Schema{ContentEncoding: contentEncodingBase64}
-		g.applyContainerType(s, typeNameString)
-
-		return s, true
+		return g.byteSliceSchema(), true
 
 	case typeTime:
 		return &Schema{Type: typeNameString, Format: formatDateTime}, true
@@ -734,10 +740,7 @@ func (g *generator) schemaForSlice(t reflect.Type, nullable bool) (*Schema, erro
 	if el := t.Elem(); el.Kind() == reflect.Uint8 {
 		pt := reflect.PointerTo(el)
 		if !pt.Implements(typeJSONMarshaler) && !pt.Implements(typeTextMarshaler) {
-			s := &Schema{ContentEncoding: contentEncodingBase64}
-			g.applyContainerType(s, typeNameString)
-
-			return s, nil
+			return g.byteSliceSchema(), nil
 		}
 	}
 
