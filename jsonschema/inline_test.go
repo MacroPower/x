@@ -1132,6 +1132,7 @@ func TestFileResolver(t *testing.T) {
 	files := map[string]string{
 		"schemas/a.json": `{"type": "string"}`,
 		"broken.json":    `{not json`,
+		"null.json":      `null`,
 	}
 
 	tests := map[string]struct {
@@ -1155,6 +1156,11 @@ func TestFileResolver(t *testing.T) {
 		},
 		"malformed document": {
 			uri: "broken.json",
+		},
+		"null content rejected": {
+			// A file whose top-level JSON is null is not a schema document; it
+			// must be an error, not a silently-degenerate reject-everything schema.
+			uri: "null.json",
 		},
 	}
 

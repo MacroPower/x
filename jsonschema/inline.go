@@ -2,7 +2,6 @@ package jsonschema
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -864,11 +863,13 @@ func NewFileResolver(fsys fs.FS) *FileResolver {
 	return &FileResolver{fsys: fsys}
 }
 
-// ResolveRef reads and unmarshals the schema document stored at the file
-// path named by uri. The resolver is authoritative for its fs, so an
-// unreadable or undecodable file is an error rather than the not-resolved
-// answer. Reads are local and not cancellable, so the context is unused.
-// See [FileResolver] for the path semantics.
+// ResolveRef reads and parses the schema document stored at the file path
+// named by uri. The resolver is authoritative for its fs, so an unreadable or
+// undecodable file is an error rather than the not-resolved answer. Parsing
+// goes through [ParseSchema], so a file whose top-level JSON is not an object
+// or boolean (a number, string, array, or null) is rejected rather than
+// silently producing a degenerate schema. Reads are local and not cancellable,
+// so the context is unused. See [FileResolver] for the path semantics.
 func (r *FileResolver) ResolveRef(_ context.Context, uri string) (*Schema, error) {
 	name := strings.TrimPrefix(uri, "file://")
 	name = strings.TrimPrefix(name, "/")
@@ -878,12 +879,10 @@ func (r *FileResolver) ResolveRef(_ context.Context, uri string) (*Schema, error
 		return nil, fmt.Errorf("read schema document: %w", err)
 	}
 
-	var s Schema
-
-	err = json.Unmarshal(data, &s)
+	s, err := ParseSchema(data)
 	if err != nil {
 		return nil, fmt.Errorf("decode schema document %q: %w", name, err)
 	}
 
-	return &s, nil
+	return s, nil
 }
