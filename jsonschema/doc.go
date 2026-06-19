@@ -534,9 +534,12 @@
 // Instance numbers are compared exactly (decoded with UseNumber, compared as
 // [math/big.Rat]), with one bound on the work an adversarial literal can demand:
 // for a JSON number whose exact value exceeds an internal cap (about 4096
-// significant digits or decimal exponent magnitude), the multipleOf check is
-// skipped, while minimum, maximum, exclusiveMinimum, and exclusiveMaximum are
-// still enforced exactly. The float64-typed bound keywords (minimum, maximum,
+// significant digits or decimal exponent magnitude), minimum, maximum,
+// exclusiveMinimum, and exclusiveMaximum are still enforced exactly. The
+// multipleOf check is enforced for an over-cap integer (its divisibility is
+// computed with modular arithmetic, so the magnitude is never expanded) and
+// skipped only for an over-cap non-integer, whose fractional part cannot be
+// expanded within the cap. The float64-typed bound keywords (minimum, maximum,
 // exclusiveMinimum, exclusiveMaximum, multipleOf) are limited to float64
 // precision: integers beyond 2^53 round when the schema is decoded, even though
 // the instance value they are compared against is exact. Both const and enum

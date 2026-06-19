@@ -694,9 +694,12 @@ an unaccepted instance type, `Schema.Resolve` errors, `ErrInvalidType`, and
 Instance numbers are compared exactly (decoded with `UseNumber`, compared as
 `big.Rat`), with one bound on the work an adversarial literal can demand: for a
 JSON number whose exact value exceeds an internal cap (about 4096 significant
-digits or decimal exponent magnitude), the `multipleOf` check is skipped, while
-`minimum`/`maximum`/`exclusiveMinimum`/`exclusiveMaximum` are still enforced
-exactly. Schema-side numeric keyword values are limited to `float64` precision:
+digits or decimal exponent magnitude), `minimum`/`maximum`/`exclusiveMinimum`/
+`exclusiveMaximum` are still enforced exactly. `multipleOf` is enforced for an
+over-cap _integer_ (its divisibility is computed with modular arithmetic, so the
+magnitude is never expanded) and skipped only for an over-cap _non-integer_,
+whose fractional part cannot be expanded within the cap. Schema-side numeric
+keyword values are limited to `float64` precision:
 integers beyond 2^53 in keywords like `const`, `minimum`, or `multipleOf` round
 when the schema is decoded, even though the instance value they are compared
 against is exact. A schema-side `float64` is interpreted at its shortest

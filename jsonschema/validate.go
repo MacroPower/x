@@ -3195,11 +3195,12 @@ func (v *validator) validateNumeric(
 // the negative cap), or a significand longer than the cap. Every such value
 // still orders deterministically against any float64 bound via
 // [decNumber.cmpRat], and equality with a bound is impossible, so the
-// inclusive and exclusive variants of each bound coincide. The multipleOf
-// divisibility computation needs the exact value and is skipped, but its
-// schema-validity check (a non-positive divisor) does not depend on the
-// instance and still fires. A zero value is always exactlyComparable, so it
-// never reaches this path.
+// inclusive and exclusive variants of each bound coincide. An over-cap integer
+// still has its multipleOf divisibility enforced through modular arithmetic
+// (see [integerMultipleOf]); only an over-cap non-integer skips it, since
+// expanding its fractional part is unbounded. The schema-validity check (a
+// non-positive divisor) fires regardless. A zero value is always
+// exactlyComparable, so it never reaches this path.
 func (v *validator) validateNumericUnbounded(
 	schema *Schema,
 	d decNumber,
@@ -3215,14 +3216,22 @@ func (v *validator) validateNumericUnbounded(
 		errs = append(errs, leafError(instancePath, schemaPath, keyword, msg))
 	}
 
-	// A non-positive multipleOf makes the schema invalid independent of the
-	// instance value, so it is reported here even though the divisibility
-	// computation itself is skipped for an over-cap number.
-	if schema.MultipleOf != nil && *schema.MultipleOf <= 0 {
-		add(KeywordMultipleOf, fmt.Sprintf("multipleOf must be greater than 0, got %v", *schema.MultipleOf))
-	}
-
 	bounds := v.boundsFor(schema)
+
+	// A non-positive multipleOf makes the schema invalid independent of the
+	// instance value. For a positive divisor, an over-cap integer's
+	// divisibility is still decidable at bounded cost via modular arithmetic
+	// (see integerMultipleOf), so it is enforced. A non-integral over-cap value
+	// keeps the documented skip: expanding its fractional part is unbounded.
+	if schema.MultipleOf != nil {
+		switch {
+		case *schema.MultipleOf <= 0:
+			add(KeywordMultipleOf, fmt.Sprintf("multipleOf must be greater than 0, got %v", *schema.MultipleOf))
+		case bounds.multipleOf != nil && d.isIntegral() &&
+			!integerMultipleOf(d, literal, bounds.multipleOf):
+			add(KeywordMultipleOf, fmt.Sprintf("%s is not a multiple of %v", num, *schema.MultipleOf))
+		}
+	}
 
 	// A nil bound denotes a NaN/Inf value with no rational form; such a bound
 	// cannot constrain a finite instance, so the comparison is skipped. The
@@ -3269,6 +3278,39 @@ func truncatedNumber(s string) string {
 	}
 
 	return fmt.Sprintf("%s... (%d chars)", s[:keep], len(s))
+}
+
+// integerMultipleOf reports whether the integral value of literal (decomposed
+// as d) is an exact multiple of the positive rational divisor m, without
+// expanding an over-cap magnitude. Writing the value as sig*10^k with k >= 0 and
+// m as the reduced p/q, the value is a multiple of m exactly when p divides it,
+// since gcd(p, q) = 1 means q contributes no factor of p. The check is then
+// (sig mod p)*(10^k mod p) mod p == 0, with the power reduced modulo p so 10^k
+// is never materialized. The exponent comes from the literal because
+// decNumber.exp is clamped for an over-cap magnitude. The caller must pass an
+// integral d (see [decNumber.isIntegral]) and a positive m.
+func integerMultipleOf(d decNumber, literal string, m *big.Rat) bool {
+	p := new(big.Int).Abs(m.Num())
+	if p.Sign() == 0 || d.sig == "" {
+		return true // No real divisor, or a zero value: a multiple either way.
+	}
+
+	sig, ok := new(big.Int).SetString(d.sig, 10)
+	if !ok {
+		return true // sig is all digits by construction, so this cannot fail.
+	}
+
+	k := new(big.Int).Sub(decCanonicalExp(literal), big.NewInt(int64(len(d.sig))))
+	if k.Sign() < 0 {
+		return true // Not integral after all; the caller should have screened it.
+	}
+
+	pow := new(big.Int).Exp(big.NewInt(10), k, p)
+	rem := new(big.Int).Mod(sig, p)
+	rem.Mul(rem, pow)
+	rem.Mod(rem, p)
+
+	return rem.Sign() == 0
 }
 
 // ratString returns a compact string representation of a [big.Rat]. An integer

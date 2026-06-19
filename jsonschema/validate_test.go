@@ -7498,13 +7498,19 @@ func TestValidateLargeNumberGuarded(t *testing.T) {
 		"large exponent above minimum":      {`{"minimum":1}`, "1e5000", true},
 		"negative large exponent magnitude": {`{"minimum":0}`, "-1e5000", false},
 
-		// The multipleOf divisibility computation is skipped for values past
-		// the cap, so an over-cap value passes any positive divisor. A
+		// The multipleOf check is enforced for an over-cap integer via modular
+		// arithmetic, never expanding the magnitude: 10^5000 is not divisible
+		// by 3 or 7 but is by 2 and 5. A non-integral over-cap value
+		// keeps the documented skip (its fractional part cannot be expanded). A
 		// non-positive divisor is a schema-validity error independent of the
 		// instance, so it still fails on the unbounded path.
-		"multipleOf skipped for large exponent":      {`{"multipleOf":3}`, "1e5000", true},
-		"multipleOf negative rejects large exponent": {`{"multipleOf":-1}`, "1e5000", false},
-		"multipleOf zero rejects large exponent":     {`{"multipleOf":0}`, "1e5000", false},
+		"multipleOf rejects non-divisor exponent":  {`{"multipleOf":3}`, "1e5000", false},
+		"multipleOf rejects non-divisor literal":   {`{"multipleOf":7}`, "1" + strings.Repeat("0", 5000), false},
+		"multipleOf accepts even large exponent":   {`{"multipleOf":2}`, "1e5000", true},
+		"multipleOf accepts fifth large exponent":  {`{"multipleOf":5}`, "1e5000", true},
+		"multipleOf skipped for tiny non-integer":  {`{"multipleOf":3}`, "1e-5000", true},
+		"multipleOf negative rejects large number": {`{"multipleOf":-1}`, "1e5000", false},
+		"multipleOf zero rejects large number":     {`{"multipleOf":0}`, "1e5000", false},
 
 		// Const and enum compare via equality rather than the numeric bound
 		// path; a giant literal must not reach an unguarded big.Rat parse.
