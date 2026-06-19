@@ -3671,7 +3671,18 @@ func hashValue(v any) uint64 {
 	case map[string]any:
 		h := uint64(7)
 		for k, item := range val {
-			h += stringHash(k) ^ hashValue(item)
+			// Fold each key with its own value before summing, so permuting which
+			// key holds which value changes the per-entry term. A plain
+			// XOR-then-sum is insensitive to that binding and buckets
+			// permutation-objects ({"a":1,"b":2} vs {"a":2,"b":1}) together,
+			// degrading hasDuplicates toward O(n^2) equalJSONValues calls. The sum
+			// keeps the result independent of Go's randomized map iteration order,
+			// which is required: equal objects must hash equally.
+			x := stringHash(k)*1099511628211 ^ hashValue(item)
+			x ^= x >> 33
+			x *= 0xff51afd7ed558ccd
+			x ^= x >> 33
+			h += x
 		}
 
 		return h
