@@ -52,13 +52,14 @@ type generator struct {
 	// DescriptionProvider with every comment lookup.
 	ctx context.Context
 
-	typeToDefName   map[reflect.Type]string
-	typeProviders   []TypeSchemaProvider
-	namer           Namer
-	defs            map[string]*Schema
-	defsNameToTypes map[string][]reflect.Type
-	typeToDefSchema map[reflect.Type]*Schema
-	visiting        map[reflect.Type]bool
+	typeToDefName     map[reflect.Type]string
+	typeProviders     []TypeSchemaProvider
+	namer             Namer
+	defs              map[string]*Schema
+	defsNameToTypes   map[string][]reflect.Type
+	typeToDefSchema   map[reflect.Type]*Schema
+	typeOverrideCache map[reflect.Type]typeOverrideResult
+	visiting          map[reflect.Type]bool
 	// DefaultsFrom is the WithDefaultsFrom instance; defaultsFromSet
 	// distinguishes an explicit nil instance from the option being absent.
 	defaultsFrom         any
@@ -79,6 +80,15 @@ type generator struct {
 type refRecord struct {
 	schema *Schema
 	target reflect.Type
+}
+
+// typeOverrideResult memoizes one [generator.resolveTypeSchema] consultation so
+// the registered type providers run at most once per type per run, even when the
+// allOf-composition probe and the real build both ask about the same type.
+type typeOverrideResult struct {
+	schema   *Schema
+	err      error
+	resolved bool
 }
 
 // newGenerator returns a configuration-only generator prototype: the options
@@ -113,6 +123,7 @@ func (g *generator) forRun(ctx context.Context) *generator {
 	run.defsNameToTypes = map[string][]reflect.Type{}
 	run.typeToDefName = map[reflect.Type]string{}
 	run.typeToDefSchema = map[reflect.Type]*Schema{}
+	run.typeOverrideCache = map[reflect.Type]typeOverrideResult{}
 	run.visiting = map[reflect.Type]bool{}
 	run.refRecords = nil
 
@@ -448,6 +459,24 @@ func isRecursiveContainerKind(k reflect.Kind) bool {
 // type to the next provider; any other provider error stops the
 // consultation and aborts generation.
 func (g *generator) resolveTypeSchema(t reflect.Type) (*Schema, bool, error) {
+	// Memoize per run so a stateful or expensive provider is consulted once per
+	// type: the allOf-composition probe in needsAllOfComposition and the real
+	// build both resolve the same type, and a non-deterministic provider would
+	// otherwise disagree between them. The result is cloned by finishTypeOverride
+	// before mutation, so handing the same schema to both callers is safe.
+	if cached, ok := g.typeOverrideCache[t]; ok {
+		return cached.schema, cached.resolved, cached.err
+	}
+
+	s, resolved, err := g.resolveTypeSchemaUncached(t)
+	g.typeOverrideCache[t] = typeOverrideResult{schema: s, resolved: resolved, err: err}
+
+	return s, resolved, err
+}
+
+// resolveTypeSchemaUncached performs the provider consultation that
+// resolveTypeSchema memoizes.
+func (g *generator) resolveTypeSchemaUncached(t reflect.Type) (*Schema, bool, error) {
 	tc := TypeContext{Type: t, Draft: g.draft}
 	for _, v := range slices.Backward(g.typeProviders) {
 		s, err := v.SchemaForType(g.ctx, tc)
