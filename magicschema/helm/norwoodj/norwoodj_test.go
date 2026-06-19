@@ -993,6 +993,32 @@ func TestHelmDocsAnnotator(t *testing.T) {
 				assert.Equal(t, stringtest.JoinLF("Start", "", "After blank"), desc)
 			},
 		},
+		"raw mode under a bare marker preserves leading blank lines": {
+			// A bare "# --" then @raw then a blank line must keep the leading
+			// newline separators, like upstream. Seeding an empty description
+			// directly under raw mode would swallow them and collapse the
+			// multi-line raw text to just its last paragraph.
+			input: stringtest.Input(`
+				# --
+				# @raw
+				#
+				# After
+				val: x
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				v, ok := props["val"].(map[string]any)
+				require.True(t, ok)
+
+				desc, ok := v["description"].(string)
+				require.True(t, ok)
+				assert.Equal(t, stringtest.JoinLF("", "", "After"), desc)
+			},
+		},
 		"raw before dash-dash does not activate raw mode": {
 			input: stringtest.Input(`
 				# @raw

@@ -359,11 +359,14 @@ func parseCommentBlock(commentLines []string) *parsedComment {
 
 		content := cm[2]
 
-		// Join onto the accumulated description, but seed it directly when it
-		// is still empty (a bare "# --" marker) so the result does not begin
-		// with a stray separator.
+		// Join onto the accumulated description. Outside raw mode an empty
+		// description is seeded directly (a bare "# --" marker) so the result
+		// does not begin with a stray separator. In raw mode the empty state
+		// still needs the leading newline, so the raw branch handles it even
+		// from empty -- dropping it would swallow the leading blank lines that
+		// raw mode is meant to preserve.
 		switch {
-		case description == "":
+		case description == "" && !isRaw:
 			description = content
 		case isRaw:
 			description += "\n" + content
