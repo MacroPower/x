@@ -794,7 +794,8 @@ func parseFloat(key, value string) (float64, error) {
 		if exact, ok := new(big.Int).SetString(value, 10); ok {
 			if new(big.Float).SetInt(exact).Cmp(big.NewFloat(n)) != 0 {
 				return 0, fmt.Errorf(
-					"jsonschema tag: key %q: integer bound %q exceeds exact float64 precision (>2^53)",
+					"jsonschema tag: key %q: integer bound %q exceeds exact float64 "+
+						"precision (>2^53); use const for an exact extreme value",
 					key, value,
 				)
 			}
