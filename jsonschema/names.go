@@ -8,25 +8,35 @@ import (
 	"strings"
 )
 
-// defNameReplacer rewrites characters that are unsafe in a definitions key and
-// the JSON Pointer reference token that points at it. Brackets and commas appear
-// in generic type names (e.g. Box[pkg.T]); the slash and tilde are the RFC 6901
-// JSON Pointer separator and escape characters, which a generic type argument's
-// import path (e.g. Box[example.com/foo/bar.T]) would otherwise embed verbatim
-// and break the resulting $ref fragment.
-var defNameReplacer = strings.NewReplacer(
-	"[", "_",
-	"]", "_",
-	",", "_",
-	"/", "_",
-	"~", "_",
-)
+// sanitizeDefName rewrites a definitions key, and the JSON Pointer $ref token
+// that points at it, so it is safe as both an RFC 6901 pointer token and an RFC
+// 3986 URI fragment. Generic type names embed characters that are invalid in one
+// or both: brackets, commas, spaces, and braces from type-argument lists; the
+// slash and tilde (the pointer separator and escape); and quotes, asterisks, and
+// the like from anonymous struct tags and pointer arguments (a reflect name such
+// as Box[struct { A int <tag> }] carries spaces, braces, and tag quotes). Every
+// rune outside the conservative unreserved set [A-Za-z0-9._-] is mapped to '_'
+// so the generated $ref resolves in external tools, not only this package's own
+// resolver.
+func sanitizeDefName(s string) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'A' && r <= 'Z',
+			r >= 'a' && r <= 'z',
+			r >= '0' && r <= '9',
+			r == '.', r == '_', r == '-':
+			return r
+		default:
+			return '_'
+		}
+	}, s)
+}
 
 // defaultNamer returns a definition name for a Go type. Characters that are not
 // valid in a definitions key or its JSON Pointer $ref token are replaced with
 // underscores so the generated reference resolves.
 func defaultNamer(t reflect.Type) string {
-	return defNameReplacer.Replace(t.Name())
+	return sanitizeDefName(t.Name())
 }
 
 // defaultNamerFunc adapts [defaultNamer] to the [Namer] interface, for the
@@ -40,14 +50,14 @@ func defaultNamerFunc() Namer {
 // default namer when the namer answers "". The deferral lets a [Namer]
 // rename some types and pass the rest through, and keeps a partial namer
 // from producing an empty definitions key and the broken "#/$defs/" ref
-// that would follow. A non-empty answer is run through the same replacer
+// that would follow. A non-empty answer is run through the same sanitizer
 // the default namer uses, so characters invalid in a definitions key or its
 // JSON Pointer $ref token (such as '/' and '~') cannot produce a dangling or
-// misresolving reference. The replacer never empties a non-empty name, so the
+// misresolving reference. The sanitizer never empties a non-empty name, so the
 // deferral semantics are preserved.
 func (g *generator) schemaName(t reflect.Type) string {
 	if name := g.namer.SchemaName(TypeContext{Type: t, Draft: g.draft}); name != "" {
-		return defNameReplacer.Replace(name)
+		return sanitizeDefName(name)
 	}
 
 	return defaultNamer(t)
@@ -131,11 +141,11 @@ func (g *generator) disambiguateDefs() {
 		// force an unnecessary escalation to the full-path scheme.
 		baseCandidates := make([]string, len(types))
 		for i, t := range types {
-			// Run the prefix through the same replacer the rest of the package
+			// Run the prefix through the same sanitizer the rest of the package
 			// uses: a package path element may legally contain a JSON Pointer
 			// special character (the tilde, allowed in module paths), which
 			// would otherwise misresolve the generated $ref token.
-			baseCandidates[i] = defNameReplacer.Replace(path.Base(t.PkgPath())) + "_" + name
+			baseCandidates[i] = sanitizeDefName(path.Base(t.PkgPath())) + "_" + name
 		}
 
 		// Pick the first scheme whose names are unique within the group and do
@@ -145,11 +155,11 @@ func (g *generator) disambiguateDefs() {
 		chosen := baseCandidates
 		if !g.candidatesUsable(baseCandidates, used) {
 			// Candidate scheme 2 (fallback): prefix with the full import path.
-			// The replacer subsumes the slash replacement and also handles the
+			// The sanitizer subsumes the slash replacement and also handles the
 			// tilde and the other characters invalid in a $ref token.
 			fullCandidates := make([]string, len(types))
 			for i, t := range types {
-				fullCandidates[i] = defNameReplacer.Replace(t.PkgPath()) + "_" + name
+				fullCandidates[i] = sanitizeDefName(t.PkgPath()) + "_" + name
 			}
 
 			chosen = fullCandidates

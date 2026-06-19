@@ -3558,6 +3558,39 @@ func TestGenerateFor_CrossPackageNameDisambiguation(t *testing.T) {
 	require.Equal(t, "#/$defs/beta_Widget", s.Properties["b"].Ref)
 }
 
+func TestGenerateFor_GenericAnonymousArgRefIsURISafe(t *testing.T) {
+	t.Parallel()
+
+	// A generic instantiated over an anonymous struct yields a reflect name
+	// carrying spaces, braces, and tag quotes. The generated $defs key and $ref
+	// must contain only RFC 3986 fragment-safe characters so external validators
+	// can resolve them, not just this package's own resolver.
+	type Root struct {
+		B alpha.Box[struct {
+			A int `json:"a"`
+		}] `json:"b"`
+	}
+
+	s, err := jsonschema.GenerateFor[Root](t.Context())
+	require.NoError(t, err)
+
+	ref := s.Properties["b"].Ref
+	require.NotEmpty(t, ref)
+
+	// The pointer token after "#/$defs/" is the def key; it must be free of
+	// characters that are unsafe in an RFC 3986 URI fragment or RFC 6901 token.
+	const unsafeChars = " {}\"[],~*();:"
+
+	token := strings.TrimPrefix(ref, "#/$defs/")
+	assert.False(t, strings.ContainsAny(token, unsafeChars+"/"),
+		"generated $ref token %q must not contain URI-unsafe characters", token)
+
+	for key := range s.Defs {
+		assert.False(t, strings.ContainsAny(key, unsafeChars),
+			"generated $defs key %q must not contain URI-unsafe characters", key)
+	}
+}
+
 func TestGenerateFor_TypeOverrideDropsRefUnderCollision(t *testing.T) {
 	t.Parallel()
 
