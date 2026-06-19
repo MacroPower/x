@@ -167,18 +167,11 @@ func (c *Config) annotatorsCompletion(
 
 	partial = strings.TrimSpace(partial)
 
-	// Split the base into the names already typed, trimming each element so a
-	// name preceded by a space (from a quoted "helm-schema, bitnami,") still
-	// matches the canonical Registry name and is filtered out below -- mirroring
-	// parseAnnotatorNames. Empty entries (including the trailing comma) drop, so
-	// used holds only real annotator names.
-	var used []string
-
-	for name := range strings.SplitSeq(strings.TrimRight(base, ","), ",") {
-		if trimmed := strings.TrimSpace(name); trimmed != "" {
-			used = append(used, trimmed)
-		}
-	}
+	// The names already typed, cleaned with the shared splitAnnotatorNames rule
+	// so a name preceded by a space (from a quoted "helm-schema, bitnami,")
+	// still matches the canonical Registry name and is filtered out below. The
+	// empty entry from the trailing comma drops, so used holds only real names.
+	used := splitAnnotatorNames(base)
 
 	var out []string
 
@@ -250,6 +243,23 @@ func (c *Config) NewGenerator() (*Generator, error) {
 	return NewGenerator(opts...), nil
 }
 
+// splitAnnotatorNames splits a comma-separated annotator list, trims
+// surrounding whitespace from each element, and drops empty entries. The flag
+// parser and the completion handler share this one definition of the cleaning
+// rule so a completion can never offer a spelling the parser rejects.
+func splitAnnotatorNames(s string) []string {
+	parts := strings.Split(s, ",")
+	cleaned := make([]string, 0, len(parts))
+
+	for _, name := range parts {
+		if name = strings.TrimSpace(name); name != "" {
+			cleaned = append(cleaned, name)
+		}
+	}
+
+	return cleaned
+}
+
 // parseAnnotatorNames parses a comma-separated list of annotator names and
 // returns the corresponding Annotator instances. Whitespace around names is
 // trimmed and empty entries are dropped (CLI parsing concerns); resolution
@@ -259,19 +269,7 @@ func (c *Config) parseAnnotatorNames(names string) ([]Annotator, error) {
 		return nil, nil
 	}
 
-	parts := strings.Split(names, ",")
-	cleaned := make([]string, 0, len(parts))
-
-	for _, name := range parts {
-		name = strings.TrimSpace(name)
-		if name == "" {
-			continue
-		}
-
-		cleaned = append(cleaned, name)
-	}
-
-	annotators, err := c.Registry.Lookup(cleaned...)
+	annotators, err := c.Registry.Lookup(splitAnnotatorNames(names)...)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidOption, err)
 	}
