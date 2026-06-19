@@ -383,16 +383,8 @@ func (in *inliner) run(s *Schema) (*Schema, error) {
 		draft = *in.draftOverride
 	}
 
-	in.v = &validator{
-		root:                  pristine,
-		draft:                 draft,
-		inertIDs:              in.retrievalBase,
-		uriRegistry:           map[string]*Schema{},
-		anchorRegistry:        map[string]*Schema{},
-		dynamicAnchorRegistry: map[string]*Schema{},
-		baseURIs:              map[*Schema]string{},
-		walked:                map[*Schema]bool{},
-	}
+	in.v = &validator{root: pristine, draft: draft, inertIDs: in.retrievalBase}
+	in.v.initRegistries()
 	in.v.walkSchema(pristine, in.baseURI)
 	in.recordPaths(pristine, "", in.v.schemaBase(pristine))
 

@@ -489,16 +489,22 @@ func (v *validator) resolveFormats() {
 	}
 }
 
-// buildRegistry walks the entire schema tree to build URI, anchor, and
-// base-URI registries for $id and $anchor resolution. The walk is seeded
-// with the [WithBaseURI] base, so non-local refs absolutize against it
-// exactly as they would against a root $id.
-func (v *validator) buildRegistry() {
+// initRegistries allocates the five empty registry maps that every fresh
+// registry walk fills.
+func (v *validator) initRegistries() {
 	v.uriRegistry = map[string]*Schema{}
 	v.anchorRegistry = map[string]*Schema{}
 	v.dynamicAnchorRegistry = map[string]*Schema{}
 	v.baseURIs = map[*Schema]string{}
 	v.walked = map[*Schema]bool{}
+}
+
+// buildRegistry walks the entire schema tree to build URI, anchor, and
+// base-URI registries for $id and $anchor resolution. The walk is seeded
+// with the [WithBaseURI] base, so non-local refs absolutize against it
+// exactly as they would against a root $id.
+func (v *validator) buildRegistry() {
+	v.initRegistries()
 
 	base := normalizeBaseURI(v.baseURI)
 	v.walkSchema(v.root, base)
@@ -4659,15 +4665,8 @@ func (v *validator) resolveJSONPointerViaJSON(root *Schema, segments []string) *
 // the shared registries stay untouched and concurrent runs cannot race on
 // them.
 func (v *validator) registerFallbackSchema(s *Schema, base string) {
-	scratch := &validator{
-		draft:                 v.draft,
-		inertIDs:              v.inertIDs,
-		uriRegistry:           map[string]*Schema{},
-		anchorRegistry:        map[string]*Schema{},
-		dynamicAnchorRegistry: map[string]*Schema{},
-		baseURIs:              map[*Schema]string{},
-		walked:                map[*Schema]bool{},
-	}
+	scratch := &validator{draft: v.draft, inertIDs: v.inertIDs}
+	scratch.initRegistries()
 	scratch.walkSchema(s, base)
 
 	if v.fallbackBaseURIs == nil {
