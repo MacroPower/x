@@ -642,7 +642,19 @@ func applyEnumToItems(key, value string, t reflect.Type, s *Schema) error {
 	// element ([]*string) must accept a "null" enum member, which parseTypedScalar
 	// only permits when it sees the pointer rather than the dereferenced value.
 	elem := t.Elem()
-	if derefElem := derefType(elem); derefElem.Kind() == reflect.Slice || derefElem.Kind() == reflect.Array {
+	derefElem := derefType(elem)
+
+	// A self-recursive sequence element (type T []*T) dereferences back to the
+	// sequence type itself; descending would recurse on the same type and bottom
+	// out on the misleading "no item schema" message, so name the real cause.
+	if derefElem == t {
+		return fmt.Errorf(
+			"jsonschema tag: key %q: recursive %s element type %s is not supported for an enum constraint",
+			key, t.Kind(), t,
+		)
+	}
+
+	if derefElem.Kind() == reflect.Slice || derefElem.Kind() == reflect.Array {
 		for _, item := range items {
 			err := applyEnumToItems(key, value, derefElem, item)
 			if err != nil {
