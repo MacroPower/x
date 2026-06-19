@@ -32,6 +32,18 @@ var (
 	typeByteSlice      = reflect.TypeFor[[]byte]()
 	typeProvider       = reflect.TypeFor[JSONSchemaProvider]()
 	typeExtender       = reflect.TypeFor[JSONSchemaExtender]()
+
+	// Inclusive [minimum, maximum] float64 bounds for each fixed-width integer
+	// kind. Int64 and Uint64 are excluded: float64 cannot name their maxima
+	// inclusively, so they use an exclusive maximum (see schemaForKind).
+	inclusiveIntBounds = map[reflect.Kind][2]float64{
+		reflect.Int8:   {math.MinInt8, math.MaxInt8},
+		reflect.Int16:  {math.MinInt16, math.MaxInt16},
+		reflect.Int32:  {math.MinInt32, math.MaxInt32},
+		reflect.Uint8:  {0, math.MaxUint8},
+		reflect.Uint16: {0, math.MaxUint16},
+		reflect.Uint32: {0, math.MaxUint32},
+	}
 )
 
 // generator holds the state for a single schema generation run.
@@ -629,6 +641,12 @@ func (g *generator) builtinOverride(t reflect.Type) (*Schema, bool) {
 	return nil, false
 }
 
+// boundedInteger builds an integer schema with inclusive [minimum, maximum]
+// bounds.
+func boundedInteger(minimum, maximum float64) *Schema {
+	return &Schema{Type: typeNameInteger, Minimum: new(minimum), Maximum: new(maximum)}
+}
+
 // schemaForKind handles the kind-based reflection step.
 func (g *generator) schemaForKind(t reflect.Type, nullable bool) (*Schema, error) {
 	switch t.Kind() {
@@ -657,17 +675,11 @@ func (g *generator) schemaForKind(t reflect.Type, nullable bool) (*Schema, error
 
 		return g.applyNullable(s, t, nullable), nil
 
-	case reflect.Int8:
-		s := &Schema{Type: typeNameInteger, Minimum: new(float64(math.MinInt8)), Maximum: new(float64(math.MaxInt8))}
-		return g.applyNullable(s, t, nullable), nil
-
-	case reflect.Int16:
-		s := &Schema{Type: typeNameInteger, Minimum: new(float64(math.MinInt16)), Maximum: new(float64(math.MaxInt16))}
-		return g.applyNullable(s, t, nullable), nil
-
-	case reflect.Int32:
-		s := &Schema{Type: typeNameInteger, Minimum: new(float64(math.MinInt32)), Maximum: new(float64(math.MaxInt32))}
-		return g.applyNullable(s, t, nullable), nil
+	case reflect.Int8, reflect.Int16, reflect.Int32,
+		reflect.Uint8, reflect.Uint16, reflect.Uint32:
+		// Fixed-width integers whose full range float64 can name inclusively.
+		b := inclusiveIntBounds[t.Kind()]
+		return g.applyNullable(boundedInteger(b[0], b[1]), t, nullable), nil
 
 	case reflect.Uint, reflect.Uintptr:
 		// Uint/uintptr are platform-dependent; only a lower bound is certain.
@@ -679,18 +691,6 @@ func (g *generator) schemaForKind(t reflect.Type, nullable bool) (*Schema, error
 		// 2^64 is exactly representable, so an exclusive maximum of 2^64 admits
 		// exactly v <= 2^64-1 = MaxUint64, including the boundary value.
 		s := &Schema{Type: typeNameInteger, Minimum: new(float64(0)), ExclusiveMaximum: new(exclusiveMaxUint64)}
-		return g.applyNullable(s, t, nullable), nil
-
-	case reflect.Uint8:
-		s := &Schema{Type: typeNameInteger, Minimum: new(float64(0)), Maximum: new(float64(math.MaxUint8))}
-		return g.applyNullable(s, t, nullable), nil
-
-	case reflect.Uint16:
-		s := &Schema{Type: typeNameInteger, Minimum: new(float64(0)), Maximum: new(float64(math.MaxUint16))}
-		return g.applyNullable(s, t, nullable), nil
-
-	case reflect.Uint32:
-		s := &Schema{Type: typeNameInteger, Minimum: new(float64(0)), Maximum: new(float64(math.MaxUint32))}
 		return g.applyNullable(s, t, nullable), nil
 
 	case reflect.Float32, reflect.Float64:
