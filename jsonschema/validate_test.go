@@ -1974,6 +1974,31 @@ func TestValidateRelativeRefAgainstOpaqueBase(t *testing.T) {
 	require.Error(t, err, "a must resolve to the integer child, not an unresolved ref")
 }
 
+func TestValidateCanonicalAbsoluteRefAgainstOpaqueBase(t *testing.T) {
+	t.Parallel()
+
+	// A nested $id given relative to an opaque (URN) base registers under the
+	// RFC 3986 canonical absolute URN (urn:example:sub), so a $ref written in
+	// that canonical absolute form resolves to it. Dropping the namespace
+	// identifier when merging would register it under urn:sub instead, leaving
+	// the canonical reference unresolvable.
+	root, err := jsonschema.ParseSchema([]byte(`{
+		"$id": "urn:example:root",
+		"properties": {"a": {"$ref": "urn:example:sub"}},
+		"$defs": {"c": {"$id": "sub", "type": "integer"}}
+	}`))
+	require.NoError(t, err)
+
+	v, err := jsonschema.Compile(t.Context(), root)
+	require.NoError(t, err)
+
+	require.NoError(t, v.Validate(t.Context(), map[string]any{"a": 5.0}),
+		"an integer satisfies the schema reached by the canonical absolute URN")
+
+	err = v.Validate(t.Context(), map[string]any{"a": "not an int"})
+	require.Error(t, err, "a must resolve to the integer child, not an unresolved ref")
+}
+
 func TestValidateContainsAnnotatesMatchedRegardlessOfCount(t *testing.T) {
 	t.Parallel()
 

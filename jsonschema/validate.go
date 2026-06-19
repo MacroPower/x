@@ -983,9 +983,23 @@ func resolveURI(base, ref string) string {
 
 // mergeOpaquePath merges a relative path ref into an opaque URI part using the
 // RFC 3986 merge step, treating the opaque part as a path: the ref replaces
-// everything after the final slash, or the whole part when it has none.
+// everything after the final slash. With no slash, the opaque part is split on
+// its final ':' instead (a URN's NID/NSS structure), so the namespace is
+// preserved rather than discarded; only when neither delimiter is present does
+// the ref replace the whole opaque part.
 func mergeOpaquePath(base, ref string) string {
 	if i := strings.LastIndex(base, "/"); i >= 0 {
+		return base[:i+1] + ref
+	}
+
+	// A URN opaque part such as "example:root" carries no slash but is still
+	// structured by ':'. Replacing only the final colon-delimited component
+	// keeps the namespace identifier, so a relative ref resolves to the same
+	// absolute URN a caller would write directly: urn:example:root + "sub"
+	// yields urn:example:sub, not urn:sub. Registration and lookup share
+	// resolveURI, so this keeps a relative $id and the canonical absolute $ref
+	// agreeing on one registry key.
+	if i := strings.LastIndex(base, ":"); i >= 0 {
 		return base[:i+1] + ref
 	}
 
