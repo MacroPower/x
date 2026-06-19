@@ -3558,6 +3558,30 @@ func TestGenerateFor_CrossPackageNameDisambiguation(t *testing.T) {
 	require.Equal(t, "#/$defs/beta_Widget", s.Properties["b"].Ref)
 }
 
+func TestGenerateFor_TypeOverrideDropsRefUnderCollision(t *testing.T) {
+	t.Parallel()
+
+	// Field C is a $defs-extracted type whose bare $ref is dropped by a type=
+	// override. A sibling Widget collision forces disambiguateDefs to run; it
+	// must not re-point C's now-cleared refRecord, which would re-emit a stale
+	// $ref next to the override and yield an unsatisfiable {"type","$ref"}.
+	type Root struct {
+		A alpha.Widget `json:"a"`
+		B beta.Widget  `json:"b"`
+		C alpha.Widget `json:"c" jsonschema:"type=integer"`
+	}
+
+	s, err := jsonschema.GenerateFor[Root](t.Context())
+	require.NoError(t, err)
+
+	require.Contains(t, s.Defs, "alpha_Widget")
+	require.Contains(t, s.Defs, "beta_Widget")
+
+	assert.Equal(t, "integer", s.Properties["c"].Type)
+	assert.Empty(t, s.Properties["c"].Ref,
+		"a type= override must not leave a stale $ref after disambiguation")
+}
+
 type jsonMarshalerOnly struct {
 	Value int `json:"value"`
 }

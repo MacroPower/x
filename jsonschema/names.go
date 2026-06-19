@@ -177,6 +177,17 @@ func (g *generator) disambiguateDefs() {
 
 	// Update all tracked $ref schemas to point to the correct new names.
 	for _, rec := range g.refRecords {
+		// A refRecord whose schema no longer carries a $ref has had it
+		// intentionally cleared (an explicit type= override drops the bare $ref
+		// of a $defs-extracted field). Re-pointing it would re-emit a stale $ref
+		// next to the override, producing {"type":..,"$ref":..}, which is
+		// unsatisfiable under 2020-12. Before this runs, wrapRefForDraft7
+		// repoints its record to the inner $ref (whose Ref is set), so an empty
+		// Ref here is only ever an override, never a reference awaiting rename.
+		if rec.schema.Ref == "" {
+			continue
+		}
+
 		newName := g.typeToDefName[rec.target]
 		if newName == "" {
 			continue
