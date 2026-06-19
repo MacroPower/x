@@ -54,6 +54,20 @@ type GenericEnvelope struct {
 	Box[int] `json:"crate"`
 }
 
+// Underlying is a documented struct whose field comment a defined type built
+// from it must surface.
+type Underlying struct {
+	// Quantity documents the underlying quantity.
+	Quantity int `json:"quantity"`
+}
+
+// DefinedFromStruct is a defined type whose underlying type is [Underlying]
+// (type DefinedFromStruct Underlying). Reflection reports it as a struct with
+// Underlying's fields, but its own AST declaration is a bare type name rather
+// than a struct literal, so field-comment extraction must follow the defined
+// type to Underlying's struct declaration.
+type DefinedFromStruct Underlying
+
 // Widget is a test type with documented fields.
 type Widget struct {
 	// Label documents the widget label. A jsonschema tag also sets a

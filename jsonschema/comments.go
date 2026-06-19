@@ -151,13 +151,49 @@ func (ce *GoCommentProvider) FieldDescription(ctx context.Context, fc FieldConte
 		return "", nil
 	}
 
-	name := baseTypeName(structType.Name())
-
 	files, err := ce.sourceFiles(ctx, structType.PkgPath())
 	if err != nil {
 		return "", err
 	}
 
+	// Follow a chain of same-package named types (type Foo Bar) down to the
+	// underlying struct, so a field comment declared on Bar is found when
+	// reflection reports the field under Foo. The visited set guards against a
+	// malformed cyclic alias chain.
+	name := baseTypeName(structType.Name())
+	seen := map[string]bool{}
+
+	for !seen[name] {
+		seen[name] = true
+
+		ts := findTypeSpec(files, name)
+		if ts == nil {
+			return "", nil
+		}
+
+		switch underlying := ts.Type.(type) {
+		case *ast.StructType:
+			doc, _ := structFieldDoc(underlying, fieldName)
+
+			return doc, nil
+
+		case *ast.Ident:
+			// A same-package named type (type Foo Bar); follow to Bar.
+			name = underlying.Name
+
+		default:
+			// A cross-package alias (an *ast.SelectorExpr) or a non-struct
+			// underlying type carries no locally scannable struct fields.
+			return "", nil
+		}
+	}
+
+	return "", nil
+}
+
+// findTypeSpec returns the type declaration named name in files, or nil. A type
+// name is unique per package, so the first match is authoritative.
+func findTypeSpec(files []*ast.File, name string) *ast.TypeSpec {
 	for _, f := range files {
 		for _, decl := range f.Decls {
 			gd, ok := decl.(*ast.GenDecl)
@@ -167,41 +203,38 @@ func (ce *GoCommentProvider) FieldDescription(ctx context.Context, fc FieldConte
 
 			for _, spec := range gd.Specs {
 				ts, ok := spec.(*ast.TypeSpec)
-				if !ok || ts.Name.Name != name {
-					continue
+				if ok && ts.Name.Name == name {
+					return ts
 				}
-
-				// The type name is unique per package, so the scan ends at this
-				// match whether or not the field's comment is found.
-				st, ok := ts.Type.(*ast.StructType)
-				if !ok {
-					return "", nil
-				}
-
-				for _, field := range st.Fields.List {
-					// An embedded field has no name idents; Go names it after the
-					// embedded type, and a doc comment hangs off the field itself.
-					if len(field.Names) == 0 {
-						if field.Doc != nil && embeddedFieldName(field.Type) == fieldName {
-							return strings.TrimSpace(field.Doc.Text()), nil
-						}
-
-						continue
-					}
-
-					for _, ident := range field.Names {
-						if ident.Name == fieldName && field.Doc != nil {
-							return strings.TrimSpace(field.Doc.Text()), nil
-						}
-					}
-				}
-
-				return "", nil
 			}
 		}
 	}
 
-	return "", nil
+	return nil
+}
+
+// structFieldDoc returns the trimmed doc comment for the field named fieldName
+// in st, reporting whether a documented match was found.
+func structFieldDoc(st *ast.StructType, fieldName string) (string, bool) {
+	for _, field := range st.Fields.List {
+		// An embedded field has no name idents; Go names it after the embedded
+		// type, and a doc comment hangs off the field itself.
+		if len(field.Names) == 0 {
+			if field.Doc != nil && embeddedFieldName(field.Type) == fieldName {
+				return strings.TrimSpace(field.Doc.Text()), true
+			}
+
+			continue
+		}
+
+		for _, ident := range field.Names {
+			if ident.Name == fieldName && field.Doc != nil {
+				return strings.TrimSpace(field.Doc.Text()), true
+			}
+		}
+	}
+
+	return "", false
 }
 
 // embeddedFieldName returns the field name Go assigns to an embedded

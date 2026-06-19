@@ -52,6 +52,23 @@ func TestEmbeddedNamedFieldDescription(t *testing.T) {
 	assert.Contains(t, s.Properties["stamp"].Description, "documents the envelope stamp")
 }
 
+// TestDefinedFromStructFieldDescription covers a defined type whose underlying
+// type is another struct (type Foo Bar). Reflection reports it as a struct with
+// the underlying's fields, but its AST declaration is a bare type name, so field
+// comments are found only by following the defined type to the underlying.
+func TestDefinedFromStructFieldDescription(t *testing.T) {
+	t.Parallel()
+
+	s, err := jsonschema.GenerateFor[alpha.DefinedFromStruct](
+		t.Context(),
+		jsonschema.WithDescriptionProvider(jsonschema.NewGoCommentProvider()),
+	)
+	require.NoError(t, err)
+
+	require.Contains(t, s.Properties, "quantity")
+	assert.Contains(t, s.Properties["quantity"].Description, "documents the underlying quantity")
+}
+
 // TestZeroValueGoCommentProvider covers using the exported type as a zero-value
 // literal (&GoCommentProvider{}) instead of the constructor: the comment cache
 // must initialize lazily on first store rather than panicking on a nil map.
