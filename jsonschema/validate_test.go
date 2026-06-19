@@ -2949,6 +2949,34 @@ func TestValidateFetchedDocIDDoesNotClobber(t *testing.T) {
 	require.NoError(t, err, "the ref to /a must resolve to A, not the clobbering B")
 }
 
+// TestValidateAnchorInFetchedDocWithCanonicalID pins that an $anchor reference
+// made against a fetched document's retrieval URI still resolves when the
+// document declares its own canonical $id. The walk registers the anchor under
+// the canonical base, so resolution must consult that base in addition to the
+// retrieval URI.
+func TestValidateAnchorInFetchedDocWithCanonicalID(t *testing.T) {
+	t.Parallel()
+
+	doc := &jsonschema.Schema{
+		ID:     "https://canonical.example/c",
+		Anchor: "myanchor",
+		Type:   "integer",
+	}
+
+	schema := &jsonschema.Schema{
+		Schema: "https://json-schema.org/draft/2020-12/schema",
+		Ref:    "https://fetch.example/doc#myanchor",
+	}
+
+	resolver := mapResolver{"https://fetch.example/doc": doc}
+
+	err := jsonschema.Validate(t.Context(), schema, 5.0, jsonschema.WithRefResolver(resolver))
+	require.NoError(t, err, "the anchor must resolve under the document's canonical base")
+
+	err = jsonschema.Validate(t.Context(), schema, "not an int", jsonschema.WithRefResolver(resolver))
+	require.Error(t, err, "the resolved anchor schema requires an integer")
+}
+
 // errResolver always returns an error.
 type errResolver struct{}
 
