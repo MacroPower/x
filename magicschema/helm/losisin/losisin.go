@@ -326,8 +326,12 @@ func parseBoolOrSchema(val string, hasVal bool) *jsonschema.Schema {
 // stray closer of one kind (a "}" inside a "[...]" value) does not cancel an
 // opener of the other kind and expose an inner semicolon as a delimiter. A
 // double-quoted value likewise keeps a ";" (or a bracket) it contains literal,
-// so an annotation such as default:"a;b" survives intact. When openers or a
-// quote are left unbalanced the split is unreliable, so the line is split on
+// so an annotation such as default:"a;b" survives intact; a backslash escapes
+// the next rune, so an escaped quote (default:"a\";b") does not end the run
+// early. A quote only opens a run at bracket depth zero -- inside [...] or {...}
+// the bracket stack already keeps the content literal, so a quote in a regex
+// char class like [",;] is not mistaken for a string delimiter. When openers or
+// a quote are left unbalanced the split is unreliable, so the line is split on
 // every semicolon instead -- a malformed value then only corrupts its own pair
 // rather than swallowing every pair after it.
 func splitSemicolons(line string) []string {
@@ -336,15 +340,23 @@ func splitSemicolons(line string) []string {
 		current strings.Builder
 		stack   []rune
 		inQuote bool
+		escaped bool
 	)
 
 	for _, ch := range line {
 		// Inside a double-quoted run every character is literal: a ";" or a
 		// bracket there is part of the value, not a delimiter or nesting token.
+		// A backslash escapes the next rune, so an escaped quote (default:"a\";b")
+		// does not close the run and expose the inner semicolon as a delimiter.
 		if inQuote {
 			current.WriteRune(ch)
 
-			if ch == '"' {
+			switch {
+			case escaped:
+				escaped = false
+			case ch == '\\':
+				escaped = true
+			case ch == '"':
 				inQuote = false
 			}
 
@@ -353,7 +365,13 @@ func splitSemicolons(line string) []string {
 
 		switch ch {
 		case '"':
-			inQuote = true
+			// Only a top-level quote opens a quoted run. Inside [...] or {...}
+			// the bracket stack already keeps the content literal -- a regex
+			// char class like [",;], say -- so flipping inQuote there would
+			// swallow the matching closer and force the naive whole-line split.
+			if len(stack) == 0 {
+				inQuote = true
+			}
 
 			current.WriteRune(ch)
 

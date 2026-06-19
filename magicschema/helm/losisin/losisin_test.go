@@ -1827,6 +1827,51 @@ func TestHelmValuesSchemaAnnotatorAlignment(t *testing.T) {
 				assert.Equal(t, "^x$", v["pattern"])
 			},
 		},
+		"quote inside a bracketed value preserved": {
+			// A regex char class like [",;] holds a quote alongside a ";".
+			// Opening a quoted run on that inner quote would swallow the closing
+			// bracket and force the naive whole-line split; a quote only opens a
+			// run at bracket depth zero, so the bracket stack keeps the value.
+			input: stringtest.Input(`
+				# @schema type:string;pattern:[",;]
+				val: x
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				v, ok := props["val"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "string", v["type"])
+				assert.Equal(t, `[",;]`, v["pattern"])
+			},
+		},
+		"escaped quote inside a double-quoted value preserved": {
+			// A backslash-escaped quote inside a quoted default must not end the
+			// run, or the ";" after it leaks as a delimiter and the later pairs
+			// corrupt. The escape state keeps the value and the trailing pair
+			// intact.
+			input: stringtest.Input(`
+				# @schema type:string;default:"a\";b";pattern:^x$
+				val: x
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				v, ok := props["val"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "string", v["type"])
+				assert.Equal(t, `a";b`, v["default"])
+				assert.Equal(t, "^x$", v["pattern"])
+			},
+		},
 		"$ref without type annotation": {
 			// $ref -> Ref. Should be set without requiring type.
 			input: stringtest.Input(`
