@@ -1928,12 +1928,34 @@ func isEmptySchema(s *Schema) bool {
 // Go integer kinds and float32 have already been converted by the time this
 // check runs. Other types, notably Go structs and [time.Time], are not
 // accepted, because they are not produced by encoding/json when unmarshaling
-// into an any. The check is on the top-level value only; [Validator.ValidateJSON]
-// always supplies accepted types.
+// into an any. The check recurses into containers, since [Normalize] leaves a
+// nested non-JSON leaf (a struct, channel, or function inside a slice or map)
+// unchanged; rejecting it here turns what would be a panic or a silent
+// mis-validation deeper in the walk into the documented "not accepted" error.
+// [Validator.ValidateJSON] always supplies accepted types.
 func acceptedInstance(instance any) bool {
-	switch instance.(type) {
-	case nil, bool, string, float64, json.Number, map[string]any, []any:
+	switch v := instance.(type) {
+	case nil, bool, string, float64, json.Number:
 		return true
+
+	case []any:
+		for _, item := range v {
+			if !acceptedInstance(item) {
+				return false
+			}
+		}
+
+		return true
+
+	case map[string]any:
+		for _, item := range v {
+			if !acceptedInstance(item) {
+				return false
+			}
+		}
+
+		return true
+
 	default:
 		return false
 	}

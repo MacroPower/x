@@ -49,6 +49,28 @@ func validateValue(
 	return c.ValidateValue(ctx, v)
 }
 
+func TestValidateRejectsNestedUnacceptedValue(t *testing.T) {
+	t.Parallel()
+
+	// A non-JSON Go value nested inside a container must be rejected with the
+	// "not accepted" error rather than panicking or silently mis-validating
+	// deeper in the walk.
+	schema := &jsonschema.Schema{UniqueItems: true}
+
+	for name, instance := range map[string]any{
+		"channel in a slice": []any{make(chan int)},
+		"struct in a map":    map[string]any{"k": struct{ A int }{}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := jsonschema.Validate(t.Context(), schema, instance)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "not accepted")
+		})
+	}
+}
+
 func TestValidate(t *testing.T) {
 	t.Parallel()
 
