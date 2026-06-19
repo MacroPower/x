@@ -142,6 +142,35 @@ func TestSchemaBlockNotLeakedAsDescription(t *testing.T) {
 	assert.NotContains(t, key, "description")
 }
 
+func TestArrayElementHeadCommentNotLeakedAsArrayDescription(t *testing.T) {
+	t.Parallel()
+
+	// The goccy parser attaches a sequence's first-element head comment to the
+	// array value node. It documents the element, not the array, so it must
+	// not become the array property's description.
+	input := "parent:\n  # item desc\n  - a\n  - b\n"
+
+	gen := magicschema.NewGenerator()
+	schema, err := gen.Generate([]byte(input))
+	require.NoError(t, err)
+
+	out, err := json.Marshal(schema)
+	require.NoError(t, err)
+
+	var got map[string]any
+
+	require.NoError(t, json.Unmarshal(out, &got))
+
+	props, ok := got["properties"].(map[string]any)
+	require.True(t, ok)
+
+	parent, ok := props["parent"].(map[string]any)
+	require.True(t, ok)
+
+	assert.Equal(t, "array", parent["type"])
+	assert.NotContains(t, parent, "description")
+}
+
 func TestThreeHashSchemaMarkerIsNotAFence(t *testing.T) {
 	t.Parallel()
 

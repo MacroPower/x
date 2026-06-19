@@ -601,29 +601,25 @@
               "type": "array",
               "items": {
                 "type": "string"
-              },
-              "description": "Use to set socket permission"
+              }
             },
             "mountCgroup": {
               "type": "array",
               "items": {
                 "type": "string"
-              },
-              "description": "Only used for 'mount' cgroup"
+              }
             },
             "applySysctlOverwrites": {
               "type": "array",
               "items": {
                 "type": "string"
-              },
-              "description": "Required in order to access host's /etc/sysctl.d dir"
+              }
             },
             "cleanCiliumState": {
               "type": "array",
               "items": {
                 "type": "string"
-              },
-              "description": "Most of the capabilities here are the same ones used in the\ncilium-agent's container because this container can be used to\nuninstall all Cilium resources, and therefore it is likely that\nwill need the same capabilities.\nUsed since cilium modifies routing tables, etc..."
+              }
             }
           },
           "additionalProperties": true
@@ -4889,8 +4885,7 @@
                   "type": "array",
                   "items": {
                     "type": "string"
-                  },
-                  "description": "Used in iptables. Consider removing once we are iptables-free"
+                  }
                 }
               },
               "additionalProperties": true

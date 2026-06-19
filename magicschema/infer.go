@@ -123,10 +123,15 @@ func extractComment(node ast.Node) string {
 		}
 	}
 
-	// Try inline comment on the value node.
+	// Try inline comment on the value node. Skip a sequence value: goccy stows
+	// the first element's head comment on the SequenceNode itself, so reading it
+	// here would leak an element's documentation as the array's description (a
+	// comment above a later element does not leak, only the first's).
 	if mvn.Value != nil {
-		if desc := extractFromComment(mvn.Value.GetComment()); desc != "" {
-			return desc
+		if _, isSeq := unwrapNode(mvn.Value).(*ast.SequenceNode); !isSeq {
+			if desc := extractFromComment(mvn.Value.GetComment()); desc != "" {
+				return desc
+			}
 		}
 	}
 
