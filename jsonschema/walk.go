@@ -68,6 +68,12 @@ type SubschemaEntry struct {
 // typed Schema fields are included, not sub-schemas carried as raw JSON in
 // unknown keywords (the Extra map). A nil s returns nil.
 //
+// Items and ItemsArray are the two mutually exclusive forms of the items
+// keyword; a schema parsed from JSON sets at most one. If a hand-built schema
+// sets both, the ItemsArray entries (addressed as /items/N) win and the single
+// Items form is omitted, so the items keyword never yields a /items pointer that
+// contradicts the /items/N ones.
+//
 // SubschemaEntries is the package's single source of truth for which Schema
 // fields hold sub-schemas: [Walk] and the internal traversals build on it,
 // and a maintenance test fails when an upstream Schema addition is not
@@ -143,15 +149,26 @@ func SubschemaEntries(s *Schema) []SubschemaEntry {
 		{s.UnevaluatedItems, KeywordUnevaluatedItems},
 		{s.ContentSchema, KeywordContentSchema},
 	} {
-		if entry.s != nil {
-			children = append(children, SubschemaEntry{
-				Location: Location{
-					Pointer:  "/" + entry.keyword,
-					Segments: []Segment{{Key: entry.keyword}},
-				},
-				Schema: entry.s,
-			})
+		if entry.s == nil {
+			continue
 		}
+
+		// Items and ItemsArray are the two mutually exclusive forms of the items
+		// keyword. A schema parsed from JSON sets at most one, but a hand-built
+		// one could set both; when ItemsArray is populated (emitted above as
+		// /items/N), skip the single Items form so the keyword does not also
+		// yield a contradictory /items pointer for the same location.
+		if entry.keyword == KeywordItems && len(s.ItemsArray) > 0 {
+			continue
+		}
+
+		children = append(children, SubschemaEntry{
+			Location: Location{
+				Pointer:  "/" + entry.keyword,
+				Segments: []Segment{{Key: entry.keyword}},
+			},
+			Schema: entry.s,
+		})
 	}
 
 	return children

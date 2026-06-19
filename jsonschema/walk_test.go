@@ -108,6 +108,25 @@ func TestSubschemaEntriesDirectOnly(t *testing.T) {
 	assert.Equal(t, []*jsonschema.Schema{child}, childSchemas(root))
 }
 
+func TestSubschemaEntriesItemsAndItemsArray(t *testing.T) {
+	t.Parallel()
+
+	// A hand-built schema can set both forms of the items keyword (JSON sets at
+	// most one). The array form wins; the single Items form is omitted so the
+	// keyword never yields a /items pointer contradicting the /items/N ones.
+	single := &jsonschema.Schema{Type: "string"}
+	first := &jsonschema.Schema{Type: "integer"}
+
+	entries := jsonschema.SubschemaEntries(&jsonschema.Schema{
+		Items:      single,
+		ItemsArray: []*jsonschema.Schema{first},
+	})
+
+	require.Len(t, entries, 1)
+	assert.Equal(t, "/items/0", entries[0].Pointer)
+	assert.Same(t, first, entries[0].Schema)
+}
+
 func TestSubschemaEntries(t *testing.T) {
 	t.Parallel()
 
@@ -661,6 +680,29 @@ func TestSubschemaEntriesFieldCoverage(t *testing.T) {
 	// reflection above stopped matching the field types.
 	require.GreaterOrEqual(t, len(want), 23,
 		"reflection found fewer sub-schema-bearing fields than the known upstream set")
+
+	// Items and ItemsArray are the two mutually exclusive forms of the items
+	// keyword; SubschemaEntries returns the ItemsArray form and omits the single
+	// Items form when both are set (see its doc). The probe sets both, so verify
+	// the Items form's reachability on its own with ItemsArray cleared, then drop
+	// it from the both-set expectation below.
+	itemsChild := probe.Items
+	itemsArray := probe.ItemsArray
+
+	probe.ItemsArray = nil
+	gotItems := false
+
+	for _, entry := range jsonschema.SubschemaEntries(probe) {
+		if entry.Schema == itemsChild {
+			gotItems = true
+		}
+	}
+
+	assert.True(t, gotItems, "Schema field \"Items\" must be returned when ItemsArray is unset")
+
+	probe.ItemsArray = itemsArray
+
+	delete(want, itemsChild)
 
 	got := map[*jsonschema.Schema]int{}
 	for _, entry := range jsonschema.SubschemaEntries(probe) {
