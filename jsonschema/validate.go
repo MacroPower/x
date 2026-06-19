@@ -3230,13 +3230,13 @@ func (v *validator) validateNumericUnbounded(
 	// stays shared.
 	if schema.Minimum != nil {
 		if b := bounds.minimum; b != nil && d.cmpRat(b) < 0 {
-			add("minimum", fmt.Sprintf("%s is less than %v", num, *schema.Minimum))
+			add(KeywordMinimum, fmt.Sprintf("%s is less than %v", num, *schema.Minimum))
 		}
 	}
 
 	if schema.Maximum != nil {
 		if b := bounds.maximum; b != nil && d.cmpRat(b) > 0 {
-			add("maximum", fmt.Sprintf("%s is greater than %v", num, *schema.Maximum))
+			add(KeywordMaximum, fmt.Sprintf("%s is greater than %v", num, *schema.Maximum))
 		}
 	}
 
@@ -3246,13 +3246,13 @@ func (v *validator) validateNumericUnbounded(
 		// strict inequality; the message omits the "or equal to" the bounded path
 		// uses, where equality is reachable.
 		if b := bounds.exclusiveMinimum; b != nil && d.cmpRat(b) < 0 {
-			add("exclusiveMinimum", fmt.Sprintf("%s is less than %v", num, *schema.ExclusiveMinimum))
+			add(KeywordExclusiveMinimum, fmt.Sprintf("%s is less than %v", num, *schema.ExclusiveMinimum))
 		}
 	}
 
 	if schema.ExclusiveMaximum != nil {
 		if b := bounds.exclusiveMaximum; b != nil && d.cmpRat(b) > 0 {
-			add("exclusiveMaximum", fmt.Sprintf("%s is greater than %v", num, *schema.ExclusiveMaximum))
+			add(KeywordExclusiveMaximum, fmt.Sprintf("%s is greater than %v", num, *schema.ExclusiveMaximum))
 		}
 	}
 
