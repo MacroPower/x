@@ -331,15 +331,21 @@ func createTempDir(cfg config, importPath, modPath, modDir, jsonschemaDir string
 // first-seen order and dropping duplicate and blank lines. Missing files are
 // skipped. The result is empty when no file yields any entry.
 //
-// Deduplication keys on a line's module-and-version prefix (its first two
-// fields) rather than the whole line, so a second file offering a different
-// checksum for the same module@version does not append a conflicting entry. The
-// first checksum seen wins, keeping the merged go.sum internally consistent
-// instead of carrying two h1: lines the go tool would reject.
+// Entries are keyed on a line's module-and-version prefix (its first two
+// fields). When two files give the same key the same checksum, the duplicate is
+// dropped. When they give it conflicting checksums (only possible from a
+// corrupted or stale go.sum, since a checksum is derived from the module's
+// content), the entry is omitted entirely rather than guessing which is correct,
+// so go mod tidy re-resolves that module's checksum from the cache or proxy.
 func mergeGoSum(paths ...string) []byte {
-	seen := make(map[string]struct{})
+	type sumEntry struct {
+		line     string
+		conflict bool
+	}
 
-	var b bytes.Buffer
+	entries := make(map[string]*sumEntry)
+
+	var order []string
 
 	for _, p := range paths {
 		data, err := os.ReadFile(p)
@@ -353,15 +359,31 @@ func mergeGoSum(paths ...string) []byte {
 			}
 
 			key := goSumKey(line)
-			if _, dup := seen[key]; dup {
+
+			existing, seen := entries[key]
+			if !seen {
+				entries[key] = &sumEntry{line: line}
+				order = append(order, key)
+
 				continue
 			}
 
-			seen[key] = struct{}{}
-
-			b.WriteString(line)
-			b.WriteByte('\n')
+			if existing.line != line {
+				existing.conflict = true
+			}
 		}
+	}
+
+	var b bytes.Buffer
+
+	for _, key := range order {
+		entry := entries[key]
+		if entry.conflict {
+			continue
+		}
+
+		b.WriteString(entry.line)
+		b.WriteByte('\n')
 	}
 
 	return b.Bytes()

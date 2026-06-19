@@ -262,9 +262,9 @@ func TestMergeGoSumKeysOnModuleVersion(t *testing.T) {
 	}
 
 	// The two files disagree on the module-zip checksum for the same
-	// module@version. The merge keeps the first and drops the conflicting
-	// second, while preserving the distinct go.mod line, the unrelated module,
-	// and dropping an exact duplicate.
+	// module@version. The merge omits that key entirely (so go mod tidy
+	// re-resolves it) while preserving the distinct go.mod line, the unrelated
+	// module, and dropping an exact duplicate.
 	first := writeSum("a.sum",
 		"example.com/m v1.0.0 h1:AAAA=\n"+
 			"example.com/m v1.0.0/go.mod h1:BBBB=\n")
@@ -275,13 +275,14 @@ func TestMergeGoSumKeysOnModuleVersion(t *testing.T) {
 
 	got := string(mergeGoSum(first, second))
 
-	want := "example.com/m v1.0.0 h1:AAAA=\n" +
-		"example.com/m v1.0.0/go.mod h1:BBBB=\n" +
+	want := "example.com/m v1.0.0/go.mod h1:BBBB=\n" +
 		"example.com/other v2.0.0 h1:DDDD=\n"
 
 	assert.Equal(t, want, got)
 	assert.NotContains(t, got, "CONFLICT",
-		"a conflicting checksum for an already-seen module@version must be dropped")
+		"a conflicting checksum must not win")
+	assert.NotContains(t, got, "AAAA",
+		"a conflicting module-zip checksum is dropped, not kept first")
 }
 
 func TestSelectMainModule(t *testing.T) {
