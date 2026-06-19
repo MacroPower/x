@@ -82,8 +82,9 @@ var (
 
 	// ErrInvalidDefaultsInstance is returned by [Generate] when the instance
 	// given to [WithDefaultsFrom] is unusable: its pointer-dereferenced dynamic
-	// type is not the pointer-dereferenced generated root type, or it does not
-	// marshal to a JSON object.
+	// type is not the pointer-dereferenced generated root type, it does not
+	// marshal to a JSON object, or the generated root resolves to a bare $ref
+	// with no properties to seed.
 	ErrInvalidDefaultsInstance = errors.New("invalid defaults instance")
 )
 

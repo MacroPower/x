@@ -330,6 +330,15 @@ func (g *generator) applyInstanceDefaults(instance any, rootType reflect.Type, s
 			ErrInvalidDefaultsInstance, instType)
 	}
 
+	// A correctly resolved target is an object schema (inlined root, the $defs
+	// entry, or a nullable value branch's object) and carries no $ref. A target
+	// still holding a bare $ref means the def lookup missed, so it has no
+	// Properties to seed; surface that rather than silently applying nothing.
+	if schema.Ref != "" {
+		return fmt.Errorf("%w: root of type %s resolved to a bare $ref (%s) with no seedable properties",
+			ErrInvalidDefaultsInstance, rootType, schema.Ref)
+	}
+
 	for key, raw := range values {
 		if prop, ok := schema.Properties[key]; ok && prop != nil {
 			prop.Default = raw
