@@ -21,8 +21,9 @@ The package has two independent halves sharing the `Schema` type:
   (vocabulary modelling and resolution), `internal/jsonptr` (RFC 6901
   escaping), `internal/numrat` (exact-decimal arithmetic core for JSON
   numbers: canonical decomposition, bounded `big.Rat` expansion, modular
-  `multipleOf`), `internal/numkind` (Go integer reflect kind -> parse
-  bit-width mapping, shared by both halves), `internal/typename` (the seven
+  `multipleOf`), `internal/numkind` (Go reflect kind classification
+  shared by both halves: integer parse-bit-width mapping plus the
+  integer/unsigned/float kind predicates), `internal/typename` (the seven
   canonical JSON Schema type-name constants and their predicate, shared by
   both halves and schemashape), `internal/uriref` (RFC 3986 URI-reference
   resolution and fragment handling for the `$ref` absolutization layer,

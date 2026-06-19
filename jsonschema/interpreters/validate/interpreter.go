@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"go.jacobcolvin.com/x/jsonschema"
+	"go.jacobcolvin.com/x/jsonschema/internal/numkind"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemashape"
 )
 
@@ -321,10 +322,10 @@ func applyRequiredConstraint(s *jsonschema.Schema, baseType reflect.Type) error 
 
 		s.Const = new(any(true))
 
-	case isIntegerKind(baseType):
+	case numkind.IsInteger(baseType.Kind()):
 		// Required on a numeric type means the value must not be zero.
 		forbidValue(s, 0)
-	case isFloatKind(baseType):
+	case numkind.IsFloat(baseType.Kind()):
 		forbidValue(s, 0.0)
 	}
 

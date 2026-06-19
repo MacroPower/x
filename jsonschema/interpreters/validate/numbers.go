@@ -49,7 +49,7 @@ func parseBoundFloat(value string) (float64, error) {
 // fields keep ordinary float parsing.
 func parseNumericBound(value string, t reflect.Type) (float64, error) {
 	switch {
-	case isUnsignedKind(t):
+	case numkind.IsUnsigned(t.Kind()):
 		n, err := strconv.ParseUint(value, 10, 64)
 		if err != nil {
 			return 0, fmt.Errorf("invalid unsigned integer %q: %w", value, err)
@@ -61,7 +61,7 @@ func parseNumericBound(value string, t reflect.Type) (float64, error) {
 
 		return float64(n), nil
 
-	case isIntegerKind(t):
+	case numkind.IsInteger(t.Kind()):
 		n, err := strconv.ParseInt(value, 10, 64)
 		if err != nil {
 			return 0, fmt.Errorf("invalid integer %q: %w", value, err)
@@ -341,10 +341,10 @@ func asFloat64(v any) (float64, bool) {
 // the schema to an unsatisfiable const or emitting an inert not. This mirrors the
 // jsonschema-tag path, which range-checks const/enum the same way, so both tag
 // dialects reject the same out-of-range values. Unsigned kinds are checked first
-// because [isIntegerKind] also reports true for them.
+// because [numkind.IsInteger] also reports true for them.
 func parseNumericValue(value string, t reflect.Type) (any, error) {
 	switch {
-	case isUnsignedKind(t):
+	case numkind.IsUnsigned(t.Kind()):
 		n, err := strconv.ParseUint(value, 10, numkind.UintBitSize(t.Kind()))
 		if err != nil {
 			return nil, fmt.Errorf("invalid unsigned integer %q: %w", value, err)
@@ -352,7 +352,7 @@ func parseNumericValue(value string, t reflect.Type) (any, error) {
 
 		return n, nil
 
-	case isIntegerKind(t):
+	case numkind.IsInteger(t.Kind()):
 		n, err := strconv.ParseInt(value, 10, numkind.IntBitSize(t.Kind()))
 		if err != nil {
 			return nil, fmt.Errorf("invalid integer %q: %w", value, err)
@@ -392,33 +392,7 @@ func parseNumericValues(value string, t reflect.Type) ([]any, error) {
 }
 
 func isNumericKind(t reflect.Type) bool {
-	return isIntegerKind(t) || isFloatKind(t)
-}
-
-// isIntegerKind reports whether the type is an integer kind. Uintptr counts as
-// an integer here so a uintptr field is treated like the other unsigned kinds
-// rather than falling through to the float branch.
-func isIntegerKind(t reflect.Type) bool {
-	switch t.Kind() {
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
-		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-		return true
-	default:
-		return false
-	}
-}
-
-func isUnsignedKind(t reflect.Type) bool {
-	switch t.Kind() {
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-		return true
-	default:
-		return false
-	}
-}
-
-func isFloatKind(t reflect.Type) bool {
-	return t.Kind() == reflect.Float32 || t.Kind() == reflect.Float64
+	return numkind.IsInteger(t.Kind()) || numkind.IsFloat(t.Kind())
 }
 
 // splitOneOfValues tokenizes a oneof tag value the way go-playground/validator

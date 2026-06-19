@@ -17,6 +17,7 @@ import (
 
 	"github.com/google/jsonschema-go/jsonschema"
 
+	"go.jacobcolvin.com/x/jsonschema/internal/numkind"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemashape"
 	"go.jacobcolvin.com/x/jsonschema/internal/typename"
 )
@@ -858,7 +859,7 @@ func (g *generator) schemaForMap(t reflect.Type, nullable bool) (*Schema, error)
 
 // isValidMapKey checks if a type is a valid map key for JSON serialization.
 func isValidMapKey(t reflect.Type) bool {
-	if t.Kind() == reflect.String || isIntegerKind(t.Kind()) {
+	if t.Kind() == reflect.String || numkind.IsInteger(t.Kind()) {
 		return true
 	}
 
@@ -872,19 +873,6 @@ func isValidMapKey(t reflect.Type) bool {
 	}
 
 	return false
-}
-
-// isIntegerKind reports whether k is one of Go's signed or unsigned integer
-// kinds (including uintptr), all of which encoding/json renders as JSON
-// integers.
-func isIntegerKind(k reflect.Kind) bool {
-	switch k {
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
-		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-		return true
-	default:
-		return false
-	}
 }
 
 // schemaForStruct generates a schema for struct types.
@@ -1898,7 +1886,7 @@ func nullableInnerSchema(s *Schema) *Schema {
 func isStringableType(t reflect.Type) bool {
 	t = derefType(t)
 
-	if isIntegerKind(t.Kind()) {
+	if numkind.IsInteger(t.Kind()) {
 		return true
 	}
 

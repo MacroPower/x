@@ -47,3 +47,33 @@ func UintBitSize(k reflect.Kind) int {
 		return strconv.IntSize
 	}
 }
+
+// IsInteger reports whether k is one of Go's signed or unsigned integer kinds,
+// all of which encoding/json renders as JSON integers. Uintptr counts as an
+// integer here so a uintptr field is treated like the other unsigned kinds
+// rather than falling through to the float branch.
+func IsInteger(k reflect.Kind) bool {
+	switch k {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsUnsigned reports whether k is one of Go's unsigned integer kinds, including
+// uintptr.
+func IsUnsigned(k reflect.Kind) bool {
+	switch k {
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsFloat reports whether k is one of Go's floating-point kinds.
+func IsFloat(k reflect.Kind) bool {
+	return k == reflect.Float32 || k == reflect.Float64
+}
