@@ -77,3 +77,29 @@ func IsUnsigned(k reflect.Kind) bool {
 func IsFloat(k reflect.Kind) bool {
 	return k == reflect.Float32 || k == reflect.Float64
 }
+
+// DerefType follows pointers to the underlying non-pointer type. A pointer
+// cycle would spin this loop forever -- a single-step one (type T *T, whose
+// Elem is itself) or a multi-step one (mutually recursive type A *B; type B *A,
+// which never satisfies elem == t) -- so it records the pointer types it visits
+// and stops on a repeat, returning the still-unresolved pointer type for the
+// caller to reject as unsupported. The visited set is allocated lazily, so a
+// non-pointer type pays nothing.
+func DerefType(t reflect.Type) reflect.Type {
+	var seen map[reflect.Type]struct{}
+
+	for t.Kind() == reflect.Pointer {
+		if _, ok := seen[t]; ok {
+			break
+		}
+
+		if seen == nil {
+			seen = make(map[reflect.Type]struct{})
+		}
+
+		seen[t] = struct{}{}
+		t = t.Elem()
+	}
+
+	return t
+}

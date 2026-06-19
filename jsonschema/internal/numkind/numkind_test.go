@@ -101,6 +101,54 @@ func TestIsFloat(t *testing.T) {
 	}
 }
 
+func TestDerefType(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		in   reflect.Type
+		want reflect.Type
+	}{
+		"non-pointer returns itself": {
+			in:   reflect.TypeFor[int](),
+			want: reflect.TypeFor[int](),
+		},
+		"single pointer": {
+			in:   reflect.TypeFor[*int](),
+			want: reflect.TypeFor[int](),
+		},
+		"double pointer": {
+			in:   reflect.TypeFor[**string](),
+			want: reflect.TypeFor[string](),
+		},
+		"triple pointer": {
+			in:   reflect.TypeFor[***bool](),
+			want: reflect.TypeFor[bool](),
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, numkind.DerefType(tc.in))
+		})
+	}
+}
+
+// TestDerefTypeDeepChainTerminates builds a pointer chain far deeper than any
+// real type and confirms DerefType walks it to the non-pointer base without
+// spinning, exercising the lazily allocated visited set on a long run.
+func TestDerefTypeDeepChainTerminates(t *testing.T) {
+	t.Parallel()
+
+	chain := reflect.TypeFor[string]()
+	for range 64 {
+		chain = reflect.PointerTo(chain)
+	}
+
+	assert.Equal(t, reflect.TypeFor[string](), numkind.DerefType(chain))
+}
+
 func TestIntBitSize(t *testing.T) {
 	t.Parallel()
 

@@ -135,13 +135,13 @@ func (g *generator) forRun(ctx context.Context) *generator {
 // generate produces the root schema for the given type.
 func (g *generator) generate(t reflect.Type) (*Schema, error) {
 	// A nil type carries no kind to reflect on; report it through the error
-	// contract instead of panicking in derefType.
+	// contract instead of panicking in numkind.DerefType.
 	if t == nil {
 		return nil, fmt.Errorf("%w: nil type", ErrUnsupportedType)
 	}
 
 	// Follow pointers for root type identity.
-	rootType := derefType(t)
+	rootType := numkind.DerefType(t)
 
 	schema, err := g.schemaForType(t, false)
 	if err != nil {
@@ -313,7 +313,7 @@ func (g *generator) schemaForType(t reflect.Type, nullable bool) (*Schema, error
 		nullable = g.nullable
 	}
 
-	t = derefType(t)
+	t = numkind.DerefType(t)
 
 	// A named non-struct type already extracted to $defs is referenced again,
 	// not rebuilt: re-running its provider, extender, and description hooks
@@ -1884,7 +1884,7 @@ func nullableInnerSchema(s *Schema) *Schema {
 
 // isStringableType reports whether json:",string" applies to the given type.
 func isStringableType(t reflect.Type) bool {
-	t = derefType(t)
+	t = numkind.DerefType(t)
 
 	if numkind.IsInteger(t.Kind()) {
 		return true
@@ -2251,11 +2251,11 @@ func declaringType(outer reflect.Type, f reflect.StructField) reflect.Type {
 	t := outer
 
 	for _, i := range f.Index[:max(len(f.Index)-1, 0)] {
-		t = derefType(t)
+		t = numkind.DerefType(t)
 		t = t.Field(i).Type
 	}
 
-	t = derefType(t)
+	t = numkind.DerefType(t)
 
 	return t
 }

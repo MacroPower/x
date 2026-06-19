@@ -521,7 +521,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *Schema) err
 		// On a slice or array field the enum constrains each element, not the
 		// array value itself, so the values parse against the element type and
 		// land on the item schemas ("array of enum values").
-		if base := derefType(scalarType); base.Kind() == reflect.Slice || base.Kind() == reflect.Array {
+		if base := numkind.DerefType(scalarType); base.Kind() == reflect.Slice || base.Kind() == reflect.Array {
 			return applyEnumToItems(key, value, base, s)
 		}
 
@@ -662,7 +662,7 @@ func applyEnumToItems(key, value string, t reflect.Type, s *Schema) error {
 	// element ([]*string) must accept a "null" enum member, which parseTypedScalar
 	// only permits when it sees the pointer rather than the dereferenced value.
 	elem := t.Elem()
-	derefElem := derefType(elem)
+	derefElem := numkind.DerefType(elem)
 
 	// A self-recursive sequence element (type T []*T) dereferences back to the
 	// sequence type itself; descending would recurse on the same type and bottom
@@ -713,32 +713,6 @@ func applyEnumToItems(key, value string, t reflect.Type, s *Schema) error {
 // nil.
 func itemSchemas(s *Schema) []*Schema {
 	return schemashape.ItemSchemas(s)
-}
-
-// derefType follows pointers to the underlying non-pointer type. A pointer
-// cycle would spin this loop forever -- a single-step one (type T *T, whose
-// Elem is itself) or a multi-step one (mutually recursive type A *B; type B *A,
-// which never satisfies elem == t) -- so it records the pointer types it visits
-// and stops on a repeat, returning the still-unresolved pointer type for the
-// caller to reject as unsupported. The visited set is allocated lazily, so a
-// non-pointer type pays nothing.
-func derefType(t reflect.Type) reflect.Type {
-	var seen map[reflect.Type]struct{}
-
-	for t.Kind() == reflect.Pointer {
-		if _, ok := seen[t]; ok {
-			break
-		}
-
-		if seen == nil {
-			seen = make(map[reflect.Type]struct{})
-		}
-
-		seen[t] = struct{}{}
-		t = t.Elem()
-	}
-
-	return t
 }
 
 // parseBoolValue parses a boolean tag value.
@@ -833,7 +807,7 @@ func parseTypedScalar(value string, t reflect.Type) (any, error) {
 	// "null" via its kind switch instead of silently accepting JSON null.
 	nullable := t.Kind() == reflect.Pointer
 
-	t = derefType(t)
+	t = numkind.DerefType(t)
 
 	if value == typename.Null {
 		if !nullable {
