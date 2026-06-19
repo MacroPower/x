@@ -517,6 +517,38 @@ func TestValidateInterpreter_DiveEqOnPointerElement(t *testing.T) {
 	}`, string(got))
 }
 
+func TestValidateInterpreter_DiveDropsSizedIntBounds(t *testing.T) {
+	t.Parallel()
+
+	// A sized-integer element carries kind-derived minimum/maximum from its Go
+	// type. Once dive,eq or dive,oneof pins the element's value, those bounds are
+	// redundant; dropping them keeps dive and oneof element schemas consistent
+	// with the field-level path, which drops them after interpreters run.
+	type Config struct {
+		Exact []int8 `json:"exact" validate:"dive,eq=5"`
+		Set   []int8 `json:"set"   validate:"dive,oneof=1 2 3"`
+	}
+
+	s, err := jsonschema.GenerateFor[Config](t.Context(),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
+	)
+	require.NoError(t, err)
+
+	got, err := json.Marshal(s)
+	require.NoError(t, err)
+
+	assert.JSONEq(t, `{
+		"$schema":"https://json-schema.org/draft/2020-12/schema",
+		"type":"object",
+		"properties":{
+			"exact":{"type":["null","array"],"items":{"type":"integer","const":5}},
+			"set":{"type":["null","array"],"items":{"type":"integer","enum":[1,2,3]}}
+		},
+		"required":["exact","set"],
+		"additionalProperties":false
+	}`, string(got))
+}
+
 func TestValidateInterpreter_DiveMap(t *testing.T) {
 	t.Parallel()
 

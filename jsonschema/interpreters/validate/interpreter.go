@@ -426,6 +426,7 @@ func applySequenceOneOf(s *jsonschema.Schema, value string, baseType reflect.Typ
 		}
 
 		relocateNullableValueConstraint(item)
+		dropElementBoundsForConstEnum(item)
 	}
 
 	return nil
@@ -450,6 +451,37 @@ func relocateNullableValueConstraint(s *jsonschema.Schema) {
 	if s.Enum != nil {
 		inner.Enum, s.Enum = s.Enum, nil
 	}
+}
+
+// dropElementBoundsForConstEnum clears the kind-derived numeric range keywords
+// from a dive or oneof element schema once a const or enum pins its value,
+// mirroring the field-level drop the generator applies after interpreters run.
+// A sized-integer element carries minimum/maximum from its Go type; once eq or
+// oneof fixes the value to a set those bounds are redundant. The interpreter has
+// no per-keyword provenance, so an interpreter-set bound is dropped too, exactly
+// as the field path does for interpreter-applied constraints. It runs after
+// relocateNullableValueConstraint, so a nullable element's const/enum already
+// sits on the value branch; both the branch and the wrapper are cleared.
+func dropElementBoundsForConstEnum(s *jsonschema.Schema) {
+	target := s
+	if inner := schemashape.NullableInnerSchema(s); inner != nil {
+		target = inner
+	}
+
+	if target.Const == nil && target.Enum == nil {
+		return
+	}
+
+	clearNumericBounds(target)
+	clearNumericBounds(s)
+}
+
+// clearNumericBounds drops the four numeric range keywords from s.
+func clearNumericBounds(s *jsonschema.Schema) {
+	s.Minimum = nil
+	s.Maximum = nil
+	s.ExclusiveMinimum = nil
+	s.ExclusiveMaximum = nil
 }
 
 // isStringCoercedValue reports whether the generated schema is a string while
