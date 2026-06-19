@@ -170,11 +170,12 @@ func (g *generator) generate(t reflect.Type) (*Schema, error) {
 				// Drop the type's registration along with its def so the
 				// invariant "every typeToDefName entry has a live def" holds; a
 				// later re-resolution of rootType would otherwise produce a $ref
-				// to the deleted entry.
+				// to the deleted entry. The defsNameToTypes index needs no
+				// cleanup: it is keyed by the pre-disambiguation name and read
+				// only by disambiguateDefs, which has already run.
 				delete(g.defs, defName)
 				delete(g.typeToDefName, rootType)
 				delete(g.typeToDefSchema, rootType)
-				delete(g.defsNameToTypes, defName)
 			}
 		}
 	}
