@@ -19,7 +19,11 @@ The package has two independent halves sharing the `Schema` type:
   cheap per-run state. Self-contained helpers live under `internal/`:
   `internal/format` (built-in string-format validators), `internal/vocab`
   (vocabulary modelling and resolution), `internal/jsonptr` (RFC 6901
-  escaping).
+  escaping), `internal/numrat` (exact-decimal arithmetic core for JSON
+  numbers: canonical decomposition, bounded `big.Rat` expansion, modular
+  `multipleOf`), `internal/numkind` (Go integer reflect kind -> parse
+  bit-width mapping, shared by both halves), and `internal/schemashape`
+  (structural shape classification of a `Schema`).
 
 ### Relationship to google/jsonschema-go
 

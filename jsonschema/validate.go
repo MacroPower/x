@@ -13,7 +13,6 @@ import (
 	"math/big"
 	"mime"
 	"net/url"
-	"reflect"
 	"regexp"
 	"slices"
 	"strconv"
@@ -25,6 +24,7 @@ import (
 
 	"go.jacobcolvin.com/x/jsonschema/internal/format"
 	"go.jacobcolvin.com/x/jsonschema/internal/jsonptr"
+	"go.jacobcolvin.com/x/jsonschema/internal/numrat"
 	"go.jacobcolvin.com/x/jsonschema/internal/vocab"
 )
 
@@ -667,7 +667,7 @@ func registerSchema(reg map[string]*Schema, key string, s *Schema, onlyIfAbsent 
 // converted once at Compile time so validateNumeric and validateNumericUnbounded
 // reuse them instead of re-parsing the float64 bounds on every numeric instance.
 // A nil field denotes either an absent keyword or a NaN/Inf bound that has no
-// rational form (mirroring [float64ToRat]). The rationals are operands only:
+// rational form (mirroring [numrat.Float64ToRat]). The rationals are operands only:
 // comparisons read them and never mutate them.
 type precomputedBounds struct {
 	multipleOf       *big.Rat
@@ -735,12 +735,12 @@ func (v *validator) precomputeSchema(schema *Schema, visited map[*Schema]bool) {
 	}
 
 	if schema.Const != nil {
-		if r, ok := schemaNumberRat(*schema.Const); ok {
+		if r, ok := numrat.SchemaNumberRat(*schema.Const); ok {
 			v.constRats[schema] = r
 		}
 	}
 
-	if rats := enumMemberRats(schema.Enum); rats != nil {
+	if rats := numrat.EnumMemberRats(schema.Enum); rats != nil {
 		v.enumRats[schema] = rats
 	}
 
@@ -760,23 +760,23 @@ func computeBounds(schema *Schema) *precomputedBounds {
 
 	b := &precomputedBounds{}
 	if schema.MultipleOf != nil {
-		b.multipleOf = float64ToRat(*schema.MultipleOf)
+		b.multipleOf = numrat.Float64ToRat(*schema.MultipleOf)
 	}
 
 	if schema.Minimum != nil {
-		b.minimum = float64ToRat(*schema.Minimum)
+		b.minimum = numrat.Float64ToRat(*schema.Minimum)
 	}
 
 	if schema.Maximum != nil {
-		b.maximum = float64ToRat(*schema.Maximum)
+		b.maximum = numrat.Float64ToRat(*schema.Maximum)
 	}
 
 	if schema.ExclusiveMinimum != nil {
-		b.exclusiveMinimum = float64ToRat(*schema.ExclusiveMinimum)
+		b.exclusiveMinimum = numrat.Float64ToRat(*schema.ExclusiveMinimum)
 	}
 
 	if schema.ExclusiveMaximum != nil {
-		b.exclusiveMaximum = float64ToRat(*schema.ExclusiveMaximum)
+		b.exclusiveMaximum = numrat.Float64ToRat(*schema.ExclusiveMaximum)
 	}
 
 	return b
@@ -2092,367 +2092,6 @@ func acceptedInstance(instance any) bool {
 	}
 }
 
-// maxNumberLen bounds the number of significant digits and the decimal
-// exponent magnitude that the validator expands into an exact [big.Rat].
-// [big.Rat.SetString] is quadratic in the digit count and materializes
-// exponents as full integers (a 9-character literal like 1e1000000 expands to
-// a million-digit number), so an adversarial literal can cost seconds of CPU
-// and large allocations. A number outside these bounds can never equal a
-// schema bound or const: a float64's exact decimal expansion has at most ~767
-// significant digits and a decimal exponent within about ±324, far inside the
-// cap. Such numbers are compared by magnitude class and truncated significand
-// instead of being expanded (see validateNumericUnbounded).
-const maxNumberLen = 4096
-
-// decExpClamp caps the parsed decimal exponent so arithmetic on it cannot
-// overflow. Every magnitude beyond maxNumberLen behaves identically (the value
-// is outside the float64 range either way), so clamping does not change any
-// comparison.
-const decExpClamp = 1 << 30
-
-// decNumber is the canonical decomposition of a decimal number literal:
-// value = ±0.sig × 10^exp, where sig holds the significant digits with leading
-// and trailing zeros stripped. Zero has an empty sig (its exp and neg carry no
-// meaning). The decomposition is computed in O(len) without expanding
-// exponents, so it is safe on adversarial input, and it is unique: two
-// literals denote the same value exactly when their nonzero decompositions
-// match.
-type decNumber struct {
-	sig string
-	exp int
-	neg bool
-}
-
-// parseDecNumber decomposes a decimal literal (the JSON number grammar, with a
-// leading '+' and bare ".5"/"5." forms also accepted for parity with
-// [big.Rat.SetString]) into canonical decNumber form. It reports false for
-// anything else, including the fraction and hexadecimal forms [big.Rat]
-// accepts, which JSON cannot produce.
-func parseDecNumber(s string) (decNumber, bool) {
-	var d decNumber
-
-	i := 0
-	if i < len(s) && (s[i] == '+' || s[i] == '-') {
-		d.neg = s[i] == '-'
-		i++
-	}
-
-	intStart := i
-	for i < len(s) && s[i] >= '0' && s[i] <= '9' {
-		i++
-	}
-
-	intDigits := s[intStart:i]
-
-	var fracDigits string
-
-	if i < len(s) && s[i] == '.' {
-		i++
-
-		fracStart := i
-		for i < len(s) && s[i] >= '0' && s[i] <= '9' {
-			i++
-		}
-
-		fracDigits = s[fracStart:i]
-	}
-
-	if intDigits == "" && fracDigits == "" {
-		return decNumber{}, false
-	}
-
-	var exp int64
-
-	if i < len(s) && (s[i] == 'e' || s[i] == 'E') {
-		i++
-
-		expNeg := false
-		if i < len(s) && (s[i] == '+' || s[i] == '-') {
-			expNeg = s[i] == '-'
-			i++
-		}
-
-		expStart := i
-		for i < len(s) && s[i] >= '0' && s[i] <= '9' {
-			// Saturate instead of overflowing; precision past the clamp cannot
-			// change any comparison.
-			if exp < decExpClamp {
-				exp = exp*10 + int64(s[i]-'0')
-			}
-
-			i++
-		}
-
-		if i == expStart {
-			return decNumber{}, false
-		}
-
-		if expNeg {
-			exp = -exp
-		}
-	}
-
-	if i != len(s) {
-		return decNumber{}, false
-	}
-
-	// DigitAt addresses the combined integer+fraction digit string without
-	// concatenating it.
-	digitsLen := len(intDigits) + len(fracDigits)
-	digitAt := func(i int) byte {
-		if i < len(intDigits) {
-			return intDigits[i]
-		}
-
-		return fracDigits[i-len(intDigits)]
-	}
-
-	lead := 0
-	for lead < digitsLen && digitAt(lead) == '0' {
-		lead++
-	}
-
-	if lead == digitsLen {
-		// All digits are zero: canonical zero. The sign is discarded so 0, -0,
-		// and 0e5 share a single form, matching big.Rat equality.
-		return decNumber{}, true
-	}
-
-	trail := 0
-	for digitAt(digitsLen-1-trail) == '0' {
-		trail++
-	}
-
-	// The significand spans the combined digits from lead to digitsLen-trail;
-	// slice it out of whichever part holds it, concatenating only when it
-	// straddles the decimal point.
-	start, end := lead, digitsLen-trail
-	switch {
-	case end <= len(intDigits):
-		d.sig = intDigits[start:end]
-	case start >= len(intDigits):
-		d.sig = fracDigits[start-len(intDigits) : end-len(intDigits)]
-	default:
-		d.sig = intDigits[start:] + fracDigits[:end-len(intDigits)]
-	}
-
-	// Value = sig × 10^(exp - len(frac) + trail), and as 0.sig form that shifts
-	// by len(sig) more.
-	e := int64(len(d.sig)) + exp - int64(len(fracDigits)) + int64(trail)
-	switch {
-	case e > decExpClamp:
-		e = decExpClamp
-	case e < -decExpClamp:
-		e = -decExpClamp
-	}
-
-	d.exp = int(e)
-
-	return d, true
-}
-
-// decCanonicalExp returns the exact base-10 exponent of s in its canonical
-// 0.sig x 10^exp form, as an unclamped [big.Int]: parsedExp + len(intDigits) -
-// lead, where lead is the count of leading zeros across the integer and fraction
-// digits. The exponent parseDecNumber stores is clamped so arithmetic on it
-// stays bounded, which is correct when comparing a huge number against an
-// in-range value but collapses two distinct huge magnitudes onto one decNumber.
-// This exact form is used on the rare path where two such literals share a
-// clamped decNumber, so distinct values stay distinct. The argument s must
-// already be a valid decimal literal (parseDecNumber returned true).
-func decCanonicalExp(s string) *big.Int {
-	i := 0
-	if i < len(s) && (s[i] == '+' || s[i] == '-') {
-		i++
-	}
-
-	intStart := i
-	for i < len(s) && s[i] >= '0' && s[i] <= '9' {
-		i++
-	}
-
-	intLen := i - intStart
-
-	lead := 0
-	for j := intStart; j < i && s[j] == '0'; j++ {
-		lead++
-	}
-
-	if i < len(s) && s[i] == '.' {
-		i++
-
-		// All integer digits were zero, so leading zeros continue into the
-		// fraction (e.g. 0.05 has two leading zeros across "005").
-		if lead == intLen {
-			for i < len(s) && s[i] == '0' {
-				lead++
-				i++
-			}
-		}
-
-		for i < len(s) && s[i] >= '0' && s[i] <= '9' {
-			i++
-		}
-	}
-
-	exp := new(big.Int)
-	if i < len(s) && (s[i] == 'e' || s[i] == 'E') {
-		i++
-
-		neg := false
-		if i < len(s) && (s[i] == '+' || s[i] == '-') {
-			neg = s[i] == '-'
-			i++
-		}
-
-		exp.SetString(s[i:], 10)
-
-		if neg {
-			exp.Neg(exp)
-		}
-	}
-
-	return exp.Add(exp, big.NewInt(int64(intLen-lead)))
-}
-
-// isIntegral reports whether the value is a mathematical integer: zero, or a
-// significand that sits entirely left of the decimal point.
-func (d decNumber) isIntegral() bool {
-	return d.sig == "" || d.exp >= len(d.sig)
-}
-
-// exactlyComparable reports whether the value can be expanded into a [big.Rat]
-// at bounded cost: at most maxNumberLen significant digits scaled by at most
-// maxNumberLen decimal places. Values outside these bounds are compared by
-// magnitude class instead (see validateNumericUnbounded) and can never equal a
-// float64 or integer (see equalGuarded).
-func (d decNumber) exactlyComparable() bool {
-	return len(d.sig) <= maxNumberLen && d.exp <= maxNumberLen && d.exp >= -maxNumberLen
-}
-
-// rat expands the canonical form into an exact rational. The cost is bounded
-// only for exactlyComparable values; callers must check that first.
-func (d decNumber) rat() *big.Rat {
-	if d.sig == "" {
-		return new(big.Rat)
-	}
-
-	num := new(big.Int)
-	num.SetString(d.sig, 10) // sig is all digits, so this cannot fail
-
-	shift := int64(d.exp) - int64(len(d.sig))
-
-	absShift := shift
-	if absShift < 0 {
-		absShift = -absShift
-	}
-
-	pow := new(big.Int).Exp(big.NewInt(10), big.NewInt(absShift), nil)
-
-	r := new(big.Rat)
-	if shift >= 0 {
-		r.SetInt(num.Mul(num, pow))
-	} else {
-		r.SetFrac(num, pow)
-	}
-
-	if d.neg {
-		r.Neg(r)
-	}
-
-	return r
-}
-
-// cmpRat orders a value that is not exactlyComparable against an exact
-// rational derived from a float64 bound, returning -1 (below) or +1 (above).
-// Exact equality cannot occur, because every float64 expands to at most ~767
-// significant decimal digits within exponent ±324, inside the caps. So 0 is
-// never returned and inclusive/exclusive bounds behave identically.
-func (d decNumber) cmpRat(b *big.Rat) int {
-	sign := 1
-	if d.neg {
-		sign = -1
-	}
-
-	// Huge magnitude: |value| ≥ 10^maxNumberLen exceeds every finite float64,
-	// so the sign alone decides.
-	if d.exp > maxNumberLen {
-		return sign
-	}
-
-	// Tiny magnitude: 0 < |value| < 10^-maxNumberLen sits strictly between
-	// zero and the smallest nonzero float64, so it compares as an epsilon of
-	// its sign: above every bound on or below zero, below every bound above
-	// zero (and mirrored when negative).
-	if d.exp < -maxNumberLen {
-		if d.neg {
-			if b.Sign() < 0 {
-				return 1
-			}
-
-			return -1
-		}
-
-		if b.Sign() > 0 {
-			return -1
-		}
-
-		return 1
-	}
-
-	// Over-precise: more significant digits than any float64 expansion.
-	// Truncating the significand moves the magnitude strictly toward zero (the
-	// dropped tail is nonzero since sig carries no trailing zeros), and no
-	// float64 fits strictly between the truncated and full values (that would
-	// take more than maxNumberLen significant digits). The truncated ordering
-	// therefore decides, with ties broken away from zero.
-	//
-	// The only inputs that reach this line have len(sig) > maxNumberLen (the
-	// huge/tiny branches above caught every out-of-range exponent, so the
-	// remaining non-exactlyComparable reason is excess precision). Clamp the cut
-	// anyway so a future caller passing a shorter significand degrades to an
-	// exact compare instead of a slice-bounds panic.
-	t := decNumber{sig: d.sig[:min(maxNumberLen, len(d.sig))], exp: d.exp, neg: d.neg}
-	if c := t.rat().Cmp(b); c != 0 {
-		return c
-	}
-
-	return sign
-}
-
-// jsonNumberIsIntegral reports whether a [json.Number] denotes a mathematical
-// integer (e.g. "1.0", "1e3", or a value far beyond the int64 range). The
-// canonical decomposition answers exactly in O(n) at any magnitude or
-// precision, without the quadratic [big.Rat] parse a long or large-exponent
-// literal would otherwise incur.
-func jsonNumberIsIntegral(n json.Number) bool {
-	d, ok := parseDecNumber(string(n))
-
-	return ok && d.isIntegral()
-}
-
-// isIntegralInstance reports whether a numeric instance (a [json.Number] or a
-// float64) has an integer value. A [json.Number] parses its decimal exactly via
-// [big.Rat], so integrality holds at any magnitude; a float64 uses Trunc to avoid
-// the int64() saturation that misclassifies large integral floats (e.g. 1e30).
-// It is the single definition shared by instanceType and instanceMatchesType.
-func isIntegralInstance(v any) bool {
-	switch val := v.(type) {
-	case json.Number:
-		_, err := val.Int64()
-		if err == nil {
-			return true
-		}
-
-		return jsonNumberIsIntegral(val)
-
-	case float64:
-		return !math.IsInf(val, 0) && val == math.Trunc(val)
-	}
-
-	return false
-}
-
 // instanceType returns the JSON Schema type name for a Go value.
 func instanceType(v any) string {
 	if v == nil {
@@ -2465,7 +2104,7 @@ func instanceType(v any) string {
 	case string:
 		return typeNameString
 	case json.Number, float64:
-		if isIntegralInstance(val) {
+		if numrat.IsIntegralInstance(val) {
 			return typeNameInteger
 		}
 
@@ -2497,7 +2136,7 @@ func instanceMatchesType(instance any, typ string) bool {
 		return isStr
 
 	case typeNameInteger:
-		return isIntegralInstance(instance)
+		return numrat.IsIntegralInstance(instance)
 
 	case typeNameNumber:
 		switch instance.(type) {
@@ -2636,7 +2275,7 @@ func (v *validator) validateConst(
 // decimal literals. Expanding the schema float through [big.Rat.SetFloat64]
 // would compare its exact binary value, which can never equal the literal 0.1,
 // so the schema float is instead expanded through its shortest decimal
-// ([float64ToRat]) to match how the numeric-bound keywords convert schema
+// ([numrat.Float64ToRat]) to match how the numeric-bound keywords convert schema
 // values. The two sides then compare as exact rationals, recursing through
 // arrays and objects.
 //
@@ -2644,7 +2283,7 @@ func (v *validator) validateConst(
 // and false never equals 0; the numeric branch only fires when both sides are
 // numeric kinds.
 func equalSchemaInstance(schemaVal, instance any) bool {
-	if sr, ok := schemaNumberRat(schemaVal); ok {
+	if sr, ok := numrat.SchemaNumberRat(schemaVal); ok {
 		return equalRatInstance(sr, instance)
 	}
 
@@ -2695,9 +2334,9 @@ func equalSchemaInstance(schemaVal, instance any) bool {
 	// hand-built const/enum, since the upstream parser yields float64 for a
 	// schema number; the common case is a json.Number whose magnitude exceeds
 	// the cheap-expansion bounds (an in-bounds one is already handled by
-	// schemaNumberRat above). Route through equalJSONValues so such a literal
+	// numrat.SchemaNumberRat above). Route through equalJSONValues so such a literal
 	// is compared canonically rather than through upstream's uncapped
-	// big.Rat.SetString, which would cost quadratic time (see maxNumberLen).
+	// big.Rat.SetString, which would cost quadratic time (see numrat.MaxNumberLen).
 	return equalJSONValues(schemaVal, instance)
 }
 
@@ -2705,7 +2344,7 @@ func equalSchemaInstance(schemaVal, instance any) bool {
 // rational sr, equals the numeric instance. It mirrors the numeric branch of
 // [equalSchemaInstance]: a non-numeric instance never matches.
 func equalRatInstance(sr *big.Rat, instance any) bool {
-	ir, ok := toBigRat(instance)
+	ir, ok := numrat.ToBigRat(instance)
 	if !ok {
 		return false
 	}
@@ -2726,76 +2365,11 @@ func equalWithRat(schemaVal any, schemaRat *big.Rat, instance any) bool {
 	return equalRatInstance(schemaRat, instance)
 }
 
-// schemaNumberRat converts a schema-authored numeric value to an exact
-// rational. A float64 expands through its shortest decimal ([float64ToRat]) so
-// that, e.g., schema 0.1 compares as 1/10 rather than its binary expansion,
-// matching the numeric-bound keywords; integer kinds convert exactly. A
-// non-numeric value, or a non-finite float, reports false so the caller treats
-// the schema value as a non-number.
-func schemaNumberRat(v any) (*big.Rat, bool) {
-	if f, ok := v.(float64); ok {
-		r := float64ToRat(f)
-		if r == nil {
-			return nil, false
-		}
-
-		return r, true
-	}
-
-	if n, ok := v.(json.Number); ok {
-		// A hand-built const/enum may carry a json.Number rather than the
-		// float64 the schema parser yields. Expand it the way toBigRat expands
-		// instance numbers so both take the shortest-decimal rational path
-		// rather than upstream's exact-binary float semantics.
-		d, parsed := parseDecNumber(string(n))
-		if !parsed || !d.exactlyComparable() {
-			return nil, false
-		}
-
-		return d.rat(), true
-	}
-
-	rv := reflect.ValueOf(v)
-	switch {
-	case !rv.IsValid():
-		return nil, false
-	case rv.CanInt():
-		return new(big.Rat).SetInt64(rv.Int()), true
-	case rv.CanUint():
-		return new(big.Rat).SetUint64(rv.Uint()), true
-	}
-
-	return nil, false
-}
-
-// enumMemberRats returns the rational forms of an enum's numeric members,
-// aligned by index with enum (nil for a non-numeric member). It returns nil
-// when no member is numeric, so [precomputeSchema] stores an entry only for an
-// enum that can take the fast numeric-comparison path.
-func enumMemberRats(enum []any) []*big.Rat {
-	var rats []*big.Rat
-
-	for i, member := range enum {
-		r, ok := schemaNumberRat(member)
-		if !ok {
-			continue
-		}
-
-		if rats == nil {
-			rats = make([]*big.Rat, len(enum))
-		}
-
-		rats[i] = r
-	}
-
-	return rats
-}
-
 // equalJSONValues reports JSON-semantic equality like [jsonschema.Equal], with
 // a guard for adversarial numbers: the upstream comparison expands every
 // [json.Number] through an uncapped [big.Rat.SetString], so a multi-megabyte
 // or large-exponent literal costs quadratic time and large allocations (see
-// maxNumberLen). When either value contains such a number the comparison runs
+// numrat.MaxNumberLen). When either value contains such a number the comparison runs
 // through a guarded local walk; otherwise it delegates to [jsonschema.Equal]
 // for full upstream semantics.
 func equalJSONValues(a, b any) bool {
@@ -2847,9 +2421,9 @@ func containsNonFiniteFloat(v any) bool {
 func containsUnboundedNumber(v any) bool {
 	switch val := v.(type) {
 	case json.Number:
-		d, ok := parseDecNumber(string(val))
+		d, ok := numrat.ParseDecNumber(string(val))
 
-		return !ok || !d.exactlyComparable()
+		return !ok || !d.ExactlyComparable()
 
 	case []any:
 		if slices.ContainsFunc(val, containsUnboundedNumber) {
@@ -2881,8 +2455,8 @@ func equalGuarded(a, b any) bool {
 
 	switch {
 	case aNum && bNum:
-		da, oka := parseDecNumber(string(an))
-		db, okb := parseDecNumber(string(bn))
+		da, oka := numrat.ParseDecNumber(string(an))
+		db, okb := numrat.ParseDecNumber(string(bn))
 		if !oka || !okb {
 			// Not decimal literals: textual identity, mirroring upstream's
 			// kind-level comparison for numbers big.Rat cannot parse.
@@ -2893,7 +2467,7 @@ func equalGuarded(a, b any) bool {
 			return false
 		}
 
-		if da.exactlyComparable() {
+		if da.ExactlyComparable() {
 			// Within the cheap-expansion bounds the canonical decomposition is
 			// exact, so equal structs denote equal values.
 			return true
@@ -2901,10 +2475,10 @@ func equalGuarded(a, b any) bool {
 
 		// Both magnitudes exceed the clamp, so equal structs only prove the
 		// clamped exponents match. Two distinct huge numbers (1e1073741824 and
-		// 1e2147483648) share a clamped decNumber, so confirm their exact,
+		// 1e2147483648) share a clamped DecNumber, so confirm their exact,
 		// unclamped exponents agree to keep them distinct, matching upstream's
 		// uncapped big.Rat comparison.
-		return decCanonicalExp(string(an)).Cmp(decCanonicalExp(string(bn))) == 0
+		return numrat.DecCanonicalExp(string(an)).Cmp(numrat.DecCanonicalExp(string(bn))) == 0
 
 	case aNum:
 		return guardedNumberEqual(an, b)
@@ -2950,114 +2524,22 @@ func equalGuarded(a, b any) bool {
 // the same semantics as [jsonschema.Equal]: numeric Go values compare
 // mathematically across representations, everything else is unequal.
 func guardedNumberEqual(n json.Number, b any) bool {
-	d, ok := parseDecNumber(string(n))
+	d, ok := numrat.ParseDecNumber(string(n))
 	if !ok {
 		return false
 	}
 
-	br, ok := numericRat(b)
+	br, ok := numrat.NumericRat(b)
 	if !ok {
 		return false
 	}
 
-	if !d.exactlyComparable() {
+	if !d.ExactlyComparable() {
 		// Outside the bounds the value cannot equal any float64 or integer.
 		return false
 	}
 
-	return d.rat().Cmp(br) == 0
-}
-
-// numericRat converts the numeric Go kinds [jsonschema.Equal] recognizes
-// (other than [json.Number]) to an exact rational.
-func numericRat(v any) (*big.Rat, bool) {
-	rv := reflect.ValueOf(v)
-	r := new(big.Rat)
-
-	switch {
-	case !rv.IsValid():
-		return nil, false
-	case rv.CanInt():
-		r.SetInt64(rv.Int())
-	case rv.CanUint():
-		r.SetUint64(rv.Uint())
-	case rv.CanFloat():
-		f := rv.Float()
-		if math.IsInf(f, 0) || math.IsNaN(f) {
-			return nil, false
-		}
-
-		r.SetFloat64(f)
-
-	default:
-		return nil, false
-	}
-
-	return r, true
-}
-
-// toBigRat converts a numeric value to [*big.Rat] for precise comparison.
-func toBigRat(v any) (*big.Rat, bool) {
-	switch val := v.(type) {
-	case float64:
-		// Use the shortest decimal representation so that, e.g., float64(1.01)
-		// compares as 101/100 rather than its exact binary expansion. This
-		// matches how schema bound values are converted (float64ToRat). A
-		// non-finite value yields nil, which is reported as not-a-number so
-		// numeric keywords skip it rather than dereferencing a nil *big.Rat.
-		r := float64ToRat(val)
-		if r == nil {
-			return nil, false
-		}
-
-		return r, true
-
-	case json.Number:
-		// DoS guard: decompose canonically (O(n), no exponent expansion) and
-		// expand into a rational only when that is provably cheap. Anything
-		// else is reported unparseable so validateNumeric falls back to the
-		// magnitude-class comparison.
-		d, ok := parseDecNumber(string(val))
-		if !ok || !d.exactlyComparable() {
-			return nil, false
-		}
-
-		return d.rat(), true
-	}
-
-	return nil, false
-}
-
-// isNumeric reports whether a value is a numeric type
-// (float64 or [json.Number]).
-func isNumeric(v any) bool {
-	switch v.(type) {
-	case float64, json.Number:
-		return true
-	}
-
-	return false
-}
-
-// float64ToRat converts a float64 to a [big.Rat] using its shortest decimal
-// representation to avoid precision artifacts (e.g. float64(1.1) becoming
-// 1.100000000000000088... When using [big.Rat.SetFloat64]).
-func float64ToRat(f float64) *big.Rat {
-	if math.IsInf(f, 0) || math.IsNaN(f) {
-		// Non-finite values have no rational form. Callers treat a nil result as
-		// "not a JSON number" (JSON cannot represent Inf or NaN).
-		return nil
-	}
-
-	// A finite float64 always formats to a decimal string that SetString
-	// parses, so the parse cannot fail here; a nil result would only arise from
-	// the non-finite guard above, which callers already treat as "not a number".
-	s := strconv.FormatFloat(f, 'f', -1, 64)
-
-	r := new(big.Rat)
-	_, _ = r.SetString(s)
-
-	return r
+	return d.Rat().Cmp(br) == 0
 }
 
 // boundsFor returns the numeric bound rationals for schema, preferring the
@@ -3113,7 +2595,7 @@ func (v *validator) validateNumeric(
 		return nil
 	}
 
-	if !isNumeric(instance) {
+	if !numrat.IsNumeric(instance) {
 		return nil
 	}
 
@@ -3127,21 +2609,21 @@ func (v *validator) validateNumeric(
 
 	switch n := instance.(type) {
 	case json.Number:
-		d, ok := parseDecNumber(string(n))
+		d, ok := numrat.ParseDecNumber(string(n))
 		if !ok {
 			return nil
 		}
 
-		if !d.exactlyComparable() {
+		if !d.ExactlyComparable() {
 			return v.validateNumericUnbounded(schema, d, string(n), instancePath, schemaPath)
 		}
 
-		val = d.rat()
+		val = d.Rat()
 
 	default:
 		var ok bool
 
-		val, ok = toBigRat(instance)
+		val, ok = numrat.ToBigRat(instance)
 		if !ok {
 			return nil
 		}
@@ -3165,7 +2647,7 @@ func (v *validator) validateNumeric(
 			add(KeywordMultipleOf, fmt.Sprintf("multipleOf must be greater than 0, got %v", *schema.MultipleOf))
 
 		default:
-			// A NaN/Inf divisor has no rational form (float64ToRat returns
+			// A NaN/Inf divisor has no rational form (numrat.Float64ToRat returns
 			// nil); the constraint cannot apply, so skip it rather than
 			// dividing by a nil *big.Rat. Quo writes its own receiver, so the
 			// cached divisor stays an operand and is never mutated.
@@ -3218,20 +2700,20 @@ func (v *validator) validateNumeric(
 }
 
 // validateNumericUnbounded checks the numeric bound keywords for a
-// [json.Number] whose exact expansion is too expensive (see maxNumberLen): a
+// [json.Number] whose exact expansion is too expensive (see numrat.MaxNumberLen): a
 // huge magnitude (exponent above the cap), a tiny magnitude (exponent below
 // the negative cap), or a significand longer than the cap. Every such value
 // still orders deterministically against any float64 bound via
-// [decNumber.cmpRat], and equality with a bound is impossible, so the
+// [numrat.DecNumber.CmpRat], and equality with a bound is impossible, so the
 // inclusive and exclusive variants of each bound coincide. An over-cap integer
 // still has its multipleOf divisibility enforced through modular arithmetic
-// (see [integerMultipleOf]); only an over-cap non-integer skips it, since
+// (see [numrat.IntegerMultipleOf]); only an over-cap non-integer skips it, since
 // expanding its fractional part is unbounded. The schema-validity check (a
 // non-positive divisor) fires regardless. A zero value is always
-// exactlyComparable, so it never reaches this path.
+// ExactlyComparable, so it never reaches this path.
 func (v *validator) validateNumericUnbounded(
 	schema *Schema,
-	d decNumber,
+	d numrat.DecNumber,
 	literal string,
 	instancePath instanceLocation,
 	schemaPath schemaLocation,
@@ -3249,14 +2731,14 @@ func (v *validator) validateNumericUnbounded(
 	// A non-positive multipleOf makes the schema invalid independent of the
 	// instance value. For a positive divisor, an over-cap integer's
 	// divisibility is still decidable at bounded cost via modular arithmetic
-	// (see integerMultipleOf), so it is enforced. A non-integral over-cap value
+	// (see numrat.IntegerMultipleOf), so it is enforced. A non-integral over-cap value
 	// keeps the documented skip: expanding its fractional part is unbounded.
 	if schema.MultipleOf != nil {
 		switch {
 		case *schema.MultipleOf <= 0:
 			add(KeywordMultipleOf, fmt.Sprintf("multipleOf must be greater than 0, got %v", *schema.MultipleOf))
-		case bounds.multipleOf != nil && d.isIntegral() &&
-			!integerMultipleOf(d, literal, bounds.multipleOf):
+		case bounds.multipleOf != nil && d.IsIntegral() &&
+			!numrat.IntegerMultipleOf(d, literal, bounds.multipleOf):
 			add(KeywordMultipleOf, fmt.Sprintf("%s is not a multiple of %v", num, *schema.MultipleOf))
 		}
 	}
@@ -3266,29 +2748,29 @@ func (v *validator) validateNumericUnbounded(
 	// comparison reads the bound and never mutates it, so the cached rational
 	// stays shared.
 	if schema.Minimum != nil {
-		if b := bounds.minimum; b != nil && d.cmpRat(b) < 0 {
+		if b := bounds.minimum; b != nil && d.CmpRat(b) < 0 {
 			add(KeywordMinimum, fmt.Sprintf("%s is less than %v", num, *schema.Minimum))
 		}
 	}
 
 	if schema.Maximum != nil {
-		if b := bounds.maximum; b != nil && d.cmpRat(b) > 0 {
+		if b := bounds.maximum; b != nil && d.CmpRat(b) > 0 {
 			add(KeywordMaximum, fmt.Sprintf("%s is greater than %v", num, *schema.Maximum))
 		}
 	}
 
 	if schema.ExclusiveMinimum != nil {
-		// On the unbounded path cmpRat never reports equality (an over-cap value
+		// On the unbounded path CmpRat never reports equality (an over-cap value
 		// cannot equal the finite float64 bound), so the violation is always a
 		// strict inequality; the message omits the "or equal to" the bounded path
 		// uses, where equality is reachable.
-		if b := bounds.exclusiveMinimum; b != nil && d.cmpRat(b) < 0 {
+		if b := bounds.exclusiveMinimum; b != nil && d.CmpRat(b) < 0 {
 			add(KeywordExclusiveMinimum, fmt.Sprintf("%s is less than %v", num, *schema.ExclusiveMinimum))
 		}
 	}
 
 	if schema.ExclusiveMaximum != nil {
-		if b := bounds.exclusiveMaximum; b != nil && d.cmpRat(b) > 0 {
+		if b := bounds.exclusiveMaximum; b != nil && d.CmpRat(b) > 0 {
 			add(KeywordExclusiveMaximum, fmt.Sprintf("%s is greater than %v", num, *schema.ExclusiveMaximum))
 		}
 	}
@@ -3306,39 +2788,6 @@ func truncatedNumber(s string) string {
 	}
 
 	return fmt.Sprintf("%s... (%d chars)", s[:keep], len(s))
-}
-
-// integerMultipleOf reports whether the integral value of literal (decomposed
-// as d) is an exact multiple of the positive rational divisor m, without
-// expanding an over-cap magnitude. Writing the value as sig*10^k with k >= 0 and
-// m as the reduced p/q, the value is a multiple of m exactly when p divides it,
-// since gcd(p, q) = 1 means q contributes no factor of p. The check is then
-// (sig mod p)*(10^k mod p) mod p == 0, with the power reduced modulo p so 10^k
-// is never materialized. The exponent comes from the literal because
-// decNumber.exp is clamped for an over-cap magnitude. The caller must pass an
-// integral d (see [decNumber.isIntegral]) and a positive m.
-func integerMultipleOf(d decNumber, literal string, m *big.Rat) bool {
-	p := new(big.Int).Abs(m.Num())
-	if p.Sign() == 0 || d.sig == "" {
-		return true // No real divisor, or a zero value: a multiple either way.
-	}
-
-	sig, ok := new(big.Int).SetString(d.sig, 10)
-	if !ok {
-		return true // sig is all digits by construction, so this cannot fail.
-	}
-
-	k := new(big.Int).Sub(decCanonicalExp(literal), big.NewInt(int64(len(d.sig))))
-	if k.Sign() < 0 {
-		return true // Not integral after all; the caller should have screened it.
-	}
-
-	pow := new(big.Int).Exp(big.NewInt(10), k, p)
-	rem := new(big.Int).Mod(sig, p)
-	rem.Mul(rem, pow)
-	rem.Mod(rem, p)
-
-	return rem.Sign() == 0
 }
 
 // ratString returns a compact string representation of a [big.Rat]. An integer
@@ -3773,21 +3222,21 @@ func hashValue(v any) uint64 {
 		// (see equalGuarded), and equal values share one canonical form, so
 		// hashing that form keeps equal values colliding without the quadratic
 		// parse or exponent expansion.
-		d, ok := parseDecNumber(string(val))
+		d, ok := numrat.ParseDecNumber(string(val))
 		if !ok {
 			return stringHash(string(val)) + 5
 		}
 
-		if !d.exactlyComparable() {
-			h := stringHash(d.sig)*31 + numHash(int64(d.exp))
-			if d.neg {
+		if !d.ExactlyComparable() {
+			h := stringHash(d.Sig())*31 + numHash(int64(d.Exp()))
+			if d.Neg() {
 				h = h*31 + 1
 			}
 
 			return h + 8
 		}
 
-		r := d.rat()
+		r := d.Rat()
 		// IsInt64 guards against silent truncation for integers beyond the
 		// int64 range, so they hash via RatString and stay consistent with
 		// the float64 branch (and with the guarded equality's rat compare).
