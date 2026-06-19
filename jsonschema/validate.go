@@ -340,6 +340,13 @@ type validator struct {
 	formatsEnabled bool
 	contentEnabled bool // assert contentEncoding/contentMediaType (WithContent)
 
+	// True once this per-run validator holds its own copy of the five registry
+	// maps. A run shares the compiled validator's maps by reference until it
+	// first needs to write them (resolveRemote fetching a ref at validation
+	// time), at which point ensureOwnedRegistries clones them so concurrent runs
+	// never write shared state.
+	registriesOwned bool
+
 	// Treat $id as an inert annotation in walkSchema: no URI or anchor
 	// registration, no base-URI change, in any form including the
 	// Draft 7 fragment-only anchor form. Only the inliner's scratch
@@ -408,14 +415,17 @@ func newValidator(ctx context.Context, schema *Schema, opts []ValidateOption) (*
 // is carried on the per-run copy so a [RefResolver] resolving a remote
 // ref at validation time sees the context of the run that triggered it.
 //
-// When a [RefResolver] is configured the registries can still gain entries
-// during the walk (a remote ref reached only at validation time, via
-// resolveRemote), so each run gets its own copies to keep concurrent runs from
-// racing on them. Without a resolver the walk never writes the registries, so
-// they are shared directly.
+// The five registry maps are shared from the compiled validator by reference;
+// they are immutable after Compile, so concurrent runs read them safely. A run
+// that fetches a remote ref at validation time (via resolveRemote) must write
+// them, so it first clones them privately through ensureOwnedRegistries — a
+// copy-on-write that spares the O(registry size) clone for the common run that
+// resolves nothing remotely (including a resolver-configured schema whose refs
+// were all cached during Compile).
 func (v *validator) forInstance(ctx context.Context) *validator {
 	rv := *v
 	rv.ctx = ctx
+	rv.registriesOwned = false
 	rv.visiting = map[visitKey]bool{}
 	rv.jsonPointerCache = nil
 	rv.refCache = nil
@@ -430,15 +440,24 @@ func (v *validator) forInstance(ctx context.Context) *validator {
 		rv.dynamicScope = nil
 	}
 
-	if rv.refResolver != nil {
-		rv.uriRegistry = maps.Clone(v.uriRegistry)
-		rv.anchorRegistry = maps.Clone(v.anchorRegistry)
-		rv.dynamicAnchorRegistry = maps.Clone(v.dynamicAnchorRegistry)
-		rv.baseURIs = maps.Clone(v.baseURIs)
-		rv.walked = maps.Clone(v.walked)
+	return &rv
+}
+
+// ensureOwnedRegistries gives this run its own copy of the five registry maps
+// before it writes any of them, so a resolveRemote registration cannot race a
+// concurrent run sharing the compiled validator's maps. It is idempotent: the
+// first remote fetch in a run clones, later fetches reuse the owned copies.
+func (v *validator) ensureOwnedRegistries() {
+	if v.registriesOwned {
+		return
 	}
 
-	return &rv
+	v.uriRegistry = maps.Clone(v.uriRegistry)
+	v.anchorRegistry = maps.Clone(v.anchorRegistry)
+	v.dynamicAnchorRegistry = maps.Clone(v.dynamicAnchorRegistry)
+	v.baseURIs = maps.Clone(v.baseURIs)
+	v.walked = maps.Clone(v.walked)
+	v.registriesOwned = true
 }
 
 // resolveVocabularies determines the active vocabulary set.
@@ -831,10 +850,15 @@ func (v *validator) resolveRemote(baseURI string) *Schema {
 		return nil
 	}
 
+	// Clone the registries into this run's own copies before the first remote
+	// registration so the writes below cannot race a concurrent run still
+	// sharing the compiled validator's maps. At validation time these
+	// registrations then live only for this run.
+	v.ensureOwnedRegistries()
+
 	// Register the copy under baseURI, walking its own nested $id/$anchor
 	// entries in only-if-absent mode so they cannot clobber an already-loaded
-	// entry. At validation time uriRegistry is the per-run clone, so these
-	// registrations live only for this run.
+	// entry.
 	v.uriRegistry[baseURI] = cp
 	v.walkFetchedSchema(cp, baseURI)
 
@@ -872,9 +896,9 @@ func (v *validator) remoteLoader() jsonschema.Loader {
 				// during both Schema.Resolve and the validation walk
 				// find it without re-calling the resolver. Its own nested
 				// $ids/anchors are walked in only-if-absent mode so a
-				// fetched doc cannot clobber an already-loaded entry, yet
-				// the registrations still land in the shared registry that
-				// forInstance clones per run.
+				// fetched doc cannot clobber an already-loaded entry. This
+				// runs at compile time, so the registrations land in the
+				// compiled registry every per-run validator then shares.
 				v.uriRegistry[uriStr] = cp
 				v.walkFetchedSchema(cp, uriStr)
 
