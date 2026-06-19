@@ -332,10 +332,14 @@ func parseCommentBlock(commentLines []string) *parsedComment {
 			continue
 		}
 
-		// Check @ignore (recognized, consumed).
-		stripped := strings.TrimSpace(line)
-		stripped = strings.TrimPrefix(stripped, "#")
-		stripped = strings.TrimSpace(stripped)
+		// Check @ignore (recognized, consumed). StripCommentMarker caps the
+		// strip at two '#', so a two-hash continuation marker (## @ignore) is
+		// recognized consistently with the rest of the package rather than
+		// leaving a stray '#' that defeats the markerToken check.
+		// Strip the comment marker with the shared helper that dadav uses, so
+		// marker recognition stays consistent across annotators (it caps the
+		// strip at two '#' and drops one following space).
+		stripped := strings.TrimSpace(magicschema.StripCommentMarker(line))
 
 		if markerToken(stripped, "@ignore") {
 			skip = true
