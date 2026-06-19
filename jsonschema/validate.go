@@ -26,6 +26,7 @@ import (
 	"go.jacobcolvin.com/x/jsonschema/internal/jsonptr"
 	"go.jacobcolvin.com/x/jsonschema/internal/numrat"
 	"go.jacobcolvin.com/x/jsonschema/internal/typename"
+	"go.jacobcolvin.com/x/jsonschema/internal/uriref"
 	"go.jacobcolvin.com/x/jsonschema/internal/vocab"
 )
 
@@ -553,7 +554,7 @@ func (v *validator) initRegistries() {
 func (v *validator) buildRegistry() {
 	v.initRegistries()
 
-	base := normalizeBaseURI(v.baseURI)
+	base := uriref.NormalizeBaseURI(v.baseURI)
 	v.walkSchema(v.root, base)
 
 	// Register the root document under its base URI when its own $id did
@@ -608,13 +609,13 @@ func (v *validator) walkSchemaInto(schema *Schema, parentBase string, onlyIfAbse
 	currentBase := parentBase
 
 	if schema.ID != "" && !v.inertIDs {
-		if isFragmentOnly(schema.ID) {
+		if uriref.IsFragmentOnly(schema.ID) {
 			// Draft-07: fragment-only $id acts as an anchor.
 			anchor := schema.ID[1:] // strip leading '#'
 			registerSchema(v.anchorRegistry, currentBase+"#"+anchor, schema, onlyIfAbsent)
 		} else {
-			resolved := resolveURI(currentBase, schema.ID)
-			resolved = stripFragment(resolved)
+			resolved := uriref.ResolveURI(currentBase, schema.ID)
+			resolved = uriref.StripFragment(resolved)
 			registerSchema(v.uriRegistry, resolved, schema, onlyIfAbsent)
 
 			currentBase = resolved
@@ -636,7 +637,7 @@ func (v *validator) walkSchemaInto(schema *Schema, parentBase string, onlyIfAbse
 
 	// Store base URI for this schema (used during $ref resolution).
 	// Draft-07 exception: sibling $id doesn't affect $ref resolution.
-	if v.draft == Draft7 && schema.Ref != "" && schema.ID != "" && !isFragmentOnly(schema.ID) {
+	if v.draft == Draft7 && schema.Ref != "" && schema.ID != "" && !uriref.IsFragmentOnly(schema.ID) {
 		v.baseURIs[schema] = parentBase
 	} else {
 		v.baseURIs[schema] = currentBase
@@ -995,88 +996,6 @@ func restorePropertyOrder(src, cp *Schema) {
 	for i := range srcChildren {
 		restorePropertyOrder(srcChildren[i].Schema, cpChildren[i].Schema)
 	}
-}
-
-// isFragmentOnly reports whether a URI is fragment-only (e.g. "#foo").
-func isFragmentOnly(uri string) bool {
-	return strings.HasPrefix(uri, "#")
-}
-
-// resolveURI resolves ref against base per RFC 3986.
-func resolveURI(base, ref string) string {
-	if base == "" {
-		return ref
-	}
-
-	baseURL, err := url.Parse(base)
-	if err != nil {
-		return ref
-	}
-
-	refURL, err := url.Parse(ref)
-	if err != nil {
-		return ref
-	}
-
-	// The ResolveReference call mishandles an opaque base (a URN such as
-	// urn:example:foo): a relative, non-fragment ref against it collapses to a
-	// bogus authority form like "urn:///bar". An opaque URI has no hierarchical
-	// path to merge, so resolve a relative non-fragment ref by applying the RFC
-	// 3986 path-merge to the opaque part. Registration and lookup share this
-	// function, so the result stays symmetric. Absolute and fragment-only refs
-	// resolve correctly through ResolveReference.
-	if baseURL.Opaque != "" && refURL.Scheme == "" && refURL.Opaque == "" &&
-		refURL.Host == "" && refURL.Path != "" {
-		resolved := url.URL{
-			Scheme:     baseURL.Scheme,
-			Opaque:     mergeOpaquePath(baseURL.Opaque, refURL.Path),
-			RawQuery:   refURL.RawQuery,
-			ForceQuery: refURL.ForceQuery,
-			Fragment:   refURL.Fragment,
-		}
-
-		return resolved.String()
-	}
-
-	return baseURL.ResolveReference(refURL).String()
-}
-
-// mergeOpaquePath merges a relative path ref into an opaque URI part using the
-// RFC 3986 merge step, treating the opaque part as a path: the ref replaces
-// everything after the final slash. With no slash, the opaque part is split on
-// its final ':' instead (a URN's NID/NSS structure), so the namespace is
-// preserved rather than discarded; only when neither delimiter is present does
-// the ref replace the whole opaque part.
-func mergeOpaquePath(base, ref string) string {
-	if i := strings.LastIndex(base, "/"); i >= 0 {
-		return base[:i+1] + ref
-	}
-
-	// A URN opaque part such as "example:root" carries no slash but is still
-	// structured by ':'. Replacing only the final colon-delimited component
-	// keeps the namespace identifier, so a relative ref resolves to the same
-	// absolute URN a caller would write directly: urn:example:root + "sub"
-	// yields urn:example:sub, not urn:sub. Registration and lookup share
-	// resolveURI, so this keeps a relative $id and the canonical absolute $ref
-	// agreeing on one registry key.
-	if i := strings.LastIndex(base, ":"); i >= 0 {
-		return base[:i+1] + ref
-	}
-
-	return ref
-}
-
-// stripFragment removes the fragment component from a URI.
-func stripFragment(uri string) string {
-	parsed, err := url.Parse(uri)
-	if err != nil {
-		return uri
-	}
-
-	parsed.Fragment = ""
-	parsed.RawFragment = ""
-
-	return parsed.String()
 }
 
 // detectDraft determines the draft from the root schema's $schema field.
@@ -4010,7 +3929,7 @@ func (v *validator) validateResolvedRef(
 		// A non-local (remote/absolute) ref that cannot be resolved is an
 		// error rather than silently passing. Unresolvable local fragment refs
 		// are already rejected by Schema.Resolve before the walk begins.
-		if !isFragmentOnly(ref) {
+		if !uriref.IsFragmentOnly(ref) {
 			kwPath := schemaPath.kw(keyword)
 
 			return []*ValidationError{{
@@ -4139,7 +4058,7 @@ func (v *validator) resolveRefUncached(schema *Schema, ref string) *Schema {
 
 	// Fragment-only refs (e.g. "#", "#/$defs/foo", "#anchor").
 	//nolint:nestif // Resolution walks distinct fragment forms (pointer, anchor, root).
-	if isFragmentOnly(ref) {
+	if uriref.IsFragmentOnly(ref) {
 		fragment := parsed.Fragment
 
 		// Find the root of the current resource.
@@ -4158,7 +4077,7 @@ func (v *validator) resolveRefUncached(schema *Schema, ref string) *Schema {
 		// JSON Pointer. Pass the still-encoded fragment so a member name
 		// escaped as %2F is not mistaken for a pointer separator.
 		if strings.HasPrefix(fragment, "/") {
-			raw, encoded := rawFragment(parsed)
+			raw, encoded := uriref.RawFragment(parsed)
 
 			return v.resolveJSONPointer(resourceRoot, raw, encoded)
 		}
@@ -4173,7 +4092,7 @@ func (v *validator) resolveRefUncached(schema *Schema, ref string) *Schema {
 
 	// Non-fragment ref: resolve against current schema's base URI.
 	base := v.schemaBase(schema)
-	absRef := resolveURI(base, ref)
+	absRef := uriref.ResolveURI(base, ref)
 
 	parsedAbs, err := url.Parse(absRef)
 	if err != nil {
@@ -4181,7 +4100,7 @@ func (v *validator) resolveRefUncached(schema *Schema, ref string) *Schema {
 	}
 
 	fragment := parsedAbs.Fragment
-	rawFrag, fragEncoded := rawFragment(parsedAbs)
+	rawFrag, fragEncoded := uriref.RawFragment(parsedAbs)
 	parsedAbs.Fragment = ""
 	parsedAbs.RawFragment = ""
 	baseURI := parsedAbs.String()
@@ -4284,19 +4203,6 @@ func (v *validator) resolveJSONPointer(root *Schema, fragment string, encoded bo
 	}
 
 	return v.resolveJSONPointerViaJSON(root, segments)
-}
-
-// rawFragment returns the JSON Pointer fragment to resolve plus whether it is
-// still percent-encoded. The [url.Parse] result populates RawFragment only when
-// the fragment carries an encoding it could not canonicalize (e.g. a %2F
-// separator escape); that form must be split before decoding. Otherwise
-// Fragment is already the single-decoded value and must not be decoded again.
-func rawFragment(u *url.URL) (string, bool) {
-	if u.RawFragment != "" {
-		return u.RawFragment, true
-	}
-
-	return u.Fragment, false
 }
 
 // jsonPointerKey identifies a JSON-pointer fallback lookup, used to cache its
@@ -4471,8 +4377,8 @@ func schemaAtJSONPointer(root *Schema, segments []string, base string) (*Schema,
 		// its own $id is already reflected in base.
 		if i > 0 {
 			if obj, ok := node.(map[string]any); ok {
-				if id, ok := obj["$id"].(string); ok && id != "" && !isFragmentOnly(id) {
-					base = stripFragment(resolveURI(base, id))
+				if id, ok := obj["$id"].(string); ok && id != "" && !uriref.IsFragmentOnly(id) {
+					base = uriref.StripFragment(uriref.ResolveURI(base, id))
 				}
 			}
 		}

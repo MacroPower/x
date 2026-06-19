@@ -24,8 +24,10 @@ The package has two independent halves sharing the `Schema` type:
   `multipleOf`), `internal/numkind` (Go integer reflect kind -> parse
   bit-width mapping, shared by both halves), `internal/typename` (the seven
   canonical JSON Schema type-name constants and their predicate, shared by
-  both halves and schemashape), and `internal/schemashape` (structural shape
-  classification of a `Schema`).
+  both halves and schemashape), `internal/uriref` (RFC 3986 URI-reference
+  resolution and fragment handling for the `$ref` absolutization layer,
+  including the opaque/URN merge that corrects `net/url.ResolveReference`),
+  and `internal/schemashape` (structural shape classification of a `Schema`).
 
 ### Relationship to google/jsonschema-go
 

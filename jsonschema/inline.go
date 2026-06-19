@@ -7,6 +7,8 @@ import (
 	"io/fs"
 	"net/url"
 	"strings"
+
+	"go.jacobcolvin.com/x/jsonschema/internal/uriref"
 )
 
 // inliner carries the configuration and per-call state of one [Inline] run:
@@ -220,24 +222,6 @@ func WithRefFallback(f RefFallback) InlineOption {
 	return inlineOptionFunc(func(in *inliner) { in.fallback = f })
 }
 
-// normalizeBaseURI returns the canonical absolute form of a configured base
-// URI. A base with no URI scheme is a file path; resolving it against
-// file:/// makes RFC 3986 joining well-defined and gives the root document a
-// registry key that refs absolutizing back to it reproduce exactly. An
-// empty, absolute, or unparsable base passes through unchanged.
-func normalizeBaseURI(base string) string {
-	if base == "" {
-		return base
-	}
-
-	parsed, err := url.Parse(base)
-	if err != nil || parsed.Scheme != "" {
-		return base
-	}
-
-	return resolveURI("file:///", base)
-}
-
 // Inline returns a deep copy of s in which every $ref is replaced by a copy
 // of the schema it targets, producing a self-contained schema. S and
 // resolver-returned schemas are never mutated. A nil s returns nil.
@@ -317,7 +301,7 @@ func NewInliner(opts ...InlineOption) *Inliner {
 		}
 	}
 
-	proto.baseURI = normalizeBaseURI(proto.baseURI)
+	proto.baseURI = uriref.NormalizeBaseURI(proto.baseURI)
 
 	return &Inliner{proto: proto}
 }
@@ -708,7 +692,7 @@ func (in *inliner) inlineCopy(target *Schema, path string, memoize bool) (*Schem
 // loaded), and evaluate any fragment against it. Every unresolvable form
 // returns an error wrapping [ErrRefResolve].
 func (in *inliner) resolveTarget(node *Schema, ref string) (*Schema, error) {
-	if isFragmentOnly(ref) {
+	if uriref.IsFragmentOnly(ref) {
 		target := in.v.resolveRef(node, ref)
 		if target == nil {
 			return nil, fmt.Errorf("%w: cannot resolve %q", ErrRefResolve, ref)
@@ -718,7 +702,7 @@ func (in *inliner) resolveTarget(node *Schema, ref string) (*Schema, error) {
 	}
 
 	base := in.v.schemaBase(node)
-	absRef := resolveURI(base, ref)
+	absRef := uriref.ResolveURI(base, ref)
 
 	parsed, err := url.Parse(absRef)
 	if err != nil {
@@ -726,7 +710,7 @@ func (in *inliner) resolveTarget(node *Schema, ref string) (*Schema, error) {
 	}
 
 	fragment := parsed.Fragment
-	rawFrag, encoded := rawFragment(parsed)
+	rawFrag, encoded := uriref.RawFragment(parsed)
 	parsed.Fragment = ""
 	parsed.RawFragment = ""
 	baseURI := parsed.String()

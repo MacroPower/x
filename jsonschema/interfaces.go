@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+
+	"go.jacobcolvin.com/x/jsonschema/internal/uriref"
 )
 
 // JSONSchemaProvider allows a type to provide its own schema, bypassing
@@ -510,7 +512,7 @@ func (o baseURIOption) applyInline(in *inliner) { in.baseURI = o.base }
 // "/", so [io/fs] paths keep working; a custom resolver paired with a
 // schemeless base receives the normalized file:/// form.
 func WithBaseURI(base string) RefOption {
-	return baseURIOption{base: stripFragment(base)}
+	return baseURIOption{base: uriref.StripFragment(base)}
 }
 
 // FieldContext provides context about a struct field to the field-level
