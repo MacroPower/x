@@ -75,7 +75,9 @@ func validateDateTime(s string) error {
 		return errors.New("invalid date-time")
 	}
 
-	return validateTime(timePart)
+	// The time half is already a substring of the uppercased timestamp, so
+	// validate it without folding again.
+	return validateTimeUpper(timePart)
 }
 
 func validateDate(s string) error {
@@ -88,8 +90,14 @@ func validateDate(s string) error {
 }
 
 func validateTime(s string) error {
-	upper := strings.ToUpper(s)
+	return validateTimeUpper(strings.ToUpper(s))
+}
 
+// validateTimeUpper validates an RFC 3339 partial-time whose lowercase 't'/'z'
+// designators are already folded to uppercase. The date-time path folds the
+// whole timestamp once and passes its already-folded time half here, avoiding a
+// second fold; the standalone "time" format entry folds via validateTime.
+func validateTimeUpper(upper string) error {
 	// RFC 3339 partial-time requires a two-digit hour, minute, and second.
 	// Go's time.Parse accepts a single-digit hour for the "15" layout field, so
 	// enforce the fixed-width "hh:mm:ss" shape explicitly; this also keeps the
