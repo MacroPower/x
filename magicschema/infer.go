@@ -26,21 +26,9 @@ const (
 // tag even when the literal looks like another type. Unknown tags fall
 // through to the underlying value node.
 func inferType(node ast.Node) string {
-unwrap:
-	for {
-		switch n := node.(type) {
-		case *ast.AnchorNode:
-			node = n.Value
-		case *ast.TagNode:
-			if t, ok := tagType(n.Start.Value); ok {
-				return t
-			}
-
-			node = n.Value
-
-		default:
-			break unwrap
-		}
+	node, typ, known := resolveTagged(node)
+	if known {
+		return typ
 	}
 
 	switch node.(type) {
@@ -88,6 +76,29 @@ func tagType(tag string) (string, bool) {
 	}
 
 	return "", false
+}
+
+// resolveTagged follows AnchorNode wrappers and resolves TagNodes. On a known
+// YAML tag it stops and returns that authoritative JSON Schema type with
+// known=true; on an unknown tag or an anchor it follows .Value, which may
+// bottom out at nil. When known is false the returned node is the underlying
+// concrete node (possibly nil), so callers can finish their own classification.
+func resolveTagged(node ast.Node) (ast.Node, string, bool) {
+	for {
+		switch n := node.(type) {
+		case *ast.AnchorNode:
+			node = n.Value
+		case *ast.TagNode:
+			if t, ok := tagType(n.Start.Value); ok {
+				return node, t, true
+			}
+
+			node = n.Value
+
+		default:
+			return node, "", false
+		}
+	}
 }
 
 // unwrapNode resolves TagNode and AnchorNode wrappers to the underlying
@@ -458,29 +469,21 @@ func inferItemsSchema(values []ast.Node) *jsonschema.Schema {
 // consistent with a genuine null everywhere inference gates on it -- item-list
 // nullability and the all-mappings property-preserving merge alike.
 func isNullNode(node ast.Node) bool {
-	for {
-		if node == nil {
-			return true
-		}
-
-		switch n := node.(type) {
-		case *ast.AnchorNode:
-			node = n.Value
-		case *ast.TagNode:
-			// A known tag is authoritative: !!null is a null, any other
-			// core tag is not. Unknown tags fall through to the value.
-			if t, ok := tagType(n.Start.Value); ok {
-				return t == ""
-			}
-
-			node = n.Value
-
-		default:
-			_, ok := node.(*ast.NullNode)
-
-			return ok
-		}
+	// A known tag is authoritative: !!null (the empty type) is a null, any
+	// other core tag is not. Unknown tags and anchors fall through to the
+	// underlying node, which may be nil for a broken alias.
+	node, typ, known := resolveTagged(node)
+	if known {
+		return typ == ""
 	}
+
+	if node == nil {
+		return true
+	}
+
+	_, ok := node.(*ast.NullNode)
+
+	return ok
 }
 
 // widenType returns the widened type when merging two type strings.
