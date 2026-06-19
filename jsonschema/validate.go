@@ -3091,14 +3091,18 @@ func (v *validator) validateNumericUnbounded(
 	}
 
 	if schema.ExclusiveMinimum != nil {
+		// On the unbounded path cmpRat never reports equality (an over-cap value
+		// cannot equal the finite float64 bound), so the violation is always a
+		// strict inequality; the message omits the "or equal to" the bounded path
+		// uses, where equality is reachable.
 		if b := bounds.exclusiveMinimum; b != nil && d.cmpRat(b) < 0 {
-			add("exclusiveMinimum", fmt.Sprintf("%s is less than or equal to %v", num, *schema.ExclusiveMinimum))
+			add("exclusiveMinimum", fmt.Sprintf("%s is less than %v", num, *schema.ExclusiveMinimum))
 		}
 	}
 
 	if schema.ExclusiveMaximum != nil {
 		if b := bounds.exclusiveMaximum; b != nil && d.cmpRat(b) > 0 {
-			add("exclusiveMaximum", fmt.Sprintf("%s is greater than or equal to %v", num, *schema.ExclusiveMaximum))
+			add("exclusiveMaximum", fmt.Sprintf("%s is greater than %v", num, *schema.ExclusiveMaximum))
 		}
 	}
 
