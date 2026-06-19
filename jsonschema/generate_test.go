@@ -4929,6 +4929,48 @@ func TestWithTypeSchemaExtender(t *testing.T) {
 	}
 }
 
+// TestWithTypeSchemaExtenderTargetsValueBranch pins that a type extender
+// modifies the value branch of a nullable pointer field, not the anyOf
+// nullability wrapper. A type-level keyword set on the wrapper would reject the
+// value branch (and the permitted null) it describes, and would differ from how
+// a non-pointer field of the same type is extended.
+func TestWithTypeSchemaExtenderTargetsValueBranch(t *testing.T) {
+	t.Parallel()
+
+	type doc struct {
+		Value   plainKind  `json:"value"`
+		Pointer *plainKind `json:"pointer"`
+	}
+
+	formatExtender := jsonschema.WithTypeSchemaExtender(jsonschema.TypeSchemaExtenderFunc(
+		func(_ context.Context, tc jsonschema.TypeContext, s *jsonschema.Schema) error {
+			if tc.Type == reflect.TypeFor[plainKind]() {
+				s.Format = "marker"
+			}
+
+			return nil
+		},
+	))
+
+	s, err := jsonschema.GenerateFor[doc](t.Context(), formatExtender)
+	require.NoError(t, err)
+
+	got, err := json.Marshal(s)
+	require.NoError(t, err)
+
+	want := `{
+		"$schema": "https://json-schema.org/draft/2020-12/schema",
+		"type": "object",
+		"properties": {
+			"value": {"type": "integer", "format": "marker"},
+			"pointer": {"anyOf": [{"type": "integer", "format": "marker"}, {"type": "null"}]}
+		},
+		"required": ["value", "pointer"],
+		"additionalProperties": false
+	}`
+	assert.JSONEq(t, want, string(got))
+}
+
 // TestWithTypeSchemaExtenderFor pins the generic form: f runs only for T,
 // other types pass through untouched, an error from f aborts generation,
 // and a nil f is ignored.

@@ -417,7 +417,19 @@ func (g *generator) schemaForType(t reflect.Type, nullable bool) (*Schema, error
 			return nil, err
 		}
 
-		err = g.extendType(t, s)
+		// A nullable inline scalar or array is anyOf[value, {"type":"null"}].
+		// The type's extender refines the type's value schema, so direct it at
+		// the value branch; left on the wrapper, a type-level keyword it sets
+		// (type, format, a numeric bound) would constrain the wrapper and reject
+		// the very value branch it describes, and the permitted null with it. A
+		// non-pointer field of the same type presents the bare value schema, so
+		// this keeps a pointer and a value field consistent.
+		extendTarget := s
+		if inner := nullableInnerSchema(s); inner != nil {
+			extendTarget = inner
+		}
+
+		err = g.extendType(t, extendTarget)
 		if err != nil {
 			return nil, err
 		}
