@@ -189,18 +189,18 @@ func (e *ValidationError) Error() string {
 	return b.String()
 }
 
-// writeError recursively writes the error tree with indentation. The onStack
-// set holds the ancestors on the current render path: a node is added on entry
-// and removed on exit, so a cyclic cause graph terminates while a node shared
-// by disjoint branches (a DAG) still renders under each branch rather than
-// being suppressed after its first occurrence.
-func (e *ValidationError) writeError(b *strings.Builder, depth int, onStack map[*ValidationError]bool) {
-	if e == nil || onStack[e] {
+// writeError recursively writes the error tree with indentation. The seen set
+// holds every node already rendered: a node is added on entry and never removed,
+// so a cyclic cause graph terminates and a node shared by disjoint branches (a
+// DAG) renders once rather than once per reaching path. The validator only ever
+// produces trees, so this affects output only for a caller-built shared-node
+// graph, where it also avoids the O(2^depth) blowup a deep diamond would cost.
+func (e *ValidationError) writeError(b *strings.Builder, depth int, seen map[*ValidationError]bool) {
+	if e == nil || seen[e] {
 		return
 	}
 
-	onStack[e] = true
-	defer delete(onStack, e)
+	seen[e] = true
 
 	indent := strings.Repeat("  ", depth)
 
@@ -250,13 +250,13 @@ func (e *ValidationError) writeError(b *strings.Builder, depth int, onStack map[
 	// separator before or after it.
 	wrote := hasHeader
 	for _, cause := range e.Causes {
-		if onStack[cause] {
+		if seen[cause] {
 			continue
 		}
 
 		var cb strings.Builder
 
-		cause.writeError(&cb, childDepth, onStack)
+		cause.writeError(&cb, childDepth, seen)
 
 		if cb.Len() == 0 {
 			continue

@@ -97,6 +97,23 @@ func TestValidationError_ErrorSkipsEmptyCause(t *testing.T) {
 	assert.Equal(t, "/b (type): bad", ve.Error())
 }
 
+func TestValidationError_Error_SharedNodeRenderedOnce(t *testing.T) {
+	t.Parallel()
+
+	// A node reached by two branches renders once, not once per reaching path,
+	// so a deep diamond DAG cannot blow Error() up exponentially.
+	shared := &jsonschema.ValidationError{InstancePath: "/x", Keyword: "type", Message: "bad"}
+	root := &jsonschema.ValidationError{
+		Causes: []*jsonschema.ValidationError{
+			{Keyword: "anyOf", Causes: []*jsonschema.ValidationError{shared}},
+			{Keyword: "oneOf", Causes: []*jsonschema.ValidationError{shared}},
+		},
+	}
+
+	assert.Equal(t, 1, strings.Count(root.Error(), "/x (type): bad"),
+		"a shared node must render exactly once")
+}
+
 func TestValidationError_Leaves_SharedNodeReturnedOnce(t *testing.T) {
 	t.Parallel()
 
