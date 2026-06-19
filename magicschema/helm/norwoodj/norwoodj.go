@@ -91,15 +91,11 @@ func (a *Annotator) ForContent(content []byte) (magicschema.Annotator, error) {
 
 	for line := range strings.SplitSeq(string(content), "\n") {
 		if !foundComment {
-			// Look for an old-style "# key -- description" line.
-			m := helmDocsDescRegex.FindStringSubmatch(strings.TrimSpace(line))
-			if len(m) == 0 || strings.TrimSpace(m[1]) == "" {
-				continue
-			}
-
-			// Verify key is not empty and not a recognized annotation.
-			keyPart := strings.TrimSpace(m[1])
-			if keyPart == "" || magicschema.IsAnnotationComment(keyPart) {
+			// Look for an old-style "# key -- description" line. The key is the
+			// token before the first " -- "; verify it is non-empty and not a
+			// recognized annotation marker.
+			keyPart, _, ok := splitOldStyleComment(strings.TrimSpace(line))
+			if !ok || keyPart == "" || magicschema.IsAnnotationComment(keyPart) {
 				continue
 			}
 
@@ -192,6 +188,31 @@ func cutNewStyleMarker(line string) (string, bool) {
 	return strings.TrimSpace(rest), true
 }
 
+// splitOldStyleComment matches an old-style "# key.path -- description" line
+// and returns the key path and description, splitting on the FIRST " -- "
+// separator. The greedy first capture in helmDocsDescRegex otherwise swallows
+// every "-- " up to the last one, which both mis-keys the entry and trips the
+// IsAnnotationComment guard when the description itself contains " -- " (the
+// real key is then dropped). Rejoining the extra separators onto the
+// description preserves it, mirroring the new-style cutNewStyleMarker handling.
+// The boolean is false when the line is not a description line at all.
+func splitOldStyleComment(line string) (string, string, bool) {
+	m := helmDocsDescRegex.FindStringSubmatch(line)
+	if m == nil {
+		return "", "", false
+	}
+
+	key := strings.TrimSpace(m[1])
+	desc := strings.TrimSpace(m[2])
+
+	if idx := strings.Index(key, " -- "); idx >= 0 {
+		desc = strings.TrimSpace(key[idx+len(" -- "):]) + " -- " + desc
+		key = strings.TrimSpace(key[:idx])
+	}
+
+	return key, desc, true
+}
+
 // parseCommentBlock parses a block of comment lines using the same algorithm
 // as upstream helm-docs ParseComment. It handles the "last # -- group"
 // workaround, continuation lines, @raw, @default, @notationType, and @section.
@@ -256,13 +277,13 @@ func parseCommentBlock(commentLines []string) *parsedComment {
 			break
 		}
 
-		m := helmDocsDescRegex.FindStringSubmatch(line)
-		if m == nil {
+		k, d, ok := splitOldStyleComment(line)
+		if !ok {
 			continue
 		}
 
-		keyPath = strings.TrimSpace(m[1])
-		description = strings.TrimSpace(m[2])
+		keyPath = k
+		description = d
 		docStartIdx = i
 
 		break
@@ -591,12 +612,7 @@ func mapHelmDocsType(hint string) string {
 // contains " -- ", does not qualify, so a single block's continuation stays
 // intact while two stacked old-style comments split into separate blocks.
 func startsOldStyleBlock(line string) bool {
-	m := helmDocsDescRegex.FindStringSubmatch(strings.TrimSpace(line))
-	if len(m) == 0 {
-		return false
-	}
+	key, _, ok := splitOldStyleComment(strings.TrimSpace(line))
 
-	key := strings.TrimSpace(m[1])
-
-	return key != "" && !strings.ContainsAny(key, " \t") && !magicschema.IsAnnotationComment(key)
+	return ok && key != "" && !strings.ContainsAny(key, " \t") && !magicschema.IsAnnotationComment(key)
 }

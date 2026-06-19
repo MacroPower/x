@@ -376,6 +376,34 @@ func TestHelmDocsAnnotator(t *testing.T) {
 				assert.Equal(t, "Description", p["description"])
 			},
 		},
+		"old-style description containing -- is preserved": {
+			// The greedy regex bound the last " -- " into the key, mis-keying
+			// the entry and dropping the description via the annotation guard.
+			// Splitting on the first separator keeps the real key and the full
+			// description (which itself contains " -- ").
+			input: stringtest.Input(`
+				# image.tag -- the tag -- use latest
+				image:
+				  tag: stable
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				img, ok := props["image"].(map[string]any)
+				require.True(t, ok)
+
+				imgProps, ok := img["properties"].(map[string]any)
+				require.True(t, ok)
+
+				tag, ok := imgProps["tag"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "the tag -- use latest", tag["description"])
+			},
+		},
 		"old-style with int type hint": {
 			input: stringtest.Input(`
 				# key.path -- (int) Port number
