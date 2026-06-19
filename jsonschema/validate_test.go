@@ -49,6 +49,28 @@ func validateValue(
 	return c.ValidateValue(ctx, v)
 }
 
+func TestValidateNonFiniteFloatsTreatedDistinct(t *testing.T) {
+	t.Parallel()
+
+	// NaN and ±Inf are not JSON numbers, and upstream Equal collapses them (and
+	// zero) toward one value via big.Rat.SetFloat64. The uniqueItems check must
+	// treat them as distinct rather than report a spurious duplicate.
+	schema := &jsonschema.Schema{UniqueItems: true}
+
+	for name, arr := range map[string][]any{
+		"NaN and zero":  {math.NaN(), 0.0},
+		"+Inf and -Inf": {math.Inf(1), math.Inf(-1)},
+		"two NaNs":      {math.NaN(), math.NaN()},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			require.NoError(t, jsonschema.Validate(t.Context(), schema, arr),
+				"non-finite floats must not be treated as equal under uniqueItems")
+		})
+	}
+}
+
 func TestValidateRejectsNestedUnacceptedValue(t *testing.T) {
 	t.Parallel()
 

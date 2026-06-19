@@ -2705,11 +2705,44 @@ func enumMemberRats(enum []any) []*big.Rat {
 // through a guarded local walk; otherwise it delegates to [jsonschema.Equal]
 // for full upstream semantics.
 func equalJSONValues(a, b any) bool {
+	// A non-finite float64 (NaN, +Inf, -Inf) is not a representable JSON number,
+	// and upstream's big.Rat.SetFloat64 collapses all three (and zero) toward the
+	// same value, so jsonschema.Equal would report NaN==NaN, +Inf==-Inf, and
+	// NaN==0 as equal. Treat any value containing a non-finite float as unequal
+	// to everything, including itself, matching how the numeric-bound keywords
+	// already treat such floats as "not a number".
+	if containsNonFiniteFloat(a) || containsNonFiniteFloat(b) {
+		return false
+	}
+
 	if containsUnboundedNumber(a) || containsUnboundedNumber(b) {
 		return equalGuarded(a, b)
 	}
 
 	return jsonschema.Equal(a, b)
+}
+
+// containsNonFiniteFloat reports whether v, or any element of an []any or
+// map[string]any it contains, is a non-finite float64 (NaN or ±Inf). Such a
+// value can only enter through [Validator.Validate] (JSON decoding never yields
+// one); the other container kinds cannot hold one.
+func containsNonFiniteFloat(v any) bool {
+	switch val := v.(type) {
+	case float64:
+		return math.IsInf(val, 0) || math.IsNaN(val)
+
+	case []any:
+		return slices.ContainsFunc(val, containsNonFiniteFloat)
+
+	case map[string]any:
+		for _, item := range val {
+			if containsNonFiniteFloat(item) {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 // containsUnboundedNumber walks the container shapes a decoded JSON instance
