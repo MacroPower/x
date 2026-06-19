@@ -33,13 +33,11 @@ func NewInterpreter() *Interpreter {
 // constraints to the field schema. Interpretation is pure tag parsing, so
 // the context is unused.
 func (i *Interpreter) Interpret(_ context.Context, field jsonschema.FieldContext, tag jsonschema.Tag) error {
-	value := tag.Value
-	// Strip everything after | (OR operator, unsupported; use first group only).
-	if idx := strings.Index(value, "|"); idx >= 0 {
-		value = value[:idx]
-	}
-
-	parts := strings.Split(value, ",")
+	// Split on commas first, exactly as go-playground/validator does; the OR
+	// operator is then handled per comma group inside applyParts. Splitting on
+	// the first pipe up front would discard every later comma-separated
+	// constraint (e.g. "oneof=a|b,required" would drop required).
+	parts := strings.Split(tag.Value, ",")
 
 	return applyParts(parts, field.Schema, field.Parent, field.Name, field.Type, false)
 }
@@ -57,7 +55,19 @@ func applyParts(
 	var inKeys bool
 
 	for idx := range parts {
-		part := strings.TrimSpace(parts[idx])
+		part := parts[idx]
+		// The | OR operator is not modeled. The go-playground/validator parser
+		// splits a comma group on the pipe and treats the alternatives as OR;
+		// here only the first alternative (the group before the first pipe) is
+		// interpreted, matching the documented behavior. Stripping per part
+		// rather than across the whole tag keeps later comma-separated
+		// constraints intact. A literal pipe in a param is written 0x7C and
+		// survives, since unescapeParam runs after this split.
+		if i := strings.IndexByte(part, '|'); i >= 0 {
+			part = part[:i]
+		}
+
+		part = strings.TrimSpace(part)
 		if part == "" || part == "-" {
 			continue
 		}

@@ -146,8 +146,9 @@
 // conditional validators (eqfield, required_if, skip_unless, ...), control tags
 // that govern when validation runs (omitempty, structonly, ...), and the
 // constraints inside a keys...endkeys block (map-key constraints are not
-// modeled). The | OR operator is not modeled either; only the first group
-// before | is interpreted.
+// modeled). The | OR operator is not modeled either: within a single comma
+// group the pipe separates OR alternatives, of which only the first is
+// interpreted, so later comma-separated constraints still apply.
 //
 // Any other key that is not a recognized constraint causes Interpret to return
 // an error rather than being silently consumed, so a typo'd or unsupported

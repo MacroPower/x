@@ -1695,6 +1695,31 @@ func TestValidateInterpreter_ParamEscapes(t *testing.T) {
 	}
 }
 
+func TestValidateInterpreter_PipeBindsWithinCommaGroup(t *testing.T) {
+	t.Parallel()
+
+	// The | OR operator binds within a single comma group: go-playground splits
+	// on commas first, then treats the pipe as OR. A pipe in an earlier group
+	// must not swallow later comma-separated constraints. Here oneof=a|b keeps
+	// only its first alternative ("a"), and the trailing min=2 still applies.
+	type Form struct {
+		Name string `json:"name" validate:"oneof=a|b,min=2"`
+	}
+
+	s, err := jsonschema.GenerateFor[Form](t.Context(),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
+	)
+	require.NoError(t, err)
+
+	field := s.Properties["name"]
+	require.NotNil(t, field)
+	assert.Equal(t, []any{"a"}, field.Enum,
+		"only the first OR alternative of oneof=a|b is interpreted")
+	require.NotNil(t, field.MinLength,
+		"min after a pipe-bearing constraint must still apply")
+	assert.Equal(t, 2, *field.MinLength)
+}
+
 func TestValidateInterpreter_RequiredNeZeroOnUnsignedDedups(t *testing.T) {
 	t.Parallel()
 

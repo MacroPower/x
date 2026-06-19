@@ -611,8 +611,9 @@ Supported tags (summary):
 - **Content:** `json` -> `contentMediaType`; `base64` -> `contentEncoding`.
 
 Cross-field, conditional, and control tags (`omitempty`, `structonly`, ...) are
-silently skipped; only the first group before an `|` operator is interpreted;
-unrecognized keys return an error.
+silently skipped; within a comma group only the first `|` OR alternative is
+interpreted, leaving later comma-separated constraints intact; unrecognized keys
+return an error.
 
 ## Validating instances
 
