@@ -179,3 +179,36 @@ func TestConfigAnnotatorsCompletion(t *testing.T) {
 	assert.Contains(t, candidates, "helm-schema,bitnami")
 	assert.NotContains(t, candidates, "helm-schema,helm-schema")
 }
+
+func TestConfigAnnotatorsCompletionTrimsSpaces(t *testing.T) {
+	t.Parallel()
+
+	cfg := magicschema.NewConfig()
+	cfg.Registry = helm.DefaultRegistry()
+
+	rootCmd := &cobra.Command{Use: "magicschema", Run: func(*cobra.Command, []string) {}}
+	cfg.RegisterFlags(rootCmd.Flags())
+	require.NoError(t, cfg.RegisterCompletions(rootCmd))
+
+	var buf bytes.Buffer
+
+	rootCmd.SetOut(&buf)
+	// A space after the comma (from a quoted "helm-schema, bitnami,") must not
+	// stop an already-selected name from being filtered.
+	rootCmd.SetArgs([]string{cobra.ShellCompNoDescRequestCmd, "--annotators", "helm-schema, bitnami,"})
+	require.NoError(t, rootCmd.Execute())
+
+	var candidates []string
+
+	for line := range strings.SplitSeq(strings.TrimSpace(buf.String()), "\n") {
+		if line == "" || strings.HasPrefix(line, ":") {
+			continue
+		}
+
+		candidates = append(candidates, strings.SplitN(line, "\t", 2)[0])
+	}
+
+	assert.NotContains(t, candidates, "helm-schema, bitnami,bitnami")
+	assert.NotContains(t, candidates, "helm-schema, bitnami,helm-schema")
+	assert.Contains(t, candidates, "helm-schema, bitnami,helm-docs")
+}

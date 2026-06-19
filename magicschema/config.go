@@ -167,13 +167,17 @@ func (c *Config) annotatorsCompletion(
 
 	partial = strings.TrimSpace(partial)
 
-	// The base value is "" or a run ending in ",", so a plain Split would leave
-	// a spurious "" entry; trim the trailing comma and skip the split when empty
-	// so used holds only real annotator names.
+	// Split the base into the names already typed, trimming each element so a
+	// name preceded by a space (from a quoted "helm-schema, bitnami,") still
+	// matches the canonical Registry name and is filtered out below -- mirroring
+	// parseAnnotatorNames. Empty entries (including the trailing comma) drop, so
+	// used holds only real annotator names.
 	var used []string
 
-	if base != "" {
-		used = strings.Split(strings.TrimRight(base, ","), ",")
+	for name := range strings.SplitSeq(strings.TrimRight(base, ","), ",") {
+		if trimmed := strings.TrimSpace(name); trimmed != "" {
+			used = append(used, trimmed)
+		}
 	}
 
 	var out []string
