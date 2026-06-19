@@ -499,6 +499,30 @@ func TestHelmDocsAnnotator(t *testing.T) {
 				assert.Equal(t, "The names", n["description"])
 			},
 		},
+		"nested container type list/list/string maps to array": {
+			// A nested-container hint must resolve to its OUTERMOST container.
+			// Inspecting only the segment before the last slash ("list/list")
+			// missed the container and asserted the scalar trailing "string" on
+			// a value that is actually a list.
+			input: stringtest.Input(`
+				# -- (list/list/string) Rows of names
+				rows:
+				  - - a
+				    - b
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				r, ok := props["rows"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "array", r["type"])
+				assert.Equal(t, "Rows of names", r["description"])
+			},
+		},
 		"compound type list/int maps to array": {
 			input: stringtest.Input(`
 				# -- (list/int) The ports

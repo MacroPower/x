@@ -600,27 +600,25 @@ func mapHelmDocsType(hint string) string {
 		return t
 	}
 
-	if i := strings.LastIndex(hint, "/"); i >= 0 {
-		// A "container/element" hint (e.g. "list/string") names a list or map
-		// of a known element type, so the leading container is the structural
-		// type -- resolved only when the element segment is itself a known
-		// type. A custom notation like "list/csv" (a CSV-encoded string) keeps
-		// falling through to structural inference, and a modifier-first hint
-		// like "tpl/string" uses last-segment resolution since "tpl" is scalar.
-		if container, ok := typeMapping[hint[:i]]; ok && isContainerType(container) {
-			if _, known := typeMapping[hint[i+1:]]; known {
-				return container
-			}
-		}
-
-		// Compound types: use the last segment.
-		if t, ok := typeMapping[hint[i+1:]]; ok {
-			return t
-		}
+	// A compound hint resolves only when its trailing /-separated segment names
+	// a known element type. A custom notation like "list/csv" (a CSV-encoded
+	// string) keeps falling through to structural inference.
+	element, known := typeMapping[hint[strings.LastIndex(hint, "/")+1:]]
+	if !strings.Contains(hint, "/") || !known {
+		return ""
 	}
 
-	// Unrecognized type: silently ignored.
-	return ""
+	// When the FIRST segment is a container (list/dict/array/object) the
+	// outermost container is the structural type, including nested hints like
+	// "list/list/string" or "dict/foo/string" -- a scalar type must never be
+	// asserted on a container value. Otherwise the leading segment is a scalar
+	// modifier (tpl/string, tpl/array) and the element type wins.
+	first, _, _ := strings.Cut(hint, "/")
+	if container, ok := typeMapping[first]; ok && isContainerType(container) {
+		return container
+	}
+
+	return element
 }
 
 // isContainerType reports whether a JSON Schema type is a container (array or
