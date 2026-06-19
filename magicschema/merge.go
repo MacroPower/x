@@ -88,6 +88,9 @@ func mergeSchemas(a, b *jsonschema.Schema) *jsonschema.Schema {
 	result.Anchor = cmp.Or(a.Anchor, b.Anchor)
 	result.DynamicAnchor = cmp.Or(a.DynamicAnchor, b.DynamicAnchor)
 
+	// Same first-non-nil-wins policy as the cmp.Or fields above, spelled out
+	// because Vocabulary (map), Default (json.RawMessage), and Examples ([]any)
+	// are not comparable and cmp.Or rejects them.
 	if a.Vocabulary != nil {
 		result.Vocabulary = a.Vocabulary
 	} else {
