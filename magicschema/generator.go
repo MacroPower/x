@@ -2,6 +2,7 @@ package magicschema
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1013,33 +1014,20 @@ func applyRootAnnotations(schema *jsonschema.Schema, roots []RootAnnotator, stri
 			continue
 		}
 
-		if schema.Title == "" && root.Title != "" {
-			schema.Title = root.Title
-		}
-
-		if schema.Description == "" && root.Description != "" {
-			schema.Description = root.Description
-		}
-
-		if schema.Ref == "" && root.Ref != "" {
-			schema.Ref = root.Ref
-		}
+		// First non-empty wins across annotators, the same first-wins rule the
+		// merge expresses with cmp.Or and sticky OR; Examples (a slice) and
+		// AdditionalProperties (gated by apSet) cannot collapse cleanly.
+		schema.Title = cmp.Or(schema.Title, root.Title)
+		schema.Description = cmp.Or(schema.Description, root.Description)
+		schema.Ref = cmp.Or(schema.Ref, root.Ref)
 
 		if schema.Examples == nil && root.Examples != nil {
 			schema.Examples = root.Examples
 		}
 
-		if !schema.Deprecated && root.Deprecated {
-			schema.Deprecated = root.Deprecated
-		}
-
-		if !schema.ReadOnly && root.ReadOnly {
-			schema.ReadOnly = root.ReadOnly
-		}
-
-		if !schema.WriteOnly && root.WriteOnly {
-			schema.WriteOnly = root.WriteOnly
-		}
+		schema.Deprecated = schema.Deprecated || root.Deprecated
+		schema.ReadOnly = schema.ReadOnly || root.ReadOnly
+		schema.WriteOnly = schema.WriteOnly || root.WriteOnly
 
 		if !apSet && root.AdditionalProperties != nil {
 			schema.AdditionalProperties = root.AdditionalProperties
