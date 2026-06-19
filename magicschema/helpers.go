@@ -234,3 +234,22 @@ func StripCommentMarker(line string) string {
 
 	return strings.TrimPrefix(line, " ")
 }
+
+// SetSchemaType assigns a parsed type list to a schema as either the scalar
+// Type or the Types union, clearing the sibling field so the schema never
+// carries both -- a combination the jsonschema marshaler rejects, which would
+// break the whole document's final marshal. An empty list leaves Type and Types
+// unset, so structural inference and the fail-open default still apply.
+func SetSchemaType(s *jsonschema.Schema, types []string) {
+	switch len(types) {
+	case 0:
+		// Empty or unparseable value; leave Type and Types unset.
+	case 1:
+		s.Type = types[0]
+		s.Types = nil
+
+	default:
+		s.Type = ""
+		s.Types = types
+	}
+}
