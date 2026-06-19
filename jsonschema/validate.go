@@ -3180,15 +3180,18 @@ func truncatedNumber(s string) string {
 
 // ratString returns a compact string representation of a [big.Rat]. An integer
 // renders exactly; a fraction renders through its shortest float64 decimal,
-// except when the magnitude exceeds the float64 range, where that conversion
-// yields a meaningless +Inf and the exact rational form is used instead.
+// except when the float64 conversion loses the value: a magnitude above the
+// float64 range overflows to a meaningless +Inf, and a tiny magnitude below the
+// smallest subnormal underflows to 0. The non-integer guarantee means the value
+// is nonzero, so an f of 0 can only be underflow; both cases fall back to the
+// exact rational form instead of a misleading "0" or "+Inf".
 func ratString(r *big.Rat) string {
 	if r.IsInt() {
 		return r.Num().String()
 	}
 
 	f, _ := r.Float64()
-	if math.IsInf(f, 0) {
+	if math.IsInf(f, 0) || f == 0 {
 		return r.RatString()
 	}
 

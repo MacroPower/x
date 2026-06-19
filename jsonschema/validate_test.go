@@ -7491,6 +7491,24 @@ func TestValidateRationalBoundMessageExact(t *testing.T) {
 	assert.Contains(t, msg, "is greater than 10")
 }
 
+func TestValidateRationalBoundMessageUnderflow(t *testing.T) {
+	t.Parallel()
+
+	// 1e-4000 is nonzero but underflows float64 to 0. It stays within the digit
+	// cap, so the bounded path renders it; the message must show the exact value
+	// rather than a misleading "0 is less than 1".
+	var s jsonschema.Schema
+
+	require.NoError(t, json.Unmarshal([]byte(`{"minimum":1}`), &s))
+
+	err := validateJSON(t.Context(), &s, []byte("1e-4000"))
+	require.Error(t, err)
+
+	msg := err.Error()
+	assert.NotContains(t, msg, ": 0 is less than", "the tiny value must not render as 0")
+	assert.Contains(t, msg, "1/10000000000", "the exact rational form is shown")
+}
+
 // BenchmarkValidateLargeNumber exercises validation of multi-megabyte JSON
 // number literals. The guarded paths classify such values in a single O(n)
 // scan; a regression into an unguarded big.Rat parse (quadratic in the digit
