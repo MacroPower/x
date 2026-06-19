@@ -1,7 +1,9 @@
 package magicschema
 
 import (
+	"bytes"
 	"cmp"
+	"encoding/json"
 	"maps"
 	"math"
 	"reflect"
@@ -231,9 +233,23 @@ func enumValues(s *jsonschema.Schema) []any {
 // unionEnums merges enum constraints. The value set is kept only when both
 // sides constrain: an unconstrained side already allows everything, so the
 // union has no enum at all.
+//
+// When the two enums differ, the merged set is sorted by each value's JSON
+// encoding so that merging equivalent inputs in a different order yields a
+// byte-identical enum array, mirroring the sort intersectStrings applies to
+// the required array; an enum is an unordered set in JSON Schema, so the
+// canonical order changes nothing semantically. When the two enums are
+// identical -- the common case of one annotation reused across the dynamic
+// keys of a merged mapping -- the author's order is preserved as-is, since
+// there is no merge-order ambiguity to resolve. Values JSON cannot encode keep
+// their existing relative order rather than failing the merge (fail open).
 func unionEnums(a, b []any) []any {
 	if a == nil || b == nil {
 		return nil
+	}
+
+	if slices.EqualFunc(a, b, reflect.DeepEqual) {
+		return slices.Clone(a)
 	}
 
 	out := slices.Clone(a)
@@ -243,6 +259,17 @@ func unionEnums(a, b []any) []any {
 			out = append(out, v)
 		}
 	}
+
+	slices.SortStableFunc(out, func(x, y any) int {
+		xb, xErr := json.Marshal(x)
+		yb, yErr := json.Marshal(y)
+
+		if xErr != nil || yErr != nil {
+			return 0
+		}
+
+		return bytes.Compare(xb, yb)
+	})
 
 	return out
 }

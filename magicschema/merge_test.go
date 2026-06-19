@@ -745,6 +745,25 @@ func TestMergeAnnotatedConstraints(t *testing.T) {
 				assert.Equal(t, []any{"a", "b", "c"}, size["enum"])
 			},
 		},
+		"enum union is canonically ordered regardless of input order": {
+			// The raw merge order would be [c, b, a]; the canonical JSON sort
+			// makes the emitted enum byte-stable so swapping equivalent inputs
+			// cannot change the output.
+			inputA: "# @schema enum:[c, b]\nsize: c\n",
+			inputB: "# @schema enum:[a]\nsize: a\n",
+			opts:   []magicschema.Option{magicschema.WithAnnotators(losisin.New())},
+			check: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				size, ok := props["size"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, []any{"a", "b", "c"}, size["enum"])
+			},
+		},
 		"enum dropped when one side is unconstrained": {
 			inputA: "# @schema enum:[a, b]\nsize: a\n",
 			inputB: "size: d\n",
