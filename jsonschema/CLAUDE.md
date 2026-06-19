@@ -29,8 +29,10 @@ The package has two independent halves sharing the `Schema` type:
   including the opaque/URN merge that corrects `net/url.ResolveReference`),
   `internal/normalize` (Go value -> JSON-shaped value normalization: integer
   widths to `json.Number`, float32 widening, recursive container coercion with
-  copy-on-change and a cycle guard), and `internal/schemashape` (structural
-  shape classification of a `Schema`).
+  copy-on-change and a cycle guard), `internal/schemashape` (structural
+  shape classification of a `Schema`), and `internal/goast` (doc-comment and
+  type/field-shape extraction from a parsed Go package, for the generation
+  half's comment provider).
 
 ### Relationship to google/jsonschema-go
 
