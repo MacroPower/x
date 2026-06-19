@@ -312,6 +312,7 @@ type validator struct {
 	metaSchemaResolver    RefResolver                // metaschema lookup by $schema URI (WithMetaSchemaResolver)
 	jsonPointerCache      map[jsonPointerKey]*Schema // JSON-pointer fallback results, keyed by (root, pointer)
 	refCache              map[refCacheKey]*Schema    // plain $ref resolutions, keyed by (schema, ref); successes only
+	remoteMiss            map[string]error           // baseURIs the resolver could not serve, per run; nil value = plain miss
 	visiting              map[visitKey]bool
 	patternCache          map[*Schema]compiledPattern            // schema.Pattern compiled (see numericBounds)
 	patternProps          map[*Schema]map[string]compiledPattern // patternProperties keys compiled (see numericBounds)
@@ -429,6 +430,7 @@ func (v *validator) forInstance(ctx context.Context) *validator {
 	rv.visiting = map[visitKey]bool{}
 	rv.jsonPointerCache = nil
 	rv.refCache = nil
+	rv.remoteMiss = nil
 	rv.fallbackURIRegistry = nil
 	rv.fallbackAnchorRegistry = nil
 	rv.fallbackBaseURIs = nil
@@ -817,8 +819,11 @@ func (v *validator) callResolver(uri string) (*Schema, bool, error) {
 
 // resolveRemote calls the configured [RefResolver] to fetch a remote schema,
 // registers it under baseURI, and returns it. On error it stores the error in
-// refResolveErr and returns nil. Subsequent calls for the same baseURI are
-// served from the registry (cached).
+// refResolveErr and returns nil. A success is served from the registry on later
+// calls; a miss or error is recorded in a per-run negative cache (remoteMiss),
+// so the resolver is consulted at most once per baseURI in a run even when many
+// instance nodes reference an unresolvable URI. The recorded error is still
+// re-raised into refResolveErr on each evaluation.
 //
 // The fetched document's own nested $ids and anchors are registered in
 // only-if-absent mode (see [validator.walkFetchedSchema]), so a document whose
@@ -830,13 +835,25 @@ func (v *validator) resolveRemote(baseURI string) *Schema {
 		return nil
 	}
 
+	if recorded, seen := v.remoteMiss[baseURI]; seen {
+		if recorded != nil {
+			v.refResolveErr = fmt.Errorf("%w: %w", ErrRefResolve, recorded)
+		}
+
+		return nil
+	}
+
 	schema, ok, err := v.callResolver(baseURI)
 	if err != nil {
 		v.refResolveErr = fmt.Errorf("%w: %w", ErrRefResolve, err)
+		v.recordRemoteMiss(baseURI, err)
+
 		return nil
 	}
 
 	if !ok {
+		v.recordRemoteMiss(baseURI, nil)
+
 		return nil
 	}
 
@@ -863,6 +880,17 @@ func (v *validator) resolveRemote(baseURI string) *Schema {
 	v.walkFetchedSchema(cp, baseURI)
 
 	return cp
+}
+
+// recordRemoteMiss notes that the resolver could not serve baseURI this run, so
+// resolveRemote skips re-calling it. A nil err records a plain miss; a non-nil
+// err is replayed into refResolveErr on each later evaluation of the same ref.
+func (v *validator) recordRemoteMiss(baseURI string, err error) {
+	if v.remoteMiss == nil {
+		v.remoteMiss = map[string]error{}
+	}
+
+	v.remoteMiss[baseURI] = err
 }
 
 // remoteLoader returns a [jsonschema.Loader] for upstream Schema.Resolve.

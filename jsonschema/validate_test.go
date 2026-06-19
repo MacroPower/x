@@ -3013,6 +3013,44 @@ func TestValidateRefResolverCaching(t *testing.T) {
 		"resolver should be called once per URI, got %d", callCount.Load())
 }
 
+// TestValidateRefResolverNegativeCachingPerRun pins that an unresolvable remote
+// ref consults the resolver at most once per run, no matter how many instance
+// nodes reference it. Compiling the same schema costs the same either way, so
+// only the per-node validation lookups scale with the instance; if they were
+// not negatively cached, the larger array would drive more resolver calls.
+func TestValidateRefResolverNegativeCachingPerRun(t *testing.T) {
+	t.Parallel()
+
+	validateArray := func(n int) int64 {
+		var callCount atomic.Int64
+
+		// An empty schema map answers every URI with ErrNotResolved.
+		resolver := &countingResolver{
+			schemas:   map[string]*jsonschema.Schema{},
+			callCount: &callCount,
+		}
+
+		schema := &jsonschema.Schema{
+			Schema: "https://json-schema.org/draft/2020-12/schema",
+			Type:   "array",
+			Items:  &jsonschema.Schema{Ref: "http://example.com/missing.json"},
+		}
+
+		arr := make([]any, n)
+		for i := range arr {
+			arr[i] = float64(i)
+		}
+
+		err := jsonschema.Validate(t.Context(), schema, arr, jsonschema.WithRefResolver(resolver))
+		require.Error(t, err, "an unresolvable ref is a validation error")
+
+		return callCount.Load()
+	}
+
+	assert.Equal(t, validateArray(1), validateArray(50),
+		"resolver calls must not scale with the number of nodes hitting the ref")
+}
+
 // countingResolver tracks how many times ResolveRef is called. The counter is
 // an atomic so the test stays race-free even if ref resolution is parallelized.
 type countingResolver struct {
