@@ -325,6 +325,27 @@ func TestHelmDocsAnnotator(t *testing.T) {
 				assert.Contains(t, desc, "Second line")
 			},
 		},
+		"empty marker then continuation has no leading space": {
+			// A bare "# --" leaves the description empty; the first
+			// continuation line must seed it directly, not append " " + line,
+			// which would emit a description with a stray leading space.
+			input: stringtest.Input(`
+				# --
+				# The description
+				val: x
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				v, ok := props["val"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "The description", v["description"])
+			},
+		},
 		"raw mode continuation": {
 			input: stringtest.Input(`
 				# -- First line

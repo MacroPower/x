@@ -359,9 +359,15 @@ func parseCommentBlock(commentLines []string) *parsedComment {
 
 		content := cm[2]
 
-		if isRaw {
+		// Join onto the accumulated description, but seed it directly when it
+		// is still empty (a bare "# --" marker) so the result does not begin
+		// with a stray separator.
+		switch {
+		case description == "":
+			description = content
+		case isRaw:
 			description += "\n" + content
-		} else {
+		default:
 			description += " " + content
 		}
 	}
