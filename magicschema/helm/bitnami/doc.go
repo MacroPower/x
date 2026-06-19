@@ -93,15 +93,18 @@
 // Unknown modifiers cause a hard error in the upstream tool
 // (throw new Error("Unknown modifier: ...") in applyModifiers).
 //
-// Because modifiers are comma-separated, a [default: VALUE] where VALUE
-// itself contains commas will be split incorrectly. For example,
-// [default: [a, b]] is parsed as two modifiers: "default: [a" and "b]".
-// The first produces a default value of "[a" (which may fail YAML parsing),
-// and the second is treated as an unknown modifier (hard error upstream,
-// silently ignored by us). This is a limitation of the comma-separated
-// format shared by both the upstream tool and our implementation. Values
-// containing colons but no commas work correctly (e.g.,
-// [default: https://example.com]).
+// Because upstream's modifiers are comma-separated, an upstream
+// [default: VALUE] where VALUE itself contains commas is split incorrectly.
+// For example, upstream parses [default: [a, b]] as two modifiers,
+// "default: [a" and "b]": the first yields a default of "[a" (which may fail
+// YAML parsing) and the second is an unknown modifier (a hard error
+// upstream). Our implementation does NOT share this limitation: splitModifiers
+// performs a balanced-bracket scan and the default: modifier consumes the
+// remainder of the bracket contents, so comma-containing and nested
+// flow-sequence defaults are preserved whole -- [default: a,b,c] yields
+// "a,b,c" and [array, default: [a, [b], c]] yields the list ["a", ["b"], "c"].
+// Values containing colons but no commas work correctly under both tools
+// (e.g., [default: https://example.com]).
 //
 // ## Schema Generation Pipeline
 //
@@ -230,7 +233,7 @@
 //
 // Our @param regex is:
 //
-//	^\s*##\s*@param\s+(\S+)\s*(?:\[(.*?)\])?\s*(.*)$
+//	^\s*##\s*@param\s+(\S+)\s*(.*)$
 //
 // Our @skip regex is:
 //
@@ -239,11 +242,14 @@
 // Both use \s+ (one or more whitespace) before the key path, compared to
 // the upstream's \s* (zero or more). This is stricter but functionally
 // equivalent since all real-world annotations include at least one space
-// after the tag name. Our @param regex uses a non-capturing group for the
-// optional bracket modifier, (?:\[(.*?)\]), to avoid polluting match groups
-// and captures only the bracket content without the brackets themselves.
-// The upstream instead captures the full bracketed string (\[.*?\]) and
-// strips brackets in JavaScript via split('[')[1].split(']')[0].
+// after the tag name. Our @param regex captures the key path (\S+) and the
+// remaining text (.*) separately; splitModifiers then peels a leading
+// "[...]" modifier group from that text with a balanced-bracket scan, so a
+// nested flow-sequence default like "[array, default: [a, [b], c]]" stays
+// whole (an unbalanced bracket falls back to treating the whole text as the
+// description). The upstream instead captures the bracketed string with a
+// non-greedy regex group (\[.*?\]) and strips the brackets in JavaScript via
+// split('[')[1].split(']')[0].
 //
 // Tags that are only relevant for README generation (@section,
 // @descriptionStart, @descriptionEnd, @extra) are matched by a separate
