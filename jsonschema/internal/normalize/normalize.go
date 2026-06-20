@@ -110,15 +110,15 @@ func normalizeMap(m map[string]any, onPath map[[2]uintptr]bool) (any, bool) {
 	for k, val := range m {
 		nv, changed := normalizeInstance(val, onPath)
 		if !changed {
-			if out != nil {
-				out[k] = val
-			}
-
+			// The clone below snapshots every key, including ones not yet
+			// visited, so it already holds this unchanged value; no write
+			// needed. (normalizeSlice differs: it copies only the s[:i] prefix
+			// and so must fill its unchanged tail.)
 			continue
 		}
 
-		// First change: clone the input (every entry visited so far is
-		// unchanged), then keep filling the clone.
+		// First change: clone the input (every entry is carried over by the
+		// clone), then overwrite only the entries that change.
 		if out == nil {
 			out = maps.Clone(m)
 		}
