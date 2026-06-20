@@ -2,6 +2,7 @@ package normalize
 
 import (
 	"encoding/json"
+	"reflect"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/numrat"
 	"go.jacobcolvin.com/x/jsonschema/internal/typename"
@@ -17,14 +18,32 @@ import (
 // function inside a slice or map) unchanged; rejecting it here turns what would
 // be a panic or a silent mis-validation deeper in the walk into a rejected
 // instance.
+//
+// Like [Value], the recursion carries a {pointer, len} cycle guard so a
+// self-referential map or slice (the input shape Value deliberately tolerates)
+// terminates at the back-edge instead of overflowing the stack with a fatal
+// error recover cannot catch. A back-edge re-enters a container already vetted
+// on the current path, so it is treated as accepted.
 func Accepted(instance any) bool {
+	return accepted(instance, map[[2]uintptr]bool{})
+}
+
+func accepted(instance any, onPath map[[2]uintptr]bool) bool {
 	switch v := instance.(type) {
 	case nil, bool, string, float64, json.Number:
 		return true
 
 	case []any:
+		key := [2]uintptr{reflect.ValueOf(v).Pointer(), uintptr(len(v))}
+		if onPath[key] {
+			return true
+		}
+
+		onPath[key] = true
+		defer delete(onPath, key)
+
 		for _, item := range v {
-			if !Accepted(item) {
+			if !accepted(item, onPath) {
 				return false
 			}
 		}
@@ -32,8 +51,16 @@ func Accepted(instance any) bool {
 		return true
 
 	case map[string]any:
+		key := [2]uintptr{reflect.ValueOf(v).Pointer(), uintptr(len(v))}
+		if onPath[key] {
+			return true
+		}
+
+		onPath[key] = true
+		defer delete(onPath, key)
+
 		for _, item := range v {
-			if !Accepted(item) {
+			if !accepted(item, onPath) {
 				return false
 			}
 		}

@@ -37,6 +37,25 @@ func TestAccepted(t *testing.T) {
 	}
 }
 
+func TestAcceptedTerminatesOnCyclicInstance(t *testing.T) {
+	t.Parallel()
+
+	// A self-referential map/slice is the input shape Value tolerates; Accepted
+	// must terminate at the back-edge rather than overflow the stack.
+	m := map[string]any{}
+	m["self"] = m
+	assert.True(t, normalize.Accepted(m))
+
+	s := []any{nil}
+	s[0] = s
+	assert.True(t, normalize.Accepted(s))
+
+	// A cycle wrapping an otherwise-rejected leaf still terminates and rejects.
+	bad := map[string]any{"leaf": struct{}{}}
+	bad["self"] = bad
+	assert.False(t, normalize.Accepted(bad))
+}
+
 func TestTypeName(t *testing.T) {
 	t.Parallel()
 
