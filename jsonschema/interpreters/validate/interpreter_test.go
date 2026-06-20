@@ -544,6 +544,28 @@ func TestValidateInterpreter_OneOfOnPointerElement(t *testing.T) {
 	}`, string(got))
 }
 
+// TestValidateInterpreter_OneOfConflictsWithElementEnum pins that relocating a
+// oneof enum onto a nullable element's value branch reports a conflict when the
+// element type already supplied its own enum there, rather than silently
+// discarding the element's enum.
+func TestValidateInterpreter_OneOfConflictsWithElementEnum(t *testing.T) {
+	t.Parallel()
+
+	type Config struct {
+		Colors []*string `json:"colors" validate:"oneof=red green"`
+	}
+
+	_, err := jsonschema.GenerateFor[Config](t.Context(),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
+		jsonschema.WithTypeSchemaFor[string](&jsonschema.Schema{
+			Type: "string",
+			Enum: []any{"red", "green", "blue"},
+		}),
+	)
+	require.Error(t, err)
+	require.ErrorIs(t, err, validate.ErrConflictingConstraints)
+}
+
 // TestValidateInterpreter_DiveEqOnPointerElement pins that dive,eq on a slice of
 // nullable pointers lands the const on the element's value branch rather than
 // the anyOf wrapper, keeping a null element valid.

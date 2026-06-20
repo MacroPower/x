@@ -442,7 +442,11 @@ func applySequenceOneOf(s *jsonschema.Schema, value string, baseType reflect.Typ
 			return err
 		}
 
-		relocateNullableValueConstraint(item)
+		err = relocateNullableValueConstraint(item)
+		if err != nil {
+			return err
+		}
+
 		dropElementBoundsForConstEnum(item)
 	}
 
@@ -455,19 +459,40 @@ func applySequenceOneOf(s *jsonschema.Schema, value string, baseType reflect.Typ
 // is evaluated against the instance directly and so rejects a valid null
 // element; on the value branch it constrains the value alone. It is a no-op for
 // a schema that is not a nullable wrapper or carries neither keyword.
-func relocateNullableValueConstraint(s *jsonschema.Schema) {
+//
+// The value branch may already carry a const/enum the element type itself
+// supplied (via WithTypeSchema, a provider, or an extender). The wrapper's
+// conflict check (in setNumericConst/setOneOfEnum) only inspected the wrapper,
+// not the inner branch, so a blind move would silently overwrite that. Mirror
+// the non-nullable path instead: an identical const is a no-op, and a differing
+// const or any pre-existing enum is reported as a conflict.
+func relocateNullableValueConstraint(s *jsonschema.Schema) error {
 	inner := schemashape.NullableInnerSchema(s)
 	if inner == nil {
-		return
+		return nil
 	}
 
 	if s.Const != nil {
+		if inner.Const != nil && !numericEqual(*inner.Const, *s.Const) {
+			return fmt.Errorf(
+				"%w: eq/len conflicts with the element type's existing const",
+				ErrConflictingConstraints)
+		}
+
 		inner.Const, s.Const = s.Const, nil
 	}
 
 	if s.Enum != nil {
+		if inner.Enum != nil {
+			return fmt.Errorf(
+				"%w: oneof conflicts with the element type's existing enum constraint",
+				ErrConflictingConstraints)
+		}
+
 		inner.Enum, s.Enum = s.Enum, nil
 	}
+
+	return nil
 }
 
 // dropElementBoundsForConstEnum clears the kind-derived numeric range keywords

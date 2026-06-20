@@ -142,7 +142,11 @@ func applyDive(remaining []string, s *jsonschema.Schema, fieldType reflect.Type)
 			return err
 		}
 
-		relocateNullableValueConstraint(s.AdditionalProperties)
+		err = relocateNullableValueConstraint(s.AdditionalProperties)
+		if err != nil {
+			return err
+		}
+
 		dropElementBoundsForConstEnum(s.AdditionalProperties)
 
 		return nil
@@ -164,7 +168,11 @@ func diveIntoSequence(remaining []string, s *jsonschema.Schema, elem reflect.Typ
 				return err
 			}
 
-			relocateNullableValueConstraint(item)
+			err = relocateNullableValueConstraint(item)
+			if err != nil {
+				return err
+			}
+
 			dropElementBoundsForConstEnum(item)
 		}
 
