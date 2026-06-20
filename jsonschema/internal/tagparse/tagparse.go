@@ -1,7 +1,14 @@
-package jsonschema
+// Package tagparse parses and applies the jsonschema struct tag DSL onto a
+// generated [jsonschema.Schema]. The reflection generator calls [Apply] once per
+// field that carries a jsonschema tag; the tag's comma-separated key=value pairs
+// (or a bare description) translate into schema keywords. The keyword names are
+// shared with the public package through internal/keyword, so this logic lives
+// here without importing the main package.
+package tagparse
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"math/big"
@@ -11,12 +18,20 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/google/jsonschema-go/jsonschema"
+
+	"go.jacobcolvin.com/x/jsonschema/internal/keyword"
 	"go.jacobcolvin.com/x/jsonschema/internal/numkind"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemashape"
 	"go.jacobcolvin.com/x/jsonschema/internal/typename"
 )
 
 var (
+	// ErrInvalidType is returned when a type= tag value names something other
+	// than the seven JSON Schema type names. The jsonschema package maps it onto
+	// its own public ErrInvalidType so callers can match it with [errors.Is].
+	ErrInvalidType = errors.New("invalid type name")
+
 	// Pattern matching the WORD= prefix that signals key-value mode, mirroring
 	// the upstream reserved prefix (^[^ \t\n]*=).
 	kvPrefixRegexp = regexp.MustCompile(`^[^ \t\n]*=`)
@@ -26,30 +41,30 @@ var (
 	// treated as a bare description. This prevents a plain description such as
 	// "a=b is the formula" from being misparsed as key-value.
 	jsonSchemaTagKeys = map[string]bool{
-		KeywordDescription:      true,
-		KeywordTitle:            true,
-		KeywordType:             true,
-		KeywordPattern:          true,
-		KeywordFormat:           true,
-		KeywordDeprecated:       true,
-		KeywordReadOnly:         true,
-		KeywordWriteOnly:        true,
-		KeywordUniqueItems:      true,
-		KeywordMinimum:          true,
-		KeywordMaximum:          true,
-		KeywordExclusiveMinimum: true,
-		KeywordExclusiveMaximum: true,
-		KeywordMultipleOf:       true,
-		KeywordMinLength:        true,
-		KeywordMaxLength:        true,
-		KeywordMinItems:         true,
-		KeywordMaxItems:         true,
-		KeywordMinProperties:    true,
-		KeywordMaxProperties:    true,
-		KeywordDefault:          true,
-		KeywordConst:            true,
-		KeywordEnum:             true,
-		KeywordExamples:         true,
+		keyword.Description:      true,
+		keyword.Title:            true,
+		keyword.Type:             true,
+		keyword.Pattern:          true,
+		keyword.Format:           true,
+		keyword.Deprecated:       true,
+		keyword.ReadOnly:         true,
+		keyword.WriteOnly:        true,
+		keyword.UniqueItems:      true,
+		keyword.Minimum:          true,
+		keyword.Maximum:          true,
+		keyword.ExclusiveMinimum: true,
+		keyword.ExclusiveMaximum: true,
+		keyword.MultipleOf:       true,
+		keyword.MinLength:        true,
+		keyword.MaxLength:        true,
+		keyword.MinItems:         true,
+		keyword.MaxItems:         true,
+		keyword.MinProperties:    true,
+		keyword.MaxProperties:    true,
+		keyword.Default:          true,
+		keyword.Const:            true,
+		keyword.Enum:             true,
+		keyword.Examples:         true,
 	}
 )
 
@@ -79,7 +94,7 @@ func isKeyValueTag(pairs []string) bool {
 	return !strings.ContainsAny(value, " \t")
 }
 
-// applyJSONSchemaTag parses and applies a jsonschema struct tag to a schema.
+// Apply parses and applies a jsonschema struct tag to a schema.
 //
 // Pairs apply strictly in order. The scalar keys (default, const, enum,
 // examples) parse their values against the effective scalar type: the field's
@@ -88,7 +103,7 @@ func isKeyValueTag(pairs []string) bool {
 // type= keeps Go-kind parsing while one after it parses as the overridden
 // type. The non-scalar overrides (array, object, null) have no stand-in, so a
 // scalar key following one is an error.
-func applyJSONSchemaTag(tag string, fieldType reflect.Type, s *Schema) (bool, error) {
+func Apply(tag string, fieldType reflect.Type, s *jsonschema.Schema) (bool, error) {
 	if tag == "" {
 		return false, nil
 	}
@@ -136,7 +151,7 @@ func applyJSONSchemaTag(tag string, fieldType reflect.Type, s *Schema) (bool, er
 		// conflict rather than discarding it silently. This in-loop check catches
 		// a conflicting keyword set before type=; one set after type= records its
 		// group only on the next iteration, so a post-loop check covers it.
-		if key == KeywordType && typename.Valid(value) {
+		if key == keyword.Type && typename.Valid(value) {
 			if g := conflictingGroup(groupsSet, value); g != "" {
 				return false, fmt.Errorf("jsonschema tag: %s constraint conflicts with type=%s", g, value)
 			}
@@ -155,7 +170,7 @@ func applyJSONSchemaTag(tag string, fieldType reflect.Type, s *Schema) (bool, er
 			boundAuthored = true
 		}
 
-		if key == KeywordType {
+		if key == keyword.Type {
 			scalarType = standInTypeFor(value)
 			overriddenType = value
 		}
@@ -180,7 +195,7 @@ func applyJSONSchemaTag(tag string, fieldType reflect.Type, s *Schema) (bool, er
 // pinned).
 func isNumericBoundKey(key string) bool {
 	switch key {
-	case KeywordMinimum, KeywordMaximum, KeywordExclusiveMinimum, KeywordExclusiveMaximum:
+	case keyword.Minimum, keyword.Maximum, keyword.ExclusiveMinimum, keyword.ExclusiveMaximum:
 		return true
 	default:
 		return false
@@ -188,10 +203,10 @@ func isNumericBoundKey(key string) bool {
 }
 
 // isScalarValueKey reports whether a jsonschema tag key carries scalar values
-// parsed against the effective scalar type (see [applyJSONSchemaTag]).
+// parsed against the effective scalar type (see [Apply]).
 func isScalarValueKey(key string) bool {
 	switch key {
-	case KeywordDefault, KeywordConst, KeywordEnum, KeywordExamples:
+	case keyword.Default, keyword.Const, keyword.Enum, keyword.Examples:
 		return true
 	default:
 		return false
@@ -214,13 +229,13 @@ const (
 // kind-derived keywords a type= override also drops never originate from a tag.
 func constraintGroup(key string) string {
 	switch key {
-	case KeywordMinimum, KeywordMaximum, KeywordExclusiveMinimum, KeywordExclusiveMaximum, KeywordMultipleOf:
+	case keyword.Minimum, keyword.Maximum, keyword.ExclusiveMinimum, keyword.ExclusiveMaximum, keyword.MultipleOf:
 		return groupNumeric
-	case KeywordMinLength, KeywordMaxLength, KeywordPattern, KeywordFormat:
+	case keyword.MinLength, keyword.MaxLength, keyword.Pattern, keyword.Format:
 		return groupString
-	case KeywordUniqueItems, KeywordMinItems, KeywordMaxItems:
+	case keyword.UniqueItems, keyword.MinItems, keyword.MaxItems:
 		return groupArray
-	case KeywordMinProperties, KeywordMaxProperties:
+	case keyword.MinProperties, keyword.MaxProperties:
 		return groupObject
 	default:
 		return ""
@@ -340,28 +355,27 @@ func splitTagPairs(tag string) []string {
 // applyTagKeyValue applies a single key=value pair from the jsonschema tag.
 // ScalarType is the effective type the scalar keys (default, const, enum,
 // examples) parse against: the field's Go type, or the stand-in for an
-// earlier type= override (see [applyJSONSchemaTag]). Only those keys consult
-// it.
-func applyTagKeyValue(key, value string, scalarType reflect.Type, s *Schema) error {
+// earlier type= override (see [Apply]). Only those keys consult it.
+func applyTagKeyValue(key, value string, scalarType reflect.Type, s *jsonschema.Schema) error {
 	switch key {
-	case KeywordDescription:
+	case keyword.Description:
 		s.Description = value
-	case KeywordTitle:
+	case keyword.Title:
 		s.Title = value
 
-	case KeywordType:
+	case keyword.Type:
 		if !typename.Valid(value) {
 			return fmt.Errorf("jsonschema tag: key %q: %w: %q", key, ErrInvalidType, value)
 		}
 
 		applyTypeOverride(s, value)
 
-	case KeywordPattern:
+	case keyword.Pattern:
 		s.Pattern = value
-	case KeywordFormat:
+	case keyword.Format:
 		s.Format = value
 
-	case KeywordDeprecated:
+	case keyword.Deprecated:
 		b, err := parseBoolValue(key, value)
 		if err != nil {
 			return err
@@ -369,7 +383,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *Schema) err
 
 		s.Deprecated = b
 
-	case KeywordReadOnly:
+	case keyword.ReadOnly:
 		b, err := parseBoolValue(key, value)
 		if err != nil {
 			return err
@@ -377,7 +391,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *Schema) err
 
 		s.ReadOnly = b
 
-	case KeywordWriteOnly:
+	case keyword.WriteOnly:
 		b, err := parseBoolValue(key, value)
 		if err != nil {
 			return err
@@ -385,7 +399,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *Schema) err
 
 		s.WriteOnly = b
 
-	case KeywordUniqueItems:
+	case keyword.UniqueItems:
 		b, err := parseBoolValue(key, value)
 		if err != nil {
 			return err
@@ -393,7 +407,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *Schema) err
 
 		s.UniqueItems = b
 
-	case KeywordMinimum:
+	case keyword.Minimum:
 		n, err := parseFloat(key, value)
 		if err != nil {
 			return err
@@ -401,7 +415,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *Schema) err
 
 		s.Minimum = &n
 
-	case KeywordMaximum:
+	case keyword.Maximum:
 		n, err := parseFloat(key, value)
 		if err != nil {
 			return err
@@ -409,7 +423,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *Schema) err
 
 		s.Maximum = &n
 
-	case KeywordExclusiveMinimum:
+	case keyword.ExclusiveMinimum:
 		n, err := parseFloat(key, value)
 		if err != nil {
 			return err
@@ -417,7 +431,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *Schema) err
 
 		s.ExclusiveMinimum = &n
 
-	case KeywordExclusiveMaximum:
+	case keyword.ExclusiveMaximum:
 		n, err := parseFloat(key, value)
 		if err != nil {
 			return err
@@ -425,7 +439,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *Schema) err
 
 		s.ExclusiveMaximum = &n
 
-	case KeywordMultipleOf:
+	case keyword.MultipleOf:
 		n, err := parseFloat(key, value)
 		if err != nil {
 			return err
@@ -437,7 +451,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *Schema) err
 
 		s.MultipleOf = &n
 
-	case KeywordMinLength:
+	case keyword.MinLength:
 		n, err := parseInt(key, value)
 		if err != nil {
 			return err
@@ -445,7 +459,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *Schema) err
 
 		s.MinLength = &n
 
-	case KeywordMaxLength:
+	case keyword.MaxLength:
 		n, err := parseInt(key, value)
 		if err != nil {
 			return err
@@ -453,7 +467,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *Schema) err
 
 		s.MaxLength = &n
 
-	case KeywordMinItems:
+	case keyword.MinItems:
 		n, err := parseInt(key, value)
 		if err != nil {
 			return err
@@ -461,7 +475,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *Schema) err
 
 		s.MinItems = &n
 
-	case KeywordMaxItems:
+	case keyword.MaxItems:
 		n, err := parseInt(key, value)
 		if err != nil {
 			return err
@@ -469,7 +483,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *Schema) err
 
 		s.MaxItems = &n
 
-	case KeywordMinProperties:
+	case keyword.MinProperties:
 		n, err := parseInt(key, value)
 		if err != nil {
 			return err
@@ -477,7 +491,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *Schema) err
 
 		s.MinProperties = &n
 
-	case KeywordMaxProperties:
+	case keyword.MaxProperties:
 		n, err := parseInt(key, value)
 		if err != nil {
 			return err
@@ -485,7 +499,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *Schema) err
 
 		s.MaxProperties = &n
 
-	case KeywordDefault:
+	case keyword.Default:
 		if value == "" {
 			return fmt.Errorf("jsonschema tag: key %q requires a non-empty value", key)
 		}
@@ -502,7 +516,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *Schema) err
 
 		s.Default = raw
 
-	case KeywordConst:
+	case keyword.Const:
 		if value == "" {
 			return fmt.Errorf("jsonschema tag: key %q requires a non-empty value", key)
 		}
@@ -514,7 +528,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *Schema) err
 
 		s.Const = &v
 
-	case KeywordEnum:
+	case keyword.Enum:
 		if value == "" {
 			return fmt.Errorf("jsonschema tag: key %q requires a non-empty value", key)
 		}
@@ -533,7 +547,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *Schema) err
 
 		s.Enum = enumVals
 
-	case KeywordExamples:
+	case keyword.Examples:
 		if value == "" {
 			return fmt.Errorf("jsonschema tag: key %q requires a non-empty value", key)
 		}
@@ -563,7 +577,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *Schema) err
 // format/pattern); left on a schema of a different type they are vacuous but
 // emit as confusing dead structure. Tag pairs apply in order, so keys after
 // type= still take effect.
-func applyTypeOverride(s *Schema, typeName string) {
+func applyTypeOverride(s *jsonschema.Schema, typeName string) {
 	// A nullable pointer field wraps the value schema in anyOf[value, null];
 	// an explicit type replaces the whole construct, including the wrapped
 	// value branch and its kind-derived constraints.
@@ -650,8 +664,8 @@ func parseEnumValues(key, value string, t reflect.Type) ([]any, error) {
 // sequence element descends recursively, so the enum always lands on the
 // innermost (scalar) item schemas. The other scalar tag keys (const, default,
 // examples) remain whole-value constraints and are not redirected this way.
-func applyEnumToItems(key, value string, t reflect.Type, s *Schema) error {
-	items := itemSchemas(s)
+func applyEnumToItems(key, value string, t reflect.Type, s *jsonschema.Schema) error {
+	items := schemashape.ItemSchemas(s)
 	if len(items) == 0 {
 		// A []byte field encodes as a single base64 string, leaving no
 		// per-element schema for the enum to constrain.
@@ -704,16 +718,6 @@ func applyEnumToItems(key, value string, t reflect.Type, s *Schema) error {
 	}
 
 	return nil
-}
-
-// itemSchemas returns the per-element schemas of a generated slice or array
-// field schema: Items for slices, prefixItems (Draft 2020-12) or the
-// items-as-array form (Draft-07) for fixed arrays. A nullable pointer field
-// wraps the value schema in anyOf[value, null]; the lookup follows that
-// wrapper. A []byte field (a base64 string) has no element schema and yields
-// nil.
-func itemSchemas(s *Schema) []*Schema {
-	return schemashape.ItemSchemas(s)
 }
 
 // parseBoolValue parses a boolean tag value.

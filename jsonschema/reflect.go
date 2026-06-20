@@ -19,6 +19,7 @@ import (
 	"go.jacobcolvin.com/x/jsonschema/internal/numkind"
 	"go.jacobcolvin.com/x/jsonschema/internal/reflectkind"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemashape"
+	"go.jacobcolvin.com/x/jsonschema/internal/tagparse"
 	"go.jacobcolvin.com/x/jsonschema/internal/typename"
 )
 
@@ -1412,8 +1413,14 @@ func (g *generator) buildFieldSchema(
 
 	// 3. Schema struct tag.
 	if tag, ok := fi.field.Tag.Lookup("jsonschema"); ok {
-		boundAuthored, err = applyJSONSchemaTag(tag, tagType, fieldSchema)
+		boundAuthored, err = tagparse.Apply(tag, tagType, fieldSchema)
 		if err != nil {
+			// Tagparse carries its own ErrInvalidType sentinel; map it onto the
+			// package's exported ErrInvalidType so errors.Is keeps working.
+			if errors.Is(err, tagparse.ErrInvalidType) {
+				err = fmt.Errorf("%w: %w", ErrInvalidType, err)
+			}
+
 			return nil, false, fmt.Errorf("jsonschema tag: %w", err)
 		}
 
