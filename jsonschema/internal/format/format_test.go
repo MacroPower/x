@@ -148,6 +148,10 @@ func TestEmailFormatAcceptsQuotedLocalAndAddressLiteral(t *testing.T) {
 			instance: `user@[IPv6:2001:db8::1]`,
 			valid:    true,
 		},
+		"empty quoted local part": {
+			instance: `""@example.com`,
+			valid:    false,
+		},
 	}
 
 	for name, tc := range tests {

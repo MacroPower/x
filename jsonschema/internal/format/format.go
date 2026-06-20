@@ -350,6 +350,10 @@ func validateQuotedLocal(s string) error {
 	}
 
 	inner := s[1 : len(s)-1]
+	if inner == "" {
+		return errors.New("invalid email: empty quoted local part")
+	}
+
 	for i := 0; i < len(inner); i++ {
 		c := inner[i]
 		if c == '\\' {
