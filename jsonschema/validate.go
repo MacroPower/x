@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"maps"
-	"math"
 	"math/big"
 	"mime"
 	"net/url"
@@ -2273,7 +2272,7 @@ func (v *validator) validateNumeric(
 				if !quotient.IsInt() {
 					add(
 						KeywordMultipleOf,
-						fmt.Sprintf("%s is not a multiple of %v", ratString(val), *schema.MultipleOf),
+						fmt.Sprintf("%s is not a multiple of %v", numrat.RatString(val), *schema.MultipleOf),
 					)
 				}
 			}
@@ -2284,13 +2283,13 @@ func (v *validator) validateNumeric(
 	// cannot constrain a finite instance, so the comparison is skipped.
 	if schema.Minimum != nil {
 		if bound := bounds.minimum; bound != nil && val.Cmp(bound) < 0 {
-			add(KeywordMinimum, fmt.Sprintf("%s is less than %v", ratString(val), *schema.Minimum))
+			add(KeywordMinimum, fmt.Sprintf("%s is less than %v", numrat.RatString(val), *schema.Minimum))
 		}
 	}
 
 	if schema.Maximum != nil {
 		if bound := bounds.maximum; bound != nil && val.Cmp(bound) > 0 {
-			add(KeywordMaximum, fmt.Sprintf("%s is greater than %v", ratString(val), *schema.Maximum))
+			add(KeywordMaximum, fmt.Sprintf("%s is greater than %v", numrat.RatString(val), *schema.Maximum))
 		}
 	}
 
@@ -2298,7 +2297,7 @@ func (v *validator) validateNumeric(
 		if bound := bounds.exclusiveMinimum; bound != nil && val.Cmp(bound) <= 0 {
 			add(
 				KeywordExclusiveMinimum,
-				fmt.Sprintf("%s is less than or equal to %v", ratString(val), *schema.ExclusiveMinimum),
+				fmt.Sprintf("%s is less than or equal to %v", numrat.RatString(val), *schema.ExclusiveMinimum),
 			)
 		}
 	}
@@ -2307,7 +2306,7 @@ func (v *validator) validateNumeric(
 		if bound := bounds.exclusiveMaximum; bound != nil && val.Cmp(bound) >= 0 {
 			add(
 				KeywordExclusiveMaximum,
-				fmt.Sprintf("%s is greater than or equal to %v", ratString(val), *schema.ExclusiveMaximum),
+				fmt.Sprintf("%s is greater than or equal to %v", numrat.RatString(val), *schema.ExclusiveMaximum),
 			)
 		}
 	}
@@ -2334,7 +2333,7 @@ func (v *validator) validateNumericUnbounded(
 	instancePath instanceLocation,
 	schemaPath schemaLocation,
 ) []*ValidationError {
-	num := truncatedNumber(literal)
+	num := numrat.TruncateNumber(literal)
 
 	var errs []*ValidationError
 
@@ -2392,38 +2391,6 @@ func (v *validator) validateNumericUnbounded(
 	}
 
 	return errs
-}
-
-// truncatedNumber shortens an over-length number literal for use in an error
-// message so the message stays bounded regardless of the instance size.
-func truncatedNumber(s string) string {
-	const keep = 32
-
-	if len(s) <= keep {
-		return s
-	}
-
-	return fmt.Sprintf("%s... (%d chars)", s[:keep], len(s))
-}
-
-// ratString returns a compact string representation of a [big.Rat]. An integer
-// renders exactly; a fraction renders through its shortest float64 decimal,
-// except when the float64 conversion loses the value: a magnitude above the
-// float64 range overflows to a meaningless +Inf, and a tiny magnitude below the
-// smallest subnormal underflows to 0. The non-integer guarantee means the value
-// is nonzero, so an f of 0 can only be underflow; both cases fall back to the
-// exact rational form instead of a misleading "0" or "+Inf".
-func ratString(r *big.Rat) string {
-	if r.IsInt() {
-		return r.Num().String()
-	}
-
-	f, _ := r.Float64()
-	if math.IsInf(f, 0) || f == 0 {
-		return r.RatString()
-	}
-
-	return fmt.Sprintf("%v", f)
 }
 
 // validateString checks string keywords.
