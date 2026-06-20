@@ -153,6 +153,13 @@ func RawFragment(u *url.URL) (string, bool) {
 func FilePathFromURI(uri string) string {
 	u, err := url.Parse(uri)
 	if err == nil && u.Scheme == "file" {
+		// An opaque file: URI (file:schema.json, with no authority slashes)
+		// puts the whole reference in u.Opaque and leaves u.Path empty; fall
+		// back to it so the filename is not dropped.
+		if u.Path == "" && u.Opaque != "" {
+			return strings.TrimLeft(u.Opaque, "/")
+		}
+
 		return strings.TrimLeft(u.Path, "/")
 	}
 
