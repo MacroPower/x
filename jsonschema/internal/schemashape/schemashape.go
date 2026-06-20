@@ -161,3 +161,40 @@ func NullableTypeListBase(s *jsonschema.Schema) (string, bool) {
 		return "", false
 	}
 }
+
+// IsEmpty reports whether s has no constraining keyword set (no type, no
+// applicator, no validation keyword). It is the constraint-only complement to
+// the jsonschema package's exported IsTrueSchema/IsFalseSchema predicates, which
+// additionally enumerate the annotation and identifier fields. Those three field
+// enumerations are co-maintained: when the upstream Schema gains a field,
+// revisit all of them. The jsonschema package's
+// TestIsTrueSchemaRejectsEverySetField guards the exported pair. A nil schema is
+// not empty.
+func IsEmpty(s *jsonschema.Schema) bool {
+	return s != nil &&
+		s.Type == "" && s.Types == nil &&
+		s.Ref == "" && s.DynamicRef == "" &&
+		s.Properties == nil && s.Required == nil &&
+		s.Items == nil && s.PrefixItems == nil && s.ItemsArray == nil &&
+		s.AllOf == nil && s.AnyOf == nil && s.OneOf == nil && s.Not == nil &&
+		s.If == nil && s.Then == nil && s.Else == nil &&
+		s.Enum == nil && s.Const == nil &&
+		s.Minimum == nil && s.Maximum == nil &&
+		s.ExclusiveMinimum == nil && s.ExclusiveMaximum == nil &&
+		s.MinLength == nil && s.MaxLength == nil &&
+		s.Pattern == "" && s.Format == "" &&
+		s.MinItems == nil && s.MaxItems == nil &&
+		!s.UniqueItems &&
+		s.MinProperties == nil && s.MaxProperties == nil &&
+		s.AdditionalProperties == nil && s.AdditionalItems == nil &&
+		s.PatternProperties == nil && s.PropertyNames == nil &&
+		s.Contains == nil &&
+		s.MultipleOf == nil &&
+		s.UnevaluatedProperties == nil && s.UnevaluatedItems == nil &&
+		s.DependentRequired == nil && s.DependentSchemas == nil &&
+		s.DependencySchemas == nil && s.DependencyStrings == nil &&
+		s.MinContains == nil && s.MaxContains == nil &&
+		s.Defs == nil && s.Definitions == nil &&
+		s.ContentEncoding == "" && s.ContentMediaType == "" &&
+		s.ContentSchema == nil
+}

@@ -26,6 +26,7 @@ import (
 	"go.jacobcolvin.com/x/jsonschema/internal/jsonequal"
 	"go.jacobcolvin.com/x/jsonschema/internal/jsonptr"
 	"go.jacobcolvin.com/x/jsonschema/internal/numrat"
+	"go.jacobcolvin.com/x/jsonschema/internal/schemashape"
 	"go.jacobcolvin.com/x/jsonschema/internal/typename"
 	"go.jacobcolvin.com/x/jsonschema/internal/uriref"
 	"go.jacobcolvin.com/x/jsonschema/internal/vocab"
@@ -1832,7 +1833,7 @@ func (v *validator) validateUnevaluated(
 			// IsEmptySchema implies Not == nil, so the schema is not a false
 			// schema: an empty (always-true) unevaluatedProperties evaluates
 			// every remaining property.
-			if isEmptySchema(schema.UnevaluatedProperties) {
+			if schemashape.IsEmpty(schema.UnevaluatedProperties) {
 				ann.allProperties = true
 			}
 
@@ -1873,7 +1874,7 @@ func (v *validator) validateUnevaluated(
 			// IsEmptySchema implies Not == nil, so the schema is not a false
 			// schema: an empty (always-true) unevaluatedItems evaluates every
 			// remaining item.
-			if isEmptySchema(schema.UnevaluatedItems) {
+			if schemashape.IsEmpty(schema.UnevaluatedItems) {
 				ann.allItems = true
 			}
 
@@ -1937,41 +1938,11 @@ func labelFalseSchemaKeyword(errs []*ValidationError, sub *Schema, keyword strin
 // form, since the schema then marshals to an object rather than to bare false.
 // Such a schema is validated through its `not` keyword (which still rejects every
 // instance), and the error names that keyword instead of the bare false-schema
-// message. A nil schema is not the false form. (isEmptySchema, which ignores
-// annotations, intentionally answers a different question for the always-true
-// unevaluated* subschema checks and is not used here.)
+// message. A nil schema is not the false form. ([schemashape.IsEmpty], which
+// ignores annotations, intentionally answers a different question for the
+// always-true unevaluated* subschema checks and is not used here.)
 func isFalseSchema(s *Schema) bool {
 	return IsFalseSchema(s)
-}
-
-// isEmptySchema checks if a schema is empty (no keywords set).
-func isEmptySchema(s *Schema) bool {
-	return s != nil &&
-		s.Type == "" && s.Types == nil &&
-		s.Ref == "" && s.DynamicRef == "" &&
-		s.Properties == nil && s.Required == nil &&
-		s.Items == nil && s.PrefixItems == nil && s.ItemsArray == nil &&
-		s.AllOf == nil && s.AnyOf == nil && s.OneOf == nil && s.Not == nil &&
-		s.If == nil && s.Then == nil && s.Else == nil &&
-		s.Enum == nil && s.Const == nil &&
-		s.Minimum == nil && s.Maximum == nil &&
-		s.ExclusiveMinimum == nil && s.ExclusiveMaximum == nil &&
-		s.MinLength == nil && s.MaxLength == nil &&
-		s.Pattern == "" && s.Format == "" &&
-		s.MinItems == nil && s.MaxItems == nil &&
-		!s.UniqueItems &&
-		s.MinProperties == nil && s.MaxProperties == nil &&
-		s.AdditionalProperties == nil && s.AdditionalItems == nil &&
-		s.PatternProperties == nil && s.PropertyNames == nil &&
-		s.Contains == nil &&
-		s.MultipleOf == nil &&
-		s.UnevaluatedProperties == nil && s.UnevaluatedItems == nil &&
-		s.DependentRequired == nil && s.DependentSchemas == nil &&
-		s.DependencySchemas == nil && s.DependencyStrings == nil &&
-		s.MinContains == nil && s.MaxContains == nil &&
-		s.Defs == nil && s.Definitions == nil &&
-		s.ContentEncoding == "" && s.ContentMediaType == "" &&
-		s.ContentSchema == nil
 }
 
 // acceptedInstance reports whether instance is one of the JSON-compatible Go
