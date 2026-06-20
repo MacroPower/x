@@ -1,5 +1,5 @@
-// Package jsonptr implements RFC 6901 JSON Pointer reference-token escaping and
-// array-index parsing.
+// Package jsonptr implements RFC 6901 JSON Pointer reference-token escaping,
+// array-index parsing, and navigation of a generated schema by JSON Pointer.
 package jsonptr
 
 import (

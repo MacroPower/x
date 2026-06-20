@@ -3638,7 +3638,7 @@ func (v *validator) resolveJSONPointerViaJSON(root *Schema, segments []string) *
 		return cached
 	}
 
-	target, base := schemaAtJSONPointer(root, segments, v.schemaBase(root))
+	target, base := jsonptr.SchemaAtJSONPointer(root, segments, v.schemaBase(root))
 	if target != nil {
 		v.registerFallbackSchema(target, base)
 	}
@@ -3733,80 +3733,6 @@ func (v *validator) lookupDynamicAnchor(key string) (*Schema, bool) {
 	s, ok := v.dynamicAnchorRegistry[key]
 
 	return s, ok
-}
-
-// schemaAtJSONPointer navigates root's JSON encoding by segments and returns
-// the located value as a Schema when it is itself a schema (a JSON object or
-// boolean), or nil otherwise. The walk starts from base (root's base URI) and
-// tracks $id members of the objects it descends through, so the returned base
-// is the one in effect at the located schema; the target's own $id is left to
-// walkSchema during registration.
-func schemaAtJSONPointer(root *Schema, segments []string, base string) (*Schema, string) {
-	data, err := json.Marshal(root)
-	if err != nil {
-		return nil, ""
-	}
-
-	var node any
-
-	err = json.Unmarshal(data, &node)
-	if err != nil {
-		return nil, ""
-	}
-
-	for i, seg := range segments {
-		// Crossing into an intermediate object that establishes a resource
-		// ($id) rebases everything below it. The starting root is skipped:
-		// its own $id is already reflected in base.
-		if i > 0 {
-			if obj, ok := node.(map[string]any); ok {
-				if id, ok := obj["$id"].(string); ok && id != "" && !uriref.IsFragmentOnly(id) {
-					base = uriref.StripFragment(uriref.ResolveURI(base, id))
-				}
-			}
-		}
-
-		switch container := node.(type) {
-		case map[string]any:
-			next, ok := container[seg]
-			if !ok {
-				return nil, ""
-			}
-
-			node = next
-
-		case []any:
-			idx, ok := jsonptr.ParseArrayIndex(seg)
-			if !ok || idx >= len(container) {
-				return nil, ""
-			}
-
-			node = container[idx]
-
-		default:
-			return nil, ""
-		}
-	}
-
-	switch node.(type) {
-	case map[string]any, bool:
-		target, err := json.Marshal(node)
-		if err != nil {
-			return nil, ""
-		}
-
-		var schema Schema
-
-		err = json.Unmarshal(target, &schema)
-		if err != nil {
-			return nil, ""
-		}
-
-		return &schema, base
-
-	default:
-		return nil, ""
-	}
 }
 
 // traverseSchema navigates the schema tree by matching segment names to JSON
