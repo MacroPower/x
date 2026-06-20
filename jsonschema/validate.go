@@ -3776,7 +3776,7 @@ func schemaAtJSONPointer(root *Schema, segments []string, base string) (*Schema,
 			node = next
 
 		case []any:
-			idx, ok := parseArrayIndex(seg)
+			idx, ok := jsonptr.ParseArrayIndex(seg)
 			if !ok || idx >= len(container) {
 				return nil, ""
 			}
@@ -3903,7 +3903,7 @@ func (v *validator) traverseSchema(schema *Schema, segments []string) *Schema {
 
 		// Array form (Draft-07 items as array): requires an index in rest.
 		if len(rest) > 0 && len(schema.ItemsArray) > 0 {
-			if idx, ok := parseArrayIndex(rest[0]); ok && idx < len(schema.ItemsArray) {
+			if idx, ok := jsonptr.ParseArrayIndex(rest[0]); ok && idx < len(schema.ItemsArray) {
 				return v.traverseSchema(schema.ItemsArray[idx], rest[1:])
 			}
 		}
@@ -3991,7 +3991,7 @@ func (v *validator) traverseSchema(schema *Schema, segments []string) *Schema {
 	// Slice fields: allOf, anyOf, oneOf, prefixItems.
 	idx := -1
 	if len(rest) > 0 {
-		if n, ok := parseArrayIndex(rest[0]); ok {
+		if n, ok := jsonptr.ParseArrayIndex(rest[0]); ok {
 			idx = n
 		}
 	}
@@ -4027,31 +4027,4 @@ func (v *validator) traverseSchema(schema *Schema, segments []string) *Schema {
 	}
 
 	return nil
-}
-
-// parseArrayIndex parses a JSON Pointer reference token as an RFC 6901 array
-// index. The grammar admits only "0" or a nonzero leading digit followed by
-// digits, so non-canonical forms such as "01", "+1", or "-0" are rejected. It
-// returns the parsed index and true on success, or false otherwise.
-func parseArrayIndex(seg string) (int, bool) {
-	if seg == "" {
-		return 0, false
-	}
-
-	if seg != "0" && seg[0] == '0' {
-		return 0, false
-	}
-
-	for i := range len(seg) {
-		if seg[i] < '0' || seg[i] > '9' {
-			return 0, false
-		}
-	}
-
-	idx, err := strconv.Atoi(seg)
-	if err != nil {
-		return 0, false
-	}
-
-	return idx, true
 }

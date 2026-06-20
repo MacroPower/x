@@ -1,7 +1,11 @@
-// Package jsonptr implements RFC 6901 JSON Pointer reference-token escaping.
+// Package jsonptr implements RFC 6901 JSON Pointer reference-token escaping and
+// array-index parsing.
 package jsonptr
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
 
 // escaper and unescaper apply the RFC 6901 ~0/~1 transforms in a single pass.
 // A [strings.NewReplacer] scans left to right and never rescans its own output,
@@ -47,4 +51,31 @@ func SafeToken(s string) string {
 			return '_'
 		}
 	}, s)
+}
+
+// ParseArrayIndex parses a JSON Pointer reference token as an RFC 6901 array
+// index. The grammar admits only "0" or a nonzero leading digit followed by
+// digits, so non-canonical forms such as "01", "+1", or "-0" are rejected. It
+// returns the parsed index and true on success, or false otherwise.
+func ParseArrayIndex(seg string) (int, bool) {
+	if seg == "" {
+		return 0, false
+	}
+
+	if seg != "0" && seg[0] == '0' {
+		return 0, false
+	}
+
+	for i := range len(seg) {
+		if seg[i] < '0' || seg[i] > '9' {
+			return 0, false
+		}
+	}
+
+	idx, err := strconv.Atoi(seg)
+	if err != nil {
+		return 0, false
+	}
+
+	return idx, true
 }
