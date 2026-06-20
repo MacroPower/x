@@ -1,9 +1,9 @@
-// Package goast reads doc comments and type/field shapes out of a parsed Go
-// package (go/ast). The generation half's comment provider loads package
-// sources at generation time and these helpers locate a named type, walk its
-// fields, and unwrap the type expressions Go uses to name embedded fields, so
-// the provider can serve the doc comment that belongs to a reflected type or
-// struct field.
+// Package goast loads, parses, and reads doc comments and type/field shapes out
+// of a Go package (go/ast). It loads package sources at generation time, locates
+// a named type, walks its fields (following same-package type aliases), and
+// unwraps the type expressions Go uses to name embedded fields, so the
+// generation half's comment provider can serve the doc comment that belongs to a
+// reflected type or struct field.
 package goast
 
 import (
@@ -128,4 +128,42 @@ func EmbeddedFieldName(expr ast.Expr) string {
 	default:
 		return ""
 	}
+}
+
+// StructFieldDocThroughAliases returns the doc comment for fieldName on the
+// struct named typeName, following a chain of same-package named types
+// (type Foo Bar) down to the underlying struct, so a field comment declared on
+// Bar is found when the field is reported under Foo. The type-argument list on
+// typeName is stripped first ([BaseTypeName]). It reports ok=false when no
+// reachable type is a struct (a cross-package alias or non-struct underlying
+// type carries no locally scannable fields) or the type is not found. A visited
+// set guards against a malformed cyclic alias chain.
+func StructFieldDocThroughAliases(files []*ast.File, typeName, fieldName string) (string, bool) {
+	name := BaseTypeName(typeName)
+	seen := map[string]bool{}
+
+	for !seen[name] {
+		seen[name] = true
+
+		ts := FindTypeSpec(files, name)
+		if ts == nil {
+			return "", false
+		}
+
+		switch underlying := ts.Type.(type) {
+		case *ast.StructType:
+			return StructFieldDoc(underlying, fieldName)
+
+		case *ast.Ident:
+			// A same-package named type (type Foo Bar); follow to Bar.
+			name = underlying.Name
+
+		default:
+			// A cross-package alias (an *ast.SelectorExpr) or a non-struct
+			// underlying type carries no locally scannable struct fields.
+			return "", false
+		}
+	}
+
+	return "", false
 }

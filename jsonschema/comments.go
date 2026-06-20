@@ -2,13 +2,8 @@ package jsonschema
 
 import (
 	"context"
-	"fmt"
 	"go/ast"
-	"go/parser"
-	"go/token"
 	"sync"
-
-	"golang.org/x/tools/go/packages"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/goast"
 )
@@ -124,39 +119,9 @@ func (ce *GoCommentProvider) FieldDescription(ctx context.Context, fc FieldConte
 		return "", err
 	}
 
-	// Follow a chain of same-package named types (type Foo Bar) down to the
-	// underlying struct, so a field comment declared on Bar is found when
-	// reflection reports the field under Foo. The visited set guards against a
-	// malformed cyclic alias chain.
-	name := goast.BaseTypeName(structType.Name())
-	seen := map[string]bool{}
+	doc, _ := goast.StructFieldDocThroughAliases(files, structType.Name(), fieldName)
 
-	for !seen[name] {
-		seen[name] = true
-
-		ts := goast.FindTypeSpec(files, name)
-		if ts == nil {
-			return "", nil
-		}
-
-		switch underlying := ts.Type.(type) {
-		case *ast.StructType:
-			doc, _ := goast.StructFieldDoc(underlying, fieldName)
-
-			return doc, nil
-
-		case *ast.Ident:
-			// A same-package named type (type Foo Bar); follow to Bar.
-			name = underlying.Name
-
-		default:
-			// A cross-package alias (an *ast.SelectorExpr) or a non-struct
-			// underlying type carries no locally scannable struct fields.
-			return "", nil
-		}
-	}
-
-	return "", nil
+	return doc, nil
 }
 
 // sourceFiles returns parsed AST files for the package at the given import path.
@@ -185,9 +150,9 @@ func (ce *GoCommentProvider) sourceFiles(ctx context.Context, pkgPath string) ([
 	// hit never blocks behind an unrelated (possibly slow or hung) load. Two
 	// goroutines racing on the same uncached path may both load it; the result
 	// is equivalent and the second store overwrites the first.
-	files, loaded, err := ce.loadPackage(ctx, pkgPath)
+	files, loaded, err := goast.LoadPackageFiles(ctx, ce.loadDir, pkgPath)
 	if err != nil {
-		return nil, err
+		return nil, err //nolint:wrapcheck // LoadPackageFiles already wraps the context error with "load package".
 	}
 
 	// Only cache a definitive result. A transient failure returns loaded=false
@@ -209,45 +174,4 @@ func (ce *GoCommentProvider) sourceFiles(ctx context.Context, pkgPath string) ([
 	}
 
 	return files, nil
-}
-
-// loadPackage uses go/packages to load and parse source files for a package.
-// The returned bool reports whether the load reached a definitive result worth
-// caching. A load attempted under a done context reports the context's error
-// (and false); any other load failure returns no files and false, the silent
-// skip the [GoCommentProvider] docs describe, so a transient failure is retried
-// rather than cached. A successful load returns its parsed files and true, even
-// when the package legitimately has no source files.
-//
-// The configured Mode (NeedName | NeedFiles | NeedSyntax) parses but does not
-// type-check, so the only per-file problems that arise are parse errors and
-// import resolution failures. Package-level errors (an unrelated sibling file
-// with a parse problem, an unresolved import, and so on) do not discard the
-// successfully parsed files: go/packages populates Syntax with every AST that
-// parsed cleanly while aggregating per-file problems separately in Errors.
-// Best-effort comment extraction uses whatever parsed, so a single bad file in
-// the package does not drop doc comments for the types that did parse.
-func (ce *GoCommentProvider) loadPackage(ctx context.Context, pkgPath string) ([]*ast.File, bool, error) {
-	cfg := &packages.Config{
-		Context: ctx,
-		Dir:     ce.loadDir,
-		Mode:    packages.NeedName | packages.NeedFiles | packages.NeedSyntax,
-		ParseFile: func(fset *token.FileSet, filename string, src []byte) (*ast.File, error) {
-			return parser.ParseFile(fset, filename, src, parser.ParseComments)
-		},
-	}
-
-	pkgs, err := packages.Load(cfg, pkgPath)
-
-	ctxErr := ctx.Err()
-	if ctxErr != nil {
-		return nil, false, fmt.Errorf("load package %s: %w", pkgPath, ctxErr)
-	}
-
-	if err != nil || len(pkgs) == 0 {
-		//nolint:nilerr // A live-context load failure is the documented silent skip; loaded=false keeps it out of the cache so a later call retries.
-		return nil, false, nil
-	}
-
-	return pkgs[0].Syntax, true, nil
 }
