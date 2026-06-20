@@ -48,7 +48,10 @@ The package has two independent halves sharing the `Schema` type:
   items watermark, saturation flags -- with the nil-safe `Set` type whose
   `Merge` is the union the `unevaluatedProperties`/`unevaluatedItems` walk
   consults; the merge _policy_ of when a subschema rolls up stays in the
-  validator).
+  validator), and `internal/content` (the `contentEncoding`/`contentMediaType`
+  decode-and-classify core: base64 decoding, the `application/json` media-type
+  fold, and the `base64` value the generator emits and the validator asserts;
+  the validator keeps the vocabulary gating and error construction).
 
 ### Relationship to google/jsonschema-go
 

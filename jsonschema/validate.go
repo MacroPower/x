@@ -2,13 +2,11 @@ package jsonschema
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
 	"math/big"
-	"mime"
 	"net/url"
 	"regexp"
 	"slices"
@@ -19,6 +17,7 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/annotations"
+	"go.jacobcolvin.com/x/jsonschema/internal/content"
 	"go.jacobcolvin.com/x/jsonschema/internal/format"
 	"go.jacobcolvin.com/x/jsonschema/internal/jsonequal"
 	"go.jacobcolvin.com/x/jsonschema/internal/jsonptr"
@@ -3029,70 +3028,21 @@ func (v *validator) assertContent(
 		return nil
 	}
 
-	decoded := []byte(str)
-	decodedKnown := true
+	switch kw, decodeErr := content.Assert(schema.ContentEncoding, schema.ContentMediaType, str); kw {
+	case KeywordContentEncoding:
+		return []*ValidationError{leafError(
+			instancePath, schemaPath, KeywordContentEncoding,
+			fmt.Sprintf("string is not valid base64: %v", decodeErr),
+		)}
 
-	switch schema.ContentEncoding {
-	case "":
-		// No encoding: the instance string is the content itself.
-	case contentEncodingBase64:
-		b, err := base64.StdEncoding.DecodeString(str)
-		if err != nil {
-			kwPath := schemaPath.kw("contentEncoding")
-
-			return []*ValidationError{{
-				InstancePath: instancePath.ptr,
-				segments:     instancePath.segs,
-				SchemaPath:   kwPath.ptr,
-				schemaSegs:   kwPath.segs,
-				Keyword:      KeywordContentEncoding,
-				Message:      fmt.Sprintf("string is not valid base64: %v", err),
-			}}
-		}
-
-		decoded = b
-
-	default:
-		// An unrecognized encoding cannot be decoded, so the media type
-		// cannot be asserted against the decoded form; both keywords remain
-		// annotations rather than running the assertion on still-encoded text.
-		decodedKnown = false
-	}
-
-	if decodedKnown && mediaTypeIsJSON(schema.ContentMediaType) && !json.Valid(decoded) {
-		kwPath := schemaPath.kw("contentMediaType")
-
-		return []*ValidationError{{
-			InstancePath: instancePath.ptr,
-			segments:     instancePath.segs,
-			SchemaPath:   kwPath.ptr,
-			schemaSegs:   kwPath.segs,
-			Keyword:      KeywordContentMediaType,
-			Message:      "string is not a valid application/json document",
-		}}
+	case KeywordContentMediaType:
+		return []*ValidationError{leafError(
+			instancePath, schemaPath, KeywordContentMediaType,
+			"string is not a valid application/json document",
+		)}
 	}
 
 	return nil
-}
-
-// mediaTypeIsJSON reports whether a contentMediaType denotes application/json.
-// Per RFC 2045 the type/subtype is case-insensitive and any parameters (for
-// example "; charset=utf-8") are not part of it, so "Application/JSON" and
-// "application/json; charset=utf-8" both match.
-func mediaTypeIsJSON(mediaType string) bool {
-	parsed, _, err := mime.ParseMediaType(mediaType)
-	if err == nil {
-		// ParseMediaType lowercases the type/subtype and strips parameters.
-		return parsed == "application/json"
-	}
-
-	// ParseMediaType rejects some malformed-but-recognizable values, so fall
-	// back to stripping parameters and folding case by hand.
-	if i := strings.IndexByte(mediaType, ';'); i >= 0 {
-		mediaType = mediaType[:i]
-	}
-
-	return strings.EqualFold(strings.TrimSpace(mediaType), "application/json")
 }
 
 // validateRef resolves and validates a $ref.

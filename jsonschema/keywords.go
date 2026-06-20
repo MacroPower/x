@@ -66,9 +66,7 @@ const (
 	KeywordWriteOnly             = keyword.WriteOnly
 )
 
-// Content-encoding and format value constants for the values the generator
-// emits and the validator asserts.
-const (
-	contentEncodingBase64 = "base64"
-	formatDateTime        = "date-time"
-)
+// formatDateTime is the format value the generator emits and the validator
+// asserts. (The base64 contentEncoding value lives in internal/content, which
+// owns the content assertion.)
+const formatDateTime = "date-time"

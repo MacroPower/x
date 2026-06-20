@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/jsonschema-go/jsonschema"
 
+	"go.jacobcolvin.com/x/jsonschema/internal/content"
 	"go.jacobcolvin.com/x/jsonschema/internal/jsontag"
 	"go.jacobcolvin.com/x/jsonschema/internal/numkind"
 	"go.jacobcolvin.com/x/jsonschema/internal/reflectkind"
@@ -583,7 +584,7 @@ func (g *generator) handleBuiltinType(t reflect.Type, s *Schema, nullable bool) 
 // byteSliceSchema returns the schema for a byte slice, which encoding/json
 // renders as a base64-encoded string.
 func (g *generator) byteSliceSchema() *Schema {
-	s := &Schema{ContentEncoding: contentEncodingBase64}
+	s := &Schema{ContentEncoding: content.Base64}
 	g.applyContainerType(s, typename.String)
 
 	return s
