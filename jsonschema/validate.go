@@ -1,13 +1,11 @@
 package jsonschema
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"maps"
 	"math/big"
 	"mime"
@@ -1184,9 +1182,9 @@ func ParseSchemaValue(doc any) (*Schema, error) {
 // a [Schema] directly silently coerces to the false schema. Malformed JSON
 // returns the wrapped decode error without the sentinel.
 func ParseSchema(data []byte) (*Schema, error) {
-	doc, err := decodeJSONInstance(data)
+	doc, err := normalize.DecodeJSONInstance(data)
 	if err != nil {
-		return nil, err
+		return nil, err //nolint:wrapcheck // DecodeJSONInstance already wraps with "JSON decode:".
 	}
 
 	return ParseSchemaValue(doc)
@@ -1347,9 +1345,9 @@ func (c *Validator) validateNormalized(ctx context.Context, instance any) error 
 // The context is passed to the [RefResolver] for remote refs reached during
 // this validation run (see [Validator.Validate]).
 func (c *Validator) ValidateJSON(ctx context.Context, data []byte) error {
-	instance, err := decodeJSONInstance(data)
+	instance, err := normalize.DecodeJSONInstance(data)
 	if err != nil {
-		return err
+		return err //nolint:wrapcheck // DecodeJSONInstance already wraps with "JSON decode:".
 	}
 
 	return c.Validate(ctx, instance)
@@ -1600,42 +1598,6 @@ func schemaFormsTree(schema *Schema) bool {
 	visit(schema)
 
 	return tree
-}
-
-// errTrailingData reports tokens after the single top-level JSON value.
-//
-//nolint:grouper // Kept next to decodeJSONInstance, its only user; merging unrelated globals hurts readability.
-var errTrailingData = errors.New("unexpected data after top-level value")
-
-// decodeJSONInstance decodes JSON bytes into an instance value using
-// [json.Decoder] with UseNumber(), preserving the integer vs number distinction
-// that the validator relies on.
-func decodeJSONInstance(data []byte) (any, error) {
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.UseNumber()
-
-	var instance any
-
-	err := dec.Decode(&instance)
-	if err != nil {
-		return nil, fmt.Errorf("JSON decode: %w", err)
-	}
-
-	// A JSON document is a single value. The decoder stops after the first
-	// value and leaves any remaining tokens in the stream, so an exhausted
-	// stream is required to reject documents like `{"a":1} x` or `true false`.
-	// Token skips insignificant whitespace, so trailing whitespace still
-	// reaches io.EOF and is accepted.
-	_, err = dec.Token()
-	if !errors.Is(err, io.EOF) {
-		if err == nil {
-			return nil, fmt.Errorf("JSON decode: %w", errTrailingData)
-		}
-
-		return nil, fmt.Errorf("JSON decode: %w", err)
-	}
-
-	return instance, nil
 }
 
 // annotations tracks evaluated properties and items for unevaluated* keywords.
