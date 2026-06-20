@@ -40,10 +40,15 @@ The package has two independent halves sharing the `Schema` type:
   hash for `uniqueItems`, layered on `internal/numrat` for exact decimal
   comparison), `internal/goast` (doc-comment and type/field-shape
   extraction from a parsed Go package, for the generation half's comment
-  provider), and `internal/regexcache` (process-wide compile-once cache for
+  provider), `internal/regexcache` (process-wide compile-once cache for
   validation-time regular-expression patterns, memoizing the compiled
   expression or the compile error so a pattern compiles at most once and fails
-  closed identically across runs).
+  closed identically across runs), and `internal/annotations` (the 2020-12
+  annotation collection -- evaluated-property set, matched-item index set,
+  items watermark, saturation flags -- with the nil-safe `Set` type whose
+  `Merge` is the union the `unevaluatedProperties`/`unevaluatedItems` walk
+  consults; the merge _policy_ of when a subschema rolls up stays in the
+  validator).
 
 ### Relationship to google/jsonschema-go
 

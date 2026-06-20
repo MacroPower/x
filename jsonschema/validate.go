@@ -18,6 +18,7 @@ import (
 
 	"github.com/google/jsonschema-go/jsonschema"
 
+	"go.jacobcolvin.com/x/jsonschema/internal/annotations"
 	"go.jacobcolvin.com/x/jsonschema/internal/format"
 	"go.jacobcolvin.com/x/jsonschema/internal/jsonequal"
 	"go.jacobcolvin.com/x/jsonschema/internal/jsonptr"
@@ -1535,70 +1536,13 @@ func schemaFormsTree(schema *Schema) bool {
 	return tree
 }
 
-// annotations tracks evaluated properties and items for unevaluated* keywords.
-type annotations struct {
-	properties    map[string]bool
-	itemIndexes   map[int]bool
-	itemsEnd      int
-	allProperties bool
-	allItems      bool
-}
-
-func newAnnotations() *annotations {
-	return &annotations{
-		properties:  map[string]bool{},
-		itemIndexes: map[int]bool{},
-	}
-}
-
-// childAnnotations returns a fresh annotations set when the parent tracks
-// annotations, or nil when it does not. A composition, conditional, reference,
-// or dependency keyword collects a subschema's evaluation only to merge it into
-// the parent; when the parent is nil that result is discarded, so skipping the
-// allocation avoids two maps per subschema on schemas with no
-// unevaluatedProperties/Items to satisfy. Passing nil to [validator.validate]
-// is safe: it self-allocates a local set if the subschema itself needs one.
-func childAnnotations(parent *annotations) *annotations {
-	if parent == nil {
-		return nil
-	}
-
-	return newAnnotations()
-}
-
-func (a *annotations) merge(other *annotations) {
-	if other == nil {
-		return
-	}
-
-	for k := range other.properties {
-		a.properties[k] = true
-	}
-
-	if other.allProperties {
-		a.allProperties = true
-	}
-
-	if other.itemsEnd > a.itemsEnd {
-		a.itemsEnd = other.itemsEnd
-	}
-
-	for k := range other.itemIndexes {
-		a.itemIndexes[k] = true
-	}
-
-	if other.allItems {
-		a.allItems = true
-	}
-}
-
 // validate performs the depth-first recursive walk.
 func (v *validator) validate(
 	schema *Schema,
 	instance any,
 	instancePath instanceLocation,
 	schemaPath schemaLocation,
-	ann *annotations,
+	ann *annotations.Set,
 ) []*ValidationError {
 	if schema == nil {
 		return nil
@@ -1650,7 +1594,7 @@ func (v *validator) validate(
 	// If this schema uses unevaluated* keywords but the caller didn't provide
 	// annotations, create a local annotations object to track evaluated items.
 	if ann == nil && (schema.UnevaluatedProperties != nil || schema.UnevaluatedItems != nil) {
-		ann = newAnnotations()
+		ann = annotations.New()
 	}
 
 	var errs []*ValidationError
@@ -1715,7 +1659,7 @@ func (v *validator) validateUnevaluated(
 	instance any,
 	instancePath instanceLocation,
 	schemaPath schemaLocation,
-	ann *annotations,
+	ann *annotations.Set,
 ) []*ValidationError {
 	if v.draft != Draft2020 || ann == nil || !v.vocabs.Unevaluated {
 		return nil
@@ -1726,12 +1670,12 @@ func (v *validator) validateUnevaluated(
 	// UnevaluatedProperties.
 	//nolint:nestif // Nesting tracks the annotation guards required to apply unevaluatedProperties correctly.
 	if schema.UnevaluatedProperties != nil {
-		if obj, ok := instance.(map[string]any); ok && !ann.allProperties {
+		if obj, ok := instance.(map[string]any); ok && !ann.AllPropertiesSet() {
 			// IsEmptySchema implies Not == nil, so the schema is not a false
 			// schema: an empty (always-true) unevaluatedProperties evaluates
 			// every remaining property.
 			if schemashape.IsEmpty(schema.UnevaluatedProperties) {
-				ann.allProperties = true
+				ann.SetAllProperties()
 			}
 
 			childSchemaPath := schemaPath.kw("unevaluatedProperties")
@@ -1740,7 +1684,7 @@ func (v *validator) validateUnevaluated(
 			// deterministic, matching the sibling object keywords (properties,
 			// patternProperties, additionalProperties, propertyNames).
 			for _, propName := range slices.Sorted(maps.Keys(obj)) {
-				if ann.properties[propName] {
+				if ann.Evaluated(propName) {
 					continue
 				}
 
@@ -1749,7 +1693,7 @@ func (v *validator) validateUnevaluated(
 				childPath := instancePath.key(propName)
 				childErrs := v.validate(schema.UnevaluatedProperties, val, childPath, childSchemaPath, nil)
 				if len(childErrs) == 0 {
-					ann.properties[propName] = true
+					ann.RecordProperty(propName)
 				} else {
 					errs = append(errs, &ValidationError{
 						InstancePath: childPath.ptr,
@@ -1767,29 +1711,25 @@ func (v *validator) validateUnevaluated(
 
 	// UnevaluatedItems.
 	if schema.UnevaluatedItems != nil { //nolint:nestif // Validation keyword nesting is inherent.
-		if arr, ok := instance.([]any); ok && !ann.allItems {
+		if arr, ok := instance.([]any); ok && !ann.AllItemsSet() {
 			// IsEmptySchema implies Not == nil, so the schema is not a false
 			// schema: an empty (always-true) unevaluatedItems evaluates every
 			// remaining item.
 			if schemashape.IsEmpty(schema.UnevaluatedItems) {
-				ann.allItems = true
+				ann.SetAllItems()
 			}
 
 			childSchemaPath := schemaPath.kw("unevaluatedItems")
 
 			for i, item := range arr {
-				if i < ann.itemsEnd {
-					continue
-				}
-
-				if ann.itemIndexes[i] {
+				if ann.ItemEvaluated(i) {
 					continue
 				}
 
 				childPath := instancePath.index(i)
 				childErrs := v.validate(schema.UnevaluatedItems, item, childPath, childSchemaPath, nil)
 				if len(childErrs) == 0 {
-					ann.itemIndexes[i] = true
+					ann.RecordItem(i)
 				} else {
 					errs = append(errs, &ValidationError{
 						InstancePath: childPath.ptr,
@@ -2297,7 +2237,7 @@ func (v *validator) validateArray(
 	instance any,
 	instancePath instanceLocation,
 	schemaPath schemaLocation,
-	ann *annotations,
+	ann *annotations.Set,
 ) []*ValidationError {
 	arr, ok := instance.([]any)
 	if !ok {
@@ -2341,11 +2281,8 @@ func (v *validator) validateArray(
 		// errors instead of failing fast, the whole applied range is noted once
 		// here; gating on success would leave a failed index unevaluated and let
 		// unevaluatedItems re-fire on it.
-		if ann != nil && len(prefixSchemas) > 0 {
-			end := min(len(prefixSchemas), len(arr))
-			if ann.itemsEnd < end {
-				ann.itemsEnd = end
-			}
+		if len(prefixSchemas) > 0 {
+			ann.ExtendItems(min(len(prefixSchemas), len(arr)))
 		}
 
 		// Items (single schema).
@@ -2361,9 +2298,7 @@ func (v *validator) validateArray(
 				errs = append(errs, childErrs...)
 			}
 
-			if ann != nil {
-				ann.allItems = true
-			}
+			ann.SetAllItems()
 		} else if schema.Items != nil && len(prefixSchemas) > 0 {
 			// In 2020-12: items after prefixItems applies to remaining elements.
 			// In draft-07: additionalItems applies to remaining elements.
@@ -2381,8 +2316,8 @@ func (v *validator) validateArray(
 				// Mark all items evaluated only when items actually applied to a
 				// trailing element; for an array no longer than prefixItems the
 				// prefix already covers every index via itemsEnd.
-				if ann != nil && len(arr) > len(prefixSchemas) {
-					ann.allItems = true
+				if len(arr) > len(prefixSchemas) {
+					ann.SetAllItems()
 				}
 			}
 		}
@@ -2440,10 +2375,8 @@ func (v *validator) validateArray(
 			// 2020-12 core 10.3.1.3). Record it unconditionally so a matched item
 			// stays evaluated for unevaluatedItems even when the count violates
 			// min/maxContains; those are separate assertions, emitted below.
-			if ann != nil {
-				for _, i := range matchedIdx {
-					ann.itemIndexes[i] = true
-				}
+			for _, i := range matchedIdx {
+				ann.RecordItem(i)
 			}
 
 			if matchCount < minContains {
@@ -2538,7 +2471,7 @@ func (v *validator) validateObject(
 	instance any,
 	instancePath instanceLocation,
 	schemaPath schemaLocation,
-	ann *annotations,
+	ann *annotations.Set,
 ) []*ValidationError {
 	obj, ok := instance.(map[string]any)
 	if !ok {
@@ -2572,9 +2505,7 @@ func (v *validator) validateObject(
 				localEvaluated[propName] = true
 			}
 
-			if ann != nil {
-				ann.properties[propName] = true
-			}
+			ann.RecordProperty(propName)
 
 			childPath := instancePath.key(propName)
 			childSchemaPath := schemaPath.kw("properties").key(propName)
@@ -2629,9 +2560,7 @@ func (v *validator) validateObject(
 					localEvaluated[propName] = true
 				}
 
-				if ann != nil {
-					ann.properties[propName] = true
-				}
+				ann.RecordProperty(propName)
 
 				childPath := instancePath.key(propName)
 				childErrs := v.validate(patternSchema, val, childPath, patternSchemaPath, nil)
@@ -2651,9 +2580,7 @@ func (v *validator) validateObject(
 					continue
 				}
 
-				if ann != nil {
-					ann.properties[propName] = true
-				}
+				ann.RecordProperty(propName)
 
 				childPath := instancePath.key(propName)
 				childErrs := v.validate(schema.AdditionalProperties, val, childPath, childSchemaPath, nil)
@@ -2662,9 +2589,7 @@ func (v *validator) validateObject(
 				errs = append(errs, childErrs...)
 			}
 
-			if ann != nil {
-				ann.allProperties = true
-			}
+			ann.SetAllProperties()
 		}
 
 		// PropertyNames. The constraint is on the key, not its value, and RFC
@@ -2706,12 +2631,12 @@ func (v *validator) validateObject(
 					continue
 				}
 
-				depAnn := childAnnotations(ann)
+				depAnn := ann.Child()
 				childSchemaPath := schemaPath.kw("dependentSchemas").key(prop)
 				childErrs := v.validate(depSchema, instance, instancePath, childSchemaPath, depAnn)
 				errs = append(errs, childErrs...)
-				if len(childErrs) == 0 && ann != nil {
-					ann.merge(depAnn)
+				if len(childErrs) == 0 {
+					ann.Merge(depAnn)
 				}
 			}
 		}
@@ -2802,12 +2727,12 @@ func (v *validator) validateObject(
 			continue
 		}
 
-		depAnn := childAnnotations(ann)
+		depAnn := ann.Child()
 		childSchemaPath := schemaPath.kw("dependencies").key(prop)
 		childErrs := v.validate(depSchema, instance, instancePath, childSchemaPath, depAnn)
 		errs = append(errs, childErrs...)
-		if len(childErrs) == 0 && ann != nil {
-			ann.merge(depAnn)
+		if len(childErrs) == 0 {
+			ann.Merge(depAnn)
 		}
 	}
 
@@ -2842,7 +2767,7 @@ func (v *validator) validateComposition(
 	instance any,
 	instancePath instanceLocation,
 	schemaPath schemaLocation,
-	ann *annotations,
+	ann *annotations.Set,
 ) []*ValidationError {
 	if !v.vocabs.Applicator {
 		return nil
@@ -2856,11 +2781,11 @@ func (v *validator) validateComposition(
 	if len(schema.AllOf) > 0 {
 		var (
 			allCauses []*ValidationError
-			subAnns   []*annotations
+			subAnns   []*annotations.Set
 		)
 
 		for i, sub := range schema.AllOf {
-			subAnn := childAnnotations(ann)
+			subAnn := ann.Child()
 			childSchemaPath := schemaPath.kw("allOf").idx(i)
 			childErrs := v.validate(sub, instance, instancePath, childSchemaPath, subAnn)
 			if len(childErrs) > 0 {
@@ -2882,9 +2807,9 @@ func (v *validator) validateComposition(
 				Message:      "did not validate against all subschemas",
 				Causes:       allCauses,
 			})
-		} else if ann != nil {
+		} else {
 			for _, subAnn := range subAnns {
-				ann.merge(subAnn)
+				ann.Merge(subAnn)
 			}
 		}
 	}
@@ -2896,14 +2821,13 @@ func (v *validator) validateComposition(
 		var allCauses []*ValidationError
 
 		for i, sub := range schema.AnyOf {
-			subAnn := childAnnotations(ann)
+			subAnn := ann.Child()
 			childSchemaPath := schemaPath.kw("anyOf").idx(i)
 			childErrs := v.validate(sub, instance, instancePath, childSchemaPath, subAnn)
 			if len(childErrs) == 0 {
 				matched = true
-				if ann != nil {
-					ann.merge(subAnn)
-				}
+
+				ann.Merge(subAnn)
 			} else {
 				allCauses = append(allCauses, childErrs...)
 			}
@@ -2930,11 +2854,11 @@ func (v *validator) validateComposition(
 
 		var (
 			allCauses  []*ValidationError
-			matchedAnn *annotations
+			matchedAnn *annotations.Set
 		)
 
 		for i, sub := range schema.OneOf {
-			subAnn := childAnnotations(ann)
+			subAnn := ann.Child()
 			childSchemaPath := schemaPath.kw("oneOf").idx(i)
 			childErrs := v.validate(sub, instance, instancePath, childSchemaPath, subAnn)
 			if len(childErrs) == 0 {
@@ -2972,9 +2896,7 @@ func (v *validator) validateComposition(
 			})
 
 		default:
-			if ann != nil && matchedAnn != nil {
-				ann.merge(matchedAnn)
-			}
+			ann.Merge(matchedAnn)
 		}
 	}
 
@@ -3005,7 +2927,7 @@ func (v *validator) validateConditional(
 	instance any,
 	instancePath instanceLocation,
 	schemaPath schemaLocation,
-	ann *annotations,
+	ann *annotations.Set,
 ) []*ValidationError {
 	if !v.vocabs.Applicator || schema.If == nil {
 		return nil
@@ -3013,17 +2935,15 @@ func (v *validator) validateConditional(
 
 	var errs []*ValidationError
 
-	ifAnn := childAnnotations(ann)
+	ifAnn := ann.Child()
 	ifErrs := v.validate(schema.If, instance, instancePath, schemaPath.kw("if"), ifAnn)
 	ifPassed := len(ifErrs) == 0
 
 	if ifPassed { //nolint:nestif // Conditional branching with annotation tracking requires nesting.
-		if ann != nil {
-			ann.merge(ifAnn)
-		}
+		ann.Merge(ifAnn)
 
 		if schema.Then != nil {
-			thenAnn := childAnnotations(ann)
+			thenAnn := ann.Child()
 			thenErrs := v.validate(schema.Then, instance, instancePath, schemaPath.kw("then"), thenAnn)
 			if len(thenErrs) > 0 {
 				kwPath := schemaPath.kw("then")
@@ -3037,12 +2957,12 @@ func (v *validator) validateConditional(
 					Message:      "if condition was true but then validation failed",
 					Causes:       thenErrs,
 				})
-			} else if ann != nil {
-				ann.merge(thenAnn)
+			} else {
+				ann.Merge(thenAnn)
 			}
 		}
 	} else if schema.Else != nil {
-		elseAnn := childAnnotations(ann)
+		elseAnn := ann.Child()
 		elseErrs := v.validate(schema.Else, instance, instancePath, schemaPath.kw("else"), elseAnn)
 		if len(elseErrs) > 0 {
 			kwPath := schemaPath.kw("else")
@@ -3056,8 +2976,8 @@ func (v *validator) validateConditional(
 				Message:      "if condition was false but else validation failed",
 				Causes:       elseErrs,
 			})
-		} else if ann != nil {
-			ann.merge(elseAnn)
+		} else {
+			ann.Merge(elseAnn)
 		}
 	}
 
@@ -3181,7 +3101,7 @@ func (v *validator) validateRef(
 	instance any,
 	instancePath instanceLocation,
 	schemaPath schemaLocation,
-	ann *annotations,
+	ann *annotations.Set,
 ) []*ValidationError {
 	ref := schema.Ref
 	if ref == "" {
@@ -3197,7 +3117,7 @@ func (v *validator) validateDynamicRef(
 	instance any,
 	instancePath instanceLocation,
 	schemaPath schemaLocation,
-	ann *annotations,
+	ann *annotations.Set,
 ) []*ValidationError {
 	ref := schema.DynamicRef
 	if ref == "" {
@@ -3224,7 +3144,7 @@ func (v *validator) validateResolvedRef(
 	instance any,
 	instancePath instanceLocation,
 	schemaPath schemaLocation,
-	ann *annotations,
+	ann *annotations.Set,
 ) []*ValidationError {
 	if target == nil {
 		if v.refResolveErr != nil {
@@ -3264,7 +3184,7 @@ func (v *validator) validateResolvedRef(
 		return nil
 	}
 
-	refAnn := childAnnotations(ann)
+	refAnn := ann.Child()
 	childErrs := v.validate(target, instance, instancePath, schemaPath.kw(keyword), refAnn)
 	if len(childErrs) > 0 {
 		kwPath := schemaPath.kw(keyword)
@@ -3279,9 +3199,7 @@ func (v *validator) validateResolvedRef(
 		}}
 	}
 
-	if ann != nil {
-		ann.merge(refAnn)
-	}
+	ann.Merge(refAnn)
 
 	return nil
 }
