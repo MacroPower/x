@@ -1472,7 +1472,7 @@ func (g *generator) wrapRefForDraft7(s *Schema) {
 	}
 
 	// Check if there are any sibling keywords on the $ref.
-	if !hasRefSiblings(s) {
+	if !schemashape.HasRefSiblings(s) {
 		return
 	}
 
@@ -1489,43 +1489,6 @@ func (g *generator) wrapRefForDraft7(s *Schema) {
 
 	s.AllOf = append(s.AllOf, inner)
 	s.Ref = ""
-}
-
-// hasRefSiblings reports whether a schema has any keyword set beyond just $ref.
-// Any such keyword is a sibling Draft-07 validators ignore alongside $ref, so a
-// constraint added by field-level processing (jsonschema struct tag or tag
-// interpreter) would be silently dropped unless the $ref is wrapped in allOf.
-//
-// Validation, applicator, and content keywords are detected by clearing $ref on
-// a copy and asking [schemashape.IsEmpty], the maintained single source of truth
-// for which keywords constrain a value; this catches every constraining keyword,
-// including Not/AllOf/AnyOf/OneOf/Required/Types/If/Then/Else/DependentRequired/
-// DependentSchemas and any future addition, without re-enumerating the list.
-// Annotation, metadata, and identifier keywords (description, title, default,
-// deprecated, readOnly, writeOnly, examples, $comment, $id, $schema, $anchor,
-// $dynamicAnchor, $vocabulary) and the Extra escape hatch do not constrain a
-// value, so schemashape.IsEmpty deliberately ignores them; they are checked
-// explicitly here because they too must be preserved across the allOf wrap. The
-// set mirrors the non-constraint fields IsTrueSchema enumerates beyond what
-// schemashape.IsEmpty covers.
-func hasRefSiblings(s *Schema) bool {
-	// Annotation, metadata, and identifier keywords, plus Extra: not
-	// constraints, so schemashape.IsEmpty ignores them, but field-level
-	// processing (a tag interpreter or extender) can set them and they must
-	// survive the allOf wrap.
-	if s.Description != "" || s.Title != "" || s.Default != nil ||
-		s.Deprecated || s.ReadOnly || s.WriteOnly ||
-		len(s.Examples) > 0 || len(s.Extra) > 0 ||
-		s.Comment != "" || s.ID != "" || s.Schema != "" ||
-		s.Anchor != "" || s.DynamicAnchor != "" || s.Vocabulary != nil {
-		return true
-	}
-
-	// Every constraining keyword: copy, clear $ref, and ask schemashape.IsEmpty.
-	withoutRef := *s
-	withoutRef.Ref = ""
-
-	return !schemashape.IsEmpty(&withoutRef)
 }
 
 // processAllOfField handles embedded structs that need allOf composition.

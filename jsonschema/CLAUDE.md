@@ -60,8 +60,10 @@ in-package test files by policy):
 - `TestIsTrueSchemaRejectsEverySetField` (schema_test.go): every exported
   field set alone must defeat `IsTrueSchema`; a new field fails until added
   to the predicate's enumeration. This is the primary alarm — when it fires,
-  also revisit the `internal/schemaclone` copy logic and the constraint
-  enumeration in `internal/schemashape`'s `IsEmpty`.
+  also revisit the `internal/schemaclone` copy logic, the constraint
+  enumeration in `internal/schemashape`'s `IsEmpty`, and the annotation and
+  identifier enumeration in `internal/schemashape`'s `HasRefSiblings`, which
+  mirrors the non-constraint fields `IsTrueSchema` lists beyond `IsEmpty`.
 - `TestSubschemaEntriesFieldCoverage` (walk_test.go): every `*Schema`-shaped
   field must be returned by `SubschemaEntries`, the single traversal field
   list.
