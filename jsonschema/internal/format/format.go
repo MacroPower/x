@@ -624,6 +624,14 @@ func containsInvalidURIChars(s string) bool {
 // genuinely different rule (URIs additionally ban all non-ASCII) lives in
 // containsInvalidURIChars.
 func isForbiddenURIIRIChar(c rune) bool {
+	// Control code points are excluded by both RFC 3986 and RFC 3987 (RFC 3987
+	// ucschar begins at U+00A0). The net/url byte check catches C0 and DEL, but
+	// a raw C1 control (U+0080-U+009F) encodes as two bytes >= 0x20 and slips
+	// past it on the IRI path, where asciiOnly is false.
+	if c <= 0x1F || c == 0x7F || (c >= 0x80 && c <= 0x9F) {
+		return true
+	}
+
 	switch c {
 	case ' ', '<', '>', '{', '}', '^', '`', '|', '\\', '"':
 		return true

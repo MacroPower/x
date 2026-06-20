@@ -131,6 +131,26 @@ func TestRegexFormatIdentityEscapesNonASCII(t *testing.T) {
 	}
 }
 
+// TestIRIRejectsC1Controls covers RFC 3987: C1 control code points
+// (U+0080-U+009F) are below the ucschar range (which begins at U+00A0) and are
+// not legal IRI characters. They encode as two bytes >= 0x20, so net/url's
+// byte-level control check does not reject them on the IRI path.
+func TestIRIRejectsC1Controls(t *testing.T) {
+	t.Parallel()
+
+	for _, name := range []string{"iri", "iri-reference"} {
+		validate := validator(t, name)
+		for _, c := range []rune{0x80, 0x85, 0x9F} {
+			require.Error(t, validate("http://example.com/a"+string(c)+"b"),
+				"%s with a C1 control U+%04X must be rejected", name, c)
+		}
+
+		// A legal ucschar (>= U+00A0) is still accepted.
+		require.NoError(t, validate("http://example.com/aéb"),
+			"%s with a legal ucschar must be accepted", name)
+	}
+}
+
 func TestEmailFormatAcceptsQuotedLocalAndAddressLiteral(t *testing.T) {
 	t.Parallel()
 
