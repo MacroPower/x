@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/jsonschema-go/jsonschema"
 
+	"go.jacobcolvin.com/x/jsonschema/internal/jsontag"
 	"go.jacobcolvin.com/x/jsonschema/internal/numkind"
 	"go.jacobcolvin.com/x/jsonschema/internal/reflectkind"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemashape"
@@ -1133,13 +1134,13 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 						// regular named field; encoding/json does not promote it. An
 						// options-only tag (json:",omitempty") has no name and falls
 						// through to promotion below, matching encoding/json.
-						info := parseJSONTag(f)
-						if info.jsonName == "" {
+						info := jsontag.Parse(f)
+						if info.JSONName == "" {
 							continue // json:"-"
 						}
 
 						record(
-							info.jsonName,
+							info.JSONName,
 							fieldLevel{field: f, depth: depth, optional: e.optional, tagged: true},
 							dup,
 						)
@@ -1213,14 +1214,14 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 					continue
 				}
 
-				info := parseJSONTag(f)
-				if info.jsonName == "" {
+				info := jsontag.Parse(f)
+				if info.JSONName == "" {
 					continue // json:"-"
 				}
 
 				record(
-					info.jsonName,
-					fieldLevel{field: f, depth: depth, optional: e.optional, tagged: info.taggedName},
+					info.JSONName,
+					fieldLevel{field: f, depth: depth, optional: e.optional, tagged: info.TaggedName},
 					dup,
 				)
 			}
@@ -1286,17 +1287,17 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 			continue
 		}
 
-		info := parseJSONTag(f)
-		if info.jsonName == "" {
+		info := jsontag.Parse(f)
+		if info.JSONName == "" {
 			continue
 		}
 
 		sfi := structFieldInfo{
 			field:      f,
-			jsonName:   info.jsonName,
-			omitempty:  info.omitempty || atMin[0].optional,
-			omitzero:   info.omitzero,
-			jsonString: info.jsonString,
+			jsonName:   info.JSONName,
+			omitempty:  info.Omitempty || atMin[0].optional,
+			omitzero:   info.Omitzero,
+			jsonString: info.JSONString,
 		}
 		result = append(result, sfi)
 	}
@@ -1980,81 +1981,7 @@ func (g *generator) extendType(t reflect.Type, s *Schema) error {
 }
 
 // jsonTagInfo holds parsed json tag information.
-type jsonTagInfo struct {
-	jsonName   string // empty means excluded (json:"-")
-	omitempty  bool
-	omitzero   bool
-	jsonString bool
-	// TaggedName is true when jsonName comes from an explicit json tag name
-	// rather than the Go field name. Encoding/json's same-depth collision
-	// tie-break keeps a field only when exactly one colliding field is tagged.
-	taggedName bool
-}
-
-// parseJSONTag parses the json struct tag.
-func parseJSONTag(f reflect.StructField) jsonTagInfo {
-	tag, ok := f.Tag.Lookup("json")
-	if !ok {
-		// Use field name if no tag.
-		if !f.IsExported() && !f.Anonymous {
-			return jsonTagInfo{} // excluded
-		}
-
-		name := f.Name
-		// For embedded non-struct types, use the type name.
-		if f.Anonymous {
-			ft := f.Type
-			if ft.Kind() == reflect.Pointer {
-				ft = ft.Elem()
-			}
-
-			name = ft.Name()
-		}
-
-		return jsonTagInfo{jsonName: name}
-	}
-
-	name, rest, found := strings.Cut(tag, ",")
-	if name == "-" && !found {
-		return jsonTagInfo{} // excluded
-	}
-
-	// A non-empty name segment is an explicit json tag name; an options-only tag
-	// (json:",omitempty") leaves the name empty and falls back to the field name,
-	// which is not "tagged" for the same-depth collision tie-break.
-	taggedName := name != ""
-
-	if name == "" {
-		// Use field name.
-		name = f.Name
-		if f.Anonymous {
-			ft := f.Type
-			if ft.Kind() == reflect.Pointer {
-				ft = ft.Elem()
-			}
-
-			name = ft.Name()
-		}
-	}
-
-	info := jsonTagInfo{jsonName: name, taggedName: taggedName}
-	if found {
-		for s := range strings.SplitSeq(rest, ",") {
-			switch s {
-			case "omitempty":
-				info.omitempty = true
-			case "omitzero":
-				info.omitzero = true
-			case "string": //nolint:goconst // The encoding/json ",string" tag option, not the JSON Schema type name.
-				info.jsonString = true
-			}
-		}
-	}
-
-	return info
-}
-
-// applyTypeDescription sets the description from the comment provider on a
+// ApplyTypeDescription sets the description from the comment provider on a
 // type's schema. An empty comment leaves the description unset; a provider
 // error aborts generation.
 func (g *generator) applyTypeDescription(t reflect.Type, s *Schema) error {
