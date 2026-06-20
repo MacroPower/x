@@ -2,7 +2,6 @@ package jsonschema
 
 import (
 	"context"
-	"encoding"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,7 +9,6 @@ import (
 	"math"
 	"math/big"
 	"reflect"
-	"runtime"
 	"slices"
 	"strings"
 	"time"
@@ -18,13 +16,12 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/numkind"
+	"go.jacobcolvin.com/x/jsonschema/internal/reflectkind"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemashape"
 	"go.jacobcolvin.com/x/jsonschema/internal/typename"
 )
 
 var (
-	typeTextMarshaler  = reflect.TypeFor[encoding.TextMarshaler]()
-	typeJSONMarshaler  = reflect.TypeFor[json.Marshaler]()
 	typeJSONRawMessage = reflect.TypeFor[json.RawMessage]()
 	typeTime           = reflect.TypeFor[time.Time]()
 	typeJSONNumber     = reflect.TypeFor[json.Number]()
@@ -356,18 +353,18 @@ func (g *generator) schemaForType(t reflect.Type, nullable bool) (*Schema, error
 	// here: per the documented resolution priority it falls through to
 	// kind-based reflection, and WithTypeSchema or JSONSchemaProvider is the
 	// escape hatch for its real shape.
-	if isPromotedJSONMarshaler(t) {
+	if reflectkind.IsPromotedJSONMarshaler(t) {
 		return g.handleBuiltinType(t, &Schema{}, nullable)
 	}
 
-	if isPromotedTextMarshaler(t) && !implementsJSONMarshaler(t) {
+	if reflectkind.IsPromotedTextMarshaler(t) && !reflectkind.ImplementsJSONMarshaler(t) {
 		return g.handleBuiltinType(t, &Schema{Type: typename.String}, nullable)
 	}
 
 	// 5. TextMarshaler (direct implementation). A direct TextMarshaler
 	// serializes as a string and shares the built-in path's type-level
 	// post-processing (comments, extender, $defs extraction).
-	if isDirectTextMarshaler(t) {
+	if reflectkind.IsDirectTextMarshaler(t) {
 		s := &Schema{Type: typename.String}
 		return g.handleBuiltinType(t, s, nullable)
 	}
@@ -378,7 +375,7 @@ func (g *generator) schemaForType(t reflect.Type, nullable bool) (*Schema, error
 	// re-entry emit a $ref to its $defs entry, breaking the cycle exactly as
 	// schemaForStruct does for self-referential structs. Struct types run their
 	// own equivalent guard inside schemaForStruct, so they are excluded here.
-	guarded := t.Kind() != reflect.Struct && t.Name() != "" && isRecursiveContainerKind(t.Kind())
+	guarded := t.Kind() != reflect.Struct && t.Name() != "" && reflectkind.IsRecursiveContainerKind(t.Kind())
 	if guarded {
 		if g.visiting[t] {
 			return g.refForType(t, nullable), nil
@@ -450,19 +447,6 @@ func (g *generator) schemaForType(t reflect.Type, nullable bool) (*Schema, error
 	}
 
 	return s, nil
-}
-
-// isRecursiveContainerKind reports whether a kind can hold a value of its own
-// type and thus form a cycle through schemaForKind: slices, arrays, and maps
-// recurse on the element (or value) type. Other non-struct kinds cannot embed
-// themselves, so they need no cycle guard.
-func isRecursiveContainerKind(k reflect.Kind) bool {
-	switch k {
-	case reflect.Slice, reflect.Array, reflect.Map:
-		return true
-	default:
-		return false
-	}
 }
 
 // resolveTypeSchema consults the registered type providers for t, newest
@@ -790,7 +774,7 @@ func (g *generator) schemaForSlice(t reflect.Type, nullable bool) (*Schema, erro
 	// encoding.TextMarshaler is encoded through that method, not as base64.
 	if el := t.Elem(); el.Kind() == reflect.Uint8 {
 		pt := reflect.PointerTo(el)
-		if !pt.Implements(typeJSONMarshaler) && !pt.Implements(typeTextMarshaler) {
+		if !pt.Implements(reflectkind.TypeJSONMarshaler) && !pt.Implements(reflectkind.TypeTextMarshaler) {
 			return g.byteSliceSchema(), nil
 		}
 	}
@@ -842,7 +826,7 @@ func (g *generator) schemaForArray(t reflect.Type, nullable bool) (*Schema, erro
 //
 //nolint:unparam // nullable is accepted for consistency with other schema-producing methods.
 func (g *generator) schemaForMap(t reflect.Type, nullable bool) (*Schema, error) {
-	if !isValidMapKey(t.Key()) {
+	if !reflectkind.IsValidMapKey(t.Key()) {
 		return nil, fmt.Errorf("%w: %s", ErrUnsupportedMapKey, t.Key())
 	}
 
@@ -855,24 +839,6 @@ func (g *generator) schemaForMap(t reflect.Type, nullable bool) (*Schema, error)
 	g.applyContainerType(s, typename.Object)
 
 	return s, nil
-}
-
-// isValidMapKey checks if a type is a valid map key for JSON serialization.
-func isValidMapKey(t reflect.Type) bool {
-	if t.Kind() == reflect.String || numkind.IsInteger(t.Kind()) {
-		return true
-	}
-
-	// Map keys are not addressable, so encoding/json requires the key type
-	// itself to implement TextMarshaler; a method set satisfied only via a
-	// pointer receiver does not count and json.Marshal rejects such a map. This
-	// deliberately differs from implementsTextMarshaler, which serves addressable
-	// struct fields where the pointer-receiver form is usable.
-	if t.Implements(typeTextMarshaler) {
-		return true
-	}
-
-	return false
 }
 
 // schemaForStruct generates a schema for struct types.
@@ -1373,12 +1339,12 @@ func (g *generator) needsAllOfComposition(t reflect.Type) bool {
 
 	// Check TextMarshaler (direct only, not promoted). An interface type whose
 	// method set includes MarshalText is reported as a direct implementer by
-	// isDirectTextMarshaler (hasDirectMethod short-circuits to true for any
-	// non-struct kind), but an embedded interface cannot be marshaled as a
-	// string the way a concrete TextMarshaler is, so composing one into an
+	// reflectkind.IsDirectTextMarshaler (HasDirectMethod short-circuits to true
+	// for any non-struct kind), but an embedded interface cannot be marshaled as
+	// a string the way a concrete TextMarshaler is, so composing one into an
 	// allOf:[{"type":"string"}] branch makes the schema unsatisfiable. Skip it,
 	// mirroring the JSONSchemaProvider guard above.
-	if t.Kind() != reflect.Interface && isDirectTextMarshaler(t) {
+	if t.Kind() != reflect.Interface && reflectkind.IsDirectTextMarshaler(t) {
 		return true
 	}
 
@@ -1411,7 +1377,7 @@ func (g *generator) buildFieldSchema(
 	// for a type extracted to $defs (a provider or extender), would register an
 	// orphan definition and drop the provider's constraints.
 	tagType := fieldType
-	stringOverride := fi.jsonString && isStringableType(fieldType)
+	stringOverride := fi.jsonString && reflectkind.IsStringableType(fieldType)
 
 	var (
 		fieldSchema   *Schema
@@ -1486,7 +1452,7 @@ func (g *generator) fieldContext(
 	return FieldContext{
 		Name:        fi.jsonName,
 		Type:        fi.field.Type,
-		Owner:       declaringType(parentType, fi.field),
+		Owner:       reflectkind.DeclaringType(parentType, fi.field),
 		Schema:      fieldSchema,
 		Parent:      parent,
 		StructField: fi.field,
@@ -1882,68 +1848,6 @@ func nullableInnerSchema(s *Schema) *Schema {
 	return schemashape.NullableInnerSchema(s)
 }
 
-// isStringableType reports whether json:",string" applies to the given type.
-func isStringableType(t reflect.Type) bool {
-	t = numkind.DerefType(t)
-
-	if numkind.IsInteger(t.Kind()) {
-		return true
-	}
-
-	switch t.Kind() {
-	case reflect.String, reflect.Bool, reflect.Float32, reflect.Float64:
-		return true
-	default:
-		return false
-	}
-}
-
-// isDirectTextMarshaler reports whether a type directly implements
-// [encoding.TextMarshaler] (not via a promoted embedded field method).
-func isDirectTextMarshaler(t reflect.Type) bool {
-	if !implementsTextMarshaler(t) {
-		return false
-	}
-
-	return hasDirectMethod(t, "MarshalText")
-}
-
-// implementsJSONMarshaler reports whether the type or its pointer type
-// implements [encoding/json.Marshaler], directly or via promotion.
-func implementsJSONMarshaler(t reflect.Type) bool {
-	return t.Implements(typeJSONMarshaler) || reflect.PointerTo(t).Implements(typeJSONMarshaler)
-}
-
-// implementsTextMarshaler reports whether the type or its pointer type
-// implements [encoding.TextMarshaler], directly or via promotion.
-func implementsTextMarshaler(t reflect.Type) bool {
-	return t.Implements(typeTextMarshaler) || reflect.PointerTo(t).Implements(typeTextMarshaler)
-}
-
-// isPromotedJSONMarshaler reports whether a type's method set includes
-// MarshalJSON solely via promotion from an embedded field. Encoding/json
-// resolves marshalers through the method set, so a promoted MarshalJSON
-// serializes the whole outer value. Non-struct types cannot have promoted
-// methods, so this is always false for them.
-func isPromotedJSONMarshaler(t reflect.Type) bool {
-	if !implementsJSONMarshaler(t) {
-		return false
-	}
-
-	return !hasDirectMethod(t, "MarshalJSON")
-}
-
-// isPromotedTextMarshaler reports whether a type's method set includes
-// MarshalText solely via promotion from an embedded field. See
-// [isPromotedJSONMarshaler].
-func isPromotedTextMarshaler(t reflect.Type) bool {
-	if !implementsTextMarshaler(t) {
-		return false
-	}
-
-	return !hasDirectMethod(t, "MarshalText")
-}
-
 // implementsProvider checks if a type (or pointer to type) implements
 // JSONSchemaProvider directly (not just via an embedded field).
 func implementsProvider(t reflect.Type) bool {
@@ -1951,7 +1855,7 @@ func implementsProvider(t reflect.Type) bool {
 		return false
 	}
 
-	return hasDirectMethod(t, "JSONSchema")
+	return reflectkind.HasDirectMethod(t, "JSONSchema")
 }
 
 // implementsExtender checks if a type (or pointer to type) implements
@@ -1961,53 +1865,7 @@ func implementsExtender(t reflect.Type) bool {
 		return false
 	}
 
-	return hasDirectMethod(t, "JSONSchemaExtend")
-}
-
-// hasDirectMethod reports whether a method is defined directly on the type
-// (not solely promoted from an embedded field). A method declared directly on
-// the outer type shadows an embedded one at runtime, so detection must honor
-// that: it cannot simply assume the method is promoted whenever an embedded
-// field also provides it.
-//
-// Go offers no reflect API distinguishing a shadowing direct method from a
-// promoted one, so this inspects the method's implementation: the compiler
-// emits promotion wrappers with a synthetic "<autogenerated>" source location,
-// whereas a directly declared method points to its real source file. It checks
-// the value receiver first, then the pointer receiver, mirroring how Go
-// resolves the method set; a pointer-receiver method that shadows a promoted
-// value method suppresses that promotion, so the value method set reports no
-// method and the pointer set yields the direct one.
-func hasDirectMethod(t reflect.Type, name string) bool {
-	if t.Kind() != reflect.Struct {
-		// Non-struct types can't have promoted methods.
-		return true
-	}
-
-	if m, ok := t.MethodByName(name); ok {
-		return !isPromotedMethod(m)
-	}
-
-	if m, ok := reflect.PointerTo(t).MethodByName(name); ok {
-		return !isPromotedMethod(m)
-	}
-
-	// The method is not in the type's method set at all; treat as not direct.
-	return false
-}
-
-// isPromotedMethod reports whether a method is a compiler-generated promotion
-// wrapper rather than a directly declared method. Promotion wrappers report a
-// synthetic "<autogenerated>" source location.
-func isPromotedMethod(m reflect.Method) bool {
-	fn := runtime.FuncForPC(m.Func.Pointer())
-	if fn == nil {
-		return false
-	}
-
-	file, _ := fn.FileLine(m.Func.Pointer())
-
-	return strings.Contains(file, "<autogenerated>")
+	return reflectkind.HasDirectMethod(t, "JSONSchemaExtend")
 }
 
 // callProvider calls JSONSchema on a zero value of the type. For interface
@@ -2219,7 +2077,7 @@ func (g *generator) applyTypeDescription(t reflect.Type, s *Schema) error {
 // applyFieldDescription sets the description from the comment provider on a
 // field's schema. The provider receives the [FieldContext] tag interpreters
 // get, with the tag pair empty and Owner the type declaring the field (see
-// [declaringType]); an empty comment leaves the description unset, and a
+// [reflectkind.DeclaringType]); an empty comment leaves the description unset, and a
 // provider error aborts generation.
 func (g *generator) applyFieldDescription(
 	parentType reflect.Type, fi structFieldInfo, fieldSchema, parent *Schema,
@@ -2240,22 +2098,4 @@ func (g *generator) applyFieldDescription(
 	}
 
 	return nil
-}
-
-// declaringType returns the struct type that actually declares field f. For a
-// field promoted from an embedded struct this is the embedded type, not the
-// outer struct, and the field's doc comment lives in that type's source. The
-// field's index path is absolute from outer, so walking all but its last element
-// (dereferencing embedded pointers) reaches the declaring type.
-func declaringType(outer reflect.Type, f reflect.StructField) reflect.Type {
-	t := outer
-
-	for _, i := range f.Index[:max(len(f.Index)-1, 0)] {
-		t = numkind.DerefType(t)
-		t = t.Field(i).Type
-	}
-
-	t = numkind.DerefType(t)
-
-	return t
 }
