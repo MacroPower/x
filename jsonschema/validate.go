@@ -863,6 +863,12 @@ func (v *validator) resolveRemote(baseURI string) *Schema {
 	cp, err := cloneSchema(schema)
 	if err != nil {
 		v.refResolveErr = fmt.Errorf("%w: %w", ErrRefResolve, err)
+		// Record the miss like the resolver-error and not-resolved paths above,
+		// so a document that resolves but fails to deep-copy is not re-fetched
+		// on every instance node referencing it (the "at most once per baseURI
+		// in a run" contract).
+		v.recordRemoteMiss(baseURI, err)
+
 		return nil
 	}
 
