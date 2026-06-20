@@ -141,3 +141,21 @@ func ParseArrayIndex(seg string) (int, bool) {
 
 	return idx, true
 }
+
+// SegmentsKey joins decoded JSON Pointer segments into a single string that is
+// injective regardless of the segment contents, so it can key a cache by a
+// segment list. A fixed separator byte cannot do this: a JSON member name may
+// legitimately contain any byte (NUL included), so joining on one would let
+// ["a\x00b"] collide with ["a", "b"]. Length-prefixing each segment keeps the
+// encoding uniquely decodable, so distinct segment lists never share a key.
+func SegmentsKey(segments []string) string {
+	var b strings.Builder
+
+	for _, seg := range segments {
+		b.WriteString(strconv.Itoa(len(seg)))
+		b.WriteByte(':')
+		b.WriteString(seg)
+	}
+
+	return b.String()
+}

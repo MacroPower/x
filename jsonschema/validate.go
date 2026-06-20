@@ -3513,20 +3513,7 @@ func (v *validator) resolveJSONPointerViaJSON(root *Schema, segments []string) *
 		v.jsonPointerCache = map[jsonPointerKey]*Schema{}
 	}
 
-	// Join the decoded segments into a key that is injective regardless of their
-	// contents. A fixed separator byte cannot do this: a JSON member name may
-	// legitimately contain any byte (NUL included), so joining on one would let
-	// ["a\x00b"] collide with ["a","b"]. Length-prefixing each segment keeps the
-	// encoding uniquely decodable, so distinct segment lists never share a key.
-	var keyBuilder strings.Builder
-
-	for _, seg := range segments {
-		keyBuilder.WriteString(strconv.Itoa(len(seg)))
-		keyBuilder.WriteByte(':')
-		keyBuilder.WriteString(seg)
-	}
-
-	key := jsonPointerKey{root: root, pointer: keyBuilder.String()}
+	key := jsonPointerKey{root: root, pointer: jsonptr.SegmentsKey(segments)}
 	if cached, ok := v.jsonPointerCache[key]; ok {
 		return cached
 	}

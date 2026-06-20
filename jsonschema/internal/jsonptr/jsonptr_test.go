@@ -72,3 +72,44 @@ func TestEscapeUnescapeRoundTrip(t *testing.T) {
 		})
 	}
 }
+
+func TestSegmentsKey(t *testing.T) {
+	t.Parallel()
+
+	// Distinct segment lists must never share a key, even when their flattened
+	// bytes coincide. The classic break is a fixed separator: ["a\x00b"] and
+	// ["a", "b"] flatten to the same bytes under a NUL join, so length-prefixing
+	// is what keeps them apart.
+	lists := [][]string{
+		{},
+		{""},
+		{"", ""},
+		{"a"},
+		{"a", "b"},
+		{"ab"},
+		{"a\x00b"},
+		{"a", "", "b"},
+		{"10", "x"},
+		{"1", "0x"},
+	}
+
+	seen := map[string][]string{}
+	for _, list := range lists {
+		key := jsonptr.SegmentsKey(list)
+
+		if prev, ok := seen[key]; ok {
+			assert.Equal(t, prev, list, "distinct segment lists share key %q", key)
+		}
+
+		seen[key] = list
+
+		// The same list always yields the same key.
+		assert.Equal(t, key, jsonptr.SegmentsKey(list))
+	}
+
+	// Explicit regression for the NUL-vs-split collision.
+	assert.NotEqual(t,
+		jsonptr.SegmentsKey([]string{"a\x00b"}),
+		jsonptr.SegmentsKey([]string{"a", "b"}),
+	)
+}
