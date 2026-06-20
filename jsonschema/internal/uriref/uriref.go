@@ -96,6 +96,23 @@ func StripFragment(uri string) string {
 	return parsed.String()
 }
 
+// AnchorKey returns the registry key for an anchor name declared within base,
+// the base URI joined to the name by a fragment separator. A $ref to "#name"
+// against the same base resolves to this identical key, so anchors register and
+// resolve symmetrically.
+func AnchorKey(base, name string) string {
+	return base + "#" + name
+}
+
+// IDBase returns the canonical registry key for a hierarchical (non
+// fragment-only) $id declared within base: the $id resolved against base per
+// RFC 3986 with any fragment stripped. The result is both the key the schema
+// registers under and the enclosing base for its sub-schemas, so a relative
+// $id and the absolute $ref that targets it compute the same key.
+func IDBase(base, id string) string {
+	return StripFragment(ResolveURI(base, id))
+}
+
 // NormalizeBaseURI returns the canonical absolute form of a configured base
 // URI. A base with no URI scheme is a file path; resolving it against
 // file:/// makes RFC 3986 joining well-defined and gives the root document a

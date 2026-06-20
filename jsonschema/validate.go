@@ -582,10 +582,9 @@ func (v *validator) walkSchemaInto(schema *Schema, parentBase string, onlyIfAbse
 		if uriref.IsFragmentOnly(schema.ID) {
 			// Draft-07: fragment-only $id acts as an anchor.
 			anchor := schema.ID[1:] // strip leading '#'
-			registerSchema(v.anchorRegistry, currentBase+"#"+anchor, schema, onlyIfAbsent)
+			registerSchema(v.anchorRegistry, uriref.AnchorKey(currentBase, anchor), schema, onlyIfAbsent)
 		} else {
-			resolved := uriref.ResolveURI(currentBase, schema.ID)
-			resolved = uriref.StripFragment(resolved)
+			resolved := uriref.IDBase(currentBase, schema.ID)
 			registerSchema(v.uriRegistry, resolved, schema, onlyIfAbsent)
 
 			currentBase = resolved
@@ -594,13 +593,13 @@ func (v *validator) walkSchemaInto(schema *Schema, parentBase string, onlyIfAbse
 
 	// 2020-12: $anchor keyword.
 	if schema.Anchor != "" {
-		registerSchema(v.anchorRegistry, currentBase+"#"+schema.Anchor, schema, onlyIfAbsent)
+		registerSchema(v.anchorRegistry, uriref.AnchorKey(currentBase, schema.Anchor), schema, onlyIfAbsent)
 	}
 
 	// 2020-12: $dynamicAnchor keyword.
 	// Also registered as a regular anchor (accessible via $ref).
 	if schema.DynamicAnchor != "" {
-		key := currentBase + "#" + schema.DynamicAnchor
+		key := uriref.AnchorKey(currentBase, schema.DynamicAnchor)
 		registerSchema(v.anchorRegistry, key, schema, onlyIfAbsent)
 		registerSchema(v.dynamicAnchorRegistry, key, schema, onlyIfAbsent)
 	}
@@ -3315,14 +3314,14 @@ func (v *validator) resolveDynamicRef(schema *Schema, ref string) *Schema {
 	// treated dynamically just because a same-named $dynamicAnchor sits elsewhere
 	// in the resource.
 	staticBase := v.schemaBase(staticTarget)
-	if anchored, ok := v.lookupDynamicAnchor(staticBase + "#" + fragment); !ok || anchored != staticTarget {
+	if anchored, ok := v.lookupDynamicAnchor(uriref.AnchorKey(staticBase, fragment)); !ok || anchored != staticTarget {
 		return staticTarget // no bookend → behave like $ref
 	}
 
 	// Phase 3: Walk dynamic scope outermost→innermost for first matching
 	// $dynamicAnchor.
 	for _, scopeBase := range v.dynamicScope {
-		if target, ok := v.lookupDynamicAnchor(scopeBase + "#" + fragment); ok {
+		if target, ok := v.lookupDynamicAnchor(uriref.AnchorKey(scopeBase, fragment)); ok {
 			return target
 		}
 	}
@@ -3402,7 +3401,7 @@ func (v *validator) resolveRefUncached(schema *Schema, ref string) *Schema {
 		}
 
 		// Anchor reference.
-		if target, ok := v.lookupAnchor(base + "#" + fragment); ok {
+		if target, ok := v.lookupAnchor(uriref.AnchorKey(base, fragment)); ok {
 			return target
 		}
 
@@ -3447,12 +3446,12 @@ func (v *validator) resolveRefUncached(schema *Schema, ref string) *Schema {
 	// under its own canonical base, which is the retrieval URI unless the
 	// document declares a distinct $id, so try the canonical base before
 	// falling back to the retrieval URI.
-	if anchorTarget, ok := v.lookupAnchor(baseURI + "#" + fragment); ok {
+	if anchorTarget, ok := v.lookupAnchor(uriref.AnchorKey(baseURI, fragment)); ok {
 		return anchorTarget
 	}
 
 	if canonBase := v.schemaBase(target); canonBase != "" && canonBase != baseURI {
-		if anchorTarget, ok := v.lookupAnchor(canonBase + "#" + fragment); ok {
+		if anchorTarget, ok := v.lookupAnchor(uriref.AnchorKey(canonBase, fragment)); ok {
 			return anchorTarget
 		}
 	}

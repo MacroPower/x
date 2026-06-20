@@ -230,3 +230,76 @@ func TestNormalizeBaseURI(t *testing.T) {
 		})
 	}
 }
+
+func TestAnchorKey(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		base string
+		name string
+		want string
+	}{
+		"absolute base": {base: "https://example.com/s", name: "a", want: "https://example.com/s#a"},
+		"empty base":    {base: "", name: "a", want: "#a"},
+		"urn base":      {base: "urn:example:s", name: "a", want: "urn:example:s#a"},
+		"empty name":    {base: "https://example.com/s", name: "", want: "https://example.com/s#"},
+		"dotted name":   {base: "https://example.com/s", name: "a.b", want: "https://example.com/s#a.b"},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, uriref.AnchorKey(tc.base, tc.name))
+		})
+	}
+}
+
+func TestIDBase(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		base string
+		id   string
+		want string
+	}{
+		"relative id resolves against base": {
+			base: "https://example.com/root.json",
+			id:   "child.json",
+			want: "https://example.com/child.json",
+		},
+		"absolute id replaces base": {
+			base: "https://example.com/root.json",
+			id:   "https://other.test/x.json",
+			want: "https://other.test/x.json",
+		},
+		"fragment is stripped": {
+			base: "https://example.com/root.json",
+			id:   "child.json#section",
+			want: "https://example.com/child.json",
+		},
+		"empty base keeps id": {
+			base: "",
+			id:   "https://example.com/x.json",
+			want: "https://example.com/x.json",
+		},
+		"opaque urn base merges path": {
+			base: "urn:example:root",
+			id:   "child",
+			want: "urn:example:child",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := uriref.IDBase(tc.base, tc.id)
+			assert.Equal(t, tc.want, got)
+
+			// IDBase agrees with the key a $ref recomputes: exactly the resolved
+			// id with its fragment removed.
+			assert.Equal(t, uriref.StripFragment(uriref.ResolveURI(tc.base, tc.id)), got)
+		})
+	}
+}
