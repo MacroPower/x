@@ -96,6 +96,29 @@ func TestBareDescriptionWithEqualsSign(t *testing.T) {
 		"bare description starting with word= should be treated as description")
 }
 
+func TestProseDescriptionResolvesEscapes(t *testing.T) {
+	t.Parallel()
+
+	// A bare description and a WORD=-gated prose description both resolve the
+	// comma/backslash escapes the key=value form does, rather than storing the
+	// raw tag with a stray backslash.
+	type Bare struct {
+		Name string `json:"name" jsonschema:"Hello\\, World"`
+	}
+
+	s, err := jsonschema.GenerateFor[Bare](t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, "Hello, World", s.Properties["name"].Description)
+
+	type Prose struct {
+		Name string `json:"name" jsonschema:"a=b is the formula\\, more text"`
+	}
+
+	s, err = jsonschema.GenerateFor[Prose](t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, "a=b is the formula, more text", s.Properties["name"].Description)
+}
+
 func TestParseIntRejectsNegativeValues(t *testing.T) {
 	t.Parallel()
 

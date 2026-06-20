@@ -111,14 +111,24 @@ func Apply(tag string, fieldType reflect.Type, s *jsonschema.Schema) (bool, erro
 	// Gate on the cheap regex before paying for splitTagPairs, then split once
 	// and reuse the pairs for both the key-value decision and the apply loop.
 	if !kvPrefixRegexp.MatchString(tag) {
-		s.Description = tag
+		// A bare description still honors the comma/backslash escapes the
+		// key=value form resolves, so "Hello\, World" becomes "Hello, World".
+		// Joining the split pairs restores unescaped commas while collapsing
+		// escaped ones; skip the split when there is nothing to resolve.
+		if strings.ContainsRune(tag, '\\') {
+			s.Description = strings.Join(splitTagPairs(tag), ",")
+		} else {
+			s.Description = tag
+		}
 
 		return false, nil
 	}
 
 	pairs := splitTagPairs(tag)
 	if !isKeyValueTag(pairs) {
-		s.Description = tag
+		// Prose that tripped the WORD= gate but is not key=value: store the
+		// escape-resolved text, not the raw tag, matching the bare path above.
+		s.Description = strings.Join(pairs, ",")
 
 		return false, nil
 	}
