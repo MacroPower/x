@@ -14,6 +14,8 @@ import (
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/parser"
 	"github.com/google/jsonschema-go/jsonschema"
+
+	"go.jacobcolvin.com/x/magicschema/internal/yamldoc"
 )
 
 // Sentinel errors returned by the generator.
@@ -221,13 +223,13 @@ func (g *Generator) generateSingle(input []byte) (*jsonschema.Schema, []Annotato
 	// about exact line adjacency, so on a CRLF-encoded chart it would
 	// silently drop every description. Folding here keeps all
 	// position-dependent logic aligned with the source.
-	input = normalizeLineEndings(input)
+	input = yamldoc.NormalizeLineEndings(input)
 
-	if len(input) == 0 || isBlank(input) {
+	if len(input) == 0 || yamldoc.IsBlank(input) {
 		return TrueSchema(), nil, nil
 	}
 
-	input = dropEmptyDocuments(input)
+	input = yamldoc.DropEmptyDocuments(input)
 
 	file, err := parser.ParseBytes(input, parser.ParseComments)
 	if err != nil {
@@ -248,7 +250,7 @@ func (g *Generator) generateSingle(input []byte) (*jsonschema.Schema, []Annotato
 	var docBytes [][]byte
 
 	if len(file.Docs) > 1 {
-		docBytes = splitDocumentBytes(input)
+		docBytes = yamldoc.SplitDocumentBytes(input)
 		if len(docBytes) != len(file.Docs) {
 			docBytes = nil
 		}
@@ -1127,126 +1129,4 @@ func resolveAliases(node ast.Node, resolved aliasResolutions) ast.Node {
 	}
 
 	return resolved[alias]
-}
-
-// dropEmptyDocuments removes empty documents from a multi-document YAML
-// stream by collapsing each "---" separator that is followed, across blank
-// lines only, by another separator. The goccy/go-yaml parser stops emitting
-// documents after an empty one ("a: 1\n---\n\n---\nb: 2" parses as two
-// documents, losing b entirely), and empty documents contribute nothing to
-// the union (a nil document body is skipped), so removing them up front
-// preserves semantics while keeping later documents in the stream.
-func dropEmptyDocuments(input []byte) []byte {
-	// A bare separator line requires the "---" substring, so its absence means
-	// there are no documents to collapse and the split/join would be a no-op.
-	if !bytes.Contains(input, []byte("---")) {
-		return input
-	}
-
-	lines := bytes.Split(input, []byte("\n"))
-
-	out := make([][]byte, 0, len(lines))
-
-	for i := 0; i < len(lines); i++ {
-		if !isSeparatorLine(lines[i]) {
-			out = append(out, lines[i])
-
-			continue
-		}
-
-		// Look ahead past blank lines; a following separator means this
-		// separator opens an empty document, so drop it and the blanks.
-		j := i + 1
-		for j < len(lines) && isBlank(lines[j]) {
-			j++
-		}
-
-		if j < len(lines) && isSeparatorLine(lines[j]) {
-			i = j - 1
-
-			continue
-		}
-
-		out = append(out, lines[i])
-	}
-
-	return bytes.Join(out, []byte("\n"))
-}
-
-// splitDocumentBytes splits a normalized, empty-document-stripped YAML stream
-// into per-document byte slices in source order, intended to align 1:1 with
-// parser.ParseBytes's file.Docs. Documents are separated by bare "---" start
-// markers or "..." end markers (see [isDocBoundaryLine]); a leading separator
-// opens the stream with a blank segment that corresponds to no document and is
-// dropped. Callers guard on the returned length matching the parsed document
-// count and fall back to the whole input when it does not, so an imperfect
-// split (an empty document, or "..." abutting "---") never changes behavior.
-func splitDocumentBytes(input []byte) [][]byte {
-	lines := bytes.Split(input, []byte("\n"))
-
-	segments := [][][]byte{nil}
-
-	for _, line := range lines {
-		if isDocBoundaryLine(line) {
-			segments = append(segments, nil)
-
-			continue
-		}
-
-		last := len(segments) - 1
-		segments[last] = append(segments[last], line)
-	}
-
-	if isBlank(bytes.Join(segments[0], []byte("\n"))) {
-		segments = segments[1:]
-	}
-
-	out := make([][]byte, 0, len(segments))
-	for _, seg := range segments {
-		out = append(out, bytes.Join(seg, []byte("\n")))
-	}
-
-	return out
-}
-
-// normalizeLineEndings folds CRLF and lone CR line breaks to LF. Returns the
-// input unchanged when it contains no carriage returns.
-func normalizeLineEndings(input []byte) []byte {
-	if !bytes.ContainsRune(input, '\r') {
-		return input
-	}
-
-	input = bytes.ReplaceAll(input, []byte("\r\n"), []byte("\n"))
-
-	return bytes.ReplaceAll(input, []byte("\r"), []byte("\n"))
-}
-
-// isSeparatorLine reports whether a line is a bare YAML document separator:
-// "---" with nothing but trailing whitespace. A separator carrying content
-// ("--- value") opens a non-empty document and is not bare.
-func isSeparatorLine(line []byte) bool {
-	return bytes.Equal(bytes.TrimRight(line, " \t\r"), []byte("---"))
-}
-
-// isDocBoundaryLine reports whether a line is a bare YAML document delimiter:
-// the "---" start marker or the "..." end marker. Either separates two
-// documents, so splitting on both keeps the per-document byte segments aligned
-// with the parsed document list for "..."-delimited streams. It is kept
-// distinct from [isSeparatorLine] because the two markers collapse differently
-// when an empty document is dropped.
-func isDocBoundaryLine(line []byte) bool {
-	trimmed := bytes.TrimRight(line, " \t\r")
-
-	return bytes.Equal(trimmed, []byte("---")) || bytes.Equal(trimmed, []byte("..."))
-}
-
-// isBlank returns true if the byte slice contains only whitespace.
-func isBlank(data []byte) bool {
-	for _, b := range data {
-		if b != ' ' && b != '\t' && b != '\n' && b != '\r' {
-			return false
-		}
-	}
-
-	return true
 }
