@@ -23,6 +23,8 @@ func TestFilePathFromURI(t *testing.T) {
 		"relative path":             {uri: "schema.json", want: "schema.json"},
 		"nested relative path":      {uri: "sub/schema.json", want: "sub/schema.json"},
 		"leading slash fallback":    {uri: "/abs/schema.json", want: "abs/schema.json"},
+		"relative path with query":  {uri: "a/b.json?v=1", want: "a/b.json"},
+		"file scheme with query":    {uri: "file:///a/b.json?v=1", want: "a/b.json"},
 	}
 
 	for name, tc := range tests {

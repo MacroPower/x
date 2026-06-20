@@ -163,5 +163,14 @@ func FilePathFromURI(uri string) string {
 		return strings.TrimLeft(u.Path, "/")
 	}
 
+	// Relative refs use the parsed path so a query string or fragment does not
+	// leak into the fs name, the same way the file branch drops them. A
+	// non-empty, non-file scheme such as http or urn instead keeps the raw
+	// strip, so it stays a non-fs string and misses rather than collapsing to a
+	// plausible local path.
+	if err == nil && u.Scheme == "" && u.Path != "" {
+		return strings.TrimPrefix(u.Path, "/")
+	}
+
 	return strings.TrimPrefix(strings.TrimPrefix(uri, "file://"), "/")
 }
