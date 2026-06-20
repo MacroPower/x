@@ -82,14 +82,23 @@ func applyMaxBound(minField, maxField **int, value string, exclusive bool) error
 // ceiling to N, each only when it tightens an existing bound, so the result is
 // the order-independent intersection with any min/max set elsewhere in the tag.
 // An incompatible len yields an unsatisfiable range, just as a conflicting
-// min/max pair does.
+// min/max pair does. A negative len/eq can never be satisfied -- no string or
+// collection has a negative length, and go-playground rejects every value for
+// len=-1 -- so it is expressed as the unsatisfiable floor-one/ceiling-zero
+// range (as applyMaxBound does for a sub-zero ceiling), rather than clamping to
+// 0, which would accept the empty value the rule forbids.
 func applyLenBound(minField, maxField **int, value string) error {
 	n, err := parseBoundValue(value)
 	if err != nil {
 		return err
 	}
 
-	n = clampNonNegative(n)
+	if n < 0 {
+		raiseFloor(minField, 1)
+		lowerCeiling(maxField, 0)
+
+		return nil
+	}
 
 	raiseFloor(minField, n)
 	lowerCeiling(maxField, n)

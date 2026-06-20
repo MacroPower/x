@@ -1007,6 +1007,33 @@ func TestCollectionLtZeroIsUnsatisfiable(t *testing.T) {
 		"the range must reject every array, including the empty one")
 }
 
+func TestCollectionEqNegativeIsUnsatisfiable(t *testing.T) {
+	t.Parallel()
+
+	// An eq=-1 (like len=-1) demands a negative length, which no array can have,
+	// so go-playground rejects every value including the empty array. The schema
+	// mirrors that with an unsatisfiable minItems/maxItems range rather than
+	// clamping a negative length to a permissive maxItems:0 that would accept [].
+	type MyType struct {
+		Items []string `json:"items" validate:"eq=-1"`
+	}
+
+	s, err := jsonschema.GenerateFor[MyType](t.Context(),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
+	)
+	require.NoError(t, err)
+
+	prop := s.Properties["items"]
+	require.NotNil(t, prop)
+	require.NotNil(t, prop.MaxItems)
+	require.NotNil(t, prop.MinItems)
+
+	assert.GreaterOrEqual(t, *prop.MaxItems, 0,
+		"maxItems must be non-negative per JSON Schema spec")
+	assert.Greater(t, *prop.MinItems, *prop.MaxItems,
+		"the range must reject every array, including the empty one")
+}
+
 func TestStringLtZeroIsUnsatisfiable(t *testing.T) {
 	t.Parallel()
 
