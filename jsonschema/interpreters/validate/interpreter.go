@@ -292,6 +292,22 @@ func addRequired(parent *jsonschema.Schema, name string) {
 // so the floors only ever rise: a stronger min/len bound set by another part of
 // the tag is never lowered, regardless of where "required" appears.
 func applyRequiredConstraint(s *jsonschema.Schema, baseType reflect.Type) error {
+	// A json:",string" numeric or bool field serializes its value as a quoted
+	// string, so the "non-zero" requirement must forbid the serialized zero
+	// ("0" or "false"), not the raw numeric/bool zero: a numeric not.const is
+	// inert against a string instance (silently dropping the requirement) and a
+	// bool const pins an unsatisfiable bool on a string schema. This mirrors the
+	// eq/ne/oneof reroute that compares against the serialized form.
+	if isStringCoercedValue(s, baseType) {
+		if isBoolKind(baseType) {
+			forbidValue(s, "false")
+		} else {
+			forbidValue(s, "0")
+		}
+
+		return nil
+	}
+
 	switch {
 	case baseType.Kind() == reflect.String:
 		if s.MinLength == nil || *s.MinLength < 1 {

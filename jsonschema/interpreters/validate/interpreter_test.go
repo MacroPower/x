@@ -115,6 +115,47 @@ func TestValidateInterpreter_StringCoercedValueConstraints(t *testing.T) {
 		"the serialized string form satisfies the coerced constraints")
 }
 
+func TestValidateInterpreter_StringCoercedRequired(t *testing.T) {
+	t.Parallel()
+
+	// Required on a json:",string" numeric or bool field must forbid the
+	// serialized zero ("0"/"false"), not the raw numeric/bool zero: a numeric
+	// not.const is inert against the quoted string instance, and a bool const
+	// pins an unsatisfiable bool on a string schema.
+	type Form struct {
+		N    int  `json:"n,string"    validate:"required"`
+		Flag bool `json:"flag,string" validate:"required"`
+	}
+
+	s, err := jsonschema.GenerateFor[Form](t.Context(),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
+	)
+	require.NoError(t, err)
+
+	got, err := json.Marshal(s)
+	require.NoError(t, err)
+
+	assert.JSONEq(t, `{
+		"$schema":"https://json-schema.org/draft/2020-12/schema",
+		"type":"object",
+		"properties":{
+			"n":{"type":"string","not":{"const":"0"}},
+			"flag":{"type":"string","not":{"const":"false"}}
+		},
+		"required":["n","flag"],
+		"additionalProperties":false
+	}`, string(got))
+
+	v, err := jsonschema.Compile(t.Context(), s)
+	require.NoError(t, err)
+	require.NoError(t, v.ValidateJSON(t.Context(), []byte(`{"n":"5","flag":"true"}`)),
+		"a non-zero serialized value satisfies required")
+	require.Error(t, v.ValidateJSON(t.Context(), []byte(`{"n":"0","flag":"true"}`)),
+		"the serialized numeric zero must be rejected")
+	require.Error(t, v.ValidateJSON(t.Context(), []byte(`{"n":"5","flag":"false"}`)),
+		"the serialized bool zero must be rejected")
+}
+
 func TestValidateInterpreter_NumericConstraints(t *testing.T) {
 	t.Parallel()
 
