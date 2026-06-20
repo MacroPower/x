@@ -241,6 +241,25 @@ func TestParseFloatRejectsImpreciseIntegerBound(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, s.Properties["v"].Maximum)
 	assert.InDelta(t, 1152921504606846976.0, *s.Properties["v"].Maximum, 0)
+
+	// The same out-of-precision integer written in exponent form must also be
+	// rejected: the check keys on the exact value, not the spelling.
+	type ExpForm struct {
+		V int64 `json:"v" jsonschema:"maximum=9.007199254740993e15"` // 2^53 + 1
+	}
+
+	_, err = jsonschema.GenerateFor[ExpForm](t.Context())
+	require.ErrorContains(t, err, "exceeds exact float64 precision")
+
+	// An exponent-form integer that IS representable is accepted.
+	type ExpRepresentable struct {
+		V int64 `json:"v" jsonschema:"maximum=1e15"`
+	}
+
+	s, err = jsonschema.GenerateFor[ExpRepresentable](t.Context())
+	require.NoError(t, err)
+	require.NotNil(t, s.Properties["v"].Maximum)
+	assert.InDelta(t, 1e15, *s.Properties["v"].Maximum, 0)
 }
 
 func TestParseTypedScalarRejectsNaNInf(t *testing.T) {

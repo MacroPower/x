@@ -764,21 +764,22 @@ func parseFloat(key, value string) (float64, error) {
 		return 0, fmt.Errorf("jsonschema tag: key %q: %q is not a finite number", key, value)
 	}
 
-	// An integer-literal bound the float64 cannot represent exactly (magnitude
+	// An integer-valued bound the float64 cannot represent exactly (magnitude
 	// above 2^53, e.g. an int64 field's own max) silently rounds to a different
-	// value when stored as the schema's *float64 bound, loosening the constraint.
-	// Reject it rather than ship a bound that differs from the tag, keeping the
-	// bound keywords consistent with the exact-precision const/enum parsing on
-	// the same field. Fractional and exponent literals are left alone.
-	if !strings.ContainsAny(value, ".eE") {
-		if exact, ok := new(big.Int).SetString(value, 10); ok {
-			if new(big.Float).SetInt(exact).Cmp(big.NewFloat(n)) != 0 {
-				return 0, fmt.Errorf(
-					"jsonschema tag: key %q: integer bound %q exceeds exact float64 "+
-						"precision (>2^53); use const for an exact extreme value",
-					key, value,
-				)
-			}
+	// value when stored as the schema's *float64 bound, loosening the
+	// constraint. Reject it rather than ship a bound that differs from the tag,
+	// keeping the bound keywords consistent with the exact-precision const/enum
+	// parsing on the same field. The check keys on the exact value, not the
+	// spelling, so an integer written in exponent form (9.007199254740993e15) is
+	// caught the same as its plain-decimal form; genuinely fractional bounds are
+	// inherently float64 and are left alone.
+	if r, ok := new(big.Rat).SetString(value); ok && r.IsInt() {
+		if new(big.Float).SetInt(r.Num()).Cmp(big.NewFloat(n)) != 0 {
+			return 0, fmt.Errorf(
+				"jsonschema tag: key %q: integer bound %q exceeds exact float64 "+
+					"precision (>2^53); use const for an exact extreme value",
+				key, value,
+			)
 		}
 	}
 
