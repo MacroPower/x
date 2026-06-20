@@ -277,7 +277,7 @@ const jsonschemaModule = "go.jacobcolvin.com/x/jsonschema"
 func createTempDir(cfg config, importPath, modPath, modDir, jsonschemaDir string) (string, error) {
 	tempDir, err := os.MkdirTemp("", "jsonschemagen-*")
 	if err != nil {
-		return "", fmt.Errorf("create temp dir: %w", err)
+		return "", fmt.Errorf("mkdir: %w", err)
 	}
 
 	// Render main.go.
