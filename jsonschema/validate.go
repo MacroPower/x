@@ -24,6 +24,7 @@ import (
 	"go.jacobcolvin.com/x/jsonschema/internal/jsonptr"
 	"go.jacobcolvin.com/x/jsonschema/internal/normalize"
 	"go.jacobcolvin.com/x/jsonschema/internal/numrat"
+	"go.jacobcolvin.com/x/jsonschema/internal/schemaclone"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemashape"
 	"go.jacobcolvin.com/x/jsonschema/internal/typename"
 	"go.jacobcolvin.com/x/jsonschema/internal/uriref"
@@ -941,61 +942,27 @@ func (v *validator) remoteLoader() jsonschema.Loader {
 	}
 }
 
-// cloneSchema deep-copies a [Schema] via JSON round-trip.
-//
-// Upstream [jsonschema.Schema.CloneSchemas] is shallow for non-sub-schema
-// fields (Extra, Enum, Const, Default, Examples): it shares their backing
-// maps, slices, and pointers with the original. A round-trip through JSON
-// instead yields an independent copy of every serializable field, which is
-// what remote-ref isolation requires so [jsonschema.Schema.Resolve]'s in-place
-// mutations can't corrupt the caller's schema. The render-only PropertyOrder
-// field carries json:"-", so the round-trip drops it; it is restored afterward
-// (see [restorePropertyOrder]) so a clone preserves property ordering. Every
-// other serializable field round-trips as an independent copy.
+// cloneSchema deep-copies a [Schema] via JSON round-trip, restoring the
+// render-only PropertyOrder field the round-trip drops. The copy logic lives in
+// [schemaclone.Clone]; the lockstep PropertyOrder restore walks this package's
+// [SubschemaEntries] traversal, threaded in as [schemaChildren].
 func cloneSchema(s *Schema) (*Schema, error) {
-	data, err := json.Marshal(s)
-	if err != nil {
-		return nil, fmt.Errorf("clone schema: %w", err)
-	}
-
-	var cp Schema
-
-	err = json.Unmarshal(data, &cp)
-	if err != nil {
-		return nil, fmt.Errorf("clone schema: %w", err)
-	}
-
-	restorePropertyOrder(s, &cp)
-
-	return &cp, nil
+	//nolint:wrapcheck // Clone already wraps with "clone schema:".
+	return schemaclone.Clone(s, schemaChildren)
 }
 
-// restorePropertyOrder copies the render-only PropertyOrder field (json:"-", so
-// dropped by [cloneSchema]'s JSON round-trip) from src onto cp at every node,
-// walking both in lockstep through [SubschemaEntries]. Because cp is a JSON
-// clone of src, the two share an identical sub-schema structure and
-// SubschemaEntries (which orders map-held children by sorted key) yields
-// matching entry orders. Each slice is cloned so cp stays unaliased from src. A
-// JSON clone is always a finite tree, so the recursion terminates.
-func restorePropertyOrder(src, cp *Schema) {
-	if src == nil || cp == nil {
-		return
+// schemaChildren returns the direct sub-schemas of s in [SubschemaEntries]
+// order, the traversal [schemaclone.Clone] walks to pair nodes when restoring
+// PropertyOrder.
+func schemaChildren(s *Schema) []*Schema {
+	entries := SubschemaEntries(s)
+
+	children := make([]*Schema, len(entries))
+	for i, entry := range entries {
+		children[i] = entry.Schema
 	}
 
-	if src.PropertyOrder != nil {
-		cp.PropertyOrder = slices.Clone(src.PropertyOrder)
-	}
-
-	srcChildren := SubschemaEntries(src)
-	cpChildren := SubschemaEntries(cp)
-
-	if len(srcChildren) != len(cpChildren) {
-		return // Structural mismatch; nothing safe to pair.
-	}
-
-	for i := range srcChildren {
-		restorePropertyOrder(srcChildren[i].Schema, cpChildren[i].Schema)
-	}
+	return children
 }
 
 // detectDraft determines the draft from the root schema's $schema field.

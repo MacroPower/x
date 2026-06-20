@@ -33,7 +33,9 @@ The package has two independent halves sharing the `Schema` type:
   `internal/normalize` (Go value -> JSON-shaped value normalization: integer
   widths to `json.Number`, float32 widening, recursive container coercion with
   copy-on-change and a cycle guard), `internal/schemashape` (structural
-  shape classification of a `Schema`), `internal/jsonequal` (DoS-guarded,
+  shape classification of a `Schema`), `internal/schemaclone` (deep copy of
+  a `Schema` via JSON round-trip with render-only `PropertyOrder` restored
+  through a caller-supplied sub-schema traversal), `internal/jsonequal` (DoS-guarded,
   JSON-semantic value equality for `const`/`enum` and the matching content
   hash for `uniqueItems`, layered on `internal/numrat` for exact decimal
   comparison), and `internal/goast` (doc-comment and type/field-shape
@@ -58,7 +60,7 @@ in-package test files by policy):
 - `TestIsTrueSchemaRejectsEverySetField` (schema_test.go): every exported
   field set alone must defeat `IsTrueSchema`; a new field fails until added
   to the predicate's enumeration. This is the primary alarm — when it fires,
-  also revisit the internal `cloneSchema` classification and the constraint
+  also revisit the `internal/schemaclone` copy logic and the constraint
   enumeration in `internal/schemashape`'s `IsEmpty`.
 - `TestSubschemaEntriesFieldCoverage` (walk_test.go): every `*Schema`-shaped
   field must be returned by `SubschemaEntries`, the single traversal field
