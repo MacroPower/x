@@ -2205,8 +2205,13 @@ func (v *validator) validateString(
 		if fv, exists := v.formatCheckers[schema.Format]; exists {
 			err := fv.ValidateFormat(v.runContext(), schema.Format, str)
 			if err != nil {
-				errs = append(errs, leafError(instancePath, schemaPath, KeywordFormat,
-					fmt.Sprintf("string does not match format %q: %v", schema.Format, err)))
+				e := leafError(instancePath, schemaPath, KeywordFormat,
+					fmt.Sprintf("string does not match format %q: %v", schema.Format, err))
+				// Attach the checker's error so a sentinel it returns stays
+				// reachable via errors.Is/As on the validation result, matching
+				// the $ref-resolution path (validateResolvedRef).
+				e.err = err
+				errs = append(errs, e)
 			}
 		}
 	}

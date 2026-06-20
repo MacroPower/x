@@ -1304,6 +1304,26 @@ func TestValidateWithCustomFormatValidator(t *testing.T) {
 	assert.Contains(t, err.Error(), "custom-format")
 }
 
+func TestValidateCustomFormatErrorIsMatchable(t *testing.T) {
+	t.Parallel()
+
+	// A sentinel a custom format checker returns must stay reachable via
+	// errors.Is on the validation result, the same way an unresolvable $ref
+	// surfaces ErrRefResolve.
+	errMyFormat := errors.New("my-format sentinel")
+
+	schema := &jsonschema.Schema{Type: "string", Format: "custom-format"}
+	err := jsonschema.Validate(t.Context(), schema, "invalid",
+		jsonschema.WithFormats(true),
+		jsonschema.WithFormatValidator("custom-format", jsonschema.FormatValidatorFunc(
+			func(_ context.Context, _, _ string) error {
+				return errMyFormat
+			})),
+	)
+	require.Error(t, err)
+	require.ErrorIs(t, err, errMyFormat)
+}
+
 // TestValidateFormatValidatorReceivesName proves one checker implementation
 // registered under several names is told which name each check runs under,
 // the way an http.Handler reads the request path.
