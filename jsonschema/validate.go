@@ -694,7 +694,7 @@ type compiledPattern struct {
 // base-URI registries,
 // which keeps the validation-time fallback walk ([registerFallbackSchema]) from
 // populating these caches.
-func (v *validator) precompute() {
+func (v *validator) precompute() map[*Schema]bool {
 	v.numericBounds = map[*Schema]*precomputedBounds{}
 	v.patternCache = map[*Schema]compiledPattern{}
 	v.patternProps = map[*Schema]map[string]compiledPattern{}
@@ -703,6 +703,8 @@ func (v *validator) precompute() {
 
 	visited := map[*Schema]bool{}
 	v.precomputeSchema(v.root, visited)
+
+	return visited
 }
 
 // precomputeSchema records the derived caches for one schema and recurses into
@@ -1048,7 +1050,7 @@ func Compile(ctx context.Context, schema *Schema, opts ...ValidateOption) (*Vali
 	// Precompute derived per-schema state (numeric bounds and compiled
 	// patterns) while still single-threaded, so the returned Validator only
 	// reads these caches once shared across goroutines.
-	v.precompute()
+	precomputeVisited := v.precompute()
 
 	// Structural pre-validation via Schema.Resolve.
 	// A Loader is always provided so Schema.Resolve doesn't fail on remote
@@ -1075,6 +1077,15 @@ func Compile(ctx context.Context, schema *Schema, opts ...ValidateOption) (*Vali
 	//nolint:contextcheck // The compile context rides on the ctx field set above.
 	if err != nil && !v.resolveErrorIsRefOnly(schema, resolveOpts) {
 		return nil, fmt.Errorf("schema resolve: %w", err)
+	}
+
+	// Resolve may have fetched and registered remote schemas in uriRegistry
+	// after precompute ran over the root subtree. Extend the caches to them
+	// (the shared visited set skips schemas already covered) so a numeric,
+	// pattern, const, or enum keyword in a compile-time-fetched remote hits the
+	// cache instead of being recomputed on every validation.
+	for _, s := range v.uriRegistry {
+		v.precomputeSchema(s, precomputeVisited)
 	}
 
 	// Drop the compile context so the cached validator never holds a stale or
