@@ -555,7 +555,7 @@ func (in *inliner) expand(pristine *Schema, path string) (*Schema, bool, error) 
 func (in *inliner) expandTarget(pristine *Schema, path string) (*Schema, error) {
 	ref := pristine.Ref
 
-	target, err := in.resolveTarget(pristine, ref)
+	target, targetDoc, targetPtr, err := in.resolveTarget(pristine, ref)
 	if err != nil {
 		return in.substitute(pristine, path, ref, err)
 	}
@@ -566,11 +566,16 @@ func (in *inliner) expandTarget(pristine *Schema, path string) (*Schema, error) 
 
 	// A target materialized from an unknown (Extra) keyword via a JSON pointer
 	// is a fresh schema recordPaths never walked, so it has no recorded path or
-	// document. Seed it (idempotently) with the referencing node's location and
-	// document so a nested ref failure reports a meaningful RefFailure instead
-	// of empty fields.
+	// document. Seed it (idempotently) with its own document and pointer so a
+	// nested ref failure reports the document it physically lives in. A
+	// fragment-only ref (empty targetDoc) shares the referencing node's
+	// document, so fall back to that node's location.
 	if _, ok := in.paths[target]; !ok {
-		in.recordPaths(target, path, in.docs[pristine])
+		if targetDoc == "" {
+			targetDoc, targetPtr = in.docs[pristine], path
+		}
+
+		in.recordPaths(target, targetPtr, targetDoc)
 	}
 
 	return in.inlineCopy(target, in.paths[target], true)
@@ -691,14 +696,19 @@ func (in *inliner) inlineCopy(target *Schema, path string, memoize bool) (*Schem
 // fetch the addressed document (served from the registry when already
 // loaded), and evaluate any fragment against it. Every unresolvable form
 // returns an error wrapping [ErrRefResolve].
-func (in *inliner) resolveTarget(node *Schema, ref string) (*Schema, error) {
+// It also returns the target's own containing-document URI and its JSON Pointer
+// within that document, so a caller seeding paths for an otherwise-unrecorded
+// target (one materialized from an unknown keyword) reports a nested failure in
+// the document it physically lives in. A fragment-only ref returns an empty
+// document, signaling the caller to use the referencing node's own document.
+func (in *inliner) resolveTarget(node *Schema, ref string) (*Schema, string, string, error) {
 	if uriref.IsFragmentOnly(ref) {
 		target := in.v.resolveRef(node, ref)
 		if target == nil {
-			return nil, fmt.Errorf("%w: cannot resolve %q", ErrRefResolve, ref)
+			return nil, "", "", fmt.Errorf("%w: cannot resolve %q", ErrRefResolve, ref)
 		}
 
-		return target, nil
+		return target, "", "", nil
 	}
 
 	base := in.v.schemaBase(node)
@@ -706,7 +716,7 @@ func (in *inliner) resolveTarget(node *Schema, ref string) (*Schema, error) {
 
 	parsed, err := url.Parse(absRef)
 	if err != nil {
-		return nil, fmt.Errorf("%w: parse %q: %w", ErrRefResolve, absRef, err)
+		return nil, "", "", fmt.Errorf("%w: parse %q: %w", ErrRefResolve, absRef, err)
 	}
 
 	fragment := parsed.Fragment
@@ -719,12 +729,12 @@ func (in *inliner) resolveTarget(node *Schema, ref string) (*Schema, error) {
 	if !ok {
 		docRoot, err = in.fetchDoc(baseURI)
 		if err != nil {
-			return nil, err
+			return nil, "", "", err
 		}
 	}
 
 	if fragment == "" {
-		return docRoot, nil
+		return docRoot, baseURI, "", nil
 	}
 
 	// JSON Pointer within the fetched document. Pass the still-encoded
@@ -733,10 +743,10 @@ func (in *inliner) resolveTarget(node *Schema, ref string) (*Schema, error) {
 	if strings.HasPrefix(fragment, "/") {
 		target := in.v.resolveJSONPointer(docRoot, rawFrag, encoded)
 		if target == nil {
-			return nil, fmt.Errorf("%w: cannot resolve %q", ErrRefResolve, ref)
+			return nil, "", "", fmt.Errorf("%w: cannot resolve %q", ErrRefResolve, ref)
 		}
 
-		return target, nil
+		return target, baseURI, fragment, nil
 	}
 
 	// Anchor within the fetched document. Match the validator's precedence
@@ -744,16 +754,16 @@ func (in *inliner) resolveTarget(node *Schema, ref string) (*Schema, error) {
 	// to the document's own canonical base ($id), so Inline resolves an anchor
 	// exactly as validation would.
 	if target, ok := in.v.lookupAnchor(uriref.AnchorKey(baseURI, fragment)); ok {
-		return target, nil
+		return target, baseURI, "", nil
 	}
 
 	if canonBase := in.v.schemaBase(docRoot); canonBase != "" && canonBase != baseURI {
 		if target, ok := in.v.lookupAnchor(uriref.AnchorKey(canonBase, fragment)); ok {
-			return target, nil
+			return target, baseURI, "", nil
 		}
 	}
 
-	return nil, fmt.Errorf("%w: cannot resolve %q", ErrRefResolve, ref)
+	return nil, "", "", fmt.Errorf("%w: cannot resolve %q", ErrRefResolve, ref)
 }
 
 // runContext returns the [Inline] call's context for hook invocations (the

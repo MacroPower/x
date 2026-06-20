@@ -944,6 +944,43 @@ func TestInlineRefFailurePathForExtraKeywordTarget(t *testing.T) {
 		"a RefFailure for an Extra-keyword target must carry the referencing node's path")
 }
 
+func TestInlineRefFailureDocumentForCrossDocExtraKeyword(t *testing.T) {
+	t.Parallel()
+
+	// A cross-document ref into an unknown (Extra) keyword of a fetched document
+	// materializes a fresh schema. A nested failing ref inside it must report the
+	// fetched document's URI and a pointer rooted in that document, not the
+	// referencing root's document and location.
+	var captured jsonschema.RefFailure
+
+	fallback := jsonschema.RefFallbackFunc(func(_ context.Context, f jsonschema.RefFailure) jsonschema.RefAction {
+		captured = f
+
+		return jsonschema.DropRef()
+	})
+
+	docB, err := jsonschema.ParseSchema([]byte(`{
+		"x": {"inner": {"$ref": "#/$defs/missing"}}
+	}`))
+	require.NoError(t, err)
+
+	root, err := jsonschema.ParseSchema([]byte(`{
+		"properties": {"a": {"$ref": "https://example.com/b.json#/x/inner"}}
+	}`))
+	require.NoError(t, err)
+
+	_, err = jsonschema.Inline(t.Context(), root,
+		jsonschema.WithRefResolver(mapResolver{"https://example.com/b.json": docB}),
+		jsonschema.WithRefFallback(fallback))
+	require.NoError(t, err)
+
+	assert.Equal(t, "#/$defs/missing", captured.Ref, "the inner ref is the one consulted")
+	assert.Equal(t, "https://example.com/b.json", captured.Document,
+		"the failure must be reported in the document the failing ref physically lives in")
+	assert.Equal(t, "/x/inner", captured.Path,
+		"the path must be rooted in the fetched document")
+}
+
 func TestInlineSubstituteRecursionIsBounded(t *testing.T) {
 	t.Parallel()
 
