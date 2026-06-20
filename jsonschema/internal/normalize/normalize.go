@@ -30,7 +30,7 @@ import (
 //     unchanged.
 //
 // Anything else (structs, named numeric types, map[any]any) also passes
-// through unchanged and is rejected by the validator's instance-type check.
+// through unchanged and is rejected by [Accepted].
 //
 // Containers are copied only when normalization changes something inside them;
 // an already JSON-shaped value is returned as-is, and the input is never

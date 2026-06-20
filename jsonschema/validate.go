@@ -24,6 +24,7 @@ import (
 	"go.jacobcolvin.com/x/jsonschema/internal/format"
 	"go.jacobcolvin.com/x/jsonschema/internal/jsonequal"
 	"go.jacobcolvin.com/x/jsonschema/internal/jsonptr"
+	"go.jacobcolvin.com/x/jsonschema/internal/normalize"
 	"go.jacobcolvin.com/x/jsonschema/internal/numrat"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemashape"
 	"go.jacobcolvin.com/x/jsonschema/internal/typename"
@@ -1307,7 +1308,7 @@ func (c *Validator) Validate(ctx context.Context, instance any) error {
 // entry points cannot drift.
 func normalizeAndCheck(instance any) (any, error) {
 	instance = Normalize(instance)
-	if !acceptedInstance(instance) {
+	if !normalize.Accepted(instance) {
 		return nil, fmt.Errorf(
 			"instance of type %T is not accepted: accepted types are map[string]any, "+
 				"[]any, string, bool, nil, and the numeric types; marshal to JSON or use Validator.ValidateJSON",
@@ -1944,111 +1945,6 @@ func isFalseSchema(s *Schema) bool {
 	return IsFalseSchema(s)
 }
 
-// acceptedInstance reports whether instance is one of the JSON-compatible Go
-// types the validation walk works with: map[string]any, []any, string,
-// float64, [json.Number], bool, or nil. [Validate] runs [Normalize] first, so
-// Go integer kinds and float32 have already been converted by the time this
-// check runs. Other types, notably Go structs and [time.Time], are not
-// accepted, because they are not produced by encoding/json when unmarshaling
-// into an any. The check recurses into containers, since [Normalize] leaves a
-// nested non-JSON leaf (a struct, channel, or function inside a slice or map)
-// unchanged; rejecting it here turns what would be a panic or a silent
-// mis-validation deeper in the walk into the documented "not accepted" error.
-// [Validator.ValidateJSON] always supplies accepted types.
-func acceptedInstance(instance any) bool {
-	switch v := instance.(type) {
-	case nil, bool, string, float64, json.Number:
-		return true
-
-	case []any:
-		for _, item := range v {
-			if !acceptedInstance(item) {
-				return false
-			}
-		}
-
-		return true
-
-	case map[string]any:
-		for _, item := range v {
-			if !acceptedInstance(item) {
-				return false
-			}
-		}
-
-		return true
-
-	default:
-		return false
-	}
-}
-
-// instanceType returns the JSON Schema type name for a Go value.
-func instanceType(v any) string {
-	if v == nil {
-		return typename.Null
-	}
-
-	switch val := v.(type) {
-	case bool:
-		return typename.Boolean
-	case string:
-		return typename.String
-	case json.Number, float64:
-		if numrat.IsIntegralInstance(val) {
-			return typename.Integer
-		}
-
-		return typename.Number
-
-	case map[string]any:
-		return typename.Object
-	case []any:
-		return typename.Array
-	default:
-		return ""
-	}
-}
-
-// instanceMatchesType checks if an instance matches a JSON Schema type string.
-func instanceMatchesType(instance any, typ string) bool {
-	switch typ {
-	case typename.Null:
-		return instance == nil
-	case typename.Boolean:
-		_, ok := instance.(bool)
-		return ok
-
-	case typename.String:
-		// Json.Number is a distinct type, so a string assertion already
-		// excludes it; no separate numeric guard is needed.
-		_, isStr := instance.(string)
-
-		return isStr
-
-	case typename.Integer:
-		return numrat.IsIntegralInstance(instance)
-
-	case typename.Number:
-		switch instance.(type) {
-		case float64, json.Number:
-			return true
-		}
-
-		return false
-
-	case typename.Object:
-		_, ok := instance.(map[string]any)
-		return ok
-
-	case typename.Array:
-		_, ok := instance.([]any)
-		return ok
-	}
-
-	return false
-}
-
 // validateType checks the type keyword.
 func (v *validator) validateType(
 	schema *Schema,
@@ -2070,12 +1966,12 @@ func (v *validator) validateType(
 	}
 
 	for _, t := range types {
-		if instanceMatchesType(instance, t) {
+		if normalize.MatchesType(instance, t) {
 			return nil
 		}
 	}
 
-	got := instanceType(instance)
+	got := normalize.TypeName(instance)
 
 	return []*ValidationError{
 		leafError(instancePath, schemaPath, KeywordType,
