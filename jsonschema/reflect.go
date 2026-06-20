@@ -229,7 +229,7 @@ func (g *generator) generate(t reflect.Type) (*Schema, error) {
 // properties, shared by every occurrence of the type.
 func (g *generator) rootDefaultsTarget(schema *Schema, rootType reflect.Type) *Schema {
 	target := schema
-	if inner := nullableInnerSchema(target); inner != nil {
+	if inner := schemashape.NullableInnerSchema(target); inner != nil {
 		target = inner
 	}
 
@@ -426,7 +426,7 @@ func (g *generator) schemaForType(t reflect.Type, nullable bool) (*Schema, error
 		// non-pointer field of the same type presents the bare value schema, so
 		// this keeps a pointer and a value field consistent.
 		extendTarget := s
-		if inner := nullableInnerSchema(s); inner != nil {
+		if inner := schemashape.NullableInnerSchema(s); inner != nil {
 			extendTarget = inner
 		}
 
@@ -1424,7 +1424,7 @@ func (g *generator) buildFieldSchema(
 		// redundant numeric bounds. An author-set bound combined with enum is
 		// kept (it narrows the enum). Type-gated keywords such as pattern do not
 		// apply to null and stay put.
-		dropTypeBoundsForConstEnum(fieldSchema, boundAuthored)
+		schemashape.DropTypeBoundsForConstEnum(fieldSchema, boundAuthored)
 	}
 
 	// Add to parent.
@@ -1498,7 +1498,7 @@ func (g *generator) applyFieldInterpreters(
 	// boundAuthored the jsonschema tag established. Re-dropping runs only when an
 	// interpreter touched the field; otherwise buildFieldSchema already dropped.
 	if ranInterpreter {
-		dropTypeBoundsForConstEnum(fieldSchema, boundAuthored)
+		schemashape.DropTypeBoundsForConstEnum(fieldSchema, boundAuthored)
 	}
 
 	// Wrap bare $ref with allOf for Draft-07 if annotations were added. This
@@ -1511,7 +1511,7 @@ func (g *generator) applyFieldInterpreters(
 	// itself a bare $ref. Under Draft-07 a $ref ignores its siblings, so the
 	// inner branch needs the same allOf wrap; otherwise the relocated keyword is
 	// silently dropped at validation time.
-	if inner := nullableInnerSchema(fieldSchema); inner != nil {
+	if inner := schemashape.NullableInnerSchema(fieldSchema); inner != nil {
 		g.wrapRefForDraft7(inner)
 	}
 
@@ -1735,118 +1735,6 @@ func (g *generator) applyNullable(s *Schema, t reflect.Type, nullable bool) *Sch
 			{Type: typename.Null},
 		},
 	}
-}
-
-// relocateConstEnumToValueBranch moves any Const and Enum keywords set on a
-// nullable pointer field onto its value (non-null) branch and returns the schema
-// that holds them afterward. Const and enum test the instance value regardless
-// of its type, so left on the nullable wrapper they reject the permitted null;
-// relocating them onto the value branch keeps null valid. Type-gated keywords
-// such as minimum and pattern do not apply to null and stay on the wrapper.
-//
-// Two nullable shapes occur: the anyOf[value, {"type":"null"}] wrapper (nullable
-// $ref and value pointers), and the {"type":["null", base]} type list that
-// applyContainerType emits for a nullable pointer to a container or a ",string"
-// stringable. The type-list shape cannot gate const/enum to the non-null type,
-// so it is rewritten into the anyOf form when it carries either.
-//
-// When s is not a nullable schema, or carries neither Const nor Enum, s is
-// returned unchanged. Each keyword moves only when set, so a nil keyword never
-// clobbers a value-branch keyword.
-func relocateConstEnumToValueBranch(s *Schema) *Schema {
-	if s.Const == nil && s.Enum == nil {
-		return s
-	}
-
-	if inner := nullableInnerSchema(s); inner != nil {
-		moveConstEnum(s, inner)
-
-		return inner
-	}
-
-	if base, ok := nullableTypeListBase(s); ok {
-		inner := &Schema{Type: base}
-		moveConstEnum(s, inner)
-
-		s.Types = nil
-		s.AnyOf = []*Schema{inner, {Type: typename.Null}}
-
-		return inner
-	}
-
-	return s
-}
-
-// clearNumericBounds drops the four numeric range keywords from s. Used once a
-// const/enum pins the value, where the type-derived bounds are redundant and
-// could reject a value set to the type's own boundary.
-func clearNumericBounds(s *Schema) {
-	s.Minimum = nil
-	s.Maximum = nil
-	s.ExclusiveMinimum = nil
-	s.ExclusiveMaximum = nil
-}
-
-// dropTypeBoundsForConstEnum relocates a nullable pointer's const/enum onto the
-// value branch, then drops the redundant numeric bounds. The bounds may sit on
-// the relocated value branch or, for a nullable pointer, on the anyOf/type-list
-// wrapper, so both are cleared.
-//
-// A const fully pins the value, so every bound it carries is subsumed and
-// dropped, even one the author set explicitly. An enum only restricts the value
-// to a set, so an author-set bound narrows it further (enum ∩ bound) and is kept
-// (boundAuthored); only the kind-derived bounds an enum makes redundant are
-// dropped. The tag-interpreter path passes boundAuthored false: it has no
-// per-keyword provenance, so it keeps the prior drop-all behavior.
-func dropTypeBoundsForConstEnum(fieldSchema *Schema, boundAuthored bool) {
-	target := relocateConstEnumToValueBranch(fieldSchema)
-
-	switch {
-	case target.Const != nil:
-		clearNumericBounds(target)
-		clearNumericBounds(fieldSchema)
-
-	case target.Enum != nil && !boundAuthored:
-		clearNumericBounds(target)
-		clearNumericBounds(fieldSchema)
-	}
-}
-
-// moveConstEnum transfers any Const and Enum set on src onto dst, clearing them
-// on src.
-func moveConstEnum(src, dst *Schema) {
-	if src.Const != nil {
-		dst.Const, src.Const = src.Const, nil
-	}
-
-	if src.Enum != nil {
-		dst.Enum, src.Enum = src.Enum, nil
-	}
-}
-
-// nullableTypeListBase reports whether s is a two-element type list pairing
-// "null" with one other type (the shape applyContainerType emits for a nullable
-// pointer container), returning the non-null type.
-func nullableTypeListBase(s *Schema) (string, bool) {
-	if len(s.Types) != 2 {
-		return "", false
-	}
-
-	switch {
-	case s.Types[0] == typename.Null:
-		return s.Types[1], true
-	case s.Types[1] == typename.Null:
-		return s.Types[0], true
-	default:
-		return "", false
-	}
-}
-
-// nullableInnerSchema returns the value (non-null) branch of a schema produced
-// by [generator.applyNullable], which is an anyOf of a value schema and
-// {"type":"null"}. It returns nil if s does not have that exact shape.
-func nullableInnerSchema(s *Schema) *Schema {
-	return schemashape.NullableInnerSchema(s)
 }
 
 // implementsProvider checks if a type (or pointer to type) implements

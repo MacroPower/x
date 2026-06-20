@@ -473,16 +473,8 @@ func dropElementBoundsForConstEnum(s *jsonschema.Schema) {
 		return
 	}
 
-	clearNumericBounds(target)
-	clearNumericBounds(s)
-}
-
-// clearNumericBounds drops the four numeric range keywords from s.
-func clearNumericBounds(s *jsonschema.Schema) {
-	s.Minimum = nil
-	s.Maximum = nil
-	s.ExclusiveMinimum = nil
-	s.ExclusiveMaximum = nil
+	schemashape.ClearNumericBounds(target)
+	schemashape.ClearNumericBounds(s)
 }
 
 // isStringCoercedValue reports whether the generated schema is a string while

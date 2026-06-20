@@ -175,8 +175,9 @@ func applyJSONSchemaTag(tag string, fieldType reflect.Type, s *Schema) (bool, er
 }
 
 // isNumericBoundKey reports whether key is one of the four range-bound keywords
-// that [clearNumericBounds] drops, used to tell an author-set bound (kept when
-// it narrows an enum) from a kind-derived one (always redundant once pinned).
+// that [schemashape.ClearNumericBounds] drops, used to tell an author-set bound
+// (kept when it narrows an enum) from a kind-derived one (always redundant once
+// pinned).
 func isNumericBoundKey(key string) bool {
 	switch key {
 	case KeywordMinimum, KeywordMaximum, KeywordExclusiveMinimum, KeywordExclusiveMaximum:
@@ -566,7 +567,7 @@ func applyTypeOverride(s *Schema, typeName string) {
 	// A nullable pointer field wraps the value schema in anyOf[value, null];
 	// an explicit type replaces the whole construct, including the wrapped
 	// value branch and its kind-derived constraints.
-	if nullableInnerSchema(s) != nil {
+	if schemashape.NullableInnerSchema(s) != nil {
 		s.AnyOf = nil
 	}
 
@@ -699,7 +700,7 @@ func applyEnumToItems(key, value string, t reflect.Type, s *Schema) error {
 		// anyOf[value, null]; the enum belongs on the value branch, not as a
 		// sibling of anyOf where it would reject a valid null element. This is
 		// a no-op for a non-nullable item.
-		relocateConstEnumToValueBranch(item)
+		schemashape.RelocateConstEnumToValueBranch(item)
 	}
 
 	return nil
