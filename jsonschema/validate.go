@@ -3139,10 +3139,10 @@ func (v *validator) resolveRefUncached(schema *Schema, ref string) *Schema {
 		return v.resolveJSONPointer(target, rawFrag, fragEncoded)
 	}
 
-	// Anchor within resolved schema. A fetched document registers its anchors
-	// under its own canonical base, which is the retrieval URI unless the
-	// document declares a distinct $id, so try the canonical base before
-	// falling back to the retrieval URI.
+	// Anchor within resolved schema. Try the retrieval/current base first, then
+	// fall back to the document's own canonical base ($id) when it declares one
+	// distinct from the retrieval URI. The inliner's resolveTarget mirrors this
+	// precedence so the two paths resolve an anchor identically.
 	if anchorTarget, ok := v.lookupAnchor(uriref.AnchorKey(baseURI, fragment)); ok {
 		return anchorTarget
 	}
