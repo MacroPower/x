@@ -354,6 +354,11 @@ func mergeGoSum(paths ...string) []byte {
 		}
 
 		for line := range strings.SplitSeq(string(data), "\n") {
+			// Tolerate CRLF-terminated go.sum files (e.g. produced by a
+			// line-ending normalization rule): a stray trailing \r would both
+			// defeat the conflict comparison against an LF twin and write an
+			// invalid \r-suffixed checksum line that go mod tidy rejects.
+			line = strings.TrimSuffix(line, "\r")
 			if line == "" {
 				continue
 			}

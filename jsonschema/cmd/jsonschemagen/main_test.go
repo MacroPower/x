@@ -285,6 +285,34 @@ func TestMergeGoSumKeysOnModuleVersion(t *testing.T) {
 		"a conflicting module-zip checksum is dropped, not kept first")
 }
 
+func TestMergeGoSumToleratesCRLF(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	writeSum := func(name, content string) string {
+		t.Helper()
+
+		p := filepath.Join(dir, name)
+		require.NoError(t, os.WriteFile(p, []byte(content), 0o600))
+
+		return p
+	}
+
+	// A CRLF copy of an entry must deduplicate against its LF twin (not be
+	// treated as a conflict) and must be written back without a trailing \r.
+	lf := writeSum("lf.sum", "example.com/m v1.0.0 h1:AAAA=\n")
+	crlf := writeSum("crlf.sum", "example.com/m v1.0.0 h1:AAAA=\r\nexample.com/n v2.0.0 h1:BBBB=\r\n")
+
+	got := string(mergeGoSum(lf, crlf))
+
+	want := "example.com/m v1.0.0 h1:AAAA=\n" +
+		"example.com/n v2.0.0 h1:BBBB=\n"
+
+	assert.Equal(t, want, got)
+	assert.NotContains(t, got, "\r", "CRLF endings must not survive into the merged go.sum")
+}
+
 func TestSelectMainModule(t *testing.T) {
 	t.Parallel()
 
