@@ -126,3 +126,18 @@ func RawFragment(u *url.URL) (string, bool) {
 
 	return u.Fragment, false
 }
+
+// FilePathFromURI maps a ref URI to the file-system path it names. It drops a
+// file:// scheme and any authority via [url.Parse] so file://host/x, file:///x,
+// and file:////x all map to the path "x"; TrimPrefix alone mishandled an
+// authority and extra leading slashes. Non-file and relative inputs fall back to
+// the prior strip so they address the fs as before. It is the inverse of the
+// file:/// base registration that [NormalizeBaseURI] performs.
+func FilePathFromURI(uri string) string {
+	u, err := url.Parse(uri)
+	if err == nil && u.Scheme == "file" {
+		return strings.TrimLeft(u.Path, "/")
+	}
+
+	return strings.TrimPrefix(strings.TrimPrefix(uri, "file://"), "/")
+}

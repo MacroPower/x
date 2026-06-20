@@ -864,18 +864,7 @@ func NewFileResolver(fsys fs.FS) *FileResolver {
 // silently producing a degenerate schema. Reads are local and not cancellable,
 // so the context is unused. See [FileResolver] for the path semantics.
 func (r *FileResolver) ResolveRef(_ context.Context, uri string) (*Schema, error) {
-	// Drop a file:// scheme and any authority via url.Parse so file://host/x,
-	// file:///x, and file:////x all map to the fs path "x"; TrimPrefix alone
-	// mishandled an authority and extra leading slashes. Non-file and relative
-	// inputs fall back to the prior strip so they address the fs as before.
-	name := uri
-
-	u, perr := url.Parse(uri)
-	if perr == nil && u.Scheme == "file" {
-		name = strings.TrimLeft(u.Path, "/")
-	} else {
-		name = strings.TrimPrefix(strings.TrimPrefix(name, "file://"), "/")
-	}
+	name := uriref.FilePathFromURI(uri)
 
 	data, err := fs.ReadFile(r.fsys, name)
 	if err != nil {
