@@ -318,6 +318,8 @@ type validator struct {
 	patternProps          map[*Schema]map[string]compiledPattern // patternProperties keys compiled (see numericBounds)
 	constRats             map[*Schema]*big.Rat                   // numeric const value as a rational (see numericBounds)
 	enumRats              map[*Schema][]*big.Rat                 // numeric enum members as rationals by index (see numericBounds)
+	sortedPropertyKeys    map[*Schema][]string                   // schema.Properties keys, sorted (see numericBounds)
+	sortedPatternKeys     map[*Schema][]string                   // schema.PatternProperties keys, sorted (see numericBounds)
 
 	// Registrations for schemas materialized by the JSON-pointer fallback
 	// (resolveJSONPointerViaJSON). Like jsonPointerCache they are per-run
@@ -700,6 +702,8 @@ func (v *validator) precompute() map[*Schema]bool {
 	v.patternProps = map[*Schema]map[string]compiledPattern{}
 	v.constRats = map[*Schema]*big.Rat{}
 	v.enumRats = map[*Schema][]*big.Rat{}
+	v.sortedPropertyKeys = map[*Schema][]string{}
+	v.sortedPatternKeys = map[*Schema][]string{}
 
 	visited := map[*Schema]bool{}
 	v.precomputeSchema(v.root, visited)
@@ -725,6 +729,13 @@ func (v *validator) precomputeSchema(schema *Schema, visited map[*Schema]bool) {
 		v.patternCache[schema] = compiledPattern{re: re, err: err}
 	}
 
+	if len(schema.Properties) > 0 {
+		// The schema's property-name set is fixed; precompute its sorted order
+		// (used for deterministic error order) once instead of re-sorting on
+		// every object instance node.
+		v.sortedPropertyKeys[schema] = slices.Sorted(maps.Keys(schema.Properties))
+	}
+
 	if len(schema.PatternProperties) > 0 {
 		compiled := make(map[string]compiledPattern, len(schema.PatternProperties))
 		for pattern := range schema.PatternProperties {
@@ -733,6 +744,7 @@ func (v *validator) precomputeSchema(schema *Schema, visited map[*Schema]bool) {
 		}
 
 		v.patternProps[schema] = compiled
+		v.sortedPatternKeys[schema] = slices.Sorted(maps.Keys(schema.PatternProperties))
 	}
 
 	if schema.Const != nil {
@@ -1936,6 +1948,27 @@ func (v *validator) boundsFor(schema *Schema) *precomputedBounds {
 	return computeBounds(schema)
 }
 
+// propertyKeysFor returns schema.Properties' keys in sorted order, preferring
+// the Compile-time cache and sorting on the fly for a schema absent from it (a
+// remote or JSON-pointer fallback schema reached only at validation time).
+func (v *validator) propertyKeysFor(schema *Schema) []string {
+	if keys, ok := v.sortedPropertyKeys[schema]; ok {
+		return keys
+	}
+
+	return slices.Sorted(maps.Keys(schema.Properties))
+}
+
+// patternKeysFor returns schema.PatternProperties' keys in sorted order, with
+// the same Compile-time cache and on-the-fly fallback as [propertyKeysFor].
+func (v *validator) patternKeysFor(schema *Schema) []string {
+	if keys, ok := v.sortedPatternKeys[schema]; ok {
+		return keys
+	}
+
+	return slices.Sorted(maps.Keys(schema.PatternProperties))
+}
+
 // patternFor returns the compiled form of schema.Pattern, preferring the
 // Compile-time cache and compiling on the fly for a schema absent from it
 // (a remote or JSON-pointer fallback schema reached only at validation time).
@@ -2448,8 +2481,9 @@ func (v *validator) validateObject(
 	//nolint:nestif // One branch per object applicator keyword; flattening would not reduce the inherent fan-out.
 	if v.vocabs.Applicator {
 		// Properties. Iterate in sorted-key order so the emitted error order is
-		// deterministic; Go map iteration is randomized.
-		for _, propName := range slices.Sorted(maps.Keys(schema.Properties)) {
+		// deterministic; Go map iteration is randomized. The key set is fixed
+		// per schema, so the sort is precomputed at Compile time.
+		for _, propName := range v.propertyKeysFor(schema) {
 			propSchema := schema.Properties[propName]
 			val, exists := obj[propName]
 			if !exists {
@@ -2480,8 +2514,9 @@ func (v *validator) validateObject(
 			sortedObjKeys = slices.Sorted(maps.Keys(obj))
 		}
 
-		// PatternProperties. Sorted iteration keeps the error order deterministic.
-		for _, pattern := range slices.Sorted(maps.Keys(schema.PatternProperties)) {
+		// PatternProperties. Sorted iteration keeps the error order
+		// deterministic; the key set is fixed, so the sort is precomputed.
+		for _, pattern := range v.patternKeysFor(schema) {
 			patternSchema := schema.PatternProperties[pattern]
 
 			// One schema-path location per pattern, shared by the error branch
