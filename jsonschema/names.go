@@ -130,7 +130,7 @@ func (g *generator) disambiguateDefs() {
 		// fallback is constructed only on escalation, the uncommon case, so the
 		// usual base-scheme path does not build a second candidate slice.
 		chosen := baseCandidates
-		if !g.candidatesUsable(baseCandidates, used) {
+		if !candidatesUsable(baseCandidates, used) {
 			// Candidate scheme 2 (fallback): prefix with the full import path.
 			// The sanitizer subsumes the slash replacement and also handles the
 			// tilde and the other characters invalid in a $ref token.
@@ -147,7 +147,7 @@ func (g *generator) disambiguateDefs() {
 			// generic differing only by a path separator, or a retained def
 			// matching the constructed name). Suffix to guarantee uniqueness so
 			// no schema is dropped and every refRecord points at its own def.
-			finalName := g.uniqueName(chosen[i], used)
+			finalName := uniqueName(chosen[i], used)
 
 			s := g.typeToDefSchema[t]
 			if s == nil {
@@ -188,7 +188,7 @@ func (g *generator) disambiguateDefs() {
 // distinct and free of any name already reserved in used. A scheme that fails
 // this check would map two types in the same group to one key, or shadow a
 // retained def, so the caller escalates to a stronger scheme.
-func (g *generator) candidatesUsable(candidates []string, used map[string]bool) bool {
+func candidatesUsable(candidates []string, used map[string]bool) bool {
 	seen := make(map[string]bool, len(candidates))
 	for _, c := range candidates {
 		if used[c] || seen[c] {
@@ -205,7 +205,7 @@ func (g *generator) candidatesUsable(candidates []string, used map[string]bool) 
 // appends the smallest numeric suffix that is. This is the last-resort
 // guarantee that every definitions key is distinct so no schema is silently
 // overwritten.
-func (g *generator) uniqueName(name string, used map[string]bool) string {
+func uniqueName(name string, used map[string]bool) string {
 	if !used[name] {
 		return name
 	}
