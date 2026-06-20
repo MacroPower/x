@@ -183,7 +183,12 @@ func resolveModuleInfo() (string, string, error) {
 		return "", "", cmdError(err)
 	}
 
-	return selectMainModule(out, currentGoMod())
+	goMod, err := currentGoMod()
+	if err != nil {
+		return "", "", fmt.Errorf("resolve current go.mod: %w", err)
+	}
+
+	return selectMainModule(out, goMod)
 }
 
 // selectMainModule picks the main module from a `go list -m -json` stream.
@@ -236,22 +241,26 @@ func selectMainModule(stream []byte, goMod string) (string, string, error) {
 }
 
 // currentGoMod returns the absolute path of the go.mod for the current
-// directory's main module via `go env GOMOD`, or an empty string if the
-// command fails or the current directory is not within a module.
-func currentGoMod() string {
+// directory's main module via `go env GOMOD`. An empty string with a nil error
+// means the current directory is not within a module (the os.DevNull sentinel
+// `go env GOMOD` reports). A failure of the command itself is returned as an
+// error rather than an empty string, so a transient failure is not mistaken for
+// being outside a module, which would silently target the first workspace
+// module instead of the current one.
+func currentGoMod() (string, error) {
 	cmd := exec.CommandContext(context.Background(), "go", "env", "GOMOD")
 	out, err := cmd.Output()
 	if err != nil {
-		return ""
+		return "", cmdError(err)
 	}
 
 	goMod := strings.TrimSpace(string(out))
 	// `go env GOMOD` reports os.DevNull when outside a module.
 	if goMod == os.DevNull {
-		return ""
+		return "", nil
 	}
 
-	return goMod
+	return goMod, nil
 }
 
 // resolveJSONSchemaDir returns the local directory of the jsonschema module.
