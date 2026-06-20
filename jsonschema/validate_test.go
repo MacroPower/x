@@ -3934,7 +3934,7 @@ func TestRemoteLoaderReturnsEmptyOnFailure(t *testing.T) {
 func TestRegexCacheKeyedByPattern(t *testing.T) {
 	t.Parallel()
 
-	// The package-level regexCache keys compiled patterns by their source, so
+	// The internal/regexcache cache keys compiled patterns by their source, so
 	// each distinct pattern validates against its own regex rather than a stale
 	// cached one. Across 26 single-letter patterns only "^testA$" matches the
 	// instance "testA"; a mis-keyed cache would let another letter's pattern

@@ -38,9 +38,12 @@ The package has two independent halves sharing the `Schema` type:
   through a caller-supplied sub-schema traversal), `internal/jsonequal` (DoS-guarded,
   JSON-semantic value equality for `const`/`enum` and the matching content
   hash for `uniqueItems`, layered on `internal/numrat` for exact decimal
-  comparison), and `internal/goast` (doc-comment and type/field-shape
+  comparison), `internal/goast` (doc-comment and type/field-shape
   extraction from a parsed Go package, for the generation half's comment
-  provider).
+  provider), and `internal/regexcache` (process-wide compile-once cache for
+  validation-time regular-expression patterns, memoizing the compiled
+  expression or the compile error so a pattern compiles at most once and fails
+  closed identically across runs).
 
 ### Relationship to google/jsonschema-go
 

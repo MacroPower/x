@@ -14,7 +14,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"unicode/utf8"
 
 	"github.com/google/jsonschema-go/jsonschema"
@@ -24,43 +23,13 @@ import (
 	"go.jacobcolvin.com/x/jsonschema/internal/jsonptr"
 	"go.jacobcolvin.com/x/jsonschema/internal/normalize"
 	"go.jacobcolvin.com/x/jsonschema/internal/numrat"
+	"go.jacobcolvin.com/x/jsonschema/internal/regexcache"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemaclone"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemashape"
 	"go.jacobcolvin.com/x/jsonschema/internal/typename"
 	"go.jacobcolvin.com/x/jsonschema/internal/uriref"
 	"go.jacobcolvin.com/x/jsonschema/internal/vocab"
 )
-
-// regexCache caches the outcome of compiling each pattern (the regexp or the
-// compile error), keyed by pattern string.
-var regexCache sync.Map
-
-// cachedRegexp is the memoized result of compiling one pattern.
-type cachedRegexp struct {
-	re  *regexp.Regexp
-	err error
-}
-
-func compileRegexp(pattern string) (*regexp.Regexp, error) {
-	if v, ok := regexCache.Load(pattern); ok {
-		if c, ok := v.(cachedRegexp); ok {
-			return c.re, c.err
-		}
-	}
-
-	re, err := regexp.Compile(pattern)
-	if err != nil {
-		err = fmt.Errorf("compile regexp: %w", err)
-	}
-
-	// Cache the outcome including failures, so an invalid pattern reached
-	// through the validation-time fallback (a remote/uncached schema) compiles
-	// at most once. The cached error is shared across runs; callers only test it
-	// for non-nil and never mutate it.
-	regexCache.Store(pattern, cachedRegexp{re: re, err: err})
-
-	return re, err
-}
 
 // ValidateOption configures validation behavior. Options are produced by
 // this package's With* constructors; the interface form (rather than a func
@@ -683,7 +652,7 @@ type precomputedBounds struct {
 // compiledPattern caches the result of compiling a regular expression pattern at
 // Compile time. It records the compiled regexp or, when the pattern is one Go's
 // RE2 engine rejects, the compile error, so validation reproduces the same
-// fail-closed behavior it would on a fresh [compileRegexp] call.
+// fail-closed behavior it would on a fresh [regexcache.Compile] call.
 type compiledPattern struct {
 	re  *regexp.Regexp
 	err error
@@ -723,14 +692,14 @@ func (v *validator) precomputeSchema(schema *Schema, visited map[*Schema]bool) {
 	}
 
 	if schema.Pattern != "" {
-		re, err := compileRegexp(schema.Pattern)
+		re, err := regexcache.Compile(schema.Pattern)
 		v.patternCache[schema] = compiledPattern{re: re, err: err}
 	}
 
 	if len(schema.PatternProperties) > 0 {
 		compiled := make(map[string]compiledPattern, len(schema.PatternProperties))
 		for pattern := range schema.PatternProperties {
-			re, err := compileRegexp(pattern)
+			re, err := regexcache.Compile(pattern)
 			compiled[pattern] = compiledPattern{re: re, err: err}
 		}
 
@@ -1998,13 +1967,13 @@ func (v *validator) boundsFor(schema *Schema) *precomputedBounds {
 // Compile-time cache and compiling on the fly for a schema absent from it
 // (a remote or JSON-pointer fallback schema reached only at validation time).
 // The compile error, when present, is reported by the caller exactly as a fresh
-// [compileRegexp] call would, preserving the fail-closed behavior.
+// [regexcache.Compile] call would, preserving the fail-closed behavior.
 func (v *validator) patternFor(schema *Schema) compiledPattern {
 	if cp, ok := v.patternCache[schema]; ok {
 		return cp
 	}
 
-	re, err := compileRegexp(schema.Pattern)
+	re, err := regexcache.Compile(schema.Pattern)
 
 	return compiledPattern{re: re, err: err}
 }
@@ -2019,7 +1988,7 @@ func (v *validator) patternPropertyFor(schema *Schema, pattern string) compiledP
 		}
 	}
 
-	re, err := compileRegexp(pattern)
+	re, err := regexcache.Compile(pattern)
 
 	return compiledPattern{re: re, err: err}
 }
