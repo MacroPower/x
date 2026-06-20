@@ -393,7 +393,15 @@ func (g *generator) schemaForType(t reflect.Type, nullable bool) (*Schema, error
 	// decide the definition's nullability for all of them, making the output
 	// depend on field declaration order. Inlined types keep nullability on the
 	// schema itself, exactly as the built-in and provider paths do.
-	extractBare := t.Kind() != reflect.Struct && t.Name() != "" && g.shouldExtract(t)
+	//
+	// A guarded (potentially cyclic) type is built bare too: a cycle detected
+	// while building it routes it to $defs via the cyclic-fill path below, which
+	// needs the same bare entry. When no cycle materializes and it stays inline,
+	// the withheld nullability is restored after the build. This is a no-op for
+	// slices and maps (they fold g.nullable into the container type regardless
+	// of the build-time flag); only a named array, which honors the flag, is
+	// affected, fixing an order-dependent null in its shared $defs entry.
+	extractBare := t.Kind() != reflect.Struct && t.Name() != "" && (g.shouldExtract(t) || guarded)
 
 	kindNullable := nullable
 	if extractBare {
@@ -445,6 +453,12 @@ func (g *generator) schemaForType(t reflect.Type, nullable bool) (*Schema, error
 
 		if g.shouldExtract(t) {
 			return g.extractToDefs(t, s, nullable)
+		}
+
+		// Built bare as a guarded type but neither cyclic nor extracted, so it
+		// stays inline: restore the nullability withheld during the bare build.
+		if extractBare {
+			s = g.applyNullable(s, t, nullable)
 		}
 	}
 

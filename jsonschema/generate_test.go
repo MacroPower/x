@@ -3746,6 +3746,55 @@ func TestGenerateFor_TypeOverrideDropsRefUnderCollision(t *testing.T) {
 		"a type= override must not leave a stale $ref after disambiguation")
 }
 
+// cyclicArrayElem and cyclicArrayFixed form an indirect array cycle
+// (Fixed -> Elem -> Fixed) used to exercise the bare-$defs invariant for a
+// recursive named array, whose schema honors the build-time nullable flag.
+type (
+	cyclicArrayElem  []cyclicArrayFixed
+	cyclicArrayFixed [3]cyclicArrayElem
+)
+
+type cyclicValueFirst struct {
+	V cyclicArrayFixed  `json:"v"`
+	P *cyclicArrayFixed `json:"p"`
+}
+
+type cyclicPointerFirst struct {
+	P *cyclicArrayFixed `json:"p"`
+	V cyclicArrayFixed  `json:"v"`
+}
+
+func TestGenerateFor_CyclicArrayDefIsOrderIndependent(t *testing.T) {
+	t.Parallel()
+
+	// The shared $defs entry for a recursive named array must not bake in
+	// nullability, or whichever reference is processed first (value vs pointer
+	// field) fixes the entry's null-ness for all occurrences, making the output
+	// depend on field declaration order.
+	v, err := jsonschema.GenerateFor[cyclicValueFirst](t.Context())
+	require.NoError(t, err)
+
+	p, err := jsonschema.GenerateFor[cyclicPointerFirst](t.Context())
+	require.NoError(t, err)
+
+	vDef, err := json.Marshal(v.Defs["cyclicArrayFixed"])
+	require.NoError(t, err)
+
+	pDef, err := json.Marshal(p.Defs["cyclicArrayFixed"])
+	require.NoError(t, err)
+
+	assert.JSONEq(t, string(vDef), string(pDef),
+		"the shared $defs array entry must not depend on field declaration order")
+
+	// The array entry itself must be bare (its own nullability belongs on each
+	// $ref, not the shared definition). The inner slice elements keep their own
+	// g.nullable null, which is a run constant and so order-independent.
+	require.NotNil(t, v.Defs["cyclicArrayFixed"])
+	assert.Equal(t, "array", v.Defs["cyclicArrayFixed"].Type,
+		"the array $defs entry must be a bare array, not an anyOf null wrapper")
+	assert.Nil(t, v.Defs["cyclicArrayFixed"].AnyOf)
+}
+
 type jsonMarshalerOnly struct {
 	Value int `json:"value"`
 }
