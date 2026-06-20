@@ -219,22 +219,50 @@ func (l schemaLocation) idx(i int) schemaLocation {
 	}
 }
 
-// leafError builds a terminal validation error at the given instance location
-// and the keyword token under the given schema location, copying both path
-// representations from the typed locations so the four private path fields can
+// newError builds a validation error at the given instance location and the
+// fully-formed schema location, copying both path representations from the typed
+// locations through this single constructor so the four private path fields can
 // never be mismatched at a call site. It is a fresh value each call, keeping
-// validation safe to run concurrently on a shared [Validator].
-func leafError(instancePath instanceLocation, schemaPath schemaLocation, keyword, msg string) *ValidationError {
-	kwPath := schemaPath.kw(keyword)
-
+// validation safe to run concurrently on a shared [Validator]. [leafError] and
+// [wrapError] are the keyword-appending conveniences over it for the common case
+// where the schema location is exactly the keyword asserted; the few call sites
+// whose location names a map member (patternProperties, dependencies) or omits a
+// keyword (the boolean false schema) pass the location here directly.
+func newError(
+	instancePath instanceLocation,
+	schemaPath schemaLocation,
+	keyword, msg string,
+	causes []*ValidationError,
+) *ValidationError {
 	return &ValidationError{
 		InstancePath: instancePath.ptr,
 		segments:     instancePath.segs,
-		SchemaPath:   kwPath.ptr,
-		schemaSegs:   kwPath.segs,
+		SchemaPath:   schemaPath.ptr,
+		schemaSegs:   schemaPath.segs,
 		Keyword:      keyword,
 		Message:      msg,
+		Causes:       causes,
 	}
+}
+
+// leafError builds a terminal (cause-free) validation error at the keyword token
+// under schemaPath: the keyword-appending convenience over [newError] for the
+// common case where the schema location is exactly the keyword being asserted.
+func leafError(instancePath instanceLocation, schemaPath schemaLocation, keyword, msg string) *ValidationError {
+	return newError(instancePath, schemaPath.kw(keyword), keyword, msg, nil)
+}
+
+// wrapError builds a validation error carrying nested causes at the keyword
+// token under schemaPath, the non-terminal counterpart of [leafError]. Both
+// append the keyword to schemaPath and route through [newError], so a
+// cause-bearing applicator error pairs its path fields identically to a leaf.
+func wrapError(
+	instancePath instanceLocation,
+	schemaPath schemaLocation,
+	keyword, msg string,
+	causes []*ValidationError,
+) *ValidationError {
+	return newError(instancePath, schemaPath.kw(keyword), keyword, msg, causes)
 }
 
 // builtinFormat adapts a bare value-checking function to [FormatValidator]
@@ -1559,14 +1587,12 @@ func (v *validator) validate(
 	if isFalseSchema(schema) {
 		// Keyword is left empty here: this point cannot know which applicator
 		// (if any) handed it the false schema. The applicator call sites stamp
-		// it via labelFalseSchemaKeyword.
-		return []*ValidationError{{
-			InstancePath: instancePath.ptr,
-			segments:     instancePath.segs,
-			SchemaPath:   schemaPath.ptr,
-			schemaSegs:   schemaPath.segs,
-			Message:      "value is not allowed",
-		}}
+		// it via labelFalseSchemaKeyword. The schema location is bare (no keyword
+		// token) for the same reason, so the error is built through newError
+		// directly rather than the keyword-appending leafError.
+		return []*ValidationError{
+			newError(instancePath, schemaPath, "", "value is not allowed", nil),
+		}
 	}
 
 	// Circular ref detection: same schema + same instance path = true cycle.
@@ -1694,15 +1720,11 @@ func (v *validator) validateUnevaluated(
 				if len(childErrs) == 0 {
 					ann.RecordProperty(propName)
 				} else {
-					errs = append(errs, &ValidationError{
-						InstancePath: childPath.ptr,
-						segments:     childPath.segs,
-						SchemaPath:   childSchemaPath.ptr,
-						schemaSegs:   childSchemaPath.segs,
-						Keyword:      KeywordUnevaluatedProperties,
-						Message:      fmt.Sprintf("property %q is not allowed by unevaluatedProperties", propName),
-						Causes:       childErrs,
-					})
+					errs = append(errs, newError(
+						childPath, childSchemaPath, KeywordUnevaluatedProperties,
+						fmt.Sprintf("property %q is not allowed by unevaluatedProperties", propName),
+						childErrs,
+					))
 				}
 			}
 		}
@@ -1730,15 +1752,11 @@ func (v *validator) validateUnevaluated(
 				if len(childErrs) == 0 {
 					ann.RecordItem(i)
 				} else {
-					errs = append(errs, &ValidationError{
-						InstancePath: childPath.ptr,
-						segments:     childPath.segs,
-						SchemaPath:   childSchemaPath.ptr,
-						schemaSegs:   childSchemaPath.segs,
-						Keyword:      KeywordUnevaluatedItems,
-						Message:      fmt.Sprintf("item %d is not allowed by unevaluatedItems", i),
-						Causes:       childErrs,
-					})
+					errs = append(errs, newError(
+						childPath, childSchemaPath, KeywordUnevaluatedItems,
+						fmt.Sprintf("item %d is not allowed by unevaluatedItems", i),
+						childErrs,
+					))
 				}
 			}
 		}
@@ -2149,29 +2167,13 @@ func (v *validator) validateString(
 			runeLen := utf8.RuneCountInString(str)
 
 			if schema.MinLength != nil && runeLen < *schema.MinLength {
-				kwPath := schemaPath.kw("minLength")
-
-				errs = append(errs, &ValidationError{
-					InstancePath: instancePath.ptr,
-					segments:     instancePath.segs,
-					SchemaPath:   kwPath.ptr,
-					schemaSegs:   kwPath.segs,
-					Keyword:      KeywordMinLength,
-					Message:      fmt.Sprintf("string length %d is less than %d", runeLen, *schema.MinLength),
-				})
+				errs = append(errs, leafError(instancePath, schemaPath, KeywordMinLength,
+					fmt.Sprintf("string length %d is less than %d", runeLen, *schema.MinLength)))
 			}
 
 			if schema.MaxLength != nil && runeLen > *schema.MaxLength {
-				kwPath := schemaPath.kw("maxLength")
-
-				errs = append(errs, &ValidationError{
-					InstancePath: instancePath.ptr,
-					segments:     instancePath.segs,
-					SchemaPath:   kwPath.ptr,
-					schemaSegs:   kwPath.segs,
-					Keyword:      KeywordMaxLength,
-					Message:      fmt.Sprintf("string length %d is greater than %d", runeLen, *schema.MaxLength),
-				})
+				errs = append(errs, leafError(instancePath, schemaPath, KeywordMaxLength,
+					fmt.Sprintf("string length %d is greater than %d", runeLen, *schema.MaxLength)))
 			}
 		}
 
@@ -2183,28 +2185,12 @@ func (v *validator) validateString(
 				// backreference or lookaround) fails closed: the constraint
 				// cannot be evaluated, so no string is accepted under it rather
 				// than silently treating every string as a match.
-				kwPath := schemaPath.kw("pattern")
-
-				errs = append(errs, &ValidationError{
-					InstancePath: instancePath.ptr,
-					segments:     instancePath.segs,
-					SchemaPath:   kwPath.ptr,
-					schemaSegs:   kwPath.segs,
-					Keyword:      KeywordPattern,
-					Message:      fmt.Sprintf("pattern %q cannot be compiled", schema.Pattern),
-				})
+				errs = append(errs, leafError(instancePath, schemaPath, KeywordPattern,
+					fmt.Sprintf("pattern %q cannot be compiled", schema.Pattern)))
 
 			case !cp.re.MatchString(str):
-				kwPath := schemaPath.kw("pattern")
-
-				errs = append(errs, &ValidationError{
-					InstancePath: instancePath.ptr,
-					segments:     instancePath.segs,
-					SchemaPath:   kwPath.ptr,
-					schemaSegs:   kwPath.segs,
-					Keyword:      KeywordPattern,
-					Message:      fmt.Sprintf("string does not match pattern %q", schema.Pattern),
-				})
+				errs = append(errs, leafError(instancePath, schemaPath, KeywordPattern,
+					fmt.Sprintf("string does not match pattern %q", schema.Pattern)))
 			}
 		}
 	}
@@ -2213,16 +2199,8 @@ func (v *validator) validateString(
 		if fv, exists := v.formatCheckers[schema.Format]; exists {
 			err := fv.ValidateFormat(v.runContext(), schema.Format, str)
 			if err != nil {
-				kwPath := schemaPath.kw("format")
-
-				errs = append(errs, &ValidationError{
-					InstancePath: instancePath.ptr,
-					segments:     instancePath.segs,
-					SchemaPath:   kwPath.ptr,
-					schemaSegs:   kwPath.segs,
-					Keyword:      KeywordFormat,
-					Message:      fmt.Sprintf("string does not match format %q: %v", schema.Format, err),
-				})
+				errs = append(errs, leafError(instancePath, schemaPath, KeywordFormat,
+					fmt.Sprintf("string does not match format %q: %v", schema.Format, err)))
 			}
 		}
 	}
@@ -2340,14 +2318,12 @@ func (v *validator) validateArray(
 
 			var matchedIdx []int
 
+			// The contains schema location is invariant across elements; build it
+			// once rather than rebuilding it on every iteration.
+			containsSchemaPath := schemaPath.kw("contains")
+
 			for i, item := range arr {
-				childErrs := v.validate(
-					schema.Contains,
-					item,
-					instancePath.index(i),
-					schemaPath.kw("contains"),
-					nil,
-				)
+				childErrs := v.validate(schema.Contains, item, instancePath.index(i), containsSchemaPath, nil)
 				if len(childErrs) == 0 {
 					matchCount++
 
@@ -2386,29 +2362,13 @@ func (v *validator) validateArray(
 					keyword = KeywordMinContains
 				}
 
-				kwPath := schemaPath.kw(keyword)
-
-				errs = append(errs, &ValidationError{
-					InstancePath: instancePath.ptr,
-					segments:     instancePath.segs,
-					SchemaPath:   kwPath.ptr,
-					schemaSegs:   kwPath.segs,
-					Keyword:      keyword,
-					Message:      fmt.Sprintf("array has %d matching items, minimum is %d", matchCount, minContains),
-				})
+				errs = append(errs, leafError(instancePath, schemaPath, keyword,
+					fmt.Sprintf("array has %d matching items, minimum is %d", matchCount, minContains)))
 			}
 
 			if maxContains >= 0 && matchCount > maxContains {
-				kwPath := schemaPath.kw("maxContains")
-
-				errs = append(errs, &ValidationError{
-					InstancePath: instancePath.ptr,
-					segments:     instancePath.segs,
-					SchemaPath:   kwPath.ptr,
-					schemaSegs:   kwPath.segs,
-					Keyword:      KeywordMaxContains,
-					Message:      fmt.Sprintf("array has %d matching items, maximum is %d", matchCount, maxContains),
-				})
+				errs = append(errs, leafError(instancePath, schemaPath, KeywordMaxContains,
+					fmt.Sprintf("array has %d matching items, maximum is %d", matchCount, maxContains)))
 			}
 		}
 	}
@@ -2418,46 +2378,20 @@ func (v *validator) validateArray(
 	if v.vocabs.Validation {
 		// MinItems.
 		if schema.MinItems != nil && len(arr) < *schema.MinItems {
-			kwPath := schemaPath.kw("minItems")
-
-			errs = append(errs, &ValidationError{
-				InstancePath: instancePath.ptr,
-				segments:     instancePath.segs,
-				SchemaPath:   kwPath.ptr,
-				schemaSegs:   kwPath.segs,
-				Keyword:      KeywordMinItems,
-				Message:      fmt.Sprintf("array has %d items, minimum is %d", len(arr), *schema.MinItems),
-			})
+			errs = append(errs, leafError(instancePath, schemaPath, KeywordMinItems,
+				fmt.Sprintf("array has %d items, minimum is %d", len(arr), *schema.MinItems)))
 		}
 
 		// MaxItems.
 		if schema.MaxItems != nil && len(arr) > *schema.MaxItems {
-			kwPath := schemaPath.kw("maxItems")
-
-			errs = append(errs, &ValidationError{
-				InstancePath: instancePath.ptr,
-				segments:     instancePath.segs,
-				SchemaPath:   kwPath.ptr,
-				schemaSegs:   kwPath.segs,
-				Keyword:      KeywordMaxItems,
-				Message:      fmt.Sprintf("array has %d items, maximum is %d", len(arr), *schema.MaxItems),
-			})
+			errs = append(errs, leafError(instancePath, schemaPath, KeywordMaxItems,
+				fmt.Sprintf("array has %d items, maximum is %d", len(arr), *schema.MaxItems)))
 		}
 
 		// UniqueItems.
-		if schema.UniqueItems {
-			if jsonequal.HasDuplicates(arr) {
-				kwPath := schemaPath.kw("uniqueItems")
-
-				errs = append(errs, &ValidationError{
-					InstancePath: instancePath.ptr,
-					segments:     instancePath.segs,
-					SchemaPath:   kwPath.ptr,
-					schemaSegs:   kwPath.segs,
-					Keyword:      KeywordUniqueItems,
-					Message:      "array contains duplicate items",
-				})
-			}
+		if schema.UniqueItems && jsonequal.HasDuplicates(arr) {
+			errs = append(errs, leafError(instancePath, schemaPath, KeywordUniqueItems,
+				"array contains duplicate items"))
 		}
 	}
 
@@ -2536,15 +2470,11 @@ func (v *validator) validateObject(
 			if cp.err != nil {
 				// A pattern Go's RE2 cannot compile fails closed: the keyword
 				// cannot decide which properties it governs, so the object is
-				// rejected rather than silently dropping the subschema.
-				errs = append(errs, &ValidationError{
-					InstancePath: instancePath.ptr,
-					segments:     instancePath.segs,
-					SchemaPath:   patternSchemaPath.ptr,
-					schemaSegs:   patternSchemaPath.segs,
-					Keyword:      KeywordPatternProperties,
-					Message:      fmt.Sprintf("pattern %q cannot be compiled", pattern),
-				})
+				// rejected rather than silently dropping the subschema. The
+				// location names the pattern member, so the keyword token and
+				// path differ: build through newError with the full location.
+				errs = append(errs, newError(instancePath, patternSchemaPath, KeywordPatternProperties,
+					fmt.Sprintf("pattern %q cannot be compiled", pattern), nil))
 
 				continue
 			}
@@ -2598,46 +2528,26 @@ func (v *validator) validateObject(
 		// offending name in the message identifying which key failed and which
 		// object it belongs to.
 		if schema.PropertyNames != nil {
+			// The propertyNames schema location is invariant across keys; build it
+			// once rather than rebuilding it on every iteration.
+			childSchemaPath := schemaPath.kw("propertyNames")
+
 			for _, propName := range sortedObjKeys {
 				childPath := instancePath.key(propName)
-				childSchemaPath := schemaPath.kw("propertyNames")
-				childErrs := v.validate(
-					schema.PropertyNames,
-					propName,
-					childPath,
-					childSchemaPath,
-					nil,
-				)
+				childErrs := v.validate(schema.PropertyNames, propName, childPath, childSchemaPath, nil)
 				if len(childErrs) > 0 {
-					errs = append(errs, &ValidationError{
-						InstancePath: childPath.ptr,
-						segments:     childPath.segs,
-						SchemaPath:   childSchemaPath.ptr,
-						schemaSegs:   childSchemaPath.segs,
-						Keyword:      KeywordPropertyNames,
-						Message:      fmt.Sprintf("property name %q is invalid", propName),
-						Causes:       childErrs,
-					})
+					errs = append(errs, newError(
+						childPath, childSchemaPath, KeywordPropertyNames,
+						fmt.Sprintf("property name %q is invalid", propName), childErrs,
+					))
 				}
 			}
 		}
 
 		// DependentSchemas (2020-12).
 		if v.draft == Draft2020 {
-			for _, prop := range slices.Sorted(maps.Keys(schema.DependentSchemas)) {
-				depSchema := schema.DependentSchemas[prop]
-				if _, exists := obj[prop]; !exists {
-					continue
-				}
-
-				depAnn := ann.Child()
-				childSchemaPath := schemaPath.kw("dependentSchemas").key(prop)
-				childErrs := v.validate(depSchema, instance, instancePath, childSchemaPath, depAnn)
-				errs = append(errs, childErrs...)
-				if len(childErrs) == 0 {
-					ann.Merge(depAnn)
-				}
-			}
+			errs = append(errs, v.validateSchemaDependencies(
+				schema.DependentSchemas, KeywordDependentSchemas, instance, obj, instancePath, schemaPath, ann)...)
 		}
 	}
 
@@ -2647,70 +2557,27 @@ func (v *validator) validateObject(
 		// Required.
 		for _, reqProp := range schema.Required {
 			if _, exists := obj[reqProp]; !exists {
-				kwPath := schemaPath.kw("required")
-
-				errs = append(errs, &ValidationError{
-					InstancePath: instancePath.ptr,
-					segments:     instancePath.segs,
-					SchemaPath:   kwPath.ptr,
-					schemaSegs:   kwPath.segs,
-					Keyword:      KeywordRequired,
-					Message:      fmt.Sprintf("missing required property %q", reqProp),
-				})
+				errs = append(errs, leafError(instancePath, schemaPath, KeywordRequired,
+					fmt.Sprintf("missing required property %q", reqProp)))
 			}
 		}
 
 		// MinProperties.
 		if schema.MinProperties != nil && len(obj) < *schema.MinProperties {
-			kwPath := schemaPath.kw("minProperties")
-
-			errs = append(errs, &ValidationError{
-				InstancePath: instancePath.ptr,
-				segments:     instancePath.segs,
-				SchemaPath:   kwPath.ptr,
-				schemaSegs:   kwPath.segs,
-				Keyword:      KeywordMinProperties,
-				Message:      fmt.Sprintf("object has %d properties, minimum is %d", len(obj), *schema.MinProperties),
-			})
+			errs = append(errs, leafError(instancePath, schemaPath, KeywordMinProperties,
+				fmt.Sprintf("object has %d properties, minimum is %d", len(obj), *schema.MinProperties)))
 		}
 
 		// MaxProperties.
 		if schema.MaxProperties != nil && len(obj) > *schema.MaxProperties {
-			kwPath := schemaPath.kw("maxProperties")
-
-			errs = append(errs, &ValidationError{
-				InstancePath: instancePath.ptr,
-				segments:     instancePath.segs,
-				SchemaPath:   kwPath.ptr,
-				schemaSegs:   kwPath.segs,
-				Keyword:      KeywordMaxProperties,
-				Message:      fmt.Sprintf("object has %d properties, maximum is %d", len(obj), *schema.MaxProperties),
-			})
+			errs = append(errs, leafError(instancePath, schemaPath, KeywordMaxProperties,
+				fmt.Sprintf("object has %d properties, maximum is %d", len(obj), *schema.MaxProperties)))
 		}
 
 		// DependentRequired (2020-12).
 		if v.draft == Draft2020 {
-			for _, prop := range slices.Sorted(maps.Keys(schema.DependentRequired)) {
-				deps := schema.DependentRequired[prop]
-				if _, exists := obj[prop]; !exists {
-					continue
-				}
-
-				for _, dep := range deps {
-					if _, exists := obj[dep]; !exists {
-						kwPath := schemaPath.kw("dependentRequired").key(prop)
-
-						errs = append(errs, &ValidationError{
-							InstancePath: instancePath.ptr,
-							segments:     instancePath.segs,
-							SchemaPath:   kwPath.ptr,
-							schemaSegs:   kwPath.segs,
-							Keyword:      KeywordDependentRequired,
-							Message:      fmt.Sprintf("property %q requires property %q", prop, dep),
-						})
-					}
-				}
-			}
+			errs = append(errs, v.validateRequiredDependencies(
+				schema.DependentRequired, KeywordDependentRequired, obj, instancePath, schemaPath)...)
 		}
 	}
 
@@ -2720,39 +2587,72 @@ func (v *validator) validateObject(
 	// and dependentRequired there, but accepting the legacy form aids migration and
 	// matches the optional dependencies-compatibility suite). Ungated by vocabulary:
 	// vocabulary is a 2020-12 concept and the legacy keyword predates it.
-	for _, prop := range slices.Sorted(maps.Keys(schema.DependencySchemas)) {
-		depSchema := schema.DependencySchemas[prop]
+	errs = append(errs, v.validateSchemaDependencies(
+		schema.DependencySchemas, KeywordDependencies, instance, obj, instancePath, schemaPath, ann)...)
+	errs = append(errs, v.validateRequiredDependencies(
+		schema.DependencyStrings, KeywordDependencies, obj, instancePath, schemaPath)...)
+
+	return errs
+}
+
+// validateSchemaDependencies validates the schema-valued dependency keywords:
+// Draft 2020-12 dependentSchemas and the legacy draft-07 dependencies form.
+// For each trigger property present in obj, the whole instance must validate
+// against the dependency subschema. Annotations are merged only on success, so
+// a failing dependency does not let unevaluated* observe its partial
+// evaluation. The keyword argument names the keyword for the error schema path.
+func (v *validator) validateSchemaDependencies(
+	deps map[string]*Schema,
+	keyword string,
+	instance any,
+	obj map[string]any,
+	instancePath instanceLocation,
+	schemaPath schemaLocation,
+	ann *annotations.Set,
+) []*ValidationError {
+	var errs []*ValidationError
+
+	for _, prop := range slices.Sorted(maps.Keys(deps)) {
 		if _, exists := obj[prop]; !exists {
 			continue
 		}
 
 		depAnn := ann.Child()
-		childSchemaPath := schemaPath.kw("dependencies").key(prop)
-		childErrs := v.validate(depSchema, instance, instancePath, childSchemaPath, depAnn)
+		childSchemaPath := schemaPath.kw(keyword).key(prop)
+		childErrs := v.validate(deps[prop], instance, instancePath, childSchemaPath, depAnn)
 		errs = append(errs, childErrs...)
+
 		if len(childErrs) == 0 {
 			ann.Merge(depAnn)
 		}
 	}
 
-	for _, prop := range slices.Sorted(maps.Keys(schema.DependencyStrings)) {
-		deps := schema.DependencyStrings[prop]
+	return errs
+}
+
+// validateRequiredDependencies validates the string-array dependency keywords:
+// Draft 2020-12 dependentRequired and the legacy draft-07 dependencies form.
+// When a trigger property is present in obj, each property it names must be
+// present too. The keyword argument names both the error schema path token and
+// the Keyword field, which coincide for these keywords.
+func (v *validator) validateRequiredDependencies(
+	deps map[string][]string,
+	keyword string,
+	obj map[string]any,
+	instancePath instanceLocation,
+	schemaPath schemaLocation,
+) []*ValidationError {
+	var errs []*ValidationError
+
+	for _, prop := range slices.Sorted(maps.Keys(deps)) {
 		if _, exists := obj[prop]; !exists {
 			continue
 		}
 
-		for _, dep := range deps {
+		for _, dep := range deps[prop] {
 			if _, exists := obj[dep]; !exists {
-				kwPath := schemaPath.kw("dependencies").key(prop)
-
-				errs = append(errs, &ValidationError{
-					InstancePath: instancePath.ptr,
-					segments:     instancePath.segs,
-					SchemaPath:   kwPath.ptr,
-					schemaSegs:   kwPath.segs,
-					Keyword:      KeywordDependencies,
-					Message:      fmt.Sprintf("property %q requires property %q", prop, dep),
-				})
+				errs = append(errs, newError(instancePath, schemaPath.kw(keyword).key(prop), keyword,
+					fmt.Sprintf("property %q requires property %q", prop, dep), nil))
 			}
 		}
 	}
@@ -2795,17 +2695,8 @@ func (v *validator) validateComposition(
 		}
 
 		if len(allCauses) > 0 {
-			kwPath := schemaPath.kw("allOf")
-
-			errs = append(errs, &ValidationError{
-				InstancePath: instancePath.ptr,
-				segments:     instancePath.segs,
-				SchemaPath:   kwPath.ptr,
-				schemaSegs:   kwPath.segs,
-				Keyword:      KeywordAllOf,
-				Message:      "did not validate against all subschemas",
-				Causes:       allCauses,
-			})
+			errs = append(errs, wrapError(instancePath, schemaPath, KeywordAllOf,
+				"did not validate against all subschemas", allCauses))
 		} else {
 			for _, subAnn := range subAnns {
 				ann.Merge(subAnn)
@@ -2833,17 +2724,8 @@ func (v *validator) validateComposition(
 		}
 
 		if !matched {
-			kwPath := schemaPath.kw("anyOf")
-
-			errs = append(errs, &ValidationError{
-				InstancePath: instancePath.ptr,
-				segments:     instancePath.segs,
-				SchemaPath:   kwPath.ptr,
-				schemaSegs:   kwPath.segs,
-				Keyword:      KeywordAnyOf,
-				Message:      "did not validate against any subschema",
-				Causes:       allCauses,
-			})
+			errs = append(errs, wrapError(instancePath, schemaPath, KeywordAnyOf,
+				"did not validate against any subschema", allCauses))
 		}
 	}
 
@@ -2870,29 +2752,12 @@ func (v *validator) validateComposition(
 
 		switch {
 		case matchCount == 0:
-			kwPath := schemaPath.kw("oneOf")
-
-			errs = append(errs, &ValidationError{
-				InstancePath: instancePath.ptr,
-				segments:     instancePath.segs,
-				SchemaPath:   kwPath.ptr,
-				schemaSegs:   kwPath.segs,
-				Keyword:      KeywordOneOf,
-				Message:      "did not validate against any subschema",
-				Causes:       allCauses,
-			})
+			errs = append(errs, wrapError(instancePath, schemaPath, KeywordOneOf,
+				"did not validate against any subschema", allCauses))
 
 		case matchCount > 1:
-			kwPath := schemaPath.kw("oneOf")
-
-			errs = append(errs, &ValidationError{
-				InstancePath: instancePath.ptr,
-				segments:     instancePath.segs,
-				SchemaPath:   kwPath.ptr,
-				schemaSegs:   kwPath.segs,
-				Keyword:      KeywordOneOf,
-				Message:      fmt.Sprintf("validated against %d subschemas, expected exactly one", matchCount),
-			})
+			errs = append(errs, leafError(instancePath, schemaPath, KeywordOneOf,
+				fmt.Sprintf("validated against %d subschemas, expected exactly one", matchCount)))
 
 		default:
 			ann.Merge(matchedAnn)
@@ -2904,16 +2769,8 @@ func (v *validator) validateComposition(
 		// Not never contributes annotations.
 		childErrs := v.validate(schema.Not, instance, instancePath, schemaPath.kw("not"), nil)
 		if len(childErrs) == 0 {
-			kwPath := schemaPath.kw("not")
-
-			errs = append(errs, &ValidationError{
-				InstancePath: instancePath.ptr,
-				segments:     instancePath.segs,
-				SchemaPath:   kwPath.ptr,
-				schemaSegs:   kwPath.segs,
-				Keyword:      KeywordNot,
-				Message:      "should not validate against the schema",
-			})
+			errs = append(errs, leafError(instancePath, schemaPath, KeywordNot,
+				"should not validate against the schema"))
 		}
 	}
 
@@ -2945,17 +2802,8 @@ func (v *validator) validateConditional(
 			thenAnn := ann.Child()
 			thenErrs := v.validate(schema.Then, instance, instancePath, schemaPath.kw("then"), thenAnn)
 			if len(thenErrs) > 0 {
-				kwPath := schemaPath.kw("then")
-
-				errs = append(errs, &ValidationError{
-					InstancePath: instancePath.ptr,
-					segments:     instancePath.segs,
-					SchemaPath:   kwPath.ptr,
-					schemaSegs:   kwPath.segs,
-					Keyword:      KeywordThen,
-					Message:      "if condition was true but then validation failed",
-					Causes:       thenErrs,
-				})
+				errs = append(errs, wrapError(instancePath, schemaPath, KeywordThen,
+					"if condition was true but then validation failed", thenErrs))
 			} else {
 				ann.Merge(thenAnn)
 			}
@@ -2964,17 +2812,8 @@ func (v *validator) validateConditional(
 		elseAnn := ann.Child()
 		elseErrs := v.validate(schema.Else, instance, instancePath, schemaPath.kw("else"), elseAnn)
 		if len(elseErrs) > 0 {
-			kwPath := schemaPath.kw("else")
-
-			errs = append(errs, &ValidationError{
-				InstancePath: instancePath.ptr,
-				segments:     instancePath.segs,
-				SchemaPath:   kwPath.ptr,
-				schemaSegs:   kwPath.segs,
-				Keyword:      KeywordElse,
-				Message:      "if condition was false but else validation failed",
-				Causes:       elseErrs,
-			})
+			errs = append(errs, wrapError(instancePath, schemaPath, KeywordElse,
+				"if condition was false but else validation failed", elseErrs))
 		} else {
 			ann.Merge(elseAnn)
 		}
@@ -3005,9 +2844,7 @@ func (v *validator) validateContent(
 	}
 
 	if v.contentEnabled {
-		if errs := v.assertContent(schema, instance, instancePath, schemaPath); errs != nil {
-			return errs
-		}
+		return v.assertContent(schema, instance, instancePath, schemaPath)
 	}
 
 	return nil
@@ -3101,33 +2938,21 @@ func (v *validator) validateResolvedRef(
 			err := v.refResolveErr
 			v.refResolveErr = nil
 
-			kwPath := schemaPath.kw(keyword)
+			// Built through leafError to share the path pairing; the private err
+			// field (the unwrappable resolution cause) is set on the result.
+			e := leafError(instancePath, schemaPath, keyword, err.Error())
+			e.err = err
 
-			return []*ValidationError{{
-				InstancePath: instancePath.ptr,
-				segments:     instancePath.segs,
-				SchemaPath:   kwPath.ptr,
-				schemaSegs:   kwPath.segs,
-				Keyword:      keyword,
-				Message:      err.Error(),
-				err:          err,
-			}}
+			return []*ValidationError{e}
 		}
 
 		// A non-local (remote/absolute) ref that cannot be resolved is an
 		// error rather than silently passing. Unresolvable local fragment refs
 		// are already rejected by Schema.Resolve before the walk begins.
 		if !uriref.IsFragmentOnly(ref) {
-			kwPath := schemaPath.kw(keyword)
-
-			return []*ValidationError{{
-				InstancePath: instancePath.ptr,
-				segments:     instancePath.segs,
-				SchemaPath:   kwPath.ptr,
-				schemaSegs:   kwPath.segs,
-				Keyword:      keyword,
-				Message:      fmt.Sprintf("cannot resolve %s %q", keyword, ref),
-			}}
+			return []*ValidationError{
+				leafError(instancePath, schemaPath, keyword, fmt.Sprintf("cannot resolve %s %q", keyword, ref)),
+			}
 		}
 
 		// Unresolvable local fragment ref: silently skip.
@@ -3137,16 +2962,9 @@ func (v *validator) validateResolvedRef(
 	refAnn := ann.Child()
 	childErrs := v.validate(target, instance, instancePath, schemaPath.kw(keyword), refAnn)
 	if len(childErrs) > 0 {
-		kwPath := schemaPath.kw(keyword)
-
-		return []*ValidationError{{
-			InstancePath: instancePath.ptr,
-			segments:     instancePath.segs,
-			SchemaPath:   kwPath.ptr,
-			schemaSegs:   kwPath.segs,
-			Keyword:      keyword,
-			Causes:       childErrs,
-		}}
+		return []*ValidationError{
+			wrapError(instancePath, schemaPath, keyword, "", childErrs),
+		}
 	}
 
 	ann.Merge(refAnn)
