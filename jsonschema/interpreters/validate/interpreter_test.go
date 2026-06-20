@@ -52,6 +52,26 @@ func TestValidateInterpreter_StringConstraints(t *testing.T) {
 	}`, string(got))
 }
 
+func TestValidateInterpreter_OneOfQuoteTokenization(t *testing.T) {
+	t.Parallel()
+
+	// A single-quoted run is one value even with spaces; an interior quote does
+	// not suppress the whitespace separator and is stripped, matching
+	// go-playground's `'[^']*'|\S+` tokenize-then-strip.
+	type Form struct {
+		Cities string `json:"cities" validate:"oneof='New York' Boston"`
+		Mixed  string `json:"mixed"  validate:"oneof=ab'cd ef"`
+	}
+
+	s, err := jsonschema.GenerateFor[Form](t.Context(),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
+	)
+	require.NoError(t, err)
+
+	assert.Equal(t, []any{"New York", "Boston"}, s.Properties["cities"].Enum)
+	assert.Equal(t, []any{"abcd", "ef"}, s.Properties["mixed"].Enum)
+}
+
 func TestValidateInterpreter_StringCoercedValueConstraints(t *testing.T) {
 	t.Parallel()
 

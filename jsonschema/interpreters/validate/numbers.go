@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -395,46 +396,25 @@ func isNumericKind(t reflect.Type) bool {
 	return numkind.IsInteger(t.Kind()) || numkind.IsFloat(t.Kind())
 }
 
+// oneOfSplitRegexp matches one oneof token, mirroring go-playground/validator's
+// own splitter (`'[^']*'|\S+`): a single-quoted run (one value even with
+// spaces) or an unquoted whitespace-delimited run. A quote only opens a group
+// when it is the first character of a token; an interior, trailing, or
+// unbalanced quote is matched by the \S+ alternative and stripped afterward.
+var oneOfSplitRegexp = regexp.MustCompile(`'[^']*'|\S+`)
+
 // splitOneOfValues tokenizes a oneof tag value the way go-playground/validator
 // does: whitespace separates values, but a single-quoted run is one value even
-// when it contains spaces, and the surrounding quotes are stripped. So
+// when it contains spaces, and every quote in each token is then stripped. So
 // "oneof='New York' Boston" yields ["New York", "Boston"] rather than being
-// shattered on every space.
+// shattered on every space, and "oneof=ab'cd ef" yields ["abcd", "ef"] -- the
+// interior quote does not suppress the separator -- matching the upstream
+// tokenize-then-strip exactly.
 func splitOneOfValues(value string) []string {
-	var (
-		out     []string
-		cur     strings.Builder
-		inQuote bool
-		started bool
-	)
-
-	flush := func() {
-		if started {
-			out = append(out, cur.String())
-			cur.Reset()
-
-			started = false
-		}
+	out := oneOfSplitRegexp.FindAllString(value, -1)
+	for i := range out {
+		out[i] = strings.ReplaceAll(out[i], "'", "")
 	}
-
-	for _, r := range value {
-		switch {
-		case r == '\'':
-			// A quote toggles grouping and is itself stripped. Entering a quote
-			// starts a value even if it ends up empty (oneof='' -> "").
-			inQuote = !inQuote
-			started = true
-
-		case !inQuote && (r == ' ' || r == '\t' || r == '\n' || r == '\r'):
-			flush()
-		default:
-			cur.WriteRune(r)
-
-			started = true
-		}
-	}
-
-	flush()
 
 	return out
 }
