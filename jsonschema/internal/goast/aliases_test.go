@@ -27,6 +27,19 @@ type CycleA CycleB
 type CycleB CycleA
 
 type NotStruct int
+
+type Box[T any] struct {
+	// BoxFieldDoc is the doc.
+	BoxField int
+}
+
+type Pair[T, U any] struct {
+	// PairFieldDoc is the doc.
+	PF int
+}
+
+type GenericAlias Box[int]
+type GenericListAlias Pair[int, string]
 `
 
 func TestStructFieldDocThroughAliases(t *testing.T) {
@@ -48,6 +61,18 @@ func TestStructFieldDocThroughAliases(t *testing.T) {
 			wantOK:    true,
 		},
 		"generic name stripped": {typeName: "Direct[int]", fieldName: "DF", wantDoc: "DirectDoc here.", wantOK: true},
+		"follows generic instantiation alias": {
+			typeName:  "GenericAlias",
+			fieldName: "BoxField",
+			wantDoc:   "BoxFieldDoc is the doc.",
+			wantOK:    true,
+		},
+		"follows generic list instantiation alias": {
+			typeName:  "GenericListAlias",
+			fieldName: "PF",
+			wantDoc:   "PairFieldDoc is the doc.",
+			wantOK:    true,
+		},
 		"cyclic alias guarded":  {typeName: "CycleA", fieldName: "X", wantOK: false},
 		"non-struct underlying": {typeName: "NotStruct", fieldName: "X", wantOK: false},
 		"type not found":        {typeName: "Missing", fieldName: "X", wantOK: false},

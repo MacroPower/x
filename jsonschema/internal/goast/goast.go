@@ -132,12 +132,13 @@ func EmbeddedFieldName(expr ast.Expr) string {
 
 // StructFieldDocThroughAliases returns the doc comment for fieldName on the
 // struct named typeName, following a chain of same-package named types
-// (type Foo Bar) down to the underlying struct, so a field comment declared on
-// Bar is found when the field is reported under Foo. The type-argument list on
-// typeName is stripped first ([BaseTypeName]). It reports ok=false when no
-// reachable type is a struct (a cross-package alias or non-struct underlying
-// type carries no locally scannable fields) or the type is not found. A visited
-// set guards against a malformed cyclic alias chain.
+// (type Foo Bar, or a generic instantiation type Foo Bar[int]) down to the
+// underlying struct, so a field comment declared on Bar is found when the field
+// is reported under Foo. The type-argument list on typeName is stripped first
+// ([BaseTypeName]). It reports ok=false when no reachable type is a struct (a
+// cross-package alias or non-struct underlying type carries no locally
+// scannable fields) or the type is not found. A visited set guards against a
+// malformed cyclic alias chain.
 func StructFieldDocThroughAliases(files []*ast.File, typeName, fieldName string) (string, bool) {
 	name := BaseTypeName(typeName)
 	seen := map[string]bool{}
@@ -157,6 +158,27 @@ func StructFieldDocThroughAliases(files []*ast.File, typeName, fieldName string)
 		case *ast.Ident:
 			// A same-package named type (type Foo Bar); follow to Bar.
 			name = underlying.Name
+
+		case *ast.IndexExpr:
+			// A same-package generic instantiation (type Foo Bar[int]); follow
+			// to the base type Bar. A non-Ident base (a cross-package
+			// instantiation pkg.Bar[int]) carries no locally scannable fields.
+			id, ok := underlying.X.(*ast.Ident)
+			if !ok {
+				return "", false
+			}
+
+			name = id.Name
+
+		case *ast.IndexListExpr:
+			// As *ast.IndexExpr, but with several type arguments
+			// (type Foo Bar[int, string]).
+			id, ok := underlying.X.(*ast.Ident)
+			if !ok {
+				return "", false
+			}
+
+			name = id.Name
 
 		default:
 			// A cross-package alias (an *ast.SelectorExpr) or a non-struct
