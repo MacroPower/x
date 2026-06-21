@@ -677,6 +677,41 @@ func TestGenerateFor_WithTypeSchemaFor(t *testing.T) {
 	}`, string(got))
 }
 
+func TestGenerateFor_NullableRefToTrueSchemaDedup(t *testing.T) {
+	t.Parallel()
+
+	// A named struct given an empty (true) override extracts to $defs as the
+	// boolean `true` schema, which already accepts null. A nullable pointer to it
+	// must reuse the bare $ref rather than wrapping it in a redundant
+	// anyOf[$ref, null], matching applyNullable's dedup for an inline empty
+	// schema.
+	type Widget struct {
+		X int `json:"x"`
+	}
+
+	type Holder struct {
+		W *Widget `json:"w"`
+	}
+
+	s, err := jsonschema.GenerateFor[Holder](t.Context(),
+		jsonschema.WithTypeSchemaFor[Widget](&jsonschema.Schema{}),
+	)
+	require.NoError(t, err)
+
+	got, err := json.Marshal(s)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{
+		"$schema":"https://json-schema.org/draft/2020-12/schema",
+		"type":"object",
+		"properties":{
+			"w":{"$ref":"#/$defs/Widget"}
+		},
+		"required":["w"],
+		"additionalProperties":false,
+		"$defs":{"Widget":true}
+	}`, string(got))
+}
+
 func TestGenerateFor_JsonStringTag(t *testing.T) {
 	t.Parallel()
 

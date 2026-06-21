@@ -1597,14 +1597,15 @@ func (g *generator) refForType(t reflect.Type, nullable bool) *Schema {
 	g.refRecords = append(g.refRecords, refRecord{schema: refSchema, target: t})
 
 	if nullable {
-		// If the definition itself already admits null (an override or provider
-		// that encodes null in its own type), the anyOf wrapper would add a
-		// redundant second null branch; mirror applyNullable's dedup. The def
+		// If the definition itself already admits null, the anyOf wrapper would
+		// add a redundant second null branch; mirror applyNullable's dedup. That
+		// covers a true (empty) schema, which accepts every value including null,
+		// and an override or provider that encodes null in its own type. The def
 		// schema is available here for an extracted type (extractToDefs sets it
 		// before this runs); a cycle placeholder leaves it nil, so the wrapper is
 		// kept until the def is known.
 		if def := g.typeToDefSchema[t]; def != nil &&
-			(def.Type == typename.Null || slices.Contains(def.Types, typename.Null)) {
+			(schemashape.IsEmpty(def) || def.Type == typename.Null || slices.Contains(def.Types, typename.Null)) {
 			return refSchema
 		}
 
