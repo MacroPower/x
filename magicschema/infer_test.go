@@ -252,6 +252,20 @@ func TestInferTypes(t *testing.T) {
 			input: "val:\n",
 			want:  "",
 		},
+		"tagged string keeps its type": {
+			input: "val: !!str 8080\n",
+			want:  "string",
+		},
+		"bool tag on empty scalar drops the type": {
+			// "val: !!bool" with no value is a null; asserting boolean would
+			// reject the null the source holds, so fail open to no constraint.
+			input: "val: !!bool\n",
+			want:  "",
+		},
+		"int tag on empty scalar drops the type": {
+			input: "val: !!int\n",
+			want:  "",
+		},
 	}
 
 	for name, tc := range tcs {
@@ -316,6 +330,13 @@ func TestInferArrayItems(t *testing.T) {
 		},
 		"mixed incompatible array": {
 			input:    "items:\n  - hello\n  - 42\n",
+			hasItems: false,
+		},
+		"incompatible element sandwiched between compatible ones": {
+			// The integer between two strings must drop the items constraint
+			// (fail open), not be forgotten so the items type re-settles on
+			// string and rejects the integer the list actually holds.
+			input:    "items:\n  - hello\n  - 42\n  - world\n",
 			hasItems: false,
 		},
 		"empty array": {

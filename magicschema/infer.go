@@ -28,6 +28,14 @@ const (
 func inferType(node ast.Node) string {
 	node, typ, known := resolveTagged(node)
 	if known {
+		// A known core tag on an empty scalar (e.g. "v: !!bool" with no value)
+		// describes a null: the value is absent, and asserting the tagged type
+		// would reject the null the source actually holds. Fall through to no
+		// constraint (fail open) rather than emit a type the value fails.
+		if isNullNode(unwrapNode(node)) {
+			return ""
+		}
+
 		return typ
 	}
 
@@ -46,10 +54,9 @@ func inferType(node ast.Node) string {
 		return typeArray
 	case *ast.MappingNode, *ast.MappingValueNode:
 		return typeObject
-	case *ast.NullNode:
-		return ""
 	}
 
+	// Null and any unrecognized node carry no type constraint (fail open).
 	return ""
 }
 
@@ -446,10 +453,32 @@ func inferItemsSchema(values []ast.Node) *jsonschema.Schema {
 			continue
 		}
 
-		resultType = widenType(resultType, inferType(val))
+		t := inferType(val)
+		if t == "" {
+			// An unknown node carries no type evidence; stay transparent.
+			continue
+		}
+
+		if resultType == "" {
+			resultType = t
+
+			continue
+		}
+
+		// An empty widenType result means the two known types are
+		// incompatible. Letting resultType absorb that would lose the
+		// incompatibility the moment a later element matched an earlier type, so
+		// an incompatible element sandwiched between compatible ones must drop
+		// the constraint outright (fail open) rather than be silently forgotten.
+		widened := widenType(resultType, t)
+		if widened == "" {
+			return nil
+		}
+
+		resultType = widened
 	}
 
-	// No positive type evidence, or incompatible types: fail open.
+	// No positive type evidence: fail open.
 	if resultType == "" {
 		return nil
 	}
