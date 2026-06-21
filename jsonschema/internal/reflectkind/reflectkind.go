@@ -132,7 +132,12 @@ func IsPromotedTextMarshaler(t reflect.Type) bool {
 // method and the pointer set yields the direct one.
 func HasDirectMethod(t reflect.Type, name string) bool {
 	if t.Kind() != reflect.Struct {
-		// Non-struct types can't have promoted methods.
+		// Non-struct types can't have promoted methods, so a method they have is
+		// necessarily direct. This short-circuits to true without checking the
+		// method set: every caller already establishes that the method exists
+		// (via an Implements guard) before asking, so the question is only
+		// "direct or promoted", and for a non-struct the answer is always
+		// direct.
 		return true
 	}
 
