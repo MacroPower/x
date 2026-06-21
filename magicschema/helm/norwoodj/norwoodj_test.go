@@ -250,6 +250,27 @@ func TestHelmDocsAnnotator(t *testing.T) {
 				assert.Equal(t, "string", f["type"])
 			},
 		},
+		"contradictory scalar compound type drops to inference": {
+			// "string/int" has a concrete scalar leading segment, not a modifier
+			// like tpl, so it cannot mean "integer". Asserting integer on the
+			// quoted string value would reject it; fall through to inference,
+			// which types the value as a string instead.
+			input: stringtest.Input(`
+				# -- (string/int) the port
+				port: "8080"
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				f, ok := props["port"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "string", f["type"])
+			},
+		},
 		"empty parens kept in description": {
 			// An empty "()" names no type, so upstream helm-docs keeps it in
 			// the description rather than stripping it as a type hint.

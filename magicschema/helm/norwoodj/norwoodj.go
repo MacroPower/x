@@ -618,14 +618,31 @@ func mapHelmDocsType(hint string) string {
 	// When the FIRST segment is a container (list/dict/array/object) the
 	// outermost container is the structural type, including nested hints like
 	// "list/list/string" or "dict/foo/string" -- a scalar type must never be
-	// asserted on a container value. Otherwise the leading segment is a scalar
-	// modifier (tpl/string, tpl/array) and the element type wins.
+	// asserted on a container value.
 	first, _, _ := strings.Cut(hint, "/")
 	if container, ok := typeMapping[first]; ok && isContainerType(container) {
 		return container
 	}
 
-	return element
+	// Otherwise the element type wins only when the leading segment is a scalar
+	// modifier (tpl/string, tpl/array) -- an encoding wrapper, not a type. A
+	// leading segment that is itself a concrete scalar type is contradictory
+	// ("string/int"), and an unknown one cannot be read as a modifier, so both
+	// fall through to structural inference rather than assert a type the value
+	// may not match (fail open).
+	if isStringModifier(first) {
+		return element
+	}
+
+	return ""
+}
+
+// isStringModifier reports whether a leading compound-hint segment is a scalar
+// modifier whose element type wins -- a string-encoding wrapper such as tpl (a
+// Go template) or yaml (a YAML-encoded value), as opposed to a concrete scalar
+// type like "string" or "int".
+func isStringModifier(seg string) bool {
+	return seg == "tpl" || seg == "yaml"
 }
 
 // isContainerType reports whether a JSON Schema type is a container (array or
