@@ -56,6 +56,37 @@ func TestSetSchemaType(t *testing.T) {
 	}
 }
 
+func TestParseYAMLValue(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		val  string
+		want string // JSON encoding; empty means nil (no value)
+	}{
+		"blank carries no value":          {val: "", want: ""},
+		"whitespace carries no value":     {val: "   ", want: ""},
+		"explicit null parses to null":    {val: "null", want: "null"},
+		"string value":                    {val: "hello", want: `"hello"`},
+		"integer value keeps native type": {val: "42", want: "42"},
+		"boolean value keeps native type": {val: "true", want: "true"},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := magicschema.ParseYAMLValue(tc.val)
+			if tc.want == "" {
+				assert.Nil(t, got, "a blank value must carry no default")
+
+				return
+			}
+
+			assert.JSONEq(t, tc.want, string(got))
+		})
+	}
+}
+
 func TestToSubSchemaArrayAllOrNothing(t *testing.T) {
 	t.Parallel()
 

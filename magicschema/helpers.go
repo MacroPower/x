@@ -191,8 +191,16 @@ func ToSubSchemaMap(val any) map[string]*jsonschema.Schema {
 	return result
 }
 
-// ParseYAMLValue parses a YAML value string into [json.RawMessage].
+// ParseYAMLValue parses a YAML value string into [json.RawMessage]. A blank
+// (empty or whitespace-only) input returns nil rather than the JSON null
+// [DefaultValue] would produce for it: a blank value is the absence of a value,
+// not an explicit null, so an annotation default left empty must not advertise
+// a null default. An explicit null is written out ("null") and still parses.
 func ParseYAMLValue(val string) json.RawMessage {
+	if strings.TrimSpace(val) == "" {
+		return nil
+	}
+
 	var v any
 
 	err := yaml.Unmarshal([]byte(val), &v)
