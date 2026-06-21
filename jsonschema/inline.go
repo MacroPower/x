@@ -567,12 +567,13 @@ func (in *inliner) expandTarget(pristine *Schema, path string) (*Schema, error) 
 	// A target materialized from an unknown (Extra) keyword via a JSON pointer
 	// is a fresh schema recordPaths never walked, so it has no recorded path or
 	// document. Seed it (idempotently) with its own document and pointer so a
-	// nested ref failure reports the document it physically lives in. A
+	// nested ref failure reports where the target physically lives. A
 	// fragment-only ref (empty targetDoc) shares the referencing node's
-	// document, so fall back to that node's location.
+	// document, and the ref's own pointer fragment is the target's location --
+	// the referring node's path would mislocate a nested ref failure.
 	if _, ok := in.paths[target]; !ok {
 		if targetDoc == "" {
-			targetDoc, targetPtr = in.docs[pristine], path
+			targetDoc, targetPtr = in.docs[pristine], strings.TrimPrefix(ref, "#")
 		}
 
 		in.recordPaths(target, targetPtr, targetDoc)

@@ -919,9 +919,9 @@ func TestInlineRefFailurePathForExtraKeywordTarget(t *testing.T) {
 	t.Parallel()
 
 	// A $ref into an unknown (Extra) keyword materializes a fresh schema that
-	// recordPaths never saw. A nested failing ref inside it must still report a
-	// non-empty RefFailure location, seeded from the referencing node, rather
-	// than empty path and document fields.
+	// recordPaths never saw. A nested failing ref inside it must report the
+	// location the target physically lives at -- the ref's own pointer fragment
+	// (/x/sub) -- not the referencing node's path (/properties/a).
 	var captured jsonschema.RefFailure
 
 	fallback := jsonschema.RefFallbackFunc(func(_ context.Context, f jsonschema.RefFailure) jsonschema.RefAction {
@@ -940,8 +940,8 @@ func TestInlineRefFailurePathForExtraKeywordTarget(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "#/$defs/missing", captured.Ref, "the inner ref is the one consulted")
-	assert.NotEmpty(t, captured.Path,
-		"a RefFailure for an Extra-keyword target must carry the referencing node's path")
+	assert.Equal(t, "/x/sub", captured.Path,
+		"the failure path must be the target's own location, not the referencing node's")
 }
 
 func TestInlineRefFailureDocumentForCrossDocExtraKeyword(t *testing.T) {
