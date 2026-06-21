@@ -1848,6 +1848,26 @@ func TestHelmValuesSchemaAnnotatorAlignment(t *testing.T) {
 				assert.Equal(t, "^x$", v["pattern"])
 			},
 		},
+		"quoted pattern with a semicolon keeps the bare regex": {
+			// A pattern containing ";" must be quoted to survive splitSemicolons;
+			// the surrounding quotes are then stripped so the regex matches the
+			// value rather than carrying literal quote characters.
+			input: stringtest.Input(`
+				# @schema type:string;pattern:"^a;b$"
+				val: x
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				v, ok := props["val"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "^a;b$", v["pattern"])
+			},
+		},
 		"quote inside a bracketed value preserved": {
 			// A regex char class like [",;] holds a quote alongside a ";".
 			// Opening a quoted run on that inner quote would swallow the closing

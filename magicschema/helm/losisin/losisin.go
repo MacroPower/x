@@ -174,7 +174,7 @@ func (a *Annotator) applyPair(
 		}
 
 	case "pattern":
-		schema.Pattern = val
+		schema.Pattern = unquoteScalar(val)
 	case "multipleOf":
 		schema.MultipleOf = parsePositiveFloat64Ptr(val)
 	case "minimum":
@@ -221,9 +221,9 @@ func (a *Annotator) applyPair(
 		}
 
 	case "$id":
-		schema.ID = val
+		schema.ID = unquoteScalar(val)
 	case "$ref":
-		schema.Ref = val
+		schema.Ref = unquoteScalar(val)
 	case "item":
 		// Guard ensureItems on a non-empty value: a bare or empty-valued
 		// item* key would otherwise create an empty Items schema, which
@@ -516,6 +516,33 @@ func parseAnyList(val string) []any {
 	}
 
 	return list
+}
+
+// unquoteScalar strips matching surrounding quotes from an inline scalar value.
+// A pattern, $id, or $ref containing a ";" must be quoted to survive
+// splitSemicolons, but the raw value then keeps the quote characters -- a
+// pattern like "^a$" would carry the literal quotes into the regex and reject
+// the value it should match. Parsing a fully quoted scalar through YAML yields
+// the bare text, matching how default and const are already unquoted. A bare
+// value is returned unchanged so it is never re-coerced.
+func unquoteScalar(val string) string {
+	if len(val) < 2 {
+		return val
+	}
+
+	first := val[0]
+	if (first != '"' && first != '\'') || val[len(val)-1] != first {
+		return val
+	}
+
+	var s string
+
+	err := yaml.Unmarshal([]byte(val), &s)
+	if err != nil {
+		return val
+	}
+
+	return s
 }
 
 // parseYAMLValue parses a YAML string into any Go value, distinguishing
