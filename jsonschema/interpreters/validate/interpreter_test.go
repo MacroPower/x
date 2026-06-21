@@ -85,6 +85,7 @@ func TestValidateInterpreter_StringCoercedValueConstraints(t *testing.T) {
 		Choice  int  `json:"choice,string"   validate:"oneof=1 2 3"`
 		NotZero int  `json:"not_zero,string" validate:"ne=0"`
 		Flag    bool `json:"flag,string"     validate:"eq=true"`
+		Exact   int  `json:"exact,string"    validate:"len=7"`
 	}
 
 	s, err := jsonschema.GenerateFor[Form](t.Context(),
@@ -95,6 +96,9 @@ func TestValidateInterpreter_StringCoercedValueConstraints(t *testing.T) {
 	got, err := json.Marshal(s)
 	require.NoError(t, err)
 
+	// A len=N on a numeric means value-equals N, so on a coerced field it must
+	// produce the same string const as eq=N ("7"), not a numeric const a quoted
+	// instance can never match.
 	assert.JSONEq(t, `{
 		"$schema":"https://json-schema.org/draft/2020-12/schema",
 		"type":"object",
@@ -102,16 +106,17 @@ func TestValidateInterpreter_StringCoercedValueConstraints(t *testing.T) {
 			"count":{"type":"string","const":"5"},
 			"choice":{"type":"string","enum":["1","2","3"]},
 			"not_zero":{"type":"string","not":{"const":"0"}},
-			"flag":{"type":"string","const":"true"}
+			"flag":{"type":"string","const":"true"},
+			"exact":{"type":"string","const":"7"}
 		},
-		"required":["count","choice","not_zero","flag"],
+		"required":["count","choice","not_zero","flag","exact"],
 		"additionalProperties":false
 	}`, string(got))
 
 	v, err := jsonschema.Compile(t.Context(), s)
 	require.NoError(t, err)
 	require.NoError(t, v.ValidateJSON(t.Context(),
-		[]byte(`{"count":"5","choice":"2","not_zero":"3","flag":"true"}`)),
+		[]byte(`{"count":"5","choice":"2","not_zero":"3","flag":"true","exact":"7"}`)),
 		"the serialized string form satisfies the coerced constraints")
 }
 

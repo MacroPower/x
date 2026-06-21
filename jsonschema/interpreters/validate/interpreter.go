@@ -157,12 +157,22 @@ func applyValidator(key, value string, s, parent *jsonschema.Schema, fieldName s
 	// string, so the generator emits a string schema. Value-equality constraints
 	// must compare against that serialized form; dispatching on the raw Go kind
 	// would stamp a numeric or bool const/enum onto a string schema that no
-	// instance can match. Route eq/ne/oneof through the string path. Bound and
-	// length constraints keep their kind dispatch.
+	// instance can match. Route eq/ne/oneof through the string path. True bound
+	// and length constraints keep their kind dispatch.
 	if isStringCoercedValue(s, baseType) {
 		switch key {
 		case "eq", "ne", "oneof":
 			baseType = reflect.TypeFor[string]()
+		case "len":
+			// A len=N on a numeric field means the value equals N (the same
+			// scalar const as eq=N, per the doc contract), not a length. On a
+			// coerced field that const must be the serialized string, so route
+			// through the string eq path; the numeric kind dispatch would stamp
+			// a numeric const no quoted instance can ever match. A coerced bool
+			// keeps the main switch's unsupported-len error.
+			if isNumericKind(baseType) {
+				return applyStringEq(s, value)
+			}
 		}
 	}
 
