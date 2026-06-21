@@ -6682,6 +6682,49 @@ func TestCompileRejectsItemsArrayUnderDraft2020(t *testing.T) {
 	})
 }
 
+func TestCompileChecksRemoteDocumentStructure(t *testing.T) {
+	t.Parallel()
+
+	// The structural checks (type names, the Draft-7 items array under Draft
+	// 2020-12) must also cover remote documents fetched during Resolve, not just
+	// the local root. A remote reached only through a root $ref otherwise compiles
+	// cleanly and then silently mis-validates.
+	t.Run("draft-7 items array in a remote", func(t *testing.T) {
+		t.Parallel()
+
+		root := &jsonschema.Schema{
+			Schema: "https://json-schema.org/draft/2020-12/schema",
+			Ref:    "https://example.com/tuple.json",
+		}
+		remote := &jsonschema.Schema{
+			Type:       "array",
+			ItemsArray: []*jsonschema.Schema{{Type: "string"}},
+		}
+
+		_, err := jsonschema.Compile(t.Context(), root,
+			jsonschema.WithRefResolver(mapResolver{"https://example.com/tuple.json": remote}))
+		require.ErrorIs(t, err, jsonschema.ErrItemsArrayUnderDraft2020)
+		assert.Contains(t, err.Error(), "https://example.com/tuple.json",
+			"the violation must name the offending remote document")
+	})
+
+	t.Run("invalid type name in a remote", func(t *testing.T) {
+		t.Parallel()
+
+		root := &jsonschema.Schema{
+			Schema: "https://json-schema.org/draft/2020-12/schema",
+			Ref:    "https://example.com/typo.json",
+		}
+		remote := &jsonschema.Schema{Type: "strng"}
+
+		_, err := jsonschema.Compile(t.Context(), root,
+			jsonschema.WithRefResolver(mapResolver{"https://example.com/typo.json": remote}))
+		require.ErrorIs(t, err, jsonschema.ErrInvalidType)
+		assert.Contains(t, err.Error(), "https://example.com/typo.json",
+			"the violation must name the offending remote document")
+	})
+}
+
 func TestCheckTypeNames(t *testing.T) {
 	t.Parallel()
 

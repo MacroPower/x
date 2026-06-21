@@ -1053,8 +1053,12 @@ func Compile(ctx context.Context, schema *Schema, opts ...ValidateOption) (*Vali
 	// Reject unknown type names up front. Schema.Resolve does not check the
 	// type vocabulary, and a typo'd type otherwise compiles cleanly and then
 	// rejects every instance: a confusing runtime failure instead of a clear
-	// construction error.
-	err = CheckTypeNames(schema)
+	// construction error. The visited set is shared with the post-Resolve remote
+	// pass below, so a node reached both locally and through a remote URI is
+	// checked once.
+	typeVisited := map[*Schema]bool{}
+
+	err = checkTypeNames(schema, "", typeVisited)
 	if err != nil {
 		return nil, err
 	}
@@ -1063,8 +1067,10 @@ func Compile(ctx context.Context, schema *Schema, opts ...ValidateOption) (*Vali
 	// no meaning and the validation walk would otherwise drop it silently,
 	// accepting every element. Draft-7 spells tuples this way, so the check is
 	// gated on the resolved draft rather than applied unconditionally.
+	itemsVisited := map[*Schema]bool{}
+
 	if v.draft == Draft2020 {
-		err = checkItemsArrayDraft2020(schema, "", map[*Schema]bool{})
+		err = checkItemsArrayDraft2020(schema, "", itemsVisited)
 		if err != nil {
 			return nil, err
 		}
@@ -1102,12 +1108,36 @@ func Compile(ctx context.Context, schema *Schema, opts ...ValidateOption) (*Vali
 		return nil, fmt.Errorf("schema resolve: %w", err)
 	}
 
-	// Resolve may have fetched and registered remote schemas in uriRegistry
-	// after precompute ran over the root subtree. Extend the caches to them
-	// (the shared visited set skips schemas already covered) so a numeric,
-	// pattern, const, or enum keyword in a compile-time-fetched remote hits the
-	// cache instead of being recomputed on every validation.
-	for _, s := range v.uriRegistry {
+	// Resolve may have fetched and registered remote documents in uriRegistry
+	// after the passes above ran over the root subtree. Two things must extend to
+	// them, in key-sorted order so a reported violation locates a stable document:
+	//
+	//   - The structural checks (type names always, the Draft-7 items array under
+	//     Draft 2020-12). The root pass walks typed sub-schemas only and never
+	//     crosses a $ref into a remote, so a remote carrying an invalid type or an
+	//     items array would otherwise compile cleanly and then silently
+	//     mis-validate. The shared visited sets skip the root (also registered
+	//     under its base URI) and any node reached through several URIs, so each is
+	//     checked once; the base URI prefixes the path so a violation names the
+	//     offending remote.
+	//   - The precompute caches (numeric bounds and compiled patterns), so a
+	//     numeric, pattern, const, or enum keyword in a fetched remote hits the
+	//     cache instead of being recomputed on every validation.
+	for _, uri := range slices.Sorted(maps.Keys(v.uriRegistry)) {
+		s := v.uriRegistry[uri]
+
+		err = checkTypeNames(s, uri+"#", typeVisited)
+		if err != nil {
+			return nil, err
+		}
+
+		if v.draft == Draft2020 {
+			err = checkItemsArrayDraft2020(s, uri+"#", itemsVisited)
+			if err != nil {
+				return nil, err
+			}
+		}
+
 		v.precomputeSchema(s, precomputeVisited)
 	}
 
