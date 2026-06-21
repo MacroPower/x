@@ -211,9 +211,10 @@ func IsEmpty(s *jsonschema.Schema) bool {
 // DependentSchemas and any future addition, without re-enumerating the list.
 // Annotation, metadata, and identifier keywords (description, title, default,
 // deprecated, readOnly, writeOnly, examples, $comment, $id, $schema, $anchor,
-// $dynamicAnchor, $vocabulary) and the Extra escape hatch do not constrain a
-// value, so [IsEmpty] deliberately ignores them; they are checked explicitly
-// here because they too must be preserved across the allOf wrap. The set mirrors
+// $dynamicAnchor, $vocabulary), the render-only PropertyOrder, and the Extra
+// escape hatch do not constrain a value, so [IsEmpty] deliberately ignores
+// them; they are checked explicitly here because they too must be preserved
+// across the allOf wrap. The set mirrors
 // the non-constraint fields the jsonschema package's IsTrueSchema enumerates
 // beyond what [IsEmpty] covers; the three enumerations are co-maintained on
 // upstream Schema additions.
@@ -223,7 +224,7 @@ func HasRefSiblings(s *jsonschema.Schema) bool {
 	// interpreter or extender) can set them and they must survive the allOf wrap.
 	if s.Description != "" || s.Title != "" || s.Default != nil ||
 		s.Deprecated || s.ReadOnly || s.WriteOnly ||
-		len(s.Examples) > 0 || len(s.Extra) > 0 ||
+		len(s.Examples) > 0 || len(s.Extra) > 0 || len(s.PropertyOrder) > 0 ||
 		s.Comment != "" || s.ID != "" || s.Schema != "" ||
 		s.Anchor != "" || s.DynamicAnchor != "" || s.Vocabulary != nil {
 		return true

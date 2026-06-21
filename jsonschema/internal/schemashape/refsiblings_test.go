@@ -54,6 +54,10 @@ func TestHasRefSiblings(t *testing.T) {
 			schema: withRef(func(s *jsonschema.Schema) { s.Extra = map[string]any{"k": "v"} }),
 			want:   true,
 		},
+		"propertyOrder": {
+			schema: withRef(func(s *jsonschema.Schema) { s.PropertyOrder = []string{"a"} }),
+			want:   true,
+		},
 
 		// Constraint keywords: detected via IsEmpty after clearing $ref.
 		"type constraint":     {schema: withRef(func(s *jsonschema.Schema) { s.Type = "string" }), want: true},
