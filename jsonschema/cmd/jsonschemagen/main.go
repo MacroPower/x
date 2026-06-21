@@ -628,9 +628,10 @@ func isValidImportPath(p string) bool {
 
 	for _, r := range p {
 		switch {
+		// C0 control characters (including tab, 0x09), plus DEL and C1.
 		case r < 0x20, r == 0x7f, r >= 0x80 && r <= 0x9f:
 			return false
-		case r == '"', r == '`', r == '\\', r == ' ', r == '\t':
+		case r == '"', r == '`', r == '\\', r == ' ':
 			return false
 		}
 	}
