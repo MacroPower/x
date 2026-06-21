@@ -298,19 +298,53 @@ func guardedNumberEqual(n json.Number, b any) bool {
 	return d.Rat().Cmp(br) == 0
 }
 
+// equalClassified reports JSON-semantic equality like [equalJSONValues] but
+// takes each operand's non-finite/unbounded classification precomputed, so a
+// caller comparing one value against many (HasDuplicates) walks each value for
+// those properties once rather than re-walking both operands on every pair. The
+// dispatch is identical to equalJSONValues: a non-finite operand is unequal to
+// everything; an unbounded operand routes through the guarded comparison;
+// otherwise the full upstream semantics apply.
+func equalClassified(a any, aNonFinite, aUnbounded bool, b any, bNonFinite, bUnbounded bool) bool {
+	if aNonFinite || bNonFinite {
+		return false
+	}
+
+	if aUnbounded || bUnbounded {
+		return equalGuarded(a, b)
+	}
+
+	return jsonschema.Equal(a, b)
+}
+
 // HasDuplicates checks for duplicate values using JSON-semantic equality.
 func HasDuplicates(arr []any) bool {
-	// Use hash-then-compare optimization.
-	seen := make(map[uint64][]any, len(arr))
+	// Each array element is classified once for the two properties equalJSONValues
+	// would otherwise re-derive by walking both operands on every pair: whether it
+	// contains a non-finite float and whether it contains an out-of-bounds number.
+	// Classifying once turns the per-pair guard walks from O(n^2) into O(n).
+	type entry struct {
+		val       any
+		nonFinite bool
+		unbounded bool
+	}
+
+	seen := make(map[uint64][]entry, len(arr))
+
 	for _, item := range arr {
+		nonFinite := containsNonFiniteFloat(item)
+		// A non-finite operand is never equal to anything, so its unboundedness is
+		// never consulted; skip that walk.
+		unbounded := !nonFinite && containsUnboundedNumber(item)
+
 		h := hashValue(item)
 		for _, existing := range seen[h] {
-			if equalJSONValues(item, existing) {
+			if equalClassified(item, nonFinite, unbounded, existing.val, existing.nonFinite, existing.unbounded) {
 				return true
 			}
 		}
 
-		seen[h] = append(seen[h], item)
+		seen[h] = append(seen[h], entry{val: item, nonFinite: nonFinite, unbounded: unbounded})
 	}
 
 	return false
