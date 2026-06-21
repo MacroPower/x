@@ -489,6 +489,16 @@ func applySequenceOneOf(s *jsonschema.Schema, value string, baseType reflect.Typ
 // not the inner branch, so a blind move would silently overwrite that. Mirror
 // the non-nullable path instead: an identical const is a no-op, and a differing
 // const or any pre-existing enum is reported as a conflict.
+//
+// Only the anyOf[value, null] shape is handled, not the {"type":["null", base]}
+// type list that the generator also emits for nullable containers and ",string"
+// stringables (the shape [schemashape.RelocateConstEnumToValueBranch] rewrites
+// at the field level). That shape never reaches here carrying a const/enum: a
+// scalar element's nullability always generates the anyOf form (applyNullable),
+// and only scalars take the dive/oneof const/enum path. The omission relies on
+// that invariant; if a scalar nullable element ever emits the type-list shape,
+// this must grow the type-list case rather than leave the const as an inert
+// sibling of "type":["null", base].
 func relocateNullableValueConstraint(s *jsonschema.Schema) error {
 	inner := schemashape.NullableInnerSchema(s)
 	if inner == nil {
