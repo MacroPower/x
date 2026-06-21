@@ -749,18 +749,11 @@ func (in *inliner) resolveTarget(node *Schema, ref string) (*Schema, string, str
 		return target, baseURI, fragment, nil
 	}
 
-	// Anchor within the fetched document. Match the validator's precedence
-	// (resolveRefUncached): try the retrieval/current base first, then fall back
-	// to the document's own canonical base ($id), so Inline resolves an anchor
-	// exactly as validation would.
-	if target, ok := in.v.lookupAnchor(uriref.AnchorKey(baseURI, fragment)); ok {
+	// Anchor within the fetched document, resolved via the shared cross-document
+	// precedence (retrieval base first, then the document's canonical $id base)
+	// so Inline resolves an anchor exactly as validation would.
+	if target, ok := in.v.lookupAnchorWithFallback(baseURI, docRoot, fragment); ok {
 		return target, baseURI, "", nil
-	}
-
-	if canonBase := in.v.schemaBase(docRoot); canonBase != "" && canonBase != baseURI {
-		if target, ok := in.v.lookupAnchor(uriref.AnchorKey(canonBase, fragment)); ok {
-			return target, baseURI, "", nil
-		}
 	}
 
 	return nil, "", "", fmt.Errorf("%w: cannot resolve %q", ErrRefResolve, ref)

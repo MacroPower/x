@@ -3228,18 +3228,10 @@ func (v *validator) resolveRefUncached(schema *Schema, ref string) *Schema {
 		return v.resolveJSONPointer(target, rawFrag, fragEncoded)
 	}
 
-	// Anchor within resolved schema. Try the retrieval/current base first, then
-	// fall back to the document's own canonical base ($id) when it declares one
-	// distinct from the retrieval URI. The inliner's resolveTarget mirrors this
-	// precedence so the two paths resolve an anchor identically.
-	if anchorTarget, ok := v.lookupAnchor(uriref.AnchorKey(baseURI, fragment)); ok {
+	// Anchor within resolved schema, resolved via the shared cross-document
+	// precedence (retrieval base first, then the document's canonical $id base).
+	if anchorTarget, ok := v.lookupAnchorWithFallback(baseURI, target, fragment); ok {
 		return anchorTarget
-	}
-
-	if canonBase := v.schemaBase(target); canonBase != "" && canonBase != baseURI {
-		if anchorTarget, ok := v.lookupAnchor(uriref.AnchorKey(canonBase, fragment)); ok {
-			return anchorTarget
-		}
 	}
 
 	return nil
@@ -3387,6 +3379,27 @@ func (v *validator) lookupAnchor(key string) (*Schema, bool) {
 	s, ok := v.fallbackAnchorRegistry[key]
 
 	return s, ok
+}
+
+// lookupAnchorWithFallback resolves a named anchor fragment within an
+// already-located document, applying the cross-document precedence: the
+// retrieval/current base first, then the document's own canonical base ($id)
+// when docRoot declares one distinct from baseURI. Both resolveRefUncached and
+// the inliner's resolveTarget call it, so the validation and inline paths
+// resolve an anchor identically from one definition rather than two hand-rolled
+// copies kept in sync by comment.
+func (v *validator) lookupAnchorWithFallback(baseURI string, docRoot *Schema, fragment string) (*Schema, bool) {
+	if target, ok := v.lookupAnchor(uriref.AnchorKey(baseURI, fragment)); ok {
+		return target, true
+	}
+
+	if canonBase := v.schemaBase(docRoot); canonBase != "" && canonBase != baseURI {
+		if target, ok := v.lookupAnchor(uriref.AnchorKey(canonBase, fragment)); ok {
+			return target, true
+		}
+	}
+
+	return nil, false
 }
 
 // lookupDynamicAnchor resolves a baseURI#name key against $dynamicAnchor
