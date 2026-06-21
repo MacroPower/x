@@ -2372,25 +2372,27 @@ func (v *validator) validateArray(
 
 			ann.SetAllItems()
 		} else if schema.Items != nil && len(prefixSchemas) > 0 {
-			// In 2020-12: items after prefixItems applies to remaining elements.
-			// In draft-07: additionalItems applies to remaining elements.
-			if v.draft == Draft2020 {
-				childSchemaPath := schemaPath.kw("items")
+			// In 2020-12, items after prefixItems applies to the remaining
+			// elements. This branch is reachable only under 2020-12: upstream
+			// Resolve forbids Items and ItemsArray from both being set, so under
+			// draft-07 (where prefixSchemas comes from ItemsArray) Items is nil
+			// here. Draft-07's trailing-element keyword is additionalItems,
+			// handled below.
+			childSchemaPath := schemaPath.kw("items")
 
-				for i := len(prefixSchemas); i < len(arr); i++ {
-					childPath := instancePath.index(i)
-					childErrs := v.validate(schema.Items, arr[i], childPath, childSchemaPath, nil)
-					labelFalseSchemaKeyword(childErrs, schema.Items, KeywordItems)
+			for i := len(prefixSchemas); i < len(arr); i++ {
+				childPath := instancePath.index(i)
+				childErrs := v.validate(schema.Items, arr[i], childPath, childSchemaPath, nil)
+				labelFalseSchemaKeyword(childErrs, schema.Items, KeywordItems)
 
-					errs = append(errs, childErrs...)
-				}
+				errs = append(errs, childErrs...)
+			}
 
-				// Mark all items evaluated only when items actually applied to a
-				// trailing element; for an array no longer than prefixItems the
-				// prefix already covers every index via itemsEnd.
-				if len(arr) > len(prefixSchemas) {
-					ann.SetAllItems()
-				}
+			// Mark all items evaluated only when items actually applied to a
+			// trailing element; for an array no longer than prefixItems the
+			// prefix already covers every index via itemsEnd.
+			if len(arr) > len(prefixSchemas) {
+				ann.SetAllItems()
 			}
 		}
 
