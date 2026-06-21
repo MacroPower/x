@@ -1767,33 +1767,36 @@ func (v *validator) validateUnevaluated(
 		if obj, ok := instance.(map[string]any); ok && !ann.AllPropertiesSet() {
 			// IsEmptySchema implies Not == nil, so the schema is not a false
 			// schema: an empty (always-true) unevaluatedProperties evaluates
-			// every remaining property.
+			// every remaining property and can never fail. The saturation flag
+			// fully captures that outcome, so the per-property loop is skipped:
+			// it would only re-validate each property against the empty schema
+			// (always passing) and re-record what SetAllProperties subsumes.
 			if schemashape.IsEmpty(schema.UnevaluatedProperties) {
 				ann.SetAllProperties()
-			}
+			} else {
+				childSchemaPath := schemaPath.kw("unevaluatedProperties")
 
-			childSchemaPath := schemaPath.kw("unevaluatedProperties")
+				// Iterate in sorted key order so the emitted cause errors are
+				// deterministic, matching the sibling object keywords (properties,
+				// patternProperties, additionalProperties, propertyNames).
+				for _, propName := range slices.Sorted(maps.Keys(obj)) {
+					if ann.Evaluated(propName) {
+						continue
+					}
 
-			// Iterate in sorted key order so the emitted cause errors are
-			// deterministic, matching the sibling object keywords (properties,
-			// patternProperties, additionalProperties, propertyNames).
-			for _, propName := range slices.Sorted(maps.Keys(obj)) {
-				if ann.Evaluated(propName) {
-					continue
-				}
+					val := obj[propName]
 
-				val := obj[propName]
-
-				childPath := instancePath.key(propName)
-				childErrs := v.validate(schema.UnevaluatedProperties, val, childPath, childSchemaPath, nil)
-				if len(childErrs) == 0 {
-					ann.RecordProperty(propName)
-				} else {
-					errs = append(errs, newError(
-						childPath, childSchemaPath, KeywordUnevaluatedProperties,
-						fmt.Sprintf("property %q is not allowed by unevaluatedProperties", propName),
-						childErrs,
-					))
+					childPath := instancePath.key(propName)
+					childErrs := v.validate(schema.UnevaluatedProperties, val, childPath, childSchemaPath, nil)
+					if len(childErrs) == 0 {
+						ann.RecordProperty(propName)
+					} else {
+						errs = append(errs, newError(
+							childPath, childSchemaPath, KeywordUnevaluatedProperties,
+							fmt.Sprintf("property %q is not allowed by unevaluatedProperties", propName),
+							childErrs,
+						))
+					}
 				}
 			}
 		}
@@ -1804,28 +1807,31 @@ func (v *validator) validateUnevaluated(
 		if arr, ok := instance.([]any); ok && !ann.AllItemsSet() {
 			// IsEmptySchema implies Not == nil, so the schema is not a false
 			// schema: an empty (always-true) unevaluatedItems evaluates every
-			// remaining item.
+			// remaining item and can never fail. The saturation flag fully
+			// captures that outcome, so the per-item loop is skipped: it would
+			// only re-validate each item against the empty schema (always
+			// passing) and re-record what SetAllItems subsumes.
 			if schemashape.IsEmpty(schema.UnevaluatedItems) {
 				ann.SetAllItems()
-			}
+			} else {
+				childSchemaPath := schemaPath.kw("unevaluatedItems")
 
-			childSchemaPath := schemaPath.kw("unevaluatedItems")
+				for i, item := range arr {
+					if ann.ItemEvaluated(i) {
+						continue
+					}
 
-			for i, item := range arr {
-				if ann.ItemEvaluated(i) {
-					continue
-				}
-
-				childPath := instancePath.index(i)
-				childErrs := v.validate(schema.UnevaluatedItems, item, childPath, childSchemaPath, nil)
-				if len(childErrs) == 0 {
-					ann.RecordItem(i)
-				} else {
-					errs = append(errs, newError(
-						childPath, childSchemaPath, KeywordUnevaluatedItems,
-						fmt.Sprintf("item %d is not allowed by unevaluatedItems", i),
-						childErrs,
-					))
+					childPath := instancePath.index(i)
+					childErrs := v.validate(schema.UnevaluatedItems, item, childPath, childSchemaPath, nil)
+					if len(childErrs) == 0 {
+						ann.RecordItem(i)
+					} else {
+						errs = append(errs, newError(
+							childPath, childSchemaPath, KeywordUnevaluatedItems,
+							fmt.Sprintf("item %d is not allowed by unevaluatedItems", i),
+							childErrs,
+						))
+					}
 				}
 			}
 		}
