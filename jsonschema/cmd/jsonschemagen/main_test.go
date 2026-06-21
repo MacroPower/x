@@ -851,6 +851,36 @@ func TestRenderGoModEmitsTwoReplaceDirectives(t *testing.T) {
 		"renderGoMod should emit replace directives for the user module and jsonschema")
 }
 
+func TestCheckReplaceDir(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]struct {
+		dir string
+		err string
+	}{
+		"valid path":   {dir: "/tmp/mymod", err: ""},
+		"empty dir":    {dir: "", err: "reported no local directory"},
+		"backslash":    {dir: `/tmp/weird\dir`, err: "backslash"},
+		"valid spaces": {dir: "/tmp/my mod", err: ""},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := checkReplaceDir("module directory", tc.dir)
+			if tc.err == "" {
+				require.NoError(t, err)
+
+				return
+			}
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.err)
+		})
+	}
+}
+
 func TestCmdErrorExtractsStderr(t *testing.T) {
 	t.Parallel()
 

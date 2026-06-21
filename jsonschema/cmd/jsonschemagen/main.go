@@ -486,14 +486,25 @@ func goDirectiveVersion() string {
 }
 
 // checkReplaceDir rejects a module directory the go tool cannot place in a
-// replace directive. The modfile parser treats any backslash in a replacement
-// path as a Windows path and rejects it on a non-Windows system -- even when the
-// path is quoted, because it inspects the unquoted value -- so quoting cannot
-// rescue it. Catching it here turns the otherwise cryptic downstream "go mod
-// tidy" failure ("replacement directory appears to be Windows path") into a
-// clear message at the input boundary. A backslash is a legal POSIX filename
-// byte, so a checkout under such a directory is what triggers this.
+// replace directive. An empty path means `go list -m -json` reported no local
+// directory for the module -- it is known to the build but not extracted into
+// the module cache (a proxy-only state on a fresh checkout) -- which would emit
+// a `replace MODULE =>` line with no target that the modfile parser rejects.
+// A backslash trips a different parser rule: the modfile parser treats any
+// backslash in a replacement path as a Windows path and rejects it on a
+// non-Windows system -- even when the path is quoted, because it inspects the
+// unquoted value -- so quoting cannot rescue it. A backslash is a legal POSIX
+// filename byte, so a checkout under such a directory is what triggers it.
+// Catching both here turns the otherwise cryptic downstream "go mod tidy"
+// failure into a clear message at the input boundary.
 func checkReplaceDir(label, dir string) error {
+	if dir == "" {
+		return fmt.Errorf(
+			"%s is empty: the module reported no local directory; run `go mod download` first",
+			label,
+		)
+	}
+
 	if strings.Contains(dir, `\`) {
 		return fmt.Errorf(
 			"%s %q contains a backslash, which the go tool rejects as a Windows path in a replace directive",
