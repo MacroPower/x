@@ -1,6 +1,8 @@
 package regexcache_test
 
 import (
+	"regexp"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -53,6 +55,48 @@ func TestCompileCachesCompiledExpression(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Same(t, first, second)
+}
+
+func TestCompileFirstCompileRaceReturnsSamePointer(t *testing.T) {
+	t.Parallel()
+
+	// Race the first compile of a fresh pattern across many goroutines. The
+	// compile-and-cache is atomic, so every goroutine observes the same
+	// *regexp.Regexp; a non-atomic store would hand the losers their own
+	// locally-compiled pointers. Run under -race, this also catches the data
+	// race on the cache.
+	const (
+		pattern = `^race-me-[0-9]+$`
+		n       = 64
+	)
+
+	var (
+		wg      sync.WaitGroup
+		start   = make(chan struct{})
+		results = make([]*regexp.Regexp, n)
+	)
+
+	wg.Add(n)
+
+	for i := range n {
+		go func() {
+			defer wg.Done()
+
+			<-start
+
+			re, err := regexcache.Compile(pattern)
+			assert.NoError(t, err)
+
+			results[i] = re
+		}()
+	}
+
+	close(start)
+	wg.Wait()
+
+	for i := 1; i < n; i++ {
+		assert.Same(t, results[0], results[i])
+	}
 }
 
 func TestCompileCachesErrorFailClosed(t *testing.T) {

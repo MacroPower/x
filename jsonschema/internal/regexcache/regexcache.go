@@ -42,9 +42,18 @@ func Compile(pattern string) (*regexp.Regexp, error) {
 
 	// Cache the outcome including failures, so an invalid pattern reached
 	// through the validation-time fallback (a remote/uncached schema) compiles
-	// at most once. The cached error is shared across runs; callers only test it
-	// for non-nil and never mutate it.
-	cache.Store(pattern, cached{re: re, err: err})
+	// at most once. LoadOrStore makes the compile-and-cache atomic: when two
+	// goroutines race the first compile of one pattern, the loser discards its
+	// own result and both return the winner's, so every call for a given
+	// pattern observes the same compiled expression (and error) per the
+	// contract. The cached error is shared across runs; callers only test it for
+	// non-nil and never mutate it.
+	actual, _ := cache.LoadOrStore(pattern, cached{re: re, err: err})
+	if c, ok := actual.(cached); ok {
+		return c.re, c.err
+	}
 
+	// Unreachable: only cached values are ever stored. Fall back to the freshly
+	// compiled outcome rather than panicking.
 	return re, err
 }
