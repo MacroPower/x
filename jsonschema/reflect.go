@@ -314,11 +314,16 @@ func (g *generator) schemaForType(t reflect.Type, nullable bool) (*Schema, error
 
 	t = numkind.DerefType(t)
 
-	// A named non-struct type already extracted to $defs is referenced again,
-	// not rebuilt: re-running its provider, extender, and description hooks
-	// would invoke them once per reference and discard every result after the
-	// first. Struct types run the equivalent guard inside schemaForStruct.
-	if t.Kind() != reflect.Struct && t.Name() != "" {
+	// A named type already extracted to $defs is referenced again, not rebuilt:
+	// re-resolving it would re-run its provider, override, extender, and
+	// description hooks once per reference and discard every result after the
+	// first (extractToDefs finds the existing entry). This must precede the
+	// provider/override dispatch (steps 1-2) so a provider or override struct is
+	// not re-invoked per occurrence -- those steps run before the kind-based
+	// path where schemaForStruct keeps its own already-extracted guard. It fires
+	// only once the type has a $defs entry, so a struct mid-build (no entry yet)
+	// still flows through schemaForStruct's visiting-based cycle detection.
+	if t.Name() != "" {
 		if _, exists := g.typeToDefName[t]; exists {
 			return g.refForType(t, nullable), nil
 		}
