@@ -598,6 +598,65 @@ func TestMergeNullCarryThreeInputs(t *testing.T) {
 	}
 }
 
+func TestMergeIncompatibleThreeInputsStaysFailOpen(t *testing.T) {
+	t.Parallel()
+
+	// An incompatible pair widens the type away to "accept everything". A
+	// third input must not let the merge read that absent type as a null and
+	// re-emit [type, null]: that would reject the incompatible input and
+	// falsely admit null. The result must stay typeless, with no internal
+	// marker leaking into the output.
+	tcs := map[string]struct {
+		inputs []string
+	}{
+		"string, integer, string": {
+			inputs: []string{"val: foo\n", "val: 1\n", "val: bar\n"},
+		},
+		"string, integer, integer": {
+			inputs: []string{"val: foo\n", "val: 1\n", "val: 2\n"},
+		},
+		"incompatible last": {
+			inputs: []string{"val: 1\n", "val: 2\n", "val: foo\n"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			inputs := make([][]byte, len(tc.inputs))
+			for i, in := range tc.inputs {
+				inputs[i] = []byte(in)
+			}
+
+			gen := magicschema.NewGenerator()
+			schema, err := gen.Generate(inputs...)
+			require.NoError(t, err)
+
+			out, err := json.Marshal(schema)
+			require.NoError(t, err)
+
+			assert.NotContains(t, string(out), "typeless_union",
+				"internal merge marker must not leak into the output")
+
+			var got map[string]any
+
+			require.NoError(t, json.Unmarshal(out, &got))
+
+			props, ok := got["properties"].(map[string]any)
+			require.True(t, ok)
+
+			// No type constraint: val may be the true schema (JSON true) or a
+			// map without a "type" key.
+			if val, isMap := props["val"].(map[string]any); isMap {
+				assert.Nil(t, val["type"], "incompatible union must stay typeless")
+			} else {
+				assert.Equal(t, true, props["val"], "expected the true schema")
+			}
+		})
+	}
+}
+
 func TestMergeAnnotatedConstraints(t *testing.T) {
 	t.Parallel()
 

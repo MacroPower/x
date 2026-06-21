@@ -165,6 +165,10 @@ func (g *Generator) Generate(inputs ...[]byte) (*jsonschema.Schema, error) {
 		result = reduceSchemas(schemas)
 	}
 
+	// Drop the internal marker the merge uses to keep an incompatible-type
+	// union fail-open across folds; it must never reach the output.
+	stripTypelessUnion(result)
+
 	// Apply root-level settings.
 	result.Schema = "http://json-schema.org/draft-07/schema#"
 
