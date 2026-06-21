@@ -103,19 +103,33 @@ func normalizeNullTypes(s *jsonschema.Schema) {
 		}
 	}
 
+	forEachSubSchema(s, normalizeNullTypes)
+}
+
+// forEachSubSchema calls fn on each non-nil direct sub-schema of s -- the
+// single-schema fields, the schema slices, and the schema maps. It does not
+// recurse; a caller walking the whole tree calls forEachSubSchema again from
+// within fn. The enumerated field set mirrors the sub-schema shape of
+// jsonschema.Schema and is the one place the package spells it out, so a later
+// tree walk reuses it instead of copying the list.
+func forEachSubSchema(s *jsonschema.Schema, fn func(*jsonschema.Schema)) {
 	for _, sub := range [...]*jsonschema.Schema{
 		s.Items, s.AdditionalItems, s.Contains, s.UnevaluatedItems,
 		s.AdditionalProperties, s.PropertyNames, s.UnevaluatedProperties,
 		s.Not, s.If, s.Then, s.Else, s.ContentSchema,
 	} {
-		normalizeNullTypes(sub)
+		if sub != nil {
+			fn(sub)
+		}
 	}
 
 	for _, subs := range [...][]*jsonschema.Schema{
 		s.PrefixItems, s.ItemsArray, s.AllOf, s.AnyOf, s.OneOf,
 	} {
 		for _, sub := range subs {
-			normalizeNullTypes(sub)
+			if sub != nil {
+				fn(sub)
+			}
 		}
 	}
 
@@ -124,7 +138,9 @@ func normalizeNullTypes(s *jsonschema.Schema) {
 		s.PatternProperties, s.DependentSchemas,
 	} {
 		for _, sub := range subs {
-			normalizeNullTypes(sub)
+			if sub != nil {
+				fn(sub)
+			}
 		}
 	}
 }
