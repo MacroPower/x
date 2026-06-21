@@ -1059,6 +1059,17 @@ func Compile(ctx context.Context, schema *Schema, opts ...ValidateOption) (*Vali
 		return nil, err
 	}
 
+	// Reject the Draft-7 array form of items under Draft 2020-12, where it has
+	// no meaning and the validation walk would otherwise drop it silently,
+	// accepting every element. Draft-7 spells tuples this way, so the check is
+	// gated on the resolved draft rather than applied unconditionally.
+	if v.draft == Draft2020 {
+		err = checkItemsArrayDraft2020(schema, "", map[*Schema]bool{})
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	// Precompute derived per-schema state (numeric bounds and compiled
 	// patterns) while still single-threaded, so the returned Validator only
 	// reads these caches once shared across goroutines.
@@ -1258,6 +1269,35 @@ func checkTypeNames(schema *Schema, schemaPath string, visited map[*Schema]bool)
 	// map children come in sorted-key order for deterministic violations).
 	for _, entry := range SubschemaEntries(schema) {
 		err := checkTypeNames(entry.Schema, schemaPath+entry.Pointer, visited)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// checkItemsArrayDraft2020 rejects the Draft-7 array form of the items keyword
+// (ItemsArray, what upstream parses a JSON `"items": [ ... ]` into) when
+// compiling under [Draft2020], where it has no meaning. Without this the
+// 2020-12 array walk drops the constraint silently and validates every element
+// against nothing. The traversal mirrors [checkTypeNames]: it uses
+// [SubschemaEntries] for the field list and each entry's Pointer for the
+// location, with visited guarding schema-graph cycles. Compile runs it only
+// under Draft 2020-12, so Draft-7 schemas pay nothing.
+func checkItemsArrayDraft2020(schema *Schema, schemaPath string, visited map[*Schema]bool) error {
+	if schema == nil || visited[schema] {
+		return nil
+	}
+
+	visited[schema] = true
+
+	if len(schema.ItemsArray) > 0 {
+		return fmt.Errorf("%w; use prefixItems at %s/items", ErrItemsArrayUnderDraft2020, schemaPath)
+	}
+
+	for _, entry := range SubschemaEntries(schema) {
+		err := checkItemsArrayDraft2020(entry.Schema, schemaPath+entry.Pointer, visited)
 		if err != nil {
 			return err
 		}

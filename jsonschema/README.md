@@ -689,6 +689,13 @@ instance at runtime. The same check is exported standalone as
 `CheckTypeNames` (see [Schema traversal and predicates](#schema-traversal-and-predicates));
 `Compile` routes through it, so the two produce textually identical errors.
 
+Under draft 2020-12, `Compile` also rejects the array form of the `items`
+keyword (what a JSON `"items": [ ... ]` parses into) with
+`ErrItemsArrayUnderDraft2020`. That form is the draft-07 spelling of tuple
+validation; 2020-12 spells tuples with `prefixItems`, so an array-form `items`
+would otherwise be dropped silently and accept every element. Set the draft-07
+`$schema` (or `WithDraft`) for tuple semantics, or use `prefixItems`.
+
 The one-shot `Validate` compiles a fresh validator on every call; to
 validate many instances against the same schema, `Compile` once and reuse
 the result. A `*Validator` is safe for concurrent use by multiple
@@ -1092,18 +1099,19 @@ cycle introduced by the substitute is an ordinary `ErrRefCycle`.
 
 ## Errors
 
-| Error                        | Trigger                                                                                                                                     |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ErrUnsupportedType`         | A Go type with no JSON Schema representation (`func`, `chan`, `complex`, `unsafe.Pointer`).                                                 |
-| `ErrUnsupportedMapKey`       | A map key that is not a string, integer type, or `encoding.TextMarshaler`.                                                                  |
-| `ErrInvalidType`             | A `type` keyword naming something other than the seven JSON Schema type names (returned by `CheckTypeNames` and `Compile`).                 |
-| `ErrInvalidSchemaDocument`   | A schema document whose top-level value is not a JSON object or boolean (returned by `CompileJSON`, `ParseSchema`, and `ParseSchemaValue`). |
-| `ErrUnknownVocabulary`       | A required `$vocabulary` URI is unrecognized (or 2020-12 core is marked optional).                                                          |
-| `ErrRefResolve`              | A `RefResolver` returns an error resolving a remote `$ref`; in `Inline`, also a non-local ref with no resolver or any unresolvable target.  |
-| `ErrRefCycle`                | `Inline` expands a `$ref` that reaches its own target: the reference graph is cyclic and has no finite expansion.                           |
-| `ErrRefInline`               | `Inline` encounters a reference with no faithful static expansion (`$dynamicRef` under Draft 2020-12).                                      |
-| `ErrProviderPanic`           | A `JSONSchemaProvider`/`JSONSchemaExtender` method panics (recovered and wrapped).                                                          |
-| `ErrInvalidDefaultsInstance` | The `WithDefaultsFrom` instance does not match the generated root type or does not marshal to a JSON object.                                |
+| Error                         | Trigger                                                                                                                                     |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ErrUnsupportedType`          | A Go type with no JSON Schema representation (`func`, `chan`, `complex`, `unsafe.Pointer`).                                                 |
+| `ErrUnsupportedMapKey`        | A map key that is not a string, integer type, or `encoding.TextMarshaler`.                                                                  |
+| `ErrInvalidType`              | A `type` keyword naming something other than the seven JSON Schema type names (returned by `CheckTypeNames` and `Compile`).                 |
+| `ErrItemsArrayUnderDraft2020` | The draft-07 array form of `items` used under draft 2020-12, where tuples are spelled with `prefixItems` (returned by `Compile`).           |
+| `ErrInvalidSchemaDocument`    | A schema document whose top-level value is not a JSON object or boolean (returned by `CompileJSON`, `ParseSchema`, and `ParseSchemaValue`). |
+| `ErrUnknownVocabulary`        | A required `$vocabulary` URI is unrecognized (or 2020-12 core is marked optional).                                                          |
+| `ErrRefResolve`               | A `RefResolver` returns an error resolving a remote `$ref`; in `Inline`, also a non-local ref with no resolver or any unresolvable target.  |
+| `ErrRefCycle`                 | `Inline` expands a `$ref` that reaches its own target: the reference graph is cyclic and has no finite expansion.                           |
+| `ErrRefInline`                | `Inline` encounters a reference with no faithful static expansion (`$dynamicRef` under Draft 2020-12).                                      |
+| `ErrProviderPanic`            | A `JSONSchemaProvider`/`JSONSchemaExtender` method panics (recovered and wrapped).                                                          |
+| `ErrInvalidDefaultsInstance`  | The `WithDefaultsFrom` instance does not match the generated root type or does not marshal to a JSON object.                                |
 
 ## CLI: `jsonschemagen`
 

@@ -538,6 +538,13 @@
 // Predicates below); Compile routes through it, so the two produce textually
 // identical errors.
 //
+// Compile under [Draft2020] also rejects the array form of the items keyword
+// (what a JSON "items": [ ... ] parses into) with an error wrapping
+// [ErrItemsArrayUnderDraft2020]. That form is the Draft-7 spelling of tuple
+// validation; 2020-12 spells tuples with prefixItems, so an array-form items
+// would otherwise be dropped silently and accept every element. Set the Draft-7
+// $schema (or [WithDraft]) for tuple semantics, or use prefixItems.
+//
 // Instance numbers are compared exactly (decoded with UseNumber, compared as
 // [math/big.Rat]), with one bound on the work an adversarial literal can demand:
 // for a JSON number whose exact value exceeds an internal cap (about 4096

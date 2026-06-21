@@ -22,6 +22,17 @@ var (
 	// compile cleanly and then reject every instance at runtime.
 	ErrInvalidType = errors.New("invalid type name")
 
+	// ErrItemsArrayUnderDraft2020 is returned by [Compile] when a schema
+	// compiled under [Draft2020] sets the array form of the items keyword
+	// (the field upstream parses a JSON `"items": [ ... ]` into). Array-form
+	// items is the Draft-7 spelling of tuple validation; under 2020-12 tuples
+	// are spelled with prefixItems and array-form items has no meaning, so the
+	// 2020-12 walk would silently validate every element against nothing.
+	// Rejecting it at construction surfaces the dropped constraint instead of
+	// accepting every instance; set the Draft-7 $schema (or [WithDraft]) for
+	// tuple semantics, or use prefixItems.
+	ErrItemsArrayUnderDraft2020 = errors.New("array-form items is not valid under draft 2020-12")
+
 	// ErrInvalidSchemaDocument is returned by [CompileJSON], [ParseSchema],
 	// and [ParseSchemaValue] when a schema document's top-level value is not a
 	// JSON object or boolean.

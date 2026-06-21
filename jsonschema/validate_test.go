@@ -6616,6 +6616,72 @@ func TestCompileRejectsUnknownTypeNames(t *testing.T) {
 	}
 }
 
+// TestCompileRejectsItemsArrayUnderDraft2020 pins that the Draft-7 array form of
+// items (what a JSON `"items": [ ... ]` parses into) is rejected at Compile
+// under Draft 2020-12, where the validation walk would otherwise drop it
+// silently and accept every element, while remaining valid under Draft-7.
+func TestCompileRejectsItemsArrayUnderDraft2020(t *testing.T) {
+	t.Parallel()
+
+	t.Run("rejected at top level under default draft", func(t *testing.T) {
+		t.Parallel()
+
+		schema := &jsonschema.Schema{
+			Type:       "array",
+			ItemsArray: []*jsonschema.Schema{{Type: "integer"}},
+		}
+
+		_, err := jsonschema.Compile(t.Context(), schema)
+		require.ErrorIs(t, err, jsonschema.ErrItemsArrayUnderDraft2020)
+		assert.Contains(t, err.Error(), "/items")
+	})
+
+	t.Run("rejected when nested under properties", func(t *testing.T) {
+		t.Parallel()
+
+		schema := &jsonschema.Schema{
+			Type: "object",
+			Properties: map[string]*jsonschema.Schema{
+				"tuple": {
+					Type:       "array",
+					ItemsArray: []*jsonschema.Schema{{Type: "integer"}},
+				},
+			},
+		}
+
+		_, err := jsonschema.Compile(t.Context(), schema)
+		require.ErrorIs(t, err, jsonschema.ErrItemsArrayUnderDraft2020)
+		assert.Contains(t, err.Error(), "/properties/tuple/items")
+	})
+
+	t.Run("accepted and enforced under draft-7", func(t *testing.T) {
+		t.Parallel()
+
+		schema := &jsonschema.Schema{
+			Schema:     "http://json-schema.org/draft-07/schema#",
+			Type:       "array",
+			ItemsArray: []*jsonschema.Schema{{Type: "integer"}},
+		}
+
+		v, err := jsonschema.Compile(t.Context(), schema)
+		require.NoError(t, err)
+		require.Error(t, v.Validate(t.Context(), []any{"x"}))
+		require.NoError(t, v.Validate(t.Context(), []any{1.0}))
+	})
+
+	t.Run("accepted under WithDraft draft-7 override", func(t *testing.T) {
+		t.Parallel()
+
+		schema := &jsonschema.Schema{
+			Type:       "array",
+			ItemsArray: []*jsonschema.Schema{{Type: "integer"}},
+		}
+
+		_, err := jsonschema.Compile(t.Context(), schema, jsonschema.WithDraft(jsonschema.Draft7))
+		require.NoError(t, err)
+	})
+}
+
 func TestCheckTypeNames(t *testing.T) {
 	t.Parallel()
 
