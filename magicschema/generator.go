@@ -654,21 +654,19 @@ func (g *Generator) buildChildSchema(
 
 	childSchema := annotation.Schema
 
+	inferred := inferType(valueNode)
+
 	// If annotation doesn't specify type, infer it.
-	if childSchema.Type == "" && len(childSchema.Types) == 0 {
-		if inferred := inferType(valueNode); inferred != "" {
-			childSchema.Type = inferred
-		}
+	if childSchema.Type == "" && len(childSchema.Types) == 0 && inferred != "" {
+		childSchema.Type = inferred
 	}
 
-	// A null-only annotated type (e.g. bitnami's [nullable] without a type,
-	// or an inline type:null) widens with the value's inferred type so the
-	// schema does not reject the concrete value present in the source.
-	if isNullOnlyType(childSchema) {
-		if inferred := inferType(valueNode); inferred != "" && inferred != typeNull {
-			childSchema.Type = ""
-			childSchema.Types = []string{inferred, typeNull}
-		}
+	// A null-only annotated type (e.g. bitnami's [nullable] without a type, or
+	// an inline type:null) widens with the value's inferred type so the schema
+	// does not reject the concrete value present in the source. A concrete
+	// annotated type is authoritative and stands even over a null value.
+	if isNullOnlyType(childSchema) && inferred != "" && inferred != typeNull {
+		SetSchemaType(childSchema, []string{inferred, typeNull})
 	}
 
 	// Structural recursion looks through tag and anchor wrappers.
