@@ -119,6 +119,43 @@ func TestGeneratorAnnotatorEmptyTypesNotGrafted(t *testing.T) {
 	assert.Equal(t, "desc", prop["description"])
 }
 
+func TestGeneratorAnnotatorHighPriorityEmptyTypesNormalized(t *testing.T) {
+	t.Parallel()
+
+	// The highest-priority annotator returns a non-nil but empty Types slice.
+	// It copies straight through copySchema (no lower-priority result reaches
+	// the mergeSchemaFields guard), so structural inference fills Type and
+	// leaves both Type and Types set -- which the jsonschema marshaler rejects,
+	// failing the whole document. Normalizing the empty slice to nil in
+	// copySchema keeps the marshal working.
+	high := stubAnnotator{
+		name:   "high",
+		result: &magicschema.AnnotationResult{Schema: &jsonschema.Schema{Types: []string{}, Description: "desc"}},
+	}
+
+	gen := magicschema.NewGenerator(magicschema.WithAnnotators(high))
+
+	schema, err := gen.Generate([]byte("key: value\n"))
+	require.NoError(t, err)
+
+	// The marshal must not error on a schema carrying both Type and Types.
+	out, err := json.Marshal(schema)
+	require.NoError(t, err)
+
+	var got map[string]any
+
+	require.NoError(t, json.Unmarshal(out, &got))
+
+	props, ok := got["properties"].(map[string]any)
+	require.True(t, ok)
+
+	prop, ok := props["key"].(map[string]any)
+	require.True(t, ok)
+
+	assert.Equal(t, "string", prop["type"])
+	assert.Equal(t, "desc", prop["description"])
+}
+
 func TestGeneratorAnnotatorMutuallyExclusiveKeywords(t *testing.T) {
 	t.Parallel()
 

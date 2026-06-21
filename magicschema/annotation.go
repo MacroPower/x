@@ -116,6 +116,18 @@ func copySchema(s *jsonschema.Schema) *jsonschema.Schema {
 	}
 
 	c := *s
+
+	// A non-nil but empty Types slice survives the shallow copy and later
+	// collides with a Type that structural inference fills, leaving both set --
+	// a combination the jsonschema marshaler rejects, failing the whole
+	// document's marshal. Normalize it to nil, mirroring SetSchemaType's
+	// empty-list handling, so inference can fill Type cleanly. The
+	// lower-priority path is already guarded in mergeSchemaFields; this covers
+	// the highest-priority result, which copies through here untouched.
+	if len(c.Types) == 0 {
+		c.Types = nil
+	}
+
 	if s.Extra != nil {
 		c.Extra = maps.Clone(s.Extra)
 	}
