@@ -96,6 +96,50 @@ func TestBareDescriptionWithEqualsSign(t *testing.T) {
 		"bare description starting with word= should be treated as description")
 }
 
+func TestLeadingCommaTagRejected(t *testing.T) {
+	t.Parallel()
+
+	// A jsonschema tag with a leading comma (e.g. ",minimum=1") is a malformed
+	// key-value tag, not a bare description: the empty first segment must surface
+	// as a parse error rather than swallowing the real constraint into the
+	// description. Every other malformed-comma position (trailing, doubled) already
+	// errors, so the leading position must too.
+	cases := map[string]func(context.Context) (*jsonschema.Schema, error){
+		"leading comma before keyword": func(ctx context.Context) (*jsonschema.Schema, error) {
+			type T struct {
+				V int `json:"v" jsonschema:",minimum=1"`
+			}
+
+			return jsonschema.GenerateFor[T](ctx)
+		},
+		"leading comma before type": func(ctx context.Context) (*jsonschema.Schema, error) {
+			type T struct {
+				V int `json:"v" jsonschema:",type=integer"`
+			}
+
+			return jsonschema.GenerateFor[T](ctx)
+		},
+		"doubled leading comma": func(ctx context.Context) (*jsonschema.Schema, error) {
+			type T struct {
+				V int `json:"v" jsonschema:",,minimum=1"`
+			}
+
+			return jsonschema.GenerateFor[T](ctx)
+		},
+	}
+
+	for name, gen := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := gen(t.Context())
+			require.Error(t, err,
+				"a leading comma must be rejected, not swallowed into the description")
+			assert.Contains(t, err.Error(), "missing '='")
+		})
+	}
+}
+
 func TestProseDescriptionResolvesEscapes(t *testing.T) {
 	t.Parallel()
 

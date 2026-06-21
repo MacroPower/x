@@ -79,6 +79,15 @@ var (
 // key-value mode, surfaces typos like "descrption=typo" as unrecognized-key
 // errors, yet treats prose such as "a=b is the formula" as a bare description.
 func isKeyValueTag(pairs []string) bool {
+	// An empty first segment means a malformed leading comma (e.g.
+	// ",type=integer"): the kvPrefixRegexp gate matches a leading comma only when
+	// a WORD= prefix precedes the first whitespace, so this is never prose. Route
+	// it into the apply loop, whose missing-'=' guard reports it, instead of
+	// swallowing the real constraints into the description.
+	if pairs[0] == "" {
+		return true
+	}
+
 	// Inspect only the first key=value segment.
 	key, value, found := strings.Cut(pairs[0], "=")
 	if !found {
