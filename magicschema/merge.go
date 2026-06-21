@@ -79,13 +79,9 @@ func mergeSchemas(a, b *jsonschema.Schema) *jsonschema.Schema {
 		merged = nil
 	}
 
-	switch len(merged) {
-	case 0:
-	case 1:
-		result.Type = merged[0]
-	default:
-		result.Types = merged
-	}
+	// SetSchemaType assigns the scalar Type or the Types union and dedups, so a
+	// schema never carries both -- the same rule the annotators apply.
+	SetSchemaType(result, merged)
 
 	// Merge metadata: prefer a, fall back to b.
 	result.Title = cmp.Or(a.Title, b.Title)
@@ -96,6 +92,7 @@ func mergeSchemas(a, b *jsonschema.Schema) *jsonschema.Schema {
 	// path (mergeSchemaFields) already keeps them; a later union merge must not
 	// silently drop what survived single-input generation. References ($ref,
 	// $dynamicRef) stay dropped (see the doc comment).
+	result.Schema = cmp.Or(a.Schema, b.Schema)
 	result.ID = cmp.Or(a.ID, b.ID)
 	result.Comment = cmp.Or(a.Comment, b.Comment)
 	result.Anchor = cmp.Or(a.Anchor, b.Anchor)
