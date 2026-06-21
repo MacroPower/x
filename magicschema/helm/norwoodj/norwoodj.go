@@ -182,6 +182,22 @@ func cutNewStyleMarker(line string) (string, bool) {
 	return strings.TrimSpace(rest), true
 }
 
+// lastDefault returns the value of the last "# @default -- value" line in the
+// block, or nil when there is none. @default resolves last-wins, so a later
+// override beats an earlier one regardless of where the description sits.
+func lastDefault(lines []string) *string {
+	var val *string
+
+	for _, line := range lines {
+		if dm := defaultValueRegex.FindStringSubmatch(line); len(dm) > 1 {
+			v := dm[1]
+			val = &v
+		}
+	}
+
+	return val
+}
+
 // splitOldStyleComment matches an old-style "# key.path -- description" line
 // and returns the key path and description, splitting on the FIRST " -- "
 // separator. The greedy first capture in helmDocsDescRegex otherwise swallows
@@ -220,21 +236,13 @@ func parseCommentBlock(commentLines []string) *parsedComment {
 	// Scan ALL lines for @default before applying the issue #96
 	// workaround, so that @default lines appearing before the last
 	// "# --" group are preserved.
-	var prefixDefault *string
-
-	for _, line := range commentLines {
-		if dm := defaultValueRegex.FindStringSubmatch(line); len(dm) > 1 {
-			val := dm[1]
-			prefixDefault = &val
-		}
-	}
+	prefixDefault := lastDefault(commentLines)
 
 	// Work around issue #96: if multiple "# --" lines exist, take only the
 	// last group (from the last "# --" line onward) and recurse.
 	lastIdx := 0
 	for i, line := range commentLines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "# --") {
+		if _, ok := cutNewStyleMarker(line); ok {
 			lastIdx = i
 		}
 	}
@@ -524,8 +532,7 @@ func (a *Annotator) parseNewStyleComment(commentStr string) *parsedComment {
 	hasDesc := false
 
 	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "# --") {
+		if _, ok := cutNewStyleMarker(line); ok {
 			hasDesc = true
 
 			break
@@ -533,21 +540,11 @@ func (a *Annotator) parseNewStyleComment(commentStr string) *parsedComment {
 	}
 
 	if !hasDesc {
-		// No "# --" line, but check for standalone @default. Multiple @default
-		// lines resolve last-wins, matching parseCommentBlock's scan on the
-		// "# --" path so the result does not depend on whether a description
-		// line is present.
-		var lastDefault *string
-
-		for _, line := range lines {
-			if dm := defaultValueRegex.FindStringSubmatch(line); len(dm) > 1 {
-				val := dm[1]
-				lastDefault = &val
-			}
-		}
-
-		if lastDefault != nil {
-			return &parsedComment{defaultVal: lastDefault}
+		// No "# --" line, but check for standalone @default. @default resolves
+		// last-wins, matching parseCommentBlock's prefix scan so the result does
+		// not depend on whether a description line is present.
+		if d := lastDefault(lines); d != nil {
+			return &parsedComment{defaultVal: d}
 		}
 
 		return nil
