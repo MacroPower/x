@@ -1,6 +1,7 @@
 package validate_test
 
 import (
+	"context"
 	"encoding/json"
 	"math"
 	"reflect"
@@ -159,6 +160,77 @@ func TestValidateInterpreter_StringCoercedRequired(t *testing.T) {
 		"the serialized numeric zero must be rejected")
 	require.Error(t, v.ValidateJSON(t.Context(), []byte(`{"n":"5","flag":"false"}`)),
 		"the serialized bool zero must be rejected")
+}
+
+func TestValidateInterpreter_StringCoercedNumericBoundRejected(t *testing.T) {
+	t.Parallel()
+
+	// A numeric bound on a json:",string" field cannot be faithfully expressed:
+	// minimum and friends constrain JSON numbers, so they are inert against the
+	// quoted string instance the field serializes to. Stamping the keyword would
+	// silently drop the bound, so each bound rule (min/max/gt/lt/gte/lte, all
+	// routed through the same coercion case) is rejected instead. Struct tags
+	// must be compile-time literals, so each bound has its own field; GenerateFor
+	// returns on the first offending rule.
+	cases := map[string]func(context.Context) (*jsonschema.Schema, error){
+		"min": func(ctx context.Context) (*jsonschema.Schema, error) {
+			type F struct {
+				V int `json:"v,string" validate:"min=5"`
+			}
+
+			return jsonschema.GenerateFor[F](ctx, validateInterp())
+		},
+		"max": func(ctx context.Context) (*jsonschema.Schema, error) {
+			type F struct {
+				V int `json:"v,string" validate:"max=5"`
+			}
+
+			return jsonschema.GenerateFor[F](ctx, validateInterp())
+		},
+		"gt": func(ctx context.Context) (*jsonschema.Schema, error) {
+			type F struct {
+				V int `json:"v,string" validate:"gt=5"`
+			}
+
+			return jsonschema.GenerateFor[F](ctx, validateInterp())
+		},
+		"lt": func(ctx context.Context) (*jsonschema.Schema, error) {
+			type F struct {
+				V int `json:"v,string" validate:"lt=5"`
+			}
+
+			return jsonschema.GenerateFor[F](ctx, validateInterp())
+		},
+		"gte": func(ctx context.Context) (*jsonschema.Schema, error) {
+			type F struct {
+				V int `json:"v,string" validate:"gte=5"`
+			}
+
+			return jsonschema.GenerateFor[F](ctx, validateInterp())
+		},
+		"lte": func(ctx context.Context) (*jsonschema.Schema, error) {
+			type F struct {
+				V int `json:"v,string" validate:"lte=5"`
+			}
+
+			return jsonschema.GenerateFor[F](ctx, validateInterp())
+		},
+	}
+
+	for name, gen := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			s, err := gen(t.Context())
+			require.Error(t, err, "a numeric bound on a coerced field must be rejected")
+			assert.Contains(t, err.Error(), "coerced numeric field")
+			assert.Nil(t, s)
+		})
+	}
+}
+
+func validateInterp() jsonschema.GenerateOption {
+	return jsonschema.WithTagInterpreter("validate", validate.NewInterpreter())
 }
 
 func TestValidateInterpreter_NumericConstraints(t *testing.T) {

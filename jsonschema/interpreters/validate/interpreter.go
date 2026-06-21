@@ -173,6 +173,19 @@ func applyValidator(key, value string, s, parent *jsonschema.Schema, fieldName s
 			if isNumericKind(baseType) {
 				return applyStringEq(s, value)
 			}
+
+		case "min", "gte", "max", "lte", "gt", "lt":
+			// A numeric bound has no faithful mapping onto the serialized string:
+			// minimum and friends constrain JSON numbers, so they are inert
+			// against the quoted-string instance a json:",string" field produces,
+			// and JSON Schema has no keyword for "the numeric value of this string
+			// is >= N" (length keywords measure characters, not magnitude).
+			// Stamping the numeric keyword would silently drop the bound, so it is
+			// rejected instead. A coerced bool keeps the main switch's
+			// unsupported-bound error.
+			if isNumericKind(baseType) {
+				return fmt.Errorf("validate tag: %q not supported on a json:\",string\" coerced numeric field", key)
+			}
 		}
 	}
 

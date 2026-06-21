@@ -63,6 +63,14 @@
 // range-checked against the field's Go type, and a value the type cannot hold
 // is an error, mirroring the jsonschema tag's const/enum behavior.
 //
+// A json:",string" numeric or bool field serializes its value as a quoted
+// string, so the generated schema has type string. Scalar value rules (eq, ne,
+// oneof, len, and required's non-zero check) compare against that serialized
+// form. Numeric bounds (min, max, gt, lt, gte, lte) have no faithful mapping
+// onto the serialized string -- minimum and friends constrain JSON numbers, not
+// the quoted instance -- so they are rejected with an error rather than silently
+// dropped as an inert numeric keyword on a string schema.
+//
 // Length and size bounds (minLength/maxLength, minItems/maxItems,
 // minProperties/maxProperties) from several rules in one tag intersect
 // independently of order: a floor only rises and a ceiling only falls, and len=N
