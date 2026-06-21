@@ -1335,10 +1335,11 @@ func (c *Validator) Validate(ctx context.Context, instance any) error {
 // normalizeAndCheck normalizes instance and reports an error if, after
 // normalization, its type or a nested container leaf is not one the validation
 // walk accepts. The message lists the accepted types in one place so the two
-// entry points cannot drift.
+// entry points cannot drift. Normalization and the acceptance check share one
+// tree walk via [normalize.ValueChecked].
 func normalizeAndCheck(instance any) (any, error) {
-	instance = Normalize(instance)
-	if !normalize.Accepted(instance) {
+	instance, ok := normalize.ValueChecked(instance)
+	if !ok {
 		return nil, fmt.Errorf(
 			"instance of type %T is not accepted: accepted types are map[string]any, "+
 				"[]any, string, bool, nil, and the numeric types; marshal to JSON or use Validator.ValidateJSON",
