@@ -1,7 +1,6 @@
 package magicschema
 
 import (
-	"bytes"
 	"cmp"
 	"encoding/json"
 	"errors"
@@ -218,7 +217,7 @@ func (g *Generator) GenerateFiles(paths ...string) (*jsonschema.Schema, error) {
 func (g *Generator) generateSingle(input []byte) (*jsonschema.Schema, []Annotator, error) {
 	// Strip a UTF-8 byte-order mark; the parser would otherwise treat it
 	// as part of the first property key.
-	input = bytes.TrimPrefix(input, []byte("\xef\xbb\xbf"))
+	input = yamldoc.StripBOM(input)
 
 	// Normalize line endings to LF. The YAML spec folds all line breaks to
 	// LF on input, but goccy's lexer counts each CR toward its line number,
@@ -688,7 +687,7 @@ func (g *Generator) buildChildSchema(
 
 	// Apply mergeProperties before skipProperties. Both can be set at once --
 	// mergeAnnotations ORs them, so two annotators can each contribute one, or
-	// one losisin line can set both -- and stripping first would leave
+	// one annotation line can set both -- and stripping first would leave
 	// mergeProperties with no Properties to fold, silently dropping the child
 	// schemas. Folding first preserves them in additionalProperties; the strip
 	// then clears the now-empty Properties map.

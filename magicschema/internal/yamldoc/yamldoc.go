@@ -89,6 +89,12 @@ func SplitDocumentBytes(input []byte) [][]byte {
 	return out
 }
 
+// StripBOM removes a leading UTF-8 byte-order mark. A parser would otherwise
+// treat it as part of the first property key.
+func StripBOM(input []byte) []byte {
+	return bytes.TrimPrefix(input, []byte("\xef\xbb\xbf"))
+}
+
 // NormalizeLineEndings folds CRLF and lone CR line breaks to LF. Returns the
 // input unchanged when it contains no carriage returns.
 func NormalizeLineEndings(input []byte) []byte {
