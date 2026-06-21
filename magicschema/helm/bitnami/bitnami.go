@@ -84,9 +84,9 @@ func (a *Annotator) ForContent(content []byte) (magicschema.Annotator, error) {
 				description: description,
 			}
 
-			if modifiers != "" {
-				parseModifiers(param, modifiers)
-			}
+			// No guard needed: parseModifiers is a no-op on an empty modifier
+			// group.
+			parseModifiers(param, modifiers)
 
 			clone.params[keyPath] = param
 		}
@@ -111,17 +111,20 @@ func (a *Annotator) Annotate(_ ast.Node, keyPath string) *magicschema.Annotation
 		Description: param.description,
 	}
 
+	// Build the type list and let SetSchemaType pick scalar vs union (and dedup),
+	// like the other annotators, rather than hand-rolling the cases. A
+	// nullable-only param collapses to the scalar "null" type.
+	var types []string
+
 	if param.typeName != "" {
-		if param.nullable {
-			schema.Types = []string{param.typeName, "null"}
-		} else {
-			schema.Type = param.typeName
-		}
-	} else if param.nullable {
-		// A single type collapses to the scalar Type, like the other annotators
-		// and mergeSchemas, rather than a one-element ["null"] array.
-		schema.Type = "null"
+		types = append(types, param.typeName)
 	}
+
+	if param.nullable {
+		types = append(types, "null")
+	}
+
+	magicschema.SetSchemaType(schema, types)
 
 	if param.defaultVal != nil {
 		schema.Default = magicschema.ParseYAMLValue(*param.defaultVal)
