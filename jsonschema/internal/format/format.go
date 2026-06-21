@@ -724,6 +724,13 @@ func validateRegex(s string) error {
 	depth := 0
 
 	inClass := false
+
+	// Track the byte index where a ']' could first close a class: just past the
+	// opening '[' and past a leading '^'. ECMA 262 and RE2 both treat a ']' in
+	// that position as a literal class member, so the class is not yet
+	// terminable; tracking it rejects the empty class "[]" (and "[^]") that a
+	// naive close-on-first-']' scan accepts.
+	classStart := 0
 	for i := 0; i < len(s); {
 		c := s[i]
 		switch {
@@ -744,12 +751,18 @@ func validateRegex(s string) error {
 			continue
 
 		case inClass:
-			if c == ']' {
+			// A leading '^' is a negation, not a member, so the next ']' stays
+			// a literal; a ']' only terminates once a member has been seen.
+			if c == '^' && i == classStart {
+				classStart++
+			} else if c == ']' && i > classStart {
 				inClass = false
 			}
 
 		case c == '[':
 			inClass = true
+			classStart = i + 1
+
 		case c == '(':
 			depth++
 		case c == ')':

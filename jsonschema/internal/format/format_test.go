@@ -62,6 +62,42 @@ func TestRegexFormatAcceptsECMA262Constructs(t *testing.T) {
 	}
 }
 
+// TestRegexFormatRejectsEmptyCharacterClass covers the empty character class:
+// a ']' immediately after '[' (or after a leading '^') is a literal class
+// member in both ECMA 262 and RE2, so the class is unterminated. A class with
+// a real member, including a literal ']' as that member, stays valid.
+func TestRegexFormatRejectsEmptyCharacterClass(t *testing.T) {
+	t.Parallel()
+
+	validate := validator(t, "regex")
+
+	tests := map[string]struct {
+		instance string
+		valid    bool
+	}{
+		"empty class is invalid":             {instance: "[]", valid: false},
+		"negated empty class is invalid":     {instance: "[^]", valid: false},
+		"empty class mid-pattern is invalid": {instance: "a[]b", valid: false},
+		"class with literal ] is valid":      {instance: "[]]", valid: true},
+		"class with a member is valid":       {instance: "[a]", valid: true},
+		"negated class with member is valid": {instance: "[^a]", valid: true},
+		"class with escaped ] is valid":      {instance: `[\]]`, valid: true},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := validate(tc.instance)
+			if tc.valid {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+			}
+		})
+	}
+}
+
 // TestRegexFormatIdentityEscapesNonASCII covers ECMA 262 Annex B identity
 // escapes: a backslash followed by a non-ASCII source character is valid even
 // though it names no defined escape. The escaped rune must be decoded as UTF-8
