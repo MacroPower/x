@@ -549,14 +549,30 @@ func applyType(schema *jsonschema.Schema, val any) {
 		types := make([]string, 0, len(v))
 
 		for _, item := range v {
-			switch s := item.(type) {
+			switch item := item.(type) {
 			case string:
-				types = append(types, s)
+				// An empty string is not a valid JSON Schema type token; treat
+				// it as null, matching the round-trip path's normalizeNullTypes.
+				if item == "" {
+					types = append(types, "null")
+
+					continue
+				}
+
+				types = append(types, item)
+
 			case nil:
 				// YAML null in a type array (e.g., [string, null]) is
 				// deserialized as nil. Convert to the "null" type string,
 				// matching upstream behavior.
 				types = append(types, "null")
+			default:
+				// A member that is not a string or null cannot be a JSON Schema
+				// type token (e.g. type: [string, 1]). Narrowing to the
+				// representable members would drop a type the value may take and
+				// reject it, so drop the type entirely and fall back to value
+				// inference (fail open).
+				return
 			}
 		}
 

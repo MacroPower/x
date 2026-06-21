@@ -2855,6 +2855,49 @@ func TestHelmSchemaAnnotatorUnit(t *testing.T) {
 				assert.NotEmpty(t, f["type"], "type must not be an empty array")
 			},
 		},
+		"mixed type array with a non-string member drops the type": {
+			// type: [string, 1] cannot narrow to [string] without rejecting an
+			// integer the value may take, so the whole type is dropped and the
+			// value's type is inferred instead (fail open).
+			input: stringtest.Input(`
+				# @schema
+				# type: [string, 1]
+				# @schema
+				field: 42
+			`),
+			want: func(t *testing.T, _ *dadav.Annotator, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				f, ok := props["field"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "integer", f["type"])
+			},
+		},
+		"empty-string type member becomes the null type": {
+			// type: [string, ''] would emit the invalid Draft-7 "type": ["",...];
+			// the empty string normalizes to the null type instead.
+			input: stringtest.Input(`
+				# @schema
+				# type: [string, '']
+				# @schema
+				field: x
+			`),
+			want: func(t *testing.T, _ *dadav.Annotator, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				f, ok := props["field"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, []any{"string", "null"}, f["type"])
+			},
+		},
 		"double-hash description outside block stripped correctly": {
 			// Double-hash comments used as descriptions must not
 			// leave a stray '#' in the description text.
