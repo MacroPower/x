@@ -273,10 +273,9 @@ func splitAnnotatorNames(s string) []string {
 // trimmed and empty entries are dropped (CLI parsing concerns); resolution
 // itself goes through [Registry.Lookup].
 func (c *Config) parseAnnotatorNames(names string) ([]Annotator, error) {
-	if names == "" {
-		return nil, nil
-	}
-
+	// An empty or whitespace-only list needs no special case: splitAnnotatorNames
+	// drops it to no names and Lookup returns an empty slice, which the caller
+	// treats as "no annotators".
 	annotators, err := c.Registry.Lookup(splitAnnotatorNames(names)...)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidOption, err)
