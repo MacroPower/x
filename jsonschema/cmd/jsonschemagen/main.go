@@ -28,8 +28,6 @@ import (
 	"strconv"
 	"strings"
 	"text/template"
-	"unicode"
-	"unicode/utf8"
 )
 
 type config struct {
@@ -603,10 +601,10 @@ func renderMainGo(w io.Writer, cfg config, importPath string) error {
 	// The type is referenced as target.<TypeName> from a separate generated
 	// package, so an unexported name is inaccessible and would otherwise fail
 	// late with an opaque "undefined: target.<name>" compiler error. A non-empty
-	// name is guaranteed by token.IsIdentifier above, and DecodeRuneInString
-	// reads the first rune, handling a non-ASCII initial letter correctly.
-	first, _ := utf8.DecodeRuneInString(cfg.TypeName)
-	if !unicode.IsUpper(first) {
+	// name is guaranteed by token.IsIdentifier above, and token.IsExported then
+	// applies Go's own definition of exported-ness (the first rune is an
+	// upper-case letter), handling a non-ASCII initial letter correctly.
+	if !token.IsExported(cfg.TypeName) {
 		return fmt.Errorf("invalid type name %q: must be an exported (capitalized) Go identifier", cfg.TypeName)
 	}
 
