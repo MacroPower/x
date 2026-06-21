@@ -52,11 +52,13 @@ func DropEmptyDocuments(input []byte) []byte {
 // SplitDocumentBytes splits a normalized, empty-document-stripped YAML stream
 // into per-document byte slices in source order, intended to align 1:1 with
 // parser.ParseBytes's file.Docs. Documents are separated by bare "---" start
-// markers or "..." end markers (see [isDocBoundaryLine]); a leading separator
-// opens the stream with a blank segment that corresponds to no document and is
-// dropped. Callers guard on the returned length matching the parsed document
-// count and fall back to the whole input when it does not, so an imperfect
-// split (an empty document, or "..." abutting "---") never changes behavior.
+// markers or "..." end markers (see [isDocBoundaryLine]). Blank segments are
+// dropped: a leading separator opens the stream with one, and an empty document
+// between markers ("a: 1\n...\n\n...\nb: 2", which "..." leaves for
+// [DropEmptyDocuments] to miss) leaves one in the middle. The parser emits no
+// document for either, so keeping them would misalign the slices. Callers guard
+// on the returned length matching the parsed document count and fall back to
+// the whole input when it does not, so an imperfect split never changes behavior.
 func SplitDocumentBytes(input []byte) [][]byte {
 	lines := bytes.Split(input, []byte("\n"))
 
@@ -73,13 +75,15 @@ func SplitDocumentBytes(input []byte) [][]byte {
 		segments[last] = append(segments[last], line)
 	}
 
-	if IsBlank(bytes.Join(segments[0], []byte("\n"))) {
-		segments = segments[1:]
-	}
-
 	out := make([][]byte, 0, len(segments))
+
 	for _, seg := range segments {
-		out = append(out, bytes.Join(seg, []byte("\n")))
+		joined := bytes.Join(seg, []byte("\n"))
+		if IsBlank(joined) {
+			continue
+		}
+
+		out = append(out, joined)
 	}
 
 	return out
@@ -111,9 +115,7 @@ func isSeparatorLine(line []byte) bool {
 // distinct from [isSeparatorLine] because the two markers collapse differently
 // when an empty document is dropped.
 func isDocBoundaryLine(line []byte) bool {
-	trimmed := bytes.TrimRight(line, " \t\r")
-
-	return bytes.Equal(trimmed, []byte("---")) || bytes.Equal(trimmed, []byte("..."))
+	return isSeparatorLine(line) || bytes.Equal(bytes.TrimRight(line, " \t\r"), []byte("..."))
 }
 
 // IsBlank returns true if the byte slice contains only whitespace.
