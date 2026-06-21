@@ -653,6 +653,32 @@ type Exists struct{}
 	require.Error(t, err)
 }
 
+func TestIntegrationPackageMainRejected(t *testing.T) {
+	t.Parallel()
+
+	// A type in a package main cannot be reflected over, because jsonschemagen
+	// imports the target package and Go forbids importing a main package. The
+	// tool must reject it with a clear message rather than failing late with the
+	// opaque "is a program, not an importable package" build error.
+	binary := buildBinary(t)
+	dir := createTestModule(t, `package main
+
+type Config struct {
+	Name string `+"`"+`json:"name"`+"`"+`
+}
+`)
+
+	cmd := exec.CommandContext(t.Context(), binary, "-type", "Config")
+	cmd.Dir = dir
+
+	out, err := cmd.CombinedOutput()
+	require.Error(t, err)
+	assert.Contains(t, string(out), "package main",
+		"a main-package target must be rejected with a clear message")
+	assert.NotContains(t, string(out), "not an importable package",
+		"the opaque go build error must not leak through")
+}
+
 // cmdStderr extracts stderr from an exec error for test diagnostics.
 func cmdStderr(err error) string {
 	if err == nil {

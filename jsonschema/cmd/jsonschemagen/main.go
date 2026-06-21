@@ -164,15 +164,36 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 	return nil
 }
 
-// resolveImportPath returns the import path of the current package.
+// resolveImportPath returns the import path of the current package. It rejects a
+// main package up front: jsonschemagen generates a program that imports the
+// target package to reflect over it, and Go forbids importing a package main,
+// which would otherwise fail late with the opaque "is a program, not an
+// importable package" build error from `go run`. The package name comes from the
+// same `go list` call, so the check costs no extra process.
 func resolveImportPath() (string, error) {
-	cmd := exec.CommandContext(context.Background(), "go", "list", ".")
+	cmd := exec.CommandContext(context.Background(), "go", "list", "-f", "{{.Name}} {{.ImportPath}}", ".")
 	out, err := cmd.Output()
 	if err != nil {
 		return "", cmdError(err)
 	}
 
-	return strings.TrimSpace(string(out)), nil
+	// A package name and an import path are each a single space-free token, so
+	// the first space separates them.
+	name, importPath, ok := strings.Cut(strings.TrimSpace(string(out)), " ")
+	if !ok {
+		return "", fmt.Errorf("parse go list output %q", strings.TrimSpace(string(out)))
+	}
+
+	if name == "main" {
+		return "", fmt.Errorf(
+			"cannot generate a schema for a type in package main (%s): jsonschemagen imports "+
+				"the target package to reflect over it, which Go does not allow for a main package; "+
+				"move the type to an importable (non-main) package",
+			importPath,
+		)
+	}
+
+	return importPath, nil
 }
 
 // moduleInfo holds the path and directory of a Go module.
