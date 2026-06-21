@@ -2413,8 +2413,6 @@ func (v *validator) validateArray(
 		if schema.Contains != nil {
 			matchCount := 0
 
-			var matchedIdx []int
-
 			// The contains schema location is invariant across elements; build it
 			// once rather than rebuilding it on every iteration.
 			containsSchemaPath := schemaPath.kw("contains")
@@ -2424,7 +2422,13 @@ func (v *validator) validateArray(
 				if len(childErrs) == 0 {
 					matchCount++
 
-					matchedIdx = append(matchedIdx, i)
+					// Record the matched index as the contains annotation (JSON
+					// Schema 2020-12 core 10.3.1.3) as it is found, independent of
+					// min/maxContains, so a matched item stays evaluated for
+					// unevaluatedItems even when the count violates those separate
+					// assertions emitted below. RecordItem is nil-safe and order
+					// independent, so recording here needs no second pass.
+					ann.RecordItem(i)
 				}
 			}
 
@@ -2440,15 +2444,6 @@ func (v *validator) validateArray(
 			maxContains := -1
 			if v.draft == Draft2020 && v.vocabs.Validation && schema.MaxContains != nil {
 				maxContains = *schema.MaxContains
-			}
-
-			// The contains annotation is the set of indexes the subschema matched,
-			// produced per element independently of min/maxContains (JSON Schema
-			// 2020-12 core 10.3.1.3). Record it unconditionally so a matched item
-			// stays evaluated for unevaluatedItems even when the count violates
-			// min/maxContains; those are separate assertions, emitted below.
-			for _, i := range matchedIdx {
-				ann.RecordItem(i)
 			}
 
 			if matchCount < minContains {
