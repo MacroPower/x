@@ -9,53 +9,6 @@ import (
 	"go.jacobcolvin.com/x/jsonschema/internal/normalize"
 )
 
-func TestAccepted(t *testing.T) {
-	t.Parallel()
-
-	tests := map[string]struct {
-		in   any
-		want bool
-	}{
-		"nil":                    {in: nil, want: true},
-		"bool":                   {in: true, want: true},
-		"string":                 {in: "x", want: true},
-		"float64":                {in: 1.5, want: true},
-		"json.Number":            {in: json.Number("5"), want: true},
-		"accepted slice":         {in: []any{1.0, "x", nil}, want: true},
-		"accepted map":           {in: map[string]any{"a": 1.0}, want: true},
-		"slice with struct leaf": {in: []any{struct{}{}}, want: false},
-		"map with struct leaf":   {in: map[string]any{"a": struct{}{}}, want: false},
-		"bare struct":            {in: struct{}{}, want: false},
-		"raw int":                {in: 5, want: false},
-	}
-
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			assert.Equal(t, tc.want, normalize.Accepted(tc.in))
-		})
-	}
-}
-
-func TestAcceptedTerminatesOnCyclicInstance(t *testing.T) {
-	t.Parallel()
-
-	// A self-referential map/slice is the input shape Value tolerates; Accepted
-	// must terminate at the back-edge rather than overflow the stack.
-	m := map[string]any{}
-	m["self"] = m
-	assert.True(t, normalize.Accepted(m))
-
-	s := []any{nil}
-	s[0] = s
-	assert.True(t, normalize.Accepted(s))
-
-	// A cycle wrapping an otherwise-rejected leaf still terminates and rejects.
-	bad := map[string]any{"leaf": struct{}{}}
-	bad["self"] = bad
-	assert.False(t, normalize.Accepted(bad))
-}
-
 func TestTypeName(t *testing.T) {
 	t.Parallel()
 

@@ -220,6 +220,57 @@ func TestValueCycleGuardSelfReferentialSlice(t *testing.T) {
 	assert.Equal(t, json.Number("1"), gotSlice[0])
 }
 
+func TestValueChecked(t *testing.T) {
+	t.Parallel()
+
+	// ValueChecked normalizes like Value and additionally reports whether every
+	// leaf is, after normalization, a JSON-shaped value the validation walk
+	// accepts. A raw Go int is accepted because normalization converts it to a
+	// json.Number; a struct leaf has no JSON shape and is not accepted.
+	tests := map[string]struct {
+		in       any
+		accepted bool
+	}{
+		"nil":                    {in: nil, accepted: true},
+		"bool":                   {in: true, accepted: true},
+		"string":                 {in: "x", accepted: true},
+		"float64":                {in: 1.5, accepted: true},
+		"json.Number":            {in: json.Number("5"), accepted: true},
+		"raw int converts":       {in: 5, accepted: true},
+		"accepted slice":         {in: []any{1, "x", nil}, accepted: true},
+		"accepted map":           {in: map[string]any{"a": 1}, accepted: true},
+		"slice with struct leaf": {in: []any{struct{}{}}, accepted: false},
+		"map with struct leaf":   {in: map[string]any{"a": struct{}{}}, accepted: false},
+		"bare struct":            {in: struct{}{}, accepted: false},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, accepted := normalize.ValueChecked(tc.in)
+			assert.Equal(t, tc.accepted, accepted)
+		})
+	}
+}
+
+func TestValueCheckedTerminatesOnCyclicInstance(t *testing.T) {
+	t.Parallel()
+
+	// A self-referential map/slice is the input shape Value tolerates; the
+	// folded acceptance walk must terminate at the back-edge rather than overflow
+	// the stack, and a cycle wrapping a rejected leaf still reports not-accepted.
+	m := map[string]any{"n": 1}
+	m["self"] = m
+	_, accepted := normalize.ValueChecked(m)
+	assert.True(t, accepted)
+
+	bad := map[string]any{"leaf": struct{}{}}
+	bad["self"] = bad
+	_, accepted = normalize.ValueChecked(bad)
+	assert.False(t, accepted)
+}
+
 func TestValueResliceIsNormalizedNotMistakenForCycle(t *testing.T) {
 	t.Parallel()
 

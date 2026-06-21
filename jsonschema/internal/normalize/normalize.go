@@ -30,7 +30,7 @@ import (
 //     unchanged.
 //
 // Anything else (structs, named numeric types, map[any]any) also passes
-// through unchanged and is rejected by [Accepted].
+// through unchanged; [ValueChecked] reports such a leaf as not accepted.
 //
 // Containers are copied only when normalization changes something inside them;
 // an already JSON-shaped value is returned as-is, and the input is never
@@ -50,10 +50,10 @@ func Value(instance any) any {
 // ValueChecked normalizes instance like [Value] and additionally reports
 // whether every leaf is, after normalization, a JSON-shaped value the
 // validation walk accepts: map[string]any, []any, string, bool, nil, float64,
-// [encoding/json.Number], or a Go numeric kind Value converts. It folds Value
-// and [Accepted] into a single tree walk for the validation funnel, which would
-// otherwise normalize the instance and then re-walk the whole structure a second
-// time to check acceptance.
+// [encoding/json.Number], or a Go numeric kind Value converts. It folds
+// normalization and the acceptance check into a single tree walk for the
+// validation funnel, which would otherwise normalize the instance and then
+// re-walk the whole structure a second time to check acceptance.
 func ValueChecked(instance any) (any, bool) {
 	normalized, _, accepted := normalizeInstance(instance, map[[2]uintptr]bool{})
 
@@ -65,7 +65,7 @@ func ValueChecked(instance any) (any, bool) {
 // value. The changed flag lets container normalization share unchanged children
 // with the input instead of comparing interface values (which would panic on
 // uncomparable types like maps and slices). The accepted flag carries the
-// [Accepted] check through the same walk, so the validation funnel needs only
+// acceptance check through the same walk, so the validation funnel needs only
 // one traversal.
 func normalizeInstance(instance any, onPath map[[2]uintptr]bool) (any, bool, bool) {
 	switch v := instance.(type) {

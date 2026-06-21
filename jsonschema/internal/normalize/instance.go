@@ -2,75 +2,10 @@ package normalize
 
 import (
 	"encoding/json"
-	"reflect"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/numrat"
 	"go.jacobcolvin.com/x/jsonschema/internal/typename"
 )
-
-// Accepted reports whether instance is one of the JSON-compatible Go types the
-// validation walk works with: map[string]any, []any, string, float64,
-// [json.Number], bool, or nil. Callers run [Value] first, so Go integer kinds
-// and float32 are already converted by the time this runs. Other types, notably
-// Go structs and [time.Time], are not accepted, because encoding/json does not
-// produce them when unmarshaling into an any. The check recurses into
-// containers, since [Value] leaves a nested non-JSON leaf (a struct, channel, or
-// function inside a slice or map) unchanged; rejecting it here turns what would
-// be a panic or a silent mis-validation deeper in the walk into a rejected
-// instance.
-//
-// Like [Value], the recursion carries a {pointer, len} cycle guard so a
-// self-referential map or slice (the input shape Value deliberately tolerates)
-// terminates at the back-edge instead of overflowing the stack with a fatal
-// error recover cannot catch. A back-edge re-enters a container already vetted
-// on the current path, so it is treated as accepted.
-func Accepted(instance any) bool {
-	return accepted(instance, map[[2]uintptr]bool{})
-}
-
-func accepted(instance any, onPath map[[2]uintptr]bool) bool {
-	switch v := instance.(type) {
-	case nil, bool, string, float64, json.Number:
-		return true
-
-	case []any:
-		key := [2]uintptr{reflect.ValueOf(v).Pointer(), uintptr(len(v))}
-		if onPath[key] {
-			return true
-		}
-
-		onPath[key] = true
-		defer delete(onPath, key)
-
-		for _, item := range v {
-			if !accepted(item, onPath) {
-				return false
-			}
-		}
-
-		return true
-
-	case map[string]any:
-		key := [2]uintptr{reflect.ValueOf(v).Pointer(), uintptr(len(v))}
-		if onPath[key] {
-			return true
-		}
-
-		onPath[key] = true
-		defer delete(onPath, key)
-
-		for _, item := range v {
-			if !accepted(item, onPath) {
-				return false
-			}
-		}
-
-		return true
-
-	default:
-		return false
-	}
-}
 
 // TypeName returns the JSON Schema type name for a normalized Go value, or ""
 // for a value that has no JSON Schema type.
