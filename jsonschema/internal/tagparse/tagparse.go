@@ -223,6 +223,13 @@ func isScalarValueKey(key string) bool {
 	}
 }
 
+// isStringScalar reports whether t (after dereferencing pointers) is a string
+// kind. An empty const/default value is meaningful only for a string field,
+// where it expresses the valid JSON Schema value "".
+func isStringScalar(t reflect.Type) bool {
+	return t != nil && numkind.DerefType(t).Kind() == reflect.String
+}
+
 // Constraint group names: the JSON type family whose keywords a type= override
 // keeps. A keyword outside the override's family is dropped, so an explicitly
 // tagged keyword in a dropped family is a conflict.
@@ -510,7 +517,9 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *jsonschema.
 		s.MaxProperties = &n
 
 	case keyword.Default:
-		if value == "" {
+		// An empty value is rejected except on a string field, where "" is the
+		// valid JSON Schema default the empty string.
+		if value == "" && !isStringScalar(scalarType) {
 			return fmt.Errorf("jsonschema tag: key %q requires a non-empty value", key)
 		}
 
@@ -527,7 +536,9 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *jsonschema.
 		s.Default = raw
 
 	case keyword.Const:
-		if value == "" {
+		// An empty value is rejected except on a string field, where "" is the
+		// valid JSON Schema const the empty string.
+		if value == "" && !isStringScalar(scalarType) {
 			return fmt.Errorf("jsonschema tag: key %q requires a non-empty value", key)
 		}
 

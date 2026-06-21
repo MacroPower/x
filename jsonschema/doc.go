@@ -383,6 +383,10 @@
 // complex values, use [JSONSchemaExtender] or AST doc comments with
 // [WithDescriptionProvider].
 //
+// An empty value (for example const= or default=) is rejected for every key
+// except const and default on a string field, where it expresses the valid
+// JSON Schema empty string ({"type":"string","const":""}).
+//
 // Because pairs apply in order, a default, const, enum, or examples value
 // appearing after a type= pair parses against the overridden JSON type
 // rather than the field's Go type: string, integer, number, and boolean

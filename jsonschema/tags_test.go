@@ -460,6 +460,32 @@ func TestParseTypedScalarPrecisionLoss(t *testing.T) {
 		"large int64 const should not lose precision in float64 cast")
 }
 
+func TestEmptyStringConstAndDefault(t *testing.T) {
+	t.Parallel()
+
+	// An empty const/default value expresses the valid JSON Schema empty string
+	// on a string field; it stays rejected on a non-string field where "" is
+	// meaningless.
+	type StringField struct {
+		C string `json:"c" jsonschema:"const="`
+		D string `json:"d" jsonschema:"default="`
+	}
+
+	s, err := jsonschema.GenerateFor[StringField](t.Context())
+	require.NoError(t, err)
+
+	require.NotNil(t, s.Properties["c"].Const)
+	assert.Empty(t, *s.Properties["c"].Const)
+	assert.JSONEq(t, `""`, string(s.Properties["d"].Default))
+
+	type IntField struct {
+		C int `json:"c" jsonschema:"const="`
+	}
+
+	_, err = jsonschema.GenerateFor[IntField](t.Context())
+	require.Error(t, err, "an empty const on a non-string field stays rejected")
+}
+
 func TestParseTypedScalarRejectsUnknownKinds(t *testing.T) {
 	t.Parallel()
 
