@@ -303,55 +303,57 @@ func parseBoolOrSchema(val string, hasVal bool) *jsonschema.Schema {
 }
 
 // splitSemicolons splits a line by semicolons, respecting nested brackets and
-// double-quoted runs. Bracket nesting is tracked with a type-aware stack, so a
-// stray closer of one kind (a "}" inside a "[...]" value) does not cancel an
-// opener of the other kind and expose an inner semicolon as a delimiter. A
-// double-quoted value likewise keeps a ";" (or a bracket) it contains literal,
-// so an annotation such as default:"a;b" survives intact; a backslash escapes
-// the next rune, so an escaped quote (default:"a\";b") does not end the run
-// early. A quote only opens a run at bracket depth zero -- inside [...] or {...}
-// the bracket stack already keeps the content literal, so a quote in a regex
-// char class like [",;] is not mistaken for a string delimiter. When openers or
-// a quote are left unbalanced the split is unreliable, so the line is split on
-// every semicolon instead -- a malformed value then only corrupts its own pair
+// quoted runs. Bracket nesting is tracked with a type-aware stack, so a stray
+// closer of one kind (a "}" inside a "[...]" value) does not cancel an opener
+// of the other kind and expose an inner semicolon as a delimiter. A quoted
+// value -- single or double -- likewise keeps a ";" (or a bracket) it contains
+// literal, so an annotation such as default:'a;b' or default:"a;b" survives
+// intact; inside a double-quoted run a backslash escapes the next rune, so an
+// escaped quote (default:"a\";b") does not end the run early. A quote only
+// opens a run at bracket depth zero -- inside [...] or {...} the bracket stack
+// already keeps the content literal, so a quote in a regex char class like
+// [",;] is not mistaken for a string delimiter. When openers or a quote are
+// left unbalanced the split is unreliable, so the line is split on every
+// semicolon instead -- a malformed value then only corrupts its own pair
 // rather than swallowing every pair after it.
 func splitSemicolons(line string) []string {
 	var (
 		parts   []string
 		current strings.Builder
 		stack   []rune
-		inQuote bool
+		quote   rune // 0 outside a quoted run, else the opening quote rune
 		escaped bool
 	)
 
 	for _, ch := range line {
-		// Inside a double-quoted run every character is literal: a ";" or a
-		// bracket there is part of the value, not a delimiter or nesting token.
-		// A backslash escapes the next rune, so an escaped quote (default:"a\";b")
-		// does not close the run and expose the inner semicolon as a delimiter.
-		if inQuote {
+		// Inside a quoted run every character is literal: a ";" or a bracket
+		// there is part of the value, not a delimiter or nesting token. In a
+		// double-quoted run a backslash escapes the next rune, so an escaped
+		// quote (default:"a\";b") does not close the run and expose the inner
+		// semicolon; single-quoted YAML has no backslash escape.
+		if quote != 0 {
 			current.WriteRune(ch)
 
 			switch {
 			case escaped:
 				escaped = false
-			case ch == '\\':
+			case quote == '"' && ch == '\\':
 				escaped = true
-			case ch == '"':
-				inQuote = false
+			case ch == quote:
+				quote = 0
 			}
 
 			continue
 		}
 
 		switch ch {
-		case '"':
+		case '"', '\'':
 			// Only a top-level quote opens a quoted run. Inside [...] or {...}
 			// the bracket stack already keeps the content literal -- a regex
-			// char class like [",;], say -- so flipping inQuote there would
+			// char class like [",;], say -- so opening a run there would
 			// swallow the matching closer and force the naive whole-line split.
 			if len(stack) == 0 {
-				inQuote = true
+				quote = ch
 			}
 
 			current.WriteRune(ch)
@@ -387,7 +389,7 @@ func splitSemicolons(line string) []string {
 		parts = append(parts, current.String())
 	}
 
-	if len(stack) != 0 || inQuote {
+	if len(stack) != 0 || quote != 0 {
 		return strings.Split(line, ";")
 	}
 

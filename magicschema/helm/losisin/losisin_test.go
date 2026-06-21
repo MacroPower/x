@@ -1827,6 +1827,27 @@ func TestHelmValuesSchemaAnnotatorAlignment(t *testing.T) {
 				assert.Equal(t, "^x$", v["pattern"])
 			},
 		},
+		"semicolon inside a single-quoted value preserved": {
+			// A single-quoted default holding a ";" must not split at the inner
+			// semicolon either; YAML single quotes carry no backslash escape.
+			input: stringtest.Input(`
+				# @schema type:string;default:'a;b';pattern:^x$
+				val: x
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				v, ok := props["val"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "string", v["type"])
+				assert.Equal(t, "a;b", v["default"])
+				assert.Equal(t, "^x$", v["pattern"])
+			},
+		},
 		"quote inside a bracketed value preserved": {
 			// A regex char class like [",;] holds a quote alongside a ";".
 			// Opening a quoted run on that inner quote would swallow the closing
