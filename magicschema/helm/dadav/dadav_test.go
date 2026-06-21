@@ -630,6 +630,10 @@ func TestHelmSchemaRootAnnotation(t *testing.T) {
 			want: func(t *testing.T, got map[string]any) {
 				t.Helper()
 				assert.Equal(t, "#/definitions/root", got["$ref"])
+				// $ref governs the document; the structural type and
+				// properties Draft 7 would ignore beside it are dropped.
+				assert.NotContains(t, got, "type")
+				assert.NotContains(t, got, "properties")
 			},
 		},
 		"root examples propagate": {

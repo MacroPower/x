@@ -1040,6 +1040,21 @@ func applyRootAnnotations(schema *jsonschema.Schema, roots []RootAnnotator, stri
 
 		schema.Extra = mergeExtraInto(schema.Extra, root.Extra)
 	}
+
+	// A root $ref makes the document a reference. Draft 7 ignores the siblings
+	// of $ref, so the structural type and properties the walk produced would be
+	// silently inert beside it -- and actively misleading if the referent
+	// constrains differently. Drop them so the output is the reference the
+	// annotation asked for. Only a root annotator can set Ref here, since the
+	// structural walk never does.
+	if schema.Ref != "" {
+		schema.Type = ""
+		schema.Types = nil
+		schema.Properties = nil
+		schema.PropertyOrder = nil
+		schema.AdditionalProperties = nil
+		schema.Required = nil
+	}
 }
 
 // isNullOnlyType reports whether a schema's type constraint permits only
