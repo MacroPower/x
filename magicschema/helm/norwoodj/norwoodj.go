@@ -27,16 +27,10 @@ var (
 	// DefaultValueRegex matches @default override lines.
 	defaultValueRegex = regexp.MustCompile(`^\s*# @default -- (.*)$`)
 
-	// RawDescriptionRegex matches @raw annotation lines.
-	rawDescriptionRegex = regexp.MustCompile(`^\s*#\s+@raw`)
-
-	// NotationTypeRegex matches @notationType annotations with " -- " separator.
-	// Mirrors upstream's ^\s*#\s+@notationType\s+--\s+(.*)$.
-	notationTypeRegex = regexp.MustCompile(`^\s*#\s+@notationType\s+--\s+(.*)$`)
-
-	// SectionRegex matches @section annotations with " -- " separator.
-	// Mirrors upstream's ^\s*# @section -- (.*)$.
-	sectionRegex = regexp.MustCompile(`^\s*# @section -- (.*)$`)
+	// RawDescriptionRegex matches @raw annotation lines. @raw is anchored as a
+	// whole token (followed by whitespace or end of line) so "@rawData" is not
+	// mistaken for it, and a space after the hash is required, matching upstream.
+	rawDescriptionRegex = regexp.MustCompile(`^\s*#\s+@raw(\s|$)`)
 
 	// TypeMapping maps helm-docs type hints to JSON Schema types.
 	//nolint:goconst // JSON Schema type names repeated intentionally.
@@ -307,14 +301,15 @@ func parseCommentBlock(commentLines []string) *parsedComment {
 	var defaultVal *string
 
 	for _, line := range commentLines[docStartIdx+1:] {
-		// Check @raw.
+		// @raw switches continuation joining to newline mode. It keeps its own
+		// regex because, unlike @ignore, it requires a space after the hash.
 		if !isRaw && rawDescriptionRegex.MatchString(line) {
 			isRaw = true
 
 			continue
 		}
 
-		// Check @default.
+		// @default -- value overrides the default.
 		if dm := defaultValueRegex.FindStringSubmatch(line); len(dm) > 1 {
 			val := dm[1]
 			defaultVal = &val
@@ -322,35 +317,23 @@ func parseCommentBlock(commentLines []string) *parsedComment {
 			continue
 		}
 
-		// Check @notationType (with " -- " separator, matching upstream regex).
-		if notationTypeRegex.MatchString(line) {
-			continue
-		}
-
-		// Check @section (with " -- " separator, matching upstream regex).
-		if sectionRegex.MatchString(line) {
-			continue
-		}
-
-		// Check @ignore (recognized, consumed). StripCommentMarker caps the
-		// strip at two '#', so a two-hash continuation marker (## @ignore) is
-		// recognized consistently with the rest of the package rather than
-		// leaving a stray '#' that defeats the markerToken check.
-		// Strip the comment marker with the shared helper that dadav uses, so
-		// marker recognition stays consistent across annotators (it caps the
-		// strip at two '#' and drops one following space).
+		// The remaining markers are recognized on the shared two-hash-capped
+		// strip, so they are detected consistently across annotators (a two-hash
+		// "## @ignore" is honored) and markerToken anchors on a whole token, so
+		// "@sections of the chart" stays description text.
 		stripped := strings.TrimSpace(magicschema.StripCommentMarker(line))
 
+		// @ignore hides the key.
 		if markerToken(stripped, "@ignore") {
 			skip = true
 
 			continue
 		}
 
-		// Consume @notationType and @section without " -- " separator as a
-		// divergence from upstream. Upstream would let these fall through to
-		// continuation text. We consume them to avoid annotation markers
-		// leaking into schema descriptions.
+		// @notationType and @section are recognized but produce no schema
+		// output. Consuming both the " -- "-separated form and the bare form via
+		// markerToken (a divergence from upstream, which lets the bare form fall
+		// through) keeps either from leaking into the description.
 		if markerToken(stripped, "@notationType") || markerToken(stripped, "@section") {
 			continue
 		}

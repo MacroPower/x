@@ -1014,6 +1014,26 @@ func TestHelmDocsAnnotator(t *testing.T) {
 				assert.Equal(t, stringtest.JoinLF("Start", "", "After blank"), desc)
 			},
 		},
+		"raw prefix word does not activate raw mode": {
+			// "@rawData" must not be mistaken for the "@raw" marker: it stays
+			// description text rather than switching to raw (newline) joining.
+			input: stringtest.Input(`
+				# -- Start
+				# @rawData here
+				val: x
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				v, ok := props["val"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "Start @rawData here", v["description"])
+			},
+		},
 		"raw mode under a bare marker preserves leading blank lines": {
 			// A bare "# --" then @raw then a blank line must keep the leading
 			// newline separators, like upstream. Seeding an empty description
