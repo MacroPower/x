@@ -100,6 +100,16 @@ func run(cfg config, stdout io.Writer) error {
 		return fmt.Errorf("resolve jsonschema dir: %w", err)
 	}
 
+	err = checkReplaceDir("module directory", modDir)
+	if err != nil {
+		return err
+	}
+
+	err = checkReplaceDir("jsonschema directory", jsonschemaDir)
+	if err != nil {
+		return err
+	}
+
 	tempDir, err := createTempDir(cfg, importPath, modPath, modDir, jsonschemaDir)
 	if err != nil {
 		return fmt.Errorf("create temp dir: %w", err)
@@ -475,13 +485,34 @@ func goDirectiveVersion() string {
 	return m[1] + "." + m[2]
 }
 
+// checkReplaceDir rejects a module directory the go tool cannot place in a
+// replace directive. The modfile parser treats any backslash in a replacement
+// path as a Windows path and rejects it on a non-Windows system -- even when the
+// path is quoted, because it inspects the unquoted value -- so quoting cannot
+// rescue it. Catching it here turns the otherwise cryptic downstream "go mod
+// tidy" failure ("replacement directory appears to be Windows path") into a
+// clear message at the input boundary. A backslash is a legal POSIX filename
+// byte, so a checkout under such a directory is what triggers this.
+func checkReplaceDir(label, dir string) error {
+	if strings.Contains(dir, `\`) {
+		return fmt.Errorf(
+			"%s %q contains a backslash, which the go tool rejects as a Windows path in a replace directive",
+			label, dir,
+		)
+	}
+
+	return nil
+}
+
 // quotePath quotes a filesystem path for use in a go.mod replace directive when
 // a bare token would be misparsed. The go.mod lexer splits a bare token on
 // whitespace and rejects an unquoted token that contains a quote ("unquoted
 // string cannot contain quote"), so the path is quoted when it holds a space,
 // quote, or backtick, or any control character (a newline or carriage return
 // would otherwise inject a bare line break into the directive). All of these
-// are legal in POSIX filenames.
+// are legal in POSIX filenames. A backslash is rejected upstream by
+// [checkReplaceDir] (quoting cannot make the go tool accept it), so it is not
+// handled here.
 func quotePath(p string) string {
 	if strings.ContainsAny(p, " \"`") || strings.ContainsFunc(p, func(r rune) bool {
 		return r < 0x20
