@@ -18,6 +18,13 @@ import (
 var (
 	escaper   = strings.NewReplacer("~", "~0", "/", "~1")
 	unescaper = strings.NewReplacer("~1", "/", "~0", "~")
+
+	// The pctSlashUnescaper folds both spellings of a percent-encoded pointer
+	// separator ("%2F" and its lowercase form) to '/' in one left-to-right pass.
+	// The two patterns differ at their last byte so they never both match at one
+	// position, and the written '/' can never form a new "%2F"/"%2f", so a single
+	// pass equals two sequential [strings.ReplaceAll] calls.
+	pctSlashUnescaper = strings.NewReplacer("%2F", "/", "%2f", "/")
 )
 
 // Escape escapes a string per RFC 6901.
@@ -87,8 +94,7 @@ func FragmentSegments(fragment string, encoded bool) ([]string, bool) {
 	// percent-escaped pointer such as "%2Ffoo%2Fbar" therefore resolves like
 	// "/foo/bar".
 	if encoded {
-		path = strings.ReplaceAll(path, "%2F", "/")
-		path = strings.ReplaceAll(path, "%2f", "/")
+		path = pctSlashUnescaper.Replace(path)
 	}
 
 	segments := strings.Split(path, "/")
