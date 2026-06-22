@@ -860,7 +860,12 @@ func scalarDefault(node ast.Node) json.RawMessage {
 // scalars read the inner string node's text directly; both the literal
 // node and its re-serialized forms carry the block header.
 func scalarGoValue(node ast.Node) (any, bool) {
-	if isNullNode(node) {
+	// Unwrap before the null check so a known-tag-on-empty-scalar
+	// (e.g. "v: !!int" with no value) is treated as the null it actually
+	// holds, matching inferType which suppresses the type for the same node.
+	// Reading the tag-wrapped node instead lets resolveTagged report the
+	// tagged type and coerce the absent value to a concrete zero (0, "").
+	if isNullNode(unwrapNode(node)) {
 		return nil, true
 	}
 

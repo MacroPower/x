@@ -303,6 +303,31 @@ func TestGeneratorInferDefaults(t *testing.T) {
 				}
 			},
 		},
+		"tagged empty scalar records a null default": {
+			opts: []magicschema.Option{magicschema.WithInferDefaults(true)},
+			// A tagged but absent value parses only as the last entry in its
+			// mapping, so each tag is its own single-key input; the three
+			// merge into one schema.
+			inputs: []string{
+				"intval: !!int\n",
+				"strval: !!str\n",
+				"boolval: !!bool\n",
+			},
+			check: func(t *testing.T, got map[string]any, _ string) {
+				t.Helper()
+
+				// Type inference is suppressed for a tagged but absent value,
+				// so the recorded default must be the null the value actually
+				// holds, not a coerced zero (0, "").
+				for _, key := range []string{"intval", "strval", "boolval"} {
+					prop := propertyAt(t, got, key)
+					d, ok := prop["default"]
+					require.True(t, ok, "expected a default on %s", key)
+					assert.Nil(t, d, "expected a null default on %s", key)
+					assert.NotContains(t, prop, "type", "tagged-empty %s should carry no type", key)
+				}
+			},
+		},
 		"scalar array records the full observed list": {
 			opts: []magicschema.Option{magicschema.WithInferDefaults(true)},
 			inputs: []string{stringtest.Input(`
