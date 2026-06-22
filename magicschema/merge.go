@@ -546,6 +546,7 @@ func constrainsValue(s *jsonschema.Schema) bool {
 		len(s.Required) > 0 ||
 		s.DependentRequired != nil || s.DependentSchemas != nil ||
 		s.DependencySchemas != nil || s.DependencyStrings != nil ||
+		s.ContentEncoding != "" || s.ContentMediaType != "" || s.ContentSchema != nil ||
 		s.AllOf != nil || s.AnyOf != nil || s.OneOf != nil || s.Not != nil ||
 		s.If != nil || s.Then != nil || s.Else != nil
 }
