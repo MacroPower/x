@@ -657,6 +657,62 @@ func TestMergeIncompatibleThreeInputsStaysFailOpen(t *testing.T) {
 	}
 }
 
+func TestMergeIncompatibleEnumOrderIndependent(t *testing.T) {
+	t.Parallel()
+
+	// Three enum-constrained inputs whose types are incompatible (integer vs
+	// string) fold to a typeless union. The unioned value set must survive
+	// regardless of fold order: the two-input incompatible path kept the enum
+	// while the multi-input typeless fast path once dropped it, so the surviving
+	// constraint depended on input order.
+	enumOf := func(t *testing.T, inputs ...string) []any {
+		t.Helper()
+
+		bs := make([][]byte, len(inputs))
+		for i, in := range inputs {
+			bs[i] = []byte(in)
+		}
+
+		gen := magicschema.NewGenerator(magicschema.WithAnnotators(losisin.New()))
+		schema, err := gen.Generate(bs...)
+		require.NoError(t, err)
+
+		out, err := json.Marshal(schema)
+		require.NoError(t, err)
+
+		assert.NotContains(t, string(out), "typeless_union",
+			"internal merge marker must not leak into the output")
+
+		var got map[string]any
+
+		require.NoError(t, json.Unmarshal(out, &got))
+
+		props, ok := got["properties"].(map[string]any)
+		require.True(t, ok)
+
+		val, ok := props["val"].(map[string]any)
+		require.True(t, ok)
+
+		assert.Nil(t, val["type"], "incompatible union must stay typeless")
+
+		enum, ok := val["enum"].([]any)
+		require.True(t, ok, "the unioned enum must survive the incompatible fold")
+
+		return enum
+	}
+
+	intInput := "# @schema type:integer;enum:[1, 2]\nval: 1\n"
+	strA := "# @schema type:string;enum:[a]\nval: a\n"
+	strB := "# @schema type:string;enum:[b]\nval: b\n"
+
+	forward := enumOf(t, intInput, strA, strB)
+	reverse := enumOf(t, strB, strA, intInput)
+
+	assert.ElementsMatch(t, []any{float64(1), float64(2), "a", "b"}, forward)
+	assert.Equal(t, forward, reverse,
+		"the merged enum must be byte-identical regardless of fold order")
+}
+
 func TestMergeAnnotatedConstraints(t *testing.T) {
 	t.Parallel()
 

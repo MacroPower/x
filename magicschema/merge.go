@@ -47,17 +47,31 @@ func mergeSchemas(a, b *jsonschema.Schema) *jsonschema.Schema {
 		return a
 	}
 
-	// One side already widened to accept every value because two incompatible
-	// types unioned the type away (not because the value was null). The union
-	// of "accept everything" with anything is still "accept everything", so
-	// stay typeless and keep the marker: a later fold must not read the absent
-	// type as a null value and re-introduce a [type, null] union that would
-	// reject the very inputs the incompatible merge already accepted.
+	// One side already widened past its type constraint because two
+	// incompatible types unioned the type away (not because the value was
+	// null). The result stays typeless and keeps the marker: a later fold must
+	// not read the absent type as a null value and re-introduce a [type, null]
+	// union that would reject the very inputs the incompatible merge accepted.
 	if isTypelessUnion(a) || isTypelessUnion(b) {
-		return markTypelessUnion(&jsonschema.Schema{
+		out := &jsonschema.Schema{
 			Title:       cmp.Or(a.Title, b.Title),
 			Description: cmp.Or(a.Description, b.Description),
-		})
+		}
+
+		// Carry the value-set constraint through, exactly as the two-input
+		// incompatible path below does, so a folded enum/const survives the
+		// multi-input fast path too. Without this a three-input fold dropped
+		// the enum here while the two-input path kept it, making which
+		// constraints survive depend on fold order. An unconstrained input
+		// still widens the union to accept everything (fail open), since
+		// unionEnums yields nil whenever either side is unconstrained.
+		if a.Const != nil && b.Const != nil && reflect.DeepEqual(*a.Const, *b.Const) {
+			out.Const = a.Const
+		} else {
+			out.Enum = unionEnums(enumValues(a), enumValues(b))
+		}
+
+		return markTypelessUnion(out)
 	}
 
 	result := &jsonschema.Schema{}
@@ -250,8 +264,11 @@ func isTypelessUnion(s *jsonschema.Schema) bool {
 }
 
 // stripTypelessUnion removes the internal typeless-union marker from the whole
-// schema tree before output. A marked schema carries no type-specific keywords,
-// so reaching every schema position (via forEachSubSchema) is enough.
+// schema tree before output. A marked schema carries no nested sub-schemas in
+// type-specific positions (items, properties, and the like) -- only Title,
+// Description, and at most an Enum or Const value set -- so reaching every
+// schema position via forEachSubSchema is enough to clear the marker; the
+// carried value set holds no sub-schema and needs no descent.
 func stripTypelessUnion(s *jsonschema.Schema) {
 	if s == nil {
 		return
