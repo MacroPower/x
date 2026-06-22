@@ -6,10 +6,42 @@
 package schemashape
 
 import (
+	"slices"
+
 	"github.com/google/jsonschema-go/jsonschema"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/typename"
 )
+
+// AdmitsNull reports whether s already accepts a JSON null, so wrapping it in
+// anyOf[s, {"type":"null"}] would add a redundant second null branch. It covers
+// a true (empty) schema, a type or type list naming null, and an anyOf or oneOf
+// already carrying a {"type":"null"} branch -- the last being a shape a provider
+// or override may supply that the reflection generator never emits itself. A nil
+// schema (an unfilled cycle placeholder) is not yet known and returns false.
+func AdmitsNull(s *jsonschema.Schema) bool {
+	if s == nil {
+		return false
+	}
+
+	if IsEmpty(s) || s.Type == typename.Null || slices.Contains(s.Types, typename.Null) {
+		return true
+	}
+
+	for _, branch := range s.AnyOf {
+		if branch != nil && branch.Type == typename.Null {
+			return true
+		}
+	}
+
+	for _, branch := range s.OneOf {
+		if branch != nil && branch.Type == typename.Null {
+			return true
+		}
+	}
+
+	return false
+}
 
 // NullableInnerSchema returns the value (non-null) branch of a schema produced
 // for a nullable field: an anyOf of a value schema and {"type":"null"} in

@@ -2867,6 +2867,35 @@ func TestGenerateFor_ExtractedNullBearingOverrideNotDoubleWrapped(t *testing.T) 
 	assert.Equal(t, "#/$defs/NullableThing", field.Ref)
 }
 
+func TestGenerateFor_ExtractedAnyOfNullOverrideNotDoubleWrapped(t *testing.T) {
+	t.Parallel()
+
+	// A null-bearing override expressed as anyOf[value, {"type":"null"}] (rather
+	// than a type list) on an extracted type must also yield a bare $ref under a
+	// nullable pointer, not anyOf[$ref, null]: the def already admits null.
+	type NullableThing struct {
+		V int `json:"v"`
+	}
+
+	type Container struct {
+		T *NullableThing `json:"t"`
+	}
+
+	override := &jsonschema.Schema{
+		AnyOf: []*jsonschema.Schema{{Type: "object"}, {Type: "null"}},
+	}
+
+	s, err := jsonschema.GenerateFor[Container](t.Context(),
+		jsonschema.WithTypeSchema(reflect.TypeFor[NullableThing](), override),
+	)
+	require.NoError(t, err)
+
+	field := s.Properties["t"]
+	require.NotNil(t, field)
+	assert.Nil(t, field.AnyOf, "a null-bearing anyOf override must not add a second null branch")
+	assert.Equal(t, "#/$defs/NullableThing", field.Ref)
+}
+
 func TestGenerateFor_Draft7_NullableRefWithAnnotation(t *testing.T) {
 	t.Parallel()
 

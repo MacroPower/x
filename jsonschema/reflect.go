@@ -1596,14 +1596,13 @@ func (g *generator) refForType(t reflect.Type, nullable bool) *Schema {
 
 	if nullable {
 		// If the definition itself already admits null, the anyOf wrapper would
-		// add a redundant second null branch; mirror applyNullable's dedup. That
-		// covers a true (empty) schema, which accepts every value including null,
-		// and an override or provider that encodes null in its own type. The def
-		// schema is available here for an extracted type (extractToDefs sets it
-		// before this runs); a cycle placeholder leaves it nil, so the wrapper is
-		// kept until the def is known.
-		if def := g.typeToDefSchema[t]; def != nil &&
-			(schemashape.IsEmpty(def) || def.Type == typename.Null || slices.Contains(def.Types, typename.Null)) {
+		// add a redundant second null branch; mirror applyNullable's dedup via the
+		// shared AdmitsNull predicate (a true schema, a null-bearing type or type
+		// list, or an override/provider anyOf/oneOf that already carries a null
+		// branch). The def schema is available here for an extracted type
+		// (extractToDefs sets it before this runs); a cycle placeholder leaves it
+		// nil, so the wrapper is kept until the def is known.
+		if def := g.typeToDefSchema[t]; schemashape.AdmitsNull(def) {
 			return refSchema
 		}
 
@@ -1645,13 +1644,12 @@ func (g *generator) applyNullable(s *Schema, t reflect.Type, nullable bool) *Sch
 		return s
 	}
 
-	// Already accepts null, so the anyOf wrapper adds nothing: an unconstrained
-	// (true) schema accepts every value, and a schema whose type declaration
-	// includes null already admits it. The latter covers a builtin that folds
-	// null into its type list (the []byte override) and an override or provider
-	// that returns a null-bearing type, keeping the output the bare form instead
-	// of a redundant second null branch.
-	if schemashape.IsEmpty(s) || s.Type == typename.Null || slices.Contains(s.Types, typename.Null) {
+	// Already accepts null, so the anyOf wrapper adds nothing and is skipped to
+	// avoid a redundant second null branch. AdmitsNull covers an unconstrained
+	// (true) schema, a builtin that folds null into its type list (the []byte
+	// override), and an override or provider that returns a null-bearing type or
+	// an anyOf/oneOf already carrying a null branch.
+	if schemashape.AdmitsNull(s) {
 		return s
 	}
 
