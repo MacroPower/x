@@ -526,6 +526,13 @@ func parseAnyList(val string) []any {
 // the value it should match. Parsing a fully quoted scalar through YAML yields
 // the bare text, matching how default and const are already unquoted. A bare
 // value is returned unchanged so it is never re-coerced.
+//
+// When the YAML parse fails the surrounding quotes are still stripped manually
+// rather than left on the value: a double-quoted regex such as "^\d+$" is not a
+// valid YAML double-quoted scalar (\d is not a recognized escape), and keeping
+// the quotes would build a regex that requires literal leading and trailing
+// quote characters (fail closed). The first and last bytes were already
+// confirmed equal quote runes, so the slice is safe.
 func unquoteScalar(val string) string {
 	if len(val) < 2 {
 		return val
@@ -540,7 +547,7 @@ func unquoteScalar(val string) string {
 
 	err := yaml.Unmarshal([]byte(val), &s)
 	if err != nil {
-		return val
+		return val[1 : len(val)-1]
 	}
 
 	return s

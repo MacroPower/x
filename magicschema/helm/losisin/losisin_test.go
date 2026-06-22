@@ -1868,6 +1868,27 @@ func TestHelmValuesSchemaAnnotatorAlignment(t *testing.T) {
 				assert.Equal(t, "^a;b$", v["pattern"])
 			},
 		},
+		"double-quoted regex with a backslash class strips its quotes": {
+			// "^\d+;\d+$" must be quoted so the ";" survives splitSemicolons,
+			// but \d is not a valid YAML double-quote escape, so the YAML parse
+			// fails. The quotes must still be stripped; keeping them would build
+			// a regex requiring literal leading and trailing quotes (fail closed).
+			input: stringtest.Input(`
+				# @schema type:string;pattern:"^\d+;\d+$"
+				val: x
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				v, ok := props["val"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, `^\d+;\d+$`, v["pattern"])
+			},
+		},
 		"quote inside a bracketed value preserved": {
 			// A regex char class like [",;] holds a quote alongside a ";".
 			// Opening a quoted run on that inner quote would swallow the closing
