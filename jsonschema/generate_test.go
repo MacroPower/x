@@ -6069,6 +6069,39 @@ func TestGenerateFor_EmbeddedTextMarshalerStruct_Draft7(t *testing.T) {
 	}`, string(got))
 }
 
+// A struct implementing json.Marshaler reflects as an object (its MarshalJSON
+// output is unknowable). An embedded direct-TextMarshaler struct reached on
+// that path must have its fields promoted, not be composed as an
+// allOf:[{"type":"string"}] branch, which would make the object schema
+// unsatisfiable for every instance.
+type directTextEmbed struct {
+	Inner string `json:"inner"`
+}
+
+func (directTextEmbed) MarshalText() ([]byte, error) { return nil, nil }
+
+type jsonOuterWithTextEmbed struct {
+	directTextEmbed
+
+	Extra int `json:"extra"`
+}
+
+func (jsonOuterWithTextEmbed) MarshalJSON() ([]byte, error) { return []byte(`{}`), nil }
+
+func TestGenerateFor_JSONMarshalerOuterWithTextMarshalerEmbed(t *testing.T) {
+	t.Parallel()
+
+	s, err := jsonschema.GenerateFor[jsonOuterWithTextEmbed](t.Context())
+	require.NoError(t, err)
+
+	// The embed's fields are promoted into the object; no string allOf branch is
+	// composed, so the object schema stays satisfiable.
+	assert.Empty(t, s.AllOf, "schema: %s", marshalSchema(t, s))
+	assert.Equal(t, "object", s.Type)
+	assert.Contains(t, s.Properties, "inner")
+	assert.Contains(t, s.Properties, "extra")
+}
+
 // Embedded pointer-to-non-struct type.
 type MyInt int
 
