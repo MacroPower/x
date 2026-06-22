@@ -102,6 +102,21 @@ func TestRelocateConstEnumToValueBranch(t *testing.T) {
 		assert.Nil(t, s.Const)
 	})
 
+	t.Run("null-first anyOf wrapper moves const to value branch", func(t *testing.T) {
+		t.Parallel()
+
+		value := &jsonschema.Schema{Type: "integer"}
+		s := &jsonschema.Schema{
+			AnyOf: []*jsonschema.Schema{{Type: "null"}, value},
+			Const: new(any(5.0)),
+		}
+
+		got := schemashape.RelocateConstEnumToValueBranch(s)
+		assert.Same(t, value, got)
+		assert.NotNil(t, value.Const)
+		assert.Nil(t, s.Const)
+	})
+
 	t.Run("type list is rewritten into anyOf", func(t *testing.T) {
 		t.Parallel()
 

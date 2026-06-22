@@ -12,8 +12,11 @@ import (
 )
 
 // NullableInnerSchema returns the value (non-null) branch of a schema produced
-// for a nullable field: an anyOf of a value schema and {"type":"null"}. It
-// returns nil when s does not have that exact shape.
+// for a nullable field: an anyOf of a value schema and {"type":"null"} in
+// either order. It returns nil when s does not have that shape. The generator
+// always emits the null branch second, but a provider or override schema may
+// supply it first, so both orderings are recognized (mirroring
+// NullableTypeListBase).
 func NullableInnerSchema(s *jsonschema.Schema) *jsonschema.Schema {
 	if s == nil {
 		return nil
@@ -23,11 +26,14 @@ func NullableInnerSchema(s *jsonschema.Schema) *jsonschema.Schema {
 		return nil
 	}
 
-	if s.AnyOf[1].Type == typename.Null {
+	switch {
+	case s.AnyOf[1].Type == typename.Null:
 		return s.AnyOf[0]
+	case s.AnyOf[0].Type == typename.Null:
+		return s.AnyOf[1]
+	default:
+		return nil
 	}
-
-	return nil
 }
 
 // ItemSchemas returns the per-element schemas of a generated slice or fixed
