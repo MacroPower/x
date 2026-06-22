@@ -2469,35 +2469,39 @@ func (v *validator) validateArray(
 				}
 			}
 
-			// MinContains/maxContains are 2020-12 validation-vocab keywords. They
-			// do not exist in Draft-07 (any such keys are unknown and ignored),
-			// and they are skipped when the validation vocabulary is disabled; the
-			// defaults are then minContains=1 and no maxContains.
-			minContains := 1
-			if v.draft == Draft2020 && v.vocabs.Validation && schema.MinContains != nil {
-				minContains = *schema.MinContains
-			}
-
-			maxContains := -1
-			if v.draft == Draft2020 && v.vocabs.Validation && schema.MaxContains != nil {
-				maxContains = *schema.MaxContains
-			}
-
-			if matchCount < minContains {
-				// An explicit minContains owns the violation; without it the
-				// shortfall is a plain contains failure (default minContains=1).
-				keyword := KeywordContains
-				if v.draft == Draft2020 && v.vocabs.Validation && schema.MinContains != nil {
-					keyword = KeywordMinContains
+			// The contains-count assertion -- the default minContains=1 floor and
+			// the optional minContains/maxContains bounds -- belongs to the
+			// 2020-12 validation vocabulary, so under Draft 2020-12 it is skipped
+			// when that vocabulary is disabled; contains then only records its
+			// match annotation above. Draft-07 has no vocabularies, so the default
+			// contains assertion always applies there.
+			if v.draft != Draft2020 || v.vocabs.Validation {
+				minContains := 1
+				if v.draft == Draft2020 && schema.MinContains != nil {
+					minContains = *schema.MinContains
 				}
 
-				errs = append(errs, leafError(instancePath, schemaPath, keyword,
-					fmt.Sprintf("array has %d matching items, minimum is %d", matchCount, minContains)))
-			}
+				maxContains := -1
+				if v.draft == Draft2020 && schema.MaxContains != nil {
+					maxContains = *schema.MaxContains
+				}
 
-			if maxContains >= 0 && matchCount > maxContains {
-				errs = append(errs, leafError(instancePath, schemaPath, KeywordMaxContains,
-					fmt.Sprintf("array has %d matching items, maximum is %d", matchCount, maxContains)))
+				if matchCount < minContains {
+					// An explicit minContains owns the violation; without it the
+					// shortfall is a plain contains failure (default minContains=1).
+					keyword := KeywordContains
+					if v.draft == Draft2020 && schema.MinContains != nil {
+						keyword = KeywordMinContains
+					}
+
+					errs = append(errs, leafError(instancePath, schemaPath, keyword,
+						fmt.Sprintf("array has %d matching items, minimum is %d", matchCount, minContains)))
+				}
+
+				if maxContains >= 0 && matchCount > maxContains {
+					errs = append(errs, leafError(instancePath, schemaPath, KeywordMaxContains,
+						fmt.Sprintf("array has %d matching items, maximum is %d", matchCount, maxContains)))
+				}
 			}
 		}
 	}

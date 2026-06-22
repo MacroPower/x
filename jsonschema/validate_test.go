@@ -2019,6 +2019,28 @@ func TestValidateCanonicalAbsoluteRefAgainstOpaqueBase(t *testing.T) {
 	require.Error(t, err, "a must resolve to the integer child, not an unresolved ref")
 }
 
+func TestValidateContainsCountSkippedWithoutValidationVocab(t *testing.T) {
+	t.Parallel()
+
+	// Under Draft 2020-12 the contains-count assertion (including the default
+	// minContains=1 floor) belongs to the validation vocabulary. With the
+	// applicator vocabulary active but validation disabled, contains only records
+	// its match annotation, so an empty array is valid; with validation active
+	// the default floor still rejects it.
+	schema := &jsonschema.Schema{Contains: &jsonschema.Schema{Type: "string"}}
+
+	applicatorOnly, err := jsonschema.Compile(t.Context(), schema,
+		jsonschema.WithVocabularies(jsonschema.VocabCore2020, jsonschema.VocabApplicator2020))
+	require.NoError(t, err)
+	require.NoError(t, applicatorOnly.ValidateJSON(t.Context(), []byte(`[]`)),
+		"contains asserts nothing without the validation vocabulary")
+
+	full, err := jsonschema.Compile(t.Context(), schema)
+	require.NoError(t, err)
+	require.Error(t, full.ValidateJSON(t.Context(), []byte(`[]`)),
+		"the default minContains=1 floor applies with the validation vocabulary")
+}
+
 func TestValidateContainsAnnotatesMatchedRegardlessOfCount(t *testing.T) {
 	t.Parallel()
 
