@@ -2993,6 +2993,28 @@ func TestHelmValuesSchemaAnnotatorUpstreamAlignment(t *testing.T) {
 				assert.Contains(t, enum, "true")
 			},
 		},
+		"single-quoted comma enum unquotes like double-quoted": {
+			// A quote protects a comma or space inside a comma-split token; the
+			// surrounding quotes must not leak into the value. Single quotes
+			// once leaked ('a' stayed "'a'"), so the enum never matched.
+			input: stringtest.Input(`
+				# @schema enum:'a', "b", c
+				val: a
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				v, ok := props["val"].(map[string]any)
+				require.True(t, ok)
+
+				enum, ok := v["enum"].([]any)
+				require.True(t, ok)
+				assert.Equal(t, []any{"a", "b", "c"}, enum)
+			},
+		},
 		"examples comma-separated without brackets": {
 			// Upstream processList falls back to comma-splitting for examples
 			// values that do not start with "[".

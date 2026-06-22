@@ -3,7 +3,6 @@ package losisin
 import (
 	"log/slog"
 	"math"
-	"strconv"
 	"strings"
 
 	"github.com/goccy/go-yaml"
@@ -506,18 +505,15 @@ func parseAnyList(val string) []any {
 			continue
 		}
 
-		// Try to unquote quoted strings.
-		if strings.HasPrefix(item, "\"") {
-			unquoted, err := strconv.Unquote(item)
-			if err == nil {
-				list = append(list, unquoted)
-
-				continue
-			}
-		}
-
-		// Trim surrounding quotes and use as-is.
-		list = append(list, strings.Trim(item, "\""))
+		// Strip the surrounding quotes from a fully quoted token -- single or
+		// double -- so a quote needed only to protect a comma or space does not
+		// leak into the value. The double-quote-only unquoting this replaced
+		// left single-quoted items with their quotes ('a' stayed "'a'"), so an
+		// enum or itemEnum member never matched the real value (fail closed).
+		// An unquoted token stays a string, matching upstream processList's
+		// string-typed comma-split fallback (numbers and booleans keep native
+		// types only on the bracketed YAML path).
+		list = append(list, unquoteScalar(item))
 	}
 
 	return list
