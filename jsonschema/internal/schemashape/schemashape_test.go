@@ -55,6 +55,7 @@ func TestNullableTypeListBase(t *testing.T) {
 		"null second": {types: []string{"string", "null"}, wantBase: "string", wantOK: true},
 		"single type": {types: []string{"string"}, wantBase: "", wantOK: false},
 		"no null":     {types: []string{"string", "integer"}, wantBase: "", wantOK: false},
+		"both null":   {types: []string{"null", "null"}, wantBase: "", wantOK: false},
 	}
 
 	for name, tc := range tests {

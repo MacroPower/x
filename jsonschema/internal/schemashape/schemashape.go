@@ -151,17 +151,19 @@ func MoveConstEnum(src, dst *jsonschema.Schema) {
 }
 
 // NullableTypeListBase reports whether s is a two-element type list pairing
-// "null" with one other type (the shape a nullable pointer container emits),
-// returning the non-null type.
+// "null" with one other, non-null type (the shape a nullable pointer container
+// emits), returning the non-null type. A degenerate ["null", "null"] list is
+// not a nullable base, so it returns false rather than fabricating a null value
+// branch.
 func NullableTypeListBase(s *jsonschema.Schema) (string, bool) {
 	if len(s.Types) != 2 {
 		return "", false
 	}
 
 	switch {
-	case s.Types[0] == typename.Null:
+	case s.Types[0] == typename.Null && s.Types[1] != typename.Null:
 		return s.Types[1], true
-	case s.Types[1] == typename.Null:
+	case s.Types[1] == typename.Null && s.Types[0] != typename.Null:
 		return s.Types[0], true
 	default:
 		return "", false
