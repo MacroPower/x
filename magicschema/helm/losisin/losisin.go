@@ -149,9 +149,9 @@ func (a *Annotator) applyPair(
 	case "type":
 		a.applyType(schema, val)
 	case "title":
-		schema.Title = val
+		schema.Title = unquoteScalar(val)
 	case "description":
-		schema.Description = val
+		schema.Description = unquoteScalar(val)
 	case "default":
 		// An empty value carries no default (explicit null is written as
 		// "default:null"); setting it would emit a spurious null default.
@@ -244,8 +244,11 @@ func (a *Annotator) applyPair(
 		}
 
 	case "itemRef":
-		if val != "" {
-			ensureItems(schema).Ref = val
+		// Unquote like the $ref sibling: a ref containing a ";" must be
+		// quoted to survive splitSemicolons, and the quotes must not leak
+		// into the JSON pointer.
+		if ref := unquoteScalar(val); ref != "" {
+			ensureItems(schema).Ref = ref
 		}
 
 	case "hidden":

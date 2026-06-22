@@ -1868,6 +1868,48 @@ func TestHelmValuesSchemaAnnotatorAlignment(t *testing.T) {
 				assert.Equal(t, "^a;b$", v["pattern"])
 			},
 		},
+		"quoted title with a semicolon keeps the bare text": {
+			// A title containing ";" must be quoted to survive splitSemicolons;
+			// the surrounding quotes must not leak into the metadata string,
+			// matching how pattern/$id/$ref are unquoted.
+			input: stringtest.Input(`
+				# @schema title:"Step 1; then 2"
+				val: x
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				v, ok := props["val"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "Step 1; then 2", v["title"])
+			},
+		},
+		"quoted itemRef keeps the bare pointer": {
+			// An itemRef containing ";" must be quoted to survive
+			// splitSemicolons; the quotes must not leak into the JSON pointer,
+			// matching the $ref sibling.
+			input: stringtest.Input(`
+				# @schema type:array;itemRef:"#/$defs/a;b"
+				val: []
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				v, ok := props["val"].(map[string]any)
+				require.True(t, ok)
+
+				items, ok := v["items"].(map[string]any)
+				require.True(t, ok)
+				assert.Equal(t, "#/$defs/a;b", items["$ref"])
+			},
+		},
 		"double-quoted regex with a backslash class strips its quotes": {
 			// "^\d+;\d+$" must be quoted so the ";" survives splitSemicolons,
 			// but \d is not a valid YAML double-quote escape, so the YAML parse
