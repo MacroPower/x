@@ -981,6 +981,41 @@ func TestInlineRefFailureDocumentForCrossDocExtraKeyword(t *testing.T) {
 		"the path must be rooted in the fetched document")
 }
 
+func TestInlineSubstituteRefFailureDocumentUsesSubstituteID(t *testing.T) {
+	t.Parallel()
+
+	// A substitute schema declaring its own $id re-bases its subtree, so a nested
+	// ref failure inside it must be reported in the substitute's own document,
+	// not the enclosing document where the original failing ref lived.
+	var captured jsonschema.RefFailure
+
+	fallback := jsonschema.RefFallbackFunc(func(_ context.Context, f jsonschema.RefFailure) jsonschema.RefAction {
+		if f.Ref == "#/$defs/missing" {
+			captured = f
+
+			return jsonschema.DropRef()
+		}
+
+		return jsonschema.SubstituteRef(&jsonschema.Schema{
+			ID:         "https://substitute.example/sub.json",
+			Properties: map[string]*jsonschema.Schema{"inner": {Ref: "#/$defs/missing"}},
+		})
+	})
+
+	root, err := jsonschema.ParseSchema([]byte(`{
+		"$id": "https://root.example/root.json",
+		"properties": {"a": {"$ref": "#/$defs/absent"}}
+	}`))
+	require.NoError(t, err)
+
+	_, err = jsonschema.Inline(t.Context(), root, jsonschema.WithRefFallback(fallback))
+	require.NoError(t, err)
+
+	assert.Equal(t, "#/$defs/missing", captured.Ref, "the nested ref is the one captured")
+	assert.Equal(t, "https://substitute.example/sub.json", captured.Document,
+		"a substitute with its own $id reports nested failures in its own document")
+}
+
 func TestInlineSubstituteRecursionIsBounded(t *testing.T) {
 	t.Parallel()
 

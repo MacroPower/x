@@ -636,7 +636,13 @@ func (in *inliner) substitute(pristine *Schema, path, ref string, inlineErr erro
 	// registry, so the real document keeps priority while the substitute's own
 	// nested refs still resolve.
 	in.v.registerFallbackSchema(cp, in.v.schemaBase(pristine))
-	in.recordPaths(cp, path, in.docs[pristine])
+
+	// Record the substitute subtree under the base registerFallbackSchema
+	// established for it, not the failing node's document: a substitute that
+	// re-bases via its own $id then reports a nested ref failure in its own
+	// document. With no $id the base equals the failing node's document, so the
+	// common case is unchanged. This mirrors fetchDoc's recordPaths.
+	in.recordPaths(cp, path, in.v.schemaBase(cp))
 
 	return in.inlineCopy(cp, path, false)
 }
