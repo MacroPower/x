@@ -467,16 +467,21 @@ func parseStringList(val string) []string {
 
 	result := make([]string, 0, len(parsed))
 
-	// Non-string, non-null elements are dropped rather than stringified:
-	// parseStringList feeds type and item lists, where a coerced "1" or
-	// "true" would be an invalid JSON Schema type token. Dropping it fails
-	// open, matching dadav's applyType.
+	// A member that is neither a string nor null cannot be a JSON Schema type
+	// token (e.g. type:[string, 1]). Narrowing to just the representable
+	// members would keep type:string and reject an integer the value may take
+	// (fail closed), and would also make the same malformed annotation differ
+	// from dadav's applyType, which abandons the whole type. Drop the entire
+	// list instead so SetSchemaType leaves the type unset and value inference
+	// applies (fail open).
 	for _, v := range parsed {
 		switch v := v.(type) {
 		case string:
 			result = append(result, v)
 		case nil:
 			result = append(result, yamlNull)
+		default:
+			return nil
 		}
 	}
 

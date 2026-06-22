@@ -3581,7 +3581,7 @@ func TestHelmValuesSchemaAnnotatorFailOpenParsing(t *testing.T) {
 				assert.False(t, has, "blank const must not emit const:null")
 			},
 		},
-		"non-string type element is dropped": {
+		"malformed type list drops entirely, value type fills in": {
 			input: stringtest.Input(`
 				# @schema type:[string, 1]
 				name: test
@@ -3595,16 +3595,38 @@ func TestHelmValuesSchemaAnnotatorFailOpenParsing(t *testing.T) {
 				name, ok := props["name"].(map[string]any)
 				require.True(t, ok)
 
-				// Only "string" survives; the numeric 1 is not a valid JSON
-				// Schema type token, so it is dropped, collapsing the list to
-				// a single scalar type.
+				// The numeric 1 is not a valid JSON Schema type token, so the
+				// whole list drops (fail open, matching dadav's applyType);
+				// structural inference then fills the type from the string
+				// value. The annotated type does NOT narrow to "string".
 				assert.Equal(t, "string", name["type"])
 			},
 		},
-		"non-string type element is dropped in comma form": {
+		"malformed type list over an integer value infers integer": {
+			// The decisive case: when the malformed type list is dropped, the
+			// schema must fall through to the value's inferred type. The old
+			// behavior narrowed to type:string and rejected the integer (fail
+			// closed); failing open instead infers integer, matching dadav.
+			input: stringtest.Input(`
+				# @schema type:[string, 1]
+				count: 7
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				count, ok := props["count"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "integer", count["type"])
+			},
+		},
+		"malformed type list drops entirely in comma form": {
 			// The comma form must agree with the bracket form above: the
-			// numeric token is dropped rather than kept as the invalid type
-			// token "1".
+			// numeric token drops the whole list rather than narrowing to the
+			// invalid type token "1" or to "string".
 			input: stringtest.Input(`
 				# @schema type:string, 1
 				name: test
