@@ -20,6 +20,8 @@ func TestRatString(t *testing.T) {
 		"integer":          {rat: big.NewRat(5, 1), want: "5"},
 		"negative integer": {rat: big.NewRat(-7, 1), want: "-7"},
 		"fraction":         {rat: big.NewRat(1, 4), want: "0.25"},
+		"non-exact tenth":  {rat: big.NewRat(1, 10), want: "0.1"},
+		"non-exact 0.3":    {rat: big.NewRat(3, 10), want: "0.3"},
 	}
 
 	for name, tc := range tests {
@@ -42,6 +44,13 @@ func TestRatStringFallsBackToExactForm(t *testing.T) {
 
 	underflow := numrat.RatString(new(big.Rat).SetFrac(big.NewInt(1), huge))
 	assert.Equal(t, "1/"+huge.String(), underflow)
+
+	// A finite, in-range fraction with more precision than a float64 holds keeps
+	// the exact form instead of reporting the rounded shortest-float value.
+	precise, ok := new(big.Rat).SetString("1.000000000000000000000000000001")
+	assert.True(t, ok)
+	assert.Equal(t, "1000000000000000000000000000001/1000000000000000000000000000000",
+		numrat.RatString(precise))
 }
 
 func TestTruncateNumber(t *testing.T) {

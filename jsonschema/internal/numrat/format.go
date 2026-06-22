@@ -24,7 +24,10 @@ func TruncateNumber(s string) string {
 // float64 range overflows to a meaningless +Inf, and a tiny magnitude below the
 // smallest subnormal underflows to 0. The non-integer guarantee means the value
 // is nonzero, so an f of 0 can only be underflow; both cases fall back to the
-// exact rational form instead of a misleading "0" or "+Inf".
+// exact rational form instead of a misleading "0" or "+Inf". A finite, in-range
+// value whose shortest-float decimal does not round-trip to the exact rational
+// (more precision than a float64 holds) falls back too, so the rendering is the
+// true value rather than a rounded one.
 func RatString(r *big.Rat) string {
 	if r.IsInt() {
 		return r.Num().String()
@@ -35,5 +38,17 @@ func RatString(r *big.Rat) string {
 		return r.RatString()
 	}
 
-	return fmt.Sprintf("%v", f)
+	// The shortest-float decimal is faithful only when it parses back to the
+	// exact rational. Ordinary decimals such as 0.1 and 0.3 round-trip and keep
+	// their readable form; a value carrying more precision than a float64 holds
+	// does not, so fall back to the exact p/q form rather than report a rounded
+	// value.
+	s := fmt.Sprintf("%v", f)
+
+	back, ok := new(big.Rat).SetString(s)
+	if ok && back.Cmp(r) == 0 {
+		return s
+	}
+
+	return r.RatString()
 }
