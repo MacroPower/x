@@ -157,7 +157,18 @@ func FilePathFromURI(uri string) string {
 		// puts the whole reference in u.Opaque and leaves u.Path empty; fall
 		// back to it so the filename is not dropped.
 		if u.Path == "" && u.Opaque != "" {
-			return strings.TrimLeft(u.Opaque, "/")
+			// Percent-decode to match the decoding url.Parse already applies to
+			// u.Path for the file:///x and file://host/x forms, so the same
+			// filename maps to the same fs name regardless of authority slashes. A
+			// malformed escape falls back to the literal rather than a garbage path.
+			opaque := strings.TrimLeft(u.Opaque, "/")
+
+			decoded, derr := url.PathUnescape(opaque)
+			if derr == nil {
+				return decoded
+			}
+
+			return opaque
 		}
 
 		return strings.TrimLeft(u.Path, "/")
