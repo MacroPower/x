@@ -418,14 +418,40 @@ func isHelmDocsOldStyleComment(s string) bool {
 		return false
 	}
 
-	// The part before " -- " should look like a dotted key path (e.g.,
-	// "image.tag", "controller.service.annotations.\"key\""). A key path
-	// is a single token: prose that happens to contain a dot, such as
-	// "Use the v1.2 API -- stable", has spaces and is a legitimate
-	// description.
-	prefix := strings.TrimSpace(s[:idx])
+	return IsHelmDocsKeyPath(strings.TrimSpace(s[:idx]))
+}
 
-	return strings.Contains(prefix, ".") && !strings.ContainsAny(prefix, " \t")
+// IsHelmDocsKeyPath reports whether s is the dotted key path of an old-style
+// helm-docs "# key.path -- description" comment: a single token (no
+// whitespace) of two or more dot-separated, non-empty segments, none beginning
+// with a digit. The dotted-path shape separates a real key reference such as
+// "image.tag" from prose that merely contains a dot -- the abbreviations
+// "e.g."/"i.e."/"etc." leave a trailing empty segment, and a version like
+// "v1.2" leaves a digit-led segment. The norwoodj annotator and the fallback
+// comment extractor share this one predicate so the file scan that records an
+// old-style description and the structural pass that skips it cannot disagree
+// and attribute the same comment to two unrelated keys.
+func IsHelmDocsKeyPath(s string) bool {
+	if s == "" || strings.ContainsAny(s, " \t") {
+		return false
+	}
+
+	segments := strings.Split(s, ".")
+	if len(segments) < 2 {
+		return false
+	}
+
+	for _, seg := range segments {
+		if seg == "" {
+			return false
+		}
+
+		if seg[0] >= '0' && seg[0] <= '9' {
+			return false
+		}
+	}
+
+	return true
 }
 
 // inferItemsSchema creates an items schema from a sequence's elements. The

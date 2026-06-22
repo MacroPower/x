@@ -85,11 +85,14 @@ func (a *Annotator) ForContent(content []byte) (magicschema.Annotator, error) {
 
 	for line := range strings.SplitSeq(string(content), "\n") {
 		if !foundComment {
-			// Look for an old-style "# key -- description" line. The key is the
-			// token before the first " -- "; verify it is non-empty and not a
+			// Look for an old-style "# key.path -- description" line. The key is
+			// the token before the first " -- "; it must be a dotted key path
+			// (the shared predicate that the fallback comment extractor also
+			// uses, so a dotless single token like prose "note -- ..." is not
+			// recorded here while also leaking as a description) and not a
 			// recognized annotation marker.
 			keyPart, _, ok := splitOldStyleComment(strings.TrimSpace(line))
-			if !ok || keyPart == "" || magicschema.IsAnnotationComment(keyPart) {
+			if !ok || !magicschema.IsHelmDocsKeyPath(keyPart) || magicschema.IsAnnotationComment(keyPart) {
 				continue
 			}
 
@@ -640,5 +643,5 @@ func isContainerType(t string) bool {
 func startsOldStyleBlock(line string) bool {
 	key, _, ok := splitOldStyleComment(strings.TrimSpace(line))
 
-	return ok && key != "" && !strings.ContainsAny(key, " \t") && !magicschema.IsAnnotationComment(key)
+	return ok && magicschema.IsHelmDocsKeyPath(key) && !magicschema.IsAnnotationComment(key)
 }

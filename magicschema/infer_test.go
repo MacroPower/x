@@ -92,6 +92,27 @@ func TestIsAnnotationComment(t *testing.T) {
 			input: "Use the v1.2 API -- it is stable",
 			want:  false,
 		},
+		"abbreviation e.g. before dashes": {
+			// "e.g." leaves a trailing empty dot segment, so it is prose, not
+			// a key path, and the description must survive.
+			input: "e.g. -- a worked example",
+			want:  false,
+		},
+		"abbreviation i.e. before dashes": {
+			input: "i.e. -- that is, the canonical form",
+			want:  false,
+		},
+		"single dotless token before dashes": {
+			// A single token with no dot is prose, not a key path; treating it
+			// as an annotation would both drop it here and let the norwoodj
+			// scan record it, attributing it to two unrelated keys.
+			input: "note -- be careful with this",
+			want:  false,
+		},
+		"version-like token before dashes": {
+			input: "v1.2 -- the API version to target",
+			want:  false,
+		},
 		"empty string": {
 			input: "",
 			want:  false,
@@ -108,6 +129,36 @@ func TestIsAnnotationComment(t *testing.T) {
 
 			got := magicschema.IsAnnotationComment(tc.input)
 			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestIsHelmDocsKeyPath(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]bool{
+		"image.tag":                  true,
+		"global.image.registry":      true,
+		"controller.service.enabled": true,
+		"":                           false,
+		"replicaCount":               false, // a dotless single token is prose
+		"note":                       false,
+		"e.g.":                       false, // trailing empty segment
+		"i.e.":                       false,
+		"etc.":                       false,
+		"v1.2":                       false, // digit-led segment
+		"1.2.3":                      false,
+		"a b.c":                      false, // contains whitespace
+		"a..b":                       false, // empty middle segment
+		".leading":                   false,
+		"trailing.":                  false,
+	}
+
+	for input, want := range tcs {
+		t.Run(input, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, want, magicschema.IsHelmDocsKeyPath(input))
 		})
 	}
 }

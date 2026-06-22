@@ -1196,6 +1196,35 @@ func TestHelmDocsAnnotator(t *testing.T) {
 				assert.Equal(t, "Old-style image tag", tag["description"])
 			},
 		},
+		"dotless prose comment is not recorded as an old-style key": {
+			// "# note -- be careful" has a single dotless token before " -- ",
+			// so it is prose, not an old-style key path. It must not be recorded
+			// as an old-style description for the unrelated "note" key (the file
+			// scan once accepted dotless keys while the structural fallback
+			// required a dot, attributing the same comment to two keys).
+			input: stringtest.Input(`
+				# note -- be careful with this
+				config:
+				  enabled: true
+				note: hello
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				note, ok := props["note"].(map[string]any)
+				require.True(t, ok)
+				assert.Empty(t, note["description"],
+					"the unrelated note key must not inherit the prose comment")
+
+				config, ok := props["config"].(map[string]any)
+				require.True(t, ok)
+				assert.Equal(t, "note -- be careful with this", config["description"],
+					"the prose comment attaches once, to the key it sits above")
+			},
+		},
 		"old-style in head comment discarded for current node": {
 			// Upstream getDescriptionFromNode discards the auto-description when
 			// ParseComment returns a non-empty key. The old-style comment targets
