@@ -120,9 +120,12 @@ func normalizeMap(m map[string]any, onPath map[[2]uintptr]bool) (any, bool, bool
 	// directly or transitively) would otherwise recurse without bound and abort
 	// the process with a stack overflow that recover cannot catch. Track the
 	// containers on the current path and stop at a back-edge, leaving the value
-	// unchanged. The key carries len alongside the pointer to stay uniform with
-	// normalizeSlice, where the length distinguishes a reslice from a true cycle.
-	// A back-edge re-enters a container already on the path, so it is accepted.
+	// unchanged. The key reuses normalizeSlice's {pointer, len} shape so both
+	// helpers share one onPath map; for a map the pointer alone identifies the
+	// container (a map cannot be resliced into a distinct value sharing its
+	// pointer), so len never changes the decision here and is carried only for
+	// that uniformity. A back-edge re-enters a container already on the path, so
+	// it is accepted.
 	key := [2]uintptr{reflect.ValueOf(m).Pointer(), uintptr(len(m))}
 	if onPath[key] {
 		return m, false, true
