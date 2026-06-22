@@ -16,6 +16,11 @@ import (
 // [ErrInvalidOption], so their errors match both sentinels with [errors.Is].
 var ErrUnknownAnnotator = errors.New("unknown annotator")
 
+// DefaultAnnotators is the comma-separated annotator list [NewConfig] seeds
+// and [Config.RegisterFlags] offers as the --annotators default: the four
+// built-in Helm parsers in priority order.
+const DefaultAnnotators = "helm-schema,helm-values-schema,bitnami,helm-docs"
+
 // Flags holds CLI flag names for schema generation configuration, allowing
 // callers to customize flag names while keeping sensible defaults.
 type Flags struct {
@@ -85,7 +90,13 @@ type Config struct {
 	InferDefaults bool
 }
 
-// NewConfig returns a new [Config] with default flag names.
+// NewConfig returns a new [Config] with default flag names and the
+// Registry-independent runtime defaults whose zero value would otherwise be
+// invalid (Draft 7, Indent 2, Output "-"). Annotators is intentionally left
+// empty: the default annotator names resolve only against a [Config.Registry],
+// which is the caller's to supply, so seeding them here would make
+// NewConfig+NewGenerator fail with an unknown-annotator error. The CLI default
+// is applied in [Config.RegisterFlags] instead.
 func NewConfig() *Config {
 	f := Flags{
 		Output:        "output",
@@ -99,29 +110,44 @@ func NewConfig() *Config {
 		InferDefaults: "infer-defaults",
 	}
 
-	return &Config{Flags: f, Draft: 7}
+	return &Config{
+		Flags:  f,
+		Draft:  7,
+		Indent: 2,
+		Output: "-",
+	}
 }
 
 // RegisterFlags adds schema generation flags to the given [*pflag.FlagSet].
+// Each flag's default is the current field value rather than a hardcoded
+// literal, so a caller that sets a field before registering flags keeps that
+// value as the default (pflag's *Var registration would otherwise overwrite it
+// immediately), and the flag defaults stay in step with [NewConfig]. The one
+// exception is --annotators: NewConfig cannot seed it (see there), so an unset
+// Annotators falls back to the full [DefaultAnnotators] list for the CLI.
 func (c *Config) RegisterFlags(flags *pflag.FlagSet) {
-	flags.StringVarP(&c.Output, c.Flags.Output, "o", "-",
+	annotators := c.Annotators
+	if annotators == "" {
+		annotators = DefaultAnnotators
+	}
+
+	flags.StringVarP(&c.Output, c.Flags.Output, "o", c.Output,
 		"output file path (- for stdout)")
-	flags.IntVar(&c.Draft, c.Flags.Draft, 7,
+	flags.IntVar(&c.Draft, c.Flags.Draft, c.Draft,
 		"JSON Schema draft version (only 7 is supported)")
-	flags.IntVar(&c.Indent, c.Flags.Indent, 2,
+	flags.IntVar(&c.Indent, c.Flags.Indent, c.Indent,
 		"JSON indentation spaces (0 for compact output)")
-	flags.StringVar(&c.Title, c.Flags.Title, "",
+	flags.StringVar(&c.Title, c.Flags.Title, c.Title,
 		"schema title field")
-	flags.StringVar(&c.Description, c.Flags.Description, "",
+	flags.StringVar(&c.Description, c.Flags.Description, c.Description,
 		"schema description field")
-	flags.StringVar(&c.ID, c.Flags.ID, "",
+	flags.StringVar(&c.ID, c.Flags.ID, c.ID,
 		"schema $id field")
-	flags.StringVarP(&c.Annotators, c.Flags.Annotators, "a",
-		"helm-schema,helm-values-schema,bitnami,helm-docs",
+	flags.StringVarP(&c.Annotators, c.Flags.Annotators, "a", annotators,
 		"comma-separated list of enabled annotation parsers (in priority order)")
-	flags.BoolVar(&c.Strict, c.Flags.Strict, false,
+	flags.BoolVar(&c.Strict, c.Flags.Strict, c.Strict,
 		"set additionalProperties: false on objects")
-	flags.BoolVar(&c.InferDefaults, c.Flags.InferDefaults, false,
+	flags.BoolVar(&c.InferDefaults, c.Flags.InferDefaults, c.InferDefaults,
 		"record observed YAML values as schema defaults")
 }
 

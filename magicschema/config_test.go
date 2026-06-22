@@ -175,6 +175,42 @@ func TestConfigMustRegisterCompletions(t *testing.T) {
 	})
 }
 
+func TestConfigRegisterFlagsDefaults(t *testing.T) {
+	t.Parallel()
+
+	t.Run("an unset config takes the documented defaults", func(t *testing.T) {
+		t.Parallel()
+
+		cfg := magicschema.NewConfig()
+		cmd := &cobra.Command{Use: "test"}
+		cfg.RegisterFlags(cmd.Flags())
+
+		assert.Equal(t, "-", cfg.Output)
+		assert.Equal(t, 2, cfg.Indent)
+		assert.Equal(t, 7, cfg.Draft)
+		assert.Equal(t, magicschema.DefaultAnnotators, cfg.Annotators,
+			"an empty Annotators must fall back to the full CLI default")
+	})
+
+	t.Run("preset fields are not clobbered by registration", func(t *testing.T) {
+		t.Parallel()
+
+		cfg := magicschema.NewConfig()
+		cfg.Indent = 4
+		cfg.Output = "out.json"
+		cfg.Annotators = "helm-docs"
+
+		cmd := &cobra.Command{Use: "test"}
+		cfg.RegisterFlags(cmd.Flags())
+
+		// Registration writes the default into the bound field, so seeding
+		// each default from the current field keeps the preset value.
+		assert.Equal(t, 4, cfg.Indent)
+		assert.Equal(t, "out.json", cfg.Output)
+		assert.Equal(t, "helm-docs", cfg.Annotators)
+	})
+}
+
 func TestConfigAnnotatorsCompletion(t *testing.T) {
 	t.Parallel()
 
