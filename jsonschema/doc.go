@@ -549,6 +549,13 @@
 // would otherwise be dropped silently and accept every element. Set the Draft-7
 // $schema (or [WithDraft]) for tuple semantics, or use prefixItems.
 //
+// Compile also rejects a negative length or count keyword (minLength, maxLength,
+// minItems, maxItems, minProperties, maxProperties, minContains, maxContains)
+// with an error wrapping [ErrNegativeBound]. The spec defines each as a
+// non-negative integer, but Schema.Resolve does not enforce it, so a negative
+// bound would otherwise compile and then silently mis-validate: a negative
+// maximum rejects every instance and a negative minimum never fires.
+//
 // Instance numbers are compared exactly (decoded with UseNumber, compared as
 // [math/big.Rat]), with one bound on the work an adversarial literal can demand:
 // for a JSON number whose exact value exceeds an internal cap (about 4096

@@ -33,6 +33,16 @@ var (
 	// tuple semantics, or use prefixItems.
 	ErrItemsArrayUnderDraft2020 = errors.New("array-form items is not valid under draft 2020-12")
 
+	// ErrNegativeBound is returned by [Compile] when a length or count keyword
+	// (minLength, maxLength, minItems, maxItems, minProperties, maxProperties,
+	// minContains, maxContains) carries a negative value, which the spec defines
+	// as a non-negative integer. Schema.Resolve does not enforce it, so a
+	// negative bound would otherwise compile cleanly and then silently
+	// mis-validate: a negative maximum rejects every instance and a negative
+	// minimum is a dead no-op. Rejecting it at construction surfaces the
+	// malformed schema instead.
+	ErrNegativeBound = errors.New("negative bound")
+
 	// ErrInvalidSchemaDocument is returned by [CompileJSON], [ParseSchema],
 	// and [ParseSchemaValue] when a schema document's top-level value is not a
 	// JSON object or boolean.

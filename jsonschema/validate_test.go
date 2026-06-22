@@ -6638,6 +6638,48 @@ func TestCompileRejectsUnknownTypeNames(t *testing.T) {
 	}
 }
 
+// TestCompileRejectsNegativeBound pins that a negative length or count keyword
+// is rejected at Compile, where the validation walk would otherwise silently
+// mis-validate (a negative maximum rejects every instance, a negative minimum
+// never fires).
+func TestCompileRejectsNegativeBound(t *testing.T) {
+	t.Parallel()
+
+	t.Run("rejected at top level", func(t *testing.T) {
+		t.Parallel()
+
+		schema := &jsonschema.Schema{Type: "array", MaxItems: new(-1)}
+
+		_, err := jsonschema.Compile(t.Context(), schema)
+		require.ErrorIs(t, err, jsonschema.ErrNegativeBound)
+		assert.Contains(t, err.Error(), "/maxItems")
+	})
+
+	t.Run("rejected when nested under properties", func(t *testing.T) {
+		t.Parallel()
+
+		schema := &jsonschema.Schema{
+			Type: "object",
+			Properties: map[string]*jsonschema.Schema{
+				"name": {Type: "string", MinLength: new(-3)},
+			},
+		}
+
+		_, err := jsonschema.Compile(t.Context(), schema)
+		require.ErrorIs(t, err, jsonschema.ErrNegativeBound)
+		assert.Contains(t, err.Error(), "/properties/name/minLength")
+	})
+
+	t.Run("zero bound compiles", func(t *testing.T) {
+		t.Parallel()
+
+		schema := &jsonschema.Schema{Type: "array", MinItems: new(0), MaxItems: new(0)}
+
+		_, err := jsonschema.Compile(t.Context(), schema)
+		require.NoError(t, err)
+	})
+}
+
 // TestCompileRejectsItemsArrayUnderDraft2020 pins that the Draft-7 array form of
 // items (what a JSON `"items": [ ... ]` parses into) is rejected at Compile
 // under Draft 2020-12, where the validation walk would otherwise drop it

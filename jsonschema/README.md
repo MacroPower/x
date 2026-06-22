@@ -696,6 +696,13 @@ validation; 2020-12 spells tuples with `prefixItems`, so an array-form `items`
 would otherwise be dropped silently and accept every element. Set the draft-07
 `$schema` (or `WithDraft`) for tuple semantics, or use `prefixItems`.
 
+`Compile` also rejects a negative length or count keyword (`minLength`,
+`maxLength`, `minItems`, `maxItems`, `minProperties`, `maxProperties`,
+`minContains`, `maxContains`) with `ErrNegativeBound`. The spec defines each as
+a non-negative integer, but `Schema.Resolve` does not enforce it, so a negative
+bound would otherwise compile and then silently mis-validate: a negative maximum
+rejects every instance and a negative minimum never fires.
+
 The one-shot `Validate` compiles a fresh validator on every call; to
 validate many instances against the same schema, `Compile` once and reuse
 the result. A `*Validator` is safe for concurrent use by multiple

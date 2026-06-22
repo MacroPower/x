@@ -1063,6 +1063,18 @@ func Compile(ctx context.Context, schema *Schema, opts ...ValidateOption) (*Vali
 		return nil, err
 	}
 
+	// Reject a negative length or count bound up front, for the same reason as
+	// the type-name check: Schema.Resolve does not enforce the spec's
+	// non-negative-integer requirement, so a negative bound otherwise compiles
+	// and then silently mis-validates. The visited set is shared with the
+	// post-Resolve remote pass below.
+	boundsVisited := map[*Schema]bool{}
+
+	err = checkNonNegativeBounds(schema, "", boundsVisited)
+	if err != nil {
+		return nil, err
+	}
+
 	// Reject the Draft-7 array form of items under Draft 2020-12, where it has
 	// no meaning and the validation walk would otherwise drop it silently,
 	// accepting every element. Draft-7 spells tuples this way, so the check is
@@ -1127,6 +1139,11 @@ func Compile(ctx context.Context, schema *Schema, opts ...ValidateOption) (*Vali
 		s := v.uriRegistry[uri]
 
 		err = checkTypeNames(s, uri+"#", typeVisited)
+		if err != nil {
+			return nil, err
+		}
+
+		err = checkNonNegativeBounds(s, uri+"#", boundsVisited)
 		if err != nil {
 			return nil, err
 		}
@@ -1328,6 +1345,50 @@ func checkItemsArrayDraft2020(schema *Schema, schemaPath string, visited map[*Sc
 
 	for _, entry := range SubschemaEntries(schema) {
 		err := checkItemsArrayDraft2020(entry.Schema, schemaPath+entry.Pointer, visited)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// checkNonNegativeBounds rejects a negative value on a length or count keyword,
+// each of which the spec defines as a non-negative integer. Schema.Resolve does
+// not enforce it, so a negative bound otherwise compiles cleanly and then
+// silently mis-validates: a negative maximum rejects every instance and a
+// negative minimum never fires. The traversal mirrors [checkTypeNames]: it uses
+// [SubschemaEntries] for the field list and each entry's Pointer for the
+// location, with visited guarding schema-graph cycles. It is draft-agnostic;
+// every draft defines these keywords as non-negative.
+func checkNonNegativeBounds(schema *Schema, schemaPath string, visited map[*Schema]bool) error {
+	if schema == nil || visited[schema] {
+		return nil
+	}
+
+	visited[schema] = true
+
+	for _, bound := range []struct {
+		value   *int
+		keyword string
+	}{
+		{schema.MinLength, "minLength"},
+		{schema.MaxLength, "maxLength"},
+		{schema.MinItems, "minItems"},
+		{schema.MaxItems, "maxItems"},
+		{schema.MinProperties, "minProperties"},
+		{schema.MaxProperties, "maxProperties"},
+		{schema.MinContains, "minContains"},
+		{schema.MaxContains, "maxContains"},
+	} {
+		if bound.value != nil && *bound.value < 0 {
+			return fmt.Errorf("%w: %s is %d at %s/%s",
+				ErrNegativeBound, bound.keyword, *bound.value, schemaPath, bound.keyword)
+		}
+	}
+
+	for _, entry := range SubschemaEntries(schema) {
+		err := checkNonNegativeBounds(entry.Schema, schemaPath+entry.Pointer, visited)
 		if err != nil {
 			return err
 		}
