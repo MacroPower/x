@@ -21,7 +21,7 @@ const (
 
 	// devboxVersion is the jetify devbox release installed into the built
 	// image.
-	devboxVersion = "0.17.3" // renovate: datasource=github-releases depName=jetify-com/devbox
+	devboxVersion = "0.17.4" // renovate: datasource=github-releases depName=jetify-com/devbox
 
 	// nixVersion pins the single-user Nix installer so the bootstrap store
 	// is reproducible across image builds.
