@@ -435,24 +435,45 @@ func stripCommentPrefix(line string) string {
 // marker from any of the built-in annotator formats. Recognition is
 // independent of which annotators are enabled, so a known format's marker
 // never leaks into a description even when its annotator is off (fail open).
-// Custom annotators extend marker recognition by implementing the optional
-// [MarkerAnnotator] interface.
+// Word markers count only as whole tokens ([IsMarkerBoundary]), so prose such
+// as "@sections of the chart" or "@defaults are merged" stays description
+// text, agreeing with the annotator scans that consume the markers. Two
+// markers are deliberately boundary-less, matching their scans: the @schema
+// family follows the fence grammar [ClassifySchemaLine] defines (upstream
+// helm-schema fences on any "@schema" prefix, junk suffixes included), and
+// "--" matches the norwoodj "# --" detection, which accepts a missing
+// following space. Custom annotators extend marker recognition by
+// implementing the optional [MarkerAnnotator] interface.
 func IsAnnotationComment(s string) bool {
 	s = strings.TrimSpace(s)
 
-	return strings.HasPrefix(s, "@schema") ||
-		strings.HasPrefix(s, "@param") ||
-		strings.HasPrefix(s, "@skip") ||
-		strings.HasPrefix(s, "@section") ||
-		strings.HasPrefix(s, "@extra") ||
-		strings.HasPrefix(s, "@descriptionStart") ||
-		strings.HasPrefix(s, "@descriptionEnd") ||
-		strings.HasPrefix(s, "@raw") ||
-		strings.HasPrefix(s, "@ignore") ||
-		strings.HasPrefix(s, "@notationType") ||
-		strings.HasPrefix(s, "@default") ||
-		strings.HasPrefix(s, "--") ||
-		isHelmDocsOldStyleComment(s)
+	if ClassifySchemaLine(s) != SchemaLinePlain {
+		return true
+	}
+
+	for _, marker := range annotationMarkers {
+		if rest, ok := strings.CutPrefix(s, marker); ok && IsMarkerBoundary(rest) {
+			return true
+		}
+	}
+
+	return strings.HasPrefix(s, "--") || isHelmDocsOldStyleComment(s)
+}
+
+// annotationMarkers lists the whole-token annotation markers of the built-in
+// formats. [IsAnnotationComment] requires each to stand at a marker boundary,
+// so a prose word that merely extends one does not count.
+var annotationMarkers = []string{
+	"@param",
+	"@skip",
+	"@section",
+	"@extra",
+	"@descriptionStart",
+	"@descriptionEnd",
+	"@raw",
+	"@ignore",
+	"@notationType",
+	"@default",
 }
 
 // isHelmDocsOldStyleComment detects old-style helm-docs comments of the form

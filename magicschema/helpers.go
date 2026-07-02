@@ -290,11 +290,13 @@ func StripCommentMarker(line string) string {
 
 // IsMarkerBoundary reports whether rest -- the remainder of a comment line
 // after an annotation marker prefix is cut -- leaves the marker standing as a
-// whole token: rest is empty or begins with a space or tab. Every marker scan
-// in the package shares this one boundary predicate, so the adapters and the
-// structural fallback agree on which lines carry annotations: "@schemafoo" is
-// never the "@schema" marker, and a prose line such as "@sections of the
-// chart" is never the "@section" marker.
+// whole token: rest is empty or begins with a space or tab. Every word-marker
+// scan in the package shares this one boundary predicate, so the adapters and
+// the structural fallback agree on which lines carry annotations: a prose
+// line such as "@sections of the chart" is never the "@section" marker. The
+// @schema fence family is the deliberate exception -- [ClassifySchemaLine]
+// matches junk suffixes such as "@schema@" because upstream helm-schema
+// fences on any "@schema" prefix.
 func IsMarkerBoundary(rest string) bool {
 	return rest == "" || rest[0] == ' ' || rest[0] == '\t'
 }

@@ -87,6 +87,30 @@ func TestIsAnnotationComment(t *testing.T) {
 			input: "This is a regular comment",
 			want:  false,
 		},
+		"prose extending @section": {
+			// Word markers count only as whole tokens: prose whose first
+			// word merely extends a marker stays description text.
+			input: "@sections of the chart are documented here",
+			want:  false,
+		},
+		"prose extending @default": {
+			input: "@defaults are merged with overrides",
+			want:  false,
+		},
+		"prose extending @skip": {
+			input: "@skipped keys are listed in the README",
+			want:  false,
+		},
+		"prose extending @param": {
+			input: "@parameters are described below",
+			want:  false,
+		},
+		"junk suffix on @schema": {
+			// The @schema fence family is deliberately boundary-less:
+			// upstream helm-schema fences on any "@schema" prefix.
+			input: "@schema@",
+			want:  true,
+		},
 		"old-style helm-docs key path": {
 			input: "image.tag -- the image tag",
 			want:  true,
