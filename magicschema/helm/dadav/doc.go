@@ -320,6 +320,13 @@
 //   - No $defs rewriting: We do not rewrite $defs to definitions or rewrite
 //     $ref paths from #/$defs/ to #/definitions/. The annotator preserves
 //     whatever the user wrote. (Upstream: rewrites both; ours: preserves.)
+//     The one exception is a single block carrying both spellings: the
+//     jsonschema marshaler rejects a schema with both definitions and $defs
+//     set, which would fail the whole document's marshal, so definitions
+//     takes precedence and the block's $defs entry is dropped -- matching
+//     the package's Draft 7 output and the upstream's preference for
+//     definitions. (Upstream: folds $defs into definitions; ours:
+//     definitions wins, $defs dropped.)
 //
 //   - No global property: We do not auto-inject a "global" property.
 //     This package is a generic YAML-to-schema tool, not Helm-specific.

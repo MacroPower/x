@@ -270,9 +270,26 @@ func (a *Annotator) applyField(schema *jsonschema.Schema, result *magicschema.An
 	case "dependencies":
 		applyDependencies(schema, val)
 	case "definitions":
-		schema.Definitions = magicschema.ToSubSchemaMap(val)
+		// The definitions and $defs keys are the Draft 7 and 2019-09+
+		// spellings of the same keyword, and the jsonschema marshaler rejects
+		// a schema carrying both, which would break the whole document's
+		// final marshal (the same invariant SetSchemaType guards for
+		// Type/Types). Block keys arrive in map order, so exclusivity uses a
+		// fixed, order-independent precedence: definitions wins when one
+		// block carries both spellings, matching the package's Draft 7 output
+		// and the upstream's preference for definitions. Each side yields
+		// only to a value that parses, so an unparseable winner cannot drop a
+		// valid loser.
+		if defs := magicschema.ToSubSchemaMap(val); defs != nil {
+			schema.Definitions = defs
+			schema.Defs = nil
+		}
+
 	case "$defs":
-		schema.Defs = magicschema.ToSubSchemaMap(val)
+		if schema.Definitions == nil {
+			schema.Defs = magicschema.ToSubSchemaMap(val)
+		}
+
 	case "$ref":
 		schema.Ref = toString(val)
 	case "$id":
@@ -603,7 +620,10 @@ func applyRequired(schema *jsonschema.Schema, result *magicschema.AnnotationResu
 }
 
 // applyDependencies handles the "dependencies" field which can contain
-// either schema or string-array values.
+// either schema or string-array values. Each key routes to exactly one of
+// DependencySchemas or DependencyStrings based on its value's shape, so the
+// jsonschema marshaler's invariant that no key appears in both maps holds by
+// construction.
 func applyDependencies(schema *jsonschema.Schema, val any) {
 	m, ok := val.(map[string]any)
 	if !ok {

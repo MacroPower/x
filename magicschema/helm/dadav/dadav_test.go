@@ -1000,6 +1000,67 @@ func TestHelmSchemaAnnotatorEdgeCases(t *testing.T) {
 				assert.Contains(t, defs, "port")
 			},
 		},
+		"definitions and $defs in one block": {
+			// The jsonschema marshaler rejects a schema carrying both
+			// definitions and $defs, which would fail the whole document's
+			// marshal (checked by the harness below). The definitions key
+			// takes precedence and the $defs entry drops, independent of the
+			// order the block's keys are iterated in.
+			input: stringtest.Input(`
+				# @schema
+				# definitions:
+				#   a:
+				#     type: string
+				# $defs:
+				#   b:
+				#     type: string
+				# @schema
+				key: value
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				k, ok := props["key"].(map[string]any)
+				require.True(t, ok)
+
+				defs, ok := k["definitions"].(map[string]any)
+				require.True(t, ok)
+				assert.Contains(t, defs, "a")
+
+				assert.Nil(t, k["$defs"])
+			},
+		},
+		"unparseable $defs keeps definitions": {
+			// A $defs value that is not a mapping never displaces a valid
+			// definitions sibling, in either iteration order.
+			input: stringtest.Input(`
+				# @schema
+				# $defs: not-a-map
+				# definitions:
+				#   a:
+				#     type: string
+				# @schema
+				key: value
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				k, ok := props["key"].(map[string]any)
+				require.True(t, ok)
+
+				defs, ok := k["definitions"].(map[string]any)
+				require.True(t, ok)
+				assert.Contains(t, defs, "a")
+
+				assert.Nil(t, k["$defs"])
+			},
+		},
 		"uniqueItems constraint": {
 			input: stringtest.Input(`
 				# @schema
