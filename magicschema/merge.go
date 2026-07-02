@@ -55,23 +55,16 @@ func mergeSchemas(a, b *jsonschema.Schema) *jsonschema.Schema {
 	// [type, null] union that would reject the very inputs the earlier merge
 	// accepted.
 	if isTypelessUnion(a) || isTypelessUnion(b) {
-		out := &jsonschema.Schema{
-			Title:       cmp.Or(a.Title, b.Title),
-			Description: cmp.Or(a.Description, b.Description),
-		}
+		out := &jsonschema.Schema{}
 
-		// Carry the value-set constraint through, exactly as the two-input
-		// incompatible path below does, so a folded enum/const survives the
-		// multi-input fast path too. Without this a three-input fold dropped
-		// the enum here while the two-input path kept it, making which
-		// constraints survive depend on fold order. An unconstrained input
-		// still widens the union to accept everything (fail open), since
-		// unionEnums yields nil whenever either side is unconstrained.
-		if a.Const != nil && b.Const != nil && reflect.DeepEqual(*a.Const, *b.Const) {
-			out.Const = a.Const
-		} else {
-			out.Enum = unionEnums(enumValues(a), enumValues(b))
-		}
+		// Carry metadata and the value-set constraint through with the same
+		// helpers the two-input incompatible path below uses, so the fold is
+		// associative: which metadata and constraints survive must not depend
+		// on how many inputs fold through the marked schema. A path-local copy
+		// here would drop defaults, examples, x-* annotations, and enums on a
+		// three-input fold while the two-input path keeps them.
+		mergeMetadata(out, a, b)
+		mergeValueSet(out, a, b)
 
 		return markTypelessUnion(out)
 	}
@@ -104,59 +97,10 @@ func mergeSchemas(a, b *jsonschema.Schema) *jsonschema.Schema {
 	// schema never carries both -- the same rule the annotators apply.
 	SetSchemaType(result, merged)
 
-	// Merge metadata: prefer a, fall back to b.
-	result.Title = cmp.Or(a.Title, b.Title)
-	result.Description = cmp.Or(a.Description, b.Description)
-
-	// Identity and informational keywords annotate rather than constrain, so
-	// they carry first-wins like title and description. The annotator-merge
-	// path (mergeSchemaFields) already keeps them; a later union merge must not
-	// silently drop what survived single-input generation. References ($ref,
-	// $dynamicRef) stay dropped (see the doc comment).
-	result.Schema = cmp.Or(a.Schema, b.Schema)
-	result.ID = cmp.Or(a.ID, b.ID)
-	result.Comment = cmp.Or(a.Comment, b.Comment)
-	result.Anchor = cmp.Or(a.Anchor, b.Anchor)
-	result.DynamicAnchor = cmp.Or(a.DynamicAnchor, b.DynamicAnchor)
-
-	// Same first-non-nil-wins policy as the cmp.Or fields above, spelled out
-	// because Vocabulary (map), Default (json.RawMessage), and Examples ([]any)
-	// are not comparable and cmp.Or rejects them.
-	if a.Vocabulary != nil {
-		result.Vocabulary = a.Vocabulary
-	} else {
-		result.Vocabulary = b.Vocabulary
-	}
-
-	if a.Default != nil {
-		result.Default = a.Default
-	} else {
-		result.Default = b.Default
-	}
-
-	if a.Examples != nil {
-		result.Examples = a.Examples
-	} else {
-		result.Examples = b.Examples
-	}
-
-	// Deprecated is informational and sticky; readOnly/writeOnly restrict
-	// usage, so they hold only when both sides agree.
-	result.Deprecated = a.Deprecated || b.Deprecated
-	result.ReadOnly = a.ReadOnly && b.ReadOnly
-	result.WriteOnly = a.WriteOnly && b.WriteOnly
-
-	// Enum and const both constrain value sets (const is a single-value
-	// enum), so they union with each other, independent of type. Equal
-	// consts stay const; any other both-sides combination unions to enum.
-	if a.Const != nil && b.Const != nil && reflect.DeepEqual(*a.Const, *b.Const) {
-		result.Const = a.Const
-	} else {
-		result.Enum = unionEnums(enumValues(a), enumValues(b))
-	}
-
-	// Merge x-* custom annotations per key, a wins.
-	result.Extra = mergeExtra(a.Extra, b.Extra)
+	// Merge metadata and the value-set constraint (see the helpers for the
+	// per-keyword rules).
+	mergeMetadata(result, a, b)
+	mergeValueSet(result, a, b)
 
 	// When both sides constrain the type but the union is incompatible,
 	// the type constraint is dropped entirely (fail open). Type-specific
@@ -250,6 +194,70 @@ func mergeSchemas(a, b *jsonschema.Schema) *jsonschema.Schema {
 	return result
 }
 
+// mergeMetadata carries the informational keywords of a and b onto out with
+// union semantics: prefer a, fall back to b. Both merge paths -- the main
+// path and the typeless-union fast path -- share it, so the metadata a marked
+// schema carries does not depend on how many inputs fold through it.
+func mergeMetadata(out, a, b *jsonschema.Schema) {
+	out.Title = cmp.Or(a.Title, b.Title)
+	out.Description = cmp.Or(a.Description, b.Description)
+
+	// Identity and informational keywords annotate rather than constrain, so
+	// they carry first-wins like title and description. The annotator-merge
+	// path (mergeSchemaFields) already keeps them; a later union merge must not
+	// silently drop what survived single-input generation. References ($ref,
+	// $dynamicRef) stay dropped (see the mergeSchemas doc comment).
+	out.Schema = cmp.Or(a.Schema, b.Schema)
+	out.ID = cmp.Or(a.ID, b.ID)
+	out.Comment = cmp.Or(a.Comment, b.Comment)
+	out.Anchor = cmp.Or(a.Anchor, b.Anchor)
+	out.DynamicAnchor = cmp.Or(a.DynamicAnchor, b.DynamicAnchor)
+
+	// Same first-non-nil-wins policy as the cmp.Or fields above, spelled out
+	// because Vocabulary (map), Default (json.RawMessage), and Examples ([]any)
+	// are not comparable and cmp.Or rejects them.
+	if a.Vocabulary != nil {
+		out.Vocabulary = a.Vocabulary
+	} else {
+		out.Vocabulary = b.Vocabulary
+	}
+
+	if a.Default != nil {
+		out.Default = a.Default
+	} else {
+		out.Default = b.Default
+	}
+
+	if a.Examples != nil {
+		out.Examples = a.Examples
+	} else {
+		out.Examples = b.Examples
+	}
+
+	// Deprecated is informational and sticky; readOnly/writeOnly restrict
+	// usage, so they hold only when both sides agree.
+	out.Deprecated = a.Deprecated || b.Deprecated
+	out.ReadOnly = a.ReadOnly && b.ReadOnly
+	out.WriteOnly = a.WriteOnly && b.WriteOnly
+
+	// Merge x-* custom annotations per key, a wins.
+	out.Extra = mergeExtra(a.Extra, b.Extra)
+}
+
+// mergeValueSet carries the unioned value-set constraint of a and b onto out.
+// Enum and const both constrain value sets (const is a single-value enum), so
+// they union with each other, independent of type. Equal consts stay const;
+// any other both-sides combination unions to enum. An unconstrained side
+// widens the union to accept everything (fail open), since unionEnums yields
+// nil whenever either side is unconstrained.
+func mergeValueSet(out, a, b *jsonschema.Schema) {
+	if a.Const != nil && b.Const != nil && reflect.DeepEqual(*a.Const, *b.Const) {
+		out.Const = a.Const
+	} else {
+		out.Enum = unionEnums(enumValues(a), enumValues(b))
+	}
+}
+
 // typelessUnionKey marks a schema whose type was dropped because the union
 // accepts every type -- two incompatible types unioned, or a typeless
 // annotation-only constraint schema met a typed one and its constraints all
@@ -287,10 +295,12 @@ func isTypelessUnion(s *jsonschema.Schema) bool {
 
 // stripTypelessUnion removes the internal typeless-union marker from the whole
 // schema tree before output. A marked schema carries no nested sub-schemas in
-// type-specific positions (items, properties, and the like) -- only metadata
-// such as title and description, and at most an Enum or Const value set -- so
-// reaching every schema position via forEachSubSchema is enough to clear the
-// marker; the carried value set holds no sub-schema and needs no descent.
+// type-specific positions (items, properties, and the like) -- only the
+// informational keywords mergeMetadata carries (title, description, identity
+// keywords, default, examples, usage flags, x-* annotations) and at most an
+// Enum or Const value set -- so reaching every schema position via
+// forEachSubSchema is enough to clear the marker; none of the carried fields
+// hold a sub-schema, so they need no descent.
 func stripTypelessUnion(s *jsonschema.Schema) {
 	if s == nil {
 		return

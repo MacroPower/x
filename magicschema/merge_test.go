@@ -774,6 +774,122 @@ func TestMergeIncompatibleEnumOrderIndependent(t *testing.T) {
 		"the merged enum must be byte-identical regardless of fold order")
 }
 
+func TestMergeIncompatibleMetadataFoldOrderIndependent(t *testing.T) {
+	t.Parallel()
+
+	// One annotated input carries informational metadata (default, examples,
+	// deprecated, $comment, and an x-* annotation); the other two inputs hold
+	// incompatible types, so the fold widens the type away. The metadata must
+	// survive no matter which position the annotated input occupies: the
+	// two-input incompatible path carries it onto the marked typeless union,
+	// and the multi-input fast path must carry the same set, or which
+	// metadata survives depends on how many inputs fold through the marked
+	// schema.
+	annotated := "# @schema\n" +
+		"# type: string\n" +
+		"# default: keepme\n" +
+		"# examples: [keepme]\n" +
+		"# deprecated: true\n" +
+		"# $comment: keepme\n" +
+		"# x-custom: keepme\n" +
+		"# @schema\n" +
+		"val: hello\n"
+
+	tcs := map[string]struct {
+		inputs []string
+	}{
+		"annotated first":  {inputs: []string{annotated, "val: 1\n", "val: true\n"}},
+		"annotated middle": {inputs: []string{"val: 1\n", annotated, "val: true\n"}},
+		"annotated last":   {inputs: []string{"val: 1\n", "val: true\n", annotated}},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			inputs := make([][]byte, len(tc.inputs))
+			for i, in := range tc.inputs {
+				inputs[i] = []byte(in)
+			}
+
+			gen := magicschema.NewGenerator(magicschema.WithAnnotators(dadav.New()))
+			schema, err := gen.Generate(inputs...)
+			require.NoError(t, err)
+
+			out, err := json.Marshal(schema)
+			require.NoError(t, err)
+
+			assert.NotContains(t, string(out), "typeless_union",
+				"internal merge marker must not leak into the output")
+
+			var got map[string]any
+
+			require.NoError(t, json.Unmarshal(out, &got))
+
+			props, ok := got["properties"].(map[string]any)
+			require.True(t, ok)
+
+			val, ok := props["val"].(map[string]any)
+			require.True(t, ok, "the carried metadata must survive the fold")
+
+			assert.Nil(t, val["type"], "incompatible union must stay typeless")
+			assert.Equal(t, "keepme", val["default"])
+			assert.Equal(t, []any{"keepme"}, val["examples"])
+			assert.Equal(t, true, val["deprecated"])
+			assert.Equal(t, "keepme", val["$comment"])
+			assert.Equal(t, "keepme", val["x-custom"])
+		})
+	}
+}
+
+func TestMergeIncompatibleThreeInputsKeepsInferredDefault(t *testing.T) {
+	t.Parallel()
+
+	// Inferred defaults carry first-wins through a union merge, so the first
+	// input's default must survive an incompatible three-input fold exactly as
+	// it survives a two-input one: routing the marked typeless schema through
+	// the multi-input fast path must not drop it.
+	tcs := map[string]struct {
+		inputs []string
+		want   any
+	}{
+		"string first":  {inputs: []string{"val: hello\n", "val: 5\n", "val: world\n"}, want: "hello"},
+		"integer first": {inputs: []string{"val: 5\n", "val: hello\n", "val: world\n"}, want: float64(5)},
+		"two inputs":    {inputs: []string{"val: hello\n", "val: 5\n"}, want: "hello"},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			inputs := make([][]byte, len(tc.inputs))
+			for i, in := range tc.inputs {
+				inputs[i] = []byte(in)
+			}
+
+			gen := magicschema.NewGenerator(magicschema.WithInferDefaults(true))
+			schema, err := gen.Generate(inputs...)
+			require.NoError(t, err)
+
+			out, err := json.Marshal(schema)
+			require.NoError(t, err)
+
+			var got map[string]any
+
+			require.NoError(t, json.Unmarshal(out, &got))
+
+			props, ok := got["properties"].(map[string]any)
+			require.True(t, ok)
+
+			val, ok := props["val"].(map[string]any)
+			require.True(t, ok, "the carried default must survive the fold")
+
+			assert.Nil(t, val["type"], "incompatible union must stay typeless")
+			assert.Equal(t, tc.want, val["default"])
+		})
+	}
+}
+
 func TestMergeAnnotatedConstraints(t *testing.T) {
 	t.Parallel()
 
