@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/x/magicschema"
 )
@@ -83,6 +84,56 @@ func TestParseYAMLValue(t *testing.T) {
 			}
 
 			assert.JSONEq(t, tc.want, string(got))
+		})
+	}
+}
+
+func TestToSubSchemaTypeNormalization(t *testing.T) {
+	t.Parallel()
+
+	// The nested type arrays a round-tripped sub-schema carries must uphold
+	// the same invariants SetSchemaType enforces for annotation-supplied
+	// lists: no duplicate members (a JSON Schema type array must have unique
+	// members), a single member collapses to the scalar Type, and an empty
+	// array leaves the type unset rather than emitting the invalid "type": [].
+	tcs := map[string]struct {
+		val       any
+		wantType  string
+		wantTypes []string
+	}{
+		"null member becomes the null type": {
+			val:       map[string]any{"type": []any{nil, "string"}},
+			wantTypes: []string{"null", "string"},
+		},
+		"duplicate members drop while first-seen order is kept": {
+			val:       map[string]any{"type": []any{"string", "null", "string"}},
+			wantTypes: []string{"string", "null"},
+		},
+		"null alongside the null string collapses to scalar": {
+			val:      map[string]any{"type": []any{"null", nil}},
+			wantType: "null",
+		},
+		"single member collapses to scalar": {
+			val:      map[string]any{"type": []any{"string"}},
+			wantType: "string",
+		},
+		"empty type array leaves the type unset": {
+			val: map[string]any{"type": []any{}},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			// Nest the schema under items to confirm the normalization walks
+			// the whole tree, not just the top level.
+			got := magicschema.ToSubSchema(map[string]any{"items": tc.val})
+			require.NotNil(t, got)
+			require.NotNil(t, got.Items)
+
+			assert.Equal(t, tc.wantType, got.Items.Type)
+			assert.Equal(t, tc.wantTypes, got.Items.Types)
 		})
 	}
 }

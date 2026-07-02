@@ -121,9 +121,11 @@ func copySchema(s *jsonschema.Schema) *jsonschema.Schema {
 	// collides with a Type that structural inference fills, leaving both set --
 	// a combination the jsonschema marshaler rejects, failing the whole
 	// document's marshal. Normalize it to nil, mirroring SetSchemaType's
-	// empty-list handling, so inference can fill Type cleanly. The
-	// lower-priority path is already guarded in mergeSchemaFields; this covers
-	// the highest-priority result, which copies through here untouched.
+	// empty-list handling, so inference can fill Type cleanly. The in-package
+	// producers never emit an empty Types (SetSchemaType leaves an empty list
+	// unset and ToSubSchema normalizes its round-tripped tree), so this guard
+	// and its mergeSchemaFields counterpart are defense-in-depth for external
+	// Annotator implementations that hand-construct one.
 	if len(c.Types) == 0 {
 		c.Types = nil
 	}
@@ -149,7 +151,10 @@ func mergeSchemaFields(dst, src *jsonschema.Schema) {
 	// carries. Requiring a real src type keeps a non-nil but empty src.Types from
 	// being grafted on: it would emit an invalid "type": [] and, once structural
 	// inference fills Type, set both Type and Types and break the document's
-	// final marshal. Grafting type:string onto an existing const:5 (or an integer
+	// final marshal. In-package producers never emit an empty Types (SetSchemaType
+	// and ToSubSchema both normalize it away), so this clause, like the copySchema
+	// guard, is defense-in-depth for external Annotator implementations.
+	// Grafting type:string onto an existing const:5 (or an integer
 	// enum) would instead leave a schema no value satisfies (fail closed) -- the
 	// mirror of the enum/const fill guard below.
 	if dst.Type == "" && len(dst.Types) == 0 &&

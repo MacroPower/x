@@ -3608,9 +3608,7 @@
               "description": "Default log level of Envoy application log that is configured if Cilium debug / verbose logging isn't enabled.\nThis option allows to have a different log level than the Cilium Agent - e.g. lower it to `critical`.\nPossible values: trace, debug, info, warning, error, critical, off",
               "oneOf": [
                 {
-                  "type": [
-                    "null"
-                  ]
+                  "type": "null"
                 },
                 {
                   "enum": [

@@ -62,9 +62,12 @@ func FalseSchema() *jsonschema.Schema {
 // ToSubSchema converts an arbitrary Go value (a map[string]any, bool, or any
 // other JSON-marshalable value) to a [*jsonschema.Schema] by round-tripping
 // through JSON. Returns nil for values that do not survive the round trip
-// (annotation parse failures are skipped, never fatal). YAML nulls inside
-// type arrays (e.g. "type: [null, string]") become the "null" type string,
-// matching how annotators translate the YAML null literal at the top level.
+// (annotation parse failures are skipped, never fatal). Type arrays anywhere
+// in the tree are normalized with [SetSchemaType] semantics: YAML nulls
+// (e.g. "type: [null, string]") become the "null" type string, matching how
+// annotators translate the YAML null literal at the top level; duplicate
+// members drop; a single remaining member collapses to the scalar Type; and
+// an empty array leaves the type unset.
 func ToSubSchema(val any) *jsonschema.Schema {
 	if val == nil {
 		return nil
@@ -82,28 +85,43 @@ func ToSubSchema(val any) *jsonschema.Schema {
 		return nil
 	}
 
-	normalizeNullTypes(&schema)
+	normalizeTypes(&schema)
 
 	return &schema
 }
 
-// normalizeNullTypes rewrites empty strings in Types to the "null" type
-// across the schema tree. A YAML null inside a type array survives the JSON
-// round trip as an empty string in Types, which is not a valid JSON Schema
-// type. Walking the typed tree keeps non-schema values (defaults, enums,
-// consts) untouched.
-func normalizeNullTypes(s *jsonschema.Schema) {
+// normalizeTypes normalizes Types across the schema tree so a round-tripped
+// sub-schema upholds the same type invariants [SetSchemaType] enforces for
+// annotation-supplied lists. A YAML null inside a type array survives the
+// JSON round trip as an empty string in Types, which is not a valid JSON
+// Schema type; it is rewritten to the "null" type. The list then passes
+// through [SetSchemaType], so duplicates drop (a type array must have unique
+// members), a single member collapses to the scalar Type, and an empty array
+// ("type: []") leaves the type unset -- nil Types -- instead of emitting the
+// invalid "type": []. Walking the typed tree keeps non-schema values
+// (defaults, enums, consts) untouched.
+func normalizeTypes(s *jsonschema.Schema) {
 	if s == nil {
 		return
 	}
 
-	for i, t := range s.Types {
-		if t == "" {
-			s.Types[i] = typeNull
+	if s.Types != nil {
+		types := s.Types
+		// SetSchemaType leaves the schema untouched for an empty list, so clear
+		// Types first: a zero-length array normalizes to nil rather than
+		// surviving as a non-nil empty slice.
+		s.Types = nil
+
+		for i, t := range types {
+			if t == "" {
+				types[i] = typeNull
+			}
 		}
+
+		SetSchemaType(s, types)
 	}
 
-	forEachSubSchema(s, normalizeNullTypes)
+	forEachSubSchema(s, normalizeTypes)
 }
 
 // forEachSubSchema calls fn on each non-nil direct sub-schema of s -- the

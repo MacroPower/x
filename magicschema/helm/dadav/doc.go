@@ -476,7 +476,10 @@
 //   - Single-element type array normalization: When the type field is an
 //     array with exactly one element, it is stored as a single Type string
 //     rather than a Types slice, matching upstream's MarshalJSON behavior
-//     for StringOrArrayOfString.
+//     for StringOrArrayOfString. The same normalization applies to type
+//     arrays inside nested sub-schemas (items, oneOf branches, and so on),
+//     where duplicate members also drop and an empty array leaves the type
+//     unset, so a nested type array is never spec-invalid.
 //
 //   - additionalItems boolean support: The additionalItems field accepts
 //     both boolean values and schema objects, matching upstream's

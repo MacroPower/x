@@ -3061,7 +3061,9 @@ func TestHelmSchemaUpstreamBehavior(t *testing.T) {
 		"null type inside oneOf branch": {
 			// A YAML null inside a nested type array (cilium's
 			// envoy.log.defaultLevel) must become the "null" type string,
-			// not an empty string, across the ToSubSchema round trip.
+			// not an empty string, across the ToSubSchema round trip. The
+			// single-member array collapses to the scalar type, matching
+			// upstream's StringOrArrayOfString marshal.
 			input: stringtest.Input(`
 				# @schema
 				# oneOf:
@@ -3086,9 +3088,62 @@ func TestHelmSchemaUpstreamBehavior(t *testing.T) {
 				branch, ok := oneOf[0].(map[string]any)
 				require.True(t, ok)
 
-				types, ok := branch["type"].([]any)
+				assert.Equal(t, "null", branch["type"])
+			},
+		},
+		"duplicate members in nested type array collapse": {
+			// A YAML null beside the "null" string in a nested type array
+			// normalizes to two "null" members; a JSON Schema type array must
+			// have unique members, so the duplicate drops and the remaining
+			// member collapses to the scalar type instead of emitting the
+			// spec-invalid ["null", "null"].
+			input: stringtest.Input(`
+				# @schema
+				# items:
+				#   type: ["null", null]
+				# @schema
+				field: [a]
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
 				require.True(t, ok)
-				assert.Equal(t, []any{"null"}, types)
+
+				f, ok := props["field"].(map[string]any)
+				require.True(t, ok)
+
+				items, ok := f["items"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "null", items["type"])
+			},
+		},
+		"empty type array in nested schema leaves the type unset": {
+			// A nested type: [] must not surface as the invalid Draft-7
+			// "type": [] -- an empty type array matches nothing (fail
+			// closed). The type is left unset, so the otherwise-empty items
+			// schema marshals as the validate-everything boolean form.
+			input: stringtest.Input(`
+				# @schema
+				# type: array
+				# items:
+				#   type: []
+				# @schema
+				field:
+				  - a
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				f, ok := props["field"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, true, f["items"],
+					"an empty type array must not reach the output")
 			},
 		},
 		"multiple blocks with regular comments between them": {

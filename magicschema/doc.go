@@ -243,7 +243,10 @@
 //   - [FalseSchema] returns a schema that validates nothing (the JSON
 //     Schema "false" value, represented as &jsonschema.Schema{Not: &jsonschema.Schema{}}).
 //   - [ToSubSchema] converts an arbitrary Go value to a [*jsonschema.Schema]
-//     by round-tripping through JSON.
+//     by round-tripping through JSON, normalizing type arrays across the tree
+//     with [SetSchemaType] semantics (nulls become the "null" type, duplicates
+//     drop, a single member collapses to the scalar type, an empty array
+//     leaves the type unset).
 //   - [ToSubSchemaArray] converts a []any to []*jsonschema.Schema.
 //   - [ToSubSchemaMap] converts a map[string]any to map[string]*jsonschema.Schema.
 //   - [ParseYAMLValue] parses a YAML value string into a [json.RawMessage].
