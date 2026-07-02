@@ -751,9 +751,16 @@ func (g *Generator) buildChildSchema(
 	// which only fills in when the annotation leaves the field nil.
 	annotatedAP := childSchema.AdditionalProperties != nil
 
-	// For object types, recurse into children.
-	if hasType(childSchema, typeObject) && childSchema.Properties == nil {
+	// For object types, recurse into children. An annotation that authored
+	// its own Properties skips the structural fill, but strict mode's
+	// additionalProperties:false must still apply when the annotation left
+	// the field unset -- the same default every structurally walked object
+	// receives; the flags reset below still treats it as structural.
+	switch {
+	case hasType(childSchema, typeObject) && childSchema.Properties == nil:
 		g.fillObjectFromStructure(childSchema, structuralNode, childPath, anchors, annotation)
+	case hasType(childSchema, typeObject) && !annotatedAP && g.strict:
+		childSchema.AdditionalProperties = FalseSchema()
 	}
 
 	// Skip- and merge-properties annotations declare the mapping's keys

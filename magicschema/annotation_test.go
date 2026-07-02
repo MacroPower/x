@@ -185,6 +185,45 @@ func TestGeneratorAnnotatorFlagsWithoutSchema(t *testing.T) {
 	}
 }
 
+func TestGeneratorAnnotatorPropertiesGetStrictAdditionalProperties(t *testing.T) {
+	t.Parallel()
+
+	// An annotator that authors its own Properties skips the structural
+	// fill, but WithStrict's additionalProperties:false must still apply
+	// when the annotation leaves the field unset, the same as every
+	// structurally walked object.
+	ann := stubAnnotator{
+		name: "props",
+		result: &magicschema.AnnotationResult{Schema: &jsonschema.Schema{
+			Type: "object",
+			Properties: map[string]*jsonschema.Schema{
+				"x": {Type: "string"},
+			},
+		}},
+	}
+
+	gen := magicschema.NewGenerator(magicschema.WithAnnotators(ann), magicschema.WithStrict(true))
+
+	schema, err := gen.Generate([]byte("obj:\n  x: hi\n  y: 2\n"))
+	require.NoError(t, err)
+
+	out, err := json.Marshal(schema)
+	require.NoError(t, err)
+
+	var got map[string]any
+
+	require.NoError(t, json.Unmarshal(out, &got))
+
+	props, ok := got["properties"].(map[string]any)
+	require.True(t, ok)
+
+	obj, ok := props["obj"].(map[string]any)
+	require.True(t, ok)
+
+	assert.Equal(t, false, obj["additionalProperties"],
+		"strict mode must apply to annotator-authored object schemas too")
+}
+
 func TestGeneratorAnnotatorRefNotGraftedBesideConstraints(t *testing.T) {
 	t.Parallel()
 
