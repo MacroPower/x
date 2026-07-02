@@ -68,6 +68,23 @@
 // comments, key line comments, and value line comments are not subject to
 // grouping.
 //
+// The goccy parser this package uses erases the physical blank lines when it
+// merges separate comment blocks above a key into one head comment group, so
+// the "\n\n" boundary upstream splits on never reaches the comment string.
+// [magicschema.HeadCommentRun] reconstructs the boundaries from comment token
+// positions, narrowing the head comment to the run physically adjacent to the
+// key before [magicschema.LastCommentGroup] applies the "#"-only line
+// grouping. A detached annotation block -- a file header, an annotation for a
+// removed key, separated from the key by a blank line -- therefore does not
+// apply to the following key, matching the upstream split.
+//
+// The value line comment is read only when it sits on the value's own line.
+// The goccy parser stows a comment written above the first sequence element
+// on the SequenceNode itself, where reading it as the value's line comment would
+// apply the element's annotation to the array key; upstream's
+// valNode.LineComment never carries such a comment. A same-line comment on a
+// flow sequence ("key: []  # @schema type:[array, null]") keeps applying.
+//
 // If a key appears multiple times across collected annotations (e.g.,
 // "type:string" in one line and "type:integer" in another), the last value
 // wins (overwrite semantics). The upstream processes all annotations
@@ -420,6 +437,12 @@
 //   - The global property injection (adding "global" with type
 //     ["object", "null"]) is not performed. This is a Helm-specific
 //     convenience that is outside the scope of a generic annotation parser.
+//
+//   - A trailing comment on the closing line of a multi-line flow sequence
+//     is not read as the value's line comment. The goccy parser attaches
+//     both that comment and a comment above the first sequence element to
+//     the SequenceNode, so the token-line comparison that keeps element
+//     comments from applying to the array also skips this rare placement.
 //
 // [helm-values-schema-json]: https://github.com/losisin/helm-values-schema-json
 package losisin

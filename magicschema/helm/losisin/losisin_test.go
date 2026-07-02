@@ -3519,6 +3519,103 @@ func TestHelmValuesSchemaAnnotatorUpstreamAlignment(t *testing.T) {
 				assert.Equal(t, false, c["additionalProperties"])
 			},
 		},
+		"detached annotation block does not apply to the following key": {
+			// The parser merges blank-line-separated comment blocks into one
+			// head comment group; a detached annotation separated from the
+			// key by a blank line must not apply, matching upstream's
+			// last-comment-group split on the blank line. Applying it would
+			// assert type integer and reject the key's own string value
+			// (fail closed).
+			input: stringtest.Input(`
+				# @schema type:integer
+
+				# plain docs
+				name: test
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				n, ok := props["name"].(map[string]any)
+				require.True(t, ok)
+
+				// Structural inference wins; the detached annotation leaves
+				// no trace while the adjacent prose stays the description.
+				assert.Equal(t, "string", n["type"])
+				assert.Equal(t, "plain docs", n["description"])
+			},
+		},
+		"detached annotation does not mark the following key required": {
+			input: stringtest.Input(`
+				a: 1
+				# @schema required:true;type:string
+
+				b: 2
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				b, ok := props["b"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "integer", b["type"])
+				assert.NotContains(t, got, "required")
+			},
+		},
+		"annotation above the first array element does not apply to the array": {
+			// The goccy parser stows the first element's head comment on the
+			// SequenceNode itself; upstream reads only the value's same-line
+			// comment, so the element annotation must not assert its scalar
+			// type on the array key (fail closed against the array value).
+			input: stringtest.Input(`
+				arr:
+				  # @schema type:string
+				  - foo
+				  - bar
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				arr, ok := props["arr"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "array", arr["type"])
+
+				items, ok := arr["items"].(map[string]any)
+				require.True(t, ok)
+				assert.Equal(t, "string", items["type"])
+			},
+		},
+		"inline annotation on a flow sequence still applies": {
+			// A comment on the value's own line is the upstream
+			// valNode.LineComment and must keep applying even though goccy
+			// attaches it to the SequenceNode.
+			input: stringtest.Input(`
+				middlewares: []  # @schema type:[array, null]
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				m, ok := props["middlewares"].(map[string]any)
+				require.True(t, ok)
+
+				types, ok := m["type"].([]any)
+				require.True(t, ok)
+				assert.Contains(t, types, "array")
+				assert.Contains(t, types, "null")
+			},
+		},
 	}
 
 	for name, tc := range tcs {
