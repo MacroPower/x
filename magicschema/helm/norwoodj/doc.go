@@ -259,8 +259,14 @@
 //     continuation text.
 //
 //   - @default produces schema default: When @default is present, its
-//     value is set as the JSON Schema "default" field (as a raw string).
-//     The upstream uses @default for documentation rendering only.
+//     value is parsed as a YAML expression and set as the JSON Schema
+//     "default" field, so numbers, booleans, lists, and objects keep
+//     their native JSON types (matching the bitnami annotator). Values
+//     that are blank or do not parse as YAML -- notably the common
+//     helm-docs display idiom of backticked defaults such as
+//     "@default -- `[]` (empty list)" -- produce no default, following
+//     the best-effort principle. The upstream uses @default for
+//     documentation rendering only.
 //
 //   - Type mapping to JSON Schema: The upstream stores helm-docs display
 //     types (int, float, bool, list, object, string, yaml, tpl) verbatim
