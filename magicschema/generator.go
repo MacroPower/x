@@ -700,7 +700,14 @@ func (g *Generator) buildChildSchema(
 	valueNode ast.Node,
 	annotation *AnnotationResult,
 ) *jsonschema.Schema {
-	if annotation == nil || annotation.Schema == nil {
+	// The structural path handles a missing annotation and an annotation
+	// carrying only the Skip/HasRequired signals, which the caller applies.
+	// An annotation with SkipProperties or MergeProperties set but no Schema
+	// stays on the annotated path with an empty schema: those flags transform
+	// the structure below, and the documented contract ORs them across
+	// annotator results without ever requiring a Schema alongside.
+	if annotation == nil ||
+		(annotation.Schema == nil && !annotation.SkipProperties && !annotation.MergeProperties) {
 		childSchema := g.walkNode(valueNode, childPath, anchors)
 		if childSchema.Description == "" {
 			childSchema.Description = extractComment(mvn, g.isAnnotationLine)
@@ -710,6 +717,9 @@ func (g *Generator) buildChildSchema(
 	}
 
 	childSchema := annotation.Schema
+	if childSchema == nil {
+		childSchema = &jsonschema.Schema{}
+	}
 
 	inferred := inferType(valueNode)
 

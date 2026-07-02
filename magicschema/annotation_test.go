@@ -115,6 +115,76 @@ func TestGeneratorAnnotatorTypeFillRespectsValueSet(t *testing.T) {
 	}
 }
 
+func TestGeneratorAnnotatorFlagsWithoutSchema(t *testing.T) {
+	t.Parallel()
+
+	// SkipProperties and MergeProperties are documented to take effect
+	// whenever any annotator sets them; the AnnotationResult contract never
+	// requires a Schema alongside. An annotation carrying only a flag must
+	// transform the structural schema the same way one carrying an empty
+	// Schema does -- under WithStrict, ignoring MergeProperties would emit
+	// additionalProperties:false on a node the annotation declares dynamic
+	// and reject the source file's own dynamic keys (fail closed).
+	tcs := map[string]struct {
+		result *magicschema.AnnotationResult
+		check  func(*testing.T, map[string]any)
+	}{
+		"mergeProperties folds children into additionalProperties": {
+			result: &magicschema.AnnotationResult{MergeProperties: true},
+			check: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				assert.NotContains(t, got, "properties")
+
+				ap, ok := got["additionalProperties"].(map[string]any)
+				require.True(t, ok,
+					"expected a folded additionalProperties schema, got %v",
+					got["additionalProperties"])
+				assert.Equal(t, "integer", ap["type"])
+			},
+		},
+		"skipProperties strips children and stays permissive": {
+			result: &magicschema.AnnotationResult{SkipProperties: true},
+			check: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				assert.NotContains(t, got, "properties")
+				assert.Equal(t, true, got["additionalProperties"])
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			gen := magicschema.NewGenerator(
+				magicschema.WithAnnotators(stubAnnotator{name: "flags", result: tc.result}),
+				magicschema.WithStrict(true),
+			)
+
+			schema, err := gen.Generate([]byte("env:\n  a: 1\n  b: 2\n"))
+			require.NoError(t, err)
+
+			out, err := json.Marshal(schema)
+			require.NoError(t, err)
+
+			var got map[string]any
+
+			require.NoError(t, json.Unmarshal(out, &got))
+
+			props, ok := got["properties"].(map[string]any)
+			require.True(t, ok)
+
+			env, ok := props["env"].(map[string]any)
+			require.True(t, ok)
+
+			assert.Equal(t, "object", env["type"])
+			tc.check(t, env)
+		})
+	}
+}
+
 func TestGeneratorAnnotatorRefNotGraftedBesideConstraints(t *testing.T) {
 	t.Parallel()
 
