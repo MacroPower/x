@@ -89,14 +89,12 @@ func (a *Annotator) ForContent(content []byte) (magicschema.Annotator, error) {
 
 	for line := range strings.SplitSeq(string(content), "\n") {
 		if !foundComment {
-			// Look for an old-style "# key.path -- description" line. The key is
-			// the token before the first " -- "; it must look like a key path
-			// (the shared predicate that the fallback comment extractor also
-			// uses, so the scan that records a line and the fallback that
-			// suppresses it always agree) and not be a recognized annotation
-			// marker.
-			keyPart, _, ok := splitOldStyleComment(strings.TrimSpace(line))
-			if !ok || !magicschema.IsHelmDocsKeyPath(keyPart) || magicschema.IsAnnotationComment(keyPart) {
+			// Look for an old-style "# key.path -- description" line. The
+			// same predicate splits stacked blocks below, so the scan that
+			// opens a block and the split that starts the next one always
+			// agree; its key-path check is also shared with the fallback
+			// comment extractor (see [magicschema.IsHelmDocsKeyPath]).
+			if !startsOldStyleBlock(line) {
 				continue
 			}
 
