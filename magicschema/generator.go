@@ -266,14 +266,27 @@ func (g *Generator) generateSingle(input []byte) (*jsonschema.Schema, []Annotato
 		}
 	}
 
+	// A skipped document's bytes carry forward into the next real document's
+	// annotator content (see the skip below).
+	var carry []byte
+
 	for i, doc := range file.Docs {
 		// A comment-only "---" block parses to a *ast.CommentGroupNode body and
 		// a leading directive (such as %YAML) to a *ast.DirectiveNode body.
 		// Neither is a value, so walking it would fold a spurious empty schema
 		// -- and, through the merge, a stray "null" type that defeats strict
-		// mode -- into the union. Skip them like a nil body.
+		// mode -- into the union. Skip them like a nil body, but keep the
+		// segment's bytes: a comment header above an explicit "---" parses as
+		// a comment-only document, and the file-scan annotations it holds
+		// (bitnami @param, norwoodj old-style descriptions) document the
+		// FOLLOWING document's keys, so its content must still reach that
+		// document's annotators.
 		switch doc.Body.(type) {
 		case nil, *ast.CommentGroupNode, *ast.DirectiveNode:
+			if docBytes != nil {
+				carry = append(append(carry, docBytes[i]...), '\n')
+			}
+
 			continue
 		}
 
@@ -285,6 +298,11 @@ func (g *Generator) generateSingle(input []byte) (*jsonschema.Schema, []Annotato
 		content := input
 		if docBytes != nil {
 			content = docBytes[i]
+
+			if len(carry) > 0 {
+				content = append(carry, content...)
+				carry = nil
+			}
 		}
 
 		prepared := prepareAnnotators(g.annotators, content)

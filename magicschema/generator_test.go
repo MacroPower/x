@@ -1282,6 +1282,42 @@ func TestGeneratorConcurrentUse(t *testing.T) {
 	wg.Wait()
 }
 
+func TestGeneratorCommentHeaderAboveDocumentStartReachesAnnotators(t *testing.T) {
+	t.Parallel()
+
+	// A comment header above an explicit "---" parses as a comment-only
+	// document. It produces no schema, but the file-scan annotations it holds
+	// document the following document's keys, so its bytes must reach that
+	// document's annotators rather than being dropped with the skipped
+	// document.
+	input := stringtest.Input(`
+		## @param replicas Number of replicas
+		---
+		replicas: 1
+	`)
+
+	gen := magicschema.NewGenerator(
+		magicschema.WithAnnotators(bitnami.New()),
+	)
+	schema, err := gen.Generate([]byte(input))
+	require.NoError(t, err)
+
+	out, err := json.Marshal(schema)
+	require.NoError(t, err)
+
+	var got map[string]any
+
+	require.NoError(t, json.Unmarshal(out, &got))
+
+	props, ok := got["properties"].(map[string]any)
+	require.True(t, ok)
+
+	replicas, ok := props["replicas"].(map[string]any)
+	require.True(t, ok)
+
+	assert.Equal(t, "Number of replicas", replicas["description"])
+}
+
 func TestGeneratorMultiDocumentAnnotatorIsolation(t *testing.T) {
 	t.Parallel()
 
