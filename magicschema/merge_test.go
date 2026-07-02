@@ -763,6 +763,97 @@ func TestMergeTypelessConstraintThreeInputsStaysFailOpen(t *testing.T) {
 	}
 }
 
+func TestMergeTwoTypelessConstraintsStayFailOpen(t *testing.T) {
+	t.Parallel()
+
+	// Merging two typeless annotation-only constraint schemas (differing
+	// patterns, so both drop) must produce a marked typeless union, not a
+	// bare empty schema: a later typed input would read the bare schema as a
+	// null and emit a [type, null] union that rejects values the constraint
+	// inputs accepted, and the output would depend on input order.
+	tcs := map[string]struct {
+		inputs []string
+	}{
+		"constraints first": {
+			inputs: []string{"# @schema pattern:^a\nkey:\n", "# @schema pattern:^b\nkey:\n", "key: 42\n"},
+		},
+		"constraints split": {
+			inputs: []string{"# @schema pattern:^a\nkey:\n", "key: 42\n", "# @schema pattern:^b\nkey:\n"},
+		},
+		"constraints last": {
+			inputs: []string{"key: 42\n", "# @schema pattern:^a\nkey:\n", "# @schema pattern:^b\nkey:\n"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			inputs := make([][]byte, len(tc.inputs))
+			for i, in := range tc.inputs {
+				inputs[i] = []byte(in)
+			}
+
+			gen := magicschema.NewGenerator(magicschema.WithAnnotators(losisin.New()))
+			schema, err := gen.Generate(inputs...)
+			require.NoError(t, err)
+
+			out, err := json.Marshal(schema)
+			require.NoError(t, err)
+
+			assert.NotContains(t, string(out), "typeless_union",
+				"internal merge marker must not leak into the output")
+
+			var got map[string]any
+
+			require.NoError(t, json.Unmarshal(out, &got))
+
+			props, ok := got["properties"].(map[string]any)
+			require.True(t, ok)
+
+			if key, isMap := props["key"].(map[string]any); isMap {
+				assert.Nil(t, key["type"], "typeless constraint union must stay typeless")
+			} else {
+				assert.Equal(t, true, props["key"], "expected the true schema")
+			}
+		})
+	}
+}
+
+func TestMergeTypelessConstraintDropsOneSidedItems(t *testing.T) {
+	t.Parallel()
+
+	// A typeless constraint schema (pattern, no type) permits any array with
+	// any elements, so its instances do reach items: grafting the typed
+	// side's items onto the typeless union would reject arrays the
+	// constraint input accepted (fail closed). Unlike a null stand-in, whose
+	// instances never reach items, the constraint side must drop them.
+	inputs := [][]byte{
+		[]byte("# @schema pattern:^a\nkey:\n"),
+		[]byte("key: [x, y]\n"),
+	}
+
+	gen := magicschema.NewGenerator(magicschema.WithAnnotators(losisin.New()))
+	schema, err := gen.Generate(inputs...)
+	require.NoError(t, err)
+
+	out, err := json.Marshal(schema)
+	require.NoError(t, err)
+
+	var got map[string]any
+
+	require.NoError(t, json.Unmarshal(out, &got))
+
+	props, ok := got["properties"].(map[string]any)
+	require.True(t, ok)
+
+	if key, isMap := props["key"].(map[string]any); isMap {
+		assert.Nil(t, key["items"], "one-sided items must drop against a typeless constraint side")
+	} else {
+		assert.Equal(t, true, props["key"], "expected the true schema")
+	}
+}
+
 func TestMergeIncompatibleEnumOrderIndependent(t *testing.T) {
 	t.Parallel()
 

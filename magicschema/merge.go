@@ -94,6 +94,19 @@ func mergeSchemas(a, b *jsonschema.Schema) *jsonschema.Schema {
 	case len(typesB) == 0 && len(typesA) > 0 && constrainsValue(b):
 		merged = nil
 		typelessConstraint = true
+
+	// Two typeless sides with a constraint schema among them stay a typeless
+	// union too: the constraint side already permits every type, so the
+	// result must never later read as a null stand-in. Without this the
+	// merge of two annotation-only schemas whose constraints all drop
+	// (differing patterns, say) would return a bare empty schema that a
+	// later fold widens to a [type, null] union, rejecting values the
+	// constraint inputs accepted and making the fold order-dependent. Two
+	// typeless sides with no constraints at all are genuine null stand-ins
+	// and keep widening.
+	case len(typesA) == 0 && len(typesB) == 0 && (constrainsValue(a) || constrainsValue(b)):
+		merged = nil
+		typelessConstraint = true
 	}
 
 	// SetSchemaType assigns the scalar Type or the Types union and dedups, so a
@@ -144,20 +157,25 @@ func mergeSchemas(a, b *jsonschema.Schema) *jsonschema.Schema {
 	// Merge items as a union. When both sides constrain, the element schemas
 	// merge recursively. An array-typed side with no items constraint already
 	// permits any element, so the union must too: grafting the other side's
-	// items onto it would fail closed, and the constraint drops. A side with
-	// no array type evidence at all (a null or empty value whose absent type
-	// widened the union to [array, null]) says nothing about elements -- a
-	// null instance never reaches items -- so the typed side's items survive,
-	// matching the one-sided properties an object keeps through the same
-	// merge. The nil fast-path in mergeSchemas returns the non-nil side,
-	// which would fail closed for two arrays, so it cannot be relied on for
-	// items.
+	// items onto it would fail closed, and the constraint drops. The same
+	// holds for a typeless constraint schema (pattern, bounds, no type): it
+	// permits any array with any elements, so its instances do reach items
+	// and one-sided items must drop with it. Only a side with no array
+	// evidence and no constraints at all (a null or empty value whose absent
+	// type widened the union to [array, null]) says nothing about elements --
+	// a null instance never reaches items -- so the typed side's items
+	// survive it, matching the one-sided properties an object keeps through
+	// the same merge. The nil fast-path in mergeSchemas returns the non-nil
+	// side, which would fail closed for two arrays, so it cannot be relied on
+	// for items.
 	switch {
 	case a.Items != nil && b.Items != nil:
 		result.Items = mergeSchemas(a.Items, b.Items)
-	case a.Items != nil && !slices.Contains(typesB, typeArray):
+	case a.Items != nil && !slices.Contains(typesB, typeArray) &&
+		(len(typesB) > 0 || !constrainsValue(b)):
 		result.Items = a.Items
-	case b.Items != nil && !slices.Contains(typesA, typeArray):
+	case b.Items != nil && !slices.Contains(typesA, typeArray) &&
+		(len(typesA) > 0 || !constrainsValue(a)):
 		result.Items = b.Items
 	}
 
