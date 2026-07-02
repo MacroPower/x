@@ -115,6 +115,100 @@ func TestGeneratorAnnotatorTypeFillRespectsValueSet(t *testing.T) {
 	}
 }
 
+func TestGeneratorAnnotatorRefNotGraftedBesideConstraints(t *testing.T) {
+	t.Parallel()
+
+	// Under Draft 7 every validation sibling of $ref is ignored, so grafting
+	// a lower-priority $ref beside higher-priority constraints would let the
+	// reference govern entirely and invert the documented precedence. The
+	// $ref fill must be skipped when the winner carries a type or value
+	// constraint.
+	high := stubAnnotator{
+		name: "high",
+		result: &magicschema.AnnotationResult{Schema: &jsonschema.Schema{
+			Type:    "string",
+			Pattern: "^[a-z]+$",
+		}},
+	}
+	low := stubAnnotator{
+		name: "low",
+		result: &magicschema.AnnotationResult{Schema: &jsonschema.Schema{
+			Ref: "https://example.com/name.schema.json",
+		}},
+	}
+
+	gen := magicschema.NewGenerator(magicschema.WithAnnotators(high, low))
+
+	schema, err := gen.Generate([]byte("key:\n"))
+	require.NoError(t, err)
+
+	out, err := json.Marshal(schema)
+	require.NoError(t, err)
+
+	var got map[string]any
+
+	require.NoError(t, json.Unmarshal(out, &got))
+
+	props, ok := got["properties"].(map[string]any)
+	require.True(t, ok)
+
+	prop, ok := props["key"].(map[string]any)
+	require.True(t, ok)
+
+	assert.Equal(t, "string", prop["type"])
+	assert.Equal(t, "^[a-z]+$", prop["pattern"])
+	assert.NotContains(t, prop, "$ref",
+		"a lower-priority $ref must not nullify the winner's constraints")
+}
+
+func TestGeneratorAnnotatorConditionalFilledAsUnit(t *testing.T) {
+	t.Parallel()
+
+	// The if/then/else conditional only has meaning as a unit. A then
+	// without an if is inert (accepts everything), so grafting a
+	// lower-priority annotator's if under it would activate a conditional
+	// neither annotator wrote, pairing the winner's then with the loser's
+	// trigger.
+	high := stubAnnotator{
+		name: "high",
+		result: &magicschema.AnnotationResult{Schema: &jsonschema.Schema{
+			Then: &jsonschema.Schema{Type: "number"},
+		}},
+	}
+	low := stubAnnotator{
+		name: "low",
+		result: &magicschema.AnnotationResult{Schema: &jsonschema.Schema{
+			If:   &jsonschema.Schema{Type: "integer"},
+			Then: &jsonschema.Schema{Type: "string"},
+		}},
+	}
+
+	gen := magicschema.NewGenerator(magicschema.WithAnnotators(high, low))
+
+	schema, err := gen.Generate([]byte("key:\n"))
+	require.NoError(t, err)
+
+	out, err := json.Marshal(schema)
+	require.NoError(t, err)
+
+	var got map[string]any
+
+	require.NoError(t, json.Unmarshal(out, &got))
+
+	props, ok := got["properties"].(map[string]any)
+	require.True(t, ok)
+
+	prop, ok := props["key"].(map[string]any)
+	require.True(t, ok)
+
+	assert.NotContains(t, prop, "if",
+		"a lower-priority if must not activate the winner's inert then")
+
+	then, ok := prop["then"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "number", then["type"])
+}
+
 func TestGeneratorAnnotatorEmptyTypesNotGrafted(t *testing.T) {
 	t.Parallel()
 

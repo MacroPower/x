@@ -161,6 +161,16 @@ func copySchema(s *jsonschema.Schema) *jsonschema.Schema {
 // mergeSchemaFields merges fields from src into dst where dst has zero values.
 // Dst has higher priority; src fills in gaps.
 func mergeSchemaFields(dst, src *jsonschema.Schema) {
+	// Under Draft 7 every validation sibling of $ref is ignored, so grafting
+	// a lower-priority $ref beside higher-priority constraints would let the
+	// reference govern entirely and silently disable what the winner wrote
+	// (fail closed, and the inverse of the documented precedence) -- the same
+	// reason applyRootAnnotations strips structural keywords beside a root
+	// $ref. The fill is allowed only when dst carries no type and no value
+	// constraint for the reference to nullify, judged before this call's own
+	// gap fills add src's other fields to dst.
+	refFillOK := dst.Ref == "" && len(typeList(dst)) == 0 && !constrainsValue(dst)
+
 	// Fill the type from the lower-priority src only when src actually carries
 	// one and it does not contradict a value set the higher-priority dst already
 	// carries. Requiring a real src type keeps a non-nil but empty src.Types from
@@ -312,15 +322,14 @@ func mergeSchemaFields(dst, src *jsonschema.Schema) {
 		dst.Not = src.Not
 	}
 
-	if dst.If == nil {
+	// The if/then/else conditional only has meaning as a unit -- the same
+	// rule mergeSchemas applies. A then or else without an if is inert, so
+	// filling the trio independently could graft a lower-priority if under a
+	// higher-priority inert then and activate a conditional neither annotator
+	// wrote (fail closed). Fill only when dst carries none of the three.
+	if dst.If == nil && dst.Then == nil && dst.Else == nil {
 		dst.If = src.If
-	}
-
-	if dst.Then == nil {
 		dst.Then = src.Then
-	}
-
-	if dst.Else == nil {
 		dst.Else = src.Else
 	}
 
@@ -340,7 +349,7 @@ func mergeSchemaFields(dst, src *jsonschema.Schema) {
 		dst.Examples = src.Examples
 	}
 
-	if dst.Ref == "" {
+	if refFillOK {
 		dst.Ref = src.Ref
 	}
 
