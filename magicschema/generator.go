@@ -350,7 +350,12 @@ func (g *Generator) walkNode(
 	unwrapped := unwrapNode(node)
 
 	if unwrapped == nil {
-		return &jsonschema.Schema{}
+		// A broken alias or a wrapper bottoming out at nil is a null value
+		// (see isNullNode), so it records a null default like a genuine null.
+		schema := &jsonschema.Schema{}
+		g.recordDefault(schema, node, anchors)
+
+		return schema
 	}
 
 	var schema *jsonschema.Schema
