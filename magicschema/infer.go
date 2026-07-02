@@ -446,9 +446,9 @@ func IsAnnotationComment(s string) bool {
 }
 
 // isHelmDocsOldStyleComment detects old-style helm-docs comments of the form
-// "key.path -- description" where a dotted key path precedes the " -- "
-// separator. This prevents these comments from leaking as descriptions on
-// parent nodes during fallback comment extraction.
+// "key.path -- description" where a key path precedes the " -- " separator.
+// This prevents these comments from leaking as descriptions on parent nodes
+// during fallback comment extraction.
 func isHelmDocsOldStyleComment(s string) bool {
 	idx := strings.Index(s, " -- ")
 	if idx <= 0 {
@@ -458,27 +458,25 @@ func isHelmDocsOldStyleComment(s string) bool {
 	return IsHelmDocsKeyPath(strings.TrimSpace(s[:idx]))
 }
 
-// IsHelmDocsKeyPath reports whether s is the dotted key path of an old-style
-// helm-docs "# key.path -- description" comment: a single token (no
-// whitespace) of two or more dot-separated, non-empty segments, none beginning
-// with a digit. The dotted-path shape separates a real key reference such as
-// "image.tag" from prose that merely contains a dot -- the abbreviations
-// "e.g."/"i.e."/"etc." leave a trailing empty segment, and a version like
-// "v1.2" leaves a digit-led segment. The norwoodj annotator and the fallback
-// comment extractor share this one predicate so the file scan that records an
-// old-style description and the structural pass that skips it cannot disagree
-// and attribute the same comment to two unrelated keys.
+// IsHelmDocsKeyPath reports whether s is the key path of an old-style
+// helm-docs "# key.path -- description" comment: a single non-empty token (no
+// whitespace) of dot-separated, non-empty segments, none beginning with a
+// digit. Upstream helm-docs accepts any non-empty key, so a dotless top-level
+// key such as "replicas" qualifies alongside a dotted path like "image.tag".
+// The segment rules reject text that cannot be a key reference -- the
+// abbreviations "e.g."/"i.e."/"etc." leave a trailing empty segment, and a
+// version like "v1.2" leaves a digit-led segment -- but a single prose word
+// before " -- " is indistinguishable from a top-level key and counts as one,
+// the cost of matching the upstream scanner. The norwoodj annotator and the
+// fallback comment extractor share this one predicate so the file scan that
+// records an old-style description and the structural pass that skips it
+// cannot disagree and attribute the same comment to two unrelated keys.
 func IsHelmDocsKeyPath(s string) bool {
 	if s == "" || strings.ContainsAny(s, " \t") {
 		return false
 	}
 
-	segments := strings.Split(s, ".")
-	if len(segments) < 2 {
-		return false
-	}
-
-	for _, seg := range segments {
+	for seg := range strings.SplitSeq(s, ".") {
 		if seg == "" {
 			return false
 		}

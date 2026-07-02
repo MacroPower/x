@@ -31,7 +31,8 @@
 //     replicas: 3
 //
 //   - Old-style comments: A comment line matching "# key.path -- description"
-//     anywhere in the file associates a description with the dotted key path.
+//     anywhere in the file associates a description with that key path
+//     (dotted for nested keys, a bare token for top-level keys).
 //     These are parsed by a file-level line scanner (not the YAML AST) and
 //     stored in a key-to-description map. The old-style scanner explicitly
 //     checks that group 1 (the key) is non-empty, so new-style "# -- desc"
@@ -326,6 +327,18 @@
 //     filter these to prevent annotation markers from being stored as
 //     key-path descriptions.
 //
+//   - Old-style key shape filtering: The old-style scanner additionally
+//     requires the key to look like a key path
+//     ([magicschema.IsHelmDocsKeyPath]): a single token without
+//     whitespace, made of dot-separated non-empty segments, none
+//     beginning with a digit. The upstream accepts any non-empty group 1,
+//     so prose containing " -- " (e.g. "# Use the v1.2 API -- stable")
+//     would be recorded under a nonsense key. We reject such lines so
+//     they remain available as ordinary fallback descriptions. Dotless
+//     single tokens (e.g. "# replicas -- count") pass the filter, since
+//     they are indistinguishable from top-level keys the upstream
+//     documents.
+//
 //   - New-style precedence: When both a new-style head comment ("# -- desc")
 //     and an old-style file-scanned comment ("# key.path -- desc") target
 //     the same node, the new-style comment takes precedence (checked first,
@@ -413,7 +426,9 @@
 //   - Old-style scanner key validation: The old-style file scanner
 //     requires a non-empty key path (group 1), skipping new-style
 //     "# -- desc" lines where the key is empty. This matches the
-//     upstream's match[1] == "" check. Additionally, after
+//     upstream's match[1] == "" check; the key must also be key-path
+//     shaped (see "Old-style key shape filtering" under Intentional
+//     Divergences). Additionally, after
 //     parseCommentBlock processes the collected lines, entries with an
 //     empty key path (which can occur when the issue #96 workaround
 //     recurses to a new-style "# --" group within an old-style block)

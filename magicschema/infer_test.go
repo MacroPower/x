@@ -106,11 +106,13 @@ func TestIsAnnotationComment(t *testing.T) {
 			want:  false,
 		},
 		"single dotless token before dashes": {
-			// A single token with no dot is prose, not a key path; treating it
-			// as an annotation would both drop it here and let the norwoodj
-			// scan record it, attributing it to two unrelated keys.
+			// A single dotless token is a valid top-level key in upstream
+			// helm-docs old-style comments, so the line counts as an
+			// annotation marker and the norwoodj scan records it; the
+			// fallback extractor suppresses it here so the same comment is
+			// not also attributed to the key it happens to sit above.
 			input: "note -- be careful with this",
-			want:  false,
+			want:  true,
 		},
 		"version-like token before dashes": {
 			input: "v1.2 -- the API version to target",
@@ -144,8 +146,8 @@ func TestIsHelmDocsKeyPath(t *testing.T) {
 		"global.image.registry":      true,
 		"controller.service.enabled": true,
 		"":                           false,
-		"replicaCount":               false, // a dotless single token is prose
-		"note":                       false,
+		"replicaCount":               true, // a dotless token is a top-level key
+		"note":                       true,
 		"e.g.":                       false, // trailing empty segment
 		"i.e.":                       false,
 		"etc.":                       false,

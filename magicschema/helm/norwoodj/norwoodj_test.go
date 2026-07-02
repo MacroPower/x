@@ -1329,12 +1329,12 @@ func TestHelmDocsAnnotator(t *testing.T) {
 				assert.Equal(t, "Old-style image tag", tag["description"])
 			},
 		},
-		"dotless prose comment is not recorded as an old-style key": {
-			// "# note -- be careful" has a single dotless token before " -- ",
-			// so it is prose, not an old-style key path. It must not be recorded
-			// as an old-style description for the unrelated "note" key (the file
-			// scan once accepted dotless keys while the structural fallback
-			// required a dot, attributing the same comment to two keys).
+		"dotless old-style comment annotates the top-level key": {
+			// "# note -- be careful" has a single dotless token before " -- ".
+			// Upstream helm-docs accepts any non-empty key, so the comment is
+			// an old-style annotation for the top-level "note" key. It must
+			// annotate that key exactly once and not also leak as a fallback
+			// description on the unrelated key it happens to sit above.
 			input: stringtest.Input(`
 				# note -- be careful with this
 				config:
@@ -1349,13 +1349,38 @@ func TestHelmDocsAnnotator(t *testing.T) {
 
 				note, ok := props["note"].(map[string]any)
 				require.True(t, ok)
-				assert.Empty(t, note["description"],
-					"the unrelated note key must not inherit the prose comment")
+				assert.Equal(t, "be careful with this", note["description"],
+					"the old-style comment annotates the key it names")
 
 				config, ok := props["config"].(map[string]any)
 				require.True(t, ok)
-				assert.Equal(t, "note -- be careful with this", config["description"],
-					"the prose comment attaches once, to the key it sits above")
+				assert.Empty(t, config["description"],
+					"the annotation marker must not leak to the adjacent key")
+			},
+		},
+		"top-level old-style annotation applies description type and default": {
+			// A top-level dotless key in an old-style comment matches the
+			// upstream scanner (any non-empty key qualifies), so the
+			// description, the (int) type hint, and the @default override
+			// all reach the schema instead of the marker line leaking
+			// verbatim into the description.
+			input: stringtest.Input(`
+				# replicas -- (int) Number of replicas
+				# @default -- 1
+				replicas: 3
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				r, ok := props["replicas"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "Number of replicas", r["description"])
+				assert.Equal(t, "integer", r["type"])
+				assert.InEpsilon(t, float64(1), r["default"], 0.0001)
 			},
 		},
 		"old-style in head comment discarded for current node": {
