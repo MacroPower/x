@@ -722,15 +722,7 @@ func propertyKeys(s *jsonschema.Schema) []string {
 		return append(keys, rest...)
 	}
 
-	keys := make([]string, 0, len(s.Properties))
-
-	for k := range s.Properties {
-		keys = append(keys, k)
-	}
-
-	slices.Sort(keys)
-
-	return keys
+	return slices.Sorted(maps.Keys(s.Properties))
 }
 
 // mergeProperties merges properties from a and b into result using union semantics.
