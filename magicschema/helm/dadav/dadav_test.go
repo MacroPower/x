@@ -1252,6 +1252,36 @@ func TestHelmSchemaAnnotatorEdgeCases(t *testing.T) {
 				assert.Nil(t, k["$defs"])
 			},
 		},
+		"all-unparseable definitions keeps $defs": {
+			// A definitions map whose entries all fail the sub-schema round
+			// trip carries no usable value, so it never displaces a valid
+			// $defs sibling: an unparseable winner cannot drop a valid loser.
+			input: stringtest.Input(`
+				# @schema
+				# definitions:
+				#   bad: 7
+				# $defs:
+				#   good:
+				#     type: string
+				# @schema
+				key: value
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				k, ok := props["key"].(map[string]any)
+				require.True(t, ok)
+
+				defs, ok := k["$defs"].(map[string]any)
+				require.True(t, ok)
+				assert.Contains(t, defs, "good")
+
+				assert.Nil(t, k["definitions"])
+			},
+		},
 		"uniqueItems constraint": {
 			input: stringtest.Input(`
 				# @schema

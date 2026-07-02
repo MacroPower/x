@@ -202,6 +202,13 @@ func ToSubSchemaArray(val any) []*jsonschema.Schema {
 }
 
 // ToSubSchemaMap converts a map[string]any to map[string]*jsonschema.Schema.
+// Entries that do not survive the round trip are dropped individually --
+// unlike the combinator lists [ToSubSchemaArray] feeds, one bad entry does
+// not change the meaning of its siblings -- but when nothing survives (or the
+// map is empty) the result is nil, not an empty map. Callers gate on nil to
+// tell "no usable value" apart from a parsed one: a non-nil empty map would
+// win a definitions/$defs precedence contest with no content to show for it,
+// and an empty Properties would suppress the structural property fill.
 func ToSubSchemaMap(val any) map[string]*jsonschema.Schema {
 	m, ok := val.(map[string]any)
 	if !ok {
@@ -215,6 +222,10 @@ func ToSubSchemaMap(val any) map[string]*jsonschema.Schema {
 		if s != nil {
 			result[key] = s
 		}
+	}
+
+	if len(result) == 0 {
+		return nil
 	}
 
 	return result

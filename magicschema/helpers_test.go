@@ -367,3 +367,21 @@ func TestToSubSchemaArrayAllOrNothing(t *testing.T) {
 	})
 	assert.Len(t, got, 2)
 }
+
+func TestToSubSchemaMapNilWhenNothingSurvives(t *testing.T) {
+	t.Parallel()
+
+	// Individual bad entries drop, but an all-bad (or empty) map returns nil
+	// rather than an empty map: callers gate on nil, and a non-nil empty map
+	// would win a definitions/$defs precedence contest with no content or
+	// suppress the structural property fill.
+	assert.Nil(t, magicschema.ToSubSchemaMap(map[string]any{"bad": 7}))
+	assert.Nil(t, magicschema.ToSubSchemaMap(map[string]any{}))
+
+	got := magicschema.ToSubSchemaMap(map[string]any{
+		"bad":  7,
+		"good": map[string]any{"type": "string"},
+	})
+	require.Len(t, got, 1)
+	assert.Contains(t, got, "good")
+}
