@@ -1692,6 +1692,37 @@ func TestHelmSchemaAnnotatorEdgeCases(t *testing.T) {
 				assert.Contains(t, req, "version")
 			},
 		},
+		"required and dependencies drop non-string list members": {
+			// Both annotations share the same narrowing policy for malformed
+			// string lists: keep the string members, drop the rest.
+			input: stringtest.Input(`
+				# @schema
+				# required: [name, 1]
+				# dependencies:
+				#   name: [version, 2]
+				# @schema
+				metadata:
+				  name: chart
+				  version: "1.0"
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				m, ok := props["metadata"].(map[string]any)
+				require.True(t, ok)
+
+				req, ok := m["required"].([]any)
+				require.True(t, ok)
+				assert.Equal(t, []any{"name"}, req)
+
+				deps, ok := m["dependencies"].(map[string]any)
+				require.True(t, ok)
+				assert.Equal(t, []any{"version"}, deps["name"])
+			},
+		},
 		"unannotated key not marked required": {
 			input: stringtest.Input(`
 				field: value

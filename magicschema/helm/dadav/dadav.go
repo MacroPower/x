@@ -533,15 +533,7 @@ func applyRequired(schema *jsonschema.Schema, result *magicschema.AnnotationResu
 	case bool:
 		result.HasRequired = &v
 	case []any:
-		strs := make([]string, 0, len(v))
-
-		for _, item := range v {
-			if s, ok := item.(string); ok {
-				strs = append(strs, s)
-			}
-		}
-
-		schema.Required = strs
+		schema.Required = toStringSlice(v)
 	}
 }
 
@@ -563,15 +555,7 @@ func applyDependencies(schema *jsonschema.Schema, val any) {
 				schema.DependencyStrings = make(map[string][]string)
 			}
 
-			strs := make([]string, 0, len(dv))
-
-			for _, item := range dv {
-				if s, ok := item.(string); ok {
-					strs = append(strs, s)
-				}
-			}
-
-			schema.DependencyStrings[key] = strs
+			schema.DependencyStrings[key] = toStringSlice(dv)
 
 		case map[string]any:
 			// Drop a dependency whose schema cannot round-trip rather than
@@ -605,6 +589,23 @@ func toAdditionalProperties(val any) *jsonschema.Schema {
 	}
 
 	return nil
+}
+
+// toStringSlice converts a list value to its string members, dropping
+// anything else. Keeping the representable members (rather than abandoning
+// the whole list as applyType does) is the shared policy for dadav's
+// "required" and "dependencies" string lists: a partial list still guides
+// without rejecting values (fail open).
+func toStringSlice(val []any) []string {
+	strs := make([]string, 0, len(val))
+
+	for _, item := range val {
+		if s, ok := item.(string); ok {
+			strs = append(strs, s)
+		}
+	}
+
+	return strs
 }
 
 // toString converts a value to a string.
