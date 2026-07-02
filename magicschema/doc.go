@@ -170,8 +170,13 @@
 // schema.
 //
 // Object properties are unioned across files. Array items schemas are merged
-// recursively. The required array is intersected so that a property is only
-// required in the merged schema if it is required in every input.
+// recursively; a file where the value is null or empty keeps the other file's
+// items schema intact (null carries no element evidence, just as it keeps
+// one-sided object properties), while an array-typed file with no items
+// constraint -- an empty list -- drops items from the union, since that side
+// already permits any element. The required array is intersected so that a
+// property is only required in the merged schema if it is required in every
+// input.
 //
 // # Annotation System
 //

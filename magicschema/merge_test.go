@@ -191,6 +191,51 @@ func TestMergeMultipleInputs(t *testing.T) {
 				assert.Nil(t, list["items"], "a one-sided items constraint must not survive the union")
 			},
 		},
+		"overlay null keeps base array items": {
+			// The Helm idiom for arrays: an overlay clears a base list by
+			// setting it to null. The null side carries no array evidence, so
+			// the base file's element schema survives the [array, null]
+			// widening, matching the properties an object keeps through the
+			// same merge.
+			inputA: "list:\n  - 1\n  - 2\n",
+			inputB: "list: null\n",
+			check: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				list, ok := props["list"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, []any{"array", "null"}, list["type"])
+
+				items, ok := list["items"].(map[string]any)
+				require.True(t, ok, "the typed side's items must survive a null merge")
+				assert.Equal(t, "integer", items["type"])
+			},
+		},
+		"base null keeps overlay array items": {
+			// The mirror of the case above: the null side comes first, so the
+			// merge keeps the other side's items through the b-side branch.
+			inputA: "list: null\n",
+			inputB: "list:\n  - 1\n  - 2\n",
+			check: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				list, ok := props["list"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, []any{"array", "null"}, list["type"])
+
+				items, ok := list["items"].(map[string]any)
+				require.True(t, ok, "the typed side's items must survive a null merge")
+				assert.Equal(t, "integer", items["type"])
+			},
+		},
 		"incompatible widen drops object constraints": {
 			// When object + string widens away the type, the object-specific
 			// keywords must drop too: a schema with properties but no type

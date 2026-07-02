@@ -22,11 +22,14 @@ import (
 // multipleOf, patternProperties, and other keywords with no widening rule)
 // are kept only when both sides agree. A type that is null or empty on one
 // side and concrete on the other widens to a [type, null] union so the null
-// input still validates. When the two types are incompatible the type
-// constraint is dropped entirely, and every type-specific keyword
-// (properties, items, bounds, pattern) drops with it -- a schema with no
-// type but residual object or array constraints would still fail closed for
-// those instances.
+// input still validates; that null side carries no array type evidence, so
+// the typed side's items survive it (a null instance never reaches items),
+// just as one-sided properties survive -- items drop only when the itemless
+// side is itself array-typed and genuinely permits any element. When the two
+// types are incompatible the type constraint is dropped entirely, and every
+// type-specific keyword (properties, items, bounds, pattern) drops with it --
+// a schema with no type but residual object or array constraints would still
+// fail closed for those instances.
 // Combinators and references ($ref, $dynamicRef, allOf/anyOf/oneOf, not) are
 // dropped entirely, which is the most permissive behavior; the if/then/else
 // conditional is kept as a unit when both sides agree exactly. Identity and
@@ -138,13 +141,24 @@ func mergeSchemas(a, b *jsonschema.Schema) *jsonschema.Schema {
 	// Merge required: intersection.
 	result.Required = intersectStrings(a.Required, b.Required)
 
-	// Merge items as a union: a side with no items constraint already permits
-	// any element, so the union must too. Only merge when both sides constrain;
-	// otherwise leave Items nil (fail open). The nil fast-path in mergeSchemas
-	// returns the non-nil side, which would fail closed here, so it cannot be
-	// relied on for items.
-	if a.Items != nil && b.Items != nil {
+	// Merge items as a union. When both sides constrain, the element schemas
+	// merge recursively. An array-typed side with no items constraint already
+	// permits any element, so the union must too: grafting the other side's
+	// items onto it would fail closed, and the constraint drops. A side with
+	// no array type evidence at all (a null or empty value whose absent type
+	// widened the union to [array, null]) says nothing about elements -- a
+	// null instance never reaches items -- so the typed side's items survive,
+	// matching the one-sided properties an object keeps through the same
+	// merge. The nil fast-path in mergeSchemas returns the non-nil side,
+	// which would fail closed for two arrays, so it cannot be relied on for
+	// items.
+	switch {
+	case a.Items != nil && b.Items != nil:
 		result.Items = mergeSchemas(a.Items, b.Items)
+	case a.Items != nil && !slices.Contains(typesB, typeArray):
+		result.Items = a.Items
+	case b.Items != nil && !slices.Contains(typesA, typeArray):
+		result.Items = b.Items
 	}
 
 	// Keywords with no widening rule are kept only when both sides agree
