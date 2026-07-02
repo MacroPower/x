@@ -62,7 +62,12 @@ func FalseSchema() *jsonschema.Schema {
 // ToSubSchema converts an arbitrary Go value (a map[string]any, bool, or any
 // other JSON-marshalable value) to a [*jsonschema.Schema] by round-tripping
 // through JSON. Returns nil for values that do not survive the round trip
-// (annotation parse failures are skipped, never fatal). Type arrays anywhere
+// (annotation parse failures are skipped, never fatal). The round trip
+// includes marshaling back out: the jsonschema marshaler validates its
+// invariants only on marshal, so a decoded schema carrying a combination it
+// rejects -- both definitions and $defs anywhere in the tree -- is returned
+// as nil (the annotation is skipped, fail open) rather than passed through
+// to break the whole document's final marshal. Type arrays anywhere
 // in the tree are normalized with [SetSchemaType] semantics: YAML nulls
 // (e.g. "type: [null, string]") become the "null" type string, matching how
 // annotators translate the YAML null literal at the top level; duplicate
@@ -86,6 +91,17 @@ func ToSubSchema(val any) *jsonschema.Schema {
 	}
 
 	normalizeTypes(&schema)
+
+	// The jsonschema marshaler runs its invariant checks (basicChecks) only in
+	// MarshalJSON, never on unmarshal, so a decoded schema can carry a
+	// marshal-fatal combination such as both definitions and $defs. The value
+	// receiver on MarshalJSON means a document marshal checks every nested
+	// sub-schema, so one bad annotation would fail the entire output. Probing
+	// the marshal here surfaces the rejection while it is still skippable.
+	_, err = json.Marshal(&schema)
+	if err != nil {
+		return nil
+	}
 
 	return &schema
 }

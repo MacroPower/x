@@ -246,7 +246,9 @@
 //     by round-tripping through JSON, normalizing type arrays across the tree
 //     with [SetSchemaType] semantics (nulls become the "null" type, duplicates
 //     drop, a single member collapses to the scalar type, an empty array
-//     leaves the type unset).
+//     leaves the type unset). A value the jsonschema marshaler rejects (for
+//     example, both definitions and $defs in one object) returns nil, so the
+//     annotation is skipped rather than breaking the document's final marshal.
 //   - [ToSubSchemaArray] converts a []any to []*jsonschema.Schema.
 //   - [ToSubSchemaMap] converts a map[string]any to map[string]*jsonschema.Schema.
 //   - [ParseYAMLValue] parses a YAML value string into a [json.RawMessage].

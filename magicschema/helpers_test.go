@@ -1,6 +1,7 @@
 package magicschema_test
 
 import (
+	"encoding/json"
 	"math"
 	"testing"
 
@@ -134,6 +135,54 @@ func TestToSubSchemaTypeNormalization(t *testing.T) {
 
 			assert.Equal(t, tc.wantType, got.Items.Type)
 			assert.Equal(t, tc.wantTypes, got.Items.Types)
+		})
+	}
+}
+
+func TestToSubSchemaMarshalValidation(t *testing.T) {
+	t.Parallel()
+
+	// The jsonschema marshaler validates its invariants only on marshal, so a
+	// decoded schema can carry a combination the final document marshal
+	// rejects -- both definitions and $defs. Every nested sub-schema is
+	// checked during a document marshal, so passing one through would turn a
+	// single bad annotation into a fatal marshal of the whole output.
+	// ToSubSchema returns nil for such values instead (fail open).
+	defs := map[string]any{"a": map[string]any{"type": "string"}}
+
+	tcs := map[string]struct {
+		val  any
+		want bool // whether a schema is returned
+	}{
+		"both definitions and $defs at the top level are skipped": {
+			val: map[string]any{"definitions": defs, "$defs": defs},
+		},
+		"both definitions and $defs in a nested carrier are skipped": {
+			val: map[string]any{
+				"items": map[string]any{"definitions": defs, "$defs": defs},
+			},
+		},
+		"a single defs shape survives": {
+			val:  map[string]any{"$defs": defs},
+			want: true,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := magicschema.ToSubSchema(tc.val)
+			if !tc.want {
+				assert.Nil(t, got, "a schema the marshaler rejects must be skipped")
+
+				return
+			}
+
+			require.NotNil(t, got)
+
+			_, err := json.Marshal(got)
+			require.NoError(t, err, "a returned sub-schema must marshal cleanly")
 		})
 	}
 }
