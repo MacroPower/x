@@ -588,8 +588,11 @@ func parseAnyList(val string) []any {
 // rather than left on the value: a double-quoted regex such as "^\d+$" is not a
 // valid YAML double-quoted scalar (\d is not a recognized escape), and keeping
 // the quotes would build a regex that requires literal leading and trailing
-// quote characters (fail closed). The first and last bytes were already
-// confirmed equal quote runes, so the slice is safe.
+// quote characters (fail closed). The manual strip applies only when the
+// leading quote's run spans the whole value; text that merely starts and ends
+// with the same quote character (a description like 'foo' and 'bar', a regex
+// alternation like "^a"|"b$") is returned verbatim, matching the upstream's
+// verbatim assignment.
 func unquoteScalar(val string) string {
 	if len(val) < 2 {
 		return val
@@ -604,10 +607,51 @@ func unquoteScalar(val string) string {
 
 	err := yaml.Unmarshal([]byte(val), &s)
 	if err != nil {
-		return val[1 : len(val)-1]
+		if quoteSpansValue(val) {
+			return val[1 : len(val)-1]
+		}
+
+		return val
 	}
 
 	return s
+}
+
+// quoteSpansValue reports whether a value whose first and last bytes are the
+// same quote rune is a single fully quoted scalar: no interior occurrence of
+// the quote closes the run before the final byte, honoring backslash escapes
+// inside double quotes and doubled quotes inside single quotes. A false result
+// means the outer quotes are ordinary content, so stripping them would mangle
+// the value.
+func quoteSpansValue(val string) bool {
+	quote := val[0]
+	interior := val[1 : len(val)-1]
+
+	for i := 0; i < len(interior); i++ {
+		switch {
+		case quote == '"' && interior[i] == '\\':
+			// A trailing backslash escapes the closing quote itself, leaving
+			// the scalar unterminated.
+			if i == len(interior)-1 {
+				return false
+			}
+
+			i++
+
+		case interior[i] == quote:
+			// A doubled quote is the single-quote escape form; any other
+			// occurrence closes the run early. A quote in the final interior
+			// position pairs with the closing byte, leaving the scalar
+			// unterminated.
+			if quote != '\'' || i == len(interior)-1 || interior[i+1] != quote {
+				return false
+			}
+
+			i++
+		}
+	}
+
+	return true
 }
 
 // parseYAMLValue parses a YAML string into any Go value, distinguishing

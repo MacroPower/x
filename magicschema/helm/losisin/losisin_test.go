@@ -1931,6 +1931,47 @@ func TestHelmValuesSchemaAnnotatorAlignment(t *testing.T) {
 				assert.Equal(t, `^\d+;\d+$`, v["pattern"])
 			},
 		},
+		"description quoted at both ends stays verbatim": {
+			// 'foo' and 'bar' starts and ends with the same quote rune but is
+			// not one fully quoted scalar; the parse-failure fallback must not
+			// slice off the outer quotes and keep the inner ones, mangling the
+			// text upstream assigns verbatim.
+			input: stringtest.Input(`
+				# @schema type:string;description:'foo' and 'bar'
+				name: test
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				n, ok := props["name"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, `'foo' and 'bar'`, n["description"])
+			},
+		},
+		"pattern alternating quoted literals stays verbatim": {
+			// A regex alternation of two quoted literals starts and ends with
+			// a double quote; stripping the outer pair would build a different
+			// regex that rejects the intended values.
+			input: stringtest.Input(`
+				# @schema type:string;pattern:"^a"|"b$"
+				val: x
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				v, ok := props["val"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, `"^a"|"b$"`, v["pattern"])
+			},
+		},
 		"quote inside a bracketed value preserved": {
 			// A regex char class like [",;] holds a quote alongside a ";".
 			// Opening a quoted run on that inner quote would swallow the closing
