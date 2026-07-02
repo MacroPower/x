@@ -285,6 +285,12 @@
 //   - [StripCommentMarker] removes the leading "#" marker (capped at two
 //     hashes) and one following space from a comment line, the strip used to
 //     recognize block markers consistently across annotators.
+//   - [ClassifySchemaLine] reports a stripped, trimmed comment line's role in
+//     the @schema / @schema.root block-delimiter grammar as a
+//     [SchemaLineKind]: prose, a root or schema block delimiter, or the
+//     non-delimiter inline form. The structural fallback's fence tracking and
+//     the helm-schema annotator's comment scan share this one classifier so
+//     they cannot disagree on which lines fence a block.
 //
 // # CLI Integration
 //

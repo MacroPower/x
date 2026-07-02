@@ -288,6 +288,61 @@ func StripCommentMarker(line string) string {
 	return strings.TrimPrefix(line, " ")
 }
 
+// SchemaLineKind classifies a comment line's role in the @schema /
+// @schema.root block-delimiter grammar, after the comment marker is stripped
+// and the remainder fully trimmed. [ClassifySchemaLine] produces it.
+type SchemaLineKind int
+
+// The delimiter roles [ClassifySchemaLine] distinguishes.
+const (
+	// SchemaLinePlain is a line that is not a @schema or @schema.root marker.
+	SchemaLinePlain SchemaLineKind = iota
+	// SchemaLineRoot is a bare "@schema.root" block delimiter.
+	SchemaLineRoot
+	// SchemaLineSchema is a bare "@schema" block delimiter, including a junk
+	// suffix such as "@schema@" that upstream helm-schema still treats as a
+	// delimiter.
+	SchemaLineSchema
+	// SchemaLineInline is a @schema- or @schema.root-prefixed line that is
+	// not a delimiter -- trailing content or the whitespace-separated
+	// helm-values-schema inline form -- so it is never collected as block
+	// content.
+	SchemaLineInline
+)
+
+// ClassifySchemaLine reports the delimiter role of a stripped, fully trimmed
+// comment line, so the @schema / @schema.root fence grammar -- which bare
+// markers delimit a block, and which @schema-prefixed lines are the inline
+// form rather than a delimiter -- lives in one place. Upstream helm-schema
+// toggles blocks on any line prefixed with "# @schema", so junk suffixes such
+// as "@schema@" (seen in the wild in cilium's values.yaml) still delimit a
+// block; only a whitespace-separated suffix is excluded, since that form is
+// the helm-values-schema inline annotation. The "@schema.root" literal must
+// be contiguous and bare: "@schema .root" with a space is the inline form,
+// and trailing content after either marker is inline rather than a delimiter.
+// The dadav annotator's comment scan and the structural fallback's fence
+// tracking share this one classifier so the two passes cannot disagree on
+// which lines fence a block; each applies its own block-state transitions.
+func ClassifySchemaLine(trimmed string) SchemaLineKind {
+	if after, ok := strings.CutPrefix(trimmed, "@schema.root"); ok {
+		if after == "" {
+			return SchemaLineRoot
+		}
+
+		return SchemaLineInline
+	}
+
+	if after, ok := strings.CutPrefix(trimmed, "@schema"); ok {
+		if after == "" || (after[0] != ' ' && after[0] != '\t') {
+			return SchemaLineSchema
+		}
+
+		return SchemaLineInline
+	}
+
+	return SchemaLinePlain
+}
+
 // SetSchemaType assigns a parsed type list to a schema as either the scalar
 // Type or the Types union, clearing the sibling field so the schema never
 // carries both -- a combination the jsonschema marshaler rejects, which would

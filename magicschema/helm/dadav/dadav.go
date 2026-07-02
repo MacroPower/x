@@ -345,52 +345,6 @@ func setExtra(schema *jsonschema.Schema, key string, val any) {
 	schema.Extra[key] = val
 }
 
-// schemaLineKind classifies a comment line's role in the @schema/@schema.root
-// delimiter grammar, after the comment marker is stripped and the remainder
-// fully trimmed.
-type schemaLineKind int
-
-const (
-	// A line that is not a @schema or @schema.root marker.
-	schemaLinePlain schemaLineKind = iota
-	// A bare "@schema.root" block delimiter.
-	schemaLineRoot
-	// A bare "@schema" block delimiter, including a junk suffix such as
-	// "@schema@" that upstream still treats as a delimiter.
-	schemaLineSchema
-	// A @schema- or @schema.root-prefixed line that is not a delimiter --
-	// trailing content or the whitespace-separated helm-values-schema inline
-	// form -- so it is never collected as block content.
-	schemaLineInline
-)
-
-// classifySchemaLine reports the delimiter role of a stripped, fully trimmed
-// comment line, so the grammar -- which bare markers delimit a block, and
-// which @schema-prefixed lines are the inline form rather than a delimiter --
-// lives in one place; [scanCommentBlocks] applies the block-state
-// transitions. The "@schema.root" literal must be contiguous and bare:
-// "@schema .root" with a space is the inline form, and trailing content after
-// either marker is inline rather than a delimiter.
-func classifySchemaLine(trimmed string) schemaLineKind {
-	if after, ok := strings.CutPrefix(trimmed, "@schema.root"); ok {
-		if strings.TrimSpace(after) == "" {
-			return schemaLineRoot
-		}
-
-		return schemaLineInline
-	}
-
-	if after, ok := strings.CutPrefix(trimmed, "@schema"); ok {
-		if isDelimiterSuffix(after) {
-			return schemaLineSchema
-		}
-
-		return schemaLineInline
-	}
-
-	return schemaLinePlain
-}
-
 // commentBlocks is the classified content of one comment scan: the
 // concatenated @schema block content, the first @schema.root block's content,
 // and the non-annotation description prose.
@@ -401,8 +355,9 @@ type commentBlocks struct {
 }
 
 // scanCommentBlocks classifies every comment line as @schema block content,
-// @schema.root block content, or description prose in a single pass, so the
-// delimiter grammar and its block-state transitions live in one place.
+// @schema.root block content, or description prose in a single pass, applying
+// the block-state transitions for the delimiter grammar
+// [magicschema.ClassifySchemaLine] defines.
 //
 // Block semantics:
 //
@@ -435,7 +390,7 @@ func scanCommentBlocks(comment string) commentBlocks {
 	// whether the enclosing @schema block is closed by a later delimiter,
 	// which needs the total delimiter count before the stateful pass runs.
 	stripped := make([]string, len(lines))
-	kinds := make([]schemaLineKind, len(lines))
+	kinds := make([]magicschema.SchemaLineKind, len(lines))
 
 	var fences int
 
@@ -443,9 +398,9 @@ func scanCommentBlocks(comment string) commentBlocks {
 		// Strip once; markers match on a fully trimmed copy while content
 		// keeps its indentation beyond the marker and single space.
 		stripped[i] = magicschema.StripCommentMarker(line)
-		kinds[i] = classifySchemaLine(strings.TrimSpace(stripped[i]))
+		kinds[i] = magicschema.ClassifySchemaLine(strings.TrimSpace(stripped[i]))
 
-		if kinds[i] == schemaLineSchema {
+		if kinds[i] == magicschema.SchemaLineSchema {
 			fences++
 		}
 	}
@@ -459,7 +414,7 @@ func scanCommentBlocks(comment string) commentBlocks {
 
 	for i, kind := range kinds {
 		switch kind {
-		case schemaLineRoot:
+		case magicschema.SchemaLineRoot:
 			// Junk inside a closed @schema block (see semantics above): seen
 			// counting below fences means another @schema delimiter follows,
 			// so the open block is eventually closed.
@@ -473,7 +428,7 @@ func scanCommentBlocks(comment string) commentBlocks {
 
 			inRoot = !inRoot
 
-		case schemaLineSchema:
+		case magicschema.SchemaLineSchema:
 			// Toggle delimiter -- supports multiple concatenated blocks --
 			// that also closes an open @schema.root block.
 			if inRoot {
@@ -484,12 +439,12 @@ func scanCommentBlocks(comment string) commentBlocks {
 			seen++
 			inSchema = !inSchema
 
-		case schemaLineInline:
+		case magicschema.SchemaLineInline:
 			// Not a delimiter (inline helm-values-schema form) and never
 			// collected: letting it land in block YAML would make goccy
 			// reject the whole block, and it is not a description either.
 
-		default: // schemaLinePlain
+		default: // magicschema.SchemaLinePlain
 			switch {
 			case inRoot:
 				if !rootDone {
@@ -532,16 +487,6 @@ func scanCommentBlocks(comment string) commentBlocks {
 		root:        strings.Join(rootLines, "\n"),
 		description: strings.Join(descLines, "\n"),
 	}
-}
-
-// isDelimiterSuffix reports whether the text following the "@schema" token
-// forms a block delimiter. Upstream helm-schema toggles blocks on any line
-// prefixed with "# @schema", so junk suffixes such as "@schema@" (seen in
-// the wild in cilium's values.yaml) still delimit a block. A
-// whitespace-separated suffix is excluded because that form is the
-// helm-values-schema inline annotation.
-func isDelimiterSuffix(after string) bool {
-	return after == "" || (after[0] != ' ' && after[0] != '\t')
 }
 
 // applyType sets Type or Types on the schema from a YAML value.

@@ -155,6 +155,74 @@ func TestLastCommentGroup(t *testing.T) {
 	}
 }
 
+// TestClassifySchemaLine covers the @schema / @schema.root delimiter grammar
+// shared by the structural fence tracking and the helm-schema annotator's
+// comment scan: junk suffixes such as "@schema@" still delimit (upstream
+// helm-schema toggles on any "# @schema"-prefixed line), a
+// whitespace-separated suffix is the helm-values-schema inline form, and
+// "@schema.root" must be contiguous and bare to delimit a root block.
+func TestClassifySchemaLine(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		line string
+		want magicschema.SchemaLineKind
+	}{
+		"prose is plain": {
+			line: "The number of replicas.",
+			want: magicschema.SchemaLinePlain,
+		},
+		"empty line is plain": {
+			line: "",
+			want: magicschema.SchemaLinePlain,
+		},
+		"bare @schema delimits": {
+			line: "@schema",
+			want: magicschema.SchemaLineSchema,
+		},
+		"junk suffix still delimits": {
+			line: "@schema@",
+			want: magicschema.SchemaLineSchema,
+		},
+		"dotted junk suffix still delimits": {
+			line: "@schema.foo",
+			want: magicschema.SchemaLineSchema,
+		},
+		"space-separated suffix is the inline form": {
+			line: "@schema type:integer;minimum:1",
+			want: magicschema.SchemaLineInline,
+		},
+		"tab-separated suffix is the inline form": {
+			line: "@schema\ttype:integer",
+			want: magicschema.SchemaLineInline,
+		},
+		"spaced .root is the inline form": {
+			line: "@schema .root",
+			want: magicschema.SchemaLineInline,
+		},
+		"bare @schema.root delimits": {
+			line: "@schema.root",
+			want: magicschema.SchemaLineRoot,
+		},
+		"@schema.root with trailing content is inline": {
+			line: "@schema.root title: Values",
+			want: magicschema.SchemaLineInline,
+		},
+		"@schema.root with attached junk is inline": {
+			line: "@schema.root@",
+			want: magicschema.SchemaLineInline,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, magicschema.ClassifySchemaLine(tc.line))
+		})
+	}
+}
+
 func TestToSubSchemaTypeNormalization(t *testing.T) {
 	t.Parallel()
 

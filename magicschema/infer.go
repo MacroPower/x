@@ -315,32 +315,35 @@ func adjacentCommentRun(comment *ast.CommentGroupNode, key ast.MapKeyNode) ([]st
 
 // schemaFenceState applies the @schema / @schema.root block-fence toggles for
 // one already-stripped, trimmed comment line and reports whether the line is a
-// fence delimiter (which carries no description text). A root marker inside an
-// open @schema block is junk content, not a delimiter, and a @schema delimiter
-// also ends an unclosed @schema.root block, mirroring the dadav annotator's
-// comment scan. (That scan sees the whole comment and restores the root
-// marker's delimiter role when the enclosing @schema block is unclosed; the
-// distinction cannot surface here, where a line inside either block is equally
-// not prose.) Like upstream helm-schema, junk suffixes such as "@schema@"
-// still delimit a block; only a whitespace-separated suffix is excluded, since
-// that form is the helm-values-schema inline annotation. It returns the updated
-// (inSchema, inRoot) state and whether the line was a fence delimiter.
+// @schema or @schema.root marker (delimiter or inline form, neither of which
+// carries description text). [ClassifySchemaLine] supplies the delimiter
+// grammar; this function adds the streaming transitions: a root delimiter
+// inside an open @schema block is junk content, not a toggle, and a @schema
+// delimiter also ends an unclosed @schema.root block, mirroring the dadav
+// annotator's comment scan. (That scan sees the whole comment and restores the
+// root marker's delimiter role when the enclosing @schema block is unclosed;
+// the distinction cannot surface here, where a line inside either block is
+// equally not prose.) It returns the updated (inSchema, inRoot) state and
+// whether the line was a marker.
 func schemaFenceState(cleaned string, inSchema, inRoot bool) (bool, bool, bool) {
-	if after, ok := strings.CutPrefix(cleaned, "@schema.root"); ok {
-		if !inSchema && after == "" {
+	switch ClassifySchemaLine(cleaned) {
+	case SchemaLineRoot:
+		if !inSchema {
 			inRoot = !inRoot
 		}
 
 		return inSchema, inRoot, true
-	}
 
-	if after, ok := strings.CutPrefix(cleaned, "@schema"); ok {
-		if after == "" || (after[0] != ' ' && after[0] != '\t') {
-			inRoot = false
-			inSchema = !inSchema
-		}
+	case SchemaLineSchema:
+		inRoot = false
+		inSchema = !inSchema
 
 		return inSchema, inRoot, true
+
+	case SchemaLineInline:
+		return inSchema, inRoot, true
+
+	case SchemaLinePlain:
 	}
 
 	return inSchema, inRoot, false
