@@ -53,17 +53,37 @@ func (a *Annotator) Annotate(node ast.Node, _ string) *magicschema.AnnotationRes
 		return nil
 	}
 
-	commentStr := comment.String()
-
-	// Parse @schema.root blocks only from the first key in the mapping.
+	// Parse @schema.root blocks only from the first key in the mapping. Root
+	// extraction reads the whole merged comment group: upstream parses the
+	// first key's full head comment (and the document head comment) for root
+	// blocks without stripping leading comment groups, so a root block
+	// separated from the first key by a blank line still applies.
 	if !a.seenFirstKey {
-		rootContent := extractSchemaRootBlock(commentStr)
+		rootContent := extractSchemaRootBlock(comment.String())
 		if rootContent != "" {
 			a.parseRootBlock(rootContent)
 		}
 	}
 
 	a.seenFirstKey = true
+
+	// Property-level parsing reads only the head-comment run that physically
+	// documents the key. The parser merges blank-line-separated comment
+	// blocks -- a file header, a stale annotation block for a removed key --
+	// into one head comment group, and applying such a detached block here
+	// can produce a schema the key's own value fails. Upstream strips
+	// everything before the last blank line (leadingCommentsRemover) before
+	// parsing @schema blocks and descriptions; [magicschema.HeadCommentRun]
+	// reconstructs the same narrowing from comment token positions. The
+	// extractors start outside any block, as upstream does after stripping,
+	// so a block whose opening fence sits in a discarded run contributes
+	// nothing; the fence-state results are therefore unused.
+	run, _, _ := magicschema.HeadCommentRun(mvn)
+	if len(run) == 0 {
+		return nil
+	}
+
+	commentStr := strings.Join(run, "\n")
 
 	// Parse @schema blocks.
 	blockContent := extractSchemaBlock(commentStr)

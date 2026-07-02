@@ -2501,6 +2501,111 @@ func TestHelmSchemaAnnotatorAlignment(t *testing.T) {
 				assert.Empty(t, k["title"])
 			},
 		},
+		"detached annotation block does not apply to the following key": {
+			// The parser merges blank-line-separated comment blocks into one
+			// head comment group; a stale block (a commented-out previous key
+			// with its annotations) separated from the key by a blank line
+			// must not apply, matching upstream's leadingCommentsRemover.
+			// Applying it would emit type string and reject the key's own
+			// integer value (fail closed).
+			input: stringtest.Input(`
+				# Example configuration (disabled):
+				# @schema
+				# type: string
+				# @schema
+				# oldKey: value
+
+				replicas: 3
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				r, ok := props["replicas"].(map[string]any)
+				require.True(t, ok)
+
+				// Structural inference wins; the stale block and its prose
+				// leave no trace.
+				assert.Equal(t, "integer", r["type"])
+				assert.Empty(t, r["description"])
+			},
+		},
+		"file header separated by blank line does not leak into description": {
+			input: stringtest.Input(`
+				# File header comment
+
+				# @schema
+				# type: integer
+				# @schema
+				replicas: 3
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				r, ok := props["replicas"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "integer", r["type"])
+				assert.Empty(t, r["description"])
+			},
+		},
+		"adjacent block applies despite detached stale block above": {
+			// Only the run touching the key is parsed, so the adjacent block
+			// wins and the detached one is ignored -- the upstream sees the
+			// same text after leadingCommentsRemover stripping.
+			input: stringtest.Input(`
+				# @schema
+				# type: string
+				# @schema
+
+				# @schema
+				# type: integer
+				# @schema
+				replicas: 3
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				r, ok := props["replicas"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "integer", r["type"])
+			},
+		},
+		"root block separated by blank line still applies": {
+			// Root extraction reads the full merged comment group: upstream
+			// exempts root parsing from leadingCommentsRemover and checks the
+			// document head comment for the blank-line-separated case.
+			input: stringtest.Input(`
+				# @schema.root
+				# title: My Chart
+				# @schema.root
+
+				replicas: 3
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				assert.Equal(t, "My Chart", got["title"])
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				r, ok := props["replicas"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "integer", r["type"])
+				assert.Empty(t, r["description"])
+			},
+		},
 		"root block content excluded from description extraction": {
 			// Root block content between delimiters must not become descriptions.
 			input: stringtest.Input(`

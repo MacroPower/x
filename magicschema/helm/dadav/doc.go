@@ -201,9 +201,12 @@
 //     schema block lines during [GetSchemaFromComment]: lines outside
 //     @schema block delimiters are collected as description, stripped of the
 //     leading "# " prefix, and joined with "\n" (preserving multi-line
-//     structure). The leadingCommentsRemover regex is applied to the
-//     HeadComment before both root schema and regular schema parsing
-//     (see description auto-generation above for regex details).
+//     structure). The leadingCommentsRemover regex is applied to each key's
+//     HeadComment before [GetSchemaFromComment], so property-level blocks
+//     and descriptions see only the comment group after the last blank
+//     line. Root parsing is exempt: [GetRootSchemaFromComment] reads the
+//     first key's full HeadComment, and a document-level check catches a
+//     root block that a blank line separates from the first key.
 //
 //   - double-hash comments: The upstream only recognizes single-hash
 //     delimiters (# @schema). Lines beginning with ## @schema are not
@@ -421,7 +424,20 @@
 //   - @schema.root: Root schema blocks are parsed from the first key's
 //     head comment only. Root blocks on non-first keys are ignored. The
 //     root block is processed separately from regular @schema blocks,
-//     and root content does not leak into property annotations.
+//     and root content does not leak into property annotations. Root
+//     extraction reads the full merged comment group, so a root block
+//     separated from the first key by a blank line still applies --
+//     matching the upstream, whose root parsing is exempt from
+//     leadingCommentsRemover and whose document-level check catches the
+//     blank-line-separated case.
+//
+//   - Annotation scoping: Property-level @schema blocks and descriptions
+//     are parsed only from the head-comment run physically adjacent to the
+//     key ([magicschema.HeadCommentRun]), and parsing starts outside any
+//     block, matching the upstream's leadingCommentsRemover stripping. A
+//     detached annotation block or file header separated from the key by a
+//     blank line does not apply, so a stale block cannot produce a schema
+//     the key's own value fails.
 //
 //   - Root field propagation: The same fields propagate from root blocks
 //     as in the upstream: title, description, $ref, examples, deprecated,
@@ -437,12 +453,15 @@
 //     in the block. Only comments after the last blank line are used,
 //     matching the upstream's leadingCommentsRemover regex behavior. The
 //     upstream regex ((?s)(?m)(?:.*\n{2,})+) greedily strips everything
-//     before the last double-newline; our implementation achieves the
-//     same result by finding the last blank line in the collected
-//     description lines and using only lines after it. Description lines
-//     join with newlines and keep their indentation beyond the comment
-//     marker and single following space, matching the upstream, so YAML
-//     snippets embedded in comments keep their structure.
+//     before the last double-newline; the goccy parser erases physical
+//     blank lines when it merges comment blocks into one head comment
+//     group, so our implementation restores the boundaries from comment
+//     token positions ([magicschema.HeadCommentRun]) and additionally
+//     treats a "#"-only line as a group boundary
+//     ([magicschema.LastCommentGroup]). Description lines join with
+//     newlines and keep their indentation beyond the comment marker and
+//     single following space, matching the upstream, so YAML snippets
+//     embedded in comments keep their structure.
 //
 //   - Helm-docs prefix stripping: The "-- " prefix from helm-docs style
 //     comments is stripped from descriptions. Helm-docs @tag lines (e.g.,
