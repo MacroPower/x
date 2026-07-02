@@ -98,13 +98,18 @@
 // For example, upstream parses [default: [a, b]] as two modifiers,
 // "default: [a" and "b]": the first yields a default of "[a" (which may fail
 // YAML parsing) and the second is an unknown modifier (a hard error
-// upstream). Our implementation does NOT share this limitation: splitModifiers
-// performs a balanced-bracket scan and the default: modifier consumes the
-// remainder of the bracket contents, so comma-containing and nested
-// flow-sequence defaults are preserved whole -- [default: a,b,c] yields
-// "a,b,c" and [array, default: [a, [b], c]] yields the list ["a", ["b"], "c"].
-// Values containing colons but no commas work correctly under both tools
-// (e.g., [default: https://example.com]).
+// upstream). Our implementation splits modifier tokens on commas at bracket
+// depth zero, which agrees with the upstream tokenization on every
+// upstream-valid modifier list (upstream imposes no modifier ordering, so
+// [default: abc, nullable] yields default "abc" plus nullable under both
+// tools). A bracketed flow-sequence default like [array, default: [a, [b],
+// c]] stays whole because its commas sit inside nested brackets -- an input
+// upstream mangles as described above. A bare comma-containing default like
+// [default: a,b,c] is truncated at the first comma under both tokenizations;
+// upstream then hard-errors on the leftover unknown modifiers "b" and "c",
+// while we silently ignore them and record the default "a". Values
+// containing colons but no commas work correctly under both tools (e.g.,
+// [default: https://example.com]).
 //
 // ## Schema Generation Pipeline
 //
@@ -292,6 +297,16 @@
 //   - Unknown modifiers: We silently ignore unrecognized modifiers rather than
 //     raising an error. This follows the magicschema best-effort principle of
 //     extracting as much information as possible without failing.
+//
+//   - Bracketed flow-sequence defaults: Modifier tokens are split on commas
+//     only at bracket depth zero, so a [default: VALUE] whose value is a
+//     flow sequence ([array, default: [a, [b], c]]) is preserved whole and
+//     parsed as the list ["a", ["b"], "c"]. Upstream splits on every comma,
+//     mangling such input into a truncated default ("[a") and unknown-modifier
+//     hard errors. On upstream-valid input (which never nests brackets inside
+//     the modifier group) the two tokenizations agree, including for
+//     modifiers written after default: ([default: abc, nullable] yields
+//     default "abc" plus nullable).
 //
 //   - Extended type modifiers: We accept number, integer, and boolean as type
 //     modifiers in addition to the upstream's string, array, and object. This

@@ -222,7 +222,11 @@ func TestBitnamiAnnotator(t *testing.T) {
 				assert.Equal(t, "custom", v["default"])
 			},
 		},
-		"default value containing commas is preserved": {
+		"bare comma default truncates at first comma": {
+			// Modifier tokens split on commas like upstream, so a bare
+			// comma ends the default value. Upstream hard-errors on the
+			// leftover unknown modifiers "b" and "c"; we silently ignore
+			// them (best-effort).
 			input: stringtest.Input(`
 				## @param tags [array, default: a,b,c] Tags
 				tags: actual
@@ -237,7 +241,33 @@ func TestBitnamiAnnotator(t *testing.T) {
 				require.True(t, ok)
 
 				assert.Equal(t, "array", v["type"])
-				assert.Equal(t, "a,b,c", v["default"])
+				assert.Equal(t, "a", v["default"])
+			},
+		},
+		"modifier after default is applied": {
+			// Upstream imposes no modifier ordering, so nullable may follow
+			// default:. The default ends at the comma and nullable widens
+			// the inferred string type rather than being swallowed into the
+			// default value.
+			input: stringtest.Input(`
+				## @param foo [default: abc, nullable] Description
+				foo: bar
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				v, ok := props["foo"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "abc", v["default"])
+
+				types, ok := v["type"].([]any)
+				require.True(t, ok)
+				assert.Contains(t, types, "string")
+				assert.Contains(t, types, "null")
 			},
 		},
 		"deeply nested flow-sequence default is preserved": {
@@ -1914,6 +1944,54 @@ func TestBitnamiPrepare(t *testing.T) {
 				assert.JSONEq(t, `"x"`, string(result.Schema.Default))
 			},
 		},
+		"modifiers after default are applied": {
+			// Comma-splitting matches upstream, which imposes no modifier
+			// ordering: the default ends at the comma and the trailing
+			// modifiers still apply.
+			content: stringtest.Input(`
+				## @param val [default: abc, string, nullable] Desc
+				val: test
+			`),
+			keyPath: "val",
+			want: func(t *testing.T, result *magicschema.AnnotationResult) {
+				t.Helper()
+				require.NotNil(t, result)
+				require.NotNil(t, result.Schema)
+				assert.Equal(t, []string{"string", "null"}, result.Schema.Types)
+				assert.NotNil(t, result.Schema.Default)
+				assert.JSONEq(t, `"abc"`, string(result.Schema.Default))
+			},
+		},
+		"nullable after default without type": {
+			content: stringtest.Input(`
+				## @param val [default: abc, nullable] Desc
+				val: test
+			`),
+			keyPath: "val",
+			want: func(t *testing.T, result *magicschema.AnnotationResult) {
+				t.Helper()
+				require.NotNil(t, result)
+				require.NotNil(t, result.Schema)
+				assert.Equal(t, "null", result.Schema.Type)
+				assert.NotNil(t, result.Schema.Default)
+				assert.JSONEq(t, `"abc"`, string(result.Schema.Default))
+			},
+		},
+		"default before nullable": {
+			content: stringtest.Input(`
+				## @param val [nullable, default: abc] Desc
+				val: test
+			`),
+			keyPath: "val",
+			want: func(t *testing.T, result *magicschema.AnnotationResult) {
+				t.Helper()
+				require.NotNil(t, result)
+				require.NotNil(t, result.Schema)
+				assert.Equal(t, "null", result.Schema.Type)
+				assert.NotNil(t, result.Schema.Default)
+				assert.JSONEq(t, `"abc"`, string(result.Schema.Default))
+			},
+		},
 	}
 
 	for name, tc := range tcs {
@@ -1987,8 +2065,9 @@ func TestBitnamiAnnotatorRealWorld(t *testing.T) {
 }
 
 // TestBitnamiAnnotatorDefaultWithComma covers a default: modifier whose value
-// contains commas. Because default: takes the remainder of the bracket
-// contents, the value is preserved rather than truncated at the first comma.
+// contains a bare comma. Modifier tokens split on commas like upstream, so
+// the comma ends the default value; the leftover token "world" is an unknown
+// modifier, a hard error upstream and silently ignored here (best-effort).
 func TestBitnamiAnnotatorDefaultWithComma(t *testing.T) {
 	t.Parallel()
 
@@ -2017,6 +2096,6 @@ func TestBitnamiAnnotatorDefaultWithComma(t *testing.T) {
 	require.True(t, ok)
 
 	assert.Equal(t, "string", g["type"])
-	assert.Equal(t, "hello, world", g["default"],
-		"default value must keep its comma, not truncate to \"hello\"")
+	assert.Equal(t, "hello", g["default"],
+		"default value must end at the comma, matching upstream tokenization")
 }

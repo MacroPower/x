@@ -191,28 +191,31 @@ func splitModifiers(rest string) (string, string) {
 
 // parseModifiers parses the comma-separated modifiers within brackets.
 //
-// The default: modifier takes the remainder of the bracket contents rather than
-// a single comma-delimited token, so a default value containing commas (e.g.
-// "[array, default: a,b,c]") is preserved instead of truncated at the first
-// comma. This follows the bitnami convention of writing default: last; the
-// modifiers before it are the type and nullable flags. The marker is matched at
-// a comma boundary (see [defaultModifierIndex]) so a token such as
-// "somedefault:" cannot stand in for it.
+// Tokens are split on commas at bracket depth zero, mirroring the upstream
+// comma-splitting: modifiers written after default: (an ordering upstream
+// accepts, e.g. "[default: abc, nullable]") are applied rather than swallowed
+// into the default value. The depth-zero rule additionally keeps a bracketed
+// flow-sequence default such as "[array, default: [a, [b], c]]" whole, an
+// input upstream cannot express (see Intentional Divergences in doc.go). A
+// bare comma inside a default value ends it, matching upstream; the leftover
+// tokens are unknown modifiers and are silently ignored (best-effort). The
+// default: marker must start its token, so "somedefault:" cannot stand in
+// for it.
 func parseModifiers(param *bitnamiParam, modifiers string) {
-	if idx := defaultModifierIndex(modifiers); idx >= 0 {
-		val := strings.TrimSpace(modifiers[idx+len("default:"):])
-
-		// An empty "[default:]" carries no value; setting it would emit a
-		// spurious "default": null.
-		if val != "" {
-			param.defaultVal = &val
-		}
-
-		modifiers = modifiers[:idx]
-	}
-
-	for part := range strings.SplitSeq(modifiers, ",") {
+	for _, part := range splitModifierTokens(modifiers) {
 		part = strings.TrimSpace(part)
+
+		if val, ok := strings.CutPrefix(part, "default:"); ok {
+			val = strings.TrimSpace(val)
+
+			// An empty "[default:]" carries no value; setting it would emit a
+			// spurious "default": null.
+			if val != "" {
+				param.defaultVal = &val
+			}
+
+			continue
+		}
 
 		switch part {
 		case "nullable":
@@ -225,29 +228,31 @@ func parseModifiers(param *bitnamiParam, modifiers string) {
 	}
 }
 
-// defaultModifierIndex returns the byte offset of the "default:" modifier --
-// the marker at the start of the bracket contents or directly after a comma,
-// ignoring surrounding spaces -- or -1 when it is absent. Anchoring to a comma
-// boundary keeps another token such as "somedefault:" from matching as a
-// substring, while still letting the default value itself contain commas (the
-// modifier takes the remainder of the bracket).
-func defaultModifierIndex(modifiers string) int {
-	const marker = "default:"
+// splitModifierTokens splits bracket contents on commas at bracket depth
+// zero, so a comma inside a nested flow sequence (e.g. the default value in
+// "array, default: [a, [b], c]") does not end its token. The input is the
+// balanced group peeled by [splitModifiers], so the depth never goes
+// negative.
+func splitModifierTokens(modifiers string) []string {
+	var (
+		tokens []string
+		depth  int
+		start  int
+	)
 
-	for i := 0; i+len(marker) <= len(modifiers); i++ {
-		if modifiers[i:i+len(marker)] != marker {
-			continue
-		}
-
-		j := i - 1
-		for j >= 0 && (modifiers[j] == ' ' || modifiers[j] == '\t') {
-			j--
-		}
-
-		if j < 0 || modifiers[j] == ',' {
-			return i
+	for i, ch := range modifiers {
+		switch ch {
+		case '[':
+			depth++
+		case ']':
+			depth--
+		case ',':
+			if depth == 0 {
+				tokens = append(tokens, modifiers[start:i])
+				start = i + 1
+			}
 		}
 	}
 
-	return -1
+	return append(tokens, modifiers[start:])
 }
