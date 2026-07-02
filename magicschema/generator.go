@@ -998,7 +998,11 @@ func (g *Generator) astToGoValue(node ast.Node, anchors aliasResolutions) (any, 
 
 	switch n := unwrapNode(node).(type) {
 	case nil:
-		return nil, false
+		// A broken alias or a wrapper bottoming out at nil is a null value
+		// (see isNullNode), so it converts to a null member like a genuine
+		// null -- returning no value here would drop an entire containing
+		// list's default over one dangling alias.
+		return nil, true
 	case *ast.SequenceNode:
 		return g.sequenceToGoValue(n, anchors)
 	case *ast.MappingNode:

@@ -657,6 +657,25 @@ func TestGeneratorBrokenAlias(t *testing.T) {
 				assert.ElementsMatch(t, []any{"integer", "null"}, items["type"])
 			},
 		},
+		"broken alias in a list records a null member in the default": {
+			opts: []magicschema.Option{
+				magicschema.WithInferDefaults(true),
+			},
+			input: stringtest.Input(`
+				nums:
+				  - 1
+				  - *missing
+			`),
+			check: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				nums := propertyAt(t, got, "nums")
+
+				d, ok := nums["default"].([]any)
+				require.True(t, ok, "expected a list default on nums, got %v", nums["default"])
+				assert.Equal(t, []any{float64(1), nil}, d)
+			},
+		},
 	}
 
 	for name, tc := range tcs {
