@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/goccy/go-yaml/ast"
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/stringtest"
@@ -2198,6 +2200,51 @@ level1:
 	val, ok := l4Props["value"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "string", val["type"])
+}
+
+// rootRefStubAnnotator is a no-op annotator whose root schema is a bare
+// $ref, standing in for a @schema.root block that makes the document a
+// reference.
+type rootRefStubAnnotator struct{}
+
+func (rootRefStubAnnotator) Name() string { return "rootref" }
+
+func (r rootRefStubAnnotator) ForContent(_ []byte) (magicschema.Annotator, error) { return r, nil }
+
+func (rootRefStubAnnotator) Annotate(_ ast.Node, _ string) *magicschema.AnnotationResult {
+	return nil
+}
+
+func (rootRefStubAnnotator) RootSchema() *jsonschema.Schema {
+	return &jsonschema.Schema{Ref: "https://example.com/root.schema.json"}
+}
+
+func TestGeneratorRootRefClearsStructuralSiblings(t *testing.T) {
+	t.Parallel()
+
+	// A root $ref makes the document a reference; Draft 7 ignores $ref
+	// siblings, so every structural output of the walk must clear -- for a
+	// sequence-rooted document that includes the items schema and the
+	// inferred default, not just the object keywords.
+	gen := magicschema.NewGenerator(
+		magicschema.WithAnnotators(rootRefStubAnnotator{}),
+		magicschema.WithInferDefaults(true),
+	)
+
+	schema, err := gen.Generate([]byte("- 1\n- 2\n"))
+	require.NoError(t, err)
+
+	out, err := json.Marshal(schema)
+	require.NoError(t, err)
+
+	var got map[string]any
+
+	require.NoError(t, json.Unmarshal(out, &got))
+
+	assert.Equal(t, "https://example.com/root.schema.json", got["$ref"])
+	assert.NotContains(t, got, "items")
+	assert.NotContains(t, got, "default")
+	assert.NotContains(t, got, "type")
 }
 
 func TestGeneratorRootAdditionalPropertiesNonObject(t *testing.T) {
