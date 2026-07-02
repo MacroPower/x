@@ -400,11 +400,13 @@
 //     flag is used. The magicschema design mandates fail-open behavior:
 //     generated schemas should help users, not block them.
 //
-//   - default and const with empty values are silently treated as null.
-//     The upstream uses processObjectComment which rejects empty strings
-//     with a "missing value" error. Our implementation treats an empty
-//     value as YAML null, which is a valid JSON Schema value for both
-//     fields.
+//   - default and const with empty values are silently skipped (no field
+//     is emitted). The upstream uses processObjectComment which rejects
+//     empty strings with a "missing value" error. A blank value is the
+//     absence of a value, not an explicit null: emitting "default": null
+//     would advertise a spurious null default, and "const": null would
+//     reject every real value (fail-closed). An explicit null is written
+//     as "default:null" or "const:null", which parses normally.
 //
 //   - $ref values are preserved as-is. The upstream's $k8s shorthand
 //     expansion, file-based $ref resolution, schema bundling, and Draft 7
