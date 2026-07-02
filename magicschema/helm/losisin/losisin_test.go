@@ -3828,6 +3828,26 @@ func TestHelmValuesSchemaAnnotatorFailOpenParsing(t *testing.T) {
 				assert.False(t, has, "blank const must not emit const:null")
 			},
 		},
+		"empty-string type member becomes the null type": {
+			// type:["", string] would emit the invalid Draft-7 "type": ["",...];
+			// SetSchemaType rewrites the empty string to the null type, matching
+			// dadav's block form of the same annotation.
+			input: stringtest.Input(`
+				# @schema type:["", string]
+				name: test
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				name, ok := props["name"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, []any{"null", "string"}, name["type"])
+			},
+		},
 		"malformed type list drops entirely, value type fills in": {
 			input: stringtest.Input(`
 				# @schema type:[string, 1]

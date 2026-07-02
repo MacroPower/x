@@ -2,6 +2,7 @@ package magicschema
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 
 	"github.com/goccy/go-yaml"
@@ -109,13 +110,13 @@ func ToSubSchema(val any) *jsonschema.Schema {
 // normalizeTypes normalizes Types across the schema tree so a round-tripped
 // sub-schema upholds the same type invariants [SetSchemaType] enforces for
 // annotation-supplied lists. A YAML null inside a type array survives the
-// JSON round trip as an empty string in Types, which is not a valid JSON
-// Schema type; it is rewritten to the "null" type. The list then passes
-// through [SetSchemaType], so duplicates drop (a type array must have unique
-// members), a single member collapses to the scalar Type, and an empty array
-// ("type: []") leaves the type unset -- nil Types -- instead of emitting the
-// invalid "type": []. Walking the typed tree keeps non-schema values
-// (defaults, enums, consts) untouched.
+// JSON round trip as an empty string in Types; [SetSchemaType] rewrites it to
+// the "null" type (an empty string is not a valid JSON Schema type), drops
+// duplicates (a type array must have unique members), collapses a single
+// member to the scalar Type, and leaves an empty array ("type: []") with the
+// type unset -- nil Types -- instead of emitting the invalid "type": [].
+// Walking the typed tree keeps non-schema values (defaults, enums, consts)
+// untouched.
 func normalizeTypes(s *jsonschema.Schema) {
 	if s == nil {
 		return
@@ -127,12 +128,6 @@ func normalizeTypes(s *jsonschema.Schema) {
 		// Types first: a zero-length array normalizes to nil rather than
 		// surviving as a non-nil empty slice.
 		s.Types = nil
-
-		for i, t := range types {
-			if t == "" {
-				types[i] = typeNull
-			}
-		}
 
 		SetSchemaType(s, types)
 	}
@@ -299,11 +294,29 @@ func StripCommentMarker(line string) string {
 // break the whole document's final marshal. An empty list leaves Type and Types
 // unset, so structural inference and the fail-open default still apply.
 //
+// An empty-string member is rewritten to the "null" type: "" is not a valid
+// JSON Schema type token, and it is how a YAML null in a type list surfaces
+// both from annotation parsing (type: ["", string]) and from the JSON round
+// trip in [ToSubSchema], so every caller shares one rewrite instead of each
+// annotator keeping a private copy. The rewrite runs before deduplication, so
+// a list like ["", "null"] still collapses to the scalar "null". The caller's
+// slice is never mutated; the rewrite copies first.
+//
 // Repeated entries are dropped while first-seen order is preserved: a JSON
 // Schema type array must have unique members, so a duplicate (type:
 // [string, string], or a type written twice across repeated pairs) collapses to
 // the scalar Type rather than emitting an array the spec rejects.
 func SetSchemaType(s *jsonschema.Schema, types []string) {
+	if slices.Contains(types, "") {
+		types = slices.Clone(types)
+
+		for i, t := range types {
+			if t == "" {
+				types[i] = typeNull
+			}
+		}
+	}
+
 	if len(types) > 1 {
 		seen := make(map[string]struct{}, len(types))
 		deduped := make([]string, 0, len(types))

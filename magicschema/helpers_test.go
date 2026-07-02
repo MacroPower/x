@@ -3,6 +3,7 @@ package magicschema_test
 import (
 	"encoding/json"
 	"math"
+	"slices"
 	"testing"
 
 	"github.com/google/jsonschema-go/jsonschema"
@@ -37,6 +38,18 @@ func TestSetSchemaType(t *testing.T) {
 			types:     []string{"string", "null", "string"},
 			wantTypes: []string{"string", "null"},
 		},
+		"empty-string member becomes the null type": {
+			types:     []string{"", "string"},
+			wantTypes: []string{"null", "string"},
+		},
+		"empty-string member alone collapses to scalar null": {
+			types:    []string{""},
+			wantType: "null",
+		},
+		"empty-string member dedups against the null type": {
+			types:    []string{"", "null"},
+			wantType: "null",
+		},
 	}
 
 	for name, tc := range tcs {
@@ -50,10 +63,13 @@ func TestSetSchemaType(t *testing.T) {
 				s = &jsonschema.Schema{}
 			}
 
+			input := slices.Clone(tc.types)
+
 			magicschema.SetSchemaType(s, tc.types)
 
 			assert.Equal(t, tc.wantType, s.Type)
 			assert.Equal(t, tc.wantTypes, s.Types)
+			assert.Equal(t, input, tc.types, "the caller's slice must stay untouched")
 		})
 	}
 }

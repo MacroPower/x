@@ -419,6 +419,13 @@
 //     through and may be caught by downstream schema consumers. This avoids
 //     blocking schema generation over minor annotation typos.
 //
+//   - An empty-string member in a bracketed type list (type:["", string])
+//     is rewritten to the "null" type by [magicschema.SetSchemaType], the
+//     same rewrite every annotator applies, so the output never carries the
+//     invalid Draft 7 type token "". The upstream passes the empty string
+//     through to its compliance validation, which rejects it as a hard
+//     error.
+//
 //   - Semicolons inside bracket-delimited values ({} or []) are not treated
 //     as pair separators. The upstream naively splits on all semicolons via
 //     [strings.SplitSeq], which means complex values like

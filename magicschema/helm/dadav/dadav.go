@@ -555,14 +555,8 @@ func applyType(schema *jsonschema.Schema, val any) {
 		for _, item := range v {
 			switch item := item.(type) {
 			case string:
-				// An empty string is not a valid JSON Schema type token; treat
-				// it as null, matching the round-trip path's normalizeNullTypes.
-				if item == "" {
-					types = append(types, "null")
-
-					continue
-				}
-
+				// An empty string is not a valid JSON Schema type token;
+				// SetSchemaType rewrites it to the "null" type.
 				types = append(types, item)
 
 			case nil:
