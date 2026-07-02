@@ -891,6 +891,63 @@ production:
 	assert.Contains(t, prodProps, "retries")
 }
 
+func TestGeneratorWrappedMappingKeys(t *testing.T) {
+	t.Parallel()
+
+	// Anchored, tagged, and alias keys must emit the resolved key text as the
+	// property name, not the raw source syntax ("&k foo", "!!str foo", "*k"):
+	// under WithStrict the raw spelling would produce a schema the source
+	// document itself fails to validate against.
+	tcs := map[string]struct {
+		input string
+		path  []string
+		want  string
+	}{
+		"anchored key": {
+			input: "&k foo: 1\n",
+			path:  []string{"properties"},
+			want:  "foo",
+		},
+		"tagged key": {
+			input: "!!str foo: 1\n",
+			path:  []string{"properties"},
+			want:  "foo",
+		},
+		"alias key": {
+			input: "name: &k foo\nmap:\n  *k : value\n",
+			path:  []string{"properties", "map", "properties"},
+			want:  "foo",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			gen := magicschema.NewGenerator()
+			schema, err := gen.Generate([]byte(tc.input))
+			require.NoError(t, err)
+
+			out, err := json.Marshal(schema)
+			require.NoError(t, err)
+
+			var got map[string]any
+
+			require.NoError(t, json.Unmarshal(out, &got))
+
+			node := got
+			for _, p := range tc.path {
+				next, ok := node[p].(map[string]any)
+				require.True(t, ok, "missing %q in %v", p, node)
+
+				node = next
+			}
+
+			assert.Contains(t, node, tc.want)
+		})
+	}
+}
+
 func TestGeneratorRedefinedAnchorNearestPreceding(t *testing.T) {
 	t.Parallel()
 

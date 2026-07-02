@@ -620,7 +620,7 @@ func (g *Generator) handleProperty(
 	addToOrder func(string),
 	decisions *explicitDecisions,
 ) {
-	keyName := keyText(mvn.Key)
+	keyName := keyText(mvn.Key, anchors)
 
 	childPath := keyName
 	if keyPath != "" {
@@ -670,14 +670,25 @@ func (g *Generator) handleProperty(
 	}
 }
 
-// keyText returns the plain text of a mapping key, unwrapping quoted string
-// keys so property names and key paths carry no quote characters.
-func keyText(key ast.MapKeyNode) string {
-	if s, ok := key.(*ast.StringNode); ok {
+// keyText returns the plain text of a mapping key: quoted string keys unwrap
+// to their value so property names and key paths carry no quote characters,
+// anchor and tag wrappers resolve to the underlying key, and alias keys
+// resolve through the anchor map -- so "&k foo", "!!str foo", and "*k" all
+// yield the key text a YAML loader would use rather than raw source syntax,
+// which under [WithStrict] would emit a property name the source document
+// itself fails to match. A broken alias key resolves to null, which YAML
+// loaders render as the string "null".
+func keyText(key ast.MapKeyNode, anchors aliasResolutions) string {
+	node := unwrapNode(resolveAliases(key, anchors))
+	if node == nil {
+		return typeNull
+	}
+
+	if s, ok := node.(*ast.StringNode); ok {
 		return s.Value
 	}
 
-	return key.String()
+	return node.String()
 }
 
 // buildChildSchema creates a schema for a child property, combining annotations
@@ -1053,7 +1064,7 @@ func (g *Generator) mappingToGoValue(
 			return nil, false
 		}
 
-		out[keyText(mvn.Key)] = v
+		out[keyText(mvn.Key, anchors)] = v
 	}
 
 	return out, true
