@@ -4,8 +4,11 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/goccy/go-yaml/ast"
+	"github.com/goccy/go-yaml/parser"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/x/magicschema"
 )
@@ -250,6 +253,225 @@ func TestThreeHashSchemaMarkerIsNotAFence(t *testing.T) {
 
 	assert.Equal(t, "integer", key["type"])
 	assert.Equal(t, "A real description", key["description"])
+}
+
+func TestHeadCommentRun(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input        string
+		key          string
+		want         []string
+		wantInSchema bool
+		wantInRoot   bool
+	}{
+		"single adjacent run": {
+			input: stringtest.Input(`
+				# docs
+				name: test
+			`),
+			key:  "name",
+			want: []string{"# docs"},
+		},
+		"no head comment": {
+			input: "name: test",
+			key:   "name",
+			want:  nil,
+		},
+		"inline comment is not a head run": {
+			input: "name: test # inline",
+			key:   "name",
+			want:  nil,
+		},
+		"detached block dropped": {
+			// The parser merges both blocks into one head comment group; the
+			// blank line survives only in token positions, so only the run
+			// touching the key comes back.
+			input: stringtest.Input(`
+				# stale docs
+
+				# real docs
+				name: test
+			`),
+			key:  "name",
+			want: []string{"# real docs"},
+		},
+		"no run touches the key": {
+			input: stringtest.Input(`
+				# stale docs
+
+				name: test
+			`),
+			key:  "name",
+			want: nil,
+		},
+		"commented-out child of previous key dropped by column": {
+			// The comment sits directly above the key, but its column marks it
+			// as a commented-out child of the previous key, not documentation
+			// for this one.
+			input: stringtest.Input(`
+				parent:
+				  # commented-out: sibling
+				other: 2
+			`),
+			key:  "other",
+			want: nil,
+		},
+		"outdented comment still documents the key": {
+			// A run is discarded only when indented past the key's column; an
+			// outdented comment still counts.
+			input: stringtest.Input(`
+				parent:
+				# outdented docs
+				  child: 1
+			`),
+			key:  "child",
+			want: []string{"# outdented docs"},
+		},
+		"nested key with adjacent run": {
+			input: stringtest.Input(`
+				parent:
+				  # child docs
+				  child: 1
+			`),
+			key:  "child",
+			want: []string{"# child docs"},
+		},
+		"paragraph separator keeps the run alive": {
+			input: stringtest.Input(`
+				# para one
+				#
+				# para two
+				name: test
+			`),
+			key:  "name",
+			want: []string{"# para one", "#", "# para two"},
+		},
+		"run beginning inside a schema block": {
+			// The blank line splits the @schema block, so the kept run begins
+			// mid-block; inSchema reports the fence state its opening line
+			// inherits from the discarded prefix.
+			input: stringtest.Input(`
+				# @schema
+				# type: string
+
+				# enum:
+				#   - a
+				# @schema
+				key: 1
+			`),
+			key:          "key",
+			want:         []string{"# enum:", "#   - a", "# @schema"},
+			wantInSchema: true,
+		},
+		"run beginning inside a root block": {
+			input: stringtest.Input(`
+				# @schema.root
+				# title: Root
+
+				# docs
+				key: 1
+			`),
+			key:        "key",
+			want:       []string{"# docs"},
+			wantInRoot: true,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			mvn := findMappingValue(t, tc.input, tc.key)
+
+			run, inSchema, inRoot := magicschema.HeadCommentRun(mvn)
+			assert.Equal(t, tc.want, run)
+			assert.Equal(t, tc.wantInSchema, inSchema)
+			assert.Equal(t, tc.wantInRoot, inRoot)
+		})
+	}
+}
+
+func TestHeadCommentRunFailOpen(t *testing.T) {
+	t.Parallel()
+
+	t.Run("unpositioned comment token attributes the whole group", func(t *testing.T) {
+		t.Parallel()
+
+		mvn := findMappingValue(t, "# stale docs\n\n# real docs\nname: test", "name")
+
+		comment := mvn.GetComment()
+		require.NotNil(t, comment)
+		require.NotEmpty(t, comment.Comments)
+
+		// Without positions the physical layout cannot be reconstructed, so
+		// the whole merged group is attributed to the key (fail open).
+		comment.Comments[0].Token.Position = nil
+
+		run, inSchema, inRoot := magicschema.HeadCommentRun(mvn)
+		assert.Equal(t, []string{"# stale docs", "# real docs"}, run)
+		assert.False(t, inSchema)
+		assert.False(t, inRoot)
+	})
+
+	t.Run("non-mapping-value node", func(t *testing.T) {
+		t.Parallel()
+
+		file, err := parser.ParseBytes([]byte("- a\n- b\n"), parser.ParseComments)
+		require.NoError(t, err)
+		require.NotEmpty(t, file.Docs)
+
+		run, inSchema, inRoot := magicschema.HeadCommentRun(file.Docs[0].Body)
+		assert.Nil(t, run)
+		assert.False(t, inSchema)
+		assert.False(t, inRoot)
+	})
+
+	t.Run("nil node", func(t *testing.T) {
+		t.Parallel()
+
+		run, inSchema, inRoot := magicschema.HeadCommentRun(nil)
+		assert.Nil(t, run)
+		assert.False(t, inSchema)
+		assert.False(t, inRoot)
+	})
+}
+
+// findMappingValue parses input with comments and returns the mapping value
+// node whose key matches key, searching depth-first.
+func findMappingValue(t *testing.T, input, key string) *ast.MappingValueNode {
+	t.Helper()
+
+	file, err := parser.ParseBytes([]byte(input), parser.ParseComments)
+	require.NoError(t, err)
+	require.NotEmpty(t, file.Docs)
+
+	var find func(node ast.Node) *ast.MappingValueNode
+
+	find = func(node ast.Node) *ast.MappingValueNode {
+		switch n := node.(type) {
+		case *ast.MappingNode:
+			for _, v := range n.Values {
+				if found := find(v); found != nil {
+					return found
+				}
+			}
+
+		case *ast.MappingValueNode:
+			if n.Key != nil && n.Key.GetToken() != nil && n.Key.GetToken().Value == key {
+				return n
+			}
+
+			return find(n.Value)
+		}
+
+		return nil
+	}
+
+	mvn := find(file.Docs[0].Body)
+	require.NotNil(t, mvn, "key %q not found", key)
+
+	return mvn
 }
 
 func TestInferTypes(t *testing.T) {

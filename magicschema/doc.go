@@ -265,6 +265,12 @@
 //   - [LastCommentGroup] returns the lines of the final comment group (the
 //     lines after the last blank comment line, ignoring trailing blanks),
 //     which is the group annotation formats scope to.
+//   - [HeadCommentRun] narrows a mapping value node's merged head comment
+//     group to the run of lines physically adjacent to its key, using
+//     comment token positions to restore the blank-line boundaries the
+//     parser erases, and reports the @schema / @schema.root block-fence
+//     state at the run's first line. It is the same narrowing the
+//     structural description fallback applies.
 //   - [StripCommentMarker] removes the leading "#" marker (capped at two
 //     hashes) and one following space from a comment line, the strip used to
 //     recognize block markers consistently across annotators.

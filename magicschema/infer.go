@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/goccy/go-yaml/ast"
+	"github.com/goccy/go-yaml/token"
 	"github.com/google/jsonschema-go/jsonschema"
 )
 
@@ -188,26 +189,52 @@ func commentDescription(s string, inSchema, inRoot bool) string {
 	return ""
 }
 
-// adjacentCommentRun returns the lines ("#"-prefixed, matching
-// [ast.CommentGroupNode.String] output) of the head comment run that
-// documents the key. The goccy parser merges separate comment blocks -- a
-// file header, a commented-out example for the previous key -- into one
-// head comment group on the following key, erasing the physical blank
-// lines between them. Token positions reconstruct the layout: a run is a
-// maximal sequence of comment tokens on consecutive lines at the same
-// column, so a jump in line numbers is an erased blank line and a column
-// change is a comment from a different nesting level (such as a
-// commented-out child of the previous key). A description is the comment
-// block touching the key, so only the final run counts, and only when its
-// last line sits directly above the key and is not indented past the key's
-// column; anything else is a stray block that documents nothing here.
-// Comment tokens without position information cannot be placed, so the
-// whole group is attributed (fail open).
+// HeadCommentRun returns the lines of the head comment run that physically
+// documents a mapping value node's key, each line "#"-prefixed to match
+// [ast.CommentGroupNode.String] output. It returns nil when node is not an
+// *ast.MappingValueNode, the node has no head comment, or no run touches the
+// key.
 //
-// The kept run may begin partway through a @schema / @schema.root block whose
-// opening fence sat in a discarded earlier run; the returned booleans report
-// the fence state at the run's first line so [cleanComment] starts inside the
-// block and does not emit the orphaned block content as a description.
+// The goccy parser merges separate comment blocks above a key -- a file
+// header, a commented-out example for the previous key -- into one head
+// comment group, erasing the physical blank lines between them, so reading
+// the group whole attributes stale blocks to the key. Comment token positions
+// reconstruct the layout: a run is a maximal sequence of comment tokens on
+// consecutive lines at the same column, so a jump in line numbers is an
+// erased blank line and a column change is a comment from a different nesting
+// level (such as a commented-out child of the previous key). A "#"-only line
+// is a paragraph separator within one run: it neither ends the run nor moves
+// the column baseline. Only the final run counts, and only when its last line
+// sits directly above the key and is not indented past the key's column;
+// anything else is a stray block that documents nothing here. When a comment
+// token or the key carries no position information the layout cannot be
+// reconstructed, so the whole group is attributed to the key (fail open).
+//
+// The kept run may begin partway through a @schema or @schema.root block
+// whose opening fence sat in a discarded earlier run. The two boolean results
+// report the @schema and @schema.root fence state at the run's first line, so
+// a caller interpreting block fences can tell orphaned block content from
+// prose instead of mistaking the block's closing fence for an opener.
+//
+// The structural description fallback applies the same narrowing, so an
+// annotator that scopes its annotations with HeadCommentRun agrees with the
+// core on which comment block documents a key.
+func HeadCommentRun(node ast.Node) ([]string, bool, bool) {
+	mvn, ok := node.(*ast.MappingValueNode)
+	if !ok || mvn == nil {
+		return nil, false, false
+	}
+
+	return adjacentCommentRun(mvn.GetComment(), mvn.Key)
+}
+
+// adjacentCommentRun narrows a head comment group to the run of comment lines
+// physically adjacent to key, implementing the contract documented on
+// [HeadCommentRun] for an explicit comment group and key. The returned
+// booleans report the @schema / @schema.root fence state at the run's first
+// line, replayed from the discarded prefix, so [cleanComment] starts inside
+// an already-open block and does not emit the orphaned block content as a
+// description.
 func adjacentCommentRun(comment *ast.CommentGroupNode, key ast.MapKeyNode) ([]string, bool, bool) {
 	if comment == nil {
 		return nil, false, false
@@ -258,7 +285,14 @@ func adjacentCommentRun(comment *ast.CommentGroupNode, key ast.MapKeyNode) ([]st
 		prevLine, prevCol = tok.Position.Line, tok.Position.Column
 	}
 
-	keyTok := key.GetToken()
+	// A nil key cannot be placed, the same as a key token without position
+	// information: the whole group is attributed (fail open).
+	var keyTok *token.Token
+
+	if key != nil {
+		keyTok = key.GetToken()
+	}
+
 	if unpositioned || keyTok == nil || keyTok.Position == nil {
 		return all, false, false
 	}
