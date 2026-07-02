@@ -199,6 +199,12 @@
 //     additionalProperties schema, then removes Properties. This is
 //     useful when a mapping's keys are dynamic.
 //
+// Both keep additionalProperties permissive on the node they apply to,
+// even under [WithStrict]: the strict-mode false describes exactly the
+// keys these annotations hide, and keeping it would reject the source
+// file itself (fail open). An additionalProperties the annotation sets
+// directly is authoritative and stands.
+//
 // Skip, SkipProperties, and MergeProperties are OR'd across all annotator
 // results for a given node: if any annotator sets them, they take effect.
 //

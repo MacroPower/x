@@ -678,9 +678,27 @@ func (g *Generator) buildChildSchema(
 	// Structural recursion looks through tag and anchor wrappers.
 	structuralNode := unwrapNode(valueNode)
 
+	// Distinguish an annotator-set additionalProperties (authoritative) from
+	// one fillObjectFromStructure inherits off the structural walk below,
+	// which only fills in when the annotation leaves the field nil.
+	annotatedAP := childSchema.AdditionalProperties != nil
+
 	// For object types, recurse into children.
 	if hasType(childSchema, typeObject) && childSchema.Properties == nil {
 		g.fillObjectFromStructure(childSchema, structuralNode, childPath, anchors, annotation)
+	}
+
+	// Skip- and merge-properties annotations declare the mapping's keys
+	// dynamic, so the structural walk's additionalProperties -- false under
+	// [WithStrict] -- must not survive on a node whose property map those
+	// annotations hide: with the properties stripped it would validate only
+	// the empty object and reject the source file (fail open). Only the
+	// structurally inherited value resets; an annotator-set
+	// additionalProperties stands, and the mergeProperties fold below
+	// installs its own merged schema when there are properties to fold.
+	if (annotation.SkipProperties || annotation.MergeProperties) &&
+		!annotatedAP && childSchema.AdditionalProperties != nil {
+		childSchema.AdditionalProperties = TrueSchema()
 	}
 
 	// For array types, recurse into items. Skip when an annotator already set a

@@ -692,6 +692,89 @@ func TestGeneratorSkipAndMergePropertiesTogether(t *testing.T) {
 	assert.Equal(t, "integer", ap["type"])
 }
 
+func TestGeneratorStrictSkipAndMergeProperties(t *testing.T) {
+	t.Parallel()
+
+	// Skip- and merge-properties annotations hide a node's property map, so
+	// the strict-mode structural additionalProperties:false must not survive
+	// on that node: the schema would validate only the empty object and
+	// reject the source file itself. An annotation-set additionalProperties
+	// stays authoritative. The root keeps its strict false throughout.
+	tcs := map[string]struct {
+		input string
+		check func(*testing.T, map[string]any)
+	}{
+		"skipProperties keeps additionalProperties open": {
+			input: stringtest.Input(`
+				# @schema skipProperties:true
+				resources:
+				  limits:
+				    cpu: 100m
+			`),
+			check: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				resources := propertyAt(t, got, "resources")
+				assert.NotContains(t, resources, "properties")
+				assert.Equal(t, true, resources["additionalProperties"])
+			},
+		},
+		"mergeProperties on an empty mapping keeps additionalProperties open": {
+			input: stringtest.Input(`
+				# @schema mergeProperties:true
+				labels: {}
+			`),
+			check: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				labels := propertyAt(t, got, "labels")
+				assert.NotContains(t, labels, "properties")
+				assert.Equal(t, true, labels["additionalProperties"])
+			},
+		},
+		"annotation-set additionalProperties stays authoritative": {
+			input: stringtest.Input(`
+				# @schema skipProperties:true;additionalProperties:false
+				resources:
+				  limits:
+				    cpu: 100m
+			`),
+			check: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				resources := propertyAt(t, got, "resources")
+				assert.NotContains(t, resources, "properties")
+				assert.Equal(t, false, resources["additionalProperties"])
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			gen := magicschema.NewGenerator(
+				magicschema.WithStrict(true),
+				magicschema.WithAnnotators(losisin.New()),
+			)
+
+			schema, err := gen.Generate([]byte(tc.input))
+			require.NoError(t, err)
+
+			out, err := json.Marshal(schema)
+			require.NoError(t, err)
+
+			var got map[string]any
+
+			require.NoError(t, json.Unmarshal(out, &got))
+
+			assert.Equal(t, false, got["additionalProperties"],
+				"strict mode must keep the root additionalProperties false")
+			tc.check(t, got)
+		})
+	}
+}
+
 func TestGeneratorInferDefaultsGolden(t *testing.T) {
 	t.Parallel()
 
