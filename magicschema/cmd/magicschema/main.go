@@ -20,6 +20,11 @@ import (
 func main() {
 	cfg := magicschema.NewConfig()
 	cfg.Registry = helm.DefaultRegistry()
+	// The --annotators flag default is the caller's to seed, since names
+	// resolve only against the Registry chosen here; helm.DefaultNames keeps
+	// the priority order the registry documents, while Registry.Names would
+	// sort alphabetically.
+	cfg.Annotators = strings.Join(helm.DefaultNames(), ",")
 
 	rootCmd := &cobra.Command{
 		Use:   "magicschema [flags] <file.yaml> [file2.yaml ...]",

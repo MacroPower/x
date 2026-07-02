@@ -286,8 +286,12 @@
 // defaults. The [Config.Registry] field maps annotator names (as used in
 // the --annotators flag) to prototype [Annotator] instances.
 // [Config.NewGenerator] looks up each comma-separated name in Registry to
-// build the annotator list. Programmatic callers resolve names directly with
-// [Registry.Lookup] and enumerate them with [Registry.Names].
+// build the annotator list. The --annotators flag default is whatever the
+// caller assigns to [Config.Annotators] before [Config.RegisterFlags]; a
+// CLI using the built-in Helm registry seeds it from
+// [go.jacobcolvin.com/x/magicschema/helm.DefaultNames]. Programmatic callers
+// resolve names directly with [Registry.Lookup] and enumerate them with
+// [Registry.Names].
 //
 // # Basic Usage
 //
@@ -315,6 +319,7 @@
 //
 //	cfg := magicschema.NewConfig()
 //	cfg.Registry = helm.DefaultRegistry()
+//	cfg.Annotators = strings.Join(helm.DefaultNames(), ",")
 //	cfg.RegisterFlags(rootCmd.PersistentFlags())
 //	cfg.MustRegisterCompletions(rootCmd)
 //

@@ -16,11 +16,6 @@ import (
 // [ErrInvalidOption], so their errors match both sentinels with [errors.Is].
 var ErrUnknownAnnotator = errors.New("unknown annotator")
 
-// DefaultAnnotators is the comma-separated annotator list [NewConfig] seeds
-// and [Config.RegisterFlags] offers as the --annotators default: the four
-// built-in Helm parsers in priority order.
-const DefaultAnnotators = "helm-schema,helm-values-schema,bitnami,helm-docs"
-
 // Flags holds CLI flag names for schema generation configuration, allowing
 // callers to customize flag names while keeping sensible defaults.
 type Flags struct {
@@ -93,10 +88,12 @@ type Config struct {
 // NewConfig returns a new [Config] with default flag names and the
 // Registry-independent runtime defaults whose zero value would otherwise be
 // invalid (Draft 7, Indent 2, Output "-"). Annotators is intentionally left
-// empty: the default annotator names resolve only against a [Config.Registry],
-// which is the caller's to supply, so seeding them here would make
-// NewConfig+NewGenerator fail with an unknown-annotator error. The CLI default
-// is applied in [Config.RegisterFlags] instead.
+// empty: annotator names resolve only against a [Config.Registry], which is
+// the caller's to supply, so seeding them here would make
+// NewConfig+NewGenerator fail with an unknown-annotator error. A caller that
+// wants a --annotators default sets Annotators alongside Registry before
+// [Config.RegisterFlags] (the magicschema CLI joins
+// [go.jacobcolvin.com/x/magicschema/helm.DefaultNames]).
 func NewConfig() *Config {
 	f := Flags{
 		Output:        "output",
@@ -122,15 +119,10 @@ func NewConfig() *Config {
 // Each flag's default is the current field value rather than a hardcoded
 // literal, so a caller that sets a field before registering flags keeps that
 // value as the default (pflag's *Var registration would otherwise overwrite it
-// immediately), and the flag defaults stay in step with [NewConfig]. The one
-// exception is --annotators: NewConfig cannot seed it (see there), so an unset
-// Annotators falls back to the full [DefaultAnnotators] list for the CLI.
+// immediately), and the flag defaults stay in step with [NewConfig]. That
+// includes --annotators: an Annotators left empty stays empty, matching a
+// [Config.Registry] the caller has not populated (see [NewConfig]).
 func (c *Config) RegisterFlags(flags *pflag.FlagSet) {
-	annotators := c.Annotators
-	if annotators == "" {
-		annotators = DefaultAnnotators
-	}
-
 	flags.StringVarP(&c.Output, c.Flags.Output, "o", c.Output,
 		"output file path (- for stdout)")
 	flags.IntVar(&c.Draft, c.Flags.Draft, c.Draft,
@@ -143,7 +135,7 @@ func (c *Config) RegisterFlags(flags *pflag.FlagSet) {
 		"schema description field")
 	flags.StringVar(&c.ID, c.Flags.ID, c.ID,
 		"schema $id field")
-	flags.StringVarP(&c.Annotators, c.Flags.Annotators, "a", annotators,
+	flags.StringVarP(&c.Annotators, c.Flags.Annotators, "a", c.Annotators,
 		"comma-separated list of enabled annotation parsers (in priority order)")
 	flags.BoolVar(&c.Strict, c.Flags.Strict, c.Strict,
 		"set additionalProperties: false on objects")

@@ -188,8 +188,25 @@ func TestConfigRegisterFlagsDefaults(t *testing.T) {
 		assert.Equal(t, "-", cfg.Output)
 		assert.Equal(t, 2, cfg.Indent)
 		assert.Equal(t, 7, cfg.Draft)
-		assert.Equal(t, magicschema.DefaultAnnotators, cfg.Annotators,
-			"an empty Annotators must fall back to the full CLI default")
+		assert.Empty(t, cfg.Annotators,
+			"an unset Annotators must stay empty: names resolve only against the caller's Registry")
+	})
+
+	t.Run("an unset Annotators works with a non-helm registry", func(t *testing.T) {
+		t.Parallel()
+
+		// Registration must not inject annotator names the caller's Registry
+		// cannot resolve; with nothing seeded, NewGenerator succeeds with no
+		// annotators instead of tripping over an unknown name.
+		cfg := magicschema.NewConfig()
+		cfg.Registry = make(magicschema.Registry)
+
+		cmd := &cobra.Command{Use: "test"}
+		cfg.RegisterFlags(cmd.Flags())
+
+		gen, err := cfg.NewGenerator()
+		require.NoError(t, err)
+		assert.NotNil(t, gen)
 	})
 
 	t.Run("preset fields are not clobbered by registration", func(t *testing.T) {
