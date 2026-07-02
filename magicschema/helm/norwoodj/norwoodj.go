@@ -394,10 +394,24 @@ func (a *Annotator) Annotate(node ast.Node, keyPath string) *magicschema.Annotat
 		return nil
 	}
 
+	// Head comment lines come from the run that physically documents the
+	// key. The goccy parser merges blank-line-separated comment blocks --
+	// a file header, a comment for a removed key -- into one head comment
+	// group, so reading the group whole would attribute a detached earlier
+	// block's description, @default, or @ignore to this key. Upstream reads
+	// yaml.v3's HeadComment, which excludes blank-line-separated blocks;
+	// [magicschema.HeadCommentRun] reconstructs the erased blank-line
+	// boundaries from comment token positions.
+	var headComment string
+
+	if run, _, _ := magicschema.HeadCommentRun(mvn); len(run) > 0 {
+		headComment = strings.Join(run, "\n")
+	}
+
 	// Collect all comment text from the node for @ignore checking.
 	// Helm-docs uses strings.Contains(comment, "@ignore") as a
 	// substring check on HeadComment.
-	commentStr := collectComments(mvn)
+	commentStr := collectComments(mvn, headComment)
 
 	if strings.Contains(commentStr, "@ignore") {
 		return &magicschema.AnnotationResult{Skip: true}
@@ -405,12 +419,6 @@ func (a *Annotator) Annotate(node ast.Node, keyPath string) *magicschema.Annotat
 
 	// Try new-style "# -- description" from the head comment.
 	// Only use the head comment for new-style parsing (not inline comments).
-	var headComment string
-
-	if c := mvn.GetComment(); c != nil {
-		headComment = c.String()
-	}
-
 	entry := a.parseNewStyleComment(headComment)
 
 	// Reconcile with the old-style "# key.path -- desc" entry parsed in
@@ -494,16 +502,26 @@ func reconcileOldStyle(entry, old *parsedComment) *parsedComment {
 }
 
 // collectComments gathers all comment text from a MappingValueNode,
-// including head comments and inline comments on key/value nodes.
-func collectComments(mvn *ast.MappingValueNode) string {
+// including the narrowed head comment and inline comments on key/value
+// nodes. The head comment arrives pre-narrowed to the run that physically
+// documents the key ([magicschema.HeadCommentRun]), so a detached earlier
+// block does not contribute; upstream's @ignore check reads only
+// yaml.v3's HeadComment, which excludes blank-line-separated blocks.
+func collectComments(mvn *ast.MappingValueNode, headComment string) string {
 	var parts []string
 
-	if c := mvn.GetComment(); c != nil {
-		parts = append(parts, c.String())
+	if headComment != "" {
+		parts = append(parts, headComment)
 	}
 
+	// A sequence value's comment counts only when it sits on the value's
+	// own line: goccy stows the first element's head comment on the
+	// SequenceNode itself, and for such a comment upstream removes only the
+	// matching sequence item, never the whole key. A same-line comment on a
+	// flow sequence ("key: [] # @ignore") still counts, preserving the
+	// inline-comment divergence documented in doc.go.
 	if mvn.Value != nil {
-		if c := mvn.Value.GetComment(); c != nil {
+		if c := mvn.Value.GetComment(); c != nil && !isStowedSequenceComment(mvn.Value, c) {
 			parts = append(parts, c.String())
 		}
 	}
@@ -522,6 +540,45 @@ func collectComments(mvn *ast.MappingValueNode) string {
 	}
 
 	return strings.Join(parts, "\n")
+}
+
+// isStowedSequenceComment reports whether a value node's comment group is a
+// sequence element's head comment rather than the value's own line comment.
+// The goccy parser stows the first element's head comment on the SequenceNode
+// itself (behind any tag or anchor wrapper), so the comment sits on a
+// different line than the value token; a same-line comment on a flow sequence
+// ("key: [] # @ignore") is a genuine line comment and does not count.
+// When the value or comment carries no position information the layout cannot
+// be reconstructed, so the comment is attributed to the value (fail open).
+func isStowedSequenceComment(value ast.Node, comment *ast.CommentGroupNode) bool {
+	if _, ok := unwrapValue(value).(*ast.SequenceNode); !ok {
+		return false
+	}
+
+	valueTok := value.GetToken()
+	commentTok := comment.GetToken()
+
+	if valueTok == nil || valueTok.Position == nil || commentTok == nil || commentTok.Position == nil {
+		return false
+	}
+
+	return commentTok.Position.Line != valueTok.Position.Line
+}
+
+// unwrapValue resolves TagNode and AnchorNode wrappers to the underlying
+// value node, mirroring the unwrapping the core applies before its own
+// sequence-comment guard.
+func unwrapValue(node ast.Node) ast.Node {
+	for {
+		switch n := node.(type) {
+		case *ast.TagNode:
+			node = n.Value
+		case *ast.AnchorNode:
+			node = n.Value
+		default:
+			return node
+		}
+	}
 }
 
 // parseNewStyleComment parses the new-style "# -- description" format from

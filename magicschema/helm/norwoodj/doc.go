@@ -192,6 +192,17 @@
 // an old-style comment in the HeadComment), the auto-description is
 // discarded -- the key path will be resolved via the file scanner instead.
 //
+// The goccy parser this package uses erases the physical blank lines when it
+// merges separate comment blocks above a key into one head comment group, so
+// the blank-line boundary that scopes yaml.v3's HeadComment never reaches the
+// comment string. [magicschema.HeadCommentRun] reconstructs the boundaries
+// from comment token positions, narrowing the head comment to the run
+// physically adjacent to the key before description parsing, standalone
+// @default detection, and the @ignore substring check. A detached comment
+// block -- a file header, a description or @ignore for a removed key,
+// separated from the key by a blank line -- therefore does not apply to the
+// following key, matching the upstream HeadComment scope.
+//
 // ## Template Priority
 //
 // In the default template, old-style descriptions and defaults take
@@ -268,11 +279,25 @@
 //
 //   - @ignore scope extended: Matching the upstream, @ignore is detected
 //     via substring check on comment text. However, the upstream checks
-//     only HeadComment on all Content nodes. We check all comment text
-//     attached to a MappingValueNode -- head comments, and inline
-//     comments on key and value nodes -- using the goccy/go-yaml AST.
-//     This allows @ignore to be placed as an inline comment
-//     (e.g., "secret: value # @ignore") in addition to head comments.
+//     only HeadComment on all Content nodes. We check the head comment
+//     run adjacent to a MappingValueNode's key, inline comments on the
+//     key and value nodes, and the foot comment, using the goccy/go-yaml
+//     AST. This allows @ignore to be placed as an inline comment
+//     (e.g., "secret: value # @ignore") or as a trailing comment after
+//     the last key, in addition to head comments. A comment stowed on a
+//     sequence value (goccy attaches a comment above the first element to
+//     the SequenceNode itself, on a different line than the value token)
+//     is excluded: upstream removes only the matching sequence item for
+//     such a comment, never the whole key, so the key stays (fail open)
+//     while the item-level removal is not replicated.
+//
+//   - Head comment run narrowed by column: [magicschema.HeadCommentRun]
+//     also discards comment lines indented past the key's column (a
+//     commented-out child of the previous key), whereas yaml.v3's
+//     HeadComment is indentation-insensitive, so upstream would attribute
+//     such a comment to the key. The narrowing matches the core
+//     structural description fallback, so the annotator and the core
+//     agree on which comment block documents a key.
 //
 //   - No nil type defaulting: The upstream defaults nil values to "string"
 //     type. We emit no type constraint for null/empty values, following
@@ -321,7 +346,10 @@
 //     it requires "# --" to be present as a substring). We detect
 //     standalone @default annotations and produce an AnnotationResult
 //     with only the Default field set, allowing @default to function
-//     independently of "# --" descriptions.
+//     independently of "# --" descriptions. Since the extension has no
+//     upstream behavior to mirror, it scopes to the head comment run
+//     adjacent to the key: a @default in a blank-line-detached earlier
+//     block does not apply to the following key.
 //
 //   - Description whitespace trimming: The upstream assigns the regex
 //     match groups for key path and description without trimming. We

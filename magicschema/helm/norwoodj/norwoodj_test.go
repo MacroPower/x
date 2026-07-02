@@ -324,6 +324,139 @@ func TestHelmDocsAnnotator(t *testing.T) {
 				assert.NotContains(t, props, "name")
 			},
 		},
+		"ignore above the first sequence element does not skip the array key": {
+			// The goccy parser stows the first element's head comment on the
+			// SequenceNode itself; reading it as the value's comment would
+			// delete the whole array key, while upstream removes only the
+			// matching sequence item. Keeping the key is the fail-open side
+			// of that divergence.
+			input: stringtest.Input(`
+				list:
+				  # @ignore
+				  - item1
+				  - item2
+				keep: true
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Contains(t, props, "keep")
+
+				list, ok := props["list"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "array", list["type"])
+			},
+		},
+		"inline ignore on a flow sequence still skips": {
+			// A comment on the value's own line is a genuine inline comment,
+			// not a stowed element comment, so the documented inline @ignore
+			// divergence keeps applying to sequence values.
+			input: stringtest.Input(`
+				list: [] # @ignore
+				keep: true
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				assert.NotContains(t, props, "list")
+				assert.Contains(t, props, "keep")
+			},
+		},
+		"detached ignore block does not skip the following key": {
+			// The parser merges blank-line-separated comment blocks into one
+			// head comment group; an @ignore for a commented-out key,
+			// separated from the next key by a blank line, must not delete
+			// that key. Upstream reads yaml.v3's HeadComment, which excludes
+			// blank-line-separated blocks.
+			input: stringtest.Input(`
+				# @ignore
+				# secretInternal: xyz
+
+				# -- Public key
+				publicKey: abc
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				p, ok := props["publicKey"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "Public key", p["description"])
+			},
+		},
+		"file header mentioning ignore does not skip the following key": {
+			input: stringtest.Input(`
+				# this file uses @ignore annotations below
+
+				# -- Public key
+				publicKey: abc
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				p, ok := props["publicKey"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "Public key", p["description"])
+			},
+		},
+		"detached default block does not apply to the following key": {
+			// Standalone @default scopes to the comment block adjacent to the
+			// key; a @default in a blank-line-detached earlier block belongs
+			// to whatever it once documented, not to the following key.
+			input: stringtest.Input(`
+				# @default -- 42
+
+				publicKey: abc
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				p, ok := props["publicKey"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "string", p["type"])
+				assert.NotContains(t, p, "default")
+			},
+		},
+		"detached description block does not apply to the following key": {
+			// A "# --" description for a deleted key, separated from the next
+			// key by a blank line, stays detached rather than becoming the
+			// next key's description.
+			input: stringtest.Input(`
+				# -- description for a key that was deleted
+
+				newKey: 1
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				n, ok := props["newKey"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "integer", n["type"])
+				assert.NotContains(t, n, "description")
+			},
+		},
 		"multi-line continuation with blank comment": {
 			input: stringtest.Input(`
 				# -- First line

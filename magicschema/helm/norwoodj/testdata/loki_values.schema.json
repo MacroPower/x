@@ -3197,7 +3197,6 @@
         },
         "startupProbe": {
           "type": "object",
-          "description": "statup probe for the read pods. If empty, applies no startupProbe",
           "additionalProperties": true
         },
         "terminationGracePeriodSeconds": {
