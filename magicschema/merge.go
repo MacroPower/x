@@ -47,11 +47,13 @@ func mergeSchemas(a, b *jsonschema.Schema) *jsonschema.Schema {
 		return a
 	}
 
-	// One side already widened past its type constraint because two
-	// incompatible types unioned the type away (not because the value was
-	// null). The result stays typeless and keeps the marker: a later fold must
-	// not read the absent type as a null value and re-introduce a [type, null]
-	// union that would reject the very inputs the incompatible merge accepted.
+	// One side already widened past its type constraint because an earlier
+	// merge unioned the type away -- two incompatible types, or a typeless
+	// constraint schema whose constraints all dropped -- not because the value
+	// was null. The result stays typeless and keeps the marker: a later fold
+	// must not read the absent type as a null value and re-introduce a
+	// [type, null] union that would reject the very inputs the earlier merge
+	// accepted.
 	if isTypelessUnion(a) || isTypelessUnion(b) {
 		out := &jsonschema.Schema{
 			Title:       cmp.Or(a.Title, b.Title),
@@ -86,11 +88,16 @@ func mergeSchemas(a, b *jsonschema.Schema) *jsonschema.Schema {
 	// annotation-only constraint schema (pattern, enum, bounds with no type):
 	// it already permits every type, so the union is typeless and injecting
 	// null would claim a null is valid when neither input allowed one.
+	typelessConstraint := false
+
 	switch {
 	case len(typesA) == 0 && len(typesB) > 0 && constrainsValue(a):
 		merged = nil
+		typelessConstraint = true
+
 	case len(typesB) == 0 && len(typesA) > 0 && constrainsValue(b):
 		merged = nil
+		typelessConstraint = true
 	}
 
 	// SetSchemaType assigns the scalar Type or the Types union and dedups, so a
@@ -227,18 +234,33 @@ func mergeSchemas(a, b *jsonschema.Schema) *jsonschema.Schema {
 		result.If, result.Then, result.Else = a.If, a.Then, a.Else
 	}
 
+	// The typeless-constraint union above drops the type because the
+	// annotation-only side already permits every type, not because a value
+	// was null. When every constraint also drops (one-sided pattern, bounds,
+	// or enum leave nothing behind), the result is indistinguishable from a
+	// null-value schema, so it carries the typeless-union marker to keep a
+	// later fold from re-reading the absent type as a null and emitting a
+	// [type, null] union that rejects values this merge accepts. A result
+	// that still constrains needs no marker: the constrainsValue check above
+	// keeps the next fold typeless.
+	if typelessConstraint && !constrainsValue(result) {
+		return markTypelessUnion(result)
+	}
+
 	return result
 }
 
-// typelessUnionKey marks a schema whose type was dropped because two
-// incompatible types unioned to "accept everything", as opposed to an absent
-// type that stands in for a null value. The merge reads an absent type on one
-// side as a null and widens the other side to a [type, null] union; without
-// this marker a three-input fold such as string + integer + string would read
-// the string+integer result (typeless) as a null and re-emit [string, null],
-// rejecting the integer input and falsely admitting null. The marker rides
-// along through the fold and stripTypelessUnion removes it before output, so it
-// never reaches the generated schema.
+// typelessUnionKey marks a schema whose type was dropped because the union
+// accepts every type -- two incompatible types unioned, or a typeless
+// annotation-only constraint schema met a typed one and its constraints all
+// dropped -- as opposed to an absent type that stands in for a null value.
+// The merge reads an absent type on one side as a null and widens the other
+// side to a [type, null] union; without this marker a three-input fold such
+// as string + integer + string would read the string+integer result
+// (typeless) as a null and re-emit [string, null], rejecting the integer
+// input and falsely admitting null. The marker rides along through the fold
+// and stripTypelessUnion removes it before output, so it never reaches the
+// generated schema.
 const typelessUnionKey = "__magicschema_typeless_union__"
 
 // markTypelessUnion records the typeless-union marker on s and returns it.
@@ -265,10 +287,10 @@ func isTypelessUnion(s *jsonschema.Schema) bool {
 
 // stripTypelessUnion removes the internal typeless-union marker from the whole
 // schema tree before output. A marked schema carries no nested sub-schemas in
-// type-specific positions (items, properties, and the like) -- only Title,
-// Description, and at most an Enum or Const value set -- so reaching every
-// schema position via forEachSubSchema is enough to clear the marker; the
-// carried value set holds no sub-schema and needs no descent.
+// type-specific positions (items, properties, and the like) -- only metadata
+// such as title and description, and at most an Enum or Const value set -- so
+// reaching every schema position via forEachSubSchema is enough to clear the
+// marker; the carried value set holds no sub-schema and needs no descent.
 func stripTypelessUnion(s *jsonschema.Schema) {
 	if s == nil {
 		return

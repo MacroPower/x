@@ -657,6 +657,67 @@ func TestMergeIncompatibleThreeInputsStaysFailOpen(t *testing.T) {
 	}
 }
 
+func TestMergeTypelessConstraintThreeInputsStaysFailOpen(t *testing.T) {
+	t.Parallel()
+
+	// A typeless annotation-only constraint schema (pattern, no type since the
+	// value is null) merged against a typed input yields a typeless union, and
+	// the one-sided pattern drops (fail open). A third input with a different
+	// type must not let the merge read that bare typeless result as a null and
+	// re-emit [type, null]: that would reject the values the earlier inputs
+	// hold and falsely constrain the union. The result must stay typeless,
+	// with no internal marker leaking into the output.
+	tcs := map[string]struct {
+		inputs []string
+	}{
+		"constraint first": {
+			inputs: []string{"# @schema pattern:^a\nkey:\n", "key: xyz\n", "key: 42\n"},
+		},
+		"constraint middle": {
+			inputs: []string{"key: xyz\n", "# @schema pattern:^a\nkey:\n", "key: 42\n"},
+		},
+		"constraint last": {
+			inputs: []string{"key: xyz\n", "key: 42\n", "# @schema pattern:^a\nkey:\n"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			inputs := make([][]byte, len(tc.inputs))
+			for i, in := range tc.inputs {
+				inputs[i] = []byte(in)
+			}
+
+			gen := magicschema.NewGenerator(magicschema.WithAnnotators(losisin.New()))
+			schema, err := gen.Generate(inputs...)
+			require.NoError(t, err)
+
+			out, err := json.Marshal(schema)
+			require.NoError(t, err)
+
+			assert.NotContains(t, string(out), "typeless_union",
+				"internal merge marker must not leak into the output")
+
+			var got map[string]any
+
+			require.NoError(t, json.Unmarshal(out, &got))
+
+			props, ok := got["properties"].(map[string]any)
+			require.True(t, ok)
+
+			// No type constraint: key may be the true schema (JSON true) or a
+			// map without a "type" key.
+			if key, isMap := props["key"].(map[string]any); isMap {
+				assert.Nil(t, key["type"], "typeless constraint union must stay typeless")
+			} else {
+				assert.Equal(t, true, props["key"], "expected the true schema")
+			}
+		})
+	}
+}
+
 func TestMergeIncompatibleEnumOrderIndependent(t *testing.T) {
 	t.Parallel()
 
