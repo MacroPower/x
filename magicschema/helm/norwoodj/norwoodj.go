@@ -32,7 +32,11 @@ var (
 	// mistaken for it, and a space after the hash is required, matching upstream.
 	rawDescriptionRegex = regexp.MustCompile(`^\s*#\s+@raw(\s|$)`)
 
-	// TypeMapping maps helm-docs type hints to JSON Schema types.
+	// TypeMapping maps helm-docs type hints to JSON Schema types. The tpl and
+	// yaml render notations map to "string" only during compound-hint
+	// resolution (list/tpl -> array, tpl/string -> string); mapHelmDocsType
+	// asserts no type for the bare hints, which sit on mappings and sequences
+	// as readily as on strings.
 	//nolint:goconst // JSON Schema type names repeated intentionally.
 	typeMapping = map[string]string{
 		"int":     "integer",
@@ -642,6 +646,16 @@ func markerToken(s, marker string) bool {
 
 // mapHelmDocsType maps a helm-docs type hint to a JSON Schema type.
 func mapHelmDocsType(hint string) string {
+	// A bare tpl or yaml hint is a render notation -- the value is a Go
+	// template, or is rendered as a YAML block -- not a type assertion, and
+	// charts place it on mappings and sequences as readily as on strings.
+	// Asserting "string" would reject the chart's own values, so the hint
+	// contributes no type constraint and structural inference decides
+	// (fail open).
+	if isStringModifier(hint) {
+		return ""
+	}
+
 	// Direct mapping.
 	if t, ok := typeMapping[hint]; ok {
 		return t
@@ -677,10 +691,11 @@ func mapHelmDocsType(hint string) string {
 	return ""
 }
 
-// isStringModifier reports whether a leading compound-hint segment is a scalar
-// modifier whose element type wins -- a string-encoding wrapper such as tpl (a
-// Go template) or yaml (a YAML-encoded value), as opposed to a concrete scalar
-// type like "string" or "int".
+// isStringModifier reports whether a type-hint segment is a render notation
+// rather than a concrete type -- a string-encoding wrapper such as tpl (a Go
+// template) or yaml (a YAML-encoded value). As the leading segment of a
+// compound hint the element type wins (tpl/array -> array); as a bare hint it
+// asserts no type at all, leaving the type to structural inference.
 func isStringModifier(seg string) bool {
 	return seg == "tpl" || seg == "yaml"
 }

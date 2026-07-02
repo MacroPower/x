@@ -272,17 +272,22 @@
 //     types (int, float, bool, list, object, string, yaml, tpl) verbatim
 //     for the documentation table. We map them to JSON Schema types:
 //     int->integer, float->number, bool->boolean, list->array,
-//     dict->object, object->object, string->string, tpl->string,
-//     yaml->string. Additional mappings (integer, number, boolean, array)
-//     are accepted for convenience. Compound "X/Y" hints are mapped in two
+//     dict->object, object->object, string->string. Additional mappings
+//     (integer, number, boolean, array) are accepted for convenience.
+//     Bare "tpl" and "yaml" hints are render notations (a Go template, a
+//     value rendered as a YAML block), not type assertions; charts place
+//     them on mappings and sequences as readily as on strings, so they
+//     contribute no type constraint and the type comes from structural
+//     inference (fail open). Compound "X/Y" hints are mapped in two
 //     tiers (see mapHelmDocsType and isContainerType): when the leading
 //     segment X maps to a container type (array/object) and the trailing
-//     segment Y is itself a known type, the CONTAINER type wins, including
-//     nested hints (list/string->array, dict/foo/string->object);
-//     otherwise the last /-separated segment is used (tpl/string->string,
-//     tpl/array->array, where "tpl" is a scalar modifier). Unrecognized
-//     types (e.g., "path", "map", "list/csv") are silently ignored -- the
-//     type comes from structural inference instead.
+//     segment Y is itself a known type or render notation, the CONTAINER
+//     type wins, including nested hints (list/string->array,
+//     list/tpl->array, dict/foo/string->object); otherwise the last
+//     /-separated segment is used (tpl/string->string, tpl/array->array,
+//     where "tpl" is a scalar modifier). Unrecognized types (e.g., "path",
+//     "map", "list/csv") are silently ignored -- the type comes from
+//     structural inference instead.
 //
 //   - @ignore scope extended: Matching the upstream, @ignore is detected
 //     via substring check on comment text. However, the upstream checks

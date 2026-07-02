@@ -935,6 +935,9 @@ func TestHelmDocsAnnotator(t *testing.T) {
 			},
 		},
 		"type hint yaml": {
+			// A bare (yaml) hint is a render notation, not a type assertion;
+			// it contributes no type constraint, so the string type here comes
+			// from structural inference over the scalar value.
 			input: stringtest.Input(`
 				# -- (yaml) Raw content
 				content: data
@@ -949,9 +952,59 @@ func TestHelmDocsAnnotator(t *testing.T) {
 				require.True(t, ok)
 
 				assert.Equal(t, "string", c["type"])
+				assert.Equal(t, "Raw content", c["description"])
+			},
+		},
+		"type hint yaml on mapping keeps object type": {
+			// The (yaml) hint marks a value rendered as a YAML block, not a
+			// string; on a mapping the structural object type stands so the
+			// schema accepts the chart's own values (fail open).
+			input: stringtest.Input(`
+				# -- (yaml) Extra config rendered as yaml
+				config:
+				  a: 1
+				  b: 2
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				c, ok := props["config"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "object", c["type"])
+				assert.Equal(t, "Extra config rendered as yaml", c["description"])
+
+				cprops, ok := c["properties"].(map[string]any)
+				require.True(t, ok)
+				assert.Contains(t, cprops, "a")
+				assert.Contains(t, cprops, "b")
+			},
+		},
+		"type hint yaml on sequence keeps array type": {
+			input: stringtest.Input(`
+				# -- (yaml) Extra manifests rendered as yaml
+				manifests:
+				  - kind: ConfigMap
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				m, ok := props["manifests"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "array", m["type"])
 			},
 		},
 		"type hint tpl": {
+			// A bare (tpl) hint is a render notation, not a type assertion;
+			// it contributes no type constraint, so the string type here comes
+			// from structural inference over the scalar value.
 			input: stringtest.Input(`
 				# -- (tpl) Templated value
 				tpl: value
@@ -966,6 +1019,27 @@ func TestHelmDocsAnnotator(t *testing.T) {
 				require.True(t, ok)
 
 				assert.Equal(t, "string", f["type"])
+			},
+		},
+		"type hint tpl on mapping keeps object type": {
+			// Like (yaml), a bare (tpl) hint marks templated content; on a
+			// mapping the structural object type stands so the schema accepts
+			// the chart's own values (fail open).
+			input: stringtest.Input(`
+				# -- (tpl) Templated annotations
+				annotations:
+				  role: "{{ .Values.role }}"
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				a, ok := props["annotations"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "object", a["type"])
 			},
 		},
 		"deep compound type": {
@@ -1993,7 +2067,8 @@ func TestHelmDocsAnnotator(t *testing.T) {
 			},
 		},
 		"compound type with single segment": {
-			// A type like "tpl" (not compound) should map directly.
+			// A bare "tpl" hint (not compound) is a render notation that
+			// asserts no type; structural inference supplies string here.
 			input: stringtest.Input(`
 				# -- (tpl) A template
 				val: x
