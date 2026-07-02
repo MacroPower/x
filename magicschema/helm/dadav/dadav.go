@@ -557,8 +557,12 @@ func extractNonAnnotationDescription(comment string) string {
 		}
 	}
 
-	// Keep only the last comment group, ignoring trailing blank lines so a
-	// blank final line cannot discard the whole description.
+	// The caller passes the head-comment run that documents the key, which
+	// is already one comment group. A "#"-only line inside it (an empty
+	// string after marker stripping) is a paragraph separator kept as a
+	// blank line in the joined description, matching the upstream join;
+	// trimming the group's blank edges keeps the description from starting
+	// or ending with a separator.
 	group := magicschema.LastCommentGroup(descLines)
 	if len(group) == 0 {
 		return ""

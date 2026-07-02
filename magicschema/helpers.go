@@ -245,12 +245,15 @@ func ParseYAMLValue(val string) json.RawMessage {
 	return DefaultValue(v)
 }
 
-// LastCommentGroup returns the lines of the final comment group: the lines
-// after the last blank comment line, ignoring trailing blanks. A line is
-// blank when stripping '#' markers and whitespace leaves nothing. Annotation
-// formats scope to the comment group directly above a key, so earlier groups
-// (often documentation for the file or a preceding key) are excluded. The
-// returned slice contains no blank lines.
+// LastCommentGroup returns the lines of the final comment group, trimming
+// blank lines from both ends. A line is blank when stripping '#' markers and
+// whitespace leaves nothing. Comment groups are delimited by physical blank
+// lines in the source -- the boundary every upstream annotation format splits
+// on -- which the goccy parser erases when it merges comment blocks, so a run
+// narrowed by [HeadCommentRun] is already a single group and only its blank
+// edges need trimming. A blank ("#"-only) line inside the group is a
+// paragraph separator within one description, not a group boundary, and is
+// preserved so callers joining the lines keep the paragraph break.
 func LastCommentGroup(lines []string) []string {
 	blank := func(line string) bool {
 		stripped := strings.TrimSpace(line)
@@ -264,15 +267,12 @@ func LastCommentGroup(lines []string) []string {
 		end--
 	}
 
-	lastBlank := -1
-
-	for i, line := range lines[:end] {
-		if blank(line) {
-			lastBlank = i
-		}
+	start := 0
+	for start < end && blank(lines[start]) {
+		start++
 	}
 
-	return lines[lastBlank+1 : end]
+	return lines[start:end]
 }
 
 // StripCommentMarker removes leading whitespace, up to two leading '#'

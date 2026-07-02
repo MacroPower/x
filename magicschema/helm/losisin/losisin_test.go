@@ -2574,9 +2574,11 @@ func TestHelmValuesSchemaAnnotatorUpstreamAlignment(t *testing.T) {
 		input string
 		want  func(*testing.T, map[string]any)
 	}{
-		"head comment group isolation only last group": {
-			// Upstream: only the last comment group (after last blank line)
-			// in head comments is considered for annotations.
+		"bare hash line keeps both annotations last wins": {
+			// Upstream delimits head comment groups only on physical blank
+			// lines ("\n\n" in the raw comment); a "#"-only line is part of
+			// the same group, so both annotation lines apply and the second
+			// type assignment wins under last-wins overwrite semantics.
 			input: stringtest.Input(`
 				# @schema type:integer
 				#
@@ -2592,8 +2594,30 @@ func TestHelmValuesSchemaAnnotatorUpstreamAlignment(t *testing.T) {
 				n, ok := props["name"].(map[string]any)
 				require.True(t, ok)
 
-				// Only the last group's annotation should apply.
 				assert.Equal(t, "string", n["type"])
+			},
+		},
+		"annotation above bare hash separated prose still applies": {
+			// A "#"-only line between the annotation and its prose paragraph
+			// is not a group boundary; upstream keeps the whole block as one
+			// group (a "#" line is not "\n\n") and applies the annotation.
+			input: stringtest.Input(`
+				# @schema type:integer;minimum:1
+				#
+				# The number of replicas.
+				replicas: 3
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				r, ok := props["replicas"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "integer", r["type"])
+				assert.InEpsilon(t, float64(1), r["minimum"], 1e-9)
 			},
 		},
 		"negative minLength is ignored": {

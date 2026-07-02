@@ -83,7 +83,7 @@
     },
     "servicePort": {
       "type": "integer",
-      "description": "Actual port description"
+      "description": "Old context\n\nActual port description"
     },
     "enabled": {
       "type": "boolean",

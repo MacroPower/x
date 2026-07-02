@@ -48,16 +48,17 @@ func (a *Annotator) Annotate(node ast.Node, _ string) *magicschema.AnnotationRes
 	var commentLines []string
 
 	// Head comment lines come from the run that physically documents the
-	// key, narrowed to the final comment group. The parser merges
-	// blank-line-separated comment blocks into one head comment group, so
-	// reading the group whole would apply a detached earlier block (a file
-	// header, an annotation for a removed key) to this key -- possibly
-	// producing a schema the key's own value fails. Upstream keeps only the
-	// last comment group, splitting the raw head comment on the blank line;
-	// [magicschema.HeadCommentRun] reconstructs the erased blank-line
-	// boundaries from comment token positions, and
-	// [magicschema.LastCommentGroup] applies the "#"-only line grouping
-	// within the run.
+	// key. The parser merges blank-line-separated comment blocks into one
+	// head comment group, so reading the group whole would apply a detached
+	// earlier block (a file header, an annotation for a removed key) to this
+	// key -- possibly producing a schema the key's own value fails. Upstream
+	// keeps only the last comment group, splitting the raw head comment on
+	// the blank line; [magicschema.HeadCommentRun] reconstructs the erased
+	// blank-line boundaries from comment token positions, so the run is that
+	// last group. A "#"-only line inside the run is a paragraph separator,
+	// not a group boundary ([magicschema.LastCommentGroup] trims only the
+	// group's blank edges), so an annotation separated from its prose by a
+	// bare "#" line still applies, matching the upstream "\n\n"-only split.
 	if run, _, _ := magicschema.HeadCommentRun(mvn); len(run) > 0 {
 		commentLines = append(commentLines, magicschema.LastCommentGroup(run)...)
 	}

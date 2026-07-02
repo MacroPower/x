@@ -265,7 +265,11 @@ func TestHelmSchemaAnnotator(t *testing.T) {
 				assert.NotContains(t, deps, "bad")
 			},
 		},
-		"blank line separates description context": {
+		"bare hash line separates description paragraphs": {
+			// A "#"-only line is a paragraph separator within one description,
+			// not a group boundary: upstream delimits comment groups only on
+			// physical blank lines and keeps the "#" line as a blank line in
+			// the joined description.
 			input: stringtest.Input(`
 				# Old context about something
 				#
@@ -284,7 +288,11 @@ func TestHelmSchemaAnnotator(t *testing.T) {
 				f, ok := props["key"].(map[string]any)
 				require.True(t, ok)
 
-				assert.Equal(t, "Actual description", f["description"])
+				assert.Equal(t, stringtest.JoinLF(
+					"Old context about something",
+					"",
+					"Actual description",
+				), f["description"])
 			},
 		},
 		"definitions and ref": {
@@ -2058,8 +2066,10 @@ func TestHelmSchemaAnnotatorAlignment(t *testing.T) {
 				assert.Equal(t, "./schemas/base.json#/definitions/port", p["$ref"])
 			},
 		},
-		"description from blank-line separated comment groups": {
-			// Only comment lines after the last blank line are used as description.
+		"description keeps paragraphs separated by bare hash line": {
+			// Upstream's leadingCommentsRemover splits only on physical blank
+			// lines ("\n{2,}"); a "#"-only line is kept as a blank line in the
+			// joined description, so both paragraphs survive.
 			input: stringtest.Input(`
 				# Section header
 				# More context
@@ -2079,7 +2089,12 @@ func TestHelmSchemaAnnotatorAlignment(t *testing.T) {
 				r, ok := props["replicas"].(map[string]any)
 				require.True(t, ok)
 
-				assert.Equal(t, "Actual description for replicas", r["description"])
+				assert.Equal(t, stringtest.JoinLF(
+					"Section header",
+					"More context",
+					"",
+					"Actual description for replicas",
+				), r["description"])
 			},
 		},
 		"description with helm-docs double-dash prefix stripped": {
@@ -2925,9 +2940,11 @@ func TestHelmSchemaAnnotatorUnit(t *testing.T) {
 				assert.Equal(t, "Description text", f["description"])
 			},
 		},
-		"multiple comment groups with blank separator uses last group": {
-			// Only the comment lines immediately preceding the key (after
-			// the last blank line) are used.
+		"bare hash separator keeps every description paragraph": {
+			// A "#"-only line does not delimit comment groups (only physical
+			// blank lines do, and the head-comment run narrowing handles
+			// those), so the whole run joins into one multi-paragraph
+			// description, matching upstream.
 			input: stringtest.Input(`
 				# Old section header
 				# More old context
@@ -2949,6 +2966,9 @@ func TestHelmSchemaAnnotatorUnit(t *testing.T) {
 				require.True(t, ok)
 
 				assert.Equal(t, stringtest.JoinLF(
+					"Old section header",
+					"More old context",
+					"",
 					"Line one of actual desc",
 					"Line two of actual desc",
 				), f["description"])

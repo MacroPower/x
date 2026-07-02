@@ -89,6 +89,56 @@ func TestParseYAMLValue(t *testing.T) {
 	}
 }
 
+// TestLastCommentGroup covers the group contract: a "#"-only line (or an
+// empty line, its marker-stripped form) is a paragraph separator within one
+// comment group, not a group delimiter -- upstream annotation formats delimit
+// only on physical blank lines, which [magicschema.HeadCommentRun] handles --
+// so interior separators are preserved and only the blank edges are trimmed.
+func TestLastCommentGroup(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		lines []string
+		want  []string
+	}{
+		"nil input": {},
+		"all blank lines trim to nothing": {
+			lines: []string{"#", "  #  ", ""},
+		},
+		"interior hash-only line is kept as a separator": {
+			lines: []string{"# @schema type:integer;minimum:1", "#", "# The number of replicas."},
+			want:  []string{"# @schema type:integer;minimum:1", "#", "# The number of replicas."},
+		},
+		"interior empty line is kept as a separator": {
+			lines: []string{"First paragraph.", "", "Second paragraph."},
+			want:  []string{"First paragraph.", "", "Second paragraph."},
+		},
+		"leading blank lines are trimmed": {
+			lines: []string{"#", "# Description"},
+			want:  []string{"# Description"},
+		},
+		"trailing blank lines are trimmed": {
+			lines: []string{"# Description", "#", "  # "},
+			want:  []string{"# Description"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := magicschema.LastCommentGroup(tc.lines)
+			if tc.want == nil {
+				assert.Empty(t, got)
+
+				return
+			}
+
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
 func TestToSubSchemaTypeNormalization(t *testing.T) {
 	t.Parallel()
 

@@ -456,9 +456,12 @@
 //     before the last double-newline; the goccy parser erases physical
 //     blank lines when it merges comment blocks into one head comment
 //     group, so our implementation restores the boundaries from comment
-//     token positions ([magicschema.HeadCommentRun]) and additionally
-//     treats a "#"-only line as a group boundary
-//     ([magicschema.LastCommentGroup]). Description lines join with
+//     token positions ([magicschema.HeadCommentRun]). A "#"-only line is
+//     a paragraph separator within the description, not a group boundary
+//     -- upstream keeps it as a blank line in the joined description, and
+//     so does our join -- though blank lines at the description's edges
+//     are trimmed ([magicschema.LastCommentGroup]), where upstream can
+//     emit a leading or trailing newline. Description lines join with
 //     newlines and keep their indentation beyond the comment marker and
 //     single following space, matching the upstream, so YAML snippets
 //     embedded in comments keep their structure.

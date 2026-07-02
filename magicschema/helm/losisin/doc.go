@@ -73,10 +73,12 @@
 // the "\n\n" boundary upstream splits on never reaches the comment string.
 // [magicschema.HeadCommentRun] reconstructs the boundaries from comment token
 // positions, narrowing the head comment to the run physically adjacent to the
-// key before [magicschema.LastCommentGroup] applies the "#"-only line
-// grouping. A detached annotation block -- a file header, an annotation for a
+// key. A detached annotation block -- a file header, an annotation for a
 // removed key, separated from the key by a blank line -- therefore does not
-// apply to the following key, matching the upstream split.
+// apply to the following key, matching the upstream split. A "#"-only line is
+// not a group boundary -- upstream splits only on the physical blank line --
+// so an annotation separated from its prose description by a bare "#" line
+// still applies.
 //
 // The value line comment is read only when it sits on the value's own line.
 // The goccy parser stows a comment written above the first sequence element

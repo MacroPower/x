@@ -34,7 +34,7 @@
             "null",
             "string"
           ],
-          "description": "Applicable values:\n- flow\n- kvstore\n- envoy\n- datapath\n- policy"
+          "description": "Configure verbosity levels for debug logging\nThis option is used to enable debug messages for operations related to such\nsub-system such as (e.g. kvstore, envoy, datapath or policy), and flow is\nfor enabling debug messages emitted per request, message and connection.\nMultiple values can be set via a space-separated string (e.g. \"datapath envoy\").\n\nApplicable values:\n- flow\n- kvstore\n- envoy\n- datapath\n- policy"
         },
         "metricsSamplingInterval": {
           "type": [
@@ -1173,21 +1173,21 @@
             "null",
             "string"
           ],
-          "description": "By default, all keys may be overridden. To disable overrides, set this to \"none\" or\nchange the configSources variable."
+          "description": "allowedConfigOverrides is a list of config-map keys that can be overridden.\nThat is to say, if this value is set, config sources (excepting the first one) can\nonly override keys in this list.\n\nThis takes precedence over blockedConfigOverrides.\n\nBy default, all keys may be overridden. To disable overrides, set this to \"none\" or\nchange the configSources variable."
         },
         "blockedConfigOverrides": {
           "type": [
             "null",
             "string"
           ],
-          "description": "By default, all keys may be overridden."
+          "description": "blockedConfigOverrides is a list of config-map keys that may not be overridden.\nIn other words, if any of these keys appear in a configuration source excepting the\nfirst one, they will be ignored\n\nThis is ignored if allowedConfigOverrides is set.\n\nBy default, all keys may be overridden."
         },
         "enableSourceIPVerification": {
           "type": [
             "null",
             "boolean"
           ],
-          "description": "By default, this functionality is enabled"
+          "description": "enableSourceIPVerification is a boolean flag to enable or disable the Source IP verification\nof endpoints. This flag is useful when Cilium is chained with other CNIs.\n\nBy default, this functionality is enabled"
         }
       },
       "additionalProperties": true
@@ -1773,7 +1773,7 @@
                 "null",
                 "array"
               ],
-              "description": "You can specify the list of metrics from the helm CLI:"
+              "description": "Configures the list of metrics to collect. If empty or null, metrics\nare disabled.\nExample:\n\n  enabled:\n  - dns:query;ignoreAAAA\n  - drop\n  - tcp\n  - flow\n  - icmp\n  - http\n\nYou can specify the list of metrics from the helm CLI:"
             },
             "enableOpenMetrics": {
               "type": "boolean"
@@ -3402,7 +3402,7 @@
             "string",
             "array"
           ],
-          "description": "  addresses: [\"192.168.1.0/24\", \"2001::/64\"]"
+          "description": "List of CIDRs for choosing which IP addresses assigned to native devices are used for NodePort load-balancing.\nBy default this is empty and the first suitable, preferably private, IPv4 and IPv6 address assigned to each device is used.\n\nExample:\n\n  addresses: [\"192.168.1.0/24\", \"2001::/64\"]"
         },
         "bindProtection": {
           "type": "boolean"
@@ -6303,7 +6303,7 @@
                     "null",
                     "string"
                   ],
-                  "description": "Example values: 10.0.0.1:8081, spire-server.cilium-spire.svc:8081"
+                  "description": "SPIRE server address used by Cilium Operator\n\nIf k8s Service DNS along with port number is used (e.g. \u003cservice-name\u003e.\u003cnamespace\u003e.svc(.*):\u003cport-number\u003e format),\nCilium Operator will resolve its address by looking up the clusterIP from Service resource.\n\nExample values: 10.0.0.1:8081, spire-server.cilium-spire.svc:8081"
                 },
                 "trustDomain": {
                   "type": "string"

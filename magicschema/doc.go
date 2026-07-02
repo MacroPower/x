@@ -262,9 +262,12 @@
 //     @param, @skip, @default, --, etc.), allowing annotators and the
 //     fallback comment extractor to avoid treating annotations as plain
 //     descriptions.
-//   - [LastCommentGroup] returns the lines of the final comment group (the
-//     lines after the last blank comment line, ignoring trailing blanks),
-//     which is the group annotation formats scope to.
+//   - [LastCommentGroup] returns the lines of the final comment group,
+//     trimming blank ("#"-only) lines from both ends. Physical blank lines
+//     delimit comment groups and [HeadCommentRun] restores those boundaries,
+//     so a narrowed run is a single group; a "#"-only line inside it is a
+//     paragraph separator, not a delimiter, and interior separators are
+//     preserved.
 //   - [HeadCommentRun] narrows a mapping value node's merged head comment
 //     group to the run of lines physically adjacent to its key, using
 //     comment token positions to restore the blank-line boundaries the
