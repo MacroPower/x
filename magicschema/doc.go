@@ -285,6 +285,10 @@
 //   - [StripCommentMarker] removes the leading "#" marker (capped at two
 //     hashes) and one following space from a comment line, the strip used to
 //     recognize block markers consistently across annotators.
+//   - [IsMarkerBoundary] reports whether the remainder of a line after an
+//     annotation marker prefix leaves the marker standing as a whole token
+//     (empty, or a space or tab follows), the boundary every marker scan
+//     shares so "@schemafoo" never matches "@schema".
 //   - [ClassifySchemaLine] reports a stripped, trimmed comment line's role in
 //     the @schema / @schema.root block-delimiter grammar as a
 //     [SchemaLineKind]: prose, a root or schema block delimiter, or the

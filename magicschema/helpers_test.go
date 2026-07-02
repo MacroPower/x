@@ -223,6 +223,33 @@ func TestClassifySchemaLine(t *testing.T) {
 	}
 }
 
+// TestIsMarkerBoundary covers the whole-token boundary every marker scan
+// shares: only end-of-line, a space, or a tab after the marker counts, so a
+// longer word ("@schemafoo") or punctuation ("@schema@") is not the marker.
+func TestIsMarkerBoundary(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		rest string
+		want bool
+	}{
+		"empty rest bounds the marker":   {rest: "", want: true},
+		"leading space bounds":           {rest: " type:string", want: true},
+		"leading tab bounds":             {rest: "\ttype:string", want: true},
+		"attached word does not bound":   {rest: "foo", want: false},
+		"punctuation does not bound":     {rest: "@", want: false},
+		"leading newline does not bound": {rest: "\nfoo", want: false},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, magicschema.IsMarkerBoundary(tc.rest))
+		})
+	}
+}
+
 func TestToSubSchemaTypeNormalization(t *testing.T) {
 	t.Parallel()
 

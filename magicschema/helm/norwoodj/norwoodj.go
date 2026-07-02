@@ -632,16 +632,14 @@ func (a *Annotator) parseNewStyleComment(commentStr string) *parsedComment {
 }
 
 // markerToken reports whether s begins with marker as a whole token -- the
-// marker exactly, or followed by whitespace. A continuation line such as
-// "@sections of the chart are documented below" then stays in the description
-// instead of being silently consumed as an "@section" annotation.
+// marker exactly, or followed by whitespace ([magicschema.IsMarkerBoundary]).
+// A continuation line such as "@sections of the chart are documented below"
+// then stays in the description instead of being silently consumed as an
+// "@section" annotation.
 func markerToken(s, marker string) bool {
 	rest, ok := strings.CutPrefix(s, marker)
-	if !ok {
-		return false
-	}
 
-	return rest == "" || rest[0] == ' ' || rest[0] == '\t'
+	return ok && magicschema.IsMarkerBoundary(rest)
 }
 
 // mapHelmDocsType maps a helm-docs type hint to a JSON Schema type.

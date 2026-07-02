@@ -288,6 +288,17 @@ func StripCommentMarker(line string) string {
 	return strings.TrimPrefix(line, " ")
 }
 
+// IsMarkerBoundary reports whether rest -- the remainder of a comment line
+// after an annotation marker prefix is cut -- leaves the marker standing as a
+// whole token: rest is empty or begins with a space or tab. Every marker scan
+// in the package shares this one boundary predicate, so the adapters and the
+// structural fallback agree on which lines carry annotations: "@schemafoo" is
+// never the "@schema" marker, and a prose line such as "@sections of the
+// chart" is never the "@section" marker.
+func IsMarkerBoundary(rest string) bool {
+	return rest == "" || rest[0] == ' ' || rest[0] == '\t'
+}
+
 // SchemaLineKind classifies a comment line's role in the @schema /
 // @schema.root block-delimiter grammar, after the comment marker is stripped
 // and the remainder fully trimmed. [ClassifySchemaLine] produces it.
@@ -333,7 +344,7 @@ func ClassifySchemaLine(trimmed string) SchemaLineKind {
 	}
 
 	if after, ok := strings.CutPrefix(trimmed, "@schema"); ok {
-		if after == "" || (after[0] != ' ' && after[0] != '\t') {
+		if after == "" || !IsMarkerBoundary(after) {
 			return SchemaLineSchema
 		}
 

@@ -106,7 +106,7 @@ func (a *Annotator) Annotate(node ast.Node, _ string) *magicschema.AnnotationRes
 		if after, ok := strings.CutPrefix(trimmed, "@schema"); ok {
 			// Require a space or end-of-string after "@schema" to avoid
 			// matching "@schemafoo" as an annotation (matches upstream behavior).
-			if after != "" && after[0] != ' ' && after[0] != '\t' {
+			if !magicschema.IsMarkerBoundary(after) {
 				continue
 			}
 
