@@ -92,7 +92,12 @@ func (a *Annotator) Annotate(node ast.Node, _ string) *magicschema.AnnotationRes
 	return a.parseBlock(blocks.schema, blocks.description)
 }
 
-// RootSchema returns the parsed root-level schema, if any.
+// RootSchema returns the parsed root-level schema, if any. The schema
+// carries every field the @schema.root block sets; the generator's
+// applyRootAnnotations is the single propagation gate, copying only the
+// documented subset (title, description, $ref, examples, deprecated,
+// readOnly, writeOnly, additionalProperties, and x-* extensions) to the
+// document-level schema.
 func (a *Annotator) RootSchema() *jsonschema.Schema {
 	return a.rootSchema
 }
@@ -130,35 +135,12 @@ func (a *Annotator) parseBlock(content, description string) *magicschema.Annotat
 	return result
 }
 
-// rootAllowedKeys is the subset of @schema fields a @schema.root block
-// propagates to the document-level schema. Type-, value-, and structure-level
-// keywords are intentionally excluded; x-* extensions are allowed by prefix
-// (see rootAllowed).
-var rootAllowedKeys = map[string]struct{}{
-	"title":                {},
-	"description":          {},
-	"$ref":                 {},
-	"examples":             {},
-	"deprecated":           {},
-	"readOnly":             {},
-	"writeOnly":            {},
-	"additionalProperties": {},
-}
-
-// rootAllowed reports whether a @schema.root key propagates to the
-// document-level schema.
-func rootAllowed(key string) bool {
-	if _, ok := rootAllowedKeys[key]; ok {
-		return true
-	}
-
-	return strings.HasPrefix(key, "x-")
-}
-
-// parseRootBlock parses @schema.root content into the root schema. Only the
-// documented rootAllowed subset propagates; each allowed key is dispatched
-// through applyField so its handling stays identical to a property-level
-// @schema block rather than a second copy that can drift.
+// parseRootBlock parses @schema.root content into the root schema. Every key
+// is dispatched through applyField so its handling stays identical to a
+// property-level @schema block, and the full parse is stored unfiltered:
+// the generator's applyRootAnnotations is the single propagation gate that
+// copies only the documented subset to the document-level schema, so a
+// second adapter-side whitelist would only drift from it.
 func (a *Annotator) parseRootBlock(content string) {
 	var raw map[string]any
 
@@ -171,14 +153,12 @@ func (a *Annotator) parseRootBlock(content string) {
 
 	schema := &jsonschema.Schema{}
 
-	// A throwaway result captures applyField's required/skip signals, which no
-	// rootAllowed key sets, so root blocks contribute none.
+	// A throwaway result captures applyField's required/skip signals; it is
+	// discarded, so root blocks contribute none.
 	result := &magicschema.AnnotationResult{Schema: schema}
 
 	for key, val := range raw {
-		if rootAllowed(key) {
-			a.applyField(schema, result, key, val)
-		}
+		a.applyField(schema, result, key, val)
 	}
 
 	a.rootSchema = schema

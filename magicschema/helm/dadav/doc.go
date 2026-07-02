@@ -454,7 +454,12 @@
 //   - Root field propagation: The same fields propagate from root blocks
 //     as in the upstream: title, description, $ref, examples, deprecated,
 //     readOnly, writeOnly, additionalProperties, and x-* extensions.
-//     Other fields in root blocks are silently ignored.
+//     Other fields in root blocks are silently ignored. The annotator
+//     parses the full block into [Annotator.RootSchema] without filtering;
+//     the generator's applyRootAnnotations is the single propagation gate,
+//     copying only the subset above to the document-level schema --
+//     mirroring the upstream, which unmarshals the whole block but
+//     propagates only these fields.
 //
 //   - CLI flag precedence: CLI flags (--title, --description, --id)
 //     override root annotation values, matching the upstream's behavior

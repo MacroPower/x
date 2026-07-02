@@ -6,6 +6,8 @@ import (
 	"os"
 	"testing"
 
+	"github.com/goccy/go-yaml/ast"
+	"github.com/goccy/go-yaml/parser"
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -848,6 +850,91 @@ func TestHelmSchemaRootAnnotation(t *testing.T) {
 
 			require.NoError(t, json.Unmarshal(out, &got))
 			tc.want(t, got)
+		})
+	}
+}
+
+// firstMappingValue parses input with comments and returns the document's
+// first mapping value node, which carries the head comment root extraction
+// reads.
+func firstMappingValue(t *testing.T, input string) *ast.MappingValueNode {
+	t.Helper()
+
+	file, err := parser.ParseBytes([]byte(input), parser.ParseComments)
+	require.NoError(t, err)
+	require.NotEmpty(t, file.Docs)
+
+	switch body := file.Docs[0].Body.(type) {
+	case *ast.MappingNode:
+		require.NotEmpty(t, body.Values)
+
+		return body.Values[0]
+
+	case *ast.MappingValueNode:
+		return body
+	}
+
+	require.FailNow(t, "document body is not a mapping")
+
+	return nil
+}
+
+func TestHelmSchemaRootSchemaUnfiltered(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		want  func(*testing.T, *jsonschema.Schema)
+	}{
+		"root schema carries non-propagated fields": {
+			// The root schema stores the full parse; the generator's
+			// applyRootAnnotations is the single propagation gate, so direct
+			// RootSchema callers see every field the block sets while the
+			// generated document receives only the documented subset (see
+			// TestHelmSchemaRootAnnotation).
+			input: stringtest.Input(`
+				# @schema.root
+				# title: Chart
+				# type: string
+				# pattern: "^[a-z]+$"
+				# minimum: 1
+				# @schema.root
+				replicas: 3
+			`),
+			want: func(t *testing.T, root *jsonschema.Schema) {
+				t.Helper()
+
+				require.NotNil(t, root)
+				assert.Equal(t, "Chart", root.Title)
+				assert.Equal(t, "string", root.Type)
+				assert.Equal(t, "^[a-z]+$", root.Pattern)
+
+				require.NotNil(t, root.Minimum)
+				assert.InDelta(t, float64(1), *root.Minimum, 0.001)
+			},
+		},
+		"no root block leaves the root schema nil": {
+			input: stringtest.Input(`
+				# @schema
+				# type: integer
+				# @schema
+				replicas: 3
+			`),
+			want: func(t *testing.T, root *jsonschema.Schema) {
+				t.Helper()
+				assert.Nil(t, root)
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			ann := dadav.New()
+			ann.Annotate(firstMappingValue(t, tc.input), "replicas")
+
+			tc.want(t, ann.RootSchema())
 		})
 	}
 }
