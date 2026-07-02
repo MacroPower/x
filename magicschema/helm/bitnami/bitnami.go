@@ -17,10 +17,11 @@ var (
 	// "[array, default: [a, [b], c]]") whole. A fixed regex can only balance a
 	// bounded nesting depth, so it would cut a deeper default at an inner "]"
 	// and leak the rest into the description.
-	paramRegex     = regexp.MustCompile(`^\s*##\s*@param\s+(\S+)\s*(.*)$`)
-	skipRegex      = regexp.MustCompile(`^\s*##\s*@skip\s+(\S+)`)
-	ignoredTagExpr = regexp.MustCompile(`^\s*##\s*@(section|descriptionStart|descriptionEnd|extra)\b`)
-	arrayIndexExpr = regexp.MustCompile(`\[\d+\]`)
+	paramRegex        = regexp.MustCompile(`^\s*##\s*@param\s+(\S+)\s*(.*)$`)
+	skipRegex         = regexp.MustCompile(`^\s*##\s*@skip\s+(\S+)`)
+	ignoredTagExpr    = regexp.MustCompile(`^\s*##\s*@(section|descriptionStart|descriptionEnd|extra)\b`)
+	arrayIndexExpr    = regexp.MustCompile(`\[\d+\]`)
+	trailingIndexExpr = regexp.MustCompile(`\[\d+\]$`)
 )
 
 // Annotator parses ## @param line annotations from the bitnami
@@ -70,14 +71,20 @@ func (a *Annotator) ForContent(content []byte) (magicschema.Annotator, error) {
 
 		// Check for @skip.
 		if m := skipRegex.FindStringSubmatch(line); m != nil {
-			clone.skips[normalizeKeyPath(m[1])] = true
+			if keyPath, ok := normalizeKeyPath(m[1]); ok {
+				clone.skips[keyPath] = true
+			}
 
 			continue
 		}
 
 		// Check for @param.
 		if m := paramRegex.FindStringSubmatch(line); m != nil {
-			keyPath := normalizeKeyPath(m[1])
+			keyPath, ok := normalizeKeyPath(m[1])
+			if !ok {
+				continue
+			}
+
 			modifiers, description := splitModifiers(m[2])
 
 			param := &bitnamiParam{
@@ -134,9 +141,22 @@ func (a *Annotator) Annotate(_ ast.Node, keyPath string) *magicschema.Annotation
 }
 
 // normalizeKeyPath strips array indices from a bitnami key path, converting
-// paths like "jobs[0].nameOverride" to "jobs.nameOverride".
-func normalizeKeyPath(keyPath string) string {
-	return arrayIndexExpr.ReplaceAllString(keyPath, "")
+// paths like "jobs[0].nameOverride" to "jobs.nameOverride" so annotations
+// match the dot-separated key paths used by the generator's AST walker.
+//
+// A key path whose final segment is a bare positional index (such as
+// "items[0]") targets a single array element rather than a key the walker
+// visits. Stripping that index would attach the element's type, default, or
+// skip to the array key itself, producing a schema that rejects the array
+// value present in the source. The second return value reports whether the
+// path resolves to a walker key; element-level paths report false and the
+// annotation is dropped (fail open).
+func normalizeKeyPath(keyPath string) (string, bool) {
+	if trailingIndexExpr.MatchString(keyPath) {
+		return "", false
+	}
+
+	return arrayIndexExpr.ReplaceAllString(keyPath, ""), true
 }
 
 // splitModifiers separates a leading "[...]" modifier group from the

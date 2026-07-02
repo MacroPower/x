@@ -259,7 +259,12 @@
 // Array indices in key paths are stripped during normalization
 // ("jobs[0].nameOverride" becomes "jobs.nameOverride") so that annotations
 // match the dot-separated key paths used by the magicschema generator's AST
-// walker.
+// walker, which never emits indexed paths. A key path whose final segment is
+// a bare positional index (such as "initContainers[0]") targets a single
+// array element rather than a key the walker visits; stripping that index
+// would attach the element's type, default, or skip to the array key itself,
+// producing a schema that rejects the array value present in the source.
+// Such element-level annotations are dropped entirely (fail open).
 //
 // # Intentional Divergences
 //
@@ -346,6 +351,17 @@
 //     simply never matched and have no effect. The observable schema output
 //     is equivalent: annotations without matching YAML structure are
 //     silently ignored by both implementations.
+//
+//   - Element-level annotations: Upstream's generateSchema treats a key path
+//     ending in a bare positional index (e.g., "initContainers[0]") as an
+//     array element, creating an array schema and recursing into its items.
+//     Our generator's AST walker never emits indexed key paths, so there is
+//     no walker key such an annotation can correctly attach to; applying it
+//     to the array key itself would assert the element's scalar type (or
+//     remove the key via @skip) against the array value present in the
+//     source. We drop these annotations entirely (fail open). Nested indexed
+//     paths ("jobs[0].nameOverride") apply to the corresponding items
+//     property as usual.
 //
 //   - Dot-containing YAML keys: Upstream excludes parameters whose YAML keys
 //     contain dots (e.g., "prometheus.io/scrape") from the schema due to a

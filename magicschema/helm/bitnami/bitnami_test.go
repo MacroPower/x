@@ -326,7 +326,7 @@ func TestBitnamiAnnotator(t *testing.T) {
 				assert.Equal(t, "Override name for the first job", no["description"])
 			},
 		},
-		"array index in skip key path": {
+		"skip with bare array index does not remove the array": {
 			input: stringtest.Input(`
 				## @skip items[0]
 				items:
@@ -339,8 +339,33 @@ func TestBitnamiAnnotator(t *testing.T) {
 				props, ok := got["properties"].(map[string]any)
 				require.True(t, ok)
 
-				assert.NotContains(t, props, "items")
+				// @skip on a single element targets that element, not the
+				// array key; the annotation is dropped and the array stays
+				// in the schema (fail open).
+				assert.Contains(t, props, "items")
 				assert.Contains(t, props, "name")
+			},
+		},
+		"param with bare array index does not type the array": {
+			input: stringtest.Input(`
+				## @param initContainers[0] [string] first container name
+				initContainers:
+				  - main
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				ic, ok := props["initContainers"].(map[string]any)
+				require.True(t, ok)
+
+				// The element-level annotation must not attach its scalar
+				// type or description to the array key; the type is inferred
+				// from the YAML structure instead.
+				assert.Equal(t, "array", ic["type"])
+				assert.NotContains(t, ic, "description")
 			},
 		},
 		"multiple array indices in key path": {
@@ -1811,6 +1836,49 @@ func TestBitnamiPrepare(t *testing.T) {
 				t.Helper()
 				require.NotNil(t, result)
 				assert.True(t, result.Skip)
+			},
+		},
+		"param with bare trailing index records nothing": {
+			content: stringtest.Input(`
+				## @param items[0] [string] First element
+				items:
+				  - main
+			`),
+			keyPath: "items",
+			want: func(t *testing.T, result *magicschema.AnnotationResult) {
+				t.Helper()
+				// An element-level annotation must not attach to the array
+				// key; it is dropped entirely (fail open).
+				assert.Nil(t, result)
+			},
+		},
+		"skip with bare trailing index records nothing": {
+			content: stringtest.Input(`
+				## @skip items[0]
+				items:
+				  - secret: hidden
+			`),
+			keyPath: "items",
+			want: func(t *testing.T, result *magicschema.AnnotationResult) {
+				t.Helper()
+				// @skip on a single element does not remove the array key.
+				assert.Nil(t, result)
+			},
+		},
+		"param with nested path ending in index records nothing": {
+			content: stringtest.Input(`
+				## @param jobs[0].containers[1] [string] Second container
+				jobs:
+				  - containers:
+				      - a
+				      - b
+			`),
+			keyPath: "jobs.containers",
+			want: func(t *testing.T, result *magicschema.AnnotationResult) {
+				t.Helper()
+				// The final segment is a bare positional index, so the
+				// annotation targets an element and is dropped.
+				assert.Nil(t, result)
 			},
 		},
 		"default only modifier without type": {
