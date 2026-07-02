@@ -292,3 +292,36 @@ func TestConfigAnnotatorsCompletionTrimsSpaces(t *testing.T) {
 	assert.NotContains(t, candidates, "helm-schema, bitnami,helm-schema")
 	assert.Contains(t, candidates, "helm-schema, bitnami,helm-docs")
 }
+
+func TestConfigAnnotatorsCompletionKeepsTypedSpace(t *testing.T) {
+	t.Parallel()
+
+	cfg := magicschema.NewConfig()
+	cfg.Registry = helm.DefaultRegistry()
+
+	rootCmd := &cobra.Command{Use: "magicschema", Run: func(*cobra.Command, []string) {}}
+	cfg.RegisterFlags(rootCmd.Flags())
+	require.NoError(t, cfg.RegisterCompletions(rootCmd))
+
+	var buf bytes.Buffer
+
+	rootCmd.SetOut(&buf)
+	// The space the user typed after the comma must survive into the
+	// candidates: the shell keeps only candidates that extend the typed
+	// word, so "helm-schema,bitnami" would be filtered out and the user
+	// would see no suggestions.
+	rootCmd.SetArgs([]string{cobra.ShellCompNoDescRequestCmd, "--annotators", "helm-schema, bit"})
+	require.NoError(t, rootCmd.Execute())
+
+	var candidates []string
+
+	for line := range strings.SplitSeq(strings.TrimSpace(buf.String()), "\n") {
+		if line == "" || strings.HasPrefix(line, ":") {
+			continue
+		}
+
+		candidates = append(candidates, strings.SplitN(line, "\t", 2)[0])
+	}
+
+	assert.Contains(t, candidates, "helm-schema, bitnami")
+}

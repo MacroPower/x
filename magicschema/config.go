@@ -183,7 +183,14 @@ func (c *Config) annotatorsCompletion(
 		base, partial = toComplete[:idx+1], toComplete[idx+1:]
 	}
 
-	partial = strings.TrimSpace(partial)
+	// Whitespace between the comma and the partial name (a quoted
+	// "helm-schema, bit") moves into the kept base rather than being
+	// dropped: the shell filters candidates by prefix against the typed
+	// word, so a candidate that loses the typed space never survives the
+	// filter and the user sees no suggestions at all.
+	trimmed := strings.TrimLeft(partial, " \t")
+	base += partial[:len(partial)-len(trimmed)]
+	partial = strings.TrimSpace(trimmed)
 
 	// The names already typed, cleaned with the shared splitAnnotatorNames rule
 	// so a name preceded by a space (from a quoted "helm-schema, bitnami,")
