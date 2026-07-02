@@ -283,11 +283,29 @@ func mergeMetadata(out, a, b *jsonschema.Schema) {
 // widens the union to accept everything (fail open), since unionEnums yields
 // nil whenever either side is unconstrained.
 func mergeValueSet(out, a, b *jsonschema.Schema) {
-	if a.Const != nil && b.Const != nil && reflect.DeepEqual(*a.Const, *b.Const) {
+	if a.Const != nil && b.Const != nil && jsonValueEqual(*a.Const, *b.Const) {
 		out.Const = a.Const
 	} else {
 		out.Enum = unionEnums(enumValues(a), enumValues(b))
 	}
+}
+
+// jsonValueEqual reports whether two decoded values are equal by their
+// canonical JSON encoding. Numerically equal values may arrive as different
+// Go types -- goccy parses an integer literal to uint64 while a float literal
+// or a [ToSubSchema] JSON round trip yields float64 -- and [reflect.DeepEqual]
+// treats those as distinct even though they marshal to identical JSON bytes,
+// which would emit duplicate enum members the spec wants unique. Values that
+// cannot be marshaled fall back to [reflect.DeepEqual].
+func jsonValueEqual(a, b any) bool {
+	ab, aErr := json.Marshal(a)
+	bb, bErr := json.Marshal(b)
+
+	if aErr != nil || bErr != nil {
+		return reflect.DeepEqual(a, b)
+	}
+
+	return bytes.Equal(ab, bb)
 }
 
 // typelessUnionKey marks a schema whose type was dropped because the union
@@ -401,14 +419,14 @@ func unionEnums(a, b []any) []any {
 		return nil
 	}
 
-	if slices.EqualFunc(a, b, reflect.DeepEqual) {
+	if slices.EqualFunc(a, b, jsonValueEqual) {
 		return slices.Clone(a)
 	}
 
 	out := slices.Clone(a)
 
 	for _, v := range b {
-		if !slices.ContainsFunc(out, func(x any) bool { return reflect.DeepEqual(x, v) }) {
+		if !slices.ContainsFunc(out, func(x any) bool { return jsonValueEqual(x, v) }) {
 			out = append(out, v)
 		}
 	}

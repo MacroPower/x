@@ -856,6 +856,40 @@ func TestMergeTypelessConstraintDropsOneSidedItems(t *testing.T) {
 	}
 }
 
+func TestMergeEnumsNumericallyEqualAcrossGoTypes(t *testing.T) {
+	t.Parallel()
+
+	// The goccy parser decodes an integer literal to uint64 and a float
+	// literal to float64, but 1 and 1.0 marshal to the same JSON. Merging
+	// equivalent enums must not emit duplicate members that differ only by
+	// decoded Go type.
+	inputs := [][]byte{
+		[]byte("# @schema\n# enum: [1, 2]\n# @schema\nk: 1\n"),
+		[]byte("# @schema\n# enum: [1.0, 2.0]\n# @schema\nk: 1\n"),
+	}
+
+	gen := magicschema.NewGenerator(magicschema.WithAnnotators(dadav.New()))
+	schema, err := gen.Generate(inputs...)
+	require.NoError(t, err)
+
+	out, err := json.Marshal(schema)
+	require.NoError(t, err)
+
+	var got map[string]any
+
+	require.NoError(t, json.Unmarshal(out, &got))
+
+	props, ok := got["properties"].(map[string]any)
+	require.True(t, ok)
+
+	k, ok := props["k"].(map[string]any)
+	require.True(t, ok)
+
+	enum, ok := k["enum"].([]any)
+	require.True(t, ok)
+	assert.Len(t, enum, 2, "numerically equal members must deduplicate: %v", enum)
+}
+
 func TestConcurrentGenerateSharedAnnotatorPrototype(t *testing.T) {
 	t.Parallel()
 
