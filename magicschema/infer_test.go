@@ -251,6 +251,36 @@ func TestArrayElementHeadCommentNotLeakedAsArrayDescription(t *testing.T) {
 	assert.NotContains(t, parent, "description")
 }
 
+func TestFlowSequenceInlineCommentBecomesDescription(t *testing.T) {
+	t.Parallel()
+
+	// An inline comment on a one-line flow sequence sits on the key's own
+	// line, so it documents the array itself -- unlike a block sequence's
+	// stowed first-element head comment -- and becomes the description, the
+	// same as inline comments on scalars and flow mappings.
+	input := "key: [1, 2] # flow seq description\n"
+
+	gen := magicschema.NewGenerator()
+	schema, err := gen.Generate([]byte(input))
+	require.NoError(t, err)
+
+	out, err := json.Marshal(schema)
+	require.NoError(t, err)
+
+	var got map[string]any
+
+	require.NoError(t, json.Unmarshal(out, &got))
+
+	props, ok := got["properties"].(map[string]any)
+	require.True(t, ok)
+
+	key, ok := props["key"].(map[string]any)
+	require.True(t, ok)
+
+	assert.Equal(t, "array", key["type"])
+	assert.Equal(t, "flow seq description", key["description"])
+}
+
 func TestThreeHashSchemaMarkerIsNotAFence(t *testing.T) {
 	t.Parallel()
 
