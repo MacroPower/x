@@ -333,12 +333,19 @@ func isTypelessUnion(s *jsonschema.Schema) bool {
 // Enum or Const value set -- so reaching every schema position via
 // forEachSubSchema is enough to clear the marker; none of the carried fields
 // hold a sub-schema, so they need no descent.
+//
+// The walk crosses sub-schemas the merge only aliases from annotator-owned
+// prototypes, which copySchema promises never to write into (and which a
+// concurrently reused annotator may share across Generate calls), so a schema
+// without the marker must not be touched at all: even a no-op delete on its
+// Extra map is a map write and a data race. Only merge-allocated schemas ever
+// carry the marker, and those are safe to mutate.
 func stripTypelessUnion(s *jsonschema.Schema) {
 	if s == nil {
 		return
 	}
 
-	if s.Extra != nil {
+	if isTypelessUnion(s) {
 		delete(s.Extra, typelessUnionKey)
 
 		if len(s.Extra) == 0 {

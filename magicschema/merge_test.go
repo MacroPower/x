@@ -2,8 +2,10 @@ package magicschema_test
 
 import (
 	"encoding/json"
+	"sync"
 	"testing"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -852,6 +854,41 @@ func TestMergeTypelessConstraintDropsOneSidedItems(t *testing.T) {
 	} else {
 		assert.Equal(t, true, props["key"], "expected the true schema")
 	}
+}
+
+func TestConcurrentGenerateSharedAnnotatorPrototype(t *testing.T) {
+	t.Parallel()
+
+	// An annotator may return the same cached AnnotationResult from every
+	// call, and its sub-schemas are aliased (not cloned) into the merged
+	// tree. The output walk that strips the internal typeless-union marker
+	// must not write into schemas that do not carry it -- even a no-op map
+	// delete is a write -- or concurrent Generate calls race on the shared
+	// prototype (caught by -race).
+	shared := &magicschema.AnnotationResult{
+		Schema: &jsonschema.Schema{
+			Type: "array",
+			Items: &jsonschema.Schema{
+				Type:  "string",
+				Extra: map[string]any{"x-note": "shared"},
+			},
+		},
+	}
+
+	gen := magicschema.NewGenerator(magicschema.WithAnnotators(
+		stubAnnotator{name: "shared", result: shared},
+	))
+
+	var wg sync.WaitGroup
+
+	for range 8 {
+		wg.Go(func() {
+			_, err := gen.Generate([]byte("list:\n  - a\n"))
+			assert.NoError(t, err)
+		})
+	}
+
+	wg.Wait()
 }
 
 func TestMergeIncompatibleEnumOrderIndependent(t *testing.T) {
