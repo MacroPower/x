@@ -338,9 +338,13 @@
 //   - Best-effort error handling: Malformed YAML in @schema blocks
 //     produces a warning (via [log/slog]) and is skipped, rather than
 //     causing a fatal error. Unclosed @schema blocks are processed
-//     best-effort (content up to end-of-comment is included). Unclosed
-//     @schema.root blocks are silently ignored. (Upstream: treats unclosed
-//     blocks and malformed YAML as hard errors.)
+//     best-effort: content up to end-of-comment is included, except the
+//     lines a following @schema.root block claims, which parse as a root
+//     block rather than schema content. Unclosed @schema.root blocks --
+//     still open when the comment ends -- are silently ignored; a @schema
+//     delimiter closes an open root block, so content before it still
+//     applies. (Upstream: treats unclosed blocks and malformed YAML as
+//     hard errors.)
 //
 //   - Validation is not performed: We do not validate annotation schemas
 //     for type/constraint consistency (e.g., minimum > maximum, pattern on
@@ -351,11 +355,19 @@
 //   - Single-pass comment extraction: The upstream uses a two-pass
 //     approach (GetRootSchemaFromComment then GetSchemaFromComment) to
 //     prevent the @schema prefix from matching @schema.root lines. Our
-//     implementation uses a single pass that tracks both inBlock and
-//     inRootBlock states simultaneously. We check for @schema.root first
-//     (via CutPrefix), so it is matched before the shorter @schema prefix.
-//     This is functionally equivalent to the upstream's two-pass approach
-//     but simpler to implement.
+//     implementation classifies every line in a single pass that tracks
+//     the @schema and @schema.root block states simultaneously, checking
+//     for @schema.root first (via CutPrefix) so it is matched before the
+//     shorter @schema prefix. A bare @schema.root marker inside a closed
+//     @schema block is junk content rather than a delimiter -- toggling
+//     there would swallow the rest of the block -- while inside an
+//     unclosed @schema block the marker keeps its delimiter role, so a
+//     root block following a missing @schema close parses as a root block
+//     instead of being absorbed into the property schema, matching the
+//     upstream's root pass, which strips root blocks before schema
+//     parsing. For well-formed blocks the single pass is functionally
+//     equivalent to the upstream's two-pass approach but simpler to
+//     implement.
 //
 //   - Double-hash support: We recognize ## @schema as a block delimiter,
 //     stripping up to two leading # characters from both delimiters and

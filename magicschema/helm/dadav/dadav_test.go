@@ -603,6 +603,102 @@ func TestHelmSchemaRootAnnotation(t *testing.T) {
 				assert.Nil(t, got["title"])
 			},
 		},
+		"root block after unclosed schema block is not absorbed": {
+			// Inside an unclosed @schema block a bare @schema.root marker
+			// keeps its delimiter role, so the root block's fields reach the
+			// root schema instead of leaking into the property schema.
+			input: stringtest.Input(`
+				# @schema
+				# type: string
+				# @schema.root
+				# title: RootTitle
+				# @schema.root
+				first: hello
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				assert.Equal(t, "RootTitle", got["title"])
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				first, ok := props["first"].(map[string]any)
+				require.True(t, ok)
+
+				// Unclosed @schema content up to the root block still applies.
+				assert.Equal(t, "string", first["type"])
+				// Root content must not leak into the property schema.
+				assert.Nil(t, first["title"])
+			},
+		},
+		"unclosed root block is ignored": {
+			// A @schema.root block still open when the comment ends is
+			// silently ignored, unlike unclosed @schema blocks which are
+			// processed best-effort.
+			input: stringtest.Input(`
+				# @schema.root
+				# title: RootTitle
+				first: 1
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+				assert.Empty(t, got["title"])
+			},
+		},
+		"unclosed root block after unclosed schema block is ignored": {
+			// The root marker inside the unclosed @schema block claims the
+			// following lines for a root block, and that root block is itself
+			// unclosed, so its content applies nowhere.
+			input: stringtest.Input(`
+				# @schema
+				# type: string
+				# @schema.root
+				# title: RootTitle
+				first: hello
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				assert.Empty(t, got["title"])
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				first, ok := props["first"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "string", first["type"])
+				assert.Nil(t, first["title"])
+			},
+		},
+		"root block closed by a schema delimiter still applies": {
+			// A @schema delimiter closes an open root block (root content
+			// cannot extend into schema blocks), so the content before it is
+			// kept; only a root block still open at the end of the comment is
+			// unclosed and ignored.
+			input: stringtest.Input(`
+				# @schema.root
+				# title: RootTitle
+				# @schema
+				# type: integer
+				# @schema
+				replicas: 3
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				assert.Equal(t, "RootTitle", got["title"])
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				r, ok := props["replicas"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "integer", r["type"])
+			},
+		},
 		"non-propagated fields ignored from root": {
 			input: stringtest.Input(`
 				# @schema.root

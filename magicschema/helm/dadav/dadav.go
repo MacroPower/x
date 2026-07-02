@@ -59,9 +59,8 @@ func (a *Annotator) Annotate(node ast.Node, _ string) *magicschema.AnnotationRes
 	// blocks without stripping leading comment groups, so a root block
 	// separated from the first key by a blank line still applies.
 	if !a.seenFirstKey {
-		rootContent := extractSchemaRootBlock(comment.String())
-		if rootContent != "" {
-			a.parseRootBlock(rootContent)
+		if root := scanCommentBlocks(comment.String()).root; root != "" {
+			a.parseRootBlock(root)
 		}
 	}
 
@@ -74,25 +73,23 @@ func (a *Annotator) Annotate(node ast.Node, _ string) *magicschema.AnnotationRes
 	// can produce a schema the key's own value fails. Upstream strips
 	// everything before the last blank line (leadingCommentsRemover) before
 	// parsing @schema blocks and descriptions; [magicschema.HeadCommentRun]
-	// reconstructs the same narrowing from comment token positions. The
-	// extractors start outside any block, as upstream does after stripping,
-	// so a block whose opening fence sits in a discarded run contributes
-	// nothing; the fence-state results are therefore unused.
+	// reconstructs the same narrowing from comment token positions. The scan
+	// starts outside any block, as upstream does after stripping, so a block
+	// whose opening fence sits in a discarded run contributes nothing; the
+	// fence-state results are therefore unused.
 	run, _, _ := magicschema.HeadCommentRun(mvn)
 	if len(run) == 0 {
 		return nil
 	}
 
-	commentStr := strings.Join(run, "\n")
-
-	// Parse @schema blocks.
-	blockContent := extractSchemaBlock(commentStr)
-	if blockContent == "" {
-		// No @schema block found. Use non-annotation comment as description.
+	blocks := scanCommentBlocks(strings.Join(run, "\n"))
+	if blocks.schema == "" {
+		// No @schema block found. The generator's structural fallback uses
+		// the non-annotation comment as the description.
 		return nil
 	}
 
-	return a.parseBlock(blockContent, commentStr)
+	return a.parseBlock(blocks.schema, blocks.description)
 }
 
 // RootSchema returns the parsed root-level schema, if any.
@@ -101,7 +98,9 @@ func (a *Annotator) RootSchema() *jsonschema.Schema {
 }
 
 // parseBlock parses the content of a @schema block into an AnnotationResult.
-func (a *Annotator) parseBlock(content, fullComment string) *magicschema.AnnotationResult {
+// The description is the comment's non-annotation prose, applied when the
+// block itself sets none.
+func (a *Annotator) parseBlock(content, description string) *magicschema.AnnotationResult {
 	var raw map[string]any
 
 	err := yaml.Unmarshal([]byte(content), &raw)
@@ -122,12 +121,10 @@ func (a *Annotator) parseBlock(content, fullComment string) *magicschema.Annotat
 		a.applyField(schema, result, key, val)
 	}
 
-	// Extract description from non-annotation comments if not set.
-	if schema.Description == "" {
-		desc := extractNonAnnotationDescription(fullComment)
-		if desc != "" {
-			schema.Description = desc
-		}
+	// Fall back to the non-annotation comment prose if the block sets no
+	// description.
+	if schema.Description == "" && description != "" {
+		schema.Description = description
 	}
 
 	return result
@@ -368,12 +365,12 @@ const (
 )
 
 // classifySchemaLine reports the delimiter role of a stripped, fully trimmed
-// comment line. The three block extractors share it so the grammar -- which
-// bare markers delimit a block, and which @schema-prefixed lines are the inline
-// form rather than a delimiter -- lives in one place; each extractor still
-// applies its own block-state transitions. The "@schema.root" literal must be
-// contiguous and bare: "@schema .root" with a space is the inline form, and
-// trailing content after either marker is inline rather than a delimiter.
+// comment line, so the grammar -- which bare markers delimit a block, and
+// which @schema-prefixed lines are the inline form rather than a delimiter --
+// lives in one place; [scanCommentBlocks] applies the block-state
+// transitions. The "@schema.root" literal must be contiguous and bare:
+// "@schema .root" with a space is the inline form, and trailing content after
+// either marker is inline rather than a delimiter.
 func classifySchemaLine(trimmed string) schemaLineKind {
 	if after, ok := strings.CutPrefix(trimmed, "@schema.root"); ok {
 		if strings.TrimSpace(after) == "" {
@@ -394,167 +391,132 @@ func classifySchemaLine(trimmed string) schemaLineKind {
 	return schemaLinePlain
 }
 
-// extractSchemaBlock extracts the content between # @schema delimiters.
-// Multiple @schema blocks in the same comment are concatenated (toggle behavior).
-// Content inside @schema.root blocks is excluded.
-func extractSchemaBlock(comment string) string {
-	lines := strings.Split(comment, "\n")
-
-	var (
-		inBlock     bool
-		inRootBlock bool
-		content     []string
-	)
-
-	for _, line := range lines {
-		// Strip once; markers match on a fully trimmed copy while content
-		// keeps its indentation beyond the marker and single space.
-		stripped := magicschema.StripCommentMarker(line)
-		trimmed := strings.TrimSpace(stripped)
-
-		switch classifySchemaLine(trimmed) {
-		case schemaLineRoot:
-			// Inside an open @schema block the marker is junk content, not a
-			// delimiter: toggling there would swallow the rest of the block.
-			if !inBlock {
-				inRootBlock = !inRootBlock
-			}
-
-		case schemaLineSchema:
-			// Toggle delimiter -- supports multiple blocks. A @schema delimiter
-			// also ends an unclosed @schema.root block, so a missing root close
-			// cannot swallow every following schema block.
-			inRootBlock = false
-			inBlock = !inBlock
-
-		case schemaLineInline:
-			// Not a delimiter (inline helm-values-schema form), never collected.
-
-		default: // schemaLinePlain
-			if inBlock && !inRootBlock {
-				content = append(content, stripped)
-			}
-		}
-	}
-
-	if len(content) == 0 {
-		return ""
-	}
-
-	return strings.Join(content, "\n")
+// commentBlocks is the classified content of one comment scan: the
+// concatenated @schema block content, the first @schema.root block's content,
+// and the non-annotation description prose.
+type commentBlocks struct {
+	schema      string
+	root        string
+	description string
 }
 
-// extractSchemaRootBlock extracts the content between @schema.root delimiters.
-func extractSchemaRootBlock(comment string) string {
+// scanCommentBlocks classifies every comment line as @schema block content,
+// @schema.root block content, or description prose in a single pass, so the
+// delimiter grammar and its block-state transitions live in one place.
+//
+// Block semantics:
+//
+//   - @schema delimiters toggle, so multiple blocks on the same key are
+//     concatenated. An unclosed @schema block is processed best-effort:
+//     content up to the end of the comment is included, except the lines a
+//     following @schema.root block claims.
+//   - Only the first @schema.root block applies; later root blocks still
+//     toggle state so their content stays out of the schema content and the
+//     description. A @schema delimiter closes an open root block (root
+//     content cannot extend into schema blocks), so a missing root close
+//     cannot swallow every following schema block. A root block still open
+//     when the comment ends is unclosed and silently ignored.
+//   - A bare @schema.root marker inside a closed @schema block is junk
+//     content, not a delimiter: toggling there would swallow the rest of the
+//     block. Inside an unclosed @schema block the marker keeps its delimiter
+//     role, so a root block following a missing @schema close parses as a
+//     root block instead of leaking into the property schema -- matching the
+//     upstream's root pass, which strips root blocks before schema parsing.
+//
+// Block content and description lines keep their indentation beyond the
+// comment marker and single following space, matching upstream helm-schema,
+// so YAML snippets embedded in comments keep their structure. Description
+// lines are additionally stripped of the helm-docs "-- " prefix, and lines
+// that are themselves annotation markers are skipped.
+func scanCommentBlocks(comment string) commentBlocks {
 	lines := strings.Split(comment, "\n")
 
-	var (
-		inBlock       bool
-		inSchemaBlock bool
-		content       []string
-	)
+	// Classify every line up front: the root-marker transition depends on
+	// whether the enclosing @schema block is closed by a later delimiter,
+	// which needs the total delimiter count before the stateful pass runs.
+	stripped := make([]string, len(lines))
+	kinds := make([]schemaLineKind, len(lines))
 
-scan:
-	for _, line := range lines {
+	var fences int
+
+	for i, line := range lines {
 		// Strip once; markers match on a fully trimmed copy while content
 		// keeps its indentation beyond the marker and single space.
-		stripped := magicschema.StripCommentMarker(line)
-		trimmed := strings.TrimSpace(stripped)
+		stripped[i] = magicschema.StripCommentMarker(line)
+		kinds[i] = classifySchemaLine(strings.TrimSpace(stripped[i]))
 
-		switch classifySchemaLine(trimmed) {
-		case schemaLineRoot:
-			// Inside an open @schema block the marker is junk content, not a
-			// delimiter, mirroring extractSchemaBlock.
-			if inSchemaBlock {
-				continue
-			}
-
-			if inBlock {
-				break scan // Closing delimiter -- only the first root block.
-			}
-
-			inBlock = true
-
-		case schemaLineSchema:
-			// A @schema delimiter ends an unclosed root block (root content
-			// cannot extend into schema blocks) and otherwise toggles
-			// schema-block state so root markers inside a schema block are
-			// ignored as junk.
-			if inBlock {
-				break scan
-			}
-
-			inSchemaBlock = !inSchemaBlock
-
-		case schemaLineInline:
-			// An inline "@schema key:value" is not a delimiter, but it is still
-			// skipped rather than appended: letting it land in the root YAML
-			// would make goccy reject the whole block as invalid.
-
-		default: // schemaLinePlain
-			if inBlock {
-				content = append(content, stripped)
-			}
+		if kinds[i] == schemaLineSchema {
+			fences++
 		}
 	}
-
-	if len(content) == 0 {
-		return ""
-	}
-
-	return strings.Join(content, "\n")
-}
-
-// extractNonAnnotationDescription extracts description text from comments
-// that are not part of @schema or @schema.root blocks. Lines join with
-// newlines and keep their indentation beyond the comment marker and single
-// following space, matching upstream helm-schema, so YAML snippets embedded
-// in comments keep their structure.
-func extractNonAnnotationDescription(comment string) string {
-	lines := strings.Split(comment, "\n")
 
 	var (
-		descLines     []string
-		inSchemaBlock bool
-		inRootBlock   bool
+		inSchema, inRoot, rootDone bool
+		seen                       int
+
+		schemaLines, rootLines, descLines []string
 	)
 
-	for _, line := range lines {
-		// Markers are matched on a fully trimmed copy; the content keeps
-		// its indentation.
-		content := magicschema.StripCommentMarker(line)
-		stripped := strings.TrimSpace(content)
-
-		switch classifySchemaLine(stripped) {
+	for i, kind := range kinds {
+		switch kind {
 		case schemaLineRoot:
-			// Inside an open @schema block the marker is junk content, not a
-			// delimiter.
-			if !inSchemaBlock {
-				inRootBlock = !inRootBlock
+			// Junk inside a closed @schema block (see semantics above): seen
+			// counting below fences means another @schema delimiter follows,
+			// so the open block is eventually closed.
+			if inSchema && seen < fences {
+				continue
 			}
+
+			if inRoot {
+				rootDone = true // Closing delimiter -- only the first root block.
+			}
+
+			inRoot = !inRoot
 
 		case schemaLineSchema:
-			// A @schema delimiter also ends an unclosed @schema.root block.
-			inRootBlock = false
-			inSchemaBlock = !inSchemaBlock
+			// Toggle delimiter -- supports multiple concatenated blocks --
+			// that also closes an open @schema.root block.
+			if inRoot {
+				rootDone = true
+				inRoot = false
+			}
+
+			seen++
+			inSchema = !inSchema
 
 		case schemaLineInline:
-			// Inline helm-values-schema content -- skipped, not a description.
+			// Not a delimiter (inline helm-values-schema form) and never
+			// collected: letting it land in block YAML would make goccy
+			// reject the whole block, and it is not a description either.
 
 		default: // schemaLinePlain
-			if inSchemaBlock || inRootBlock {
-				continue
-			}
+			switch {
+			case inRoot:
+				if !rootDone {
+					rootLines = append(rootLines, stripped[i])
+				}
 
-			// Regular comment line: strip the helm-docs "-- " prefix off the
-			// indentation-preserving copy.
-			cleaned := strings.TrimPrefix(content, "-- ")
-			if magicschema.IsAnnotationComment(cleaned) {
-				continue
-			}
+			case inSchema:
+				schemaLines = append(schemaLines, stripped[i])
 
-			descLines = append(descLines, cleaned)
+			default:
+				// Regular comment line: strip the helm-docs "-- " prefix off
+				// the indentation-preserving copy.
+				cleaned := strings.TrimPrefix(stripped[i], "-- ")
+				if magicschema.IsAnnotationComment(cleaned) {
+					continue
+				}
+
+				descLines = append(descLines, cleaned)
+			}
 		}
+	}
+
+	// A root block still open at the end of the comment is unclosed and is
+	// silently ignored. Content collected before rootDone belongs to a block
+	// a delimiter closed and is kept.
+	if inRoot && !rootDone {
+		rootLines = nil
 	}
 
 	// The caller passes the head-comment run that documents the key, which
@@ -563,12 +525,13 @@ func extractNonAnnotationDescription(comment string) string {
 	// blank line in the joined description, matching the upstream join;
 	// trimming the group's blank edges keeps the description from starting
 	// or ending with a separator.
-	group := magicschema.LastCommentGroup(descLines)
-	if len(group) == 0 {
-		return ""
-	}
+	descLines = magicschema.LastCommentGroup(descLines)
 
-	return strings.Join(group, "\n")
+	return commentBlocks{
+		schema:      strings.Join(schemaLines, "\n"),
+		root:        strings.Join(rootLines, "\n"),
+		description: strings.Join(descLines, "\n"),
+	}
 }
 
 // isDelimiterSuffix reports whether the text following the "@schema" token

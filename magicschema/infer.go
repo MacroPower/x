@@ -317,7 +317,10 @@ func adjacentCommentRun(comment *ast.CommentGroupNode, key ast.MapKeyNode) ([]st
 // fence delimiter (which carries no description text). A root marker inside an
 // open @schema block is junk content, not a delimiter, and a @schema delimiter
 // also ends an unclosed @schema.root block, mirroring the dadav annotator's
-// block extraction. Like upstream helm-schema, junk suffixes such as "@schema@"
+// comment scan. (That scan sees the whole comment and restores the root
+// marker's delimiter role when the enclosing @schema block is unclosed; the
+// distinction cannot surface here, where a line inside either block is equally
+// not prose.) Like upstream helm-schema, junk suffixes such as "@schema@"
 // still delimit a block; only a whitespace-separated suffix is excluded, since
 // that form is the helm-values-schema inline annotation. It returns the updated
 // (inSchema, inRoot) state and whether the line was a fence delimiter.
