@@ -528,8 +528,10 @@ func collectComments(mvn *ast.MappingValueNode, headComment string) string {
 		}
 	}
 
-	if keyNode, ok := mvn.Key.(ast.Node); ok {
-		if c := keyNode.GetComment(); c != nil {
+	// MapKeyNode embeds ast.Node, so GetComment is callable directly behind
+	// the nil guard.
+	if mvn.Key != nil {
+		if c := mvn.Key.GetComment(); c != nil {
 			parts = append(parts, c.String())
 		}
 	}

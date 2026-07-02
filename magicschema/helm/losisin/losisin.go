@@ -66,12 +66,11 @@ func (a *Annotator) Annotate(node ast.Node, _ string) *magicschema.AnnotationRes
 	// Key-line comment before value-line comment so that, under last-wins
 	// resolution, the value-line annotation wins -- the order upstream
 	// helm-values-schema collects them (keyNode.LineComment, then
-	// valNode.LineComment).
+	// valNode.LineComment). MapKeyNode embeds ast.Node, so GetComment is
+	// callable directly behind the nil guard.
 	if mvn.Key != nil {
-		if keyNode, ok := mvn.Key.(ast.Node); ok {
-			if comment := keyNode.GetComment(); comment != nil {
-				commentLines = append(commentLines, strings.Split(comment.String(), "\n")...)
-			}
+		if comment := mvn.Key.GetComment(); comment != nil {
+			commentLines = append(commentLines, strings.Split(comment.String(), "\n")...)
 		}
 	}
 
