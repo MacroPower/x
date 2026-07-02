@@ -6,12 +6,14 @@ package yamldoc
 import "bytes"
 
 // DropEmptyDocuments removes empty documents from a multi-document YAML
-// stream by collapsing each "---" separator that is followed, across blank
-// lines only, by another separator. The goccy/go-yaml parser stops emitting
-// documents after an empty one ("a: 1\n---\n\n---\nb: 2" parses as two
-// documents, losing b entirely), and empty documents contribute nothing to
-// the union (a nil document body is skipped), so removing them up front
-// preserves semantics while keeping later documents in the stream.
+// stream by collapsing each bare "---" separator that is followed, across
+// blank lines only, by another document start line -- either another bare
+// separator or a "---" marker carrying same-line content ("--- {b: 2}").
+// The goccy/go-yaml parser stops emitting documents after an empty one
+// ("a: 1\n---\n\n---\nb: 2" parses as two documents, losing b entirely),
+// and empty documents contribute nothing to the union (a nil document body
+// is skipped), so removing them up front preserves semantics while keeping
+// later documents in the stream.
 func DropEmptyDocuments(input []byte) []byte {
 	// A bare separator line requires the "---" substring, so its absence means
 	// there are no documents to collapse and the split/join would be a no-op.
@@ -30,14 +32,17 @@ func DropEmptyDocuments(input []byte) []byte {
 			continue
 		}
 
-		// Look ahead past blank lines; a following separator means this
-		// separator opens an empty document, so drop it and the blanks.
+		// Look ahead past blank lines; a following document start line means
+		// this separator opens an empty document, so drop it and the blanks.
+		// The start line itself is reprocessed on the next iteration: a bare
+		// separator repeats the collapse, a content-carrying "--- value" line
+		// is kept and opens the next document.
 		j := i + 1
 		for j < len(lines) && IsBlank(lines[j]) {
 			j++
 		}
 
-		if j < len(lines) && isSeparatorLine(lines[j]) {
+		if j < len(lines) && isDocumentStartLine(lines[j]) {
 			i = j - 1
 
 			continue
@@ -108,10 +113,45 @@ func NormalizeLineEndings(input []byte) []byte {
 }
 
 // isSeparatorLine reports whether a line is a bare YAML document separator:
-// "---" with nothing but trailing whitespace. A separator carrying content
-// ("--- value") opens a non-empty document and is not bare.
+// "---" followed by nothing but whitespace or a whitespace-separated trailing
+// comment ("--- # c"). A comment is not content, so a comment-carrying
+// separator still opens an empty document. A separator carrying content
+// ("--- value") opens a non-empty document and is not bare, and a marker
+// fused to other characters ("---foo") is a plain scalar, not a separator.
 func isSeparatorLine(line []byte) bool {
-	return bytes.Equal(bytes.TrimRight(line, " \t\r"), []byte("---"))
+	rest, ok := bytes.CutPrefix(line, []byte("---"))
+	if !ok {
+		return false
+	}
+
+	rest = bytes.TrimRight(rest, " \t\r")
+	if len(rest) == 0 {
+		return true
+	}
+
+	// A trailing comment must be separated from the marker by whitespace;
+	// without it the line is a plain scalar ("---#c"), not a separator.
+	trimmed := bytes.TrimLeft(rest, " \t")
+
+	return len(trimmed) < len(rest) && len(trimmed) > 0 && trimmed[0] == '#'
+}
+
+// isDocumentStartLine reports whether a line begins a document: a bare
+// separator (see [isSeparatorLine]) or a "---" marker followed by whitespace
+// and same-line content ("--- {b: 2}"). Either closes an empty document that
+// a preceding bare separator opened, so [DropEmptyDocuments] collapses the
+// bare separator when its look-ahead lands on one.
+func isDocumentStartLine(line []byte) bool {
+	if isSeparatorLine(line) {
+		return true
+	}
+
+	rest, ok := bytes.CutPrefix(line, []byte("---"))
+	if !ok {
+		return false
+	}
+
+	return len(rest) > 0 && (rest[0] == ' ' || rest[0] == '\t')
 }
 
 // isDocBoundaryLine reports whether a line is a bare YAML document delimiter:

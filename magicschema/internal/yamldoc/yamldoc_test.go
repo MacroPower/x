@@ -8,6 +8,62 @@ import (
 	"go.jacobcolvin.com/x/magicschema/internal/yamldoc"
 )
 
+func TestDropEmptyDocuments(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		want  string
+	}{
+		"bare separator before bare separator collapses": {
+			input: "a: 1\n---\n\n---\nb: 2\n",
+			want:  "a: 1\n---\nb: 2\n",
+		},
+		"comment-carrying separator before bare separator collapses": {
+			input: "a: 1\n--- # c\n\n---\nb: 2\n",
+			want:  "a: 1\n---\nb: 2\n",
+		},
+		"bare separator before comment-carrying separator collapses": {
+			input: "a: 1\n---\n\n--- # c\nb: 2\n",
+			want:  "a: 1\n--- # c\nb: 2\n",
+		},
+		"tab before trailing comment is still bare": {
+			input: "a: 1\n---\t# c\n\n---\nb: 2\n",
+			want:  "a: 1\n---\nb: 2\n",
+		},
+		"bare separator before content-carrying start collapses": {
+			input: "a: 1\n---\n--- {b: 2}\n",
+			want:  "a: 1\n--- {b: 2}\n",
+		},
+		"bare separator before content-carrying start across blanks collapses": {
+			input: "a: 1\n---\n\n--- {b: 2}\n",
+			want:  "a: 1\n--- {b: 2}\n",
+		},
+		"comment-carrying separator opening a non-empty document is kept": {
+			input: "a: 1\n--- # c\nb: 2\n",
+			want:  "a: 1\n--- # c\nb: 2\n",
+		},
+		"fused comment is a plain scalar, not a separator": {
+			input: "a: 1\n---#c\n\n---\nb: 2\n",
+			want:  "a: 1\n---#c\n\n---\nb: 2\n",
+		},
+		"end marker is not a collapse target": {
+			input: "a: 1\n---\n\n...\nb: 2\n",
+			want:  "a: 1\n---\n\n...\nb: 2\n",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := yamldoc.DropEmptyDocuments([]byte(tc.input))
+
+			assert.Equal(t, tc.want, string(got))
+		})
+	}
+}
+
 func TestSplitDocumentBytes(t *testing.T) {
 	t.Parallel()
 
@@ -33,6 +89,10 @@ func TestSplitDocumentBytes(t *testing.T) {
 		},
 		"end marker separates two documents": {
 			input: "a: 1\n...\nb: 2\n",
+			want:  []string{"a: 1", "b: 2\n"},
+		},
+		"separator with trailing comment separates two documents": {
+			input: "a: 1\n--- # c\nb: 2\n",
 			want:  []string{"a: 1", "b: 2\n"},
 		},
 	}

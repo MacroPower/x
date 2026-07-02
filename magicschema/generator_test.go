@@ -2279,6 +2279,21 @@ func TestGeneratorEmptyMidStreamDocument(t *testing.T) {
 		"multiple empty documents": {
 			input: "foo: 1\n---\n\n---\n\n---\nbar: 2\n",
 		},
+		"empty document opened by separator with trailing comment": {
+			input: "foo: 1\n--- # c\n\n---\nbar: 2\n",
+		},
+		"empty document closed by separator with trailing comment": {
+			input: "foo: 1\n---\n\n--- # c\nbar: 2\n",
+		},
+		"tab before the separator's trailing comment": {
+			input: "foo: 1\n---\t# c\n\n---\nbar: 2\n",
+		},
+		"empty document closed by content-carrying document start": {
+			input: "foo: 1\n---\n--- {bar: 2}\n",
+		},
+		"empty document closed by content-carrying start across blanks": {
+			input: "foo: 1\n---\n\n--- {bar: 2}\n",
+		},
 	}
 
 	for name, tc := range tcs {
