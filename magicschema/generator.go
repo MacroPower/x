@@ -721,6 +721,17 @@ func (g *Generator) buildChildSchema(
 		childSchema = &jsonschema.Schema{}
 	}
 
+	// A $ref annotation makes the property a reference. Draft 7 ignores
+	// every validation sibling of $ref, so grafting the structural type,
+	// properties, items, strict additionalProperties, comment descriptions,
+	// or inferred defaults beside it would be inert at best -- and under
+	// validators that do apply siblings, would double-constrain against the
+	// referent (fail closed). Return the annotation as authored, the same
+	// rule applyRootAnnotations enforces for a root $ref.
+	if childSchema.Ref != "" {
+		return childSchema
+	}
+
 	inferred := inferType(valueNode)
 
 	// If annotation doesn't specify type, infer it. The fill is skipped when

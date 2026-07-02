@@ -90,9 +90,7 @@
       "description": "Helm docs style description"
     },
     "resources": {
-      "type": "object",
-      "$ref": "#/definitions/resource",
-      "additionalProperties": true
+      "$ref": "#/definitions/resource"
     },
     "config": {
       "type": "object",
