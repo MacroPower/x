@@ -53,6 +53,21 @@ type RootAnnotator interface {
 	RootSchema() *jsonschema.Schema
 }
 
+// MarkerAnnotator is an optional interface that annotators can implement to
+// report which comment lines are annotation markers of their format. The
+// fallback description extractor consults every prepared annotator that
+// implements it, in addition to the built-in [IsAnnotationComment] list, so
+// a custom format's marker lines never leak into property descriptions.
+// Built-in formats need no recognizer: [IsAnnotationComment] always covers
+// them, even when their annotator is not enabled.
+type MarkerAnnotator interface {
+	// IsAnnotationLine reports whether a comment line is an annotation
+	// marker of this annotator's format rather than prose. The line arrives
+	// with its leading "#" markers stripped and surrounding whitespace
+	// trimmed.
+	IsAnnotationLine(line string) bool
+}
+
 // mergeAnnotations merges multiple AnnotationResults in priority order
 // (first element has highest priority). Returns nil if all inputs are nil.
 // The merged schema is a copy, so downstream mutation never reaches into a

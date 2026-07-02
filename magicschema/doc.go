@@ -75,7 +75,9 @@
 //     empty element among typed elements widens the items type to
 //     [type, null] so the source list validates. Plain YAML
 //     comments that do not look like annotation markers become the
-//     description; [IsAnnotationComment] identifies markers to skip.
+//     description; [IsAnnotationComment] identifies built-in markers to
+//     skip, and annotators implementing [MarkerAnnotator] extend
+//     recognition to their own formats.
 //     Comments also fill in the description when annotators produce
 //     output without one. With [WithInferDefaults], each scalar records
 //     its observed value and each array its full observed list as the
@@ -220,6 +222,11 @@
 // root-level schema properties (e.g., from @schema.root blocks) implement
 // the optional [RootAnnotator] interface; root properties from every input
 // apply in priority order (first input, first annotator wins per field).
+// Annotators with their own marker syntax implement the optional
+// [MarkerAnnotator] interface so the fallback description extractor
+// recognizes their marker lines and keeps them out of descriptions;
+// built-in formats are always recognized via [IsAnnotationComment], even
+// when their annotator is not enabled.
 //
 // Four built-in annotator sub-packages are provided:
 //
@@ -258,10 +265,11 @@
 //   - [ToSubSchemaMap] converts a map[string]any to map[string]*jsonschema.Schema.
 //   - [ParseYAMLValue] parses a YAML value string into a [json.RawMessage].
 //   - [IsAnnotationComment] reports whether a comment string looks like an
-//     annotation marker from any supported annotator format (@schema,
+//     annotation marker from any built-in annotator format (@schema,
 //     @param, @skip, @default, --, etc.), allowing annotators and the
 //     fallback comment extractor to avoid treating annotations as plain
-//     descriptions.
+//     descriptions. Custom formats extend recognition through the optional
+//     [MarkerAnnotator] interface.
 //   - [LastCommentGroup] returns the lines of the final comment group,
 //     trimming blank ("#"-only) lines from both ends. Physical blank lines
 //     delimit comment groups and [HeadCommentRun] restores those boundaries,

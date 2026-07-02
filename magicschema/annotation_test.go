@@ -2,12 +2,14 @@ package magicschema_test
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/goccy/go-yaml/ast"
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/x/magicschema"
 )
@@ -25,6 +27,39 @@ func (s stubAnnotator) ForContent(_ []byte) (magicschema.Annotator, error) { ret
 
 func (s stubAnnotator) Annotate(_ ast.Node, _ string) *magicschema.AnnotationResult {
 	return s.result
+}
+
+// markerStubAnnotator parses a custom "# @myschema type:<type>" comment line,
+// standing in for a third-party annotator with its own marker syntax. It
+// implements [magicschema.MarkerAnnotator] so the fallback description
+// extractor keeps its marker lines out of descriptions.
+type markerStubAnnotator struct{}
+
+func (markerStubAnnotator) Name() string { return "myschema" }
+
+func (m markerStubAnnotator) ForContent(_ []byte) (magicschema.Annotator, error) { return m, nil }
+
+func (markerStubAnnotator) Annotate(node ast.Node, _ string) *magicschema.AnnotationResult {
+	run, _, _ := magicschema.HeadCommentRun(node)
+
+	for _, line := range run {
+		cleaned := strings.TrimSpace(magicschema.StripCommentMarker(line))
+
+		after, ok := strings.CutPrefix(cleaned, "@myschema type:")
+		if !ok {
+			continue
+		}
+
+		return &magicschema.AnnotationResult{
+			Schema: &jsonschema.Schema{Type: strings.TrimSpace(after)},
+		}
+	}
+
+	return nil
+}
+
+func (markerStubAnnotator) IsAnnotationLine(line string) bool {
+	return strings.HasPrefix(line, "@myschema")
 }
 
 func TestGeneratorAnnotatorTypeFillRespectsValueSet(t *testing.T) {
@@ -288,4 +323,67 @@ func TestGeneratorAnnotatorRootKeywordsMerge(t *testing.T) {
 	assert.Equal(t, "danc", prop["$dynamicAnchor"])
 	assert.Equal(t, "#dref", prop["$dynamicRef"])
 	assert.Equal(t, map[string]any{"https://example.test/vocab": true}, prop["$vocabulary"])
+}
+
+func TestGeneratorMarkerAnnotatorKeepsMarkersOutOfDescriptions(t *testing.T) {
+	t.Parallel()
+
+	// The built-in [IsAnnotationComment] list does not know a custom
+	// annotator's marker grammar, so without the annotator's MarkerAnnotator
+	// recognizer the fallback comment extractor would emit its marker lines
+	// as prose descriptions.
+	tcs := map[string]struct {
+		input    string
+		wantType string
+		wantDesc string // empty means the property must carry no description
+	}{
+		"marker alone yields no description": {
+			input: stringtest.Input(`
+				# @myschema type:string
+				name: foo
+			`),
+			wantType: "string",
+		},
+		"prose beside the marker becomes the description": {
+			input: stringtest.Input(`
+				# The name.
+				# @myschema type:string
+				name: foo
+			`),
+			wantType: "string",
+			wantDesc: "The name.",
+		},
+		"inline marker yields no description": {
+			input:    "name: foo # @myschema type:string\n",
+			wantType: "string",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			gen := magicschema.NewGenerator(magicschema.WithAnnotators(markerStubAnnotator{}))
+
+			schema, err := gen.Generate([]byte(tc.input))
+			require.NoError(t, err)
+
+			out, err := json.Marshal(schema)
+			require.NoError(t, err)
+
+			var got map[string]any
+
+			require.NoError(t, json.Unmarshal(out, &got))
+
+			prop := propertyAt(t, got, "name")
+			assert.Equal(t, tc.wantType, prop["type"])
+
+			if tc.wantDesc == "" {
+				assert.NotContains(t, prop, "description",
+					"annotation marker must not leak into the description")
+			} else {
+				assert.Equal(t, tc.wantDesc, prop["description"])
+			}
+		})
+	}
 }

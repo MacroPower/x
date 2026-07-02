@@ -124,9 +124,10 @@ func unwrapNode(node ast.Node) ast.Node {
 	}
 }
 
-// extractComment extracts a plain-text description from a node's comments.
+// extractComment extracts a plain-text description from a node's comments,
+// skipping lines the isAnnotation predicate recognizes as annotation markers.
 // Returns empty string if no suitable comment is found.
-func extractComment(node ast.Node) string {
+func extractComment(node ast.Node, isAnnotation func(string) bool) string {
 	mvn, ok := node.(*ast.MappingValueNode)
 	if !ok {
 		return ""
@@ -137,7 +138,7 @@ func extractComment(node ast.Node) string {
 	// opening fence was discarded with an earlier run, so the run's starting
 	// fence state travels with it.
 	if run, inSchema, inRoot := adjacentCommentRun(mvn.GetComment(), mvn.Key); len(run) > 0 {
-		if desc := commentDescription(strings.Join(run, "\n"), inSchema, inRoot); desc != "" {
+		if desc := commentDescription(strings.Join(run, "\n"), inSchema, inRoot, isAnnotation); desc != "" {
 			return desc
 		}
 	}
@@ -148,7 +149,7 @@ func extractComment(node ast.Node) string {
 	// comment above a later element does not leak, only the first's).
 	if mvn.Value != nil {
 		if _, isSeq := unwrapNode(mvn.Value).(*ast.SequenceNode); !isSeq {
-			if desc := extractFromComment(mvn.Value.GetComment()); desc != "" {
+			if desc := extractFromComment(mvn.Value.GetComment(), isAnnotation); desc != "" {
 				return desc
 			}
 		}
@@ -158,7 +159,7 @@ func extractComment(node ast.Node) string {
 	// GetComment is callable directly; the nil guard is the only protection
 	// the old comma-ok assertion provided.
 	if mvn.Key != nil {
-		if desc := extractFromComment(mvn.Key.GetComment()); desc != "" {
+		if desc := extractFromComment(mvn.Key.GetComment(), isAnnotation); desc != "" {
 			return desc
 		}
 	}
@@ -168,21 +169,21 @@ func extractComment(node ast.Node) string {
 
 // extractFromComment extracts a description from a comment group node. An
 // inline comment is a self-contained group, so it starts outside any block.
-func extractFromComment(comment *ast.CommentGroupNode) string {
+func extractFromComment(comment *ast.CommentGroupNode, isAnnotation func(string) bool) string {
 	if comment == nil {
 		return ""
 	}
 
-	return commentDescription(comment.String(), false, false)
+	return commentDescription(comment.String(), false, false, isAnnotation)
 }
 
 // commentDescription cleans a comment string and rejects results that are
 // annotation markers rather than prose. The inSchema and inRoot flags seed the
 // @schema / @schema.root fence state for callers handing over a run that
 // already begins inside a block.
-func commentDescription(s string, inSchema, inRoot bool) string {
-	desc := cleanComment(s, inSchema, inRoot)
-	if desc != "" && !IsAnnotationComment(desc) {
+func commentDescription(s string, inSchema, inRoot bool, isAnnotation func(string) bool) string {
+	desc := cleanComment(s, inSchema, inRoot, isAnnotation)
+	if desc != "" && !isAnnotation(desc) {
 		return desc
 	}
 
@@ -355,8 +356,10 @@ func schemaFenceState(cleaned string, inSchema, inRoot bool) (bool, bool, bool) 
 // so YAML snippets embedded in comments keep their structure. Annotation
 // lines are dropped: bare @schema and @schema.root lines fence helm-schema
 // blocks whose content is annotation data, not prose, and lines matching
-// [IsAnnotationComment] are markers.
-func cleanComment(s string, inSchemaBlock, inRootBlock bool) string {
+// the isAnnotation predicate are markers. The generator's predicate combines
+// the built-in [IsAnnotationComment] list with the [MarkerAnnotator]
+// recognizers of the prepared annotators.
+func cleanComment(s string, inSchemaBlock, inRootBlock bool, isAnnotation func(string) bool) string {
 	var lines []string
 
 	for line := range strings.SplitSeq(s, "\n") {
@@ -379,10 +382,10 @@ func cleanComment(s string, inSchemaBlock, inRootBlock bool) string {
 			continue
 		}
 
-		// Skip annotation markers from any supported annotator format so
+		// Skip annotation markers from any recognized annotator format so
 		// they never leak into descriptions. Blank lines stay: they
 		// separate paragraphs.
-		if cleaned != "" && IsAnnotationComment(cleaned) {
+		if cleaned != "" && isAnnotation(cleaned) {
 			continue
 		}
 
@@ -426,7 +429,11 @@ func stripCommentPrefix(line string) string {
 }
 
 // IsAnnotationComment returns true if the comment looks like an annotation
-// marker from any of the supported annotators.
+// marker from any of the built-in annotator formats. Recognition is
+// independent of which annotators are enabled, so a known format's marker
+// never leaks into a description even when its annotator is off (fail open).
+// Custom annotators extend marker recognition by implementing the optional
+// [MarkerAnnotator] interface.
 func IsAnnotationComment(s string) bool {
 	s = strings.TrimSpace(s)
 
