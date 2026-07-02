@@ -655,15 +655,22 @@ func (g *Generator) buildChildSchema(
 
 	inferred := inferType(valueNode)
 
-	// If annotation doesn't specify type, infer it.
-	if childSchema.Type == "" && len(childSchema.Types) == 0 && inferred != "" {
+	// If annotation doesn't specify type, infer it. The fill is skipped when
+	// the annotation's enum or const contradicts the inferred type: grafting
+	// the structural type onto an incompatible value set would leave a schema
+	// no value satisfies (fail closed), mirroring the value-set guard
+	// mergeSchemaFields applies to the annotator-vs-annotator fill.
+	if childSchema.Type == "" && len(childSchema.Types) == 0 && inferred != "" &&
+		valueSetFitsType(enumValues(childSchema), &jsonschema.Schema{Type: inferred}) {
 		childSchema.Type = inferred
 	}
 
 	// A null-only annotated type (e.g. bitnami's [nullable] without a type, or
 	// an inline type:null) widens with the value's inferred type so the schema
 	// does not reject the concrete value present in the source. A concrete
-	// annotated type is authoritative and stands even over a null value.
+	// annotated type is authoritative and stands even over a null value. The
+	// widening needs no value-set guard: it only adds a type to the union, so
+	// it never rejects a value the null-only annotation accepted.
 	if isNullOnlyType(childSchema) && inferred != "" && inferred != typeNull {
 		SetSchemaType(childSchema, []string{inferred, typeNull})
 	}

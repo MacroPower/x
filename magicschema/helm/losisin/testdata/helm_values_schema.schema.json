@@ -254,7 +254,6 @@
       "const": false
     },
     "mixedEnum": {
-      "type": "integer",
       "enum": [
         null,
         1,

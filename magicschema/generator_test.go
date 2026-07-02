@@ -1326,6 +1326,77 @@ func TestGeneratorAllAnnotators(t *testing.T) {
 				assert.False(t, hasConst, "incompatible const must be dropped")
 			},
 		},
+		"structural type incompatible with annotated enum is not filled": {
+			// The helm-values-schema annotator sets a string enum on a key
+			// whose value is an integer. Filling the inferred integer type
+			// beside the string enum would emit
+			// {"type":"integer","enum":["debug","info"]}, which no value
+			// satisfies (fail closed). The type stays unset and the enum
+			// stands alone.
+			input: "" +
+				"# @schema enum:[debug, info]\n" +
+				"verbosity: 3\n",
+			check: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				verbosity, ok := props["verbosity"].(map[string]any)
+				require.True(t, ok, "missing property: verbosity")
+
+				assert.Equal(t, []any{"debug", "info"}, verbosity["enum"])
+
+				_, hasType := verbosity["type"]
+				assert.False(t, hasType, "incompatible inferred type must not be filled")
+			},
+		},
+		"structural type incompatible with annotated const is not filled": {
+			// The helm-values-schema annotator sets a string const on a key
+			// whose value is an integer. The inferred integer type must not
+			// be grafted beside it.
+			input: "" +
+				"# @schema const:hello\n" +
+				"port: 8080\n",
+			check: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				port, ok := props["port"].(map[string]any)
+				require.True(t, ok, "missing property: port")
+
+				assert.Equal(t, "hello", port["const"])
+
+				_, hasType := port["type"]
+				assert.False(t, hasType, "incompatible inferred type must not be filled")
+			},
+		},
+		"structural string type incompatible with integer const is not filled": {
+			// The reverse direction: a helm-schema block sets an integer
+			// const on a key whose value is a string. The inferred string
+			// type must not be grafted beside it.
+			input: "" +
+				"# @schema\n" +
+				"# const: 5\n" +
+				"# @schema\n" +
+				"key: hello\n",
+			check: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				key, ok := props["key"].(map[string]any)
+				require.True(t, ok, "missing property: key")
+
+				assert.InDelta(t, 5, key["const"], 0.01)
+
+				_, hasType := key["type"]
+				assert.False(t, hasType, "incompatible inferred type must not be filled")
+			},
+		},
 	}
 
 	for name, tc := range tcs {
