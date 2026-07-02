@@ -16,28 +16,31 @@ func TestDropEmptyDocuments(t *testing.T) {
 		want  string
 	}{
 		"bare separator before bare separator collapses": {
+			// The dropped separator blanks in place rather than deleting its
+			// line, so later lines keep their physical line numbers and
+			// parser positions still point at the user's file.
 			input: "a: 1\n---\n\n---\nb: 2\n",
-			want:  "a: 1\n---\nb: 2\n",
+			want:  "a: 1\n\n\n---\nb: 2\n",
 		},
 		"comment-carrying separator before bare separator collapses": {
 			input: "a: 1\n--- # c\n\n---\nb: 2\n",
-			want:  "a: 1\n---\nb: 2\n",
+			want:  "a: 1\n\n\n---\nb: 2\n",
 		},
 		"bare separator before comment-carrying separator collapses": {
 			input: "a: 1\n---\n\n--- # c\nb: 2\n",
-			want:  "a: 1\n--- # c\nb: 2\n",
+			want:  "a: 1\n\n\n--- # c\nb: 2\n",
 		},
 		"tab before trailing comment is still bare": {
 			input: "a: 1\n---\t# c\n\n---\nb: 2\n",
-			want:  "a: 1\n---\nb: 2\n",
+			want:  "a: 1\n\n\n---\nb: 2\n",
 		},
 		"bare separator before content-carrying start collapses": {
 			input: "a: 1\n---\n--- {b: 2}\n",
-			want:  "a: 1\n--- {b: 2}\n",
+			want:  "a: 1\n\n--- {b: 2}\n",
 		},
 		"bare separator before content-carrying start across blanks collapses": {
 			input: "a: 1\n---\n\n--- {b: 2}\n",
-			want:  "a: 1\n--- {b: 2}\n",
+			want:  "a: 1\n\n\n--- {b: 2}\n",
 		},
 		"comment-carrying separator opening a non-empty document is kept": {
 			input: "a: 1\n--- # c\nb: 2\n",

@@ -6,14 +6,17 @@ package yamldoc
 import "bytes"
 
 // DropEmptyDocuments removes empty documents from a multi-document YAML
-// stream by collapsing each bare "---" separator that is followed, across
+// stream by blanking each bare "---" separator that is followed, across
 // blank lines only, by another document start line -- either another bare
 // separator or a "---" marker carrying same-line content ("--- {b: 2}").
 // The goccy/go-yaml parser stops emitting documents after an empty one
 // ("a: 1\n---\n\n---\nb: 2" parses as two documents, losing b entirely),
 // and empty documents contribute nothing to the union (a nil document body
 // is skipped), so removing them up front preserves semantics while keeping
-// later documents in the stream.
+// later documents in the stream. The dropped separator is replaced with a
+// blank line rather than deleted, so every later line keeps its physical
+// line number and parser positions -- error messages, comment attribution --
+// still point at the user's actual file.
 func DropEmptyDocuments(input []byte) []byte {
 	// A bare separator line requires the "---" substring, so its absence means
 	// there are no documents to collapse and the split/join would be a no-op.
@@ -25,7 +28,7 @@ func DropEmptyDocuments(input []byte) []byte {
 
 	out := make([][]byte, 0, len(lines))
 
-	for i := 0; i < len(lines); i++ {
+	for i := range lines {
 		if !isSeparatorLine(lines[i]) {
 			out = append(out, lines[i])
 
@@ -33,17 +36,17 @@ func DropEmptyDocuments(input []byte) []byte {
 		}
 
 		// Look ahead past blank lines; a following document start line means
-		// this separator opens an empty document, so drop it and the blanks.
-		// The start line itself is reprocessed on the next iteration: a bare
-		// separator repeats the collapse, a content-carrying "--- value" line
-		// is kept and opens the next document.
+		// this separator opens an empty document, so blank it out. The blank
+		// run and the start line keep their own lines: a bare separator
+		// repeats the collapse when its turn comes, a content-carrying
+		// "--- value" line is kept and opens the next document.
 		j := i + 1
 		for j < len(lines) && IsBlank(lines[j]) {
 			j++
 		}
 
 		if j < len(lines) && isDocumentStartLine(lines[j]) {
-			i = j - 1
+			out = append(out, nil)
 
 			continue
 		}

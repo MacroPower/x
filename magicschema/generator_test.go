@@ -202,6 +202,22 @@ func TestGeneratorInvalidYAML(t *testing.T) {
 	assert.Nil(t, schema)
 }
 
+func TestGeneratorInvalidYAMLPositionSurvivesEmptyDocuments(t *testing.T) {
+	t.Parallel()
+
+	// Empty-document stripping blanks lines in place rather than deleting
+	// them, so a parse error after dropped documents reports the line number
+	// of the user's actual file -- here the unclosed sequence on line 9 --
+	// not a position in collapsed text.
+	input := "a: 1\n---\n\n\n---\n\n\n---\nb: [unclosed\n"
+
+	gen := magicschema.NewGenerator()
+
+	_, err := gen.Generate([]byte(input))
+	require.ErrorIs(t, err, magicschema.ErrInvalidYAML)
+	assert.Contains(t, err.Error(), "[9:", "error must cite the source file's line number")
+}
+
 func TestGeneratorOptions(t *testing.T) {
 	t.Parallel()
 
