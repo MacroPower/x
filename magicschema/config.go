@@ -242,7 +242,7 @@ func (c *Config) NewGenerator() (*Generator, error) {
 		return nil, fmt.Errorf("%w: negative JSON indentation %d", ErrInvalidOption, c.Indent)
 	}
 
-	annotators, err := c.parseAnnotatorNames(c.Annotators)
+	annotators, err := c.parseAnnotatorNames()
 	if err != nil {
 		return nil, err
 	}
@@ -293,15 +293,15 @@ func splitAnnotatorNames(s string) []string {
 	return cleaned
 }
 
-// parseAnnotatorNames parses a comma-separated list of annotator names and
+// parseAnnotatorNames parses the comma-separated [Config.Annotators] list and
 // returns the corresponding Annotator instances. Whitespace around names is
 // trimmed and empty entries are dropped (CLI parsing concerns); resolution
 // itself goes through [Registry.Lookup].
-func (c *Config) parseAnnotatorNames(names string) ([]Annotator, error) {
+func (c *Config) parseAnnotatorNames() ([]Annotator, error) {
 	// An empty or whitespace-only list needs no special case: splitAnnotatorNames
 	// drops it to no names and Lookup returns an empty slice, which the caller
 	// treats as "no annotators".
-	annotators, err := c.Registry.Lookup(splitAnnotatorNames(names)...)
+	annotators, err := c.Registry.Lookup(splitAnnotatorNames(c.Annotators)...)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidOption, err)
 	}
