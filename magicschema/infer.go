@@ -566,9 +566,13 @@ func inferItemsSchema(values []ast.Node) *jsonschema.Schema {
 	)
 
 	// Genuine nulls mark the list nullable; unknown nodes stay transparent
-	// via the empty string, which widens to the other side.
+	// via the empty string, which widens to the other side. The unwrap before
+	// the null check treats a known-tag-on-empty-scalar element (e.g. "!!int"
+	// with no value) as the null it actually holds, matching inferType and
+	// scalarGoValue -- checking the wrapped node would classify it neither
+	// null nor typed and silently drop its null evidence.
 	for _, val := range values {
-		if isNullNode(val) {
+		if isNullNode(unwrapNode(val)) {
 			hasNull = true
 
 			continue

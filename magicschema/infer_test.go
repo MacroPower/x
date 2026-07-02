@@ -281,6 +281,37 @@ func TestFlowSequenceInlineCommentBecomesDescription(t *testing.T) {
 	assert.Equal(t, "flow seq description", key["description"])
 }
 
+func TestTaggedEmptyListElementAddsNullToItems(t *testing.T) {
+	t.Parallel()
+
+	// A known tag on an empty scalar holds a null (see inferType), so as a
+	// list element it adds "null" to the items type the same way a literal
+	// null element does, and the source list validates.
+	input := "list:\n  - 1\n  - 2\n  - !!int\n"
+
+	gen := magicschema.NewGenerator()
+	schema, err := gen.Generate([]byte(input))
+	require.NoError(t, err)
+
+	out, err := json.Marshal(schema)
+	require.NoError(t, err)
+
+	var got map[string]any
+
+	require.NoError(t, json.Unmarshal(out, &got))
+
+	props, ok := got["properties"].(map[string]any)
+	require.True(t, ok)
+
+	list, ok := props["list"].(map[string]any)
+	require.True(t, ok)
+
+	items, ok := list["items"].(map[string]any)
+	require.True(t, ok)
+
+	assert.Equal(t, []any{"integer", "null"}, items["type"])
+}
+
 func TestThreeHashSchemaMarkerIsNotAFence(t *testing.T) {
 	t.Parallel()
 
