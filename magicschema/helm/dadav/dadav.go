@@ -166,11 +166,11 @@ func (a *Annotator) parseBlock(content, description string) *magicschema.Annotat
 		a.applyField(schema, result, key, val)
 	}
 
-	// Fall back to the non-annotation comment prose if the block sets no
-	// description.
-	if schema.Description == "" && description != "" {
-		schema.Description = description
-	}
+	// The comment's non-annotation prose is inferred, not authored by the
+	// block, so it travels as the fallback description: the merge applies it
+	// only when no annotator of any priority set a description explicitly,
+	// keeping inferred prose from shadowing an explicit annotation.
+	result.FallbackDescription = description
 
 	return result
 }

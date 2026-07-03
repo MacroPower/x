@@ -60,7 +60,10 @@
 //     [AnnotationResult.MergeProperties] are OR'd across all results.
 //     [AnnotationResult.HasRequired] uses the highest-priority annotator
 //     that explicitly sets it (non-nil). Description uses the first
-//     non-empty value. Extra maps are merged per key. With
+//     non-empty explicit value; comment-inferred prose travels separately
+//     as [AnnotationResult.FallbackDescription] and applies only when no
+//     annotator of any priority sets a description explicitly. Extra maps
+//     are merged per key. With
 //     [WithInferDefaults], an annotated node without a default records
 //     the observed value, same as the structural fallback below.
 //

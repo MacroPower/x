@@ -11,11 +11,21 @@ import (
 // AnnotationResult wraps an Annotator's output with metadata that doesn't
 // belong on the schema node itself.
 type AnnotationResult struct {
-	Schema          *jsonschema.Schema
-	HasRequired     *bool // non-nil if annotator explicitly set required (true or false)
-	Skip            bool  // true if this subtree should be omitted from the schema
-	SkipProperties  bool  // true to strip Properties from the output schema
-	MergeProperties bool  // true to merge child properties into additionalProperties
+	Schema      *jsonschema.Schema
+	HasRequired *bool // non-nil if annotator explicitly set required (true or false)
+
+	// FallbackDescription is prose the annotator inferred from surrounding
+	// comments rather than parsed from an explicit annotation key (dadav
+	// derives one from the comment lines around a @schema block). It fills
+	// the merged schema's description only when no annotator of any priority
+	// set one explicitly, so inferred prose never shadows an explicit
+	// description annotation, while still outranking the generator's own
+	// comment fallback.
+	FallbackDescription string
+
+	Skip            bool // true if this subtree should be omitted from the schema
+	SkipProperties  bool // true to strip Properties from the output schema
+	MergeProperties bool // true to merge child properties into additionalProperties
 }
 
 // Annotator extracts schema metadata from YAML comments.
@@ -102,6 +112,13 @@ func mergeAnnotations(results []*AnnotationResult) *AnnotationResult {
 			merged.HasRequired = r.HasRequired
 		}
 
+		// FallbackDescription: first non-empty in priority order, applied to
+		// the schema only after the fold so an explicit description from ANY
+		// priority outranks inferred prose.
+		if merged.FallbackDescription == "" {
+			merged.FallbackDescription = r.FallbackDescription
+		}
+
 		if r.Schema == nil {
 			continue
 		}
@@ -114,6 +131,12 @@ func mergeAnnotations(results []*AnnotationResult) *AnnotationResult {
 
 		// Merge schema fields: lower priority fills in gaps.
 		mergeSchemaFields(merged.Schema, r.Schema)
+	}
+
+	// The inferred prose fills in last: every annotator's explicit
+	// Description has had its chance to win the field above.
+	if merged != nil && merged.Schema != nil && merged.Schema.Description == "" {
+		merged.Schema.Description = merged.FallbackDescription
 	}
 
 	return merged

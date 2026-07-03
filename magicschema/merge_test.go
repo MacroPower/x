@@ -8,6 +8,7 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/x/magicschema"
 	"go.jacobcolvin.com/x/magicschema/helm/dadav"
@@ -888,6 +889,76 @@ func TestMergeEnumsNumericallyEqualAcrossGoTypes(t *testing.T) {
 	enum, ok := k["enum"].([]any)
 	require.True(t, ok)
 	assert.Len(t, enum, 2, "numerically equal members must deduplicate: %v", enum)
+}
+
+func TestExplicitDescriptionOutranksInferredProse(t *testing.T) {
+	t.Parallel()
+
+	// The dadav annotator infers a description from the prose around its @schema
+	// block. That inferred prose must not shadow a description another
+	// annotator parsed from an explicit annotation key, regardless of
+	// annotator priority order (dadav is higher priority than losisin in
+	// this configuration).
+	input := stringtest.Input(`
+		# some prose
+		# @schema
+		# type: string
+		# @schema
+		# @schema description:explicit losisin description
+		key: val
+	`)
+
+	gen := magicschema.NewGenerator(magicschema.WithAnnotators(dadav.New(), losisin.New()))
+	schema, err := gen.Generate([]byte(input))
+	require.NoError(t, err)
+
+	out, err := json.Marshal(schema)
+	require.NoError(t, err)
+
+	var got map[string]any
+
+	require.NoError(t, json.Unmarshal(out, &got))
+
+	props, ok := got["properties"].(map[string]any)
+	require.True(t, ok)
+
+	key, ok := props["key"].(map[string]any)
+	require.True(t, ok)
+
+	assert.Equal(t, "explicit losisin description", key["description"])
+}
+
+func TestInferredProseStillFillsDescription(t *testing.T) {
+	t.Parallel()
+
+	// With no explicit description from any annotator, dadav's
+	// comment-inferred prose still becomes the description.
+	input := stringtest.Input(`
+		# some prose
+		# @schema
+		# type: string
+		# @schema
+		key: val
+	`)
+
+	gen := magicschema.NewGenerator(magicschema.WithAnnotators(dadav.New(), losisin.New()))
+	schema, err := gen.Generate([]byte(input))
+	require.NoError(t, err)
+
+	out, err := json.Marshal(schema)
+	require.NoError(t, err)
+
+	var got map[string]any
+
+	require.NoError(t, json.Unmarshal(out, &got))
+
+	props, ok := got["properties"].(map[string]any)
+	require.True(t, ok)
+
+	key, ok := props["key"].(map[string]any)
+	require.True(t, ok)
+
+	assert.Equal(t, "some prose", key["description"])
 }
 
 func TestConcurrentGenerateSharedAnnotatorPrototype(t *testing.T) {
