@@ -228,6 +228,40 @@ func TestConfigRegisterFlagsDefaults(t *testing.T) {
 	})
 }
 
+func TestConfigRegisterFlagsShorthands(t *testing.T) {
+	t.Parallel()
+
+	t.Run("defaults register -o and -a", func(t *testing.T) {
+		t.Parallel()
+
+		cfg := magicschema.NewConfig()
+		cmd := &cobra.Command{Use: "test"}
+		cfg.RegisterFlags(cmd.Flags())
+
+		assert.Equal(t, "output", cmd.Flags().ShorthandLookup("o").Name)
+		assert.Equal(t, "annotators", cmd.Flags().ShorthandLookup("a").Name)
+	})
+
+	t.Run("cleared shorthands avoid a host collision", func(t *testing.T) {
+		t.Parallel()
+
+		// Two flags registering the same shorthand panic in pflag, so a host
+		// CLI that already uses -o or -a clears the shorthand fields; renaming
+		// the long flag alone cannot avoid the collision.
+		cmd := &cobra.Command{Use: "test"}
+		cmd.Flags().StringP("overwrite", "o", "", "host flag")
+		cmd.Flags().StringP("all", "a", "", "host flag")
+
+		cfg := magicschema.NewConfig()
+		cfg.Flags.OutputShorthand = ""
+		cfg.Flags.AnnotatorsShorthand = ""
+
+		require.NotPanics(t, func() { cfg.RegisterFlags(cmd.Flags()) })
+		assert.NotNil(t, cmd.Flags().Lookup("output"))
+		assert.NotNil(t, cmd.Flags().Lookup("annotators"))
+	})
+}
+
 func TestConfigAnnotatorsCompletion(t *testing.T) {
 	t.Parallel()
 

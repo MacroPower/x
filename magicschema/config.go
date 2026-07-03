@@ -18,16 +18,23 @@ var ErrUnknownAnnotator = errors.New("unknown annotator")
 
 // Flags holds CLI flag names for schema generation configuration, allowing
 // callers to customize flag names while keeping sensible defaults.
+//
+// The shorthand fields exist because pflag panics when two flags register
+// the same shorthand: a host CLI that already uses -o or -a clears (or
+// remaps) the shorthand here, which renaming the long flag alone cannot
+// avoid. An empty shorthand registers none.
 type Flags struct {
-	Output        string
-	Draft         string
-	Indent        string
-	Title         string
-	Description   string
-	ID            string
-	Annotators    string
-	Strict        string
-	InferDefaults string
+	Output              string
+	OutputShorthand     string
+	Draft               string
+	Indent              string
+	Title               string
+	Description         string
+	ID                  string
+	Annotators          string
+	AnnotatorsShorthand string
+	Strict              string
+	InferDefaults       string
 }
 
 // Registry maps annotator names (as used in the --annotators flag) to
@@ -96,15 +103,17 @@ type Config struct {
 // [go.jacobcolvin.com/x/magicschema/helm.DefaultNames]).
 func NewConfig() *Config {
 	f := Flags{
-		Output:        "output",
-		Draft:         "draft",
-		Indent:        "indent",
-		Title:         "title",
-		Description:   "description",
-		ID:            "id",
-		Annotators:    "annotators",
-		Strict:        "strict",
-		InferDefaults: "infer-defaults",
+		Output:              "output",
+		OutputShorthand:     "o",
+		Draft:               "draft",
+		Indent:              "indent",
+		Title:               "title",
+		Description:         "description",
+		ID:                  "id",
+		Annotators:          "annotators",
+		AnnotatorsShorthand: "a",
+		Strict:              "strict",
+		InferDefaults:       "infer-defaults",
 	}
 
 	return &Config{
@@ -123,7 +132,7 @@ func NewConfig() *Config {
 // includes --annotators: an Annotators left empty stays empty, matching a
 // [Config.Registry] the caller has not populated (see [NewConfig]).
 func (c *Config) RegisterFlags(flags *pflag.FlagSet) {
-	flags.StringVarP(&c.Output, c.Flags.Output, "o", c.Output,
+	flags.StringVarP(&c.Output, c.Flags.Output, c.Flags.OutputShorthand, c.Output,
 		"output file path (- for stdout)")
 	flags.IntVar(&c.Draft, c.Flags.Draft, c.Draft,
 		"JSON Schema draft version (only 7 is supported)")
@@ -135,7 +144,7 @@ func (c *Config) RegisterFlags(flags *pflag.FlagSet) {
 		"schema description field")
 	flags.StringVar(&c.ID, c.Flags.ID, c.ID,
 		"schema $id field")
-	flags.StringVarP(&c.Annotators, c.Flags.Annotators, "a", c.Annotators,
+	flags.StringVarP(&c.Annotators, c.Flags.Annotators, c.Flags.AnnotatorsShorthand, c.Annotators,
 		"comma-separated list of enabled annotation parsers (in priority order)")
 	flags.BoolVar(&c.Strict, c.Flags.Strict, c.Strict,
 		"set additionalProperties: false on objects")
