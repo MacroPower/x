@@ -124,9 +124,9 @@ func generate(gen *magicschema.Generator, args []string) (*jsonschema.Schema, er
 				return nil, fmt.Errorf("%w: stdin: %w", magicschema.ErrReadInput, err)
 			}
 		} else {
-			data, err = os.ReadFile(arg)
+			data, err = magicschema.ReadInputFile(arg)
 			if err != nil {
-				return nil, fmt.Errorf("%w: %w", magicschema.ErrReadInput, err)
+				return nil, err
 			}
 		}
 

@@ -216,17 +216,31 @@ func (g *Generator) GenerateFiles(paths ...string) (*jsonschema.Schema, error) {
 	inputs := make([][]byte, 0, len(paths))
 
 	for _, path := range paths {
-		// The *os.PathError from os.ReadFile already carries the path.
-		//nolint:gosec // G304: reading caller-provided paths is the purpose of GenerateFiles.
-		data, err := os.ReadFile(path)
+		data, err := ReadInputFile(path)
 		if err != nil {
-			return nil, fmt.Errorf("%w: %w", ErrReadInput, err)
+			return nil, err
 		}
 
 		inputs = append(inputs, data)
 	}
 
 	return g.Generate(inputs...)
+}
+
+// ReadInputFile reads one input file for [Generator.Generate], wrapping
+// failures in [ErrReadInput]. It is the same read [Generator.GenerateFiles]
+// performs per path, exported so a caller assembling a mixed input list (the
+// CLI's stdin alongside file paths) shares one read-and-wrap rule instead of
+// re-implementing it.
+func ReadInputFile(path string) ([]byte, error) {
+	// The *os.PathError from os.ReadFile already carries the path.
+	//nolint:gosec // G304: reading caller-provided paths is the purpose of ReadInputFile.
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrReadInput, err)
+	}
+
+	return data, nil
 }
 
 // generateSingle processes a single YAML input into a schema. It returns the
