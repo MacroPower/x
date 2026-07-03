@@ -182,7 +182,8 @@
 //     (array, boolean, integer, null, number, object, string) during the
 //     compliance pass; invalid types cause a hard error. Duplicate types in
 //     a type array are also rejected.
-//   - title, description: metadata strings (direct assignment, no parsing).
+//   - title, description: metadata strings. Upstream assigns them verbatim;
+//     here a fully quoted value is unquoted (see Intentional Divergences).
 //   - default: default value parsed via processObjectComment. Supports
 //     scalars, objects, and arrays. An empty value (bare "default:" with
 //     nothing after the colon) is a hard error.
@@ -194,8 +195,9 @@
 //     allows any value including null. An empty value is a hard error.
 //   - examples: array of example values. Same list parsing as enum
 //     (preserves native types).
-//   - pattern: regex pattern string for string validation (direct
-//     assignment).
+//   - pattern: regex pattern string for string validation. Upstream assigns
+//     it verbatim; here a fully quoted value is unquoted (see Intentional
+//     Divergences).
 //   - minimum, maximum: numeric range constraints (float64 via
 //     [strconv.ParseFloat]). Accept "null" to clear the constraint.
 //     Invalid numbers are hard errors.
@@ -218,8 +220,8 @@
 //     appendNullType post-processing), regardless of where the key sits
 //     relative to type:. With no annotated type the null-only type is left
 //     for the generator to widen with the value's inferred type.
-//   - $id: schema identifier URI (direct assignment, no validation).
-//   - $ref: schema reference URI (direct assignment). Upstream supports
+//   - $id: schema identifier URI, unquoted like title (no validation).
+//   - $ref: schema reference URI, unquoted like title. Upstream supports
 //     $k8s shorthand expansion (see below) and Draft 7 allOf wrapping
 //     (see below).
 //   - additionalProperties: when the value is empty or whitespace-only,
@@ -241,7 +243,7 @@
 //     via processObjectComment. Creates the Items schema if nil.
 //   - itemEnum: shortcut to set items.enum. Uses the same list parsing as
 //     enum (preserves native types). Creates the Items schema if nil.
-//   - itemRef: shortcut to set items.$ref (direct assignment). Creates
+//   - itemRef: shortcut to set items.$ref, unquoted like $ref. Creates
 //     the Items schema if nil.
 //   - itemRequired: shortcut to set items.required from a list of property
 //     names, for arrays of objects. Creates the Items schema if nil.
@@ -357,6 +359,14 @@
 //   - Unknown annotation keys produce a warning log and are skipped, rather
 //     than causing a hard error. This follows the magicschema principle of
 //     silently handling unparseable annotations.
+//
+//   - String-valued keys upstream assigns verbatim (title, description,
+//     pattern, $id, $ref, itemRef) strip matching surrounding quotes here: a
+//     value containing a ";" must be quoted to survive the semicolon split,
+//     and keeping the quotes would corrupt the value (a quoted pattern would
+//     require literal quote characters in matched strings). Text that merely
+//     starts and ends with the same quote character without the quote
+//     spanning the whole value stays verbatim, matching upstream.
 //
 //   - Empty key:value pairs from trailing semicolons are silently skipped.
 //     Upstream treats trailing semicolons as producing an empty key which
