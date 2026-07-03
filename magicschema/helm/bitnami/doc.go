@@ -102,9 +102,10 @@
 // depth zero, which agrees with the upstream tokenization on every
 // upstream-valid modifier list (upstream imposes no modifier ordering, so
 // [default: abc, nullable] yields default "abc" plus nullable under both
-// tools). A bracketed flow-sequence default like [array, default: [a, [b],
-// c]] stays whole because its commas sit inside nested brackets -- an input
-// upstream mangles as described above. A bare comma-containing default like
+// tools). A bracketed flow-collection default like [array, default: [a, [b],
+// c]] or [object, default: {cpu: 100m, memory: 128Mi}] stays whole because
+// its commas sit inside nested brackets or braces -- inputs upstream mangles
+// as described above. A bare comma-containing default like
 // [default: a,b,c] is truncated at the first comma under both tokenizations;
 // upstream then hard-errors on the leftover unknown modifiers "b" and "c",
 // while we silently ignore them and record the default "a". Values
@@ -298,15 +299,16 @@
 //     raising an error. This follows the magicschema best-effort principle of
 //     extracting as much information as possible without failing.
 //
-//   - Bracketed flow-sequence defaults: Modifier tokens are split on commas
-//     only at bracket depth zero, so a [default: VALUE] whose value is a
-//     flow sequence ([array, default: [a, [b], c]]) is preserved whole and
-//     parsed as the list ["a", ["b"], "c"]. Upstream splits on every comma,
-//     mangling such input into a truncated default ("[a") and unknown-modifier
-//     hard errors. On upstream-valid input (which never nests brackets inside
-//     the modifier group) the two tokenizations agree, including for
-//     modifiers written after default: ([default: abc, nullable] yields
-//     default "abc" plus nullable).
+//   - Bracketed flow-collection defaults: Modifier tokens are split on commas
+//     only at bracket depth zero (square brackets and braces both nest), so a
+//     [default: VALUE] whose value is a flow sequence ([array, default: [a,
+//     [b], c]]) or a flow mapping ([object, default: {cpu: 100m, memory:
+//     128Mi}]) is preserved whole and parsed as its native list or map.
+//     Upstream splits on every comma, mangling such input into a truncated
+//     default ("[a") and unknown-modifier hard errors. On upstream-valid
+//     input (which never nests brackets inside the modifier group) the two
+//     tokenizations agree, including for modifiers written after default:
+//     ([default: abc, nullable] yields default "abc" plus nullable).
 //
 //   - Extended type modifiers: We accept number, integer, and boolean as type
 //     modifiers in addition to the upstream's string, array, and object. This

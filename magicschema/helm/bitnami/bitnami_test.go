@@ -2152,3 +2152,39 @@ func TestBitnamiAnnotatorDefaultWithComma(t *testing.T) {
 	assert.Equal(t, "hello", g["default"],
 		"default value must end at the comma, matching upstream tokenization")
 }
+
+func TestBitnamiAnnotatorFlowMappingDefault(t *testing.T) {
+	t.Parallel()
+
+	// Commas inside a flow-mapping default sit at brace depth, so the token
+	// stays whole and the default parses as its native map -- the same
+	// preservation the flow-sequence default gets.
+	input := stringtest.Input(`
+		## @param resources [object, default: {cpu: 100m, memory: 128Mi}] Resource requests
+		resources:
+		  cpu: 200m
+	`)
+
+	gen := magicschema.NewGenerator(
+		magicschema.WithAnnotators(bitnami.New()),
+	)
+	schema, err := gen.Generate([]byte(input))
+	require.NoError(t, err)
+
+	out, err := json.Marshal(schema)
+	require.NoError(t, err)
+
+	var got map[string]any
+
+	require.NoError(t, json.Unmarshal(out, &got))
+
+	props, ok := got["properties"].(map[string]any)
+	require.True(t, ok)
+
+	r, ok := props["resources"].(map[string]any)
+	require.True(t, ok)
+
+	assert.Equal(t, "object", r["type"])
+	assert.Equal(t, map[string]any{"cpu": "100m", "memory": "128Mi"}, r["default"])
+	assert.Equal(t, "Resource requests", r["description"])
+}

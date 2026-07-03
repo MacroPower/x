@@ -216,10 +216,12 @@ func parseModifiers(param *bitnamiParam, modifiers string) {
 }
 
 // splitModifierTokens splits bracket contents on commas at bracket depth
-// zero, so a comma inside a nested flow sequence (e.g. the default value in
-// "array, default: [a, [b], c]") does not end its token. The input is the
-// balanced group peeled by [splitModifiers], so the depth never goes
-// negative.
+// zero, so a comma inside a nested flow collection (e.g. the default value in
+// "array, default: [a, [b], c]" or "object, default: {cpu: 100m}") does not
+// end its token. Square brackets and braces both nest -- a flow-mapping
+// default carries commas just as a flow sequence does -- and a stray closer
+// never drops the depth below zero, so a malformed value cannot make a later
+// top-level comma look nested.
 func splitModifierTokens(modifiers string) []string {
 	var (
 		tokens []string
@@ -229,10 +231,13 @@ func splitModifierTokens(modifiers string) []string {
 
 	for i, ch := range modifiers {
 		switch ch {
-		case '[':
+		case '[', '{':
 			depth++
-		case ']':
-			depth--
+		case ']', '}':
+			if depth > 0 {
+				depth--
+			}
+
 		case ',':
 			if depth == 0 {
 				tokens = append(tokens, modifiers[start:i])
