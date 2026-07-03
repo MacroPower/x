@@ -115,6 +115,36 @@ func TestBitnamiAnnotator(t *testing.T) {
 				assert.Contains(t, props, "name")
 			},
 		},
+		"annotation-lookalike inside a block scalar is data": {
+			// A ## @param line inside a "|" scalar is string data; treating
+			// it as an annotation would attach a wrong type to the real key
+			// and reject the source file itself.
+			input: stringtest.Input(`
+				script: |
+				  ## @param config.item [string] fake bitnami param
+				config:
+				  item: 1
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				config, ok := props["config"].(map[string]any)
+				require.True(t, ok)
+
+				configProps, ok := config["properties"].(map[string]any)
+				require.True(t, ok)
+
+				item, ok := configProps["item"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "integer", item["type"],
+					"the fake @param inside the scalar must not set a type")
+				assert.NotContains(t, item, "description")
+			},
+		},
 		"param on the same key outranks skip": {
 			// Upstream filters @skip entries out of its render list, but a
 			// separate @param entry for the same key still renders, so the

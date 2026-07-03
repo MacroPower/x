@@ -8,6 +8,53 @@ import (
 	"go.jacobcolvin.com/x/magicschema/internal/yamldoc"
 )
 
+func TestMaskBlockScalars(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		want  []string
+	}{
+		"literal scalar interior blanked": {
+			input: "script: |\n  # fake comment\n  ## @param x y\nreal: 1\n",
+			want:  []string{"script: |", "", "", "real: 1", ""},
+		},
+		"folded scalar with chomping and comment": {
+			input: "text: >- # c\n  data line\nnext: 2\n",
+			want:  []string{"text: >- # c", "", "next: 2", ""},
+		},
+		"sequence item scalar": {
+			input: "list:\n  - |\n    # data\n  - plain\n",
+			want:  []string{"list:", "  - |", "", "  - plain", ""},
+		},
+		"blank lines stay inside the scalar": {
+			input: "s: |\n  a\n\n  b\nreal: 1\n",
+			want:  []string{"s: |", "", "", "", "real: 1", ""},
+		},
+		"comment ending in an indicator opens nothing": {
+			input: "# usage: |\n  ## @param x y\nreal: 1\n",
+			want:  []string{"# usage: |", "  ## @param x y", "real: 1", ""},
+		},
+		"plain scalar containing a pipe opens nothing": {
+			input: "cmd: foo | bar\n  # not data\n",
+			want:  []string{"cmd: foo | bar", "  # not data", ""},
+		},
+		"no block scalars unchanged": {
+			input: "a: 1\n# comment\nb: 2\n",
+			want:  []string{"a: 1", "# comment", "b: 2", ""},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := yamldoc.MaskBlockScalars([]byte(tc.input))
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
 func TestDropEmptyDocuments(t *testing.T) {
 	t.Parallel()
 

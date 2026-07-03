@@ -8,6 +8,7 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 
 	"go.jacobcolvin.com/x/magicschema"
+	"go.jacobcolvin.com/x/magicschema/internal/yamldoc"
 )
 
 var (
@@ -60,9 +61,11 @@ func (a *Annotator) ForContent(content []byte) (magicschema.Annotator, error) {
 		skips:  make(map[string]bool),
 	}
 
-	lines := strings.SplitSeq(string(content), "\n")
-
-	for line := range lines {
+	// Block scalar interiors are blanked before the scan: string data inside
+	// a "|" or ">" value may look exactly like a ## @param line, and
+	// registering it would attach a wrong type or description to a real key
+	// (fail closed).
+	for _, line := range yamldoc.MaskBlockScalars(content) {
 		// Skip recognized-but-ignored tags (@section, @descriptionStart,
 		// @descriptionEnd, @extra) to avoid misparsing them as @param lines.
 		if ignoredTagExpr.MatchString(line) {

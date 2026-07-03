@@ -3,7 +3,65 @@
 // ahead of parsing.
 package yamldoc
 
-import "bytes"
+import (
+	"bytes"
+	"regexp"
+	"strings"
+)
+
+// blockScalarHeader matches a line whose value position holds only a block
+// scalar indicator with optional chomping/indentation modifiers and an
+// optional trailing comment: "key: |", "- >-", "key: |2+ # c". The indicator
+// must be the whole value, so a plain scalar that merely contains a pipe
+// ("cmd: foo | bar") does not count.
+var blockScalarHeader = regexp.MustCompile(`[:\-][ \t]+[|>]\d*[+-]?\d*[ \t]*(?:#.*)?$`)
+
+// MaskBlockScalars splits content into lines with the interior of block
+// scalars (literal "|" and folded ">" values) blanked out. Line-oriented
+// annotation scans (bitnami's ## @param, norwoodj's old-style descriptions)
+// iterate these lines instead of a raw split, so string DATA inside a block
+// scalar -- which may look exactly like an annotation comment -- can never
+// register an annotation and attach a wrong type or description to a real
+// key, producing a schema the source file itself fails. Line count and
+// order are preserved; only interior lines become empty.
+//
+// Detection is textual: a non-comment line whose value position holds only a
+// block scalar indicator opens a scalar, and every following line that is
+// blank or indented past the header line belongs to it. Block scalar content
+// must be indented past the line that introduces it, so the first line back
+// at or under the header's indentation ends the scalar.
+func MaskBlockScalars(content []byte) []string {
+	lines := strings.Split(string(content), "\n")
+
+	inScalar, headerIndent := false, 0
+
+	for i, line := range lines {
+		if inScalar {
+			if IsBlank([]byte(line)) || indentOf(line) > headerIndent {
+				lines[i] = ""
+
+				continue
+			}
+
+			inScalar = false
+		}
+
+		// A comment line ending in an indicator ("# usage: |") opens nothing;
+		// without the guard it would swallow indented annotation lines below.
+		trimmed := strings.TrimLeft(line, " \t")
+		if !strings.HasPrefix(trimmed, "#") && blockScalarHeader.MatchString(line) {
+			inScalar, headerIndent = true, indentOf(line)
+		}
+	}
+
+	return lines
+}
+
+// indentOf counts a line's leading spaces. YAML forbids tabs in indentation,
+// so spaces alone determine nesting.
+func indentOf(line string) int {
+	return len(line) - len(strings.TrimLeft(line, " "))
+}
 
 // DropEmptyDocuments removes empty documents from a multi-document YAML
 // stream by blanking each bare "---" separator that is followed, across

@@ -44,6 +44,35 @@ func TestHelmDocsAnnotator(t *testing.T) {
 		input string
 		want  func(*testing.T, map[string]any)
 	}{
+		"annotation-lookalike inside a block scalar is data": {
+			// An old-style "# key -- desc" line inside a "|" scalar is string
+			// data; treating it as an annotation would attach a wrong
+			// description to the real key.
+			input: stringtest.Input(`
+				script: |
+				  # config.item -- fake description from string data
+				config:
+				  item: 1
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				config, ok := props["config"].(map[string]any)
+				require.True(t, ok)
+
+				configProps, ok := config["properties"].(map[string]any)
+				require.True(t, ok)
+
+				item, ok := configProps["item"].(map[string]any)
+				require.True(t, ok)
+
+				assert.NotContains(t, item, "description",
+					"the fake old-style line inside the scalar must not attach")
+			},
+		},
 		"simple description": {
 			input: stringtest.Input(`
 				# -- Number of replicas

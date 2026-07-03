@@ -8,6 +8,7 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 
 	"go.jacobcolvin.com/x/magicschema"
+	"go.jacobcolvin.com/x/magicschema/internal/yamldoc"
 )
 
 var (
@@ -87,7 +88,12 @@ func (a *Annotator) ForContent(content []byte) (magicschema.Annotator, error) {
 
 	var commentLines []string
 
-	for line := range strings.SplitSeq(string(content), "\n") {
+	// Block scalar interiors are blanked before the scan: string data inside
+	// a "|" or ">" value may look exactly like an old-style "# key -- desc"
+	// line, and registering it would attach a wrong description to a real
+	// key. A blanked line reads as a non-comment line, terminating any open
+	// block the same way the data line itself would.
+	for _, line := range yamldoc.MaskBlockScalars(content) {
 		if !foundComment {
 			// Look for an old-style "# key.path -- description" line. The
 			// same predicate splits stacked blocks below, so the scan that
