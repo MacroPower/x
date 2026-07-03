@@ -45,50 +45,39 @@ func (a *Annotator) Annotate(node ast.Node, _ string) *magicschema.AnnotationRes
 		return nil
 	}
 
-	// Collect all comment lines from head, inline on value, inline on key, and foot.
+	// Collect the comment parts from head, key line, value line, and foot.
+	// The shared collector compensates the goccy attribution quirks (merged
+	// head groups narrowed to the documenting run, a sequence's stowed
+	// first-element head comment excluded from the value-line part).
+	nc := magicschema.CollectNodeComments(mvn)
+
 	var commentLines []string
 
-	// Head comment lines come from the run that physically documents the
-	// key. The parser merges blank-line-separated comment blocks into one
-	// head comment group, so reading the group whole would apply a detached
-	// earlier block (a file header, an annotation for a removed key) to this
-	// key -- possibly producing a schema the key's own value fails. Upstream
-	// keeps only the last comment group, splitting the raw head comment on
-	// the blank line; [magicschema.HeadCommentRun] reconstructs the erased
-	// blank-line boundaries from comment token positions, so the run is that
-	// last group. A "#"-only line inside the run is a paragraph separator,
-	// not a group boundary ([magicschema.LastCommentGroup] trims only the
-	// group's blank edges), so an annotation separated from its prose by a
-	// bare "#" line still applies, matching the upstream "\n\n"-only split.
-	if run, _, _ := magicschema.HeadCommentRun(mvn); len(run) > 0 {
-		commentLines = append(commentLines, magicschema.LastCommentGroup(run)...)
+	// The head run may span several upstream comment groups; upstream keeps
+	// only the last, splitting on the blank line. A "#"-only line inside the
+	// run is a paragraph separator, not a group boundary
+	// ([magicschema.LastCommentGroup] trims only the group's blank edges), so
+	// an annotation separated from its prose by a bare "#" line still
+	// applies, matching the upstream "\n\n"-only split.
+	if nc.HeadRun != "" {
+		commentLines = append(commentLines,
+			magicschema.LastCommentGroup(strings.Split(nc.HeadRun, "\n"))...)
 	}
 
 	// Key-line comment before value-line comment so that, under last-wins
 	// resolution, the value-line annotation wins -- the order upstream
 	// helm-values-schema collects them (keyNode.LineComment, then
-	// valNode.LineComment). MapKeyNode embeds ast.Node, so GetComment is
-	// callable directly behind the nil guard.
-	if mvn.Key != nil {
-		if comment := mvn.Key.GetComment(); comment != nil {
-			commentLines = append(commentLines, strings.Split(comment.String(), "\n")...)
-		}
+	// valNode.LineComment).
+	if nc.KeyInline != "" {
+		commentLines = append(commentLines, strings.Split(nc.KeyInline, "\n")...)
 	}
 
-	// A sequence value's comment counts only when it sits on the value's own
-	// line, matching the upstream valNode.LineComment read: goccy stows the
-	// first element's head comment on the SequenceNode itself, so reading it
-	// unconditionally would apply an element's annotation to the array key,
-	// asserting the element's scalar type on the array value. The core
-	// description extraction guards the same quirk.
-	if mvn.Value != nil {
-		if comment := mvn.Value.GetComment(); comment != nil && !isStowedSequenceComment(mvn.Value, comment) {
-			commentLines = append(commentLines, strings.Split(comment.String(), "\n")...)
-		}
+	if nc.ValueInline != "" {
+		commentLines = append(commentLines, strings.Split(nc.ValueInline, "\n")...)
 	}
 
-	if mvn.FootComment != nil {
-		commentLines = append(commentLines, strings.Split(mvn.FootComment.String(), "\n")...)
+	if nc.Foot != "" {
+		commentLines = append(commentLines, strings.Split(nc.Foot, "\n")...)
 	}
 
 	// Find inline @schema annotations.
@@ -139,45 +128,6 @@ func (a *Annotator) Annotate(node ast.Node, _ string) *magicschema.AnnotationRes
 	}
 
 	return result
-}
-
-// isStowedSequenceComment reports whether a value node's comment group is a
-// sequence element's head comment rather than the value's own line comment.
-// The goccy parser stows the first element's head comment on the SequenceNode
-// itself (behind any tag or anchor wrapper), so the comment sits on a
-// different line than the value token; a same-line comment on a flow sequence
-// ("key: [] # @schema ...") is a genuine line comment and does not count.
-// When the value or comment carries no position information the layout cannot
-// be reconstructed, so the comment is attributed to the value (fail open).
-func isStowedSequenceComment(value ast.Node, comment *ast.CommentGroupNode) bool {
-	if _, ok := unwrapValue(value).(*ast.SequenceNode); !ok {
-		return false
-	}
-
-	valueTok := value.GetToken()
-	commentTok := comment.GetToken()
-
-	if valueTok == nil || valueTok.Position == nil || commentTok == nil || commentTok.Position == nil {
-		return false
-	}
-
-	return commentTok.Position.Line != valueTok.Position.Line
-}
-
-// unwrapValue resolves TagNode and AnchorNode wrappers to the underlying
-// value node, mirroring the unwrapping the core applies before its own
-// sequence-comment guard.
-func unwrapValue(node ast.Node) ast.Node {
-	for {
-		switch n := node.(type) {
-		case *ast.TagNode:
-			node = n.Value
-		case *ast.AnchorNode:
-			node = n.Value
-		default:
-			return node
-		}
-	}
 }
 
 // parseLine parses a semicolon-separated key:value line into schema fields.

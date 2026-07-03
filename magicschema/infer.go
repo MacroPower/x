@@ -258,6 +258,91 @@ func HeadCommentRun(node ast.Node) ([]string, bool, bool) {
 	return adjacentCommentRun(mvn.GetComment(), mvn.Key)
 }
 
+// NodeComments is the comment text attached to a mapping value node,
+// separated by source position so annotators can order and filter the parts
+// per their format's precedence rules. [CollectNodeComments] fills it; an
+// absent part is the empty string.
+type NodeComments struct {
+	// HeadRun is the head-comment run that physically documents the key
+	// (see [HeadCommentRun]), joined with newlines.
+	HeadRun string
+
+	// KeyInline is the key node's inline comment group.
+	KeyInline string
+
+	// ValueInline is the value node's inline comment group. It is empty when
+	// the group is a block sequence's stowed first-element head comment (see
+	// [IsStowedSequenceComment]), which documents the element, not the value.
+	ValueInline string
+
+	// Foot is the node's foot comment group -- a trailing comment after the
+	// last key attaches there.
+	Foot string
+}
+
+// CollectNodeComments gathers the comment groups attached to a mapping value
+// node. The losisin and norwoodj annotators share it, so the goccy comment
+// attribution quirks it compensates -- merged head comment groups narrowed by
+// [HeadCommentRun], a sequence's first-element head comment stowed on the
+// value node -- are handled in one place and the formats cannot drift on the
+// identical YAML. A non-mapping node has no attached comments and returns
+// the zero value.
+func CollectNodeComments(node ast.Node) NodeComments {
+	var nc NodeComments
+
+	mvn, ok := node.(*ast.MappingValueNode)
+	if !ok || mvn == nil {
+		return nc
+	}
+
+	if run, _, _ := HeadCommentRun(mvn); len(run) > 0 {
+		nc.HeadRun = strings.Join(run, "\n")
+	}
+
+	// MapKeyNode embeds ast.Node, so GetComment is callable directly behind
+	// the nil guard.
+	if mvn.Key != nil {
+		if c := mvn.Key.GetComment(); c != nil {
+			nc.KeyInline = c.String()
+		}
+	}
+
+	if mvn.Value != nil {
+		if c := mvn.Value.GetComment(); c != nil && !IsStowedSequenceComment(mvn.Value, c) {
+			nc.ValueInline = c.String()
+		}
+	}
+
+	if mvn.FootComment != nil {
+		nc.Foot = mvn.FootComment.String()
+	}
+
+	return nc
+}
+
+// IsStowedSequenceComment reports whether a value node's comment group is a
+// sequence element's head comment rather than the value's own line comment.
+// The goccy parser stows the first element's head comment on the SequenceNode
+// itself (behind any tag or anchor wrapper), so the comment sits on a
+// different line than the value token; a same-line comment on a flow sequence
+// ("key: [] # note") is a genuine line comment and does not count. When the
+// value or comment carries no position information the layout cannot be
+// reconstructed, so the comment is attributed to the value (fail open).
+func IsStowedSequenceComment(value ast.Node, comment *ast.CommentGroupNode) bool {
+	if _, ok := unwrapNode(value).(*ast.SequenceNode); !ok {
+		return false
+	}
+
+	valueTok := value.GetToken()
+	commentTok := comment.GetToken()
+
+	if valueTok == nil || valueTok.Position == nil || commentTok == nil || commentTok.Position == nil {
+		return false
+	}
+
+	return commentTok.Position.Line != valueTok.Position.Line
+}
+
 // adjacentCommentRun narrows a head comment group to the run of comment lines
 // physically adjacent to key, implementing the contract documented on
 // [HeadCommentRun] for an explicit comment group and key. The returned
