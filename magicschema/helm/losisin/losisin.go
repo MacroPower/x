@@ -474,10 +474,13 @@ func parseBoolOrSchema(val string, hasVal bool) *jsonschema.Schema {
 // escaped quote (default:"a\";b") does not end the run early. A quote only
 // opens a run at bracket depth zero -- inside [...] or {...} the bracket stack
 // already keeps the content literal, so a quote in a regex char class like
-// [",;] is not mistaken for a string delimiter. When openers or a quote are
-// left unbalanced the split is unreliable, so the line is split on every
-// semicolon instead -- a malformed value then only corrupts its own pair
-// rather than swallowing every pair after it.
+// [",;] is not mistaken for a string delimiter -- and only at the start of a
+// value or pair (after ':', ';', or whitespace): an apostrophe inside
+// unquoted prose ("description:don't overuse") is literal, so it cannot pair
+// with a later apostrophe and swallow the ';' between two pairs. When openers
+// or a quote are left unbalanced the split is unreliable, so the line is
+// split on every semicolon instead -- a malformed value then only corrupts
+// its own pair rather than swallowing every pair after it.
 func splitSemicolons(line string) []string {
 	var (
 		parts   []string
@@ -485,6 +488,7 @@ func splitSemicolons(line string) []string {
 		stack   []rune
 		quote   rune // 0 outside a quoted run, else the opening quote rune
 		escaped bool
+		prev    rune // previous rune outside quoted runs, 0 at line start
 	)
 
 	for _, ch := range line {
@@ -508,13 +512,17 @@ func splitSemicolons(line string) []string {
 			continue
 		}
 
+		atValueStart := prev == 0 || prev == ':' || prev == ';' || prev == ' ' || prev == '\t'
+		prev = ch
+
 		switch ch {
 		case '"', '\'':
-			// Only a top-level quote opens a quoted run. Inside [...] or {...}
-			// the bracket stack already keeps the content literal -- a regex
-			// char class like [",;], say -- so opening a run there would
-			// swallow the matching closer and force the naive whole-line split.
-			if len(stack) == 0 {
+			// Only a top-level quote at the start of a value opens a quoted
+			// run. Inside [...] or {...} the bracket stack already keeps the
+			// content literal -- a regex char class like [",;], say -- and a
+			// mid-word quote is prose; opening a run in either place would
+			// swallow a later matching rune and corrupt neighboring pairs.
+			if len(stack) == 0 && atValueStart {
 				quote = ch
 			}
 

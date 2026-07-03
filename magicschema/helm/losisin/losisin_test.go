@@ -66,6 +66,27 @@ func TestHelmValuesSchemaAnnotator(t *testing.T) {
 				assert.Contains(t, req, "name")
 			},
 		},
+		"apostrophes in prose stay literal across pairs": {
+			// An apostrophe mid-word must not open a quoted run: two balanced
+			// apostrophes in different values would otherwise swallow the ';'
+			// between them, merging the pairs and losing the second key.
+			input: stringtest.Input(`
+				# @schema description:don't overuse;title:User's guide
+				key: val
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				k, ok := props["key"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "don't overuse", k["description"])
+				assert.Equal(t, "User's guide", k["title"])
+			},
+		},
 		"nullable appends null to the type": {
 			input: stringtest.Input(`
 				# @schema type:integer;nullable
