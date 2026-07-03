@@ -400,6 +400,28 @@ func TestHelmSchemaAnnotator(t *testing.T) {
 				assert.Equal(t, "Chart", got["title"])
 			},
 		},
+		"root block above explicit document start marker": {
+			// The goccy parser turns a comment header above "---" into a
+			// comment-only document, so the root block never reaches
+			// Annotate; the ForContent leading-comment scan must pick it up,
+			// matching upstream's document head comment check.
+			input: stringtest.Input(`
+				# @schema.root
+				# title: MyChart
+				# @schema.root
+				---
+				first: 1
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				assert.Equal(t, "MyChart", got["title"])
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+				assert.Contains(t, props, "first")
+			},
+		},
 		"block description not set when explicit description exists": {
 			input: stringtest.Input(`
 				# Some comment

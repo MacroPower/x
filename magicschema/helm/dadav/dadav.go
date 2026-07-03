@@ -33,9 +33,49 @@ func (a *Annotator) Name() string {
 	return Name
 }
 
-// ForContent returns a new Annotator ready to process the given file.
-func (a *Annotator) ForContent(_ []byte) (magicschema.Annotator, error) {
-	return New(), nil
+// ForContent returns a new Annotator ready to process the given file. The
+// file's leading comment lines are scanned for a @schema.root block here: a
+// root block above an explicit "---" document-start marker parses as a
+// comment-only document whose comments never reach Annotate, whose own root
+// extraction reads only the first mapping key's head comment. Upstream
+// helm-schema checks the document-level head comment for root blocks the
+// same way. A root block on the first key overrides one found here, matching
+// the closer-to-the-data reading.
+func (a *Annotator) ForContent(content []byte) (magicschema.Annotator, error) {
+	fresh := New()
+
+	if head := leadingCommentLines(content); head != "" {
+		if root := scanCommentBlocks(head).root; root != "" {
+			fresh.parseRootBlock(root)
+		}
+	}
+
+	return fresh, nil
+}
+
+// leadingCommentLines returns the file's leading run of comment lines -- the
+// document head comment -- stopping at the first line that is none of a
+// comment, a blank, or a bare document marker. Blanks and markers are
+// skipped rather than kept: root extraction reads the whole merged comment
+// group, so a root block separated from the document start by a blank line
+// or a "---" still applies.
+func leadingCommentLines(content []byte) string {
+	var comments []string
+
+	for line := range strings.SplitSeq(string(content), "\n") {
+		trimmed := strings.TrimSpace(line)
+
+		switch {
+		case strings.HasPrefix(trimmed, "#"):
+			comments = append(comments, trimmed)
+		case trimmed == "" || trimmed == "---" || trimmed == "...":
+			continue
+		default:
+			return strings.Join(comments, "\n")
+		}
+	}
+
+	return strings.Join(comments, "\n")
 }
 
 // Annotate extracts schema annotations from @schema blocks in comments.
