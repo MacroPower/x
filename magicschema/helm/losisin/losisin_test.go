@@ -66,6 +66,103 @@ func TestHelmValuesSchemaAnnotator(t *testing.T) {
 				assert.Contains(t, req, "name")
 			},
 		},
+		"nullable appends null to the type": {
+			input: stringtest.Input(`
+				# @schema type:integer;nullable
+				replicaCount: 3
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				r, ok := props["replicaCount"].(map[string]any)
+				require.True(t, ok)
+
+				types, ok := r["type"].([]any)
+				require.True(t, ok, "nullable must widen the type to a union, got %v", r["type"])
+				assert.ElementsMatch(t, []any{"integer", "null"}, types)
+			},
+		},
+		"nullable before type still widens": {
+			input: stringtest.Input(`
+				# @schema nullable;type:integer
+				replicaCount: 3
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				r, ok := props["replicaCount"].(map[string]any)
+				require.True(t, ok)
+
+				types, ok := r["type"].([]any)
+				require.True(t, ok, "nullable must apply after type:, got %v", r["type"])
+				assert.ElementsMatch(t, []any{"integer", "null"}, types)
+			},
+		},
+		"nullable without a type widens with the inferred type": {
+			input: stringtest.Input(`
+				# @schema nullable
+				replicaCount: 3
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				r, ok := props["replicaCount"].(map[string]any)
+				require.True(t, ok)
+
+				types, ok := r["type"].([]any)
+				require.True(t, ok,
+					"the null-only type must widen with the inferred type, got %v", r["type"])
+				assert.ElementsMatch(t, []any{"integer", "null"}, types)
+			},
+		},
+		"deprecated key": {
+			input: stringtest.Input(`
+				# @schema deprecated
+				oldField: value
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				f, ok := props["oldField"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, true, f["deprecated"])
+			},
+		},
+		"itemRequired sets the items required list": {
+			input: stringtest.Input(`
+				# @schema item:object;itemRequired:[name, value]
+				env: []
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				env, ok := props["env"].(map[string]any)
+				require.True(t, ok)
+
+				items, ok := env["items"].(map[string]any)
+				require.True(t, ok)
+
+				req, ok := items["required"].([]any)
+				require.True(t, ok)
+				assert.Equal(t, []any{"name", "value"}, req)
+			},
+		},
 		"tilde null clears a bound instead of becoming zero": {
 			// The goccy parser decodes "~" (and Null/NULL) into float64 as 0 with no
 			// error, so without up-front null detection a null-valued bound
@@ -1453,12 +1550,6 @@ func TestHelmValuesSchemaAnnotatorUnsupportedKeys(t *testing.T) {
 		"format is not supported": {
 			input: stringtest.Input(`
 				# @schema type:string;format:email
-				val: test
-			`),
-		},
-		"deprecated is not supported": {
-			input: stringtest.Input(`
-				# @schema type:string;deprecated
 				val: test
 			`),
 		},

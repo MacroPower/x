@@ -3,6 +3,7 @@ package losisin
 import (
 	"log/slog"
 	"math"
+	"slices"
 	"strings"
 
 	"github.com/goccy/go-yaml"
@@ -125,8 +126,16 @@ func (a *Annotator) Annotate(node ast.Node, _ string) *magicschema.AnnotationRes
 	schema := &jsonschema.Schema{}
 	result := &magicschema.AnnotationResult{Schema: schema}
 
+	var nullable bool
+
 	for _, line := range schemaLines {
-		a.parseLine(schema, result, line)
+		a.parseLine(schema, result, line, &nullable)
+	}
+
+	// The nullable key applies after every pair so it works on both sides of
+	// type: within a line and across lines alike.
+	if nullable {
+		applyNullable(schema)
 	}
 
 	return result
@@ -172,7 +181,14 @@ func unwrapValue(node ast.Node) ast.Node {
 }
 
 // parseLine parses a semicolon-separated key:value line into schema fields.
-func (a *Annotator) parseLine(schema *jsonschema.Schema, result *magicschema.AnnotationResult, line string) {
+// The nullable flag is collected rather than applied: it widens the type only
+// after every pair has been seen.
+func (a *Annotator) parseLine(
+	schema *jsonschema.Schema,
+	result *magicschema.AnnotationResult,
+	line string,
+	nullable *bool,
+) {
 	pairs := splitSemicolons(line)
 
 	for _, pair := range pairs {
@@ -185,7 +201,7 @@ func (a *Annotator) parseLine(schema *jsonschema.Schema, result *magicschema.Ann
 		key = strings.TrimSpace(key)
 		val = strings.TrimSpace(val)
 
-		a.applyPair(schema, result, key, val, hasVal)
+		a.applyPair(schema, result, key, val, hasVal, nullable)
 	}
 }
 
@@ -197,6 +213,7 @@ func (a *Annotator) applyPair(
 	result *magicschema.AnnotationResult,
 	key, val string,
 	hasVal bool,
+	nullable *bool,
 ) {
 	switch key {
 	case "type":
@@ -253,6 +270,17 @@ func (a *Annotator) applyPair(
 
 	case "readOnly":
 		schema.ReadOnly = parseBoolDefault(val)
+	case "deprecated":
+		schema.Deprecated = parseBoolDefault(val)
+	case "nullable":
+		// Collected, not applied: the null type appends only after every
+		// pair, so nullable works regardless of where it sits relative to
+		// type:. A false value stays inert rather than un-nulling a type
+		// union another pair set.
+		if parseBoolDefault(val) {
+			*nullable = true
+		}
+
 	case "examples":
 		schema.Examples = magicschema.FilterJSONSafe(parseAnyList(val))
 	case "additionalProperties":
@@ -312,6 +340,14 @@ func (a *Annotator) applyPair(
 			ensureItems(schema).Enum = enum
 		}
 
+	case "itemRequired":
+		// A required list for the items schema of object-typed elements.
+		// Assign only a non-empty parse (fail open on garbage), mirroring the
+		// sibling item* guards.
+		if req := parseRequiredNames(val); len(req) > 0 {
+			ensureItems(schema).Required = req
+		}
+
 	case "itemRef":
 		// Unquote like the $ref sibling: a ref containing a ";" must be
 		// quoted to survive splitSemicolons, and the quotes must not leak
@@ -340,6 +376,61 @@ func (a *Annotator) applyPair(
 // parse for bracket-prefixed values, then falls back to comma-splitting.
 func (a *Annotator) applyType(schema *jsonschema.Schema, val string) {
 	magicschema.SetSchemaType(schema, parseStringList(val))
+}
+
+// applyNullable appends "null" to the annotated type, matching upstream's
+// appendNullType post-processing. With no annotated type it leaves the
+// null-only type, which the generator widens with the value's inferred type
+// -- the same contract bitnami's [nullable] modifier relies on.
+func applyNullable(s *jsonschema.Schema) {
+	var types []string
+
+	switch {
+	case s.Types != nil:
+		types = append(slices.Clone(s.Types), yamlNull)
+	case s.Type != "":
+		types = []string{s.Type, yamlNull}
+	default:
+		types = []string{yamlNull}
+	}
+
+	magicschema.SetSchemaType(s, types)
+}
+
+// parseRequiredNames parses a property-name list for itemRequired: string
+// members are kept (a partial list still guides, fail open) and repeats
+// drop, since required is a Draft 7 set whose elements must be unique.
+func parseRequiredNames(val string) []string {
+	parsed, items, ok := splitListValue(val)
+	if !ok {
+		parsed = make([]any, 0, len(items))
+
+		for _, item := range items {
+			parsed = append(parsed, unquoteScalar(item))
+		}
+	}
+
+	var (
+		names []string
+		seen  = make(map[string]struct{}, len(parsed))
+	)
+
+	for _, v := range parsed {
+		s, isString := v.(string)
+		if !isString {
+			continue
+		}
+
+		if _, dup := seen[s]; dup {
+			continue
+		}
+
+		seen[s] = struct{}{}
+
+		names = append(names, s)
+	}
+
+	return names
 }
 
 // ensureItems lazily initializes and returns the schema's Items, so the item*

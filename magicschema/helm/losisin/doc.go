@@ -213,6 +213,11 @@
 //   - required: boolean, marks this property as required in its parent's
 //     required array.
 //   - readOnly: boolean.
+//   - deprecated: boolean.
+//   - nullable: boolean; appends "null" to the type (upstream's
+//     appendNullType post-processing), regardless of where the key sits
+//     relative to type:. With no annotated type the null-only type is left
+//     for the generator to widen with the value's inferred type.
 //   - $id: schema identifier URI (direct assignment, no validation).
 //   - $ref: schema reference URI (direct assignment). Upstream supports
 //     $k8s shorthand expansion (see below) and Draft 7 allOf wrapping
@@ -238,6 +243,8 @@
 //     enum (preserves native types). Creates the Items schema if nil.
 //   - itemRef: shortcut to set items.$ref (direct assignment). Creates
 //     the Items schema if nil.
+//   - itemRequired: shortcut to set items.required from a list of property
+//     names, for arrays of objects. Creates the Items schema if nil.
 //   - hidden: boolean, excludes the property (and its children) from schema
 //     output entirely. Works on any node type (scalars, arrays, objects).
 //   - skipProperties: boolean, strips the properties map from an object
@@ -326,8 +333,6 @@
 // set via @schema comment annotations:
 //
 //   - format
-//   - deprecated (note: the upstream JSON tag is misspelled as "decrecated",
-//     though the YAML tag is correct)
 //   - writeOnly
 //   - exclusiveMinimum, exclusiveMaximum
 //   - if, then, else (though these can appear in nested schemas passed to
