@@ -329,8 +329,6 @@ func parseCommentBlock(commentLines []string) *parsedComment {
 	isRaw := false
 	skip := false
 
-	var defaultVal *string
-
 	for _, line := range commentLines[docStartIdx+1:] {
 		// @raw switches continuation joining to newline mode. It keeps its own
 		// regex because, unlike @ignore, it requires a space after the hash.
@@ -340,11 +338,11 @@ func parseCommentBlock(commentLines []string) *parsedComment {
 			continue
 		}
 
-		// @default -- value overrides the default.
-		if dm := defaultValueRegex.FindStringSubmatch(line); len(dm) > 1 {
-			val := dm[1]
-			defaultVal = &val
-
+		// @default lines are only consumed here: resolution is one last-wins
+		// rule over the whole block, and prefixDefault already holds the
+		// winning value -- any match after docStartIdx is by index order also
+		// the last match lastDefault found.
+		if defaultValueRegex.MatchString(line) {
 			continue
 		}
 
@@ -393,16 +391,11 @@ func parseCommentBlock(commentLines []string) *parsedComment {
 		}
 	}
 
-	// Use prefix default if no default was found in continuation lines.
-	if defaultVal == nil {
-		defaultVal = prefixDefault
-	}
-
 	return &parsedComment{
 		keyPath:     keyPath,
 		description: description,
 		typeName:    typeName,
-		defaultVal:  defaultVal,
+		defaultVal:  prefixDefault,
 		skip:        skip,
 	}
 }
