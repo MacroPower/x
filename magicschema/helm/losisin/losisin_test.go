@@ -66,6 +66,23 @@ func TestHelmValuesSchemaAnnotator(t *testing.T) {
 				assert.Contains(t, req, "name")
 			},
 		},
+		"unparseable required value is skipped not an opt-out": {
+			// HasRequired's false is an active tri-state signal that cancels
+			// merge-key-inherited required and outranks lower-priority
+			// annotators, so a typo must leave the signal unset instead of
+			// becoming an explicit required:false no annotator wrote.
+			input: stringtest.Input(`
+				# @schema type:string;required:yes
+				name: test
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				_, hasReq := got["required"]
+				assert.False(t, hasReq,
+					"a typo like required:yes must not set the tri-state signal either way")
+			},
+		},
 		"apostrophes in prose stay literal across pairs": {
 			// An apostrophe mid-word must not open a quoted run: two balanced
 			// apostrophes in different values would otherwise swallow the ';'

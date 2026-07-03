@@ -265,8 +265,16 @@ func (a *Annotator) applyPair(
 	case "uniqueItems":
 		schema.UniqueItems = parseBoolDefault(val)
 	case "required":
-		b := parseBoolDefault(val)
-		result.HasRequired = &b
+		// Only an explicit true/false (or the bare keyword, which upstream
+		// reads as true) sets the tri-state signal. HasRequired's false is an
+		// active opt-out -- it outranks a lower-priority annotator's explicit
+		// required:true and cancels merge-key-inherited required -- unlike
+		// every other boolean key's inert zero, so an unparseable value must
+		// be skipped rather than converted into an opt-out no annotator
+		// wrote.
+		if b, ok := parseBool(val); ok {
+			result.HasRequired = &b
+		}
 
 	case "readOnly":
 		schema.ReadOnly = parseBoolDefault(val)
@@ -880,26 +888,37 @@ func parseIntPtr(val string) *int {
 	return &v
 }
 
-// parseBoolDefault parses a string as a boolean. An empty value (bare keyword
-// with no colon) returns true, matching upstream behavior where "# @schema required"
-// is equivalent to "# @schema required:true". Only "true" and "false" (case-
-// insensitive per YAML spec) are recognized; unrecognized values are treated as
-// false (fail-open: don't add restrictions for garbage input).
-func parseBoolDefault(val string) bool {
+// parseBool parses a string as a boolean, reporting whether it parsed. An
+// empty value (bare keyword with no colon) is true, matching upstream
+// behavior where "# @schema required" is equivalent to
+// "# @schema required:true". Only "true" and "false" (case-insensitive per
+// YAML spec) are recognized; anything else reports false so callers whose
+// false is an active signal (required's tri-state opt-out) can skip garbage
+// instead of acting on it.
+func parseBool(val string) (bool, bool) {
 	val = strings.TrimSpace(val)
 	if val == "" {
-		return true
+		return true, true
 	}
 
 	switch strings.ToLower(val) {
 	case "true":
-		return true
+		return true, true
 	case "false":
-		return false
+		return false, true
 	default:
 		slog.Warn("invalid boolean for helm-values-schema annotation",
 			slog.String("value", val))
 
-		return false
+		return false, false
 	}
+}
+
+// parseBoolDefault parses a string as a boolean for keys whose false is an
+// inert zero value: an unrecognized value is treated as false (fail open:
+// don't add restrictions for garbage input).
+func parseBoolDefault(val string) bool {
+	b, _ := parseBool(val)
+
+	return b
 }
