@@ -2059,6 +2059,29 @@ func TestHelmValuesSchemaAnnotatorAlignment(t *testing.T) {
 				assert.Equal(t, "^x$", v["pattern"])
 			},
 		},
+		"doubled quote escape inside a single-quoted value preserved": {
+			// A doubled quote inside a single-quoted run is YAML's escape for
+			// a literal quote, not the closing delimiter: the run must stay
+			// open across it so the later ";" stays part of the value instead
+			// of splitting the pair.
+			input: stringtest.Input(`
+				# @schema type:string;description:'it''s nice; really';pattern:^x$
+				val: x
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				v, ok := props["val"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "string", v["type"])
+				assert.Equal(t, "it's nice; really", v["description"])
+				assert.Equal(t, "^x$", v["pattern"])
+			},
+		},
 		"quoted pattern with a semicolon keeps the bare regex": {
 			// A pattern containing ";" must be quoted to survive splitSemicolons;
 			// the surrounding quotes are then stripped so the regex matches the

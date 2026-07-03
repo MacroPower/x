@@ -421,7 +421,9 @@ func parseBoolOrSchema(val string, hasVal bool) *jsonschema.Schema {
 // value -- single or double -- likewise keeps a ";" (or a bracket) it contains
 // literal, so an annotation such as default:'a;b' or default:"a;b" survives
 // intact; inside a double-quoted run a backslash escapes the next rune, so an
-// escaped quote (default:"a\";b") does not end the run early. A quote only
+// escaped quote (default:"a\";b") does not end the run early, and inside a
+// single-quoted run a doubled quote is YAML's literal-quote escape
+// (default:'a”s;b'), not the closing delimiter. A quote only
 // opens a run at bracket depth zero -- inside [...] or {...} the bracket stack
 // already keeps the content literal, so a quote in a regex char class like
 // [",;] is not mistaken for a string delimiter -- and only at the start of a
@@ -441,12 +443,18 @@ func splitSemicolons(line string) []string {
 		prev    rune // previous rune outside quoted runs, 0 at line start
 	)
 
-	for _, ch := range line {
+	runes := []rune(line)
+
+	for i := 0; i < len(runes); i++ {
+		ch := runes[i]
+
 		// Inside a quoted run every character is literal: a ";" or a bracket
 		// there is part of the value, not a delimiter or nesting token. In a
 		// double-quoted run a backslash escapes the next rune, so an escaped
 		// quote (default:"a\";b") does not close the run and expose the inner
-		// semicolon; single-quoted YAML has no backslash escape.
+		// semicolon; in a single-quoted run a doubled quote is YAML's escape
+		// for a literal quote (default:'a''s;b'), not the closing delimiter --
+		// the same escape rules quoteSpansValue honors when unquoting.
 		if quote != 0 {
 			current.WriteRune(ch)
 
@@ -456,6 +464,14 @@ func splitSemicolons(line string) []string {
 			case quote == '"' && ch == '\\':
 				escaped = true
 			case ch == quote:
+				if quote == '\'' && i+1 < len(runes) && runes[i+1] == '\'' {
+					current.WriteRune(runes[i+1])
+
+					i++
+
+					continue
+				}
+
 				quote = 0
 			}
 
