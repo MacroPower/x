@@ -175,33 +175,19 @@ func (a *Annotator) parseBlock(content, description string) *magicschema.Annotat
 	return result
 }
 
-// parseRootBlock parses @schema.root content into the root schema. Every key
-// is dispatched through applyField so its handling stays identical to a
-// property-level @schema block, and the full parse is stored unfiltered:
-// the generator's applyRootAnnotations is the single propagation gate that
-// copies only the documented subset to the document-level schema, so a
-// second adapter-side whitelist would only drift from it.
+// parseRootBlock parses @schema.root content into the root schema by
+// delegating to parseBlock, so a root field's handling stays identical to a
+// property-level @schema block by construction. The result's required/skip
+// signals are discarded, so root blocks contribute none, and the full parse
+// is stored unfiltered: the generator's applyRootAnnotations is the single
+// propagation gate that copies only the documented subset to the
+// document-level schema, so a second adapter-side whitelist would only
+// drift from it. An empty or unparseable root block leaves rootSchema nil,
+// which applyRootAnnotations skips the same as an empty schema.
 func (a *Annotator) parseRootBlock(content string) {
-	var raw map[string]any
-
-	err := yaml.Unmarshal([]byte(content), &raw)
-	if err != nil {
-		slog.Warn("parse @schema.root block", slog.Any("error", err))
-
-		return
+	if r := a.parseBlock(content, ""); r != nil {
+		a.rootSchema = r.Schema
 	}
-
-	schema := &jsonschema.Schema{}
-
-	// A throwaway result captures applyField's required/skip signals; it is
-	// discarded, so root blocks contribute none.
-	result := &magicschema.AnnotationResult{Schema: schema}
-
-	for key, val := range raw {
-		a.applyField(schema, result, key, val)
-	}
-
-	a.rootSchema = schema
 }
 
 // applyField applies a single key-value pair from a @schema block to the schema.
