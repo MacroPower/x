@@ -402,9 +402,9 @@ func (g *Generator) walkNode(
 
 	switch n := unwrapped.(type) {
 	case *ast.MappingNode:
-		schema = g.walkMapping(n, keyPath, anchors)
+		schema = g.walkMapping(n.Values, keyPath, anchors)
 	case *ast.MappingValueNode:
-		schema = g.walkMapping(nil, keyPath, anchors, n)
+		schema = g.walkMapping([]*ast.MappingValueNode{n}, keyPath, anchors)
 	case *ast.SequenceNode:
 		schema = g.walkSequence(n, keyPath, anchors)
 	default:
@@ -440,12 +440,15 @@ func (g *Generator) recordDefault(
 	}
 }
 
-// walkMapping processes a mapping node into an object schema.
+// walkMapping processes a mapping's key-value entries into an object schema.
+// Callers pass an *ast.MappingNode's Values or wrap a lone
+// *ast.MappingValueNode in a one-element slice -- the same shape
+// mappingToGoValue takes -- so there is no second input to keep exclusive
+// with the first.
 func (g *Generator) walkMapping(
-	mn *ast.MappingNode,
+	values []*ast.MappingValueNode,
 	keyPath string,
 	anchors aliasResolutions,
-	extraValues ...*ast.MappingValueNode,
 ) *jsonschema.Schema {
 	g.depth++
 	defer func() { g.depth-- }()
@@ -465,15 +468,6 @@ func (g *Generator) walkMapping(
 		schema.AdditionalProperties = FalseSchema()
 	} else {
 		schema.AdditionalProperties = TrueSchema()
-	}
-
-	// Callers pass either a mapping node or extra values, never both, so
-	// no append is needed (appending to mn.Values could mutate the AST's
-	// backing array).
-	values := extraValues
-
-	if mn != nil {
-		values = mn.Values
 	}
 
 	var (
@@ -549,7 +543,7 @@ func (g *Generator) handleMergeKey(
 
 	switch mv := mergeValue.(type) {
 	case *ast.MappingNode:
-		g.mergeMappingInto(schema, g.walkMapping(mv, keyPath, anchors), addToOrder, decisions)
+		g.mergeMappingInto(schema, g.walkMapping(mv.Values, keyPath, anchors), addToOrder, decisions)
 
 	case *ast.SequenceNode:
 		for _, seqVal := range mv.Values {
@@ -561,7 +555,7 @@ func (g *Generator) handleMergeKey(
 				continue
 			}
 
-			g.mergeMappingInto(schema, g.walkMapping(mappingNode, keyPath, anchors), addToOrder, decisions)
+			g.mergeMappingInto(schema, g.walkMapping(mappingNode.Values, keyPath, anchors), addToOrder, decisions)
 		}
 	}
 }
@@ -841,7 +835,7 @@ func (g *Generator) fillObjectFromStructure(
 		return
 	}
 
-	structural := g.walkMapping(mappingNode, childPath, anchors)
+	structural := g.walkMapping(mappingNode.Values, childPath, anchors)
 	childSchema.Properties = structural.Properties
 	childSchema.PropertyOrder = structural.PropertyOrder
 
