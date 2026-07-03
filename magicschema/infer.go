@@ -325,10 +325,16 @@ func CollectNodeComments(node ast.Node) NodeComments {
 // The goccy parser stows the first element's head comment on the SequenceNode
 // itself (behind any tag or anchor wrapper), so the comment sits on a
 // different line than the value token; a same-line comment on a flow sequence
-// ("key: [] # note") is a genuine line comment and does not count. When the
+// ("key: [] # note") is a genuine line comment and does not count. A nil
+// comment group is no comment at all and reports false, matching the
+// nil-tolerant [HeadCommentRun] and [CollectNodeComments] siblings. When the
 // value or comment carries no position information the layout cannot be
 // reconstructed, so the comment is attributed to the value (fail open).
 func IsStowedSequenceComment(value ast.Node, comment *ast.CommentGroupNode) bool {
+	if comment == nil {
+		return false
+	}
+
 	if _, ok := unwrapNode(value).(*ast.SequenceNode); !ok {
 		return false
 	}

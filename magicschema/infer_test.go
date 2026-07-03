@@ -281,6 +281,27 @@ func TestFlowSequenceInlineCommentBecomesDescription(t *testing.T) {
 	assert.Equal(t, "flow seq description", key["description"])
 }
 
+func TestIsStowedSequenceCommentNilComment(t *testing.T) {
+	t.Parallel()
+
+	// A nil comment group is no comment at all: report false rather than
+	// dereferencing it, matching the nil-tolerant HeadCommentRun and
+	// CollectNodeComments siblings.
+	file, err := parser.ParseBytes([]byte("key: [1, 2]\n"), parser.ParseComments)
+	require.NoError(t, err)
+
+	var seq ast.Node
+
+	for _, node := range ast.Filter(ast.SequenceType, file.Docs[0]) {
+		seq = node
+	}
+
+	require.NotNil(t, seq)
+
+	assert.False(t, magicschema.IsStowedSequenceComment(seq, nil))
+	assert.False(t, magicschema.IsStowedSequenceComment(nil, nil))
+}
+
 func TestTaggedEmptyListElementAddsNullToItems(t *testing.T) {
 	t.Parallel()
 
