@@ -258,8 +258,8 @@
 //
 // Tags that are only relevant for README generation (@section,
 // @descriptionStart, @descriptionEnd, @extra) are matched by a separate
-// ignored-tag regex and skipped during Prepare to prevent misparsing them
-// as @param lines.
+// ignored-tag regex and skipped during the ForContent scan to prevent
+// misparsing them as @param lines.
 //
 // Array indices in key paths are stripped during normalization
 // ("jobs[0].nameOverride" becomes "jobs.nameOverride") so that annotations
@@ -403,8 +403,8 @@
 //     YAML structure itself is a valuable source of schema information.
 //
 //   - Duplicate key paths: When multiple @param annotations target the same
-//     key path, the last annotation in the file wins during Prepare (since
-//     our params map overwrites on duplicate keys). The upstream schema
+//     key path, the last annotation in the file wins during the ForContent
+//     scan (since our params map overwrites on duplicate keys). The upstream schema
 //     output also ends up using the last annotation's values, since
 //     generateSchema iterates all duplicate entries and later tree writes
 //     overwrite earlier ones. The observable schema behavior is equivalent.
