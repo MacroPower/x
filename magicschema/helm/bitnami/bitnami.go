@@ -104,13 +104,18 @@ func (a *Annotator) ForContent(content []byte) (magicschema.Annotator, error) {
 
 // Annotate looks up the key path in the pre-built annotation map.
 func (a *Annotator) Annotate(_ ast.Node, keyPath string) *magicschema.AnnotationResult {
-	// Check for skip.
-	if a.skips[keyPath] {
-		return &magicschema.AnnotationResult{Skip: true}
-	}
-
 	param, ok := a.params[keyPath]
+
+	// A @skip omits the subtree only when no @param documents the same key
+	// path. Upstream filters skipped entries out of its own render list, but
+	// a separate @param entry for the key still renders into the schema, so
+	// the param wins the conflict here too -- dropping the key, its type,
+	// and its whole inferred subtree over a stale @skip would fail closed.
 	if !ok {
+		if a.skips[keyPath] {
+			return &magicschema.AnnotationResult{Skip: true}
+		}
+
 		return nil
 	}
 

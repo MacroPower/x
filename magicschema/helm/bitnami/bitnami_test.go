@@ -115,6 +115,29 @@ func TestBitnamiAnnotator(t *testing.T) {
 				assert.Contains(t, props, "name")
 			},
 		},
+		"param on the same key outranks skip": {
+			// Upstream filters @skip entries out of its render list, but a
+			// separate @param entry for the same key still renders, so the
+			// param wins the conflict and the subtree stays in the schema.
+			input: stringtest.Input(`
+				## @skip metrics
+				## @param metrics [object] Metrics configuration
+				metrics:
+				  enabled: true
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				metrics, ok := props["metrics"].(map[string]any)
+				require.True(t, ok, "the @param must keep metrics in the schema")
+
+				assert.Equal(t, "object", metrics["type"])
+				assert.Equal(t, "Metrics configuration", metrics["description"])
+			},
+		},
 		"nested key path": {
 			input: stringtest.Input(`
 				## @param image.repository Container image name
