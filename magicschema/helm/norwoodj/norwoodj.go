@@ -165,7 +165,19 @@ func (a *Annotator) finishOldStyleBlock(commentLines []string) {
 		return
 	}
 
-	a.oldStyleDescs[entry.keyPath] = entry
+	// Bracketed array indices normalize to the walker's index-free paths
+	// ("jobs[0].name" resolves as "jobs.name", applied to every element via
+	// the items schema), the same rule bitnami applies; without it the entry
+	// is stored under a path the walker never asks for, and the comment is
+	// simultaneously suppressed from the fallback description, so the
+	// annotation would apply nowhere. An element-level path ("items[0]")
+	// drops entirely rather than mis-attaching to the array key.
+	keyPath, ok := magicschema.NormalizeKeyPath(entry.keyPath)
+	if !ok {
+		return
+	}
+
+	a.oldStyleDescs[keyPath] = entry
 }
 
 // parsedComment holds the result of parsing a comment block (old-style or

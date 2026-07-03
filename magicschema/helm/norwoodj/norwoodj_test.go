@@ -44,6 +44,37 @@ func TestHelmDocsAnnotator(t *testing.T) {
 		input string
 		want  func(*testing.T, map[string]any)
 	}{
+		"array-index key path applies to the items schema": {
+			// Bracketed indices normalize to the walker's index-free paths,
+			// the same rule bitnami applies; without it the annotation is
+			// stored under a path the walker never asks for while the
+			// comment is also suppressed from the fallback description.
+			input: stringtest.Input(`
+				# jobs[0].name -- Job name from helm-docs
+				jobs:
+				  - name: a
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				jobs, ok := props["jobs"].(map[string]any)
+				require.True(t, ok)
+
+				items, ok := jobs["items"].(map[string]any)
+				require.True(t, ok)
+
+				itemProps, ok := items["properties"].(map[string]any)
+				require.True(t, ok)
+
+				name, ok := itemProps["name"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "Job name from helm-docs", name["description"])
+			},
+		},
 		"annotation-lookalike inside a block scalar is data": {
 			// An old-style "# key -- desc" line inside a "|" scalar is string
 			// data; treating it as an annotation would attach a wrong

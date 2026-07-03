@@ -2,6 +2,7 @@ package magicschema
 
 import (
 	"encoding/json"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -424,6 +425,33 @@ func SetSchemaType(s *jsonschema.Schema, types []string) {
 		s.Type = ""
 		s.Types = types
 	}
+}
+
+var (
+	arrayIndexExpr    = regexp.MustCompile(`\[\d+\]`)
+	trailingIndexExpr = regexp.MustCompile(`\[\d+\]$`)
+)
+
+// NormalizeKeyPath strips array indices from an annotation key path,
+// converting paths like "jobs[0].nameOverride" to "jobs.nameOverride" so
+// annotations match the dot-separated key paths used by the generator's AST
+// walker (which walks sequence elements under the array's own path).
+//
+// A key path whose final segment is a bare positional index (such as
+// "items[0]") targets a single array element rather than a key the walker
+// visits. Stripping that index would attach the element's type, default,
+// description, or skip to the array key itself, producing a schema that
+// rejects the array value present in the source. The second return value
+// reports whether the path resolves to a walker key; element-level paths
+// report false and the annotation is dropped (fail open). The bitnami and
+// norwoodj annotators share this one rule, so the same bracketed path cannot
+// resolve differently between the two formats.
+func NormalizeKeyPath(keyPath string) (string, bool) {
+	if trailingIndexExpr.MatchString(keyPath) {
+		return "", false
+	}
+
+	return arrayIndexExpr.ReplaceAllString(keyPath, ""), true
 }
 
 // TypeTokens converts a decoded annotation list to JSON Schema type tokens:
