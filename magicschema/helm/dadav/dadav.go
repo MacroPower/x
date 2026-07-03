@@ -495,40 +495,17 @@ func scanCommentBlocks(comment string) commentBlocks {
 	}
 }
 
-// applyType sets Type or Types on the schema from a YAML value.
+// applyType sets Type or Types on the schema from a YAML value. List members
+// normalize through [magicschema.TypeTokens] -- the policy shared with
+// losisin -- and SetSchemaType collapses a single type to the scalar Type
+// while an empty or dropped list (type: [], type: [string, 1]) stays unset so
+// structural inference and the fail-open default still apply.
 func applyType(schema *jsonschema.Schema, val any) {
 	switch v := val.(type) {
 	case string:
 		schema.Type = v
 	case []any:
-		types := make([]string, 0, len(v))
-
-		for _, item := range v {
-			switch item := item.(type) {
-			case string:
-				// An empty string is not a valid JSON Schema type token;
-				// SetSchemaType rewrites it to the "null" type.
-				types = append(types, item)
-
-			case nil:
-				// YAML null in a type array (e.g., [string, null]) is
-				// deserialized as nil. Convert to the "null" type string,
-				// matching upstream behavior.
-				types = append(types, "null")
-			default:
-				// A member that is not a string or null cannot be a JSON Schema
-				// type token (e.g. type: [string, 1]). Narrowing to the
-				// representable members would drop a type the value may take and
-				// reject it, so drop the type entirely and fall back to value
-				// inference (fail open).
-				return
-			}
-		}
-
-		// SetSchemaType collapses a single type to the scalar Type and leaves an
-		// empty list (e.g. type: [], type: [1, 2]) untouched so structural
-		// inference and the fail-open default still apply.
-		magicschema.SetSchemaType(schema, types)
+		magicschema.SetSchemaType(schema, magicschema.TypeTokens(v))
 	}
 }
 

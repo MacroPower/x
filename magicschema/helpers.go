@@ -425,3 +425,29 @@ func SetSchemaType(s *jsonschema.Schema, types []string) {
 		s.Types = types
 	}
 }
+
+// TypeTokens converts a decoded annotation list to JSON Schema type tokens:
+// string members are kept and null members become the "null" type (a YAML
+// null in a type list, e.g. type: [string, null], decodes as nil). A member
+// that is neither cannot be a type token (type: [string, 1]); narrowing to
+// the representable members would keep type:string and reject an integer the
+// value may take (fail closed), so the whole list drops to nil instead and
+// [SetSchemaType] leaves the type unset for value inference (fail open). The
+// dadav and losisin annotators share this one policy, so the same malformed
+// annotation cannot produce different schemas in the two formats.
+func TypeTokens(items []any) []string {
+	tokens := make([]string, 0, len(items))
+
+	for _, item := range items {
+		switch item := item.(type) {
+		case string:
+			tokens = append(tokens, item)
+		case nil:
+			tokens = append(tokens, typeNull)
+		default:
+			return nil
+		}
+	}
+
+	return tokens
+}
