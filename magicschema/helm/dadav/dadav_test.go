@@ -4271,6 +4271,31 @@ func TestHelmSchemaAnnotatorNumericCoercion(t *testing.T) {
 				}
 			},
 		},
+		"float maxLength of exactly 2^63 is rejected": {
+			// A float64 cannot represent MaxInt64; the nearest value is 2^63
+			// itself, whose int conversion is implementation-defined
+			// (saturating on arm64, wrapping negative on amd64). The bound
+			// check must reject it so the same input cannot produce
+			// different schemas per architecture.
+			input: stringtest.Input(`
+				# @schema
+				# maxLength: 9223372036854775808.0
+				# @schema
+				name: test
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				name, ok := props["name"].(map[string]any)
+				require.True(t, ok)
+
+				assert.NotContains(t, name, "maxLength",
+					"a float bound at exactly 2^63 must be dropped, not converted")
+			},
+		},
 		"non-finite enum value is dropped, schema still marshals": {
 			input: stringtest.Input(`
 				# @schema

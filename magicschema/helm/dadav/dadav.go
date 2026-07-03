@@ -717,8 +717,14 @@ func toIntPtr(val any) *int {
 		return &i
 
 	case float64:
+		// The upper bound excludes 2^63 itself: float64 cannot represent
+		// MaxInt64, so the constant math.MaxInt rounds up to exactly 2^63 in
+		// this comparison, and a v equal to it would pass a ">" check and
+		// make int(v) an out-of-range conversion whose result is
+		// implementation-defined (saturating on arm64, wrapping on amd64).
+		// MinInt is exactly representable, so the lower bound compares as is.
 		if math.IsInf(v, 0) || math.IsNaN(v) || v != math.Trunc(v) ||
-			v < math.MinInt || v > math.MaxInt {
+			v < math.MinInt || v >= 1<<63 {
 			return nil
 		}
 
