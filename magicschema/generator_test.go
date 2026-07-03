@@ -2254,6 +2254,34 @@ level1:
 	assert.Equal(t, "string", val["type"])
 }
 
+// nilPreparedAnnotator returns (nil, nil) from ForContent, standing in for an
+// external annotator that means "nothing to do for this file" -- mirroring
+// Annotate's documented nil-for-no-result convention.
+type nilPreparedAnnotator struct{}
+
+func (nilPreparedAnnotator) Name() string { return "nilprepared" }
+
+func (nilPreparedAnnotator) ForContent(_ []byte) (magicschema.Annotator, error) {
+	return nil, nil //nolint:nilnil // the (nil, nil) return is the case under test
+}
+
+func (nilPreparedAnnotator) Annotate(_ ast.Node, _ string) *magicschema.AnnotationResult {
+	return nil
+}
+
+func TestGeneratorNilPreparedAnnotatorDropped(t *testing.T) {
+	t.Parallel()
+
+	// A nil prepared annotator is dropped like a failed one rather than
+	// walked, which would panic on the first Annotate call.
+	gen := magicschema.NewGenerator(magicschema.WithAnnotators(nilPreparedAnnotator{}))
+
+	schema, err := gen.Generate([]byte("key: value\n"))
+	require.NoError(t, err)
+	require.NotNil(t, schema.Properties["key"])
+	assert.Equal(t, "string", schema.Properties["key"].Type)
+}
+
 // rootRefStubAnnotator is a no-op annotator whose root schema is a bare
 // $ref, standing in for a @schema.root block that makes the document a
 // reference.

@@ -356,13 +356,16 @@ func reduceSchemas(schemas []*jsonschema.Schema) *jsonschema.Schema {
 }
 
 // prepareAnnotators calls ForContent on each prototype annotator, dropping
-// (with a warning) any annotator whose preparation fails.
+// (with a warning) any annotator whose preparation fails. A nil prepared
+// annotator is dropped the same way: an external ForContent returning
+// (nil, nil) to mean "nothing to do" would otherwise panic on its first
+// Annotate call, and annotation handling is never fatal.
 func prepareAnnotators(annotators []Annotator, content []byte) []Annotator {
 	prepared := make([]Annotator, 0, len(annotators))
 
 	for _, ann := range annotators {
 		p, err := ann.ForContent(content)
-		if err != nil {
+		if err != nil || p == nil {
 			slog.Warn("annotator prepare",
 				slog.String("annotator", ann.Name()),
 				slog.Any("error", err),
