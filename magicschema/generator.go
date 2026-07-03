@@ -26,7 +26,9 @@ var (
 	ErrWriteOutput   = errors.New("write output")
 )
 
-// Generator produces JSON Schema from YAML input.
+// Generator produces JSON Schema from YAML input. It holds only
+// configuration and is safe for concurrent use: all mutable walk state lives
+// on the per-document [docWalker] that generateSingle constructs.
 type Generator struct {
 	title       string
 	description string
@@ -35,20 +37,35 @@ type Generator struct {
 
 	strict        bool
 	inferDefaults bool
+}
 
-	// Walk recursion depth on the per-document copy of the Generator,
-	// bounding alias cycles and nesting deeper than maxWalkDepth.
+// docWalker holds the mutable state of one document's schema walk, keeping it
+// off the [Generator] so the public object stays pure configuration: state
+// with reference semantics added here is isolated per document by
+// construction, where a shallow copy of the Generator would silently share it
+// across documents and concurrent Generate calls.
+type docWalker struct {
+	// The owning Generator, read only for configuration (strict,
+	// inferDefaults) during the walk.
+	gen *Generator
+
+	// The document's prepared annotators, so per-document annotator state
+	// (e.g. dadav's root-block tracking) resets at document boundaries and
+	// the prototype annotators the Generator holds are never mutated.
+	annotators []Annotator
+
+	// Walk recursion depth, bounding alias cycles and nesting deeper than
+	// maxWalkDepth.
 	depth int
 
-	// Walked node count on the per-document copy of the Generator,
-	// bounding total work when aliases fan out exponentially (chained
-	// anchors each referenced multiple times, billion-laughs style).
+	// Walked node count, bounding total work when aliases fan out
+	// exponentially (chained anchors each referenced multiple times,
+	// billion-laughs style).
 	visits int
 
-	// Items-schema nesting level on the per-document copy of the
-	// Generator. An items schema describes every element of a sequence,
-	// so a default lifted from one observed element would be arbitrary;
-	// default recording is suppressed while non-zero.
+	// Items-schema nesting level. An items schema describes every element of
+	// a sequence, so a default lifted from one observed element would be
+	// arbitrary; default recording is suppressed while non-zero.
 	inItems int
 
 	// Walked node count for default inference (astToGoValue), kept separate
@@ -284,11 +301,9 @@ func (g *Generator) generateSingle(input []byte) (*jsonschema.Schema, []Annotato
 			continue
 		}
 
-		// Prepare annotators per document so per-document state (e.g.
-		// dadav's root-block tracking) resets at document boundaries.
-		// The walk runs on a per-document copy so the receiver -- and the
-		// prototype annotators it holds -- are never mutated, keeping
-		// Generator safe for concurrent use.
+		// Prepare annotators per document and walk on a per-document
+		// docWalker, so all mutable state is isolated per document and the
+		// Generator stays safe for concurrent use.
 		content := input
 		if docBytes != nil {
 			content = docBytes[i]
@@ -302,11 +317,10 @@ func (g *Generator) generateSingle(input []byte) (*jsonschema.Schema, []Annotato
 		prepared := prepareAnnotators(g.annotators, content)
 		allPrepared = append(allPrepared, prepared...)
 
-		docGen := *g
-		docGen.annotators = prepared
+		walker := &docWalker{gen: g, annotators: prepared}
 
 		anchors := buildAliasResolutions(doc.Body)
-		schemas = append(schemas, docGen.walkNode(doc.Body, "", anchors))
+		schemas = append(schemas, walker.walkNode(doc.Body, "", anchors))
 	}
 
 	if len(schemas) == 0 {
@@ -356,12 +370,12 @@ func prepareAnnotators(annotators []Annotator, content []byte) []Annotator {
 // known format's markers never leak into descriptions (fail open). The
 // recognizers are consulted straight off the prepared annotators, so there is
 // no second field to keep in lockstep with them.
-func (g *Generator) isAnnotationLine(s string) bool {
+func (w *docWalker) isAnnotationLine(s string) bool {
 	if IsAnnotationComment(s) {
 		return true
 	}
 
-	for _, ann := range g.annotators {
+	for _, ann := range w.annotators {
 		if m, ok := ann.(MarkerAnnotator); ok && m.IsAnnotationLine(s) {
 			return true
 		}
@@ -375,14 +389,14 @@ func (g *Generator) isAnnotationLine(s string) bool {
 // rather than here, so every recursion path -- including direct calls into
 // the container walkers from merge-key and annotation handling -- consumes
 // exactly one depth unit per nesting level.
-func (g *Generator) walkNode(
+func (w *docWalker) walkNode(
 	node ast.Node,
 	keyPath string,
 	anchors aliasResolutions,
 ) *jsonschema.Schema {
-	g.visits++
+	w.visits++
 
-	if g.visits > maxNodeVisits {
+	if w.visits > maxNodeVisits {
 		return &jsonschema.Schema{}
 	}
 
@@ -393,7 +407,7 @@ func (g *Generator) walkNode(
 		// A broken alias or a wrapper bottoming out at nil is a null value
 		// (see isNullNode), so it records a null default like a genuine null.
 		schema := &jsonschema.Schema{}
-		g.recordDefault(schema, node, anchors)
+		w.recordDefault(schema, node, anchors)
 
 		return schema
 	}
@@ -402,17 +416,17 @@ func (g *Generator) walkNode(
 
 	switch n := unwrapped.(type) {
 	case *ast.MappingNode:
-		schema = g.walkMapping(n.Values, keyPath, anchors)
+		schema = w.walkMapping(n.Values, keyPath, anchors)
 	case *ast.MappingValueNode:
-		schema = g.walkMapping([]*ast.MappingValueNode{n}, keyPath, anchors)
+		schema = w.walkMapping([]*ast.MappingValueNode{n}, keyPath, anchors)
 	case *ast.SequenceNode:
-		schema = g.walkSequence(n, keyPath, anchors)
+		schema = w.walkSequence(n, keyPath, anchors)
 	default:
 		// Pass the wrapped node so explicit tags reach inferType.
 		schema = walkScalar(node)
 	}
 
-	g.recordDefault(schema, node, anchors)
+	w.recordDefault(schema, node, anchors)
 
 	return schema
 }
@@ -421,19 +435,19 @@ func (g *Generator) walkNode(
 // default inference is enabled, no annotator set one, and the walk is
 // outside an items schema (see the inItems field). Objects record no
 // default, since their children carry their own.
-func (g *Generator) recordDefault(
+func (w *docWalker) recordDefault(
 	schema *jsonschema.Schema,
 	node ast.Node,
 	anchors aliasResolutions,
 ) {
-	if !g.inferDefaults || g.inItems != 0 || schema.Default != nil {
+	if !w.gen.inferDefaults || w.inItems != 0 || schema.Default != nil {
 		return
 	}
 
 	switch unwrapNode(node).(type) {
 	case *ast.MappingNode, *ast.MappingValueNode:
 	case *ast.SequenceNode:
-		schema.Default = g.nodeDefault(node, anchors)
+		schema.Default = w.nodeDefault(node, anchors)
 	default:
 		// Pass the wrapped node so explicit tags coerce the value.
 		schema.Default = scalarDefault(node)
@@ -445,17 +459,17 @@ func (g *Generator) recordDefault(
 // *ast.MappingValueNode in a one-element slice -- the same shape
 // mappingToGoValue takes -- so there is no second input to keep exclusive
 // with the first.
-func (g *Generator) walkMapping(
+func (w *docWalker) walkMapping(
 	values []*ast.MappingValueNode,
 	keyPath string,
 	anchors aliasResolutions,
 ) *jsonschema.Schema {
-	g.depth++
-	defer func() { g.depth-- }()
+	w.depth++
+	defer func() { w.depth-- }()
 
-	g.visits++
+	w.visits++
 
-	if g.depth > maxWalkDepth || g.visits > maxNodeVisits {
+	if w.depth > maxWalkDepth || w.visits > maxNodeVisits {
 		return &jsonschema.Schema{}
 	}
 
@@ -464,7 +478,7 @@ func (g *Generator) walkMapping(
 		Properties: make(map[string]*jsonschema.Schema),
 	}
 
-	if g.strict {
+	if w.gen.strict {
 		schema.AdditionalProperties = FalseSchema()
 	} else {
 		schema.AdditionalProperties = TrueSchema()
@@ -492,12 +506,12 @@ func (g *Generator) walkMapping(
 
 	for _, mvn := range values {
 		if _, ok := mvn.Key.(*ast.MergeKeyNode); ok {
-			g.handleMergeKey(mvn, keyPath, anchors, schema, addToOrder, decisions)
+			w.handleMergeKey(mvn, keyPath, anchors, schema, addToOrder, decisions)
 
 			continue
 		}
 
-		g.handleProperty(mvn, keyPath, anchors, schema, addToOrder, decisions)
+		w.handleProperty(mvn, keyPath, anchors, schema, addToOrder, decisions)
 	}
 
 	// A skipped key may have been inserted (and ordered) by a merge key before
@@ -530,7 +544,7 @@ type explicitDecisions struct {
 }
 
 // handleMergeKey processes a YAML merge key (<<) and adds its properties.
-func (g *Generator) handleMergeKey(
+func (w *docWalker) handleMergeKey(
 	mvn *ast.MappingValueNode,
 	keyPath string,
 	anchors aliasResolutions,
@@ -543,7 +557,7 @@ func (g *Generator) handleMergeKey(
 
 	switch mv := mergeValue.(type) {
 	case *ast.MappingNode:
-		g.mergeMappingInto(schema, g.walkMapping(mv.Values, keyPath, anchors), addToOrder, decisions)
+		w.mergeMappingInto(schema, w.walkMapping(mv.Values, keyPath, anchors), addToOrder, decisions)
 
 	case *ast.SequenceNode:
 		for _, seqVal := range mv.Values {
@@ -555,7 +569,7 @@ func (g *Generator) handleMergeKey(
 				continue
 			}
 
-			g.mergeMappingInto(schema, g.walkMapping(mappingNode.Values, keyPath, anchors), addToOrder, decisions)
+			w.mergeMappingInto(schema, w.walkMapping(mappingNode.Values, keyPath, anchors), addToOrder, decisions)
 		}
 	}
 }
@@ -565,7 +579,7 @@ func (g *Generator) handleMergeKey(
 // regardless of position), a key an explicit annotation skipped is never
 // re-inserted, required keys are deduplicated, and a key an explicit
 // required:false de-required (or skipped) is not marked required.
-func (g *Generator) mergeMappingInto(
+func (w *docWalker) mergeMappingInto(
 	schema, mergeSchema *jsonschema.Schema,
 	addToOrder func(string),
 	decisions *explicitDecisions,
@@ -604,7 +618,7 @@ func removeRequired(schema *jsonschema.Schema, key string) {
 }
 
 // handleProperty processes a single key-value pair in a mapping.
-func (g *Generator) handleProperty(
+func (w *docWalker) handleProperty(
 	mvn *ast.MappingValueNode,
 	keyPath string,
 	anchors aliasResolutions,
@@ -619,7 +633,7 @@ func (g *Generator) handleProperty(
 		childPath = keyPath + "." + keyName
 	}
 
-	annotation := g.annotate(mvn, childPath)
+	annotation := w.annotate(mvn, childPath)
 	if annotation != nil && annotation.Skip {
 		// Record the skip and undo any property a preceding "<<" merge key
 		// already inserted, so the subtree is omitted regardless of source
@@ -636,7 +650,7 @@ func (g *Generator) handleProperty(
 	// reach inferType; buildChildSchema unwraps for structural checks.
 	valueNode := resolveAliases(mvn.Value, anchors)
 
-	childSchema := g.buildChildSchema(mvn, childPath, anchors, valueNode, annotation)
+	childSchema := w.buildChildSchema(mvn, childPath, anchors, valueNode, annotation)
 
 	// Description precedence lives entirely in buildChildSchema: in the
 	// annotated path childSchema is annotation.Schema itself, so its
@@ -685,7 +699,7 @@ func keyText(key ast.MapKeyNode, anchors aliasResolutions) string {
 
 // buildChildSchema creates a schema for a child property, combining annotations
 // and structural inference.
-func (g *Generator) buildChildSchema(
+func (w *docWalker) buildChildSchema(
 	mvn *ast.MappingValueNode,
 	childPath string,
 	anchors aliasResolutions,
@@ -700,9 +714,9 @@ func (g *Generator) buildChildSchema(
 	// annotator results without ever requiring a Schema alongside.
 	if annotation == nil ||
 		(annotation.Schema == nil && !annotation.SkipProperties && !annotation.MergeProperties) {
-		childSchema := g.walkNode(valueNode, childPath, anchors)
+		childSchema := w.walkNode(valueNode, childPath, anchors)
 		if childSchema.Description == "" {
-			childSchema.Description = extractComment(mvn, g.isAnnotationLine)
+			childSchema.Description = extractComment(mvn, w.isAnnotationLine)
 		}
 
 		return childSchema
@@ -761,8 +775,8 @@ func (g *Generator) buildChildSchema(
 	// receives; the flags reset below still treats it as structural.
 	switch {
 	case hasType(childSchema, typeObject) && childSchema.Properties == nil:
-		g.fillObjectFromStructure(childSchema, structuralNode, childPath, anchors, annotation)
-	case hasType(childSchema, typeObject) && !annotatedAP && g.strict:
+		w.fillObjectFromStructure(childSchema, structuralNode, childPath, anchors, annotation)
+	case hasType(childSchema, typeObject) && !annotatedAP && w.gen.strict:
 		childSchema.AdditionalProperties = FalseSchema()
 	}
 
@@ -784,7 +798,7 @@ func (g *Generator) buildChildSchema(
 	// sets both forms of the keyword, which the marshaler rejects (fail closed).
 	if hasType(childSchema, typeArray) && childSchema.Items == nil && childSchema.ItemsArray == nil {
 		if seqNode, ok := structuralNode.(*ast.SequenceNode); ok {
-			childSchema.Items = g.inferItemsFromSequence(seqNode, childPath, anchors)
+			childSchema.Items = w.inferItemsFromSequence(seqNode, childPath, anchors)
 		}
 	}
 
@@ -808,13 +822,13 @@ func (g *Generator) buildChildSchema(
 
 	// The observed value fills in the default when no annotator set one,
 	// regardless of the annotated type (descriptive, fail-open).
-	g.recordDefault(childSchema, valueNode, anchors)
+	w.recordDefault(childSchema, valueNode, anchors)
 
 	// A plain comment fills in the description when no annotator set one:
 	// extract as much as possible (best-effort) rather than letting an
 	// annotation without a description suppress the comment fallback.
 	if childSchema.Description == "" {
-		childSchema.Description = extractComment(mvn, g.isAnnotationLine)
+		childSchema.Description = extractComment(mvn, w.isAnnotationLine)
 	}
 
 	return childSchema
@@ -823,7 +837,7 @@ func (g *Generator) buildChildSchema(
 // fillObjectFromStructure copies the structural recursion's object schema
 // (properties, order, required, additionalProperties) onto an annotated
 // object schema whose annotation left those fields unset.
-func (g *Generator) fillObjectFromStructure(
+func (w *docWalker) fillObjectFromStructure(
 	childSchema *jsonschema.Schema,
 	structuralNode ast.Node,
 	childPath string,
@@ -835,7 +849,7 @@ func (g *Generator) fillObjectFromStructure(
 		return
 	}
 
-	structural := g.walkMapping(mappingNode.Values, childPath, anchors)
+	structural := w.walkMapping(mappingNode.Values, childPath, anchors)
 	childSchema.Properties = structural.Properties
 	childSchema.PropertyOrder = structural.PropertyOrder
 
@@ -855,39 +869,39 @@ func (g *Generator) fillObjectFromStructure(
 }
 
 // walkSequence processes a sequence node into an array schema.
-func (g *Generator) walkSequence(
+func (w *docWalker) walkSequence(
 	seq *ast.SequenceNode,
 	keyPath string,
 	anchors aliasResolutions,
 ) *jsonschema.Schema {
 	return &jsonschema.Schema{
 		Type:  typeArray,
-		Items: g.inferItemsFromSequence(seq, keyPath, anchors),
+		Items: w.inferItemsFromSequence(seq, keyPath, anchors),
 	}
 }
 
 // inferItemsFromSequence infers the items schema from a sequence node's
 // values. Returning nil leaves the items constraint unset, which both the
 // empty-sequence case and the depth cutoff use to fail open.
-func (g *Generator) inferItemsFromSequence(
+func (w *docWalker) inferItemsFromSequence(
 	seq *ast.SequenceNode,
 	keyPath string,
 	anchors aliasResolutions,
 ) *jsonschema.Schema {
-	g.depth++
-	defer func() { g.depth-- }()
+	w.depth++
+	defer func() { w.depth-- }()
 
-	g.visits++
+	w.visits++
 
-	if g.depth > maxWalkDepth || g.visits > maxNodeVisits {
+	if w.depth > maxWalkDepth || w.visits > maxNodeVisits {
 		return nil
 	}
 
 	// Suppress per-element defaults inside the items schema (see the
 	// inItems field); the sequence node itself already carries the full
 	// list as its default.
-	g.inItems++
-	defer func() { g.inItems-- }()
+	w.inItems++
+	defer func() { w.inItems-- }()
 
 	if len(seq.Values) == 0 {
 		return nil
@@ -926,7 +940,7 @@ func (g *Generator) inferItemsFromSequence(
 		var result *jsonschema.Schema
 
 		for _, node := range resolved {
-			result = mergeSchemas(result, g.walkNode(node, keyPath, anchors))
+			result = mergeSchemas(result, w.walkNode(node, keyPath, anchors))
 		}
 
 		return result
@@ -990,8 +1004,8 @@ func scalarGoValue(node ast.Node) (any, bool) {
 // default, resolving aliases along the way. Conversion is all-or-nothing:
 // any unconvertible part (alias cycles, merge keys, exceeded walk
 // budgets) yields no default rather than a partial value.
-func (g *Generator) nodeDefault(node ast.Node, anchors aliasResolutions) json.RawMessage {
-	v, ok := g.astToGoValue(node, anchors)
+func (w *docWalker) nodeDefault(node ast.Node, anchors aliasResolutions) json.RawMessage {
+	v, ok := w.astToGoValue(node, anchors)
 	if !ok {
 		return nil
 	}
@@ -1007,10 +1021,10 @@ func (g *Generator) nodeDefault(node ast.Node, anchors aliasResolutions) json.Ra
 // sequences -- so pathological inputs fail open to no default instead of
 // hanging. The default-visit budget is kept distinct from the structural
 // walk's so recording defaults never shrinks structural coverage.
-func (g *Generator) astToGoValue(node ast.Node, anchors aliasResolutions) (any, bool) {
-	g.defaultVisits++
+func (w *docWalker) astToGoValue(node ast.Node, anchors aliasResolutions) (any, bool) {
+	w.defaultVisits++
 
-	if g.defaultVisits > maxNodeVisits {
+	if w.defaultVisits > maxNodeVisits {
 		return nil, false
 	}
 
@@ -1024,11 +1038,11 @@ func (g *Generator) astToGoValue(node ast.Node, anchors aliasResolutions) (any, 
 		// list's default over one dangling alias.
 		return nil, true
 	case *ast.SequenceNode:
-		return g.sequenceToGoValue(n, anchors)
+		return w.sequenceToGoValue(n, anchors)
 	case *ast.MappingNode:
-		return g.mappingToGoValue(n.Values, anchors)
+		return w.mappingToGoValue(n.Values, anchors)
 	case *ast.MappingValueNode:
-		return g.mappingToGoValue([]*ast.MappingValueNode{n}, anchors)
+		return w.mappingToGoValue([]*ast.MappingValueNode{n}, anchors)
 	default:
 		// Pass the wrapped node so explicit tags coerce the value.
 		return scalarGoValue(node)
@@ -1037,21 +1051,21 @@ func (g *Generator) astToGoValue(node ast.Node, anchors aliasResolutions) (any, 
 
 // sequenceToGoValue converts a sequence node to a []any, initialized
 // non-nil so an empty sequence marshals as [] rather than null.
-func (g *Generator) sequenceToGoValue(
+func (w *docWalker) sequenceToGoValue(
 	seq *ast.SequenceNode,
 	anchors aliasResolutions,
 ) (any, bool) {
-	g.depth++
-	defer func() { g.depth-- }()
+	w.depth++
+	defer func() { w.depth-- }()
 
-	if g.depth > maxWalkDepth {
+	if w.depth > maxWalkDepth {
 		return nil, false
 	}
 
 	out := make([]any, 0, len(seq.Values))
 
 	for _, val := range seq.Values {
-		v, ok := g.astToGoValue(val, anchors)
+		v, ok := w.astToGoValue(val, anchors)
 		if !ok {
 			return nil, false
 		}
@@ -1065,14 +1079,14 @@ func (g *Generator) sequenceToGoValue(
 // mappingToGoValue converts mapping entries to a map[string]any. Merge
 // keys (<<) fail open to no value: they are rare inside sequences, and
 // expanding them here would duplicate the schema walk's merge handling.
-func (g *Generator) mappingToGoValue(
+func (w *docWalker) mappingToGoValue(
 	values []*ast.MappingValueNode,
 	anchors aliasResolutions,
 ) (any, bool) {
-	g.depth++
-	defer func() { g.depth-- }()
+	w.depth++
+	defer func() { w.depth-- }()
 
-	if g.depth > maxWalkDepth {
+	if w.depth > maxWalkDepth {
 		return nil, false
 	}
 
@@ -1083,7 +1097,7 @@ func (g *Generator) mappingToGoValue(
 			return nil, false
 		}
 
-		v, ok := g.astToGoValue(mvn.Value, anchors)
+		v, ok := w.astToGoValue(mvn.Value, anchors)
 		if !ok {
 			return nil, false
 		}
@@ -1095,14 +1109,14 @@ func (g *Generator) mappingToGoValue(
 }
 
 // annotate runs all enabled annotators on a node and returns the merged result.
-func (g *Generator) annotate(node ast.Node, keyPath string) *AnnotationResult {
-	if len(g.annotators) == 0 {
+func (w *docWalker) annotate(node ast.Node, keyPath string) *AnnotationResult {
+	if len(w.annotators) == 0 {
 		return nil
 	}
 
-	results := make([]*AnnotationResult, 0, len(g.annotators))
+	results := make([]*AnnotationResult, 0, len(w.annotators))
 
-	for _, ann := range g.annotators {
+	for _, ann := range w.annotators {
 		result := ann.Annotate(node, keyPath)
 		results = append(results, result)
 	}
