@@ -615,14 +615,27 @@ func toAdditionalProperties(val any) *jsonschema.Schema {
 // anything else. Keeping the representable members (rather than abandoning
 // the whole list as applyType does) is the shared policy for dadav's
 // "required" and "dependencies" string lists: a partial list still guides
-// without rejecting values (fail open).
+// without rejecting values (fail open). Repeats drop while first-seen order
+// is preserved: both consumers feed Draft 7 arrays whose elements must be
+// unique (required, dependency key lists), and a duplicate would make the
+// emitted document fail metaschema validation.
 func toStringSlice(val []any) []string {
 	strs := make([]string, 0, len(val))
+	seen := make(map[string]struct{}, len(val))
 
 	for _, item := range val {
-		if s, ok := item.(string); ok {
-			strs = append(strs, s)
+		s, ok := item.(string)
+		if !ok {
+			continue
 		}
+
+		if _, dup := seen[s]; dup {
+			continue
+		}
+
+		seen[s] = struct{}{}
+
+		strs = append(strs, s)
 	}
 
 	return strs

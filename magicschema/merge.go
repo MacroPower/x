@@ -657,7 +657,9 @@ func constrainsValue(s *jsonschema.Schema) bool {
 		s.If != nil || s.Then != nil || s.Else != nil
 }
 
-// intersectStrings returns the intersection of two string slices.
+// intersectStrings returns the intersection of two string slices. Each
+// member appears once even when an input repeats it: the required array the
+// intersection feeds is a Draft 7 set whose elements must be unique.
 func intersectStrings(a, b []string) []string {
 	if a == nil || b == nil {
 		return nil
@@ -673,6 +675,8 @@ func intersectStrings(a, b []string) []string {
 	for _, s := range b {
 		if set[s] {
 			result = append(result, s)
+
+			set[s] = false
 		}
 	}
 

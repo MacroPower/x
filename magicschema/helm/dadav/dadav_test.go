@@ -400,6 +400,31 @@ func TestHelmSchemaAnnotator(t *testing.T) {
 				assert.Equal(t, "Chart", got["title"])
 			},
 		},
+		"duplicate required members deduplicate": {
+			// Draft 7 requires the required array's elements to be unique; a
+			// repeated member would make the emitted document fail
+			// metaschema validation.
+			input: stringtest.Input(`
+				# @schema
+				# required: [a, a]
+				# @schema
+				foo:
+				  a: 1
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				foo, ok := props["foo"].(map[string]any)
+				require.True(t, ok)
+
+				req, ok := foo["required"].([]any)
+				require.True(t, ok)
+				assert.Equal(t, []any{"a"}, req)
+			},
+		},
 		"root block above explicit document start marker": {
 			// The goccy parser turns a comment header above "---" into a
 			// comment-only document, so the root block never reaches
