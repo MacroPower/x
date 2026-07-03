@@ -228,23 +228,23 @@ func (a *Annotator) applyPair(
 	case "pattern":
 		schema.Pattern = unquoteScalar(val)
 	case "multipleOf":
-		schema.MultipleOf = parsePositiveFloat64Ptr(val)
+		applyNumericBound(&schema.MultipleOf, val, parsePositiveFloat64Ptr)
 	case "minimum":
-		schema.Minimum = parseFloat64Ptr(val)
+		applyNumericBound(&schema.Minimum, val, parseFloat64Ptr)
 	case "maximum":
-		schema.Maximum = parseFloat64Ptr(val)
+		applyNumericBound(&schema.Maximum, val, parseFloat64Ptr)
 	case "minLength":
-		schema.MinLength = parseIntPtr(val)
+		applyNumericBound(&schema.MinLength, val, parseIntPtr)
 	case "maxLength":
-		schema.MaxLength = parseIntPtr(val)
+		applyNumericBound(&schema.MaxLength, val, parseIntPtr)
 	case "minItems":
-		schema.MinItems = parseIntPtr(val)
+		applyNumericBound(&schema.MinItems, val, parseIntPtr)
 	case "maxItems":
-		schema.MaxItems = parseIntPtr(val)
+		applyNumericBound(&schema.MaxItems, val, parseIntPtr)
 	case "minProperties":
-		schema.MinProperties = parseIntPtr(val)
+		applyNumericBound(&schema.MinProperties, val, parseIntPtr)
 	case "maxProperties":
-		schema.MaxProperties = parseIntPtr(val)
+		applyNumericBound(&schema.MaxProperties, val, parseIntPtr)
 	case "uniqueItems":
 		schema.UniqueItems = parseBoolDefault(val)
 	case "required":
@@ -259,13 +259,29 @@ func (a *Annotator) applyPair(
 		schema.AdditionalProperties = parseBoolOrSchema(val, hasVal)
 
 	case "patternProperties":
-		schema.PatternProperties = parseYAMLSchemaMap(val)
+		// Assign only a parsed value: an unparseable one is silently skipped
+		// (per the documented invalid-values rule), so a later typo on a
+		// repeated key never clears a previously set valid constraint. The
+		// not and item* keys below already guard the same way.
+		if m := parseYAMLSchemaMap(val); m != nil {
+			schema.PatternProperties = m
+		}
+
 	case "allOf":
-		schema.AllOf = parseYAMLSchemaArray(val)
+		if arr := parseYAMLSchemaArray(val); arr != nil {
+			schema.AllOf = arr
+		}
+
 	case "anyOf":
-		schema.AnyOf = parseYAMLSchemaArray(val)
+		if arr := parseYAMLSchemaArray(val); arr != nil {
+			schema.AnyOf = arr
+		}
+
 	case "oneOf":
-		schema.OneOf = parseYAMLSchemaArray(val)
+		if arr := parseYAMLSchemaArray(val); arr != nil {
+			schema.OneOf = arr
+		}
+
 	case "not":
 		s := parseYAMLSchema(val)
 		if s != nil {
@@ -672,14 +688,44 @@ func parseYAMLSchemaMap(val string) map[string]*jsonschema.Schema {
 	return magicschema.ToSubSchemaMap(v)
 }
 
+// isYAMLNull reports whether a trimmed scalar is one of YAML's null
+// spellings (null, Null, NULL, ~). The numeric paths must recognize them up
+// front: goccy decodes them into float64 as 0 with no error, so a null-valued
+// bound would otherwise emit a spurious 0 constraint instead of clearing.
+func isYAMLNull(s string) bool {
+	switch s {
+	case yamlNull, "Null", "NULL", "~":
+		return true
+	}
+
+	return false
+}
+
+// applyNumericBound resolves a numeric-bound annotation value onto dst using
+// the given parser: an empty or null value clears the constraint (upstream's
+// null-clears semantics), while an unparseable, non-finite, or out-of-domain
+// value is silently skipped -- per the documented invalid-values rule -- so a
+// typo on a repeated key never clears a previously set valid constraint.
+func applyNumericBound[T int | float64](dst **T, val string, parse func(string) *T) {
+	if s := strings.TrimSpace(val); s == "" || isYAMLNull(s) {
+		*dst = nil
+
+		return
+	}
+
+	if v := parse(val); v != nil {
+		*dst = v
+	}
+}
+
 // parseFloat64Ptr parses a string into *float64. Returns nil for an empty or
-// "null" value (both clear the constraint, matching upstream and keeping the
+// null value (both clear the constraint, matching upstream and keeping the
 // bare-keyword form fail-open), for unparseable values, and for non-finite
 // results (.inf/.nan), which YAML accepts but JSON cannot marshal -- letting
 // one through would fail the whole schema's final marshal.
 func parseFloat64Ptr(val string) *float64 {
 	s := strings.TrimSpace(val)
-	if s == "" || s == yamlNull {
+	if s == "" || isYAMLNull(s) {
 		return nil
 	}
 
@@ -717,7 +763,7 @@ func parsePositiveFloat64Ptr(val string) *float64 {
 // than dropping a usable-but-imprecise constraint.
 func parseIntPtr(val string) *int {
 	s := strings.TrimSpace(val)
-	if s == "" || s == yamlNull {
+	if s == "" || isYAMLNull(s) {
 		return nil
 	}
 

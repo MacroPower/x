@@ -66,6 +66,88 @@ func TestHelmValuesSchemaAnnotator(t *testing.T) {
 				assert.Contains(t, req, "name")
 			},
 		},
+		"tilde null clears a bound instead of becoming zero": {
+			// The goccy parser decodes "~" (and Null/NULL) into float64 as 0 with no
+			// error, so without up-front null detection a null-valued bound
+			// emitted a spurious 0 constraint that rejects the chart's own
+			// value.
+			input: stringtest.Input(`
+				# @schema type:integer;maximum:~
+				replicas: 3
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				r, ok := props["replicas"].(map[string]any)
+				require.True(t, ok)
+
+				assert.NotContains(t, r, "maximum",
+					"a null-valued bound clears the constraint")
+			},
+		},
+		"invalid bound on a repeated key keeps the valid one": {
+			// Invalid parse values are documented as silently skipped: a typo
+			// must not clear a previously set valid constraint. Only an
+			// explicit null clears.
+			input: stringtest.Input(`
+				# @schema minimum:5
+				# @schema minimum:abc
+				count: 7
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				c, ok := props["count"].(map[string]any)
+				require.True(t, ok)
+
+				assert.InDelta(t, float64(5), c["minimum"], 0.001,
+					"a later typo must not clear the valid bound")
+			},
+		},
+		"explicit null on a repeated key clears the bound": {
+			input: stringtest.Input(`
+				# @schema minimum:5
+				# @schema minimum:null
+				count: 7
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				c, ok := props["count"].(map[string]any)
+				require.True(t, ok)
+
+				assert.NotContains(t, c, "minimum")
+			},
+		},
+		"invalid allOf on a repeated key keeps the valid one": {
+			input: stringtest.Input(`
+				# @schema allOf:[{minLength: 1}]
+				# @schema allOf:garbage
+				name: test
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				n, ok := props["name"].(map[string]any)
+				require.True(t, ok)
+
+				allOf, ok := n["allOf"].([]any)
+				require.True(t, ok, "the valid allOf must survive the later typo")
+				assert.Len(t, allOf, 1)
+			},
+		},
 		"type array": {
 			input: stringtest.Input(`
 				# @schema type:[integer, null];minimum:0
