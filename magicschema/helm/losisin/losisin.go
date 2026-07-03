@@ -217,7 +217,7 @@ func (a *Annotator) applyPair(
 ) {
 	switch key {
 	case "type":
-		a.applyType(schema, val)
+		magicschema.SetSchemaType(schema, parseStringList(val))
 	case "title":
 		schema.Title = unquoteScalar(val)
 	case "description":
@@ -376,14 +376,6 @@ func (a *Annotator) applyPair(
 	default:
 		slog.Warn("unknown helm-values-schema key", slog.String("key", key))
 	}
-}
-
-// applyType parses a type string which may be a single type, a bracket-delimited
-// array like [string, integer], or a comma-separated list like "string, null".
-// The upstream tool uses processList with stringsOnly=true, which first tries YAML
-// parse for bracket-prefixed values, then falls back to comma-splitting.
-func (a *Annotator) applyType(schema *jsonschema.Schema, val string) {
-	magicschema.SetSchemaType(schema, parseStringList(val))
 }
 
 // applyNullable appends "null" to the annotated type, matching upstream's
