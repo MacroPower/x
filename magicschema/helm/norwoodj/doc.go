@@ -412,11 +412,15 @@
 //     override annotations. Multiple @default lines in a single block
 //     cause the last one to win (each match overwrites the previous).
 //
-//   - @section regex: Uses ^\s*# @section -- (.*)$ for standard-form
-//     section annotations (with " -- " separator).
-//
-//   - @notationType regex: Uses ^\s*#\s+@notationType\s+--\s+(.*)$ for
-//     standard-form notation type annotations (with " -- " separator).
+//   - @section and @notationType consumption: recognized as whole tokens on
+//     the two-hash-capped comment strip (markerToken over
+//     [magicschema.StripCommentMarker]), not with the upstream regexes
+//     above. This is broader than upstream: two-hash forms
+//     ("## @section -- x") and the bare forms without " -- " are consumed
+//     too, so neither spelling leaks into the description, whereas upstream
+//     lets the unmatched forms fall through as continuation text. Prose
+//     whose first word merely extends a marker ("@sections of the chart")
+//     still stays description text.
 //
 //   - Comment continuation regex: Uses ^\s*#(\s?)(.*)$ to match
 //     continuation lines, with the optional space after # controlling
