@@ -33,12 +33,6 @@ type Generator struct {
 	id          string
 	annotators  []Annotator
 
-	// Marker recognizers of the prepared annotators, set on the per-document
-	// copy of the Generator alongside annotators. The fallback description
-	// extractor consults them (see [Generator.isAnnotationLine]) so a custom
-	// annotator's marker lines never leak into descriptions.
-	markers []MarkerAnnotator
-
 	strict        bool
 	inferDefaults bool
 
@@ -310,7 +304,6 @@ func (g *Generator) generateSingle(input []byte) (*jsonschema.Schema, []Annotato
 
 		docGen := *g
 		docGen.annotators = prepared
-		docGen.markers = markerAnnotators(prepared)
 
 		anchors := buildAliasResolutions(doc.Body)
 		schemas = append(schemas, docGen.walkNode(doc.Body, "", anchors))
@@ -356,33 +349,20 @@ func prepareAnnotators(annotators []Annotator, content []byte) []Annotator {
 	return prepared
 }
 
-// markerAnnotators collects the prepared annotators that implement the
-// optional [MarkerAnnotator] interface, so the fallback description
-// extractor can consult their marker recognizers.
-func markerAnnotators(annotators []Annotator) []MarkerAnnotator {
-	var markers []MarkerAnnotator
-
-	for _, ann := range annotators {
-		if m, ok := ann.(MarkerAnnotator); ok {
-			markers = append(markers, m)
-		}
-	}
-
-	return markers
-}
-
 // isAnnotationLine reports whether a comment line is an annotation marker of
 // any recognized format: the built-in [IsAnnotationComment] list or a
-// prepared annotator implementing [MarkerAnnotator]. The built-in list
-// applies regardless of which annotators are enabled, so a known format's
-// markers never leak into descriptions (fail open).
+// prepared annotator implementing the optional [MarkerAnnotator] interface.
+// The built-in list applies regardless of which annotators are enabled, so a
+// known format's markers never leak into descriptions (fail open). The
+// recognizers are consulted straight off the prepared annotators, so there is
+// no second field to keep in lockstep with them.
 func (g *Generator) isAnnotationLine(s string) bool {
 	if IsAnnotationComment(s) {
 		return true
 	}
 
-	for _, m := range g.markers {
-		if m.IsAnnotationLine(s) {
+	for _, ann := range g.annotators {
+		if m, ok := ann.(MarkerAnnotator); ok && m.IsAnnotationLine(s) {
 			return true
 		}
 	}
