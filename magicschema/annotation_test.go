@@ -270,6 +270,58 @@ func TestGeneratorAnnotatorRefNotGraftedBesideConstraints(t *testing.T) {
 		"a lower-priority $ref must not nullify the winner's constraints")
 }
 
+func TestGeneratorFallbackDescriptionWithoutSchema(t *testing.T) {
+	t.Parallel()
+
+	// An annotation result carrying only FallbackDescription has no schema
+	// fragment for mergeAnnotations to apply it to; the structural path must
+	// still honor the documented contract that inferred prose outranks the
+	// generator's own comment fallback.
+	ann := stubAnnotator{
+		name: "proseonly",
+		result: &magicschema.AnnotationResult{
+			FallbackDescription: "prose from external annotator",
+		},
+	}
+
+	tcs := map[string]struct {
+		input string
+	}{
+		"without a comment": {
+			input: "key: 1\n",
+		},
+		"outranking the comment fallback": {
+			input: "# comment prose\nkey: 1\n",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			gen := magicschema.NewGenerator(magicschema.WithAnnotators(ann))
+
+			schema, err := gen.Generate([]byte(tc.input))
+			require.NoError(t, err)
+
+			out, err := json.Marshal(schema)
+			require.NoError(t, err)
+
+			var got map[string]any
+
+			require.NoError(t, json.Unmarshal(out, &got))
+
+			props, ok := got["properties"].(map[string]any)
+			require.True(t, ok)
+
+			prop, ok := props["key"].(map[string]any)
+			require.True(t, ok)
+
+			assert.Equal(t, "prose from external annotator", prop["description"])
+		})
+	}
+}
+
 func TestGeneratorAnnotatorRefWinnerNotPolluted(t *testing.T) {
 	t.Parallel()
 

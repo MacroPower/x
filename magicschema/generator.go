@@ -743,9 +743,7 @@ func (w *docWalker) buildChildSchema(
 	if annotation == nil ||
 		(annotation.Schema == nil && !annotation.SkipProperties && !annotation.MergeProperties) {
 		childSchema := w.walkNode(valueNode, childPath, anchors)
-		if childSchema.Description == "" {
-			childSchema.Description = extractComment(mvn, w.isAnnotationLine)
-		}
+		w.fillDescription(childSchema, mvn, annotation)
 
 		return childSchema
 	}
@@ -866,11 +864,29 @@ func (w *docWalker) buildChildSchema(
 	// A plain comment fills in the description when no annotator set one:
 	// extract as much as possible (best-effort) rather than letting an
 	// annotation without a description suppress the comment fallback.
-	if childSchema.Description == "" {
-		childSchema.Description = extractComment(mvn, w.isAnnotationLine)
-	}
+	w.fillDescription(childSchema, mvn, annotation)
 
 	return childSchema
+}
+
+// fillDescription fills an empty description from the annotation's inferred
+// prose first, then from the node's own plain comment. The documented
+// FallbackDescription contract has annotator-inferred prose outrank the
+// generator's comment fallback; applying it here covers the annotation
+// results that carry no schema fragment for mergeAnnotations to apply it to
+// (a bare FallbackDescription, or one beside only the Skip-family flags).
+func (w *docWalker) fillDescription(
+	schema *jsonschema.Schema,
+	mvn *ast.MappingValueNode,
+	annotation *AnnotationResult,
+) {
+	if schema.Description == "" && annotation != nil {
+		schema.Description = annotation.FallbackDescription
+	}
+
+	if schema.Description == "" {
+		schema.Description = extractComment(mvn, w.isAnnotationLine)
+	}
 }
 
 // fillObjectFromStructure copies the structural recursion's object schema
