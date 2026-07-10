@@ -129,8 +129,9 @@ loop:
 
 // DropEmptyDocuments removes empty documents from a multi-document YAML
 // stream by blanking each bare "---" separator that is followed, across
-// blank lines only, by another document start line -- either another bare
-// separator or a "---" marker carrying same-line content ("--- {b: 2}").
+// blank lines only, by another document boundary -- another bare separator,
+// a "---" marker carrying same-line content ("--- {b: 2}"), or a bare "..."
+// end marker (which goccy otherwise fails to parse directly after "---").
 // The goccy/go-yaml parser stops emitting documents after an empty one
 // ("a: 1\n---\n\n---\nb: 2" parses as two documents, losing b entirely),
 // and empty documents contribute nothing to the union (a nil document body
@@ -157,17 +158,20 @@ func DropEmptyDocuments(input []byte) []byte {
 			continue
 		}
 
-		// Look ahead past blank lines; a following document start line means
-		// this separator opens an empty document, so blank it out. The blank
-		// run and the start line keep their own lines: a bare separator
-		// repeats the collapse when its turn comes, a content-carrying
-		// "--- value" line is kept and opens the next document.
+		// Look ahead past blank lines; a following document start line or a
+		// bare "..." end marker means this separator opens an empty document,
+		// so blank it out. The blank run and the boundary line keep their own
+		// lines: a bare separator repeats the collapse when its turn comes, a
+		// content-carrying "--- value" line is kept and opens the next
+		// document, and a kept "..." harmlessly terminates the previous
+		// document -- goccy otherwise fails the whole parse on the valid
+		// stream "---\n...".
 		j := i + 1
 		for j < len(lines) && IsBlank(lines[j]) {
 			j++
 		}
 
-		if j < len(lines) && isDocumentStartLine(lines[j]) {
+		if j < len(lines) && (isDocumentStartLine(lines[j]) || isEndMarkerLine(lines[j])) {
 			out = append(out, nil)
 
 			continue
@@ -286,7 +290,12 @@ func isDocumentStartLine(line []byte) bool {
 // distinct from [isSeparatorLine] because the two markers collapse differently
 // when an empty document is dropped.
 func isDocBoundaryLine(line []byte) bool {
-	return isSeparatorLine(line) || bytes.Equal(bytes.TrimRight(line, " \t\r"), []byte("..."))
+	return isSeparatorLine(line) || isEndMarkerLine(line)
+}
+
+// isEndMarkerLine reports whether a line is a bare "..." document end marker.
+func isEndMarkerLine(line []byte) bool {
+	return bytes.Equal(bytes.TrimRight(line, " \t\r"), []byte("..."))
 }
 
 // IsBlank returns true if the byte slice contains only whitespace.

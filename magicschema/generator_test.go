@@ -2497,6 +2497,15 @@ func TestGeneratorEmptyMidStreamDocument(t *testing.T) {
 		"empty document closed by content-carrying start across blanks": {
 			input: "foo: 1\n---\n\n--- {bar: 2}\n",
 		},
+		"empty document closed by an end marker": {
+			// The goccy parser fails the whole parse on "---" directly
+			// followed by "...", so the collapse must treat the end marker
+			// as closing the empty document.
+			input: "foo: 1\n---\n...\n---\nbar: 2\n",
+		},
+		"empty document closed by an end marker across blanks": {
+			input: "foo: 1\n---\n\n...\n---\nbar: 2\n",
+		},
 	}
 
 	for name, tc := range tcs {

@@ -133,9 +133,17 @@ func TestDropEmptyDocuments(t *testing.T) {
 			input: "a: 1\n---#c\n\n---\nb: 2\n",
 			want:  "a: 1\n---#c\n\n---\nb: 2\n",
 		},
-		"end marker is not a collapse target": {
+		"end marker closes an empty document": {
+			// A bare "---" whose next boundary is a "..." end marker opens an
+			// empty document; goccy fails the whole parse on the valid stream
+			// "---\n...", so the separator collapses and the kept "..."
+			// harmlessly terminates the previous document.
 			input: "a: 1\n---\n\n...\nb: 2\n",
-			want:  "a: 1\n---\n\n...\nb: 2\n",
+			want:  "a: 1\n\n\n...\nb: 2\n",
+		},
+		"empty document between separator and end marker collapses": {
+			input: "a: 1\n---\n...\n---\nb: 2\n",
+			want:  "a: 1\n\n...\n---\nb: 2\n",
 		},
 	}
 
