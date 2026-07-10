@@ -143,16 +143,15 @@ func extractComment(node ast.Node, isAnnotation func(string) bool) string {
 		}
 	}
 
-	// Try inline comment on the value node. A sequence value's comment group
-	// counts only when it sits on the key's own line (a flow sequence's inline
-	// comment): goccy stows a block sequence's first element head comment on
-	// the SequenceNode itself, so reading a later-line group here would leak
-	// an element's documentation as the array's description (a comment above a
-	// later element does not leak, only the first's).
+	// Try inline comment on the value node, excluding a block sequence's
+	// stowed first-element head comment, which documents the element rather
+	// than the array. The same [IsStowedSequenceComment] rule the annotators
+	// apply through CollectNodeComments decides here, so the structural
+	// fallback and the annotation formats attribute the identical comment
+	// group the same way.
 	if mvn.Value != nil {
-		_, isSeq := unwrapNode(mvn.Value).(*ast.SequenceNode)
-		if !isSeq || commentOnKeyLine(mvn.Value.GetComment(), mvn.Key) {
-			if desc := extractFromComment(mvn.Value.GetComment(), isAnnotation); desc != "" {
+		if c := mvn.Value.GetComment(); c != nil && !IsStowedSequenceComment(mvn.Value, c) {
+			if desc := extractFromComment(c, isAnnotation); desc != "" {
 				return desc
 			}
 		}
@@ -168,32 +167,6 @@ func extractComment(node ast.Node, isAnnotation func(string) bool) string {
 	}
 
 	return ""
-}
-
-// commentOnKeyLine reports whether every comment in the group sits on the
-// same source line as the key, proving the group is the key's own inline
-// comment rather than a stowed element comment. Missing position information
-// on any token reports false: without the layout the group cannot be told
-// apart from a leaked element comment, so it is not attributed (fail closed
-// here is fail open for the schema -- no description beats a wrong one).
-func commentOnKeyLine(comment *ast.CommentGroupNode, key ast.MapKeyNode) bool {
-	if comment == nil || key == nil || len(comment.Comments) == 0 {
-		return false
-	}
-
-	keyTok := key.GetToken()
-	if keyTok == nil || keyTok.Position == nil {
-		return false
-	}
-
-	for _, c := range comment.Comments {
-		tok := c.GetToken()
-		if tok == nil || tok.Position == nil || tok.Position.Line != keyTok.Position.Line {
-			return false
-		}
-	}
-
-	return true
 }
 
 // extractFromComment extracts a description from a comment group node. An
