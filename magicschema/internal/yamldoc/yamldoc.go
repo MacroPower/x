@@ -10,11 +10,41 @@ import (
 )
 
 // blockScalarHeader matches a line whose value position holds only a block
-// scalar indicator with optional chomping/indentation modifiers and an
-// optional trailing comment: "key: |", "- >-", "key: |2+ # c". The indicator
-// must be the whole value, so a plain scalar that merely contains a pipe
-// ("cmd: foo | bar") does not count.
-var blockScalarHeader = regexp.MustCompile(`[:\-][ \t]+[|>]\d*[+-]?\d*[ \t]*(?:#.*)?$`)
+// scalar indicator with optional chomping/indentation modifiers, optionally
+// preceded by anchor and tag tokens: "key: |", "- >-", "key: |2+",
+// "key: &tpl !!str |". Anchors (&name) and tags (!tag) are the only tokens
+// YAML permits between the key separator and the indicator, and a plain
+// scalar cannot begin with '&' or '!', so allowing them cannot reintroduce
+// the "cmd: foo | bar" false positive. The indicator must end the line;
+// [isBlockScalarHeader] cuts any trailing comment before matching.
+var (
+	blockScalarHeader = regexp.MustCompile(`[:\-][ \t]+(?:[&!][^ \t]+[ \t]+)*[|>]\d*[+-]?\d*[ \t]*$`)
+
+	// The entryScalarRest pattern matches a sequence entry's remainder when
+	// the entry itself holds the block scalar ("- |", "- &tpl >-"): optional
+	// anchor/tag tokens, then the indicator. A mapping key there instead
+	// ("- script: |") makes the key the scalar's owner (see [headerIndentOf]).
+	entryScalarRest = regexp.MustCompile(`^(?:[&!][^ \t]+[ \t]+)*[|>]`)
+)
+
+// isBlockScalarHeader reports whether a line opens a block scalar. The
+// trailing comment is cut before matching -- a '#' preceded by whitespace
+// starts a comment outside quoted scalars per YAML -- so an indicator-like
+// suffix inside a comment ("image: # config: |") never opens a scalar, while
+// a real header's own trailing comment ("key: | # c") still matches.
+func isBlockScalarHeader(line string) bool {
+	cut := len(line)
+
+	for i := 1; i < len(line); i++ {
+		if line[i] == '#' && (line[i-1] == ' ' || line[i-1] == '\t') {
+			cut = i
+
+			break
+		}
+	}
+
+	return blockScalarHeader.MatchString(line[:cut])
+}
 
 // MaskBlockScalars splits content into lines with the interior of block
 // scalars (literal "|" and folded ">" values) blanked out. Line-oriented
@@ -49,8 +79,8 @@ func MaskBlockScalars(content []byte) []string {
 		// A comment line ending in an indicator ("# usage: |") opens nothing;
 		// without the guard it would swallow indented annotation lines below.
 		trimmed := strings.TrimLeft(line, " \t")
-		if !strings.HasPrefix(trimmed, "#") && blockScalarHeader.MatchString(line) {
-			inScalar, headerIndent = true, indentOf(line)
+		if !strings.HasPrefix(trimmed, "#") && isBlockScalarHeader(line) {
+			inScalar, headerIndent = true, headerIndentOf(line)
 		}
 	}
 
@@ -61,6 +91,40 @@ func MaskBlockScalars(content []byte) []string {
 // so spaces alone determine nesting.
 func indentOf(line string) int {
 	return len(line) - len(strings.TrimLeft(line, " "))
+}
+
+// headerIndentOf returns the column of a block scalar header's owner: the
+// first character past the leading spaces and any "- " sequence-entry
+// markers when the scalar hangs off a mapping key ("- script: |" owns the
+// scalar at the key's column), or the innermost dash's own column when the
+// indicator directly follows the dashes ("- |"). Block scalar content must
+// be indented past the owner, so a sequence-entry sibling key ("  other:"
+// beside "- script: |") sits at the owner's indent and ends the scalar
+// instead of being masked as interior. A raw leading-space count would put
+// the owner at the dash and swallow every sibling.
+func headerIndentOf(line string) int {
+	i, lastDash := 0, -1
+
+loop:
+	for i < len(line) {
+		switch {
+		case line[i] == ' ':
+			i++
+		case line[i] == '-' && i+1 < len(line) && (line[i+1] == ' ' || line[i+1] == '\t'):
+			lastDash = i
+
+			i += 2
+
+		default:
+			break loop
+		}
+	}
+
+	if lastDash >= 0 && entryScalarRest.MatchString(line[i:]) {
+		return lastDash
+	}
+
+	return i
 }
 
 // DropEmptyDocuments removes empty documents from a multi-document YAML
