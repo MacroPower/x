@@ -857,6 +857,41 @@ func TestMergeTypelessConstraintDropsOneSidedItems(t *testing.T) {
 	}
 }
 
+func TestMergeTypelessConstraintDropsOneSidedProperties(t *testing.T) {
+	t.Parallel()
+
+	// A typeless constraint schema (pattern, no type) permits any object
+	// with any shape, so its instances do reach properties: grafting the
+	// typed side's property schemas one-sided would reject objects the
+	// constraint input accepted (fail closed) -- the same rule the items
+	// merge applies to one-sided items.
+	inputs := [][]byte{
+		[]byte("# @schema pattern:^a\nconf:\n"),
+		[]byte("conf:\n  a: 1\n"),
+	}
+
+	gen := magicschema.NewGenerator(magicschema.WithAnnotators(losisin.New()))
+	schema, err := gen.Generate(inputs...)
+	require.NoError(t, err)
+
+	out, err := json.Marshal(schema)
+	require.NoError(t, err)
+
+	var got map[string]any
+
+	require.NoError(t, json.Unmarshal(out, &got))
+
+	props, ok := got["properties"].(map[string]any)
+	require.True(t, ok)
+
+	if conf, isMap := props["conf"].(map[string]any); isMap {
+		assert.Nil(t, conf["properties"],
+			"one-sided properties must drop against a typeless constraint side")
+	} else {
+		assert.Equal(t, true, props["conf"], "expected the true schema")
+	}
+}
+
 func TestMergeRefSideIsNotANullStandIn(t *testing.T) {
 	t.Parallel()
 

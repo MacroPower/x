@@ -143,9 +143,22 @@ func mergeSchemas(a, b *jsonschema.Schema) *jsonschema.Schema {
 	result.MaxProperties = maxPtr(a.MaxProperties, b.MaxProperties)
 	result.UniqueItems = a.UniqueItems && b.UniqueItems
 
-	// Merge object properties (union).
-	if a.Properties != nil || b.Properties != nil {
-		mergeProperties(result, a, b)
+	// Merge object properties (union). A typeless constraint side (pattern,
+	// bounds, no type) permits any object with any shape, so its instances do
+	// reach the other side's properties: grafting them one-sided would reject
+	// objects the constraint input accepted (fail closed), the same rule the
+	// items merge below applies through its !constrainsValue arm. A null
+	// stand-in or a typed side still keeps the other side's properties.
+	aTypelessConstraint := len(typesA) == 0 && constrainsValue(a)
+	bTypelessConstraint := len(typesB) == 0 && constrainsValue(b)
+
+	switch {
+	case a.Properties != nil && b.Properties == nil && bTypelessConstraint:
+	case b.Properties != nil && a.Properties == nil && aTypelessConstraint:
+	default:
+		if a.Properties != nil || b.Properties != nil {
+			mergeProperties(result, a, b)
+		}
 	}
 
 	// Merge additionalProperties: fail-open (true wins over false).
