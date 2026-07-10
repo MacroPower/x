@@ -597,16 +597,35 @@ var annotationMarkers = []string{
 }
 
 // isHelmDocsOldStyleComment detects old-style helm-docs comments of the form
-// "key.path -- description" where a key path precedes the " -- " separator.
-// This prevents these comments from leaking as descriptions on parent nodes
+// "key.path -- description" where a key path precedes the separator. This
+// prevents these comments from leaking as descriptions on adjacent nodes
 // during fallback comment extraction.
+//
+// The separator grammar mirrors the norwoodj annotator's parse of upstream's
+// regex (\s+--\s*): the greedy capture binds the last whitespace-preceded
+// "--", which needs no space after the dashes, and the captured key then
+// re-splits at its first " -- ". Diverging here would let a line the
+// annotator consumes as an annotation ("# key --desc") simultaneously leak
+// into a neighboring key's description as prose.
 func isHelmDocsOldStyleComment(s string) bool {
-	idx := strings.Index(s, " -- ")
-	if idx <= 0 {
+	last := -1
+
+	for i := 1; i+1 < len(s); i++ {
+		if s[i] == '-' && s[i+1] == '-' && (s[i-1] == ' ' || s[i-1] == '\t') {
+			last = i
+		}
+	}
+
+	if last < 0 {
 		return false
 	}
 
-	return IsHelmDocsKeyPath(strings.TrimSpace(s[:idx]))
+	key := strings.TrimSpace(s[:last])
+	if idx := strings.Index(key, " -- "); idx >= 0 {
+		key = strings.TrimSpace(key[:idx])
+	}
+
+	return IsHelmDocsKeyPath(key)
 }
 
 // IsHelmDocsKeyPath reports whether s is the key path of an old-style

@@ -142,6 +142,25 @@ func TestIsAnnotationComment(t *testing.T) {
 			input: "v1.2 -- the API version to target",
 			want:  false,
 		},
+		"old-style key with no space after dashes": {
+			// The norwoodj separator (\s+--) needs no space after the
+			// dashes, so its scan consumes this line; recognizing it here
+			// keeps the consumed annotation out of a neighbor's description.
+			input: "image.tag --the image tag",
+			want:  true,
+		},
+		"old-style key before separator-bearing description": {
+			// The annotator re-splits the greedy capture at the first
+			// " -- ", so the key is "compound", not "compound -- one".
+			input: "compound -- one --two",
+			want:  true,
+		},
+		"prose before spaceless dashes": {
+			// The last whitespace-preceded "--" binds, leaving multi-word
+			// prose as the key, which is not a key path.
+			input: "see the docs --here",
+			want:  false,
+		},
 		"empty string": {
 			input: "",
 			want:  false,
