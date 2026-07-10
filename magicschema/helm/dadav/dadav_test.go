@@ -4246,6 +4246,52 @@ func TestHelmSchemaAnnotatorNumericCoercion(t *testing.T) {
 				assert.False(t, has, "non-finite maximum must be dropped")
 			},
 		},
+		"non-positive multipleOf is dropped": {
+			// The Draft 7 metaschema requires multipleOf > 0; emitting 0
+			// would make the whole document metaschema-invalid and fail
+			// every number under lenient validators too.
+			input: stringtest.Input(`
+				# @schema
+				# multipleOf: 0
+				# @schema
+				count: 5
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				count, ok := props["count"].(map[string]any)
+				require.True(t, ok)
+
+				_, has := count["multipleOf"]
+				assert.False(t, has, "a non-positive multipleOf must be dropped")
+			},
+		},
+		"negative minLength is dropped": {
+			// The Draft 7 metaschema types the min/max Length/Items/
+			// Properties keywords as nonNegativeInteger; a negative bound
+			// would make the whole document metaschema-invalid.
+			input: stringtest.Input(`
+				# @schema
+				# minLength: -3
+				# @schema
+				name: test
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				name, ok := props["name"].(map[string]any)
+				require.True(t, ok)
+
+				_, has := name["minLength"]
+				assert.False(t, has, "a negative minLength must be dropped")
+			},
+		},
 		"overflowing maxLength is rejected not wrapped": {
 			input: stringtest.Input(`
 				# @schema

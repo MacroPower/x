@@ -350,7 +350,13 @@
 //     for type/constraint consistency (e.g., minimum > maximum, pattern on
 //     non-string type). Invalid annotations are passed through as-is,
 //     letting downstream validators catch issues. (Upstream: validates and
-//     rejects invalid schemas.)
+//     rejects invalid schemas.) Metaschema-invalid keyword values are the
+//     exception: a multipleOf that is not strictly positive or a negative
+//     min/max Length/Items/Properties would make the whole emitted document
+//     fail Draft 7 metaschema validation -- strict validators then reject
+//     every instance (fail closed) -- so those values drop like non-finite
+//     floats, the same rule losisin applies. (Upstream: hard-errors on
+//     exactly these values.)
 //
 //   - Single-pass comment extraction: The upstream uses a two-pass
 //     approach (GetRootSchemaFromComment then GetSchemaFromComment) to

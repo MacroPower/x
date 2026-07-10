@@ -223,7 +223,7 @@ func (a *Annotator) applyField(schema *jsonschema.Schema, result *magicschema.An
 	case "exclusiveMaximum":
 		schema.ExclusiveMaximum = toFloat64Ptr(val)
 	case "multipleOf":
-		schema.MultipleOf = toFloat64Ptr(val)
+		schema.MultipleOf = toPositiveFloat64Ptr(val)
 	case "minLength":
 		schema.MinLength = toIntPtr(val)
 	case "maxLength":
@@ -653,20 +653,43 @@ func toFloat64Ptr(val any) *float64 {
 	return nil
 }
 
-// toIntPtr converts a numeric value to *int. Values outside the int range are
-// rejected rather than wrapped: goccy decodes integers above MaxInt64 as
-// uint64, and a bare int(v) cast would turn a large positive bound into a
-// negative one. Non-integral or non-finite floats are likewise dropped.
+// toPositiveFloat64Ptr converts a numeric value to *float64, rejecting values
+// that are not strictly positive. Its one consumer is multipleOf, which the
+// Draft 7 metaschema requires to be > 0: a zero or negative value would make
+// the emitted document metaschema-invalid, failing every instance under
+// strict validators (fail closed), so it drops like a non-finite float.
+func toPositiveFloat64Ptr(val any) *float64 {
+	f := toFloat64Ptr(val)
+	if f == nil || *f <= 0 {
+		return nil
+	}
+
+	return f
+}
+
+// toIntPtr converts a numeric value to *int. Every consumer is one of the
+// min/max Length/Items/Properties keywords, which the Draft 7 metaschema
+// types as nonNegativeInteger, so negative values are rejected: emitting one
+// would make the whole document metaschema-invalid (fail closed). Values
+// outside the int range are rejected rather than wrapped: goccy decodes
+// integers above MaxInt64 as uint64, and a bare int(v) cast would turn a
+// large positive bound into a negative one. Non-integral or non-finite
+// floats are likewise dropped.
 func toIntPtr(val any) *int {
 	switch v := val.(type) {
 	case int:
-		return &v
-	case int64:
-		if v < math.MinInt || v > math.MaxInt {
+		if v < 0 {
 			return nil
 		}
 
-		i := int(v) //nolint:gosec // bounded by the MinInt/MaxInt check above
+		return &v
+
+	case int64:
+		if v < 0 || v > math.MaxInt {
+			return nil
+		}
+
+		i := int(v) //nolint:gosec // bounded by the checks above
 
 		return &i
 
@@ -685,9 +708,8 @@ func toIntPtr(val any) *int {
 		// this comparison, and a v equal to it would pass a ">" check and
 		// make int(v) an out-of-range conversion whose result is
 		// implementation-defined (saturating on arm64, wrapping on amd64).
-		// MinInt is exactly representable, so the lower bound compares as is.
 		if math.IsInf(v, 0) || math.IsNaN(v) || v != math.Trunc(v) ||
-			v < math.MinInt || v >= 1<<63 {
+			v < 0 || v >= 1<<63 {
 			return nil
 		}
 
