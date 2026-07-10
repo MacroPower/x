@@ -359,13 +359,22 @@ func jsonValueEqual(a, b any) bool {
 // generated schema.
 const typelessUnionKey = "__magicschema_typeless_union__"
 
+// typelessUnionSentinel is the value stored under typelessUnionKey. The
+// marker checks match on this unexported type, not mere key presence: user
+// annotation content can name the key itself (a nested sub-schema
+// round-tripping through ToSubSchema lands unknown keywords in Extra as
+// plain JSON values), and reading such a value as the merge's own marker
+// would collapse the schema's real constraints. User values are never this
+// type, so they neither trigger the marker nor get stripped from the output.
+type typelessUnionSentinel struct{}
+
 // markTypelessUnion records the typeless-union marker on s and returns it.
 func markTypelessUnion(s *jsonschema.Schema) *jsonschema.Schema {
 	if s.Extra == nil {
 		s.Extra = make(map[string]any, 1)
 	}
 
-	s.Extra[typelessUnionKey] = true
+	s.Extra[typelessUnionKey] = typelessUnionSentinel{}
 
 	return s
 }
@@ -376,7 +385,7 @@ func isTypelessUnion(s *jsonschema.Schema) bool {
 		return false
 	}
 
-	_, ok := s.Extra[typelessUnionKey]
+	_, ok := s.Extra[typelessUnionKey].(typelessUnionSentinel)
 
 	return ok
 }

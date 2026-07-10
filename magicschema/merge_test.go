@@ -857,6 +857,55 @@ func TestMergeTypelessConstraintDropsOneSidedItems(t *testing.T) {
 	}
 }
 
+func TestMergeUserContentNamingMarkerKeyIsNotAMarker(t *testing.T) {
+	t.Parallel()
+
+	// User annotation content can name the internal typeless-union marker
+	// key (a nested sub-schema lands unknown keywords in Extra as plain JSON
+	// values). The merge must match its marker on the internal sentinel
+	// value, not key presence: reading the user's bool as the marker would
+	// collapse the property's real constraints, and stripping it would
+	// silently delete authored content.
+	input := []byte(stringtest.Input(`
+		# @schema
+		# properties:
+		#   foo:
+		#     type: string
+		#     __magicschema_typeless_union__: true
+		# @schema
+		parent:
+		  foo: bar
+	`))
+
+	gen := magicschema.NewGenerator(magicschema.WithAnnotators(dadav.New()))
+	schema, err := gen.Generate(input, input)
+	require.NoError(t, err)
+
+	out, err := json.Marshal(schema)
+	require.NoError(t, err)
+
+	var got map[string]any
+
+	require.NoError(t, json.Unmarshal(out, &got))
+
+	props, ok := got["properties"].(map[string]any)
+	require.True(t, ok)
+
+	parent, ok := props["parent"].(map[string]any)
+	require.True(t, ok)
+
+	pprops, ok := parent["properties"].(map[string]any)
+	require.True(t, ok)
+
+	foo, ok := pprops["foo"].(map[string]any)
+	require.True(t, ok)
+
+	assert.Equal(t, "string", foo["type"],
+		"the authored type must survive a merge of two inputs")
+	assert.Equal(t, true, foo["__magicschema_typeless_union__"],
+		"the user's authored keyword must be preserved, not stripped")
+}
+
 func TestMergeAgreeingCombinatorsAndRefSurvive(t *testing.T) {
 	t.Parallel()
 
