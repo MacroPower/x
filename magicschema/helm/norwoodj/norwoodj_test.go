@@ -222,6 +222,41 @@ func TestHelmDocsAnnotator(t *testing.T) {
 				assert.Equal(t, "second", v["default"])
 			},
 		},
+		"old-style block default stays with its own key": {
+			// An old-style block's @default documents the block's key path,
+			// which the ForContent file scan already delivers there; the
+			// node-level standalone-@default extension must not also attach
+			// it to the physically following node.
+			input: stringtest.Input(`
+				# other.thing -- desc for other
+				# @default -- 99
+				name: hello
+				other:
+				  thing: 1
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				n, ok := props["name"].(map[string]any)
+				require.True(t, ok)
+				assert.NotContains(t, n, "default",
+					"the old-style block's @default must not leak onto the following node")
+
+				other, ok := props["other"].(map[string]any)
+				require.True(t, ok)
+
+				oprops, ok := other["properties"].(map[string]any)
+				require.True(t, ok)
+
+				thing, ok := oprops["thing"].(map[string]any)
+				require.True(t, ok)
+				assert.Equal(t, "desc for other", thing["description"])
+				assert.InDelta(t, float64(99), thing["default"], 0.001)
+			},
+		},
 		"type hint string": {
 			input: stringtest.Input(`
 				# -- (string) Container image

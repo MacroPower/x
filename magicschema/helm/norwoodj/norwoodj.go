@@ -2,6 +2,7 @@ package norwoodj
 
 import (
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/goccy/go-yaml/ast"
@@ -536,6 +537,16 @@ func (a *Annotator) parseNewStyleComment(commentStr string) *parsedComment {
 	}
 
 	if !hasDesc {
+		// A block holding an old-style "# key.path -- desc" line documents
+		// that key, not this node: its @default already reaches the right key
+		// through the ForContent file scan (oldStyleDescs), so extracting it
+		// here would attach the default to the physically following node --
+		// the same misattribution the pc.keyPath guard below prevents for
+		// descriptions.
+		if slices.ContainsFunc(lines, startsOldStyleBlock) {
+			return nil
+		}
+
 		// No "# --" line, but check for standalone @default. @default resolves
 		// last-wins, matching parseCommentBlock's prefix scan so the result does
 		// not depend on whether a description line is present.
