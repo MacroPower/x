@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"slices"
 	"strings"
 
 	"github.com/google/jsonschema-go/jsonschema"
@@ -90,15 +89,12 @@ func run(cfg *magicschema.Config, args []string) error {
 	return nil
 }
 
-// generate produces a schema from the CLI arguments. Plain file paths go
-// through [magicschema.Generator.GenerateFiles]; an argument of "-" reads
-// stdin (a CLI concern the library does not handle), so any "-" falls back
-// to reading each input here.
+// generate produces a schema from the CLI arguments. Each argument is a file
+// path read via [magicschema.ReadInputFile] -- the same read
+// [magicschema.Generator.GenerateFiles] performs -- except "-", which reads
+// stdin (a CLI concern the library does not handle). One loop serves both
+// shapes, so an invocation with "-" cannot drift from one without it.
 func generate(gen *magicschema.Generator, args []string) (*jsonschema.Schema, error) {
-	if !slices.Contains(args, "-") {
-		return gen.GenerateFiles(args...)
-	}
-
 	inputs := make([][]byte, 0, len(args))
 	stdinSeen := false
 
