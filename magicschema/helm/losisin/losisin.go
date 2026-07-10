@@ -360,40 +360,15 @@ func applyNullable(s *jsonschema.Schema) {
 	magicschema.SetSchemaType(s, types)
 }
 
-// parseRequiredNames parses a property-name list for itemRequired: string
-// members are kept (a partial list still guides, fail open) and repeats
-// drop, since required is a Draft 7 set whose elements must be unique.
+// parseRequiredNames parses a property-name list for itemRequired through the
+// shared token policy ([magicschema.StringTokens]): string members are kept
+// (a partial list still guides, fail open) and repeats drop, since required
+// is a Draft 7 set whose elements must be unique. The list scaffold is the
+// same YAML-coerced parse parseStringList uses, so the bracketed and
+// comma-split forms agree on every member -- a null in either form drops
+// rather than surviving the fallback as the literal name "null".
 func parseRequiredNames(val string) []string {
-	parsed, items, ok := splitListValue(val)
-	if !ok {
-		parsed = make([]any, 0, len(items))
-
-		for _, item := range items {
-			parsed = append(parsed, unquoteScalar(item))
-		}
-	}
-
-	var (
-		names []string
-		seen  = make(map[string]struct{}, len(parsed))
-	)
-
-	for _, v := range parsed {
-		s, isString := v.(string)
-		if !isString {
-			continue
-		}
-
-		if _, dup := seen[s]; dup {
-			continue
-		}
-
-		seen[s] = struct{}{}
-
-		names = append(names, s)
-	}
-
-	return names
+	return magicschema.StringTokens(parseListItems(val))
 }
 
 // ensureItems lazily initializes and returns the schema's Items, so the item*
@@ -590,35 +565,41 @@ func splitListValue(val string) ([]any, []string, bool) {
 	return nil, items, false
 }
 
-// parseStringList parses a list value where all elements are coerced to
-// strings. This matches the upstream processList(comment, stringsOnly=true)
-// behavior.
-func parseStringList(val string) []string {
+// parseListItems parses a list value into its decoded members: the YAML
+// array parse for bracket-prefixed values (see splitListValue), with the
+// comma-split fallback coercing each token through YAML so the two forms
+// agree -- without the coercion, "type:string, 1" kept the invalid token "1"
+// while "type:[string, 1]" dropped it.
+func parseListItems(val string) []any {
 	parsed, items, ok := splitListValue(val)
-	if !ok {
-		// The comma-split fallback returns raw tokens. Coerce each through
-		// YAML the same way the bracket path does so the two forms agree:
-		// without this, "type:string, 1" kept the invalid token "1" while
-		// "type:[string, 1]" dropped it.
-		parsed = make([]any, 0, len(items))
-
-		for _, item := range items {
-			var v any
-
-			err := yaml.Unmarshal([]byte(item), &v)
-			if err != nil {
-				v = item
-			}
-
-			parsed = append(parsed, v)
-		}
+	if ok {
+		return parsed
 	}
 
-	// Token normalization is the policy shared with dadav's applyType (see
-	// [magicschema.TypeTokens]): strings kept, nulls become the "null" type,
-	// and any other member drops the whole list so the same malformed
-	// annotation cannot produce different schemas in the two formats.
-	return magicschema.TypeTokens(parsed)
+	parsed = make([]any, 0, len(items))
+
+	for _, item := range items {
+		var v any
+
+		err := yaml.Unmarshal([]byte(item), &v)
+		if err != nil {
+			v = item
+		}
+
+		parsed = append(parsed, v)
+	}
+
+	return parsed
+}
+
+// parseStringList parses a list value where all elements are coerced to
+// strings. This matches the upstream processList(comment, stringsOnly=true)
+// behavior. Token normalization is the policy shared with dadav's applyType
+// (see [magicschema.TypeTokens]): strings kept, nulls become the "null"
+// type, and any other member drops the whole list so the same malformed
+// annotation cannot produce different schemas in the two formats.
+func parseStringList(val string) []string {
+	return magicschema.TypeTokens(parseListItems(val))
 }
 
 // parseAnyList parses a list value preserving native types (null stays nil,

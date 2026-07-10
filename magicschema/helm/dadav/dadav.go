@@ -519,7 +519,11 @@ func applyRequired(schema *jsonschema.Schema, result *magicschema.AnnotationResu
 	case bool:
 		result.HasRequired = &v
 	case []any:
-		schema.Required = toStringSlice(v)
+		// StringTokens keeps the representable members (rather than
+		// abandoning the whole list as applyType does) and drops repeats:
+		// required is a Draft 7 set whose elements must be unique, and a
+		// partial list still guides without rejecting values (fail open).
+		schema.Required = magicschema.StringTokens(v)
 	}
 }
 
@@ -541,7 +545,7 @@ func applyDependencies(schema *jsonschema.Schema, val any) {
 				schema.DependencyStrings = make(map[string][]string)
 			}
 
-			schema.DependencyStrings[key] = toStringSlice(dv)
+			schema.DependencyStrings[key] = magicschema.StringTokens(dv)
 
 		case map[string]any:
 			// Drop a dependency whose schema cannot round-trip rather than
@@ -575,36 +579,6 @@ func toAdditionalProperties(val any) *jsonschema.Schema {
 	}
 
 	return nil
-}
-
-// toStringSlice converts a list value to its string members, dropping
-// anything else. Keeping the representable members (rather than abandoning
-// the whole list as applyType does) is the shared policy for dadav's
-// "required" and "dependencies" string lists: a partial list still guides
-// without rejecting values (fail open). Repeats drop while first-seen order
-// is preserved: both consumers feed Draft 7 arrays whose elements must be
-// unique (required, dependency key lists), and a duplicate would make the
-// emitted document fail metaschema validation.
-func toStringSlice(val []any) []string {
-	strs := make([]string, 0, len(val))
-	seen := make(map[string]struct{}, len(val))
-
-	for _, item := range val {
-		s, ok := item.(string)
-		if !ok {
-			continue
-		}
-
-		if _, dup := seen[s]; dup {
-			continue
-		}
-
-		seen[s] = struct{}{}
-
-		strs = append(strs, s)
-	}
-
-	return strs
 }
 
 // toString converts a value to a string.

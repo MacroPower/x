@@ -201,6 +201,31 @@ func TestHelmValuesSchemaAnnotator(t *testing.T) {
 				assert.Equal(t, []any{"name", "value"}, req)
 			},
 		},
+		"unbracketed itemRequired agrees with the bracketed form": {
+			// The comma-split fallback coerces tokens through YAML like the
+			// bracket path, so a null member drops in both forms instead of
+			// surviving the fallback as the literal property name "null".
+			input: stringtest.Input(`
+				# @schema item:object;itemRequired:name, null, value
+				env: []
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				env, ok := props["env"].(map[string]any)
+				require.True(t, ok)
+
+				items, ok := env["items"].(map[string]any)
+				require.True(t, ok)
+
+				req, ok := items["required"].([]any)
+				require.True(t, ok)
+				assert.Equal(t, []any{"name", "value"}, req)
+			},
+		},
 		"tilde null clears a bound instead of becoming zero": {
 			// The goccy parser decodes "~" (and Null/NULL) into float64 as 0 with no
 			// error, so without up-front null detection a null-valued bound

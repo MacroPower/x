@@ -223,6 +223,42 @@ func TestClassifySchemaLine(t *testing.T) {
 	}
 }
 
+func TestStringTokens(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		items []any
+		want  []string
+	}{
+		"strings kept in order": {
+			items: []any{"a", "b"},
+			want:  []string{"a", "b"},
+		},
+		"non-strings dropped, rest kept": {
+			// A partial list still guides (fail open), unlike TypeTokens
+			// where one bad member drops the whole list.
+			items: []any{"a", nil, 1, "b"},
+			want:  []string{"a", "b"},
+		},
+		"repeats dropped preserving first-seen order": {
+			items: []any{"b", "a", "b"},
+			want:  []string{"b", "a"},
+		},
+		"empty list": {
+			items: []any{},
+			want:  []string{},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, magicschema.StringTokens(tc.items))
+		})
+	}
+}
+
 // TestClassifyCommentLine covers the raw-line entry to the fence grammar:
 // the marker text is what follows up to two hashes and exactly one space, so
 // no-space "#@schema" prose and content indented past the marker space never

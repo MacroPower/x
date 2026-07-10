@@ -489,6 +489,36 @@ func NormalizeKeyPath(keyPath string) (string, bool) {
 	return arrayIndexExpr.ReplaceAllString(keyPath, ""), true
 }
 
+// StringTokens converts a decoded annotation list to its string members,
+// dropping anything else while preserving first-seen order and dropping
+// repeats. Its consumers feed Draft 7 arrays whose elements must be unique
+// (required and dependency key lists), and a partial list still guides
+// without rejecting values (fail open) -- unlike [TypeTokens], where an
+// unrepresentable member drops the whole list. The dadav and losisin
+// annotators share this one policy so the same malformed annotation cannot
+// produce different schemas in the two formats.
+func StringTokens(items []any) []string {
+	strs := make([]string, 0, len(items))
+	seen := make(map[string]struct{}, len(items))
+
+	for _, item := range items {
+		s, ok := item.(string)
+		if !ok {
+			continue
+		}
+
+		if _, dup := seen[s]; dup {
+			continue
+		}
+
+		seen[s] = struct{}{}
+
+		strs = append(strs, s)
+	}
+
+	return strs
+}
+
 // TypeTokens converts a decoded annotation list to JSON Schema type tokens:
 // string members are kept and null members become the "null" type (a YAML
 // null in a type list, e.g. type: [string, null], decodes as nil). A member
