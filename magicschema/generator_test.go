@@ -21,6 +21,7 @@ import (
 	"go.jacobcolvin.com/x/magicschema/helm/bitnami"
 	"go.jacobcolvin.com/x/magicschema/helm/dadav"
 	"go.jacobcolvin.com/x/magicschema/helm/losisin"
+	"go.jacobcolvin.com/x/magicschema/internal/schematest"
 )
 
 func TestGeneratorBasic(t *testing.T) {
@@ -901,7 +902,7 @@ func TestGeneratorInferDefaultsGolden(t *testing.T) {
 	schema, err := gen.Generate(data)
 	require.NoError(t, err)
 
-	assertGolden(t, "testdata/infer_defaults.schema.json", schema)
+	schematest.AssertGolden(t, "testdata/infer_defaults.schema.json", schema)
 }
 
 func TestGeneratorFromFile(t *testing.T) {
@@ -914,7 +915,7 @@ func TestGeneratorFromFile(t *testing.T) {
 	schema, err := gen.Generate(data)
 	require.NoError(t, err)
 
-	assertGolden(t, "testdata/basic.schema.json", schema)
+	schematest.AssertGolden(t, "testdata/basic.schema.json", schema)
 }
 
 func TestGeneratorRealWorld(t *testing.T) {
@@ -933,7 +934,7 @@ func TestGeneratorRealWorld(t *testing.T) {
 	schema, err := gen.Generate(data)
 	require.NoError(t, err)
 
-	assertGolden(t, "testdata/realworld.schema.json", schema)
+	schematest.AssertGolden(t, "testdata/realworld.schema.json", schema)
 }
 
 func TestGeneratorMultiFile(t *testing.T) {
@@ -949,7 +950,7 @@ func TestGeneratorMultiFile(t *testing.T) {
 	schema, err := gen.Generate(dataA, dataB)
 	require.NoError(t, err)
 
-	assertGolden(t, "testdata/merge.schema.json", schema)
+	schematest.AssertGolden(t, "testdata/merge.schema.json", schema)
 }
 
 func TestGeneratorAnchorsAndAliases(t *testing.T) {

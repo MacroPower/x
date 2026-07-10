@@ -2,40 +2,17 @@ package norwoodj_test
 
 import (
 	"encoding/json"
-	"flag"
 	"os"
 	"testing"
 
-	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/x/magicschema"
 	"go.jacobcolvin.com/x/magicschema/helm/norwoodj"
+	"go.jacobcolvin.com/x/magicschema/internal/schematest"
 )
-
-var update = flag.Bool("update", false, "update golden files")
-
-func assertGolden(t *testing.T, goldenPath string, schema *jsonschema.Schema) {
-	t.Helper()
-
-	got, err := json.MarshalIndent(schema, "", "  ")
-	require.NoError(t, err)
-
-	got = append(got, '\n')
-
-	if *update {
-		require.NoError(t, os.WriteFile(goldenPath, got, 0o644))
-
-		return
-	}
-
-	want, err := os.ReadFile(goldenPath)
-	require.NoError(t, err, "golden file %s not found; run with -update to create", goldenPath)
-
-	assert.JSONEq(t, string(want), string(got))
-}
 
 func TestHelmDocsAnnotator(t *testing.T) {
 	t.Parallel()
@@ -3154,7 +3131,7 @@ func TestHelmDocsAnnotatorFromFile(t *testing.T) {
 	schema, err := gen.Generate(data)
 	require.NoError(t, err)
 
-	assertGolden(t, "testdata/helm_docs.schema.json", schema)
+	schematest.AssertGolden(t, "testdata/helm_docs.schema.json", schema)
 }
 
 // TestHelmDocsAnnotatorRealWorld generates a schema for the grafana loki
@@ -3175,7 +3152,7 @@ func TestHelmDocsAnnotatorRealWorld(t *testing.T) {
 	schema, err := gen.Generate(data)
 	require.NoError(t, err)
 
-	assertGolden(t, "testdata/loki_values.schema.json", schema)
+	schematest.AssertGolden(t, "testdata/loki_values.schema.json", schema)
 }
 
 // TestHelmDocsAnnotatorNewStyleSeparatorInDescription covers a new-style

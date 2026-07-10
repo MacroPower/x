@@ -2,40 +2,17 @@ package losisin_test
 
 import (
 	"encoding/json"
-	"flag"
 	"os"
 	"testing"
 
-	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/x/magicschema"
 	"go.jacobcolvin.com/x/magicschema/helm/losisin"
+	"go.jacobcolvin.com/x/magicschema/internal/schematest"
 )
-
-var update = flag.Bool("update", false, "update golden files")
-
-func assertGolden(t *testing.T, goldenPath string, schema *jsonschema.Schema) {
-	t.Helper()
-
-	got, err := json.MarshalIndent(schema, "", "  ")
-	require.NoError(t, err)
-
-	got = append(got, '\n')
-
-	if *update {
-		require.NoError(t, os.WriteFile(goldenPath, got, 0o644))
-
-		return
-	}
-
-	want, err := os.ReadFile(goldenPath)
-	require.NoError(t, err, "golden file %s not found; run with -update to create", goldenPath)
-
-	assert.JSONEq(t, string(want), string(got))
-}
 
 func TestHelmValuesSchemaAnnotator(t *testing.T) {
 	t.Parallel()
@@ -2886,7 +2863,7 @@ func TestHelmValuesSchemaAnnotatorFromFile(t *testing.T) {
 	schema, err := gen.Generate(data)
 	require.NoError(t, err)
 
-	assertGolden(t, "testdata/helm_values_schema.schema.json", schema)
+	schematest.AssertGolden(t, "testdata/helm_values_schema.schema.json", schema)
 }
 
 // TestHelmValuesSchemaAnnotatorRealWorld locks in the generated schema for the
@@ -2905,7 +2882,7 @@ func TestHelmValuesSchemaAnnotatorRealWorld(t *testing.T) {
 	schema, err := gen.Generate(data)
 	require.NoError(t, err)
 
-	assertGolden(t, "testdata/traefik_values.schema.json", schema)
+	schematest.AssertGolden(t, "testdata/traefik_values.schema.json", schema)
 }
 
 func TestHelmValuesSchemaAnnotatorUpstreamAlignment(t *testing.T) {
