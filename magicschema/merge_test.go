@@ -857,6 +857,40 @@ func TestMergeTypelessConstraintDropsOneSidedItems(t *testing.T) {
 	}
 }
 
+func TestMergeRefSideIsNotANullStandIn(t *testing.T) {
+	t.Parallel()
+
+	// A $ref-only schema constrains through its referent, which need not
+	// allow null. Reading its absent type as a null value would widen the
+	// typed side to [type, null] -- injecting a null the annotation never
+	// granted and silently dropping the reference into a plain union.
+	inputs := [][]byte{
+		[]byte("# @schema $ref:https://example.com/image.json\nimage:\n  tag: latest\n"),
+		[]byte("image:\n  repository: nginx\n"),
+	}
+
+	gen := magicschema.NewGenerator(magicschema.WithAnnotators(losisin.New()))
+	schema, err := gen.Generate(inputs...)
+	require.NoError(t, err)
+
+	out, err := json.Marshal(schema)
+	require.NoError(t, err)
+
+	var got map[string]any
+
+	require.NoError(t, json.Unmarshal(out, &got))
+
+	props, ok := got["properties"].(map[string]any)
+	require.True(t, ok)
+
+	if image, isMap := props["image"].(map[string]any); isMap {
+		assert.NotContains(t, image, "type",
+			"a ref side is a typeless constraint, not a null stand-in")
+	} else {
+		assert.Equal(t, true, props["image"], "expected the true schema")
+	}
+}
+
 func TestMergeEnumsNumericallyEqualAcrossGoTypes(t *testing.T) {
 	t.Parallel()
 

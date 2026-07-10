@@ -633,9 +633,13 @@ func isFalseSchema(s *jsonschema.Schema) bool {
 // array-shaped ones (additionalProperties, contains, propertyNames,
 // if/then/else, ...): a typeless schema constrained only by one of them still
 // permits every other type, so widening it to a [type, null] union would
-// reject values it currently accepts (fail closed).
+// reject values it currently accepts (fail closed). References count too: a
+// $ref-only schema constrains through its referent, which need not allow
+// null, so reading it as a null stand-in would inject a null the annotation
+// never granted.
 func constrainsValue(s *jsonschema.Schema) bool {
-	return s.Pattern != "" || s.Format != "" ||
+	return s.Ref != "" || s.DynamicRef != "" ||
+		s.Pattern != "" || s.Format != "" ||
 		s.Enum != nil || s.Const != nil ||
 		s.Minimum != nil || s.Maximum != nil ||
 		s.ExclusiveMinimum != nil || s.ExclusiveMaximum != nil ||
