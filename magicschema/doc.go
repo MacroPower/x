@@ -132,16 +132,17 @@
 //
 //   - [ErrInvalidYAML]: the input is not valid YAML syntax (fatal).
 //   - [ErrInvalidOption]: a configuration value is invalid, such as an
-//     unrecognized annotator name in [Config.NewGenerator] (which also
-//     wraps [ErrUnknownAnnotator], so both match).
+//     unrecognized annotator name in the cli subpackage's NewGenerator
+//     (which also wraps [ErrUnknownAnnotator], so both match).
 //   - [ErrUnknownAnnotator]: an annotator name with no registered parser,
 //     returned by [Registry.Lookup].
 //   - [ErrReadInput]: an input file could not be read in
 //     [Generator.GenerateFiles] (fatal).
 //   - [ErrMarshalSchema]: the generated schema could not be marshaled to
-//     JSON, such as a schema an annotator built with conflicting keywords
-//     (fatal).
-//   - [ErrWriteOutput]: an I/O error occurred writing output (fatal).
+//     JSON in [WriteSchema], such as a schema an annotator built with
+//     conflicting keywords (fatal).
+//   - [ErrWriteOutput]: an I/O error occurred writing output in
+//     [WriteSchema] (fatal).
 //
 // Annotation parse failures are not fatal. They are logged as warnings
 // and the annotation is skipped.
@@ -309,18 +310,19 @@
 //
 // # CLI Integration
 //
-// [Config] bridges CLI flags to the library, following the RegisterFlags /
-// RegisterCompletions / NewGenerator pattern. The [Flags] type within
-// [Config] allows callers to customize flag names while keeping sensible
-// defaults. The [Config.Registry] field maps annotator names (as used in
-// the --annotators flag) to prototype [Annotator] instances.
-// [Config.NewGenerator] looks up each comma-separated name in Registry to
-// build the annotator list. The --annotators flag default is whatever the
-// caller assigns to [Config.Annotators] before [Config.RegisterFlags]; a
-// CLI using the built-in Helm registry seeds it from
+// The [go.jacobcolvin.com/x/magicschema/cli] subpackage bridges CLI flags to
+// the library, following the RegisterFlags / RegisterCompletions /
+// NewGenerator pattern; it lives outside the core package so the cobra and
+// pflag dependencies never enter a programmatic consumer's build. Its Config
+// carries a [Registry] mapping annotator names (as used in the --annotators
+// flag) to prototype [Annotator] instances, and its NewGenerator looks up
+// each comma-separated name to build the annotator list. The --annotators
+// flag default is whatever the caller assigns before RegisterFlags; a CLI
+// using the built-in Helm registry seeds it from
 // [go.jacobcolvin.com/x/magicschema/helm.DefaultNames]. Programmatic callers
 // resolve names directly with [Registry.Lookup] and enumerate them with
-// [Registry.Names].
+// [Registry.Names], and [WriteSchema] is the emit phase both kinds of caller
+// share.
 //
 // # Basic Usage
 //
@@ -346,7 +348,7 @@
 //
 // # Config-Based Usage
 //
-//	cfg := magicschema.NewConfig()
+//	cfg := cli.NewConfig()
 //	cfg.Registry = helm.DefaultRegistry()
 //	cfg.Annotators = strings.Join(helm.DefaultNames(), ",")
 //	cfg.RegisterFlags(rootCmd.PersistentFlags())
@@ -354,6 +356,7 @@
 //
 //	gen, err := cfg.NewGenerator()
 //	schema, err := gen.Generate(yamlBytes)
+//	err = magicschema.WriteSchema(os.Stdout, schema, cfg.Indent)
 //
 // [jsonschema.Schema]: https://pkg.go.dev/github.com/google/jsonschema-go/jsonschema#Schema
 // [dadav/helm-schema]: https://github.com/dadav/helm-schema

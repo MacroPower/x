@@ -1,6 +1,7 @@
 package magicschema_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -924,12 +925,10 @@ func TestGeneratorRealWorld(t *testing.T) {
 	data, err := os.ReadFile("testdata/realworld.yaml")
 	require.NoError(t, err)
 
-	cfg := magicschema.NewConfig()
-	cfg.Registry = helm.DefaultRegistry()
-	cfg.Annotators = "helm-schema,helm-values-schema,bitnami,helm-docs"
-
-	gen, err := cfg.NewGenerator()
+	annotators, err := helm.DefaultRegistry().Lookup(helm.DefaultNames()...)
 	require.NoError(t, err)
+
+	gen := magicschema.NewGenerator(magicschema.WithAnnotators(annotators...))
 
 	schema, err := gen.Generate(data)
 	require.NoError(t, err)
@@ -1299,12 +1298,10 @@ func TestGeneratorConcurrentUse(t *testing.T) {
 	// per-document copy plus annotator cloning. This exercises that guarantee
 	// under -race with all four prototype annotators and inputs that touch the
 	// shared paths: annotations, anchors/merge keys, and multi-document streams.
-	cfg := magicschema.NewConfig()
-	cfg.Registry = helm.DefaultRegistry()
-	cfg.Annotators = strings.Join(helm.DefaultNames(), ",")
-
-	gen, err := cfg.NewGenerator()
+	annotators, err := helm.DefaultRegistry().Lookup(helm.DefaultNames()...)
 	require.NoError(t, err)
+
+	gen := magicschema.NewGenerator(magicschema.WithAnnotators(annotators...))
 
 	inputs := [][]byte{
 		[]byte(stringtest.Input(`
@@ -1782,12 +1779,10 @@ func TestGeneratorAllAnnotators(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			cfg := magicschema.NewConfig()
-			cfg.Registry = helm.DefaultRegistry()
-			cfg.Annotators = "helm-schema,helm-values-schema,bitnami,helm-docs"
-
-			gen, err := cfg.NewGenerator()
+			annotators, err := helm.DefaultRegistry().Lookup(helm.DefaultNames()...)
 			require.NoError(t, err)
+
+			gen := magicschema.NewGenerator(magicschema.WithAnnotators(annotators...))
 
 			schema, err := gen.Generate([]byte(tc.input))
 			require.NoError(t, err)
@@ -2776,23 +2771,6 @@ func TestGeneratorStrictRootAdditionalProperties(t *testing.T) {
 		"strict mode must keep the root additionalProperties false")
 }
 
-func TestConfigNewGeneratorUnknownAnnotator(t *testing.T) {
-	t.Parallel()
-
-	cfg := magicschema.NewConfig()
-	cfg.Registry = make(magicschema.Registry)
-	cfg.Registry.Add(dadav.New())
-
-	cfg.Annotators = "helm-schema,nonexistent-annotator"
-
-	gen, err := cfg.NewGenerator()
-	require.Error(t, err)
-	require.ErrorIs(t, err, magicschema.ErrInvalidOption)
-	require.ErrorIs(t, err, magicschema.ErrUnknownAnnotator)
-	require.EqualError(t, err, `invalid option: unknown annotator "nonexistent-annotator"`)
-	assert.Nil(t, gen)
-}
-
 func TestGeneratorGenerateFiles(t *testing.T) {
 	t.Parallel()
 
@@ -2857,6 +2835,57 @@ func TestGeneratorGenerateFilesZeroPaths(t *testing.T) {
 	// Zero paths behave like Generate with zero inputs: the true schema
 	// with only the draft URI set.
 	assert.JSONEq(t, `{"$schema": "http://json-schema.org/draft-07/schema#"}`, string(out))
+}
+
+// failingWriter fails every write, standing in for a broken output stream.
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, os.ErrClosed }
+
+func TestWriteSchema(t *testing.T) {
+	t.Parallel()
+
+	schema := &jsonschema.Schema{Type: "object"}
+
+	t.Run("indented output ends with a newline", func(t *testing.T) {
+		t.Parallel()
+
+		var buf bytes.Buffer
+
+		require.NoError(t, magicschema.WriteSchema(&buf, schema, 2))
+		// Byte-exact on purpose: the assertion covers the indentation and
+		// trailing newline, which JSONEq cannot see.
+		assert.Equal(t, "{\n  \"type\": \"object\"\n}\n", buf.String()) //nolint:testifylint // formatting under test
+	})
+
+	t.Run("zero indent is compact", func(t *testing.T) {
+		t.Parallel()
+
+		var buf bytes.Buffer
+
+		require.NoError(t, magicschema.WriteSchema(&buf, schema, 0))
+		assert.Equal(t, "{\"type\":\"object\"}\n", buf.String()) //nolint:testifylint // formatting under test
+	})
+
+	t.Run("marshal failures wrap ErrMarshalSchema", func(t *testing.T) {
+		t.Parallel()
+
+		// Type and Types together violate a jsonschema marshal invariant.
+		bad := &jsonschema.Schema{Type: "object", Types: []string{"object", "null"}}
+
+		var buf bytes.Buffer
+
+		err := magicschema.WriteSchema(&buf, bad, 2)
+		require.ErrorIs(t, err, magicschema.ErrMarshalSchema)
+		assert.Zero(t, buf.Len(), "nothing may be written after a marshal failure")
+	})
+
+	t.Run("write failures wrap ErrWriteOutput", func(t *testing.T) {
+		t.Parallel()
+
+		err := magicschema.WriteSchema(failingWriter{}, schema, 2)
+		require.ErrorIs(t, err, magicschema.ErrWriteOutput)
+	})
 }
 
 func TestGeneratorEmptyMapping(t *testing.T) {

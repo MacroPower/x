@@ -1,4 +1,4 @@
-package magicschema_test
+package cli_test
 
 import (
 	"bytes"
@@ -10,92 +10,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/x/magicschema"
+	"go.jacobcolvin.com/x/magicschema/cli"
 	"go.jacobcolvin.com/x/magicschema/helm"
 	"go.jacobcolvin.com/x/magicschema/helm/dadav"
-	"go.jacobcolvin.com/x/magicschema/helm/losisin"
-	"go.jacobcolvin.com/x/magicschema/helm/norwoodj"
 )
-
-func TestRegistryLookup(t *testing.T) {
-	t.Parallel()
-
-	registry := helm.DefaultRegistry()
-
-	tcs := map[string]struct {
-		names []string
-		want  []string
-		err   error
-	}{
-		"resolves names preserving the given order": {
-			names: []string{norwoodj.Name, dadav.Name},
-			want:  []string{norwoodj.Name, dadav.Name},
-		},
-		"zero names yield an empty list": {
-			names: nil,
-			want:  []string{},
-		},
-		"unknown name": {
-			names: []string{dadav.Name, "nonexistent"},
-			err:   magicschema.ErrUnknownAnnotator,
-		},
-		"exact match only, no trimming": {
-			names: []string{" " + dadav.Name},
-			err:   magicschema.ErrUnknownAnnotator,
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			got, err := registry.Lookup(tc.names...)
-			if tc.err != nil {
-				require.ErrorIs(t, err, tc.err)
-				assert.Nil(t, got)
-
-				return
-			}
-
-			require.NoError(t, err)
-
-			gotNames := make([]string, 0, len(got))
-			for _, a := range got {
-				gotNames = append(gotNames, a.Name())
-			}
-
-			assert.Equal(t, tc.want, gotNames)
-		})
-	}
-}
-
-func TestRegistryNames(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		annotators []magicschema.Annotator
-		want       []string
-	}{
-		"sorted regardless of registration order": {
-			annotators: []magicschema.Annotator{losisin.New(), dadav.New()},
-			want:       []string{dadav.Name, losisin.Name},
-		},
-		"empty registry": {
-			annotators: nil,
-			want:       nil,
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			registry := make(magicschema.Registry)
-			registry.Add(tc.annotators...)
-
-			assert.Equal(t, tc.want, registry.Names())
-		})
-	}
-}
 
 func TestConfigNewGeneratorDraft(t *testing.T) {
 	t.Parallel()
@@ -103,7 +21,7 @@ func TestConfigNewGeneratorDraft(t *testing.T) {
 	t.Run("NewConfig defaults to the supported draft", func(t *testing.T) {
 		t.Parallel()
 
-		cfg := magicschema.NewConfig()
+		cfg := cli.NewConfig()
 		assert.Equal(t, 7, cfg.Draft)
 
 		gen, err := cfg.NewGenerator()
@@ -115,7 +33,7 @@ func TestConfigNewGeneratorDraft(t *testing.T) {
 		t.Parallel()
 
 		for _, draft := range []int{0, 4, 2020} {
-			cfg := magicschema.NewConfig()
+			cfg := cli.NewConfig()
 			cfg.Draft = draft
 
 			_, err := cfg.NewGenerator()
@@ -132,7 +50,7 @@ func TestConfigNewGeneratorIndent(t *testing.T) {
 		t.Parallel()
 
 		for _, indent := range []int{0, 2, 4} {
-			cfg := magicschema.NewConfig()
+			cfg := cli.NewConfig()
 			cfg.Indent = indent
 
 			gen, err := cfg.NewGenerator()
@@ -144,7 +62,7 @@ func TestConfigNewGeneratorIndent(t *testing.T) {
 	t.Run("negative indent is rejected", func(t *testing.T) {
 		t.Parallel()
 
-		cfg := magicschema.NewConfig()
+		cfg := cli.NewConfig()
 		cfg.Indent = -2
 
 		_, err := cfg.NewGenerator()
@@ -158,7 +76,7 @@ func TestConfigMustRegisterCompletions(t *testing.T) {
 	t.Run("registered flags do not panic", func(t *testing.T) {
 		t.Parallel()
 
-		cfg := magicschema.NewConfig()
+		cfg := cli.NewConfig()
 		cmd := &cobra.Command{Use: "test"}
 		cfg.RegisterFlags(cmd.Flags())
 
@@ -168,7 +86,7 @@ func TestConfigMustRegisterCompletions(t *testing.T) {
 	t.Run("missing flags panic", func(t *testing.T) {
 		t.Parallel()
 
-		cfg := magicschema.NewConfig()
+		cfg := cli.NewConfig()
 		cmd := &cobra.Command{Use: "test"}
 
 		require.Panics(t, func() { cfg.MustRegisterCompletions(cmd) })
@@ -181,7 +99,7 @@ func TestConfigRegisterFlagsDefaults(t *testing.T) {
 	t.Run("an unset config takes the documented defaults", func(t *testing.T) {
 		t.Parallel()
 
-		cfg := magicschema.NewConfig()
+		cfg := cli.NewConfig()
 		cmd := &cobra.Command{Use: "test"}
 		cfg.RegisterFlags(cmd.Flags())
 
@@ -198,7 +116,7 @@ func TestConfigRegisterFlagsDefaults(t *testing.T) {
 		// Registration must not inject annotator names the caller's Registry
 		// cannot resolve; with nothing seeded, NewGenerator succeeds with no
 		// annotators instead of tripping over an unknown name.
-		cfg := magicschema.NewConfig()
+		cfg := cli.NewConfig()
 		cfg.Registry = make(magicschema.Registry)
 
 		cmd := &cobra.Command{Use: "test"}
@@ -212,7 +130,7 @@ func TestConfigRegisterFlagsDefaults(t *testing.T) {
 	t.Run("preset fields are not clobbered by registration", func(t *testing.T) {
 		t.Parallel()
 
-		cfg := magicschema.NewConfig()
+		cfg := cli.NewConfig()
 		cfg.Indent = 4
 		cfg.Output = "out.json"
 		cfg.Annotators = "helm-docs"
@@ -234,7 +152,7 @@ func TestConfigRegisterFlagsShorthands(t *testing.T) {
 	t.Run("defaults register -o and -a", func(t *testing.T) {
 		t.Parallel()
 
-		cfg := magicschema.NewConfig()
+		cfg := cli.NewConfig()
 		cmd := &cobra.Command{Use: "test"}
 		cfg.RegisterFlags(cmd.Flags())
 
@@ -252,7 +170,7 @@ func TestConfigRegisterFlagsShorthands(t *testing.T) {
 		cmd.Flags().StringP("overwrite", "o", "", "host flag")
 		cmd.Flags().StringP("all", "a", "", "host flag")
 
-		cfg := magicschema.NewConfig()
+		cfg := cli.NewConfig()
 		cfg.Flags.OutputShorthand = ""
 		cfg.Flags.AnnotatorsShorthand = ""
 
@@ -265,7 +183,7 @@ func TestConfigRegisterFlagsShorthands(t *testing.T) {
 func TestConfigAnnotatorsCompletion(t *testing.T) {
 	t.Parallel()
 
-	cfg := magicschema.NewConfig()
+	cfg := cli.NewConfig()
 	cfg.Registry = helm.DefaultRegistry()
 
 	rootCmd := &cobra.Command{Use: "magicschema", Run: func(*cobra.Command, []string) {}}
@@ -297,7 +215,7 @@ func TestConfigAnnotatorsCompletion(t *testing.T) {
 func TestConfigAnnotatorsCompletionTrimsSpaces(t *testing.T) {
 	t.Parallel()
 
-	cfg := magicschema.NewConfig()
+	cfg := cli.NewConfig()
 	cfg.Registry = helm.DefaultRegistry()
 
 	rootCmd := &cobra.Command{Use: "magicschema", Run: func(*cobra.Command, []string) {}}
@@ -330,7 +248,7 @@ func TestConfigAnnotatorsCompletionTrimsSpaces(t *testing.T) {
 func TestConfigAnnotatorsCompletionKeepsTypedSpace(t *testing.T) {
 	t.Parallel()
 
-	cfg := magicschema.NewConfig()
+	cfg := cli.NewConfig()
 	cfg.Registry = helm.DefaultRegistry()
 
 	rootCmd := &cobra.Command{Use: "magicschema", Run: func(*cobra.Command, []string) {}}
@@ -358,4 +276,21 @@ func TestConfigAnnotatorsCompletionKeepsTypedSpace(t *testing.T) {
 	}
 
 	assert.Contains(t, candidates, "helm-schema, bitnami")
+}
+
+func TestConfigNewGeneratorUnknownAnnotator(t *testing.T) {
+	t.Parallel()
+
+	cfg := cli.NewConfig()
+	cfg.Registry = make(magicschema.Registry)
+	cfg.Registry.Add(dadav.New())
+
+	cfg.Annotators = "helm-schema,nonexistent-annotator"
+
+	gen, err := cfg.NewGenerator()
+	require.Error(t, err)
+	require.ErrorIs(t, err, magicschema.ErrInvalidOption)
+	require.ErrorIs(t, err, magicschema.ErrUnknownAnnotator)
+	require.EqualError(t, err, `invalid option: unknown annotator "nonexistent-annotator"`)
+	assert.Nil(t, gen)
 }

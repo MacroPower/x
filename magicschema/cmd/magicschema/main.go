@@ -3,7 +3,7 @@
 package main
 
 import (
-	"encoding/json"
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -13,11 +13,12 @@ import (
 	"github.com/spf13/cobra"
 
 	"go.jacobcolvin.com/x/magicschema"
+	"go.jacobcolvin.com/x/magicschema/cli"
 	"go.jacobcolvin.com/x/magicschema/helm"
 )
 
 func main() {
-	cfg := magicschema.NewConfig()
+	cfg := cli.NewConfig()
 	cfg.Registry = helm.DefaultRegistry()
 	// The --annotators flag default is the caller's to seed, since names
 	// resolve only against the Registry chosen here; helm.DefaultNames keeps
@@ -49,7 +50,7 @@ types from YAML structure when annotations are absent.`,
 	}
 }
 
-func run(cfg *magicschema.Config, args []string) error {
+func run(cfg *cli.Config, args []string) error {
 	gen, err := cfg.NewGenerator()
 	if err != nil {
 		return err
@@ -60,30 +61,22 @@ func run(cfg *magicschema.Config, args []string) error {
 		return err
 	}
 
-	var out []byte
-
-	if cfg.Indent > 0 {
-		out, err = json.MarshalIndent(schema, "", strings.Repeat(" ", cfg.Indent))
-	} else {
-		out, err = json.Marshal(schema)
-	}
-
-	if err != nil {
-		return fmt.Errorf("%w: %w", magicschema.ErrMarshalSchema, err)
-	}
-
-	out = append(out, '\n')
-
 	if cfg.Output == "" || cfg.Output == "-" {
-		_, err = os.Stdout.Write(out)
-		if err != nil {
-			return fmt.Errorf("%w: %w", magicschema.ErrWriteOutput, err)
-		}
-	} else {
-		err := os.WriteFile(cfg.Output, out, 0o644)
-		if err != nil {
-			return fmt.Errorf("%w: %w", magicschema.ErrWriteOutput, err)
-		}
+		return magicschema.WriteSchema(os.Stdout, schema, cfg.Indent)
+	}
+
+	// Render into a buffer first so a marshal failure never truncates an
+	// existing output file.
+	var buf bytes.Buffer
+
+	err = magicschema.WriteSchema(&buf, schema, cfg.Indent)
+	if err != nil {
+		return err
+	}
+
+	err = os.WriteFile(cfg.Output, buf.Bytes(), 0o644) //nolint:gosec // schema output, not a secret
+	if err != nil {
+		return fmt.Errorf("%w: %w", magicschema.ErrWriteOutput, err)
 	}
 
 	return nil

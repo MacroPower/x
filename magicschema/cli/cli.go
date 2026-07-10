@@ -1,20 +1,20 @@
-package magicschema
+// Package cli bridges CLI flags to the magicschema library, following the
+// RegisterFlags / RegisterCompletions / NewGenerator pattern. It exists as a
+// subpackage so the cobra and pflag dependencies stay out of the core
+// library's build graph: a programmatic consumer that imports magicschema
+// only for NewGenerator and Generate never compiles a flag framework.
+package cli
 
 import (
-	"errors"
 	"fmt"
-	"maps"
 	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
-)
 
-// ErrUnknownAnnotator indicates an annotator name with no registered parser.
-// Configuration paths such as [Config.NewGenerator] additionally wrap
-// [ErrInvalidOption], so their errors match both sentinels with [errors.Is].
-var ErrUnknownAnnotator = errors.New("unknown annotator")
+	"go.jacobcolvin.com/x/magicschema"
+)
 
 // Flags holds CLI flag names for schema generation configuration, allowing
 // callers to customize flag names while keeping sensible defaults.
@@ -37,50 +37,14 @@ type Flags struct {
 	InferDefaults       string
 }
 
-// Registry maps annotator names (as used in the --annotators flag) to
-// prototype [Annotator] instances. Prototypes are never mutated; the
-// generator calls [Annotator.ForContent] to obtain a prepared clone for
-// each input file.
-type Registry map[string]Annotator
-
-// Add registers one or more annotators in the registry, using each
-// annotator's [Annotator.Name] as the map key.
-func (r Registry) Add(annotators ...Annotator) {
-	for _, a := range annotators {
-		r[a.Name()] = a
-	}
-}
-
-// Lookup resolves annotator names to their registered prototypes, preserving
-// the given order. Names must match registered names exactly; a miss returns
-// an error wrapping [ErrUnknownAnnotator].
-func (r Registry) Lookup(names ...string) ([]Annotator, error) {
-	annotators := make([]Annotator, 0, len(names))
-
-	for _, name := range names {
-		annotator, ok := r[name]
-		if !ok {
-			return nil, fmt.Errorf("%w %q", ErrUnknownAnnotator, name)
-		}
-
-		annotators = append(annotators, annotator)
-	}
-
-	return annotators, nil
-}
-
-// Names returns the registered annotator names, sorted.
-func (r Registry) Names() []string {
-	return slices.Sorted(maps.Keys(r))
-}
-
 // Config holds CLI flag values for schema generation configuration.
 //
 // Create instances with [NewConfig] and register CLI flags with
-// [Config.RegisterFlags]. Use [Config.NewGenerator] to create a [Generator].
+// [Config.RegisterFlags]. Use [Config.NewGenerator] to create a
+// [magicschema.Generator].
 type Config struct {
 	Flags         Flags
-	Registry      Registry
+	Registry      magicschema.Registry
 	Output        string
 	Title         string
 	Description   string
@@ -231,8 +195,8 @@ func (c *Config) MustRegisterCompletions(cmd *cobra.Command) {
 	}
 }
 
-// NewGenerator creates a [Generator] using this [Config].
-func (c *Config) NewGenerator() (*Generator, error) {
+// NewGenerator creates a [magicschema.Generator] using this [Config].
+func (c *Config) NewGenerator() (*magicschema.Generator, error) {
 	// Only Draft 7 output is implemented; reject any other requested draft
 	// instead of silently emitting draft-07. NewConfig defaults Draft to 7 and
 	// RegisterFlags registers 7 as the flag default, so any other value -- 0
@@ -240,15 +204,16 @@ func (c *Config) NewGenerator() (*Generator, error) {
 	// field.
 	if c.Draft != 7 {
 		return nil, fmt.Errorf("%w: unsupported JSON Schema draft %d (only 7 is supported)",
-			ErrInvalidOption, c.Draft)
+			magicschema.ErrInvalidOption, c.Draft)
 	}
 
 	// A negative indent is meaningless. Reject it explicitly instead of letting
-	// it fall through to compact output (the writer only indents when Indent is
-	// positive), so a typo surfaces as an error rather than silently dropping
-	// the requested indentation.
+	// it fall through to compact output ([magicschema.WriteSchema] only indents
+	// when Indent is positive), so a typo surfaces as an error rather than
+	// silently dropping the requested indentation.
 	if c.Indent < 0 {
-		return nil, fmt.Errorf("%w: negative JSON indentation %d", ErrInvalidOption, c.Indent)
+		return nil, fmt.Errorf("%w: negative JSON indentation %d",
+			magicschema.ErrInvalidOption, c.Indent)
 	}
 
 	annotators, err := c.parseAnnotatorNames()
@@ -256,33 +221,33 @@ func (c *Config) NewGenerator() (*Generator, error) {
 		return nil, err
 	}
 
-	var opts []Option
+	var opts []magicschema.Option
 
 	if len(annotators) > 0 {
-		opts = append(opts, WithAnnotators(annotators...))
+		opts = append(opts, magicschema.WithAnnotators(annotators...))
 	}
 
 	if c.Title != "" {
-		opts = append(opts, WithTitle(c.Title))
+		opts = append(opts, magicschema.WithTitle(c.Title))
 	}
 
 	if c.Description != "" {
-		opts = append(opts, WithDescription(c.Description))
+		opts = append(opts, magicschema.WithDescription(c.Description))
 	}
 
 	if c.ID != "" {
-		opts = append(opts, WithID(c.ID))
+		opts = append(opts, magicschema.WithID(c.ID))
 	}
 
 	if c.Strict {
-		opts = append(opts, WithStrict(true))
+		opts = append(opts, magicschema.WithStrict(true))
 	}
 
 	if c.InferDefaults {
-		opts = append(opts, WithInferDefaults(true))
+		opts = append(opts, magicschema.WithInferDefaults(true))
 	}
 
-	return NewGenerator(opts...), nil
+	return magicschema.NewGenerator(opts...), nil
 }
 
 // splitAnnotatorNames splits a comma-separated annotator list, trims
@@ -305,14 +270,14 @@ func splitAnnotatorNames(s string) []string {
 // parseAnnotatorNames parses the comma-separated [Config.Annotators] list and
 // returns the corresponding Annotator instances. Whitespace around names is
 // trimmed and empty entries are dropped (CLI parsing concerns); resolution
-// itself goes through [Registry.Lookup].
-func (c *Config) parseAnnotatorNames() ([]Annotator, error) {
+// itself goes through [magicschema.Registry.Lookup].
+func (c *Config) parseAnnotatorNames() ([]magicschema.Annotator, error) {
 	// An empty or whitespace-only list needs no special case: splitAnnotatorNames
 	// drops it to no names and Lookup returns an empty slice, which the caller
 	// treats as "no annotators".
 	annotators, err := c.Registry.Lookup(splitAnnotatorNames(c.Annotators)...)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInvalidOption, err)
+		return nil, fmt.Errorf("%w: %w", magicschema.ErrInvalidOption, err)
 	}
 
 	return annotators, nil

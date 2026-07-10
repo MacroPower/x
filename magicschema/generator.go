@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"slices"
+	"strings"
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
@@ -226,6 +228,39 @@ func (g *Generator) GenerateFiles(paths ...string) (*jsonschema.Schema, error) {
 	}
 
 	return g.Generate(inputs...)
+}
+
+// WriteSchema marshals schema to JSON -- indented by indent spaces when
+// indent is positive, compact otherwise -- appends a trailing newline, and
+// writes the result to w. Marshal failures wrap [ErrMarshalSchema] (a schema
+// an annotator built with conflicting keywords) and write failures wrap
+// [ErrWriteOutput]. It is the emit phase of the documented pipeline,
+// exported so every frontend shares one output rule instead of
+// re-implementing the marshal-indent-newline sequence.
+func WriteSchema(w io.Writer, schema *jsonschema.Schema, indent int) error {
+	var (
+		out []byte
+		err error
+	)
+
+	if indent > 0 {
+		out, err = json.MarshalIndent(schema, "", strings.Repeat(" ", indent))
+	} else {
+		out, err = json.Marshal(schema)
+	}
+
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrMarshalSchema, err)
+	}
+
+	out = append(out, '\n')
+
+	_, err = w.Write(out)
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrWriteOutput, err)
+	}
+
+	return nil
 }
 
 // ReadInputFile reads one input file for [Generator.Generate], wrapping
