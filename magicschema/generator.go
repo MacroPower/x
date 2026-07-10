@@ -787,13 +787,18 @@ func (w *docWalker) buildChildSchema(
 
 	// For object types, recurse into children. An annotation that authored
 	// its own Properties skips the structural fill, but strict mode's
-	// additionalProperties:false must still apply when the annotation left
-	// the field unset -- the same default every structurally walked object
-	// receives; the flags reset below still treats it as structural.
-	switch {
-	case hasType(childSchema, typeObject) && childSchema.Properties == nil:
+	// additionalProperties:false must still apply whenever the annotation
+	// left the field unset -- the same default every structurally walked
+	// object receives, including an annotated type:object over a non-mapping
+	// value (a null "empty by default" object, say), where the structural
+	// fill has no mapping to copy from; the flags reset below still treats
+	// it as structural.
+	if hasType(childSchema, typeObject) && childSchema.Properties == nil {
 		w.fillObjectFromStructure(childSchema, structuralNode, childPath, anchors, annotation)
-	case hasType(childSchema, typeObject) && !annotatedAP && w.gen.strict:
+	}
+
+	if hasType(childSchema, typeObject) && !annotatedAP && w.gen.strict &&
+		childSchema.AdditionalProperties == nil {
 		childSchema.AdditionalProperties = FalseSchema()
 	}
 

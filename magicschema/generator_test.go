@@ -786,6 +786,24 @@ func TestGeneratorStrictSkipAndMergeProperties(t *testing.T) {
 				assert.Equal(t, true, labels["additionalProperties"])
 			},
 		},
+		"annotated object over a null value gets the strict default": {
+			// The structural fill has no mapping to copy from, but strict
+			// mode's additionalProperties:false is the default every object
+			// receives when the annotation leaves the field unset -- a null
+			// "empty by default" object must not silently stay wide open
+			// while every sibling object is closed.
+			input: stringtest.Input(`
+				# @schema type:object
+				config:
+			`),
+			check: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				config := propertyAt(t, got, "config")
+				assert.Equal(t, "object", config["type"])
+				assert.Equal(t, false, config["additionalProperties"])
+			},
+		},
 		"annotation-set additionalProperties stays authoritative": {
 			input: stringtest.Input(`
 				# @schema skipProperties:true;additionalProperties:false
