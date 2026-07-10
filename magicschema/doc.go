@@ -212,8 +212,11 @@
 // Both keep additionalProperties permissive on the node they apply to,
 // even under [WithStrict]: the strict-mode false describes exactly the
 // keys these annotations hide, and keeping it would reject the source
-// file itself (fail open). An additionalProperties the annotation sets
-// directly is authoritative and stands.
+// file itself (fail open). Skip gets the same treatment on the parent
+// mapping: the skipped key still exists in the source document, so the
+// mapping that omitted it stays permissive under strict mode. An
+// additionalProperties the annotation sets directly is authoritative and
+// stands.
 //
 // Skip, SkipProperties, and MergeProperties are OR'd across all annotator
 // results for a given node: if any annotator sets them, they take effect.

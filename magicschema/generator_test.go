@@ -819,6 +819,30 @@ func TestGeneratorStrictSkipAndMergeProperties(t *testing.T) {
 				assert.Equal(t, false, resources["additionalProperties"])
 			},
 		},
+		"skipped key keeps its parent mapping permissive": {
+			// The skipped key still exists in the source document, so the
+			// strict false on its parent would reject the very file the
+			// schema was generated from. Siblings of the parent (and the
+			// root, checked by the harness) keep their strict false.
+			input: stringtest.Input(`
+				config:
+				  # @schema hidden:true
+				  secret: x
+				  name: a
+			`),
+			check: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				config := propertyAt(t, got, "config")
+				assert.Equal(t, true, config["additionalProperties"],
+					"the mapping that omitted a key must stay permissive")
+
+				props, ok := config["properties"].(map[string]any)
+				require.True(t, ok)
+				assert.NotContains(t, props, "secret")
+				assert.Contains(t, props, "name")
+			},
+		},
 		"mergeProperties keeps an annotation-set additionalProperties": {
 			// The fold writes the merged child schemas into
 			// additionalProperties only when the annotation did not author

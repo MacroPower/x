@@ -540,6 +540,17 @@ func (w *docWalker) walkMapping(
 		return !ok
 	})
 
+	// A skipped key still exists in the source document, so strict mode's
+	// additionalProperties:false on this mapping would reject the very file
+	// the schema was generated from. Fail open on the mapping instead -- the
+	// same rule the SkipProperties and MergeProperties annotations get, whose
+	// strict false likewise describes exactly the keys the annotation hides.
+	// An annotator-set additionalProperties on this node is applied by
+	// buildChildSchema and stands: only the structural strict default resets.
+	if w.gen.strict && len(decisions.skipped) > 0 {
+		schema.AdditionalProperties = TrueSchema()
+	}
+
 	schema.PropertyOrder = propertyOrder
 
 	if len(schema.Properties) == 0 {
