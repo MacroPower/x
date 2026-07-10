@@ -30,11 +30,14 @@ import (
 // type-specific keyword (properties, items, bounds, pattern) drops with it --
 // a schema with no type but residual object or array constraints would still
 // fail closed for those instances.
-// Combinators and references ($ref, $dynamicRef, allOf/anyOf/oneOf, not) are
-// dropped entirely, which is the most permissive behavior; the if/then/else
-// conditional is kept as a unit when both sides agree exactly. Identity and
-// informational keywords ($id, $comment, $anchor, $dynamicAnchor, $vocabulary)
-// carry first-wins like title and description, since they annotate rather than
+// Combinators (allOf/anyOf/oneOf, not) follow the same keep-when-equal rule,
+// the if/then/else conditional is kept as a unit when both sides agree
+// exactly, and $ref survives only when both sides agree on the reference and
+// on their definitions maps (a kept ref beside dropped definitions could
+// dangle); $dynamicRef is dropped entirely, since its resolution depends on
+// dynamic scope the merge cannot preserve. Identity and informational
+// keywords ($id, $comment, $anchor, $dynamicAnchor, $vocabulary) carry
+// first-wins like title and description, since they annotate rather than
 // constrain.
 //
 // The result aliases sub-structures of both inputs (one-sided properties,
@@ -215,6 +218,27 @@ func mergeSchemas(a, b *jsonschema.Schema) *jsonschema.Schema {
 	result.ContentMediaType = keepEqual(a.ContentMediaType, b.ContentMediaType)
 	result.ContentSchema = keepEqual(a.ContentSchema, b.ContentSchema)
 
+	// Combinators have no widening rule either: identical combinators union
+	// to themselves -- the common case of one annotation reused across every
+	// input file -- and anything else drops (fail open), the same
+	// keep-when-equal contract as pattern and patternProperties.
+	result.AllOf = keepEqual(a.AllOf, b.AllOf)
+	result.AnyOf = keepEqual(a.AnyOf, b.AnyOf)
+	result.OneOf = keepEqual(a.OneOf, b.OneOf)
+	result.Not = keepEqual(a.Not, b.Not)
+
+	// $ref only has meaning together with the definitions it may resolve
+	// into, so the reference survives only when both sides agree on the
+	// reference and on both definition maps (kept intact by the keepEqual
+	// assignments above when they agree): a kept ref beside dropped
+	// definitions could dangle. $dynamicRef stays dropped; its resolution
+	// depends on dynamic scope the merge cannot preserve.
+	if a.Ref != "" && a.Ref == b.Ref &&
+		reflect.DeepEqual(a.Definitions, b.Definitions) &&
+		reflect.DeepEqual(a.Defs, b.Defs) {
+		result.Ref = a.Ref
+	}
+
 	// The if/then/else conditional only has meaning as a unit, so it is
 	// kept only when the whole trio agrees.
 	if reflect.DeepEqual(a.If, b.If) &&
@@ -250,8 +274,9 @@ func mergeMetadata(out, a, b *jsonschema.Schema) {
 	// Identity and informational keywords annotate rather than constrain, so
 	// they carry first-wins like title and description. The annotator-merge
 	// path (mergeSchemaFields) already keeps them; a later union merge must not
-	// silently drop what survived single-input generation. References ($ref,
-	// $dynamicRef) stay dropped (see the mergeSchemas doc comment).
+	// silently drop what survived single-input generation. References are not
+	// metadata: mergeSchemas keeps an agreeing $ref in its keep-when-equal
+	// block and drops $dynamicRef (see its doc comment).
 	out.Schema = cmp.Or(a.Schema, b.Schema)
 	out.ID = cmp.Or(a.ID, b.ID)
 	out.Comment = cmp.Or(a.Comment, b.Comment)

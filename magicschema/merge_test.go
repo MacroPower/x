@@ -857,6 +857,94 @@ func TestMergeTypelessConstraintDropsOneSidedItems(t *testing.T) {
 	}
 }
 
+func TestMergeAgreeingCombinatorsAndRefSurvive(t *testing.T) {
+	t.Parallel()
+
+	// Keywords with no widening rule are kept only when both sides agree
+	// exactly -- the common case of one annotation reused across every input
+	// file. Dropping an agreed anyOf or $ref would silently lose the very
+	// constraint both files asked for.
+	t.Run("identical anyOf survives the merge", func(t *testing.T) {
+		t.Parallel()
+
+		annotated := []byte("# @schema type:string;anyOf:[{pattern: \"^a\"}, {pattern: \"^b\"}]\nkey: abc\n")
+
+		gen := magicschema.NewGenerator(magicschema.WithAnnotators(losisin.New()))
+		schema, err := gen.Generate(annotated, annotated)
+		require.NoError(t, err)
+
+		out, err := json.Marshal(schema)
+		require.NoError(t, err)
+
+		var got map[string]any
+
+		require.NoError(t, json.Unmarshal(out, &got))
+
+		props, ok := got["properties"].(map[string]any)
+		require.True(t, ok)
+
+		key, ok := props["key"].(map[string]any)
+		require.True(t, ok)
+
+		anyOf, ok := key["anyOf"].([]any)
+		require.True(t, ok, "the agreed anyOf must survive the merge")
+		assert.Len(t, anyOf, 2)
+	})
+
+	t.Run("identical ref survives the merge", func(t *testing.T) {
+		t.Parallel()
+
+		annotated := []byte("# @schema $ref:https://example.com/image.json\nimage:\n  tag: latest\n")
+
+		gen := magicschema.NewGenerator(magicschema.WithAnnotators(losisin.New()))
+		schema, err := gen.Generate(annotated, annotated)
+		require.NoError(t, err)
+
+		out, err := json.Marshal(schema)
+		require.NoError(t, err)
+
+		var got map[string]any
+
+		require.NoError(t, json.Unmarshal(out, &got))
+
+		props, ok := got["properties"].(map[string]any)
+		require.True(t, ok)
+
+		image, ok := props["image"].(map[string]any)
+		require.True(t, ok)
+
+		assert.Equal(t, "https://example.com/image.json", image["$ref"],
+			"the agreed $ref must survive the merge")
+	})
+
+	t.Run("differing anyOf drops from the union", func(t *testing.T) {
+		t.Parallel()
+
+		gen := magicschema.NewGenerator(magicschema.WithAnnotators(losisin.New()))
+		schema, err := gen.Generate(
+			[]byte("# @schema type:string;anyOf:[{pattern: \"^a\"}]\nkey: abc\n"),
+			[]byte("# @schema type:string;anyOf:[{pattern: \"^b\"}]\nkey: abc\n"),
+		)
+		require.NoError(t, err)
+
+		out, err := json.Marshal(schema)
+		require.NoError(t, err)
+
+		var got map[string]any
+
+		require.NoError(t, json.Unmarshal(out, &got))
+
+		props, ok := got["properties"].(map[string]any)
+		require.True(t, ok)
+
+		key, ok := props["key"].(map[string]any)
+		require.True(t, ok)
+
+		assert.NotContains(t, key, "anyOf",
+			"differing combinators must drop from the union (fail open)")
+	})
+}
+
 func TestMergeTypelessConstraintDropsOneSidedProperties(t *testing.T) {
 	t.Parallel()
 
