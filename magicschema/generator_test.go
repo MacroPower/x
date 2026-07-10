@@ -1465,6 +1465,45 @@ func TestGeneratorMultiDocumentAnnotatorIsolation(t *testing.T) {
 	assert.False(t, hasDesc, "doc1's @param must not bleed into doc2's foo")
 }
 
+func TestGeneratorContentCarryingStartAnnotatorIsolation(t *testing.T) {
+	t.Parallel()
+
+	// The same isolation must hold when the second document starts on a
+	// content-carrying "---" line. A bare-marker line scan finds no boundary
+	// there, mismatches the parsed document count, and silently falls back
+	// to scanning the whole stream for every document -- the exact bleed the
+	// split exists to prevent. The position-derived segments place the
+	// "--- {foo: 2}" line in its own document.
+	input := stringtest.Input(`
+		## @param foo A leaked description
+		unrelated: 1
+		--- {foo: 2}
+	`)
+
+	gen := magicschema.NewGenerator(
+		magicschema.WithAnnotators(bitnami.New()),
+	)
+	schema, err := gen.Generate([]byte(input))
+	require.NoError(t, err)
+
+	out, err := json.Marshal(schema)
+	require.NoError(t, err)
+
+	var got map[string]any
+
+	require.NoError(t, json.Unmarshal(out, &got))
+
+	props, ok := got["properties"].(map[string]any)
+	require.True(t, ok)
+
+	foo, ok := props["foo"].(map[string]any)
+	require.True(t, ok)
+
+	_, hasDesc := foo["description"]
+	assert.False(t, hasDesc, "doc1's @param must not bleed into doc2's foo")
+	assert.Equal(t, "integer", foo["type"])
+}
+
 func TestGeneratorDotSeparatorAnnotatorIsolation(t *testing.T) {
 	t.Parallel()
 

@@ -1,6 +1,6 @@
 // Package yamldoc preprocesses raw YAML document bytes -- line-ending
-// normalization, empty-document stripping, and per-document splitting --
-// ahead of parsing.
+// normalization, empty-document stripping, and block-scalar masking for
+// line-oriented annotation scans -- ahead of parsing.
 package yamldoc
 
 import (
@@ -183,46 +183,6 @@ func DropEmptyDocuments(input []byte) []byte {
 	return bytes.Join(out, []byte("\n"))
 }
 
-// SplitDocumentBytes splits a normalized, empty-document-stripped YAML stream
-// into per-document byte slices in source order, intended to align 1:1 with
-// parser.ParseBytes's file.Docs. Documents are separated by bare "---" start
-// markers or "..." end markers (see [isDocBoundaryLine]). Blank segments are
-// dropped: a leading separator opens the stream with one, and an empty document
-// between markers ("a: 1\n...\n\n...\nb: 2", which "..." leaves for
-// [DropEmptyDocuments] to miss) leaves one in the middle. The parser emits no
-// document for either, so keeping them would misalign the slices. Callers guard
-// on the returned length matching the parsed document count and fall back to
-// the whole input when it does not, so an imperfect split never changes behavior.
-func SplitDocumentBytes(input []byte) [][]byte {
-	lines := bytes.Split(input, []byte("\n"))
-
-	segments := [][][]byte{nil}
-
-	for _, line := range lines {
-		if isDocBoundaryLine(line) {
-			segments = append(segments, nil)
-
-			continue
-		}
-
-		last := len(segments) - 1
-		segments[last] = append(segments[last], line)
-	}
-
-	out := make([][]byte, 0, len(segments))
-
-	for _, seg := range segments {
-		joined := bytes.Join(seg, []byte("\n"))
-		if IsBlank(joined) {
-			continue
-		}
-
-		out = append(out, joined)
-	}
-
-	return out
-}
-
 // StripBOM removes a leading UTF-8 byte-order mark. A parser would otherwise
 // treat it as part of the first property key.
 func StripBOM(input []byte) []byte {
@@ -281,16 +241,6 @@ func isDocumentStartLine(line []byte) bool {
 	}
 
 	return len(rest) > 0 && (rest[0] == ' ' || rest[0] == '\t')
-}
-
-// isDocBoundaryLine reports whether a line is a bare YAML document delimiter:
-// the "---" start marker or the "..." end marker. Either separates two
-// documents, so splitting on both keeps the per-document byte segments aligned
-// with the parsed document list for "..."-delimited streams. It is kept
-// distinct from [isSeparatorLine] because the two markers collapse differently
-// when an empty document is dropped.
-func isDocBoundaryLine(line []byte) bool {
-	return isSeparatorLine(line) || isEndMarkerLine(line)
 }
 
 // isEndMarkerLine reports whether a line is a bare "..." document end marker.

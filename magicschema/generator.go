@@ -1,6 +1,7 @@
 package magicschema
 
 import (
+	"bytes"
 	"cmp"
 	"encoding/json"
 	"errors"
@@ -279,15 +280,17 @@ func (g *Generator) generateSingle(input []byte) (*jsonschema.Schema, []Annotato
 
 	// Scope each document's content to the annotators that scan it (bitnami's
 	// ## @param lines, norwoodj's old-style descriptions) so a multi-document
-	// stream does not bleed one document's annotations into another. The split
-	// is used only when it aligns 1:1 with the parsed documents; otherwise the
-	// whole stream is passed, preserving prior behavior.
+	// stream does not bleed one document's annotations into another. The
+	// segments derive from the parser's own document positions, so they align
+	// 1:1 with file.Docs by construction; when a boundary lacks position
+	// information the whole stream is passed instead, with a warning, since
+	// the bleed is otherwise silent.
 	var docBytes [][]byte
 
 	if len(file.Docs) > 1 {
-		docBytes = yamldoc.SplitDocumentBytes(input)
-		if len(docBytes) != len(file.Docs) {
-			docBytes = nil
+		docBytes = documentByteRanges(input, file.Docs)
+		if docBytes == nil {
+			slog.Warn("document boundary positions unavailable; annotators see the whole stream")
 		}
 	}
 
@@ -359,6 +362,56 @@ func (g *Generator) generateSingle(input []byte) (*jsonschema.Schema, []Annotato
 	}
 
 	return reduceSchemas(schemas), allPrepared, nil
+}
+
+// documentByteRanges slices the input into per-document byte segments using
+// the parser's own document positions, so the segments align 1:1 with docs by
+// construction -- no shadow re-lex of the document-boundary grammar that has
+// to track goccy's parser. Document i begins at its own "---" start marker
+// line; a marker-less document begins on the line after the previous
+// document's "..." end marker, or at the top of the input for the first.
+// Each segment runs to the line before the next document begins, so a
+// content-carrying start line ("--- {b: 2}") lands in its own document's
+// segment -- a shape a bare-marker line scan misfiles into the previous
+// document -- while comments above a marker stay with the preceding segment,
+// where the comment-only-document carry expects them. It returns nil when a
+// boundary lacks position information or the boundaries are not monotonic,
+// and the caller falls back to handing every annotator the whole stream.
+func documentByteRanges(input []byte, docs []*ast.DocumentNode) [][]byte {
+	lines := bytes.Split(input, []byte("\n"))
+
+	// The 0-based line index where each document begins.
+	starts := make([]int, len(docs))
+
+	for i, doc := range docs {
+		switch {
+		case doc.Start != nil && doc.Start.Position != nil:
+			starts[i] = doc.Start.Position.Line - 1
+		case i == 0:
+			starts[i] = 0
+		case docs[i-1].End != nil && docs[i-1].End.Position != nil:
+			starts[i] = docs[i-1].End.Position.Line
+		default:
+			return nil
+		}
+
+		if starts[i] < 0 || starts[i] > len(lines) || (i > 0 && starts[i] < starts[i-1]) {
+			return nil
+		}
+	}
+
+	out := make([][]byte, len(docs))
+
+	for i := range docs {
+		end := len(lines)
+		if i+1 < len(docs) {
+			end = starts[i+1]
+		}
+
+		out[i] = bytes.Join(lines[starts[i]:end], []byte("\n"))
+	}
+
+	return out
 }
 
 // reduceSchemas folds a non-empty slice of schemas into one with union
