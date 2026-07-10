@@ -263,6 +263,47 @@ func TestHelmValuesSchemaAnnotator(t *testing.T) {
 				assert.NotContains(t, c, "minimum")
 			},
 		},
+		"invalid default on a repeated key keeps the valid one": {
+			// The default/enum/examples parses share the documented
+			// invalid-values rule with the numeric bounds: a later typo must
+			// not clear a previously set valid value with nil.
+			input: stringtest.Input(`
+				# @schema default:5
+				# @schema default:{bad
+				count: 7
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				c, ok := props["count"].(map[string]any)
+				require.True(t, ok)
+
+				assert.InDelta(t, float64(5), c["default"], 0.001,
+					"a later typo must not clear the valid default")
+			},
+		},
+		"invalid enum on a repeated key keeps the valid one": {
+			input: stringtest.Input(`
+				# @schema enum:[a, b]
+				# @schema enum:
+				name: a
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				n, ok := props["name"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, []any{"a", "b"}, n["enum"],
+					"an empty repeat must not clear the valid enum")
+			},
+		},
 		"invalid allOf on a repeated key keeps the valid one": {
 			input: stringtest.Input(`
 				# @schema allOf:[{minLength: 1}]

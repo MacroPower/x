@@ -174,13 +174,22 @@ func (a *Annotator) applyPair(
 		schema.Description = unquoteScalar(val)
 	case "default":
 		// An empty value carries no default (explicit null is written as
-		// "default:null"); setting it would emit a spurious null default.
-		if val != "" {
-			schema.Default = magicschema.ParseYAMLValue(val)
+		// "default:null"); setting it would emit a spurious null default. Only
+		// a parsed value is assigned -- per the documented invalid-values
+		// rule, an unparseable value on a repeated key must not clear a
+		// previously set valid default with nil.
+		if raw := magicschema.ParseYAMLValue(val); raw != nil {
+			schema.Default = raw
 		}
 
 	case "enum":
-		schema.Enum = magicschema.FilterJSONSafe(parseAnyList(val))
+		// Assign only a non-empty parse, mirroring the itemEnum guard: an
+		// unparseable or empty value is silently skipped so a later typo on a
+		// repeated key never clears a previously set valid constraint.
+		if list := magicschema.FilterJSONSafe(parseAnyList(val)); len(list) > 0 {
+			schema.Enum = list
+		}
+
 	case "const":
 		// An empty value carries no const (explicit null is "const:null");
 		// emitting const:null would reject the real value (fail-closed),
@@ -240,7 +249,11 @@ func (a *Annotator) applyPair(
 		}
 
 	case "examples":
-		schema.Examples = magicschema.FilterJSONSafe(parseAnyList(val))
+		// Assign only a non-empty parse, the same guard as enum above.
+		if list := magicschema.FilterJSONSafe(parseAnyList(val)); len(list) > 0 {
+			schema.Examples = list
+		}
+
 	case "additionalProperties":
 		schema.AdditionalProperties = parseBoolOrSchema(val, hasVal)
 
