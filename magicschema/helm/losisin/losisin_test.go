@@ -3536,10 +3536,11 @@ func TestHelmValuesSchemaAnnotatorUpstreamAlignment(t *testing.T) {
 				assert.NotContains(t, n, "default")
 			},
 		},
-		"invalid boolean for required treated as false": {
+		"invalid boolean for required leaves the signal unset": {
 			// Upstream: invalid booleans are hard errors.
-			// Our behavior: invalid booleans default to false (fail-open:
-			// don't add restrictions for garbage input).
+			// Our behavior: an unparseable required is skipped entirely --
+			// false would be an active opt-out, not an inert zero -- so the
+			// key is simply not marked required (fail-open).
 			input: stringtest.Input(`
 				# @schema type:string;required:foo
 				name: test

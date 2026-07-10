@@ -213,7 +213,9 @@
 //     parsing as length constraints.
 //   - uniqueItems: boolean, whether array items must be unique.
 //   - required: boolean, marks this property as required in its parent's
-//     required array.
+//     required array. Unlike the other boolean keys, an unparseable value
+//     is skipped rather than read as false, since an explicit false is an
+//     active opt-out (see Intentional Divergences).
 //   - readOnly: boolean.
 //   - deprecated: boolean.
 //   - nullable: boolean; appends "null" to the type (upstream's
@@ -385,7 +387,13 @@
 //     and "false" only; all other values including case variants produce
 //     hard errors. For unrecognized non-boolean values (anything other than
 //     true/false case-insensitively), our implementation treats them as
-//     false (fail-open: don't add restrictions for garbage input).
+//     false (fail-open: don't add restrictions for garbage input) -- except
+//     for required, whose false is an active opt-out rather than an inert
+//     zero: it cancels merge-key-inherited required and outranks a
+//     lower-priority annotator's explicit required:true, so an unparseable
+//     required value is skipped entirely, leaving the tri-state signal
+//     unset instead of converting garbage into an opt-out no annotator
+//     wrote.
 //
 //   - Numeric constraints (minLength, maxLength, minItems, maxItems,
 //     minProperties, maxProperties) are parsed via YAML unmarshal into int
