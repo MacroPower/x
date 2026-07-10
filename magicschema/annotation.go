@@ -184,6 +184,17 @@ func copySchema(s *jsonschema.Schema) *jsonschema.Schema {
 // mergeSchemaFields merges fields from src into dst where dst has zero values.
 // Dst has higher priority; src fills in gaps.
 func mergeSchemaFields(dst, src *jsonschema.Schema) {
+	// A higher-priority $ref annotation is emitted as authored -- the
+	// contract buildChildSchema's Ref early-return and applyRootAnnotations
+	// enforce for the structural side. Filling lower-priority siblings in
+	// beside it would be inert under strict Draft 7 (siblings of $ref are
+	// ignored) and would double-constrain against the referent under
+	// validators that do apply siblings (fail closed), so no gap fill runs
+	// at all.
+	if dst.Ref != "" {
+		return
+	}
+
 	// Under Draft 7 every validation sibling of $ref is ignored, so grafting
 	// a lower-priority $ref beside higher-priority constraints would let the
 	// reference govern entirely and silently disable what the winner wrote
@@ -192,7 +203,7 @@ func mergeSchemaFields(dst, src *jsonschema.Schema) {
 	// $ref. The fill is allowed only when dst carries no type and no value
 	// constraint for the reference to nullify, judged before this call's own
 	// gap fills add src's other fields to dst.
-	refFillOK := dst.Ref == "" && len(typeList(dst)) == 0 && !constrainsValue(dst)
+	refFillOK := len(typeList(dst)) == 0 && !constrainsValue(dst)
 
 	// Fill the type from the lower-priority src only when src actually carries
 	// one and it does not contradict a value set the higher-priority dst already

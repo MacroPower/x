@@ -270,6 +270,49 @@ func TestGeneratorAnnotatorRefNotGraftedBesideConstraints(t *testing.T) {
 		"a lower-priority $ref must not nullify the winner's constraints")
 }
 
+func TestGeneratorAnnotatorRefWinnerNotPolluted(t *testing.T) {
+	t.Parallel()
+
+	// The mirror of the graft guard: a higher-priority $ref-only annotation
+	// is emitted as authored, so a lower-priority annotator's type (or any
+	// other sibling) must not be filled in beside it -- inert under strict
+	// Draft 7 and double-constraining under validators that apply siblings.
+	high := stubAnnotator{
+		name: "high",
+		result: &magicschema.AnnotationResult{Schema: &jsonschema.Schema{
+			Ref: "https://example.com/name.schema.json",
+		}},
+	}
+	low := stubAnnotator{
+		name: "low",
+		result: &magicschema.AnnotationResult{Schema: &jsonschema.Schema{
+			Type: "string",
+		}},
+	}
+
+	gen := magicschema.NewGenerator(magicschema.WithAnnotators(high, low))
+
+	schema, err := gen.Generate([]byte("key: hello\n"))
+	require.NoError(t, err)
+
+	out, err := json.Marshal(schema)
+	require.NoError(t, err)
+
+	var got map[string]any
+
+	require.NoError(t, json.Unmarshal(out, &got))
+
+	props, ok := got["properties"].(map[string]any)
+	require.True(t, ok)
+
+	prop, ok := props["key"].(map[string]any)
+	require.True(t, ok)
+
+	assert.Equal(t, "https://example.com/name.schema.json", prop["$ref"])
+	assert.NotContains(t, prop, "type",
+		"a lower-priority type must not be grafted beside the winning $ref")
+}
+
 func TestGeneratorAnnotatorConditionalFilledAsUnit(t *testing.T) {
 	t.Parallel()
 
