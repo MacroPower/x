@@ -819,6 +819,26 @@ func TestGeneratorStrictSkipAndMergeProperties(t *testing.T) {
 				assert.Equal(t, false, resources["additionalProperties"])
 			},
 		},
+		"mergeProperties keeps an annotation-set additionalProperties": {
+			// The fold writes the merged child schemas into
+			// additionalProperties only when the annotation did not author
+			// the field itself; an authored value is authoritative, and the
+			// fold then only strips the property map.
+			input: stringtest.Input(`
+				# @schema mergeProperties:true;additionalProperties:{"type": "string"}
+				m:
+				  a: 1
+				  b: 2
+			`),
+			check: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				m := propertyAt(t, got, "m")
+				assert.NotContains(t, m, "properties")
+				assert.Equal(t, map[string]any{"type": "string"}, m["additionalProperties"],
+					"the authored additionalProperties must not be overwritten by the fold")
+			},
+		},
 	}
 
 	for name, tc := range tcs {

@@ -829,9 +829,15 @@ func (w *docWalker) buildChildSchema(
 	// one annotation line can set both -- and stripping first would leave
 	// mergeProperties with no Properties to fold, silently dropping the child
 	// schemas. Folding first preserves them in additionalProperties; the strip
-	// then clears the now-empty Properties map.
+	// then clears the now-empty Properties map. An annotator-set
+	// additionalProperties is authoritative and stands (the documented
+	// contract): the fold then only strips the property map, the same way
+	// skipProperties hides it.
 	if annotation.MergeProperties && childSchema.Properties != nil {
-		childSchema.AdditionalProperties = mergePropertySchemas(childSchema)
+		if !annotatedAP {
+			childSchema.AdditionalProperties = mergePropertySchemas(childSchema)
+		}
+
 		childSchema.Properties = nil
 		childSchema.PropertyOrder = nil
 	}
