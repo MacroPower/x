@@ -427,16 +427,16 @@ func adjacentCommentRun(comment *ast.CommentGroupNode, key ast.MapKeyNode) ([]st
 	// block state.
 	inSchema, inRoot := false, false
 	for _, line := range all[:len(all)-len(run)] {
-		inSchema, inRoot, _ = schemaFenceState(strings.TrimSpace(StripCommentMarker(line)), inSchema, inRoot)
+		inSchema, inRoot, _ = schemaFenceState(ClassifyCommentLine(line), inSchema, inRoot)
 	}
 
 	return run, inSchema, inRoot
 }
 
 // schemaFenceState applies the @schema / @schema.root block-fence toggles for
-// one already-stripped, trimmed comment line and reports whether the line is a
+// one comment line's [SchemaLineKind] and reports whether the line is a
 // @schema or @schema.root marker (delimiter or inline form, neither of which
-// carries description text). [ClassifySchemaLine] supplies the delimiter
+// carries description text). [ClassifyCommentLine] supplies the delimiter
 // grammar; this function adds the streaming transitions: a root delimiter
 // inside an open @schema block is junk content, not a toggle, and a @schema
 // delimiter also ends an unclosed @schema.root block, mirroring the dadav
@@ -445,8 +445,8 @@ func adjacentCommentRun(comment *ast.CommentGroupNode, key ast.MapKeyNode) ([]st
 // the distinction cannot surface here, where a line inside either block is
 // equally not prose.) It returns the updated (inSchema, inRoot) state and
 // whether the line was a marker.
-func schemaFenceState(cleaned string, inSchema, inRoot bool) (bool, bool, bool) {
-	switch ClassifySchemaLine(cleaned) {
+func schemaFenceState(kind SchemaLineKind, inSchema, inRoot bool) (bool, bool, bool) {
+	switch kind {
 	case SchemaLineRoot:
 		if !inSchema {
 			inRoot = !inRoot
@@ -487,20 +487,20 @@ func cleanComment(s string, inSchemaBlock, inRootBlock bool, isAnnotation func(s
 
 	for line := range strings.SplitSeq(s, "\n") {
 		// Markers are matched on a fully trimmed copy; the content keeps
-		// its indentation. Fence markers are matched on a two-hash-capped
-		// strip (see [StripCommentMarker]) so a "### @schema" line, which the
-		// dadav annotator does not treat as a delimiter, is likewise not a
-		// fence here; the content uses the all-hash [stripCommentPrefix] so
-		// decorative hash banners still collapse to blank lines.
+		// its indentation. Fence markers are classified from the raw line
+		// (see [ClassifyCommentLine]) so a "### @schema" line, a no-space
+		// "#@schema", or indented block content -- none of which the dadav
+		// annotator treats as a delimiter -- is likewise not a fence here;
+		// the content uses the all-hash [stripCommentPrefix] so decorative
+		// hash banners still collapse to blank lines.
 		content := stripCommentPrefix(line)
 		cleaned := strings.TrimSpace(content)
-		marker := strings.TrimSpace(StripCommentMarker(line))
 
 		// Track helm-schema block fences so block content never leaks into
 		// descriptions (see [schemaFenceState]).
 		var fence bool
 
-		inSchemaBlock, inRootBlock, fence = schemaFenceState(marker, inSchemaBlock, inRootBlock)
+		inSchemaBlock, inRootBlock, fence = schemaFenceState(ClassifyCommentLine(line), inSchemaBlock, inRootBlock)
 		if fence || inSchemaBlock || inRootBlock {
 			continue
 		}

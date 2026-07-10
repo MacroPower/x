@@ -382,6 +382,35 @@ func TestThreeHashSchemaMarkerIsNotAFence(t *testing.T) {
 	assert.Equal(t, "A real description", key["description"])
 }
 
+func TestNoSpaceSchemaMarkerIsNotAFence(t *testing.T) {
+	t.Parallel()
+
+	// "#@schema" (no space after the hash) is prose, not a fence: upstream
+	// helm-schema fences on the raw "# @schema" prefix, so a phantom block
+	// here would swallow the real description that follows.
+	input := "#@schema\n# A real description\nkey: 5\n"
+
+	gen := magicschema.NewGenerator()
+	schema, err := gen.Generate([]byte(input))
+	require.NoError(t, err)
+
+	out, err := json.Marshal(schema)
+	require.NoError(t, err)
+
+	var got map[string]any
+
+	require.NoError(t, json.Unmarshal(out, &got))
+
+	props, ok := got["properties"].(map[string]any)
+	require.True(t, ok)
+
+	key, ok := props["key"].(map[string]any)
+	require.True(t, ok)
+
+	assert.Equal(t, "integer", key["type"])
+	assert.Equal(t, "A real description", key["description"])
+}
+
 func TestHeadCommentRun(t *testing.T) {
 	t.Parallel()
 

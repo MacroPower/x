@@ -401,10 +401,13 @@ func scanCommentBlocks(comment string) commentBlocks {
 	var fences int
 
 	for i, line := range lines {
-		// Strip once; markers match on a fully trimmed copy while content
-		// keeps its indentation beyond the marker and single space.
+		// Strip once; content keeps its indentation beyond the marker and
+		// single space. Markers classify from the raw line so indented
+		// @schema-looking block content and no-space "#@schema" prose can
+		// never toggle a fence or be dropped as the inline form (see
+		// [magicschema.ClassifyCommentLine]).
 		stripped[i] = magicschema.StripCommentMarker(line)
-		kinds[i] = magicschema.ClassifySchemaLine(strings.TrimSpace(stripped[i]))
+		kinds[i] = magicschema.ClassifyCommentLine(line)
 
 		if kinds[i] == magicschema.SchemaLineSchema {
 			fences++

@@ -288,8 +288,9 @@ func LastCommentGroup(lines []string) []string {
 // recognized, so a line with three or more hashes ("### @schema") is treated
 // as prose, not a marker. Keeping only one trailing space means deeper
 // indentation after "# " survives for nested YAML block content. Annotators
-// and the structural fence detector strip markers with this helper so a
-// marker is recognized consistently across the package.
+// strip markers with this helper so a marker is recognized consistently
+// across the package; the @schema fence family classifies raw lines through
+// [ClassifyCommentLine], which applies the same capped strip.
 func StripCommentMarker(line string) string {
 	line = strings.TrimSpace(line)
 
@@ -346,8 +347,10 @@ const (
 // be contiguous and bare: "@schema .root" with a space is the inline form,
 // and trailing content after either marker is inline rather than a delimiter.
 // The dadav annotator's comment scan and the structural fallback's fence
-// tracking share this one classifier so the two passes cannot disagree on
-// which lines fence a block; each applies its own block-state transitions.
+// tracking share this one classifier -- both reach it through
+// [ClassifyCommentLine], which derives the marker text from the raw line --
+// so the two passes cannot disagree on which lines fence a block; each
+// applies its own block-state transitions.
 func ClassifySchemaLine(trimmed string) SchemaLineKind {
 	if after, ok := strings.CutPrefix(trimmed, "@schema.root"); ok {
 		if after == "" {
@@ -366,6 +369,38 @@ func ClassifySchemaLine(trimmed string) SchemaLineKind {
 	}
 
 	return SchemaLinePlain
+}
+
+// ClassifyCommentLine reports the @schema / @schema.root delimiter role of a
+// raw comment line, deriving the marker text the fence grammar sees and
+// classifying it with [ClassifySchemaLine]. The marker text is the remainder
+// after up to two leading '#' characters and exactly one following space,
+// right-trimmed. Two line shapes therefore never fence, matching upstream
+// helm-schema's raw "# @schema" prefix check: text fused to the hashes with
+// no separating space ("#@schema") is prose, and a line indented past the
+// single marker space ("#   @schema: value" -- block content nested under a
+// mapping key, say) keeps its leading whitespace, which no marker prefix
+// matches. Without the indentation rule, @schema-looking YAML nested inside a
+// block would toggle the fence mid-block and silently corrupt the block's
+// content. The dadav annotator's comment scan and the structural fallback's
+// fence tracking both classify through this one helper so the two passes
+// cannot disagree on which lines fence a block.
+func ClassifyCommentLine(line string) SchemaLineKind {
+	line = strings.TrimSpace(line)
+
+	for range 2 {
+		line = strings.TrimPrefix(line, "#")
+	}
+
+	rest, ok := strings.CutPrefix(line, " ")
+	if !ok {
+		// A bare hash run ("#", "##") carries no text and stays plain; any
+		// other unseparated remainder is prose fused to the marker
+		// ("#@schema", "###"), never a fence.
+		return SchemaLinePlain
+	}
+
+	return ClassifySchemaLine(strings.TrimRight(rest, " \t"))
 }
 
 // SetSchemaType assigns a parsed type list to a schema as either the scalar

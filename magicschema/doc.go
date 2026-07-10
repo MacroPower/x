@@ -298,6 +298,11 @@
 //     non-delimiter inline form. The structural fallback's fence tracking and
 //     the helm-schema annotator's comment scan share this one classifier so
 //     they cannot disagree on which lines fence a block.
+//   - [ClassifyCommentLine] classifies a raw comment line's fence role by
+//     deriving the marker text -- what follows up to two hashes and exactly
+//     one space -- and delegating to [ClassifySchemaLine], so no-space
+//     "#@schema" prose and block content indented past the marker space
+//     never fence. Both fence-tracking passes classify through it.
 //
 // # CLI Integration
 //

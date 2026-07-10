@@ -223,6 +223,79 @@ func TestClassifySchemaLine(t *testing.T) {
 	}
 }
 
+// TestClassifyCommentLine covers the raw-line entry to the fence grammar:
+// the marker text is what follows up to two hashes and exactly one space, so
+// no-space "#@schema" prose and content indented past the marker space never
+// fence, matching upstream helm-schema's raw "# @schema" prefix check.
+func TestClassifyCommentLine(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		line string
+		want magicschema.SchemaLineKind
+	}{
+		"single hash fence": {
+			line: "# @schema",
+			want: magicschema.SchemaLineSchema,
+		},
+		"double hash fence": {
+			line: "## @schema",
+			want: magicschema.SchemaLineSchema,
+		},
+		"fence with trailing whitespace": {
+			line: "# @schema  ",
+			want: magicschema.SchemaLineSchema,
+		},
+		"junk suffix still a fence": {
+			line: "# @schema@",
+			want: magicschema.SchemaLineSchema,
+		},
+		"root fence": {
+			line: "# @schema.root",
+			want: magicschema.SchemaLineRoot,
+		},
+		"inline form": {
+			line: "# @schema type:string",
+			want: magicschema.SchemaLineInline,
+		},
+		"no space after hash is prose": {
+			line: "#@schema",
+			want: magicschema.SchemaLinePlain,
+		},
+		"three hashes is prose": {
+			line: "### @schema",
+			want: magicschema.SchemaLinePlain,
+		},
+		"indented marker is block content": {
+			// Indentation past the single marker space is nested YAML block
+			// content; a fence or inline reading would corrupt or drop the
+			// enclosing block's content.
+			line: "#   @schema: marker",
+			want: magicschema.SchemaLinePlain,
+		},
+		"indented prose continuation": {
+			line: "#   @schema is cool",
+			want: magicschema.SchemaLinePlain,
+		},
+		"bare hash": {
+			line: "#",
+			want: magicschema.SchemaLinePlain,
+		},
+		"plain prose": {
+			line: "# a description",
+			want: magicschema.SchemaLinePlain,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, magicschema.ClassifyCommentLine(tc.line))
+		})
+	}
+}
+
 // TestIsMarkerBoundary covers the whole-token boundary every marker scan
 // shares: only end-of-line, a space, or a tab after the marker counts, so a
 // longer word ("@schemafoo") or punctuation ("@schema@") is not the marker.

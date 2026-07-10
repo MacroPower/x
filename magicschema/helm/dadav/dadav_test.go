@@ -69,6 +69,79 @@ func TestHelmSchemaAnnotator(t *testing.T) {
 				assert.InDelta(t, float64(100), r["maximum"], 0.001)
 			},
 		},
+		"indented schema-looking block content stays content": {
+			// Block content indented past the "# " marker is nested YAML, not
+			// a fence or the inline form, even when it begins with "@schema":
+			// toggling there would end the block early and leak the rest as a
+			// description. The "@schema: marker" line is itself invalid YAML
+			// ('@' starts no plain scalar), so the whole block is skipped
+			// best-effort and structural inference stands -- rather than the
+			// pre-classification corruption of a half-parsed block.
+			input: stringtest.Input(`
+				# @schema
+				# x-map:
+				#   @schema: marker
+				# type: integer
+				# @schema
+				key: 5
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				k, ok := props["key"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "integer", k["type"])
+				assert.NotContains(t, k, "x-map",
+					"an unparseable block must be skipped whole, not half-applied")
+				assert.NotContains(t, k, "description",
+					"block content must not leak into the description")
+			},
+		},
+		"indented folded scalar continuation stays content": {
+			input: stringtest.Input(`
+				# @schema
+				# description: >-
+				#   @schema is cool
+				# @schema
+				key: 5
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				k, ok := props["key"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "@schema is cool", k["description"])
+			},
+		},
+		"no-space hash marker is prose not a phantom fence": {
+			// "#@schema" does not match upstream's raw "# @schema" prefix, so
+			// it opens no block and the prose that follows survives as the
+			// fallback description.
+			input: stringtest.Input(`
+				#@schema
+				# this is my description
+				key: 5
+			`),
+			want: func(t *testing.T, got map[string]any) {
+				t.Helper()
+
+				props, ok := got["properties"].(map[string]any)
+				require.True(t, ok)
+
+				k, ok := props["key"].(map[string]any)
+				require.True(t, ok)
+
+				assert.Equal(t, "this is my description", k["description"])
+			},
+		},
 		"required as bool": {
 			input: stringtest.Input(`
 				# @schema
