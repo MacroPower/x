@@ -337,7 +337,24 @@ func (g *Generator) generateSingle(input []byte) (*jsonschema.Schema, []Annotato
 		schemas = append(schemas, walker.walkNode(doc.Body, "", anchors))
 	}
 
+	// A trailing comment-only document has no following document to carry its
+	// bytes into; its file-scan annotations (a @schema.root block after a
+	// final "---", say) must still reach prepared annotators rather than be
+	// silently discarded. Appending keeps priority order: earlier inputs and
+	// documents win per field.
+	if len(carry) > 0 {
+		allPrepared = append(allPrepared, prepareAnnotators(g.annotators, carry)...)
+	}
+
 	if len(schemas) == 0 {
+		// Every document was comment-only or a directive, so the loop never
+		// prepared an annotator against the content. Prepare against the
+		// whole input so root annotations -- a @schema.root block in a fully
+		// commented-out values file -- still apply.
+		if len(allPrepared) == 0 {
+			allPrepared = prepareAnnotators(g.annotators, input)
+		}
+
 		return TrueSchema(), allPrepared, nil
 	}
 

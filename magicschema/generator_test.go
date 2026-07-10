@@ -1380,6 +1380,53 @@ func TestGeneratorCommentHeaderAboveDocumentStartReachesAnnotators(t *testing.T)
 	assert.Equal(t, "Number of replicas", replicas["description"])
 }
 
+func TestGeneratorCommentOnlyInputKeepsRootAnnotations(t *testing.T) {
+	t.Parallel()
+
+	// A fully commented-out values file parses to a single comment-only
+	// document, which the walk skips -- but its @schema.root block must
+	// still reach a prepared annotator instead of being silently dropped
+	// with the skipped document.
+	input := stringtest.Input(`
+		# @schema.root
+		# title: Root Title
+		# @schema.root
+	`)
+
+	gen := magicschema.NewGenerator(
+		magicschema.WithAnnotators(dadav.New()),
+	)
+	schema, err := gen.Generate([]byte(input))
+	require.NoError(t, err)
+
+	assert.Equal(t, "Root Title", schema.Title,
+		"the comment-only input's root block must still apply")
+}
+
+func TestGeneratorTrailingCommentOnlyDocumentKeepsRootAnnotations(t *testing.T) {
+	t.Parallel()
+
+	// A trailing comment-only document has no following document to carry
+	// its bytes into; its root block must still reach a prepared annotator.
+	input := stringtest.Input(`
+		foo: 1
+		---
+		# @schema.root
+		# title: Trailing Title
+		# @schema.root
+	`)
+
+	gen := magicschema.NewGenerator(
+		magicschema.WithAnnotators(dadav.New()),
+	)
+	schema, err := gen.Generate([]byte(input))
+	require.NoError(t, err)
+
+	assert.Equal(t, "Trailing Title", schema.Title)
+	require.NotNil(t, schema.Properties["foo"],
+		"the real document's schema must be unaffected")
+}
+
 func TestGeneratorMultiDocumentAnnotatorIsolation(t *testing.T) {
 	t.Parallel()
 
