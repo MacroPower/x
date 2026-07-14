@@ -25,7 +25,7 @@ const (
 
 	// nixVersion pins the single-user Nix installer so the bootstrap store
 	// is reproducible across image builds.
-	nixVersion = "2.34.8" // renovate: datasource=github-tags depName=NixOS/nix
+	nixVersion = "2.35.1" // renovate: datasource=github-tags depName=NixOS/nix
 
 	defaultCacheNamespace = "go.jacobcolvin.com/x/toolchains/devbox"
 
