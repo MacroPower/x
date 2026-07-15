@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	defaultImage = "ghcr.io/zizmorcore/zizmor:1.26.1" // renovate: datasource=docker depName=ghcr.io/zizmorcore/zizmor
+	defaultImage = "ghcr.io/zizmorcore/zizmor:1.27.0" // renovate: datasource=docker depName=ghcr.io/zizmorcore/zizmor
 
 	defaultWorkflowsDir = ".github/workflows"
 )
