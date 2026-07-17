@@ -19,7 +19,7 @@ import (
 
 const (
 	// cosignVersion is the pinned cosign release used for the default image.
-	cosignVersion = "v3.1.1" // renovate: datasource=github-releases depName=sigstore/cosign
+	cosignVersion = "v3.1.2" // renovate: datasource=github-releases depName=sigstore/cosign
 
 	// cosignImage is the official cosign image the binary is extracted from.
 	cosignImage = "gcr.io/projectsigstore/cosign:" + cosignVersion
