@@ -32,8 +32,13 @@ The package has two independent halves sharing the `Schema` type:
   including the opaque/URN merge that corrects `net/url.ResolveReference`),
   `internal/normalize` (Go value -> JSON-shaped value normalization: integer
   widths to `json.Number`, float32 widening, recursive container coercion with
-  copy-on-change and a cycle guard), `internal/schemashape` (structural
-  shape classification of a `Schema`), `internal/schemaclone` (deep copy of
+  copy-on-change and a cycle guard), `internal/schemafield` (the canonical
+  field-metadata table for the upstream `Schema` type: one row per exported
+  field carrying its class, sub-schema shape, zero predicate, and container-clone
+  closure, from which the true/empty/ref-sibling predicates, the sub-schema
+  traversal, and the container-clone pass all derive), `internal/schemashape`
+  (structural shape classification of a `Schema`), `internal/schemaclone`
+  (deep copy of
   a `Schema` via JSON round-trip with render-only `PropertyOrder` restored
   through a caller-supplied sub-schema traversal), `internal/jsonequal` (DoS-guarded,
   JSON-semantic value equality for `const`/`enum` and the matching content
@@ -63,21 +68,26 @@ used for exactly two things: structural well-formedness via `Schema.Resolve`
 format checking — is implemented here, because the upstream's resolved
 reference graph is unexported and its validator stops at the first error.
 
-When bumping the upstream dependency, reflection-based maintenance guards in
-the external test package enumerate every `Schema` field and fail on
-unclassified upstream additions — all through public API (the package has no
-in-package test files by policy):
+The single update site on an upstream bump is the canonical field-metadata
+table in `internal/schemafield`: `IsTrueSchema`, `internal/schemashape`'s
+`IsEmpty` and `HasRefSiblings`, `SubschemaEntries`, and the container-clone pass
+all derive from it and do not carry their own field enumerations. Add the new
+field to the table (one row) and the derived predicates and traversals pick it
+up. Reflection-based maintenance guards fail on an unclassified upstream
+addition; the main-package guards below run through the public API (that
+package has no in-package test files by policy), while `TestFieldTableMatchesUpstream`
+is an in-package test in `internal/schemafield`, where that policy does not apply:
 
-- `TestIsTrueSchemaRejectsEverySetField` (schema_test.go): every exported
-  field set alone must defeat `IsTrueSchema`; a new field fails until added
-  to the predicate's enumeration. This is the primary alarm — when it fires,
-  also revisit the `internal/schemaclone` copy logic, the constraint
-  enumeration in `internal/schemashape`'s `IsEmpty`, and the annotation and
-  identifier enumeration in `internal/schemashape`'s `HasRefSiblings`, which
-  mirrors the non-constraint fields `IsTrueSchema` lists beyond `IsEmpty`.
-- `TestSubschemaEntriesFieldCoverage` (walk_test.go): every `*Schema`-shaped
-  field must be returned by `SubschemaEntries`, the single traversal field
-  list.
+- `TestFieldTableMatchesUpstream` (internal/schemafield): the primary staleness
+  alarm. It reflects over the upstream `Schema` and asserts every exported field
+  appears in the table exactly once with a `Shape` matching its Go type, a valid
+  `Class`, the right sub-schema accessor, and the right container-clone presence.
+  A new upstream field fails this until it is added to the table.
+- `TestIsTrueSchemaRejectsEverySetField` (`schema_test.go`): every exported
+  field set alone must defeat `IsTrueSchema`. It is the only guard that each
+  field's zero predicate reads the correct field (a presence-only table check
+  cannot catch a wrong-field accessor); when it fires, fix the field's `IsZero`
+  accessor in the `internal/schemafield` table.
 - `TestSchemaSerializableFieldCoverage` (schema_test.go): every field must
   carry a json tag or be allowlisted, guarding the JSON round-trip that
   `Inline`'s deep copy and `ParseSchemaValue` rely on.

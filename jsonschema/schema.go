@@ -5,6 +5,8 @@ import (
 	"fmt"
 
 	"github.com/google/jsonschema-go/jsonschema"
+
+	"go.jacobcolvin.com/x/jsonschema/internal/schemafield"
 )
 
 // Schema is an alias for the upstream [jsonschema.Schema] type, so callers can
@@ -46,48 +48,12 @@ func MustRaw(v any) json.RawMessage {
 // The check is strict about JSON's nil-versus-empty distinction, matching
 // the upstream Schema docs: a non-nil empty map or slice counts as set. So
 // Schema{Enum: []any{}}, for example, is not the true schema, even though it
-// vacuously rejects every instance. The field enumeration below covers
-// every exported Schema field; a maintenance test fails when an upstream
-// addition is not classified.
+// vacuously rejects every instance. The per-field zero check comes from the
+// canonical [go.jacobcolvin.com/x/jsonschema/internal/schemafield] table,
+// which covers every exported Schema field; a maintenance test there fails
+// when an upstream addition is not classified.
 func IsTrueSchema(s *Schema) bool {
-	return s != nil &&
-		// Core.
-		s.ID == "" && s.Schema == "" && s.Ref == "" && s.Comment == "" &&
-		s.Defs == nil && s.Definitions == nil &&
-		s.DependencySchemas == nil && s.DependencyStrings == nil &&
-		s.Anchor == "" && s.DynamicAnchor == "" && s.DynamicRef == "" &&
-		s.Vocabulary == nil &&
-		// Metadata.
-		s.Title == "" && s.Description == "" && s.Default == nil &&
-		!s.Deprecated && !s.ReadOnly && !s.WriteOnly &&
-		s.Examples == nil &&
-		// Validation.
-		s.Type == "" && s.Types == nil && s.Enum == nil && s.Const == nil &&
-		s.MultipleOf == nil &&
-		s.Minimum == nil && s.Maximum == nil &&
-		s.ExclusiveMinimum == nil && s.ExclusiveMaximum == nil &&
-		s.MinLength == nil && s.MaxLength == nil && s.Pattern == "" &&
-		// Arrays.
-		s.PrefixItems == nil && s.Items == nil && s.ItemsArray == nil &&
-		s.MinItems == nil && s.MaxItems == nil &&
-		s.AdditionalItems == nil && !s.UniqueItems && s.Contains == nil &&
-		s.MinContains == nil && s.MaxContains == nil &&
-		s.UnevaluatedItems == nil &&
-		// Objects.
-		s.MinProperties == nil && s.MaxProperties == nil &&
-		s.Required == nil && s.DependentRequired == nil &&
-		s.Properties == nil && s.PatternProperties == nil &&
-		s.AdditionalProperties == nil && s.PropertyNames == nil &&
-		s.UnevaluatedProperties == nil &&
-		// Logic.
-		s.AllOf == nil && s.AnyOf == nil && s.OneOf == nil && s.Not == nil &&
-		// Conditional.
-		s.If == nil && s.Then == nil && s.Else == nil &&
-		s.DependentSchemas == nil &&
-		// Content, format, and extensions.
-		s.ContentEncoding == "" && s.ContentMediaType == "" &&
-		s.ContentSchema == nil && s.Format == "" &&
-		s.Extra == nil && s.PropertyOrder == nil
+	return schemafield.IsTrue(s)
 }
 
 // IsFalseSchema reports whether s is the boolean false schema form

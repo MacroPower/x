@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/jsonptr"
+	"go.jacobcolvin.com/x/jsonschema/internal/schemafield"
 )
 
 var (
@@ -85,90 +86,66 @@ func SubschemaEntries(s *Schema) []SubschemaEntry {
 
 	var children []SubschemaEntry
 
-	for _, entry := range []struct {
-		m       map[string]*Schema
-		keyword string
-	}{
-		{s.Properties, KeywordProperties},
-		{s.PatternProperties, KeywordPatternProperties},
-		{s.Defs, KeywordDefs},
-		{s.Definitions, KeywordDefinitions},
-		{s.DependentSchemas, KeywordDependentSchemas},
-		{s.DependencySchemas, KeywordDependencies},
-	} {
-		for _, key := range slices.Sorted(maps.Keys(entry.m)) {
-			if sub := entry.m[key]; sub != nil {
-				children = append(children, SubschemaEntry{
-					Location: Location{
-						Pointer:  "/" + entry.keyword + "/" + jsonptr.Escape(key),
-						Segments: []Segment{{Key: entry.keyword}, {Key: key}},
-					},
-					Schema: sub,
-				})
+	// The schemafield.Subschemas list holds the sub-schema fields in the pinned
+	// emission order (all maps, then all slices, then all singles); dispatch on
+	// each field's Shape to build the Location its keyword addresses.
+	for _, f := range schemafield.Subschemas {
+		switch f.Shape {
+		case schemafield.None:
+			// Subschemas never contains a None field; the case is here only to
+			// keep the switch exhaustive over Shape.
+
+		case schemafield.Map:
+			m := f.MapOf(s)
+			for _, key := range slices.Sorted(maps.Keys(m)) {
+				if sub := m[key]; sub != nil {
+					children = append(children, SubschemaEntry{
+						Location: Location{
+							Pointer:  "/" + f.Keyword + "/" + jsonptr.Escape(key),
+							Segments: []Segment{{Key: f.Keyword}, {Key: key}},
+						},
+						Schema: sub,
+					})
+				}
 			}
-		}
-	}
 
-	for _, entry := range []struct {
-		keyword string
-		list    []*Schema
-	}{
-		{KeywordAllOf, s.AllOf},
-		{KeywordAnyOf, s.AnyOf},
-		{KeywordOneOf, s.OneOf},
-		{KeywordPrefixItems, s.PrefixItems},
-		{KeywordItems, s.ItemsArray},
-	} {
-		for i, sub := range entry.list {
-			if sub != nil {
-				children = append(children, SubschemaEntry{
-					Location: Location{
-						Pointer:  "/" + entry.keyword + "/" + strconv.Itoa(i),
-						Segments: []Segment{{Key: entry.keyword}, {Index: i, IsIndex: true}},
-					},
-					Schema: sub,
-				})
+		case schemafield.Slice:
+			for i, sub := range f.SliceOf(s) {
+				if sub != nil {
+					children = append(children, SubschemaEntry{
+						Location: Location{
+							Pointer:  "/" + f.Keyword + "/" + strconv.Itoa(i),
+							Segments: []Segment{{Key: f.Keyword}, {Index: i, IsIndex: true}},
+						},
+						Schema: sub,
+					})
+				}
 			}
-		}
-	}
 
-	for _, entry := range []struct {
-		s       *Schema
-		keyword string
-	}{
-		{s.Items, KeywordItems},
-		{s.AdditionalProperties, KeywordAdditionalProperties},
-		{s.AdditionalItems, KeywordAdditionalItems},
-		{s.Not, KeywordNot},
-		{s.If, KeywordIf},
-		{s.Then, KeywordThen},
-		{s.Else, KeywordElse},
-		{s.Contains, KeywordContains},
-		{s.PropertyNames, KeywordPropertyNames},
-		{s.UnevaluatedProperties, KeywordUnevaluatedProperties},
-		{s.UnevaluatedItems, KeywordUnevaluatedItems},
-		{s.ContentSchema, KeywordContentSchema},
-	} {
-		if entry.s == nil {
-			continue
-		}
+		case schemafield.Single:
+			sub := f.SingleOf(s)
+			if sub == nil {
+				continue
+			}
 
-		// Items and ItemsArray are the two mutually exclusive forms of the items
-		// keyword. A schema parsed from JSON sets at most one, but a hand-built
-		// one could set both; when ItemsArray is populated (emitted above as
-		// /items/N), skip the single Items form so the keyword does not also
-		// yield a contradictory /items pointer for the same location.
-		if entry.keyword == KeywordItems && len(s.ItemsArray) > 0 {
-			continue
-		}
+			// Items and ItemsArray are the two mutually exclusive forms of the
+			// items keyword. A schema parsed from JSON sets at most one, but a
+			// hand-built one could set both; when ItemsArray is populated
+			// (emitted above as /items/N), skip the single Items form so the
+			// keyword does not also yield a contradictory /items pointer for the
+			// same location.
+			if f.Name == "Items" && len(s.ItemsArray) > 0 {
+				continue
+			}
 
-		children = append(children, SubschemaEntry{
-			Location: Location{
-				Pointer:  "/" + entry.keyword,
-				Segments: []Segment{{Key: entry.keyword}},
-			},
-			Schema: entry.s,
-		})
+			children = append(children, SubschemaEntry{
+				Location: Location{
+					Pointer:  "/" + f.Keyword,
+					Segments: []Segment{{Key: f.Keyword}},
+				},
+				Schema: sub,
+			})
+		}
 	}
 
 	return children

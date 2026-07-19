@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/jsonschema-go/jsonschema"
 
+	"go.jacobcolvin.com/x/jsonschema/internal/schemafield"
 	"go.jacobcolvin.com/x/jsonschema/internal/typename"
 )
 
@@ -205,38 +206,12 @@ func NullableTypeListBase(s *jsonschema.Schema) (string, bool) {
 // IsEmpty reports whether s has no constraining keyword set (no type, no
 // applicator, no validation keyword). It is the constraint-only complement to
 // the jsonschema package's exported IsTrueSchema/IsFalseSchema predicates, which
-// additionally enumerate the annotation and identifier fields. Those three field
-// enumerations are co-maintained: when the upstream Schema gains a field,
-// revisit all of them. The jsonschema package's
-// TestIsTrueSchemaRejectsEverySetField guards the exported pair. A nil schema is
-// not empty.
+// additionally cover the annotation, identifier, render-only, and extension
+// fields. The classification lives in the canonical
+// [go.jacobcolvin.com/x/jsonschema/internal/schemafield] table (the union of its
+// Constraint and Applicator classes); a nil schema is not empty.
 func IsEmpty(s *jsonschema.Schema) bool {
-	return s != nil &&
-		s.Type == "" && s.Types == nil &&
-		s.Ref == "" && s.DynamicRef == "" &&
-		s.Properties == nil && s.Required == nil &&
-		s.Items == nil && s.PrefixItems == nil && s.ItemsArray == nil &&
-		s.AllOf == nil && s.AnyOf == nil && s.OneOf == nil && s.Not == nil &&
-		s.If == nil && s.Then == nil && s.Else == nil &&
-		s.Enum == nil && s.Const == nil &&
-		s.Minimum == nil && s.Maximum == nil &&
-		s.ExclusiveMinimum == nil && s.ExclusiveMaximum == nil &&
-		s.MinLength == nil && s.MaxLength == nil &&
-		s.Pattern == "" && s.Format == "" &&
-		s.MinItems == nil && s.MaxItems == nil &&
-		!s.UniqueItems &&
-		s.MinProperties == nil && s.MaxProperties == nil &&
-		s.AdditionalProperties == nil && s.AdditionalItems == nil &&
-		s.PatternProperties == nil && s.PropertyNames == nil &&
-		s.Contains == nil &&
-		s.MultipleOf == nil &&
-		s.UnevaluatedProperties == nil && s.UnevaluatedItems == nil &&
-		s.DependentRequired == nil && s.DependentSchemas == nil &&
-		s.DependencySchemas == nil && s.DependencyStrings == nil &&
-		s.MinContains == nil && s.MaxContains == nil &&
-		s.Defs == nil && s.Definitions == nil &&
-		s.ContentEncoding == "" && s.ContentMediaType == "" &&
-		s.ContentSchema == nil
+	return schemafield.IsEmpty(s)
 }
 
 // HasRefSiblings reports whether a schema has any keyword set beyond just $ref.
@@ -244,35 +219,13 @@ func IsEmpty(s *jsonschema.Schema) bool {
 // constraint added by field-level processing (jsonschema struct tag or tag
 // interpreter) would be silently dropped unless the $ref is wrapped in allOf.
 //
-// Validation, applicator, and content keywords are detected by clearing $ref on
-// a copy and asking [IsEmpty], the maintained single source of truth for which
-// keywords constrain a value; this catches every constraining keyword, including
-// Not/AllOf/AnyOf/OneOf/Required/Types/If/Then/Else/DependentRequired/
-// DependentSchemas and any future addition, without re-enumerating the list.
-// Annotation, metadata, and identifier keywords (description, title, default,
-// deprecated, readOnly, writeOnly, examples, $comment, $id, $schema, $anchor,
-// $dynamicAnchor, $vocabulary), the render-only PropertyOrder, and the Extra
-// escape hatch do not constrain a value, so [IsEmpty] deliberately ignores
-// them; they are checked explicitly here because they too must be preserved
-// across the allOf wrap. The set mirrors
-// the non-constraint fields the jsonschema package's IsTrueSchema enumerates
-// beyond what [IsEmpty] covers; the three enumerations are co-maintained on
-// upstream Schema additions.
+// It delegates to [schemafield.HasSiblingsBesides], which reports any field
+// other than Ref set on s -- constraint, applicator, annotation, identifier,
+// render-only, and the Extra escape hatch alike, so every keyword that must
+// survive the allOf wrap is caught, including future upstream additions. The
+// check uses the canonical table's nil-versus-empty zero semantics (a non-nil
+// empty Examples, Extra, or PropertyOrder counts as a sibling), aligning it with
+// IsTrueSchema and IsEmpty.
 func HasRefSiblings(s *jsonschema.Schema) bool {
-	// Annotation, metadata, and identifier keywords, plus Extra: not
-	// constraints, so IsEmpty ignores them, but field-level processing (a tag
-	// interpreter or extender) can set them and they must survive the allOf wrap.
-	if s.Description != "" || s.Title != "" || s.Default != nil ||
-		s.Deprecated || s.ReadOnly || s.WriteOnly ||
-		len(s.Examples) > 0 || len(s.Extra) > 0 || len(s.PropertyOrder) > 0 ||
-		s.Comment != "" || s.ID != "" || s.Schema != "" ||
-		s.Anchor != "" || s.DynamicAnchor != "" || s.Vocabulary != nil {
-		return true
-	}
-
-	// Every constraining keyword: copy, clear $ref, and ask IsEmpty.
-	withoutRef := *s
-	withoutRef.Ref = ""
-
-	return !IsEmpty(&withoutRef)
+	return schemafield.HasSiblingsBesides(s, "Ref")
 }

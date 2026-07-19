@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -7880,6 +7881,70 @@ func BenchmarkValidateLargeNumber(b *testing.B) {
 			for b.Loop() {
 				if v.ValidateJSON(b.Context(), instance) == nil {
 					b.Fatal("expected a validation error")
+				}
+			}
+		})
+	}
+}
+
+// BenchmarkValidateFieldPredicates exercises the two hot per-node predicates that
+// enumerate every Schema field through the canonical internal/schemafield table:
+// IsFalseSchema (per validated node carrying a `not`) and IsEmpty (per node
+// guarded by an unevaluated* keyword). Each case validates a large array so the
+// predicate runs once per element; a regression from the table-driven closure
+// loop shows up here as a per-element ns/op jump.
+func BenchmarkValidateFieldPredicates(b *testing.B) {
+	const count = 50_000
+
+	elements := make([]string, count)
+	for i := range elements {
+		elements[i] = strconv.Itoa(i)
+	}
+
+	array := "[" + strings.Join(elements, ",") + "]"
+
+	cases := map[string]struct {
+		schema   string
+		instance string
+	}{
+		// Each element schema carries a `not`, so IsFalseSchema runs the field
+		// loop on the `not` subschema for every element.
+		"not per element": {
+			`{"type":"array","items":{"not":{"const":"never"},"type":"integer"}}`,
+			array,
+		},
+		// The unevaluatedItems keyword forces the IsEmpty check on its
+		// always-true subschema for every element the annotation walk considers.
+		"unevaluated per element": {
+			`{"type":"array","prefixItems":[{"type":"integer"}],"unevaluatedItems":{"type":"integer"}}`,
+			array,
+		},
+	}
+
+	for name, c := range cases {
+		b.Run(name, func(b *testing.B) {
+			var s jsonschema.Schema
+
+			err := json.Unmarshal([]byte(c.schema), &s)
+			if err != nil {
+				b.Fatal(err)
+			}
+
+			v, err := jsonschema.Compile(b.Context(), &s)
+			if err != nil {
+				b.Fatal(err)
+			}
+
+			instance := []byte(c.instance)
+
+			b.SetBytes(int64(len(instance)))
+			b.ResetTimer()
+
+			// These instances satisfy their schemas, exercising the accept path
+			// where every element's predicate runs to completion.
+			for b.Loop() {
+				if v.ValidateJSON(b.Context(), instance) != nil {
+					b.Fatal("expected no validation error")
 				}
 			}
 		})
