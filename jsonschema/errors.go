@@ -3,6 +3,8 @@ package jsonschema
 import (
 	"errors"
 	"strings"
+
+	"go.jacobcolvin.com/x/jsonschema/internal/refresolve"
 )
 
 var (
@@ -67,7 +69,11 @@ var (
 	// sentinel (or an error wrapping it) to decline, and match it with
 	// [errors.Is]. Any other error reports a resolution attempt that failed and
 	// stops resolution.
-	ErrNotResolved = errors.New("schema URI not resolved")
+	//
+	// It is re-exported from internal/refresolve, the shared resolution core,
+	// so [errors.Is] matches the sentinel identically whether a failure
+	// originates in that package or here.
+	ErrNotResolved = refresolve.ErrNotResolved
 
 	// ErrTypeNotHandled is returned by a [TypeSchemaProvider] to report a Go
 	// type it does not handle, passing resolution to the next provider and
@@ -81,7 +87,11 @@ var (
 	// resolving a remote $ref URI. [Inline] also wraps it for a non-local ref
 	// with no resolver configured and for any ref whose target cannot be
 	// found.
-	ErrRefResolve = errors.New("ref resolve")
+	//
+	// It is re-exported from internal/refresolve, the shared resolution core,
+	// so [errors.Is] matches the sentinel identically whether a failure
+	// originates in that package or here.
+	ErrRefResolve = refresolve.ErrRefResolve
 
 	// ErrRefCycle is returned by [Inline] when expanding a $ref reaches a
 	// schema whose own expansion is still in progress: the reference graph
