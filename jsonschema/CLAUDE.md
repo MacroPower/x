@@ -16,7 +16,11 @@ The package has two independent halves sharing the `Schema` type:
   `*ValidationError` trees. `Compile` builds a `validator` once (registry
   construction from `$id`/`$anchor`, precomputed numeric bounds and compiled
   regexes, draft and vocabulary detection); `validator.forInstance` derives
-  cheap per-run state. Self-contained helpers live under `internal/`:
+  cheap per-run state. `$ref`/`$dynamicRef`/`$anchor` resolution lives in the
+  shared `internal/refresolve` core, which both the validator and the inliner
+  (`inline.go`) consume so the two engines cannot disagree; the inliner holds a
+  `refresolve.Session` rather than embedding a `*validator`. Self-contained
+  helpers live under `internal/`:
   `internal/format` (built-in string-format validators), `internal/vocab`
   (vocabulary modelling and resolution), `internal/jsonptr` (RFC 6901
   escaping, plus `SafeToken` for $ref/$defs token sanitization),
@@ -56,7 +60,17 @@ The package has two independent halves sharing the `Schema` type:
   validator), and `internal/content` (the `contentEncoding`/`contentMediaType`
   decode-and-classify core: base64 decoding, the `application/json` media-type
   fold, and the `base64` value the generator emits and the validator asserts;
-  the validator keeps the vocabulary gating and error construction).
+  the validator keeps the vocabulary gating and error construction), and
+  `internal/refresolve` (the shared `$ref`/`$dynamicRef`/`$anchor` resolution
+  core: registry construction, base-URI computation, anchor precedence, the
+  unified remote fetch/caching seam, and structured ref-failure attribution via
+  its `Result`. A compiled `Registry` is shared by reference; each run derives a
+  `Session` that copies the registry on write. The `ErrRefResolve` and
+  `ErrNotResolved` sentinels live here and are re-exported from `errors.go` so
+  `errors.Is` identity holds across the boundary. Parent-typed behavior it
+  cannot name (sub-schema traversal and deep clone) is injected as `Deps`
+  closures, and the two draft-dependent branches use its own two-value `Draft`
+  enum).
 
 ### Relationship to google/jsonschema-go
 

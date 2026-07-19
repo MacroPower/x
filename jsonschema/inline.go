@@ -2,17 +2,16 @@ package jsonschema
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io/fs"
-	"net/url"
 	"strings"
 
+	"go.jacobcolvin.com/x/jsonschema/internal/refresolve"
 	"go.jacobcolvin.com/x/jsonschema/internal/uriref"
 )
 
 // inliner carries the configuration and per-call state of one [Inline] run:
-// the functional options, a scratch validator holding the $id/$anchor
+// the functional options, a [refresolve.Session] holding the $id/$anchor
 // registries for the pristine copy of the root document and of every fetched
 // document, and the expansion bookkeeping that memoizes finished targets and
 // detects reference cycles.
@@ -30,11 +29,12 @@ type inliner struct {
 	// document fetch.
 	ctx context.Context
 
-	// The scratch validator resolving references. Its URI, anchor, and
-	// base-URI registries are built by the same walk Compile uses, over the
-	// pristine root copy and each pristine fetched-document copy, so
-	// resolution matches the validator's and sees only original structure.
-	v *validator
+	// The resolution session resolving references, sharing the core the
+	// validator uses. Its URI, anchor, and base-URI registries are built by the
+	// same walk Compile uses, over the pristine root copy and each pristine
+	// fetched-document copy, so resolution matches the validator's and sees only
+	// original structure.
+	session *refresolve.Session
 
 	// Pristine schemas whose self-contained copy is currently being built;
 	// a ref that resolves to an in-flight schema is a cycle.
@@ -67,6 +67,11 @@ type inliner struct {
 	draftOverride *Draft
 
 	baseURI string
+
+	// The draft governing the Draft 2020-12/Draft 7 sibling rules, detected from
+	// the root document (or the [WithDraft] override). It is the parent Draft,
+	// distinct from the resolution core's own enum.
+	draft Draft
 
 	// Current depth of nested substitute expansions. Each [SubstituteRef]
 	// clone is a fresh schema the pointer-identity inflight guard never
@@ -357,29 +362,22 @@ func (in *inliner) run(s *Schema) (*Schema, error) {
 	// The same registry construction Compile performs, seeded with the
 	// configured base URI: the walk registers every $id, $anchor, and
 	// $dynamicAnchor and records each schema's base URI, which is what
-	// fragment-only resolution and ref absolutization consult. Only
-	// pristine copies are registered, so no resolution can observe a
-	// mutation. In retrieval-base mode the walk treats $id as inert, so
-	// every schema's base URI stays the document's retrieval URI and $id
-	// registers nothing.
-	draft := detectDraft(pristine)
+	// fragment-only resolution and ref absolutization consult, and registers the
+	// root document under its base URI when its own $id did not claim one. Only
+	// pristine copies are registered, so no resolution can observe a mutation.
+	// In retrieval-base mode the walk treats $id as inert, so every schema's
+	// base URI stays the document's retrieval URI and $id registers nothing.
+	in.draft = detectDraft(pristine)
 	if in.draftOverride != nil {
-		draft = *in.draftOverride
+		in.draft = *in.draftOverride
 	}
 
-	in.v = &validator{root: pristine, draft: draft, inertIDs: in.retrievalBase}
-	in.v.initRegistries()
-	in.v.walkSchema(pristine, in.baseURI)
-	in.recordPaths(pristine, "", in.v.schemaBase(pristine))
+	reg := refresolve.NewRegistry(refDeps(), toRefDraft(in.draft), in.retrievalBase)
+	reg.Build(pristine, in.baseURI)
 
-	// Register the root document under its base URI when its own $id did
-	// not already claim one, so a ref that absolutizes back to the root
-	// document resolves to this copy instead of re-fetching it.
-	if in.baseURI != "" {
-		if _, ok := in.v.uriRegistry[in.baseURI]; !ok {
-			in.v.uriRegistry[in.baseURI] = pristine
-		}
-	}
+	in.session = reg.NewSession()
+
+	in.recordPaths(pristine, "", in.session.SchemaBase(pristine))
 
 	// The context reaches the resolver through the ctx field set above:
 	// document fetches happen deep inside the expansion walk, which cannot
@@ -436,7 +434,7 @@ func (in *inliner) walkPair(working, pristine *Schema, path string) error {
 	// $dynamicRef, or both.
 	var copies []*Schema
 
-	if in.v.draft == Draft2020 && pristine.DynamicRef != "" {
+	if in.draft == Draft2020 && pristine.DynamicRef != "" {
 		inlineErr := fmt.Errorf("%w: $dynamicRef %q has no static expansion", ErrRefInline, pristine.DynamicRef)
 
 		tc, err := in.substitute(pristine, path, pristine.DynamicRef, inlineErr)
@@ -541,7 +539,7 @@ func (in *inliner) expand(pristine *Schema, path string) (*Schema, bool, error) 
 	// the node from being a bare ref eligible for wholesale replacement.
 	rest.DynamicRef = ""
 
-	replace := in.v.draft == Draft7 || IsTrueSchema(&rest)
+	replace := in.draft == Draft7 || IsTrueSchema(&rest)
 
 	return tc, replace, nil
 }
@@ -630,19 +628,19 @@ func (in *inliner) substitute(pristine *Schema, path, ref string, inlineErr erro
 	}
 
 	// Register the substitute's $id/$anchor in the per-run fallback registries
-	// via a scratch validator rather than the shared ones. A caller-supplied
-	// substitute whose $id collides with an already-loaded document URI must not
-	// overwrite that entry; the fallback is consulted only after the shared
-	// registry, so the real document keeps priority while the substitute's own
-	// nested refs still resolve.
-	in.v.registerFallbackSchema(cp, in.v.schemaBase(pristine))
+	// rather than the shared ones. A caller-supplied substitute whose $id
+	// collides with an already-loaded document URI must not overwrite that
+	// entry; the fallback is consulted only after the shared registry, so the
+	// real document keeps priority while the substitute's own nested refs still
+	// resolve.
+	in.session.RegisterFallback(cp, in.session.SchemaBase(pristine))
 
-	// Record the substitute subtree under the base registerFallbackSchema
-	// established for it, not the failing node's document: a substitute that
-	// re-bases via its own $id then reports a nested ref failure in its own
-	// document. With no $id the base equals the failing node's document, so the
-	// common case is unchanged. This mirrors fetchDoc's recordPaths.
-	in.recordPaths(cp, path, in.v.schemaBase(cp))
+	// Record the substitute subtree under the base RegisterFallback established
+	// for it, not the failing node's document: a substitute that re-bases via
+	// its own $id then reports a nested ref failure in its own document. With no
+	// $id the base equals the failing node's document, so the common case is
+	// unchanged. This mirrors fetchDoc's recordPaths.
+	in.recordPaths(cp, path, in.session.SchemaBase(cp))
 
 	return in.inlineCopy(cp, path, false)
 }
@@ -698,72 +696,30 @@ func (in *inliner) inlineCopy(target *Schema, path string, memoize bool) (*Schem
 }
 
 // resolveTarget resolves the ref at the pristine node to its pristine target
-// schema. Fragment-only refs resolve within the enclosing document through
-// the shared registries; other refs absolutize against the node's base URI,
-// fetch the addressed document (served from the registry when already
-// loaded), and evaluate any fragment against it. Every unresolvable form
-// returns an error wrapping [ErrRefResolve].
+// schema through the shared resolution core, the same [refresolve.Session] the
+// validator resolves against. Fragment-only refs resolve within the enclosing
+// document; other refs absolutize against the node's base URI, fetch the
+// addressed document (served from the registry when already loaded, otherwise
+// through [inliner.fetchDoc]), and evaluate any fragment against it. Every
+// unresolvable form returns an error wrapping [ErrRefResolve].
+//
 // It also returns the target's own containing-document URI and its JSON Pointer
 // within that document, so a caller seeding paths for an otherwise-unrecorded
 // target (one materialized from an unknown keyword) reports a nested failure in
 // the document it physically lives in. A fragment-only ref returns an empty
 // document, signaling the caller to use the referencing node's own document.
 func (in *inliner) resolveTarget(node *Schema, ref string) (*Schema, string, string, error) {
-	if uriref.IsFragmentOnly(ref) {
-		target := in.v.resolveRef(node, ref)
-		if target == nil {
-			return nil, "", "", fmt.Errorf("%w: cannot resolve %q", ErrRefResolve, ref)
+	res := in.session.ResolveRef(node, ref, in.fetchDoc)
+	if res.Target == nil {
+		if res.Err != nil {
+			//nolint:wrapcheck // fetchDoc already wraps its error with ErrRefResolve.
+			return nil, "", "", res.Err
 		}
 
-		return target, "", "", nil
+		return nil, "", "", fmt.Errorf("%w: cannot resolve %q", ErrRefResolve, ref)
 	}
 
-	base := in.v.schemaBase(node)
-	absRef := uriref.ResolveURI(base, ref)
-
-	parsed, err := url.Parse(absRef)
-	if err != nil {
-		return nil, "", "", fmt.Errorf("%w: parse %q: %w", ErrRefResolve, absRef, err)
-	}
-
-	fragment := parsed.Fragment
-	rawFrag, encoded := uriref.RawFragment(parsed)
-	parsed.Fragment = ""
-	parsed.RawFragment = ""
-	baseURI := parsed.String()
-
-	docRoot, ok := in.v.lookupURI(baseURI)
-	if !ok {
-		docRoot, err = in.fetchDoc(baseURI)
-		if err != nil {
-			return nil, "", "", err
-		}
-	}
-
-	if fragment == "" {
-		return docRoot, baseURI, "", nil
-	}
-
-	// JSON Pointer within the fetched document. Pass the still-encoded
-	// fragment so a member name escaped as %2F is not mistaken for a
-	// pointer separator.
-	if strings.HasPrefix(fragment, "/") {
-		target := in.v.resolveJSONPointer(docRoot, rawFrag, encoded)
-		if target == nil {
-			return nil, "", "", fmt.Errorf("%w: cannot resolve %q", ErrRefResolve, ref)
-		}
-
-		return target, baseURI, fragment, nil
-	}
-
-	// Anchor within the fetched document, resolved via the shared cross-document
-	// precedence (retrieval base first, then the document's canonical $id base)
-	// so Inline resolves an anchor exactly as validation would.
-	if target, ok := in.v.lookupAnchorWithFallback(baseURI, docRoot, fragment); ok {
-		return target, baseURI, "", nil
-	}
-
-	return nil, "", "", fmt.Errorf("%w: cannot resolve %q", ErrRefResolve, ref)
+	return res.Target, res.DocumentURI, res.Fragment, nil
 }
 
 // runContext returns the [Inline] call's context for hook invocations (the
@@ -777,48 +733,31 @@ func (in *inliner) runContext() context.Context {
 	return in.ctx
 }
 
-// callResolver invokes the configured resolver for uri under the
-// [Inline] call's context. It mirrors [validator.callResolver], including
-// normalizing a nil schema with a nil error to the not-resolved answer
-// (ErrNotResolved), upholding the [RefResolver] contract that no caller
-// dereferences a nil document.
-func (in *inliner) callResolver(uri string) (*Schema, error) {
-	s, err := in.resolver.ResolveRef(in.runContext(), uri)
-	if err != nil {
-		//nolint:wrapcheck // fetchDoc wraps the error with ErrRefResolve.
-		return nil, err
-	}
-
-	if s == nil {
-		return nil, fmt.Errorf("%w: %q", ErrNotResolved, uri)
-	}
-
-	return s, nil
-}
-
-// fetchDoc fetches the document at baseURI through the configured resolver,
-// registers a pristine copy under baseURI, and returns the copy. The copy is
-// resolution space only and is never mutated; output material is cloned from it
-// on demand.
+// fetchDoc is the inliner's [refresolve.Fetch] closure: it fetches the document
+// at baseURI through the configured resolver, registers a pristine copy under
+// baseURI, and returns the copy. The copy is resolution space only and is never
+// mutated; output material is cloned from it on demand.
 //
 // Its own $ids, anchors, and base URIs are registered through the per-run
 // fallback registries rather than walked into the shared ones: a fetched
 // document whose nested $id resolves to an already-loaded URI (the root base or
 // an earlier document) must not overwrite that entry, so the already-loaded
 // document keeps priority while the fetched document's own refs still resolve.
-// This mirrors the substitute path's convention.
+// This mirrors the substitute path's convention. Unlike the validator's fetch
+// it uses no negative cache and returns an error (not a plain miss) on failure,
+// preserving the inliner's fail-on-first-unresolvable-ref behavior.
 func (in *inliner) fetchDoc(baseURI string) (*Schema, error) {
 	if in.resolver == nil {
 		return nil, fmt.Errorf("%w: no resolver configured for %q", ErrRefResolve, baseURI)
 	}
 
-	s, err := in.callResolver(baseURI)
-	if errors.Is(err, ErrNotResolved) {
-		return nil, fmt.Errorf("%w: cannot resolve %q", ErrRefResolve, baseURI)
-	}
-
+	s, ok, err := callResolver(in.runContext(), in.resolver, baseURI)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrRefResolve, err)
+	}
+
+	if !ok {
+		return nil, fmt.Errorf("%w: cannot resolve %q", ErrRefResolve, baseURI)
 	}
 
 	cp, err := cloneSchema(s)
@@ -826,9 +765,9 @@ func (in *inliner) fetchDoc(baseURI string) (*Schema, error) {
 		return nil, fmt.Errorf("%w: %w", ErrRefResolve, err)
 	}
 
-	in.v.uriRegistry[baseURI] = cp
-	in.v.registerFallbackSchema(cp, baseURI)
-	in.recordPaths(cp, "", in.v.schemaBase(cp))
+	in.session.Registry().URI[baseURI] = cp
+	in.session.RegisterFallback(cp, baseURI)
+	in.recordPaths(cp, "", in.session.SchemaBase(cp))
 
 	return cp, nil
 }

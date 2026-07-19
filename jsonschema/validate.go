@@ -23,6 +23,7 @@ import (
 	"go.jacobcolvin.com/x/jsonschema/internal/jsonptr"
 	"go.jacobcolvin.com/x/jsonschema/internal/normalize"
 	"go.jacobcolvin.com/x/jsonschema/internal/numrat"
+	"go.jacobcolvin.com/x/jsonschema/internal/refresolve"
 	"go.jacobcolvin.com/x/jsonschema/internal/regexcache"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemaclone"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemashape"
@@ -276,8 +277,7 @@ func (f builtinFormat) ValidateFormat(_ context.Context, _, value string) error 
 
 // validator holds state for a single validation run.
 type validator struct {
-	refResolveErr error       // last error from refResolver, consumed by validateRef/validateDynamicRef
-	refResolver   RefResolver // optional remote ref resolver
+	refResolver RefResolver // optional remote ref resolver
 
 	// The caller's context for the current compile or validation run, passed
 	// to the resolver with every resolution call. It has the
@@ -288,7 +288,23 @@ type validator struct {
 	// points use [context.Background].
 	ctx context.Context
 
-	walked map[*Schema]bool // schemas already visited by walkSchema (cycle guard)
+	// The shared, compiled ref-resolution registry (URI/anchor/base-URI maps),
+	// built once at Compile and shared by reference across concurrent runs. Each
+	// run derives a per-run refSession from it; a run that fetches a remote ref
+	// clones it copy-on-write so the shared maps stay immutable.
+	refReg *refresolve.Registry
+
+	// The per-run resolution view: ref/pointer caches, per-run fallback
+	// registrations, negative cache, and dynamic scope. The compiled proto
+	// carries a compile-time session for the resolve-error gate; forInstance and
+	// the inliner each derive their own.
+	refSession *refresolve.Session
+
+	// The remote-fetch strategy passed to refSession resolution. The proto's
+	// writes the shared refReg directly (so gate-time fetches persist into the
+	// compiled registry); a per-run session's clones the registry copy-on-write
+	// before its first write.
+	refFetch refresolve.Fetch
 
 	// NumericBounds, patternCache, and patternProps below are compile-time
 	// caches of derived per-schema state. They are populated once during
@@ -300,34 +316,19 @@ type validator struct {
 	// value directly.
 	numericBounds map[*Schema]*precomputedBounds // numeric bound keywords as rationals
 
-	root                  *Schema
-	resolveOpts           *ResolveOptions
-	formatsForce          *bool           // explicit WithFormats override; nil if unset
-	vocabOverride         map[string]bool // from WithVocabularies
-	formatCheckers        map[string]FormatValidator
-	uriRegistry           map[string]*Schema         // absolute URI → schema
-	anchorRegistry        map[string]*Schema         // baseURI#anchor → schema
-	dynamicAnchorRegistry map[string]*Schema         // baseURI#name → schema ($dynamicAnchor only)
-	baseURIs              map[*Schema]string         // schema → its base URI
-	metaSchemaResolver    RefResolver                // metaschema lookup by $schema URI (WithMetaSchemaResolver)
-	jsonPointerCache      map[jsonPointerKey]*Schema // JSON-pointer fallback results, keyed by (root, pointer)
-	refCache              map[refCacheKey]*Schema    // plain $ref resolutions, keyed by (schema, ref); successes only
-	remoteMiss            map[string]error           // baseURIs the resolver could not serve, per run; nil value = plain miss
-	visiting              map[visitKey]bool
-	patternCache          map[*Schema]compiledPattern            // schema.Pattern compiled (see numericBounds)
-	patternProps          map[*Schema]map[string]compiledPattern // patternProperties keys compiled (see numericBounds)
-	constRats             map[*Schema]*big.Rat                   // numeric const value as a rational (see numericBounds)
-	enumRats              map[*Schema][]*big.Rat                 // numeric enum members as rationals by index (see numericBounds)
-	sortedPropertyKeys    map[*Schema][]string                   // schema.Properties keys, sorted (see numericBounds)
-	sortedPatternKeys     map[*Schema][]string                   // schema.PatternProperties keys, sorted (see numericBounds)
-
-	// Registrations for schemas materialized by the JSON-pointer fallback
-	// (resolveJSONPointerViaJSON). Like jsonPointerCache they are per-run
-	// scratch state, so concurrent runs never write the shared registries;
-	// lookups consult the shared registry first and these second.
-	fallbackURIRegistry    map[string]*Schema
-	fallbackAnchorRegistry map[string]*Schema
-	fallbackBaseURIs       map[*Schema]string
+	root               *Schema
+	resolveOpts        *ResolveOptions
+	formatsForce       *bool           // explicit WithFormats override; nil if unset
+	vocabOverride      map[string]bool // from WithVocabularies
+	formatCheckers     map[string]FormatValidator
+	metaSchemaResolver RefResolver // metaschema lookup by $schema URI (WithMetaSchemaResolver)
+	visiting           map[visitKey]bool
+	patternCache       map[*Schema]compiledPattern            // schema.Pattern compiled (see numericBounds)
+	patternProps       map[*Schema]map[string]compiledPattern // patternProperties keys compiled (see numericBounds)
+	constRats          map[*Schema]*big.Rat                   // numeric const value as a rational (see numericBounds)
+	enumRats           map[*Schema][]*big.Rat                 // numeric enum members as rationals by index (see numericBounds)
+	sortedPropertyKeys map[*Schema][]string                   // schema.Properties keys, sorted (see numericBounds)
+	sortedPatternKeys  map[*Schema][]string                   // schema.PatternProperties keys, sorted (see numericBounds)
 
 	// The WithDraft override; nil leaves the draft to $schema detection.
 	draftOverride *Draft
@@ -336,25 +337,17 @@ type validator struct {
 	// to the root schema's $id.
 	baseURI string
 
-	dynamicScope []string // stack of resource base URIs entered during validation
-	draft        Draft
-	vocabs       vocab.Set // resolved active vocabularies
+	draft  Draft
+	vocabs vocab.Set // resolved active vocabularies
 
 	formatsEnabled bool
 	contentEnabled bool // assert contentEncoding/contentMediaType (WithContent)
 
-	// True once this per-run validator holds its own copy of the five registry
-	// maps. A run shares the compiled validator's maps by reference until it
-	// first needs to write them (resolveRemote fetching a ref at validation
-	// time), at which point ensureOwnedRegistries clones them so concurrent runs
-	// never write shared state.
-	registriesOwned bool
-
-	// Treat $id as an inert annotation in walkSchema: no URI or anchor
-	// registration, no base-URI change, in any form including the
-	// Draft 7 fragment-only anchor form. Only the inliner's scratch
-	// validators set it, for [WithRetrievalBase]; Compile never does,
-	// so validation behavior is unaffected.
+	// Treat $id as an inert annotation during the registry walk: no URI or
+	// anchor registration, no base-URI change, in any form including the
+	// Draft 7 fragment-only anchor form. Only the inliner sets it, for
+	// [WithRetrievalBase]; Compile never does, so validation behavior is
+	// unaffected.
 	inertIDs bool
 }
 
@@ -401,67 +394,79 @@ func newValidator(ctx context.Context, schema *Schema, opts []ValidateOption) (*
 	// vocabularies, and any explicit WithFormats override).
 	v.resolveFormats()
 
-	v.buildRegistry()
+	// The gate session's fetch reads the compile context from the ctx field set
+	// above, not a threaded parameter.
+	//nolint:contextcheck // See the comment above.
+	v.buildRefReg()
 
 	// The dynamic scope is seeded per run by forInstance, the single source for
-	// the rule; the compiled validator is never walked directly, so it needs no
-	// scope here.
+	// the rule; the compiled validator's compile-time session (used only by the
+	// resolve-error gate) needs no scope.
 
 	return v, nil
 }
 
+// refDeps returns the dependency-injection boundary the resolution core needs:
+// the sub-schema traversal and deep-clone the parent owns.
+func refDeps() refresolve.Deps {
+	return refresolve.Deps{Children: schemaChildren, Clone: cloneSchema}
+}
+
+// toRefDraft maps the parent draft to the resolution core's two-value enum,
+// which drives the Draft-7 sibling-$id exception and dynamic-scope seeding.
+func toRefDraft(d Draft) refresolve.Draft {
+	if d == Draft7 {
+		return refresolve.Draft7
+	}
+
+	return refresolve.Draft2020
+}
+
+// buildRefReg builds the compiled ref-resolution registry over the root document
+// (seeded with the normalized [WithBaseURI] base) and the compile-time session
+// the resolve-error gate resolves through. The gate's fetches write the shared
+// refReg directly (via a copy-on-write-disabled fetch) so remote documents
+// fetched while compiling persist into the registry every run shares.
+func (v *validator) buildRefReg() {
+	v.refReg = refresolve.NewRegistry(refDeps(), toRefDraft(v.draft), v.inertIDs)
+	v.refReg.Build(v.root, uriref.NormalizeBaseURI(v.baseURI))
+
+	v.refSession = v.refReg.NewSession()
+	// The fetch reads the run's context from the ctx field, so no parameter
+	// threads through the deep resolution machinery.
+	//nolint:contextcheck // See the comment above.
+	v.refFetch = v.remoteFetch(v.refSession, false)
+}
+
 // forInstance returns a per-validation view of a compiled validator with fresh
-// mutable walk state (the visiting set, dynamic scope, JSON-pointer cache, and
-// ref-resolution scratch), so a [Validator] can be reused and is safe for
-// concurrent use. The immutable per-schema state (registries, resolved
-// vocabularies, draft, and format configuration) is shared. The caller's ctx
-// is carried on the per-run copy so a [RefResolver] resolving a remote
-// ref at validation time sees the context of the run that triggered it.
+// mutable walk state (the visiting set and a fresh per-run refSession), so a
+// [Validator] can be reused and is safe for concurrent use. The immutable
+// per-schema state (the compiled refReg, resolved vocabularies, draft, and
+// format configuration) is shared. The caller's ctx is carried on the per-run
+// copy so a [RefResolver] resolving a remote ref at validation time sees the
+// context of the run that triggered it.
 //
-// The five registry maps are shared from the compiled validator by reference;
-// they are immutable after Compile, so concurrent runs read them safely. A run
-// that fetches a remote ref at validation time (via resolveRemote) must write
-// them, so it first clones them privately through ensureOwnedRegistries — a
-// copy-on-write that spares the O(registry size) clone for the common run that
-// resolves nothing remotely (including a resolver-configured schema whose refs
-// were all cached during Compile).
+// The compiled refReg is shared by reference; it is immutable after Compile, so
+// concurrent runs read it safely. A run that fetches a remote ref at validation
+// time clones it privately via the session's copy-on-write (see
+// [refresolve.Session.EnsureOwned] in the run's refFetch), sparing the clone for
+// the common run that resolves nothing remotely.
 func (v *validator) forInstance(ctx context.Context) *validator {
 	rv := *v
 	rv.ctx = ctx
-	rv.registriesOwned = false
 	rv.visiting = map[visitKey]bool{}
-	rv.jsonPointerCache = nil
-	rv.refCache = nil
-	rv.remoteMiss = nil
-	rv.fallbackURIRegistry = nil
-	rv.fallbackAnchorRegistry = nil
-	rv.fallbackBaseURIs = nil
-	rv.refResolveErr = nil
 
+	rv.refSession = v.refReg.NewSession()
 	if rv.draft == Draft2020 {
-		rv.dynamicScope = []string{rv.baseURIs[rv.root]}
-	} else {
-		rv.dynamicScope = nil
+		rv.refSession.SeedDynamicScope(rv.refSession.SchemaBase(rv.root))
 	}
+
+	// The fetch reads the run's context from the ctx field set above, so no
+	// parameter threads through the deep resolution machinery.
+	//nolint:contextcheck // See the comment above.
+	rv.refFetch = rv.remoteFetch(rv.refSession, true)
 
 	return &rv
-}
-
-// ensureOwnedRegistries gives this run its own copy of the five registry maps
-// before it writes any of them, so a resolveRemote registration cannot race a
-// concurrent run sharing the compiled validator's maps. It is idempotent: the
-// first remote fetch in a run clones, later fetches reuse the owned copies.
-func (v *validator) ensureOwnedRegistries() {
-	if v.registriesOwned {
-		return
-	}
-
-	v.uriRegistry = maps.Clone(v.uriRegistry)
-	v.anchorRegistry = maps.Clone(v.anchorRegistry)
-	v.dynamicAnchorRegistry = maps.Clone(v.dynamicAnchorRegistry)
-	v.baseURIs = maps.Clone(v.baseURIs)
-	v.walked = maps.Clone(v.walked)
-	v.registriesOwned = true
 }
 
 // resolveVocabularies determines the active vocabulary set.
@@ -537,133 +542,6 @@ func (v *validator) resolveFormats() {
 	}
 }
 
-// initRegistries allocates the five empty registry maps that every fresh
-// registry walk fills.
-func (v *validator) initRegistries() {
-	v.uriRegistry = map[string]*Schema{}
-	v.anchorRegistry = map[string]*Schema{}
-	v.dynamicAnchorRegistry = map[string]*Schema{}
-	v.baseURIs = map[*Schema]string{}
-	v.walked = map[*Schema]bool{}
-}
-
-// buildRegistry walks the entire schema tree to build URI, anchor, and
-// base-URI registries for $id and $anchor resolution. The walk is seeded
-// with the [WithBaseURI] base, so non-local refs absolutize against it
-// exactly as they would against a root $id.
-func (v *validator) buildRegistry() {
-	v.initRegistries()
-
-	base := uriref.NormalizeBaseURI(v.baseURI)
-	v.walkSchema(v.root, base)
-
-	// Register the root document under its base URI when its own $id did
-	// not already claim one, so a ref that absolutizes back to the root
-	// document resolves to this copy instead of being fetched.
-	if base != "" {
-		if _, ok := v.uriRegistry[base]; !ok {
-			v.uriRegistry[base] = v.root
-		}
-	}
-}
-
-// walkSchema recursively walks a schema tree, registering $id and $anchor
-// entries and computing base URIs. An $id/$anchor that repeats a key already in
-// the registry overwrites it, which is the right behavior for the single
-// authoritative document buildRegistry walks.
-func (v *validator) walkSchema(schema *Schema, parentBase string) {
-	v.walkSchemaInto(schema, parentBase, false)
-}
-
-// walkFetchedSchema walks a document fetched from a [RefResolver], registering
-// its nested $id/$anchor/$dynamicAnchor entries only when the key is not already
-// claimed. A fetched document whose nested $id resolves to an already-loaded URI
-// (the root base or an earlier fetched document) must not overwrite that entry,
-// so the already-loaded document keeps priority while the fetched document's own
-// refs still resolve. Unlike [validator.registerFallbackSchema] these
-// registrations land in the shared registry, so they survive the per-run clone
-// forInstance makes for the compile-time loader path; at validation time the
-// registry is already that per-run clone.
-func (v *validator) walkFetchedSchema(schema *Schema, parentBase string) {
-	v.walkSchemaInto(schema, parentBase, true)
-}
-
-// walkSchemaInto is the shared walk core. When onlyIfAbsent is true, a
-// string-keyed registration ($id URI, $anchor, $dynamicAnchor) yields to an
-// existing entry instead of overwriting it; the pointer-keyed base URI is always
-// recorded so every node still resolves its own relative refs.
-func (v *validator) walkSchemaInto(schema *Schema, parentBase string, onlyIfAbsent bool) {
-	if schema == nil {
-		return
-	}
-
-	// Cycle guard: a *Schema graph may alias or form a cycle (e.g.
-	// s.AllOf = []*Schema{s}). Registering each pointer once and returning
-	// early on a repeat keeps the walk from recursing without bound.
-	if v.walked[schema] {
-		return
-	}
-
-	v.walked[schema] = true
-
-	currentBase := parentBase
-
-	if schema.ID != "" && !v.inertIDs {
-		if uriref.IsFragmentOnly(schema.ID) {
-			// Draft-07: fragment-only $id acts as an anchor.
-			anchor := schema.ID[1:] // strip leading '#'
-			registerSchema(v.anchorRegistry, uriref.AnchorKey(currentBase, anchor), schema, onlyIfAbsent)
-		} else {
-			resolved := uriref.IDBase(currentBase, schema.ID)
-			registerSchema(v.uriRegistry, resolved, schema, onlyIfAbsent)
-
-			currentBase = resolved
-		}
-	}
-
-	// 2020-12: $anchor keyword.
-	if schema.Anchor != "" {
-		registerSchema(v.anchorRegistry, uriref.AnchorKey(currentBase, schema.Anchor), schema, onlyIfAbsent)
-	}
-
-	// 2020-12: $dynamicAnchor keyword.
-	// Also registered as a regular anchor (accessible via $ref).
-	if schema.DynamicAnchor != "" {
-		key := uriref.AnchorKey(currentBase, schema.DynamicAnchor)
-		registerSchema(v.anchorRegistry, key, schema, onlyIfAbsent)
-		registerSchema(v.dynamicAnchorRegistry, key, schema, onlyIfAbsent)
-	}
-
-	// Store base URI for this schema (used during $ref resolution).
-	// Draft-07 exception: sibling $id doesn't affect $ref resolution.
-	if v.draft == Draft7 && schema.Ref != "" && schema.ID != "" && !uriref.IsFragmentOnly(schema.ID) {
-		v.baseURIs[schema] = parentBase
-	} else {
-		v.baseURIs[schema] = currentBase
-	}
-
-	// Recurse into all sub-schema fields. Every child inherits currentBase, so
-	// iterating SubschemaEntries (the single source of truth for the field
-	// list) reproduces the previous per-keyword recursion; its sorted-key map
-	// order also makes registry construction deterministic.
-	for _, e := range SubschemaEntries(schema) {
-		v.walkSchemaInto(e.Schema, currentBase, onlyIfAbsent)
-	}
-}
-
-// registerSchema stores s under key in reg. When onlyIfAbsent is true an
-// existing entry is preserved, so a fetched document cannot overwrite a URI or
-// anchor already claimed by the root or an earlier document.
-func registerSchema(reg map[string]*Schema, key string, s *Schema, onlyIfAbsent bool) {
-	if onlyIfAbsent {
-		if _, ok := reg[key]; ok {
-			return
-		}
-	}
-
-	reg[key] = s
-}
-
 // precomputedBounds holds the numeric bound keywords of a schema as rationals,
 // converted once at Compile time so validateNumeric and validateNumericUnbounded
 // reuse them instead of re-parsing the float64 bounds on every numeric instance.
@@ -693,9 +571,8 @@ type compiledPattern struct {
 // the caches it builds are never written concurrently. The traversal delegates
 // to [SubschemaEntries] for the sub-schema field list and consults only schema
 // fields and its own visited set; it does not touch the URI, anchor, or
-// base-URI registries,
-// which keeps the validation-time fallback walk ([registerFallbackSchema]) from
-// populating these caches.
+// base-URI registries, which keeps the validation-time fallback walk (the
+// session's RegisterFallback) from populating these caches.
 func (v *validator) precompute() map[*Schema]bool {
 	v.numericBounds = map[*Schema]*precomputedBounds{}
 	v.patternCache = map[*Schema]compiledPattern{}
@@ -806,20 +683,20 @@ func (v *validator) runContext() context.Context {
 	return v.ctx
 }
 
-// callResolver invokes the configured resolver for uri under the context of
-// the current compile or validation run, with ok reporting whether the
-// resolver served the URI: an ErrNotResolved answer becomes ok false with a
-// nil error. A nil schema with a nil error is normalized to the
-// not-resolved answer too, upholding the [RefResolver] contract that no
-// caller dereferences a nil document.
-func (v *validator) callResolver(uri string) (*Schema, bool, error) {
-	s, err := v.refResolver.ResolveRef(v.runContext(), uri)
+// callResolver invokes resolver for uri under ctx, with ok reporting whether
+// the resolver served the URI: an ErrNotResolved answer becomes ok false with a
+// nil error. A nil schema with a nil error is normalized to the not-resolved
+// answer too, upholding the [RefResolver] contract that no caller dereferences a
+// nil document. The validator's remote fetch and loader and the inliner's fetch
+// all share it, so the three sites invoke the resolver identically.
+func callResolver(ctx context.Context, resolver RefResolver, uri string) (*Schema, bool, error) {
+	s, err := resolver.ResolveRef(ctx, uri)
 	if errors.Is(err, ErrNotResolved) {
 		return nil, false, nil
 	}
 
 	if err != nil {
-		//nolint:wrapcheck // resolveRemote wraps the error with ErrRefResolve; remoteLoader tolerates it.
+		//nolint:wrapcheck // Callers wrap the error with ErrRefResolve or tolerate it.
 		return nil, false, err
 	}
 
@@ -830,107 +707,98 @@ func (v *validator) callResolver(uri string) (*Schema, bool, error) {
 	return s, true, nil
 }
 
-// resolveRemote calls the configured [RefResolver] to fetch a remote schema,
-// registers it under baseURI, and returns it. On error it stores the error in
-// refResolveErr and returns nil. A success is served from the registry on later
-// calls; a miss or error is recorded in a per-run negative cache (remoteMiss),
-// so the resolver is consulted at most once per baseURI in a run even when many
-// instance nodes reference an unresolvable URI. The recorded error is still
-// re-raised into refResolveErr on each evaluation.
+// remoteFetch returns the [refresolve.Fetch] the resolution core calls when a
+// non-fragment ref's document is not yet registered. It fetches the document
+// through the configured [RefResolver], deep-copies it, registers the copy under
+// baseURI, and walks its nested $id/$anchor entries in only-if-absent mode so
+// they cannot clobber an already-loaded entry.
 //
-// The fetched document's own nested $ids and anchors are registered in
-// only-if-absent mode (see [validator.walkFetchedSchema]), so a document whose
-// nested $id resolves to an already-loaded URI (the root base or an earlier
-// fetched document) keeps the already-loaded entry's priority while the fetched
-// document's own refs still resolve.
-func (v *validator) resolveRemote(baseURI string) *Schema {
-	if v.refResolver == nil {
-		return nil
-	}
-
-	if recorded, seen := v.remoteMiss[baseURI]; seen {
-		if recorded != nil {
-			v.refResolveErr = fmt.Errorf("%w: %w", ErrRefResolve, recorded)
+// A per-run session (cow true) clones the compiled registry copy-on-write before
+// its first write via [refresolve.Session.EnsureOwned], so the registrations
+// live only for that run and never race a concurrent run. The compile-time gate
+// session (cow false) writes the shared refReg directly, so a remote document
+// fetched while compiling persists into the registry every run shares.
+//
+// A resolver miss or error is recorded in the session's per-run negative cache,
+// so the resolver is consulted at most once per baseURI in a run even when many
+// nodes reference an unresolvable URI. The recorded error is replayed on each
+// later evaluation, and only a resolver-reported failure carries an error;
+// a plain not-resolved answer returns (nil, nil).
+func (v *validator) remoteFetch(sess *refresolve.Session, cow bool) refresolve.Fetch {
+	return func(baseURI string) (*Schema, error) {
+		if v.refResolver == nil {
+			return nil, nil //nolint:nilnil // A missing resolver is a plain miss, not an error.
 		}
 
-		return nil
+		if recorded, seen := sess.RemoteMiss(baseURI); seen {
+			if recorded != nil {
+				return nil, fmt.Errorf("%w: %w", ErrRefResolve, recorded)
+			}
+
+			return nil, nil //nolint:nilnil // A recorded plain miss stays a plain miss.
+		}
+
+		schema, ok, err := callResolver(v.runContext(), v.refResolver, baseURI)
+		if err != nil {
+			sess.RecordRemoteMiss(baseURI, err)
+
+			return nil, fmt.Errorf("%w: %w", ErrRefResolve, err)
+		}
+
+		if !ok {
+			sess.RecordRemoteMiss(baseURI, nil)
+
+			return nil, nil //nolint:nilnil // A resolver miss is not an error.
+		}
+
+		// Deep-copy before registering so the resolver-owned schema is never
+		// mutated by the walk and the cache holds an independent copy.
+		cp, err := cloneSchema(schema)
+		if err != nil {
+			// Record the miss like the paths above, so a document that resolves
+			// but fails to deep-copy is not re-fetched on every node referencing
+			// it (the "at most once per baseURI in a run" contract).
+			sess.RecordRemoteMiss(baseURI, err)
+
+			return nil, fmt.Errorf("%w: %w", ErrRefResolve, err)
+		}
+
+		if cow {
+			// Clone the registry into this run's own copy before the first
+			// remote registration so the writes below cannot race a concurrent
+			// run still sharing the compiled registry.
+			sess.EnsureOwned()
+		}
+
+		reg := sess.Registry()
+		reg.URI[baseURI] = cp
+		reg.WalkFetched(cp, baseURI)
+
+		return cp, nil
 	}
-
-	schema, ok, err := v.callResolver(baseURI)
-	if err != nil {
-		v.refResolveErr = fmt.Errorf("%w: %w", ErrRefResolve, err)
-		v.recordRemoteMiss(baseURI, err)
-
-		return nil
-	}
-
-	if !ok {
-		v.recordRemoteMiss(baseURI, nil)
-
-		return nil
-	}
-
-	// Deep-copy before registering so the resolver-owned schema is never
-	// mutated by the walk and the cache holds an independent copy. This
-	// matches the remoteLoader path used during Schema.Resolve, so a remote
-	// ref is registered identically whichever path reaches it first.
-	cp, err := cloneSchema(schema)
-	if err != nil {
-		v.refResolveErr = fmt.Errorf("%w: %w", ErrRefResolve, err)
-		// Record the miss like the resolver-error and not-resolved paths above,
-		// so a document that resolves but fails to deep-copy is not re-fetched
-		// on every instance node referencing it (the "at most once per baseURI
-		// in a run" contract).
-		v.recordRemoteMiss(baseURI, err)
-
-		return nil
-	}
-
-	// Clone the registries into this run's own copies before the first remote
-	// registration so the writes below cannot race a concurrent run still
-	// sharing the compiled validator's maps. At validation time these
-	// registrations then live only for this run.
-	v.ensureOwnedRegistries()
-
-	// Register the copy under baseURI, walking its own nested $id/$anchor
-	// entries in only-if-absent mode so they cannot clobber an already-loaded
-	// entry.
-	v.uriRegistry[baseURI] = cp
-	v.walkFetchedSchema(cp, baseURI)
-
-	return cp
-}
-
-// recordRemoteMiss notes that the resolver could not serve baseURI this run, so
-// resolveRemote skips re-calling it. A nil err records a plain miss; a non-nil
-// err is replayed into refResolveErr on each later evaluation of the same ref.
-func (v *validator) recordRemoteMiss(baseURI string, err error) {
-	if v.remoteMiss == nil {
-		v.remoteMiss = map[string]error{}
-	}
-
-	v.remoteMiss[baseURI] = err
 }
 
 // remoteLoader returns a [jsonschema.Loader] for upstream Schema.Resolve.
 // When a [RefResolver] is configured, resolved schemas are registered in the
-// URI/anchor registries (caching them for the validation walk). If no
+// shared compiled registry (caching them for the validation walk). If no
 // resolver is configured or the resolver misses or fails, an empty schema is
 // returned so Schema.Resolve doesn't fail.
 //
 // Schemas returned to the upstream resolver are deep-copied via JSON
 // round-trip so that Schema.Resolve's internal mutations (e.g. $schema
-// inheritance) don't modify the caller's original schema objects.
+// inheritance) don't modify the caller's original schema objects. This runs at
+// compile time single-threaded, so the registrations land directly in the
+// compiled registry every per-run validator then shares.
 func (v *validator) remoteLoader() jsonschema.Loader {
 	return func(uri *url.URL) (*Schema, error) {
 		uriStr := uri.String()
 		// Check cache first.
-		if s, ok := v.uriRegistry[uriStr]; ok {
+		if s, ok := v.refReg.URI[uriStr]; ok {
 			return s, nil
 		}
 
 		if v.refResolver != nil {
-			s, ok, err := v.callResolver(uriStr)
+			s, ok, err := callResolver(v.runContext(), v.refResolver, uriStr)
 			if err == nil && ok {
 				// Deep-copy so the upstream resolver's mutations don't
 				// affect the original schema from the RefResolver.
@@ -939,15 +807,13 @@ func (v *validator) remoteLoader() jsonschema.Loader {
 					return nil, fmt.Errorf("clone resolved schema: %w", cpErr)
 				}
 
-				// Register the copy under uriStr so subsequent lookups
-				// during both Schema.Resolve and the validation walk
-				// find it without re-calling the resolver. Its own nested
-				// $ids/anchors are walked in only-if-absent mode so a
-				// fetched doc cannot clobber an already-loaded entry. This
-				// runs at compile time, so the registrations land in the
-				// compiled registry every per-run validator then shares.
-				v.uriRegistry[uriStr] = cp
-				v.walkFetchedSchema(cp, uriStr)
+				// Register the copy under uriStr so subsequent lookups during
+				// both Schema.Resolve and the validation walk find it without
+				// re-calling the resolver. Its own nested $ids/anchors are
+				// walked in only-if-absent mode so a fetched doc cannot clobber
+				// an already-loaded entry.
+				v.refReg.URI[uriStr] = cp
+				v.refReg.WalkFetched(cp, uriStr)
 
 				return cp, nil
 			}
@@ -1135,8 +1001,8 @@ func Compile(ctx context.Context, schema *Schema, opts ...ValidateOption) (*Vali
 	//   - The precompute caches (numeric bounds and compiled patterns), so a
 	//     numeric, pattern, const, or enum keyword in a fetched remote hits the
 	//     cache instead of being recomputed on every validation.
-	for _, uri := range slices.Sorted(maps.Keys(v.uriRegistry)) {
-		s := v.uriRegistry[uri]
+	for _, uri := range slices.Sorted(maps.Keys(v.refReg.URI)) {
+		s := v.refReg.URI[uri]
 
 		err = checkTypeNames(s, uri+"#", typeVisited)
 		if err != nil {
@@ -1600,9 +1466,9 @@ func (v *validator) structureResolves(schema *Schema, resolveOpts ResolveOptions
 // the structural and meta-schema validation that upstream performs by
 // dereferencing refs. [structureResolves] skips that validation for targets
 // carried in unknown keywords or non-applicator keyword internals, since those
-// have no typed Schema field. A reference this package cannot follow leaves
-// refResolveErr set as a side effect; it is cleared so it does not leak into a
-// later error.
+// have no typed Schema field. A resolution reports failure through its
+// [refresolve.Result]; the gate reads only the target, so a resolver error
+// does not leak into a later validation error.
 func (v *validator) refsResolveWellFormed(schema *Schema, resolveOpts ResolveOptions) bool {
 	ok := true
 
@@ -1611,16 +1477,14 @@ func (v *validator) refsResolveWellFormed(schema *Schema, resolveOpts ResolveOpt
 			return
 		}
 
-		if s.Ref != "" && !v.refTargetWellFormed(v.resolveRef(s, s.Ref), resolveOpts) {
-			v.refResolveErr = nil
+		if s.Ref != "" && !v.refTargetWellFormed(v.resolveRef(s, s.Ref).Target, resolveOpts) {
 			ok = false
 
 			return
 		}
 
 		if v.draft == Draft2020 && s.DynamicRef != "" &&
-			!v.refTargetWellFormed(v.resolveDynamicRef(s, s.DynamicRef), resolveOpts) {
-			v.refResolveErr = nil
+			!v.refTargetWellFormed(v.resolveDynamicRef(s, s.DynamicRef).Target, resolveOpts) {
 			ok = false
 		}
 	})
@@ -1651,8 +1515,9 @@ func (v *validator) refTargetWellFormed(target *Schema, resolveOpts ResolveOptio
 
 // allRefsResolvable reports whether this package can resolve every $ref and
 // $dynamicRef directly reachable from schema, without judging the resolved
-// targets. A reference this package cannot follow leaves refResolveErr set; it
-// is cleared so it does not leak into a later error.
+// targets. A resolution reports failure through its [refresolve.Result]; the
+// gate reads only the target, so a resolver error does not leak into a later
+// error.
 func (v *validator) allRefsResolvable(schema *Schema) bool {
 	ok := true
 
@@ -1661,13 +1526,11 @@ func (v *validator) allRefsResolvable(schema *Schema) bool {
 			return
 		}
 
-		if s.Ref != "" && v.resolveRef(s, s.Ref) == nil {
-			v.refResolveErr = nil
+		if s.Ref != "" && v.resolveRef(s, s.Ref).Target == nil {
 			ok = false
 		}
 
-		if v.draft == Draft2020 && s.DynamicRef != "" && v.resolveDynamicRef(s, s.DynamicRef) == nil {
-			v.refResolveErr = nil
+		if v.draft == Draft2020 && s.DynamicRef != "" && v.resolveDynamicRef(s, s.DynamicRef).Target == nil {
 			ok = false
 		}
 	})
@@ -1766,15 +1629,13 @@ func (v *validator) validate(
 	defer delete(v.visiting, key)
 
 	// Dynamic scope tracking: push when entering a new resource boundary.
-	// The root is already on the stack from initialization; subsequent
-	// pushes happen when validation crosses into a schema whose resource
-	// base URI differs from the current scope top.
-	if v.draft == Draft2020 && len(v.dynamicScope) > 0 {
-		base := v.schemaBase(schema)
-		if base != v.dynamicScope[len(v.dynamicScope)-1] {
-			v.dynamicScope = append(v.dynamicScope, base)
-			defer func() { v.dynamicScope = v.dynamicScope[:len(v.dynamicScope)-1] }()
-		}
+	// The root is already on the stack from seeding; subsequent pushes happen
+	// when validation crosses into a schema whose resource base URI differs
+	// from the current scope top. EnterScope is a no-op when the scope is empty
+	// (Draft 7, where it is never seeded) or unchanged.
+	if v.draft == Draft2020 {
+		leave := v.refSession.EnterScope(v.refSession.SchemaBase(schema))
+		defer leave()
 	}
 
 	// If this schema uses unevaluated* keywords but the caller didn't provide
@@ -3121,23 +2982,24 @@ func (v *validator) validateDynamicRef(
 // validateResolvedRef validates the instance against a resolved reference
 // target, sharing the resolution-error and annotation handling between $ref
 // and $dynamicRef. The keyword names the reference keyword for error paths.
+// The [refresolve.Result] carries the target and, on a resolver-reported
+// failure, the error to surface.
 func (v *validator) validateResolvedRef(
-	target *Schema,
+	res refresolve.Result,
 	ref, keyword string,
 	instance any,
 	instancePath instanceLocation,
 	schemaPath schemaLocation,
 	ann *annotations.Set,
 ) []*ValidationError {
-	if target == nil {
-		if v.refResolveErr != nil {
-			err := v.refResolveErr
-			v.refResolveErr = nil
-
+	if res.Target == nil {
+		if res.Err != nil {
 			// Built through leafError to share the path pairing; the private err
-			// field (the unwrappable resolution cause) is set on the result.
-			e := leafError(instancePath, schemaPath, keyword, err.Error())
-			e.err = err
+			// field (the unwrappable resolution cause) is set on the result. The
+			// error is carried by value in the Result, so it surfaces once per
+			// failing node without a shared side channel to clear.
+			e := leafError(instancePath, schemaPath, keyword, res.Err.Error())
+			e.err = res.Err
 
 			return []*ValidationError{e}
 		}
@@ -3156,7 +3018,7 @@ func (v *validator) validateResolvedRef(
 	}
 
 	refAnn := ann.Child()
-	childErrs := v.validate(target, instance, instancePath, schemaPath.kw(keyword), refAnn)
+	childErrs := v.validate(res.Target, instance, instancePath, schemaPath.kw(keyword), refAnn)
 	if len(childErrs) > 0 {
 		return []*ValidationError{
 			wrapError(instancePath, schemaPath, keyword, "", childErrs),
@@ -3168,343 +3030,15 @@ func (v *validator) validateResolvedRef(
 	return nil
 }
 
-// resolveDynamicRef resolves a $dynamicRef string to a target schema.
-// Two-phase: static resolution first, then dynamic scope walk if bookended.
-func (v *validator) resolveDynamicRef(schema *Schema, ref string) *Schema {
-	parsed, err := url.Parse(ref)
-	if err != nil {
-		return nil
-	}
-
-	fragment := parsed.Fragment
-
-	// Phase 1: Static resolution (same as $ref).
-	staticTarget := v.resolveRef(schema, ref)
-	if staticTarget == nil {
-		return nil
-	}
-
-	// JSON Pointer fragments bypass dynamic resolution.
-	if strings.HasPrefix(fragment, "/") || fragment == "" {
-		return staticTarget
-	}
-
-	// Phase 2: Bookending check. Dynamic resolution engages only when static
-	// resolution actually landed on the schema that bears a $dynamicAnchor of the
-	// fragment name, not merely when the static target's resource defines one
-	// somewhere. Otherwise a plain $anchor that wins static resolution would be
-	// treated dynamically just because a same-named $dynamicAnchor sits elsewhere
-	// in the resource.
-	staticBase := v.schemaBase(staticTarget)
-	if anchored, ok := v.lookupDynamicAnchor(uriref.AnchorKey(staticBase, fragment)); !ok || anchored != staticTarget {
-		return staticTarget // no bookend → behave like $ref
-	}
-
-	// Phase 3: Walk dynamic scope outermost→innermost for first matching
-	// $dynamicAnchor.
-	for _, scopeBase := range v.dynamicScope {
-		if target, ok := v.lookupDynamicAnchor(uriref.AnchorKey(scopeBase, fragment)); ok {
-			return target
-		}
-	}
-
-	return staticTarget
+// resolveRef resolves a $ref string against the shared resolution core, keyed to
+// this run's session. The [refresolve.Result] carries the target and, on a
+// resolver-reported failure, the error to surface.
+func (v *validator) resolveRef(schema *Schema, ref string) refresolve.Result {
+	return v.refSession.ResolveRef(schema, ref, v.refFetch)
 }
 
-// refCacheKey identifies a plain $ref resolution, used to cache its result
-// within a validation run. The containing schema fixes the base URI the ref
-// resolves against, so the pair is sufficient to key the lookup.
-type refCacheKey struct {
-	//nolint:unused // Read via struct equality when used as a map key.
-	schema *Schema
-	//nolint:unused // Read via struct equality when used as a map key.
-	ref string
-}
-
-// resolveRef resolves a $ref string to a target schema using the URI and anchor
-// registries, caching the result per (schema, ref) for the validation run.
-//
-// The same ref is re-resolved for every instance node it is evaluated against,
-// and resolution is deterministic within a run because the registries are fixed
-// at compile time (or cloned once per run when a [RefResolver] is configured).
-// Only successful resolutions are cached: an unresolved remote ref records its
-// failure in refResolveErr as a side effect that the caller consumes once, so
-// caching a nil would suppress that error on later evaluations.
-func (v *validator) resolveRef(schema *Schema, ref string) *Schema {
-	key := refCacheKey{schema: schema, ref: ref}
-	if cached, ok := v.refCache[key]; ok {
-		return cached
-	}
-
-	target := v.resolveRefUncached(schema, ref)
-	if target != nil {
-		if v.refCache == nil {
-			v.refCache = map[refCacheKey]*Schema{}
-		}
-
-		v.refCache[key] = target
-	}
-
-	return target
-}
-
-// resolveRefUncached performs the actual $ref resolution behind resolveRef's
-// per-run cache.
-func (v *validator) resolveRefUncached(schema *Schema, ref string) *Schema {
-	parsed, err := url.Parse(ref)
-	if err != nil {
-		return nil
-	}
-
-	// Fragment-only refs (e.g. "#", "#/$defs/foo", "#anchor").
-	//nolint:nestif // Resolution walks distinct fragment forms (pointer, anchor, root).
-	if uriref.IsFragmentOnly(ref) {
-		fragment := parsed.Fragment
-
-		// Find the root of the current resource.
-		resourceRoot := v.root
-		base := v.schemaBase(schema)
-		if base != "" {
-			if target, ok := v.lookupURI(base); ok {
-				resourceRoot = target
-			}
-		}
-
-		if fragment == "" {
-			return resourceRoot
-		}
-
-		// JSON Pointer. Pass the still-encoded fragment so a member name
-		// escaped as %2F is not mistaken for a pointer separator.
-		if strings.HasPrefix(fragment, "/") {
-			raw, encoded := uriref.RawFragment(parsed)
-
-			return v.resolveJSONPointer(resourceRoot, raw, encoded)
-		}
-
-		// Anchor reference.
-		if target, ok := v.lookupAnchor(uriref.AnchorKey(base, fragment)); ok {
-			return target
-		}
-
-		return nil
-	}
-
-	// Non-fragment ref: resolve against current schema's base URI.
-	base := v.schemaBase(schema)
-	absRef := uriref.ResolveURI(base, ref)
-
-	parsedAbs, err := url.Parse(absRef)
-	if err != nil {
-		return nil
-	}
-
-	fragment := parsedAbs.Fragment
-	rawFrag, fragEncoded := uriref.RawFragment(parsedAbs)
-	parsedAbs.Fragment = ""
-	parsedAbs.RawFragment = ""
-	baseURI := parsedAbs.String()
-
-	target, ok := v.lookupURI(baseURI)
-	if !ok {
-		// Try remote resolution as fallback.
-		target = v.resolveRemote(baseURI)
-		if target == nil {
-			return nil
-		}
-	}
-
-	if fragment == "" {
-		return target
-	}
-
-	// JSON Pointer within resolved schema. Pass the still-encoded fragment so a
-	// member name escaped as %2F is not mistaken for a pointer separator.
-	if strings.HasPrefix(fragment, "/") {
-		return v.resolveJSONPointer(target, rawFrag, fragEncoded)
-	}
-
-	// Anchor within resolved schema, resolved via the shared cross-document
-	// precedence (retrieval base first, then the document's canonical $id base).
-	if anchorTarget, ok := v.lookupAnchorWithFallback(baseURI, target, fragment); ok {
-		return anchorTarget
-	}
-
-	return nil
-}
-
-// resolveJSONPointer resolves a JSON Pointer fragment against a schema.
-//
-// Typed traversal handles the common case, matching pointer segments to known
-// Schema fields. When that fails the pointer may still target a referenceable
-// location that has no typed field, so resolution falls back to walking the
-// schema's JSON form. Such locations are a sub-schema carried as raw JSON in an
-// unknown keyword, or the internals of a non-applicator keyword such as
-// examples.
-func (v *validator) resolveJSONPointer(root *Schema, fragment string, encoded bool) *Schema {
-	segments, ok := jsonptr.FragmentSegments(fragment, encoded)
-	if !ok {
-		return nil
-	}
-
-	if target := jsonptr.TraverseSchema(root, segments); target != nil {
-		return target
-	}
-
-	return v.resolveJSONPointerViaJSON(root, segments)
-}
-
-// jsonPointerKey identifies a JSON-pointer fallback lookup, used to cache its
-// result within a validation run.
-type jsonPointerKey struct {
-	//nolint:unused // Read via struct equality when used as a map key.
-	root *Schema
-	//nolint:unused // Read via struct equality when used as a map key.
-	pointer string
-}
-
-// resolveJSONPointerViaJSON resolves a JSON Pointer by walking the schema's JSON
-// encoding rather than its typed fields, so it reaches locations that typed
-// traversal cannot: sub-schemas held in unknown keywords (the Extra map) and
-// the internals of non-applicator keywords such as examples. The target
-// resolves only when it is itself a schema: a JSON object or boolean. Any
-// other target (a string, number, or missing member) yields nil, so a pointer
-// into a non-schema value or a typo stays unresolved.
-//
-// A located schema is freshly unmarshaled and so unknown to the registries
-// built at compile time; it is registered through the per-run fallback
-// registries with the base URI in effect at its location, so any $ref,
-// $anchor, or $id inside it resolves correctly instead of against an empty
-// base.
-//
-// Results are cached per (root, pointer): the same fallback is reached once per
-// ref during gate checking and again for each instance node the ref is
-// evaluated against, and the root is marshaled at most once per distinct
-// pointer. This path runs only for the uncommon untyped-location pointer.
-func (v *validator) resolveJSONPointerViaJSON(root *Schema, segments []string) *Schema {
-	if v.jsonPointerCache == nil {
-		v.jsonPointerCache = map[jsonPointerKey]*Schema{}
-	}
-
-	key := jsonPointerKey{root: root, pointer: jsonptr.SegmentsKey(segments)}
-	if cached, ok := v.jsonPointerCache[key]; ok {
-		return cached
-	}
-
-	target, base := jsonptr.SchemaAtJSONPointer(root, segments, v.schemaBase(root))
-	if target != nil {
-		v.registerFallbackSchema(target, base)
-	}
-
-	v.jsonPointerCache[key] = target
-
-	return target
-}
-
-// registerFallbackSchema walks a schema materialized by the JSON-pointer
-// fallback and records its subtree's base URIs, $ids, and anchors in the
-// per-run fallback registries. A scratch validator collects the walk output so
-// the shared registries stay untouched and concurrent runs cannot race on
-// them.
-func (v *validator) registerFallbackSchema(s *Schema, base string) {
-	scratch := &validator{draft: v.draft, inertIDs: v.inertIDs}
-	scratch.initRegistries()
-	scratch.walkSchema(s, base)
-
-	if v.fallbackBaseURIs == nil {
-		v.fallbackURIRegistry = map[string]*Schema{}
-		v.fallbackAnchorRegistry = map[string]*Schema{}
-		v.fallbackBaseURIs = map[*Schema]string{}
-	}
-
-	// $dynamicAnchor registrations are deliberately not carried into the fallback
-	// scope: lookupDynamicAnchor resolves only against the shared registry, so a
-	// dynamic anchor a fallback materialized cannot pollute an unrelated
-	// $dynamicRef's dynamic scope.
-	//
-	// Merge first-write-wins so two distinct fallback schemas registering the
-	// same absolute $id/$anchor key (only reachable from a malformed duplicate-key
-	// schema) resolve deterministically to the earliest-materialized one, matching
-	// registerSchema's onlyIfAbsent precedence rather than a map-iteration race.
-	for k, s := range scratch.uriRegistry {
-		if _, ok := v.fallbackURIRegistry[k]; !ok {
-			v.fallbackURIRegistry[k] = s
-		}
-	}
-
-	for k, s := range scratch.anchorRegistry {
-		if _, ok := v.fallbackAnchorRegistry[k]; !ok {
-			v.fallbackAnchorRegistry[k] = s
-		}
-	}
-
-	// Base URIs key on the schema pointer, which is unique per node, so no
-	// cross-schema collision is possible and a plain copy is correct.
-	maps.Copy(v.fallbackBaseURIs, scratch.baseURIs)
-}
-
-// schemaBase returns the base URI registered for s, consulting the shared
-// registry first and the per-run fallback registrations second.
-func (v *validator) schemaBase(s *Schema) string {
-	if base, ok := v.baseURIs[s]; ok {
-		return base
-	}
-
-	return v.fallbackBaseURIs[s]
-}
-
-// lookupURI resolves an absolute URI to its schema, consulting the shared
-// registry first and the per-run fallback registrations second.
-func (v *validator) lookupURI(uri string) (*Schema, bool) {
-	if s, ok := v.uriRegistry[uri]; ok {
-		return s, true
-	}
-
-	s, ok := v.fallbackURIRegistry[uri]
-
-	return s, ok
-}
-
-// lookupAnchor resolves a baseURI#anchor key, consulting the shared registry
-// first and the per-run fallback registrations second.
-func (v *validator) lookupAnchor(key string) (*Schema, bool) {
-	if s, ok := v.anchorRegistry[key]; ok {
-		return s, true
-	}
-
-	s, ok := v.fallbackAnchorRegistry[key]
-
-	return s, ok
-}
-
-// lookupAnchorWithFallback resolves a named anchor fragment within an
-// already-located document, applying the cross-document precedence: the
-// retrieval/current base first, then the document's own canonical base ($id)
-// when docRoot declares one distinct from baseURI. Both resolveRefUncached and
-// the inliner's resolveTarget call it, so the validation and inline paths
-// resolve an anchor identically from one definition rather than two hand-rolled
-// copies kept in sync by comment.
-func (v *validator) lookupAnchorWithFallback(baseURI string, docRoot *Schema, fragment string) (*Schema, bool) {
-	if target, ok := v.lookupAnchor(uriref.AnchorKey(baseURI, fragment)); ok {
-		return target, true
-	}
-
-	if canonBase := v.schemaBase(docRoot); canonBase != "" && canonBase != baseURI {
-		if target, ok := v.lookupAnchor(uriref.AnchorKey(canonBase, fragment)); ok {
-			return target, true
-		}
-	}
-
-	return nil, false
-}
-
-// lookupDynamicAnchor resolves a baseURI#name key against $dynamicAnchor
-// registrations in the shared compile-time registry only. Unlike URI and anchor
-// lookups it does not consult the per-run JSON-pointer fallback: a $dynamicAnchor
-// that a fallback materialized for an unrelated ref is outside the dynamic scope
-// of any $dynamicRef and must not be selectable as its target.
-func (v *validator) lookupDynamicAnchor(key string) (*Schema, bool) {
-	s, ok := v.dynamicAnchorRegistry[key]
-
-	return s, ok
+// resolveDynamicRef resolves a $dynamicRef string against the shared resolution
+// core, applying the static-then-dynamic-scope walk.
+func (v *validator) resolveDynamicRef(schema *Schema, ref string) refresolve.Result {
+	return v.refSession.ResolveDynamicRef(schema, ref, v.refFetch)
 }
