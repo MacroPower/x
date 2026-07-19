@@ -1,0 +1,32 @@
+# idn-hostname acceptance vectors.
+#
+# Source: curated from RFC 5890/5891 (IDNA2008) example text and the UTS-46
+# lookup profile as implemented by golang.org/x/net/idna (idna.Lookup), which
+# the idn-hostname validator delegates to. Pinned to golang.org/x/net v0.56.0
+# (jsonschema/go.mod), the same module the validator compiles against.
+#
+# This is a curated subset, not the full Unicode IdnaTestV2.txt corpus.
+# IdnaTestV2.txt records per-row toUnicode/toASCII outputs and status codes for
+# both the transitional and non-transitional profiles; reducing those columns to
+# one accept/reject for this validator needs its own mapping logic. The
+# validator also layers RFC 5890/5891 structure on top of the idna.Lookup pass:
+# label and total-length limits, the RFC 1123 numeric-TLD ban, and the
+# trailing-dot and empty-label rules, none of which the corpus's raw conversion
+# status captures. These vectors lock the accept/reject boundary the validator
+# actually implements; consuming the full corpus would be a separate rig.
+#
+# Format: <input>\t<valid>   (valid is "true" or "false"); '#' lines are comments.
+#
+example.com	true
+a.b.c	true
+xn--fsq.jp	true
+münchen.de	true
+例え.jp	true
+αβγ.gr	true
+example.com.	true
+föö.example	true
+-bad.example	false
+bad-.example	false
+xn--	false
+123	false
+a..b	false

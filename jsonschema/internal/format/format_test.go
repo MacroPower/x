@@ -14,12 +14,13 @@ import (
 // format keyword is covered by its own tests.
 
 // validator returns the built-in validator registered under name, failing the
-// test if the format is not registered.
-func validator(t *testing.T, name string) func(string) error {
-	t.Helper()
+// test if the format is not registered. It accepts a [testing.TB] so both the
+// table tests (*testing.T) and the fuzz targets (*testing.F) can reuse it.
+func validator(tb testing.TB, name string) func(string) error {
+	tb.Helper()
 
 	fn, ok := format.Validators()[name]
-	require.True(t, ok, "format %q must be registered", name)
+	require.True(tb, ok, "format %q must be registered", name)
 
 	return fn
 }
