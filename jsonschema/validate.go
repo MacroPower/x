@@ -606,9 +606,12 @@ func (v *validator) precompute() map[*Schema]bool {
 
 // precomputeSchema records the derived caches for one schema and recurses into
 // its sub-schemas, guarding against schema graph cycles with visited. It is the
-// Compile-time counterpart of the dispatch loop: it runs each keyword row's
-// compile step (nil for rows that precompute nothing), so the per-schema caches
-// a row's eval consults are populated by the same row that reads them.
+// Compile-time counterpart of the dispatch loop: it runs each active keyword
+// row's compile step (nil for rows that precompute nothing), so the per-schema
+// caches a row's eval consults are populated by the same row that reads them. A
+// row the run's draft, vocabulary, or opt-in gates disabled (buildActiveRows
+// runs earlier in newValidator) never evaluates, so its caches are never read
+// and are not built.
 func (v *validator) precomputeSchema(schema *Schema, visited map[*Schema]bool) {
 	if schema == nil || visited[schema] {
 		return
@@ -616,9 +619,9 @@ func (v *validator) precomputeSchema(schema *Schema, visited map[*Schema]bool) {
 
 	visited[schema] = true
 
-	for i := range keywordTable {
-		if c := keywordTable[i].compile; c != nil {
-			c(v, schema)
+	for _, e := range v.activeRows {
+		if e.compile != nil {
+			e.compile(v, schema)
 		}
 	}
 
