@@ -338,6 +338,16 @@ func applyRequiredConstraint(s *jsonschema.Schema, baseType reflect.Type) error 
 		}
 
 	case baseType.Kind() == reflect.Slice, baseType.Kind() == reflect.Array:
+		// A byte slice does not marshal to a JSON array, so an array size floor
+		// would be inert against every instance the field produces -- or
+		// actively wrong for json.RawMessage, whose unconstrained schema admits
+		// any JSON value: minItems: 1 there rejects the valid empty array even
+		// though go-playground's required accepts a non-nil RawMessage holding
+		// "[]". Only the parent's required entry applies.
+		if isByteSliceField(baseType) {
+			return nil
+		}
+
 		if s.MinItems == nil || *s.MinItems < 1 {
 			s.MinItems = new(1)
 		}
