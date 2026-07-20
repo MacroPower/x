@@ -1,7 +1,6 @@
 package jsonschema
 
 import (
-	"go.jacobcolvin.com/x/jsonschema/internal/keyword"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemashape"
 	"go.jacobcolvin.com/x/jsonschema/internal/typename"
 )
@@ -280,12 +279,15 @@ func (g *generator) renderNullableRefField(n *node) *Schema {
 // splitFieldKeywords moves each authored non-const/enum keyword off value onto a
 // fresh wrapper at its mutated value, restoring value's type-derived value from
 // the snapshot. It returns the wrapper; const/enum and structural children are
-// left on value untouched.
+// left on value untouched. A nil snapshot (a node with no split) moves nothing.
 func (g *generator) splitFieldKeywords(value, snapshot *Schema) *Schema {
 	wrapper := &Schema{}
+	if snapshot == nil {
+		return wrapper
+	}
 
 	for _, kw := range movableKeywords {
-		if !keywordDiffers(kw, snapshot, value) {
+		if !kw.differs(snapshot, value) {
 			continue
 		}
 
@@ -293,20 +295,15 @@ func (g *generator) splitFieldKeywords(value, snapshot *Schema) *Schema {
 		// interpreter dropping a bound its const/enum pinned) is a deliberate
 		// removal, not an authored sibling: leave it cleared rather than moving
 		// it out and restoring the type value.
-		if !keywordSet(kw, value) {
+		if !kw.differs(emptySchema, value) {
 			continue
 		}
 
-		assignKeyword(kw, value, wrapper)  // wrapper gets the mutated value
-		assignKeyword(kw, snapshot, value) // value branch restores the type value
+		kw.assign(value, wrapper)  // wrapper gets the mutated value
+		kw.assign(snapshot, value) // value branch restores the type value
 	}
 
 	return wrapper
-}
-
-// keywordSet reports whether the named keyword is set (non-zero) on s.
-func keywordSet(kw string, s *Schema) bool {
-	return keywordDiffers(kw, emptySchema, s)
 }
 
 // maybeInlineRoot inlines a root $ref whose def is reached from nowhere else,
@@ -359,6 +356,40 @@ func (g *generator) referencedElsewhere(exclude *node, def *defEntry) bool {
 	return found
 }
 
+// movableKeyword is one field-authorable keyword the nullable split can move
+// onto the anyOf wrapper: differs reports whether it changed between two
+// schemas (against the snapshot it marks the keyword authored; against
+// emptySchema it marks it set), and assign copies it from src onto dst,
+// overwriting dst's value (which clears it when src's is the zero value). Each
+// keyword defines both closures in one table entry, so a keyword cannot be
+// movable without also being comparable and assignable.
+type movableKeyword struct {
+	differs func(snap, cur *Schema) bool
+	assign  func(src, dst *Schema)
+}
+
+// valueKeyword builds a movableKeyword over a directly comparable field
+// (strings, bools, and the pointer-identity Not). The differs comparison is by
+// value deliberately: a hook that re-sets a keyword to the type's own value is
+// reported as unchanged, dropping a redundant wrapper sibling that carries no
+// meaning either way.
+func valueKeyword[T comparable](get func(*Schema) T, set func(*Schema, T)) movableKeyword {
+	return movableKeyword{
+		differs: func(snap, cur *Schema) bool { return get(snap) != get(cur) },
+		assign:  func(src, dst *Schema) { set(dst, get(src)) },
+	}
+}
+
+// pointerKeyword builds a movableKeyword over a *T scalar field, comparing the
+// pointed-at values (two nils equal, nil versus non-nil unequal) and assigning
+// the pointer.
+func pointerKeyword[T comparable](get func(*Schema) *T, set func(*Schema, *T)) movableKeyword {
+	return movableKeyword{
+		differs: func(snap, cur *Schema) bool { return !ptrEqual(get(snap), get(cur)) },
+		assign:  func(src, dst *Schema) { set(dst, get(src)) },
+	}
+}
+
 // movableKeywords are the field-authorable keywords the nullable split moves
 // onto the anyOf wrapper. Const and enum are handled separately (they stay on
 // the value branch), as are the structural sub-schema fields, which are
@@ -367,142 +398,89 @@ func (g *generator) referencedElsewhere(exclude *node, def *defEntry) bool {
 // belongs on the value branch, not the wrapper; a field never authors an allOf
 // that must move outward.
 var (
-	movableKeywords = []string{
-		keyword.Description, keyword.Title, keyword.Default,
-		keyword.Deprecated, keyword.ReadOnly, keyword.WriteOnly,
-		keyword.Examples, keyword.Comment,
-		keyword.Pattern, keyword.Format,
-		keyword.Minimum, keyword.Maximum,
-		keyword.ExclusiveMinimum, keyword.ExclusiveMaximum,
-		keyword.MultipleOf,
-		keyword.MinLength, keyword.MaxLength,
-		keyword.MinItems, keyword.MaxItems, keyword.UniqueItems,
-		keyword.MinProperties, keyword.MaxProperties,
-		keyword.Not,
+	movableKeywords = []movableKeyword{
+		valueKeyword(
+			func(s *Schema) string { return s.Description },
+			func(s *Schema, v string) { s.Description = v }),
+		valueKeyword(
+			func(s *Schema) string { return s.Title },
+			func(s *Schema, v string) { s.Title = v }),
+		{
+			differs: func(snap, cur *Schema) bool { return string(snap.Default) != string(cur.Default) },
+			assign:  func(src, dst *Schema) { dst.Default = src.Default },
+		},
+		valueKeyword(
+			func(s *Schema) bool { return s.Deprecated },
+			func(s *Schema, v bool) { s.Deprecated = v }),
+		valueKeyword(
+			func(s *Schema) bool { return s.ReadOnly },
+			func(s *Schema, v bool) { s.ReadOnly = v }),
+		valueKeyword(
+			func(s *Schema) bool { return s.WriteOnly },
+			func(s *Schema, v bool) { s.WriteOnly = v }),
+		{
+			// A field rarely re-authors a type's examples; a length change is a
+			// sufficient authored signal (an equal-length re-set is inert either
+			// way).
+			differs: func(snap, cur *Schema) bool { return len(snap.Examples) != len(cur.Examples) },
+			assign:  func(src, dst *Schema) { dst.Examples = src.Examples },
+		},
+		valueKeyword(
+			func(s *Schema) string { return s.Comment },
+			func(s *Schema, v string) { s.Comment = v }),
+		valueKeyword(
+			func(s *Schema) string { return s.Pattern },
+			func(s *Schema, v string) { s.Pattern = v }),
+		valueKeyword(
+			func(s *Schema) string { return s.Format },
+			func(s *Schema, v string) { s.Format = v }),
+		pointerKeyword(
+			func(s *Schema) *float64 { return s.Minimum },
+			func(s *Schema, v *float64) { s.Minimum = v }),
+		pointerKeyword(
+			func(s *Schema) *float64 { return s.Maximum },
+			func(s *Schema, v *float64) { s.Maximum = v }),
+		pointerKeyword(
+			func(s *Schema) *float64 { return s.ExclusiveMinimum },
+			func(s *Schema, v *float64) { s.ExclusiveMinimum = v }),
+		pointerKeyword(
+			func(s *Schema) *float64 { return s.ExclusiveMaximum },
+			func(s *Schema, v *float64) { s.ExclusiveMaximum = v }),
+		pointerKeyword(
+			func(s *Schema) *float64 { return s.MultipleOf },
+			func(s *Schema, v *float64) { s.MultipleOf = v }),
+		pointerKeyword(
+			func(s *Schema) *int { return s.MinLength },
+			func(s *Schema, v *int) { s.MinLength = v }),
+		pointerKeyword(
+			func(s *Schema) *int { return s.MaxLength },
+			func(s *Schema, v *int) { s.MaxLength = v }),
+		pointerKeyword(
+			func(s *Schema) *int { return s.MinItems },
+			func(s *Schema, v *int) { s.MinItems = v }),
+		pointerKeyword(
+			func(s *Schema) *int { return s.MaxItems },
+			func(s *Schema, v *int) { s.MaxItems = v }),
+		valueKeyword(
+			func(s *Schema) bool { return s.UniqueItems },
+			func(s *Schema, v bool) { s.UniqueItems = v }),
+		pointerKeyword(
+			func(s *Schema) *int { return s.MinProperties },
+			func(s *Schema, v *int) { s.MinProperties = v }),
+		pointerKeyword(
+			func(s *Schema) *int { return s.MaxProperties },
+			func(s *Schema, v *int) { s.MaxProperties = v }),
+		// Not compares by pointer identity: the split only needs to know a hook
+		// swapped the sub-schema in, not whether its contents are equivalent.
+		valueKeyword(
+			func(s *Schema) *Schema { return s.Not },
+			func(s, v *Schema) { s.Not = v }),
 	}
 
-	// EmptySchema is the zero-value schema keywordSet compares against; it is
-	// never mutated.
+	// EmptySchema is the zero-value schema splitFieldKeywords compares against
+	// to test whether a keyword is set; it is never mutated.
 	emptySchema = &Schema{}
 )
-
-// keywordDiffers reports whether the named keyword differs in value between the
-// snapshot and the mutated payload, marking it as authored by field or element
-// processing. This value comparison is deliberate: a hook that re-sets a keyword
-// to the type's own value is reported as unchanged, dropping a redundant wrapper
-// sibling that carries no meaning either way. A nil snapshot (a node with no
-// split) reports no difference.
-func keywordDiffers(kw string, snap, cur *Schema) bool {
-	if snap == nil {
-		return false
-	}
-
-	switch kw {
-	case keyword.Description:
-		return snap.Description != cur.Description
-	case keyword.Title:
-		return snap.Title != cur.Title
-	case keyword.Default:
-		return string(snap.Default) != string(cur.Default)
-	case keyword.Deprecated:
-		return snap.Deprecated != cur.Deprecated
-	case keyword.ReadOnly:
-		return snap.ReadOnly != cur.ReadOnly
-	case keyword.WriteOnly:
-		return snap.WriteOnly != cur.WriteOnly
-	case keyword.Examples:
-		// A field rarely re-authors a type's examples; a length change is a
-		// sufficient authored signal (an equal-length re-set is inert either way).
-		return len(snap.Examples) != len(cur.Examples)
-	case keyword.Comment:
-		return snap.Comment != cur.Comment
-	case keyword.Pattern:
-		return snap.Pattern != cur.Pattern
-	case keyword.Format:
-		return snap.Format != cur.Format
-	case keyword.Minimum:
-		return !ptrEqual(snap.Minimum, cur.Minimum)
-	case keyword.Maximum:
-		return !ptrEqual(snap.Maximum, cur.Maximum)
-	case keyword.ExclusiveMinimum:
-		return !ptrEqual(snap.ExclusiveMinimum, cur.ExclusiveMinimum)
-	case keyword.ExclusiveMaximum:
-		return !ptrEqual(snap.ExclusiveMaximum, cur.ExclusiveMaximum)
-	case keyword.MultipleOf:
-		return !ptrEqual(snap.MultipleOf, cur.MultipleOf)
-	case keyword.MinLength:
-		return !ptrEqual(snap.MinLength, cur.MinLength)
-	case keyword.MaxLength:
-		return !ptrEqual(snap.MaxLength, cur.MaxLength)
-	case keyword.MinItems:
-		return !ptrEqual(snap.MinItems, cur.MinItems)
-	case keyword.MaxItems:
-		return !ptrEqual(snap.MaxItems, cur.MaxItems)
-	case keyword.UniqueItems:
-		return snap.UniqueItems != cur.UniqueItems
-	case keyword.MinProperties:
-		return !ptrEqual(snap.MinProperties, cur.MinProperties)
-	case keyword.MaxProperties:
-		return !ptrEqual(snap.MaxProperties, cur.MaxProperties)
-	case keyword.Not:
-		return snap.Not != cur.Not
-	default:
-		return false
-	}
-}
-
-// assignKeyword copies the named keyword from src onto dst, overwriting dst's
-// value (which clears it when src's is the zero value).
-func assignKeyword(kw string, src, dst *Schema) {
-	switch kw {
-	case keyword.Description:
-		dst.Description = src.Description
-	case keyword.Title:
-		dst.Title = src.Title
-	case keyword.Default:
-		dst.Default = src.Default
-	case keyword.Deprecated:
-		dst.Deprecated = src.Deprecated
-	case keyword.ReadOnly:
-		dst.ReadOnly = src.ReadOnly
-	case keyword.WriteOnly:
-		dst.WriteOnly = src.WriteOnly
-	case keyword.Examples:
-		dst.Examples = src.Examples
-	case keyword.Comment:
-		dst.Comment = src.Comment
-	case keyword.Pattern:
-		dst.Pattern = src.Pattern
-	case keyword.Format:
-		dst.Format = src.Format
-	case keyword.Minimum:
-		dst.Minimum = src.Minimum
-	case keyword.Maximum:
-		dst.Maximum = src.Maximum
-	case keyword.ExclusiveMinimum:
-		dst.ExclusiveMinimum = src.ExclusiveMinimum
-	case keyword.ExclusiveMaximum:
-		dst.ExclusiveMaximum = src.ExclusiveMaximum
-	case keyword.MultipleOf:
-		dst.MultipleOf = src.MultipleOf
-	case keyword.MinLength:
-		dst.MinLength = src.MinLength
-	case keyword.MaxLength:
-		dst.MaxLength = src.MaxLength
-	case keyword.MinItems:
-		dst.MinItems = src.MinItems
-	case keyword.MaxItems:
-		dst.MaxItems = src.MaxItems
-	case keyword.UniqueItems:
-		dst.UniqueItems = src.UniqueItems
-	case keyword.MinProperties:
-		dst.MinProperties = src.MinProperties
-	case keyword.MaxProperties:
-		dst.MaxProperties = src.MaxProperties
-	case keyword.Not:
-		dst.Not = src.Not
-	}
-}
 
 // ptrEqual reports whether two pointers hold equal values, treating two nil
 // pointers as equal and a nil and a non-nil as unequal.
