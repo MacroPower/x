@@ -2622,6 +2622,79 @@ func TestGenerateFor_NullablePointerConstDropsTypeBounds(t *testing.T) {
 		"a non-const value is rejected")
 }
 
+// BoundedRefProvider is a numeric provider type, so it is extracted to $defs
+// and referenced via $ref.
+type BoundedRefProvider int
+
+func (BoundedRefProvider) JSONSchema(context.Context, jsonschema.TypeContext) (*jsonschema.Schema, error) {
+	return &jsonschema.Schema{Type: "integer"}, nil
+}
+
+func TestGenerateFor_NullableRefFieldConstDropsWrapperBounds(t *testing.T) {
+	t.Parallel()
+
+	// A const on a nullable $ref field pins the value, so an authored bound the
+	// split moved onto the anyOf wrapper is subsumed and must be dropped there
+	// too; a bound stranded on the wrapper would reject a const outside it.
+	type Container struct {
+		F *BoundedRefProvider `json:"f" jsonschema:"minimum=10,const=3"`
+	}
+
+	s, err := jsonschema.GenerateFor[Container](t.Context())
+	require.NoError(t, err)
+
+	field := s.Properties["f"]
+	require.NotNil(t, field)
+	require.Len(t, field.AnyOf, 2)
+	assert.Nil(t, field.Minimum, "the wrapper must not strand the authored bound")
+
+	validator, err := jsonschema.Compile(t.Context(), s)
+	require.NoError(t, err)
+
+	assert.NoError(t, validator.ValidateJSON(t.Context(), []byte(`{"f": 3}`)),
+		"the const value must validate even though it is below the dropped minimum")
+	assert.NoError(t, validator.ValidateJSON(t.Context(), []byte(`{"f": null}`)),
+		"a null pointer is permitted")
+	assert.Error(t, validator.ValidateJSON(t.Context(), []byte(`{"f": 4}`)),
+		"a non-const value is rejected")
+}
+
+// NullAdmittingRefProvider supplies a schema that already admits null, so a
+// nullable reference to it takes the no-wrapper dedup path.
+type NullAdmittingRefProvider int
+
+func (NullAdmittingRefProvider) JSONSchema(context.Context, jsonschema.TypeContext) (*jsonschema.Schema, error) {
+	return &jsonschema.Schema{Types: []string{"integer", "null"}}, nil
+}
+
+func TestGenerateFor_NullAdmittingRefFieldConstDropsBounds(t *testing.T) {
+	t.Parallel()
+
+	// When the referenced def admits null, the ref carries every field keyword
+	// with no anyOf split. A const still pins the value, so an authored bound
+	// beside the $ref is subsumed and must be dropped, not left to reject it.
+	type Container struct {
+		F *NullAdmittingRefProvider `json:"f" jsonschema:"minimum=10,const=3"`
+	}
+
+	s, err := jsonschema.GenerateFor[Container](t.Context())
+	require.NoError(t, err)
+
+	field := s.Properties["f"]
+	require.NotNil(t, field)
+	assert.Nil(t, field.Minimum, "the pinned const subsumes the authored bound")
+
+	validator, err := jsonschema.Compile(t.Context(), s)
+	require.NoError(t, err)
+
+	assert.NoError(t, validator.ValidateJSON(t.Context(), []byte(`{"f": 3}`)),
+		"the const value must validate even though it is below the dropped minimum")
+	require.Error(t, validator.ValidateJSON(t.Context(), []byte(`{"f": null}`)),
+		"the const rides beside the $ref with no null branch, so it pins out null")
+	assert.Error(t, validator.ValidateJSON(t.Context(), []byte(`{"f": 4}`)),
+		"a non-const value is rejected")
+}
+
 func TestGenerateFor_NullableSizedIntPointerSplit(t *testing.T) {
 	t.Parallel()
 

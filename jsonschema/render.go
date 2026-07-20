@@ -226,13 +226,22 @@ func (g *generator) renderNullableRefField(n *node) *Schema {
 	g.renderDef(n.def)
 
 	if schemashape.AdmitsNull(n.def.rendered) {
-		return g.renderRef(n.payload, n.def)
+		s := g.renderRef(n.payload, n.def)
+		g.clearFieldBounds(n, s)
+
+		return s
 	}
 
 	valuePayload := *n.payload
 	wrapper := g.splitFieldKeywords(&valuePayload, n.snapshot)
 
-	g.clearFieldBounds(n, &valuePayload)
+	// A pinned const/enum subsumes the numeric bounds on both sides of the
+	// split, exactly as in renderNullableSplit: a bound the split moved to the
+	// wrapper would reject a const outside it.
+	if g.pinsValue(n, &valuePayload) {
+		schemashape.ClearNumericBounds(&valuePayload)
+		schemashape.ClearNumericBounds(wrapper)
+	}
 
 	value := g.renderRef(&valuePayload, n.def)
 	wrapper.AnyOf = []*Schema{value, {Type: typename.Null}}
