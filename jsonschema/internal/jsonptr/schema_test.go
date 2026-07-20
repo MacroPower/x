@@ -28,7 +28,7 @@ func TestSchemaAtJSONPointer(t *testing.T) {
 	t.Run("navigates into $defs", func(t *testing.T) {
 		t.Parallel()
 
-		got, base := jsonptr.SchemaAtJSONPointer(root, []string{"$defs", "Foo"}, "https://example.com/root")
+		got, base := jsonptr.SchemaAtJSONPointer(root, []string{"$defs", "Foo"}, "https://example.com/root", true)
 		require.NotNil(t, got)
 		assert.Equal(t, "string", got.Type)
 		assert.Equal(t, "https://example.com/root", base)
@@ -37,7 +37,7 @@ func TestSchemaAtJSONPointer(t *testing.T) {
 	t.Run("navigates an array index", func(t *testing.T) {
 		t.Parallel()
 
-		got, _ := jsonptr.SchemaAtJSONPointer(root, []string{"prefixItems", "1"}, "")
+		got, _ := jsonptr.SchemaAtJSONPointer(root, []string{"prefixItems", "1"}, "", true)
 		require.NotNil(t, got)
 		assert.Equal(t, "boolean", got.Type)
 	})
@@ -45,14 +45,14 @@ func TestSchemaAtJSONPointer(t *testing.T) {
 	t.Run("missing segment returns nil", func(t *testing.T) {
 		t.Parallel()
 
-		got, _ := jsonptr.SchemaAtJSONPointer(root, []string{"$defs", "Missing"}, "")
+		got, _ := jsonptr.SchemaAtJSONPointer(root, []string{"$defs", "Missing"}, "", true)
 		assert.Nil(t, got)
 	})
 
 	t.Run("non-schema target returns nil", func(t *testing.T) {
 		t.Parallel()
 
-		got, _ := jsonptr.SchemaAtJSONPointer(root, []string{"type"}, "")
+		got, _ := jsonptr.SchemaAtJSONPointer(root, []string{"type"}, "", true)
 		assert.Nil(t, got)
 	})
 
@@ -74,6 +74,7 @@ func TestSchemaAtJSONPointer(t *testing.T) {
 			nested,
 			[]string{"properties", "a", "properties", "b"},
 			"https://example.com/root",
+			true,
 		)
 		require.NotNil(t, got)
 		assert.Equal(t, "string", got.Type)

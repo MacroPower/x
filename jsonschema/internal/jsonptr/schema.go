@@ -10,11 +10,15 @@ import (
 
 // SchemaAtJSONPointer navigates root's JSON encoding by segments and returns
 // the located value as a Schema when it is itself a schema (a JSON object or
-// boolean), or nil otherwise. The walk starts from base (root's base URI) and
-// tracks $id members of the objects it descends through, so the returned base
-// is the one in effect at the located schema; the target's own $id is left to
-// the caller during registration.
-func SchemaAtJSONPointer(root *jsonschema.Schema, segments []string, base string) (*jsonschema.Schema, string) {
+// boolean), or nil otherwise. The walk starts from base (root's base URI) and,
+// when trackIDs is set, tracks $id members of the objects it descends through,
+// so the returned base is the one in effect at the located schema; the
+// target's own $id is left to the caller during registration. A caller whose
+// walk treats $id as inert (a retrieval-base walk) passes trackIDs false, and
+// the crossed $id members leave base untouched.
+func SchemaAtJSONPointer(
+	root *jsonschema.Schema, segments []string, base string, trackIDs bool,
+) (*jsonschema.Schema, string) {
 	data, err := json.Marshal(root)
 	if err != nil {
 		return nil, ""
@@ -31,7 +35,7 @@ func SchemaAtJSONPointer(root *jsonschema.Schema, segments []string, base string
 		// Crossing into an intermediate object that establishes a resource
 		// ($id) rebases everything below it. The starting root is skipped:
 		// its own $id is already reflected in base.
-		if i > 0 {
+		if trackIDs && i > 0 {
 			if obj, ok := node.(map[string]any); ok {
 				if id, ok := obj["$id"].(string); ok && id != "" && !uriref.IsFragmentOnly(id) {
 					base = uriref.StripFragment(uriref.ResolveURI(base, id))

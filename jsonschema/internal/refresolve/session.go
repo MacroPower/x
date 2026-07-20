@@ -217,7 +217,11 @@ func (s *Session) resolveJSONPointerViaJSON(root *jsonschema.Schema, segments []
 		return cached
 	}
 
-	target, base := jsonptr.SchemaAtJSONPointer(root, segments, s.SchemaBase(root))
+	// ID tracking during pointer navigation follows the same inertIDs policy
+	// as the registry walk: under a retrieval-base run a crossed $id must not
+	// rebase the located schema, or its refs would absolutize against the $id
+	// instead of the document's retrieval base.
+	target, base := jsonptr.SchemaAtJSONPointer(root, segments, s.SchemaBase(root), !s.reg.inertIDs)
 	if target != nil {
 		s.RegisterFallback(target, base)
 	}
