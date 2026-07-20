@@ -617,7 +617,8 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *jsonschema.
 // original Go kind (an int64-reflected field such as [time.Duration] carries
 // range bounds, a slice carries items, a struct carries properties, and a
 // string-reflected field such as [time.Time] or [big.Rat] carries a
-// format/pattern); left on a schema of a different type they are vacuous but
+// format/pattern, and a []byte field carries the string-only content
+// keywords); left on a schema of a different type they are vacuous but
 // emit as confusing dead structure. Tag pairs apply in order, so keys after
 // type= still take effect.
 func applyTypeOverride(s *jsonschema.Schema, typeName string) {
@@ -643,6 +644,9 @@ func applyTypeOverride(s *jsonschema.Schema, typeName string) {
 		s.Pattern = ""
 		s.MinLength = nil
 		s.MaxLength = nil
+		s.ContentEncoding = ""
+		s.ContentMediaType = ""
+		s.ContentSchema = nil
 	}
 
 	if typeName != typename.Array {
