@@ -743,25 +743,44 @@ func (in *inliner) runContext() context.Context {
 // document whose nested $id resolves to an already-loaded URI (the root base or
 // an earlier document) must not overwrite that entry, so the already-loaded
 // document keeps priority while the fetched document's own refs still resolve.
-// This mirrors the substitute path's convention. Unlike the validator's fetch
-// it uses no negative cache and returns an error (not a plain miss) on failure,
-// preserving the inliner's fail-on-first-unresolvable-ref behavior.
+// This mirrors the substitute path's convention.
+//
+// A resolver miss or error is recorded in the session's per-run negative cache
+// and replayed on later fetches of the same URI, so the resolver is consulted
+// at most once per baseURI in a run even when a [WithRefFallback] policy
+// continues past the failure and many nodes reference the same unresolvable
+// URI. Unlike the validator's fetch it returns an error (not a plain miss) on
+// failure, preserving the inliner's fail-on-first-unresolvable-ref behavior.
 func (in *inliner) fetchDoc(baseURI string) (*Schema, error) {
 	if in.resolver == nil {
 		return nil, fmt.Errorf("%w: no resolver configured for %q", ErrRefResolve, baseURI)
 	}
 
+	if recorded, seen := in.session.RemoteMiss(baseURI); seen {
+		if recorded != nil {
+			return nil, fmt.Errorf("%w: %w", ErrRefResolve, recorded)
+		}
+
+		return nil, fmt.Errorf("%w: cannot resolve %q", ErrRefResolve, baseURI)
+	}
+
 	s, ok, err := callResolver(in.runContext(), in.resolver, baseURI)
 	if err != nil {
+		in.session.RecordRemoteMiss(baseURI, err)
+
 		return nil, fmt.Errorf("%w: %w", ErrRefResolve, err)
 	}
 
 	if !ok {
+		in.session.RecordRemoteMiss(baseURI, nil)
+
 		return nil, fmt.Errorf("%w: cannot resolve %q", ErrRefResolve, baseURI)
 	}
 
 	cp, err := cloneSchema(s)
 	if err != nil {
+		in.session.RecordRemoteMiss(baseURI, err)
+
 		return nil, fmt.Errorf("%w: %w", ErrRefResolve, err)
 	}
 
