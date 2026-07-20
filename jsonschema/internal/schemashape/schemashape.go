@@ -140,7 +140,10 @@ func MoveConstEnum(src, dst *jsonschema.Schema) {
 // anyOf[value, {"type":"null"}] wrapper or the {"type":["null", base]} type
 // list itself, with the const/enum stamped beside it afterward by a tag or
 // interpreter. The type-list shape cannot gate const/enum to the non-null
-// type, so it is rewritten into the anyOf form when it carries either.
+// type, so it is rewritten into the anyOf form when it carries either. An
+// anyOf an author placed beside the type list folds into an allOf conjunct
+// during the rewrite, so it keeps applying conjunctively to both branches
+// instead of being overwritten by the nullable wrapper.
 //
 // When s is not a nullable shape, or carries neither Const nor Enum, s is
 // returned unchanged.
@@ -158,6 +161,14 @@ func RelocateConstEnumToValueBranch(s *jsonschema.Schema) *jsonschema.Schema {
 	if base, ok := NullableTypeListBase(s); ok {
 		inner := &jsonschema.Schema{Type: base}
 		MoveConstEnum(s, inner)
+
+		// An authored anyOf beside the type list applies conjunctively to it.
+		// Folding it into an allOf conjunct before installing the nullable
+		// wrapper anyOf keeps those exact semantics: the authored anyOf still
+		// gates both the value and the null branch.
+		if s.AnyOf != nil {
+			s.AllOf = append(s.AllOf, &jsonschema.Schema{AnyOf: s.AnyOf})
+		}
 
 		s.Types = nil
 		s.AnyOf = []*jsonschema.Schema{inner, {Type: typename.Null}}
