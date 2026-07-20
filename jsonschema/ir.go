@@ -207,7 +207,11 @@ func (g *generator) payloadRefTargets() map[string]*defEntry {
 // additionally follows the raw $ref strings a hook (an override, provider, or
 // extender) may have authored into a payload: a payload subtree is not
 // node-backed, so a $defs reference inside it is a reachability edge only a
-// string scan sees. Each def reached that way has its body walked too, and
+// string scan sees. A ref node's own provisional token is not such an edge (its
+// reference is the def link walkNodes follows, and render replaces the token
+// with the final name), so the scan skips it rather than resolving it to
+// whichever def happens to share the base name. Each def reached by a string
+// hit has its body walked too, and
 // onPayloadRef (when non-nil) observes every payload ref hit, seen or not.
 // Payload subtrees are assumed acyclic, as everywhere else in the generator
 // (hook schemas arrive JSON-decoded or JSON-round-trip cloned).
@@ -218,20 +222,29 @@ func (g *generator) walkReachable(
 	onPayloadRef func(*defEntry),
 ) {
 	targets := g.payloadRefTargets()
+	prefix := g.draft.refPrefix()
 
-	var scanPayload func(s *Schema)
+	var scanPayload func(s *Schema, skipTopRef bool)
 
 	visitAndScan := func(n *node) {
 		visit(n)
-		scanPayload(n.payload)
+
+		// A kindRef payload still carrying its own provisional token is the node's
+		// reference edge itself: walkNodes already follows n.def, and render
+		// replaces the token with the final name. Resolving it here through the
+		// baseName fallback could hit an unrelated def sharing the base name, so
+		// skip the top-level lookup and scan only the payload's children.
+		skipTopRef := n.kind == kindRef && n.payload != nil &&
+			n.payload.Ref == prefix+n.def.baseName
+		scanPayload(n.payload, skipTopRef)
 	}
 
-	scanPayload = func(s *Schema) {
+	scanPayload = func(s *Schema, skipTopRef bool) {
 		if s == nil {
 			return
 		}
 
-		if e, ok := targets[s.Ref]; ok {
+		if e, ok := targets[s.Ref]; ok && !skipTopRef {
 			if onPayloadRef != nil {
 				onPayloadRef(e)
 			}
@@ -243,7 +256,7 @@ func (g *generator) walkReachable(
 		}
 
 		for _, child := range schemafield.Children(s) {
-			scanPayload(child)
+			scanPayload(child, false)
 		}
 	}
 
