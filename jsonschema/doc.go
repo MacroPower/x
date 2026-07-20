@@ -722,11 +722,13 @@
 // (true) or optional (false). The validator respects $vocabulary to gate keyword
 // groups: when a vocabulary is inactive, its keywords are silently skipped.
 //
-// The format-assertion vocabulary is an exception: because this implementation
-// recognizes it, its presence in a $vocabulary map asserts format regardless of
-// the true/false value. The boolean only governs implementations that do not
-// understand the vocabulary, so a metaschema with format-assertion: false still
-// asserts format here.
+// The boolean governs only implementations that do not understand the
+// vocabulary; it has no impact on ones that do (core §8.1.2). This
+// implementation understands every standard 2020-12 vocabulary, so a
+// recognized vocabulary is active whenever its URI appears in the map,
+// true or false alike: a metaschema with validation: false still asserts
+// type, and one with format-assertion: false still asserts format. A
+// vocabulary is inactive only when its URI is absent from the map.
 //
 // Vocabulary support is a Draft 2020-12 feature; under Draft 7 the full
 // built-in vocabulary set is always used and [WithVocabularies] and

@@ -840,7 +840,12 @@ the previous checker.
 ### Vocabularies
 
 Draft 2020-12 `$vocabulary` gates which keyword groups run: inactive
-vocabularies have their keywords silently skipped. Vocabulary resolution
+vocabularies have their keywords silently skipped. The `$vocabulary` boolean
+marks a vocabulary required (`true`) or optional (`false`) for implementations
+that do not recognize it and has no impact on ones that do, so a recognized
+vocabulary is active whenever its URI is listed, `true` or `false` alike (a
+metaschema with `format-assertion: false` still asserts format); a vocabulary
+is inactive only when its URI is absent. Vocabulary resolution
 priority is `WithVocabularies` (direct override) > `WithMetaSchemaResolver`
 (a `RefResolver` consulted with the root schema's `$schema` URI; a
 `SchemaMap` serves fixed metaschemas by exact `$id`, and `ChainResolvers`

@@ -57,23 +57,15 @@ func All() Set {
 	}
 }
 
-// Resolve converts a raw $vocabulary map to a Set.
+// Resolve converts a raw $vocabulary map to a Set. A recognized vocabulary is
+// activated by its mere presence in the map, regardless of the boolean value:
+// per core §8.1.2 the value marks the vocabulary required or optional for
+// implementations that do not understand it, and "has no impact if the
+// implementation understands the vocabulary". This implementation understands
+// every group Set tracks, so only an absent URI leaves a group inactive.
 func Resolve(vocabs map[string]bool) Set {
 	vs := Set{}
-	for uri, active := range vocabs {
-		// The format-assertion vocabulary is special: once an implementation
-		// recognizes it, format is asserted regardless of the true/false value.
-		// The boolean only governs implementations that do not understand the
-		// vocabulary (validation §7.2.2), so its mere presence enables assertion.
-		if uri == FormatAssertion2020 {
-			vs.FormatAssertion = true
-			continue
-		}
-
-		if !active {
-			continue
-		}
-
+	for uri := range vocabs {
 		switch uri {
 		case Applicator2020:
 			vs.Applicator = true
@@ -83,6 +75,8 @@ func Resolve(vocabs map[string]bool) Set {
 			vs.Unevaluated = true
 		case Content2020:
 			vs.Content = true
+		case FormatAssertion2020:
+			vs.FormatAssertion = true
 		}
 	}
 
