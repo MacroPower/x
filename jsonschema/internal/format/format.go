@@ -1052,11 +1052,45 @@ func validateIRIReference(s string) error {
 	return validateURIRef(s, containsInvalidIRIChars, "IRI")
 }
 
-// containsInvalidIRIChars checks for characters forbidden by RFC 3987.
-// Unlike URIs, IRIs allow non-ASCII Unicode characters, so only the shared
-// forbidden set applies.
+// containsInvalidIRIChars checks for characters forbidden by RFC 3987. Unlike
+// URIs, IRIs allow non-ASCII Unicode characters, but only within the RFC 3987
+// sets: iunreserved admits ucschar, and the private-use iprivate set is
+// admitted only in the iquery component (neither ipath nor ifragment has an
+// iprivate production). Every other non-ASCII code point -- the noncharacter
+// gaps (U+FDD0-FDEF, U+FFF0-FFFD plus the plane-final U+FFFE/U+FFFF pairs)
+// and the U+E0000-E0FFF tags-plane gap -- is rejected anywhere. Ill-formed
+// UTF-8 decodes to U+FFFD, which the noncharacter-adjacent bounds already
+// exclude, and range decoding never yields surrogates.
 func containsInvalidIRIChars(s string) bool {
-	return containsForbiddenURIIRIChars(s, false)
+	// Locate the query component: from just after the first '?' preceding any
+	// '#' up to that '#' (or the end of the string). A '?' inside the fragment
+	// does not open a query.
+	end := len(s)
+	if frag := strings.IndexByte(s, '#'); frag >= 0 {
+		end = frag
+	}
+
+	qStart := -1
+	if q := strings.IndexByte(s[:end], '?'); q >= 0 {
+		qStart = q + 1
+	}
+
+	for i, c := range s {
+		if isForbiddenURIIRIChar(c) {
+			return true
+		}
+
+		if c < 0xA0 {
+			continue
+		}
+
+		inQuery := qStart >= 0 && i >= qStart && i < end
+		if !isUcschar(c) && (!inQuery || !isIprivate(c)) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // validateURITemplate validates a URI Template per RFC 6570. It checks for
