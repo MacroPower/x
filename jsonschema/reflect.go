@@ -244,6 +244,15 @@ func (g *generator) schemaForType(t reflect.Type, nullable bool) (*node, error) 
 
 	t = numkind.DerefType(t)
 
+	// A nil interface marshals as null, so an interface position is nullable
+	// like a pointer. The bit matters only when a later step intercepts the
+	// interface with a non-empty schema (an override, a provider declaration,
+	// or a TextMarshaler method set): a plain interface reflects as {}, which
+	// already admits null, and render dedups the wrapper away.
+	if t.Kind() == reflect.Interface {
+		nullable = g.nullable
+	}
+
 	// A named type already registered in $defs is referenced again, not rebuilt:
 	// re-resolving it would re-run its provider, override, extender, and
 	// description hooks once per reference and discard every result after the
@@ -638,7 +647,7 @@ func (g *generator) schemaForKind(t reflect.Type, nullable bool) (*node, error) 
 		return g.scalarNode(&Schema{Type: typename.Number}, nullable), nil
 
 	case reflect.Interface:
-		return &node{kind: kindValue, payload: &Schema{}}, nil
+		return g.scalarNode(&Schema{}, nullable), nil
 
 	case reflect.Slice:
 		return g.schemaForSlice(t, nullable)
@@ -1087,21 +1096,6 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 						continue
 					}
 
-					if ft.Kind() == reflect.Interface {
-						// Embedded interface types: if they implement
-						// JSONSchemaProvider, compose via allOf. Otherwise,
-						// skip, since an unrestricted schema adds no useful info.
-						if g.needsAllOfComposition(ft) {
-							record(
-								allOfName(ft),
-								fieldLevel{field: f, depth: depth, optional: e.optional, composeAllOf: true},
-								false,
-							)
-						}
-
-						continue
-					}
-
 					if ft.Kind() == reflect.Struct {
 						// Check if this embedded struct needs to be composed via allOf.
 						if g.needsAllOfComposition(ft) {
@@ -1138,7 +1132,10 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 						continue
 					}
 
-					// Embedded non-struct type: treated as regular field with type name as key.
+					// Embedded non-struct type (interfaces included): encoding/json
+					// records it as a regular leaf field under the field name, never
+					// flattened, so it participates in normal shadowing and
+					// ambiguity resolution.
 					jsonName := ft.Name()
 					if jsonName == "" {
 						continue
@@ -1264,11 +1261,10 @@ func (g *generator) needsAllOfComposition(t reflect.Type) bool {
 		return true
 	}
 
-	// Check JSONSchemaProvider. An interface type's method set can include
-	// JSONSchema, but callProvider cannot instantiate an interface to call it and
-	// returns nil, which would compose a vacuous empty allOf branch. A genuine
-	// override for the interface is handled by resolveTypeSchema above.
-	if t.Kind() != reflect.Interface && implementsProvider(t) {
+	// Check JSONSchemaProvider. Only embedded structs reach this probe: an
+	// embedded interface is a regular leaf field (encoding/json never flattens
+	// it), so its schema resolves through schemaForType like any other field.
+	if implementsProvider(t) {
 		return true
 	}
 

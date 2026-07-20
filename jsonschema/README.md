@@ -157,7 +157,7 @@ entries never do.
 | `[]byte`                             | nullable base64-encoded `string` (`contentEncoding`) (see `WithNullable`)                                   |
 | `[N]T`                               | fixed-size array via `prefixItems` with `minItems`/`maxItems` = N                                           |
 | `map[K]V`                            | nullable `object` with `additionalProperties` (K: string, integer, or `TextMarshaler`) (see `WithNullable`) |
-| `any` / interface                    | unrestricted (`{}`)                                                                                         |
+| `any` / interface                    | unrestricted (`{}`); an intercepted interface schema admits `null` alongside (see `WithNullable`)           |
 | `struct`                             | `object` with `properties`, `required`, and `additionalProperties: false`                                   |
 
 Well-known types have built-in overrides matched by exact `reflect.Type`:
@@ -439,7 +439,8 @@ Fields follow `encoding/json` conventions: the `json` tag sets the property
 name, `json:"-"` excludes a field (`json:"-,"` uses the literal name `"-"`),
 `omitempty` and `omitzero` drop the field from `required`, and `json:",string"`
 forces a `{"type":"string"}` schema for applicable types. Embedded structs
-without a `json` tag have their fields promoted; embedded types intercepted by
+without a `json` tag have their fields promoted; embedded struct types
+intercepted by
 an earlier resolution step are composed via `allOf` (wrapped as
 `anyOf[schema, {}]` for a pointer embed, since a nil pointer contributes
 nothing to the marshaled object). A provider schema (registered or on-type)
@@ -447,7 +448,10 @@ used for such an embedded type must leave the object
 open (no `additionalProperties: false`), since `allOf` evaluates each branch
 against the whole object: a closed branch rejects the parent's sibling
 properties and the generated schema then rejects the struct's own marshaled
-JSON.
+JSON. Embedded non-struct types, interfaces included, are regular leaf fields
+keyed by the field name, exactly as `encoding/json` records them: the key is
+always emitted (`null` for a nil interface), so an intercepted interface
+schema admits `null` alongside.
 
 ### Comment extraction
 

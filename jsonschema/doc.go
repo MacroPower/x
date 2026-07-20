@@ -152,12 +152,17 @@
 //     K must be string, an integer type, or implement [encoding.TextMarshaler];
 //     other key types return [ErrUnsupportedMapKey].
 //   - Interfaces: any interface type produces an unrestricted schema ({}).
+//     A nil interface marshals as null, so an interface whose schema an
+//     earlier resolution step intercepts (a registered override, or a
+//     [encoding.TextMarshaler] method set) admits null alongside the
+//     intercepted schema, like a pointer.
 //   - Structs: produce objects with properties, required, and
 //     additionalProperties: false by default.
 //
-// The "nullable" behavior of pointers, slices, maps, and []byte above is the
-// default; [WithNullable](false) drops the null branch so *T yields the bare
-// value schema, []T yields {"type":"array"}, and map yields {"type":"object"}.
+// The "nullable" behavior of pointers, slices, maps, []byte, and intercepted
+// interfaces above is the default; [WithNullable](false) drops the null branch
+// so *T yields the bare value schema, []T yields {"type":"array"}, and map
+// yields {"type":"object"}.
 //
 // Well-known types have built-in overrides: [time.Time] maps to
 // {"type": "string", "format": "date-time"}, [encoding/json.RawMessage] to {},
@@ -214,8 +219,9 @@
 // reflection-generated schema after it is built. If both are implemented, only
 // [JSONSchemaProvider] is used. Both value and pointer receivers are checked.
 // A provider declared only in an interface's method set is not consulted, since
-// an interface value cannot be instantiated to call it; an embedded interface
-// of that shape is skipped rather than composed into an empty allOf branch.
+// an interface value cannot be instantiated to call it; such an interface
+// produces the unrestricted schema ({}), extracted to $defs like any other
+// provider-implementing named type.
 // Both methods return an error, which aborts generation, for an
 // implementation that cannot produce or adjust its schema; a panic is still
 // recovered and wrapped with [ErrProviderPanic] as a backstop.
@@ -322,8 +328,9 @@
 // them from the output. A struct whose method set includes a MarshalJSON or
 // MarshalText promoted from an embedded field is not reflected field by field
 // at all; the promoted marshaler serializes the whole outer value (see the
-// resolution priority above). Embedded types intercepted by earlier priority
-// chain steps (a registered [TypeSchemaProvider] or [JSONSchemaProvider]) are
+// resolution priority above). Embedded struct types intercepted by earlier
+// priority chain steps (a registered [TypeSchemaProvider] or
+// [JSONSchemaProvider]) are
 // composed via allOf rather than having their fields promoted; an embed reached
 // through a pointer composes as anyOf[schema, {}] instead, since a nil pointer
 // contributes nothing to the marshaled object. A provider schema (registered or
@@ -340,9 +347,14 @@
 // pointer-to-non-struct types are handled the same way, with the pointer
 // adding nullability.
 //
-// Embedded interface types produce an unrestricted schema ({}) since their
-// concrete type is unknowable at compile time. If the interface type
-// implements [JSONSchemaProvider], that schema is composed via allOf.
+// Embedded interface types are regular leaf fields too, keyed by the field
+// name: [encoding/json] never flattens them, and always emits the key (null
+// for a nil interface, the concrete value otherwise). A plain interface
+// produces an unrestricted schema ({}) since its concrete type is unknowable
+// at compile time; an interface intercepted by an earlier resolution step (a
+// registered override, or a [encoding.TextMarshaler] method set) uses the
+// intercepted schema with null admitted alongside. Unexported embedded
+// interfaces, like all unexported embedded non-struct types, are excluded.
 //
 // Field shadowing and ambiguity follow [encoding/json] rules: outer fields
 // shadow inner fields of the same name, and ambiguous fields at the same

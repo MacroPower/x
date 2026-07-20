@@ -6237,7 +6237,7 @@ type HasEmbeddedInterface struct {
 	Name string `json:"name"`
 }
 
-func TestGenerateFor_EmbeddedInterfaceSkipped(t *testing.T) {
+func TestGenerateFor_EmbeddedInterfaceLeafField(t *testing.T) {
 	t.Parallel()
 
 	s, err := jsonschema.GenerateFor[HasEmbeddedInterface](t.Context())
@@ -6246,14 +6246,17 @@ func TestGenerateFor_EmbeddedInterfaceSkipped(t *testing.T) {
 	got, err := json.Marshal(s)
 	require.NoError(t, err)
 
-	// Embedded interface without JSONSchemaProvider is skipped.
+	// Encoding/json records an embedded interface as a regular leaf field under
+	// the field name (never flattened), always emitting the key: null when nil,
+	// the concrete value otherwise. The property is the unrestricted schema.
 	assert.JSONEq(t, `{
 		"$schema":"https://json-schema.org/draft/2020-12/schema",
 		"type":"object",
 		"properties":{
+			"Stringer":true,
 			"name":{"type":"string"}
 		},
-		"required":["name"],
+		"required":["Stringer","name"],
 		"additionalProperties":false
 	}`, string(got))
 }
@@ -6276,9 +6279,10 @@ func TestGenerateFor_EmbeddedInterfaceWithProvider(t *testing.T) {
 	require.NoError(t, err)
 
 	// SchemaInterface declares JSONSchemaProvider, but an interface cannot be
-	// instantiated to call it (callProvider returns nil), so the embed is skipped
-	// rather than composed into a vacuous allOf:[{}] branch that constrains
-	// nothing.
+	// instantiated to call it (callProvider returns nil), so its schema is
+	// unrestricted. The embed is a regular leaf field under the field name, and
+	// the provider-implementing named interface extracts to $defs like any other
+	// provider-implementing named type.
 	assert.Empty(t, s.AllOf, "schema: %s", marshalSchema(t, s))
 
 	got, err := json.Marshal(s)
@@ -6287,16 +6291,19 @@ func TestGenerateFor_EmbeddedInterfaceWithProvider(t *testing.T) {
 	assert.JSONEq(t, `{
 		"$schema":"https://json-schema.org/draft/2020-12/schema",
 		"type":"object",
-		"properties":{"extra":{"type":"string"}},
-		"required":["extra"],
+		"properties":{
+			"SchemaInterface":{"$ref":"#/$defs/SchemaInterface"},
+			"extra":{"type":"string"}
+		},
+		"$defs":{"SchemaInterface":true},
+		"required":["SchemaInterface","extra"],
 		"additionalProperties":false
 	}`, string(got))
 }
 
-// textMarshalerIface is an interface whose method set includes
-// encoding.TextMarshaler. An interface cannot serialize as a string the way a
-// concrete TextMarshaler does, so an embed of it must be skipped, not composed
-// into an unsatisfiable allOf:[{"type":"string"}] branch.
+// textMarshalerIface is an unexported interface whose method set includes
+// encoding.TextMarshaler. As an unexported embedded non-struct field it is
+// excluded entirely, matching encoding/json.
 type textMarshalerIface interface {
 	encoding.TextMarshaler
 }
@@ -6319,9 +6326,8 @@ func TestGenerateFor_EmbeddedTextMarshalerInterfaceSkipped(t *testing.T) {
 	s, err := jsonschema.GenerateFor[embedsTextMarshalerIface](t.Context())
 	require.NoError(t, err)
 
-	// The embed matches TextMarshaler only through the interface method set, so
-	// it is skipped rather than composed into an allOf branch that would make the
-	// schema unsatisfiable.
+	// The embed is an unexported embedded non-struct field, so it is excluded,
+	// matching encoding/json: no property and no allOf branch.
 	assert.Empty(t, s.AllOf, "schema: %s", marshalSchema(t, s))
 
 	got, err := json.Marshal(s)
