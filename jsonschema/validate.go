@@ -394,7 +394,9 @@ func newValidator(ctx context.Context, schema *Schema, opts []ValidateOption) (*
 		v.draft = *v.draftOverride
 	}
 
-	// Resolve active vocabularies.
+	// Resolve active vocabularies. The metaschema resolver reads the compile
+	// context from the ctx field set above, not a threaded parameter.
+	//nolint:contextcheck // See the comment above.
 	err := v.resolveVocabularies()
 	if err != nil {
 		return nil, err
@@ -506,7 +508,10 @@ func (v *validator) resolveVocabularies() error {
 	fromOverride := rawVocabs != nil
 
 	if rawVocabs == nil && v.metaSchemaResolver != nil && v.root.Schema != "" {
-		ms, err := v.metaSchemaResolver.ResolveRef(v.ctx, v.root.Schema)
+		// The lookup goes through runContext, not the raw ctx field: hook
+		// invocations always receive a normalized context, matching the
+		// remote-fetch and loader call sites.
+		ms, err := v.metaSchemaResolver.ResolveRef(v.runContext(), v.root.Schema)
 		if err != nil && !errors.Is(err, ErrNotResolved) {
 			return fmt.Errorf("resolve metaschema %q: %w", v.root.Schema, err)
 		}
