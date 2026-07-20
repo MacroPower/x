@@ -68,7 +68,10 @@
 // A json:",string" numeric or bool field serializes its value as a quoted
 // string, so the generated schema has type string. Scalar value rules (eq, ne,
 // oneof, len, and required's non-zero check) compare against that serialized
-// form. Numeric bounds (min, max, gt, lt, gte, lte) have no faithful mapping
+// form: each value is parsed against the field's Go type (keeping the range
+// check above) and re-serialized, so a non-canonical spelling such as eq=5.0
+// or eq=1e2 constrains the canonical text ("5", "100") the field actually
+// emits. Numeric bounds (min, max, gt, lt, gte, lte) have no faithful mapping
 // onto the serialized string -- minimum and friends constrain JSON numbers, not
 // the quoted instance -- so they are rejected with an error rather than silently
 // dropped as an inert numeric keyword on a string schema.

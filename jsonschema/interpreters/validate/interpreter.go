@@ -2,6 +2,7 @@ package validate
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -157,35 +158,14 @@ func applyValidator(key, value string, s, parent *jsonschema.Schema, fieldName s
 	// string, so the generator emits a string schema. Value-equality constraints
 	// must compare against that serialized form; dispatching on the raw Go kind
 	// would stamp a numeric or bool const/enum onto a string schema that no
-	// instance can match. Route eq/ne/oneof through the string path. True bound
-	// and length constraints keep their kind dispatch.
+	// instance can match. Route eq/ne/oneof through the string path, with each
+	// value parsed against the real kind and re-serialized to its canonical
+	// form (see [canonicalCoercedScalar]). True bound and length constraints
+	// keep their kind dispatch.
 	if isStringCoercedValue(s, baseType) {
-		switch key {
-		case "eq", "ne", "oneof":
-			baseType = reflect.TypeFor[string]()
-		case "len":
-			// A len=N on a numeric field means the value equals N (the same
-			// scalar const as eq=N, per the doc contract), not a length. On a
-			// coerced field that const must be the serialized string, so route
-			// through the string eq path; the numeric kind dispatch would stamp
-			// a numeric const no quoted instance can ever match. A coerced bool
-			// keeps the main switch's unsupported-len error.
-			if isNumericKind(baseType) {
-				return applyStringEq(s, value)
-			}
-
-		case "min", "gte", "max", "lte", "gt", "lt":
-			// A numeric bound has no faithful mapping onto the serialized string:
-			// minimum and friends constrain JSON numbers, so they are inert
-			// against the quoted-string instance a json:",string" field produces,
-			// and JSON Schema has no keyword for "the numeric value of this string
-			// is >= N" (length keywords measure characters, not magnitude).
-			// Stamping the numeric keyword would silently drop the bound, so it is
-			// rejected instead. A coerced bool keeps the main switch's
-			// unsupported-bound error.
-			if isNumericKind(baseType) {
-				return fmt.Errorf("validate tag: %q not supported on a json:\",string\" coerced numeric field", key)
-			}
+		handled, err := applyCoercedValidator(key, value, s, baseType)
+		if handled || err != nil {
+			return err
 		}
 	}
 
@@ -548,6 +528,140 @@ func dropElementBoundsForConstEnum(s *jsonschema.Schema) {
 // against the serialized string, not the underlying numeric or bool value.
 func isStringCoercedValue(s *jsonschema.Schema, baseType reflect.Type) bool {
 	return schemaPermitsString(s) && (isNumericKind(baseType) || isBoolKind(baseType))
+}
+
+// applyCoercedValidator handles the validators whose json:",string" coerced
+// form differs from their kind dispatch. It reports whether the validator was
+// fully handled; an unhandled one (for example len or a bound on a coerced
+// bool, or any non-scalar validator) falls through to the main kind dispatch.
+func applyCoercedValidator(key, value string, s *jsonschema.Schema, baseType reflect.Type) (bool, error) {
+	switch key {
+	case "eq":
+		canonical, err := canonicalCoercedScalar(value, baseType)
+		if err != nil {
+			return true, fmt.Errorf("validate tag: eq: %w", err)
+		}
+
+		return true, applyStringEq(s, canonical)
+
+	case "ne":
+		canonical, err := canonicalCoercedScalar(value, baseType)
+		if err != nil {
+			return true, fmt.Errorf("validate tag: ne: %w", err)
+		}
+
+		applyStringNe(s, canonical)
+
+		return true, nil
+
+	case "oneof":
+		return true, applyCoercedOneOf(s, value, baseType)
+
+	case "len":
+		// A len=N on a numeric field means the value equals N (the same
+		// scalar const as eq=N, per the doc contract), not a length. On a
+		// coerced field that const must be the serialized string, so route
+		// through the string eq path; the numeric kind dispatch would stamp
+		// a numeric const no quoted instance can ever match. A coerced bool
+		// keeps the main switch's unsupported-len error.
+		if isNumericKind(baseType) {
+			canonical, err := canonicalCoercedScalar(value, baseType)
+			if err != nil {
+				return true, fmt.Errorf("validate tag: len: %w", err)
+			}
+
+			return true, applyStringEq(s, canonical)
+		}
+
+	case "min", "gte", "max", "lte", "gt", "lt":
+		// A numeric bound has no faithful mapping onto the serialized string:
+		// minimum and friends constrain JSON numbers, so they are inert
+		// against the quoted-string instance a json:",string" field produces,
+		// and JSON Schema has no keyword for "the numeric value of this string
+		// is >= N" (length keywords measure characters, not magnitude).
+		// Stamping the numeric keyword would silently drop the bound, so it is
+		// rejected instead. A coerced bool keeps the main switch's
+		// unsupported-bound error.
+		if isNumericKind(baseType) {
+			return true, fmt.Errorf("validate tag: %q not supported on a json:\",string\" coerced numeric field", key)
+		}
+	}
+
+	return false, nil
+}
+
+// canonicalCoercedScalar parses a scalar eq/ne/oneof/len parameter against the
+// field's real numeric or bool kind and returns the text the field's value
+// serializes to. Parsing at the real kind keeps the documented range check
+// (eq=200 on an int8 is an error instead of an unsatisfiable const), and
+// re-serializing canonicalizes the spellings go-playground accepts but
+// encoding/json never emits: "5.0", "+5", and "1e2" all become their canonical
+// number text, so the constraint matches the instance the field produces. The
+// parsed value is converted back to the field's Go type and marshaled, so a
+// string-marshaling type contributes its own serialized form; a quoted result
+// is unquoted to the content the generated string schema compares against.
+func canonicalCoercedScalar(value string, baseType reflect.Type) (string, error) {
+	var parsed any
+
+	if isBoolKind(baseType) {
+		// Inlined rather than reusing parseBool: its error already carries the
+		// "validate tag:" prefix the caller adds.
+		switch value {
+		case "true":
+			parsed = true
+		case "false":
+			parsed = false
+		default:
+			return "", fmt.Errorf("invalid boolean %q", value)
+		}
+	} else {
+		p, err := parseNumericValue(value, baseType)
+		if err != nil {
+			return "", err
+		}
+
+		parsed = p
+	}
+
+	out, err := json.Marshal(reflect.ValueOf(parsed).Convert(baseType).Interface())
+	if err != nil {
+		return "", fmt.Errorf("cannot serialize %q as %s: %w", value, baseType, err)
+	}
+
+	if len(out) > 0 && out[0] == '"' {
+		var unquoted string
+
+		err := json.Unmarshal(out, &unquoted)
+		if err != nil {
+			return "", fmt.Errorf("cannot serialize %q as %s: %w", value, baseType, err)
+		}
+
+		return unquoted, nil
+	}
+
+	return string(out), nil
+}
+
+// applyCoercedOneOf applies oneof on a json:",string" coerced field: each
+// space-separated value parses against the real base kind (keeping the range
+// check) and its canonical serialized form becomes the enum member.
+func applyCoercedOneOf(s *jsonschema.Schema, value string, baseType reflect.Type) error {
+	vals := splitOneOfValues(value)
+	if len(vals) == 0 {
+		return fmt.Errorf("validate tag: oneof requires at least one value")
+	}
+
+	enum := make([]any, len(vals))
+	for i, v := range vals {
+		canonical, err := canonicalCoercedScalar(v, baseType)
+		if err != nil {
+			return fmt.Errorf("validate tag: oneof: %w", err)
+		}
+
+		enum[i] = canonical
+	}
+
+	return setOneOfEnum(s, enum)
 }
 
 // applyEq applies eq constraint based on the type. A non-numeric, non-bool,
