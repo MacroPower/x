@@ -589,7 +589,10 @@ func isAllDigits(s string) bool {
 func validateURIAbs(s string, badChars func(string) bool, label string) error {
 	u, err := url.Parse(s)
 	if err != nil {
-		return fmt.Errorf("invalid %s", label)
+		u = reparseIPvFutureHost(s)
+		if u == nil {
+			return fmt.Errorf("invalid %s", label)
+		}
 	}
 
 	if u.Scheme == "" {
@@ -617,7 +620,10 @@ func validateURIAbs(s string, badChars func(string) bool, label string) error {
 func validateURIRef(s string, badChars func(string) bool, label string) error {
 	u, err := url.Parse(s)
 	if err != nil {
-		return fmt.Errorf("invalid %s reference", label)
+		u = reparseIPvFutureHost(s)
+		if u == nil {
+			return fmt.Errorf("invalid %s reference", label)
+		}
 	}
 
 	if badChars(s) {
@@ -653,6 +659,91 @@ func validURIDelims(s, host string) bool {
 	}
 
 	return strings.Count(s, "[") == want && strings.Count(s, "]") == want
+}
+
+// reparseIPvFutureHost works around net/url's missing support for the RFC
+// 3986 IPvFuture host literal (IP-literal = "[" ( IPv6address / IPvFuture )
+// "]"): [url.Parse] validates a bracketed host strictly as an IP address, so a
+// syntactically valid "[v1.x]" authority fails to parse. When s contains a
+// bracketed segment matching the IPvFuture production, the URL is re-parsed
+// with that literal swapped for a placeholder IPv6 literal and the result
+// returned for the remaining checks (which still run on the original string
+// where they are character-based: every IPvFuture character is a legal URI
+// character, and the placeholder keeps the host bracketed so the IP-literal
+// bracket accounting is unchanged). It returns nil when no such literal is
+// present or the re-parse fails too.
+func reparseIPvFutureHost(s string) *url.URL {
+	start := strings.IndexByte(s, '[')
+	if start < 0 {
+		return nil
+	}
+
+	end := strings.IndexByte(s[start:], ']')
+	if end < 0 {
+		return nil
+	}
+
+	end += start
+
+	if !isIPvFuture(s[start+1 : end]) {
+		return nil
+	}
+
+	u, err := url.Parse(s[:start] + "[::1]" + s[end+1:])
+	if err != nil {
+		return nil
+	}
+
+	return u
+}
+
+// isIPvFuture reports whether lit (the text between the brackets of an
+// IP-literal) matches the RFC 3986 IPvFuture production: "v" 1*HEXDIG "."
+// 1*( unreserved / sub-delims / ":" ). The "v" is case-insensitive, as ABNF
+// string literals are (RFC 5234 §2.3).
+func isIPvFuture(lit string) bool {
+	if lit == "" || (lit[0] != 'v' && lit[0] != 'V') {
+		return false
+	}
+
+	i := 1
+	for i < len(lit) && isHexDigit(lit[i]) {
+		i++
+	}
+
+	if i == 1 || i >= len(lit) || lit[i] != '.' {
+		return false
+	}
+
+	tail := lit[i+1:]
+	if tail == "" {
+		return false
+	}
+
+	for j := range len(tail) {
+		if !isIPvFutureTailChar(tail[j]) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// isIPvFutureTailChar reports whether c may appear after the dot in an
+// IPvFuture literal: unreserved / sub-delims / ":".
+func isIPvFutureTailChar(c byte) bool {
+	if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') {
+		return true
+	}
+
+	switch c {
+	case '-', '.', '_', '~', // unreserved
+		'!', '$', '&', '\'', '(', ')', '*', '+', ',', ';', '=', // sub-delims
+		':':
+		return true
+	}
+
+	return false
 }
 
 // validateURI validates an absolute URI per RFC 3986.
