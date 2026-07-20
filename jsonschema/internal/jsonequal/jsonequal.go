@@ -8,13 +8,17 @@
 // through a guarded local walk that compares numbers via their canonical
 // decomposition (exact at any size); otherwise it delegates to the upstream for
 // full JSON semantics. Non-finite floats (NaN, ±Inf) are treated as unequal to
-// everything, including themselves, matching the numeric-bound keywords.
+// everything, including themselves, matching the numeric-bound keywords. Cyclic
+// values (containers that contain themselves, which have no JSON serialization)
+// are likewise unequal to everything, including themselves, and are detected up
+// front so the walks terminate instead of overflowing the stack.
 package jsonequal
 
 import (
 	"encoding/json"
 	"math"
 	"math/big"
+	"reflect"
 	"slices"
 
 	"github.com/google/jsonschema-go/jsonschema"
@@ -129,6 +133,17 @@ func EqualWithRat(schemaVal any, schemaRat *big.Rat, instance any) bool {
 // through a guarded local walk; otherwise it delegates to [jsonschema.Equal]
 // for full upstream semantics.
 func equalJSONValues(a, b any) bool {
+	// A cyclic value (a container that contains itself) has no JSON
+	// serialization, so it is unequal to everything, including itself. This
+	// check must run first: every other walk here (containsNonFiniteFloat,
+	// containsUnboundedNumber, equalGuarded, and the upstream
+	// [jsonschema.Equal]) assumes a finite tree and would recurse without
+	// bound on a cycle, aborting the process with a fatal stack overflow that
+	// recover cannot catch.
+	if containsCycle(a) || containsCycle(b) {
+		return false
+	}
+
 	// A non-finite float64 (NaN, +Inf, -Inf) is not a representable JSON number,
 	// and upstream's big.Rat.SetFloat64 collapses all three (and zero) toward the
 	// same value, so jsonschema.Equal would report NaN==NaN, +Inf==-Inf, and
@@ -144,6 +159,61 @@ func equalJSONValues(a, b any) bool {
 	}
 
 	return jsonschema.Equal(a, b)
+}
+
+// containsCycle reports whether v is or contains a self-referential []any or
+// map[string]any: a container that is, directly or transitively, its own
+// ancestor. The internal/normalize package deliberately tolerates such
+// instances (its cycle guard stops at the back-edge and keeps the value), so
+// they can reach the equality and hash walks here, which otherwise assume
+// finite trees and would recurse without bound. A cyclic value has no JSON
+// serialization, so
+// callers treat it like a non-finite float: unequal to everything, including
+// itself. Other container kinds cannot appear inside a decoded or normalized
+// JSON instance, so only these two shapes need walking.
+func containsCycle(v any) bool {
+	return containsCycleOnPath(v, map[[2]uintptr]bool{})
+}
+
+// containsCycleOnPath is the recursive core of [containsCycle]. It mirrors
+// internal/normalize's guard: the on-path set keys on {data pointer, len}
+// rather than the pointer alone, so a reslice sharing its parent's data
+// pointer is not mistaken for a back-edge, and entries are removed on exit so
+// shared (DAG) substructure is not reported as a cycle.
+func containsCycleOnPath(v any, onPath map[[2]uintptr]bool) bool {
+	switch val := v.(type) {
+	case []any:
+		key := [2]uintptr{reflect.ValueOf(val).Pointer(), uintptr(len(val))}
+		if onPath[key] {
+			return true
+		}
+
+		onPath[key] = true
+		defer delete(onPath, key)
+
+		for _, item := range val {
+			if containsCycleOnPath(item, onPath) {
+				return true
+			}
+		}
+
+	case map[string]any:
+		key := [2]uintptr{reflect.ValueOf(val).Pointer(), uintptr(len(val))}
+		if onPath[key] {
+			return true
+		}
+
+		onPath[key] = true
+		defer delete(onPath, key)
+
+		for _, item := range val {
+			if containsCycleOnPath(item, onPath) {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 // containsNonFiniteFloat reports whether v, or any element of an []any or
@@ -304,7 +374,9 @@ func guardedNumberEqual(n json.Number, b any) bool {
 // those properties once rather than re-walking both operands on every pair. The
 // dispatch is identical to equalJSONValues: a non-finite operand is unequal to
 // everything; an unbounded operand routes through the guarded comparison;
-// otherwise the full upstream semantics apply.
+// otherwise the full upstream semantics apply. Both operands must be acyclic;
+// the caller screens cyclic values out (see [containsCycle]) before
+// classification, since every walk here assumes a finite tree.
 func equalClassified(a any, aNonFinite, aUnbounded bool, b any, bNonFinite, bUnbounded bool) bool {
 	if aNonFinite || bNonFinite {
 		return false
@@ -318,6 +390,8 @@ func equalClassified(a any, aNonFinite, aUnbounded bool, b any, bNonFinite, bUnb
 }
 
 // HasDuplicates checks for duplicate values using JSON-semantic equality.
+// A cyclic element (see [containsCycle]) is unequal to everything, including
+// itself, so it never counts as a duplicate.
 func HasDuplicates(arr []any) bool {
 	// Each array element is classified once for the two properties equalJSONValues
 	// would otherwise re-derive by walking both operands on every pair: whether it
@@ -332,6 +406,14 @@ func HasDuplicates(arr []any) bool {
 	seen := make(map[uint64][]entry, len(arr))
 
 	for _, item := range arr {
+		// A cyclic element is unequal to everything, including itself (see
+		// containsCycle), so it can never form a duplicate. It must be
+		// screened out before the classification and hash walks below, which
+		// assume finite trees and would otherwise recurse without bound.
+		if containsCycle(item) {
+			continue
+		}
+
 		nonFinite := containsNonFiniteFloat(item)
 		// A non-finite operand is never equal to anything, so its unboundedness is
 		// never consulted; skip that walk.
