@@ -1020,6 +1020,37 @@ func Compile(ctx context.Context, schema *Schema, opts ...ValidateOption) (*Vali
 		return nil, fmt.Errorf("schema resolve: %w", err)
 	}
 
+	// The resolve-error gate above may have materialized $ref targets through
+	// the JSON-pointer fallback: schemas carried inside unknown keywords or
+	// non-applicator keyword internals, which the typed root pass never reaches
+	// and which never join refReg.URI. The structural checks extend to them
+	// here exactly as the loop below extends them to fetched remotes, so a
+	// fallback target carrying an invalid type name, a negative bound, or a
+	// Draft-7 items array fails compilation instead of silently mis-validating.
+	// Each target's locator names the pointer that materialized it, and the
+	// shared visited sets keep every node checked once. The precompute caches
+	// are deliberately not extended: a validation run re-materializes fallback
+	// targets as fresh objects, so pointer-keyed caches built here could never
+	// be hit.
+	for _, ft := range v.refSession.FallbackTargets() {
+		err = checkTypeNames(ft.Schema, ft.Locator, typeVisited)
+		if err != nil {
+			return nil, err
+		}
+
+		err = checkNonNegativeBounds(ft.Schema, ft.Locator, boundsVisited)
+		if err != nil {
+			return nil, err
+		}
+
+		if v.draft == Draft2020 {
+			err = checkItemsArrayDraft2020(ft.Schema, ft.Locator, itemsVisited)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+
 	// Resolve may have fetched and registered remote documents in uriRegistry
 	// after the passes above ran over the root subtree. Two things must extend to
 	// them, in key-sorted order so a reported violation locates a stable document:

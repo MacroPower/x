@@ -2,6 +2,7 @@ package refresolve
 
 import (
 	"maps"
+	"strings"
 
 	"github.com/google/jsonschema-go/jsonschema"
 
@@ -27,6 +28,12 @@ type Session struct {
 	fallbackURI      map[string]*jsonschema.Schema
 	fallbackAnchor   map[string]*jsonschema.Schema
 	fallbackBaseURIs map[*jsonschema.Schema]string
+
+	// The schemas the JSON-pointer fallback materialized this session, in
+	// materialization order, each with the location that produced it. The
+	// compile-time gate's session exposes them via [Session.FallbackTargets] so
+	// content checks extend to exactly the schemas the gate resolved.
+	fallbackTargets []FallbackTarget
 
 	refCache         map[refCacheKey]Result
 	jsonPointerCache map[jsonPointerKey]*jsonschema.Schema
@@ -224,11 +231,48 @@ func (s *Session) resolveJSONPointerViaJSON(root *jsonschema.Schema, segments []
 	target, base := jsonptr.SchemaAtJSONPointer(root, segments, s.SchemaBase(root), !s.reg.inertIDs)
 	if target != nil {
 		s.RegisterFallback(target, base)
+
+		s.fallbackTargets = append(s.fallbackTargets, FallbackTarget{
+			Schema:  target,
+			Locator: s.SchemaBase(root) + "#" + displayPointer(segments),
+		})
 	}
 
 	s.jsonPointerCache[key] = target
 
 	return target
+}
+
+// FallbackTarget pairs a schema the JSON-pointer fallback materialized with the
+// location it was resolved from, so a compile-time caller can run content
+// checks over exactly the schemas the resolve-error gate materialized.
+type FallbackTarget struct {
+	// Schema is the freshly-unmarshaled schema at the pointer target.
+	Schema *jsonschema.Schema
+	// Locator is the target's location for error paths: the base URI of the
+	// document it was resolved within (possibly empty), "#", and the RFC 6901
+	// pointer that located it.
+	Locator string
+}
+
+// FallbackTargets returns the schemas the JSON-pointer fallback materialized in
+// this session, in materialization order. The order is deterministic within a
+// run because resolution follows the deterministic sub-schema traversal.
+func (s *Session) FallbackTargets() []FallbackTarget {
+	return s.fallbackTargets
+}
+
+// displayPointer renders decoded JSON Pointer segments back into an RFC 6901
+// pointer for error locations, escaping each reference token.
+func displayPointer(segments []string) string {
+	var b strings.Builder
+
+	for _, seg := range segments {
+		b.WriteByte('/')
+		b.WriteString(jsonptr.Escape(seg))
+	}
+
+	return b.String()
 }
 
 // RegisterFallback walks a schema materialized by the JSON-pointer fallback (or
