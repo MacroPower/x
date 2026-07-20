@@ -2563,6 +2563,64 @@ func TestGenerateFor_JsonStringOverridesRef(t *testing.T) {
 		"the overridden type must not leave an orphan $defs entry")
 }
 
+func TestGenerateFor_HookAuthoredRefKeepsDefAlive(t *testing.T) {
+	t.Parallel()
+
+	// Field A's type= tag detaches the generator's own $ref to Status, but the
+	// WithTypeSchema override on field B's type carries a raw $ref to
+	// #/$defs/Status as payload data. Reachability must follow that authored
+	// ref string, or the emitted schema would reference a pruned definition.
+	type Link string
+
+	type Container struct {
+		A Status `json:"a" jsonschema:"type=string"`
+		B Link   `json:"b"`
+	}
+
+	s, err := jsonschema.GenerateFor[Container](t.Context(),
+		jsonschema.WithTypeSchemaFor[Link](&jsonschema.Schema{Ref: "#/$defs/Status"}),
+	)
+	require.NoError(t, err)
+
+	assert.Equal(t, "string", s.Properties["a"].Type)
+	require.Contains(t, s.Defs, "Status",
+		"the def referenced only by the override's authored $ref must survive")
+
+	_, err = jsonschema.Compile(t.Context(), s)
+	require.NoError(t, err, "the authored $ref must resolve in the emitted schema")
+}
+
+// selfRefKeptNode's extender authors a raw $ref back to the type's own $defs
+// entry (a hand-built recursive parent link), so root inlining must keep the
+// def and leave the root a $ref; inlining would leave the authored ref
+// dangling.
+type selfRefKeptNode struct {
+	Name string `json:"name"`
+}
+
+func (selfRefKeptNode) JSONSchemaExtend(_ context.Context, _ jsonschema.TypeContext, s *jsonschema.Schema) error {
+	s.Properties["parent"] = &jsonschema.Schema{Ref: "#/$defs/selfRefKeptNode"}
+
+	return nil
+}
+
+func TestGenerateFor_ExtenderAuthoredSelfRefKeepsDef(t *testing.T) {
+	t.Parallel()
+
+	s, err := jsonschema.GenerateFor[selfRefKeptNode](t.Context())
+	require.NoError(t, err)
+
+	require.Contains(t, s.Defs, "selfRefKeptNode",
+		"the def targeted by the extender's authored $ref must survive root inlining")
+	assert.Equal(t, "#/$defs/selfRefKeptNode", s.Ref)
+
+	validator, err := jsonschema.Compile(t.Context(), s)
+	require.NoError(t, err, "the authored $ref must resolve in the emitted schema")
+
+	assert.NoError(t, validator.ValidateJSON(t.Context(),
+		[]byte(`{"name":"a","parent":{"name":"b"}}`)))
+}
+
 func TestGenerateFor_NullablePointerJSONStringConstAcceptsNull(t *testing.T) {
 	t.Parallel()
 

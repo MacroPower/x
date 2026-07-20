@@ -2,6 +2,8 @@ package jsonschema
 
 import (
 	"reflect"
+
+	"go.jacobcolvin.com/x/jsonschema/internal/schemafield"
 )
 
 // nodeKind classifies an IR node by the JSON Schema shape its render produces.
@@ -180,12 +182,110 @@ func walkNodes(root *node, seen map[*defEntry]bool, visit func(*node)) {
 	}
 }
 
+// forEachSubschema calls fn for every non-nil direct sub-schema of s, reading
+// the canonical field table's raw extractors without assembling walk locations.
+func forEachSubschema(s *Schema, fn func(*Schema)) {
+	for _, f := range schemafield.Subschemas {
+		switch f.Shape {
+		case schemafield.Single:
+			if c := f.SingleOf(s); c != nil {
+				fn(c)
+			}
+
+		case schemafield.Slice:
+			for _, c := range f.SliceOf(s) {
+				if c != nil {
+					fn(c)
+				}
+			}
+
+		case schemafield.Map:
+			for _, c := range f.MapOf(s) {
+				if c != nil {
+					fn(c)
+				}
+			}
+
+		case schemafield.None:
+		}
+	}
+}
+
+// payloadRefTargets maps every $defs ref string a hook may have authored to its
+// def entry: the final assigned name of each def, plus its provisional baseName
+// where no final name claims it (a ref node's own payload carries the
+// provisional form until render). It must be built after assignDefNames.
+func (g *generator) payloadRefTargets() map[string]*defEntry {
+	prefix := g.draft.refPrefix()
+
+	targets := make(map[string]*defEntry, len(g.defs))
+	for _, e := range g.defs {
+		targets[prefix+e.name] = e
+	}
+
+	for _, e := range g.defs {
+		if _, claimed := targets[prefix+e.baseName]; !claimed {
+			targets[prefix+e.baseName] = e
+		}
+	}
+
+	return targets
+}
+
+// walkReachable visits every node reachable from root like walkNodes, and
+// additionally follows the raw $ref strings a hook (an override, provider, or
+// extender) may have authored into a payload: a payload subtree is not
+// node-backed, so a $defs reference inside it is a reachability edge only a
+// string scan sees. Each def reached that way has its body walked too, and
+// onPayloadRef (when non-nil) observes every payload ref hit, seen or not.
+// Payload subtrees are assumed acyclic, as everywhere else in the generator
+// (hook schemas arrive JSON-decoded or JSON-round-trip cloned).
+func (g *generator) walkReachable(
+	root *node,
+	seen map[*defEntry]bool,
+	visit func(*node),
+	onPayloadRef func(*defEntry),
+) {
+	targets := g.payloadRefTargets()
+
+	var scanPayload func(s *Schema)
+
+	visitAndScan := func(n *node) {
+		visit(n)
+		scanPayload(n.payload)
+	}
+
+	scanPayload = func(s *Schema) {
+		if s == nil {
+			return
+		}
+
+		if e, ok := targets[s.Ref]; ok {
+			if onPayloadRef != nil {
+				onPayloadRef(e)
+			}
+
+			if !seen[e] {
+				seen[e] = true
+				walkNodes(e.body, seen, visitAndScan)
+			}
+		}
+
+		forEachSubschema(s, scanPayload)
+	}
+
+	walkNodes(root, seen, visitAndScan)
+}
+
 // collectReferencedDefs walks the final root node graph and returns the def
-// entries reachable from it, in build order. A def orphaned by a type= override
-// or by root inlining is never reached, so it is dropped from the output.
+// entries reachable from it, in build order. Reachability follows both node
+// links and hook-authored payload $ref strings, so a def whose only remaining
+// reference is a raw $ref inside an override or extender schema stays alive. A
+// def orphaned by a type= override or by root inlining is never reached, so it
+// is dropped from the output.
 func (g *generator) collectReferencedDefs(root *node) []*defEntry {
 	seen := map[*defEntry]bool{}
-	walkNodes(root, seen, func(*node) {})
+	g.walkReachable(root, seen, func(*node) {}, nil)
 
 	reached := make([]*defEntry, 0, len(seen))
 	for _, e := range g.defs {

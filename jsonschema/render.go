@@ -309,15 +309,21 @@ func (g *generator) maybeInlineRoot(root *node) *node {
 	return &inlined
 }
 
-// referencedElsewhere reports whether any node other than exclude links to def.
-// The walk starts from def's own body with def pre-seen, so exclude (the root
-// $ref that targets def) is skipped while everything the body reaches, including
-// a self- or mutual-recursion ref back to def, is inspected.
+// referencedElsewhere reports whether any node other than exclude links to def,
+// or any hook-authored payload $ref string targets it. The walk starts from
+// def's own body with def pre-seen, so exclude (the root $ref that targets def)
+// is skipped while everything the body reaches, including a self- or
+// mutual-recursion ref back to def and a raw $ref an extender authored into a
+// payload, is inspected.
 func (g *generator) referencedElsewhere(exclude *node, def *defEntry) bool {
 	found := false
 
-	walkNodes(def.body, map[*defEntry]bool{def: true}, func(n *node) {
+	g.walkReachable(def.body, map[*defEntry]bool{def: true}, func(n *node) {
 		if n.def == def && n != exclude {
+			found = true
+		}
+	}, func(e *defEntry) {
+		if e == def {
 			found = true
 		}
 	})
