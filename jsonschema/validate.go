@@ -300,10 +300,10 @@ type validator struct {
 	// the inliner each derive their own.
 	refSession *refresolve.Session
 
-	// The remote-fetch strategy passed to refSession resolution. The proto's
-	// writes the shared refReg directly (so gate-time fetches persist into the
-	// compiled registry); a per-run session's clones the registry copy-on-write
-	// before its first write.
+	// The remote-fetch strategy passed to refSession resolution. On the compiled
+	// proto it writes the shared refReg directly (so gate-time fetches persist
+	// into the compiled registry); on a per-run session it clones the registry
+	// copy-on-write before its first write.
 	refFetch refresolve.Fetch
 
 	// NumericBounds, patternCache, and patternProps below are compile-time
@@ -407,9 +407,10 @@ func newValidator(ctx context.Context, schema *Schema, opts []ValidateOption) (*
 }
 
 // refDeps returns the dependency-injection boundary the resolution core needs:
-// the sub-schema traversal and deep-clone the parent owns.
+// the sub-schema traversal the parent owns. Deep cloning stays parent-side in
+// the fetch closures, so the core needs no clone dependency.
 func refDeps() refresolve.Deps {
-	return refresolve.Deps{Children: schemaChildren, Clone: cloneSchema}
+	return refresolve.Deps{Children: schemaChildren}
 }
 
 // toRefDraft maps the parent draft to the resolution core's two-value enum,
@@ -1631,11 +1632,13 @@ func (v *validator) validate(
 	// Dynamic scope tracking: push when entering a new resource boundary.
 	// The root is already on the stack from seeding; subsequent pushes happen
 	// when validation crosses into a schema whose resource base URI differs
-	// from the current scope top. EnterScope is a no-op when the scope is empty
-	// (Draft 7, where it is never seeded) or unchanged.
+	// from the current scope top. EnterScope returns nil when the scope is empty
+	// (Draft 7, where it is never seeded) or unchanged, so the defer is
+	// registered only on the rarer boundary crossing, not on every node.
 	if v.draft == Draft2020 {
-		leave := v.refSession.EnterScope(v.refSession.SchemaBase(schema))
-		defer leave()
+		if leave := v.refSession.EnterScope(v.refSession.SchemaBase(schema)); leave != nil {
+			defer leave()
+		}
 	}
 
 	// If this schema uses unevaluated* keywords but the caller didn't provide

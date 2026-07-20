@@ -15,10 +15,10 @@ import (
 // validation or inline run with [Registry.NewSession].
 type Session struct {
 	// The active registry: the shared compiled one until the first owned write,
-	// then a private clone (see [Session.EnsureOwned]).
+	// then a private clone (see [Session.EnsureOwned]). Its deps, draft, and
+	// inertIDs are the single source RegisterFallback reads, so the session
+	// carries no copies of them.
 	reg *Registry
-
-	deps Deps
 
 	// Per-run fallback registrations for schemas materialized by the
 	// JSON-pointer fallback ([Session.ResolveJSONPointer]). Lookups consult the
@@ -37,9 +37,7 @@ type Session struct {
 
 	dynamicScope []string
 
-	draft    Draft
-	inertIDs bool
-	owned    bool
+	owned bool
 }
 
 // refCacheKey identifies a plain $ref resolution within a run. The containing
@@ -105,10 +103,11 @@ func (s *Session) SeedDynamicScope(rootBase string) {
 
 // EnterScope pushes base onto the dynamic scope when it differs from the current
 // top, returning a function that pops it. When the scope is empty or base
-// already tops it, no push happens and the returned function is a no-op.
+// already tops it, no push happens and it returns nil, so the caller registers a
+// defer only on the rarer resource-boundary crossing rather than on every node.
 func (s *Session) EnterScope(base string) func() {
 	if len(s.dynamicScope) == 0 || base == s.dynamicScope[len(s.dynamicScope)-1] {
-		return func() {}
+		return nil
 	}
 
 	s.dynamicScope = append(s.dynamicScope, base)
@@ -119,7 +118,7 @@ func (s *Session) EnterScope(base string) func() {
 // SchemaBase returns the base URI registered for sc, consulting the shared
 // registry first and the per-run fallback registrations second.
 func (s *Session) SchemaBase(sc *jsonschema.Schema) string {
-	if base, ok := s.reg.BaseURIs[sc]; ok {
+	if base, ok := s.reg.baseURIs[sc]; ok {
 		return base
 	}
 
@@ -141,7 +140,7 @@ func (s *Session) LookupURI(uri string) (*jsonschema.Schema, bool) {
 // LookupAnchor resolves a baseURI#anchor key, consulting the shared registry
 // first and the per-run fallback registrations second.
 func (s *Session) LookupAnchor(key string) (*jsonschema.Schema, bool) {
-	if sc, ok := s.reg.Anchor[key]; ok {
+	if sc, ok := s.reg.anchor[key]; ok {
 		return sc, true
 	}
 
@@ -180,7 +179,7 @@ func (s *Session) LookupAnchorWithFallback(
 // a fallback materialized for an unrelated ref is outside any $dynamicRef's
 // dynamic scope and must not be selectable as its target.
 func (s *Session) LookupDynamicAnchor(key string) (*jsonschema.Schema, bool) {
-	sc, ok := s.reg.DynamicAnchor[key]
+	sc, ok := s.reg.dynamicAnchor[key]
 
 	return sc, ok
 }
@@ -234,7 +233,7 @@ func (s *Session) resolveJSONPointerViaJSON(root *jsonschema.Schema, segments []
 // walk output so the shared registry stays untouched and concurrent runs cannot
 // race on it.
 func (s *Session) RegisterFallback(sc *jsonschema.Schema, base string) {
-	scratch := NewRegistry(s.deps, s.draft, s.inertIDs)
+	scratch := NewRegistry(s.reg.deps, s.reg.draft, s.reg.inertIDs)
 	scratch.Walk(sc, base)
 
 	if s.fallbackBaseURIs == nil {
@@ -259,7 +258,7 @@ func (s *Session) RegisterFallback(sc *jsonschema.Schema, base string) {
 		}
 	}
 
-	for k, v := range scratch.Anchor {
+	for k, v := range scratch.anchor {
 		if _, ok := s.fallbackAnchor[k]; !ok {
 			s.fallbackAnchor[k] = v
 		}
@@ -267,5 +266,5 @@ func (s *Session) RegisterFallback(sc *jsonschema.Schema, base string) {
 
 	// Base URIs key on the schema pointer, which is unique per node, so no
 	// cross-schema collision is possible and a plain copy is correct.
-	maps.Copy(s.fallbackBaseURIs, scratch.BaseURIs)
+	maps.Copy(s.fallbackBaseURIs, scratch.baseURIs)
 }

@@ -2,8 +2,7 @@
 // the jsonschema validator and inliner. It owns registry construction, base-URI
 // computation, anchor precedence, unified remote fetch orchestration, and
 // structured ref-failure attribution, so the two engines resolve references
-// identically by construction rather than by keeping two hand-rolled copies in
-// sync.
+// identically by construction.
 //
 // The package depends on the upstream [jsonschema.Schema] type and the internal
 // uriref/jsonptr helpers, but not on the parent jsonschema package: parent-typed
@@ -40,11 +39,9 @@ const (
 // [NewRegistry].
 type Deps struct {
 	// Children returns the direct sub-schemas of a schema in a stable order,
-	// the parent's schemaChildren. The walk consumes only the child schema, so
-	// the []*jsonschema.Schema shape (dropping each child's Location) suffices.
+	// the parent's schemaChildren. The registry walk consumes only the child
+	// schema, so the []*jsonschema.Schema shape (dropping each child's Location)
+	// suffices. Deep cloning stays on the parent side, in the fetch closures
+	// that register remote documents, so the core needs no clone dependency.
 	Children func(*jsonschema.Schema) []*jsonschema.Schema
-
-	// Clone deep-copies a schema, the parent's cloneSchema. Injecting it keeps
-	// the render-only PropertyOrder restore traversal on the parent side.
-	Clone func(*jsonschema.Schema) (*jsonschema.Schema, error)
 }

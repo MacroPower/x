@@ -9,14 +9,18 @@ import (
 	"go.jacobcolvin.com/x/jsonschema/internal/uriref"
 )
 
-// Fetch is the caller's remote-document registration strategy, the single seam
-// unifying the validator's resolveRemote, its compile-time loader, and the
-// inliner's fetchDoc. [Session.ResolveRef] calls it for a non-fragment ref whose
-// base URI is not already registered. It returns the registered document on
-// success, (nil, nil) for a plain miss, or (nil, err) for a failure whose error
-// becomes [Result.Err]. The closure owns resolver invocation, deep copy,
-// registration target, and negative caching; the core owns the resolution
-// decision tree around it.
+// Fetch is the caller's remote-document registration strategy, the seam
+// unifying the validator's remote fetch (both the compile-time gate and each
+// per-run session) and the inliner's fetchDoc. [Session.ResolveRef] calls it for
+// a non-fragment ref whose base URI is not already registered. It returns the
+// registered document on success, (nil, nil) for a plain miss, or (nil, err) for
+// a failure whose error becomes [Result.Err]. The closure owns resolver
+// invocation, deep copy, registration target, and negative caching; the core
+// owns the resolution decision tree around it.
+//
+// The upstream Schema.Resolve loader is a distinct concern: it must never fail
+// resolution on a miss, so it does not go through Fetch, sharing only the
+// resolver-invocation helper.
 type Fetch func(baseURI string) (*jsonschema.Schema, error)
 
 // Result is the structured outcome of a reference resolution that both engines

@@ -18,8 +18,8 @@ The package has two independent halves sharing the `Schema` type:
   regexes, draft and vocabulary detection); `validator.forInstance` derives
   cheap per-run state. `$ref`/`$dynamicRef`/`$anchor` resolution lives in the
   shared `internal/refresolve` core, which both the validator and the inliner
-  (`inline.go`) consume so the two engines cannot disagree; the inliner holds a
-  `refresolve.Session` rather than embedding a `*validator`. Self-contained
+  (`inline.go`) consume so the two engines cannot disagree; the inliner resolves
+  through a `refresolve.Session`. Self-contained
   helpers live under `internal/`:
   `internal/format` (built-in string-format validators), `internal/vocab`
   (vocabulary modelling and resolution), `internal/jsonptr` (RFC 6901
@@ -67,10 +67,10 @@ The package has two independent halves sharing the `Schema` type:
   its `Result`. A compiled `Registry` is shared by reference; each run derives a
   `Session` that copies the registry on write. The `ErrRefResolve` and
   `ErrNotResolved` sentinels live here and are re-exported from `errors.go` so
-  `errors.Is` identity holds across the boundary. Parent-typed behavior it
-  cannot name (sub-schema traversal and deep clone) is injected as `Deps`
-  closures, and the two draft-dependent branches use its own two-value `Draft`
-  enum).
+  `errors.Is` identity holds across the boundary. Sub-schema traversal, which it
+  cannot name without importing the parent, is injected as a `Deps` closure
+  (deep cloning stays parent-side in the fetch closures), and the two
+  draft-dependent branches use its own two-value `Draft` enum).
 
 ### Relationship to google/jsonschema-go
 
