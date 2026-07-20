@@ -117,6 +117,8 @@ func (g *generator) renderDef(e *defEntry) {
 // paths. A nullable node carrying a snapshot never reaches here; render routes
 // it to renderNullableSplit.
 func (g *generator) applyNull(n *node, base *Schema) *Schema {
+	g.relocateAuthoredConstEnum(n, base)
+
 	if !n.nullable {
 		g.clearFieldBounds(n, base)
 
@@ -176,6 +178,7 @@ func (g *generator) renderNullableSplit(n *node) *Schema {
 	}
 
 	base := g.renderBase(n)
+	g.relocateAuthoredConstEnum(n, base)
 
 	// A nilable container is always encoded as a type list (or flipped to anyOf
 	// by a const/enum below); its bare payload has no type yet, so the AdmitsNull
@@ -216,6 +219,31 @@ func (g *generator) renderNullableSplit(n *node) *Schema {
 // never pin here: their interpreter already cleared or kept the bounds.
 func (g *generator) pinsValue(n *node, value *Schema) bool {
 	return n.isField && (value.Const != nil || (value.Enum != nil && !n.boundAuthored))
+}
+
+// relocateAuthoredConstEnum moves a const/enum stamped beside a hook-authored
+// nullable wrapper (an override or provider anyOf[value, null] or
+// ["null", base] type list) onto its value branch, so the wrapper's permitted
+// null is not rejected. A generator-built payload is bare when its const/enum
+// is stamped -- render lands them on the value branch by construction -- so
+// only a hook-supplied wrapper shape reshapes here. When the relocated const
+// (or unauthored enum) pins a field's value, the numeric bounds it subsumes are
+// dropped from both the wrapper and the value branch, mirroring the split
+// path's pinned-value drop.
+func (g *generator) relocateAuthoredConstEnum(n *node, s *Schema) {
+	if s.Const == nil && s.Enum == nil {
+		return
+	}
+
+	target := schemashape.RelocateConstEnumToValueBranch(s)
+	if target == s {
+		return
+	}
+
+	if g.pinsValue(n, target) {
+		schemashape.ClearNumericBounds(target)
+		schemashape.ClearNumericBounds(s)
+	}
 }
 
 // renderNullableRefField encodes a nullable $ref field. When the referenced def

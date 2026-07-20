@@ -743,9 +743,13 @@ func applyEnumToItems(key, value string, t reflect.Type, s *jsonschema.Schema) e
 
 	for _, item := range items {
 		// Each item schema gets its own value slice so no slice is shared
-		// across schema nodes. The item payload is bare; render applies the null
-		// wrapper afterward, landing the enum on the value branch by construction.
+		// across schema nodes. A generator-built item payload is bare -- render
+		// applies the null wrapper afterward, landing the enum on the value
+		// branch by construction -- but a hook-authored item may already be an
+		// anyOf[value, null] wrapper, so the enum is relocated onto its value
+		// branch rather than left to reject the permitted null.
 		item.Enum = slices.Clone(enumVals)
+		schemashape.RelocateConstEnumToValueBranch(item)
 	}
 
 	return nil

@@ -465,7 +465,50 @@ func applySequenceOneOf(s *jsonschema.Schema, value string, baseType reflect.Typ
 			return err
 		}
 
+		err = relocateNullableValueConstraint(item)
+		if err != nil {
+			return err
+		}
+
 		dropElementBoundsForConstEnum(item)
+	}
+
+	return nil
+}
+
+// relocateNullableValueConstraint moves a Const or Enum stamped beside a
+// hook-authored nullable wrapper (anyOf[value, null]) onto its value branch, so
+// the wrapper's permitted null is not rejected. A generator-built element
+// payload is bare -- render applies its null wrapper afterward, landing the
+// const/enum on the value branch by construction -- so only an override- or
+// provider-supplied wrapper shape reshapes here. A different const or an
+// existing enum already on the value branch can never be satisfied together
+// with the tag's and is reported as a conflict rather than silently
+// overwritten.
+func relocateNullableValueConstraint(s *jsonschema.Schema) error {
+	inner := schemashape.NullableInnerSchema(s)
+	if inner == nil {
+		return nil
+	}
+
+	if s.Const != nil {
+		if inner.Const != nil && !numericEqual(*inner.Const, *s.Const) {
+			return fmt.Errorf(
+				"%w: eq/len conflicts with the element type's existing const",
+				ErrConflictingConstraints)
+		}
+
+		inner.Const, s.Const = s.Const, nil
+	}
+
+	if s.Enum != nil {
+		if inner.Enum != nil {
+			return fmt.Errorf(
+				"%w: oneof conflicts with the element type's existing enum constraint",
+				ErrConflictingConstraints)
+		}
+
+		inner.Enum, s.Enum = s.Enum, nil
 	}
 
 	return nil
@@ -478,7 +521,9 @@ func applySequenceOneOf(s *jsonschema.Schema, value string, baseType reflect.Typ
 // a set those bounds are redundant. The interpreter has no per-keyword
 // provenance, so an interpreter-set bound is dropped too. The element payload is
 // bare (render applies any null wrapper afterward, landing the const/enum on the
-// value branch), so only the element itself is cleared.
+// value branch), so only the element itself is cleared; a hook-authored wrapper
+// element has already had its const/enum moved off by
+// relocateNullableValueConstraint, leaving the wrapper's own keywords in place.
 func dropElementBoundsForConstEnum(s *jsonschema.Schema) {
 	if s.Const == nil && s.Enum == nil {
 		return

@@ -1213,6 +1213,33 @@ func TestTagEnumOnSequenceFields(t *testing.T) {
 		assert.Equal(t, []any{"monday", "tuesday"}, items[0].Enum)
 	})
 
+	t.Run("slice of override wrapper elements", func(t *testing.T) {
+		t.Parallel()
+
+		// The element type's override supplies its own anyOf[value, null]
+		// wrapper; the enum must relocate onto the value branch so the null the
+		// override admits stays valid.
+		type Day string
+
+		type T struct {
+			Days []Day `json:"days" jsonschema:"enum=monday|tuesday"`
+		}
+
+		s, err := jsonschema.GenerateFor[T](t.Context(),
+			jsonschema.WithTypeSchemaFor[Day](&jsonschema.Schema{
+				AnyOf: []*jsonschema.Schema{{Type: "string"}, {Type: "null"}},
+			}),
+		)
+		require.NoError(t, err)
+
+		items := itemsOf(s, "days")
+		require.Len(t, items, 1)
+		assert.Nil(t, items[0].Enum, "the enum must not sit beside the authored wrapper")
+		require.Len(t, items[0].AnyOf, 2)
+		assert.Equal(t, []any{"monday", "tuesday"}, items[0].AnyOf[0].Enum,
+			"the enum lands on the wrapper's value branch")
+	})
+
 	t.Run("slice of nullable pointers puts enum on the value branch", func(t *testing.T) {
 		t.Parallel()
 

@@ -475,7 +475,11 @@
 // step operates on the bare value schema; the null encoding for a nil-able
 // field (an anyOf[value, null] wrapper, or a ["null", base] type list) is
 // applied afterward. Field-level processing always applies, including when the
-// type is referenced via $ref.
+// type is referenced via $ref. When an override or provider supplies one of
+// those nullable shapes itself, a const or enum stamped beside it by a tag or
+// interpreter is relocated onto the wrapper's value branch, so the authored
+// null stays valid; an interpreter constraint that conflicts with a const or
+// enum already on that branch is reported rather than silently overwritten.
 //
 // # Validation
 //

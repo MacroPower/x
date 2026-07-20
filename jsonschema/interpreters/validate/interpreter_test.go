@@ -643,6 +643,61 @@ func TestValidateInterpreter_OneOfConflictsWithElementEnum(t *testing.T) {
 	require.ErrorIs(t, err, validate.ErrConflictingConstraints)
 }
 
+// TestValidateInterpreter_OneOfOnOverrideWrapperElement pins that oneof on a
+// slice whose element type's override supplies its own anyOf[value, null]
+// wrapper relocates the enum onto the wrapper's value branch, keeping the null
+// the override admits valid.
+func TestValidateInterpreter_OneOfOnOverrideWrapperElement(t *testing.T) {
+	t.Parallel()
+
+	type Color string
+
+	type Config struct {
+		Colors []Color `json:"colors" validate:"oneof=red green"`
+	}
+
+	s, err := jsonschema.GenerateFor[Config](t.Context(),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
+		jsonschema.WithTypeSchemaFor[Color](&jsonschema.Schema{
+			AnyOf: []*jsonschema.Schema{{Type: "string"}, {Type: "null"}},
+		}),
+	)
+	require.NoError(t, err)
+
+	items := s.Properties["colors"].Items
+	require.NotNil(t, items)
+	assert.Nil(t, items.Enum, "the enum must not sit beside the authored wrapper")
+	require.Len(t, items.AnyOf, 2)
+	assert.Equal(t, []any{"red", "green"}, items.AnyOf[0].Enum,
+		"the enum lands on the wrapper's value branch")
+}
+
+// TestValidateInterpreter_OneOfConflictsWithWrapperElementEnum pins that
+// relocating a oneof enum onto an override-supplied wrapper's value branch
+// reports a conflict when that branch already carries its own enum, rather
+// than silently discarding either.
+func TestValidateInterpreter_OneOfConflictsWithWrapperElementEnum(t *testing.T) {
+	t.Parallel()
+
+	type Color string
+
+	type Config struct {
+		Colors []Color `json:"colors" validate:"oneof=red green"`
+	}
+
+	_, err := jsonschema.GenerateFor[Config](t.Context(),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
+		jsonschema.WithTypeSchemaFor[Color](&jsonschema.Schema{
+			AnyOf: []*jsonschema.Schema{
+				{Type: "string", Enum: []any{"red", "green", "blue"}},
+				{Type: "null"},
+			},
+		}),
+	)
+	require.Error(t, err)
+	require.ErrorIs(t, err, validate.ErrConflictingConstraints)
+}
+
 // TestValidateInterpreter_DiveEqOnPointerElement pins that dive,eq on a slice of
 // nullable pointers lands the const on the element's value branch rather than
 // the anyOf wrapper, keeping a null element valid.

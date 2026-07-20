@@ -95,6 +95,79 @@ func ItemSchemas(s *jsonschema.Schema) []*jsonschema.Schema {
 	}
 }
 
+// NullableTypeListBase reports whether s is a two-element type list pairing
+// "null" with one other, non-null type, returning the non-null type. A
+// degenerate ["null", "null"] list is not a nullable base, so it returns false
+// rather than fabricating a null value branch.
+func NullableTypeListBase(s *jsonschema.Schema) (string, bool) {
+	if len(s.Types) != 2 {
+		return "", false
+	}
+
+	switch {
+	case s.Types[0] == typename.Null && s.Types[1] != typename.Null:
+		return s.Types[1], true
+	case s.Types[1] == typename.Null && s.Types[0] != typename.Null:
+		return s.Types[0], true
+	default:
+		return "", false
+	}
+}
+
+// MoveConstEnum transfers any Const and Enum set on src onto dst, clearing them
+// on src. Each keyword moves only when set, so a nil keyword never clobbers a
+// dst keyword.
+func MoveConstEnum(src, dst *jsonschema.Schema) {
+	if src.Const != nil {
+		dst.Const, src.Const = src.Const, nil
+	}
+
+	if src.Enum != nil {
+		dst.Enum, src.Enum = src.Enum, nil
+	}
+}
+
+// RelocateConstEnumToValueBranch moves any Const and Enum set beside a nullable
+// wrapper onto its value (non-null) branch and returns the schema that holds
+// them afterward. Const and enum test the instance value regardless of its
+// type, so left on the wrapper they reject the permitted null; relocating them
+// onto the value branch keeps null valid. Type-gated keywords such as minimum
+// and pattern do not apply to null and stay on the wrapper.
+//
+// The generator builds nullable positions from bare payloads and lands
+// const/enum on the value branch by construction, so this reshaping serves the
+// hook-authored wrappers only: an override or provider may supply the
+// anyOf[value, {"type":"null"}] wrapper or the {"type":["null", base]} type
+// list itself, with the const/enum stamped beside it afterward by a tag or
+// interpreter. The type-list shape cannot gate const/enum to the non-null
+// type, so it is rewritten into the anyOf form when it carries either.
+//
+// When s is not a nullable shape, or carries neither Const nor Enum, s is
+// returned unchanged.
+func RelocateConstEnumToValueBranch(s *jsonschema.Schema) *jsonschema.Schema {
+	if s.Const == nil && s.Enum == nil {
+		return s
+	}
+
+	if inner := NullableInnerSchema(s); inner != nil {
+		MoveConstEnum(s, inner)
+
+		return inner
+	}
+
+	if base, ok := NullableTypeListBase(s); ok {
+		inner := &jsonschema.Schema{Type: base}
+		MoveConstEnum(s, inner)
+
+		s.Types = nil
+		s.AnyOf = []*jsonschema.Schema{inner, {Type: typename.Null}}
+
+		return inner
+	}
+
+	return s
+}
+
 // ClearNumericBounds drops the four numeric range keywords from s. Used once a
 // const/enum pins the value, where the type-derived bounds are redundant and
 // could reject a value set to the type's own boundary.

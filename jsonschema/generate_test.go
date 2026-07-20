@@ -2563,6 +2563,62 @@ func TestGenerateFor_JsonStringOverridesRef(t *testing.T) {
 		"the overridden type must not leave an orphan $defs entry")
 }
 
+func TestGenerateFor_ConstOnOverrideNullableWrapper(t *testing.T) {
+	t.Parallel()
+
+	// A WithTypeSchema override supplies its own anyOf[value, null] wrapper. A
+	// const/enum tag on a field of that type must relocate onto the value
+	// branch: beside the wrapper it rejects the null the override admits.
+	type MyVal string
+
+	tests := map[string]struct {
+		override *jsonschema.Schema
+	}{
+		"anyOf wrapper": {
+			override: &jsonschema.Schema{
+				AnyOf: []*jsonschema.Schema{{Type: "string"}, {Type: "null"}},
+			},
+		},
+		"null-first anyOf wrapper": {
+			override: &jsonschema.Schema{
+				AnyOf: []*jsonschema.Schema{{Type: "null"}, {Type: "string"}},
+			},
+		},
+		"type-list wrapper": {
+			override: &jsonschema.Schema{Types: []string{"string", "null"}},
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			type Container struct {
+				F MyVal `json:"f" jsonschema:"const=x"`
+			}
+
+			s, err := jsonschema.GenerateFor[Container](t.Context(),
+				jsonschema.WithTypeSchemaFor[MyVal](tt.override),
+			)
+			require.NoError(t, err)
+
+			field := s.Properties["f"]
+			require.NotNil(t, field)
+			assert.Nil(t, field.Const, "const must not sit beside the authored wrapper")
+
+			validator, err := jsonschema.Compile(t.Context(), s)
+			require.NoError(t, err)
+
+			assert.NoError(t, validator.ValidateJSON(t.Context(), []byte(`{"f": null}`)),
+				"the null the override admits stays valid")
+			assert.NoError(t, validator.ValidateJSON(t.Context(), []byte(`{"f": "x"}`)),
+				"the const value is permitted")
+			assert.Error(t, validator.ValidateJSON(t.Context(), []byte(`{"f": "y"}`)),
+				"a non-const value is rejected")
+		})
+	}
+}
+
 func TestGenerateFor_HookAuthoredRefKeepsDefAlive(t *testing.T) {
 	t.Parallel()
 
