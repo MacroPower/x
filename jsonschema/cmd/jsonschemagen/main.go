@@ -28,6 +28,8 @@ import (
 	"strconv"
 	"strings"
 	"text/template"
+
+	"golang.org/x/mod/module"
 )
 
 type config struct {
@@ -450,6 +452,27 @@ func goSumKey(line string) string {
 	return line[:first+1+second]
 }
 
+// zeroVersion is the placeholder require version for a module path without a
+// major-version suffix.
+const zeroVersion = "v0.0.0"
+
+// requireVersion returns the placeholder version for the temp go.mod's require
+// directive on modPath. The go.mod parser enforces that a require version's
+// major version matches the module path's major-version suffix, so a path like
+// example.com/app/v2 (or a gopkg.in-style path.v2) must be required at v2, not
+// v0. The version is a placeholder either way: the directory replace directive
+// supplies the code, so the go tool never resolves it.
+func requireVersion(modPath string) string {
+	_, pathMajor, ok := module.SplitPathVersion(modPath)
+	if !ok || pathMajor == "" {
+		return zeroVersion
+	}
+
+	// A non-empty pathMajor is "/vN", or ".vN" for a gopkg.in path; either way
+	// the matching placeholder is "vN.0.0".
+	return strings.TrimLeft(pathMajor, "/.") + ".0.0"
+}
+
 func renderGoMod(modPath, modDir, jsonschemaDir string) string {
 	var b strings.Builder
 
@@ -457,7 +480,7 @@ func renderGoMod(modPath, modDir, jsonschemaDir string) string {
 	b.WriteString("go " + goDirectiveVersion() + "\n\n")
 
 	b.WriteString("require (\n")
-	b.WriteString("\t" + modPath + " v0.0.0\n")
+	b.WriteString("\t" + modPath + " " + requireVersion(modPath) + "\n")
 
 	if modPath != jsonschemaModule {
 		b.WriteString("\t" + jsonschemaModule + " v0.0.0\n")
