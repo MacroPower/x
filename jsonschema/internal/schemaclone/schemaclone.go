@@ -39,11 +39,19 @@ type Children func(*jsonschema.Schema) []*jsonschema.Schema
 // so a clone preserves property ordering. Every other serializable field
 // round-trips as an independent copy.
 //
+// A nil s clones to nil. Without the guard the round-trip would fabricate the
+// false (reject-everything) schema: nil marshals as JSON null, which the
+// upstream UnmarshalJSON reads as the boolean schema false.
+//
 // A cyclic schema graph cannot round-trip through JSON, so Clone rejects it
 // with an error wrapping [ErrCyclic] before marshaling. The cycle check walks
 // the sub-schema graph children supplies; a *Schema smuggled through an
 // any-typed container (Extra, Examples) is outside that traversal.
 func Clone(s *jsonschema.Schema, children Children) (*jsonschema.Schema, error) {
+	if s == nil {
+		return nil, nil //nolint:nilnil // A nil schema clones to nil.
+	}
+
 	err := checkAcyclic(s, children, map[*jsonschema.Schema]visit{})
 	if err != nil {
 		return nil, err
