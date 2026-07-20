@@ -919,7 +919,7 @@ func TestInlineRefFailurePathForExtraKeywordTarget(t *testing.T) {
 	t.Parallel()
 
 	// A $ref into an unknown (Extra) keyword materializes a fresh schema that
-	// recordPaths never saw. A nested failing ref inside it must report the
+	// record never saw. A nested failing ref inside it must report the
 	// location the target physically lives at -- the ref's own pointer fragment
 	// (/x/sub) -- not the referencing node's path (/properties/a).
 	var captured jsonschema.RefFailure

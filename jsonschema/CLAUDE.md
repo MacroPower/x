@@ -27,9 +27,17 @@ The package has two independent halves sharing the `Schema` type:
   and its accessors recompute on the fly. `extend` folds a remote document fetched
   while compiling into the same index, sharing `freeze`'s pointer dedup. This is
   the validation-side analog of the generation IR (`ir.go`): identity assigned
-  once, no in-place mutation after construction. The inliner still uses the
-  clone-based path (`internal/schemaclone`); moving it onto the frozen form is a
-  staged follow-up. `$ref`/`$dynamicRef`/`$anchor` resolution lives in the
+  once, no in-place mutation after construction. The inliner (`inline.go`) uses
+  the same node-identity index type: its `record` walk interns every pristine
+  schema (the root document, each fetched document, each `WithRefFallback`
+  substitute, and each target materialized from an unknown keyword) into its own
+  `compiledDoc` via `intern`, and its expansion bookkeeping (the in-flight cycle
+  guard, the memoized self-contained copies, and each node's path and
+  containing-document URI) lives in slices indexed by the assigned id. The
+  inliner clones through `internal/schemaclone` for its pristine and working
+  copies; folding `compiledDoc` child edges and the fetched-document clone into
+  the constructor is a staged follow-up.
+  `$ref`/`$dynamicRef`/`$anchor` resolution lives in the
   shared `internal/refresolve` core, which both the validator and the inliner
   (`inline.go`) consume so the two engines cannot disagree; the inliner resolves
   through a `refresolve.Session`. Self-contained

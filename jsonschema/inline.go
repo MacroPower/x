@@ -36,29 +36,6 @@ type inliner struct {
 	// original structure.
 	session *refresolve.Session
 
-	// Pristine schemas whose self-contained copy is currently being built;
-	// a ref that resolves to an in-flight schema is a cycle.
-	inflight map[*Schema]bool
-
-	// Pristine schemas mapped to their finished self-contained copies, so a
-	// target referenced from several places is expanded once. Every
-	// additional use clones the memoized copy, so no two positions in the
-	// output share nodes.
-	memo map[*Schema]*Schema
-
-	// Pristine schemas mapped to their JSON Pointer path within their
-	// containing document, recorded when each document joins resolution
-	// space. The paths name ref-node locations for [WithRefFallback]
-	// consultations and seed the path of each expansion walk.
-	paths map[*Schema]string
-
-	// Pristine schemas mapped to the URI of their containing document,
-	// recorded alongside paths: the root document's $id or [WithBaseURI]
-	// base ("" when it has neither), and each fetched document's $id or
-	// retrieval URI. The URIs identify the failing document in
-	// [WithRefFallback] consultations.
-	docs map[*Schema]string
-
 	// The per-reference failure policy from [WithRefFallback]; nil
 	// means every expansion failure is fatal.
 	fallback RefFallback
@@ -67,6 +44,36 @@ type inliner struct {
 	draftOverride *Draft
 
 	baseURI string
+
+	// The frozen node-identity index over every pristine schema the run touches:
+	// the pristine root document, each fetched document, each fallback
+	// substitute, and each target materialized from an unknown keyword. As record
+	// walks, it interns each schema here, and the per-node slices below are
+	// indexed by the id it assigns, so one identity source backs all the
+	// expansion bookkeeping. Pristine schemas are never mutated, so their
+	// pointers stay stable keys for the run.
+	doc *compiledDoc
+
+	// The inflight[id] flag marks a pristine schema whose self-contained copy is
+	// currently being built; a ref that resolves to an in-flight schema is a cycle.
+	inflight []bool
+
+	// The memo[id] entry is a pristine schema's finished self-contained copy, so
+	// a target referenced from several places is expanded once. Every additional
+	// use clones the memoized copy, so no two positions in the output share nodes.
+	memo []*Schema
+
+	// The paths[id] entry is a pristine schema's JSON Pointer path within its
+	// containing document, recorded when each document joins resolution space. The
+	// paths name ref-node locations for [WithRefFallback] consultations and seed
+	// the path of each expansion walk.
+	paths []string
+
+	// The docs[id] entry is the URI of a pristine schema's containing document,
+	// recorded alongside paths: the root document's $id or [WithBaseURI] base
+	// ("" when it has neither), and each fetched document's $id or retrieval URI.
+	// The URIs identify the failing document in [WithRefFallback] consultations.
+	docs []string
 
 	// The draft governing the Draft 2020-12/Draft 7 sibling rules, detected from
 	// the root document (or the [WithDraft] override). It is the parent Draft,
@@ -333,10 +340,7 @@ func (il *Inliner) Inline(ctx context.Context, s *Schema) (*Schema, error) {
 		draftOverride: il.proto.draftOverride,
 		baseURI:       il.proto.baseURI,
 		retrievalBase: il.proto.retrievalBase,
-		inflight:      map[*Schema]bool{},
-		memo:          map[*Schema]*Schema{},
-		paths:         map[*Schema]string{},
-		docs:          map[*Schema]string{},
+		doc:           newCompiledDoc(),
 	}
 
 	// The context reaches the resolver through the ctx field set above:
@@ -379,7 +383,7 @@ func (in *inliner) run(s *Schema) (*Schema, error) {
 
 	in.session = reg.NewSession()
 
-	in.recordPaths(pristine, "", in.session.SchemaBase(pristine))
+	in.record(pristine, "", in.session.SchemaBase(pristine))
 
 	// The context reaches the resolver through the ctx field set above:
 	// document fetches happen deep inside the expansion walk, which cannot
@@ -398,26 +402,41 @@ func (in *inliner) run(s *Schema) (*Schema, error) {
 	return working, nil
 }
 
-// recordPaths maps every schema in the pristine document rooted at s to its
-// JSON Pointer path within that document and to doc, the document's URI,
-// keyed by pointer identity. The paths and document URIs name ref-node
-// locations for fallback consultations. An aliased or cyclic graph keeps the
-// first location recorded for a node.
-func (in *inliner) recordPaths(s *Schema, path, doc string) {
+// record interns every schema in the pristine document rooted at s into the
+// node-identity index and stores, under the id it assigns, the schema's JSON
+// Pointer path within that document and doc, the document's URI. The paths and
+// document URIs name ref-node locations for fallback consultations. A schema
+// already indexed stops the walk, so an aliased or cyclic graph keeps the first
+// location recorded for a node.
+func (in *inliner) record(s *Schema, path, doc string) {
 	if s == nil {
 		return
 	}
 
-	if _, ok := in.paths[s]; ok {
+	id, indexed := in.doc.intern(s)
+	if indexed {
 		return
 	}
 
-	in.paths[s] = path
-	in.docs[s] = doc
+	in.grow()
+
+	in.paths[id] = path
+	in.docs[id] = doc
 
 	for _, child := range SubschemaEntries(s) {
-		in.recordPaths(child.Schema, path+child.Pointer, doc)
+		in.record(child.Schema, path+child.Pointer, doc)
 	}
+}
+
+// grow extends every per-node slice to the index's current node count, called
+// after each intern so a freshly assigned id is addressable. Slots for a new id
+// start at their zero value (empty path/doc, not in flight, no memoized copy).
+func (in *inliner) grow() {
+	n := in.doc.len()
+	in.paths = growSlice(in.paths, n)
+	in.docs = growSlice(in.docs, n)
+	in.inflight = growSlice(in.inflight, n)
+	in.memo = growSlice(in.memo, n)
 }
 
 // walkPair makes working's subtree self-contained in place, reading all
@@ -560,26 +579,31 @@ func (in *inliner) expandTarget(pristine *Schema, path string) (*Schema, error) 
 		return in.substitute(pristine, path, ref, err)
 	}
 
-	if in.inflight[target] {
+	// A target already indexed and currently in flight closes a reference cycle;
+	// a not-yet-indexed target cannot be in flight.
+	if id, ok := in.doc.nodeID(target); ok && in.inflight[id] {
 		return in.substitute(pristine, path, ref, fmt.Errorf("%w: %q", ErrRefCycle, ref))
 	}
 
 	// A target materialized from an unknown (Extra) keyword via a JSON pointer
-	// is a fresh schema recordPaths never walked, so it has no recorded path or
+	// is a fresh schema record never walked, so it has no recorded path or
 	// document. Seed it (idempotently) with its own document and pointer so a
 	// nested ref failure reports where the target physically lives. A
 	// fragment-only ref (empty targetDoc) shares the referencing node's
 	// document, and the ref's own pointer fragment is the target's location --
 	// the referring node's path would mislocate a nested ref failure.
-	if _, ok := in.paths[target]; !ok {
+	if _, ok := in.doc.nodeID(target); !ok {
 		if targetDoc == "" {
-			targetDoc, targetPtr = in.docs[pristine], strings.TrimPrefix(ref, "#")
+			pristineID, _ := in.doc.nodeID(pristine)
+			targetDoc, targetPtr = in.docs[pristineID], strings.TrimPrefix(ref, "#")
 		}
 
-		in.recordPaths(target, targetPtr, targetDoc)
+		in.record(target, targetPtr, targetDoc)
 	}
 
-	return in.inlineCopy(target, in.paths[target], true)
+	targetID, _ := in.doc.nodeID(target)
+
+	return in.inlineCopy(target, in.paths[targetID], true)
 }
 
 // maxSubstituteDepth bounds nested [SubstituteRef] expansions so a fallback
@@ -613,8 +637,9 @@ func (in *inliner) substitute(pristine *Schema, path, ref string, inlineErr erro
 	in.substituteDepth++
 	defer func() { in.substituteDepth-- }()
 
+	pristineID, _ := in.doc.nodeID(pristine)
 	action := in.fallback.ResolveRefFailure(in.runContext(),
-		RefFailure{Document: in.docs[pristine], Path: path, Ref: ref, Err: inlineErr})
+		RefFailure{Document: in.docs[pristineID], Path: path, Ref: ref, Err: inlineErr})
 
 	if action.kind == refActionPropagate {
 		return nil, inlineErr
@@ -643,14 +668,14 @@ func (in *inliner) substitute(pristine *Schema, path, ref string, inlineErr erro
 	// its own $id then reports a nested ref failure in its own document. Such a
 	// substitute is the root of its own document, so its nested failure paths
 	// are seeded at "" to stay rooted in that document, mirroring fetchDoc's
-	// recordPaths. With no re-basing $id the base is unchanged from the failing
+	// record. With no re-basing $id the base is unchanged from the failing
 	// node's, so the subtree keeps the node's path and document.
 	seed := path
 	if in.session.SchemaBase(cp) != base {
 		seed = ""
 	}
 
-	in.recordPaths(cp, seed, in.session.SchemaBase(cp))
+	in.record(cp, seed, in.session.SchemaBase(cp))
 
 	return in.inlineCopy(cp, seed, false)
 }
@@ -668,12 +693,17 @@ func (in *inliner) substitute(pristine *Schema, path, ref string, inlineErr erro
 // to one means the expansion reached its own target, which only a reference
 // cycle can cause.
 func (in *inliner) inlineCopy(target *Schema, path string, memoize bool) (*Schema, error) {
-	if memoized, ok := in.memo[target]; ok {
+	// The target was interned before inlineCopy runs (record seeds it at the
+	// resolving ref, or it belongs to a document already recorded), so its id is
+	// valid and its inflight/memo slots are addressable.
+	id, _ := in.doc.nodeID(target)
+
+	if memoized := in.memo[id]; memoized != nil {
 		return cloneSchema(memoized)
 	}
 
-	in.inflight[target] = true
-	defer delete(in.inflight, target)
+	in.inflight[id] = true
+	defer func() { in.inflight[id] = false }()
 
 	cp, err := cloneSchema(target)
 	if err != nil {
@@ -690,7 +720,7 @@ func (in *inliner) inlineCopy(target *Schema, path string, memoize bool) (*Schem
 	}
 
 	if memoize {
-		in.memo[target] = cp
+		in.memo[id] = cp
 
 		// Clone on the first use too, so the memo entry is never aliased to a
 		// position in the output tree. Every caller, first or later, then gets an
@@ -794,7 +824,7 @@ func (in *inliner) fetchDoc(baseURI string) (*Schema, error) {
 
 	in.session.Registry().URI[baseURI] = cp
 	in.session.RegisterFallback(cp, baseURI)
-	in.recordPaths(cp, "", in.session.SchemaBase(cp))
+	in.record(cp, "", in.session.SchemaBase(cp))
 
 	return cp, nil
 }

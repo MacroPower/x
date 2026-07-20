@@ -28,13 +28,36 @@ type compiledDoc struct {
 	schemas []*Schema
 }
 
+// newCompiledDoc returns an empty index, ready for [compiledDoc.intern],
+// [compiledDoc.extend], or [freeze] to populate it.
+func newCompiledDoc() *compiledDoc {
+	return &compiledDoc{ids: map[*Schema]int{}}
+}
+
 // freeze builds the frozen node-identity index over the schema graph rooted at
 // root, assigning each distinct reachable *Schema a dense id.
 func freeze(root *Schema) *compiledDoc {
-	d := &compiledDoc{ids: map[*Schema]int{}}
+	d := newCompiledDoc()
 	d.extend(root)
 
 	return d
+}
+
+// intern returns s's node id, assigning a fresh dense id when s is not yet
+// indexed. The bool reports whether s was already present, so a caller walking a
+// graph can record per-node metadata exactly once (first-write-wins) and stop
+// descending a subtree it has already indexed. A nil s must not be interned;
+// callers guard it.
+func (d *compiledDoc) intern(s *Schema) (int, bool) {
+	if id, ok := d.ids[s]; ok {
+		return id, true
+	}
+
+	id := len(d.schemas)
+	d.ids[s] = id
+	d.schemas = append(d.schemas, s)
+
+	return id, false
 }
 
 // extend indexes every not-yet-seen *Schema reachable from root and returns from,
@@ -59,12 +82,9 @@ func (d *compiledDoc) walk(s *Schema) {
 		return
 	}
 
-	if _, seen := d.ids[s]; seen {
+	if _, seen := d.intern(s); seen {
 		return
 	}
-
-	d.ids[s] = len(d.schemas)
-	d.schemas = append(d.schemas, s)
 
 	for _, child := range schemafield.Children(s) {
 		d.walk(child)
