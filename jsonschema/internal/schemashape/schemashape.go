@@ -48,7 +48,9 @@ func AdmitsNull(s *jsonschema.Schema) bool {
 // for a nullable field: an anyOf of a value schema and {"type":"null"} in
 // either order. It returns nil when s does not have that shape. The generator
 // always emits the null branch second, but a provider or override schema may
-// supply it first, so both orderings are recognized.
+// supply it first, so both orderings are recognized. A degenerate anyOf of two
+// null branches has no value branch and returns nil rather than treating a null
+// branch as the value (mirroring NullableTypeListBase's ["null", "null"] guard).
 func NullableInnerSchema(s *jsonschema.Schema) *jsonschema.Schema {
 	if s == nil {
 		return nil
@@ -59,9 +61,9 @@ func NullableInnerSchema(s *jsonschema.Schema) *jsonschema.Schema {
 	}
 
 	switch {
-	case s.AnyOf[1].Type == typename.Null:
+	case s.AnyOf[1].Type == typename.Null && s.AnyOf[0].Type != typename.Null:
 		return s.AnyOf[0]
-	case s.AnyOf[0].Type == typename.Null:
+	case s.AnyOf[0].Type == typename.Null && s.AnyOf[1].Type != typename.Null:
 		return s.AnyOf[1]
 	default:
 		return nil
