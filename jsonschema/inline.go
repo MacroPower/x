@@ -633,16 +633,24 @@ func (in *inliner) substitute(pristine *Schema, path, ref string, inlineErr erro
 	// entry; the fallback is consulted only after the shared registry, so the
 	// real document keeps priority while the substitute's own nested refs still
 	// resolve.
-	in.session.RegisterFallback(cp, in.session.SchemaBase(pristine))
+	base := in.session.SchemaBase(pristine)
+	in.session.RegisterFallback(cp, base)
 
 	// Record the substitute subtree under the base RegisterFallback established
 	// for it, not the failing node's document: a substitute that re-bases via
-	// its own $id then reports a nested ref failure in its own document. With no
-	// $id the base equals the failing node's document, so the common case is
-	// unchanged. This mirrors fetchDoc's recordPaths.
-	in.recordPaths(cp, path, in.session.SchemaBase(cp))
+	// its own $id then reports a nested ref failure in its own document. Such a
+	// substitute is the root of its own document, so its nested failure paths
+	// are seeded at "" to stay rooted in that document, mirroring fetchDoc's
+	// recordPaths. With no re-basing $id the base is unchanged from the failing
+	// node's, so the subtree keeps the node's path and document.
+	seed := path
+	if in.session.SchemaBase(cp) != base {
+		seed = ""
+	}
 
-	return in.inlineCopy(cp, path, false)
+	in.recordPaths(cp, seed, in.session.SchemaBase(cp))
+
+	return in.inlineCopy(cp, seed, false)
 }
 
 // inlineCopy returns a self-contained copy of the pristine target: a fresh
