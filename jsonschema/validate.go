@@ -2840,6 +2840,11 @@ func (v *validator) validateSchemaDependencies(
 		depAnn := ann.Child()
 		childSchemaPath := schemaPath.kw(keyword).key(prop)
 		childErrs := v.validate(deps[prop], instance, instancePath, childSchemaPath, depAnn)
+		// Stamp the dependency keyword on a boolean-false subschema's leaf,
+		// mirroring the other applicator call sites, so the error contract (a
+		// false subschema failure carries the applying keyword) holds here too.
+		labelFalseSchemaKeyword(childErrs, deps[prop], keyword)
+
 		errs = append(errs, childErrs...)
 
 		if len(childErrs) == 0 {
