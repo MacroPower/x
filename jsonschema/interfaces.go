@@ -531,9 +531,14 @@ type FieldContext struct {
 	// (and where a [GoCommentProvider] finds its doc comment), not the outer
 	// struct.
 	Owner reflect.Type
-	// Schema is the field's own generated schema. A tag interpreter modifies
-	// it in place; a [DescriptionProvider] must treat it as read-only and
-	// answer through its return value instead.
+	// Schema is the field's own generated schema: the bare value schema, with
+	// no nullable wrapper. A nil-able field (a pointer, or a ",string" pointer)
+	// presents its non-null value schema here, and generation applies the null
+	// encoding (an anyOf[value, null] wrapper, or a ["null", base] type list)
+	// afterward, so a const or enum an interpreter sets lands on the value and
+	// keeps the permitted null valid. A tag interpreter modifies the schema in
+	// place; a [DescriptionProvider] must treat it as read-only and answer
+	// through its return value instead.
 	Schema *Schema
 	// Parent is the enclosing object schema, so an interpreter can append to
 	// its Required list. The [DescriptionProvider] read-only contract of

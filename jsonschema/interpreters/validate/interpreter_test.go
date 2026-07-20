@@ -709,6 +709,38 @@ func TestValidateInterpreter_DiveDropsSizedIntBounds(t *testing.T) {
 	}`, string(got))
 }
 
+func TestValidateInterpreter_DiveDropsSizedIntBoundsOnPointerElement(t *testing.T) {
+	t.Parallel()
+
+	// A nullable-pointer sized-int element goes through the render nullable split.
+	// The interpreter clears the kind-derived minimum/maximum on the bare element
+	// once eq/oneof pins it, and the split must leave them cleared rather than
+	// restoring them from the pre-interpreter snapshot onto the value branch.
+	type Config struct {
+		Exact []*int8 `json:"exact" validate:"dive,eq=5"`
+		Set   []*int8 `json:"set"   validate:"dive,oneof=1 2 3"`
+	}
+
+	s, err := jsonschema.GenerateFor[Config](t.Context(),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
+	)
+	require.NoError(t, err)
+
+	got, err := json.Marshal(s)
+	require.NoError(t, err)
+
+	assert.JSONEq(t, `{
+		"$schema":"https://json-schema.org/draft/2020-12/schema",
+		"type":"object",
+		"properties":{
+			"exact":{"type":["null","array"],"items":{"anyOf":[{"type":"integer","const":5},{"type":"null"}]}},
+			"set":{"type":["null","array"],"items":{"anyOf":[{"type":"integer","enum":[1,2,3]},{"type":"null"}]}}
+		},
+		"required":["exact","set"],
+		"additionalProperties":false
+	}`, string(got))
+}
+
 func TestValidateInterpreter_DiveMap(t *testing.T) {
 	t.Parallel()
 

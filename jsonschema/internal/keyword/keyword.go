@@ -11,6 +11,7 @@ const (
 	AdditionalProperties  = "additionalProperties"
 	AllOf                 = "allOf"
 	AnyOf                 = "anyOf"
+	Comment               = "$comment"
 	Const                 = "const"
 	Contains              = "contains"
 	ContentEncoding       = "contentEncoding"

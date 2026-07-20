@@ -465,64 +465,7 @@ func applySequenceOneOf(s *jsonschema.Schema, value string, baseType reflect.Typ
 			return err
 		}
 
-		err = relocateNullableValueConstraint(item)
-		if err != nil {
-			return err
-		}
-
 		dropElementBoundsForConstEnum(item)
-	}
-
-	return nil
-}
-
-// relocateNullableValueConstraint moves a Const or Enum stamped on a nullable
-// wrapper schema (anyOf[value, null], the shape a pointer element generates)
-// onto its value branch. A type-agnostic const/enum left as a sibling of anyOf
-// is evaluated against the instance directly and so rejects a valid null
-// element; on the value branch it constrains the value alone. It is a no-op for
-// a schema that is not a nullable wrapper or carries neither keyword.
-//
-// The value branch may already carry a const/enum the element type itself
-// supplied (via WithTypeSchema, a provider, or an extender). The wrapper's
-// conflict check (in setNumericConst/setOneOfEnum) only inspected the wrapper,
-// not the inner branch, so a blind move would silently overwrite that. Mirror
-// the non-nullable path instead: an identical const is a no-op, and a differing
-// const or any pre-existing enum is reported as a conflict.
-//
-// Only the anyOf[value, null] shape is handled, not the {"type":["null", base]}
-// type list that the generator also emits for nullable containers and ",string"
-// stringables (the shape [schemashape.RelocateConstEnumToValueBranch] rewrites
-// at the field level). That shape never reaches here carrying a const/enum: a
-// scalar element's nullability always generates the anyOf form (applyNullable),
-// and only scalars take the dive/oneof const/enum path. The omission relies on
-// that invariant; if a scalar nullable element ever emits the type-list shape,
-// this must grow the type-list case rather than leave the const as an inert
-// sibling of "type":["null", base].
-func relocateNullableValueConstraint(s *jsonschema.Schema) error {
-	inner := schemashape.NullableInnerSchema(s)
-	if inner == nil {
-		return nil
-	}
-
-	if s.Const != nil {
-		if inner.Const != nil && !numericEqual(*inner.Const, *s.Const) {
-			return fmt.Errorf(
-				"%w: eq/len conflicts with the element type's existing const",
-				ErrConflictingConstraints)
-		}
-
-		inner.Const, s.Const = s.Const, nil
-	}
-
-	if s.Enum != nil {
-		if inner.Enum != nil {
-			return fmt.Errorf(
-				"%w: oneof conflicts with the element type's existing enum constraint",
-				ErrConflictingConstraints)
-		}
-
-		inner.Enum, s.Enum = s.Enum, nil
 	}
 
 	return nil
@@ -530,24 +473,17 @@ func relocateNullableValueConstraint(s *jsonschema.Schema) error {
 
 // dropElementBoundsForConstEnum clears the kind-derived numeric range keywords
 // from a dive or oneof element schema once a const or enum pins its value,
-// mirroring the field-level drop the generator applies after interpreters run.
-// A sized-integer element carries minimum/maximum from its Go type; once eq or
-// oneof fixes the value to a set those bounds are redundant. The interpreter has
-// no per-keyword provenance, so an interpreter-set bound is dropped too, exactly
-// as the field path does for interpreter-applied constraints. It runs after
-// relocateNullableValueConstraint, so a nullable element's const/enum already
-// sits on the value branch; both the branch and the wrapper are cleared.
+// mirroring the field-level drop the generator applies. A sized-integer element
+// carries minimum/maximum from its Go type; once eq or oneof fixes the value to
+// a set those bounds are redundant. The interpreter has no per-keyword
+// provenance, so an interpreter-set bound is dropped too. The element payload is
+// bare (render applies any null wrapper afterward, landing the const/enum on the
+// value branch), so only the element itself is cleared.
 func dropElementBoundsForConstEnum(s *jsonschema.Schema) {
-	target := s
-	if inner := schemashape.NullableInnerSchema(s); inner != nil {
-		target = inner
-	}
-
-	if target.Const == nil && target.Enum == nil {
+	if s.Const == nil && s.Enum == nil {
 		return
 	}
 
-	schemashape.ClearNumericBounds(target)
 	schemashape.ClearNumericBounds(s)
 }
 

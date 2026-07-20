@@ -2622,6 +2622,86 @@ func TestGenerateFor_NullablePointerConstDropsTypeBounds(t *testing.T) {
 		"a non-const value is rejected")
 }
 
+func TestGenerateFor_NullableSizedIntPointerSplit(t *testing.T) {
+	t.Parallel()
+
+	// A sized-int pointer carries kind-derived bounds inside its value branch,
+	// while a field-authored keyword sits on the anyOf wrapper as a sibling. The
+	// split reproduces this placement byte for byte: an authored numeric bound
+	// stays outside next to the type's own bounds inside, a const/enum lands on
+	// the value branch with the kind bounds cleared, an authored bound alongside
+	// an enum keeps the bounds (enum ∩ bound), and a ",string" const/enum flips
+	// the type list into the anyOf form.
+	tests := map[string]struct {
+		generate func() (*jsonschema.Schema, error)
+		want     string
+	}{
+		"minimum keeps kind bounds inside, tag bound outside": {
+			generate: func() (*jsonschema.Schema, error) {
+				type Container struct {
+					F *int8 `json:"f" jsonschema:"minimum=0"`
+				}
+
+				return jsonschema.GenerateFor[Container](t.Context())
+			},
+			want: `{"minimum":0,"anyOf":[{"type":"integer","minimum":-128,"maximum":127},{"type":"null"}]}`,
+		},
+		"const clears kind bounds on the value branch": {
+			generate: func() (*jsonschema.Schema, error) {
+				type Container struct {
+					F *int8 `json:"f" jsonschema:"const=5"`
+				}
+
+				return jsonschema.GenerateFor[Container](t.Context())
+			},
+			want: `{"anyOf":[{"type":"integer","const":5},{"type":"null"}]}`,
+		},
+		"enum clears kind bounds on the value branch": {
+			generate: func() (*jsonschema.Schema, error) {
+				type Container struct {
+					F *uint8 `json:"f" jsonschema:"enum=1|2|3"`
+				}
+
+				return jsonschema.GenerateFor[Container](t.Context())
+			},
+			want: `{"anyOf":[{"type":"integer","enum":[1,2,3]},{"type":"null"}]}`,
+		},
+		"authored bound with enum keeps kind bounds inside": {
+			generate: func() (*jsonschema.Schema, error) {
+				type Container struct {
+					F *int8 `json:"f" jsonschema:"enum=1|2|3,minimum=2"`
+				}
+
+				return jsonschema.GenerateFor[Container](t.Context())
+			},
+			want: `{"minimum":2,"anyOf":[{"type":"integer","enum":[1,2,3],"minimum":-128,"maximum":127},{"type":"null"}]}`,
+		},
+		"string override flips the type list to anyOf for enum": {
+			generate: func() (*jsonschema.Schema, error) {
+				type Container struct {
+					F *int8 `json:"f,string" jsonschema:"enum=1|2|3"`
+				}
+
+				return jsonschema.GenerateFor[Container](t.Context())
+			},
+			want: `{"anyOf":[{"type":"string","enum":["1","2","3"]},{"type":"null"}]}`,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			s, err := tc.generate()
+			require.NoError(t, err)
+
+			got, err := json.Marshal(s.Properties["f"])
+			require.NoError(t, err)
+			assert.JSONEq(t, tc.want, string(got))
+		})
+	}
+}
+
 func TestGenerateFor_EnumKeepsAuthoredBound(t *testing.T) {
 	t.Parallel()
 
@@ -2736,6 +2816,39 @@ func (allOfEmbed) JSONSchema(context.Context, jsonschema.TypeContext) (*jsonsche
 		Properties: map[string]*jsonschema.Schema{"x": {Type: "integer"}},
 		Required:   []string{"x"},
 	}, nil
+}
+
+func TestGenerateFor_NullableInlineStructWithAllOfEmbedKeepsAllOfInside(t *testing.T) {
+	t.Parallel()
+
+	// A nullable pointer to an inline struct that composes an embed via allOf
+	// must keep that allOf on the value branch, not hoist it onto the anyOf
+	// wrapper, where it would apply to (and reject) the permitted null. The embed
+	// allOf is structural, not a field-authored keyword. WithDefinitions(false)
+	// keeps the struct inline so the object (with its allOf) is the value branch.
+	type Container struct {
+		Inner *struct {
+			allOfEmbed
+
+			B int `json:"b"`
+		} `json:"inner"`
+	}
+
+	s, err := jsonschema.GenerateFor[Container](t.Context(), jsonschema.WithDefinitions(false))
+	require.NoError(t, err)
+
+	field := s.Properties["inner"]
+	require.Len(t, field.AnyOf, 2)
+	assert.Empty(t, field.AllOf, "the embed allOf must not sit on the nullable wrapper")
+
+	value := field.AnyOf[0]
+	assert.Equal(t, "object", value.Type)
+	require.Len(t, value.AllOf, 1, "the embed allOf belongs on the value branch")
+	assert.Equal(t, "null", field.AnyOf[1].Type)
+
+	// The generated schema must accept the null the pointer permits.
+	err = jsonschema.Validate(t.Context(), s, map[string]any{"inner": nil})
+	require.NoError(t, err, "a null inner pointer is permitted")
 }
 
 // allOfWrapM and allOfWrapN each embed allOfEmbed so it reaches allOfDupOuter

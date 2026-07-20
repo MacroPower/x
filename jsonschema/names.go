@@ -62,125 +62,84 @@ func (g *generator) shouldExtract(t reflect.Type) bool {
 	return implementsProvider(t) || implementsExtender(t)
 }
 
-// disambiguateDefs resolves name collisions in the definitions map by prefixing
-// with the package's base directory name, then with the full import path
-// if collisions persist.
-func (g *generator) disambiguateDefs() {
-	var hasCollision bool
-
-	for _, types := range g.defsNameToTypes {
-		if len(types) > 1 {
-			hasCollision = true
-			break
-		}
+// assignDefNames assigns each def entry its final $defs key, disambiguating
+// name collisions by prefixing with the package's base directory name, then
+// with the full import path if collisions persist. It runs before render, so
+// renderRef emits final names directly; because refs are defEntry pointer
+// links, no ref re-pointing pass is needed.
+func (g *generator) assignDefNames() {
+	// Group entries by their pre-disambiguation base name.
+	byBase := map[string][]*defEntry{}
+	for _, e := range g.defs {
+		byBase[e.baseName] = append(byBase[e.baseName], e)
 	}
 
-	if !hasCollision {
-		return
-	}
-
-	newDefs := make(map[string]*Schema, len(g.defs))
-
-	// Used reserves every name placed in newDefs so that a disambiguated name
-	// can never silently overwrite a retained non-colliding def or a name
-	// produced for a different collision group.
+	// Used reserves every assigned name so a disambiguated name can never
+	// silently shadow a singleton or a name produced for another group.
 	used := make(map[string]bool, len(g.defs))
 
-	// First pass: retain all non-colliding names verbatim and reserve them.
+	// First pass: singletons keep their base name verbatim and reserve it.
 	// Colliding groups are collected for a deterministic second pass; iterating
-	// g.defs directly would resolve groups in randomized order and make the
-	// chosen disambiguation (and thus which schema wins a residual clash)
-	// nondeterministic.
-	var collisionNames []string
+	// the map directly would resolve groups in randomized order and make the
+	// chosen disambiguation nondeterministic.
+	var collisionBases []string
 
-	for name, schema := range g.defs {
-		if len(g.defsNameToTypes[name]) <= 1 {
-			newDefs[name] = schema
-			used[name] = true
+	for base, entries := range byBase {
+		if len(entries) <= 1 {
+			entries[0].name = base
+			used[base] = true
 
 			continue
 		}
 
-		collisionNames = append(collisionNames, name)
+		collisionBases = append(collisionBases, base)
 	}
 
-	sort.Strings(collisionNames)
+	sort.Strings(collisionBases)
 
 	// Second pass: disambiguate each collision group, escalating the naming
 	// scheme until every name is unique against everything already placed.
-	for _, name := range collisionNames {
-		types := g.defsNameToTypes[name]
+	for _, base := range collisionBases {
+		entries := byBase[base]
 
 		// Candidate scheme 1: prefix with the package's base directory name. The
 		// underscore separator keeps the package and type name distinct so two
 		// groups whose base+name concatenate to the same string (package "foo"
 		// with type "BarBaz" versus package "fooBar" with type "Baz") do not
 		// force an unnecessary escalation to the full-path scheme.
-		baseCandidates := make([]string, len(types))
-		for i, t := range types {
+		baseCandidates := make([]string, len(entries))
+		for i, e := range entries {
 			// Run the prefix through the same sanitizer the rest of the package
 			// uses: a package path element may legally contain a JSON Pointer
 			// special character (the tilde, allowed in module paths), which
 			// would otherwise misresolve the generated $ref token.
-			baseCandidates[i] = jsonptr.SafeToken(path.Base(t.PkgPath())) + "_" + name
+			baseCandidates[i] = jsonptr.SafeToken(path.Base(e.typ.PkgPath())) + "_" + base
 		}
 
 		// Pick the first scheme whose names are unique within the group and do
-		// not clash with any name already reserved in newDefs. The full-path
-		// fallback is constructed only on escalation, the uncommon case, so the
-		// usual base-scheme path does not build a second candidate slice.
+		// not clash with any name already reserved. The full-path fallback is
+		// constructed only on escalation, the uncommon case.
 		chosen := baseCandidates
 		if !candidatesUsable(baseCandidates, used) {
 			// Candidate scheme 2 (fallback): prefix with the full import path.
 			// The sanitizer subsumes the slash replacement and also handles the
 			// tilde and the other characters invalid in a $ref token.
-			fullCandidates := make([]string, len(types))
-			for i, t := range types {
-				fullCandidates[i] = jsonptr.SafeToken(t.PkgPath()) + "_" + name
+			fullCandidates := make([]string, len(entries))
+			for i, e := range entries {
+				fullCandidates[i] = jsonptr.SafeToken(e.typ.PkgPath()) + "_" + base
 			}
 
 			chosen = fullCandidates
 		}
 
-		for i, t := range types {
+		for i, e := range entries {
 			// Even the full-path scheme can collide (two type arguments of a
-			// generic differing only by a path separator, or a retained def
-			// matching the constructed name). Suffix to guarantee uniqueness so
-			// no schema is dropped and every refRecord points at its own def.
+			// generic differing only by a path separator, or a singleton matching
+			// the constructed name). Suffix to guarantee uniqueness.
 			finalName := uniqueName(chosen[i], used)
-
-			s := g.typeToDefSchema[t]
-			if s == nil {
-				s = g.defs[name]
-			}
-
-			newDefs[finalName] = s
+			e.name = finalName
 			used[finalName] = true
-			g.typeToDefName[t] = finalName
 		}
-	}
-
-	g.defs = newDefs
-
-	// Update all tracked $ref schemas to point to the correct new names.
-	for _, rec := range g.refRecords {
-		// A refRecord whose schema no longer carries a $ref has had it
-		// intentionally cleared (an explicit type= override drops the bare $ref
-		// of a $defs-extracted field). Re-pointing it would re-emit a stale $ref
-		// next to the override, producing {"type":..,"$ref":..}, which is
-		// unsatisfiable under 2020-12. Before this runs, wrapRefForDraft7
-		// repoints its record to the inner $ref (whose Ref is set), so an empty
-		// Ref here is only ever an override, never a reference awaiting rename.
-		if rec.schema.Ref == "" {
-			continue
-		}
-
-		newName := g.typeToDefName[rec.target]
-		if newName == "" {
-			continue
-		}
-
-		rec.schema.Ref = g.draft.refPrefix() + newName
 	}
 }
 

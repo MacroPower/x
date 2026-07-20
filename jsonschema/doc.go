@@ -265,8 +265,12 @@
 // [FieldContext] containing the field's schema, parent schema, JSON name,
 // Go type, declaring struct type, full [reflect.StructField] (for reading
 // sibling struct tags such as the json tag's options), and the target
-// [Draft] (for emitting draft-appropriate keywords). For a promoted field,
-// the declaring struct type is the embedded type, exposed as
+// [Draft] (for emitting draft-appropriate keywords). The field's schema is
+// the bare value schema, without any nullable wrapper: a nil-able field
+// presents its non-null value schema, and generation applies the null
+// encoding afterward, so a const or enum an interpreter sets lands on the
+// value and keeps the permitted null valid. For a promoted field, the
+// declaring struct type is the embedded type, exposed as
 // [FieldContext.Owner], which a [DescriptionProvider] reads for the same
 // field. Each interpreter is registered under the struct tag key it reads;
 // multiple interpreters can be registered and are applied in order.
@@ -362,10 +366,11 @@
 // const.
 //
 // The type key overrides the reflected type entirely: it must name one of
-// the seven JSON Schema types, and it removes the nullable anyOf wrapper a
-// pointer field generates plus, when the new type is not numeric, the
-// numeric bounds derived from the Go kind. A pointer [time.Duration] field
-// with jsonschema:"type=string,pattern=..." therefore produces a clean string
+// the seven JSON Schema types. The overridden field is not nullable (it
+// names a concrete type in place of the one a pointer would make nil-able)
+// and not a reference. When the new type is not numeric, its Go-kind numeric
+// bounds are dropped too. A pointer [time.Duration] field with
+// jsonschema:"type=string,pattern=..." therefore produces a clean string
 // schema without needing [JSONSchemaExtender]. Tag pairs apply in order;
 // keys after type= still take effect. A constraint keyword the tag sets
 // explicitly (a numeric bound such as minimum or multipleOf, or a string,
@@ -445,9 +450,9 @@
 // behavior, and additionalProperties/unevaluatedProperties handling with allOf
 // composition. In [Draft7], when a $ref'd field has additional annotations
 // from struct tags, the $ref is wrapped in an allOf; for a nullable $ref field
-// the wrap applies to the value branch of the anyOf, where a relocated
-// const/enum lands. In [Draft2020], sibling keywords are placed directly
-// alongside $ref.
+// the wrap applies to the value branch of the anyOf, where a field's const or
+// enum lands. In [Draft2020], sibling keywords are placed directly alongside
+// $ref.
 //
 // The [WithDraft] option serves generation, validation, and inlining alike:
 // generation targets the given draft, while validation and [Inline] use it
@@ -466,9 +471,11 @@
 //
 // Field-level processing is executed per struct field, after the field's type
 // schema is resolved: (1) json:",string" override, (2) comment extraction,
-// (3) jsonschema struct tag, (4) registered tag interpreters in order.
-// Field-level processing always applies, including when the type is referenced
-// via $ref.
+// (3) jsonschema struct tag, (4) registered tag interpreters in order. Each
+// step operates on the bare value schema; the null encoding for a nil-able
+// field (an anyOf[value, null] wrapper, or a ["null", base] type list) is
+// applied afterward. Field-level processing always applies, including when the
+// type is referenced via $ref.
 //
 // # Validation
 //

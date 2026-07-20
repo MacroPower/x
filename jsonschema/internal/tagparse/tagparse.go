@@ -103,6 +103,18 @@ func isKeyValueTag(pairs []string) bool {
 	return !strings.ContainsAny(value, " \t")
 }
 
+// Result reports what [Apply] did that the generator's render phase needs. It is
+// internal, so it is free to widen as more provenance is required.
+type Result struct {
+	// BoundAuthored reports whether the tag set a numeric range bound, which the
+	// render split keeps alongside an enum (enum ∩ bound) rather than dropping.
+	BoundAuthored bool
+	// TypeOverridden reports whether a type= pair replaced the field's type. The
+	// field is then inline and non-nullable, so the builder detaches its $ref
+	// link and clears its null bit.
+	TypeOverridden bool
+}
+
 // Apply parses and applies a jsonschema struct tag to a schema.
 //
 // Pairs apply strictly in order. The scalar keys (default, const, enum,
@@ -112,9 +124,9 @@ func isKeyValueTag(pairs []string) bool {
 // type= keeps Go-kind parsing while one after it parses as the overridden
 // type. The non-scalar overrides (array, object, null) have no stand-in, so a
 // scalar key following one is an error.
-func Apply(tag string, fieldType reflect.Type, s *jsonschema.Schema) (bool, error) {
+func Apply(tag string, fieldType reflect.Type, s *jsonschema.Schema) (Result, error) {
 	if tag == "" {
-		return false, nil
+		return Result{}, nil
 	}
 
 	// Gate on the cheap regex before paying for splitTagPairs, then split once
@@ -130,7 +142,7 @@ func Apply(tag string, fieldType reflect.Type, s *jsonschema.Schema) (bool, erro
 			s.Description = tag
 		}
 
-		return false, nil
+		return Result{}, nil
 	}
 
 	pairs := splitTagPairs(tag)
@@ -139,7 +151,7 @@ func Apply(tag string, fieldType reflect.Type, s *jsonschema.Schema) (bool, erro
 		// escape-resolved text, not the raw tag, matching the bare path above.
 		s.Description = strings.Join(pairs, ",")
 
-		return false, nil
+		return Result{}, nil
 	}
 
 	scalarType := fieldType
@@ -147,21 +159,21 @@ func Apply(tag string, fieldType reflect.Type, s *jsonschema.Schema) (bool, erro
 	var (
 		overriddenType string
 		groupsSet      = map[string]bool{}
-		boundAuthored  bool
+		res            Result
 	)
 
 	for _, pair := range pairs {
 		key, value, found := strings.Cut(pair, "=")
 		if !found {
-			return false, fmt.Errorf("jsonschema tag: segment %q missing '='", pair)
+			return Result{}, fmt.Errorf("jsonschema tag: segment %q missing '='", pair)
 		}
 
 		if key == "" {
-			return false, fmt.Errorf("jsonschema tag: empty key in %q", pair)
+			return Result{}, fmt.Errorf("jsonschema tag: empty key in %q", pair)
 		}
 
 		if scalarType == nil && isScalarValueKey(key) {
-			return false, fmt.Errorf("jsonschema tag: key %q cannot follow type=%s", key, overriddenType)
+			return Result{}, fmt.Errorf("jsonschema tag: key %q cannot follow type=%s", key, overriddenType)
 		}
 
 		// A type= override drops the constraint groups the new type cannot use.
@@ -172,13 +184,13 @@ func Apply(tag string, fieldType reflect.Type, s *jsonschema.Schema) (bool, erro
 		// group only on the next iteration, so a post-loop check covers it.
 		if key == keyword.Type && typename.Valid(value) {
 			if g := conflictingGroup(groupsSet, value); g != "" {
-				return false, fmt.Errorf("jsonschema tag: %s constraint conflicts with type=%s", g, value)
+				return Result{}, fmt.Errorf("jsonschema tag: %s constraint conflicts with type=%s", g, value)
 			}
 		}
 
 		err := applyTagKeyValue(key, value, scalarType, s)
 		if err != nil {
-			return false, err
+			return Result{}, err
 		}
 
 		if g := constraintGroup(key); g != "" {
@@ -186,12 +198,13 @@ func Apply(tag string, fieldType reflect.Type, s *jsonschema.Schema) (bool, erro
 		}
 
 		if isNumericBoundKey(key) {
-			boundAuthored = true
+			res.BoundAuthored = true
 		}
 
 		if key == keyword.Type {
 			scalarType = standInTypeFor(value)
 			overriddenType = value
+			res.TypeOverridden = true
 		}
 	}
 
@@ -201,11 +214,11 @@ func Apply(tag string, fieldType reflect.Type, s *jsonschema.Schema) (bool, erro
 	// is recorded, so it cannot see the later ordering).
 	if overriddenType != "" {
 		if g := conflictingGroup(groupsSet, overriddenType); g != "" {
-			return false, fmt.Errorf("jsonschema tag: %s constraint conflicts with type=%s", g, overriddenType)
+			return Result{}, fmt.Errorf("jsonschema tag: %s constraint conflicts with type=%s", g, overriddenType)
 		}
 	}
 
-	return boundAuthored, nil
+	return res, nil
 }
 
 // isNumericBoundKey reports whether key is one of the four range-bound keywords
@@ -608,13 +621,6 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *jsonschema.
 // emit as confusing dead structure. Tag pairs apply in order, so keys after
 // type= still take effect.
 func applyTypeOverride(s *jsonschema.Schema, typeName string) {
-	// A nullable pointer field wraps the value schema in anyOf[value, null];
-	// an explicit type replaces the whole construct, including the wrapped
-	// value branch and its kind-derived constraints.
-	if schemashape.NullableInnerSchema(s) != nil {
-		s.AnyOf = nil
-	}
-
 	// A field whose type was extracted to $defs reflects to a bare {$ref}; the
 	// explicit type replaces that assertion, so drop the ref. Leaving it would
 	// emit {$ref, type}, which under 2020-12 requires both to hold and is
@@ -737,14 +743,9 @@ func applyEnumToItems(key, value string, t reflect.Type, s *jsonschema.Schema) e
 
 	for _, item := range items {
 		// Each item schema gets its own value slice so no slice is shared
-		// across schema nodes.
+		// across schema nodes. The item payload is bare; render applies the null
+		// wrapper afterward, landing the enum on the value branch by construction.
 		item.Enum = slices.Clone(enumVals)
-
-		// A nullable-pointer element ([]*string) wraps its value schema in
-		// anyOf[value, null]; the enum belongs on the value branch, not as a
-		// sibling of anyOf where it would reject a valid null element. This is
-		// a no-op for a non-nullable item.
-		schemashape.RelocateConstEnumToValueBranch(item)
 	}
 
 	return nil

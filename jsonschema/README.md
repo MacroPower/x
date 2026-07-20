@@ -391,11 +391,12 @@ backslash (`\,`, and `\\` for a literal backslash). For complex values, use
 
 `type=` overrides the reflected type entirely, for a Go type whose JSON
 representation differs from its reflection: it must name one of the seven
-JSON Schema types, and it removes the nullable `anyOf` wrapper a pointer
-field generates. When the new type is not numeric, it also removes the
-numeric bounds derived from the Go kind. So a `*time.Duration` field
-(reflected as a nullable integer) with `jsonschema:"type=string,pattern=..."`
-produces a clean `{"type":"string","pattern":"..."}` without needing
+JSON Schema types. The overridden field is not nullable (it names a concrete
+type in place of the one a pointer would make nil-able) and not a reference.
+When the new type is not numeric, it also removes the numeric bounds derived
+from the Go kind. So a `*time.Duration` field (reflected as a nullable
+integer) with `jsonschema:"type=string,pattern=..."` produces a clean
+`{"type":"string","pattern":"..."}` without needing
 `JSONSchemaExtend`. Tag pairs apply in order; keys after `type=` still take
 effect. A numeric bound set by an earlier pair and then dropped by a
 non-numeric `type=` override is reported as an error rather than silently
@@ -526,7 +527,7 @@ overrides how definition keys are derived.
 handling, and `unevaluatedProperties` vs `additionalProperties` in `allOf`
 compositions. In Draft-07, a `$ref`'d field with extra annotations is wrapped in
 an `allOf`; for a nullable `$ref` field the wrap applies to the value branch of
-the `anyOf`, where a relocated `const`/`enum` lands. In Draft 2020-12 sibling
+the `anyOf`, where a field's `const`/`enum` lands. In Draft 2020-12 sibling
 keywords sit directly alongside `$ref`.
 
 The `WithDraft` option serves generation, validation, and `Inline` alike:
@@ -550,8 +551,11 @@ Interpreters receive three things and modify the schema in place. The first is
 the Generate call's context, like the other generation-time hooks; an
 interpreter that performs no cancellable work ignores it. The second is a `Tag`
 carrying the struct tag key and value the call runs under. The third is a
-`FieldContext`, which holds the field's schema, parent schema, JSON name, and Go
-type; the declaring struct type, which for a promoted field is the embedded
+`FieldContext`, which holds the field's schema (the bare value schema, with
+the null encoding for a nil-able field applied afterward, so a `const` or
+`enum` an interpreter sets lands on the value and keeps null valid), parent
+schema, JSON name, and Go type; the declaring struct type, which for a
+promoted field is the embedded
 type; the full `reflect.StructField` for reading sibling struct tags such as the
 `json` tag's options; and the target `Draft` for emitting draft-appropriate
 keywords. Each interpreter is registered under the struct tag key it reads

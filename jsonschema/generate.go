@@ -345,9 +345,9 @@ func (g *generator) applyInstanceDefaults(instance any, rootType reflect.Type, s
 			// The default may now sit beside a $ref (a definitions-extracted
 			// field), where Draft-07 readers would ignore it; wrap the $ref
 			// in allOf, the same shape the tag-default path produces. This
-			// runs after disambiguateDefs, so repointing the tracked ref
-			// record inside the wrap is harmless. No-op for other drafts and
-			// for properties without a $ref.
+			// runs post-render on the produced schema, so the $ref already
+			// carries its final name. No-op for other drafts and for
+			// properties without a $ref.
 			g.wrapRefForDraft7(prop)
 		}
 	}
