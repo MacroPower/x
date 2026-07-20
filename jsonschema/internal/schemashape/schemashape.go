@@ -124,10 +124,10 @@ func IsEmpty(s *jsonschema.Schema) bool {
 // It delegates to [schemafield.HasSiblingsBesides], which reports any field
 // other than Ref set on s -- constraint, applicator, annotation, identifier,
 // render-only, and the Extra escape hatch alike, so every keyword that must
-// survive the allOf wrap is caught, including future upstream additions. The
-// check uses the canonical table's nil-versus-empty zero semantics (a non-nil
-// empty Examples, Extra, or PropertyOrder counts as a sibling), aligning it with
-// IsTrueSchema and IsEmpty.
+// survive the allOf wrap is caught, including future upstream additions. A
+// non-nil empty Examples, Extra, or PropertyOrder is not a sibling: it leaves
+// no trace in marshaled output, so a wrap would preserve nothing (the table's
+// IsZeroInOutput semantics).
 func HasRefSiblings(s *jsonschema.Schema) bool {
 	return schemafield.HasSiblingsBesides(s, "Ref")
 }

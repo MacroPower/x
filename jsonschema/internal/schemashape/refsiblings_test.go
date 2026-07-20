@@ -59,6 +59,21 @@ func TestHasRefSiblings(t *testing.T) {
 			want:   true,
 		},
 
+		// Non-nil empty containers that upstream omits from marshaled output:
+		// nothing observable rides beside the $ref, so no wrap.
+		"empty examples": {
+			schema: withRef(func(s *jsonschema.Schema) { s.Examples = []any{} }),
+			want:   false,
+		},
+		"empty extra": {
+			schema: withRef(func(s *jsonschema.Schema) { s.Extra = map[string]any{} }),
+			want:   false,
+		},
+		"empty propertyOrder": {
+			schema: withRef(func(s *jsonschema.Schema) { s.PropertyOrder = []string{} }),
+			want:   false,
+		},
+
 		// Constraint keywords: detected via IsEmpty after clearing $ref.
 		"type constraint":     {schema: withRef(func(s *jsonschema.Schema) { s.Type = "string" }), want: true},
 		"pattern constraint":  {schema: withRef(func(s *jsonschema.Schema) { s.Pattern = "^x" }), want: true},

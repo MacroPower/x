@@ -166,7 +166,16 @@ func TestIsZeroReadsNilAndEmpty(t *testing.T) {
 	}
 	assert.False(t, IsTrue(nonNilEmpty), "non-nil empty containers count as set")
 	assert.True(t, HasSiblingsBesides(nonNilEmpty, "Ref"),
-		"non-nil empty containers are ref siblings under nil-based semantics")
+		"a non-nil empty Enum stays a sibling under the strict nil-based semantics")
+
+	outputInvisible := &jsonschema.Schema{
+		Examples:      []any{},
+		PropertyOrder: []string{},
+		Extra:         map[string]any{},
+	}
+	assert.False(t, IsTrue(outputInvisible), "non-nil empty containers count as set")
+	assert.False(t, HasSiblingsBesides(outputInvisible, "Ref"),
+		"empty Examples, Extra, and PropertyOrder leave no trace in output, so they are not siblings")
 }
 
 // TestCloneContainersUnaliasesHeaders confirms the container clones reallocate

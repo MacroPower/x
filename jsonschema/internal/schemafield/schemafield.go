@@ -90,6 +90,17 @@ type Field struct {
 	// nil-versus-empty distinction: a non-nil empty slice or map counts as set.
 	IsZero func(s *Schema) bool
 
+	// IsZeroInOutput reports whether the field leaves no trace in the schema's
+	// marshaled output even though IsZero reports it set. It is non-nil only
+	// for the containers upstream omits when empty and whose emptiness never
+	// constrains validation: Examples and Extra (omitted by omitempty and the
+	// Extra inlining), and the render-only PropertyOrder, whose empty value
+	// cannot affect property ordering. HasSiblingsBesides prefers it over
+	// IsZero so a bare $ref is not allOf-wrapped to preserve state no reader
+	// of the output can see; IsTrue and IsEmpty keep the strict nil-based
+	// semantics.
+	IsZeroInOutput func(s *Schema) bool
+
 	// SingleOf, SliceOf, and MapOf extract the field's sub-schemas. Exactly one
 	// is non-nil, selected by Shape; all three are nil when Shape is None.
 	SingleOf func(s *Schema) *Schema
@@ -245,6 +256,7 @@ var (
 			Name:           "Examples",
 			Class:          Annotation,
 			IsZero:         func(s *Schema) bool { return s.Examples == nil },
+			IsZeroInOutput: func(s *Schema) bool { return len(s.Examples) == 0 },
 			CloneContainer: func(s *Schema) { s.Examples = slices.Clone(s.Examples) },
 		},
 
@@ -357,12 +369,14 @@ var (
 			Name:           "Extra",
 			Class:          Extension,
 			IsZero:         func(s *Schema) bool { return s.Extra == nil },
+			IsZeroInOutput: func(s *Schema) bool { return len(s.Extra) == 0 },
 			CloneContainer: func(s *Schema) { s.Extra = maps.Clone(s.Extra) },
 		},
 		{
 			Name:           "PropertyOrder",
 			Class:          RenderOnly,
 			IsZero:         func(s *Schema) bool { return s.PropertyOrder == nil },
+			IsZeroInOutput: func(s *Schema) bool { return len(s.PropertyOrder) == 0 },
 			CloneContainer: func(s *Schema) { s.PropertyOrder = slices.Clone(s.PropertyOrder) },
 		},
 	}
@@ -453,7 +467,9 @@ func IsEmpty(s *Schema) bool {
 // HasSiblingsBesides reports whether s has any field set other than the one named
 // except. It backs schemashape.HasRefSiblings (called with "Ref"): a $ref
 // carrying any sibling keyword must be wrapped in allOf so the sibling is not
-// dropped. A nil s has no siblings.
+// dropped. A field that is set but leaves no trace in marshaled output (see
+// [Field.IsZeroInOutput]) is not a sibling: there is nothing the wrap could
+// preserve. A nil s has no siblings.
 func HasSiblingsBesides(s *Schema, except string) bool {
 	if s == nil {
 		return false
@@ -465,7 +481,12 @@ func HasSiblingsBesides(s *Schema, except string) bool {
 			continue
 		}
 
-		if !f.IsZero(s) {
+		zero := f.IsZero
+		if f.IsZeroInOutput != nil {
+			zero = f.IsZeroInOutput
+		}
+
+		if !zero(s) {
 			return true
 		}
 	}
