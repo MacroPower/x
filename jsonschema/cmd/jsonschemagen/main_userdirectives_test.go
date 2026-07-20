@@ -4,166 +4,19 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestUserGoModDirectives(t *testing.T) {
-	t.Parallel()
-
-	tests := map[string]struct {
-		goMod   string
-		modDir  string
-		modPath string
-		want    []string
-		err     string
-	}{
-		"no directives": {
-			goMod:   "module example.com/app\n\ngo 1.21\n",
-			modDir:  "/home/user/app",
-			modPath: "example.com/app",
-			want:    nil,
-		},
-		"relative directory target resolved against modDir": {
-			goMod: "module example.com/app\n\ngo 1.21\n\n" +
-				"replace example.com/dep => ../dep\n",
-			modDir:  "/home/user/app",
-			modPath: "example.com/app",
-			want:    []string{"replace example.com/dep => /home/user/dep"},
-		},
-		"absolute directory target passes through": {
-			goMod: "module example.com/app\n\ngo 1.21\n\n" +
-				"replace example.com/dep => /opt/dep\n",
-			modDir:  "/home/user/app",
-			modPath: "example.com/app",
-			want:    []string{"replace example.com/dep => /opt/dep"},
-		},
-		"directory target with a space is quoted": {
-			goMod: "module example.com/app\n\ngo 1.21\n\n" +
-				"replace example.com/dep => \"/opt/my dep\"\n",
-			modDir:  "/home/user/app",
-			modPath: "example.com/app",
-			want:    []string{`replace example.com/dep => "/opt/my dep"`},
-		},
-		"module target copies verbatim": {
-			goMod: "module example.com/app\n\ngo 1.21\n\n" +
-				"replace example.com/dep v1.0.0 => example.com/fork v1.1.0\n",
-			modDir:  "/home/user/app",
-			modPath: "example.com/app",
-			want:    []string{"replace example.com/dep v1.0.0 => example.com/fork v1.1.0"},
-		},
-		"replace of the user module is skipped": {
-			goMod: "module example.com/other\n\ngo 1.21\n\n" +
-				"replace example.com/app => ../app-fork\n",
-			modDir:  "/home/user/app",
-			modPath: "example.com/app",
-			want:    nil,
-		},
-		"replace of jsonschema is skipped": {
-			goMod: "module example.com/app\n\ngo 1.21\n\n" +
-				"replace go.jacobcolvin.com/x/jsonschema => ../jsonschema\n",
-			modDir:  "/home/user/app",
-			modPath: "example.com/app",
-			want:    nil,
-		},
-		"exclude copies verbatim": {
-			goMod: "module example.com/app\n\ngo 1.21\n\n" +
-				"exclude example.com/old v1.0.0\n",
-			modDir:  "/home/user/app",
-			modPath: "example.com/app",
-			want:    []string{"exclude example.com/old v1.0.0"},
-		},
-		"mixed directives keep replaces then excludes": {
-			goMod: "module example.com/app\n\ngo 1.21\n\n" +
-				"exclude example.com/old v1.0.0\n\n" +
-				"replace (\n" +
-				"\texample.com/app => ../self\n" +
-				"\texample.com/dep => ./vendor-dep\n" +
-				"\texample.com/fork v1.0.0 => example.com/upstream v1.1.0\n" +
-				")\n",
-			modDir:  "/home/user/app",
-			modPath: "example.com/app",
-			want: []string{
-				"replace example.com/dep => /home/user/app/vendor-dep",
-				"replace example.com/fork v1.0.0 => example.com/upstream v1.1.0",
-				"exclude example.com/old v1.0.0",
-			},
-		},
-		"unparsable go.mod": {
-			goMod:   "module example.com/app\n\nbogus directive\n",
-			modDir:  "/home/user/app",
-			modPath: "example.com/app",
-			err:     "parse go.mod",
-		},
-	}
-
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			got, err := userGoModDirectives([]byte(tc.goMod), tc.modDir, tc.modPath)
-			if tc.err != "" {
-				require.Error(t, err)
-				assert.Contains(t, err.Error(), tc.err)
-
-				return
-			}
-
-			require.NoError(t, err)
-			assert.Equal(t, tc.want, got)
-		})
-	}
-}
-
-func TestUserGoModDirectivesRejectsBackslashTarget(t *testing.T) {
-	t.Parallel()
-
-	if filepath.Separator != '/' {
-		t.Skip("a backslash directory target is only rejected on slash-separator hosts")
-	}
-
-	// A backslash directory target is rejected when the user's go.mod is
-	// parsed (the modfile parser refuses a Windows-looking replacement path on
-	// a non-Windows system), so it surfaces as a clear parse error at the
-	// input boundary rather than a cryptic go mod tidy failure in the temp
-	// module.
-	goMod := "module example.com/app\n\ngo 1.21\n\n" +
-		`replace example.com/dep => /opt/weird\dep` + "\n"
-
-	_, err := userGoModDirectives([]byte(goMod), "/home/user/app", "example.com/app")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "parse go.mod")
-}
-
-func TestRenderGoModAppendsUserDirectives(t *testing.T) {
-	t.Parallel()
-
-	got := renderGoMod(
-		"example.com/app",
-		"/home/user/app",
-		"/home/user/jsonschema",
-		"replace example.com/dep => /home/user/dep",
-		"exclude example.com/old v1.0.0",
-	)
-
-	assert.True(t, strings.HasSuffix(got,
-		"replace go.jacobcolvin.com/x/jsonschema => /home/user/jsonschema\n"+
-			"replace example.com/dep => /home/user/dep\n"+
-			"exclude example.com/old v1.0.0\n"),
-		"user directives must follow the tool's own replace directives, got:\n%s", got)
-}
-
 func TestIntegrationUserReplaceDirective(t *testing.T) {
 	t.Parallel()
 
-	// Replace directives apply only to the main module of a build, so the temp
-	// module must copy the user's replaces: without them, a replace pointing at
-	// a local unpublished module makes go mod tidy try to fetch the original
-	// path from the network, and a replace pointing at a fork silently
-	// generates from the unreplaced upstream code.
+	// The helper builds inside the user's own module, so the user's replace
+	// directives apply natively with no copying by the CLI: a replace pointing
+	// at a local unpublished module resolves to that directory rather than being
+	// fetched from the network.
 	binary := buildBinary(t)
 	jsDir := moduleDir(t)
 
@@ -177,7 +30,7 @@ func TestIntegrationUserReplaceDirective(t *testing.T) {
 	// The replaced dependency: a local module that does not exist upstream.
 	require.NoError(t, os.WriteFile(filepath.Join(depDir, "go.mod"), []byte(`module example.com/dep
 
-go `+goDirectiveVersion()+`
+go `+testGoVersion+`
 `), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(depDir, "options.go"), []byte(`package dep
 
@@ -186,11 +39,11 @@ type Options struct {
 }
 `), 0o644))
 
-	// The user's module replaces the dependency with a relative directory, so
-	// the copied directive must also be resolved against the module directory.
+	// The user's module replaces the dependency with a relative directory, which
+	// the go tool resolves against the module root when the helper builds there.
 	require.NoError(t, os.WriteFile(filepath.Join(userDir, "go.mod"), []byte(`module example.com/testmod
 
-go `+goDirectiveVersion()+`
+go `+testGoVersion+`
 
 require (
 	example.com/dep v0.0.0

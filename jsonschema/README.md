@@ -1146,8 +1146,11 @@ cycle introduced by the substitute is an ordinary `ErrRefCycle`.
 
 The module ships a build-time code-generation CLI under `cmd/jsonschemagen`,
 intended for `//go:generate`. It writes a JSON Schema file for a named Go type
-by generating a temporary program that imports the target package and calls
-`Generate`, reusing the library's generation pipeline:
+by building a small helper program that imports the target package and calls
+`Generate`, reusing the library's generation pipeline. The helper is compiled
+inside the target's own module through a build overlay, so module resolution and
+checksums are handled by the `go` tool; the module must be able to resolve this
+package (via a `require`, a workspace, or a `tool` directive):
 
 ```go
 //go:generate go run go.jacobcolvin.com/x/jsonschema/cmd/jsonschemagen -type Config -o config.schema.json

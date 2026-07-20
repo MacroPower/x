@@ -4,11 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -167,196 +165,6 @@ func main() {
 	}
 }
 
-func TestRenderGoMod(t *testing.T) {
-	t.Parallel()
-
-	tests := map[string]struct {
-		modPath       string
-		modDir        string
-		jsonschemaDir string
-		want          string
-	}{
-		"different module": {
-			modPath:       "example.com/myapp",
-			modDir:        "/home/user/myapp",
-			jsonschemaDir: "/home/user/go/pkg/mod/go.jacobcolvin.com/x/jsonschema@v0.1.0",
-			want: fmt.Sprintf(`module _jsonschemagen_tmp
-
-go %s
-
-require (
-	example.com/myapp v0.0.0
-	go.jacobcolvin.com/x/jsonschema v0.0.0
-)
-
-replace example.com/myapp => /home/user/myapp
-replace go.jacobcolvin.com/x/jsonschema => /home/user/go/pkg/mod/go.jacobcolvin.com/x/jsonschema@v0.1.0
-`, goDirectiveVersion()),
-		},
-		"jsonschema module itself": {
-			modPath:       "go.jacobcolvin.com/x/jsonschema",
-			modDir:        "/home/user/jsonschema",
-			jsonschemaDir: "/home/user/jsonschema",
-			want: fmt.Sprintf(`module _jsonschemagen_tmp
-
-go %s
-
-require (
-	go.jacobcolvin.com/x/jsonschema v0.0.0
-)
-
-replace go.jacobcolvin.com/x/jsonschema => /home/user/jsonschema
-`, goDirectiveVersion()),
-		},
-	}
-
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			got := renderGoMod(tc.modPath, tc.modDir, tc.jsonschemaDir)
-			assert.Equal(t, tc.want, got)
-		})
-	}
-}
-
-func TestRenderGoModQuotesSpecialPaths(t *testing.T) {
-	t.Parallel()
-
-	// A double-quote, backtick, or space (all legal in POSIX filenames) must be
-	// quoted in the replace directive, or the go.mod lexer rejects the unquoted
-	// token with "invalid quoted string".
-	tests := map[string]string{
-		"double quote":    `/home/user/we"ird/proj`,
-		"backtick":        "/home/user/we`ird/proj",
-		"space":           "/home/user/we ird/proj",
-		"tab":             "/home/user/we\tird/proj",
-		"newline":         "/home/user/we\nird/proj",
-		"carriage return": "/home/user/we\rird/proj",
-	}
-
-	for name, dir := range tests {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			got := renderGoMod("example.com/app", dir, "/home/user/jsonschema")
-			want := "replace example.com/app => " + strconv.Quote(dir) + "\n"
-			assert.Contains(t, got, want,
-				"a path with a special character must be quoted in the replace directive")
-		})
-	}
-}
-
-func TestMergeGoSumKeysOnModuleVersion(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-
-	writeSum := func(name, content string) string {
-		t.Helper()
-
-		p := filepath.Join(dir, name)
-		require.NoError(t, os.WriteFile(p, []byte(content), 0o600))
-
-		return p
-	}
-
-	// The two files disagree on the module-zip checksum for the same
-	// module@version. The merge omits that key entirely (so go mod tidy
-	// re-resolves it) while preserving the distinct go.mod line, the unrelated
-	// module, and dropping an exact duplicate.
-	first := writeSum("a.sum",
-		"example.com/m v1.0.0 h1:AAAA=\n"+
-			"example.com/m v1.0.0/go.mod h1:BBBB=\n")
-	second := writeSum("b.sum",
-		"example.com/m v1.0.0 h1:CONFLICT=\n"+
-			"example.com/other v2.0.0 h1:DDDD=\n"+
-			"example.com/m v1.0.0/go.mod h1:BBBB=\n")
-
-	got := string(mergeGoSum(first, second))
-
-	want := "example.com/m v1.0.0/go.mod h1:BBBB=\n" +
-		"example.com/other v2.0.0 h1:DDDD=\n"
-
-	assert.Equal(t, want, got)
-	assert.NotContains(t, got, "CONFLICT",
-		"a conflicting checksum must not win")
-	assert.NotContains(t, got, "AAAA",
-		"a conflicting module-zip checksum is dropped, not kept first")
-}
-
-func TestMergeGoSumToleratesCRLF(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-
-	writeSum := func(name, content string) string {
-		t.Helper()
-
-		p := filepath.Join(dir, name)
-		require.NoError(t, os.WriteFile(p, []byte(content), 0o600))
-
-		return p
-	}
-
-	// A CRLF copy of an entry must deduplicate against its LF twin (not be
-	// treated as a conflict) and must be written back without a trailing \r.
-	lf := writeSum("lf.sum", "example.com/m v1.0.0 h1:AAAA=\n")
-	crlf := writeSum("crlf.sum", "example.com/m v1.0.0 h1:AAAA=\r\nexample.com/n v2.0.0 h1:BBBB=\r\n")
-
-	got := string(mergeGoSum(lf, crlf))
-
-	want := "example.com/m v1.0.0 h1:AAAA=\n" +
-		"example.com/n v2.0.0 h1:BBBB=\n"
-
-	assert.Equal(t, want, got)
-	assert.NotContains(t, got, "\r", "CRLF endings must not survive into the merged go.sum")
-}
-
-func TestSelectMainModule(t *testing.T) {
-	t.Parallel()
-
-	stream := `{"Path":"example.com/a","Dir":"/ws/a","GoMod":"/ws/a/go.mod"}
-{"Path":"example.com/b","Dir":"/ws/b","GoMod":"/ws/b/go.mod"}`
-
-	t.Run("matches the current module in a workspace", func(t *testing.T) {
-		t.Parallel()
-
-		path, dir, err := selectMainModule([]byte(stream), "/ws/b/go.mod")
-		require.NoError(t, err)
-		assert.Equal(t, "example.com/b", path)
-		assert.Equal(t, "/ws/b", dir)
-	})
-
-	t.Run("falls back to the first object outside a module", func(t *testing.T) {
-		t.Parallel()
-
-		path, dir, err := selectMainModule([]byte(stream), "")
-		require.NoError(t, err)
-		assert.Equal(t, "example.com/a", path, "an empty GOMOD means outside a module")
-		assert.Equal(t, "/ws/a", dir)
-	})
-
-	t.Run("errors when no object matches the current module", func(t *testing.T) {
-		t.Parallel()
-
-		// Inside a module, no match means the current module is absent from the
-		// stream; falling back to an arbitrary module would target the wrong
-		// source tree, so this is an error rather than a silent first-object pick.
-		_, _, err := selectMainModule([]byte(stream), "/ws/missing/go.mod")
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "/ws/missing/go.mod")
-	})
-
-	t.Run("errors on an empty stream", func(t *testing.T) {
-		t.Parallel()
-
-		_, _, err := selectMainModule(nil, "")
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "no module reported")
-	})
-}
-
 func TestRun_MissingType(t *testing.T) {
 	t.Parallel()
 
@@ -404,12 +212,19 @@ func moduleDir(t *testing.T) string {
 	out, err := cmd.Output()
 	require.NoError(t, err)
 
-	var info moduleInfo
+	var info struct {
+		Dir string `json:"Dir"`
+	}
 
 	require.NoError(t, json.Unmarshal(out, &info))
 
 	return info.Dir
 }
+
+// testGoVersion is the go directive for generated test modules. It must be at
+// least the jsonschema module's own go directive (they require jsonschema), so
+// it is pinned rather than derived from the running toolchain.
+const testGoVersion = "1.26.0"
 
 // createTestModule creates a temporary Go module with the given type definition
 // and returns the module directory.
@@ -421,7 +236,7 @@ func createTestModule(t *testing.T, typeDef string) string {
 
 	goMod := `module example.com/testmod
 
-go ` + goDirectiveVersion() + `
+go ` + testGoVersion + `
 
 require go.jacobcolvin.com/x/jsonschema v0.0.0
 
@@ -773,136 +588,6 @@ func TestIsValidImportPathRejectsControlBytes(t *testing.T) {
 			t.Parallel()
 
 			assert.Equal(t, tc.want, isValidImportPath(tc.path))
-		})
-	}
-}
-
-func TestGoVersionPatternAnchored(t *testing.T) {
-	t.Parallel()
-
-	tests := map[string]struct {
-		version string
-		want    []string // nil means no match; otherwise [major, minor].
-	}{
-		"release":           {"go1.26.0", []string{"1", "26"}},
-		"release candidate": {"go1.25rc1", []string{"1", "25"}},
-		"devel build":       {"devel go1.26-abc123 X:Y", []string{"1", "26"}},
-		// The anchor reads only the leading version: a goMAJOR.MINOR embedded
-		// later, or a leading token that merely ends in "go", does not match.
-		"leading garbage":     {"prefix go1.9", nil},
-		"embedded after word": {"cargo1.5", nil},
-	}
-
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			m := goVersionPattern.FindStringSubmatch(tc.version)
-			if tc.want == nil {
-				assert.Nil(t, m)
-
-				return
-			}
-
-			require.Len(t, m, 3)
-			assert.Equal(t, tc.want, []string{m[1], m[2]})
-		})
-	}
-}
-
-func TestGoModUsesDetectedGoVersion(t *testing.T) {
-	t.Parallel()
-
-	goMod := renderGoMod("example.com/mymod", "/tmp/mymod", "/tmp/jsonschema")
-
-	// The go directive is derived from the running toolchain via
-	// goDirectiveVersion, never hardcoded.
-	assert.Contains(t, goMod, "go "+goDirectiveVersion()+"\n",
-		"go.mod go directive should be derived from the running toolchain")
-}
-
-func TestTestHelperGoModUsesDetectedGoVersion(t *testing.T) {
-	t.Parallel()
-
-	// CreateTestModule derives its go directive from goDirectiveVersion, the
-	// same source the production code uses, so the helper never pins a fixed
-	// version of its own.
-	dir := createTestModule(t, `package testmod
-
-type Stub struct{}
-`)
-	data, err := os.ReadFile(filepath.Join(dir, "go.mod"))
-	require.NoError(t, err)
-
-	assert.Contains(t, string(data), "go "+goDirectiveVersion()+"\n",
-		"test helper go.mod go directive should be derived from the running toolchain")
-}
-
-func TestRenderGoModPathsWithSpaces(t *testing.T) {
-	t.Parallel()
-
-	goMod := renderGoMod(
-		"example.com/mymod",
-		"/Users/my user/project",
-		"/Users/my user/jsonschema",
-	)
-
-	// RenderGoMod quotes replace-directive paths that contain whitespace, since
-	// an unquoted path with a space does not parse in go.mod.
-	assert.NotContains(t, goMod, "=> /Users/my user/project\n",
-		"paths with spaces in replace directives should be quoted")
-
-	assert.Contains(t, goMod, `"/Users/my user/project"`,
-		"paths with spaces should be quoted in go.mod replace directives")
-}
-
-func TestRenderGoModEmitsTwoReplaceDirectives(t *testing.T) {
-	t.Parallel()
-
-	// RenderGoMod emits exactly two replace directives: one pointing the user's
-	// module at its local directory and one pointing jsonschema at its local
-	// directory.
-	goMod := renderGoMod("example.com/mymod", "/tmp/mymod", "/tmp/jsonschema")
-
-	lines := strings.Split(goMod, "\n")
-
-	replaceCount := 0
-	for _, line := range lines {
-		if strings.HasPrefix(line, "replace ") {
-			replaceCount++
-		}
-	}
-
-	assert.Equal(t, 2, replaceCount,
-		"renderGoMod should emit replace directives for the user module and jsonschema")
-}
-
-func TestCheckReplaceDir(t *testing.T) {
-	t.Parallel()
-
-	cases := map[string]struct {
-		dir string
-		err string
-	}{
-		"valid path":   {dir: "/tmp/mymod", err: ""},
-		"empty dir":    {dir: "", err: "reported no local directory"},
-		"backslash":    {dir: `/tmp/weird\dir`, err: "backslash"},
-		"valid spaces": {dir: "/tmp/my mod", err: ""},
-	}
-
-	for name, tc := range cases {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			err := checkReplaceDir("module directory", tc.dir)
-			if tc.err == "" {
-				require.NoError(t, err)
-
-				return
-			}
-
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), tc.err)
 		})
 	}
 }

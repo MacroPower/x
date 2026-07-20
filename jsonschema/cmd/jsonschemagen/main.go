@@ -5,9 +5,14 @@
 //
 //	//go:generate go run go.jacobcolvin.com/x/jsonschema/cmd/jsonschemagen -type Config -o config.schema.json
 //
-// The tool works by creating a temporary Go program that imports the target
-// package, calls [jsonschema.Generate], and outputs the resulting JSON, so it
-// reuses the library's generation pipeline rather than duplicating it.
+// The tool builds a small helper program that imports the target package, calls
+// [jsonschema.Generate], and prints the resulting JSON, reusing the library's
+// generation pipeline rather than duplicating it. The helper is compiled inside
+// the target's own module and supplied to the go tool through a build overlay,
+// so nothing is written to the source tree and the go tool handles module
+// resolution, replace directives, and checksum verification. That module must be
+// able to resolve go.jacobcolvin.com/x/jsonschema (via a require, a workspace, or
+// a tool directive).
 package main
 
 import (
@@ -23,15 +28,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
-	"runtime"
-	"strconv"
 	"strings"
 	"text/template"
-
-	"golang.org/x/mod/modfile"
-	"golang.org/x/mod/module"
 )
+
+// jsonschemaModule is the module path of the jsonschema library the helper
+// imports; it seeds the remediation hint when a build cannot resolve it.
+const jsonschemaModule = "go.jacobcolvin.com/x/jsonschema"
 
 type config struct {
 	TypeName             string
@@ -86,48 +89,32 @@ func run(cfg config, stdout io.Writer) error {
 		return fmt.Errorf("invalid -indent %q: must contain only whitespace", cfg.Indent)
 	}
 
-	importPath, err := resolveImportPath()
+	goMod, err := ensureInModule()
+	if err != nil {
+		return err
+	}
+
+	// The build mode (workspace vs single module) governs how every go command
+	// below is invoked, so resolve it once. A workspace ignores -mod and rejects
+	// it; a single module needs -mod=mod to bypass an inherited vendor directory.
+	inWork, err := inWorkspace()
+	if err != nil {
+		return err
+	}
+
+	importPath, err := resolveImportPath(inWork)
 	if err != nil {
 		return fmt.Errorf("resolve import path: %w", err)
 	}
 
-	modPath, modDir, err := resolveModuleInfo()
+	var helper bytes.Buffer
+
+	err = renderMainGo(&helper, cfg, importPath)
 	if err != nil {
-		return fmt.Errorf("resolve module info: %w", err)
+		return fmt.Errorf("render helper: %w", err)
 	}
 
-	jsonschemaDir, err := resolveJSONSchemaDir()
-	if err != nil {
-		return fmt.Errorf("resolve jsonschema dir: %w", err)
-	}
-
-	err = checkReplaceDir("module directory", modDir)
-	if err != nil {
-		return err
-	}
-
-	err = checkReplaceDir("jsonschema directory", jsonschemaDir)
-	if err != nil {
-		return err
-	}
-
-	goModData, err := os.ReadFile(filepath.Join(modDir, "go.mod"))
-	if err != nil {
-		return fmt.Errorf("read go.mod: %w", err)
-	}
-
-	userDirectives, err := userGoModDirectives(goModData, modDir, modPath)
-	if err != nil {
-		return fmt.Errorf("copy go.mod directives: %w", err)
-	}
-
-	tempDir, err := createTempDir(cfg, importPath, modPath, modDir, jsonschemaDir, userDirectives)
-	if err != nil {
-		return fmt.Errorf("create temp dir: %w", err)
-	}
-	defer os.RemoveAll(tempDir)
-
-	output, err := runGenerate(tempDir)
+	output, err := runGenerate(goMod, helper.Bytes(), inWork)
 	if err != nil {
 		return err
 	}
@@ -178,13 +165,25 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 }
 
 // resolveImportPath returns the import path of the current package. It rejects a
-// main package up front: jsonschemagen generates a program that imports the
-// target package to reflect over it, and Go forbids importing a package main,
-// which would otherwise fail late with the opaque "is a program, not an
-// importable package" build error from `go run`. The package name comes from the
-// same `go list` call, so the check costs no extra process.
-func resolveImportPath() (string, error) {
-	cmd := exec.CommandContext(context.Background(), "go", "list", "-f", "{{.Name}} {{.ImportPath}}", ".")
+// main package up front: jsonschemagen builds a helper that imports the target
+// package to reflect over it, and Go forbids importing a package main, which
+// would otherwise fail late with the opaque "is a program, not an importable
+// package" build error. The package name comes from the same `go list` call, so
+// the check costs no extra process.
+//
+// Outside a workspace it passes -mod=mod so an inherited vendor directory (auto-
+// selected when vendor/modules.txt exists) does not make `go list` fail on a
+// vendor tree the helper does not use; -mod is rejected in workspace mode, where
+// the workspace already governs resolution.
+func resolveImportPath(inWork bool) (string, error) {
+	args := []string{"list"}
+	if !inWork {
+		args = append(args, "-mod=mod")
+	}
+
+	args = append(args, "-f", "{{.Name}} {{.ImportPath}}", ".")
+
+	cmd := exec.CommandContext(context.Background(), "go", args...)
 	out, err := cmd.Output()
 	if err != nil {
 		return "", cmdError(err)
@@ -209,87 +208,13 @@ func resolveImportPath() (string, error) {
 	return importPath, nil
 }
 
-// moduleInfo holds the path and directory of a Go module.
-type moduleInfo struct {
-	Path  string `json:"Path"`
-	Dir   string `json:"Dir"`
-	GoMod string `json:"GoMod"`
-}
-
-// resolveModuleInfo returns the path and directory of the main module that
-// contains the current package.
-func resolveModuleInfo() (string, string, error) {
-	cmd := exec.CommandContext(context.Background(), "go", "list", "-m", "-json")
-	out, err := cmd.Output()
-	if err != nil {
-		return "", "", cmdError(err)
-	}
-
-	goMod, err := currentGoMod()
-	if err != nil {
-		return "", "", fmt.Errorf("resolve current go.mod: %w", err)
-	}
-
-	return selectMainModule(out, goMod)
-}
-
-// selectMainModule picks the main module from a `go list -m -json` stream.
-//
-// Under a Go workspace (go.work), `go list -m -json` with no module argument
-// emits a concatenated JSON stream with one object per workspace module, all
-// flagged as main. The module whose go.mod matches goMod (the current
-// directory's module, from `go env GOMOD`) is selected, so generation targets
-// the right module rather than whichever object appears first.
-//
-// An empty goMod means the caller is outside a module, where the first object
-// is the right answer. Inside a module a stream with no matching object means
-// the current module is absent, so returning an arbitrary module would point
-// generation at the wrong source tree; that is reported as an error rather than
-// silently falling back to the first object.
-func selectMainModule(stream []byte, goMod string) (string, string, error) {
-	dec := json.NewDecoder(bytes.NewReader(stream))
-
-	var (
-		firstPath, firstDir string
-		haveFirst           bool
-	)
-
-	for dec.More() {
-		var info moduleInfo
-
-		err := dec.Decode(&info)
-		if err != nil {
-			return "", "", fmt.Errorf("parse module info: %w", err)
-		}
-
-		if goMod != "" && info.GoMod == goMod {
-			return info.Path, info.Dir, nil
-		}
-
-		if !haveFirst {
-			firstPath, firstDir, haveFirst = info.Path, info.Dir, true
-		}
-	}
-
-	if !haveFirst {
-		return "", "", fmt.Errorf("parse module info: no module reported")
-	}
-
-	if goMod != "" {
-		return "", "", fmt.Errorf("parse module info: no module matches %q", goMod)
-	}
-
-	return firstPath, firstDir, nil
-}
-
-// currentGoMod returns the absolute path of the go.mod for the current
-// directory's main module via `go env GOMOD`. An empty string with a nil error
-// means the current directory is not within a module (the os.DevNull sentinel
-// `go env GOMOD` reports). A failure of the command itself is returned as an
-// error rather than an empty string, so a transient failure is not mistaken for
-// being outside a module, which would silently target the first workspace
-// module instead of the current one.
-func currentGoMod() (string, error) {
+// ensureInModule verifies the tool is running inside a module and returns the
+// absolute path of that module's go.mod, via `go env GOMOD`. A command failure
+// is returned as an error rather than mistaken for being outside a module; the
+// os.DevNull sentinel (or an empty value in GOPATH mode) that `go env GOMOD`
+// reports outside a module yields a clear error, since generation must run
+// within the target package's module.
+func ensureInModule() (string, error) {
 	cmd := exec.CommandContext(context.Background(), "go", "env", "GOMOD")
 	out, err := cmd.Output()
 	if err != nil {
@@ -297,383 +222,177 @@ func currentGoMod() (string, error) {
 	}
 
 	goMod := strings.TrimSpace(string(out))
-	// `go env GOMOD` reports os.DevNull when outside a module.
-	if goMod == os.DevNull {
-		return "", nil
+	if goMod == "" || goMod == os.DevNull {
+		return "", fmt.Errorf("jsonschemagen must run inside a module (no go.mod found for the current directory)")
 	}
 
 	return goMod, nil
 }
 
-// resolveJSONSchemaDir returns the local directory of the jsonschema module.
-func resolveJSONSchemaDir() (string, error) {
-	cmd := exec.CommandContext(context.Background(), "go", "list", "-m", "-json", jsonschemaModule)
-	out, err := cmd.Output()
+// runGenerate builds and runs the helper inside the user's module and returns
+// its stdout (the generated schema). The helper source is supplied through a
+// build overlay so nothing is written to the source tree: a virtual package
+// directory under the current directory (the target package dir) maps to a
+// backing file in a system temp dir. Placing the virtual package under the
+// current directory keeps an internal/ target importable, since the helper is a
+// descendant of every internal/ parent the target sits beneath.
+//
+// GOWORK and vendor/module mode are the user's real build context and are
+// inherited rather than neutralized. In a workspace the module graph and
+// go.work.sum are already complete. A single-module build seeds a redirected
+// modfile so the helper's dependencies (e.g. golang.org/x/tools for -comments)
+// resolve from the module cache without mutating the user's go.mod/go.sum.
+func runGenerate(goMod string, helperSrc []byte, inWork bool) ([]byte, error) {
+	cwd, err := os.Getwd()
 	if err != nil {
-		return "", cmdError(err)
+		return nil, fmt.Errorf("resolve working directory: %w", err)
 	}
 
-	var info moduleInfo
-
-	err = json.Unmarshal(out, &info)
-	if err != nil {
-		return "", fmt.Errorf("parse jsonschema module info: %w", err)
-	}
-
-	return info.Dir, nil
-}
-
-const jsonschemaModule = "go.jacobcolvin.com/x/jsonschema"
-
-func createTempDir(
-	cfg config,
-	importPath, modPath, modDir, jsonschemaDir string,
-	userDirectives []string,
-) (string, error) {
 	tempDir, err := os.MkdirTemp("", "jsonschemagen-*")
 	if err != nil {
-		return "", fmt.Errorf("mkdir: %w", err)
+		return nil, fmt.Errorf("create temp dir: %w", err)
 	}
+	defer os.RemoveAll(tempDir)
 
-	// Render main.go.
-	var mainBuf bytes.Buffer
+	backing := filepath.Join(tempDir, "main.go")
 
-	err = renderMainGo(&mainBuf, cfg, importPath)
+	err = os.WriteFile(backing, helperSrc, 0o644)
 	if err != nil {
-		os.RemoveAll(tempDir)
-
-		return "", fmt.Errorf("render main.go: %w", err)
+		return nil, fmt.Errorf("write helper: %w", err)
 	}
 
-	err = os.WriteFile(filepath.Join(tempDir, "main.go"), mainBuf.Bytes(), 0o644)
+	// The virtual directory never exists on disk; the overlay maps its main.go
+	// to the backing file. A dot prefix keeps it out of `go list ./...` and
+	// similar wildcards, mirroring how the go tool ignores dot directories.
+	pkgBase := "." + filepath.Base(tempDir)
+	virtual := filepath.Join(cwd, pkgBase, "main.go")
+	pkgArg := "./" + pkgBase
+
+	overlayPath := filepath.Join(tempDir, "overlay.json")
+
+	err = writeOverlay(overlayPath, virtual, backing)
 	if err != nil {
-		os.RemoveAll(tempDir)
-
-		return "", fmt.Errorf("write main.go: %w", err)
+		return nil, err
 	}
 
-	// Render go.mod.
-	goMod := renderGoMod(modPath, modDir, jsonschemaDir, userDirectives...)
+	env := os.Environ()
+	args := []string{"run"}
 
-	err = os.WriteFile(filepath.Join(tempDir, "go.mod"), []byte(goMod), 0o644)
-	if err != nil {
-		os.RemoveAll(tempDir)
-
-		return "", fmt.Errorf("write go.mod: %w", err)
-	}
-
-	// Seed go.sum with the merged checksums of the user's module and the
-	// jsonschema module. The temp module requires jsonschema (via a local
-	// replace), whose transitive dependencies' checksums live in jsonschema's
-	// own go.sum but are absent from a user module that does not import
-	// jsonschema. Without them, go mod tidy must re-resolve from the network
-	// and fails in an offline/air-gapped sandbox. A read miss on either file is
-	// expected (a module may have no dependencies yet); a write failure is not.
-	sum := mergeGoSum(filepath.Join(modDir, "go.sum"), filepath.Join(jsonschemaDir, "go.sum"))
-	if len(sum) > 0 {
-		err = os.WriteFile(filepath.Join(tempDir, "go.sum"), sum, 0o644)
+	if !inWork {
+		genMod, err := seedModule(tempDir, goMod, cwd, overlayPath, pkgArg, env)
 		if err != nil {
-			os.RemoveAll(tempDir)
-
-			return "", fmt.Errorf("write go.sum: %w", err)
-		}
-	}
-
-	return tempDir, nil
-}
-
-// mergeGoSum reads the given go.sum files and returns their union, preserving
-// first-seen order and dropping duplicate and blank lines. Missing files are
-// skipped. The result is empty when no file yields any entry.
-//
-// Entries are keyed on a line's module-and-version prefix (its first two
-// fields). When two files give the same key the same checksum, the duplicate is
-// dropped. When they give it conflicting checksums (only possible from a
-// corrupted or stale go.sum, since a checksum is derived from the module's
-// content), the entry is omitted entirely rather than guessing which is correct,
-// so go mod tidy re-resolves that module's checksum from the cache or proxy.
-func mergeGoSum(paths ...string) []byte {
-	type sumEntry struct {
-		line     string
-		conflict bool
-	}
-
-	entries := make(map[string]*sumEntry)
-
-	var order []string
-
-	for _, p := range paths {
-		data, err := os.ReadFile(p)
-		if err != nil {
-			continue
+			return nil, err
 		}
 
-		for line := range strings.SplitSeq(string(data), "\n") {
-			// Tolerate CRLF-terminated go.sum files (e.g. produced by a
-			// line-ending normalization rule): a stray trailing \r would both
-			// defeat the conflict comparison against an LF twin and write an
-			// invalid \r-suffixed checksum line that go mod tidy rejects.
-			line = strings.TrimSuffix(line, "\r")
-			if line == "" {
-				continue
-			}
-
-			key := goSumKey(line)
-
-			existing, seen := entries[key]
-			if !seen {
-				entries[key] = &sumEntry{line: line}
-				order = append(order, key)
-
-				continue
-			}
-
-			if existing.line != line {
-				existing.conflict = true
-			}
-		}
+		// -mod=mod on the run bypasses automatic vendor-mode selection (a
+		// vendor/modules.txt the helper's dependencies are absent from); the
+		// redirected modfile keeps every write in the temp dir.
+		args = append(args, "-mod=mod", "-modfile="+genMod)
 	}
 
-	var b bytes.Buffer
+	args = append(args, "-overlay="+overlayPath, pkgArg)
 
-	for _, key := range order {
-		entry := entries[key]
-		if entry.conflict {
-			continue
-		}
+	run := exec.CommandContext(context.Background(), "go", args...)
+	run.Dir = cwd
+	run.Env = env
 
-		b.WriteString(entry.line)
-		b.WriteByte('\n')
-	}
-
-	return b.Bytes()
-}
-
-// goSumKey returns the deduplication key for a go.sum line: its
-// module-and-version prefix, the first two space-separated fields (the second
-// carries the optional /go.mod suffix that distinguishes the module-zip and
-// go.mod checksums). A line without two fields keys on its whole self.
-func goSumKey(line string) string {
-	first := strings.IndexByte(line, ' ')
-	if first < 0 {
-		return line
-	}
-
-	second := strings.IndexByte(line[first+1:], ' ')
-	if second < 0 {
-		return line
-	}
-
-	return line[:first+1+second]
-}
-
-// zeroVersion is the placeholder require version for a module path without a
-// major-version suffix.
-const zeroVersion = "v0.0.0"
-
-// requireVersion returns the placeholder version for the temp go.mod's require
-// directive on modPath. The go.mod parser enforces that a require version's
-// major version matches the module path's major-version suffix, so a path like
-// example.com/app/v2 (or a gopkg.in-style path.v2) must be required at v2, not
-// v0. The version is a placeholder either way: the directory replace directive
-// supplies the code, so the go tool never resolves it.
-func requireVersion(modPath string) string {
-	_, pathMajor, ok := module.SplitPathVersion(modPath)
-	if !ok || pathMajor == "" {
-		return zeroVersion
-	}
-
-	// A non-empty pathMajor is "/vN", or ".vN" for a gopkg.in path; either way
-	// the matching placeholder is "vN.0.0".
-	return strings.TrimLeft(pathMajor, "/.") + ".0.0"
-}
-
-// renderGoMod renders the temp module's go.mod: a require and a directory
-// replace for the user's module and for jsonschema, followed by the directives
-// copied from the user's go.mod via [userGoModDirectives].
-func renderGoMod(modPath, modDir, jsonschemaDir string, userDirectives ...string) string {
-	var b strings.Builder
-
-	b.WriteString("module _jsonschemagen_tmp\n\n")
-	b.WriteString("go " + goDirectiveVersion() + "\n\n")
-
-	b.WriteString("require (\n")
-	b.WriteString("\t" + modPath + " " + requireVersion(modPath) + "\n")
-
-	if modPath != jsonschemaModule {
-		b.WriteString("\t" + jsonschemaModule + " v0.0.0\n")
-	}
-
-	b.WriteString(")\n\n")
-
-	b.WriteString("replace " + modPath + " => " + quotePath(modDir) + "\n")
-
-	if modPath != jsonschemaModule {
-		b.WriteString("replace " + jsonschemaModule + " => " + quotePath(jsonschemaDir) + "\n")
-	}
-
-	for _, directive := range userDirectives {
-		b.WriteString(directive + "\n")
-	}
-
-	return b.String()
-}
-
-// userGoModDirectives parses the user module's go.mod and renders the replace
-// and exclude directives to copy into the temp go.mod. Replace directives
-// apply only to the main module of a build, so without the copy every replace
-// in the user's go.mod would be silently ignored when the temp module builds
-// the target package: a replace pointing at a local unpublished module would
-// make go mod tidy fetch the original path from the network, and a replace
-// pointing at a fork would silently generate the schema from the unreplaced
-// upstream code.
-//
-// A replace of modPath or of the jsonschema module is skipped: [renderGoMod]
-// emits its own directory replace for both (a user replace of jsonschema is
-// already honored, because its directory is resolved via `go list -m` inside
-// the user's module), and a second replace of the same module would be
-// rejected by the go.mod parser as a duplicate. A relative directory target is
-// resolved against modDir so it stays valid from the temp directory; a module
-// target (path and version) and an exclude directive copy through verbatim.
-func userGoModDirectives(goModData []byte, modDir, modPath string) ([]string, error) {
-	f, err := modfile.Parse("go.mod", goModData, nil)
+	out, err := run.Output()
 	if err != nil {
-		return nil, fmt.Errorf("parse go.mod: %w", err)
+		return nil, generateError(err)
 	}
 
-	var directives []string
-
-	for _, r := range f.Replace {
-		if r.Old.Path == modPath || r.Old.Path == jsonschemaModule {
-			continue
-		}
-
-		old := r.Old.Path
-		if r.Old.Version != "" {
-			old += " " + r.Old.Version
-		}
-
-		target := r.New.Path + " " + r.New.Version
-
-		// A target without a version is a directory replacement.
-		if r.New.Version == "" {
-			dir := r.New.Path
-			if !filepath.IsAbs(dir) {
-				dir = filepath.Join(modDir, dir)
-			}
-
-			err := checkReplaceDir("replace target for "+r.Old.Path, dir)
-			if err != nil {
-				return nil, err
-			}
-
-			target = quotePath(dir)
-		}
-
-		directives = append(directives, "replace "+old+" => "+target)
-	}
-
-	for _, e := range f.Exclude {
-		directives = append(directives, "exclude "+e.Mod.Path+" "+e.Mod.Version)
-	}
-
-	return directives, nil
+	return out, nil
 }
 
-// goVersionPattern matches the "goMAJOR.MINOR" prefix of a toolchain version
-// string. It anchors at the start, after an optional "devel " token, so it
-// reads only the leading version and never a "goMAJOR.MINOR" sequence embedded
-// later in the build metadata. This covers every form runtime.Version()
-// produces: "go1.26.0", a release candidate "go1.25rc1", and a development
-// build "devel go1.26-abc123 ...".
-var goVersionPattern = regexp.MustCompile(`^(?:devel )?go(\d+)\.(\d+)`)
-
-// defaultGoDirectiveVersion is the fallback "go" directive value used when the
-// running toolchain version cannot be parsed. It must be a valid directive so
-// the generated go.mod always parses.
-const defaultGoDirectiveVersion = "1.21"
-
-// goDirectiveVersion returns a valid major.minor Go version for the go.mod "go"
-// directive, derived from the running toolchain rather than hardcoded.
-//
-// Runtime.Version() is not always a plain "goMAJOR.MINOR.PATCH" string: release
-// candidates report "go1.25rc1" and development builds report
-// "devel go1.26-abc123 ...". Extracting just the major.minor pair keeps the
-// emitted directive valid across all of these, since a raw release-candidate or
-// multi-token devel string is rejected by the go.mod parser.
-func goDirectiveVersion() string {
-	m := goVersionPattern.FindStringSubmatch(runtime.Version())
-	if m == nil {
-		return defaultGoDirectiveVersion
+// writeOverlay writes a go build overlay mapping the virtual helper file to its
+// backing file. The go tool reads the overlay to build a package whose source
+// lives outside the directory it nominally occupies.
+func writeOverlay(path, virtual, backing string) error {
+	overlay := struct {
+		Replace map[string]string `json:"Replace"`
+	}{
+		Replace: map[string]string{virtual: backing},
 	}
 
-	return m[1] + "." + m[2]
-}
-
-// checkReplaceDir rejects a module directory the go tool cannot place in a
-// replace directive on this host. An empty path means `go list -m -json`
-// reported no local directory for the module -- it is known to the build but
-// not extracted into the module cache (a proxy-only state on a fresh checkout)
-// -- which would emit a `replace MODULE =>` line with no target that the
-// modfile parser rejects. A backslash trips a different parser rule on a
-// non-Windows host: the modfile parser treats any backslash in a replacement
-// path as a Windows path and rejects it when the host separator is '/' --
-// even when the path is quoted, because it inspects the unquoted value -- so
-// quoting cannot rescue it. A backslash is a legal POSIX filename byte, so a
-// checkout under such a directory is what triggers it; on Windows a backslash
-// path is the normal form and is accepted. Catching both here turns the
-// otherwise cryptic downstream "go mod tidy" failure into a clear message at
-// the input boundary.
-func checkReplaceDir(label, dir string) error {
-	return checkReplaceDirFor(label, dir, filepath.Separator)
-}
-
-// checkReplaceDirFor is [checkReplaceDir] parameterized by the host's path
-// separator so the Windows behavior stays testable on any platform. The
-// modfile parser's backslash rule is gated on the separator: it rejects a
-// Windows-looking replacement path only when filepath.Separator is '/'. On
-// Windows every directory (C:\Users\me\proj) contains backslashes and the go
-// tool accepts them in a replace directive, so the rejection mirrors the same
-// gate rather than firing unconditionally.
-func checkReplaceDirFor(label, dir string, separator rune) error {
-	if dir == "" {
-		return fmt.Errorf(
-			"%s is empty: the module reported no local directory; run `go mod download` first",
-			label,
-		)
+	data, err := json.Marshal(overlay)
+	if err != nil {
+		return fmt.Errorf("marshal overlay: %w", err)
 	}
 
-	if separator == '/' && strings.Contains(dir, `\`) {
-		return fmt.Errorf(
-			"%s %q contains a backslash, which the go tool rejects as a Windows path in a replace directive",
-			label, dir,
-		)
+	err = os.WriteFile(path, data, 0o644)
+	if err != nil {
+		return fmt.Errorf("write overlay: %w", err)
 	}
 
 	return nil
 }
 
-// quotePath quotes a filesystem path for use in a go.mod replace directive when
-// a bare token would be misparsed. The go.mod lexer splits a bare token on
-// whitespace and rejects an unquoted token that contains a quote ("unquoted
-// string cannot contain quote"), so the path is quoted when it holds a space,
-// quote, or backtick, or any control character (a newline or carriage return
-// would otherwise inject a bare line break into the directive). All of these
-// are legal in POSIX filenames. A backslash on a non-Windows host is rejected
-// upstream by [checkReplaceDir] (quoting cannot make the go tool accept it),
-// so it is not handled here; on Windows, where backslash paths are accepted,
-// strconv.Quote round-trips them through the modfile parser's unquoting.
-func quotePath(p string) string {
-	if strings.ContainsAny(p, " \"`") || strings.ContainsFunc(p, func(r rune) bool {
-		return r < 0x20
-	}) {
-		return strconv.Quote(p)
+// inWorkspace reports whether a Go workspace is active, via `go env GOWORK`
+// (empty or "off" means no workspace). Under a workspace the module graph and
+// checksums come from go.work/go.work.sum, and `-modfile` is rejected, so the
+// caller must not seed a redirected modfile.
+func inWorkspace() (bool, error) {
+	cmd := exec.CommandContext(context.Background(), "go", "env", "GOWORK")
+	out, err := cmd.Output()
+	if err != nil {
+		return false, cmdError(err)
 	}
 
-	return p
+	work := strings.TrimSpace(string(out))
+
+	return work != "" && work != "off", nil
 }
 
-//nolint:grouper // Template var kept apart from goVersionPattern; merging unrelated globals hurts readability.
+// seedModule copies the user's go.mod and go.sum into the temp dir and lets the
+// go tool complete the helper's requirements and checksums into those copies
+// from the module cache, so a single-module build resolves the helper's
+// dependencies without touching the user's files. It returns the path of the
+// redirected modfile. `go get` does not accept a `-mod` flag; it ignores
+// vendoring and resolves against the module cache.
+func seedModule(tempDir, goMod, cwd, overlayPath, pkgArg string, env []string) (string, error) {
+	genMod := filepath.Join(tempDir, "gen.mod")
+
+	err := copyFile(goMod, genMod)
+	if err != nil {
+		return "", fmt.Errorf("copy go.mod: %w", err)
+	}
+
+	// The go tool derives the sum file from the modfile name (.mod -> .sum); a
+	// module with no dependencies has no go.sum yet, which `go get` then creates.
+	err = copyFile(filepath.Join(filepath.Dir(goMod), "go.sum"), filepath.Join(tempDir, "gen.sum"))
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return "", fmt.Errorf("copy go.sum: %w", err)
+	}
+
+	get := exec.CommandContext(context.Background(), "go", "get",
+		"-modfile="+genMod, "-overlay="+overlayPath, pkgArg)
+	get.Dir = cwd
+	get.Env = env
+
+	out, err := get.CombinedOutput()
+	if err != nil {
+		msg := strings.TrimSpace(string(out))
+		if hint := unresolvedHint(msg); hint != "" {
+			return "", fmt.Errorf("resolve helper dependencies: %w: %s\n\t%s", err, msg, hint)
+		}
+
+		return "", fmt.Errorf("resolve helper dependencies: %w: %s", err, msg)
+	}
+
+	return genMod, nil
+}
+
+// copyFile copies src to dst. A missing src is reported as an [os.ErrNotExist]
+// error so callers can distinguish an optional source from a real failure.
+func copyFile(src, dst string) error {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(dst, data, 0o644)
+}
+
 var mainGoTmpl = template.Must(template.New("main.go").Parse(`package main
 
 import (
@@ -789,34 +508,35 @@ func isValidImportPath(p string) bool {
 	return true
 }
 
-func runGenerate(tempDir string) ([]byte, error) {
-	// The temp module is self-contained, so neutralize an inherited workspace or
-	// vendor mode before invoking the go tool in it: an exported GOWORK lists the
-	// user's modules rather than this throwaway one, and GOFLAGS=-mod=vendor
-	// demands a vendor dir the temp module lacks. Either would fail the commands
-	// below. Appending to os.Environ() keeps GOPATH, GOCACHE, PATH, and proxy
-	// settings intact.
-	hermeticEnv := append(os.Environ(), "GOWORK=off", "GOFLAGS=")
-
-	tidy := exec.CommandContext(context.Background(), "go", "mod", "tidy")
-	tidy.Dir = tempDir
-	tidy.Env = hermeticEnv
-
-	out, err := tidy.CombinedOutput()
-	if err != nil {
-		return nil, fmt.Errorf("go mod tidy: %w: %s", err, out)
+// unresolvedHint returns a remediation hint when go output shows the module
+// cannot resolve the generation dependencies, or "" when no such signature is
+// present. It is appended to both the seed and build failures, which are the two
+// points a missing dependency surfaces (a missing checksum, or no module
+// providing the package).
+func unresolvedHint(output string) string {
+	if strings.Contains(output, "missing go.sum entry") ||
+		strings.Contains(output, "no required module provides package") ||
+		strings.Contains(output, "cannot find module providing package") {
+		return fmt.Sprintf(
+			"hint: %s and its generation dependencies must be resolvable in this module; "+
+				"run `go mod tidy` (or `go work sync` in a workspace)",
+			jsonschemaModule,
+		)
 	}
 
-	run := exec.CommandContext(context.Background(), "go", "run", ".")
-	run.Dir = tempDir
-	run.Env = hermeticEnv
+	return ""
+}
 
-	out, err = run.Output()
-	if err != nil {
-		return nil, fmt.Errorf("generate: %w", cmdError(err))
+// generateError wraps a failed helper build, appending [unresolvedHint] when the
+// go tool's stderr shows the module cannot resolve the generation dependencies.
+func generateError(err error) error {
+	wrapped := cmdError(err)
+
+	if hint := unresolvedHint(wrapped.Error()); hint != "" {
+		return fmt.Errorf("generate: %w\n\t%s", wrapped, hint)
 	}
 
-	return out, nil
+	return fmt.Errorf("generate: %w", wrapped)
 }
 
 // cmdError surfaces the trimmed stderr of an *exec.ExitError in the message
