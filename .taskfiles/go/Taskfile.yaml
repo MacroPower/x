@@ -176,7 +176,11 @@ tasks:
     cmds:
       - |
         for pkg in $(go list {{.FUZZPKGS}}); do
-          targets=$(go test -list='^Fuzz' "$pkg" 2>/dev/null | grep '^Fuzz' || true)
+          # The list step must fail loudly on a broken test build (errexit
+          # aborts on the substitution's exit status); only the grep tolerates
+          # a package with zero fuzz targets.
+          listed=$(go test -list='^Fuzz' "$pkg")
+          targets=$(printf '%s\n' "$listed" | grep '^Fuzz' || true)
           for target in $targets; do
             echo "==> fuzzing $target in $pkg for {{.FUZZTIME}}"
             go test -run='^$' -fuzz="^${target}$" -fuzztime={{.FUZZTIME}} "$pkg"
