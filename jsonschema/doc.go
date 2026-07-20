@@ -770,6 +770,14 @@
 // unresolvable local fragment ref is silently skipped.
 // Circular refs are detected and treated as passing to avoid infinite recursion.
 //
+// A remote document first fetched during a validation run is vetted with the
+// same structural checks Compile applies to compile-time-fetched documents:
+// type names, non-negative bounds, and under [Draft2020] the Draft-7 items
+// array. A violation makes the referencing ref fail with an error wrapping
+// [ErrRefResolve] that also wraps the structural sentinel ([ErrInvalidType],
+// [ErrNegativeBound], or [ErrItemsArrayUnderDraft2020]), rather than letting
+// the document silently mis-validate.
+//
 // Non-local refs absolutize against the enclosing resource's base URI: its
 // $id, or the root base set with [WithBaseURI], which also registers the
 // root document under that URI so a ref absolutizing back to it resolves

@@ -811,6 +811,21 @@ func (v *validator) remoteFetch(sess *refresolve.Session, cow bool) refresolve.F
 		}
 
 		if cow {
+			// A document first fetched during a validation run never passes
+			// through Compile's post-Resolve structural loop, so the same
+			// checks run here before registration; a compile-time fetch (cow
+			// false) registers into the shared refReg and is checked by that
+			// loop instead. A violation is recorded like the misses above, so
+			// the at-most-once-per-baseURI contract holds, and surfaces
+			// through the ref as an error wrapping [ErrRefResolve] rather
+			// than silently mis-validating.
+			checkErr := v.checkFetchedDocument(cp, baseURI)
+			if checkErr != nil {
+				sess.RecordRemoteMiss(baseURI, checkErr)
+
+				return nil, fmt.Errorf("%w: %w", ErrRefResolve, checkErr)
+			}
+
 			// Clone the registry into this run's own copy before the first
 			// remote registration so the writes below cannot race a concurrent
 			// run still sharing the compiled registry.
@@ -823,6 +838,34 @@ func (v *validator) remoteFetch(sess *refresolve.Session, cow bool) refresolve.F
 
 		return cp, nil
 	}
+}
+
+// checkFetchedDocument runs the structural checks Compile applies to remote
+// documents (type names, non-negative bounds, and under [Draft2020] the
+// Draft-7 items array) over a document fetched during a validation run, giving
+// late-fetched documents parity with compile-time-fetched ones. The base URI
+// prefixes the path so a violation names the offending document exactly as the
+// compile-time pass does. Draft-7 runs legitimately carry array-form items, so
+// that check stays gated on the resolved draft.
+func (v *validator) checkFetchedDocument(s *Schema, baseURI string) error {
+	err := checkTypeNames(s, baseURI+"#", map[*Schema]bool{})
+	if err != nil {
+		return err
+	}
+
+	err = checkNonNegativeBounds(s, baseURI+"#", map[*Schema]bool{})
+	if err != nil {
+		return err
+	}
+
+	if v.draft == Draft2020 {
+		err = checkItemsArrayDraft2020(s, baseURI+"#", map[*Schema]bool{})
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // remoteLoader returns a [jsonschema.Loader] for upstream Schema.Resolve.

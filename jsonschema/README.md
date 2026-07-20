@@ -864,7 +864,11 @@ default. Remote and absolute `$ref` URIs are resolved through an optional
 resolution fails, and resolved schemas are cached within the validation run. A
 resolver error surfaces as `ErrRefResolve`; an unresolvable remote/absolute ref
 with no resolver is reported as a `*ValidationError`. Circular refs are detected
-and treated as passing. Non-local refs absolutize against the enclosing
+and treated as passing. A document first fetched during a validation run is
+vetted with the same structural checks `Compile` applies to compile-time-fetched
+documents; a violation fails the referencing ref with `ErrRefResolve` wrapping
+the structural sentinel (`ErrInvalidType`, `ErrNegativeBound`, or
+`ErrItemsArrayUnderDraft2020`) instead of silently mis-validating. Non-local refs absolutize against the enclosing
 resource's base URI: its `$id`, or the root base set with `WithBaseURI`.
 That base also registers the root document under its URI, so a ref
 absolutizing back to it resolves in-memory. The same `WithBaseURI` value serves `Inline`,
