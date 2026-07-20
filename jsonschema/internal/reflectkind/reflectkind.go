@@ -55,8 +55,13 @@ func IsValidMapKey(t reflect.Type) bool {
 }
 
 // IsStringableType reports whether json:",string" applies to the given type.
+// Encoding/json dereferences exactly one pointer level, and only when the
+// pointer type is unnamed, before checking the quotable kinds; a named pointer
+// type or a multi-level pointer is not quoted and marshals as a bare value.
 func IsStringableType(t reflect.Type) bool {
-	t = numkind.DerefType(t)
+	if t.Name() == "" && t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
 
 	if numkind.IsInteger(t.Kind()) {
 		return true

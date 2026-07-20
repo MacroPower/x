@@ -306,7 +306,10 @@
 // the field name, json:"-" excludes the field (but json:"-," with a trailing
 // comma uses the literal name "-" as the JSON key), omitempty and omitzero
 // omit the field from required, and json:",string" overrides the field schema
-// to {"type": "string"} for applicable types (string, integer, float, bool).
+// to {"type": "string"} for applicable types (string, integer, float, bool,
+// and a single unnamed pointer to one of those; a named pointer type or a
+// multi-level pointer is not quoted by [encoding/json], so it keeps its
+// underlying type's schema).
 // Unexported non-embedded fields are excluded; unexported embedded struct
 // types still have their exported fields promoted.
 //
