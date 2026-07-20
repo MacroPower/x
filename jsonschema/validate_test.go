@@ -2023,23 +2023,29 @@ func TestValidateCanonicalAbsoluteRefAgainstOpaqueBase(t *testing.T) {
 func TestValidateContainsCountSkippedWithoutValidationVocab(t *testing.T) {
 	t.Parallel()
 
-	// Under Draft 2020-12 the contains-count assertion (including the default
-	// minContains=1 floor) belongs to the validation vocabulary. With the
-	// applicator vocabulary active but validation disabled, contains only records
-	// its match annotation, so an empty array is valid; with validation active
-	// the default floor still rejects it.
-	schema := &jsonschema.Schema{Contains: &jsonschema.Schema{Type: "string"}}
+	// Under Draft 2020-12 only the explicit minContains/maxContains bounds
+	// belong to the validation vocabulary; the at-least-one rule with its
+	// default minContains=1 floor belongs to contains itself (core section
+	// 10.3.1.3, applicator vocabulary). With the applicator vocabulary active
+	// but validation disabled, the explicit bounds are skipped while the
+	// default floor still rejects an array with no matching element.
+	schema := &jsonschema.Schema{
+		Contains:    &jsonschema.Schema{Type: "string"},
+		MinContains: new(2),
+	}
 
 	applicatorOnly, err := jsonschema.Compile(t.Context(), schema,
 		jsonschema.WithVocabularies(jsonschema.VocabCore2020, jsonschema.VocabApplicator2020))
 	require.NoError(t, err)
-	require.NoError(t, applicatorOnly.ValidateJSON(t.Context(), []byte(`[]`)),
-		"contains asserts nothing without the validation vocabulary")
+	require.NoError(t, applicatorOnly.ValidateJSON(t.Context(), []byte(`["a"]`)),
+		"the explicit minContains is skipped without the validation vocabulary")
+	require.Error(t, applicatorOnly.ValidateJSON(t.Context(), []byte(`[]`)),
+		"the default minContains=1 floor applies even without the validation vocabulary")
 
 	full, err := jsonschema.Compile(t.Context(), schema)
 	require.NoError(t, err)
-	require.Error(t, full.ValidateJSON(t.Context(), []byte(`[]`)),
-		"the default minContains=1 floor applies with the validation vocabulary")
+	require.Error(t, full.ValidateJSON(t.Context(), []byte(`["a"]`)),
+		"the explicit minContains applies with the validation vocabulary")
 }
 
 func TestValidateContainsAnnotatesMatchedRegardlessOfCount(t *testing.T) {

@@ -2463,10 +2463,12 @@ func evalArrayItems(ctx evalContext) []*ValidationError {
 // evalContains checks the contains keyword and its count assertion (the default
 // minContains=1 floor and the optional minContains/maxContains bounds). The
 // match loop records the contains annotation for every matching item
-// unconditionally (so unevaluatedItems sees them even when the count fails); the
-// count assertion is sub-gated on the validation vocabulary, since it belongs
-// there while the match/annotation belongs to the applicator vocabulary that
-// gates this whole row.
+// unconditionally (so unevaluatedItems sees them even when the count fails).
+// The at-least-one rule with its default floor belongs to contains itself
+// (2020-12 core section 10.3.1.3, the applicator vocabulary that gates this
+// row), so it applies whenever the row runs; only the explicit
+// minContains/maxContains keyword reads are sub-gated on the validation
+// vocabulary, which owns those keywords.
 func evalContains(ctx evalContext) []*ValidationError {
 	schema := ctx.schema
 	if schema.Contains == nil {
@@ -2503,30 +2505,29 @@ func evalContains(ctx evalContext) []*ValidationError {
 		}
 	}
 
-	// The contains-count assertion belongs to the 2020-12 validation vocabulary,
-	// so under Draft 2020-12 it is skipped when that vocabulary is disabled;
-	// contains then only records its match annotation above. Under Draft-07
-	// vocabActive(vocabValidation) is always true, so the default contains
-	// assertion always applies there.
-	if !v.vocabActive(vocabValidation) {
-		return errs
-	}
+	// Only the explicit minContains/maxContains keywords belong to the 2020-12
+	// validation vocabulary; with it disabled they are skipped (not in effect),
+	// while the default minContains=1 floor below still applies, since the
+	// at-least-one rule is contains' own (applicator-vocabulary) assertion.
+	// Under Draft-07 vocabActive(vocabValidation) is always true.
+	validationActive := v.vocabActive(vocabValidation)
 
 	minContains := 1
-	if v.draft == Draft2020 && schema.MinContains != nil {
+	if validationActive && v.draft == Draft2020 && schema.MinContains != nil {
 		minContains = *schema.MinContains
 	}
 
 	maxContains := -1
-	if v.draft == Draft2020 && schema.MaxContains != nil {
+	if validationActive && v.draft == Draft2020 && schema.MaxContains != nil {
 		maxContains = *schema.MaxContains
 	}
 
 	if matchCount < minContains {
-		// An explicit minContains owns the violation; without it the shortfall is
-		// a plain contains failure (default minContains=1).
+		// An explicit (and in-effect) minContains owns the violation; otherwise
+		// the shortfall is a plain contains failure (default minContains=1). A
+		// skipped minContains must not label a default-floor failure.
 		keyword := KeywordContains
-		if v.draft == Draft2020 && schema.MinContains != nil {
+		if validationActive && v.draft == Draft2020 && schema.MinContains != nil {
 			keyword = KeywordMinContains
 		}
 

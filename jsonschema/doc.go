@@ -727,6 +727,10 @@
 // vocabulary URIs to booleans indicating whether each vocabulary is required
 // (true) or optional (false). The validator respects $vocabulary to gate keyword
 // groups: when a vocabulary is inactive, its keywords are silently skipped.
+// The contains keyword's at-least-one rule (its default minContains=1 floor)
+// belongs to contains itself in the applicator vocabulary, so disabling the
+// validation vocabulary skips only the explicit minContains/maxContains
+// bounds, not the default floor.
 //
 // The boolean governs only implementations that do not understand the
 // vocabulary; it has no impact on ones that do (core §8.1.2). This
