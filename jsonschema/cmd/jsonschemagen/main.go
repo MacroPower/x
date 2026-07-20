@@ -29,6 +29,7 @@ import (
 	"strings"
 	"text/template"
 
+	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
 )
 
@@ -110,7 +111,17 @@ func run(cfg config, stdout io.Writer) error {
 		return err
 	}
 
-	tempDir, err := createTempDir(cfg, importPath, modPath, modDir, jsonschemaDir)
+	goModData, err := os.ReadFile(filepath.Join(modDir, "go.mod"))
+	if err != nil {
+		return fmt.Errorf("read go.mod: %w", err)
+	}
+
+	userDirectives, err := userGoModDirectives(goModData, modDir, modPath)
+	if err != nil {
+		return fmt.Errorf("copy go.mod directives: %w", err)
+	}
+
+	tempDir, err := createTempDir(cfg, importPath, modPath, modDir, jsonschemaDir, userDirectives)
 	if err != nil {
 		return fmt.Errorf("create temp dir: %w", err)
 	}
@@ -314,7 +325,11 @@ func resolveJSONSchemaDir() (string, error) {
 
 const jsonschemaModule = "go.jacobcolvin.com/x/jsonschema"
 
-func createTempDir(cfg config, importPath, modPath, modDir, jsonschemaDir string) (string, error) {
+func createTempDir(
+	cfg config,
+	importPath, modPath, modDir, jsonschemaDir string,
+	userDirectives []string,
+) (string, error) {
 	tempDir, err := os.MkdirTemp("", "jsonschemagen-*")
 	if err != nil {
 		return "", fmt.Errorf("mkdir: %w", err)
@@ -338,7 +353,7 @@ func createTempDir(cfg config, importPath, modPath, modDir, jsonschemaDir string
 	}
 
 	// Render go.mod.
-	goMod := renderGoMod(modPath, modDir, jsonschemaDir)
+	goMod := renderGoMod(modPath, modDir, jsonschemaDir, userDirectives...)
 
 	err = os.WriteFile(filepath.Join(tempDir, "go.mod"), []byte(goMod), 0o644)
 	if err != nil {
@@ -473,7 +488,10 @@ func requireVersion(modPath string) string {
 	return strings.TrimLeft(pathMajor, "/.") + ".0.0"
 }
 
-func renderGoMod(modPath, modDir, jsonschemaDir string) string {
+// renderGoMod renders the temp module's go.mod: a require and a directory
+// replace for the user's module and for jsonschema, followed by the directives
+// copied from the user's go.mod via [userGoModDirectives].
+func renderGoMod(modPath, modDir, jsonschemaDir string, userDirectives ...string) string {
 	var b strings.Builder
 
 	b.WriteString("module _jsonschemagen_tmp\n\n")
@@ -494,7 +512,72 @@ func renderGoMod(modPath, modDir, jsonschemaDir string) string {
 		b.WriteString("replace " + jsonschemaModule + " => " + quotePath(jsonschemaDir) + "\n")
 	}
 
+	for _, directive := range userDirectives {
+		b.WriteString(directive + "\n")
+	}
+
 	return b.String()
+}
+
+// userGoModDirectives parses the user module's go.mod and renders the replace
+// and exclude directives to copy into the temp go.mod. Replace directives
+// apply only to the main module of a build, so without the copy every replace
+// in the user's go.mod would be silently ignored when the temp module builds
+// the target package: a replace pointing at a local unpublished module would
+// make go mod tidy fetch the original path from the network, and a replace
+// pointing at a fork would silently generate the schema from the unreplaced
+// upstream code.
+//
+// A replace of modPath or of the jsonschema module is skipped: [renderGoMod]
+// emits its own directory replace for both (a user replace of jsonschema is
+// already honored, because its directory is resolved via `go list -m` inside
+// the user's module), and a second replace of the same module would be
+// rejected by the go.mod parser as a duplicate. A relative directory target is
+// resolved against modDir so it stays valid from the temp directory; a module
+// target (path and version) and an exclude directive copy through verbatim.
+func userGoModDirectives(goModData []byte, modDir, modPath string) ([]string, error) {
+	f, err := modfile.Parse("go.mod", goModData, nil)
+	if err != nil {
+		return nil, fmt.Errorf("parse go.mod: %w", err)
+	}
+
+	var directives []string
+
+	for _, r := range f.Replace {
+		if r.Old.Path == modPath || r.Old.Path == jsonschemaModule {
+			continue
+		}
+
+		old := r.Old.Path
+		if r.Old.Version != "" {
+			old += " " + r.Old.Version
+		}
+
+		target := r.New.Path + " " + r.New.Version
+
+		// A target without a version is a directory replacement.
+		if r.New.Version == "" {
+			dir := r.New.Path
+			if !filepath.IsAbs(dir) {
+				dir = filepath.Join(modDir, dir)
+			}
+
+			err := checkReplaceDir("replace target for "+r.Old.Path, dir)
+			if err != nil {
+				return nil, err
+			}
+
+			target = quotePath(dir)
+		}
+
+		directives = append(directives, "replace "+old+" => "+target)
+	}
+
+	for _, e := range f.Exclude {
+		directives = append(directives, "exclude "+e.Mod.Path+" "+e.Mod.Version)
+	}
+
+	return directives, nil
 }
 
 // goVersionPattern matches the "goMAJOR.MINOR" prefix of a toolchain version
