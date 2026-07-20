@@ -7,11 +7,20 @@ package schemaclone
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 
 	"github.com/google/jsonschema-go/jsonschema"
 )
+
+// ErrCyclic reports a cyclic schema pointer graph handed to [Clone]. A cycle
+// cannot round-trip through JSON: the upstream MarshalJSON re-enters
+// [json.Marshal] with a fresh encoder at every nesting level, so encoding/json's
+// per-encoder cycle detection never triggers and the marshal recurses until an
+// unrecoverable stack overflow. Clone detects the cycle up front and returns
+// this ordinary error instead.
+var ErrCyclic = errors.New("cyclic schema graph")
 
 // Children returns the direct sub-schemas of a schema in a stable order. [Clone]
 // walks src and its copy in lockstep through one such function to pair nodes; the
@@ -29,7 +38,17 @@ type Children func(*jsonschema.Schema) []*jsonschema.Schema
 // json:"-", so the round-trip drops it; it is restored afterward (via children)
 // so a clone preserves property ordering. Every other serializable field
 // round-trips as an independent copy.
+//
+// A cyclic schema graph cannot round-trip through JSON, so Clone rejects it
+// with an error wrapping [ErrCyclic] before marshaling. The cycle check walks
+// the sub-schema graph children supplies; a *Schema smuggled through an
+// any-typed container (Extra, Examples) is outside that traversal.
 func Clone(s *jsonschema.Schema, children Children) (*jsonschema.Schema, error) {
+	err := checkAcyclic(s, children, map[*jsonschema.Schema]visit{})
+	if err != nil {
+		return nil, err
+	}
+
 	data, err := json.Marshal(s)
 	if err != nil {
 		return nil, fmt.Errorf("clone schema: %w", err)
@@ -45,6 +64,47 @@ func Clone(s *jsonschema.Schema, children Children) (*jsonschema.Schema, error) 
 	restorePropertyOrder(s, &cp, children)
 
 	return &cp, nil
+}
+
+// visit is a node's state in the checkAcyclic depth-first walk: the zero value
+// means unseen, visiting marks a node on the current path, and visited marks a
+// node whose subtree is fully explored.
+type visit uint8
+
+const (
+	visiting visit = iota + 1
+	visited
+)
+
+// checkAcyclic walks the sub-schema graph under s depth-first and returns an
+// error wrapping [ErrCyclic] when a schema pointer repeats on the current
+// path. Only an on-path repeat is a cycle: a pointer reachable along several
+// acyclic paths (a DAG) marshals fine and passes. A fully explored node is
+// skipped on re-visit, keeping the walk linear in the number of edges.
+func checkAcyclic(s *jsonschema.Schema, children Children, state map[*jsonschema.Schema]visit) error {
+	if s == nil {
+		return nil
+	}
+
+	switch state[s] {
+	case visiting:
+		return fmt.Errorf("clone schema: %w", ErrCyclic)
+	case visited:
+		return nil
+	}
+
+	state[s] = visiting
+
+	for _, child := range children(s) {
+		err := checkAcyclic(child, children, state)
+		if err != nil {
+			return err
+		}
+	}
+
+	state[s] = visited
+
+	return nil
 }
 
 // restorePropertyOrder copies the render-only PropertyOrder field (json:"-", so
