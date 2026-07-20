@@ -3,8 +3,8 @@ package jsonschema
 import "fmt"
 
 // keywordTable is the ordered keyword dispatch table. It drives the Compile-time
-// precompute (precomputeSchema runs each row's compile step) and, filtered to
-// the run's applicable rows once at Compile (see [validator.buildActiveRows]),
+// precompute (precomputeRange runs each row's compile step per frozen node) and,
+// filtered to the run's applicable rows once at Compile (see [validator.buildActiveRows]),
 // the validation walk. Table order is eval order; the phase field partitions the
 // rows into ref-resolution, assertion, and unevaluated stages, and the init below
 // enforces that partition so an edit cannot float the unevaluated rows -- which
@@ -366,20 +366,20 @@ func computeItemsPlan(v *validator, s *Schema) *itemsPlan {
 // schema sets any array item keyword, so the array.items eval avoids rebuilding
 // it per node. Schemas with no item keywords are left absent; itemsPlanFor
 // returns nil for them.
-func itemsCompile(v *validator, s *Schema) {
+func itemsCompile(v *validator, id int, s *Schema) {
 	if p := computeItemsPlan(v, s); p != nil {
-		v.itemsPlans[s] = p
+		v.itemsPlans[id] = p
 	}
 }
 
-// itemsPlanFor returns the array item plan for schema, preferring the
-// Compile-time cache and computing on the fly for a schema absent from it (a
-// remote or JSON-pointer fallback schema reached only at validation time),
-// mirroring [validator.boundsFor]. It returns nil when the schema sets no array
-// item keyword.
-func (v *validator) itemsPlanFor(schema *Schema) *itemsPlan {
-	if p, ok := v.itemsPlans[schema]; ok {
-		return p
+// itemsPlanFor returns the array item plan for schema, preferring the per-node
+// cache and computing on the fly for a schema outside the frozen graph (a remote
+// or JSON-pointer fallback schema reached only at validation time), mirroring
+// [validator.boundsFor]. It returns nil when the schema sets no array item
+// keyword.
+func (v *validator) itemsPlanFor(id int, schema *Schema) *itemsPlan {
+	if v.inGraph(id) && v.itemsPlans[id] != nil {
+		return v.itemsPlans[id]
 	}
 
 	return computeItemsPlan(v, schema)

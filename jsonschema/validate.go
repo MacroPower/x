@@ -307,15 +307,21 @@ type validator struct {
 	// copy-on-write before its first write.
 	refFetch refresolve.Fetch
 
-	// NumericBounds, patternCache, and patternProps below are compile-time
-	// caches of derived per-schema state. They are populated once during
-	// Compile by precompute, which runs single-threaded, and are read-only
-	// afterward; forInstance shares them by reference across runs, so
-	// concurrent Validate calls only read them. A schema reached only at
-	// validation time (a remote or JSON-pointer fallback schema) is absent
-	// from these maps, and the validation path falls back to computing the
-	// value directly.
-	numericBounds map[*Schema]*precomputedBounds // numeric bound keywords as rationals
+	// The doc is the frozen node-identity index over the root document: each
+	// schema reachable through sub-schema keywords has a dense id, and the
+	// per-node caches below are slices indexed by that id. Built once at Compile
+	// and read-only afterward; forInstance shares it by reference.
+	doc *compiledDoc
+
+	// The numericBounds, patternCache, and the caches below are compile-time
+	// slices of derived per-node state, indexed by frozen node id. They are populated
+	// once during Compile by precompute, which runs single-threaded, and are
+	// read-only afterward; forInstance shares them by reference across runs, so
+	// concurrent Validate calls only read them. A nil element means the node sets
+	// no keyword the cache covers. A schema reached only at validation time (a
+	// remote or JSON-pointer fallback schema) is outside doc, so its cache lookup
+	// misses and the validation path computes the value directly.
+	numericBounds []*precomputedBounds // numeric bound keywords as rationals, by node id
 
 	root               *Schema
 	resolveOpts        *ResolveOptions
@@ -324,13 +330,13 @@ type validator struct {
 	formatCheckers     map[string]FormatValidator
 	metaSchemaResolver RefResolver // metaschema lookup by $schema URI (WithMetaSchemaResolver)
 	visiting           map[visitKey]bool
-	patternCache       map[*Schema]compiledPattern            // schema.Pattern compiled (see numericBounds)
-	patternProps       map[*Schema]map[string]compiledPattern // patternProperties keys compiled (see numericBounds)
-	constRats          map[*Schema]*big.Rat                   // numeric const value as a rational (see numericBounds)
-	enumRats           map[*Schema][]*big.Rat                 // numeric enum members as rationals by index (see numericBounds)
-	sortedPropertyKeys map[*Schema][]string                   // schema.Properties keys, sorted (see numericBounds)
-	sortedPatternKeys  map[*Schema][]string                   // schema.PatternProperties keys, sorted (see numericBounds)
-	itemsPlans         map[*Schema]*itemsPlan                 // normalized array item keywords (see numericBounds)
+	patternCache       []*compiledPattern           // schema.Pattern compiled (see numericBounds)
+	patternProps       []map[string]compiledPattern // patternProperties keys compiled (see numericBounds)
+	constRats          []*big.Rat                   // numeric const value as a rational (see numericBounds)
+	enumRats           [][]*big.Rat                 // numeric enum members as rationals by index (see numericBounds)
+	sortedPropertyKeys [][]string                   // schema.Properties keys, sorted (see numericBounds)
+	sortedPatternKeys  [][]string                   // schema.PatternProperties keys, sorted (see numericBounds)
+	itemsPlans         []*itemsPlan                 // normalized array item keywords (see numericBounds)
 
 	// The WithDraft override; nil leaves the draft to $schema detection.
 	draftOverride *Draft
@@ -420,6 +426,12 @@ func newValidator(ctx context.Context, schema *Schema, opts []ValidateOption) (*
 	// above, not a threaded parameter.
 	//nolint:contextcheck // See the comment above.
 	v.buildRefReg()
+
+	// Freeze the node-identity index over the root document. The per-node
+	// precompute caches are slices indexed by the ids it assigns. It references
+	// the caller's *Schema pointers (Validator.Schema stays the caller's value),
+	// so nodeID hits for the same pointers the validation walk descends.
+	v.doc = freeze(v.root)
 
 	// The dynamic scope is seeded per run by forInstance, the single source for
 	// the rule; the compiled validator's compile-time session (used only by the
@@ -595,97 +607,106 @@ type compiledPattern struct {
 	err error
 }
 
-// precompute populates the read-only per-schema caches (numeric bounds and
-// compiled patterns) by traversing every schema reachable from the root once.
-// It runs single-threaded during Compile, before the [Validator] is shared, so
-// the caches it builds are never written concurrently. The traversal delegates
-// to [schemafield.Children] for the sub-schema field list and consults only
-// schema fields and its own visited set; it does not touch the URI, anchor, or
-// base-URI registries, which keeps the validation-time fallback walk (the
-// session's RegisterFallback) from populating these caches.
-func (v *validator) precompute() map[*Schema]bool {
-	v.numericBounds = map[*Schema]*precomputedBounds{}
-	v.patternCache = map[*Schema]compiledPattern{}
-	v.patternProps = map[*Schema]map[string]compiledPattern{}
-	v.constRats = map[*Schema]*big.Rat{}
-	v.enumRats = map[*Schema][]*big.Rat{}
-	v.sortedPropertyKeys = map[*Schema][]string{}
-	v.sortedPatternKeys = map[*Schema][]string{}
-	v.itemsPlans = map[*Schema]*itemsPlan{}
-
-	visited := map[*Schema]bool{}
-	v.precomputeSchema(v.root, visited)
-
-	return visited
+// precompute populates the read-only per-node caches (numeric bounds and
+// compiled patterns) indexed by frozen node id. It sizes the cache slices to the
+// frozen graph and runs each active keyword row's compile step over every node,
+// single-threaded during Compile before the [Validator] is shared, so the caches
+// are never written concurrently. The frozen index already deduped every distinct
+// pointer, so precompute needs no visited set of its own. It does not touch the
+// URI, anchor, or base-URI registries, which keeps the validation-time fallback
+// walk (the session's RegisterFallback) from populating these caches.
+func (v *validator) precompute() {
+	v.sizeCaches(v.doc.len())
+	v.precomputeRange(0, v.doc.len())
 }
 
-// precomputeSchema records the derived caches for one schema and recurses into
-// its sub-schemas, guarding against schema graph cycles with visited. It is the
-// Compile-time counterpart of the dispatch loop: it runs each active keyword
-// row's compile step (nil for rows that precompute nothing), so the per-schema
-// caches a row's eval consults are populated by the same row that reads them. A
-// row the run's draft, vocabulary, or opt-in gates disabled (buildActiveRows
-// runs earlier in newValidator) never evaluates, so its caches are never read
-// and are not built.
-func (v *validator) precomputeSchema(schema *Schema, visited map[*Schema]bool) {
-	if schema == nil || visited[schema] {
-		return
+// sizeCaches grows every per-node cache slice to length n (allocating on the
+// first call, extending with nil elements when Compile later folds a fetched
+// remote's nodes into the frozen graph). A nil element means the node sets no
+// keyword the cache covers.
+func (v *validator) sizeCaches(n int) {
+	v.numericBounds = growSlice(v.numericBounds, n)
+	v.patternCache = growSlice(v.patternCache, n)
+	v.patternProps = growSlice(v.patternProps, n)
+	v.constRats = growSlice(v.constRats, n)
+	v.enumRats = growSlice(v.enumRats, n)
+	v.sortedPropertyKeys = growSlice(v.sortedPropertyKeys, n)
+	v.sortedPatternKeys = growSlice(v.sortedPatternKeys, n)
+	v.itemsPlans = growSlice(v.itemsPlans, n)
+}
+
+// growSlice returns s extended to length n with zero-value elements, or s
+// unchanged when it is already at least that long.
+func growSlice[T any](s []T, n int) []T {
+	if n <= len(s) {
+		return s
 	}
 
-	visited[schema] = true
+	return append(s, make([]T, n-len(s))...)
+}
 
-	for _, e := range v.activeRows {
-		if e.compile != nil {
-			e.compile(v, schema)
+// precomputeRange records the derived caches for the frozen nodes in id range
+// [from, to). It is the Compile-time counterpart of the dispatch loop: it runs
+// each active keyword row's compile step (nil for rows that precompute nothing)
+// under each node's id, so the per-node caches a row's eval consults are
+// populated by the same row that reads them. A row the run's draft, vocabulary,
+// or opt-in gates disabled (buildActiveRows runs earlier in newValidator) never
+// evaluates, so its caches are never read and are not built. The range form lets
+// Compile precompute only a fetched remote's freshly indexed nodes.
+func (v *validator) precomputeRange(from, to int) {
+	for id := from; id < to; id++ {
+		schema := v.doc.schemas[id]
+		for _, e := range v.activeRows {
+			if e.compile != nil {
+				e.compile(v, id, schema)
+			}
 		}
-	}
-
-	for _, child := range schemafield.Children(schema) {
-		v.precomputeSchema(child, visited)
 	}
 }
 
 // numericCompile caches a schema's numeric bound keywords as rationals for the
-// numeric row's eval.
-func numericCompile(v *validator, s *Schema) {
+// numeric row's eval, under the schema's frozen node id.
+func numericCompile(v *validator, id int, s *Schema) {
 	if b := computeBounds(s); b != nil {
-		v.numericBounds[s] = b
+		v.numericBounds[id] = b
 	}
 }
 
 // enumCompile caches a schema's numeric enum members as rationals by index for
-// the enum row's eval.
-func enumCompile(v *validator, s *Schema) {
+// the enum row's eval, under the schema's frozen node id.
+func enumCompile(v *validator, id int, s *Schema) {
 	if rats := numrat.EnumMemberRats(s.Enum); rats != nil {
-		v.enumRats[s] = rats
+		v.enumRats[id] = rats
 	}
 }
 
 // constCompile caches a schema's numeric const value as a rational for the const
-// row's eval.
-func constCompile(v *validator, s *Schema) {
+// row's eval, under the schema's frozen node id.
+func constCompile(v *validator, id int, s *Schema) {
 	if s.Const != nil {
 		if r, ok := numrat.SchemaNumberRat(*s.Const); ok {
-			v.constRats[s] = r
+			v.constRats[id] = r
 		}
 	}
 }
 
-// stringCompile caches a schema's compiled Pattern for the string row's eval.
-func stringCompile(v *validator, s *Schema) {
+// stringCompile caches a schema's compiled Pattern for the string row's eval,
+// under the schema's frozen node id.
+func stringCompile(v *validator, id int, s *Schema) {
 	if s.Pattern != "" {
 		re, err := regexcache.Compile(s.Pattern)
-		v.patternCache[s] = compiledPattern{re: re, err: err}
+		v.patternCache[id] = &compiledPattern{re: re, err: err}
 	}
 }
 
 // objectApplicatorsCompile caches a schema's sorted property keys, compiled
 // patternProperties, and sorted pattern keys for the object.applicators row's
-// eval. The key sets are fixed per schema, so the sorts and compiles happen
-// once at Compile time instead of on every object instance node.
-func objectApplicatorsCompile(v *validator, s *Schema) {
+// eval, under the schema's frozen node id. The key sets are fixed per schema, so
+// the sorts and compiles happen once at Compile time instead of on every object
+// instance node.
+func objectApplicatorsCompile(v *validator, id int, s *Schema) {
 	if len(s.Properties) > 0 {
-		v.sortedPropertyKeys[s] = slices.Sorted(maps.Keys(s.Properties))
+		v.sortedPropertyKeys[id] = slices.Sorted(maps.Keys(s.Properties))
 	}
 
 	if len(s.PatternProperties) > 0 {
@@ -695,8 +716,8 @@ func objectApplicatorsCompile(v *validator, s *Schema) {
 			compiled[pattern] = compiledPattern{re: re, err: err}
 		}
 
-		v.patternProps[s] = compiled
-		v.sortedPatternKeys[s] = slices.Sorted(maps.Keys(s.PatternProperties))
+		v.patternProps[id] = compiled
+		v.sortedPatternKeys[id] = slices.Sorted(maps.Keys(s.PatternProperties))
 	}
 }
 
@@ -1118,10 +1139,10 @@ func Compile(ctx context.Context, schema *Schema, opts ...ValidateOption) (*Vali
 		return nil, err
 	}
 
-	// Precompute derived per-schema state (numeric bounds and compiled
-	// patterns) while still single-threaded, so the returned Validator only
-	// reads these caches once shared across goroutines.
-	precomputeVisited := v.precompute()
+	// Precompute derived per-node state (numeric bounds and compiled patterns)
+	// into the frozen-id-indexed caches while still single-threaded, so the
+	// returned Validator only reads these caches once shared across goroutines.
+	v.precompute()
 
 	// Structural pre-validation via Schema.Resolve.
 	// A Loader is always provided so Schema.Resolve doesn't fail on remote
@@ -1182,7 +1203,7 @@ func Compile(ctx context.Context, schema *Schema, opts ...ValidateOption) (*Vali
 	//   - The precompute caches (numeric bounds and compiled patterns), so a
 	//     numeric, pattern, const, or enum keyword in a fetched remote hits the
 	//     cache instead of being recomputed on every validation. This is not part
-	//     of vetting: it runs only here, keyed on its own precomputeVisited set.
+	//     of vetting: it runs only here, folding the remote into the node index.
 	for _, uri := range slices.Sorted(maps.Keys(v.refReg.URI)) {
 		s := v.refReg.URI[uri]
 
@@ -1191,7 +1212,17 @@ func Compile(ctx context.Context, schema *Schema, opts ...ValidateOption) (*Vali
 			return nil, err
 		}
 
-		v.precomputeSchema(s, precomputeVisited)
+		// Fold the remote's nodes into the frozen graph and precompute the
+		// freshly indexed range. A remote wholly aliasing already-indexed nodes
+		// (the root re-registered under its base URI, or a node reached through
+		// several URIs) adds nothing: extend returns from == len(), so the grow
+		// and precompute are no-ops and each reachable node is indexed and
+		// precomputed exactly once.
+		from := v.doc.extend(s)
+		if from < v.doc.len() {
+			v.sizeCaches(v.doc.len())
+			v.precomputeRange(from, v.doc.len())
+		}
 	}
 
 	// Drop the compile context so the cached validator never holds a stale or
@@ -1821,11 +1852,20 @@ func (v *validator) validate(
 		ann = annotations.New()
 	}
 
+	// Resolve the schema's frozen node id once for this node so the per-keyword
+	// eval steps index their caches by it. A schema outside the frozen graph (a
+	// remote or JSON-pointer fallback target reached only at validation time)
+	// takes id -1, and the cache accessors recompute for it.
+	nodeID := -1
+	if id, ok := v.doc.nodeID(schema); ok {
+		nodeID = id
+	}
+
 	// Drive keyword evaluation from the run's active dispatch rows (filtered once
 	// at Compile by buildActiveRows), evaluated in table order -- the
 	// deterministic error-slice order the tests pin.
 	ctx := evalContext{
-		v: v, schema: schema, instance: instance,
+		v: v, schema: schema, nodeID: nodeID, instance: instance,
 		instancePath: instancePath, schemaPath: schemaPath, ann: ann,
 	}
 
@@ -2047,7 +2087,14 @@ func evalEnum(ctx evalContext) []*ValidationError {
 		return nil
 	}
 
-	rats := ctx.v.enumRats[schema]
+	// A nil slot (in-graph node with no numeric enum members, or an out-of-graph
+	// fallback schema) leaves rats nil; the loop below tolerates that and
+	// compares members by value.
+	var rats []*big.Rat
+
+	if ctx.v.inGraph(ctx.nodeID) {
+		rats = ctx.v.enumRats[ctx.nodeID]
+	}
 
 	for i, allowed := range schema.Enum {
 		var allowedRat *big.Rat
@@ -2073,8 +2120,17 @@ func evalConst(ctx evalContext) []*ValidationError {
 		return nil
 	}
 
+	// A nil slot (in-graph node with a non-numeric const, or an out-of-graph
+	// fallback schema) leaves constRat nil; EqualWithRat is nil-safe and falls
+	// back to value comparison.
+	var constRat *big.Rat
+
+	if ctx.v.inGraph(ctx.nodeID) {
+		constRat = ctx.v.constRats[ctx.nodeID]
+	}
+
 	constVal := *schema.Const
-	if jsonequal.EqualWithRat(constVal, ctx.v.constRats[schema], ctx.instance) {
+	if jsonequal.EqualWithRat(constVal, constRat, ctx.instance) {
 		return nil
 	}
 
@@ -2083,47 +2139,57 @@ func evalConst(ctx evalContext) []*ValidationError {
 	}
 }
 
+// inGraph reports whether id addresses a frozen node whose cache slot may hold a
+// precomputed value: a non-negative id within the sized slices. A negative id
+// marks a schema outside the frozen graph (a fallback target reached only at
+// validation time), whose caches were never built. The bound is doc.len()
+// because sizeCaches keeps every cache slice invariantly that long, so a
+// non-negative in-graph id never over-indexes a shorter slice.
+func (v *validator) inGraph(id int) bool {
+	return id >= 0 && id < v.doc.len()
+}
+
 // boundsFor returns the numeric bound rationals for schema, preferring the
-// Compile-time cache and converting on the fly for a schema absent from it
+// per-node cache and converting on the fly for a schema outside the frozen graph
 // (a remote or JSON-pointer fallback schema reached only at validation time).
 // The returned rationals are operands only; callers must not mutate them.
-func (v *validator) boundsFor(schema *Schema) *precomputedBounds {
-	if b, ok := v.numericBounds[schema]; ok {
-		return b
+func (v *validator) boundsFor(id int, schema *Schema) *precomputedBounds {
+	if v.inGraph(id) && v.numericBounds[id] != nil {
+		return v.numericBounds[id]
 	}
 
 	return computeBounds(schema)
 }
 
 // propertyKeysFor returns schema.Properties' keys in sorted order, preferring
-// the Compile-time cache and sorting on the fly for a schema absent from it (a
-// remote or JSON-pointer fallback schema reached only at validation time).
-func (v *validator) propertyKeysFor(schema *Schema) []string {
-	if keys, ok := v.sortedPropertyKeys[schema]; ok {
-		return keys
+// the per-node cache and sorting on the fly for a schema outside the frozen graph
+// (a remote or JSON-pointer fallback schema reached only at validation time).
+func (v *validator) propertyKeysFor(id int, schema *Schema) []string {
+	if v.inGraph(id) && v.sortedPropertyKeys[id] != nil {
+		return v.sortedPropertyKeys[id]
 	}
 
 	return slices.Sorted(maps.Keys(schema.Properties))
 }
 
 // patternKeysFor returns schema.PatternProperties' keys in sorted order, with
-// the same Compile-time cache and on-the-fly fallback as [propertyKeysFor].
-func (v *validator) patternKeysFor(schema *Schema) []string {
-	if keys, ok := v.sortedPatternKeys[schema]; ok {
-		return keys
+// the same per-node cache and on-the-fly fallback as [propertyKeysFor].
+func (v *validator) patternKeysFor(id int, schema *Schema) []string {
+	if v.inGraph(id) && v.sortedPatternKeys[id] != nil {
+		return v.sortedPatternKeys[id]
 	}
 
 	return slices.Sorted(maps.Keys(schema.PatternProperties))
 }
 
-// patternFor returns the compiled form of schema.Pattern, preferring the
-// Compile-time cache and compiling on the fly for a schema absent from it
-// (a remote or JSON-pointer fallback schema reached only at validation time).
-// The compile error, when present, is reported by the caller exactly as a fresh
+// patternFor returns the compiled form of schema.Pattern, preferring the per-node
+// cache and compiling on the fly for a schema outside the frozen graph (a remote
+// or JSON-pointer fallback schema reached only at validation time). The compile
+// error, when present, is reported by the caller exactly as a fresh
 // [regexcache.Compile] call would, preserving the fail-closed behavior.
-func (v *validator) patternFor(schema *Schema) compiledPattern {
-	if cp, ok := v.patternCache[schema]; ok {
-		return cp
+func (v *validator) patternFor(id int, schema *Schema) compiledPattern {
+	if v.inGraph(id) && v.patternCache[id] != nil {
+		return *v.patternCache[id]
 	}
 
 	re, err := regexcache.Compile(schema.Pattern)
@@ -2132,11 +2198,11 @@ func (v *validator) patternFor(schema *Schema) compiledPattern {
 }
 
 // patternPropertyFor returns the compiled form of one patternProperties key on
-// schema, preferring the Compile-time cache and compiling on the fly for a
-// schema absent from it.
-func (v *validator) patternPropertyFor(schema *Schema, pattern string) compiledPattern {
-	if byPattern, ok := v.patternProps[schema]; ok {
-		if cp, ok := byPattern[pattern]; ok {
+// schema, preferring the per-node cache and compiling on the fly for a schema
+// outside the frozen graph.
+func (v *validator) patternPropertyFor(id int, pattern string) compiledPattern {
+	if v.inGraph(id) && v.patternProps[id] != nil {
+		if cp, ok := v.patternProps[id][pattern]; ok {
 			return cp
 		}
 	}
@@ -2150,6 +2216,7 @@ func (v *validator) patternPropertyFor(schema *Schema, pattern string) compiledP
 func evalNumeric(ctx evalContext) []*ValidationError {
 	v, schema, instance := ctx.v, ctx.schema, ctx.instance
 	instancePath, schemaPath := ctx.instancePath, ctx.schemaPath
+	nodeID := ctx.nodeID
 
 	if !numrat.IsNumeric(instance) {
 		return nil
@@ -2171,7 +2238,7 @@ func evalNumeric(ctx evalContext) []*ValidationError {
 		}
 
 		if !d.ExactlyComparable() {
-			return v.validateNumericUnbounded(schema, d, string(n), instancePath, schemaPath)
+			return v.validateNumericUnbounded(nodeID, schema, d, string(n), instancePath, schemaPath)
 		}
 
 		val = d.Rat()
@@ -2193,7 +2260,7 @@ func evalNumeric(ctx evalContext) []*ValidationError {
 		errs = append(errs, leafError(instancePath, schemaPath, keyword, msg))
 	}
 
-	bounds := v.boundsFor(schema)
+	bounds := v.boundsFor(nodeID, schema)
 
 	if schema.MultipleOf != nil {
 		switch {
@@ -2268,6 +2335,7 @@ func evalNumeric(ctx evalContext) []*ValidationError {
 // non-positive divisor) fires regardless. A zero value is always
 // ExactlyComparable, so it never reaches this path.
 func (v *validator) validateNumericUnbounded(
+	id int,
 	schema *Schema,
 	d numrat.DecNumber,
 	literal string,
@@ -2282,7 +2350,7 @@ func (v *validator) validateNumericUnbounded(
 		errs = append(errs, leafError(instancePath, schemaPath, keyword, msg))
 	}
 
-	bounds := v.boundsFor(schema)
+	bounds := v.boundsFor(id, schema)
 
 	// A non-positive multipleOf makes the schema invalid independent of the
 	// instance value. For a positive divisor, an over-cap integer's
@@ -2369,7 +2437,7 @@ func evalString(ctx evalContext) []*ValidationError {
 	}
 
 	if schema.Pattern != "" {
-		cp := ctx.v.patternFor(schema)
+		cp := ctx.v.patternFor(ctx.nodeID, schema)
 		switch {
 		case cp.err != nil:
 			// A pattern Go's RE2 cannot compile (e.g. an ECMA-262 backreference
@@ -2448,7 +2516,7 @@ func evalArrayItems(ctx evalContext) []*ValidationError {
 		return nil
 	}
 
-	plan := ctx.v.itemsPlanFor(ctx.schema)
+	plan := ctx.v.itemsPlanFor(ctx.nodeID, ctx.schema)
 	if plan == nil {
 		return nil
 	}
@@ -2657,7 +2725,7 @@ func evalObjectApplicators(ctx evalContext) []*ValidationError {
 	// Properties. Iterate in sorted-key order so the emitted error order is
 	// deterministic; Go map iteration is randomized. The key set is fixed
 	// per schema, so the sort is precomputed at Compile time.
-	for _, propName := range v.propertyKeysFor(schema) {
+	for _, propName := range v.propertyKeysFor(ctx.nodeID, schema) {
 		propSchema := schema.Properties[propName]
 		val, exists := obj[propName]
 		if !exists {
@@ -2690,14 +2758,14 @@ func evalObjectApplicators(ctx evalContext) []*ValidationError {
 
 	// PatternProperties. Sorted iteration keeps the error order
 	// deterministic; the key set is fixed, so the sort is precomputed.
-	for _, pattern := range v.patternKeysFor(schema) {
+	for _, pattern := range v.patternKeysFor(ctx.nodeID, schema) {
 		patternSchema := schema.PatternProperties[pattern]
 
 		// One schema-path location per pattern, shared by the error branch
 		// and every matching property rather than rebuilt for each.
 		patternSchemaPath := schemaPath.kw("patternProperties").key(pattern)
 
-		cp := v.patternPropertyFor(schema, pattern)
+		cp := v.patternPropertyFor(ctx.nodeID, pattern)
 		if cp.err != nil {
 			// A pattern Go's RE2 cannot compile fails closed: the keyword
 			// cannot decide which properties it governs, so the object is

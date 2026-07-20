@@ -16,7 +16,20 @@ The package has two independent halves sharing the `Schema` type:
   `*ValidationError` trees. `Compile` builds a `validator` once (registry
   construction from `$id`/`$anchor`, precomputed numeric bounds and compiled
   regexes, draft and vocabulary detection); `validator.forInstance` derives
-  cheap per-run state. `$ref`/`$dynamicRef`/`$anchor` resolution lives in the
+  cheap per-run state. `Compile` also freezes a node-identity index over the root
+  document (`compiled.go`: `compiledDoc`, built by `freeze`): every schema
+  reachable through sub-schema keywords is assigned a dense id once, and the
+  per-node precompute caches (numeric bounds, compiled patterns, sorted key sets,
+  const/enum rationals, item plans) are slices indexed by that id. The index
+  references the caller's live pointers, so
+  `Validator.Schema()` still returns the caller's value; a schema reached only at
+  validation time (a remote or JSON-pointer fallback target) is outside the index
+  and its accessors recompute on the fly. `extend` folds a remote document fetched
+  while compiling into the same index, sharing `freeze`'s pointer dedup. This is
+  the validation-side analog of the generation IR (`ir.go`): identity assigned
+  once, no in-place mutation after construction. The inliner still uses the
+  clone-based path (`internal/schemaclone`); moving it onto the frozen form is a
+  staged follow-up. `$ref`/`$dynamicRef`/`$anchor` resolution lives in the
   shared `internal/refresolve` core, which both the validator and the inliner
   (`inline.go`) consume so the two engines cannot disagree; the inliner resolves
   through a `refresolve.Session`. Self-contained
@@ -81,6 +94,13 @@ used for exactly two things: structural well-formedness via `Schema.Resolve`
 `$ref`/`$dynamicRef`/`$anchor` resolution, the validation walk, path tracking,
 format checking — is implemented here, because the upstream's resolved
 reference graph is unexported and its validator stops at the first error.
+
+The frozen compiled form (`compiled.go`) does not change this relationship: it
+is an identity index _over_ the upstream `Schema` graph, mapping each reachable
+`*Schema` to a dense node id, not a third use that re-models `Schema`'s fields
+(those stay tabulated in `internal/schemafield`). It references the caller's live
+pointers rather than cloning, so `Validator.Schema()` still returns the exact
+value passed to `Compile`.
 
 The single update site on an upstream bump is the canonical field-metadata
 table in `internal/schemafield`: `IsTrueSchema`, `internal/schemashape`'s

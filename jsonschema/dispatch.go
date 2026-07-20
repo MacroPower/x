@@ -83,9 +83,9 @@ const (
 // is not semantic.
 type keywordEntry struct {
 	// The compile step runs once per schema at Compile time to populate the
-	// read-only per-schema caches this row's eval consults; nil when the row
-	// precomputes nothing.
-	compile func(v *validator, s *Schema)
+	// read-only per-node caches this row's eval consults, storing under the
+	// schema's frozen node id; nil when the row precomputes nothing.
+	compile func(v *validator, id int, s *Schema)
 	// The eval step asserts this row's keywords against one instance node,
 	// returning the errors it found (empty when the node satisfies them).
 	eval func(ctx evalContext) []*ValidationError
@@ -126,6 +126,12 @@ type evalContext struct {
 	instance     any
 	instancePath instanceLocation
 	schemaPath   schemaLocation
+	// The nodeID is schema's frozen node id, or -1 when schema is outside the
+	// frozen graph (a fallback target reached only at validation time). The
+	// per-node cache accessors index their slices by it and recompute on -1. It
+	// trails the pointer-bearing fields so it does not extend the GC scan prefix
+	// (govet fieldalignment).
+	nodeID int
 }
 
 // vocabActive reports whether the vocabulary group g is active for this run.

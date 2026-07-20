@@ -434,8 +434,8 @@ func SchemaNumberRat(v any) (*big.Rat, bool) {
 
 // EnumMemberRats returns the rational forms of an enum's numeric members,
 // aligned by index with enum (nil for a non-numeric member). It returns nil
-// when no member is numeric, so [precomputeSchema] stores an entry only for an
-// enum that can take the fast numeric-comparison path.
+// when no member is numeric, so the caller caches an entry only for an enum
+// that can take the fast numeric-comparison path.
 func EnumMemberRats(enum []any) []*big.Rat {
 	var rats []*big.Rat
 
