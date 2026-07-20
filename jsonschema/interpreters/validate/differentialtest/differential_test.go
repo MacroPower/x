@@ -1,4 +1,4 @@
-package validate_test
+package differentialtest_test
 
 import (
 	"bytes"
@@ -10,12 +10,11 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-
-	playground "github.com/go-playground/validator/v10"
-
 	"go.jacobcolvin.com/x/jsonschema"
 	"go.jacobcolvin.com/x/jsonschema/internal/fuzzfill"
 	"go.jacobcolvin.com/x/jsonschema/interpreters/validate"
+
+	playground "github.com/go-playground/validator/v10"
 )
 
 // Rig 2 -- validator differential. The validate interpreter maps

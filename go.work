@@ -4,6 +4,7 @@ use (
 	./ansivideo
 	./cobras
 	./jsonschema
+	./jsonschema/interpreters/validate/differentialtest
 	./magicschema
 	./stringtest
 	./version
