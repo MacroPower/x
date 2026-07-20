@@ -36,18 +36,11 @@ func Parse(f reflect.StructField) Info {
 			return Info{} // excluded
 		}
 
-		name := f.Name
-		// For embedded non-struct types, use the type name.
-		if f.Anonymous {
-			ft := f.Type
-			if ft.Kind() == reflect.Pointer {
-				ft = ft.Elem()
-			}
-
-			name = ft.Name()
-		}
-
-		return Info{JSONName: name}
+		// The field name serves embedded fields too: for both value and pointer
+		// embeds it is the unqualified type identifier, without the type
+		// arguments [reflect.Type.Name] carries for an instantiated generic
+		// type, exactly the key encoding/json uses.
+		return Info{JSONName: f.Name}
 	}
 
 	name, rest, found := strings.Cut(tag, ",")
@@ -67,16 +60,9 @@ func Parse(f reflect.StructField) Info {
 	taggedName := name != ""
 
 	if name == "" {
-		// Use field name.
+		// Use the field name, which for an embedded field is the unqualified
+		// type identifier encoding/json keys the field by.
 		name = f.Name
-		if f.Anonymous {
-			ft := f.Type
-			if ft.Kind() == reflect.Pointer {
-				ft = ft.Elem()
-			}
-
-			name = ft.Name()
-		}
 	}
 
 	info := Info{JSONName: name, TaggedName: taggedName}

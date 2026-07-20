@@ -343,7 +343,10 @@
 // json:",omitempty") promotes the fields, matching encoding/json.
 //
 // Embedded non-struct named types (e.g., type MyString string) are treated as
-// regular fields with the type name as the JSON key, not promoted. Embedded
+// regular fields with the field name as the JSON key, not promoted. The field
+// name is the unqualified type identifier, so an embedded instantiated generic
+// type (e.g. GenList[int]) is keyed "GenList", without the type arguments
+// [reflect.Type.Name] carries, matching [encoding/json]. Embedded
 // pointer-to-non-struct types are handled the same way, with the pointer
 // adding nullability.
 //

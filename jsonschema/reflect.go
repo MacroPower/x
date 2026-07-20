@@ -1135,13 +1135,10 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 					// Embedded non-struct type (interfaces included): encoding/json
 					// records it as a regular leaf field under the field name, never
 					// flattened, so it participates in normal shadowing and
-					// ambiguity resolution.
-					jsonName := ft.Name()
-					if jsonName == "" {
-						continue
-					}
-
-					record(jsonName, fieldLevel{field: f, depth: depth, optional: e.optional}, dup)
+					// ambiguity resolution. The field name is the unqualified type
+					// identifier, without the type arguments [reflect.Type.Name]
+					// carries for an instantiated generic type.
+					record(f.Name, fieldLevel{field: f, depth: depth, optional: e.optional}, dup)
 
 					continue
 				}
