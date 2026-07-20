@@ -1060,23 +1060,28 @@ func containsInvalidIRIChars(s string) bool {
 }
 
 // validateURITemplate validates a URI Template per RFC 6570. It checks for
-// matched, non-nested braces and that each brace expression is non-empty and
-// contains only valid expression characters.
+// matched, non-nested braces, that each brace expression is non-empty and
+// contains only valid expression characters, and that the literal text
+// between expressions contains only characters from the literals rule
+// (which excludes CTL, SP, '"', "'", '%' outside pct-encoded, '<', '>',
+// '\', '^', '`', and '|', and limits non-ASCII to ucschar / iprivate).
 func validateURITemplate(s string) error {
 	inExpr := false
 
 	exprStart := 0
-	for i := range len(s) {
-		switch s[i] {
-		case '{':
+	for i := 0; i < len(s); {
+		c := s[i]
+		switch {
+		case c == '{':
 			if inExpr {
 				return errors.New("invalid URI template: nested brace")
 			}
 
 			inExpr = true
 			exprStart = i + 1
+			i++
 
-		case '}':
+		case c == '}':
 			if !inExpr {
 				return errors.New("invalid URI template: unmatched closing brace")
 			}
@@ -1087,6 +1092,28 @@ func validateURITemplate(s string) error {
 			}
 
 			inExpr = false
+			i++
+
+		case inExpr:
+			// Expression contents are validated as a whole at the closing brace.
+			i++
+
+		case c == '%':
+			// In literal context '%' is legal only as pct-encoded ("%" HEXDIG
+			// HEXDIG).
+			if i+2 >= len(s) || !isHexDigit(s[i+1]) || !isHexDigit(s[i+2]) {
+				return errors.New("invalid URI template: malformed percent-encoding in literal")
+			}
+
+			i += 3
+
+		default:
+			r, size := utf8.DecodeRuneInString(s[i:])
+			if !isURITemplateLiteral(r, size) {
+				return errors.New("invalid URI template: invalid character in literal")
+			}
+
+			i += size
 		}
 	}
 
@@ -1095,6 +1122,64 @@ func validateURITemplate(s string) error {
 	}
 
 	return nil
+}
+
+// isURITemplateLiteral reports whether r may appear as literal text outside a
+// brace expression, per the RFC 6570 literals rule: %x21 / %x23-24 / %x26 /
+// %x28-3B / %x3D / %x3F-5B / %x5D / %x5F / %x61-7A / %x7E / ucschar /
+// iprivate ('%' is handled separately as pct-encoded, and '{' / '}' delimit
+// expressions). The size is the byte length the rune decoded from: a lone
+// invalid UTF-8 byte decodes to (utf8.RuneError, 1) and is rejected.
+func isURITemplateLiteral(r rune, size int) bool {
+	if r == utf8.RuneError && size == 1 {
+		return false
+	}
+
+	switch {
+	case r == 0x21,
+		r >= 0x23 && r <= 0x24,
+		r == 0x26,
+		r >= 0x28 && r <= 0x3B,
+		r == 0x3D,
+		r >= 0x3F && r <= 0x5B,
+		r == 0x5D,
+		r == 0x5F,
+		r >= 0x61 && r <= 0x7A,
+		r == 0x7E:
+		return true
+	}
+
+	return isUcschar(r) || isIprivate(r)
+}
+
+// isUcschar reports whether r is in the RFC 3987 ucschar set: %xA0-D7FF /
+// %xF900-FDCF / %xFDF0-FFEF / %x10000-1FFFD through %xD0000-DFFFD (each
+// supplementary plane minus its trailing noncharacters) / %xE1000-EFFFD.
+func isUcschar(r rune) bool {
+	switch {
+	case r >= 0xA0 && r <= 0xD7FF,
+		r >= 0xF900 && r <= 0xFDCF,
+		r >= 0xFDF0 && r <= 0xFFEF:
+		return true
+
+	case r >= 0x10000 && r <= 0xDFFFD:
+		// Planes 1-13 each span %xN0000-NFFFD, excluding the plane-final
+		// noncharacters NFFFE and NFFFF.
+		return r&0xFFFF <= 0xFFFD
+
+	case r >= 0xE1000 && r <= 0xEFFFD:
+		return true
+	}
+
+	return false
+}
+
+// isIprivate reports whether r is in the RFC 3987 iprivate set of private-use
+// code points: %xE000-F8FF / %xF0000-FFFFD / %x100000-10FFFD.
+func isIprivate(r rune) bool {
+	return (r >= 0xE000 && r <= 0xF8FF) ||
+		(r >= 0xF0000 && r <= 0xFFFFD) ||
+		(r >= 0x100000 && r <= 0x10FFFD)
 }
 
 // validateURITemplateExpr validates the contents of a single {expression}
