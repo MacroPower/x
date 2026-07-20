@@ -42,14 +42,22 @@ func ResolveURI(base, ref string) string {
 	// 3986 path-merge to the opaque part. Registration and lookup share this
 	// function, so the result stays symmetric. Absolute and fragment-only refs
 	// resolve correctly through ResolveReference.
+	// The merge operates on the encoded path form: url.URL.Opaque is emitted
+	// verbatim by String() and kept raw by url.Parse, so feeding it the decoded
+	// Path would resolve a percent-escaped ref to a different key than its
+	// absolute spelling (and emit invalid URIs for escapes like %20). The
+	// hierarchical branch resolves on escaped paths the same way. RawFragment
+	// is carried along so a still-encoded JSON Pointer fragment keeps the raw
+	// spelling its splitting depends on.
 	if baseURL.Opaque != "" && refURL.Scheme == "" && refURL.Opaque == "" &&
 		refURL.Host == "" && refURL.Path != "" {
 		resolved := url.URL{
-			Scheme:     baseURL.Scheme,
-			Opaque:     mergeOpaquePath(baseURL.Opaque, refURL.Path),
-			RawQuery:   refURL.RawQuery,
-			ForceQuery: refURL.ForceQuery,
-			Fragment:   refURL.Fragment,
+			Scheme:      baseURL.Scheme,
+			Opaque:      mergeOpaquePath(baseURL.Opaque, refURL.EscapedPath()),
+			RawQuery:    refURL.RawQuery,
+			ForceQuery:  refURL.ForceQuery,
+			Fragment:    refURL.Fragment,
+			RawFragment: refURL.RawFragment,
 		}
 
 		return resolved.String()
