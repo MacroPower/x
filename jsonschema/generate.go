@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"reflect"
 	"slices"
+
+	"go.jacobcolvin.com/x/jsonschema/internal/numkind"
 )
 
 // GenerateOption configures schema generation. Options are produced by this
@@ -300,9 +302,13 @@ func WithRootTitle(enabled bool) GenerateOption {
 // (see [generator.wrapRefForDraft7]); Draft-07 readers ignore keywords
 // beside $ref, so the sibling default would otherwise be discarded.
 func (g *generator) applyInstanceDefaults(instance any, rootType reflect.Type, schema *Schema) error {
+	// DerefType guards against pointer cycles (type P *P, or a mutually
+	// recursive pair), returning the still-unresolved pointer type; that can
+	// never equal the non-pointer rootType, so the mismatch check below
+	// rejects it.
 	instType := reflect.TypeOf(instance)
-	for instType != nil && instType.Kind() == reflect.Pointer {
-		instType = instType.Elem()
+	if instType != nil {
+		instType = numkind.DerefType(instType)
 	}
 
 	if instType != rootType {
