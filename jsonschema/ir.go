@@ -182,35 +182,6 @@ func walkNodes(root *node, seen map[*defEntry]bool, visit func(*node)) {
 	}
 }
 
-// forEachSubschema calls fn for every non-nil direct sub-schema of s, reading
-// the canonical field table's raw extractors without assembling walk locations.
-func forEachSubschema(s *Schema, fn func(*Schema)) {
-	for _, f := range schemafield.Subschemas {
-		switch f.Shape {
-		case schemafield.Single:
-			if c := f.SingleOf(s); c != nil {
-				fn(c)
-			}
-
-		case schemafield.Slice:
-			for _, c := range f.SliceOf(s) {
-				if c != nil {
-					fn(c)
-				}
-			}
-
-		case schemafield.Map:
-			for _, c := range f.MapOf(s) {
-				if c != nil {
-					fn(c)
-				}
-			}
-
-		case schemafield.None:
-		}
-	}
-}
-
 // payloadRefTargets maps every $defs ref string a hook may have authored to its
 // def entry: the final assigned name of each def, plus its provisional baseName
 // where no final name claims it (a ref node's own payload carries the
@@ -271,7 +242,9 @@ func (g *generator) walkReachable(
 			}
 		}
 
-		forEachSubschema(s, scanPayload)
+		for _, child := range schemafield.Children(s) {
+			scanPayload(child)
+		}
 	}
 
 	walkNodes(root, seen, visitAndScan)

@@ -504,3 +504,51 @@ func CloneContainers(s *Schema) {
 		}
 	}
 }
+
+// Children returns the direct sub-schemas of s in the jsonschema package's
+// SubschemaEntries order -- the pinned Subschemas field order with map keys
+// sorted -- without assembling pointer locations. Two SubschemaEntries rules
+// carry over so the orders stay in lockstep (a guard test in the jsonschema
+// package pins this): a nil child is skipped, and the single Items form is
+// skipped when ItemsArray is populated, since both express the items keyword.
+// It serves traversals that need only the child schemas, like the refresolve
+// registry walk and the clone pairing walk, which requires the source and copy
+// to yield children in identical order.
+func Children(s *Schema) []*Schema {
+	if s == nil {
+		return nil
+	}
+
+	var children []*Schema
+
+	for _, f := range Subschemas {
+		switch f.Shape {
+		case None:
+
+		case Map:
+			m := f.MapOf(s)
+			for _, key := range slices.Sorted(maps.Keys(m)) {
+				if sub := m[key]; sub != nil {
+					children = append(children, sub)
+				}
+			}
+
+		case Slice:
+			for _, sub := range f.SliceOf(s) {
+				if sub != nil {
+					children = append(children, sub)
+				}
+			}
+
+		case Single:
+			sub := f.SingleOf(s)
+			if sub == nil || (f.Name == "Items" && len(s.ItemsArray) > 0) {
+				continue
+			}
+
+			children = append(children, sub)
+		}
+	}
+
+	return children
+}

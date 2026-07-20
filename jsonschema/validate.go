@@ -26,6 +26,7 @@ import (
 	"go.jacobcolvin.com/x/jsonschema/internal/refresolve"
 	"go.jacobcolvin.com/x/jsonschema/internal/regexcache"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemaclone"
+	"go.jacobcolvin.com/x/jsonschema/internal/schemafield"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemashape"
 	"go.jacobcolvin.com/x/jsonschema/internal/typename"
 	"go.jacobcolvin.com/x/jsonschema/internal/uriref"
@@ -424,7 +425,7 @@ func newValidator(ctx context.Context, schema *Schema, opts []ValidateOption) (*
 // the sub-schema traversal the parent owns. Deep cloning stays parent-side in
 // the fetch closures, so the core needs no clone dependency.
 func refDeps() refresolve.Deps {
-	return refresolve.Deps{Children: schemaChildren}
+	return refresolve.Deps{Children: schemafield.Children}
 }
 
 // toRefDraft maps the parent draft to the resolution core's two-value enum,
@@ -584,8 +585,8 @@ type compiledPattern struct {
 // compiled patterns) by traversing every schema reachable from the root once.
 // It runs single-threaded during Compile, before the [Validator] is shared, so
 // the caches it builds are never written concurrently. The traversal delegates
-// to [SubschemaEntries] for the sub-schema field list and consults only schema
-// fields and its own visited set; it does not touch the URI, anchor, or
+// to [schemafield.Children] for the sub-schema field list and consults only
+// schema fields and its own visited set; it does not touch the URI, anchor, or
 // base-URI registries, which keeps the validation-time fallback walk (the
 // session's RegisterFallback) from populating these caches.
 func (v *validator) precompute() map[*Schema]bool {
@@ -625,8 +626,8 @@ func (v *validator) precomputeSchema(schema *Schema, visited map[*Schema]bool) {
 		}
 	}
 
-	for _, e := range SubschemaEntries(schema) {
-		v.precomputeSchema(e.Schema, visited)
+	for _, child := range schemafield.Children(schema) {
+		v.precomputeSchema(child, visited)
 	}
 }
 
@@ -872,25 +873,12 @@ func (v *validator) remoteLoader() jsonschema.Loader {
 
 // cloneSchema deep-copies a [Schema] via JSON round-trip, restoring the
 // render-only PropertyOrder field the round-trip drops. The copy logic lives in
-// [schemaclone.Clone]; the lockstep PropertyOrder restore walks this package's
-// [SubschemaEntries] traversal, threaded in as [schemaChildren].
+// [schemaclone.Clone]; the lockstep PropertyOrder restore walks
+// [schemafield.Children], the schemas-only form of the [SubschemaEntries]
+// traversal order.
 func cloneSchema(s *Schema) (*Schema, error) {
 	//nolint:wrapcheck // Clone already wraps with "clone schema:".
-	return schemaclone.Clone(s, schemaChildren)
-}
-
-// schemaChildren returns the direct sub-schemas of s in [SubschemaEntries]
-// order, the traversal [schemaclone.Clone] walks to pair nodes when restoring
-// PropertyOrder.
-func schemaChildren(s *Schema) []*Schema {
-	entries := SubschemaEntries(s)
-
-	children := make([]*Schema, len(entries))
-	for i, entry := range entries {
-		children[i] = entry.Schema
-	}
-
-	return children
+	return schemaclone.Clone(s, schemafield.Children)
 }
 
 // detectDraft determines the draft from the root schema's $schema field.

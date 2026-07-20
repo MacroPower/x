@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/x/jsonschema"
+	"go.jacobcolvin.com/x/jsonschema/internal/schemafield"
 )
 
 // childSchemas projects SubschemaEntries onto the bare child schemas, for
@@ -92,6 +93,33 @@ func TestSubschemaEntriesChildren(t *testing.T) {
 			assert.Equal(t, tc.want, childSchemas(tc.schema))
 		})
 	}
+}
+
+// TestSchemafieldChildrenMatchesSubschemaEntries pins that
+// schemafield.Children yields exactly the SubschemaEntries schemas in the same
+// order. The two walks share the Subschemas field list but assemble children
+// independently (Children skips the Location build), and consumers like the
+// clone pairing walk require lockstep order between them.
+func TestSchemafieldChildrenMatchesSubschemaEntries(t *testing.T) {
+	t.Parallel()
+
+	s := &jsonschema.Schema{
+		Properties: map[string]*jsonschema.Schema{
+			"b": {Type: "string"},
+			"a": {Type: "integer"},
+		},
+		Defs: map[string]*jsonschema.Schema{
+			"z": {Type: "number"},
+			"y": {Type: "boolean"},
+		},
+		AllOf:      []*jsonschema.Schema{{Type: "object"}, nil, {Type: "array"}},
+		Items:      &jsonschema.Schema{Type: "string"},
+		ItemsArray: []*jsonschema.Schema{{Type: "integer"}},
+		Not:        &jsonschema.Schema{Type: "null"},
+	}
+
+	assert.Equal(t, childSchemas(s), schemafield.Children(s))
+	assert.Nil(t, schemafield.Children(nil))
 }
 
 // TestSubschemaEntriesDirectOnly pins that SubschemaEntries returns only
