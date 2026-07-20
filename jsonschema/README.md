@@ -636,7 +636,8 @@ always succeeds or always fails (following `regexp.MustCompile` and
   via `Normalize`, so values decoded from YAML or TOML validate directly:
   integers convert to `json.Number` (exact at any magnitude) and `float32`
   widens to `float64`. `Normalize` is exported for callers that want to
-  pre-normalize a value once and reuse it.
+  pre-normalize a value once and reuse it. A self-referential instance (a map
+  or slice that contains itself) is rejected rather than walked.
 - `Validator.ValidateJSON(ctx, data)` unmarshals raw JSON with a
   `json.Decoder` using `UseNumber()` (preserving the integer-vs-number
   distinction), then validates.

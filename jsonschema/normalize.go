@@ -26,7 +26,8 @@ import "go.jacobcolvin.com/x/jsonschema/internal/normalize"
 //
 // A self-referential instance (a map or slice that contains itself) is not
 // descended past the cycle, so Normalize terminates instead of overflowing the
-// stack. Validating such an instance against a recursive schema may still
-// recurse without bound, so callers building cyclic instances by hand should
-// avoid recursive schemas.
+// stack. Because the input is never mutated, the cycle's back-edge in the
+// result keeps pointing at the original, possibly un-normalized container, so
+// the result is best-effort for cyclic inputs; [Validate] and
+// [Validator.Validate] reject such instances outright.
 func Normalize(instance any) any { return normalize.Value(instance) }

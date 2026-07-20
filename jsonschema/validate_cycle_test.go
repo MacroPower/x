@@ -4,16 +4,17 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/x/jsonschema"
 )
 
-// Normalize tolerates a self-referential (cyclic) instance, so one can reach
-// the keywords that compare values: uniqueItems, const, and enum. Those
-// comparisons must terminate rather than abort the process with a fatal stack
-// overflow. A cyclic value has no JSON serialization, so like a non-finite
-// float it compares unequal to everything, including itself: it never forms a
-// uniqueItems duplicate and never matches a const or enum value.
+// A self-referential (cyclic) instance is rejected by the instance funnel
+// before any keyword runs, so the value-comparison keywords -- uniqueItems,
+// const, and enum -- can never walk a cycle and abort the process with a fatal
+// stack overflow. The rejection arrives as an ordinary error, not a crash and
+// not a *ValidationError. The comparison walks themselves keep their own cycle
+// guards as defense in depth, pinned in internal/jsonequal.
 func TestValidateCyclicInstanceValueComparisons(t *testing.T) {
 	t.Parallel()
 
@@ -29,32 +30,26 @@ func TestValidateCyclicInstanceValueComparisons(t *testing.T) {
 	tests := map[string]struct {
 		schema   string
 		instance any
-		wantErr  bool
 	}{
-		"uniqueItems with cyclic element passes": {
+		"uniqueItems with cyclic element": {
 			schema:   `{"uniqueItems": true}`,
 			instance: cyclic(),
-			wantErr:  false,
 		},
-		"uniqueItems with same cyclic value twice passes": {
+		"uniqueItems with same cyclic value twice": {
 			schema:   `{"uniqueItems": true}`,
 			instance: []any{sharedCycle, sharedCycle},
-			wantErr:  false,
 		},
-		"uniqueItems still catches duplicates beside a cyclic element": {
+		"uniqueItems with duplicates beside a cyclic element": {
 			schema:   `{"uniqueItems": true}`,
 			instance: []any{cyclic(), "x", "x"},
-			wantErr:  true,
 		},
-		"const never matches a cyclic instance": {
+		"const with cyclic instance": {
 			schema:   `{"const": [null, "x"]}`,
 			instance: cyclic(),
-			wantErr:  true,
 		},
-		"enum never matches a cyclic instance": {
+		"enum with cyclic instance": {
 			schema:   `{"enum": [[null, "x"], "y"]}`,
 			instance: cyclic(),
-			wantErr:  true,
 		},
 	}
 
@@ -65,11 +60,13 @@ func TestValidateCyclicInstanceValueComparisons(t *testing.T) {
 			v := jsonschema.MustCompileJSON([]byte(tc.schema))
 
 			err := v.Validate(t.Context(), tc.instance)
-			if tc.wantErr {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "is not accepted")
+
+			var verr *jsonschema.ValidationError
+
+			assert.NotErrorAs(t, err, &verr,
+				"a cyclic instance is rejected by the funnel, not a validation failure")
 		})
 	}
 }

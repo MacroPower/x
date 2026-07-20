@@ -495,7 +495,8 @@
 //     kinds that encoding/json does not produce (the signed and unsigned
 //     integer types and float32) are accepted too and normalized via
 //     [Normalize], so values decoded from YAML or TOML validate directly
-//     (integers exactly, at any magnitude).
+//     (integers exactly, at any magnitude). A self-referential instance (a
+//     map or slice that contains itself) is rejected rather than walked.
 //   - [Validator.ValidateJSON] unmarshals raw JSON bytes with
 //     [encoding/json.Decoder] using UseNumber() to preserve integer vs
 //     number distinction, then validates.

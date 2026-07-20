@@ -6,7 +6,9 @@
 // something inside them, so an already JSON-shaped value is returned untouched
 // and the input is never mutated. A `{pointer, len}` cycle guard stops the
 // recursion at a self-referential map or slice while still normalizing a reslice
-// that merely shares a data pointer.
+// that merely shares a data pointer; [ValueChecked] reports such a cyclic
+// instance as not accepted, because its back-edge necessarily points at the
+// original, possibly un-normalized container.
 package normalize
 
 import (
@@ -38,9 +40,10 @@ import (
 //
 // A self-referential instance (a map or slice that contains itself) is not
 // descended past the cycle, so Value terminates instead of overflowing the
-// stack. Validating such an instance against a recursive schema may still
-// recurse without bound, so callers building cyclic instances by hand should
-// avoid recursive schemas.
+// stack. Because the input is never mutated, the back-edge in the result keeps
+// pointing at the original, possibly un-normalized container, so the result is
+// best-effort for cyclic inputs; [ValueChecked] reports such an instance as
+// not accepted.
 func Value(instance any) any {
 	normalized, _, _ := normalizeInstance(instance, map[[2]uintptr]bool{})
 
@@ -54,6 +57,11 @@ func Value(instance any) any {
 // normalization and the acceptance check into a single tree walk for the
 // validation funnel, which would otherwise normalize the instance and then
 // re-walk the whole structure a second time to check acceptance.
+//
+// A self-referential instance (a map or slice that contains itself) is
+// reported as not accepted: copy-on-change never mutates the input, so the
+// cycle's back-edge still points at the original container, whose leaves may
+// be un-normalized, and the validation walk cannot safely traverse it.
 func ValueChecked(instance any) (any, bool) {
 	normalized, _, accepted := normalizeInstance(instance, map[[2]uintptr]bool{})
 
@@ -124,11 +132,13 @@ func normalizeMap(m map[string]any, onPath map[[2]uintptr]bool) (any, bool, bool
 	// helpers share one onPath map; for a map the pointer alone identifies the
 	// container (a map cannot be resliced into a distinct value sharing its
 	// pointer), so len never changes the decision here and is carried only for
-	// that uniformity. A back-edge re-enters a container already on the path, so
-	// it is accepted.
+	// that uniformity. A back-edge is returned unchanged and reported not
+	// accepted: copy-on-change never mutates the input, so the edge still
+	// points at the original map, whose leaves may be un-normalized, and the
+	// funnel must reject the instance rather than mis-validate through it.
 	key := [2]uintptr{reflect.ValueOf(m).Pointer(), uintptr(len(m))}
 	if onPath[key] {
-		return m, false, true
+		return m, false, false
 	}
 
 	onPath[key] = true
@@ -177,10 +187,11 @@ func normalizeSlice(s []any, onPath map[[2]uintptr]bool) (any, bool, bool) {
 	// c[:1] shares c's data pointer but is a distinct, acyclic value, so keying
 	// on the pointer alone would wrongly treat it as a back-edge and return it
 	// un-normalized. A genuine self-reference re-enters with the same pointer
-	// and length, so it is still caught. A back-edge is accepted.
+	// and length, so it is still caught. A back-edge is returned unchanged and
+	// reported not accepted, for the reason given in normalizeMap.
 	key := [2]uintptr{reflect.ValueOf(s).Pointer(), uintptr(len(s))}
 	if onPath[key] {
-		return s, false, true
+		return s, false, false
 	}
 
 	onPath[key] = true

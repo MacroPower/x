@@ -258,12 +258,14 @@ func TestValueCheckedTerminatesOnCyclicInstance(t *testing.T) {
 	t.Parallel()
 
 	// A self-referential map/slice is the input shape Value tolerates; the
-	// folded acceptance walk must terminate at the back-edge rather than overflow
-	// the stack, and a cycle wrapping a rejected leaf still reports not-accepted.
+	// folded acceptance walk must terminate at the back-edge rather than
+	// overflow the stack. The back-edge itself is reported not accepted (it
+	// points at the original, possibly un-normalized container), so a cyclic
+	// instance never reaches the validation walk.
 	m := map[string]any{"n": 1}
 	m["self"] = m
 	_, accepted := normalize.ValueChecked(m)
-	assert.True(t, accepted)
+	assert.False(t, accepted)
 
 	bad := map[string]any{"leaf": struct{}{}}
 	bad["self"] = bad

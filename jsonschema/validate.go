@@ -1305,7 +1305,9 @@ func checkNonNegativeBounds(schema *Schema, schemaPath string, visited map[*Sche
 // float32; they are normalized via [Normalize], so values decoded from YAML or
 // TOML or built by hand validate directly (integers exactly, at any
 // magnitude). Go structs are not accepted; passing any other type returns an
-// error (marshal to JSON or use [Validator.ValidateJSON] instead).
+// error (marshal to JSON or use [Validator.ValidateJSON] instead). A
+// self-referential instance (a map or slice that contains itself) is rejected
+// rather than walked.
 //
 // Returns nil on success or an error that can be unwrapped to [*ValidationError]
 // via [errors.AsType].
@@ -1324,16 +1326,18 @@ func (c *Validator) Validate(ctx context.Context, instance any) error {
 }
 
 // normalizeAndCheck normalizes instance and reports an error if, after
-// normalization, its type or a nested container leaf is not one the validation
-// walk accepts. The message lists the accepted types in one place so the two
-// entry points cannot drift. Normalization and the acceptance check share one
-// tree walk via [normalize.ValueChecked].
+// normalization, its type, a nested container leaf, or a self-referential
+// container is not one the validation walk accepts. The message lists the
+// accepted shapes in one place so the two entry points cannot drift.
+// Normalization and the acceptance check share one tree walk via
+// [normalize.ValueChecked].
 func normalizeAndCheck(instance any) (any, error) {
 	instance, ok := normalize.ValueChecked(instance)
 	if !ok {
 		return nil, fmt.Errorf(
-			"instance of type %T is not accepted: accepted types are map[string]any, "+
-				"[]any, string, bool, nil, and the numeric types; marshal to JSON or use Validator.ValidateJSON",
+			"instance of type %T is not accepted: instances must contain only map[string]any, "+
+				"[]any, string, bool, nil, and numeric values, with no self-referential containers; "+
+				"marshal to JSON or use Validator.ValidateJSON",
 			instance,
 		)
 	}
@@ -1412,7 +1416,8 @@ func (c *Validator) ValidateValue(ctx context.Context, v any) error {
 // produce are accepted too, namely the signed and unsigned integer types and
 // float32; they are normalized via [Normalize]. Go structs are not accepted;
 // passing any other type returns an error (marshal to JSON or use
-// [Validator.ValidateJSON] instead).
+// [Validator.ValidateJSON] instead). A self-referential instance (a map or
+// slice that contains itself) is rejected rather than walked.
 //
 // Returns nil on success or an error that can be unwrapped to
 // [*ValidationError] via [errors.AsType].
