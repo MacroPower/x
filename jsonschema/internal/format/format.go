@@ -600,6 +600,10 @@ func validateURIAbs(s string, badChars func(string) bool, label string) error {
 		return fmt.Errorf("invalid %s: forbidden characters", label)
 	}
 
+	if !validURIDelims(s, u.Host) {
+		return fmt.Errorf("invalid %s: misplaced delimiter", label)
+	}
+
 	// Bare IPv6 addresses must be enclosed in brackets per RFC 3986 §3.2.2.
 	if strings.Count(u.Host, ":") > 1 && !strings.HasPrefix(u.Host, "[") {
 		return fmt.Errorf("invalid %s: bare IPv6 address", label)
@@ -611,7 +615,7 @@ func validateURIAbs(s string, badChars func(string) bool, label string) error {
 // validateURIRef validates a URI/IRI reference: it must parse and contain no
 // forbidden characters, but needs no scheme (relative references are allowed).
 func validateURIRef(s string, badChars func(string) bool, label string) error {
-	_, err := url.Parse(s)
+	u, err := url.Parse(s)
 	if err != nil {
 		return fmt.Errorf("invalid %s reference", label)
 	}
@@ -620,7 +624,35 @@ func validateURIRef(s string, badChars func(string) bool, label string) error {
 		return fmt.Errorf("invalid %s reference: forbidden characters", label)
 	}
 
+	if !validURIDelims(s, u.Host) {
+		return fmt.Errorf("invalid %s reference: misplaced delimiter", label)
+	}
+
 	return nil
+}
+
+// validURIDelims reports whether s uses the RFC 3986 gen-delims '#', '[', and
+// ']' only in their delimiting positions: '#' at most once (introducing the
+// fragment), and square brackets only as the enclosing pair of an authority
+// IP-literal host. The net/url parser tolerates all three elsewhere (storing
+// "a#b" as a fragment and accepting raw brackets in the path), but fragment =
+// query =
+// *( pchar / "/" / "?" ) contains no '#', and '[' / ']' appear in the RFC 3986
+// grammar only in the IP-literal production. Counting on the raw string is
+// deliberate: percent-encoded %5B/%5D are legal anywhere and leave no literal
+// bracket in s. The host is the parsed authority host, which net/url returns
+// bracketed exactly when the authority carries an IP-literal.
+func validURIDelims(s, host string) bool {
+	if strings.Count(s, "#") > 1 {
+		return false
+	}
+
+	want := 0
+	if strings.HasPrefix(host, "[") {
+		want = 1
+	}
+
+	return strings.Count(s, "[") == want && strings.Count(s, "]") == want
 }
 
 // validateURI validates an absolute URI per RFC 3986.
