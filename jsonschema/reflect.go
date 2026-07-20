@@ -66,6 +66,7 @@ type generator struct {
 	tagInterpreters      []tagInterpreterRegistration
 	typeExtenders        []TypeSchemaExtender
 	draft                Draft
+	profile              draftProfile // per-draft behavioral policy, resolved once from draft
 	definitions          bool
 	additionalProperties bool
 	nullable             bool
@@ -99,6 +100,12 @@ func newGenerator(opts []GenerateOption) *generator {
 			opt.applyGenerate(g)
 		}
 	}
+
+	// Resolve the draft profile after options settle g.draft, so every
+	// generation site reads the policy through g.profile rather than comparing
+	// g.draft. Each run copies the prototype by value via forRun, carrying it
+	// along.
+	g.profile = g.draft.profile()
 
 	return g
 }
@@ -183,7 +190,7 @@ func (g *generator) generate(t reflect.Type) (*Schema, error) {
 			defs[e.name] = e.rendered
 		}
 
-		if g.draft == Draft7 {
+		if g.profile.definitionsKeyword {
 			schema.Definitions = defs
 		} else {
 			schema.Defs = defs
@@ -223,7 +230,7 @@ func (g *generator) rootDefaultsTarget(schema *Schema, root *node) *Schema {
 func (g *generator) rootTitleTarget(schema *Schema, root *node) *Schema {
 	// Draft-07 readers ignore keywords beside a bare $ref, so a self-referential
 	// root that stayed a $ref is titled on its $defs body instead.
-	if g.draft == Draft7 && schema.Ref != "" && root.kind == kindRef {
+	if !g.profile.honorRefSiblings && schema.Ref != "" && root.kind == kindRef {
 		return root.def.rendered
 	}
 
@@ -741,7 +748,7 @@ func (g *generator) schemaForArray(t reflect.Type, nullable bool) (*node, error)
 		MinItems: new(n),
 		MaxItems: new(n),
 	}
-	if g.draft == Draft7 {
+	if !g.profile.prefixItemsTuple {
 		s.ItemsArray = elems
 	} else {
 		s.PrefixItems = elems
@@ -896,7 +903,7 @@ func (g *generator) buildStructSchema(t reflect.Type) (*node, error) {
 	// Handle allOf + additionalProperties interaction. Decided here on embed
 	// presence and carried on the payload; render appends the embed branches.
 	if hasAllOf && !g.additionalProperties {
-		if g.draft == Draft2020 {
+		if g.profile.closeWithUnevaluated {
 			s.AdditionalProperties = nil
 			s.UnevaluatedProperties = &Schema{Not: &Schema{}}
 		} else {
@@ -1444,7 +1451,7 @@ func (g *generator) applyFieldInterpreters(
 // post-render defaults path, where a default landing beside a bare $ref root or
 // property needs the wrap; render's renderRef handles the field path itself.
 func (g *generator) wrapRefForDraft7(s *Schema) {
-	if g.draft != Draft7 || s.Ref == "" {
+	if g.profile.honorRefSiblings || s.Ref == "" {
 		return
 	}
 

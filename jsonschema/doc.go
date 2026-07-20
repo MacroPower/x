@@ -802,7 +802,8 @@
 // array. A violation makes the referencing ref fail with an error wrapping
 // [ErrRefResolve] that also wraps the structural sentinel ([ErrInvalidType],
 // [ErrNegativeBound], or [ErrItemsArrayUnderDraft2020]), rather than letting
-// the document silently mis-validate.
+// the document silently mis-validate. [Inline] shares this same vetting policy
+// for the documents it fetches (see Reference Inlining below).
 //
 // Non-local refs absolutize against the enclosing resource's base URI: its
 // $id, or the root base set with [WithBaseURI], which also registers the
@@ -890,6 +891,17 @@
 // the keyword, as the validator does). A non-local ref with no resolver
 // configured, or any ref whose target cannot be found, returns an error
 // wrapping [ErrRefResolve].
+//
+// A remote document fetched during inlining is structurally vetted before it
+// is inlined, through the same policy the validator applies to fetched
+// documents (see Remote References): a fetched document carrying an invalid
+// type name, a negative bound, or, under a draft that rejects it, the array
+// form of items returns an error wrapping [ErrRefResolve] that also wraps the
+// structural sentinel ([ErrInvalidType], [ErrNegativeBound], or
+// [ErrItemsArrayUnderDraft2020]), rather than inlining the document into a
+// malformed output schema. The fetched document follows the root document's
+// draft, so a Draft-7 array-form items remote inlined under a Draft-7 run is
+// left intact.
 //
 // [WithRefFallback] sets a per-reference failure policy (a
 // [RefFallback]) consulted when expanding a reference fails for any of those

@@ -134,7 +134,7 @@ func (g *generator) refNode(e *defEntry, nullable bool) *node {
 		kind:     kindRef,
 		def:      e,
 		nullable: nullable,
-		payload:  &Schema{Ref: g.draft.refPrefix() + e.baseName},
+		payload:  &Schema{Ref: g.profile.refPrefix() + e.baseName},
 	}
 }
 
@@ -187,7 +187,7 @@ func walkNodes(root *node, seen map[*defEntry]bool, visit func(*node)) {
 // where no final name claims it (a ref node's own payload carries the
 // provisional form until render). It must be built after assignDefNames.
 func (g *generator) payloadRefTargets() map[string]*defEntry {
-	prefix := g.draft.refPrefix()
+	prefix := g.profile.refPrefix()
 
 	targets := make(map[string]*defEntry, len(g.defs))
 	for _, e := range g.defs {
@@ -222,7 +222,7 @@ func (g *generator) walkReachable(
 	onPayloadRef func(*defEntry),
 ) {
 	targets := g.payloadRefTargets()
-	prefix := g.draft.refPrefix()
+	prefix := g.profile.refPrefix()
 
 	var scanPayload func(s *Schema, skipTopRef bool)
 

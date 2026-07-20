@@ -319,7 +319,7 @@ type itemsPlan struct {
 func computeItemsPlan(v *validator, s *Schema) *itemsPlan {
 	var p itemsPlan
 
-	if v.draft == Draft2020 {
+	if v.profile.prefixItemsTuple {
 		if len(s.PrefixItems) > 0 {
 			p.tuple = s.PrefixItems
 			p.tupleLabel = KeywordPrefixItems

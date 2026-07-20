@@ -55,7 +55,7 @@ func (g *generator) renderBase(n *node) *Schema {
 			elems[i] = g.render(c)
 		}
 
-		if g.draft == Draft7 {
+		if !g.profile.prefixItemsTuple {
 			n.payload.ItemsArray = elems
 		} else {
 			n.payload.PrefixItems = elems
@@ -84,9 +84,9 @@ func (g *generator) renderBase(n *node) *Schema {
 // 2020-12 the siblings stay alongside.
 func (g *generator) renderRef(payload *Schema, def *defEntry) *Schema {
 	s := *payload
-	s.Ref = g.draft.refPrefix() + def.name
+	s.Ref = g.profile.refPrefix() + def.name
 
-	if g.draft == Draft7 && schemashape.HasRefSiblings(&s) {
+	if !g.profile.honorRefSiblings && schemashape.HasRefSiblings(&s) {
 		inner := &Schema{Ref: s.Ref}
 		s.Ref = ""
 		s.AllOf = append(s.AllOf, inner)

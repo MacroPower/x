@@ -347,8 +347,9 @@ type validator struct {
 	// shares the slice by reference; it is read-only after Compile.
 	activeRows []*keywordEntry
 
-	draft  Draft
-	vocabs vocab.Set // resolved active vocabularies
+	draft   Draft
+	profile draftProfile // per-draft behavioral policy, resolved once from draft
+	vocabs  vocab.Set    // resolved active vocabularies
 
 	formatsEnabled bool
 	// Whether format assertion was activated by the 2020-12 format-assertion
@@ -395,10 +396,8 @@ func newValidator(ctx context.Context, schema *Schema, opts []ValidateOption) (*
 	}
 
 	// Detect draft from $schema field; a WithDraft override wins.
-	v.draft = detectDraft(schema)
-	if v.draftOverride != nil {
-		v.draft = *v.draftOverride
-	}
+	v.draft = resolveDraft(schema, v.draftOverride)
+	v.profile = v.draft.profile()
 
 	// Resolve active vocabularies. The metaschema resolver reads the compile
 	// context from the ctx field set above, not a threaded parameter.
@@ -481,7 +480,7 @@ func (v *validator) forInstance(ctx context.Context) *validator {
 	rv.visiting = map[visitKey]bool{}
 
 	rv.refSession = v.refReg.NewSession()
-	if rv.draft == Draft2020 {
+	if rv.profile.dynamicRef {
 		rv.refSession.SeedDynamicScope(rv.refSession.SchemaBase(rv.root))
 	}
 
@@ -504,7 +503,7 @@ func (v *validator) forInstance(ctx context.Context) *validator {
 // Draft-07 always gets vocab.All; vocabulary is a 2020-12 concept.
 func (v *validator) resolveVocabularies() error {
 	// Draft-07 has no vocabulary concept.
-	if v.draft != Draft2020 {
+	if !v.profile.vocabularies {
 		v.vocabs = vocab.All()
 
 		return nil
@@ -562,7 +561,7 @@ func (v *validator) resolveFormats() {
 	switch {
 	case v.formatsForce != nil:
 		v.formatsEnabled = *v.formatsForce
-	case v.draft == Draft7:
+	case v.profile.formatAssertsByDefault:
 		v.formatsEnabled = true
 	default:
 		v.formatsEnabled = v.vocabs.FormatAssertion
@@ -769,6 +768,55 @@ func callResolver(ctx context.Context, resolver RefResolver, uri string) (*Schem
 	return s, true, nil
 }
 
+// fetchAndClone is the shared fetch-and-clone skeleton the validator's
+// [validator.remoteFetch] and the inliner's [inliner.fetchDoc] both run: it
+// consults the session's per-run negative cache, calls the resolver through
+// [callResolver], and deep-clones the resolved document so the resolver-owned
+// schema is never mutated by a later walk and the cache holds an independent
+// copy. Every failure path records the outcome in the negative cache, upholding
+// the at-most-once-per-baseURI-in-a-run contract even when many nodes reference
+// the same URI.
+//
+// The two result shapes the callers distinguish are: missed true, a plain
+// not-resolved answer (a resolver miss or a replayed plain miss) that each
+// caller shapes into its own miss behavior; and a non-nil err, already wrapped
+// with [ErrRefResolve] (a resolver-reported failure, a replayed recorded error,
+// or a clone failure). On success cp holds the clone with missed false and a nil
+// error. The caller then vets and registers cp under its own policy.
+func fetchAndClone(
+	ctx context.Context, resolver RefResolver, sess *refresolve.Session, baseURI string,
+) (*Schema, bool, error) {
+	if recorded, seen := sess.RemoteMiss(baseURI); seen {
+		if recorded != nil {
+			return nil, false, fmt.Errorf("%w: %w", ErrRefResolve, recorded)
+		}
+
+		return nil, true, nil
+	}
+
+	schema, ok, err := callResolver(ctx, resolver, baseURI)
+	if err != nil {
+		sess.RecordRemoteMiss(baseURI, err)
+
+		return nil, false, fmt.Errorf("%w: %w", ErrRefResolve, err)
+	}
+
+	if !ok {
+		sess.RecordRemoteMiss(baseURI, nil)
+
+		return nil, true, nil
+	}
+
+	cp, err := cloneSchema(schema)
+	if err != nil {
+		sess.RecordRemoteMiss(baseURI, err)
+
+		return nil, false, fmt.Errorf("%w: %w", ErrRefResolve, err)
+	}
+
+	return cp, false, nil
+}
+
 // remoteFetch returns the [refresolve.Fetch] the resolution core calls when a
 // non-fragment ref's document is not yet registered. It fetches the document
 // through the configured [RefResolver], deep-copies it, registers the copy under
@@ -792,37 +840,13 @@ func (v *validator) remoteFetch(sess *refresolve.Session, cow bool) refresolve.F
 			return nil, nil //nolint:nilnil // A missing resolver is a plain miss, not an error.
 		}
 
-		if recorded, seen := sess.RemoteMiss(baseURI); seen {
-			if recorded != nil {
-				return nil, fmt.Errorf("%w: %w", ErrRefResolve, recorded)
-			}
-
-			return nil, nil //nolint:nilnil // A recorded plain miss stays a plain miss.
-		}
-
-		schema, ok, err := callResolver(v.runContext(), v.refResolver, baseURI)
+		cp, missed, err := fetchAndClone(v.runContext(), v.refResolver, sess, baseURI)
 		if err != nil {
-			sess.RecordRemoteMiss(baseURI, err)
-
-			return nil, fmt.Errorf("%w: %w", ErrRefResolve, err)
+			return nil, err
 		}
 
-		if !ok {
-			sess.RecordRemoteMiss(baseURI, nil)
-
-			return nil, nil //nolint:nilnil // A resolver miss is not an error.
-		}
-
-		// Deep-copy before registering so the resolver-owned schema is never
-		// mutated by the walk and the cache holds an independent copy.
-		cp, err := cloneSchema(schema)
-		if err != nil {
-			// Record the miss like the paths above, so a document that resolves
-			// but fails to deep-copy is not re-fetched on every node referencing
-			// it (the "at most once per baseURI in a run" contract).
-			sess.RecordRemoteMiss(baseURI, err)
-
-			return nil, fmt.Errorf("%w: %w", ErrRefResolve, err)
+		if missed {
+			return nil, nil //nolint:nilnil // A resolver miss is not an error for the validator.
 		}
 
 		if cow {
@@ -855,32 +879,70 @@ func (v *validator) remoteFetch(sess *refresolve.Session, cow bool) refresolve.F
 	}
 }
 
-// checkFetchedDocument runs the structural checks Compile applies to remote
-// documents (type names, non-negative bounds, and under [Draft2020] the
-// Draft-7 items array) over a document fetched during a validation run, giving
-// late-fetched documents parity with compile-time-fetched ones. The base URI
-// prefixes the path so a violation names the offending document exactly as the
-// compile-time pass does. Draft-7 runs legitimately carry array-form items, so
-// that check stays gated on the resolved draft.
-func (v *validator) checkFetchedDocument(s *Schema, baseURI string) error {
-	err := checkTypeNames(s, baseURI+"#", map[*Schema]bool{})
+// documentVetter is the single structural-vetting policy applied to every
+// schema document the compiler and the runtime accept: the root, JSON-pointer
+// fallback targets, and fetched remote documents alike. It runs the type-name
+// check, the non-negative-bounds check, and (only when rejectItemsArray is set,
+// i.e. under a draft where the array form of items is invalid) the items-array
+// check, in that order, so the first violation a document carries is the one
+// reported.
+//
+// The three visited sets guard schema-graph cycles and let one vetter deduplicate
+// across several passes: Compile shares a single vetter over the root, the
+// fallback targets, and the fetched remotes, so a node reached both locally and
+// through a remote URI is checked once and its violation is attributed to the
+// pass that reached it first. A fetch reached only at validation or inline time
+// builds a fresh vetter per document, since each such document is independent.
+type documentVetter struct {
+	typeVisited      map[*Schema]bool
+	boundsVisited    map[*Schema]bool
+	itemsVisited     map[*Schema]bool
+	rejectItemsArray bool
+}
+
+// newDocumentVetter returns a vetter with fresh visited sets. The
+// rejectItemsArray flag comes from the run's [draftProfile]; the type-name and
+// bounds checks are draft-agnostic.
+func newDocumentVetter(rejectItemsArray bool) *documentVetter {
+	return &documentVetter{
+		typeVisited:      map[*Schema]bool{},
+		boundsVisited:    map[*Schema]bool{},
+		itemsVisited:     map[*Schema]bool{},
+		rejectItemsArray: rejectItemsArray,
+	}
+}
+
+// vet applies the structural checks to s, prefixing each check's traversal with
+// pathPrefix so a violation names the offending document exactly. It returns the
+// first violation, or nil.
+func (dv *documentVetter) vet(s *Schema, pathPrefix string) error {
+	err := checkTypeNames(s, pathPrefix, dv.typeVisited)
 	if err != nil {
 		return err
 	}
 
-	err = checkNonNegativeBounds(s, baseURI+"#", map[*Schema]bool{})
+	err = checkNonNegativeBounds(s, pathPrefix, dv.boundsVisited)
 	if err != nil {
 		return err
 	}
 
-	if v.draft == Draft2020 {
-		err = checkItemsArrayDraft2020(s, baseURI+"#", map[*Schema]bool{})
+	if dv.rejectItemsArray {
+		err = checkItemsArrayDraft2020(s, pathPrefix, dv.itemsVisited)
 		if err != nil {
 			return err
 		}
 	}
 
 	return nil
+}
+
+// checkFetchedDocument runs the single [documentVetter] policy over a document
+// fetched during a validation run, giving late-fetched documents parity with
+// compile-time-fetched ones. Each late fetch is independent, so it uses a fresh
+// vetter. The base URI prefixes the path so a violation names the offending
+// document exactly as the compile-time pass does.
+func (v *validator) checkFetchedDocument(s *Schema, baseURI string) error {
+	return newDocumentVetter(v.profile.rejectItemsArray).vet(s, baseURI+"#")
 }
 
 // remoteLoader returns a [jsonschema.Loader] for upstream Schema.Resolve.
@@ -937,6 +999,19 @@ func (v *validator) remoteLoader() jsonschema.Loader {
 func cloneSchema(s *Schema) (*Schema, error) {
 	//nolint:wrapcheck // Clone already wraps with "clone schema:".
 	return schemaclone.Clone(s, schemafield.Children)
+}
+
+// resolveDraft returns the draft a validation or inlining run operates under: a
+// [WithDraft] override when one was given, otherwise the draft detected from the
+// root schema's $schema field. It is the single detect-then-override site the
+// validator and inliner share. Returning the override without reading $schema is
+// behavior-preserving because [detectDraft] is a pure read with no side effect.
+func resolveDraft(s *Schema, override *Draft) Draft {
+	if override != nil {
+		return *override
+	}
+
+	return detectDraft(s)
 }
 
 // detectDraft determines the draft from the root schema's $schema field.
@@ -1008,42 +1083,21 @@ func Compile(ctx context.Context, schema *Schema, opts ...ValidateOption) (*Vali
 		return nil, err
 	}
 
-	// Reject unknown type names up front. Schema.Resolve does not check the
-	// type vocabulary, and a typo'd type otherwise compiles cleanly and then
-	// rejects every instance: a confusing runtime failure instead of a clear
-	// construction error. The visited set is shared with the post-Resolve remote
-	// pass below, so a node reached both locally and through a remote URI is
-	// checked once.
-	typeVisited := map[*Schema]bool{}
+	// Structurally vet the root document up front, before Schema.Resolve.
+	// Schema.Resolve does not check the type vocabulary or enforce the spec's
+	// non-negative-integer bounds, so a typo'd type or a negative bound
+	// otherwise compiles cleanly and then silently mis-validates; the array form
+	// of items has no meaning under a draft that spells tuples with prefixItems,
+	// where the walk would drop it silently and accept every element. One vetter
+	// carries the visited sets across this root pass and the two post-Resolve
+	// passes below (fallback targets, fetched remotes), so a node reached both
+	// locally and through a remote URI is checked once and attributed to the
+	// pass that reached it first.
+	dv := newDocumentVetter(v.profile.rejectItemsArray)
 
-	err = checkTypeNames(schema, "", typeVisited)
+	err = dv.vet(schema, "")
 	if err != nil {
 		return nil, err
-	}
-
-	// Reject a negative length or count bound up front, for the same reason as
-	// the type-name check: Schema.Resolve does not enforce the spec's
-	// non-negative-integer requirement, so a negative bound otherwise compiles
-	// and then silently mis-validates. The visited set is shared with the
-	// post-Resolve remote pass below.
-	boundsVisited := map[*Schema]bool{}
-
-	err = checkNonNegativeBounds(schema, "", boundsVisited)
-	if err != nil {
-		return nil, err
-	}
-
-	// Reject the Draft-7 array form of items under Draft 2020-12, where it has
-	// no meaning and the validation walk would otherwise drop it silently,
-	// accepting every element. Draft-7 spells tuples this way, so the check is
-	// gated on the resolved draft rather than applied unconditionally.
-	itemsVisited := map[*Schema]bool{}
-
-	if v.draft == Draft2020 {
-		err = checkItemsArrayDraft2020(schema, "", itemsVisited)
-		if err != nil {
-			return nil, err
-		}
 	}
 
 	// Precompute derived per-schema state (numeric bounds and compiled
@@ -1081,31 +1135,18 @@ func Compile(ctx context.Context, schema *Schema, opts ...ValidateOption) (*Vali
 	// The resolve-error gate above may have materialized $ref targets through
 	// the JSON-pointer fallback: schemas carried inside unknown keywords or
 	// non-applicator keyword internals, which the typed root pass never reaches
-	// and which never join refReg.URI. The structural checks extend to them
-	// here exactly as the loop below extends them to fetched remotes, so a
-	// fallback target carrying an invalid type name, a negative bound, or a
-	// Draft-7 items array fails compilation instead of silently mis-validating.
-	// Each target's locator names the pointer that materialized it, and the
-	// shared visited sets keep every node checked once. The precompute caches
-	// are deliberately not extended: a validation run re-materializes fallback
-	// targets as fresh objects, so pointer-keyed caches built here could never
-	// be hit.
+	// and which never join refReg.URI. The same vetter extends to them here
+	// exactly as it extends below to fetched remotes, so a fallback target
+	// carrying an invalid type name, a negative bound, or a rejected items array
+	// fails compilation instead of silently mis-validating. Each target's locator
+	// names the pointer that materialized it, and the shared visited sets keep
+	// every node checked once. The precompute caches are deliberately not
+	// extended: a validation run re-materializes fallback targets as fresh
+	// objects, so pointer-keyed caches built here could never be hit.
 	for _, ft := range v.refSession.FallbackTargets() {
-		err = checkTypeNames(ft.Schema, ft.Locator, typeVisited)
+		err = dv.vet(ft.Schema, ft.Locator)
 		if err != nil {
 			return nil, err
-		}
-
-		err = checkNonNegativeBounds(ft.Schema, ft.Locator, boundsVisited)
-		if err != nil {
-			return nil, err
-		}
-
-		if v.draft == Draft2020 {
-			err = checkItemsArrayDraft2020(ft.Schema, ft.Locator, itemsVisited)
-			if err != nil {
-				return nil, err
-			}
 		}
 	}
 
@@ -1113,35 +1154,23 @@ func Compile(ctx context.Context, schema *Schema, opts ...ValidateOption) (*Vali
 	// after the passes above ran over the root subtree. Two things must extend to
 	// them, in key-sorted order so a reported violation locates a stable document:
 	//
-	//   - The structural checks (type names always, the Draft-7 items array under
-	//     Draft 2020-12). The root pass walks typed sub-schemas only and never
-	//     crosses a $ref into a remote, so a remote carrying an invalid type or an
-	//     items array would otherwise compile cleanly and then silently
-	//     mis-validate. The shared visited sets skip the root (also registered
-	//     under its base URI) and any node reached through several URIs, so each is
-	//     checked once; the base URI prefixes the path so a violation names the
-	//     offending remote.
+	//   - The structural vetting. The root pass walks typed sub-schemas only and
+	//     never crosses a $ref into a remote, so a remote carrying an invalid
+	//     type, a negative bound, or a rejected items array would otherwise
+	//     compile cleanly and then silently mis-validate. The vetter's shared
+	//     visited sets skip the root (also registered under its base URI) and any
+	//     node reached through several URIs, so each is checked once; the base URI
+	//     prefixes the path so a violation names the offending remote.
 	//   - The precompute caches (numeric bounds and compiled patterns), so a
 	//     numeric, pattern, const, or enum keyword in a fetched remote hits the
-	//     cache instead of being recomputed on every validation.
+	//     cache instead of being recomputed on every validation. This is not part
+	//     of vetting: it runs only here, keyed on its own precomputeVisited set.
 	for _, uri := range slices.Sorted(maps.Keys(v.refReg.URI)) {
 		s := v.refReg.URI[uri]
 
-		err = checkTypeNames(s, uri+"#", typeVisited)
+		err = dv.vet(s, uri+"#")
 		if err != nil {
 			return nil, err
-		}
-
-		err = checkNonNegativeBounds(s, uri+"#", boundsVisited)
-		if err != nil {
-			return nil, err
-		}
-
-		if v.draft == Draft2020 {
-			err = checkItemsArrayDraft2020(s, uri+"#", itemsVisited)
-			if err != nil {
-				return nil, err
-			}
 		}
 
 		v.precomputeSchema(s, precomputeVisited)
@@ -1611,7 +1640,7 @@ func (v *validator) refsResolveWellFormed(schema *Schema, resolveOpts ResolveOpt
 			return
 		}
 
-		if v.draft == Draft2020 && s.DynamicRef != "" &&
+		if v.profile.dynamicRef && s.DynamicRef != "" &&
 			!v.refTargetWellFormed(v.resolveDynamicRef(s, s.DynamicRef).Target, resolveOpts) {
 			ok = false
 		}
@@ -1658,7 +1687,7 @@ func (v *validator) allRefsResolvable(schema *Schema) bool {
 			ok = false
 		}
 
-		if v.draft == Draft2020 && s.DynamicRef != "" && v.resolveDynamicRef(s, s.DynamicRef).Target == nil {
+		if v.profile.dynamicRef && s.DynamicRef != "" && v.resolveDynamicRef(s, s.DynamicRef).Target == nil {
 			ok = false
 		}
 	})
@@ -1762,7 +1791,7 @@ func (v *validator) validate(
 	// from the current scope top. EnterScope returns nil when the scope is empty
 	// (Draft 7, where it is never seeded) or unchanged, so the defer is
 	// registered only on the rarer boundary crossing, not on every node.
-	if v.draft == Draft2020 {
+	if v.profile.dynamicRef {
 		if leave := v.refSession.EnterScope(v.refSession.SchemaBase(schema)); leave != nil {
 			defer leave()
 		}
@@ -1785,7 +1814,7 @@ func (v *validator) validate(
 	// Draft-07: a $ref with siblings ignores the siblings, so only the $ref row
 	// runs. Under Draft 2020-12 a $ref evaluates alongside its siblings, and a
 	// schema with no $ref runs every active row regardless of draft.
-	onlyRef := v.draft == Draft7 && schema.Ref != ""
+	onlyRef := !v.profile.honorRefSiblings && schema.Ref != ""
 
 	var errs []*ValidationError
 
@@ -2514,12 +2543,12 @@ func evalContains(ctx evalContext) []*ValidationError {
 	validationActive := v.vocabActive(vocabValidation)
 
 	minContains := 1
-	if validationActive && v.draft == Draft2020 && schema.MinContains != nil {
+	if validationActive && v.profile.containsCounts && schema.MinContains != nil {
 		minContains = *schema.MinContains
 	}
 
 	maxContains := -1
-	if validationActive && v.draft == Draft2020 && schema.MaxContains != nil {
+	if validationActive && v.profile.containsCounts && schema.MaxContains != nil {
 		maxContains = *schema.MaxContains
 	}
 
@@ -2528,7 +2557,7 @@ func evalContains(ctx evalContext) []*ValidationError {
 		// the shortfall is a plain contains failure (default minContains=1). A
 		// skipped minContains must not label a default-floor failure.
 		keyword := KeywordContains
-		if validationActive && v.draft == Draft2020 && schema.MinContains != nil {
+		if validationActive && v.profile.containsCounts && schema.MinContains != nil {
 			keyword = KeywordMinContains
 		}
 

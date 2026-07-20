@@ -876,7 +876,9 @@ and treated as passing. A document first fetched during a validation run is
 vetted with the same structural checks `Compile` applies to compile-time-fetched
 documents; a violation fails the referencing ref with `ErrRefResolve` wrapping
 the structural sentinel (`ErrInvalidType`, `ErrNegativeBound`, or
-`ErrItemsArrayUnderDraft2020`) instead of silently mis-validating. Non-local refs absolutize against the enclosing
+`ErrItemsArrayUnderDraft2020`) instead of silently mis-validating. `Inline`
+shares this same vetting policy for the documents it fetches (see
+[Inlining references](#inlining-references)). Non-local refs absolutize against the enclosing
 resource's base URI: its `$id`, or the root base set with `WithBaseURI`.
 That base also registers the root document under its URI, so a ref
 absolutizing back to it resolves in-memory. The same `WithBaseURI` value serves `Inline`,
@@ -1096,6 +1098,15 @@ Failure modes:
   as the validator does).
 - A non-local ref with no resolver configured, or any ref whose target cannot
   be found, returns an error wrapping `ErrRefResolve`.
+- A remote document fetched during inlining is structurally vetted before it is
+  inlined, through the same policy the validator applies to fetched documents
+  (see [Remote references](#remote-references)). A fetched document carrying an
+  invalid type name, a negative bound, or, under a draft that rejects it, the
+  array form of `items` returns an error wrapping `ErrRefResolve` that also wraps
+  the structural sentinel (`ErrInvalidType`, `ErrNegativeBound`, or
+  `ErrItemsArrayUnderDraft2020`), rather than being inlined into a malformed
+  output schema. The fetched document follows the root document's draft, so a
+  Draft-07 array-form `items` remote inlined under a Draft-07 run is left intact.
 
 `WithRefFallback` sets a per-reference failure policy (a `RefFallback`,
 with `RefFallbackFunc` adapting a bare function) consulted when

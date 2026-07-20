@@ -79,6 +79,10 @@ type inliner struct {
 	// ref would recurse without bound; the depth caps it.
 	substituteDepth int
 
+	// The per-draft behavioral policy, resolved once from draft. All-bool, so it
+	// groups with retrievalBase in the struct's trailing small fields.
+	profile draftProfile
+
 	// Resolve refs against each document's retrieval URI, with $id inert
 	// ([WithRetrievalBase]).
 	retrievalBase bool
@@ -367,10 +371,8 @@ func (in *inliner) run(s *Schema) (*Schema, error) {
 	// pristine copies are registered, so no resolution can observe a mutation.
 	// In retrieval-base mode the walk treats $id as inert, so every schema's
 	// base URI stays the document's retrieval URI and $id registers nothing.
-	in.draft = detectDraft(pristine)
-	if in.draftOverride != nil {
-		in.draft = *in.draftOverride
-	}
+	in.draft = resolveDraft(pristine, in.draftOverride)
+	in.profile = in.draft.profile()
 
 	reg := refresolve.NewRegistry(refDeps(), toRefDraft(in.draft), in.retrievalBase)
 	reg.Build(pristine, in.baseURI)
@@ -434,7 +436,7 @@ func (in *inliner) walkPair(working, pristine *Schema, path string) error {
 	// $dynamicRef, or both.
 	var copies []*Schema
 
-	if in.draft == Draft2020 && pristine.DynamicRef != "" {
+	if in.profile.dynamicRef && pristine.DynamicRef != "" {
 		inlineErr := fmt.Errorf("%w: $dynamicRef %q has no static expansion", ErrRefInline, pristine.DynamicRef)
 
 		tc, err := in.substitute(pristine, path, pristine.DynamicRef, inlineErr)
@@ -539,7 +541,7 @@ func (in *inliner) expand(pristine *Schema, path string) (*Schema, bool, error) 
 	// the node from being a bare ref eligible for wholesale replacement.
 	rest.DynamicRef = ""
 
-	replace := in.draft == Draft7 || IsTrueSchema(&rest)
+	replace := !in.profile.honorRefSiblings || IsTrueSchema(&rest)
 
 	return tc, replace, nil
 }
@@ -759,37 +761,35 @@ func (in *inliner) runContext() context.Context {
 // continues past the failure and many nodes reference the same unresolvable
 // URI. Unlike the validator's fetch it returns an error (not a plain miss) on
 // failure, preserving the inliner's fail-on-first-unresolvable-ref behavior.
+//
+// A fetched document is structurally vetted before registration, through the
+// same [documentVetter] policy the validator applies, so a remote carrying an
+// invalid type name, a negative bound, or (under a draft that rejects it) the
+// array form of items fails [Inline] with an error wrapping [ErrRefResolve]
+// rather than being inlined into a malformed output schema. The check is
+// recorded in the negative cache like the other failures, so it too is run at
+// most once per baseURI in a run.
 func (in *inliner) fetchDoc(baseURI string) (*Schema, error) {
 	if in.resolver == nil {
 		return nil, fmt.Errorf("%w: no resolver configured for %q", ErrRefResolve, baseURI)
 	}
 
-	if recorded, seen := in.session.RemoteMiss(baseURI); seen {
-		if recorded != nil {
-			return nil, fmt.Errorf("%w: %w", ErrRefResolve, recorded)
-		}
+	cp, missed, err := fetchAndClone(in.runContext(), in.resolver, in.session, baseURI)
+	if err != nil {
+		return nil, err
+	}
 
+	if missed {
+		// Unlike the validator's fetch, a miss is fatal for the inliner: there
+		// is no fallback answer for an unresolvable non-fragment ref.
 		return nil, fmt.Errorf("%w: cannot resolve %q", ErrRefResolve, baseURI)
 	}
 
-	s, ok, err := callResolver(in.runContext(), in.resolver, baseURI)
-	if err != nil {
-		in.session.RecordRemoteMiss(baseURI, err)
+	vetErr := newDocumentVetter(in.profile.rejectItemsArray).vet(cp, baseURI+"#")
+	if vetErr != nil {
+		in.session.RecordRemoteMiss(baseURI, vetErr)
 
-		return nil, fmt.Errorf("%w: %w", ErrRefResolve, err)
-	}
-
-	if !ok {
-		in.session.RecordRemoteMiss(baseURI, nil)
-
-		return nil, fmt.Errorf("%w: cannot resolve %q", ErrRefResolve, baseURI)
-	}
-
-	cp, err := cloneSchema(s)
-	if err != nil {
-		in.session.RecordRemoteMiss(baseURI, err)
-
-		return nil, fmt.Errorf("%w: %w", ErrRefResolve, err)
+		return nil, fmt.Errorf("%w: %w", ErrRefResolve, vetErr)
 	}
 
 	in.session.Registry().URI[baseURI] = cp
