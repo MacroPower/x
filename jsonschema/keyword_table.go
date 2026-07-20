@@ -333,9 +333,13 @@ func computeItemsPlan(v *validator, s *Schema) *itemsPlan {
 	} else {
 		// Draft-07: the array form of items spells a tuple, with additionalItems
 		// governing the trailing elements. PrefixItems is not a Draft-07 keyword
-		// and is ignored.
+		// and is ignored. The nil check (not a length check) keeps a
+		// present-but-empty items array (JSON "items": []) in the tuple branch:
+		// additionalItems then applies from index zero, rather than being
+		// silently dropped by falling through to the single-schema case, whose
+		// Items is nil when ItemsArray absorbed the keyword.
 		switch {
-		case len(s.ItemsArray) > 0:
+		case s.ItemsArray != nil:
 			p.tuple = s.ItemsArray
 			p.tupleLabel = KeywordItems
 
