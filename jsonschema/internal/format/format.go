@@ -337,14 +337,20 @@ func validateEmailLocal(s string) error {
 	}
 
 	if s[0] == '"' {
-		return validateQuotedLocal(s)
+		return validateQuotedLocal(s, false)
 	}
 
 	return validateDotAtomLocal(s)
 }
 
-// validateQuotedLocal validates a quoted-string local part.
-func validateQuotedLocal(s string) error {
+// validateQuotedLocal validates a quoted-string local part per RFC 5321:
+// qtextSMTP (%d32-33 / %d35-91 / %d93-126) runs interleaved with
+// quoted-pairSMTP (%d92 %d32-126). The allowUnicode flag additionally admits
+// well-formed non-ASCII UTF-8 runes in the unescaped text, the RFC 6531
+// widening for idn-email; RFC 6531 extends only qtextSMTP, not
+// quoted-pairSMTP, so the escaped character must be printable ASCII for both
+// formats.
+func validateQuotedLocal(s string, allowUnicode bool) error {
 	if len(s) < 2 || s[len(s)-1] != '"' {
 		return errors.New("invalid email: malformed quoted local part")
 	}
@@ -354,15 +360,36 @@ func validateQuotedLocal(s string) error {
 		return errors.New("invalid email: empty quoted local part")
 	}
 
-	for i := 0; i < len(inner); i++ {
+	for i := 0; i < len(inner); {
 		c := inner[i]
-		if c == '\\' {
-			i++ // skip the escaped character
-			continue
-		}
+		switch {
+		case c == '\\':
+			// Quoted-pairSMTP = %d92 %d32-126. A backslash as the final
+			// interior byte would have escaped the closing quote and cannot
+			// reach here via splitEmail, but reject it defensively.
+			if i+1 >= len(inner) || inner[i+1] < 0x20 || inner[i+1] > 0x7E {
+				return errors.New("invalid email: invalid quoted-pair in local part")
+			}
 
-		if c < 0x20 || c == 0x7F {
-			return errors.New("invalid email: control character in local part")
+			i += 2
+
+		case c >= 0x20 && c <= 0x7E && c != '"':
+			// QtextSMTP: printable ASCII except '"'; '\\' is the case above.
+			i++
+
+		case c >= utf8.RuneSelf && allowUnicode:
+			// RFC 6531 widens qtextSMTP with UTF8-non-ascii, which must be a
+			// well-formed sequence; an ill-formed byte decodes to
+			// (utf8.RuneError, 1) and is rejected.
+			r, size := utf8.DecodeRuneInString(inner[i:])
+			if r == utf8.RuneError && size == 1 {
+				return errors.New("invalid email: malformed UTF-8 in local part")
+			}
+
+			i += size
+
+		default:
+			return errors.New("invalid email: invalid character in quoted local part")
 		}
 	}
 
@@ -1365,10 +1392,10 @@ func validateIDNEmail(s string) error {
 // validateIDNEmailLocal validates the local part of an IDN email address
 // (RFC 6531). Non-ASCII characters are permitted, but the part must be at most
 // 64 octets and, unless quoted, must form a dot-atom of IDN atext runes. The
-// quoted form reuses validateQuotedLocal, whose escape-aware scan rejects
-// control characters, bare interior quotes, and an unterminated string; that
-// scan already admits non-ASCII UTF-8 (its bytes are all >= 0x80, above the
-// rejected control range), which is the RFC 6531 widening over RFC 5321.
+// quoted form reuses validateQuotedLocal with its Unicode widening enabled:
+// the escape-aware scan rejects control characters, bare interior quotes, and
+// an unterminated string, and additionally admits well-formed non-ASCII UTF-8
+// in the unescaped text, which is the RFC 6531 widening over RFC 5321.
 func validateIDNEmailLocal(s string) error {
 	if s == "" {
 		return errors.New("invalid IDN email: empty local part")
@@ -1379,7 +1406,7 @@ func validateIDNEmailLocal(s string) error {
 	}
 
 	if s[0] == '"' {
-		return validateQuotedLocal(s)
+		return validateQuotedLocal(s, true)
 	}
 
 	return validateDotAtom(s, isIDNAtext, dotAtomErrors{
