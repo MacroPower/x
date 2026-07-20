@@ -323,8 +323,17 @@ func applyRequiredConstraint(s *jsonschema.Schema, baseType reflect.Type) error 
 		// actively wrong for json.RawMessage, whose unconstrained schema admits
 		// any JSON value: minItems: 1 there rejects the valid empty array even
 		// though go-playground's required accepts a non-nil RawMessage holding
-		// "[]". Only the parent's required entry applies.
+		// "[]". A []byte marshals to a base64 string, so the non-empty floor
+		// the package applies to required-on-collections lands on minLength,
+		// where it constrains the serialized empty value "". A byte-slice type
+		// whose schema is not a string (json.RawMessage's unconstrained
+		// schema) has no faithful non-zero constraint, so only the parent's
+		// required entry applies.
 		if isByteSliceField(baseType) {
+			if schemaPermitsString(s) && (s.MinLength == nil || *s.MinLength < 1) {
+				s.MinLength = new(1)
+			}
+
 			return nil
 		}
 

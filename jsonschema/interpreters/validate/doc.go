@@ -25,8 +25,10 @@
 //     fields it also adds a type-specific non-zero constraint: minLength: 1 for
 //     strings, minItems: 1 for slices/arrays, minProperties: 1 for maps,
 //     const: true for bools, and a not forbidding 0 for numbers. A byte slice
-//     ([]byte or json.RawMessage) does not marshal to a JSON array, so it gets
-//     no array size floor, only the required entry. Pointer fields
+//     does not marshal to a JSON array, so it gets no array size floor:
+//     a []byte encodes as a base64 string and gets minLength: 1 on that
+//     string, while a byte-slice type whose schema is not a string
+//     (json.RawMessage) gets only the required entry. Pointer fields
 //     only get the required constraint, not the type-specific non-zero check.
 //     In go-playground/validator, required on a pointer means "must be
 //     non-nil", so the pointed-to value may be zero. The required tag adds the
