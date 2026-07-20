@@ -7,22 +7,24 @@ import (
 	"go.jacobcolvin.com/x/jsonschema"
 )
 
-// applyStringMinConstraint applies min/gte or gt to a string schema by raising
-// its minLength floor.
-func applyStringMinConstraint(s *jsonschema.Schema, value string, exclusive bool) error {
-	return applyMinBound(&s.MinLength, value, exclusive)
+// applyStringMinConstraint applies min/gte or gt to a string field by raising
+// its minLength floor on the canvas, reading the effective floor.
+func applyStringMinConstraint(field jsonschema.FieldContext, value string, exclusive bool) error {
+	return applyMinBound(&field.Schema.MinLength, field.EffectiveMinLength(), value, exclusive)
 }
 
-// applyStringMaxConstraint applies max/lte or lt to a string schema by lowering
-// its maxLength ceiling.
-func applyStringMaxConstraint(s *jsonschema.Schema, value string, exclusive bool) error {
-	return applyMaxBound(&s.MinLength, &s.MaxLength, value, exclusive)
+// applyStringMaxConstraint applies max/lte or lt to a string field by lowering
+// its maxLength ceiling on the canvas, reading the effective bounds.
+func applyStringMaxConstraint(field jsonschema.FieldContext, value string, exclusive bool) error {
+	return applyMaxBound(&field.Schema.MinLength, &field.Schema.MaxLength,
+		field.EffectiveMinLength(), field.EffectiveMaxLength(), value, exclusive)
 }
 
-// applyStringLenConstraint applies len=N to a string schema by pinning minLength
-// and maxLength to the intersected bound.
-func applyStringLenConstraint(s *jsonschema.Schema, value string) error {
-	return applyLenBound(&s.MinLength, &s.MaxLength, value)
+// applyStringLenConstraint applies len=N to a string field by pinning minLength
+// and maxLength on the canvas to the intersected bound.
+func applyStringLenConstraint(field jsonschema.FieldContext, value string) error {
+	return applyLenBound(&field.Schema.MinLength, &field.Schema.MaxLength,
+		field.EffectiveMinLength(), field.EffectiveMaxLength(), value)
 }
 
 // applyStringOneOf applies oneof=a b c to a string schema. Single-quoted runs

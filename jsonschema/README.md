@@ -551,18 +551,23 @@ type TagInterpreter interface {
 }
 ```
 
-Interpreters receive three things and modify the schema in place. The first is
-the Generate call's context, like the other generation-time hooks; an
-interpreter that performs no cancellable work ignores it. The second is a `Tag`
-carrying the struct tag key and value the call runs under. The third is a
-`FieldContext`, which holds the field's schema (the bare value schema, with
-the null encoding for a nil-able field applied afterward, so a `const` or
-`enum` an interpreter sets lands on the value and keeps null valid), parent
-schema, JSON name, and Go type; the declaring struct type, which for a
-promoted field is the embedded
-type; the full `reflect.StructField` for reading sibling struct tags such as the
-`json` tag's options; and the target `Draft` for emitting draft-appropriate
-keywords. Each interpreter is registered under the struct tag key it reads
+Interpreters receive three things and declare facts on the field's authored
+canvas. The first is the Generate call's context, like the other generation-time
+hooks; an interpreter that performs no cancellable work ignores it. The second is
+a `Tag` carrying the struct tag key and value the call runs under. The third is a
+`FieldContext`, whose `Schema` is the authored-facts canvas an interpreter writes
+to (value-scoped facts like `const` and `enum`, annotations, and bounds it
+tightens by reading the effective merged value through the field's `Effective`
+accessors) and whose read-only `Base` is the type-derived schema, for dispatching
+on the reflected shape. Generation composes the canvas with `Base` and applies
+the null encoding for a nil-able field, so a `const` or `enum` an interpreter
+declares lands on the value branch and keeps null valid. The context also holds
+the parent schema, JSON name, and Go type; the declaring struct type, which for a
+promoted field is the embedded type; the full `reflect.StructField` for reading
+sibling struct tags such as the `json` tag's options; and the target `Draft` for
+emitting draft-appropriate keywords. To constrain the elements of a sequence or
+map field, an interpreter walks the element contexts `FieldContext.ElementContexts`
+returns. Each interpreter is registered under the struct tag key it reads
 (following `net/http.Handle`, so one implementation can serve several keys);
 multiple interpreters can be registered and run in order, after the `jsonschema`
 tag. `TagInterpreterFunc` adapts a bare function, so a one-off interpreter needs

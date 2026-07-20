@@ -33,15 +33,19 @@ const (
 // pointers, so field and element hooks navigate and mutate the shared bare
 // leaves in place during build.
 type node struct {
-	payload *Schema   // bare payload; sub-schema fields hold child payloads (shared)
+	payload *Schema   // bare type-derived payload; sub-schema fields hold child payloads (shared)
 	def     *defEntry // non-nil iff kindRef
 	items   *node     // slice element / map value
-	// The snapshot is a shallow copy of payload taken before any field or element
-	// hook runs, set only on a nullable field or element (the render split's only
-	// reader). It captures the type-derived keywords, so render restores a value a
-	// hook overwrote and tells an authored keyword (wrapper sibling) from a
-	// type-derived one (value branch).
-	snapshot *Schema
+	// The authored canvas carries the field-level facts that field and element
+	// hooks (the jsonschema tag, the comment provider, tag interpreters) declare:
+	// annotations, value-scoped const/enum, and numeric/string/array bounds. It is
+	// allocated for every field and element node and stays separate from payload,
+	// so which schema a keyword lives in is its provenance: reconcileField composes
+	// the final schema from payload (type-derived) plus authored (field-level). For
+	// a composite field or element its sub-schema fields hold the child nodes'
+	// authored canvases, the same pointers, so the tag path navigates element
+	// canvases the way it navigates payloads.
+	authored *Schema
 
 	// Base is the non-null base type of a nilable container (array/object/string
 	// for a slice, map, or ",string" pointer). It is empty for every other node;
@@ -56,8 +60,15 @@ type node struct {
 	// Nullable is the single deferred null decision; base selects the encoding
 	// render applies when it is set.
 	nullable      bool
-	isField       bool // gates the render-time nullable-field bound clearing
+	isField       bool // gates the reconcile-time nullable-field bound clearing
 	boundAuthored bool // a jsonschema-tag numeric bound was authored on the field
+	// The dropBounds flag records that a tag interpreter pinned an element's value
+	// with a const or enum that subsumes its type-derived numeric bounds, so
+	// reconcile drops them. It is the element counterpart of the field's
+	// boundAuthored rule: the jsonschema enum-on-elements path leaves it unset
+	// (keeping the type bounds), while an interpreter that pins an element (via
+	// FieldContext.PinElementValue) sets it.
+	dropBounds bool
 }
 
 // nilableContainer reports whether the node is a slice, map, or ",string"
@@ -111,18 +122,57 @@ func (g *generator) newDefEntry(t reflect.Type) *defEntry {
 	return e
 }
 
-// snapshotNode records a shallow copy of n's bare payload, capturing its
-// type-derived keywords before any field or element hook mutates it. Only a
-// nullable node is ever split, so a non-nullable node needs no snapshot and
-// skips the copy. Render reads the snapshot to restore an overwritten type value
-// and to tell an authored keyword (wrapper sibling) from a type one.
-func snapshotNode(n *node) {
-	if !n.nullable || n.snapshot != nil {
+// allocCanvasTree allocates the authored canvas for a field node and every
+// sequence or map element beneath it, mirroring payload's sub-schema structure
+// so a composite field's canvas wires each element's canvas into its Items,
+// prefixItems (or the Draft-07 items-array), or additionalProperties slot. The
+// tag path then navigates element canvases the same way it navigates payloads,
+// while reconcileField reads each node's own canvas for its field-level facts.
+// It recurses only into elements (items and prefix), not struct properties or
+// embeds, which are separate field nodes that receive their own canvases when
+// their struct is built. A node whose canvas is already allocated is left alone.
+func allocCanvasTree(n *node, draft Draft) {
+	if n == nil || n.authored != nil {
 		return
 	}
 
-	s := *n.payload
-	n.snapshot = &s
+	a := &Schema{}
+
+	switch n.kind {
+	case kindList:
+		if n.items != nil {
+			allocCanvasTree(n.items, draft)
+
+			a.Items = n.items.authored
+		}
+
+	case kindMap:
+		if n.items != nil {
+			allocCanvasTree(n.items, draft)
+
+			a.AdditionalProperties = n.items.authored
+		}
+
+	case kindTuple:
+		elems := make([]*Schema, len(n.prefix))
+		for i, c := range n.prefix {
+			allocCanvasTree(c, draft)
+
+			elems[i] = c.authored
+		}
+
+		if draft == Draft7 {
+			a.ItemsArray = elems
+		} else {
+			a.PrefixItems = elems
+		}
+
+	case kindValue, kindObject, kindRef:
+		// A leaf value, a struct (its properties are separate field nodes), or a
+		// $ref carries no element canvas of its own.
+	}
+
+	n.authored = a
 }
 
 // refNode builds a kindRef node linking to e and carrying nullable. Its payload

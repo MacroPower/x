@@ -70,37 +70,13 @@ func NullableInnerSchema(s *jsonschema.Schema) *jsonschema.Schema {
 	}
 }
 
-// ItemSchemas returns the per-element schemas of a generated slice or fixed
-// array field schema: Items for slices, prefixItems (Draft 2020-12) or the
-// items-as-array form (Draft-07) for fixed arrays. A nullable pointer field
-// wraps the value schema in anyOf[value, null]; the lookup follows that wrapper
-// first. A []byte field (a base64 string) has no element schema and yields nil.
-func ItemSchemas(s *jsonschema.Schema) []*jsonschema.Schema {
-	if inner := NullableInnerSchema(s); inner != nil {
-		s = inner
-	}
-
-	// Per-position element schemas win over a bare items schema: under Draft
-	// 2020-12 a tuple sets prefixItems for the elements and items only as the
-	// additional-trailing-element constraint, so returning items there would
-	// drop the real element schemas. Generator output sets exactly one of these
-	// fields, so the order is a no-op today and a guard against that shape.
-	switch {
-	case len(s.PrefixItems) > 0:
-		return s.PrefixItems
-	case len(s.ItemsArray) > 0:
-		return s.ItemsArray
-	case s.Items != nil:
-		return []*jsonschema.Schema{s.Items}
-	default:
-		return nil
-	}
-}
-
 // NullableTypeListBase reports whether s is a two-element type list pairing
 // "null" with one other, non-null type, returning the non-null type. A
 // degenerate ["null", "null"] list is not a nullable base, so it returns false
 // rather than fabricating a null value branch.
+//
+// Staged for removal in the type-level phase: it survives only as a helper of
+// [RelocateConstEnumToValueBranch], which the field-level path does not use.
 func NullableTypeListBase(s *jsonschema.Schema) (string, bool) {
 	if len(s.Types) != 2 {
 		return "", false
@@ -119,6 +95,9 @@ func NullableTypeListBase(s *jsonschema.Schema) (string, bool) {
 // MoveConstEnum transfers any Const and Enum set on src onto dst, clearing them
 // on src. Each keyword moves only when set, so a nil keyword never clobbers a
 // dst keyword.
+//
+// Staged for removal in the type-level phase: it survives only as a helper of
+// [RelocateConstEnumToValueBranch], which the field-level path does not use.
 func MoveConstEnum(src, dst *jsonschema.Schema) {
 	if src.Const != nil {
 		dst.Const, src.Const = src.Const, nil
@@ -149,6 +128,13 @@ func MoveConstEnum(src, dst *jsonschema.Schema) {
 //
 // When s is not a nullable shape, or carries neither Const nor Enum, s is
 // returned unchanged.
+//
+// Staged for removal in the type-level phase. Field-level facts land on a
+// separate authored canvas that reconcile composes onto the value branch by
+// construction, so the generator-built path never reshapes here. The one
+// remaining caller is the legacy seam that places a field-level const/enum on a
+// not-yet-migrated provider/override/extender wrapper at the field's type; it
+// disappears once type-level hooks carry their nullability stance explicitly.
 func RelocateConstEnumToValueBranch(s *jsonschema.Schema) *jsonschema.Schema {
 	if s.Const == nil && s.Enum == nil {
 		return s

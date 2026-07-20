@@ -8,12 +8,13 @@ import (
 // render produces the final schema for a node: its base shape with the null
 // encoding applied. It is the only place null wrapping, $ref strings, dedup,
 // and the Draft-7 sibling wrap are decided, all from the complete graph. A
-// nullable position that field or element processing may have mutated (it
-// carries a snapshot) takes the split path, which owns its wrapper/value
-// keyword placement (and the value branch's own Draft-7 ref wrap).
+// field or element node (the only nodes carrying an authored canvas) routes to
+// [generator.reconcileField], which composes the type-derived payload with the
+// field-level facts and owns its wrapper/value keyword placement; every other
+// node applies the null encoding to its bare base directly.
 func (g *generator) render(n *node) *Schema {
-	if n.nullable && n.snapshot != nil {
-		return g.renderNullableSplit(n)
+	if n.authored != nil {
+		return g.reconcileField(n)
 	}
 
 	return g.applyNull(n, g.renderBase(n))
@@ -110,11 +111,11 @@ func (g *generator) renderDef(e *defEntry) {
 }
 
 // applyNull applies a node's deferred null decision to its rendered base for
-// every node that did not take the split path (all non-nullable nodes, plus
-// nullable nodes without a snapshot). It is the single site that chooses the
-// null encoding and performs the null-admission dedup for the inline and $ref
-// paths. A nullable node carrying a snapshot never reaches here; render routes
-// it to renderNullableSplit.
+// every node that has no authored canvas: the root, definition bodies, embed
+// branches, and type-level provider/override payloads. It chooses the null
+// encoding and performs the null-admission dedup for the inline and $ref paths.
+// A field or element node never reaches here; render routes it to
+// [generator.reconcileField].
 func (g *generator) applyNull(n *node, base *Schema) *Schema {
 	g.relocateAuthoredConstEnum(n, base)
 
@@ -163,61 +164,19 @@ func (g *generator) clearFieldBounds(n *node, value *Schema) {
 	}
 }
 
-// renderNullableSplit encodes a nullable position that carries a snapshot (a
-// struct field, or a slice/map/array element), splitting its keywords into the
-// anyOf value branch (type-derived keywords plus const/enum) and the wrapper
-// siblings (each authored non-const/enum keyword). A plain ["null", base]
-// container with no const/enum needs no split: its authored keywords merge onto
-// the type list.
-func (g *generator) renderNullableSplit(n *node) *Schema {
-	// A reference field splits before the Draft-7 ref wrap: annotations move to
-	// the wrapper, const/enum stay with the $ref on the value branch.
-	if n.kind == kindRef {
-		return g.renderNullableRefField(n)
-	}
-
-	base := g.renderBase(n)
-	g.relocateAuthoredConstEnum(n, base)
-
-	// A nilable container is always encoded as a type list (or flipped to anyOf
-	// by a const/enum below); its bare payload has no type yet, so the AdmitsNull
-	// dedup, which treats a typeless payload as null-admitting, must not run
-	// first.
-	hasConstEnum := base.Const != nil || base.Enum != nil
-	if n.nilableContainer() && !hasConstEnum {
-		base.Types = []string{typename.Null, n.base}
-
-		return base
-	}
-
-	if !n.nilableContainer() && schemashape.AdmitsNull(base) {
-		return base
-	}
-
-	wrapper := g.splitFieldKeywords(base, n.snapshot)
-
-	// A const (or unauthored enum) pins the value: drop the type-derived bounds
-	// it subsumes from the value branch, and any authored bound the split moved
-	// to the wrapper, which would otherwise reject a const outside it.
-	if g.pinsValue(n, base) {
-		schemashape.ClearNumericBounds(base)
-		schemashape.ClearNumericBounds(wrapper)
-	}
-
-	if n.nilableContainer() {
-		base.Type = n.base
-	}
-
-	wrapper.AnyOf = []*Schema{base, {Type: typename.Null}}
-
-	return wrapper
-}
-
-// pinsValue reports whether a field's const or unauthored enum on the value
-// branch subsumes the numeric bounds, so they are dropped. Element positions
-// never pin here: their interpreter already cleared or kept the bounds.
+// pinsValue reports whether a pinned value subsumes the numeric bounds, so they
+// are dropped. A struct field pins when its value branch carries a const, or an
+// enum the jsonschema tag did not narrow with its own bound (boundAuthored). An
+// element pins when a tag interpreter marked it via [FieldContext.PinElementValue]
+// (the dropBounds signal), which the jsonschema enum-on-elements path leaves
+// unset so the element keeps its type bounds. Every other node (type-level,
+// root, def body) is neither a field nor an element and never pins here.
 func (g *generator) pinsValue(n *node, value *Schema) bool {
-	return n.isField && (value.Const != nil || (value.Enum != nil && !n.boundAuthored))
+	if n.isField {
+		return value.Const != nil || (value.Enum != nil && !n.boundAuthored)
+	}
+
+	return n.dropBounds
 }
 
 // relocateAuthoredConstEnum moves a const/enum stamped beside a hook-authored
@@ -243,67 +202,6 @@ func (g *generator) relocateAuthoredConstEnum(n *node, s *Schema) {
 		schemashape.ClearNumericBounds(target)
 		schemashape.ClearNumericBounds(s)
 	}
-}
-
-// renderNullableRefField encodes a nullable $ref field. When the referenced def
-// admits null the ref carries every keyword and no null branch is added;
-// otherwise annotations move to the wrapper while const/enum ride the $ref on
-// the value branch, which takes its own Draft-7 sibling wrap.
-func (g *generator) renderNullableRefField(n *node) *Schema {
-	g.renderDef(n.def)
-
-	if schemashape.AdmitsNull(n.def.rendered) {
-		s := g.renderRef(n.payload, n.def)
-		g.clearFieldBounds(n, s)
-
-		return s
-	}
-
-	valuePayload := *n.payload
-	wrapper := g.splitFieldKeywords(&valuePayload, n.snapshot)
-
-	// A pinned const/enum subsumes the numeric bounds on both sides of the
-	// split, exactly as in renderNullableSplit: a bound the split moved to the
-	// wrapper would reject a const outside it.
-	if g.pinsValue(n, &valuePayload) {
-		schemashape.ClearNumericBounds(&valuePayload)
-		schemashape.ClearNumericBounds(wrapper)
-	}
-
-	value := g.renderRef(&valuePayload, n.def)
-	wrapper.AnyOf = []*Schema{value, {Type: typename.Null}}
-
-	return wrapper
-}
-
-// splitFieldKeywords moves each authored non-const/enum keyword off value onto a
-// fresh wrapper at its mutated value, restoring value's type-derived value from
-// the snapshot. It returns the wrapper; const/enum and structural children are
-// left on value untouched. A nil snapshot (a node with no split) moves nothing.
-func (g *generator) splitFieldKeywords(value, snapshot *Schema) *Schema {
-	wrapper := &Schema{}
-	if snapshot == nil {
-		return wrapper
-	}
-
-	for _, kw := range movableKeywords {
-		if !kw.differs(snapshot, value) {
-			continue
-		}
-
-		// A keyword the value cleared relative to the snapshot (an element
-		// interpreter dropping a bound its const/enum pinned) is a deliberate
-		// removal, not an authored sibling: leave it cleared rather than moving
-		// it out and restoring the type value.
-		if !kw.differs(emptySchema, value) {
-			continue
-		}
-
-		kw.assign(value, wrapper)  // wrapper gets the mutated value
-		kw.assign(snapshot, value) // value branch restores the type value
-	}
-
-	return wrapper
 }
 
 // maybeInlineRoot inlines a root $ref whose def is reached from nowhere else,
@@ -354,140 +252,4 @@ func (g *generator) referencedElsewhere(exclude *node, def *defEntry) bool {
 	})
 
 	return found
-}
-
-// movableKeyword is one field-authorable keyword the nullable split can move
-// onto the anyOf wrapper: differs reports whether it changed between two
-// schemas (against the snapshot it marks the keyword authored; against
-// emptySchema it marks it set), and assign copies it from src onto dst,
-// overwriting dst's value (which clears it when src's is the zero value). Each
-// keyword defines both closures in one table entry, so a keyword cannot be
-// movable without also being comparable and assignable.
-type movableKeyword struct {
-	differs func(snap, cur *Schema) bool
-	assign  func(src, dst *Schema)
-}
-
-// valueKeyword builds a movableKeyword over a directly comparable field
-// (strings, bools, and the pointer-identity Not). The differs comparison is by
-// value deliberately: a hook that re-sets a keyword to the type's own value is
-// reported as unchanged, dropping a redundant wrapper sibling that carries no
-// meaning either way.
-func valueKeyword[T comparable](get func(*Schema) T, set func(*Schema, T)) movableKeyword {
-	return movableKeyword{
-		differs: func(snap, cur *Schema) bool { return get(snap) != get(cur) },
-		assign:  func(src, dst *Schema) { set(dst, get(src)) },
-	}
-}
-
-// pointerKeyword builds a movableKeyword over a *T scalar field, comparing the
-// pointed-at values (two nils equal, nil versus non-nil unequal) and assigning
-// the pointer.
-func pointerKeyword[T comparable](get func(*Schema) *T, set func(*Schema, *T)) movableKeyword {
-	return movableKeyword{
-		differs: func(snap, cur *Schema) bool { return !ptrEqual(get(snap), get(cur)) },
-		assign:  func(src, dst *Schema) { set(dst, get(src)) },
-	}
-}
-
-// movableKeywords are the field-authorable keywords the nullable split moves
-// onto the anyOf wrapper. Const and enum are handled separately (they stay on
-// the value branch), as are the structural sub-schema fields, which are
-// re-rendered from the value node. AllOf is deliberately absent: a composite's
-// allOf holds its embed branches (structural, appended by renderBase), so it
-// belongs on the value branch, not the wrapper; a field never authors an allOf
-// that must move outward.
-var (
-	movableKeywords = []movableKeyword{
-		valueKeyword(
-			func(s *Schema) string { return s.Description },
-			func(s *Schema, v string) { s.Description = v }),
-		valueKeyword(
-			func(s *Schema) string { return s.Title },
-			func(s *Schema, v string) { s.Title = v }),
-		{
-			differs: func(snap, cur *Schema) bool { return string(snap.Default) != string(cur.Default) },
-			assign:  func(src, dst *Schema) { dst.Default = src.Default },
-		},
-		valueKeyword(
-			func(s *Schema) bool { return s.Deprecated },
-			func(s *Schema, v bool) { s.Deprecated = v }),
-		valueKeyword(
-			func(s *Schema) bool { return s.ReadOnly },
-			func(s *Schema, v bool) { s.ReadOnly = v }),
-		valueKeyword(
-			func(s *Schema) bool { return s.WriteOnly },
-			func(s *Schema, v bool) { s.WriteOnly = v }),
-		{
-			// A field rarely re-authors a type's examples; a length change is a
-			// sufficient authored signal (an equal-length re-set is inert either
-			// way).
-			differs: func(snap, cur *Schema) bool { return len(snap.Examples) != len(cur.Examples) },
-			assign:  func(src, dst *Schema) { dst.Examples = src.Examples },
-		},
-		valueKeyword(
-			func(s *Schema) string { return s.Comment },
-			func(s *Schema, v string) { s.Comment = v }),
-		valueKeyword(
-			func(s *Schema) string { return s.Pattern },
-			func(s *Schema, v string) { s.Pattern = v }),
-		valueKeyword(
-			func(s *Schema) string { return s.Format },
-			func(s *Schema, v string) { s.Format = v }),
-		pointerKeyword(
-			func(s *Schema) *float64 { return s.Minimum },
-			func(s *Schema, v *float64) { s.Minimum = v }),
-		pointerKeyword(
-			func(s *Schema) *float64 { return s.Maximum },
-			func(s *Schema, v *float64) { s.Maximum = v }),
-		pointerKeyword(
-			func(s *Schema) *float64 { return s.ExclusiveMinimum },
-			func(s *Schema, v *float64) { s.ExclusiveMinimum = v }),
-		pointerKeyword(
-			func(s *Schema) *float64 { return s.ExclusiveMaximum },
-			func(s *Schema, v *float64) { s.ExclusiveMaximum = v }),
-		pointerKeyword(
-			func(s *Schema) *float64 { return s.MultipleOf },
-			func(s *Schema, v *float64) { s.MultipleOf = v }),
-		pointerKeyword(
-			func(s *Schema) *int { return s.MinLength },
-			func(s *Schema, v *int) { s.MinLength = v }),
-		pointerKeyword(
-			func(s *Schema) *int { return s.MaxLength },
-			func(s *Schema, v *int) { s.MaxLength = v }),
-		pointerKeyword(
-			func(s *Schema) *int { return s.MinItems },
-			func(s *Schema, v *int) { s.MinItems = v }),
-		pointerKeyword(
-			func(s *Schema) *int { return s.MaxItems },
-			func(s *Schema, v *int) { s.MaxItems = v }),
-		valueKeyword(
-			func(s *Schema) bool { return s.UniqueItems },
-			func(s *Schema, v bool) { s.UniqueItems = v }),
-		pointerKeyword(
-			func(s *Schema) *int { return s.MinProperties },
-			func(s *Schema, v *int) { s.MinProperties = v }),
-		pointerKeyword(
-			func(s *Schema) *int { return s.MaxProperties },
-			func(s *Schema, v *int) { s.MaxProperties = v }),
-		// Not compares by pointer identity: the split only needs to know a hook
-		// swapped the sub-schema in, not whether its contents are equivalent.
-		valueKeyword(
-			func(s *Schema) *Schema { return s.Not },
-			func(s, v *Schema) { s.Not = v }),
-	}
-
-	// EmptySchema is the zero-value schema splitFieldKeywords compares against
-	// to test whether a keyword is set; it is never mutated.
-	emptySchema = &Schema{}
-)
-
-// ptrEqual reports whether two pointers hold equal values, treating two nil
-// pointers as equal and a nil and a non-nil as unequal.
-func ptrEqual[T comparable](a, b *T) bool {
-	if a == nil || b == nil {
-		return a == b
-	}
-
-	return *a == *b
 }

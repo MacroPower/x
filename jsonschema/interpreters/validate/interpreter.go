@@ -31,9 +31,9 @@ func NewInterpreter() *Interpreter {
 	return &Interpreter{}
 }
 
-// Interpret parses the validate tag value from [jsonschema.Tag] and applies
-// constraints to the field schema. Interpretation is pure tag parsing, so
-// the context is unused.
+// Interpret parses the validate tag value from [jsonschema.Tag] and declares
+// constraints on the field's authored canvas. Interpretation is pure tag
+// parsing, so the context is unused.
 func (i *Interpreter) Interpret(_ context.Context, field jsonschema.FieldContext, tag jsonschema.Tag) error {
 	// Split on commas first, exactly as go-playground/validator does; the OR
 	// operator is then handled per comma group inside applyParts. Splitting on
@@ -41,19 +41,13 @@ func (i *Interpreter) Interpret(_ context.Context, field jsonschema.FieldContext
 	// constraint (e.g. "oneof=a|b,required" would drop required).
 	parts := strings.Split(tag.Value, ",")
 
-	return applyParts(parts, field.Schema, field.Parent, field.Name, field.Type, false)
+	return applyParts(parts, field, false)
 }
 
-// applyParts applies a sequence of validator tag parts to a schema.
+// applyParts applies a sequence of validator tag parts to a field.
 //
 //nolint:unparam // isDive is accepted for consistency with the recursive dive pattern.
-func applyParts(
-	parts []string,
-	s, parent *jsonschema.Schema,
-	fieldName string,
-	fieldType reflect.Type,
-	isDive bool,
-) error {
+func applyParts(parts []string, field jsonschema.FieldContext, isDive bool) error {
 	var inKeys bool
 
 	for idx := range parts {
@@ -86,7 +80,7 @@ func applyParts(
 				return fmt.Errorf("validate tag: dive with no subsequent constraints")
 			}
 
-			return applyDive(remaining, s, fieldType)
+			return applyDive(remaining, field)
 		}
 
 		key, value, hasValue := strings.Cut(part, "=")
@@ -134,7 +128,7 @@ func applyParts(
 			continue
 		}
 
-		err := applyValidator(key, value, s, parent, fieldName, fieldType)
+		err := applyValidator(key, value, field)
 		if err != nil {
 			return err
 		}
@@ -143,10 +137,13 @@ func applyParts(
 	return nil
 }
 
-// applyValidator applies a single validator to the schema.
-func applyValidator(key, value string, s, parent *jsonschema.Schema, fieldName string, fieldType reflect.Type) error {
+// applyValidator applies a single validator to the field. Writes land on the
+// canvas ([jsonschema.FieldContext.Schema]); type-state reads consult
+// [jsonschema.FieldContext.Base]; bound tightening reads the effective merged
+// value through the field's Effective accessors.
+func applyValidator(key, value string, field jsonschema.FieldContext) error {
 	// Follow pointers for type checking.
-	baseType := fieldType
+	baseType := field.Type
 
 	isPointer := false
 	for baseType.Kind() == reflect.Pointer {
@@ -162,8 +159,8 @@ func applyValidator(key, value string, s, parent *jsonschema.Schema, fieldName s
 	// value parsed against the real kind and re-serialized to its canonical
 	// form (see [canonicalCoercedScalar]). True bound and length constraints
 	// keep their kind dispatch.
-	if isStringCoercedValue(s, baseType) {
-		handled, err := applyCoercedValidator(key, value, s, baseType)
+	if isStringCoercedValue(field.Base, baseType) {
+		handled, err := applyCoercedValidator(key, value, field.Schema, baseType)
 		if handled || err != nil {
 			return err
 		}
@@ -171,33 +168,33 @@ func applyValidator(key, value string, s, parent *jsonschema.Schema, fieldName s
 
 	switch key {
 	case "required":
-		if parent != nil && fieldName != "" {
-			addRequired(parent, fieldName)
+		if field.Parent != nil && field.Name != "" {
+			addRequired(field.Parent, field.Name)
 		}
 
 		if !isPointer {
-			return applyRequiredConstraint(s, baseType)
+			return applyRequiredConstraint(field, baseType)
 		}
 
 		return nil
 
 	case "min", "gte":
-		return applyMinConstraint(s, value, baseType, false)
+		return applyMinConstraint(field, value, baseType, false)
 	case "max", "lte":
-		return applyMaxConstraint(s, value, baseType, false)
+		return applyMaxConstraint(field, value, baseType, false)
 	case "gt":
-		return applyMinConstraint(s, value, baseType, true)
+		return applyMinConstraint(field, value, baseType, true)
 	case "lt":
-		return applyMaxConstraint(s, value, baseType, true)
+		return applyMaxConstraint(field, value, baseType, true)
 	case "len":
-		return applyLenConstraint(s, value, baseType)
+		return applyLenConstraint(field, value, baseType)
 
 	case "oneof":
-		return applyOneOf(s, value, baseType)
+		return applyOneOf(field, value, baseType)
 	case "eq":
-		return applyEq(s, value, baseType)
+		return applyEq(field, value, baseType)
 	case "ne":
-		return applyNe(s, value, baseType)
+		return applyNe(field, value, baseType)
 
 	case "unique":
 		if isByteSliceField(baseType) {
@@ -209,7 +206,7 @@ func applyValidator(key, value string, s, parent *jsonschema.Schema, fieldName s
 		// go-playground/validator's unique-on-map checks unique values, which
 		// has no object-schema equivalent. So unique on a map is a no-op.
 		if isSequenceKind(baseType) {
-			s.UniqueItems = true
+			field.Schema.UniqueItems = true
 		}
 
 	default:
@@ -221,11 +218,11 @@ func applyValidator(key, value string, s, parent *jsonschema.Schema, fieldName s
 		// []byte field, whose schema is a base64-encoded string). An unrecognized
 		// validator is an error rather than being silently consumed.
 		if recognized := isStringKeywordTag(key); recognized {
-			if !isStringKind(baseType) && !schemaPermitsString(s) {
+			if !isStringKind(baseType) && !schemaPermitsString(field.Base) {
 				return fmt.Errorf("validate tag: %q not supported for type %s", key, baseType.Kind())
 			}
 
-			applyStringKeywordTag(key, s)
+			applyStringKeywordTag(key, field)
 
 			return nil
 		}
@@ -289,23 +286,25 @@ func addRequired(parent *jsonschema.Schema, name string) {
 	parent.Required = append(parent.Required, name)
 }
 
-// applyRequiredConstraint adds type-specific "required" constraints, matching
-// go-playground/validator semantics where "required" means a non-zero value.
-// Validator rules in a single tag compose conjunctively and order-independently,
-// so the floors only ever rise: a stronger min/len bound set by another part of
-// the tag is never lowered, regardless of where "required" appears.
-func applyRequiredConstraint(s *jsonschema.Schema, baseType reflect.Type) error {
+// applyRequiredConstraint declares type-specific "required" constraints on the
+// canvas, matching go-playground/validator semantics where "required" means a
+// non-zero value. Validator rules in a single tag compose conjunctively and
+// order-independently, so the floors only ever rise: a stronger min/len bound
+// set by another part of the tag is never lowered, regardless of where
+// "required" appears. Each floor reads the effective merged bound so it never
+// weakens the type's own bound.
+func applyRequiredConstraint(field jsonschema.FieldContext, baseType reflect.Type) error {
 	// A json:",string" numeric or bool field serializes its value as a quoted
 	// string, so the "non-zero" requirement must forbid the serialized zero
 	// ("0" or "false"), not the raw numeric/bool zero: a numeric not.const is
 	// inert against a string instance (silently dropping the requirement) and a
 	// bool const pins an unsatisfiable bool on a string schema. This mirrors the
 	// eq/ne/oneof reroute that compares against the serialized form.
-	if isStringCoercedValue(s, baseType) {
+	if isStringCoercedValue(field.Base, baseType) {
 		if isBoolKind(baseType) {
-			forbidValue(s, "false")
+			forbidValue(field.Schema, "false")
 		} else {
-			forbidValue(s, "0")
+			forbidValue(field.Schema, "0")
 		}
 
 		return nil
@@ -313,8 +312,8 @@ func applyRequiredConstraint(s *jsonschema.Schema, baseType reflect.Type) error 
 
 	switch {
 	case baseType.Kind() == reflect.String:
-		if s.MinLength == nil || *s.MinLength < 1 {
-			s.MinLength = new(1)
+		if eff := field.EffectiveMinLength(); eff == nil || *eff < 1 {
+			field.Schema.MinLength = new(1)
 		}
 
 	case baseType.Kind() == reflect.Slice, baseType.Kind() == reflect.Array:
@@ -330,20 +329,20 @@ func applyRequiredConstraint(s *jsonschema.Schema, baseType reflect.Type) error 
 		// schema) has no faithful non-zero constraint, so only the parent's
 		// required entry applies.
 		if isByteSliceField(baseType) {
-			if schemaPermitsString(s) && (s.MinLength == nil || *s.MinLength < 1) {
-				s.MinLength = new(1)
+			if eff := field.EffectiveMinLength(); schemaPermitsString(field.Base) && (eff == nil || *eff < 1) {
+				field.Schema.MinLength = new(1)
 			}
 
 			return nil
 		}
 
-		if s.MinItems == nil || *s.MinItems < 1 {
-			s.MinItems = new(1)
+		if eff := field.EffectiveMinItems(); eff == nil || *eff < 1 {
+			field.Schema.MinItems = new(1)
 		}
 
 	case baseType.Kind() == reflect.Map:
-		if s.MinProperties == nil || *s.MinProperties < 1 {
-			s.MinProperties = new(1)
+		if eff := field.EffectiveMinProperties(); eff == nil || *eff < 1 {
+			field.Schema.MinProperties = new(1)
 		}
 
 	case baseType.Kind() == reflect.Bool:
@@ -352,59 +351,59 @@ func applyRequiredConstraint(s *jsonschema.Schema, baseType reflect.Type) error 
 		// change, but eq=false pins it to false, which required can never satisfy.
 		// Overwriting it would silently discard the eq=false rule, so the impossible
 		// combination is reported rather than resolved by precedence.
-		if s.Const != nil {
-			if b, ok := (*s.Const).(bool); ok && !b {
+		if field.Schema.Const != nil {
+			if b, ok := (*field.Schema.Const).(bool); ok && !b {
 				return fmt.Errorf("%w: required on a bool already constrained to false", ErrConflictingConstraints)
 			}
 		}
 
-		s.Const = new(any(true))
+		field.Schema.Const = new(any(true))
 
 	case numkind.IsInteger(baseType.Kind()):
 		// Required on a numeric type means the value must not be zero.
-		forbidValue(s, 0)
+		forbidValue(field.Schema, 0)
 	case numkind.IsFloat(baseType.Kind()):
-		forbidValue(s, 0.0)
+		forbidValue(field.Schema, 0.0)
 	}
 
 	return nil
 }
 
 // applyMinConstraint applies min/gte or gt constraint based on the type.
-func applyMinConstraint(s *jsonschema.Schema, value string, baseType reflect.Type, exclusive bool) error {
+func applyMinConstraint(field jsonschema.FieldContext, value string, baseType reflect.Type, exclusive bool) error {
 	switch {
 	case isStringKind(baseType):
-		return applyStringMinConstraint(s, value, exclusive)
+		return applyStringMinConstraint(field, value, exclusive)
 	case isNumericKind(baseType):
-		return applyNumericMinConstraint(s, value, baseType, exclusive)
+		return applyNumericMinConstraint(field, value, baseType, exclusive)
 	case isCollectionKind(baseType):
-		return applyCollectionMinConstraint(s, value, baseType, exclusive)
+		return applyCollectionMinConstraint(field, value, baseType, exclusive)
 	default:
 		return fmt.Errorf("validate tag: min/gt not supported for type %s", baseType.Kind())
 	}
 }
 
 // applyMaxConstraint applies max/lte or lt constraint based on the type.
-func applyMaxConstraint(s *jsonschema.Schema, value string, baseType reflect.Type, exclusive bool) error {
+func applyMaxConstraint(field jsonschema.FieldContext, value string, baseType reflect.Type, exclusive bool) error {
 	switch {
 	case isStringKind(baseType):
-		return applyStringMaxConstraint(s, value, exclusive)
+		return applyStringMaxConstraint(field, value, exclusive)
 	case isNumericKind(baseType):
-		return applyNumericMaxConstraint(s, value, baseType, exclusive)
+		return applyNumericMaxConstraint(field, value, baseType, exclusive)
 	case isCollectionKind(baseType):
-		return applyCollectionMaxConstraint(s, value, baseType, exclusive)
+		return applyCollectionMaxConstraint(field, value, baseType, exclusive)
 	default:
 		return fmt.Errorf("validate tag: max/lt not supported for type %s", baseType.Kind())
 	}
 }
 
 // applyLenConstraint applies len=N (sets both min and max) based on the type.
-func applyLenConstraint(s *jsonschema.Schema, value string, baseType reflect.Type) error {
+func applyLenConstraint(field jsonschema.FieldContext, value string, baseType reflect.Type) error {
 	switch {
 	case isStringKind(baseType):
-		return applyStringLenConstraint(s, value)
+		return applyStringLenConstraint(field, value)
 	case isCollectionKind(baseType):
-		return applyCollectionLenConstraint(s, value, baseType)
+		return applyCollectionLenConstraint(field, value, baseType)
 	case isNumericKind(baseType):
 		// Len=N on a numeric type means the value must equal N.
 		parsed, err := parseNumericValue(value, baseType)
@@ -412,7 +411,7 @@ func applyLenConstraint(s *jsonschema.Schema, value string, baseType reflect.Typ
 			return fmt.Errorf("validate tag: len: %w", err)
 		}
 
-		return setNumericConst(s, parsed)
+		return setNumericConst(field.Schema, parsed)
 
 	default:
 		return fmt.Errorf("validate tag: len not supported for type %s", baseType.Kind())
@@ -421,129 +420,108 @@ func applyLenConstraint(s *jsonschema.Schema, value string, baseType reflect.Typ
 
 // applyOneOf applies oneof constraint based on the type. On a slice or array
 // the constraint applies to each element (mirroring the jsonschema tag's enum
-// behavior for sequence fields), so it lands on the item schemas parsed
+// behavior for sequence fields), so it lands on the element canvases parsed
 // against the element type. A field whose base type is none of these (for
 // example a struct, [time.Time], or map) cannot carry a string enum without
 // producing an unsatisfiable schema, so it is rejected rather than silently
 // mis-stamped.
-func applyOneOf(s *jsonschema.Schema, value string, baseType reflect.Type) error {
+func applyOneOf(field jsonschema.FieldContext, value string, baseType reflect.Type) error {
 	switch {
 	case isNumericKind(baseType):
-		return applyNumericOneOf(s, value, baseType)
+		return applyNumericOneOf(field.Schema, value, baseType)
 	case isBoolKind(baseType):
-		return applyBoolOneOf(s, value)
+		return applyBoolOneOf(field.Schema, value)
 	case isStringKind(baseType):
-		return applyStringOneOf(s, value)
+		return applyStringOneOf(field.Schema, value)
 	case isSequenceKind(baseType):
-		return applySequenceOneOf(s, value, baseType)
+		return applySequenceOneOf(field, value, baseType)
 	default:
 		return fmt.Errorf("validate tag: oneof not supported for type %s", baseType.Kind())
 	}
 }
 
-// applySequenceOneOf applies oneof on a slice or array field to its item
-// schemas, parsing the values against the element type. The element schemas
-// mirror diveIntoSequence's shapes: Items for slices, prefixItems
-// (Draft 2020-12) or the items-as-array form (Draft-07) for fixed arrays. A
-// []byte field encodes as a single base64 string with no element schema, so
-// oneof on it is rejected rather than silently dropped.
-func applySequenceOneOf(s *jsonschema.Schema, value string, baseType reflect.Type) error {
-	items := schemashape.ItemSchemas(s)
-	if len(items) == 0 {
+// applySequenceOneOf applies oneof on a slice or array field to its element
+// canvases, parsing the values against the element type. A []byte field encodes
+// as a single base64 string with no element schema, so oneof on it is rejected
+// rather than silently dropped.
+func applySequenceOneOf(field jsonschema.FieldContext, value string, baseType reflect.Type) error {
+	elems := field.ElementContexts()
+	if len(elems) == 0 {
 		return fmt.Errorf("validate tag: oneof: %s field has no item schema to constrain", baseType.Kind())
 	}
 
-	elem := baseType.Elem()
-	for elem.Kind() == reflect.Pointer {
-		elem = elem.Elem()
-	}
+	for i := range elems {
+		elem := elems[i]
 
-	for _, item := range items {
-		err := applyOneOf(item, value, elem)
+		et := elem.Type
+		for et.Kind() == reflect.Pointer {
+			et = et.Elem()
+		}
+
+		err := applyOneOf(elem, value, et)
 		if err != nil {
 			return err
 		}
 
-		err = relocateNullableValueConstraint(item)
+		err = finishElement(elem)
 		if err != nil {
 			return err
 		}
-
-		dropElementBoundsForConstEnum(item)
 	}
 
 	return nil
 }
 
-// relocateNullableValueConstraint moves a Const or Enum stamped beside a
-// hook-authored nullable wrapper (anyOf[value, null]) onto its value branch, so
-// the wrapper's permitted null is not rejected. A generator-built element
-// payload is bare -- render applies its null wrapper afterward, landing the
-// const/enum on the value branch by construction -- so only an override- or
-// provider-supplied wrapper shape reshapes here. A different const or an
-// existing enum already on the value branch can never be satisfied together
-// with the tag's and is reported as a conflict rather than silently
-// overwritten.
-func relocateNullableValueConstraint(s *jsonschema.Schema) error {
-	inner := schemashape.NullableInnerSchema(s)
-	if inner == nil {
-		return nil
+// finishElement completes constraining one sequence or map element. It reports a
+// clash between a tag const/enum and a const/enum already on the element type's
+// value schema -- the type-derived base, or the value branch of a legacy
+// provider-supplied nullable wrapper -- since reconcile places the tag const/enum
+// there and a disagreeing one would be silently overwritten. It then marks the
+// element for bound dropping when a const or enum pinned its value, so reconcile
+// drops the type-derived numeric bounds the pinned value subsumes.
+func finishElement(elem jsonschema.FieldContext) error {
+	existing := elem.Base
+	if inner := schemashape.NullableInnerSchema(elem.Base); inner != nil {
+		existing = inner
 	}
 
-	if s.Const != nil {
-		if inner.Const != nil && !numericEqual(*inner.Const, *s.Const) {
+	if existing != nil {
+		if elem.Schema.Const != nil && existing.Const != nil && !numericEqual(*existing.Const, *elem.Schema.Const) {
 			return fmt.Errorf(
 				"%w: eq/len conflicts with the element type's existing const",
 				ErrConflictingConstraints)
 		}
 
-		inner.Const, s.Const = s.Const, nil
-	}
-
-	if s.Enum != nil {
-		if inner.Enum != nil {
+		if elem.Schema.Enum != nil && existing.Enum != nil {
 			return fmt.Errorf(
 				"%w: oneof conflicts with the element type's existing enum constraint",
 				ErrConflictingConstraints)
 		}
+	}
 
-		inner.Enum, s.Enum = s.Enum, nil
+	if elem.Schema.Const != nil || elem.Schema.Enum != nil {
+		elem.PinElementValue()
 	}
 
 	return nil
 }
 
-// dropElementBoundsForConstEnum clears the kind-derived numeric range keywords
-// from a dive or oneof element schema once a const or enum pins its value,
-// mirroring the field-level drop the generator applies. A sized-integer element
-// carries minimum/maximum from its Go type; once eq or oneof fixes the value to
-// a set those bounds are redundant. The interpreter has no per-keyword
-// provenance, so an interpreter-set bound is dropped too. The element payload is
-// bare (render applies any null wrapper afterward, landing the const/enum on the
-// value branch), so only the element itself is cleared; a hook-authored wrapper
-// element has already had its const/enum moved off by
-// relocateNullableValueConstraint, leaving the wrapper's own keywords in place.
-func dropElementBoundsForConstEnum(s *jsonschema.Schema) {
-	if s.Const == nil && s.Enum == nil {
-		return
-	}
-
-	schemashape.ClearNumericBounds(s)
-}
-
 // isStringCoercedValue reports whether the generated schema is a string while
 // the Go kind is numeric or bool, the shape a json:",string" field (or a
 // string-marshaling type) produces. A value-equality constraint then compares
-// against the serialized string, not the underlying numeric or bool value.
-func isStringCoercedValue(s *jsonschema.Schema, baseType reflect.Type) bool {
-	return schemaPermitsString(s) && (isNumericKind(baseType) || isBoolKind(baseType))
+// against the serialized string, not the underlying numeric or bool value. The
+// schema shape is read from the type-derived base, since a coerced field's
+// string type comes from the reflection layer, not from a tag fact.
+func isStringCoercedValue(base *jsonschema.Schema, baseType reflect.Type) bool {
+	return schemaPermitsString(base) && (isNumericKind(baseType) || isBoolKind(baseType))
 }
 
 // applyCoercedValidator handles the validators whose json:",string" coerced
-// form differs from their kind dispatch. It reports whether the validator was
-// fully handled; an unhandled one (for example len or a bound on a coerced
-// bool, or any non-scalar validator) falls through to the main kind dispatch.
-func applyCoercedValidator(key, value string, s *jsonschema.Schema, baseType reflect.Type) (bool, error) {
+// form differs from their kind dispatch, declaring the result on the canvas. It
+// reports whether the validator was fully handled; an unhandled one (for example
+// len or a bound on a coerced bool, or any non-scalar validator) falls through
+// to the main kind dispatch.
+func applyCoercedValidator(key, value string, canvas *jsonschema.Schema, baseType reflect.Type) (bool, error) {
 	switch key {
 	case "eq":
 		canonical, err := canonicalCoercedScalar(value, baseType)
@@ -551,7 +529,7 @@ func applyCoercedValidator(key, value string, s *jsonschema.Schema, baseType ref
 			return true, fmt.Errorf("validate tag: eq: %w", err)
 		}
 
-		return true, applyStringEq(s, canonical)
+		return true, applyStringEq(canvas, canonical)
 
 	case "ne":
 		canonical, err := canonicalCoercedScalar(value, baseType)
@@ -559,12 +537,12 @@ func applyCoercedValidator(key, value string, s *jsonschema.Schema, baseType ref
 			return true, fmt.Errorf("validate tag: ne: %w", err)
 		}
 
-		applyStringNe(s, canonical)
+		applyStringNe(canvas, canonical)
 
 		return true, nil
 
 	case "oneof":
-		return true, applyCoercedOneOf(s, value, baseType)
+		return true, applyCoercedOneOf(canvas, value, baseType)
 
 	case "len":
 		// A len=N on a numeric field means the value equals N (the same
@@ -579,7 +557,7 @@ func applyCoercedValidator(key, value string, s *jsonschema.Schema, baseType ref
 				return true, fmt.Errorf("validate tag: len: %w", err)
 			}
 
-			return true, applyStringEq(s, canonical)
+			return true, applyStringEq(canvas, canonical)
 		}
 
 	case "min", "gte", "max", "lte", "gt", "lt":
@@ -654,7 +632,7 @@ func canonicalCoercedScalar(value string, baseType reflect.Type) (string, error)
 // applyCoercedOneOf applies oneof on a json:",string" coerced field: each
 // space-separated value parses against the real base kind (keeping the range
 // check) and its canonical serialized form becomes the enum member.
-func applyCoercedOneOf(s *jsonschema.Schema, value string, baseType reflect.Type) error {
+func applyCoercedOneOf(canvas *jsonschema.Schema, value string, baseType reflect.Type) error {
 	vals := splitOneOfValues(value)
 	if len(vals) == 0 {
 		return fmt.Errorf("validate tag: oneof requires at least one value")
@@ -670,24 +648,24 @@ func applyCoercedOneOf(s *jsonschema.Schema, value string, baseType reflect.Type
 		enum[i] = canonical
 	}
 
-	return setOneOfEnum(s, enum)
+	return setOneOfEnum(canvas, enum)
 }
 
 // applyEq applies eq constraint based on the type. A non-numeric, non-bool,
 // non-collection, non-string base type (for example a struct or [time.Time])
 // cannot carry a string const without producing an unsatisfiable schema, so it
 // is rejected rather than silently mis-stamped.
-func applyEq(s *jsonschema.Schema, value string, baseType reflect.Type) error {
+func applyEq(field jsonschema.FieldContext, value string, baseType reflect.Type) error {
 	switch {
 	case isNumericKind(baseType):
-		return applyNumericEq(s, value, baseType)
+		return applyNumericEq(field.Schema, value, baseType)
 	case isBoolKind(baseType):
-		return applyBoolEq(s, value)
+		return applyBoolEq(field.Schema, value)
 	case isCollectionKind(baseType):
 		// Eq=N on a collection means the length equals N.
-		return applyCollectionLenConstraint(s, value, baseType)
+		return applyCollectionLenConstraint(field, value, baseType)
 	case isStringKind(baseType):
-		return applyStringEq(s, value)
+		return applyStringEq(field.Schema, value)
 
 	default:
 		return fmt.Errorf("validate tag: eq not supported for type %s", baseType.Kind())
@@ -714,25 +692,25 @@ func parseBool(v string) (bool, error) {
 // it to true) is a conflict the two rules can never both satisfy, so it is
 // reported rather than silently overwritten. This keeps the result independent
 // of tag order.
-func applyBoolEq(s *jsonschema.Schema, value string) error {
+func applyBoolEq(canvas *jsonschema.Schema, value string) error {
 	b, err := parseBool(value)
 	if err != nil {
 		return err
 	}
 
-	if s.Const != nil {
-		if existing, ok := (*s.Const).(bool); ok && existing != b {
+	if canvas.Const != nil {
+		if existing, ok := (*canvas.Const).(bool); ok && existing != b {
 			return fmt.Errorf("%w: eq=%t conflicts with an existing bool constraint", ErrConflictingConstraints, b)
 		}
 	}
 
-	s.Const = new(any(b))
+	canvas.Const = new(any(b))
 
 	return nil
 }
 
 // applyBoolOneOf applies oneof=true false → enum for a bool schema.
-func applyBoolOneOf(s *jsonschema.Schema, value string) error {
+func applyBoolOneOf(canvas *jsonschema.Schema, value string) error {
 	vals := splitOneOfValues(value)
 	if len(vals) == 0 {
 		return fmt.Errorf("validate tag: oneof requires at least one value")
@@ -748,7 +726,7 @@ func applyBoolOneOf(s *jsonschema.Schema, value string) error {
 		enum[i] = b
 	}
 
-	return setOneOfEnum(s, enum)
+	return setOneOfEnum(canvas, enum)
 }
 
 // setOneOfEnum pins the schema's enum to a oneof value list, reporting a
@@ -756,12 +734,12 @@ func applyBoolOneOf(s *jsonschema.Schema, value string) error {
 // jsonschema enum tag) already set. Both oneof and enum fully enumerate the
 // allowed values, so two different enumerations can never both hold; this
 // mirrors the const family (eq) instead of letting whichever rule runs last win.
-func setOneOfEnum(s *jsonschema.Schema, vals []any) error {
-	if s.Enum != nil {
+func setOneOfEnum(canvas *jsonschema.Schema, vals []any) error {
+	if canvas.Enum != nil {
 		return fmt.Errorf("%w: oneof conflicts with an existing enum constraint", ErrConflictingConstraints)
 	}
 
-	s.Enum = vals
+	canvas.Enum = vals
 
 	return nil
 }
@@ -770,16 +748,16 @@ func setOneOfEnum(s *jsonschema.Schema, vals []any) error {
 // bool forbids the boolean value, ne=N on a collection forbids that length, and
 // ne on a string forbids the string. A non-numeric, non-bool, non-collection,
 // non-string base type is rejected rather than silently mis-stamped.
-func applyNe(s *jsonschema.Schema, value string, baseType reflect.Type) error {
+func applyNe(field jsonschema.FieldContext, value string, baseType reflect.Type) error {
 	switch {
 	case isNumericKind(baseType):
-		return applyNumericNe(s, value, baseType)
+		return applyNumericNe(field.Schema, value, baseType)
 	case isBoolKind(baseType):
-		return applyBoolNe(s, value)
+		return applyBoolNe(field.Schema, value)
 	case isCollectionKind(baseType):
-		return applyCollectionNe(s, value, baseType)
+		return applyCollectionNe(field.Schema, value, baseType)
 	case isStringKind(baseType):
-		applyStringNe(s, value)
+		applyStringNe(field.Schema, value)
 
 		return nil
 
@@ -790,13 +768,13 @@ func applyNe(s *jsonschema.Schema, value string, baseType reflect.Type) error {
 
 // applyBoolNe applies ne=true/false → not for a bool schema, forbidding the
 // boolean value rather than a string.
-func applyBoolNe(s *jsonschema.Schema, value string) error {
+func applyBoolNe(canvas *jsonschema.Schema, value string) error {
 	b, err := parseBool(value)
 	if err != nil {
 		return err
 	}
 
-	forbidValue(s, b)
+	forbidValue(canvas, b)
 
 	return nil
 }

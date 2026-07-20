@@ -709,8 +709,6 @@ func (g *generator) schemaForSlice(t reflect.Type, nullable bool) (*node, error)
 		return nil, fmt.Errorf("element type: %w", err)
 	}
 
-	snapshotNode(items)
-
 	return &node{
 		kind:     kindList,
 		payload:  &Schema{Items: items.payload},
@@ -736,8 +734,6 @@ func (g *generator) schemaForArray(t reflect.Type, nullable bool) (*node, error)
 		if err != nil {
 			return nil, fmt.Errorf("element type: %w", err)
 		}
-
-		snapshotNode(item)
 
 		prefix[i] = item
 		elems[i] = item.payload
@@ -773,8 +769,6 @@ func (g *generator) schemaForMap(t reflect.Type, nullable bool) (*node, error) {
 	if err != nil {
 		return nil, fmt.Errorf("map value type: %w", err)
 	}
-
-	snapshotNode(val)
 
 	return &node{
 		kind:     kindMap,
@@ -1346,20 +1340,24 @@ func (g *generator) buildFieldSchema(
 
 	fieldNode.isField = true
 
-	// Snapshot the bare value payload before field processing (only a nullable
-	// field is split, so only it needs one); render reads it to restore
-	// type-derived keyword values a field keyword overwrote.
-	snapshotNode(fieldNode)
+	// Allocate the authored canvas for the field and every sequence/map element
+	// beneath it. Field-level processing (the comment provider, the jsonschema
+	// tag, tag interpreters) declares its facts on the canvas rather than mutating
+	// the type-derived payload, so which schema a keyword lives in is its
+	// provenance and reconcileField composes the two at render.
+	allocCanvasTree(fieldNode, g.draft)
 
 	// 2. Field-level comment.
-	err = g.applyFieldDescription(parentType, fi, fieldNode.payload, parent.payload)
+	err = g.applyFieldDescription(parentType, fi, fieldNode, parent.payload)
 	if err != nil {
 		return nil, err
 	}
 
-	// 3. Schema struct tag.
+	// 3. Schema struct tag. Facts land on the authored canvas; a type= override
+	// restructures the type-derived payload (it replaces the reflected assertion),
+	// so it takes the payload directly.
 	if tag, ok := fi.field.Tag.Lookup("jsonschema"); ok {
-		res, err := tagparse.Apply(tag, tagType, fieldNode.payload)
+		res, err := tagparse.Apply(tag, tagType, fieldNode.authored, fieldNode.payload)
 		if err != nil {
 			// Tagparse carries its own ErrInvalidType sentinel; map it onto the
 			// package's exported ErrInvalidType so errors.Is keeps working.
@@ -1375,12 +1373,13 @@ func (g *generator) buildFieldSchema(
 		// A type= override replaces the field's type wholesale, so the field is
 		// now inline: it is not a reference and not nullable. Rebuild it as a
 		// plain value node over the overridden payload, dropping the def link,
-		// children, and null bits in one place. Reachability drops any def the
-		// detached ref orphaned.
+		// children, and null bits in one place, while carrying the authored canvas
+		// across. Reachability drops any def the detached ref orphaned.
 		if res.TypeOverridden {
 			fieldNode = &node{
 				kind:          kindValue,
 				payload:       fieldNode.payload,
+				authored:      fieldNode.authored,
 				isField:       true,
 				boundAuthored: res.BoundAuthored,
 			}
@@ -1407,26 +1406,32 @@ func (g *generator) buildFieldSchema(
 
 // fieldContext builds the FieldContext passed to tag interpreters and the
 // description provider for one struct field, computing the declaring type once.
+// Schema is the field's authored canvas (where a hook declares its facts) and
+// Base is the type-derived payload (read-only); the accessor exposing element
+// canvases reads the field node's element children.
 func (g *generator) fieldContext(
 	parentType reflect.Type,
 	fi structFieldInfo,
-	fieldSchema, parent *Schema,
+	fieldNode *node,
+	parent *Schema,
 ) FieldContext {
 	return FieldContext{
 		Name:        fi.jsonName,
 		Type:        fi.field.Type,
 		Owner:       reflectkind.DeclaringType(parentType, fi.field),
-		Schema:      fieldSchema,
+		Schema:      fieldNode.authored,
+		Base:        fieldNode.payload,
 		Parent:      parent,
 		StructField: fi.field,
 		Draft:       g.draft,
+		node:        fieldNode,
 	}
 }
 
 // applyFieldInterpreters runs the registered tag interpreters for a field on its
-// bare value payload. It runs after all field payloads are in place so
-// interpreters see the full parent.Properties. Const/enum placement and the
-// Draft-07 $ref wrap are handled by render, from the complete graph.
+// authored canvas. It runs after all field payloads are in place so interpreters
+// see the full parent.Properties. Const/enum placement and the Draft-07 $ref
+// wrap are handled by render, from the complete graph.
 func (g *generator) applyFieldInterpreters(
 	parentType reflect.Type,
 	fi structFieldInfo,
@@ -1434,7 +1439,7 @@ func (g *generator) applyFieldInterpreters(
 ) error {
 	for _, reg := range g.tagInterpreters {
 		if tag, ok := fi.field.Tag.Lookup(reg.key); ok {
-			fc := g.fieldContext(parentType, fi, fieldNode.payload, parent.payload)
+			fc := g.fieldContext(parentType, fi, fieldNode, parent.payload)
 
 			err := reg.interp.Interpret(g.ctx, fc, Tag{Key: reg.key, Value: tag})
 			if err != nil {
@@ -1650,18 +1655,19 @@ func (g *generator) applyTypeDescription(t reflect.Type, s *Schema) error {
 }
 
 // applyFieldDescription sets the description from the comment provider on a
-// field's schema. The provider receives the [FieldContext] tag interpreters
-// get, with the tag pair empty and Owner the type declaring the field (see
+// field's authored canvas (the field description is wrapper-scoped, as reconcile
+// places it). The provider receives the [FieldContext] tag interpreters get,
+// with the tag pair empty and Owner the type declaring the field (see
 // [reflectkind.DeclaringType]); an empty comment leaves the description unset, and a
 // provider error aborts generation.
 func (g *generator) applyFieldDescription(
-	parentType reflect.Type, fi structFieldInfo, fieldSchema, parent *Schema,
+	parentType reflect.Type, fi structFieldInfo, fieldNode *node, parent *Schema,
 ) error {
 	if g.descriptionProvider == nil {
 		return nil
 	}
 
-	fc := g.fieldContext(parentType, fi, fieldSchema, parent)
+	fc := g.fieldContext(parentType, fi, fieldNode, parent)
 
 	comment, err := g.descriptionProvider.FieldDescription(g.ctx, fc)
 	if err != nil {
@@ -1669,7 +1675,7 @@ func (g *generator) applyFieldDescription(
 	}
 
 	if comment != "" {
-		fieldSchema.Description = comment
+		fieldNode.authored.Description = comment
 	}
 
 	return nil

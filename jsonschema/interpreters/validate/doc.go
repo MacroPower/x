@@ -6,6 +6,15 @@
 // for ecosystem consistency, so users who already annotate structs with
 // validate tags get schema generation for free.
 //
+// The interpreter declares each constraint as a fact on the field's authored
+// canvas ([jsonschema.FieldContext.Schema]) rather than mutating a merged
+// schema, and generation composes those facts with the field's type-derived
+// schema. On a nil-able (pointer) field a value constraint such as eq or oneof
+// therefore lands on the value branch of the null encoding, so the permitted
+// null stays valid, while a forbidden value (ne) and length or numeric bounds
+// move to the null wrapper. Element constraints (dive, and oneof on a sequence)
+// reach the element schemas through the field's element contexts.
+//
 // # Usage
 //
 // Register the interpreter when generating a schema:

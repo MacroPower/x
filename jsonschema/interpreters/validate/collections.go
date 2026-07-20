@@ -6,19 +6,23 @@ import (
 	"reflect"
 
 	"go.jacobcolvin.com/x/jsonschema"
-	"go.jacobcolvin.com/x/jsonschema/internal/schemashape"
 )
 
-// collectionBoundFields returns the schema's size-bound field pointers for the
-// collection's base type: the min/maxProperties pair for a map, otherwise the
-// min/maxItems pair for a slice or array. The first result is the floor field,
-// the second the ceiling field.
-func collectionBoundFields(s *jsonschema.Schema, baseType reflect.Type) (**int, **int) {
+// collectionBounds returns the collection's size-bound canvas write targets (the
+// floor and ceiling field pointers) and their effective floor and ceiling
+// values, in that order: the min/maxProperties pair for a map, otherwise the
+// min/maxItems pair for a slice or array. The effective values coalesce the
+// canvas with the type-derived base so a tag bound never weakens the type's own.
+func collectionBounds(
+	field jsonschema.FieldContext, baseType reflect.Type,
+) (**int, **int, *int, *int) {
 	if isMapKind(baseType) {
-		return &s.MinProperties, &s.MaxProperties
+		return &field.Schema.MinProperties, &field.Schema.MaxProperties,
+			field.EffectiveMinProperties(), field.EffectiveMaxProperties()
 	}
 
-	return &s.MinItems, &s.MaxItems
+	return &field.Schema.MinItems, &field.Schema.MaxItems,
+		field.EffectiveMinItems(), field.EffectiveMaxItems()
 }
 
 // errByteSliceLengthConstraint reports a length, size, or uniqueness validator
@@ -37,40 +41,50 @@ func isByteSliceField(baseType reflect.Type) bool {
 	return baseType.Kind() == reflect.Slice && baseType.Elem().Kind() == reflect.Uint8
 }
 
-// applyCollectionMinConstraint applies min/gte or gt to a collection schema by
-// raising its size floor (minItems or minProperties).
-func applyCollectionMinConstraint(s *jsonschema.Schema, value string, baseType reflect.Type, exclusive bool) error {
+// applyCollectionMinConstraint applies min/gte or gt to a collection field by
+// raising its size floor (minItems or minProperties) on the canvas.
+func applyCollectionMinConstraint(
+	field jsonschema.FieldContext,
+	value string,
+	baseType reflect.Type,
+	exclusive bool,
+) error {
 	if isByteSliceField(baseType) {
 		return errByteSliceLengthConstraint
 	}
 
-	minField, _ := collectionBoundFields(s, baseType)
+	minField, _, effMin, _ := collectionBounds(field, baseType)
 
-	return applyMinBound(minField, value, exclusive)
+	return applyMinBound(minField, effMin, value, exclusive)
 }
 
-// applyCollectionMaxConstraint applies max/lte or lt to a collection schema by
-// lowering its size ceiling (maxItems or maxProperties).
-func applyCollectionMaxConstraint(s *jsonschema.Schema, value string, baseType reflect.Type, exclusive bool) error {
+// applyCollectionMaxConstraint applies max/lte or lt to a collection field by
+// lowering its size ceiling (maxItems or maxProperties) on the canvas.
+func applyCollectionMaxConstraint(
+	field jsonschema.FieldContext,
+	value string,
+	baseType reflect.Type,
+	exclusive bool,
+) error {
 	if isByteSliceField(baseType) {
 		return errByteSliceLengthConstraint
 	}
 
-	minField, maxField := collectionBoundFields(s, baseType)
+	minField, maxField, effMin, effMax := collectionBounds(field, baseType)
 
-	return applyMaxBound(minField, maxField, value, exclusive)
+	return applyMaxBound(minField, maxField, effMin, effMax, value, exclusive)
 }
 
-// applyCollectionLenConstraint applies len=N to a collection schema by pinning
-// both size bounds to the intersected value.
-func applyCollectionLenConstraint(s *jsonschema.Schema, value string, baseType reflect.Type) error {
+// applyCollectionLenConstraint applies len=N to a collection field by pinning
+// both size bounds on the canvas to the intersected value.
+func applyCollectionLenConstraint(field jsonschema.FieldContext, value string, baseType reflect.Type) error {
 	if isByteSliceField(baseType) {
 		return errByteSliceLengthConstraint
 	}
 
-	minField, maxField := collectionBoundFields(s, baseType)
+	minField, maxField, effMin, effMax := collectionBounds(field, baseType)
 
-	return applyLenBound(minField, maxField, value)
+	return applyLenBound(minField, maxField, effMin, effMax, value)
 }
 
 // applyCollectionNe applies ne=N to a collection schema, forbidding the length
@@ -119,67 +133,64 @@ func applyCollectionNe(s *jsonschema.Schema, value string, baseType reflect.Type
 	return nil
 }
 
-// applyDive descends into the element type for slice/array/map and applies
-// remaining parts to the items/additionalProperties sub-schema.
-func applyDive(remaining []string, s *jsonschema.Schema, fieldType reflect.Type) error {
+// applyDive descends into the element type for slice/array/map and applies the
+// remaining parts to each element context.
+func applyDive(remaining []string, field jsonschema.FieldContext) error {
 	// Follow pointers.
-	ft := fieldType
+	ft := field.Type
 	for ft.Kind() == reflect.Pointer {
 		ft = ft.Elem()
 	}
 
 	switch ft.Kind() {
 	case reflect.Slice, reflect.Array:
-		return diveIntoSequence(remaining, s, ft.Elem())
+		return diveIntoSequence(remaining, field)
 
 	case reflect.Map:
-		if s.AdditionalProperties == nil {
+		elems := field.ElementContexts()
+		if len(elems) == 0 {
 			return fmt.Errorf("validate tag: cannot dive: map schema has no additionalProperties")
 		}
 
-		err := applyParts(remaining, s.AdditionalProperties, nil, "", ft.Elem(), true)
+		value := elems[0]
+
+		err := applyParts(remaining, value, true)
 		if err != nil {
 			return err
 		}
 
-		err = relocateNullableValueConstraint(s.AdditionalProperties)
-		if err != nil {
-			return err
-		}
-
-		dropElementBoundsForConstEnum(s.AdditionalProperties)
-
-		return nil
+		return finishElement(value)
 
 	default:
 		return fmt.Errorf("validate tag: cannot dive into non-collection type %s", ft.Kind())
 	}
 }
 
-// diveIntoSequence applies the remaining dive constraints to the element schema
-// of a slice or fixed array. Each of the element-schema shapes
-// (see [schemashape.ItemSchemas]) is dived into so a dive tag on those kinds
-// does not abort generation.
-func diveIntoSequence(remaining []string, s *jsonschema.Schema, elem reflect.Type) error {
-	if items := schemashape.ItemSchemas(s); len(items) > 0 {
-		for _, item := range items {
-			err := applyParts(remaining, item, nil, "", elem, true)
+// diveIntoSequence applies the remaining dive constraints to each element
+// context of a slice or fixed array (its single item, or every array position),
+// so a dive tag on those kinds does not abort generation. A []byte field
+// marshals to a single base64 string with no per-element schema, so its dive is
+// a no-op rather than a generation error.
+func diveIntoSequence(remaining []string, field jsonschema.FieldContext) error {
+	if elems := field.ElementContexts(); len(elems) > 0 {
+		for i := range elems {
+			elem := elems[i]
+
+			err := applyParts(remaining, elem, true)
 			if err != nil {
 				return err
 			}
 
-			err = relocateNullableValueConstraint(item)
+			err = finishElement(elem)
 			if err != nil {
 				return err
 			}
-
-			dropElementBoundsForConstEnum(item)
 		}
 
 		return nil
 	}
 
-	if s.ContentEncoding == base64Encoding {
+	if field.Base != nil && field.Base.ContentEncoding == base64Encoding {
 		// A []byte field marshals to a single base64 string, so there is no
 		// per-element schema to constrain. The dive has no representable target;
 		// accept it as a no-op rather than aborting generation.

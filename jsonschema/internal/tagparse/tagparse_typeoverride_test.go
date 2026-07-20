@@ -43,22 +43,23 @@ func TestApplyTypeOverrideContentKeywords(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			// The shape byteSliceSchema produces (plus the optional media-type
-			// keywords a hook may add) before the tag applies.
-			s := &jsonschema.Schema{
+			// The payload shape byteSliceSchema produces (plus the optional
+			// media-type keywords a hook may add) before the tag applies. A type=
+			// override restructures the payload, so the content keywords live there.
+			payload := &jsonschema.Schema{
 				Type:             "string",
 				ContentEncoding:  "base64",
 				ContentMediaType: "application/json",
 				ContentSchema:    contentSchema,
 			}
 
-			res, err := tagparse.Apply(tc.tag, reflect.TypeFor[[]byte](), s)
+			res, err := tagparse.Apply(tc.tag, reflect.TypeFor[[]byte](), &jsonschema.Schema{}, payload)
 			require.NoError(t, err)
 			assert.False(t, res.BoundAuthored, "no numeric bound keys in the tag")
 
-			assert.Equal(t, tc.wantContentEncoding, s.ContentEncoding)
-			assert.Equal(t, tc.wantContentMediaType, s.ContentMediaType)
-			assert.Equal(t, tc.wantContentSchema, s.ContentSchema)
+			assert.Equal(t, tc.wantContentEncoding, payload.ContentEncoding)
+			assert.Equal(t, tc.wantContentMediaType, payload.ContentMediaType)
+			assert.Equal(t, tc.wantContentSchema, payload.ContentSchema)
 		})
 	}
 }

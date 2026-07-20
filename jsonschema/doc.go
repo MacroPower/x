@@ -268,20 +268,26 @@
 // through the pluggable [TagInterpreter] interface. Interpreters receive the
 // Generate call's context, like the other generation-time hooks, a [Tag]
 // carrying the struct tag key and value the call runs under, and a
-// [FieldContext] containing the field's schema, parent schema, JSON name,
-// Go type, declaring struct type, full [reflect.StructField] (for reading
-// sibling struct tags such as the json tag's options), and the target
-// [Draft] (for emitting draft-appropriate keywords). The field's schema is
-// the bare value schema, without any nullable wrapper: a nil-able field
-// presents its non-null value schema, and generation applies the null
-// encoding afterward, so a const or enum an interpreter sets lands on the
-// value and keeps the permitted null valid. For a promoted field, the
-// declaring struct type is the embedded type, exposed as
-// [FieldContext.Owner], which a [DescriptionProvider] reads for the same
-// field. Each interpreter is registered under the struct tag key it reads;
-// multiple interpreters can be registered and are applied in order.
-// [TagInterpreterFunc] adapts a bare function, so a one-off interpreter needs
-// no named type.
+// [FieldContext] containing the field's authored canvas ([FieldContext.Schema]),
+// its type-derived [FieldContext.Base], the parent schema, JSON name, Go type,
+// declaring struct type, full [reflect.StructField] (for reading sibling struct
+// tags such as the json tag's options), and the target [Draft] (for emitting
+// draft-appropriate keywords). An interpreter declares facts by writing them to
+// the canvas rather than mutating a merged schema: value-scoped facts (const,
+// enum) and annotations, plus bounds it tightens by reading the effective merged
+// value through the field's Effective accessors and writing the tightened result
+// back. The type-derived Base is read-only, for dispatching on the reflected
+// shape. Generation composes the canvas with Base and applies the null encoding,
+// so a const or enum an interpreter declares lands on the value branch and keeps
+// a permitted null valid. To constrain the elements of a sequence or map field
+// (a dive, or a sequence-wide oneof), an interpreter walks the element contexts
+// [FieldContext.ElementContexts] returns, each a [FieldContext] over one
+// element's canvas. For a promoted field, the declaring struct type is the
+// embedded type, exposed as [FieldContext.Owner], which a [DescriptionProvider]
+// reads for the same field. Each interpreter is registered under the struct tag
+// key it reads; multiple interpreters can be registered and are applied in
+// order. [TagInterpreterFunc] adapts a bare function, so a one-off interpreter
+// needs no named type.
 //
 // # Definitions and References
 //
@@ -492,15 +498,22 @@
 //
 // Field-level processing is executed per struct field, after the field's type
 // schema is resolved: (1) json:",string" override, (2) comment extraction,
-// (3) jsonschema struct tag, (4) registered tag interpreters in order. Each
-// step operates on the bare value schema; the null encoding for a nil-able
-// field (an anyOf[value, null] wrapper, or a ["null", base] type list) is
-// applied afterward. Field-level processing always applies, including when the
-// type is referenced via $ref. When an override or provider supplies one of
-// those nullable shapes itself, a const or enum stamped beside it by a tag or
-// interpreter is relocated onto the wrapper's value branch, so the authored
-// null stays valid; an interpreter constraint that conflicts with a const or
-// enum already on that branch is reported rather than silently overwritten.
+// (3) jsonschema struct tag, (4) registered tag interpreters in order. Steps
+// (2) through (4) declare facts on a separate authored canvas rather than
+// mutating the type-derived schema, so which schema a keyword lives in is its
+// provenance. Generation then reconciles the two, composing the final schema
+// and applying the null encoding for a nil-able field (an anyOf[value, null]
+// wrapper, or a ["null", base] type list): the value-scoped facts (const, enum,
+// string-content keywords) land on the value branch by construction while
+// annotations and the authored bounds move to the null wrapper (the type-derived
+// bounds stay on the value branch), so a permitted null stays valid without any
+// post-hoc reshape of a stamped wrapper.
+// Field-level processing always applies, including when the type is referenced
+// via $ref. When a not-yet-migrated override or provider supplies a nullable
+// shape at the field's type, an interpreter that declares a const or enum
+// disagreeing with one already on that shape's value branch reports the
+// conflict rather than silently overwriting it, comparing against the
+// type-derived schema before it writes.
 //
 // # Validation
 //

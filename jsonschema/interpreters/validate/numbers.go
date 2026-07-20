@@ -102,17 +102,18 @@ func uintExactlyRepresentableAsFloat64(n uint64) bool {
 	return n <= maxExact
 }
 
-// tightenNumericBound parses a numeric tag bound and intersects it with any
-// bound already on the schema. The rule's strictness selects the target field:
-// the exclusive pointer for gt/lt, otherwise the inclusive one. The tightens
-// predicate reports whether the new bound n is stronger than an existing one
-// (n > existing for a floor, n < existing for a ceiling), so rules in a validate
-// tag are ANDed and a tag bound never weakens a stronger bound set elsewhere (a
-// repeated rule, or the type-derived bound for a sized integer);
-// inclusiveName/exclusiveName label a parse error.
+// tightenNumericBound parses a numeric tag bound and intersects it with the
+// effective bound already in effect. The rule's strictness selects the target:
+// the exclusive bound for gt/lt, otherwise the inclusive one. The effective
+// value coalesces the canvas with the type-derived base, and the write lands on
+// the canvas; the tightens predicate reports whether the new bound n is stronger
+// than the effective one (n > existing for a floor, n < existing for a ceiling),
+// so rules in a validate tag are ANDed and a tag bound never weakens a stronger
+// bound set elsewhere (a repeated rule, or the type-derived bound for a sized
+// integer); inclusiveName/exclusiveName label a parse error.
 func tightenNumericBound(value string, baseType reflect.Type, exclusive bool,
-	inclusiveField, exclusiveField **float64, inclusiveName, exclusiveName string,
-	tightens func(n, existing float64) bool,
+	inclusiveEff, exclusiveEff *float64, inclusiveField, exclusiveField **float64,
+	inclusiveName, exclusiveName string, tightens func(n, existing float64) bool,
 ) error {
 	n, err := parseNumericBound(value, baseType)
 	if err != nil {
@@ -124,31 +125,50 @@ func tightenNumericBound(value string, baseType reflect.Type, exclusive bool,
 		return fmt.Errorf("validate tag: %s: %w", name, err)
 	}
 
+	eff := inclusiveEff
 	field := inclusiveField
+
 	if exclusive {
+		eff = exclusiveEff
 		field = exclusiveField
 	}
 
-	if *field == nil || tightens(n, **field) {
+	if eff == nil || tightens(n, *eff) {
 		*field = new(n)
 	}
 
 	return nil
 }
 
-// applyNumericMinConstraint applies min/gte or gt to a numeric schema by raising
-// the minimum (or exclusiveMinimum) floor. A tag bound the field's Go type can
-// never reach (min=-300 on an int8) does not lower the stronger type floor.
-func applyNumericMinConstraint(s *jsonschema.Schema, value string, baseType reflect.Type, exclusive bool) error {
-	return tightenNumericBound(value, baseType, exclusive, &s.Minimum, &s.ExclusiveMinimum, "min", "gt",
+// applyNumericMinConstraint applies min/gte or gt to a numeric field by raising
+// the minimum (or exclusiveMinimum) floor on the canvas. A tag bound the field's
+// Go type can never reach (min=-300 on an int8) does not lower the stronger type
+// floor, since the effective bound coalesces the canvas with the type base.
+func applyNumericMinConstraint(
+	field jsonschema.FieldContext,
+	value string,
+	baseType reflect.Type,
+	exclusive bool,
+) error {
+	return tightenNumericBound(value, baseType, exclusive,
+		field.EffectiveMinimum(), field.EffectiveExclusiveMinimum(),
+		&field.Schema.Minimum, &field.Schema.ExclusiveMinimum, "min", "gt",
 		func(n, existing float64) bool { return n > existing })
 }
 
-// applyNumericMaxConstraint applies max/lte or lt to a numeric schema by lowering
-// the maximum (or exclusiveMaximum) ceiling. A tag bound the field's Go type can
-// never reach (max=200 on an int8) does not raise the stronger type ceiling.
-func applyNumericMaxConstraint(s *jsonschema.Schema, value string, baseType reflect.Type, exclusive bool) error {
-	return tightenNumericBound(value, baseType, exclusive, &s.Maximum, &s.ExclusiveMaximum, "max", "lt",
+// applyNumericMaxConstraint applies max/lte or lt to a numeric field by lowering
+// the maximum (or exclusiveMaximum) ceiling on the canvas. A tag bound the
+// field's Go type can never reach (max=200 on an int8) does not raise the
+// stronger type ceiling.
+func applyNumericMaxConstraint(
+	field jsonschema.FieldContext,
+	value string,
+	baseType reflect.Type,
+	exclusive bool,
+) error {
+	return tightenNumericBound(value, baseType, exclusive,
+		field.EffectiveMaximum(), field.EffectiveExclusiveMaximum(),
+		&field.Schema.Maximum, &field.Schema.ExclusiveMaximum, "max", "lt",
 		func(n, existing float64) bool { return n < existing })
 }
 

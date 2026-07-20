@@ -282,15 +282,17 @@ type Tag struct {
 // reads, following [net/http.Handle]'s name-at-registration shape, so one
 // implementation can serve several keys.
 type TagInterpreter interface {
-	// Interpret reads the tag pair ([Tag.Value], keyed by [Tag.Key]) and
-	// the field context, then modifies the schema in place. It is called
-	// during field-level processing, after the type schema, comments, and
-	// jsonschema struct tag have been applied. The FieldContext provides
-	// access to both the field's own schema and the parent object schema,
-	// enabling constraints like "required" that modify the parent. The
-	// context follows the [TypeSchemaProvider.SchemaForType] contract: it
-	// comes from the Generate call in effect, and an interpreter that
-	// performs no cancellable work can ignore it.
+	// Interpret reads the tag pair ([Tag.Value], keyed by [Tag.Key]) and the
+	// field context, then declares constraints by writing them to the field's
+	// authored canvas ([FieldContext.Schema]). It is called during field-level
+	// processing, after the type schema, comments, and jsonschema struct tag
+	// have been applied. The FieldContext also exposes the type-derived
+	// [FieldContext.Base] to dispatch on and the parent object schema
+	// ([FieldContext.Parent]) to append to, enabling constraints like "required"
+	// that modify the parent. The context follows the
+	// [TypeSchemaProvider.SchemaForType] contract: it comes from the Generate
+	// call in effect, and an interpreter that performs no cancellable work can
+	// ignore it.
 	Interpret(ctx context.Context, field FieldContext, tag Tag) error
 }
 
@@ -531,19 +533,37 @@ type FieldContext struct {
 	// (and where a [GoCommentProvider] finds its doc comment), not the outer
 	// struct.
 	Owner reflect.Type
-	// Schema is the field's own generated schema: the bare value schema, with
-	// no nullable wrapper. A nil-able field (a pointer, or a ",string" pointer)
-	// presents its non-null value schema here, and generation applies the null
-	// encoding (an anyOf[value, null] wrapper, or a ["null", base] type list)
-	// afterward, so a const or enum an interpreter sets lands on the value and
-	// keeps the permitted null valid. A tag interpreter modifies the schema in
-	// place; a [DescriptionProvider] must treat it as read-only and answer
-	// through its return value instead.
+	// Schema is the field's authored-facts canvas: a fresh schema the jsonschema
+	// tag pre-fills and an interpreter extends, declaring the value-scoped facts
+	// (const, enum, the string-content keywords), annotations, and the
+	// numeric/string/array bounds the field carries. It is not the field's merged
+	// schema: generation composes the final shape from the type-derived
+	// [FieldContext.Base] and this canvas, placing the value-scoped facts on the
+	// value branch and the annotations and authored bounds on the null wrapper,
+	// then applying the null encoding, so a const or enum an interpreter declares
+	// lands on the value and keeps a permitted null valid. A tag interpreter
+	// declares facts by writing them here; a [DescriptionProvider] must treat it as
+	// read-only and answer through its return value instead. A bound that tightens
+	// the type's own value reads the effective merged bound through
+	// [FieldContext.EffectiveMinimum] and the other Effective accessors, then
+	// writes the tightened result here.
 	Schema *Schema
+	// Base is the field's type-derived reflected schema, read-only: the pristine
+	// payload carrying the type's own keywords (its numeric bounds, the
+	// json:",string" string coercion, any type= override), before any field-level
+	// fact is applied. An interpreter dispatching on the reflected shape (whether
+	// the schema permits a string, whether it is a base64 content string) reads it
+	// here; the Effective accessors coalesce it with the canvas for tightening.
+	Base *Schema
 	// Parent is the enclosing object schema, so an interpreter can append to
 	// its Required list. The [DescriptionProvider] read-only contract of
 	// Schema applies.
 	Parent *Schema
+	// The node field is the field or element IR node backing this context,
+	// non-nil for a context the generator builds and nil for one a caller
+	// constructs. It backs the element accessor ([FieldContext.ElementContexts])
+	// and the pinned-value signal ([FieldContext.PinElementValue]).
+	node *node
 	// Name is the JSON property name for the field.
 	Name string
 	// StructField is the full reflect.StructField, so an interpreter can read
@@ -554,4 +574,219 @@ type FieldContext struct {
 	// emit draft-appropriate keywords (for example dependentRequired under
 	// [Draft2020] versus dependencies under [Draft7]).
 	Draft Draft
+}
+
+// ElementContexts returns a FieldContext for each element schema of a sequence
+// or map field: the single element of a slice or map, or one per position of a
+// fixed array. It is the accessor an interpreter uses to constrain elements (a
+// dive or a sequence-wide oneof), replacing a walk of the field's item schemas.
+// Each returned context carries the element's own authored canvas
+// ([FieldContext.Schema]), its type-derived [FieldContext.Base], and its Go
+// [FieldContext.Type] (pointer-preserving, so a []*string element still parses a
+// null member), and supports [FieldContext.ElementContexts] again for a nested
+// sequence. The elements carry an empty Name and a nil Parent, matching a dive's
+// element position, and the run's Draft.
+//
+// A field with no per-element schema returns nil: a []byte or [json.RawMessage]
+// (which encodes as a single string, not an array), or a field whose schema a
+// provider supplied without element sub-schemas. An interpreter treats a nil
+// result as "no item schema to constrain". A FieldContext a caller builds
+// directly (rather than one generation supplies) has no backing node and so
+// always returns nil, making element constraints inert; drive such an
+// interpreter through generation to exercise them.
+func (fc FieldContext) ElementContexts() []FieldContext {
+	if fc.node == nil {
+		return nil
+	}
+
+	elemType := elementType(fc.Type)
+
+	build := func(child *node) FieldContext {
+		return FieldContext{
+			Type:   elemType,
+			Schema: child.authored,
+			Base:   child.payload,
+			Draft:  fc.Draft,
+			node:   child,
+		}
+	}
+
+	switch fc.node.kind {
+	case kindList, kindMap:
+		if fc.node.items == nil {
+			return nil
+		}
+
+		return []FieldContext{build(fc.node.items)}
+
+	case kindTuple:
+		out := make([]FieldContext, len(fc.node.prefix))
+		for i, c := range fc.node.prefix {
+			out[i] = build(c)
+		}
+
+		return out
+
+	default:
+		return nil
+	}
+}
+
+// PinElementValue marks an element context whose value an interpreter pinned
+// with a const or enum: reconcile then drops the element's type-derived numeric
+// bounds, which the pinned value subsumes. It is a no-op on a context with no
+// backing node. Only an element context carries this signal; a field's own
+// bound drop follows the boundAuthored rule the generator tracks.
+func (fc FieldContext) PinElementValue() {
+	if fc.node != nil {
+		fc.node.dropBounds = true
+	}
+}
+
+// coalesceField returns the canvas value when the field authored it, otherwise
+// the type-derived base value: the effective merged keyword an interpreter reads
+// when tightening a bound so a tag bound never weakens the type's own bound and
+// repeated tag bounds intersect order-independently.
+func coalesceField[T any](canvas, base *T) *T {
+	if canvas != nil {
+		return canvas
+	}
+
+	return base
+}
+
+// effectiveBase returns fc.Base, or an empty schema when a caller built the
+// context without one, so the Effective accessors never dereference a nil Base.
+func (fc FieldContext) effectiveBase() *Schema {
+	if fc.Base != nil {
+		return fc.Base
+	}
+
+	return &Schema{}
+}
+
+// EffectiveMinimum reports the effective minimum keyword an interpreter tightens
+// against: the value already authored on the canvas, or the type-derived bound
+// from [FieldContext.Base] when the canvas has not set one. The other Effective
+// accessors follow the same rule for their keywords.
+func (fc FieldContext) EffectiveMinimum() *float64 {
+	return coalesceField(fc.Schema.Minimum, fc.effectiveBase().Minimum)
+}
+
+// EffectiveMaximum reports the effective maximum keyword.
+// See [FieldContext.EffectiveMinimum].
+func (fc FieldContext) EffectiveMaximum() *float64 {
+	return coalesceField(fc.Schema.Maximum, fc.effectiveBase().Maximum)
+}
+
+// EffectiveExclusiveMinimum reports the effective exclusiveMinimum keyword.
+// See [FieldContext.EffectiveMinimum].
+func (fc FieldContext) EffectiveExclusiveMinimum() *float64 {
+	return coalesceField(fc.Schema.ExclusiveMinimum, fc.effectiveBase().ExclusiveMinimum)
+}
+
+// EffectiveExclusiveMaximum reports the effective exclusiveMaximum keyword.
+// See [FieldContext.EffectiveMinimum].
+func (fc FieldContext) EffectiveExclusiveMaximum() *float64 {
+	return coalesceField(fc.Schema.ExclusiveMaximum, fc.effectiveBase().ExclusiveMaximum)
+}
+
+// EffectiveMinLength reports the effective minLength keyword.
+// See [FieldContext.EffectiveMinimum].
+func (fc FieldContext) EffectiveMinLength() *int {
+	return coalesceField(fc.Schema.MinLength, fc.effectiveBase().MinLength)
+}
+
+// EffectiveMaxLength reports the effective maxLength keyword.
+// See [FieldContext.EffectiveMinimum].
+func (fc FieldContext) EffectiveMaxLength() *int {
+	return coalesceField(fc.Schema.MaxLength, fc.effectiveBase().MaxLength)
+}
+
+// EffectiveMinItems reports the effective minItems keyword.
+// See [FieldContext.EffectiveMinimum].
+func (fc FieldContext) EffectiveMinItems() *int {
+	return coalesceField(fc.Schema.MinItems, fc.effectiveBase().MinItems)
+}
+
+// EffectiveMaxItems reports the effective maxItems keyword.
+// See [FieldContext.EffectiveMinimum].
+func (fc FieldContext) EffectiveMaxItems() *int {
+	return coalesceField(fc.Schema.MaxItems, fc.effectiveBase().MaxItems)
+}
+
+// EffectiveMinProperties reports the effective minProperties keyword.
+// See [FieldContext.EffectiveMinimum].
+func (fc FieldContext) EffectiveMinProperties() *int {
+	return coalesceField(fc.Schema.MinProperties, fc.effectiveBase().MinProperties)
+}
+
+// EffectiveMaxProperties reports the effective maxProperties keyword.
+// See [FieldContext.EffectiveMinimum].
+func (fc FieldContext) EffectiveMaxProperties() *int {
+	return coalesceField(fc.Schema.MaxProperties, fc.effectiveBase().MaxProperties)
+}
+
+// EffectiveFormat reports the effective format keyword: the canvas value, or the
+// type-derived one when the canvas has none. It backs the "set only when empty"
+// guard so a format tag never overrides a value an explicit jsonschema tag or
+// the field's type already set. [FieldContext.EffectivePattern],
+// [FieldContext.EffectiveContentEncoding], and
+// [FieldContext.EffectiveContentMediaType] guard their keywords the same way.
+func (fc FieldContext) EffectiveFormat() string {
+	if fc.Schema.Format != "" {
+		return fc.Schema.Format
+	}
+
+	return fc.effectiveBase().Format
+}
+
+// EffectivePattern reports the effective pattern keyword.
+// See [FieldContext.EffectiveFormat].
+func (fc FieldContext) EffectivePattern() string {
+	if fc.Schema.Pattern != "" {
+		return fc.Schema.Pattern
+	}
+
+	return fc.effectiveBase().Pattern
+}
+
+// EffectiveContentEncoding reports the effective contentEncoding keyword.
+// See [FieldContext.EffectiveFormat].
+func (fc FieldContext) EffectiveContentEncoding() string {
+	if fc.Schema.ContentEncoding != "" {
+		return fc.Schema.ContentEncoding
+	}
+
+	return fc.effectiveBase().ContentEncoding
+}
+
+// EffectiveContentMediaType reports the effective contentMediaType keyword.
+// See [FieldContext.EffectiveFormat].
+func (fc FieldContext) EffectiveContentMediaType() string {
+	if fc.Schema.ContentMediaType != "" {
+		return fc.Schema.ContentMediaType
+	}
+
+	return fc.effectiveBase().ContentMediaType
+}
+
+// elementType returns the element (or map value) Go type of t, dereferencing a
+// pointer to the container first but preserving a pointer element, so a
+// []*string yields *string. A non-container type yields nil.
+func elementType(t reflect.Type) reflect.Type {
+	if t == nil {
+		return nil
+	}
+
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+
+	switch t.Kind() {
+	case reflect.Slice, reflect.Array, reflect.Map:
+		return t.Elem()
+	default:
+		return nil
+	}
 }

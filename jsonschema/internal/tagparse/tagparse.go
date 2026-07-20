@@ -22,7 +22,6 @@ import (
 
 	"go.jacobcolvin.com/x/jsonschema/internal/keyword"
 	"go.jacobcolvin.com/x/jsonschema/internal/numkind"
-	"go.jacobcolvin.com/x/jsonschema/internal/schemashape"
 	"go.jacobcolvin.com/x/jsonschema/internal/typename"
 )
 
@@ -115,7 +114,11 @@ type Result struct {
 	TypeOverridden bool
 }
 
-// Apply parses and applies a jsonschema struct tag to a schema.
+// Apply parses and applies a jsonschema struct tag. Value-scoped facts and
+// annotations land on the authored canvas, while a type= pair restructures the
+// type-derived payload (it replaces the reflected type assertion, not a canvas
+// fact). An enum on a slice or array field lands on the element canvases, which
+// mirror the payload's item structure.
 //
 // Pairs apply strictly in order. The scalar keys (default, const, enum,
 // examples) parse their values against the effective scalar type: the field's
@@ -124,7 +127,7 @@ type Result struct {
 // type= keeps Go-kind parsing while one after it parses as the overridden
 // type. The non-scalar overrides (array, object, null) have no stand-in, so a
 // scalar key following one is an error.
-func Apply(tag string, fieldType reflect.Type, s *jsonschema.Schema) (Result, error) {
+func Apply(tag string, fieldType reflect.Type, canvas, payload *jsonschema.Schema) (Result, error) {
 	if tag == "" {
 		return Result{}, nil
 	}
@@ -137,9 +140,9 @@ func Apply(tag string, fieldType reflect.Type, s *jsonschema.Schema) (Result, er
 		// Joining the split pairs restores unescaped commas while collapsing
 		// escaped ones; skip the split when there is nothing to resolve.
 		if strings.ContainsRune(tag, '\\') {
-			s.Description = strings.Join(splitTagPairs(tag), ",")
+			canvas.Description = strings.Join(splitTagPairs(tag), ",")
 		} else {
-			s.Description = tag
+			canvas.Description = tag
 		}
 
 		return Result{}, nil
@@ -149,7 +152,7 @@ func Apply(tag string, fieldType reflect.Type, s *jsonschema.Schema) (Result, er
 	if !isKeyValueTag(pairs) {
 		// Prose that tripped the WORD= gate but is not key=value: store the
 		// escape-resolved text, not the raw tag, matching the bare path above.
-		s.Description = strings.Join(pairs, ",")
+		canvas.Description = strings.Join(pairs, ",")
 
 		return Result{}, nil
 	}
@@ -188,7 +191,7 @@ func Apply(tag string, fieldType reflect.Type, s *jsonschema.Schema) (Result, er
 			}
 		}
 
-		err := applyTagKeyValue(key, value, scalarType, s)
+		err := applyTagKeyValue(key, value, scalarType, canvas, payload)
 		if err != nil {
 			return Result{}, err
 		}
@@ -222,9 +225,9 @@ func Apply(tag string, fieldType reflect.Type, s *jsonschema.Schema) (Result, er
 }
 
 // isNumericBoundKey reports whether key is one of the four range-bound keywords
-// that [schemashape.ClearNumericBounds] drops, used to tell an author-set bound
-// (kept when it narrows an enum) from a kind-derived one (always redundant once
-// pinned).
+// reconcile drops once a value is pinned, used to tell an author-set bound (kept
+// when it narrows an enum, via the node's boundAuthored flag) from a kind-derived
+// one (always redundant once pinned).
 func isNumericBoundKey(key string) bool {
 	switch key {
 	case keyword.Minimum, keyword.Maximum, keyword.ExclusiveMinimum, keyword.ExclusiveMaximum:
@@ -392,27 +395,29 @@ func splitTagPairs(tag string) []string {
 }
 
 // applyTagKeyValue applies a single key=value pair from the jsonschema tag.
-// ScalarType is the effective type the scalar keys (default, const, enum,
-// examples) parse against: the field's Go type, or the stand-in for an
-// earlier type= override (see [Apply]). Only those keys consult it.
-func applyTagKeyValue(key, value string, scalarType reflect.Type, s *jsonschema.Schema) error {
+// Value-scoped facts and annotations land on the canvas; a type= pair
+// restructures the type-derived payload. ScalarType is the effective type the
+// scalar keys (default, const, enum, examples) parse against: the field's Go
+// type, or the stand-in for an earlier type= override (see [Apply]). Only those
+// keys consult it.
+func applyTagKeyValue(key, value string, scalarType reflect.Type, canvas, payload *jsonschema.Schema) error {
 	switch key {
 	case keyword.Description:
-		s.Description = value
+		canvas.Description = value
 	case keyword.Title:
-		s.Title = value
+		canvas.Title = value
 
 	case keyword.Type:
 		if !typename.Valid(value) {
 			return fmt.Errorf("jsonschema tag: key %q: %w: %q", key, ErrInvalidType, value)
 		}
 
-		applyTypeOverride(s, value)
+		applyTypeOverride(payload, value)
 
 	case keyword.Pattern:
-		s.Pattern = value
+		canvas.Pattern = value
 	case keyword.Format:
-		s.Format = value
+		canvas.Format = value
 
 	case keyword.Deprecated:
 		b, err := parseBoolValue(key, value)
@@ -420,7 +425,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *jsonschema.
 			return err
 		}
 
-		s.Deprecated = b
+		canvas.Deprecated = b
 
 	case keyword.ReadOnly:
 		b, err := parseBoolValue(key, value)
@@ -428,7 +433,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *jsonschema.
 			return err
 		}
 
-		s.ReadOnly = b
+		canvas.ReadOnly = b
 
 	case keyword.WriteOnly:
 		b, err := parseBoolValue(key, value)
@@ -436,7 +441,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *jsonschema.
 			return err
 		}
 
-		s.WriteOnly = b
+		canvas.WriteOnly = b
 
 	case keyword.UniqueItems:
 		b, err := parseBoolValue(key, value)
@@ -444,7 +449,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *jsonschema.
 			return err
 		}
 
-		s.UniqueItems = b
+		canvas.UniqueItems = b
 
 	case keyword.Minimum:
 		n, err := parseFloat(key, value)
@@ -452,7 +457,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *jsonschema.
 			return err
 		}
 
-		s.Minimum = &n
+		canvas.Minimum = &n
 
 	case keyword.Maximum:
 		n, err := parseFloat(key, value)
@@ -460,7 +465,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *jsonschema.
 			return err
 		}
 
-		s.Maximum = &n
+		canvas.Maximum = &n
 
 	case keyword.ExclusiveMinimum:
 		n, err := parseFloat(key, value)
@@ -468,7 +473,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *jsonschema.
 			return err
 		}
 
-		s.ExclusiveMinimum = &n
+		canvas.ExclusiveMinimum = &n
 
 	case keyword.ExclusiveMaximum:
 		n, err := parseFloat(key, value)
@@ -476,7 +481,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *jsonschema.
 			return err
 		}
 
-		s.ExclusiveMaximum = &n
+		canvas.ExclusiveMaximum = &n
 
 	case keyword.MultipleOf:
 		n, err := parseFloat(key, value)
@@ -488,7 +493,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *jsonschema.
 			return fmt.Errorf("jsonschema tag: key %q must be greater than 0, got %v", key, n)
 		}
 
-		s.MultipleOf = &n
+		canvas.MultipleOf = &n
 
 	case keyword.MinLength:
 		n, err := parseInt(key, value)
@@ -496,7 +501,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *jsonschema.
 			return err
 		}
 
-		s.MinLength = &n
+		canvas.MinLength = &n
 
 	case keyword.MaxLength:
 		n, err := parseInt(key, value)
@@ -504,7 +509,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *jsonschema.
 			return err
 		}
 
-		s.MaxLength = &n
+		canvas.MaxLength = &n
 
 	case keyword.MinItems:
 		n, err := parseInt(key, value)
@@ -512,7 +517,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *jsonschema.
 			return err
 		}
 
-		s.MinItems = &n
+		canvas.MinItems = &n
 
 	case keyword.MaxItems:
 		n, err := parseInt(key, value)
@@ -520,7 +525,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *jsonschema.
 			return err
 		}
 
-		s.MaxItems = &n
+		canvas.MaxItems = &n
 
 	case keyword.MinProperties:
 		n, err := parseInt(key, value)
@@ -528,7 +533,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *jsonschema.
 			return err
 		}
 
-		s.MinProperties = &n
+		canvas.MinProperties = &n
 
 	case keyword.MaxProperties:
 		n, err := parseInt(key, value)
@@ -536,7 +541,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *jsonschema.
 			return err
 		}
 
-		s.MaxProperties = &n
+		canvas.MaxProperties = &n
 
 	case keyword.Default:
 		// An empty value is rejected except on a string field, where "" is the
@@ -555,7 +560,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *jsonschema.
 			return fmt.Errorf("jsonschema tag: key %q: %w", key, err)
 		}
 
-		s.Default = raw
+		canvas.Default = raw
 
 	case keyword.Const:
 		// An empty value is rejected except on a string field, where "" is the
@@ -569,7 +574,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *jsonschema.
 			return fmt.Errorf("jsonschema tag: key %q: %w", key, err)
 		}
 
-		s.Const = &v
+		canvas.Const = &v
 
 	case keyword.Enum:
 		if value == "" {
@@ -578,9 +583,9 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *jsonschema.
 
 		// On a slice or array field the enum constrains each element, not the
 		// array value itself, so the values parse against the element type and
-		// land on the item schemas ("array of enum values").
+		// land on the element canvases ("array of enum values").
 		if base := numkind.DerefType(scalarType); base.Kind() == reflect.Slice || base.Kind() == reflect.Array {
-			return applyEnumToItems(key, value, base, s)
+			return applyEnumToItems(key, value, base, canvas)
 		}
 
 		enumVals, err := parseEnumValues(key, value, scalarType)
@@ -588,7 +593,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *jsonschema.
 			return err
 		}
 
-		s.Enum = enumVals
+		canvas.Enum = enumVals
 
 	case keyword.Examples:
 		if value == "" {
@@ -600,7 +605,7 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, s *jsonschema.
 			return err
 		}
 
-		s.Examples = examples
+		canvas.Examples = examples
 
 	default:
 		return fmt.Errorf("jsonschema tag: unrecognized key %q", key)
@@ -699,13 +704,14 @@ func parseEnumValues(key, value string, t reflect.Type) ([]any, error) {
 	return enumVals, nil
 }
 
-// applyEnumToItems applies an enum tag on a slice or array field to the
-// field's item schemas, parsing each value against the element type. A nested
-// sequence element descends recursively, so the enum always lands on the
-// innermost (scalar) item schemas. The other scalar tag keys (const, default,
-// examples) remain whole-value constraints and are not redirected this way.
-func applyEnumToItems(key, value string, t reflect.Type, s *jsonschema.Schema) error {
-	items := schemashape.ItemSchemas(s)
+// applyEnumToItems applies an enum tag on a slice or array field to the field's
+// element canvases (which mirror the payload's item structure), parsing each
+// value against the element type. A nested sequence element descends
+// recursively, so the enum always lands on the innermost (scalar) element
+// canvases. The other scalar tag keys (const, default, examples) remain
+// whole-value constraints and are not redirected this way.
+func applyEnumToItems(key, value string, t reflect.Type, canvas *jsonschema.Schema) error {
+	items := elementCanvases(canvas)
 	if len(items) == 0 {
 		// A []byte field encodes as a single base64 string, leaving no
 		// per-element schema for the enum to constrain.
@@ -746,17 +752,33 @@ func applyEnumToItems(key, value string, t reflect.Type, s *jsonschema.Schema) e
 	}
 
 	for _, item := range items {
-		// Each item schema gets its own value slice so no slice is shared
-		// across schema nodes. A generator-built item payload is bare -- render
-		// applies the null wrapper afterward, landing the enum on the value
-		// branch by construction -- but a hook-authored item may already be an
-		// anyOf[value, null] wrapper, so the enum is relocated onto its value
-		// branch rather than left to reject the permitted null.
+		// Each element canvas gets its own value slice so no slice is shared
+		// across nodes. The enum lands on the bare element canvas; reconcileField
+		// composes it onto the value branch by construction, so a permitted null
+		// stays valid without any post-hoc relocation.
 		item.Enum = slices.Clone(enumVals)
-		schemashape.RelocateConstEnumToValueBranch(item)
 	}
 
 	return nil
+}
+
+// elementCanvases returns the per-element authored canvases of a sequence
+// field's canvas: prefixItems (Draft 2020-12) or the items-array form (Draft-07)
+// for a fixed array, or the single Items canvas for a slice. The canvas is
+// generator-wired to mirror the payload's item structure, so a plain structural
+// read reaches them; a field with no element canvas (a []byte, or a $ref field)
+// yields nil.
+func elementCanvases(canvas *jsonschema.Schema) []*jsonschema.Schema {
+	switch {
+	case len(canvas.PrefixItems) > 0:
+		return canvas.PrefixItems
+	case len(canvas.ItemsArray) > 0:
+		return canvas.ItemsArray
+	case canvas.Items != nil:
+		return []*jsonschema.Schema{canvas.Items}
+	default:
+		return nil
+	}
 }
 
 // parseBoolValue parses a boolean tag value.

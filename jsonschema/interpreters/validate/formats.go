@@ -19,12 +19,17 @@ func isStringKeywordTag(key string) bool {
 	return formatFor(key) != "" || patternFor(key) != "" || isContentTag(key)
 }
 
-// schemaPermitsString reports whether the generated schema can hold a string
+// schemaPermitsString reports whether the type-derived schema can hold a string
 // instance. It accepts both the single Type form and the Types array form (as
 // produced for nullable and []byte fields), so a string-only keyword such as
 // base64 is allowed on a field whose schema is a string even when the Go kind is
-// not (e.g. a []byte field, which generates a base64-encoded string schema).
+// not (e.g. a []byte field, which generates a base64-encoded string schema). A
+// nil schema (a caller-built context with no Base) permits no string.
 func schemaPermitsString(s *jsonschema.Schema) bool {
+	if s == nil {
+		return false
+	}
+
 	if s.Type == "string" {
 		return true
 	}
@@ -32,28 +37,29 @@ func schemaPermitsString(s *jsonschema.Schema) bool {
 	return slices.Contains(s.Types, "string")
 }
 
-// applyStringKeywordTag applies the format, pattern, or content keyword named by
-// key to a string schema. An explicit jsonschema struct tag value is preserved:
-// each keyword is only set when not already present. Key must be recognized by
+// applyStringKeywordTag declares the format, pattern, or content keyword named
+// by key on the field's canvas. An effective value already in force (from an
+// explicit jsonschema struct tag or the field's type) is preserved: each keyword
+// is only set when its effective value is empty. Key must be recognized by
 // [isStringKeywordTag].
-func applyStringKeywordTag(key string, s *jsonschema.Schema) {
+func applyStringKeywordTag(key string, field jsonschema.FieldContext) {
 	if format := formatFor(key); format != "" {
-		if s.Format == "" {
-			s.Format = format
+		if field.EffectiveFormat() == "" {
+			field.Schema.Format = format
 		}
 
 		return
 	}
 
 	if pattern := patternFor(key); pattern != "" {
-		if s.Pattern == "" {
-			s.Pattern = pattern
+		if field.EffectivePattern() == "" {
+			field.Schema.Pattern = pattern
 		}
 
 		return
 	}
 
-	applyContentTag(key, s)
+	applyContentTag(key, field)
 }
 
 // formatFor maps a format validator key to its JSON Schema "format" value, or
@@ -108,18 +114,19 @@ func isContentTag(key string) bool {
 	}
 }
 
-// applyContentTag applies content validator tags to a string schema, preserving
-// any value already set by an explicit jsonschema struct tag.
-func applyContentTag(key string, s *jsonschema.Schema) {
+// applyContentTag declares content validator tags on the field's canvas,
+// preserving any effective value already in force (from an explicit jsonschema
+// struct tag or the field's type).
+func applyContentTag(key string, field jsonschema.FieldContext) {
 	switch key {
 	case "json":
-		if s.ContentMediaType == "" {
-			s.ContentMediaType = "application/json"
+		if field.EffectiveContentMediaType() == "" {
+			field.Schema.ContentMediaType = "application/json"
 		}
 
 	case base64Encoding:
-		if s.ContentEncoding == "" {
-			s.ContentEncoding = base64Encoding
+		if field.EffectiveContentEncoding() == "" {
+			field.Schema.ContentEncoding = base64Encoding
 		}
 	}
 }

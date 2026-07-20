@@ -1486,47 +1486,46 @@ func TestTrailingDiveErrors(t *testing.T) {
 
 	// A trailing dive needs a real element constraint. A bare dive, or one
 	// followed only by control or cross-field tags, has nothing to apply to the
-	// element and is an error, matching go-playground/validator. A dive followed
-	// by a genuine constraint is accepted.
-	tests := map[string]struct {
-		tag     string
-		wantErr bool
-	}{
-		"bare dive":             {tag: "dive", wantErr: true},
-		"dive then omitempty":   {tag: "dive,omitempty", wantErr: true},
-		"dive then structonly":  {tag: "dive,structonly", wantErr: true},
-		"dive then cross-field": {tag: "dive,eqfield=Other", wantErr: true},
-		"dive then constraint":  {tag: "dive,min=1", wantErr: false},
+	// element and is an error, matching go-playground/validator. The error is
+	// raised before the element is descended into, so a canvas with no backing
+	// element node still exercises it.
+	errCases := map[string]string{
+		"bare dive":             "dive",
+		"dive then omitempty":   "dive,omitempty",
+		"dive then structonly":  "dive,structonly",
+		"dive then cross-field": "dive,eqfield=Other",
 	}
 
-	for name, tc := range tests {
+	for name, tag := range errCases {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			field := &jsonschema.Schema{
-				Type:  "array",
-				Items: &jsonschema.Schema{Type: "string"},
-			}
-			parent := &jsonschema.Schema{
-				Type:       "object",
-				Properties: map[string]*jsonschema.Schema{"items": field},
-			}
-
 			err := validate.NewInterpreter().Interpret(t.Context(), jsonschema.FieldContext{
 				Type:   reflect.TypeFor[[]string](),
-				Schema: field,
-				Parent: parent,
+				Schema: &jsonschema.Schema{},
+				Parent: &jsonschema.Schema{},
 				Name:   "items",
-			}, jsonschema.Tag{Key: "validate", Value: tc.tag})
+			}, jsonschema.Tag{Key: "validate", Value: tag})
 
-			if tc.wantErr {
-				require.Error(t, err,
-					"a trailing dive with only control/cross-field tags is an error")
-			} else {
-				require.NoError(t, err)
-			}
+			require.Error(t, err,
+				"a trailing dive with only control/cross-field tags is an error")
 		})
 	}
+
+	// A dive followed by a genuine constraint is accepted; it descends into the
+	// real element node built by generation.
+	t.Run("dive then constraint", func(t *testing.T) {
+		t.Parallel()
+
+		type Config struct {
+			Items []string `json:"items" validate:"dive,min=1"`
+		}
+
+		_, err := jsonschema.GenerateFor[Config](t.Context(),
+			jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
+		)
+		require.NoError(t, err)
+	})
 }
 
 func TestMissingEndkeysStillAppliesValueConstraints(t *testing.T) {
