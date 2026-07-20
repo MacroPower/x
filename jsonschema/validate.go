@@ -329,6 +329,7 @@ type validator struct {
 	enumRats           map[*Schema][]*big.Rat                 // numeric enum members as rationals by index (see numericBounds)
 	sortedPropertyKeys map[*Schema][]string                   // schema.Properties keys, sorted (see numericBounds)
 	sortedPatternKeys  map[*Schema][]string                   // schema.PatternProperties keys, sorted (see numericBounds)
+	itemsPlans         map[*Schema]*itemsPlan                 // normalized array item keywords (see numericBounds)
 
 	// The WithDraft override; nil leaves the draft to $schema detection.
 	draftOverride *Draft
@@ -336,6 +337,14 @@ type validator struct {
 	// The root document's base URI from [WithBaseURI]; "" leaves the base
 	// to the root schema's $id.
 	baseURI string
+
+	// The activeRows are the keywordTable rows this run evaluates: those whose
+	// draft, vocabulary, and opt-in gates all pass. The gate reads only run-fixed
+	// state (draft, vocabs, formatsEnabled, contentEnabled), so the set is constant
+	// for the run and is computed once at Compile (buildActiveRows) instead of
+	// re-deciding every row at every instance node. The per-run forInstance copy
+	// shares the slice by reference; it is read-only after Compile.
+	activeRows []*keywordEntry
 
 	draft  Draft
 	vocabs vocab.Set // resolved active vocabularies
@@ -393,6 +402,11 @@ func newValidator(ctx context.Context, schema *Schema, opts []ValidateOption) (*
 	// Resolve whether the format keyword is asserted (depends on draft,
 	// vocabularies, and any explicit WithFormats override).
 	v.resolveFormats()
+
+	// Filter the dispatch table to the rows this run evaluates now that every
+	// gate input (draft, vocabularies, format/content opt-in) is resolved, so the
+	// per-node walk iterates only applicable rows and never re-runs gatePasses.
+	v.buildActiveRows()
 
 	// The gate session's fetch reads the compile context from the ctx field set
 	// above, not a threaded parameter.
@@ -582,6 +596,7 @@ func (v *validator) precompute() map[*Schema]bool {
 	v.enumRats = map[*Schema][]*big.Rat{}
 	v.sortedPropertyKeys = map[*Schema][]string{}
 	v.sortedPatternKeys = map[*Schema][]string{}
+	v.itemsPlans = map[*Schema]*itemsPlan{}
 
 	visited := map[*Schema]bool{}
 	v.precomputeSchema(v.root, visited)
@@ -590,7 +605,10 @@ func (v *validator) precompute() map[*Schema]bool {
 }
 
 // precomputeSchema records the derived caches for one schema and recurses into
-// its sub-schemas, guarding against schema graph cycles with visited.
+// its sub-schemas, guarding against schema graph cycles with visited. It is the
+// Compile-time counterpart of the dispatch loop: it runs each keyword row's
+// compile step (nil for rows that precompute nothing), so the per-schema caches
+// a row's eval consults are populated by the same row that reads them.
 func (v *validator) precomputeSchema(schema *Schema, visited map[*Schema]bool) {
 	if schema == nil || visited[schema] {
 		return
@@ -598,45 +616,69 @@ func (v *validator) precomputeSchema(schema *Schema, visited map[*Schema]bool) {
 
 	visited[schema] = true
 
-	if b := computeBounds(schema); b != nil {
-		v.numericBounds[schema] = b
-	}
-
-	if schema.Pattern != "" {
-		re, err := regexcache.Compile(schema.Pattern)
-		v.patternCache[schema] = compiledPattern{re: re, err: err}
-	}
-
-	if len(schema.Properties) > 0 {
-		// The schema's property-name set is fixed; precompute its sorted order
-		// (used for deterministic error order) once instead of re-sorting on
-		// every object instance node.
-		v.sortedPropertyKeys[schema] = slices.Sorted(maps.Keys(schema.Properties))
-	}
-
-	if len(schema.PatternProperties) > 0 {
-		compiled := make(map[string]compiledPattern, len(schema.PatternProperties))
-		for pattern := range schema.PatternProperties {
-			re, err := regexcache.Compile(pattern)
-			compiled[pattern] = compiledPattern{re: re, err: err}
+	for i := range keywordTable {
+		if c := keywordTable[i].compile; c != nil {
+			c(v, schema)
 		}
-
-		v.patternProps[schema] = compiled
-		v.sortedPatternKeys[schema] = slices.Sorted(maps.Keys(schema.PatternProperties))
-	}
-
-	if schema.Const != nil {
-		if r, ok := numrat.SchemaNumberRat(*schema.Const); ok {
-			v.constRats[schema] = r
-		}
-	}
-
-	if rats := numrat.EnumMemberRats(schema.Enum); rats != nil {
-		v.enumRats[schema] = rats
 	}
 
 	for _, e := range SubschemaEntries(schema) {
 		v.precomputeSchema(e.Schema, visited)
+	}
+}
+
+// numericCompile caches a schema's numeric bound keywords as rationals for the
+// numeric row's eval.
+func numericCompile(v *validator, s *Schema) {
+	if b := computeBounds(s); b != nil {
+		v.numericBounds[s] = b
+	}
+}
+
+// enumCompile caches a schema's numeric enum members as rationals by index for
+// the enum row's eval.
+func enumCompile(v *validator, s *Schema) {
+	if rats := numrat.EnumMemberRats(s.Enum); rats != nil {
+		v.enumRats[s] = rats
+	}
+}
+
+// constCompile caches a schema's numeric const value as a rational for the const
+// row's eval.
+func constCompile(v *validator, s *Schema) {
+	if s.Const != nil {
+		if r, ok := numrat.SchemaNumberRat(*s.Const); ok {
+			v.constRats[s] = r
+		}
+	}
+}
+
+// stringCompile caches a schema's compiled Pattern for the string row's eval.
+func stringCompile(v *validator, s *Schema) {
+	if s.Pattern != "" {
+		re, err := regexcache.Compile(s.Pattern)
+		v.patternCache[s] = compiledPattern{re: re, err: err}
+	}
+}
+
+// objectApplicatorsCompile caches a schema's sorted property keys, compiled
+// patternProperties, and sorted pattern keys for the object.applicators row's
+// eval. The key sets are fixed per schema, so the sorts and compiles happen
+// once at Compile time instead of on every object instance node.
+func objectApplicatorsCompile(v *validator, s *Schema) {
+	if len(s.Properties) > 0 {
+		v.sortedPropertyKeys[s] = slices.Sorted(maps.Keys(s.Properties))
+	}
+
+	if len(s.PatternProperties) > 0 {
+		compiled := make(map[string]compiledPattern, len(s.PatternProperties))
+		for pattern := range s.PatternProperties {
+			re, err := regexcache.Compile(pattern)
+			compiled[pattern] = compiledPattern{re: re, err: err}
+		}
+
+		v.patternProps[s] = compiled
+		v.sortedPatternKeys[s] = slices.Sorted(maps.Keys(s.PatternProperties))
 	}
 }
 
@@ -1647,149 +1689,142 @@ func (v *validator) validate(
 		ann = annotations.New()
 	}
 
+	// Drive keyword evaluation from the run's active dispatch rows (filtered once
+	// at Compile by buildActiveRows), evaluated in table order -- the
+	// deterministic error-slice order the tests pin.
+	ctx := evalContext{
+		v: v, schema: schema, instance: instance,
+		instancePath: instancePath, schemaPath: schemaPath, ann: ann,
+	}
+
+	// Draft-07: a $ref with siblings ignores the siblings, so only the $ref row
+	// runs. Under Draft 2020-12 a $ref evaluates alongside its siblings, and a
+	// schema with no $ref runs every active row regardless of draft.
+	onlyRef := v.draft == Draft7 && schema.Ref != ""
+
 	var errs []*ValidationError
 
-	// $ref resolution.
-	if schema.Ref != "" {
-		refErrs := v.validateRef(schema, instance, instancePath, schemaPath, ann)
-		errs = append(errs, refErrs...)
-		// Draft-07: ignore siblings of $ref.
-		if v.draft == Draft7 {
-			return errs
+	for _, e := range v.activeRows {
+		if onlyRef && !e.isRef {
+			continue
 		}
+
+		errs = append(errs, e.eval(ctx)...)
 	}
-
-	// $dynamicRef resolution (2020-12 only).
-	if v.draft == Draft2020 && schema.DynamicRef != "" {
-		errs = append(errs, v.validateDynamicRef(schema, instance, instancePath, schemaPath, ann)...)
-	}
-
-	// Type validation.
-	errs = append(errs, v.validateType(schema, instance, instancePath, schemaPath)...)
-
-	// Enum.
-	errs = append(errs, v.validateEnum(schema, instance, instancePath, schemaPath)...)
-
-	// Const.
-	errs = append(errs, v.validateConst(schema, instance, instancePath, schemaPath)...)
-
-	// Numeric validations.
-	errs = append(errs, v.validateNumeric(schema, instance, instancePath, schemaPath)...)
-
-	// String validations.
-	errs = append(errs, v.validateString(schema, instance, instancePath, schemaPath)...)
-
-	// Array validations.
-	errs = append(errs, v.validateArray(schema, instance, instancePath, schemaPath, ann)...)
-
-	// Object validations.
-	errs = append(errs, v.validateObject(schema, instance, instancePath, schemaPath, ann)...)
-
-	// Composition keywords.
-	errs = append(errs, v.validateComposition(schema, instance, instancePath, schemaPath, ann)...)
-
-	// Conditional keywords.
-	errs = append(errs, v.validateConditional(schema, instance, instancePath, schemaPath, ann)...)
-
-	// Content keywords.
-	errs = append(errs, v.validateContent(schema, instance, instancePath, schemaPath)...)
-
-	// Unevaluated keywords: must run after all other applicator keywords
-	// (properties, patternProperties, additionalProperties, allOf, anyOf,
-	// oneOf, if/then/else, dependentSchemas) so annotations are fully merged.
-	errs = append(errs, v.validateUnevaluated(schema, instance, instancePath, schemaPath, ann)...)
 
 	return errs
 }
 
-// validateUnevaluated checks unevaluatedProperties and unevaluatedItems.
-// These must run after all other applicator keywords.
-func (v *validator) validateUnevaluated(
-	schema *Schema,
-	instance any,
-	instancePath instanceLocation,
-	schemaPath schemaLocation,
-	ann *annotations.Set,
-) []*ValidationError {
-	if v.draft != Draft2020 || ann == nil || !v.vocabs.Unevaluated {
+// evalUnevaluatedProperties checks unevaluatedProperties. It runs in
+// phaseUnevaluated, after every applicator has recorded the properties it
+// evaluated, so the annotation set it consults is complete. The draft and
+// vocabulary gate lives on the table row; the nil-annotation short-circuit
+// stays here because it is a per-node runtime condition, not a static fact.
+//
+//nolint:nestif // Nesting tracks the annotation guards required to apply unevaluatedProperties correctly.
+func evalUnevaluatedProperties(ctx evalContext) []*ValidationError {
+	schema, ann := ctx.schema, ctx.ann
+	if ann == nil || schema.UnevaluatedProperties == nil {
 		return nil
 	}
 
+	obj, ok := ctx.instance.(map[string]any)
+	if !ok || ann.AllPropertiesSet() {
+		return nil
+	}
+
+	// IsEmptySchema implies Not == nil, so the schema is not a false schema: an
+	// empty (always-true) unevaluatedProperties evaluates every remaining
+	// property and can never fail. The saturation flag fully captures that
+	// outcome, so the per-property loop is skipped: it would only re-validate
+	// each property against the empty schema (always passing) and re-record what
+	// SetAllProperties subsumes.
+	if schemashape.IsEmpty(schema.UnevaluatedProperties) {
+		ann.SetAllProperties()
+
+		return nil
+	}
+
+	v := ctx.v
+
 	var errs []*ValidationError
 
-	// UnevaluatedProperties.
-	//nolint:nestif // Nesting tracks the annotation guards required to apply unevaluatedProperties correctly.
-	if schema.UnevaluatedProperties != nil {
-		if obj, ok := instance.(map[string]any); ok && !ann.AllPropertiesSet() {
-			// IsEmptySchema implies Not == nil, so the schema is not a false
-			// schema: an empty (always-true) unevaluatedProperties evaluates
-			// every remaining property and can never fail. The saturation flag
-			// fully captures that outcome, so the per-property loop is skipped:
-			// it would only re-validate each property against the empty schema
-			// (always passing) and re-record what SetAllProperties subsumes.
-			if schemashape.IsEmpty(schema.UnevaluatedProperties) {
-				ann.SetAllProperties()
-			} else {
-				childSchemaPath := schemaPath.kw("unevaluatedProperties")
+	childSchemaPath := ctx.schemaPath.kw("unevaluatedProperties")
 
-				// Iterate in sorted key order so the emitted cause errors are
-				// deterministic, matching the sibling object keywords (properties,
-				// patternProperties, additionalProperties, propertyNames).
-				for _, propName := range slices.Sorted(maps.Keys(obj)) {
-					if ann.Evaluated(propName) {
-						continue
-					}
+	// Iterate in sorted key order so the emitted cause errors are deterministic,
+	// matching the sibling object keywords (properties, patternProperties,
+	// additionalProperties, propertyNames).
+	for _, propName := range slices.Sorted(maps.Keys(obj)) {
+		if ann.Evaluated(propName) {
+			continue
+		}
 
-					val := obj[propName]
+		val := obj[propName]
 
-					childPath := instancePath.key(propName)
-					childErrs := v.validate(schema.UnevaluatedProperties, val, childPath, childSchemaPath, nil)
-					if len(childErrs) == 0 {
-						ann.RecordProperty(propName)
-					} else {
-						errs = append(errs, newError(
-							childPath, childSchemaPath, KeywordUnevaluatedProperties,
-							fmt.Sprintf("property %q is not allowed by unevaluatedProperties", propName),
-							childErrs,
-						))
-					}
-				}
-			}
+		childPath := ctx.instancePath.key(propName)
+		childErrs := v.validate(schema.UnevaluatedProperties, val, childPath, childSchemaPath, nil)
+		if len(childErrs) == 0 {
+			ann.RecordProperty(propName)
+		} else {
+			errs = append(errs, newError(
+				childPath, childSchemaPath, KeywordUnevaluatedProperties,
+				fmt.Sprintf("property %q is not allowed by unevaluatedProperties", propName),
+				childErrs,
+			))
 		}
 	}
 
-	// UnevaluatedItems.
-	if schema.UnevaluatedItems != nil { //nolint:nestif // Validation keyword nesting is inherent.
-		if arr, ok := instance.([]any); ok && !ann.AllItemsSet() {
-			// IsEmptySchema implies Not == nil, so the schema is not a false
-			// schema: an empty (always-true) unevaluatedItems evaluates every
-			// remaining item and can never fail. The saturation flag fully
-			// captures that outcome, so the per-item loop is skipped: it would
-			// only re-validate each item against the empty schema (always
-			// passing) and re-record what SetAllItems subsumes.
-			if schemashape.IsEmpty(schema.UnevaluatedItems) {
-				ann.SetAllItems()
-			} else {
-				childSchemaPath := schemaPath.kw("unevaluatedItems")
+	return errs
+}
 
-				for i, item := range arr {
-					if ann.ItemEvaluated(i) {
-						continue
-					}
+// evalUnevaluatedItems checks unevaluatedItems, the array counterpart of
+// [evalUnevaluatedProperties]; it runs last for the same annotation-completeness
+// reason.
+//
+//nolint:nestif // Validation keyword nesting is inherent.
+func evalUnevaluatedItems(ctx evalContext) []*ValidationError {
+	schema, ann := ctx.schema, ctx.ann
+	if ann == nil || schema.UnevaluatedItems == nil {
+		return nil
+	}
 
-					childPath := instancePath.index(i)
-					childErrs := v.validate(schema.UnevaluatedItems, item, childPath, childSchemaPath, nil)
-					if len(childErrs) == 0 {
-						ann.RecordItem(i)
-					} else {
-						errs = append(errs, newError(
-							childPath, childSchemaPath, KeywordUnevaluatedItems,
-							fmt.Sprintf("item %d is not allowed by unevaluatedItems", i),
-							childErrs,
-						))
-					}
-				}
-			}
+	arr, ok := ctx.instance.([]any)
+	if !ok || ann.AllItemsSet() {
+		return nil
+	}
+
+	// IsEmptySchema implies Not == nil, so the schema is not a false schema: an
+	// empty (always-true) unevaluatedItems evaluates every remaining item and
+	// can never fail. The saturation flag fully captures that outcome, so the
+	// per-item loop is skipped: it would only re-validate each item against the
+	// empty schema (always passing) and re-record what SetAllItems subsumes.
+	if schemashape.IsEmpty(schema.UnevaluatedItems) {
+		ann.SetAllItems()
+
+		return nil
+	}
+
+	v := ctx.v
+
+	var errs []*ValidationError
+
+	childSchemaPath := ctx.schemaPath.kw("unevaluatedItems")
+
+	for i, item := range arr {
+		if ann.ItemEvaluated(i) {
+			continue
+		}
+
+		childPath := ctx.instancePath.index(i)
+		childErrs := v.validate(schema.UnevaluatedItems, item, childPath, childSchemaPath, nil)
+		if len(childErrs) == 0 {
+			ann.RecordItem(i)
+		} else {
+			errs = append(errs, newError(
+				childPath, childSchemaPath, KeywordUnevaluatedItems,
+				fmt.Sprintf("item %d is not allowed by unevaluatedItems", i),
+				childErrs,
+			))
 		}
 	}
 
@@ -1830,16 +1865,9 @@ func isFalseSchema(s *Schema) bool {
 	return IsFalseSchema(s)
 }
 
-// validateType checks the type keyword.
-func (v *validator) validateType(
-	schema *Schema,
-	instance any,
-	instancePath instanceLocation,
-	schemaPath schemaLocation,
-) []*ValidationError {
-	if !v.vocabs.Validation {
-		return nil
-	}
+// evalType checks the type keyword.
+func evalType(ctx evalContext) []*ValidationError {
+	schema := ctx.schema
 
 	types := schema.Types
 	if schema.Type != "" {
@@ -1851,15 +1879,15 @@ func (v *validator) validateType(
 	}
 
 	for _, t := range types {
-		if normalize.MatchesType(instance, t) {
+		if normalize.MatchesType(ctx.instance, t) {
 			return nil
 		}
 	}
 
-	got := normalize.TypeName(instance)
+	got := normalize.TypeName(ctx.instance)
 
 	return []*ValidationError{
-		leafError(instancePath, schemaPath, KeywordType,
+		leafError(ctx.instancePath, ctx.schemaPath, KeywordType,
 			fmt.Sprintf("expected %s, got %q", formatTypes(types), got)),
 	}
 }
@@ -1877,16 +1905,9 @@ func formatTypes(types []string) string {
 	return "[" + strings.Join(parts, ", ") + "]"
 }
 
-// validateEnum checks the enum keyword.
-func (v *validator) validateEnum(
-	schema *Schema,
-	instance any,
-	instancePath instanceLocation,
-	schemaPath schemaLocation,
-) []*ValidationError {
-	if !v.vocabs.Validation {
-		return nil
-	}
+// evalEnum checks the enum keyword.
+func evalEnum(ctx evalContext) []*ValidationError {
+	schema := ctx.schema
 
 	// A nil Enum means the keyword is absent (skip). An empty but non-nil Enum
 	// ("enum": []) permits no values, so every instance fails it.
@@ -1894,7 +1915,7 @@ func (v *validator) validateEnum(
 		return nil
 	}
 
-	rats := v.enumRats[schema]
+	rats := ctx.v.enumRats[schema]
 
 	for i, allowed := range schema.Enum {
 		var allowedRat *big.Rat
@@ -1903,38 +1924,30 @@ func (v *validator) validateEnum(
 			allowedRat = rats[i]
 		}
 
-		if jsonequal.EqualWithRat(allowed, allowedRat, instance) {
+		if jsonequal.EqualWithRat(allowed, allowedRat, ctx.instance) {
 			return nil
 		}
 	}
 
 	return []*ValidationError{
-		leafError(instancePath, schemaPath, KeywordEnum, "value does not match any enum member"),
+		leafError(ctx.instancePath, ctx.schemaPath, KeywordEnum, "value does not match any enum member"),
 	}
 }
 
-// validateConst checks the const keyword.
-func (v *validator) validateConst(
-	schema *Schema,
-	instance any,
-	instancePath instanceLocation,
-	schemaPath schemaLocation,
-) []*ValidationError {
-	if !v.vocabs.Validation {
-		return nil
-	}
-
+// evalConst checks the const keyword.
+func evalConst(ctx evalContext) []*ValidationError {
+	schema := ctx.schema
 	if schema.Const == nil {
 		return nil
 	}
 
 	constVal := *schema.Const
-	if jsonequal.EqualWithRat(constVal, v.constRats[schema], instance) {
+	if jsonequal.EqualWithRat(constVal, ctx.v.constRats[schema], ctx.instance) {
 		return nil
 	}
 
 	return []*ValidationError{
-		leafError(instancePath, schemaPath, KeywordConst, "value does not match const"),
+		leafError(ctx.instancePath, ctx.schemaPath, KeywordConst, "value does not match const"),
 	}
 }
 
@@ -2001,16 +2014,10 @@ func (v *validator) patternPropertyFor(schema *Schema, pattern string) compiledP
 	return compiledPattern{re: re, err: err}
 }
 
-// validateNumeric checks numeric keywords.
-func (v *validator) validateNumeric(
-	schema *Schema,
-	instance any,
-	instancePath instanceLocation,
-	schemaPath schemaLocation,
-) []*ValidationError {
-	if !v.vocabs.Validation {
-		return nil
-	}
+// evalNumeric checks numeric keywords.
+func evalNumeric(ctx evalContext) []*ValidationError {
+	v, schema, instance := ctx.v, ctx.schema, ctx.instance
+	instancePath, schemaPath := ctx.instancePath, ctx.schemaPath
 
 	if !numrat.IsNumeric(instance) {
 		return nil
@@ -2195,14 +2202,15 @@ func (v *validator) validateNumericUnbounded(
 	return errs
 }
 
-// validateString checks string keywords.
-func (v *validator) validateString(
-	schema *Schema,
-	instance any,
-	instancePath instanceLocation,
-	schemaPath schemaLocation,
-) []*ValidationError {
-	str, ok := instance.(string)
+// evalString checks the string length and pattern keywords (minLength,
+// maxLength, pattern). The format keyword is a separate row ([evalFormat]): it
+// belongs to core rather than the validation vocabulary and has its own opt-in
+// gate, so splitting it keeps each row's gate a single declarative fact.
+func evalString(ctx evalContext) []*ValidationError {
+	schema := ctx.schema
+	instancePath, schemaPath := ctx.instancePath, ctx.schemaPath
+
+	str, ok := ctx.instance.(string)
 	if !ok {
 		// Json.Number is a distinct type, so it fails this assertion and string
 		// keywords correctly do not apply to numbers.
@@ -2211,263 +2219,284 @@ func (v *validator) validateString(
 
 	var errs []*ValidationError
 
-	//nolint:nestif // One branch per string validation keyword.
-	if v.vocabs.Validation {
-		// RuneCountInString avoids allocating a []rune; only count when a
-		// length keyword is present.
-		if schema.MinLength != nil || schema.MaxLength != nil {
-			runeLen := utf8.RuneCountInString(str)
+	// RuneCountInString avoids allocating a []rune; only count when a length
+	// keyword is present.
+	if schema.MinLength != nil || schema.MaxLength != nil {
+		runeLen := utf8.RuneCountInString(str)
 
-			if schema.MinLength != nil && runeLen < *schema.MinLength {
-				errs = append(errs, leafError(instancePath, schemaPath, KeywordMinLength,
-					fmt.Sprintf("string length %d is less than %d", runeLen, *schema.MinLength)))
-			}
-
-			if schema.MaxLength != nil && runeLen > *schema.MaxLength {
-				errs = append(errs, leafError(instancePath, schemaPath, KeywordMaxLength,
-					fmt.Sprintf("string length %d is greater than %d", runeLen, *schema.MaxLength)))
-			}
+		if schema.MinLength != nil && runeLen < *schema.MinLength {
+			errs = append(errs, leafError(instancePath, schemaPath, KeywordMinLength,
+				fmt.Sprintf("string length %d is less than %d", runeLen, *schema.MinLength)))
 		}
 
-		if schema.Pattern != "" {
-			cp := v.patternFor(schema)
-			switch {
-			case cp.err != nil:
-				// A pattern Go's RE2 cannot compile (e.g. an ECMA-262
-				// backreference or lookaround) fails closed: the constraint
-				// cannot be evaluated, so no string is accepted under it rather
-				// than silently treating every string as a match.
-				errs = append(errs, leafError(instancePath, schemaPath, KeywordPattern,
-					fmt.Sprintf("pattern %q cannot be compiled", schema.Pattern)))
-
-			case !cp.re.MatchString(str):
-				errs = append(errs, leafError(instancePath, schemaPath, KeywordPattern,
-					fmt.Sprintf("string does not match pattern %q", schema.Pattern)))
-			}
+		if schema.MaxLength != nil && runeLen > *schema.MaxLength {
+			errs = append(errs, leafError(instancePath, schemaPath, KeywordMaxLength,
+				fmt.Sprintf("string length %d is greater than %d", runeLen, *schema.MaxLength)))
 		}
 	}
 
-	if schema.Format != "" && v.formatsEnabled {
-		if fv, exists := v.formatCheckers[schema.Format]; exists {
-			err := fv.ValidateFormat(v.runContext(), schema.Format, str)
-			if err != nil {
-				e := leafError(instancePath, schemaPath, KeywordFormat,
-					fmt.Sprintf("string does not match format %q: %v", schema.Format, err))
-				// Attach the checker's error so a sentinel it returns stays
-				// reachable via errors.Is/As on the validation result, matching
-				// the $ref-resolution path (validateResolvedRef).
-				e.err = err
-				errs = append(errs, e)
-			}
+	if schema.Pattern != "" {
+		cp := ctx.v.patternFor(schema)
+		switch {
+		case cp.err != nil:
+			// A pattern Go's RE2 cannot compile (e.g. an ECMA-262 backreference
+			// or lookaround) fails closed: the constraint cannot be evaluated, so
+			// no string is accepted under it rather than silently treating every
+			// string as a match.
+			errs = append(errs, leafError(instancePath, schemaPath, KeywordPattern,
+				fmt.Sprintf("pattern %q cannot be compiled", schema.Pattern)))
+
+		case !cp.re.MatchString(str):
+			errs = append(errs, leafError(instancePath, schemaPath, KeywordPattern,
+				fmt.Sprintf("string does not match pattern %q", schema.Pattern)))
 		}
 	}
 
 	return errs
 }
 
-// validateArray checks array keywords.
-func (v *validator) validateArray(
-	schema *Schema,
-	instance any,
-	instancePath instanceLocation,
-	schemaPath schemaLocation,
-	ann *annotations.Set,
-) []*ValidationError {
-	arr, ok := instance.([]any)
+// evalFormat asserts the format keyword against a string instance. Format is
+// annotation-only unless the run enables assertion (the row's optInFormat gate),
+// so this is reached only when assertion is on.
+func evalFormat(ctx evalContext) []*ValidationError {
+	schema := ctx.schema
+
+	str, ok := ctx.instance.(string)
 	if !ok {
 		return nil
 	}
 
+	if schema.Format == "" {
+		return nil
+	}
+
+	fv, exists := ctx.v.formatCheckers[schema.Format]
+	if !exists {
+		return nil
+	}
+
+	err := fv.ValidateFormat(ctx.v.runContext(), schema.Format, str)
+	if err == nil {
+		return nil
+	}
+
+	e := leafError(ctx.instancePath, ctx.schemaPath, KeywordFormat,
+		fmt.Sprintf("string does not match format %q: %v", schema.Format, err))
+	// Attach the checker's error so a sentinel it returns stays reachable via
+	// errors.Is/As on the validation result, matching the $ref-resolution path
+	// (validateResolvedRef).
+	e.err = err
+
+	return []*ValidationError{e}
+}
+
+// evalArrayItems checks the array item applicator keywords (prefixItems, items,
+// additionalItems) by iterating the Compile-time [itemsPlan], which normalizes
+// the two draft spellings of tuple and trailing items away, so this eval carries
+// no per-node draft branch. The annotation watermark it records is exact: the
+// tuple marks every index it applied a subschema to regardless of per-item
+// success, and the rest marks all items only when it is the 2020-12 items
+// keyword (restMarksAllItems) and actually reached a trailing element.
+func evalArrayItems(ctx evalContext) []*ValidationError {
+	arr, ok := ctx.instance.([]any)
+	if !ok {
+		return nil
+	}
+
+	plan := ctx.v.itemsPlanFor(ctx.schema)
+	if plan == nil {
+		return nil
+	}
+
+	v, ann := ctx.v, ctx.ann
+	instancePath, schemaPath := ctx.instancePath, ctx.schemaPath
+
 	var errs []*ValidationError
 
-	// Applicator vocab: prefixItems, items, additionalItems, contains.
-	if v.vocabs.Applicator { //nolint:nestif // Vocabulary-gated applicator keywords require nesting.
-		// PrefixItems (2020-12) or items as array (draft-07).
-		var (
-			prefixSchemas []*Schema
-			prefixKeyword string
-		)
-
-		if v.draft == Draft2020 && len(schema.PrefixItems) > 0 {
-			prefixSchemas = schema.PrefixItems
-			prefixKeyword = KeywordPrefixItems
-		} else if v.draft == Draft7 && len(schema.ItemsArray) > 0 {
-			prefixSchemas = schema.ItemsArray
-			prefixKeyword = KeywordItems
+	for i, ps := range plan.tuple {
+		if i >= len(arr) {
+			break
 		}
 
-		for i, ps := range prefixSchemas {
-			if i >= len(arr) {
-				break
-			}
+		childPath := instancePath.index(i)
+		childSchemaPath := schemaPath.kw(plan.tupleLabel).idx(i)
+		childErrs := v.validate(ps, arr[i], childPath, childSchemaPath, nil)
+		labelFalseSchemaKeyword(childErrs, ps, plan.tupleLabel)
 
+		errs = append(errs, childErrs...)
+	}
+
+	// The tuple annotates every index it applied a subschema to, regardless of
+	// per-item success (2020-12 core §10.3.1.1: "the largest index to which this
+	// keyword applied a subschema"). Because this walk collects all errors
+	// instead of failing fast, the whole applied range is noted once here;
+	// gating on success would leave a failed index unevaluated and let
+	// unevaluatedItems re-fire on it.
+	if len(plan.tuple) > 0 {
+		ann.ExtendItems(min(len(plan.tuple), len(arr)))
+	}
+
+	if plan.rest != nil {
+		// The rest applies to indexes at or beyond the tuple length (every index
+		// when the tuple is empty). The schema location is invariant across
+		// elements; build it once.
+		childSchemaPath := schemaPath.kw(plan.restLabel)
+
+		for i := len(plan.tuple); i < len(arr); i++ {
 			childPath := instancePath.index(i)
-			childSchemaPath := schemaPath.kw(prefixKeyword).idx(i)
-			childErrs := v.validate(ps, arr[i], childPath, childSchemaPath, nil)
-			labelFalseSchemaKeyword(childErrs, ps, prefixKeyword)
+			childErrs := v.validate(plan.rest, arr[i], childPath, childSchemaPath, nil)
+			labelFalseSchemaKeyword(childErrs, plan.rest, plan.restLabel)
 
 			errs = append(errs, childErrs...)
 		}
 
-		// PrefixItems annotates every index it applied a subschema to, regardless
-		// of per-item success (2020-12 core §10.3.1.1: "the largest index to which
-		// this keyword applied a subschema"). Because this walk collects all
-		// errors instead of failing fast, the whole applied range is noted once
-		// here; gating on success would leave a failed index unevaluated and let
-		// unevaluatedItems re-fire on it.
-		if len(prefixSchemas) > 0 {
-			ann.ExtendItems(min(len(prefixSchemas), len(arr)))
-		}
-
-		// Items (single schema).
-		if schema.Items != nil && len(prefixSchemas) == 0 {
-			// Single-schema items: applies to all elements.
-			childSchemaPath := schemaPath.kw("items")
-
-			for i, item := range arr {
-				childPath := instancePath.index(i)
-				childErrs := v.validate(schema.Items, item, childPath, childSchemaPath, nil)
-				labelFalseSchemaKeyword(childErrs, schema.Items, KeywordItems)
-
-				errs = append(errs, childErrs...)
-			}
-
+		// Mark all items evaluated only for the 2020-12 items rest, and only when
+		// it actually covered a trailing element: an empty tuple means it covered
+		// every index (unconditional), otherwise only when the array outran the
+		// tuple. Draft-07 additionalItems records no watermark (restMarksAllItems
+		// is false).
+		if plan.restMarksAllItems && (len(plan.tuple) == 0 || len(arr) > len(plan.tuple)) {
 			ann.SetAllItems()
-		} else if schema.Items != nil && len(prefixSchemas) > 0 {
-			// In 2020-12, items after prefixItems applies to the remaining
-			// elements. This branch is reachable only under 2020-12: upstream
-			// Resolve forbids Items and ItemsArray from both being set, so under
-			// draft-07 (where prefixSchemas comes from ItemsArray) Items is nil
-			// here. Draft-07's trailing-element keyword is additionalItems,
-			// handled below.
-			childSchemaPath := schemaPath.kw("items")
-
-			for i := len(prefixSchemas); i < len(arr); i++ {
-				childPath := instancePath.index(i)
-				childErrs := v.validate(schema.Items, arr[i], childPath, childSchemaPath, nil)
-				labelFalseSchemaKeyword(childErrs, schema.Items, KeywordItems)
-
-				errs = append(errs, childErrs...)
-			}
-
-			// Mark all items evaluated only when items actually applied to a
-			// trailing element; for an array no longer than prefixItems the
-			// prefix already covers every index via itemsEnd.
-			if len(arr) > len(prefixSchemas) {
-				ann.SetAllItems()
-			}
-		}
-
-		// AdditionalItems (draft-07 only).
-		if v.draft == Draft7 && schema.AdditionalItems != nil && len(schema.ItemsArray) > 0 {
-			childSchemaPath := schemaPath.kw("additionalItems")
-
-			for i := len(schema.ItemsArray); i < len(arr); i++ {
-				childPath := instancePath.index(i)
-				childErrs := v.validate(schema.AdditionalItems, arr[i], childPath, childSchemaPath, nil)
-				labelFalseSchemaKeyword(childErrs, schema.AdditionalItems, KeywordAdditionalItems)
-
-				errs = append(errs, childErrs...)
-			}
-		}
-
-		// Contains (applicator vocab).
-		if schema.Contains != nil {
-			matchCount := 0
-
-			// The contains schema location is invariant across elements; build it
-			// once rather than rebuilding it on every iteration.
-			containsSchemaPath := schemaPath.kw("contains")
-
-			for i, item := range arr {
-				childErrs := v.validate(schema.Contains, item, instancePath.index(i), containsSchemaPath, nil)
-				if len(childErrs) == 0 {
-					matchCount++
-
-					// Record the matched index as the contains annotation (JSON
-					// Schema 2020-12 core 10.3.1.3) as it is found, independent of
-					// min/maxContains, so a matched item stays evaluated for
-					// unevaluatedItems even when the count violates those separate
-					// assertions emitted below. RecordItem is nil-safe and order
-					// independent, so recording here needs no second pass.
-					ann.RecordItem(i)
-				}
-			}
-
-			// The contains-count assertion -- the default minContains=1 floor and
-			// the optional minContains/maxContains bounds -- belongs to the
-			// 2020-12 validation vocabulary, so under Draft 2020-12 it is skipped
-			// when that vocabulary is disabled; contains then only records its
-			// match annotation above. Draft-07 has no vocabularies, so the default
-			// contains assertion always applies there.
-			if v.draft != Draft2020 || v.vocabs.Validation {
-				minContains := 1
-				if v.draft == Draft2020 && schema.MinContains != nil {
-					minContains = *schema.MinContains
-				}
-
-				maxContains := -1
-				if v.draft == Draft2020 && schema.MaxContains != nil {
-					maxContains = *schema.MaxContains
-				}
-
-				if matchCount < minContains {
-					// An explicit minContains owns the violation; without it the
-					// shortfall is a plain contains failure (default minContains=1).
-					keyword := KeywordContains
-					if v.draft == Draft2020 && schema.MinContains != nil {
-						keyword = KeywordMinContains
-					}
-
-					errs = append(errs, leafError(instancePath, schemaPath, keyword,
-						fmt.Sprintf("array has %d matching items, minimum is %d", matchCount, minContains)))
-				}
-
-				if maxContains >= 0 && matchCount > maxContains {
-					errs = append(errs, leafError(instancePath, schemaPath, KeywordMaxContains,
-						fmt.Sprintf("array has %d matching items, maximum is %d", matchCount, maxContains)))
-				}
-			}
-		}
-	}
-
-	// Validation vocab: minItems, maxItems, uniqueItems.
-	//nolint:nestif // One branch per array validation keyword.
-	if v.vocabs.Validation {
-		// MinItems.
-		if schema.MinItems != nil && len(arr) < *schema.MinItems {
-			errs = append(errs, leafError(instancePath, schemaPath, KeywordMinItems,
-				fmt.Sprintf("array has %d items, minimum is %d", len(arr), *schema.MinItems)))
-		}
-
-		// MaxItems.
-		if schema.MaxItems != nil && len(arr) > *schema.MaxItems {
-			errs = append(errs, leafError(instancePath, schemaPath, KeywordMaxItems,
-				fmt.Sprintf("array has %d items, maximum is %d", len(arr), *schema.MaxItems)))
-		}
-
-		// UniqueItems.
-		if schema.UniqueItems && jsonequal.HasDuplicates(arr) {
-			errs = append(errs, leafError(instancePath, schemaPath, KeywordUniqueItems,
-				"array contains duplicate items"))
 		}
 	}
 
 	return errs
 }
 
-// validateObject checks object keywords.
-func (v *validator) validateObject(
-	schema *Schema,
-	instance any,
-	instancePath instanceLocation,
-	schemaPath schemaLocation,
-	ann *annotations.Set,
-) []*ValidationError {
-	obj, ok := instance.(map[string]any)
+// evalContains checks the contains keyword and its count assertion (the default
+// minContains=1 floor and the optional minContains/maxContains bounds). The
+// match loop records the contains annotation for every matching item
+// unconditionally (so unevaluatedItems sees them even when the count fails); the
+// count assertion is sub-gated on the validation vocabulary, since it belongs
+// there while the match/annotation belongs to the applicator vocabulary that
+// gates this whole row.
+func evalContains(ctx evalContext) []*ValidationError {
+	schema := ctx.schema
+	if schema.Contains == nil {
+		return nil
+	}
+
+	arr, ok := ctx.instance.([]any)
 	if !ok {
 		return nil
 	}
+
+	v, ann := ctx.v, ctx.ann
+	instancePath, schemaPath := ctx.instancePath, ctx.schemaPath
+
+	var errs []*ValidationError
+
+	matchCount := 0
+
+	// The contains schema location is invariant across elements; build it once
+	// rather than rebuilding it on every iteration.
+	containsSchemaPath := schemaPath.kw("contains")
+
+	for i, item := range arr {
+		childErrs := v.validate(schema.Contains, item, instancePath.index(i), containsSchemaPath, nil)
+		if len(childErrs) == 0 {
+			matchCount++
+
+			// Record the matched index as the contains annotation (JSON Schema
+			// 2020-12 core 10.3.1.3) as it is found, independent of min/maxContains,
+			// so a matched item stays evaluated for unevaluatedItems even when the
+			// count violates those separate assertions emitted below. RecordItem is
+			// nil-safe and order independent, so recording here needs no second pass.
+			ann.RecordItem(i)
+		}
+	}
+
+	// The contains-count assertion belongs to the 2020-12 validation vocabulary,
+	// so under Draft 2020-12 it is skipped when that vocabulary is disabled;
+	// contains then only records its match annotation above. Under Draft-07
+	// vocabActive(vocabValidation) is always true, so the default contains
+	// assertion always applies there.
+	if !v.vocabActive(vocabValidation) {
+		return errs
+	}
+
+	minContains := 1
+	if v.draft == Draft2020 && schema.MinContains != nil {
+		minContains = *schema.MinContains
+	}
+
+	maxContains := -1
+	if v.draft == Draft2020 && schema.MaxContains != nil {
+		maxContains = *schema.MaxContains
+	}
+
+	if matchCount < minContains {
+		// An explicit minContains owns the violation; without it the shortfall is
+		// a plain contains failure (default minContains=1).
+		keyword := KeywordContains
+		if v.draft == Draft2020 && schema.MinContains != nil {
+			keyword = KeywordMinContains
+		}
+
+		errs = append(errs, leafError(instancePath, schemaPath, keyword,
+			fmt.Sprintf("array has %d matching items, minimum is %d", matchCount, minContains)))
+	}
+
+	if maxContains >= 0 && matchCount > maxContains {
+		errs = append(errs, leafError(instancePath, schemaPath, KeywordMaxContains,
+			fmt.Sprintf("array has %d matching items, maximum is %d", matchCount, maxContains)))
+	}
+
+	return errs
+}
+
+// evalArrayLength checks the array length and uniqueness keywords (minItems,
+// maxItems, uniqueItems).
+func evalArrayLength(ctx evalContext) []*ValidationError {
+	schema := ctx.schema
+
+	arr, ok := ctx.instance.([]any)
+	if !ok {
+		return nil
+	}
+
+	instancePath, schemaPath := ctx.instancePath, ctx.schemaPath
+
+	var errs []*ValidationError
+
+	if schema.MinItems != nil && len(arr) < *schema.MinItems {
+		errs = append(errs, leafError(instancePath, schemaPath, KeywordMinItems,
+			fmt.Sprintf("array has %d items, minimum is %d", len(arr), *schema.MinItems)))
+	}
+
+	if schema.MaxItems != nil && len(arr) > *schema.MaxItems {
+		errs = append(errs, leafError(instancePath, schemaPath, KeywordMaxItems,
+			fmt.Sprintf("array has %d items, maximum is %d", len(arr), *schema.MaxItems)))
+	}
+
+	if schema.UniqueItems && jsonequal.HasDuplicates(arr) {
+		errs = append(errs, leafError(instancePath, schemaPath, KeywordUniqueItems,
+			"array contains duplicate items"))
+	}
+
+	return errs
+}
+
+// evalObjectApplicators checks the object applicator cluster (properties,
+// patternProperties, additionalProperties, propertyNames). These stay one row
+// because additionalProperties reads the set of properties matched by this
+// schema's own properties/patternProperties -- a per-node local, deliberately
+// not the cross-subschema annotation rollup -- and that set plus the sorted
+// instance keys are locals the four keywords share. The dependentSchemas
+// keyword is a separate row: it needs no local matched-set and carries a
+// 2020-12-only gate.
+//
+//nolint:nestif // One branch per object applicator keyword; flattening would not reduce the inherent fan-out.
+func evalObjectApplicators(ctx evalContext) []*ValidationError {
+	schema, ann := ctx.schema, ctx.ann
+
+	obj, ok := ctx.instance.(map[string]any)
+	if !ok {
+		return nil
+	}
+
+	v := ctx.v
+	instancePath, schemaPath := ctx.instancePath, ctx.schemaPath
 
 	var errs []*ValidationError
 
@@ -2479,17 +2508,65 @@ func (v *validator) validateObject(
 		localEvaluated = map[string]bool{}
 	}
 
-	// Applicator vocab: properties, patternProperties, additionalProperties,
-	// propertyNames, dependentSchemas.
-	//nolint:nestif // One branch per object applicator keyword; flattening would not reduce the inherent fan-out.
-	if v.vocabs.Applicator {
-		// Properties. Iterate in sorted-key order so the emitted error order is
-		// deterministic; Go map iteration is randomized. The key set is fixed
-		// per schema, so the sort is precomputed at Compile time.
-		for _, propName := range v.propertyKeysFor(schema) {
-			propSchema := schema.Properties[propName]
-			val, exists := obj[propName]
-			if !exists {
+	// Properties. Iterate in sorted-key order so the emitted error order is
+	// deterministic; Go map iteration is randomized. The key set is fixed
+	// per schema, so the sort is precomputed at Compile time.
+	for _, propName := range v.propertyKeysFor(schema) {
+		propSchema := schema.Properties[propName]
+		val, exists := obj[propName]
+		if !exists {
+			continue
+		}
+
+		if localEvaluated != nil {
+			localEvaluated[propName] = true
+		}
+
+		ann.RecordProperty(propName)
+
+		childPath := instancePath.key(propName)
+		childSchemaPath := schemaPath.kw("properties").key(propName)
+		childErrs := v.validate(propSchema, val, childPath, childSchemaPath, nil)
+		labelFalseSchemaKeyword(childErrs, propSchema, KeywordProperties)
+
+		errs = append(errs, childErrs...)
+	}
+
+	// PatternProperties, additionalProperties, and propertyNames all iterate
+	// the instance keys in sorted order; compute that ordering once and share
+	// it rather than re-sorting per pattern and per keyword. The applicator
+	// walk never mutates obj.
+	var sortedObjKeys []string
+
+	if len(schema.PatternProperties) > 0 || schema.AdditionalProperties != nil || schema.PropertyNames != nil {
+		sortedObjKeys = slices.Sorted(maps.Keys(obj))
+	}
+
+	// PatternProperties. Sorted iteration keeps the error order
+	// deterministic; the key set is fixed, so the sort is precomputed.
+	for _, pattern := range v.patternKeysFor(schema) {
+		patternSchema := schema.PatternProperties[pattern]
+
+		// One schema-path location per pattern, shared by the error branch
+		// and every matching property rather than rebuilt for each.
+		patternSchemaPath := schemaPath.kw("patternProperties").key(pattern)
+
+		cp := v.patternPropertyFor(schema, pattern)
+		if cp.err != nil {
+			// A pattern Go's RE2 cannot compile fails closed: the keyword
+			// cannot decide which properties it governs, so the object is
+			// rejected rather than silently dropping the subschema. The
+			// location names the pattern member, so the keyword token and
+			// path differ: build through newError with the full location.
+			errs = append(errs, newError(instancePath, patternSchemaPath, KeywordPatternProperties,
+				fmt.Sprintf("pattern %q cannot be compiled", pattern), nil))
+
+			continue
+		}
+
+		for _, propName := range sortedObjKeys {
+			val := obj[propName]
+			if !cp.re.MatchString(propName) {
 				continue
 			}
 
@@ -2500,155 +2577,140 @@ func (v *validator) validateObject(
 			ann.RecordProperty(propName)
 
 			childPath := instancePath.key(propName)
-			childSchemaPath := schemaPath.kw("properties").key(propName)
-			childErrs := v.validate(propSchema, val, childPath, childSchemaPath, nil)
-			labelFalseSchemaKeyword(childErrs, propSchema, KeywordProperties)
+			childErrs := v.validate(patternSchema, val, childPath, patternSchemaPath, nil)
+			labelFalseSchemaKeyword(childErrs, patternSchema, KeywordPatternProperties)
+
+			errs = append(errs, childErrs...)
+		}
+	}
+
+	// AdditionalProperties: only considers sibling properties and patternProperties.
+	if schema.AdditionalProperties != nil {
+		childSchemaPath := schemaPath.kw("additionalProperties")
+
+		for _, propName := range sortedObjKeys {
+			val := obj[propName]
+			if localEvaluated[propName] {
+				continue
+			}
+
+			ann.RecordProperty(propName)
+
+			childPath := instancePath.key(propName)
+			childErrs := v.validate(schema.AdditionalProperties, val, childPath, childSchemaPath, nil)
+			labelFalseSchemaKeyword(childErrs, schema.AdditionalProperties, KeywordAdditionalProperties)
 
 			errs = append(errs, childErrs...)
 		}
 
-		// PatternProperties, additionalProperties, and propertyNames all iterate
-		// the instance keys in sorted order; compute that ordering once and share
-		// it rather than re-sorting per pattern and per keyword. The applicator
-		// walk never mutates obj.
-		var sortedObjKeys []string
+		ann.SetAllProperties()
+	}
 
-		if len(schema.PatternProperties) > 0 || schema.AdditionalProperties != nil || schema.PropertyNames != nil {
-			sortedObjKeys = slices.Sorted(maps.Keys(obj))
-		}
+	// PropertyNames. The constraint is on the key, not its value, and RFC
+	// 6901 gives a key no JSON Pointer of its own, so a violation borrows
+	// the property's location: the wrapping error (and its causes) carry
+	// the property's instance path, with Keyword "propertyNames" and the
+	// offending name in the message identifying which key failed and which
+	// object it belongs to.
+	if schema.PropertyNames != nil {
+		// The propertyNames schema location is invariant across keys; build it
+		// once rather than rebuilding it on every iteration.
+		childSchemaPath := schemaPath.kw("propertyNames")
 
-		// PatternProperties. Sorted iteration keeps the error order
-		// deterministic; the key set is fixed, so the sort is precomputed.
-		for _, pattern := range v.patternKeysFor(schema) {
-			patternSchema := schema.PatternProperties[pattern]
-
-			// One schema-path location per pattern, shared by the error branch
-			// and every matching property rather than rebuilt for each.
-			patternSchemaPath := schemaPath.kw("patternProperties").key(pattern)
-
-			cp := v.patternPropertyFor(schema, pattern)
-			if cp.err != nil {
-				// A pattern Go's RE2 cannot compile fails closed: the keyword
-				// cannot decide which properties it governs, so the object is
-				// rejected rather than silently dropping the subschema. The
-				// location names the pattern member, so the keyword token and
-				// path differ: build through newError with the full location.
-				errs = append(errs, newError(instancePath, patternSchemaPath, KeywordPatternProperties,
-					fmt.Sprintf("pattern %q cannot be compiled", pattern), nil))
-
-				continue
+		for _, propName := range sortedObjKeys {
+			childPath := instancePath.key(propName)
+			childErrs := v.validate(schema.PropertyNames, propName, childPath, childSchemaPath, nil)
+			if len(childErrs) > 0 {
+				errs = append(errs, newError(
+					childPath, childSchemaPath, KeywordPropertyNames,
+					fmt.Sprintf("property name %q is invalid", propName), childErrs,
+				))
 			}
-
-			for _, propName := range sortedObjKeys {
-				val := obj[propName]
-				if !cp.re.MatchString(propName) {
-					continue
-				}
-
-				if localEvaluated != nil {
-					localEvaluated[propName] = true
-				}
-
-				ann.RecordProperty(propName)
-
-				childPath := instancePath.key(propName)
-				childErrs := v.validate(patternSchema, val, childPath, patternSchemaPath, nil)
-				labelFalseSchemaKeyword(childErrs, patternSchema, KeywordPatternProperties)
-
-				errs = append(errs, childErrs...)
-			}
-		}
-
-		// AdditionalProperties: only considers sibling properties and patternProperties.
-		if schema.AdditionalProperties != nil {
-			childSchemaPath := schemaPath.kw("additionalProperties")
-
-			for _, propName := range sortedObjKeys {
-				val := obj[propName]
-				if localEvaluated[propName] {
-					continue
-				}
-
-				ann.RecordProperty(propName)
-
-				childPath := instancePath.key(propName)
-				childErrs := v.validate(schema.AdditionalProperties, val, childPath, childSchemaPath, nil)
-				labelFalseSchemaKeyword(childErrs, schema.AdditionalProperties, KeywordAdditionalProperties)
-
-				errs = append(errs, childErrs...)
-			}
-
-			ann.SetAllProperties()
-		}
-
-		// PropertyNames. The constraint is on the key, not its value, and RFC
-		// 6901 gives a key no JSON Pointer of its own, so a violation borrows
-		// the property's location: the wrapping error (and its causes) carry
-		// the property's instance path, with Keyword "propertyNames" and the
-		// offending name in the message identifying which key failed and which
-		// object it belongs to.
-		if schema.PropertyNames != nil {
-			// The propertyNames schema location is invariant across keys; build it
-			// once rather than rebuilding it on every iteration.
-			childSchemaPath := schemaPath.kw("propertyNames")
-
-			for _, propName := range sortedObjKeys {
-				childPath := instancePath.key(propName)
-				childErrs := v.validate(schema.PropertyNames, propName, childPath, childSchemaPath, nil)
-				if len(childErrs) > 0 {
-					errs = append(errs, newError(
-						childPath, childSchemaPath, KeywordPropertyNames,
-						fmt.Sprintf("property name %q is invalid", propName), childErrs,
-					))
-				}
-			}
-		}
-
-		// DependentSchemas (2020-12).
-		if v.draft == Draft2020 {
-			errs = append(errs, v.validateSchemaDependencies(
-				schema.DependentSchemas, KeywordDependentSchemas, instance, obj, instancePath, schemaPath, ann)...)
 		}
 	}
 
-	// Validation vocab: required, minProperties, maxProperties, dependentRequired.
-	//nolint:nestif // One branch per object validation keyword.
-	if v.vocabs.Validation {
-		// Required.
-		for _, reqProp := range schema.Required {
-			if _, exists := obj[reqProp]; !exists {
-				errs = append(errs, leafError(instancePath, schemaPath, KeywordRequired,
-					fmt.Sprintf("missing required property %q", reqProp)))
-			}
-		}
+	return errs
+}
 
-		// MinProperties.
-		if schema.MinProperties != nil && len(obj) < *schema.MinProperties {
-			errs = append(errs, leafError(instancePath, schemaPath, KeywordMinProperties,
-				fmt.Sprintf("object has %d properties, minimum is %d", len(obj), *schema.MinProperties)))
-		}
+// evalDependentSchemas checks the 2020-12 dependentSchemas keyword. Its table
+// row gates it on the applicator vocabulary and the 2020-12-and-up draft range.
+func evalDependentSchemas(ctx evalContext) []*ValidationError {
+	obj, ok := ctx.instance.(map[string]any)
+	if !ok {
+		return nil
+	}
 
-		// MaxProperties.
-		if schema.MaxProperties != nil && len(obj) > *schema.MaxProperties {
-			errs = append(errs, leafError(instancePath, schemaPath, KeywordMaxProperties,
-				fmt.Sprintf("object has %d properties, maximum is %d", len(obj), *schema.MaxProperties)))
-		}
+	return ctx.v.validateSchemaDependencies(
+		ctx.schema.DependentSchemas, KeywordDependentSchemas,
+		ctx.instance, obj, ctx.instancePath, ctx.schemaPath, ctx.ann)
+}
 
-		// DependentRequired (2020-12).
-		if v.draft == Draft2020 {
-			errs = append(errs, v.validateRequiredDependencies(
-				schema.DependentRequired, KeywordDependentRequired, obj, instancePath, schemaPath)...)
+// evalObjectCount checks the object count keywords (required, minProperties,
+// maxProperties).
+func evalObjectCount(ctx evalContext) []*ValidationError {
+	schema := ctx.schema
+
+	obj, ok := ctx.instance.(map[string]any)
+	if !ok {
+		return nil
+	}
+
+	instancePath, schemaPath := ctx.instancePath, ctx.schemaPath
+
+	var errs []*ValidationError
+
+	for _, reqProp := range schema.Required {
+		if _, exists := obj[reqProp]; !exists {
+			errs = append(errs, leafError(instancePath, schemaPath, KeywordRequired,
+				fmt.Sprintf("missing required property %q", reqProp)))
 		}
 	}
 
-	// Dependencies (legacy): DependencySchemas and DependencyStrings, both
-	// derived from the draft-07 `dependencies` keyword. Honored under Draft 2020-12
-	// too for backward compatibility (the keyword was split into dependentSchemas
-	// and dependentRequired there, but accepting the legacy form aids migration and
-	// matches the optional dependencies-compatibility suite). Ungated by vocabulary:
-	// vocabulary is a 2020-12 concept and the legacy keyword predates it.
+	if schema.MinProperties != nil && len(obj) < *schema.MinProperties {
+		errs = append(errs, leafError(instancePath, schemaPath, KeywordMinProperties,
+			fmt.Sprintf("object has %d properties, minimum is %d", len(obj), *schema.MinProperties)))
+	}
+
+	if schema.MaxProperties != nil && len(obj) > *schema.MaxProperties {
+		errs = append(errs, leafError(instancePath, schemaPath, KeywordMaxProperties,
+			fmt.Sprintf("object has %d properties, maximum is %d", len(obj), *schema.MaxProperties)))
+	}
+
+	return errs
+}
+
+// evalDependentRequired checks the 2020-12 dependentRequired keyword, gated on
+// the validation vocabulary and the 2020-12-and-up draft range by its table row.
+func evalDependentRequired(ctx evalContext) []*ValidationError {
+	obj, ok := ctx.instance.(map[string]any)
+	if !ok {
+		return nil
+	}
+
+	return ctx.v.validateRequiredDependencies(
+		ctx.schema.DependentRequired, KeywordDependentRequired, obj, ctx.instancePath, ctx.schemaPath)
+}
+
+// evalLegacyDependencies checks the legacy draft-07 dependencies keyword, which
+// upstream splits into DependencySchemas and DependencyStrings. It is honored
+// under Draft 2020-12 too for backward compatibility (the keyword was split into
+// dependentSchemas and dependentRequired there, but accepting the legacy form
+// aids migration and matches the optional dependencies-compatibility suite).
+// Ungated by vocabulary: vocabulary is a 2020-12 concept and the legacy keyword
+// predates it, so its table row carries the always-active core group.
+func evalLegacyDependencies(ctx evalContext) []*ValidationError {
+	obj, ok := ctx.instance.(map[string]any)
+	if !ok {
+		return nil
+	}
+
+	v, schema := ctx.v, ctx.schema
+	instancePath, schemaPath := ctx.instancePath, ctx.schemaPath
+
+	var errs []*ValidationError
+
 	errs = append(errs, v.validateSchemaDependencies(
-		schema.DependencySchemas, KeywordDependencies, instance, obj, instancePath, schemaPath, ann)...)
+		schema.DependencySchemas, KeywordDependencies, ctx.instance, obj, instancePath, schemaPath, ctx.ann)...)
 	errs = append(errs, v.validateRequiredDependencies(
 		schema.DependencyStrings, KeywordDependencies, obj, instancePath, schemaPath)...)
 
@@ -2720,134 +2782,162 @@ func (v *validator) validateRequiredDependencies(
 	return errs
 }
 
-// validateComposition checks allOf, anyOf, oneOf, not.
-func (v *validator) validateComposition(
-	schema *Schema,
-	instance any,
-	instancePath instanceLocation,
-	schemaPath schemaLocation,
-	ann *annotations.Set,
-) []*ValidationError {
-	if !v.vocabs.Applicator {
+// evalAllOf checks the allOf keyword. Annotations from individual subschemas are
+// merged only when the allOf as a whole succeeds; a single failing branch
+// discards them all so unevaluatedProperties/Items do not observe partial
+// evaluation.
+func evalAllOf(ctx evalContext) []*ValidationError {
+	schema, ann := ctx.schema, ctx.ann
+	if len(schema.AllOf) == 0 {
 		return nil
 	}
 
-	var errs []*ValidationError
+	v := ctx.v
+	instancePath, schemaPath := ctx.instancePath, ctx.schemaPath
 
-	// AllOf. Annotations from individual subschemas are merged only when the
-	// allOf as a whole succeeds; a single failing branch discards them all so
-	// unevaluatedProperties/Items do not observe partial evaluation.
-	if len(schema.AllOf) > 0 {
-		var (
-			allCauses []*ValidationError
-			subAnns   []*annotations.Set
-		)
+	var (
+		allCauses []*ValidationError
+		subAnns   []*annotations.Set
+	)
 
-		for i, sub := range schema.AllOf {
-			subAnn := ann.Child()
-			childSchemaPath := schemaPath.kw("allOf").idx(i)
-			childErrs := v.validate(sub, instance, instancePath, childSchemaPath, subAnn)
-			if len(childErrs) > 0 {
-				allCauses = append(allCauses, childErrs...)
-			} else {
-				subAnns = append(subAnns, subAnn)
-			}
-		}
-
-		if len(allCauses) > 0 {
-			errs = append(errs, wrapError(instancePath, schemaPath, KeywordAllOf,
-				"did not validate against all subschemas", allCauses))
+	for i, sub := range schema.AllOf {
+		subAnn := ann.Child()
+		childSchemaPath := schemaPath.kw("allOf").idx(i)
+		childErrs := v.validate(sub, ctx.instance, instancePath, childSchemaPath, subAnn)
+		if len(childErrs) > 0 {
+			allCauses = append(allCauses, childErrs...)
 		} else {
-			for _, subAnn := range subAnns {
-				ann.Merge(subAnn)
-			}
+			subAnns = append(subAnns, subAnn)
 		}
 	}
 
-	// AnyOf.
-	if len(schema.AnyOf) > 0 { //nolint:nestif // Composition keyword with annotation merging requires nesting.
-		matched := false
-
-		var allCauses []*ValidationError
-
-		for i, sub := range schema.AnyOf {
-			subAnn := ann.Child()
-			childSchemaPath := schemaPath.kw("anyOf").idx(i)
-			childErrs := v.validate(sub, instance, instancePath, childSchemaPath, subAnn)
-			if len(childErrs) == 0 {
-				matched = true
-
-				ann.Merge(subAnn)
-			} else {
-				allCauses = append(allCauses, childErrs...)
-			}
-		}
-
-		if !matched {
-			errs = append(errs, wrapError(instancePath, schemaPath, KeywordAnyOf,
-				"did not validate against any subschema", allCauses))
+	if len(allCauses) > 0 {
+		return []*ValidationError{
+			wrapError(instancePath, schemaPath, KeywordAllOf, "did not validate against all subschemas", allCauses),
 		}
 	}
 
-	// OneOf.
-	if len(schema.OneOf) > 0 {
-		matchCount := 0
-
-		var (
-			allCauses  []*ValidationError
-			matchedAnn *annotations.Set
-		)
-
-		for i, sub := range schema.OneOf {
-			subAnn := ann.Child()
-			childSchemaPath := schemaPath.kw("oneOf").idx(i)
-			childErrs := v.validate(sub, instance, instancePath, childSchemaPath, subAnn)
-			if len(childErrs) == 0 {
-				matchCount++
-				matchedAnn = subAnn
-			} else {
-				allCauses = append(allCauses, childErrs...)
-			}
-		}
-
-		switch {
-		case matchCount == 0:
-			errs = append(errs, wrapError(instancePath, schemaPath, KeywordOneOf,
-				"did not validate against any subschema", allCauses))
-
-		case matchCount > 1:
-			errs = append(errs, leafError(instancePath, schemaPath, KeywordOneOf,
-				fmt.Sprintf("validated against %d subschemas, expected exactly one", matchCount)))
-
-		default:
-			ann.Merge(matchedAnn)
-		}
+	for _, subAnn := range subAnns {
+		ann.Merge(subAnn)
 	}
 
-	// Not.
-	if schema.Not != nil {
-		// Not never contributes annotations.
-		childErrs := v.validate(schema.Not, instance, instancePath, schemaPath.kw("not"), nil)
-		if len(childErrs) == 0 {
-			errs = append(errs, leafError(instancePath, schemaPath, KeywordNot,
-				"should not validate against the schema"))
-		}
-	}
-
-	return errs
+	return nil
 }
 
-// validateConditional checks if/then/else.
-func (v *validator) validateConditional(
-	schema *Schema,
-	instance any,
-	instancePath instanceLocation,
-	schemaPath schemaLocation,
-	ann *annotations.Set,
-) []*ValidationError {
-	if !v.vocabs.Applicator || schema.If == nil {
+// evalAnyOf checks the anyOf keyword, merging the annotations of every matching
+// branch.
+func evalAnyOf(ctx evalContext) []*ValidationError {
+	schema, ann := ctx.schema, ctx.ann
+	if len(schema.AnyOf) == 0 {
 		return nil
 	}
+
+	v := ctx.v
+	instancePath, schemaPath := ctx.instancePath, ctx.schemaPath
+
+	matched := false
+
+	var allCauses []*ValidationError
+
+	for i, sub := range schema.AnyOf {
+		subAnn := ann.Child()
+		childSchemaPath := schemaPath.kw("anyOf").idx(i)
+		childErrs := v.validate(sub, ctx.instance, instancePath, childSchemaPath, subAnn)
+		if len(childErrs) == 0 {
+			matched = true
+
+			ann.Merge(subAnn)
+		} else {
+			allCauses = append(allCauses, childErrs...)
+		}
+	}
+
+	if !matched {
+		return []*ValidationError{
+			wrapError(instancePath, schemaPath, KeywordAnyOf, "did not validate against any subschema", allCauses),
+		}
+	}
+
+	return nil
+}
+
+// evalOneOf checks the oneOf keyword, merging the single matching branch's
+// annotations and failing when zero or more than one branch matches.
+func evalOneOf(ctx evalContext) []*ValidationError {
+	schema, ann := ctx.schema, ctx.ann
+	if len(schema.OneOf) == 0 {
+		return nil
+	}
+
+	v := ctx.v
+	instancePath, schemaPath := ctx.instancePath, ctx.schemaPath
+
+	matchCount := 0
+
+	var (
+		allCauses  []*ValidationError
+		matchedAnn *annotations.Set
+	)
+
+	for i, sub := range schema.OneOf {
+		subAnn := ann.Child()
+		childSchemaPath := schemaPath.kw("oneOf").idx(i)
+		childErrs := v.validate(sub, ctx.instance, instancePath, childSchemaPath, subAnn)
+		if len(childErrs) == 0 {
+			matchCount++
+			matchedAnn = subAnn
+		} else {
+			allCauses = append(allCauses, childErrs...)
+		}
+	}
+
+	switch {
+	case matchCount == 0:
+		return []*ValidationError{
+			wrapError(instancePath, schemaPath, KeywordOneOf, "did not validate against any subschema", allCauses),
+		}
+
+	case matchCount > 1:
+		return []*ValidationError{
+			leafError(instancePath, schemaPath, KeywordOneOf,
+				fmt.Sprintf("validated against %d subschemas, expected exactly one", matchCount)),
+		}
+
+	default:
+		ann.Merge(matchedAnn)
+
+		return nil
+	}
+}
+
+// evalNot checks the not keyword. Not never contributes annotations.
+func evalNot(ctx evalContext) []*ValidationError {
+	schema := ctx.schema
+	if schema.Not == nil {
+		return nil
+	}
+
+	childErrs := ctx.v.validate(schema.Not, ctx.instance, ctx.instancePath, ctx.schemaPath.kw("not"), nil)
+	if len(childErrs) == 0 {
+		return []*ValidationError{
+			leafError(ctx.instancePath, ctx.schemaPath, KeywordNot, "should not validate against the schema"),
+		}
+	}
+
+	return nil
+}
+
+// evalIfThenElse checks the if/then/else conditional keywords.
+//
+//nolint:nestif // Conditional branching with annotation tracking requires nesting.
+func evalIfThenElse(ctx evalContext) []*ValidationError {
+	schema, ann := ctx.schema, ctx.ann
+	if schema.If == nil {
+		return nil
+	}
+
+	v, instance := ctx.v, ctx.instance
+	instancePath, schemaPath := ctx.instancePath, ctx.schemaPath
 
 	var errs []*ValidationError
 
@@ -2855,7 +2945,7 @@ func (v *validator) validateConditional(
 	ifErrs := v.validate(schema.If, instance, instancePath, schemaPath.kw("if"), ifAnn)
 	ifPassed := len(ifErrs) == 0
 
-	if ifPassed { //nolint:nestif // Conditional branching with annotation tracking requires nesting.
+	if ifPassed {
 		ann.Merge(ifAnn)
 
 		if schema.Then != nil {
@@ -2882,7 +2972,7 @@ func (v *validator) validateConditional(
 	return errs
 }
 
-// validateContent applies content keywords.
+// evalContent applies content keywords.
 //
 // Per 2020-12 spec section 8.5, content keywords (contentEncoding,
 // contentMediaType, contentSchema) are annotations only and never affect
@@ -2890,24 +2980,11 @@ func (v *validator) validateConditional(
 // does not decode, so it is never asserted regardless of the other keywords.
 //
 // [WithContent] opts in to asserting contentEncoding and contentMediaType for
-// string instances only; non-string instances carry no content and pass.
-func (v *validator) validateContent(
-	schema *Schema,
-	instance any,
-	instancePath instanceLocation,
-	schemaPath schemaLocation,
-) []*ValidationError {
-	// Gated on the content vocabulary, consistent with the other keyword
-	// groups. When it is inactive the content keywords are inert.
-	if !v.vocabs.Content {
-		return nil
-	}
-
-	if v.contentEnabled {
-		return v.assertContent(schema, instance, instancePath, schemaPath)
-	}
-
-	return nil
+// string instances only; non-string instances carry no content and pass. The
+// content vocabulary and that opt-in are both the table row's gate, so this
+// reaches here only when assertion is on.
+func evalContent(ctx evalContext) []*ValidationError {
+	return ctx.v.assertContent(ctx.schema, ctx.instance, ctx.instancePath, ctx.schemaPath)
 }
 
 // assertContent asserts contentEncoding and contentMediaType for a string
@@ -2942,44 +3019,36 @@ func (v *validator) assertContent(
 	return nil
 }
 
-// validateRef resolves and validates a $ref.
-func (v *validator) validateRef(
-	schema *Schema,
-	instance any,
-	instancePath instanceLocation,
-	schemaPath schemaLocation,
-	ann *annotations.Set,
-) []*ValidationError {
+// evalRef resolves and validates a $ref. Under Draft-07 a $ref suppresses its
+// siblings; the dispatch loop enforces that (via the row's isRef marker), so
+// this eval carries no draft branch.
+func evalRef(ctx evalContext) []*ValidationError {
+	schema := ctx.schema
+
 	ref := schema.Ref
 	if ref == "" {
 		return nil
 	}
 
-	return v.validateResolvedRef(v.resolveRef(schema, ref), ref, KeywordRef, instance, instancePath, schemaPath, ann)
+	return ctx.v.validateResolvedRef(
+		ctx.v.resolveRef(schema, ref), ref, KeywordRef,
+		ctx.instance, ctx.instancePath, ctx.schemaPath, ctx.ann)
 }
 
-// validateDynamicRef resolves and validates a $dynamicRef.
-func (v *validator) validateDynamicRef(
-	schema *Schema,
-	instance any,
-	instancePath instanceLocation,
-	schemaPath schemaLocation,
-	ann *annotations.Set,
-) []*ValidationError {
+// evalDynamicRef resolves and validates a $dynamicRef. Its table row carries the
+// 2020-12-and-up draft range, so the 2020-12 draft gate lives on the row rather
+// than in this eval.
+func evalDynamicRef(ctx evalContext) []*ValidationError {
+	schema := ctx.schema
+
 	ref := schema.DynamicRef
 	if ref == "" {
 		return nil
 	}
 
-	return v.validateResolvedRef(
-		v.resolveDynamicRef(schema, ref),
-		ref,
-		KeywordDynamicRef,
-		instance,
-		instancePath,
-		schemaPath,
-		ann,
-	)
+	return ctx.v.validateResolvedRef(
+		ctx.v.resolveDynamicRef(schema, ref), ref, KeywordDynamicRef,
+		ctx.instance, ctx.instancePath, ctx.schemaPath, ctx.ann)
 }
 
 // validateResolvedRef validates the instance against a resolved reference

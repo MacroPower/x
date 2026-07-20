@@ -7842,6 +7842,138 @@ func TestValidateRationalBoundMessageUnderflow(t *testing.T) {
 	assert.Contains(t, msg, "1/10000000000", "the exact rational form is shown")
 }
 
+// BenchmarkValidateObjectHeavy exercises a node that activates many dispatch
+// rows at once: an object carrying properties, patternProperties,
+// additionalProperties, required, min/maxProperties, dependentSchemas, allOf,
+// and if/then. The instance is valid, so every active row's eval runs to
+// completion rather than short-circuiting -- the worst case for per-node
+// dispatch overhead.
+func BenchmarkValidateObjectHeavy(b *testing.B) {
+	const schema = `{
+		"type": "object",
+		"required": ["id", "name"],
+		"minProperties": 2,
+		"maxProperties": 20,
+		"properties": {
+			"id": {"type": "integer", "minimum": 0},
+			"name": {"type": "string", "minLength": 1, "maxLength": 100},
+			"tags": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+			"score": {"type": "number", "minimum": 0, "maximum": 100}
+		},
+		"patternProperties": {
+			"^x-": {"type": "string"}
+		},
+		"additionalProperties": {"type": "string"},
+		"dependentSchemas": {
+			"score": {"required": ["id"]}
+		},
+		"allOf": [
+			{"properties": {"id": {"maximum": 1000000}}}
+		],
+		"if": {"required": ["score"]},
+		"then": {"properties": {"score": {"minimum": 0}}}
+	}`
+
+	instance := []byte(`{
+		"id": 42,
+		"name": "widget",
+		"tags": ["a", "b", "c"],
+		"score": 87.5,
+		"x-extra": "meta",
+		"note": "free-form"
+	}`)
+
+	var s jsonschema.Schema
+
+	err := json.Unmarshal([]byte(schema), &s)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	v, err := jsonschema.Compile(b.Context(), &s)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	// The instance satisfies the schema, so a non-nil error means the benchmark
+	// stopped measuring the full traversal.
+	for b.Loop() {
+		if v.ValidateJSON(b.Context(), instance) != nil {
+			b.Fatal("expected the instance to validate")
+		}
+	}
+}
+
+// BenchmarkValidateDeepNesting exercises a recursive schema over a broad, deeply
+// nested instance, so the per-node dispatch overhead is multiplied across many
+// recursive validate() calls -- the case that surfaces any per-node throughput
+// regression the dispatch walk might carry.
+func BenchmarkValidateDeepNesting(b *testing.B) {
+	const schema = `{
+		"$ref": "#/$defs/node",
+		"$defs": {
+			"node": {
+				"type": "object",
+				"properties": {
+					"value": {"type": "integer"},
+					"children": {
+						"type": "array",
+						"items": {"$ref": "#/$defs/node"}
+					}
+				}
+			}
+		}
+	}`
+
+	// Build a balanced tree: depth levels, each node holding fanout children.
+	var build func(depth int) map[string]any
+
+	build = func(depth int) map[string]any {
+		node := map[string]any{"value": depth}
+		if depth == 0 {
+			return node
+		}
+
+		children := make([]any, 0, 3)
+		for range 3 {
+			children = append(children, build(depth-1))
+		}
+
+		node["children"] = children
+
+		return node
+	}
+
+	tree, err := json.Marshal(build(6))
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	var s jsonschema.Schema
+
+	err = json.Unmarshal([]byte(schema), &s)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	v, err := jsonschema.Compile(b.Context(), &s)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		if v.ValidateJSON(b.Context(), tree) != nil {
+			b.Fatal("expected the instance to validate")
+		}
+	}
+}
+
 // BenchmarkValidateLargeNumber exercises validation of multi-megabyte JSON
 // number literals. The guarded paths classify such values in a single O(n)
 // scan; a regression into an unguarded big.Rat parse (quadratic in the digit
