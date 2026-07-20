@@ -611,18 +611,31 @@ func goDirectiveVersion() string {
 }
 
 // checkReplaceDir rejects a module directory the go tool cannot place in a
-// replace directive. An empty path means `go list -m -json` reported no local
-// directory for the module -- it is known to the build but not extracted into
-// the module cache (a proxy-only state on a fresh checkout) -- which would emit
-// a `replace MODULE =>` line with no target that the modfile parser rejects.
-// A backslash trips a different parser rule: the modfile parser treats any
-// backslash in a replacement path as a Windows path and rejects it on a
-// non-Windows system -- even when the path is quoted, because it inspects the
-// unquoted value -- so quoting cannot rescue it. A backslash is a legal POSIX
-// filename byte, so a checkout under such a directory is what triggers it.
-// Catching both here turns the otherwise cryptic downstream "go mod tidy"
-// failure into a clear message at the input boundary.
+// replace directive on this host. An empty path means `go list -m -json`
+// reported no local directory for the module -- it is known to the build but
+// not extracted into the module cache (a proxy-only state on a fresh checkout)
+// -- which would emit a `replace MODULE =>` line with no target that the
+// modfile parser rejects. A backslash trips a different parser rule on a
+// non-Windows host: the modfile parser treats any backslash in a replacement
+// path as a Windows path and rejects it when the host separator is '/' --
+// even when the path is quoted, because it inspects the unquoted value -- so
+// quoting cannot rescue it. A backslash is a legal POSIX filename byte, so a
+// checkout under such a directory is what triggers it; on Windows a backslash
+// path is the normal form and is accepted. Catching both here turns the
+// otherwise cryptic downstream "go mod tidy" failure into a clear message at
+// the input boundary.
 func checkReplaceDir(label, dir string) error {
+	return checkReplaceDirFor(label, dir, filepath.Separator)
+}
+
+// checkReplaceDirFor is [checkReplaceDir] parameterized by the host's path
+// separator so the Windows behavior stays testable on any platform. The
+// modfile parser's backslash rule is gated on the separator: it rejects a
+// Windows-looking replacement path only when filepath.Separator is '/'. On
+// Windows every directory (C:\Users\me\proj) contains backslashes and the go
+// tool accepts them in a replace directive, so the rejection mirrors the same
+// gate rather than firing unconditionally.
+func checkReplaceDirFor(label, dir string, separator rune) error {
 	if dir == "" {
 		return fmt.Errorf(
 			"%s is empty: the module reported no local directory; run `go mod download` first",
@@ -630,7 +643,7 @@ func checkReplaceDir(label, dir string) error {
 		)
 	}
 
-	if strings.Contains(dir, `\`) {
+	if separator == '/' && strings.Contains(dir, `\`) {
 		return fmt.Errorf(
 			"%s %q contains a backslash, which the go tool rejects as a Windows path in a replace directive",
 			label, dir,
@@ -646,9 +659,10 @@ func checkReplaceDir(label, dir string) error {
 // string cannot contain quote"), so the path is quoted when it holds a space,
 // quote, or backtick, or any control character (a newline or carriage return
 // would otherwise inject a bare line break into the directive). All of these
-// are legal in POSIX filenames. A backslash is rejected upstream by
-// [checkReplaceDir] (quoting cannot make the go tool accept it), so it is not
-// handled here.
+// are legal in POSIX filenames. A backslash on a non-Windows host is rejected
+// upstream by [checkReplaceDir] (quoting cannot make the go tool accept it),
+// so it is not handled here; on Windows, where backslash paths are accepted,
+// strconv.Quote round-trips them through the modfile parser's unquoting.
 func quotePath(p string) string {
 	if strings.ContainsAny(p, " \"`") || strings.ContainsFunc(p, func(r rune) bool {
 		return r < 0x20
