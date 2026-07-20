@@ -11,6 +11,7 @@ import (
 
 	"go.jacobcolvin.com/x/jsonschema"
 	"go.jacobcolvin.com/x/jsonschema/internal/numkind"
+	"go.jacobcolvin.com/x/jsonschema/internal/schemashape"
 )
 
 // parseBoundFloat parses a numeric bound, rejecting non-finite values
@@ -204,12 +205,17 @@ func applyNumericNe(s *jsonschema.Schema, value string, baseType reflect.Type) e
 // forbidValue records that the schema must not equal v. Several tags can forbid
 // values on the same field (for example "required" forbids the zero value while
 // "ne" forbids another); rather than clobbering a single not.const, the values
-// accumulate into not.enum so every constraint composes.
+// accumulate into not.enum so every constraint composes. The accumulation only
+// applies to a not that constrains nothing beyond that one const or enum: a not
+// carrying sibling keywords (an override-authored {const: x, minLength: 5}) is
+// a conjunction, so merging into it -- or trusting its const/enum as "already
+// forbidden" -- would forbid the value only when the siblings also match. Such
+// a not takes the default branch instead.
 func forbidValue(s *jsonschema.Schema, v any) {
 	switch {
 	case s.Not == nil:
 		s.Not = &jsonschema.Schema{Const: &v}
-	case s.Not.Const != nil:
+	case s.Not.Const != nil && constrainsConstOnly(s.Not):
 		if numericEqual(*s.Not.Const, v) {
 			// Already forbidden as a single value (e.g. required and ne=0 on a
 			// numeric field both forbid 0); nothing to add. The comparison is
@@ -225,7 +231,7 @@ func forbidValue(s *jsonschema.Schema, v any) {
 		s.Not.Enum = []any{*s.Not.Const, v}
 		s.Not.Const = nil
 
-	case s.Not.Enum != nil:
+	case s.Not.Enum != nil && constrainsEnumOnly(s.Not):
 		if slices.ContainsFunc(s.Not.Enum, func(e any) bool { return numericEqual(e, v) }) {
 			return
 		}
@@ -233,16 +239,36 @@ func forbidValue(s *jsonschema.Schema, v any) {
 		s.Not.Enum = append(s.Not.Enum, v)
 
 	default:
-		// Not carries some other shape (e.g. a type or pattern). Composing the
-		// forbidden value onto it directly would silently keep those unrelated
-		// constraints; instead move the existing not under allOf and add a
-		// separate not for the new value so both apply conjunctively.
+		// Not carries some other shape (e.g. a type or pattern, or a const or
+		// enum with sibling keywords). Composing the forbidden value onto it
+		// directly would silently keep those unrelated constraints; instead
+		// move the existing not under allOf and add a separate not for the new
+		// value so both apply conjunctively.
 		s.AllOf = append(s.AllOf,
 			&jsonschema.Schema{Not: s.Not},
 			&jsonschema.Schema{Not: &jsonschema.Schema{Const: &v}},
 		)
 		s.Not = nil
 	}
+}
+
+// constrainsConstOnly reports whether s constrains nothing beyond its Const.
+// Annotations such as title and description are ignored: they do not affect
+// what the not rejects, so they may ride along with an accumulated enum.
+func constrainsConstOnly(s *jsonschema.Schema) bool {
+	remainder := *s
+	remainder.Const = nil
+
+	return schemashape.IsEmpty(&remainder)
+}
+
+// constrainsEnumOnly reports whether s constrains nothing beyond its Enum, the
+// enum analog of [constrainsConstOnly].
+func constrainsEnumOnly(s *jsonschema.Schema) bool {
+	remainder := *s
+	remainder.Enum = nil
+
+	return schemashape.IsEmpty(&remainder)
 }
 
 // numericEqual reports whether a and b represent the same number, regardless of
