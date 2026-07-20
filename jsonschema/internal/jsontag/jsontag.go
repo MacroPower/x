@@ -29,13 +29,14 @@ type Info struct {
 
 // Parse parses the json struct tag of f.
 func Parse(f reflect.StructField) Info {
+	// Encoding/json skips an unexported non-embedded field before reading its
+	// tag, so a json tag cannot resurrect it.
+	if !f.IsExported() && !f.Anonymous {
+		return Info{} // excluded
+	}
+
 	tag, ok := f.Tag.Lookup("json")
 	if !ok {
-		// Use field name if no tag.
-		if !f.IsExported() && !f.Anonymous {
-			return Info{} // excluded
-		}
-
 		// The field name serves embedded fields too: for both value and pointer
 		// embeds it is the unqualified type identifier, without the type
 		// arguments [reflect.Type.Name] carries for an instantiated generic
