@@ -788,14 +788,18 @@ func validateRegex(s string) error {
 }
 
 // validateRegexEscape reports whether c is a valid character following a
-// backslash in an ECMA 262 regular expression. It rejects escapes that ECMA
-// 262 does not define (e.g. "\a"), which RE2 would otherwise accept. Any
-// non-ASCII rune is a valid identity escape: ECMA 262 Annex B (non-unicode
-// mode) permits an identity escape of any source character that is not part of
-// another escape, so an escaped multi-byte code point is accepted. The size is
-// the byte length the rune decoded from: a lone invalid UTF-8 byte decodes to
-// (utf8.RuneError, 1) and is rejected, while a genuine U+FFFD decodes from three
-// bytes and is accepted as an identity escape.
+// backslash in an ECMA 262 regular expression. It rejects escapes that the
+// ECMA 262 main grammar does not define (e.g. "\a"), which RE2 would otherwise
+// accept. Any non-ASCII rune is a valid identity escape: ECMA 262 Annex B
+// (non-unicode mode) permits an identity escape of any source character that is
+// not part of another escape, so an escaped multi-byte code point is accepted.
+// Within ASCII, the main grammar's IdentityEscape[~UnicodeMode] rule
+// ("SourceCharacter but not UnicodeIDContinue") applies: punctuation, space,
+// and control characters are valid identity escapes, while letters that name
+// no defined escape and '_' are ID_Continue characters and are rejected. The
+// size is the byte length the rune decoded from: a lone invalid UTF-8 byte
+// decodes to (utf8.RuneError, 1) and is rejected, while a genuine U+FFFD
+// decodes from three bytes and is accepted as an identity escape.
 func validateRegexEscape(c rune, size int) error {
 	if c == utf8.RuneError && size == 1 {
 		return errors.New("invalid regex: invalid escape sequence")
@@ -820,12 +824,14 @@ func validateRegexEscape(c rune, size int) error {
 		return nil
 	}
 
-	switch c {
-	case '^', '$', '\\', '.', '*', '+', '?', '(', ')', '[', ']', '{', '}', '|', '/', '-':
-		return nil
+	// Every remaining ASCII rune that is not UnicodeIDContinue is a valid
+	// identity escape under the main grammar. Digits were consumed above, so
+	// only letters and '_' are ID_Continue here and are rejected.
+	if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' {
+		return errors.New("invalid regex: invalid escape sequence")
 	}
 
-	return errors.New("invalid regex: invalid escape sequence")
+	return nil
 }
 
 // validateRelativeJSONPointer validates a Relative JSON Pointer per
