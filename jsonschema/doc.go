@@ -304,7 +304,10 @@
 //
 // Struct fields follow [encoding/json] conventions: the json tag determines
 // the field name, json:"-" excludes the field (but json:"-," with a trailing
-// comma uses the literal name "-" as the JSON key), omitempty and omitzero
+// comma uses the literal name "-" as the JSON key), a tag name [encoding/json]
+// rejects as invalid (characters outside letters, digits, and its fixed
+// punctuation set) is discarded in favor of the Go field name, omitempty and
+// omitzero
 // omit the field from required, and json:",string" overrides the field schema
 // to {"type": "string"} for applicable types (string, integer, float, bool,
 // and a single unnamed pointer to one of those; a named pointer type or a

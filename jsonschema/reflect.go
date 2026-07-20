@@ -1066,11 +1066,13 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 
 					tagVal, hasTag := f.Tag.Lookup("json")
 					explicitName, _, _ := strings.Cut(tagVal, ",")
-					if hasTag && explicitName != "" {
+					if hasTag && jsontag.ValidName(explicitName) {
 						// Embedded struct with an explicit json name → treated as a
 						// regular named field; encoding/json does not promote it. An
-						// options-only tag (json:",omitempty") has no name and falls
-						// through to promotion below, matching encoding/json.
+						// options-only tag (json:",omitempty") has no name -- and a
+						// name encoding/json rejects as invalid is discarded the same
+						// way -- so both fall through to promotion below, matching
+						// encoding/json.
 						info := jsontag.Parse(f)
 						if info.JSONName == "" {
 							continue // json:"-"

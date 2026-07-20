@@ -7,6 +7,7 @@ package jsontag
 import (
 	"reflect"
 	"strings"
+	"unicode"
 )
 
 // Info is the parsed result of a field's json struct tag.
@@ -54,6 +55,12 @@ func Parse(f reflect.StructField) Info {
 		return Info{} // excluded
 	}
 
+	// Encoding/json discards a name it rejects as invalid, falling back to the
+	// field name and treating the field as untagged.
+	if !ValidName(name) {
+		name = ""
+	}
+
 	// A non-empty name segment is an explicit json tag name; an options-only tag
 	// (json:",omitempty") leaves the name empty and falls back to the field name,
 	// which is not "tagged" for the same-depth collision tie-break.
@@ -87,4 +94,26 @@ func Parse(f reflect.StructField) Info {
 	}
 
 	return info
+}
+
+// ValidName reports whether a json tag name is one encoding/json honors:
+// letters, digits, and a fixed punctuation set (backslash and quote characters
+// are reserved). An invalid name is discarded and the field falls back to its
+// Go name, exactly as encoding/json's isValidTag does; the empty string is
+// invalid.
+func ValidName(name string) bool {
+	if name == "" {
+		return false
+	}
+
+	for _, c := range name {
+		switch {
+		case strings.ContainsRune("!#$%&()*+-./:;<=>?@[]^_{|}~ ", c):
+			// Any punctuation from the fixed set is allowed in a tag name.
+		case !unicode.IsLetter(c) && !unicode.IsDigit(c):
+			return false
+		}
+	}
+
+	return true
 }
