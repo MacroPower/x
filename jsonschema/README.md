@@ -823,6 +823,10 @@ containing object are both identifiable from `InstancePath` alone.
 The active draft and vocabulary decide whether `format` is asserted: under
 Draft-07 it is asserted, under Draft 2020-12 it is annotation-only unless the
 format-assertion vocabulary is active. `WithFormats(true)` forces assertion.
+When the format-assertion vocabulary drives assertion, a format name with no
+registered checker rejects every string instance (the 2020-12 spec mandates
+failure on unknown formats); assertion via `WithFormats(true)` or Draft-07's
+default keeps unknown names annotation-only.
 Built-in checkers cover `date-time`, `date`, `time`, `duration`, `email`,
 `idn-email`, `hostname`, `idn-hostname`, `uri`, `uri-reference`, `uri-template`,
 `iri`, `iri-reference`, `uuid`, `ipv4`, `ipv6`, `json-pointer`,

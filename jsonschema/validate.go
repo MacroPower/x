@@ -351,7 +351,13 @@ type validator struct {
 	vocabs vocab.Set // resolved active vocabularies
 
 	formatsEnabled bool
-	contentEnabled bool // assert contentEncoding/contentMediaType (WithContent)
+	// Whether format assertion was activated by the 2020-12 format-assertion
+	// vocabulary rather than the WithFormats opt-in or Draft-07's default. In
+	// this mode the spec (validation section 7.2.3) mandates failure on
+	// unknown formats, so evalFormat rejects a format name with no registered
+	// checker instead of treating it as annotation-only.
+	formatsVocabDriven bool
+	contentEnabled     bool // assert contentEncoding/contentMediaType (WithContent)
 
 	// Treat $id as an inert annotation during the registry walk: no URI or
 	// anchor registration, no base-URI change, in any form including the
@@ -560,6 +566,10 @@ func (v *validator) resolveFormats() {
 		v.formatsEnabled = true
 	default:
 		v.formatsEnabled = v.vocabs.FormatAssertion
+		// Only vocabulary-driven assertion is spec-bound to fail on unknown
+		// formats (2020-12 validation section 7.2.3); the WithFormats opt-in
+		// and Draft-07's default assertion keep unknown names annotation-only.
+		v.formatsVocabDriven = v.formatsEnabled
 	}
 }
 
@@ -2347,6 +2357,18 @@ func evalFormat(ctx evalContext) []*ValidationError {
 
 	fv, exists := ctx.v.formatCheckers[schema.Format]
 	if !exists {
+		// When the format-assertion vocabulary drives assertion, 2020-12
+		// validation section 7.2.3 mandates failure on unknown formats, so a
+		// name with no registered checker rejects the instance. Assertion via
+		// WithFormats(true) or Draft-07's default stays lenient: those are the
+		// package's own opt-in contracts, and an unknown name asserts nothing.
+		if ctx.v.formatsVocabDriven {
+			return []*ValidationError{
+				leafError(ctx.instancePath, ctx.schemaPath, KeywordFormat,
+					fmt.Sprintf("format %q has no registered checker", schema.Format)),
+			}
+		}
+
 		return nil
 	}
 
