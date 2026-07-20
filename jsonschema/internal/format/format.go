@@ -472,27 +472,34 @@ func validateEmailDomain(d string) error {
 	// Email domains follow the RFC 5321 sub-domain grammar
 	// (sub-domain = Let-dig [Ldh-str]), which permits an all-numeric top-level
 	// label, so the numeric-TLD ban from the hostname format must not apply.
-	return validateHostnameLabels(d, false)
+	// The grammar also has no trailing-dot production, so the FQDN root-dot
+	// allowance from the hostname format must not apply either.
+	return validateHostnameLabels(d, false, false)
 }
 
 func validateHostname(s string) error {
 	// The hostname format is RFC 1123-based; the top-level label must not be
-	// all-numeric, to disambiguate from an IPv4 address (RFC 1123 §2.1).
-	return validateHostnameLabels(s, true)
+	// all-numeric, to disambiguate from an IPv4 address (RFC 1123 §2.1), and
+	// the DNS root-dot convention permits a trailing dot on a multi-label FQDN.
+	return validateHostnameLabels(s, true, true)
 }
 
 // validateHostnameLabels validates the shared RFC 1123 label structure used by
 // both the hostname format and email domain validation. The banNumericTLD flag
 // rejects an all-numeric top-level label, which the hostname format requires
-// (RFC 1123 §2.1) but the RFC 5321 email domain grammar permits.
-func validateHostnameLabels(s string, banNumericTLD bool) error {
+// (RFC 1123 §2.1) but the RFC 5321 email domain grammar permits. The
+// allowTrailingDot flag accepts the DNS root-dot convention on a multi-label
+// FQDN, which likewise belongs to the hostname format only: the RFC 5321
+// Domain grammar (sub-domain *("." sub-domain)) has no trailing-dot
+// production.
+func validateHostnameLabels(s string, banNumericTLD, allowTrailingDot bool) error {
 	if s == "" {
 		return errors.New("invalid hostname")
 	}
 
 	// Allow a single trailing dot on a multi-label FQDN (e.g. "example.com."),
 	// but reject a bare trailing dot like "example." or ".".
-	if strings.HasSuffix(s, ".") {
+	if allowTrailingDot && strings.HasSuffix(s, ".") {
 		trimmed := s[:len(s)-1]
 		if !strings.Contains(trimmed, ".") {
 			return errors.New("invalid hostname")
@@ -1195,16 +1202,19 @@ func validateURITemplateVarname(name string) error {
 // validateIDNHostname validates an internationalized hostname per RFC 5890/5891.
 func validateIDNHostname(s string) error {
 	// The idn-hostname format bans an all-numeric top-level label, mirroring the
-	// plain hostname format so it cannot be confused with an IPv4 address.
-	return validateIDNHostnameLabels(s, true)
+	// plain hostname format so it cannot be confused with an IPv4 address, and
+	// keeps the FQDN trailing-dot allowance the hostname format has.
+	return validateIDNHostnameLabels(s, true, true)
 }
 
 // validateIDNHostnameLabels validates the shared RFC 5890/5891 label structure
 // used by both the idn-hostname format and idn-email domain validation. The
 // banNumericTLD flag rejects an all-numeric top-level label, which the
 // idn-hostname format requires but the RFC 5321/6531 email domain grammar
-// permits.
-func validateIDNHostnameLabels(s string, banNumericTLD bool) error {
+// permits. The allowTrailingDot flag accepts the DNS root-dot convention on a
+// multi-label FQDN, which likewise belongs to the idn-hostname format only:
+// the RFC 5321/6531 Domain grammar has no trailing-dot production.
+func validateIDNHostnameLabels(s string, banNumericTLD, allowTrailingDot bool) error {
 	if s == "" {
 		return errors.New("invalid IDN hostname: empty string")
 	}
@@ -1214,7 +1224,7 @@ func validateIDNHostnameLabels(s string, banNumericTLD bool) error {
 	// Allow a single trailing dot on a multi-label FQDN (e.g. "example.com."),
 	// consistent with validateHostname. A bare trailing dot on a single label
 	// ("example.") still leaves an empty label and is rejected below.
-	if n := len(labels); n >= 3 && labels[n-1] == "" {
+	if n := len(labels); allowTrailingDot && n >= 3 && labels[n-1] == "" {
 		labels = labels[:n-1]
 	}
 
@@ -1422,7 +1432,8 @@ func validateIDNEmailLocal(s string) error {
 // grammar unchanged. A hostname is validated as an internationalized domain
 // name (U-labels/IDNA); the RFC 5321/6531 email domain grammar permits an
 // all-numeric top-level label, so the idn-hostname numeric-TLD ban does not
-// apply here.
+// apply here, and it has no trailing-dot production, so the FQDN root-dot
+// allowance does not apply either.
 func validateIDNEmailDomain(d string) error {
 	if d == "" {
 		return errors.New("invalid IDN email: empty domain")
@@ -1432,7 +1443,7 @@ func validateIDNEmailDomain(d string) error {
 		return validateEmailDomain(d)
 	}
 
-	return validateIDNHostnameLabels(d, false)
+	return validateIDNHostnameLabels(d, false, false)
 }
 
 // isIDNAtext reports whether r may appear in an unquoted IDN email local part
