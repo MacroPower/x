@@ -2239,9 +2239,10 @@ func (v *validator) validateNumericUnbounded(
 
 	// A non-positive multipleOf makes the schema invalid independent of the
 	// instance value. For a positive divisor, an over-cap integer's
-	// divisibility is still decidable at bounded cost via modular arithmetic
-	// (see numrat.IntegerMultipleOf), so it is enforced. A non-integral over-cap value
-	// keeps the documented skip: expanding its fractional part is unbounded.
+	// divisibility is still decidable via modular arithmetic at cost linear in
+	// the literal (see numrat.IntegerMultipleOf), so it is enforced. A
+	// non-integral over-cap value keeps the documented skip: expanding its
+	// fractional part is unbounded.
 	if schema.MultipleOf != nil {
 		switch {
 		case *schema.MultipleOf <= 0:

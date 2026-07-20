@@ -548,34 +548,197 @@ func Float64ToRat(f float64) *big.Rat {
 }
 
 // IntegerMultipleOf reports whether the integral value of literal (decomposed
-// as d) is an exact multiple of the positive rational divisor m, without
-// expanding an over-cap magnitude. Writing the value as sig*10^k with k >= 0 and
+// as d) is an exact multiple of the positive rational divisor m, at cost
+// linear in the literal so an adversarial magnitude or precision is never
+// expanded (see MaxNumberLen). Writing the value as sig*10^k with k >= 0 and
 // m as the reduced p/q, the value is a multiple of m exactly when p divides it,
-// since gcd(p, q) = 1 means q contributes no factor of p. The check is then
-// (sig mod p)*(10^k mod p) mod p == 0, with the power reduced modulo p so 10^k
-// is never materialized. The exponent comes from the literal because
-// DecNumber.exp is clamped for an over-cap magnitude. The caller must pass an
-// integral d (see [DecNumber.IsIntegral]) and a positive m.
+// since gcd(p, q) = 1 means q contributes no factor of p. The significand is
+// reduced modulo p by chunked Horner rather than parsed into a [big.Int]
+// (which is quadratic in the digit count), and the shift is handled by size:
+// a shift within p's bit length contributes 10^k mod p directly, while a
+// larger shift supplies every factor of 2 and 5 in p and leaves 10^k
+// invertible modulo the remaining cofactor, so divisibility reduces to that
+// cofactor dividing the significand, however long the exponent digit run is.
+// The exponent comes from the literal because DecNumber.exp is clamped for an
+// over-cap magnitude. The caller must pass an integral d (see
+// [DecNumber.IsIntegral]) and a positive m.
 func IntegerMultipleOf(d DecNumber, literal string, m *big.Rat) bool {
 	p := new(big.Int).Abs(m.Num())
 	if p.Sign() == 0 || d.sig == "" {
 		return true // No real divisor, or a zero value: a multiple either way.
 	}
 
-	sig, ok := new(big.Int).SetString(d.sig, 10)
-	if !ok {
-		return true // sig is all digits by construction, so this cannot fail.
-	}
-
-	k := new(big.Int).Sub(DecCanonicalExp(literal), big.NewInt(int64(len(d.sig))))
-	if k.Sign() < 0 {
+	k, exact := integerShift(literal, len(d.sig))
+	switch {
+	case k < 0:
 		return true // Not integral after all; the caller should have screened it.
+
+	case k > int64(p.BitLen()):
+		// The shift exceeds every possible power of 2 or 5 in p (a factor 2^a
+		// or 5^b needs a, b <= log2(p)), so 10^k supplies all of them, and the
+		// remaining cofactor r is coprime to 10, making 10^k invertible mod r:
+		// p divides sig*10^k exactly when r divides sig. This branch also
+		// covers a saturated shift, which only under-reports the true one.
+		return decDigitsMod(d.sig, coprimeTenPart(p)).Sign() == 0
+
+	case !exact:
+		// Saturated yet not past p's bit length: reachable only for a
+		// significand of ~2^50 digits. Fail open like the over-cap
+		// non-integer skip rather than risk a wrong verdict.
+		return true
+
+	default:
+		pow := new(big.Int).Exp(big.NewInt(10), big.NewInt(k), p)
+		rem := decDigitsMod(d.sig, p)
+		rem.Mul(rem, pow)
+		rem.Mod(rem, p)
+
+		return rem.Sign() == 0
+	}
+}
+
+// integerShiftSat is the saturation cap for integerShift's exponent
+// accumulation. It only needs to exceed every possible bit length of a
+// multipleOf numerator (a float64-derived rational stays under ~2100 bits);
+// past it, every shift decides divisibility identically.
+const integerShiftSat = int64(1) << 50
+
+// integerShift returns k such that the literal denotes sig × 10^k (the
+// canonical exponent minus the significand length), accumulating the exponent
+// digit run with saturating arithmetic so the cost is O(len) and no [big.Int]
+// is ever built. The exact result reports whether k is the true shift; when
+// false the true shift is at least k (saturation only rounds down). A negative
+// exponent saturating the cap reports k = -1 exactly: no physically possible
+// significand can shift such a value back to an integer. The argument must
+// already be a valid decimal literal (ParseDecNumber returned true).
+func integerShift(literal string, sigLen int) (int64, bool) {
+	s := literal
+
+	i := 0
+	if i < len(s) && (s[i] == '+' || s[i] == '-') {
+		i++
 	}
 
-	pow := new(big.Int).Exp(big.NewInt(10), k, p)
-	rem := new(big.Int).Mod(sig, p)
-	rem.Mul(rem, pow)
-	rem.Mod(rem, p)
+	intStart := i
+	for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+		i++
+	}
 
-	return rem.Sign() == 0
+	intLen := i - intStart
+
+	lead := 0
+	for j := intStart; j < i && s[j] == '0'; j++ {
+		lead++
+	}
+
+	if i < len(s) && s[i] == '.' {
+		i++
+
+		// All integer digits were zero, so leading zeros continue into the
+		// fraction (e.g. 0.05 has two leading zeros across "005").
+		if lead == intLen {
+			for i < len(s) && s[i] == '0' {
+				lead++
+				i++
+			}
+		}
+
+		for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+			i++
+		}
+	}
+
+	var exp int64
+
+	neg, exact := false, true
+
+	if i < len(s) && (s[i] == 'e' || s[i] == 'E') {
+		i++
+
+		if i < len(s) && (s[i] == '+' || s[i] == '-') {
+			neg = s[i] == '-'
+			i++
+		}
+
+		for ; i < len(s) && s[i] >= '0' && s[i] <= '9'; i++ {
+			if exp >= integerShiftSat {
+				exact = false
+
+				continue
+			}
+
+			exp = exp*10 + int64(s[i]-'0')
+		}
+	}
+
+	if neg {
+		if !exact {
+			return -1, true
+		}
+
+		exp = -exp
+	}
+
+	return exp + int64(intLen-lead) - int64(sigLen), exact
+}
+
+// decChunkDigits is the number of decimal digits decDigitsMod folds per
+// Horner step: the widest power of ten whose chunk value fits a uint64.
+const decChunkDigits = 18
+
+// decDigitsMod reduces a decimal digit string modulo p (p > 0) with Horner's
+// rule over fixed-size chunks, so every intermediate stays within a few words
+// of p and the cost is linear in the digit count. Parsing the digits into a
+// full [big.Int] first would be quadratic, which is exactly the expansion
+// MaxNumberLen exists to prevent.
+func decDigitsMod(digits string, p *big.Int) *big.Int {
+	scale := new(big.Int).SetUint64(1e18) // 10^decChunkDigits
+	rem := new(big.Int)
+	chunk := new(big.Int)
+
+	i := len(digits) % decChunkDigits
+	if i > 0 {
+		rem.SetUint64(foldDigits(digits[:i]))
+	}
+
+	for ; i < len(digits); i += decChunkDigits {
+		chunk.SetUint64(foldDigits(digits[i : i+decChunkDigits]))
+
+		rem.Mul(rem, scale)
+		rem.Add(rem, chunk)
+		rem.Mod(rem, p)
+	}
+
+	return rem.Mod(rem, p)
+}
+
+// foldDigits folds a run of decimal digits into its uint64 value; callers
+// keep runs within decChunkDigits so the fold cannot overflow.
+func foldDigits(digits string) uint64 {
+	var v uint64
+
+	for _, c := range []byte(digits) {
+		v = v*10 + uint64(c-'0')
+	}
+
+	return v
+}
+
+// coprimeTenPart returns the largest divisor of p that is coprime to 10: p
+// with every factor of 2 and 5 stripped.
+func coprimeTenPart(p *big.Int) *big.Int {
+	r := new(big.Int).Rsh(p, p.TrailingZeroBits())
+
+	five := big.NewInt(5)
+	q, rem := new(big.Int), new(big.Int)
+
+	for {
+		q.QuoRem(r, five, rem)
+
+		if rem.Sign() != 0 {
+			return r
+		}
+
+		r, q = q, r
+	}
 }
