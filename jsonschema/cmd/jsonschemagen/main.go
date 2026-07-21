@@ -96,7 +96,9 @@ func run(cfg config, stdout io.Writer) error {
 
 	// The build mode (workspace vs single module) governs how every go command
 	// below is invoked, so resolve it once. A workspace ignores -mod and rejects
-	// it; a single module needs -mod=mod to bypass an inherited vendor directory.
+	// it; a single module needs a -mod flag to bypass an inherited vendor
+	// directory (readonly where the user's real go.mod is in play, mod where a
+	// redirected modfile absorbs the writes).
 	inWork, err := inWorkspace()
 	if err != nil {
 		return err
@@ -171,14 +173,18 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 // package" build error. The package name comes from the same `go list` call, so
 // the check costs no extra process.
 //
-// Outside a workspace it passes -mod=mod so an inherited vendor directory (auto-
-// selected when vendor/modules.txt exists) does not make `go list` fail on a
-// vendor tree the helper does not use; -mod is rejected in workspace mode, where
-// the workspace already governs resolution.
+// Outside a workspace it passes -mod=readonly so an inherited vendor directory
+// (auto-selected when vendor/modules.txt exists) does not make `go list` fail
+// on a vendor tree the helper does not use. Readonly, not mod: this `go list`
+// runs against the user's real go.mod with no -modfile redirect, and -mod=mod
+// would let an untidy module be silently tidied here, fetching from the network
+// and rewriting the user's go.mod/go.sum. An untidy module instead fails with
+// go's standard "run go mod tidy" guidance. -mod is rejected in workspace mode,
+// where the workspace already governs resolution.
 func resolveImportPath(inWork bool) (string, error) {
 	args := []string{"list"}
 	if !inWork {
-		args = append(args, "-mod=mod")
+		args = append(args, "-mod=readonly")
 	}
 
 	args = append(args, "-f", "{{.Name}} {{.ImportPath}}", ".")

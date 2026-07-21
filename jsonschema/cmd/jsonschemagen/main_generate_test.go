@@ -78,7 +78,8 @@ func TestIntegrationCommentsSeedsMissingChecksums(t *testing.T) {
 	goMod := "module example.com/app\n\ngo " + testGoVersion +
 		"\n\nrequire go.jacobcolvin.com/x/jsonschema v0.0.0\n\n" +
 		"replace go.jacobcolvin.com/x/jsonschema => " + jsDir + "\n"
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte(goMod), 0o644))
+	modPath := filepath.Join(dir, "go.mod")
+	require.NoError(t, os.WriteFile(modPath, []byte(goMod), 0o644))
 
 	// A go.sum without the golang.org/x/tools entries, to force the seed step.
 	full, err := os.ReadFile(filepath.Join(jsDir, "go.sum"))
@@ -98,7 +99,10 @@ func TestIntegrationCommentsSeedsMissingChecksums(t *testing.T) {
 	sumPath := filepath.Join(dir, "go.sum")
 	require.NoError(t, os.WriteFile(sumPath, []byte(trimmed.String()), 0o644))
 
-	before, err := os.ReadFile(sumPath)
+	beforeSum, err := os.ReadFile(sumPath)
+	require.NoError(t, err)
+
+	beforeMod, err := os.ReadFile(modPath)
 	require.NoError(t, err)
 
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "types.go"), []byte(`package app
@@ -116,9 +120,45 @@ type Config struct {
 	require.NoError(t, err, "stderr: %s", cmdStderr(err))
 	assert.Contains(t, string(out), "Config is the application configuration.")
 
-	after, err := os.ReadFile(sumPath)
+	afterSum, err := os.ReadFile(sumPath)
 	require.NoError(t, err)
-	assert.Equal(t, before, after, "seeding must not modify the user's go.sum")
+	assert.Equal(t, beforeSum, afterSum, "seeding must not modify the user's go.sum")
+
+	afterMod, err := os.ReadFile(modPath)
+	require.NoError(t, err)
+	assert.Equal(t, beforeMod, afterMod, "generation must not modify the user's go.mod")
+}
+
+func TestIntegrationOfflineWithWarmCache(t *testing.T) {
+	t.Parallel()
+
+	// The offline guarantee: with the module proxy off, a module that resolves
+	// jsonschema through a local replace (its transitive dependencies already in
+	// the module cache from building this repo) must still generate. No step in
+	// the pipeline -- import-path resolution, modfile seeding, the helper build
+	// -- may reach for the network.
+	binary := buildBinary(t)
+	dir := t.TempDir()
+	writeModuleFiles(t, dir, "example.com/app")
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "types.go"), []byte(`package app
+
+// Config is the application configuration.
+type Config struct {
+	Name string `+"`"+`json:"name"`+"`"+`
+}
+`), 0o644))
+
+	// -comments forces the seed step to complete golang.org/x/tools into the
+	// redirected modfile, so the offline guarantee covers `go get` as well.
+	cmd := exec.CommandContext(t.Context(), binary, "-type", "Config", "-comments")
+	cmd.Dir = dir
+
+	cmd.Env = append(os.Environ(), "GOPROXY=off", "GOFLAGS=")
+
+	out, err := cmd.Output()
+	require.NoError(t, err, "stderr: %s", cmdStderr(err))
+	assert.Contains(t, string(out), "Config is the application configuration.")
 }
 
 func TestIntegrationVendorMode(t *testing.T) {
