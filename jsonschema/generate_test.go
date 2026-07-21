@@ -2872,6 +2872,31 @@ func TestGenerateFor_TagBoundOnlyTightensTypeBound(t *testing.T) {
 	assert.InDelta(t, 127.0, *field.Maximum, 0, "the int8 type ceiling wins over the weaker tag maximum")
 }
 
+func TestGenerateFor_TagEnumKeepsAuthoredBoundEqualToKindBound(t *testing.T) {
+	t.Parallel()
+
+	// An authored bound EQUAL to the kind bound is still authored: a field enum
+	// drops the kind-derived bounds by provenance, not by value, so minimum=0 on a
+	// uint8 survives the enum while the untouched kind ceiling of 255 is dropped.
+	// A value-based classification would misfile the equal authored floor as
+	// kind-derived and drop it with the ceiling.
+	type Config struct {
+		N uint8 `json:"n" jsonschema:"enum=1|2|3,minimum=0"`
+	}
+
+	s, err := jsonschema.GenerateFor[Config](t.Context())
+	require.NoError(t, err)
+
+	field := s.Properties["n"]
+	require.NotNil(t, field)
+	assert.Equal(t, []any{uint64(1), uint64(2), uint64(3)}, field.Enum)
+	require.NotNil(t, field.Minimum)
+	assert.InDelta(t, 0.0, *field.Minimum, 0, "the authored floor equal to the kind floor is kept")
+	assert.Nil(t, field.Maximum, "the kind ceiling the enum subsumes is dropped")
+	assert.Nil(t, field.ExclusiveMinimum)
+	assert.Nil(t, field.ExclusiveMaximum)
+}
+
 func TestGenerateFor_NullableTagBoundOnlyTightensTypeBound(t *testing.T) {
 	t.Parallel()
 
