@@ -160,7 +160,7 @@ a node-backed `$ref` edge. Setting more than one is `ErrConflictingTypeSchema`.
 The stance replaces hand-shaping an `anyOf[value, null]` wrapper the generator
 would otherwise reverse-engineer, and is recorded on the def entry
 (`defEntry.nullability`) so it combines with each reference's pointer-ness in
-`refNode`, keeping `$defs` nullability order-independent.
+`node.nullableDecision`, keeping `$defs` nullability order-independent.
 
 ### Behavior is spec'd in doc.go and README.md
 

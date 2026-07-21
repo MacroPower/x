@@ -57,9 +57,15 @@ type node struct {
 	embeds []embedNode // struct allOf/anyOf composition branches
 
 	kind nodeKind
-	// Nullable is the single deferred null decision; base selects the encoding
-	// render applies when it is set.
+	// Nullable is the single deferred null decision for a non-kindRef node; base
+	// selects the encoding render applies when it is set. A kindRef node instead
+	// carries ptrNullable and resolves its decision lazily in nullableDecision,
+	// so a stance recorded on the def entry after a self-referential placeholder
+	// ref is built still reaches that reference.
 	nullable bool
+	// PtrNullable is a kindRef node's occurrence pointer-ness, combined with the
+	// def entry's recorded stance in nullableDecision.
+	ptrNullable bool
 	// Verbatim marks a kindValue leaf whose payload a type-level hook declared
 	// through [TypeSchema.Verbatim]: it is emitted exactly as authored, so render
 	// and reconcile skip the null encoding for it entirely.
@@ -82,6 +88,19 @@ func (n *node) nilableContainer() bool {
 	return n.base != ""
 }
 
+// nullableDecision resolves whether the node's occurrence admits null. A kindRef
+// combines its occurrence pointer-ness with the def entry's recorded stance,
+// read lazily so a stance set after a self-referential placeholder ref is built
+// (the extender runs after the recursive fields it reaches) still applies. Every
+// other node carries its decision directly, fixed when the node is built.
+func (n *node) nullableDecision() bool {
+	if n.kind == kindRef {
+		return combineNullable(n.def.nullability, n.ptrNullable)
+	}
+
+	return n.nullable
+}
+
 // nodeProp is a struct property: its value node and JSON name.
 type nodeProp struct {
 	schema *node
@@ -97,8 +116,9 @@ type embedNode struct {
 }
 
 // defEntry is a shared $defs entry. Every reference to the type is a kindRef
-// node linking here, so the body is built once and each reference carries its
-// own nullable bit, making $defs nullability order-independent.
+// node linking here, so the body is built once and each reference resolves its
+// own null decision from its pointer-ness and the entry's stance, making $defs
+// nullability order-independent.
 type defEntry struct {
 	typ      reflect.Type
 	body     *node   // bare value node; nil while a cycle placeholder
@@ -106,10 +126,11 @@ type defEntry struct {
 	baseName string  // namer output, pre-disambiguation; the provisional $ref token
 	name     string  // final $defs key; set by assignDefNames before render
 	// Nullability is the type's declared null-admission stance, recorded once at
-	// definition time and combined with each reference's pointer-ness in refNode.
-	// The stance is a per-type property, so recording it on the entry (rather than
-	// on the shared body) keeps it applied consistently at every reference and
-	// leaves the def body bare. It is NullabilityUnset for a type with no stance.
+	// definition time and combined with each reference's pointer-ness in
+	// nullableDecision. The stance is a per-type property, so recording it on the
+	// entry (rather than on the shared body) keeps it applied consistently at
+	// every reference and leaves the def body bare. It is NullabilityUnset for a
+	// type with no stance.
 	nullability Nullability
 	// Rendering guards re-entrancy while body is mid-render: a self- or mutually
 	// recursive body reaching its own ref sees rendered still nil and keeps its
@@ -185,19 +206,22 @@ func allocCanvasTree(n *node, draft Draft) {
 	n.authored = a
 }
 
-// refNode builds a kindRef node linking to e, its nullability the type's
-// recorded stance combined with the occurrence's pointer-ness (ptrNullable): a
-// pointer occurrence of a NonNullable type still admits no null, and a
-// non-pointer occurrence of a Nullable type does. Its payload holds the
+// refNode builds a kindRef node linking to e, carrying the occurrence's
+// pointer-ness. The nullableDecision method later combines it with the def
+// entry's recorded stance: a pointer occurrence of a NonNullable type still
+// admits no null, and a non-pointer occurrence of a Nullable type does. The
+// combine is deferred rather than baked in here, so a stance the def entry
+// records after a self-referential placeholder ref is built still reaches that
+// reference. Its payload holds the
 // provisional $ref string (the pre-disambiguation name), so a build-time
-// interpreter or extender reading .Ref sees a real reference; render re-emits
-// the final name via renderRef and grafts any siblings.
+// interpreter or extender reading .Ref sees a real reference; render re-emits the
+// final name via renderRef and grafts any siblings.
 func (g *generator) refNode(e *defEntry, ptrNullable bool) *node {
 	return &node{
-		kind:     kindRef,
-		def:      e,
-		nullable: combineNullable(e.nullability, ptrNullable),
-		payload:  &Schema{Ref: g.profile.refPrefix() + e.baseName},
+		kind:        kindRef,
+		def:         e,
+		ptrNullable: ptrNullable,
+		payload:     &Schema{Ref: g.profile.refPrefix() + e.baseName},
 	}
 }
 

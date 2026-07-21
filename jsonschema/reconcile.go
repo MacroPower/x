@@ -86,8 +86,9 @@ func (g *generator) reconcileField(n *node) *Schema {
 // canvas onto the provisional-ref payload, then emits the final $ref: annotations
 // move to the wrapper while const/enum ride the $ref on the value branch, which
 // takes its own Draft-7 sibling wrap in [generator.renderRef]. When the
-// referenced definition is empty (it already admits null), the ref carries every
-// keyword and no null branch is added.
+// referenced definition already admits null (it is empty, or a nilable container
+// whose def body carries the null), the ref carries every keyword and no null
+// branch is added.
 func (g *generator) reconcileRefField(n *node) *Schema {
 	g.renderDef(n.def)
 
@@ -96,14 +97,14 @@ func (g *generator) reconcileRefField(n *node) *Schema {
 	merged := *base
 	overlayAuthored(&merged, n.authored, base)
 
-	if !n.nullable {
+	if !n.nullableDecision() {
 		s := g.renderRef(&merged, n.def)
 		g.clearFieldBounds(n, s)
 
 		return s
 	}
 
-	if schemashape.IsEmpty(n.def.rendered) {
+	if refTargetAdmitsNull(n.def.rendered) {
 		s := g.renderRef(&merged, n.def)
 		g.clearFieldBounds(n, s)
 

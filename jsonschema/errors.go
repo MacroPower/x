@@ -118,11 +118,12 @@ var (
 	// with no properties to seed.
 	ErrInvalidDefaultsInstance = errors.New("invalid defaults instance")
 
-	// ErrConflictingTypeSchema is returned by [Generate] when a type-level hook
-	// declares a [TypeSchema] with more than one of Value, Verbatim, or Ref set.
-	// The three are mutually exclusive ways to describe a type's schema, so
-	// setting two at once is a caller bug surfaced here rather than resolved by a
-	// silent precedence that would hide it.
+	// ErrConflictingTypeSchema is returned by [Generate] for a malformed
+	// [TypeSchema] declared by a type-level hook: one that sets more than one of
+	// Value, Verbatim, or Ref (the three are mutually exclusive ways to describe a
+	// type's schema, so setting two at once is a caller bug rather than a silent
+	// precedence), or whose Ref names a type that is not extractable to $defs (so
+	// it cannot be kept reachable through a node-backed $ref edge).
 	ErrConflictingTypeSchema = errors.New("conflicting type schema")
 )
 

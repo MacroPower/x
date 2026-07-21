@@ -2647,7 +2647,7 @@ type selfRefKeptNode struct {
 	Parent *selfRefParent `json:"parent,omitempty"`
 }
 
-func TestGenerateFor_ExtenderAuthoredSelfRefKeepsDef(t *testing.T) {
+func TestGenerateFor_VerbatimAuthoredSelfRefKeepsDef(t *testing.T) {
 	t.Parallel()
 
 	s, err := jsonschema.GenerateFor[selfRefKeptNode](t.Context())
@@ -3192,6 +3192,38 @@ func TestGenerateFor_NullableStanceReachesNonPointerRef(t *testing.T) {
 	assert.Equal(t, "null", field.AnyOf[1].Type)
 }
 
+// extractedTags is a named nilable container (a slice) that implements
+// JSONSchemaExtender, so it is extracted to $defs. Its container null lives in
+// the shared def body's type list, so a pointer reference to it must stay a bare
+// $ref, not a redundant anyOf[$ref, null].
+type extractedTags []string
+
+func (extractedTags) JSONSchemaExtend(_ context.Context, _ jsonschema.TypeContext, ts *jsonschema.TypeSchema) error {
+	ts.Value.Description = "tags"
+
+	return nil
+}
+
+func TestGenerateFor_ExtractedNilableContainerPointerNotDoubleWrapped(t *testing.T) {
+	t.Parallel()
+
+	type Container struct {
+		P *extractedTags `json:"p"`
+	}
+
+	s, err := jsonschema.GenerateFor[Container](t.Context())
+	require.NoError(t, err)
+
+	field := s.Properties["p"]
+	require.NotNil(t, field)
+	assert.Nil(t, field.AnyOf, "the def already admits null via its type list; the ref must not double-wrap")
+	assert.Equal(t, "#/$defs/extractedTags", field.Ref)
+
+	def := s.Defs["extractedTags"]
+	require.NotNil(t, def)
+	assert.Equal(t, []string{"null", "array"}, def.Types)
+}
+
 func TestGenerateFor_NonNullableStanceDropsPointerNull(t *testing.T) {
 	t.Parallel()
 
@@ -3216,6 +3248,36 @@ func TestGenerateFor_NonNullableStanceDropsPointerNull(t *testing.T) {
 	assert.Equal(t, "string", field.Type, "the NonNullable pointer field is a bare value, not a null wrapper")
 	assert.Nil(t, field.AnyOf)
 	assert.Nil(t, field.Types)
+}
+
+// stancedRecursive is a self-referential struct, so its self-reference is built
+// as a placeholder before the type's extender runs. The stance the extender
+// records must still reach that reference.
+type stancedRecursive struct {
+	Name string            `json:"name"`
+	Next *stancedRecursive `json:"next,omitempty"`
+}
+
+func TestGenerateFor_StanceReachesSelfReference(t *testing.T) {
+	t.Parallel()
+
+	s, err := jsonschema.GenerateFor[stancedRecursive](t.Context(),
+		jsonschema.WithTypeSchemaExtenderFor[stancedRecursive](
+			func(_ context.Context, _ jsonschema.TypeContext, ts *jsonschema.TypeSchema) error {
+				ts.Nullable = jsonschema.NonNullable
+				return nil
+			}),
+	)
+	require.NoError(t, err)
+
+	def := s.Defs["stancedRecursive"]
+	require.NotNil(t, def)
+
+	next := def.Properties["next"]
+	require.NotNil(t, next)
+	assert.Equal(t, "#/$defs/stancedRecursive", next.Ref,
+		"the NonNullable stance reaches the self-reference built before the extender ran")
+	assert.Nil(t, next.AnyOf, "the pointer self-reference admits no null under NonNullable")
 }
 
 func TestGenerateFor_VerbatimEmittedUnderPointer(t *testing.T) {

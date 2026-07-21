@@ -213,7 +213,7 @@ func (g *generator) rootDefaultsTarget(schema *Schema, root *node) *Schema {
 
 	// A pointer root under WithNullable renders as anyOf[value, {null}]; applyNull
 	// always emits the null branch second, so the value branch is AnyOf[0]. No
-	// hook wrapper reaches here anymore, so no other ordering is possible.
+	// hook wrapper reaches here, so no other ordering is possible.
 	if root.nullable && len(schema.AnyOf) == 2 {
 		return schema.AnyOf[0]
 	}
@@ -585,7 +585,14 @@ func (g *generator) refTypeOverride(t reflect.Type, ts TypeSchema, nullable bool
 			"%w: type %s Ref %s does not name an extractable type", ErrConflictingTypeSchema, t, ts.Ref)
 	}
 
-	ref.nullable = combineNullable(ts.Nullable, nullable)
+	// Fold the alias's own stance with the occurrence's pointer-ness into the
+	// reference's ptrNullable, which nullableDecision reads. NullableDecision then
+	// applies the aliased type's own recorded stance outermost, so the precedence
+	// is target stance, then alias stance, then pointer-ness: a Ref alias inherits
+	// the target type's stance, and its own Nullable applies only when the target
+	// is NullabilityUnset (the common case, where the folded value passes through
+	// unchanged).
+	ref.ptrNullable = combineNullable(ts.Nullable, nullable)
 
 	return ref, nil
 }
@@ -1747,7 +1754,9 @@ func (g *generator) extendType(t reflect.Type, ts *TypeSchema) error {
 // site to fold into the node's null decision. An extender that replaces ts.Value
 // with a new pointer is copied back into s in place, since s is the shared
 // payload aliased into the node graph (and, once the field is registered, into
-// the parent's Properties); mutating in place keeps those aliases consistent.
+// the parent's Properties); mutating in place keeps those aliases consistent. An
+// extender that clears ts.Value to nil leaves the payload unchanged, since there
+// is nothing to copy back.
 func (g *generator) extendTypeSchema(t reflect.Type, s *Schema) (Nullability, error) {
 	ts := &TypeSchema{Value: s}
 

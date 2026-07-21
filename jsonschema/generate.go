@@ -146,8 +146,8 @@ func (p exactTypeProvider) SchemaForType(_ context.Context, tc TypeContext) (Typ
 // overriding even [JSONSchemaProvider]. Useful for mapping third-party types
 // or overriding types whose [JSONSchemaProvider] schema is undesirable.
 // Providers are consulted newest registration first, so if called multiple
-// times for the same type, the last registration wins. A zero [TypeSchema]
-// marks the type unrestricted ({}); it is not a removal idiom.
+// times for the same type, the last registration wins. Every call adds a
+// registration; a zero [TypeSchema] marks the type unrestricted ({}).
 //
 // The override's [TypeSchema.Value] (or [TypeSchema.Verbatim]) is copied before
 // use: its sub-schemas are deep-copied and its Enum, Const, Default, and Extra

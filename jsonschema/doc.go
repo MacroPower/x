@@ -56,8 +56,9 @@
 //     an integer type, or an [encoding.TextMarshaler].
 //   - [ErrProviderPanic]: returned when a [JSONSchemaProvider] or
 //     [JSONSchemaExtender] method panics; the panic is recovered and wrapped.
-//   - [ErrConflictingTypeSchema]: returned when a type-level hook declares a
-//     [TypeSchema] with more than one of Value, Verbatim, or Ref set.
+//   - [ErrConflictingTypeSchema]: returned for a malformed [TypeSchema] a
+//     type-level hook declares: more than one of Value, Verbatim, or Ref set,
+//     or a Ref naming a type that is not extractable to $defs.
 //   - [ErrInvalidDefaultsInstance]: returned when the [WithDefaultsFrom]
 //     instance does not match the generated root type or does not marshal to
 //     a JSON object.
@@ -133,8 +134,8 @@
 // additive registrations that a nil cannot identify anything to remove from
 // ([WithTagInterpreter], [WithTypeSchemaProvider], [WithTypeSchemaExtender],
 // [WithFormatValidator]); these ignore a nil registration. [WithTypeSchema]
-// takes a [TypeSchema] value, not a pointer: a zero [TypeSchema] marks the type
-// unrestricted ({}), so it is not a removal idiom.
+// takes a [TypeSchema] value, not a pointer: every call adds a registration,
+// and a zero [TypeSchema] marks the type unrestricted ({}).
 //
 // # Type Mapping
 //

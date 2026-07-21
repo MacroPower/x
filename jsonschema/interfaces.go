@@ -63,8 +63,8 @@ type TypeContext struct {
 }
 
 // Nullability is a type-level hook's declared stance on whether its schema
-// admits a JSON null, replacing the practice of hand-shaping an anyOf[value,
-// null] wrapper the generator then has to recognize.
+// admits a JSON null, so a hook declares its stance rather than hand-shaping an
+// anyOf[value, null] wrapper the generator would have to recognize.
 type Nullability uint8
 
 const (
@@ -96,8 +96,9 @@ type TypeSchema struct {
 	// Ref declares that this schema is a reference to the named Go type, so
 	// generation keeps that type's definition reachable through a node-backed
 	// edge instead of a payload $ref-string scan. The named type must be
-	// extractable (a struct or a type extracted to $defs) so the reference stays
-	// a real $ref edge.
+	// extractable (a struct, or a type extracted to $defs because it implements a
+	// provider or extender) so the reference stays a real $ref edge; a
+	// non-extractable Ref is [ErrConflictingTypeSchema].
 	Ref reflect.Type
 	// Nullable is the type's null-admission stance (see [Nullability]). It
 	// decorates Value (and Ref); it is ignored for Verbatim.

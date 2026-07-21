@@ -1,6 +1,8 @@
 package jsonschema
 
 import (
+	"slices"
+
 	"go.jacobcolvin.com/x/jsonschema/internal/schemashape"
 	"go.jacobcolvin.com/x/jsonschema/internal/typename"
 )
@@ -124,7 +126,7 @@ func (g *generator) renderDef(e *defEntry) {
 // A field or element node never reaches here; render routes it to
 // [generator.reconcileField].
 func (g *generator) applyNull(n *node, base *Schema) *Schema {
-	if !n.nullable {
+	if !n.nullableDecision() {
 		g.clearFieldBounds(n, base)
 
 		if n.nilableContainer() {
@@ -141,16 +143,18 @@ func (g *generator) applyNull(n *node, base *Schema) *Schema {
 		return base
 	}
 
-	// The only null-admitting bare shape reaching here is the empty schema (an
-	// interface, or a $ref to an empty def): every hook-supplied null wrapper is
-	// gone, and byte slices take the nilable-container path above. An empty
-	// schema already permits null, so no second branch is added.
+	// A target that already admits null needs no second null branch. For an
+	// inline node the target is its own bare payload, null-admitting only when
+	// empty (an interface). For a $ref the target is the shared def body, which
+	// also admits null when it is a nilable container -- a slice, map, or []byte,
+	// whose container null lives in the def body's type list rather than on each
+	// reference.
 	target := base
 	if n.kind == kindRef {
 		target = n.def.rendered
 	}
 
-	if schemashape.IsEmpty(target) {
+	if refTargetAdmitsNull(target) {
 		return base
 	}
 
@@ -188,6 +192,20 @@ func (g *generator) pinsValue(n *node, value *Schema) bool {
 	return n.dropBounds
 }
 
+// refTargetAdmitsNull reports whether a rendered schema already accepts a JSON
+// null, so a nullable reference to it needs no second null branch: an empty
+// schema (an interface, or a $ref to an empty def), or a type list naming null
+// (an extracted nilable container -- slice, map, []byte -- whose container null
+// lives in the shared def body rather than on each reference). A nil target (an
+// unfilled cycle placeholder) is not yet known.
+func refTargetAdmitsNull(s *Schema) bool {
+	if s == nil {
+		return false
+	}
+
+	return schemashape.IsEmpty(s) || s.Type == typename.Null || slices.Contains(s.Types, typename.Null)
+}
+
 // maybeInlineRoot inlines a root $ref whose def is reached from nowhere else,
 // dropping the entry. A def referenced elsewhere (self-reference or mutual
 // recursion) keeps the root a $ref so those references never dangle.
@@ -200,7 +218,7 @@ func (g *generator) maybeInlineRoot(root *node) *node {
 	// def stays referenced through the wrapper and is never inlined; only a
 	// bare-$ref root (a non-pointer struct, or a pointer root under
 	// WithNullable(false)) is a candidate.
-	if root.nullable {
+	if root.nullableDecision() {
 		return root
 	}
 
