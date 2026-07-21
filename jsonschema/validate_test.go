@@ -6746,6 +6746,20 @@ func TestCompileRejectsItemsArrayUnderDraft2020(t *testing.T) {
 		assert.Contains(t, err.Error(), "/properties/tuple/items")
 	})
 
+	t.Run("empty array form rejected under default draft", func(t *testing.T) {
+		t.Parallel()
+
+		// A JSON `"items": []` unmarshals to a non-nil empty ItemsArray; the
+		// present-but-empty array form is rejected like any other, so its
+		// Draft-7 additionalItems semantics cannot be dropped silently.
+		v, err := jsonschema.ParseSchema([]byte(
+			`{"items": [], "additionalItems": {"type": "string"}}`))
+		require.NoError(t, err)
+
+		_, err = jsonschema.Compile(t.Context(), v)
+		require.ErrorIs(t, err, jsonschema.ErrItemsArrayUnderDraft2020)
+	})
+
 	t.Run("accepted and enforced under draft-7", func(t *testing.T) {
 		t.Parallel()
 

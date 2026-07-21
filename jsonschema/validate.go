@@ -1408,7 +1408,11 @@ func checkItemsArrayDraft2020(schema *Schema, schemaPath string, visited map[*Sc
 
 	visited[schema] = true
 
-	if len(schema.ItemsArray) > 0 {
+	// A nil check rather than a length check: upstream unmarshals a present
+	// but empty `"items": []` into a non-nil empty slice, and that array form
+	// is just as meaningless under 2020-12 (it silently drops the Draft-7
+	// semantics of its additionalItems sibling).
+	if schema.ItemsArray != nil {
 		return fmt.Errorf("%w; use prefixItems at %s/items", ErrItemsArrayUnderDraft2020, schemaPath)
 	}
 
