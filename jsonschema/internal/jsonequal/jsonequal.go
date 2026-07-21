@@ -247,6 +247,15 @@ func containsNonFiniteFloat(v any) bool {
 func containsUnboundedNumber(v any) bool {
 	switch val := v.(type) {
 	case json.Number:
+		// The decomposition is canonical (trailing zeros stripped), so a
+		// multi-megabyte literal like "1." + zeros can classify as exactly
+		// comparable even though the fallback path would hand the RAW literal
+		// to big.Rat.SetString, whose cost is quadratic in raw length. Any
+		// over-long literal is guarded regardless of its canonical form.
+		if len(val) > numrat.MaxNumberLen {
+			return true
+		}
+
 		d, ok := numrat.ParseDecNumber(string(val))
 
 		return !ok || !d.ExactlyComparable()

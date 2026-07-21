@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"math"
 	"math/big"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 
@@ -254,6 +256,32 @@ func TestOverCapNumbers(t *testing.T) {
 	// distinct ones do not.
 	assert.True(t, jsonequal.HasDuplicates([]any{json.Number("1e1000000000"), json.Number("1e1000000000")}))
 	assert.False(t, jsonequal.HasDuplicates([]any{json.Number("1e1000000000"), json.Number("1e2000000000")}))
+}
+
+// TestOverLongCanonicallySmallNumbers covers literals whose raw length exceeds
+// the expansion cap while their canonical decomposition is tiny (trailing
+// fractional zeros strip to "1"). Classified by decomposition alone they look
+// exactly comparable, and the fallback path would then hand the raw
+// multi-megabyte literal to big.Rat.SetString, whose cost is quadratic in raw
+// length. The guard keys on raw length, so these compare via the canonical
+// form: correct results in linear time. The wall-clock bound is the regression
+// check; the pre-fix quadratic path took tens of seconds at this size.
+func TestOverLongCanonicallySmallNumbers(t *testing.T) {
+	t.Parallel()
+
+	long1 := json.Number("1." + strings.Repeat("0", 4_000_000))
+	long2 := json.Number("2." + strings.Repeat("0", 4_000_000))
+
+	start := time.Now()
+
+	assert.True(t, jsonequal.EqualWithRat(long1, nil, json.Number(string(long1))))
+	assert.False(t, jsonequal.EqualWithRat(long1, nil, long2))
+	assert.True(t, jsonequal.EqualWithRat(long1, nil, json.Number("1")))
+	assert.True(t, jsonequal.HasDuplicates([]any{long1, json.Number(string(long1))}))
+	assert.False(t, jsonequal.HasDuplicates([]any{long1, long2}))
+
+	assert.Less(t, time.Since(start), 5*time.Second,
+		"over-long literals must stay on the linear guarded path")
 }
 
 // ratOf mirrors the validator's top-level numeric precompute
