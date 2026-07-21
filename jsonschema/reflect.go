@@ -483,7 +483,7 @@ func (g *generator) handleOverrideType(t reflect.Type, ts TypeSchema, nullable b
 // TypeSchema (nil Value) marks the type unrestricted ({}).
 //
 //   - Value (common case): clone the caller-shared schema, apply type-level
-//     comments, and build a bare value node; nullability is the [TypeSchema.Nullable]
+//     comments, and build a bare value node; nullability is the [TypeSchema.Nullability]
 //     stance combined with the occurrence's pointer-ness, never a wrapper baked
 //     into the payload.
 //   - Verbatim: an opaque, fully-formed schema emitted exactly as given, with no
@@ -538,10 +538,10 @@ func (g *generator) finishTypeOverride(t reflect.Type, ts TypeSchema, nullable b
 	vnode := &node{kind: kindValue, payload: s}
 
 	if g.shouldExtract(t) {
-		return g.defineType(t, vnode, ts.Nullable, nullable), nil
+		return g.defineType(t, vnode, ts.Nullability, nullable), nil
 	}
 
-	vnode.nullable = combineNullable(ts.Nullable, nullable)
+	vnode.nullable = combineNullable(ts.Nullability, nullable)
 
 	return vnode, nil
 }
@@ -606,10 +606,10 @@ func (g *generator) refTypeOverride(t reflect.Type, ts TypeSchema, nullable bool
 	// reference's ptrNullable, which nullableDecision reads. NullableDecision then
 	// applies the aliased type's own recorded stance outermost, so the precedence
 	// is target stance, then alias stance, then pointer-ness: a Ref alias inherits
-	// the target type's stance, and its own Nullable applies only when the target
-	// is NullabilityUnset (the common case, where the folded value passes through
+	// the target type's stance, and its own Nullability applies only when the target
+	// is NullFromReflection (the common case, where the folded value passes through
 	// unchanged).
-	ref.ptrNullable = combineNullable(ts.Nullable, nullable)
+	ref.ptrNullable = combineNullable(ts.Nullability, nullable)
 
 	return ref, nil
 }
@@ -632,14 +632,14 @@ func (g *generator) handleProviderType(t reflect.Type, nullable bool) (*node, er
 }
 
 // combineNullable resolves a [Nullability] stance against an occurrence's
-// pointer-ness: Nullable always admits null, NonNullable never does, and
-// NullabilityUnset defers to the pointer-ness (a pointer or interface position
+// pointer-ness: NullAllowed always admits null, NullForbidden never does, and
+// NullFromReflection defers to the pointer-ness (a pointer or interface position
 // is nullable, everything else is not).
 func combineNullable(stance Nullability, ptr bool) bool {
 	switch stance {
-	case Nullable:
+	case NullAllowed:
 		return true
-	case NonNullable:
+	case NullForbidden:
 		return false
 	default:
 		return ptr
@@ -653,7 +653,7 @@ func combineNullable(stance Nullability, ptr bool) bool {
 // its type list) is deduped by render, never double-wrapped.
 func (g *generator) handleBuiltinType(t reflect.Type, s *Schema, nullable bool) (*node, error) {
 	value := &node{kind: kindValue, payload: s}
-	stance := NullabilityUnset
+	stance := NullFromReflection
 
 	//nolint:nestif // Sequential post-processing steps; flattening adds no clarity.
 	if t.Name() != "" {
@@ -1001,7 +1001,7 @@ func (g *generator) buildStructSchema(t reflect.Type) (*node, Nullability, error
 		if fields[idx].composeViaAllOf {
 			err := g.processAllOfField(fields[idx], obj)
 			if err != nil {
-				return nil, NullabilityUnset, fmt.Errorf("embedded %s: %w", fields[idx].field.Type, err)
+				return nil, NullFromReflection, fmt.Errorf("embedded %s: %w", fields[idx].field.Type, err)
 			}
 
 			hasAllOf = true
@@ -1011,7 +1011,7 @@ func (g *generator) buildStructSchema(t reflect.Type) (*node, Nullability, error
 
 		fieldNode, err := g.buildFieldSchema(t, fields[idx], obj)
 		if err != nil {
-			return nil, NullabilityUnset, fmt.Errorf("field %q: %w", fields[idx].jsonName, err)
+			return nil, NullFromReflection, fmt.Errorf("field %q: %w", fields[idx].jsonName, err)
 		}
 
 		pending = append(pending, pendingField{fi: fields[idx], node: fieldNode})
@@ -1022,7 +1022,7 @@ func (g *generator) buildStructSchema(t reflect.Type) (*node, Nullability, error
 
 		err := g.applyFieldInterpreters(t, pf.fi, pf.node, obj)
 		if err != nil {
-			return nil, NullabilityUnset, fmt.Errorf("field %q: %w", pf.fi.jsonName, err)
+			return nil, NullFromReflection, fmt.Errorf("field %q: %w", pf.fi.jsonName, err)
 		}
 	}
 
@@ -1041,7 +1041,7 @@ func (g *generator) buildStructSchema(t reflect.Type) (*node, Nullability, error
 	// Type-level comment.
 	err := g.applyTypeDescription(t, s)
 	if err != nil {
-		return nil, NullabilityUnset, err
+		return nil, NullFromReflection, err
 	}
 
 	// JSONSchemaExtend, then registered extenders. An extender may declare a
@@ -1049,7 +1049,7 @@ func (g *generator) buildStructSchema(t reflect.Type) (*node, Nullability, error
 	// inline node's null decision.
 	stance, err := g.extendTypeSchema(t, s)
 	if err != nil {
-		return nil, NullabilityUnset, err
+		return nil, NullFromReflection, err
 	}
 
 	return obj, stance, nil
@@ -1520,6 +1520,14 @@ func (g *generator) buildFieldSchema(
 		}
 	}
 
+	// Mark the enum-on-elements carve-out. At this instant only the jsonschema tag
+	// could have authored an enum on a sequence/map element, and it does so on the
+	// bare element canvas without pinning the value, so those elements keep their
+	// type-derived numeric bounds through reconcile. Placed after the whole tag
+	// block, a type= override (which rebuilt the field into a childless value node
+	// above) is a natural no-op.
+	markKeptElementEnums(fieldNode)
+
 	// Add to parent. The payload (bare) is shared into parent.Properties so a
 	// build-time interpreter sees the sibling shape; render overwrites it.
 	if parent.payload.Properties == nil {
@@ -1743,7 +1751,7 @@ func callExtender(ctx context.Context, tc TypeContext, ts *TypeSchema) (err erro
 // produced and can adjust it. It is called from each reflection path
 // (structs, built-in overrides, named non-struct kinds) and never from the
 // provider paths (registered or on-type), which replace reflection entirely.
-// The extenders mutate ts.Value in place and may set ts.Nullable to declare a
+// The extenders mutate ts.Value in place and may set ts.Nullability to declare a
 // nullability stance.
 func (g *generator) extendType(t reflect.Type, ts *TypeSchema) error {
 	tc := TypeContext{Type: t, Draft: g.draft}
@@ -1767,7 +1775,7 @@ func (g *generator) extendType(t reflect.Type, ts *TypeSchema) error {
 
 // extendTypeSchema runs [generator.extendType] over the type-derived payload s,
 // wrapping it in a [TypeSchema] the extenders mutate. It returns the declared
-// [Nullability] stance (NullabilityUnset when no extender sets one) for the call
+// [Nullability] stance (NullFromReflection when no extender sets one) for the call
 // site to fold into the node's null decision. An extender that replaces ts.Value
 // with a new pointer is copied back into s in place, since s is the shared
 // payload aliased into the node graph (and, once the field is registered, into
@@ -1777,19 +1785,19 @@ func (g *generator) extendType(t reflect.Type, ts *TypeSchema) error {
 //
 // The envelope enters with Verbatim and Ref nil: those declare a replacement
 // schema, which only a provider supplies. An extender honors only Value and
-// Nullable, so one that sets Verbatim or Ref is reported as a malformed
+// Nullability, so one that sets Verbatim or Ref is reported as a malformed
 // TypeSchema rather than having the declaration silently ignored.
 func (g *generator) extendTypeSchema(t reflect.Type, s *Schema) (Nullability, error) {
 	ts := &TypeSchema{Value: s}
 
 	err := g.extendType(t, ts)
 	if err != nil {
-		return NullabilityUnset, err
+		return NullFromReflection, err
 	}
 
 	if ts.Verbatim != nil || ts.Ref != nil {
-		return NullabilityUnset, fmt.Errorf(
-			"%w: extender for type %s sets Verbatim or Ref; an extender declares only Value and Nullable",
+		return NullFromReflection, fmt.Errorf(
+			"%w: extender for type %s sets Verbatim or Ref; an extender declares only Value and Nullability",
 			ErrConflictingTypeSchema, t)
 	}
 
@@ -1797,7 +1805,7 @@ func (g *generator) extendTypeSchema(t reflect.Type, s *Schema) (Nullability, er
 		*s = *ts.Value
 	}
 
-	return ts.Nullable, nil
+	return ts.Nullability, nil
 }
 
 // jsonTagInfo holds parsed json tag information.

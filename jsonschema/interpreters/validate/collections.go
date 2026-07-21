@@ -9,20 +9,22 @@ import (
 )
 
 // collectionBounds returns the collection's size-bound canvas write targets (the
-// floor and ceiling field pointers) and their effective floor and ceiling
+// floor and ceiling field pointers) and their current canvas floor and ceiling
 // values, in that order: the min/maxProperties pair for a map, otherwise the
-// min/maxItems pair for a slice or array. The effective values coalesce the
-// canvas with the type-derived base so a tag bound never weakens the type's own.
+// min/maxItems pair for a slice or array. The bound helpers intersect a rule
+// against these canvas values (so repeated rules in one tag AND), while reconcile
+// intersects the canvas against the type-derived bound so a tag bound never
+// weakens the type's own.
 func collectionBounds(
 	field jsonschema.FieldContext, baseType reflect.Type,
 ) (**int, **int, *int, *int) {
 	if isMapKind(baseType) {
 		return &field.Canvas.MinProperties, &field.Canvas.MaxProperties,
-			field.EffectiveMinProperties(), field.EffectiveMaxProperties()
+			field.Canvas.MinProperties, field.Canvas.MaxProperties
 	}
 
 	return &field.Canvas.MinItems, &field.Canvas.MaxItems,
-		field.EffectiveMinItems(), field.EffectiveMaxItems()
+		field.Canvas.MinItems, field.Canvas.MaxItems
 }
 
 // errByteSliceLengthConstraint reports a length, size, or uniqueness validator

@@ -1,6 +1,7 @@
 package jsonschema
 
 import (
+	"cmp"
 	"slices"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/schemashape"
@@ -138,6 +139,10 @@ func (g *generator) reconcileRefField(n *node) *Schema {
 // tag cannot override a type-level bool annotation the field's own type set to
 // true back to false. Authoring one of these to false is meaningless in every
 // other case, so the ambiguity is confined to that one legacy-seam combination.
+//
+// The type-derivable bound keywords do not blind-assign: after the overlay,
+// intersectBounds tightens each to the stronger of the canvas and the base
+// value, so an authored bound can only tighten the type's own, never weaken it.
 func overlayAuthored(merged, canvas, base *Schema) {
 	for _, kw := range movableKeywords {
 		if kw.differs(emptySchema, canvas) {
@@ -176,6 +181,68 @@ func overlayAuthored(merged, canvas, base *Schema) {
 	// payload's slice header intact regardless.
 	if len(canvas.AllOf) > 0 {
 		merged.AllOf = append(slices.Clone(base.AllOf), canvas.AllOf...)
+	}
+
+	intersectBounds(merged, base)
+}
+
+// intersectBounds tightens each type-derivable bound keyword on merged to the
+// stronger of merged's current value (the overlaid canvas value, or base's own
+// where the canvas authored none) and base's type-derived value: a floor keeps
+// the larger side, a ceiling the smaller, and a nil pointer is an unbounded side
+// so a non-nil value always wins. It closes the non-nullable weakening footgun --
+// where a weaker authored bound would blind-overwrite the stronger type bound --
+// for every writer at once (the jsonschema tag, validate, third-party
+// interpreters), so an authored bound can only tighten the type's own value. The
+// nullable path is unaffected: a stronger canvas bound differs from base, so
+// splitFieldKeywords moves it to the wrapper, while a weaker canvas bound equals
+// base after intersection, so no redundant inert wrapper sibling is emitted for it.
+//
+// Cross-keyword strictness (an exclusive versus inclusive bound) is not
+// reconciled here: base's own keywords are never weakened and the canvas can only
+// add conjuncts, so per-keyword intersection only ever tightens. The multipleOf
+// keyword is excluded: it has no type-derived value to intersect against.
+func intersectBounds(merged, base *Schema) {
+	merged.Minimum = intersectFloor(merged.Minimum, base.Minimum)
+	merged.ExclusiveMinimum = intersectFloor(merged.ExclusiveMinimum, base.ExclusiveMinimum)
+	merged.MinLength = intersectFloor(merged.MinLength, base.MinLength)
+	merged.MinItems = intersectFloor(merged.MinItems, base.MinItems)
+	merged.MinProperties = intersectFloor(merged.MinProperties, base.MinProperties)
+
+	merged.Maximum = intersectCeiling(merged.Maximum, base.Maximum)
+	merged.ExclusiveMaximum = intersectCeiling(merged.ExclusiveMaximum, base.ExclusiveMaximum)
+	merged.MaxLength = intersectCeiling(merged.MaxLength, base.MaxLength)
+	merged.MaxItems = intersectCeiling(merged.MaxItems, base.MaxItems)
+	merged.MaxProperties = intersectCeiling(merged.MaxProperties, base.MaxProperties)
+}
+
+// intersectFloor returns the stronger (larger) of two lower bounds, treating a
+// nil pointer as an unbounded side so a non-nil bound always wins.
+func intersectFloor[T cmp.Ordered](a, b *T) *T {
+	switch {
+	case a == nil:
+		return b
+	case b == nil:
+		return a
+	case *b > *a:
+		return b
+	default:
+		return a
+	}
+}
+
+// intersectCeiling returns the stronger (smaller) of two upper bounds, treating a
+// nil pointer as an unbounded side so a non-nil bound always wins.
+func intersectCeiling[T cmp.Ordered](a, b *T) *T {
+	switch {
+	case a == nil:
+		return b
+	case b == nil:
+		return a
+	case *b < *a:
+		return b
+	default:
+		return a
 	}
 }
 

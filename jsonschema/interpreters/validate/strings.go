@@ -8,23 +8,25 @@ import (
 )
 
 // applyStringMinConstraint applies min/gte or gt to a string field by raising
-// its minLength floor on the canvas, reading the effective floor.
+// its minLength floor on the canvas, intersecting its own repeated rules against
+// the canvas value (reconcile intersects against the type bound).
 func applyStringMinConstraint(field jsonschema.FieldContext, value string, exclusive bool) error {
-	return applyMinBound(&field.Canvas.MinLength, field.EffectiveMinLength(), value, exclusive)
+	return applyMinBound(&field.Canvas.MinLength, field.Canvas.MinLength, value, exclusive)
 }
 
 // applyStringMaxConstraint applies max/lte or lt to a string field by lowering
-// its maxLength ceiling on the canvas, reading the effective bounds.
+// its maxLength ceiling on the canvas, intersecting its own repeated rules
+// against the canvas values (reconcile intersects against the type bound).
 func applyStringMaxConstraint(field jsonschema.FieldContext, value string, exclusive bool) error {
 	return applyMaxBound(&field.Canvas.MinLength, &field.Canvas.MaxLength,
-		field.EffectiveMinLength(), field.EffectiveMaxLength(), value, exclusive)
+		field.Canvas.MinLength, field.Canvas.MaxLength, value, exclusive)
 }
 
 // applyStringLenConstraint applies len=N to a string field by pinning minLength
 // and maxLength on the canvas to the intersected bound.
 func applyStringLenConstraint(field jsonschema.FieldContext, value string) error {
 	return applyLenBound(&field.Canvas.MinLength, &field.Canvas.MaxLength,
-		field.EffectiveMinLength(), field.EffectiveMaxLength(), value)
+		field.Canvas.MinLength, field.Canvas.MaxLength, value)
 }
 
 // applyStringOneOf applies oneof=a b c to a string field. Single-quoted runs

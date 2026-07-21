@@ -138,8 +138,11 @@ func applyParts(parts []string, field jsonschema.FieldContext, isDive bool) erro
 
 // applyValidator applies a single validator to the field. Writes land on the
 // canvas ([jsonschema.FieldContext.Canvas]); type-state reads consult
-// [jsonschema.FieldContext.Base]; bound tightening reads the effective merged
-// value through the field's Effective accessors.
+// [jsonschema.FieldContext.Base]; bound tightening writes the tightened bound to
+// the canvas, intersecting its own repeated rules against the canvas value while
+// reconcile intersects against the type-derived bound. A string first-wins
+// keyword (format, pattern, contentEncoding, contentMediaType) still reads
+// [jsonschema.FieldContext.EffectiveFormat] and its siblings.
 func applyValidator(key, value string, field jsonschema.FieldContext) error {
 	// Follow pointers for type checking.
 	baseType := field.Type
@@ -290,8 +293,9 @@ func addRequired(parent *jsonschema.Schema, name string) {
 // non-zero value. Validator rules in a single tag compose conjunctively and
 // order-independently, so the floors only ever rise: a stronger min/len bound
 // set by another part of the tag is never lowered, regardless of where
-// "required" appears. Each floor reads the effective merged bound so it never
-// weakens the type's own bound.
+// "required" appears. Each floor reads the current canvas bound; reconcile
+// intersects the canvas against the type-derived bound, so a required floor of
+// one never weakens the type's own stronger bound.
 func applyRequiredConstraint(field jsonschema.FieldContext, baseType reflect.Type) error {
 	// A json:",string" numeric or bool field serializes its value as a quoted
 	// string, so the "non-zero" requirement must forbid the serialized zero
@@ -311,7 +315,7 @@ func applyRequiredConstraint(field jsonschema.FieldContext, baseType reflect.Typ
 
 	switch {
 	case baseType.Kind() == reflect.String:
-		if eff := field.EffectiveMinLength(); eff == nil || *eff < 1 {
+		if eff := field.Canvas.MinLength; eff == nil || *eff < 1 {
 			field.Canvas.MinLength = new(1)
 		}
 
@@ -328,19 +332,19 @@ func applyRequiredConstraint(field jsonschema.FieldContext, baseType reflect.Typ
 		// schema) has no faithful non-zero constraint, so only the parent's
 		// required entry applies.
 		if isByteSliceField(baseType) {
-			if eff := field.EffectiveMinLength(); schemaPermitsString(field.Base) && (eff == nil || *eff < 1) {
+			if eff := field.Canvas.MinLength; schemaPermitsString(field.Base) && (eff == nil || *eff < 1) {
 				field.Canvas.MinLength = new(1)
 			}
 
 			return nil
 		}
 
-		if eff := field.EffectiveMinItems(); eff == nil || *eff < 1 {
+		if eff := field.Canvas.MinItems; eff == nil || *eff < 1 {
 			field.Canvas.MinItems = new(1)
 		}
 
 	case baseType.Kind() == reflect.Map:
-		if eff := field.EffectiveMinProperties(); eff == nil || *eff < 1 {
+		if eff := field.Canvas.MinProperties; eff == nil || *eff < 1 {
 			field.Canvas.MinProperties = new(1)
 		}
 
@@ -481,9 +485,10 @@ func applySequenceOneOf(field jsonschema.FieldContext, value string, baseType re
 // finishElement completes constraining one sequence or map element. It reports a
 // clash between a tag const/enum and a const/enum already on the element type's
 // value schema -- the type-derived base -- since reconcile places the tag
-// const/enum there and a disagreeing one would be silently overwritten. It then
-// marks the element for bound dropping when a const or enum pinned its value, so
-// reconcile drops the type-derived numeric bounds the pinned value subsumes.
+// const/enum there and a disagreeing one would be silently overwritten. A const
+// or enum the interpreter writes onto the element canvas pins its value; reconcile
+// derives the bound drop from that authored canvas directly, so no imperative
+// signal is needed here.
 func finishElement(elem jsonschema.FieldContext) error {
 	existing := elem.Base
 
@@ -499,10 +504,6 @@ func finishElement(elem jsonschema.FieldContext) error {
 				"%w: oneof conflicts with the element type's existing enum constraint",
 				ErrConflictingConstraints)
 		}
-	}
-
-	if elem.Canvas.Const != nil || elem.Canvas.Enum != nil {
-		elem.PinElementValue()
 	}
 
 	return nil

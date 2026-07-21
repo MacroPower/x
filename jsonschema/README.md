@@ -247,7 +247,7 @@ func (Status) JSONSchema(context.Context, jsonschema.TypeContext) (jsonschema.Ty
 
 A type implementing `JSONSchemaExtender` modifies its reflection-generated schema
 after it is built. It receives the same `TypeSchema`, with `Value` set to the
-reflection-generated schema to mutate in place; only `Value` and `Nullable` are
+reflection-generated schema to mutate in place; only `Value` and `Nullability` are
 honored (`Verbatim` and `Ref` declare a replacement schema only a provider
 supplies, so an extender setting either is `ErrConflictingTypeSchema`), and a
 non-nil error aborts generation:
@@ -272,8 +272,8 @@ ignores them.
 A `TypeSchema` declares intent instead of a pre-shaped schema. Exactly one of
 `Value`, `Verbatim`, or `Ref` is meaningful; setting more than one is
 `ErrConflictingTypeSchema`. `Value` is a bare value schema whose nullability is
-the `Nullable` stance combined with each occurrence's pointer-ness -- so a hook
-declares `Nullable` (or `NonNullable`) rather than hand-shaping an
+the `Nullability` stance combined with each occurrence's pointer-ness -- so a hook
+declares `NullAllowed` (or `NullForbidden`) rather than hand-shaping an
 `anyOf[value, null]` wrapper. `Verbatim` is an opaque escape hatch emitted
 exactly as authored (no null encoding), for a fully-formed schema such as one
 loaded from a document. `Ref` is a whole-type alias to another Go type, kept
@@ -454,6 +454,14 @@ that bound is dropped too. An `enum` only restricts the value to a set, so an
 explicit bound the tag sets narrows it further and is kept:
 `enum=10|20,minimum=15` keeps `minimum` and so admits only `20`.
 
+On a sequence or map element the bound drop is by author. A jsonschema-tag
+`enum` on the elements keeps each element's type-derived numeric bounds -- the
+tag writes the enum onto the bare element schema without pinning the value, so
+`[]int8` with `enum=1|2|3` keeps each element's `-128`/`127` range alongside the
+enum. A tag interpreter that pins an element's value with a `const` or `enum` (a
+`validate` dive, or a sequence-wide `oneof`) instead drops those bounds, the way
+a whole-value `const` or `enum` does on a scalar field.
+
 ### Struct field rules
 
 Fields follow `encoding/json` conventions: the `json` tag sets the property
@@ -577,10 +585,16 @@ canvas. The first is the Generate call's context, like the other generation-time
 hooks; an interpreter that performs no cancellable work ignores it. The second is
 a `Tag` carrying the struct tag key and value the call runs under. The third is a
 `FieldContext`, whose `Canvas` is the authored-facts canvas an interpreter writes
-to (value-scoped facts like `const` and `enum`, annotations, and bounds it
-tightens by reading the effective merged value through the field's `Effective`
-accessors) and whose read-only `Base` is the type-derived schema, for dispatching
-on the reflected shape. Generation composes the canvas with `Base` and applies
+to (value-scoped facts like `const` and `enum`, annotations, and numeric, string,
+and array bounds). A canvas bound can only tighten the type's own: generation
+intersects each canvas bound with the type-derived bound from `Base` and keeps the
+stronger side, so a weaker authored bound never widens the type's, and an
+interpreter need only intersect its own repeated rules within a tag against the
+canvas value. (The string first-wins keywords -- `format`, `pattern`,
+`contentEncoding`, `contentMediaType` -- read the field's `EffectiveFormat` and
+sibling accessors so a tag never overrides a value the type already set.) The
+read-only `Base` is the type-derived schema, for dispatching on the reflected
+shape. Generation composes the canvas with `Base` and applies
 the null encoding for a nil-able field, so a `const` or `enum` an interpreter
 declares lands on the value branch and keeps null valid. The context also holds
 the parent schema, JSON name, and Go type; the declaring struct type, which for a

@@ -17,21 +17,22 @@ func parseBoundValue(value string) (int, error) {
 	return n, nil
 }
 
-// raiseFloor stores n in *field when it tightens the effective lower bound. The
-// effective floor coalesces the canvas with the type-derived base, and the write
-// lands on the canvas. Rules in a validate tag are ANDed, so overlapping floors
-// intersect to their maximum: a weaker (lower) floor never lowers a stronger one
-// already in effect, regardless of tag order.
+// raiseFloor stores n in *field when it tightens the canvas lower bound at eff.
+// Rules in a validate tag are ANDed, so overlapping floors intersect to their
+// maximum: a weaker (lower) floor never lowers a stronger one already on the
+// canvas, regardless of tag order. The type-derived floor is intersected later
+// by reconcile.
 func raiseFloor(field **int, eff *int, n int) {
 	if eff == nil || n > *eff {
 		*field = new(n)
 	}
 }
 
-// lowerCeiling stores n in *field when it tightens the effective upper bound.
+// lowerCeiling stores n in *field when it tightens the canvas upper bound at eff.
 // Rules in a validate tag are ANDed, so overlapping ceilings intersect to their
-// minimum: a weaker (higher) ceiling never raises a stronger one already in
-// effect, regardless of tag order.
+// minimum: a weaker (higher) ceiling never raises a stronger one already on the
+// canvas, regardless of tag order. The type-derived ceiling is intersected
+// later by reconcile.
 func lowerCeiling(field **int, eff *int, n int) {
 	if eff == nil || n < *eff {
 		*field = new(n)
@@ -39,8 +40,8 @@ func lowerCeiling(field **int, eff *int, n int) {
 }
 
 // applyMinBound raises the floor at field from a min/gte (inclusive) or gt
-// (exclusive) rule, reading the effective floor at effMin. Gt=N is the inclusive
-// bound N+1, clamped non-negative as the length keywords require.
+// (exclusive) rule, reading the current canvas floor at effMin. Gt=N is the
+// inclusive bound N+1, clamped non-negative as the length keywords require.
 func applyMinBound(field **int, effMin *int, value string, exclusive bool) error {
 	n, err := parseBoundValue(value)
 	if err != nil {
@@ -53,7 +54,7 @@ func applyMinBound(field **int, effMin *int, value string, exclusive bool) error
 }
 
 // applyMaxBound lowers the ceiling at maxField from a max/lte (inclusive) or lt
-// (exclusive) rule, reading the effective floor and ceiling at effMin/effMax.
+// (exclusive) rule, reading the current canvas floor and ceiling at effMin/effMax.
 // Lt=N is the inclusive bound N-1. When that inclusive ceiling is negative the
 // rule demands a length below zero, which no string or collection can have, so
 // the constraint is unsatisfiable. Clamping the ceiling to a non-negative zero
@@ -81,7 +82,7 @@ func applyMaxBound(minField, maxField **int, effMin, effMax *int, value string, 
 }
 
 // applyLenBound pins both bounds to len=N: it raises the floor and lowers the
-// ceiling to N, each only when it tightens the effective bound (read at
+// ceiling to N, each only when it tightens the current canvas bound (read at
 // effMin/effMax), so the result is the order-independent intersection with any
 // min/max set elsewhere in the tag. An incompatible len yields an unsatisfiable
 // range, just as a conflicting min/max pair does. A negative len/eq can never be

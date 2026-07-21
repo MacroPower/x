@@ -72,13 +72,16 @@ type node struct {
 	verbatim      bool
 	isField       bool // gates the reconcile-time nullable-field bound clearing
 	boundAuthored bool // a jsonschema-tag numeric bound was authored on the field
-	// The dropBounds flag records that a tag interpreter pinned an element's value
-	// with a const or enum that subsumes its type-derived numeric bounds, so
-	// reconcile drops them. It is the element counterpart of the field's
-	// boundAuthored rule: the jsonschema enum-on-elements path leaves it unset
-	// (keeping the type bounds), while an interpreter that pins an element (via
-	// FieldContext.PinElementValue) sets it.
-	dropBounds bool
+	// The keepElementBounds flag records the jsonschema-tag enum-on-elements
+	// carve-out: a jsonschema `enum` written onto a sequence or map element keeps
+	// that element's type-derived numeric bounds even though it authored an enum,
+	// because the tag path writes the enum onto the bare element canvas and never
+	// intends to pin the value the way an interpreter's dive does. Build stamps it
+	// after the jsonschema tag runs, on any element whose canvas authored an enum;
+	// reconcile then treats an authored element enum as pinning (dropping the
+	// bounds) unless this flag keeps them. It is the element counterpart of the
+	// field's boundAuthored rule.
+	keepElementBounds bool
 }
 
 // nilableContainer reports whether the node is a slice, map, or ",string"
@@ -129,7 +132,7 @@ type defEntry struct {
 	// definition time and combined with each reference's pointer-ness in
 	// nullableDecision. The stance is a per-type property, so recording it on the
 	// entry (rather than on the shared body) keeps it applied consistently at
-	// every reference and leaves the def body bare. It is NullabilityUnset for a
+	// every reference and leaves the def body bare. It is NullFromReflection for a
 	// type with no stance.
 	nullability Nullability
 	// Rendering guards re-entrancy while body is mid-render: a self- or mutually
@@ -206,10 +209,48 @@ func allocCanvasTree(n *node, draft Draft) {
 	n.authored = a
 }
 
+// markKeptElementEnums stamps keepElementBounds on every sequence or map element
+// node beneath n whose canvas authored an enum, recording the jsonschema-tag
+// enum-on-elements carve-out. It runs after the jsonschema tag has applied, the
+// only field-level step that can author an element enum without pinning the
+// value, so it marks exactly the elements whose type-derived numeric bounds must
+// survive their authored enum. It mirrors allocCanvasTree's recursion, descending
+// only into elements (items and prefix), never struct properties or embeds.
+func markKeptElementEnums(n *node) {
+	if n == nil {
+		return
+	}
+
+	visit := func(elem *node) {
+		if elem == nil {
+			return
+		}
+
+		if elem.authored != nil && elem.authored.Enum != nil {
+			elem.keepElementBounds = true
+		}
+
+		markKeptElementEnums(elem)
+	}
+
+	switch n.kind {
+	case kindList, kindMap:
+		visit(n.items)
+	case kindTuple:
+		for _, c := range n.prefix {
+			visit(c)
+		}
+
+	case kindValue, kindObject, kindRef:
+		// A leaf value, a struct (its properties are separate field nodes), or a
+		// $ref carries no element node of its own.
+	}
+}
+
 // refNode builds a kindRef node linking to e, carrying the occurrence's
 // pointer-ness. The nullableDecision method later combines it with the def
-// entry's recorded stance: a pointer occurrence of a NonNullable type still
-// admits no null, and a non-pointer occurrence of a Nullable type does. The
+// entry's recorded stance: a pointer occurrence of a NullForbidden type still
+// admits no null, and a non-pointer occurrence of a NullAllowed type does. The
 // combine is deferred rather than baked in here, so a stance the def entry
 // records after a self-referential placeholder ref is built still reaches that
 // reference. Its payload holds the

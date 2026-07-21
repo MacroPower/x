@@ -103,14 +103,14 @@ func uintExactlyRepresentableAsFloat64(n uint64) bool {
 }
 
 // tightenNumericBound parses a numeric tag bound and intersects it with the
-// effective bound already in effect. The rule's strictness selects the target:
-// the exclusive bound for gt/lt, otherwise the inclusive one. The effective
-// value coalesces the canvas with the type-derived base, and the write lands on
-// the canvas; the tightens predicate reports whether the new bound n is stronger
-// than the effective one (n > existing for a floor, n < existing for a ceiling),
-// so rules in a validate tag are ANDed and a tag bound never weakens a stronger
-// bound set elsewhere (a repeated rule, or the type-derived bound for a sized
-// integer); inclusiveName/exclusiveName label a parse error.
+// canvas bound already in effect. The rule's strictness selects the target: the
+// exclusive bound for gt/lt, otherwise the inclusive one. The existing value read
+// and the write both land on the canvas; the tightens predicate reports whether
+// the new bound n is stronger than the current one (n > existing for a floor,
+// n < existing for a ceiling), so repeated rules in a validate tag are ANDed
+// order-independently. The type-derived bound (a sized integer's floor/ceiling)
+// is intersected later by reconcile, so a tag bound never has to consult it
+// here; inclusiveName/exclusiveName label a parse error.
 func tightenNumericBound(value string, baseType reflect.Type, exclusive bool,
 	inclusiveEff, exclusiveEff *float64, inclusiveField, exclusiveField **float64,
 	inclusiveName, exclusiveName string, tightens func(n, existing float64) bool,
@@ -141,9 +141,11 @@ func tightenNumericBound(value string, baseType reflect.Type, exclusive bool,
 }
 
 // applyNumericMinConstraint applies min/gte or gt to a numeric field by raising
-// the minimum (or exclusiveMinimum) floor on the canvas. A tag bound the field's
-// Go type can never reach (min=-300 on an int8) does not lower the stronger type
-// floor, since the effective bound coalesces the canvas with the type base.
+// the minimum (or exclusiveMinimum) floor on the canvas. It intersects only its
+// own repeated rules within the tag by reading the canvas value; reconcile
+// intersects the result against the type-derived bound, so a tag bound the
+// field's Go type can never reach (min=-300 on an int8) never lowers the stronger
+// type floor.
 func applyNumericMinConstraint(
 	field jsonschema.FieldContext,
 	value string,
@@ -151,15 +153,17 @@ func applyNumericMinConstraint(
 	exclusive bool,
 ) error {
 	return tightenNumericBound(value, baseType, exclusive,
-		field.EffectiveMinimum(), field.EffectiveExclusiveMinimum(),
+		field.Canvas.Minimum, field.Canvas.ExclusiveMinimum,
 		&field.Canvas.Minimum, &field.Canvas.ExclusiveMinimum, "min", "gt",
 		func(n, existing float64) bool { return n > existing })
 }
 
 // applyNumericMaxConstraint applies max/lte or lt to a numeric field by lowering
-// the maximum (or exclusiveMaximum) ceiling on the canvas. A tag bound the
-// field's Go type can never reach (max=200 on an int8) does not raise the
-// stronger type ceiling.
+// the maximum (or exclusiveMaximum) ceiling on the canvas. It intersects only its
+// own repeated rules within the tag by reading the canvas value; reconcile
+// intersects the result against the type-derived bound, so a tag bound the
+// field's Go type can never reach (max=200 on an int8) never raises the stronger
+// type ceiling.
 func applyNumericMaxConstraint(
 	field jsonschema.FieldContext,
 	value string,
@@ -167,7 +171,7 @@ func applyNumericMaxConstraint(
 	exclusive bool,
 ) error {
 	return tightenNumericBound(value, baseType, exclusive,
-		field.EffectiveMaximum(), field.EffectiveExclusiveMaximum(),
+		field.Canvas.Maximum, field.Canvas.ExclusiveMaximum,
 		&field.Canvas.Maximum, &field.Canvas.ExclusiveMaximum, "max", "lt",
 		func(n, existing float64) bool { return n < existing })
 }

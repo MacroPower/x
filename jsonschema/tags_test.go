@@ -1198,6 +1198,30 @@ func TestTagEnumOnSequenceFields(t *testing.T) {
 		assert.Equal(t, []any{int64(1), int64(2), int64(3)}, items[0].Enum)
 	})
 
+	t.Run("slice of sized ints keeps element bounds", func(t *testing.T) {
+		t.Parallel()
+
+		// A jsonschema-tag enum on the elements writes the enum onto the bare
+		// element schema without pinning the value, so each element keeps its
+		// type-derived numeric bounds (int8's -128/127) alongside the enum. This is
+		// the enum-on-elements carve-out: unlike an interpreter dive/oneof pin, the
+		// tag path does not drop the bounds.
+		type T struct {
+			Codes []int8 `json:"codes" jsonschema:"enum=1|2|3"`
+		}
+
+		s, err := jsonschema.GenerateFor[T](t.Context())
+		require.NoError(t, err)
+
+		items := itemsOf(s, "codes")
+		require.Len(t, items, 1)
+		require.Len(t, items[0].Enum, 3)
+		require.NotNil(t, items[0].Minimum, "the element keeps its int8 minimum alongside the enum")
+		require.NotNil(t, items[0].Maximum, "the element keeps its int8 maximum alongside the enum")
+		assert.InDelta(t, -128.0, *items[0].Minimum, 0)
+		assert.InDelta(t, 127.0, *items[0].Maximum, 0)
+	})
+
 	t.Run("pointer to slice", func(t *testing.T) {
 		t.Parallel()
 
@@ -1216,7 +1240,7 @@ func TestTagEnumOnSequenceFields(t *testing.T) {
 	t.Run("slice of override wrapper elements", func(t *testing.T) {
 		t.Parallel()
 
-		// The element type declares a Nullable stance; the enum must relocate onto
+		// The element type declares a NullAllowed stance; the enum must relocate onto
 		// the generated wrapper's value branch so the null the stance admits stays
 		// valid.
 		type Day string
@@ -1227,8 +1251,8 @@ func TestTagEnumOnSequenceFields(t *testing.T) {
 
 		s, err := jsonschema.GenerateFor[T](t.Context(),
 			jsonschema.WithTypeSchemaFor[Day](jsonschema.TypeSchema{
-				Value:    &jsonschema.Schema{Type: "string"},
-				Nullable: jsonschema.Nullable,
+				Value:       &jsonschema.Schema{Type: "string"},
+				Nullability: jsonschema.NullAllowed,
 			}),
 		)
 		require.NoError(t, err)

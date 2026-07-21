@@ -39,9 +39,9 @@ type JSONSchemaProvider interface {
 // The method is called after the schema has been generated via reflection,
 // allowing the type to add, remove, or modify any fields. It receives a
 // [TypeSchema] whose [TypeSchema.Value] is the reflection-generated schema to
-// mutate in place; an extender may also set [TypeSchema.Nullable] to declare a
+// mutate in place; an extender may also set [TypeSchema.Nullability] to declare a
 // nullability stance rather than hand-shaping a null wrapper. Only Value and
-// Nullable are honored: [TypeSchema.Verbatim] and [TypeSchema.Ref] declare a
+// Nullability are honored: [TypeSchema.Verbatim] and [TypeSchema.Ref] declare a
 // replacement schema, which only a provider supplies, so an extender that sets
 // either aborts generation with [ErrConflictingTypeSchema] rather than having
 // the declaration silently ignored. A non-nil error
@@ -72,14 +72,14 @@ type TypeContext struct {
 type Nullability uint8
 
 const (
-	// NullabilityUnset defers to reflection: a pointer or interface position is
+	// NullFromReflection defers to reflection: a pointer or interface position is
 	// nullable, everything else is not (the pre-envelope default).
-	NullabilityUnset Nullability = iota
-	// Nullable makes every occurrence of the type admit null, even a non-pointer
+	NullFromReflection Nullability = iota
+	// NullAllowed makes every occurrence of the type admit null, even a non-pointer
 	// field.
-	Nullable
-	// NonNullable makes no occurrence admit null, even a pointer field.
-	NonNullable
+	NullAllowed
+	// NullForbidden makes no occurrence admit null, even a pointer field.
+	NullForbidden
 )
 
 // TypeSchema is what a type-level hook declares for a Go type: a bare value
@@ -89,8 +89,8 @@ const (
 // [ErrConflictingTypeSchema].
 type TypeSchema struct {
 	// Value is the bare value schema (no null wrapper). Generation applies the
-	// null encoding per Nullable and each occurrence's pointer-ness. A zero
-	// TypeSchema (nil Value, NullabilityUnset, nil Verbatim/Ref) marks the type
+	// null encoding per Nullability and each occurrence's pointer-ness. A zero
+	// TypeSchema (nil Value, NullFromReflection, nil Verbatim/Ref) marks the type
 	// unrestricted ({}).
 	Value *Schema
 	// Verbatim is an opaque escape hatch: the schema is emitted exactly as given,
@@ -106,9 +106,9 @@ type TypeSchema struct {
 	// that cycles back to its own type (a self-Ref, or a mutual A -> B -> A
 	// chain).
 	Ref reflect.Type
-	// Nullable is the type's null-admission stance (see [Nullability]). It
+	// Nullability is the type's null-admission stance (see [Nullability]). It
 	// decorates Value (and Ref); it is ignored for Verbatim.
-	Nullable Nullability
+	Nullability Nullability
 }
 
 // TypeSchemaProvider supplies schemas for Go types it recognizes during
@@ -171,9 +171,9 @@ func (f TypeSchemaProviderFunc) SchemaForType(ctx context.Context, tc TypeContex
 // runs (after comment extraction, before $defs extraction) and after the
 // type's own JSONSchemaExtend. Like JSONSchemaExtender, it is not called for
 // types whose schema a registered provider or [JSONSchemaProvider] supplied.
-// It modifies ts.Value in place (and may set ts.Nullable to declare a
+// It modifies ts.Value in place (and may set ts.Nullability to declare a
 // nullability stance, symmetric with a provider, so it never needs to emit a
-// raw null wrapper); an error aborts generation. Only Value and Nullable are
+// raw null wrapper); an error aborts generation. Only Value and Nullability are
 // honored: [TypeSchema.Verbatim] and [TypeSchema.Ref] declare a replacement
 // schema, which only a provider supplies, so an extender that sets either
 // aborts generation with [ErrConflictingTypeSchema] rather than having the
@@ -610,17 +610,20 @@ type FieldContext struct {
 	// then applying the null encoding, so a const or enum an interpreter declares
 	// lands on the value and keeps a permitted null valid. A tag interpreter
 	// declares facts by writing them here; a [DescriptionProvider] must treat it as
-	// read-only and answer through its return value instead. A bound that tightens
-	// the type's own value reads the effective merged bound through
-	// [FieldContext.EffectiveMinimum] and the other Effective accessors, then
-	// writes the tightened result here.
+	// read-only and answer through its return value instead. A numeric, string, or
+	// array bound an interpreter writes here can only tighten the type's own value:
+	// generation intersects each canvas bound with the type-derived bound from
+	// [FieldContext.Base], keeping the stronger side, so a weaker authored bound
+	// never widens the type's.
 	Canvas *Schema
 	// Base is the field's type-derived reflected schema, read-only: the pristine
 	// payload carrying the type's own keywords (its numeric bounds, the
 	// json:",string" string coercion, any type= override), before any field-level
 	// fact is applied. An interpreter dispatching on the reflected shape (whether
 	// the schema permits a string, whether it is a base64 content string) reads it
-	// here; the Effective accessors coalesce it with the canvas for tightening.
+	// here; the string first-wins Effective accessors ([FieldContext.EffectiveFormat]
+	// and its siblings) coalesce it with the canvas so a tag never overrides a
+	// keyword the type already set.
 	Base *Schema
 	// Parent is the enclosing object schema, so an interpreter can append to
 	// its Required list. The [DescriptionProvider] read-only contract of
@@ -628,8 +631,7 @@ type FieldContext struct {
 	Parent *Schema
 	// The node field is the field or element IR node backing this context,
 	// non-nil for a context the generator builds and nil for one a caller
-	// constructs. It backs the element accessor ([FieldContext.ElementContexts])
-	// and the pinned-value signal ([FieldContext.PinElementValue]).
+	// constructs. It backs the element accessor ([FieldContext.ElementContexts]).
 	node *node
 	// Name is the JSON property name for the field.
 	Name string
@@ -699,29 +701,6 @@ func (fc FieldContext) ElementContexts() []FieldContext {
 	}
 }
 
-// PinElementValue marks an element context whose value an interpreter pinned
-// with a const or enum: reconcile then drops the element's type-derived numeric
-// bounds, which the pinned value subsumes. It is a no-op on a context with no
-// backing node. Only an element context carries this signal; a field's own
-// bound drop follows the boundAuthored rule the generator tracks.
-func (fc FieldContext) PinElementValue() {
-	if fc.node != nil {
-		fc.node.dropBounds = true
-	}
-}
-
-// coalesceField returns the canvas value when the field authored it, otherwise
-// the type-derived base value: the effective merged keyword an interpreter reads
-// when tightening a bound so a tag bound never weakens the type's own bound and
-// repeated tag bounds intersect order-independently.
-func coalesceField[T any](canvas, base *T) *T {
-	if canvas != nil {
-		return canvas
-	}
-
-	return base
-}
-
 // effectiveBase returns fc.Base, or an empty schema when a caller built the
 // context without one, so the Effective accessors never dereference a nil Base.
 func (fc FieldContext) effectiveBase() *Schema {
@@ -730,68 +709,6 @@ func (fc FieldContext) effectiveBase() *Schema {
 	}
 
 	return &Schema{}
-}
-
-// EffectiveMinimum reports the effective minimum keyword an interpreter tightens
-// against: the value already authored on the canvas, or the type-derived bound
-// from [FieldContext.Base] when the canvas has not set one. The other Effective
-// accessors follow the same rule for their keywords.
-func (fc FieldContext) EffectiveMinimum() *float64 {
-	return coalesceField(fc.Canvas.Minimum, fc.effectiveBase().Minimum)
-}
-
-// EffectiveMaximum reports the effective maximum keyword.
-// See [FieldContext.EffectiveMinimum].
-func (fc FieldContext) EffectiveMaximum() *float64 {
-	return coalesceField(fc.Canvas.Maximum, fc.effectiveBase().Maximum)
-}
-
-// EffectiveExclusiveMinimum reports the effective exclusiveMinimum keyword.
-// See [FieldContext.EffectiveMinimum].
-func (fc FieldContext) EffectiveExclusiveMinimum() *float64 {
-	return coalesceField(fc.Canvas.ExclusiveMinimum, fc.effectiveBase().ExclusiveMinimum)
-}
-
-// EffectiveExclusiveMaximum reports the effective exclusiveMaximum keyword.
-// See [FieldContext.EffectiveMinimum].
-func (fc FieldContext) EffectiveExclusiveMaximum() *float64 {
-	return coalesceField(fc.Canvas.ExclusiveMaximum, fc.effectiveBase().ExclusiveMaximum)
-}
-
-// EffectiveMinLength reports the effective minLength keyword.
-// See [FieldContext.EffectiveMinimum].
-func (fc FieldContext) EffectiveMinLength() *int {
-	return coalesceField(fc.Canvas.MinLength, fc.effectiveBase().MinLength)
-}
-
-// EffectiveMaxLength reports the effective maxLength keyword.
-// See [FieldContext.EffectiveMinimum].
-func (fc FieldContext) EffectiveMaxLength() *int {
-	return coalesceField(fc.Canvas.MaxLength, fc.effectiveBase().MaxLength)
-}
-
-// EffectiveMinItems reports the effective minItems keyword.
-// See [FieldContext.EffectiveMinimum].
-func (fc FieldContext) EffectiveMinItems() *int {
-	return coalesceField(fc.Canvas.MinItems, fc.effectiveBase().MinItems)
-}
-
-// EffectiveMaxItems reports the effective maxItems keyword.
-// See [FieldContext.EffectiveMinimum].
-func (fc FieldContext) EffectiveMaxItems() *int {
-	return coalesceField(fc.Canvas.MaxItems, fc.effectiveBase().MaxItems)
-}
-
-// EffectiveMinProperties reports the effective minProperties keyword.
-// See [FieldContext.EffectiveMinimum].
-func (fc FieldContext) EffectiveMinProperties() *int {
-	return coalesceField(fc.Canvas.MinProperties, fc.effectiveBase().MinProperties)
-}
-
-// EffectiveMaxProperties reports the effective maxProperties keyword.
-// See [FieldContext.EffectiveMinimum].
-func (fc FieldContext) EffectiveMaxProperties() *int {
-	return coalesceField(fc.Canvas.MaxProperties, fc.effectiveBase().MaxProperties)
 }
 
 // EffectiveFormat reports the effective format keyword: the canvas value, or the

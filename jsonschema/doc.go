@@ -240,11 +240,11 @@
 // authored, no null encoding), or [TypeSchema.Ref] (a whole-type alias to another
 // Go type, kept reachable through a node-backed $ref edge); setting more than one
 // is [ErrConflictingTypeSchema]. A zero TypeSchema marks the type unrestricted
-// ({}). The [Nullability] stance ([Nullable]/[NonNullable]) makes every
+// ({}). The [Nullability] stance ([NullAllowed]/[NullForbidden]) makes every
 // occurrence of the type admit null (or none), replacing a hand-shaped
 // anyOf[value, null] wrapper the generator would otherwise have to recognize. An
 // extender receives the same envelope with [TypeSchema.Value] set to the
-// reflection-generated schema to mutate in place, and may set [TypeSchema.Nullable]
+// reflection-generated schema to mutate in place, and may set [TypeSchema.Nullability]
 // to declare a stance too; those are the only fields an extender may set, since
 // Verbatim and Ref declare a replacement schema only a provider supplies, so an
 // extender setting either is [ErrConflictingTypeSchema] rather than a silently
@@ -298,10 +298,16 @@
 // tags such as the json tag's options), and the target [Draft] (for emitting
 // draft-appropriate keywords). An interpreter declares facts by writing them to
 // the canvas rather than mutating a merged schema: value-scoped facts (const,
-// enum) and annotations, plus bounds it tightens by reading the effective merged
-// value through the field's Effective accessors and writing the tightened result
-// back. The type-derived Base is read-only, for dispatching on the reflected
-// shape. Generation composes the canvas with Base and applies the null encoding,
+// enum) and annotations, plus numeric, string, and array bounds it writes to the
+// canvas. A canvas bound can only tighten the type's own: generation intersects
+// each canvas bound with the type-derived bound from Base, keeping the stronger
+// side, so a weaker authored bound never widens the type's, and an interpreter
+// need only intersect its own repeated rules within a tag against the canvas
+// value. (The string first-wins keywords -- format, pattern, contentEncoding,
+// contentMediaType -- read [FieldContext.EffectiveFormat] and its siblings so a
+// tag never overrides a value the type already set.) The type-derived Base is
+// read-only, for dispatching on the reflected shape. Generation composes the
+// canvas with Base and applies the null encoding,
 // so a const or enum an interpreter declares lands on the value branch and keeps
 // a permitted null valid. To constrain the elements of a sequence or map field
 // (a dive, or a sequence-wide oneof), an interpreter walks the element contexts
@@ -472,6 +478,14 @@
 // explicit bound the tag sets narrows it further and is kept:
 // enum=10|20,minimum=15 keeps minimum and so admits only 20.
 //
+// The bound drop is by author on a sequence or map element. A jsonschema-tag
+// enum on the elements keeps each element's type-derived numeric bounds: the tag
+// writes the enum onto the bare element schema without pinning the value, so a
+// []int8 with enum=1|2|3 keeps each element's -128/127 range alongside the enum.
+// A tag interpreter that pins an element's value with a const or enum (a validate
+// dive, or a sequence-wide oneof) instead drops those bounds, the way a
+// whole-value const or enum does on a scalar field.
+//
 // # Comment Extraction
 //
 // Type and field descriptions come from a [DescriptionProvider], registered
@@ -531,7 +545,11 @@
 // string-content keywords) land on the value branch by construction while
 // annotations and the authored bounds move to the null wrapper (the type-derived
 // bounds stay on the value branch), so a permitted null stays valid without any
-// post-hoc reshape of a stamped wrapper.
+// post-hoc reshape of a stamped wrapper. As part of the composition each authored
+// bound keyword is intersected with the type-derived bound and the stronger side
+// kept, so a canvas bound can only tighten the type's own value, never weaken it
+// -- the same guarantee for every writer (the jsonschema tag, a tag interpreter,
+// a third party).
 // Field-level processing always applies, including when the type is referenced
 // via $ref. When a not-yet-migrated override or provider supplies a nullable
 // shape at the field's type, an interpreter that declares a const or enum

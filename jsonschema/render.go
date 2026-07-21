@@ -178,18 +178,30 @@ func (g *generator) clearFieldBounds(n *node, value *Schema) {
 }
 
 // pinsValue reports whether a pinned value subsumes the numeric bounds, so they
-// are dropped. A struct field pins when its value branch carries a const, or an
-// enum the jsonschema tag did not narrow with its own bound (boundAuthored). An
-// element pins when a tag interpreter marked it via [FieldContext.PinElementValue]
-// (the dropBounds signal), which the jsonschema enum-on-elements path leaves
-// unset so the element keeps its type bounds. Every other node (type-level,
-// root, def body) is neither a field nor an element and never pins here.
+// are dropped. A struct field pins when its merged value branch carries a const,
+// or an enum the jsonschema tag did not narrow with its own bound (boundAuthored).
+// An element pins when its own canvas authored a const or enum, except the
+// jsonschema-tag enum-on-elements carve-out (keepElementBounds), which keeps the
+// element's type bounds. Every other node (type-level, root, def body) has no
+// authored canvas and never pins here.
+//
+// The element branch reads the element's own canvas rather than the merged value,
+// so a const or enum the element's type supplies is not conflated with an
+// authored pin. One narrow divergence: an element carrying both a jsonschema-tag
+// enum and an interpreter dive/oneof on the same canvas keeps the type bounds
+// (keepElementBounds wins), an unusual and arguably ill-formed combination.
 func (g *generator) pinsValue(n *node, value *Schema) bool {
+	if n.authored == nil { // root, def body, embed, type-level: never pins
+		return false
+	}
+
 	if n.isField {
 		return value.Const != nil || (value.Enum != nil && !n.boundAuthored)
 	}
 
-	return n.dropBounds
+	// An element node reads its own canvas: the const/enum it authored, with the
+	// jsonschema-tag enum-on-elements carve-out recorded in keepElementBounds.
+	return n.authored.Const != nil || (n.authored.Enum != nil && !n.keepElementBounds)
 }
 
 // refTargetAdmitsNull reports whether a rendered schema already accepts a JSON

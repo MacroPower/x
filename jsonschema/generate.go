@@ -93,7 +93,7 @@ func WithTypeSchemaExtender(e TypeSchemaExtender) GenerateOption {
 // WithTypeSchemaExtenderFor is [WithTypeSchemaExtender] for a statically
 // known type, so call sites need not guard on [reflect.TypeFor] themselves:
 // f runs only for T, receiving the [TypeSchema] whose Value is the
-// reflection-generated schema to modify in place (and whose Nullable it may
+// reflection-generated schema to modify in place (and whose Nullability it may
 // set), and every other type passes through untouched. The signature is
 // [TypeSchemaExtenderFunc]'s, eliding only the type guard, so f still
 // receives the [TypeContext] and can emit draft-appropriate keywords.

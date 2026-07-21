@@ -2570,7 +2570,7 @@ func TestGenerateFor_JsonStringOverridesRef(t *testing.T) {
 func TestGenerateFor_ConstOnOverrideNullableWrapper(t *testing.T) {
 	t.Parallel()
 
-	// A WithTypeSchema override declares a Nullable stance, so generation wraps a
+	// A WithTypeSchema override declares a NullAllowed stance, so generation wraps a
 	// non-pointer field of that type in anyOf[value, null]. A const tag on the
 	// field must relocate onto the value branch: beside the wrapper it would
 	// reject the null the stance admits.
@@ -2582,8 +2582,8 @@ func TestGenerateFor_ConstOnOverrideNullableWrapper(t *testing.T) {
 
 	s, err := jsonschema.GenerateFor[Container](t.Context(),
 		jsonschema.WithTypeSchemaFor[MyVal](jsonschema.TypeSchema{
-			Value:    &jsonschema.Schema{Type: "string"},
-			Nullable: jsonschema.Nullable,
+			Value:       &jsonschema.Schema{Type: "string"},
+			Nullability: jsonschema.NullAllowed,
 		}),
 	)
 	require.NoError(t, err)
@@ -2850,6 +2850,69 @@ func TestGenerateFor_NullableRefFieldConstDropsWrapperBounds(t *testing.T) {
 		"a null pointer is permitted")
 	assert.Error(t, validator.ValidateJSON(t.Context(), []byte(`{"f": 4}`)),
 		"a non-const value is rejected")
+}
+
+func TestGenerateFor_TagBoundOnlyTightensTypeBound(t *testing.T) {
+	t.Parallel()
+
+	// A jsonschema-tag bound weaker than the field's type-derived bound must not
+	// replace it: reconcile intersects each authored bound with the type bound and
+	// keeps the stronger side. A non-pointer int8 takes the non-nullable path,
+	// where a blind overlay would once have emitted the weaker tag ceiling of 200.
+	type Config struct {
+		N int8 `json:"n" jsonschema:"maximum=200"`
+	}
+
+	s, err := jsonschema.GenerateFor[Config](t.Context())
+	require.NoError(t, err)
+
+	field := s.Properties["n"]
+	require.NotNil(t, field)
+	require.NotNil(t, field.Maximum)
+	assert.InDelta(t, 127.0, *field.Maximum, 0, "the int8 type ceiling wins over the weaker tag maximum")
+}
+
+func TestGenerateFor_NullableTagBoundOnlyTightensTypeBound(t *testing.T) {
+	t.Parallel()
+
+	// The nullable path: a weaker tag ceiling on a pointer int8 intersects to the
+	// type ceiling before the null split, so it no longer differs from the type
+	// bound and the anyOf wrapper gains no bound sibling; the value branch keeps
+	// the type ceiling.
+	type Config struct {
+		N *int8 `json:"n" jsonschema:"maximum=200"`
+	}
+
+	s, err := jsonschema.GenerateFor[Config](t.Context())
+	require.NoError(t, err)
+
+	field := s.Properties["n"]
+	require.NotNil(t, field)
+	assert.Nil(t, field.Maximum, "the wrapper carries no bound sibling")
+	require.Len(t, field.AnyOf, 2)
+
+	value := field.AnyOf[0]
+	require.NotNil(t, value.Maximum)
+	assert.InDelta(t, 127.0, *value.Maximum, 0, "the int8 type ceiling wins on the value branch")
+}
+
+func TestGenerateFor_TagMinItemsCannotWeakenArrayLength(t *testing.T) {
+	t.Parallel()
+
+	// A fixed array's length fixes minItems/maxItems from the type. A weaker
+	// minItems tag must not lower that floor: reconcile keeps the stronger (larger)
+	// type floor.
+	type Config struct {
+		P [3]string `json:"p" jsonschema:"minItems=1"`
+	}
+
+	s, err := jsonschema.GenerateFor[Config](t.Context())
+	require.NoError(t, err)
+
+	field := s.Properties["p"]
+	require.NotNil(t, field)
+	require.NotNil(t, field.MinItems)
+	assert.Equal(t, 3, *field.MinItems, "the fixed array length wins over the weaker tag minItems")
 }
 
 // NullAdmittingRefProvider supplies an unrestricted schema, so its extracted def
@@ -3196,7 +3259,7 @@ func TestGenerateFor_WithTypeSchemaNamedNonStructInlined(t *testing.T) {
 func TestGenerateFor_WithTypeSchemaNullBearingPointerNotDoubleWrapped(t *testing.T) {
 	t.Parallel()
 
-	// A WithTypeSchema override declaring a Nullable stance on a scalar type wraps
+	// A WithTypeSchema override declaring a NullAllowed stance on a scalar type wraps
 	// a pointer field in a single anyOf[value, null] (the scalar null encoding),
 	// with the value on the first branch -- not a redundant second null branch.
 	type MyID string
@@ -3207,8 +3270,8 @@ func TestGenerateFor_WithTypeSchemaNullBearingPointerNotDoubleWrapped(t *testing
 
 	s, err := jsonschema.GenerateFor[Container](t.Context(),
 		jsonschema.WithTypeSchema(reflect.TypeFor[MyID](), jsonschema.TypeSchema{
-			Value:    &jsonschema.Schema{Type: "string"},
-			Nullable: jsonschema.Nullable,
+			Value:       &jsonschema.Schema{Type: "string"},
+			Nullability: jsonschema.NullAllowed,
 		}),
 	)
 	require.NoError(t, err)
@@ -3223,7 +3286,7 @@ func TestGenerateFor_WithTypeSchemaNullBearingPointerNotDoubleWrapped(t *testing
 func TestGenerateFor_ExtractedNullBearingOverrideNotDoubleWrapped(t *testing.T) {
 	t.Parallel()
 
-	// A Nullable-stance override on an extracted type (a named struct) leaves the
+	// A NullAllowed-stance override on an extracted type (a named struct) leaves the
 	// shared def body bare; the null branch rides on each reference. A nullable
 	// pointer to it is anyOf[$ref, null], so the null lives at the reference, not
 	// baked into the shared definition.
@@ -3237,8 +3300,8 @@ func TestGenerateFor_ExtractedNullBearingOverrideNotDoubleWrapped(t *testing.T) 
 
 	s, err := jsonschema.GenerateFor[Container](t.Context(),
 		jsonschema.WithTypeSchema(reflect.TypeFor[NullableThing](), jsonschema.TypeSchema{
-			Value:    &jsonschema.Schema{Type: "object"},
-			Nullable: jsonschema.Nullable,
+			Value:       &jsonschema.Schema{Type: "object"},
+			Nullability: jsonschema.NullAllowed,
 		}),
 	)
 	require.NoError(t, err)
@@ -3258,9 +3321,9 @@ func TestGenerateFor_ExtractedNullBearingOverrideNotDoubleWrapped(t *testing.T) 
 func TestGenerateFor_NullableStanceReachesNonPointerRef(t *testing.T) {
 	t.Parallel()
 
-	// A Nullable stance is a per-type property recorded on the def entry, so it
+	// A NullAllowed stance is a per-type property recorded on the def entry, so it
 	// reaches every reference, not just pointer ones: a non-pointer field of a
-	// Nullable-stance extracted type still admits null (anyOf[$ref, null]).
+	// NullAllowed-stance extracted type still admits null (anyOf[$ref, null]).
 	type NullableThing struct {
 		V int `json:"v"`
 	}
@@ -3271,8 +3334,8 @@ func TestGenerateFor_NullableStanceReachesNonPointerRef(t *testing.T) {
 
 	s, err := jsonschema.GenerateFor[Container](t.Context(),
 		jsonschema.WithTypeSchema(reflect.TypeFor[NullableThing](), jsonschema.TypeSchema{
-			Value:    &jsonschema.Schema{Type: "object"},
-			Nullable: jsonschema.Nullable,
+			Value:       &jsonschema.Schema{Type: "object"},
+			Nullability: jsonschema.NullAllowed,
 		}),
 	)
 	require.NoError(t, err)
@@ -3316,10 +3379,10 @@ func TestGenerateFor_ExtractedNilableContainerPointerNotDoubleWrapped(t *testing
 	assert.Equal(t, []string{"null", "array"}, def.Types)
 }
 
-func TestGenerateFor_NonNullableStanceDropsPointerNull(t *testing.T) {
+func TestGenerateFor_NullForbiddenStanceDropsPointerNull(t *testing.T) {
 	t.Parallel()
 
-	// A NonNullable stance makes no occurrence admit null, even a pointer field:
+	// A NullForbidden stance makes no occurrence admit null, even a pointer field:
 	// the pointer-ness that would otherwise add an anyOf null branch is overridden.
 	type Code string
 
@@ -3329,15 +3392,15 @@ func TestGenerateFor_NonNullableStanceDropsPointerNull(t *testing.T) {
 
 	s, err := jsonschema.GenerateFor[Container](t.Context(),
 		jsonschema.WithTypeSchemaFor[Code](jsonschema.TypeSchema{
-			Value:    &jsonschema.Schema{Type: "string"},
-			Nullable: jsonschema.NonNullable,
+			Value:       &jsonschema.Schema{Type: "string"},
+			Nullability: jsonschema.NullForbidden,
 		}),
 	)
 	require.NoError(t, err)
 
 	field := s.Properties["c"]
 	require.NotNil(t, field)
-	assert.Equal(t, "string", field.Type, "the NonNullable pointer field is a bare value, not a null wrapper")
+	assert.Equal(t, "string", field.Type, "the NullForbidden pointer field is a bare value, not a null wrapper")
 	assert.Nil(t, field.AnyOf)
 	assert.Nil(t, field.Types)
 }
@@ -3356,7 +3419,7 @@ func TestGenerateFor_StanceReachesSelfReference(t *testing.T) {
 	s, err := jsonschema.GenerateFor[stancedRecursive](t.Context(),
 		jsonschema.WithTypeSchemaExtenderFor[stancedRecursive](
 			func(_ context.Context, _ jsonschema.TypeContext, ts *jsonschema.TypeSchema) error {
-				ts.Nullable = jsonschema.NonNullable
+				ts.Nullability = jsonschema.NullForbidden
 				return nil
 			}),
 	)
@@ -3368,8 +3431,8 @@ func TestGenerateFor_StanceReachesSelfReference(t *testing.T) {
 	next := def.Properties["next"]
 	require.NotNil(t, next)
 	assert.Equal(t, "#/$defs/stancedRecursive", next.Ref,
-		"the NonNullable stance reaches the self-reference built before the extender ran")
-	assert.Nil(t, next.AnyOf, "the pointer self-reference admits no null under NonNullable")
+		"the NullForbidden stance reaches the self-reference built before the extender ran")
+	assert.Nil(t, next.AnyOf, "the pointer self-reference admits no null under NullForbidden")
 }
 
 func TestGenerateFor_VerbatimEmittedUnderPointer(t *testing.T) {
@@ -5629,7 +5692,7 @@ func TestWithTypeSchemaExtender(t *testing.T) {
 func TestWithTypeSchemaExtenderVerbatimRefRejected(t *testing.T) {
 	t.Parallel()
 
-	// An extender honors only Value and Nullable: Verbatim and Ref declare a
+	// An extender honors only Value and Nullability: Verbatim and Ref declare a
 	// replacement schema, which only a provider supplies. An extender setting
 	// either is reported rather than having the declaration silently ignored.
 	type doc struct {
