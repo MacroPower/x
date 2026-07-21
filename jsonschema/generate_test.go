@@ -2630,6 +2630,60 @@ func TestGenerateFor_HookAuthoredRefKeepsDefAlive(t *testing.T) {
 	require.NoError(t, err, "the aliased $ref must resolve in the emitted schema")
 }
 
+func TestGenerateFor_ConflictingTypeSchemaRejected(t *testing.T) {
+	t.Parallel()
+
+	// Value, Verbatim, and Ref are mutually exclusive ways to describe a type's
+	// schema, so an envelope setting more than one is a caller bug reported as
+	// ErrConflictingTypeSchema rather than resolved by silent precedence. A Ref
+	// naming a type that is not extractable to $defs shares the sentinel: an
+	// inlined copy would lose the reachability guarantee the alias exists for.
+	type target struct {
+		Name string `json:"name"`
+	}
+
+	tests := map[string]struct {
+		ts jsonschema.TypeSchema
+	}{
+		"value and verbatim": {
+			ts: jsonschema.TypeSchema{
+				Value:    &jsonschema.Schema{Type: "string"},
+				Verbatim: &jsonschema.Schema{Type: "string"},
+			},
+		},
+		"value and ref": {
+			ts: jsonschema.TypeSchema{
+				Value: &jsonschema.Schema{Type: "string"},
+				Ref:   reflect.TypeFor[target](),
+			},
+		},
+		"verbatim and ref": {
+			ts: jsonschema.TypeSchema{
+				Verbatim: &jsonschema.Schema{Type: "string"},
+				Ref:      reflect.TypeFor[target](),
+			},
+		},
+		"non-extractable ref": {
+			ts: jsonschema.TypeSchema{Ref: reflect.TypeFor[int]()},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			type doc struct {
+				T time.Time `json:"t"`
+			}
+
+			_, err := jsonschema.GenerateFor[doc](t.Context(),
+				jsonschema.WithTypeSchemaFor[time.Time](tc.ts),
+			)
+			require.ErrorIs(t, err, jsonschema.ErrConflictingTypeSchema)
+		})
+	}
+}
+
 func TestGenerateFor_TypeSchemaRefSelfCycleRejected(t *testing.T) {
 	t.Parallel()
 
