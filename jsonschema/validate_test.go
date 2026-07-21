@@ -6614,6 +6614,31 @@ func TestValidateConstUnboundedJSONNumber(t *testing.T) {
 	require.Error(t, v.ValidateJSON(t.Context(), []byte("5")))
 }
 
+// TestValidateBigConstThroughRemoteFetch covers the clone the validator's
+// remote-fetch path applies to a resolver-returned document: the deep copy
+// must preserve a json.Number const/enum exactly, or the fetched document
+// mis-validates instances the same document compiled directly accepts
+// (numbers beyond float64 precision round in a plain JSON round-trip).
+func TestValidateBigConstThroughRemoteFetch(t *testing.T) {
+	t.Parallel()
+
+	const big = "12345678901234567890"
+
+	remote := &jsonschema.Schema{Const: new(any(json.Number(big)))}
+	root := &jsonschema.Schema{Ref: "https://ex.com/big.json"}
+
+	v, err := jsonschema.Compile(t.Context(), root,
+		jsonschema.WithRefResolver(jsonschema.SchemaMap{
+			"https://ex.com/big.json": remote,
+		}))
+	require.NoError(t, err)
+
+	require.NoError(t, v.ValidateJSON(t.Context(), []byte(big)),
+		"the exact literal must satisfy the fetched const")
+	require.Error(t, v.ValidateJSON(t.Context(), []byte("12345678901234567000")),
+		"the float64-rounded neighbor must not")
+}
+
 // TestWithVocabulariesWithoutCore pins that the WithVocabularies override
 // selects the active set directly: listing only non-core vocabularies
 // compiles and applies them. The spec's "core must be required" rule

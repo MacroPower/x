@@ -1,6 +1,7 @@
 package schemaclone_test
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/google/jsonschema-go/jsonschema"
@@ -123,4 +124,40 @@ func TestClone(t *testing.T) {
 		assert.Equal(t, []string{"root"}, cp.PropertyOrder)
 		assert.Nil(t, cp.Items.PropertyOrder)
 	})
+}
+
+// TestClonePreservesNumberValues covers the any-typed value fields: the plain
+// round-trip decodes their numbers as float64, silently rounding a json.Number
+// beyond float64 precision and changing what a cloned const/enum accepts. The
+// number-preserving re-copy keeps the literal exact and the copy unaliased.
+func TestClonePreservesNumberValues(t *testing.T) {
+	t.Parallel()
+
+	const big = "12345678901234567890"
+
+	src := &jsonschema.Schema{
+		Const:    new(any(json.Number(big))),
+		Enum:     []any{json.Number(big), "x"},
+		Examples: []any{json.Number(big)},
+		Extra:    map[string]any{"x-custom": json.Number(big)},
+		Items:    &jsonschema.Schema{Const: new(any(json.Number(big)))},
+	}
+
+	cp, err := schemaclone.Clone(src, children)
+	require.NoError(t, err)
+
+	assert.Equal(t, json.Number(big), *cp.Const)
+	assert.Equal(t, []any{json.Number(big), "x"}, cp.Enum)
+	assert.Equal(t, []any{json.Number(big)}, cp.Examples)
+	assert.Equal(t, json.Number(big), cp.Extra["x-custom"])
+	assert.Equal(t, json.Number(big), *cp.Items.Const, "nested nodes are restored too")
+
+	// The restored values are copies, not aliases.
+	assert.NotSame(t, src.Const, cp.Const)
+
+	*src.Const = any(json.Number("1"))
+	src.Enum[1] = "mutated"
+
+	assert.Equal(t, json.Number(big), *cp.Const)
+	assert.Equal(t, "x", cp.Enum[1])
 }

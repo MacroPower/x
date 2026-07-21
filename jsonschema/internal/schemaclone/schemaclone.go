@@ -6,6 +6,7 @@
 package schemaclone
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -117,11 +118,12 @@ func checkAcyclic(s *jsonschema.Schema, children Children, state map[*jsonschema
 
 // restorePropertyOrder copies the render-only PropertyOrder field (json:"-", so
 // dropped by [Clone]'s JSON round-trip) from src onto cp at every node, walking
-// both in lockstep through children. Because cp is a JSON clone of src, the two
-// share an identical sub-schema structure and children (which orders map-held
-// entries deterministically) yields matching orders. Each slice is cloned so cp
-// stays unaliased from src. A JSON clone is always a finite tree, so the
-// recursion terminates.
+// both in lockstep through children, and re-copies the any-typed value fields
+// number-preservingly (see restoreNumberValues). Because cp is a JSON clone of
+// src, the two share an identical sub-schema structure and children (which
+// orders map-held entries deterministically) yields matching orders. Each slice
+// is cloned so cp stays unaliased from src. A JSON clone is always a finite
+// tree, so the recursion terminates.
 func restorePropertyOrder(src, cp *jsonschema.Schema, children Children) {
 	if src == nil || cp == nil {
 		return
@@ -130,6 +132,8 @@ func restorePropertyOrder(src, cp *jsonschema.Schema, children Children) {
 	if src.PropertyOrder != nil {
 		cp.PropertyOrder = slices.Clone(src.PropertyOrder)
 	}
+
+	restoreNumberValues(src, cp)
 
 	srcChildren := children(src)
 	cpChildren := children(cp)
@@ -141,4 +145,67 @@ func restorePropertyOrder(src, cp *jsonschema.Schema, children Children) {
 	for i := range srcChildren {
 		restorePropertyOrder(srcChildren[i], cpChildren[i], children)
 	}
+}
+
+// restoreNumberValues re-copies the any-typed value fields (Const, Enum,
+// Examples, Extra) from src onto cp with numbers preserved. The round-trip's
+// plain Unmarshal decodes their numbers as float64, silently rounding a
+// [json.Number] beyond float64 precision and changing what a cloned const/enum
+// accepts; a marshal + UseNumber decode of the source value keeps the literal
+// exact while still yielding a copy fully unaliased from src. A value that
+// fails the re-copy (an unmarshalable Extra member) keeps the plain
+// round-tripped form.
+func restoreNumberValues(src, cp *jsonschema.Schema) {
+	if src.Const != nil {
+		if v, ok := copyJSONValue(*src.Const); ok {
+			cp.Const = &v
+		}
+	}
+
+	if src.Enum != nil {
+		if v, ok := copyJSONValue(src.Enum); ok {
+			if list, isList := v.([]any); isList {
+				cp.Enum = list
+			}
+		}
+	}
+
+	if src.Examples != nil {
+		if v, ok := copyJSONValue(src.Examples); ok {
+			if list, isList := v.([]any); isList {
+				cp.Examples = list
+			}
+		}
+	}
+
+	if src.Extra != nil {
+		if v, ok := copyJSONValue(src.Extra); ok {
+			if m, isMap := v.(map[string]any); isMap {
+				cp.Extra = m
+			}
+		}
+	}
+}
+
+// copyJSONValue deep-copies a JSON-shaped value via a marshal + UseNumber
+// decode, so numbers come back as exact [json.Number] literals rather than
+// rounded float64s. It reports ok=false on any error so the caller can keep
+// its fallback value.
+func copyJSONValue(v any) (any, bool) {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return nil, false
+	}
+
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+
+	var out any
+
+	err = dec.Decode(&out)
+	if err != nil {
+		return nil, false
+	}
+
+	return out, true
 }
