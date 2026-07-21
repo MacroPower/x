@@ -138,8 +138,8 @@ is an in-package test in `internal/schemafield`, where that policy does not appl
   carry a json tag or be allowlisted, guarding the JSON round-trip that
   `Inline`'s deep copy and `ParseSchemaValue` rely on.
 - `TestTypeSchemaOverrideContainersUnaliased` (generate_test.go):
-  container fields of a `WithTypeSchema` override must not stay aliased in
-  generated schemas.
+  container fields of a `WithTypeSchema` override (in both its `TypeSchema.Value`
+  and `TypeSchema.Verbatim` forms) must not stay aliased in generated schemas.
 
 ### Type resolution priority (generation)
 
@@ -150,6 +150,17 @@ from an embedded field -> direct `encoding.TextMarshaler` -> kind-based
 reflection. A direct `json.Marshaler` is deliberately not consulted (its
 output shape is unknowable). `JSONSchemaExtender` runs only when reflection
 produced the schema. The full behavioral spec lives in `doc.go`.
+
+Type-level hooks (`JSONSchemaProvider`/`TypeSchemaProvider` and their extender
+counterparts, plus `WithTypeSchema`) declare intent through a `TypeSchema`
+envelope rather than a pre-shaped `*Schema`: a bare `Value` decorated by a
+`Nullability` stance and the occurrence's pointer-ness, an opaque `Verbatim`
+schema emitted as-is, or a `Ref` alias to another Go type kept reachable through
+a node-backed `$ref` edge. Setting more than one is `ErrConflictingTypeSchema`.
+The stance replaces hand-shaping an `anyOf[value, null]` wrapper the generator
+would otherwise reverse-engineer, and is recorded on the def entry
+(`defEntry.nullability`) so it combines with each reference's pointer-ness in
+`refNode`, keeping `$defs` nullability order-independent.
 
 ### Behavior is spec'd in doc.go and README.md
 

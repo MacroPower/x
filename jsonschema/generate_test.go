@@ -504,11 +504,11 @@ func TestGenerateFor_TextMarshaler(t *testing.T) {
 // JSONSchemaProvider type.
 type Status string
 
-func (Status) JSONSchema(context.Context, jsonschema.TypeContext) (*jsonschema.Schema, error) {
-	return &jsonschema.Schema{
+func (Status) JSONSchema(context.Context, jsonschema.TypeContext) (jsonschema.TypeSchema, error) {
+	return jsonschema.TypeSchema{Value: &jsonschema.Schema{
 		Type: "string",
 		Enum: []any{"active", "inactive", "suspended"},
-	}, nil
+	}}, nil
 }
 
 func TestGenerateFor_JSONSchemaProvider(t *testing.T) {
@@ -531,9 +531,9 @@ type Metadata struct {
 	Tags map[string]string `json:"tags"`
 }
 
-func (Metadata) JSONSchemaExtend(_ context.Context, _ jsonschema.TypeContext, s *jsonschema.Schema) error {
-	s.Description = "Arbitrary key-value metadata"
-	s.MinProperties = new(1)
+func (Metadata) JSONSchemaExtend(_ context.Context, _ jsonschema.TypeContext, ts *jsonschema.TypeSchema) error {
+	ts.Value.Description = "Arbitrary key-value metadata"
+	ts.Value.MinProperties = new(1)
 
 	return nil
 }
@@ -568,7 +568,7 @@ type failingExtender struct {
 	Name string `json:"name"`
 }
 
-func (failingExtender) JSONSchemaExtend(context.Context, jsonschema.TypeContext, *jsonschema.Schema) error {
+func (failingExtender) JSONSchemaExtend(context.Context, jsonschema.TypeContext, *jsonschema.TypeSchema) error {
 	return errExtendUnavailable
 }
 
@@ -586,7 +586,7 @@ func TestGenerateFor_JSONSchemaExtenderError(t *testing.T) {
 // wraps the $ref in an anyOf null branch), not on the single shared entry.
 type nullableDefStatus string
 
-func (nullableDefStatus) JSONSchemaExtend(context.Context, jsonschema.TypeContext, *jsonschema.Schema) error {
+func (nullableDefStatus) JSONSchemaExtend(context.Context, jsonschema.TypeContext, *jsonschema.TypeSchema) error {
 	return nil
 }
 
@@ -641,7 +641,7 @@ func TestGenerateFor_WithTypeSchema(t *testing.T) {
 		Format: "date",
 	}
 	s, err := jsonschema.GenerateFor[time.Time](t.Context(),
-		jsonschema.WithTypeSchema(reflect.TypeFor[time.Time](), override),
+		jsonschema.WithTypeSchema(reflect.TypeFor[time.Time](), jsonschema.TypeSchema{Value: override}),
 	)
 	require.NoError(t, err)
 
@@ -664,7 +664,7 @@ func TestGenerateFor_WithTypeSchemaFor(t *testing.T) {
 		Format: "date",
 	}
 	s, err := jsonschema.GenerateFor[time.Time](t.Context(),
-		jsonschema.WithTypeSchemaFor[time.Time](override),
+		jsonschema.WithTypeSchemaFor[time.Time](jsonschema.TypeSchema{Value: override}),
 	)
 	require.NoError(t, err)
 
@@ -694,7 +694,7 @@ func TestGenerateFor_NullableRefToTrueSchemaDedup(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[Holder](t.Context(),
-		jsonschema.WithTypeSchemaFor[Widget](&jsonschema.Schema{}),
+		jsonschema.WithTypeSchemaFor[Widget](jsonschema.TypeSchema{Value: &jsonschema.Schema{}}),
 	)
 	require.NoError(t, err)
 
@@ -1578,8 +1578,12 @@ func TestGenerateFor_JSONSchemaTag_Const(t *testing.T) {
 // NonStructExtender is a named non-struct type implementing JSONSchemaExtender.
 type NonStructExtender []string
 
-func (NonStructExtender) JSONSchemaExtend(_ context.Context, _ jsonschema.TypeContext, s *jsonschema.Schema) error {
-	s.Description = "A list of tags"
+func (NonStructExtender) JSONSchemaExtend(
+	_ context.Context,
+	_ jsonschema.TypeContext,
+	ts *jsonschema.TypeSchema,
+) error {
+	ts.Value.Description = "A list of tags"
 
 	return nil
 }
@@ -1633,11 +1637,11 @@ func TestGenerateFor_NonStructExtender_Root(t *testing.T) {
 // NonStructProvider is a named non-struct type implementing JSONSchemaProvider.
 type NonStructProvider int
 
-func (NonStructProvider) JSONSchema(context.Context, jsonschema.TypeContext) (*jsonschema.Schema, error) {
-	return &jsonschema.Schema{
+func (NonStructProvider) JSONSchema(context.Context, jsonschema.TypeContext) (jsonschema.TypeSchema, error) {
+	return jsonschema.TypeSchema{Value: &jsonschema.Schema{
 		Type: "integer",
 		Enum: []any{1, 2, 3},
-	}, nil
+	}}, nil
 }
 
 func TestGenerateFor_NonStructProvider_ExtractedToDefs(t *testing.T) {
@@ -1886,19 +1890,19 @@ type BothProviderAndExtender struct {
 	Value string `json:"value"`
 }
 
-func (BothProviderAndExtender) JSONSchema(context.Context, jsonschema.TypeContext) (*jsonschema.Schema, error) {
-	return &jsonschema.Schema{
+func (BothProviderAndExtender) JSONSchema(context.Context, jsonschema.TypeContext) (jsonschema.TypeSchema, error) {
+	return jsonschema.TypeSchema{Value: &jsonschema.Schema{
 		Type:        "string",
 		Description: "from provider",
-	}, nil
+	}}, nil
 }
 
 func (BothProviderAndExtender) JSONSchemaExtend(
 	_ context.Context,
 	_ jsonschema.TypeContext,
-	s *jsonschema.Schema,
+	ts *jsonschema.TypeSchema,
 ) error {
-	s.Description = "from extender"
+	ts.Value.Description = "from extender"
 
 	return nil
 }
@@ -1926,7 +1930,7 @@ func TestGenerateFor_WithTypeSchema_NamedStructExtractedToDefs(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[Container](t.Context(),
-		jsonschema.WithTypeSchema(reflect.TypeFor[Address](), override),
+		jsonschema.WithTypeSchema(reflect.TypeFor[Address](), jsonschema.TypeSchema{Value: override}),
 	)
 	require.NoError(t, err)
 
@@ -2096,8 +2100,8 @@ type NilProvider struct {
 }
 
 //nolint:nilnil // A nil schema with a nil error is the documented unrestricted-schema answer.
-func (NilProvider) JSONSchema(context.Context, jsonschema.TypeContext) (*jsonschema.Schema, error) {
-	return nil, nil
+func (NilProvider) JSONSchema(context.Context, jsonschema.TypeContext) (jsonschema.TypeSchema, error) {
+	return jsonschema.TypeSchema{}, nil
 }
 
 func TestGenerateFor_JSONSchemaProviderReturnsNil(t *testing.T) {
@@ -2518,11 +2522,11 @@ type WithTypeSchemaProvider struct {
 	Value string `json:"value"`
 }
 
-func (WithTypeSchemaProvider) JSONSchema(context.Context, jsonschema.TypeContext) (*jsonschema.Schema, error) {
-	return &jsonschema.Schema{
+func (WithTypeSchemaProvider) JSONSchema(context.Context, jsonschema.TypeContext) (jsonschema.TypeSchema, error) {
+	return jsonschema.TypeSchema{Value: &jsonschema.Schema{
 		Type:        "string",
 		Description: "from provider",
-	}, nil
+	}}, nil
 }
 
 func TestGenerateFor_WithTypeSchemaOverridesProvider(t *testing.T) {
@@ -2534,7 +2538,7 @@ func TestGenerateFor_WithTypeSchemaOverridesProvider(t *testing.T) {
 		Description: "from override",
 	}
 	s, err := jsonschema.GenerateFor[WithTypeSchemaProvider](t.Context(),
-		jsonschema.WithTypeSchema(reflect.TypeFor[WithTypeSchemaProvider](), override),
+		jsonschema.WithTypeSchema(reflect.TypeFor[WithTypeSchemaProvider](), jsonschema.TypeSchema{Value: override}),
 	)
 	require.NoError(t, err)
 
@@ -2566,66 +2570,46 @@ func TestGenerateFor_JsonStringOverridesRef(t *testing.T) {
 func TestGenerateFor_ConstOnOverrideNullableWrapper(t *testing.T) {
 	t.Parallel()
 
-	// A WithTypeSchema override supplies its own anyOf[value, null] wrapper. A
-	// const/enum tag on a field of that type must relocate onto the value
-	// branch: beside the wrapper it rejects the null the override admits.
+	// A WithTypeSchema override declares a Nullable stance, so generation wraps a
+	// non-pointer field of that type in anyOf[value, null]. A const tag on the
+	// field must relocate onto the value branch: beside the wrapper it would
+	// reject the null the stance admits.
 	type MyVal string
 
-	tests := map[string]struct {
-		override *jsonschema.Schema
-	}{
-		"anyOf wrapper": {
-			override: &jsonschema.Schema{
-				AnyOf: []*jsonschema.Schema{{Type: "string"}, {Type: "null"}},
-			},
-		},
-		"null-first anyOf wrapper": {
-			override: &jsonschema.Schema{
-				AnyOf: []*jsonschema.Schema{{Type: "null"}, {Type: "string"}},
-			},
-		},
-		"type-list wrapper": {
-			override: &jsonschema.Schema{Types: []string{"string", "null"}},
-		},
+	type Container struct {
+		F MyVal `json:"f" jsonschema:"const=x"`
 	}
 
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
+	s, err := jsonschema.GenerateFor[Container](t.Context(),
+		jsonschema.WithTypeSchemaFor[MyVal](jsonschema.TypeSchema{
+			Value:    &jsonschema.Schema{Type: "string"},
+			Nullable: jsonschema.Nullable,
+		}),
+	)
+	require.NoError(t, err)
 
-			type Container struct {
-				F MyVal `json:"f" jsonschema:"const=x"`
-			}
+	field := s.Properties["f"]
+	require.NotNil(t, field)
+	assert.Nil(t, field.Const, "const must not sit beside the wrapper")
 
-			s, err := jsonschema.GenerateFor[Container](t.Context(),
-				jsonschema.WithTypeSchemaFor[MyVal](tt.override),
-			)
-			require.NoError(t, err)
+	validator, err := jsonschema.Compile(t.Context(), s)
+	require.NoError(t, err)
 
-			field := s.Properties["f"]
-			require.NotNil(t, field)
-			assert.Nil(t, field.Const, "const must not sit beside the authored wrapper")
-
-			validator, err := jsonschema.Compile(t.Context(), s)
-			require.NoError(t, err)
-
-			assert.NoError(t, validator.ValidateJSON(t.Context(), []byte(`{"f": null}`)),
-				"the null the override admits stays valid")
-			assert.NoError(t, validator.ValidateJSON(t.Context(), []byte(`{"f": "x"}`)),
-				"the const value is permitted")
-			assert.Error(t, validator.ValidateJSON(t.Context(), []byte(`{"f": "y"}`)),
-				"a non-const value is rejected")
-		})
-	}
+	assert.NoError(t, validator.ValidateJSON(t.Context(), []byte(`{"f": null}`)),
+		"the null the stance admits stays valid")
+	assert.NoError(t, validator.ValidateJSON(t.Context(), []byte(`{"f": "x"}`)),
+		"the const value is permitted")
+	assert.Error(t, validator.ValidateJSON(t.Context(), []byte(`{"f": "y"}`)),
+		"a non-const value is rejected")
 }
 
 func TestGenerateFor_HookAuthoredRefKeepsDefAlive(t *testing.T) {
 	t.Parallel()
 
 	// Field A's type= tag detaches the generator's own $ref to Status, but the
-	// WithTypeSchema override on field B's type carries a raw $ref to
-	// #/$defs/Status as payload data. Reachability must follow that authored
-	// ref string, or the emitted schema would reference a pruned definition.
+	// override on field B's type declares a TypeSchema.Ref alias to Status, a
+	// node-backed edge that keeps the def reachable. Without it the emitted schema
+	// would reference a pruned definition.
 	type Link string
 
 	type Container struct {
@@ -2634,30 +2618,33 @@ func TestGenerateFor_HookAuthoredRefKeepsDefAlive(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[Container](t.Context(),
-		jsonschema.WithTypeSchemaFor[Link](&jsonschema.Schema{Ref: "#/$defs/Status"}),
+		jsonschema.WithTypeSchemaFor[Link](jsonschema.TypeSchema{Ref: reflect.TypeFor[Status]()}),
 	)
 	require.NoError(t, err)
 
 	assert.Equal(t, "string", s.Properties["a"].Type)
 	require.Contains(t, s.Defs, "Status",
-		"the def referenced only by the override's authored $ref must survive")
+		"the def the override's Ref alias targets must survive")
 
 	_, err = jsonschema.Compile(t.Context(), s)
-	require.NoError(t, err, "the authored $ref must resolve in the emitted schema")
+	require.NoError(t, err, "the aliased $ref must resolve in the emitted schema")
 }
 
-// selfRefKeptNode's extender authors a raw $ref back to the type's own $defs
-// entry (a hand-built recursive parent link), so root inlining must keep the
-// def and leave the root a $ref; inlining would leave the authored ref
-// dangling.
+// selfRefParent supplies, verbatim, a raw $ref back to the enclosing type's own
+// $defs entry -- a hand-built recursive parent link expressed through the
+// TypeSchema envelope rather than a raw $ref injected into a reflected payload.
+// The Verbatim reachability scan follows that ref, so root inlining keeps
+// selfRefKeptNode's def and leaves the root a $ref; inlining would leave the
+// authored ref dangling.
+type selfRefParent struct{}
+
+func (selfRefParent) JSONSchema(context.Context, jsonschema.TypeContext) (jsonschema.TypeSchema, error) {
+	return jsonschema.TypeSchema{Verbatim: &jsonschema.Schema{Ref: "#/$defs/selfRefKeptNode"}}, nil
+}
+
 type selfRefKeptNode struct {
-	Name string `json:"name"`
-}
-
-func (selfRefKeptNode) JSONSchemaExtend(_ context.Context, _ jsonschema.TypeContext, s *jsonschema.Schema) error {
-	s.Properties["parent"] = &jsonschema.Schema{Ref: "#/$defs/selfRefKeptNode"}
-
-	return nil
+	Name   string         `json:"name"`
+	Parent *selfRefParent `json:"parent,omitempty"`
 }
 
 func TestGenerateFor_ExtenderAuthoredSelfRefKeepsDef(t *testing.T) {
@@ -2667,7 +2654,7 @@ func TestGenerateFor_ExtenderAuthoredSelfRefKeepsDef(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Contains(t, s.Defs, "selfRefKeptNode",
-		"the def targeted by the extender's authored $ref must survive root inlining")
+		"the def the Verbatim scan reaches must survive root inlining")
 	assert.Equal(t, "#/$defs/selfRefKeptNode", s.Ref)
 
 	validator, err := jsonschema.Compile(t.Context(), s)
@@ -2740,8 +2727,8 @@ func TestGenerateFor_NullablePointerConstDropsTypeBounds(t *testing.T) {
 // and referenced via $ref.
 type BoundedRefProvider int
 
-func (BoundedRefProvider) JSONSchema(context.Context, jsonschema.TypeContext) (*jsonschema.Schema, error) {
-	return &jsonschema.Schema{Type: "integer"}, nil
+func (BoundedRefProvider) JSONSchema(context.Context, jsonschema.TypeContext) (jsonschema.TypeSchema, error) {
+	return jsonschema.TypeSchema{Value: &jsonschema.Schema{Type: "integer"}}, nil
 }
 
 func TestGenerateFor_NullableRefFieldConstDropsWrapperBounds(t *testing.T) {
@@ -2777,8 +2764,8 @@ func TestGenerateFor_NullableRefFieldConstDropsWrapperBounds(t *testing.T) {
 // nullable reference to it takes the no-wrapper dedup path.
 type NullAdmittingRefProvider int
 
-func (NullAdmittingRefProvider) JSONSchema(context.Context, jsonschema.TypeContext) (*jsonschema.Schema, error) {
-	return &jsonschema.Schema{Types: []string{"integer", "null"}}, nil
+func (NullAdmittingRefProvider) JSONSchema(context.Context, jsonschema.TypeContext) (jsonschema.TypeSchema, error) {
+	return jsonschema.TypeSchema{Value: &jsonschema.Schema{Types: []string{"integer", "null"}}}, nil
 }
 
 func TestGenerateFor_NullAdmittingRefFieldConstDropsBounds(t *testing.T) {
@@ -2997,12 +2984,12 @@ type allOfEmbed struct {
 }
 
 //nolint:unused // Provider method invoked via reflection during generation.
-func (allOfEmbed) JSONSchema(context.Context, jsonschema.TypeContext) (*jsonschema.Schema, error) {
-	return &jsonschema.Schema{
+func (allOfEmbed) JSONSchema(context.Context, jsonschema.TypeContext) (jsonschema.TypeSchema, error) {
+	return jsonschema.TypeSchema{Value: &jsonschema.Schema{
 		Type:       "object",
 		Properties: map[string]*jsonschema.Schema{"x": {Type: "integer"}},
 		Required:   []string{"x"},
-	}, nil
+	}}, nil
 }
 
 func TestGenerateFor_NullableInlineStructWithAllOfEmbedKeepsAllOfInside(t *testing.T) {
@@ -3100,7 +3087,7 @@ func TestGenerateFor_WithTypeSchemaNamedNonStructInlined(t *testing.T) {
 	}
 
 	s, err := jsonschema.GenerateFor[Container](t.Context(),
-		jsonschema.WithTypeSchema(reflect.TypeFor[Priority](), override),
+		jsonschema.WithTypeSchema(reflect.TypeFor[Priority](), jsonschema.TypeSchema{Value: override}),
 	)
 	require.NoError(t, err)
 
@@ -3114,38 +3101,37 @@ func TestGenerateFor_WithTypeSchemaNamedNonStructInlined(t *testing.T) {
 func TestGenerateFor_WithTypeSchemaNullBearingPointerNotDoubleWrapped(t *testing.T) {
 	t.Parallel()
 
-	// A WithTypeSchema override that already accepts null (its type list includes
-	// "null") on a pointer field must not be wrapped in a redundant
-	// anyOf[override, {"type":"null"}]. The override is emitted as-is, matching
-	// the []byte builtin form, since applyNullable leaves a null-bearing schema
-	// alone.
+	// A WithTypeSchema override declaring a Nullable stance on a scalar type wraps
+	// a pointer field in a single anyOf[value, null] (the scalar null encoding),
+	// with the value on the first branch -- not a redundant second null branch.
 	type MyID string
 
 	type Container struct {
 		ID *MyID `json:"id"`
 	}
 
-	override := &jsonschema.Schema{
-		Types: []string{"null", "string"},
-	}
-
 	s, err := jsonschema.GenerateFor[Container](t.Context(),
-		jsonschema.WithTypeSchema(reflect.TypeFor[MyID](), override),
+		jsonschema.WithTypeSchema(reflect.TypeFor[MyID](), jsonschema.TypeSchema{
+			Value:    &jsonschema.Schema{Type: "string"},
+			Nullable: jsonschema.Nullable,
+		}),
 	)
 	require.NoError(t, err)
 
 	field := s.Properties["id"]
-	assert.Nil(t, field.AnyOf, "a null-bearing override must not be wrapped in anyOf")
-	assert.Equal(t, []string{"null", "string"}, field.Types)
+	require.Len(t, field.AnyOf, 2)
+	assert.Equal(t, "string", field.AnyOf[0].Type)
+	assert.Equal(t, "null", field.AnyOf[1].Type)
+	assert.Nil(t, field.Types)
 }
 
 func TestGenerateFor_ExtractedNullBearingOverrideNotDoubleWrapped(t *testing.T) {
 	t.Parallel()
 
-	// A null-bearing override on an extracted type (a named struct) is reached
-	// through extractToDefs/refForType, not the inline applyNullable path. A
-	// nullable pointer to it must still be a bare $ref, not anyOf[$ref, null],
-	// because the def itself already admits null.
+	// A Nullable-stance override on an extracted type (a named struct) leaves the
+	// shared def body bare; the null branch rides on each reference. A nullable
+	// pointer to it is anyOf[$ref, null], so the null lives at the reference, not
+	// baked into the shared definition.
 	type NullableThing struct {
 		V int `json:"v"`
 	}
@@ -3154,46 +3140,53 @@ func TestGenerateFor_ExtractedNullBearingOverrideNotDoubleWrapped(t *testing.T) 
 		T *NullableThing `json:"t"`
 	}
 
-	override := &jsonschema.Schema{Types: []string{"null", "object"}}
-
 	s, err := jsonschema.GenerateFor[Container](t.Context(),
-		jsonschema.WithTypeSchema(reflect.TypeFor[NullableThing](), override),
+		jsonschema.WithTypeSchema(reflect.TypeFor[NullableThing](), jsonschema.TypeSchema{
+			Value:    &jsonschema.Schema{Type: "object"},
+			Nullable: jsonschema.Nullable,
+		}),
 	)
 	require.NoError(t, err)
 
 	field := s.Properties["t"]
 	require.NotNil(t, field)
-	assert.Nil(t, field.AnyOf, "a null-bearing extracted override must not add a second null branch")
-	assert.Equal(t, "#/$defs/NullableThing", field.Ref)
+	require.Len(t, field.AnyOf, 2)
+	assert.Equal(t, "#/$defs/NullableThing", field.AnyOf[0].Ref)
+	assert.Equal(t, "null", field.AnyOf[1].Type)
+
+	def := s.Defs["NullableThing"]
+	require.NotNil(t, def)
+	assert.Equal(t, "object", def.Type, "the shared def body stays bare (null rides on the reference)")
+	assert.Nil(t, def.Types)
 }
 
-func TestGenerateFor_ExtractedAnyOfNullOverrideNotDoubleWrapped(t *testing.T) {
+func TestGenerateFor_NullableStanceReachesNonPointerRef(t *testing.T) {
 	t.Parallel()
 
-	// A null-bearing override expressed as anyOf[value, {"type":"null"}] (rather
-	// than a type list) on an extracted type must also yield a bare $ref under a
-	// nullable pointer, not anyOf[$ref, null]: the def already admits null.
+	// A Nullable stance is a per-type property recorded on the def entry, so it
+	// reaches every reference, not just pointer ones: a non-pointer field of a
+	// Nullable-stance extracted type still admits null (anyOf[$ref, null]).
 	type NullableThing struct {
 		V int `json:"v"`
 	}
 
 	type Container struct {
-		T *NullableThing `json:"t"`
-	}
-
-	override := &jsonschema.Schema{
-		AnyOf: []*jsonschema.Schema{{Type: "object"}, {Type: "null"}},
+		T NullableThing `json:"t"`
 	}
 
 	s, err := jsonschema.GenerateFor[Container](t.Context(),
-		jsonschema.WithTypeSchema(reflect.TypeFor[NullableThing](), override),
+		jsonschema.WithTypeSchema(reflect.TypeFor[NullableThing](), jsonschema.TypeSchema{
+			Value:    &jsonschema.Schema{Type: "object"},
+			Nullable: jsonschema.Nullable,
+		}),
 	)
 	require.NoError(t, err)
 
 	field := s.Properties["t"]
 	require.NotNil(t, field)
-	assert.Nil(t, field.AnyOf, "a null-bearing anyOf override must not add a second null branch")
-	assert.Equal(t, "#/$defs/NullableThing", field.Ref)
+	require.Len(t, field.AnyOf, 2)
+	assert.Equal(t, "#/$defs/NullableThing", field.AnyOf[0].Ref)
+	assert.Equal(t, "null", field.AnyOf[1].Type)
 }
 
 func TestGenerateFor_Draft7_NullableRefWithAnnotation(t *testing.T) {
@@ -3282,9 +3275,9 @@ func (TextMarshalerWithExtender) MarshalText() ([]byte, error) { return nil, nil
 func (TextMarshalerWithExtender) JSONSchemaExtend(
 	_ context.Context,
 	_ jsonschema.TypeContext,
-	s *jsonschema.Schema,
+	ts *jsonschema.TypeSchema,
 ) error {
-	s.Enum = []any{"active", "inactive", "pending"}
+	ts.Value.Enum = []any{"active", "inactive", "pending"}
 
 	return nil
 }
@@ -3524,8 +3517,8 @@ func TestDraft07AdditionalPropertiesRetainedWithPromotedEmbed(t *testing.T) {
 
 type providerMutationTestType struct{}
 
-func (providerMutationTestType) JSONSchema(context.Context, jsonschema.TypeContext) (*jsonschema.Schema, error) {
-	return &sharedProviderSchema, nil
+func (providerMutationTestType) JSONSchema(context.Context, jsonschema.TypeContext) (jsonschema.TypeSchema, error) {
+	return jsonschema.TypeSchema{Value: &sharedProviderSchema}, nil
 }
 
 var (
@@ -3886,8 +3879,8 @@ type panickingProvider struct {
 	names []string
 }
 
-func (p panickingProvider) JSONSchema(context.Context, jsonschema.TypeContext) (*jsonschema.Schema, error) {
-	return &jsonschema.Schema{Description: p.names[0]}, nil // out of range on zero value
+func (p panickingProvider) JSONSchema(context.Context, jsonschema.TypeContext) (jsonschema.TypeSchema, error) {
+	return jsonschema.TypeSchema{Value: &jsonschema.Schema{Description: p.names[0]}}, nil // out of range on zero value
 }
 
 // embeddedProvider supplies a JSONSchema method that an outer type can both
@@ -3897,8 +3890,8 @@ func (p panickingProvider) JSONSchema(context.Context, jsonschema.TypeContext) (
 type embeddedProvider struct{}
 
 //nolint:unused // Shadowed by outerWithDirectMethods.JSONSchema; present only to create the shadowing case.
-func (embeddedProvider) JSONSchema(context.Context, jsonschema.TypeContext) (*jsonschema.Schema, error) {
-	return &jsonschema.Schema{Type: "embedded"}, nil
+func (embeddedProvider) JSONSchema(context.Context, jsonschema.TypeContext) (jsonschema.TypeSchema, error) {
+	return jsonschema.TypeSchema{Value: &jsonschema.Schema{Type: "embedded"}}, nil
 }
 
 // outerWithDirectMethods declares JSONSchema directly and also embeds a type
@@ -3907,8 +3900,8 @@ type outerWithDirectMethods struct {
 	embeddedProvider //nolint:unused // Embedded to exercise direct-method-wins-over-promoted shadowing.
 }
 
-func (outerWithDirectMethods) JSONSchema(context.Context, jsonschema.TypeContext) (*jsonschema.Schema, error) {
-	return &jsonschema.Schema{Type: "outer"}, nil
+func (outerWithDirectMethods) JSONSchema(context.Context, jsonschema.TypeContext) (jsonschema.TypeSchema, error) {
+	return jsonschema.TypeSchema{Value: &jsonschema.Schema{Type: "outer"}}, nil
 }
 
 func TestProviderPanicOnZeroValueWrapsErrProviderPanic(t *testing.T) {
@@ -3925,8 +3918,8 @@ func TestProviderPanicOnZeroValueWrapsErrProviderPanic(t *testing.T) {
 // channel for a provider that cannot produce its schema.
 type failingProvider struct{}
 
-func (failingProvider) JSONSchema(context.Context, jsonschema.TypeContext) (*jsonschema.Schema, error) {
-	return nil, errProviderUnavailable
+func (failingProvider) JSONSchema(context.Context, jsonschema.TypeContext) (jsonschema.TypeSchema, error) {
+	return jsonschema.TypeSchema{}, errProviderUnavailable
 }
 
 // TestProviderErrorAbortsGeneration proves a provider error aborts
@@ -4179,8 +4172,8 @@ func TestGenerateFor_JSONMarshalerNotConsulted(t *testing.T) {
 
 type ptrProvider struct{}
 
-func (*ptrProvider) JSONSchema(context.Context, jsonschema.TypeContext) (*jsonschema.Schema, error) {
-	return &jsonschema.Schema{Type: "string", Format: "ptr-provider-marker"}, nil
+func (*ptrProvider) JSONSchema(context.Context, jsonschema.TypeContext) (jsonschema.TypeSchema, error) {
+	return jsonschema.TypeSchema{Value: &jsonschema.Schema{Type: "string", Format: "ptr-provider-marker"}}, nil
 }
 
 func TestGenerateFor_ProviderPointerReceiver(t *testing.T) {
@@ -4200,8 +4193,8 @@ type ptrExtender struct {
 	Name string `json:"name"`
 }
 
-func (*ptrExtender) JSONSchemaExtend(_ context.Context, _ jsonschema.TypeContext, s *jsonschema.Schema) error {
-	s.Description = "ptr-extender-marker"
+func (*ptrExtender) JSONSchemaExtend(_ context.Context, _ jsonschema.TypeContext, ts *jsonschema.TypeSchema) error {
+	ts.Value.Description = "ptr-extender-marker"
 
 	return nil
 }
@@ -4223,12 +4216,12 @@ func TestGenerateFor_ExtenderPointerReceiver(t *testing.T) {
 // its JSONSchema method receives.
 type draftAwareProvider struct{}
 
-func (draftAwareProvider) JSONSchema(_ context.Context, tc jsonschema.TypeContext) (*jsonschema.Schema, error) {
+func (draftAwareProvider) JSONSchema(_ context.Context, tc jsonschema.TypeContext) (jsonschema.TypeSchema, error) {
 	if tc.Draft == jsonschema.Draft7 {
-		return &jsonschema.Schema{Type: "string", Description: "draft-07"}, nil
+		return jsonschema.TypeSchema{Value: &jsonschema.Schema{Type: "string", Description: "draft-07"}}, nil
 	}
 
-	return &jsonschema.Schema{Type: "string", Description: "draft-2020"}, nil
+	return jsonschema.TypeSchema{Value: &jsonschema.Schema{Type: "string", Description: "draft-2020"}}, nil
 }
 
 func TestJSONSchemaProviderReceivesTypeContext(t *testing.T) {
@@ -4254,9 +4247,13 @@ type ctxAwareExtender struct {
 	Value string `json:"value"`
 }
 
-func (ctxAwareExtender) JSONSchemaExtend(ctx context.Context, _ jsonschema.TypeContext, s *jsonschema.Schema) error {
+func (ctxAwareExtender) JSONSchemaExtend(
+	ctx context.Context,
+	_ jsonschema.TypeContext,
+	ts *jsonschema.TypeSchema,
+) error {
 	if v, ok := ctx.Value(extenderCtxKey{}).(string); ok {
-		s.Description = v
+		ts.Value.Description = v
 	}
 
 	return nil
@@ -4979,45 +4976,59 @@ func TestTypeSchemaOverrideContainersUnaliased(t *testing.T) {
 	probeType := reflect.TypeFor[overrideProbe]()
 	schemaType := reflect.TypeFor[jsonschema.Schema]()
 
-	var (
-		covered   []string
-		uncovered []string
-	)
-
-	for field := range schemaType.Fields() {
-		if !field.IsExported() || !isAliasingContainerType(field.Type) {
-			continue
-		}
-
-		override := populatedSchema(t, field)
-
-		// Definitions are disabled so the generated root is the override copy
-		// itself rather than a $ref into $defs.
-		got, err := jsonschema.Generate(t.Context(), probeType,
-			jsonschema.WithTypeSchema(probeType, override),
-			jsonschema.WithDefinitions(false),
-		)
-		require.NoError(t, err, "generate with override for field %s", field.Name)
-
-		if containerPointer(t, fieldValue(override, field)) != containerPointer(t, fieldValue(got, field)) {
-			covered = append(covered, field.Name)
-
-			continue
-		}
-
-		uncovered = append(uncovered, field.Name)
+	// Both TypeSchema.Value and TypeSchema.Verbatim carry a caller-shared *Schema
+	// that finishTypeOverride must clone, so the guard exercises each.
+	envelopes := map[string]func(*jsonschema.Schema) jsonschema.TypeSchema{
+		"Value":    func(s *jsonschema.Schema) jsonschema.TypeSchema { return jsonschema.TypeSchema{Value: s} },
+		"Verbatim": func(s *jsonschema.Schema) jsonschema.TypeSchema { return jsonschema.TypeSchema{Verbatim: s} },
 	}
 
-	sort.Strings(uncovered)
-	require.Empty(t, uncovered,
-		"exported Schema field(s) %v of a container type stay aliased between a WithTypeSchema "+
-			"override and the generated schema; a write through the generated schema would corrupt "+
-			"the override across Generate calls",
-		uncovered)
+	for envName, wrap := range envelopes {
+		t.Run(envName, func(t *testing.T) {
+			t.Parallel()
 
-	// Sanity: the guard actually inspected the fields it is meant to protect.
-	require.NotEmpty(t, covered, "guard found no container-typed Schema fields to check; the type set is stale")
-	assert.Contains(t, covered, "Examples", "Examples is the empirically reproduced aliasing case and must be covered")
+			var (
+				covered   []string
+				uncovered []string
+			)
+
+			for field := range schemaType.Fields() {
+				if !field.IsExported() || !isAliasingContainerType(field.Type) {
+					continue
+				}
+
+				override := populatedSchema(t, field)
+
+				// Definitions are disabled so the generated root is the override
+				// copy itself rather than a $ref into $defs.
+				got, err := jsonschema.Generate(t.Context(), probeType,
+					jsonschema.WithTypeSchema(probeType, wrap(override)),
+					jsonschema.WithDefinitions(false),
+				)
+				require.NoError(t, err, "generate with override for field %s", field.Name)
+
+				if containerPointer(t, fieldValue(override, field)) != containerPointer(t, fieldValue(got, field)) {
+					covered = append(covered, field.Name)
+
+					continue
+				}
+
+				uncovered = append(uncovered, field.Name)
+			}
+
+			sort.Strings(uncovered)
+			require.Empty(t, uncovered,
+				"exported Schema field(s) %v of a container type stay aliased between a WithTypeSchema "+
+					"override and the generated schema; a write through the generated schema would corrupt "+
+					"the override across Generate calls",
+				uncovered)
+
+			// Sanity: the guard actually inspected the fields it is meant to protect.
+			require.NotEmpty(t, covered, "guard found no container-typed Schema fields to check; the type set is stale")
+			assert.Contains(t, covered, "Examples",
+				"Examples is the empirically reproduced aliasing case and must be covered")
+		})
+	}
 }
 
 // populatedSchema returns a *Schema with the given field set to a fresh,
@@ -5120,8 +5131,12 @@ type rootTitleExtender struct {
 	Name string `json:"name"`
 }
 
-func (rootTitleExtender) JSONSchemaExtend(_ context.Context, _ jsonschema.TypeContext, s *jsonschema.Schema) error {
-	s.Title = "Extended"
+func (rootTitleExtender) JSONSchemaExtend(
+	_ context.Context,
+	_ jsonschema.TypeContext,
+	ts *jsonschema.TypeSchema,
+) error {
+	ts.Value.Title = "Extended"
 
 	return nil
 }
@@ -5229,7 +5244,7 @@ func TestWithRootTitle(t *testing.T) {
 			jsonschema.WithRootTitle(true),
 			jsonschema.WithTypeSchema(
 				reflect.TypeFor[rootTitleStruct](),
-				&jsonschema.Schema{Type: "object", Title: "Custom"},
+				jsonschema.TypeSchema{Value: &jsonschema.Schema{Type: "object", Title: "Custom"}},
 			),
 		)
 		require.NoError(t, err)
@@ -5282,8 +5297,8 @@ func TestWithRootTitle(t *testing.T) {
 // JSONSchemaExtend, for ordering tests against registered extenders.
 type extendedKind int
 
-func (extendedKind) JSONSchemaExtend(_ context.Context, _ jsonschema.TypeContext, s *jsonschema.Schema) error {
-	s.Description = "by author"
+func (extendedKind) JSONSchemaExtend(_ context.Context, _ jsonschema.TypeContext, ts *jsonschema.TypeSchema) error {
+	ts.Value.Description = "by author"
 
 	return nil
 }
@@ -5292,9 +5307,9 @@ func (extendedKind) JSONSchemaExtend(_ context.Context, _ jsonschema.TypeContext
 // other type untouched.
 func describePlainKind() jsonschema.TypeSchemaExtender {
 	return jsonschema.TypeSchemaExtenderFunc(
-		func(_ context.Context, tc jsonschema.TypeContext, s *jsonschema.Schema) error {
+		func(_ context.Context, tc jsonschema.TypeContext, ts *jsonschema.TypeSchema) error {
 			if tc.Type == reflect.TypeFor[plainKind]() {
-				s.Description = "extended"
+				ts.Value.Description = "extended"
 			}
 
 			return nil
@@ -5329,9 +5344,9 @@ func TestWithTypeSchemaExtender(t *testing.T) {
 			opts: []jsonschema.GenerateOption{
 				jsonschema.WithTypeSchemaExtender(describePlainKind()),
 				jsonschema.WithTypeSchemaExtender(jsonschema.TypeSchemaExtenderFunc(
-					func(_ context.Context, tc jsonschema.TypeContext, s *jsonschema.Schema) error {
+					func(_ context.Context, tc jsonschema.TypeContext, ts *jsonschema.TypeSchema) error {
 						if tc.Type == reflect.TypeFor[plainKind]() {
-							s.Description += ", then refined"
+							ts.Value.Description += ", then refined"
 						}
 
 						return nil
@@ -5350,9 +5365,11 @@ func TestWithTypeSchemaExtender(t *testing.T) {
 		},
 		"not called for resolver-supplied schemas": {
 			opts: []jsonschema.GenerateOption{
-				jsonschema.WithTypeSchemaFor[plainKind](&jsonschema.Schema{Type: "string"}),
+				jsonschema.WithTypeSchemaFor[plainKind](
+					jsonschema.TypeSchema{Value: &jsonschema.Schema{Type: "string"}},
+				),
 				jsonschema.WithTypeSchemaExtender(jsonschema.TypeSchemaExtenderFunc(
-					func(_ context.Context, tc jsonschema.TypeContext, _ *jsonschema.Schema) error {
+					func(_ context.Context, tc jsonschema.TypeContext, _ *jsonschema.TypeSchema) error {
 						if tc.Type == reflect.TypeFor[plainKind]() {
 							return errors.New("extender reached a replaced type")
 						}
@@ -5413,9 +5430,9 @@ func TestWithTypeSchemaExtenderTargetsValueBranch(t *testing.T) {
 	}
 
 	formatExtender := jsonschema.WithTypeSchemaExtender(jsonschema.TypeSchemaExtenderFunc(
-		func(_ context.Context, tc jsonschema.TypeContext, s *jsonschema.Schema) error {
+		func(_ context.Context, tc jsonschema.TypeContext, ts *jsonschema.TypeSchema) error {
 			if tc.Type == reflect.TypeFor[plainKind]() {
-				s.Format = "marker"
+				ts.Value.Format = "marker"
 			}
 
 			return nil
@@ -5457,8 +5474,8 @@ func TestWithTypeSchemaExtenderFor(t *testing.T) {
 
 		s, err := jsonschema.GenerateFor[doc](t.Context(),
 			jsonschema.WithTypeSchemaExtenderFor[plainKind](
-				func(_ context.Context, _ jsonschema.TypeContext, s *jsonschema.Schema) error {
-					s.Description = "extended"
+				func(_ context.Context, _ jsonschema.TypeContext, ts *jsonschema.TypeSchema) error {
+					ts.Value.Description = "extended"
 					return nil
 				}),
 		)
@@ -5485,7 +5502,7 @@ func TestWithTypeSchemaExtenderFor(t *testing.T) {
 
 		_, err := jsonschema.GenerateFor[doc](t.Context(),
 			jsonschema.WithTypeSchemaExtenderFor[plainKind](
-				func(context.Context, jsonschema.TypeContext, *jsonschema.Schema) error { return errBoom }),
+				func(context.Context, jsonschema.TypeContext, *jsonschema.TypeSchema) error { return errBoom }),
 		)
 		require.ErrorIs(t, err, errBoom)
 	})
@@ -5507,9 +5524,9 @@ func TestWithTypeSchemaExtender_AfterJSONSchemaExtend(t *testing.T) {
 
 	s, err := jsonschema.GenerateFor[extendedKind](t.Context(),
 		jsonschema.WithTypeSchemaExtender(jsonschema.TypeSchemaExtenderFunc(
-			func(_ context.Context, tc jsonschema.TypeContext, s *jsonschema.Schema) error {
+			func(_ context.Context, tc jsonschema.TypeContext, ts *jsonschema.TypeSchema) error {
 				if tc.Type == reflect.TypeFor[extendedKind]() {
-					s.Description += ", then extended"
+					ts.Value.Description += ", then extended"
 				}
 
 				return nil
@@ -5537,7 +5554,7 @@ func TestWithTypeSchemaExtender_ReceivesDraft(t *testing.T) {
 	_, err := jsonschema.GenerateFor[plainKind](t.Context(),
 		jsonschema.WithDraft(jsonschema.Draft7),
 		jsonschema.WithTypeSchemaExtender(jsonschema.TypeSchemaExtenderFunc(
-			func(_ context.Context, tc jsonschema.TypeContext, _ *jsonschema.Schema) error {
+			func(_ context.Context, tc jsonschema.TypeContext, _ *jsonschema.TypeSchema) error {
 				got = append(got, tc.Draft)
 				return nil
 			},
@@ -5561,7 +5578,7 @@ func TestWithTypeSchemaExtender_Error(t *testing.T) {
 
 	_, err := jsonschema.GenerateFor[plainKind](t.Context(),
 		jsonschema.WithTypeSchemaExtender(jsonschema.TypeSchemaExtenderFunc(
-			func(context.Context, jsonschema.TypeContext, *jsonschema.Schema) error { return errBoom },
+			func(context.Context, jsonschema.TypeContext, *jsonschema.TypeSchema) error { return errBoom },
 		)),
 	)
 	require.ErrorIs(t, err, errBoom)
@@ -5582,12 +5599,12 @@ type plainKind int
 // stringerProvider resolves every fmt.Stringer to a plain string schema.
 func stringerProvider() jsonschema.TypeSchemaProvider {
 	return jsonschema.TypeSchemaProviderFunc(
-		func(_ context.Context, tc jsonschema.TypeContext) (*jsonschema.Schema, error) {
+		func(_ context.Context, tc jsonschema.TypeContext) (jsonschema.TypeSchema, error) {
 			if !tc.Type.Implements(reflect.TypeFor[fmt.Stringer]()) {
-				return nil, jsonschema.ErrTypeNotHandled
+				return jsonschema.TypeSchema{}, jsonschema.ErrTypeNotHandled
 			}
 
-			return &jsonschema.Schema{Type: "string"}, nil
+			return jsonschema.TypeSchema{Value: &jsonschema.Schema{Type: "string"}}, nil
 		},
 	)
 }
@@ -5620,7 +5637,9 @@ func TestWithTypeSchemaProvider(t *testing.T) {
 		"later WithTypeSchema wins over earlier provider": {
 			opts: []jsonschema.GenerateOption{
 				jsonschema.WithTypeSchemaProvider(stringerProvider()),
-				jsonschema.WithTypeSchemaFor[stringerKind](&jsonschema.Schema{Type: "string", Format: "uri"}),
+				jsonschema.WithTypeSchemaFor[stringerKind](
+					jsonschema.TypeSchema{Value: &jsonschema.Schema{Type: "string", Format: "uri"}},
+				),
 			},
 			want: `{
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -5635,7 +5654,9 @@ func TestWithTypeSchemaProvider(t *testing.T) {
 		},
 		"later provider wins over earlier WithTypeSchema": {
 			opts: []jsonschema.GenerateOption{
-				jsonschema.WithTypeSchemaFor[stringerKind](&jsonschema.Schema{Type: "string", Format: "uri"}),
+				jsonschema.WithTypeSchemaFor[stringerKind](
+					jsonschema.TypeSchema{Value: &jsonschema.Schema{Type: "string", Format: "uri"}},
+				),
 				jsonschema.WithTypeSchemaProvider(stringerProvider()),
 			},
 			want: `{
@@ -5652,12 +5673,12 @@ func TestWithTypeSchemaProvider(t *testing.T) {
 		"nil schema with nil error is unrestricted": {
 			opts: []jsonschema.GenerateOption{
 				jsonschema.WithTypeSchemaProvider(jsonschema.TypeSchemaProviderFunc(
-					func(_ context.Context, tc jsonschema.TypeContext) (*jsonschema.Schema, error) {
+					func(_ context.Context, tc jsonschema.TypeContext) (jsonschema.TypeSchema, error) {
 						if tc.Type != reflect.TypeFor[stringerKind]() {
-							return nil, jsonschema.ErrTypeNotHandled
+							return jsonschema.TypeSchema{}, jsonschema.ErrTypeNotHandled
 						}
 
-						return nil, nil //nolint:nilnil // The unrestricted answer.
+						return jsonschema.TypeSchema{}, nil
 					},
 				)),
 			},
@@ -5705,8 +5726,8 @@ func TestWithTypeSchema_LastRegistrationWins(t *testing.T) {
 	t.Parallel()
 
 	s, err := jsonschema.GenerateFor[plainKind](t.Context(),
-		jsonschema.WithTypeSchemaFor[plainKind](&jsonschema.Schema{Type: "string"}),
-		jsonschema.WithTypeSchemaFor[plainKind](&jsonschema.Schema{Type: "number"}),
+		jsonschema.WithTypeSchemaFor[plainKind](jsonschema.TypeSchema{Value: &jsonschema.Schema{Type: "string"}}),
+		jsonschema.WithTypeSchemaFor[plainKind](jsonschema.TypeSchema{Value: &jsonschema.Schema{Type: "number"}}),
 	)
 	require.NoError(t, err)
 
@@ -5716,47 +5737,6 @@ func TestWithTypeSchema_LastRegistrationWins(t *testing.T) {
 		"$schema": "https://json-schema.org/draft/2020-12/schema",
 		"type": "number"
 	}`, string(got))
-}
-
-// TestWithTypeSchema_NilUnregisters proves a nil schema restores the type's
-// default resolution: earlier exact registrations for the type are removed,
-// while predicate providers still apply.
-func TestWithTypeSchema_NilUnregisters(t *testing.T) {
-	t.Parallel()
-
-	t.Run("removes earlier exact registration", func(t *testing.T) {
-		t.Parallel()
-
-		s, err := jsonschema.GenerateFor[plainKind](t.Context(),
-			jsonschema.WithTypeSchemaFor[plainKind](&jsonschema.Schema{Type: "string"}),
-			jsonschema.WithTypeSchemaFor[plainKind](nil),
-		)
-		require.NoError(t, err)
-
-		got, err := json.Marshal(s)
-		require.NoError(t, err)
-		assert.JSONEq(t, `{
-			"$schema": "https://json-schema.org/draft/2020-12/schema",
-			"type": "integer"
-		}`, string(got))
-	})
-
-	t.Run("leaves predicate providers in place", func(t *testing.T) {
-		t.Parallel()
-
-		s, err := jsonschema.GenerateFor[stringerKind](t.Context(),
-			jsonschema.WithTypeSchemaProvider(stringerProvider()),
-			jsonschema.WithTypeSchemaFor[stringerKind](nil),
-		)
-		require.NoError(t, err)
-
-		got, err := json.Marshal(s)
-		require.NoError(t, err)
-		assert.JSONEq(t, `{
-			"$schema": "https://json-schema.org/draft/2020-12/schema",
-			"type": "string"
-		}`, string(got))
-	})
 }
 
 // TestWithTypeSchemaProvider_ReceivesDraft proves the TypeContext carries the
@@ -5777,9 +5757,9 @@ func TestWithTypeSchemaProvider_ReceivesDraft(t *testing.T) {
 			_, err := jsonschema.GenerateFor[plainKind](t.Context(),
 				jsonschema.WithDraft(draft),
 				jsonschema.WithTypeSchemaProvider(jsonschema.TypeSchemaProviderFunc(
-					func(_ context.Context, tc jsonschema.TypeContext) (*jsonschema.Schema, error) {
+					func(_ context.Context, tc jsonschema.TypeContext) (jsonschema.TypeSchema, error) {
 						got = append(got, tc.Draft)
-						return nil, jsonschema.ErrTypeNotHandled
+						return jsonschema.TypeSchema{}, jsonschema.ErrTypeNotHandled
 					},
 				)),
 			)
@@ -5812,12 +5792,12 @@ func TestWithTypeSchemaProvider_EmbeddedComposition(t *testing.T) {
 
 	s, err := jsonschema.GenerateFor[doc](t.Context(),
 		jsonschema.WithTypeSchemaProvider(jsonschema.TypeSchemaProviderFunc(
-			func(_ context.Context, tc jsonschema.TypeContext) (*jsonschema.Schema, error) {
+			func(_ context.Context, tc jsonschema.TypeContext) (jsonschema.TypeSchema, error) {
 				if tc.Type != reflect.TypeFor[base]() {
-					return nil, jsonschema.ErrTypeNotHandled
+					return jsonschema.TypeSchema{}, jsonschema.ErrTypeNotHandled
 				}
 
-				return &jsonschema.Schema{Type: "object"}, nil
+				return jsonschema.TypeSchema{Value: &jsonschema.Schema{Type: "object"}}, nil
 			},
 		)),
 	)
@@ -5848,12 +5828,12 @@ func TestWithTypeSchemaProvider_Error(t *testing.T) {
 
 	failFor := func(target reflect.Type) jsonschema.GenerateOption {
 		return jsonschema.WithTypeSchemaProvider(jsonschema.TypeSchemaProviderFunc(
-			func(_ context.Context, tc jsonschema.TypeContext) (*jsonschema.Schema, error) {
+			func(_ context.Context, tc jsonschema.TypeContext) (jsonschema.TypeSchema, error) {
 				if tc.Type == target {
-					return nil, errLoad
+					return jsonschema.TypeSchema{}, errLoad
 				}
 
-				return nil, jsonschema.ErrTypeNotHandled
+				return jsonschema.TypeSchema{}, jsonschema.ErrTypeNotHandled
 			},
 		))
 	}
@@ -5917,12 +5897,12 @@ func TestWithTypeSchemaProvider_SchemaUnaliased(t *testing.T) {
 
 	shared := &jsonschema.Schema{Type: "string", Enum: []any{"a"}}
 	provider := jsonschema.TypeSchemaProviderFunc(
-		func(_ context.Context, tc jsonschema.TypeContext) (*jsonschema.Schema, error) {
+		func(_ context.Context, tc jsonschema.TypeContext) (jsonschema.TypeSchema, error) {
 			if tc.Type != reflect.TypeFor[plainKind]() {
-				return nil, jsonschema.ErrTypeNotHandled
+				return jsonschema.TypeSchema{}, jsonschema.ErrTypeNotHandled
 			}
 
-			return shared, nil
+			return jsonschema.TypeSchema{Value: shared}, nil
 		},
 	)
 
@@ -6185,11 +6165,13 @@ type ProviderEmbed struct {
 	Field1 string `json:"field1"`
 }
 
-func (ProviderEmbed) JSONSchema(context.Context, jsonschema.TypeContext) (*jsonschema.Schema, error) {
-	return &jsonschema.Schema{
-		Type: "object",
-		Properties: map[string]*jsonschema.Schema{
-			"field1": {Type: "string"},
+func (ProviderEmbed) JSONSchema(context.Context, jsonschema.TypeContext) (jsonschema.TypeSchema, error) {
+	return jsonschema.TypeSchema{
+		Value: &jsonschema.Schema{
+			Type: "object",
+			Properties: map[string]*jsonschema.Schema{
+				"field1": {Type: "string"},
+			},
 		},
 	}, nil
 }
@@ -6264,7 +6246,7 @@ func TestGenerateFor_EmbeddedInterfaceLeafField(t *testing.T) {
 // SchemaInterface is an interface that implements JSONSchemaProvider.
 type SchemaInterface interface {
 	fmt.Stringer
-	JSONSchema(ctx context.Context, tc jsonschema.TypeContext) (*jsonschema.Schema, error)
+	JSONSchema(ctx context.Context, tc jsonschema.TypeContext) (jsonschema.TypeSchema, error)
 }
 
 type HasProviderInterface struct {
@@ -6540,7 +6522,7 @@ func TestGenerateFor_EmbeddedStructWithTypeSchemaOverride(t *testing.T) {
 	s, err := jsonschema.GenerateFor[HasOverriddenEmbed](t.Context(),
 		jsonschema.WithTypeSchema(
 			reflect.TypeFor[OverriddenEmbed](),
-			&jsonschema.Schema{Type: "string", Format: "custom"},
+			jsonschema.TypeSchema{Value: &jsonschema.Schema{Type: "string", Format: "custom"}},
 		),
 	)
 	require.NoError(t, err)
@@ -6628,7 +6610,7 @@ func TestGenerateFor_EmbeddedWithTypeSchemaOverride(t *testing.T) {
 	s, err := jsonschema.GenerateFor[HasWithTypeSchemaEmbed](t.Context(),
 		jsonschema.WithTypeSchema(
 			reflect.TypeFor[OverrideTarget](),
-			&jsonschema.Schema{Type: "string", Format: "custom"},
+			jsonschema.TypeSchema{Value: &jsonschema.Schema{Type: "string", Format: "custom"}},
 		),
 	)
 	require.NoError(t, err)
@@ -6813,11 +6795,13 @@ type OptionalProviderEmbed struct {
 	Req string `json:"req"`
 }
 
-func (OptionalProviderEmbed) JSONSchema(context.Context, jsonschema.TypeContext) (*jsonschema.Schema, error) {
-	return &jsonschema.Schema{
-		Type:       "object",
-		Properties: map[string]*jsonschema.Schema{"req": {Type: "string"}},
-		Required:   []string{"req"},
+func (OptionalProviderEmbed) JSONSchema(context.Context, jsonschema.TypeContext) (jsonschema.TypeSchema, error) {
+	return jsonschema.TypeSchema{
+		Value: &jsonschema.Schema{
+			Type:       "object",
+			Properties: map[string]*jsonschema.Schema{"req": {Type: "string"}},
+			Required:   []string{"req"},
+		},
 	}, nil
 }
 

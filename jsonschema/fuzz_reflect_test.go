@@ -111,10 +111,12 @@ type ProviderObject struct {
 	Kind string `json:"kind"`
 }
 
-func (ProviderObject) JSONSchema(context.Context, jsonschema.TypeContext) (*jsonschema.Schema, error) {
-	return &jsonschema.Schema{
-		Type:       "object",
-		Properties: map[string]*jsonschema.Schema{"kind": {Type: "string"}},
+func (ProviderObject) JSONSchema(context.Context, jsonschema.TypeContext) (jsonschema.TypeSchema, error) {
+	return jsonschema.TypeSchema{
+		Value: &jsonschema.Schema{
+			Type:       "object",
+			Properties: map[string]*jsonschema.Schema{"kind": {Type: "string"}},
+		},
 	}, nil
 }
 

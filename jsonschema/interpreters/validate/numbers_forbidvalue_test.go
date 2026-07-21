@@ -60,7 +60,7 @@ func TestValidateInterpreter_NeWithForeignNotSiblings(t *testing.T) {
 
 			s, err := jsonschema.GenerateFor[Form](t.Context(),
 				jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
-				jsonschema.WithTypeSchemaFor[forbiddenString](tc.override),
+				jsonschema.WithTypeSchemaFor[forbiddenString](jsonschema.TypeSchema{Value: tc.override}),
 			)
 			require.NoError(t, err)
 

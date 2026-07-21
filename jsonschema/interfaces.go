@@ -12,14 +12,18 @@ import (
 
 // JSONSchemaProvider allows a type to provide its own schema, bypassing
 // automatic generation entirely. When a type implements JSONSchemaProvider,
-// the returned schema replaces reflection-based generation for that type.
-// If JSONSchema returns a nil schema and a nil error, the type is treated as
-// unrestricted ({}). A non-nil error aborts generation, matching
-// [JSONSchemaExtender]; this lets a provider report that it cannot produce
-// its schema, as when it loads a schema document. A panic in the method
-// is still recovered and wrapped with [ErrProviderPanic], as a backstop for
-// genuine bugs such as dereferencing a nil pointer field on the zero value
-// the method is invoked against.
+// the returned [TypeSchema] replaces reflection-based generation for that type.
+// A zero TypeSchema with a nil error treats the type as unrestricted ({}); a
+// non-nil error aborts generation, matching [JSONSchemaExtender]. This lets a
+// provider report that it cannot produce its schema, as when it loads a schema
+// document. A panic in the method is still recovered and wrapped with
+// [ErrProviderPanic], as a backstop for genuine bugs such as dereferencing a
+// nil pointer field on the zero value the method is invoked against.
+//
+// The [TypeSchema] carries the bare value schema plus its intent (a [Nullability]
+// stance, an opaque [TypeSchema.Verbatim] escape hatch, or a [TypeSchema.Ref] to a
+// named type), so a provider declares whether its schema admits null rather than
+// hand-shaping an anyOf[value, null] wrapper the generator would have to recognize.
 //
 // The method receives the same arguments as its registered counterpart,
 // [TypeSchemaProvider.SchemaForType]: the context of the Generate call in
@@ -28,19 +32,21 @@ import (
 // can emit draft-appropriate keywords). An implementation needing neither
 // ignores them.
 type JSONSchemaProvider interface {
-	JSONSchema(ctx context.Context, tc TypeContext) (*Schema, error)
+	JSONSchema(ctx context.Context, tc TypeContext) (TypeSchema, error)
 }
 
 // JSONSchemaExtender allows a type to modify its auto-generated schema.
 // The method is called after the schema has been generated via reflection,
-// allowing the type to add, remove, or modify any fields. A non-nil error
-// aborts generation, matching the registered [TypeSchemaExtender]
-// counterpart, whose [TypeSchemaExtender.ExtendSchemaForType] arguments the
-// method shares: the context of the Generate call in effect and a
-// [TypeContext] carrying the target [Draft]. An implementation needing
-// neither ignores them.
+// allowing the type to add, remove, or modify any fields. It receives a
+// [TypeSchema] whose [TypeSchema.Value] is the reflection-generated schema to
+// mutate in place; an extender may also set [TypeSchema.Nullable] to declare a
+// nullability stance rather than hand-shaping a null wrapper. A non-nil error
+// aborts generation, matching the registered [TypeSchemaExtender] counterpart,
+// whose [TypeSchemaExtender.ExtendSchemaForType] arguments the method shares:
+// the context of the Generate call in effect and a [TypeContext] carrying the
+// target [Draft]. An implementation needing neither ignores them.
 type JSONSchemaExtender interface {
-	JSONSchemaExtend(ctx context.Context, tc TypeContext, schema *Schema) error
+	JSONSchemaExtend(ctx context.Context, tc TypeContext, ts *TypeSchema) error
 }
 
 // TypeContext provides context about the Go type whose schema a
@@ -54,6 +60,48 @@ type TypeContext struct {
 	// draft-appropriate keywords (for example dependentRequired under
 	// [Draft2020] versus dependencies under [Draft7]).
 	Draft Draft
+}
+
+// Nullability is a type-level hook's declared stance on whether its schema
+// admits a JSON null, replacing the practice of hand-shaping an anyOf[value,
+// null] wrapper the generator then has to recognize.
+type Nullability uint8
+
+const (
+	// NullabilityUnset defers to reflection: a pointer or interface position is
+	// nullable, everything else is not (the pre-envelope default).
+	NullabilityUnset Nullability = iota
+	// Nullable makes every occurrence of the type admit null, even a non-pointer
+	// field.
+	Nullable
+	// NonNullable makes no occurrence admit null, even a pointer field.
+	NonNullable
+)
+
+// TypeSchema is what a type-level hook declares for a Go type: a bare value
+// schema plus its intent, so generation applies the null encoding and resolves
+// references itself instead of reverse-engineering a pre-shaped schema. Exactly
+// one of Value, Verbatim, or Ref is meaningful; setting more than one is
+// [ErrConflictingTypeSchema].
+type TypeSchema struct {
+	// Value is the bare value schema (no null wrapper). Generation applies the
+	// null encoding per Nullable and each occurrence's pointer-ness. A zero
+	// TypeSchema (nil Value, NullabilityUnset, nil Verbatim/Ref) marks the type
+	// unrestricted ({}).
+	Value *Schema
+	// Verbatim is an opaque escape hatch: the schema is emitted exactly as given,
+	// with no null encoding applied. Use it for a fully-formed schema (e.g. one
+	// loaded from a document). Reachability still scans it for raw $ref strings.
+	Verbatim *Schema
+	// Ref declares that this schema is a reference to the named Go type, so
+	// generation keeps that type's definition reachable through a node-backed
+	// edge instead of a payload $ref-string scan. The named type must be
+	// extractable (a struct or a type extracted to $defs) so the reference stays
+	// a real $ref edge.
+	Ref reflect.Type
+	// Nullable is the type's null-admission stance (see [Nullability]). It
+	// decorates Value (and Ref); it is ignored for Verbatim.
+	Nullable Nullability
 }
 
 // TypeSchemaProvider supplies schemas for Go types it recognizes during
@@ -70,11 +118,17 @@ type TypeContext struct {
 // SchemaForType returns [ErrTypeNotHandled] (or an error wrapping it) when
 // the provider does not handle the type in tc, passing resolution to the
 // next provider and then to the rest of the chain, the way a [RefResolver]
-// answers [ErrNotResolved]. Returning a nil schema with a nil error marks
-// the type unrestricted ({}), mirroring [JSONSchemaProvider]. A returned
-// schema is copied before use with the same discipline [WithTypeSchema]
-// documents, so one schema value may be shared across types, calls, and
-// goroutines.
+// answers [ErrNotResolved]. Because it returns a [TypeSchema] by value, a
+// zero TypeSchema with a nil error marks the type unrestricted ({}), and
+// decline is only via the error -- there is no nil-schema ambiguity. The
+// TypeSchema's Value (or Verbatim) is copied before use with the same
+// discipline [WithTypeSchema] documents, so one schema value may be shared
+// across types, calls, and goroutines.
+//
+// The [TypeSchema] carries the bare value schema plus its intent (a
+// [Nullability] stance, an opaque [TypeSchema.Verbatim], or a [TypeSchema.Ref]
+// to a named type), so generation applies the null encoding and resolves
+// references itself instead of recognizing a pre-shaped wrapper.
 //
 // Any other non-nil error aborts generation. This lets a provider report
 // that it recognizes the type but cannot produce its schema, such as on an
@@ -86,15 +140,15 @@ type TypeContext struct {
 // A provider may be consulted several times for the same type within one
 // generation run, so SchemaForType must be deterministic.
 type TypeSchemaProvider interface {
-	SchemaForType(ctx context.Context, tc TypeContext) (*Schema, error)
+	SchemaForType(ctx context.Context, tc TypeContext) (TypeSchema, error)
 }
 
 // TypeSchemaProviderFunc adapts a bare providing function to a
 // [TypeSchemaProvider], following [net/http.HandlerFunc].
-type TypeSchemaProviderFunc func(ctx context.Context, tc TypeContext) (*Schema, error)
+type TypeSchemaProviderFunc func(ctx context.Context, tc TypeContext) (TypeSchema, error)
 
 // SchemaForType calls f.
-func (f TypeSchemaProviderFunc) SchemaForType(ctx context.Context, tc TypeContext) (*Schema, error) {
+func (f TypeSchemaProviderFunc) SchemaForType(ctx context.Context, tc TypeContext) (TypeSchema, error) {
 	return f(ctx, tc)
 }
 
@@ -110,20 +164,22 @@ func (f TypeSchemaProviderFunc) SchemaForType(ctx context.Context, tc TypeContex
 // runs (after comment extraction, before $defs extraction) and after the
 // type's own JSONSchemaExtend. Like JSONSchemaExtender, it is not called for
 // types whose schema a registered provider or [JSONSchemaProvider] supplied.
-// It modifies s in place; an error aborts generation. An extender that does
-// not recognize the type in tc leaves s untouched and returns nil. The
-// context follows the [TypeSchemaProvider.SchemaForType] contract.
+// It modifies ts.Value in place (and may set ts.Nullable to declare a
+// nullability stance, symmetric with a provider, so it never needs to emit a
+// raw null wrapper); an error aborts generation. An extender that does not
+// recognize the type in tc leaves ts untouched and returns nil. The context
+// follows the [TypeSchemaProvider.SchemaForType] contract.
 type TypeSchemaExtender interface {
-	ExtendSchemaForType(ctx context.Context, tc TypeContext, s *Schema) error
+	ExtendSchemaForType(ctx context.Context, tc TypeContext, ts *TypeSchema) error
 }
 
 // TypeSchemaExtenderFunc adapts a bare extending function to a
 // [TypeSchemaExtender], following [net/http.HandlerFunc].
-type TypeSchemaExtenderFunc func(ctx context.Context, tc TypeContext, s *Schema) error
+type TypeSchemaExtenderFunc func(ctx context.Context, tc TypeContext, ts *TypeSchema) error
 
 // ExtendSchemaForType calls f.
-func (f TypeSchemaExtenderFunc) ExtendSchemaForType(ctx context.Context, tc TypeContext, s *Schema) error {
-	return f(ctx, tc, s)
+func (f TypeSchemaExtenderFunc) ExtendSchemaForType(ctx context.Context, tc TypeContext, ts *TypeSchema) error {
+	return f(ctx, tc, ts)
 }
 
 // DescriptionProvider supplies descriptions for types and struct fields during

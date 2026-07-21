@@ -634,9 +634,11 @@ func TestValidateInterpreter_OneOfConflictsWithElementEnum(t *testing.T) {
 
 	_, err := jsonschema.GenerateFor[Config](t.Context(),
 		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
-		jsonschema.WithTypeSchemaFor[string](&jsonschema.Schema{
-			Type: "string",
-			Enum: []any{"red", "green", "blue"},
+		jsonschema.WithTypeSchemaFor[string](jsonschema.TypeSchema{
+			Value: &jsonschema.Schema{
+				Type: "string",
+				Enum: []any{"red", "green", "blue"},
+			},
 		}),
 	)
 	require.Error(t, err)
@@ -644,9 +646,9 @@ func TestValidateInterpreter_OneOfConflictsWithElementEnum(t *testing.T) {
 }
 
 // TestValidateInterpreter_OneOfOnOverrideWrapperElement pins that oneof on a
-// slice whose element type's override supplies its own anyOf[value, null]
-// wrapper relocates the enum onto the wrapper's value branch, keeping the null
-// the override admits valid.
+// slice whose element type declares a Nullable stance relocates the enum onto
+// the generated wrapper's value branch, keeping the null the stance admits
+// valid.
 func TestValidateInterpreter_OneOfOnOverrideWrapperElement(t *testing.T) {
 	t.Parallel()
 
@@ -658,24 +660,25 @@ func TestValidateInterpreter_OneOfOnOverrideWrapperElement(t *testing.T) {
 
 	s, err := jsonschema.GenerateFor[Config](t.Context(),
 		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
-		jsonschema.WithTypeSchemaFor[Color](&jsonschema.Schema{
-			AnyOf: []*jsonschema.Schema{{Type: "string"}, {Type: "null"}},
+		jsonschema.WithTypeSchemaFor[Color](jsonschema.TypeSchema{
+			Value:    &jsonschema.Schema{Type: "string"},
+			Nullable: jsonschema.Nullable,
 		}),
 	)
 	require.NoError(t, err)
 
 	items := s.Properties["colors"].Items
 	require.NotNil(t, items)
-	assert.Nil(t, items.Enum, "the enum must not sit beside the authored wrapper")
+	assert.Nil(t, items.Enum, "the enum must not sit beside the wrapper")
 	require.Len(t, items.AnyOf, 2)
 	assert.Equal(t, []any{"red", "green"}, items.AnyOf[0].Enum,
 		"the enum lands on the wrapper's value branch")
 }
 
 // TestValidateInterpreter_OneOfConflictsWithWrapperElementEnum pins that
-// relocating a oneof enum onto an override-supplied wrapper's value branch
-// reports a conflict when that branch already carries its own enum, rather
-// than silently discarding either.
+// relocating a oneof enum onto a Nullable-stance element's value branch reports
+// a conflict when that branch already carries its own enum, rather than silently
+// discarding either.
 func TestValidateInterpreter_OneOfConflictsWithWrapperElementEnum(t *testing.T) {
 	t.Parallel()
 
@@ -687,11 +690,12 @@ func TestValidateInterpreter_OneOfConflictsWithWrapperElementEnum(t *testing.T) 
 
 	_, err := jsonschema.GenerateFor[Config](t.Context(),
 		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
-		jsonschema.WithTypeSchemaFor[Color](&jsonschema.Schema{
-			AnyOf: []*jsonschema.Schema{
-				{Type: "string", Enum: []any{"red", "green", "blue"}},
-				{Type: "null"},
+		jsonschema.WithTypeSchemaFor[Color](jsonschema.TypeSchema{
+			Value: &jsonschema.Schema{
+				Type: "string",
+				Enum: []any{"red", "green", "blue"},
 			},
+			Nullable: jsonschema.Nullable,
 		}),
 	)
 	require.Error(t, err)

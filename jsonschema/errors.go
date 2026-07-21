@@ -117,6 +117,13 @@ var (
 	// marshal to a JSON object, or the generated root resolves to a bare $ref
 	// with no properties to seed.
 	ErrInvalidDefaultsInstance = errors.New("invalid defaults instance")
+
+	// ErrConflictingTypeSchema is returned by [Generate] when a type-level hook
+	// declares a [TypeSchema] with more than one of Value, Verbatim, or Ref set.
+	// The three are mutually exclusive ways to describe a type's schema, so
+	// setting two at once is a caller bug surfaced here rather than resolved by a
+	// silent precedence that would hide it.
+	ErrConflictingTypeSchema = errors.New("conflicting type schema")
 )
 
 // ValidationError represents a JSON Schema validation failure.

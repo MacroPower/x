@@ -99,7 +99,7 @@ func TestGenerateFor_EmbeddedInterfaceWithTypeSchemaOverride(t *testing.T) {
 
 	s, err := jsonschema.GenerateFor[hasLeafIface](
 		t.Context(),
-		jsonschema.WithTypeSchemaFor[LeafIface](leafIfaceOverride()),
+		jsonschema.WithTypeSchemaFor[LeafIface](jsonschema.TypeSchema{Value: leafIfaceOverride()}),
 	)
 	require.NoError(t, err)
 
@@ -151,7 +151,7 @@ func TestGenerateFor_InterfaceFieldTypeSchemaAdmitsNull(t *testing.T) {
 
 	s, err := jsonschema.GenerateFor[doc](
 		t.Context(),
-		jsonschema.WithTypeSchemaFor[LeafIface](leafIfaceOverride()),
+		jsonschema.WithTypeSchemaFor[LeafIface](jsonschema.TypeSchema{Value: leafIfaceOverride()}),
 	)
 	require.NoError(t, err)
 

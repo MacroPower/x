@@ -56,6 +56,8 @@
 //     an integer type, or an [encoding.TextMarshaler].
 //   - [ErrProviderPanic]: returned when a [JSONSchemaProvider] or
 //     [JSONSchemaExtender] method panics; the panic is recovered and wrapped.
+//   - [ErrConflictingTypeSchema]: returned when a type-level hook declares a
+//     [TypeSchema] with more than one of Value, Verbatim, or Ref set.
 //   - [ErrInvalidDefaultsInstance]: returned when the [WithDefaultsFrom]
 //     instance does not match the generated root type or does not marshal to
 //     a JSON object.
@@ -76,7 +78,9 @@
 //   - [WithDescriptionProvider] sets the [DescriptionProvider] used as the source of
 //     type and field descriptions; [NewGoCommentProvider] constructs the
 //     AST-backed provider that extracts Go doc comments.
-//   - [WithTypeSchema] overrides the schema for a specific Go type;
+//   - [WithTypeSchema] overrides the schema for a specific Go type with a
+//     [TypeSchema] envelope (a bare value plus a [Nullability] stance, or a
+//     [TypeSchema.Verbatim] escape hatch, or a [TypeSchema.Ref] alias);
 //     [WithTypeSchemaFor] is its generic form for statically known types.
 //   - [WithTypeSchemaProvider] registers a [TypeSchemaProvider] that supplies
 //     schemas for whole families of types by predicate, sharing the
@@ -123,14 +127,14 @@
 // Across every entry point, an option given a nil interface or pointer value
 // restores the default behavior: [WithNamer] the built-in namer,
 // [WithDescriptionProvider] no descriptions, [WithRefResolver] local-only ref
-// resolution, [WithRefFallback] fatal expansion failures, [WithDefaultsFrom]
+// resolution, [WithRefFallback] fatal expansion failures, and [WithDefaultsFrom]
 // no seeded defaults (a typed nil pointer is a value, not a reset: it
-// marshals to JSON null and fails as a non-object instance), and
-// [WithTypeSchema] with a nil schema the type's default resolution
-// (unregistering earlier exact registrations for the type). The exception is
+// marshals to JSON null and fails as a non-object instance). The exception is
 // additive registrations that a nil cannot identify anything to remove from
 // ([WithTagInterpreter], [WithTypeSchemaProvider], [WithTypeSchemaExtender],
-// [WithFormatValidator]); these ignore a nil registration.
+// [WithFormatValidator]); these ignore a nil registration. [WithTypeSchema]
+// takes a [TypeSchema] value, not a pointer: a zero [TypeSchema] marks the type
+// unrestricted ({}), so it is not a removal idiom.
 //
 // # Type Mapping
 //
@@ -225,6 +229,21 @@
 // Both methods return an error, which aborts generation, for an
 // implementation that cannot produce or adjust its schema; a panic is still
 // recovered and wrapped with [ErrProviderPanic] as a backstop.
+//
+// A type-level hook declares its intent through a [TypeSchema] envelope rather
+// than a pre-shaped schema, so generation applies the null encoding and resolves
+// references itself. A provider (or [WithTypeSchema]) fills exactly one of
+// [TypeSchema.Value] (a bare value schema, decorated by a [Nullability] stance
+// and the occurrence's pointer-ness), [TypeSchema.Verbatim] (emitted exactly as
+// authored, no null encoding), or [TypeSchema.Ref] (a whole-type alias to another
+// Go type, kept reachable through a node-backed $ref edge); setting more than one
+// is [ErrConflictingTypeSchema]. A zero TypeSchema marks the type unrestricted
+// ({}). The [Nullability] stance ([Nullable]/[NonNullable]) makes every
+// occurrence of the type admit null (or none), replacing a hand-shaped
+// anyOf[value, null] wrapper the generator would otherwise have to recognize. An
+// extender receives the same envelope with [TypeSchema.Value] set to the
+// reflection-generated schema to mutate in place, and may set [TypeSchema.Nullable]
+// to declare a stance too.
 //
 // When a registered provider ([WithTypeSchemaProvider] or [WithTypeSchema]) or
 // [JSONSchemaProvider] provides the schema, [JSONSchemaExtender] is not

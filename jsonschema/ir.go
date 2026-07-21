@@ -59,7 +59,11 @@ type node struct {
 	kind nodeKind
 	// Nullable is the single deferred null decision; base selects the encoding
 	// render applies when it is set.
-	nullable      bool
+	nullable bool
+	// Verbatim marks a kindValue leaf whose payload a type-level hook declared
+	// through [TypeSchema.Verbatim]: it is emitted exactly as authored, so render
+	// and reconcile skip the null encoding for it entirely.
+	verbatim      bool
 	isField       bool // gates the reconcile-time nullable-field bound clearing
 	boundAuthored bool // a jsonschema-tag numeric bound was authored on the field
 	// The dropBounds flag records that a tag interpreter pinned an element's value
@@ -101,6 +105,12 @@ type defEntry struct {
 	rendered *Schema // memoized render(body); the $defs value and null-dedup target
 	baseName string  // namer output, pre-disambiguation; the provisional $ref token
 	name     string  // final $defs key; set by assignDefNames before render
+	// Nullability is the type's declared null-admission stance, recorded once at
+	// definition time and combined with each reference's pointer-ness in refNode.
+	// The stance is a per-type property, so recording it on the entry (rather than
+	// on the shared body) keeps it applied consistently at every reference and
+	// leaves the def body bare. It is NullabilityUnset for a type with no stance.
+	nullability Nullability
 	// Rendering guards re-entrancy while body is mid-render: a self- or mutually
 	// recursive body reaching its own ref sees rendered still nil and keeps its
 	// null wrapper rather than deduping against an unfinished body.
@@ -175,29 +185,36 @@ func allocCanvasTree(n *node, draft Draft) {
 	n.authored = a
 }
 
-// refNode builds a kindRef node linking to e and carrying nullable. Its payload
-// holds the provisional $ref string (the pre-disambiguation name), so a
-// build-time interpreter or extender reading .Ref sees a real reference; render
-// re-emits the final name via renderRef and grafts any siblings.
-func (g *generator) refNode(e *defEntry, nullable bool) *node {
+// refNode builds a kindRef node linking to e, its nullability the type's
+// recorded stance combined with the occurrence's pointer-ness (ptrNullable): a
+// pointer occurrence of a NonNullable type still admits no null, and a
+// non-pointer occurrence of a Nullable type does. Its payload holds the
+// provisional $ref string (the pre-disambiguation name), so a build-time
+// interpreter or extender reading .Ref sees a real reference; render re-emits
+// the final name via renderRef and grafts any siblings.
+func (g *generator) refNode(e *defEntry, ptrNullable bool) *node {
 	return &node{
 		kind:     kindRef,
 		def:      e,
-		nullable: nullable,
+		nullable: combineNullable(e.nullability, ptrNullable),
 		payload:  &Schema{Ref: g.profile.refPrefix() + e.baseName},
 	}
 }
 
-// defineType fills t's def entry with body (if still a placeholder) and returns
-// a reference node carrying nullable. The body is always the bare value node,
-// and every reference keeps its own nullable bit.
-func (g *generator) defineType(t reflect.Type, body *node, nullable bool) *node {
+// defineType fills t's def entry with body (if still a placeholder), records the
+// type's nullability stance on the entry, and returns a reference node. The body
+// is always the bare value node; the stance lives on the entry and is combined
+// with each reference's pointer-ness in refNode, so $defs nullability stays
+// order-independent.
+func (g *generator) defineType(t reflect.Type, body *node, stance Nullability, ptrNullable bool) *node {
 	e := g.newDefEntry(t)
+	e.nullability = stance
+
 	if e.body == nil {
 		e.body = body
 	}
 
-	return g.refNode(e, nullable)
+	return g.refNode(e, ptrNullable)
 }
 
 // walkNodes visits every node reachable from root, following items, props,

@@ -22,12 +22,12 @@ type extenderWithDefs struct {
 	Value string `json:"value"`
 }
 
-func (extenderWithDefs) JSONSchemaExtend(_ context.Context, _ jsonschema.TypeContext, s *jsonschema.Schema) error {
-	if s.Defs == nil {
-		s.Defs = map[string]*jsonschema.Schema{}
+func (extenderWithDefs) JSONSchemaExtend(_ context.Context, _ jsonschema.TypeContext, ts *jsonschema.TypeSchema) error {
+	if ts.Value.Defs == nil {
+		ts.Value.Defs = map[string]*jsonschema.Schema{}
 	}
 
-	s.Defs["customDef"] = &jsonschema.Schema{Type: "string"}
+	ts.Value.Defs["customDef"] = &jsonschema.Schema{Type: "string"}
 
 	return nil
 }
@@ -1216,9 +1216,9 @@ func TestTagEnumOnSequenceFields(t *testing.T) {
 	t.Run("slice of override wrapper elements", func(t *testing.T) {
 		t.Parallel()
 
-		// The element type's override supplies its own anyOf[value, null]
-		// wrapper; the enum must relocate onto the value branch so the null the
-		// override admits stays valid.
+		// The element type declares a Nullable stance; the enum must relocate onto
+		// the generated wrapper's value branch so the null the stance admits stays
+		// valid.
 		type Day string
 
 		type T struct {
@@ -1226,15 +1226,16 @@ func TestTagEnumOnSequenceFields(t *testing.T) {
 		}
 
 		s, err := jsonschema.GenerateFor[T](t.Context(),
-			jsonschema.WithTypeSchemaFor[Day](&jsonschema.Schema{
-				AnyOf: []*jsonschema.Schema{{Type: "string"}, {Type: "null"}},
+			jsonschema.WithTypeSchemaFor[Day](jsonschema.TypeSchema{
+				Value:    &jsonschema.Schema{Type: "string"},
+				Nullable: jsonschema.Nullable,
 			}),
 		)
 		require.NoError(t, err)
 
 		items := itemsOf(s, "days")
 		require.Len(t, items, 1)
-		assert.Nil(t, items[0].Enum, "the enum must not sit beside the authored wrapper")
+		assert.Nil(t, items[0].Enum, "the enum must not sit beside the wrapper")
 		require.Len(t, items[0].AnyOf, 2)
 		assert.Equal(t, []any{"monday", "tuesday"}, items[0].AnyOf[0].Enum,
 			"the enum lands on the wrapper's value branch")

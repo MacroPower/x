@@ -26,6 +26,13 @@ func (g *generator) reconcileField(n *node) *Schema {
 	merged := *base
 	overlayAuthored(&merged, n.authored, base)
 
+	// A verbatim-typed field still overlays its field-level facts (description,
+	// tags) onto the authored copy, but the payload is emitted with no null
+	// encoding, so skip the null split and return the merged copy directly.
+	if n.verbatim {
+		return &merged
+	}
+
 	// A value-scoped const/enum stamped beside a legacy hook-supplied nullable
 	// wrapper (a not-yet-migrated provider/override/extender at the field's type)
 	// moves onto the wrapper's value branch, so the wrapper's permitted null is

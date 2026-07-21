@@ -17,6 +17,13 @@ func (g *generator) render(n *node) *Schema {
 		return g.reconcileField(n)
 	}
 
+	// A verbatim payload (a TypeSchema.Verbatim escape hatch) is emitted exactly
+	// as authored, so the null encoding is skipped even for a pointer occurrence's
+	// nullable bit.
+	if n.verbatim {
+		return n.payload
+	}
+
 	return g.applyNull(n, g.renderBase(n))
 }
 

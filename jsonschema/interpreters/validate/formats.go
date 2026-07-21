@@ -20,17 +20,18 @@ func isStringKeywordTag(key string) bool {
 }
 
 // schemaPermitsString reports whether the type-derived schema can hold a string
-// instance. It accepts both the single Type form and the Types array form (as
-// produced for nullable and []byte fields), so a string-only keyword such as
-// base64 is allowed on a field whose schema is a string even when the Go kind is
-// not (e.g. a []byte field, which generates a base64-encoded string schema). A
-// nil schema (a caller-built context with no Base) permits no string.
+// instance. It accepts the single Type form, the Types array form (as produced
+// for a nullable field), and a base64 contentEncoding, so a string-only keyword
+// such as base64 is allowed on a field whose schema is a string even when the Go
+// kind is not (e.g. a []byte field, whose type-derived base is a bare
+// base64-content payload whose string type render applies later). A nil schema
+// (a caller-built context with no Base) permits no string.
 func schemaPermitsString(s *jsonschema.Schema) bool {
 	if s == nil {
 		return false
 	}
 
-	if s.Type == "string" {
+	if s.Type == "string" || s.ContentEncoding == base64Encoding {
 		return true
 	}
 

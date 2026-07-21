@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
-	"slices"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/numkind"
 )
@@ -93,21 +92,22 @@ func WithTypeSchemaExtender(e TypeSchemaExtender) GenerateOption {
 
 // WithTypeSchemaExtenderFor is [WithTypeSchemaExtender] for a statically
 // known type, so call sites need not guard on [reflect.TypeFor] themselves:
-// f runs only for T, receiving the reflection-generated schema to modify in
-// place, and every other type passes through untouched. The signature is
+// f runs only for T, receiving the [TypeSchema] whose Value is the
+// reflection-generated schema to modify in place (and whose Nullable it may
+// set), and every other type passes through untouched. The signature is
 // [TypeSchemaExtenderFunc]'s, eliding only the type guard, so f still
 // receives the [TypeContext] and can emit draft-appropriate keywords.
 //
 //	jsonschema.WithTypeSchemaExtenderFor[pkg.Money](
-//		func(_ context.Context, _ jsonschema.TypeContext, s *jsonschema.Schema) error {
-//			s.Pattern = `^\d+\.\d{2}$`
+//		func(_ context.Context, _ jsonschema.TypeContext, ts *jsonschema.TypeSchema) error {
+//			ts.Value.Pattern = `^\d+\.\d{2}$`
 //			return nil
 //		})
 //
 // The registration-order and not-called-when-replaced semantics of
 // [WithTypeSchemaExtender] apply unchanged. A nil f is ignored.
 func WithTypeSchemaExtenderFor[T any](
-	f func(ctx context.Context, tc TypeContext, s *Schema) error,
+	f func(ctx context.Context, tc TypeContext, ts *TypeSchema) error,
 ) GenerateOption {
 	if f == nil {
 		return WithTypeSchemaExtender(nil)
@@ -116,28 +116,28 @@ func WithTypeSchemaExtenderFor[T any](
 	target := reflect.TypeFor[T]()
 
 	return WithTypeSchemaExtender(TypeSchemaExtenderFunc(
-		func(ctx context.Context, tc TypeContext, s *Schema) error {
+		func(ctx context.Context, tc TypeContext, ts *TypeSchema) error {
 			if tc.Type != target {
 				return nil
 			}
 
-			return f(ctx, tc, s)
+			return f(ctx, tc, ts)
 		}))
 }
 
 // exactTypeProvider is the [TypeSchemaProvider] registered by
-// [WithTypeSchema]: it offers s for exactly the type t.
+// [WithTypeSchema]: it offers ts for exactly the type t.
 type exactTypeProvider struct {
-	t reflect.Type
-	s *Schema
+	t  reflect.Type
+	ts TypeSchema
 }
 
-func (p exactTypeProvider) SchemaForType(_ context.Context, tc TypeContext) (*Schema, error) {
+func (p exactTypeProvider) SchemaForType(_ context.Context, tc TypeContext) (TypeSchema, error) {
 	if tc.Type != p.t {
-		return nil, fmt.Errorf("%w: %s", ErrTypeNotHandled, tc.Type)
+		return TypeSchema{}, fmt.Errorf("%w: %s", ErrTypeNotHandled, tc.Type)
 	}
 
-	return p.s, nil
+	return p.ts, nil
 }
 
 // WithTypeSchema overrides the generated schema for a specific Go type: it
@@ -146,42 +146,33 @@ func (p exactTypeProvider) SchemaForType(_ context.Context, tc TypeContext) (*Sc
 // overriding even [JSONSchemaProvider]. Useful for mapping third-party types
 // or overriding types whose [JSONSchemaProvider] schema is undesirable.
 // Providers are consulted newest registration first, so if called multiple
-// times for the same type, the last registration wins. A nil s restores the
-// type's default resolution: earlier WithTypeSchema registrations for t are
-// removed, while predicate providers ([WithTypeSchemaProvider]) and the rest
-// of the chain still apply.
+// times for the same type, the last registration wins. A zero [TypeSchema]
+// marks the type unrestricted ({}); it is not a removal idiom.
 //
-// The override is copied before use: its sub-schemas are deep-copied and its
-// Enum, Const, Default, and Extra containers are cloned, so a tag interpreter
-// or [JSONSchemaExtender] that appends to Enum, reassigns Const, or writes into
-// Extra during generation cannot reach back into s or into another Generate
-// call reusing the same override. Only the top-level containers are cloned:
-// nested values keep their identity, so mutating through a pointer, slice, or
-// map element held inside one of those values can still leak.
-func WithTypeSchema(t reflect.Type, s *Schema) GenerateOption {
+// The override's [TypeSchema.Value] (or [TypeSchema.Verbatim]) is copied before
+// use: its sub-schemas are deep-copied and its Enum, Const, Default, and Extra
+// containers are cloned, so a tag interpreter or [JSONSchemaExtender] that
+// appends to Enum, reassigns Const, or writes into Extra during generation
+// cannot reach back into the override or into another Generate call reusing it.
+// Only the top-level containers are cloned: nested values keep their identity,
+// so mutating through a pointer, slice, or map element held inside one of those
+// values can still leak.
+func WithTypeSchema(t reflect.Type, ts TypeSchema) GenerateOption {
 	return generateOptionFunc(func(g *generator) {
-		if s == nil {
-			g.typeProviders = slices.DeleteFunc(g.typeProviders, func(p TypeSchemaProvider) bool {
-				ep, ok := p.(exactTypeProvider)
-				return ok && ep.t == t
-			})
-
-			return
-		}
-
-		g.typeProviders = append(g.typeProviders, exactTypeProvider{t: t, s: s})
+		g.typeProviders = append(g.typeProviders, exactTypeProvider{t: t, ts: ts})
 	})
 }
 
 // WithTypeSchemaFor is [WithTypeSchema] for a statically known type, so call
 // sites need not spell out [reflect.TypeFor]:
 //
-//	jsonschema.WithTypeSchemaFor[time.Duration](&jsonschema.Schema{Type: "string"})
+//	jsonschema.WithTypeSchemaFor[time.Duration](jsonschema.TypeSchema{
+//		Value: &jsonschema.Schema{Type: "string"}})
 //
 // The copying and last-registration-wins semantics of [WithTypeSchema] apply
 // unchanged.
-func WithTypeSchemaFor[T any](s *Schema) GenerateOption {
-	return WithTypeSchema(reflect.TypeFor[T](), s)
+func WithTypeSchemaFor[T any](ts TypeSchema) GenerateOption {
+	return WithTypeSchema(reflect.TypeFor[T](), ts)
 }
 
 // Namer produces the definition name for a Go type: the key the type's

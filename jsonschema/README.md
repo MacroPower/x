@@ -178,8 +178,8 @@ Unsupported types (`func`, `chan`, `complex`, `unsafe.Pointer`) return
 | `WithDraft(Draft)`               | Target draft: `Draft2020` (default) or `Draft7`; also serves validation and `Inline`.         |
 | `WithTagInterpreter(key, t)`     | Register a `TagInterpreter` under the struct tag key it reads; multiple are applied in order. |
 | `WithDescriptionProvider(p)`     | Set the `DescriptionProvider` used as the source of descriptions.                             |
-| `WithTypeSchema(t, s)`           | Override the schema for a specific Go type (highest priority).                                |
-| `WithTypeSchemaFor[T](s)`        | `WithTypeSchema` for a statically known type, without `reflect.TypeFor`.                      |
+| `WithTypeSchema(t, ts)`          | Override a specific Go type with a `TypeSchema` envelope (highest priority).                  |
+| `WithTypeSchemaFor[T](ts)`       | `WithTypeSchema` for a statically known type, without `reflect.TypeFor`.                      |
 | `WithTypeSchemaProvider(p)`      | Register a `TypeSchemaProvider` that overrides types by predicate.                            |
 | `WithTypeSchemaExtender(e)`      | Register a `TypeSchemaExtender` that modifies reflection-generated schemas.                   |
 | `WithNamer(n)`                   | Custom `Namer` for `$defs` entries; an empty name defers to the built-in namer.               |
@@ -228,30 +228,36 @@ type themselves.
 ### Customization interfaces
 
 A type implementing `JSONSchemaProvider` supplies its own schema entirely,
-bypassing reflection; a non-nil error aborts generation:
+bypassing reflection. It returns a `TypeSchema` envelope carrying its intent, so
+generation applies the null encoding and resolves references itself; a non-nil
+error aborts generation:
 
 ```go
 type Status string
 
-func (Status) JSONSchema(context.Context, jsonschema.TypeContext) (*jsonschema.Schema, error) {
-	return &jsonschema.Schema{
-		Type: "string",
-		Enum: []any{"active", "inactive", "suspended"},
+func (Status) JSONSchema(context.Context, jsonschema.TypeContext) (jsonschema.TypeSchema, error) {
+	return jsonschema.TypeSchema{
+		Value: &jsonschema.Schema{
+			Type: "string",
+			Enum: []any{"active", "inactive", "suspended"},
+		},
 	}, nil
 }
 ```
 
 A type implementing `JSONSchemaExtender` modifies its reflection-generated schema
-after it is built; a non-nil error aborts generation:
+after it is built. It receives the same `TypeSchema`, with `Value` set to the
+reflection-generated schema to mutate in place; a non-nil error aborts
+generation:
 
 ```go
 type Metadata struct {
 	Tags map[string]string `json:"tags"`
 }
 
-func (Metadata) JSONSchemaExtend(_ context.Context, _ jsonschema.TypeContext, s *jsonschema.Schema) error {
-	s.Description = "Arbitrary key-value metadata"
-	s.MinProperties = new(1)
+func (Metadata) JSONSchemaExtend(_ context.Context, _ jsonschema.TypeContext, ts *jsonschema.TypeSchema) error {
+	ts.Value.Description = "Arbitrary key-value metadata"
+	ts.Value.MinProperties = new(1)
 	return nil
 }
 ```
@@ -260,6 +266,17 @@ Both methods receive the same arguments as their registered counterparts
 (`TypeSchemaProvider`, `TypeSchemaExtender`): the Generate call's context and
 a `TypeContext` carrying the target draft. An implementation needing neither
 ignores them.
+
+A `TypeSchema` declares intent instead of a pre-shaped schema. Exactly one of
+`Value`, `Verbatim`, or `Ref` is meaningful; setting more than one is
+`ErrConflictingTypeSchema`. `Value` is a bare value schema whose nullability is
+the `Nullable` stance combined with each occurrence's pointer-ness -- so a hook
+declares `Nullable` (or `NonNullable`) rather than hand-shaping an
+`anyOf[value, null]` wrapper. `Verbatim` is an opaque escape hatch emitted
+exactly as authored (no null encoding), for a fully-formed schema such as one
+loaded from a document. `Ref` is a whole-type alias to another Go type, kept
+reachable through a node-backed `$ref` edge. A zero `TypeSchema` marks the type
+unrestricted (`{}`).
 
 For each type, the schema is determined by the first matching step:
 
@@ -288,11 +305,11 @@ third-party interface, or every type in a package. By contrast,
 ```go
 // Every type implementing fmt.Stringer serializes as a string.
 stringers := jsonschema.TypeSchemaProviderFunc(
-	func(_ context.Context, tc jsonschema.TypeContext) (*jsonschema.Schema, error) {
+	func(_ context.Context, tc jsonschema.TypeContext) (jsonschema.TypeSchema, error) {
 		if !tc.Type.Implements(reflect.TypeFor[fmt.Stringer]()) {
-			return nil, jsonschema.ErrTypeNotHandled
+			return jsonschema.TypeSchema{}, jsonschema.ErrTypeNotHandled
 		}
-		return &jsonschema.Schema{Type: "string"}, nil
+		return jsonschema.TypeSchema{Value: &jsonschema.Schema{Type: "string"}}, nil
 	},
 )
 
@@ -301,7 +318,7 @@ schema, err := jsonschema.GenerateFor[Config](ctx, jsonschema.WithTypeSchemaProv
 
 Providers answer `ErrTypeNotHandled` (or an error wrapping it) for a type
 they do not handle, passing it to the next provider and then to the rest of
-the chain; returning a nil schema with a nil error marks the type
+the chain; returning a zero `TypeSchema` with a nil error marks the type
 unrestricted (`{}`), mirroring `JSONSchemaProvider`. Any other provider error
 aborts generation, for a provider that recognizes a type but cannot produce
 its schema (an I/O failure, for example). A provider may be consulted several
@@ -326,9 +343,9 @@ what reflection produced:
 ```go
 // Add a description to a third-party type without replacing its schema.
 descriptions := jsonschema.TypeSchemaExtenderFunc(
-	func(_ context.Context, tc jsonschema.TypeContext, s *jsonschema.Schema) error {
+	func(_ context.Context, tc jsonschema.TypeContext, ts *jsonschema.TypeSchema) error {
 		if tc.Type == reflect.TypeFor[netip.Addr]() {
-			s.Description = "An IP address."
+			ts.Value.Description = "An IP address."
 		}
 		return nil
 	},
@@ -344,8 +361,8 @@ keeps the `TypeContext`, so it stays draft-aware):
 ```go
 schema, err := jsonschema.GenerateFor[Config](ctx,
 	jsonschema.WithTypeSchemaExtenderFor[netip.Addr](
-		func(_ context.Context, _ jsonschema.TypeContext, s *jsonschema.Schema) error {
-			s.Description = "An IP address."
+		func(_ context.Context, _ jsonschema.TypeContext, ts *jsonschema.TypeSchema) error {
+			ts.Value.Description = "An IP address."
 			return nil
 		}))
 ```
