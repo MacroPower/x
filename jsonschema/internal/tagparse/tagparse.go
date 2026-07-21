@@ -197,6 +197,17 @@ func Apply(tag string, fieldType reflect.Type, canvas, payload *jsonschema.Schem
 			groupsSet[g] = true
 		}
 
+		// An enum on a sequence field is redirected onto the item schemas (see
+		// applyEnumToItems), so it lives inside array structure that only the
+		// array type keeps; record it as an array constraint so a non-array
+		// type= override reports a conflict instead of silently dropping the
+		// author's enum with the items it rides on.
+		if key == keyword.Enum && scalarType != nil {
+			if base := numkind.DerefType(scalarType); base.Kind() == reflect.Slice || base.Kind() == reflect.Array {
+				groupsSet[groupArray] = true
+			}
+		}
+
 		if key == keyword.Type {
 			scalarType = standInTypeFor(value)
 			overriddenType = value

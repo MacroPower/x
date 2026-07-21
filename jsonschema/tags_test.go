@@ -1769,3 +1769,40 @@ func TestTagEmptyStringKeyValues(t *testing.T) {
 		})
 	}
 }
+
+// TestTagElementEnumVsTypeOverride covers the interaction of an
+// element-redirected enum with a type= override. The enum on a sequence field
+// lands on the item schemas, structure only the array type keeps, so a
+// non-array override must report the same conflict any other array constraint
+// gets rather than silently dropping the author's enum with the items it rides
+// on. An override naming array keeps the items and the enum survives.
+func TestTagElementEnumVsTypeOverride(t *testing.T) {
+	t.Parallel()
+
+	t.Run("non-array override conflicts", func(t *testing.T) {
+		t.Parallel()
+
+		type T struct {
+			F []string `json:"f" jsonschema:"enum=a|b,type=string"`
+		}
+
+		_, err := jsonschema.GenerateFor[T](t.Context())
+		require.ErrorContains(t, err, "array constraint conflicts with type=string")
+	})
+
+	t.Run("array override keeps the element enum", func(t *testing.T) {
+		t.Parallel()
+
+		type T struct {
+			F []string `json:"f" jsonschema:"enum=a|b,type=array"`
+		}
+
+		s, err := jsonschema.GenerateFor[T](t.Context())
+		require.NoError(t, err)
+
+		field := s.Properties["f"]
+		require.NotNil(t, field)
+		require.NotNil(t, field.Items, "the array override keeps the item schema")
+		assert.Equal(t, []any{"a", "b"}, field.Items.Enum)
+	})
+}

@@ -1503,17 +1503,9 @@ func (g *generator) buildFieldSchema(
 		}
 
 		// A type= override replaces the field's type wholesale, so the field is
-		// now inline: it is not a reference and not nullable. Rebuild it as a
-		// plain value node over the overridden payload, dropping the def link,
-		// children, and null bits in one place, while carrying the authored canvas
-		// across. Reachability drops any def the detached ref orphaned.
+		// now inline: it is not a reference and not nullable.
 		if res.TypeOverridden {
-			fieldNode = &node{
-				kind:     kindValue,
-				payload:  fieldNode.payload,
-				authored: fieldNode.authored,
-				isField:  true,
-			}
+			fieldNode = rebuildOverriddenField(fieldNode)
 		}
 	}
 
@@ -1521,8 +1513,8 @@ func (g *generator) buildFieldSchema(
 	// could have authored an enum on a sequence/map element, and it does so on the
 	// bare element canvas without pinning the value, so those elements keep their
 	// type-derived numeric bounds through reconcile. Placed after the whole tag
-	// block, a type= override (which rebuilt the field into a childless value node
-	// above) is a natural no-op.
+	// block, a type= override that could not keep element structure (rebuilt into
+	// a childless value node above) is a natural no-op.
 	markKeptElementEnums(fieldNode)
 
 	// Add to parent. The payload (bare) is shared into parent.Properties so a
@@ -1541,6 +1533,37 @@ func (g *generator) buildFieldSchema(
 	parent.props = append(parent.props, nodeProp{name: fi.jsonName, schema: fieldNode})
 
 	return fieldNode, nil
+}
+
+// rebuildOverriddenField rebuilds a field node after a type= override replaced
+// its type wholesale: a plain value node over the overridden payload, dropping
+// the def link, children, and null bits in one place, while carrying the
+// authored canvas across. Reachability drops any def the detached ref
+// orphaned. A type=array override on a sequence field keeps the payload's
+// element structure (applyTypeOverride drops it for every other type), and the
+// authored element canvases can carry a redirected element enum; those element
+// nodes are kept so reconcile still composes them per child instead of
+// silently dropping the author's enum.
+func rebuildOverriddenField(fieldNode *node) *node {
+	rebuilt := &node{
+		kind:     kindValue,
+		payload:  fieldNode.payload,
+		authored: fieldNode.authored,
+		isField:  true,
+	}
+
+	switch {
+	case fieldNode.kind == kindList && fieldNode.payload.Items != nil:
+		rebuilt.kind = kindList
+		rebuilt.items = fieldNode.items
+
+	case fieldNode.kind == kindTuple &&
+		(len(fieldNode.payload.PrefixItems) > 0 || len(fieldNode.payload.ItemsArray) > 0):
+		rebuilt.kind = kindTuple
+		rebuilt.prefix = fieldNode.prefix
+	}
+
+	return rebuilt
 }
 
 // fieldContext builds the FieldContext passed to tag interpreters and the
