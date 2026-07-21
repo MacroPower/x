@@ -2601,6 +2601,22 @@ func TestValidateInterpreter_NumericValueOverflowErrors(t *testing.T) {
 		Value int8 `json:"value" validate:"eq=100"`
 	}
 
+	type eqFloat32 struct {
+		Value float32 `json:"value" validate:"eq=1e300"`
+	}
+
+	type oneofFloat32 struct {
+		Value float32 `json:"value" validate:"oneof=1 1e300"`
+	}
+
+	type inRangeFloat32 struct {
+		Value float32 `json:"value" validate:"eq=1e30"`
+	}
+
+	type eqFloat64 struct {
+		Value float64 `json:"value" validate:"eq=1e300"`
+	}
+
 	cases := map[string]struct {
 		gen func() (*jsonschema.Schema, error)
 		err bool
@@ -2640,6 +2656,38 @@ func TestValidateInterpreter_NumericValueOverflowErrors(t *testing.T) {
 		"in-range eq on int8": {
 			gen: func() (*jsonschema.Schema, error) {
 				return jsonschema.GenerateFor[inRangeInt8](t.Context(),
+					jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
+				)
+			},
+			err: false,
+		},
+		"eq overflow on float32": {
+			gen: func() (*jsonschema.Schema, error) {
+				return jsonschema.GenerateFor[eqFloat32](t.Context(),
+					jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
+				)
+			},
+			err: true,
+		},
+		"oneof overflow on float32": {
+			gen: func() (*jsonschema.Schema, error) {
+				return jsonschema.GenerateFor[oneofFloat32](t.Context(),
+					jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
+				)
+			},
+			err: true,
+		},
+		"in-range eq on float32": {
+			gen: func() (*jsonschema.Schema, error) {
+				return jsonschema.GenerateFor[inRangeFloat32](t.Context(),
+					jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
+				)
+			},
+			err: false,
+		},
+		"large eq stays valid on float64": {
+			gen: func() (*jsonschema.Schema, error) {
+				return jsonschema.GenerateFor[eqFloat64](t.Context(),
 					jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 				)
 			},

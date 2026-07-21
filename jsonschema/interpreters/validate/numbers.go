@@ -184,6 +184,15 @@ func parseNumericValue(value string, t reflect.Type) (any, error) {
 		return nil, err
 	}
 
+	// A float32 field cannot hold a value outside its range, so reparse at 32
+	// bits purely as an overflow check, mirroring the jsonschema-tag path.
+	if t.Kind() == reflect.Float32 {
+		_, err := strconv.ParseFloat(value, 32)
+		if err != nil {
+			return nil, fmt.Errorf("invalid number %q: %w", value, err)
+		}
+	}
+
 	return n, nil
 }
 
