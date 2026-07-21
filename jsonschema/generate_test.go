@@ -6799,6 +6799,42 @@ func TestGenerateFor_JSONMarshalerOuterWithTextMarshalerEmbed(t *testing.T) {
 	assert.Contains(t, s.Properties, "extra")
 }
 
+// twoBuiltinEmbeds embeds two marshaler-bearing builtin types at the same
+// depth, so promotion is ambiguous and suppressed: encoding/json marshals the
+// outer as a plain object of its reflected fields ({"n":...}).
+type twoBuiltinEmbeds struct {
+	time.Time
+	big.Int
+
+	N int `json:"n"`
+}
+
+// TestGenerateFor_BuiltinEmbedsNotComposed pins that a builtin-override embed
+// reached on the reflection path is not composed as an allOf branch: the
+// embed's marshaler never serializes the outer value here, so composing the
+// scalar builtin schema (string/integer) onto the object schema would reject
+// every instance, including the type's own marshaled output. The builtin
+// structs export no fields, so promotion contributes nothing, matching
+// encoding/json.
+func TestGenerateFor_BuiltinEmbedsNotComposed(t *testing.T) {
+	t.Parallel()
+
+	s, err := jsonschema.GenerateFor[twoBuiltinEmbeds](t.Context())
+	require.NoError(t, err)
+
+	assert.Empty(t, s.AllOf, "schema: %s", marshalSchema(t, s))
+	assert.Equal(t, "object", s.Type)
+	assert.Contains(t, s.Properties, "n")
+
+	// The schema accepts the type's own marshaled output.
+	out, err := json.Marshal(twoBuiltinEmbeds{N: 5})
+	require.NoError(t, err)
+
+	v, err := jsonschema.Compile(t.Context(), s)
+	require.NoError(t, err)
+	require.NoError(t, v.ValidateJSON(t.Context(), out))
+}
+
 // Embedded pointer-to-non-struct type.
 type MyInt int
 

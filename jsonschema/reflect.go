@@ -1400,19 +1400,18 @@ func (g *generator) needsAllOfComposition(t reflect.Type) bool {
 		return true
 	}
 
-	// Check built-in overrides.
-	if _, ok := g.builtinOverride(t); ok {
-		return true
-	}
-
-	// A direct TextMarshaler is deliberately not composed here. When an embedded
-	// type's promoted MarshalText drives the whole outer value, schemaForType
-	// intercepts the outer as a string before reflection begins, so this probe is
-	// only reached for an outer that reflects as an object (for example, one that
-	// implements json.Marshaler itself). There the embed's MarshalText never
-	// serializes the value, so composing it as an allOf:[{"type":"string"}]
-	// branch would make the object schema unsatisfiable; its fields are promoted
-	// instead.
+	// A direct TextMarshaler or a built-in override is deliberately not
+	// composed here. When an embedded type's promoted marshaler drives the
+	// whole outer value, schemaForType intercepts the outer before reflection
+	// begins, so this probe is only reached for an outer that reflects as an
+	// object (one that implements json.Marshaler itself, or one whose embeds'
+	// marshalers are suppressed as ambiguous). There the embed's marshaler
+	// never serializes the value -- encoding/json emits a plain object of the
+	// reflected fields -- so composing the scalar builtin schema as an
+	// allOf:[{"type":"string"}] branch would make the object schema
+	// unsatisfiable; the embed's fields are promoted instead (every builtin
+	// struct override exports none, contributing nothing, exactly matching the
+	// marshaled output).
 
 	return false
 }
