@@ -611,11 +611,17 @@ type FieldContext struct {
 	// then applying the null encoding, so a const or enum an interpreter declares
 	// lands on the value and keeps a permitted null valid. A tag interpreter
 	// declares facts by writing them here; a [DescriptionProvider] must treat it as
-	// read-only and answer through its return value instead. A numeric, string, or
-	// array bound an interpreter writes here can only tighten the type's own value:
-	// generation intersects each canvas bound with the type-derived bound from
-	// [FieldContext.Base], keeping the stronger side, so a weaker authored bound
-	// never widens the type's.
+	// read-only and answer through its return value instead.
+	//
+	// An interpreter contributes bounds and value constraints through the
+	// [Constraints] facade [FieldContext.Constraints] returns rather than writing
+	// the canvas bound fields directly. The facade is intersect-only -- a bound
+	// weaker than the one already in effect (the canvas value, or the type-derived
+	// one from Base) never lands on the canvas -- and generation resolves the
+	// canvas against Base through the same shared algebra, so a canvas bound can
+	// only tighten the type's own value. A nil bound field on the canvas means
+	// unauthored, not cleared: the kind-derived bound from Base stands, and there
+	// is no way to widen or remove it from here.
 	Canvas *Schema
 	// Base is the field's type-derived reflected schema, read-only: the pristine
 	// payload carrying the type's own keywords (its numeric bounds, the
