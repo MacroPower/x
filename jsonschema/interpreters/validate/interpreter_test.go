@@ -665,6 +665,41 @@ func TestValidateInterpreter_NestedDive(t *testing.T) {
 	}`, string(got))
 }
 
+// TestValidateInterpreter_DiveEnumKeepsAuthoredElementBound pins that an
+// element enum drops only the type-derived bounds: a bound the interpreter
+// authored on the same element survives alongside the pin, mirroring the
+// field-enum rule.
+func TestValidateInterpreter_DiveEnumKeepsAuthoredElementBound(t *testing.T) {
+	t.Parallel()
+
+	type Config struct {
+		Values []int8 `json:"values" validate:"dive,gte=0,oneof=5 10"`
+	}
+
+	s, err := jsonschema.GenerateFor[Config](t.Context(),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
+	)
+	require.NoError(t, err)
+
+	got, err := json.Marshal(s)
+	require.NoError(t, err)
+
+	// The int8 range (-128/127) is subsumed by the enum and dropped; the
+	// authored gte floor is kept.
+	assert.JSONEq(t, `{
+		"$schema":"https://json-schema.org/draft/2020-12/schema",
+		"type":"object",
+		"properties":{
+			"values":{
+				"type":["null","array"],
+				"items":{"type":"integer","enum":[5,10],"minimum":0}
+			}
+		},
+		"required":["values"],
+		"additionalProperties":false
+	}`, string(got))
+}
+
 func TestValidateInterpreter_DivePointerElement(t *testing.T) {
 	t.Parallel()
 

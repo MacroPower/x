@@ -160,16 +160,15 @@ func (g *generator) resolveBounds(n *node, merged, base *Schema) {
 }
 
 // numericResolveMode selects the const/enum subsumption for the numeric axis
-// from the node's role. It reproduces the prior pins-value precedence and adds
-// the field-enum edge fix: a field const drops every numeric bound; a field enum
-// drops the kind-derived bounds and keeps the authored ones that narrow it. A
-// field reads the merged value (post-overlay, so a type-override const/enum on
-// the payload is honored); an element reads its own authored canvas, so a
-// const/enum the element's type supplies is not conflated with an authored pin.
-// An element pin drops every bound, except the jsonschema-tag enum-on-elements
-// carve-out (keepElementBounds), which keeps the type bounds. A verbatim payload
-// is emitted as authored: its const/enum never subsumes its own bounds, so the
-// algebra only intersects.
+// from the node's role, with one precedence shared by fields and elements: a
+// const drops every numeric bound; an enum drops the kind-derived bounds and
+// keeps the authored ones that narrow it. A field reads the merged value
+// (post-overlay, so a type-override const/enum on the payload is honored); an
+// element reads its own authored canvas, so a const/enum the element's type
+// supplies is not conflated with an authored pin, and the jsonschema-tag
+// enum-on-elements carve-out (keepElementBounds) keeps the type bounds. A
+// verbatim payload is emitted as authored: its const/enum never subsumes its
+// own bounds, so the algebra only intersects.
 func numericResolveMode(merged *Schema, n *node) constraint.ResolveMode {
 	if n.verbatim {
 		return constraint.ResolveKeepKind
@@ -187,14 +186,17 @@ func numericResolveMode(merged *Schema, n *node) constraint.ResolveMode {
 	}
 
 	// An element (or any non-field node reaching here) pins when its own canvas
-	// authored a const or enum, dropping the type-derived bounds the pinned value
-	// subsumes -- unless the enum is the jsonschema-tag enum-on-elements
-	// carve-out, which deliberately keeps the type bounds.
-	if n.authored.Const != nil || (n.authored.Enum != nil && !n.keepElementBounds) {
+	// authored a const or enum, mirroring the field precedence above -- unless
+	// the enum is the jsonschema-tag enum-on-elements carve-out, which
+	// deliberately keeps the type bounds.
+	switch {
+	case n.authored.Const != nil:
 		return constraint.ResolveDropAll
+	case n.authored.Enum != nil && !n.keepElementBounds:
+		return constraint.ResolveDropKind
+	default:
+		return constraint.ResolveKeepKind
 	}
-
-	return constraint.ResolveKeepKind
 }
 
 // canvasAuthorsBounds reports whether the authored canvas carries any numeric or

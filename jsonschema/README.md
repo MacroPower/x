@@ -469,8 +469,10 @@ On a sequence or map element the bound drop is by author. A jsonschema-tag
 tag writes the enum onto the bare element schema without pinning the value, so
 `[]int8` with `enum=1|2|3` keeps each element's `-128`/`127` range alongside the
 enum. A tag interpreter that pins an element's value with a `const` or `enum` (a
-`validate` dive, or a sequence-wide `oneof`) instead drops those bounds, the way
-a whole-value `const` or `enum` does on a scalar field.
+`validate` dive, or a sequence-wide `oneof`) instead drops the type-derived
+bounds, the way a whole-value `const` or `enum` does on a scalar field; a bound
+the interpreter authored on the element itself survives alongside the pin,
+mirroring the field rule.
 
 ### Struct field rules
 
