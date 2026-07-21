@@ -1,8 +1,6 @@
 package constraint
 
 import (
-	"errors"
-	"fmt"
 	"slices"
 
 	"github.com/google/jsonschema-go/jsonschema"
@@ -12,53 +10,15 @@ import (
 	"go.jacobcolvin.com/x/jsonschema/internal/schemashape"
 )
 
-// ErrConflict marks two constraints that pin mutually exclusive discrete values
-// -- two different consts, a second enum, or a required bool against a const of
-// false. It aborts generation rather than shipping a schema that silently drops
-// one constraint. Callers wrap it with their own dialect-specific phrasing so
-// the message and any sentinel identity they expose stay under their control.
-var ErrConflict = errors.New("conflicting value constraints")
-
-// ValueSet models the discrete-value constraints on one schema: the allowed set
-// (a const pins one value, an enum restricts to a set) and the forbidden set (ne
-// and required's non-zero check). It holds the const/enum conflict detection and
-// the forbidden-value escalation (not.const -> not.enum -> allOf) shared by the
-// dialects.
+// ValueSet models the forbidden-value constraints on one schema (ne and
+// required's non-zero check): the escalation from not.const to not.enum to allOf
+// as rules accumulate, shared by the dialects. The allowed set (const/enum) is
+// not modeled here: each writer composes it directly on its canvas, where the
+// facade and the interpreters run their conflict checks against the canvas and
+// the type-derived base.
 type ValueSet struct {
-	constVal  any
 	not       *jsonschema.Schema
-	enum      []any
 	allOfNots []*jsonschema.Schema
-	constSet  bool
-	enumSet   bool
-}
-
-// SetConst pins the const, reporting [ErrConflict] rather than overwriting a
-// const a previous rule already pinned to a different value. Equality is
-// numeric-aware, so the same number arriving as different Go types does not read
-// as a conflict.
-func (vs *ValueSet) SetConst(v any) error {
-	if vs.constSet && !valuesEqual(vs.constVal, v) {
-		return fmt.Errorf("%w: %v pins a different const", ErrConflict, v)
-	}
-
-	vs.constSet = true
-	vs.constVal = v
-
-	return nil
-}
-
-// SetEnum sets the enum, reporting [ErrConflict] when an enum is already set, so
-// a oneof rule and an earlier enum cannot silently overwrite one another.
-func (vs *ValueSet) SetEnum(v []any) error {
-	if vs.enumSet {
-		return fmt.Errorf("%w: enum already set", ErrConflict)
-	}
-
-	vs.enumSet = true
-	vs.enum = v
-
-	return nil
 }
 
 // Forbid records that the value must not equal v, accumulating so several rules
@@ -126,53 +86,6 @@ func (vs *ValueSet) SeedNot(not *jsonschema.Schema) { vs.not = not }
 // that keeps the not.const -> not.enum -> allOf composition defined once here.
 func (vs ValueSet) WriteForbidden(s *jsonschema.Schema) {
 	s.Not = vs.not
-
-	if len(vs.allOfNots) > 0 {
-		s.AllOf = append(s.AllOf, vs.allOfNots...)
-	}
-}
-
-// Conflict reports a discrete unsatisfiability that the set-time checks did not
-// already surface. The const/enum clashes abort at [ValueSet.SetConst] and
-// [ValueSet.SetEnum]; a const forbidden by an accumulated not is left as an
-// impossible schema rather than an error, so this adds no further check.
-func (vs ValueSet) Conflict() error { return nil }
-
-// Point returns the value a const pins, so the numeric-bound axis can drop the
-// bounds a single value subsumes.
-func (vs ValueSet) Point() (any, bool) {
-	if vs.constSet {
-		return vs.constVal, true
-	}
-
-	return nil, false
-}
-
-// EnumValues returns the enum members and whether an enum is set, so a public
-// facade's Enum getter can expose the pinned set for an interpreter's build-time
-// conflict pre-check before it sets its own enum.
-func (vs ValueSet) EnumValues() ([]any, bool) { return vs.enum, vs.enumSet }
-
-// pinsConst reports whether a const is set (subsumes every numeric bound).
-func (vs ValueSet) pinsConst() bool { return vs.constSet }
-
-// pinsEnum reports whether an enum is set (subsumes only kind-derived bounds).
-func (vs ValueSet) pinsEnum() bool { return vs.enumSet }
-
-// Render writes the allowed and forbidden constraints onto the schema.
-func (vs ValueSet) Render(s *jsonschema.Schema) {
-	if vs.constSet {
-		v := vs.constVal
-		s.Const = &v
-	}
-
-	if vs.enumSet {
-		s.Enum = vs.enum
-	}
-
-	if vs.not != nil {
-		s.Not = vs.not
-	}
 
 	if len(vs.allOfNots) > 0 {
 		s.AllOf = append(s.AllOf, vs.allOfNots...)

@@ -18,30 +18,22 @@ const (
 	Props
 )
 
-// Set is the per-node aggregate of every typed constraint: the numeric interval,
-// the length/count intervals, multipleOf, and the const/enum/forbidden value
-// set. The three constraint sources contribute into one Set instead of writing
-// the schema fields directly, so [Set.Resolve] (or [Set.ResolveBounds]) applies
-// precedence once and the result is written in one place.
+// Set is the per-node aggregate of the typed bound constraints: the numeric
+// interval, the length/count intervals, and multipleOf. The bound sources
+// contribute into one Set instead of writing the schema fields directly, so
+// [Set.ResolveBounds] applies precedence once and the result is written in one
+// place ([Resolved.RenderBounds]).
 type Set struct {
 	multipleOf *Endpoint
-	Values     ValueSet
 	numeric    axis
 	length     axis
 	items      axis
 	props      axis
 }
 
-// New returns a Set with the size axes flagged as an integer, non-negative
-// domain so an empty size range is detected correctly.
+// New returns an empty Set ready to absorb contributions.
 func New() *Set {
-	set := &Set{}
-	for _, ax := range []*axis{&set.length, &set.items, &set.props} {
-		ax.integral = true
-		ax.nonNegative = true
-	}
-
-	return set
+	return &Set{}
 }
 
 // AddNumeric contributes one numeric bound.
@@ -93,11 +85,10 @@ const (
 	ResolveDropAll
 )
 
-// Resolved is the outcome of a resolve: the merged intervals and value set, with
-// the const/enum precedence already applied.
+// Resolved is the outcome of a resolve: the merged intervals, with the
+// const/enum precedence already applied.
 type Resolved struct {
 	MultipleOf *Endpoint
-	Values     ValueSet
 	Numeric    Interval
 	Length     Interval
 	Items      Interval
@@ -107,9 +98,10 @@ type Resolved struct {
 // ResolveBounds resolves the size axes (folding every tier) and the numeric axis
 // under mode, returning the merged intervals and multipleOf. It applies no
 // const/enum precedence of its own: the caller supplies it through mode, since
-// only the caller knows whether a node is a field or an element. The value set
-// is left empty for the caller to place. An unsatisfiable interval is preserved
-// in the result rather than loosened.
+// only the caller knows whether a node is a field or an element and what its
+// effective const/enum is (the value set lives on the caller's schema, not
+// here). An unsatisfiable interval is preserved in the result rather than
+// loosened.
 func (set *Set) ResolveBounds(mode ResolveMode) Resolved {
 	r := Resolved{
 		Length:     set.length.resolve(resolveFull),
@@ -128,58 +120,6 @@ func (set *Set) ResolveBounds(mode ResolveMode) Resolved {
 	}
 
 	return r
-}
-
-// Resolve applies the value-set-driven const/enum precedence and returns the
-// merged constraints, surfacing a discrete conflict once. A const subsumes every
-// numeric bound (they are redundant against a pinned value); an enum subsumes
-// only the kind-derived bounds and keeps the authored ones that narrow it;
-// multipleOf is never subsumed, since a divisibility rule stays meaningful under
-// a const or enum. Length/count and value constraints resolve independently. An
-// unsatisfiable interval is preserved in the result rather than loosened.
-func (set *Set) Resolve() (Resolved, error) {
-	err := set.Values.Conflict()
-	if err != nil {
-		return Resolved{}, err
-	}
-
-	mode := ResolveKeepKind
-
-	switch {
-	case set.Values.pinsConst():
-		mode = ResolveDropAll
-	case set.Values.pinsEnum():
-		mode = ResolveDropKind
-	}
-
-	r := set.ResolveBounds(mode)
-	r.Values = set.Values
-
-	return r, nil
-}
-
-// Render resolves the set and writes the merged constraints onto the schema in
-// one place, clearing the keyword fields it owns first so a stale bound cannot
-// survive. It reports a conflict from [Set.Resolve].
-func (set *Set) Render(s *jsonschema.Schema) error {
-	r, err := set.Resolve()
-	if err != nil {
-		return err
-	}
-
-	r.Render(s)
-
-	return nil
-}
-
-// Render writes the resolved constraints onto the schema in one place, clearing
-// the numeric, size, and multipleOf keyword fields it owns first so a stale bound
-// cannot survive. The value set (const/enum/not) is set, not cleared, so a
-// pre-existing structural allOf (an embed branch, or an escalated forbidden set)
-// stays in place.
-func (r *Resolved) Render(s *jsonschema.Schema) {
-	r.RenderBounds(s)
-	r.Values.Render(s)
 }
 
 // RenderBounds writes the resolved numeric, length, items, and properties
@@ -214,38 +154,6 @@ func (set *Set) AbsorbAxes(s *jsonschema.Schema, mode Mode, prov Provenance) {
 	absorbSizeField(&set.length, s.MinLength, s.MaxLength, mode, prov)
 	absorbSizeField(&set.items, s.MinItems, s.MaxItems, mode, prov)
 	absorbSizeField(&set.props, s.MinProperties, s.MaxProperties, mode, prov)
-}
-
-// AbsorbSchema folds the constraints already present on a schema into the set at
-// the given tier, so a source that can only produce a *Schema (a tag interpreter
-// mutating in place, or a hook-supplied payload) still converges into the one
-// model. It reports a conflict from an absorbed const or enum.
-func (set *Set) AbsorbSchema(s *jsonschema.Schema, mode Mode, prov Provenance) error {
-	set.AbsorbAxes(s, mode, prov)
-
-	if s.MultipleOf != nil {
-		set.SetMultipleOf(*s.MultipleOf)
-	}
-
-	if s.Const != nil {
-		err := set.Values.SetConst(*s.Const)
-		if err != nil {
-			return err
-		}
-	}
-
-	if s.Enum != nil {
-		err := set.Values.SetEnum(s.Enum)
-		if err != nil {
-			return err
-		}
-	}
-
-	if s.Not != nil && set.Values.not == nil {
-		set.Values.not = s.Not
-	}
-
-	return nil
 }
 
 // absorbBound adds a numeric bound endpoint present on a schema.

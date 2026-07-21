@@ -10,11 +10,12 @@ import (
 	"go.jacobcolvin.com/x/jsonschema/internal/constraint"
 )
 
-// renderValues renders a value set onto a fresh schema for inspection.
+// renderValues writes a value set's forbidden state onto a fresh schema for
+// inspection.
 func renderValues(vs constraint.ValueSet) jsonschema.Schema {
 	var s jsonschema.Schema
 
-	vs.Render(&s)
+	vs.WriteForbidden(&s)
 
 	return s
 }
@@ -114,45 +115,6 @@ func TestValueSetForbidSchema(t *testing.T) {
 		require.Len(t, s.AllOf, 2)
 		assert.Same(t, forbidden, s.AllOf[1].Not)
 	})
-}
-
-func TestValueSetSetConstConflict(t *testing.T) {
-	t.Parallel()
-
-	var vs constraint.ValueSet
-
-	require.NoError(t, vs.SetConst(5))
-	require.NoError(t, vs.SetConst(uint64(5)), "the same number in a different type is not a conflict")
-
-	err := vs.SetConst(6)
-	require.ErrorIs(t, err, constraint.ErrConflict)
-}
-
-func TestValueSetSetEnumConflict(t *testing.T) {
-	t.Parallel()
-
-	var vs constraint.ValueSet
-
-	require.NoError(t, vs.SetEnum([]any{1, 2}))
-
-	err := vs.SetEnum([]any{3})
-	require.ErrorIs(t, err, constraint.ErrConflict)
-}
-
-func TestValueSetRender(t *testing.T) {
-	t.Parallel()
-
-	var vs constraint.ValueSet
-
-	require.NoError(t, vs.SetConst("x"))
-	vs.Forbid(0)
-
-	s := renderValues(vs)
-	require.NotNil(t, s.Const)
-	assert.Equal(t, "x", *s.Const)
-	require.NotNil(t, s.Not)
-	require.NotNil(t, s.Not.Const)
-	assert.Equal(t, 0, *s.Not.Const)
 }
 
 func TestValueSetSeedNotWriteForbiddenPreservesOtherAllOf(t *testing.T) {

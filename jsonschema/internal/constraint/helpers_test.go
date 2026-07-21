@@ -2,10 +2,6 @@ package constraint_test
 
 import (
 	"math/big"
-	"testing"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/constraint"
 )
@@ -44,18 +40,4 @@ func authoredLower(e constraint.Endpoint) constraint.Bound {
 
 func authoredUpper(e constraint.Endpoint) constraint.Bound {
 	return upperBound(e, constraint.Intersect, constraint.Authored)
-}
-
-func assertEndpointEqual(t *testing.T, want, got constraint.Endpoint) {
-	t.Helper()
-
-	if want.Rat == nil {
-		assert.Nil(t, got.Rat, "expected an unset endpoint")
-
-		return
-	}
-
-	require.NotNil(t, got.Rat, "expected a set endpoint")
-	assert.Equal(t, 0, want.Rat.Cmp(got.Rat), "rational mismatch: want %s got %s", want.Rat, got.Rat)
-	assert.Equal(t, want.Inclusive, got.Inclusive, "inclusivity mismatch")
 }

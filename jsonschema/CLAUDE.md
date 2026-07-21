@@ -55,19 +55,20 @@ The package has two independent halves sharing the `Schema` type:
   shared by both halves: integer parse-bit-width mapping, the
   integer/unsigned/float kind predicates, plus `DerefType` for pointer-chain
   dereference with cycle detection), `internal/constraint` (the shared typed
-  constraint algebra for generation: an `Interval` over exact `big.Rat`
-  endpoints with an order-independent intersection, a `ValueSet` for
-  const/enum/forbidden with the `not.const -> not.enum -> allOf` escalation, and
-  a per-node `Set` whose axes carry the numeric/length/count contributions
-  tiered by `Mode` (Baseline/Replace/Intersect) and `Provenance`
-  (KindDerived/Authored). It renders onto the upstream `Schema` type so the
-  reflection pipeline and the sibling tag-interpreter packages both import it
-  without a cycle; the single 2^53 policy (`ParseNumericBound`,
-  `ErrNotRepresentable`), the size-bound fold (`ParseSizeBound`), the
-  const/enum subsumption (`ResolveBounds` under a caller-chosen `ResolveMode`),
-  and the redundant-sibling collapse (`CanonicalizeNumeric`) all live here. The
-  public `Constraints` facade (`constraints.go`) and `reconcile.go` are its two
-  callers), `internal/typename` (the seven
+  bound algebra for generation: an `Interval` over exact `big.Rat` endpoints, a
+  `ValueSet` for forbidden values with the `not.const -> not.enum -> allOf`
+  escalation and the shared numeric-aware `ValuesEqual`, and a per-node `Set`
+  whose axes carry the numeric/length/count contributions tiered by `Mode`
+  (Baseline/Intersect) and `Provenance` (KindDerived/Authored). It renders onto
+  the upstream `Schema` type so the reflection pipeline and the sibling
+  tag-interpreter packages both import it without a cycle; the single 2^53
+  policy (`ParseNumericBound`, `ErrNotRepresentable`), the size-bound fold
+  (`ParseSizeBound`), the const/enum subsumption (`ResolveBounds` under a
+  caller-chosen `ResolveMode`), and the redundant-sibling collapse
+  (`CanonicalizeNumeric`) all live here. The public `Constraints` facade
+  (`constraints.go`) and `reconcile.go` are its two callers; the allowed set
+  (const/enum) is composed on each writer's canvas, not modeled in the
+  package), `internal/typename` (the seven
   canonical JSON Schema type-name constants and their predicate, shared by
   both halves and schemashape), `internal/uriref` (RFC 3986 URI-reference
   resolution and fragment handling for the `$ref` absolutization layer,

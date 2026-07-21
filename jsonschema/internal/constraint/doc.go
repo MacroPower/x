@@ -1,26 +1,45 @@
-// Package constraint is the shared typed constraint algebra for schema
-// generation. The three constraint sources -- Go-kind reflection, the
-// jsonschema struct tag, and tag interpreters such as the validate tag -- each
-// express their bounds and values as typed constraints and merge them through
-// this one model. Intersection, conflict detection, unsatisfiability, and the
-// const/enum-subsumes-bounds precedence are each defined once here and are
-// order-independent: precedence is data (a contribution [Mode] and [Provenance])
-// rather than the order the sources happen to run in.
+// Package constraint is the shared typed bound algebra for schema generation.
+// The three bound sources -- Go-kind reflection, the jsonschema struct tag, and
+// tag interpreters such as the validate tag -- merge their numeric and
+// length/count bounds through this one model, so intersection, the
+// const/enum-subsumes-bounds precedence, and the preservation of an
+// unsatisfiable range are each defined once and hold regardless of the order
+// the sources ran in.
 //
-// The model has three parts:
+// The production surface is small:
 //
-//   - [Interval] over exact decimals ([math/big.Rat] endpoints) for the numeric
-//     bounds and, in an integer non-negative domain, the length/count ranges.
-//     [Interval.Intersect] is the single keep-tighter combinator for the
-//     floor/ceiling merge.
-//   - [ValueSet] for const/enum (allowed) and ne/not (forbidden) values, with
-//     the forbidden-value escalation (not.const -> not.enum -> allOf) and one
-//     numeric-aware equality built on exact rationals.
-//   - [Set], the per-node aggregate. [Set.Resolve] applies the value-set-driven
-//     const/enum precedence and surfaces a conflict once, while
-//     [Set.ResolveBounds] resolves under a caller-supplied [ResolveMode] so the
-//     reconcile path, which alone knows whether a node is a field or an element,
-//     drives the numeric-bound subsumption itself.
+//   - [ParseNumericBound] and [ParseSizeBound] are the single parse policies:
+//     the 2^53 exact-representability check ([ErrNotRepresentable]) for numeric
+//     bounds, and the exclusive-to-inclusive fold, non-negative clamp, and
+//     unsatisfiable-range construction for length/count bounds. Both tag
+//     dialects parse through them.
+//   - [Set] aggregates one node's bound contributions -- each a [Bound] carrying
+//     its [Mode] tier (Baseline for the kind-derived payload, Intersect for
+//     everything authored) and [Provenance] -- via [Set.AbsorbAxes],
+//     [Set.AddNumeric]/[Set.AddSize], and [Set.SetMultipleOf].
+//     [Set.ResolveBounds] folds each axis into an exact-decimal [Interval]
+//     ([math/big.Rat] endpoints) under a caller-chosen [ResolveMode], and
+//     [Resolved.RenderBounds] writes the collapsed result back. The reconcile
+//     path is the caller: it alone knows whether a node is a field or an
+//     element and what its effective const/enum is, so it selects the mode (a
+//     const drops every numeric bound, an enum drops only the KindDerived ones)
+//     rather than this package inferring it.
+//   - [ValueSet] holds the forbidden-value escalation (not.const -> not.enum ->
+//     allOf) and the numeric-aware equality [ValuesEqual] the dialects share.
+//     The allowed set (const/enum) is not modeled here: each writer composes it
+//     directly on its canvas, where the facade and the interpreters check
+//     conflicts against the canvas and the type-derived base.
+//   - [CanonicalizeNumeric] is the render-time collapse that leaves one keyword
+//     per numeric side (a minimum beside a weaker exclusiveMinimum drops the
+//     redundant sibling).
+//
+// Order-independence comes from two properties working together: the facade's
+// bound writes are eager intersections against the effective bound (so repeated
+// interpreter rules AND in any order), and the reconcile-time fold here is
+// itself commutative (Baseline contributions are overwritten per slot,
+// Intersect contributions keep the tighter endpoint). An unsatisfiable interval
+// (a floor above its ceiling) is rendered as its impossible bounds rather than
+// loosened.
 //
 // The package renders onto the upstream
 // github.com/google/jsonschema-go/jsonschema.Schema type (which the main package

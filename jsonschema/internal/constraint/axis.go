@@ -6,15 +6,12 @@ package constraint
 type Mode uint8
 
 const (
-	// Baseline is the weakest tier: the Go-kind-derived bound. A Replace on the
-	// same slot overrides it; every Intersect tightens the result.
+	// Baseline is the weakest tier: the Go-kind-derived bound. Every Intersect
+	// tightens the result.
 	Baseline Mode = iota
-	// Replace overwrites the same slot's Baseline, so an explicit jsonschema-tag
-	// bound can widen past the kind bound it names. Among Replace contributions
-	// on one slot the last one wins, preserving the tag's last-pair-wins rule.
-	Replace
-	// Intersect tightens whatever the slot resolved to, so a validate-tag or
-	// interpreter bound is ANDed and never weakens a stronger bound.
+	// Intersect tightens whatever the slot resolved to, so an authored bound (the
+	// jsonschema tag, a validate-tag rule, an interpreter facade contribution) is
+	// ANDed and never weakens a stronger bound.
 	Intersect
 )
 
@@ -45,11 +42,11 @@ type Bound struct {
 type resolveMode uint8
 
 const (
-	// The resolveFull mode folds every tier: the baseline, overwritten by any
-	// replace, then tightened by every intersect. It is the ordinary resolve.
+	// The resolveFull mode folds every contribution: the baseline, tightened by
+	// every intersect. It is the ordinary resolve.
 	resolveFull resolveMode = iota
-	// The resolveDropKind mode drops the Baseline (kind-derived) contributions and
-	// keeps only the authored ones, which is how an enum keeps its narrowing bound.
+	// The resolveDropKind mode drops the KindDerived contributions and keeps only
+	// the Authored ones, which is how an enum keeps its narrowing bound.
 	resolveDropKind
 )
 
@@ -57,9 +54,7 @@ const (
 // unresolved so the const/enum subsumption can re-resolve under a provenance
 // filter.
 type axis struct {
-	bounds      []Bound
-	integral    bool
-	nonNegative bool
+	bounds []Bound
 }
 
 // add appends a contribution.
@@ -68,10 +63,8 @@ func (a *axis) add(b Bound) { a.bounds = append(a.bounds, b) }
 // resolve folds the contributions into a single [Interval] under mode.
 func (a axis) resolve(mode resolveMode) Interval {
 	return Interval{
-		Lo:          a.resolveSide(true, mode),
-		Hi:          a.resolveSide(false, mode),
-		Integral:    a.integral,
-		NonNegative: a.nonNegative,
+		Lo: a.resolveSide(true, mode),
+		Hi: a.resolveSide(false, mode),
 	}
 }
 
@@ -86,28 +79,29 @@ func (a axis) resolveSide(lower bool, mode resolveMode) Endpoint {
 }
 
 // resolveSlot resolves the contributions to one (side, inclusivity) slot in
-// precedence order regardless of insertion order: the baseline, overwritten by
-// any replace (last wins), then tightened by every intersect. The mode filters
-// which tiers participate.
+// precedence order regardless of insertion order: the baseline (a later baseline
+// on the same slot overwrites an earlier one), tightened by every intersect. The
+// mode filters by [Provenance]: a dropKind resolve skips every KindDerived
+// contribution, so only the authored bounds reach the result.
 func (a axis) resolveSlot(lower, inclusive bool, mode resolveMode) Endpoint {
 	var cur Endpoint
 
-	if mode != resolveDropKind {
-		for _, b := range a.bounds {
-			if b.Lower == lower && b.End.Inclusive == inclusive && b.Mode == Baseline {
-				cur = b.End
-			}
+	matches := func(b Bound, tier Mode) bool {
+		if mode == resolveDropKind && b.Provenance == KindDerived {
+			return false
 		}
+
+		return b.Lower == lower && b.End.Inclusive == inclusive && b.Mode == tier
 	}
 
 	for _, b := range a.bounds {
-		if b.Lower == lower && b.End.Inclusive == inclusive && b.Mode == Replace {
+		if matches(b, Baseline) {
 			cur = b.End
 		}
 	}
 
 	for _, b := range a.bounds {
-		if b.Lower == lower && b.End.Inclusive == inclusive && b.Mode == Intersect {
+		if matches(b, Intersect) {
 			if !cur.set() {
 				cur = b.End
 			} else {
