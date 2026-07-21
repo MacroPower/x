@@ -3492,6 +3492,38 @@ func TestGenerateFor_VerbatimEmittedUnderPointer(t *testing.T) {
 		"the verbatim schema is emitted as-is, with no null branch under the pointer")
 }
 
+func TestGenerateFor_VerbatimTagBoundOnlyTightens(t *testing.T) {
+	t.Parallel()
+
+	// The tighten-only guarantee holds on the verbatim path too: a jsonschema-tag
+	// bound weaker than one the verbatim schema authors cannot replace it, while a
+	// tighter tag bound applies. A verbatim payload with no authored canvas bound
+	// is left untouched (see TestGenerateFor_VerbatimEmittedUnderPointer).
+	type Blob string
+
+	type Container struct {
+		B Blob `json:"b" jsonschema:"maximum=200,minimum=5"`
+	}
+
+	s, err := jsonschema.GenerateFor[Container](t.Context(),
+		jsonschema.WithTypeSchemaFor[Blob](jsonschema.TypeSchema{
+			Verbatim: &jsonschema.Schema{
+				Type:    "integer",
+				Minimum: new(0.0),
+				Maximum: new(100.0),
+			},
+		}),
+	)
+	require.NoError(t, err)
+
+	field := s.Properties["b"]
+	require.NotNil(t, field)
+	require.NotNil(t, field.Maximum)
+	assert.InDelta(t, 100.0, *field.Maximum, 0, "the verbatim ceiling wins over the weaker tag maximum")
+	require.NotNil(t, field.Minimum)
+	assert.InDelta(t, 5.0, *field.Minimum, 0, "the tighter tag floor applies")
+}
+
 func TestGenerateFor_Draft7_NullableRefWithAnnotation(t *testing.T) {
 	t.Parallel()
 
