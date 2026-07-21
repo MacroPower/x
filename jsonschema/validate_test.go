@@ -3985,6 +3985,61 @@ func TestValidateMutatesInputSchema(t *testing.T) {
 		"Validate should not mutate the input schema")
 }
 
+// TestCompileRemoteBackrefDoesNotMutateInput covers the remoteLoader cache-hit
+// path: the registry holds caller-owned pointers (the root under its retrieval
+// URI, nested absolute-$id subschemas), and when a fetched remote document
+// refs back to a registered URI the upstream resolver's loader answer is
+// mutated in place ($schema inheritance). The hit must be cloned like a
+// resolver answer, or Compile writes a $schema the author never wrote into the
+// caller's object and a later Compile of the same object can detect a
+// different draft.
+func TestCompileRemoteBackrefDoesNotMutateInput(t *testing.T) {
+	t.Parallel()
+
+	t.Run("root registered via WithBaseURI", func(t *testing.T) {
+		t.Parallel()
+
+		root := &jsonschema.Schema{Ref: "https://ex.com/remote.json"}
+		resolver := jsonschema.SchemaMap{
+			"https://ex.com/remote.json": {
+				Schema: "https://json-schema.org/draft/2020-12/schema",
+				Ref:    "https://ex.com/root.json",
+			},
+		}
+
+		_, err := jsonschema.Compile(t.Context(), root,
+			jsonschema.WithRefResolver(resolver),
+			jsonschema.WithBaseURI("https://ex.com/root.json"))
+		require.NoError(t, err)
+
+		assert.Empty(t, root.Schema,
+			"Compile must not write $schema into the caller's root schema")
+	})
+
+	t.Run("nested absolute $id subschema", func(t *testing.T) {
+		t.Parallel()
+
+		def := &jsonschema.Schema{ID: "https://ex.com/def.json", Type: "string"}
+		root := &jsonschema.Schema{
+			Ref:  "https://ex.com/remote.json",
+			Defs: map[string]*jsonschema.Schema{"d": def},
+		}
+		resolver := jsonschema.SchemaMap{
+			"https://ex.com/remote.json": {
+				Schema: "http://json-schema.org/draft-07/schema#",
+				Ref:    "https://ex.com/def.json",
+			},
+		}
+
+		_, err := jsonschema.Compile(t.Context(), root,
+			jsonschema.WithRefResolver(resolver))
+		require.NoError(t, err)
+
+		assert.Empty(t, def.Schema,
+			"Compile must not write $schema into the caller's nested $id subschema")
+	})
+}
+
 func TestRemoteLoaderReturnsEmptyOnFailure(t *testing.T) {
 	t.Parallel()
 

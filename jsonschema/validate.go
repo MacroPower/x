@@ -1000,9 +1000,19 @@ func (v *validator) checkFetchedDocument(s *Schema, baseURI string) error {
 func (v *validator) remoteLoader() jsonschema.Loader {
 	return func(uri *url.URL) (*Schema, error) {
 		uriStr := uri.String()
-		// Check cache first.
+		// Check cache first. The registry holds caller-owned pointers (the
+		// root under its retrieval URI, every nested absolute-$id subschema),
+		// and the upstream resolver mutates loader-returned schemas ($schema
+		// inheritance), so a hit is cloned like a resolver answer. Resolve
+		// only needs the copy for structural resolution; the validation walk
+		// keeps reading the registry entry.
 		if s, ok := v.refReg.URI[uriStr]; ok {
-			return s, nil
+			cp, cpErr := cloneSchema(s)
+			if cpErr != nil {
+				return nil, fmt.Errorf("clone cached schema: %w", cpErr)
+			}
+
+			return cp, nil
 		}
 
 		if v.refResolver != nil {
