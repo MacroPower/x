@@ -783,6 +783,12 @@ func callResolver(ctx context.Context, resolver RefResolver, uri string) (*Schem
 // with [ErrRefResolve] (a resolver-reported failure, a replayed recorded error,
 // or a clone failure). On success cp holds the clone with missed false and a nil
 // error. The caller then vets and registers cp under its own policy.
+//
+// The third remote path, [validator.remoteLoader], deliberately stays off this
+// skeleton: the upstream Loader contract must not fail Schema.Resolve, so that
+// path cannot fail fast on the wrapped errors this skeleton returns and must
+// not populate the per-run negative cache, and its registrations are instead
+// vetted by Compile's single post-Resolve vet loop.
 func fetchAndClone(
 	ctx context.Context, resolver RefResolver, sess *refresolve.Session, baseURI string,
 ) (*Schema, bool, error) {
@@ -881,7 +887,10 @@ func (v *validator) remoteFetch(sess *refresolve.Session, cow bool) refresolve.F
 
 // documentVetter is the single structural-vetting policy applied to every
 // schema document the compiler and the runtime accept: the root, JSON-pointer
-// fallback targets, and fetched remote documents alike. It runs the type-name
+// fallback targets, and fetched remote documents alike. Inline is the one
+// exception: its own root schema is not vetted (only the remotes it fetches
+// are), preserving its long-standing acceptance of inputs Compile would
+// reject. It runs the type-name
 // check, the non-negative-bounds check, and (only when rejectItemsArray is set,
 // i.e. under a draft where the array form of items is invalid) the items-array
 // check, in that order, so the first violation a document carries is the one
@@ -900,15 +909,15 @@ type documentVetter struct {
 	rejectItemsArray bool
 }
 
-// newDocumentVetter returns a vetter with fresh visited sets. The
-// rejectItemsArray flag comes from the run's [draftProfile]; the type-name and
-// bounds checks are draft-agnostic.
-func newDocumentVetter(rejectItemsArray bool) *documentVetter {
+// newDocumentVetter returns a vetter with fresh visited sets, carrying the
+// run's [draftProfile] policy. Only the profile's rejectItemsArray flag feeds
+// the checks; the type-name and bounds checks are draft-agnostic.
+func newDocumentVetter(profile draftProfile) *documentVetter {
 	return &documentVetter{
 		typeVisited:      map[*Schema]bool{},
 		boundsVisited:    map[*Schema]bool{},
 		itemsVisited:     map[*Schema]bool{},
-		rejectItemsArray: rejectItemsArray,
+		rejectItemsArray: profile.rejectItemsArray,
 	}
 }
 
@@ -942,7 +951,7 @@ func (dv *documentVetter) vet(s *Schema, pathPrefix string) error {
 // vetter. The base URI prefixes the path so a violation names the offending
 // document exactly as the compile-time pass does.
 func (v *validator) checkFetchedDocument(s *Schema, baseURI string) error {
-	return newDocumentVetter(v.profile.rejectItemsArray).vet(s, baseURI+"#")
+	return newDocumentVetter(v.profile).vet(s, baseURI+"#")
 }
 
 // remoteLoader returns a [jsonschema.Loader] for upstream Schema.Resolve.
@@ -956,6 +965,15 @@ func (v *validator) checkFetchedDocument(s *Schema, baseURI string) error {
 // inheritance) don't modify the caller's original schema objects. This runs at
 // compile time single-threaded, so the registrations land directly in the
 // compiled registry every per-run validator then shares.
+//
+// Unlike [validator.remoteFetch] and the inliner's fetch, this path does not
+// run through [fetchAndClone]: the upstream Loader contract must not fail
+// Schema.Resolve, so a resolver miss, resolver error, or clone failure is
+// swallowed into the empty-schema answer rather than failing fast, and no
+// negative-cache entry is recorded for it. Skipping the vet here is safe
+// because every document this loader registers lands in the shared refReg,
+// which Compile's single post-Resolve vet loop checks before the Validator is
+// returned.
 func (v *validator) remoteLoader() jsonschema.Loader {
 	return func(uri *url.URL) (*Schema, error) {
 		uriStr := uri.String()
@@ -1093,7 +1111,7 @@ func Compile(ctx context.Context, schema *Schema, opts ...ValidateOption) (*Vali
 	// passes below (fallback targets, fetched remotes), so a node reached both
 	// locally and through a remote URI is checked once and attributed to the
 	// pass that reached it first.
-	dv := newDocumentVetter(v.profile.rejectItemsArray)
+	dv := newDocumentVetter(v.profile)
 
 	err = dv.vet(schema, "")
 	if err != nil {
