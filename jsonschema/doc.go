@@ -309,7 +309,21 @@
 // read-only, for dispatching on the reflected shape. Generation composes the
 // canvas with Base and applies the null encoding,
 // so a const or enum an interpreter declares lands on the value branch and keeps
-// a permitted null valid. To constrain the elements of a sequence or map field
+// a permitted null valid.
+//
+// For bounds and value constraints an interpreter uses the [Constraints] facade
+// [FieldContext.Constraints] returns, the contribution surface over the shared
+// constraint algebra. It parses and adds numeric bounds
+// ([Constraints.AddNumericBound]) under the single 2^53 exact-representability
+// policy, string length ([Constraints.AddLengthBound]), container counts
+// ([Constraints.AddCountBound], which selects minItems/maxItems or
+// minProperties/maxProperties from the field kind), multipleOf, and
+// const/enum/forbidden values, without naming the internal model. The bound
+// methods are intersect-only: each writes back only when it tightens the
+// effective bound, so a bound never loosens a stronger one the field's type or
+// an earlier rule set, and a bound that would widen or clear a kind bound is a
+// no-op. A conflict an interpreter raises through the facade surfaces the public
+// [ErrConstraintConflict] sentinel. To constrain the elements of a sequence or map field
 // (a dive, or a sequence-wide oneof), an interpreter walks the element contexts
 // [FieldContext.ElementContexts] returns, each a [FieldContext] over one
 // element's canvas. For a promoted field, the declaring struct type is the
@@ -472,11 +486,18 @@
 // schema).
 //
 // A const or enum makes the kind-derived numeric bounds (an int8's
-// minimum/maximum, for instance) redundant, so they are dropped. A const also
-// subsumes an explicit bound the tag sets, since it pins a single value, so
-// that bound is dropped too. An enum only restricts the value to a set, so an
-// explicit bound the tag sets narrows it further and is kept:
-// enum=10|20,minimum=15 keeps minimum and so admits only 20.
+// minimum/maximum, for instance) redundant, so they are dropped. This
+// const/enum-subsumes-bounds precedence is owned once by the shared constraint
+// algebra and applies uniformly to every authored bound, whether the jsonschema
+// tag or a tag interpreter set it. A const subsumes an explicit bound too, since
+// it pins a single value, so that bound is dropped. An enum only restricts the
+// value to a set, so an explicit bound narrows it further and is kept:
+// enum=10|20,minimum=15 keeps minimum and so admits only 20. Numeric, length,
+// and count bounds from all three sources (the Go kind, the jsonschema tag, and
+// tag interpreters) merge through that one model: they intersect order-
+// independently (a weaker bound never loosens a stronger one), a conflict in the
+// discrete value set aborts generation, and an unsatisfiable range (a minimum
+// above a maximum) is emitted as its impossible bounds rather than loosened.
 //
 // The bound drop is by author on a sequence or map element. A jsonschema-tag
 // enum on the elements keeps each element's type-derived numeric bounds: the tag
@@ -657,8 +678,11 @@
 // precision: integers beyond 2^53 round when the schema is decoded, even though
 // the instance value they are compared against is exact. Both const and enum
 // values are preserved exactly (decoded as [json.Number]); on the generation
-// side a jsonschema tag bound that would round is rejected rather than silently
-// loosened.
+// side an authored bound that would round is rejected rather than silently
+// loosened, through a single exact-representability policy shared by every
+// source (the jsonschema tag and every tag interpreter, via
+// [ErrBoundNotRepresentable]), so a bound beyond 2^53 is rejected the same way
+// regardless of which tag set it or the field's kind.
 //
 // Validation is configured via [ValidateOption] values:
 //

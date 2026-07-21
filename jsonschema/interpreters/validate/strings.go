@@ -5,28 +5,54 @@ import (
 	"reflect"
 
 	"go.jacobcolvin.com/x/jsonschema"
+	"go.jacobcolvin.com/x/jsonschema/internal/constraint"
 )
 
 // applyStringMinConstraint applies min/gte or gt to a string field by raising
-// its minLength floor on the canvas, intersecting its own repeated rules against
-// the canvas value (reconcile intersects against the type bound).
+// its minLength floor through the shared constraints facade, which folds an
+// exclusive gt, clamps non-negative, and intersects against the effective floor.
 func applyStringMinConstraint(field jsonschema.FieldContext, value string, exclusive bool) error {
-	return applyMinBound(&field.Canvas.MinLength, field.Canvas.MinLength, value, exclusive)
+	rule := jsonschema.LenMin
+	if exclusive {
+		rule = jsonschema.LenGt
+	}
+
+	err := field.Constraints().AddLengthBound(rule, value)
+	if err != nil {
+		return fmt.Errorf("validate tag: min: %w", err)
+	}
+
+	return nil
 }
 
 // applyStringMaxConstraint applies max/lte or lt to a string field by lowering
-// its maxLength ceiling on the canvas, intersecting its own repeated rules
-// against the canvas values (reconcile intersects against the type bound).
+// its maxLength ceiling through the facade, which folds an exclusive lt and
+// expresses an unsatisfiable sub-zero ceiling as the floor-one/ceiling-zero
+// range no string satisfies.
 func applyStringMaxConstraint(field jsonschema.FieldContext, value string, exclusive bool) error {
-	return applyMaxBound(&field.Canvas.MinLength, &field.Canvas.MaxLength,
-		field.Canvas.MinLength, field.Canvas.MaxLength, value, exclusive)
+	rule := jsonschema.LenMax
+	if exclusive {
+		rule = jsonschema.LenLt
+	}
+
+	err := field.Constraints().AddLengthBound(rule, value)
+	if err != nil {
+		return fmt.Errorf("validate tag: max: %w", err)
+	}
+
+	return nil
 }
 
 // applyStringLenConstraint applies len=N to a string field by pinning minLength
-// and maxLength on the canvas to the intersected bound.
+// and maxLength through the facade to the intersected bound (a negative len
+// yields the unsatisfiable range).
 func applyStringLenConstraint(field jsonschema.FieldContext, value string) error {
-	return applyLenBound(&field.Canvas.MinLength, &field.Canvas.MaxLength,
-		field.Canvas.MinLength, field.Canvas.MaxLength, value)
+	err := field.Constraints().AddLengthBound(jsonschema.LenExact, value)
+	if err != nil {
+		return fmt.Errorf("validate tag: len: %w", err)
+	}
+
+	return nil
 }
 
 // applyStringOneOf applies oneof=a b c to a string field. Single-quoted runs
@@ -59,7 +85,7 @@ func applyStringEq(field jsonschema.FieldContext, value string) error {
 		}
 	}
 
-	if field.Base != nil && field.Base.Const != nil && !numericEqual(*field.Base.Const, any(value)) {
+	if field.Base != nil && field.Base.Const != nil && !constraint.ValuesEqual(*field.Base.Const, any(value)) {
 		return fmt.Errorf("%w: eq=%q conflicts with the type's existing const",
 			ErrConflictingConstraints, value)
 	}

@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 
+	"go.jacobcolvin.com/x/jsonschema/internal/numkind"
 	"go.jacobcolvin.com/x/jsonschema/internal/uriref"
 )
 
@@ -699,6 +700,34 @@ func (fc FieldContext) ElementContexts() []FieldContext {
 	default:
 		return nil
 	}
+}
+
+// Constraints returns the intersect-only contribution facade for the field: the
+// surface a tag interpreter uses to add numeric bounds, string length, container
+// counts, multipleOf, and const/enum/forbidden values through the shared
+// constraint algebra. It captures the field's authored canvas, its type-derived
+// base, and the field's dereferenced kind (so [Constraints.AddNumericBound]
+// parses at the right kind and [Constraints.AddCountBound] targets items or
+// properties). Each call builds a fresh facade over the same canvas, so an
+// interpreter may call it repeatedly.
+func (fc FieldContext) Constraints() *Constraints {
+	return &Constraints{
+		canvas: fc.Canvas,
+		base:   fc.Base,
+		kind:   numkind.DerefType(fc.Type).Kind(),
+	}
+}
+
+// coalesceField returns the canvas value when the field authored it, otherwise
+// the type-derived base value: the effective merged keyword an interpreter reads
+// when tightening a bound so a tag bound never weakens the type's own bound and
+// repeated tag bounds intersect order-independently.
+func coalesceField[T any](canvas, base *T) *T {
+	if canvas != nil {
+		return canvas
+	}
+
+	return base
 }
 
 // effectiveBase returns fc.Base, or an empty schema when a caller built the

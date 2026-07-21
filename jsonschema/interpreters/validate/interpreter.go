@@ -3,20 +3,25 @@ package validate
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"reflect"
 	"slices"
 	"strings"
 
 	"go.jacobcolvin.com/x/jsonschema"
+	"go.jacobcolvin.com/x/jsonschema/internal/constraint"
 	"go.jacobcolvin.com/x/jsonschema/internal/numkind"
 )
 
 // ErrConflictingConstraints reports two tag rules on one field that can never
 // both hold, such as required and eq=false on a bool: required means the value
-// must be true while eq=false pins it to false, so no value satisfies both.
-var ErrConflictingConstraints = errors.New("validate tag: conflicting constraints")
+// must be true while eq=false pins it to false, so no value satisfies both. It
+// derives from the package-level [jsonschema.ErrConstraintConflict], so a
+// conflict this interpreter raises is recognizable through either sentinel.
+var ErrConflictingConstraints = fmt.Errorf(
+	"validate tag: conflicting constraints: %w",
+	jsonschema.ErrConstraintConflict,
+)
 
 // Interpreter implements [jsonschema.TagInterpreter] for go-playground/validator
 // tag syntax. Create one with [NewInterpreter] and register it under the
@@ -385,7 +390,7 @@ func applyMinConstraint(field jsonschema.FieldContext, value string, baseType re
 	case isStringKind(baseType):
 		return applyStringMinConstraint(field, value, exclusive)
 	case isNumericKind(baseType):
-		return applyNumericMinConstraint(field, value, baseType, exclusive)
+		return applyNumericMinConstraint(field, value, exclusive)
 	case isCollectionKind(baseType):
 		return applyCollectionMinConstraint(field, value, baseType, exclusive)
 	default:
@@ -399,7 +404,7 @@ func applyMaxConstraint(field jsonschema.FieldContext, value string, baseType re
 	case isStringKind(baseType):
 		return applyStringMaxConstraint(field, value, exclusive)
 	case isNumericKind(baseType):
-		return applyNumericMaxConstraint(field, value, baseType, exclusive)
+		return applyNumericMaxConstraint(field, value, exclusive)
 	case isCollectionKind(baseType):
 		return applyCollectionMaxConstraint(field, value, baseType, exclusive)
 	default:
@@ -493,7 +498,8 @@ func finishElement(elem jsonschema.FieldContext) error {
 	existing := elem.Base
 
 	if existing != nil {
-		if elem.Canvas.Const != nil && existing.Const != nil && !numericEqual(*existing.Const, *elem.Canvas.Const) {
+		if elem.Canvas.Const != nil && existing.Const != nil &&
+			!constraint.ValuesEqual(*existing.Const, *elem.Canvas.Const) {
 			return fmt.Errorf(
 				"%w: eq/len conflicts with the element type's existing const",
 				ErrConflictingConstraints)
@@ -771,7 +777,7 @@ func applyNe(field jsonschema.FieldContext, value string, baseType reflect.Type)
 	case isBoolKind(baseType):
 		return applyBoolNe(field.Canvas, value)
 	case isCollectionKind(baseType):
-		return applyCollectionNe(field.Canvas, value, baseType)
+		return applyCollectionNe(field, value, baseType)
 	case isStringKind(baseType):
 		applyStringNe(field.Canvas, value)
 

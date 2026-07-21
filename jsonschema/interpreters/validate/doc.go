@@ -69,6 +69,11 @@
 //     into not.enum or allOf when several values are forbidden, e.g. required+ne)
 //   - len=N: const (value equals N)
 //
+// Numeric, length, and count bounds are contributed through the field's shared
+// Constraints facade, so this interpreter applies the one 2^53
+// exact-representability policy and the one intersection the jsonschema tag and
+// the Go kind also merge through, rather than a private bound path.
+//
 // Numeric bounds intersect with the bounds derived from the field's Go type:
 // a tag bound wider than the type's range clamps to the type limit (int8 with
 // max=200 emits maximum: 127), matching the jsonschema tag's bound handling.

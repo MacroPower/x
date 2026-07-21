@@ -4,28 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strconv"
 
 	"go.jacobcolvin.com/x/jsonschema"
 )
-
-// collectionBounds returns the collection's size-bound canvas write targets (the
-// floor and ceiling field pointers) and their current canvas floor and ceiling
-// values, in that order: the min/maxProperties pair for a map, otherwise the
-// min/maxItems pair for a slice or array. The bound helpers intersect a rule
-// against these canvas values (so repeated rules in one tag AND), while reconcile
-// intersects the canvas against the type-derived bound so a tag bound never
-// weakens the type's own.
-func collectionBounds(
-	field jsonschema.FieldContext, baseType reflect.Type,
-) (**int, **int, *int, *int) {
-	if isMapKind(baseType) {
-		return &field.Canvas.MinProperties, &field.Canvas.MaxProperties,
-			field.Canvas.MinProperties, field.Canvas.MaxProperties
-	}
-
-	return &field.Canvas.MinItems, &field.Canvas.MaxItems,
-		field.Canvas.MinItems, field.Canvas.MaxItems
-}
 
 // errByteSliceLengthConstraint reports a length, size, or uniqueness validator
 // applied to a []byte field. A []byte marshals to a single base64 string, so
@@ -44,7 +26,9 @@ func isByteSliceField(baseType reflect.Type) bool {
 }
 
 // applyCollectionMinConstraint applies min/gte or gt to a collection field by
-// raising its size floor (minItems or minProperties) on the canvas.
+// raising its size floor (minItems or minProperties) through the shared
+// constraints facade, which selects the count keyword from the field's kind and
+// intersects the bound against the effective floor.
 func applyCollectionMinConstraint(
 	field jsonschema.FieldContext,
 	value string,
@@ -55,13 +39,21 @@ func applyCollectionMinConstraint(
 		return errByteSliceLengthConstraint
 	}
 
-	minField, _, effMin, _ := collectionBounds(field, baseType)
+	rule := jsonschema.LenMin
+	if exclusive {
+		rule = jsonschema.LenGt
+	}
 
-	return applyMinBound(minField, effMin, value, exclusive)
+	err := field.Constraints().AddCountBound(rule, value)
+	if err != nil {
+		return fmt.Errorf("validate tag: min: %w", err)
+	}
+
+	return nil
 }
 
 // applyCollectionMaxConstraint applies max/lte or lt to a collection field by
-// lowering its size ceiling (maxItems or maxProperties) on the canvas.
+// lowering its size ceiling (maxItems or maxProperties) through the facade.
 func applyCollectionMaxConstraint(
 	field jsonschema.FieldContext,
 	value string,
@@ -72,34 +64,46 @@ func applyCollectionMaxConstraint(
 		return errByteSliceLengthConstraint
 	}
 
-	minField, maxField, effMin, effMax := collectionBounds(field, baseType)
+	rule := jsonschema.LenMax
+	if exclusive {
+		rule = jsonschema.LenLt
+	}
 
-	return applyMaxBound(minField, maxField, effMin, effMax, value, exclusive)
+	err := field.Constraints().AddCountBound(rule, value)
+	if err != nil {
+		return fmt.Errorf("validate tag: max: %w", err)
+	}
+
+	return nil
 }
 
 // applyCollectionLenConstraint applies len=N to a collection field by pinning
-// both size bounds on the canvas to the intersected value.
+// both size bounds through the facade to the intersected value.
 func applyCollectionLenConstraint(field jsonschema.FieldContext, value string, baseType reflect.Type) error {
 	if isByteSliceField(baseType) {
 		return errByteSliceLengthConstraint
 	}
 
-	minField, maxField, effMin, effMax := collectionBounds(field, baseType)
+	err := field.Constraints().AddCountBound(jsonschema.LenExact, value)
+	if err != nil {
+		return fmt.Errorf("validate tag: len: %w", err)
+	}
 
-	return applyLenBound(minField, maxField, effMin, effMax, value)
+	return nil
 }
 
-// applyCollectionNe applies ne=N to a collection schema, forbidding the length
-// N. The exclusion is expressed as a not subschema pinning the length so a
-// collection of exactly N elements (or entries, for a map) is rejected.
-func applyCollectionNe(s *jsonschema.Schema, value string, baseType reflect.Type) error {
+// applyCollectionNe applies ne=N to a collection field, forbidding the length N.
+// The exclusion is expressed as a not subschema pinning the length so a
+// collection of exactly N elements (or entries, for a map) is rejected; it rides
+// the shared facade ForbidSchema so it composes with any value already forbidden.
+func applyCollectionNe(field jsonschema.FieldContext, value string, baseType reflect.Type) error {
 	if isByteSliceField(baseType) {
 		return errByteSliceLengthConstraint
 	}
 
-	n, err := parseBoundValue(value)
+	n, err := strconv.Atoi(value)
 	if err != nil {
-		return err
+		return fmt.Errorf("validate tag: invalid number %q: %w", value, err)
 	}
 
 	// A negative length can never occur, so ne=<negative> excludes nothing.
@@ -116,21 +120,7 @@ func applyCollectionNe(s *jsonschema.Schema, value string, baseType reflect.Type
 		forbidden.MaxItems = new(n)
 	}
 
-	if s.Not == nil {
-		s.Not = forbidden
-
-		return nil
-	}
-
-	// A length exclusion is a min/max range rather than a single value, so it
-	// cannot ride on forbidValue's not.const/not.enum accumulation. Instead move
-	// any existing not under allOf and add a separate not for this length so both
-	// apply conjunctively.
-	s.AllOf = append(s.AllOf,
-		&jsonschema.Schema{Not: s.Not},
-		&jsonschema.Schema{Not: forbidden},
-	)
-	s.Not = nil
+	field.Constraints().ForbidSchema(forbidden)
 
 	return nil
 }

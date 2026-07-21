@@ -5,21 +5,22 @@ import (
 	"math"
 	"reflect"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 
 	"go.jacobcolvin.com/x/jsonschema"
+	"go.jacobcolvin.com/x/jsonschema/internal/constraint"
 	"go.jacobcolvin.com/x/jsonschema/internal/numkind"
-	"go.jacobcolvin.com/x/jsonschema/internal/schemashape"
 )
 
-// parseBoundFloat parses a numeric bound, rejecting non-finite values
+// parseBoundFloat parses a numeric value, rejecting non-finite values
 // ("NaN"/"Inf"/"+Inf"/"-Inf"). [strconv.ParseFloat] accepts those, but a
-// non-finite bound cannot constrain any JSON number: the validator converts
-// each bound to a [big.Rat] and skips comparison when that conversion yields
-// no rational form, so a non-finite Minimum/Maximum is a silent no-op. Such a
-// bound is rejected at generation time so it never reaches the schema.
+// non-finite value cannot constrain any JSON number: the validator converts each
+// bound to a [big.Rat] and skips comparison when that conversion yields no
+// rational form, so a non-finite Minimum/Maximum is a silent no-op. Such a value
+// is rejected at generation time so it never reaches the schema. It parses the
+// scalar eq/ne/oneof values on a float field; the numeric bound keywords parse
+// through the shared [constraint.ParseNumericBound] policy in the facade.
 func parseBoundFloat(value string) (float64, error) {
 	// Reject the non-decimal float forms Go's strconv accepts (underscore digit
 	// separators and hexadecimal floats such as 0x1p4) so the validate tag
@@ -40,140 +41,41 @@ func parseBoundFloat(value string) (float64, error) {
 	return n, nil
 }
 
-// parseNumericBound parses a numeric min/max bound for the given field type. The
-// upstream [jsonschema.Schema] stores Minimum and Maximum as *float64, so a bound
-// must be exactly representable as a float64 to be stored faithfully. For
-// integer-kind fields the bound is parsed exactly with [strconv.ParseInt] or
-// [strconv.ParseUint] (mirroring [parseNumericValue]) and then checked for exact
-// float64 representability; a bound outside the float64 mantissa's exact-integer
-// range (beyond 2^53) would silently round, turning a forbidden value into an
-// accepted one (or vice versa), so it is rejected rather than stored. Float-kind
-// fields keep ordinary float parsing.
-func parseNumericBound(value string, t reflect.Type) (float64, error) {
-	switch {
-	case numkind.IsUnsigned(t.Kind()):
-		n, err := strconv.ParseUint(value, 10, 64)
-		if err != nil {
-			return 0, fmt.Errorf("invalid unsigned integer %q: %w", value, err)
-		}
-
-		if !uintExactlyRepresentableAsFloat64(n) {
-			return 0, fmt.Errorf("bound %s is not exactly representable as a JSON Schema number", value)
-		}
-
-		return float64(n), nil
-
-	case numkind.IsInteger(t.Kind()):
-		n, err := strconv.ParseInt(value, 10, 64)
-		if err != nil {
-			return 0, fmt.Errorf("invalid integer %q: %w", value, err)
-		}
-
-		if !intExactlyRepresentableAsFloat64(n) {
-			return 0, fmt.Errorf("bound %s is not exactly representable as a JSON Schema number", value)
-		}
-
-		return float64(n), nil
-	}
-
-	return parseBoundFloat(value)
-}
-
-// intExactlyRepresentableAsFloat64 reports whether n round-trips through float64
-// without loss. Values beyond 2^53 in magnitude lose precision: float64(n) snaps
-// to a nearby representable integer, so int64(float64(n)) == n only when the
-// conversion was exact. The [math.MaxInt64] edge is handled by the round-trip
-// itself: float64 conversion rounds it up to 2^63, which is out of int64 range,
-// so the int64() conversion is implementation-defined and never equals
-// [math.MaxInt64], correctly reporting it inexact.
-func intExactlyRepresentableAsFloat64(n int64) bool {
-	const maxExact = int64(1) << 53
-
-	return n >= -maxExact && n <= maxExact
-}
-
-// uintExactlyRepresentableAsFloat64 reports whether n round-trips through
-// float64 without loss, the unsigned analog of
-// [intExactlyRepresentableAsFloat64]. Values beyond 2^53 lose precision, so for
-// example [math.MaxUint64] rounds up to 2^64 and is rejected.
-func uintExactlyRepresentableAsFloat64(n uint64) bool {
-	const maxExact = uint64(1) << 53
-
-	return n <= maxExact
-}
-
-// tightenNumericBound parses a numeric tag bound and intersects it with the
-// canvas bound already in effect. The rule's strictness selects the target: the
-// exclusive bound for gt/lt, otherwise the inclusive one. The existing value read
-// and the write both land on the canvas; the tightens predicate reports whether
-// the new bound n is stronger than the current one (n > existing for a floor,
-// n < existing for a ceiling), so repeated rules in a validate tag are ANDed
-// order-independently. The type-derived bound (a sized integer's floor/ceiling)
-// is intersected later by reconcile, so a tag bound never has to consult it
-// here; inclusiveName/exclusiveName label a parse error.
-func tightenNumericBound(value string, baseType reflect.Type, exclusive bool,
-	inclusiveEff, exclusiveEff *float64, inclusiveField, exclusiveField **float64,
-	inclusiveName, exclusiveName string, tightens func(n, existing float64) bool,
-) error {
-	n, err := parseNumericBound(value, baseType)
-	if err != nil {
-		name := inclusiveName
-		if exclusive {
-			name = exclusiveName
-		}
-
-		return fmt.Errorf("validate tag: %s: %w", name, err)
-	}
-
-	eff := inclusiveEff
-	field := inclusiveField
-
+// applyNumericMinConstraint applies min/gte or gt to a numeric field by raising
+// the minimum (or exclusiveMinimum) floor through the shared constraints facade,
+// which parses under the field's kind, applies the single 2^53 policy, and
+// intersects the bound against the effective one so a tag bound the type can
+// never reach (min=-300 on an int8) does not lower the stronger type floor.
+func applyNumericMinConstraint(field jsonschema.FieldContext, value string, exclusive bool) error {
+	rule := jsonschema.BoundMin
 	if exclusive {
-		eff = exclusiveEff
-		field = exclusiveField
+		rule = jsonschema.BoundGt
 	}
 
-	if eff == nil || tightens(n, *eff) {
-		*field = new(n)
+	err := field.Constraints().AddNumericBound(rule, value)
+	if err != nil {
+		return fmt.Errorf("validate tag: minimum: %w", err)
 	}
 
 	return nil
 }
 
-// applyNumericMinConstraint applies min/gte or gt to a numeric field by raising
-// the minimum (or exclusiveMinimum) floor on the canvas. It intersects only its
-// own repeated rules within the tag by reading the canvas value; reconcile
-// intersects the result against the type-derived bound, so a tag bound the
-// field's Go type can never reach (min=-300 on an int8) never lowers the stronger
-// type floor.
-func applyNumericMinConstraint(
-	field jsonschema.FieldContext,
-	value string,
-	baseType reflect.Type,
-	exclusive bool,
-) error {
-	return tightenNumericBound(value, baseType, exclusive,
-		field.Canvas.Minimum, field.Canvas.ExclusiveMinimum,
-		&field.Canvas.Minimum, &field.Canvas.ExclusiveMinimum, "min", "gt",
-		func(n, existing float64) bool { return n > existing })
-}
-
 // applyNumericMaxConstraint applies max/lte or lt to a numeric field by lowering
-// the maximum (or exclusiveMaximum) ceiling on the canvas. It intersects only its
-// own repeated rules within the tag by reading the canvas value; reconcile
-// intersects the result against the type-derived bound, so a tag bound the
-// field's Go type can never reach (max=200 on an int8) never raises the stronger
-// type ceiling.
-func applyNumericMaxConstraint(
-	field jsonschema.FieldContext,
-	value string,
-	baseType reflect.Type,
-	exclusive bool,
-) error {
-	return tightenNumericBound(value, baseType, exclusive,
-		field.Canvas.Maximum, field.Canvas.ExclusiveMaximum,
-		&field.Canvas.Maximum, &field.Canvas.ExclusiveMaximum, "max", "lt",
-		func(n, existing float64) bool { return n < existing })
+// the maximum (or exclusiveMaximum) ceiling through the facade, which intersects
+// it so a tag bound the type can never reach (max=200 on an int8) does not raise
+// the stronger type ceiling.
+func applyNumericMaxConstraint(field jsonschema.FieldContext, value string, exclusive bool) error {
+	rule := jsonschema.BoundMax
+	if exclusive {
+		rule = jsonschema.BoundLt
+	}
+
+	err := field.Constraints().AddNumericBound(rule, value)
+	if err != nil {
+		return fmt.Errorf("validate tag: maximum: %w", err)
+	}
+
+	return nil
 }
 
 // applyNumericOneOf applies oneof=1 2 3 to a numeric field.
@@ -206,12 +108,12 @@ func applyNumericEq(field jsonschema.FieldContext, value string, baseType reflec
 // canvas const onto it, so a disagreeing const the field's type already
 // supplies (a type override, or another hook) would be silently overwritten.
 func setNumericConst(field jsonschema.FieldContext, parsed any) error {
-	if field.Canvas.Const != nil && !numericEqual(*field.Canvas.Const, parsed) {
+	if field.Canvas.Const != nil && !constraint.ValuesEqual(*field.Canvas.Const, parsed) {
 		return fmt.Errorf("%w: eq/len=%v conflicts with an existing value constraint",
 			ErrConflictingConstraints, parsed)
 	}
 
-	if field.Base != nil && field.Base.Const != nil && !numericEqual(*field.Base.Const, parsed) {
+	if field.Base != nil && field.Base.Const != nil && !constraint.ValuesEqual(*field.Base.Const, parsed) {
 		return fmt.Errorf("%w: eq/len=%v conflicts with the type's existing const",
 			ErrConflictingConstraints, parsed)
 	}
@@ -233,163 +135,19 @@ func applyNumericNe(s *jsonschema.Schema, value string, baseType reflect.Type) e
 	return nil
 }
 
-// forbidValue records that the schema must not equal v. Several tags can forbid
-// values on the same field (for example "required" forbids the zero value while
-// "ne" forbids another); rather than clobbering a single not.const, the values
-// accumulate into not.enum so every constraint composes. The accumulation only
-// applies to a not that constrains nothing beyond that one const or enum: a not
-// carrying sibling keywords (an override-authored {const: x, minLength: 5}) is
-// a conjunction, so merging into it -- or trusting its const/enum as "already
-// forbidden" -- would forbid the value only when the siblings also match. Such
-// a not takes the default branch instead.
+// forbidValue records that the schema must not equal v, composing with any value
+// already forbidden through the shared not.const -> not.enum -> allOf escalation
+// in the constraint package: several tags can forbid values on one field (for
+// example required forbids the zero value while ne forbids another), and the
+// numeric-aware dedup treats the same number arriving with different dynamic
+// types (the untyped int 0 the required path forbids and the uint64(0) an ne=0
+// on an unsigned field forbids) as one value.
 func forbidValue(s *jsonschema.Schema, v any) {
-	switch {
-	case s.Not == nil:
-		s.Not = &jsonschema.Schema{Const: &v}
-	case s.Not.Const != nil && constrainsConstOnly(s.Not):
-		if numericEqual(*s.Not.Const, v) {
-			// Already forbidden as a single value (e.g. required and ne=0 on a
-			// numeric field both forbid 0); nothing to add. The comparison is
-			// numeric-aware because the same number can arrive with different
-			// dynamic types: the required path forbids the untyped int 0 while
-			// ne=0 on an unsigned field parses to uint64(0) and on a float field
-			// to float64(0). Plain == treats those as distinct and would emit a
-			// duplicate.
-			return
-		}
+	var vs constraint.ValueSet
 
-		// Promote the existing single forbidden value into an enum set.
-		s.Not.Enum = []any{*s.Not.Const, v}
-		s.Not.Const = nil
-
-	case s.Not.Enum != nil && constrainsEnumOnly(s.Not):
-		if slices.ContainsFunc(s.Not.Enum, func(e any) bool { return numericEqual(e, v) }) {
-			return
-		}
-
-		s.Not.Enum = append(s.Not.Enum, v)
-
-	default:
-		// Not carries some other shape (e.g. a type or pattern, or a const or
-		// enum with sibling keywords). Composing the forbidden value onto it
-		// directly would silently keep those unrelated constraints; instead
-		// move the existing not under allOf and add a separate not for the new
-		// value so both apply conjunctively.
-		s.AllOf = append(s.AllOf,
-			&jsonschema.Schema{Not: s.Not},
-			&jsonschema.Schema{Not: &jsonschema.Schema{Const: &v}},
-		)
-		s.Not = nil
-	}
-}
-
-// constrainsConstOnly reports whether s constrains nothing beyond its Const.
-// Annotations such as title and description are ignored: they do not affect
-// what the not rejects, so they may ride along with an accumulated enum.
-func constrainsConstOnly(s *jsonschema.Schema) bool {
-	remainder := *s
-	remainder.Const = nil
-
-	return schemashape.IsEmpty(&remainder)
-}
-
-// constrainsEnumOnly reports whether s constrains nothing beyond its Enum, the
-// enum analog of [constrainsConstOnly].
-func constrainsEnumOnly(s *jsonschema.Schema) bool {
-	remainder := *s
-	remainder.Enum = nil
-
-	return schemashape.IsEmpty(&remainder)
-}
-
-// numericEqual reports whether a and b represent the same number, regardless of
-// their dynamic Go types. Forbidden values reach [forbidValue] with different
-// types for the same number (the required path forbids the untyped int 0 while
-// ne=0 on an unsigned field forbids uint64(0) and on a float field float64(0)),
-// so an int and a uint64 holding 0 compare equal here even though == reports
-// them distinct. Non-numeric values (for example bools or strings) fall back to
-// ==.
-func numericEqual(a, b any) bool {
-	ai, aIsInt := asInt64(a)
-	bi, bIsInt := asInt64(b)
-	if aIsInt && bIsInt {
-		return ai == bi
-	}
-
-	au, aIsUint := asUint64(a)
-	bu, bIsUint := asUint64(b)
-	if aIsUint && bIsUint {
-		return au == bu
-	}
-
-	// A signed and an unsigned value can still match when the signed value is
-	// non-negative and equals the unsigned magnitude.
-	if aIsInt && bIsUint {
-		return ai >= 0 && uint64(ai) == bu
-	}
-
-	if aIsUint && bIsInt {
-		return bi >= 0 && uint64(bi) == au
-	}
-
-	af, aIsFloat := asFloat64(a)
-	bf, bIsFloat := asFloat64(b)
-	if (aIsInt || aIsUint || aIsFloat) && (bIsInt || bIsUint || bIsFloat) {
-		// An integer operand compared against a float converts to float64. A
-		// magnitude beyond 2^53 has no exact float64 form, so two distinct
-		// values could collide; treat such a pair as unequal rather than risk a
-		// false match (which would drop a forbidden value from forbidValue).
-		if (aIsInt && !intExactlyRepresentableAsFloat64(ai)) ||
-			(aIsUint && !uintExactlyRepresentableAsFloat64(au)) ||
-			(bIsInt && !intExactlyRepresentableAsFloat64(bi)) ||
-			(bIsUint && !uintExactlyRepresentableAsFloat64(bu)) {
-			return false
-		}
-
-		return af == bf
-	}
-
-	return a == b
-}
-
-// asInt64 returns the value as an int64 when it holds a signed integer kind.
-func asInt64(v any) (int64, bool) {
-	rv := reflect.ValueOf(v)
-
-	switch rv.Kind() {
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return rv.Int(), true
-	default:
-		return 0, false
-	}
-}
-
-// asUint64 returns the value as a uint64 when it holds an unsigned integer kind.
-func asUint64(v any) (uint64, bool) {
-	rv := reflect.ValueOf(v)
-
-	switch rv.Kind() {
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-		return rv.Uint(), true
-	default:
-		return 0, false
-	}
-}
-
-// asFloat64 returns the value as a float64 when it holds any numeric kind.
-func asFloat64(v any) (float64, bool) {
-	rv := reflect.ValueOf(v)
-
-	switch rv.Kind() {
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return float64(rv.Int()), true
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-		return float64(rv.Uint()), true
-	case reflect.Float32, reflect.Float64:
-		return rv.Float(), true
-	default:
-		return 0, false
-	}
+	vs.SeedNot(s.Not)
+	vs.Forbid(v)
+	vs.WriteForbidden(s)
 }
 
 // parseNumericValue parses a single numeric value according to the Go type.

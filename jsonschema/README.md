@@ -449,10 +449,20 @@ item schema).
 
 A `const` or `enum` makes the kind-derived numeric bounds (an `int8`'s
 `minimum`/`maximum`, for instance) redundant, so they are dropped. A `const`
-also subsumes an explicit bound the tag sets, since it pins a single value, so
-that bound is dropped too. An `enum` only restricts the value to a set, so an
-explicit bound the tag sets narrows it further and is kept:
-`enum=10|20,minimum=15` keeps `minimum` and so admits only `20`.
+also subsumes an explicit bound, since it pins a single value, so that bound is
+dropped too. An `enum` only restricts the value to a set, so an explicit bound
+narrows it further and is kept: `enum=10|20,minimum=15` keeps `minimum` and so
+admits only `20`.
+
+The numeric, length, and count bounds from all three sources (the Go kind, the
+`jsonschema` tag, and tag interpreters) merge through one shared constraint
+model, so this precedence is defined once and applies uniformly no matter which
+source set a bound. The bounds intersect order-independently (a weaker bound
+never loosens a stronger one), a conflict in the discrete value set aborts
+generation, and an unsatisfiable range (a `minimum` above a `maximum`) is
+emitted as its impossible bounds rather than loosened. A numeric bound beyond
+2^53, which a float64 cannot hold exactly, is rejected the same way regardless
+of which source set it.
 
 On a sequence or map element the bound drop is by author. A jsonschema-tag
 `enum` on the elements keeps each element's type-derived numeric bounds -- the
@@ -600,7 +610,20 @@ declares lands on the value branch and keeps null valid. The context also holds
 the parent schema, JSON name, and Go type; the declaring struct type, which for a
 promoted field is the embedded type; the full `reflect.StructField` for reading
 sibling struct tags such as the `json` tag's options; and the target `Draft` for
-emitting draft-appropriate keywords. To constrain the elements of a sequence or
+emitting draft-appropriate keywords.
+
+For bounds and value constraints, an interpreter uses the `Constraints` facade
+`FieldContext.Constraints()` returns, the contribution surface over the shared
+constraint algebra. It parses and adds numeric bounds (`AddNumericBound`, under
+the single 2^53 policy), string length (`AddLengthBound`), container counts
+(`AddCountBound`, which targets `minItems`/`maxItems` or
+`minProperties`/`maxProperties` from the field kind), `multipleOf`, and
+`const`/`enum`/forbidden values, without naming the internal model. The bound
+methods are intersect-only: each writes back only when it tightens the effective
+bound, so a bound never loosens a stronger one and a widening bound is a no-op. A
+conflict surfaces the exported `ErrConstraintConflict` sentinel.
+
+To constrain the elements of a sequence or
 map field, an interpreter walks the element contexts `FieldContext.ElementContexts`
 returns. Each interpreter is registered under the struct tag key it reads
 (following `net/http.Handle`, so one implementation can serve several keys);
