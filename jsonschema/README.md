@@ -882,7 +882,7 @@ containing object are both identifiable from `InstancePath` alone.
 | `WithBaseURI(base)`            | Set the root document's base URI for ref absolutization; also serves `Inline`.                                           |
 | `WithFormatValidator(name, f)` | Register a custom `format` checker (a `FormatValidator`; `FormatValidatorFunc` adapts a bare function) under `name`.     |
 | `WithFormats(bool)`            | Force `format` assertion on or off.                                                                                      |
-| `WithContent(bool)`            | Assert `contentEncoding`/`contentMediaType` (annotation-only by default).                                                |
+| `WithContent(bool)`            | Assert `contentEncoding`/`contentMediaType` (annotation-only by default; base64 rejects line breaks under 2020-12 only). |
 | `WithResolveOptions(opts)`     | Pass `ResolveOptions` (aliased from the upstream package) to `Schema.Resolve`.                                           |
 | `WithVocabularies(uris...)`    | Directly set the active vocabularies (highest precedence); unlisted ones are inactive.                                   |
 | `WithMetaSchemaResolver(r)`    | Set a `RefResolver` that looks up the metaschema (whose `$vocabulary` gates keyword groups) by the root's `$schema` URI. |

@@ -45,6 +45,7 @@ func TestAssert(t *testing.T) {
 		encoding  string
 		mediaType string
 		str       string
+		strict    bool
 		keyword   string
 		decodeErr bool
 	}{
@@ -90,13 +91,31 @@ func TestAssert(t *testing.T) {
 			mediaType: "text/plain",
 			str:       `{not json`,
 		},
+		"strict rejects embedded line feed": {
+			encoding:  content.Base64,
+			str:       "aGV\nsbG8=",
+			strict:    true,
+			keyword:   "contentEncoding",
+			decodeErr: true,
+		},
+		"strict rejects embedded carriage return": {
+			encoding:  content.Base64,
+			str:       "aGV\rsbG8=",
+			strict:    true,
+			keyword:   "contentEncoding",
+			decodeErr: true,
+		},
+		"lenient ignores embedded line feed": {
+			encoding: content.Base64,
+			str:      "aGV\nsbG8=",
+		},
 	}
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			kw, decErr := content.Assert(tc.encoding, tc.mediaType, tc.str)
+			kw, decErr := content.Assert(tc.encoding, tc.mediaType, tc.str, tc.strict)
 			assert.Equal(t, tc.keyword, kw)
 
 			if tc.decodeErr {

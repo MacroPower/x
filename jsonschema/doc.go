@@ -711,6 +711,8 @@
 //     2020-12 unless the format-assertion vocabulary is active.
 //   - [WithContent] asserts contentEncoding (base64) and contentMediaType
 //     (application/json) for string instances. Annotation-only by default.
+//     Base64 follows the draft's citation: RFC 4648 under 2020-12 (line
+//     breaks rejected), MIME base64 under Draft-07 (line breaks ignored).
 //   - [WithResolveOptions] passes [ResolveOptions] (an alias for the upstream
 //     options type, so no second import is needed) for structural
 //     pre-validation.

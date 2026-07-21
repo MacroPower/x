@@ -1478,6 +1478,27 @@ func TestValidateWithContent(t *testing.T) {
 	}
 }
 
+// TestValidateWithContentBase64LineBreaks covers the draft split for line
+// breaks in base64 content: 2020-12 cites RFC 4648, which forbids characters
+// outside the base alphabet, while Draft-07 cites the MIME base64 of RFC 2045,
+// which ignores them. The encoding/base64 decoder silently skips \r and \n, so
+// without an explicit check the strict form would pass.
+func TestValidateWithContentBase64LineBreaks(t *testing.T) {
+	t.Parallel()
+
+	schema := &jsonschema.Schema{ContentEncoding: "base64"}
+	instance := "aGV\nsbG8="
+
+	err := jsonschema.Validate(t.Context(), schema, instance,
+		jsonschema.WithContent(true))
+	require.Error(t, err, "2020-12 base64 must reject an embedded line break")
+	assert.Contains(t, err.Error(), "(contentEncoding)")
+
+	err = jsonschema.Validate(t.Context(), schema, instance,
+		jsonschema.WithContent(true), jsonschema.WithDraft(jsonschema.Draft7))
+	require.NoError(t, err, "Draft-07 MIME base64 ignores line breaks")
+}
+
 func TestValidateDynamicRefUnresolvableErrors(t *testing.T) {
 	t.Parallel()
 

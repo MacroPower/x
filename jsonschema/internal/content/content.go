@@ -14,6 +14,7 @@ package content
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"mime"
 	"strings"
 )
@@ -54,7 +55,13 @@ func MediaTypeIsJSON(mediaType string) bool {
 //   - ("", nil) when the content passes, or when the encoding is unrecognized
 //     and so cannot be decoded for the media-type check (both keywords stay
 //     annotations).
-func Assert(encoding, mediaType, str string) (string, error) {
+//
+// strictBase64 selects the draft's base64 grammar: Draft 2020-12 cites
+// RFC 4648, which forbids characters outside the base alphabet including line
+// breaks, while Draft-07 cites the MIME base64 of RFC 2045, which ignores
+// them. [encoding/base64] silently skips \r and \n, so the strict form rejects
+// them up front.
+func Assert(encoding, mediaType, str string, strictBase64 bool) (string, error) {
 	decoded := []byte(str)
 	decodedKnown := true
 
@@ -62,6 +69,10 @@ func Assert(encoding, mediaType, str string) (string, error) {
 	case "":
 		// No encoding: the instance string is the content itself.
 	case Base64:
+		if strictBase64 && strings.ContainsAny(str, "\r\n") {
+			return "contentEncoding", errors.New("line break in encoded data")
+		}
+
 		b, err := base64.StdEncoding.DecodeString(str)
 		if err != nil {
 			return "contentEncoding", err

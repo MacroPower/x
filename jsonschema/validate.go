@@ -3214,7 +3214,10 @@ func (v *validator) assertContent(
 		return nil
 	}
 
-	switch kw, decodeErr := content.Assert(schema.ContentEncoding, schema.ContentMediaType, str); kw {
+	switch kw, decodeErr := content.Assert(
+		schema.ContentEncoding, schema.ContentMediaType, str,
+		v.draft == Draft2020,
+	); kw {
 	case KeywordContentEncoding:
 		return []*ValidationError{leafError(
 			instancePath, schemaPath, KeywordContentEncoding,
