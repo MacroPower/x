@@ -83,6 +83,9 @@ func TestRegexFormatRejectsEmptyCharacterClass(t *testing.T) {
 		"class with a member is valid":       {instance: "[a]", valid: true},
 		"negated class with member is valid": {instance: "[^a]", valid: true},
 		"class with escaped ] is valid":      {instance: `[\]]`, valid: true},
+		"negated class of caret is valid":    {instance: "[^^]", valid: true},
+		"negated class of carets is valid":   {instance: "[^^^]", valid: true},
+		"negated class then ] is valid":      {instance: "[^^]]", valid: true},
 	}
 
 	for name, tc := range tests {

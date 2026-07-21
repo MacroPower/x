@@ -910,7 +910,9 @@ func validateRegex(s string) error {
 		case inClass:
 			// A leading '^' is a negation, not a member, so the next ']' stays
 			// a literal; a ']' only terminates once a member has been seen.
-			if c == '^' && i == classStart {
+			// Only the '^' immediately after the opening '[' negates: a later
+			// '^' is an ordinary member (so "[^^]" is a complete class).
+			if c == '^' && i == classStart && s[i-1] == '[' {
 				classStart++
 			} else if c == ']' && i > classStart {
 				inClass = false
