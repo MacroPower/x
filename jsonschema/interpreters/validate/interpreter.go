@@ -11,7 +11,6 @@ import (
 
 	"go.jacobcolvin.com/x/jsonschema"
 	"go.jacobcolvin.com/x/jsonschema/internal/numkind"
-	"go.jacobcolvin.com/x/jsonschema/internal/schemashape"
 )
 
 // ErrConflictingConstraints reports two tag rules on one field that can never
@@ -474,16 +473,12 @@ func applySequenceOneOf(field jsonschema.FieldContext, value string, baseType re
 
 // finishElement completes constraining one sequence or map element. It reports a
 // clash between a tag const/enum and a const/enum already on the element type's
-// value schema -- the type-derived base, or the value branch of a legacy
-// provider-supplied nullable wrapper -- since reconcile places the tag const/enum
-// there and a disagreeing one would be silently overwritten. It then marks the
-// element for bound dropping when a const or enum pinned its value, so reconcile
-// drops the type-derived numeric bounds the pinned value subsumes.
+// value schema -- the type-derived base -- since reconcile places the tag
+// const/enum there and a disagreeing one would be silently overwritten. It then
+// marks the element for bound dropping when a const or enum pinned its value, so
+// reconcile drops the type-derived numeric bounds the pinned value subsumes.
 func finishElement(elem jsonschema.FieldContext) error {
 	existing := elem.Base
-	if inner := schemashape.NullableInnerSchema(elem.Base); inner != nil {
-		existing = inner
-	}
 
 	if existing != nil {
 		if elem.Schema.Const != nil && existing.Const != nil && !numericEqual(*existing.Const, *elem.Schema.Const) {

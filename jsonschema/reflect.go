@@ -211,12 +211,14 @@ func (g *generator) rootDefaultsTarget(schema *Schema, root *node) *Schema {
 		return root.def.rendered
 	}
 
-	target := schema
-	if inner := schemashape.NullableInnerSchema(target); inner != nil {
-		target = inner
+	// A pointer root under WithNullable renders as anyOf[value, {null}]; applyNull
+	// always emits the null branch second, so the value branch is AnyOf[0]. No
+	// hook wrapper reaches here anymore, so no other ordering is possible.
+	if root.nullable && len(schema.AnyOf) == 2 {
+		return schema.AnyOf[0]
 	}
 
-	return target
+	return schema
 }
 
 // rootTitleTarget resolves the schema that WithRootTitle titles. Draft-07

@@ -33,12 +33,6 @@ func (g *generator) reconcileField(n *node) *Schema {
 		return &merged
 	}
 
-	// A value-scoped const/enum stamped beside a legacy hook-supplied nullable
-	// wrapper (a not-yet-migrated provider/override/extender at the field's type)
-	// moves onto the wrapper's value branch, so the wrapper's permitted null is
-	// not rejected. A generator-built payload is bare, so this is a no-op there.
-	g.relocateAuthoredConstEnum(n, &merged)
-
 	if !n.nullable {
 		g.clearFieldBounds(n, &merged)
 
@@ -51,7 +45,7 @@ func (g *generator) reconcileField(n *node) *Schema {
 
 	// A nilable container with no const/enum encodes as a ["null", base] type
 	// list carrying its authored keywords inline; its bare payload has no type
-	// yet, so the AdmitsNull dedup (which treats a typeless payload as
+	// yet, so the empty-schema dedup (which treats a typeless payload as
 	// null-admitting) must not run first.
 	hasConstEnum := merged.Const != nil || merged.Enum != nil
 	if n.nilableContainer() && !hasConstEnum {
@@ -60,9 +54,9 @@ func (g *generator) reconcileField(n *node) *Schema {
 		return &merged
 	}
 
-	// A payload that already admits null (an empty schema, or a legacy wrapper)
-	// needs no second null branch: return it with its authored keywords inline.
-	if !n.nilableContainer() && schemashape.AdmitsNull(&merged) {
+	// An empty payload (an interface field) already admits null, so it needs no
+	// second null branch: return it with its authored keywords inline.
+	if !n.nilableContainer() && schemashape.IsEmpty(&merged) {
 		return &merged
 	}
 
@@ -92,8 +86,8 @@ func (g *generator) reconcileField(n *node) *Schema {
 // canvas onto the provisional-ref payload, then emits the final $ref: annotations
 // move to the wrapper while const/enum ride the $ref on the value branch, which
 // takes its own Draft-7 sibling wrap in [generator.renderRef]. When the
-// referenced definition already admits null, the ref carries every keyword and no
-// null branch is added.
+// referenced definition is empty (it already admits null), the ref carries every
+// keyword and no null branch is added.
 func (g *generator) reconcileRefField(n *node) *Schema {
 	g.renderDef(n.def)
 
@@ -109,7 +103,7 @@ func (g *generator) reconcileRefField(n *node) *Schema {
 		return s
 	}
 
-	if schemashape.AdmitsNull(n.def.rendered) {
+	if schemashape.IsEmpty(n.def.rendered) {
 		s := g.renderRef(&merged, n.def)
 		g.clearFieldBounds(n, s)
 

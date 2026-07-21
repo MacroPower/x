@@ -124,8 +124,6 @@ func (g *generator) renderDef(e *defEntry) {
 // A field or element node never reaches here; render routes it to
 // [generator.reconcileField].
 func (g *generator) applyNull(n *node, base *Schema) *Schema {
-	g.relocateAuthoredConstEnum(n, base)
-
 	if !n.nullable {
 		g.clearFieldBounds(n, base)
 
@@ -143,12 +141,16 @@ func (g *generator) applyNull(n *node, base *Schema) *Schema {
 		return base
 	}
 
+	// The only null-admitting bare shape reaching here is the empty schema (an
+	// interface, or a $ref to an empty def): every hook-supplied null wrapper is
+	// gone, and byte slices take the nilable-container path above. An empty
+	// schema already permits null, so no second branch is added.
 	target := base
 	if n.kind == kindRef {
 		target = n.def.rendered
 	}
 
-	if schemashape.AdmitsNull(target) {
+	if schemashape.IsEmpty(target) {
 		return base
 	}
 
@@ -184,31 +186,6 @@ func (g *generator) pinsValue(n *node, value *Schema) bool {
 	}
 
 	return n.dropBounds
-}
-
-// relocateAuthoredConstEnum moves a const/enum stamped beside a hook-authored
-// nullable wrapper (an override or provider anyOf[value, null] or
-// ["null", base] type list) onto its value branch, so the wrapper's permitted
-// null is not rejected. A generator-built payload is bare when its const/enum
-// is stamped -- render lands them on the value branch by construction -- so
-// only a hook-supplied wrapper shape reshapes here. When the relocated const
-// (or unauthored enum) pins a field's value, the numeric bounds it subsumes are
-// dropped from both the wrapper and the value branch, mirroring the split
-// path's pinned-value drop.
-func (g *generator) relocateAuthoredConstEnum(n *node, s *Schema) {
-	if s.Const == nil && s.Enum == nil {
-		return
-	}
-
-	target := schemashape.RelocateConstEnumToValueBranch(s)
-	if target == s {
-		return
-	}
-
-	if g.pinsValue(n, target) {
-		schemashape.ClearNumericBounds(target)
-		schemashape.ClearNumericBounds(s)
-	}
 }
 
 // maybeInlineRoot inlines a root $ref whose def is reached from nowhere else,

@@ -2760,20 +2760,23 @@ func TestGenerateFor_NullableRefFieldConstDropsWrapperBounds(t *testing.T) {
 		"a non-const value is rejected")
 }
 
-// NullAdmittingRefProvider supplies a schema that already admits null, so a
-// nullable reference to it takes the no-wrapper dedup path.
+// NullAdmittingRefProvider supplies an unrestricted schema, so its extracted def
+// is the empty schema, which already admits null. A nullable reference to it
+// takes the no-wrapper dedup path (the only null-admitting def shape now, since
+// hooks no longer bake null into their Value).
 type NullAdmittingRefProvider int
 
 func (NullAdmittingRefProvider) JSONSchema(context.Context, jsonschema.TypeContext) (jsonschema.TypeSchema, error) {
-	return jsonschema.TypeSchema{Value: &jsonschema.Schema{Types: []string{"integer", "null"}}}, nil
+	return jsonschema.TypeSchema{}, nil
 }
 
 func TestGenerateFor_NullAdmittingRefFieldConstDropsBounds(t *testing.T) {
 	t.Parallel()
 
-	// When the referenced def admits null, the ref carries every field keyword
-	// with no anyOf split. A const still pins the value, so an authored bound
-	// beside the $ref is subsumed and must be dropped, not left to reject it.
+	// When the referenced def is empty (it admits null), the ref carries every
+	// field keyword with no anyOf split. A const still pins the value, so an
+	// authored bound beside the $ref is subsumed and must be dropped, not left to
+	// reject it.
 	type Container struct {
 		F *NullAdmittingRefProvider `json:"f" jsonschema:"minimum=10,const=3"`
 	}
@@ -3187,6 +3190,59 @@ func TestGenerateFor_NullableStanceReachesNonPointerRef(t *testing.T) {
 	require.Len(t, field.AnyOf, 2)
 	assert.Equal(t, "#/$defs/NullableThing", field.AnyOf[0].Ref)
 	assert.Equal(t, "null", field.AnyOf[1].Type)
+}
+
+func TestGenerateFor_NonNullableStanceDropsPointerNull(t *testing.T) {
+	t.Parallel()
+
+	// A NonNullable stance makes no occurrence admit null, even a pointer field:
+	// the pointer-ness that would otherwise add an anyOf null branch is overridden.
+	type Code string
+
+	type Container struct {
+		C *Code `json:"c"`
+	}
+
+	s, err := jsonschema.GenerateFor[Container](t.Context(),
+		jsonschema.WithTypeSchemaFor[Code](jsonschema.TypeSchema{
+			Value:    &jsonschema.Schema{Type: "string"},
+			Nullable: jsonschema.NonNullable,
+		}),
+	)
+	require.NoError(t, err)
+
+	field := s.Properties["c"]
+	require.NotNil(t, field)
+	assert.Equal(t, "string", field.Type, "the NonNullable pointer field is a bare value, not a null wrapper")
+	assert.Nil(t, field.AnyOf)
+	assert.Nil(t, field.Types)
+}
+
+func TestGenerateFor_VerbatimEmittedUnderPointer(t *testing.T) {
+	t.Parallel()
+
+	// A Verbatim schema is emitted exactly as authored, with no null encoding,
+	// even for a pointer occurrence that would otherwise be wrapped.
+	type Blob string
+
+	type Container struct {
+		B *Blob `json:"b"`
+	}
+
+	s, err := jsonschema.GenerateFor[Container](t.Context(),
+		jsonschema.WithTypeSchemaFor[Blob](jsonschema.TypeSchema{
+			Verbatim: &jsonschema.Schema{
+				Type:       "object",
+				Properties: map[string]*jsonschema.Schema{"x": {Type: "integer"}},
+			},
+		}),
+	)
+	require.NoError(t, err)
+
+	got, err := json.Marshal(s.Properties["b"])
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"type":"object","properties":{"x":{"type":"integer"}}}`, string(got),
+		"the verbatim schema is emitted as-is, with no null branch under the pointer")
 }
 
 func TestGenerateFor_Draft7_NullableRefWithAnnotation(t *testing.T) {
