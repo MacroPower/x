@@ -2430,7 +2430,7 @@ func TestGenerateFor_Draft7_RefWithInterpreterComment(t *testing.T) {
 
 	interp := jsonschema.TagInterpreterFunc(
 		func(_ context.Context, field jsonschema.FieldContext, _ jsonschema.Tag) error {
-			field.Schema.Comment = "a note"
+			field.Canvas.Comment = "a note"
 
 			return nil
 		},

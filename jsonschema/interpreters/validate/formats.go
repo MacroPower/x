@@ -46,7 +46,7 @@ func schemaPermitsString(s *jsonschema.Schema) bool {
 func applyStringKeywordTag(key string, field jsonschema.FieldContext) {
 	if format := formatFor(key); format != "" {
 		if field.EffectiveFormat() == "" {
-			field.Schema.Format = format
+			field.Canvas.Format = format
 		}
 
 		return
@@ -54,7 +54,7 @@ func applyStringKeywordTag(key string, field jsonschema.FieldContext) {
 
 	if pattern := patternFor(key); pattern != "" {
 		if field.EffectivePattern() == "" {
-			field.Schema.Pattern = pattern
+			field.Canvas.Pattern = pattern
 		}
 
 		return
@@ -122,12 +122,12 @@ func applyContentTag(key string, field jsonschema.FieldContext) {
 	switch key {
 	case "json":
 		if field.EffectiveContentMediaType() == "" {
-			field.Schema.ContentMediaType = "application/json"
+			field.Canvas.ContentMediaType = "application/json"
 		}
 
 	case base64Encoding:
 		if field.EffectiveContentEncoding() == "" {
-			field.Schema.ContentEncoding = base64Encoding
+			field.Canvas.ContentEncoding = base64Encoding
 		}
 	}
 }

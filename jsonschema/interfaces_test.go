@@ -209,7 +209,7 @@ func TestTagInterpreterFunc(t *testing.T) {
 
 		interp := jsonschema.TagInterpreterFunc(
 			func(_ context.Context, field jsonschema.FieldContext, tag jsonschema.Tag) error {
-				field.Schema.Description = "in " + tag.Value + " via " + tag.Key
+				field.Canvas.Description = "in " + tag.Value + " via " + tag.Key
 				return nil
 			},
 		)

@@ -330,7 +330,7 @@ func TestWithDescriptionProvider_FieldContext(t *testing.T) {
 	assert.Equal(t, "Size", got.StructField.Name)
 	assert.Equal(t, "size", got.Name)
 	assert.Equal(t, reflect.TypeFor[int](), got.Type)
-	assert.NotNil(t, got.Schema)
+	assert.NotNil(t, got.Canvas)
 	assert.NotNil(t, got.Parent)
 }
 

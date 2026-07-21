@@ -17,11 +17,11 @@ func collectionBounds(
 	field jsonschema.FieldContext, baseType reflect.Type,
 ) (**int, **int, *int, *int) {
 	if isMapKind(baseType) {
-		return &field.Schema.MinProperties, &field.Schema.MaxProperties,
+		return &field.Canvas.MinProperties, &field.Canvas.MaxProperties,
 			field.EffectiveMinProperties(), field.EffectiveMaxProperties()
 	}
 
-	return &field.Schema.MinItems, &field.Schema.MaxItems,
+	return &field.Canvas.MinItems, &field.Canvas.MaxItems,
 		field.EffectiveMinItems(), field.EffectiveMaxItems()
 }
 

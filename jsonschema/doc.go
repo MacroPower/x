@@ -292,7 +292,7 @@
 // through the pluggable [TagInterpreter] interface. Interpreters receive the
 // Generate call's context, like the other generation-time hooks, a [Tag]
 // carrying the struct tag key and value the call runs under, and a
-// [FieldContext] containing the field's authored canvas ([FieldContext.Schema]),
+// [FieldContext] containing the field's authored canvas ([FieldContext.Canvas]),
 // its type-derived [FieldContext.Base], the parent schema, JSON name, Go type,
 // declaring struct type, full [reflect.StructField] (for reading sibling struct
 // tags such as the json tag's options), and the target [Draft] (for emitting

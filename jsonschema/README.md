@@ -576,7 +576,7 @@ Interpreters receive three things and declare facts on the field's authored
 canvas. The first is the Generate call's context, like the other generation-time
 hooks; an interpreter that performs no cancellable work ignores it. The second is
 a `Tag` carrying the struct tag key and value the call runs under. The third is a
-`FieldContext`, whose `Schema` is the authored-facts canvas an interpreter writes
+`FieldContext`, whose `Canvas` is the authored-facts canvas an interpreter writes
 to (value-scoped facts like `const` and `enum`, annotations, and bounds it
 tightens by reading the effective merged value through the field's `Effective`
 accessors) and whose read-only `Base` is the type-derived schema, for dispatching

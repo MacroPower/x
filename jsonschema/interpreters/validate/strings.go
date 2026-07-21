@@ -10,20 +10,20 @@ import (
 // applyStringMinConstraint applies min/gte or gt to a string field by raising
 // its minLength floor on the canvas, reading the effective floor.
 func applyStringMinConstraint(field jsonschema.FieldContext, value string, exclusive bool) error {
-	return applyMinBound(&field.Schema.MinLength, field.EffectiveMinLength(), value, exclusive)
+	return applyMinBound(&field.Canvas.MinLength, field.EffectiveMinLength(), value, exclusive)
 }
 
 // applyStringMaxConstraint applies max/lte or lt to a string field by lowering
 // its maxLength ceiling on the canvas, reading the effective bounds.
 func applyStringMaxConstraint(field jsonschema.FieldContext, value string, exclusive bool) error {
-	return applyMaxBound(&field.Schema.MinLength, &field.Schema.MaxLength,
+	return applyMaxBound(&field.Canvas.MinLength, &field.Canvas.MaxLength,
 		field.EffectiveMinLength(), field.EffectiveMaxLength(), value, exclusive)
 }
 
 // applyStringLenConstraint applies len=N to a string field by pinning minLength
 // and maxLength on the canvas to the intersected bound.
 func applyStringLenConstraint(field jsonschema.FieldContext, value string) error {
-	return applyLenBound(&field.Schema.MinLength, &field.Schema.MaxLength,
+	return applyLenBound(&field.Canvas.MinLength, &field.Canvas.MaxLength,
 		field.EffectiveMinLength(), field.EffectiveMaxLength(), value)
 }
 
@@ -50,8 +50,8 @@ func applyStringOneOf(field jsonschema.FieldContext, value string) error {
 // silently resolved. This keeps the result independent of tag order and matches
 // setNumericConst and applyBoolEq.
 func applyStringEq(field jsonschema.FieldContext, value string) error {
-	if field.Schema.Const != nil {
-		if existing, ok := (*field.Schema.Const).(string); ok && existing != value {
+	if field.Canvas.Const != nil {
+		if existing, ok := (*field.Canvas.Const).(string); ok && existing != value {
 			return fmt.Errorf("%w: eq=%q conflicts with an existing value constraint",
 				ErrConflictingConstraints, value)
 		}
@@ -64,7 +64,7 @@ func applyStringEq(field jsonschema.FieldContext, value string) error {
 
 	var v any = value
 
-	field.Schema.Const = &v
+	field.Canvas.Const = &v
 
 	return nil
 }

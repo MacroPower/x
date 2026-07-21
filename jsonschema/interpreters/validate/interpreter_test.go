@@ -1088,7 +1088,7 @@ func TestApplyDiveErrorsWhenItemsNil(t *testing.T) {
 	interp := validate.NewInterpreter()
 	err := interp.Interpret(t.Context(), jsonschema.FieldContext{
 		Type:   reflect.TypeFor[[]string](),
-		Schema: s.Properties["items"],
+		Canvas: s.Properties["items"],
 		Parent: s,
 		Name:   "items",
 	}, jsonschema.Tag{Key: "validate", Value: "dive,min=1"})
@@ -1584,7 +1584,7 @@ func TestTrailingDiveErrors(t *testing.T) {
 
 			err := validate.NewInterpreter().Interpret(t.Context(), jsonschema.FieldContext{
 				Type:   reflect.TypeFor[[]string](),
-				Schema: &jsonschema.Schema{},
+				Canvas: &jsonschema.Schema{},
 				Parent: &jsonschema.Schema{},
 				Name:   "items",
 			}, jsonschema.Tag{Key: "validate", Value: tag})
@@ -1877,7 +1877,7 @@ func TestValidateInterpreter_LengthConstraintOnByteSlice(t *testing.T) {
 			interp := validate.NewInterpreter()
 			err := interp.Interpret(t.Context(), jsonschema.FieldContext{
 				Type:   reflect.TypeFor[[]byte](),
-				Schema: s.Properties["data"],
+				Canvas: s.Properties["data"],
 				Parent: s,
 				Name:   "data",
 			}, jsonschema.Tag{Key: "validate", Value: tag})
@@ -1960,7 +1960,7 @@ func TestCollectionGtMaxIntDoesNotWrap(t *testing.T) {
 			interp := validate.NewInterpreter()
 			err := interp.Interpret(t.Context(), jsonschema.FieldContext{
 				Type:   tc.fieldType,
-				Schema: schema,
+				Canvas: schema,
 				Parent: parent,
 				Name:   "field",
 			}, jsonschema.Tag{Key: "validate", Value: "gt=" + strconv.Itoa(math.MaxInt)})
@@ -1999,7 +1999,7 @@ func TestCollectionLtMinIntDoesNotWrap(t *testing.T) {
 			interp := validate.NewInterpreter()
 			err := interp.Interpret(t.Context(), jsonschema.FieldContext{
 				Type:   tc.fieldType,
-				Schema: schema,
+				Canvas: schema,
 				Parent: parent,
 				Name:   "field",
 			}, jsonschema.Tag{Key: "validate", Value: "lt=" + strconv.Itoa(math.MinInt)})
@@ -2061,7 +2061,7 @@ func TestValidateInterpreter_ParamEscapes(t *testing.T) {
 			interp := validate.NewInterpreter()
 			err := interp.Interpret(t.Context(), jsonschema.FieldContext{
 				Type:   reflect.TypeFor[string](),
-				Schema: schema,
+				Canvas: schema,
 				Parent: parent,
 				Name:   "value",
 			}, jsonschema.Tag{Key: "validate", Value: tc.tag})

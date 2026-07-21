@@ -1540,7 +1540,7 @@ func (g *generator) buildFieldSchema(
 
 // fieldContext builds the FieldContext passed to tag interpreters and the
 // description provider for one struct field, computing the declaring type once.
-// Schema is the field's authored canvas (where a hook declares its facts) and
+// Canvas is the field's authored canvas (where a hook declares its facts) and
 // Base is the type-derived payload (read-only); the accessor exposing element
 // canvases reads the field node's element children.
 func (g *generator) fieldContext(
@@ -1553,7 +1553,7 @@ func (g *generator) fieldContext(
 		Name:        fi.jsonName,
 		Type:        fi.field.Type,
 		Owner:       reflectkind.DeclaringType(parentType, fi.field),
-		Schema:      fieldNode.authored,
+		Canvas:      fieldNode.authored,
 		Base:        fieldNode.payload,
 		Parent:      parent,
 		StructField: fi.field,

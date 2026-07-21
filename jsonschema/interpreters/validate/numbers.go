@@ -152,7 +152,7 @@ func applyNumericMinConstraint(
 ) error {
 	return tightenNumericBound(value, baseType, exclusive,
 		field.EffectiveMinimum(), field.EffectiveExclusiveMinimum(),
-		&field.Schema.Minimum, &field.Schema.ExclusiveMinimum, "min", "gt",
+		&field.Canvas.Minimum, &field.Canvas.ExclusiveMinimum, "min", "gt",
 		func(n, existing float64) bool { return n > existing })
 }
 
@@ -168,7 +168,7 @@ func applyNumericMaxConstraint(
 ) error {
 	return tightenNumericBound(value, baseType, exclusive,
 		field.EffectiveMaximum(), field.EffectiveExclusiveMaximum(),
-		&field.Schema.Maximum, &field.Schema.ExclusiveMaximum, "max", "lt",
+		&field.Canvas.Maximum, &field.Canvas.ExclusiveMaximum, "max", "lt",
 		func(n, existing float64) bool { return n < existing })
 }
 
@@ -202,7 +202,7 @@ func applyNumericEq(field jsonschema.FieldContext, value string, baseType reflec
 // canvas const onto it, so a disagreeing const the field's type already
 // supplies (a type override, or another hook) would be silently overwritten.
 func setNumericConst(field jsonschema.FieldContext, parsed any) error {
-	if field.Schema.Const != nil && !numericEqual(*field.Schema.Const, parsed) {
+	if field.Canvas.Const != nil && !numericEqual(*field.Canvas.Const, parsed) {
 		return fmt.Errorf("%w: eq/len=%v conflicts with an existing value constraint",
 			ErrConflictingConstraints, parsed)
 	}
@@ -212,7 +212,7 @@ func setNumericConst(field jsonschema.FieldContext, parsed any) error {
 			ErrConflictingConstraints, parsed)
 	}
 
-	field.Schema.Const = &parsed
+	field.Canvas.Const = &parsed
 
 	return nil
 }

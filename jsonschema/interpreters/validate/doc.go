@@ -7,7 +7,7 @@
 // validate tags get schema generation for free.
 //
 // The interpreter declares each constraint as a fact on the field's authored
-// canvas ([jsonschema.FieldContext.Schema]) rather than mutating a merged
+// canvas ([jsonschema.FieldContext.Canvas]) rather than mutating a merged
 // schema, and generation composes those facts with the field's type-derived
 // schema. On a nil-able (pointer) field a value constraint such as eq or oneof
 // therefore lands on the value branch of the null encoding, so the permitted

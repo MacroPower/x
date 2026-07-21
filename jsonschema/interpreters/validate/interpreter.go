@@ -137,7 +137,7 @@ func applyParts(parts []string, field jsonschema.FieldContext, isDive bool) erro
 }
 
 // applyValidator applies a single validator to the field. Writes land on the
-// canvas ([jsonschema.FieldContext.Schema]); type-state reads consult
+// canvas ([jsonschema.FieldContext.Canvas]); type-state reads consult
 // [jsonschema.FieldContext.Base]; bound tightening reads the effective merged
 // value through the field's Effective accessors.
 func applyValidator(key, value string, field jsonschema.FieldContext) error {
@@ -205,7 +205,7 @@ func applyValidator(key, value string, field jsonschema.FieldContext) error {
 		// go-playground/validator's unique-on-map checks unique values, which
 		// has no object-schema equivalent. So unique on a map is a no-op.
 		if isSequenceKind(baseType) {
-			field.Schema.UniqueItems = true
+			field.Canvas.UniqueItems = true
 		}
 
 	default:
@@ -301,9 +301,9 @@ func applyRequiredConstraint(field jsonschema.FieldContext, baseType reflect.Typ
 	// eq/ne/oneof reroute that compares against the serialized form.
 	if isStringCoercedValue(field.Base, baseType) {
 		if isBoolKind(baseType) {
-			forbidValue(field.Schema, "false")
+			forbidValue(field.Canvas, "false")
 		} else {
-			forbidValue(field.Schema, "0")
+			forbidValue(field.Canvas, "0")
 		}
 
 		return nil
@@ -312,7 +312,7 @@ func applyRequiredConstraint(field jsonschema.FieldContext, baseType reflect.Typ
 	switch {
 	case baseType.Kind() == reflect.String:
 		if eff := field.EffectiveMinLength(); eff == nil || *eff < 1 {
-			field.Schema.MinLength = new(1)
+			field.Canvas.MinLength = new(1)
 		}
 
 	case baseType.Kind() == reflect.Slice, baseType.Kind() == reflect.Array:
@@ -329,19 +329,19 @@ func applyRequiredConstraint(field jsonschema.FieldContext, baseType reflect.Typ
 		// required entry applies.
 		if isByteSliceField(baseType) {
 			if eff := field.EffectiveMinLength(); schemaPermitsString(field.Base) && (eff == nil || *eff < 1) {
-				field.Schema.MinLength = new(1)
+				field.Canvas.MinLength = new(1)
 			}
 
 			return nil
 		}
 
 		if eff := field.EffectiveMinItems(); eff == nil || *eff < 1 {
-			field.Schema.MinItems = new(1)
+			field.Canvas.MinItems = new(1)
 		}
 
 	case baseType.Kind() == reflect.Map:
 		if eff := field.EffectiveMinProperties(); eff == nil || *eff < 1 {
-			field.Schema.MinProperties = new(1)
+			field.Canvas.MinProperties = new(1)
 		}
 
 	case baseType.Kind() == reflect.Bool:
@@ -351,8 +351,8 @@ func applyRequiredConstraint(field jsonschema.FieldContext, baseType reflect.Typ
 		// never satisfy required. Overwriting it would silently discard the
 		// other rule, so the impossible combination is reported rather than
 		// resolved by precedence.
-		if field.Schema.Const != nil {
-			if b, ok := (*field.Schema.Const).(bool); ok && !b {
+		if field.Canvas.Const != nil {
+			if b, ok := (*field.Canvas.Const).(bool); ok && !b {
 				return fmt.Errorf("%w: required on a bool already constrained to false", ErrConflictingConstraints)
 			}
 		}
@@ -363,13 +363,13 @@ func applyRequiredConstraint(field jsonschema.FieldContext, baseType reflect.Typ
 			}
 		}
 
-		field.Schema.Const = new(any(true))
+		field.Canvas.Const = new(any(true))
 
 	case numkind.IsInteger(baseType.Kind()):
 		// Required on a numeric type means the value must not be zero.
-		forbidValue(field.Schema, 0)
+		forbidValue(field.Canvas, 0)
 	case numkind.IsFloat(baseType.Kind()):
-		forbidValue(field.Schema, 0.0)
+		forbidValue(field.Canvas, 0.0)
 	}
 
 	return nil
@@ -488,20 +488,20 @@ func finishElement(elem jsonschema.FieldContext) error {
 	existing := elem.Base
 
 	if existing != nil {
-		if elem.Schema.Const != nil && existing.Const != nil && !numericEqual(*existing.Const, *elem.Schema.Const) {
+		if elem.Canvas.Const != nil && existing.Const != nil && !numericEqual(*existing.Const, *elem.Canvas.Const) {
 			return fmt.Errorf(
 				"%w: eq/len conflicts with the element type's existing const",
 				ErrConflictingConstraints)
 		}
 
-		if elem.Schema.Enum != nil && existing.Enum != nil {
+		if elem.Canvas.Enum != nil && existing.Enum != nil {
 			return fmt.Errorf(
 				"%w: oneof conflicts with the element type's existing enum constraint",
 				ErrConflictingConstraints)
 		}
 	}
 
-	if elem.Schema.Const != nil || elem.Schema.Enum != nil {
+	if elem.Canvas.Const != nil || elem.Canvas.Enum != nil {
 		elem.PinElementValue()
 	}
 
@@ -539,7 +539,7 @@ func applyCoercedValidator(key, value string, field jsonschema.FieldContext, bas
 			return true, fmt.Errorf("validate tag: ne: %w", err)
 		}
 
-		applyStringNe(field.Schema, canonical)
+		applyStringNe(field.Canvas, canonical)
 
 		return true, nil
 
@@ -701,8 +701,8 @@ func applyBoolEq(field jsonschema.FieldContext, value string) error {
 		return err
 	}
 
-	if field.Schema.Const != nil {
-		if existing, ok := (*field.Schema.Const).(bool); ok && existing != b {
+	if field.Canvas.Const != nil {
+		if existing, ok := (*field.Canvas.Const).(bool); ok && existing != b {
 			return fmt.Errorf("%w: eq=%t conflicts with an existing bool constraint", ErrConflictingConstraints, b)
 		}
 	}
@@ -713,7 +713,7 @@ func applyBoolEq(field jsonschema.FieldContext, value string) error {
 		}
 	}
 
-	field.Schema.Const = new(any(b))
+	field.Canvas.Const = new(any(b))
 
 	return nil
 }
@@ -746,7 +746,7 @@ func applyBoolOneOf(field jsonschema.FieldContext, value string) error {
 // enumerations can never both hold; this mirrors the const family (eq) instead
 // of letting whichever rule runs last win.
 func setOneOfEnum(field jsonschema.FieldContext, vals []any) error {
-	if field.Schema.Enum != nil {
+	if field.Canvas.Enum != nil {
 		return fmt.Errorf("%w: oneof conflicts with an existing enum constraint", ErrConflictingConstraints)
 	}
 
@@ -754,7 +754,7 @@ func setOneOfEnum(field jsonschema.FieldContext, vals []any) error {
 		return fmt.Errorf("%w: oneof conflicts with the type's existing enum constraint", ErrConflictingConstraints)
 	}
 
-	field.Schema.Enum = vals
+	field.Canvas.Enum = vals
 
 	return nil
 }
@@ -766,13 +766,13 @@ func setOneOfEnum(field jsonschema.FieldContext, vals []any) error {
 func applyNe(field jsonschema.FieldContext, value string, baseType reflect.Type) error {
 	switch {
 	case isNumericKind(baseType):
-		return applyNumericNe(field.Schema, value, baseType)
+		return applyNumericNe(field.Canvas, value, baseType)
 	case isBoolKind(baseType):
-		return applyBoolNe(field.Schema, value)
+		return applyBoolNe(field.Canvas, value)
 	case isCollectionKind(baseType):
-		return applyCollectionNe(field.Schema, value, baseType)
+		return applyCollectionNe(field.Canvas, value, baseType)
 	case isStringKind(baseType):
-		applyStringNe(field.Schema, value)
+		applyStringNe(field.Canvas, value)
 
 		return nil
 
