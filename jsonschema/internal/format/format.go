@@ -350,6 +350,10 @@ func validateEmailLocal(s string) error {
 // widening for idn-email; RFC 6531 extends only qtextSMTP, not
 // quoted-pairSMTP, so the escaped character must be printable ASCII for both
 // formats.
+//
+// One deliberate deviation: the RFC's Quoted-string production permits zero
+// content characters, but the empty quoted local part ""@example.com names no
+// deliverable mailbox, so it is rejected.
 func validateQuotedLocal(s string, allowUnicode bool) error {
 	if len(s) < 2 || s[len(s)-1] != '"' {
 		return errors.New("invalid email: malformed quoted local part")
