@@ -1609,6 +1609,13 @@ func Validate(ctx context.Context, schema *Schema, instance any, opts ...Validat
 	return c.validateNormalized(ctx, instance)
 }
 
+// errRefCheckStop stops a [Walk] in the resolve-error gate at the first ref
+// that fails its check. It never escapes: the gate reads only whether the walk
+// returned nil, so the sentinel's identity is private control flow. It is
+// deliberately distinct from walk.go's errStopIteration, which is the [Schemas]
+// iterator's own break signal.
+var errRefCheckStop = errors.New("stop ref check")
+
 // resolveErrorIsRefOnly reports whether a [jsonschema.Schema.Resolve] failure
 // is caused solely by $ref/$dynamicRef target lookup that this package resolves
 // itself.
@@ -1656,9 +1663,14 @@ func (v *validator) structureResolves(schema *Schema, resolveOpts ResolveOptions
 		return false
 	}
 
-	eachSubschema(stripped, func(s *Schema) {
+	// Clearing the string ref keywords does not change SubschemaEntries, so Walk
+	// descends the same children; the callback never returns an error.
+	//nolint:errcheck // The callback only ever returns nil.
+	_ = Walk(stripped, func(_ Location, s *Schema) error {
 		s.Ref = ""
 		s.DynamicRef = ""
+
+		return nil
 	})
 
 	_, err = stripped.Resolve(&resolveOpts)
@@ -1676,26 +1688,23 @@ func (v *validator) structureResolves(schema *Schema, resolveOpts ResolveOptions
 // [refresolve.Result]; the gate reads only the target, so a resolver error
 // does not leak into a later validation error.
 func (v *validator) refsResolveWellFormed(schema *Schema, resolveOpts ResolveOptions) bool {
-	ok := true
-
-	eachSubschema(schema, func(s *Schema) {
-		if !ok {
-			return
-		}
-
+	// Stop at the first ill-formed ref target; the resolveRef/resolveDynamicRef
+	// lookups are idempotent and side-effect-free, so leaving the remaining nodes
+	// unvisited cannot change the result.
+	err := Walk(schema, func(_ Location, s *Schema) error {
 		if s.Ref != "" && !v.refTargetWellFormed(v.resolveRef(s, s.Ref).Target, resolveOpts) {
-			ok = false
-
-			return
+			return errRefCheckStop
 		}
 
 		if v.profile.dynamicRef && s.DynamicRef != "" &&
 			!v.refTargetWellFormed(v.resolveDynamicRef(s, s.DynamicRef).Target, resolveOpts) {
-			ok = false
+			return errRefCheckStop
 		}
+
+		return nil
 	})
 
-	return ok
+	return err == nil
 }
 
 // refTargetWellFormed reports whether a resolved ref target is structurally
@@ -1725,46 +1734,28 @@ func (v *validator) refTargetWellFormed(target *Schema, resolveOpts ResolveOptio
 // gate reads only the target, so a resolver error does not leak into a later
 // error.
 func (v *validator) allRefsResolvable(schema *Schema) bool {
-	ok := true
-
-	eachSubschema(schema, func(s *Schema) {
-		if !ok {
-			return
-		}
-
+	// Stop at the first unresolvable ref; the lookups are idempotent and
+	// side-effect-free, so the unvisited nodes cannot change the outcome.
+	err := Walk(schema, func(_ Location, s *Schema) error {
 		if s.Ref != "" && v.resolveRef(s, s.Ref).Target == nil {
-			ok = false
+			return errRefCheckStop
 		}
 
 		if v.profile.dynamicRef && s.DynamicRef != "" && v.resolveDynamicRef(s, s.DynamicRef).Target == nil {
-			ok = false
+			return errRefCheckStop
 		}
+
+		return nil
 	})
 
-	return ok
-}
-
-// eachSubschema calls fn for schema and every sub-schema reachable through its
-// sub-schema-bearing keywords (see [SubschemaEntries]). The caller must ensure
-// the schema's sub-schema pointers form a tree (see [schemaFormsTree]); an
-// aliased or cyclic structure would recurse without bound. [Walk] is the
-// exported, cycle-safe form.
-func eachSubschema(schema *Schema, fn func(*Schema)) {
-	if schema == nil {
-		return
-	}
-
-	fn(schema)
-
-	for _, entry := range SubschemaEntries(schema) {
-		eachSubschema(entry.Schema, fn)
-	}
+	return err == nil
 }
 
 // schemaFormsTree reports whether schema's sub-schema pointers form a tree: no
 // *Schema is reachable through more than one path, and there are no pointer
-// cycles. Upstream Resolve rejects non-tree schemas, so this gates the cases
-// where it is safe to traverse with [eachSubschema].
+// cycles. Upstream Resolve rejects non-tree schemas via pointer identity, a
+// check a JSON clone silently collapses (see [validator.resolveErrorIsRefOnly]),
+// so the resolve-error gate re-imposes it here before its clone-based checks run.
 func schemaFormsTree(schema *Schema) bool {
 	seen := map[*Schema]bool{}
 	tree := true

@@ -35,8 +35,17 @@ The package has two independent halves sharing the `Schema` type:
   guard, the memoized self-contained copies, and each node's path and
   containing-document URI) lives in slices indexed by the assigned id. The
   inliner clones through `internal/schemaclone` for its pristine and working
-  copies; folding `compiledDoc` child edges and the fetched-document clone into
-  the constructor is a staged follow-up.
+  copies. Three once-sketched follow-ups were assessed and intentionally not
+  pursued, because each is worse-or-neutral against the "the index references
+  live pointers, never clones" decision: keying `refresolve`'s `baseURIs`/`walked`
+  by node id (both already key on stable, never-mutated pointers, and `refresolve`
+  is a standalone package with no parent import, so id-keying only adds a lookup
+  or breaks the boundary); replacing the defensive fetched-document `cloneSchema`
+  with an index entry (the clone provides isolation from the resolver-owned and
+  upstream-`Resolve`-mutated schema, which an index cannot); and shrinking
+  `internal/schemaclone` or retiring `schemaFormsTree` (the clone's cycle check is
+  intrinsic to the JSON round-trip, and `schemaFormsTree` _rejects_ non-tree
+  graphs, the opposite of the identity index, which _tolerates_ them).
   `$ref`/`$dynamicRef`/`$anchor` resolution lives in the
   shared `internal/refresolve` core, which both the validator and the inliner
   (`inline.go`) consume so the two engines cannot disagree; the inliner resolves
