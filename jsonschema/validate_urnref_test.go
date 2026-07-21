@@ -43,3 +43,38 @@ func TestValidateURNEncodedRef(t *testing.T) {
 	assert.NotContains(t, verr.Error(), "cannot resolve")
 	assert.Contains(t, verr.Error(), `expected "string"`)
 }
+
+// TestValidateURNDotSegmentRef exercises RFC 3986 5.2.2 for an opaque URN
+// base: a dot-segmented relative $id registers under the canonical
+// dot-segment-free key, so the absolute $ref spelling resolves to it the same
+// way it does under a hierarchical base.
+func TestValidateURNDotSegmentRef(t *testing.T) {
+	t.Parallel()
+
+	doc := stringtest.Input(`
+		{
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"$id": "urn:example:a/b/c",
+			"$defs": {"d": {"$id": "../d", "type": "integer"}},
+			"$ref": "urn:example:a/d"
+		}
+	`)
+
+	var schema jsonschema.Schema
+
+	require.NoError(t, json.Unmarshal([]byte(doc), &schema))
+
+	compiled, err := jsonschema.Compile(t.Context(), &schema)
+	require.NoError(t, err)
+
+	require.NoError(t, compiled.Validate(t.Context(), 5))
+
+	err = compiled.Validate(t.Context(), "not an integer")
+	require.Error(t, err)
+
+	var verr *jsonschema.ValidationError
+
+	require.ErrorAs(t, err, &verr)
+	assert.NotContains(t, verr.Error(), "cannot resolve")
+	assert.Contains(t, verr.Error(), `expected "integer"`)
+}

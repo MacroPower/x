@@ -36,6 +36,29 @@ func TestResolveURI(t *testing.T) {
 			ref:  "sub",
 			want: "sub",
 		},
+		// RFC 3986 5.2.2 applies remove_dot_segments after the merge, so a
+		// dot-segmented ref and its canonical absolute spelling compute the
+		// same registry key, matching the hierarchical branch.
+		"opaque urn parent ref pops a segment": {
+			base: "urn:example:a/b/c",
+			ref:  "../d",
+			want: "urn:example:a/d",
+		},
+		"opaque urn same-dir dot ref": {
+			base: "urn:example:a/b/c",
+			ref:  "./d",
+			want: "urn:example:a/b/d",
+		},
+		"opaque urn parent ref stops at the namespace": {
+			base: "urn:example:a/b/c",
+			ref:  "../../../d",
+			want: "urn:example:d",
+		},
+		"opaque urn slashless parent ref keeps namespace": {
+			base: "urn:example:root",
+			ref:  "../sub",
+			want: "urn:example:sub",
+		},
 		"hierarchical relative ref merges path": {
 			base: "http://example.com/a/b",
 			ref:  "c",

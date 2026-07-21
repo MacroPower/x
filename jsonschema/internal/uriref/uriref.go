@@ -10,6 +10,7 @@
 package uriref
 
 import (
+	"bytes"
 	"net/url"
 	"strings"
 )
@@ -71,10 +72,22 @@ func ResolveURI(base, ref string) string {
 // everything after the final slash. With no slash, the opaque part is split on
 // its final ':' instead (a URN's NID/NSS structure), so the namespace is
 // preserved rather than discarded; only when neither delimiter is present does
-// the ref replace the whole opaque part.
+// the ref replace the whole opaque part. RFC 3986 5.2.2 follows the merge with
+// remove_dot_segments, which the hierarchical branch gets from
+// [url.URL.ResolveReference]; applying it here keeps a dot-segmented ref and
+// its canonical absolute spelling on one registry key. The URN NID prefix
+// (everything through the last ':' before the first '/') stays out of segment
+// popping so ".." cannot consume the namespace identifier.
 func mergeOpaquePath(base, ref string) string {
 	if i := strings.LastIndex(base, "/"); i >= 0 {
-		return base[:i+1] + ref
+		merged := base[:i+1] + ref
+
+		prefix := ""
+		if j := strings.LastIndex(merged[:strings.Index(merged, "/")+1], ":"); j >= 0 {
+			prefix, merged = merged[:j+1], merged[j+1:]
+		}
+
+		return prefix + removeDotSegments(merged)
 	}
 
 	// A URN opaque part such as "example:root" carries no slash but is still
@@ -85,10 +98,64 @@ func mergeOpaquePath(base, ref string) string {
 	// ResolveURI, so this keeps a relative $id and the canonical absolute $ref
 	// agreeing on one registry key.
 	if i := strings.LastIndex(base, ":"); i >= 0 {
-		return base[:i+1] + ref
+		return base[:i+1] + removeDotSegments(ref)
 	}
 
-	return ref
+	return removeDotSegments(ref)
+}
+
+// removeDotSegments applies the RFC 3986 5.2.4 remove_dot_segments algorithm.
+// A path with no leading slash keeps that shape: the algorithm's output always
+// starts segments with '/', so a leading slash the input never had is trimmed
+// back off.
+func removeDotSegments(path string) string {
+	rooted := strings.HasPrefix(path, "/")
+
+	var out []byte
+
+	for path != "" {
+		switch {
+		case strings.HasPrefix(path, "../"):
+			path = path[len("../"):]
+		case strings.HasPrefix(path, "./"):
+			path = path[len("./"):]
+		case strings.HasPrefix(path, "/./"):
+			path = path[len("/."):]
+		case path == "/.":
+			path = "/"
+		case strings.HasPrefix(path, "/../"), path == "/..":
+			if path == "/.." {
+				path = "/"
+			} else {
+				path = path[len("/.."):]
+			}
+
+			if i := bytes.LastIndexByte(out, '/'); i >= 0 {
+				out = out[:i]
+			} else {
+				out = out[:0]
+			}
+
+		case path == "." || path == "..":
+			path = ""
+		default:
+			// Move the first segment, including its leading '/' if present, to
+			// the output.
+			end := len(path)
+			if i := strings.IndexByte(path[1:], '/'); i >= 0 {
+				end = i + 1
+			}
+
+			out = append(out, path[:end]...)
+			path = path[end:]
+		}
+	}
+
+	if !rooted {
+		return strings.TrimPrefix(string(out), "/")
+	}
+
+	return string(out)
 }
 
 // StripFragment removes the fragment component from a URI.
