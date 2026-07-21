@@ -172,40 +172,47 @@ func applyNumericMaxConstraint(
 		func(n, existing float64) bool { return n < existing })
 }
 
-// applyNumericOneOf applies oneof=1 2 3 to a numeric schema.
-func applyNumericOneOf(s *jsonschema.Schema, value string, baseType reflect.Type) error {
+// applyNumericOneOf applies oneof=1 2 3 to a numeric field.
+func applyNumericOneOf(field jsonschema.FieldContext, value string, baseType reflect.Type) error {
 	vals, err := parseNumericValues(value, baseType)
 	if err != nil {
 		return fmt.Errorf("validate tag: oneof: %w", err)
 	}
 
-	return setOneOfEnum(s, vals)
+	return setOneOfEnum(field, vals)
 }
 
-// applyNumericEq applies eq=N → const for a numeric schema.
-func applyNumericEq(s *jsonschema.Schema, value string, baseType reflect.Type) error {
+// applyNumericEq applies eq=N → const for a numeric field.
+func applyNumericEq(field jsonschema.FieldContext, value string, baseType reflect.Type) error {
 	parsed, err := parseNumericValue(value, baseType)
 	if err != nil {
 		return fmt.Errorf("validate tag: eq: %w", err)
 	}
 
-	return setNumericConst(s, parsed)
+	return setNumericConst(field, parsed)
 }
 
-// setNumericConst pins the schema's const to a numeric value, reporting a
+// setNumericConst pins the field's const to a numeric value, reporting a
 // conflict rather than silently overwriting a const that a previous rule
 // already pinned to a different number. A numeric field's eq and len rules
 // both pin the value (eq=N and len=N each mean "equals N"), so eq=5,len=10 --
 // or eq=3,eq=9 -- can never both hold; rejecting the clash keeps the result
 // order-independent and matches applyBoolEq instead of letting whichever rule
-// runs last win.
-func setNumericConst(s *jsonschema.Schema, parsed any) error {
-	if s.Const != nil && !numericEqual(*s.Const, parsed) {
+// runs last win. The type-derived base is compared too: reconcile overlays the
+// canvas const onto it, so a disagreeing const the field's type already
+// supplies (a type override, or another hook) would be silently overwritten.
+func setNumericConst(field jsonschema.FieldContext, parsed any) error {
+	if field.Schema.Const != nil && !numericEqual(*field.Schema.Const, parsed) {
 		return fmt.Errorf("%w: eq/len=%v conflicts with an existing value constraint",
 			ErrConflictingConstraints, parsed)
 	}
 
-	s.Const = &parsed
+	if field.Base != nil && field.Base.Const != nil && !numericEqual(*field.Base.Const, parsed) {
+		return fmt.Errorf("%w: eq/len=%v conflicts with the type's existing const",
+			ErrConflictingConstraints, parsed)
+	}
+
+	field.Schema.Const = &parsed
 
 	return nil
 }

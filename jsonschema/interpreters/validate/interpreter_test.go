@@ -1229,6 +1229,84 @@ func TestOneOfConflictsWithJSONSchemaEnum(t *testing.T) {
 	})
 }
 
+func TestFieldOneOfConflictsWithTypeEnum(t *testing.T) {
+	t.Parallel()
+
+	// A type override already enumerates the field's allowed values; a oneof on
+	// the field enumerates a different set. Reconcile overlays the canvas enum
+	// onto the type-derived one, so the disagreement is reported at the field
+	// (comparing against FieldContext.Base) rather than silently replacing the
+	// type's enum, matching the element-level check.
+	type T struct {
+		S string `json:"s" validate:"oneof=c d"`
+	}
+
+	_, err := jsonschema.GenerateFor[T](t.Context(),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
+		jsonschema.WithTypeSchemaFor[string](jsonschema.TypeSchema{
+			Value: &jsonschema.Schema{Type: "string", Enum: []any{"a", "b"}},
+		}),
+	)
+	require.ErrorIs(t, err, validate.ErrConflictingConstraints)
+}
+
+func TestFieldEqConflictsWithTypeConst(t *testing.T) {
+	t.Parallel()
+
+	// An eq rule pinning a value the field's type already pins differently can
+	// never hold; the clash is reported against the type-derived base rather
+	// than letting the canvas const silently overwrite the type's const. An eq
+	// that agrees with the type's const is accepted.
+	t.Run("numeric conflict", func(t *testing.T) {
+		t.Parallel()
+
+		type T struct {
+			N int `json:"n" validate:"eq=5"`
+		}
+
+		_, err := jsonschema.GenerateFor[T](t.Context(),
+			jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
+			jsonschema.WithTypeSchemaFor[int](jsonschema.TypeSchema{
+				Value: &jsonschema.Schema{Type: "integer", Const: new(any(7))},
+			}),
+		)
+		require.ErrorIs(t, err, validate.ErrConflictingConstraints)
+	})
+
+	t.Run("string conflict", func(t *testing.T) {
+		t.Parallel()
+
+		type T struct {
+			S string `json:"s" validate:"eq=foo"`
+		}
+
+		_, err := jsonschema.GenerateFor[T](t.Context(),
+			jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
+			jsonschema.WithTypeSchemaFor[string](jsonschema.TypeSchema{
+				Value: &jsonschema.Schema{Type: "string", Const: new(any("bar"))},
+			}),
+		)
+		require.ErrorIs(t, err, validate.ErrConflictingConstraints)
+	})
+
+	t.Run("matching const agrees", func(t *testing.T) {
+		t.Parallel()
+
+		type T struct {
+			N int `json:"n" validate:"eq=5"`
+		}
+
+		s, err := jsonschema.GenerateFor[T](t.Context(),
+			jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
+			jsonschema.WithTypeSchemaFor[int](jsonschema.TypeSchema{
+				Value: &jsonschema.Schema{Type: "integer", Const: new(any(5))},
+			}),
+		)
+		require.NoError(t, err)
+		require.NotNil(t, s.Properties["n"].Const)
+	})
+}
+
 func TestCollectionLtZeroIsUnsatisfiable(t *testing.T) {
 	t.Parallel()
 

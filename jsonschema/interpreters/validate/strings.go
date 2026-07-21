@@ -27,9 +27,9 @@ func applyStringLenConstraint(field jsonschema.FieldContext, value string) error
 		field.EffectiveMinLength(), field.EffectiveMaxLength(), value)
 }
 
-// applyStringOneOf applies oneof=a b c to a string schema. Single-quoted runs
+// applyStringOneOf applies oneof=a b c to a string field. Single-quoted runs
 // group multi-word values (oneof='New York' Boston) per go-playground/validator.
-func applyStringOneOf(s *jsonschema.Schema, value string) error {
+func applyStringOneOf(field jsonschema.FieldContext, value string) error {
 	vals := splitOneOfValues(value)
 	if len(vals) == 0 {
 		return fmt.Errorf("validate tag: oneof requires at least one value")
@@ -40,25 +40,31 @@ func applyStringOneOf(s *jsonschema.Schema, value string) error {
 		enum[i] = v
 	}
 
-	return setOneOfEnum(s, enum)
+	return setOneOfEnum(field, enum)
 }
 
-// applyStringEq applies eq=val → const for a string schema. A const already
-// pinned to a different value by an earlier rule is a conflict the two rules can
-// never both satisfy, so it is reported rather than silently overwritten. This
-// keeps the result independent of tag order and matches setNumericConst and
-// applyBoolEq.
-func applyStringEq(s *jsonschema.Schema, value string) error {
-	if s.Const != nil {
-		if existing, ok := (*s.Const).(string); ok && existing != value {
+// applyStringEq applies eq=val → const for a string field. A const already
+// pinned to a different value by an earlier rule -- or by the field's type
+// itself, whose const reconcile would otherwise silently overwrite -- is a
+// conflict the two rules can never both satisfy, so it is reported rather than
+// silently resolved. This keeps the result independent of tag order and matches
+// setNumericConst and applyBoolEq.
+func applyStringEq(field jsonschema.FieldContext, value string) error {
+	if field.Schema.Const != nil {
+		if existing, ok := (*field.Schema.Const).(string); ok && existing != value {
 			return fmt.Errorf("%w: eq=%q conflicts with an existing value constraint",
 				ErrConflictingConstraints, value)
 		}
 	}
 
+	if field.Base != nil && field.Base.Const != nil && !numericEqual(*field.Base.Const, any(value)) {
+		return fmt.Errorf("%w: eq=%q conflicts with the type's existing const",
+			ErrConflictingConstraints, value)
+	}
+
 	var v any = value
 
-	s.Const = &v
+	field.Schema.Const = &v
 
 	return nil
 }

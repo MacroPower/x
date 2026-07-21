@@ -159,7 +159,7 @@ func applyValidator(key, value string, field jsonschema.FieldContext) error {
 	// form (see [canonicalCoercedScalar]). True bound and length constraints
 	// keep their kind dispatch.
 	if isStringCoercedValue(field.Base, baseType) {
-		handled, err := applyCoercedValidator(key, value, field.Schema, baseType)
+		handled, err := applyCoercedValidator(key, value, field, baseType)
 		if handled || err != nil {
 			return err
 		}
@@ -346,12 +346,19 @@ func applyRequiredConstraint(field jsonschema.FieldContext, baseType reflect.Typ
 
 	case baseType.Kind() == reflect.Bool:
 		// Required on bool means the value must be true. An eq tag elsewhere on the
-		// field may already have pinned the const: eq=true agrees and needs no
-		// change, but eq=false pins it to false, which required can never satisfy.
-		// Overwriting it would silently discard the eq=false rule, so the impossible
-		// combination is reported rather than resolved by precedence.
+		// field may already have pinned the const -- or the field's type may
+		// supply one: eq=true agrees and needs no change, but a false pin can
+		// never satisfy required. Overwriting it would silently discard the
+		// other rule, so the impossible combination is reported rather than
+		// resolved by precedence.
 		if field.Schema.Const != nil {
 			if b, ok := (*field.Schema.Const).(bool); ok && !b {
+				return fmt.Errorf("%w: required on a bool already constrained to false", ErrConflictingConstraints)
+			}
+		}
+
+		if field.Base != nil && field.Base.Const != nil {
+			if b, ok := (*field.Base.Const).(bool); ok && !b {
 				return fmt.Errorf("%w: required on a bool already constrained to false", ErrConflictingConstraints)
 			}
 		}
@@ -410,7 +417,7 @@ func applyLenConstraint(field jsonschema.FieldContext, value string, baseType re
 			return fmt.Errorf("validate tag: len: %w", err)
 		}
 
-		return setNumericConst(field.Schema, parsed)
+		return setNumericConst(field, parsed)
 
 	default:
 		return fmt.Errorf("validate tag: len not supported for type %s", baseType.Kind())
@@ -427,11 +434,11 @@ func applyLenConstraint(field jsonschema.FieldContext, value string, baseType re
 func applyOneOf(field jsonschema.FieldContext, value string, baseType reflect.Type) error {
 	switch {
 	case isNumericKind(baseType):
-		return applyNumericOneOf(field.Schema, value, baseType)
+		return applyNumericOneOf(field, value, baseType)
 	case isBoolKind(baseType):
-		return applyBoolOneOf(field.Schema, value)
+		return applyBoolOneOf(field, value)
 	case isStringKind(baseType):
-		return applyStringOneOf(field.Schema, value)
+		return applyStringOneOf(field, value)
 	case isSequenceKind(baseType):
 		return applySequenceOneOf(field, value, baseType)
 	default:
@@ -512,11 +519,11 @@ func isStringCoercedValue(base *jsonschema.Schema, baseType reflect.Type) bool {
 }
 
 // applyCoercedValidator handles the validators whose json:",string" coerced
-// form differs from their kind dispatch, declaring the result on the canvas. It
-// reports whether the validator was fully handled; an unhandled one (for example
-// len or a bound on a coerced bool, or any non-scalar validator) falls through
-// to the main kind dispatch.
-func applyCoercedValidator(key, value string, canvas *jsonschema.Schema, baseType reflect.Type) (bool, error) {
+// form differs from their kind dispatch, declaring the result on the field's
+// canvas. It reports whether the validator was fully handled; an unhandled one
+// (for example len or a bound on a coerced bool, or any non-scalar validator)
+// falls through to the main kind dispatch.
+func applyCoercedValidator(key, value string, field jsonschema.FieldContext, baseType reflect.Type) (bool, error) {
 	switch key {
 	case "eq":
 		canonical, err := canonicalCoercedScalar(value, baseType)
@@ -524,7 +531,7 @@ func applyCoercedValidator(key, value string, canvas *jsonschema.Schema, baseTyp
 			return true, fmt.Errorf("validate tag: eq: %w", err)
 		}
 
-		return true, applyStringEq(canvas, canonical)
+		return true, applyStringEq(field, canonical)
 
 	case "ne":
 		canonical, err := canonicalCoercedScalar(value, baseType)
@@ -532,12 +539,12 @@ func applyCoercedValidator(key, value string, canvas *jsonschema.Schema, baseTyp
 			return true, fmt.Errorf("validate tag: ne: %w", err)
 		}
 
-		applyStringNe(canvas, canonical)
+		applyStringNe(field.Schema, canonical)
 
 		return true, nil
 
 	case "oneof":
-		return true, applyCoercedOneOf(canvas, value, baseType)
+		return true, applyCoercedOneOf(field, value, baseType)
 
 	case "len":
 		// A len=N on a numeric field means the value equals N (the same
@@ -552,7 +559,7 @@ func applyCoercedValidator(key, value string, canvas *jsonschema.Schema, baseTyp
 				return true, fmt.Errorf("validate tag: len: %w", err)
 			}
 
-			return true, applyStringEq(canvas, canonical)
+			return true, applyStringEq(field, canonical)
 		}
 
 	case "min", "gte", "max", "lte", "gt", "lt":
@@ -627,7 +634,7 @@ func canonicalCoercedScalar(value string, baseType reflect.Type) (string, error)
 // applyCoercedOneOf applies oneof on a json:",string" coerced field: each
 // space-separated value parses against the real base kind (keeping the range
 // check) and its canonical serialized form becomes the enum member.
-func applyCoercedOneOf(canvas *jsonschema.Schema, value string, baseType reflect.Type) error {
+func applyCoercedOneOf(field jsonschema.FieldContext, value string, baseType reflect.Type) error {
 	vals := splitOneOfValues(value)
 	if len(vals) == 0 {
 		return fmt.Errorf("validate tag: oneof requires at least one value")
@@ -643,7 +650,7 @@ func applyCoercedOneOf(canvas *jsonschema.Schema, value string, baseType reflect
 		enum[i] = canonical
 	}
 
-	return setOneOfEnum(canvas, enum)
+	return setOneOfEnum(field, enum)
 }
 
 // applyEq applies eq constraint based on the type. A non-numeric, non-bool,
@@ -653,14 +660,14 @@ func applyCoercedOneOf(canvas *jsonschema.Schema, value string, baseType reflect
 func applyEq(field jsonschema.FieldContext, value string, baseType reflect.Type) error {
 	switch {
 	case isNumericKind(baseType):
-		return applyNumericEq(field.Schema, value, baseType)
+		return applyNumericEq(field, value, baseType)
 	case isBoolKind(baseType):
-		return applyBoolEq(field.Schema, value)
+		return applyBoolEq(field, value)
 	case isCollectionKind(baseType):
 		// Eq=N on a collection means the length equals N.
 		return applyCollectionLenConstraint(field, value, baseType)
 	case isStringKind(baseType):
-		return applyStringEq(field.Schema, value)
+		return applyStringEq(field, value)
 
 	default:
 		return fmt.Errorf("validate tag: eq not supported for type %s", baseType.Kind())
@@ -682,30 +689,37 @@ func parseBool(v string) (bool, error) {
 	}
 }
 
-// applyBoolEq applies eq=true/false → const for a bool schema. A const already
+// applyBoolEq applies eq=true/false → const for a bool field. A const already
 // pinned to the opposite value by another rule (for example required, which pins
-// it to true) is a conflict the two rules can never both satisfy, so it is
-// reported rather than silently overwritten. This keeps the result independent
-// of tag order.
-func applyBoolEq(canvas *jsonschema.Schema, value string) error {
+// it to true) -- or by the field's type itself, whose const reconcile would
+// otherwise silently overwrite -- is a conflict the two rules can never both
+// satisfy, so it is reported rather than silently resolved. This keeps the
+// result independent of tag order.
+func applyBoolEq(field jsonschema.FieldContext, value string) error {
 	b, err := parseBool(value)
 	if err != nil {
 		return err
 	}
 
-	if canvas.Const != nil {
-		if existing, ok := (*canvas.Const).(bool); ok && existing != b {
+	if field.Schema.Const != nil {
+		if existing, ok := (*field.Schema.Const).(bool); ok && existing != b {
 			return fmt.Errorf("%w: eq=%t conflicts with an existing bool constraint", ErrConflictingConstraints, b)
 		}
 	}
 
-	canvas.Const = new(any(b))
+	if field.Base != nil && field.Base.Const != nil {
+		if existing, ok := (*field.Base.Const).(bool); ok && existing != b {
+			return fmt.Errorf("%w: eq=%t conflicts with the type's existing const", ErrConflictingConstraints, b)
+		}
+	}
+
+	field.Schema.Const = new(any(b))
 
 	return nil
 }
 
-// applyBoolOneOf applies oneof=true false → enum for a bool schema.
-func applyBoolOneOf(canvas *jsonschema.Schema, value string) error {
+// applyBoolOneOf applies oneof=true false → enum for a bool field.
+func applyBoolOneOf(field jsonschema.FieldContext, value string) error {
 	vals := splitOneOfValues(value)
 	if len(vals) == 0 {
 		return fmt.Errorf("validate tag: oneof requires at least one value")
@@ -721,20 +735,26 @@ func applyBoolOneOf(canvas *jsonschema.Schema, value string) error {
 		enum[i] = b
 	}
 
-	return setOneOfEnum(canvas, enum)
+	return setOneOfEnum(field, enum)
 }
 
-// setOneOfEnum pins the schema's enum to a oneof value list, reporting a
+// setOneOfEnum pins the field's enum to a oneof value list, reporting a
 // conflict rather than silently overwriting an enum an earlier rule (such as a
-// jsonschema enum tag) already set. Both oneof and enum fully enumerate the
-// allowed values, so two different enumerations can never both hold; this
-// mirrors the const family (eq) instead of letting whichever rule runs last win.
-func setOneOfEnum(canvas *jsonschema.Schema, vals []any) error {
-	if canvas.Enum != nil {
+// jsonschema enum tag) already set on the canvas -- or one the field's type
+// itself supplies, which reconcile would otherwise silently overwrite. Both
+// oneof and enum fully enumerate the allowed values, so two different
+// enumerations can never both hold; this mirrors the const family (eq) instead
+// of letting whichever rule runs last win.
+func setOneOfEnum(field jsonschema.FieldContext, vals []any) error {
+	if field.Schema.Enum != nil {
 		return fmt.Errorf("%w: oneof conflicts with an existing enum constraint", ErrConflictingConstraints)
 	}
 
-	canvas.Enum = vals
+	if field.Base != nil && field.Base.Enum != nil {
+		return fmt.Errorf("%w: oneof conflicts with the type's existing enum constraint", ErrConflictingConstraints)
+	}
+
+	field.Schema.Enum = vals
 
 	return nil
 }
