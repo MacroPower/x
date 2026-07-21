@@ -369,14 +369,20 @@ func (g *generator) schemaForType(t reflect.Type, nullable bool) (*node, error) 
 		return nil, err
 	}
 
-	// Type-level post-processing for non-struct named types.
-	// Struct types handle comments, extend, and extraction internally
-	// in buildStructSchema/schemaForStruct.
+	// Type-level post-processing for non-struct types. Struct types handle
+	// comments, extend, and extraction internally in
+	// buildStructSchema/schemaForStruct. Unnamed composite types ([]string,
+	// map[string]int) run the extender too -- their schemas are just as
+	// reflection-produced -- but skip comment lookup (keyed by named type) and
+	// never extract (shouldExtract and the cyclic guard both require a name),
+	// so an inline unnamed type is extended once per occurrence.
 	//nolint:nestif // Sequential post-processing steps; flattening adds no clarity.
-	if t.Kind() != reflect.Struct && t.Name() != "" {
-		err := g.applyTypeDescription(t, n.payload)
-		if err != nil {
-			return nil, err
+	if t.Kind() != reflect.Struct {
+		if t.Name() != "" {
+			err := g.applyTypeDescription(t, n.payload)
+			if err != nil {
+				return nil, err
+			}
 		}
 
 		// The type's extender refines its value schema, so direct it at the bare
@@ -653,23 +659,24 @@ func combineNullable(stance Nullability, ptr bool) bool {
 // its type list) is deduped by render, never double-wrapped.
 func (g *generator) handleBuiltinType(t reflect.Type, s *Schema, nullable bool) (*node, error) {
 	value := &node{kind: kindValue, payload: s}
-	stance := NullFromReflection
 
-	//nolint:nestif // Sequential post-processing steps; flattening adds no clarity.
+	// Comment lookup is keyed by named type; the extender runs for unnamed
+	// builtin-produced schemas too (a registered extender for []byte is just
+	// as applicable as one for a named type).
 	if t.Name() != "" {
 		err := g.applyTypeDescription(t, s)
 		if err != nil {
 			return nil, err
 		}
+	}
 
-		stance, err = g.extendTypeSchema(t, s)
-		if err != nil {
-			return nil, err
-		}
+	stance, err := g.extendTypeSchema(t, s)
+	if err != nil {
+		return nil, err
+	}
 
-		if g.shouldExtract(t) {
-			return g.defineType(t, value, stance, nullable), nil
-		}
+	if g.shouldExtract(t) {
+		return g.defineType(t, value, stance, nullable), nil
 	}
 
 	value.nullable = combineNullable(stance, nullable)
@@ -1768,8 +1775,9 @@ func callExtender(ctx context.Context, tc TypeContext, ts *TypeSchema) (err erro
 // registered [TypeSchemaExtender] values ([WithTypeSchemaExtender]) in
 // registration order, so a registered extender sees what the type's author
 // produced and can adjust it. It is called from each reflection path
-// (structs, built-in overrides, named non-struct kinds) and never from the
-// provider paths (registered or on-type), which replace reflection entirely.
+// (structs, built-in overrides, non-struct kinds named or not) and never from
+// the provider paths (registered or on-type), which replace reflection
+// entirely.
 // The extenders mutate ts.Value in place and may set ts.Nullability to declare a
 // nullability stance.
 func (g *generator) extendType(t reflect.Type, ts *TypeSchema) error {

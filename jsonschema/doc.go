@@ -552,8 +552,9 @@
 //
 // Schema generation involves two levels of processing:
 //
-// Type-level processing is executed once per type, producing the type's
-// canonical schema: (1) base type reflection via the priority chain,
+// Type-level processing produces a type's canonical schema (once for a
+// $defs-extracted type, per occurrence for a type that stays inline):
+// (1) base type reflection via the priority chain,
 // (2) comment extraction if enabled, (3) [JSONSchemaExtender] if implemented,
 // (4) registered [TypeSchemaExtender] values in registration order.
 //

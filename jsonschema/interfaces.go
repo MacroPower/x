@@ -167,10 +167,15 @@ func (f TypeSchemaProviderFunc) SchemaForType(ctx context.Context, tc TypeContex
 // registers a TypeSchemaExtender. Where a [TypeSchemaProvider] replaces a
 // type's schema wholesale, an extender adjusts what reflection produced.
 //
-// ExtendSchemaForType is called once per type whose schema kind-based
+// ExtendSchemaForType is called for each type whose schema kind-based
 // reflection or a built-in override produced, at the point JSONSchemaExtend
 // runs (after comment extraction, before $defs extraction) and after the
-// type's own JSONSchemaExtend. Like JSONSchemaExtender, it is not called for
+// type's own JSONSchemaExtend. A $defs-extracted type is extended once, on
+// its shared entry; a type that stays inline (an unnamed composite such as
+// []string, or a named non-struct that is not extracted) is extended once
+// per occurrence, so an extender may run several times for the same type
+// within one generation run and must be deterministic, matching
+// [TypeSchemaProvider]. Like JSONSchemaExtender, it is not called for
 // types whose schema a registered provider or [JSONSchemaProvider] supplied.
 // It modifies ts.Value in place (and may set ts.Nullability to declare a
 // nullability stance, symmetric with a provider, so it never needs to emit a

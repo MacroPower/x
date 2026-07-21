@@ -341,6 +341,8 @@ used. When a registered provider (`WithTypeSchemaProvider` or `WithTypeSchema`) 
 `TypeSchemaExtender` registered with `WithTypeSchemaExtender` adjusts the
 reflection-generated schema at the same point in the pipeline, after the
 type's own `JSONSchemaExtend`, under the same not-called-when-replaced rule.
+Like a provider, an extender may run several times for the same type within
+one run (once per inline occurrence), so it must be deterministic.
 Where a provider replaces a type's schema wholesale, an extender modifies
 what reflection produced:
 

@@ -5751,6 +5751,41 @@ func TestWithTypeSchemaExtender(t *testing.T) {
 	}
 }
 
+// TestWithTypeSchemaExtenderUnnamedTypes pins that an extender registered for
+// an unnamed composite type ([]string, map[string]int) runs: their schemas are
+// reflection-produced just like a named type's, so the extender contract
+// covers them. They stay inline (no name, so no $defs extraction), which means
+// the extender runs once per occurrence.
+func TestWithTypeSchemaExtenderUnnamedTypes(t *testing.T) {
+	t.Parallel()
+
+	type doc struct {
+		Tags   []string       `json:"tags"`
+		Counts map[string]int `json:"counts"`
+	}
+
+	s, err := jsonschema.GenerateFor[doc](t.Context(),
+		jsonschema.WithTypeSchemaExtenderFor[[]string](
+			func(_ context.Context, _ jsonschema.TypeContext, ts *jsonschema.TypeSchema) error {
+				ts.Value.MinItems = new(1)
+
+				return nil
+			}),
+		jsonschema.WithTypeSchemaExtenderFor[map[string]int](
+			func(_ context.Context, _ jsonschema.TypeContext, ts *jsonschema.TypeSchema) error {
+				ts.Value.MinProperties = new(1)
+
+				return nil
+			}),
+	)
+	require.NoError(t, err)
+
+	assert.Equal(t, new(1), s.Properties["tags"].MinItems,
+		"the []string extender must run for the unnamed slice type")
+	assert.Equal(t, new(1), s.Properties["counts"].MinProperties,
+		"the map[string]int extender must run for the unnamed map type")
+}
+
 func TestWithTypeSchemaExtenderVerbatimRefRejected(t *testing.T) {
 	t.Parallel()
 
