@@ -58,7 +58,8 @@
 //     [JSONSchemaExtender] method panics; the panic is recovered and wrapped.
 //   - [ErrConflictingTypeSchema]: returned for a malformed [TypeSchema] a
 //     type-level hook declares: more than one of Value, Verbatim, or Ref set,
-//     or a Ref naming a type that is not extractable to $defs.
+//     a Ref naming a type that is not extractable to $defs, or a Ref alias
+//     chain that cycles back to its own type.
 //   - [ErrInvalidDefaultsInstance]: returned when the [WithDefaultsFrom]
 //     instance does not match the generated root type or does not marshal to
 //     a JSON object.

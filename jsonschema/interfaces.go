@@ -98,7 +98,9 @@ type TypeSchema struct {
 	// edge instead of a payload $ref-string scan. The named type must be
 	// extractable (a struct, or a type extracted to $defs because it implements a
 	// provider or extender) so the reference stays a real $ref edge; a
-	// non-extractable Ref is [ErrConflictingTypeSchema].
+	// non-extractable Ref is [ErrConflictingTypeSchema], as is an alias chain
+	// that cycles back to its own type (a self-Ref, or a mutual A -> B -> A
+	// chain).
 	Ref reflect.Type
 	// Nullable is the type's null-admission stance (see [Nullability]). It
 	// decorates Value (and Ref); it is ignored for Verbatim.

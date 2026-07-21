@@ -123,7 +123,9 @@ var (
 	// Value, Verbatim, or Ref (the three are mutually exclusive ways to describe a
 	// type's schema, so setting two at once is a caller bug rather than a silent
 	// precedence), or whose Ref names a type that is not extractable to $defs (so
-	// it cannot be kept reachable through a node-backed $ref edge).
+	// it cannot be kept reachable through a node-backed $ref edge) or whose Ref
+	// alias chain cycles back to itself (a self-Ref, or a mutual A -> B -> A
+	// chain, which no finite reference graph can satisfy).
 	ErrConflictingTypeSchema = errors.New("conflicting type schema")
 )
 

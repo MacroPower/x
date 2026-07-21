@@ -275,7 +275,9 @@ declares `Nullable` (or `NonNullable`) rather than hand-shaping an
 `anyOf[value, null]` wrapper. `Verbatim` is an opaque escape hatch emitted
 exactly as authored (no null encoding), for a fully-formed schema such as one
 loaded from a document. `Ref` is a whole-type alias to another Go type, kept
-reachable through a node-backed `$ref` edge. A zero `TypeSchema` marks the type
+reachable through a node-backed `$ref` edge; a `Ref` naming a type that is not
+extractable to `$defs`, or an alias chain that cycles back to its own type, is
+`ErrConflictingTypeSchema` too. A zero `TypeSchema` marks the type
 unrestricted (`{}`).
 
 For each type, the schema is determined by the first matching step:

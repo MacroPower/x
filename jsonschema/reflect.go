@@ -56,6 +56,10 @@ type generator struct {
 	defs              []*defEntry
 	typeOverrideCache map[reflect.Type]typeOverrideResult
 	visiting          map[reflect.Type]bool
+	// RefAliasing tracks the types whose [TypeSchema.Ref] alias is being
+	// resolved, so an alias chain that reaches one of them again (a self-Ref, or
+	// a mutual A -> B -> A cycle) is reported instead of recursing forever.
+	refAliasing map[reflect.Type]bool
 	// DefaultsFrom is the WithDefaultsFrom instance; defaultsFromSet
 	// distinguishes an explicit nil instance from the option being absent.
 	defaultsFrom         any
@@ -118,6 +122,7 @@ func (g *generator) forRun(ctx context.Context) *generator {
 	run.defs = nil
 	run.typeOverrideCache = map[reflect.Type]typeOverrideResult{}
 	run.visiting = map[reflect.Type]bool{}
+	run.refAliasing = map[reflect.Type]bool{}
 
 	return &run
 }
@@ -575,6 +580,18 @@ func checkTypeSchemaExclusive(t reflect.Type, ts TypeSchema) error {
 // pointer-ness (schemaForType computes null from ts.Ref's own pointer-ness and
 // knows nothing of the stance, so the combine is applied here).
 func (g *generator) refTypeOverride(t reflect.Type, ts TypeSchema, nullable bool) (*node, error) {
+	// The alias resolves through schemaForType, which consults the override
+	// chain again for the target; a Ref naming its own type, directly or through
+	// a chain of aliases, would recurse forever. Re-entering a type whose alias
+	// is already being resolved is that cycle, reported as a malformed
+	// TypeSchema rather than crashing the stack.
+	if g.refAliasing[t] {
+		return nil, fmt.Errorf("%w: type %s Ref %s forms an alias cycle", ErrConflictingTypeSchema, t, ts.Ref)
+	}
+
+	g.refAliasing[t] = true
+	defer delete(g.refAliasing, t)
+
 	ref, err := g.schemaForType(ts.Ref, nullable)
 	if err != nil {
 		return nil, err

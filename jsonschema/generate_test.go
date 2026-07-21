@@ -2630,6 +2630,44 @@ func TestGenerateFor_HookAuthoredRefKeepsDefAlive(t *testing.T) {
 	require.NoError(t, err, "the aliased $ref must resolve in the emitted schema")
 }
 
+func TestGenerateFor_TypeSchemaRefSelfCycleRejected(t *testing.T) {
+	t.Parallel()
+
+	// A Ref alias resolves by generating the target's schema, which consults
+	// the override chain again; a Ref naming its own type can therefore never
+	// bottom out. The cycle is reported as a malformed TypeSchema instead of
+	// recursing until the stack overflows.
+	type Node struct {
+		Name string `json:"name"`
+	}
+
+	_, err := jsonschema.GenerateFor[Node](t.Context(),
+		jsonschema.WithTypeSchemaFor[Node](jsonschema.TypeSchema{Ref: reflect.TypeFor[Node]()}),
+	)
+	require.ErrorIs(t, err, jsonschema.ErrConflictingTypeSchema)
+}
+
+func TestGenerateFor_TypeSchemaRefMutualCycleRejected(t *testing.T) {
+	t.Parallel()
+
+	// Two overrides aliasing each other (A -> B -> A) form the same unbounded
+	// resolution as a self-Ref, just one hop longer; the re-entry is reported
+	// rather than crashing the stack.
+	type CycleA struct {
+		Name string `json:"name"`
+	}
+
+	type CycleB struct {
+		Name string `json:"name"`
+	}
+
+	_, err := jsonschema.GenerateFor[CycleA](t.Context(),
+		jsonschema.WithTypeSchemaFor[CycleA](jsonschema.TypeSchema{Ref: reflect.TypeFor[CycleB]()}),
+		jsonschema.WithTypeSchemaFor[CycleB](jsonschema.TypeSchema{Ref: reflect.TypeFor[CycleA]()}),
+	)
+	require.ErrorIs(t, err, jsonschema.ErrConflictingTypeSchema)
+}
+
 // selfRefParent supplies, verbatim, a raw $ref back to the enclosing type's own
 // $defs entry -- a hand-built recursive parent link expressed through the
 // TypeSchema envelope rather than a raw $ref injected into a reflected payload.
