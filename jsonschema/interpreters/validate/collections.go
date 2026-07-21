@@ -111,11 +111,20 @@ func applyCollectionNe(field jsonschema.FieldContext, value string, baseType ref
 		return nil
 	}
 
+	// The forbidden subschema is gated on the collection's instance type:
+	// min/max size keywords are inert against a non-array (non-object)
+	// instance, so without the gate the subschema vacuously validates against
+	// the null a nilable field's schema deliberately admits, and the outer not
+	// rejects it. With the gate, null fails the inner type check and the
+	// permitted null stays valid, matching go-playground (ne=N passes on a nil
+	// collection since len(nil) is 0).
 	forbidden := &jsonschema.Schema{}
 	if isMapKind(baseType) {
+		forbidden.Type = "object"
 		forbidden.MinProperties = new(n)
 		forbidden.MaxProperties = new(n)
 	} else {
+		forbidden.Type = "array"
 		forbidden.MinItems = new(n)
 		forbidden.MaxItems = new(n)
 	}

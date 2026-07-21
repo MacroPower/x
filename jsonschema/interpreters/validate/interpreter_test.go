@@ -1921,13 +1921,26 @@ func TestValidateInterpreter_CollectionNe(t *testing.T) {
 
 	tags := s.Properties["tags"]
 	require.NotNil(t, tags.Not)
+	assert.Equal(t, "array", tags.Not.Type,
+		"the forbidden subschema is type-gated so it cannot vacuously match the permitted null")
 	assert.Equal(t, new(3), tags.Not.MinItems)
 	assert.Equal(t, new(3), tags.Not.MaxItems)
 
 	labels := s.Properties["labels"]
 	require.NotNil(t, labels.Not)
+	assert.Equal(t, "object", labels.Not.Type,
+		"the forbidden subschema is type-gated so it cannot vacuously match the permitted null")
 	assert.Equal(t, new(2), labels.Not.MinProperties)
 	assert.Equal(t, new(2), labels.Not.MaxProperties)
+
+	// The nilable fields' schemas deliberately admit null; without the type
+	// gate the size keywords are inert against null, the forbidden subschema
+	// vacuously validates, and the outer not rejects the null the schema
+	// admits.
+	require.NoError(t, jsonschema.Validate(t.Context(), s,
+		map[string]any{"tags": nil, "labels": nil}))
+	require.Error(t, jsonschema.Validate(t.Context(), s,
+		map[string]any{"tags": []any{"a", "b", "c"}, "labels": nil}))
 }
 
 func TestValidateInterpreter_CollectionNeComposesWithAllOf(t *testing.T) {
