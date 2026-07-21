@@ -155,17 +155,24 @@ func (c *Constraints) AddLengthBound(rule LenRule, value string) error {
 // but targeting the count keywords the field's kind selects: minItems/maxItems
 // for a slice or array, minProperties/maxProperties for a map. The exclusive
 // fold happens here (there is no exclusive-items keyword to defer it to), and
-// each inclusive floor or ceiling intersects the canvas's current count.
+// each inclusive floor or ceiling intersects the canvas's current count. A field
+// of any other kind has no count keyword to target, so the call reports an error
+// rather than stamping minItems onto a non-container schema.
 func (c *Constraints) AddCountBound(rule LenRule, value string) error {
 	base := c.baseSchema()
 
-	if c.kind == reflect.Map {
+	switch c.kind {
+	case reflect.Map:
 		return c.addSizeBound(rule, value,
 			&c.canvas.MinProperties, &c.canvas.MaxProperties, base.MinProperties, base.MaxProperties)
-	}
 
-	return c.addSizeBound(rule, value,
-		&c.canvas.MinItems, &c.canvas.MaxItems, base.MinItems, base.MaxItems)
+	case reflect.Slice, reflect.Array:
+		return c.addSizeBound(rule, value,
+			&c.canvas.MinItems, &c.canvas.MaxItems, base.MinItems, base.MaxItems)
+
+	default:
+		return fmt.Errorf("count bound: field kind %s is not a slice, array, or map", c.kind)
+	}
 }
 
 // addSizeBound parses a length/count rule through the shared size algebra and
@@ -228,12 +235,19 @@ func (c *Constraints) Enum() ([]any, bool) {
 }
 
 // SetConst pins the field's const, reporting [ErrConstraintConflict] rather than
-// overwriting a const a previous rule already pinned to a different
-// (numeric-aware) value. An interpreter that needs its own conflict wording
-// checks [Constraints.Const] first; this call is the shared backstop.
+// overwriting a const already pinned to a different (numeric-aware) value --
+// whether a previous rule pinned it on the canvas or the field's type supplies
+// it on the base, where reconcile overlays the canvas const and a disagreeing
+// type-pinned value would otherwise be silently overwritten. An interpreter that
+// needs its own conflict wording checks [Constraints.Const] first; this call is
+// the shared backstop.
 func (c *Constraints) SetConst(value any) error {
 	if c.canvas.Const != nil && !constraint.ValuesEqual(*c.canvas.Const, value) {
 		return fmt.Errorf("%w: a different const is already set", ErrConstraintConflict)
+	}
+
+	if base := c.baseSchema(); base.Const != nil && !constraint.ValuesEqual(*base.Const, value) {
+		return fmt.Errorf("%w: the type already pins a different const", ErrConstraintConflict)
 	}
 
 	v := value
@@ -243,11 +257,17 @@ func (c *Constraints) SetConst(value any) error {
 }
 
 // SetEnum sets the field's enum, reporting [ErrConstraintConflict] when an enum
-// is already set, so two enumerations cannot silently overwrite one another. An
-// interpreter that needs its own wording checks [Constraints.Enum] first.
+// is already set -- on the canvas by a previous rule, or on the type-derived
+// base, which reconcile would silently overwrite with the canvas value -- so two
+// enumerations cannot shadow one another. An interpreter that needs its own
+// wording checks [Constraints.Enum] first.
 func (c *Constraints) SetEnum(values []any) error {
 	if c.canvas.Enum != nil {
 		return fmt.Errorf("%w: an enum is already set", ErrConstraintConflict)
+	}
+
+	if c.baseSchema().Enum != nil {
+		return fmt.Errorf("%w: the type already sets an enum", ErrConstraintConflict)
 	}
 
 	c.canvas.Enum = values

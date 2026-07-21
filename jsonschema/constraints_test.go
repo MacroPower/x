@@ -94,6 +94,94 @@ func TestConstraintsFacadeConflictSentinel(t *testing.T) {
 		"a different second const surfaces the public conflict sentinel")
 }
 
+// TestConstraintsFacadeBaseCrossCheck confirms the SetConst/SetEnum backstop
+// consults the type-derived base like it does the canvas: reconcile overlays the
+// canvas const/enum onto the payload, so a value the field's type already pins
+// would be silently overwritten if the facade only checked the canvas.
+func TestConstraintsFacadeBaseCrossCheck(t *testing.T) {
+	t.Parallel()
+
+	t.Run("const conflicts with a type-pinned const", func(t *testing.T) {
+		t.Parallel()
+
+		type Payload struct {
+			Name string `json:"name" pin:"x"`
+		}
+
+		var conflict error
+
+		interp := boundInterp(func(c *jsonschema.Constraints) error {
+			conflict = c.SetConst("other")
+
+			return nil
+		})
+
+		typed := any("typed")
+
+		_, err := jsonschema.GenerateFor[Payload](t.Context(),
+			jsonschema.WithTagInterpreter("pin", interp),
+			jsonschema.WithTypeSchemaFor[string](jsonschema.TypeSchema{
+				Value: &jsonschema.Schema{Type: "string", Const: &typed},
+			}),
+		)
+		require.NoError(t, err)
+		require.ErrorIs(t, conflict, jsonschema.ErrConstraintConflict,
+			"a const disagreeing with the type-pinned one is a conflict, not an override")
+	})
+
+	t.Run("const equal to the type-pinned const is not a conflict", func(t *testing.T) {
+		t.Parallel()
+
+		type Payload struct {
+			Name string `json:"name" pin:"x"`
+		}
+
+		interp := boundInterp(func(c *jsonschema.Constraints) error {
+			return c.SetConst("typed")
+		})
+
+		typed := any("typed")
+
+		s, err := jsonschema.GenerateFor[Payload](t.Context(),
+			jsonschema.WithTagInterpreter("pin", interp),
+			jsonschema.WithTypeSchemaFor[string](jsonschema.TypeSchema{
+				Value: &jsonschema.Schema{Type: "string", Const: &typed},
+			}),
+		)
+		require.NoError(t, err)
+
+		field := s.Properties["name"]
+		require.NotNil(t, field.Const)
+		assert.Equal(t, "typed", *field.Const)
+	})
+
+	t.Run("enum conflicts with a type-set enum", func(t *testing.T) {
+		t.Parallel()
+
+		type Payload struct {
+			Name string `json:"name" pin:"x"`
+		}
+
+		var conflict error
+
+		interp := boundInterp(func(c *jsonschema.Constraints) error {
+			conflict = c.SetEnum([]any{"a", "b"})
+
+			return nil
+		})
+
+		_, err := jsonschema.GenerateFor[Payload](t.Context(),
+			jsonschema.WithTagInterpreter("pin", interp),
+			jsonschema.WithTypeSchemaFor[string](jsonschema.TypeSchema{
+				Value: &jsonschema.Schema{Type: "string", Enum: []any{"a", "b", "c"}},
+			}),
+		)
+		require.NoError(t, err)
+		require.ErrorIs(t, conflict, jsonschema.ErrConstraintConflict,
+			"a second enumeration cannot silently shadow the type's own")
+	})
+}
+
 // TestConstraintsFacadeNumericBoundPolicy confirms the facade applies the shared
 // 2^53 exact-representability policy through the public sentinel.
 func TestConstraintsFacadeNumericBoundPolicy(t *testing.T) {
@@ -238,6 +326,33 @@ func TestConstraintsFacadeCountIntersection(t *testing.T) {
 		require.NotNil(t, field.MaxItems)
 		assert.Equal(t, 1, *field.MinItems)
 		assert.Equal(t, 0, *field.MaxItems)
+	})
+
+	t.Run("rejects a non-container kind", func(t *testing.T) {
+		t.Parallel()
+
+		type Payload struct {
+			N int `count:"x" json:"n"`
+		}
+
+		var countErr error
+
+		interp := boundInterp(func(c *jsonschema.Constraints) error {
+			countErr = c.AddCountBound(jsonschema.LenMin, "2")
+
+			return nil
+		})
+
+		s, err := jsonschema.GenerateFor[Payload](t.Context(),
+			jsonschema.WithTagInterpreter("count", interp),
+		)
+		require.NoError(t, err)
+		require.Error(t, countErr,
+			"an int field has no count keyword to target")
+
+		field := s.Properties["n"]
+		assert.Nil(t, field.MinItems, "no stray minItems lands on a non-container schema")
+		assert.Nil(t, field.MinProperties)
 	})
 }
 
