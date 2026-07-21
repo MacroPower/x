@@ -634,6 +634,13 @@ func validateURIRef(s string, badChars func(string) bool, label string) error {
 		return fmt.Errorf("invalid %s reference: misplaced delimiter", label)
 	}
 
+	// Bare IPv6 addresses must be enclosed in brackets per RFC 3986 §3.2.2; a
+	// network-path reference carries the same authority grammar as an absolute
+	// URI.
+	if strings.Count(u.Host, ":") > 1 && !strings.HasPrefix(u.Host, "[") {
+		return fmt.Errorf("invalid %s reference: bare IPv6 address", label)
+	}
+
 	return nil
 }
 

@@ -818,3 +818,22 @@ func TestURIRejectsBareIPv6(t *testing.T) {
 	require.NoError(t, err,
 		"uri with a bracketed IPv6 authority should be accepted")
 }
+
+// TestURIReferenceRejectsBareIPv6 confirms the reference validators reject an
+// unbracketed IPv6 authority in a network-path reference, matching the
+// absolute validators: the authority grammar is the same (RFC 3986 §3.2.2).
+func TestURIReferenceRejectsBareIPv6(t *testing.T) {
+	t.Parallel()
+
+	for _, format := range []string{"uri-reference", "iri-reference"} {
+		validate := validator(t, format)
+
+		err := validate("//::1/a")
+		require.Error(t, err,
+			"%s with an unbracketed IPv6 authority should be rejected", format)
+
+		err = validate("//[::1]/a")
+		require.NoError(t, err,
+			"%s with a bracketed IPv6 authority should be accepted", format)
+	}
+}
