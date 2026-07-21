@@ -69,9 +69,8 @@ type node struct {
 	// Verbatim marks a kindValue leaf whose payload a type-level hook declared
 	// through [TypeSchema.Verbatim]: it is emitted exactly as authored, so render
 	// and reconcile skip the null encoding for it entirely.
-	verbatim      bool
-	isField       bool // gates the reconcile-time nullable-field bound clearing
-	boundAuthored bool // a jsonschema-tag numeric bound was authored on the field
+	verbatim bool
+	isField  bool // marks a struct-field node, so reconcile applies the field const/enum bound subsumption
 	// The keepElementBounds flag records the jsonschema-tag enum-on-elements
 	// carve-out: a jsonschema `enum` written onto a sequence or map element keeps
 	// that element's type-derived numeric bounds even though it authored an enum,
@@ -80,7 +79,7 @@ type node struct {
 	// after the jsonschema tag runs, on any element whose canvas authored an enum;
 	// reconcile then treats an authored element enum as pinning (dropping the
 	// bounds) unless this flag keeps them. It is the element counterpart of the
-	// field's boundAuthored rule.
+	// field-enum rule, which reconcile derives from the merged value instead.
 	keepElementBounds bool
 }
 

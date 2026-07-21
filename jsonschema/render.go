@@ -127,8 +127,6 @@ func (g *generator) renderDef(e *defEntry) {
 // [generator.reconcileField].
 func (g *generator) applyNull(n *node, base *Schema) *Schema {
 	if !n.nullableDecision() {
-		g.clearFieldBounds(n, base)
-
 		if n.nilableContainer() {
 			base.Type = n.base
 		}
@@ -165,43 +163,6 @@ func (g *generator) applyNull(n *node, base *Schema) *Schema {
 	}
 
 	return &Schema{AnyOf: []*Schema{base, {Type: typename.Null}}}
-}
-
-// clearFieldBounds drops the type-derived numeric bounds a const or unauthored
-// enum on a field subsumes, at the value schema. It runs only for struct
-// fields: an element's bounds are already cleared (or deliberately kept) by the
-// interpreter that stamped its const/enum, so render must not re-decide.
-func (g *generator) clearFieldBounds(n *node, value *Schema) {
-	if g.pinsValue(n, value) {
-		schemashape.ClearNumericBounds(value)
-	}
-}
-
-// pinsValue reports whether a pinned value subsumes the numeric bounds, so they
-// are dropped. A struct field pins when its merged value branch carries a const,
-// or an enum the jsonschema tag did not narrow with its own bound (boundAuthored).
-// An element pins when its own canvas authored a const or enum, except the
-// jsonschema-tag enum-on-elements carve-out (keepElementBounds), which keeps the
-// element's type bounds. Every other node (type-level, root, def body) has no
-// authored canvas and never pins here.
-//
-// The element branch reads the element's own canvas rather than the merged value,
-// so a const or enum the element's type supplies is not conflated with an
-// authored pin. One narrow divergence: an element carrying both a jsonschema-tag
-// enum and an interpreter dive/oneof on the same canvas keeps the type bounds
-// (keepElementBounds wins), an unusual and arguably ill-formed combination.
-func (g *generator) pinsValue(n *node, value *Schema) bool {
-	if n.authored == nil { // root, def body, embed, type-level: never pins
-		return false
-	}
-
-	if n.isField {
-		return value.Const != nil || (value.Enum != nil && !n.boundAuthored)
-	}
-
-	// An element node reads its own canvas: the const/enum it authored, with the
-	// jsonschema-tag enum-on-elements carve-out recorded in keepElementBounds.
-	return n.authored.Const != nil || (n.authored.Enum != nil && !n.keepElementBounds)
 }
 
 // refTargetAdmitsNull reports whether a rendered schema already accepts a JSON

@@ -2961,9 +2961,10 @@ func TestGenerateFor_NullableSizedIntPointerSplit(t *testing.T) {
 	// while a field-authored keyword sits on the anyOf wrapper as a sibling. The
 	// split reproduces this placement byte for byte: an authored numeric bound
 	// stays outside next to the type's own bounds inside, a const/enum lands on
-	// the value branch with the kind bounds cleared, an authored bound alongside
-	// an enum keeps the bounds (enum ∩ bound), and a ",string" const/enum flips
-	// the type list into the anyOf form.
+	// the value branch with the kind bounds cleared, an enum with an authored
+	// bound drops the kind bounds the enum subsumes while the authored bound rides
+	// the wrapper (enum ∩ bound), and a ",string" const/enum flips the type list
+	// into the anyOf form.
 	tests := map[string]struct {
 		generate func() (*jsonschema.Schema, error)
 		want     string
@@ -2998,7 +2999,7 @@ func TestGenerateFor_NullableSizedIntPointerSplit(t *testing.T) {
 			},
 			want: `{"anyOf":[{"type":"integer","enum":[1,2,3]},{"type":"null"}]}`,
 		},
-		"authored bound with enum keeps kind bounds inside": {
+		"enum with authored bound drops the subsumed kind ceiling": {
 			generate: func() (*jsonschema.Schema, error) {
 				type Container struct {
 					F *int8 `json:"f" jsonschema:"enum=1|2|3,minimum=2"`
@@ -3006,7 +3007,11 @@ func TestGenerateFor_NullableSizedIntPointerSplit(t *testing.T) {
 
 				return jsonschema.GenerateFor[Container](t.Context())
 			},
-			want: `{"minimum":2,"anyOf":[{"type":"integer","enum":[1,2,3],"minimum":-128,"maximum":127},{"type":"null"}]}`,
+			// The field enum drops the kind-derived bounds it subsumes: the kind
+			// ceiling (maximum:127) is gone, and the authored floor (minimum:2) rides
+			// the wrapper as the sibling that narrows the enum. The value branch keeps
+			// only the restored kind floor, redundant under the enum but harmless.
+			want: `{"minimum":2,"anyOf":[{"type":"integer","enum":[1,2,3],"minimum":-128},{"type":"null"}]}`,
 		},
 		"string override flips the type list to anyOf for enum": {
 			generate: func() (*jsonschema.Schema, error) {

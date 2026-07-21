@@ -1,9 +1,9 @@
 package jsonschema
 
 import (
-	"cmp"
 	"slices"
 
+	"go.jacobcolvin.com/x/jsonschema/internal/constraint"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemashape"
 	"go.jacobcolvin.com/x/jsonschema/internal/typename"
 )
@@ -29,14 +29,27 @@ func (g *generator) reconcileField(n *node) *Schema {
 
 	// A verbatim-typed field still overlays its field-level facts (description,
 	// tags) onto the authored copy, but the payload is emitted with no null
-	// encoding, so skip the null split and return the merged copy directly.
+	// encoding, so skip the null split and return the merged copy directly. Its
+	// bounds resolve only when the canvas authored one, so the tighten-only
+	// guarantee holds for a tag bound on a verbatim-typed field while a bound-free
+	// canvas leaves the verbatim payload's own keywords exactly as authored,
+	// never collapsed to canonical form.
 	if n.verbatim {
+		if canvasAuthorsBounds(n.authored) {
+			g.resolveBounds(n, &merged, base)
+		}
+
 		return &merged
 	}
 
-	if !n.nullable {
-		g.clearFieldBounds(n, &merged)
+	// Resolve the numeric/length/count bounds through the shared algebra before
+	// the null split: the kind-derived payload (Baseline) is intersected with the
+	// authored canvas (Replace) under the const/enum subsumption the node's role
+	// chooses, then collapsed to one keyword per side. The split then partitions
+	// the resolved keywords.
+	g.resolveBounds(n, &merged, base)
 
+	if !n.nullable {
 		if n.nilableContainer() {
 			merged.Type = n.base
 		}
@@ -63,16 +76,10 @@ func (g *generator) reconcileField(n *node) *Schema {
 
 	// Split the authored wrapper-scoped keywords onto a fresh anyOf wrapper,
 	// restoring the value branch's type-derived values from the pristine payload;
-	// const/enum and structural children stay on the value branch.
+	// const/enum and structural children stay on the value branch. The bound
+	// subsumption already happened in resolveBounds, so the split only partitions
+	// the resolved keywords.
 	wrapper := splitFieldKeywords(&merged, base)
-
-	// A const (or unauthored enum, or a pinned element) subsumes the type-derived
-	// bounds: drop them from the value branch and from any authored bound the
-	// split moved to the wrapper, which would otherwise reject a value outside it.
-	if g.pinsValue(n, &merged) {
-		schemashape.ClearNumericBounds(&merged)
-		schemashape.ClearNumericBounds(wrapper)
-	}
 
 	if n.nilableContainer() {
 		merged.Type = n.base
@@ -98,31 +105,107 @@ func (g *generator) reconcileRefField(n *node) *Schema {
 	merged := *base
 	overlayAuthored(&merged, n.authored, base)
 
-	if !n.nullableDecision() {
-		s := g.renderRef(&merged, n.def)
-		g.clearFieldBounds(n, s)
+	// Resolve bounds before renderRef so a facade- or tag-contributed bound lands
+	// on merged first; the Draft-07 sibling wrap in renderRef then moves it into
+	// the allOf beside the $ref rather than leaving it as an ignored sibling.
+	g.resolveBounds(n, &merged, base)
 
-		return s
+	if !n.nullableDecision() {
+		return g.renderRef(&merged, n.def)
 	}
 
 	if refTargetAdmitsNull(n.def.rendered) {
-		s := g.renderRef(&merged, n.def)
-		g.clearFieldBounds(n, s)
-
-		return s
+		return g.renderRef(&merged, n.def)
 	}
 
 	wrapper := splitFieldKeywords(&merged, base)
-
-	if g.pinsValue(n, &merged) {
-		schemashape.ClearNumericBounds(&merged)
-		schemashape.ClearNumericBounds(wrapper)
-	}
 
 	value := g.renderRef(&merged, n.def)
 	wrapper.AnyOf = []*Schema{value, {Type: typename.Null}}
 
 	return wrapper
+}
+
+// resolveBounds resolves the node's numeric, length, and count bounds through
+// the shared constraint algebra and writes the collapsed result onto merged. It
+// absorbs the kind-derived payload (base) as the Baseline tier and the authored
+// canvas (n.authored) as the Intersect tier -- never merged, whose
+// payload-copied kind bounds would be mislabeled authored -- then resolves the
+// numeric axis under the const/enum subsumption the node's role selects. The
+// Intersect tier makes every authored bound tighten-only: a canvas bound weaker
+// than the type's own (a tag maximum the field's Go kind can never reach) never
+// weakens it, for every writer at once (the jsonschema tag, validate,
+// third-party interpreters). The size axes always fold every tier. It reads the
+// effective const/enum from merged (post-overlay, so a type-override const/enum
+// on base is honored). The axis resolution already collapses each side to one
+// keyword; CanonicalizeNumeric applies the shared canonical-form pass afterward
+// so the field/element numeric output stays canonical regardless of how the
+// bounds were written.
+func (g *generator) resolveBounds(n *node, merged, base *Schema) {
+	set := constraint.New()
+	set.AbsorbAxes(base, constraint.Baseline, constraint.KindDerived)
+	set.AbsorbAxes(n.authored, constraint.Intersect, constraint.Authored)
+
+	if base.MultipleOf != nil {
+		set.SetMultipleOf(*base.MultipleOf)
+	}
+
+	if n.authored.MultipleOf != nil {
+		set.SetMultipleOf(*n.authored.MultipleOf)
+	}
+
+	resolved := set.ResolveBounds(numericResolveMode(merged, n))
+	resolved.RenderBounds(merged)
+	constraint.CanonicalizeNumeric(merged)
+}
+
+// numericResolveMode selects the const/enum subsumption for the numeric axis
+// from the node's role. It reproduces the prior pins-value precedence and adds
+// the field-enum edge fix: a field const drops every numeric bound; a field enum
+// drops the kind-derived bounds and keeps the authored ones that narrow it. A
+// field reads the merged value (post-overlay, so a type-override const/enum on
+// the payload is honored); an element reads its own authored canvas, so a
+// const/enum the element's type supplies is not conflated with an authored pin.
+// An element pin drops every bound, except the jsonschema-tag enum-on-elements
+// carve-out (keepElementBounds), which keeps the type bounds. A verbatim payload
+// is emitted as authored: its const/enum never subsumes its own bounds, so the
+// algebra only intersects.
+func numericResolveMode(merged *Schema, n *node) constraint.ResolveMode {
+	if n.verbatim {
+		return constraint.ResolveKeepKind
+	}
+
+	if n.isField {
+		switch {
+		case merged.Const != nil:
+			return constraint.ResolveDropAll
+		case merged.Enum != nil:
+			return constraint.ResolveDropKind
+		default:
+			return constraint.ResolveKeepKind
+		}
+	}
+
+	// An element (or any non-field node reaching here) pins when its own canvas
+	// authored a const or enum, dropping the type-derived bounds the pinned value
+	// subsumes -- unless the enum is the jsonschema-tag enum-on-elements
+	// carve-out, which deliberately keeps the type bounds.
+	if n.authored.Const != nil || (n.authored.Enum != nil && !n.keepElementBounds) {
+		return constraint.ResolveDropAll
+	}
+
+	return constraint.ResolveKeepKind
+}
+
+// canvasAuthorsBounds reports whether the authored canvas carries any numeric or
+// length/count bound keyword, gating the verbatim-path bound resolution: only an
+// authored bound warrants folding a verbatim payload through the algebra.
+func canvasAuthorsBounds(canvas *Schema) bool {
+	return canvas.Minimum != nil || canvas.ExclusiveMinimum != nil ||
+		canvas.Maximum != nil || canvas.ExclusiveMaximum != nil ||
+		canvas.MinLength != nil || canvas.MaxLength != nil ||
+		canvas.MinItems != nil || canvas.MaxItems != nil ||
+		canvas.MinProperties != nil || canvas.MaxProperties != nil
 }
 
 // overlayAuthored merges the authored canvas onto merged: each wrapper-scoped
@@ -140,9 +223,10 @@ func (g *generator) reconcileRefField(n *node) *Schema {
 // true back to false. Authoring one of these to false is meaningless in every
 // other case, so the ambiguity is confined to that one legacy-seam combination.
 //
-// The type-derivable bound keywords do not blind-assign: after the overlay,
-// intersectBounds tightens each to the stronger of the canvas and the base
-// value, so an authored bound can only tighten the type's own, never weaken it.
+// The bound keywords the overlay blind-assigns here are provisional: resolveBounds
+// then re-derives them from the pristine payload and the canvas through the
+// shared algebra, so an authored bound can only tighten the type's own, never
+// weaken it.
 func overlayAuthored(merged, canvas, base *Schema) {
 	for _, kw := range movableKeywords {
 		if kw.differs(emptySchema, canvas) {
@@ -182,68 +266,6 @@ func overlayAuthored(merged, canvas, base *Schema) {
 	if len(canvas.AllOf) > 0 {
 		merged.AllOf = append(slices.Clone(base.AllOf), canvas.AllOf...)
 	}
-
-	intersectBounds(merged, base)
-}
-
-// intersectBounds tightens each type-derivable bound keyword on merged to the
-// stronger of merged's current value (the overlaid canvas value, or base's own
-// where the canvas authored none) and base's type-derived value: a floor keeps
-// the larger side, a ceiling the smaller, and a nil pointer is an unbounded side
-// so a non-nil value always wins. It closes the non-nullable weakening footgun --
-// where a weaker authored bound would blind-overwrite the stronger type bound --
-// for every writer at once (the jsonschema tag, validate, third-party
-// interpreters), so an authored bound can only tighten the type's own value. The
-// nullable path is unaffected: a stronger canvas bound differs from base, so
-// splitFieldKeywords moves it to the wrapper, while a weaker canvas bound equals
-// base after intersection, so no redundant inert wrapper sibling is emitted for it.
-//
-// Cross-keyword strictness (an exclusive versus inclusive bound) is not
-// reconciled here: base's own keywords are never weakened and the canvas can only
-// add conjuncts, so per-keyword intersection only ever tightens. The multipleOf
-// keyword is excluded: it has no type-derived value to intersect against.
-func intersectBounds(merged, base *Schema) {
-	merged.Minimum = intersectFloor(merged.Minimum, base.Minimum)
-	merged.ExclusiveMinimum = intersectFloor(merged.ExclusiveMinimum, base.ExclusiveMinimum)
-	merged.MinLength = intersectFloor(merged.MinLength, base.MinLength)
-	merged.MinItems = intersectFloor(merged.MinItems, base.MinItems)
-	merged.MinProperties = intersectFloor(merged.MinProperties, base.MinProperties)
-
-	merged.Maximum = intersectCeiling(merged.Maximum, base.Maximum)
-	merged.ExclusiveMaximum = intersectCeiling(merged.ExclusiveMaximum, base.ExclusiveMaximum)
-	merged.MaxLength = intersectCeiling(merged.MaxLength, base.MaxLength)
-	merged.MaxItems = intersectCeiling(merged.MaxItems, base.MaxItems)
-	merged.MaxProperties = intersectCeiling(merged.MaxProperties, base.MaxProperties)
-}
-
-// intersectFloor returns the stronger (larger) of two lower bounds, treating a
-// nil pointer as an unbounded side so a non-nil bound always wins.
-func intersectFloor[T cmp.Ordered](a, b *T) *T {
-	switch {
-	case a == nil:
-		return b
-	case b == nil:
-		return a
-	case *b > *a:
-		return b
-	default:
-		return a
-	}
-}
-
-// intersectCeiling returns the stronger (smaller) of two upper bounds, treating a
-// nil pointer as an unbounded side so a non-nil bound always wins.
-func intersectCeiling[T cmp.Ordered](a, b *T) *T {
-	switch {
-	case a == nil:
-		return b
-	case b == nil:
-		return a
-	case *b < *a:
-		return b
-	default:
-		return a
-	}
 }
 
 // splitFieldKeywords moves each authored wrapper-scoped keyword off value onto a
@@ -263,8 +285,13 @@ func splitFieldKeywords(value, base *Schema) *Schema {
 
 		// A keyword the value cleared relative to base is a deliberate removal,
 		// not an authored sibling: leave it cleared rather than moving it out and
-		// restoring the type value. The canvas never clears a payload keyword, so
-		// this guard is defensive.
+		// restoring the type value. This guard is load-bearing since the bound
+		// algebra resolves each numeric side to a single keyword: when an authored
+		// endpoint changes which keyword represents a side (a kind Minimum=0 plus an
+		// authored gt=5 renders ExclusiveMinimum and clears Minimum), the now-empty
+		// Minimum is left cleared on the value branch rather than restored to the
+		// kind value. That is safe because the facade is intersect-only, so the
+		// authored endpoint on the same side always subsumes the kind one.
 		if !kw.differs(emptySchema, value) {
 			continue
 		}

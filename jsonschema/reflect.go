@@ -1502,8 +1502,6 @@ func (g *generator) buildFieldSchema(
 			return nil, fmt.Errorf("jsonschema tag: %w", err)
 		}
 
-		fieldNode.boundAuthored = res.BoundAuthored
-
 		// A type= override replaces the field's type wholesale, so the field is
 		// now inline: it is not a reference and not nullable. Rebuild it as a
 		// plain value node over the overridden payload, dropping the def link,
@@ -1511,11 +1509,10 @@ func (g *generator) buildFieldSchema(
 		// across. Reachability drops any def the detached ref orphaned.
 		if res.TypeOverridden {
 			fieldNode = &node{
-				kind:          kindValue,
-				payload:       fieldNode.payload,
-				authored:      fieldNode.authored,
-				isField:       true,
-				boundAuthored: res.BoundAuthored,
+				kind:     kindValue,
+				payload:  fieldNode.payload,
+				authored: fieldNode.authored,
+				isField:  true,
 			}
 		}
 	}

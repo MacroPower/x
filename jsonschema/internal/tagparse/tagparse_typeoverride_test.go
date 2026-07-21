@@ -53,9 +53,8 @@ func TestApplyTypeOverrideContentKeywords(t *testing.T) {
 				ContentSchema:    contentSchema,
 			}
 
-			res, err := tagparse.Apply(tc.tag, reflect.TypeFor[[]byte](), &jsonschema.Schema{}, payload)
+			_, err := tagparse.Apply(tc.tag, reflect.TypeFor[[]byte](), &jsonschema.Schema{}, payload)
 			require.NoError(t, err)
-			assert.False(t, res.BoundAuthored, "no numeric bound keys in the tag")
 
 			assert.Equal(t, tc.wantContentEncoding, payload.ContentEncoding)
 			assert.Equal(t, tc.wantContentMediaType, payload.ContentMediaType)

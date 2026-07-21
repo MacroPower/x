@@ -1,10 +1,9 @@
 // Package schemashape holds small structural helpers over a generated
 // [jsonschema.Schema]: the empty-schema and $ref-sibling predicates that derive
 // from the canonical [go.jacobcolvin.com/x/jsonschema/internal/schemafield]
-// table, and the numeric-bound clear a pinned const/enum triggers. The
-// reflection generator and the validate-tag interpreter live in separate
-// packages but inspect the same generated shapes, so the logic is centralized
-// here to keep a single source of truth.
+// table. The reflection generator and the validate-tag interpreter live in
+// separate packages but inspect the same generated shapes, so the logic is
+// centralized here to keep a single source of truth.
 package schemashape
 
 import (
@@ -12,16 +11,6 @@ import (
 
 	"go.jacobcolvin.com/x/jsonschema/internal/schemafield"
 )
-
-// ClearNumericBounds drops the four numeric range keywords from s. Used once a
-// const/enum pins the value, where the type-derived bounds are redundant and
-// could reject a value set to the type's own boundary.
-func ClearNumericBounds(s *jsonschema.Schema) {
-	s.Minimum = nil
-	s.Maximum = nil
-	s.ExclusiveMinimum = nil
-	s.ExclusiveMaximum = nil
-}
 
 // IsEmpty reports whether s has no constraining keyword set (no type, no
 // applicator, no validation keyword). It is the constraint-only complement to

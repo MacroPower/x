@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"math/big"
 	"reflect"
 	"regexp"
 	"slices"
@@ -20,6 +19,7 @@ import (
 
 	"github.com/google/jsonschema-go/jsonschema"
 
+	"go.jacobcolvin.com/x/jsonschema/internal/constraint"
 	"go.jacobcolvin.com/x/jsonschema/internal/keyword"
 	"go.jacobcolvin.com/x/jsonschema/internal/numkind"
 	"go.jacobcolvin.com/x/jsonschema/internal/typename"
@@ -105,9 +105,6 @@ func isKeyValueTag(pairs []string) bool {
 // Result reports what [Apply] did that the generator's render phase needs. It is
 // internal, so it is free to widen as more provenance is required.
 type Result struct {
-	// BoundAuthored reports whether the tag set a numeric range bound, which the
-	// render split keeps alongside an enum (enum ∩ bound) rather than dropping.
-	BoundAuthored bool
 	// TypeOverridden reports whether a type= pair replaced the field's type. The
 	// field is then inline and non-nullable, so the builder detaches its $ref
 	// link and clears its null bit.
@@ -200,10 +197,6 @@ func Apply(tag string, fieldType reflect.Type, canvas, payload *jsonschema.Schem
 			groupsSet[g] = true
 		}
 
-		if isNumericBoundKey(key) {
-			res.BoundAuthored = true
-		}
-
 		if key == keyword.Type {
 			scalarType = standInTypeFor(value)
 			overriddenType = value
@@ -222,19 +215,6 @@ func Apply(tag string, fieldType reflect.Type, canvas, payload *jsonschema.Schem
 	}
 
 	return res, nil
-}
-
-// isNumericBoundKey reports whether key is one of the four range-bound keywords
-// reconcile drops once a value is pinned, used to tell an author-set bound (kept
-// when it narrows an enum, via the node's boundAuthored flag) from a kind-derived
-// one (always redundant once pinned).
-func isNumericBoundKey(key string) bool {
-	switch key {
-	case keyword.Minimum, keyword.Maximum, keyword.ExclusiveMinimum, keyword.ExclusiveMaximum:
-		return true
-	default:
-		return false
-	}
 }
 
 // isScalarValueKey reports whether a jsonschema tag key carries scalar values
@@ -806,45 +786,34 @@ func nonDecimalFloat(value string) bool {
 	return strings.ContainsAny(value, "_xX")
 }
 
-// parseFloat parses a float64 tag value.
+// parseFloat parses a float64 tag value (the four numeric bound keywords and
+// multipleOf) through the shared exact-representability policy. Parsing at the
+// [reflect.Invalid] kind takes the decimal-float path, which rejects the
+// non-decimal spellings (underscore separators, hexadecimal floats), non-finite
+// values, and an integer-valued literal beyond 2^53 whose float64 form rounds --
+// the same 2^53 policy the validate tag applies. The integer-precision failure
+// keeps this dialect's "exceeds exact float64 precision" phrasing while wrapping
+// [constraint.ErrNotRepresentable] so [errors.Is] identity to the public
+// jsonschema.ErrBoundNotRepresentable sentinel holds.
 func parseFloat(key, value string) (float64, error) {
 	if value == "" {
 		return 0, fmt.Errorf("jsonschema tag: key %q requires a non-empty value", key)
 	}
 
-	if nonDecimalFloat(value) {
-		return 0, fmt.Errorf("jsonschema tag: key %q: %q is not a decimal number", key, value)
-	}
-
-	n, err := strconv.ParseFloat(value, 64)
+	end, err := constraint.ParseNumericBound(value, reflect.Invalid)
 	if err != nil {
+		if errors.Is(err, constraint.ErrNotRepresentable) {
+			return 0, fmt.Errorf(
+				"jsonschema tag: key %q: integer bound %q exceeds exact float64 "+
+					"precision (>2^53); use const for an exact extreme value: %w",
+				key, value, constraint.ErrNotRepresentable,
+			)
+		}
+
 		return 0, fmt.Errorf("jsonschema tag: key %q: %w", key, err)
 	}
 
-	if math.IsNaN(n) || math.IsInf(n, 0) {
-		return 0, fmt.Errorf("jsonschema tag: key %q: %q is not a finite number", key, value)
-	}
-
-	// An integer-valued bound the float64 cannot represent exactly (magnitude
-	// above 2^53, e.g. an int64 field's own max) silently rounds to a different
-	// value when stored as the schema's *float64 bound, loosening the
-	// constraint. Reject it rather than ship a bound that differs from the tag,
-	// keeping the bound keywords consistent with the exact-precision const/enum
-	// parsing on the same field. The check keys on the exact value, not the
-	// spelling, so an integer written in exponent form (9.007199254740993e15) is
-	// caught the same as its plain-decimal form; genuinely fractional bounds are
-	// inherently float64 and are left alone.
-	if r, ok := new(big.Rat).SetString(value); ok && r.IsInt() {
-		if new(big.Float).SetInt(r.Num()).Cmp(big.NewFloat(n)) != 0 {
-			return 0, fmt.Errorf(
-				"jsonschema tag: key %q: integer bound %q exceeds exact float64 "+
-					"precision (>2^53); use const for an exact extreme value",
-				key, value,
-			)
-		}
-	}
-
-	return n, nil
+	return end.Val, nil
 }
 
 // parseInt parses a non-negative int tag value, rejecting negatives as required
