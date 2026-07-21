@@ -45,14 +45,14 @@ type inliner struct {
 
 	baseURI string
 
-	// The frozen node-identity index over every pristine schema the run touches:
+	// The node-identity index over every pristine schema the run touches:
 	// the pristine root document, each fetched document, each fallback
 	// substitute, and each target materialized from an unknown keyword. As record
 	// walks, it interns each schema here, and the per-node slices below are
 	// indexed by the id it assigns, so one identity source backs all the
 	// expansion bookkeeping. Pristine schemas are never mutated, so their
 	// pointers stay stable keys for the run.
-	doc *compiledDoc
+	index *schemaIndex
 
 	// The inflight[id] flag marks a pristine schema whose self-contained copy is
 	// currently being built; a ref that resolves to an in-flight schema is a cycle.
@@ -340,7 +340,7 @@ func (il *Inliner) Inline(ctx context.Context, s *Schema) (*Schema, error) {
 		draftOverride: il.proto.draftOverride,
 		baseURI:       il.proto.baseURI,
 		retrievalBase: il.proto.retrievalBase,
-		doc:           newCompiledDoc(),
+		index:         newSchemaIndex(),
 	}
 
 	// The context reaches the resolver through the ctx field set above:
@@ -413,7 +413,7 @@ func (in *inliner) record(s *Schema, path, doc string) {
 		return
 	}
 
-	id, indexed := in.doc.intern(s)
+	id, indexed := in.index.intern(s)
 	if indexed {
 		return
 	}
@@ -432,11 +432,26 @@ func (in *inliner) record(s *Schema, path, doc string) {
 // after each intern so a freshly assigned id is addressable. Slots for a new id
 // start at their zero value (empty path/doc, not in flight, no memoized copy).
 func (in *inliner) grow() {
-	n := in.doc.len()
+	n := in.index.len()
 	in.paths = growSlice(in.paths, n)
 	in.docs = growSlice(in.docs, n)
 	in.inflight = growSlice(in.inflight, n)
 	in.memo = growSlice(in.memo, n)
+}
+
+// internedID returns the node id the index assigned to s. Every caller relies
+// on the id addressing that schema's own per-node slots (paths, docs, inflight,
+// memo), so a miss -- a schema that record was expected to have interned but
+// did not -- is an internal invariant violation. It is surfaced as an error
+// rather than letting a zero id silently alias slot 0, the pristine root's
+// bookkeeping.
+func (in *inliner) internedID(s *Schema) (int, error) {
+	id, ok := in.index.nodeID(s)
+	if !ok {
+		return 0, fmt.Errorf("%w: schema not interned in the node index", ErrRefInline)
+	}
+
+	return id, nil
 }
 
 // walkPair makes working's subtree self-contained in place, reading all
@@ -581,7 +596,7 @@ func (in *inliner) expandTarget(pristine *Schema, path string) (*Schema, error) 
 
 	// A target already indexed and currently in flight closes a reference cycle;
 	// a not-yet-indexed target cannot be in flight.
-	if id, ok := in.doc.nodeID(target); ok && in.inflight[id] {
+	if id, ok := in.index.nodeID(target); ok && in.inflight[id] {
 		return in.substitute(pristine, path, ref, fmt.Errorf("%w: %q", ErrRefCycle, ref))
 	}
 
@@ -592,16 +607,23 @@ func (in *inliner) expandTarget(pristine *Schema, path string) (*Schema, error) 
 	// fragment-only ref (empty targetDoc) shares the referencing node's
 	// document, and the ref's own pointer fragment is the target's location --
 	// the referring node's path would mislocate a nested ref failure.
-	if _, ok := in.doc.nodeID(target); !ok {
+	if _, ok := in.index.nodeID(target); !ok {
 		if targetDoc == "" {
-			pristineID, _ := in.doc.nodeID(pristine)
+			pristineID, err := in.internedID(pristine)
+			if err != nil {
+				return nil, err
+			}
+
 			targetDoc, targetPtr = in.docs[pristineID], strings.TrimPrefix(ref, "#")
 		}
 
 		in.record(target, targetPtr, targetDoc)
 	}
 
-	targetID, _ := in.doc.nodeID(target)
+	targetID, err := in.internedID(target)
+	if err != nil {
+		return nil, err
+	}
 
 	return in.inlineCopy(target, in.paths[targetID], true)
 }
@@ -637,7 +659,11 @@ func (in *inliner) substitute(pristine *Schema, path, ref string, inlineErr erro
 	in.substituteDepth++
 	defer func() { in.substituteDepth-- }()
 
-	pristineID, _ := in.doc.nodeID(pristine)
+	pristineID, err := in.internedID(pristine)
+	if err != nil {
+		return nil, err
+	}
+
 	action := in.fallback.ResolveRefFailure(in.runContext(),
 		RefFailure{Document: in.docs[pristineID], Path: path, Ref: ref, Err: inlineErr})
 
@@ -694,9 +720,13 @@ func (in *inliner) substitute(pristine *Schema, path, ref string, inlineErr erro
 // cycle can cause.
 func (in *inliner) inlineCopy(target *Schema, path string, memoize bool) (*Schema, error) {
 	// The target was interned before inlineCopy runs (record seeds it at the
-	// resolving ref, or it belongs to a document already recorded), so its id is
-	// valid and its inflight/memo slots are addressable.
-	id, _ := in.doc.nodeID(target)
+	// resolving ref, or it belongs to a document already recorded); the checked
+	// lookup turns a violation of that invariant into an error instead of
+	// silently reading and writing slot 0's memo and inflight entries.
+	id, err := in.internedID(target)
+	if err != nil {
+		return nil, err
+	}
 
 	if memoized := in.memo[id]; memoized != nil {
 		return cloneSchema(memoized)

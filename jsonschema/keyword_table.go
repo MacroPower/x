@@ -3,7 +3,7 @@ package jsonschema
 import "fmt"
 
 // keywordTable is the ordered keyword dispatch table. It drives the Compile-time
-// precompute (precomputeRange runs each row's compile step per frozen node) and,
+// precompute (precomputeRange runs each row's compile step per indexed node) and,
 // filtered to the run's applicable rows once at Compile (see [validator.buildActiveRows]),
 // the validation walk. Table order is eval order; the phase field partitions the
 // rows into ref-resolution, assertion, and unevaluated stages, and the init below
@@ -373,12 +373,12 @@ func itemsCompile(v *validator, id int, s *Schema) {
 }
 
 // itemsPlanFor returns the array item plan for schema, preferring the per-node
-// cache and computing on the fly for a schema outside the frozen graph (a remote
+// cache and computing on the fly for a schema outside the index (a remote
 // or JSON-pointer fallback schema reached only at validation time), mirroring
 // [validator.boundsFor]. It returns nil when the schema sets no array item
 // keyword.
 func (v *validator) itemsPlanFor(id int, schema *Schema) *itemsPlan {
-	if v.inGraph(id) && v.itemsPlans[id] != nil {
+	if v.inIndex(id) && v.itemsPlans[id] != nil {
 		return v.itemsPlans[id]
 	}
 

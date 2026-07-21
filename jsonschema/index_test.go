@@ -8,14 +8,14 @@ import (
 	"go.jacobcolvin.com/x/jsonschema"
 )
 
-// A $defs entry referenced from two properties is one node in the frozen index:
-// it gets a single id, so its precomputed pattern and numeric-bound caches are
-// built once and validation reaching it through either $ref indexes the same
-// slot. (Upstream Schema.Resolve requires the pointer graph itself to be a tree,
-// so shared reuse is expressed through $ref rather than by aliasing one *Schema
-// pointer into two fields.) This guards that the id-indexed caches apply wherever
-// a shared node is reached.
-func TestValidateSharedDefSharesCompiledCache(t *testing.T) {
+// A $defs entry referenced from two properties is one node in the identity
+// index: it gets a single id, so its precomputed pattern and numeric-bound
+// caches are built once and validation reaching it through either $ref indexes
+// the same slot. (Upstream Schema.Resolve requires the pointer graph itself to
+// be a tree, so shared reuse is expressed through $ref rather than by aliasing
+// one *Schema pointer into two fields.) This guards that the id-indexed caches
+// apply wherever a shared node is reached.
+func TestValidateSharedDefSharesIndexedCache(t *testing.T) {
 	t.Parallel()
 
 	v, err := jsonschema.CompileJSON(t.Context(), []byte(`{
@@ -44,7 +44,7 @@ func TestValidateSharedDefSharesCompiledCache(t *testing.T) {
 }
 
 // A remote document fetched at compile time and referenced from two properties
-// exercises the frozen index's remote-fold path: Compile assigns the remote's
+// exercises the identity index's remote-fold path: Compile assigns the remote's
 // nodes ids (extend), grows and precomputes their caches (precomputeRange over
 // the freshly indexed range), and validation at either referencing position hits
 // the cached remote node by id. The two refs to one URI resolve to a single
@@ -78,7 +78,7 @@ func TestValidateCompileTimeRemoteSharedByTwoRefs(t *testing.T) {
 
 // A recursive schema (a $defs entry that references itself) is finite in the
 // pointer graph -- the self-reference is a $ref string, not a pointer cycle -- so
-// the frozen index assigns each node one id and validation of a nested instance
+// the identity index assigns each node one id and validation of a nested instance
 // terminates through the ref-resolution cycle guard.
 func TestValidateRecursiveRefCompilesAndValidates(t *testing.T) {
 	t.Parallel()

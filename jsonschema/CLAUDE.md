@@ -16,8 +16,8 @@ The package has two independent halves sharing the `Schema` type:
   `*ValidationError` trees. `Compile` builds a `validator` once (registry
   construction from `$id`/`$anchor`, precomputed numeric bounds and compiled
   regexes, draft and vocabulary detection); `validator.forInstance` derives
-  cheap per-run state. `Compile` also freezes a node-identity index over the root
-  document (`compiled.go`: `compiledDoc`, built by `freeze`): every schema
+  cheap per-run state. `Compile` also builds a node-identity index over the root
+  document (`index.go`: `schemaIndex`, a pointer interner): every schema
   reachable through sub-schema keywords is assigned a dense id once, and the
   per-node precompute caches (numeric bounds, compiled patterns, sorted key sets,
   const/enum rationals, item plans) are slices indexed by that id. The index
@@ -25,27 +25,22 @@ The package has two independent halves sharing the `Schema` type:
   `Validator.Schema()` still returns the caller's value; a schema reached only at
   validation time (a remote or JSON-pointer fallback target) is outside the index
   and its accessors recompute on the fly. `extend` folds a remote document fetched
-  while compiling into the same index, sharing `freeze`'s pointer dedup. This is
-  the validation-side analog of the generation IR (`ir.go`): identity assigned
-  once, no in-place mutation after construction. The inliner (`inline.go`) uses
+  while compiling into the same index, sharing `intern`'s pointer dedup. The inliner (`inline.go`) uses
   the same node-identity index type: its `record` walk interns every pristine
   schema (the root document, each fetched document, each `WithRefFallback`
   substitute, and each target materialized from an unknown keyword) into its own
-  `compiledDoc` via `intern`, and its expansion bookkeeping (the in-flight cycle
+  `schemaIndex` via `intern`, and its expansion bookkeeping (the in-flight cycle
   guard, the memoized self-contained copies, and each node's path and
   containing-document URI) lives in slices indexed by the assigned id. The
   inliner clones through `internal/schemaclone` for its pristine and working
-  copies. Three once-sketched follow-ups were assessed and intentionally not
-  pursued, because each is worse-or-neutral against the "the index references
-  live pointers, never clones" decision: keying `refresolve`'s `baseURIs`/`walked`
-  by node id (both already key on stable, never-mutated pointers, and `refresolve`
-  is a standalone package with no parent import, so id-keying only adds a lookup
-  or breaks the boundary); replacing the defensive fetched-document `cloneSchema`
-  with an index entry (the clone provides isolation from the resolver-owned and
-  upstream-`Resolve`-mutated schema, which an index cannot); and shrinking
-  `internal/schemaclone` or retiring `schemaFormsTree` (the clone's cycle check is
-  intrinsic to the JSON round-trip, and `schemaFormsTree` _rejects_ non-tree
-  graphs, the opposite of the identity index, which _tolerates_ them).
+  copies. Follow-up work here is not done and remains open: a single-point
+  cycle policy, retiring `schemaFormsTree`, and subsuming the per-clone
+  `checkAcyclic` in `internal/schemaclone`. Two constraints any such design
+  must handle: `refresolve` is a standalone package with no parent import, so
+  keying its `baseURIs`/`walked` by node id means either an extra lookup at the
+  boundary or breaking that boundary; and the defensive fetched-document
+  `cloneSchema` isolates this package from the resolver-owned schema that
+  upstream `Resolve` mutates, an isolation a pointer index alone cannot provide.
   `$ref`/`$dynamicRef`/`$anchor` resolution lives in the
   shared `internal/refresolve` core, which both the validator and the inliner
   (`inline.go`) consume so the two engines cannot disagree; the inliner resolves
@@ -112,7 +107,7 @@ used for exactly two things: structural well-formedness via `Schema.Resolve`
 format checking — is implemented here, because the upstream's resolved
 reference graph is unexported and its validator stops at the first error.
 
-The frozen compiled form (`compiled.go`) does not change this relationship: it
+The node-identity index (`index.go`) does not change this relationship: it
 is an identity index _over_ the upstream `Schema` graph, mapping each reachable
 `*Schema` to a dense node id, not a third use that re-models `Schema`'s fields
 (those stay tabulated in `internal/schemafield`). It references the caller's live
