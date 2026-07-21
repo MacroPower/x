@@ -382,10 +382,25 @@ func splitTagPairs(tag string) []string {
 // keys consult it.
 func applyTagKeyValue(key, value string, scalarType reflect.Type, canvas, payload *jsonschema.Schema) error {
 	switch key {
-	case keyword.Description:
-		canvas.Description = value
-	case keyword.Title:
-		canvas.Title = value
+	case keyword.Description, keyword.Title, keyword.Pattern, keyword.Format:
+		// An empty string is the field's zero value, so the keyword would
+		// silently not be emitted at all; reject the empty value like every
+		// other key so a typo such as "pattern=" is a parse error rather than
+		// a dropped constraint.
+		if value == "" {
+			return fmt.Errorf("jsonschema tag: key %q requires a non-empty value", key)
+		}
+
+		switch key {
+		case keyword.Description:
+			canvas.Description = value
+		case keyword.Title:
+			canvas.Title = value
+		case keyword.Pattern:
+			canvas.Pattern = value
+		case keyword.Format:
+			canvas.Format = value
+		}
 
 	case keyword.Type:
 		if !typename.Valid(value) {
@@ -393,11 +408,6 @@ func applyTagKeyValue(key, value string, scalarType reflect.Type, canvas, payloa
 		}
 
 		applyTypeOverride(payload, value)
-
-	case keyword.Pattern:
-		canvas.Pattern = value
-	case keyword.Format:
-		canvas.Format = value
 
 	case keyword.Deprecated:
 		b, err := parseBoolValue(key, value)

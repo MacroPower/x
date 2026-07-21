@@ -1710,3 +1710,62 @@ func TestTagScalarAfterTypeOverride(t *testing.T) {
 		})
 	}
 }
+
+// TestTagEmptyStringKeyValues covers the empty-value rule for the string-typed
+// annotation keys: an empty description=, title=, pattern=, or format= would
+// assign the field's zero value, so the keyword would silently never be
+// emitted. Empty values are a parse error for every key except const and
+// default on a string field, and these four are no exception.
+func TestTagEmptyStringKeyValues(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		generate func() (*jsonschema.Schema, error)
+	}{
+		"empty description": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					F string `json:"f" jsonschema:"description="`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+		},
+		"empty title": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					F string `json:"f" jsonschema:"title="`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+		},
+		"empty pattern": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					F string `json:"f" jsonschema:"pattern=,minLength=1"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+		},
+		"empty format": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					F string `json:"f" jsonschema:"format="`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := tc.generate()
+			require.ErrorContains(t, err, "requires a non-empty value")
+		})
+	}
+}
