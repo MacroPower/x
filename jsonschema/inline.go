@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"net/url"
 	"strings"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/refresolve"
@@ -609,12 +610,10 @@ func (in *inliner) expandTarget(pristine *Schema, path string) (*Schema, error) 
 	// the referring node's path would mislocate a nested ref failure.
 	if _, ok := in.index.nodeID(target); !ok {
 		if targetDoc == "" {
-			pristineID, err := in.internedID(pristine)
+			targetDoc, targetPtr, err = in.fragmentTargetLocation(pristine, ref)
 			if err != nil {
 				return nil, err
 			}
-
-			targetDoc, targetPtr = in.docs[pristineID], strings.TrimPrefix(ref, "#")
 		}
 
 		in.record(target, targetPtr, targetDoc)
@@ -626,6 +625,40 @@ func (in *inliner) expandTarget(pristine *Schema, path string) (*Schema, error) 
 	}
 
 	return in.inlineCopy(target, in.paths[targetID], true)
+}
+
+// fragmentTargetLocation seeds the recorded location for a target reached by a
+// fragment-only ref from the pristine node: the node's containing document
+// paired with the ref's pointer fragment, prefixed by the enclosing resource
+// root's recorded location. The prefix matters inside an embedded $id
+// resource, where the fragment resolves against the resource root rather than
+// the document root; there the bare fragment is resource-relative and would
+// mislocate the target within the containing document.
+func (in *inliner) fragmentTargetLocation(pristine *Schema, ref string) (string, string, error) {
+	pristineID, err := in.internedID(pristine)
+	if err != nil {
+		return "", "", err
+	}
+
+	doc, ptr := in.docs[pristineID], strings.TrimPrefix(ref, "#")
+
+	// Recorded paths use decoded tokens; a still-encoded fragment (one
+	// url.Parse could not canonicalize, e.g. a %2F separator escape) keeps the
+	// raw spelling its splitting depends on.
+	parsed, perr := url.Parse(ref)
+	if perr == nil {
+		if fragment, encoded := uriref.RawFragment(parsed); !encoded {
+			ptr = fragment
+		}
+	}
+
+	if res := in.session.ResolveRef(pristine, "#", in.fetchDoc); res.Target != nil {
+		if rootID, ok := in.index.nodeID(res.Target); ok {
+			doc, ptr = in.docs[rootID], in.paths[rootID]+ptr
+		}
+	}
+
+	return doc, ptr, nil
 }
 
 // maxSubstituteDepth bounds nested [SubstituteRef] expansions so a fallback
@@ -689,19 +722,20 @@ func (in *inliner) substitute(pristine *Schema, path, ref string, inlineErr erro
 	base := in.session.SchemaBase(pristine)
 	in.session.RegisterFallback(cp, base)
 
-	// Record the substitute subtree under the base RegisterFallback established
-	// for it, not the failing node's document: a substitute that re-bases via
-	// its own $id then reports a nested ref failure in its own document. Such a
-	// substitute is the root of its own document, so its nested failure paths
-	// are seeded at "" to stay rooted in that document, mirroring fetchDoc's
-	// record. With no re-basing $id the base is unchanged from the failing
-	// node's, so the subtree keeps the node's path and document.
-	seed := path
+	// A substitute that re-bases via its own $id reports a nested ref failure
+	// in its own document: it is the root of that document, so its nested
+	// failure paths are seeded at "" to stay rooted there, mirroring
+	// fetchDoc's record. With no re-basing $id the subtree keeps the failing
+	// node's path and containing document -- the document, not the node's base
+	// URI: inside an embedded $id resource the base is the resource's $id
+	// while the node-rooted path lives in the containing document, and pairing
+	// the two would mislocate the failure.
+	seed, doc := path, in.docs[pristineID]
 	if in.session.SchemaBase(cp) != base {
-		seed = ""
+		seed, doc = "", in.session.SchemaBase(cp)
 	}
 
-	in.record(cp, seed, in.session.SchemaBase(cp))
+	in.record(cp, seed, doc)
 
 	return in.inlineCopy(cp, seed, false)
 }

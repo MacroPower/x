@@ -944,6 +944,88 @@ func TestInlineRefFailurePathForExtraKeywordTarget(t *testing.T) {
 		"the failure path must be the target's own location, not the referencing node's")
 }
 
+// TestInlineRefFailureLocationInsideEmbeddedResource covers the two
+// document/path pairings for failures inside an embedded $id resource. A
+// node's base URI there is the resource's $id while its recorded path is
+// rooted in the containing document, so both the extra-keyword seeding and the
+// non-rebasing substitute must pair the containing document's URI with the
+// document-rooted pointer, not the embedded $id with a document-rooted
+// pointer (or vice versa).
+func TestInlineRefFailureLocationInsideEmbeddedResource(t *testing.T) {
+	t.Parallel()
+
+	t.Run("extra keyword target", func(t *testing.T) {
+		t.Parallel()
+
+		var captured jsonschema.RefFailure
+
+		fallback := jsonschema.RefFallbackFunc(func(_ context.Context, f jsonschema.RefFailure) jsonschema.RefAction {
+			captured = f
+
+			return jsonschema.DropRef()
+		})
+
+		root, err := jsonschema.ParseSchema([]byte(`{
+			"$id": "https://root.example/r.json",
+			"properties": {"outer": {
+				"$id": "https://emb.example/e.json",
+				"x": {"sub": {"$ref": "#/$defs/missing"}},
+				"properties": {"a": {"$ref": "#/x/sub"}}
+			}}
+		}`))
+		require.NoError(t, err)
+
+		_, err = jsonschema.Inline(t.Context(), root, jsonschema.WithRefFallback(fallback))
+		require.NoError(t, err)
+
+		assert.Equal(t, "#/$defs/missing", captured.Ref, "the inner ref is the one consulted")
+		assert.Equal(t, "https://root.example/r.json", captured.Document,
+			"the failure document is the containing document, not the embedded $id")
+		assert.Equal(t, "/properties/outer/x/sub", captured.Path,
+			"the path is where the target physically lives, rooted in the containing document")
+	})
+
+	t.Run("non-rebasing substitute subtree", func(t *testing.T) {
+		t.Parallel()
+
+		var failures []jsonschema.RefFailure
+
+		fallback := jsonschema.RefFallbackFunc(func(_ context.Context, f jsonschema.RefFailure) jsonschema.RefAction {
+			failures = append(failures, f)
+
+			if len(failures) == 1 {
+				return jsonschema.SubstituteRef(&jsonschema.Schema{
+					Properties: map[string]*jsonschema.Schema{
+						"inner": {Ref: "#/$defs/alsoMissing"},
+					},
+				})
+			}
+
+			return jsonschema.DropRef()
+		})
+
+		root, err := jsonschema.ParseSchema([]byte(`{
+			"$id": "https://root.example/r.json",
+			"properties": {"outer": {
+				"$id": "https://emb.example/e.json",
+				"properties": {"a": {"$ref": "#/$defs/missing"}}
+			}}
+		}`))
+		require.NoError(t, err)
+
+		_, err = jsonschema.Inline(t.Context(), root, jsonschema.WithRefFallback(fallback))
+		require.NoError(t, err)
+
+		require.Len(t, failures, 2)
+		assert.Equal(t, "https://root.example/r.json", failures[0].Document)
+		assert.Equal(t, "/properties/outer/properties/a", failures[0].Path)
+		assert.Equal(t, failures[0].Document, failures[1].Document,
+			"a non-rebasing substitute keeps the failing node's containing document")
+		assert.Equal(t, "/properties/outer/properties/a/properties/inner", failures[1].Path,
+			"the nested failure path stays rooted in that document")
+	})
+}
+
 func TestInlineRefFailureDocumentForCrossDocExtraKeyword(t *testing.T) {
 	t.Parallel()
 
