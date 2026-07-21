@@ -5572,6 +5572,51 @@ func TestWithTypeSchemaExtender(t *testing.T) {
 	}
 }
 
+func TestWithTypeSchemaExtenderVerbatimRefRejected(t *testing.T) {
+	t.Parallel()
+
+	// An extender honors only Value and Nullable: Verbatim and Ref declare a
+	// replacement schema, which only a provider supplies. An extender setting
+	// either is reported rather than having the declaration silently ignored.
+	type doc struct {
+		Plain plainKind `json:"plain"`
+	}
+
+	tests := map[string]struct {
+		mutate func(ts *jsonschema.TypeSchema)
+	}{
+		"verbatim": {
+			mutate: func(ts *jsonschema.TypeSchema) {
+				ts.Verbatim = &jsonschema.Schema{Type: "string"}
+			},
+		},
+		"ref": {
+			mutate: func(ts *jsonschema.TypeSchema) {
+				ts.Ref = reflect.TypeFor[plainKind]()
+			},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := jsonschema.GenerateFor[doc](t.Context(),
+				jsonschema.WithTypeSchemaExtender(jsonschema.TypeSchemaExtenderFunc(
+					func(_ context.Context, tcx jsonschema.TypeContext, ts *jsonschema.TypeSchema) error {
+						if tcx.Type == reflect.TypeFor[plainKind]() {
+							tc.mutate(ts)
+						}
+
+						return nil
+					},
+				)),
+			)
+			require.ErrorIs(t, err, jsonschema.ErrConflictingTypeSchema)
+		})
+	}
+}
+
 // TestWithTypeSchemaExtenderTargetsValueBranch pins that a type extender
 // modifies the value branch of a nullable pointer field, not the anyOf
 // nullability wrapper. A type-level keyword set on the wrapper would reject the

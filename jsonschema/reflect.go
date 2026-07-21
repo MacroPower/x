@@ -1774,12 +1774,23 @@ func (g *generator) extendType(t reflect.Type, ts *TypeSchema) error {
 // the parent's Properties); mutating in place keeps those aliases consistent. An
 // extender that clears ts.Value to nil leaves the payload unchanged, since there
 // is nothing to copy back.
+//
+// The envelope enters with Verbatim and Ref nil: those declare a replacement
+// schema, which only a provider supplies. An extender honors only Value and
+// Nullable, so one that sets Verbatim or Ref is reported as a malformed
+// TypeSchema rather than having the declaration silently ignored.
 func (g *generator) extendTypeSchema(t reflect.Type, s *Schema) (Nullability, error) {
 	ts := &TypeSchema{Value: s}
 
 	err := g.extendType(t, ts)
 	if err != nil {
 		return NullabilityUnset, err
+	}
+
+	if ts.Verbatim != nil || ts.Ref != nil {
+		return NullabilityUnset, fmt.Errorf(
+			"%w: extender for type %s sets Verbatim or Ref; an extender declares only Value and Nullable",
+			ErrConflictingTypeSchema, t)
 	}
 
 	if ts.Value != nil && ts.Value != s {

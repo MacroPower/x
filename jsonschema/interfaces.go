@@ -40,7 +40,11 @@ type JSONSchemaProvider interface {
 // allowing the type to add, remove, or modify any fields. It receives a
 // [TypeSchema] whose [TypeSchema.Value] is the reflection-generated schema to
 // mutate in place; an extender may also set [TypeSchema.Nullable] to declare a
-// nullability stance rather than hand-shaping a null wrapper. A non-nil error
+// nullability stance rather than hand-shaping a null wrapper. Only Value and
+// Nullable are honored: [TypeSchema.Verbatim] and [TypeSchema.Ref] declare a
+// replacement schema, which only a provider supplies, so an extender that sets
+// either aborts generation with [ErrConflictingTypeSchema] rather than having
+// the declaration silently ignored. A non-nil error
 // aborts generation, matching the registered [TypeSchemaExtender] counterpart,
 // whose [TypeSchemaExtender.ExtendSchemaForType] arguments the method shares:
 // the context of the Generate call in effect and a [TypeContext] carrying the
@@ -169,7 +173,11 @@ func (f TypeSchemaProviderFunc) SchemaForType(ctx context.Context, tc TypeContex
 // types whose schema a registered provider or [JSONSchemaProvider] supplied.
 // It modifies ts.Value in place (and may set ts.Nullable to declare a
 // nullability stance, symmetric with a provider, so it never needs to emit a
-// raw null wrapper); an error aborts generation. An extender that does not
+// raw null wrapper); an error aborts generation. Only Value and Nullable are
+// honored: [TypeSchema.Verbatim] and [TypeSchema.Ref] declare a replacement
+// schema, which only a provider supplies, so an extender that sets either
+// aborts generation with [ErrConflictingTypeSchema] rather than having the
+// declaration silently ignored. An extender that does not
 // recognize the type in tc leaves ts untouched and returns nil. The context
 // follows the [TypeSchemaProvider.SchemaForType] contract.
 type TypeSchemaExtender interface {

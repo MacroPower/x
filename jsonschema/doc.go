@@ -245,7 +245,10 @@
 // anyOf[value, null] wrapper the generator would otherwise have to recognize. An
 // extender receives the same envelope with [TypeSchema.Value] set to the
 // reflection-generated schema to mutate in place, and may set [TypeSchema.Nullable]
-// to declare a stance too.
+// to declare a stance too; those are the only fields an extender may set, since
+// Verbatim and Ref declare a replacement schema only a provider supplies, so an
+// extender setting either is [ErrConflictingTypeSchema] rather than a silently
+// ignored declaration.
 //
 // When a registered provider ([WithTypeSchemaProvider] or [WithTypeSchema]) or
 // [JSONSchemaProvider] provides the schema, [JSONSchemaExtender] is not

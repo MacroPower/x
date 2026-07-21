@@ -247,8 +247,10 @@ func (Status) JSONSchema(context.Context, jsonschema.TypeContext) (jsonschema.Ty
 
 A type implementing `JSONSchemaExtender` modifies its reflection-generated schema
 after it is built. It receives the same `TypeSchema`, with `Value` set to the
-reflection-generated schema to mutate in place; a non-nil error aborts
-generation:
+reflection-generated schema to mutate in place; only `Value` and `Nullable` are
+honored (`Verbatim` and `Ref` declare a replacement schema only a provider
+supplies, so an extender setting either is `ErrConflictingTypeSchema`), and a
+non-nil error aborts generation:
 
 ```go
 type Metadata struct {
