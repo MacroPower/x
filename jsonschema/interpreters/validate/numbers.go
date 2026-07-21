@@ -47,14 +47,14 @@ func parseBoundFloat(value string) (float64, error) {
 // intersects the bound against the effective one so a tag bound the type can
 // never reach (min=-300 on an int8) does not lower the stronger type floor.
 func applyNumericMinConstraint(field jsonschema.FieldContext, value string, exclusive bool) error {
-	rule := jsonschema.BoundMin
+	rule, name := jsonschema.BoundMin, ruleMin
 	if exclusive {
-		rule = jsonschema.BoundGt
+		rule, name = jsonschema.BoundGt, "gt"
 	}
 
 	err := field.Constraints().AddNumericBound(rule, value)
 	if err != nil {
-		return fmt.Errorf("validate tag: minimum: %w", err)
+		return fmt.Errorf("validate tag: %s: %w", name, err)
 	}
 
 	return nil
@@ -65,14 +65,14 @@ func applyNumericMinConstraint(field jsonschema.FieldContext, value string, excl
 // it so a tag bound the type can never reach (max=200 on an int8) does not raise
 // the stronger type ceiling.
 func applyNumericMaxConstraint(field jsonschema.FieldContext, value string, exclusive bool) error {
-	rule := jsonschema.BoundMax
+	rule, name := jsonschema.BoundMax, ruleMax
 	if exclusive {
-		rule = jsonschema.BoundLt
+		rule, name = jsonschema.BoundLt, "lt"
 	}
 
 	err := field.Constraints().AddNumericBound(rule, value)
 	if err != nil {
-		return fmt.Errorf("validate tag: maximum: %w", err)
+		return fmt.Errorf("validate tag: %s: %w", name, err)
 	}
 
 	return nil

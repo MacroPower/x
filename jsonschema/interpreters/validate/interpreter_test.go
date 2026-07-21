@@ -269,6 +269,120 @@ func TestValidateInterpreter_NumericConstraints(t *testing.T) {
 	}`, string(got))
 }
 
+// TestValidateInterpreter_BoundRuleErrorLabels pins that a malformed bound value
+// is attributed to the rule that carried it: gt is reported as gt (not min) and
+// lt as lt (not max), across the numeric, string-length, and collection-count
+// paths that share the facade-routed bound parsing.
+func TestValidateInterpreter_BoundRuleErrorLabels(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		generate func(t *testing.T) error
+		want     string
+	}{
+		"numeric min": {
+			generate: func(t *testing.T) error {
+				t.Helper()
+
+				type Config struct {
+					V int `json:"v" validate:"min=oops"`
+				}
+
+				_, err := jsonschema.GenerateFor[Config](t.Context(),
+					jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()))
+
+				return err
+			},
+			want: "validate tag: min:",
+		},
+		"numeric gt": {
+			generate: func(t *testing.T) error {
+				t.Helper()
+
+				type Config struct {
+					V int `json:"v" validate:"gt=oops"`
+				}
+
+				_, err := jsonschema.GenerateFor[Config](t.Context(),
+					jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()))
+
+				return err
+			},
+			want: "validate tag: gt:",
+		},
+		"numeric max": {
+			generate: func(t *testing.T) error {
+				t.Helper()
+
+				type Config struct {
+					V int `json:"v" validate:"max=oops"`
+				}
+
+				_, err := jsonschema.GenerateFor[Config](t.Context(),
+					jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()))
+
+				return err
+			},
+			want: "validate tag: max:",
+		},
+		"numeric lt": {
+			generate: func(t *testing.T) error {
+				t.Helper()
+
+				type Config struct {
+					V int `json:"v" validate:"lt=oops"`
+				}
+
+				_, err := jsonschema.GenerateFor[Config](t.Context(),
+					jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()))
+
+				return err
+			},
+			want: "validate tag: lt:",
+		},
+		"string gt": {
+			generate: func(t *testing.T) error {
+				t.Helper()
+
+				type Config struct {
+					V string `json:"v" validate:"gt=oops"`
+				}
+
+				_, err := jsonschema.GenerateFor[Config](t.Context(),
+					jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()))
+
+				return err
+			},
+			want: "validate tag: gt:",
+		},
+		"collection lt": {
+			generate: func(t *testing.T) error {
+				t.Helper()
+
+				type Config struct {
+					V []string `json:"v" validate:"lt=oops"`
+				}
+
+				_, err := jsonschema.GenerateFor[Config](t.Context(),
+					jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()))
+
+				return err
+			},
+			want: "validate tag: lt:",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := tc.generate(t)
+			require.Error(t, err)
+			assert.ErrorContains(t, err, tc.want)
+		})
+	}
+}
+
 // TestValidateInterpreter_OneOfOnSequenceFields pins that oneof on a slice or
 // array field constrains each element, mirroring the jsonschema tag's enum
 // behavior for sequence fields.

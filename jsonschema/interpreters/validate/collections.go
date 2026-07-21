@@ -39,14 +39,14 @@ func applyCollectionMinConstraint(
 		return errByteSliceLengthConstraint
 	}
 
-	rule := jsonschema.LenMin
+	rule, name := jsonschema.LenMin, ruleMin
 	if exclusive {
-		rule = jsonschema.LenGt
+		rule, name = jsonschema.LenGt, "gt"
 	}
 
 	err := field.Constraints().AddCountBound(rule, value)
 	if err != nil {
-		return fmt.Errorf("validate tag: min: %w", err)
+		return fmt.Errorf("validate tag: %s: %w", name, err)
 	}
 
 	return nil
@@ -64,14 +64,14 @@ func applyCollectionMaxConstraint(
 		return errByteSliceLengthConstraint
 	}
 
-	rule := jsonschema.LenMax
+	rule, name := jsonschema.LenMax, ruleMax
 	if exclusive {
-		rule = jsonschema.LenLt
+		rule, name = jsonschema.LenLt, "lt"
 	}
 
 	err := field.Constraints().AddCountBound(rule, value)
 	if err != nil {
-		return fmt.Errorf("validate tag: max: %w", err)
+		return fmt.Errorf("validate tag: %s: %w", name, err)
 	}
 
 	return nil

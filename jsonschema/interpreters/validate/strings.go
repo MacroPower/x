@@ -12,14 +12,14 @@ import (
 // its minLength floor through the shared constraints facade, which folds an
 // exclusive gt, clamps non-negative, and intersects against the effective floor.
 func applyStringMinConstraint(field jsonschema.FieldContext, value string, exclusive bool) error {
-	rule := jsonschema.LenMin
+	rule, name := jsonschema.LenMin, ruleMin
 	if exclusive {
-		rule = jsonschema.LenGt
+		rule, name = jsonschema.LenGt, "gt"
 	}
 
 	err := field.Constraints().AddLengthBound(rule, value)
 	if err != nil {
-		return fmt.Errorf("validate tag: min: %w", err)
+		return fmt.Errorf("validate tag: %s: %w", name, err)
 	}
 
 	return nil
@@ -30,14 +30,14 @@ func applyStringMinConstraint(field jsonschema.FieldContext, value string, exclu
 // expresses an unsatisfiable sub-zero ceiling as the floor-one/ceiling-zero
 // range no string satisfies.
 func applyStringMaxConstraint(field jsonschema.FieldContext, value string, exclusive bool) error {
-	rule := jsonschema.LenMax
+	rule, name := jsonschema.LenMax, ruleMax
 	if exclusive {
-		rule = jsonschema.LenLt
+		rule, name = jsonschema.LenLt, "lt"
 	}
 
 	err := field.Constraints().AddLengthBound(rule, value)
 	if err != nil {
-		return fmt.Errorf("validate tag: max: %w", err)
+		return fmt.Errorf("validate tag: %s: %w", name, err)
 	}
 
 	return nil

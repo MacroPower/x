@@ -23,6 +23,13 @@ var ErrConflictingConstraints = fmt.Errorf(
 	jsonschema.ErrConstraintConflict,
 )
 
+// ruleMin and ruleMax are the inclusive bound rule names, shared between the
+// tag dispatch and the per-rule error labels the bound helpers emit.
+const (
+	ruleMin = "min"
+	ruleMax = "max"
+)
+
 // Interpreter implements [jsonschema.TagInterpreter] for go-playground/validator
 // tag syntax. Create one with [NewInterpreter] and register it under the
 // "validate" tag key:
@@ -185,9 +192,9 @@ func applyValidator(key, value string, field jsonschema.FieldContext) error {
 
 		return nil
 
-	case "min", "gte":
+	case ruleMin, "gte":
 		return applyMinConstraint(field, value, baseType, false)
-	case "max", "lte":
+	case ruleMax, "lte":
 		return applyMaxConstraint(field, value, baseType, false)
 	case "gt":
 		return applyMinConstraint(field, value, baseType, true)
@@ -569,7 +576,7 @@ func applyCoercedValidator(key, value string, field jsonschema.FieldContext, bas
 			return true, applyStringEq(field, canonical)
 		}
 
-	case "min", "gte", "max", "lte", "gt", "lt":
+	case ruleMin, "gte", ruleMax, "lte", "gt", "lt":
 		// A numeric bound has no faithful mapping onto the serialized string:
 		// minimum and friends constrain JSON numbers, so they are inert
 		// against the quoted-string instance a json:",string" field produces,
