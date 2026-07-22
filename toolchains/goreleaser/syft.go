@@ -10,7 +10,7 @@ import (
 
 const (
 	// syftVersion is the pinned syft release used for the default image.
-	syftVersion = "v1.48.0" // renovate: datasource=github-releases depName=anchore/syft
+	syftVersion = "v1.49.0" // renovate: datasource=github-releases depName=anchore/syft
 
 	// syftImage is the official syft image the binary is extracted from.
 	syftImage = "ghcr.io/anchore/syft:" + syftVersion
