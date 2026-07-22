@@ -209,7 +209,13 @@ func TestEmailFormatAcceptsQuotedLocalAndAddressLiteral(t *testing.T) {
 			valid:    true,
 		},
 		"empty quoted local part": {
+			// Quoted-string = DQUOTE *QcontentSMTP DQUOTE permits zero content
+			// characters, and the format assertion is grammar conformance.
 			instance: `""@example.com`,
+			valid:    true,
+		},
+		"unterminated quoted local part": {
+			instance: `"@example.com`,
 			valid:    false,
 		},
 	}

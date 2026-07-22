@@ -351,18 +351,16 @@ func validateEmailLocal(s string) error {
 // quoted-pairSMTP, so the escaped character must be printable ASCII for both
 // formats.
 //
-// One deliberate deviation: the RFC's Quoted-string production permits zero
-// content characters, but the empty quoted local part ""@example.com names no
-// deliverable mailbox, so it is rejected.
+// The empty quoted local part ""@example.com is accepted: Quoted-string =
+// DQUOTE *QcontentSMTP DQUOTE permits zero content characters (as does RFC
+// 5322's quoted-string, which Draft-07 cites), and the format assertion is
+// defined by grammar conformance, not deliverability.
 func validateQuotedLocal(s string, allowUnicode bool) error {
 	if len(s) < 2 || s[len(s)-1] != '"' {
 		return errors.New("invalid email: malformed quoted local part")
 	}
 
 	inner := s[1 : len(s)-1]
-	if inner == "" {
-		return errors.New("invalid email: empty quoted local part")
-	}
 
 	for i := 0; i < len(inner); {
 		c := inner[i]
