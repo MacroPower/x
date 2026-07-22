@@ -1806,3 +1806,42 @@ func TestTagElementEnumVsTypeOverride(t *testing.T) {
 		assert.Equal(t, []any{"a", "b"}, field.Items.Enum)
 	})
 }
+
+// evenForMultipleOf carries a type-level multipleOf through WithTypeSchemaFor
+// in TestTagMultipleOfNullableConsistency.
+type evenForMultipleOf int
+
+// TestTagMultipleOfNullableConsistency pins that an authored multipleOf
+// resolves with the same replace semantics on nullable and non-nullable
+// occurrences of the same type. The nullable split used to move the authored
+// value onto the anyOf wrapper while restoring the type-derived value on the
+// value branch, silently conjoining the two: identical tags accepted 6 on the
+// value field but only multiples of 12 on the pointer field.
+func TestTagMultipleOfNullableConsistency(t *testing.T) {
+	t.Parallel()
+
+	type doc struct {
+		Plain evenForMultipleOf  `json:"plain" jsonschema:"multipleOf=6"`
+		Ptr   *evenForMultipleOf `json:"ptr"   jsonschema:"multipleOf=6"`
+	}
+
+	s, err := jsonschema.GenerateFor[doc](t.Context(),
+		jsonschema.WithTypeSchemaFor[evenForMultipleOf](jsonschema.TypeSchema{
+			Value: &jsonschema.Schema{Type: "integer", MultipleOf: new(4.0)},
+		}))
+	require.NoError(t, err)
+
+	for _, instance := range []map[string]any{
+		{"plain": 6, "ptr": 6},
+		{"plain": 12, "ptr": 12},
+		{"plain": 6, "ptr": nil},
+	} {
+		require.NoError(t, jsonschema.Validate(t.Context(), s, instance),
+			"instance %v must satisfy the authored multipleOf on both occurrences", instance)
+	}
+
+	require.Error(t, jsonschema.Validate(t.Context(), s, map[string]any{"plain": 4, "ptr": 6}),
+		"the authored multipleOf replaces the type value on the plain field")
+	require.Error(t, jsonschema.Validate(t.Context(), s, map[string]any{"plain": 6, "ptr": 4}),
+		"the authored multipleOf replaces the type value on the pointer field")
+}

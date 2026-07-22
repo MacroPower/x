@@ -205,6 +205,7 @@ func numericResolveMode(merged *Schema, n *node) constraint.ResolveMode {
 func canvasAuthorsBounds(canvas *Schema) bool {
 	return canvas.Minimum != nil || canvas.ExclusiveMinimum != nil ||
 		canvas.Maximum != nil || canvas.ExclusiveMaximum != nil ||
+		canvas.MultipleOf != nil ||
 		canvas.MinLength != nil || canvas.MaxLength != nil ||
 		canvas.MinItems != nil || canvas.MaxItems != nil ||
 		canvas.MinProperties != nil || canvas.MaxProperties != nil
@@ -345,6 +346,14 @@ func pointerKeyword[T comparable](get func(*Schema) *T, set func(*Schema, *T)) m
 // from the value node. AllOf is deliberately absent: a composite's allOf holds
 // its embed branches (structural, appended by renderBase) and a forbid-value
 // allOf conjunct, both of which belong on the value branch, not the wrapper.
+// MultipleOf is deliberately absent too: it resolves with replace semantics
+// (the authored value overwrites the type-derived one), so the split's
+// move-and-restore -- correct for the intersected bounds, where the restored
+// type value is subsumed by the moved authored one -- would put the authored
+// value on the wrapper AND the type value back on the value branch, silently
+// conjoining the two (multipleOf 6 over a type's 4 accepting only multiples
+// of 12 where the non-nullable field accepts 6). The resolved value stays on
+// the value branch, where null is never subject to it.
 var (
 	movableKeywords = []movableKeyword{
 		valueKeyword(
@@ -394,9 +403,6 @@ var (
 		pointerKeyword(
 			func(s *Schema) *float64 { return s.ExclusiveMaximum },
 			func(s *Schema, v *float64) { s.ExclusiveMaximum = v }),
-		pointerKeyword(
-			func(s *Schema) *float64 { return s.MultipleOf },
-			func(s *Schema, v *float64) { s.MultipleOf = v }),
 		pointerKeyword(
 			func(s *Schema) *int { return s.MinLength },
 			func(s *Schema, v *int) { s.MinLength = v }),
