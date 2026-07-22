@@ -799,11 +799,13 @@ digits or decimal exponent magnitude), `minimum`/`maximum`/`exclusiveMinimum`/
 `exclusiveMaximum` are still enforced exactly. `multipleOf` is enforced for an
 over-cap _integer_ (its divisibility is computed with modular arithmetic, so the
 magnitude is never expanded) and skipped only for an over-cap _non-integer_,
-whose fractional part cannot be expanded within the cap. Schema-side numeric
-keyword values are limited to `float64` precision:
-integers beyond 2^53 in keywords like `const`, `minimum`, or `multipleOf` round
+whose fractional part cannot be expanded within the cap. The `float64`-typed
+bound keywords (`minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`,
+`multipleOf`) are limited to `float64` precision: integers beyond 2^53 round
 when the schema is decoded, even though the instance value they are compared
-against is exact. A schema-side `float64` is interpreted at its shortest
+against is exact. `const` and `enum` values are preserved exactly (decoded as
+`json.Number`) through every entry point, including `ParseSchema` and
+`CompileJSON`. A schema-side `float64` is interpreted at its shortest
 decimal value across all numeric keywords, so `const: 0.1` matches the
 instance `0.1` exactly, consistent with how `minimum: 0.1` bounds it.
 

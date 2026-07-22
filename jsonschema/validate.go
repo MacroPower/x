@@ -1,6 +1,7 @@
 package jsonschema
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -1292,11 +1293,117 @@ func ParseSchemaValue(doc any) (*Schema, error) {
 			return nil, fmt.Errorf("decode schema document: %w", err)
 		}
 
+		restoreExactValues(&s, d)
+
 		return &s, nil
 
 	default:
 		return nil, fmt.Errorf("%w: got %T", ErrInvalidSchemaDocument, doc)
 	}
+}
+
+// restoreExactValues re-copies each decoded node's const and enum from the
+// source document. The upstream UnmarshalJSON decodes those any-typed members
+// without UseNumber, so a number beyond float64 precision comes back rounded
+// and the validator would compare instances against the rounded neighbor of
+// what the author wrote. Each node's typed [Location] segments resolve its
+// source map, and each member is re-copied via a marshal + UseNumber decode,
+// keeping numbers as exact [json.Number] literals while staying unaliased from
+// the caller's document. Restoration is gated on what upstream parsed (a node
+// whose Const/Enum is unset stays unset), so the two trees stay shape-aligned;
+// a member that fails the re-copy keeps its round-tripped value.
+func restoreExactValues(s *Schema, doc map[string]any) {
+	//nolint:errcheck // The walk callback never returns an error.
+	_ = Walk(s, func(loc Location, node *Schema) error {
+		if node.Const == nil && node.Enum == nil {
+			return nil
+		}
+
+		src, ok := resolveDocValue(doc, loc.Segments).(map[string]any)
+		if !ok {
+			return nil
+		}
+
+		if node.Const != nil {
+			if cp, copied := copySourceMember(src, "const"); copied {
+				node.Const = &cp
+			}
+		}
+
+		if node.Enum != nil {
+			if cp, copied := copySourceMember(src, "enum"); copied {
+				if list, isList := cp.([]any); isList {
+					node.Enum = list
+				}
+			}
+		}
+
+		return nil
+	})
+}
+
+// resolveDocValue resolves a schema node's typed path into the decoded source
+// document, returning nil on any shape mismatch. The walk's segment keys are
+// schema keywords and member keys carried verbatim, matching the document's
+// own JSON structure.
+func resolveDocValue(doc any, segments []Segment) any {
+	cur := doc
+	for _, seg := range segments {
+		switch val := cur.(type) {
+		case map[string]any:
+			if seg.IsIndex {
+				return nil
+			}
+
+			cur = val[seg.Key]
+
+		case []any:
+			if !seg.IsIndex || seg.Index >= len(val) {
+				return nil
+			}
+
+			cur = val[seg.Index]
+
+		default:
+			return nil
+		}
+	}
+
+	return cur
+}
+
+// copySourceMember returns an exact copy of a member of the source map,
+// reporting false when the member is absent or the copy fails.
+func copySourceMember(src map[string]any, key string) (any, bool) {
+	v, present := src[key]
+	if !present {
+		return nil, false
+	}
+
+	return copyExactJSONValue(v)
+}
+
+// copyExactJSONValue deep-copies a JSON-shaped value via a marshal + UseNumber
+// decode, so numbers come back as exact [json.Number] literals and the copy is
+// unaliased from the source. It reports ok=false on any error so the caller
+// keeps its fallback value.
+func copyExactJSONValue(v any) (any, bool) {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return nil, false
+	}
+
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+
+	var out any
+
+	err = dec.Decode(&out)
+	if err != nil {
+		return nil, false
+	}
+
+	return out, true
 }
 
 // ParseSchema decodes data as a single JSON schema document and returns it

@@ -8203,3 +8203,58 @@ func BenchmarkValidateFieldPredicates(b *testing.B) {
 		})
 	}
 }
+
+// TestCompileJSONConstEnumExactness pins that const and enum numbers survive
+// the JSON entry points exactly. The upstream UnmarshalJSON decodes those
+// any-typed members without UseNumber, so without the post-decode restore a
+// number beyond float64 precision compiled to its rounded neighbor: the schema
+// rejected the authored literal and accepted a value the author never wrote.
+func TestCompileJSONConstEnumExactness(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		schema string
+		accept []string
+		reject []string
+	}{
+		"big integer const": {
+			schema: `{"const": 10000000000000000001}`,
+			accept: []string{"10000000000000000001"},
+			reject: []string{"10000000000000000000", "10000000000000000002"},
+		},
+		"uint64 max enum member": {
+			schema: `{"enum": [18446744073709551615, "x"]}`,
+			accept: []string{"18446744073709551615", `"x"`},
+			reject: []string{"18446744073709552000"},
+		},
+		"high-precision fraction const": {
+			schema: `{"const": 0.1000000000000000000000001}`,
+			accept: []string{"0.1000000000000000000000001"},
+			reject: []string{"0.1"},
+		},
+		"nested const under properties": {
+			schema: `{"properties": {"n": {"const": 10000000000000000001}}}`,
+			accept: []string{`{"n": 10000000000000000001}`},
+			reject: []string{`{"n": 10000000000000000000}`},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			v, err := jsonschema.CompileJSON(t.Context(), []byte(tc.schema))
+			require.NoError(t, err)
+
+			for _, instance := range tc.accept {
+				require.NoError(t, v.ValidateJSON(t.Context(), []byte(instance)),
+					"instance %s must match the authored value exactly", instance)
+			}
+
+			for _, instance := range tc.reject {
+				require.Error(t, v.ValidateJSON(t.Context(), []byte(instance)),
+					"instance %s must not match the authored value", instance)
+			}
+		})
+	}
+}
