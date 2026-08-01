@@ -115,8 +115,11 @@ The package has two independent halves sharing the `Schema` type:
 
 `Schema` is a type alias to the upstream type (`schema.go`). The upstream is
 used for exactly two things: structural well-formedness via `Schema.Resolve`
-(called once per `Compile`, result discarded) and JSON-semantic value equality
-(`const`/`enum`/`uniqueItems`). Everything else — the reflection pipeline, all
+(called once per `Compile`, result discarded) and, as a recovering fallback,
+value equality for hand-built operand shapes the JSON-semantic walk in
+`internal/jsonequal` does not model (`const`/`enum`/`uniqueItems` comparisons
+otherwise run entirely in that package, and a panic in the upstream fallback
+degrades to unequal). Everything else — the reflection pipeline, all
 `$ref`/`$dynamicRef`/`$anchor` resolution, the validation walk, path tracking,
 format checking — is implemented here, because the upstream's resolved
 reference graph is unexported and its validator stops at the first error.
