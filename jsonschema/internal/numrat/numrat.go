@@ -15,6 +15,7 @@ import (
 	"math/big"
 	"reflect"
 	"strconv"
+	"strings"
 )
 
 // MaxNumberLen bounds the number of significant digits and the decimal
@@ -250,6 +251,198 @@ func DecCanonicalExp(s string) *big.Int {
 	}
 
 	return exp.Add(exp, big.NewInt(int64(intLen-lead)))
+}
+
+// DecCanonicalExpEqual reports whether two decimal literals have the same
+// exact canonical exponent (the value [DecCanonicalExp] returns), at cost
+// linear in the literals. DecCanonicalExp materializes the exponent digit run
+// with [big.Int.SetString], which is quadratic in the run length, so deciding
+// equality through it hands an adversarial large-exponent literal exactly the
+// expansion MaxNumberLen exists to prevent; this comparison never builds a
+// [big.Int] from an unbounded run. Both arguments must already be valid
+// decimal literals (ParseDecNumber returned true).
+func DecCanonicalExpEqual(a, b string) bool {
+	da, na, ka := decExpParts(a)
+	db, nb, kb := decExpParts(b)
+
+	// Small runs expand at bounded cost; reuse the exact big.Int form.
+	const smallRun = 32
+
+	if len(da) <= smallRun && len(db) <= smallRun {
+		return DecCanonicalExp(a).Cmp(DecCanonicalExp(b)) == 0
+	}
+
+	// At least one run holds more than 32 digits, so that literal exponent
+	// magnitude is at least 10^32, while each offset is bounded by its
+	// literal's length (far below 10^18 for any literal that fits in
+	// memory). The canonical exponents Pa+ka and Pb+kb can then be equal
+	// only when the literal exponents nearly cancel: same sign, lengths
+	// within one, and a digit-string difference small enough for the
+	// offsets to bridge.
+	if na != nb {
+		return false
+	}
+
+	if gap := len(da) - len(db); gap < -1 || gap > 1 {
+		return false
+	}
+
+	// Pa - Pb must equal kb - ka exactly.
+	delta := kb - ka
+
+	cmp := cmpDigits(da, db)
+	if cmp == 0 {
+		return delta == 0
+	}
+
+	hi, lo := da, db
+	if cmp < 0 {
+		hi, lo = db, da
+	}
+
+	diff, small := subDigits(hi, lo)
+	if !small {
+		// The magnitudes differ by at least 10^18, beyond any offset delta.
+		return false
+	}
+
+	// Restore the sign of Pa - Pb: positive when the larger magnitude is
+	// Pa's and the shared literal-exponent sign is positive, and flipped by
+	// either condition reversing.
+	//
+	//nolint:gosec // subDigits caps diff below 10^18, well within int64.
+	sd := int64(diff)
+	if (cmp < 0) != na {
+		sd = -sd
+	}
+
+	return sd == delta
+}
+
+// decExpParts splits a valid decimal literal's exact canonical exponent into
+// the literal exponent digit run (leading zeros stripped; empty when the
+// exponent is absent or zero), the run's sign, and the offset
+// [DecCanonicalExp] adds to it (intLen - lead, where lead counts leading
+// zeros across the integer and fraction digits). All O(len), with no
+// [big.Int] built.
+func decExpParts(s string) (string, bool, int64) {
+	i := 0
+	if i < len(s) && (s[i] == '+' || s[i] == '-') {
+		i++
+	}
+
+	intStart := i
+	for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+		i++
+	}
+
+	intLen := i - intStart
+
+	lead := 0
+	for j := intStart; j < i && s[j] == '0'; j++ {
+		lead++
+	}
+
+	if i < len(s) && s[i] == '.' {
+		i++
+
+		// All integer digits were zero, so leading zeros continue into the
+		// fraction (e.g. 0.05 has two leading zeros across "005").
+		if lead == intLen {
+			for i < len(s) && s[i] == '0' {
+				lead++
+				i++
+			}
+		}
+
+		for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+			i++
+		}
+	}
+
+	var (
+		digits string
+		neg    bool
+	)
+
+	if i < len(s) && (s[i] == 'e' || s[i] == 'E') {
+		i++
+
+		if i < len(s) && (s[i] == '+' || s[i] == '-') {
+			neg = s[i] == '-'
+			i++
+		}
+
+		for i < len(s) && s[i] == '0' {
+			i++
+		}
+
+		digits = s[i:]
+	}
+
+	if digits == "" {
+		// Canonical zero discards the sign so 0 and -0 agree.
+		neg = false
+	}
+
+	return digits, neg, int64(intLen - lead)
+}
+
+// cmpDigits orders two decimal digit strings with no leading zeros: by
+// length, then lexicographically.
+func cmpDigits(a, b string) int {
+	if len(a) != len(b) {
+		if len(a) < len(b) {
+			return -1
+		}
+
+		return 1
+	}
+
+	return strings.Compare(a, b)
+}
+
+// subDigits returns hi - lo for two decimal digit strings with hi >= lo as
+// numbers (no leading zeros), reporting small = false when the difference
+// reaches 10^18; the returned magnitude is meaningful only when small. The
+// subtraction runs right to left with a borrow, in O(len), so two nearly
+// canceling multi-megabyte runs (10^n vs 10^n - 1) still compare in linear
+// time.
+func subDigits(hi, lo string) (uint64, bool) {
+	const lowDigits = 18 // 10^18 fits int64 with room for negation
+
+	var diff uint64
+
+	pow := uint64(1)
+	borrow := 0
+
+	for i := range len(hi) {
+		d := int(hi[len(hi)-1-i]-'0') - borrow
+		if i < len(lo) {
+			d -= int(lo[len(lo)-1-i] - '0')
+		}
+
+		borrow = 0
+		if d < 0 {
+			d += 10
+			borrow = 1
+		}
+
+		if d != 0 {
+			if i >= lowDigits {
+				return 0, false
+			}
+
+			//nolint:gosec // d is a single decimal digit (1-9) here.
+			diff += uint64(d) * pow
+		}
+
+		if i < lowDigits {
+			pow *= 10
+		}
+	}
+
+	return diff, true
 }
 
 // IsIntegral reports whether the value is a mathematical integer: zero, or a

@@ -313,6 +313,44 @@ func TestOverLongCanonicallySmallNumbers(t *testing.T) {
 		"over-long literals must stay on the linear guarded path")
 }
 
+// TestOverCapExponentRunsCompareLinearly covers the exact-exponent tie-break
+// for literals that share a clamped DecNumber: every 1e<huge> literal with the
+// same significand collides into one bucket, and only the exact canonical
+// exponents can tell the values apart. That comparison must stay linear in
+// the literal (numrat.DecCanonicalExpEqual); materializing each exponent run
+// with big.Int.SetString is quadratic in the run length, which at this size
+// took minutes of CPU for a payload of a few megabytes. The wall-clock bound
+// is the regression check.
+func TestOverCapExponentRunsCompareLinearly(t *testing.T) {
+	t.Parallel()
+
+	runLen := 8_000_000
+	if testing.Short() {
+		runLen = 100_000
+	}
+
+	run := strings.Repeat("7", runLen)
+
+	// Distinct values sharing one clamped DecNumber: same significand, same
+	// clamped exponent, exponent runs differing only in the last digit.
+	a := json.Number("1e" + run + "1")
+	b := json.Number("1e" + run + "2")
+
+	// Equal values spelled differently: 10e(X-1) shifts one significand
+	// digit into the exponent, so the tie-break must prove the runs differ
+	// by exactly the offset the significands contribute.
+	c := json.Number("10e" + run + "0")
+	d := json.Number("1e" + run + "1")
+
+	start := time.Now()
+
+	assert.False(t, jsonequal.HasDuplicates([]any{a, b}))
+	assert.True(t, jsonequal.HasDuplicates([]any{c, d}))
+
+	assert.Less(t, time.Since(start), 15*time.Second,
+		"over-cap exponent runs must compare in linear time")
+}
+
 // ratOf mirrors the validator's top-level numeric precompute
 // (numrat.SchemaNumberRat) for a schema value, failing the test if the value is
 // not a recognized schema number.

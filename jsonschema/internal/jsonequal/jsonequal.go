@@ -337,9 +337,11 @@ func equalGuarded(a, b any) bool {
 		// Both magnitudes exceed the clamp, so equal structs only prove the
 		// clamped exponents match. Two distinct huge numbers (1e1073741824 and
 		// 1e2147483648) share a clamped DecNumber, so confirm their exact,
-		// unclamped exponents agree to keep them distinct, matching upstream's
-		// uncapped big.Rat comparison.
-		return numrat.DecCanonicalExp(string(an)).Cmp(numrat.DecCanonicalExp(string(bn))) == 0
+		// unclamped exponents agree to keep them distinct. The comparison is
+		// linear in the literals ([numrat.DecCanonicalExpEqual]); expanding
+		// each exponent run into a big.Int would be quadratic, exactly the
+		// adversarial-literal cost the guarded walk exists to avoid.
+		return numrat.DecCanonicalExpEqual(string(an), string(bn))
 
 	case aNum:
 		return guardedNumberEqual(an, b)
