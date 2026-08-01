@@ -1,6 +1,7 @@
 package jsonptr
 
 import (
+	"bytes"
 	"encoding/json"
 
 	"github.com/google/jsonschema-go/jsonschema"
@@ -8,25 +9,43 @@ import (
 	"go.jacobcolvin.com/x/jsonschema/internal/uriref"
 )
 
+// Materialize converts a located JSON value (a map[string]any or bool, with
+// [json.Number] leaves) into a Schema. The caller supplies it because building
+// a Schema whose const/enum numbers stay exact requires the parent package's
+// decode discipline, which this package cannot name without an import cycle.
+type Materialize func(node any) (*jsonschema.Schema, error)
+
 // SchemaAtJSONPointer navigates root's JSON encoding by segments and returns
-// the located value as a Schema when it is itself a schema (a JSON object or
-// boolean), or nil otherwise. The walk starts from base (root's base URI) and,
-// when trackIDs is set, tracks $id members of the objects it descends through,
-// so the returned base is the one in effect at the located schema; the
-// target's own $id is left to the caller during registration. A caller whose
-// walk treats $id as inert (a retrieval-base walk) passes trackIDs false, and
-// the crossed $id members leave base untouched.
+// the value located there, materialized as a Schema when it is itself a schema
+// (a JSON object or boolean), or nil otherwise. The JSON form decodes with
+// UseNumber so numbers survive as exact [json.Number] literals, and the
+// located node is handed to materialize, keeping a const or enum beyond
+// float64 precision exact in the returned schema.
+//
+// The walk starts from base (root's base URI) and, when trackIDs is set,
+// tracks $id members of the objects it descends through, so the returned base
+// is the one in effect at the located schema; the target's own $id is left to
+// the caller during registration. A caller whose walk treats $id as inert (a
+// retrieval-base walk) passes trackIDs false, and the crossed $id members
+// leave base untouched.
 func SchemaAtJSONPointer(
 	root *jsonschema.Schema, segments []string, base string, trackIDs bool,
+	materialize Materialize,
 ) (*jsonschema.Schema, string) {
 	data, err := json.Marshal(root)
 	if err != nil {
 		return nil, ""
 	}
 
+	// Decode with UseNumber so a number beyond float64 precision keeps its
+	// literal form: the materialized target's const/enum must hold what the
+	// author wrote, not the rounded float64 neighbor.
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+
 	var node any
 
-	err = json.Unmarshal(data, &node)
+	err = dec.Decode(&node)
 	if err != nil {
 		return nil, ""
 	}
@@ -67,19 +86,12 @@ func SchemaAtJSONPointer(
 
 	switch node.(type) {
 	case map[string]any, bool:
-		target, err := json.Marshal(node)
+		schema, err := materialize(node)
 		if err != nil {
 			return nil, ""
 		}
 
-		var schema jsonschema.Schema
-
-		err = json.Unmarshal(target, &schema)
-		if err != nil {
-			return nil, ""
-		}
-
-		return &schema, base
+		return schema, base
 
 	default:
 		return nil, ""

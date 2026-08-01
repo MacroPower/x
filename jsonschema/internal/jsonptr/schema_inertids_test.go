@@ -47,7 +47,9 @@ func TestSchemaAtJSONPointerInertIDs(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got, base := jsonptr.SchemaAtJSONPointer(root, segments, "https://example.com/root", tc.trackIDs)
+			got, base := jsonptr.SchemaAtJSONPointer(
+				root, segments, "https://example.com/root", tc.trackIDs, materializeSchema,
+			)
 			require.NotNil(t, got)
 			assert.Equal(t, "string", got.Type)
 			assert.Equal(t, tc.want, base)

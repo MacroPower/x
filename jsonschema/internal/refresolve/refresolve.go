@@ -44,4 +44,11 @@ type Deps struct {
 	// suffices. Deep cloning stays on the parent side, in the fetch closures
 	// that register remote documents, so the core needs no clone dependency.
 	Children func(*jsonschema.Schema) []*jsonschema.Schema
+
+	// Materialize converts a decoded JSON schema document (a map[string]any or
+	// bool, with json.Number leaves) into a Schema, the parent's
+	// ParseSchemaValue. The JSON-pointer fallback builds its targets through it
+	// so a const or enum beyond float64 precision stays exact, matching every
+	// other path a schema document takes into the engines.
+	Materialize func(node any) (*jsonschema.Schema, error)
 }

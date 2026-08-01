@@ -445,10 +445,17 @@ func newValidator(ctx context.Context, schema *Schema, opts []ValidateOption) (*
 }
 
 // refDeps returns the dependency-injection boundary the resolution core needs:
-// the sub-schema traversal the parent owns. Deep cloning stays parent-side in
+// the sub-schema traversal the parent owns, and the decoded-document
+// materializer the JSON-pointer fallback builds its targets through.
+// [ParseSchemaValue] serves as the materializer so a fallback target's const
+// and enum numbers stay exact [json.Number] literals, like every other path a
+// schema document takes into the engines. Deep cloning stays parent-side in
 // the fetch closures, so the core needs no clone dependency.
 func refDeps() refresolve.Deps {
-	return refresolve.Deps{Children: schemafield.Children}
+	return refresolve.Deps{
+		Children:    schemafield.Children,
+		Materialize: ParseSchemaValue,
+	}
 }
 
 // toRefDraft maps the parent draft to the resolution core's two-value enum,
@@ -1303,20 +1310,24 @@ func ParseSchemaValue(doc any) (*Schema, error) {
 	}
 }
 
-// restoreExactValues re-copies each decoded node's const and enum from the
+// restoreExactValues re-copies each decoded node's any-typed value members
+// (const, enum, examples, and the unknown-keyword Extra map, mirroring the set
+// internal/schemaclone restores) from the
 // source document. The upstream UnmarshalJSON decodes those any-typed members
 // without UseNumber, so a number beyond float64 precision comes back rounded
 // and the validator would compare instances against the rounded neighbor of
-// what the author wrote. Each node's typed [Location] segments resolve its
+// what the author wrote; a sub-schema carried inside an unknown keyword would
+// likewise reach the JSON-pointer fallback with its numbers already rounded.
+// Each node's typed [Location] segments resolve its
 // source map, and each member is re-copied via a marshal + UseNumber decode,
 // keeping numbers as exact [json.Number] literals while staying unaliased from
 // the caller's document. Restoration is gated on what upstream parsed (a node
-// whose Const/Enum is unset stays unset), so the two trees stay shape-aligned;
+// whose members are unset stays unset), so the two trees stay shape-aligned;
 // a member that fails the re-copy keeps its round-tripped value.
 func restoreExactValues(s *Schema, doc map[string]any) {
 	//nolint:errcheck // The walk callback never returns an error.
 	_ = Walk(s, func(loc Location, node *Schema) error {
-		if node.Const == nil && node.Enum == nil {
+		if node.Const == nil && node.Enum == nil && node.Examples == nil && node.Extra == nil {
 			return nil
 		}
 
@@ -1336,6 +1347,20 @@ func restoreExactValues(s *Schema, doc map[string]any) {
 				if list, isList := cp.([]any); isList {
 					node.Enum = list
 				}
+			}
+		}
+
+		if node.Examples != nil {
+			if cp, copied := copySourceMember(src, "examples"); copied {
+				if list, isList := cp.([]any); isList {
+					node.Examples = list
+				}
+			}
+		}
+
+		for key := range node.Extra {
+			if cp, copied := copySourceMember(src, key); copied {
+				node.Extra[key] = cp
 			}
 		}
 
