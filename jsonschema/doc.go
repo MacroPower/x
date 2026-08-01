@@ -566,10 +566,12 @@
 // provenance. Generation then reconciles the two, composing the final schema
 // and applying the null encoding for a nil-able field (an anyOf[value, null]
 // wrapper, or a ["null", base] type list): the value-scoped facts (const, enum,
-// string-content keywords) land on the value branch by construction while
-// annotations and the authored bounds move to the null wrapper (the type-derived
-// bounds stay on the value branch), so a permitted null stays valid without any
-// post-hoc reshape of a stamped wrapper. As part of the composition each authored
+// string-content keywords, and the replace-semantics pattern, format, and
+// multipleOf) land on the value branch by construction while annotations and
+// the authored bounds move to the null wrapper (the type-derived bounds stay on
+// the value branch), so a permitted null stays valid without any post-hoc
+// reshape of a stamped wrapper, and a keyword resolves to the same value on a
+// nullable field as on a non-nullable one. As part of the composition each authored
 // bound keyword is intersected with the type-derived bound and the stronger side
 // kept, so a canvas bound can only tighten the type's own value, never weaken it
 // -- the same guarantee for every writer (the jsonschema tag, a tag interpreter,

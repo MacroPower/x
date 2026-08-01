@@ -1845,3 +1845,74 @@ func TestTagMultipleOfNullableConsistency(t *testing.T) {
 	require.Error(t, jsonschema.Validate(t.Context(), s, map[string]any{"plain": 6, "ptr": 4}),
 		"the authored multipleOf replaces the type value on the pointer field")
 }
+
+// digitPatternString carries a type-level pattern through WithTypeSchemaFor in
+// TestTagPatternNullableConsistency.
+type digitPatternString string
+
+// TestTagPatternNullableConsistency pins that an authored pattern resolves with
+// the same replace semantics on nullable and non-nullable occurrences of the
+// same type, like multipleOf above. The nullable split used to move the
+// authored pattern onto the anyOf wrapper while restoring the type-derived
+// pattern on the value branch, silently conjoining the two: disjoint patterns
+// rejected every string on the pointer field while the value field accepted
+// the authored pattern.
+func TestTagPatternNullableConsistency(t *testing.T) {
+	t.Parallel()
+
+	type doc struct {
+		Plain digitPatternString  `json:"plain" jsonschema:"pattern=^[a-z]+$"`
+		Ptr   *digitPatternString `json:"ptr"   jsonschema:"pattern=^[a-z]+$"`
+	}
+
+	s, err := jsonschema.GenerateFor[doc](t.Context(),
+		jsonschema.WithTypeSchemaFor[digitPatternString](jsonschema.TypeSchema{
+			Value: &jsonschema.Schema{Type: "string", Pattern: "^[0-9]+$"},
+		}))
+	require.NoError(t, err)
+
+	for _, instance := range []map[string]any{
+		{"plain": "abc", "ptr": "abc"},
+		{"plain": "abc", "ptr": nil},
+	} {
+		require.NoError(t, jsonschema.Validate(t.Context(), s, instance),
+			"instance %v must satisfy the authored pattern on both occurrences", instance)
+	}
+
+	require.Error(t, jsonschema.Validate(t.Context(), s, map[string]any{"plain": "123", "ptr": "abc"}),
+		"the authored pattern replaces the type value on the plain field")
+	require.Error(t, jsonschema.Validate(t.Context(), s, map[string]any{"plain": "abc", "ptr": "123"}),
+		"the authored pattern replaces the type value on the pointer field")
+}
+
+// hostnameFormatString carries a type-level format through WithTypeSchemaFor in
+// TestTagFormatNullableStaysOnValueBranch.
+type hostnameFormatString string
+
+// TestTagFormatNullableStaysOnValueBranch pins the format analog of
+// TestTagPatternNullableConsistency structurally (format is annotation-only by
+// default in 2020-12): the authored format replaces the type-derived one on the
+// value branch of the nullable anyOf, leaving no wrapper sibling that would
+// conjoin the two.
+func TestTagFormatNullableStaysOnValueBranch(t *testing.T) {
+	t.Parallel()
+
+	type doc struct {
+		Ptr *hostnameFormatString `json:"ptr" jsonschema:"format=email"`
+	}
+
+	s, err := jsonschema.GenerateFor[doc](t.Context(),
+		jsonschema.WithTypeSchemaFor[hostnameFormatString](jsonschema.TypeSchema{
+			Value: &jsonschema.Schema{Type: "string", Format: "hostname"},
+		}))
+	require.NoError(t, err)
+
+	prop := s.Properties["ptr"]
+	require.NotNil(t, prop)
+	require.Len(t, prop.AnyOf, 2)
+
+	assert.Empty(t, prop.Format,
+		"the null wrapper carries no format sibling")
+	assert.Equal(t, "email", prop.AnyOf[0].Format,
+		"the authored format replaces the type value on the value branch")
+}

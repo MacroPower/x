@@ -245,6 +245,20 @@ func overlayAuthored(merged, canvas, base *Schema) {
 		merged.Enum = canvas.Enum
 	}
 
+	// Pattern and format resolve with replace semantics (the authored value
+	// overwrites the type-derived one) and gate only a string instance, never
+	// null, so like multipleOf they are value-scoped: overlay them here and keep
+	// them out of movableKeywords, so the null split leaves the resolved value on
+	// the value branch instead of conjoining the authored value on the wrapper
+	// with the type value restored beneath it.
+	if canvas.Pattern != "" {
+		merged.Pattern = canvas.Pattern
+	}
+
+	if canvas.Format != "" {
+		merged.Format = canvas.Format
+	}
+
 	// The string-content keywords are value-scoped like const/enum (they gate a
 	// string instance, not null), so they ride on the value branch rather than
 	// the null wrapper: overlay them here rather than partitioning them in
@@ -346,13 +360,14 @@ func pointerKeyword[T comparable](get func(*Schema) *T, set func(*Schema, *T)) m
 // from the value node. AllOf is deliberately absent: a composite's allOf holds
 // its embed branches (structural, appended by renderBase) and a forbid-value
 // allOf conjunct, both of which belong on the value branch, not the wrapper.
-// MultipleOf is deliberately absent too: it resolves with replace semantics
-// (the authored value overwrites the type-derived one), so the split's
-// move-and-restore -- correct for the intersected bounds, where the restored
-// type value is subsumed by the moved authored one -- would put the authored
-// value on the wrapper AND the type value back on the value branch, silently
-// conjoining the two (multipleOf 6 over a type's 4 accepting only multiples
-// of 12 where the non-nullable field accepts 6). The resolved value stays on
+// MultipleOf, Pattern, and Format are deliberately absent too: each resolves
+// with replace semantics (the authored value overwrites the type-derived one),
+// so the split's move-and-restore -- correct for the intersected bounds, where
+// the restored type value is subsumed by the moved authored one -- would put
+// the authored value on the wrapper AND the type value back on the value
+// branch, silently conjoining the two (multipleOf 6 over a type's 4 accepting
+// only multiples of 12, or disjoint patterns rejecting every string, where the
+// non-nullable field accepts the authored value). The resolved value stays on
 // the value branch, where null is never subject to it.
 var (
 	movableKeywords = []movableKeyword{
@@ -385,12 +400,6 @@ var (
 		valueKeyword(
 			func(s *Schema) string { return s.Comment },
 			func(s *Schema, v string) { s.Comment = v }),
-		valueKeyword(
-			func(s *Schema) string { return s.Pattern },
-			func(s *Schema, v string) { s.Pattern = v }),
-		valueKeyword(
-			func(s *Schema) string { return s.Format },
-			func(s *Schema, v string) { s.Format = v }),
 		pointerKeyword(
 			func(s *Schema) *float64 { return s.Minimum },
 			func(s *Schema, v *float64) { s.Minimum = v }),
