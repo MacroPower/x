@@ -120,7 +120,10 @@
 //   - lt=N: maxItems: N-1
 //   - eq=N: minItems and maxItems (length equals N)
 //   - ne=N: not (forbids length N)
-//   - unique: uniqueItems: true
+//   - unique: uniqueItems: true. The unique=<field> form asserts uniqueness of
+//     one named field across struct elements, which uniqueItems (whole-element
+//     comparison) cannot express, so it is an error rather than being silently
+//     weakened.
 //   - oneof=a b c: enum on the item schemas, parsed against the element type
 //     (each element must be one of the values; [][]T descends to the innermost
 //     element schema). A []byte field has no item schema (it encodes as a

@@ -219,6 +219,18 @@ func applyValidator(key, value string, field jsonschema.FieldContext) error {
 		return applyNe(field, value, baseType)
 
 	case "unique":
+		// The go-playground unique=<field> form asserts uniqueness of one
+		// named struct field across the elements, strictly stronger than JSON
+		// Schema's whole-element uniqueItems. Degrading it silently would
+		// accept instances (duplicate field, distinct wholes) the tag
+		// rejects, so the param form surfaces as a generation error,
+		// matching the package policy on unrepresentable constraints.
+		if value != "" {
+			return fmt.Errorf(
+				"validate tag: unique=%s has no JSON Schema equivalent (uniqueItems compares whole elements)",
+				value)
+		}
+
 		if isByteSliceField(baseType) {
 			return errByteSliceLengthConstraint
 		}

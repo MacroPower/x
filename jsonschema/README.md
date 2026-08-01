@@ -678,7 +678,8 @@ Supported tags (summary):
   to length/numeric keywords for strings and numbers, and to
   `minItems`/`maxItems` or `minProperties`/`maxProperties` for collections.
 - **Enumerations:** `oneof` maps to `enum` for strings, numbers, and bools.
-- **Collections:** `unique` -> `uniqueItems`; `dive` descends into element or
+- **Collections:** `unique` -> `uniqueItems` (the `unique=<field>` form has no
+  JSON Schema equivalent and is an error); `dive` descends into element or
   value schemas.
 - **Formats:** `email`, `url`, `uri`, `uuid`, `ipv4`, `ipv6`, `hostname` ->
   `format`.
