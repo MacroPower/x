@@ -939,7 +939,9 @@ optional or omits it, fails with `ErrUnknownVocabulary`. Draft-07 has no
 Only local fragment refs (`#/$defs/...`, `#/definitions/...`) are resolved by
 default. Remote and absolute `$ref` URIs are resolved through an optional
 `RefResolver` set with `WithRefResolver`; the resolver is called only when local
-resolution fails, and resolved schemas are cached within the validation run. A
+resolution fails, and every outcome -- a resolved schema, a not-resolved answer,
+or an error -- is cached within the validation run, so the resolver is consulted
+at most once per distinct URI per run. A
 resolver error surfaces as `ErrRefResolve`; an unresolvable remote/absolute ref
 with no resolver is reported as a `*ValidationError`. Circular refs are detected
 and treated as passing. A document first fetched during a validation run is

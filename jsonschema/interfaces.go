@@ -410,12 +410,15 @@ func (f FormatValidatorFunc) ValidateFormat(ctx context.Context, name, value str
 }
 
 // RefResolver resolves remote schema URIs during validation. The resolver
-// is called only when local resolution fails to find a target. Successfully
-// resolved schemas are cached within the validation run, so the resolver is
-// invoked at most once per URI that resolves; a URI the resolver reports as
-// not resolved or fails on is not cached and may be queried again for each
-// ref that targets it. Implementations must be safe for concurrent use if
-// passed to multiple Validate calls.
+// is called only when local resolution fails to find a target. Every
+// outcome is cached for the duration of the validation run: a resolved
+// schema is reused, and a not-resolved answer or a resolution error is
+// recorded and replayed for every other ref targeting the same URI, so the
+// resolver is invoked at most once per distinct URI per run. A resolver
+// with transient failures is therefore not re-consulted within a run; a
+// fresh run starts with an empty cache and consults it anew.
+// Implementations must be safe for concurrent use if passed to multiple
+// Validate calls.
 //
 // The same resolver value serves both validation and inlining via a single
 // [WithRefResolver] option.

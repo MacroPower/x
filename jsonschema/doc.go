@@ -695,8 +695,10 @@
 //     dialect.
 //   - [WithRefResolver] sets a [RefResolver] for resolving remote $ref URIs.
 //     The resolver is called only when local fragment resolution fails. Resolved
-//     schemas are cached within the validation run. The resolver receives the
-//     caller's context (see Remote References below).
+//     schemas are cached within the validation run, as are not-resolved
+//     answers and errors, so the resolver is consulted at most once per
+//     distinct URI per run. The resolver receives the caller's context (see
+//     Remote References below).
 //   - [WithBaseURI] sets the root document's base URI, the base its
 //     non-local refs absolutize against when no root $id establishes one,
 //     and registers the root under it so a ref absolutizing back to the
