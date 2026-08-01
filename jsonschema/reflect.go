@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"math/big"
 	"reflect"
@@ -24,6 +25,7 @@ import (
 var (
 	typeJSONRawMessage = reflect.TypeFor[json.RawMessage]()
 	typeTime           = reflect.TypeFor[time.Time]()
+	typeSlogLevel      = reflect.TypeFor[slog.Level]()
 	typeJSONNumber     = reflect.TypeFor[json.Number]()
 	typeBigInt         = reflect.TypeFor[big.Int]()
 	typeBigRat         = reflect.TypeFor[big.Rat]()
@@ -318,8 +320,13 @@ func (g *generator) schemaForType(t reflect.Type, nullable bool) (*node, error) 
 
 	// 5. TextMarshaler (direct implementation). A direct TextMarshaler
 	// serializes as a string and shares the built-in path's type-level
-	// post-processing (comments, extender, $defs extraction).
-	if reflectkind.IsDirectTextMarshaler(t) {
+	// post-processing (comments, extender, $defs extraction). A type that
+	// also implements json.Marshaler is not a string: encoding/json prefers
+	// MarshalJSON over MarshalText, so the text form never appears in the
+	// output. Such a type falls through to kind-based reflection like any
+	// other direct json.Marshaler, mirroring the guard on step 4's promoted
+	// TextMarshaler branch.
+	if reflectkind.IsDirectTextMarshaler(t) && !reflectkind.ImplementsJSONMarshaler(t) {
 		s := &Schema{Type: typename.String}
 		return g.handleBuiltinType(t, s, nullable)
 	}
@@ -710,6 +717,13 @@ func (g *generator) builtinOverride(t reflect.Type) (*Schema, bool) {
 	switch t {
 	case typeTime:
 		return &Schema{Type: typename.String, Format: formatDateTime}, true
+	case typeSlogLevel:
+		// Slog.Level implements both direct marshalers, so the TextMarshaler
+		// step does not claim it (encoding/json prefers MarshalJSON); its
+		// MarshalJSON emits the same level name MarshalText produces, as a
+		// JSON string, so the string schema kind-based reflection of its int
+		// kind would miss is pinned here.
+		return &Schema{Type: typename.String}, true
 	case typeJSONRawMessage:
 		return &Schema{}, true
 	case typeJSONNumber:

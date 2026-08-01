@@ -166,7 +166,10 @@ Well-known types have built-in overrides matched by exact `reflect.Type`:
 `{"type":"number"}`, `math/big.Int` -> `{"type":"integer"}` (its MarshalJSON
 emits a bare number), and `math/big` `Rat`/`Float` -> `{"type":"string"}` with
 a numeric pattern (`big.Float`'s pattern also admits the `"+Inf"`/`"-Inf"`
-text it marshals for infinities). `net/url.URL` has no override: it
+text it marshals for infinities). `log/slog.Level` -> `{"type":"string"}`: it
+implements both direct marshalers, and its MarshalJSON emits the level name
+as a JSON string, so the override pins the string schema its output
+requires. `net/url.URL` has no override: it
 implements no marshaler interface, so it reflects as the struct object
 `encoding/json` actually emits.
 Types implementing `encoding.TextMarshaler` map to `{"type":"string"}`.
@@ -296,12 +299,16 @@ For each type, the schema is determined by the first matching step:
    promoted `encoding.TextMarshaler` makes it `{"type":"string"}`. In both
    cases the promoted method serializes the whole outer struct, so reflecting
    its fields would describe a shape that never appears.
-5. `encoding.TextMarshaler` (direct implementation).
+5. `encoding.TextMarshaler` (direct implementation, for types not also
+   implementing `encoding/json.Marshaler`).
 6. Kind-based reflection.
 
 A direct `encoding/json.Marshaler` implementation is not consulted: it falls
 through to kind-based reflection, since MarshalJSON can return any JSON type.
-Use `WithTypeSchema` or `JSONSchemaProvider` to describe its real shape.
+That holds even when the type also implements `encoding.TextMarshaler`
+(`encoding/json` prefers MarshalJSON, so the text form never appears in the
+output). Use `WithTypeSchema` or `JSONSchemaProvider` to describe its real
+shape.
 
 A `TypeSchemaProvider` registered with `WithTypeSchemaProvider` supplies
 schemas for whole families of types by predicate: every type implementing a

@@ -2080,8 +2080,9 @@ func TestGenerateFor_NullableRefWithAnnotation(t *testing.T) {
 	}`, string(got))
 }
 
-// slog.Level implements encoding.TextMarshaler, so it should produce
-// {"type": "string"} without a dedicated built-in override.
+// slog.Level implements both direct marshalers, so the TextMarshaler step
+// does not claim it (encoding/json prefers MarshalJSON); its built-in
+// override pins the {"type": "string"} its actual output requires.
 func TestGenerateFor_SlogLevel(t *testing.T) {
 	t.Parallel()
 

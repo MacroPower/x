@@ -176,7 +176,10 @@
 // {"type": "integer"} (its MarshalJSON emits a bare number), and
 // [math/big.Rat], [math/big.Float] to {"type": "string"} with a numeric
 // pattern constraint ([math/big.Float]'s pattern also admits the "+Inf" and
-// "-Inf" text it marshals for infinities). Built-in overrides are matched by
+// "-Inf" text it marshals for infinities). [log/slog.Level] maps to
+// {"type": "string"}: it implements both direct marshalers, and its
+// MarshalJSON emits the level name as a JSON string, so the override pins
+// the string schema its output requires. Built-in overrides are matched by
 // exact [reflect.Type], so named types wrapping a built-in-overridden type
 // (e.g., type MyTime [time.Time]) do not receive the override and fall
 // through to subsequent resolution steps. [net/url.URL] has no override: it
@@ -205,15 +208,19 @@
 //  4. Marshaler methods promoted from an embedded field: a promoted
 //     [encoding/json.Marshaler] makes the schema unrestricted ({}), and a
 //     promoted [encoding.TextMarshaler] makes it {"type": "string"}.
-//  5. [encoding.TextMarshaler] interface (direct implementation).
+//  5. [encoding.TextMarshaler] interface (direct implementation, for types
+//     not also implementing [encoding/json.Marshaler]).
 //  6. Kind-based reflection.
 //
 // A direct [encoding/json.Marshaler] implementation is not in this chain.
-// Types directly implementing only [encoding/json.Marshaler] (not
-// [encoding.TextMarshaler]) are handled by kind-based reflection, since
-// MarshalJSON can return any JSON type, leaving the output type unknowable
-// via reflection. Specific well-known [encoding/json.Marshaler] types are handled
-// via built-in overrides. Other [encoding/json.Marshaler] types should use
+// Types directly implementing [encoding/json.Marshaler] are handled by
+// kind-based reflection, since MarshalJSON can return any JSON type, leaving
+// the output type unknowable via reflection. That holds even when the type
+// also implements [encoding.TextMarshaler]: encoding/json prefers MarshalJSON
+// over MarshalText, so the text form never appears in the output and step 5
+// does not claim the type as a string. Specific well-known
+// [encoding/json.Marshaler] types are handled via built-in overrides.
+// Other [encoding/json.Marshaler] types should use
 // [WithTypeSchema] or implement [JSONSchemaProvider]. A marshaler promoted
 // from an embedded field is different (step 4): encoding/json resolves
 // marshalers through the method set, so the promoted method serializes the
