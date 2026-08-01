@@ -298,16 +298,27 @@ func TestParseFloatRejectsImpreciseIntegerBound(t *testing.T) {
 	_, err := jsonschema.GenerateFor[TooBig](t.Context())
 	require.ErrorContains(t, err, "exceeds exact float64 precision")
 
-	// An integer that IS exactly representable (a power of two above 2^53) is
-	// accepted unchanged.
-	type Representable struct {
+	// An integer above 2^53 whose float64 is binary-exact but whose shortest
+	// decimal differs is still rejected: 2^60 would ship (and enforce) as the
+	// float64's shortest decimal 1152921504606847000, loosening the bound by 24.
+	type BinaryExact struct {
 		V int64 `json:"v" jsonschema:"maximum=1152921504606846976"` // 2^60
+	}
+
+	_, err = jsonschema.GenerateFor[BinaryExact](t.Context())
+	require.ErrorIs(t, err, jsonschema.ErrBoundNotRepresentable)
+	require.ErrorContains(t, err, "exceeds exact float64 precision")
+
+	// An integer above 2^53 that IS the float64's own shortest decimal is
+	// accepted unchanged: it ships and enforces as exactly the authored value.
+	type Representable struct {
+		V int64 `json:"v" jsonschema:"maximum=18014398509481984"` // 2^54
 	}
 
 	s, err := jsonschema.GenerateFor[Representable](t.Context())
 	require.NoError(t, err)
 	require.NotNil(t, s.Properties["v"].Maximum)
-	assert.InDelta(t, 1152921504606846976.0, *s.Properties["v"].Maximum, 0)
+	assert.InDelta(t, 18014398509481984.0, *s.Properties["v"].Maximum, 0)
 
 	// The same out-of-precision integer written in exponent form must also be
 	// rejected: the check keys on the exact value, not the spelling.

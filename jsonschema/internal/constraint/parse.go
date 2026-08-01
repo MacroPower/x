@@ -14,11 +14,14 @@ import (
 )
 
 // ErrNotRepresentable marks a numeric bound whose exact value cannot be stored
-// as the schema's *float64 without rounding, so the stored bound would differ
+// as the schema's *float64 without changing it, so the stored bound would differ
 // from the tag. It is the single exact-representability policy, shared by every
-// dialect: an integer bound beyond 2^53 rounds when converted to float64,
-// silently loosening (or tightening) the constraint, so it is rejected rather
-// than shipped. Callers wrap this with their own dialect-specific phrasing.
+// dialect: a schema-side float64 denotes its shortest decimal (the value
+// encoding/json renders and the validator enforces), so an integer bound that
+// interpretation cannot reproduce -- one beyond 2^53 that rounds, or whose
+// shortest decimal differs from the exact binary value -- would silently loosen
+// (or tighten) the constraint and is rejected rather than shipped. Callers wrap
+// this with their own dialect-specific phrasing.
 var ErrNotRepresentable = errors.New("not exactly representable as a JSON Schema number")
 
 // maxExactInt is the largest integer magnitude a float64 represents exactly;
@@ -31,9 +34,10 @@ const maxExactInt = int64(1) << 53
 // which both the jsonschema tag and the validate tag parse numeric bounds: an
 // integer-kind field parses exactly (rejecting a fractional or exponent spelling
 // the type cannot hold) and checks the 2^53 magnitude directly; every other kind
-// parses as a decimal float and applies the same 2^53 check to an integer-valued
-// literal, so a float-kind bound beyond 2^53 is rejected rather than silently
-// rounded.
+// parses as a decimal float and accepts an integer-valued literal only when the
+// float64's shortest-decimal interpretation reproduces it exactly, so a
+// float-kind bound the schema cannot ship as authored is rejected rather than
+// silently rounded.
 func ParseNumericBound(value string, kind reflect.Kind) (Endpoint, error) {
 	switch {
 	case numkind.IsUnsigned(kind):
@@ -68,8 +72,8 @@ func ParseNumericBound(value string, kind reflect.Kind) (Endpoint, error) {
 // parseFloatBound parses a decimal-float bound: it rejects the non-decimal float
 // forms strconv accepts (underscore separators, hexadecimal floats), rejects
 // non-finite values (which cannot constrain any JSON number), and rejects an
-// integer-valued literal beyond 2^53 whose float64 form rounds away from the
-// exact value.
+// integer-valued literal whose float64 form does not ship as the exact value
+// under the package's shortest-decimal interpretation.
 func parseFloatBound(value string) (Endpoint, error) {
 	if strings.ContainsAny(value, "_xX") {
 		return Endpoint{}, fmt.Errorf("%q is not a decimal number", value)
@@ -84,13 +88,17 @@ func parseFloatBound(value string) (Endpoint, error) {
 		return Endpoint{}, fmt.Errorf("%q is not a finite number", value)
 	}
 
-	// Compare the float64's exact binary value against the exact integer, not its
-	// shortest decimal: a power of two above 2^53 (e.g. 2^60) is stored exactly
-	// and must be accepted, while 2^53+1 rounds and must be rejected. Float64ToRat
-	// would use the shortest decimal (2^60 -> ...847000), which differs from the
-	// exact integer and would wrongly reject it.
+	// Compare the float64's shortest-decimal interpretation ([numrat.Float64ToRat])
+	// against the exact integer, not its exact binary value: the shortest decimal
+	// is the number the bound ships and enforces as -- the endpoint rational
+	// below, the validator's precomputed bound rationals, and encoding/json's
+	// rendering of the schema's *float64 all go through it -- so it must
+	// reproduce the authored value. A binary-exact float64 is not enough: 2^60
+	// is stored exactly in binary yet renders as 1152921504606847000, so
+	// accepting it would ship a bound loosened by 24, while 2^54 or 1e23 (each
+	// its own float64's shortest decimal) ships verbatim and is accepted.
 	if dn, ok := numrat.ParseDecNumber(value); ok && dn.IsIntegral() && dn.ExactlyComparable() {
-		if new(big.Rat).SetFloat64(n).Cmp(dn.Rat()) != 0 {
+		if numrat.Float64ToRat(n).Cmp(dn.Rat()) != 0 {
 			return Endpoint{}, notRepresentable(value)
 		}
 	}

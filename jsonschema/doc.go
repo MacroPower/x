@@ -703,11 +703,15 @@
 // precision: integers beyond 2^53 round when the schema is decoded, even though
 // the instance value they are compared against is exact. Both const and enum
 // values are preserved exactly (decoded as [json.Number]); on the generation
-// side an authored bound that would round is rejected rather than silently
-// loosened, through a single exact-representability policy shared by every
-// source (the jsonschema tag and every tag interpreter, via
-// [ErrBoundNotRepresentable]), so a bound beyond 2^53 is rejected the same way
-// regardless of which tag set it or the field's kind.
+// side an authored bound the shipped float64 would not reproduce is rejected
+// rather than silently loosened, through a single exact-representability
+// policy shared by every source (the jsonschema tag and every tag interpreter,
+// via [ErrBoundNotRepresentable]): an integer bound is accepted only when the
+// float64's shortest-decimal interpretation -- the value the schema renders
+// and the validator enforces -- equals the authored value (2^60, which renders
+// as 1152921504606847000, is rejected the same way regardless of which tag set
+// it; 2^54, which renders as itself, is accepted), and a bound parsed at an
+// integer-kind field is capped at 2^53 outright.
 //
 // Validation is configured via [ValidateOption] values:
 //

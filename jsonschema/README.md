@@ -471,9 +471,11 @@ model, so this precedence is defined once and applies uniformly no matter which
 source set a bound. The bounds intersect order-independently (a weaker bound
 never loosens a stronger one), a conflict in the discrete value set aborts
 generation, and an unsatisfiable range (a `minimum` above a `maximum`) is
-emitted as its impossible bounds rather than loosened. A numeric bound beyond
-2^53, which a float64 cannot hold exactly, is rejected the same way regardless
-of which source set it.
+emitted as its impossible bounds rather than loosened. A numeric bound the
+schema-side float64 cannot ship exactly -- an integer its shortest-decimal
+rendering, the value the validator enforces, does not reproduce -- is rejected
+the same way regardless of which source set it; a bound parsed at an
+integer-kind field is capped at 2^53 outright.
 
 On a sequence or map element the bound drop is by author. A jsonschema-tag
 `enum` on the elements keeps each element's type-derived numeric bounds -- the

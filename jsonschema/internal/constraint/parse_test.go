@@ -50,12 +50,34 @@ func TestParseNumericBound(t *testing.T) {
 		"float fractional ok":        {value: "1.5", kind: reflect.Float64, wantVal: 1.5},
 		"float tenth ok":             {value: "0.1", kind: reflect.Float64, wantVal: 0.1},
 		"float exponent integral ok": {value: "1e2", kind: reflect.Float64, wantVal: 100},
-		"float power of two above 2^53 ok": {
-			// 2^60 is exactly representable, so it is accepted, not rejected.
-			value: "1152921504606846976", kind: reflect.Float64, wantVal: 1152921504606846976,
+		"float power of two above 2^53 rejected": {
+			// 2^60 is binary-exact in a float64, but the schema ships the
+			// float64's shortest decimal (1152921504606847000), a different
+			// number, so accepting it would loosen the bound by 24.
+			value:           "1152921504606846976",
+			kind:            reflect.Float64,
+			wantErr:         true,
+			unrepresentable: true,
 		},
-		"invalid kind power of two above 2^53 ok": {
-			value: "1152921504606846976", kind: reflect.Invalid, wantVal: 1152921504606846976,
+		"invalid kind power of two above 2^53 rejected": {
+			value:           "1152921504606846976",
+			kind:            reflect.Invalid,
+			wantErr:         true,
+			unrepresentable: true,
+		},
+		"float shortest-decimal integer above 2^53 ok": {
+			// 2^54 is its own float64's shortest decimal, so it ships verbatim.
+			value: "18014398509481984", kind: reflect.Float64, wantVal: 18014398509481984,
+		},
+		"float shortest-decimal spelling of 2^60 float64 ok": {
+			// The number float64(2^60) actually denotes is accepted: it ships
+			// and enforces exactly as authored.
+			value: "1152921504606847000", kind: reflect.Float64, wantVal: 1152921504606847000,
+		},
+		"float power of ten above 2^53 ok": {
+			// 1e23 is not binary-exact, but its float64's shortest decimal is
+			// 1e23 itself, so the shipped bound denotes the authored value.
+			value: "1e23", kind: reflect.Float64, wantVal: 1e23,
 		},
 		"float integer beyond 2^53": {
 			value:           "9007199254740993",

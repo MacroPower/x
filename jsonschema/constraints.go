@@ -17,11 +17,12 @@ var (
 	// recognizable through this one.
 	ErrConstraintConflict = errors.New("conflicting value constraints")
 
-	// ErrBoundNotRepresentable reports a numeric bound whose exact value a float64
-	// cannot hold (an integer magnitude beyond 2^53), so storing it as the schema's
-	// *float64 bound would silently round and change the constraint. It is the
-	// single exact-representability policy shared by [Constraints.AddNumericBound]
-	// and the jsonschema tag.
+	// ErrBoundNotRepresentable reports a numeric bound the schema's *float64
+	// cannot ship exactly: an integer the float64's shortest-decimal
+	// interpretation (the value the schema renders and the validator enforces)
+	// does not reproduce, so storing it would silently change the constraint.
+	// It is the single exact-representability policy shared by
+	// [Constraints.AddNumericBound] and the jsonschema tag.
 	ErrBoundNotRepresentable = constraint.ErrNotRepresentable
 )
 
@@ -94,8 +95,9 @@ func (c *Constraints) baseSchema() *Schema {
 }
 
 // AddNumericBound contributes one numeric bound parsed from value under the
-// field's kind, applying the shared exact-representability policy (a bound beyond
-// 2^53 is rejected as [ErrBoundNotRepresentable] rather than silently rounded).
+// field's kind, applying the shared exact-representability policy (a bound the
+// shipped float64 would not reproduce exactly is rejected as
+// [ErrBoundNotRepresentable] rather than silently rounded).
 // The bound intersects the field's effective bound: it is written to the canvas
 // only when it tightens the value already in effect (the canvas value, or the
 // type-derived one), so a weaker bound never loosens a stronger one and the kind
