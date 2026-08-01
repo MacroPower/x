@@ -158,19 +158,46 @@ func equalJSONValues(a, b any) bool {
 		return equalGuarded(a, b)
 	}
 
-	return jsonschema.Equal(a, b)
+	return equalUpstream(a, b)
 }
 
-// containsCycle reports whether v is or contains a self-referential []any or
-// map[string]any: a container that is, directly or transitively, its own
-// ancestor. The internal/normalize package deliberately tolerates such
-// instances (its cycle guard stops at the back-edge and keeps the value), so
-// they can reach the equality and hash walks here, which otherwise assume
-// finite trees and would recurse without bound. A cyclic value has no JSON
-// serialization, so
+// equalUpstream delegates to [jsonschema.Equal] for values outside the shapes
+// the local walks understand (hand-built const/enum containers such as the
+// map[any]any gopkg.in/yaml.v2 decodes documents into, typed slices, structs),
+// converting any panic into "unequal". The upstream comparison checks only
+// the [reflect.Kind] before iterating maps, so a map[any]any const against a
+// decoded map[string]any instance panics inside [reflect.Value.MapIndex] (an
+// interface{} key is not assignable to a string key), and other exotic kinds
+// (non-nil funcs, channels) panic explicitly. A pair upstream cannot compare
+// safely is treated like a non-finite float: unequal.
+func equalUpstream(a, b any) bool {
+	eq := false
+
+	func() {
+		defer func() {
+			if recover() != nil {
+				// The pair stays reported unequal.
+				eq = false
+			}
+		}()
+
+		eq = jsonschema.Equal(a, b)
+	}()
+
+	return eq
+}
+
+// containsCycle reports whether v is or contains a self-referential []any,
+// map[string]any, or map[any]any: a container that is, directly or
+// transitively, its own ancestor. The internal/normalize package deliberately
+// tolerates such instances (its cycle guard stops at the back-edge and keeps
+// the value), so they can reach the equality and hash walks here, which
+// otherwise assume finite trees and would recurse without bound. A cyclic
+// value has no JSON serialization, so
 // callers treat it like a non-finite float: unequal to everything, including
-// itself. Other container kinds cannot appear inside a decoded or normalized
-// JSON instance, so only these two shapes need walking.
+// itself. []any and map[string]any are the shapes a decoded or normalized
+// JSON instance can take; map[any]any is the YAML-decoded shape a hand-built
+// const/enum can carry.
 func containsCycle(v any) bool {
 	return containsCycleOnPath(v, map[[2]uintptr]bool{})
 }
@@ -211,15 +238,34 @@ func containsCycleOnPath(v any, onPath map[[2]uintptr]bool) bool {
 				return true
 			}
 		}
+
+	case map[any]any:
+		// The shape gopkg.in/yaml.v2 decodes documents into; a hand-built
+		// const/enum can carry it, and a cycle through it would otherwise
+		// overflow the stack in the walks below (a map key cannot hold a
+		// container, so only the values need following).
+		key := [2]uintptr{reflect.ValueOf(val).Pointer(), uintptr(len(val))}
+		if onPath[key] {
+			return true
+		}
+
+		onPath[key] = true
+		defer delete(onPath, key)
+
+		for _, item := range val {
+			if containsCycleOnPath(item, onPath) {
+				return true
+			}
+		}
 	}
 
 	return false
 }
 
-// containsNonFiniteFloat reports whether v, or any element of an []any or
-// map[string]any it contains, is a non-finite float64 (NaN or ±Inf). Such a
-// value can only enter through validation (JSON decoding never yields one); the
-// other container kinds cannot hold one.
+// containsNonFiniteFloat reports whether v, or any element of an []any,
+// map[string]any, or map[any]any it contains, is a non-finite float64 (NaN or
+// ±Inf). Such a value can only enter through validation (JSON decoding never
+// yields one); the other container kinds cannot hold one.
 func containsNonFiniteFloat(v any) bool {
 	switch val := v.(type) {
 	case float64:
@@ -229,6 +275,17 @@ func containsNonFiniteFloat(v any) bool {
 		return slices.ContainsFunc(val, containsNonFiniteFloat)
 
 	case map[string]any:
+		for _, item := range val {
+			if containsNonFiniteFloat(item) {
+				return true
+			}
+		}
+
+	case map[any]any:
+		// A hand-built const/enum can carry the map[any]any shape
+		// gopkg.in/yaml.v2 decodes documents into; upstream folds a NaN inside
+		// one toward zero like any other non-finite float, so it must be
+		// screened here too.
 		for _, item := range val {
 			if containsNonFiniteFloat(item) {
 				return true
@@ -352,7 +409,7 @@ func equalGuarded(a, b any) bool {
 		return true
 	}
 
-	return jsonschema.Equal(a, b)
+	return equalUpstream(a, b)
 }
 
 // guardedNumberEqual compares a [json.Number] against a non-Number value with
@@ -395,7 +452,7 @@ func equalClassified(a any, aNonFinite, aUnbounded bool, b any, bNonFinite, bUnb
 		return equalGuarded(a, b)
 	}
 
-	return jsonschema.Equal(a, b)
+	return equalUpstream(a, b)
 }
 
 // HasDuplicates checks for duplicate values using JSON-semantic equality.
