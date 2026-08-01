@@ -962,7 +962,11 @@ resolution fails, and every outcome -- a resolved schema, a not-resolved answer,
 or an error -- is cached within the validation run, so the resolver is consulted
 at most once per distinct URI per run. A
 resolver error surfaces as `ErrRefResolve`; an unresolvable remote/absolute ref
-with no resolver is reported as a `*ValidationError`. Circular refs are detected
+with no resolver is reported as a `*ValidationError`, and so is an unresolvable
+local fragment ref inside a document first fetched during a validation run or
+inside a JSON-pointer fallback target, where no compile-time pass vetted it
+(within a compile-vetted document such a fragment ref is silently skipped,
+since `Compile` already rejects genuinely broken ones). Circular refs are detected
 and treated as passing. A document first fetched during a validation run is
 vetted with the same structural checks `Compile` applies to compile-time-fetched
 documents, and a JSON-pointer fallback target materialized during a run (a

@@ -147,6 +147,15 @@ func (r *Registry) walkInto(schema *jsonschema.Schema, parentBase string, onlyIf
 	}
 }
 
+// KnownSchema reports whether sc was registered by this registry's walks: it
+// belongs to the root document or to a document walked in while the registry
+// was built (for the compiled registry, the documents present at compile
+// time). A schema materialized by the JSON-pointer fallback or fetched into a
+// per-run clone is not known to the compiled registry.
+func (r *Registry) KnownSchema(sc *jsonschema.Schema) bool {
+	return r.walked[sc]
+}
+
 // Clone returns a copy-on-write duplicate of r: the five maps are cloned so a
 // run that registers a remote fetch cannot race a concurrent run sharing the
 // compiled registry, while the immutable configuration is copied by value.

@@ -904,8 +904,13 @@
 // reported as a [*ValidationError] by the validation walk: with no resolver
 // (or a resolver answering ErrNotResolved) the message begins with
 // "cannot resolve $ref" and includes the quoted ref, while a resolver that
-// returns any other error yields one wrapping [ErrRefResolve]. Only an
-// unresolvable local fragment ref is silently skipped.
+// returns any other error yields one wrapping [ErrRefResolve]. An
+// unresolvable local fragment ref is reported the same way when it sits in a
+// part of the graph no compile-time pass vetted: inside a document first
+// fetched during a validation run, or inside a JSON-pointer fallback target.
+// Only an unresolvable local fragment ref within a compile-vetted document is
+// silently skipped, because there Schema.Resolve has already rejected
+// genuinely broken fragment refs before the walk begins.
 // Circular refs are detected and treated as passing to avoid infinite recursion.
 //
 // A remote document first fetched during a validation run is vetted with the

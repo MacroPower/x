@@ -3454,7 +3454,7 @@ func evalRef(ctx evalContext) []*ValidationError {
 	}
 
 	return ctx.v.validateResolvedRef(
-		ctx.v.resolveRef(schema, ref), ref, KeywordRef,
+		ctx.v.resolveRef(schema, ref), schema, ref, KeywordRef,
 		ctx.instance, ctx.instancePath, ctx.schemaPath, ctx.ann)
 }
 
@@ -3470,17 +3470,19 @@ func evalDynamicRef(ctx evalContext) []*ValidationError {
 	}
 
 	return ctx.v.validateResolvedRef(
-		ctx.v.resolveDynamicRef(schema, ref), ref, KeywordDynamicRef,
+		ctx.v.resolveDynamicRef(schema, ref), schema, ref, KeywordDynamicRef,
 		ctx.instance, ctx.instancePath, ctx.schemaPath, ctx.ann)
 }
 
 // validateResolvedRef validates the instance against a resolved reference
 // target, sharing the resolution-error and annotation handling between $ref
-// and $dynamicRef. The keyword names the reference keyword for error paths.
+// and $dynamicRef. The schema is the node bearing the reference keyword;
+// the keyword names that keyword for error paths.
 // The [refresolve.Result] carries the target and, on a resolver-reported
 // failure, the error to surface.
 func (v *validator) validateResolvedRef(
 	res refresolve.Result,
+	schema *Schema,
 	ref, keyword string,
 	instance any,
 	instancePath instanceLocation,
@@ -3499,16 +3501,22 @@ func (v *validator) validateResolvedRef(
 			return []*ValidationError{e}
 		}
 
-		// A non-local (remote/absolute) ref that cannot be resolved is an
-		// error rather than silently passing. Unresolvable local fragment refs
-		// are already rejected by Schema.Resolve before the walk begins.
-		if !uriref.IsFragmentOnly(ref) {
+		// An unresolvable ref is an error rather than silently passing: always
+		// for a non-local (remote/absolute) ref, and for a local fragment ref
+		// whose bearing node entered the graph only during this run (inside a
+		// document first fetched at validation time, or inside a JSON-pointer
+		// fallback target), where no compile-time pass ever vetted it. Only a
+		// fragment ref borne by a node the compiled registry knows is silently
+		// skipped: there Schema.Resolve already rejected genuinely broken
+		// fragments before the walk began, so this branch is benign.
+		if !uriref.IsFragmentOnly(ref) || !v.refReg.KnownSchema(schema) {
 			return []*ValidationError{
 				leafError(instancePath, schemaPath, keyword, fmt.Sprintf("cannot resolve %s %q", keyword, ref)),
 			}
 		}
 
-		// Unresolvable local fragment ref: silently skip.
+		// Unresolvable local fragment ref in a compile-vetted document:
+		// silently skip.
 		return nil
 	}
 
