@@ -30,6 +30,14 @@ const (
 	ruleMax = "max"
 )
 
+// boolTrue and boolFalse are the boolean parameter spellings
+// go-playground/validator accepts, shared by the bool parsers and the coerced
+// required zero.
+const (
+	boolTrue  = "true"
+	boolFalse = "false"
+)
+
 // Interpreter implements [jsonschema.TagInterpreter] for go-playground/validator
 // tag syntax. Create one with [NewInterpreter] and register it under the
 // "validate" tag key:
@@ -310,17 +318,27 @@ func addRequired(parent *jsonschema.Schema, name string) {
 // one never weakens the type's own stronger bound.
 func applyRequiredConstraint(field jsonschema.FieldContext, baseType reflect.Type) error {
 	// A json:",string" numeric or bool field serializes its value as a quoted
-	// string, so the "non-zero" requirement must forbid the serialized zero
-	// ("0" or "false"), not the raw numeric/bool zero: a numeric not.const is
-	// inert against a string instance (silently dropping the requirement) and a
-	// bool const pins an unsatisfiable bool on a string schema. This mirrors the
-	// eq/ne/oneof reroute that compares against the serialized form.
+	// string, so the "non-zero" requirement must forbid the serialized zero,
+	// not the raw numeric/bool zero: a numeric not.const is inert against a
+	// string instance (silently dropping the requirement) and a bool const
+	// pins an unsatisfiable bool on a string schema. The forbidden text comes
+	// from the same canonicalization as eq/ne/oneof, so a plain json:",string"
+	// field forbids "0"/"false" while a string-marshaling type contributes
+	// whatever its zero value actually serializes to; hardcoding "0" there
+	// would forbid a string the field never emits, leaving the documented
+	// non-zero check silently inert.
 	if isStringCoercedValue(field.Base, baseType) {
+		zero := "0"
 		if isBoolKind(baseType) {
-			forbidValue(field.Canvas, "false")
-		} else {
-			forbidValue(field.Canvas, "0")
+			zero = boolFalse
 		}
+
+		canonical, err := canonicalCoercedScalar(zero, baseType)
+		if err != nil {
+			return fmt.Errorf("validate tag: required: %w", err)
+		}
+
+		forbidValue(field.Canvas, canonical)
 
 		return nil
 	}
@@ -623,9 +641,9 @@ func canonicalCoercedScalar(value string, baseType reflect.Type) (string, error)
 		// Inlined rather than reusing parseBool: its error already carries the
 		// "validate tag:" prefix the caller adds.
 		switch value {
-		case "true":
+		case boolTrue:
 			parsed = true
-		case "false":
+		case boolFalse:
 			parsed = false
 		default:
 			return "", fmt.Errorf("invalid boolean %q", value)
@@ -707,9 +725,9 @@ func isBoolKind(t reflect.Type) bool { return t.Kind() == reflect.Bool }
 // parseBool parses a boolean validator value.
 func parseBool(v string) (bool, error) {
 	switch v {
-	case "true":
+	case boolTrue:
 		return true, nil
-	case "false":
+	case boolFalse:
 		return false, nil
 	default:
 		return false, fmt.Errorf("validate tag: invalid boolean %q", v)
