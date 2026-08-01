@@ -965,8 +965,10 @@ resolver error surfaces as `ErrRefResolve`; an unresolvable remote/absolute ref
 with no resolver is reported as a `*ValidationError`. Circular refs are detected
 and treated as passing. A document first fetched during a validation run is
 vetted with the same structural checks `Compile` applies to compile-time-fetched
-documents; a violation fails the referencing ref with `ErrRefResolve` wrapping
-the structural sentinel (`ErrInvalidType`, `ErrNegativeBound`, or
+documents, and a JSON-pointer fallback target materialized during a run (a
+schema carried inside an unknown keyword) is vetted the same way at
+materialization; a violation fails the referencing ref with `ErrRefResolve`
+wrapping the structural sentinel (`ErrInvalidType`, `ErrNegativeBound`, or
 `ErrItemsArrayUnderDraft2020`) instead of silently mis-validating. `Inline`
 shares this same vetting policy for the documents it fetches (see
 [Inlining references](#inlining-references)). Non-local refs absolutize against the enclosing

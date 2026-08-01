@@ -911,7 +911,11 @@
 // A remote document first fetched during a validation run is vetted with the
 // same structural checks Compile applies to compile-time-fetched documents:
 // type names, non-negative bounds, and under [Draft2020] the Draft-7 items
-// array. A violation makes the referencing ref fail with an error wrapping
+// array. A JSON-pointer fallback target materialized during a run (a schema
+// carried inside an unknown keyword or the internals of a non-applicator
+// keyword) is vetted the same way at materialization, matching the vet Compile
+// runs over the fallback targets its own gate materializes. A violation makes
+// the referencing ref fail with an error wrapping
 // [ErrRefResolve] that also wraps the structural sentinel ([ErrInvalidType],
 // [ErrNegativeBound], or [ErrItemsArrayUnderDraft2020]), rather than letting
 // the document silently mis-validate. [Inline] shares this same vetting policy

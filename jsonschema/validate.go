@@ -507,6 +507,14 @@ func (v *validator) forInstance(ctx context.Context) *validator {
 		rv.refSession.SeedDynamicScope(rv.refSession.SchemaBase(rv.root))
 	}
 
+	// A JSON-pointer fallback target materialized during this run never passed
+	// through Compile's fallback vet loop (a run re-materializes targets as
+	// fresh objects, and a target inside a late-fetched document has no
+	// compile-time counterpart at all), so the same structural policy runs at
+	// materialization; a violation surfaces through the referencing ref as an
+	// error wrapping [ErrRefResolve], matching the late-fetched-document vet.
+	rv.refSession.SetFallbackVet(rv.fallbackVet())
+
 	// The fetch reads the run's context from the ctx field set above, so no
 	// parameter threads through the deep resolution machinery.
 	//nolint:contextcheck // See the comment above.
@@ -984,6 +992,32 @@ func (dv *documentVetter) vet(s *Schema, pathPrefix string) error {
 // document exactly as the compile-time pass does.
 func (v *validator) checkFetchedDocument(s *Schema, baseURI string) error {
 	return newDocumentVetter(v.profile).vet(s, baseURI+"#")
+}
+
+// fallbackVet returns the structural vet a per-run session applies to each
+// JSON-pointer fallback target it materializes, giving those targets parity
+// with Compile's fallback vet loop: a run re-materializes targets as fresh
+// objects (and a target inside a late-fetched document has no compile-time
+// counterpart at all), so the check must run again here. One lazily-built
+// vetter is shared across the run's targets, mirroring the compile loop's
+// shared visited sets, and a violation is wrapped in [ErrRefResolve] so it
+// surfaces through the referencing ref exactly like a late-fetched-document
+// violation.
+func (v *validator) fallbackVet() func(sc *Schema, locator string) error {
+	var dv *documentVetter
+
+	return func(sc *Schema, locator string) error {
+		if dv == nil {
+			dv = newDocumentVetter(v.profile)
+		}
+
+		err := dv.vet(sc, locator)
+		if err != nil {
+			return fmt.Errorf("%w: %w", ErrRefResolve, err)
+		}
+
+		return nil
+	}
 }
 
 // remoteLoader returns a [jsonschema.Loader] for upstream Schema.Resolve.

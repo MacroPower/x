@@ -35,8 +35,15 @@ type Session struct {
 	// content checks extend to exactly the schemas the gate resolved.
 	fallbackTargets []FallbackTarget
 
+	// Structural vet applied to each schema the JSON-pointer fallback
+	// materializes, before registration (see [Session.SetFallbackVet]). Nil
+	// skips vetting: the compile-time gate's session leaves it unset because
+	// the compiler vets its [Session.FallbackTargets] in one shared pass after
+	// resolution.
+	fallbackVet func(sc *jsonschema.Schema, locator string) error
+
 	refCache         map[refCacheKey]Result
-	jsonPointerCache map[jsonPointerKey]*jsonschema.Schema
+	jsonPointerCache map[jsonPointerKey]fallbackResult
 
 	// Negative cache of baseURIs the resolver could not serve this run; a nil
 	// value is a plain miss, a non-nil value the error to replay.
@@ -62,6 +69,13 @@ type jsonPointerKey struct {
 	root *jsonschema.Schema
 	//nolint:unused // Read via struct equality when used as a map key.
 	pointer string
+}
+
+// fallbackResult is a cached JSON-pointer fallback outcome: the materialized
+// target, or the vet error that rejected it (both nil for a plain miss).
+type fallbackResult struct {
+	target *jsonschema.Schema
+	err    error
 }
 
 // Registry returns the session's current registry: the shared compiled one, or
@@ -191,19 +205,34 @@ func (s *Session) LookupDynamicAnchor(key string) (*jsonschema.Schema, bool) {
 	return sc, ok
 }
 
+// SetFallbackVet installs the structural vet applied to each schema the
+// JSON-pointer fallback materializes, before it is registered. A non-nil error
+// rejects the target: the resolution reports the error instead of a target, so
+// an ill-formed schema reached only through the fallback cannot silently
+// mis-validate. Per-run sessions install the validator's vetting policy here;
+// the compile-time gate's session leaves it unset and the compiler vets its
+// [Session.FallbackTargets] in one shared pass instead.
+func (s *Session) SetFallbackVet(vet func(sc *jsonschema.Schema, locator string) error) {
+	s.fallbackVet = vet
+}
+
 // ResolveJSONPointer resolves a JSON Pointer fragment against a schema. Typed
 // traversal handles the common case; when it fails the pointer may still target
 // a referenceable location with no typed field (a sub-schema carried as raw JSON
 // in an unknown keyword, or the internals of a non-applicator keyword such as
-// examples), so resolution falls back to walking the schema's JSON form.
-func (s *Session) ResolveJSONPointer(root *jsonschema.Schema, fragment string, encoded bool) *jsonschema.Schema {
+// examples), so resolution falls back to walking the schema's JSON form. A
+// non-nil error reports a fallback target the installed vet rejected (see
+// [Session.SetFallbackVet]); an unlocatable pointer is a plain (nil, nil) miss.
+func (s *Session) ResolveJSONPointer(
+	root *jsonschema.Schema, fragment string, encoded bool,
+) (*jsonschema.Schema, error) {
 	segments, ok := jsonptr.FragmentSegments(fragment, encoded)
 	if !ok {
-		return nil
+		return nil, nil //nolint:nilnil // An unlocatable pointer is a plain miss, not an error.
 	}
 
 	if target := jsonptr.TraverseSchema(root, segments); target != nil {
-		return target
+		return target, nil
 	}
 
 	return s.resolveJSONPointerViaJSON(root, segments)
@@ -212,16 +241,19 @@ func (s *Session) ResolveJSONPointer(root *jsonschema.Schema, fragment string, e
 // resolveJSONPointerViaJSON resolves a JSON Pointer by walking the schema's JSON
 // encoding rather than its typed fields, reaching locations typed traversal
 // cannot. A located schema is freshly unmarshaled and unknown to the compiled
-// registries; it is registered through the per-run fallback registries with the
-// base URI in effect at its location. Results are cached per (root, pointer).
-func (s *Session) resolveJSONPointerViaJSON(root *jsonschema.Schema, segments []string) *jsonschema.Schema {
+// registries; it is vetted (when a vet is installed) and registered through the
+// per-run fallback registries with the base URI in effect at its location.
+// Results, including vet rejections, are cached per (root, pointer).
+func (s *Session) resolveJSONPointerViaJSON(
+	root *jsonschema.Schema, segments []string,
+) (*jsonschema.Schema, error) {
 	if s.jsonPointerCache == nil {
-		s.jsonPointerCache = map[jsonPointerKey]*jsonschema.Schema{}
+		s.jsonPointerCache = map[jsonPointerKey]fallbackResult{}
 	}
 
 	key := jsonPointerKey{root: root, pointer: jsonptr.SegmentsKey(segments)}
 	if cached, ok := s.jsonPointerCache[key]; ok {
-		return cached
+		return cached.target, cached.err
 	}
 
 	// ID tracking during pointer navigation follows the same inertIDs policy
@@ -231,18 +263,30 @@ func (s *Session) resolveJSONPointerViaJSON(root *jsonschema.Schema, segments []
 	target, base := jsonptr.SchemaAtJSONPointer(
 		root, segments, s.SchemaBase(root), !s.reg.inertIDs, s.reg.deps.Materialize,
 	)
+
+	locator := s.SchemaBase(root) + "#" + displayPointer(segments)
+
+	var vetErr error
+
+	if target != nil && s.fallbackVet != nil {
+		vetErr = s.fallbackVet(target, locator)
+		if vetErr != nil {
+			target = nil
+		}
+	}
+
 	if target != nil {
 		s.RegisterFallback(target, base)
 
 		s.fallbackTargets = append(s.fallbackTargets, FallbackTarget{
 			Schema:  target,
-			Locator: s.SchemaBase(root) + "#" + displayPointer(segments),
+			Locator: locator,
 		})
 	}
 
-	s.jsonPointerCache[key] = target
+	s.jsonPointerCache[key] = fallbackResult{target: target, err: vetErr}
 
-	return target
+	return target, vetErr
 }
 
 // FallbackTarget pairs a schema the JSON-pointer fallback materialized with the

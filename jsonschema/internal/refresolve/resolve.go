@@ -29,8 +29,10 @@ type Result struct {
 	// Target is the resolved schema, nil on failure.
 	Target *jsonschema.Schema
 
-	// Err wraps [ErrRefResolve] when the fetch closure reported a failure; nil
-	// otherwise (including an ordinary unresolved fragment).
+	// Err wraps [ErrRefResolve] when the fetch closure reported a failure or
+	// the installed fallback vet rejected a materialized JSON-pointer target
+	// (see [Session.SetFallbackVet]); nil otherwise (including an ordinary
+	// unresolved fragment).
 	Err error
 
 	// DocumentURI is the located document's base URI for a non-fragment ref, ""
@@ -98,7 +100,9 @@ func (s *Session) resolveRefUncached(schema *jsonschema.Schema, ref string, fetc
 		if strings.HasPrefix(fragment, "/") {
 			raw, encoded := uriref.RawFragment(parsed)
 
-			return Result{Target: s.ResolveJSONPointer(resourceRoot, raw, encoded)}
+			t, ptrErr := s.ResolveJSONPointer(resourceRoot, raw, encoded)
+
+			return Result{Target: t, Err: ptrErr}
 		}
 
 		// Anchor reference.
@@ -141,11 +145,12 @@ func (s *Session) resolveRefUncached(schema *jsonschema.Schema, ref string, fetc
 
 	// JSON Pointer within resolved schema.
 	if strings.HasPrefix(fragment, "/") {
-		if t := s.ResolveJSONPointer(target, rawFrag, fragEncoded); t != nil {
+		t, ptrErr := s.ResolveJSONPointer(target, rawFrag, fragEncoded)
+		if t != nil {
 			return Result{Target: t, DocumentURI: baseURI, Fragment: fragment}
 		}
 
-		return Result{}
+		return Result{Err: ptrErr}
 	}
 
 	// Anchor within resolved schema, resolved via the shared cross-document
