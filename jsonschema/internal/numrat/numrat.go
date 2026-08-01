@@ -456,7 +456,11 @@ func EnumMemberRats(enum []any) []*big.Rat {
 }
 
 // NumericRat converts the numeric Go kinds [jsonschema.Equal] recognizes
-// (other than [json.Number]) to an exact rational.
+// (other than [json.Number]) to an exact rational. A float expands through
+// its shortest decimal ([Float64ToRat]), so a mixed float64/json.Number pair
+// under uniqueItems compares the way const, enum, and the numeric-bound
+// keywords interpret a float64 (float64(0.1) is 1/10, not its exact binary
+// expansion); a non-finite float reports false.
 func NumericRat(v any) (*big.Rat, bool) {
 	rv := reflect.ValueOf(v)
 	r := new(big.Rat)
@@ -469,12 +473,12 @@ func NumericRat(v any) (*big.Rat, bool) {
 	case rv.CanUint():
 		r.SetUint64(rv.Uint())
 	case rv.CanFloat():
-		f := rv.Float()
-		if math.IsInf(f, 0) || math.IsNaN(f) {
+		fr := Float64ToRat(rv.Float())
+		if fr == nil {
 			return nil, false
 		}
 
-		r.SetFloat64(f)
+		return fr, true
 
 	default:
 		return nil, false

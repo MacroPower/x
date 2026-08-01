@@ -4882,8 +4882,9 @@ func TestJSONNumberAcrossNumericKeywords(t *testing.T) {
 func TestUniqueItemsNumericRepresentation(t *testing.T) {
 	t.Parallel()
 
-	// UniqueItems must agree with jsonschema.Equal's big.Rat comparison even when
-	// the same number appears in different Go representations. This is reachable
+	// UniqueItems must recognize the same number across Go representations,
+	// with a float64 interpreted at its shortest decimal value the way const,
+	// enum, and the numeric-bound keywords interpret it. This is reachable
 	// only through Validate; ValidateJSON produces json.Number uniformly.
 	tests := map[string]struct {
 		instance []any
@@ -4893,17 +4894,25 @@ func TestUniqueItemsNumericRepresentation(t *testing.T) {
 			instance: []any{float64(5), json.Number("5")},
 			err:      true,
 		},
-		"integer at 2^63 mixed representations": {
-			// 2^63 is exactly representable as float64 but exceeds int64, so the
-			// hash falls back to an exact key and recognizes the float64 and
-			// json.Number forms as the same value.
-			instance: []any{float64(9223372036854775808), json.Number("9223372036854775808")},
+		"integer at 2^63 shortest-decimal spelling": {
+			// Float64(1<<63)'s shortest decimal is 9223372036854776000 (the
+			// float64 spacing at 2^63 is 2048), so that json.Number spelling
+			// is the same value.
+			instance: []any{float64(9223372036854775808), json.Number("9223372036854776000")},
 			err:      true,
 		},
-		"binary and decimal fractions are distinct": {
-			// Float64(0.1) is the exact binary 0.1000...0555, not the rational
-			// 1/10 that json.Number("0.1") denotes, so they are not duplicates.
+		"integer at 2^63 exact binary spelling": {
+			// The exact binary integer 9223372036854775808 is a different
+			// value than float64(1<<63)'s shortest decimal, just as
+			// float64(1<<63) does not match const 9223372036854775808.
+			instance: []any{float64(9223372036854775808), json.Number("9223372036854775808")},
+		},
+		"fraction mixed representations": {
+			// Float64(0.1) is interpreted as its shortest decimal 1/10, the
+			// same value json.Number("0.1") denotes (and the value both match
+			// under const 0.1), not its exact binary expansion 0.1000...0555.
 			instance: []any{float64(0.1), json.Number("0.1")},
+			err:      true,
 		},
 	}
 	for name, tt := range tests {

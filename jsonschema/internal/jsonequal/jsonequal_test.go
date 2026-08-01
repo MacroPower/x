@@ -132,6 +132,35 @@ func TestHasDuplicates(t *testing.T) {
 			arr:  []any{json.Number("1"), float64(1)},
 			want: true,
 		},
+		"json.Number and float64 of equal non-integer value collide": {
+			// The float must be interpreted through its shortest decimal
+			// (1.1 as 11/10), the way const, enum, and the numeric bounds
+			// interpret it; its exact binary value never equals the literal.
+			arr:  []any{json.Number("1.1"), float64(1.1)},
+			want: true,
+		},
+		"json.Number and float64 of equal fraction collide": {
+			arr:  []any{float64(0.1), json.Number("0.1")},
+			want: true,
+		},
+		"distinct non-integer float64 and json.Number": {
+			arr:  []any{float64(1.1), json.Number("1.2")},
+			want: false,
+		},
+		"large integral float64 collides with its shortest-decimal literal": {
+			// Above 2^53 the shortest decimal of an integral float can denote
+			// a different integer than its exact binary value: float64(1<<60)
+			// reads back as 1152921504606847000, so that literal is the same
+			// value and must share its hash bucket.
+			arr:  []any{float64(1 << 60), json.Number("1152921504606847000")},
+			want: true,
+		},
+		"large integral float64 distinct from its exact binary integer": {
+			// The exact binary value 1152921504606846976 is a different value
+			// under the shortest-decimal interpretation, matching const/enum.
+			arr:  []any{float64(1 << 60), json.Number("1152921504606846976")},
+			want: false,
+		},
 		"objects equal regardless of key order": {
 			arr: []any{
 				map[string]any{"a": json.Number("1"), "b": json.Number("2")},

@@ -711,7 +711,11 @@
 // and the validator enforces -- equals the authored value (2^60, which renders
 // as 1152921504606847000, is rejected the same way regardless of which tag set
 // it; 2^54, which renders as itself, is accepted), and a bound parsed at an
-// integer-kind field is capped at 2^53 outright.
+// integer-kind field is capped at 2^53 outright. A float64 in a
+// pre-parsed instance (JSON decoding always yields [encoding/json.Number]) is
+// interpreted at its shortest decimal value across all numeric keywords,
+// including the uniqueItems comparison, so float64(0.1) and a decoded 0.1 are
+// one value under const, enum, and uniqueItems alike.
 //
 // Validation is configured via [ValidateOption] values:
 //

@@ -827,7 +827,11 @@ against is exact. `const` and `enum` values are preserved exactly (decoded as
 `json.Number`) through every entry point, including `ParseSchema` and
 `CompileJSON`. A schema-side `float64` is interpreted at its shortest
 decimal value across all numeric keywords, so `const: 0.1` matches the
-instance `0.1` exactly, consistent with how `minimum: 0.1` bounds it.
+instance `0.1` exactly, consistent with how `minimum: 0.1` bounds it. A
+`float64` in a pre-parsed instance (JSON decoding always yields `json.Number`)
+is interpreted the same way, including under `uniqueItems`, so `float64(0.1)`
+and a decoded `0.1` are one value: duplicates under `uniqueItems`, and each
+matching `const: 0.1`.
 
 ### Structured errors
 
@@ -1307,8 +1311,11 @@ forward-direction generation only; schema-to-code generation is a non-goal.
 This package re-exports the upstream `Schema` type so users need only import
 this package, and reuses the upstream for two things: meta-schema validation /
 structural well-formedness (via `Schema.Resolve`, called once per `Compile` with
-its result discarded) and JSON-semantic value comparison (`const`, `enum`,
-`uniqueItems`, via `Equal`). Everything else is implemented here.
+its result discarded) and, as a fallback, JSON-semantic comparison of hand-built
+`const`/`enum` values outside the decoded JSON shapes (via `Equal`). Everything
+else, including the `const`/`enum`/`uniqueItems` value comparison for decoded
+JSON shapes (exact decimal, with `float64` interpreted at its shortest decimal),
+is implemented here.
 
 | Concern                                                       | Implementation                               |
 | ------------------------------------------------------------- | -------------------------------------------- |
@@ -1318,7 +1325,7 @@ its result discarded) and JSON-semantic value comparison (`const`, `enum`,
 | Instance validation walk                                      | This package                                 |
 | Error types and path tracking                                 | This package                                 |
 | Format validation                                             | This package (pluggable)                     |
-| JSON-semantic value comparison (`const`/`enum`/`uniqueItems`) | Upstream `Equal()`                           |
+| JSON-semantic value comparison (`const`/`enum`/`uniqueItems`) | This package (upstream `Equal()` fallback)   |
 
 The package implements its own validation walk because the upstream
 `Resolved.Validate` returns on the first error within container keywords and

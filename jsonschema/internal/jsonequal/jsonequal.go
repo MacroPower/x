@@ -1,13 +1,17 @@
 // Package jsonequal implements DoS-guarded, JSON-semantic value equality for
 // the const and enum keywords and the matching content hash for the
 // uniqueItems check. It layers on [go.jacobcolvin.com/x/jsonschema/internal/numrat]
-// for exact decimal comparison: upstream's [jsonschema.Equal] expands every
-// [json.Number] through an uncapped [big.Rat.SetString], so an adversarial
-// multi-megabyte or large-exponent literal costs quadratic time and large
-// allocations. When either side carries such a number the comparison routes
-// through a guarded local walk that compares numbers via their canonical
-// decomposition (exact at any size); otherwise it delegates to the upstream for
-// full JSON semantics. Non-finite floats (NaN, ±Inf) are treated as unequal to
+// for exact decimal comparison: numbers compare through a guarded local walk
+// over their canonical decomposition (exact at any size, linear in the
+// literal), never through upstream [jsonschema.Equal]'s uncapped
+// [big.Rat.SetString] expansion, whose cost is quadratic in an adversarial
+// multi-megabyte or large-exponent literal. A float64 operand is interpreted
+// through its shortest decimal ([numrat.Float64ToRat]), so float64(0.1)
+// equals the decoded literal 0.1 under uniqueItems just as it does under
+// const, enum, and the numeric-bound keywords. Values outside the
+// decoded-JSON shapes (hand-built const/enum containers) delegate to the
+// upstream comparison, hardened against its panics. Non-finite floats (NaN,
+// ±Inf) are treated as unequal to
 // everything, including themselves, matching the numeric-bound keywords. Cyclic
 // values (containers that contain themselves, which have no JSON serialization)
 // are likewise unequal to everything, including themselves, and are detected up
@@ -125,21 +129,22 @@ func EqualWithRat(schemaVal any, schemaRat *big.Rat, instance any) bool {
 	return equalRatInstance(schemaRat, instance)
 }
 
-// equalJSONValues reports JSON-semantic equality like [jsonschema.Equal], with
-// a guard for adversarial numbers: the upstream comparison expands every
-// [json.Number] through an uncapped [big.Rat.SetString], so a multi-megabyte
-// or large-exponent literal costs quadratic time and large allocations (see
-// numrat.MaxNumberLen). When either value contains such a number the comparison runs
-// through a guarded local walk; otherwise it delegates to [jsonschema.Equal]
-// for full upstream semantics.
+// equalJSONValues reports JSON-semantic equality like [jsonschema.Equal],
+// with numbers compared through the guarded local walk (see [equalGuarded]):
+// exact at any size, linear in the literal, and with a float64 interpreted
+// through its shortest decimal so the result agrees with const, enum, and
+// the numeric-bound keywords. Delegating numbers to the upstream would
+// instead expand every [json.Number] through an uncapped [big.Rat.SetString]
+// (quadratic in an adversarial literal, see numrat.MaxNumberLen) and expand
+// a float64 to its exact binary value, under which float64(0.1) never
+// equals the decoded literal 0.1.
 func equalJSONValues(a, b any) bool {
 	// A cyclic value (a container that contains itself) has no JSON
 	// serialization, so it is unequal to everything, including itself. This
 	// check must run first: every other walk here (containsNonFiniteFloat,
-	// containsUnboundedNumber, equalGuarded, and the upstream
-	// [jsonschema.Equal]) assumes a finite tree and would recurse without
-	// bound on a cycle, aborting the process with a fatal stack overflow that
-	// recover cannot catch.
+	// equalGuarded, and the upstream [jsonschema.Equal]) assumes a finite
+	// tree and would recurse without bound on a cycle, aborting the process
+	// with a fatal stack overflow that recover cannot catch.
 	if containsCycle(a) || containsCycle(b) {
 		return false
 	}
@@ -154,11 +159,7 @@ func equalJSONValues(a, b any) bool {
 		return false
 	}
 
-	if containsUnboundedNumber(a) || containsUnboundedNumber(b) {
-		return equalGuarded(a, b)
-	}
-
-	return equalUpstream(a, b)
+	return equalGuarded(a, b)
 }
 
 // equalUpstream delegates to [jsonschema.Equal] for values outside the shapes
@@ -296,51 +297,19 @@ func containsNonFiniteFloat(v any) bool {
 	return false
 }
 
-// containsUnboundedNumber walks the container shapes a decoded JSON instance
-// can take and reports whether any [json.Number] inside is outside the
-// cheap-expansion bounds (or not a decimal literal at all). Values of other
-// container types cannot hold a [json.Number] produced by JSON decoding, so
-// only these shapes need walking.
-func containsUnboundedNumber(v any) bool {
-	switch val := v.(type) {
-	case json.Number:
-		// The decomposition is canonical (trailing zeros stripped), so a
-		// multi-megabyte literal like "1." + zeros can classify as exactly
-		// comparable even though the fallback path would hand the RAW literal
-		// to big.Rat.SetString, whose cost is quadratic in raw length. Any
-		// over-long literal is guarded regardless of its canonical form.
-		if len(val) > numrat.MaxNumberLen {
-			return true
-		}
-
-		d, ok := numrat.ParseDecNumber(string(val))
-
-		return !ok || !d.ExactlyComparable()
-
-	case []any:
-		if slices.ContainsFunc(val, containsUnboundedNumber) {
-			return true
-		}
-
-	case map[string]any:
-		for _, item := range val {
-			if containsUnboundedNumber(item) {
-				return true
-			}
-		}
-	}
-
-	return false
-}
-
-// equalGuarded mirrors [jsonschema.Equal] over the JSON instance shapes while
-// comparing numbers via their canonical decomposition, which is exact at any
-// size without expanding the literal: two decimal literals are equal exactly
-// when their decompositions match, and a number outside the cheap-expansion
+// equalGuarded is the comparison walk over the JSON instance shapes. Numbers
+// compare via their canonical decomposition, which is exact at any size
+// without expanding the literal: two decimal literals are equal exactly when
+// their decompositions match, and a number outside the cheap-expansion
 // bounds can never equal a float64 or integer (those expand to at most ~767
-// significant decimal digits within exponent ±324). Container types other
-// than the decoded-JSON shapes fall through to [jsonschema.Equal], which is
-// safe because they cannot hold a decoded [json.Number].
+// significant decimal digits within exponent ±324). A float64 against a
+// [json.Number] compares through the shortest-decimal interpretation
+// ([numrat.NumericRat]), so float64(1.1) equals the decoded literal 1.1 here
+// just as it does under const, enum, and the numeric-bound keywords.
+// Container types other than the decoded-JSON shapes fall through to
+// [equalUpstream]; a decoded [json.Number] can only appear inside the shapes
+// handled here, so no adversarial literal reaches the upstream's uncapped
+// parse.
 func equalGuarded(a, b any) bool {
 	an, aNum := a.(json.Number)
 	bn, bNum := b.(json.Number)
@@ -434,65 +403,37 @@ func guardedNumberEqual(n json.Number, b any) bool {
 	return d.Rat().Cmp(br) == 0
 }
 
-// equalClassified reports JSON-semantic equality like [equalJSONValues] but
-// takes each operand's non-finite/unbounded classification precomputed, so a
-// caller comparing one value against many (HasDuplicates) walks each value for
-// those properties once rather than re-walking both operands on every pair. The
-// dispatch is identical to equalJSONValues: a non-finite operand is unequal to
-// everything; an unbounded operand routes through the guarded comparison;
-// otherwise the full upstream semantics apply. Both operands must be acyclic;
-// the caller screens cyclic values out (see [containsCycle]) before
-// classification, since every walk here assumes a finite tree.
-func equalClassified(a any, aNonFinite, aUnbounded bool, b any, bNonFinite, bUnbounded bool) bool {
-	if aNonFinite || bNonFinite {
-		return false
-	}
-
-	if aUnbounded || bUnbounded {
-		return equalGuarded(a, b)
-	}
-
-	return equalUpstream(a, b)
-}
-
 // HasDuplicates checks for duplicate values using JSON-semantic equality.
 // A cyclic element (see [containsCycle]) is unequal to everything, including
 // itself, so it never counts as a duplicate.
 func HasDuplicates(arr []any) bool {
-	// Each array element is classified once for the two properties equalJSONValues
-	// would otherwise re-derive by walking both operands on every pair: whether it
-	// contains a non-finite float and whether it contains an out-of-bounds number.
-	// Classifying once turns the per-pair guard walks from O(n^2) into O(n).
-	type entry struct {
-		val       any
-		nonFinite bool
-		unbounded bool
-	}
-
-	seen := make(map[uint64][]entry, len(arr))
+	seen := make(map[uint64][]any, len(arr))
 
 	for _, item := range arr {
 		// A cyclic element is unequal to everything, including itself (see
 		// containsCycle), so it can never form a duplicate. It must be
-		// screened out before the classification and hash walks below, which
-		// assume finite trees and would otherwise recurse without bound.
+		// screened out before the other walks below, which assume finite
+		// trees and would otherwise recurse without bound.
 		if containsCycle(item) {
 			continue
 		}
 
-		nonFinite := containsNonFiniteFloat(item)
-		// A non-finite operand is never equal to anything, so its unboundedness is
-		// never consulted; skip that walk.
-		unbounded := !nonFinite && containsUnboundedNumber(item)
+		// A non-finite element is likewise unequal to everything, including
+		// itself (see equalJSONValues), so it can neither be a duplicate nor
+		// anchor one; screening it here once keeps the per-pair comparison
+		// from re-walking both operands, as equalJSONValues would.
+		if containsNonFiniteFloat(item) {
+			continue
+		}
 
 		h := hashValue(item)
 		for _, existing := range seen[h] {
-			if equalClassified(item, nonFinite, unbounded, existing.val, existing.nonFinite, existing.unbounded) {
+			if equalGuarded(item, existing) {
 				return true
 			}
 		}
 
-		seen[h] = append(seen[h], entry{val: item, nonFinite: nonFinite, unbounded: unbounded})
+		seen[h] = append(seen[h], item)
 	}
 
 	return false
@@ -513,12 +454,14 @@ func hashValue(v any) uint64 {
 	case string:
 		return stringHash(val)
 	case float64:
-		// Normalize: integers hash the same regardless of representation. The
-		// fast path is restricted to the int64 range; an out-of-range float to
-		// int64 conversion is platform-defined (saturates or wraps), so larger
-		// integers fall through to the big.Rat path and stay consistent with the
-		// json.Number branch (and with jsonschema.Equal).
-		if val == math.Trunc(val) && val >= math.MinInt64 && val < math.MaxInt64 {
+		// Integral floats within 2^53 have a shortest decimal equal to the
+		// integer itself (the float64 spacing is at most 1, so no shorter
+		// decimal denotes a different number), letting them take the cheap
+		// integer hash directly. A larger integral float's shortest decimal
+		// can denote a different integer (float64(1<<60) reads back as
+		// 1152921504606847000), so it must go through the rational form below
+		// to share a bucket with the json.Number spelling of that value.
+		if val == math.Trunc(val) && val > -(1<<53) && val < 1<<53 {
 			return numHash(int64(val))
 		}
 
@@ -536,9 +479,13 @@ func hashValue(v any) uint64 {
 			return 0x9e3779b97f4a7c17
 		}
 
-		r := new(big.Rat).SetFloat64(val)
-
-		return stringHash(r.RatString()) + 4
+		// Interpret the float through its shortest decimal, the same rational
+		// the guarded equality compares (numrat.NumericRat), so float64(1.1)
+		// and json.Number("1.1") share a bucket. Expanding the exact binary
+		// value (big.Rat.SetFloat64) would split equal values across buckets.
+		// The non-finite cases returned above, so the conversion cannot yield
+		// nil.
+		return ratHash(numrat.Float64ToRat(val))
 
 	case json.Number:
 		// DoS guard: expand only canonically cheap literals into a rational. A
@@ -560,15 +507,7 @@ func hashValue(v any) uint64 {
 			return h + 8
 		}
 
-		r := d.Rat()
-		// IsInt64 guards against silent truncation for integers beyond the
-		// int64 range, so they hash via RatString and stay consistent with
-		// the float64 branch (and with the guarded equality's rat compare).
-		if r.IsInt() && r.Num().IsInt64() {
-			return numHash(r.Num().Int64())
-		}
-
-		return stringHash(r.RatString()) + 4
+		return ratHash(d.Rat())
 
 	case []any:
 		h := uint64(6)
@@ -599,6 +538,20 @@ func hashValue(v any) uint64 {
 	}
 
 	return 0
+}
+
+// ratHash hashes the exact rational a numeric value denotes, so every
+// spelling of one value (a float64 via its shortest decimal, a decimal
+// literal via its canonical decomposition) lands in one bucket: the int64
+// form when the value fits (matching the integer fast path above), the
+// canonical fraction string otherwise. IsInt64 guards against silent
+// truncation for integers beyond the int64 range.
+func ratHash(r *big.Rat) uint64 {
+	if r.IsInt() && r.Num().IsInt64() {
+		return numHash(r.Num().Int64())
+	}
+
+	return stringHash(r.RatString()) + 4
 }
 
 func stringHash(s string) uint64 {
