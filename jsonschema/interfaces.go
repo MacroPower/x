@@ -724,6 +724,12 @@ func (fc FieldContext) ElementContexts() []FieldContext {
 // parses at the right kind and [Constraints.AddCountBound] targets items or
 // properties). Each call builds a fresh facade over the same canvas, so an
 // interpreter may call it repeatedly.
+//
+// The facade writes to Canvas, so a caller-built context must populate Canvas
+// before contributing through it (a facade over a nil canvas has nowhere to
+// record a contribution and panics on write). A context the generator builds
+// always carries a canvas; the read-only Effective accessors, by contrast,
+// tolerate a nil Canvas and fall back to Base.
 func (fc FieldContext) Constraints() *Constraints {
 	return &Constraints{
 		canvas: fc.Canvas,
@@ -754,15 +760,30 @@ func (fc FieldContext) effectiveBase() *Schema {
 	return &Schema{}
 }
 
+// effectiveCanvas returns fc.Canvas, or an empty schema when a caller built the
+// context without one, mirroring [FieldContext.effectiveBase]: a nil canvas
+// reads as nothing authored, so the Effective accessors fall through to Base.
+func (fc FieldContext) effectiveCanvas() *Schema {
+	if fc.Canvas != nil {
+		return fc.Canvas
+	}
+
+	return &Schema{}
+}
+
 // EffectiveFormat reports the effective format keyword: the canvas value, or the
 // type-derived one when the canvas has none. It backs the "set only when empty"
 // guard so a format tag never overrides a value an explicit jsonschema tag or
 // the field's type already set. [FieldContext.EffectivePattern],
 // [FieldContext.EffectiveContentEncoding], and
 // [FieldContext.EffectiveContentMediaType] guard their keywords the same way.
+//
+// The accessors tolerate a caller-built context missing Canvas or Base: a nil
+// side reads as unauthored (empty), so a hand-built context (an interpreter
+// unit test, for example) never panics here.
 func (fc FieldContext) EffectiveFormat() string {
-	if fc.Canvas.Format != "" {
-		return fc.Canvas.Format
+	if f := fc.effectiveCanvas().Format; f != "" {
+		return f
 	}
 
 	return fc.effectiveBase().Format
@@ -771,8 +792,8 @@ func (fc FieldContext) EffectiveFormat() string {
 // EffectivePattern reports the effective pattern keyword.
 // See [FieldContext.EffectiveFormat].
 func (fc FieldContext) EffectivePattern() string {
-	if fc.Canvas.Pattern != "" {
-		return fc.Canvas.Pattern
+	if p := fc.effectiveCanvas().Pattern; p != "" {
+		return p
 	}
 
 	return fc.effectiveBase().Pattern
@@ -781,8 +802,8 @@ func (fc FieldContext) EffectivePattern() string {
 // EffectiveContentEncoding reports the effective contentEncoding keyword.
 // See [FieldContext.EffectiveFormat].
 func (fc FieldContext) EffectiveContentEncoding() string {
-	if fc.Canvas.ContentEncoding != "" {
-		return fc.Canvas.ContentEncoding
+	if e := fc.effectiveCanvas().ContentEncoding; e != "" {
+		return e
 	}
 
 	return fc.effectiveBase().ContentEncoding
@@ -791,8 +812,8 @@ func (fc FieldContext) EffectiveContentEncoding() string {
 // EffectiveContentMediaType reports the effective contentMediaType keyword.
 // See [FieldContext.EffectiveFormat].
 func (fc FieldContext) EffectiveContentMediaType() string {
-	if fc.Canvas.ContentMediaType != "" {
-		return fc.Canvas.ContentMediaType
+	if m := fc.effectiveCanvas().ContentMediaType; m != "" {
+		return m
 	}
 
 	return fc.effectiveBase().ContentMediaType
