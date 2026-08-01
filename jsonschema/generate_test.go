@@ -1774,7 +1774,7 @@ func TestGenerateFor_BigRatAndBigFloat(t *testing.T) {
 		},
 		"big.Float": {
 			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[big.Float](t.Context()) },
-			want:     `{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"string","pattern":"^-?[0-9]+(\\.[0-9]+)?([eE][-+]?[0-9]+)?$"}`,
+			want:     `{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"string","pattern":"^([+-]Inf|-?[0-9]+(\\.[0-9]+)?([eE][-+]?[0-9]+)?)$"}`,
 		},
 	}
 

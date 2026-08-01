@@ -175,11 +175,13 @@
 // [encoding/json.Number] to {"type": "number"}, [math/big.Int] to
 // {"type": "integer"} (its MarshalJSON emits a bare number), and
 // [math/big.Rat], [math/big.Float] to {"type": "string"} with a numeric
-// pattern constraint. Built-in overrides are matched by exact [reflect.Type],
-// so named types wrapping a built-in-overridden type (e.g., type MyTime
-// [time.Time]) do not receive the override and fall through to subsequent
-// resolution steps. [net/url.URL] has no override: it implements no marshaler
-// interface, so it reflects as the struct object encoding/json actually emits.
+// pattern constraint ([math/big.Float]'s pattern also admits the "+Inf" and
+// "-Inf" text it marshals for infinities). Built-in overrides are matched by
+// exact [reflect.Type], so named types wrapping a built-in-overridden type
+// (e.g., type MyTime [time.Time]) do not receive the override and fall
+// through to subsequent resolution steps. [net/url.URL] has no override: it
+// implements no marshaler interface, so it reflects as the struct object
+// encoding/json actually emits.
 //
 // Types implementing [encoding.TextMarshaler] map to {"type": "string"},
 // checked before struct reflection.

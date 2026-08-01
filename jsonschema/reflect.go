@@ -722,7 +722,10 @@ func (g *generator) builtinOverride(t reflect.Type) (*Schema, bool) {
 	case typeBigRat:
 		return &Schema{Type: typename.String, Pattern: `^-?[0-9]+(/[0-9]+)?$`}, true
 	case typeBigFloat:
-		return &Schema{Type: typename.String, Pattern: `^-?[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]+)?$`}, true
+		// Big.Float can hold infinities (only NaN is unrepresentable), and its
+		// MarshalText emits "+Inf"/"-Inf" for them, so the pattern admits that
+		// text alongside finite decimal forms. (big.Rat cannot be infinite.)
+		return &Schema{Type: typename.String, Pattern: `^([+-]Inf|-?[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]+)?)$`}, true
 	}
 
 	return nil, false

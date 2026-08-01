@@ -165,8 +165,10 @@ Well-known types have built-in overrides matched by exact `reflect.Type`:
 `encoding/json.RawMessage` -> `{}`, `encoding/json.Number` ->
 `{"type":"number"}`, `math/big.Int` -> `{"type":"integer"}` (its MarshalJSON
 emits a bare number), and `math/big` `Rat`/`Float` -> `{"type":"string"}` with
-a numeric pattern. `net/url.URL` has no override: it implements no marshaler
-interface, so it reflects as the struct object `encoding/json` actually emits.
+a numeric pattern (`big.Float`'s pattern also admits the `"+Inf"`/`"-Inf"`
+text it marshals for infinities). `net/url.URL` has no override: it
+implements no marshaler interface, so it reflects as the struct object
+`encoding/json` actually emits.
 Types implementing `encoding.TextMarshaler` map to `{"type":"string"}`.
 Unsupported types (`func`, `chan`, `complex`, `unsafe.Pointer`) return
 `ErrUnsupportedType`.
