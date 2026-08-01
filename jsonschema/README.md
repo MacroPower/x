@@ -1233,7 +1233,10 @@ by building a small helper program that imports the target package and calls
 `Generate`, reusing the library's generation pipeline. The helper is compiled
 inside the target's own module through a build overlay, so module resolution and
 checksums are handled by the `go` tool; the module must be able to resolve this
-package (via a `require`, a workspace, or a `tool` directive):
+package (via a `require`, a workspace, or a `tool` directive). The helper hands
+the schema back through a file rather than its stdout, so anything an `init`
+function in the target package (or its dependencies) prints to stdout is
+forwarded to stderr instead of corrupting the emitted JSON:
 
 ```go
 //go:generate go run go.jacobcolvin.com/x/jsonschema/cmd/jsonschemagen -type Config -o config.schema.json

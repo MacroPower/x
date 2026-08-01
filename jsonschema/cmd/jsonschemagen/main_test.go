@@ -57,8 +57,12 @@ func main() {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}
-	os.Stdout.Write(data)
-	os.Stdout.Write([]byte("\n"))
+	data = append(data, '\n')
+	err = os.WriteFile("/tmp/gen/schema.json", data, 0o600)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		os.Exit(1)
+	}
 }
 `,
 		},
@@ -98,8 +102,12 @@ func main() {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}
-	os.Stdout.Write(data)
-	os.Stdout.Write([]byte("\n"))
+	data = append(data, '\n')
+	err = os.WriteFile("/tmp/gen/schema.json", data, 0o600)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		os.Exit(1)
+	}
 }
 `,
 		},
@@ -145,8 +153,12 @@ func main() {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}
-	os.Stdout.Write(data)
-	os.Stdout.Write([]byte("\n"))
+	data = append(data, '\n')
+	err = os.WriteFile("/tmp/gen/schema.json", data, 0o600)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		os.Exit(1)
+	}
 }
 `,
 		},
@@ -158,7 +170,7 @@ func main() {
 
 			var buf bytes.Buffer
 
-			err := renderMainGo(&buf, tc.cfg, tc.importPath)
+			err := renderMainGo(&buf, tc.cfg, tc.importPath, "/tmp/gen/schema.json")
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, buf.String())
 		})
@@ -521,7 +533,7 @@ func TestRenderMainGoRejectsInjectedTypeName(t *testing.T) {
 
 	var b strings.Builder
 
-	err := renderMainGo(&b, cfg, "example.com/myapp")
+	err := renderMainGo(&b, cfg, "example.com/myapp", "/tmp/gen/schema.json")
 	require.Error(t, err, "renderMainGo should reject TypeName with special characters")
 }
 
@@ -539,7 +551,7 @@ func TestRenderMainGoRejectsUnexportedTypeName(t *testing.T) {
 
 	var b strings.Builder
 
-	err := renderMainGo(&b, cfg, "example.com/myapp")
+	err := renderMainGo(&b, cfg, "example.com/myapp", "/tmp/gen/schema.json")
 	require.Error(t, err, "renderMainGo should reject an unexported TypeName")
 	assert.Contains(t, err.Error(), "exported")
 }
@@ -561,7 +573,7 @@ func TestRenderMainGoRejectsInjectedImportPath(t *testing.T) {
 
 	var b strings.Builder
 
-	err := renderMainGo(&b, cfg, malicious)
+	err := renderMainGo(&b, cfg, malicious, "/tmp/gen/schema.json")
 	require.Error(t, err, "renderMainGo should reject ImportPath with injection characters")
 }
 

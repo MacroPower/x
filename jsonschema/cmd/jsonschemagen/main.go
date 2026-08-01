@@ -6,7 +6,8 @@
 //	//go:generate go run go.jacobcolvin.com/x/jsonschema/cmd/jsonschemagen -type Config -o config.schema.json
 //
 // The tool builds a small helper program that imports the target package, calls
-// [jsonschema.Generate], and prints the resulting JSON, reusing the library's
+// [jsonschema.Generate], and writes the resulting JSON to a hand-off file the
+// tool reads back, reusing the library's
 // generation pipeline rather than duplicating it. The helper is compiled inside
 // the target's own module and supplied to the go tool through a build overlay,
 // so nothing is written to the source tree and the go tool handles module
@@ -109,14 +110,7 @@ func run(cfg config, stdout io.Writer) error {
 		return fmt.Errorf("resolve import path: %w", err)
 	}
 
-	var helper bytes.Buffer
-
-	err = renderMainGo(&helper, cfg, importPath)
-	if err != nil {
-		return fmt.Errorf("render helper: %w", err)
-	}
-
-	output, err := runGenerate(goMod, helper.Bytes(), inWork)
+	output, err := runGenerate(goMod, cfg, importPath, inWork)
 	if err != nil {
 		return err
 	}
@@ -236,7 +230,15 @@ func ensureInModule() (string, error) {
 }
 
 // runGenerate builds and runs the helper inside the user's module and returns
-// its stdout (the generated schema). The helper source is supplied through a
+// the generated schema. The helper writes the schema to a hand-off file in the
+// temp dir rather than to its stdout: the helper imports the target package, so
+// every init function in that package and its transitive dependencies runs
+// before generation, and anything they print to stdout would otherwise be
+// captured as part of the schema and corrupt the output. Stray helper stdout is
+// forwarded to stderr instead, so a chatty init stays visible without entering
+// the data channel.
+//
+// The helper source is supplied through a
 // build overlay so nothing is written to the source tree: a virtual package
 // directory under the current directory (the target package dir) maps to a
 // backing file in a system temp dir. Placing the virtual package under the
@@ -248,7 +250,7 @@ func ensureInModule() (string, error) {
 // go.work.sum are already complete. A single-module build seeds a redirected
 // modfile so the helper's dependencies (e.g. golang.org/x/tools for -comments)
 // resolve from the module cache without mutating the user's go.mod/go.sum.
-func runGenerate(goMod string, helperSrc []byte, inWork bool) ([]byte, error) {
+func runGenerate(goMod string, cfg config, importPath string, inWork bool) ([]byte, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return nil, fmt.Errorf("resolve working directory: %w", err)
@@ -260,9 +262,18 @@ func runGenerate(goMod string, helperSrc []byte, inWork bool) ([]byte, error) {
 	}
 	defer os.RemoveAll(tempDir)
 
+	schemaPath := filepath.Join(tempDir, "schema.json")
+
+	var helper bytes.Buffer
+
+	err = renderMainGo(&helper, cfg, importPath, schemaPath)
+	if err != nil {
+		return nil, fmt.Errorf("render helper: %w", err)
+	}
+
 	backing := filepath.Join(tempDir, "main.go")
 
-	err = os.WriteFile(backing, helperSrc, 0o644)
+	err = os.WriteFile(backing, helper.Bytes(), 0o644)
 	if err != nil {
 		return nil, fmt.Errorf("write helper: %w", err)
 	}
@@ -307,7 +318,18 @@ func runGenerate(goMod string, helperSrc []byte, inWork bool) ([]byte, error) {
 		return nil, generateError(err)
 	}
 
-	return out, nil
+	// Anything on the helper's stdout is init-time noise from the target
+	// package or its dependencies, never schema data; surface it on stderr.
+	if len(out) > 0 {
+		fmt.Fprintf(os.Stderr, "%s", out)
+	}
+
+	schema, err := os.ReadFile(schemaPath)
+	if err != nil {
+		return nil, fmt.Errorf("read generated schema: %w", err)
+	}
+
+	return schema, nil
 }
 
 // writeOverlay writes a go build overlay mapping the virtual helper file to its
@@ -442,8 +464,12 @@ func main() {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}
-	os.Stdout.Write(data)
-	os.Stdout.Write([]byte("\n"))
+	data = append(data, '\n')
+	err = os.WriteFile({{.OutputLiteral}}, data, 0o600)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		os.Exit(1)
+	}
 }
 `))
 
@@ -451,13 +477,18 @@ type templateData struct {
 	ImportPath           string
 	TypeName             string
 	IndentLiteral        string
+	OutputLiteral        string
 	Draft7               bool
 	Comments             bool
 	AdditionalProperties bool
 	Validate             bool
 }
 
-func renderMainGo(w io.Writer, cfg config, importPath string) error {
+// renderMainGo renders the helper program. The schema lands at outPath, a
+// tool-owned file in the temp dir interpolated as a quoted Go string literal
+// (like the indent), so the helper's stdout stays free for init-time noise from
+// the target package's dependency graph.
+func renderMainGo(w io.Writer, cfg config, importPath, outPath string) error {
 	// Guard against injection: the type name and import path are interpolated
 	// into a Go source template.
 	if !token.IsIdentifier(cfg.TypeName) {
@@ -486,6 +517,7 @@ func renderMainGo(w io.Writer, cfg config, importPath string) error {
 		AdditionalProperties: cfg.AdditionalProperties,
 		Validate:             cfg.Validate,
 		IndentLiteral:        fmt.Sprintf("%q", cfg.Indent),
+		OutputLiteral:        fmt.Sprintf("%q", outPath),
 	}
 
 	return mainGoTmpl.Execute(w, data)
