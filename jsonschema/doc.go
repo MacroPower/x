@@ -624,7 +624,10 @@
 //     of the very type a schema was generated for validates in one call,
 //     with json tags, omitempty and omitzero, and MarshalJSON
 //     implementations all applying exactly as a JSON consumer of the value
-//     would see them.
+//     would see them. A non-pointer value is marshaled through a pointer to
+//     a copy, so pointer-receiver MarshalJSON/MarshalText implementations
+//     (big.Int's, for example) apply as they would for &v, and a value
+//     instance validates identically to a pointer instance.
 //
 // A compiled Validator also reports what it validates: [Validator.Schema]
 // returns the root schema it was compiled for (read-only; recompile after

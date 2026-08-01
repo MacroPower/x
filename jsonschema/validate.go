@@ -9,6 +9,7 @@ import (
 	"maps"
 	"math/big"
 	"net/url"
+	"reflect"
 	"regexp"
 	"slices"
 	"strconv"
@@ -1677,7 +1678,12 @@ func (c *Validator) ValidateJSON(ctx context.Context, data []byte) error {
 // instance of the very type a schema was generated for validates in one
 // call. What is validated is the value's marshaled form, exactly what a JSON
 // consumer of the value would see: json tags, omitempty and omitzero, and
-// MarshalJSON implementations all apply. The bytes are decoded back with the
+// MarshalJSON implementations all apply. A non-pointer v is marshaled
+// through a pointer to a copy, so pointer-receiver MarshalJSON and
+// MarshalText implementations (big.Int's, for example) apply exactly as
+// they would for &v -- generation resolves marshalers through the type's
+// full method set, and ValidateValue(ctx, v) and ValidateValue(ctx, &v)
+// validate the same JSON form. The bytes are decoded back with the
 // [Validator.ValidateJSON] discipline (numbers as [json.Number]).
 //
 // Returns nil on success or an error that can be unwrapped to
@@ -1689,12 +1695,34 @@ func (c *Validator) ValidateJSON(ctx context.Context, data []byte) error {
 // The context is passed to the [RefResolver] for remote refs reached during
 // this validation run (see [Validator.Validate]).
 func (c *Validator) ValidateValue(ctx context.Context, v any) error {
-	data, err := json.Marshal(v)
+	data, err := json.Marshal(addressableInstance(v))
 	if err != nil {
 		return fmt.Errorf("marshal instance: %w", err)
 	}
 
 	return c.ValidateJSON(ctx, data)
+}
+
+// addressableInstance returns v, or a pointer to a copy of v when v is not
+// already a pointer. A value arrives in the interface non-addressable, and
+// encoding/json only uses a pointer-receiver MarshalJSON/MarshalText on an
+// addressable value, so marshaling v directly would fall back to struct
+// reflection for a type like [big.Int] held by value -- a shape generation
+// never describes, since it resolves marshalers through the type's full
+// method set. Marshaling through a pointer makes the copy (and every field
+// under it) addressable, so the pointer-receiver methods apply as they do
+// for &v; encoding/json dereferences the added pointer, leaving the output
+// otherwise unchanged.
+func addressableInstance(v any) any {
+	rv := reflect.ValueOf(v)
+	if !rv.IsValid() || rv.Kind() == reflect.Pointer {
+		return v
+	}
+
+	p := reflect.New(rv.Type())
+	p.Elem().Set(rv)
+
+	return p.Interface()
 }
 
 // Validate validates a pre-parsed Go value against a JSON Schema. It compiles
