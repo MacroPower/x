@@ -491,3 +491,96 @@ func TestConstraintsInterpreterOrderIndependent(t *testing.T) {
 	assert.InDelta(t, 10, *forward.Minimum, 0)
 	assert.InDelta(t, 100, *forward.Maximum, 0)
 }
+
+// reservedNotString carries a type-level not through WithTypeSchemaFor in
+// TestConstraintsForbidComposesTypeNot.
+type reservedNotString string
+
+// TestConstraintsForbidComposesTypeNot pins that a field-level forbid composes
+// with a type-derived not instead of replacing it. The overlay used to
+// blind-assign the canvas not over the type's own, so a field-level Forbid let
+// the type-forbidden value validate on a non-nullable field while the nullable
+// split kept both -- the same tag accepted "reserved" or not depending on
+// pointer-ness.
+func TestConstraintsForbidComposesTypeNot(t *testing.T) {
+	t.Parallel()
+
+	reserved := any("reserved")
+	typeSchema := func() jsonschema.GenerateOption {
+		return jsonschema.WithTypeSchemaFor[reservedNotString](jsonschema.TypeSchema{
+			Value: &jsonschema.Schema{
+				Type: "string",
+				Not:  &jsonschema.Schema{Const: &reserved},
+			},
+		})
+	}
+
+	t.Run("forbid value folds into the type not", func(t *testing.T) {
+		t.Parallel()
+
+		type doc struct {
+			Plain reservedNotString  `forbid:"x" json:"plain"`
+			Ptr   *reservedNotString `forbid:"x" json:"ptr"`
+		}
+
+		interp := boundInterp(func(c *jsonschema.Constraints) error {
+			c.Forbid("x")
+
+			return nil
+		})
+
+		s, err := jsonschema.GenerateFor[doc](t.Context(),
+			jsonschema.WithTagInterpreter("forbid", interp), typeSchema())
+		require.NoError(t, err)
+
+		plain := s.Properties["plain"]
+		require.NotNil(t, plain)
+		require.NotNil(t, plain.Not, "the type not survives the field forbid")
+		assert.Equal(t, []any{"reserved", "x"}, plain.Not.Enum,
+			"the field forbid folds into the type not's escalation")
+
+		for _, instance := range []map[string]any{
+			{"plain": "ok", "ptr": "ok"},
+			{"plain": "ok", "ptr": nil},
+		} {
+			require.NoError(t, jsonschema.Validate(t.Context(), s, instance),
+				"instance %v must satisfy both forbids on both occurrences", instance)
+		}
+
+		for _, instance := range []map[string]any{
+			{"plain": "reserved", "ptr": "ok"},
+			{"plain": "ok", "ptr": "reserved"},
+			{"plain": "x", "ptr": "ok"},
+			{"plain": "ok", "ptr": "x"},
+		} {
+			require.Error(t, jsonschema.Validate(t.Context(), s, instance),
+				"instance %v must fail: the type not and the field forbid both hold", instance)
+		}
+	})
+
+	t.Run("forbid schema conjoins under allOf", func(t *testing.T) {
+		t.Parallel()
+
+		type doc struct {
+			Plain reservedNotString `forbid:"x" json:"plain"`
+		}
+
+		three := 3
+		interp := boundInterp(func(c *jsonschema.Constraints) error {
+			c.ForbidSchema(&jsonschema.Schema{MinLength: &three})
+
+			return nil
+		})
+
+		s, err := jsonschema.GenerateFor[doc](t.Context(),
+			jsonschema.WithTagInterpreter("forbid", interp), typeSchema())
+		require.NoError(t, err)
+
+		require.NoError(t, jsonschema.Validate(t.Context(), s, map[string]any{"plain": "ab"}),
+			"a value neither forbid matches validates")
+		require.Error(t, jsonschema.Validate(t.Context(), s, map[string]any{"plain": "reserved"}),
+			"the type not still holds beside the forbidden schema")
+		require.Error(t, jsonschema.Validate(t.Context(), s, map[string]any{"plain": "abc"}),
+			"the forbidden schema still holds beside the type not")
+	})
+}

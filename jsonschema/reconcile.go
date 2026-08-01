@@ -283,6 +283,23 @@ func overlayAuthored(merged, canvas, base *Schema) {
 	if len(canvas.AllOf) > 0 {
 		merged.AllOf = append(slices.Clone(base.AllOf), canvas.AllOf...)
 	}
+
+	// A canvas not composes with a type-derived not rather than replacing it:
+	// the generic overlay above blind-assigned the canvas value over the type's
+	// own forbid, which would loosen the type constraint (a field-level forbid
+	// letting a type-forbidden value validate, while the nullable split keeps
+	// both, so pointer-ness flipped the semantics). The shared escalation folds
+	// a bare const/enum forbid into the type's not and moves anything else under
+	// allOf, so both always hold, for every writer (the facade, an interpreter
+	// authoring the canvas not directly).
+	if canvas.Not != nil && base.Not != nil && canvas.Not != base.Not {
+		not, conjuncts := constraint.ConjoinNot(base.Not, canvas.Not)
+		merged.Not = not
+
+		if len(conjuncts) > 0 {
+			merged.AllOf = append(slices.Clone(merged.AllOf), conjuncts...)
+		}
+	}
 }
 
 // splitFieldKeywords moves each authored wrapper-scoped keyword off value onto a

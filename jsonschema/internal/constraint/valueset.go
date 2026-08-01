@@ -92,6 +92,35 @@ func (vs ValueSet) WriteForbidden(s *jsonschema.Schema) {
 	}
 }
 
+// ConjoinNot composes an authored not with a type-derived one so both hold: a
+// bare const or enum forbid folds into the type's not through the shared
+// not.const -> not.enum -> allOf escalation, and any other authored not moves
+// under allOf beside the type's. The type not is copied before mutation, so
+// the pristine payload it came from never changes. It returns the composed not
+// (nil when the escalation moved everything under allOf) and the allOf
+// conjuncts to append.
+func ConjoinNot(typeNot, authored *jsonschema.Schema) (*jsonschema.Schema, []*jsonschema.Schema) {
+	seed := *typeNot
+	seed.Enum = slices.Clone(seed.Enum)
+
+	vs := ValueSet{not: &seed}
+
+	switch {
+	case authored.Const != nil && constrainsConstOnly(authored):
+		vs.Forbid(*authored.Const)
+
+	case authored.Enum != nil && constrainsEnumOnly(authored):
+		for _, v := range authored.Enum {
+			vs.Forbid(v)
+		}
+
+	default:
+		vs.ForbidSchema(authored)
+	}
+
+	return vs.not, vs.allOfNots
+}
+
 // constrainsConstOnly reports whether s constrains nothing beyond its Const, so
 // an accumulated not may promote it to an enum. Annotations ride along.
 func constrainsConstOnly(s *jsonschema.Schema) bool {

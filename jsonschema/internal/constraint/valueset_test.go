@@ -142,3 +142,49 @@ func TestValueSetSeedNotWriteForbiddenPreservesOtherAllOf(t *testing.T) {
 	require.NotNil(t, s.AllOf[2].Not.Const)
 	assert.Equal(t, 9, *s.AllOf[2].Not.Const)
 }
+
+func TestConjoinNot(t *testing.T) {
+	t.Parallel()
+
+	t.Run("const forbid folds into the type not", func(t *testing.T) {
+		t.Parallel()
+
+		typeNot := &jsonschema.Schema{Const: new(any("reserved"))}
+
+		not, conjuncts := constraint.ConjoinNot(typeNot, &jsonschema.Schema{Const: new(any("x"))})
+
+		require.NotNil(t, not)
+		assert.Equal(t, []any{"reserved", "x"}, not.Enum)
+		assert.Empty(t, conjuncts)
+		assert.NotNil(t, typeNot.Const, "the type not is copied, never mutated")
+		assert.Nil(t, typeNot.Enum, "the type not is copied, never mutated")
+	})
+
+	t.Run("enum forbid folds member by member", func(t *testing.T) {
+		t.Parallel()
+
+		typeNot := &jsonschema.Schema{Enum: []any{"a", "b"}}
+
+		not, conjuncts := constraint.ConjoinNot(typeNot, &jsonschema.Schema{Enum: []any{"b", "c"}})
+
+		require.NotNil(t, not)
+		assert.Equal(t, []any{"a", "b", "c"}, not.Enum, "members dedup through the escalation")
+		assert.Empty(t, conjuncts)
+		assert.Equal(t, []any{"a", "b"}, typeNot.Enum, "the type not is copied, never mutated")
+	})
+
+	t.Run("sibling-carrying forbid moves under allOf", func(t *testing.T) {
+		t.Parallel()
+
+		typeNot := &jsonschema.Schema{Const: new(any("reserved"))}
+		authored := &jsonschema.Schema{MinLength: new(3)}
+
+		not, conjuncts := constraint.ConjoinNot(typeNot, authored)
+
+		assert.Nil(t, not, "both nots move under allOf")
+		require.Len(t, conjuncts, 2)
+		require.NotNil(t, conjuncts[0].Not)
+		assert.Equal(t, "reserved", *conjuncts[0].Not.Const)
+		assert.Same(t, authored, conjuncts[1].Not)
+	})
+}
