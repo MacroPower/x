@@ -625,7 +625,11 @@ the single 2^53 policy), string length (`AddLengthBound`), container counts
 `const`/`enum`/forbidden values, without naming the internal model. The bound
 methods are intersect-only: each writes back only when it tightens the effective
 bound, so a bound never loosens a stronger one and a widening bound is a no-op. A
-conflict surfaces the exported `ErrConstraintConflict` sentinel.
+conflict surfaces the exported `ErrConstraintConflict` sentinel, checked against
+the canvas and an inline type-derived value; a `const`/`enum` living in a
+`$defs`-referenced definition is not visible to the check and instead composes
+conjunctively beside the `$ref` (an `enum` intersects and only tightens, a
+disagreeing `const` composes to a faithfully unsatisfiable schema).
 
 To constrain the elements of a sequence or
 map field, an interpreter walks the element contexts `FieldContext.ElementContexts`

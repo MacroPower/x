@@ -237,10 +237,15 @@ func (c *Constraints) Enum() ([]any, bool) {
 // SetConst pins the field's const, reporting [ErrConstraintConflict] rather than
 // overwriting a const already pinned to a different (numeric-aware) value --
 // whether a previous rule pinned it on the canvas or the field's type supplies
-// it on the base, where reconcile overlays the canvas const and a disagreeing
-// type-pinned value would otherwise be silently overwritten. An interpreter that
-// needs its own conflict wording checks [Constraints.Const] first; this call is
-// the shared backstop.
+// it on an inline base, where reconcile overlays the canvas const and a
+// disagreeing type-pinned value would otherwise be silently overwritten. For a
+// $defs-extracted type the base is the field's provisional {$ref} payload, so a
+// const the referenced definition pins is not visible here and no conflict is
+// reported; nothing is overwritten either -- the canvas const rides beside the
+// $ref and both apply conjunctively, so disagreeing values compose to a
+// faithfully unsatisfiable schema rather than aborting generation. An
+// interpreter that needs its own conflict wording checks [Constraints.Const]
+// first; this call is the shared backstop for the overlay path.
 func (c *Constraints) SetConst(value any) error {
 	if c.canvas.Const != nil && !constraint.ValuesEqual(*c.canvas.Const, value) {
 		return fmt.Errorf("%w: a different const is already set", ErrConstraintConflict)
@@ -257,10 +262,13 @@ func (c *Constraints) SetConst(value any) error {
 }
 
 // SetEnum sets the field's enum, reporting [ErrConstraintConflict] when an enum
-// is already set -- on the canvas by a previous rule, or on the type-derived
-// base, which reconcile would silently overwrite with the canvas value -- so two
-// enumerations cannot shadow one another. An interpreter that needs its own
-// wording checks [Constraints.Enum] first.
+// is already set -- on the canvas by a previous rule, or on an inline
+// type-derived base, which reconcile would silently overwrite with the canvas
+// value -- so two enumerations cannot shadow one another. For a $defs-extracted
+// type the definition's enum is not visible on the base (the provisional {$ref}
+// payload) and no conflict is reported; the canvas enum rides beside the $ref
+// and the conjunction intersects the two sets, which only tightens. An
+// interpreter that needs its own wording checks [Constraints.Enum] first.
 func (c *Constraints) SetEnum(values []any) error {
 	if c.canvas.Enum != nil {
 		return fmt.Errorf("%w: an enum is already set", ErrConstraintConflict)

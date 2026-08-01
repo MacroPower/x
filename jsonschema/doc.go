@@ -581,7 +581,13 @@
 // shape at the field's type, an interpreter that declares a const or enum
 // disagreeing with one already on that shape's value branch reports the
 // conflict rather than silently overwriting it, comparing against the
-// type-derived schema before it writes.
+// type-derived schema before it writes. That conflict check covers the inline
+// case, where the overlay would otherwise lose the type's value; for a
+// $defs-extracted type the const or enum lives in the referenced definition,
+// not on the field's own payload, so no conflict is reported there -- the
+// canvas value rides beside the $ref and the two compose conjunctively (an
+// enum intersects and only tightens; a disagreeing const composes to a
+// faithfully unsatisfiable schema rather than aborting generation).
 //
 // # Validation
 //
