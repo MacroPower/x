@@ -55,37 +55,47 @@ func ResolveURI(base, ref string) string {
 	// spelling its splitting depends on.
 	if baseURL.Opaque != "" && refURL.Scheme == "" && refURL.Opaque == "" &&
 		refURL.Host == "" && refURL.Path != "" {
-		resolved := url.URL{
-			Scheme:      baseURL.Scheme,
-			RawQuery:    refURL.RawQuery,
-			ForceQuery:  refURL.ForceQuery,
-			Fragment:    refURL.Fragment,
-			RawFragment: refURL.RawFragment,
-		}
+		return resolveOpaqueRef(baseURL, refURL)
+	}
 
-		if strings.HasPrefix(refURL.Path, "/") {
-			// A rooted path skips the merge and replaces the base path, with
-			// the same remove_dot_segments step 5.2.2 prescribes. RawPath keeps
-			// the still-encoded spelling String() must emit, mirroring the
-			// encoded-form discipline of the merge branch.
-			escaped := removeDotSegments(refURL.EscapedPath())
+	return baseURL.ResolveReference(refURL).String()
+}
 
-			resolved.RawPath = escaped
-			resolved.OmitHost = true
+// resolveOpaqueRef resolves a relative non-fragment ref against an opaque
+// base: a rooted ref path replaces the base path outright per RFC 3986
+// section 5.2.2, anything else merges into the opaque part.
+func resolveOpaqueRef(baseURL, refURL *url.URL) string {
+	resolved := url.URL{
+		Scheme:      baseURL.Scheme,
+		RawQuery:    refURL.RawQuery,
+		ForceQuery:  refURL.ForceQuery,
+		Fragment:    refURL.Fragment,
+		RawFragment: refURL.RawFragment,
+	}
 
-			if decoded, derr := url.PathUnescape(escaped); derr == nil {
-				resolved.Path = decoded
-			} else {
-				resolved.Path = escaped
-			}
-		} else {
-			resolved.Opaque = mergeOpaquePath(baseURL.Opaque, refURL.EscapedPath())
-		}
+	if !strings.HasPrefix(refURL.Path, "/") {
+		resolved.Opaque = mergeOpaquePath(baseURL.Opaque, refURL.EscapedPath())
 
 		return resolved.String()
 	}
 
-	return baseURL.ResolveReference(refURL).String()
+	// A rooted path skips the merge and replaces the base path, with the same
+	// remove_dot_segments step 5.2.2 prescribes. RawPath keeps the
+	// still-encoded spelling String() must emit, mirroring the encoded-form
+	// discipline of the merge branch.
+	escaped := removeDotSegments(refURL.EscapedPath())
+
+	resolved.RawPath = escaped
+	resolved.OmitHost = true
+
+	decoded, err := url.PathUnescape(escaped)
+	if err != nil {
+		decoded = escaped
+	}
+
+	resolved.Path = decoded
+
+	return resolved.String()
 }
 
 // mergeOpaquePath merges a relative path ref into an opaque URI part using the
