@@ -480,7 +480,20 @@ func applySequenceOneOf(field jsonschema.FieldContext, value string, baseType re
 			et = et.Elem()
 		}
 
-		err := applyOneOf(elem, value, et)
+		// A string-coerced element (a string-marshaling numeric or bool type,
+		// whose schema is a string) compares against its serialized form,
+		// exactly as the dive path routes through applyValidator's coerced
+		// dispatch. Dispatching on the raw element kind would stamp a numeric
+		// or bool enum onto the string element schema that no instance the
+		// field serializes can ever match.
+		var err error
+
+		if isStringCoercedValue(elem.Base, et) {
+			err = applyCoercedOneOf(elem, value, et)
+		} else {
+			err = applyOneOf(elem, value, et)
+		}
+
 		if err != nil {
 			return err
 		}
