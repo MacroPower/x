@@ -236,7 +236,9 @@
 // A provider declared only in an interface's method set is not consulted, since
 // an interface value cannot be instantiated to call it; such an interface
 // produces the unrestricted schema ({}), extracted to $defs like any other
-// provider-implementing named type.
+// provider-implementing named type. An extender declared in an interface's
+// method set is likewise not consulted: the interface's reflected
+// unrestricted schema stands unextended.
 // Both methods return an error, which aborts generation, for an
 // implementation that cannot produce or adjust its schema; a panic is still
 // recovered and wrapped with [ErrProviderPanic] as a backstop.

@@ -1754,13 +1754,20 @@ func callProvider(ctx context.Context, tc TypeContext) (ts TypeSchema, err error
 	return res, nil
 }
 
-// callExtender calls JSONSchemaExtend on a zero value of the type. As with
-// [callProvider], the method runs against a zero value, so a panic (for example
-// dereferencing a nil pointer field) is recovered and returned as an error
-// wrapping [ErrProviderPanic]. An error the method itself returns is wrapped
-// with the type and method so it locates the failing extender.
+// callExtender calls JSONSchemaExtend on a zero value of the type. For
+// interface types it returns nil without calling anything, since a nil
+// interface cannot be called (reflect panics on a nil interface's Method);
+// the reflected schema stands unextended, matching [callProvider]'s handling
+// of an interface declaring JSONSchema. As with [callProvider], the method
+// runs against a zero value, so a panic (for example dereferencing a nil
+// pointer field) is recovered and returned as an error wrapping
+// [ErrProviderPanic]. An error the method itself returns is wrapped with the
+// type and method so it locates the failing extender.
 func callExtender(ctx context.Context, tc TypeContext, ts *TypeSchema) (err error) {
 	t := tc.Type
+	if t.Kind() == reflect.Interface {
+		return nil
+	}
 
 	defer func() {
 		if r := recover(); r != nil {
