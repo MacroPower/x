@@ -78,3 +78,38 @@ func TestValidateURNDotSegmentRef(t *testing.T) {
 	assert.NotContains(t, verr.Error(), "cannot resolve")
 	assert.Contains(t, verr.Error(), `expected "integer"`)
 }
+
+// TestValidateURNRootedRef exercises RFC 3986 5.2.2 for a rooted reference
+// path against an opaque URN base: a path beginning with "/" replaces the base
+// path outright rather than merging with it, so the $ref targets the key the
+// absolute $id spelling registers under (urn:/c, not urn:example:a//c).
+func TestValidateURNRootedRef(t *testing.T) {
+	t.Parallel()
+
+	doc := stringtest.Input(`
+		{
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"$id": "urn:example:a/b",
+			"$defs": {"A": {"$id": "urn:/c", "type": "integer"}},
+			"$ref": "/c"
+		}
+	`)
+
+	var schema jsonschema.Schema
+
+	require.NoError(t, json.Unmarshal([]byte(doc), &schema))
+
+	compiled, err := jsonschema.Compile(t.Context(), &schema)
+	require.NoError(t, err)
+
+	require.NoError(t, compiled.Validate(t.Context(), 5))
+
+	err = compiled.Validate(t.Context(), "not an integer")
+	require.Error(t, err)
+
+	var verr *jsonschema.ValidationError
+
+	require.ErrorAs(t, err, &verr)
+	assert.NotContains(t, verr.Error(), "cannot resolve")
+	assert.Contains(t, verr.Error(), `expected "integer"`)
+}

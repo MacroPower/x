@@ -31,6 +31,28 @@ func TestResolveURI(t *testing.T) {
 			ref:  "#/$defs/foo",
 			want: "urn:example:root#/$defs/foo",
 		},
+		// RFC 3986 section 5.2.2: a reference path beginning with "/" replaces
+		// the base path outright instead of merging with it.
+		"opaque urn rooted ref replaces path": {
+			base: "urn:example:a/b",
+			ref:  "/c",
+			want: "urn:/c",
+		},
+		"opaque urn rooted ref keeps fragment": {
+			base: "urn:example:root",
+			ref:  "/c#frag",
+			want: "urn:/c#frag",
+		},
+		"opaque urn rooted dot-segmented ref": {
+			base: "urn:example:a/b",
+			ref:  "/x/../c",
+			want: "urn:/c",
+		},
+		"opaque urn rooted encoded ref keeps encoding": {
+			base: "urn:example:root",
+			ref:  "/sub%2Fx",
+			want: "urn:/sub%2Fx",
+		},
 		"empty base returns ref": {
 			base: "",
 			ref:  "sub",
@@ -96,6 +118,21 @@ func TestResolveURIOpaqueSymmetry(t *testing.T) {
 	assert.Equal(t, registered, resolved)
 	assert.Equal(t, "urn:example:sub", resolved)
 	assert.NotEqual(t, "urn:sub", resolved)
+}
+
+// TestResolveURIRootedRefOpaqueSymmetry asserts the same symmetry for a rooted
+// ref path: per RFC 3986 section 5.2.2 a path beginning with "/" replaces the
+// base path, so the result must match the key the absolute spelling registers
+// under (urn:/c) rather than a merged form like urn:example:a//c or the bogus
+// authority form urn:///c that ResolveReference produces.
+func TestResolveURIRootedRefOpaqueSymmetry(t *testing.T) {
+	t.Parallel()
+
+	registered := uriref.ResolveURI("", "urn:/c")
+	resolved := uriref.ResolveURI("urn:example:a/b", "/c")
+
+	assert.Equal(t, registered, resolved)
+	assert.Equal(t, "urn:/c", resolved)
 }
 
 func TestRawFragment(t *testing.T) {

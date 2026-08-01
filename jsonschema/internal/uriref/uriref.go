@@ -40,7 +40,10 @@ func ResolveURI(base, ref string) string {
 	// urn:example:foo): a relative, non-fragment ref against it collapses to a
 	// bogus authority form like "urn:///bar". An opaque URI has no hierarchical
 	// path to merge, so resolve a relative non-fragment ref by applying the RFC
-	// 3986 path-merge to the opaque part. Registration and lookup share this
+	// 3986 path-merge to the opaque part; a rooted ref path replaces the base
+	// path outright per RFC 3986 section 5.2.2, spelled with OmitHost so the
+	// result matches what url.Parse yields for the same absolute URI written
+	// directly (urn:/c, not urn:///c). Registration and lookup share this
 	// function, so the result stays symmetric. Absolute and fragment-only refs
 	// resolve correctly through ResolveReference.
 	// The merge operates on the encoded path form: url.URL.Opaque is emitted
@@ -54,11 +57,29 @@ func ResolveURI(base, ref string) string {
 		refURL.Host == "" && refURL.Path != "" {
 		resolved := url.URL{
 			Scheme:      baseURL.Scheme,
-			Opaque:      mergeOpaquePath(baseURL.Opaque, refURL.EscapedPath()),
 			RawQuery:    refURL.RawQuery,
 			ForceQuery:  refURL.ForceQuery,
 			Fragment:    refURL.Fragment,
 			RawFragment: refURL.RawFragment,
+		}
+
+		if strings.HasPrefix(refURL.Path, "/") {
+			// A rooted path skips the merge and replaces the base path, with
+			// the same remove_dot_segments step 5.2.2 prescribes. RawPath keeps
+			// the still-encoded spelling String() must emit, mirroring the
+			// encoded-form discipline of the merge branch.
+			escaped := removeDotSegments(refURL.EscapedPath())
+
+			resolved.RawPath = escaped
+			resolved.OmitHost = true
+
+			if decoded, derr := url.PathUnescape(escaped); derr == nil {
+				resolved.Path = decoded
+			} else {
+				resolved.Path = escaped
+			}
+		} else {
+			resolved.Opaque = mergeOpaquePath(baseURL.Opaque, refURL.EscapedPath())
 		}
 
 		return resolved.String()
