@@ -159,7 +159,7 @@ func TestRegexVectors(t *testing.T) {
 		"quantifier braces":      {"a{2,3}", true},
 		"unbalanced parenthesis": {"(", false},
 		"unterminated class":     {"[", false},
-		"empty class":            {"[]", false},
+		"empty class":            {"[]", true},
 		"trailing backslash":     {`\`, false},
 	})
 }

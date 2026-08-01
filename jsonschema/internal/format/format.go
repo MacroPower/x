@@ -891,12 +891,6 @@ func validateRegex(s string) error {
 
 	inClass := false
 
-	// Track the byte index where a ']' could first close a class: just past the
-	// opening '[' and past a leading '^'. ECMA 262 and RE2 both treat a ']' in
-	// that position as a literal class member, so the class is not yet
-	// terminable; tracking it rejects the empty class "[]" (and "[^]") that a
-	// naive close-on-first-']' scan accepts.
-	classStart := 0
 	for i := 0; i < len(s); {
 		c := s[i]
 		switch {
@@ -917,19 +911,20 @@ func validateRegex(s string) error {
 			continue
 
 		case inClass:
-			// A leading '^' is a negation, not a member, so the next ']' stays
-			// a literal; a ']' only terminates once a member has been seen.
-			// Only the '^' immediately after the opening '[' negates: a later
-			// '^' is an ordinary member (so "[^^]" is a complete class).
-			if c == '^' && i == classStart && s[i-1] == '[' {
-				classStart++
-			} else if c == ']' && i > classStart {
+			// The first unescaped ']' terminates the class. ECMA 262 22.2.1
+			// permits an empty ClassContents, so "[]" (matches nothing) and
+			// "[^]" (matches any character) are valid, and an unescaped ']' is
+			// never a class member (ClassAtomNoDash excludes it; a literal ']'
+			// must be escaped). "[]]" is therefore an empty class followed by a
+			// literal ']', which Annex B permits outside a class. A leading '^'
+			// needs no special casing: it negates, and the class it negates may
+			// be empty.
+			if c == ']' {
 				inClass = false
 			}
 
 		case c == '[':
 			inClass = true
-			classStart = i + 1
 
 		case c == '(':
 			depth++

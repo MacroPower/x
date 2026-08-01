@@ -63,11 +63,13 @@ func TestRegexFormatAcceptsECMA262Constructs(t *testing.T) {
 	}
 }
 
-// TestRegexFormatRejectsEmptyCharacterClass covers the empty character class:
-// a ']' immediately after '[' (or after a leading '^') is a literal class
-// member in both ECMA 262 and RE2, so the class is unterminated. A class with
-// a real member, including a literal ']' as that member, stays valid.
-func TestRegexFormatRejectsEmptyCharacterClass(t *testing.T) {
+// TestRegexFormatAcceptsEmptyCharacterClass covers the empty character class:
+// ECMA 262 22.2.1 defines CharacterClass as '[' [lookahead != ^] ClassContents
+// ']' where ClassContents may be empty, so "[]" (matches nothing) and "[^]"
+// (matches any character, a common idiom) are valid patterns. An unescaped ']'
+// is never a class member, so "[]]" is an empty class followed by a literal
+// ']'. A genuinely unterminated class stays invalid.
+func TestRegexFormatAcceptsEmptyCharacterClass(t *testing.T) {
 	t.Parallel()
 
 	validate := validator(t, "regex")
@@ -76,16 +78,18 @@ func TestRegexFormatRejectsEmptyCharacterClass(t *testing.T) {
 		instance string
 		valid    bool
 	}{
-		"empty class is invalid":             {instance: "[]", valid: false},
-		"negated empty class is invalid":     {instance: "[^]", valid: false},
-		"empty class mid-pattern is invalid": {instance: "a[]b", valid: false},
-		"class with literal ] is valid":      {instance: "[]]", valid: true},
-		"class with a member is valid":       {instance: "[a]", valid: true},
-		"negated class with member is valid": {instance: "[^a]", valid: true},
-		"class with escaped ] is valid":      {instance: `[\]]`, valid: true},
-		"negated class of caret is valid":    {instance: "[^^]", valid: true},
-		"negated class of carets is valid":   {instance: "[^^^]", valid: true},
-		"negated class then ] is valid":      {instance: "[^^]]", valid: true},
+		"empty class is valid":                  {instance: "[]", valid: true},
+		"negated empty class is valid":          {instance: "[^]", valid: true},
+		"empty class mid-pattern is valid":      {instance: "a[]b", valid: true},
+		"empty class then literal ] is valid":   {instance: "[]]", valid: true},
+		"class with a member is valid":          {instance: "[a]", valid: true},
+		"negated class with member is valid":    {instance: "[^a]", valid: true},
+		"class with escaped ] is valid":         {instance: `[\]]`, valid: true},
+		"negated class of caret is valid":       {instance: "[^^]", valid: true},
+		"negated class of carets is valid":      {instance: "[^^^]", valid: true},
+		"negated class then ] is valid":         {instance: "[^^]]", valid: true},
+		"unterminated class is invalid":         {instance: "[a", valid: false},
+		"unterminated negated class is invalid": {instance: "[^", valid: false},
 	}
 
 	for name, tc := range tests {
