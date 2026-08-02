@@ -19,6 +19,23 @@ const (
 	SizeFold
 )
 
+// KeywordPolicy is how a dialect's string keyword (format, pattern, content)
+// composes with a value already in force. The package's documented precedence
+// is jsonschema tag over type over interpreter, which is two behaviors, so it is
+// a parameter rather than a choice the model makes for everyone.
+type KeywordPolicy uint8
+
+const (
+	// KeywordReplace lets the value replace whatever is in force. It is the
+	// jsonschema tag's rule: the tag names the keyword outright, so an author
+	// writing pattern= means that pattern and not the type's.
+	KeywordReplace KeywordPolicy = iota
+	// KeywordFirstWins keeps a value already in force. It is a tag
+	// interpreter's rule: an interpreter infers a keyword from a validator
+	// rather than naming it, so it never overrides what was stated outright.
+	KeywordFirstWins
+)
+
 // Policy carries the divergences that are properly dialect-specific, so they
 // are named parameters of one implementation rather than grounds for two.
 type Policy struct {
@@ -31,6 +48,8 @@ type Policy struct {
 	BoundKind reflect.Kind
 	// Sizes is how a length or count literal reads.
 	Sizes SizePolicy
+	// Keywords is how a string keyword composes with one already in force.
+	Keywords KeywordPolicy
 	// AllowNullScalar admits the literal "null" as the JSON null value on a
 	// nullable shape. The jsonschema tag spells null that way; the validate tag
 	// has no null literal, so there "null" is the four-character string.

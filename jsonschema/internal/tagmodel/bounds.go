@@ -33,25 +33,32 @@ func coalesce[T any](canvas, base *T) *T {
 	return base
 }
 
-// tightenBound writes n into *field when it tightens the effective bound: a
-// higher value for a floor, a lower one for a ceiling. A widening or equal value
-// is a no-op, so bounds intersect and never loosen.
+// tightenBound writes n into *field unless it would loosen the effective bound:
+// a floor may only rise and a ceiling may only fall, so bounds intersect
+// regardless of the order the rules appeared in.
+//
+// A bound equal to the effective one is written rather than skipped, because
+// writing it is what records that the value was authored. Provenance is not
+// bookkeeping here: an enum drops the kind-derived bounds and keeps the authored
+// ones, so minimum=0 on a uint8 must survive an enum even though the kind floor
+// is already 0. Skipping the equal write would misfile it as kind-derived and
+// drop it.
 func tightenBound(field **float64, eff *float64, n float64, ceiling bool) {
-	if eff == nil || (ceiling && n < *eff) || (!ceiling && n > *eff) {
+	if eff == nil || (ceiling && n <= *eff) || (!ceiling && n >= *eff) {
 		*field = &n
 	}
 }
 
-// raiseFloor writes n into *field when it tightens the effective lower bound.
+// raiseFloor writes n into *field unless it would lower the effective floor.
 func raiseFloor(field **int, eff *int, n int) {
-	if eff == nil || n > *eff {
+	if eff == nil || n >= *eff {
 		*field = &n
 	}
 }
 
-// lowerCeiling writes n into *field when it tightens the effective upper bound.
+// lowerCeiling writes n into *field unless it would raise the effective ceiling.
 func lowerCeiling(field **int, eff *int, n int) {
-	if eff == nil || n < *eff {
+	if eff == nil || n <= *eff {
 		*field = &n
 	}
 }

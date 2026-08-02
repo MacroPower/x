@@ -53,6 +53,7 @@ func TestMatrixGolden(t *testing.T) {
 		|content encoding / object -> reject: content encoding is not supported on a object
 		|content encoding / opaque value -> reject: content encoding is not supported on a opaque value
 		|content encoding / raw byte slice -> reject: content encoding is not supported on a raw byte slice
+		|content encoding / referenced definition -> apply
 		|content encoding / string -> apply
 		|content encoding / string-coerced boolean -> apply
 		|content encoding / string-coerced number -> apply
@@ -64,6 +65,7 @@ func TestMatrixGolden(t *testing.T) {
 		|content media type / object -> reject: content media type is not supported on a object
 		|content media type / opaque value -> reject: content media type is not supported on a opaque value
 		|content media type / raw byte slice -> reject: content media type is not supported on a raw byte slice
+		|content media type / referenced definition -> apply
 		|content media type / string -> apply
 		|content media type / string-coerced boolean -> apply
 		|content media type / string-coerced number -> apply
@@ -75,6 +77,7 @@ func TestMatrixGolden(t *testing.T) {
 		|divisor / object -> reject: divisor is not supported on a object
 		|divisor / opaque value -> reject: divisor is not supported on a opaque value
 		|divisor / raw byte slice -> reject: divisor is not supported on a raw byte slice
+		|divisor / referenced definition -> apply
 		|divisor / string -> reject: divisor is not supported on a string
 		|divisor / string-coerced boolean -> reject: divisor is not supported on a string-coerced boolean
 		|divisor / string-coerced number -> reject: divisor is not supported on a string-coerced number
@@ -86,6 +89,7 @@ func TestMatrixGolden(t *testing.T) {
 		|element uniqueness / object -> ignore: unique on a map asserts distinct values, which no object keyword expresses
 		|element uniqueness / opaque value -> reject: unique has no array to constrain on a opaque value
 		|element uniqueness / raw byte slice -> reject: unique has no array to constrain on a raw byte slice
+		|element uniqueness / referenced definition -> reject: unique has no array to constrain on a referenced definition
 		|element uniqueness / string -> reject: unique has no array to constrain on a string
 		|element uniqueness / string-coerced boolean -> reject: unique has no array to constrain on a string-coerced boolean
 		|element uniqueness / string-coerced number -> reject: unique has no array to constrain on a string-coerced number
@@ -97,6 +101,7 @@ func TestMatrixGolden(t *testing.T) {
 		|enumerated values / object -> reject: an enumeration on a map has no element meaning (use dive to constrain the values)
 		|enumerated values / opaque value -> reject: enumerated values is not supported on a opaque value
 		|enumerated values / raw byte slice -> reject: a raw byte slice has no item schema to constrain
+		|enumerated values / referenced definition -> reject: enumerated values is not supported on a referenced definition
 		|enumerated values / string -> apply
 		|enumerated values / string-coerced boolean -> apply
 		|enumerated values / string-coerced number -> apply
@@ -108,6 +113,7 @@ func TestMatrixGolden(t *testing.T) {
 		|exact size / object -> apply
 		|exact size / opaque value -> reject: exact size is not supported on a opaque value
 		|exact size / raw byte slice -> reject: exact size is not supported on a raw byte slice
+		|exact size / referenced definition -> apply
 		|exact size / string -> apply
 		|exact size / string-coerced boolean -> reject: exact size is not supported on a string-coerced boolean
 		|exact size / string-coerced number -> apply
@@ -119,6 +125,7 @@ func TestMatrixGolden(t *testing.T) {
 		|exclusive ceiling / object -> apply
 		|exclusive ceiling / opaque value -> reject: exclusive ceiling is not supported on a opaque value
 		|exclusive ceiling / raw byte slice -> reject: exclusive ceiling is not supported on a raw byte slice
+		|exclusive ceiling / referenced definition -> apply
 		|exclusive ceiling / string -> apply
 		|exclusive ceiling / string-coerced boolean -> reject: a bound is not supported on a json:",string" coerced numeric field (minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)
 		|exclusive ceiling / string-coerced number -> reject: a bound is not supported on a json:",string" coerced numeric field (minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)
@@ -130,6 +137,7 @@ func TestMatrixGolden(t *testing.T) {
 		|exclusive floor / object -> apply
 		|exclusive floor / opaque value -> reject: exclusive floor is not supported on a opaque value
 		|exclusive floor / raw byte slice -> reject: exclusive floor is not supported on a raw byte slice
+		|exclusive floor / referenced definition -> apply
 		|exclusive floor / string -> apply
 		|exclusive floor / string-coerced boolean -> reject: a bound is not supported on a json:",string" coerced numeric field (minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)
 		|exclusive floor / string-coerced number -> reject: a bound is not supported on a json:",string" coerced numeric field (minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)
@@ -141,6 +149,7 @@ func TestMatrixGolden(t *testing.T) {
 		|forbidden size / object -> apply
 		|forbidden size / opaque value -> reject: forbidden size is not supported on a opaque value
 		|forbidden size / raw byte slice -> reject: forbidden size is not supported on a raw byte slice
+		|forbidden size / referenced definition -> reject: forbidden size is not supported on a referenced definition
 		|forbidden size / string -> reject: forbidden size is not supported on a string
 		|forbidden size / string-coerced boolean -> reject: forbidden size is not supported on a string-coerced boolean
 		|forbidden size / string-coerced number -> reject: forbidden size is not supported on a string-coerced number
@@ -152,6 +161,7 @@ func TestMatrixGolden(t *testing.T) {
 		|forbidden value / object -> reject: forbidden value is not supported on a object
 		|forbidden value / opaque value -> reject: forbidden value is not supported on a opaque value
 		|forbidden value / raw byte slice -> reject: forbidden value is not supported on a raw byte slice
+		|forbidden value / referenced definition -> reject: forbidden value is not supported on a referenced definition
 		|forbidden value / string -> apply
 		|forbidden value / string-coerced boolean -> apply
 		|forbidden value / string-coerced number -> apply
@@ -163,6 +173,7 @@ func TestMatrixGolden(t *testing.T) {
 		|format / object -> reject: format is not supported on a object
 		|format / opaque value -> reject: format is not supported on a opaque value
 		|format / raw byte slice -> reject: format is not supported on a raw byte slice
+		|format / referenced definition -> apply
 		|format / string -> apply
 		|format / string-coerced boolean -> apply
 		|format / string-coerced number -> apply
@@ -174,6 +185,7 @@ func TestMatrixGolden(t *testing.T) {
 		|inclusive ceiling / object -> apply
 		|inclusive ceiling / opaque value -> reject: inclusive ceiling is not supported on a opaque value
 		|inclusive ceiling / raw byte slice -> reject: inclusive ceiling is not supported on a raw byte slice
+		|inclusive ceiling / referenced definition -> apply
 		|inclusive ceiling / string -> apply
 		|inclusive ceiling / string-coerced boolean -> reject: a bound is not supported on a json:",string" coerced numeric field (minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)
 		|inclusive ceiling / string-coerced number -> reject: a bound is not supported on a json:",string" coerced numeric field (minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)
@@ -185,6 +197,7 @@ func TestMatrixGolden(t *testing.T) {
 		|inclusive floor / object -> apply
 		|inclusive floor / opaque value -> reject: inclusive floor is not supported on a opaque value
 		|inclusive floor / raw byte slice -> reject: inclusive floor is not supported on a raw byte slice
+		|inclusive floor / referenced definition -> apply
 		|inclusive floor / string -> apply
 		|inclusive floor / string-coerced boolean -> reject: a bound is not supported on a json:",string" coerced numeric field (minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)
 		|inclusive floor / string-coerced number -> reject: a bound is not supported on a json:",string" coerced numeric field (minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)
@@ -196,6 +209,7 @@ func TestMatrixGolden(t *testing.T) {
 		|non-zero assertion / object -> apply
 		|non-zero assertion / opaque value -> ignore: an opaque value has no schema-expressible zero
 		|non-zero assertion / raw byte slice -> ignore: an unconstrained raw JSON value has no faithful non-zero form
+		|non-zero assertion / referenced definition -> ignore: a referenced definition's zero is not readable here; only the parent's required entry applies
 		|non-zero assertion / string -> apply
 		|non-zero assertion / string-coerced boolean -> apply
 		|non-zero assertion / string-coerced number -> apply
@@ -207,6 +221,7 @@ func TestMatrixGolden(t *testing.T) {
 		|pattern / object -> reject: pattern is not supported on a object
 		|pattern / opaque value -> reject: pattern is not supported on a opaque value
 		|pattern / raw byte slice -> reject: pattern is not supported on a raw byte slice
+		|pattern / referenced definition -> apply
 		|pattern / string -> apply
 		|pattern / string-coerced boolean -> apply
 		|pattern / string-coerced number -> apply
@@ -218,6 +233,7 @@ func TestMatrixGolden(t *testing.T) {
 		|pinned value / object -> reject: pinned value is not supported on a object
 		|pinned value / opaque value -> reject: pinned value is not supported on a opaque value
 		|pinned value / raw byte slice -> reject: pinned value is not supported on a raw byte slice
+		|pinned value / referenced definition -> reject: pinned value is not supported on a referenced definition
 		|pinned value / string -> apply
 		|pinned value / string-coerced boolean -> apply
 		|pinned value / string-coerced number -> apply

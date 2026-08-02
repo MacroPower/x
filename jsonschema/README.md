@@ -416,10 +416,19 @@ Supported keys include `type`, `description`, `title`, `default`, `examples`,
 `exclusiveMaximum`, `multipleOf`, `minLength`, `maxLength`, `pattern`, `format`,
 `minItems`, `maxItems`, `uniqueItems`, `minProperties`, `maxProperties`, `enum`,
 and `const`. Values for `default`, `const`, `enum`, and `examples` are parsed
-according to the field's Go type. `enum` and `examples` values are separated by
-`|`; commas separate pairs, so a value containing a comma escapes it with a
-backslash (`\,`, and `\\` for a literal backslash). For complex values, use
-`JSONSchemaExtender` or doc comments with `WithDescriptionProvider`.
+against the field's schema _shape_ -- the JSON shape its instance actually
+takes -- rather than against its Go kind alone. The two agree for an ordinary
+field and diverge wherever the field serializes itself as something else: a
+`json:",string"` numeric or bool field, and equally a type that marshals itself
+as text, has a string schema, so its scalars parse at the real Go kind (keeping
+the range check, so `const=200` on an `int8` is an error) and are then
+re-serialized to the text the field emits. A `MarshalText` int whose value `3`
+writes as `"L3"` therefore gets `const=3` as `{"const":"L3"}` rather than the
+unsatisfiable `{"type":"string","const":3}`, and `default=3` likewise. `enum`
+and `examples` values are separated by `|`; commas separate pairs, so a value
+containing a comma escapes it with a backslash (`\,`, and `\\` for a literal
+backslash). For complex values, use `JSONSchemaExtender` or doc comments with
+`WithDescriptionProvider`.
 
 `type=` overrides the reflected type entirely, for a Go type whose JSON
 representation differs from its reflection: it must name one of the seven
@@ -450,13 +459,31 @@ schemas (next paragraph) keys on the scalar-parse type, which an override
 replaces.
 
 On a slice or array field, `enum` constrains each element rather than the
-array value: the values parse against the element type and land on the item
-schemas, so `Days []string` with `enum=monday|tuesday` produces
-`{"items":{"type":"string","enum":["monday","tuesday"]}}`. Nested sequences
-(`[][]T`) descend to the innermost element schema. `const`, `default`, and
-`examples` remain whole-value constraints and are still errors on sequence
-fields, as is `enum` on `[]byte` (which encodes as a base64 string with no
-item schema).
+array value: the values land on the item schemas, where each element parses
+against its own shape, so `Days []string` with `enum=monday|tuesday` produces
+`{"items":{"type":"string","enum":["monday","tuesday"]}}` and a coerced or
+text-marshaling element gets the same treatment a coerced field does. Nested
+sequences (`[][]T`) descend to the innermost element schema. `const`, `default`,
+and `examples` remain whole-value constraints and are still errors on sequence
+fields, as is `enum` on `[]byte` (which encodes as a base64 string with no item
+schema). This is the same element path a `validate` dive or sequence-wide
+`oneof` takes, so the two dialects cannot disagree about what an element is.
+
+A keyword the field's shape cannot carry is an error rather than an inert
+keyword nothing enforces: `minItems=3` on a string, or any numeric bound on a
+`json:",string"` coerced field, whose instance is a quoted string that `minimum`
+cannot constrain. The shape is read from the field's schema, not only its Go
+kind, so a field whose type supplies a verbatim or overridden schema is judged by
+what that schema declares.
+
+A repeated bound key intersects rather than overwriting: `minimum=5,minimum=3`
+keeps `5`, matching how bounds from every other source compose. A second `const`
+or `enum`, or one disagreeing with a value the field's type already pins, is
+`ErrConstraintConflict`: both fully describe the allowed value, so neither can
+silently win. `format` and `pattern` replace what the field's type declared (the
+tag names the keyword outright, unlike a tag interpreter, which defers to both),
+but naming either twice in one tag is an error, since there no precedence
+applies and dropping one of two stated values would be silent.
 
 A `const` or `enum` makes the kind-derived numeric bounds (an `int8`'s
 `minimum`/`maximum`, for instance) redundant, so they are dropped. A `const`

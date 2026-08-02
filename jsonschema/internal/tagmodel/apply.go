@@ -288,21 +288,20 @@ func applyMultipleOf(t Target, r Rule, _ Policy) error {
 	return nil
 }
 
-// applyStringKeyword sets one of the string keywords, first-wins: a value
-// already in force stands, whether the field's type supplied it or an earlier
-// rule authored it.
+// applyStringKeyword sets one of the string keywords under the dialect's
+// composition rule ([Policy.Keywords]).
 //
-// Unlike a const, two patterns are not contradictory -- they are two constraints
-// the package resolves by a documented precedence, under which an explicit
-// jsonschema struct tag wins over an interpreter and the type wins over both. So
-// this reports nothing. What is a mistake is one tag naming the same keyword
-// twice, where there is no precedence to appeal to and dropping either value
-// would be silent; that is a repeated key in one tag, which the front-end owning
-// that grammar detects and reports.
-func applyStringKeyword(t Target, r Rule, _ Policy) error {
+// Unlike a const, two patterns are not contradictory: they are two constraints
+// the package resolves by a documented precedence, under which a jsonschema tag
+// replaces what the type declared and an interpreter defers to both. So this
+// reports nothing either way. What is a mistake is one tag naming the same
+// keyword twice, where there is no precedence to appeal to and dropping either
+// value would be silent; that is a repeated key in one tag, which the front-end
+// owning that grammar detects.
+func applyStringKeyword(t Target, r Rule, pol Policy) error {
 	slot, typeValue := stringKeywordSlots(t, r.Op)
 
-	if *slot != "" || typeValue != "" {
+	if pol.Keywords == KeywordFirstWins && (*slot != "" || typeValue != "") {
 		return nil
 	}
 

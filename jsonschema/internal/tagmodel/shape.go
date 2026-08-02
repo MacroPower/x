@@ -55,6 +55,14 @@ const (
 	// [json.RawMessage], whose unconstrained schema admits any JSON value at all,
 	// so it has neither an array to size nor a string to measure.
 	FormRawBytes
+	// FormRef is a payload that is a bare reference to a definition, over a Go
+	// kind that reveals nothing either. The instance shape is whatever the
+	// definition declares, which is not readable here, so a keyword a dialect
+	// names outright is emitted as a $ref sibling and the definition decides
+	// whether it means anything. It is the one deliberately permissive column,
+	// and it is permissive only for the rules that name a keyword: a rule that
+	// would have to infer one, or read a value at a Go kind, still reports.
+	FormRef
 	// FormOpaque is every remaining shape -- a struct, interface, channel, or
 	// function -- whose instance the tag vocabulary cannot describe.
 	FormOpaque
@@ -76,6 +84,7 @@ var formNames = [formCount]string{
 	FormTextString:    "text-marshaled string",
 	FormByteString:    "base64 byte string",
 	FormRawBytes:      "raw byte slice",
+	FormRef:           "referenced definition",
 	FormOpaque:        "opaque value",
 }
 
@@ -205,6 +214,10 @@ func classifyForm(t reflect.Type, base *jsonschema.Schema) Form {
 			return FormNumber
 		case schemaDeclares(base, typename.Boolean):
 			return FormBool
+		case base != nil && base.Ref != "":
+			// The payload defers to a definition and the Go kind said nothing,
+			// so neither source knows what the instance is.
+			return FormRef
 		default:
 			return FormOpaque
 		}

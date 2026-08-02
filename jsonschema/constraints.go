@@ -138,7 +138,11 @@ const (
 // which names JSON Schema keywords directly, runs under the opposite settings;
 // both are the same implementation with different parameters.
 func interpreterPolicy(kind reflect.Kind) tagmodel.Policy {
-	return tagmodel.Policy{BoundKind: kind, Sizes: tagmodel.SizeFold}
+	return tagmodel.Policy{
+		BoundKind: kind,
+		Sizes:     tagmodel.SizeFold,
+		Keywords:  tagmodel.KeywordFirstWins,
+	}
 }
 
 // Apply contributes one constraint in the shared model's vocabulary: the

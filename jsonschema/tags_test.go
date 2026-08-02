@@ -62,18 +62,22 @@ func TestSplitTagPairsCommasInValues(t *testing.T) {
 	t.Parallel()
 
 	// A comma separates tag segments: description=Hello World,minimum=1 yields
-	// the description "Hello World".
+	// the description "Hello World" and a separate minimum. The field is numeric
+	// so the second segment is a keyword the shape can actually carry; a
+	// minimum on a string would be rejected rather than parsed and ignored.
 	type MyType struct {
-		Name string `json:"name" jsonschema:"description=Hello World,minimum=1"`
+		Count int `json:"count" jsonschema:"description=Hello World,minimum=1"`
 	}
 
 	s, err := jsonschema.GenerateFor[MyType](t.Context())
 	require.NoError(t, err)
 
-	prop := s.Properties["name"]
+	prop := s.Properties["count"]
 	require.NotNil(t, prop)
 
 	assert.Equal(t, "Hello World", prop.Description)
+	require.NotNil(t, prop.Minimum)
+	assert.InDelta(t, 1.0, *prop.Minimum, 0)
 }
 
 func TestBareDescriptionWithEqualsSign(t *testing.T) {

@@ -66,6 +66,11 @@ var (
 		FormRawBytes:      AxisAuto,
 		FormOpaque:        AxisAuto,
 		FormUnset:         AxisAuto,
+		// A referenced definition has no natural axis either: a rule-shaped
+		// bound would have to guess which family the definition declares, and
+		// guessing is what this column exists not to do. A named keyword still
+		// applies, per formCarriesAxis below.
+		FormRef: AxisAuto,
 	}
 
 	// The formCarriesAxis table reports whether a form's schema has a keyword family at
@@ -80,6 +85,9 @@ var (
 		FormObject:     {AxisProperties: true},
 		FormTextString: {AxisLength: true},
 		FormByteString: {AxisLength: true},
+		// Every family, because the definition may declare any of them and this
+		// dialect named the keyword outright.
+		FormRef: {AxisNumeric: true, AxisLength: true, AxisItems: true, AxisProperties: true},
 	}
 )
 
@@ -133,7 +141,9 @@ func init() {
 // the shared bound applier; resolveAxis has already rejected the pairs whose
 // axis does not exist, so a cell reached here has a family to write.
 func fillBounds() {
-	bounded := []Form{FormString, FormNumber, FormArray, FormObject, FormTextString, FormByteString}
+	bounded := []Form{
+		FormString, FormNumber, FormArray, FormObject, FormTextString, FormByteString, FormRef,
+	}
 
 	for _, op := range []Op{OpFloorIncl, OpFloorExcl, OpCeilIncl, OpCeilExcl} {
 		for _, f := range bounded {
@@ -222,6 +232,7 @@ func fillValues() {
 		"unique on a map asserts distinct values, which no object keyword expresses")
 
 	apply(OpMultipleOf, FormNumber, applyMultipleOf)
+	apply(OpMultipleOf, FormRef, applyMultipleOf)
 }
 
 // fillNonZero fills the non-zero row, whose shape depends entirely on what
@@ -248,13 +259,17 @@ func fillNonZero() {
 	// A text-marshaled or opaque value has no emptiness the schema can name.
 	ignore(OpNonZero, FormTextString, "a text-marshaled value has no schema-expressible zero")
 	ignore(OpNonZero, FormOpaque, "an opaque value has no schema-expressible zero")
+	ignore(OpNonZero, FormRef,
+		"a referenced definition's zero is not readable here; only the parent's required entry applies")
 }
 
 // fillStringKeywords fills the four first-wins string-keyword rows, which apply
 // wherever the instance is a string.
 func fillStringKeywords() {
 	for _, op := range []Op{OpFormat, OpPattern, OpContentEncoding, OpContentMediaType} {
-		for _, f := range []Form{FormString, FormTextString, FormByteString, FormCoercedNumber, FormCoercedBool} {
+		for _, f := range []Form{
+			FormString, FormTextString, FormByteString, FormCoercedNumber, FormCoercedBool, FormRef,
+		} {
 			apply(op, f, applyStringKeyword)
 		}
 	}

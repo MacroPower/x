@@ -474,9 +474,17 @@
 // than silently discarded. This holds regardless of whether the keyword
 // appears before or after the type= pair.
 //
-// Values for default, const, enum, and examples are parsed using type-aware
-// parsing based on the field's Go type. Enum and examples values are
-// separated by "|". Unrecognized keys are a parse error. A value containing a
+// Values for default, const, enum, and examples parse against the field's
+// schema *shape* -- the JSON shape its instance actually takes -- rather than
+// against its Go kind alone. The two agree for an ordinary field and diverge
+// wherever the field serializes itself as something else: a json:",string"
+// numeric or bool field, and equally a type that marshals itself as text, has a
+// string schema, so its scalars are parsed at the real Go kind (keeping the
+// range check, so const=200 on an int8 is an error) and then re-serialized to
+// the text the field emits. A MarshalText int whose value 3 writes as "L3"
+// therefore gets const=3 as {"const":"L3"}, not the unsatisfiable
+// {"type":"string","const":3}, and default=3 likewise. Enum and examples values
+// are separated by "|". Unrecognized keys are a parse error. A value containing a
 // comma escapes it with a backslash (a literal backslash is "\\"), so
 // jsonschema:"description=Hello\, World" sets the description "Hello, World";
 // enum and examples values cannot contain "|" (used as value separator). For
@@ -503,11 +511,30 @@
 // replaces with a non-sequence stand-in.
 //
 // On a slice or array field, enum constrains each element rather than the
-// array value: the values parse against the element type and land on the item
-// schemas. Nested sequences descend to the innermost element schema. Const,
-// default, and examples remain whole-value constraints and are still errors
-// on sequence fields, as is enum on []byte (a base64 string with no item
-// schema).
+// array value: the values land on the item schemas, where each element parses
+// against its own shape, so a coerced or text-marshaling element gets the same
+// treatment a coerced field does. Nested sequences descend to the innermost
+// element schema. Const, default, and examples remain whole-value constraints
+// and are still errors on sequence fields, as is enum on []byte (a base64
+// string with no item schema). This is the same element path a validate dive or
+// sequence-wide oneof takes, so the two dialects cannot disagree about what an
+// element is.
+//
+// A keyword the field's shape cannot carry is an error rather than an inert
+// keyword nothing enforces: minItems=3 on a string, or any numeric bound on a
+// json:",string" coerced field, whose instance is a quoted string that minimum
+// cannot constrain. The shape is read from the field's schema, not only its Go
+// kind, so a field whose type supplies a verbatim or overridden schema is judged
+// by what that schema declares.
+//
+// A repeated bound key intersects rather than overwriting: minimum=5,minimum=3
+// keeps 5, matching how bounds from every other source compose. A second const
+// or enum, or one disagreeing with a value the field's type already pins, is
+// [ErrConstraintConflict]: both fully describe the allowed value, so neither can
+// silently win. Format and pattern replace what the field's type declared (the
+// tag names the keyword outright, unlike a tag interpreter, which defers to
+// both), but naming either twice in one tag is an error, since there no
+// precedence applies and dropping one of two stated values would be silent.
 //
 // A const or enum makes the kind-derived numeric bounds (an int8's
 // minimum/maximum, for instance) redundant, so they are dropped. This
