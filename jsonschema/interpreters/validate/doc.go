@@ -123,7 +123,9 @@
 //   - unique: uniqueItems: true. The unique=<field> form asserts uniqueness of
 //     one named field across struct elements, which uniqueItems (whole-element
 //     comparison) cannot express, so it is an error rather than being silently
-//     weakened.
+//     weakened. On a shape with no array to constrain -- a string, number,
+//     bool, or struct -- unique is likewise an error; a map is the one
+//     exception, documented under the map constraints below.
 //   - oneof=a b c: enum on the item schemas, parsed against the element type
 //     (each element must be one of the values; [][]T descends to the innermost
 //     element schema). A []byte field has no item schema (it encodes as a
@@ -138,6 +140,10 @@
 //   - lt=N: maxProperties: N-1
 //   - eq=N: minProperties and maxProperties (entry count equals N)
 //   - ne=N: not (forbids entry count N)
+//   - unique: a documented no-op. Unlike the shapes where unique is rejected,
+//     go-playground's unique-on-map does mean something -- the map's values must
+//     be distinct -- but JSON Schema has no object-side counterpart to
+//     uniqueItems, so there is nothing faithful to emit.
 //
 // Format tags (mapped to "format"):
 //

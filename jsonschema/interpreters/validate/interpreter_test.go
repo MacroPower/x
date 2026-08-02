@@ -1601,25 +1601,62 @@ func TestOneOfEmptyValueErrors(t *testing.T) {
 		"oneof= with no values produces an error")
 }
 
-func TestUniqueOnNonCollectionLeavesUniqueItemsUnset(t *testing.T) {
+func TestUniqueOnNonCollectionIsRejected(t *testing.T) {
 	t.Parallel()
 
-	// UniqueItems is only meaningful for arrays, so unique on a string field
-	// leaves it unset.
-	type MyType struct {
-		Name string `json:"name" validate:"unique"`
+	// UniqueItems is array-only, and unique carries no go-playground meaning on
+	// a scalar either, so the tag has nothing to constrain. Rejecting it
+	// surfaces the mistake instead of emitting a schema that quietly ignores the
+	// author's stated intent.
+	for name, tc := range map[string]struct {
+		build func() (*jsonschema.Schema, error)
+		kind  string
+	}{
+		"string": {kind: "string", build: func() (*jsonschema.Schema, error) {
+			type MyType struct {
+				Name string `json:"name" validate:"unique"`
+			}
+
+			return jsonschema.GenerateFor[MyType](t.Context(),
+				jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()))
+		}},
+		"number": {kind: "int", build: func() (*jsonschema.Schema, error) {
+			type MyType struct {
+				Count int `json:"count" validate:"unique"`
+			}
+
+			return jsonschema.GenerateFor[MyType](t.Context(),
+				jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()))
+		}},
+		"bool": {kind: "bool", build: func() (*jsonschema.Schema, error) {
+			type MyType struct {
+				On bool `json:"on" validate:"unique"`
+			}
+
+			return jsonschema.GenerateFor[MyType](t.Context(),
+				jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()))
+		}},
+		"struct": {kind: "struct", build: func() (*jsonschema.Schema, error) {
+			type Inner struct {
+				A string `json:"a"`
+			}
+
+			type MyType struct {
+				In Inner `json:"in" validate:"unique"`
+			}
+
+			return jsonschema.GenerateFor[MyType](t.Context(),
+				jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()))
+		}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := tc.build()
+			require.Error(t, err, "unique on a shape with no array must be rejected")
+			assert.Contains(t, err.Error(), "unique has no array to constrain on type "+tc.kind)
+		})
 	}
-
-	s, err := jsonschema.GenerateFor[MyType](t.Context(),
-		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
-	)
-	require.NoError(t, err)
-
-	prop := s.Properties["name"]
-	require.NotNil(t, prop)
-
-	assert.False(t, prop.UniqueItems,
-		"uniqueItems is not set on non-collection types")
 }
 
 func TestEqOnCollectionProducesLengthBounds(t *testing.T) {

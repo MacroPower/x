@@ -694,8 +694,11 @@ Supported tags (summary):
   `minItems`/`maxItems` or `minProperties`/`maxProperties` for collections.
 - **Enumerations:** `oneof` maps to `enum` for strings, numbers, and bools.
 - **Collections:** `unique` -> `uniqueItems` (the `unique=<field>` form has no
-  JSON Schema equivalent and is an error); `dive` descends into element or
-  value schemas.
+  JSON Schema equivalent and is an error, as is `unique` on a shape with no
+  array to constrain -- a string, number, bool, or struct; a map is the one
+  exception and stays a documented no-op, since its go-playground meaning
+  "distinct values" is real but has no object-side keyword); `dive` descends
+  into element or value schemas.
 - **Formats:** `email`, `url`, `uri`, `uuid`, `ipv4`, `ipv6`, `hostname` ->
   `format`.
 - **Patterns:** `alpha`, `alphanum`, `numeric`, `number`, `ascii` -> `pattern`.

@@ -235,12 +235,23 @@ func applyValidator(key, value string, field jsonschema.FieldContext) error {
 			return errByteSliceLengthConstraint
 		}
 
-		// UniqueItems is only meaningful for array/slice types. Maps are
-		// excluded: JSON Schema's uniqueItems is array-only, and
-		// go-playground/validator's unique-on-map checks unique values, which
-		// has no object-schema equivalent. So unique on a map is a no-op.
-		if isSequenceKind(baseType) {
+		// UniqueItems is array-only, so only a slice or array shape can carry
+		// it. A map is the documented exception: go-playground's unique-on-map
+		// checks that the map's *values* are distinct, a real constraint with no
+		// object-schema equivalent, so it stays a no-op rather than becoming an
+		// error on a tag that means something. Every other shape -- a string,
+		// number, bool, or struct -- has no array to constrain and no
+		// go-playground meaning either, so the tag is rejected rather than
+		// silently dropped, matching the package policy on unrepresentable
+		// constraints.
+		switch {
+		case isSequenceKind(baseType):
 			field.Canvas.UniqueItems = true
+		case isMapKind(baseType):
+		default:
+			return fmt.Errorf(
+				"validate tag: unique has no array to constrain on type %s (uniqueItems applies to arrays)",
+				baseType.Kind())
 		}
 
 	default:
