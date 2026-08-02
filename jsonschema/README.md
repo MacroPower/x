@@ -502,10 +502,12 @@ used for such an embedded type must leave the object
 open (no `additionalProperties: false`), since `allOf` evaluates each branch
 against the whole object: a closed branch rejects the parent's sibling
 properties and the generated schema then rejects the struct's own marshaled
-JSON. Embedded non-struct types, interfaces included, are regular leaf fields
-keyed by the field name, exactly as `encoding/json` records them: the key is
-always emitted (`null` for a nil interface), so an intercepted interface
-schema admits `null` alongside.
+JSON. Under `allOf` composition, `Draft2020` puts `unevaluatedProperties: false`
+on the parent in place of `additionalProperties: false`, while `Draft7` omits
+`additionalProperties: false` from the parent altogether. Embedded non-struct
+types, interfaces included, are regular leaf fields keyed by the field name,
+exactly as `encoding/json` records them: the key is always emitted (`null` for a
+nil interface), so an intercepted interface schema admits `null` alongside.
 
 ### Comment extraction
 
@@ -1360,6 +1362,16 @@ refs.
   spec.
 - **`Validator.ValidateJSON` uses `UseNumber`** to preserve the integer-vs-number
   distinction that default `float64` unmarshaling would lose.
+
+Two points where the generated schema's model of a Go type differs from what
+`encoding/json` emits for that type, each specified in the section that owns it:
+
+- **A direct `encoding/json.Marshaler` is reflected by its Go struct shape**,
+  not its marshaled shape, so the schema can reject output `encoding/json`
+  produces (see [Customization interfaces](#customization-interfaces)).
+- **Draft-07 omits `additionalProperties: false` from the parent under `allOf`
+  composition**, which loosens the schema rather than tightening it, so it
+  cannot reject valid output (see [Struct field rules](#struct-field-rules)).
 
 ### Non-goals
 

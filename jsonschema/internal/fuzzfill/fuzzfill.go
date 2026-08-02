@@ -75,8 +75,10 @@ type Cursor struct {
 	pos  int
 }
 
-// newCursor returns a Cursor reading from data.
-func newCursor(data []byte) *Cursor { return &Cursor{data: data} }
+// NewCursor returns a Cursor reading from data. [Fill] builds one internally;
+// it is exported so a rig can drive the same zero-extending reader over a blob
+// of its own, drawing something other than a value from it.
+func NewCursor(data []byte) *Cursor { return &Cursor{data: data} }
 
 // Byte consumes and returns the next byte, or zero once the blob is exhausted.
 func (c *Cursor) Byte() byte {
@@ -200,7 +202,7 @@ func Fill(rv reflect.Value, data []byte, opts ...Option) {
 		opt(cfg)
 	}
 
-	f := &filler{cfg: cfg, cur: newCursor(data)}
+	f := &filler{cfg: cfg, cur: NewCursor(data)}
 	f.fill(rv.Elem(), 0)
 }
 

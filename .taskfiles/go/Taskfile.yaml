@@ -146,18 +146,18 @@ tasks:
     cmds:
       - go generate {{.GO_PKGS}}
 
-  # fuzz is the "counterexamples generated in CI" mechanism: a nightly job runs
-  # it with a longer FUZZTIME, and any discovered failure is minimized into the
-  # owning package's testdata/fuzz/<FuzzName>/ and committed as a permanent
-  # regression seed. That seed then re-runs as an ordinary subtest under
-  # `task test` on every PR, so it is deliberately NOT wired into check or test:
-  # fuzzing is time-bounded and must not slow the PR gate.
+  # fuzz is the counterexample-search mechanism. No scheduled job runs it; it is
+  # invoked by hand with a longer FUZZTIME, and any discovered failure is
+  # minimized into the owning package's testdata/fuzz/<FuzzName>/ and committed
+  # as a permanent regression seed. That seed then re-runs as an ordinary
+  # subtest under `task test` on every PR, so it is deliberately NOT wired into
+  # check or test: fuzzing is time-bounded and must not slow the PR gate.
   #
   # `go test -fuzz` errors when its regexp matches more than one target or the
   # package pattern resolves to more than one package, so the target list is
   # enumerated and each FuzzXxx is run on its own package, one at a time.
   fuzz:
-    desc: Runs each Go fuzz target for FUZZTIME (nightly counterexample search; not in check/test)
+    desc: Runs each Go fuzz target for FUZZTIME (counterexample search; not in check/test)
     summary: |
       Enumerates every FuzzXxx across the workspace and runs each one
       individually for FUZZTIME, because `go test -fuzz` accepts only a single
@@ -168,7 +168,8 @@ tasks:
       that then re-runs under `task test` on every PR.
 
       Args:
-        FUZZTIME: Duration to run each target (default: 30s; nightly passes longer)
+        FUZZTIME: Duration to run each target (default: 30s; pass longer when
+                  searching for counterexamples)
         FUZZPKGS: Packages to scan (default: every workspace module)
     vars:
       FUZZTIME: '{{.FUZZTIME | default "30s"}}'

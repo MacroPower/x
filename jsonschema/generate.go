@@ -233,7 +233,9 @@ func WithAdditionalProperties(allowed bool) GenerateOption {
 
 // WithNullable controls whether nil-able Go types (slices, maps, pointers,
 // []byte) are made nullable. Default: true. When false, []T -> {"type":"array"},
-// map -> {"type":"object"}, *T -> the bare value schema, no null branch.
+// map -> {"type":"object"}, *T -> the bare value schema, no null branch. A nil
+// field that [encoding/json] marshals to null is then outside the generated
+// schema, so turn it off only where absent values are never serialized as null.
 func WithNullable(allowed bool) GenerateOption {
 	return generateOptionFunc(func(g *generator) { g.nullable = allowed })
 }

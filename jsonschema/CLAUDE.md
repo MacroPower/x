@@ -196,3 +196,37 @@ contract the tests enforce.
 - `conformance_test.go` validates generated schemas against the official
   metaschemas vendored in `testdata/metaschemas/`, using this package's own
   validator and a `RefResolver` for the metaschema's vocabulary sub-schemas.
+- Two differential fuzz rigs close the loop between the package's halves on one
+  property: **the schema generated for a Go type must accept whatever
+  `encoding/json` marshals from a value of that type.** A rejection means
+  `reflect.go`'s hand-reimplementation of `encoding/json`'s field resolution has
+  drifted, which is where past fixes cluster. Both draw their values from
+  `internal/fuzzfill`, which turns a fuzzing entropy blob into a populated value
+  through a deterministic, zero-extending `Cursor`.
+  - `fuzz_reflect_test.go` (rig 1) asserts it over a hand-written roster, one
+    `FuzzReflectAccepts<T>` per type. The roster keeps the classes runtime type
+    construction cannot express, and so stays permanently: a promoted marshaler,
+    an embedded generic instantiation, an embedded interface.
+  - `fuzz_shape_test.go` (rig 2) fuzzes the type shape as well as the value.
+    `internal/fuzzshape` synthesizes a `reflect.Type` from a blob via
+    `reflect.StructOf`, which the non-generic `Generate` entry point takes
+    as-is, so the rig needs no new public API. Its callback takes two blobs so
+    shape and value entropy evolve independently. `FuzzShapeAccepts` and its
+    option variants assert the accept property; `FuzzShapeRejectsNearMiss`
+    asserts the complement, that an instance one property away from the
+    marshaled shape is refused, so an accept-everything schema cannot pass
+    vacuously.
+  - Three causes would make a synthesized shape report a divergence the package
+    is not guilty of: a direct `json.Marshaler` (whose output shape reflection
+    cannot know), `WithNullable(false)` (which drops the null branch by
+    design), and `reflect.StructOf`'s inability to reproduce method promotion.
+    Each has a reason constant carried as the message of a guard that pins the
+    cause down, the same convention `suite_test.go` uses for skips.
+    `reasonUnmodeledMarshaler` lives in `internal/fuzzshape`'s test, beside the
+    guard over drawn shapes that enforces it; `reasonNullableOff` and
+    `reasonStructOfPromotion` live in `fuzz_shape_test.go` with the rig. The
+    `StructOf` limitation is a property of the harness, not of the package, and
+    deliberately does not appear in `doc.go` or `README.md`.
+  - `task go:fuzz` searches for new counterexamples; the seed corpora run on
+    every `go test`. A discovered counterexample is committed under
+    `testdata/fuzz/<Target>/` as a permanent regression seed before the fix.

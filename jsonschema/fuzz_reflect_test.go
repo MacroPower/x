@@ -205,6 +205,112 @@ type bigWrapper struct {
 	Label string   `json:"label"`
 }
 
+// Wrap is an exported generic struct. Embedded as a concrete instantiation
+// with no tag, its fields promote into the outer object like any other struct
+// embed.
+type Wrap[T any] struct {
+	Inner T      `json:"inner"`
+	Note  string `json:"note"`
+}
+
+// Bag is an exported generic map type. Embedded as Bag[string] it stays a leaf
+// property, and the two ways to name that property disagree: its
+// [reflect.StructField.Name] is the bare identifier "Bag" while
+// [reflect.Type.Name] carries the type arguments as "Bag[string]".
+// Encoding/json keys the property by the field name, so a schema keyed by the
+// instantiated type name requires a property no marshaled object ever has.
+type Bag[T any] map[string]T
+
+// embeddedGeneric embeds both generic forms alongside a plain sibling: the
+// struct instantiation whose fields promote, and the map instantiation that
+// remains a leaf keyed by "Bag". Only a hand-written type can express this:
+// [reflect.StructOf] cannot build an embed whose field name would have to be
+// "Wrap[int]", which is not an identifier.
+type embeddedGeneric struct {
+	Wrap[int]
+	Bag[string]
+
+	Extra string `json:"extra"`
+}
+
+// Marker is an exported interface embedded as a leaf. Encoding/json never
+// flattens an embedded interface: it stays a regular property under the field
+// name.
+type Marker interface{ MarkerKind() string }
+
+// dualMarshaler implements json.Marshaler and encoding.TextMarshaler directly.
+// Encoding/json prefers MarshalJSON, so the text form never reaches the output
+// and generation must not claim type: string from MarshalText; it falls
+// through to the int kind, which is what the emitted number satisfies. The
+// type rides along as one field of embeddedInterface rather than carrying its
+// own target, since a target of its own would fuzz a single scalar.
+type dualMarshaler int
+
+func (d dualMarshaler) MarshalJSON() ([]byte, error) {
+	// A bare integer is valid JSON, so this emits it directly and never errors.
+	return strconv.AppendInt(nil, int64(d), 10), nil
+}
+
+func (dualMarshaler) MarshalText() ([]byte, error) { return []byte("dual"), nil }
+
+// embeddedInterface embeds Marker alongside fuzzable siblings. Fuzzfill leaves
+// an interface at its zero value, so the embedded field marshals as
+// null on every run, and the schema must both carry the property under the
+// field name and admit null there or the default additionalProperties: false
+// rejects the object outright.
+type embeddedInterface struct {
+	Marker
+
+	Name string        `json:"name"`
+	Dual dualMarshaler `json:"dual"`
+}
+
+// DeepLeafA and DeepLeafB both promote an untagged "Overlap" two embedding
+// levels below the roster type, so the collision lands at equal depth and
+// encoding/json drops the name entirely. As with AmbiguousLeft and
+// AmbiguousRight, the colliding fields stay untagged: `go vet`'s structtag
+// check namespaces repeated json tags per embedding level, and an untagged
+// field never enters that namespace, so the intended collision goes unflagged.
+type DeepLeafA struct {
+	Overlap string
+	A       string `json:"a"`
+}
+
+// DeepLeafB is DeepLeafA's counterpart; see DeepLeafA.
+type DeepLeafB struct {
+	Overlap string
+	B       string `json:"b"`
+}
+
+// DeepMidA relays DeepLeafA to the ambiguity depth and carries its own
+// "shadowed", one level below the roster type's field of the same name and so
+// the losing side of encoding/json's depth rule.
+type DeepMidA struct {
+	DeepLeafA
+
+	Shadowed string `json:"shadowed"`
+}
+
+// DeepMidB only relays DeepLeafB, supplying the second half of the equal-depth
+// "Overlap" collision.
+type DeepMidB struct {
+	DeepLeafB
+
+	Mid int64 `json:"mid"`
+}
+
+// deepEmbedChain puts both encoding/json resolution rules on one chain two
+// levels deep: the roster type's own "shadowed" wins outright over DeepMidA's
+// deeper one, while "Overlap" collides untagged at equal depth and vanishes
+// from the object. Generation has to reach the same verdicts, since a schema
+// that keeps a dropped name requires a key no instance carries.
+type deepEmbedChain struct {
+	DeepMidA
+	DeepMidB
+
+	Shadowed string `json:"shadowed"`
+}
+
 func FuzzReflectAcceptsPlainStruct(f *testing.F) {
 	fuzzReflectAccepts[plainScalarsContainersPointers](f)
 }
@@ -266,6 +372,18 @@ func FuzzReflectAcceptsRawMessage(f *testing.F) {
 
 func FuzzReflectAcceptsBigInt(f *testing.F) {
 	fuzzReflectAccepts[bigWrapper](f)
+}
+
+func FuzzReflectAcceptsEmbeddedGeneric(f *testing.F) {
+	fuzzReflectAccepts[embeddedGeneric](f)
+}
+
+func FuzzReflectAcceptsEmbeddedInterface(f *testing.F) {
+	fuzzReflectAccepts[embeddedInterface](f)
+}
+
+func FuzzReflectAcceptsDeepEmbedChain(f *testing.F) {
+	fuzzReflectAccepts[deepEmbedChain](f)
 }
 
 // fuzzReflectAccepts is the shared body for every rig-1 target. It generates

@@ -227,6 +227,19 @@
 // whole outer struct and reflecting its fields would describe a shape that
 // never appears in the output.
 //
+// # Deviations from encoding/json
+//
+// Two points where the generated schema's model of a Go type differs from what
+// [encoding/json] emits for that type, each specified in the section that owns
+// it.
+//
+//   - A direct [encoding/json.Marshaler] implementation is reflected by its Go
+//     struct shape, not its marshaled shape, so the schema can reject output
+//     [encoding/json] produces (see Type Resolution Priority, above).
+//   - [Draft7] omits additionalProperties: false from the parent under allOf
+//     composition, which loosens the schema rather than tightening it, so it
+//     cannot reject valid output (see Struct Field Rules, below).
+//
 // # Customization Interfaces
 //
 // Types may implement [JSONSchemaProvider] to supply their own schema entirely,
