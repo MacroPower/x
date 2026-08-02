@@ -1525,7 +1525,8 @@ func (g *generator) buildFieldSchema(
 				err = fmt.Errorf("%w: %w", ErrInvalidType, err)
 			}
 
-			return nil, fmt.Errorf("jsonschema tag: %w", err)
+			// Tagparse errors already carry the "jsonschema tag:" prefix.
+			return nil, err
 		}
 
 		// A type= override replaces the field's type wholesale, so the field is
