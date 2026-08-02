@@ -11,7 +11,6 @@ import (
 
 	"go.jacobcolvin.com/x/jsonschema/internal/constraint"
 	"go.jacobcolvin.com/x/jsonschema/internal/keyword"
-	"go.jacobcolvin.com/x/jsonschema/internal/numkind"
 	"go.jacobcolvin.com/x/jsonschema/internal/tagmodel"
 	"go.jacobcolvin.com/x/jsonschema/internal/typename"
 )
@@ -89,11 +88,12 @@ type Result struct {
 // Pairs apply strictly in order over a mutable shape, because a type= pair
 // rewrites the payload and changes what every later pair means. The scalar keys
 // (default, const, enum, examples) parse their values against the effective
-// scalar type: the field's Go type until a type= pair overrides it, and
-// afterward a stand-in Go type for the overridden JSON type (see
-// [standInTypeFor]), so a scalar key before type= keeps Go-kind parsing while
-// one after it parses as the overridden type. The non-scalar overrides (array,
-// object, null) have no stand-in, so a scalar key following one is an error.
+// shape: the field's own classification until a type= pair overrides it, and
+// afterward the shape the named JSON type takes (see
+// [tagmodel.ShapeForTypeName]), so a scalar key before type= keeps Go-kind
+// parsing while one after it parses as the overridden type. The non-scalar
+// overrides (array, object, null) spell no scalar, so a scalar key following
+// one is an error.
 // TypeSchema is the type-derived schema the tag classifies the field against.
 // It is the payload for an ordinary field, and differs only where the payload
 // alone understates what the instance is: a nullable json:",string" field keeps
@@ -123,8 +123,7 @@ func Apply(
 		canvas:     canvas,
 		payload:    payload,
 		typeSchema: typeSchema,
-		shapeType:  fieldType,
-		scalarOK:   true,
+		fieldType:  fieldType,
 		groupsSet:  map[string]bool{},
 		seen:       map[string]bool{},
 	}
@@ -148,24 +147,25 @@ type applyState struct {
 	// payload except where the payload understates the instance (see [Apply]).
 	// A type= override restates the payload outright, so it replaces this too.
 	typeSchema *jsonschema.Schema
-	// The shapeType field is what every key classifies against: the field's Go
-	// type, or a stand-in for the overridden JSON type after a type= pair.
-	shapeType      reflect.Type
-	groupsSet      map[string]bool
-	seen           map[string]bool
+	// The fieldType field is the field's own Go type, which every key classifies
+	// against until a type= pair replaces the classification outright.
+	fieldType reflect.Type
+	groupsSet map[string]bool
+	seen      map[string]bool
+	// The overriddenType field names the JSON type a type= pair installed, and is
+	// empty until one does.
 	overriddenType string
-	// The scalarOK flag reports whether a scalar key still has a type to parse
-	// against. It goes false after a type= override to array, object, or null,
-	// which have no scalar stand-in, and is the gate that rejects a scalar key
-	// following one.
-	scalarOK bool
+	// The overridden field is the shape that type takes, which displaces the
+	// field's own classification for every later pair. It is meaningful only
+	// while overriddenType names the type it came from.
+	overridden tagmodel.Shape
 }
 
 // apply folds one directive into the state.
 func (s *applyState) apply(d Directive) error {
 	key, value := d.Key, d.Value
 
-	if !s.scalarOK && isScalarValueKey(key) {
+	if !s.scalarOK() && isScalarValueKey(key) {
 		return fmt.Errorf("jsonschema tag: key %q cannot follow type=%s", key, s.overriddenType)
 	}
 
@@ -187,7 +187,7 @@ func (s *applyState) apply(d Directive) error {
 	// names the actual mistake: the author wrote both, and the override is why
 	// the keyword cannot stay.
 	if s.overriddenType != "" {
-		if g := constraintGroup(key); g != "" && g != typeConstraintGroup(s.overriddenType) {
+		if g := constraintGroup(key); g != "" && !keepsGroup(s.overriddenType, g) {
 			return fmt.Errorf("jsonschema tag: %s constraint conflicts with type=%s", g, s.overriddenType)
 		}
 	}
@@ -210,12 +210,18 @@ func (s *applyState) apply(d Directive) error {
 	}
 
 	if key == keyword.Type {
-		s.scalarOK = standInTypeFor(value) != nil
-		s.shapeType = overriddenShapeType(value)
+		s.overridden = tagmodel.ShapeForTypeName(value)
 		s.overriddenType = value
 	}
 
 	return nil
+}
+
+// scalarOK reports whether a scalar key still has something to parse its value
+// against. A type= override to array, object, or null leaves the shape with no
+// scalar kind, and that is the gate rejecting a scalar key that follows one.
+func (s *applyState) scalarOK() bool {
+	return s.overriddenType == "" || s.overridden.Kind != reflect.Invalid
 }
 
 // applyKey routes one key: the annotations this dialect owns outright, the type=
@@ -322,7 +328,7 @@ func (s *applyState) wrapApplyError(key, value string, err error) error {
 func (s *applyState) bind(
 	rule tagmodel.KeyRule, shape tagmodel.Shape, key, value string,
 ) (tagmodel.Rule, error) {
-	if value == "" && key == keyword.Const && s.isStringScalar() {
+	if value == "" && key == keyword.Const && allowsEmptyScalar(shape) {
 		return tagmodel.Rule{Op: rule.Op, Axis: rule.Axis, Params: tagmodel.ParamsOf("")}, nil
 	}
 
@@ -388,13 +394,15 @@ func (s *applyState) applyFlag(key, value string) error {
 // it serializes itself as one gets the text it actually emits rather than the
 // number's own spelling.
 func (s *applyState) applyDefault(key, value string) error {
+	shape := s.shape()
+
 	// An empty value is rejected except on a string field, where "" is the valid
 	// JSON Schema default the empty string.
-	if value == "" && !s.isStringScalar() {
+	if value == "" && !allowsEmptyScalar(shape) {
 		return emptyValueError(key)
 	}
 
-	v, err := s.shape().ParseScalar(value, tagPolicy)
+	v, err := shape.ParseScalar(value, tagPolicy)
 	if err != nil {
 		return fmt.Errorf("jsonschema tag: key %q: %w", key, err)
 	}
@@ -431,11 +439,15 @@ func (s *applyState) applyExamples(key, value string) error {
 	return nil
 }
 
-// shape classifies what the tag is currently constraining, from the effective
-// Go type and the payload as it now stands, so a pair after a type= override
-// sees the overridden shape.
+// shape classifies what the tag is currently constraining: the shape a type=
+// pair installed, which restates the instance outright, or the field's own Go
+// type against the payload as it now stands.
 func (s *applyState) shape() tagmodel.Shape {
-	return tagmodel.ShapeOf(s.shapeType, s.typeSchema)
+	if s.overriddenType != "" {
+		return s.overridden
+	}
+
+	return tagmodel.ShapeOf(s.fieldType, s.typeSchema)
 }
 
 // target builds the write destination for the field, pairing the canvas's
@@ -451,7 +463,10 @@ func (s *applyState) target(shape tagmodel.Shape) tagmodel.Target {
 func newTarget(shape tagmodel.Shape, canvas, payload *jsonschema.Schema) tagmodel.Target {
 	var elems func() []tagmodel.Target
 
-	if shape.Form == tagmodel.FormArray {
+	// A type=array override names a sequence with no Go element type behind it,
+	// so it supplies no element targets and an element rule reports rather than
+	// descending into a shape the tag invented.
+	if shape.Form == tagmodel.FormArray && shape.Elem != nil {
 		elems = func() []tagmodel.Target {
 			canvases := elementSchemas(canvas)
 			payloads := elementSchemas(payload)
@@ -529,9 +544,13 @@ func isScalarValueKey(key string) bool {
 	}
 }
 
-// isStringScalar reports whether the effective type is a string kind. An empty
-// const or default value is meaningful only there, where it expresses the valid
-// JSON Schema value "".
-func (s *applyState) isStringScalar() bool {
-	return s.scalarOK && numkind.DerefType(s.shapeType).Kind() == reflect.String
+// allowsEmptyScalar reports whether an empty tag value names a real value on
+// this shape: the empty string, which is a value only where the instance is a
+// plain string.
+//
+// Reading the classified form rather than the Go kind keeps the exception in
+// step with the form the value is then parsed under. A string-kinded field
+// whose payload declares a number is a number here, and "" is not one of those.
+func allowsEmptyScalar(shape tagmodel.Shape) bool {
+	return shape.Form == tagmodel.FormString
 }

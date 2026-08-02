@@ -122,6 +122,63 @@ type Shape struct {
 	Nullable bool
 }
 
+// FormForTypeName returns the form an instance of the named JSON type takes. It
+// is the classification for a dialect that names the JSON type outright rather
+// than describing a Go value -- the jsonschema tag's type= pair -- and it is
+// where a JSON type name becomes a form, so a name written in a tag and a name
+// [classifyForm] reads off a type-derived schema mean the same thing.
+//
+// The null type names no value a constraint can describe, so it maps to
+// [FormOpaque], whose every operation reports. A name outside the seven JSON
+// Schema types maps to [FormUnset].
+func FormForTypeName(name string) Form {
+	switch name {
+	case typename.String:
+		return FormString
+	case typename.Integer, typename.Number:
+		return FormNumber
+	case typename.Boolean:
+		return FormBool
+	case typename.Array:
+		return FormArray
+	case typename.Object:
+		return FormObject
+	case typename.Null:
+		return FormOpaque
+	default:
+		return FormUnset
+	}
+}
+
+// ShapeForTypeName returns the shape an instance of the named JSON type takes.
+// It is what a dialect installs when its tag restates the type outright: the
+// named type displaces the Go type entirely, so the shape carries the named
+// type's own form and the kind its scalar literals parse at, and it never
+// admits null -- an overridden occurrence is the named type itself, so a null
+// literal has nothing to assign to.
+//
+// The three types a tag cannot spell a scalar for -- array, object, and null --
+// carry [reflect.Invalid] as their kind, which is how a front-end tells that a
+// scalar key following the override has nothing to parse against.
+func ShapeForTypeName(name string) Shape {
+	var kind reflect.Kind
+
+	switch name {
+	case typename.String:
+		kind = reflect.String
+	case typename.Integer:
+		// The widest integer, not a platform int, so a literal above 2^31-1
+		// survives on a 32-bit build.
+		kind = reflect.Int64
+	case typename.Number:
+		kind = reflect.Float64
+	case typename.Boolean:
+		kind = reflect.Bool
+	}
+
+	return Shape{Kind: kind, Form: FormForTypeName(name)}
+}
+
 // ShapeOf classifies a field or element from its Go type and the type-derived
 // base schema. It is the single home of the string-coercion test, the
 // schema-permits-a-string test, the byte-slice test, and every kind predicate
@@ -183,7 +240,7 @@ func classifyForm(t reflect.Type, base *jsonschema.Schema) Form {
 		// A string kind under a number-typed schema is a verbatim or overridden
 		// payload: the instance is a number, so numeric keywords are the ones
 		// that constrain it.
-		if schemaDeclares(base, typename.Integer, typename.Number) {
+		if declaredForm(base) == FormNumber {
 			return FormNumber
 		}
 
@@ -204,21 +261,59 @@ func classifyForm(t reflect.Type, base *jsonschema.Schema) Form {
 		return FormObject
 
 	default:
-		switch {
-		case str:
+		if str {
 			return FormTextString
-		case schemaDeclares(base, typename.Integer, typename.Number):
-			return FormNumber
-		case schemaDeclares(base, typename.Boolean):
-			return FormBool
-		case base != nil && base.Ref != "":
+		}
+
+		// Only the two scalar forms are read off the base here. A declared array
+		// or object would name a container whose elements or values neither
+		// source can classify, which is what [FormOpaque] already says.
+		if f := declaredForm(base); f == FormNumber || f == FormBool {
+			return f
+		}
+
+		if base != nil && base.Ref != "" {
 			// The payload defers to a definition and the Go kind said nothing,
 			// so neither source knows what the instance is.
 			return FormRef
-		default:
-			return FormOpaque
+		}
+
+		return FormOpaque
+	}
+}
+
+// declaredForm returns the form the type-derived schema names outright, or
+// [FormUnset] when it names none. It routes through [FormForTypeName] so a type
+// name reflection wrote and a type name a tag wrote classify identically.
+//
+// The null member of a Types array is skipped: there it states that the
+// occurrence admits null, not what the value looks like.
+func declaredForm(s *jsonschema.Schema) Form {
+	if s == nil {
+		return FormUnset
+	}
+
+	if f := namedForm(s.Type); f != FormUnset {
+		return f
+	}
+
+	for _, name := range s.Types {
+		if f := namedForm(name); f != FormUnset {
+			return f
 		}
 	}
+
+	return FormUnset
+}
+
+// namedForm is [FormForTypeName] with the null marker skipped, for reading a
+// schema's own type list.
+func namedForm(name string) Form {
+	if name == typename.Null {
+		return FormUnset
+	}
+
+	return FormForTypeName(name)
 }
 
 // schemaPermitsString reports whether the type-derived schema can hold a string

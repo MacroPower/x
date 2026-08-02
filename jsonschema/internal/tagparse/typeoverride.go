@@ -1,17 +1,18 @@
 package tagparse
 
 import (
-	"reflect"
+	"fmt"
 
 	"github.com/google/jsonschema-go/jsonschema"
 
-	"go.jacobcolvin.com/x/jsonschema/internal/keyword"
+	"go.jacobcolvin.com/x/jsonschema/internal/tagmodel"
 	"go.jacobcolvin.com/x/jsonschema/internal/typename"
 )
 
 // Constraint group names: the JSON type family whose keywords a type= override
 // keeps. A keyword outside the override's family is dropped, so an explicitly
-// tagged keyword in a dropped family is a conflict.
+// tagged keyword in a dropped family is a conflict. Each group is one of the
+// shared model's bound axes, under the name this dialect's messages give it.
 const (
 	groupNumeric = "numeric"
 	groupString  = "string"
@@ -19,99 +20,116 @@ const (
 	groupObject  = "object"
 )
 
-// constraintGroup returns the constraint group a jsonschema tag key belongs to,
-// or "" for an annotation key such as description or default that survives any
-// type. Only the tag-settable constraint keywords are classified; the
-// kind-derived keywords a type= override also drops never originate from a tag.
-func constraintGroup(key string) string {
-	switch key {
-	case keyword.Minimum, keyword.Maximum, keyword.ExclusiveMinimum, keyword.ExclusiveMaximum, keyword.MultipleOf:
-		return groupNumeric
-	case keyword.MinLength, keyword.MaxLength, keyword.Pattern, keyword.Format:
-		return groupString
-	case keyword.UniqueItems, keyword.MinItems, keyword.MaxItems:
-		return groupArray
-	case keyword.MinProperties, keyword.MaxProperties:
-		return groupObject
-	default:
-		return ""
+var (
+	// The groups table pairs each constraint group with the model axis it names,
+	// in the order a conflict is reported, which is what keeps the reported
+	// conflict deterministic when a tag set several.
+	groups = [...]struct {
+		name string
+		axis tagmodel.Axis
+	}{
+		{groupNumeric, tagmodel.AxisNumeric},
+		{groupString, tagmodel.AxisLength},
+		{groupArray, tagmodel.AxisItems},
+		{groupObject, tagmodel.AxisProperties},
 	}
+
+	// The opGroups table classifies the keys whose family their [tagmodel.KeyRule]
+	// row cannot state, because an axis names a bound's endpoint family and these
+	// keywords are not bounds. It is keyed by the operation rather than by the
+	// keyword, so the classification holds however a key is spelled.
+	opGroups = map[tagmodel.Op]string{
+		tagmodel.OpMultipleOf: groupNumeric,
+		tagmodel.OpUnique:     groupArray,
+		tagmodel.OpPattern:    groupString,
+		tagmodel.OpFormat:     groupString,
+	}
+
+	// The groupless set is the operations that deliberately belong to no family:
+	// a pinned or enumerated value is a value, not a keyword an override drops,
+	// and the scalar gate is what decides whether it may follow one.
+	groupless = map[tagmodel.Op]bool{
+		tagmodel.OpEqual: true,
+		tagmodel.OpOneOf: true,
+	}
+
+	// The constraintGroups table classifies every constraint key this tag spells,
+	// derived from the tagKeys table rather than restated beside it.
+	constraintGroups = buildConstraintGroups()
+)
+
+// buildConstraintGroups derives the key-to-group table from the key table: a
+// bound row is classified by the axis it already declares, and the handful of
+// non-bound keywords by their operation. A row that classifies as neither is a
+// panic on first import, so adding a key to tagKeys either classifies from what
+// the row already says or reports, the same totality the shared model's matrix
+// has.
+func buildConstraintGroups() map[string]string {
+	out := make(map[string]string, len(tagKeys))
+
+	for key, rule := range tagKeys {
+		switch {
+		case groupForAxis(rule.Axis) != "":
+			out[key] = groupForAxis(rule.Axis)
+		case opGroups[rule.Op] != "":
+			out[key] = opGroups[rule.Op]
+		case groupless[rule.Op]:
+		default:
+			panic(fmt.Sprintf("tagparse: key %q names no constraint group", key))
+		}
+	}
+
+	return out
 }
 
-// typeConstraintGroup returns the one constraint group whose keywords a type=
-// value keeps: integer and number both keep the numeric group, the others keep
-// their own, and boolean or null keep none.
-func typeConstraintGroup(typeName string) string {
-	switch typeName {
-	case typename.Integer, typename.Number:
-		return groupNumeric
-	case typename.String:
-		return groupString
-	case typename.Array:
-		return groupArray
-	case typename.Object:
-		return groupObject
-	default:
-		return ""
-	}
-}
-
-// conflictingGroup returns the first constraint group in groupsSet that a type=
-// override to typeName would drop, or "" when every set group survives. The
-// fixed iteration order keeps the reported conflict deterministic.
-func conflictingGroup(groupsSet map[string]bool, typeName string) string {
-	kept := typeConstraintGroup(typeName)
-
-	for _, g := range []string{groupNumeric, groupString, groupArray, groupObject} {
-		if groupsSet[g] && g != kept {
-			return g
+// groupForAxis names the constraint group a model axis belongs to, or "" for
+// [tagmodel.AxisAuto], which pins no family.
+func groupForAxis(axis tagmodel.Axis) string {
+	for _, g := range groups {
+		if g.axis == axis {
+			return g.name
 		}
 	}
 
 	return ""
 }
 
-// standInTypeFor returns the Go type that scalar tag values parse against after
-// a type= pair overrides the field's reflected type: the override replaces the
-// schema's type, so subsequent scalar values must parse as the overridden JSON
-// type rather than the field's Go kind. The stand-ins are never pointers, so
-// "null" scalar values are rejected after an override. The non-scalar JSON types
-// (array, object, null) have no scalar stand-in and return nil; scalar keys
-// following such an override are an error.
-func standInTypeFor(typeName string) reflect.Type {
-	switch typeName {
-	case typename.String:
-		return reflect.TypeFor[string]()
-	case typename.Integer:
-		return reflect.TypeFor[int64]()
-	case typename.Number:
-		return reflect.TypeFor[float64]()
-	case typename.Boolean:
-		return reflect.TypeFor[bool]()
-	default: // array, object, null
-		return nil
-	}
+// constraintGroup returns the constraint group a jsonschema tag key belongs to,
+// or "" for an annotation key such as description or default that survives any
+// type. Only the tag-settable constraint keywords are classified; the
+// kind-derived keywords a type= override also drops never originate from a tag.
+func constraintGroup(key string) string {
+	return constraintGroups[key]
 }
 
-// overriddenShapeType returns the Go type an overridden field classifies
-// against. It differs from [standInTypeFor] only for the non-scalar JSON types,
-// which have no scalar stand-in but still have to answer whether the overridden
-// shape carries a given keyword family: type=array,minItems=1 must work, and
-// that question is separate from whether a scalar key may follow. The scalar
-// gate stays [standInTypeFor]'s nil.
-func overriddenShapeType(typeName string) reflect.Type {
-	if t := standInTypeFor(typeName); t != nil {
-		return t
+// keepsGroup reports whether a type= override to typeName keeps one constraint
+// group's keywords. The answer is the shared model's: the overridden instance
+// takes a known form, and whether that form has the group's keyword family is
+// the same fact the model checks before it lands a bound.
+func keepsGroup(typeName, group string) bool {
+	form := tagmodel.FormForTypeName(typeName)
+
+	for _, g := range groups {
+		if g.name == group {
+			return tagmodel.FormCarriesAxis(form, g.axis)
+		}
 	}
 
-	switch typeName {
-	case typename.Array:
-		return reflect.TypeFor[[]any]()
-	case typename.Object:
-		return reflect.TypeFor[map[string]any]()
-	default: // null
-		return reflect.TypeFor[any]()
+	return false
+}
+
+// conflictingGroup returns the first constraint group in groupsSet that a type=
+// override to typeName would drop, or "" when every set group survives.
+func conflictingGroup(groupsSet map[string]bool, typeName string) string {
+	form := tagmodel.FormForTypeName(typeName)
+
+	for _, g := range groups {
+		if groupsSet[g.name] && !tagmodel.FormCarriesAxis(form, g.axis) {
+			return g.name
+		}
 	}
+
+	return ""
 }
 
 // applyTypeOverride applies a type= tag value, replacing the reflected type

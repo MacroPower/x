@@ -109,6 +109,20 @@ var (
 const coercedBoundNote = "a bound is not supported on a json:\",string\" coerced numeric field " +
 	"(minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)"
 
+// FormCarriesAxis reports whether a form's schema has a given keyword family at
+// all. It is the table [resolveAxis] consults, exported because a dialect can
+// have to answer the same question before a rule reaches the model: the
+// jsonschema tag's type= pair drops every keyword family the new type has no
+// use for, and which families those are is this fact and not a second one.
+// Reading it here is the opposite of re-deriving it.
+func FormCarriesAxis(f Form, a Axis) bool {
+	if f >= formCount || a >= axisCount {
+		return false
+	}
+
+	return formCarriesAxis[f][a]
+}
+
 // axisRejection explains why a bound cannot land on a form, and is the message
 // the front-end wraps.
 func axisRejection(form Form, axis Axis) string {
