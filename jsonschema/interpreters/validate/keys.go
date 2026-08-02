@@ -2,12 +2,9 @@ package validate
 
 import (
 	"go.jacobcolvin.com/x/jsonschema"
+	"go.jacobcolvin.com/x/jsonschema/internal/content"
 	"go.jacobcolvin.com/x/jsonschema/internal/tagmodel"
 )
-
-// base64Encoding is the content validator tag and the contentEncoding keyword
-// value for base64-encoded string content.
-const base64Encoding = "base64"
 
 // validatorRule is one row of this dialect's key table: the shared rule, plus
 // the dialect's own explanation for a key whose declared arity an author is
@@ -83,8 +80,8 @@ var validatorKeys = map[string]validatorRule{
 	"json": {KeyRule: tagmodel.KeyRule{
 		Op: tagmodel.OpContentMediaType, Param: tagmodel.ParamNone, Implied: "application/json",
 	}},
-	base64Encoding: {KeyRule: tagmodel.KeyRule{
-		Op: tagmodel.OpContentEncoding, Param: tagmodel.ParamNone, Implied: base64Encoding,
+	content.Base64: {KeyRule: tagmodel.KeyRule{
+		Op: tagmodel.OpContentEncoding, Param: tagmodel.ParamNone, Implied: content.Base64,
 	}},
 }
 

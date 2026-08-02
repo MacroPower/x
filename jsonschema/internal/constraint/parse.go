@@ -69,23 +69,39 @@ func ParseNumericBound(value string, kind reflect.Kind) (Endpoint, error) {
 	}
 }
 
-// parseFloatBound parses a decimal-float bound: it rejects the non-decimal float
-// forms strconv accepts (underscore separators, hexadecimal floats), rejects
-// non-finite values (which cannot constrain any JSON number), and rejects an
-// integer-valued literal whose float64 form does not ship as the exact value
-// under the package's shortest-decimal interpretation.
-func parseFloatBound(value string) (Endpoint, error) {
+// ParseDecimalFloat parses a decimal float literal under the one spelling policy
+// every dialect shares: it rejects the non-decimal forms strconv also accepts
+// (underscore digit separators, hexadecimal floats), so a numeric tag value
+// reads the same way regardless of the field's type, and rejects the non-finite
+// values encoding/json cannot marshal and no JSON number can equal.
+//
+// It is the spelling half only. A bound additionally applies the
+// exact-representability policy ([parseFloatBound]); a field value additionally
+// range-checks against its own Go kind. Both start here.
+func ParseDecimalFloat(value string) (float64, error) {
 	if strings.ContainsAny(value, "_xX") {
-		return Endpoint{}, fmt.Errorf("%q is not a decimal number", value)
+		return 0, fmt.Errorf("invalid number %q: not a decimal number", value)
 	}
 
 	n, err := strconv.ParseFloat(value, 64)
 	if err != nil {
-		return Endpoint{}, fmt.Errorf("invalid number %q: %w", value, err)
+		return 0, fmt.Errorf("invalid number %q: %w", value, err)
 	}
 
 	if math.IsNaN(n) || math.IsInf(n, 0) {
-		return Endpoint{}, fmt.Errorf("%q is not a finite number", value)
+		return 0, fmt.Errorf("%q is not a finite number", value)
+	}
+
+	return n, nil
+}
+
+// parseFloatBound parses a decimal-float bound: the shared spelling policy, plus
+// the rejection of an integer-valued literal whose float64 form does not ship as
+// the exact value under the package's shortest-decimal interpretation.
+func parseFloatBound(value string) (Endpoint, error) {
+	n, err := ParseDecimalFloat(value)
+	if err != nil {
+		return Endpoint{}, err
 	}
 
 	// Compare the float64's shortest-decimal interpretation ([numrat.Float64ToRat])
@@ -130,17 +146,39 @@ const (
 	RuleLen
 )
 
+// SizeDomain is how a dialect reads a negative size literal, the one place the
+// two disagree for a defensible reason on each side.
+type SizeDomain uint8
+
+const (
+	// SizeFold folds a negative literal into the unsatisfiable range below. A
+	// dialect naming a rule rather than a keyword is describing a predicate, and
+	// go-playground's max=-1 is a predicate no value satisfies.
+	SizeFold SizeDomain = iota
+	// SizeStrict rejects a negative literal outright, matching the non-negative
+	// value domain of minLength and its siblings: a dialect that names the
+	// keyword is writing that keyword's value, and -1 is not one.
+	SizeStrict
+)
+
 // ParseSizeBound parses a length/count bound into inclusive integer
 // contributions at the given tier. It folds an exclusive rule to its inclusive
 // integer form (saturating at MaxInt/MinInt so a boundary value does not wrap),
 // clamps a floor to non-negative, and expresses an unsatisfiable rule -- a
 // sub-zero ceiling from lt=0 or a negative max, or a negative len -- as a floor
 // of one against a ceiling of zero rather than a permissive zero ceiling, since
-// such a rule rejects even the empty value.
-func ParseSizeBound(value string, rule SizeRule, mode Mode, prov Provenance) ([]Bound, error) {
+// such a rule rejects even the empty value. Under [SizeStrict] a negative
+// literal is rejected before any of that.
+func ParseSizeBound(
+	value string, rule SizeRule, domain SizeDomain, mode Mode, prov Provenance,
+) ([]Bound, error) {
 	n, err := strconv.Atoi(value)
 	if err != nil {
 		return nil, fmt.Errorf("invalid number %q: %w", value, err)
+	}
+
+	if domain == SizeStrict && n < 0 {
+		return nil, fmt.Errorf("must be non-negative, got %d", n)
 	}
 
 	switch rule {

@@ -1,22 +1,18 @@
 package tagmodel
 
-import "reflect"
+import (
+	"reflect"
 
-// SizePolicy is how a dialect reads a length or count literal. The two dialects
-// disagree for a defensible reason on each side, so the choice is a named
-// parameter rather than a second implementation.
-type SizePolicy uint8
+	"go.jacobcolvin.com/x/jsonschema/internal/constraint"
+)
 
+// The size-literal domains, re-exported from the shared algebra that owns them
+// so a front-end names its policy without reaching past the model.
 const (
-	// SizeStrict rejects a negative literal outright, matching the non-negative
-	// value domain of minLength and its sibling keywords: a dialect that names
-	// the keyword is writing that keyword's value, and -1 is not one.
-	SizeStrict SizePolicy = iota
-	// SizeFold folds a negative literal through the shared size algebra, which
-	// expresses it as the unsatisfiable floor-one/ceiling-zero range. A dialect
-	// naming a rule rather than a keyword is describing a predicate, and
-	// go-playground's max=-1 is a predicate no value satisfies.
-	SizeFold
+	// SizeFold folds a negative literal into the unsatisfiable range.
+	SizeFold = constraint.SizeFold
+	// SizeStrict rejects a negative literal outright.
+	SizeStrict = constraint.SizeStrict
 )
 
 // KeywordPolicy is how a dialect's string keyword (format, pattern, content)
@@ -47,7 +43,7 @@ type Policy struct {
 	// on an int that is an error. Same literal, two right answers.
 	BoundKind reflect.Kind
 	// Sizes is how a length or count literal reads.
-	Sizes SizePolicy
+	Sizes constraint.SizeDomain
 	// Keywords is how a string keyword composes with one already in force.
 	Keywords KeywordPolicy
 	// AllowNullScalar admits the literal "null" as the JSON null value on a

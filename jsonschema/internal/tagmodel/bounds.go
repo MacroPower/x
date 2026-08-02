@@ -44,7 +44,9 @@ func tighten[T cmp.Ordered](field **T, base *T, n T, ceiling bool) {
 }
 
 // parseSizeLiteral parses a length or count literal, which is always a base-10
-// integer in both dialects.
+// integer in both dialects. The bound path parses through the shared algebra
+// instead; this serves the forbidden-size rule, which needs the number itself
+// rather than a contribution.
 func parseSizeLiteral(value string) (int, error) {
 	n, err := strconv.Atoi(value)
 	if err != nil {

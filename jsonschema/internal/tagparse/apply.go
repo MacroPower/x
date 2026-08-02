@@ -502,18 +502,20 @@ func emptyValueError(key string) error {
 	return fmt.Errorf("jsonschema tag: key %q requires a non-empty value", key)
 }
 
-// parseFlag parses a boolean annotation value.
+// parseFlag parses a boolean annotation value. It reads booleans the same way
+// the constraint keys do, since those reach the shared literal parser through
+// Bind and one tag should not spell true two ways.
 func parseFlag(key, value string) (bool, error) {
-	switch value {
-	case "":
+	if value == "" {
 		return false, emptyValueError(key)
-	case "true":
-		return true, nil
-	case "false":
-		return false, nil
-	default:
-		return false, fmt.Errorf("jsonschema tag: key %q: invalid boolean %q", key, value)
 	}
+
+	b, err := tagmodel.ParseBoolLiteral(value)
+	if err != nil {
+		return false, fmt.Errorf("jsonschema tag: key %q: %w", key, err)
+	}
+
+	return b, nil
 }
 
 // isScalarValueKey reports whether a jsonschema tag key carries scalar values

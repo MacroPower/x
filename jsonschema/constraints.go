@@ -1,8 +1,6 @@
 package jsonschema
 
 import (
-	"fmt"
-
 	"go.jacobcolvin.com/x/jsonschema/internal/constraint"
 	"go.jacobcolvin.com/x/jsonschema/internal/tagmodel"
 )
@@ -131,17 +129,13 @@ func (c *Constraints) Apply(op Op, axis Axis, params ...string) error {
 	)
 }
 
-// SetMultipleOf records a multipleOf value on the field, reporting an error for a
-// non-positive value, which JSON Schema forbids.
+// SetMultipleOf records a multipleOf value on the field, reporting an error for
+// a non-positive value, which JSON Schema forbids, and for a field whose shape
+// has no number to divide. It is the named form of
+// [Constraints.Apply] with [OpMultipleOf].
 func (c *Constraints) SetMultipleOf(value float64) error {
-	if value <= 0 {
-		return fmt.Errorf("multipleOf must be positive, got %v", value)
-	}
-
-	v := value
-	c.target.Canvas.MultipleOf = &v
-
-	return nil
+	//nolint:wrapcheck // The model owns the rule and its wording.
+	return tagmodel.SetMultipleOf(c.target, value)
 }
 
 // Const returns the value the field's const pins and whether one is set, so an

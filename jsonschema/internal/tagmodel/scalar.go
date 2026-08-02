@@ -3,11 +3,10 @@ package tagmodel
 import (
 	"encoding/json"
 	"fmt"
-	"math"
 	"reflect"
 	"strconv"
-	"strings"
 
+	"go.jacobcolvin.com/x/jsonschema/internal/constraint"
 	"go.jacobcolvin.com/x/jsonschema/internal/numkind"
 	"go.jacobcolvin.com/x/jsonschema/internal/typename"
 )
@@ -50,7 +49,7 @@ func (sh Shape) ParseScalar(lit string, pol Policy) (any, error) {
 		return lit, nil
 
 	case FormBool:
-		return parseBoolLiteral(lit)
+		return ParseBoolLiteral(lit)
 
 	case FormNumber:
 		return sh.parseNumber(lit)
@@ -106,31 +105,21 @@ func (sh Shape) parseNumber(lit string) (any, error) {
 	return parseFloatLiteral(lit, sh.Kind)
 }
 
-// parseFloatLiteral parses a decimal float literal, rejecting the forms
-// [strconv.ParseFloat] accepts beyond plain decimal notation (underscore digit
-// separators, hexadecimal floats) so a numeric tag value reads the same way at
-// every kind, and rejecting the non-finite values encoding/json cannot marshal
-// and no instance can equal.
+// parseFloatLiteral parses a float field value: the shared decimal spelling
+// policy, plus the range check the field's own kind implies.
+//
+// The value is stored at 64 bits even for a float32 field, so it is the float64
+// nearest the decimal the author wrote rather than its float32-rounded form:
+// rounding 0.1 to float32 stores 0.10000000149011612, which a {"v":0.1} instance
+// could never match against its own const. The 32-bit reparse is therefore an
+// overflow check and nothing else.
 func parseFloatLiteral(lit string, kind reflect.Kind) (any, error) {
-	if strings.ContainsAny(lit, "_xX") {
-		return nil, fmt.Errorf("invalid number %q: not a decimal number", lit)
-	}
-
-	// Parse at 64 bits for storage, so the stored value is the float64 nearest
-	// the decimal the author wrote rather than its float32-rounded form:
-	// rounding 0.1 to float32 stores 0.10000000149011612, which a {"v":0.1}
-	// instance could never match against its own const.
-	n, err := strconv.ParseFloat(lit, 64)
+	n, err := constraint.ParseDecimalFloat(lit)
 	if err != nil {
-		return nil, fmt.Errorf("invalid number %q: %w", lit, err)
+		//nolint:wrapcheck // The shared policy owns the spelling and its message.
+		return nil, err
 	}
 
-	if math.IsNaN(n) || math.IsInf(n, 0) {
-		return nil, fmt.Errorf("%q is not a finite number", lit)
-	}
-
-	// A float32 field cannot hold a value outside its range, so reparse at 32
-	// bits purely as an overflow check.
 	if kind == reflect.Float32 {
 		_, err = strconv.ParseFloat(lit, 32)
 		if err != nil {
@@ -153,7 +142,7 @@ func (sh Shape) coercedText(lit string) (any, error) {
 	)
 
 	if sh.Form == FormCoercedBool {
-		parsed, err = parseBoolLiteral(lit)
+		parsed, err = ParseBoolLiteral(lit)
 	} else {
 		parsed, err = sh.parseNumber(lit)
 	}
@@ -194,8 +183,11 @@ func (sh Shape) zeroLiteral() string {
 	return "0"
 }
 
-// parseBoolLiteral parses the two boolean literals both tag grammars spell.
-func parseBoolLiteral(lit string) (bool, error) {
+// ParseBoolLiteral parses the two boolean literals both tag grammars spell,
+// deliberately not [strconv.ParseBool]'s wider "1"/"t"/"TRUE" set, which neither
+// grammar accepts. It is exported so a dialect's own boolean keys read the same
+// way as the ones that reach it through [Bind].
+func ParseBoolLiteral(lit string) (bool, error) {
 	switch lit {
 	case boolTrue:
 		return true, nil

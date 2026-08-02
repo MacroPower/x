@@ -165,7 +165,8 @@ func TestSetSizeRendering(t *testing.T) {
 		t.Parallel()
 
 		set := constraint.New()
-		bounds, err := constraint.ParseSizeBound("5", constraint.RuleMin, constraint.Intersect, constraint.Authored)
+		bounds, err := constraint.ParseSizeBound(
+			"5", constraint.RuleMin, constraint.SizeFold, constraint.Intersect, constraint.Authored)
 		require.NoError(t, err)
 		set.AddSize(constraint.Length, bounds)
 
@@ -179,7 +180,8 @@ func TestSetSizeRendering(t *testing.T) {
 		t.Parallel()
 
 		set := constraint.New()
-		bounds, err := constraint.ParseSizeBound("0", constraint.RuleLt, constraint.Intersect, constraint.Authored)
+		bounds, err := constraint.ParseSizeBound(
+			"0", constraint.RuleLt, constraint.SizeFold, constraint.Intersect, constraint.Authored)
 		require.NoError(t, err)
 		set.AddSize(constraint.Length, bounds)
 
@@ -194,10 +196,12 @@ func TestSetSizeRendering(t *testing.T) {
 		t.Parallel()
 
 		set := constraint.New()
-		maxB, err := constraint.ParseSizeBound("3", constraint.RuleMax, constraint.Intersect, constraint.Authored)
+		maxB, err := constraint.ParseSizeBound(
+			"3", constraint.RuleMax, constraint.SizeFold, constraint.Intersect, constraint.Authored)
 		require.NoError(t, err)
 
-		lenB, err := constraint.ParseSizeBound("5", constraint.RuleLen, constraint.Intersect, constraint.Authored)
+		lenB, err := constraint.ParseSizeBound(
+			"5", constraint.RuleLen, constraint.SizeFold, constraint.Intersect, constraint.Authored)
 		require.NoError(t, err)
 		set.AddSize(constraint.Items, maxB)
 		set.AddSize(constraint.Items, lenB)
@@ -215,7 +219,8 @@ func TestSetSizeRendering(t *testing.T) {
 		// The const/enum subsumption applies to the numeric axis only: a size
 		// bound survives a DropAll resolve.
 		set := constraint.New()
-		bounds, err := constraint.ParseSizeBound("5", constraint.RuleMin, constraint.Intersect, constraint.Authored)
+		bounds, err := constraint.ParseSizeBound(
+			"5", constraint.RuleMin, constraint.SizeFold, constraint.Intersect, constraint.Authored)
 		require.NoError(t, err)
 		set.AddSize(constraint.Items, bounds)
 

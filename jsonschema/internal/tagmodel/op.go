@@ -321,7 +321,7 @@ func checkParams(op Op, params Params) error {
 	if op == OpUnique {
 		// Only the two literals both dialects spell, not strconv.ParseBool's
 		// wider "1"/"t"/"TRUE" set, which neither tag grammar accepts.
-		_, err := parseBoolLiteral(params.One())
+		_, err := ParseBoolLiteral(params.One())
 		if err != nil {
 			return err
 		}

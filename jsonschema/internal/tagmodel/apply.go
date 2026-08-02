@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"slices"
+	"strconv"
 
 	"github.com/google/jsonschema-go/jsonschema"
 
@@ -161,26 +162,13 @@ func applyNumericBound(t Target, r Rule, pol Policy) error {
 }
 
 // applySizeBound folds a length or count rule through the shared size algebra --
-// the exclusive-to-inclusive fold, the non-negative clamp, and the
-// unsatisfiable floor-one/ceiling-zero construction -- and intersects each
-// resulting endpoint against the effective one. A strict-size dialect rejects a
-// negative literal before the fold, since it is writing a keyword whose value
-// domain excludes one.
+// the exclusive-to-inclusive fold, the non-negative clamp, the negative-literal
+// domain the dialect chose, and the unsatisfiable floor-one/ceiling-zero
+// construction -- and intersects each resulting endpoint against the effective
+// one.
 func applySizeBound(t Target, r Rule, pol Policy) error {
-	value := r.Params.One()
-
-	if pol.Sizes == SizeStrict {
-		n, err := parseSizeLiteral(value)
-		if err != nil {
-			return err
-		}
-
-		if n < 0 {
-			return fmt.Errorf("must be non-negative, got %d", n)
-		}
-	}
-
-	bounds, err := constraint.ParseSizeBound(value, sizeRuleFor(r.Op), constraint.Intersect, constraint.Authored)
+	bounds, err := constraint.ParseSizeBound(
+		r.Params.One(), sizeRuleFor(r.Op), pol.Sizes, constraint.Intersect, constraint.Authored)
 	if err != nil {
 		//nolint:wrapcheck // The shared algebra owns the message dialect.
 		return err
@@ -282,7 +270,7 @@ func applyOneOf(t Target, r Rule, pol Policy) error {
 // applyUnique sets uniqueItems when the bound boolean asks for it. A false
 // literal leaves the keyword unset rather than emitting the vacuous default.
 func applyUnique(t Target, r Rule, _ Policy) error {
-	on, err := parseBoolLiteral(r.Params.One())
+	on, err := ParseBoolLiteral(r.Params.One())
 	if err != nil {
 		return err
 	}
@@ -297,9 +285,15 @@ func applyUnique(t Target, r Rule, _ Policy) error {
 // applyMultipleOf records a divisor, rejecting the non-positive value JSON
 // Schema forbids.
 func applyMultipleOf(t Target, r Rule, _ Policy) error {
+	return applyDivisor(t, r.Params.One())
+}
+
+// applyDivisor records a divisor from its literal, shared with the facade's
+// named setter so the positivity rule lives in one place.
+func applyDivisor(t Target, lit string) error {
 	// A divisor is a keyword value, not a field value, so it takes the
 	// keyword-shaped literal domain regardless of the target's kind.
-	end, err := constraint.ParseNumericBound(r.Params.One(), reflect.Invalid)
+	end, err := constraint.ParseNumericBound(lit, reflect.Invalid)
 	if err != nil {
 		//nolint:wrapcheck // The shared policy owns the message and the sentinel.
 		return err
@@ -414,6 +408,16 @@ func nonZeroTrue(t Target, _ Rule, _ Policy) error {
 	}
 
 	return SetConst(t, true)
+}
+
+// SetMultipleOf records a divisor on the target, going through the same cell
+// the tag keyword does so a shape with no number to divide is reported rather
+// than stamped.
+func SetMultipleOf(t Target, value float64) error {
+	return Apply(t, Rule{
+		Op:     OpMultipleOf,
+		Params: ParamsOf(strconv.FormatFloat(value, 'g', -1, 64)),
+	}, Policy{})
 }
 
 // SetConst pins the target's const, reporting [ErrConflict] rather than

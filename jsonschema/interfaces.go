@@ -806,11 +806,15 @@ func (fc FieldContext) effectiveCanvas() *Schema {
 }
 
 // EffectiveFormat reports the effective format keyword: the canvas value, or the
-// type-derived one when the canvas has none. It backs the "set only when empty"
-// guard so a format tag never overrides a value an explicit jsonschema tag or
-// the field's type already set. [FieldContext.EffectivePattern],
+// type-derived one when the canvas has none. [FieldContext.EffectivePattern],
 // [FieldContext.EffectiveContentEncoding], and
-// [FieldContext.EffectiveContentMediaType] guard their keywords the same way.
+// [FieldContext.EffectiveContentMediaType] read their keywords the same way.
+//
+// These are read-only accessors, for an interpreter that wants to know what is
+// already in force before deciding what to contribute. They no longer gate the
+// write: [Constraints.Apply] applies a string keyword first-wins for an
+// interpreter, so a tag never overrides a value an explicit jsonschema tag or
+// the field's type already set, and an interpreter gets that without asking.
 //
 // The accessors tolerate a caller-built context missing Canvas or Base: a nil
 // side reads as unauthored (empty), so a hand-built context (an interpreter

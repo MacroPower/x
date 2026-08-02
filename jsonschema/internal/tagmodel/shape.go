@@ -7,13 +7,10 @@ import (
 
 	"github.com/google/jsonschema-go/jsonschema"
 
+	"go.jacobcolvin.com/x/jsonschema/internal/content"
 	"go.jacobcolvin.com/x/jsonschema/internal/numkind"
 	"go.jacobcolvin.com/x/jsonschema/internal/typename"
 )
-
-// base64Encoding is the contentEncoding value the generator emits for a byte
-// slice, and the third way a schema can declare that its instance is a string.
-const base64Encoding = "base64"
 
 // Form is the JSON shape an instance actually takes: the dispatch column of the
 // constraint matrix. It is deliberately not the Go kind. Classifying once, at
@@ -231,7 +228,7 @@ func classifyForm(t reflect.Type, base *jsonschema.Schema) Form {
 // schema permits no string.
 func schemaPermitsString(s *jsonschema.Schema) bool {
 	return schemaDeclares(s, typename.String) ||
-		(s != nil && s.ContentEncoding == base64Encoding)
+		(s != nil && s.ContentEncoding == content.Base64)
 }
 
 // schemaDeclares reports whether the schema names any of the given JSON types,
