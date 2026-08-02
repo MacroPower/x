@@ -15,7 +15,15 @@ import (
 // from the RFCs' own example text. They complement the robustness fuzz (layer 1)
 // and the stdlib differentials (layer 2), and sit alongside the official JSON
 // Schema Test Suite's optional/format cases, which already run via
-// TestSuiteFormat.
+// TestSuiteFormat. The suite already carries every RFC 6901 §5 pointer example
+// and RFC 3339's leap second, so those are not re-transcribed here; only the
+// gaps it leaves are.
+//
+// One accepted coverage gap: iri and iri-reference get only the one-way
+// containment from uri and uri-reference (containment_test.go) plus the narrow
+// ucschar cases in format_iri_ucschar_test.go. Containment cannot catch
+// over-acceptance on the ucschar side, and there is no public IRI corpus and no
+// stdlib IRI parser to differential against, so that side stays uncovered.
 
 // formatVector is one acceptance vector: an instance and whether the format
 // validator must accept it.
@@ -76,6 +84,100 @@ func TestURIReferenceVectors(t *testing.T) {
 		"query-only reference":    {"?q=1", true},
 		"empty reference":         {"", true},
 		"space is forbidden":      {"http://exa mple", false},
+	})
+}
+
+var (
+	// The RFC 3986 §5.4.1 normal and §5.4.2 abnormal reference-resolution
+	// inputs, verbatim and in order. Every one is a well-formed
+	// URI-reference; the section exists to pin merge and dot-segment removal,
+	// so it is the densest set of relative-reference shapes the RFC publishes
+	// and the suite carries none of it.
+	rfc3986References = []string{
+		// §5.4.1 Normal Examples.
+		"g:h", "g", "./g", "g/", "/g", "//g", "?y", "g?y", "#s", "g#s",
+		"g?y#s", ";x", "g;x", "g;x?y#s", "", ".", "./", "..", "../", "../g",
+		"../..", "../../", "../../g",
+
+		// §5.4.2 Abnormal Examples.
+		"../../../g", "../../../../g", "/./g", "/../g", "g.", ".g", "g..",
+		"..g", "./../g", "./g/.", "g/./h", "g/../h", "g;x=1/./y", "g;x=1/../y",
+		"g?y/./x", "g?y/../x", "g#s/./x", "g#s/../x", "http:g",
+	}
+
+	// The distinct §5.4 resolution targets. Each is an absolute URI, so each
+	// must satisfy the uri format as well as uri-reference: a reference that
+	// resolves against "http://a/b/c/d;p?q" and produces something the uri
+	// format rejects would make the two formats disagree about the same string.
+	rfc3986ResolvedTargets = []string{
+		"g:h", "http://a/b/c/g", "http://a/b/c/g/", "http://a/g", "http://g",
+		"http://a/b/c/d;p?y", "http://a/b/c/g?y", "http://a/b/c/d;p#s",
+		"http://a/b/c/g#s", "http://a/b/c/g?y#s", "http://a/b/c/;x",
+		"http://a/b/c/g;x", "http://a/b/c/g;x?y#s", "http://a/b/c/d;p?q",
+		"http://a/b/c/", "http://a/b/", "http://a/b/g", "http://a/",
+		"http://a/b/c/g.", "http://a/b/c/.g", "http://a/b/c/g..",
+		"http://a/b/c/..g", "http://a/b/c/g/h", "http://a/b/c/h",
+		"http://a/b/c/g;x=1/y", "http://a/b/c/y", "http://a/b/c/g?y/./x",
+		"http://a/b/c/g?y/../x", "http://a/b/c/g#s/./x", "http://a/b/c/g#s/../x",
+	}
+)
+
+// TestURIReferenceResolutionVectors runs every RFC 3986 §5.4 reference-
+// resolution input through the uri-reference format, and the two that carry a
+// scheme through the uri format as well. §5.4 is the RFC's own inventory of
+// relative-reference shapes -- dot segments, empty references, semicolon
+// parameters, a query or fragment carrying what looks like a path -- and none
+// of it appears in the vendored suite.
+func TestURIReferenceResolutionVectors(t *testing.T) {
+	t.Parallel()
+
+	cases := make(map[string]formatVector, len(rfc3986References))
+	for _, ref := range rfc3986References {
+		cases["reference "+ref] = formatVector{instance: ref, valid: true}
+	}
+
+	runFormatVectors(t, "uri-reference", cases)
+
+	// URI-reference = URI / relative-ref, and a relative-ref cannot begin with
+	// a scheme, so exactly the two schemed inputs are absolute URIs.
+	runFormatVectors(t, "uri", map[string]formatVector{
+		"schemed reference g:h":      {"g:h", true},
+		"schemed reference http:g":   {"http:g", true},
+		"dot-segment reference":      {"../../g", false},
+		"network-path reference //g": {"//g", false},
+	})
+}
+
+// TestURIResolutionTargetVectors runs every RFC 3986 §5.4 resolution target
+// through the uri format. These are the strings a caller holds after resolving
+// a reference against a base, so the format must accept them if the resolution
+// step is to be usable.
+func TestURIResolutionTargetVectors(t *testing.T) {
+	t.Parallel()
+
+	cases := make(map[string]formatVector, len(rfc3986ResolvedTargets))
+	for _, target := range rfc3986ResolvedTargets {
+		cases["target "+target] = formatVector{instance: target, valid: true}
+	}
+
+	runFormatVectors(t, "uri", cases)
+}
+
+// TestDateTimeOffsetVectors checks the date-time format against RFC 3339 §4.3,
+// which gives "-00:00" a meaning "+00:00" does not: the offset is unknown, as
+// distinct from known to be UTC. Both are well-formed time-offset productions
+// and the suite covers neither.
+func TestDateTimeOffsetVectors(t *testing.T) {
+	t.Parallel()
+
+	runFormatVectors(t, "date-time", map[string]formatVector{
+		"negative zero offset (RFC 3339 §4.3)": {"2020-01-02T03:04:05-00:00", true},
+		"positive zero offset":                 {"2020-01-02T03:04:05+00:00", true},
+		"Z designator":                         {"2020-01-02T03:04:05Z", true},
+		"negative offset":                      {"2020-01-02T03:04:05-05:00", true},
+		"offset hour out of range":             {"2020-01-02T03:04:05-24:00", false},
+		"offset minute out of range":           {"2020-01-02T03:04:05-00:60", false},
+		"offset without minutes":               {"2020-01-02T03:04:05-05", false},
 	})
 }
 
