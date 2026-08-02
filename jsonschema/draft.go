@@ -70,8 +70,9 @@ func (d Draft) schemaURI() string {
 // draftProfile declares every value-level behavioral difference between drafts
 // as data, so a difference is stated once in [draftProfiles] rather than
 // re-derived at each site that compares a run's draft. Keyword *applicability*
-// (which keywords a draft evaluates at all) stays in the dispatch table's
-// draftRange rows; the profile carries the finer policy the walk, the inliner,
+// (which keywords a draft evaluates at all) is declared per keyword in
+// internal/keywordmeta and derived onto the dispatch table's rows; the profile
+// carries the finer policy the walk, the inliner,
 // and the generator would otherwise each branch on. Each field is kept distinct
 // even where several currently share the value "this is Draft 2020-12", because
 // they name independent policies that a future draft could set independently.
