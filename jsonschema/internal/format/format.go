@@ -994,10 +994,9 @@ func validateRegex(s string) error {
 // and "\_" are identity escapes under Annex B even though the main grammar's
 // narrower rule excludes them.
 //
-// Bare "\c" with no following ControlLetter is accepted, which Annex B does not
-// permit. The lenience is deliberate: this format is an assertion over a pattern
-// the package never compiles, and falsely rejecting a pattern every engine
-// accepts is the worse failure.
+// Bare "\c" with no following ControlLetter is accepted because Annex B
+// accepts it: ExtendedAtom carries a "\ [lookahead = c]" production, so the
+// backslash before a non-ControlLetter "c" is its own literal atom.
 //
 // The one rejection is a lone invalid UTF-8 byte, which decodes to
 // (utf8.RuneError, 1) and is not a source character at all; a genuine U+FFFD

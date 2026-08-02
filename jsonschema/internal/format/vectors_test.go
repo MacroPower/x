@@ -111,7 +111,7 @@ var (
 	// format rejects would make the two formats disagree about the same string.
 	rfc3986ResolvedTargets = []string{
 		"g:h", "http://a/b/c/g", "http://a/b/c/g/", "http://a/g", "http://g",
-		"http://a/b/c/d;p?y", "http://a/b/c/g?y", "http://a/b/c/d;p#s",
+		"http://a/b/c/d;p?y", "http://a/b/c/g?y", "http://a/b/c/d;p?q#s",
 		"http://a/b/c/g#s", "http://a/b/c/g?y#s", "http://a/b/c/;x",
 		"http://a/b/c/g;x", "http://a/b/c/g;x?y#s", "http://a/b/c/d;p?q",
 		"http://a/b/c/", "http://a/b/", "http://a/b/g", "http://a/",
@@ -119,6 +119,7 @@ var (
 		"http://a/b/c/..g", "http://a/b/c/g/h", "http://a/b/c/h",
 		"http://a/b/c/g;x=1/y", "http://a/b/c/y", "http://a/b/c/g?y/./x",
 		"http://a/b/c/g?y/../x", "http://a/b/c/g#s/./x", "http://a/b/c/g#s/../x",
+		"http:g",
 	}
 )
 

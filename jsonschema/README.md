@@ -950,7 +950,7 @@ spec asks, the checker takes the position below. Replace any of them with
   terminated classes, well-formed escapes. Backreferences and lookaround are
   accepted, since ECMA-262 has them and Go's RE2 does not, and every ASCII
   character is a valid ECMA-262 Annex B identity escape, so `\a` and `\_` are
-  accepted (as is a bare `\c`, which Annex B requires a control letter after).
+  accepted (as is a bare `\c`, an Annex B `ExtendedAtom` in its own right).
   The format therefore accepts patterns RE2 rejects. This is independent of the
   `pattern` keyword, which does use RE2; see the deviation note below.
 - **`uri-template`** accepts the RFC 6570 `op-reserve` operators (`{=path}`,
