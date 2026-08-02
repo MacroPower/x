@@ -273,7 +273,23 @@ func validateTimeOffset(s string) error {
 	return nil
 }
 
+// maxEmailOctets is the RFC 5321 §4.5.3.1.3 size limit on a forward path: 256
+// octets including the enclosing angle brackets, so 254 for the address itself.
+// It does not follow from the local-part and domain limits, which sum to 318.
+// RFC 6531 §3.4 carries the limit over to an internationalized address, counting
+// octets there too.
+const maxEmailOctets = 254
+
+// validateEmail validates an email address against the RFC 5321 Mailbox grammar
+// and the §4.5.3.1 size limits: 64 octets for the local part (§4.5.3.1.1), 253
+// for the domain (§4.5.3.1.2, via validateHostnameLabels), and 254 for the
+// forward path as a whole (§4.5.3.1.3). The total is not implied by the two
+// parts, which sum to 318.
 func validateEmail(s string) error {
+	if len(s) > maxEmailOctets {
+		return errors.New("invalid email: address length")
+	}
+
 	local, domain, ok := splitEmail(s)
 	if !ok {
 		return errors.New("invalid email")
@@ -1615,7 +1631,14 @@ func checkContextualRules(label string) error {
 // and a bracketed address literal in the domain follows the same path as
 // validateEmailDomain. IDN-specific behavior is confined to where RFC 6531
 // widens RFC 5321: UTF-8 in the local part and U-labels/IDNA in the hostname.
+// The §4.5.3.1 size limits are not among the widenings -- RFC 6531 §3.4 keeps
+// them and keeps them measured in octets -- so the 254-octet total applies here
+// as it does to the plain email format.
 func validateIDNEmail(s string) error {
+	if len(s) > maxEmailOctets {
+		return errors.New("invalid IDN email: address too long")
+	}
+
 	local, domain, ok := splitEmail(s)
 	if !ok {
 		return errors.New("invalid IDN email: missing or misplaced @")

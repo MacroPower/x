@@ -72,13 +72,6 @@ var (
 			reason: "net.ParseIP accepts a :: eliding one group; RFC 5321 IPv6-comp requires more than one",
 		},
 	}
-
-	// Corpus cases the validator does not yet classify correctly, so the corpus
-	// can land ahead of the fix it motivates. Each entry is skipped rather than
-	// pinned, and is removed by the commit that closes it.
-	isEmailPendingFix = map[string]string{
-		"39": "validateEmail omits the RFC 5321 §4.5.3.1.3 254-octet limit on the whole address",
-	}
 )
 
 // isEmailCase is one decoded corpus case.
@@ -116,23 +109,15 @@ func runISEmailCorpus(t *testing.T, name string) {
 		require.True(t, known, "corpus case %s has unmapped category %q", tc.id, tc.category)
 	}
 
-	// Liveness: an override or pending entry naming a case that no longer
-	// exists would sit unexercised and mask a regression after a refresh.
+	// Liveness: an override naming a case that no longer exists would sit
+	// unexercised and mask a regression after a refresh.
 	for id := range isEmailOverrides {
 		require.True(t, ids[id], "override for case %s is no longer in the corpus; drop it", id)
-	}
-
-	for id := range isEmailPendingFix {
-		require.True(t, ids[id], "pending-fix entry for case %s is no longer in the corpus; drop it", id)
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.id+"/"+string(tc.category), func(t *testing.T) {
 			t.Parallel()
-
-			if reason, pending := isEmailPendingFix[tc.id]; pending {
-				t.Skipf("known defect, fix pending: %s", reason)
-			}
 
 			want := isEmailExpectations[tc.category]
 			why := "category " + string(tc.category)
