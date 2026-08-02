@@ -9,6 +9,21 @@ import (
 // value for base64-encoded string content.
 const base64Encoding = "base64"
 
+// validatorRule is one row of this dialect's key table: the shared rule, plus
+// the dialect's own explanation for a key whose declared arity an author is
+// likely to get wrong.
+//
+// The note lives on the row rather than in a second map keyed by the same
+// strings, so it cannot drift from the rule it explains -- the same reason the
+// shared model puts a dialect's divergence on its key row rather than beside it.
+type validatorRule struct {
+	// The paramNote field is a format verb taking the offending value. It
+	// replaces the generic arity message so the error says what is actually
+	// unrepresentable, not merely that the parameter was unexpected.
+	paramNote string
+	tagmodel.KeyRule
+}
+
 // validatorKeys is this dialect's whole vocabulary: every validator that
 // expresses a value constraint, mapped to the shared operation it names and the
 // way go-playground spells its parameter.
@@ -22,66 +37,71 @@ const base64Encoding = "base64"
 // min is a length on a string and a count on a slice, and the field's shape
 // decides which. SizedOp records the one place the dialect spells a size rule
 // with a value rule's key: eq=N on a slice is len(slice)==N.
-var (
-	validatorKeys = map[string]tagmodel.KeyRule{
-		"required": {Op: tagmodel.OpNonZero, Param: tagmodel.ParamNone},
+var validatorKeys = map[string]validatorRule{
+	"required": {KeyRule: tagmodel.KeyRule{Op: tagmodel.OpNonZero, Param: tagmodel.ParamNone}},
 
-		"min": {Op: tagmodel.OpFloorIncl, Param: tagmodel.ParamRequired},
-		"gte": {Op: tagmodel.OpFloorIncl, Param: tagmodel.ParamRequired},
-		"gt":  {Op: tagmodel.OpFloorExcl, Param: tagmodel.ParamRequired},
-		"max": {Op: tagmodel.OpCeilIncl, Param: tagmodel.ParamRequired},
-		"lte": {Op: tagmodel.OpCeilIncl, Param: tagmodel.ParamRequired},
-		"lt":  {Op: tagmodel.OpCeilExcl, Param: tagmodel.ParamRequired},
-		"len": {Op: tagmodel.OpExactSize, Param: tagmodel.ParamRequired},
+	"min": {KeyRule: tagmodel.KeyRule{Op: tagmodel.OpFloorIncl, Param: tagmodel.ParamRequired}},
+	"gte": {KeyRule: tagmodel.KeyRule{Op: tagmodel.OpFloorIncl, Param: tagmodel.ParamRequired}},
+	"gt":  {KeyRule: tagmodel.KeyRule{Op: tagmodel.OpFloorExcl, Param: tagmodel.ParamRequired}},
+	"max": {KeyRule: tagmodel.KeyRule{Op: tagmodel.OpCeilIncl, Param: tagmodel.ParamRequired}},
+	"lte": {KeyRule: tagmodel.KeyRule{Op: tagmodel.OpCeilIncl, Param: tagmodel.ParamRequired}},
+	"lt":  {KeyRule: tagmodel.KeyRule{Op: tagmodel.OpCeilExcl, Param: tagmodel.ParamRequired}},
+	"len": {KeyRule: tagmodel.KeyRule{Op: tagmodel.OpExactSize, Param: tagmodel.ParamRequired}},
 
-		"eq": {Op: tagmodel.OpEqual, SizedOp: tagmodel.OpExactSize, Param: tagmodel.ParamRequired},
-		"ne": {Op: tagmodel.OpNotEqual, SizedOp: tagmodel.OpForbidSize, Param: tagmodel.ParamRequired},
+	"eq": {KeyRule: tagmodel.KeyRule{
+		Op: tagmodel.OpEqual, SizedOp: tagmodel.OpExactSize, Param: tagmodel.ParamRequired,
+	}},
+	"ne": {KeyRule: tagmodel.KeyRule{
+		Op: tagmodel.OpNotEqual, SizedOp: tagmodel.OpForbidSize, Param: tagmodel.ParamRequired,
+	}},
 
-		"oneof": {Op: tagmodel.OpOneOf, Param: tagmodel.ParamList, Split: splitOneOfValues},
+	"oneof": {KeyRule: tagmodel.KeyRule{Op: tagmodel.OpOneOf, Param: tagmodel.ParamList, Split: splitOneOfValues}},
 
-		// The bare form asserts uniqueness of whole elements. The unique=<field>
-		// form asserts it of one named field across struct elements, which
-		// uniqueItems cannot express, so declaring this row ParamNone is what turns
-		// that parameter into an error instead of a silently weakened constraint.
-		"unique": {Op: tagmodel.OpUnique, Param: tagmodel.ParamNone, Implied: "true"},
+	// The bare form asserts uniqueness of whole elements. The unique=<field>
+	// form asserts it of one named field across struct elements, which
+	// uniqueItems cannot express, so declaring this row ParamNone is what turns
+	// that parameter into an error instead of a silently weakened constraint.
+	"unique": {
+		KeyRule:   tagmodel.KeyRule{Op: tagmodel.OpUnique, Param: tagmodel.ParamNone, Implied: "true"},
+		paramNote: "unique=%s has no JSON Schema equivalent (uniqueItems compares whole elements)",
+	},
 
-		"email":    formatKey("email"),
-		"url":      formatKey("uri"),
-		"uri":      formatKey("uri-reference"),
-		"uuid":     formatKey("uuid"),
-		"ipv4":     formatKey("ipv4"),
-		"ipv6":     formatKey("ipv6"),
-		"hostname": formatKey("hostname"),
+	"email":    formatKey("email"),
+	"url":      formatKey("uri"),
+	"uri":      formatKey("uri-reference"),
+	"uuid":     formatKey("uuid"),
+	"ipv4":     formatKey("ipv4"),
+	"ipv6":     formatKey("ipv6"),
+	"hostname": formatKey("hostname"),
 
-		"alpha":    patternKey(`^[a-zA-Z]+$`),
-		"alphanum": patternKey(`^[a-zA-Z0-9]+$`),
-		"numeric":  patternKey(`^[-+]?[0-9]+(?:\.[0-9]+)?$`),
-		"number":   patternKey(`^[0-9]+$`),
-		"ascii":    patternKey(`^[\x00-\x7F]*$`),
+	"alpha":    patternKey(`^[a-zA-Z]+$`),
+	"alphanum": patternKey(`^[a-zA-Z0-9]+$`),
+	"numeric":  patternKey(`^[-+]?[0-9]+(?:\.[0-9]+)?$`),
+	"number":   patternKey(`^[0-9]+$`),
+	"ascii":    patternKey(`^[\x00-\x7F]*$`),
 
-		"json":         {Op: tagmodel.OpContentMediaType, Param: tagmodel.ParamNone, Implied: "application/json"},
-		base64Encoding: {Op: tagmodel.OpContentEncoding, Param: tagmodel.ParamNone, Implied: base64Encoding},
-	}
-
-	// The paramNotes table carries this dialect's explanation for a key whose
-	// declared arity an author is likely to get wrong, so the error says what is
-	// actually unrepresentable rather than only that the parameter was
-	// unexpected. The verb takes the offending value.
-	paramNotes = map[string]string{
-		"unique": "unique=%s has no JSON Schema equivalent (uniqueItems compares whole elements)",
-	}
-)
+	"json": {KeyRule: tagmodel.KeyRule{
+		Op: tagmodel.OpContentMediaType, Param: tagmodel.ParamNone, Implied: "application/json",
+	}},
+	base64Encoding: {KeyRule: tagmodel.KeyRule{
+		Op: tagmodel.OpContentEncoding, Param: tagmodel.ParamNone, Implied: base64Encoding,
+	}},
+}
 
 // formatKey is a bare validator naming a format value, which the row supplies
 // since the tag itself carries none.
-func formatKey(format string) tagmodel.KeyRule {
-	return tagmodel.KeyRule{Op: tagmodel.OpFormat, Param: tagmodel.ParamNone, Implied: format}
+func formatKey(format string) validatorRule {
+	return validatorRule{KeyRule: tagmodel.KeyRule{
+		Op: tagmodel.OpFormat, Param: tagmodel.ParamNone, Implied: format,
+	}}
 }
 
 // patternKey is a bare validator naming a regular expression, spelled the same
 // way as a format key.
-func patternKey(pattern string) tagmodel.KeyRule {
-	return tagmodel.KeyRule{Op: tagmodel.OpPattern, Param: tagmodel.ParamNone, Implied: pattern}
+func patternKey(pattern string) validatorRule {
+	return validatorRule{KeyRule: tagmodel.KeyRule{
+		Op: tagmodel.OpPattern, Param: tagmodel.ParamNone, Implied: pattern,
+	}}
 }
 
 // isControlTag reports whether a key is a go-playground/validator control tag

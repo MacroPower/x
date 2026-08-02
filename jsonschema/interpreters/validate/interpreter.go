@@ -173,13 +173,16 @@ func applyValidator(key, value string, hasValue bool, field jsonschema.FieldCont
 
 	shape := shapeOf(field)
 
-	bound, err := tagmodel.Bind(rule, shape, value, hasValue)
+	bound, err := tagmodel.Bind(rule.KeyRule, shape, value, hasValue)
 	if err != nil {
-		if note, ok := paramNotes[key]; ok {
-			return fmt.Errorf("validate tag: "+note, value)
+		// A row carrying its own note replaces the generic arity reason, but
+		// still wraps the model's error, so errors.Is keeps working through it.
+		reason := key
+		if rule.paramNote != "" {
+			reason = fmt.Sprintf(rule.paramNote, value)
 		}
 
-		return fmt.Errorf("validate tag: %s: %w", key, err)
+		return fmt.Errorf("validate tag: %s: %w", reason, err)
 	}
 
 	err = field.ConstraintsFor(shape).Apply(bound.Op, bound.Axis, bound.Params.Values()...)

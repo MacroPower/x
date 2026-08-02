@@ -98,15 +98,14 @@ var (
 	// beside the two tables above so a new form declares why it rejects a bound
 	// where it declares which bounds it takes, rather than in a switch elsewhere.
 	formAxisNote = [formCount]string{
-		FormByteString: "a length or uniqueness constraint on a []byte field has no array length " +
-			"to constrain (it encodes as a base64 string)",
-		FormCoercedNumber: coercedBoundNote,
-		FormCoercedBool:   coercedBoundNote,
+		FormByteString: "a bound on a []byte field has no array length to constrain " +
+			"(it encodes as a base64 string)",
 	}
 )
 
-// coercedBoundNote explains why no bound reaches a string-coerced field, shared
-// by the axis check and the cells that reject a bound outright.
+// coercedBoundNote explains why no bound reaches a string-coerced field. It is
+// a static cell reason rather than a formAxisNote row: no cell routes a coerced
+// form to applyBound, so the axis check never sees one.
 const coercedBoundNote = "a bound is not supported on a json:\",string\" coerced numeric field " +
 	"(minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)"
 
@@ -165,17 +164,17 @@ func fillBounds() {
 	apply(OpExactSize, FormNumber, applyEqual)
 	apply(OpExactSize, FormCoercedNumber, applyEqual)
 
-	// Forbidding a size is only meaningful where a size exists.
-	for _, f := range []Form{FormArray, FormObject} {
-		apply(OpForbidSize, f, applyForbidSize)
-	}
+	// Forbidding a size is only meaningful where a size exists, and which size
+	// it is comes from the table rather than from the applier.
+	apply(OpForbidSize, FormArray, forbidSizeOn(AxisItems))
+	apply(OpForbidSize, FormObject, forbidSizeOn(AxisProperties))
 
 	// A coerced numeric bound has no faithful mapping: minimum constrains JSON
 	// numbers, so it is inert against the quoted string the field emits, and
 	// JSON Schema has no keyword for "the numeric value of this text is >= N".
 	for _, op := range []Op{OpFloorIncl, OpFloorExcl, OpCeilIncl, OpCeilExcl} {
 		for _, f := range []Form{FormCoercedNumber, FormCoercedBool} {
-			reject(op, f, axisRejection(f, AxisAuto))
+			reject(op, f, coercedBoundNote)
 		}
 	}
 }
@@ -216,7 +215,7 @@ func fillValues() {
 	// same policy the length constraints on a byte slice already follow, and it
 	// is what makes a sequence-wide enumeration and a dive-scoped one agree.
 	for _, f := range []Form{FormByteString, FormRawBytes} {
-		reject(OpOneOf, f, fmt.Sprintf("a %s has no item schema to constrain", f))
+		reject(OpOneOf, f, NoElementsReason(f))
 	}
 
 	apply(OpUnique, FormArray, applyUnique)
@@ -247,9 +246,9 @@ func fillNonZero() {
 	apply(OpNonZero, FormArray, nonZeroFloor(AxisItems))
 	apply(OpNonZero, FormObject, nonZeroFloor(AxisProperties))
 
-	apply(OpNonZero, FormNumber, nonZeroForbid)
-	apply(OpNonZero, FormCoercedNumber, nonZeroForbid)
-	apply(OpNonZero, FormCoercedBool, nonZeroForbid)
+	apply(OpNonZero, FormNumber, nonZeroForbidNumber)
+	apply(OpNonZero, FormCoercedNumber, nonZeroForbidCoerced)
+	apply(OpNonZero, FormCoercedBool, nonZeroForbidCoerced)
 
 	apply(OpNonZero, FormBool, nonZeroTrue)
 
@@ -270,7 +269,11 @@ func fillNonZero() {
 // fillStringKeywords fills the four first-wins string-keyword rows, which apply
 // wherever the instance is a string.
 func fillStringKeywords() {
-	for _, op := range []Op{OpFormat, OpPattern, OpContentEncoding, OpContentMediaType} {
+	for op := OpUnset + 1; op < opCount; op++ {
+		if !op.IsStringKeyword() {
+			continue
+		}
+
 		for _, f := range []Form{
 			FormString, FormTextString, FormByteString, FormCoercedNumber, FormCoercedBool, FormRef,
 		} {

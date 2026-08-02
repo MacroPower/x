@@ -95,12 +95,12 @@ func TestMatrixGolden(t *testing.T) {
 		|element uniqueness / string-coerced number -> reject: unique has no array to constrain on a string-coerced number
 		|element uniqueness / text-marshaled string -> reject: unique has no array to constrain on a text-marshaled string
 		|enumerated values / array -> apply
-		|enumerated values / base64 byte string -> reject: a base64 byte string has no item schema to constrain
+		|enumerated values / base64 byte string -> reject: a []byte field has no item schema to constrain (it encodes as a base64 string)
 		|enumerated values / boolean -> apply
 		|enumerated values / number -> apply
 		|enumerated values / object -> reject: an enumeration on a map has no element meaning (use dive to constrain the values)
 		|enumerated values / opaque value -> reject: enumerated values is not supported on a opaque value
-		|enumerated values / raw byte slice -> reject: a raw byte slice has no item schema to constrain
+		|enumerated values / raw byte slice -> reject: a []byte field has no item schema to constrain (it encodes as a base64 string)
 		|enumerated values / referenced definition -> reject: enumerated values is not supported on a referenced definition
 		|enumerated values / string -> apply
 		|enumerated values / string-coerced boolean -> apply

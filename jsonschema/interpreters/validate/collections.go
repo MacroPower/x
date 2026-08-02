@@ -33,26 +33,11 @@ func applyDive(remaining []string, field jsonschema.FieldContext) error {
 	return nil
 }
 
-// noElementsReason names why a field has no element schema to descend into,
-// separating the shapes that genuinely have none from a diveable shape whose
-// schema a provider supplied without item sub-schemas.
+// noElementsReason names why a field has no element schema to descend into.
+// The reason itself comes from the shared model, so a dive and a sequence-wide
+// rule report the same fact in the same words. Reporting at all -- rather than
+// accepting a dive into a shape with no elements as a no-op -- is what keeps the
+// two paths agreeing about a field neither can reach into.
 func noElementsReason(field jsonschema.FieldContext) error {
-	form := shapeOf(field).Form
-
-	switch form {
-	case tagmodel.FormByteString, tagmodel.FormRawBytes:
-		// A []byte encodes as one base64 string, so there are no elements and
-		// never will be. Reporting it matches the sequence-wide rules on the
-		// same field, which reject rather than dropping a constraint the author
-		// wrote; accepting the dive as a no-op here would make the two paths
-		// disagree about the same field.
-		return errors.New(
-			"a []byte field has no item schema to constrain (it encodes as a base64 string)")
-
-	case tagmodel.FormArray, tagmodel.FormObject:
-		return errors.New("the schema has no item or value sub-schema")
-
-	default:
-		return fmt.Errorf("cannot descend into a %s", form)
-	}
+	return errors.New(tagmodel.NoElementsReason(shapeOf(field).Form))
 }

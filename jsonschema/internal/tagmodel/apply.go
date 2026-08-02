@@ -8,6 +8,7 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/constraint"
+	"go.jacobcolvin.com/x/jsonschema/internal/numkind"
 	"go.jacobcolvin.com/x/jsonschema/internal/typename"
 )
 
@@ -61,7 +62,7 @@ func resolveAxis(form Form, axis Axis) (Axis, error) {
 func retargetToElements(t Target, r Rule, pol Policy) error {
 	elems := t.Elements()
 	if len(elems) == 0 {
-		return fmt.Errorf("%w: %s has no item schema to constrain", ErrUnsupported, t.Shape.Form)
+		return fmt.Errorf("%w: %s", ErrUnsupported, NoElementsReason(t.Shape.Form))
 	}
 
 	for _, elem := range elems {
@@ -78,6 +79,21 @@ func retargetToElements(t Target, r Rule, pol Policy) error {
 	}
 
 	return nil
+}
+
+// NoElementsReason is why a shape has no element schema to constrain. Every path
+// that has to say so -- a sequence-wide rule, a dive, and the static cells for
+// the shapes that never have elements -- says it from here, so the two dialects
+// cannot drift on the wording of a fact they share.
+func NoElementsReason(form Form) string {
+	switch form {
+	case FormByteString, FormRawBytes:
+		return "a []byte field has no item schema to constrain (it encodes as a base64 string)"
+	case FormArray, FormObject:
+		return "the schema has no item or value sub-schema to constrain"
+	default:
+		return fmt.Sprintf("a %s has no elements to constrain", form)
+	}
 }
 
 // applyBound settles which keyword family the bound targets, then routes it
@@ -98,11 +114,19 @@ func applyBound(t Target, r Rule, pol Policy) error {
 
 	r.Axis = axis
 
-	if axis == AxisNumeric {
-		return applyNumericBound(t, r, pol)
+	if axis != AxisNumeric {
+		return applySizeBound(t, r, pol)
 	}
 
-	return applySizeBound(t, r, pol)
+	// A number has no "exact size": pinning is what an exact rule means there.
+	// The table reroutes the plain numeric form already, but a shape whose type
+	// is only known through a reference reaches this with the axis named
+	// outright.
+	if r.Op == OpExactSize {
+		return applyEqual(t, r, pol)
+	}
+
+	return applyNumericBound(t, r, pol)
 }
 
 // applyNumericBound parses under the dialect's literal domain
@@ -128,8 +152,8 @@ func applyNumericBound(t Target, r Rule, pol Policy) error {
 	case OpCeilExcl:
 		tighten(&t.Canvas.ExclusiveMaximum, base.ExclusiveMaximum, n, true)
 	default:
-		// Only the four endpoint operations resolve to the numeric axis; an
-		// exact size on a number pins the value and never reaches here.
+		// The four endpoint operations are the only ones applyBound routes to
+		// the numeric axis; an exact size is a pin and was handled there.
 		return fmt.Errorf("%w: %s has no numeric endpoint", ErrUnsupported, r.Op)
 	}
 
@@ -176,40 +200,43 @@ func applySizeBound(t Target, r Rule, pol Policy) error {
 	return nil
 }
 
-// applyForbidSize forbids one length or entry count, expressed as a not
-// subschema pinning that size. The subschema is gated on the instance type,
-// because a size keyword is inert against a non-array (or non-object) instance:
-// without the gate it would vacuously validate against the null a nilable
-// field's schema deliberately admits, and the outer not would reject it.
-func applyForbidSize(t Target, r Rule, _ Policy) error {
-	n, err := parseSizeLiteral(r.Params.One())
-	if err != nil {
-		return err
-	}
+// forbidSizeOn builds the applier that forbids one length or entry count on a
+// given axis, expressed as a not subschema pinning that size. The axis comes
+// from the table rather than from the target's form, so the form-to-axis fact
+// stays in one place.
+//
+// The subschema is gated on the instance type, because a size keyword is inert
+// against a non-array (or non-object) instance: without the gate it would
+// vacuously validate against the null a nilable field's schema deliberately
+// admits, and the outer not would reject it.
+func forbidSizeOn(axis Axis) func(Target, Rule, Policy) error {
+	return func(t Target, r Rule, _ Policy) error {
+		n, err := parseSizeLiteral(r.Params.One())
+		if err != nil {
+			return err
+		}
 
-	// No instance has a negative size, so forbidding one excludes nothing.
-	if n < 0 {
+		// No instance has a negative size, so forbidding one excludes nothing.
+		if n < 0 {
+			return nil
+		}
+
+		forbidden := &jsonschema.Schema{}
+
+		if axis == AxisProperties {
+			forbidden.Type = typename.Object
+			forbidden.MinProperties = &n
+			forbidden.MaxProperties = &n
+		} else {
+			forbidden.Type = typename.Array
+			forbidden.MinItems = &n
+			forbidden.MaxItems = &n
+		}
+
+		ForbidSchema(t.Canvas, forbidden)
+
 		return nil
 	}
-
-	forbidden := &jsonschema.Schema{}
-
-	// The size a map has is its entry count; every other sized shape's is its
-	// item count. Reading it from the form keeps this independent of whether the
-	// dialect named an axis at all.
-	if t.Shape.Form == FormObject {
-		forbidden.Type = typename.Object
-		forbidden.MinProperties = &n
-		forbidden.MaxProperties = &n
-	} else {
-		forbidden.Type = typename.Array
-		forbidden.MinItems = &n
-		forbidden.MaxItems = &n
-	}
-
-	ForbidSchema(t.Canvas, forbidden)
-
-	return nil
 }
 
 // applyEqual pins the target's const, reporting a conflict rather than
@@ -340,36 +367,38 @@ func nonZeroFloor(axis Axis) func(Target, Rule, Policy) error {
 	}
 }
 
-// nonZeroForbid is the non-zero assertion on a shape whose emptiness is a value:
-// forbid the zero the field emits. On a coerced shape that is the serialized
-// text, taken from the same scalar constructor every other coerced operation
-// calls, so a string-marshaling type forbids what it actually writes.
-func nonZeroForbid(t Target, _ Rule, pol Policy) error {
+// nonZeroForbidCoerced is the non-zero assertion on a shape whose schema is a
+// string because it serializes itself as one: forbid the serialized zero, taken
+// from the same scalar constructor every other coerced operation calls, so a
+// string-marshaling type forbids the text it actually writes rather than a
+// hardcoded "0" it never emits.
+func nonZeroForbidCoerced(t Target, _ Rule, pol Policy) error {
 	if t.Shape.Nullable {
 		return nil
 	}
 
-	switch t.Shape.Form {
-	case FormCoercedNumber, FormCoercedBool:
-		v, err := t.Shape.ParseScalar(t.Shape.zeroLiteral(), pol)
-		if err != nil {
-			return err
-		}
+	v, err := t.Shape.ParseScalar(t.Shape.zeroLiteral(), pol)
+	if err != nil {
+		return err
+	}
 
-		Forbid(t.Canvas, v)
+	Forbid(t.Canvas, v)
 
-	case FormNumber:
-		// The untyped literals the numeric-aware dedup folds together with any
-		// other spelling of zero the same target forbids.
-		if numericIsIntegral(t.Shape.Kind) {
-			Forbid(t.Canvas, 0)
-		} else {
-			Forbid(t.Canvas, 0.0)
-		}
+	return nil
+}
 
-	default:
-		// Only the value-shaped forms route here; the matrix sends every other
-		// form to a size floor or a documented no-op.
+// nonZeroForbidNumber is the non-zero assertion on a native number: forbid the
+// zero literal directly. The untyped literals are what the numeric-aware dedup
+// folds together with any other spelling of zero the same target forbids.
+func nonZeroForbidNumber(t Target, _ Rule, _ Policy) error {
+	if t.Shape.Nullable {
+		return nil
+	}
+
+	if numkind.IsInteger(t.Shape.Kind) {
+		Forbid(t.Canvas, 0)
+	} else {
+		Forbid(t.Canvas, 0.0)
 	}
 
 	return nil

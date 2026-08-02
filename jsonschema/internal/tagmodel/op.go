@@ -109,6 +109,20 @@ func (op Op) String() string {
 	return opNames[op]
 }
 
+// IsStringKeyword reports whether the operation sets one of the string keywords
+// (format, pattern, and the content pair). These are the only operations whose
+// applier can overwrite a value already in force -- a const or enum conflicts,
+// and a bound intersects -- so a dialect that has to notice a repeated value
+// asks here rather than naming the set itself and going stale.
+func (op Op) IsStringKeyword() bool {
+	switch op {
+	case OpFormat, OpPattern, OpContentEncoding, OpContentMediaType:
+		return true
+	default:
+		return false
+	}
+}
+
 // Axis pins the keyword family a bound targets. [AxisAuto] lets the shape
 // choose, which is what a dialect naming a rule rather than a keyword means:
 // validate's min is a length on a string and a count on a slice. A dialect that

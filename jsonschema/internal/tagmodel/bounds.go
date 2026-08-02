@@ -3,13 +3,11 @@ package tagmodel
 import (
 	"cmp"
 	"fmt"
-	"reflect"
 	"strconv"
 
 	"github.com/google/jsonschema-go/jsonschema"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/constraint"
-	"go.jacobcolvin.com/x/jsonschema/internal/numkind"
 )
 
 // baseOf returns the target's type-derived schema, or an empty one when it has
@@ -85,10 +83,4 @@ func sizeSlots(t Target, axis Axis) (**int, **int, *int, *int) {
 	default:
 		return &t.Canvas.MinLength, &t.Canvas.MaxLength, base.MinLength, base.MaxLength
 	}
-}
-
-// numericIsIntegral reports whether a numeric kind's zero is an integer, so the
-// non-zero assertion forbids the literal the schema's own values compare as.
-func numericIsIntegral(kind reflect.Kind) bool {
-	return numkind.IsInteger(kind)
 }

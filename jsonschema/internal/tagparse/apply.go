@@ -123,8 +123,8 @@ func Apply(
 		canvas:     canvas,
 		payload:    payload,
 		typeSchema: typeSchema,
-		scalarType: fieldType,
 		shapeType:  fieldType,
+		scalarOK:   true,
 		groupsSet:  map[string]bool{},
 		seen:       map[string]bool{},
 	}
@@ -148,25 +148,24 @@ type applyState struct {
 	// payload except where the payload understates the instance (see [Apply]).
 	// A type= override restates the payload outright, so it replaces this too.
 	typeSchema *jsonschema.Schema
-	// The scalarType field is what a scalar key parses against, and nil after a type=
-	// override with no scalar stand-in, which is the gate that rejects a scalar
-	// key following one.
-	scalarType reflect.Type
-	// The shapeType field is what a constraint key classifies against. It differs from
-	// scalarType only after a non-scalar type= override, where there is no
-	// scalar stand-in but the overridden shape still has to answer whether it
-	// carries a given keyword family.
+	// The shapeType field is what every key classifies against: the field's Go
+	// type, or a stand-in for the overridden JSON type after a type= pair.
 	shapeType      reflect.Type
 	groupsSet      map[string]bool
 	seen           map[string]bool
 	overriddenType string
+	// The scalarOK flag reports whether a scalar key still has a type to parse
+	// against. It goes false after a type= override to array, object, or null,
+	// which have no scalar stand-in, and is the gate that rejects a scalar key
+	// following one.
+	scalarOK bool
 }
 
 // apply folds one directive into the state.
 func (s *applyState) apply(d Directive) error {
 	key, value := d.Key, d.Value
 
-	if s.scalarType == nil && isScalarValueKey(key) {
+	if !s.scalarOK && isScalarValueKey(key) {
 		return fmt.Errorf("jsonschema tag: key %q cannot follow type=%s", key, s.overriddenType)
 	}
 
@@ -211,7 +210,7 @@ func (s *applyState) apply(d Directive) error {
 	}
 
 	if key == keyword.Type {
-		s.scalarType = standInTypeFor(value)
+		s.scalarOK = standInTypeFor(value) != nil
 		s.shapeType = overriddenShapeType(value)
 		s.overriddenType = value
 	}
@@ -323,7 +322,7 @@ func (s *applyState) wrapApplyError(key, value string, err error) error {
 func (s *applyState) bind(
 	rule tagmodel.KeyRule, shape tagmodel.Shape, key, value string,
 ) (tagmodel.Rule, error) {
-	if value == "" && key == keyword.Const && isStringScalar(s.scalarType) {
+	if value == "" && key == keyword.Const && s.isStringScalar() {
 		return tagmodel.Rule{Op: rule.Op, Axis: rule.Axis, Params: tagmodel.ParamsOf("")}, nil
 	}
 
@@ -341,14 +340,18 @@ func (s *applyState) bind(
 
 // checkRepeat reports a key naming a string keyword twice in one tag.
 //
-// The shared model applies these first-wins, which is right across sources: an
-// explicit tag beats an interpreter and the field's type beats both, by a
-// documented precedence. Within one tag there is no precedence to appeal to, so
-// two values for one keyword state two intentions and silently dropping either
-// would be worse than reporting. Bounds are exempt: two of those intersect,
-// which is a defined composition rather than a contradiction.
+// These are the only operations whose applier overwrites: this dialect replaces
+// what the field's type declared, which is right across sources, where a
+// documented precedence applies. Within one tag there is no precedence to appeal
+// to, so two values for one keyword state two intentions and silently dropping
+// either would be worse than reporting. Bounds are exempt, since two of those
+// intersect -- a defined composition rather than a contradiction -- and a const
+// or enum already conflicts on its own.
+//
+// The set comes from the model rather than being named here, so adding a
+// content-keyword row to the table cannot silently escape the check.
 func (s *applyState) checkRepeat(rule tagmodel.KeyRule, key string) error {
-	if rule.Op != tagmodel.OpFormat && rule.Op != tagmodel.OpPattern {
+	if !rule.Op.IsStringKeyword() {
 		return nil
 	}
 
@@ -387,7 +390,7 @@ func (s *applyState) applyFlag(key, value string) error {
 func (s *applyState) applyDefault(key, value string) error {
 	// An empty value is rejected except on a string field, where "" is the valid
 	// JSON Schema default the empty string.
-	if value == "" && !isStringScalar(s.scalarType) {
+	if value == "" && !s.isStringScalar() {
 		return emptyValueError(key)
 	}
 
@@ -524,9 +527,9 @@ func isScalarValueKey(key string) bool {
 	}
 }
 
-// isStringScalar reports whether t (after dereferencing pointers) is a string
-// kind. An empty const/default value is meaningful only for a string field,
-// where it expresses the valid JSON Schema value "".
-func isStringScalar(t reflect.Type) bool {
-	return t != nil && numkind.DerefType(t).Kind() == reflect.String
+// isStringScalar reports whether the effective type is a string kind. An empty
+// const or default value is meaningful only there, where it expresses the valid
+// JSON Schema value "".
+func (s *applyState) isStringScalar() bool {
+	return s.scalarOK && numkind.DerefType(s.shapeType).Kind() == reflect.String
 }
