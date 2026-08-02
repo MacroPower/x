@@ -534,17 +534,8 @@ func validateHostnameLabels(s string, banNumericTLD, allowTrailingDot bool) erro
 
 	labels := strings.Split(s, ".")
 	for _, label := range labels {
-		if label == "" || len(label) > 63 {
+		if !isLDHLabel(label) {
 			return errors.New("invalid hostname")
-		}
-
-		for i, c := range label {
-			isAlpha := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
-			isDigit := c >= '0' && c <= '9'
-			isHyphen := c == '-' && i > 0 && i < len(label)-1
-			if !isAlpha && !isDigit && !isHyphen {
-				return errors.New("invalid hostname")
-			}
 		}
 
 		// Only labels carrying the "xn--" ACE prefix are A-labels and must
@@ -571,6 +562,33 @@ func validateHostnameLabels(s string, banNumericTLD, allowTrailingDot bool) erro
 	}
 
 	return nil
+}
+
+// isLDHLabel reports whether label is a letter-digit-hyphen label: ASCII
+// letters, digits, and interior hyphens, non-empty and at most 63 octets. This
+// is both the RFC 1123 §2.1 host name label and the RFC 5321 §4.1.2 sub-domain
+// (Let-dig [Ldh-str]), which are the same production. Consecutive hyphens are
+// permitted anywhere they are interior, including positions 3-4: RFC 5890
+// §2.3.2.2 reserves that shape for IDNA, but neither RFC 1123 nor RFC 5321 does,
+// and the two callers that own those grammars must not inherit the IDNA rule.
+func isLDHLabel(label string) bool {
+	if label == "" || len(label) > 63 {
+		return false
+	}
+
+	for i := range len(label) {
+		c := label[i]
+
+		isAlpha := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+		isDigit := c >= '0' && c <= '9'
+		isHyphen := c == '-' && i > 0 && i < len(label)-1
+
+		if !isAlpha && !isDigit && !isHyphen {
+			return false
+		}
+	}
+
+	return true
 }
 
 // hasACEPrefix reports whether label begins with the IDNA ACE prefix "xn--".
@@ -1449,18 +1467,31 @@ func validateURITemplateVarname(name string) error {
 func validateIDNHostname(s string) error {
 	// The idn-hostname format bans an all-numeric top-level label, mirroring the
 	// plain hostname format so it cannot be confused with an IPv4 address, and
-	// keeps the FQDN trailing-dot allowance the hostname format has.
-	return validateIDNHostnameLabels(s, true, true)
+	// keeps the FQDN trailing-dot allowance the hostname format has. Its ASCII
+	// labels are IDNA LDH labels, so they go through idna.Lookup and pick up the
+	// RFC 5890 §2.3.2.2 reserved-LDH ban.
+	return validateIDNHostnameLabels(s, true, true, false)
 }
 
 // validateIDNHostnameLabels validates the shared RFC 5890/5891 label structure
-// used by both the idn-hostname format and idn-email domain validation. The
-// banNumericTLD flag rejects an all-numeric top-level label, which the
+// used by both the idn-hostname format and idn-email domain validation. Three
+// flags separate what belongs to each caller's grammar:
+//
+// The banNumericTLD flag rejects an all-numeric top-level label, which the
 // idn-hostname format requires but the RFC 5321/6531 email domain grammar
 // permits. The allowTrailingDot flag accepts the DNS root-dot convention on a
-// multi-label FQDN, which likewise belongs to the idn-hostname format only:
-// the RFC 5321/6531 Domain grammar has no trailing-dot production.
-func validateIDNHostnameLabels(s string, banNumericTLD, allowTrailingDot bool) error {
+// multi-label FQDN, which likewise belongs to the idn-hostname format only: the
+// RFC 5321/6531 Domain grammar has no trailing-dot production.
+//
+// The asciiSubDomain flag decides which LDH rule an ASCII label without an ACE
+// prefix is held to. Such a label is not internationalized at all, so the
+// caller's grammar owns it: idn-hostname holds it to IDNA, where idna.Lookup
+// applies RFC 5890 §2.3.2.2 and rejects a reserved-LDH label ("ab--cd"), while
+// idn-email holds it to RFC 5321 sub-domain, which permits one -- RFC 6531 §3.3
+// widens the RFC 5321 Domain grammar by admitting U-labels and does not narrow
+// its ASCII alternative. This mirrors validateHostnameLabels, which likewise
+// applies IDNA only to an "xn--"-prefixed label.
+func validateIDNHostnameLabels(s string, banNumericTLD, allowTrailingDot, asciiSubDomain bool) error {
 	if s == "" {
 		return errors.New("invalid IDN hostname: empty string")
 	}
@@ -1480,9 +1511,9 @@ func validateIDNHostnameLabels(s string, banNumericTLD, allowTrailingDot bool) e
 			return errors.New("invalid IDN hostname: empty label")
 		}
 
-		ascii, err := idna.Lookup.ToASCII(label)
+		ascii, err := idnLabelToASCII(label, asciiSubDomain)
 		if err != nil {
-			return errors.New("invalid IDN hostname: " + err.Error())
+			return err
 		}
 
 		// A non-empty label whose A-label form is empty is a degenerate
@@ -1542,6 +1573,41 @@ func validateIDNHostnameLabels(s string, banNumericTLD, allowTrailingDot bool) e
 	}
 
 	return nil
+}
+
+// idnLabelToASCII returns the A-label form of one domain label. When
+// asciiSubDomain is set and the label is pure ASCII without an ACE prefix, it is
+// an LDH label the caller's grammar owns, so it is held to RFC 5321 sub-domain
+// and returned as written rather than routed through idna.Lookup, whose RFC 5890
+// §2.3.2.2 reserved-LDH ban does not belong to that grammar. Every other label
+// -- one carrying non-ASCII (a U-label) or an "xn--" prefix (an A-label) -- is
+// genuinely internationalized and converts through IDNA.
+func idnLabelToASCII(label string, asciiSubDomain bool) (string, error) {
+	if asciiSubDomain && isASCII(label) && !hasACEPrefix(label) {
+		if !isLDHLabel(label) {
+			return "", errors.New("invalid IDN hostname: invalid label")
+		}
+
+		return label, nil
+	}
+
+	ascii, err := idna.Lookup.ToASCII(label)
+	if err != nil {
+		return "", errors.New("invalid IDN hostname: " + err.Error())
+	}
+
+	return ascii, nil
+}
+
+// isASCII reports whether s consists entirely of ASCII bytes.
+func isASCII(s string) bool {
+	for i := range len(s) {
+		if s[i] >= utf8.RuneSelf {
+			return false
+		}
+	}
+
+	return true
 }
 
 // splitIDNADots splits a string on all IDNA dot separators:
@@ -1686,7 +1752,10 @@ func validateIDNEmailLocal(s string) error {
 // name (U-labels/IDNA); the RFC 5321/6531 email domain grammar permits an
 // all-numeric top-level label, so the idn-hostname numeric-TLD ban does not
 // apply here, and it has no trailing-dot production, so the FQDN root-dot
-// allowance does not apply either.
+// allowance does not apply either. An ASCII label without an ACE prefix is held
+// to RFC 5321 sub-domain rather than to IDNA, because RFC 6531 §3.3 widens the
+// RFC 5321 Domain grammar by admitting U-labels and leaves its ASCII
+// alternative alone; the plain email format accepts the same labels.
 func validateIDNEmailDomain(d string) error {
 	if d == "" {
 		return errors.New("invalid IDN email: empty domain")
@@ -1696,7 +1765,7 @@ func validateIDNEmailDomain(d string) error {
 		return validateEmailDomain(d)
 	}
 
-	return validateIDNHostnameLabels(d, false, false)
+	return validateIDNHostnameLabels(d, false, false, true)
 }
 
 // isIDNAtext reports whether r may appear in an unquoted IDN email local part

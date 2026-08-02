@@ -136,6 +136,37 @@ func hasURIScheme(s string) bool {
 	return false
 }
 
+// FuzzContainmentEmailImpliesIDNEmail asserts that every email is an idn-email.
+// RFC 6531 §3.2 and §3.3 define the internationalized Mailbox by widening RFC
+// 5321's: UTF-8 in the local part, U-labels in the domain. It adds alternatives
+// and removes none, so the ASCII language is contained in the UTF-8 one, and a
+// violation here means one of the two paths carries a check its grammar sibling
+// must not -- which is how the IDNA reserved-LDH ban was found leaking into
+// idn-email domains.
+func FuzzContainmentEmailImpliesIDNEmail(f *testing.F) {
+	email := validator(f, "email")
+	idnEmail := validator(f, "idn-email")
+
+	for _, seed := range []string{
+		"user@example.com", "a@b", "a@ab--cd.com", "a@xn--fsq.jp", `""@example.com`,
+		`"a b"@example.com`, "user@[192.0.2.1]", "user@[IPv6:::1]", "user@123",
+		"user@example.com.", "no-at-sign", "@example.com", "user@", "",
+	} {
+		f.Add(seed)
+	}
+
+	f.Fuzz(func(t *testing.T, s string) {
+		if email(s) != nil {
+			return
+		}
+
+		err := idnEmail(s)
+		if err != nil {
+			t.Fatalf("email accepts %q but idn-email rejects it: %v", s, err)
+		}
+	})
+}
+
 // FuzzContainmentIPv4ImpliesMappedIPv6 asserts that every ipv4 address embeds in
 // the IPv4-mapped IPv6 form. RFC 4291 §2.5.5.2 defines "::ffff:" + dotted-quad
 // as an IPv6 address, and its dotted-quad tail is exactly the ipv4 grammar, so

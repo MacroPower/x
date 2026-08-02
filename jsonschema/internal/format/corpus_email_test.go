@@ -88,6 +88,17 @@ func TestEmailCorpus(t *testing.T) {
 	runISEmailCorpus(t, "email")
 }
 
+// TestIDNEmailCorpus runs the same corpus through the idn-email format. RFC
+// 6531 widens the RFC 5321 Mailbox grammar rather than restating it -- UTF-8 in
+// the local part, U-labels in the domain -- so every ASCII address the corpus
+// grades is graded identically, and the widened alternatives the corpus does
+// not reach are covered by the vectors and the containment target.
+func TestIDNEmailCorpus(t *testing.T) {
+	t.Parallel()
+
+	runISEmailCorpus(t, "idn-email")
+}
+
 // runISEmailCorpus drives every corpus case against the named format, which
 // asserts the RFC 5321 Mailbox grammar or a documented widening of it.
 func runISEmailCorpus(t *testing.T, name string) {
