@@ -1,6 +1,11 @@
 package jsonschema
 
-import "fmt"
+import (
+	"fmt"
+	"slices"
+
+	"go.jacobcolvin.com/x/jsonschema/internal/keywordmeta"
+)
 
 // keywordTable is the ordered keyword dispatch table. It drives the Compile-time
 // precompute (precomputeRange runs each row's compile step per indexed node) and,
@@ -18,10 +23,11 @@ import "fmt"
 // variable initializer, so it is exempt.
 var keywordTable []keywordEntry
 
-// init builds the dispatch table and enforces its ordering invariants at package
-// load, turning the "unevaluated must run last" rule from a convention an edit
-// could break into a checked fact: phases are non-decreasing down the table (so
-// the phaseUnevaluated rows form a contiguous tail), and every unevaluated row
+// init builds the dispatch table, derives each row's draft range from its member
+// keywords, and enforces the table's invariants at package load, turning the
+// "unevaluated must run last" rule from a convention an edit could break into a
+// checked fact: phases are non-decreasing down the table (so the
+// phaseUnevaluated rows form a contiguous tail), and every unevaluated row
 // carries the unevaluated vocabulary and the 2020-12-and-up draft range. A
 // violation panics at load rather than silently mis-ordering annotation
 // evaluation.
@@ -32,7 +38,6 @@ func init() {
 			name:     "$ref",
 			keywords: []string{KeywordRef},
 			vocab:    vocabCore,
-			drafts:   draftAll,
 			phase:    phaseRef,
 			isRef:    true,
 			eval:     evalRef,
@@ -41,7 +46,6 @@ func init() {
 			name:     "$dynamicRef",
 			keywords: []string{KeywordDynamicRef},
 			vocab:    vocabCore,
-			drafts:   draft2020Up,
 			phase:    phaseRef,
 			eval:     evalDynamicRef,
 		},
@@ -51,7 +55,6 @@ func init() {
 			name:     "type",
 			keywords: []string{KeywordType},
 			vocab:    vocabValidation,
-			drafts:   draftAll,
 			phase:    phaseAssert,
 			eval:     evalType,
 		},
@@ -59,7 +62,6 @@ func init() {
 			name:     "enum",
 			keywords: []string{KeywordEnum},
 			vocab:    vocabValidation,
-			drafts:   draftAll,
 			phase:    phaseAssert,
 			compile:  enumCompile,
 			eval:     evalEnum,
@@ -68,7 +70,6 @@ func init() {
 			name:     "const",
 			keywords: []string{KeywordConst},
 			vocab:    vocabValidation,
-			drafts:   draftAll,
 			phase:    phaseAssert,
 			compile:  constCompile,
 			eval:     evalConst,
@@ -80,7 +81,6 @@ func init() {
 				KeywordExclusiveMinimum, KeywordExclusiveMaximum,
 			},
 			vocab:   vocabValidation,
-			drafts:  draftAll,
 			phase:   phaseAssert,
 			compile: numericCompile,
 			eval:    evalNumeric,
@@ -89,7 +89,6 @@ func init() {
 			name:     "string",
 			keywords: []string{KeywordMinLength, KeywordMaxLength, KeywordPattern},
 			vocab:    vocabValidation,
-			drafts:   draftAll,
 			phase:    phaseAssert,
 			compile:  stringCompile,
 			eval:     evalString,
@@ -99,7 +98,6 @@ func init() {
 			keywords: []string{KeywordFormat},
 			vocab:    vocabCore,
 			optIn:    optInFormat,
-			drafts:   draftAll,
 			phase:    phaseAssert,
 			eval:     evalFormat,
 		},
@@ -107,7 +105,6 @@ func init() {
 			name:     "array.items",
 			keywords: []string{KeywordPrefixItems, KeywordItems, KeywordAdditionalItems},
 			vocab:    vocabApplicator,
-			drafts:   draftAll,
 			phase:    phaseAssert,
 			compile:  itemsCompile,
 			eval:     evalArrayItems,
@@ -116,7 +113,6 @@ func init() {
 			name:     "contains",
 			keywords: []string{KeywordContains, KeywordMinContains, KeywordMaxContains},
 			vocab:    vocabApplicator,
-			drafts:   draftAll,
 			phase:    phaseAssert,
 			eval:     evalContains,
 		},
@@ -124,7 +120,6 @@ func init() {
 			name:     "array.length",
 			keywords: []string{KeywordMinItems, KeywordMaxItems, KeywordUniqueItems},
 			vocab:    vocabValidation,
-			drafts:   draftAll,
 			phase:    phaseAssert,
 			eval:     evalArrayLength,
 		},
@@ -135,7 +130,6 @@ func init() {
 				KeywordAdditionalProperties, KeywordPropertyNames,
 			},
 			vocab:   vocabApplicator,
-			drafts:  draftAll,
 			phase:   phaseAssert,
 			compile: objectApplicatorsCompile,
 			eval:    evalObjectApplicators,
@@ -144,7 +138,6 @@ func init() {
 			name:     "dependentSchemas",
 			keywords: []string{KeywordDependentSchemas},
 			vocab:    vocabApplicator,
-			drafts:   draft2020Up,
 			phase:    phaseAssert,
 			eval:     evalDependentSchemas,
 		},
@@ -152,7 +145,6 @@ func init() {
 			name:     "object.count",
 			keywords: []string{KeywordRequired, KeywordMinProperties, KeywordMaxProperties},
 			vocab:    vocabValidation,
-			drafts:   draftAll,
 			phase:    phaseAssert,
 			eval:     evalObjectCount,
 		},
@@ -160,7 +152,6 @@ func init() {
 			name:     "dependentRequired",
 			keywords: []string{KeywordDependentRequired},
 			vocab:    vocabValidation,
-			drafts:   draft2020Up,
 			phase:    phaseAssert,
 			eval:     evalDependentRequired,
 		},
@@ -168,7 +159,6 @@ func init() {
 			name:     "dependencies.legacy",
 			keywords: []string{KeywordDependencies},
 			vocab:    vocabCore,
-			drafts:   draftAll,
 			phase:    phaseAssert,
 			eval:     evalLegacyDependencies,
 		},
@@ -176,7 +166,6 @@ func init() {
 			name:     "allOf",
 			keywords: []string{KeywordAllOf},
 			vocab:    vocabApplicator,
-			drafts:   draftAll,
 			phase:    phaseAssert,
 			eval:     evalAllOf,
 		},
@@ -184,7 +173,6 @@ func init() {
 			name:     "anyOf",
 			keywords: []string{KeywordAnyOf},
 			vocab:    vocabApplicator,
-			drafts:   draftAll,
 			phase:    phaseAssert,
 			eval:     evalAnyOf,
 		},
@@ -192,7 +180,6 @@ func init() {
 			name:     "oneOf",
 			keywords: []string{KeywordOneOf},
 			vocab:    vocabApplicator,
-			drafts:   draftAll,
 			phase:    phaseAssert,
 			eval:     evalOneOf,
 		},
@@ -200,7 +187,6 @@ func init() {
 			name:     "not",
 			keywords: []string{KeywordNot},
 			vocab:    vocabApplicator,
-			drafts:   draftAll,
 			phase:    phaseAssert,
 			eval:     evalNot,
 		},
@@ -208,7 +194,6 @@ func init() {
 			name:     "ifThenElse",
 			keywords: []string{KeywordIf, KeywordThen, KeywordElse},
 			vocab:    vocabApplicator,
-			drafts:   draftAll,
 			phase:    phaseAssert,
 			eval:     evalIfThenElse,
 		},
@@ -217,7 +202,6 @@ func init() {
 			keywords: []string{KeywordContentEncoding, KeywordContentMediaType},
 			vocab:    vocabContent,
 			optIn:    optInContent,
-			drafts:   draftAll,
 			phase:    phaseAssert,
 			eval:     evalContent,
 		},
@@ -228,7 +212,6 @@ func init() {
 			name:     "unevaluatedProperties",
 			keywords: []string{KeywordUnevaluatedProperties},
 			vocab:    vocabUnevaluated,
-			drafts:   draft2020Up,
 			phase:    phaseUnevaluated,
 			eval:     evalUnevaluatedProperties,
 		},
@@ -236,11 +219,13 @@ func init() {
 			name:     "unevaluatedItems",
 			keywords: []string{KeywordUnevaluatedItems},
 			vocab:    vocabUnevaluated,
-			drafts:   draft2020Up,
 			phase:    phaseUnevaluated,
 			eval:     evalUnevaluatedItems,
 		},
 	}
+
+	deriveRowDrafts()
+	checkRowVocabularies()
 
 	for i := 1; i < len(keywordTable); i++ {
 		if keywordTable[i].phase < keywordTable[i-1].phase {
@@ -262,8 +247,10 @@ func init() {
 			panic(fmt.Sprintf("jsonschema: unevaluated row %q must carry vocabUnevaluated", e.name))
 		}
 
-		if e.drafts != draft2020Up {
-			panic(fmt.Sprintf("jsonschema: unevaluated row %q must carry draft2020Up", e.name))
+		// The range is derived rather than authored, so this asserts that the
+		// hull of the row's member keywords came out 2020-12-and-up.
+		if e.drafts != keywordmeta.Drafts2020Up {
+			panic(fmt.Sprintf("jsonschema: unevaluated row %q must derive draft2020Up", e.name))
 		}
 	}
 
@@ -282,6 +269,82 @@ func init() {
 			owner[kw] = e.name
 		}
 	}
+}
+
+// deriveRowDrafts sets each dispatch row's draft range to the hull of its member
+// keywords' declared ranges, so a keyword's applicability is stated once in
+// [keywordmeta.Keywords] rather than twice. It runs before the table's other
+// invariant checks, which read the derived value.
+//
+// A hull can only widen, so it could admit a draft no member declares: a row
+// spanning {Draft-07 and older} and {2020-12 and newer} would derive "every
+// draft" while covering neither the gap between them nor a future draft added
+// inside it. Requiring some member to declare the hull outright rules that out,
+// since that member covers the whole derived range and no gap can exist within
+// it. Sampling the drafts the enum names would not, because it cannot speak for
+// a draft added later.
+func deriveRowDrafts() {
+	for i := range keywordTable {
+		e := &keywordTable[i]
+
+		if len(e.keywords) == 0 {
+			panic(fmt.Sprintf("jsonschema: dispatch row %q owns no keywords", e.name))
+		}
+
+		hull := rowMeta(e, e.keywords[0]).Drafts
+		for _, kw := range e.keywords[1:] {
+			hull = hull.Hull(rowMeta(e, kw).Drafts)
+		}
+
+		spansHull := func(kw string) bool { return rowMeta(e, kw).Drafts == hull }
+		if !slices.ContainsFunc(e.keywords, spansHull) {
+			panic(fmt.Sprintf(
+				"jsonschema: dispatch row %q derives a draft range no member keyword declares outright, "+
+					"so it may admit a draft none of them covers",
+				e.name,
+			))
+		}
+
+		e.drafts = hull
+	}
+}
+
+// checkRowVocabularies asserts each dispatch row's hand-written vocabulary
+// against its member keywords' declared ones. The vocabulary stays hand-written
+// on the row (a row gates as a unit, and a flat enum has no hull to derive) and
+// is cross-checked instead: every member must declare the row's group, unless
+// the member declares [keywordmeta.Keyword.VocabRefined], meaning its eval step
+// re-checks a finer gate inline.
+func checkRowVocabularies() {
+	for i := range keywordTable {
+		e := &keywordTable[i]
+
+		for _, kw := range e.keywords {
+			meta := rowMeta(e, kw)
+			if meta.VocabRefined {
+				continue
+			}
+
+			if meta.Vocab != e.vocab {
+				panic(fmt.Sprintf(
+					"jsonschema: dispatch row %q carries vocabulary %d but its keyword %q declares %d",
+					e.name, e.vocab, kw, meta.Vocab,
+				))
+			}
+		}
+	}
+}
+
+// rowMeta returns the declared semantics for one of row e's member keywords,
+// panicking when the dispatch table names a keyword the semantics table does not
+// declare.
+func rowMeta(e *keywordEntry, kw string) *keywordmeta.Keyword {
+	meta, ok := keywordmeta.ByName[kw]
+	if !ok {
+		panic(fmt.Sprintf("jsonschema: dispatch row %q owns undeclared keyword %q", e.name, kw))
+	}
+
+	return meta
 }
 
 // itemsPlan is the Compile-time normalization of a schema's array item keywords

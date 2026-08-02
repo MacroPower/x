@@ -4,6 +4,7 @@ import (
 	"slices"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/constraint"
+	"go.jacobcolvin.com/x/jsonschema/internal/keywordmeta"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemashape"
 	"go.jacobcolvin.com/x/jsonschema/internal/typename"
 )
@@ -201,23 +202,27 @@ func numericResolveMode(merged *Schema, n *node) constraint.ResolveMode {
 
 // canvasAuthorsBounds reports whether the authored canvas carries any numeric or
 // length/count bound keyword, gating the verbatim-path bound resolution: only an
-// authored bound warrants folding a verbatim payload through the algebra.
+// authored bound warrants folding a verbatim payload through the algebra. The
+// endpoints come from [keywordmeta.Bounds], so a keyword joins the algebra by
+// declaring [keywordmeta.Keyword.Bound], not by being listed here.
 func canvasAuthorsBounds(canvas *Schema) bool {
-	return canvas.Minimum != nil || canvas.ExclusiveMinimum != nil ||
-		canvas.Maximum != nil || canvas.ExclusiveMaximum != nil ||
-		canvas.MultipleOf != nil ||
-		canvas.MinLength != nil || canvas.MaxLength != nil ||
-		canvas.MinItems != nil || canvas.MaxItems != nil ||
-		canvas.MinProperties != nil || canvas.MaxProperties != nil
+	for _, kw := range keywordmeta.Bounds {
+		if kw.Set(canvas) {
+			return true
+		}
+	}
+
+	return false
 }
 
-// overlayAuthored merges the authored canvas onto merged: each wrapper-scoped
-// keyword the canvas set (the movableKeywords partition), plus the value-scoped
-// const, enum, string-content keywords, and forbid-value allOf conjuncts. It sets
-// a keyword only where the canvas authored it, so a payload keyword the canvas did
-// not touch survives. Structural sub-schema fields (items, properties,
-// additionalProperties) are not merged: they carry the child element canvases for
-// the tag path to navigate, and each child reconciles its own canvas onto the
+// overlayAuthored merges the authored canvas onto merged: every keyword
+// [keywordmeta.Authored] declares (the wrapper-scoped annotations and bounds
+// alongside the value-scoped const, enum, and string-content keywords), plus the
+// forbid-value allOf conjuncts. It sets a keyword only where the canvas authored
+// it, so a payload keyword the canvas did not touch survives. Structural
+// sub-schema fields (items, properties, additionalProperties) declare no Assign,
+// which keeps them out of the set: they hold the child element canvases for the
+// tag path to navigate, and each child reconciles its own canvas onto the
 // rendered payload.
 //
 // A bare Schema canvas cannot distinguish a bool keyword authored to false
@@ -231,48 +236,10 @@ func canvasAuthorsBounds(canvas *Schema) bool {
 // shared algebra, so an authored bound can only tighten the type's own, never
 // weaken it.
 func overlayAuthored(merged, canvas, base *Schema) {
-	for _, kw := range movableKeywords {
-		if kw.differs(emptySchema, canvas) {
-			kw.assign(canvas, merged)
+	for _, kw := range keywordmeta.Authored {
+		if kw.Set(canvas) {
+			kw.Assign(canvas, merged)
 		}
-	}
-
-	if canvas.Const != nil {
-		merged.Const = canvas.Const
-	}
-
-	if canvas.Enum != nil {
-		merged.Enum = canvas.Enum
-	}
-
-	// Pattern and format resolve with replace semantics (the authored value
-	// overwrites the type-derived one) and gate only a string instance, never
-	// null, so like multipleOf they are value-scoped: overlay them here and keep
-	// them out of movableKeywords, so the null split leaves the resolved value on
-	// the value branch instead of conjoining the authored value on the wrapper
-	// with the type value restored beneath it.
-	if canvas.Pattern != "" {
-		merged.Pattern = canvas.Pattern
-	}
-
-	if canvas.Format != "" {
-		merged.Format = canvas.Format
-	}
-
-	// The string-content keywords are value-scoped like const/enum (they gate a
-	// string instance, not null), so they ride on the value branch rather than
-	// the null wrapper: overlay them here rather than partitioning them in
-	// splitFieldKeywords.
-	if canvas.ContentEncoding != "" {
-		merged.ContentEncoding = canvas.ContentEncoding
-	}
-
-	if canvas.ContentMediaType != "" {
-		merged.ContentMediaType = canvas.ContentMediaType
-	}
-
-	if canvas.ContentSchema != nil {
-		merged.ContentSchema = canvas.ContentSchema
 	}
 
 	// A forbidValue accumulation lands in the canvas's allOf; append it after the
@@ -312,8 +279,8 @@ func overlayAuthored(merged, canvas, base *Schema) {
 func splitFieldKeywords(value, base *Schema) *Schema {
 	wrapper := &Schema{}
 
-	for _, kw := range movableKeywords {
-		if !kw.differs(base, value) {
+	for _, kw := range keywordmeta.Movable {
+		if !kw.Differs(base, value) {
 			continue
 		}
 
@@ -326,148 +293,13 @@ func splitFieldKeywords(value, base *Schema) *Schema {
 		// Minimum is left cleared on the value branch rather than restored to the
 		// kind value. That is safe because the facade is intersect-only, so the
 		// authored endpoint on the same side always subsumes the kind one.
-		if !kw.differs(emptySchema, value) {
+		if !kw.Set(value) {
 			continue
 		}
 
-		kw.assign(value, wrapper) // wrapper gets the authored value
-		kw.assign(base, value)    // value branch restores the type value
+		kw.Assign(value, wrapper) // wrapper gets the authored value
+		kw.Assign(base, value)    // value branch restores the type value
 	}
 
 	return wrapper
-}
-
-// movableKeyword is one field-authorable keyword the nullable split can move
-// onto the anyOf wrapper: differs reports whether it holds different values in
-// two schemas (against base it marks the keyword authored; against emptySchema it
-// marks it set), and assign copies it from src onto dst, overwriting dst's value
-// (which clears it when src's is the zero value). Each keyword defines both
-// closures in one table entry, so a keyword cannot be movable without also being
-// comparable and assignable.
-type movableKeyword struct {
-	differs func(a, b *Schema) bool
-	assign  func(src, dst *Schema)
-}
-
-// valueKeyword builds a movableKeyword over a directly comparable field
-// (strings, bools, and the pointer-identity Not). The differs comparison is by
-// value deliberately: a hook that re-sets a keyword to the type's own value is
-// reported as unchanged, dropping a redundant wrapper sibling that carries no
-// meaning either way.
-func valueKeyword[T comparable](get func(*Schema) T, set func(*Schema, T)) movableKeyword {
-	return movableKeyword{
-		differs: func(a, b *Schema) bool { return get(a) != get(b) },
-		assign:  func(src, dst *Schema) { set(dst, get(src)) },
-	}
-}
-
-// pointerKeyword builds a movableKeyword over a *T scalar field, comparing the
-// pointed-at values (two nils equal, nil versus non-nil unequal) and assigning
-// the pointer.
-func pointerKeyword[T comparable](get func(*Schema) *T, set func(*Schema, *T)) movableKeyword {
-	return movableKeyword{
-		differs: func(a, b *Schema) bool { return !ptrEqual(get(a), get(b)) },
-		assign:  func(src, dst *Schema) { set(dst, get(src)) },
-	}
-}
-
-// movableKeywords are the field-authorable keywords the nullable split moves onto
-// the anyOf wrapper. Const and enum are handled separately (they stay on the
-// value branch), as are the structural sub-schema fields, which are re-rendered
-// from the value node. AllOf is deliberately absent: a composite's allOf holds
-// its embed branches (structural, appended by renderBase) and a forbid-value
-// allOf conjunct, both of which belong on the value branch, not the wrapper.
-// MultipleOf, Pattern, and Format are deliberately absent too: each resolves
-// with replace semantics (the authored value overwrites the type-derived one),
-// so the split's move-and-restore -- correct for the intersected bounds, where
-// the restored type value is subsumed by the moved authored one -- would put
-// the authored value on the wrapper AND the type value back on the value
-// branch, silently conjoining the two (multipleOf 6 over a type's 4 accepting
-// only multiples of 12, or disjoint patterns rejecting every string, where the
-// non-nullable field accepts the authored value). The resolved value stays on
-// the value branch, where null is never subject to it.
-var (
-	movableKeywords = []movableKeyword{
-		valueKeyword(
-			func(s *Schema) string { return s.Description },
-			func(s *Schema, v string) { s.Description = v }),
-		valueKeyword(
-			func(s *Schema) string { return s.Title },
-			func(s *Schema, v string) { s.Title = v }),
-		{
-			differs: func(a, b *Schema) bool { return string(a.Default) != string(b.Default) },
-			assign:  func(src, dst *Schema) { dst.Default = src.Default },
-		},
-		valueKeyword(
-			func(s *Schema) bool { return s.Deprecated },
-			func(s *Schema, v bool) { s.Deprecated = v }),
-		valueKeyword(
-			func(s *Schema) bool { return s.ReadOnly },
-			func(s *Schema, v bool) { s.ReadOnly = v }),
-		valueKeyword(
-			func(s *Schema) bool { return s.WriteOnly },
-			func(s *Schema, v bool) { s.WriteOnly = v }),
-		{
-			// A field rarely re-authors a type's examples; a length change is a
-			// sufficient authored signal (an equal-length re-set is inert either
-			// way).
-			differs: func(a, b *Schema) bool { return len(a.Examples) != len(b.Examples) },
-			assign:  func(src, dst *Schema) { dst.Examples = src.Examples },
-		},
-		valueKeyword(
-			func(s *Schema) string { return s.Comment },
-			func(s *Schema, v string) { s.Comment = v }),
-		pointerKeyword(
-			func(s *Schema) *float64 { return s.Minimum },
-			func(s *Schema, v *float64) { s.Minimum = v }),
-		pointerKeyword(
-			func(s *Schema) *float64 { return s.Maximum },
-			func(s *Schema, v *float64) { s.Maximum = v }),
-		pointerKeyword(
-			func(s *Schema) *float64 { return s.ExclusiveMinimum },
-			func(s *Schema, v *float64) { s.ExclusiveMinimum = v }),
-		pointerKeyword(
-			func(s *Schema) *float64 { return s.ExclusiveMaximum },
-			func(s *Schema, v *float64) { s.ExclusiveMaximum = v }),
-		pointerKeyword(
-			func(s *Schema) *int { return s.MinLength },
-			func(s *Schema, v *int) { s.MinLength = v }),
-		pointerKeyword(
-			func(s *Schema) *int { return s.MaxLength },
-			func(s *Schema, v *int) { s.MaxLength = v }),
-		pointerKeyword(
-			func(s *Schema) *int { return s.MinItems },
-			func(s *Schema, v *int) { s.MinItems = v }),
-		pointerKeyword(
-			func(s *Schema) *int { return s.MaxItems },
-			func(s *Schema, v *int) { s.MaxItems = v }),
-		valueKeyword(
-			func(s *Schema) bool { return s.UniqueItems },
-			func(s *Schema, v bool) { s.UniqueItems = v }),
-		pointerKeyword(
-			func(s *Schema) *int { return s.MinProperties },
-			func(s *Schema, v *int) { s.MinProperties = v }),
-		pointerKeyword(
-			func(s *Schema) *int { return s.MaxProperties },
-			func(s *Schema, v *int) { s.MaxProperties = v }),
-		// Not compares by pointer identity: the split only needs to know a hook
-		// swapped the sub-schema in, not whether its contents are equivalent.
-		valueKeyword(
-			func(s *Schema) *Schema { return s.Not },
-			func(s, v *Schema) { s.Not = v }),
-	}
-
-	// EmptySchema is the zero-value schema overlayAuthored and splitFieldKeywords
-	// compare against to test whether a keyword is set; it is never mutated.
-	emptySchema = &Schema{}
-)
-
-// ptrEqual reports whether two pointers hold equal values, treating two nil
-// pointers as equal and a nil and a non-nil as unequal.
-func ptrEqual[T comparable](a, b *T) bool {
-	if a == nil || b == nil {
-		return a == b
-	}
-
-	return *a == *b
 }

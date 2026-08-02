@@ -4,6 +4,7 @@ import (
 	"slices"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/annotations"
+	"go.jacobcolvin.com/x/jsonschema/internal/keywordmeta"
 )
 
 // vocabGroup names the vocabulary that owns a keyword row, so the dispatch loop
@@ -12,14 +13,18 @@ import (
 // always active: it covers the keywords ($ref, $dynamicRef, format, the legacy
 // dependencies form) that are not part of any optional 2020-12 vocabulary and
 // must apply regardless of which vocabularies a metaschema activates.
-type vocabGroup uint8
+//
+// The type aliases [keywordmeta.VocabGroup] and the constants alias its
+// constants, where each individual keyword declares the same grouping; the init
+// in keyword_table.go cross-checks each row against its members.
+type vocabGroup = keywordmeta.VocabGroup
 
 const (
-	vocabCore        vocabGroup = iota // always active ($ref, $dynamicRef, format, legacy dependencies)
-	vocabApplicator                    // vocab.Set.Applicator
-	vocabValidation                    // vocab.Set.Validation
-	vocabUnevaluated                   // vocab.Set.Unevaluated
-	vocabContent                       // vocab.Set.Content
+	vocabCore        = keywordmeta.VocabCore        // always active ($ref, $dynamicRef, format, legacy dependencies)
+	vocabApplicator  = keywordmeta.VocabApplicator  // vocab.Set.Applicator
+	vocabValidation  = keywordmeta.VocabValidation  // vocab.Set.Validation
+	vocabUnevaluated = keywordmeta.VocabUnevaluated // vocab.Set.Unevaluated
+	vocabContent     = keywordmeta.VocabContent     // vocab.Set.Content
 )
 
 // optIn is an orthogonal gate for keywords whose assertion is opt-in beyond
@@ -39,26 +44,15 @@ const (
 // draftRange expresses a keyword's applicability as a closed interval over the
 // ordered [Draft] values: an O(1), allocation-free membership test that is
 // monotonic with draft removal (a keyword introduced at one draft and removed
-// at another names the interval between them). The draftMin/draftMax sentinels
-// are spaced far beyond the current Draft values (Draft7=-100, Draft2020=0) so
-// draft2020Up genuinely means "2020-12 and any future newer draft" rather than
-// collapsing to the single point {Draft2020}.
-type draftRange struct{ lo, hi Draft }
-
-// contains reports whether draft d falls within the closed interval.
-func (r draftRange) contains(d Draft) bool { return d >= r.lo && d <= r.hi }
-
-const (
-	draftMin Draft = -1 << 30
-	draftMax Draft = 1 << 30
-)
-
-var (
-	// The draftAll range matches every draft.
-	draftAll = draftRange{draftMin, draftMax}
-	// The draft2020Up range matches Draft 2020-12 and any newer draft.
-	draft2020Up = draftRange{Draft2020, draftMax}
-)
+// at another names the interval between them). Its sentinels are spaced far
+// beyond the current Draft values (Draft7=-100, Draft2020=0) so an open-ended
+// range genuinely means "and any future newer draft" rather than collapsing to
+// the single point {Draft2020}.
+//
+// The type aliases [keywordmeta.DraftRange], where each individual keyword
+// declares its own range; a dispatch row's range is derived from its members in
+// keyword_table.go's init rather than written here.
+type draftRange = keywordmeta.DraftRange
 
 // phase groups keyword rows into ordered evaluation stages. Table order is eval
 // order, but phase makes the one ordering guarantee that matters -- the
@@ -74,7 +68,7 @@ const (
 )
 
 // keywordEntry is one row of the keyword dispatch table: a keyword group
-// represented as data (owning vocabulary, applicable drafts, opt-in gate, an
+// represented as data (owning vocabulary, derived draft range, opt-in gate, an
 // optional compile-time precompute step, and an eval step) so draft and
 // vocabulary gating is a declarative fact checked once in the dispatch loop
 // rather than a conditional remembered at each keyword branch.
@@ -98,10 +92,13 @@ type keywordEntry struct {
 	// validator asserts, and a keyword added to the constants but not to any
 	// row's keywords is caught automatically.
 	keywords []string
-	drafts   draftRange
-	vocab    vocabGroup
-	optIn    optIn
-	phase    phase
+	// The drafts range is the only field the table literal leaves unset:
+	// deriveRowDrafts fills it at load from the row's member keywords, so a
+	// keyword's applicability is declared once in [keywordmeta.Keywords].
+	drafts draftRange
+	vocab  vocabGroup
+	optIn  optIn
+	phase  phase
 	// The isRef flag marks the $ref row so the dispatch loop can implement
 	// Draft-07 $ref sibling suppression (a $ref with siblings ignores the
 	// siblings).
@@ -159,7 +156,7 @@ func (v *validator) vocabActive(g vocabGroup) bool {
 // gate (if any) is enabled. This is the single site where draft and vocabulary
 // applicability is decided, rather than a conditional at each keyword branch.
 func (v *validator) gatePasses(e *keywordEntry) bool {
-	if !e.drafts.contains(v.draft) {
+	if !e.drafts.Contains(keywordmeta.Draft(v.draft)) {
 		return false
 	}
 

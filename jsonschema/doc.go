@@ -595,11 +595,12 @@
 // the authored bounds move to the null wrapper (the type-derived bounds stay on
 // the value branch), so a permitted null stays valid without any post-hoc
 // reshape of a stamped wrapper, and a keyword resolves to the same value on a
-// nullable field as on a non-nullable one. As part of the composition each authored
-// bound keyword is intersected with the type-derived bound and the stronger side
-// kept, so a canvas bound can only tighten the type's own value, never weaken it
-// -- the same guarantee for every writer (the jsonschema tag, a tag interpreter,
-// a third party).
+// nullable field as on a non-nullable one. Which side a keyword lands on is
+// declared per keyword in a single table, not spread across the reconciliation.
+// As part of the composition each authored bound keyword is intersected with the
+// type-derived bound and the stronger side kept, so a canvas bound can only
+// tighten the type's own value, never weaken it -- the same guarantee for every
+// writer (the jsonschema tag, a tag interpreter, a third party).
 // Field-level processing always applies, including when the type is referenced
 // via $ref. When a not-yet-migrated override or provider supplies a nullable
 // shape at the field's type, an interpreter that declares a const or enum

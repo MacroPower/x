@@ -621,13 +621,14 @@ canvas value. (The string first-wins keywords -- `format`, `pattern`,
 `contentEncoding`, `contentMediaType` -- read the field's `EffectiveFormat` and
 sibling accessors so a tag never overrides a value the type already set.) The
 read-only `Base` is the type-derived schema, for dispatching on the reflected
-shape. Generation composes the canvas with `Base` and applies
-the null encoding for a nil-able field, so a `const` or `enum` an interpreter
-declares lands on the value branch and keeps null valid. The context also holds
-the parent schema, JSON name, and Go type; the declaring struct type, which for a
-promoted field is the embedded type; the full `reflect.StructField` for reading
-sibling struct tags such as the `json` tag's options; and the target `Draft` for
-emitting draft-appropriate keywords.
+shape. Generation composes the canvas with `Base` and applies the null encoding
+for a nil-able field, so a `const` or `enum` an interpreter declares lands on the
+value branch and keeps null valid. Which side a keyword lands on is declared per
+keyword in a single table, not spread across the reconciliation. The context also
+holds the parent schema, JSON name, and Go type; the declaring struct type, which
+for a promoted field is the embedded type; the full `reflect.StructField` for
+reading sibling struct tags such as the `json` tag's options; and the target
+`Draft` for emitting draft-appropriate keywords.
 
 For bounds and value constraints, an interpreter uses the `Constraints` facade
 `FieldContext.Constraints()` returns, the contribution surface over the shared

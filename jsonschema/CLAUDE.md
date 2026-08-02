@@ -79,8 +79,19 @@ The package has two independent halves sharing the `Schema` type:
   field-metadata table for the upstream `Schema` type: one row per exported
   field carrying its class, sub-schema shape, zero predicate, and container-clone
   closure, from which the true/empty/ref-sibling predicates, the sub-schema
-  traversal, and the container-clone pass all derive), `internal/schemashape`
-  (structural shape classification of a `Schema`), `internal/schemaclone`
+  traversal, and the container-clone pass all derive), `internal/keywordmeta`
+  (schemafield's keyword-side sibling: one declared row per keyword name in
+  `internal/keyword`, stating how an authored value merges with the type-derived
+  one (`Merge`), which branch of the nullable `anyOf` split it lands on
+  (`Scope`), and the drafts and vocabulary gating it. `reconcile.go`'s movable,
+  authorable, and bound sets all derive from it, so a replace-semantics keyword
+  cannot land on the null wrapper. That is the failure mode behind two past bugs
+  (`multipleOf`, then `pattern` and `format`), each a product of a
+  hand-maintained movable list. Each row also names the `internal/schemafield`
+  rows it claims, and each dispatch row's draft range derives from its member
+  keywords' declared ranges, while the row's vocabulary is cross-checked against
+  them at load), `internal/schemashape` (structural shape classification of a
+  `Schema`), `internal/schemaclone`
   (deep copy of
   a `Schema` via JSON round-trip with render-only `PropertyOrder` restored
   through a caller-supplied sub-schema traversal), `internal/jsonequal` (DoS-guarded,
@@ -131,15 +142,20 @@ is an identity index _over_ the upstream `Schema` graph, mapping each reachable
 pointers rather than cloning, so `Validator.Schema()` still returns the exact
 value passed to `Compile`.
 
-The single update site on an upstream bump is the canonical field-metadata
-table in `internal/schemafield`: `IsTrueSchema`, `internal/schemashape`'s
-`IsEmpty` and `HasRefSiblings`, `SubschemaEntries`, and the container-clone pass
-all derive from it and do not carry their own field enumerations. Add the new
-field to the table (one row) and the derived predicates and traversals pick it
-up. Reflection-based maintenance guards fail on an unclassified upstream
+An upstream bump has two update sites, both guarded. The first is the canonical
+field-metadata table in `internal/schemafield`: `IsTrueSchema`,
+`internal/schemashape`'s `IsEmpty` and `HasRefSiblings`, `SubschemaEntries`, and
+the container-clone pass all derive from it and do not carry their own field
+enumerations. Add the new field to the table (one row) and the derived
+predicates and traversals pick it up. The second is the per-keyword semantics
+table in `internal/keywordmeta`: every new field's keyword needs a row there,
+naming the schemafield rows it claims. The generation half's movable,
+authorable, and bound sets and the dispatch table's draft ranges all derive from
+it. Reflection-based maintenance guards fail on an unclassified upstream
 addition; the main-package guards below run through the public API (that
 package has no in-package test files by policy), while `TestFieldTableMatchesUpstream`
-is an in-package test in `internal/schemafield`, where that policy does not apply:
+and the `TestKeywordMeta*` guards are in-package tests in `internal/schemafield`
+and `internal/keywordmeta`, where that policy does not apply:
 
 - `TestFieldTableMatchesUpstream` (internal/schemafield): the primary staleness
   alarm. It reflects over the upstream `Schema` and asserts every exported field
@@ -157,6 +173,46 @@ is an in-package test in `internal/schemafield`, where that policy does not appl
 - `TestTypeSchemaOverrideContainersUnaliased` (generate_test.go):
   container fields of a `WithTypeSchema` override (in both its `TypeSchema.Value`
   and `TypeSchema.Verbatim` forms) must not stay aliased in generated schemas.
+- `TestKeywordMetaCoversSchemaFields` (internal/keywordmeta): the keyword-side
+  staleness alarm, chaining through `TestFieldTableMatchesUpstream` to upstream.
+  Every schemafield row is claimed by exactly one keyword row or allowlisted with
+  a reason (seven are allowlisted: the five identifiers with no keyword
+  constant, plus `PropertyOrder` and `Extra`). A new upstream field essentially
+  always arrives with a new keyword, so this is the forcing function for
+  classifying it.
+- `TestKeywordMetaColumnsConsistent` (internal/keywordmeta): the per-row
+  invariants, the load-bearing one being that a `ScopeWrapper` row can never be
+  `MergeReplace`. That is the check that would have caught both prior bugs.
+- `TestKeywordMetaCoversConstants` and `TestKeywordMetaDerivedSets`
+  (internal/keywordmeta): the row-per-constant bijection, and the membership (by
+  name, not count) of the `Movable`, `Authored`, and `Bounds` sets the field
+  reconciliation derives.
+- `TestReconcileSplitConsistency` (reconcile_split_test.go): the behavioral
+  guard on the partition the table declares. A `T` field and a `*T` field
+  carrying the identical authored value over the identical type-level schema
+  must accept and reject the identical non-null instances.
+- `TestReconcileSplitCoversAuthored` (reconcile_split_test.go): that guard's
+  coverage is an exact partition of `keywordmeta.Authored` (covered cases xor
+  skips, each skip carrying a reason), so a new authorable keyword cannot land
+  uncovered.
+- `TestAssertionKeywordsCoverage` (dispatch_test.go): the cross-check between the
+  two tables, asserting the declared-asserted set equals `AssertionKeywords()`.
+  The dispatch table's own init additionally panics at load when a row's derived
+  draft range is one no member keyword declares outright (which is what rules out
+  a hull that widened over a gap none of them covers), or when a row's vocabulary
+  disagrees with a member's declared one. A member whose eval step re-checks a
+  finer vocabulary gate inline declares `VocabRefined` to opt out of the latter,
+  so the exception lives on the keyword rather than in a list beside the check.
+- `TestPublicKeywordConstantsMirrorInternal` (dispatch_test.go): the public
+  `Keyword*` re-exports must mirror the internal keyword set minus `$comment`,
+  so a keyword added internally cannot silently lack a public constant.
+- `TestDispatchDraftGating` (dispatch_test.go): at least one probe per dispatch
+  row, pinning through the public API whether that row's keyword fires under
+  each draft. It is the behavioral baseline the derived draft ranges must
+  reproduce, and `TestDispatchDraftGatingCoversRows` forces a new row to get one.
+- `TestDraftConstantsInSync` (dispatch_test.go): `Draft` is declared twice (the
+  public enum and `internal/keywordmeta`'s copy, which the parent cannot import
+  in reverse), so their numeric values are pinned equal.
 
 ### Type resolution priority (generation)
 
