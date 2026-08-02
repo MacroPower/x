@@ -213,19 +213,24 @@ var (
 			},
 			validate: []jsonschema.ValidateOption{jsonschema.WithFormats(true)},
 		},
+		// The const tag authors the same value the type-level schema already
+		// pins, and the enum tag is the sole author over a bare typed schema:
+		// a disagreeing authored const and any authored enum beside the type's
+		// own are ErrConstraintConflict at tag application, so these are the
+		// only compositions whose split an instance can observe.
 		keyword.Const: {
 			elem:      reflect.TypeFor[splitString](),
-			typeValue: &jsonschema.Schema{Type: "string", Const: new(any("typed"))},
+			typeValue: &jsonschema.Schema{Type: "string", Const: new(any("fixed"))},
 			tag:       "const=fixed",
 			ok:        "fixed",
 			probes: []splitProbe{
 				{value: "fixed", valid: true},
-				{value: "typed", valid: false},
+				{value: "other", valid: false},
 			},
 		},
 		keyword.Enum: {
 			elem:      reflect.TypeFor[splitString](),
-			typeValue: &jsonschema.Schema{Type: "string", Enum: []any{"a", "b", "c"}},
+			typeValue: &jsonschema.Schema{Type: "string"},
 			tag:       "enum=a|b",
 			ok:        "a",
 			probes: []splitProbe{
