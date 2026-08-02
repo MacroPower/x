@@ -65,10 +65,26 @@ The package has two independent halves sharing the `Schema` type:
   policy (`ParseNumericBound`, `ErrNotRepresentable`), the size-bound fold
   (`ParseSizeBound`), the const/enum subsumption (`ResolveBounds` under a
   caller-chosen `ResolveMode`), and the redundant-sibling collapse
-  (`CanonicalizeNumeric`) all live here. The public `Constraints` facade
-  (`constraints.go`) and `reconcile.go` are its two callers; the allowed set
-  (const/enum) is composed on each writer's canvas, not modeled in the
-  package), `internal/typename` (the seven
+  (`CanonicalizeNumeric`) all live here. Its scope stops at the bound algebra
+  and the forbidden-value escalation: `internal/tagmodel` and `reconcile.go`
+  are its two callers, and the allowed set (const/enum) is composed on each
+  writer's canvas, not modeled in the package),
+  `internal/tagmodel` (the one interpretation of a struct-tag constraint,
+  layered above `internal/constraint` and shared by both tag dialects. A `Form`
+  is the JSON shape an instance actually takes -- classified by `ShapeOf` from
+  the Go type _and_ the type-derived base, which wins when the two disagree --
+  and it is the dispatch column, so string coercion is a column of the table
+  rather than a gate each operation re-derives. An `Op` is the shared operation
+  vocabulary, a `Target` the one write destination a field and an element share
+  (which makes element retargeting one implementation), `Shape.ParseScalar` the
+  one scalar constructor including the convert-and-marshal round-trip a
+  text-marshaling type needs, and a total `[opCount][formCount]` matrix the
+  dispatch. Dialect divergence is expressed as a named `Policy` parameter (the
+  numeric-bound literal domain, the negative-size question) or a field on the
+  dialect's own `KeyRule` row (arity, list spelling, the implied value of a bare
+  key), never as duplicated code. It renders onto the upstream `Schema` for the
+  same no-cycle reason `constraint` does and must not import the main package),
+  `internal/typename` (the seven
   canonical JSON Schema type-name constants and their predicate, shared by
   both halves and schemashape), `internal/uriref` (RFC 3986 URI-reference
   resolution and fragment handling for the `$ref` absolutization layer,
@@ -213,6 +229,16 @@ and `internal/keywordmeta`, where that policy does not apply:
 - `TestDraftConstantsInSync` (dispatch_test.go): `Draft` is declared twice (the
   public enum and `internal/keywordmeta`'s copy, which the parent cannot import
   in reverse), so their numeric values are pinned equal.
+- `internal/tagmodel`'s constraint matrix is guarded in three escalating steps.
+  The table is a fixed-size `[opCount][formCount]` array, so a new `Op` or
+  `Form` grows every row and column rather than falling through a lookup. The
+  package's `init` then walks every cell and panics naming any pair left
+  unfilled, any `StatusApply` cell with no applier, and any `StatusIgnore` or
+  `StatusReject` cell with no written reason; it runs on first import, so every
+  test binary in the module trips it. `TestMatrixGolden` pins a textual dump of
+  the whole table, making a deliberate cell change a reviewable diff in the test
+  file and an accidental one a failure, and `TestFormClassificationTotal` pins
+  that every `reflect.Kind` classifies to a form.
 
 ### Type resolution priority (generation)
 

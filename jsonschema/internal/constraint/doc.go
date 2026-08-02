@@ -6,6 +6,14 @@
 // unsatisfiable range are each defined once and hold regardless of the order
 // the sources ran in.
 //
+// The scope is the bound algebra and the forbidden-value escalation, and stops
+// there. Which axis a struct-tag rule targets, whether a scalar takes its native
+// or its serialized form, and which operations a given shape can carry at all
+// live one layer above in internal/tagmodel, whose vocabulary is struct tags --
+// a vocabulary reconcile, this package's other caller, runs at a phase where
+// struct tags no longer exist. Its two callers are internal/tagmodel and the
+// main package's reconcile.go.
+//
 // The production surface is small:
 //
 //   - [ParseNumericBound] and [ParseSizeBound] are the single parse policies:
