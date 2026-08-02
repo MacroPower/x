@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/numkind"
+	"go.jacobcolvin.com/x/jsonschema/internal/tagmodel"
 	"go.jacobcolvin.com/x/jsonschema/internal/uriref"
 )
 
@@ -735,7 +736,38 @@ func (fc FieldContext) Constraints() *Constraints {
 		canvas: fc.Canvas,
 		base:   fc.Base,
 		kind:   numkind.DerefType(fc.Type).Kind(),
+		target: fc.target(),
 	}
+}
+
+// target builds the shared model's write destination for the field: its
+// classified shape, the canvas facts land on, the type-derived base a conflict
+// is checked against, and a lazy element accessor.
+//
+// The element closure is the seam that lets the model retarget a rule onto
+// element schemas without knowing how a caller finds them. It wraps
+// [FieldContext.ElementContexts], which stays the node-backed public accessor,
+// so a rule written for the field and the same rule written under a dive reach
+// the same destinations through one path. A caller-built context has no backing
+// node, so it supplies no elements and an element rule reports rather than
+// silently doing nothing.
+func (fc FieldContext) target() tagmodel.Target {
+	var elems func() []tagmodel.Target
+
+	if fc.node != nil {
+		elems = func() []tagmodel.Target {
+			children := fc.ElementContexts()
+
+			out := make([]tagmodel.Target, len(children))
+			for i := range children {
+				out[i] = children[i].target()
+			}
+
+			return out
+		}
+	}
+
+	return tagmodel.NewTarget(tagmodel.ShapeOf(fc.Type, fc.Base), fc.Canvas, fc.Base, elems)
 }
 
 // coalesceField returns the canvas value when the field authored it, otherwise

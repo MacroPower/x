@@ -1,11 +1,11 @@
 package jsonschema
 
 import (
-	"errors"
 	"fmt"
 	"reflect"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/constraint"
+	"go.jacobcolvin.com/x/jsonschema/internal/tagmodel"
 )
 
 var (
@@ -15,7 +15,7 @@ var (
 	// interpreter matches with [errors.Is]; the validate interpreter's own
 	// conflict sentinel is derived from it, so a conflict from either layer is
 	// recognizable through this one.
-	ErrConstraintConflict = errors.New("conflicting value constraints")
+	ErrConstraintConflict = tagmodel.ErrConflict
 
 	// ErrBoundNotRepresentable reports a numeric bound the schema's *float64
 	// cannot ship exactly: an integer the float64's shortest-decimal
@@ -81,7 +81,90 @@ const (
 type Constraints struct {
 	canvas *Schema
 	base   *Schema
+	target tagmodel.Target
 	kind   reflect.Kind
+}
+
+// Op and Axis are the shared constraint model's vocabulary, re-exported so an
+// interpreter names an operation and a keyword family rather than translating
+// its dialect into a second set of names.
+type (
+	// Op is one constraint operation: an endpoint, a size, a pinned or forbidden
+	// value, an enumeration, and so on.
+	Op = tagmodel.Op
+	// Axis is the keyword family a bound targets.
+	Axis = tagmodel.Axis
+)
+
+// The operations an interpreter contributes. They are the shared model's, so a
+// rule means the same thing here as it does in the jsonschema tag.
+const (
+	OpFloorIncl        = tagmodel.OpFloorIncl
+	OpFloorExcl        = tagmodel.OpFloorExcl
+	OpCeilIncl         = tagmodel.OpCeilIncl
+	OpCeilExcl         = tagmodel.OpCeilExcl
+	OpExactSize        = tagmodel.OpExactSize
+	OpForbidSize       = tagmodel.OpForbidSize
+	OpEqual            = tagmodel.OpEqual
+	OpNotEqual         = tagmodel.OpNotEqual
+	OpOneOf            = tagmodel.OpOneOf
+	OpNonZero          = tagmodel.OpNonZero
+	OpUnique           = tagmodel.OpUnique
+	OpMultipleOf       = tagmodel.OpMultipleOf
+	OpFormat           = tagmodel.OpFormat
+	OpPattern          = tagmodel.OpPattern
+	OpContentEncoding  = tagmodel.OpContentEncoding
+	OpContentMediaType = tagmodel.OpContentMediaType
+)
+
+// The keyword families a bound can target. AxisAuto lets the field's shape
+// choose, which is what a rule-shaped tag (min, max) means; naming a family
+// pins it, so a shape with no such keyword is an error rather than an inert
+// keyword nothing enforces.
+const (
+	AxisAuto       = tagmodel.AxisAuto
+	AxisNumeric    = tagmodel.AxisNumeric
+	AxisLength     = tagmodel.AxisLength
+	AxisItems      = tagmodel.AxisItems
+	AxisProperties = tagmodel.AxisProperties
+)
+
+// interpreterPolicy is the dialect policy every tag interpreter runs under.
+//
+// A tag interpreter reads a rule-shaped dialect: min=5 describes a predicate on
+// the Go value, so the literal parses at the field's own kind (gte=1.5 on an int
+// is an error, as go-playground has it) and a negative size folds to the
+// unsatisfiable range rather than being rejected outright. The jsonschema tag,
+// which names JSON Schema keywords directly, runs under the opposite settings;
+// both are the same implementation with different parameters.
+func interpreterPolicy(kind reflect.Kind) tagmodel.Policy {
+	return tagmodel.Policy{BoundKind: kind, Sizes: tagmodel.SizeFold}
+}
+
+// Apply contributes one constraint in the shared model's vocabulary: the
+// operation, the keyword family it targets (or [AxisAuto] to let the field's
+// shape choose), and the rule's parameters.
+//
+// It is the whole contribution surface. Which operations the field's shape can
+// carry, whether a scalar parameter compares against the Go value or against
+// the text a json:",string" field serializes, and whether a rule retargets onto
+// element schemas are all decided by the shared model from the field's shape, so
+// an interpreter neither repeats those decisions nor can get them wrong. A rule
+// the shape cannot carry reports an error naming the reason rather than emitting
+// a keyword nothing enforces.
+//
+// Bounds intersect: each is written only when it tightens the value already in
+// effect (the canvas value, or the type-derived one), so a weaker rule never
+// loosens a stronger one and repeated rules compose order-independently. A
+// second const or enum that disagrees with one already in force is
+// [ErrConstraintConflict] rather than a silent overwrite.
+func (c *Constraints) Apply(op Op, axis Axis, params ...string) error {
+	//nolint:wrapcheck // The model owns the message; the interpreter adds its own dialect prefix.
+	return tagmodel.Apply(
+		c.target,
+		tagmodel.Rule{Op: op, Axis: axis, Params: tagmodel.ParamsOf(params...)},
+		interpreterPolicy(c.kind),
+	)
 }
 
 // baseSchema returns the type-derived base, or an empty schema when the facade

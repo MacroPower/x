@@ -86,9 +86,18 @@ var (
 // axisRejection explains why a bound cannot land on a form, and is the message
 // the front-end wraps.
 func axisRejection(form Form, axis Axis) string {
-	if form == FormByteString || form == FormRawBytes {
+	switch form {
+	case FormByteString, FormRawBytes:
 		return "a length or uniqueness constraint on a []byte field has no array length to constrain " +
 			"(it encodes as a base64 string)"
+
+	case FormCoercedNumber, FormCoercedBool:
+		return "a bound is not supported on a json:\",string\" coerced numeric field " +
+			"(minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)"
+
+	default:
+		// Every other form takes the generic phrasing below, which names the
+		// form and the family it was asked to carry.
 	}
 
 	if axis == AxisAuto {
@@ -152,8 +161,7 @@ func fillBounds() {
 	// JSON Schema has no keyword for "the numeric value of this text is >= N".
 	for _, op := range []Op{OpFloorIncl, OpFloorExcl, OpCeilIncl, OpCeilExcl} {
 		for _, f := range []Form{FormCoercedNumber, FormCoercedBool} {
-			reject(op, f, "a bound has no faithful mapping onto a json:\",string\" coerced field "+
-				"(minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)")
+			reject(op, f, axisRejection(f, AxisAuto))
 		}
 	}
 }
@@ -198,6 +206,14 @@ func fillValues() {
 	}
 
 	apply(OpUnique, FormArray, applyUnique)
+
+	// Only an array can carry uniqueItems. Naming that in the rejection matters
+	// because the mistake is usually a shape mistake, not a spelling one.
+	for f := FormUnset + 1; f < formCount; f++ {
+		if f != FormArray && f != FormObject {
+			reject(OpUnique, f, fmt.Sprintf("unique has no array to constrain on a %s", f))
+		}
+	}
 
 	// The go-playground unique on a map asserts its values are distinct: a real
 	// constraint with no object-side counterpart to uniqueItems, so there is

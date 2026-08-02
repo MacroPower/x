@@ -25,15 +25,6 @@ func Apply(t Target, r Rule, pol Policy) error {
 		return fmt.Errorf("tagmodel: unclassified shape for %s", t.Shape.Type)
 	}
 
-	if r.Op.isBound() {
-		axis, err := resolveAxis(form, r.Axis)
-		if err != nil {
-			return err
-		}
-
-		r.Axis = axis
-	}
-
 	c := matrix[r.Op][form]
 	switch c.status {
 	case StatusApply:
@@ -89,13 +80,25 @@ func retargetToElements(t Target, r Rule, pol Policy) error {
 	return nil
 }
 
-// applyBound routes a bound to the keyword family its axis names. Each
-// contribution intersects the effective endpoint -- the value already authored
-// on the canvas, or the type-derived one -- and lands only when it tightens, so
-// a weaker rule never loosens a stronger one and the result does not depend on
-// the order the rules appeared in.
+// applyBound settles which keyword family the bound targets, then routes it
+// there. Each contribution intersects the effective endpoint -- the value
+// already authored on the canvas, or the type-derived one -- and lands only when
+// it tightens, so a weaker rule never loosens a stronger one and the result does
+// not depend on the order the rules appeared in.
+//
+// The axis is resolved here rather than before the cell lookup because not every
+// operation that a dialect spells as a bound is one: an exact size on a number
+// pins the value, and its cell is the pinning applier, which has no axis to
+// resolve and must not be rejected for lacking one.
 func applyBound(t Target, r Rule, pol Policy) error {
-	if r.Axis == AxisNumeric {
+	axis, err := resolveAxis(t.Shape.Form, r.Axis)
+	if err != nil {
+		return err
+	}
+
+	r.Axis = axis
+
+	if axis == AxisNumeric {
 		return applyNumericBound(t, r, pol)
 	}
 
@@ -191,7 +194,10 @@ func applyForbidSize(t Target, r Rule, _ Policy) error {
 
 	forbidden := &jsonschema.Schema{}
 
-	if r.Axis == AxisProperties {
+	// The size a map has is its entry count; every other sized shape's is its
+	// item count. Reading it from the form keeps this independent of whether the
+	// dialect named an axis at all.
+	if t.Shape.Form == FormObject {
 		forbidden.Type = typename.Object
 		forbidden.MinProperties = &n
 		forbidden.MaxProperties = &n
@@ -282,27 +288,25 @@ func applyMultipleOf(t Target, r Rule, _ Policy) error {
 	return nil
 }
 
-// applyStringKeyword sets one of the first-wins string keywords. A value the
-// type already supplies stands, so a tag never overrides what the type declared;
-// a second authored value is a conflict, since silently dropping one of two
-// stated intentions would be worse than either honoring order or reporting.
+// applyStringKeyword sets one of the string keywords, first-wins: a value
+// already in force stands, whether the field's type supplied it or an earlier
+// rule authored it.
+//
+// Unlike a const, two patterns are not contradictory -- they are two constraints
+// the package resolves by a documented precedence, under which an explicit
+// jsonschema struct tag wins over an interpreter and the type wins over both. So
+// this reports nothing. What is a mistake is one tag naming the same keyword
+// twice, where there is no precedence to appeal to and dropping either value
+// would be silent; that is a repeated key in one tag, which the front-end owning
+// that grammar detects and reports.
 func applyStringKeyword(t Target, r Rule, _ Policy) error {
-	value := r.Params.One()
-
 	slot, typeValue := stringKeywordSlots(t, r.Op)
 
-	switch {
-	case *slot == value || (*slot == "" && typeValue == value):
-		// Already in force with the same value: nothing to do, no conflict.
-		return nil
-	case *slot != "":
-		return fmt.Errorf("%w: %s is already set to %q", ErrConflict, r.Op, *slot)
-	case typeValue != "":
-		// First-wins against the type: the type's value stands.
+	if *slot != "" || typeValue != "" {
 		return nil
 	}
 
-	*slot = value
+	*slot = r.Params.One()
 
 	return nil
 }

@@ -1610,9 +1610,9 @@ func TestUniqueOnNonCollectionIsRejected(t *testing.T) {
 	// author's stated intent.
 	for name, tc := range map[string]struct {
 		build func() (*jsonschema.Schema, error)
-		kind  string
+		form  string
 	}{
-		"string": {kind: "string", build: func() (*jsonschema.Schema, error) {
+		"string": {form: "string", build: func() (*jsonschema.Schema, error) {
 			type MyType struct {
 				Name string `json:"name" validate:"unique"`
 			}
@@ -1620,7 +1620,7 @@ func TestUniqueOnNonCollectionIsRejected(t *testing.T) {
 			return jsonschema.GenerateFor[MyType](t.Context(),
 				jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()))
 		}},
-		"number": {kind: "int", build: func() (*jsonschema.Schema, error) {
+		"number": {form: "number", build: func() (*jsonschema.Schema, error) {
 			type MyType struct {
 				Count int `json:"count" validate:"unique"`
 			}
@@ -1628,7 +1628,7 @@ func TestUniqueOnNonCollectionIsRejected(t *testing.T) {
 			return jsonschema.GenerateFor[MyType](t.Context(),
 				jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()))
 		}},
-		"bool": {kind: "bool", build: func() (*jsonschema.Schema, error) {
+		"bool": {form: "boolean", build: func() (*jsonschema.Schema, error) {
 			type MyType struct {
 				On bool `json:"on" validate:"unique"`
 			}
@@ -1636,7 +1636,7 @@ func TestUniqueOnNonCollectionIsRejected(t *testing.T) {
 			return jsonschema.GenerateFor[MyType](t.Context(),
 				jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()))
 		}},
-		"struct": {kind: "struct", build: func() (*jsonschema.Schema, error) {
+		"struct": {form: "opaque value", build: func() (*jsonschema.Schema, error) {
 			type Inner struct {
 				A string `json:"a"`
 			}
@@ -1654,7 +1654,7 @@ func TestUniqueOnNonCollectionIsRejected(t *testing.T) {
 
 			_, err := tc.build()
 			require.Error(t, err, "unique on a shape with no array must be rejected")
-			assert.Contains(t, err.Error(), "unique has no array to constrain on type "+tc.kind)
+			assert.Contains(t, err.Error(), "unique has no array to constrain on a "+tc.form)
 		})
 	}
 }
@@ -2038,21 +2038,23 @@ func TestValidateInterpreter_DiveIntoFixedArray(t *testing.T) {
 	}
 }
 
-func TestValidateInterpreter_DiveIntoByteSliceIsNoOp(t *testing.T) {
+func TestValidateInterpreter_DiveIntoByteSliceIsRejected(t *testing.T) {
 	t.Parallel()
 
 	// A []byte field marshals to a single base64 string with no per-element
-	// schema, so diving into it is a no-op rather than a generation error.
+	// schema, so a dive has nothing to descend into. Rejecting it matches the
+	// sequence-wide rules on the same field, which already reject rather than
+	// drop a constraint the author wrote: the two spellings of "constrain the
+	// elements" cannot disagree about a field that has none.
 	type B struct {
 		Data []byte `json:"data" validate:"dive,min=1"`
 	}
 
-	s, err := jsonschema.GenerateFor[B](t.Context(),
+	_, err := jsonschema.GenerateFor[B](t.Context(),
 		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 	)
-	require.NoError(t, err)
-
-	assert.Equal(t, "base64", s.Properties["data"].ContentEncoding)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no item schema to constrain")
 }
 
 // TestValidateInterpreter_LengthConstraintOnByteSlice pins that a direct

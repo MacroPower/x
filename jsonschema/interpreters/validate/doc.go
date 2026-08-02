@@ -81,15 +81,21 @@
 // range-checked against the field's Go type, and a value the type cannot hold
 // is an error, mirroring the jsonschema tag's const/enum behavior.
 //
-// A json:",string" numeric or bool field serializes its value as a quoted
-// string, so the generated schema has type string. Scalar value rules (eq, ne,
-// oneof, len, and required's non-zero check) compare against that serialized
-// form: each value is parsed against the field's Go type (keeping the range
-// check above) and re-serialized, so a non-canonical spelling such as eq=5.0
-// or eq=1e2 constrains the canonical text ("5", "100") the field actually
-// emits. Numeric bounds (min, max, gt, lt, gte, lte) have no faithful mapping
-// onto the serialized string -- minimum and friends constrain JSON numbers, not
-// the quoted instance -- so they are rejected with an error rather than silently
+// Some fields serialize a scalar Go value as a quoted string, so the generated
+// schema has type string: a json:",string" numeric or bool field, and equally a
+// numeric or bool type that marshals itself as text. The rule is stated in terms
+// of that *shape* rather than of the json tag, so both are covered by one
+// behavior. Scalar value rules (eq, ne, oneof, len, and required's non-zero
+// check) compare against the serialized form: each value is parsed against the
+// field's Go type (keeping the range check above), converted back to that type,
+// and marshaled, so a non-canonical spelling such as eq=5.0 or eq=1e2 constrains
+// the canonical text ("5", "100") the field actually emits, and a
+// string-marshaling type constrains whatever text it writes rather than the
+// number's own spelling.
+//
+// Numeric bounds (min, max, gt, lt, gte, lte) have no faithful mapping onto that
+// serialized string -- minimum and friends constrain JSON numbers, not the
+// quoted instance -- so they are rejected with an error rather than silently
 // dropped as an inert numeric keyword on a string schema.
 //
 // Length and size bounds (minLength/maxLength, minItems/maxItems,
@@ -178,6 +184,17 @@
 // type). When dive descends through a pointer element type (e.g., []*int),
 // constraints after dive apply to the underlying type's schema.
 //
+// Descending is all dive does. A constraint written after it runs against the
+// element through the same path a sequence-wide rule takes, so on a slice or
+// array `oneof=a b` and `dive,oneof=a b` produce identical schemas, and each
+// element's own shape (including a string-coerced or text-marshaling one)
+// decides how the constraint applies. Two divergences from that are deliberate:
+// on a map, dive descends to the values while a bare oneof is an error, because
+// dive says "descend" explicitly and a bare oneof on a map has no go-playground
+// element meaning; and on a []byte both forms are an error, because the field
+// encodes as a single base64 string with no element schema either one could
+// reach.
+//
 // # Skipped and Unrecognized Tags
 //
 // Some tags carry no JSON Schema representation and are skipped: cross-field and
@@ -192,4 +209,15 @@
 // an error rather than being silently consumed, so a typo'd or unsupported
 // validator surfaces at generation time instead of yielding a schema that
 // quietly drops the intended constraint.
+//
+// # Implementation
+//
+// This package owns this dialect's grammar and nothing more: splitting the tag,
+// the OR and escape handling, the dive and keys blocks, the skipped tags, and a
+// table naming the operation each validator spells. What an operation does to a
+// given field is the shared constraint model's, which the jsonschema struct tag
+// runs through as well, so the two dialects cannot drift on a rule they both
+// express. Every constraint is contributed through [jsonschema.Constraints];
+// this package holds no scalar parser and writes no schema keyword directly,
+// which is what keeps the two interpretations one.
 package validate

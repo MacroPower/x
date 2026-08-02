@@ -109,17 +109,6 @@ func (op Op) String() string {
 	return opNames[op]
 }
 
-// isBound reports whether the operation contributes to a bound axis, so the
-// caller resolves an axis for it before dispatching.
-func (op Op) isBound() bool {
-	switch op {
-	case OpFloorIncl, OpFloorExcl, OpCeilIncl, OpCeilExcl, OpExactSize, OpForbidSize:
-		return true
-	default:
-		return false
-	}
-}
-
 // Axis pins the keyword family a bound targets. [AxisAuto] lets the shape
 // choose, which is what a dialect naming a rule rather than a keyword means:
 // validate's min is a length on a string and a count on a slice. A dialect that

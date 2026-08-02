@@ -80,16 +80,16 @@ func TestMatrixGolden(t *testing.T) {
 		|divisor / string-coerced number -> reject: divisor is not supported on a string-coerced number
 		|divisor / text-marshaled string -> reject: divisor is not supported on a text-marshaled string
 		|element uniqueness / array -> apply
-		|element uniqueness / base64 byte string -> reject: element uniqueness is not supported on a base64 byte string
-		|element uniqueness / boolean -> reject: element uniqueness is not supported on a boolean
-		|element uniqueness / number -> reject: element uniqueness is not supported on a number
+		|element uniqueness / base64 byte string -> reject: unique has no array to constrain on a base64 byte string
+		|element uniqueness / boolean -> reject: unique has no array to constrain on a boolean
+		|element uniqueness / number -> reject: unique has no array to constrain on a number
 		|element uniqueness / object -> ignore: unique on a map asserts distinct values, which no object keyword expresses
-		|element uniqueness / opaque value -> reject: element uniqueness is not supported on a opaque value
-		|element uniqueness / raw byte slice -> reject: element uniqueness is not supported on a raw byte slice
-		|element uniqueness / string -> reject: element uniqueness is not supported on a string
-		|element uniqueness / string-coerced boolean -> reject: element uniqueness is not supported on a string-coerced boolean
-		|element uniqueness / string-coerced number -> reject: element uniqueness is not supported on a string-coerced number
-		|element uniqueness / text-marshaled string -> reject: element uniqueness is not supported on a text-marshaled string
+		|element uniqueness / opaque value -> reject: unique has no array to constrain on a opaque value
+		|element uniqueness / raw byte slice -> reject: unique has no array to constrain on a raw byte slice
+		|element uniqueness / string -> reject: unique has no array to constrain on a string
+		|element uniqueness / string-coerced boolean -> reject: unique has no array to constrain on a string-coerced boolean
+		|element uniqueness / string-coerced number -> reject: unique has no array to constrain on a string-coerced number
+		|element uniqueness / text-marshaled string -> reject: unique has no array to constrain on a text-marshaled string
 		|enumerated values / array -> apply
 		|enumerated values / base64 byte string -> reject: a base64 byte string has no item schema to constrain
 		|enumerated values / boolean -> apply
@@ -120,8 +120,8 @@ func TestMatrixGolden(t *testing.T) {
 		|exclusive ceiling / opaque value -> reject: exclusive ceiling is not supported on a opaque value
 		|exclusive ceiling / raw byte slice -> reject: exclusive ceiling is not supported on a raw byte slice
 		|exclusive ceiling / string -> apply
-		|exclusive ceiling / string-coerced boolean -> reject: a bound has no faithful mapping onto a json:",string" coerced field (minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)
-		|exclusive ceiling / string-coerced number -> reject: a bound has no faithful mapping onto a json:",string" coerced field (minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)
+		|exclusive ceiling / string-coerced boolean -> reject: a bound is not supported on a json:",string" coerced numeric field (minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)
+		|exclusive ceiling / string-coerced number -> reject: a bound is not supported on a json:",string" coerced numeric field (minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)
 		|exclusive ceiling / text-marshaled string -> apply
 		|exclusive floor / array -> apply
 		|exclusive floor / base64 byte string -> apply
@@ -131,8 +131,8 @@ func TestMatrixGolden(t *testing.T) {
 		|exclusive floor / opaque value -> reject: exclusive floor is not supported on a opaque value
 		|exclusive floor / raw byte slice -> reject: exclusive floor is not supported on a raw byte slice
 		|exclusive floor / string -> apply
-		|exclusive floor / string-coerced boolean -> reject: a bound has no faithful mapping onto a json:",string" coerced field (minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)
-		|exclusive floor / string-coerced number -> reject: a bound has no faithful mapping onto a json:",string" coerced field (minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)
+		|exclusive floor / string-coerced boolean -> reject: a bound is not supported on a json:",string" coerced numeric field (minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)
+		|exclusive floor / string-coerced number -> reject: a bound is not supported on a json:",string" coerced numeric field (minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)
 		|exclusive floor / text-marshaled string -> apply
 		|forbidden size / array -> apply
 		|forbidden size / base64 byte string -> reject: forbidden size is not supported on a base64 byte string
@@ -175,8 +175,8 @@ func TestMatrixGolden(t *testing.T) {
 		|inclusive ceiling / opaque value -> reject: inclusive ceiling is not supported on a opaque value
 		|inclusive ceiling / raw byte slice -> reject: inclusive ceiling is not supported on a raw byte slice
 		|inclusive ceiling / string -> apply
-		|inclusive ceiling / string-coerced boolean -> reject: a bound has no faithful mapping onto a json:",string" coerced field (minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)
-		|inclusive ceiling / string-coerced number -> reject: a bound has no faithful mapping onto a json:",string" coerced field (minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)
+		|inclusive ceiling / string-coerced boolean -> reject: a bound is not supported on a json:",string" coerced numeric field (minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)
+		|inclusive ceiling / string-coerced number -> reject: a bound is not supported on a json:",string" coerced numeric field (minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)
 		|inclusive ceiling / text-marshaled string -> apply
 		|inclusive floor / array -> apply
 		|inclusive floor / base64 byte string -> apply
@@ -186,8 +186,8 @@ func TestMatrixGolden(t *testing.T) {
 		|inclusive floor / opaque value -> reject: inclusive floor is not supported on a opaque value
 		|inclusive floor / raw byte slice -> reject: inclusive floor is not supported on a raw byte slice
 		|inclusive floor / string -> apply
-		|inclusive floor / string-coerced boolean -> reject: a bound has no faithful mapping onto a json:",string" coerced field (minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)
-		|inclusive floor / string-coerced number -> reject: a bound has no faithful mapping onto a json:",string" coerced field (minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)
+		|inclusive floor / string-coerced boolean -> reject: a bound is not supported on a json:",string" coerced numeric field (minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)
+		|inclusive floor / string-coerced number -> reject: a bound is not supported on a json:",string" coerced numeric field (minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)
 		|inclusive floor / text-marshaled string -> apply
 		|non-zero assertion / array -> apply
 		|non-zero assertion / base64 byte string -> apply

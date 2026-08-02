@@ -22,8 +22,6 @@ const (
 // Policy carries the divergences that are properly dialect-specific, so they
 // are named parameters of one implementation rather than grounds for two.
 type Policy struct {
-	// Dialect labels the tag in error text.
-	Dialect string
 	// BoundKind is the Go kind a numeric bound literal parses at.
 	// [reflect.Invalid] takes the keyword-shaped domain: minimum is a JSON
 	// Schema keyword whose value may be fractional even on an integer schema, so
