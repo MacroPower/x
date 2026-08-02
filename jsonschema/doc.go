@@ -813,6 +813,35 @@
 // iri, iri-reference, uuid, ipv4, ipv6, json-pointer, relative-json-pointer, and
 // regex.
 //
+// Each checker asserts its format's defining grammar. Where that grammar admits
+// more than one reading, or where the string alone cannot decide what the spec
+// asks, the checker takes the position below; [WithFormatValidator] replaces any
+// of them.
+//
+//   - regex is a structural ECMA-262 check, not a compile: balanced groups,
+//     terminated classes, well-formed escapes. Backreferences and lookaround are
+//     accepted, since ECMA-262 has them and Go's RE2 does not, and every ASCII
+//     character is a valid ECMA-262 Annex B identity escape, so "\a" and "\_"
+//     are accepted (as is a bare "\c", which Annex B requires a control letter
+//     after). The format therefore accepts patterns RE2 rejects. This is
+//     independent of the pattern keyword, which does use RE2.
+//   - uri-template accepts the RFC 6570 op-reserve operators ("{=path}",
+//     "{!x}", "{|x*}") and a prefix modifier on any varspec ("{keys:1}"). Both
+//     are valid under the RFC's ABNF and fail only during expansion, which a
+//     check over the template string cannot reach. The literals rule follows
+//     errata ID 6937, so an apostrophe is a literal.
+//   - email and idn-email assert the RFC 5321 Mailbox grammar plus the §4.5.3.1
+//     size limits (64 octets local, 253 domain, 254 total). The RFC 5322
+//     comment, folding-whitespace, and obsolete productions that Draft-07's
+//     cited §3.4.1 would permit are rejected. Deliverability is never consulted.
+//   - uri and uri-reference accept an IPvFuture authority ("http://[v7.x]/"),
+//     which RFC 3986 §3.2.2 defines and Go's net/url cannot parse.
+//   - hostname accepts a reserved-LDH label (a hyphen in positions 3 and 4, as
+//     in "ab--cd.com") per RFC 1123 §2.1, while idn-hostname rejects it per RFC
+//     5890 §2.3.2.2, so hostname accepts names idn-hostname does not. idn-email
+//     follows hostname here: RFC 6531 widens the RFC 5321 domain grammar by
+//     admitting U-labels rather than importing IDNA's label rules.
+//
 // # Schema Traversal and Predicates
 //
 // Helpers are provided for working with [Schema] values directly, independent
