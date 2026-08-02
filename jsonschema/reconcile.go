@@ -166,10 +166,10 @@ func (g *generator) resolveBounds(n *node, merged, base *Schema) {
 // keeps the authored ones that narrow it. A field reads the merged value
 // (post-overlay, so a type-override const/enum on the payload is honored); an
 // element reads its own authored canvas, so a const/enum the element's type
-// supplies is not conflated with an authored pin, and the jsonschema-tag
-// enum-on-elements carve-out (keepElementBounds) keeps the type bounds. A
-// verbatim payload is emitted as authored: its const/enum never subsumes its
-// own bounds, so the algebra only intersects.
+// supplies is not conflated with an authored pin. Which dialect authored the
+// element's const/enum does not enter into it: the precedence is a property of
+// the keyword, not of its provenance. A verbatim payload is emitted as authored:
+// its const/enum never subsumes its own bounds, so the algebra only intersects.
 func numericResolveMode(merged *Schema, n *node) constraint.ResolveMode {
 	if n.verbatim {
 		return constraint.ResolveKeepKind
@@ -187,13 +187,11 @@ func numericResolveMode(merged *Schema, n *node) constraint.ResolveMode {
 	}
 
 	// An element (or any non-field node reaching here) pins when its own canvas
-	// authored a const or enum, mirroring the field precedence above -- unless
-	// the enum is the jsonschema-tag enum-on-elements carve-out, which
-	// deliberately keeps the type bounds.
+	// authored a const or enum, mirroring the field precedence above.
 	switch {
 	case n.authored.Const != nil:
 		return constraint.ResolveDropAll
-	case n.authored.Enum != nil && !n.keepElementBounds:
+	case n.authored.Enum != nil:
 		return constraint.ResolveDropKind
 	default:
 		return constraint.ResolveKeepKind

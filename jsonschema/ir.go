@@ -71,16 +71,6 @@ type node struct {
 	// and reconcile skip the null encoding for it entirely.
 	verbatim bool
 	isField  bool // marks a struct-field node, so reconcile applies the field const/enum bound subsumption
-	// The keepElementBounds flag records the jsonschema-tag enum-on-elements
-	// carve-out: a jsonschema `enum` written onto a sequence or map element keeps
-	// that element's type-derived numeric bounds even though it authored an enum,
-	// because the tag path writes the enum onto the bare element canvas and never
-	// intends to pin the value the way an interpreter's dive does. Build stamps it
-	// after the jsonschema tag runs, on any element whose canvas authored an enum;
-	// reconcile then treats an authored element enum as pinning (dropping the
-	// bounds) unless this flag keeps them. It is the element counterpart of the
-	// field-enum rule, which reconcile derives from the merged value instead.
-	keepElementBounds bool
 }
 
 // nilableContainer reports whether the node is a slice, map, or ",string"
@@ -206,44 +196,6 @@ func allocCanvasTree(n *node, draft Draft) {
 	}
 
 	n.authored = a
-}
-
-// markKeptElementEnums stamps keepElementBounds on every sequence or map element
-// node beneath n whose canvas authored an enum, recording the jsonschema-tag
-// enum-on-elements carve-out. It runs after the jsonschema tag has applied, the
-// only field-level step that can author an element enum without pinning the
-// value, so it marks exactly the elements whose type-derived numeric bounds must
-// survive their authored enum. It mirrors allocCanvasTree's recursion, descending
-// only into elements (items and prefix), never struct properties or embeds.
-func markKeptElementEnums(n *node) {
-	if n == nil {
-		return
-	}
-
-	visit := func(elem *node) {
-		if elem == nil {
-			return
-		}
-
-		if elem.authored != nil && elem.authored.Enum != nil {
-			elem.keepElementBounds = true
-		}
-
-		markKeptElementEnums(elem)
-	}
-
-	switch n.kind {
-	case kindList, kindMap:
-		visit(n.items)
-	case kindTuple:
-		for _, c := range n.prefix {
-			visit(c)
-		}
-
-	case kindValue, kindObject, kindRef:
-		// A leaf value, a struct (its properties are separate field nodes), or a
-		// $ref carries no element node of its own.
-	}
 }
 
 // refNode builds a kindRef node linking to e, carrying the occurrence's

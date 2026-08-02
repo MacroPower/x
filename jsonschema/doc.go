@@ -523,15 +523,12 @@
 // discrete value set aborts generation, and an unsatisfiable range (a minimum
 // above a maximum) is emitted as its impossible bounds rather than loosened.
 //
-// The bound drop is by author on a sequence or map element. A jsonschema-tag
-// enum on the elements keeps each element's type-derived numeric bounds: the tag
-// writes the enum onto the bare element schema without pinning the value, so a
-// []int8 with enum=1|2|3 keeps each element's -128/127 range alongside the enum.
-// A tag interpreter that pins an element's value with a const or enum (a validate
-// dive, or a sequence-wide oneof) instead drops the type-derived bounds, the way
-// a whole-value const or enum does on a scalar field; a bound the interpreter
-// authored on the element itself survives alongside the pin, mirroring the
-// field rule.
+// A sequence or map element resolves by the same rule, reading its own authored
+// canvas rather than the field's. Which dialect wrote the element's const or
+// enum does not enter into it: a []int8 with jsonschema:"enum=1|2|3" and one
+// with validate:"oneof=1 2 3" both drop each element's kind-derived -128/127
+// range, and a bound authored on the element itself survives alongside the pin,
+// mirroring the field rule.
 //
 // # Comment Extraction
 //

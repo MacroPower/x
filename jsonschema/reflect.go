@@ -1443,9 +1443,7 @@ func (g *generator) needsAllOfComposition(t reflect.Type) bool {
 // buildFieldSchema generates a struct field's schema, applies the json:",string"
 // override, comment extraction, and jsonschema struct tag, then registers it in
 // the parent's Properties/PropertyOrder and required list. Tag interpreters run
-// later in applyFieldInterpreters once all sibling properties exist. The returned
-// bool reports whether the jsonschema tag authored a numeric bound kept alongside
-// an enum, so applyFieldInterpreters can preserve it when it re-drops bounds.
+// later in applyFieldInterpreters once all sibling properties exist.
 func (g *generator) buildFieldSchema(
 	parentType reflect.Type,
 	fi structFieldInfo,
@@ -1531,14 +1529,6 @@ func (g *generator) buildFieldSchema(
 			fieldNode = rebuildOverriddenField(fieldNode)
 		}
 	}
-
-	// Mark the enum-on-elements carve-out. At this instant only the jsonschema tag
-	// could have authored an enum on a sequence/map element, and it does so on the
-	// bare element canvas without pinning the value, so those elements keep their
-	// type-derived numeric bounds through reconcile. Placed after the whole tag
-	// block, a type= override that could not keep element structure (rebuilt into
-	// a childless value node above) is a natural no-op.
-	markKeptElementEnums(fieldNode)
 
 	// Add to parent. The payload (bare) is shared into parent.Properties so a
 	// build-time interpreter sees the sibling shape; render overwrites it.

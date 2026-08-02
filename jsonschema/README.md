@@ -477,15 +477,12 @@ rendering, the value the validator enforces, does not reproduce -- is rejected
 the same way regardless of which source set it; a bound parsed at an
 integer-kind field is capped at 2^53 outright.
 
-On a sequence or map element the bound drop is by author. A jsonschema-tag
-`enum` on the elements keeps each element's type-derived numeric bounds -- the
-tag writes the enum onto the bare element schema without pinning the value, so
-`[]int8` with `enum=1|2|3` keeps each element's `-128`/`127` range alongside the
-enum. A tag interpreter that pins an element's value with a `const` or `enum` (a
-`validate` dive, or a sequence-wide `oneof`) instead drops the type-derived
-bounds, the way a whole-value `const` or `enum` does on a scalar field; a bound
-the interpreter authored on the element itself survives alongside the pin,
-mirroring the field rule.
+A sequence or map element resolves by the same rule, reading its own authored
+canvas rather than the field's. Which dialect wrote the element's `const` or
+`enum` does not enter into it: `[]int8` with `jsonschema:"enum=1|2|3"` and
+`[]int8` with `validate:"oneof=1 2 3"` both drop each element's kind-derived
+`-128`/`127` range, and a bound authored on the element itself survives
+alongside the pin, mirroring the field rule.
 
 ### Struct field rules
 

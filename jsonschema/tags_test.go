@@ -1209,14 +1209,13 @@ func TestTagEnumOnSequenceFields(t *testing.T) {
 		assert.Equal(t, []any{int64(1), int64(2), int64(3)}, items[0].Enum)
 	})
 
-	t.Run("slice of sized ints keeps element bounds", func(t *testing.T) {
+	t.Run("slice of sized ints drops the kind-derived element bounds", func(t *testing.T) {
 		t.Parallel()
 
-		// A jsonschema-tag enum on the elements writes the enum onto the bare
-		// element schema without pinning the value, so each element keeps its
-		// type-derived numeric bounds (int8's -128/127) alongside the enum. This is
-		// the enum-on-elements carve-out: unlike an interpreter dive/oneof pin, the
-		// tag path does not drop the bounds.
+		// An enum on the elements restricts each element to a set the int8 range
+		// already admits, so the kind-derived -128/127 bounds are redundant and
+		// drop. The rule reads the keyword, not the dialect that wrote it: a
+		// validate dive/oneof pin on the same elements resolves identically.
 		type T struct {
 			Codes []int8 `json:"codes" jsonschema:"enum=1|2|3"`
 		}
@@ -1227,10 +1226,8 @@ func TestTagEnumOnSequenceFields(t *testing.T) {
 		items := itemsOf(s, "codes")
 		require.Len(t, items, 1)
 		require.Len(t, items[0].Enum, 3)
-		require.NotNil(t, items[0].Minimum, "the element keeps its int8 minimum alongside the enum")
-		require.NotNil(t, items[0].Maximum, "the element keeps its int8 maximum alongside the enum")
-		assert.InDelta(t, -128.0, *items[0].Minimum, 0)
-		assert.InDelta(t, 127.0, *items[0].Maximum, 0)
+		assert.Nil(t, items[0].Minimum, "the enum subsumes the kind-derived int8 minimum")
+		assert.Nil(t, items[0].Maximum, "the enum subsumes the kind-derived int8 maximum")
 	})
 
 	t.Run("pointer to slice", func(t *testing.T) {
