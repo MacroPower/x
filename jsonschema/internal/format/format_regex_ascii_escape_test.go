@@ -6,13 +6,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestRegexFormatIdentityEscapesASCII covers the ECMA 262 main-grammar
-// IdentityEscape rule for ASCII: IdentityEscape[~UnicodeMode] is any source
-// character that is not UnicodeIDContinue, so a backslash before ASCII
-// punctuation, space, or a control character is a valid escape (every JS
-// engine accepts new RegExp("\\,"), and Go RE2 compiles it too). ASCII
-// letters that name no defined escape (e.g. "\a") and "_" are ID_Continue
-// characters and stay rejected.
+// TestRegexFormatIdentityEscapesASCII covers the ECMA 262 Annex B
+// IdentityEscape rule for ASCII: SourceCharacterIdentityEscape[~N] is
+// "SourceCharacter but not c", so every ASCII character in the escape position
+// either names a defined escape or is its own identity escape, and none of them
+// rejects. Annex B is normative for web browsers and shipped by every JS engine,
+// so the main grammar's narrower "not UnicodeIDContinue" rule would reject
+// patterns like "\a" and "\_" that every engine compiles.
+//
+// The accept cases are kept as regression coverage over the whole ASCII range:
+// punctuation, whitespace, control characters, the defined escapes, and the
+// letters and underscore the main grammar excludes.
 func TestRegexFormatIdentityEscapesASCII(t *testing.T) {
 	t.Parallel()
 
@@ -41,10 +45,15 @@ func TestRegexFormatIdentityEscapesASCII(t *testing.T) {
 		"escaped comma inside a class is valid":        {instance: `[\,]`, want: true},
 		"escaped tab is a valid identity escape":       {instance: "\\\t", want: true},
 
-		"escaped metacharacter stays valid":     {instance: `\.`, want: true},
-		"escaped class shorthand stays valid":   {instance: `\d`, want: true},
-		"undefined letter escape stays invalid": {instance: `\a`, want: false},
-		"escaped underscore is invalid":         {instance: `\_`, want: false},
+		"escaped metacharacter stays valid":         {instance: `\.`, want: true},
+		"escaped class shorthand stays valid":       {instance: `\d`, want: true},
+		"undefined letter escape is an identity":    {instance: `\a`, want: true},
+		"uppercase undefined letter is an identity": {instance: `\A`, want: true},
+		"escaped underscore is an identity":         {instance: `\_`, want: true},
+
+		// A backslash with nothing after it is not an escape at all; the
+		// structural scan rejects it before the escape rule is consulted.
+		"trailing backslash is still invalid": {instance: `\`, want: false},
 	}
 
 	for name, tc := range tests {

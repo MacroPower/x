@@ -950,47 +950,27 @@ func validateRegex(s string) error {
 	return nil
 }
 
-// validateRegexEscape reports whether c is a valid character following a
-// backslash in an ECMA 262 regular expression. It rejects escapes that the
-// ECMA 262 main grammar does not define (e.g. "\a"), which RE2 would otherwise
-// accept. Any non-ASCII rune is a valid identity escape: ECMA 262 Annex B
-// (non-unicode mode) permits an identity escape of any source character that is
-// not part of another escape, so an escaped multi-byte code point is accepted.
-// Within ASCII, the main grammar's IdentityEscape[~UnicodeMode] rule
-// ("SourceCharacter but not UnicodeIDContinue") applies: punctuation, space,
-// and control characters are valid identity escapes, while letters that name
-// no defined escape and '_' are ID_Continue characters and are rejected. The
-// size is the byte length the rune decoded from: a lone invalid UTF-8 byte
-// decodes to (utf8.RuneError, 1) and is rejected, while a genuine U+FFFD
-// decodes from three bytes and is accepted as an identity escape.
+// validateRegexEscape reports whether c, the rune following a backslash, forms
+// a valid escape in an ECMA 262 regular expression. ECMA 262 Annex B, which is
+// normative for web browsers and shipped by every JS engine, widens
+// IdentityEscape[~UnicodeMode] from the main grammar's "SourceCharacter but not
+// UnicodeIDContinue" to "SourceCharacter but not c", so a source character in
+// the escape position either names a defined escape such as \d, \n, \u, or \1,
+// or is its own identity escape, and no character there rejects. Both "\a"
+// and "\_" are identity escapes under Annex B even though the main grammar's
+// narrower rule excludes them.
+//
+// Bare "\c" with no following ControlLetter is accepted, which Annex B does not
+// permit. The lenience is deliberate: this format is an assertion over a pattern
+// the package never compiles, and falsely rejecting a pattern every engine
+// accepts is the worse failure.
+//
+// The one rejection is a lone invalid UTF-8 byte, which decodes to
+// (utf8.RuneError, 1) and is not a source character at all; a genuine U+FFFD
+// decodes from three bytes and is accepted as an identity escape. The size is
+// the byte length the rune decoded from, which distinguishes the two.
 func validateRegexEscape(c rune, size int) error {
 	if c == utf8.RuneError && size == 1 {
-		return errors.New("invalid regex: invalid escape sequence")
-	}
-
-	if c >= utf8.RuneSelf {
-		return nil
-	}
-
-	switch {
-	case c >= '0' && c <= '9': // backreference / octal
-		return nil
-	case c == 'd' || c == 'D' || c == 'w' || c == 'W' || c == 's' || c == 'S':
-		return nil
-	case c == 'b' || c == 'B': // word boundary / backspace
-		return nil
-	case c == 'n' || c == 'r' || c == 't' || c == 'f' || c == 'v':
-		return nil
-	case c == 'x' || c == 'u' || c == 'c': // hex / unicode / control escapes
-		return nil
-	case c == 'k' || c == 'p' || c == 'P': // named backref / unicode property
-		return nil
-	}
-
-	// Every remaining ASCII rune that is not UnicodeIDContinue is a valid
-	// identity escape under the main grammar. Digits were consumed above, so
-	// only letters and '_' are ID_Continue here and are rejected.
-	if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' {
 		return errors.New("invalid regex: invalid escape sequence")
 	}
 

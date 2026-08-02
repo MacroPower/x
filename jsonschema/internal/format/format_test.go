@@ -109,9 +109,8 @@ func TestRegexFormatAcceptsEmptyCharacterClass(t *testing.T) {
 // TestRegexFormatIdentityEscapesNonASCII covers ECMA 262 Annex B identity
 // escapes: a backslash followed by a non-ASCII source character is valid even
 // though it names no defined escape. The escaped rune must be decoded as UTF-8
-// rather than judged by its lead byte. The ASCII escape rules are unchanged: a
-// defined escape like "\d" stays valid and an undefined one like "\a" stays
-// invalid.
+// rather than judged by its lead byte, which is what separates a genuine U+FFFD
+// from a lone invalid byte -- the only sequence the escape rule rejects.
 func TestRegexFormatIdentityEscapesNonASCII(t *testing.T) {
 	t.Parallel()
 
@@ -149,9 +148,9 @@ func TestRegexFormatIdentityEscapesNonASCII(t *testing.T) {
 			instance: `\d`,
 			valid:    true,
 		},
-		"undefined ASCII escape stays invalid": {
+		"undefined ASCII escape is an identity escape": {
 			instance: `\a`,
-			valid:    false,
+			valid:    true,
 		},
 		"trailing backslash stays invalid": {
 			instance: `foo\`,

@@ -40,6 +40,7 @@ const (
 	reasonCrossDraft       skipReason = "the referenced schema is Draft 2019-09, which this package does not support (Draft-07 and 2020-12 only); the draft is taken from the root schema's $schema and there is no per-ref switch to an unsupported draft's keyword semantics"
 	reasonRE2Whitespace    skipReason = `patterns use Go RE2, not ECMA 262: RE2 \s matches only [\t\n\f\r ], so this character's class membership differs`
 	reasonRE2ControlEscape skipReason = `patterns use Go RE2, not ECMA 262: RE2 has no \cX control escape, so Schema.Resolve rejects the pattern and the matching instance cannot validate`
+	reasonAnnexBIdentity   skipReason = `the regex format applies ECMA 262 Annex B, where SourceCharacterIdentityEscape[~N] is "SourceCharacter but not c", so "\a" is a valid identity escape; the case pins the main grammar's narrower rule, which only applies under the u flag and which no engine applies to a bare pattern (V8 compiles /\a/ and rejects only /\a/u)`
 )
 
 func buildSuiteSkips() map[string]skipReason {
@@ -51,6 +52,13 @@ func buildSuiteSkips() map[string]skipReason {
 		// passes when the keyword is absent.
 		"draft7/optional/cross-draft.json/refs to future drafts are processed as future drafts/missing bar is invalid":                     reasonCrossDraft,
 		"draft2020-12/optional/cross-draft.json/refs to historic drafts are processed as historic drafts/first item not a string is valid": reasonCrossDraft,
+
+		// The only optional/format skip. The suite reads an undefined ASCII
+		// letter escape under the ECMA 262 main grammar, which excludes
+		// UnicodeIDContinue from IdentityEscape; the format validator reads it
+		// under Annex B, which every JS engine implements for a pattern without
+		// the u flag. The surrounding regex format cases still run.
+		`draft2020-12/optional/format/ecmascript-regex.json/\a is not an ECMA 262 control escape`: reasonAnnexBIdentity,
 	}
 
 	addECMARegexSkips(skips)
@@ -98,10 +106,11 @@ var (
 	// "draft/file.json/group", or "draft/file.json/group/test".
 	//
 	// Every entry is a deliberate, minimal divergence required by this package's
-	// design (Draft-07/2020-12 only, Go RE2 patterns): only the specific cases
-	// that cannot pass are skipped, so the other cases in the same file and group
-	// still run. The required suite and the optional/format suite run with no
-	// skips. TestSuiteSkipsAreLive guards the map against typos and stale keys by
+	// design (Draft-07/2020-12 only, Go RE2 patterns, ECMA 262 Annex B identity
+	// escapes): only the specific cases that cannot pass are skipped, so the
+	// other cases in the same file and group still run. The required suite runs
+	// with no skips, and the optional/format suite carries exactly one.
+	// TestSuiteSkipsAreLive guards the map against typos and stale keys by
 	// asserting each key names a real suite file, group, and test.
 	suiteSkips = buildSuiteSkips()
 

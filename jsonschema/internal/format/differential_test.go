@@ -2,6 +2,7 @@ package format_test
 
 import (
 	"net/netip"
+	"regexp/syntax"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +13,13 @@ import (
 // design), so every differential is framed as "agreement modulo a documented
 // carve-out set": inputs that fall in a carve-out are skipped, and a mismatch
 // outside the carve-outs is the finding.
+//
+// Each target states the one direction it asserts and why that direction is the
+// sound one, because the two directions guard different failures and which one
+// holds differs by oracle: against a looser oracle only "oracle accepts implies
+// SUT accepts" is sound (the false-rejection guard), against a stricter one only
+// "SUT accepts implies oracle accepts" (the false-acceptance guard). Never
+// assert the converse of what a target documents.
 
 // FuzzFormatIPv4VsNetip differentials the ipv4 validator against
 // net/netip.ParseAddr + Is4. The SUT parses with net.ParseIP internally
@@ -167,6 +175,62 @@ func hasTwoDigitHour(timePart string) bool {
 	isDigit := func(b byte) bool { return b >= '0' && b <= '9' }
 
 	return isDigit(timePart[0]) && isDigit(timePart[1]) && timePart[2] == ':'
+}
+
+// FuzzFormatRegexVsRE2 differentials the regex validator against Go's
+// regexp/syntax parser in Perl mode. The sound direction is one-way: RE2 parses
+// s implies the regex format accepts s. The validator is deliberately looser
+// than RE2 -- ECMA 262 permits backreferences and lookaround, which RE2 rejects
+// by design -- so "SUT accepts implies RE2 parses" is false for a whole class of
+// valid patterns and must not be asserted. What the one direction does guard is
+// false rejection: a structural scan that misreads the grammar starts turning
+// away patterns every engine compiles, which is how the Annex B identity-escape
+// misread was found.
+//
+// Two carve-out families, each a genuine RE2/ECMA-262 divergence:
+//   - \Q...\E literal quoting, an RE2/PCRE extension ECMA 262 does not have, so
+//     RE2 reads "\Q[" as a literal '[' where ECMA 262 sees an unterminated class;
+//   - "[]", where RE2 reads a leading ']' POSIX-style as a class member (making
+//     "[]Z(]" a valid class) while ECMA 262 22.2.1 reads "[]" as the empty class.
+func FuzzFormatRegexVsRE2(f *testing.F) {
+	fn := validator(f, "regex")
+
+	for _, seed := range []string{
+		"^[a-z]+$", `(foo)\1`, "foo(?=bar)", "[abc]", "a{2,3}", `\a`, `\_`, `\c`,
+		`\Q[\E`, "[]", "[]Z(]", "(", "[", `\`, "a|b", `\p{L}`, "",
+	} {
+		f.Add(seed)
+	}
+
+	f.Fuzz(func(t *testing.T, s string) {
+		_, err := syntax.Parse(s, syntax.Perl)
+		if err != nil {
+			return
+		}
+
+		if regexCarveOut(s) {
+			return
+		}
+
+		err = fn(s)
+		if err != nil {
+			t.Fatalf("RE2 parses %q but the regex format rejects it: %v", s, err)
+		}
+	})
+}
+
+// regexCarveOut skips patterns where RE2 and ECMA 262 read the same bytes as
+// different constructs, so RE2 parsing one is no evidence ECMA 262 accepts it.
+func regexCarveOut(s string) bool {
+	// \Q...\E literal quoting suspends RE2's metacharacter reading; ECMA 262
+	// has no such construct and keeps reading the quoted text as syntax.
+	if strings.Contains(s, `\Q`) || strings.Contains(s, `\E`) {
+		return true
+	}
+
+	// A leading ']' is a class member to RE2 and closes an empty class to
+	// ECMA 262, so the two disagree on where the class ends.
+	return strings.Contains(s, "[]")
 }
 
 // addIPSeeds seeds the IP differentials with dotted-decimal, colon, mapped, and
