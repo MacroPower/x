@@ -21,63 +21,27 @@ var (
 	// cannot ship exactly: an integer the float64's shortest-decimal
 	// interpretation (the value the schema renders and the validator enforces)
 	// does not reproduce, so storing it would silently change the constraint.
-	// It is the single exact-representability policy shared by
-	// [Constraints.AddNumericBound] and the jsonschema tag.
+	// It is the single exact-representability policy every dialect's numeric
+	// bounds parse through.
 	ErrBoundNotRepresentable = constraint.ErrNotRepresentable
 )
 
-// BoundRule identifies which numeric bound a [Constraints.AddNumericBound]
-// contribution expresses. The exclusive rules render as exclusiveMinimum and
-// exclusiveMaximum; the inclusive ones as minimum and maximum.
-type BoundRule uint8
-
-const (
-	// BoundMin is an inclusive floor (minimum), the target of a min or gte rule.
-	BoundMin BoundRule = iota
-	// BoundMax is an inclusive ceiling (maximum), the target of a max or lte rule.
-	BoundMax
-	// BoundGt is an exclusive floor (exclusiveMinimum), the target of a gt rule.
-	BoundGt
-	// BoundLt is an exclusive ceiling (exclusiveMaximum), the target of a lt rule.
-	BoundLt
-)
-
-// LenRule identifies which length or count bound a [Constraints.AddLengthBound]
-// or [Constraints.AddCountBound] contribution expresses. AddLengthBound targets
-// the string length keywords (minLength/maxLength); AddCountBound targets the
-// container count keywords (minItems/maxItems for a slice or array,
-// minProperties/maxProperties for a map), chosen from the field's kind.
-type LenRule uint8
-
-const (
-	// LenMin is an inclusive floor (min or gte).
-	LenMin LenRule = iota
-	// LenGt is an exclusive floor folded to the inclusive floor N+1 (gt).
-	LenGt
-	// LenMax is an inclusive ceiling (max or lte).
-	LenMax
-	// LenLt is an exclusive ceiling folded to the inclusive ceiling N-1 (lt).
-	LenLt
-	// LenExact pins both the floor and the ceiling to N (len).
-	LenExact
-)
-
 // Constraints is the contribution surface a [TagInterpreter] uses to add value
-// constraints to a field. It hides the shared constraint algebra behind a
-// curated set of methods, so an interpreter contributes numeric bounds, string
-// length, container counts, multipleOf, and const/enum/forbidden values without
-// naming the internal model, and the single 2^53 exact-representability policy
-// applies to its numeric bounds automatically.
+// constraints to a field. Its vocabulary is the shared constraint model's: an
+// interpreter names an [Op] and, for a bound, the [Axis] it targets, and the
+// model decides from the field's shape what that means. There is no second set
+// of rule names to translate into, which is what keeps an interpreter from
+// re-deriving a policy the model already owns.
 //
-// The bound methods are intersect-only: each parses its value, reads the field's
-// effective endpoint (the value already authored on the canvas, or the
-// type-derived one from the base), and writes the result back only when it
-// tightens that endpoint. A bound that would widen or clear a kind bound is a
-// no-op, so a bound never loosens a stronger one set by the field's type or an
-// earlier rule, regardless of order. The value set (const/enum/forbidden) is
-// composed on the field's canvas through the same shared helpers the jsonschema
-// tag uses. The zero value is not usable; the generator hands each field-level
-// hook a ready facade via [FieldContext.Constraints].
+// [Constraints.Apply] is the whole surface for constraints; the named methods
+// below are conveniences for the value set, where an interpreter usually wants
+// to run its own conflict check with its own wording first. Bounds are
+// intersect-only, const and enum report [ErrConstraintConflict] rather than
+// overwriting, and a rule the field's shape cannot carry is an error rather
+// than an inert keyword.
+//
+// The zero value is not usable; the generator hands each field-level hook a
+// ready facade via [FieldContext.Constraints].
 type Constraints struct {
 	canvas *Schema
 	base   *Schema
@@ -181,114 +145,6 @@ func (c *Constraints) baseSchema() *Schema {
 	return &Schema{}
 }
 
-// AddNumericBound contributes one numeric bound parsed from value under the
-// field's kind, applying the shared exact-representability policy (a bound the
-// shipped float64 would not reproduce exactly is rejected as
-// [ErrBoundNotRepresentable] rather than silently rounded).
-// The bound intersects the field's effective bound: it is written to the canvas
-// only when it tightens the value already in effect (the canvas value, or the
-// type-derived one), so a weaker bound never loosens a stronger one and the kind
-// bound survives a tag that cannot reach past it.
-//
-// The tighten check compares within one keyword slot (a gt against the effective
-// exclusiveMinimum, a min against the effective minimum), so a bound looser than
-// the opposite-inclusivity kind bound on the same side (a gt below an inclusive
-// kind minimum) can still reach the canvas. That is harmless: reconcile takes the
-// tighter of both slots when it resolves the axis, so the kind bound wins in the
-// ordinary case, and under a value enum -- the one case the looser bound survives
-// -- the enum already restricts the value to within the type range.
-func (c *Constraints) AddNumericBound(rule BoundRule, value string) error {
-	end, err := constraint.ParseNumericBound(value, c.kind)
-	if err != nil {
-		//nolint:wrapcheck // The shared policy owns the message; its sentinel is re-exported as ErrBoundNotRepresentable.
-		return err
-	}
-
-	base := c.baseSchema()
-	n := end.Val
-
-	switch rule {
-	case BoundMin:
-		tightenBound(&c.canvas.Minimum, coalesceField(c.canvas.Minimum, base.Minimum), n, false)
-
-	case BoundGt:
-		eff := coalesceField(c.canvas.ExclusiveMinimum, base.ExclusiveMinimum)
-		tightenBound(&c.canvas.ExclusiveMinimum, eff, n, false)
-
-	case BoundMax:
-		tightenBound(&c.canvas.Maximum, coalesceField(c.canvas.Maximum, base.Maximum), n, true)
-
-	case BoundLt:
-		eff := coalesceField(c.canvas.ExclusiveMaximum, base.ExclusiveMaximum)
-		tightenBound(&c.canvas.ExclusiveMaximum, eff, n, true)
-	}
-
-	return nil
-}
-
-// AddLengthBound contributes one string-length bound parsed from value: the
-// exclusive-to-inclusive fold, the non-negative clamp, and the
-// unsatisfiable-range construction (a floor of one against a ceiling of zero)
-// all happen in the shared size-bound algebra. Each resulting inclusive floor or
-// ceiling intersects the canvas's current minLength/maxLength, writing only when
-// it tightens the effective bound.
-func (c *Constraints) AddLengthBound(rule LenRule, value string) error {
-	base := c.baseSchema()
-
-	return c.addSizeBound(rule, value,
-		&c.canvas.MinLength, &c.canvas.MaxLength, base.MinLength, base.MaxLength)
-}
-
-// AddCountBound contributes one container-count bound parsed from value, folding
-// and clamping through the same size-bound algebra as [Constraints.AddLengthBound]
-// but targeting the count keywords the field's kind selects: minItems/maxItems
-// for a slice or array, minProperties/maxProperties for a map. The exclusive
-// fold happens here (there is no exclusive-items keyword to defer it to), and
-// each inclusive floor or ceiling intersects the canvas's current count. A field
-// of any other kind has no count keyword to target, so the call reports an error
-// rather than stamping minItems onto a non-container schema.
-func (c *Constraints) AddCountBound(rule LenRule, value string) error {
-	base := c.baseSchema()
-
-	switch c.kind {
-	case reflect.Map:
-		return c.addSizeBound(rule, value,
-			&c.canvas.MinProperties, &c.canvas.MaxProperties, base.MinProperties, base.MaxProperties)
-
-	case reflect.Slice, reflect.Array:
-		return c.addSizeBound(rule, value,
-			&c.canvas.MinItems, &c.canvas.MaxItems, base.MinItems, base.MaxItems)
-
-	default:
-		return fmt.Errorf("count bound: field kind %s is not a slice, array, or map", c.kind)
-	}
-}
-
-// addSizeBound parses a length/count rule through the shared size algebra and
-// intersects each resulting inclusive floor/ceiling against the canvas's current
-// bound, reading the effective value (canvas or base) so a weaker bound never
-// loosens a stronger one.
-func (c *Constraints) addSizeBound(
-	rule LenRule, value string, minField, maxField **int, baseMin, baseMax *int,
-) error {
-	bounds, err := constraint.ParseSizeBound(value, sizeRule(rule), constraint.Intersect, constraint.Authored)
-	if err != nil {
-		//nolint:wrapcheck // The shared algebra owns the message dialect.
-		return err
-	}
-
-	for _, b := range bounds {
-		n := int(b.End.Rat.Num().Int64())
-		if b.Lower {
-			raiseFloor(minField, coalesceField(*minField, baseMin), n)
-		} else {
-			lowerCeiling(maxField, coalesceField(*maxField, baseMax), n)
-		}
-	}
-
-	return nil
-}
-
 // SetMultipleOf records a multipleOf value on the field, reporting an error for a
 // non-positive value, which JSON Schema forbids.
 func (c *Constraints) SetMultipleOf(value float64) error {
@@ -390,43 +246,4 @@ func (c *Constraints) ForbidSchema(forbidden *Schema) {
 	vs.SeedNot(c.canvas.Not)
 	vs.ForbidSchema(forbidden)
 	vs.WriteForbidden(c.canvas)
-}
-
-// tightenBound writes n into *field when it tightens the effective bound: a
-// higher value for a floor, a lower value for a ceiling. A widening or equal
-// value is a no-op, so the bound methods intersect and never loosen.
-func tightenBound(field **float64, eff *float64, n float64, ceiling bool) {
-	if eff == nil || (ceiling && n < *eff) || (!ceiling && n > *eff) {
-		*field = &n
-	}
-}
-
-// raiseFloor writes n into *field when it tightens the effective lower bound.
-func raiseFloor(field **int, eff *int, n int) {
-	if eff == nil || n > *eff {
-		*field = &n
-	}
-}
-
-// lowerCeiling writes n into *field when it tightens the effective upper bound.
-func lowerCeiling(field **int, eff *int, n int) {
-	if eff == nil || n < *eff {
-		*field = &n
-	}
-}
-
-// sizeRule maps a facade [LenRule] to the shared algebra's [constraint.SizeRule].
-func sizeRule(rule LenRule) constraint.SizeRule {
-	switch rule {
-	case LenGt:
-		return constraint.RuleGt
-	case LenMax:
-		return constraint.RuleMax
-	case LenLt:
-		return constraint.RuleLt
-	case LenExact:
-		return constraint.RuleLen
-	default:
-		return constraint.RuleMin
-	}
 }

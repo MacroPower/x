@@ -336,21 +336,29 @@
 // a permitted null valid.
 //
 // For bounds and value constraints an interpreter uses the [Constraints] facade
-// [FieldContext.Constraints] returns, the contribution surface over the shared
-// constraint algebra. It parses and adds numeric bounds
-// ([Constraints.AddNumericBound]) under the single 2^53 exact-representability
-// policy, string length ([Constraints.AddLengthBound]), container counts
-// ([Constraints.AddCountBound], which selects minItems/maxItems or
-// minProperties/maxProperties from the field kind), multipleOf, and
-// const/enum/forbidden values, without naming the internal model. The bound
-// methods are intersect-only: each writes back only when it tightens the
-// effective bound, so a bound never loosens a stronger one the field's type or
-// an earlier rule set, and a bound that would widen or clear a kind bound is a
-// no-op. A conflict an interpreter raises through the facade surfaces the public
-// [ErrConstraintConflict] sentinel. To constrain the elements of a sequence or map field
-// (a dive, or a sequence-wide oneof), an interpreter walks the element contexts
-// [FieldContext.ElementContexts] returns, each a [FieldContext] over one
-// element's canvas. For a promoted field, the declaring struct type is the
+// [FieldContext.Constraints] returns, whose vocabulary is the shared constraint
+// model's: [Constraints.Apply] takes an [Op] and, for a bound, the [Axis] it
+// targets, and the model decides from the field's classified shape what that
+// means. [AxisAuto] lets the shape choose, which is what a rule-shaped
+// validator (min, max) means, while naming a family pins it. That one call
+// carries the single 2^53 exact-representability policy, the coercion decision
+// for a field whose schema is a string, and the retargeting of an element rule
+// onto the item schemas -- so an interpreter states what it wants and does not
+// re-derive any of it. [Constraints.SetConst], [Constraints.SetEnum],
+// [Constraints.Const], [Constraints.Enum], [Constraints.Forbid],
+// [Constraints.ForbidSchema], and [Constraints.SetMultipleOf] remain as named
+// conveniences for the value set, where an interpreter usually runs its own
+// conflict check with its own wording first.
+//
+// Bounds are intersect-only: each writes back only when it would not loosen the
+// effective bound, so a bound never weakens a stronger one the field's type or
+// an earlier rule set. A rule the field's shape cannot carry is an error naming
+// the reason rather than a keyword nothing enforces. A conflict an interpreter
+// raises through the facade surfaces the public [ErrConstraintConflict]
+// sentinel. An element rule (a dive, or a sequence-wide oneof) reaches the item
+// schemas through the model, which re-dispatches on each element's own shape;
+// [FieldContext.ElementContexts] remains the accessor for walking them
+// directly. For a promoted field, the declaring struct type is the
 // embedded type, exposed as [FieldContext.Owner], which a [DescriptionProvider]
 // reads for the same field. Each interpreter is registered under the struct tag
 // key it reads; multiple interpreters can be registered and are applied in

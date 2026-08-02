@@ -197,8 +197,8 @@ func TestConstraintsFacadeNumericBoundPolicy(t *testing.T) {
 	)
 
 	interp := boundInterp(func(c *jsonschema.Constraints) error {
-		okErr = c.AddNumericBound(jsonschema.BoundMin, "10")
-		bigErr = c.AddNumericBound(jsonschema.BoundMax, "9007199254740993")
+		okErr = c.Apply(jsonschema.OpFloorIncl, jsonschema.AxisNumeric, "10")
+		bigErr = c.Apply(jsonschema.OpCeilIncl, jsonschema.AxisNumeric, "9007199254740993")
 
 		return nil
 	})
@@ -254,9 +254,9 @@ func TestConstraintsFacadeIntersectOnly(t *testing.T) {
 
 	interp := boundInterp(func(c *jsonschema.Constraints) error {
 		// A floor below the int8 kind floor cannot loosen it.
-		require.NoError(t, c.AddNumericBound(jsonschema.BoundMin, "-200"))
+		require.NoError(t, c.Apply(jsonschema.OpFloorIncl, jsonschema.AxisNumeric, "-200"))
 		// A ceiling tighter than the kind ceiling is applied.
-		require.NoError(t, c.AddNumericBound(jsonschema.BoundMax, "50"))
+		require.NoError(t, c.Apply(jsonschema.OpCeilIncl, jsonschema.AxisNumeric, "50"))
 
 		return nil
 	})
@@ -273,7 +273,7 @@ func TestConstraintsFacadeIntersectOnly(t *testing.T) {
 	assert.InDelta(t, 50, *field.Maximum, 0, "the tighter ceiling is applied")
 }
 
-// TestConstraintsFacadeCountIntersection confirms AddCountBound targets the
+// TestConstraintsFacadeCountIntersection confirms a count bound targets the
 // array count keywords and intersects them, and that an unsatisfiable count
 // (lt=0) is preserved as the floor-one/ceiling-zero range no array satisfies.
 func TestConstraintsFacadeCountIntersection(t *testing.T) {
@@ -287,8 +287,8 @@ func TestConstraintsFacadeCountIntersection(t *testing.T) {
 		}
 
 		interp := boundInterp(func(c *jsonschema.Constraints) error {
-			require.NoError(t, c.AddCountBound(jsonschema.LenMin, "2"))
-			require.NoError(t, c.AddCountBound(jsonschema.LenMax, "5"))
+			require.NoError(t, c.Apply(jsonschema.OpFloorIncl, jsonschema.AxisAuto, "2"))
+			require.NoError(t, c.Apply(jsonschema.OpCeilIncl, jsonschema.AxisAuto, "5"))
 
 			return nil
 		})
@@ -313,7 +313,7 @@ func TestConstraintsFacadeCountIntersection(t *testing.T) {
 		}
 
 		interp := boundInterp(func(c *jsonschema.Constraints) error {
-			return c.AddCountBound(jsonschema.LenLt, "0")
+			return c.Apply(jsonschema.OpCeilExcl, jsonschema.AxisAuto, "0")
 		})
 
 		s, err := jsonschema.GenerateFor[Payload](t.Context(),
@@ -338,7 +338,10 @@ func TestConstraintsFacadeCountIntersection(t *testing.T) {
 		var countErr error
 
 		interp := boundInterp(func(c *jsonschema.Constraints) error {
-			countErr = c.AddCountBound(jsonschema.LenMin, "2")
+			// Naming the family rather than letting the shape choose is what
+			// makes this an error: an auto axis on an int is a numeric bound,
+			// which is a perfectly good thing to write.
+			countErr = c.Apply(jsonschema.OpFloorIncl, jsonschema.AxisItems, "2")
 
 			return nil
 		})
@@ -367,7 +370,7 @@ func TestConstraintsFacadeBoundSurvivesEnum(t *testing.T) {
 	}
 
 	interp := boundInterp(func(c *jsonschema.Constraints) error {
-		return c.AddNumericBound(jsonschema.BoundMin, "15")
+		return c.Apply(jsonschema.OpFloorIncl, jsonschema.AxisNumeric, "15")
 	})
 
 	s, err := jsonschema.GenerateFor[Payload](t.Context(),
@@ -463,10 +466,10 @@ func TestConstraintsInterpreterOrderIndependent(t *testing.T) {
 	}
 
 	lo := boundInterp(func(c *jsonschema.Constraints) error {
-		return c.AddNumericBound(jsonschema.BoundMin, "10")
+		return c.Apply(jsonschema.OpFloorIncl, jsonschema.AxisNumeric, "10")
 	})
 	hi := boundInterp(func(c *jsonschema.Constraints) error {
-		return c.AddNumericBound(jsonschema.BoundMax, "100")
+		return c.Apply(jsonschema.OpCeilIncl, jsonschema.AxisNumeric, "100")
 	})
 
 	gen := func(opts ...jsonschema.GenerateOption) *jsonschema.Schema {

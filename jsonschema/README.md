@@ -656,22 +656,30 @@ reading sibling struct tags such as the `json` tag's options; and the target
 
 For bounds and value constraints, an interpreter uses the `Constraints` facade
 `FieldContext.Constraints()` returns, the contribution surface over the shared
-constraint algebra. It parses and adds numeric bounds (`AddNumericBound`, under
-the single 2^53 policy), string length (`AddLengthBound`), container counts
-(`AddCountBound`, which targets `minItems`/`maxItems` or
-`minProperties`/`maxProperties` from the field kind), `multipleOf`, and
-`const`/`enum`/forbidden values, without naming the internal model. The bound
-methods are intersect-only: each writes back only when it tightens the effective
-bound, so a bound never loosens a stronger one and a widening bound is a no-op. A
-conflict surfaces the exported `ErrConstraintConflict` sentinel, checked against
+constraint algebra. Its vocabulary is the model's: `Apply` takes an `Op` and,
+for a bound, the `Axis` it targets (`AxisAuto` lets the field's shape choose,
+which is what a rule-shaped validator means; naming a family pins it), under
+the single 2^53 policy. Named conveniences remain for the value set
+(`SetConst`, `SetEnum`, `Const`, `Enum`, `Forbid`, `ForbidSchema`,
+`SetMultipleOf`), where an interpreter usually runs its own conflict check
+first.
+
+That one call carries the coercion decision for a field whose schema is a
+string, and the retargeting of an element rule onto the item schemas, so an
+interpreter states what it wants and re-derives none of it. Bounds are
+intersect-only: each writes back only when it would not loosen the effective
+bound, so a bound never weakens a stronger one and a widening bound is a no-op.
+A rule the field's shape cannot carry is an error naming the reason rather than
+a keyword nothing enforces. A conflict surfaces the exported
+`ErrConstraintConflict` sentinel, checked against
 the canvas and an inline type-derived value; a `const`/`enum` living in a
 `$defs`-referenced definition is not visible to the check and instead composes
 conjunctively beside the `$ref` (an `enum` intersects and only tightens, a
 disagreeing `const` composes to a faithfully unsatisfiable schema).
 
-To constrain the elements of a sequence or
-map field, an interpreter walks the element contexts `FieldContext.ElementContexts`
-returns. Each interpreter is registered under the struct tag key it reads
+An element rule (a dive, or a sequence-wide `oneof`) reaches the item schemas
+through the model, which re-dispatches on each element's own shape;
+`FieldContext.ElementContexts` remains the accessor for walking them directly. Each interpreter is registered under the struct tag key it reads
 (following `net/http.Handle`, so one implementation can serve several keys);
 multiple interpreters can be registered and run in order, after the `jsonschema`
 tag. `TagInterpreterFunc` adapts a bare function, so a one-off interpreter needs
