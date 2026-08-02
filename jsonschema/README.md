@@ -727,7 +727,14 @@ Supported tags (summary):
 - **Bounds:** `min`, `max`, `len`, `gt`, `lt`, `gte`, `lte`, `eq`, `ne`, mapped
   to length/numeric keywords for strings and numbers, and to
   `minItems`/`maxItems` or `minProperties`/`maxProperties` for collections.
-- **Enumerations:** `oneof` maps to `enum` for strings, numbers, and bools.
+- **Enumerations:** `oneof` maps to `enum` for strings, numbers, and bools, and
+  on a slice or array to an `enum` on the element schemas. That is the same
+  element path `dive` takes, so on those shapes `oneof=a b` and `dive,oneof=a b`
+  produce identical schemas. Two exceptions are deliberate: on a map, `dive`
+  descends to the values while a bare `oneof` is an error (a `dive` says
+  "descend" outright, a bare `oneof` on a map has no go-playground element
+  meaning), and on a `[]byte` both are an error, since the field encodes as one
+  base64 string with no element schema for either to reach.
 - **Collections:** `unique` -> `uniqueItems` (the `unique=<field>` form has no
   JSON Schema equivalent and is an error, as is `unique` on a shape with no
   array to constrain -- a string, number, bool, or struct; a map is the one
@@ -738,6 +745,14 @@ Supported tags (summary):
   `format`.
 - **Patterns:** `alpha`, `alphanum`, `numeric`, `number`, `ascii` -> `pattern`.
 - **Content:** `json` -> `contentMediaType`; `base64` -> `contentEncoding`.
+
+The interpreter owns this dialect's grammar and nothing else: splitting the tag,
+the OR and escape handling, the `dive` and `keys` blocks, and a table naming the
+operation each validator spells. What an operation does to a given field is the
+shared constraint model's, which the `jsonschema` struct tag runs through too, so
+the two dialects cannot drift on a rule they both express. The package holds no
+scalar parser and writes no schema keyword directly; every constraint is
+contributed through `Constraints`.
 
 Cross-field, conditional, and control tags (`omitempty`, `structonly`, ...) are
 silently skipped; within a comma group only the first `|` OR alternative is
@@ -1428,6 +1443,17 @@ refs.
   spec.
 - **`Validator.ValidateJSON` uses `UseNumber`** to preserve the integer-vs-number
   distinction that default `float64` unmarshaling would lose.
+- **One operation x shape table for every tag dialect**: the `jsonschema` tag and
+  the `validate` tag are two spellings of one constraint vocabulary, so they are
+  two grammars over one model (`internal/tagmodel`) rather than two engines. The
+  dispatch key is the JSON shape an instance actually takes, not the Go kind, so
+  string coercion is a column of the table instead of a gate each operation has
+  to remember; the table is a fixed-size array whose every cell is Apply, Ignore,
+  or Reject with a written reason, checked at import and pinned by a golden dump.
+  Where the dialects genuinely differ -- the numeric-bound literal domain, the
+  negative-size question, how a list is spelled, whether a bare key implies a
+  value -- the difference is a named parameter or a key-table row, never a second
+  implementation.
 
 Two points where the generated schema's model of a Go type differs from what
 `encoding/json` emits for that type, each specified in the section that owns it:

@@ -33,7 +33,8 @@ import (
 // excluded: format and pattern tags (go-playground uses its own regexes while
 // the schema delegates to internal/format -- that surface is rig 3's job),
 // content tags, cross-field and conditional validators, the | OR operator,
-// keys...endkeys, and json:",string" numeric bounds. Every field is
+// keys...endkeys, and json:",string" numeric *bounds* (the value rules on
+// coerced fields are covered, by coercedConstraints below). Every field is
 // non-pointer and always present with no omitempty, which eliminates the
 // "empty value skipped by one side" divergence class. Unique stays on slices
 // and arrays because the interpreter makes it a no-op on maps while
@@ -131,6 +132,26 @@ type requiredConstraints struct {
 	Flag bool    `json:"flag"  validate:"required"`
 }
 
+// coercedConstraints exercises the value rules on json:",string" fields, whose
+// schema is a string while the Go value is a number or bool. Both sides see the
+// same instance -- go-playground validates the Go value, the schema validates
+// the quoted text encoding/json writes -- so the equivalence holds only because
+// the interpreter parses each tag value at the real Go kind and re-serializes
+// it. A dialect that compared against the raw literal would pin "5.0" where the
+// field emits "5", and this rig would catch it.
+//
+// Only the value rules appear. The numeric bounds are excluded by design, not
+// by omission: minimum constrains JSON numbers and is inert against the quoted
+// instance, so the interpreter rejects them outright rather than modeling them.
+type coercedConstraints struct {
+	Eq    int     `json:"eq,string"     validate:"eq=7"`
+	Ne    int     `json:"ne,string"     validate:"ne=7"`
+	OneOf int8    `json:"one_of,string" validate:"oneof=1 2 3"`
+	Req   int     `json:"req,string"    validate:"required"`
+	FlagR bool    `json:"flag_r,string" validate:"required"`
+	FEq   float64 `json:"f_eq,string"   validate:"eq=2.5"`
+}
+
 func FuzzValidatorStringConstraints(f *testing.F) {
 	fuzzValidatorDifferential[stringConstraints](f, fuzzfill.WithCandidates(map[string][]string{
 		"OneOf": {"alpha", "beta", "gamma", "delta"},
@@ -169,6 +190,15 @@ func FuzzValidatorMapConstraints(f *testing.F) {
 
 func FuzzValidatorRequiredConstraints(f *testing.F) {
 	fuzzValidatorDifferential[requiredConstraints](f)
+}
+
+func FuzzValidatorCoercedConstraints(f *testing.F) {
+	fuzzValidatorDifferential[coercedConstraints](f, fuzzfill.WithCandidates(map[string][]string{
+		"Eq":    {"7", "8"},
+		"Ne":    {"7", "8"},
+		"OneOf": {"1", "2", "3", "4"},
+		"FEq":   {"2.5", "3.5"},
+	}))
 }
 
 // fuzzValidatorDifferential is the shared body for every rig-2 target. It
