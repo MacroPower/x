@@ -350,6 +350,19 @@
 // conveniences for the value set, where an interpreter usually runs its own
 // conflict check with its own wording first.
 //
+// An interpreter that branches on what the field is classifies it once with
+// [ShapeOf], reading the field's Go type against its type-derived
+// [FieldContext.Base]. The resulting [Shape] carries the declared type, that
+// type with its pointer chain followed, the kind a scalar literal parses at,
+// whether the occurrence admits null, and the [Form] -- the JSON shape the
+// instance actually takes, which is what the model dispatches on. Form is
+// deliberately not the Go kind, so a field that encodes itself as a string
+// (through json:",string" or its own MarshalText) reads as [FormCoercedNumber]
+// or [FormTextString] rather than as a number every branch has to
+// special-case. Passing that same Shape to [FieldContext.ConstraintsFor] builds
+// the facade without classifying the field a second time, which
+// [FieldContext.Constraints] would.
+//
 // Bounds are intersect-only: each writes back only when it would not loosen the
 // effective bound, so a bound never weakens a stronger one the field's type or
 // an earlier rule set. A rule the field's shape cannot carry is an error naming

@@ -1,6 +1,8 @@
 package jsonschema
 
 import (
+	"reflect"
+
 	"go.jacobcolvin.com/x/jsonschema/internal/constraint"
 	"go.jacobcolvin.com/x/jsonschema/internal/tagmodel"
 )
@@ -43,15 +45,26 @@ type Constraints struct {
 	target tagmodel.Target
 }
 
-// Op and Axis are the shared constraint model's vocabulary, re-exported so an
-// interpreter names an operation and a keyword family rather than translating
-// its dialect into a second set of names.
+// Op, Axis, Shape, and Form are the shared constraint model's vocabulary,
+// re-exported so an interpreter names an operation, a keyword family, and the
+// thing it is constraining rather than translating its dialect into a second
+// set of names.
 type (
 	// Op is one constraint operation: an endpoint, a size, a pinned or forbidden
 	// value, an enumeration, and so on.
 	Op = tagmodel.Op
 	// Axis is the keyword family a bound targets.
 	Axis = tagmodel.Axis
+	// Shape is what a constraint is written against: the field's declared Go
+	// type, that type with its pointer chain followed, the kind a scalar literal
+	// parses at, the [Form] its instance takes, and whether the occurrence admits
+	// null. [ShapeOf] classifies one and [FieldContext.ConstraintsFor] takes one.
+	Shape = tagmodel.Shape
+	// Form is the JSON shape an instance actually takes, which is what the model
+	// dispatches on. It is deliberately not the Go kind: a field encoding itself
+	// as a string, through json:",string" or its own MarshalText, is a coerced
+	// form rather than a number every operation has to remember to special-case.
+	Form = tagmodel.Form
 )
 
 // The operations an interpreter contributes. They are the shared model's, so a
@@ -86,6 +99,38 @@ const (
 	AxisItems      = tagmodel.AxisItems
 	AxisProperties = tagmodel.AxisProperties
 )
+
+// The forms an instance can take. They are the model's own dispatch column, so
+// an interpreter that branches on one branches on the same classification the
+// rule is then applied under.
+const (
+	FormString        = tagmodel.FormString
+	FormNumber        = tagmodel.FormNumber
+	FormBool          = tagmodel.FormBool
+	FormArray         = tagmodel.FormArray
+	FormObject        = tagmodel.FormObject
+	FormCoercedNumber = tagmodel.FormCoercedNumber
+	FormCoercedBool   = tagmodel.FormCoercedBool
+	FormTextString    = tagmodel.FormTextString
+	FormByteString    = tagmodel.FormByteString
+	FormRawBytes      = tagmodel.FormRawBytes
+	FormRef           = tagmodel.FormRef
+	FormOpaque        = tagmodel.FormOpaque
+)
+
+// ShapeOf classifies a field or element from its Go type and the type-derived
+// base schema the generator built for it, which is the classification
+// [FieldContext.Constraints] performs internally. It is exported for an
+// interpreter that dispatches on the shape itself: classify once, branch on the
+// result, and hand the same value to [FieldContext.ConstraintsFor] rather than
+// paying to classify a second time.
+//
+// The base decides the form wherever the Go type alone understates what the
+// instance is, as it does for a field whose type serializes itself as a string;
+// pass [FieldContext.Base]. A nil base classifies from the Go type alone.
+func ShapeOf(t reflect.Type, base *Schema) Shape {
+	return tagmodel.ShapeOf(t, base)
+}
 
 // interpreterPolicy is the dialect policy every tag interpreter runs under.
 //

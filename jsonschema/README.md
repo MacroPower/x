@@ -664,6 +664,18 @@ the single 2^53 policy. Named conveniences remain for the value set
 `SetMultipleOf`), where an interpreter usually runs its own conflict check
 first.
 
+An interpreter that branches on what the field is classifies it once with
+`ShapeOf(fieldType, base)`. The resulting `Shape` carries the declared Go type,
+that type with its pointer chain followed, the kind a scalar literal parses at,
+whether the occurrence admits null, and the `Form` -- the JSON shape the
+instance actually takes, which is what the model dispatches on. `Form` is
+deliberately not the Go kind, so a field that encodes itself as a string
+(through `json:",string"` or its own `MarshalText`) reads as
+`FormCoercedNumber` or `FormTextString` rather than as a number every branch
+has to special-case. Handing that same `Shape` to
+`FieldContext.ConstraintsFor` builds the facade without classifying the field
+again, which `FieldContext.Constraints()` would.
+
 That one call carries the coercion decision for a field whose schema is a
 string, and the retargeting of an element rule onto the item schemas, so an
 interpreter states what it wants and re-derives none of it. Bounds are

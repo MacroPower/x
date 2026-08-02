@@ -730,14 +730,14 @@ func (fc FieldContext) ElementContexts() []FieldContext {
 // always carries a canvas; the read-only Effective accessors, by contrast,
 // tolerate a nil Canvas and fall back to Base.
 func (fc FieldContext) Constraints() *Constraints {
-	return fc.ConstraintsFor(tagmodel.ShapeOf(fc.Type, fc.Base))
+	return fc.ConstraintsFor(ShapeOf(fc.Type, fc.Base))
 }
 
 // ConstraintsFor is [FieldContext.Constraints] for a caller that has already
-// classified the field, so an interpreter that dispatches on the shape itself
-// does not pay to classify it a second time. Classifying is not free: following
-// a pointer chain allocates a cycle guard.
-func (fc FieldContext) ConstraintsFor(shape tagmodel.Shape) *Constraints {
+// classified the field with [ShapeOf], so an interpreter that dispatches on the
+// shape itself does not pay to classify it a second time. Classifying is not
+// free: following a pointer chain allocates a cycle guard.
+func (fc FieldContext) ConstraintsFor(shape Shape) *Constraints {
 	return &Constraints{target: fc.targetOf(shape)}
 }
 
@@ -753,7 +753,7 @@ func (fc FieldContext) ConstraintsFor(shape tagmodel.Shape) *Constraints {
 // node, so it supplies no elements and an element rule reports rather than
 // silently doing nothing.
 func (fc FieldContext) target() tagmodel.Target {
-	return fc.targetOf(tagmodel.ShapeOf(fc.Type, fc.Base))
+	return fc.targetOf(ShapeOf(fc.Type, fc.Base))
 }
 
 // targetOf builds the target for an already-classified shape, so a caller that
