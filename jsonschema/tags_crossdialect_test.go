@@ -115,8 +115,23 @@ func TestCrossDialectEquivalence(t *testing.T) {
 		t.Run(sh.name, func(t *testing.T) {
 			t.Parallel()
 
+			// The bound operations -- the min/max endpoints and the sizes -- are
+			// deliberately absent. The dialects diverge on them by design,
+			// through the two named Policy fields: BoundKind gives the
+			// jsonschema tag the keyword-shaped literal domain, where
+			// minimum=1.5 on an int8 is a legitimate keyword value, while a
+			// validate rule parses at the field's own kind, where gte=1.5 on an
+			// int is correctly an error; and Sizes makes a negative size a
+			// rejection in one dialect and the unsatisfiable fold in the other.
+			// Pairing them here would assert an equivalence neither dialect
+			// claims. The matrix golden pins which shapes carry a bound at all,
+			// and each dialect's own tests pin its literal domain.
 			pairs := map[string][2]string{
 				"enumeration": {"enum=" + sh.pipeList, "oneof=" + sh.spaceLis},
+				// Uniqueness shares no policy divergence: neither field
+				// parameterizes it, and both dialects reach the same cell, so
+				// every shape must agree on the keyword or on the rejection.
+				"element uniqueness": {"uniqueItems=true", "unique"},
 			}
 
 			if !sh.sized {
