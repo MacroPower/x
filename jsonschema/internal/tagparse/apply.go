@@ -94,7 +94,14 @@ type Result struct {
 // [standInTypeFor]), so a scalar key before type= keeps Go-kind parsing while
 // one after it parses as the overridden type. The non-scalar overrides (array,
 // object, null) have no stand-in, so a scalar key following one is an error.
-func Apply(tag string, fieldType reflect.Type, canvas, payload *jsonschema.Schema) (Result, error) {
+// TypeSchema is the type-derived schema the tag classifies the field against.
+// It is the payload for an ordinary field, and differs only where the payload
+// alone understates what the instance is: a nullable json:",string" field keeps
+// its string on the node's null-branch base, so the caller passes a view saying
+// so. A nil value means "use the payload".
+func Apply(
+	tag string, fieldType reflect.Type, canvas, payload, typeSchema *jsonschema.Schema,
+) (Result, error) {
 	directives, description, err := Parse(tag)
 	if err != nil {
 		return Result{}, err
@@ -108,9 +115,14 @@ func Apply(tag string, fieldType reflect.Type, canvas, payload *jsonschema.Schem
 		return Result{}, nil
 	}
 
+	if typeSchema == nil {
+		typeSchema = payload
+	}
+
 	state := &applyState{
 		canvas:     canvas,
 		payload:    payload,
+		typeSchema: typeSchema,
 		scalarType: fieldType,
 		shapeType:  fieldType,
 		groupsSet:  map[string]bool{},
@@ -142,6 +154,10 @@ func Apply(tag string, fieldType reflect.Type, canvas, payload *jsonschema.Schem
 type applyState struct {
 	canvas  *jsonschema.Schema
 	payload *jsonschema.Schema
+	// The typeSchema field is what the field classifies against, which is the
+	// payload except where the payload understates the instance (see [Apply]).
+	// A type= override restates the payload outright, so it replaces this too.
+	typeSchema *jsonschema.Schema
 	// The scalarType field is what a scalar key parses against, and nil after a type=
 	// override with no scalar stand-in, which is the gate that rejects a scalar
 	// key following one.
@@ -243,6 +259,10 @@ func (s *applyState) applyKey(key, value string) error {
 		}
 
 		applyTypeOverride(s.payload, value)
+
+		// The override restates what the instance is, so it supersedes any
+		// coerced view the caller supplied.
+		s.typeSchema = s.payload
 
 		return nil
 
@@ -424,7 +444,7 @@ func (s *applyState) applyExamples(key, value string) error {
 // Go type and the payload as it now stands, so a pair after a type= override
 // sees the overridden shape.
 func (s *applyState) shape() tagmodel.Shape {
-	return tagmodel.ShapeOf(s.shapeType, s.payload)
+	return tagmodel.ShapeOf(s.shapeType, s.typeSchema)
 }
 
 // target builds the write destination for the field, pairing the canvas's
@@ -432,7 +452,7 @@ func (s *applyState) shape() tagmodel.Shape {
 // the elements here rather than reading only the canvas is what lets an element
 // classify itself, including the coercion its own type implies.
 func (s *applyState) target(shape tagmodel.Shape) tagmodel.Target {
-	return newTarget(shape, s.canvas, s.payload)
+	return newTarget(shape, s.canvas, s.typeSchema)
 }
 
 // newTarget builds a target for a field or element, recursing lazily into

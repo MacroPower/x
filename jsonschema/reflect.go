@@ -1452,19 +1452,24 @@ func (g *generator) buildFieldSchema(
 	fieldType := fi.field.Type
 	isPointer := fieldType.Kind() == reflect.Pointer
 
-	// 1. JSON ",string" override. The tag-scalar type (used to parse the
-	// jsonschema tag's const/enum/default values) defaults to the field's Go
-	// type. When the override coerces the field schema to a string, encoding/json
-	// also serializes the value as a quoted string, so the tag scalars must parse
-	// as strings too; otherwise a numeric const on an int field would be
-	// {"type":"string","const":5}, which the string-encoded "5" can never satisfy.
+	// 1. JSON ",string" override. When it coerces the field schema to a string,
+	// encoding/json also serializes the value as a quoted string, so the tag's
+	// scalars must compare against that text rather than the number: a numeric
+	// const on an int field would be {"type":"string","const":5}, which the
+	// string-encoded "5" can never satisfy.
+	//
+	// The tag keeps the field's real Go type and learns the coercion from the
+	// type schema instead, which is what lets it parse a scalar at the real kind
+	// (so const=200 on an int8 is out of range) before re-serializing it. For a
+	// pointer the string lives on the node's null-branch base rather than the
+	// payload, so the tag is handed a view that states the coerced type outright.
 	//
 	// On a stringable type the override fully replaces the field schema, so
 	// generating the field's own type is skipped: it would be wasted work and,
 	// for a type extracted to $defs (a provider or extender), would register an
 	// orphan definition and drop the provider's constraints.
-	tagType := fieldType
 	stringOverride := fi.jsonString && reflectkind.IsStringableType(fieldType)
+	tagTypeSchema := (*Schema)(nil)
 
 	var (
 		fieldNode *node
@@ -1481,11 +1486,10 @@ func (g *generator) buildFieldSchema(
 		if isPointer {
 			fieldNode.nullable = g.nullable
 			fieldNode.base = typename.String
+			tagTypeSchema = &Schema{Types: []string{typename.Null, typename.String}}
 		} else {
 			payload.Type = typename.String
 		}
-
-		tagType = reflect.TypeFor[string]()
 	} else {
 		fieldNode, err = g.schemaForType(fieldType, false)
 		if err != nil {
@@ -1512,7 +1516,8 @@ func (g *generator) buildFieldSchema(
 	// restructures the type-derived payload (it replaces the reflected assertion),
 	// so it takes the payload directly.
 	if tag, ok := fi.field.Tag.Lookup("jsonschema"); ok {
-		res, err := tagparse.Apply(tag, tagType, fieldNode.authored, fieldNode.payload)
+		res, err := tagparse.Apply(
+			tag, fieldType, fieldNode.authored, fieldNode.payload, tagTypeSchema)
 		if err != nil {
 			// Tagparse carries its own ErrInvalidType sentinel; map it onto the
 			// package's exported ErrInvalidType so errors.Is keeps working.
