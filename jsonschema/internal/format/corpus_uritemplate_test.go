@@ -32,12 +32,6 @@ const (
 	reasonOpReserve uriTemplateReason = `RFC 6570 §2.2 operator = op-level2 / op-level3 / op-reserve, and op-reserve = "=" / "," / "!" / "@" / "|", so the template is ABNF-valid; the operator is reserved from expansion, not from the grammar`
 
 	reasonPrefixOnComposite uriTemplateReason = `RFC 6570 §2.4.1 makes a prefix modifier an error only when the variable's *value* is composite, which a string-format check cannot see; the varspec itself is ABNF-valid`
-
-	// The defect the RFC 6570 §2.1 example '{var}' exposes:
-	// isURITemplateLiteral implements the published literals rule, whose
-	// %x26 / %x28-3B arms omit U+0027, but errata ID 6937 (Verified) corrects
-	// that to %x26-3B.
-	reasonApostropheLiteral uriTemplateReason = "isURITemplateLiteral omits U+0027, which RFC 6570 errata ID 6937 admits"
 )
 
 var (
@@ -51,14 +45,6 @@ var (
 
 		"{keys:1}":  reasonPrefixOnComposite,
 		"{+keys:1}": reasonPrefixOnComposite,
-	}
-
-	// Corpus cases the validator does not yet classify correctly, so the corpus
-	// can land ahead of the fix it motivates. Each entry is skipped rather than
-	// pinned, and is removed by the commit that closes it.
-	uriTemplatePendingFix = map[string]uriTemplateReason{
-		"'{var}'":   reasonApostropheLiteral,
-		"'{count}'": reasonApostropheLiteral,
 	}
 
 	// Each vendored corpus file mapped to the validity its cases assert.
@@ -101,18 +87,9 @@ func TestURITemplateCorpus(t *testing.T) {
 			"carve-out %q is no longer in the corpus; drop it", template)
 	}
 
-	for template := range uriTemplatePendingFix {
-		require.True(t, present[template],
-			"pending-fix entry %q is no longer in the corpus; drop it", template)
-	}
-
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-
-			if reason, pending := uriTemplatePendingFix[tc.template]; pending {
-				t.Skipf("known defect, fix pending: %s", reason)
-			}
 
 			err := validate(tc.template)
 

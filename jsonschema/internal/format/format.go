@@ -1256,11 +1256,14 @@ func validateURITemplate(s string) error {
 }
 
 // isURITemplateLiteral reports whether r may appear as literal text outside a
-// brace expression, per the RFC 6570 literals rule: %x21 / %x23-24 / %x26 /
-// %x28-3B / %x3D / %x3F-5B / %x5D / %x5F / %x61-7A / %x7E / ucschar /
-// iprivate ('%' is handled separately as pct-encoded, and '{' / '}' delimit
-// expressions). The size is the byte length the rune decoded from: a lone
-// invalid UTF-8 byte decodes to (utf8.RuneError, 1) and is rejected.
+// brace expression, per the RFC 6570 literals rule as corrected by errata ID
+// 6937 (Verified): %x21 / %x23-24 / %x26-3B / %x3D / %x3F-5B / %x5D / %x5F /
+// %x61-7A / %x7E / ucschar / iprivate ('%' is handled separately as
+// pct-encoded, and '{' / '}' delimit expressions). The published rule splits
+// that third arm into %x26 / %x28-3B, omitting U+0027 APOSTROPHE; the erratum
+// restores it, and the RFC's own §2.1 example '{var}' relies on it. The size is
+// the byte length the rune decoded from: a lone invalid UTF-8 byte decodes to
+// (utf8.RuneError, 1) and is rejected.
 func isURITemplateLiteral(r rune, size int) bool {
 	if r == utf8.RuneError && size == 1 {
 		return false
@@ -1269,8 +1272,7 @@ func isURITemplateLiteral(r rune, size int) bool {
 	switch {
 	case r == 0x21,
 		r >= 0x23 && r <= 0x24,
-		r == 0x26,
-		r >= 0x28 && r <= 0x3B,
+		r >= 0x26 && r <= 0x3B,
 		r == 0x3D,
 		r >= 0x3F && r <= 0x5B,
 		r == 0x5D,

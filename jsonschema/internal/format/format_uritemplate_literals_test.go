@@ -7,10 +7,13 @@ import (
 )
 
 // TestURITemplateLiteralCharacters covers the RFC 6570 literals rule for text
-// outside brace expressions: any Unicode character except CTL, SP, '"', "'",
-// '%' (aside from pct-encoded), '<', '>', '\', '^', '`', '{', '|', and '}',
-// with non-ASCII limited to the RFC 3987 ucschar and iprivate sets. The
-// official suite has no invalid-literal case, so these are covered here.
+// outside brace expressions, as corrected by errata ID 6937: any Unicode
+// character except CTL, SP, '"', '%' (aside from pct-encoded), '<', '>', '\',
+// '^', '`', '{', '|', and '}', with non-ASCII limited to the RFC 3987 ucschar
+// and iprivate sets. The apostrophe is a literal -- the published rule's
+// %x26 / %x28-3B arms omit it, the erratum's %x26-3B admits it, and the RFC's
+// own §2.1 example '{var}' is a valid template. The official suite has no
+// invalid-literal case, so these are covered here.
 func TestURITemplateLiteralCharacters(t *testing.T) {
 	t.Parallel()
 
@@ -27,13 +30,14 @@ func TestURITemplateLiteralCharacters(t *testing.T) {
 		"truncated pct-encoded literal": {instance: "http://e/a%2", want: false},
 		"non-hex pct-encoded literal":   {instance: "http://e/a%ZZ", want: false},
 		"double quote in literal":       {instance: `http://e/a"b"/{x}`, want: false},
-		"apostrophe in literal":         {instance: "http://e/a'b/{x}", want: false},
 		"backslash in literal":          {instance: `http://e/a\b/{x}`, want: false},
 		"pipe in literal":               {instance: "http://e/a|b/{x}", want: false},
 		"caret in literal":              {instance: "http://e/a^b/{x}", want: false},
 		"noncharacter in literal":       {instance: "http://e/a￿b/{x}", want: false},
 		"malformed UTF-8 in literal":    {instance: "http://e/a\xffb/{x}", want: false},
 
+		"apostrophe in literal":         {instance: "http://e/a'b/{x}", want: true},
+		"RFC 6570 §2.1 quoted example":  {instance: "'{var}'", want: true},
 		"plain literal template":        {instance: "http://example.com/dictionary", want: true},
 		"literal with expression":       {instance: "http://example.com/{term:1}/x", want: true},
 		"pct-encoded literal":           {instance: "http://e/a%20b/{x}", want: true},
