@@ -6,37 +6,40 @@ import (
 	"strings"
 )
 
-// CellStatus is what the model does with one (operation, shape) pair.
-type CellStatus uint8
+// cellStatus is what the model does with one (operation, shape) pair.
+type cellStatus uint8
 
 const (
-	// The cellUnset status is the zero value: a pair nobody decided. The init-time walk
-	// panics on it, which is the whole point of indexing rather than looking up.
-	cellUnset CellStatus = iota
-	// StatusApply runs the cell's applier.
-	StatusApply
-	// StatusIgnore is a deliberate, documented no-op: the tag means something
-	// real, and the schema vocabulary has nothing faithful to emit for it.
-	StatusIgnore
-	// StatusReject reports [ErrUnsupported] carrying the cell's written reason,
-	// which the front-end wraps with its own dialect prefix.
-	StatusReject
+	// The cellUnset status is the zero value: a pair nobody decided. The
+	// init-time walk panics on it, which is the whole point of indexing rather
+	// than looking up.
+	cellUnset cellStatus = iota
+	// The statusApply status runs the cell's applier.
+	statusApply
+	// The statusIgnore status is a deliberate, documented no-op: the tag means
+	// something real, and the schema vocabulary has nothing faithful to emit.
+	statusIgnore
+	// The statusReject status reports [ErrUnsupported] carrying the cell's
+	// written reason, which the front-end wraps with its own dialect prefix.
+	statusReject
+	// The statusCount constant bounds the label table.
+	statusCount
 )
 
 // cell is one (operation, shape) decision.
 type cell struct {
 	apply  func(Target, Rule, Policy) error
 	why    string
-	status CellStatus
+	status cellStatus
 }
 
 var (
 	// The statusNames table labels each status for the golden matrix dump.
-	statusNames = map[CellStatus]string{
+	statusNames = [statusCount]string{
 		cellUnset:    "UNSET",
-		StatusApply:  "apply",
-		StatusIgnore: "ignore",
-		StatusReject: "reject",
+		statusApply:  "apply",
+		statusIgnore: "ignore",
+		statusReject: "reject",
 	}
 
 	// The matrix is the total dispatch table. Indexing a fixed-size array rather than
@@ -89,23 +92,29 @@ var (
 		// dialect named the keyword outright.
 		FormRef: {AxisNumeric: true, AxisLength: true, AxisItems: true, AxisProperties: true},
 	}
+
+	// The formAxisNote table is what a form says when it cannot carry a bound,
+	// for the forms whose reason is worth more than the generated one. It sits
+	// beside the two tables above so a new form declares why it rejects a bound
+	// where it declares which bounds it takes, rather than in a switch elsewhere.
+	formAxisNote = [formCount]string{
+		FormByteString: "a length or uniqueness constraint on a []byte field has no array length " +
+			"to constrain (it encodes as a base64 string)",
+		FormCoercedNumber: coercedBoundNote,
+		FormCoercedBool:   coercedBoundNote,
+	}
 )
+
+// coercedBoundNote explains why no bound reaches a string-coerced field, shared
+// by the axis check and the cells that reject a bound outright.
+const coercedBoundNote = "a bound is not supported on a json:\",string\" coerced numeric field " +
+	"(minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)"
 
 // axisRejection explains why a bound cannot land on a form, and is the message
 // the front-end wraps.
 func axisRejection(form Form, axis Axis) string {
-	switch form {
-	case FormByteString, FormRawBytes:
-		return "a length or uniqueness constraint on a []byte field has no array length to constrain " +
-			"(it encodes as a base64 string)"
-
-	case FormCoercedNumber, FormCoercedBool:
-		return "a bound is not supported on a json:\",string\" coerced numeric field " +
-			"(minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)"
-
-	default:
-		// Every other form takes the generic phrasing below, which names the
-		// form and the family it was asked to carry.
+	if note := formAxisNote[form]; note != "" {
+		return note
 	}
 
 	if axis == AxisAuto {
@@ -123,7 +132,7 @@ func init() {
 	for op := OpUnset + 1; op < opCount; op++ {
 		for f := FormUnset + 1; f < formCount; f++ {
 			matrix[op][f] = cell{
-				status: StatusReject,
+				status: statusReject,
 				why:    fmt.Sprintf("%s is not supported on a %s", op, f),
 			}
 		}
@@ -145,19 +154,14 @@ func fillBounds() {
 		FormString, FormNumber, FormArray, FormObject, FormTextString, FormByteString, FormRef,
 	}
 
-	for _, op := range []Op{OpFloorIncl, OpFloorExcl, OpCeilIncl, OpCeilExcl} {
+	for _, op := range []Op{OpFloorIncl, OpFloorExcl, OpCeilIncl, OpCeilExcl, OpExactSize} {
 		for _, f := range bounded {
 			apply(op, f, applyBound)
 		}
 	}
 
-	// An exact size pins both endpoints on a sized shape, and pins the value
-	// itself on a numeric one: go-playground defines len=N on a number as
-	// "equals N", not as a length.
-	for _, f := range bounded {
-		apply(OpExactSize, f, applyBound)
-	}
-
+	// An exact size pins the value itself on a numeric shape rather than a
+	// length: go-playground defines len=N on a number as "equals N".
 	apply(OpExactSize, FormNumber, applyEqual)
 	apply(OpExactSize, FormCoercedNumber, applyEqual)
 
@@ -277,17 +281,17 @@ func fillStringKeywords() {
 
 // apply records an applying cell.
 func apply(op Op, f Form, fn func(Target, Rule, Policy) error) {
-	matrix[op][f] = cell{status: StatusApply, apply: fn}
+	matrix[op][f] = cell{status: statusApply, apply: fn}
 }
 
 // reject records a rejecting cell with its message.
 func reject(op Op, f Form, why string) {
-	matrix[op][f] = cell{status: StatusReject, why: why}
+	matrix[op][f] = cell{status: statusReject, why: why}
 }
 
 // ignore records a deliberate no-op with the reason it is one.
 func ignore(op Op, f Form, why string) {
-	matrix[op][f] = cell{status: StatusIgnore, why: why}
+	matrix[op][f] = cell{status: statusIgnore, why: why}
 }
 
 // verifyMatrix is the init-time totality guard. It panics naming any pair left
@@ -302,16 +306,19 @@ func verifyMatrix() {
 			switch c.status {
 			case cellUnset:
 				panic(fmt.Sprintf("tagmodel: no decision for (%s, %s)", op, f))
-			case StatusApply:
+			case statusApply:
 				if c.apply == nil {
 					panic(fmt.Sprintf("tagmodel: (%s, %s) applies with no applier", op, f))
 				}
 
-			case StatusIgnore, StatusReject:
+			case statusIgnore, statusReject:
 				if c.why == "" {
 					panic(fmt.Sprintf("tagmodel: (%s, %s) is %s with no reason",
 						op, f, statusNames[c.status]))
 				}
+
+			case statusCount:
+				panic(fmt.Sprintf("tagmodel: (%s, %s) holds the count sentinel", op, f))
 			}
 		}
 	}

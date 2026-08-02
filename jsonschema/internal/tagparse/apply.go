@@ -136,17 +136,7 @@ func Apply(
 		}
 	}
 
-	// Re-check the final override against every constraint group set across the
-	// whole tag, so a conflicting keyword placed after type= is reported with the
-	// same error as one placed before it (the in-loop guard runs before the group
-	// is recorded, so it cannot see the later ordering).
-	if state.overriddenType != "" {
-		if g := conflictingGroup(state.groupsSet, state.overriddenType); g != "" {
-			return Result{}, fmt.Errorf("jsonschema tag: %s constraint conflicts with type=%s", g, state.overriddenType)
-		}
-	}
-
-	return Result{TypeOverridden: state.res.TypeOverridden}, nil
+	return Result{TypeOverridden: state.overriddenType != ""}, nil
 }
 
 // applyState is the fold's mutable state: where facts land, the effective types
@@ -170,7 +160,6 @@ type applyState struct {
 	groupsSet      map[string]bool
 	seen           map[string]bool
 	overriddenType string
-	res            Result
 }
 
 // apply folds one directive into the state.
@@ -184,9 +173,9 @@ func (s *applyState) apply(d Directive) error {
 	// A type= override drops the constraint groups the new type cannot use.
 	// Dropping the keywords derived from the Go kind is intended, but a keyword
 	// the tag set explicitly is the author's input, so report the conflict rather
-	// than discarding it silently. This in-loop check catches a conflicting
-	// keyword set before type=; one set after type= records its group only on the
-	// next iteration, so the post-loop check covers it.
+	// than discarding it silently. This guard catches a keyword set before the
+	// type= pair; the guard below catches one set after it, while the override is
+	// already in force.
 	if key == keyword.Type && typename.Valid(value) {
 		if g := conflictingGroup(s.groupsSet, value); g != "" {
 			return fmt.Errorf("jsonschema tag: %s constraint conflicts with type=%s", g, value)
@@ -199,7 +188,7 @@ func (s *applyState) apply(d Directive) error {
 	// names the actual mistake: the author wrote both, and the override is why
 	// the keyword cannot stay.
 	if s.overriddenType != "" {
-		if g := constraintGroup(key); g != "" && conflictingGroup(map[string]bool{g: true}, s.overriddenType) != "" {
+		if g := constraintGroup(key); g != "" && g != typeConstraintGroup(s.overriddenType) {
 			return fmt.Errorf("jsonschema tag: %s constraint conflicts with type=%s", g, s.overriddenType)
 		}
 	}
@@ -225,7 +214,6 @@ func (s *applyState) apply(d Directive) error {
 		s.scalarType = standInTypeFor(value)
 		s.shapeType = overriddenShapeType(value)
 		s.overriddenType = value
-		s.res.TypeOverridden = true
 	}
 
 	return nil

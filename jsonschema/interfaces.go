@@ -7,7 +7,6 @@ import (
 	"reflect"
 	"strings"
 
-	"go.jacobcolvin.com/x/jsonschema/internal/numkind"
 	"go.jacobcolvin.com/x/jsonschema/internal/tagmodel"
 	"go.jacobcolvin.com/x/jsonschema/internal/uriref"
 )
@@ -731,12 +730,15 @@ func (fc FieldContext) ElementContexts() []FieldContext {
 // always carries a canvas; the read-only Effective accessors, by contrast,
 // tolerate a nil Canvas and fall back to Base.
 func (fc FieldContext) Constraints() *Constraints {
-	return &Constraints{
-		canvas: fc.Canvas,
-		base:   fc.Base,
-		kind:   numkind.DerefType(fc.Type).Kind(),
-		target: fc.target(),
-	}
+	return fc.ConstraintsFor(tagmodel.ShapeOf(fc.Type, fc.Base))
+}
+
+// ConstraintsFor is [FieldContext.Constraints] for a caller that has already
+// classified the field, so an interpreter that dispatches on the shape itself
+// does not pay to classify it a second time. Classifying is not free: following
+// a pointer chain allocates a cycle guard.
+func (fc FieldContext) ConstraintsFor(shape tagmodel.Shape) *Constraints {
+	return &Constraints{target: fc.targetOf(shape)}
 }
 
 // target builds the shared model's write destination for the field: its
@@ -751,11 +753,24 @@ func (fc FieldContext) Constraints() *Constraints {
 // node, so it supplies no elements and an element rule reports rather than
 // silently doing nothing.
 func (fc FieldContext) target() tagmodel.Target {
+	return fc.targetOf(tagmodel.ShapeOf(fc.Type, fc.Base))
+}
+
+// targetOf builds the target for an already-classified shape, so a caller that
+// needed the shape for its own dispatch does not pay to classify the field
+// twice.
+//
+// The element closure captures the three fields it reads rather than the whole
+// context: a FieldContext carries a [reflect.StructField] and several schema
+// pointers the closure never touches, and capturing the receiver would copy all
+// of it to the heap on every call. It is built only for a node that can have
+// elements, since most rules never ask for them.
+func (fc FieldContext) targetOf(shape tagmodel.Shape) tagmodel.Target {
 	var elems func() []tagmodel.Target
 
-	if fc.node != nil {
+	if node, typ, draft := fc.node, fc.Type, fc.Draft; node != nil {
 		elems = func() []tagmodel.Target {
-			children := fc.ElementContexts()
+			children := FieldContext{node: node, Type: typ, Draft: draft}.ElementContexts()
 
 			out := make([]tagmodel.Target, len(children))
 			for i := range children {
@@ -766,7 +781,7 @@ func (fc FieldContext) target() tagmodel.Target {
 		}
 	}
 
-	return tagmodel.NewTarget(tagmodel.ShapeOf(fc.Type, fc.Base), fc.Canvas, fc.Base, elems)
+	return tagmodel.NewTarget(shape, fc.Canvas, fc.Base, elems)
 }
 
 // effectiveBase returns fc.Base, or an empty schema when a caller built the

@@ -1,6 +1,7 @@
 package tagmodel
 
 import (
+	"cmp"
 	"fmt"
 	"reflect"
 	"strconv"
@@ -21,21 +22,11 @@ func baseOf(t Target) *jsonschema.Schema {
 	return &jsonschema.Schema{}
 }
 
-// coalesce returns the canvas value when the target authored one, otherwise the
-// type-derived value: the effective keyword a rule tightens against, so a tag
-// bound never weakens the type's own and repeated tag bounds intersect
-// order-independently.
-func coalesce[T any](canvas, base *T) *T {
-	if canvas != nil {
-		return canvas
-	}
-
-	return base
-}
-
-// tightenBound writes n into *field unless it would loosen the effective bound:
-// a floor may only rise and a ceiling may only fall, so bounds intersect
-// regardless of the order the rules appeared in.
+// tighten writes n into *field unless it would loosen the effective bound: a
+// floor may only rise and a ceiling may only fall, so bounds intersect
+// regardless of the order the rules appeared in. The effective bound is the
+// value the target authored, or the type-derived one when it authored none, so
+// a tag bound never weakens the type's own.
 //
 // A bound equal to the effective one is written rather than skipped, because
 // writing it is what records that the value was authored. Provenance is not
@@ -43,22 +34,13 @@ func coalesce[T any](canvas, base *T) *T {
 // ones, so minimum=0 on a uint8 must survive an enum even though the kind floor
 // is already 0. Skipping the equal write would misfile it as kind-derived and
 // drop it.
-func tightenBound(field **float64, eff *float64, n float64, ceiling bool) {
+func tighten[T cmp.Ordered](field **T, base *T, n T, ceiling bool) {
+	eff := *field
+	if eff == nil {
+		eff = base
+	}
+
 	if eff == nil || (ceiling && n <= *eff) || (!ceiling && n >= *eff) {
-		*field = &n
-	}
-}
-
-// raiseFloor writes n into *field unless it would lower the effective floor.
-func raiseFloor(field **int, eff *int, n int) {
-	if eff == nil || n >= *eff {
-		*field = &n
-	}
-}
-
-// lowerCeiling writes n into *field unless it would raise the effective ceiling.
-func lowerCeiling(field **int, eff *int, n int) {
-	if eff == nil || n <= *eff {
 		*field = &n
 	}
 }

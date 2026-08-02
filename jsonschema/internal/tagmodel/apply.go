@@ -27,9 +27,9 @@ func Apply(t Target, r Rule, pol Policy) error {
 
 	c := matrix[r.Op][form]
 	switch c.status {
-	case StatusApply:
+	case statusApply:
 		return c.apply(t, r, pol)
-	case StatusIgnore:
+	case statusIgnore:
 		return nil
 	default:
 		return fmt.Errorf("%w: %s", ErrUnsupported, c.why)
@@ -120,13 +120,13 @@ func applyNumericBound(t Target, r Rule, pol Policy) error {
 
 	switch r.Op {
 	case OpFloorIncl:
-		tightenBound(&t.Canvas.Minimum, coalesce(t.Canvas.Minimum, base.Minimum), n, false)
+		tighten(&t.Canvas.Minimum, base.Minimum, n, false)
 	case OpFloorExcl:
-		tightenBound(&t.Canvas.ExclusiveMinimum, coalesce(t.Canvas.ExclusiveMinimum, base.ExclusiveMinimum), n, false)
+		tighten(&t.Canvas.ExclusiveMinimum, base.ExclusiveMinimum, n, false)
 	case OpCeilIncl:
-		tightenBound(&t.Canvas.Maximum, coalesce(t.Canvas.Maximum, base.Maximum), n, true)
+		tighten(&t.Canvas.Maximum, base.Maximum, n, true)
 	case OpCeilExcl:
-		tightenBound(&t.Canvas.ExclusiveMaximum, coalesce(t.Canvas.ExclusiveMaximum, base.ExclusiveMaximum), n, true)
+		tighten(&t.Canvas.ExclusiveMaximum, base.ExclusiveMaximum, n, true)
 	default:
 		// Only the four endpoint operations resolve to the numeric axis; an
 		// exact size on a number pins the value and never reaches here.
@@ -167,9 +167,9 @@ func applySizeBound(t Target, r Rule, pol Policy) error {
 	for _, b := range bounds {
 		n := int(b.End.Rat.Num().Int64())
 		if b.Lower {
-			raiseFloor(minField, coalesce(*minField, baseMin), n)
+			tighten(minField, baseMin, n, false)
 		} else {
-			lowerCeiling(maxField, coalesce(*maxField, baseMax), n)
+			tighten(maxField, baseMax, n, true)
 		}
 	}
 
@@ -207,7 +207,7 @@ func applyForbidSize(t Target, r Rule, _ Policy) error {
 		forbidden.MaxItems = &n
 	}
 
-	forbidSchema(t.Canvas, forbidden)
+	ForbidSchema(t.Canvas, forbidden)
 
 	return nil
 }
@@ -417,7 +417,8 @@ func SetEnum(t Target, vals []any) error {
 		return fmt.Errorf("%w: the type already sets an enumeration", ErrConflict)
 	}
 
-	// Each target gets its own slice, so no two share one backing array.
+	// Copy rather than alias: this is public through the Constraints facade, so
+	// vals may be a caller's slice that it goes on to reuse or mutate.
 	t.Canvas.Enum = slices.Clone(vals)
 
 	return nil
@@ -433,9 +434,9 @@ func Forbid(s *jsonschema.Schema, v any) {
 	vs.WriteForbidden(s)
 }
 
-// forbidSchema forbids a whole subschema, taking the free not slot or moving an
+// ForbidSchema forbids a whole subschema, taking the free not slot or moving an
 // existing one under allOf so both apply conjunctively.
-func forbidSchema(s, forbidden *jsonschema.Schema) {
+func ForbidSchema(s, forbidden *jsonschema.Schema) {
 	var vs constraint.ValueSet
 
 	vs.SeedNot(s.Not)

@@ -2,6 +2,7 @@ package validate
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"slices"
@@ -170,7 +171,9 @@ func applyValidator(key, value string, hasValue bool, field jsonschema.FieldCont
 		addRequired(field.Parent, field.Name)
 	}
 
-	bound, err := tagmodel.Bind(rule, shapeOf(field), value, hasValue)
+	shape := shapeOf(field)
+
+	bound, err := tagmodel.Bind(rule, shape, value, hasValue)
 	if err != nil {
 		if note, ok := paramNotes[key]; ok {
 			return fmt.Errorf("validate tag: "+note, value)
@@ -179,7 +182,7 @@ func applyValidator(key, value string, hasValue bool, field jsonschema.FieldCont
 		return fmt.Errorf("validate tag: %s: %w", key, err)
 	}
 
-	err = field.Constraints().Apply(bound.Op, bound.Axis, bound.Params.Values()...)
+	err = field.ConstraintsFor(shape).Apply(bound.Op, bound.Axis, bound.Params.Values()...)
 	if err != nil {
 		return wrapApplyError(key, value, err)
 	}
@@ -192,12 +195,30 @@ func applyValidator(key, value string, hasValue bool, field jsonschema.FieldCont
 // [ErrConflictingConstraints] promises holds through every layer; everything
 // else keeps the model's reason, which is the one place that rejection is
 // written.
+//
+// The model reports what happened -- a different value is already pinned, an
+// enumeration is already set -- and this names the tag that tried to add one, so
+// the message says which rule to look at without every rule carrying its own
+// conflict check. The sentinel's own prefix is stripped from the model's text so
+// the composed message reads as one sentence rather than saying "conflicting
+// value constraints" twice.
 func wrapApplyError(key, value string, err error) error {
-	if isConflict(err) {
-		return fmt.Errorf("%w: %s", ErrConflictingConstraints, conflictDetail(key, value, err))
+	if !errors.Is(err, jsonschema.ErrConstraintConflict) {
+		return fmt.Errorf("validate tag: %s: %w", key, err)
 	}
 
-	return fmt.Errorf("validate tag: %s: %w", key, err)
+	rule := key
+	if value != "" {
+		rule = key + "=" + value
+	}
+
+	reason := err.Error()
+	if _, stripped, found := strings.Cut(reason, jsonschema.ErrConstraintConflict.Error()+": "); found {
+		reason = stripped
+	}
+
+	return fmt.Errorf("%w: %s conflicts with a constraint already in force: %s",
+		ErrConflictingConstraints, rule, reason)
 }
 
 // unescapeParam applies go-playground/validator's documented param escapes:

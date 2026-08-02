@@ -2,7 +2,6 @@ package jsonschema
 
 import (
 	"fmt"
-	"reflect"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/constraint"
 	"go.jacobcolvin.com/x/jsonschema/internal/tagmodel"
@@ -43,10 +42,7 @@ var (
 // The zero value is not usable; the generator hands each field-level hook a
 // ready facade via [FieldContext.Constraints].
 type Constraints struct {
-	canvas *Schema
-	base   *Schema
 	target tagmodel.Target
-	kind   reflect.Kind
 }
 
 // Op and Axis are the shared constraint model's vocabulary, re-exported so an
@@ -101,9 +97,9 @@ const (
 // unsatisfiable range rather than being rejected outright. The jsonschema tag,
 // which names JSON Schema keywords directly, runs under the opposite settings;
 // both are the same implementation with different parameters.
-func interpreterPolicy(kind reflect.Kind) tagmodel.Policy {
+func (c *Constraints) policy() tagmodel.Policy {
 	return tagmodel.Policy{
-		BoundKind: kind,
+		BoundKind: c.target.Shape.Kind,
 		Sizes:     tagmodel.SizeFold,
 		Keywords:  tagmodel.KeywordFirstWins,
 	}
@@ -131,18 +127,8 @@ func (c *Constraints) Apply(op Op, axis Axis, params ...string) error {
 	return tagmodel.Apply(
 		c.target,
 		tagmodel.Rule{Op: op, Axis: axis, Params: tagmodel.ParamsOf(params...)},
-		interpreterPolicy(c.kind),
+		c.policy(),
 	)
-}
-
-// baseSchema returns the type-derived base, or an empty schema when the facade
-// was built without one, so the effective-endpoint reads never dereference nil.
-func (c *Constraints) baseSchema() *Schema {
-	if c.base != nil {
-		return c.base
-	}
-
-	return &Schema{}
 }
 
 // SetMultipleOf records a multipleOf value on the field, reporting an error for a
@@ -153,7 +139,7 @@ func (c *Constraints) SetMultipleOf(value float64) error {
 	}
 
 	v := value
-	c.canvas.MultipleOf = &v
+	c.target.Canvas.MultipleOf = &v
 
 	return nil
 }
@@ -162,21 +148,21 @@ func (c *Constraints) SetMultipleOf(value float64) error {
 // interpreter can run its own conflict check with its own wording before pinning
 // a value of its own.
 func (c *Constraints) Const() (any, bool) {
-	if c.canvas.Const == nil {
+	if c.target.Canvas.Const == nil {
 		return nil, false
 	}
 
-	return *c.canvas.Const, true
+	return *c.target.Canvas.Const, true
 }
 
 // Enum returns the field's enum members and whether an enum is set, the analog of
 // [Constraints.Const] for the enumerated-value case.
 func (c *Constraints) Enum() ([]any, bool) {
-	if c.canvas.Enum == nil {
+	if c.target.Canvas.Enum == nil {
 		return nil, false
 	}
 
-	return c.canvas.Enum, true
+	return c.target.Canvas.Enum, true
 }
 
 // SetConst pins the field's const, reporting [ErrConstraintConflict] rather than
@@ -192,18 +178,8 @@ func (c *Constraints) Enum() ([]any, bool) {
 // interpreter that needs its own conflict wording checks [Constraints.Const]
 // first; this call is the shared backstop for the overlay path.
 func (c *Constraints) SetConst(value any) error {
-	if c.canvas.Const != nil && !constraint.ValuesEqual(*c.canvas.Const, value) {
-		return fmt.Errorf("%w: a different const is already set", ErrConstraintConflict)
-	}
-
-	if base := c.baseSchema(); base.Const != nil && !constraint.ValuesEqual(*base.Const, value) {
-		return fmt.Errorf("%w: the type already pins a different const", ErrConstraintConflict)
-	}
-
-	v := value
-	c.canvas.Const = &v
-
-	return nil
+	//nolint:wrapcheck // The model owns the conflict sentinel and its wording.
+	return tagmodel.SetConst(c.target, value)
 }
 
 // SetEnum sets the field's enum, reporting [ErrConstraintConflict] when an enum
@@ -215,35 +191,18 @@ func (c *Constraints) SetConst(value any) error {
 // and the conjunction intersects the two sets, which only tightens. An
 // interpreter that needs its own wording checks [Constraints.Enum] first.
 func (c *Constraints) SetEnum(values []any) error {
-	if c.canvas.Enum != nil {
-		return fmt.Errorf("%w: an enum is already set", ErrConstraintConflict)
-	}
-
-	if c.baseSchema().Enum != nil {
-		return fmt.Errorf("%w: the type already sets an enum", ErrConstraintConflict)
-	}
-
-	c.canvas.Enum = values
-
-	return nil
+	//nolint:wrapcheck // The model owns the conflict sentinel and its wording.
+	return tagmodel.SetEnum(c.target, values)
 }
 
 // Forbid records that the field must not equal value, composing with any value
 // already forbidden through the shared not.const -> not.enum -> allOf escalation.
 func (c *Constraints) Forbid(value any) {
-	var vs constraint.ValueSet
-
-	vs.SeedNot(c.canvas.Not)
-	vs.Forbid(value)
-	vs.WriteForbidden(c.canvas)
+	tagmodel.Forbid(c.target.Canvas, value)
 }
 
 // ForbidSchema forbids a whole subschema (a length range, say), taking the free
 // not slot or moving an existing not under allOf so both apply conjunctively.
 func (c *Constraints) ForbidSchema(forbidden *Schema) {
-	var vs constraint.ValueSet
-
-	vs.SeedNot(c.canvas.Not)
-	vs.ForbidSchema(forbidden)
-	vs.WriteForbidden(c.canvas)
+	tagmodel.ForbidSchema(c.target.Canvas, forbidden)
 }
