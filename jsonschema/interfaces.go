@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 
+	"go.jacobcolvin.com/x/jsonschema/internal/numkind"
 	"go.jacobcolvin.com/x/jsonschema/internal/tagmodel"
 	"go.jacobcolvin.com/x/jsonschema/internal/uriref"
 )
@@ -865,9 +866,7 @@ func elementType(t reflect.Type) reflect.Type {
 		return nil
 	}
 
-	for t.Kind() == reflect.Pointer {
-		t = t.Elem()
-	}
+	t = numkind.DerefType(t)
 
 	switch t.Kind() {
 	case reflect.Slice, reflect.Array, reflect.Map:
