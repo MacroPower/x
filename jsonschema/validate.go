@@ -1267,6 +1267,14 @@ func Compile(ctx context.Context, schema *Schema, opts ...ValidateOption) (*Vali
 			return nil, err
 		}
 
+		// Registry-known nodes are exactly the ones whose fragment misses the
+		// validation walk silently skips, so an in-document ref that cannot
+		// resolve now must fail compilation here; it can never resolve later.
+		err = v.vetRegisteredRefs(s, uri)
+		if err != nil {
+			return nil, err
+		}
+
 		// Fold the remote's nodes into the index and precompute the
 		// freshly indexed range. A remote wholly aliasing already-indexed nodes
 		// (the root re-registered under its base URI, or a node reached through
@@ -1925,7 +1933,10 @@ func (v *validator) refsResolveWellFormed(schema *Schema, resolveOpts ResolveOpt
 // is, for example, a schema with an uncompilable pattern that upstream rejects
 // but typed-only traversal never reaches. The own-reference check is one level
 // deep: targets reached through the typed tree are already validated by
-// [structureResolves] on the root schema.
+// [structureResolves] on the root schema, and a deeper miss surfaces at
+// validation time (a fallback-materialized bearing node is outside the compiled
+// registry, so the fragment silent skip never applies to it), while a document
+// the registry does know is vetted in full by [validator.vetRegisteredRefs].
 func (v *validator) refTargetWellFormed(target *Schema, resolveOpts ResolveOptions) bool {
 	if target == nil || !schemaFormsTree(target) {
 		return false
@@ -1959,6 +1970,43 @@ func (v *validator) allRefsResolvable(schema *Schema) bool {
 	})
 
 	return err == nil
+}
+
+// vetRegisteredRefs rejects a fragment-only $ref that does not resolve inside
+// a document the compiled registry knows. Such a ref resolves against its own
+// document alone, so one unresolvable at compile time stays unresolvable in
+// every run -- and the validation walk silently skips a fragment miss on a
+// registry-known bearing node precisely on the strength of compile-time
+// vetting (see [validator.validateResolvedRef]). Upstream Schema.Resolve
+// enforces this for the root document, but for a fetched remote the
+// resolve-error gate excuses failures past its one-level own-reference check,
+// so a ref two or more hops inside a remote is vetted only here. Refs to other
+// documents stay tolerated (a resolver may serve them only after
+// compilation), as does $dynamicRef, whose resolution depends on the run-time
+// dynamic scope.
+func (v *validator) vetRegisteredRefs(doc *Schema, locator string) error {
+	var vetErr error
+
+	//nolint:errcheck // The callback reports through vetErr.
+	_ = Walk(doc, func(_ Location, s *Schema) error {
+		if s.Ref == "" || !uriref.IsFragmentOnly(s.Ref) {
+			return nil
+		}
+
+		res := v.resolveRef(s, s.Ref)
+		if res.Target != nil {
+			return nil
+		}
+
+		vetErr = fmt.Errorf("schema resolve: %s: cannot resolve $ref %q: %w", locator, s.Ref, ErrNotResolved)
+		if res.Err != nil {
+			vetErr = fmt.Errorf("schema resolve: %s: cannot resolve $ref %q: %w", locator, s.Ref, res.Err)
+		}
+
+		return errRefCheckStop
+	})
+
+	return vetErr
 }
 
 // schemaFormsTree reports whether schema's sub-schema pointers form a tree: no
