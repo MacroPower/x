@@ -2757,6 +2757,42 @@ func TestGenerateFor_VerbatimAuthoredSelfRefKeepsDef(t *testing.T) {
 		[]byte(`{"name":"a","parent":{"name":"b"}}`)))
 }
 
+// extenderSelfRefNode authors a raw $ref back to its own $defs entry into the
+// reflected (non-verbatim) payload, the "add any field" latitude the extender
+// contract grants. The payload reachability scan must follow that ref so root
+// inlining keeps the def; inlining would leave the authored ref dangling and
+// the emitted schema uncompilable.
+type extenderSelfRefNode struct {
+	Name string `json:"name"`
+}
+
+func (extenderSelfRefNode) JSONSchemaExtend(
+	_ context.Context,
+	_ jsonschema.TypeContext,
+	ts *jsonschema.TypeSchema,
+) error {
+	ts.Value.Properties["self"] = &jsonschema.Schema{Ref: "#/$defs/extenderSelfRefNode"}
+
+	return nil
+}
+
+func TestGenerateFor_ExtenderAuthoredSelfRefKeepsDef(t *testing.T) {
+	t.Parallel()
+
+	s, err := jsonschema.GenerateFor[extenderSelfRefNode](t.Context())
+	require.NoError(t, err)
+
+	require.Contains(t, s.Defs, "extenderSelfRefNode",
+		"the def the payload scan reaches must survive root inlining")
+	assert.Equal(t, "#/$defs/extenderSelfRefNode", s.Ref)
+
+	validator, err := jsonschema.Compile(t.Context(), s)
+	require.NoError(t, err, "the authored $ref must resolve in the emitted schema")
+
+	assert.NoError(t, validator.ValidateJSON(t.Context(),
+		[]byte(`{"name":"a","self":{"name":"b"}}`)))
+}
+
 func TestGenerateFor_NullablePointerJSONStringConstAcceptsNull(t *testing.T) {
 	t.Parallel()
 

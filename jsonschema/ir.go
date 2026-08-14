@@ -287,15 +287,19 @@ func (g *generator) payloadRefTargets() map[string]*defEntry {
 }
 
 // walkReachable visits every node reachable from root like walkNodes, and
-// additionally follows the raw $ref strings inside a Verbatim payload
-// ([TypeSchema.Verbatim]): a verbatim payload is opaque and not node-backed, so
-// a $defs reference inside it is a reachability edge only a string scan sees.
-// Every other reference is a node-backed kindRef edge walkNodes already follows,
-// so only verbatim payloads are scanned. Each def reached by a string hit has
-// its body walked too, and onPayloadRef (when non-nil) observes every payload
-// ref hit, seen or not. Verbatim payload subtrees are assumed acyclic, as
-// everywhere else in the generator (hook schemas arrive JSON-decoded or
-// JSON-round-trip cloned).
+// additionally follows the raw $ref strings inside every payload: a Verbatim
+// payload ([TypeSchema.Verbatim]) is opaque and not node-backed, and a
+// build-time extender can author a raw $ref into a reflected payload (a
+// property, allOf branch, or additionalProperties renderBase preserves), so a
+// $defs reference inside either is a reachability edge only a string scan
+// sees. The one payload Ref not scanned is a kindRef node's own: that edge is
+// node-backed (walkNodes follows it via n.def) and its string is the
+// provisional token, which a base-name collision would resolve to the wrong
+// def. Each def reached by a string hit has its body walked too, and
+// onPayloadRef (when non-nil) observes every payload ref hit, seen or not.
+// Payload subtrees are assumed acyclic, as everywhere else in the generator
+// (hook schemas arrive JSON-decoded or JSON-round-trip cloned); the scanned
+// set is a dedup, keeping shared payload subtrees scanned once.
 func (g *generator) walkReachable(
 	root *node,
 	seen map[*defEntry]bool,
@@ -303,23 +307,39 @@ func (g *generator) walkReachable(
 	onPayloadRef func(*defEntry),
 ) {
 	targets := g.payloadRefTargets()
+	scanned := map[*Schema]bool{}
 
 	var scanPayload func(s *Schema)
 
 	visitAndScan := func(n *node) {
 		visit(n)
 
-		// Only a verbatim payload carries raw $ref strings that are reachability
-		// edges; every other reference is a node-backed kindRef edge.
-		if n.verbatim {
-			scanPayload(n.payload)
+		if n.kind == kindRef {
+			// A kindRef payload's own Ref is the node-backed edge walkNodes
+			// already follows via n.def, and it carries the provisional
+			// (pre-disambiguation) token: string-resolving it under a base-name
+			// collision would map to the wrong def. Skip it, but still scan
+			// any hook-grafted siblings on the payload.
+			if !scanned[n.payload] {
+				scanned[n.payload] = true
+
+				for _, child := range schemafield.Children(n.payload) {
+					scanPayload(child)
+				}
+			}
+
+			return
 		}
+
+		scanPayload(n.payload)
 	}
 
 	scanPayload = func(s *Schema) {
-		if s == nil {
+		if s == nil || scanned[s] {
 			return
 		}
+
+		scanned[s] = true
 
 		if e, ok := targets[s.Ref]; ok {
 			if onPayloadRef != nil {
@@ -342,8 +362,8 @@ func (g *generator) walkReachable(
 
 // collectReferencedDefs walks the final root node graph and returns the def
 // entries reachable from it, in build order. Reachability follows both node
-// links and the raw $ref strings inside a Verbatim payload, so a def whose only
-// remaining reference is a raw $ref inside a verbatim schema stays alive. A def
+// links and the raw $ref strings inside every payload, so a def whose only
+// remaining reference is a raw $ref a hook authored stays alive. A def
 // orphaned by a type= override or by root inlining is never reached, so it is
 // dropped from the output.
 func (g *generator) collectReferencedDefs(root *node) []*defEntry {
