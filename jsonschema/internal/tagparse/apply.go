@@ -98,9 +98,11 @@ type Result struct {
 // It is the payload for an ordinary field, and differs only where the payload
 // alone understates what the instance is: a nullable json:",string" field keeps
 // its string on the node's null-branch base, so the caller passes a view saying
-// so. A nil value means "use the payload".
+// so. A nil value means "use the payload". Quoted is the field's json:",string"
+// flag when it applies to a string Go kind, the one coercion no schema view can
+// express (see [tagmodel.ShapeOfQuoted]).
 func Apply(
-	tag string, fieldType reflect.Type, canvas, payload, typeSchema *jsonschema.Schema,
+	tag string, fieldType reflect.Type, canvas, payload, typeSchema *jsonschema.Schema, quoted bool,
 ) (Result, error) {
 	directives, description, err := Parse(tag)
 	if err != nil {
@@ -124,6 +126,7 @@ func Apply(
 		payload:    payload,
 		typeSchema: typeSchema,
 		fieldType:  fieldType,
+		quoted:     quoted,
 		groupsSet:  map[string]bool{},
 		seen:       map[string]bool{},
 	}
@@ -159,6 +162,9 @@ type applyState struct {
 	// field's own classification for every later pair. It is meaningful only
 	// while overriddenType names the type it came from.
 	overridden tagmodel.Shape
+	// The quoted field carries the json:",string" flag for a string Go kind,
+	// which no schema view can express (see [Apply]).
+	quoted bool
 }
 
 // apply folds one directive into the state.
@@ -447,7 +453,7 @@ func (s *applyState) shape() tagmodel.Shape {
 		return s.overridden
 	}
 
-	return tagmodel.ShapeOf(s.fieldType, s.typeSchema)
+	return tagmodel.ShapeOfQuoted(s.fieldType, s.typeSchema, s.quoted)
 }
 
 // target builds the write destination for the field, pairing the canvas's

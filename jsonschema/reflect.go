@@ -1709,7 +1709,7 @@ func (g *generator) buildFieldSchema(
 	// so it takes the payload directly.
 	if tag, ok := fi.field.Tag.Lookup("jsonschema"); ok {
 		res, err := tagparse.Apply(
-			tag, fieldType, fieldNode.authored, fieldNode.payload, tagTypeSchema)
+			tag, fieldType, fieldNode.authored, fieldNode.payload, tagTypeSchema, stringOverride)
 		if err != nil {
 			// Tagparse carries its own ErrInvalidType sentinel; map it onto the
 			// package's exported ErrInvalidType so errors.Is keeps working.

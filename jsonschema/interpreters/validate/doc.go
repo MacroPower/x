@@ -98,6 +98,13 @@
 // quoted instance -- so they are rejected with an error rather than silently
 // dropped as an inert numeric keyword on a string schema.
 //
+// A json:",string" string field double-encodes (the value abc marshals as the
+// JSON string "\"abc\""), so its scalar rules (eq, ne, oneof, and required's
+// non-zero check) compare against that quoted text, while the rules that would
+// measure or match the unquoted value -- the length bounds and the string
+// keywords -- are rejected with an error for the same reason numeric bounds
+// are above.
+//
 // Length and size bounds (minLength/maxLength, minItems/maxItems,
 // minProperties/maxProperties) from several rules in one tag intersect
 // independently of order: a floor only rises and a ceiling only falls, and len=N

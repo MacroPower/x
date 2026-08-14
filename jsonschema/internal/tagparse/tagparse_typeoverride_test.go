@@ -53,7 +53,7 @@ func TestApplyTypeOverrideContentKeywords(t *testing.T) {
 				ContentSchema:    contentSchema,
 			}
 
-			_, err := tagparse.Apply(tc.tag, reflect.TypeFor[[]byte](), &jsonschema.Schema{}, payload, nil)
+			_, err := tagparse.Apply(tc.tag, reflect.TypeFor[[]byte](), &jsonschema.Schema{}, payload, nil, false)
 			require.NoError(t, err)
 
 			assert.Equal(t, tc.wantContentEncoding, payload.ContentEncoding)

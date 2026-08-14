@@ -57,6 +57,9 @@ func (sh Shape) ParseScalar(lit string, pol Policy) (any, error) {
 	case FormCoercedNumber, FormCoercedBool:
 		return sh.coercedText(lit)
 
+	case FormCoercedString:
+		return sh.quotedText(lit)
+
 	default:
 		return nil, fmt.Errorf("cannot assign scalar value %q to type %s", lit, sh.Kind)
 	}
@@ -170,17 +173,35 @@ func (sh Shape) coercedText(lit string) (any, error) {
 	return string(out), nil
 }
 
+// quotedText serializes a string literal the way a json:",string" string field
+// emits it: encoding/json encodes the already-encoded string a second time, so
+// the instance is the JSON-quoted text, quotes and escapes included (value abc
+// marshals as the JSON string "\"abc\""). The literal converts through the
+// shape's own Go type first, mirroring coercedText, and unlike there the
+// quotes are the point and are kept.
+func (sh Shape) quotedText(lit string) (any, error) {
+	out, err := json.Marshal(reflect.ValueOf(lit).Convert(sh.Elem).Interface())
+	if err != nil {
+		return nil, fmt.Errorf("cannot serialize %q as %s: %w", lit, sh.Elem, err)
+	}
+
+	return string(out), nil
+}
+
 // zeroLiteral is the literal whose serialized form the non-zero assertion
 // forbids on a coerced shape: the value the field emits when it holds its Go
 // zero. It routes through the same [Shape.ParseScalar] every other coerced
 // operation uses, so a string-marshaling type forbids the text it actually
 // writes rather than a hardcoded "0" it never emits.
 func (sh Shape) zeroLiteral() string {
-	if sh.Form == FormCoercedBool {
+	switch sh.Form {
+	case FormCoercedBool:
 		return boolFalse
+	case FormCoercedString:
+		return "" // The empty string, whose quoted serialization is `""`.
+	default:
+		return "0"
 	}
-
-	return "0"
 }
 
 // ParseBoolLiteral parses the two boolean literals both tag grammars spell,

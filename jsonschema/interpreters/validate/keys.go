@@ -132,6 +132,8 @@ func isCrossFieldValidator(key string) bool {
 
 // shapeOf classifies a field or element the way the shared model does, so this
 // package can resolve a key's operation against the shape before applying it.
+// It routes through [jsonschema.FieldContext.Shape], which folds in the
+// json:",string" flag the type and base alone cannot express.
 func shapeOf(field jsonschema.FieldContext) tagmodel.Shape {
-	return tagmodel.ShapeOf(field.Type, field.Base)
+	return field.Shape()
 }

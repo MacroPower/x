@@ -424,7 +424,13 @@ as text, has a string schema, so its scalars parse at the real Go kind (keeping
 the range check, so `const=200` on an `int8` is an error) and are then
 re-serialized to the text the field emits. A `MarshalText` int whose value `3`
 writes as `"L3"` therefore gets `const=3` as `{"const":"L3"}` rather than the
-unsatisfiable `{"type":"string","const":3}`, and `default=3` likewise. `enum`
+unsatisfiable `{"type":"string","const":3}`, and `default=3` likewise. A
+`json:",string"` string field double-encodes -- `encoding/json` encodes the
+already-encoded string a second time, so the value `abc` marshals as the JSON
+string `"\"abc\""` -- and its scalars serialize the same way (`const=abc` pins
+that quoted text), while the keywords that would measure or match the unquoted
+value (`pattern`, `format`, and the length bounds) are rejected with an error
+rather than silently asserting against the quoted, escaped text. `enum`
 and `examples` values are separated by `|`; commas separate pairs, so a value
 containing a comma escapes it with a backslash (`\,`, and `\\` for a literal
 backslash). For complex values, use `JSONSchemaExtender` or doc comments with
@@ -665,7 +671,10 @@ the single 2^53 policy. Named conveniences remain for the value set
 first.
 
 An interpreter that branches on what the field is classifies it once with
-`ShapeOf(fieldType, base)`. The resulting `Shape` carries the declared Go type,
+`FieldContext.Shape()` (or `ShapeOf(fieldType, base)` when no context is
+available, which cannot see the `json:",string"` flag on a string Go kind --
+the one coercion, `FormCoercedString`, that type and base alone do not
+express). The resulting `Shape` carries the declared Go type,
 that type with its pointer chain followed, the kind a scalar literal parses at,
 whether the occurrence admits null, and the `Form` -- the JSON shape the
 instance actually takes, which is what the model dispatches on. `Form` is

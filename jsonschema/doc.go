@@ -351,8 +351,11 @@
 // conflict check with its own wording first.
 //
 // An interpreter that branches on what the field is classifies it once with
-// [ShapeOf], reading the field's Go type against its type-derived
-// [FieldContext.Base]. The resulting [Shape] carries the declared type, that
+// [FieldContext.Shape], or with [ShapeOf] when no context is available --
+// reading the field's Go type against its type-derived [FieldContext.Base],
+// though without a context the json:",string" flag on a string Go kind (the
+// one coercion, [FormCoercedString], type and base alone cannot express) is
+// invisible. The resulting [Shape] carries the declared type, that
 // type with its pointer chain followed, the kind a scalar literal parses at,
 // whether the occurrence admits null, and the [Form] -- the JSON shape the
 // instance actually takes, which is what the model dispatches on. Form is
@@ -504,7 +507,13 @@
 // range check, so const=200 on an int8 is an error) and then re-serialized to
 // the text the field emits. A MarshalText int whose value 3 writes as "L3"
 // therefore gets const=3 as {"const":"L3"}, not the unsatisfiable
-// {"type":"string","const":3}, and default=3 likewise. Enum and examples values
+// {"type":"string","const":3}, and default=3 likewise. A json:",string" string
+// field double-encodes -- [encoding/json] encodes the already-encoded string a
+// second time, so the value abc marshals as the JSON string "\"abc\"" -- and
+// its scalars serialize the same way (const=abc pins that quoted text), while
+// the keywords that would measure or match the unquoted value (pattern,
+// format, and the length bounds) are rejected with an error rather than
+// silently asserting against the quoted, escaped text. Enum and examples values
 // are separated by "|". Unrecognized keys are a parse error. A value containing a
 // comma escapes it with a backslash (a literal backslash is "\\"), so
 // jsonschema:"description=Hello\, World" sets the description "Hello, World";

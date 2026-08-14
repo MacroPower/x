@@ -7,7 +7,9 @@ import (
 	"reflect"
 	"strings"
 
+	"go.jacobcolvin.com/x/jsonschema/internal/jsontag"
 	"go.jacobcolvin.com/x/jsonschema/internal/numkind"
+	"go.jacobcolvin.com/x/jsonschema/internal/reflectkind"
 	"go.jacobcolvin.com/x/jsonschema/internal/tagmodel"
 	"go.jacobcolvin.com/x/jsonschema/internal/uriref"
 )
@@ -731,7 +733,30 @@ func (fc FieldContext) ElementContexts() []FieldContext {
 // always carries a canvas; the read-only Effective accessors, by contrast,
 // tolerate a nil Canvas and fall back to Base.
 func (fc FieldContext) Constraints() *Constraints {
-	return fc.ConstraintsFor(ShapeOf(fc.Type, fc.Base))
+	return fc.ConstraintsFor(fc.Shape())
+}
+
+// Shape classifies the field, folding in the json:",string" flag read from
+// [FieldContext.StructField] -- the one input [ShapeOf] cannot see. A quoted
+// string field double-encodes (its instance is the JSON-quoted text), which
+// only the flag distinguishes from a plain string field; every other coercion
+// is already visible in [FieldContext.Base]. Prefer this over calling [ShapeOf]
+// directly when a context is available.
+func (fc FieldContext) Shape() Shape {
+	return tagmodel.ShapeOfQuoted(fc.Type, fc.Base, fc.quotedString())
+}
+
+// quotedString reports whether the field carries a double-encoding
+// json:",string": the flag is set, the type is one encoding/json quotes, and
+// the quoted value is itself a string. It mirrors the generator's own
+// string-override test, and tolerates the zero StructField of a caller-built
+// context.
+func (fc FieldContext) quotedString() bool {
+	if fc.Type == nil || !jsontag.Parse(fc.StructField).JSONString {
+		return false
+	}
+
+	return reflectkind.IsStringableType(fc.Type) && numkind.DerefType(fc.Type).Kind() == reflect.String
 }
 
 // ConstraintsFor is [FieldContext.Constraints] for a caller that has already
@@ -754,7 +779,7 @@ func (fc FieldContext) ConstraintsFor(shape Shape) *Constraints {
 // node, so it supplies no elements and an element rule reports rather than
 // silently doing nothing.
 func (fc FieldContext) target() tagmodel.Target {
-	return fc.targetOf(ShapeOf(fc.Type, fc.Base))
+	return fc.targetOf(fc.Shape())
 }
 
 // targetOf builds the target for an already-classified shape, so a caller that

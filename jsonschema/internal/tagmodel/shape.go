@@ -40,6 +40,16 @@ const (
 	// FormCoercedBool is a bool Go kind whose schema is a string, the boolean
 	// half of the same coercion.
 	FormCoercedBool
+	// FormCoercedString is a string Go kind under json:",string": encoding/json
+	// encodes the already-encoded string a second time, so the instance is the
+	// JSON-quoted text (value abc marshals as "\"abc\""). Its scalars compare
+	// against that quoted text; keywords that would measure or match the
+	// unquoted value (bounds, len, the string keywords) have no faithful
+	// mapping and report. Unlike the numeric and bool coercions, this form is
+	// invisible to the type-and-base classification (a plain string field has
+	// the same string kind under the same string-typed schema), so it exists
+	// only where the caller supplies the quoted flag ([ShapeOfQuoted]).
+	FormCoercedString
 	// FormTextString is a string-typed schema over a Go kind that is not a
 	// scalar at all: [time.Time], big.Rat, a struct or map marshaling itself as
 	// text. A string-only keyword such as format applies; a scalar comparison
@@ -79,6 +89,7 @@ var formNames = [formCount]string{
 	FormObject:        "object",
 	FormCoercedNumber: "string-coerced number",
 	FormCoercedBool:   "string-coerced boolean",
+	FormCoercedString: "string-coerced string",
 	FormTextString:    "text-marshaled string",
 	FormByteString:    "base64 byte string",
 	FormRawBytes:      "raw byte slice",
@@ -184,14 +195,28 @@ func ShapeForTypeName(name string) Shape {
 // base schema. It is the single home of the string-coercion test, the
 // schema-permits-a-string test, the byte-slice test, and every kind predicate
 // the dialects used to each keep their own copy of.
+//
+// Type and base alone cannot see a json:",string" flag on a string Go kind
+// (the numeric and bool coercions surface as a string-typed base over a
+// non-string kind, but a quoted string field looks exactly like a plain one);
+// a caller that knows the flag classifies through [ShapeOfQuoted] instead.
 func ShapeOf(t reflect.Type, base *jsonschema.Schema) Shape {
+	return ShapeOfQuoted(t, base, false)
+}
+
+// ShapeOfQuoted is [ShapeOf] carrying the field's json:",string" flag, the one
+// input the type and base cannot express: with it, a string Go kind under a
+// string-typed base classifies as [FormCoercedString] (its instance is the
+// JSON-quoted text) rather than a plain string. The flag is redundant for
+// every other kind, whose coercion the base already states.
+func ShapeOfQuoted(t reflect.Type, base *jsonschema.Schema, quoted bool) Shape {
 	elem := numkind.DerefType(t)
 
 	return Shape{
 		Type:     t,
 		Elem:     elem,
 		Kind:     elem.Kind(),
-		Form:     classifyForm(elem, base),
+		Form:     classifyForm(elem, base, quoted),
 		Nullable: t.Kind() == reflect.Pointer,
 	}
 }
@@ -205,7 +230,7 @@ func ShapeOf(t reflect.Type, base *jsonschema.Schema) Shape {
 // open, and is the only thing that can distinguish a coerced shape from a native
 // one -- a string-typed schema over a numeric kind is the json:",string" (or
 // MarshalText) shape, whose scalars compare against the serialized text.
-func classifyForm(t reflect.Type, base *jsonschema.Schema) Form {
+func classifyForm(t reflect.Type, base *jsonschema.Schema, quoted bool) Form {
 	str := schemaPermitsString(base)
 
 	// A byte slice never has per-element schemas: it is one base64 string when
@@ -246,6 +271,12 @@ func classifyForm(t reflect.Type, base *jsonschema.Schema) Form {
 		// that constrain it.
 		if declaredForm(base) == FormNumber {
 			return FormNumber
+		}
+
+		// The quoted flag is the only thing that distinguishes a
+		// double-encoding json:",string" string field from a plain one.
+		if quoted && str {
+			return FormCoercedString
 		}
 
 		return FormString
