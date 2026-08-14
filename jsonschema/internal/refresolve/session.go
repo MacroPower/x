@@ -328,7 +328,11 @@ func displayPointer(segments []string) string {
 // race on it.
 func (s *Session) RegisterFallback(sc *jsonschema.Schema, base string) {
 	scratch := NewRegistry(s.reg.deps, s.reg.draft, s.reg.inertIDs)
-	scratch.Walk(sc, base)
+	// WalkFetched keeps the first entry for a duplicate $id/$anchor key within
+	// the document, matching the precedence the validator's fetched-document
+	// walk applies; the plain Walk would resolve such a duplicate last-wins
+	// and the two engines would disagree on the same reference.
+	scratch.WalkFetched(sc, base)
 
 	if s.fallbackBaseURIs == nil {
 		s.fallbackURI = map[string]*jsonschema.Schema{}
