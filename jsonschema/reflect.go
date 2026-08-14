@@ -1099,6 +1099,11 @@ type structFieldInfo struct {
 	omitzero        bool
 	jsonString      bool
 	composeViaAllOf bool
+	// Tagged records whether the JSON name came from an explicit json tag
+	// name, the input to encoding/json's same-depth tie-break. It is carried
+	// so a composed embed's promoted fields (ghost sightings in the enclosing
+	// struct's resolution) replay the tie-break correctly.
+	tagged bool
 	// Optional is true for an allOf-composed embed reached through a
 	// pointer-typed embedded field (directly or via an enclosing pointer
 	// embed). Encoding/json omits the embed's entire contribution when the
@@ -1130,9 +1135,20 @@ type structFieldInfo struct {
 //
 //nolint:nestif // Mirrors encoding/json's field collection logic which is inherently nested.
 func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
+	// Mark t in-progress so the ghost collection below (which re-enters this
+	// method for composed embed types) terminates on a self- or mutually
+	// composed cycle instead of recursing without bound.
+	if owned := !g.shadowScan[t]; owned {
+		g.shadowScan[t] = true
+		defer delete(g.shadowScan, t)
+	}
+
 	type fieldLevel struct {
-		field reflect.StructField
-		depth int
+		// GhostOwner names the composed embed type a ghost sighting belongs
+		// to; see the ghost flag below.
+		ghostOwner reflect.Type
+		field      reflect.StructField
+		depth      int
 		// Optional is true when the field is promoted through a pointer-typed
 		// embedded struct. Such fields are omitted by encoding/json when the
 		// embedded pointer is nil, so they are not required.
@@ -1148,6 +1164,12 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 		// field whose JSON name happens to start with that prefix is not
 		// misclassified as a composition.
 		composeAllOf bool
+		// Ghost marks a sighting of a composed embed's promoted JSON name.
+		// Encoding/json promotes those fields normally, so they compete in
+		// name resolution (shadowing deeper real fields, annihilating on
+		// ties), but a winning ghost never becomes a property: the embed's
+		// allOf branch carries its assertion.
+		ghost bool
 	}
 
 	// A fieldKey groups sightings; the composeAllOf flag puts synthetic allOf
@@ -1190,6 +1212,10 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 	// the same depth; a deeper re-occurrence is shadowed by the shallower one.
 	// The per-type index keeps distinct types apart even when their names match
 	// across packages.
+	// GhostPromoted memoizes each composed embed type's promoted fields,
+	// collected once for the ghost sightings and reused by the shadow marking.
+	ghostPromoted := map[reflect.Type][]structFieldInfo{}
+
 	allOfNames := map[reflect.Type]string{}
 	allOfName := func(ft reflect.Type) string {
 		if n, ok := allOfNames[ft]; ok {
@@ -1295,6 +1321,33 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 								false,
 							)
 
+							// Ghost sightings: encoding/json still promotes the
+							// composed embed's fields normally, so its names
+							// compete in resolution against real fields and
+							// other embeds. A skipped scan (a self- or mutually
+							// composed type) leaves its names out, keeping the
+							// pre-ghost conservative behavior for that cycle.
+							if !g.shadowScan[ft] {
+								promoted := g.collectStructFields(ft)
+								ghostPromoted[ft] = promoted
+
+								for pi := range promoted {
+									p := &promoted[pi]
+									if p.composeViaAllOf {
+										// A nested composition's names are
+										// opaque to this analysis.
+										continue
+									}
+
+									record(p.jsonName, fieldLevel{
+										depth:      depth + len(p.field.Index),
+										tagged:     p.tagged,
+										ghost:      true,
+										ghostOwner: ft,
+									}, dup)
+								}
+							}
+
 							continue
 						}
 
@@ -1343,8 +1396,13 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 		}
 	}
 
-	// Resolve shadowing and ambiguity.
+	// Resolve shadowing and ambiguity. Each real JSON name's outcome is
+	// recorded for the shadow marking below: which depth claimed the name,
+	// whether a same-depth ambiguity annihilated it, and whether the winner
+	// was a composed embed's ghost.
 	var result []structFieldInfo
+
+	outcomes := map[string]nameOutcome{}
 
 	for _, key := range order {
 		candidates := byName[key]
@@ -1354,18 +1412,18 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 
 		// Find minimum depth.
 		minDepth := candidates[0].depth
-		for _, c := range candidates[1:] {
-			if c.depth < minDepth {
-				minDepth = c.depth
+		for ci := 1; ci < len(candidates); ci++ {
+			if candidates[ci].depth < minDepth {
+				minDepth = candidates[ci].depth
 			}
 		}
 
 		// Filter to only those at minimum depth.
 		var atMin []fieldLevel
 
-		for _, c := range candidates {
-			if c.depth == minDepth {
-				atMin = append(atMin, c)
+		for ci := range candidates {
+			if candidates[ci].depth == minDepth {
+				atMin = append(atMin, candidates[ci])
 			}
 		}
 
@@ -1376,17 +1434,31 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 		if len(atMin) > 1 {
 			var tagged []fieldLevel
 
-			for _, c := range atMin {
-				if c.tagged {
-					tagged = append(tagged, c)
+			for ci := range atMin {
+				if atMin[ci].tagged {
+					tagged = append(tagged, atMin[ci])
 				}
 			}
 
 			if len(tagged) != 1 {
+				if !key.composeAllOf {
+					outcomes[key.name] = nameOutcome{depth: minDepth, annihilated: true}
+				}
+
 				continue
 			}
 
 			atMin = tagged
+		}
+
+		if atMin[0].ghost {
+			// A composed embed's promoted field won the name: no property is
+			// emitted (the embed's allOf branch carries the assertion), and
+			// the real fields it defeated stay out of the result, matching
+			// the value encoding/json actually marshals under the name.
+			outcomes[key.name] = nameOutcome{depth: minDepth, ghostOwner: atMin[0].ghostOwner}
+
+			continue
 		}
 
 		f := atMin[0].field
@@ -1407,12 +1479,15 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 			continue
 		}
 
+		outcomes[info.JSONName] = nameOutcome{depth: minDepth}
+
 		sfi := structFieldInfo{
 			field:      f,
 			jsonName:   info.JSONName,
 			omitempty:  info.Omitempty || atMin[0].optional,
 			omitzero:   info.Omitzero,
 			jsonString: info.JSONString,
+			tagged:     atMin[0].tagged,
 		}
 		result = append(result, sfi)
 	}
@@ -1425,33 +1500,38 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 		return slices.Compare(a.field.Index, b.field.Index)
 	})
 
-	g.markShadowedCompositions(result)
+	g.markShadowedCompositions(result, outcomes, ghostPromoted)
 
 	return result
 }
 
+// nameOutcome is the resolution result for one real JSON name: the depth that
+// claimed it, whether a same-depth ambiguity annihilated it (the name never
+// appears in the marshaled object), and, when a composed embed's ghost won,
+// which embed type owns it.
+type nameOutcome struct {
+	ghostOwner  reflect.Type
+	depth       int
+	annihilated bool
+}
+
 // markShadowedCompositions flags each allOf-composed embed whose promoted
-// JSON names encoding/json resolves to a different real field. The collector
-// diverts a composed embed into the synthetic-key namespace, exempting it
-// from name resolution, but encoding/json still promotes its fields
-// normally: a shallower (or same-depth winning) real field shadows the
-// embed's field, so the marshaled object carries the winner's value under
-// that name while the composed branch would assert the embed's constraints
-// against it. Same-depth ties flag conservatively without re-running the tag
-// tie-break: the resulting anyOf wrap only accepts more, never less.
-func (g *generator) markShadowedCompositions(fields []structFieldInfo) {
-	winnerDepth := map[string]int{}
-
-	for i := range fields {
-		if !fields[i].composeViaAllOf {
-			winnerDepth[fields[i].jsonName] = len(fields[i].field.Index) - 1
-		}
-	}
-
-	if len(winnerDepth) == 0 {
-		return
-	}
-
+// JSON names encoding/json resolves away from the embed: a shallower (or
+// same-depth winning) real field carries the winner's value under the name,
+// an annihilated name is dropped from the marshaled object entirely, and
+// another embed's winning ghost carries that embed's value. In each case the
+// composed branch would assert this embed's constraints against a value it
+// does not produce, so the branch must not be unconditional. The outcomes map
+// is the enclosing resolution's per-name verdict (ghost sightings included,
+// so the tag tie-break is already replayed), and ghostPromoted carries each
+// scanned embed type's promoted fields; a type absent from it was skipped as
+// a self- or mutually composed cycle and keeps its unconditional branch, as
+// before.
+func (g *generator) markShadowedCompositions(
+	fields []structFieldInfo,
+	outcomes map[string]nameOutcome,
+	ghostPromoted map[reflect.Type][]structFieldInfo,
+) {
 	for i := range fields {
 		fi := &fields[i]
 		if !fi.composeViaAllOf {
@@ -1463,16 +1543,10 @@ func (g *generator) markShadowedCompositions(fields []structFieldInfo) {
 			ft = ft.Elem()
 		}
 
-		// A mutually-composed pair would recurse through its own analysis;
-		// skip the inner occurrence, leaving its branch unconditional as
-		// before.
-		if g.shadowScan[ft] {
+		promoted, scanned := ghostPromoted[ft]
+		if !scanned {
 			continue
 		}
-
-		g.shadowScan[ft] = true
-		promoted := g.collectStructFields(ft)
-		delete(g.shadowScan, ft)
 
 		embedDepth := len(fi.field.Index) - 1
 
@@ -1489,10 +1563,25 @@ func (g *generator) markShadowedCompositions(fields []structFieldInfo) {
 			}
 
 			// The promoted name sits at the embed's depth plus its own depth
-			// within the embed type; a winner at or above that depth shadows it.
-			if dr, ok := winnerDepth[p.jsonName]; ok && dr <= embedDepth+len(p.field.Index) {
+			// within the embed type.
+			de := embedDepth + len(p.field.Index)
+
+			out, ok := outcomes[p.jsonName]
+
+			switch {
+			case !ok:
+				// No outcome recorded: the name resolved to nothing (its
+				// ghost was skipped with this scan); keep the branch's claim.
+				unshadowedAny = true
+			case !out.annihilated && out.ghostOwner == ft && out.depth == de:
+				// This embed's own ghost won the name, so the marshaled
+				// object carries the embed's value there.
+				unshadowedAny = true
+			case out.depth <= de:
+				// A real field won the tie-break, the name annihilated, or
+				// another embed claimed it at or above this depth.
 				shadowedAny = true
-			} else {
+			default:
 				unshadowedAny = true
 			}
 		}
