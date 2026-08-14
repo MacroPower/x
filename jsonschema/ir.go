@@ -51,10 +51,16 @@ type node struct {
 	// for a slice, map, or ",string" pointer). It is empty for every other node;
 	// a non-empty base is exactly what makes render encode null as a
 	// ["null", base] type list rather than an anyOf[base, null] wrapper.
-	base   string
-	props  []nodeProp  // struct properties, declaration order
-	prefix []*node     // array elements (prefixItems / itemsArray)
-	embeds []embedNode // struct allOf/anyOf composition branches
+	base string
+	// TagView is the corrected type view handed to field-level hooks (the
+	// jsonschema tag and tag interpreters) when the payload alone understates
+	// the type: a ",string" pointer's payload is empty (the coercion lives on
+	// base for the null-branch split), so hooks dispatch on this
+	// {"type":["null","string"]} view instead. Nil for every other node.
+	tagView *Schema
+	props   []nodeProp  // struct properties, declaration order
+	prefix  []*node     // array elements (prefixItems / itemsArray)
+	embeds  []embedNode // struct allOf/anyOf composition branches
 
 	kind nodeKind
 	// Nullable is the single deferred null decision for a non-kindRef node; base

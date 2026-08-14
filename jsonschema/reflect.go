@@ -1673,6 +1673,12 @@ func (g *generator) buildFieldSchema(
 			fieldNode.nullable = g.nullable
 			fieldNode.base = typename.String
 			tagTypeSchema = &Schema{Types: []string{typename.Null, typename.String}}
+			// Tag interpreters dispatch on FieldContext.Base; hand them the
+			// same corrected view the jsonschema tag gets, or they would
+			// classify the field at its native kind and bypass the
+			// coerced-form column (emitting a numeric const against a string
+			// schema, or an inert bound instead of the documented rejection).
+			fieldNode.tagView = tagTypeSchema
 		} else {
 			payload.Type = typename.String
 		}
@@ -1782,12 +1788,19 @@ func (g *generator) fieldContext(
 	fieldNode *node,
 	parent *Schema,
 ) FieldContext {
+	// A ",string" pointer records its coercion on the node's tagView rather
+	// than the (empty) payload; hooks must see the coerced type to dispatch.
+	base := fieldNode.payload
+	if fieldNode.tagView != nil {
+		base = fieldNode.tagView
+	}
+
 	return FieldContext{
 		Name:        fi.jsonName,
 		Type:        fi.field.Type,
 		Owner:       reflectkind.DeclaringType(parentType, fi.field),
 		Canvas:      fieldNode.authored,
-		Base:        fieldNode.payload,
+		Base:        base,
 		Parent:      parent,
 		StructField: fi.field,
 		Draft:       g.draft,
