@@ -128,7 +128,7 @@ func (g *generator) renderDef(e *defEntry) {
 func (g *generator) applyNull(n *node, base *Schema) *Schema {
 	if !n.nullableDecision() {
 		if n.nilableContainer() {
-			base.Type = n.base
+			bareContainerType(base, n.base)
 		}
 
 		return base
@@ -136,7 +136,7 @@ func (g *generator) applyNull(n *node, base *Schema) *Schema {
 
 	hasConstEnum := base.Const != nil || base.Enum != nil
 	if n.nilableContainer() && !hasConstEnum {
-		base.Types = []string{typename.Null, n.base}
+		nullTypeList(base, n.base)
 
 		return base
 	}
@@ -159,10 +159,42 @@ func (g *generator) applyNull(n *node, base *Schema) *Schema {
 	if n.nilableContainer() {
 		// A const/enum cannot ride on a ["null", base] list, so flip to the
 		// anyOf form with the base type on the value branch.
-		base.Type = n.base
+		bareContainerType(base, n.base)
 	}
 
 	return &Schema{AnyOf: []*Schema{base, {Type: typename.Null}}}
+}
+
+// nullTypeList applies the ["null", base] type-list encoding to a nilable
+// container's schema, honoring a hook-authored type slot: an authored Types
+// list gains "null" when absent, and an authored Type replaces the
+// kind-derived base as the list's value type. Exactly one of Type/Types is
+// set afterward, so the schema always marshals.
+func nullTypeList(s *Schema, base string) {
+	if s.Types != nil {
+		if !slices.Contains(s.Types, typename.Null) {
+			s.Types = append([]string{typename.Null}, s.Types...)
+		}
+
+		return
+	}
+
+	if s.Type != "" {
+		base = s.Type
+	}
+
+	s.Type = ""
+	s.Types = []string{typename.Null, base}
+}
+
+// bareContainerType restores a nilable container's bare type, honoring a
+// hook-authored type slot: an authored Types list already carries the type
+// constraint and an authored Type wins over the kind-derived base, so the
+// base fills the slot only when both are empty.
+func bareContainerType(s *Schema, base string) {
+	if s.Types == nil && s.Type == "" {
+		s.Type = base
+	}
 }
 
 // refTargetAdmitsNull reports whether a rendered schema already accepts a JSON

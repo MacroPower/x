@@ -52,7 +52,7 @@ func (g *generator) reconcileField(n *node) *Schema {
 
 	if !n.nullable {
 		if n.nilableContainer() {
-			merged.Type = n.base
+			bareContainerType(&merged, n.base)
 		}
 
 		return &merged
@@ -64,7 +64,7 @@ func (g *generator) reconcileField(n *node) *Schema {
 	// null-admitting) must not run first.
 	hasConstEnum := merged.Const != nil || merged.Enum != nil
 	if n.nilableContainer() && !hasConstEnum {
-		merged.Types = []string{typename.Null, n.base}
+		nullTypeList(&merged, n.base)
 
 		return &merged
 	}
@@ -83,7 +83,7 @@ func (g *generator) reconcileField(n *node) *Schema {
 	wrapper := splitFieldKeywords(&merged, base)
 
 	if n.nilableContainer() {
-		merged.Type = n.base
+		bareContainerType(&merged, n.base)
 	}
 
 	wrapper.AnyOf = []*Schema{&merged, {Type: typename.Null}}
