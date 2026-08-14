@@ -37,6 +37,51 @@ func TestCloneCyclicGraph(t *testing.T) {
 		assert.Nil(t, cp)
 	})
 
+	t.Run("cycle through Extra returns ErrCyclic", func(t *testing.T) {
+		t.Parallel()
+
+		s := &jsonschema.Schema{Type: "object"}
+		s.Extra = map[string]any{"self": s}
+
+		cp, err := schemaclone.Clone(s, children)
+		require.ErrorIs(t, err, schemaclone.ErrCyclic)
+		assert.Nil(t, cp)
+	})
+
+	t.Run("cycle through nested Examples returns ErrCyclic", func(t *testing.T) {
+		t.Parallel()
+
+		s := &jsonschema.Schema{Type: "object"}
+		s.Examples = []any{map[string]any{"schema": s}}
+
+		cp, err := schemaclone.Clone(s, children)
+		require.ErrorIs(t, err, schemaclone.ErrCyclic)
+		assert.Nil(t, cp)
+	})
+
+	t.Run("cycle through Const returns ErrCyclic", func(t *testing.T) {
+		t.Parallel()
+
+		s := &jsonschema.Schema{Type: "object"}
+		v := any(s)
+		s.Const = &v
+
+		cp, err := schemaclone.Clone(s, children)
+		require.ErrorIs(t, err, schemaclone.ErrCyclic)
+		assert.Nil(t, cp)
+	})
+
+	t.Run("acyclic schema pointer in Extra is not a cycle", func(t *testing.T) {
+		t.Parallel()
+
+		s := &jsonschema.Schema{Type: "object"}
+		s.Extra = map[string]any{"meta": &jsonschema.Schema{Type: "string"}}
+
+		cp, err := schemaclone.Clone(s, children)
+		require.NoError(t, err)
+		require.NotNil(t, cp)
+	})
+
 	t.Run("diamond-shaped DAG is not a cycle", func(t *testing.T) {
 		t.Parallel()
 

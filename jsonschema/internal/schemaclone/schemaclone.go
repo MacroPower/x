@@ -46,8 +46,9 @@ type Children func(*jsonschema.Schema) []*jsonschema.Schema
 //
 // A cyclic schema graph cannot round-trip through JSON, so Clone rejects it
 // with an error wrapping [ErrCyclic] before marshaling. The cycle check walks
-// the sub-schema graph children supplies; a *Schema smuggled through an
-// any-typed container (Extra, Examples) is outside that traversal.
+// the sub-schema graph children supplies plus the any-typed value fields
+// (Const, Enum, Examples, Extra), so a *Schema smuggled through an any-typed
+// container is detected too.
 func Clone(s *jsonschema.Schema, children Children) (*jsonschema.Schema, error) {
 	if s == nil {
 		return nil, nil //nolint:nilnil // A nil schema clones to nil.
@@ -111,7 +112,52 @@ func checkAcyclic(s *jsonschema.Schema, children Children, state map[*jsonschema
 		}
 	}
 
+	// A *Schema can also ride in the any-typed value fields; json.Marshal
+	// serializes those edges like any sub-schema, so the cycle check must
+	// cross them too.
+	values := []any{s.Enum, s.Examples, s.Extra}
+	if s.Const != nil {
+		values = append(values, *s.Const)
+	}
+
+	for _, v := range values {
+		err := checkAcyclicValue(v, children, state)
+		if err != nil {
+			return err
+		}
+	}
+
 	state[s] = visited
+
+	return nil
+}
+
+// checkAcyclicValue extends the checkAcyclic walk across a JSON-shaped value
+// held in an any-typed field, recursing through maps and slices until it finds
+// schema pointers to feed back into the graph walk. Value containers of other
+// types marshal without re-entering the schema graph and need no check.
+func checkAcyclicValue(v any, children Children, state map[*jsonschema.Schema]visit) error {
+	switch val := v.(type) {
+	case *jsonschema.Schema:
+		return checkAcyclic(val, children, state)
+	case jsonschema.Schema:
+		return checkAcyclic(&val, children, state)
+	case map[string]any:
+		for _, elem := range val {
+			err := checkAcyclicValue(elem, children, state)
+			if err != nil {
+				return err
+			}
+		}
+
+	case []any:
+		for _, elem := range val {
+			err := checkAcyclicValue(elem, children, state)
+			if err != nil {
+				return err
+			}
+		}
+	}
 
 	return nil
 }
