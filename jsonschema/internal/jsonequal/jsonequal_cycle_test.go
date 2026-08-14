@@ -102,6 +102,19 @@ func TestEqualWithRatCyclicInstance(t *testing.T) {
 			instance:  cyclicSlice(),
 			want:      false,
 		},
+		"cyclic schema value against cyclic instance terminates": {
+			// Both sides cyclic is the shape where the lock-step recursion has
+			// no finite side to bottom out on; the up-front schema-side screen
+			// must stop it.
+			schemaVal: cyclicSlice(),
+			instance:  cyclicSlice(),
+			want:      false,
+		},
+		"cyclic schema value against acyclic instance terminates": {
+			schemaVal: cyclicSlice(),
+			instance:  []any{"x"},
+			want:      false,
+		},
 	}
 
 	for name, tc := range tests {

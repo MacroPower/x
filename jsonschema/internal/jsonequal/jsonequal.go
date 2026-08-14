@@ -123,6 +123,16 @@ func equalRatInstance(sr *big.Rat, instance any) bool {
 // recomputes the same rational; the cache only removes that repeated work.
 func EqualWithRat(schemaVal any, schemaRat *big.Rat, instance any) bool {
 	if schemaRat == nil {
+		// A cyclic schema value has no JSON serialization, so it is unequal to
+		// everything (see containsCycle). The screen also bounds the recursion:
+		// equalSchemaInstance advances both sides in lock step, so a finite
+		// schema tree terminates the walk no matter what the instance contains,
+		// while a both-cyclic pair would otherwise recurse until the fatal
+		// stack overflow that recover cannot catch.
+		if containsCycle(schemaVal) {
+			return false
+		}
+
 		return equalSchemaInstance(schemaVal, instance)
 	}
 
