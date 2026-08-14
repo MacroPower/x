@@ -1,6 +1,7 @@
 package jsonequal_test
 
 import (
+	"encoding/json"
 	"math"
 	"testing"
 
@@ -56,6 +57,56 @@ func TestEqualWithRatHandBuiltMapShapes(t *testing.T) {
 		"non-nil func does not panic": {
 			schemaVal: fn,
 			instance:  fn,
+			want:      false,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, jsonequal.EqualWithRat(tc.schemaVal, nil, tc.instance))
+		})
+	}
+}
+
+// TestEqualWithRatHandBuiltExpensiveNumbers pins the screen at the upstream
+// boundary: a hand-built (typed) container beside decoded JSON delegates to
+// upstream jsonschema.Equal, whose json.Number expansion is uncapped and
+// quadratic in the literal. An out-of-bounds literal on either side makes the
+// pair unequal instead, matching how the guarded walks already treat such a
+// number, while in-bounds literals keep upstream's mathematical equality.
+func TestEqualWithRatHandBuiltExpensiveNumbers(t *testing.T) {
+	t.Parallel()
+
+	huge := json.Number("1e1000000")
+
+	tests := map[string]struct {
+		schemaVal any
+		instance  any
+		want      bool
+	}{
+		"typed slice against in-bounds decoded number stays equal": {
+			schemaVal: []int{1},
+			instance:  []any{json.Number("1")},
+			want:      true,
+		},
+		"typed slice against out-of-bounds decoded number is unequal": {
+			schemaVal: []int{1},
+			instance:  []any{huge},
+			want:      false,
+		},
+		"out-of-bounds literal in a typed slice never reaches upstream": {
+			// The two sides denote the same value, but comparing them exactly
+			// requires the quadratic expansion the package exists to avoid, so
+			// they are unequal by policy (see guardedNumberEqual).
+			schemaVal: []json.Number{huge},
+			instance:  []any{huge},
+			want:      false,
+		},
+		"out-of-bounds literal nested in a decoded object is screened": {
+			schemaVal: []int{1},
+			instance:  []any{map[string]any{"n": huge}},
 			want:      false,
 		},
 	}

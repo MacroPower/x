@@ -10,7 +10,8 @@
 // equals the decoded literal 0.1 under uniqueItems just as it does under
 // const, enum, and the numeric-bound keywords. Values outside the
 // decoded-JSON shapes (hand-built const/enum containers) delegate to the
-// upstream comparison, hardened against its panics. Non-finite floats (NaN,
+// upstream comparison, hardened against its panics and screened so no
+// out-of-bounds literal reaches its uncapped parse. Non-finite floats (NaN,
 // ±Inf) are treated as unequal to
 // everything, including themselves, matching the numeric-bound keywords. Cyclic
 // values (containers that contain themselves, which have no JSON serialization)
@@ -317,9 +318,10 @@ func containsNonFiniteFloat(v any) bool {
 // ([numrat.NumericRat]), so float64(1.1) equals the decoded literal 1.1 here
 // just as it does under const, enum, and the numeric-bound keywords.
 // Container types other than the decoded-JSON shapes fall through to
-// [equalUpstream]; a decoded [json.Number] can only appear inside the shapes
-// handled here, so no adversarial literal reaches the upstream's uncapped
-// parse.
+// [equalUpstream], screened first by [containsExpensiveNumber]: the other
+// operand can still be decoded JSON (a hand-built const against a decoded
+// instance array), so an adversarial literal must be caught before it
+// reaches the upstream's uncapped parse.
 func equalGuarded(a, b any) bool {
 	an, aNum := a.(json.Number)
 	bn, bNum := b.(json.Number)
@@ -390,7 +392,54 @@ func equalGuarded(a, b any) bool {
 		return true
 	}
 
+	// The pair is outside the decoded shapes (one side is a hand-built
+	// const/enum container), but the other side can still be decoded JSON
+	// carrying an adversarial literal, and upstream expands every json.Number
+	// through the uncapped, quadratic big.Rat.SetString. An out-of-bounds
+	// number compares only through its canonical decomposition in this package
+	// (see guardedNumberEqual), so treating the pair as unequal preserves the
+	// guarded semantics.
+	if containsExpensiveNumber(a) || containsExpensiveNumber(b) {
+		return false
+	}
+
 	return equalUpstream(a, b)
+}
+
+// containsExpensiveNumber reports whether v, through the decoded and
+// hand-built container shapes ([]any, map[string]any, map[any]any), contains
+// a [json.Number] outside the cheap-expansion bounds (or one that is not a
+// decimal literal at all). Expanding such a literal costs quadratic time in
+// upstream [jsonschema.Equal], so callers treat the pair as unequal instead
+// of delegating. Typed containers are not walked: the attacker-controlled
+// operand is always decoded JSON, so its literals are reachable through
+// these shapes.
+func containsExpensiveNumber(v any) bool {
+	switch val := v.(type) {
+	case json.Number:
+		d, ok := numrat.ParseDecNumber(string(val))
+
+		return !ok || !d.ExactlyComparable()
+
+	case []any:
+		return slices.ContainsFunc(val, containsExpensiveNumber)
+
+	case map[string]any:
+		for _, item := range val {
+			if containsExpensiveNumber(item) {
+				return true
+			}
+		}
+
+	case map[any]any:
+		for _, item := range val {
+			if containsExpensiveNumber(item) {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 // guardedNumberEqual compares a [json.Number] against a non-Number value with
