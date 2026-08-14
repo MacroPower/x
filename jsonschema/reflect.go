@@ -845,14 +845,10 @@ const (
 func (g *generator) schemaForSlice(t reflect.Type, nullable bool) (*node, error) {
 	// Byte slices marshal to base64 strings in encoding/json. The element's kind
 	// (uint8) drives this, not the slice's exact type, so named byte-slice types
-	// (type Bytes []byte) and slices of named uint8 elements are base64 too.
-	// Mirror encoding/json's exception: an element implementing json.Marshaler or
-	// encoding.TextMarshaler is encoded through that method, not as base64.
-	if el := t.Elem(); el.Kind() == reflect.Uint8 {
-		pt := reflect.PointerTo(el)
-		if !pt.Implements(reflectkind.TypeJSONMarshaler) && !pt.Implements(reflectkind.TypeTextMarshaler) {
-			return g.byteSliceNode(), nil
-		}
+	// (type Bytes []byte) and slices of named uint8 elements are base64 too,
+	// with the marshaler-bearing-element exception the predicate carries.
+	if reflectkind.IsBase64ByteSlice(t) {
+		return g.byteSliceNode(), nil
 	}
 
 	// A slice is nil-able in Go, so it folds g.nullable into the node itself,

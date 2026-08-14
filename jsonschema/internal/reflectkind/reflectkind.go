@@ -85,6 +85,21 @@ func IsDirectTextMarshaler(t reflect.Type) bool {
 	return HasDirectMethod(t, "MarshalText")
 }
 
+// IsBase64ByteSlice reports whether a slice type marshals as one base64
+// string under [encoding/json]: its element kind is uint8 and the element
+// carries no [encoding/json.Marshaler] or [encoding.TextMarshaler] of its
+// own. Encoding/json encodes a marshaler-bearing element through its method,
+// which makes such a slice a real JSON array rather than a base64 string.
+func IsBase64ByteSlice(t reflect.Type) bool {
+	if t.Kind() != reflect.Slice || t.Elem().Kind() != reflect.Uint8 {
+		return false
+	}
+
+	pt := reflect.PointerTo(t.Elem())
+
+	return !pt.Implements(TypeJSONMarshaler) && !pt.Implements(TypeTextMarshaler)
+}
+
 // ImplementsJSONMarshaler reports whether the type or its pointer type
 // implements [encoding/json.Marshaler], directly or via promotion.
 func ImplementsJSONMarshaler(t reflect.Type) bool {

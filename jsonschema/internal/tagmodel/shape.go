@@ -9,6 +9,7 @@ import (
 
 	"go.jacobcolvin.com/x/jsonschema/internal/content"
 	"go.jacobcolvin.com/x/jsonschema/internal/numkind"
+	"go.jacobcolvin.com/x/jsonschema/internal/reflectkind"
 	"go.jacobcolvin.com/x/jsonschema/internal/typename"
 )
 
@@ -208,8 +209,11 @@ func classifyForm(t reflect.Type, base *jsonschema.Schema) Form {
 	str := schemaPermitsString(base)
 
 	// A byte slice never has per-element schemas: it is one base64 string when
-	// its schema says so, and otherwise a raw JSON value.
-	if t.Kind() == reflect.Slice && t.Elem().Kind() == reflect.Uint8 {
+	// its schema says so, and otherwise a raw JSON value. A marshaler-bearing
+	// uint8 element is exempt (the predicate mirrors encoding/json): such a
+	// slice marshals as a real JSON array with per-element schemas, so it
+	// classifies as any other slice below.
+	if reflectkind.IsBase64ByteSlice(t) {
 		if str {
 			return FormByteString
 		}
