@@ -58,6 +58,10 @@ type generator struct {
 	defs              []*defEntry
 	typeOverrideCache map[reflect.Type]typeOverrideResult
 	visiting          map[reflect.Type]bool
+	// ShadowScan tracks the composed embed types whose promoted names are
+	// being collected for shadow analysis, so a mutually-composed pair does
+	// not recurse through its own analysis forever.
+	shadowScan map[reflect.Type]bool
 	// RefAliasing tracks the types whose [TypeSchema.Ref] alias is being
 	// resolved, so an alias chain that reaches one of them again (a self-Ref, or
 	// a mutual A -> B -> A cycle) is reported instead of recursing forever.
@@ -125,6 +129,7 @@ func (g *generator) forRun(ctx context.Context) *generator {
 	run.typeOverrideCache = map[reflect.Type]typeOverrideResult{}
 	run.visiting = map[reflect.Type]bool{}
 	run.refAliasing = map[reflect.Type]bool{}
+	run.shadowScan = map[reflect.Type]bool{}
 
 	return &run
 }
@@ -1008,7 +1013,7 @@ func (g *generator) buildStructSchema(t reflect.Type) (*node, Nullability, error
 	// field order.
 	fields := g.collectStructFields(t)
 
-	var hasAllOf bool
+	var hasAllOf, hasShadowPartial bool
 
 	type pendingField struct {
 		node *node
@@ -1025,6 +1030,7 @@ func (g *generator) buildStructSchema(t reflect.Type) (*node, Nullability, error
 			}
 
 			hasAllOf = true
+			hasShadowPartial = hasShadowPartial || fields[idx].shadowPartial
 
 			continue
 		}
@@ -1049,10 +1055,20 @@ func (g *generator) buildStructSchema(t reflect.Type) (*node, Nullability, error
 	// Handle allOf + additionalProperties interaction. Decided here on embed
 	// presence and carried on the payload; render appends the embed branches.
 	if hasAllOf && !g.additionalProperties {
-		if g.profile.closeWithUnevaluated {
+		switch {
+		case hasShadowPartial:
+			// A partially shadowed composition can fail against the marshaled
+			// object while its unshadowed names still appear there; with the
+			// branch wrapped as anyOf[branch, {}], those names then carry no
+			// annotation, so a closed object would reject them. Leave the
+			// object open: the same accept-over-tighten tradeoff the wrap
+			// itself makes.
+			s.AdditionalProperties = nil
+		case g.profile.closeWithUnevaluated:
 			s.AdditionalProperties = nil
 			s.UnevaluatedProperties = &Schema{Not: &Schema{}}
-		} else {
+
+		default:
 			// Draft-07: omit additionalProperties when allOf is in use.
 			s.AdditionalProperties = nil
 		}
@@ -1089,6 +1105,17 @@ type structFieldInfo struct {
 	// pointer is nil, so the composed schema must not be unconditionally
 	// required. Regular fields fold this into omitempty instead.
 	optional bool
+	// Shadowed marks an allOf-composed embed at least one of whose promoted
+	// JSON names loses encoding/json's field resolution to a real field: the
+	// marshaled object carries the winner's value under that name (or drops
+	// the name on an ambiguity tie), so the composed schema's claim on it
+	// does not hold and the branch must not be unconditional.
+	shadowed bool
+	// ShadowPartial marks a shadowed composed embed that still promotes at
+	// least one unshadowed name. Only the (now conditional) branch evaluates
+	// that name, so the parent object must stay open or a failing branch
+	// would leave it unevaluated and rejected.
+	shadowPartial bool
 }
 
 // collectStructFields mimics encoding/json's field collection logic,
@@ -1398,7 +1425,81 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 		return slices.Compare(a.field.Index, b.field.Index)
 	})
 
+	g.markShadowedCompositions(result)
+
 	return result
+}
+
+// markShadowedCompositions flags each allOf-composed embed whose promoted
+// JSON names encoding/json resolves to a different real field. The collector
+// diverts a composed embed into the synthetic-key namespace, exempting it
+// from name resolution, but encoding/json still promotes its fields
+// normally: a shallower (or same-depth winning) real field shadows the
+// embed's field, so the marshaled object carries the winner's value under
+// that name while the composed branch would assert the embed's constraints
+// against it. Same-depth ties flag conservatively without re-running the tag
+// tie-break: the resulting anyOf wrap only accepts more, never less.
+func (g *generator) markShadowedCompositions(fields []structFieldInfo) {
+	winnerDepth := map[string]int{}
+
+	for i := range fields {
+		if !fields[i].composeViaAllOf {
+			winnerDepth[fields[i].jsonName] = len(fields[i].field.Index) - 1
+		}
+	}
+
+	if len(winnerDepth) == 0 {
+		return
+	}
+
+	for i := range fields {
+		fi := &fields[i]
+		if !fi.composeViaAllOf {
+			continue
+		}
+
+		ft := fi.field.Type
+		if ft.Kind() == reflect.Pointer {
+			ft = ft.Elem()
+		}
+
+		// A mutually-composed pair would recurse through its own analysis;
+		// skip the inner occurrence, leaving its branch unconditional as
+		// before.
+		if g.shadowScan[ft] {
+			continue
+		}
+
+		g.shadowScan[ft] = true
+		promoted := g.collectStructFields(ft)
+		delete(g.shadowScan, ft)
+
+		embedDepth := len(fi.field.Index) - 1
+
+		var shadowedAny, unshadowedAny bool
+
+		for j := range promoted {
+			p := &promoted[j]
+			if p.composeViaAllOf {
+				// A nested composition's names are opaque to this analysis;
+				// assume it contributes to the marshaled object.
+				unshadowedAny = true
+
+				continue
+			}
+
+			// The promoted name sits at the embed's depth plus its own depth
+			// within the embed type; a winner at or above that depth shadows it.
+			if dr, ok := winnerDepth[p.jsonName]; ok && dr <= embedDepth+len(p.field.Index) {
+				shadowedAny = true
+			} else {
+				unshadowedAny = true
+			}
+		}
+
+		fi.shadowed = shadowedAny
+		fi.shadowPartial = shadowedAny && unshadowedAny
+	}
 }
 
 // needsAllOfComposition reports whether an embedded struct type should be
@@ -1657,6 +1758,12 @@ func (g *generator) wrapRefForDraft7(s *Schema) {
 // a nil embed satisfies the empty alternative. The empty branch also admits a
 // partial embed serialization under Draft-07 (which lacks unevaluated
 // semantics); accepting those is the price of not rejecting valid documents.
+//
+// A shadowed embed (fi.shadowed) takes the same wrap for the same reason: a
+// real field wins one of the embed's promoted names, so the marshaled object
+// carries the winner's value where the branch asserts the embed's
+// constraints, and an unconditional branch would reject the type's own
+// marshaled JSON.
 func (g *generator) processAllOfField(fi structFieldInfo, parent *node) error {
 	ft := fi.field.Type
 	if ft.Kind() == reflect.Pointer {
@@ -1674,7 +1781,7 @@ func (g *generator) processAllOfField(fi structFieldInfo, parent *node) error {
 	// optionality rides on embedNode.optional, not the node's null bit).
 	branch.nullable = false
 
-	parent.embeds = append(parent.embeds, embedNode{branch: branch, optional: fi.optional})
+	parent.embeds = append(parent.embeds, embedNode{branch: branch, optional: fi.optional || fi.shadowed})
 
 	return nil
 }
