@@ -70,6 +70,60 @@ func TestEqualWithRatHandBuiltMapShapes(t *testing.T) {
 	}
 }
 
+// TestEqualWithRatHandBuiltGoIntegers pins the numeric branch's symmetry: a
+// hand-built operand carries Go integer kinds on both sides (the schema-side
+// converter has always accepted them), so numerically equal integers nested in
+// modeled containers must compare equal rather than failing on the instance
+// side's conversion.
+func TestEqualWithRatHandBuiltGoIntegers(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		schemaVal any
+		instance  any
+		want      bool
+	}{
+		"go ints nested in arrays are equal": {
+			schemaVal: []any{1, 2},
+			instance:  []any{1, 2},
+			want:      true,
+		},
+		"go int64 nested in objects are equal": {
+			schemaVal: map[string]any{"x": int64(5)},
+			instance:  map[string]any{"x": int64(5)},
+			want:      true,
+		},
+		"go int against decoded float64 is equal": {
+			schemaVal: []any{1},
+			instance:  []any{1.0},
+			want:      true,
+		},
+		"go uint against json.Number is equal": {
+			schemaVal: map[string]any{"x": uint(7)},
+			instance:  map[string]any{"x": json.Number("7")},
+			want:      true,
+		},
+		"unequal go ints stay unequal": {
+			schemaVal: []any{1},
+			instance:  []any{2},
+			want:      false,
+		},
+		"bool never equals a go int": {
+			schemaVal: []any{1},
+			instance:  []any{true},
+			want:      false,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, jsonequal.EqualWithRat(tc.schemaVal, nil, tc.instance))
+		})
+	}
+}
+
 // TestEqualWithRatHandBuiltExpensiveNumbers pins the screen at the upstream
 // boundary: a hand-built (typed) container beside decoded JSON delegates to
 // upstream jsonschema.Equal, whose json.Number expansion is uncapped and

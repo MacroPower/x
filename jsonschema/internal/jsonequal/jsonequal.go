@@ -107,9 +107,13 @@ func equalSchemaInstance(schemaVal, instance any) bool {
 
 // equalRatInstance reports whether a schema value, already expanded to the
 // rational sr, equals the numeric instance. It mirrors the numeric branch of
-// [equalSchemaInstance]: a non-numeric instance never matches.
+// [equalSchemaInstance]: a non-numeric instance never matches. The instance
+// converts through [numrat.SchemaNumberRat], the same converter the schema
+// side uses, keeping the comparison symmetric: a hand-built operand can carry
+// Go integer kinds on either side (a decoded instance is always float64 or
+// [json.Number], on which the two converters agree).
 func equalRatInstance(sr *big.Rat, instance any) bool {
-	ir, ok := numrat.ToBigRat(instance)
+	ir, ok := numrat.SchemaNumberRat(instance)
 	if !ok {
 		return false
 	}
