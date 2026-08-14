@@ -112,7 +112,13 @@ func (set *Set) ResolveBounds(mode ResolveMode) Resolved {
 
 	switch mode {
 	case ResolveDropAll:
-		r.Numeric = Interval{} // a const, or a pinned element, subsumes every numeric bound
+		// A const, or a pinned element, subsumes every numeric bound,
+		// multipleOf included: against a single pinned value a divisor is
+		// either redundant or contradictory, never narrowing. An enum keeps
+		// it (ResolveDropKind below), since a divisor does narrow a set.
+		r.Numeric = Interval{}
+		r.MultipleOf = nil
+
 	case ResolveDropKind:
 		r.Numeric = set.numeric.resolve(resolveDropKind) // an enum keeps only authored bounds
 	default:

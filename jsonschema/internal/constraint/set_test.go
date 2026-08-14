@@ -230,17 +230,34 @@ func TestSetSizeRendering(t *testing.T) {
 	})
 }
 
-func TestSetMultipleOfSurvivesDropAll(t *testing.T) {
+func TestSetMultipleOfSubsumption(t *testing.T) {
 	t.Parallel()
 
-	// The const/enum subsumption never touches multipleOf: a divisibility rule
-	// stays meaningful under a pinned value.
-	set := constraint.New()
-	set.SetMultipleOf(4)
+	t.Run("const subsumes multipleOf", func(t *testing.T) {
+		t.Parallel()
 
-	s := renderBounds(set, constraint.ResolveDropAll)
-	require.NotNil(t, s.MultipleOf)
-	assert.InDelta(t, 4, *s.MultipleOf, 0)
+		// A pinned value subsumes a divisibility rule like any other numeric
+		// bound: against a single value the divisor is either redundant or
+		// contradictory, never narrowing.
+		set := constraint.New()
+		set.SetMultipleOf(4)
+
+		s := renderBounds(set, constraint.ResolveDropAll)
+		assert.Nil(t, s.MultipleOf)
+	})
+
+	t.Run("enum keeps multipleOf", func(t *testing.T) {
+		t.Parallel()
+
+		// An enum only restricts the value to a set, so a divisor narrows it
+		// further and is kept.
+		set := constraint.New()
+		set.SetMultipleOf(4)
+
+		s := renderBounds(set, constraint.ResolveDropKind)
+		require.NotNil(t, s.MultipleOf)
+		assert.InDelta(t, 4, *s.MultipleOf, 0)
+	})
 }
 
 func TestSetResolveOrderIndependent(t *testing.T) {

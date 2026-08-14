@@ -2816,6 +2816,60 @@ func TestGenerateFor_NullablePointerConstDropsTypeBounds(t *testing.T) {
 		"a non-const value is rejected")
 }
 
+func TestGenerateFor_ConstSubsumesMultipleOf(t *testing.T) {
+	t.Parallel()
+
+	// A const subsumes multipleOf like any other numeric bound: against a
+	// single pinned value a divisor is either redundant or contradictory,
+	// never narrowing. An enum only restricts the value to a set, so there
+	// the divisor narrows further and is kept.
+	t.Run("const drops multipleOf", func(t *testing.T) {
+		t.Parallel()
+
+		type Container struct {
+			F int8 `json:"f" jsonschema:"const=5,multipleOf=2"`
+		}
+
+		s, err := jsonschema.GenerateFor[Container](t.Context())
+		require.NoError(t, err)
+
+		field := s.Properties["f"]
+		require.NotNil(t, field)
+		assert.Nil(t, field.MultipleOf, "the const subsumes the divisor")
+
+		validator, err := jsonschema.Compile(t.Context(), s)
+		require.NoError(t, err)
+
+		assert.NoError(t, validator.ValidateJSON(t.Context(), []byte(`{"f": 5}`)),
+			"the const value must validate even though it is not a multiple of the dropped divisor")
+		assert.Error(t, validator.ValidateJSON(t.Context(), []byte(`{"f": 6}`)),
+			"a non-const value is rejected")
+	})
+
+	t.Run("enum keeps multipleOf", func(t *testing.T) {
+		t.Parallel()
+
+		type Container struct {
+			F int8 `json:"f" jsonschema:"enum=4|6|9,multipleOf=2"`
+		}
+
+		s, err := jsonschema.GenerateFor[Container](t.Context())
+		require.NoError(t, err)
+
+		field := s.Properties["f"]
+		require.NotNil(t, field)
+		require.NotNil(t, field.MultipleOf, "the divisor narrows the enum and stays")
+
+		validator, err := jsonschema.Compile(t.Context(), s)
+		require.NoError(t, err)
+
+		assert.NoError(t, validator.ValidateJSON(t.Context(), []byte(`{"f": 6}`)),
+			"an even enum member is admitted")
+		assert.Error(t, validator.ValidateJSON(t.Context(), []byte(`{"f": 9}`)),
+			"an odd enum member is excluded by the kept divisor")
+	})
+}
+
 // BoundedRefProvider is a numeric provider type, so it is extracted to $defs
 // and referenced via $ref.
 type BoundedRefProvider int
