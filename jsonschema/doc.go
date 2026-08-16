@@ -1162,7 +1162,10 @@
 // [ErrItemsArrayUnderDraft2020]), rather than inlining the document into a
 // malformed output schema. The fetched document follows the root document's
 // draft, so a Draft-7 array-form items remote inlined under a Draft-7 run is
-// left intact.
+// left intact. A JSON-pointer fallback target (a schema carried inside an
+// unknown keyword, in the root document or a fetched one) is vetted the same
+// way at materialization, so an ill-formed target cannot be spliced into the
+// output either.
 //
 // [WithRefFallback] sets a per-reference failure policy (a
 // [RefFallback]) consulted when expanding a reference fails for any of those

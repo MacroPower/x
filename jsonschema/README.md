@@ -1345,6 +1345,9 @@ Failure modes:
   `ErrItemsArrayUnderDraft2020`), rather than being inlined into a malformed
   output schema. The fetched document follows the root document's draft, so a
   Draft-07 array-form `items` remote inlined under a Draft-07 run is left intact.
+  A JSON-pointer fallback target (a schema carried inside an unknown keyword, in
+  the root document or a fetched one) is vetted the same way at materialization,
+  so an ill-formed target cannot be spliced into the output either.
 
 `WithRefFallback` sets a per-reference failure policy (a `RefFallback`,
 with `RefFallbackFunc` adapting a bare function) consulted when

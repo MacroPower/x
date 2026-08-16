@@ -209,9 +209,10 @@ func (s *Session) LookupDynamicAnchor(key string) (*jsonschema.Schema, bool) {
 // JSON-pointer fallback materializes, before it is registered. A non-nil error
 // rejects the target: the resolution reports the error instead of a target, so
 // an ill-formed schema reached only through the fallback cannot silently
-// mis-validate. Per-run sessions install the validator's vetting policy here;
-// the compile-time gate's session leaves it unset and the compiler vets its
-// [Session.FallbackTargets] in one shared pass instead.
+// mis-validate or inline. The validator's per-run sessions and the inliner's
+// session install their vetting policy here; the compile-time gate's session
+// leaves it unset and the compiler vets its [Session.FallbackTargets] in one
+// shared pass instead.
 func (s *Session) SetFallbackVet(vet func(sc *jsonschema.Schema, locator string) error) {
 	s.fallbackVet = vet
 }

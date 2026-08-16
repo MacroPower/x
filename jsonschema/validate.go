@@ -520,7 +520,7 @@ func (v *validator) forInstance(ctx context.Context) *validator {
 	// compile-time counterpart at all), so the same structural policy runs at
 	// materialization; a violation surfaces through the referencing ref as an
 	// error wrapping [ErrRefResolve], matching the late-fetched-document vet.
-	rv.refSession.SetFallbackVet(rv.fallbackVet())
+	rv.refSession.SetFallbackVet(newFallbackVet(rv.profile))
 
 	// The fetch reads the run's context from the ctx field set above, so no
 	// parameter threads through the deep resolution machinery.
@@ -1071,21 +1071,24 @@ func (v *validator) checkFetchedDocument(s *Schema, baseURI string) error {
 	return newDocumentVetter(v.profile).vet(s, baseURI+"#")
 }
 
-// fallbackVet returns the structural vet a per-run session applies to each
-// JSON-pointer fallback target it materializes, giving those targets parity
-// with Compile's fallback vet loop: a run re-materializes targets as fresh
-// objects (and a target inside a late-fetched document has no compile-time
-// counterpart at all), so the check must run again here. One lazily-built
-// vetter is shared across the run's targets, mirroring the compile loop's
-// shared visited sets, and a violation is wrapped in [ErrRefResolve] so it
-// surfaces through the referencing ref exactly like a late-fetched-document
-// violation.
-func (v *validator) fallbackVet() func(sc *Schema, locator string) error {
+// newFallbackVet returns the structural vet a [refresolve.Session] applies to
+// each JSON-pointer fallback target it materializes: a target carved out of
+// raw JSON in an unknown keyword never passed through a document-level vet, so
+// the check must run at materialization. The validator's per-run sessions
+// install it for parity with Compile's fallback vet loop (a run
+// re-materializes targets as fresh objects, and a target inside a late-fetched
+// document has no compile-time counterpart at all), and the inliner's session
+// installs it so a target spliced into the output is held to the same policy a
+// fetched document is. One lazily-built vetter is shared across a session's
+// targets, mirroring the compile loop's shared visited sets, and a violation
+// is wrapped in [ErrRefResolve] so it surfaces through the referencing ref
+// exactly like a malformed-document violation.
+func newFallbackVet(profile draftProfile) func(sc *Schema, locator string) error {
 	var dv *documentVetter
 
 	return func(sc *Schema, locator string) error {
 		if dv == nil {
-			dv = newDocumentVetter(v.profile)
+			dv = newDocumentVetter(profile)
 		}
 
 		err := dv.vet(sc, locator)

@@ -396,6 +396,14 @@ func (in *inliner) run(s *Schema) (*Schema, error) {
 
 	in.session = reg.NewSession()
 
+	// A JSON-pointer fallback target (a sub-schema carried as raw JSON in an
+	// unknown keyword) is materialized fresh by the session and spliced into
+	// the output, so it is vetted at materialization under the same
+	// [documentVetter] policy a fetched document gets in [inliner.fetchDoc];
+	// without this an ill-formed target would inline into a malformed output
+	// schema this package's own [Compile] rejects.
+	in.session.SetFallbackVet(newFallbackVet(in.profile))
+
 	in.record(pristine, "", in.session.SchemaBase(pristine))
 
 	// The context reaches the resolver through the ctx field set above:
@@ -864,7 +872,7 @@ func (in *inliner) resolveTarget(node *Schema, ref string) (*Schema, string, str
 	res := in.session.ResolveRef(node, ref, in.fetchDoc)
 	if res.Target == nil {
 		if res.Err != nil {
-			//nolint:wrapcheck // fetchDoc already wraps its error with ErrRefResolve.
+			//nolint:wrapcheck // fetchDoc and the session's fallback vet already wrap their errors with ErrRefResolve.
 			return nil, "", "", res.Err
 		}
 
