@@ -6,6 +6,7 @@ import (
 	"testing"
 	"unsafe"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/stringtest"
@@ -323,5 +324,35 @@ func TestFormClassificationTotal(t *testing.T) {
 
 		assert.NotEqual(t, tagmodel.FormUnset, tagmodel.ShapeOf(typ, nil).Form,
 			"kind %s classifies to a form", kind)
+	}
+}
+
+// TestStringKindDeclaredBasePromotion pins that a string Go kind under a
+// verbatim or overridden schema declaring a number or boolean type classifies
+// as that form -- the instance is a number or boolean, so scalar literals must
+// parse in the instance's domain rather than as Go strings. Before the boolean
+// row was honored, a const tag on a boolean-declared string type emitted the
+// unsatisfiable {"type":"boolean","const":"true"}.
+func TestStringKindDeclaredBasePromotion(t *testing.T) {
+	t.Parallel()
+
+	str := reflect.TypeFor[string]()
+
+	tests := map[string]struct {
+		base string
+		want tagmodel.Form
+	}{
+		"number base":  {base: "number", want: tagmodel.FormNumber},
+		"boolean base": {base: "boolean", want: tagmodel.FormBool},
+		"string base":  {base: "string", want: tagmodel.FormString},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			base := &jsonschema.Schema{Type: tc.base}
+			assert.Equal(t, tc.want, tagmodel.ShapeOf(str, base).Form)
+		})
 	}
 }

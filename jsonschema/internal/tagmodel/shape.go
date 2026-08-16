@@ -266,11 +266,11 @@ func classifyForm(t reflect.Type, base *jsonschema.Schema, quoted bool) Form {
 
 	switch t.Kind() {
 	case reflect.String:
-		// A string kind under a number-typed schema is a verbatim or overridden
-		// payload: the instance is a number, so numeric keywords are the ones
-		// that constrain it.
-		if declaredForm(base) == FormNumber {
-			return FormNumber
+		// A string kind under a number- or boolean-typed schema is a verbatim
+		// or overridden payload: the instance is a number or boolean, so that
+		// form's keywords are the ones that constrain it.
+		if f := declaredForm(base); f == FormNumber || f == FormBool {
+			return f
 		}
 
 		// The quoted flag is the only thing that distinguishes a
