@@ -34,3 +34,30 @@ func TestGenerateFor_TypeOverrideDropsOrphanedDefUnderCollision(t *testing.T) {
 	assert.NotContains(t, s.Defs, "alpha_Widget",
 		"a def orphaned by a type= override must be dropped even when its base name collides with a live def")
 }
+
+// TestGenerateFor_RootInliningUnderBaseNameCollision pins that the
+// reachability walk never string-resolves a ref node's provisional token.
+// Each field ref's payload is aliased into its parent's Properties, so the
+// scan can reach it through the parent before the node walk claims it; the
+// provisional "#/$defs/Knot" on B's ref would then resolve to the
+// first-registered claimant -- the orphaned alpha.Knot def, whose body's
+// back-reference to KnotRoot would falsely report the root's def as
+// referenced elsewhere and suppress root inlining.
+func TestGenerateFor_RootInliningUnderBaseNameCollision(t *testing.T) {
+	t.Parallel()
+
+	s, err := jsonschema.GenerateFor[alpha.KnotRoot](t.Context())
+	require.NoError(t, err)
+
+	assert.Empty(t, s.Ref,
+		"the root's def is referenced from nowhere once alpha.Knot is orphaned, so the root must inline")
+	assert.Equal(t, "object", s.Type)
+	require.Contains(t, s.Properties, "b")
+	assert.Equal(t, "#/$defs/beta_Knot", s.Properties["b"].Ref)
+
+	require.Contains(t, s.Defs, "beta_Knot")
+	assert.NotContains(t, s.Defs, "alpha_Knot",
+		"the orphaned colliding def must be dropped")
+	assert.NotContains(t, s.Defs, "KnotRoot",
+		"an inlined root leaves no def behind")
+}

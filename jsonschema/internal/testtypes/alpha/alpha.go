@@ -8,6 +8,7 @@ import (
 	"context"
 
 	"go.jacobcolvin.com/x/jsonschema"
+	"go.jacobcolvin.com/x/jsonschema/internal/testtypes/beta"
 )
 
 // Box is a documented generic type, exercising doc-comment extraction for an
@@ -77,4 +78,21 @@ type Widget struct {
 	// Size documents the widget size and carries no jsonschema description,
 	// so the extracted comment is used.
 	Size int `json:"size"`
+}
+
+// Knot is a test type whose name intentionally collides with beta.Knot and
+// whose body references [KnotRoot], so a def orphaned by a type= override
+// still carries a back-reference to the root's def in its body.
+type Knot struct {
+	// R is the back-reference to the root type.
+	R *KnotRoot `json:"r,omitempty"`
+}
+
+// KnotRoot is the root type for the reachability false-suppression test: its
+// A field registers alpha.Knot first and then orphans it via a type=
+// override, while B references beta.Knot, whose provisional ref token
+// ("#/$defs/Knot") collides with the orphaned def's base name.
+type KnotRoot struct {
+	A Knot      `json:"a" jsonschema:"type=string"`
+	B beta.Knot `json:"b"`
 }

@@ -315,28 +315,34 @@ func (g *generator) walkReachable(
 	targets := g.payloadRefTargets()
 	scanned := map[*Schema]bool{}
 
+	// A kindRef node's payload is aliased into its parent composite's payload
+	// (a field ref's payload sits in the parent's Properties), so the plain
+	// scan can reach one through the parent before walkNodes visits the ref
+	// node itself. The skip must therefore recognize a ref payload by
+	// identity, wherever the scan reaches it: collect every kindRef payload
+	// up front, across the root graph and every def body, since a def is
+	// often discovered only mid-walk through a string hit.
+	refPayloads := map[*Schema]bool{}
+	collectSeen := map[*defEntry]bool{}
+	markRefPayloads := func(n *node) {
+		if n.kind == kindRef {
+			refPayloads[n.payload] = true
+		}
+	}
+
+	walkNodes(root, collectSeen, markRefPayloads)
+
+	for _, e := range g.defs {
+		if !collectSeen[e] {
+			collectSeen[e] = true
+			walkNodes(e.body, collectSeen, markRefPayloads)
+		}
+	}
+
 	var scanPayload func(s *Schema)
 
 	visitAndScan := func(n *node) {
 		visit(n)
-
-		if n.kind == kindRef {
-			// A kindRef payload's own Ref is the node-backed edge walkNodes
-			// already follows via n.def, and it carries the provisional
-			// (pre-disambiguation) token: string-resolving it under a base-name
-			// collision would map to the wrong def. Skip it, but still scan
-			// any hook-grafted siblings on the payload.
-			if !scanned[n.payload] {
-				scanned[n.payload] = true
-
-				for _, child := range schemafield.Children(n.payload) {
-					scanPayload(child)
-				}
-			}
-
-			return
-		}
-
 		scanPayload(n.payload)
 	}
 
@@ -346,6 +352,23 @@ func (g *generator) walkReachable(
 		}
 
 		scanned[s] = true
+
+		scanChildren := func() {
+			for _, child := range schemafield.Children(s) {
+				scanPayload(child)
+			}
+		}
+
+		// A kindRef payload's own Ref is the node-backed edge walkNodes
+		// already follows via n.def, and it carries the provisional
+		// (pre-disambiguation) token: string-resolving it under a base-name
+		// collision would map to the wrong def. Skip it, but still scan any
+		// hook-grafted siblings on the payload.
+		if refPayloads[s] {
+			scanChildren()
+
+			return
+		}
 
 		if e, ok := targets[s.Ref]; ok {
 			if onPayloadRef != nil {
@@ -358,9 +381,7 @@ func (g *generator) walkReachable(
 			}
 		}
 
-		for _, child := range schemafield.Children(s) {
-			scanPayload(child)
-		}
+		scanChildren()
 	}
 
 	walkNodes(root, seen, visitAndScan)

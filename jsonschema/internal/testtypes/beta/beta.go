@@ -7,3 +7,11 @@ type Widget struct {
 	// Color is an arbitrary field so the colliding Widget has content.
 	Color string `json:"color"`
 }
+
+// Knot is a test type whose name intentionally collides with alpha.Knot, for
+// the reachability test that pins provisional ref-token resolution under a
+// base-name collision.
+type Knot struct {
+	// N is an arbitrary field so the colliding Knot has content.
+	N int `json:"n"`
+}
