@@ -1780,12 +1780,16 @@ func validateIDNEmailDomain(d string) error {
 }
 
 // isIDNAtext reports whether r may appear in an unquoted IDN email local part
-// (RFC 6531). It widens RFC 5321 atext with non-ASCII Unicode code points,
-// while still rejecting ASCII characters that atext disallows (such as
-// whitespace, control characters, and specials like '"', '(', '\\', and ',').
+// (RFC 6531). It widens RFC 5321 atext with UTF8-non-ascii (RFC 6532 §3.1),
+// which admits every non-ASCII code point -- including non-ASCII whitespace
+// and C1 controls, with no carve-out -- while still rejecting ASCII characters
+// that atext disallows (such as whitespace, control characters, and specials
+// like '"', '(', '\\', and ','). Sequence well-formedness is the dot-atom
+// scanner's job, so a decoded rune here is already from a well-formed
+// sequence; the quoted-local scan applies the same widening.
 func isIDNAtext(r rune) bool {
 	if r > unicode.MaxASCII {
-		return !unicode.IsControl(r) && !unicode.IsSpace(r)
+		return true
 	}
 
 	return isAtext(r)

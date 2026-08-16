@@ -62,3 +62,68 @@ func TestIDNEmailDotAtomUTF8WellFormed(t *testing.T) {
 		})
 	}
 }
+
+// TestIDNEmailDotAtomNonASCIIWidening covers the breadth of the RFC 6531 atext
+// widening in the unquoted local part: UTF8-non-ascii (RFC 6532 §3.1) admits
+// every non-ASCII code point with no whitespace or control carve-out, so
+// NO-BREAK SPACE and C1 controls are valid there -- matching the quoted-local
+// scan, which applies the same widening -- while the ASCII atext exclusions
+// (space, tab, specials) still hold.
+func TestIDNEmailDotAtomNonASCIIWidening(t *testing.T) {
+	t.Parallel()
+
+	validate := validator(t, "idn-email")
+
+	tests := map[string]struct {
+		instance string
+		want     bool
+	}{
+		"NO-BREAK SPACE in unquoted local part is valid": {
+			instance: "a\u00a0b@example.com",
+			want:     true,
+		},
+		"NEXT LINE (C1 control) in unquoted local part is valid": {
+			instance: "a\u0085b@example.com",
+			want:     true,
+		},
+		"C1 control U+009F in unquoted local part is valid": {
+			instance: "a\u009fb@example.com",
+			want:     true,
+		},
+		"IDEOGRAPHIC SPACE in unquoted local part is valid": {
+			instance: "a\u3000b@example.com",
+			want:     true,
+		},
+		"quoted spelling of NO-BREAK SPACE is valid": {
+			instance: "\"a\u00a0b\"@example.com",
+			want:     true,
+		},
+		"ASCII space in unquoted local part is invalid": {
+			instance: "a b@example.com",
+			want:     false,
+		},
+		"ASCII tab in unquoted local part is invalid": {
+			instance: "a\tb@example.com",
+			want:     false,
+		},
+		"ASCII comma in unquoted local part is invalid": {
+			instance: "a,b@example.com",
+			want:     false,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := validate(tc.instance)
+			if tc.want {
+				require.NoError(t, err,
+					"RFC 6531-valid local part should pass the idn-email validator")
+			} else {
+				require.Error(t, err,
+					"RFC 6531-invalid local part should be rejected by the idn-email validator")
+			}
+		})
+	}
+}
