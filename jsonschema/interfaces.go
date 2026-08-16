@@ -1,6 +1,7 @@
 package jsonschema
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -807,7 +808,35 @@ func (fc FieldContext) targetOf(shape tagmodel.Shape) tagmodel.Target {
 		}
 	}
 
-	return tagmodel.NewTarget(shape, fc.Canvas, fc.Base, elems)
+	target := tagmodel.NewTarget(shape, fc.Canvas, fc.Base, elems)
+
+	// A $defs-extracted type declares its keywords on the definition, not on
+	// the provisional $ref payload the base holds, so the model reads the
+	// type-declared values through this seam. The read is deferred because a
+	// self-referential type's definition body may not be filled yet when the
+	// target is built.
+	if def := fcNodeDef(fc.node); def != nil {
+		target = target.WithRefBase(func() *Schema {
+			if def.body == nil {
+				return nil
+			}
+
+			return def.body.payload
+		})
+	}
+
+	return target
+}
+
+// fcNodeDef returns the definition entry a field node's payload defers to, or
+// nil for a node that is not a reference (or a caller-built context with no
+// backing node).
+func fcNodeDef(n *node) *defEntry {
+	if n == nil {
+		return nil
+	}
+
+	return n.def
 }
 
 // effectiveBase returns fc.Base, or an empty schema when a caller built the
@@ -845,12 +874,18 @@ func (fc FieldContext) effectiveCanvas() *Schema {
 // The accessors tolerate a caller-built context missing Canvas or Base: a nil
 // side reads as unauthored (empty), so a hand-built context (an interpreter
 // unit test, for example) never panics here.
+//
+// A $defs-extracted type declares its keywords on the definition rather than
+// on the provisional $ref payload the Base holds, so the accessors read
+// through the reference: a format declared by the definition is in force on
+// the field exactly as an inline one is, and the first-wins write gate sees
+// the same value these report.
 func (fc FieldContext) EffectiveFormat() string {
 	if f := fc.effectiveCanvas().Format; f != "" {
 		return f
 	}
 
-	return fc.effectiveBase().Format
+	return cmp.Or(fc.effectiveBase().Format, fc.refBase().Format)
 }
 
 // EffectivePattern reports the effective pattern keyword.
@@ -860,7 +895,7 @@ func (fc FieldContext) EffectivePattern() string {
 		return p
 	}
 
-	return fc.effectiveBase().Pattern
+	return cmp.Or(fc.effectiveBase().Pattern, fc.refBase().Pattern)
 }
 
 // EffectiveContentEncoding reports the effective contentEncoding keyword.
@@ -870,7 +905,7 @@ func (fc FieldContext) EffectiveContentEncoding() string {
 		return e
 	}
 
-	return fc.effectiveBase().ContentEncoding
+	return cmp.Or(fc.effectiveBase().ContentEncoding, fc.refBase().ContentEncoding)
 }
 
 // EffectiveContentMediaType reports the effective contentMediaType keyword.
@@ -880,7 +915,19 @@ func (fc FieldContext) EffectiveContentMediaType() string {
 		return m
 	}
 
-	return fc.effectiveBase().ContentMediaType
+	return cmp.Or(fc.effectiveBase().ContentMediaType, fc.refBase().ContentMediaType)
+}
+
+// refBase returns the schema of the definition the field's payload defers to,
+// or an empty schema for a non-reference field (or a caller-built context),
+// so the string Effective accessors and the first-wins write gate both see a
+// keyword the $defs-extracted type declares outright.
+func (fc FieldContext) refBase() *Schema {
+	if def := fcNodeDef(fc.node); def != nil && def.body != nil && def.body.payload != nil {
+		return def.body.payload
+	}
+
+	return &Schema{}
 }
 
 // elementType returns the element (or map value) Go type of t, dereferencing a

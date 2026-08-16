@@ -1,6 +1,7 @@
 package tagmodel
 
 import (
+	"cmp"
 	"fmt"
 	"reflect"
 	"slices"
@@ -351,20 +352,37 @@ func applyStringKeyword(t Target, r Rule, pol Policy) error {
 }
 
 // stringKeywordSlots returns the canvas slot a string keyword writes and the
-// value the type already declares for it.
+// value the type already declares for it. A $defs-extracted type declares its
+// keywords on the definition rather than on the provisional $ref payload, so
+// the type value reads through the target's refBase seam too: without it a
+// first-wins interpreter could not see the definition's format and would
+// conjoin its inferred one as a $ref sibling.
 func stringKeywordSlots(t Target, op Op) (*string, string) {
-	base := baseOf(t)
+	base, ref := baseOf(t), refBaseOf(t)
 
 	switch op {
 	case OpFormat:
-		return &t.Canvas.Format, base.Format
+		return &t.Canvas.Format, cmp.Or(base.Format, ref.Format)
 	case OpPattern:
-		return &t.Canvas.Pattern, base.Pattern
+		return &t.Canvas.Pattern, cmp.Or(base.Pattern, ref.Pattern)
 	case OpContentEncoding:
-		return &t.Canvas.ContentEncoding, base.ContentEncoding
+		return &t.Canvas.ContentEncoding, cmp.Or(base.ContentEncoding, ref.ContentEncoding)
 	default:
-		return &t.Canvas.ContentMediaType, base.ContentMediaType
+		return &t.Canvas.ContentMediaType, cmp.Or(base.ContentMediaType, ref.ContentMediaType)
 	}
+}
+
+// refBaseOf returns the schema of the definition the target's base defers to,
+// or an empty one when the base is not a reference (or the seam was not
+// supplied), so the effective-value reads never dereference nil.
+func refBaseOf(t Target) *jsonschema.Schema {
+	if t.refBase != nil {
+		if s := t.refBase(); s != nil {
+			return s
+		}
+	}
+
+	return &jsonschema.Schema{}
 }
 
 // nonZeroFloor is the non-zero assertion on a shape whose emptiness is a size:
