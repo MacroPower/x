@@ -3730,7 +3730,7 @@ func evalIfThenElse(ctx evalContext) []*ValidationError {
 			thenErrs := v.validate(schema.Then, instance, instancePath, schemaPath.kw(KeywordThen), thenAnn)
 			if len(thenErrs) > 0 {
 				errs = append(errs, wrapError(instancePath, schemaPath, KeywordThen,
-					"if condition was true but then validation failed", thenErrs))
+					"if condition was true but did not validate against then subschema", thenErrs))
 			} else {
 				ann.Merge(thenAnn)
 			}
@@ -3740,7 +3740,7 @@ func evalIfThenElse(ctx evalContext) []*ValidationError {
 		elseErrs := v.validate(schema.Else, instance, instancePath, schemaPath.kw(KeywordElse), elseAnn)
 		if len(elseErrs) > 0 {
 			errs = append(errs, wrapError(instancePath, schemaPath, KeywordElse,
-				"if condition was false but else validation failed", elseErrs))
+				"if condition was false but did not validate against else subschema", elseErrs))
 		} else {
 			ann.Merge(elseAnn)
 		}
