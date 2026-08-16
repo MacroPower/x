@@ -139,6 +139,7 @@ func init() {
 			keywords: []string{KeywordDependentSchemas},
 			vocab:    vocabApplicator,
 			phase:    phaseAssert,
+			compile:  dependentSchemasCompile,
 			eval:     evalDependentSchemas,
 		},
 		{
@@ -153,6 +154,7 @@ func init() {
 			keywords: []string{KeywordDependentRequired},
 			vocab:    vocabValidation,
 			phase:    phaseAssert,
+			compile:  dependentRequiredCompile,
 			eval:     evalDependentRequired,
 		},
 		{
@@ -160,6 +162,7 @@ func init() {
 			keywords: []string{KeywordDependencies},
 			vocab:    vocabCore,
 			phase:    phaseAssert,
+			compile:  legacyDependenciesCompile,
 			eval:     evalLegacyDependencies,
 		},
 		{

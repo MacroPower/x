@@ -341,6 +341,7 @@ type validator struct {
 	sortedPropertyKeys [][]string                   // schema.Properties keys, sorted (see numericBounds)
 	sortedPatternKeys  [][]string                   // schema.PatternProperties keys, sorted (see numericBounds)
 	itemsPlans         []*itemsPlan                 // normalized array item keywords (see numericBounds)
+	depKeys            []*dependencyKeys            // dependency trigger keys, sorted (see numericBounds)
 
 	// The WithDraft override; nil leaves the draft to $schema detection.
 	draftOverride *Draft
@@ -658,6 +659,7 @@ func (v *validator) sizeCaches(n int) {
 	v.sortedPropertyKeys = growSlice(v.sortedPropertyKeys, n)
 	v.sortedPatternKeys = growSlice(v.sortedPatternKeys, n)
 	v.itemsPlans = growSlice(v.itemsPlans, n)
+	v.depKeys = growSlice(v.depKeys, n)
 }
 
 // growSlice returns s extended to length n with zero-value elements, or s
@@ -744,6 +746,75 @@ func objectApplicatorsCompile(v *validator, id int, s *Schema) {
 		v.patternProps[id] = compiled
 		v.sortedPatternKeys[id] = slices.Sorted(maps.Keys(s.PatternProperties))
 	}
+}
+
+// dependencyKeys carries a node's dependency trigger keys in sorted order,
+// one slice per keyword form. The key sets are fixed per schema, so the sorts
+// happen once at Compile time instead of on every object instance evaluation,
+// the same hoist [objectApplicatorsCompile] gives properties and
+// patternProperties. A nil slice means the node sets no keys for that form.
+type dependencyKeys struct {
+	dependentSchemas  []string
+	dependentRequired []string
+	legacySchemas     []string
+	legacyStrings     []string
+}
+
+// depKeysAt returns the node's dependencyKeys cache entry, allocating it on
+// first use so the three dependency rows' compile steps share one entry.
+func (v *validator) depKeysAt(id int) *dependencyKeys {
+	if v.depKeys[id] == nil {
+		v.depKeys[id] = &dependencyKeys{}
+	}
+
+	return v.depKeys[id]
+}
+
+// dependentSchemasCompile caches a schema's sorted dependentSchemas trigger
+// keys for the dependentSchemas row's eval, under the schema's node id.
+func dependentSchemasCompile(v *validator, id int, s *Schema) {
+	if len(s.DependentSchemas) > 0 {
+		v.depKeysAt(id).dependentSchemas = slices.Sorted(maps.Keys(s.DependentSchemas))
+	}
+}
+
+// dependentRequiredCompile caches a schema's sorted dependentRequired trigger
+// keys for the dependentRequired row's eval, under the schema's node id.
+func dependentRequiredCompile(v *validator, id int, s *Schema) {
+	if len(s.DependentRequired) > 0 {
+		v.depKeysAt(id).dependentRequired = slices.Sorted(maps.Keys(s.DependentRequired))
+	}
+}
+
+// legacyDependenciesCompile caches a schema's sorted legacy dependencies
+// trigger keys, both the schema-valued and the string-array forms, for the
+// dependencies.legacy row's eval, under the schema's node id.
+func legacyDependenciesCompile(v *validator, id int, s *Schema) {
+	if len(s.DependencySchemas) > 0 {
+		v.depKeysAt(id).legacySchemas = slices.Sorted(maps.Keys(s.DependencySchemas))
+	}
+
+	if len(s.DependencyStrings) > 0 {
+		v.depKeysAt(id).legacyStrings = slices.Sorted(maps.Keys(s.DependencyStrings))
+	}
+}
+
+// dependencyKeysFor returns deps' keys in sorted order, preferring the cached
+// slice pick selects from the node's [dependencyKeys] entry and sorting on
+// the fly for a schema outside the index (a remote or JSON-pointer fallback
+// schema reached only at validation time).
+func dependencyKeysFor[T any](
+	v *validator, id int, deps map[string]T, pick func(*dependencyKeys) []string,
+) []string {
+	if v.inIndex(id) {
+		if dk := v.depKeys[id]; dk != nil {
+			if keys := pick(dk); keys != nil {
+				return keys
+			}
+		}
+	}
+
+	return slices.Sorted(maps.Keys(deps))
 }
 
 // computeBounds converts a schema's numeric bound keywords to rationals,
@@ -3229,8 +3300,11 @@ func evalDependentSchemas(ctx evalContext) []*ValidationError {
 		return nil
 	}
 
+	triggers := dependencyKeysFor(ctx.v, ctx.nodeID, ctx.schema.DependentSchemas,
+		func(dk *dependencyKeys) []string { return dk.dependentSchemas })
+
 	return ctx.v.validateSchemaDependencies(
-		ctx.schema.DependentSchemas, KeywordDependentSchemas,
+		ctx.schema.DependentSchemas, triggers, KeywordDependentSchemas,
 		ctx.instance, obj, ctx.instancePath, ctx.schemaPath, ctx.ann)
 }
 
@@ -3276,8 +3350,12 @@ func evalDependentRequired(ctx evalContext) []*ValidationError {
 		return nil
 	}
 
+	triggers := dependencyKeysFor(ctx.v, ctx.nodeID, ctx.schema.DependentRequired,
+		func(dk *dependencyKeys) []string { return dk.dependentRequired })
+
 	return ctx.v.validateRequiredDependencies(
-		ctx.schema.DependentRequired, KeywordDependentRequired, obj, ctx.instancePath, ctx.schemaPath)
+		ctx.schema.DependentRequired, triggers, KeywordDependentRequired,
+		obj, ctx.instancePath, ctx.schemaPath)
 }
 
 // evalLegacyDependencies checks the legacy draft-07 dependencies keyword, which
@@ -3298,10 +3376,16 @@ func evalLegacyDependencies(ctx evalContext) []*ValidationError {
 
 	var errs []*ValidationError
 
+	schemaTriggers := dependencyKeysFor(v, ctx.nodeID, schema.DependencySchemas,
+		func(dk *dependencyKeys) []string { return dk.legacySchemas })
+	stringTriggers := dependencyKeysFor(v, ctx.nodeID, schema.DependencyStrings,
+		func(dk *dependencyKeys) []string { return dk.legacyStrings })
+
 	errs = append(errs, v.validateSchemaDependencies(
-		schema.DependencySchemas, KeywordDependencies, ctx.instance, obj, instancePath, schemaPath, ctx.ann)...)
+		schema.DependencySchemas, schemaTriggers, KeywordDependencies,
+		ctx.instance, obj, instancePath, schemaPath, ctx.ann)...)
 	errs = append(errs, v.validateRequiredDependencies(
-		schema.DependencyStrings, KeywordDependencies, obj, instancePath, schemaPath)...)
+		schema.DependencyStrings, stringTriggers, KeywordDependencies, obj, instancePath, schemaPath)...)
 
 	return errs
 }
@@ -3311,9 +3395,12 @@ func evalLegacyDependencies(ctx evalContext) []*ValidationError {
 // For each trigger property present in obj, the whole instance must validate
 // against the dependency subschema. Annotations are merged only on success, so
 // a failing dependency does not let unevaluated* observe its partial
-// evaluation. The keyword argument names the keyword for the error schema path.
+// evaluation. The keyword argument names the keyword for the error schema
+// path, and triggers carries deps' keys in sorted order, precomputed at
+// Compile for an indexed node (see [dependencyKeysFor]).
 func (v *validator) validateSchemaDependencies(
 	deps map[string]*Schema,
+	triggers []string,
 	keyword string,
 	instance any,
 	obj map[string]any,
@@ -3323,7 +3410,7 @@ func (v *validator) validateSchemaDependencies(
 ) []*ValidationError {
 	var errs []*ValidationError
 
-	for _, prop := range slices.Sorted(maps.Keys(deps)) {
+	for _, prop := range triggers {
 		if _, exists := obj[prop]; !exists {
 			continue
 		}
@@ -3350,9 +3437,12 @@ func (v *validator) validateSchemaDependencies(
 // Draft 2020-12 dependentRequired and the legacy draft-07 dependencies form.
 // When a trigger property is present in obj, each property it names must be
 // present too. The keyword argument names both the error schema path token and
-// the Keyword field, which coincide for these keywords.
+// the Keyword field, which coincide for these keywords, and triggers carries
+// deps' keys in sorted order, precomputed at Compile for an indexed node (see
+// [dependencyKeysFor]).
 func (v *validator) validateRequiredDependencies(
 	deps map[string][]string,
+	triggers []string,
 	keyword string,
 	obj map[string]any,
 	instancePath instanceLocation,
@@ -3360,7 +3450,7 @@ func (v *validator) validateRequiredDependencies(
 ) []*ValidationError {
 	var errs []*ValidationError
 
-	for _, prop := range slices.Sorted(maps.Keys(deps)) {
+	for _, prop := range triggers {
 		if _, exists := obj[prop]; !exists {
 			continue
 		}
