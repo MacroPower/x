@@ -1548,13 +1548,13 @@ func validateIDNHostnameLabels(s string, banNumericTLD, allowTrailingDot, asciiS
 		if hasACEPrefix(label) {
 			decoded, err = idna.Lookup.ToUnicode(label)
 			if err != nil {
-				return errors.New("invalid IDN hostname: " + err.Error())
+				return fmt.Errorf("invalid IDN hostname: %w", err)
 			}
 		}
 
 		err = checkContextualRules(decoded)
 		if err != nil {
-			return errors.New("invalid IDN hostname: " + err.Error())
+			return fmt.Errorf("invalid IDN hostname: %w", err)
 		}
 
 		totalLen += len(ascii)
@@ -1604,7 +1604,7 @@ func idnLabelToASCII(label string, asciiSubDomain bool) (string, error) {
 
 	ascii, err := idna.Lookup.ToASCII(label)
 	if err != nil {
-		return "", errors.New("invalid IDN hostname: " + err.Error())
+		return "", fmt.Errorf("invalid IDN hostname: %w", err)
 	}
 
 	return ascii, nil
