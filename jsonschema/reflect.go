@@ -1705,7 +1705,15 @@ func (g *generator) buildFieldSchema(
 	// generating the field's own type is skipped: it would be wasted work and,
 	// for a type extracted to $defs (a provider or extender), would register an
 	// orphan definition and drop the provider's constraints.
-	stringOverride := fi.jsonString && reflectkind.IsStringableType(fieldType)
+	//
+	// A type that implements json.Marshaler (directly or through its pointer
+	// method set) is exempt: encoding/json routes such a field through
+	// MarshalJSON, which ignores the ",string" option and emits the marshaler's
+	// raw bytes, so the field keeps the kind-based reflection a direct
+	// marshaler otherwise gets rather than a string schema its output never
+	// satisfies.
+	stringOverride := fi.jsonString && reflectkind.IsStringableType(fieldType) &&
+		!reflectkind.ImplementsJSONMarshaler(fieldType)
 	tagTypeSchema := (*Schema)(nil)
 
 	var (

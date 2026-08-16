@@ -522,7 +522,10 @@ alongside the pin, mirroring the field rule.
 Fields follow `encoding/json` conventions: the `json` tag sets the property
 name, `json:"-"` excludes a field (`json:"-,"` uses the literal name `"-"`),
 `omitempty` and `omitzero` drop the field from `required`, and `json:",string"`
-forces a `{"type":"string"}` schema for applicable types. Embedded structs
+forces a `{"type":"string"}` schema for applicable types (a type implementing
+`json.Marshaler` is exempt: `encoding/json` ignores the option for it, so the
+field keeps the kind-based schema a direct marshaler otherwise gets). Embedded
+structs
 without a `json` tag have their fields promoted; embedded struct types
 intercepted by
 an earlier resolution step are composed via `allOf` (wrapped as

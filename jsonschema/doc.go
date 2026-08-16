@@ -416,7 +416,11 @@
 // to {"type": "string"} for applicable types (string, integer, float, bool,
 // and a single unnamed pointer to one of those; a named pointer type or a
 // multi-level pointer is not quoted by [encoding/json], so it keeps its
-// underlying type's schema).
+// underlying type's schema). A field whose type implements
+// [encoding/json.Marshaler] (directly or through its pointer method set) is
+// not quoted either: [encoding/json] routes it through MarshalJSON, which
+// ignores the option, so the field keeps the kind-based schema a direct
+// marshaler otherwise gets.
 // Unexported non-embedded fields are excluded; unexported embedded struct
 // types still have their exported fields promoted.
 //
