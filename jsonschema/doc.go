@@ -776,7 +776,12 @@
 // invalid schema would otherwise compile and then silently mis-validate: a
 // negative maximum rejects every instance, a negative minimum never fires,
 // and a non-positive multipleOf rejects every numeric instance while
-// accepting every non-numeric one.
+// accepting every non-numeric one. A strictly positive multipleOf literal
+// below the smallest positive float64 (about 4.9e-324) is spec-valid but
+// underflows to zero when the document is decoded; [ParseSchema] and
+// [ParseSchemaValue] drop the keyword in that case -- at float64 precision it
+// constrains nothing -- rather than letting the underflowed zero be rejected
+// as an authored one.
 //
 // Instance numbers are compared exactly (decoded with UseNumber, compared as
 // [math/big.Rat]), with one bound on the work an adversarial literal can demand:

@@ -1478,6 +1478,7 @@ func ParseSchemaValue(doc any) (*Schema, error) {
 		}
 
 		restoreExactValues(&s, d)
+		dropUnderflowedMultipleOf(&s, d)
 
 		return &s, nil
 
@@ -1538,6 +1539,46 @@ func restoreExactValues(s *Schema, doc map[string]any) {
 			if cp, copied := copySourceMember(src, key); copied {
 				node.Extra[key] = cp
 			}
+		}
+
+		return nil
+	})
+}
+
+// dropUnderflowedMultipleOf clears each multipleOf whose authored literal is
+// strictly positive but decoded to float64 zero. A literal below the smallest
+// positive float64 (about 4.9e-324) underflows gradually, so
+// [strconv.ParseFloat] reports an exact 0 with no range error and the upstream
+// decode stores it silently. The spec fixes the keyword's domain as a number
+// strictly greater than zero, so the authored schema is valid and must not
+// trip [Compile]'s [ErrNonPositiveMultipleOf] vet, which by then cannot tell
+// the underflow from an authored zero. At float64 precision such a quantum
+// constrains nothing, so the keyword is dropped, the multiplicative limit of
+// the rounding the other float64-typed bound keywords already document. An
+// authored zero or negative literal keeps its decoded value and stays for the
+// vet to reject.
+func dropUnderflowedMultipleOf(s *Schema, doc map[string]any) {
+	//nolint:errcheck // The walk callback never returns an error.
+	_ = Walk(s, func(loc Location, node *Schema) error {
+		if node.MultipleOf == nil || *node.MultipleOf != 0 {
+			return nil
+		}
+
+		src, ok := resolveDocValue(doc, loc.Segments).(map[string]any)
+		if !ok {
+			return nil
+		}
+
+		// Only a [json.Number] source carries the authored literal; a float64
+		// source lost the sign of an underflowed value before this package saw
+		// the document, so it keeps the decoded zero.
+		lit, ok := src[KeywordMultipleOf].(json.Number)
+		if !ok {
+			return nil
+		}
+
+		if d, parsed := numrat.ParseDecNumber(lit.String()); parsed && d.Sig() != "" && !d.Neg() {
+			node.MultipleOf = nil
 		}
 
 		return nil
