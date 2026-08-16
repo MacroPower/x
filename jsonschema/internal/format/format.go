@@ -436,12 +436,22 @@ func validateDotAtom(s string, isText func(rune) bool, msgs dotAtomErrors) error
 		return errors.New(msgs.doubleDot)
 	}
 
-	for _, r := range s {
-		if r == '.' || isText(r) {
-			continue
+	for i := 0; i < len(s); {
+		// Decode explicitly rather than ranging: RFC 6531 widens atext with
+		// UTF8-non-ascii, which admits only well-formed sequences, and a range
+		// loop folds an ill-formed byte into (utf8.RuneError, 1)
+		// indistinguishably from a genuine U+FFFD. The quoted-local scan
+		// rejects the same case.
+		r, size := utf8.DecodeRuneInString(s[i:])
+		if r == utf8.RuneError && size == 1 {
+			return errors.New(msgs.badChar)
 		}
 
-		return errors.New(msgs.badChar)
+		if r != '.' && !isText(r) {
+			return errors.New(msgs.badChar)
+		}
+
+		i += size
 	}
 
 	return nil
