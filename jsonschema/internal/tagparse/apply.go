@@ -235,6 +235,17 @@ func (s *applyState) scalarOK() bool {
 // model.
 func (s *applyState) applyKey(key, value string) error {
 	switch key {
+	case keyword.Description, keyword.Title, keyword.Default, keyword.Examples,
+		keyword.Deprecated, keyword.ReadOnly, keyword.WriteOnly:
+		// The annotation appliers all overwrite, so a repeat in one tag is
+		// two stated intentions with no precedence to pick between.
+		err := s.checkRepeat(key)
+		if err != nil {
+			return err
+		}
+	}
+
+	switch key {
 	case keyword.Description, keyword.Title:
 		// An empty string is the field's zero value, so the keyword would
 		// silently not be emitted at all; reject the empty value like every
@@ -286,9 +297,11 @@ func (s *applyState) applyKey(key, value string) error {
 // applyConstraint binds a constraint key's value against its declared arity and
 // hands the rule to the shared model.
 func (s *applyState) applyConstraint(rule tagmodel.KeyRule, key, value string) error {
-	err := s.checkRepeat(rule, key)
-	if err != nil {
-		return err
+	if rule.Op.Overwrites() {
+		err := s.checkRepeat(key)
+		if err != nil {
+			return err
+		}
 	}
 
 	shape := s.shape()
@@ -350,23 +363,22 @@ func (s *applyState) bind(
 	return bound, nil
 }
 
-// checkRepeat reports a key naming a string keyword twice in one tag.
+// checkRepeat reports a key set twice in one tag when its applier overwrites.
 //
-// These are the only operations whose applier overwrites: this dialect replaces
-// what the field's type declared, which is right across sources, where a
-// documented precedence applies. Within one tag there is no precedence to appeal
-// to, so two values for one keyword state two intentions and silently dropping
-// either would be worse than reporting. Bounds are exempt, since two of those
-// intersect -- a defined composition rather than a contradiction -- and a const
-// or enum already conflicts on its own.
+// An overwriting key replaces what the field's type declared, which is right
+// across sources, where a documented precedence applies. Within one tag there
+// is no precedence to appeal to, so two values for one keyword state two
+// intentions and silently dropping either would be worse than reporting.
+// Bounds are exempt, since two of those intersect -- a defined composition
+// rather than a contradiction -- and a const or enum already conflicts on its
+// own.
 //
-// The set comes from the model rather than being named here, so adding a
-// content-keyword row to the table cannot silently escape the check.
-func (s *applyState) checkRepeat(rule tagmodel.KeyRule, key string) error {
-	if !rule.Op.IsStringKeyword() {
-		return nil
-	}
-
+// For the constraint keys the overwriting set comes from the model
+// ([tagmodel.Op.Overwrites]), so adding an overwriting row to the table cannot
+// silently escape the check. The annotation keys this dialect owns outright
+// (title, description, default, examples, and the boolean flags) all
+// overwrite, and [applyState.applyKey] routes them here directly.
+func (s *applyState) checkRepeat(key string) error {
 	if s.seen[key] {
 		return fmt.Errorf("jsonschema tag: key %q is set twice in one tag", key)
 	}

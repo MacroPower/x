@@ -110,10 +110,7 @@ func (op Op) String() string {
 }
 
 // IsStringKeyword reports whether the operation sets one of the string keywords
-// (format, pattern, and the content pair). These are the only operations whose
-// applier can overwrite a value already in force -- a const or enum conflicts,
-// and a bound intersects -- so a dialect that has to notice a repeated value
-// asks here rather than naming the set itself and going stale.
+// (format, pattern, and the content pair).
 func (op Op) IsStringKeyword() bool {
 	switch op {
 	case OpFormat, OpPattern, OpContentEncoding, OpContentMediaType:
@@ -121,6 +118,15 @@ func (op Op) IsStringKeyword() bool {
 	default:
 		return false
 	}
+}
+
+// Overwrites reports whether the operation's applier replaces a value already
+// in force rather than composing with it: the string keywords and the divisor.
+// A bound intersects and a const or enum conflicts on its own, so those
+// compose. A dialect that has to notice a repeated value asks here rather than
+// naming the set itself and going stale.
+func (op Op) Overwrites() bool {
+	return op.IsStringKeyword() || op == OpMultipleOf
 }
 
 // Axis pins the keyword family a bound targets. [AxisAuto] lets the shape

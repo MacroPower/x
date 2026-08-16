@@ -98,11 +98,12 @@ func TestTagRepeatedBoundIntersects(t *testing.T) {
 		"the weaker second floor does not lower the first")
 }
 
-// TestTagRepeatedStringKeywordConflicts pins that naming a string keyword twice
-// in one tag is an error. Across sources there is a documented precedence to
-// appeal to; within one tag there is none, so silently dropping one of two
-// stated values would be worse than reporting.
-func TestTagRepeatedStringKeywordConflicts(t *testing.T) {
+// TestTagRepeatedOverwritingKeyConflicts pins that naming an overwriting key
+// (a string keyword, the divisor, or an annotation) twice in one tag is an
+// error. Across sources there is a documented precedence to appeal to; within
+// one tag there is none, so silently dropping one of two stated values would
+// be worse than reporting. Bounds stay exempt: two of those intersect.
+func TestTagRepeatedOverwritingKeyConflicts(t *testing.T) {
 	t.Parallel()
 
 	for name, build := range map[string]func() (*jsonschema.Schema, error){
@@ -116,6 +117,41 @@ func TestTagRepeatedStringKeywordConflicts(t *testing.T) {
 		"format": func() (*jsonschema.Schema, error) {
 			type T struct {
 				V string `json:"v" jsonschema:"format=email,format=uuid"`
+			}
+
+			return jsonschema.GenerateFor[T](t.Context())
+		},
+		"multipleOf": func() (*jsonschema.Schema, error) {
+			type T struct {
+				V int `json:"v" jsonschema:"multipleOf=2,multipleOf=3"`
+			}
+
+			return jsonschema.GenerateFor[T](t.Context())
+		},
+		"default": func() (*jsonschema.Schema, error) {
+			type T struct {
+				V int `json:"v" jsonschema:"default=1,default=2"`
+			}
+
+			return jsonschema.GenerateFor[T](t.Context())
+		},
+		"examples": func() (*jsonschema.Schema, error) {
+			type T struct {
+				V int `json:"v" jsonschema:"examples=1|2,examples=3"`
+			}
+
+			return jsonschema.GenerateFor[T](t.Context())
+		},
+		"title": func() (*jsonschema.Schema, error) {
+			type T struct {
+				V int `json:"v" jsonschema:"title=a,title=b"`
+			}
+
+			return jsonschema.GenerateFor[T](t.Context())
+		},
+		"deprecated": func() (*jsonschema.Schema, error) {
+			type T struct {
+				V int `json:"v" jsonschema:"deprecated=true,deprecated=false"`
 			}
 
 			return jsonschema.GenerateFor[T](t.Context())
