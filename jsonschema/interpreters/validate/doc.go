@@ -175,6 +175,12 @@
 //   - json (-> contentMediaType: "application/json")
 //   - base64 (-> contentEncoding: "base64")
 //
+// On a raw JSON field (json.RawMessage) both are documented no-ops, like
+// unique on a map: the rules are real runtime checks over the raw bytes, but
+// the content keywords describe a string carrying an encoded document, and a
+// raw field's instance is whatever JSON value it holds, already decoded, so
+// there is nothing faithful to emit.
+//
 // # Dive
 //
 // The dive tag descends into the element type of a slice, array, or map,

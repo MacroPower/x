@@ -314,6 +314,19 @@ func fillStringKeywords() {
 
 		reject(op, FormCoercedString, coercedStringNote)
 	}
+
+	// A raw JSON value never carries encoded content: contentMediaType and
+	// contentEncoding describe a string holding an encoded document, and a
+	// json.RawMessage instance is whatever JSON value it holds, already
+	// decoded. The go-playground json and base64 rules on a RawMessage are
+	// real runtime checks over the raw bytes with nothing faithful to emit -- the
+	// same policy the non-zero row takes on this form -- and emitting the
+	// keyword would be worse than inert: a raw value that happens to be a JSON
+	// string would be asserted to hold an encoded document it never claimed.
+	for _, op := range []Op{OpContentMediaType, OpContentEncoding} {
+		ignore(op, FormRawBytes,
+			"a raw JSON value is already decoded JSON, not a string carrying encoded content")
+	}
 }
 
 // apply records an applying cell.

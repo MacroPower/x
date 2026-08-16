@@ -53,7 +53,7 @@ func TestMatrixGolden(t *testing.T) {
 		|content encoding / number -> reject: content encoding is not supported on a number
 		|content encoding / object -> reject: content encoding is not supported on a object
 		|content encoding / opaque value -> reject: content encoding is not supported on a opaque value
-		|content encoding / raw byte slice -> reject: content encoding is not supported on a raw byte slice
+		|content encoding / raw byte slice -> ignore: a raw JSON value is already decoded JSON, not a string carrying encoded content
 		|content encoding / referenced definition -> apply
 		|content encoding / string -> apply
 		|content encoding / string-coerced boolean -> apply
@@ -66,7 +66,7 @@ func TestMatrixGolden(t *testing.T) {
 		|content media type / number -> reject: content media type is not supported on a number
 		|content media type / object -> reject: content media type is not supported on a object
 		|content media type / opaque value -> reject: content media type is not supported on a opaque value
-		|content media type / raw byte slice -> reject: content media type is not supported on a raw byte slice
+		|content media type / raw byte slice -> ignore: a raw JSON value is already decoded JSON, not a string carrying encoded content
 		|content media type / referenced definition -> apply
 		|content media type / string -> apply
 		|content media type / string-coerced boolean -> apply
