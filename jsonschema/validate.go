@@ -2201,7 +2201,7 @@ func evalUnevaluatedProperties(ctx evalContext) []*ValidationError {
 
 	var errs []*ValidationError
 
-	childSchemaPath := ctx.schemaPath.kw("unevaluatedProperties")
+	childSchemaPath := ctx.schemaPath.kw(KeywordUnevaluatedProperties)
 
 	// Iterate in sorted key order so the emitted cause errors are deterministic,
 	// matching the sibling object keywords (properties, patternProperties,
@@ -2260,7 +2260,7 @@ func evalUnevaluatedItems(ctx evalContext) []*ValidationError {
 
 	var errs []*ValidationError
 
-	childSchemaPath := ctx.schemaPath.kw("unevaluatedItems")
+	childSchemaPath := ctx.schemaPath.kw(KeywordUnevaluatedItems)
 
 	for i, item := range arr {
 		if ann.ItemEvaluated(i) {
@@ -2941,7 +2941,7 @@ func evalContains(ctx evalContext) []*ValidationError {
 
 	// The contains schema location is invariant across elements; build it once
 	// rather than rebuilding it on every iteration.
-	containsSchemaPath := schemaPath.kw("contains")
+	containsSchemaPath := schemaPath.kw(KeywordContains)
 
 	for i, item := range arr {
 		childErrs := v.validate(schema.Contains, item, instancePath.index(i), containsSchemaPath, nil)
@@ -3075,7 +3075,7 @@ func evalObjectApplicators(ctx evalContext) []*ValidationError {
 		ann.RecordProperty(propName)
 
 		childPath := instancePath.key(propName)
-		childSchemaPath := schemaPath.kw("properties").key(propName)
+		childSchemaPath := schemaPath.kw(KeywordProperties).key(propName)
 		childErrs := v.validate(propSchema, val, childPath, childSchemaPath, nil)
 		labelFalseSchemaKeyword(childErrs, propSchema, KeywordProperties)
 
@@ -3099,7 +3099,7 @@ func evalObjectApplicators(ctx evalContext) []*ValidationError {
 
 		// One schema-path location per pattern, shared by the error branch
 		// and every matching property rather than rebuilt for each.
-		patternSchemaPath := schemaPath.kw("patternProperties").key(pattern)
+		patternSchemaPath := schemaPath.kw(KeywordPatternProperties).key(pattern)
 
 		cp := v.patternPropertyFor(ctx.nodeID, pattern)
 		if cp.err != nil {
@@ -3136,7 +3136,7 @@ func evalObjectApplicators(ctx evalContext) []*ValidationError {
 
 	// AdditionalProperties: only considers sibling properties and patternProperties.
 	if schema.AdditionalProperties != nil {
-		childSchemaPath := schemaPath.kw("additionalProperties")
+		childSchemaPath := schemaPath.kw(KeywordAdditionalProperties)
 
 		for _, propName := range sortedObjKeys {
 			val := obj[propName]
@@ -3165,7 +3165,7 @@ func evalObjectApplicators(ctx evalContext) []*ValidationError {
 	if schema.PropertyNames != nil {
 		// The propertyNames schema location is invariant across keys; build it
 		// once rather than rebuilding it on every iteration.
-		childSchemaPath := schemaPath.kw("propertyNames")
+		childSchemaPath := schemaPath.kw(KeywordPropertyNames)
 
 		for _, propName := range sortedObjKeys {
 			childPath := instancePath.key(propName)
@@ -3357,7 +3357,7 @@ func evalAllOf(ctx evalContext) []*ValidationError {
 
 	for i, sub := range schema.AllOf {
 		subAnn := ann.Child()
-		childSchemaPath := schemaPath.kw("allOf").idx(i)
+		childSchemaPath := schemaPath.kw(KeywordAllOf).idx(i)
 		childErrs := v.validate(sub, ctx.instance, instancePath, childSchemaPath, subAnn)
 		if len(childErrs) > 0 {
 			allCauses = append(allCauses, childErrs...)
@@ -3396,7 +3396,7 @@ func evalAnyOf(ctx evalContext) []*ValidationError {
 
 	for i, sub := range schema.AnyOf {
 		subAnn := ann.Child()
-		childSchemaPath := schemaPath.kw("anyOf").idx(i)
+		childSchemaPath := schemaPath.kw(KeywordAnyOf).idx(i)
 		childErrs := v.validate(sub, ctx.instance, instancePath, childSchemaPath, subAnn)
 		if len(childErrs) == 0 {
 			matched = true
@@ -3436,7 +3436,7 @@ func evalOneOf(ctx evalContext) []*ValidationError {
 
 	for i, sub := range schema.OneOf {
 		subAnn := ann.Child()
-		childSchemaPath := schemaPath.kw("oneOf").idx(i)
+		childSchemaPath := schemaPath.kw(KeywordOneOf).idx(i)
 		childErrs := v.validate(sub, ctx.instance, instancePath, childSchemaPath, subAnn)
 		if len(childErrs) == 0 {
 			matchCount++
@@ -3472,7 +3472,7 @@ func evalNot(ctx evalContext) []*ValidationError {
 		return nil
 	}
 
-	childErrs := ctx.v.validate(schema.Not, ctx.instance, ctx.instancePath, ctx.schemaPath.kw("not"), nil)
+	childErrs := ctx.v.validate(schema.Not, ctx.instance, ctx.instancePath, ctx.schemaPath.kw(KeywordNot), nil)
 	if len(childErrs) == 0 {
 		return []*ValidationError{
 			leafError(ctx.instancePath, ctx.schemaPath, KeywordNot, "should not validate against the schema"),
@@ -3497,7 +3497,7 @@ func evalIfThenElse(ctx evalContext) []*ValidationError {
 	var errs []*ValidationError
 
 	ifAnn := ann.Child()
-	ifErrs := v.validate(schema.If, instance, instancePath, schemaPath.kw("if"), ifAnn)
+	ifErrs := v.validate(schema.If, instance, instancePath, schemaPath.kw(KeywordIf), ifAnn)
 	ifPassed := len(ifErrs) == 0
 
 	if ifPassed {
@@ -3505,7 +3505,7 @@ func evalIfThenElse(ctx evalContext) []*ValidationError {
 
 		if schema.Then != nil {
 			thenAnn := ann.Child()
-			thenErrs := v.validate(schema.Then, instance, instancePath, schemaPath.kw("then"), thenAnn)
+			thenErrs := v.validate(schema.Then, instance, instancePath, schemaPath.kw(KeywordThen), thenAnn)
 			if len(thenErrs) > 0 {
 				errs = append(errs, wrapError(instancePath, schemaPath, KeywordThen,
 					"if condition was true but then validation failed", thenErrs))
@@ -3515,7 +3515,7 @@ func evalIfThenElse(ctx evalContext) []*ValidationError {
 		}
 	} else if schema.Else != nil {
 		elseAnn := ann.Child()
-		elseErrs := v.validate(schema.Else, instance, instancePath, schemaPath.kw("else"), elseAnn)
+		elseErrs := v.validate(schema.Else, instance, instancePath, schemaPath.kw(KeywordElse), elseAnn)
 		if len(elseErrs) > 0 {
 			errs = append(errs, wrapError(instancePath, schemaPath, KeywordElse,
 				"if condition was false but else validation failed", elseErrs))
