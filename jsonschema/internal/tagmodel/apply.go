@@ -433,7 +433,10 @@ func SetMultipleOf(t Target, value float64) error {
 // SetConst pins the target's const, reporting [ErrConflict] rather than
 // overwriting a value already pinned differently -- by another rule on the
 // canvas, or by the type on its base, where a disagreeing value would otherwise
-// be silently overwritten when the canvas is overlaid.
+// be silently overwritten when the canvas is overlaid. An enumeration already
+// in force is checked too: a const outside it can never hold, and both keywords
+// fully describe the allowed set, so the impossible pair is reported rather
+// than composed into a schema no instance satisfies.
 func SetConst(t Target, v any) error {
 	if t.Canvas.Const != nil && !constraint.ValuesEqual(*t.Canvas.Const, v) {
 		return fmt.Errorf("%w: a different value is already pinned", ErrConflict)
@@ -443,6 +446,14 @@ func SetConst(t Target, v any) error {
 		return fmt.Errorf("%w: the type already pins a different value", ErrConflict)
 	}
 
+	if t.Canvas.Enum != nil && !enumAdmits(t.Canvas.Enum, v) {
+		return fmt.Errorf("%w: an enumeration already in force excludes the value", ErrConflict)
+	}
+
+	if base := baseOf(t); base.Enum != nil && !enumAdmits(base.Enum, v) {
+		return fmt.Errorf("%w: the type's enumeration excludes the value", ErrConflict)
+	}
+
 	value := v
 	t.Canvas.Const = &value
 
@@ -450,7 +461,10 @@ func SetConst(t Target, v any) error {
 }
 
 // SetEnum sets the target's enum, reporting [ErrConflict] rather than shadowing
-// one already in force on the canvas or supplied by the type.
+// one already in force on the canvas or supplied by the type. A const already
+// pinned -- by another rule or by the type -- must be a member, for the same
+// reason [SetConst] checks the enumeration: the two keywords assert
+// conjunctively, so an excluded pin makes the schema unsatisfiable.
 func SetEnum(t Target, vals []any) error {
 	if t.Canvas.Enum != nil {
 		return fmt.Errorf("%w: an enumeration is already set", ErrConflict)
@@ -460,11 +474,28 @@ func SetEnum(t Target, vals []any) error {
 		return fmt.Errorf("%w: the type already sets an enumeration", ErrConflict)
 	}
 
+	if c := t.Canvas.Const; c != nil && !enumAdmits(vals, *c) {
+		return fmt.Errorf("%w: the enumeration excludes a value already pinned", ErrConflict)
+	}
+
+	if c := baseOf(t).Const; c != nil && !enumAdmits(vals, *c) {
+		return fmt.Errorf("%w: the enumeration excludes the value the type pins", ErrConflict)
+	}
+
 	// Copy rather than alias: this is public through the Constraints facade, so
 	// vals may be a caller's slice that it goes on to reuse or mutate.
 	t.Canvas.Enum = slices.Clone(vals)
 
 	return nil
+}
+
+// enumAdmits reports whether the enumeration contains v, under the same
+// numeric-aware equality [SetConst] uses for a repeated pin, so 7 and 7.0
+// count as the same member.
+func enumAdmits(vals []any, v any) bool {
+	return slices.ContainsFunc(vals, func(m any) bool {
+		return constraint.ValuesEqual(m, v)
+	})
 }
 
 // Forbid records that the schema must not equal v, composing with anything
