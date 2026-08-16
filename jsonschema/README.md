@@ -910,7 +910,12 @@ instance `0.1` exactly, consistent with how `minimum: 0.1` bounds it. A
 `float64` in a pre-parsed instance (JSON decoding always yields `json.Number`)
 is interpreted the same way, including under `uniqueItems`, so `float64(0.1)`
 and a decoded `0.1` are one value: duplicates under `uniqueItems`, and each
-matching `const: 0.1`.
+matching `const: 0.1`. A number-shaped value with no numeric value to compare
+-- a non-finite `float64` (NaN or an infinity, which JSON cannot represent
+but a Go instance can carry) or a `json.Number` whose literal is not a valid
+JSON number -- passes a bare `type` assertion but fails every numeric bound
+keyword present: a bound written to constrain a number fails closed rather
+than silently skipping a value it cannot compare.
 
 ### Structured errors
 

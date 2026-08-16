@@ -3699,8 +3699,11 @@ func TestValidateNonFiniteFloat(t *testing.T) {
 	t.Parallel()
 
 	// JSON cannot represent Inf/NaN, but a Go float64 instance can carry them.
-	// Numeric keywords and uniqueItems must skip such values without panicking,
-	// preserving the documented concurrency-safe Validate guarantee.
+	// Such a value has no numeric value a bound can compare, so every numeric
+	// bound keyword fails closed against it (skipping would let +Inf satisfy a
+	// maximum), without panicking, preserving the documented concurrency-safe
+	// Validate guarantee. A bare number type assertion still admits the value:
+	// only the bounds reject it.
 	nonFinite := map[string]float64{
 		"+Inf": math.Inf(1),
 		"-Inf": math.Inf(-1),
@@ -3726,10 +3729,30 @@ func TestValidateNonFiniteFloat(t *testing.T) {
 
 			for label, f := range nonFinite {
 				err := jsonschema.Validate(t.Context(), schema, map[string]any{"x": f})
-				assert.NoError(t, err, "%s should skip numeric keyword %s, not fail or panic", label, kw)
+				assert.Error(t, err, "%s has no comparable value, so %s must fail closed", label, kw)
 			}
 		})
 	}
+
+	t.Run("numeric/unparseable json.Number", func(t *testing.T) {
+		t.Parallel()
+
+		schema := &jsonschema.Schema{Minimum: new(5.0)}
+
+		err := jsonschema.Validate(t.Context(), schema, json.Number("abc"))
+		assert.Error(t, err, "a malformed json.Number has no value, so minimum must fail closed")
+	})
+
+	t.Run("numeric/bare type still admits non-finite", func(t *testing.T) {
+		t.Parallel()
+
+		schema := &jsonschema.Schema{Type: "number"}
+
+		for label, f := range nonFinite {
+			assert.NoError(t, jsonschema.Validate(t.Context(), schema, f),
+				"%s stays an accepted number-shaped leaf under a bare type assertion", label)
+		}
+	})
 
 	t.Run("uniqueItems", func(t *testing.T) {
 		t.Parallel()

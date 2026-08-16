@@ -2504,17 +2504,19 @@ func evalNumeric(ctx evalContext) []*ValidationError {
 
 	// Decompose a JSON number exactly once. An over-cap literal (the DoS guard)
 	// takes the magnitude-class comparison without a second scan of the literal;
-	// an unparseable one has no value to compare and skips the numeric keywords;
-	// an exactly-comparable one yields the rational the bounded checks use. A
-	// float64 (the default) converts through its shortest decimal, and a
-	// non-finite float yields no rational and is likewise skipped.
+	// an unparseable one has no value to compare and fails every present bound
+	// keyword closed; an exactly-comparable one yields the rational the bounded
+	// checks use. A float64 (the default) converts through its shortest
+	// decimal, and a non-finite float yields no rational and likewise fails
+	// closed.
 	var val *big.Rat
 
 	switch n := instance.(type) {
 	case json.Number:
 		d, ok := numrat.ParseDecNumber(string(n))
 		if !ok {
-			return nil
+			return validateNumericNonComparable(
+				schema, fmt.Sprintf("%q", string(n)), instancePath, schemaPath)
 		}
 
 		if !d.ExactlyComparable() {
@@ -2528,7 +2530,8 @@ func evalNumeric(ctx evalContext) []*ValidationError {
 
 		val, ok = numrat.ToBigRat(instance)
 		if !ok {
-			return nil
+			return validateNumericNonComparable(
+				schema, fmt.Sprintf("%v", instance), instancePath, schemaPath)
 		}
 	}
 
@@ -2678,6 +2681,59 @@ func (v *validator) validateNumericUnbounded(
 		if b := bounds.exclusiveMaximum; b != nil && d.CmpRat(b) > 0 {
 			add(KeywordExclusiveMaximum, fmt.Sprintf("%s is greater than %v", num, *schema.ExclusiveMaximum))
 		}
+	}
+
+	return errs
+}
+
+// validateNumericNonComparable reports every numeric bound keyword present on
+// the schema as violated by an instance that carries no numeric value to
+// compare: a non-finite float64 (NaN or an infinity, which JSON cannot
+// represent) or a [json.Number] whose literal is not a valid JSON number. Such
+// a value still passes a bare type assertion (normalize admits both as
+// number-shaped leaves), but a bound written to constrain a number fails
+// closed against it rather than being silently skipped: +Inf under a maximum,
+// or an unparseable literal under a minimum, must not validate. A
+// non-positive multipleOf keeps its schema-validity message, which is
+// independent of the instance value.
+func validateNumericNonComparable(
+	schema *Schema,
+	desc string,
+	instancePath instanceLocation,
+	schemaPath schemaLocation,
+) []*ValidationError {
+	var errs []*ValidationError
+
+	add := func(keyword, msg string) {
+		errs = append(errs, leafError(instancePath, schemaPath, keyword, msg))
+	}
+
+	noValue := func(keyword string) {
+		add(keyword, fmt.Sprintf("%s has no numeric value to compare with %s", desc, keyword))
+	}
+
+	if schema.MultipleOf != nil {
+		if *schema.MultipleOf <= 0 {
+			add(KeywordMultipleOf, fmt.Sprintf("multipleOf must be greater than 0, got %v", *schema.MultipleOf))
+		} else {
+			noValue(KeywordMultipleOf)
+		}
+	}
+
+	if schema.Minimum != nil {
+		noValue(KeywordMinimum)
+	}
+
+	if schema.Maximum != nil {
+		noValue(KeywordMaximum)
+	}
+
+	if schema.ExclusiveMinimum != nil {
+		noValue(KeywordExclusiveMinimum)
+	}
+
+	if schema.ExclusiveMaximum != nil {
+		noValue(KeywordExclusiveMaximum)
 	}
 
 	return errs

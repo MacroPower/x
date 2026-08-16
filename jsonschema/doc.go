@@ -789,7 +789,14 @@
 // pre-parsed instance (JSON decoding always yields [encoding/json.Number]) is
 // interpreted at its shortest decimal value across all numeric keywords,
 // including the uniqueItems comparison, so float64(0.1) and a decoded 0.1 are
-// one value under const, enum, and uniqueItems alike.
+// one value under const, enum, and uniqueItems alike. A number-shaped value
+// with no numeric value to compare -- a non-finite float64 (NaN or an
+// infinity, which JSON cannot represent but a Go instance can carry) or a
+// [encoding/json.Number] whose literal is not a valid JSON number -- passes a
+// bare type assertion but fails every numeric bound keyword present
+// (minimum, maximum, exclusiveMinimum, exclusiveMaximum, multipleOf): a bound
+// written to constrain a number fails closed rather than silently skipping a
+// value it cannot compare.
 //
 // Validation is configured via [ValidateOption] values:
 //
