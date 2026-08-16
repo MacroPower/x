@@ -10,18 +10,26 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"slices"
 
 	"github.com/google/jsonschema-go/jsonschema"
 )
 
-// ErrCyclic reports a cyclic schema pointer graph handed to [Clone]. A cycle
-// cannot round-trip through JSON: the upstream MarshalJSON re-enters
-// [json.Marshal] with a fresh encoder at every nesting level, so encoding/json's
-// per-encoder cycle detection never triggers and the marshal recurses until an
-// unrecoverable stack overflow. Clone detects the cycle up front and returns
-// this ordinary error instead.
-var ErrCyclic = errors.New("cyclic schema graph")
+var (
+	// ErrCyclic reports a cyclic schema pointer graph handed to [Clone]. A cycle
+	// cannot round-trip through JSON: the upstream MarshalJSON re-enters
+	// [json.Marshal] with a fresh encoder at every nesting level, so
+	// encoding/json's per-encoder cycle detection never triggers and the marshal
+	// recurses until an unrecoverable stack overflow. Clone detects the cycle up
+	// front and returns this ordinary error instead.
+	ErrCyclic = errors.New("cyclic schema graph")
+
+	// The schemaType and schemaPtrType sentinels let the reflection walk in
+	// [checkAcyclicReflect] recognize a schema nested in a typed container.
+	schemaType    = reflect.TypeFor[jsonschema.Schema]()
+	schemaPtrType = reflect.TypeFor[*jsonschema.Schema]()
+)
 
 // Children returns the direct sub-schemas of a schema in a stable order. [Clone]
 // walks src and its copy in lockstep through one such function to pair nodes; the
@@ -48,7 +56,8 @@ type Children func(*jsonschema.Schema) []*jsonschema.Schema
 // with an error wrapping [ErrCyclic] before marshaling. The cycle check walks
 // the sub-schema graph children supplies plus the any-typed value fields
 // (Const, Enum, Examples, Extra), so a *Schema smuggled through an any-typed
-// container is detected too.
+// container is detected too, including typed containers ([]*Schema, a map of
+// schemas, an exported struct field) that [json.Marshal] reaches by reflection.
 func Clone(s *jsonschema.Schema, children Children) (*jsonschema.Schema, error) {
 	if s == nil {
 		return nil, nil //nolint:nilnil // A nil schema clones to nil.
@@ -133,11 +142,16 @@ func checkAcyclic(s *jsonschema.Schema, children Children, state map[*jsonschema
 }
 
 // checkAcyclicValue extends the checkAcyclic walk across a JSON-shaped value
-// held in an any-typed field, recursing through maps and slices until it finds
-// schema pointers to feed back into the graph walk. Value containers of other
-// types marshal without re-entering the schema graph and need no check.
+// held in an any-typed field, recursing through containers until it finds
+// schema pointers to feed back into the graph walk. The common shapes parsed
+// JSON produces (map[string]any, []any) take the concrete fast path; every
+// other type falls through to a reflection walk, because [json.Marshal]
+// reaches a schema nested in any marshalable typed container ([]*Schema, a
+// map of schemas, an exported struct field) just as readily.
 func checkAcyclicValue(v any, children Children, state map[*jsonschema.Schema]visit) error {
 	switch val := v.(type) {
+	case nil:
+		return nil
 	case *jsonschema.Schema:
 		return checkAcyclic(val, children, state)
 	case jsonschema.Schema:
@@ -157,6 +171,77 @@ func checkAcyclicValue(v any, children Children, state map[*jsonschema.Schema]vi
 				return err
 			}
 		}
+
+	default:
+		return checkAcyclicReflect(reflect.ValueOf(v), children, state)
+	}
+
+	return nil
+}
+
+// checkAcyclicReflect walks a value of a type the concrete switch in
+// [checkAcyclicValue] does not name, mirroring encoding/json's reflection:
+// pointers, interfaces, slices, arrays, maps, and exported struct fields can
+// all hold a nested schema whose marshal re-enters the schema graph.
+// Unexported struct fields are skipped because [json.Marshal] never
+// serializes them. Kinds with no interior values (strings, numbers, channels,
+// funcs) need no check. A schema encountered as a pointer, interface, or
+// struct value is routed back through [checkAcyclicValue], whose concrete
+// cases feed it into the graph walk.
+func checkAcyclicReflect(rv reflect.Value, children Children, state map[*jsonschema.Schema]visit) error {
+	switch rv.Kind() {
+	case reflect.Pointer:
+		if rv.IsNil() {
+			return nil
+		}
+
+		if rv.Type() == schemaPtrType {
+			return checkAcyclicValue(rv.Interface(), children, state)
+		}
+
+		return checkAcyclicReflect(rv.Elem(), children, state)
+
+	case reflect.Interface:
+		if rv.IsNil() {
+			return nil
+		}
+
+		return checkAcyclicValue(rv.Interface(), children, state)
+
+	case reflect.Struct:
+		if rv.Type() == schemaType {
+			return checkAcyclicValue(rv.Interface(), children, state)
+		}
+
+		for i := range rv.NumField() {
+			if !rv.Type().Field(i).IsExported() {
+				continue
+			}
+
+			err := checkAcyclicReflect(rv.Field(i), children, state)
+			if err != nil {
+				return err
+			}
+		}
+
+	case reflect.Slice, reflect.Array:
+		for i := range rv.Len() {
+			err := checkAcyclicReflect(rv.Index(i), children, state)
+			if err != nil {
+				return err
+			}
+		}
+
+	case reflect.Map:
+		for iter := rv.MapRange(); iter.Next(); {
+			err := checkAcyclicReflect(iter.Value(), children, state)
+			if err != nil {
+				return err
+			}
+		}
+
+	default:
+		// Every other kind has no interior values a schema can hide in.
 	}
 
 	return nil
