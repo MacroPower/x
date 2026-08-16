@@ -104,19 +104,20 @@ const (
 // an interpreter that branches on one branches on the same classification the
 // rule is then applied under.
 const (
-	FormString        = tagmodel.FormString
-	FormNumber        = tagmodel.FormNumber
-	FormBool          = tagmodel.FormBool
-	FormArray         = tagmodel.FormArray
-	FormObject        = tagmodel.FormObject
-	FormCoercedNumber = tagmodel.FormCoercedNumber
-	FormCoercedBool   = tagmodel.FormCoercedBool
-	FormCoercedString = tagmodel.FormCoercedString
-	FormTextString    = tagmodel.FormTextString
-	FormByteString    = tagmodel.FormByteString
-	FormRawBytes      = tagmodel.FormRawBytes
-	FormRef           = tagmodel.FormRef
-	FormOpaque        = tagmodel.FormOpaque
+	FormString         = tagmodel.FormString
+	FormNumber         = tagmodel.FormNumber
+	FormBool           = tagmodel.FormBool
+	FormArray          = tagmodel.FormArray
+	FormObject         = tagmodel.FormObject
+	FormCoercedNumber  = tagmodel.FormCoercedNumber
+	FormCoercedBool    = tagmodel.FormCoercedBool
+	FormCoercedString  = tagmodel.FormCoercedString
+	FormTextString     = tagmodel.FormTextString
+	FormByteString     = tagmodel.FormByteString
+	FormRawBytes       = tagmodel.FormRawBytes
+	FormRef            = tagmodel.FormRef
+	FormDeclaredObject = tagmodel.FormDeclaredObject
+	FormOpaque         = tagmodel.FormOpaque
 )
 
 // ShapeOf classifies a field or element from its Go type and the type-derived

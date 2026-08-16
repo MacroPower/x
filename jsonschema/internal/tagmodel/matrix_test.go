@@ -50,6 +50,7 @@ func TestMatrixGolden(t *testing.T) {
 		|content encoding / array -> reject: content encoding is not supported on a array
 		|content encoding / base64 byte string -> apply
 		|content encoding / boolean -> reject: content encoding is not supported on a boolean
+		|content encoding / declared object -> reject: content encoding is not supported on a declared object
 		|content encoding / number -> reject: content encoding is not supported on a number
 		|content encoding / object -> reject: content encoding is not supported on a object
 		|content encoding / opaque value -> reject: content encoding is not supported on a opaque value
@@ -63,6 +64,7 @@ func TestMatrixGolden(t *testing.T) {
 		|content media type / array -> reject: content media type is not supported on a array
 		|content media type / base64 byte string -> apply
 		|content media type / boolean -> reject: content media type is not supported on a boolean
+		|content media type / declared object -> reject: content media type is not supported on a declared object
 		|content media type / number -> reject: content media type is not supported on a number
 		|content media type / object -> reject: content media type is not supported on a object
 		|content media type / opaque value -> reject: content media type is not supported on a opaque value
@@ -76,6 +78,7 @@ func TestMatrixGolden(t *testing.T) {
 		|divisor / array -> reject: divisor is not supported on a array
 		|divisor / base64 byte string -> reject: divisor is not supported on a base64 byte string
 		|divisor / boolean -> reject: divisor is not supported on a boolean
+		|divisor / declared object -> reject: divisor is not supported on a declared object
 		|divisor / number -> apply
 		|divisor / object -> reject: divisor is not supported on a object
 		|divisor / opaque value -> reject: divisor is not supported on a opaque value
@@ -89,6 +92,7 @@ func TestMatrixGolden(t *testing.T) {
 		|element uniqueness / array -> apply
 		|element uniqueness / base64 byte string -> reject: unique has no array to constrain on a base64 byte string
 		|element uniqueness / boolean -> reject: unique has no array to constrain on a boolean
+		|element uniqueness / declared object -> reject: unique has no array to constrain on a declared object
 		|element uniqueness / number -> reject: unique has no array to constrain on a number
 		|element uniqueness / object -> ignore: unique on a map asserts distinct values, which no object keyword expresses
 		|element uniqueness / opaque value -> reject: unique has no array to constrain on a opaque value
@@ -102,6 +106,7 @@ func TestMatrixGolden(t *testing.T) {
 		|enumerated values / array -> apply
 		|enumerated values / base64 byte string -> reject: a []byte field has no item schema to constrain (it encodes as a base64 string)
 		|enumerated values / boolean -> apply
+		|enumerated values / declared object -> reject: enumerated values is not supported on a declared object
 		|enumerated values / number -> apply
 		|enumerated values / object -> reject: an enumeration on a map has no element meaning (use dive to constrain the values)
 		|enumerated values / opaque value -> reject: enumerated values is not supported on a opaque value
@@ -115,6 +120,7 @@ func TestMatrixGolden(t *testing.T) {
 		|exact size / array -> apply
 		|exact size / base64 byte string -> apply
 		|exact size / boolean -> reject: exact size is not supported on a boolean
+		|exact size / declared object -> apply
 		|exact size / number -> apply
 		|exact size / object -> apply
 		|exact size / opaque value -> reject: exact size is not supported on a opaque value
@@ -128,6 +134,7 @@ func TestMatrixGolden(t *testing.T) {
 		|exclusive ceiling / array -> apply
 		|exclusive ceiling / base64 byte string -> apply
 		|exclusive ceiling / boolean -> reject: exclusive ceiling is not supported on a boolean
+		|exclusive ceiling / declared object -> apply
 		|exclusive ceiling / number -> apply
 		|exclusive ceiling / object -> apply
 		|exclusive ceiling / opaque value -> reject: exclusive ceiling is not supported on a opaque value
@@ -141,6 +148,7 @@ func TestMatrixGolden(t *testing.T) {
 		|exclusive floor / array -> apply
 		|exclusive floor / base64 byte string -> apply
 		|exclusive floor / boolean -> reject: exclusive floor is not supported on a boolean
+		|exclusive floor / declared object -> apply
 		|exclusive floor / number -> apply
 		|exclusive floor / object -> apply
 		|exclusive floor / opaque value -> reject: exclusive floor is not supported on a opaque value
@@ -154,6 +162,7 @@ func TestMatrixGolden(t *testing.T) {
 		|forbidden size / array -> apply
 		|forbidden size / base64 byte string -> reject: forbidden size is not supported on a base64 byte string
 		|forbidden size / boolean -> reject: forbidden size is not supported on a boolean
+		|forbidden size / declared object -> reject: forbidden size is not supported on a declared object
 		|forbidden size / number -> reject: forbidden size is not supported on a number
 		|forbidden size / object -> apply
 		|forbidden size / opaque value -> reject: forbidden size is not supported on a opaque value
@@ -167,6 +176,7 @@ func TestMatrixGolden(t *testing.T) {
 		|forbidden value / array -> reject: forbidden value is not supported on a array
 		|forbidden value / base64 byte string -> reject: forbidden value is not supported on a base64 byte string
 		|forbidden value / boolean -> apply
+		|forbidden value / declared object -> reject: forbidden value is not supported on a declared object
 		|forbidden value / number -> apply
 		|forbidden value / object -> reject: forbidden value is not supported on a object
 		|forbidden value / opaque value -> reject: forbidden value is not supported on a opaque value
@@ -180,6 +190,7 @@ func TestMatrixGolden(t *testing.T) {
 		|format / array -> reject: format is not supported on a array
 		|format / base64 byte string -> apply
 		|format / boolean -> reject: format is not supported on a boolean
+		|format / declared object -> reject: format is not supported on a declared object
 		|format / number -> reject: format is not supported on a number
 		|format / object -> reject: format is not supported on a object
 		|format / opaque value -> reject: format is not supported on a opaque value
@@ -193,6 +204,7 @@ func TestMatrixGolden(t *testing.T) {
 		|inclusive ceiling / array -> apply
 		|inclusive ceiling / base64 byte string -> apply
 		|inclusive ceiling / boolean -> reject: inclusive ceiling is not supported on a boolean
+		|inclusive ceiling / declared object -> apply
 		|inclusive ceiling / number -> apply
 		|inclusive ceiling / object -> apply
 		|inclusive ceiling / opaque value -> reject: inclusive ceiling is not supported on a opaque value
@@ -206,6 +218,7 @@ func TestMatrixGolden(t *testing.T) {
 		|inclusive floor / array -> apply
 		|inclusive floor / base64 byte string -> apply
 		|inclusive floor / boolean -> reject: inclusive floor is not supported on a boolean
+		|inclusive floor / declared object -> apply
 		|inclusive floor / number -> apply
 		|inclusive floor / object -> apply
 		|inclusive floor / opaque value -> reject: inclusive floor is not supported on a opaque value
@@ -219,6 +232,7 @@ func TestMatrixGolden(t *testing.T) {
 		|non-zero assertion / array -> apply
 		|non-zero assertion / base64 byte string -> apply
 		|non-zero assertion / boolean -> apply
+		|non-zero assertion / declared object -> ignore: a declared object's zero is not the empty object; only the parent's required entry applies
 		|non-zero assertion / number -> apply
 		|non-zero assertion / object -> apply
 		|non-zero assertion / opaque value -> ignore: an opaque value has no schema-expressible zero
@@ -232,6 +246,7 @@ func TestMatrixGolden(t *testing.T) {
 		|pattern / array -> reject: pattern is not supported on a array
 		|pattern / base64 byte string -> apply
 		|pattern / boolean -> reject: pattern is not supported on a boolean
+		|pattern / declared object -> reject: pattern is not supported on a declared object
 		|pattern / number -> reject: pattern is not supported on a number
 		|pattern / object -> reject: pattern is not supported on a object
 		|pattern / opaque value -> reject: pattern is not supported on a opaque value
@@ -245,6 +260,7 @@ func TestMatrixGolden(t *testing.T) {
 		|pinned value / array -> reject: pinned value is not supported on a array
 		|pinned value / base64 byte string -> reject: pinned value is not supported on a base64 byte string
 		|pinned value / boolean -> apply
+		|pinned value / declared object -> reject: pinned value is not supported on a declared object
 		|pinned value / number -> apply
 		|pinned value / object -> reject: pinned value is not supported on a object
 		|pinned value / opaque value -> reject: pinned value is not supported on a opaque value

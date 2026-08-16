@@ -71,6 +71,16 @@ const (
 	// and it is permissive only for the rules that name a keyword: a rule that
 	// would have to infer one, or read a value at a Go kind, still reports.
 	FormRef
+	// FormDeclaredObject is a payload declaring an object outright over a Go
+	// kind that is not a map: an inline (anonymous) struct field is the common
+	// case, and a verbatim or overridden object schema on an opaque kind is
+	// the other. The instance is an object, so a property-count keyword a
+	// dialect names outright applies exactly as it does on the $defs-backed
+	// named spelling. What the object holds is not classifiable from here, so
+	// element- and value-wise rules still report, and a rule-shaped bound has
+	// no family to take: go-playground's min means an entry count only on a
+	// map, and this is not one.
+	FormDeclaredObject
 	// FormOpaque is every remaining shape -- a struct, interface, channel, or
 	// function -- whose instance the tag vocabulary cannot describe.
 	FormOpaque
@@ -81,20 +91,21 @@ const (
 
 // The formNames table labels each form for the matrix dump and the rejection text.
 var formNames = [formCount]string{
-	FormUnset:         "unset",
-	FormString:        "string",
-	FormNumber:        "number",
-	FormBool:          "boolean",
-	FormArray:         "array",
-	FormObject:        "object",
-	FormCoercedNumber: "string-coerced number",
-	FormCoercedBool:   "string-coerced boolean",
-	FormCoercedString: "string-coerced string",
-	FormTextString:    "text-marshaled string",
-	FormByteString:    "base64 byte string",
-	FormRawBytes:      "raw byte slice",
-	FormRef:           "referenced definition",
-	FormOpaque:        "opaque value",
+	FormUnset:          "unset",
+	FormString:         "string",
+	FormNumber:         "number",
+	FormBool:           "boolean",
+	FormArray:          "array",
+	FormObject:         "object",
+	FormCoercedNumber:  "string-coerced number",
+	FormCoercedBool:    "string-coerced boolean",
+	FormCoercedString:  "string-coerced string",
+	FormTextString:     "text-marshaled string",
+	FormByteString:     "base64 byte string",
+	FormRawBytes:       "raw byte slice",
+	FormRef:            "referenced definition",
+	FormDeclaredObject: "declared object",
+	FormOpaque:         "opaque value",
 }
 
 // String returns the form's label.
@@ -300,11 +311,20 @@ func classifyForm(t reflect.Type, base *jsonschema.Schema, quoted bool) Form {
 			return FormTextString
 		}
 
-		// Only the two scalar forms are read off the base here. A declared array
-		// or object would name a container whose elements or values neither
-		// source can classify, which is what [FormOpaque] already says.
-		if f := declaredForm(base); f == FormNumber || f == FormBool {
+		// The scalar forms and the object form are read off the base here. A
+		// declared object -- an anonymous struct's inline payload, or a
+		// verbatim object override -- is judged by what it declares, so its
+		// count keywords apply while its values stay unclassifiable
+		// ([FormDeclaredObject] carries exactly that split). A declared array
+		// stays opaque: nothing inlines one over these kinds without an
+		// explicit override, and its elements are equally unclassifiable.
+		f := declaredForm(base)
+		if f == FormNumber || f == FormBool {
 			return f
+		}
+
+		if f == FormObject {
+			return FormDeclaredObject
 		}
 
 		if base != nil && base.Ref != "" {

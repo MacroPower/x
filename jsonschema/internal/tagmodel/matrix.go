@@ -75,6 +75,11 @@ var (
 		// guessing is what this column exists not to do. A named keyword still
 		// applies, per formCarriesAxis below.
 		FormRef: AxisAuto,
+		// A declared object is an object instance, but not a map: go-playground
+		// defines min on a map as an entry count and on a struct not at all, so
+		// a rule-shaped bound reports here while the named property-count
+		// keywords still apply, per formCarriesAxis below.
+		FormDeclaredObject: AxisAuto,
 	}
 
 	// The formCarriesAxis table reports whether a form's schema has a keyword family at
@@ -92,6 +97,11 @@ var (
 		// Every family, because the definition may declare any of them and this
 		// dialect named the keyword outright.
 		FormRef: {AxisNumeric: true, AxisLength: true, AxisItems: true, AxisProperties: true},
+		// Only the property count: the payload declares an object outright, so
+		// a named count keyword lands on it exactly as it does on the
+		// $defs-backed named spelling, and every other family is a shape the
+		// instance is known not to take.
+		FormDeclaredObject: {AxisProperties: true},
 	}
 
 	// The formAxisNote table is what a form says when it cannot carry a bound,
@@ -173,6 +183,7 @@ func init() {
 func fillBounds() {
 	bounded := []Form{
 		FormString, FormNumber, FormArray, FormObject, FormTextString, FormByteString, FormRef,
+		FormDeclaredObject,
 	}
 
 	for _, op := range []Op{OpFloorIncl, OpFloorExcl, OpCeilIncl, OpCeilExcl, OpExactSize} {
@@ -289,8 +300,13 @@ func fillNonZero() {
 		"an unconstrained raw JSON value has no faithful non-zero form")
 
 	// A text-marshaled or opaque value has no emptiness the schema can name.
+	// A declared object is in the same position: its Go value is a struct or
+	// override whose zero is not the empty object a minProperties floor would
+	// assert against, so only the parent's required entry applies.
 	ignore(OpNonZero, FormTextString, "a text-marshaled value has no schema-expressible zero")
 	ignore(OpNonZero, FormOpaque, "an opaque value has no schema-expressible zero")
+	ignore(OpNonZero, FormDeclaredObject,
+		"a declared object's zero is not the empty object; only the parent's required entry applies")
 	ignore(OpNonZero, FormRef,
 		"a referenced definition's zero is not readable here; only the parent's required entry applies")
 }
