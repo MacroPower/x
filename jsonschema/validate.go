@@ -2073,20 +2073,34 @@ func (v *validator) structureResolves(schema *Schema, resolveOpts ResolveOptions
 // dereferencing refs. [structureResolves] skips that validation for targets
 // carried in unknown keywords or non-applicator keyword internals, since those
 // have no typed Schema field. A resolution reports failure through its
-// [refresolve.Result]; the gate reads only the target, so a resolver error
-// does not leak into a later validation error.
+// [refresolve.Result]; the gate reads only the target and the document-miss
+// attribution, so a resolver error does not leak into a later validation error.
+//
+// A ref whose target document is unavailable at compile time is tolerated
+// regardless of its fragment: a resolver may serve the document only after
+// compilation, and the validation walk reports a still-unresolvable ref as a
+// "cannot resolve $ref" [*ValidationError] (see
+// [validator.validateResolvedRef]). Without that tolerance a remote ref with a
+// fragment would fail Compile (upstream Resolve applies the fragment to the
+// empty stand-in document from [validator.remoteLoader]) while its
+// fragment-less spelling compiled and deferred, an asymmetry the Remote
+// References contract in the package documentation rules out.
 func (v *validator) refsResolveWellFormed(schema *Schema, resolveOpts ResolveOptions) bool {
 	// Stop at the first ill-formed ref target; the resolveRef/resolveDynamicRef
 	// lookups are idempotent and side-effect-free, so leaving the remaining nodes
 	// unvisited cannot change the result.
 	err := Walk(schema, func(_ Location, s *Schema) error {
-		if s.Ref != "" && !v.refTargetWellFormed(v.resolveRef(s, s.Ref).Target, resolveOpts) {
-			return errRefCheckStop
+		if s.Ref != "" {
+			if res := v.resolveRef(s, s.Ref); !res.DocumentMiss && !v.refTargetWellFormed(res.Target, resolveOpts) {
+				return errRefCheckStop
+			}
 		}
 
-		if v.profile.dynamicRef && s.DynamicRef != "" &&
-			!v.refTargetWellFormed(v.resolveDynamicRef(s, s.DynamicRef).Target, resolveOpts) {
-			return errRefCheckStop
+		if v.profile.dynamicRef && s.DynamicRef != "" {
+			if res := v.resolveDynamicRef(s, s.DynamicRef); !res.DocumentMiss &&
+				!v.refTargetWellFormed(res.Target, resolveOpts) {
+				return errRefCheckStop
+			}
 		}
 
 		return nil
@@ -2122,18 +2136,25 @@ func (v *validator) refTargetWellFormed(target *Schema, resolveOpts ResolveOptio
 // allRefsResolvable reports whether this package can resolve every $ref and
 // $dynamicRef directly reachable from schema, without judging the resolved
 // targets. A resolution reports failure through its [refresolve.Result]; the
-// gate reads only the target, so a resolver error does not leak into a later
-// error.
+// gate reads only the target and the document-miss attribution, so a resolver
+// error does not leak into a later error. A ref to a document unavailable at
+// compile time is tolerated for the same reason [refsResolveWellFormed]
+// tolerates it: the resolver may serve the document only after compilation,
+// and the validation walk reports a still-unresolvable ref.
 func (v *validator) allRefsResolvable(schema *Schema) bool {
 	// Stop at the first unresolvable ref; the lookups are idempotent and
 	// side-effect-free, so the unvisited nodes cannot change the outcome.
 	err := Walk(schema, func(_ Location, s *Schema) error {
-		if s.Ref != "" && v.resolveRef(s, s.Ref).Target == nil {
-			return errRefCheckStop
+		if s.Ref != "" {
+			if res := v.resolveRef(s, s.Ref); res.Target == nil && !res.DocumentMiss {
+				return errRefCheckStop
+			}
 		}
 
-		if v.profile.dynamicRef && s.DynamicRef != "" && v.resolveDynamicRef(s, s.DynamicRef).Target == nil {
-			return errRefCheckStop
+		if v.profile.dynamicRef && s.DynamicRef != "" {
+			if res := v.resolveDynamicRef(s, s.DynamicRef); res.Target == nil && !res.DocumentMiss {
+				return errRefCheckStop
+			}
 		}
 
 		return nil

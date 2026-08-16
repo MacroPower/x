@@ -42,6 +42,14 @@ type Result struct {
 	// Fragment is the fragment portion for a pointer target within a located
 	// document, "" otherwise.
 	Fragment string
+
+	// DocumentMiss reports that a non-fragment ref's target document could not
+	// be located: the registry has no entry for its base URI and the fetch
+	// closure answered a miss or a failure (a failure rides in Err). The
+	// validator's compile-time gate tolerates this outcome, since a resolver
+	// may serve the document only after compilation, while a validation run
+	// reports it through the bearing node. Always false when Target is set.
+	DocumentMiss bool
 }
 
 // ResolveRef resolves a $ref string to a target, caching a successful result
@@ -133,7 +141,7 @@ func (s *Session) resolveRefUncached(schema *jsonschema.Schema, ref string, fetc
 		// Try remote resolution as fallback.
 		cp, fetchErr := fetch(baseURI)
 		if cp == nil {
-			return Result{Err: fetchErr}
+			return Result{Err: fetchErr, DocumentMiss: true}
 		}
 
 		target = cp

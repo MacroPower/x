@@ -72,6 +72,64 @@ func TestValidateUnresolvableFragmentRefInLateFetchedDocument(t *testing.T) {
 	}
 }
 
+// TestCompileToleratesFragmentRefToLateDocument locks in the Remote References
+// contract for a remote $ref carrying a fragment: a document unresolvable at
+// compile time is tolerated exactly like the fragment-less spelling, the
+// validation walk reports the miss as a "cannot resolve $ref" error, and the
+// ref validates normally once the resolver serves the document. Upstream
+// Schema.Resolve applies such a fragment to the empty stand-in document and
+// fails, so without the resolve-error gate's document-miss tolerance the
+// validator could never be built.
+func TestCompileToleratesFragmentRefToLateDocument(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		ref string
+		doc string
+	}{
+		"pointer fragment": {
+			ref: "https://example.test/late.json#/$defs/x",
+			doc: `{"$id": "https://example.test/late.json", "$defs": {"x": {"type": "integer"}}}`,
+		},
+		"anchor fragment": {
+			ref: "https://example.test/late.json#a",
+			doc: `{"$id": "https://example.test/late.json",` +
+				` "$defs": {"x": {"$anchor": "a", "type": "integer"}}}`,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			schema, err := jsonschema.ParseSchema([]byte(`{"properties": {"p": {"$ref": "` + tc.ref + `"}}}`))
+			require.NoError(t, err)
+
+			_, err = jsonschema.Compile(t.Context(), schema)
+			require.NoError(t, err, "a fragment ref to an unresolvable document compiles without a resolver")
+
+			doc, err := jsonschema.ParseSchema([]byte(tc.doc))
+			require.NoError(t, err)
+
+			resolver := &lateResolver{doc: doc}
+
+			v, err := jsonschema.Compile(t.Context(), schema, jsonschema.WithRefResolver(resolver))
+			require.NoError(t, err, "a resolver miss at compile time is tolerated for a fragment ref")
+
+			err = v.ValidateJSON(t.Context(), []byte(`{"p": 1}`))
+			require.ErrorContains(t, err, "cannot resolve $ref",
+				"an unserved document reports through the validation walk")
+
+			resolver.armed.Store(true)
+
+			require.NoError(t, v.ValidateJSON(t.Context(), []byte(`{"p": 1}`)),
+				"the fragment resolves once the resolver serves the document")
+			require.ErrorContains(t, v.ValidateJSON(t.Context(), []byte(`{"p": "s"}`)),
+				`expected "integer"`, "the served document's constraint applies")
+		})
+	}
+}
+
 // TestValidateUnresolvableFragmentRefInFallbackTarget covers the fallback
 // variant: a broken fragment ref two levels behind JSON-pointer fallback
 // targets, past the compile gate's one-level own-reference check. Compile
