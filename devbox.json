@@ -3,7 +3,7 @@
   "packages": {
     "go": "1.26.4",
     "go-task": "3.53.1",
-    "lefthook": "2.1.5",
+    "lefthook": "2.1.10",
     "golangci-lint": "2.13.1",
     "prettier": "3.8.3",
     "gcc": {
