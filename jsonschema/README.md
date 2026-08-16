@@ -639,6 +639,11 @@ draft-06, draft-04, or draft-03) fails `Compile` and `Inline` with
 semantics; a `WithDraft` override processes such a document explicitly. A
 custom metaschema URI keeps the `Draft2020` default.
 
+Anchor registration follows the draft in validation and inlining alike:
+`$anchor` and `$dynamicAnchor` name resolution targets only under Draft
+2020-12; under Draft-07 they are unknown annotations and a `$ref` naming one
+does not resolve.
+
 ## Tag interpreters
 
 All struct-tag interpretation beyond the `json` and `jsonschema` tags goes

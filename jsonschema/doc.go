@@ -858,7 +858,10 @@
 // dependentRequired/dependentSchemas under 2020-12) and $ref sibling behavior
 // (Draft-07 ignores siblings; 2020-12 processes them). The legacy dependencies
 // keyword is honored under both drafts: under 2020-12 it is accepted for
-// backward compatibility alongside dependentRequired/dependentSchemas.
+// backward compatibility alongside dependentRequired/dependentSchemas. Anchor
+// registration follows the draft as well: $anchor and $dynamicAnchor name
+// resolution targets only under 2020-12; under Draft-07 they are unknown
+// annotations and a $ref naming one does not resolve.
 //
 // All validation failures are collected; validation does not stop on the first
 // error. The returned [*ValidationError] forms a tree: compositional keywords

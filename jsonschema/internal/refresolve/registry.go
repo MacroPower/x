@@ -120,17 +120,22 @@ func (r *Registry) walkInto(schema *jsonschema.Schema, parentBase string, onlyIf
 		}
 	}
 
-	// 2020-12: $anchor keyword.
-	if schema.Anchor != "" {
-		register(r.anchor, uriref.AnchorKey(currentBase, schema.Anchor), schema, onlyIfAbsent)
-	}
+	// $anchor and $dynamicAnchor are Draft 2020-12 keywords; under Draft-07
+	// they are unknown annotations, register nothing, and a plain-name
+	// fragment naming one stays unresolvable.
+	if r.draft != Draft7 {
+		// 2020-12: $anchor keyword.
+		if schema.Anchor != "" {
+			register(r.anchor, uriref.AnchorKey(currentBase, schema.Anchor), schema, onlyIfAbsent)
+		}
 
-	// 2020-12: $dynamicAnchor keyword. Also registered as a regular anchor
-	// (accessible via $ref).
-	if schema.DynamicAnchor != "" {
-		key := uriref.AnchorKey(currentBase, schema.DynamicAnchor)
-		register(r.anchor, key, schema, onlyIfAbsent)
-		register(r.dynamicAnchor, key, schema, onlyIfAbsent)
+		// 2020-12: $dynamicAnchor keyword. Also registered as a regular anchor
+		// (accessible via $ref).
+		if schema.DynamicAnchor != "" {
+			key := uriref.AnchorKey(currentBase, schema.DynamicAnchor)
+			register(r.anchor, key, schema, onlyIfAbsent)
+			register(r.dynamicAnchor, key, schema, onlyIfAbsent)
+		}
 	}
 
 	// Store base URI for this schema (used during $ref resolution). Draft-07
