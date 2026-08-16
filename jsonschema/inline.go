@@ -81,6 +81,13 @@ type inliner struct {
 	// distinct from the resolution core's own enum.
 	draft Draft
 
+	// Count of fallback consultations caused by a ref closing on an in-flight
+	// target. Unlike a resolution failure, which fails identically wherever the
+	// ref is expanded from, a cycle truncation depends on the inflight stack of
+	// the expansion that hit it, so a copy built while the counter moved is
+	// context-dependent and must not be memoized (see [inliner.inlineCopy]).
+	cycleFallbacks int
+
 	// Current depth of nested substitute expansions. Each [SubstituteRef]
 	// clone is a fresh schema the pointer-identity inflight guard never
 	// matches, so a fallback that substitutes a schema with its own failing
@@ -598,6 +605,8 @@ func (in *inliner) expandTarget(pristine *Schema, path string) (*Schema, error) 
 	// A target already indexed and currently in flight closes a reference cycle;
 	// a not-yet-indexed target cannot be in flight.
 	if id, ok := in.index.nodeID(target); ok && in.inflight[id] {
+		in.cycleFallbacks++
+
 		return in.substitute(pristine, path, ref, fmt.Errorf("%w: %q", ErrRefCycle, ref))
 	}
 
@@ -746,7 +755,9 @@ func (in *inliner) substitute(pristine *Schema, path, ref string, inlineErr erro
 // JSON Pointer location within its containing document, seeding the walk's
 // path tracking. When memoize is set, the completed target is recorded so one
 // referenced from several places is expanded once; every additional use clones
-// the memoized copy so no two positions in the output share nodes. A
+// the memoized copy so no two positions in the output share nodes. A copy
+// truncated by the cycle fallback is never recorded, since the truncation
+// belongs to this expansion's inflight stack, not to the target. A
 // substitute-originated copy passes memoize false: its pointer is fresh and
 // never resolved again, so memoizing it would only accumulate dead entries. The
 // inflight set marks targets whose copy is still being built: a ref resolving
@@ -778,6 +789,8 @@ func (in *inliner) inlineCopy(target *Schema, path string, memoize bool) (*Schem
 	// spliced sub-schema; the output keeps the root document's dialect.
 	cp.Schema = ""
 
+	cyclesBefore := in.cycleFallbacks
+
 	err = in.walkPair(cp, target, path)
 	if err != nil {
 		return nil, err
@@ -793,7 +806,11 @@ func (in *inliner) inlineCopy(target *Schema, path string, memoize bool) (*Schem
 	// not only the top-level node.
 	stripIdentifiers(cp)
 
-	if memoize {
+	// A copy whose expansion consulted the cycle fallback was truncated by the
+	// inflight stack of this particular expansion; an expansion of the same
+	// target from a cycle-free position must not inherit the truncation, so
+	// the copy is returned without being memoized.
+	if memoize && in.cycleFallbacks == cyclesBefore {
 		in.memo[id] = cp
 
 		// Clone on the first use too, so the memo entry is never aliased to a
@@ -803,9 +820,10 @@ func (in *inliner) inlineCopy(target *Schema, path string, memoize bool) (*Schem
 		return cloneSchema(cp)
 	}
 
-	// A non-memoized copy (a substitute or $dynamicRef expansion) is freshly
-	// built here and never stored in the memo or aliased anywhere, so it is
-	// returned directly: a second deep clone would only duplicate work.
+	// A non-memoized copy (a substitute, a $dynamicRef expansion, or a
+	// cycle-truncated build) is freshly built here and never stored in the
+	// memo or aliased anywhere, so it is returned directly: a second deep
+	// clone would only duplicate work.
 	return cp, nil
 }
 

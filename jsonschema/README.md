@@ -1332,7 +1332,11 @@ with the usual draft sibling semantics. The fallback is
 consulted once per failure, at the reference that directly failed: a
 failure inside a nested expansion consults the innermost failing ref with
 its path in its containing document, and a declined consultation propagates
-outward without re-consulting at the enclosing refs. A substitute is
+outward without re-consulting at the enclosing refs. A cycle failure
+belongs to the expansion that closed it: a copy truncated by a cycle stays
+local to that expansion rather than being reused, so the same source ref
+can consult again when another expansion reaches it with a different
+in-flight stack. A substitute is
 deep-copied before splicing and is itself inlined recursively, its refs
 resolving in the context of the document containing the failing ref; a
 cycle introduced by the substitute is an ordinary `ErrRefCycle`.

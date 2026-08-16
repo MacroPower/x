@@ -656,7 +656,10 @@ func TestInlineRefFallback(t *testing.T) {
 			},
 			err: jsonschema.ErrRefResolve,
 		},
-		"cycle consults the innermost ref once and drop breaks it": {
+		"cycle consults the ref closing each expansion and drop breaks it": {
+			// A cycle truncation depends on the expansion's inflight stack, so
+			// a truncated copy is never memoized: each of the two expansions
+			// consults the fallback at the ref that closed its own cycle.
 			schema: stringtest.Input(`
 				{
 					"$defs": {
@@ -668,6 +671,7 @@ func TestInlineRefFallback(t *testing.T) {
 			fallback: drop,
 			wantCalls: []refFallbackCall{
 				{path: "/$defs/a", ref: "#/$defs/b", err: jsonschema.ErrRefCycle},
+				{path: "/$defs/b", ref: "#/$defs/a", err: jsonschema.ErrRefCycle},
 			},
 			want: `{"$defs": {"a": true, "b": true}}`,
 		},
