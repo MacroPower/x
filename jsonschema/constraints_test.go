@@ -637,3 +637,39 @@ func TestConstraintsForbidComposesTypeNot(t *testing.T) {
 			"the forbidden schema still holds beside the type not")
 	})
 }
+
+// TestConstraintsFacadeArity pins that Apply validates parameter counts
+// instead of silently misreading them: a missing single value would pin the
+// empty string, an extra one would be dropped, and an empty enumeration would
+// forbid every instance.
+func TestConstraintsFacadeArity(t *testing.T) {
+	t.Parallel()
+
+	type Payload struct {
+		Name string `arity:"x" json:"name"`
+	}
+
+	var noParam, extraParam, emptyEnum error
+
+	interp := boundInterp(func(c *jsonschema.Constraints) error {
+		noParam = c.Apply(jsonschema.OpNotEqual, jsonschema.AxisAuto)
+		extraParam = c.Apply(jsonschema.OpEqual, jsonschema.AxisAuto, "a", "b")
+		emptyEnum = c.Apply(jsonschema.OpOneOf, jsonschema.AxisAuto)
+
+		return nil
+	})
+
+	s, err := jsonschema.GenerateFor[Payload](t.Context(),
+		jsonschema.WithTagInterpreter("arity", interp),
+	)
+	require.NoError(t, err)
+
+	require.Error(t, noParam, "a single-value operation with no parameter must not pin the empty string")
+	require.Error(t, extraParam, "an extra parameter must not be silently dropped")
+	require.Error(t, emptyEnum, "an empty enumeration must not be recorded")
+
+	field := s.Properties["name"]
+	assert.Nil(t, field.Const, "the misapplied rules must leave no trace")
+	assert.Nil(t, field.Enum)
+	assert.Nil(t, field.Not)
+}

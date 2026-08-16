@@ -22,6 +22,16 @@ func Apply(t Target, r Rule, pol Policy) error {
 		return fmt.Errorf("tagmodel: %s", r.Op)
 	}
 
+	// Arity is checked here as well as in Bind, so a caller constructing a
+	// Rule directly (the interpreter facade) cannot hand an applier a
+	// parameter count it would silently misread: a missing single value would
+	// pin the empty string, an extra one would be dropped, and an empty
+	// enumeration would forbid every instance.
+	err := checkParams(r.Op, r.Params)
+	if err != nil {
+		return err
+	}
+
 	form := t.Shape.Form
 	if form == FormUnset || form >= formCount {
 		return fmt.Errorf("tagmodel: unclassified shape for %s", t.Shape.Type)
