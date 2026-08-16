@@ -211,6 +211,20 @@ func TestEmailFormatAcceptsQuotedLocalAndAddressLiteral(t *testing.T) {
 			instance: `user@[IPv6:2001:db8::1]`,
 			valid:    true,
 		},
+		"lowercase IPv6 tag": {
+			// The "IPv6:" tag is an ABNF literal, so any casing is valid
+			// (RFC 5234 §2.3).
+			instance: `user@[ipv6:2001:db8::1]`,
+			valid:    true,
+		},
+		"uppercase IPv6 tag": {
+			instance: `user@[IPV6:::1]`,
+			valid:    true,
+		},
+		"invalid address after case-folded IPv6 tag": {
+			instance: `user@[ipv6:not-an-address]`,
+			valid:    false,
+		},
 		"empty quoted local part": {
 			// Quoted-string = DQUOTE *QcontentSMTP DQUOTE permits zero content
 			// characters, and the format assertion is grammar conformance.

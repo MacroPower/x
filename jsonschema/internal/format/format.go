@@ -480,8 +480,10 @@ func validateEmailDomain(d string) error {
 
 	if strings.HasPrefix(d, "[") && strings.HasSuffix(d, "]") {
 		lit := d[1 : len(d)-1]
-		if rest, found := strings.CutPrefix(lit, "IPv6:"); found {
-			return validateIPv6(rest)
+		// The "IPv6:" tag is an ABNF literal (RFC 5321 §4.1.3), so it is
+		// case-insensitive per RFC 5234 §2.3.
+		if len(lit) >= len("IPv6:") && strings.EqualFold(lit[:len("IPv6:")], "IPv6:") {
+			return validateIPv6(lit[len("IPv6:"):])
 		}
 
 		return validateIPv4(lit)
