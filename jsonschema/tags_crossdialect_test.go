@@ -44,6 +44,13 @@ type crossShape struct {
 	// tag's const= is always a value. They are not two spellings of one rule
 	// there, so pairing them would assert an equivalence neither dialect claims.
 	sized bool
+	// The uniqueDiverges flag marks a shape where uniqueness splits on the
+	// NamedKeywords policy: the model's cell is an ignore (a real rule with
+	// nothing faithful to emit), which the rule-shaped validate dialect drops
+	// while the keyword-naming jsonschema tag reports as an error rather than
+	// an inert keyword. The equivalence pairing skips it; each dialect's own
+	// tests pin its half.
+	uniqueDiverges bool
 }
 
 func crossShapes() []crossShape {
@@ -64,6 +71,13 @@ func crossShapes() []crossShape {
 		return out
 	}
 
+	// The go-playground unique on a map means its values are distinct, a rule
+	// with no object-side counterpart to uniqueItems, so the map is the one
+	// shape where uniqueness diverges by policy rather than agreeing cell for
+	// cell.
+	mapShape := sized(num, "map", reflect.TypeFor[map[string]int]())
+	mapShape.uniqueDiverges = true
+
 	return []crossShape{
 		with(str, "string", reflect.TypeFor[string](), "v"),
 		with(num, "int8", reflect.TypeFor[int8](), "v"),
@@ -74,7 +88,7 @@ func crossShapes() []crossShape {
 		sized(str, "nested string slice", reflect.TypeFor[[][]string]()),
 		with(str, "byte slice", reflect.TypeFor[[]byte](), "v"),
 		with(str, "raw message", reflect.TypeFor[json.RawMessage](), "v"),
-		sized(num, "map", reflect.TypeFor[map[string]int]()),
+		mapShape,
 		with(num, "string-coerced int", reflect.TypeFor[int](), "v,string"),
 		with(num, "text-marshaling numeric", reflect.TypeFor[crossLevel](), "v"),
 		sized(num, "slice of text-marshaling numeric", reflect.TypeFor[[]crossLevel]()),
@@ -128,10 +142,14 @@ func TestCrossDialectEquivalence(t *testing.T) {
 			// and each dialect's own tests pin its literal domain.
 			pairs := map[string][2]string{
 				"enumeration": {"enum=" + sh.pipeList, "oneof=" + sh.spaceLis},
-				// Uniqueness shares no policy divergence: neither field
-				// parameterizes it, and both dialects reach the same cell, so
-				// every shape must agree on the keyword or on the rejection.
-				"element uniqueness": {"uniqueItems=true", "unique"},
+			}
+
+			// Both dialects reach the same uniqueness cell, so every shape
+			// must agree on the keyword or on the rejection -- except the one
+			// shape whose cell is an ignore, where the NamedKeywords policy
+			// deliberately splits the outcome (see crossShape.uniqueDiverges).
+			if !sh.uniqueDiverges {
+				pairs["element uniqueness"] = [2]string{"uniqueItems=true", "unique"}
 			}
 
 			if !sh.sized {

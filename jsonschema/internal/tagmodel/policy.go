@@ -50,4 +50,12 @@ type Policy struct {
 	// nullable shape. The jsonschema tag spells null that way; the validate tag
 	// has no null literal, so there "null" is the four-character string.
 	AllowNullScalar bool
+	// NamedKeywords marks a dialect whose keys name JSON Schema keywords
+	// outright rather than runtime rules. An ignored cell -- a real rule the
+	// schema vocabulary has nothing faithful to emit for -- then reports
+	// [ErrUnsupported] instead of dropping the key: a rule-shaped dialect's
+	// constraint still holds at runtime when nothing is emitted, but an author
+	// who named a keyword asked for that keyword, and a silent drop would
+	// leave text that reads as a constraint nothing enforces.
+	NamedKeywords bool
 }

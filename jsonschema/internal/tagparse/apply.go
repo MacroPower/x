@@ -32,11 +32,16 @@ var (
 	// error.) A size literal is likewise a keyword value, and minLength's value
 	// domain is non-negative, so a negative one is rejected rather than folded
 	// into the unsatisfiable range go-playground's max=-1 means. Null is
-	// spellable here, since this tag has a null literal.
+	// spellable here, since this tag has a null literal. And because every key
+	// names a JSON Schema keyword outright, a cell the model would drop as a
+	// rule-shaped no-op (uniqueItems on a map) is an error here instead: the
+	// author asked for that keyword, and this dialect emits no keyword nothing
+	// enforces.
 	tagPolicy = tagmodel.Policy{
 		BoundKind:       reflect.Invalid,
 		Sizes:           tagmodel.SizeStrict,
 		AllowNullScalar: true,
+		NamedKeywords:   true,
 	}
 
 	// The tagKeys table maps each constraint keyword this tag spells to the shared operation

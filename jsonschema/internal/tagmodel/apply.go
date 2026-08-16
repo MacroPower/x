@@ -42,7 +42,16 @@ func Apply(t Target, r Rule, pol Policy) error {
 	case statusApply:
 		return c.apply(t, r, pol)
 	case statusIgnore:
+		// An ignored cell is a real rule with nothing faithful to emit, which
+		// only a rule-shaped dialect can drop: its constraint still holds at
+		// runtime. A dialect that names keywords outright gets the rejection
+		// instead, per its policy of no inert keywords.
+		if pol.NamedKeywords {
+			return fmt.Errorf("%w: %s", ErrUnsupported, c.why)
+		}
+
 		return nil
+
 	default:
 		return fmt.Errorf("%w: %s", ErrUnsupported, c.why)
 	}
