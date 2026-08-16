@@ -624,7 +624,13 @@
 // generation targets the given draft, while validation and [Inline] use it
 // in place of the draft they otherwise detect from the root schema's $schema
 // field, for schema documents that omit $schema or carry one that does not
-// reflect their dialect.
+// reflect their dialect. Detection recognizes the Draft-7 and 2020-12 URIs;
+// a document omitting $schema, or carrying a custom metaschema URI, defaults
+// to [Draft2020]. A $schema declaring an official dialect this package does
+// not implement (2019-09, draft-06, draft-04, or draft-03) fails [Compile]
+// and [Inline] with [ErrUnsupportedDraft] rather than being silently
+// processed under different semantics; a [WithDraft] override processes such
+// a document explicitly.
 //
 // # Processing Order
 //

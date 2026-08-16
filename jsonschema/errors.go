@@ -35,6 +35,17 @@ var (
 	// tuple semantics, or use prefixItems.
 	ErrItemsArrayUnderDraft2020 = errors.New("array-form items is not valid under draft 2020-12")
 
+	// ErrUnsupportedDraft is returned by [Compile] and [Inline] when the root
+	// schema's $schema declares an official dialect this package does not
+	// implement (2019-09, draft-06, draft-04, or draft-03). Processing such a
+	// document under a supported draft would silently change keyword semantics
+	// (a 2019-09 $recursiveRef lands in Extra and asserts nothing, a valid
+	// draft-06 tuple-form items is rejected), so the declaration is an error
+	// rather than a guess. A [WithDraft] override processes the document under
+	// the given draft explicitly; an unrecognized non-official $schema URI (a
+	// custom metaschema) keeps the [Draft2020] default as before.
+	ErrUnsupportedDraft = errors.New("unsupported $schema dialect")
+
 	// ErrNegativeBound is returned by [Compile] when a length or count keyword
 	// (minLength, maxLength, minItems, maxItems, minProperties, maxProperties,
 	// minContains, maxContains) carries a negative value, which the spec defines

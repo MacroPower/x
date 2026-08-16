@@ -624,7 +624,12 @@ The `WithDraft` option serves generation, validation, and `Inline` alike:
 generation targets the given draft, while validation and inlining use it in
 place of the draft they otherwise detect from the root schema's `$schema`
 field, for schema documents that omit `$schema` (which would default to
-`Draft2020`) or carry one that does not reflect their dialect.
+`Draft2020`) or carry one that does not reflect their dialect. A `$schema`
+declaring an official dialect this package does not implement (2019-09,
+draft-06, draft-04, or draft-03) fails `Compile` and `Inline` with
+`ErrUnsupportedDraft` rather than being silently processed under different
+semantics; a `WithDraft` override processes such a document explicitly. A
+custom metaschema URI keeps the `Draft2020` default.
 
 ## Tag interpreters
 

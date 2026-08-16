@@ -383,7 +383,12 @@ func (in *inliner) run(s *Schema) (*Schema, error) {
 	// pristine copies are registered, so no resolution can observe a mutation.
 	// In retrieval-base mode the walk treats $id as inert, so every schema's
 	// base URI stays the document's retrieval URI and $id registers nothing.
-	in.draft = resolveDraft(pristine, in.draftOverride)
+	draft, err := resolveDraft(pristine, in.draftOverride)
+	if err != nil {
+		return nil, err
+	}
+
+	in.draft = draft
 	in.profile = in.draft.profile()
 
 	reg := refresolve.NewRegistry(refDeps(), toRefDraft(in.draft), in.retrievalBase)

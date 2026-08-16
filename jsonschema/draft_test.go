@@ -117,3 +117,51 @@ func TestWithDraft_GenerateUnchanged(t *testing.T) {
 
 	assert.Equal(t, "http://json-schema.org/draft-07/schema#", s.Schema)
 }
+
+// TestUnsupportedDeclaredDialect pins that a root schema declaring an official
+// dialect this package does not implement fails Compile and Inline with
+// ErrUnsupportedDraft instead of being silently processed as 2020-12 (under
+// which, for example, a 2019-09 $recursiveRef lands in Extra and asserts
+// nothing). A WithDraft override processes the document explicitly, and a
+// non-official custom metaschema URI keeps the 2020-12 default.
+func TestUnsupportedDeclaredDialect(t *testing.T) {
+	t.Parallel()
+
+	for name, uri := range map[string]string{
+		"2019-09":                "https://json-schema.org/draft/2019-09/schema",
+		"2019-09 with fragment":  "https://json-schema.org/draft/2019-09/schema#",
+		"draft-06":               "http://json-schema.org/draft-06/schema#",
+		"draft-04":               "http://json-schema.org/draft-04/schema#",
+		"draft-03":               "http://json-schema.org/draft-03/schema#",
+		"draft-04 https no frag": "https://json-schema.org/draft-04/schema",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			schema := &jsonschema.Schema{Schema: uri, Type: "object"}
+
+			_, err := jsonschema.Compile(t.Context(), schema)
+			require.ErrorIs(t, err, jsonschema.ErrUnsupportedDraft)
+
+			_, err = jsonschema.Inline(t.Context(), schema)
+			require.ErrorIs(t, err, jsonschema.ErrUnsupportedDraft)
+
+			// The override is the explicit escape hatch.
+			_, err = jsonschema.Compile(t.Context(), schema,
+				jsonschema.WithDraft(jsonschema.Draft2020))
+			require.NoError(t, err)
+		})
+	}
+
+	t.Run("custom metaschema URI keeps the default", func(t *testing.T) {
+		t.Parallel()
+
+		schema := &jsonschema.Schema{
+			Schema: "https://example.com/my-metaschema",
+			Type:   "object",
+		}
+
+		_, err := jsonschema.Compile(t.Context(), schema)
+		require.NoError(t, err)
+	})
+}

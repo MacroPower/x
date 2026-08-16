@@ -405,13 +405,18 @@ func newValidator(ctx context.Context, schema *Schema, opts []ValidateOption) (*
 	}
 
 	// Detect draft from $schema field; a WithDraft override wins.
-	v.draft = resolveDraft(schema, v.draftOverride)
+	draft, err := resolveDraft(schema, v.draftOverride)
+	if err != nil {
+		return nil, err
+	}
+
+	v.draft = draft
 	v.profile = v.draft.profile()
 
 	// Resolve active vocabularies. The metaschema resolver reads the compile
 	// context from the ctx field set above, not a threaded parameter.
 	//nolint:contextcheck // See the comment above.
-	err := v.resolveVocabularies()
+	err = v.resolveVocabularies()
 	if err != nil {
 		return nil, err
 	}
@@ -1100,27 +1105,53 @@ func cloneSchema(s *Schema) (*Schema, error) {
 // root schema's $schema field. It is the single detect-then-override site the
 // validator and inliner share. Returning the override without reading $schema is
 // behavior-preserving because [detectDraft] is a pure read with no side effect.
-func resolveDraft(s *Schema, override *Draft) Draft {
+func resolveDraft(s *Schema, override *Draft) (Draft, error) {
 	if override != nil {
-		return *override
+		return *override, nil
 	}
 
 	return detectDraft(s)
 }
 
-// detectDraft determines the draft from the root schema's $schema field.
-func detectDraft(s *Schema) Draft {
+// detectDraft determines the draft from the root schema's $schema field. A
+// declared official dialect this package does not implement is an error
+// rather than a guess (see [ErrUnsupportedDraft]); any other unrecognized URI
+// is a custom metaschema and keeps the [Draft2020] default.
+func detectDraft(s *Schema) (Draft, error) {
 	switch s.Schema {
 	case Draft7.schemaURI(),
 		"http://json-schema.org/draft-07/schema",
 		"https://json-schema.org/draft-07/schema#",
 		"https://json-schema.org/draft-07/schema":
-		return Draft7
+		return Draft7, nil
 	case Draft2020.schemaURI(),
 		"https://json-schema.org/draft/2020-12/schema#":
-		return Draft2020
+		return Draft2020, nil
+	}
+
+	if unsupportedDialect(s.Schema) {
+		return Draft2020, fmt.Errorf("%w: %q", ErrUnsupportedDraft, s.Schema)
+	}
+
+	return Draft2020, nil
+}
+
+// unsupportedDialect reports whether uri names an official json-schema.org
+// dialect this package does not implement, in any of its published spellings
+// (http or https scheme, with or without the trailing empty fragment).
+func unsupportedDialect(uri string) bool {
+	uri = strings.TrimSuffix(uri, "#")
+	uri = strings.TrimPrefix(uri, "http://")
+	uri = strings.TrimPrefix(uri, "https://")
+
+	switch uri {
+	case "json-schema.org/draft/2019-09/schema",
+		"json-schema.org/draft-06/schema",
+		"json-schema.org/draft-04/schema",
+		"json-schema.org/draft-03/schema":
+		return true
 	default:
-		return Draft2020
+		return false
 	}
 }
 
