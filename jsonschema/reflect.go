@@ -1011,7 +1011,7 @@ func (g *generator) buildStructSchema(t reflect.Type) (*node, Nullability, error
 	// then run tag interpreters. This ensures a tag interpreter observing
 	// FieldContext.Parent sees the complete sibling property set regardless of
 	// field order.
-	fields := g.collectStructFields(t)
+	fields, ghostWon := g.collectStructFields(t)
 
 	var hasAllOf, hasShadowPartial bool
 
@@ -1068,6 +1068,28 @@ func (g *generator) buildStructSchema(t reflect.Type) (*node, Nullability, error
 			s.AdditionalProperties = nil
 			s.UnevaluatedProperties = &Schema{Not: &Schema{}}
 
+			// A ghost-won name appears in the marshaled object (the embed's
+			// field value is carried under it) with no emitted property: the
+			// embed's allOf branch holds the assertion. The branch is not
+			// guaranteed to evaluate the name -- an unrestricted TypeSchema
+			// renders as true and evaluates nothing -- and the close would
+			// then reject the object's own marshaled output, so the parent
+			// evaluates each ghost-won name itself with a true property. The
+			// branch's assertions still apply through allOf, so this changes
+			// no verdict a property-enumerating branch produces.
+			for _, name := range ghostWon {
+				if _, ok := s.Properties[name]; ok {
+					continue
+				}
+
+				if s.Properties == nil {
+					s.Properties = map[string]*Schema{}
+				}
+
+				s.Properties[name] = &Schema{}
+				s.PropertyOrder = append(s.PropertyOrder, name)
+			}
+
 		default:
 			// Draft-07: omit additionalProperties when allOf is in use.
 			s.AdditionalProperties = nil
@@ -1099,11 +1121,6 @@ type structFieldInfo struct {
 	omitzero        bool
 	jsonString      bool
 	composeViaAllOf bool
-	// Tagged records whether the JSON name came from an explicit json tag
-	// name, the input to encoding/json's same-depth tie-break. It is carried
-	// so a composed embed's promoted fields (ghost sightings in the enclosing
-	// struct's resolution) replay the tie-break correctly.
-	tagged bool
 	// Optional is true for an allOf-composed embed reached through a
 	// pointer-typed embedded field (directly or via an enclosing pointer
 	// embed). Encoding/json omits the embed's entire contribution when the
@@ -1133,8 +1150,14 @@ type structFieldInfo struct {
 // a type as visited and then skip a shallower embed of the same type,
 // silently dropping fields that encoding/json promotes.
 //
+// Composed embeds join the same walk as ghost subtrees: their promoted names
+// compete in resolution exactly as encoding/json's flat walk resolves them,
+// and the second return value lists the ghost-won names, each a name the
+// marshaled object carries whose assertion lives in an embed's allOf branch
+// rather than an emitted property.
+//
 //nolint:nestif // Mirrors encoding/json's field collection logic which is inherently nested.
-func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
+func (g *generator) collectStructFields(t reflect.Type) ([]structFieldInfo, []string) {
 	// Mark t in-progress so the ghost collection below (which re-enters this
 	// method for composed embed types) terminates on a self- or mutually
 	// composed cycle instead of recursing without bound.
@@ -1228,11 +1251,17 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 		return n
 	}
 
-	// EmbedEntry is a struct type queued for processing at the next depth.
+	// EmbedEntry is a struct type queued for processing at the next depth. A
+	// ghost entry is a composed embed's subtree: encoding/json promotes its
+	// fields normally, so they walk here and compete in resolution, but every
+	// sighting they record is a ghost owned by ghostOwner, the composed embed
+	// whose allOf branch carries the assertions.
 	type embedEntry struct {
-		typ      reflect.Type
-		index    []int
-		optional bool
+		typ        reflect.Type
+		ghostOwner reflect.Type
+		index      []int
+		optional   bool
+		ghost      bool
 	}
 
 	// Visited tracks every struct type processed during the walk. A type is
@@ -1297,7 +1326,10 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 
 						record(
 							info.JSONName,
-							fieldLevel{field: f, depth: depth, optional: e.optional, tagged: true},
+							fieldLevel{
+								field: f, depth: depth, optional: e.optional, tagged: true,
+								ghost: e.ghost, ghostOwner: e.ghostOwner,
+							},
 							dup,
 						)
 
@@ -1305,8 +1337,12 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 					}
 
 					if ft.Kind() == reflect.Struct {
-						// Check if this embedded struct needs to be composed via allOf.
-						if g.needsAllOfComposition(ft) {
+						// Check if this embedded struct needs to be composed via
+						// allOf. Inside a ghost subtree the probe is skipped:
+						// encoding/json knows nothing of composition and promotes
+						// the nested embed's fields like any other, so the subtree
+						// flattens below and its names stay in the competition.
+						if !e.ghost && g.needsAllOfComposition(ft) {
 							// Compose via allOf: treat as a single entry. A pointer
 							// embed makes the composition optional: a nil pointer
 							// contributes nothing to the marshaled object.
@@ -1322,29 +1358,30 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 							)
 
 							// Ghost sightings: encoding/json still promotes the
-							// composed embed's fields normally, so its names
-							// compete in resolution against real fields and
-							// other embeds. A skipped scan (a self- or mutually
-							// composed type) leaves its names out, keeping the
-							// pre-ghost conservative behavior for that cycle.
+							// composed embed's fields normally, so its subtree
+							// joins this walk as a ghost entry and its names
+							// compete in resolution -- shadowing, same-depth
+							// annihilation (including a tie inside the embed
+							// that a replay of its resolved winners would
+							// miss), and the tag tie-break -- exactly as the
+							// flat encoding/json walk resolves them. A subtree
+							// skipped by the in-flight guard (a self- or
+							// mutually composed type) leaves its names out,
+							// keeping the pre-ghost conservative behavior for
+							// that cycle.
 							if !g.shadowScan[ft] {
-								promoted := g.collectStructFields(ft)
+								promoted, _ := g.collectStructFields(ft)
 								ghostPromoted[ft] = promoted
 
-								for pi := range promoted {
-									p := &promoted[pi]
-									if p.composeViaAllOf {
-										// A nested composition's names are
-										// opaque to this analysis.
-										continue
-									}
-
-									record(p.jsonName, fieldLevel{
-										depth:      depth + len(p.field.Index),
-										tagged:     p.tagged,
+								nextCount[ft]++
+								if nextCount[ft] == 1 {
+									next = append(next, embedEntry{
+										typ:        ft,
+										index:      fieldIndex,
+										optional:   e.optional || embeddedViaPointer,
 										ghost:      true,
 										ghostOwner: ft,
-									}, dup)
+									})
 								}
 							}
 
@@ -1358,10 +1395,13 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 						if nextCount[ft] == 1 {
 							// Fields reached through a pointer embed are optional
 							// because a nil embed omits them entirely.
-							next = append(
-								next,
-								embedEntry{typ: ft, index: fieldIndex, optional: e.optional || embeddedViaPointer},
-							)
+							next = append(next, embedEntry{
+								typ:        ft,
+								index:      fieldIndex,
+								optional:   e.optional || embeddedViaPointer,
+								ghost:      e.ghost,
+								ghostOwner: e.ghostOwner,
+							})
 						}
 
 						continue
@@ -1373,7 +1413,10 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 					// ambiguity resolution. The field name is the unqualified type
 					// identifier, without the type arguments [reflect.Type.Name]
 					// carries for an instantiated generic type.
-					record(f.Name, fieldLevel{field: f, depth: depth, optional: e.optional}, dup)
+					record(f.Name, fieldLevel{
+						field: f, depth: depth, optional: e.optional,
+						ghost: e.ghost, ghostOwner: e.ghostOwner,
+					}, dup)
 
 					continue
 				}
@@ -1389,7 +1432,10 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 
 				record(
 					info.JSONName,
-					fieldLevel{field: f, depth: depth, optional: e.optional, tagged: info.TaggedName},
+					fieldLevel{
+						field: f, depth: depth, optional: e.optional, tagged: info.TaggedName,
+						ghost: e.ghost, ghostOwner: e.ghostOwner,
+					},
 					dup,
 				)
 			}
@@ -1400,7 +1446,10 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 	// recorded for the shadow marking below: which depth claimed the name,
 	// whether a same-depth ambiguity annihilated it, and whether the winner
 	// was a composed embed's ghost.
-	var result []structFieldInfo
+	var (
+		result   []structFieldInfo
+		ghostWon []string
+	)
 
 	outcomes := map[string]nameOutcome{}
 
@@ -1455,8 +1504,11 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 			// A composed embed's promoted field won the name: no property is
 			// emitted (the embed's allOf branch carries the assertion), and
 			// the real fields it defeated stay out of the result, matching
-			// the value encoding/json actually marshals under the name.
+			// the value encoding/json actually marshals under the name. The
+			// name is reported to the caller, whose closed object must still
+			// evaluate it.
 			outcomes[key.name] = nameOutcome{depth: minDepth, ghostOwner: atMin[0].ghostOwner}
+			ghostWon = append(ghostWon, key.name)
 
 			continue
 		}
@@ -1487,7 +1539,6 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 			omitempty:  info.Omitempty || atMin[0].optional,
 			omitzero:   info.Omitzero,
 			jsonString: info.JSONString,
-			tagged:     atMin[0].tagged,
 		}
 		result = append(result, sfi)
 	}
@@ -1502,7 +1553,7 @@ func (g *generator) collectStructFields(t reflect.Type) []structFieldInfo {
 
 	g.markShadowedCompositions(result, outcomes, ghostPromoted)
 
-	return result
+	return result, ghostWon
 }
 
 // nameOutcome is the resolution result for one real JSON name: the depth that

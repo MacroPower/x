@@ -459,11 +459,21 @@
 //
 // Field shadowing and ambiguity follow [encoding/json] rules: outer fields
 // shadow inner fields of the same name, and ambiguous fields at the same
-// depth are silently dropped.
+// depth are silently dropped. A composed embed's promoted names take part in
+// the same resolution, exactly as [encoding/json]'s flat walk resolves them
+// (shadowing deeper fields, annihilating on same-depth ties -- including a
+// tie inside the embed itself -- and applying the tag tie-break), even though
+// they never become properties: the embed's allOf branch carries their
+// assertions.
 //
 // When allOf composition is used, [Draft2020] uses unevaluatedProperties: false
-// instead of additionalProperties: false on the parent. [Draft7] omits
-// additionalProperties: false from the parent when allOf is in use.
+// instead of additionalProperties: false on the parent, and each promoted
+// name a composed embed contributes to the marshaled object gets a true
+// property on the parent: the embed's branch carries the name's assertions
+// but is not guaranteed to evaluate it (an unrestricted [TypeSchema] renders
+// as true and evaluates nothing), and an unevaluated name would otherwise be
+// rejected. [Draft7] omits additionalProperties: false from the parent when
+// allOf is in use.
 //
 // Property ordering in the output matches the order fields appear in the Go
 // struct definition (via the upstream PropertyOrder field). Empty structs and

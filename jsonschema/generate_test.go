@@ -6311,13 +6311,18 @@ func TestWithTypeSchemaProvider_EmbeddedComposition(t *testing.T) {
 
 	got, err := json.Marshal(s)
 	require.NoError(t, err)
+	// The embed's promoted "name" gets a true property: the provider's branch
+	// carries the assertion but is not guaranteed to evaluate the name (here
+	// it declares no properties at all), and the unevaluatedProperties close
+	// would otherwise reject the struct's own marshaled output.
 	assert.JSONEq(t, `{
 		"$schema": "https://json-schema.org/draft/2020-12/schema",
 		"type": "object",
 		"$defs": {"base": {"type": "object"}},
 		"allOf": [{"$ref": "#/$defs/base"}],
 		"properties": {
-			"extra": {"type": "integer"}
+			"extra": {"type": "integer"},
+			"name": true
 		},
 		"required": ["extra"],
 		"unevaluatedProperties": false
@@ -7161,13 +7166,17 @@ func TestGenerateFor_EmbeddedWithTypeSchemaOverride(t *testing.T) {
 	require.NoError(t, err)
 
 	// OverrideTarget has a WithTypeSchema override → composed via allOf.
-	// Named struct type, so the override goes into $defs.
+	// Named struct type, so the override goes into $defs. The promoted
+	// "inner" gets a true property: the override branch carries the
+	// assertion but evaluates no properties, and the unevaluatedProperties
+	// close would otherwise reject the name.
 	assert.JSONEq(t, `{
 		"$schema":"https://json-schema.org/draft/2020-12/schema",
 		"type":"object",
 		"allOf":[{"$ref":"#/$defs/OverrideTarget"}],
 		"properties":{
-			"extra":{"type":"string"}
+			"extra":{"type":"string"},
+			"inner":true
 		},
 		"required":["extra"],
 		"unevaluatedProperties":false,

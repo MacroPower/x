@@ -532,8 +532,16 @@ used for such an embedded type must leave the object
 open (no `additionalProperties: false`), since `allOf` evaluates each branch
 against the whole object: a closed branch rejects the parent's sibling
 properties and the generated schema then rejects the struct's own marshaled
-JSON. Under `allOf` composition, `Draft2020` puts `unevaluatedProperties: false`
-on the parent in place of `additionalProperties: false`, while `Draft7` omits
+JSON. A composed embed's promoted names still take part in field resolution
+exactly as `encoding/json`'s flat walk resolves them (shadowing, same-depth
+annihilation -- ties inside the embed included -- and the tag tie-break),
+even though they never become properties: the embed's branch carries their
+assertions. Under `allOf` composition, `Draft2020` puts `unevaluatedProperties: false`
+on the parent in place of `additionalProperties: false`, and each promoted
+name a composed embed contributes to the marshaled object gets a `true`
+property on the parent: the branch is not guaranteed to evaluate the name (an
+unrestricted `TypeSchema` renders as `true` and evaluates nothing), and an
+unevaluated name would otherwise be rejected. `Draft7` omits
 `additionalProperties: false` from the parent altogether. Embedded non-struct
 types, interfaces included, are regular leaf fields keyed by the field name,
 exactly as `encoding/json` records them: the key is always emitted (`null` for a
