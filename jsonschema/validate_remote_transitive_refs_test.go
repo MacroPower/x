@@ -85,3 +85,43 @@ func TestCompileRemoteTransitiveBrokenRef(t *testing.T) {
 		})
 	}
 }
+
+// TestCompileTransitiveFallbackTargetVetted locks in that a JSON-pointer
+// fallback target first materialized while vetting a remote's registered refs
+// (a fragment ref two remote hops from the root) is structurally vetted at
+// Compile. The identical shape one hop deep fails Compile; before the
+// post-loop vet pass, the two-hop shape compiled cleanly and then failed
+// every Validate run with a ref-resolve error instead.
+func TestCompileTransitiveFallbackTargetVetted(t *testing.T) {
+	t.Parallel()
+
+	inner, err := jsonschema.ParseSchema([]byte(`{
+		"$ref": "#/examples/0",
+		"examples": [{"type": "strnig"}]
+	}`))
+	require.NoError(t, err)
+
+	outer, err := jsonschema.ParseSchema([]byte(`{"$ref": "https://example.test/b.json"}`))
+	require.NoError(t, err)
+
+	resolver := mapResolver{
+		"https://example.test/a.json": outer,
+		"https://example.test/b.json": inner,
+	}
+
+	for name, ref := range map[string]string{
+		"one hop":  `{"$ref": "https://example.test/b.json"}`,
+		"two hops": `{"$ref": "https://example.test/a.json"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			root, err := jsonschema.ParseSchema([]byte(ref))
+			require.NoError(t, err)
+
+			_, err = jsonschema.Compile(t.Context(), root, jsonschema.WithRefResolver(resolver))
+			require.ErrorIs(t, err, jsonschema.ErrInvalidType,
+				"the fallback target's invalid type name must fail Compile at any ref depth")
+		})
+	}
+}

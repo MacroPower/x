@@ -1340,11 +1340,30 @@ func Compile(ctx context.Context, schema *Schema, opts ...ValidateOption) (*Vali
 	// every node checked once. The precompute caches are deliberately not
 	// extended: a validation run re-materializes fallback targets as fresh
 	// objects, so pointer-keyed caches built here could never be hit.
-	for _, ft := range v.refSession.FallbackTargets() {
-		err = dv.vet(ft.Schema, ft.Locator)
-		if err != nil {
-			return nil, err
+	//
+	// The list is append-only and vetRegisteredRefs below materializes further
+	// targets (a fragment ref two or more remote hops from the root resolves
+	// through this same session), so the vet runs from a cursor and is invoked
+	// again after the registered-URI loop to cover the late arrivals.
+	vettedFallbacks := 0
+
+	vetFallbackTargets := func() error {
+		targets := v.refSession.FallbackTargets()
+		for ; vettedFallbacks < len(targets); vettedFallbacks++ {
+			ft := targets[vettedFallbacks]
+
+			err := dv.vet(ft.Schema, ft.Locator)
+			if err != nil {
+				return err
+			}
 		}
+
+		return nil
+	}
+
+	err = vetFallbackTargets()
+	if err != nil {
+		return nil, err
 	}
 
 	// Resolve may have fetched and registered remote documents in uriRegistry
@@ -1389,6 +1408,15 @@ func Compile(ctx context.Context, schema *Schema, opts ...ValidateOption) (*Vali
 			v.sizeCaches(v.index.len())
 			v.precomputeRange(from, v.index.len())
 		}
+	}
+
+	// Vet the fallback targets vetRegisteredRefs materialized after the first
+	// pass consumed the list, so a target reached only through a fragment ref
+	// two or more remote hops deep fails compilation exactly like the
+	// identical shape one hop deep, instead of failing every validation run.
+	err = vetFallbackTargets()
+	if err != nil {
+		return nil, err
 	}
 
 	// Drop the compile context so the cached validator never holds a stale or
