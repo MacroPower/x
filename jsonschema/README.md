@@ -1287,7 +1287,12 @@ one draft throughout):
   under either draft.
 
 A spliced copy never carries a `$schema` keyword, and the returned root
-keeps the input's `$schema`. Refs are inlined only in typed sub-schema
+keeps the input's `$schema`. A spliced copy also carries no `$id`,
+`$anchor`, or `$dynamicAnchor` anywhere in its subtree: the names identify
+the target at its original position, and duplicating them at each splice
+would declare the same identifier several times in one document. The copy
+is self-contained, so the names have nothing left to resolve. Refs are
+inlined only in typed sub-schema
 positions (those `SubschemaEntries` covers); a `$ref` carried as raw JSON inside
 an unknown keyword is left as-is, although a ref pointing into such a
 position still resolves.

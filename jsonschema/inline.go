@@ -783,6 +783,16 @@ func (in *inliner) inlineCopy(target *Schema, path string, memoize bool) (*Schem
 		return nil, err
 	}
 
+	// The identifier keywords likewise belong to the target's original
+	// position. Splicing them along with the copy would re-declare the
+	// target's $id resource at every splice position and duplicate its
+	// $anchor/$dynamicAnchor names within one resource, a document stricter
+	// consumers reject. The copy is self-contained -- no reference survives an
+	// expansion -- so the names have nothing left to resolve. Stripping runs
+	// after the walk so it covers identifiers nested anywhere in the copy,
+	// not only the top-level node.
+	stripIdentifiers(cp)
+
 	if memoize {
 		in.memo[id] = cp
 
@@ -797,6 +807,21 @@ func (in *inliner) inlineCopy(target *Schema, path string, memoize bool) (*Schem
 	// built here and never stored in the memo or aliased anywhere, so it is
 	// returned directly: a second deep clone would only duplicate work.
 	return cp, nil
+}
+
+// stripIdentifiers clears $id, $anchor, and $dynamicAnchor from every node of
+// a spliced copy's subtree. The names identify the target at its original
+// position; a copy spliced elsewhere must not re-declare them (see
+// [inliner.inlineCopy]). The copy is a tree -- cloning shares no nodes -- so
+// the recursion needs no cycle guard.
+func stripIdentifiers(s *Schema) {
+	s.ID = ""
+	s.Anchor = ""
+	s.DynamicAnchor = ""
+
+	for _, entry := range SubschemaEntries(s) {
+		stripIdentifiers(entry.Schema)
+	}
 }
 
 // resolveTarget resolves the ref at the pristine node to its pristine target

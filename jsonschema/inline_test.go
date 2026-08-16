@@ -78,7 +78,54 @@ func TestInline(t *testing.T) {
 			want: stringtest.Input(`
 				{
 					"$defs": {"s": {"$anchor": "leaf", "type": "string"}},
-					"items": {"$anchor": "leaf", "type": "string"}
+					"items": {"type": "string"}
+				}
+			`),
+		},
+		"splice copies drop the target's anchor at every position": {
+			schema: stringtest.Input(`
+				{
+					"$defs": {"t": {"$anchor": "a", "type": "integer"}},
+					"properties": {
+						"x": {"$ref": "#/$defs/t"},
+						"y": {"$ref": "#a"}
+					}
+				}
+			`),
+			want: stringtest.Input(`
+				{
+					"$defs": {"t": {"$anchor": "a", "type": "integer"}},
+					"properties": {
+						"x": {"type": "integer"},
+						"y": {"type": "integer"}
+					}
+				}
+			`),
+		},
+		"splice copies drop identifiers nested in their subtree": {
+			schema: stringtest.Input(`
+				{
+					"$defs": {
+						"t": {
+							"type": "object",
+							"properties": {"c": {"$anchor": "c", "type": "integer"}}
+						}
+					},
+					"items": {"$ref": "#/$defs/t"}
+				}
+			`),
+			want: stringtest.Input(`
+				{
+					"$defs": {
+						"t": {
+							"type": "object",
+							"properties": {"c": {"$anchor": "c", "type": "integer"}}
+						}
+					},
+					"items": {
+						"type": "object",
+						"properties": {"c": {"type": "integer"}}
+					}
 				}
 			`),
 		},
@@ -292,7 +339,7 @@ func TestInline(t *testing.T) {
 			files: map[string]string{
 				"anchored.json": `{"$defs": {"p": {"$anchor": "prt", "type": "integer"}}}`,
 			},
-			want: `{"$anchor": "prt", "type": "integer"}`,
+			want: `{"type": "integer"}`,
 		},
 		"mutually referencing defs are a cycle": {
 			schema: stringtest.Input(`
@@ -405,7 +452,6 @@ func TestInline(t *testing.T) {
 			},
 			want: stringtest.Input(`
 				{
-					"$id": "https://example.com/child.json",
 					"properties": {"x": {"type": "boolean"}}
 				}
 			`),
@@ -423,7 +469,7 @@ func TestInline(t *testing.T) {
 				{
 					"$id": "https://example.com/x.json",
 					"$defs": {"s": {"$anchor": "leaf", "type": "string"}},
-					"items": {"$anchor": "leaf", "type": "string"}
+					"items": {"type": "string"}
 				}
 			`),
 		},
@@ -437,7 +483,7 @@ func TestInline(t *testing.T) {
 			want: stringtest.Input(`
 				{
 					"$defs": {"s": {"$id": "https://example.com/y.json", "type": "string"}},
-					"properties": {"a": {"$id": "https://example.com/y.json", "type": "string"}}
+					"properties": {"a": {"type": "string"}}
 				}
 			`),
 		},

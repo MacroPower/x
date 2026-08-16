@@ -1100,7 +1100,12 @@
 // keywords depend on. Under Draft 7 siblings of $ref are ignored, so the
 // node is replaced by the target copy alone, as it also is under either
 // draft when $ref is the node's only keyword. A spliced copy never carries
-// a $schema keyword, and the returned root keeps the input's $schema. Refs
+// a $schema keyword, and the returned root keeps the input's $schema. A
+// spliced copy also carries no $id, $anchor, or $dynamicAnchor anywhere in
+// its subtree: the names identify the target at its original position, and
+// duplicating them at each splice would declare the same identifier several
+// times in one document. The copy is self-contained, so the names have
+// nothing left to resolve. Refs
 // are inlined only in typed sub-schema positions (those [SubschemaEntries]
 // covers); a $ref carried as raw JSON inside an unknown keyword is left
 // as-is, although a ref pointing into such a position still resolves.
