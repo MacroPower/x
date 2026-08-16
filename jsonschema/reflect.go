@@ -992,7 +992,8 @@ func (g *generator) schemaForStruct(t reflect.Type, nullable bool) (*node, error
 // type-level comment extraction and JSONSchemaExtend. The payload's Properties
 // hold the child nodes' bare payloads (shared pointers), so a tag interpreter
 // reading FieldContext.Parent sees the sibling shapes; render later overwrites
-// each entry with its rendered child.
+// each entry still holding its provisional payload with its rendered child,
+// leaving an entry a type-level extender deleted or replaced as authored.
 func (g *generator) buildStructSchema(t reflect.Type) (*node, Nullability, error) {
 	s := &Schema{
 		Type: typename.Object,
@@ -1788,7 +1789,8 @@ func (g *generator) buildFieldSchema(
 	}
 
 	// Add to parent. The payload (bare) is shared into parent.Properties so a
-	// build-time interpreter sees the sibling shape; render overwrites it.
+	// build-time interpreter sees the sibling shape; render overwrites the
+	// entry unless an extender deleted or replaced it.
 	if parent.payload.Properties == nil {
 		parent.payload.Properties = map[string]*Schema{}
 	}

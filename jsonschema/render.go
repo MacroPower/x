@@ -31,8 +31,11 @@ func (g *generator) render(n *node) *Schema {
 
 // renderBase renders a node's shape without the null encoding. For a composite
 // it merges the rendered child nodes into the node's own payload rather than
-// rebuilding it, so any property, allOf branch, or additionalProperties a
-// build-time extender added (not node-backed) survives.
+// rebuilding it, and only into slots that still hold the child's provisional
+// bare payload. A slot a build-time extender edited -- a property or element
+// deleted, replaced with the extender's own schema, or dropped wholesale by
+// replacing TypeSchema.Value -- is the extender's authored shape and survives
+// as written, as does anything the extender added (not node-backed).
 func (g *generator) renderBase(n *node) *Schema {
 	switch n.kind {
 	case kindValue:
@@ -40,6 +43,12 @@ func (g *generator) renderBase(n *node) *Schema {
 
 	case kindObject:
 		for _, p := range n.props {
+			// A nil or extender-replaced Properties map misses here too, so a
+			// wholesale Value replacement renders without resurrecting fields.
+			if n.payload.Properties[p.name] != p.schema.payload {
+				continue
+			}
+
 			n.payload.Properties[p.name] = g.render(p.schema)
 		}
 
@@ -55,26 +64,30 @@ func (g *generator) renderBase(n *node) *Schema {
 		return n.payload
 
 	case kindList:
-		n.payload.Items = g.render(n.items)
+		if n.payload.Items == n.items.payload {
+			n.payload.Items = g.render(n.items)
+		}
 
 		return n.payload
 
 	case kindTuple:
-		elems := make([]*Schema, len(n.prefix))
-		for i, c := range n.prefix {
-			elems[i] = g.render(c)
+		elems := n.payload.PrefixItems
+		if !g.profile.prefixItemsTuple {
+			elems = n.payload.ItemsArray
 		}
 
-		if !g.profile.prefixItemsTuple {
-			n.payload.ItemsArray = elems
-		} else {
-			n.payload.PrefixItems = elems
+		for i, c := range n.prefix {
+			if i < len(elems) && elems[i] == c.payload {
+				elems[i] = g.render(c)
+			}
 		}
 
 		return n.payload
 
 	case kindMap:
-		n.payload.AdditionalProperties = g.render(n.items)
+		if n.payload.AdditionalProperties == n.items.payload {
+			n.payload.AdditionalProperties = g.render(n.items)
+		}
 
 		return n.payload
 
