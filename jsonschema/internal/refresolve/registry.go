@@ -109,9 +109,13 @@ func (r *Registry) walkInto(schema *jsonschema.Schema, parentBase string, onlyIf
 
 	if schema.ID != "" && !r.inertIDs {
 		if uriref.IsFragmentOnly(schema.ID) {
-			// Draft-07: fragment-only $id acts as an anchor.
-			anchor := schema.ID[1:] // strip leading '#'
-			register(r.anchor, uriref.AnchorKey(currentBase, anchor), schema, onlyIfAbsent)
+			// Draft-07: fragment-only $id acts as an anchor. Draft 2020-12
+			// forbids a fragment in $id (core section 8.2.1), so there the
+			// form registers nothing and a ref naming it stays unresolvable.
+			if r.draft == Draft7 {
+				anchor := schema.ID[1:] // strip leading '#'
+				register(r.anchor, uriref.AnchorKey(currentBase, anchor), schema, onlyIfAbsent)
+			}
 		} else {
 			resolved := uriref.IDBase(currentBase, schema.ID)
 			register(r.URI, resolved, schema, onlyIfAbsent)

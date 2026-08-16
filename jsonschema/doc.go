@@ -861,7 +861,9 @@
 // backward compatibility alongside dependentRequired/dependentSchemas. Anchor
 // registration follows the draft as well: $anchor and $dynamicAnchor name
 // resolution targets only under 2020-12; under Draft-07 they are unknown
-// annotations and a $ref naming one does not resolve.
+// annotations and a $ref naming one does not resolve. Conversely the Draft-07
+// fragment-only $id anchor form registers only under Draft-07: 2020-12 forbids
+// a fragment in $id, so there the form names nothing.
 //
 // All validation failures are collected; validation does not stop on the first
 // error. The returned [*ValidationError] forms a tree: compositional keywords
