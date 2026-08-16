@@ -23,6 +23,7 @@ import (
 	"go.jacobcolvin.com/x/jsonschema/internal/format"
 	"go.jacobcolvin.com/x/jsonschema/internal/jsonequal"
 	"go.jacobcolvin.com/x/jsonschema/internal/jsonptr"
+	"go.jacobcolvin.com/x/jsonschema/internal/keywordmeta"
 	"go.jacobcolvin.com/x/jsonschema/internal/normalize"
 	"go.jacobcolvin.com/x/jsonschema/internal/numrat"
 	"go.jacobcolvin.com/x/jsonschema/internal/refresolve"
@@ -1642,6 +1643,53 @@ func checkItemsArrayDraft2020(schema *Schema, schemaPath string, visited map[*Sc
 	return nil
 }
 
+var (
+	// The sizeBounds table lists the length and count keywords with their
+	// *int accessors, for the compile-time domain check in
+	// [checkBoundDomains]. The init guard below pins the list to
+	// [keywordmeta.Sizes], so a count keyword added to the semantics table
+	// cannot silently skip the check.
+	sizeBounds = []struct {
+		get     func(*Schema) *int
+		keyword string
+	}{
+		{func(s *Schema) *int { return s.MinLength }, KeywordMinLength},
+		{func(s *Schema) *int { return s.MaxLength }, KeywordMaxLength},
+		{func(s *Schema) *int { return s.MinItems }, KeywordMinItems},
+		{func(s *Schema) *int { return s.MaxItems }, KeywordMaxItems},
+		{func(s *Schema) *int { return s.MinProperties }, KeywordMinProperties},
+		{func(s *Schema) *int { return s.MaxProperties }, KeywordMaxProperties},
+		{func(s *Schema) *int { return s.MinContains }, KeywordMinContains},
+		{func(s *Schema) *int { return s.MaxContains }, KeywordMaxContains},
+	}
+
+	// The errRefCheckStop sentinel stops a [Walk] in the resolve-error gate
+	// at the first ref that fails its check. It never escapes: the gate reads
+	// only whether the walk returned nil, so the sentinel's identity is
+	// private control flow. It is deliberately distinct from walk.go's
+	// errStopIteration, which is the [Schemas] iterator's own break signal.
+	errRefCheckStop = errors.New("stop ref check")
+)
+
+// init cross-checks sizeBounds against the semantics table's derived size
+// set. Panicking at load follows the dispatch table's convention: every test
+// binary in the module trips it, so the drift a hand-maintained keyword list
+// invites cannot land silently.
+func init() {
+	declared := make([]string, 0, len(sizeBounds))
+	for _, b := range sizeBounds {
+		declared = append(declared, b.keyword)
+	}
+
+	slices.Sort(declared)
+
+	if derived := keywordmeta.Names(keywordmeta.Sizes); !slices.Equal(declared, derived) {
+		panic(fmt.Sprintf(
+			"jsonschema: sizeBounds (%v) does not match keywordmeta.Sizes (%v)",
+			declared, derived))
+	}
+}
+
 // checkBoundDomains rejects a keyword value outside the domain the spec fixes
 // for it: a negative value on a length or count keyword (each defined as a
 // non-negative integer) and a non-positive multipleOf (defined as a number
@@ -1660,22 +1708,10 @@ func checkBoundDomains(schema *Schema, schemaPath string, visited map[*Schema]bo
 
 	visited[schema] = true
 
-	for _, bound := range []struct {
-		value   *int
-		keyword string
-	}{
-		{schema.MinLength, "minLength"},
-		{schema.MaxLength, "maxLength"},
-		{schema.MinItems, "minItems"},
-		{schema.MaxItems, "maxItems"},
-		{schema.MinProperties, "minProperties"},
-		{schema.MaxProperties, "maxProperties"},
-		{schema.MinContains, "minContains"},
-		{schema.MaxContains, "maxContains"},
-	} {
-		if bound.value != nil && *bound.value < 0 {
+	for _, bound := range sizeBounds {
+		if value := bound.get(schema); value != nil && *value < 0 {
 			return fmt.Errorf("%w: %s is %d at %s/%s",
-				ErrNegativeBound, bound.keyword, *bound.value, schemaPath, bound.keyword)
+				ErrNegativeBound, bound.keyword, *value, schemaPath, bound.keyword)
 		}
 	}
 
@@ -1865,13 +1901,6 @@ func Validate(ctx context.Context, schema *Schema, instance any, opts ...Validat
 	// above is not walked by Normalize a second time.
 	return c.validateNormalized(ctx, instance)
 }
-
-// errRefCheckStop stops a [Walk] in the resolve-error gate at the first ref
-// that fails its check. It never escapes: the gate reads only whether the walk
-// returned nil, so the sentinel's identity is private control flow. It is
-// deliberately distinct from walk.go's errStopIteration, which is the [Schemas]
-// iterator's own break signal.
-var errRefCheckStop = errors.New("stop ref check")
 
 // resolveErrorIsRefOnly reports whether a [jsonschema.Schema.Resolve] failure
 // is caused solely by $ref/$dynamicRef target lookup that this package resolves

@@ -305,6 +305,17 @@ func TestKeywordMetaDerivedSets(t *testing.T) {
 		keyword.MultipleOf,
 	}, Names(Bounds), "Bounds is the numeric, length, and count endpoints the algebra resolves")
 
+	assert.Equal(t, []string{
+		keyword.MaxContains,
+		keyword.MaxItems,
+		keyword.MaxLength,
+		keyword.MaxProperties,
+		keyword.MinContains,
+		keyword.MinItems,
+		keyword.MinLength,
+		keyword.MinProperties,
+	}, Names(Sizes), "Sizes is the length and count keywords with the non-negative-integer domain")
+
 	// VocabRefined is not a derived set, but its membership is pinned here for
 	// the same reason: it exempts a keyword from the dispatch table's vocabulary
 	// cross-check, so a row must not acquire the opt-out unnoticed.

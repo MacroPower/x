@@ -222,6 +222,14 @@ type Keyword struct {
 	// algebra as a numeric, length, or count endpoint.
 	Bound bool
 
+	// Size reports whether the keyword's value domain is a non-negative
+	// integer (a length or count). The parent's compile-time domain check
+	// derives its keyword list from this column, so a future count keyword
+	// declared here cannot silently skip that check. It is inferred for the
+	// int-typed bound rows and declared outright on the contains counts,
+	// which carry no bound row (the tag dialects cannot author them).
+	Size bool
+
 	// Asserted reports whether a dispatch row owns the keyword -- not whether it
 	// always asserts. Format, contentEncoding, and contentMediaType are Asserted
 	// yet stay annotation-only until their row's opt-in gate is flipped by
@@ -270,6 +278,11 @@ func boundKeyword[T comparable](
 	get func(*Schema) *T,
 	set func(*Schema, *T),
 ) Keyword {
+	// An int-typed endpoint is a length or count, whose value domain the spec
+	// fixes as a non-negative integer; a float64-typed one is a numeric bound
+	// with the full number domain.
+	_, size := any((*T)(nil)).(*int)
+
 	return pointerKeyword(Keyword{
 		Fields:   []string{field},
 		Name:     name,
@@ -278,6 +291,7 @@ func boundKeyword[T comparable](
 		Scope:    ScopeWrapper,
 		Vocab:    VocabValidation,
 		Bound:    true,
+		Size:     size,
 		Asserted: true,
 	}, get, set)
 }
@@ -551,6 +565,7 @@ var (
 			Name:         keyword.MinContains,
 			Drafts:       Drafts2020Up,
 			Vocab:        VocabValidation,
+			Size:         true,
 			Asserted:     true,
 			VocabRefined: true,
 		},
@@ -559,6 +574,7 @@ var (
 			Name:         keyword.MaxContains,
 			Drafts:       Drafts2020Up,
 			Vocab:        VocabValidation,
+			Size:         true,
 			Asserted:     true,
 			VocabRefined: true,
 		},
@@ -596,6 +612,11 @@ var (
 	// algebra resolves. It also decides whether an authored canvas carries a
 	// bound at all.
 	Bounds = derive(func(k *Keyword) bool { return k.Bound })
+
+	// Sizes is the length and count keywords, whose value domain the spec
+	// fixes as a non-negative integer. The parent's compile-time domain check
+	// pins its keyword list to this set at load.
+	Sizes = derive(func(k *Keyword) bool { return k.Size })
 
 	// Asserted is every keyword a dispatch row owns, for the cross-checks against
 	// that table.
