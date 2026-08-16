@@ -224,9 +224,12 @@ func (g *generator) rootDefaultsTarget(schema *Schema, root *node) *Schema {
 	}
 
 	// A pointer root under WithNullable renders as anyOf[value, {null}]; applyNull
-	// always emits the null branch second, so the value branch is AnyOf[0]. No
-	// hook wrapper reaches here, so no other ordering is possible.
-	if root.nullable && len(schema.AnyOf) == 2 {
+	// always emits the null branch second and records the wrap on the node, so
+	// the value branch is AnyOf[0]. The flag (not the anyOf arity) identifies
+	// the wrapper: a nullable hook root whose schema already admits null keeps
+	// its own anyOf un-wrapped and carries the properties itself, so seeding
+	// must not descend into a hook-authored branch.
+	if root.nullWrapped && len(schema.AnyOf) == 2 {
 		return schema.AnyOf[0]
 	}
 

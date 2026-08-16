@@ -76,7 +76,15 @@ type node struct {
 	// through [TypeSchema.Verbatim]: it is emitted exactly as authored, so render
 	// and reconcile skip the null encoding for it entirely.
 	verbatim bool
-	isField  bool // marks a struct-field node, so reconcile applies the field const/enum bound subsumption
+	// NullWrapped records that applyNull emitted the anyOf[base, null] wrapper
+	// for this node's render, so the rendered schema's two-element AnyOf is the
+	// generator's null encoding. A nullable node whose base already admits null
+	// (a hook schema naming "null" in its type list) skips the wrapper and
+	// keeps the flag unset, so a hook-authored anyOf is never mistaken for the
+	// wrapper; [generator.rootDefaultsTarget] resolves through the wrapper only
+	// on this flag.
+	nullWrapped bool
+	isField     bool // marks a struct-field node, so reconcile applies the field const/enum bound subsumption
 }
 
 // nilableContainer reports whether the node is a slice, map, or ",string"
