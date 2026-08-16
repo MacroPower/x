@@ -6820,6 +6820,50 @@ func TestCompileRejectsNegativeBound(t *testing.T) {
 	})
 }
 
+// TestCompileRejectsNonPositiveMultipleOf pins that a multipleOf value outside
+// its spec-fixed domain (a number strictly greater than 0) fails Compile with
+// ErrNonPositiveMultipleOf, the same construction-time policy the length and
+// count keywords get from ErrNegativeBound. It would otherwise compile and
+// then reject every numeric instance while silently accepting every
+// non-numeric one.
+func TestCompileRejectsNonPositiveMultipleOf(t *testing.T) {
+	t.Parallel()
+
+	t.Run("negative rejected at top level", func(t *testing.T) {
+		t.Parallel()
+
+		schema := &jsonschema.Schema{Type: "number", MultipleOf: new(-2.0)}
+
+		_, err := jsonschema.Compile(t.Context(), schema)
+		require.ErrorIs(t, err, jsonschema.ErrNonPositiveMultipleOf)
+		assert.Contains(t, err.Error(), "/multipleOf")
+	})
+
+	t.Run("zero rejected when nested under properties", func(t *testing.T) {
+		t.Parallel()
+
+		schema := &jsonschema.Schema{
+			Type: "object",
+			Properties: map[string]*jsonschema.Schema{
+				"n": {Type: "number", MultipleOf: new(0.0)},
+			},
+		}
+
+		_, err := jsonschema.Compile(t.Context(), schema)
+		require.ErrorIs(t, err, jsonschema.ErrNonPositiveMultipleOf)
+		assert.Contains(t, err.Error(), "/properties/n/multipleOf")
+	})
+
+	t.Run("positive fractional divisor compiles", func(t *testing.T) {
+		t.Parallel()
+
+		schema := &jsonschema.Schema{Type: "number", MultipleOf: new(0.5)}
+
+		_, err := jsonschema.Compile(t.Context(), schema)
+		require.NoError(t, err)
+	})
+}
+
 // TestCompileRejectsItemsArrayUnderDraft2020 pins that the Draft-7 array form of
 // items (what a JSON `"items": [ ... ]` parses into) is rejected at Compile
 // under Draft 2020-12, where the validation walk would otherwise drop it
@@ -7886,16 +7930,14 @@ func TestValidateLargeNumberGuarded(t *testing.T) {
 		// The multipleOf check is enforced for an over-cap integer via modular
 		// arithmetic, never expanding the magnitude: 10^5000 is not divisible
 		// by 3 or 7 but is by 2 and 5. A non-integral over-cap value
-		// keeps the documented skip (its fractional part cannot be expanded). A
-		// non-positive divisor is a schema-validity error independent of the
-		// instance, so it still fails on the unbounded path.
-		"multipleOf rejects non-divisor exponent":  {`{"multipleOf":3}`, "1e5000", false},
-		"multipleOf rejects non-divisor literal":   {`{"multipleOf":7}`, "1" + strings.Repeat("0", 5000), false},
-		"multipleOf accepts even large exponent":   {`{"multipleOf":2}`, "1e5000", true},
-		"multipleOf accepts fifth large exponent":  {`{"multipleOf":5}`, "1e5000", true},
-		"multipleOf skipped for tiny non-integer":  {`{"multipleOf":3}`, "1e-5000", true},
-		"multipleOf negative rejects large number": {`{"multipleOf":-1}`, "1e5000", false},
-		"multipleOf zero rejects large number":     {`{"multipleOf":0}`, "1e5000", false},
+		// keeps the documented skip (its fractional part cannot be expanded).
+		// A non-positive divisor no longer reaches validation: Compile
+		// rejects it with ErrNonPositiveMultipleOf.
+		"multipleOf rejects non-divisor exponent": {`{"multipleOf":3}`, "1e5000", false},
+		"multipleOf rejects non-divisor literal":  {`{"multipleOf":7}`, "1" + strings.Repeat("0", 5000), false},
+		"multipleOf accepts even large exponent":  {`{"multipleOf":2}`, "1e5000", true},
+		"multipleOf accepts fifth large exponent": {`{"multipleOf":5}`, "1e5000", true},
+		"multipleOf skipped for tiny non-integer": {`{"multipleOf":3}`, "1e-5000", true},
 
 		// Const and enum compare via equality rather than the numeric bound
 		// path; a giant literal must not reach an unguarded big.Rat parse.

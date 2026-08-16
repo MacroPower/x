@@ -881,10 +881,13 @@ would otherwise be dropped silently and accept every element. Set the draft-07
 
 `Compile` also rejects a negative length or count keyword (`minLength`,
 `maxLength`, `minItems`, `maxItems`, `minProperties`, `maxProperties`,
-`minContains`, `maxContains`) with `ErrNegativeBound`. The spec defines each as
-a non-negative integer, but `Schema.Resolve` does not enforce it, so a negative
-bound would otherwise compile and then silently mis-validate: a negative maximum
-rejects every instance and a negative minimum never fires.
+`minContains`, `maxContains`) with `ErrNegativeBound`, and a `multipleOf`
+that is not strictly greater than zero with `ErrNonPositiveMultipleOf`. The
+spec fixes each domain (a non-negative integer; a number > 0), but
+`Schema.Resolve` does not enforce them, so the invalid schema would otherwise
+compile and then silently mis-validate: a negative maximum rejects every
+instance, a negative minimum never fires, and a non-positive `multipleOf`
+rejects every numeric instance while accepting every non-numeric one.
 
 The one-shot `Validate` compiles a fresh validator on every call; to
 validate many instances against the same schema, `Compile` once and reuse
@@ -1098,7 +1101,7 @@ vetted with the same structural checks `Compile` applies to compile-time-fetched
 documents, and a JSON-pointer fallback target materialized during a run (a
 schema carried inside an unknown keyword) is vetted the same way at
 materialization; a violation fails the referencing ref with `ErrRefResolve`
-wrapping the structural sentinel (`ErrInvalidType`, `ErrNegativeBound`, or
+wrapping the structural sentinel (`ErrInvalidType`, `ErrNegativeBound`, `ErrNonPositiveMultipleOf`, or
 `ErrItemsArrayUnderDraft2020`) instead of silently mis-validating. `Inline`
 shares this same vetting policy for the documents it fetches (see
 [Inlining references](#inlining-references)). Non-local refs absolutize against the enclosing
@@ -1331,7 +1334,7 @@ Failure modes:
   (see [Remote references](#remote-references)). A fetched document carrying an
   invalid type name, a negative bound, or, under a draft that rejects it, the
   array form of `items` returns an error wrapping `ErrRefResolve` that also wraps
-  the structural sentinel (`ErrInvalidType`, `ErrNegativeBound`, or
+  the structural sentinel (`ErrInvalidType`, `ErrNegativeBound`, `ErrNonPositiveMultipleOf`, or
   `ErrItemsArrayUnderDraft2020`), rather than being inlined into a malformed
   output schema. The fetched document follows the root document's draft, so a
   Draft-07 array-form `items` remote inlined under a Draft-07 run is left intact.

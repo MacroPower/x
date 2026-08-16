@@ -769,10 +769,14 @@
 //
 // Compile also rejects a negative length or count keyword (minLength, maxLength,
 // minItems, maxItems, minProperties, maxProperties, minContains, maxContains)
-// with an error wrapping [ErrNegativeBound]. The spec defines each as a
-// non-negative integer, but Schema.Resolve does not enforce it, so a negative
-// bound would otherwise compile and then silently mis-validate: a negative
-// maximum rejects every instance and a negative minimum never fires.
+// with an error wrapping [ErrNegativeBound], and a multipleOf that is not
+// strictly greater than zero with an error wrapping
+// [ErrNonPositiveMultipleOf]. The spec fixes each domain (a non-negative
+// integer; a number > 0), but Schema.Resolve does not enforce them, so the
+// invalid schema would otherwise compile and then silently mis-validate: a
+// negative maximum rejects every instance, a negative minimum never fires,
+// and a non-positive multipleOf rejects every numeric instance while
+// accepting every non-numeric one.
 //
 // Instance numbers are compared exactly (decoded with UseNumber, compared as
 // [math/big.Rat]), with one bound on the work an adversarial literal can demand:
@@ -1046,7 +1050,8 @@
 // runs over the fallback targets its own gate materializes. A violation makes
 // the referencing ref fail with an error wrapping
 // [ErrRefResolve] that also wraps the structural sentinel ([ErrInvalidType],
-// [ErrNegativeBound], or [ErrItemsArrayUnderDraft2020]), rather than letting
+// [ErrNegativeBound], [ErrNonPositiveMultipleOf], or
+// [ErrItemsArrayUnderDraft2020]), rather than letting
 // the document silently mis-validate. [Inline] shares this same vetting policy
 // for the documents it fetches (see Reference Inlining below).
 //
@@ -1147,7 +1152,8 @@
 // documents (see Remote References): a fetched document carrying an invalid
 // type name, a negative bound, or, under a draft that rejects it, the array
 // form of items returns an error wrapping [ErrRefResolve] that also wraps the
-// structural sentinel ([ErrInvalidType], [ErrNegativeBound], or
+// structural sentinel ([ErrInvalidType], [ErrNegativeBound],
+// [ErrNonPositiveMultipleOf], or
 // [ErrItemsArrayUnderDraft2020]), rather than inlining the document into a
 // malformed output schema. The fetched document follows the root document's
 // draft, so a Draft-7 array-form items remote inlined under a Draft-7 run is

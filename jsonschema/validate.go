@@ -975,7 +975,7 @@ func (dv *documentVetter) vet(s *Schema, pathPrefix string) error {
 		return err
 	}
 
-	err = checkNonNegativeBounds(s, pathPrefix, dv.boundsVisited)
+	err = checkBoundDomains(s, pathPrefix, dv.boundsVisited)
 	if err != nil {
 		return err
 	}
@@ -1642,15 +1642,18 @@ func checkItemsArrayDraft2020(schema *Schema, schemaPath string, visited map[*Sc
 	return nil
 }
 
-// checkNonNegativeBounds rejects a negative value on a length or count keyword,
-// each of which the spec defines as a non-negative integer. Schema.Resolve does
-// not enforce it, so a negative bound otherwise compiles cleanly and then
-// silently mis-validates: a negative maximum rejects every instance and a
-// negative minimum never fires. The traversal mirrors [checkTypeNames]: it uses
-// [SubschemaEntries] for the field list and each entry's Pointer for the
-// location, with visited guarding schema-graph cycles. It is draft-agnostic;
-// every draft defines these keywords as non-negative.
-func checkNonNegativeBounds(schema *Schema, schemaPath string, visited map[*Schema]bool) error {
+// checkBoundDomains rejects a keyword value outside the domain the spec fixes
+// for it: a negative value on a length or count keyword (each defined as a
+// non-negative integer) and a non-positive multipleOf (defined as a number
+// strictly greater than zero). Schema.Resolve does not enforce either, so the
+// invalid schema would otherwise compile cleanly and then silently
+// mis-validate: a negative maximum rejects every instance, a negative minimum
+// never fires, and a non-positive multipleOf rejects every numeric instance
+// while accepting every non-numeric one. The traversal mirrors
+// [checkTypeNames]: it uses [SubschemaEntries] for the field list and each
+// entry's Pointer for the location, with visited guarding schema-graph
+// cycles. It is draft-agnostic; every draft fixes these domains identically.
+func checkBoundDomains(schema *Schema, schemaPath string, visited map[*Schema]bool) error {
 	if schema == nil || visited[schema] {
 		return nil
 	}
@@ -1676,8 +1679,13 @@ func checkNonNegativeBounds(schema *Schema, schemaPath string, visited map[*Sche
 		}
 	}
 
+	if schema.MultipleOf != nil && *schema.MultipleOf <= 0 {
+		return fmt.Errorf("%w: got %v at %s/%s",
+			ErrNonPositiveMultipleOf, *schema.MultipleOf, schemaPath, KeywordMultipleOf)
+	}
+
 	for _, entry := range SubschemaEntries(schema) {
-		err := checkNonNegativeBounds(entry.Schema, schemaPath+entry.Pointer, visited)
+		err := checkBoundDomains(entry.Schema, schemaPath+entry.Pointer, visited)
 		if err != nil {
 			return err
 		}
@@ -2549,7 +2557,9 @@ func evalNumeric(ctx evalContext) []*ValidationError {
 		switch {
 		case *schema.MultipleOf <= 0:
 			// MultipleOf MUST be strictly greater than 0; a non-positive
-			// divisor makes the schema invalid.
+			// divisor makes the schema invalid. Compile rejects it with
+			// [ErrNonPositiveMultipleOf] wherever its vetting reaches, so
+			// this is a backstop for a schema outside that coverage.
 			add(KeywordMultipleOf, fmt.Sprintf("multipleOf must be greater than 0, got %v", *schema.MultipleOf))
 
 		default:
