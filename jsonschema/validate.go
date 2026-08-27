@@ -406,6 +406,19 @@ func newValidator(ctx context.Context, schema *Schema, opts []ValidateOption) (*
 		opt.applyValidate(v)
 	}
 
+	// A configured base URI must parse before anything absolutizes against
+	// it; an unparsable base would corrupt every registry key derived from it
+	// rather than surface anywhere. It is normalized once here, so buildRefReg
+	// and the identifier checks read the same canonical form.
+	if v.baseURI != "" {
+		_, err := url.Parse(v.baseURI)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrInvalidBaseURI, err)
+		}
+
+		v.baseURI = uriref.NormalizeBaseURI(v.baseURI)
+	}
+
 	// Detect draft from $schema field; a WithDraft override wins.
 	draft, err := resolveDraft(schema, v.draftOverride)
 	if err != nil {
@@ -476,13 +489,14 @@ func toRefDraft(d Draft) refresolve.Draft {
 }
 
 // buildRefReg builds the compiled ref-resolution registry over the root document
-// (seeded with the normalized [WithBaseURI] base) and the compile-time session
-// the resolve-error gate resolves through. The gate's fetches write the shared
-// refReg directly (via a copy-on-write-disabled fetch) so remote documents
-// fetched while compiling persist into the registry every run shares.
+// (seeded with the [WithBaseURI] base, normalized by newValidator) and the
+// compile-time session the resolve-error gate resolves through. The gate's
+// fetches write the shared refReg directly (via a copy-on-write-disabled fetch)
+// so remote documents fetched while compiling persist into the registry every
+// run shares.
 func (v *validator) buildRefReg() {
 	v.refReg = refresolve.NewRegistry(refDeps(), toRefDraft(v.draft), v.inertIDs)
-	v.refReg.Build(v.root, uriref.NormalizeBaseURI(v.baseURI))
+	v.refReg.Build(v.root, v.baseURI)
 
 	v.refSession = v.refReg.NewSession()
 	// The fetch reads the run's context from the ctx field, so no parameter
@@ -1020,23 +1034,27 @@ func (v *validator) remoteFetch(sess *refresolve.Session, cow bool) refresolve.F
 // pass that reached it first. A fetch reached only at validation or inline time
 // builds a fresh vetter per document, since each such document is independent.
 type documentVetter struct {
-	structVisited    map[*Schema]bool
-	typeVisited      map[*Schema]bool
-	boundsVisited    map[*Schema]bool
-	itemsVisited     map[*Schema]bool
-	rejectItemsArray bool
+	structVisited map[*Schema]bool
+	typeVisited   map[*Schema]bool
+	boundsVisited map[*Schema]bool
+	itemsVisited  map[*Schema]bool
+	idVisited     map[*Schema]bool
+	profile       draftProfile
 }
 
 // newDocumentVetter returns a vetter with fresh visited sets, carrying the
-// run's [draftProfile] policy. Only the profile's rejectItemsArray flag feeds
-// the checks; the structure, type-name, and bounds checks are draft-agnostic.
+// run's [draftProfile] policy. The profile's rejectItemsArray flag gates the
+// items-array check, and its rejectIDFragment and vocabularies flags feed the
+// identifier checks of [documentVetter.vetDoc]; the structure, type-name, and
+// bounds checks are draft-agnostic.
 func newDocumentVetter(profile draftProfile) *documentVetter {
 	return &documentVetter{
-		structVisited:    map[*Schema]bool{},
-		typeVisited:      map[*Schema]bool{},
-		boundsVisited:    map[*Schema]bool{},
-		itemsVisited:     map[*Schema]bool{},
-		rejectItemsArray: profile.rejectItemsArray,
+		structVisited: map[*Schema]bool{},
+		typeVisited:   map[*Schema]bool{},
+		boundsVisited: map[*Schema]bool{},
+		itemsVisited:  map[*Schema]bool{},
+		idVisited:     map[*Schema]bool{},
+		profile:       profile,
 	}
 }
 
@@ -1059,7 +1077,7 @@ func (dv *documentVetter) vet(s *Schema, pathPrefix string) error {
 		return err
 	}
 
-	if dv.rejectItemsArray {
+	if dv.profile.rejectItemsArray {
 		err = checkItemsArrayDraft2020(s, pathPrefix, dv.itemsVisited)
 		if err != nil {
 			return err
@@ -1069,13 +1087,29 @@ func (dv *documentVetter) vet(s *Schema, pathPrefix string) error {
 	return nil
 }
 
+// vetDoc applies [documentVetter.vet] plus the identifier checks ($id domain
+// and $vocabulary placement, see [checkIdentifiers]) to a document rooted at
+// s, whose base URI is base. It serves the call sites that hold a whole
+// document with a known base: the root at Compile, each registry-known
+// document, and each fetched document. JSON-pointer fallback targets keep the
+// plain vet: a pointer target is a fragment of a document already checked, and
+// no document base is in hand at its location.
+func (dv *documentVetter) vetDoc(s *Schema, pathPrefix, base string) error {
+	err := dv.vet(s, pathPrefix)
+	if err != nil {
+		return err
+	}
+
+	return checkIdentifiers(s, pathPrefix, base, dv.profile, dv.idVisited)
+}
+
 // checkFetchedDocument runs the single [documentVetter] policy over a document
 // fetched during a validation run, giving late-fetched documents parity with
 // compile-time-fetched ones. Each late fetch is independent, so it uses a fresh
 // vetter. The base URI prefixes the path so a violation names the offending
 // document exactly as the compile-time pass does.
 func (v *validator) checkFetchedDocument(s *Schema, baseURI string) error {
-	return newDocumentVetter(v.profile).vet(s, baseURI+"#")
+	return newDocumentVetter(v.profile).vetDoc(s, baseURI+"#", baseURI)
 }
 
 // newFallbackVet returns the structural vet a [refresolve.Session] applies to
@@ -1310,7 +1344,7 @@ func Compile(ctx context.Context, schema *Schema, opts ...ValidateOption) (*Vali
 	// pass that reached it first.
 	dv := newDocumentVetter(v.profile)
 
-	err = dv.vet(schema, "")
+	err = dv.vetDoc(schema, "", v.baseURI)
 	if err != nil {
 		return nil, err
 	}
@@ -1339,6 +1373,13 @@ func Compile(ctx context.Context, schema *Schema, opts ...ValidateOption) (*Vali
 		// cannot thread a parameter.
 		//nolint:contextcheck // See the comment above.
 		resolveOpts.Loader = v.remoteLoader()
+	}
+
+	// Resolve the root's relative $ids against the same base the native
+	// registry and identifier checks use, so a [WithBaseURI] root with a
+	// relative $id passes both layers identically.
+	if resolveOpts.BaseURI == "" {
+		resolveOpts.BaseURI = v.baseURI
 	}
 
 	_, err = schema.Resolve(&resolveOpts)
@@ -1402,7 +1443,7 @@ func Compile(ctx context.Context, schema *Schema, opts ...ValidateOption) (*Vali
 	for _, uri := range slices.Sorted(maps.Keys(v.refReg.URI)) {
 		s := v.refReg.URI[uri]
 
-		err = dv.vet(s, uri+"#")
+		err = dv.vetDoc(s, uri+"#", uri)
 		if err != nil {
 			return nil, err
 		}
@@ -1911,6 +1952,136 @@ func checkSchemaTree(schema *Schema) error {
 	}
 
 	return visit(schema, "")
+}
+
+// checkIdentifiers verifies the $id and $vocabulary domains over a schema
+// document, threading the enclosing base URI exactly as the registry walk
+// does, so a violation is judged against the same base the resolution
+// machinery would use. Per node it checks the $vocabulary placement (see
+// [ErrMisplacedVocabulary]) and, when the node declares an $id, its domain
+// (see [ErrInvalidID] and [checkSchemaID], which also computes the base the
+// node's children inherit). The traversal mirrors [checkTypeNames]: it uses
+// [SubschemaEntries] for the recursion and each entry's Pointer for the
+// location, with visited guarding schema-graph cycles.
+func checkIdentifiers(
+	schema *Schema, schemaPath, base string, profile draftProfile, visited map[*Schema]bool,
+) error {
+	if schema == nil || visited[schema] {
+		return nil
+	}
+
+	visited[schema] = true
+
+	err := checkVocabularyPlacement(schema, schemaPath, profile)
+	if err != nil {
+		return err
+	}
+
+	currentBase := base
+
+	if schema.ID != "" {
+		next, err := checkSchemaID(schema, schemaPath, currentBase, profile)
+		if err != nil {
+			return err
+		}
+
+		currentBase = next
+	}
+
+	for _, entry := range SubschemaEntries(schema) {
+		err := checkIdentifiers(entry.Schema, schemaPath+entry.Pointer, currentBase, profile, visited)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// checkVocabularyPlacement rejects a $vocabulary on a node whose $schema does
+// not establish the Draft 2020-12 dialect. A non-empty $schema must be
+// exactly the 2020-12 URI (spec section 8.1.2 defines $vocabulary for that
+// dialect's metaschemas; any other dialect string, including the
+// trailing-"#" spelling, cannot carry one). An empty $schema is read as
+// inheriting the run's dialect: accepted under the Draft 2020-12 profile,
+// rejected under Draft-07, which predates the vocabulary concept.
+func checkVocabularyPlacement(schema *Schema, schemaPath string, profile draftProfile) error {
+	if schema.Vocabulary == nil {
+		return nil
+	}
+
+	if schema.Schema == "" {
+		if profile.vocabularies {
+			return nil
+		}
+
+		return fmt.Errorf("%w: $vocabulary under the Draft-07 dialect at %s/$vocabulary",
+			ErrMisplacedVocabulary, schemaPath)
+	}
+
+	if schema.Schema != Draft2020.schemaURI() {
+		return fmt.Errorf("%w: $vocabulary under $schema %q at %s/$vocabulary",
+			ErrMisplacedVocabulary, schema.Schema, schemaPath)
+	}
+
+	return nil
+}
+
+// checkSchemaID checks one node's non-empty $id against the keyword's domain
+// and returns the base URI the node's children inherit. The base threads
+// exactly as in the registry walk ([refresolve.Registry] walkInto): a
+// fragment-only $id changes no base, and any other $id rebases the children
+// to [uriref.IDBase] of itself against the enclosing base, whether or not its
+// checks ran. Under Draft-07 two forms go unchecked: an $id beside a $ref
+// (the draft ignores it) and a fragment-carrying $id (the anchor spelling);
+// Draft 2020-12 rejects any fragment in $id (core section 8.2.1). A checked
+// $id must parse, and its resolved form must be an absolute URI; a relative
+// $id with no absolute base registers no resolvable URI, so every ref
+// targeting it would silently miss.
+func checkSchemaID(schema *Schema, schemaPath, base string, profile draftProfile) (string, error) {
+	id := schema.ID
+
+	if uriref.IsFragmentOnly(id) {
+		if profile.rejectIDFragment {
+			return "", fmt.Errorf("%w: $id %q must not carry a fragment at %s/$id",
+				ErrInvalidID, id, schemaPath)
+		}
+
+		// Draft-07 anchor form: an anchor registration, no base change.
+		return base, nil
+	}
+
+	resolved := uriref.IDBase(base, id)
+
+	// Draft-07 ignores an $id beside a $ref, so its domain goes unchecked;
+	// the resolved base still threads to the children, as in the registry
+	// walk.
+	if !profile.rejectIDFragment && schema.Ref != "" {
+		return resolved, nil
+	}
+
+	parsed, err := url.Parse(id)
+	if err != nil {
+		return "", fmt.Errorf("%w: cannot parse $id %q at %s/$id", ErrInvalidID, id, schemaPath)
+	}
+
+	if parsed.Fragment != "" {
+		if profile.rejectIDFragment {
+			return "", fmt.Errorf("%w: $id %q must not carry a fragment at %s/$id",
+				ErrInvalidID, id, schemaPath)
+		}
+
+		// Draft-07 fragment-carrying $id: the anchor reading, unchecked.
+		return resolved, nil
+	}
+
+	resolvedURL, err := url.Parse(resolved)
+	if err != nil || !resolvedURL.IsAbs() {
+		return "", fmt.Errorf("%w: $id %q does not resolve to an absolute URI against base %q at %s/$id",
+			ErrInvalidID, id, base, schemaPath)
+	}
+
+	return resolved, nil
 }
 
 // checkItemsArrayDraft2020 rejects the Draft-7 array form of the items keyword

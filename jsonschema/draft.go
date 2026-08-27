@@ -97,6 +97,11 @@ type draftProfile struct {
 	// prefixItems), and is the Draft-07 tuple spelling, so only 2020-12 rejects
 	// it.
 	rejectItemsArray bool
+	// The rejectIDFragment flag reports whether a fragment in $id is a
+	// structural error. Draft 2020-12 forbids any fragment in $id (core
+	// section 8.2.1); under Draft-07 the fragment-only form is the anchor
+	// spelling and is tolerated.
+	rejectIDFragment bool
 	// The containsCounts flag reports whether minContains/maxContains are
 	// keywords. They are a Draft 2020-12 addition; Draft-07's contains carries
 	// only its default floor of one match.
@@ -139,6 +144,7 @@ var draftProfiles = map[Draft]draftProfile{
 		dynamicRef:             true,
 		prefixItemsTuple:       true,
 		rejectItemsArray:       true,
+		rejectIDFragment:       true,
 		containsCounts:         true,
 		vocabularies:           true,
 		formatAssertsByDefault: false,
@@ -150,6 +156,7 @@ var draftProfiles = map[Draft]draftProfile{
 		dynamicRef:             false,
 		prefixItemsTuple:       false,
 		rejectItemsArray:       false,
+		rejectIDFragment:       false,
 		containsCounts:         false,
 		vocabularies:           false,
 		formatAssertsByDefault: true,

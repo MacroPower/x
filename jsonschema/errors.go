@@ -98,6 +98,33 @@ var (
 	// aliasing the pointer.
 	ErrSchemaNotTree = errors.New("schema is not a tree")
 
+	// ErrInvalidID is returned by [Compile] for an $id outside the keyword's
+	// domain: a value [net/url.Parse] rejects, one that carries a fragment
+	// under Draft 2020-12 (core section 8.2.1 forbids any fragment in $id),
+	// or one that does not resolve to an absolute URI against its enclosing
+	// base (the parent $id chain, or [WithBaseURI] for the root). A relative
+	// $id with no absolute base would register no resolvable URI, so every
+	// ref targeting it would silently miss. Under Draft-07 the fragment
+	// forms are the anchor spelling and an $id beside a $ref is ignored, so
+	// neither is checked.
+	ErrInvalidID = errors.New("invalid $id")
+
+	// ErrInvalidBaseURI is returned by [Compile] when the [WithBaseURI] value
+	// does not parse as a URI reference. Every ref and $id in the root
+	// document absolutizes against the base, so an unparsable base would
+	// corrupt each derived registry key rather than surface anywhere.
+	ErrInvalidBaseURI = errors.New("invalid base URI")
+
+	// ErrMisplacedVocabulary is returned by [Compile] for a $vocabulary on a
+	// node whose $schema does not establish the Draft 2020-12 dialect:
+	// a non-empty $schema that is not exactly
+	// "https://json-schema.org/draft/2020-12/schema", or an empty $schema
+	// under Draft-07, which predates the vocabulary concept. A node with an
+	// empty $schema under Draft 2020-12 is accepted: the document inherits
+	// the referrer's dialect, the reading upstream applied to loaded
+	// documents.
+	ErrMisplacedVocabulary = errors.New("misplaced $vocabulary")
+
 	// ErrInvalidSchemaDocument is returned by [CompileJSON], [ParseSchema],
 	// and [ParseSchemaValue] when a schema document's top-level value is not a
 	// JSON object or boolean.
