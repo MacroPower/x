@@ -179,9 +179,43 @@ func timeCarveOut(s string) bool {
 		return true
 	}
 
+	// An out-of-range numeric zone offset. RFC 3339 bounds the offset's
+	// time-hour to 00-23 and time-minute to 00-59, and the SUT enforces the
+	// bounds, while time.Parse tolerates hour 24 and minute 60
+	// ("...T00:00:00+24:00" parses).
+	if offsetOutOfRange(s) {
+		return true
+	}
+
 	// A single-digit hour. The SUT requires a two-digit clock; time.Parse's "15"
 	// field accepts one digit.
 	return !hasTwoDigitHour(s)
+}
+
+// offsetOutOfRange reports whether s ends in a numeric zone offset whose hour
+// exceeds 23 or whose minute exceeds 59. It mirrors the SUT's offset
+// decomposition (a trailing sign, two digits, a colon, two digits); anything
+// else is not a numeric offset and is left to the other carve-outs.
+func offsetOutOfRange(s string) bool {
+	idx := strings.LastIndexAny(s, "+-")
+	if idx < 0 || len(s)-idx != 6 {
+		return false
+	}
+
+	off := s[idx:]
+	if off[3] != ':' {
+		return false
+	}
+
+	isDigit := func(b byte) bool { return b >= '0' && b <= '9' }
+	if !isDigit(off[1]) || !isDigit(off[2]) || !isDigit(off[4]) || !isDigit(off[5]) {
+		return false
+	}
+
+	hour := int(off[1]-'0')*10 + int(off[2]-'0')
+	minute := int(off[4]-'0')*10 + int(off[5]-'0')
+
+	return hour > 23 || minute > 59
 }
 
 // hasTwoDigitHour reports whether timePart begins with two digits and a colon,
