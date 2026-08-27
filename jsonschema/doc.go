@@ -719,9 +719,13 @@
 //     instance validates identically to a pointer instance.
 //
 // A compiled Validator also reports what it validates: [Validator.Schema]
-// returns the root schema it was compiled for (read-only; recompile after
-// mutating) and [Validator.Draft] the draft in effect, so a validator can
-// be passed across package boundaries without the schema riding alongside.
+// returns the root schema it was compiled for and [Validator.Draft] the
+// draft in effect, so a validator can be passed across package boundaries
+// without the schema riding alongside. The returned schema is the caller's
+// live value, not a copy, and the compiled validator's caches key off its
+// nodes: mutating a schema after [Compile] is unsupported, and validating
+// through a Validator whose schema has been mutated has undefined behavior.
+// Treat a compiled schema as immutable, and recompile after any change.
 //
 // The package-level [Validate] is the one one-shot form, compiling the
 // schema and validating one pre-parsed instance in a single call, for the

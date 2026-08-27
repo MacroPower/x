@@ -839,9 +839,13 @@ always succeeds or always fails (following `regexp.MustCompile` and
   wrapped marshal error.
 
 A compiled `Validator` also reports what it validates: `Validator.Schema()`
-returns the root schema it was compiled for (read-only; recompile after
-mutating) and `Validator.Draft()` the draft in effect, so a validator can be
-passed across package boundaries without the schema riding alongside.
+returns the root schema it was compiled for and `Validator.Draft()` the draft
+in effect, so a validator can be passed across package boundaries without the
+schema riding alongside. The returned schema is the caller's live value, not a
+copy, and the compiled validator's caches key off its nodes: mutating a schema
+after `Compile` is unsupported, and validating through a `Validator` whose
+schema has been mutated has undefined behavior. Treat a compiled schema as
+immutable, and recompile after any change.
 
 The package-level `Validate(ctx, schema, instance, opts...)` is the one
 one-shot form, compiling the schema and validating one pre-parsed instance
@@ -1518,6 +1522,11 @@ This package re-exports the upstream `Schema` type so users need only import
 this package, and reuses the upstream for exactly one behavior beyond the
 type alias: JSON-semantic comparison of hand-built `const`/`enum` values
 outside the decoded JSON shapes (via `Equal`, as a recovering fallback).
+The alias is an interop commitment: `Schema` is and will remain the upstream
+type, so schemas exchange directly with any package that accepts or produces
+`google/jsonschema-go`'s `jsonschema.Schema`, with no conversion. The
+package's internal vetted-schema types never appear in the public API; plain
+upstream `*Schema` values are what every entry point takes and returns.
 Everything else, including structural well-formedness checking at `Compile`
 and the `const`/`enum`/`uniqueItems` value comparison for decoded JSON shapes
 (exact decimal, with `float64` interpreted at its shortest decimal), is
