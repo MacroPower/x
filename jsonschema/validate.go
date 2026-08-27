@@ -484,7 +484,11 @@ func (v *validator) buildRefReg() {
 	v.refReg = refresolve.NewRegistry(refDeps(), toRefDraft(v.draft), v.inertIDs)
 	v.refReg.Build(v.root, v.baseURI)
 
-	v.refSession = v.refReg.NewSession()
+	// A nil FallbackVet is reserved for this compile-time session: Compile
+	// vets the session's FallbackTargets itself, in compileRefPasses's shared
+	// vetter pass, so fallback targets materialized here are checked once with
+	// the root's visited sets rather than per materialization.
+	v.refSession = v.refReg.NewSession(nil)
 	// The fetch reads the run's context from the ctx field, so no parameter
 	// threads through the deep resolution machinery.
 	//nolint:contextcheck // See the comment above.
@@ -509,18 +513,16 @@ func (v *validator) forInstance(ctx context.Context) *validator {
 	rv.ctx = ctx
 	rv.visiting = map[visitKey]bool{}
 
-	rv.refSession = v.refReg.NewSession()
-	if rv.profile.dynamicRef {
-		rv.refSession.SeedDynamicScope(rv.refSession.SchemaBase(rv.root))
-	}
-
 	// A JSON-pointer fallback target materialized during this run never passed
 	// through Compile's fallback vet loop (a run re-materializes targets as
 	// fresh objects, and a target inside a late-fetched document has no
 	// compile-time counterpart at all), so the same structural policy runs at
 	// materialization; a violation surfaces through the referencing ref as an
 	// error wrapping [ErrRefResolve], matching the late-fetched-document vet.
-	rv.refSession.SetFallbackVet(newFallbackVet(rv.profile))
+	rv.refSession = v.refReg.NewSession(newFallbackVet(rv.profile))
+	if rv.profile.dynamicRef {
+		rv.refSession.SeedDynamicScope(rv.refSession.SchemaBase(rv.root))
+	}
 
 	// The fetch reads the run's context from the ctx field set above, so no
 	// parameter threads through the deep resolution machinery.
@@ -1012,32 +1014,32 @@ func (v *validator) checkFetchedDocument(s *Schema, baseURI string) (schemavet.D
 	return schemavet.NewVetter(v.profile.vetProfile()).VetDoc(s, baseURI+"#", baseURI)
 }
 
-// newFallbackVet returns the structural vet a [refresolve.Session] applies to
+// newFallbackVet returns the [refresolve.FallbackVet] a session applies to
 // each JSON-pointer fallback target it materializes: a target carved out of
 // raw JSON in an unknown keyword never passed through a document-level vet, so
 // the check must run at materialization. The validator's per-run sessions
-// install it for parity with Compile's fallback vet loop (a run
-// re-materializes targets as fresh objects, and a target inside a late-fetched
-// document has no compile-time counterpart at all), and the inliner's session
-// installs it so a target spliced into the output is held to the same policy a
-// fetched document is. One lazily-built vetter is shared across a session's
-// targets, mirroring the compile loop's shared visited sets, and a violation
-// is wrapped in [ErrRefResolve] so it surfaces through the referencing ref
-// exactly like a malformed-document violation.
-func newFallbackVet(profile draftProfile) func(sc *Schema, locator string) error {
+// carry it for parity with Compile's fallback vet loop (a run re-materializes
+// targets as fresh objects, and a target inside a late-fetched document has no
+// compile-time counterpart at all), and the inliner's session carries it so a
+// target spliced into the output is held to the same policy a fetched document
+// is. One lazily-built vetter is shared across a session's targets, mirroring
+// the compile loop's shared visited sets, and a violation is wrapped in
+// [ErrRefResolve] so it surfaces through the referencing ref exactly like a
+// malformed-document violation.
+func newFallbackVet(profile draftProfile) refresolve.FallbackVet {
 	var vt *schemavet.Vetter
 
-	return func(sc *Schema, locator string) error {
+	return func(sc *Schema, locator string) (schemavet.Node, error) {
 		if vt == nil {
 			vt = schemavet.NewVetter(profile.vetProfile())
 		}
 
-		_, err := vt.Vet(sc, locator)
+		node, err := vt.Vet(sc, locator)
 		if err != nil {
-			return fmt.Errorf("%w: %w", ErrRefResolve, err)
+			return schemavet.Node{}, fmt.Errorf("%w: %w", ErrRefResolve, err)
 		}
 
-		return nil
+		return node, nil
 	}
 }
 

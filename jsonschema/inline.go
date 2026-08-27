@@ -395,15 +395,13 @@ func (in *inliner) run(s *Schema) (*Schema, error) {
 	reg := refresolve.NewRegistry(refDeps(), toRefDraft(in.draft), in.retrievalBase)
 	reg.Build(pristine, in.baseURI)
 
-	in.session = reg.NewSession()
-
 	// A JSON-pointer fallback target (a sub-schema carried as raw JSON in an
 	// unknown keyword) is materialized fresh by the session and spliced into
 	// the output, so it is vetted at materialization under the same
-	// [documentVetter] policy a fetched document gets in [inliner.fetchDoc];
+	// [schemavet.Vetter] policy a fetched document gets in [inliner.fetchDoc];
 	// without this an ill-formed target would inline into a malformed output
 	// schema this package's own [Compile] rejects.
-	in.session.SetFallbackVet(newFallbackVet(in.profile))
+	in.session = reg.NewSession(newFallbackVet(in.profile))
 
 	in.record(pristine, "", in.session.SchemaBase(pristine))
 

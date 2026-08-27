@@ -7,6 +7,7 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/jsonptr"
+	"go.jacobcolvin.com/x/jsonschema/internal/schemavet"
 	"go.jacobcolvin.com/x/jsonschema/internal/uriref"
 )
 
@@ -36,11 +37,11 @@ type Session struct {
 	fallbackTargets []FallbackTarget
 
 	// Structural vet applied to each schema the JSON-pointer fallback
-	// materializes, before registration (see [Session.SetFallbackVet]). Nil
-	// skips vetting: the compile-time session leaves it unset because
-	// the compiler vets its [Session.FallbackTargets] in one shared pass after
-	// resolution.
-	fallbackVet func(sc *jsonschema.Schema, locator string) error
+	// materializes, before registration (the [FallbackVet] passed to
+	// [Registry.NewSession]). Nil skips vetting: only the compile-time
+	// session passes nil, because the compiler vets its
+	// [Session.FallbackTargets] in one shared pass after resolution.
+	fallbackVet FallbackVet
 
 	refCache         map[refCacheKey]Result
 	jsonPointerCache map[jsonPointerKey]fallbackResult
@@ -205,25 +206,25 @@ func (s *Session) LookupDynamicAnchor(key string) (*jsonschema.Schema, bool) {
 	return sc, ok
 }
 
-// SetFallbackVet installs the structural vet applied to each schema the
-// JSON-pointer fallback materializes, before it is registered. A non-nil error
-// rejects the target: the resolution reports the error instead of a target, so
-// an ill-formed schema reached only through the fallback cannot silently
-// mis-validate or inline. The validator's per-run sessions and the inliner's
-// session install their vetting policy here; the compile-time session
-// leaves it unset and the compiler vets its [Session.FallbackTargets] in one
-// shared pass instead.
-func (s *Session) SetFallbackVet(vet func(sc *jsonschema.Schema, locator string) error) {
-	s.fallbackVet = vet
-}
+// FallbackVet is the structural vet a session applies to each schema the
+// JSON-pointer fallback materializes, before it is registered. On success it
+// returns the minted [schemavet.Node], proof the target passed the structural
+// checks; a non-nil error rejects the target, so the resolution reports the
+// error instead of a target and an ill-formed schema reached only through the
+// fallback cannot silently mis-validate or inline. Every session names its
+// policy at construction ([Registry.NewSession]): the validator's per-run
+// sessions and the inliner's session pass their vet, and only the compile-time
+// session passes nil, because the compiler vets its [Session.FallbackTargets]
+// in one shared pass instead.
+type FallbackVet func(sc *jsonschema.Schema, locator string) (schemavet.Node, error)
 
 // ResolveJSONPointer resolves a JSON Pointer fragment against a schema. Typed
 // traversal handles the common case; when it fails the pointer may still target
 // a referenceable location with no typed field (a sub-schema carried as raw JSON
 // in an unknown keyword, or the internals of a non-applicator keyword such as
 // examples), so resolution falls back to walking the schema's JSON form. A
-// non-nil error reports a fallback target the installed vet rejected (see
-// [Session.SetFallbackVet]); an unlocatable pointer is a plain (nil, nil) miss.
+// non-nil error reports a fallback target the session's [FallbackVet]
+// rejected; an unlocatable pointer is a plain (nil, nil) miss.
 func (s *Session) ResolveJSONPointer(
 	root *jsonschema.Schema, fragment string, encoded bool,
 ) (*jsonschema.Schema, error) {
@@ -270,7 +271,7 @@ func (s *Session) resolveJSONPointerViaJSON(
 	var vetErr error
 
 	if target != nil && s.fallbackVet != nil {
-		vetErr = s.fallbackVet(target, locator)
+		_, vetErr = s.fallbackVet(target, locator)
 		if vetErr != nil {
 			target = nil
 		}

@@ -26,9 +26,8 @@ type Result struct {
 	Target *jsonschema.Schema
 
 	// Err wraps [ErrRefResolve] when the fetch closure reported a failure or
-	// the installed fallback vet rejected a materialized JSON-pointer target
-	// (see [Session.SetFallbackVet]); nil otherwise (including an ordinary
-	// unresolved fragment).
+	// the session's [FallbackVet] rejected a materialized JSON-pointer target;
+	// nil otherwise (including an ordinary unresolved fragment).
 	Err error
 
 	// DocumentURI is the located document's base URI for a non-fragment ref, ""
