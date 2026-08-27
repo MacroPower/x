@@ -8,11 +8,12 @@ import (
 	"go.jacobcolvin.com/x/jsonschema"
 )
 
-// TestCompileRemoteTransitiveBrokenRef locks in that the resolve-error gate
-// vets references transitively: a broken local fragment ref two or more
-// ref-hops inside a compile-time-fetched remote document must fail Compile
-// like its purely-local and one-hop siblings, instead of compiling into a
-// validator whose known-document silent skip then accepts every instance.
+// TestCompileRemoteTransitiveBrokenRef locks in that the compile-time
+// reference walk vets references transitively: a broken local fragment ref
+// two or more ref-hops inside a compile-time-fetched remote document must
+// fail Compile like its purely-local and one-hop siblings, instead of
+// compiling into a validator whose known-document silent skip then accepts
+// every instance.
 func TestCompileRemoteTransitiveBrokenRef(t *testing.T) {
 	t.Parallel()
 

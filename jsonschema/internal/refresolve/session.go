@@ -31,13 +31,13 @@ type Session struct {
 
 	// The schemas the JSON-pointer fallback materialized this session, in
 	// materialization order, each with the location that produced it. The
-	// compile-time gate's session exposes them via [Session.FallbackTargets] so
-	// content checks extend to exactly the schemas the gate resolved.
+	// compile-time session exposes them via [Session.FallbackTargets] so
+	// content checks extend to exactly the schemas the reference walk resolved.
 	fallbackTargets []FallbackTarget
 
 	// Structural vet applied to each schema the JSON-pointer fallback
 	// materializes, before registration (see [Session.SetFallbackVet]). Nil
-	// skips vetting: the compile-time gate's session leaves it unset because
+	// skips vetting: the compile-time session leaves it unset because
 	// the compiler vets its [Session.FallbackTargets] in one shared pass after
 	// resolution.
 	fallbackVet func(sc *jsonschema.Schema, locator string) error
@@ -210,7 +210,7 @@ func (s *Session) LookupDynamicAnchor(key string) (*jsonschema.Schema, bool) {
 // rejects the target: the resolution reports the error instead of a target, so
 // an ill-formed schema reached only through the fallback cannot silently
 // mis-validate or inline. The validator's per-run sessions and the inliner's
-// session install their vetting policy here; the compile-time gate's session
+// session install their vetting policy here; the compile-time session
 // leaves it unset and the compiler vets its [Session.FallbackTargets] in one
 // shared pass instead.
 func (s *Session) SetFallbackVet(vet func(sc *jsonschema.Schema, locator string) error) {
@@ -292,7 +292,7 @@ func (s *Session) resolveJSONPointerViaJSON(
 
 // FallbackTarget pairs a schema the JSON-pointer fallback materialized with the
 // location it was resolved from, so a compile-time caller can run content
-// checks over exactly the schemas the resolve-error gate materialized.
+// checks over exactly the schemas the reference walk materialized.
 type FallbackTarget struct {
 	// Schema is the freshly-unmarshaled schema at the pointer target.
 	Schema *jsonschema.Schema

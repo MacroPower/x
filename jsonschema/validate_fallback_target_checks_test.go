@@ -34,10 +34,10 @@ func TestCompileChecksJSONPointerFallbackTargets(t *testing.T) {
 			schema: `{"$ref": "#/x", "x": {"type": "strng"}}`,
 			err:    jsonschema.ErrInvalidType,
 		},
-		"violation one ref deeper than the gate target": {
-			// The gate resolves #/x directly and #/y only through x's own $ref,
-			// so the checks must cover every materialized target, not just the
-			// first level.
+		"violation one ref deeper than the first target": {
+			// The compile-time reference walk resolves #/x directly and #/y
+			// only through x's own $ref, so the checks must cover every
+			// materialized target, not just the first level.
 			schema: `{"$ref": "#/x", "x": {"$ref": "#/y"}, "y": {"maxItems": -1}}`,
 			err:    jsonschema.ErrNegativeBound,
 		},

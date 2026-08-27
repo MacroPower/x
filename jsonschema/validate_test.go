@@ -4206,7 +4206,7 @@ func TestWalkSchemaSkipsRefs(t *testing.T) {
 	t.Parallel()
 
 	// Anchors defined inside a remotely-resolved schema become registered and
-	// usable, because resolveRemote walks the fetched document before use. The
+	// usable, because the fetch walks the fetched document before use. The
 	// same holds for that document's own sub-$ref to those anchors. WalkSchema
 	// itself does not follow $ref; the registration happens when the remote
 	// document is walked on fetch.
@@ -6263,9 +6263,8 @@ func TestValidateCollectsAllErrors(t *testing.T) {
 // TestValidateRefIntoUnknownKeyword covers $refs whose JSON Pointer targets a
 // location with no typed Schema field: a sub-schema carried in an unknown
 // keyword, or the internals of a non-applicator keyword such as examples.
-// Upstream Schema.Resolve rejects these during pre-validation, but this package
-// resolves $ref targets itself, so they resolve and the referenced constraint
-// applies.
+// Typed traversal cannot reach these, so resolution falls back to walking the
+// document's JSON form, and the referenced constraint applies.
 func TestValidateRefIntoUnknownKeyword(t *testing.T) {
 	t.Parallel()
 
@@ -6331,12 +6330,12 @@ func TestValidateRefIntoUnknownKeyword(t *testing.T) {
 	}
 }
 
-// TestValidateRefTargetWellFormed covers the structural validation of ref
-// targets reached through untyped locations (unknown keywords, non-applicator
-// internals). A malformed target must keep the upstream pre-validation error
-// fatal, whether the flaw is an uncompilable pattern or a broken nested ref. A
-// target whose nested ref resolves against the root is instead accepted and its
-// constraint applied.
+// TestValidateRefTargetWellFormed covers ref targets reached through untyped
+// locations (unknown keywords, non-applicator internals). A malformed target
+// must surface an error rather than silently passing: an uncompilable pattern
+// fails closed against every string instance, and a broken nested ref is
+// reported by the validation walk. A target whose nested ref resolves against
+// the root is instead accepted and its constraint applied.
 func TestValidateRefTargetWellFormed(t *testing.T) {
 	t.Parallel()
 
@@ -6403,10 +6402,10 @@ func aliasedSchema() *jsonschema.Schema {
 	}
 }
 
-// TestValidateResolveErrorStillFatal locks in the safety boundary of the
-// ref-only Resolve-error exception: a schema that is genuinely malformed, or
-// whose $ref cannot be resolved by this package either, must still surface the
-// pre-validation error rather than silently passing.
+// TestValidateResolveErrorStillFatal locks in the strict side of the
+// compile-time checks: a schema that is genuinely malformed, or whose $ref
+// this package cannot resolve, must surface a compile error rather than
+// silently passing.
 func TestValidateResolveErrorStillFatal(t *testing.T) {
 	t.Parallel()
 
@@ -6435,9 +6434,8 @@ func TestValidateResolveErrorStillFatal(t *testing.T) {
 			},
 			instance: []any{"hello"},
 		},
-		// Aliased sub-schema pointers do not form a tree; upstream rejects this.
-		// The ref-only exception must not mask it, even with a valid instance
-		// and no refs in play.
+		// Aliased sub-schema pointers do not form a tree; the root tree check
+		// rejects this, even with a valid instance and no refs in play.
 		"aliased sub-schema pointers are not a tree": {
 			schema:   aliasedSchema(),
 			instance: map[string]any{"a": "x", "b": "y"},
@@ -6450,7 +6448,7 @@ func TestValidateResolveErrorStillFatal(t *testing.T) {
 
 			err := jsonschema.Validate(t.Context(), tc.schema, tc.instance)
 			require.Error(t, err,
-				"an unresolvable ref must not be reclassified as a tolerable ref-only Resolve error")
+				"a malformed schema or unresolvable ref must fail rather than silently pass")
 		})
 	}
 }
@@ -7055,8 +7053,8 @@ func TestCheckTypeNamesMatchesCompile(t *testing.T) {
 // TestCheckTypeNamesToleratesUncompilableSchemas pins the standalone use case.
 // CheckTypeNames vets type names without the registry, reference resolution,
 // and vocabulary work Compile performs, so schemas Compile rejects still get a
-// verdict on their type keywords. The case here is a cyclic pointer graph that
-// upstream Resolve cannot represent.
+// verdict on their type keywords. The case here is a cyclic pointer graph,
+// which Compile's tree check rejects outright.
 func TestCheckTypeNamesToleratesUncompilableSchemas(t *testing.T) {
 	t.Parallel()
 
@@ -7623,7 +7621,7 @@ func TestMustCompileJSON(t *testing.T) {
 func TestCompileConcurrentWithRefResolver(t *testing.T) {
 	t.Parallel()
 
-	// A remote $ref forces resolveRemote during the walk, which writes the
+	// A remote $ref forces a fetch during the walk, which writes the
 	// registries; forInstance gives each run its own copies, so concurrent use
 	// must remain race-free and correct.
 	resolver := mapResolver{

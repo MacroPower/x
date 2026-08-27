@@ -258,10 +258,10 @@ func requireRejects(
 }
 
 // generateAndCompile builds the schema for a synthesized type and compiles it,
-// the step every rig-2 target opens with. Compiling runs the upstream
-// Schema.Resolve, so it doubles as the structural well-formedness assertion;
-// full metaschema validation stays in conformance_test.go, too costly to run
-// per iteration.
+// the step every rig-2 target opens with. Compiling runs the compile-time
+// structure, identifier, and reference checks, so it doubles as the
+// structural well-formedness assertion; full metaschema validation stays in
+// conformance_test.go, too costly to run per iteration.
 func generateAndCompile(
 	ctx context.Context,
 	t *testing.T,

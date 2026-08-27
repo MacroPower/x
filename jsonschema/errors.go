@@ -49,21 +49,19 @@ var (
 	// ErrNegativeBound is returned by [Compile] when a length or count keyword
 	// (minLength, maxLength, minItems, maxItems, minProperties, maxProperties,
 	// minContains, maxContains) carries a negative value, which the spec defines
-	// as a non-negative integer. Schema.Resolve does not enforce it, so a
-	// negative bound would otherwise compile cleanly and then silently
-	// mis-validate: a negative maximum rejects every instance and a negative
-	// minimum is a dead no-op. Rejecting it at construction surfaces the
-	// malformed schema instead.
+	// as a non-negative integer. A negative bound would otherwise compile
+	// cleanly and then silently mis-validate: a negative maximum rejects
+	// every instance and a negative minimum is a dead no-op. Rejecting it at
+	// construction surfaces the malformed schema instead.
 	ErrNegativeBound = errors.New("negative bound")
 
 	// ErrNonPositiveMultipleOf is returned by [Compile] when a multipleOf
 	// keyword carries a value that is not strictly greater than zero. The spec
-	// defines the keyword's value domain as a number > 0, but Schema.Resolve
-	// does not enforce it, so the invalid schema would otherwise compile
-	// cleanly and then reject every numeric instance at validation time while
-	// silently accepting every non-numeric one. Rejecting it at construction
-	// surfaces the malformed schema instead, the same policy [ErrNegativeBound]
-	// applies to the length and count keywords.
+	// defines the keyword's value domain as a number > 0; the invalid schema
+	// would otherwise compile cleanly and then reject every numeric instance
+	// at validation time while silently accepting every non-numeric one.
+	// Rejecting it at construction surfaces the malformed schema instead, the
+	// same policy [ErrNegativeBound] applies to the length and count keywords.
 	ErrNonPositiveMultipleOf = errors.New("multipleOf must be greater than 0")
 
 	// ErrNilSubschema is returned by [Compile] when a sub-schema slice or map

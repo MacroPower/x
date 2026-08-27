@@ -692,8 +692,9 @@
 //
 // The package validates JSON instances against schemas and returns structured
 // errors with full path information and hierarchical multi-error support.
-// [Compile] builds the [Validator] once, doing registry construction,
-// Schema.Resolve, and draft and vocabulary detection up front. The returned
+// [Compile] builds the [Validator] once, doing registry construction, the
+// compile-time structure, identifier, and reference checks (described below),
+// and draft and vocabulary detection up front. The returned
 // Validator is reused across instances and safe for concurrent use, with one
 // method per instance shape:
 //
@@ -753,8 +754,11 @@
 // unwraps to [*ValidationError] via [errors.AsType]. Non-validation failures
 // return ordinary wrapped errors that do not unwrap to [*ValidationError];
 // these cover JSON decoding, an unaccepted instance type, an invalid schema
-// document ([ErrInvalidSchemaDocument]), Schema.Resolve errors,
-// [ErrInvalidType], and [ErrUnknownVocabulary].
+// document ([ErrInvalidSchemaDocument]), the compile-time check sentinels
+// ([ErrInvalidType], [ErrConflictingSchemaFields], [ErrNilSubschema],
+// [ErrDuplicatePropertyOrder], [ErrSchemaNotTree], [ErrInvalidID],
+// [ErrInvalidBaseURI], [ErrMisplacedVocabulary], [ErrNotResolved]), and
+// [ErrUnknownVocabulary].
 //
 // Compile rejects a type keyword naming anything other than the seven JSON
 // Schema types ("null", "boolean", "string", "integer", "number", "object",
@@ -776,16 +780,49 @@
 // with an error wrapping [ErrNegativeBound], and a multipleOf that is not
 // strictly greater than zero with an error wrapping
 // [ErrNonPositiveMultipleOf]. The spec fixes each domain (a non-negative
-// integer; a number > 0), but Schema.Resolve does not enforce them, so the
-// invalid schema would otherwise compile and then silently mis-validate: a
-// negative maximum rejects every instance, a negative minimum never fires,
-// and a non-positive multipleOf rejects every numeric instance while
-// accepting every non-numeric one. A strictly positive multipleOf literal
+// integer; a number > 0); an invalid value would otherwise compile and then
+// silently mis-validate: a negative maximum rejects every instance, a
+// negative minimum never fires, and a non-positive multipleOf rejects every
+// numeric instance while accepting every non-numeric one. A strictly
+// positive multipleOf literal
 // below the smallest positive float64 (about 4.9e-324) is spec-valid but
 // underflows to zero when the document is decoded; [ParseSchema] and
 // [ParseSchemaValue] drop the keyword in that case -- at float64 precision it
 // constrains nothing -- rather than letting the underflowed zero be rejected
 // as an authored one.
+//
+// Beyond the keyword domains, Compile vets the document's Go representation
+// and identifiers. A schema setting both Go fields of one JSON keyword (Type
+// and Types, Defs and Definitions, Items and ItemsArray, a dependencies key
+// in both maps) is rejected with [ErrConflictingSchemaFields]; a nil *Schema
+// element inside a sub-schema slice or map with [ErrNilSubschema]; a
+// duplicate PropertyOrder entry with [ErrDuplicatePropertyOrder]; and a root
+// document whose sub-schema pointers alias or cycle with [ErrSchemaNotTree].
+// An $id outside the keyword's domain is rejected with [ErrInvalidID]: one
+// that does not parse, one carrying a fragment under Draft 2020-12 (core
+// section 8.2.1), or one that does not resolve to an absolute URI against
+// its enclosing base -- the parent $id chain, or [WithBaseURI] for the root,
+// so a relative root $id compiles exactly when a base supplies the absolute
+// prefix. Under Draft-07 the fragment forms are the anchor spelling and an
+// $id beside a $ref is ignored, so neither is checked. An unparsable
+// [WithBaseURI] value is rejected with [ErrInvalidBaseURI]. A $vocabulary on
+// a node whose $schema does not establish the 2020-12 dialect is rejected
+// with [ErrMisplacedVocabulary]: a non-empty $schema must be exactly
+// "https://json-schema.org/draft/2020-12/schema", while an empty one
+// inherits the run's dialect, accepted under 2020-12 and rejected under
+// Draft-07, which predates the vocabulary concept.
+//
+// Compile then resolves every reference reachable from the root ($ref and,
+// under 2020-12, $dynamicRef, statically) through the same resolution core
+// the validation walk uses. A reference that resolves to nothing while its
+// document is present can never resolve later, so Compile rejects it with an
+// error wrapping [ErrNotResolved] (or the resolver's reported error), naming
+// the bearing node. A reference whose document cannot be located at compile
+// time is tolerated and reported by the validation walk instead (see Remote
+// References below). An uncompilable pattern or patternProperties regex is
+// deliberately not a compile error: the compile outcome is recorded per
+// node, and every string instance the pattern would judge fails closed at
+// validation time.
 //
 // Instance numbers are compared exactly (decoded with UseNumber, compared as
 // [math/big.Rat]), with one bound on the work an adversarial literal can demand:
@@ -850,9 +887,6 @@
 //     (application/json) for string instances. Annotation-only by default.
 //     Base64 follows the draft's citation: RFC 4648 under 2020-12 (line
 //     breaks rejected), MIME base64 under Draft-07 (line breaks ignored).
-//   - [WithResolveOptions] passes [ResolveOptions] (an alias for the upstream
-//     options type, so no second import is needed) for structural
-//     pre-validation.
 //   - [WithVocabularies] directly specifies the active vocabularies for the
 //     validation run: the listed URIs are active, every other vocabulary is
 //     inactive.
@@ -1035,39 +1069,53 @@
 //
 // # Remote References
 //
-// By default only local fragment refs are resolved during validation (those
-// under #/$defs or #/definitions). Remote and absolute $ref URIs are resolved
-// via an optional [RefResolver] set with [WithRefResolver]; [RefResolverFunc]
-// adapts a bare function, so a one-off resolver needs no named type. A resolver
-// reports a URI it does not serve by answering [ErrNotResolved], the
-// not-resolved answer that passes the URI along (to the next
-// [ChainResolvers] link, and ultimately to unresolvable-ref handling),
-// following [io/fs.ErrNotExist]. An unresolvable remote or absolute $ref is
-// reported as a [*ValidationError] by the validation walk: with no resolver
-// (or a resolver answering ErrNotResolved) the message begins with
-// "cannot resolve $ref" and includes the quoted ref, while a resolver that
-// returns any other error yields one wrapping [ErrRefResolve]. An
-// unresolvable local fragment ref is reported the same way when it sits in a
-// part of the graph no compile-time pass vetted: inside a document first
-// fetched during a validation run, or inside a JSON-pointer fallback target.
-// Only an unresolvable local fragment ref within a compile-vetted document is
-// silently skipped, because there Schema.Resolve has already rejected
-// genuinely broken fragment refs before the walk begins.
+// Local fragment refs (those under #/$defs or #/definitions, plus #anchor
+// forms) resolve within the document. Remote and absolute $ref URIs are
+// resolved via an optional [RefResolver] set with [WithRefResolver];
+// [RefResolverFunc] adapts a bare function, so a one-off resolver needs no
+// named type. A resolver reports a URI it does not serve by answering
+// [ErrNotResolved], the not-resolved answer that passes the URI along (to
+// the next [ChainResolvers] link, and ultimately to unresolvable-ref
+// handling), following [io/fs.ErrNotExist].
+//
+// [Compile] resolves every reference reachable from the root through the
+// resolver: the first ref naming a remote document fetches it, registers it
+// in the compiled registry, and vets it, so later refs and every validation
+// run resolve it from cache; the resolver is consulted at most once per URI,
+// and misses and failures are negative-cached per run. A document the
+// resolver cannot serve at compile time (a not-resolved answer, or any other
+// resolver error) does not fail Compile: the resolver may serve the document
+// only after compilation, so the validation walk reports the ref instead. A
+// fragment that cannot resolve inside a document that is present -- the root,
+// or a fetched document -- fails Compile with an error wrapping
+// [ErrNotResolved], since it can never resolve later.
+//
+// At validation time, an unresolvable remote or absolute $ref is reported as
+// a [*ValidationError]: with no resolver (or a resolver answering
+// ErrNotResolved) the message begins with "cannot resolve $ref" and includes
+// the quoted ref, while a resolver that returns any other error yields one
+// wrapping [ErrRefResolve]. An unresolvable local fragment ref is reported
+// the same way when it sits in a part of the graph no compile-time pass
+// vetted: inside a document first fetched during a validation run, or inside
+// a JSON-pointer fallback target. Only an unresolvable local fragment ref
+// within a compile-vetted document is silently skipped, because there the
+// compile-time reference walk has already rejected genuinely broken fragment
+// refs before the walk begins.
 // Circular refs are detected and treated as passing to avoid infinite recursion.
 //
 // A remote document first fetched during a validation run is vetted with the
 // same structural checks Compile applies to compile-time-fetched documents:
-// type names, non-negative bounds, and under [Draft2020] the Draft-7 items
-// array. A JSON-pointer fallback target materialized during a run (a schema
-// carried inside an unknown keyword or the internals of a non-applicator
-// keyword) is vetted the same way at materialization, matching the vet Compile
-// runs over the fallback targets its own gate materializes. A violation makes
-// the referencing ref fail with an error wrapping
-// [ErrRefResolve] that also wraps the structural sentinel ([ErrInvalidType],
-// [ErrNegativeBound], [ErrNonPositiveMultipleOf], or
-// [ErrItemsArrayUnderDraft2020]), rather than letting
-// the document silently mis-validate. [Inline] shares this same vetting policy
-// for the documents it fetches (see Reference Inlining below).
+// field structure, identifiers, type names, non-negative bounds, and under
+// [Draft2020] the Draft-7 items array. A JSON-pointer fallback target
+// materialized during a run (a schema carried inside an unknown keyword or
+// the internals of a non-applicator keyword) is vetted the same way at
+// materialization, matching the vet Compile runs over the fallback targets
+// its own reference walk materializes. A violation makes the referencing ref
+// fail with an error wrapping [ErrRefResolve] that also wraps the structural
+// sentinel ([ErrInvalidType], [ErrNegativeBound], [ErrNonPositiveMultipleOf],
+// or [ErrItemsArrayUnderDraft2020]), rather than letting the document
+// silently mis-validate. [Inline] shares this same vetting policy for the
+// documents it fetches (see Reference Inlining below).
 //
 // Non-local refs absolutize against the enclosing resource's base URI: its
 // $id, or the root base set with [WithBaseURI], which also registers the

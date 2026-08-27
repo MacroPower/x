@@ -10,17 +10,13 @@ import (
 )
 
 // Fetch is the caller's remote-document registration strategy, the seam
-// unifying the validator's remote fetch (both the compile-time gate and each
-// per-run session) and the inliner's fetchDoc. [Session.ResolveRef] calls it for
-// a non-fragment ref whose base URI is not already registered. It returns the
-// registered document on success, (nil, nil) for a plain miss, or (nil, err) for
-// a failure whose error becomes [Result.Err]. The closure owns resolver
-// invocation, deep copy, registration target, and negative caching; the core
-// owns the resolution decision tree around it.
-//
-// The upstream Schema.Resolve loader is a distinct concern: it must never fail
-// resolution on a miss, so it does not go through Fetch, sharing only the
-// resolver-invocation helper.
+// unifying the validator's remote fetch (both the compile-time session and
+// each per-run session) and the inliner's fetchDoc. [Session.ResolveRef] calls
+// it for a non-fragment ref whose base URI is not already registered. It
+// returns the registered document on success, (nil, nil) for a plain miss, or
+// (nil, err) for a failure whose error becomes [Result.Err]. The closure owns
+// resolver invocation, deep copy, registration target, and negative caching;
+// the core owns the resolution decision tree around it.
 type Fetch func(baseURI string) (*jsonschema.Schema, error)
 
 // Result is the structured outcome of a reference resolution that both engines
@@ -46,7 +42,7 @@ type Result struct {
 	// DocumentMiss reports that a non-fragment ref's target document could not
 	// be located: the registry has no entry for its base URI and the fetch
 	// closure answered a miss or a failure (a failure rides in Err). The
-	// validator's compile-time gate tolerates this outcome, since a resolver
+	// validator's compile-time reference walk tolerates this outcome, since a resolver
 	// may serve the document only after compilation, while a validation run
 	// reports it through the bearing node. Always false when Target is set.
 	DocumentMiss bool

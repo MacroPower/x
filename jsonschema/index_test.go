@@ -11,8 +11,8 @@ import (
 // A $defs entry referenced from two properties is one node in the identity
 // index: it gets a single id, so its precomputed pattern and numeric-bound
 // caches are built once and validation reaching it through either $ref indexes
-// the same slot. (Upstream Schema.Resolve requires the pointer graph itself to
-// be a tree, so shared reuse is expressed through $ref rather than by aliasing
+// the same slot. (Compile requires the root's pointer graph itself to be a
+// tree, so shared reuse is expressed through $ref rather than by aliasing
 // one *Schema pointer into two fields.) This guards that the id-indexed caches
 // apply wherever a shared node is reached.
 func TestValidateSharedDefSharesIndexedCache(t *testing.T) {

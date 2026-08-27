@@ -42,8 +42,9 @@ type Children func(*jsonschema.Schema) []*jsonschema.Schema
 // (Extra, Enum, Const, Default, Examples): it shares their backing maps, slices,
 // and pointers with the original. A round-trip through JSON instead yields an
 // independent copy of every serializable field, which is what remote-ref
-// isolation requires so [jsonschema.Schema.Resolve]'s in-place mutations cannot
-// corrupt the caller's schema. The render-only PropertyOrder field carries
+// isolation requires: the caches hold copies independent of the
+// resolver-owned schemas, so no later walk of a cached document can reach the
+// caller's or the resolver's values. The render-only PropertyOrder field carries
 // json:"-", so the round-trip drops it; it is restored afterward (via children)
 // so a clone preserves property ordering. Every other serializable field
 // round-trips as an independent copy.

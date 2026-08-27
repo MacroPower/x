@@ -11,8 +11,8 @@ import (
 // TestValidateUnresolvableFragmentRefInLateFetchedDocument locks in that an
 // unresolvable fragment-only ref inside a document first fetched at validation
 // time is reported like its absolute spelling, not silently skipped. The
-// silent skip exists because Schema.Resolve pre-rejects broken fragment refs
-// at compile time, but a late-fetched document never passes through that
+// silent skip exists because the compile-time reference walk pre-rejects
+// broken fragment refs, but a late-fetched document never passes through that
 // check: without the guard the same document that fails Compile when served at
 // compile time silently accepts every instance when served only at validation
 // time.
@@ -76,10 +76,9 @@ func TestValidateUnresolvableFragmentRefInLateFetchedDocument(t *testing.T) {
 // contract for a remote $ref carrying a fragment: a document unresolvable at
 // compile time is tolerated exactly like the fragment-less spelling, the
 // validation walk reports the miss as a "cannot resolve $ref" error, and the
-// ref validates normally once the resolver serves the document. Upstream
-// Schema.Resolve applies such a fragment to the empty stand-in document and
-// fails, so without the resolve-error gate's document-miss tolerance the
-// validator could never be built.
+// ref validates normally once the resolver serves the document. Without the
+// compile-time reference walk's document-miss tolerance the validator could
+// never be built.
 func TestCompileToleratesFragmentRefToLateDocument(t *testing.T) {
 	t.Parallel()
 
@@ -132,9 +131,9 @@ func TestCompileToleratesFragmentRefToLateDocument(t *testing.T) {
 
 // TestValidateUnresolvableFragmentRefInFallbackTarget covers the fallback
 // variant: a broken fragment ref two levels behind JSON-pointer fallback
-// targets, past the compile gate's one-level own-reference check. Compile
-// tolerates it (the gate is one level deep by design), so the walk must report
-// it instead of silently accepting the instance.
+// targets. The compile-time reference walk resolves fallback-borne refs
+// tolerantly, so Compile tolerates the miss and the validation walk must
+// report it instead of silently accepting the instance.
 func TestValidateUnresolvableFragmentRefInFallbackTarget(t *testing.T) {
 	t.Parallel()
 

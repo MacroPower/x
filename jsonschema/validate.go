@@ -1225,8 +1225,8 @@ func (c *Validator) Draft() Draft {
 // it to [Validate] when validating more than one instance against the same
 // schema.
 //
-// It returns an error when the options are invalid or the schema fails
-// structural pre-validation.
+// It returns an error when the options are invalid or the schema fails the
+// compile-time structure, identifier, or reference checks.
 //
 // The context is passed to the [RefResolver] (see [WithRefResolver]) for refs
 // resolved during compilation. It is not retained by the returned
@@ -2138,8 +2138,7 @@ func init() {
 // checkBoundDomains rejects a keyword value outside the domain the spec fixes
 // for it: a negative value on a length or count keyword (each defined as a
 // non-negative integer) and a non-positive multipleOf (defined as a number
-// strictly greater than zero). Schema.Resolve does not enforce either, so the
-// invalid schema would otherwise compile cleanly and then silently
+// strictly greater than zero). An invalid value would otherwise silently
 // mis-validate: a negative maximum rejects every instance, a negative minimum
 // never fires, and a non-positive multipleOf rejects every numeric instance
 // while accepting every non-numeric one. The traversal mirrors
@@ -3937,8 +3936,9 @@ func (v *validator) validateResolvedRef(
 		// document first fetched at validation time, or inside a JSON-pointer
 		// fallback target), where no compile-time pass ever vetted it. Only a
 		// fragment ref borne by a node the compiled registry knows is silently
-		// skipped: there Schema.Resolve already rejected genuinely broken
-		// fragments before the walk began, so this branch is benign.
+		// skipped: there the compile-time reference walk already rejected
+		// genuinely broken fragments before this walk began, so this branch
+		// is benign.
 		if !uriref.IsFragmentOnly(ref) || !v.refReg.KnownSchema(schema) {
 			return []*ValidationError{
 				leafError(instancePath, schemaPath, keyword, fmt.Sprintf("cannot resolve %s %q", keyword, ref)),

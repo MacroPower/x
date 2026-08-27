@@ -806,9 +806,9 @@ return an error.
 ## Validating instances
 
 The core entry point is `Compile(ctx, schema, opts...)`: it performs the
-per-schema work once (registry construction, `Schema.Resolve`, draft and
-vocabulary detection) and returns a reusable `*Validator` with one method
-per instance shape. `MustCompile` panics on error, for package-scope
+per-schema work once (registry construction, the compile-time structure,
+identifier, and reference checks, draft and vocabulary detection) and returns
+a reusable `*Validator` with one method per instance shape. `MustCompile` panics on error, for package-scope
 validators where for a static schema and fixed options compilation either
 always succeeds or always fails (following `regexp.MustCompile` and
 `MustGenerateFor`).
@@ -893,16 +893,47 @@ would otherwise be dropped silently and accept every element. Set the draft-07
 `maxLength`, `minItems`, `maxItems`, `minProperties`, `maxProperties`,
 `minContains`, `maxContains`) with `ErrNegativeBound`, and a `multipleOf`
 that is not strictly greater than zero with `ErrNonPositiveMultipleOf`. The
-spec fixes each domain (a non-negative integer; a number > 0), but
-`Schema.Resolve` does not enforce them, so the invalid schema would otherwise
-compile and then silently mis-validate: a negative maximum rejects every
-instance, a negative minimum never fires, and a non-positive `multipleOf`
-rejects every numeric instance while accepting every non-numeric one. A
+spec fixes each domain (a non-negative integer; a number > 0); the invalid
+schema would otherwise compile and then silently mis-validate: a negative
+maximum rejects every instance, a negative minimum never fires, and a
+non-positive `multipleOf` rejects every numeric instance while accepting
+every non-numeric one. A
 strictly positive `multipleOf` literal below the smallest positive `float64`
 (about 4.9e-324) is spec-valid but underflows to zero when the document is
 decoded; `ParseSchema` and `ParseSchemaValue` drop the keyword in that case --
 at `float64` precision it constrains nothing -- rather than letting the
 underflowed zero be rejected as an authored one.
+
+Beyond the keyword domains, `Compile` vets the document's Go representation
+and identifiers. A schema setting both Go fields of one JSON keyword (`Type`
+and `Types`, `Defs` and `Definitions`, `Items` and `ItemsArray`, a
+`dependencies` key in both maps) is rejected with
+`ErrConflictingSchemaFields`; a nil `*Schema` element inside a sub-schema
+slice or map with `ErrNilSubschema`; a duplicate `PropertyOrder` entry with
+`ErrDuplicatePropertyOrder`; and a root document whose sub-schema pointers
+alias or cycle with `ErrSchemaNotTree`. An `$id` outside the keyword's domain
+is rejected with `ErrInvalidID`: one that does not parse, one carrying a
+fragment under draft 2020-12, or one that does not resolve to an absolute URI
+against its enclosing base (the parent `$id` chain, or `WithBaseURI` for the
+root, so a relative root `$id` compiles exactly when a base supplies the
+absolute prefix). Under draft-07 the fragment forms are the anchor spelling
+and an `$id` beside a `$ref` is ignored, so neither is checked. An unparsable
+`WithBaseURI` value is rejected with `ErrInvalidBaseURI`, and a `$vocabulary`
+on a node whose `$schema` does not establish the 2020-12 dialect with
+`ErrMisplacedVocabulary` (exact URI match; an empty `$schema` inherits the
+run's dialect, accepted under 2020-12 and rejected under draft-07).
+
+`Compile` then resolves every reference reachable from the root (`$ref` and,
+under 2020-12, `$dynamicRef`, statically) through the same resolution core
+the validation walk uses. A reference that resolves to nothing while its
+document is present can never resolve later, so `Compile` rejects it with an
+error wrapping `ErrNotResolved` (or the resolver's reported error); a
+reference whose document cannot be located at compile time is tolerated and
+reported by the validation walk instead (see
+[Remote references](#remote-references)). An uncompilable
+`pattern` or `patternProperties` regex is deliberately not a compile error:
+the compile outcome is recorded per node, and every string instance the
+pattern would judge fails closed at validation time.
 
 The one-shot `Validate` compiles a fresh validator on every call; to
 validate many instances against the same schema, `Compile` once and reuse
@@ -911,7 +942,7 @@ goroutines.
 
 On success all return `nil`. A validation failure returns an error that unwraps
 to `*ValidationError` via `errors.AsType`. Non-validation failures (JSON decoding,
-an unaccepted instance type, `Schema.Resolve` errors, `ErrInvalidType`, and
+an unaccepted instance type, the compile-time check sentinels, and
 `ErrUnknownVocabulary`) return ordinary wrapped errors that do not unwrap to
 `*ValidationError`.
 
@@ -1021,7 +1052,6 @@ containing object are both identifiable from `InstancePath` alone.
 | `WithFormatValidator(name, f)` | Register a custom `format` checker (a `FormatValidator`; `FormatValidatorFunc` adapts a bare function) under `name`.     |
 | `WithFormats(bool)`            | Force `format` assertion on or off.                                                                                      |
 | `WithContent(bool)`            | Assert `contentEncoding`/`contentMediaType` (annotation-only by default; base64 rejects line breaks under 2020-12 only). |
-| `WithResolveOptions(opts)`     | Pass `ResolveOptions` (aliased from the upstream package) to `Schema.Resolve`.                                           |
 | `WithVocabularies(uris...)`    | Directly set the active vocabularies (highest precedence); unlisted ones are inactive.                                   |
 | `WithMetaSchemaResolver(r)`    | Set a `RefResolver` that looks up the metaschema (whose `$vocabulary` gates keyword groups) by the root's `$schema` URI. |
 
@@ -1099,18 +1129,28 @@ optional or omits it, fails with `ErrUnknownVocabulary`. Draft-07 has no
 
 ### Remote references
 
-Only local fragment refs (`#/$defs/...`, `#/definitions/...`) are resolved by
-default. Remote and absolute `$ref` URIs are resolved through an optional
-`RefResolver` set with `WithRefResolver`; the resolver is called only when local
-resolution fails, and every outcome -- a resolved schema, a not-resolved answer,
-or an error -- is cached within the validation run, so the resolver is consulted
-at most once per distinct URI per run. A
-resolver error surfaces as `ErrRefResolve`; an unresolvable remote/absolute ref
-with no resolver is reported as a `*ValidationError`, and so is an unresolvable
-local fragment ref inside a document first fetched during a validation run or
-inside a JSON-pointer fallback target, where no compile-time pass vetted it
-(within a compile-vetted document such a fragment ref is silently skipped,
-since `Compile` already rejects genuinely broken ones). Circular refs are detected
+Local fragment refs (`#/$defs/...`, `#/definitions/...`, `#anchor`) resolve
+within the document. Remote and absolute `$ref` URIs are resolved through an
+optional `RefResolver` set with `WithRefResolver`. `Compile` resolves every
+reference reachable from the root: the first ref naming a remote document
+fetches it through the resolver, registers it in the compiled registry, and
+vets it, so later refs and every validation run resolve it from cache. The
+resolver is consulted at most once per distinct URI, and every outcome -- a
+resolved schema, a not-resolved answer, or an error -- is cached, misses and
+failures per run. A document the resolver cannot serve at compile time (a
+not-resolved answer, or any other error) does not fail `Compile`: the
+resolver may serve the document only after compilation, so the validation
+walk reports the ref instead. A fragment that cannot resolve inside a
+document that is present (the root, or a fetched document) fails `Compile`
+with `ErrNotResolved`, since it can never resolve later.
+
+At validation time, a resolver error surfaces as `ErrRefResolve`; an
+unresolvable remote/absolute ref with no resolver is reported as a
+`*ValidationError`, and so is an unresolvable local fragment ref inside a
+document first fetched during a validation run or inside a JSON-pointer
+fallback target, where no compile-time pass vetted it (within a
+compile-vetted document such a fragment ref is silently skipped, since
+`Compile` already rejects genuinely broken ones). Circular refs are detected
 and treated as passing. A document first fetched during a validation run is
 vetted with the same structural checks `Compile` applies to compile-time-fetched
 documents, and a JSON-pointer fallback target materialized during a run (a
@@ -1398,6 +1438,13 @@ cycle introduced by the substitute is an ordinary `ErrRefCycle`.
 | `ErrUnsupportedMapKey`        | A map key that is not a string, integer type, or `encoding.TextMarshaler`.                                                                  |
 | `ErrInvalidType`              | A `type` keyword naming something other than the seven JSON Schema type names (returned by `CheckTypeNames` and `Compile`).                 |
 | `ErrItemsArrayUnderDraft2020` | The draft-07 array form of `items` used under draft 2020-12, where tuples are spelled with `prefixItems` (returned by `Compile`).           |
+| `ErrConflictingSchemaFields`  | Both Go fields of one JSON keyword set (`Type`/`Types`, `Defs`/`Definitions`, `Items`/`ItemsArray`, a `dependencies` key in both maps).     |
+| `ErrNilSubschema`             | A nil `*Schema` element inside a sub-schema slice or map (returned by `Compile`).                                                           |
+| `ErrDuplicatePropertyOrder`   | A `PropertyOrder` slice listing the same property twice (returned by `Compile`).                                                            |
+| `ErrSchemaNotTree`            | The root document's sub-schema pointers alias or cycle (returned by `Compile`; reference shared schemas with `$ref` instead).               |
+| `ErrInvalidID`                | An `$id` that does not parse, carries a fragment under 2020-12, or does not resolve to an absolute URI (returned by `Compile`).             |
+| `ErrInvalidBaseURI`           | A `WithBaseURI` value that does not parse (returned by `Compile`).                                                                          |
+| `ErrMisplacedVocabulary`      | A `$vocabulary` on a node whose `$schema` does not establish the 2020-12 dialect (returned by `Compile`).                                   |
 | `ErrInvalidSchemaDocument`    | A schema document whose top-level value is not a JSON object or boolean (returned by `CompileJSON`, `ParseSchema`, and `ParseSchemaValue`). |
 | `ErrUnknownVocabulary`        | A required `$vocabulary` URI is unrecognized (or 2020-12 core is marked optional).                                                          |
 | `ErrRefResolve`               | A `RefResolver` returns an error resolving a remote `$ref`; in `Inline`, also a non-local ref with no resolver or any unresolvable target.  |
@@ -1461,23 +1508,23 @@ forward-direction generation only; schema-to-code generation is a non-goal.
 ### Relationship to `google/jsonschema-go`
 
 This package re-exports the upstream `Schema` type so users need only import
-this package, and reuses the upstream for two things: meta-schema validation /
-structural well-formedness (via `Schema.Resolve`, called once per `Compile` with
-its result discarded) and, as a fallback, JSON-semantic comparison of hand-built
-`const`/`enum` values outside the decoded JSON shapes (via `Equal`). Everything
-else, including the `const`/`enum`/`uniqueItems` value comparison for decoded
-JSON shapes (exact decimal, with `float64` interpreted at its shortest decimal),
-is implemented here.
+this package, and reuses the upstream for exactly one behavior beyond the
+type alias: JSON-semantic comparison of hand-built `const`/`enum` values
+outside the decoded JSON shapes (via `Equal`, as a recovering fallback).
+Everything else, including structural well-formedness checking at `Compile`
+and the `const`/`enum`/`uniqueItems` value comparison for decoded JSON shapes
+(exact decimal, with `float64` interpreted at its shortest decimal), is
+implemented here.
 
-| Concern                                                       | Implementation                               |
-| ------------------------------------------------------------- | -------------------------------------------- |
-| Schema data model (`Schema` struct)                           | Upstream (re-exported via type alias)        |
-| Meta-schema validation, structural well-formedness            | Upstream `Schema.Resolve` (result discarded) |
-| `$ref`/`$dynamicRef`/`$anchor` resolution (incl. remote refs) | This package (own URI/anchor registries)     |
-| Instance validation walk                                      | This package                                 |
-| Error types and path tracking                                 | This package                                 |
-| Format validation                                             | This package (pluggable)                     |
-| JSON-semantic value comparison (`const`/`enum`/`uniqueItems`) | This package (upstream `Equal()` fallback)   |
+| Concern                                                       | Implementation                             |
+| ------------------------------------------------------------- | ------------------------------------------ |
+| Schema data model (`Schema` struct)                           | Upstream (re-exported via type alias)      |
+| Structural well-formedness (compile-time checks)              | This package                               |
+| `$ref`/`$dynamicRef`/`$anchor` resolution (incl. remote refs) | This package (own URI/anchor registries)   |
+| Instance validation walk                                      | This package                               |
+| Error types and path tracking                                 | This package                               |
+| Format validation                                             | This package (pluggable)                   |
+| JSON-semantic value comparison (`const`/`enum`/`uniqueItems`) | This package (upstream `Equal()` fallback) |
 
 The package implements its own validation walk because the upstream
 `Resolved.Validate` returns on the first error within container keywords and
@@ -1536,8 +1583,11 @@ Two points where the generated schema's model of a Go type differs from what
 
 ### Non-goals
 
-- Meta-schema validation and structural well-formedness checking are delegated
-  to the upstream `Schema.Resolve`.
+- Full metaschema validation of input schemas. `Compile` checks structure,
+  identifiers, keyword domains, and references natively; validating a schema
+  document against its metaschema remains the caller's choice (the vendored
+  metaschemas under `testdata/` show the shape), and the conformance tests
+  apply it to generated schemas.
 - Code generation _from_ schemas (the reverse direction) is out of scope.
   Forward-direction generation, including the `jsonschemagen` CLI, is supported.
 

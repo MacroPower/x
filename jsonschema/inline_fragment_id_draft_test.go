@@ -15,8 +15,8 @@ import (
 // 2020-12 forbids a fragment in $id (core section 8.2.1), so under it the form
 // registers no resolution target and a $ref naming it reports ErrRefResolve
 // instead of splicing the target. The validator path rejects such a document
-// earlier, at upstream Schema.Resolve; the inliner never runs that pass, so the
-// registry walk's own draft gate is what this test exercises.
+// earlier, at Compile's identifier check; the inliner never runs that pass, so
+// the registry walk's own draft gate is what this test exercises.
 func TestInlineFragmentOnlyIDFollowsDraft(t *testing.T) {
 	t.Parallel()
 

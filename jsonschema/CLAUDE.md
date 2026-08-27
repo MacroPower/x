@@ -34,13 +34,15 @@ The package has two independent halves sharing the `Schema` type:
   containing-document URI) lives in slices indexed by the assigned id. The
   inliner clones through `internal/schemaclone` for its pristine and working
   copies. Follow-up work here is not done and remains open: a single-point
-  cycle policy, retiring `schemaFormsTree`, and subsuming the per-clone
+  cycle policy, and subsuming the per-clone
   `checkAcyclic` in `internal/schemaclone`. Two constraints any such design
   must handle: `refresolve` is a standalone package with no parent import, so
   keying its `baseURIs`/`walked` by node id means either an extra lookup at the
   boundary or breaking that boundary; and the defensive fetched-document
-  `cloneSchema` isolates this package from the resolver-owned schema that
-  upstream `Resolve` mutates, an isolation a pointer index alone cannot provide.
+  `cloneSchema` keeps every cache independent of the resolver-owned schema (a
+  resolver may hand out one shared object to many callers, and cached
+  documents are walked and registered long after the resolver returned), an
+  isolation a pointer index alone cannot provide.
   `$ref`/`$dynamicRef`/`$anchor` resolution lives in the
   shared `internal/refresolve` core, which both the validator and the inliner
   (`inline.go`) consume so the two engines cannot disagree; the inliner resolves
@@ -141,12 +143,12 @@ The package has two independent halves sharing the `Schema` type:
 ### Relationship to google/jsonschema-go
 
 `Schema` is a type alias to the upstream type (`schema.go`). The upstream is
-used for exactly two things: structural well-formedness via `Schema.Resolve`
-(called once per `Compile`, result discarded) and, as a recovering fallback,
+used for exactly one behavior beyond the type alias: as a recovering fallback,
 value equality for hand-built operand shapes the JSON-semantic walk in
 `internal/jsonequal` does not model (`const`/`enum`/`uniqueItems` comparisons
 otherwise run entirely in that package, and a panic in the upstream fallback
-degrades to unequal). Everything else — the reflection pipeline, all
+degrades to unequal). Everything else — the reflection pipeline, the
+compile-time structure/identifier/reference checks, all
 `$ref`/`$dynamicRef`/`$anchor` resolution, the validation walk, path tracking,
 format checking — is implemented here, because the upstream's resolved
 reference graph is unexported and its validator stops at the first error.
