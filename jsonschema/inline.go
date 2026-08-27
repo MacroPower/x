@@ -403,6 +403,9 @@ func (in *inliner) run(s *Schema) (*Schema, error) {
 	// schema this package's own [Compile] rejects.
 	in.session = reg.NewSession(newFallbackVet(in.profile))
 
+	// Unvetted by design (see the internal/schemavet package doc): Inline
+	// accepts a root schema Compile would reject, so the pristine root enters
+	// the resolution space without minting a vetted document.
 	in.record(pristine, "", in.session.SchemaBase(pristine))
 
 	// The context reaches the resolver through the ctx field set above:
@@ -756,6 +759,10 @@ func (in *inliner) substitute(pristine *Schema, path, ref string, inlineErr erro
 		seed, doc = "", in.session.SchemaBase(cp)
 	}
 
+	// Unvetted by design (see the internal/schemavet package doc): a
+	// caller-supplied WithRefFallback substitute carries the same trust as
+	// the inliner's own root, so it enters the resolution space without
+	// minting a vetted document.
 	in.record(cp, seed, doc)
 
 	return in.inlineCopy(cp, seed, false)
@@ -912,12 +919,12 @@ func (in *inliner) runContext() context.Context {
 // failure, preserving the inliner's fail-on-first-unresolvable-ref behavior.
 //
 // A fetched document is structurally vetted before registration, through the
-// same [documentVetter] policy the validator applies, so a remote carrying an
-// invalid type name, a negative bound, or (under a draft that rejects it) the
-// array form of items fails [Inline] with an error wrapping [ErrRefResolve]
-// rather than being inlined into a malformed output schema. The check is
-// recorded in the negative cache like the other failures, so it too is run at
-// most once per baseURI in a run.
+// same [schemavet.Vetter] policy the validator applies, so a remote carrying
+// an invalid type name, a negative bound, or (under a draft that rejects it)
+// the array form of items fails [Inline] with an error wrapping
+// [ErrRefResolve] rather than being inlined into a malformed output schema.
+// The check is recorded in the negative cache like the other failures, so it
+// too is run at most once per baseURI in a run.
 func (in *inliner) fetchDoc(baseURI string) (*Schema, error) {
 	if in.resolver == nil {
 		return nil, fmt.Errorf("%w: no resolver configured for %q", ErrRefResolve, baseURI)
@@ -934,12 +941,16 @@ func (in *inliner) fetchDoc(baseURI string) (*Schema, error) {
 		return nil, fmt.Errorf("%w: cannot resolve %q", ErrRefResolve, baseURI)
 	}
 
-	_, vetErr := schemavet.NewVetter(in.profile.vetProfile()).VetDoc(cp, baseURI+"#", baseURI)
+	doc, vetErr := schemavet.NewVetter(in.profile.vetProfile()).VetDoc(cp, baseURI+"#", baseURI)
 	if vetErr != nil {
 		in.session.RecordRemoteMiss(baseURI, vetErr)
 
 		return nil, fmt.Errorf("%w: %w", ErrRefResolve, vetErr)
 	}
+
+	// Register the vetted document's pointer (the same clone), so the currency
+	// proves the registrations below cover a vetted schema.
+	cp = doc.Schema()
 
 	in.session.Registry().URI[baseURI] = cp
 	in.session.RegisterFallback(cp, baseURI)
