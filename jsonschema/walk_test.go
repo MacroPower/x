@@ -10,6 +10,7 @@ import (
 
 	"go.jacobcolvin.com/x/jsonschema"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemafield"
+	"go.jacobcolvin.com/x/jsonschema/internal/schemavet"
 )
 
 // childSchemas projects SubschemaEntries onto the bare child schemas, for
@@ -651,4 +652,49 @@ func TestSchemas(t *testing.T) {
 			t.Fatal("a nil schema must yield nothing")
 		}
 	})
+}
+
+// TestSchemavetEntriesMatchSubschemaEntries pins that schemavet.Entries yields
+// exactly the SubschemaEntries schemas and pointers in the same order. The two
+// walks share the schemafield.Subschemas field list but assemble pointers
+// independently (schemavet cannot import the main package), and the vetting
+// error paths embed schemavet's pointers, so a divergence would change
+// compile-error text.
+func TestSchemavetEntriesMatchSubschemaEntries(t *testing.T) {
+	t.Parallel()
+
+	s := &jsonschema.Schema{
+		Properties: map[string]*jsonschema.Schema{
+			"plain": {Type: "string"},
+			"a/b":   {Type: "integer"},
+			"c~d":   {Type: "number"},
+		},
+		Defs: map[string]*jsonschema.Schema{
+			"z": {Type: "number"},
+			"y": {Type: "boolean"},
+		},
+		DependentSchemas: map[string]*jsonschema.Schema{
+			"dep": {Type: "object"},
+		},
+		AllOf:       []*jsonschema.Schema{{Type: "object"}, nil, {Type: "array"}},
+		PrefixItems: []*jsonschema.Schema{{Type: "string"}},
+		// Both forms of the items keyword set: the array form must win in
+		// both walks, and the single Items form must be omitted.
+		Items:      &jsonschema.Schema{Type: "string"},
+		ItemsArray: []*jsonschema.Schema{{Type: "integer"}},
+		Not:        &jsonschema.Schema{Type: "null"},
+		If:         &jsonschema.Schema{Type: "string"},
+	}
+
+	for _, root := range []*jsonschema.Schema{s, nil, {Type: "string"}} {
+		want := jsonschema.SubschemaEntries(root)
+		got := schemavet.Entries(root)
+
+		require.Len(t, got, len(want))
+
+		for i, entry := range want {
+			assert.Same(t, entry.Schema, got[i].Schema)
+			assert.Equal(t, entry.Pointer, got[i].Pointer)
+		}
+	}
 }

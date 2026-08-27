@@ -1,5 +1,7 @@
 package jsonschema
 
+import "go.jacobcolvin.com/x/jsonschema/internal/schemavet"
+
 // Draft represents a JSON Schema draft version. Older drafts compare as
 // less than newer ones, so ordering comparisons are meaningful; the numeric
 // values themselves are not part of the API and may change between releases
@@ -175,4 +177,17 @@ func (d Draft) profile() draftProfile {
 	}
 
 	return draftProfiles[Draft2020]
+}
+
+// vetProfile narrows the profile to the three flags the structural vetting
+// checks consult, in the leaf package's own [schemavet.Profile] type. The
+// conversion mirrors toRefDraft: schemavet, like refresolve, cannot import
+// the parent package, so it carries its own policy type and the parent
+// converts at the boundary.
+func (p draftProfile) vetProfile() schemavet.Profile {
+	return schemavet.Profile{
+		RejectItemsArray: p.rejectItemsArray,
+		RejectIDFragment: p.rejectIDFragment,
+		Vocabularies:     p.vocabularies,
+	}
 }

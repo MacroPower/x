@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/refresolve"
+	"go.jacobcolvin.com/x/jsonschema/internal/schemavet"
 	"go.jacobcolvin.com/x/jsonschema/internal/uriref"
 )
 
@@ -935,7 +936,7 @@ func (in *inliner) fetchDoc(baseURI string) (*Schema, error) {
 		return nil, fmt.Errorf("%w: cannot resolve %q", ErrRefResolve, baseURI)
 	}
 
-	vetErr := newDocumentVetter(in.profile).vetDoc(cp, baseURI+"#", baseURI)
+	_, vetErr := schemavet.NewVetter(in.profile.vetProfile()).VetDoc(cp, baseURI+"#", baseURI)
 	if vetErr != nil {
 		in.session.RecordRemoteMiss(baseURI, vetErr)
 

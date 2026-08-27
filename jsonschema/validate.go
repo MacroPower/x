@@ -21,7 +21,6 @@ import (
 	"go.jacobcolvin.com/x/jsonschema/internal/format"
 	"go.jacobcolvin.com/x/jsonschema/internal/jsonequal"
 	"go.jacobcolvin.com/x/jsonschema/internal/jsonptr"
-	"go.jacobcolvin.com/x/jsonschema/internal/keywordmeta"
 	"go.jacobcolvin.com/x/jsonschema/internal/normalize"
 	"go.jacobcolvin.com/x/jsonschema/internal/numrat"
 	"go.jacobcolvin.com/x/jsonschema/internal/refresolve"
@@ -29,7 +28,7 @@ import (
 	"go.jacobcolvin.com/x/jsonschema/internal/schemaclone"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemafield"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemashape"
-	"go.jacobcolvin.com/x/jsonschema/internal/typename"
+	"go.jacobcolvin.com/x/jsonschema/internal/schemavet"
 	"go.jacobcolvin.com/x/jsonschema/internal/uriref"
 	"go.jacobcolvin.com/x/jsonschema/internal/vocab"
 )
@@ -1000,100 +999,16 @@ func (v *validator) remoteFetch(sess *refresolve.Session, cow bool) refresolve.F
 	}
 }
 
-// documentVetter is the single structural-vetting policy applied to every
-// schema document the compiler and the runtime accept: the root, JSON-pointer
-// fallback targets, and fetched remote documents alike. Inline is the one
-// exception: its own root schema is not vetted (only the remotes it fetches
-// are), preserving its long-standing acceptance of inputs Compile would
-// reject. It runs the field-structure
-// check, the type-name check, the non-negative-bounds check, and (only when
-// rejectItemsArray is set, i.e. under a draft where the array form of items is
-// invalid) the items-array check, in that order, so the first violation a
-// document carries is the one reported.
-//
-// The visited sets guard schema-graph cycles and let one vetter deduplicate
-// across several passes: Compile shares a single vetter over the root, the
-// fallback targets, and the fetched remotes, so a node reached both locally and
-// through a remote URI is checked once and its violation is attributed to the
-// pass that reached it first. A fetch reached only at validation or inline time
-// builds a fresh vetter per document, since each such document is independent.
-type documentVetter struct {
-	structVisited map[*Schema]bool
-	typeVisited   map[*Schema]bool
-	boundsVisited map[*Schema]bool
-	itemsVisited  map[*Schema]bool
-	idVisited     map[*Schema]bool
-	profile       draftProfile
-}
-
-// newDocumentVetter returns a vetter with fresh visited sets, carrying the
-// run's [draftProfile] policy. The profile's rejectItemsArray flag gates the
-// items-array check, and its rejectIDFragment and vocabularies flags feed the
-// identifier checks of [documentVetter.vetDoc]; the structure, type-name, and
-// bounds checks are draft-agnostic.
-func newDocumentVetter(profile draftProfile) *documentVetter {
-	return &documentVetter{
-		structVisited: map[*Schema]bool{},
-		typeVisited:   map[*Schema]bool{},
-		boundsVisited: map[*Schema]bool{},
-		itemsVisited:  map[*Schema]bool{},
-		idVisited:     map[*Schema]bool{},
-		profile:       profile,
-	}
-}
-
-// vet applies the structural checks to s, prefixing each check's traversal with
-// pathPrefix so a violation names the offending document exactly. It returns the
-// first violation, or nil.
-func (dv *documentVetter) vet(s *Schema, pathPrefix string) error {
-	err := checkSchemaStructure(s, pathPrefix, dv.structVisited)
-	if err != nil {
-		return err
-	}
-
-	err = checkTypeNames(s, pathPrefix, dv.typeVisited)
-	if err != nil {
-		return err
-	}
-
-	err = checkBoundDomains(s, pathPrefix, dv.boundsVisited)
-	if err != nil {
-		return err
-	}
-
-	if dv.profile.rejectItemsArray {
-		err = checkItemsArrayDraft2020(s, pathPrefix, dv.itemsVisited)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-// vetDoc applies [documentVetter.vet] plus the identifier checks ($id domain
-// and $vocabulary placement, see [checkIdentifiers]) to a document rooted at
-// s, whose base URI is base. It serves the call sites that hold a whole
-// document with a known base: the root at Compile, each registry-known
-// document, and each fetched document. JSON-pointer fallback targets keep the
-// plain vet: a pointer target is a fragment of a document already checked, and
-// no document base is in hand at its location.
-func (dv *documentVetter) vetDoc(s *Schema, pathPrefix, base string) error {
-	err := dv.vet(s, pathPrefix)
-	if err != nil {
-		return err
-	}
-
-	return checkIdentifiers(s, pathPrefix, base, dv.profile, dv.idVisited)
-}
-
-// checkFetchedDocument runs the single [documentVetter] policy over a document
-// fetched during a validation run, giving late-fetched documents parity with
-// compile-time-fetched ones. Each late fetch is independent, so it uses a fresh
-// vetter. The base URI prefixes the path so a violation names the offending
-// document exactly as the compile-time pass does.
+// checkFetchedDocument runs the single [schemavet.Vetter] policy over a
+// document fetched during a validation run, giving late-fetched documents
+// parity with compile-time-fetched ones. Each late fetch is independent, so it
+// uses a fresh vetter. The base URI prefixes the path so a violation names the
+// offending document exactly as the compile-time pass does.
 func (v *validator) checkFetchedDocument(s *Schema, baseURI string) error {
-	return newDocumentVetter(v.profile).vetDoc(s, baseURI+"#", baseURI)
+	_, err := schemavet.NewVetter(v.profile.vetProfile()).VetDoc(s, baseURI+"#", baseURI)
+
+	//nolint:wrapcheck // The vetting error already names the document and path.
+	return err
 }
 
 // newFallbackVet returns the structural vet a [refresolve.Session] applies to
@@ -1109,14 +1024,14 @@ func (v *validator) checkFetchedDocument(s *Schema, baseURI string) error {
 // is wrapped in [ErrRefResolve] so it surfaces through the referencing ref
 // exactly like a malformed-document violation.
 func newFallbackVet(profile draftProfile) func(sc *Schema, locator string) error {
-	var dv *documentVetter
+	var vt *schemavet.Vetter
 
 	return func(sc *Schema, locator string) error {
-		if dv == nil {
-			dv = newDocumentVetter(profile)
+		if vt == nil {
+			vt = schemavet.NewVetter(profile.vetProfile())
 		}
 
-		err := dv.vet(sc, locator)
+		_, err := vt.Vet(sc, locator)
 		if err != nil {
 			return fmt.Errorf("%w: %w", ErrRefResolve, err)
 		}
@@ -1259,10 +1174,11 @@ func Compile(ctx context.Context, schema *Schema, opts ...ValidateOption) (*Vali
 	// and fetched remotes, so a node reached both locally and through a
 	// remote URI is checked once and attributed to the pass that reached it
 	// first.
-	dv := newDocumentVetter(v.profile)
+	vt := schemavet.NewVetter(v.profile.vetProfile())
 
-	err = dv.vetDoc(schema, "", v.baseURI)
+	_, err = vt.VetDoc(schema, "", v.baseURI)
 	if err != nil {
+		//nolint:wrapcheck // The vetting error already names the document and path.
 		return nil, err
 	}
 
@@ -1275,7 +1191,7 @@ func Compile(ctx context.Context, schema *Schema, opts ...ValidateOption) (*Vali
 	// documents through the resolver and vetting each document and fallback
 	// target the walk uncovers.
 	//nolint:contextcheck // The compile context rides on the ctx field set above.
-	err = v.compileRefPasses(dv)
+	err = v.compileRefPasses(vt)
 	if err != nil {
 		return nil, err
 	}
@@ -1315,7 +1231,7 @@ func Compile(ctx context.Context, schema *Schema, opts ...ValidateOption) (*Vali
 // vet cursor, and the fallback-target ref cursor. Fetches and pointer
 // fallbacks only append to those frontiers, and the session caches make
 // re-resolution idempotent, so the loop terminates.
-func (v *validator) compileRefPasses(dv *documentVetter) error {
+func (v *validator) compileRefPasses(vt *schemavet.Vetter) error {
 	// Cross-pass dedup on top of Walk's per-call dedup, so a node reachable
 	// from several documents resolves its references once. Skipping an
 	// already-walked node's children is sound because the pass that first
@@ -1391,8 +1307,9 @@ func (v *validator) compileRefPasses(dv *documentVetter) error {
 
 			s := v.refReg.URI[uri]
 
-			err := dv.vetDoc(s, uri+"#", uri)
+			_, err := vt.VetDoc(s, uri+"#", uri)
 			if err != nil {
+				//nolint:wrapcheck // The vetting error already names the document and path.
 				return err
 			}
 
@@ -1420,8 +1337,9 @@ func (v *validator) compileRefPasses(dv *documentVetter) error {
 			ft := v.refSession.FallbackTargets()[vetCursor]
 			progressed = true
 
-			err := dv.vet(ft.Schema, ft.Locator)
+			_, err := vt.Vet(ft.Schema, ft.Locator)
 			if err != nil {
+				//nolint:wrapcheck // The vetting error already names the target's locator.
 				return err
 			}
 		}
@@ -1748,153 +1666,8 @@ func MustCompileJSON(data []byte, opts ...ValidateOption) *Validator {
 // only typed sub-schema fields, and tolerates cyclic schema graphs. A nil
 // schema returns nil.
 func CheckTypeNames(schema *Schema) error {
-	return checkTypeNames(schema, "", map[*Schema]bool{})
-}
-
-// checkTypeNames implements [CheckTypeNames], verifying that every type keyword
-// reachable from schema names one of the seven JSON Schema types and returning
-// an error wrapping [ErrInvalidType] for the first violation. The traversal
-// uses [SubschemaEntries] for the sub-schema field list, appending each entry's
-// Pointer so the error locates the offending keyword; visited guards
-// against schema graph cycles. The check is draft-agnostic: neither draft
-// defines type names beyond the canonical seven.
-func checkTypeNames(schema *Schema, schemaPath string, visited map[*Schema]bool) error {
-	if schema == nil || visited[schema] {
-		return nil
-	}
-
-	visited[schema] = true
-
-	if schema.Type != "" && !typename.Valid(schema.Type) {
-		return fmt.Errorf("%w: %q at %s/type", ErrInvalidType, schema.Type, schemaPath)
-	}
-
-	for _, name := range schema.Types {
-		if !typename.Valid(name) {
-			return fmt.Errorf("%w: %q at %s/type", ErrInvalidType, name, schemaPath)
-		}
-	}
-
-	// SubschemaEntries is the single source of truth for the sub-schema field
-	// list, and its Pointer reproduces the "/keyword[/key-or-index]" tokens
-	// this check previously built by hand (member keys carry ~0/~1 escaping,
-	// map children come in sorted-key order for deterministic violations).
-	for _, entry := range SubschemaEntries(schema) {
-		err := checkTypeNames(entry.Schema, schemaPath+entry.Pointer, visited)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-// checkSchemaStructure rejects a schema whose Go representation cannot express
-// one coherent JSON document: a keyword spelled through both of its Go fields
-// (Type and Types, Defs and Definitions, Items and ItemsArray, a dependencies
-// key in both DependencySchemas and DependencyStrings), a duplicate
-// PropertyOrder entry, and a nil *Schema element inside a sub-schema slice or
-// map. Each conflicting pair marshals to a single JSON keyword, so the walk
-// would silently prefer one form; a nil container element is skipped by the
-// walk, so the branch the author listed would assert nothing. The traversal
-// mirrors [checkTypeNames]: it uses [SubschemaEntries] for the recursion and
-// each entry's Pointer for the location, with visited guarding schema-graph
-// cycles. The nil-element scan reads the raw containers through the canonical
-// [schemafield.Subschemas] table, since [SubschemaEntries] itself skips nil
-// elements.
-func checkSchemaStructure(schema *Schema, schemaPath string, visited map[*Schema]bool) error {
-	if schema == nil || visited[schema] {
-		return nil
-	}
-
-	visited[schema] = true
-
-	err := checkFieldConflicts(schema, schemaPath)
-	if err != nil {
-		return err
-	}
-
-	err = checkNilSubschemaEntries(schema, schemaPath)
-	if err != nil {
-		return err
-	}
-
-	for _, entry := range SubschemaEntries(schema) {
-		err := checkSchemaStructure(entry.Schema, schemaPath+entry.Pointer, visited)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-// checkFieldConflicts reports the per-node field conflicts of
-// [checkSchemaStructure]: the three both-fields-set pairs, a dependencies key
-// present in both maps, and a duplicate PropertyOrder entry.
-func checkFieldConflicts(schema *Schema, schemaPath string) error {
-	if schema.Type != "" && schema.Types != nil {
-		return fmt.Errorf("%w: both Type and Types at %s/type", ErrConflictingSchemaFields, schemaPath)
-	}
-
-	if schema.Defs != nil && schema.Definitions != nil {
-		return fmt.Errorf("%w: both Defs and Definitions at %s/$defs", ErrConflictingSchemaFields, schemaPath)
-	}
-
-	if schema.Items != nil && schema.ItemsArray != nil {
-		return fmt.Errorf("%w: both Items and ItemsArray at %s/items", ErrConflictingSchemaFields, schemaPath)
-	}
-
-	if len(schema.DependencyStrings) > 0 {
-		for _, key := range slices.Sorted(maps.Keys(schema.DependencySchemas)) {
-			if _, ok := schema.DependencyStrings[key]; ok {
-				return fmt.Errorf("%w: dependencies key %q is both a schema and a string array at %s/dependencies/%s",
-					ErrConflictingSchemaFields, key, schemaPath, jsonptr.Escape(key))
-			}
-		}
-	}
-
-	seen := make(map[string]bool, len(schema.PropertyOrder))
-	for _, name := range schema.PropertyOrder {
-		if seen[name] {
-			return fmt.Errorf("%w: %q at %s/propertyOrder", ErrDuplicatePropertyOrder, name, schemaPath)
-		}
-
-		seen[name] = true
-	}
-
-	return nil
-}
-
-// checkNilSubschemaEntries reports the first nil *Schema element inside one of
-// the node's sub-schema slices or maps. The scan reads the raw containers via
-// the [schemafield.Subschemas] table rather than [SubschemaEntries], which
-// skips nil elements by contract; map elements are scanned in sorted-key order
-// so the reported violation is deterministic.
-func checkNilSubschemaEntries(schema *Schema, schemaPath string) error {
-	for _, f := range schemafield.Subschemas {
-		switch f.Shape {
-		case schemafield.None, schemafield.Single:
-			// A nil single field is an absent keyword, not a violation.
-
-		case schemafield.Slice:
-			for i, sub := range f.SliceOf(schema) {
-				if sub == nil {
-					return fmt.Errorf("%w at %s/%s/%d", ErrNilSubschema, schemaPath, f.Keyword, i)
-				}
-			}
-
-		case schemafield.Map:
-			m := f.MapOf(schema)
-			for _, key := range slices.Sorted(maps.Keys(m)) {
-				if m[key] == nil {
-					return fmt.Errorf("%w at %s/%s/%s", ErrNilSubschema, schemaPath, f.Keyword, jsonptr.Escape(key))
-				}
-			}
-		}
-	}
-
-	return nil
+	//nolint:wrapcheck // The vetting error already names the offending path.
+	return schemavet.CheckTypeNames(schema)
 }
 
 // checkSchemaTree verifies that the root document's sub-schema pointers form a
@@ -1932,246 +1705,6 @@ func checkSchemaTree(schema *Schema) error {
 	}
 
 	return visit(schema, "")
-}
-
-// checkIdentifiers verifies the $id and $vocabulary domains over a schema
-// document, threading the enclosing base URI exactly as the registry walk
-// does, so a violation is judged against the same base the resolution
-// machinery would use. Per node it checks the $vocabulary placement (see
-// [ErrMisplacedVocabulary]) and, when the node declares an $id, its domain
-// (see [ErrInvalidID] and [checkSchemaID], which also computes the base the
-// node's children inherit). The traversal mirrors [checkTypeNames]: it uses
-// [SubschemaEntries] for the recursion and each entry's Pointer for the
-// location, with visited guarding schema-graph cycles.
-func checkIdentifiers(
-	schema *Schema, schemaPath, base string, profile draftProfile, visited map[*Schema]bool,
-) error {
-	if schema == nil || visited[schema] {
-		return nil
-	}
-
-	visited[schema] = true
-
-	err := checkVocabularyPlacement(schema, schemaPath, profile)
-	if err != nil {
-		return err
-	}
-
-	currentBase := base
-
-	if schema.ID != "" {
-		next, err := checkSchemaID(schema, schemaPath, currentBase, profile)
-		if err != nil {
-			return err
-		}
-
-		currentBase = next
-	}
-
-	for _, entry := range SubschemaEntries(schema) {
-		err := checkIdentifiers(entry.Schema, schemaPath+entry.Pointer, currentBase, profile, visited)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-// checkVocabularyPlacement rejects a $vocabulary on a node whose $schema does
-// not establish the Draft 2020-12 dialect. A non-empty $schema must be
-// exactly the 2020-12 URI (spec section 8.1.2 defines $vocabulary for that
-// dialect's metaschemas; any other dialect string, including the
-// trailing-"#" spelling, cannot carry one). An empty $schema is read as
-// inheriting the run's dialect: accepted under the Draft 2020-12 profile,
-// rejected under Draft-07, which predates the vocabulary concept.
-func checkVocabularyPlacement(schema *Schema, schemaPath string, profile draftProfile) error {
-	if schema.Vocabulary == nil {
-		return nil
-	}
-
-	if schema.Schema == "" {
-		if profile.vocabularies {
-			return nil
-		}
-
-		return fmt.Errorf("%w: $vocabulary under the Draft-07 dialect at %s/$vocabulary",
-			ErrMisplacedVocabulary, schemaPath)
-	}
-
-	if schema.Schema != Draft2020.schemaURI() {
-		return fmt.Errorf("%w: $vocabulary under $schema %q at %s/$vocabulary",
-			ErrMisplacedVocabulary, schema.Schema, schemaPath)
-	}
-
-	return nil
-}
-
-// checkSchemaID checks one node's non-empty $id against the keyword's domain
-// and returns the base URI the node's children inherit. The base threads
-// exactly as in the registry walk ([refresolve.Registry] walkInto): a
-// fragment-only $id changes no base, and any other $id rebases the children
-// to [uriref.IDBase] of itself against the enclosing base, whether or not its
-// checks ran. Under Draft-07 two forms go unchecked: an $id beside a $ref
-// (the draft ignores it) and a fragment-carrying $id (the anchor spelling);
-// Draft 2020-12 rejects any fragment in $id (core section 8.2.1). A checked
-// $id must parse, and its resolved form must be an absolute URI; a relative
-// $id with no absolute base registers no resolvable URI, so every ref
-// targeting it would silently miss.
-func checkSchemaID(schema *Schema, schemaPath, base string, profile draftProfile) (string, error) {
-	id := schema.ID
-
-	if uriref.IsFragmentOnly(id) {
-		if profile.rejectIDFragment {
-			return "", fmt.Errorf("%w: $id %q must not carry a fragment at %s/$id",
-				ErrInvalidID, id, schemaPath)
-		}
-
-		// Draft-07 anchor form: an anchor registration, no base change.
-		return base, nil
-	}
-
-	resolved := uriref.IDBase(base, id)
-
-	// Draft-07 ignores an $id beside a $ref, so its domain goes unchecked;
-	// the resolved base still threads to the children, as in the registry
-	// walk.
-	if !profile.rejectIDFragment && schema.Ref != "" {
-		return resolved, nil
-	}
-
-	parsed, err := url.Parse(id)
-	if err != nil {
-		return "", fmt.Errorf("%w: cannot parse $id %q at %s/$id", ErrInvalidID, id, schemaPath)
-	}
-
-	if parsed.Fragment != "" {
-		if profile.rejectIDFragment {
-			return "", fmt.Errorf("%w: $id %q must not carry a fragment at %s/$id",
-				ErrInvalidID, id, schemaPath)
-		}
-
-		// Draft-07 fragment-carrying $id: the anchor reading, unchecked.
-		return resolved, nil
-	}
-
-	resolvedURL, err := url.Parse(resolved)
-	if err != nil || !resolvedURL.IsAbs() {
-		return "", fmt.Errorf("%w: $id %q does not resolve to an absolute URI against base %q at %s/$id",
-			ErrInvalidID, id, base, schemaPath)
-	}
-
-	return resolved, nil
-}
-
-// checkItemsArrayDraft2020 rejects the Draft-7 array form of the items keyword
-// (ItemsArray, what upstream parses a JSON `"items": [ ... ]` into) when
-// compiling under [Draft2020], where it has no meaning. Without this the
-// 2020-12 array walk drops the constraint silently and validates every element
-// against nothing. The traversal mirrors [checkTypeNames]: it uses
-// [SubschemaEntries] for the field list and each entry's Pointer for the
-// location, with visited guarding schema-graph cycles. Compile runs it only
-// under Draft 2020-12, so Draft-7 schemas pay nothing.
-func checkItemsArrayDraft2020(schema *Schema, schemaPath string, visited map[*Schema]bool) error {
-	if schema == nil || visited[schema] {
-		return nil
-	}
-
-	visited[schema] = true
-
-	// A nil check rather than a length check: upstream unmarshals a present
-	// but empty `"items": []` into a non-nil empty slice, and that array form
-	// is just as meaningless under 2020-12 (it silently drops the Draft-7
-	// semantics of its additionalItems sibling).
-	if schema.ItemsArray != nil {
-		return fmt.Errorf("%w; use prefixItems at %s/items", ErrItemsArrayUnderDraft2020, schemaPath)
-	}
-
-	for _, entry := range SubschemaEntries(schema) {
-		err := checkItemsArrayDraft2020(entry.Schema, schemaPath+entry.Pointer, visited)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-// The sizeBounds table lists the length and count keywords with their
-// *int accessors, for the compile-time domain check in
-// [checkBoundDomains]. The init guard below pins the list to
-// [keywordmeta.Sizes], so a count keyword added to the semantics table
-// cannot silently skip the check.
-var sizeBounds = []struct {
-	get     func(*Schema) *int
-	keyword string
-}{
-	{func(s *Schema) *int { return s.MinLength }, KeywordMinLength},
-	{func(s *Schema) *int { return s.MaxLength }, KeywordMaxLength},
-	{func(s *Schema) *int { return s.MinItems }, KeywordMinItems},
-	{func(s *Schema) *int { return s.MaxItems }, KeywordMaxItems},
-	{func(s *Schema) *int { return s.MinProperties }, KeywordMinProperties},
-	{func(s *Schema) *int { return s.MaxProperties }, KeywordMaxProperties},
-	{func(s *Schema) *int { return s.MinContains }, KeywordMinContains},
-	{func(s *Schema) *int { return s.MaxContains }, KeywordMaxContains},
-}
-
-// init cross-checks sizeBounds against the semantics table's derived size
-// set. Panicking at load follows the dispatch table's convention: every test
-// binary in the module trips it, so the drift a hand-maintained keyword list
-// invites cannot land silently.
-func init() {
-	declared := make([]string, 0, len(sizeBounds))
-	for _, b := range sizeBounds {
-		declared = append(declared, b.keyword)
-	}
-
-	slices.Sort(declared)
-
-	if derived := keywordmeta.Names(keywordmeta.Sizes); !slices.Equal(declared, derived) {
-		panic(fmt.Sprintf(
-			"jsonschema: sizeBounds (%v) does not match keywordmeta.Sizes (%v)",
-			declared, derived))
-	}
-}
-
-// checkBoundDomains rejects a keyword value outside the domain the spec fixes
-// for it: a negative value on a length or count keyword (each defined as a
-// non-negative integer) and a non-positive multipleOf (defined as a number
-// strictly greater than zero). An invalid value would otherwise silently
-// mis-validate: a negative maximum rejects every instance, a negative minimum
-// never fires, and a non-positive multipleOf rejects every numeric instance
-// while accepting every non-numeric one. The traversal mirrors
-// [checkTypeNames]: it uses [SubschemaEntries] for the field list and each
-// entry's Pointer for the location, with visited guarding schema-graph
-// cycles. It is draft-agnostic; every draft fixes these domains identically.
-func checkBoundDomains(schema *Schema, schemaPath string, visited map[*Schema]bool) error {
-	if schema == nil || visited[schema] {
-		return nil
-	}
-
-	visited[schema] = true
-
-	for _, bound := range sizeBounds {
-		if value := bound.get(schema); value != nil && *value < 0 {
-			return fmt.Errorf("%w: %s is %d at %s/%s",
-				ErrNegativeBound, bound.keyword, *value, schemaPath, bound.keyword)
-		}
-	}
-
-	if schema.MultipleOf != nil && *schema.MultipleOf <= 0 {
-		return fmt.Errorf("%w: got %v at %s/%s",
-			ErrNonPositiveMultipleOf, *schema.MultipleOf, schemaPath, KeywordMultipleOf)
-	}
-
-	for _, entry := range SubschemaEntries(schema) {
-		err := checkBoundDomains(entry.Schema, schemaPath+entry.Pointer, visited)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
 }
 
 // Validate validates a pre-parsed Go value against the compiled schema.

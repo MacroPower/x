@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/refresolve"
+	"go.jacobcolvin.com/x/jsonschema/internal/schemavet"
 )
 
 var (
@@ -22,7 +23,11 @@ var (
 	// [CheckTypeNames] and by [Compile], as well as by the one-shot [Validate]
 	// helper, which routes through the same check. A typo'd type would otherwise
 	// compile cleanly and then reject every instance at runtime.
-	ErrInvalidType = errors.New("invalid type name")
+	//
+	// It is re-exported from internal/schemavet, the shared structural-vetting
+	// core, so [errors.Is] matches the sentinel identically whether a failure
+	// originates in that package or here.
+	ErrInvalidType = schemavet.ErrInvalidType
 
 	// ErrItemsArrayUnderDraft2020 is returned by [Compile] when a schema
 	// compiled under [Draft2020] sets the array form of the items keyword
@@ -33,7 +38,11 @@ var (
 	// Rejecting it at construction surfaces the dropped constraint instead of
 	// accepting every instance; set the Draft-7 $schema (or [WithDraft]) for
 	// tuple semantics, or use prefixItems.
-	ErrItemsArrayUnderDraft2020 = errors.New("array-form items is not valid under draft 2020-12")
+	//
+	// It is re-exported from internal/schemavet, the shared structural-vetting
+	// core, so [errors.Is] matches the sentinel identically whether a failure
+	// originates in that package or here.
+	ErrItemsArrayUnderDraft2020 = schemavet.ErrItemsArrayUnderDraft2020
 
 	// ErrUnsupportedDraft is returned by [Compile] and [Inline] when the root
 	// schema's $schema declares an official dialect this package does not
@@ -53,7 +62,11 @@ var (
 	// cleanly and then silently mis-validate: a negative maximum rejects
 	// every instance and a negative minimum is a dead no-op. Rejecting it at
 	// construction surfaces the malformed schema instead.
-	ErrNegativeBound = errors.New("negative bound")
+	//
+	// It is re-exported from internal/schemavet, the shared structural-vetting
+	// core, so [errors.Is] matches the sentinel identically whether a failure
+	// originates in that package or here.
+	ErrNegativeBound = schemavet.ErrNegativeBound
 
 	// ErrNonPositiveMultipleOf is returned by [Compile] when a multipleOf
 	// keyword carries a value that is not strictly greater than zero. The spec
@@ -62,14 +75,22 @@ var (
 	// at validation time while silently accepting every non-numeric one.
 	// Rejecting it at construction surfaces the malformed schema instead, the
 	// same policy [ErrNegativeBound] applies to the length and count keywords.
-	ErrNonPositiveMultipleOf = errors.New("multipleOf must be greater than 0")
+	//
+	// It is re-exported from internal/schemavet, the shared structural-vetting
+	// core, so [errors.Is] matches the sentinel identically whether a failure
+	// originates in that package or here.
+	ErrNonPositiveMultipleOf = schemavet.ErrNonPositiveMultipleOf
 
 	// ErrNilSubschema is returned by [Compile] when a sub-schema slice or map
 	// holds a nil *Schema element (for example AllOf: []*Schema{nil}). A nil
 	// element has no JSON form, and the walk skips it silently, so the branch
 	// the author listed would assert nothing. Only container elements are
 	// checked: a nil direct field such as Not or Items is an absent keyword.
-	ErrNilSubschema = errors.New("nil subschema")
+	//
+	// It is re-exported from internal/schemavet, the shared structural-vetting
+	// core, so [errors.Is] matches the sentinel identically whether a failure
+	// originates in that package or here.
+	ErrNilSubschema = schemavet.ErrNilSubschema
 
 	// ErrConflictingSchemaFields is returned by [Compile] when a schema sets
 	// both Go fields that spell one JSON keyword: Type and Types, Defs and
@@ -77,14 +98,22 @@ var (
 	// DependencySchemas and DependencyStrings. Each pair marshals to a single
 	// keyword, so a schema setting both cannot round-trip through JSON, and
 	// the walk would silently prefer one form over the other.
-	ErrConflictingSchemaFields = errors.New("conflicting schema fields")
+	//
+	// It is re-exported from internal/schemavet, the shared structural-vetting
+	// core, so [errors.Is] matches the sentinel identically whether a failure
+	// originates in that package or here.
+	ErrConflictingSchemaFields = schemavet.ErrConflictingSchemaFields
 
 	// ErrDuplicatePropertyOrder is returned by [Compile] when a schema's
 	// PropertyOrder slice lists the same property twice. The slice fixes the
 	// JSON rendering order of properties, a duplicate entry makes that order
 	// ambiguous, and upstream MarshalJSON rejects it, so the schema could
 	// never be marshaled.
-	ErrDuplicatePropertyOrder = errors.New("duplicate propertyOrder entry")
+	//
+	// It is re-exported from internal/schemavet, the shared structural-vetting
+	// core, so [errors.Is] matches the sentinel identically whether a failure
+	// originates in that package or here.
+	ErrDuplicatePropertyOrder = schemavet.ErrDuplicatePropertyOrder
 
 	// ErrSchemaNotTree is returned by [Compile] when the root document's
 	// sub-schema pointers do not form a tree: one *Schema value is reachable
@@ -105,7 +134,11 @@ var (
 	// ref targeting it would silently miss. Under Draft-07 two forms go
 	// unchecked: an $id beside a $ref (the draft ignores it) and a
 	// fragment-carrying $id (the anchor spelling).
-	ErrInvalidID = errors.New("invalid $id")
+	//
+	// It is re-exported from internal/schemavet, the shared structural-vetting
+	// core, so [errors.Is] matches the sentinel identically whether a failure
+	// originates in that package or here.
+	ErrInvalidID = schemavet.ErrInvalidID
 
 	// ErrInvalidBaseURI is returned by [Compile] when the [WithBaseURI] value
 	// does not parse as a URI reference. Every ref and $id in the root
@@ -121,7 +154,11 @@ var (
 	// empty $schema under Draft 2020-12 is accepted: the document inherits
 	// the referrer's dialect (the reading upstream applies to loaded
 	// documents).
-	ErrMisplacedVocabulary = errors.New("misplaced $vocabulary")
+	//
+	// It is re-exported from internal/schemavet, the shared structural-vetting
+	// core, so [errors.Is] matches the sentinel identically whether a failure
+	// originates in that package or here.
+	ErrMisplacedVocabulary = schemavet.ErrMisplacedVocabulary
 
 	// ErrInvalidSchemaDocument is returned by [CompileJSON], [ParseSchema],
 	// and [ParseSchemaValue] when a schema document's top-level value is not a
