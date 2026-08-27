@@ -66,6 +66,38 @@ var (
 	// applies to the length and count keywords.
 	ErrNonPositiveMultipleOf = errors.New("multipleOf must be greater than 0")
 
+	// ErrNilSubschema is returned by [Compile] when a sub-schema slice or map
+	// holds a nil *Schema element (for example AllOf: []*Schema{nil}). A nil
+	// element has no JSON form, and the walk skips it silently, so the branch
+	// the author listed would assert nothing. Only container elements are
+	// checked: a nil direct field such as Not or Items is an absent keyword.
+	ErrNilSubschema = errors.New("nil subschema")
+
+	// ErrConflictingSchemaFields is returned by [Compile] when a schema sets
+	// both Go fields that spell one JSON keyword: Type and Types, Defs and
+	// Definitions, Items and ItemsArray, or one dependencies key in both
+	// DependencySchemas and DependencyStrings. Each pair marshals to a single
+	// keyword, so a schema setting both cannot round-trip through JSON, and
+	// the walk would silently prefer one form over the other.
+	ErrConflictingSchemaFields = errors.New("conflicting schema fields")
+
+	// ErrDuplicatePropertyOrder is returned by [Compile] when a schema's
+	// PropertyOrder slice lists the same property twice. The slice fixes the
+	// JSON rendering order of properties, a duplicate entry makes that order
+	// ambiguous, and upstream MarshalJSON rejects it, so the schema could
+	// never be marshaled.
+	ErrDuplicatePropertyOrder = errors.New("duplicate propertyOrder entry")
+
+	// ErrSchemaNotTree is returned by [Compile] when the root document's
+	// sub-schema pointers do not form a tree: one *Schema value is reachable
+	// through two different paths, or a pointer cycle exists. The compiled
+	// per-node caches and error paths assume each node has one location, and
+	// the JSON form of such a graph silently duplicates (or, for a cycle,
+	// cannot express) the shared node. The error names both paths that reach
+	// the repeated node. Reference the shared schema with $ref instead of
+	// aliasing the pointer.
+	ErrSchemaNotTree = errors.New("schema is not a tree")
+
 	// ErrInvalidSchemaDocument is returned by [CompileJSON], [ParseSchema],
 	// and [ParseSchemaValue] when a schema document's top-level value is not a
 	// JSON object or boolean.

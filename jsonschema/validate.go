@@ -1007,19 +1007,20 @@ func (v *validator) remoteFetch(sess *refresolve.Session, cow bool) refresolve.F
 // fallback targets, and fetched remote documents alike. Inline is the one
 // exception: its own root schema is not vetted (only the remotes it fetches
 // are), preserving its long-standing acceptance of inputs Compile would
-// reject. It runs the type-name
-// check, the non-negative-bounds check, and (only when rejectItemsArray is set,
-// i.e. under a draft where the array form of items is invalid) the items-array
-// check, in that order, so the first violation a document carries is the one
-// reported.
+// reject. It runs the field-structure
+// check, the type-name check, the non-negative-bounds check, and (only when
+// rejectItemsArray is set, i.e. under a draft where the array form of items is
+// invalid) the items-array check, in that order, so the first violation a
+// document carries is the one reported.
 //
-// The three visited sets guard schema-graph cycles and let one vetter deduplicate
+// The visited sets guard schema-graph cycles and let one vetter deduplicate
 // across several passes: Compile shares a single vetter over the root, the
 // fallback targets, and the fetched remotes, so a node reached both locally and
 // through a remote URI is checked once and its violation is attributed to the
 // pass that reached it first. A fetch reached only at validation or inline time
 // builds a fresh vetter per document, since each such document is independent.
 type documentVetter struct {
+	structVisited    map[*Schema]bool
 	typeVisited      map[*Schema]bool
 	boundsVisited    map[*Schema]bool
 	itemsVisited     map[*Schema]bool
@@ -1028,9 +1029,10 @@ type documentVetter struct {
 
 // newDocumentVetter returns a vetter with fresh visited sets, carrying the
 // run's [draftProfile] policy. Only the profile's rejectItemsArray flag feeds
-// the checks; the type-name and bounds checks are draft-agnostic.
+// the checks; the structure, type-name, and bounds checks are draft-agnostic.
 func newDocumentVetter(profile draftProfile) *documentVetter {
 	return &documentVetter{
+		structVisited:    map[*Schema]bool{},
 		typeVisited:      map[*Schema]bool{},
 		boundsVisited:    map[*Schema]bool{},
 		itemsVisited:     map[*Schema]bool{},
@@ -1042,7 +1044,12 @@ func newDocumentVetter(profile draftProfile) *documentVetter {
 // pathPrefix so a violation names the offending document exactly. It returns the
 // first violation, or nil.
 func (dv *documentVetter) vet(s *Schema, pathPrefix string) error {
-	err := checkTypeNames(s, pathPrefix, dv.typeVisited)
+	err := checkSchemaStructure(s, pathPrefix, dv.structVisited)
+	if err != nil {
+		return err
+	}
+
+	err = checkTypeNames(s, pathPrefix, dv.typeVisited)
 	if err != nil {
 		return err
 	}
@@ -1279,6 +1286,14 @@ func Compile(ctx context.Context, schema *Schema, opts ...ValidateOption) (*Vali
 	// calls made while compiling (the metaschema lookup, remoteLoader during
 	// Schema.Resolve, and resolveRemote via resolveErrorIsRefOnly).
 	v, err := newValidator(ctx, schema, opts)
+	if err != nil {
+		return nil, err
+	}
+
+	// The root document's sub-schema pointers must form a tree. This runs once
+	// over the root only: fetched and fallback-materialized documents are
+	// parsed fresh and are trees by construction.
+	err = checkSchemaTree(schema)
 	if err != nil {
 		return nil, err
 	}
@@ -1751,6 +1766,151 @@ func checkTypeNames(schema *Schema, schemaPath string, visited map[*Schema]bool)
 	}
 
 	return nil
+}
+
+// checkSchemaStructure rejects a schema whose Go representation cannot express
+// one coherent JSON document: a keyword spelled through both of its Go fields
+// (Type and Types, Defs and Definitions, Items and ItemsArray, a dependencies
+// key in both DependencySchemas and DependencyStrings), a duplicate
+// PropertyOrder entry, and a nil *Schema element inside a sub-schema slice or
+// map. Each conflicting pair marshals to a single JSON keyword, so the walk
+// would silently prefer one form; a nil container element is skipped by the
+// walk, so the branch the author listed would assert nothing. The traversal
+// mirrors [checkTypeNames]: it uses [SubschemaEntries] for the recursion and
+// each entry's Pointer for the location, with visited guarding schema-graph
+// cycles. The nil-element scan reads the raw containers through the canonical
+// [schemafield.Subschemas] table, since [SubschemaEntries] itself skips nil
+// elements.
+func checkSchemaStructure(schema *Schema, schemaPath string, visited map[*Schema]bool) error {
+	if schema == nil || visited[schema] {
+		return nil
+	}
+
+	visited[schema] = true
+
+	err := checkFieldConflicts(schema, schemaPath)
+	if err != nil {
+		return err
+	}
+
+	err = checkNilSubschemaEntries(schema, schemaPath)
+	if err != nil {
+		return err
+	}
+
+	for _, entry := range SubschemaEntries(schema) {
+		err := checkSchemaStructure(entry.Schema, schemaPath+entry.Pointer, visited)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// checkFieldConflicts reports the per-node field conflicts of
+// [checkSchemaStructure]: the three both-fields-set pairs, a dependencies key
+// present in both maps, and a duplicate PropertyOrder entry.
+func checkFieldConflicts(schema *Schema, schemaPath string) error {
+	if schema.Type != "" && schema.Types != nil {
+		return fmt.Errorf("%w: both Type and Types at %s/type", ErrConflictingSchemaFields, schemaPath)
+	}
+
+	if schema.Defs != nil && schema.Definitions != nil {
+		return fmt.Errorf("%w: both Defs and Definitions at %s/$defs", ErrConflictingSchemaFields, schemaPath)
+	}
+
+	if schema.Items != nil && schema.ItemsArray != nil {
+		return fmt.Errorf("%w: both Items and ItemsArray at %s/items", ErrConflictingSchemaFields, schemaPath)
+	}
+
+	if len(schema.DependencyStrings) > 0 {
+		for _, key := range slices.Sorted(maps.Keys(schema.DependencySchemas)) {
+			if _, ok := schema.DependencyStrings[key]; ok {
+				return fmt.Errorf("%w: dependencies key %q is both a schema and a string array at %s/dependencies/%s",
+					ErrConflictingSchemaFields, key, schemaPath, jsonptr.Escape(key))
+			}
+		}
+	}
+
+	seen := make(map[string]bool, len(schema.PropertyOrder))
+	for _, name := range schema.PropertyOrder {
+		if seen[name] {
+			return fmt.Errorf("%w: %q at %s/propertyOrder", ErrDuplicatePropertyOrder, name, schemaPath)
+		}
+
+		seen[name] = true
+	}
+
+	return nil
+}
+
+// checkNilSubschemaEntries reports the first nil *Schema element inside one of
+// the node's sub-schema slices or maps. The scan reads the raw containers via
+// the [schemafield.Subschemas] table rather than [SubschemaEntries], which
+// skips nil elements by contract; map elements are scanned in sorted-key order
+// so the reported violation is deterministic.
+func checkNilSubschemaEntries(schema *Schema, schemaPath string) error {
+	for _, f := range schemafield.Subschemas {
+		switch f.Shape {
+		case schemafield.None, schemafield.Single:
+			// A nil single field is an absent keyword, not a violation.
+
+		case schemafield.Slice:
+			for i, sub := range f.SliceOf(schema) {
+				if sub == nil {
+					return fmt.Errorf("%w at %s/%s/%d", ErrNilSubschema, schemaPath, f.Keyword, i)
+				}
+			}
+
+		case schemafield.Map:
+			m := f.MapOf(schema)
+			for _, key := range slices.Sorted(maps.Keys(m)) {
+				if m[key] == nil {
+					return fmt.Errorf("%w at %s/%s/%s", ErrNilSubschema, schemaPath, f.Keyword, jsonptr.Escape(key))
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// checkSchemaTree verifies that the root document's sub-schema pointers form a
+// tree: no *Schema value reachable through two paths, and no pointer cycle.
+// The compiled per-node caches and the error paths assume each node has one
+// location, so [Compile] runs this once over the root document; fetched and
+// fallback-materialized documents are parsed fresh and are trees by
+// construction. The error names both paths that reach the repeated node. This
+// is a root-document check, distinct from the graph-tolerant traversals
+// ([Walk], the registry walk, the node index), which dedupe pointers instead.
+func checkSchemaTree(schema *Schema) error {
+	seen := map[*Schema]string{}
+
+	var visit func(s *Schema, path string) error
+
+	visit = func(s *Schema, path string) error {
+		if s == nil {
+			return nil
+		}
+
+		if first, ok := seen[s]; ok {
+			return fmt.Errorf("%w: %q and %q reach the same schema", ErrSchemaNotTree, first, path)
+		}
+
+		seen[s] = path
+
+		for _, entry := range SubschemaEntries(s) {
+			err := visit(entry.Schema, path+entry.Pointer)
+			if err != nil {
+				return err
+			}
+		}
+
+		return nil
+	}
+
+	return visit(schema, "")
 }
 
 // checkItemsArrayDraft2020 rejects the Draft-7 array form of the items keyword
