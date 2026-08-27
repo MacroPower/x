@@ -12,10 +12,10 @@ import (
 // Its keyword set parallels the jsonschema package's other per-keyword field
 // lists and must stay in sync with them when a sub-schema keyword is added to
 // Schema: SubschemaEntries (walk.go), walkSchema, schemaIndex.walk (index.go,
-// via extend), and checkTypeNames. A keyword missing here is not a correctness
-// bug, because the
-// caller (resolveJSONPointer) backstops it by walking the schema's JSON form,
-// but the omission silently bypasses this faster typed path.
+// via extend), and schemavet.Entries (internal/schemavet/checks.go). A keyword
+// missing here is not a correctness bug, because the caller
+// (resolveJSONPointer) backstops it by walking the schema's JSON form, but
+// the omission silently bypasses this faster typed path.
 func TraverseSchema(schema *jsonschema.Schema, segments []string) *jsonschema.Schema {
 	if len(segments) == 0 || schema == nil {
 		return schema

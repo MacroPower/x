@@ -365,14 +365,14 @@ func checkSchemaID(schema *Schema, schemaPath, base string, profile Profile) (st
 	return resolved, nil
 }
 
-// checkItemsArrayDraft2020 rejects the Draft-7 array form of the items keyword
+// checkItemsArrayDraft2020 rejects the Draft-07 array form of the items keyword
 // (ItemsArray, what upstream parses a JSON `"items": [ ... ]` into) when
 // compiling under Draft 2020-12, where it has no meaning. Without this the
 // 2020-12 array walk drops the constraint silently and validates every element
 // against nothing. The traversal mirrors [checkTypeNames]: it uses [Entries]
 // for the field list and each entry's Pointer for the location, with visited
 // guarding schema-graph cycles. The caller gates it on
-// [Profile.RejectItemsArray], so Draft-7 schemas pay nothing.
+// [Profile.RejectItemsArray], so Draft-07 schemas pay nothing.
 func checkItemsArrayDraft2020(schema *Schema, schemaPath string, visited map[*Schema]bool) error {
 	if schema == nil || visited[schema] {
 		return nil
@@ -382,7 +382,7 @@ func checkItemsArrayDraft2020(schema *Schema, schemaPath string, visited map[*Sc
 
 	// A nil check rather than a length check: upstream unmarshals a present
 	// but empty `"items": []` into a non-nil empty slice, and that array form
-	// is just as meaningless under 2020-12 (it silently drops the Draft-7
+	// is just as meaningless under 2020-12 (it silently drops the Draft-07
 	// semantics of its additionalItems sibling).
 	if schema.ItemsArray != nil {
 		return fmt.Errorf("%w; use prefixItems at %s/items", ErrItemsArrayUnderDraft2020, schemaPath)

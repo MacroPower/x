@@ -438,9 +438,8 @@ func newValidator(ctx context.Context, schema *Schema, opts []ValidateOption) (*
 	//nolint:contextcheck // See the comment above.
 	v.buildRefReg()
 
-	// The node-identity index is built by Compile once the root document is
-	// vetted: extend demands the vetted-document currency, so it cannot be
-	// populated here, before the vet has run.
+	// Compile builds the node-identity index after vetting the root; extend
+	// demands the vetted-document currency.
 
 	// The dynamic scope is seeded per run by forInstance, the single source for
 	// the rule; the compiled validator's compile-time session (used only by the
@@ -984,8 +983,9 @@ func (v *validator) remoteFetch(sess *refresolve.Session, cow bool) refresolve.F
 				return nil, fmt.Errorf("%w: %w", ErrRefResolve, checkErr)
 			}
 
-			// Register the vetted document's pointer (the same clone), so the
-			// currency proves the registration below covers a vetted schema.
+			// The registrations below use the minted document's pointer (the
+			// same clone), so the vetted currency, not the raw fetch result,
+			// is what enters the registry.
 			cp = doc.Schema()
 
 			// Clone the registry into this run's own copy before the first

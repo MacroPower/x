@@ -40,23 +40,22 @@ The package has two independent halves sharing the `Schema` type:
   inliner's resolution space), and everything past the vetter demands the
   minted `schemavet.Doc`/`schemavet.Node` proof. `schemaIndex.extend` takes a
   `Doc`, so an unvetted document cannot reach the precompute caches, and
-  `refresolve.Registry.NewSession` requires a `FallbackVet`, so a session that
-  forgot its vetting policy is unrepresentable. The one deliberate exception
-  is the inliner, whose own root and `WithRefFallback` substitutes stay
-  unvetted (each site carries an "Unvetted by design" marker and
-  `inline_root_unvetted_test.go` pins the behavior).
-  Follow-up work here is not done and remains open: a single-point
-  cycle policy and subsuming the per-clone `checkAcyclic` in
-  `internal/schemaclone`. Two constraints any such design
-  must handle: `refresolve` is a standalone package with no parent import
-  (leaf-to-leaf imports like its `schemavet` dependency are fine; the parent
-  is not), so
-  keying its `baseURIs`/`walked` by node id means either an extra lookup at the
-  boundary or breaking that boundary; and the defensive fetched-document
-  `cloneSchema` keeps every cache independent of the resolver-owned schema (a
-  resolver may hand out one shared object to many callers, and cached
-  documents are walked and registered long after the resolver returned), an
-  isolation a pointer index alone cannot provide.
+  `refresolve.Registry.NewSession` requires a `FallbackVet`, so every session
+  states its vetting policy at construction. The one deliberate exception is
+  the inliner, whose own root and `WithRefFallback` substitutes stay unvetted
+  (each site carries an "Unvetted by design" marker and
+  `inline_root_unvetted_test.go` pins the behavior). Follow-up work here is
+  not done and remains open: a single-point cycle policy and subsuming the
+  per-clone `checkAcyclic` in `internal/schemaclone`. Two constraints any
+  such design must handle: `refresolve` is a standalone package with no
+  parent import (leaf-to-leaf imports like its `schemavet` dependency are
+  fine; the parent is not), so keying its `baseURIs`/`walked` by node id
+  means either an extra lookup at the boundary or breaking that boundary;
+  and the defensive fetched-document `cloneSchema` keeps every cache
+  independent of the resolver-owned schema (a resolver may hand out one
+  shared object to many callers, and cached documents are walked and
+  registered long after the resolver returned), an isolation a pointer index
+  alone cannot provide.
   `$ref`/`$dynamicRef`/`$anchor` resolution lives in the
   shared `internal/refresolve` core, which both the validator and the inliner
   (`inline.go`) consume so the two engines cannot disagree; the inliner resolves
@@ -150,24 +149,24 @@ The package has two independent halves sharing the `Schema` type:
   `Session` that copies the registry on write, and `Registry.NewSession`
   requires a `FallbackVet` -- the vet, minting `schemavet.Node`, applied to
   each JSON-pointer fallback target the session materializes; nil is reserved
-  for the compile-time session, whose targets the compiler vets in one shared
-  pass. The `ErrRefResolve` and
-  `ErrNotResolved` sentinels live here and are re-exported from `errors.go` so
-  `errors.Is` identity holds across the boundary. Sub-schema traversal, which it
-  cannot name without importing the parent, is injected as a `Deps` closure
-  (deep cloning stays parent-side in the fetch closures), and the two
-  draft-dependent branches use its own two-value `Draft` enum; the sibling
-  leaf `internal/schemavet` is its one internal import), and
-  `internal/schemavet` (the single structural-vetting policy and the mint for
-  the vetted-currency types: a `Vetter` runs the structure, type-name, bound,
-  items-array, and identifier checks -- moved verbatim from `validate.go` --
-  and only `Vetter.VetDoc`/`Vetter.Vet` can produce a `Doc`/`Node`, whose
-  unexported fields make the compiler enforce that vetting ran. The nine
-  vetting sentinels live here, re-exported from `errors.go` on the refresolve
-  convention. It carries its own three-flag `Profile` (converted by
-  `draftProfile.vetProfile`, mirroring `toRefDraft`) and its own `Entries`
-  traversal, whose pointer assembly a lockstep guard test in `walk_test.go`
-  pins to `SubschemaEntries`, since vetting errors embed those pointers).
+  for the compile-time session, whose targets the compiler vets in one
+  shared pass. The `ErrRefResolve` and `ErrNotResolved` sentinels live here
+  and are re-exported from `errors.go` so `errors.Is` identity holds across
+  the boundary. Sub-schema traversal, which it cannot name without importing
+  the parent, is injected as a `Deps` closure (deep cloning stays
+  parent-side in the fetch closures), and the two draft-dependent branches
+  use its own two-value `Draft` enum; the sibling leaf `internal/schemavet`
+  is its one internal import), and `internal/schemavet` (the single
+  structural-vetting policy and the mint for the vetted-currency types: a
+  `Vetter` runs the structure, type-name, bound, items-array, and identifier
+  checks, and only `Vetter.VetDoc`/`Vetter.Vet` can produce a `Doc`/`Node`,
+  whose unexported fields make the compiler enforce that vetting ran. The
+  nine vetting sentinels live here, re-exported from `errors.go` on the
+  refresolve convention. It carries its own three-flag `Profile` (converted
+  by `draftProfile.vetProfile`, mirroring `toRefDraft`) and its own
+  `Entries` traversal, whose pointer assembly a lockstep guard test in
+  `walk_test.go` pins to `SubschemaEntries`, since vetting errors embed
+  those pointers).
 
 ### Relationship to google/jsonschema-go
 

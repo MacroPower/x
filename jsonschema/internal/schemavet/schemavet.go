@@ -16,9 +16,9 @@
 // registers a fetched document and vets it before compilation returns).
 // The inliner (inline.go) is the sole holder of unvetted schemas past that
 // boundary: its own root and its caller-supplied fallback substitutes are
-// deliberately not vetted (only the remotes it fetches are), preserving
-// Inline's long-standing acceptance of inputs Compile would reject; each such
-// site carries an "Unvetted by design" marker.
+// deliberately not vetted (only the remotes it fetches are), so Inline
+// accepts inputs Compile rejects; each such site carries an "Unvetted by
+// design" marker.
 package schemavet
 
 import (
@@ -65,7 +65,7 @@ type Node struct {
 func (n Node) Schema() *Schema { return n.s }
 
 // Vetter runs the structural-vetting policy. The visited sets guard
-// schema-graph cycles and let one vetter deduplicate across several passes:
+// schema-graph cycles and let one vetter deduplicate across several passes;
 // Compile shares a single vetter over the root, the fallback targets, and the
 // fetched remotes, so a node reached both locally and through a remote URI is
 // checked once and its violation is attributed to the pass that reached it
@@ -131,7 +131,7 @@ func (v *Vetter) Vet(s *Schema, pathPrefix string) (Node, error) {
 // whose base URI is base. It serves the call sites that hold a whole document
 // with a known base: the root at Compile, each registry-known document, and
 // each fetched document. JSON-pointer fallback targets keep the plain
-// [Vetter.Vet]: a pointer target is a fragment of a document already checked,
+// [Vetter.Vet]; a pointer target is a fragment of a document already checked,
 // and no document base is in hand at its location. It returns the minted
 // [Doc] on success, or the zero Doc and the first violation.
 func (v *Vetter) VetDoc(s *Schema, pathPrefix, base string) (Doc, error) {
@@ -154,8 +154,8 @@ func (v *Vetter) VetDoc(s *Schema, pathPrefix, base string) (Doc, error) {
 // keyword. It is the standalone form behind the parent package's public
 // CheckTypeNames: it runs only the type-name walk with a fresh visited map,
 // so a schema carrying both a structural conflict and a bad type name reports
-// the type name, exactly as the public wrapper always has. A nil schema
-// returns nil.
+// the type name, the same first error the public wrapper reports. A nil
+// schema returns nil.
 func CheckTypeNames(schema *Schema) error {
 	return checkTypeNames(schema, "", map[*Schema]bool{})
 }

@@ -723,7 +723,7 @@
 // draft in effect, so a validator can be passed across package boundaries
 // without the schema riding alongside. The returned schema is the caller's
 // live value, not a copy, and the compiled validator's caches key off its
-// nodes: mutating a schema after [Compile] is unsupported, and validating
+// nodes. Mutating a schema after [Compile] is unsupported, and validating
 // through a Validator whose schema has been mutated has undefined behavior.
 // Treat a compiled schema as immutable, and recompile after any change.
 //

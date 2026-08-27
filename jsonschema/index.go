@@ -60,7 +60,7 @@ func (d *schemaIndex) intern(s *Schema) (int, bool) {
 // extend indexes every not-yet-seen *Schema reachable from the vetted document
 // and returns from, the id count before the walk, so a caller can precompute
 // the new range [from, len()). Demanding the [schemavet.Doc] currency rather
-// than a raw *Schema makes skipping the vet a compile error: the indexed
+// than a raw *Schema makes skipping the vet a compile error; the indexed
 // id-set is exactly the set the precompute caches trust, so every document
 // folded in must have passed the structural vet first. It shares intern's
 // pointer dedup: a schema already indexed keeps its id, so a subtree wholly

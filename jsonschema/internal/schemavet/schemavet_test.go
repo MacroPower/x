@@ -110,8 +110,8 @@ func TestCheckTypeNamesRunsOnlyTypeWalk(t *testing.T) {
 	t.Parallel()
 
 	// A schema carrying both a structural conflict and a bad type name must
-	// report the type name: the standalone check runs no structure pass,
-	// exactly as the parent package's public CheckTypeNames always has.
+	// report the type name; the standalone check runs no structure pass,
+	// matching the public wrapper's contract.
 	both := &schemavet.Schema{
 		Type:  "no-such-type",
 		Defs:  map[string]*schemavet.Schema{"a": {}},

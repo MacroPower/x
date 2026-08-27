@@ -180,12 +180,11 @@ func (r *Registry) Clone() *Registry {
 }
 
 // NewSession derives a per-run [Session] sharing r's maps by reference until the
-// first write clones them via [Session.EnsureOwned]. Every caller states its
-// fallback-vetting policy here: vet is the [FallbackVet] applied to each
-// JSON-pointer fallback target the session materializes, and nil is reserved
-// for the compile-time session, whose targets the compiler vets in one shared
-// pass after resolution. Naming the policy in the constructor, rather than an
-// optional setter, makes a session that forgot to decide unrepresentable.
+// first write clones them via [Session.EnsureOwned]. Requiring vet at
+// construction forces every session to state its vetting policy: vet is the
+// [FallbackVet] applied to each JSON-pointer fallback target the session
+// materializes, and nil is reserved for the compile-time session, whose
+// targets the compiler vets in one shared pass after resolution.
 func (r *Registry) NewSession(vet FallbackVet) *Session {
 	return &Session{reg: r, fallbackVet: vet}
 }

@@ -948,8 +948,9 @@ func (in *inliner) fetchDoc(baseURI string) (*Schema, error) {
 		return nil, fmt.Errorf("%w: %w", ErrRefResolve, vetErr)
 	}
 
-	// Register the vetted document's pointer (the same clone), so the currency
-	// proves the registrations below cover a vetted schema.
+	// The registrations below use the minted document's pointer (the same
+	// clone), so the vetted currency, not the raw fetch result, is what
+	// enters the registry.
 	cp = doc.Schema()
 
 	in.session.Registry().URI[baseURI] = cp
