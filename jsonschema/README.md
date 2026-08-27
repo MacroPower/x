@@ -808,7 +808,8 @@ return an error.
 The core entry point is `Compile(ctx, schema, opts...)`: it performs the
 per-schema work once (registry construction, the compile-time structure,
 identifier, and reference checks, draft and vocabulary detection) and returns
-a reusable `*Validator` with one method per instance shape. `MustCompile` panics on error, for package-scope
+a reusable `*Validator` with one method per instance shape. `MustCompile`
+panics on error, for package-scope
 validators where for a static schema and fixed options compilation either
 always succeeds or always fails (following `regexp.MustCompile` and
 `MustGenerateFor`).
@@ -891,40 +892,39 @@ would otherwise be dropped silently and accept every element. Set the draft-07
 
 `Compile` also rejects a negative length or count keyword (`minLength`,
 `maxLength`, `minItems`, `maxItems`, `minProperties`, `maxProperties`,
-`minContains`, `maxContains`) with `ErrNegativeBound`, and a `multipleOf`
-that is not strictly greater than zero with `ErrNonPositiveMultipleOf`. The
-spec fixes each domain (a non-negative integer; a number > 0); the invalid
-schema would otherwise compile and then silently mis-validate: a negative
-maximum rejects every instance, a negative minimum never fires, and a
-non-positive `multipleOf` rejects every numeric instance while accepting
-every non-numeric one. A
-strictly positive `multipleOf` literal below the smallest positive `float64`
-(about 4.9e-324) is spec-valid but underflows to zero when the document is
-decoded; `ParseSchema` and `ParseSchemaValue` drop the keyword in that case --
-at `float64` precision it constrains nothing -- rather than letting the
-underflowed zero be rejected as an authored one.
+`minContains`, `maxContains`) with `ErrNegativeBound`, and a `multipleOf` that
+is not strictly greater than zero with `ErrNonPositiveMultipleOf`. The spec
+fixes each domain (a non-negative integer; a number > 0); the invalid schema
+would otherwise compile and then silently mis-validate: a negative maximum
+rejects every instance, a negative minimum never fires, and a non-positive
+`multipleOf` rejects every numeric instance while accepting every non-numeric
+one. A strictly positive `multipleOf` literal below the smallest positive
+`float64` (about 4.9e-324) is spec-valid but underflows to zero when the
+document is decoded; `ParseSchema` and `ParseSchemaValue` drop the keyword in
+that case -- at `float64` precision it constrains nothing -- rather than
+letting the underflowed zero be rejected as an authored one.
 
-Beyond the keyword domains, `Compile` vets the document's Go representation
-and identifiers. A schema setting both Go fields of one JSON keyword (`Type`
-and `Types`, `Defs` and `Definitions`, `Items` and `ItemsArray`, a
-`dependencies` key in both maps) is rejected with
-`ErrConflictingSchemaFields`; a nil `*Schema` element inside a sub-schema
-slice or map with `ErrNilSubschema`; a duplicate `PropertyOrder` entry with
-`ErrDuplicatePropertyOrder`; and a root document whose sub-schema pointers
-alias or cycle with `ErrSchemaNotTree`. An `$id` outside the keyword's domain
-is rejected with `ErrInvalidID`: one that does not parse, one carrying a
-fragment under draft 2020-12, or one that does not resolve to an absolute URI
-against its enclosing base (the parent `$id` chain, or `WithBaseURI` for the
-root, so a relative root `$id` compiles exactly when a base supplies the
-absolute prefix). Under draft-07 the fragment forms are the anchor spelling
-and an `$id` beside a `$ref` is ignored, so neither is checked. An unparsable
-`WithBaseURI` value is rejected with `ErrInvalidBaseURI`, and a `$vocabulary`
-on a node whose `$schema` does not establish the 2020-12 dialect with
-`ErrMisplacedVocabulary` (exact URI match; an empty `$schema` inherits the
-run's dialect, accepted under 2020-12 and rejected under draft-07).
+Beyond the keyword domains, `Compile` vets the document's Go representation and
+identifiers. A schema setting both Go fields of one JSON keyword (`Type` and
+`Types`, `Defs` and `Definitions`, `Items` and `ItemsArray`, a `dependencies`
+key in both maps) is rejected with `ErrConflictingSchemaFields`; a nil
+`*Schema` element inside a sub-schema slice or map with `ErrNilSubschema`; a
+duplicate `PropertyOrder` entry with `ErrDuplicatePropertyOrder`; and a root
+document whose sub-schema pointers alias or cycle with `ErrSchemaNotTree`. An
+`$id` outside the keyword's domain is rejected with `ErrInvalidID`: one that
+does not parse, one carrying a fragment under draft 2020-12, or one that does
+not resolve to an absolute URI against its enclosing base (the parent `$id`
+chain, or `WithBaseURI` for the root, so a relative root `$id` compiles exactly
+when a base supplies the absolute prefix). Under draft-07 two forms go
+unchecked: an `$id` beside a `$ref` (the draft ignores it) and a
+fragment-carrying `$id` (the anchor spelling). An unparsable `WithBaseURI`
+value is rejected with `ErrInvalidBaseURI`, and a `$vocabulary` on a node whose
+`$schema` does not establish the 2020-12 dialect with `ErrMisplacedVocabulary`
+(exact URI match; an empty `$schema` inherits the run's dialect, accepted under
+2020-12 and rejected under draft-07).
 
-`Compile` then resolves every reference reachable from the root (`$ref` and,
-under 2020-12, `$dynamicRef`, statically) through the same resolution core
+`Compile` then statically resolves every reference reachable from the root
+(`$ref` and, under 2020-12, `$dynamicRef`) through the same resolution core
 the validation walk uses. A reference that resolves to nothing while its
 document is present can never resolve later, so `Compile` rejects it with an
 error wrapping `ErrNotResolved` (or the resolver's reported error); a
@@ -932,8 +932,8 @@ reference whose document cannot be located at compile time is tolerated and
 reported by the validation walk instead (see
 [Remote references](#remote-references)). An uncompilable
 `pattern` or `patternProperties` regex is deliberately not a compile error:
-the compile outcome is recorded per node, and every string instance the
-pattern would judge fails closed at validation time.
+`Compile` records each pattern's regex-compile outcome per node, and every
+string instance the pattern would judge fails closed at validation time.
 
 The one-shot `Validate` compiles a fresh validator on every call; to
 validate many instances against the same schema, `Compile` once and reuse
@@ -1134,15 +1134,16 @@ within the document. Remote and absolute `$ref` URIs are resolved through an
 optional `RefResolver` set with `WithRefResolver`. `Compile` resolves every
 reference reachable from the root: the first ref naming a remote document
 fetches it through the resolver, registers it in the compiled registry, and
-vets it, so later refs and every validation run resolve it from cache. The
-resolver is consulted at most once per distinct URI, and every outcome -- a
-resolved schema, a not-resolved answer, or an error -- is cached, misses and
-failures per run. A document the resolver cannot serve at compile time (a
-not-resolved answer, or any other error) does not fail `Compile`: the
-resolver may serve the document only after compilation, so the validation
-walk reports the ref instead. A fragment that cannot resolve inside a
-document that is present (the root, or a fetched document) fails `Compile`
-with `ErrNotResolved`, since it can never resolve later.
+vets it. A fetched document persists in the compiled registry, so no later
+ref or validation run consults the resolver for it; misses and failures are
+negative-cached for the rest of the run that saw them, so an unresolvable
+URI costs one resolver call per run however many refs name it. A document
+the resolver cannot serve at compile time (a not-resolved answer, or any
+other error) does not fail `Compile`: the resolver may serve the document
+only after compilation, so the validation walk reports the ref instead. A
+fragment that cannot resolve inside a document that is present (the root, or
+a fetched document) fails `Compile` with `ErrNotResolved`, since it can
+never resolve later.
 
 At validation time, a resolver error surfaces as `ErrRefResolve`; an
 unresolvable remote/absolute ref with no resolver is reported as a
@@ -1154,10 +1155,14 @@ compile-vetted document such a fragment ref is silently skipped, since
 and treated as passing. A document first fetched during a validation run is
 vetted with the same structural checks `Compile` applies to compile-time-fetched
 documents, and a JSON-pointer fallback target materialized during a run (a
-schema carried inside an unknown keyword) is vetted the same way at
-materialization; a violation fails the referencing ref with `ErrRefResolve`
-wrapping the structural sentinel (`ErrInvalidType`, `ErrNegativeBound`, `ErrNonPositiveMultipleOf`, or
-`ErrItemsArrayUnderDraft2020`) instead of silently mis-validating. `Inline`
+schema carried inside an unknown keyword) is vetted with the same checks
+minus the identifier pass, which needs a document base no pointer target
+carries; a violation fails the referencing ref with `ErrRefResolve`
+wrapping the check's sentinel (`ErrInvalidType`, `ErrNegativeBound`,
+`ErrNonPositiveMultipleOf`, `ErrItemsArrayUnderDraft2020`,
+`ErrConflictingSchemaFields`, `ErrNilSubschema`, `ErrDuplicatePropertyOrder`,
+or, for a fetched document, `ErrInvalidID` or `ErrMisplacedVocabulary`)
+instead of silently mis-validating. `Inline`
 shares this same vetting policy for the documents it fetches (see
 [Inlining references](#inlining-references)). Non-local refs absolutize against the enclosing
 resource's base URI: its `$id`, or the root base set with `WithBaseURI`.
@@ -1386,16 +1391,18 @@ Failure modes:
   be found, returns an error wrapping `ErrRefResolve`.
 - A remote document fetched during inlining is structurally vetted before it is
   inlined, through the same policy the validator applies to fetched documents
-  (see [Remote references](#remote-references)). A fetched document carrying an
-  invalid type name, a negative bound, or, under a draft that rejects it, the
-  array form of `items` returns an error wrapping `ErrRefResolve` that also wraps
-  the structural sentinel (`ErrInvalidType`, `ErrNegativeBound`, `ErrNonPositiveMultipleOf`, or
-  `ErrItemsArrayUnderDraft2020`), rather than being inlined into a malformed
-  output schema. The fetched document follows the root document's draft, so a
-  Draft-07 array-form `items` remote inlined under a Draft-07 run is left intact.
-  A JSON-pointer fallback target (a schema carried inside an unknown keyword, in
-  the root document or a fetched one) is vetted the same way at materialization,
-  so an ill-formed target cannot be spliced into the output either.
+  (see [Remote references](#remote-references) for the full check list). A
+  violation returns an error wrapping `ErrRefResolve` that also wraps the
+  check's sentinel (`ErrInvalidType`, `ErrNegativeBound`,
+  `ErrNonPositiveMultipleOf`, `ErrItemsArrayUnderDraft2020`,
+  `ErrConflictingSchemaFields`, `ErrNilSubschema`, `ErrDuplicatePropertyOrder`,
+  `ErrInvalidID`, or `ErrMisplacedVocabulary`), rather than being inlined into
+  a malformed output schema. The fetched document follows the root document's
+  draft, so a Draft-07 array-form `items` remote inlined under a Draft-07 run
+  is left intact. A JSON-pointer fallback target (a schema carried inside an
+  unknown keyword, in the root document or a fetched one) is vetted the same
+  way at materialization, minus the identifier checks, so an ill-formed target
+  cannot be spliced into the output either.
 
 `WithRefFallback` sets a per-reference failure policy (a `RefFallback`,
 with `RefFallbackFunc` adapting a bare function) consulted when
@@ -1438,7 +1445,7 @@ cycle introduced by the substitute is an ordinary `ErrRefCycle`.
 | `ErrUnsupportedMapKey`        | A map key that is not a string, integer type, or `encoding.TextMarshaler`.                                                                  |
 | `ErrInvalidType`              | A `type` keyword naming something other than the seven JSON Schema type names (returned by `CheckTypeNames` and `Compile`).                 |
 | `ErrItemsArrayUnderDraft2020` | The draft-07 array form of `items` used under draft 2020-12, where tuples are spelled with `prefixItems` (returned by `Compile`).           |
-| `ErrConflictingSchemaFields`  | Both Go fields of one JSON keyword set (`Type`/`Types`, `Defs`/`Definitions`, `Items`/`ItemsArray`, a `dependencies` key in both maps).     |
+| `ErrConflictingSchemaFields`  | Both Go fields of one JSON keyword set, e.g. `Type`/`Types` or a `dependencies` key in both maps (returned by `Compile`).                   |
 | `ErrNilSubschema`             | A nil `*Schema` element inside a sub-schema slice or map (returned by `Compile`).                                                           |
 | `ErrDuplicatePropertyOrder`   | A `PropertyOrder` slice listing the same property twice (returned by `Compile`).                                                            |
 | `ErrSchemaNotTree`            | The root document's sub-schema pointers alias or cycle (returned by `Compile`; reference shared schemas with `$ref` instead).               |
@@ -1584,10 +1591,9 @@ Two points where the generated schema's model of a Go type differs from what
 ### Non-goals
 
 - Full metaschema validation of input schemas. `Compile` checks structure,
-  identifiers, keyword domains, and references natively; validating a schema
-  document against its metaschema remains the caller's choice (the vendored
-  metaschemas under `testdata/` show the shape), and the conformance tests
-  apply it to generated schemas.
+  identifiers, keyword domains, and references; validating a schema document
+  against its metaschema remains the caller's choice, and the conformance
+  tests apply it to generated schemas.
 - Code generation _from_ schemas (the reverse direction) is out of scope.
   Forward-direction generation, including the `jsonschemagen` CLI, is supported.
 

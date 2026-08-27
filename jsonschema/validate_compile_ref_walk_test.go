@@ -29,38 +29,38 @@ func TestCompileRefWalkRejectsUnresolvableRefs(t *testing.T) {
 		schema string
 		opts   []jsonschema.ValidateOption
 		err    error
-		path   string
+		want   string
 	}{
 		"unresolvable local pointer ref": {
 			schema: `{"$ref": "#/nope"}`,
 			err:    jsonschema.ErrNotResolved,
-			path:   `cannot resolve $ref "#/nope"`,
+			want:   `cannot resolve $ref "#/nope"`,
 		},
 		"unresolvable anchor ref": {
 			schema: `{"properties": {"a": {"$ref": "#missing"}}}`,
 			err:    jsonschema.ErrNotResolved,
-			path:   "/properties/a",
+			want:   "/properties/a",
 		},
 		"broken ref in unreferenced defs": {
 			schema: `{"$defs": {"unused": {"$ref": "#/also/nope"}}}`,
 			err:    jsonschema.ErrNotResolved,
-			path:   "/$defs/unused",
+			want:   "/$defs/unused",
 		},
 		"unresolvable dynamic ref": {
 			schema: `{"$dynamicRef": "#nothing"}`,
 			err:    jsonschema.ErrNotResolved,
-			path:   `cannot resolve $dynamicRef "#nothing"`,
+			want:   `cannot resolve $dynamicRef "#nothing"`,
 		},
 		"unparsable ref": {
 			schema: `{"$ref": "://bad"}`,
 			err:    jsonschema.ErrNotResolved,
-			path:   `cannot resolve $ref "://bad"`,
+			want:   `cannot resolve $ref "://bad"`,
 		},
 		"broken fragment into a fetched document": {
 			schema: `{"$ref": "http://example.com/present.json#/missing"}`,
 			opts:   []jsonschema.ValidateOption{jsonschema.WithRefResolver(remote)},
 			err:    jsonschema.ErrNotResolved,
-			path:   `cannot resolve $ref "http://example.com/present.json#/missing"`,
+			want:   `cannot resolve $ref "http://example.com/present.json#/missing"`,
 		},
 	}
 
@@ -73,7 +73,7 @@ func TestCompileRefWalkRejectsUnresolvableRefs(t *testing.T) {
 
 			_, err = jsonschema.Compile(t.Context(), schema, tc.opts...)
 			require.ErrorIs(t, err, tc.err)
-			assert.Contains(t, err.Error(), tc.path,
+			assert.Contains(t, err.Error(), tc.want,
 				"the error must name the bearing node and the reference")
 		})
 	}

@@ -102,9 +102,9 @@ var (
 	// or one that does not resolve to an absolute URI against its enclosing
 	// base (the parent $id chain, or [WithBaseURI] for the root). A relative
 	// $id with no absolute base would register no resolvable URI, so every
-	// ref targeting it would silently miss. Under Draft-07 the fragment
-	// forms are the anchor spelling and an $id beside a $ref is ignored, so
-	// neither is checked.
+	// ref targeting it would silently miss. Under Draft-07 two forms go
+	// unchecked: an $id beside a $ref (the draft ignores it) and a
+	// fragment-carrying $id (the anchor spelling).
 	ErrInvalidID = errors.New("invalid $id")
 
 	// ErrInvalidBaseURI is returned by [Compile] when the [WithBaseURI] value
@@ -119,8 +119,8 @@ var (
 	// "https://json-schema.org/draft/2020-12/schema", or an empty $schema
 	// under Draft-07, which predates the vocabulary concept. A node with an
 	// empty $schema under Draft 2020-12 is accepted: the document inherits
-	// the referrer's dialect, the reading upstream applied to loaded
-	// documents.
+	// the referrer's dialect (the reading upstream applies to loaded
+	// documents).
 	ErrMisplacedVocabulary = errors.New("misplaced $vocabulary")
 
 	// ErrInvalidSchemaDocument is returned by [CompileJSON], [ParseSchema],
@@ -147,6 +147,11 @@ var (
 	// sentinel (or an error wrapping it) to decline, and match it with
 	// [errors.Is]. Any other error reports a resolution attempt that failed and
 	// stops resolution.
+	//
+	// [Compile] also returns errors wrapping it: the compile-time reference
+	// walk reports a reference that resolves to nothing inside a present
+	// document (the root, or a fetched one), since such a reference can never
+	// resolve later.
 	//
 	// It is re-exported from internal/refresolve, the shared resolution core,
 	// so [errors.Is] matches the sentinel identically whether a failure

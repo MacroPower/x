@@ -34,8 +34,8 @@ The package has two independent halves sharing the `Schema` type:
   containing-document URI) lives in slices indexed by the assigned id. The
   inliner clones through `internal/schemaclone` for its pristine and working
   copies. Follow-up work here is not done and remains open: a single-point
-  cycle policy, and subsuming the per-clone
-  `checkAcyclic` in `internal/schemaclone`. Two constraints any such design
+  cycle policy and subsuming the per-clone `checkAcyclic` in
+  `internal/schemaclone`. Two constraints any such design
   must handle: `refresolve` is a standalone package with no parent import, so
   keying its `baseURIs`/`walked` by node id means either an extra lookup at the
   boundary or breaking that boundary; and the defensive fetched-document

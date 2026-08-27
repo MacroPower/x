@@ -42,7 +42,8 @@ type Result struct {
 	// DocumentMiss reports that a non-fragment ref's target document could not
 	// be located: the registry has no entry for its base URI and the fetch
 	// closure answered a miss or a failure (a failure rides in Err). The
-	// validator's compile-time reference walk tolerates this outcome, since a resolver
+	// validator's compile-time reference walk tolerates this outcome, since
+	// a resolver
 	// may serve the document only after compilation, while a validation run
 	// reports it through the bearing node. Always false when Target is set.
 	DocumentMiss bool

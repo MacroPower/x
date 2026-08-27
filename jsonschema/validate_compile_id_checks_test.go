@@ -146,8 +146,8 @@ func TestCompileChecksVocabularyPlacement(t *testing.T) {
 		err    error
 	}{
 		"vocabulary without a schema under 2020-12 compiles": {
-			// The empty $schema inherits the run's dialect, the reading
-			// upstream applied to loaded documents.
+			// The empty $schema inherits the run's dialect (the reading
+			// upstream applies to loaded documents).
 			schema: `{
 				"$vocabulary": {"https://json-schema.org/draft/2020-12/vocab/core": true},
 				"type": "object"

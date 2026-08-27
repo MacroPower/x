@@ -99,8 +99,9 @@ type draftProfile struct {
 	rejectItemsArray bool
 	// The rejectIDFragment flag reports whether a fragment in $id is a
 	// structural error. Draft 2020-12 forbids any fragment in $id (core
-	// section 8.2.1); under Draft-07 the fragment-only form is the anchor
-	// spelling and is tolerated.
+	// section 8.2.1); under Draft-07 a fragment in $id (fragment-only or
+	// appended to a hierarchical $id) is the anchor spelling and is
+	// tolerated.
 	rejectIDFragment bool
 	// The containsCounts flag reports whether minContains/maxContains are
 	// keywords. They are a Draft 2020-12 addition; Draft-07's contains carries

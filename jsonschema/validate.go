@@ -1307,7 +1307,7 @@ func Compile(ctx context.Context, schema *Schema, opts ...ValidateOption) (*Vali
 // targets are walked tolerantly: the walk exists to materialize deeper
 // targets and fetch their documents, and a miss there defers to the
 // validation walk (a fallback-borne node is outside the compiled registry,
-// so the walk never silently skips it).
+// so the validation walk never silently skips it).
 //
 // The fixpoint loop drains three monotone frontiers until none advances: the
 // not-yet-processed refReg.URI documents in key-sorted order (each vetted,

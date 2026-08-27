@@ -4012,11 +4012,10 @@ func TestValidateMutatesInputSchema(t *testing.T) {
 // into caller-owned schema objects. The registry holds caller-owned pointers
 // (the root under its retrieval URI, nested absolute-$id subschemas), and a
 // fetched remote document that refs back to a registered URI resolves to that
-// entry; historically the upstream resolver mutated such answers in place
-// ($schema inheritance), writing a $schema the author never wrote, so a later
-// Compile of the same object could detect a different draft. The compile-time
-// reference walk reads registry entries without mutating them; this stays as
-// the regression pin.
+// entry. The compile-time reference walk reads registry entries without
+// mutating them, and the fetch clones every resolver answer before
+// registration, so a $schema the author never wrote can never land on the
+// caller's object and change what a later Compile of it detects.
 func TestCompileRemoteBackrefDoesNotMutateInput(t *testing.T) {
 	t.Parallel()
 
@@ -6402,11 +6401,11 @@ func aliasedSchema() *jsonschema.Schema {
 	}
 }
 
-// TestValidateResolveErrorStillFatal locks in the strict side of the
+// TestCompileMalformedSchemaStillFatal locks in the strict side of the
 // compile-time checks: a schema that is genuinely malformed, or whose $ref
 // this package cannot resolve, must surface a compile error rather than
 // silently passing.
-func TestValidateResolveErrorStillFatal(t *testing.T) {
+func TestCompileMalformedSchemaStillFatal(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]struct {
@@ -7222,11 +7221,12 @@ func TestCompileNumericAndPatternConcurrent(t *testing.T) {
 }
 
 // TestCompileInvalidPatternFailsClosed pins that an uncompilable pattern
-// never produces an accept-all validator. The pattern's compile outcome is
-// deferred per node: Compile succeeds (a deliberate divergence from upstream,
-// which rejected the whole schema), and the cached fail-closed branch in
-// validateString rejects every string instance the pattern would have judged
-// (see TestInvalidPatternFailsClosed for the one-shot path).
+// never produces an accept-all validator. Compile records each pattern's
+// regex-compile outcome per node and defers the failure to validation time:
+// Compile succeeds (a deliberate divergence from upstream, which rejects the
+// whole schema), and the cached fail-closed branch in validateString rejects
+// every string instance the pattern would have judged (see
+// TestInvalidPatternFailsClosed for the one-shot path).
 func TestCompileInvalidPatternFailsClosed(t *testing.T) {
 	t.Parallel()
 
