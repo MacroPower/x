@@ -1,6 +1,9 @@
 package jsonschema
 
-import "go.jacobcolvin.com/x/jsonschema/internal/schemafield"
+import (
+	"go.jacobcolvin.com/x/jsonschema/internal/schemafield"
+	"go.jacobcolvin.com/x/jsonschema/internal/schemavet"
+)
 
 // schemaIndex is a node-identity index (a pointer interner) over a schema
 // graph: every distinct *Schema pointer reachable through sub-schema keywords
@@ -54,17 +57,21 @@ func (d *schemaIndex) intern(s *Schema) (int, bool) {
 	return id, false
 }
 
-// extend indexes every not-yet-seen *Schema reachable from root and returns from,
-// the id count before the walk, so a caller can precompute the new range
-// [from, len()). It shares intern's pointer dedup: a schema already indexed keeps
-// its id, so a subtree wholly aliasing already-indexed nodes (the common case for
-// a fetched remote, whose root is re-registered under its base URI and whose
-// nodes are reached through several URIs) adds nothing and returns from == len().
-// Without the shared dedup an aliased node would get a second id while ids maps to
-// only one, corrupting the index.
-func (d *schemaIndex) extend(root *Schema) int {
+// extend indexes every not-yet-seen *Schema reachable from the vetted document
+// and returns from, the id count before the walk, so a caller can precompute
+// the new range [from, len()). Demanding the [schemavet.Doc] currency rather
+// than a raw *Schema makes skipping the vet a compile error: the indexed
+// id-set is exactly the set the precompute caches trust, so every document
+// folded in must have passed the structural vet first. It shares intern's
+// pointer dedup: a schema already indexed keeps its id, so a subtree wholly
+// aliasing already-indexed nodes (the common case for a fetched remote, whose
+// root is re-registered under its base URI and whose nodes are reached through
+// several URIs) adds nothing and returns from == len(). Without the shared
+// dedup an aliased node would get a second id while ids maps to only one,
+// corrupting the index.
+func (d *schemaIndex) extend(doc schemavet.Doc) int {
 	from := len(d.schemas)
-	d.walk(root)
+	d.walk(doc.Schema())
 
 	return from
 }

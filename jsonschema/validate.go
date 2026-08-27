@@ -438,12 +438,9 @@ func newValidator(ctx context.Context, schema *Schema, opts []ValidateOption) (*
 	//nolint:contextcheck // See the comment above.
 	v.buildRefReg()
 
-	// Build the node-identity index over the root document. The per-node
-	// precompute caches are slices indexed by the ids it assigns. It references
-	// the caller's *Schema pointers (Validator.Schema stays the caller's value),
-	// so nodeID hits for the same pointers the validation walk descends.
-	v.index = newSchemaIndex()
-	v.index.extend(v.root)
+	// The node-identity index is built by Compile once the root document is
+	// vetted: extend demands the vetted-document currency, so it cannot be
+	// populated here, before the vet has run.
 
 	// The dynamic scope is seeded per run by forInstance, the single source for
 	// the rule; the compiled validator's compile-time session (used only by the
@@ -978,12 +975,16 @@ func (v *validator) remoteFetch(sess *refresolve.Session, cow bool) refresolve.F
 			// the at-most-once-per-baseURI contract holds, and surfaces
 			// through the ref as an error wrapping [ErrRefResolve] rather
 			// than silently mis-validating.
-			checkErr := v.checkFetchedDocument(cp, baseURI)
+			doc, checkErr := v.checkFetchedDocument(cp, baseURI)
 			if checkErr != nil {
 				sess.RecordRemoteMiss(baseURI, checkErr)
 
 				return nil, fmt.Errorf("%w: %w", ErrRefResolve, checkErr)
 			}
+
+			// Register the vetted document's pointer (the same clone), so the
+			// currency proves the registration below covers a vetted schema.
+			cp = doc.Schema()
 
 			// Clone the registry into this run's own copy before the first
 			// remote registration so the writes below cannot race a concurrent
@@ -1003,12 +1004,12 @@ func (v *validator) remoteFetch(sess *refresolve.Session, cow bool) refresolve.F
 // document fetched during a validation run, giving late-fetched documents
 // parity with compile-time-fetched ones. Each late fetch is independent, so it
 // uses a fresh vetter. The base URI prefixes the path so a violation names the
-// offending document exactly as the compile-time pass does.
-func (v *validator) checkFetchedDocument(s *Schema, baseURI string) error {
-	_, err := schemavet.NewVetter(v.profile.vetProfile()).VetDoc(s, baseURI+"#", baseURI)
-
+// offending document exactly as the compile-time pass does. On success it
+// returns the minted [schemavet.Doc], which the caller registers; the currency
+// makes registering an unvetted late fetch a compile error.
+func (v *validator) checkFetchedDocument(s *Schema, baseURI string) (schemavet.Doc, error) {
 	//nolint:wrapcheck // The vetting error already names the document and path.
-	return err
+	return schemavet.NewVetter(v.profile.vetProfile()).VetDoc(s, baseURI+"#", baseURI)
 }
 
 // newFallbackVet returns the structural vet a [refresolve.Session] applies to
@@ -1176,11 +1177,18 @@ func Compile(ctx context.Context, schema *Schema, opts ...ValidateOption) (*Vali
 	// first.
 	vt := schemavet.NewVetter(v.profile.vetProfile())
 
-	_, err = vt.VetDoc(schema, "", v.baseURI)
+	rootDoc, err := vt.VetDoc(schema, "", v.baseURI)
 	if err != nil {
 		//nolint:wrapcheck // The vetting error already names the document and path.
 		return nil, err
 	}
+
+	// Build the node-identity index over the vetted root document. The per-node
+	// precompute caches are slices indexed by the ids it assigns. It references
+	// the caller's *Schema pointers (Validator.Schema stays the caller's value),
+	// so nodeID hits for the same pointers the validation walk descends.
+	v.index = newSchemaIndex()
+	v.index.extend(rootDoc)
 
 	// Precompute derived per-node state (numeric bounds and compiled patterns)
 	// into the id-indexed caches while still single-threaded, so the
@@ -1307,7 +1315,7 @@ func (v *validator) compileRefPasses(vt *schemavet.Vetter) error {
 
 			s := v.refReg.URI[uri]
 
-			_, err := vt.VetDoc(s, uri+"#", uri)
+			doc, err := vt.VetDoc(s, uri+"#", uri)
 			if err != nil {
 				//nolint:wrapcheck // The vetting error already names the document and path.
 				return err
@@ -1318,7 +1326,7 @@ func (v *validator) compileRefPasses(vt *schemavet.Vetter) error {
 				return err
 			}
 
-			from := v.index.extend(s)
+			from := v.index.extend(doc)
 			if from < v.index.len() {
 				v.sizeCaches(v.index.len())
 				v.precomputeRange(from, v.index.len())
