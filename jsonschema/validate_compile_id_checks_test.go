@@ -131,11 +131,40 @@ func TestCompileRejectsInvalidBaseURI(t *testing.T) {
 func TestCompileChecksVocabularyPlacement(t *testing.T) {
 	t.Parallel()
 
+	// A remote document carrying $vocabulary with no $schema of its own,
+	// served for the fetched-document cases below.
+	remote := jsonschema.SchemaMap{
+		"http://example.com/vocab.json": {
+			Vocabulary: map[string]bool{"https://json-schema.org/draft/2020-12/vocab/core": true},
+			Type:       "object",
+		},
+	}
+
 	tests := map[string]struct {
 		schema string
 		opts   []jsonschema.ValidateOption
 		err    error
 	}{
+		"vocabulary without a schema under 2020-12 compiles": {
+			// The empty $schema inherits the run's dialect, the reading
+			// upstream applied to loaded documents.
+			schema: `{
+				"$vocabulary": {"https://json-schema.org/draft/2020-12/vocab/core": true},
+				"type": "object"
+			}`,
+		},
+		"fetched document vocabulary with empty schema compiles under 2020-12": {
+			schema: `{"$ref": "http://example.com/vocab.json"}`,
+			opts:   []jsonschema.ValidateOption{jsonschema.WithRefResolver(remote)},
+		},
+		"fetched document vocabulary with empty schema rejected under draft-07": {
+			schema: `{
+				"$schema": "http://json-schema.org/draft-07/schema#",
+				"$ref": "http://example.com/vocab.json"
+			}`,
+			opts: []jsonschema.ValidateOption{jsonschema.WithRefResolver(remote)},
+			err:  jsonschema.ErrMisplacedVocabulary,
+		},
 		"vocabulary under the exact 2020-12 schema URI compiles": {
 			schema: `{
 				"$schema": "https://json-schema.org/draft/2020-12/schema",

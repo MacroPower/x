@@ -3267,9 +3267,9 @@ func TestRefArrayIndexRFC6901Canonical(t *testing.T) {
 	//
 	// The allOf members assert nothing on their own (the constraint lives in a
 	// $defs nested under index 1), so the only failure source is the ref. The
-	// canonical form reaches a const the instance violates. A leading-zero index
-	// is rejected outright by RFC 6901 resolution and surfaces as a ref error; a
-	// signed index resolves to nothing and leaves the instance unconstrained.
+	// canonical form reaches a const the instance violates. A leading-zero or
+	// signed index is rejected by RFC 6901 resolution, so the ref can never
+	// resolve and the compile-time reference walk reports it.
 	newSchema := func(ref string) *jsonschema.Schema {
 		return &jsonschema.Schema{
 			Ref: ref,
@@ -3294,9 +3294,9 @@ func TestRefArrayIndexRFC6901Canonical(t *testing.T) {
 			ref:     "#/allOf/01/$defs/strict",
 			wantErr: "01",
 		},
-		"signed index leaves the instance unconstrained": {
+		"signed index is a ref resolution error": {
 			ref:     "#/allOf/+1/$defs/strict",
-			wantErr: "",
+			wantErr: "+1",
 		},
 	}
 
@@ -4008,14 +4008,15 @@ func TestValidateMutatesInputSchema(t *testing.T) {
 		"Validate should not mutate the input schema")
 }
 
-// TestCompileRemoteBackrefDoesNotMutateInput covers the remoteLoader cache-hit
-// path: the registry holds caller-owned pointers (the root under its retrieval
-// URI, nested absolute-$id subschemas), and when a fetched remote document
-// refs back to a registered URI the upstream resolver's loader answer is
-// mutated in place ($schema inheritance). The hit must be cloned like a
-// resolver answer, or Compile writes a $schema the author never wrote into the
-// caller's object and a later Compile of the same object can detect a
-// different draft.
+// TestCompileRemoteBackrefDoesNotMutateInput pins that Compile never writes
+// into caller-owned schema objects. The registry holds caller-owned pointers
+// (the root under its retrieval URI, nested absolute-$id subschemas), and a
+// fetched remote document that refs back to a registered URI resolves to that
+// entry; historically the upstream resolver mutated such answers in place
+// ($schema inheritance), writing a $schema the author never wrote, so a later
+// Compile of the same object could detect a different draft. The compile-time
+// reference walk reads registry entries without mutating them; this stays as
+// the regression pin.
 func TestCompileRemoteBackrefDoesNotMutateInput(t *testing.T) {
 	t.Parallel()
 
@@ -4063,11 +4064,13 @@ func TestCompileRemoteBackrefDoesNotMutateInput(t *testing.T) {
 	})
 }
 
-func TestRemoteLoaderReturnsEmptyOnFailure(t *testing.T) {
+func TestUnresolvableRemoteRefReportsAtValidation(t *testing.T) {
 	t.Parallel()
 
-	// When refResolver is nil, remoteLoader returns &Schema{} (accepts all).
-	// A broken remote ref should not silently validate as accepting all values.
+	// With no resolver configured, a remote ref's document miss is tolerated
+	// at compile time (the Remote References contract) and the validation
+	// walk reports the ref. A broken remote ref must not silently validate
+	// as accepting all values.
 	schema := &jsonschema.Schema{
 		Properties: map[string]*jsonschema.Schema{
 			"data": {Ref: "http://example.com/nonexistent-schema.json"},
@@ -4158,10 +4161,12 @@ func TestIsEmptySchemaExtraField(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestRemoteLoaderDoubleCall(t *testing.T) {
+func TestResolverCalledOncePerURI(t *testing.T) {
 	t.Parallel()
 
-	// The RefResolver should be called at most once per URI.
+	// The RefResolver should be called at most once per URI: the compile-time
+	// reference walk's fetch lands in the shared registry, so the validation
+	// run resolves the same URI from cache.
 	var callCount atomic.Int64
 
 	resolver := &countingRefResolver{
@@ -4498,15 +4503,14 @@ func TestDraft07ItemsSingleSchema(t *testing.T) {
 		"expected a type error at element index 1, got: %s", err)
 }
 
-func TestRegistryResolvesAnchorAfterResolve(t *testing.T) {
+func TestRegistryResolvesAnchorThroughPipeline(t *testing.T) {
 	t.Parallel()
 
-	// BuildRegistry runs before Schema.Resolve, yet the registry stays current
-	// for well-formed schemas. Whether Resolve adds registry entries depends on
-	// unexported upstream internals that can't be observed directly, so the test
-	// asserts the consequence callers care about: for a schema carrying $id,
-	// $anchor, and a $ref to that anchor, the full Validate pipeline resolves the
-	// anchor and enforces the anchored constraints.
+	// The registry built at Compile is what every later stage resolves
+	// against, so the test asserts the consequence callers care about: for a
+	// schema carrying $id, $anchor, and a $ref to that anchor, the full
+	// Validate pipeline resolves the anchor and enforces the anchored
+	// constraints.
 	schema := &jsonschema.Schema{
 		Schema: "https://json-schema.org/draft/2020-12/schema",
 		ID:     "https://example.com/registry-root",
@@ -4601,10 +4605,10 @@ func TestFormatsEnabledTriState(t *testing.T) {
 func TestResolveRemoteClonesConsistently(t *testing.T) {
 	t.Parallel()
 
-	// Both remote-resolution paths deep-copy before registering: remoteLoader
-	// (during Schema.Resolve) and resolveRemote (the validation-walk fallback).
-	// The cache therefore always holds an independent copy, so neither upstream
-	// nor walk mutations ever touch the resolver-owned schema.
+	// Every remote fetch deep-copies the resolver's answer before registering
+	// it, at compile time and during a validation run alike. The cache
+	// therefore always holds an independent copy, so no later walk can touch
+	// the resolver-owned schema.
 	original := &jsonschema.Schema{
 		Type:        "string",
 		Description: "original",
@@ -6184,24 +6188,6 @@ func TestConcurrentValidationSharedSchema(t *testing.T) {
 	wg.Wait()
 }
 
-func TestResolveOptionsNotMutated(t *testing.T) {
-	t.Parallel()
-
-	// A shared *ResolveOptions is copied before a Loader is injected, so the
-	// caller's value is never mutated across calls.
-	opts := &jsonschema.ResolveOptions{}
-	schema := &jsonschema.Schema{Type: "string"}
-
-	for range 2 {
-		require.NoError(t, jsonschema.Validate(t.Context(), schema, "x",
-			jsonschema.WithResolveOptions(opts),
-			jsonschema.WithRefResolver(fixedResolver{schema: &jsonschema.Schema{Type: "string"}}),
-		))
-	}
-
-	assert.Nil(t, opts.Loader, "shared ResolveOptions.Loader must not be mutated by Validate")
-}
-
 func TestValidationErrorSchemaPath(t *testing.T) {
 	t.Parallel()
 
@@ -7237,16 +7223,20 @@ func TestCompileNumericAndPatternConcurrent(t *testing.T) {
 	wg.Wait()
 }
 
-// TestCompileInvalidPatternRejected pins that an uncompilable pattern never
-// produces an accept-all validator. Structural pre-validation rejects it at
-// Compile, so the failure surfaces there; the cached fail-closed branch in
-// validateString backs the same contract for patterns reached only at
-// validation time (see TestInvalidPatternFailsClosed for the one-shot path).
-func TestCompileInvalidPatternRejected(t *testing.T) {
+// TestCompileInvalidPatternFailsClosed pins that an uncompilable pattern
+// never produces an accept-all validator. The pattern's compile outcome is
+// deferred per node: Compile succeeds (a deliberate divergence from upstream,
+// which rejected the whole schema), and the cached fail-closed branch in
+// validateString rejects every string instance the pattern would have judged
+// (see TestInvalidPatternFailsClosed for the one-shot path).
+func TestCompileInvalidPatternFailsClosed(t *testing.T) {
 	t.Parallel()
 
-	_, err := jsonschema.Compile(t.Context(), &jsonschema.Schema{Type: "string", Pattern: "[invalid"})
-	require.Error(t, err, "an uncompilable pattern must not yield an accept-all validator")
+	v, err := jsonschema.Compile(t.Context(), &jsonschema.Schema{Type: "string", Pattern: "[invalid"})
+	require.NoError(t, err, "an uncompilable pattern defers to validation time")
+
+	require.Error(t, v.Validate(t.Context(), "any string"),
+		"an uncompilable pattern must fail closed, not yield an accept-all validator")
 }
 
 // TestCompileRemoteBoundsAndPatternFallback exercises the cache-miss fallback in

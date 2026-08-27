@@ -16,8 +16,6 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/google/jsonschema-go/jsonschema"
-
 	"go.jacobcolvin.com/x/jsonschema/internal/annotations"
 	"go.jacobcolvin.com/x/jsonschema/internal/content"
 	"go.jacobcolvin.com/x/jsonschema/internal/format"
@@ -82,14 +80,6 @@ func WithFormats(enabled bool) ValidateOption {
 // annotations. Non-string instances are unaffected. Mirrors [WithFormats].
 func WithContent(enabled bool) ValidateOption {
 	return validateOptionFunc(func(v *validator) { v.contentEnabled = enabled })
-}
-
-// WithResolveOptions passes [ResolveOptions] (an alias for the upstream
-// options type) to Schema.Resolve for structural pre-validation. The
-// validation walk resolves local fragment refs directly and remote/absolute
-// refs via a configured [RefResolver] (see [WithRefResolver]).
-func WithResolveOptions(opts *ResolveOptions) ValidateOption {
-	return validateOptionFunc(func(v *validator) { v.resolveOpts = opts })
 }
 
 // WithVocabularies directly specifies the active vocabulary set for
@@ -300,12 +290,12 @@ type validator struct {
 
 	// The per-run resolution view: ref/pointer caches, per-run fallback
 	// registrations, negative cache, and dynamic scope. The compiled proto
-	// carries a compile-time session for the resolve-error gate; forInstance and
-	// the inliner each derive their own.
+	// carries a compile-time session for the compile reference walk;
+	// forInstance and the inliner each derive their own.
 	refSession *refresolve.Session
 
 	// The remote-fetch strategy passed to refSession resolution. On the compiled
-	// proto it writes the shared refReg directly (so gate-time fetches persist
+	// proto it writes the shared refReg directly (so compile-time fetches persist
 	// into the compiled registry); on a per-run session it clones the registry
 	// copy-on-write before its first write.
 	refFetch refresolve.Fetch
@@ -328,7 +318,6 @@ type validator struct {
 	numericBounds []*precomputedBounds // numeric bound keywords as rationals, by node id
 
 	root               *Schema
-	resolveOpts        *ResolveOptions
 	formatsForce       *bool           // explicit WithFormats override; nil if unset
 	vocabOverride      map[string]bool // from WithVocabularies
 	formatCheckers     map[string]FormatValidator
@@ -392,9 +381,9 @@ func newValidator(ctx context.Context, schema *Schema, opts []ValidateOption) (*
 		formatCheckers: map[string]FormatValidator{},
 		visiting:       map[visitKey]bool{},
 		// The compile context, for resolver calls made while compiling: the
-		// metaschema lookup below, and the remoteLoader and resolveRemote
-		// calls Compile makes after construction. Compile drops it before the
-		// validator is cached.
+		// metaschema lookup below, and the remote fetches the compile-time
+		// reference walk makes after construction. Compile drops it before
+		// the validator is cached.
 		ctx: ctx,
 	}
 	// Register built-in format checkers.
@@ -445,8 +434,8 @@ func newValidator(ctx context.Context, schema *Schema, opts []ValidateOption) (*
 	// per-node walk iterates only applicable rows and never re-runs gatePasses.
 	v.buildActiveRows()
 
-	// The gate session's fetch reads the compile context from the ctx field set
-	// above, not a threaded parameter.
+	// The compile session's fetch reads the compile context from the ctx field
+	// set above, not a threaded parameter.
 	//nolint:contextcheck // See the comment above.
 	v.buildRefReg()
 
@@ -459,7 +448,8 @@ func newValidator(ctx context.Context, schema *Schema, opts []ValidateOption) (*
 
 	// The dynamic scope is seeded per run by forInstance, the single source for
 	// the rule; the compiled validator's compile-time session (used only by the
-	// resolve-error gate) needs no scope.
+	// compile reference walk, which resolves $dynamicRef statically) needs no
+	// scope.
 
 	return v, nil
 }
@@ -490,7 +480,7 @@ func toRefDraft(d Draft) refresolve.Draft {
 
 // buildRefReg builds the compiled ref-resolution registry over the root document
 // (seeded with the [WithBaseURI] base, normalized by newValidator) and the
-// compile-time session the resolve-error gate resolves through. The gate's
+// compile-time session the compile reference walk resolves through. The walk's
 // fetches write the shared refReg directly (via a copy-on-write-disabled fetch)
 // so remote documents fetched while compiling persist into the registry every
 // run shares.
@@ -914,12 +904,6 @@ func callResolver(ctx context.Context, resolver RefResolver, uri string) (*Schem
 // with [ErrRefResolve] (a resolver-reported failure, a replayed recorded error,
 // or a clone failure). On success cp holds the clone with missed false and a nil
 // error. The caller then vets and registers cp under its own policy.
-//
-// The third remote path, [validator.remoteLoader], deliberately stays off this
-// skeleton: the upstream Loader contract must not fail Schema.Resolve, so that
-// path cannot fail fast on the wrapped errors this skeleton returns and must
-// not populate the per-run negative cache, and its registrations are instead
-// vetted by Compile's single post-Resolve vet loop.
 func fetchAndClone(
 	ctx context.Context, resolver RefResolver, sess *refresolve.Session, baseURI string,
 ) (*Schema, bool, error) {
@@ -962,7 +946,7 @@ func fetchAndClone(
 //
 // A per-run session (cow true) clones the compiled registry copy-on-write before
 // its first write via [refresolve.Session.EnsureOwned], so the registrations
-// live only for that run and never race a concurrent run. The compile-time gate
+// live only for that run and never race a concurrent run. The compile-time
 // session (cow false) writes the shared refReg directly, so a remote document
 // fetched while compiling persists into the registry every run shares.
 //
@@ -988,7 +972,7 @@ func (v *validator) remoteFetch(sess *refresolve.Session, cow bool) refresolve.F
 
 		if cow {
 			// A document first fetched during a validation run never passes
-			// through Compile's post-Resolve structural loop, so the same
+			// through the compile reference walk's document loop, so the same
 			// checks run here before registration; a compile-time fetch (cow
 			// false) registers into the shared refReg and is checked by that
 			// loop instead. A violation is recorded like the misses above, so
@@ -1141,71 +1125,6 @@ func newFallbackVet(profile draftProfile) func(sc *Schema, locator string) error
 	}
 }
 
-// remoteLoader returns a [jsonschema.Loader] for upstream Schema.Resolve.
-// When a [RefResolver] is configured, resolved schemas are registered in the
-// shared compiled registry (caching them for the validation walk). If no
-// resolver is configured or the resolver misses or fails, an empty schema is
-// returned so Schema.Resolve doesn't fail.
-//
-// Schemas returned to the upstream resolver are deep-copied via JSON
-// round-trip so that Schema.Resolve's internal mutations (e.g. $schema
-// inheritance) don't modify the caller's original schema objects. This runs at
-// compile time single-threaded, so the registrations land directly in the
-// compiled registry every per-run validator then shares.
-//
-// Unlike [validator.remoteFetch] and the inliner's fetch, this path does not
-// run through [fetchAndClone]: the upstream Loader contract must not fail
-// Schema.Resolve, so a resolver miss, resolver error, or clone failure is
-// swallowed into the empty-schema answer rather than failing fast, and no
-// negative-cache entry is recorded for it. Skipping the vet here is safe
-// because every document this loader registers lands in the shared refReg,
-// which Compile's single post-Resolve vet loop checks before the Validator is
-// returned.
-func (v *validator) remoteLoader() jsonschema.Loader {
-	return func(uri *url.URL) (*Schema, error) {
-		uriStr := uri.String()
-		// Check cache first. The registry holds caller-owned pointers (the
-		// root under its retrieval URI, every nested absolute-$id subschema),
-		// and the upstream resolver mutates loader-returned schemas ($schema
-		// inheritance), so a hit is cloned like a resolver answer. Resolve
-		// only needs the copy for structural resolution; the validation walk
-		// keeps reading the registry entry.
-		if s, ok := v.refReg.URI[uriStr]; ok {
-			cp, cpErr := cloneSchema(s)
-			if cpErr != nil {
-				return nil, fmt.Errorf("clone cached schema: %w", cpErr)
-			}
-
-			return cp, nil
-		}
-
-		if v.refResolver != nil {
-			s, ok, err := callResolver(v.runContext(), v.refResolver, uriStr)
-			if err == nil && ok {
-				// Deep-copy so the upstream resolver's mutations don't
-				// affect the original schema from the RefResolver.
-				cp, cpErr := cloneSchema(s)
-				if cpErr != nil {
-					return nil, fmt.Errorf("clone resolved schema: %w", cpErr)
-				}
-
-				// Register the copy under uriStr so subsequent lookups during
-				// both Schema.Resolve and the validation walk find it without
-				// re-calling the resolver. Its own nested $ids/anchors are
-				// walked in only-if-absent mode so a fetched doc cannot clobber
-				// an already-loaded entry.
-				v.refReg.URI[uriStr] = cp
-				v.refReg.WalkFetched(cp, uriStr)
-
-				return cp, nil
-			}
-		}
-
-		// Return empty schema so Schema.Resolve can proceed.
-		return &Schema{}, nil
-	}
-}
-
 // cloneSchema deep-copies a [Schema] via JSON round-trip, restoring the
 // render-only PropertyOrder field the round-trip drops. The copy logic lives in
 // [schemaclone.Clone]; the lockstep PropertyOrder restore walks
@@ -1274,8 +1193,8 @@ func unsupportedDialect(uri string) bool {
 // Validator is a schema compiled for repeated validation. Constructing it does
 // the per-schema work once, so each subsequent validation only walks the
 // instance. That work is walking the schema to build the URI/anchor
-// registries, running [jsonschema.Schema.Resolve] for structural
-// pre-validation, and detecting the draft and active vocabularies.
+// registries, running the compile-time structure, identifier, and reference
+// checks, and detecting the draft and active vocabularies.
 //
 // A Validator is safe for concurrent use by multiple goroutines.
 // [Validator.Schema] and [Validator.Draft] expose what it validates, so a
@@ -1317,8 +1236,8 @@ func (c *Validator) Draft() Draft {
 // MustCompile is Compile with [context.Background], panicking on error.
 func Compile(ctx context.Context, schema *Schema, opts ...ValidateOption) (*Validator, error) {
 	// The compile context rides on the validator's ctx field for resolver
-	// calls made while compiling (the metaschema lookup, remoteLoader during
-	// Schema.Resolve, and resolveRemote via resolveErrorIsRefOnly).
+	// calls made while compiling (the metaschema lookup, and the remote
+	// fetches the compile-time reference walk triggers).
 	v, err := newValidator(ctx, schema, opts)
 	if err != nil {
 		return nil, err
@@ -1332,16 +1251,14 @@ func Compile(ctx context.Context, schema *Schema, opts ...ValidateOption) (*Vali
 		return nil, err
 	}
 
-	// Structurally vet the root document up front, before Schema.Resolve.
-	// Schema.Resolve does not check the type vocabulary or enforce the spec's
-	// non-negative-integer bounds, so a typo'd type or a negative bound
-	// otherwise compiles cleanly and then silently mis-validates; the array form
-	// of items has no meaning under a draft that spells tuples with prefixItems,
-	// where the walk would drop it silently and accept every element. One vetter
-	// carries the visited sets across this root pass and the two post-Resolve
-	// passes below (fallback targets, fetched remotes), so a node reached both
-	// locally and through a remote URI is checked once and attributed to the
-	// pass that reached it first.
+	// Structurally vet the root document up front: field structure,
+	// identifiers, type names, bound domains, and (under 2020-12) the items
+	// array form, so a malformed document fails compilation instead of
+	// silently mis-validating. One vetter carries the visited sets across
+	// this root pass and the reference walk's passes over fallback targets
+	// and fetched remotes, so a node reached both locally and through a
+	// remote URI is checked once and attributed to the pass that reached it
+	// first.
 	dv := newDocumentVetter(v.profile)
 
 	err = dv.vetDoc(schema, "", v.baseURI)
@@ -1354,126 +1271,11 @@ func Compile(ctx context.Context, schema *Schema, opts ...ValidateOption) (*Vali
 	// returned Validator only reads these caches once shared across goroutines.
 	v.precompute()
 
-	// Structural pre-validation via Schema.Resolve.
-	// A Loader is always provided so Schema.Resolve doesn't fail on remote
-	// refs. When a RefResolver is configured, it is called during loading
-	// and the result is cached in the URI registry so the validation walk
-	// never re-calls the resolver for the same URI.
-	// Copy the caller's options so assigning Loader doesn't mutate a
-	// *ResolveOptions shared across calls.
-	var resolveOpts ResolveOptions
-
-	if v.resolveOpts != nil {
-		resolveOpts = *v.resolveOpts
-	}
-
-	if resolveOpts.Loader == nil {
-		// The compile context reaches the resolver through the ctx field set
-		// above: the loader runs inside deep upstream Resolve machinery that
-		// cannot thread a parameter.
-		//nolint:contextcheck // See the comment above.
-		resolveOpts.Loader = v.remoteLoader()
-	}
-
-	// Resolve the root's relative $ids against the same base the native
-	// registry and identifier checks use, so a [WithBaseURI] root with a
-	// relative $id passes both layers identically.
-	if resolveOpts.BaseURI == "" {
-		resolveOpts.BaseURI = v.baseURI
-	}
-
-	_, err = schema.Resolve(&resolveOpts)
+	// Resolve every reference reachable from the root, fetching remote
+	// documents through the resolver and vetting each document and fallback
+	// target the walk uncovers.
 	//nolint:contextcheck // The compile context rides on the ctx field set above.
-	if err != nil && !v.resolveErrorIsRefOnly(schema, resolveOpts) {
-		return nil, fmt.Errorf("schema resolve: %w", err)
-	}
-
-	// The resolve-error gate above may have materialized $ref targets through
-	// the JSON-pointer fallback: schemas carried inside unknown keywords or
-	// non-applicator keyword internals, which the typed root pass never reaches
-	// and which never join refReg.URI. The same vetter extends to them here
-	// exactly as it extends below to fetched remotes, so a fallback target
-	// carrying an invalid type name, a negative bound, or a rejected items array
-	// fails compilation instead of silently mis-validating. Each target's locator
-	// names the pointer that materialized it, and the shared visited sets keep
-	// every node checked once. The precompute caches are deliberately not
-	// extended: a validation run re-materializes fallback targets as fresh
-	// objects, so pointer-keyed caches built here could never be hit.
-	//
-	// The list is append-only and vetRegisteredRefs below materializes further
-	// targets (a fragment ref two or more remote hops from the root resolves
-	// through this same session), so the vet runs from a cursor and is invoked
-	// again after the registered-URI loop to cover the late arrivals.
-	vettedFallbacks := 0
-
-	vetFallbackTargets := func() error {
-		targets := v.refSession.FallbackTargets()
-		for ; vettedFallbacks < len(targets); vettedFallbacks++ {
-			ft := targets[vettedFallbacks]
-
-			err := dv.vet(ft.Schema, ft.Locator)
-			if err != nil {
-				return err
-			}
-		}
-
-		return nil
-	}
-
-	err = vetFallbackTargets()
-	if err != nil {
-		return nil, err
-	}
-
-	// Resolve may have fetched and registered remote documents in uriRegistry
-	// after the passes above ran over the root subtree. Two things must extend to
-	// them, in key-sorted order so a reported violation locates a stable document:
-	//
-	//   - The structural vetting. The root pass walks typed sub-schemas only and
-	//     never crosses a $ref into a remote, so a remote carrying an invalid
-	//     type, a negative bound, or a rejected items array would otherwise
-	//     compile cleanly and then silently mis-validate. The vetter's shared
-	//     visited sets skip the root (also registered under its base URI) and any
-	//     node reached through several URIs, so each is checked once; the base URI
-	//     prefixes the path so a violation names the offending remote.
-	//   - The precompute caches (numeric bounds and compiled patterns), so a
-	//     numeric, pattern, const, or enum keyword in a fetched remote hits the
-	//     cache instead of being recomputed on every validation. This is not part
-	//     of vetting: it runs only here, folding the remote into the node index.
-	for _, uri := range slices.Sorted(maps.Keys(v.refReg.URI)) {
-		s := v.refReg.URI[uri]
-
-		err = dv.vetDoc(s, uri+"#", uri)
-		if err != nil {
-			return nil, err
-		}
-
-		// Registry-known nodes are exactly the ones whose fragment misses the
-		// validation walk silently skips, so an in-document ref that cannot
-		// resolve now must fail compilation here; it can never resolve later.
-		err = v.vetRegisteredRefs(s, uri)
-		if err != nil {
-			return nil, err
-		}
-
-		// Fold the remote's nodes into the index and precompute the
-		// freshly indexed range. A remote wholly aliasing already-indexed nodes
-		// (the root re-registered under its base URI, or a node reached through
-		// several URIs) adds nothing: extend returns from == len(), so the grow
-		// and precompute are no-ops and each reachable node is indexed and
-		// precomputed exactly once.
-		from := v.index.extend(s)
-		if from < v.index.len() {
-			v.sizeCaches(v.index.len())
-			v.precomputeRange(from, v.index.len())
-		}
-	}
-
-	// Vet the fallback targets vetRegisteredRefs materialized after the first
-	// pass consumed the list, so a target reached only through a fragment ref
-	// two or more remote hops deep fails compilation exactly like the
-	// identical shape one hop deep, instead of failing every validation run.
-	err = vetFallbackTargets()
+	err = v.compileRefPasses(dv)
 	if err != nil {
 		return nil, err
 	}
@@ -1483,6 +1285,184 @@ func Compile(ctx context.Context, schema *Schema, opts ...ValidateOption) (*Vali
 	v.ctx = nil
 
 	return &Validator{proto: v}, nil
+}
+
+// compileRefPasses is the compile-time reference walk: it statically resolves
+// every $ref (and, under a dialect with $dynamicRef, every $dynamicRef)
+// reachable from the root, from each registry-known document, and from each
+// JSON-pointer fallback target, through the same resolution core the
+// validation walk uses. Resolving is also what fetches remote documents at
+// compile time: a non-fragment ref whose document is absent triggers the
+// compile session's fetch, which consults the [RefResolver] at most once per
+// URI (misses and failures are negative-cached) and registers the document in
+// the shared refReg every run reads.
+//
+// Strictness splits by provenance. The root and registry-known documents are
+// strict: a reference that resolves to nothing while its document is present
+// can never resolve later, so it fails compilation, wrapping the resolver's
+// reported error when one exists and [ErrNotResolved] otherwise. A document
+// miss is tolerated regardless of any carried resolver error, upholding the
+// Remote References contract: the resolver may serve the document only after
+// compilation, so the validation walk reports the ref instead. Fallback
+// targets are walked tolerantly: the walk exists to materialize deeper
+// targets and fetch their documents, and a miss there defers to the
+// validation walk (a fallback-borne node is outside the compiled registry,
+// so the walk never silently skips it).
+//
+// The fixpoint loop drains three monotone frontiers until none advances: the
+// not-yet-processed refReg.URI documents in key-sorted order (each vetted,
+// ref-walked strictly, and folded into the node index), the fallback-target
+// vet cursor, and the fallback-target ref cursor. Fetches and pointer
+// fallbacks only append to those frontiers, and the session caches make
+// re-resolution idempotent, so the loop terminates.
+func (v *validator) compileRefPasses(dv *documentVetter) error {
+	// Cross-pass dedup on top of Walk's per-call dedup, so a node reachable
+	// from several documents resolves its references once. Skipping an
+	// already-walked node's children is sound because the pass that first
+	// reached the node walked its whole subtree. Fallback targets are fresh
+	// ParseSchemaValue objects, never pointer-aliased into registry
+	// documents, so a tolerant fallback visit can never suppress a later
+	// strict check through this set.
+	walked := map[*Schema]bool{}
+
+	vetRefs := func(doc *Schema, locator string, strict bool) error {
+		//nolint:wrapcheck // Walk relays the callback's already-constructed error.
+		return Walk(doc, func(loc Location, s *Schema) error {
+			if walked[s] {
+				return SkipChildren
+			}
+
+			walked[s] = true
+
+			if s.Ref != "" {
+				err := refWalkError(v.resolveRef(s, s.Ref), KeywordRef, s.Ref, locator, loc, strict)
+				if err != nil {
+					return err
+				}
+			}
+
+			if v.profile.dynamicRef && s.DynamicRef != "" {
+				err := refWalkError(
+					v.resolveDynamicRef(s, s.DynamicRef), KeywordDynamicRef, s.DynamicRef, locator, loc, strict)
+				if err != nil {
+					return err
+				}
+			}
+
+			return nil
+		})
+	}
+
+	// The root document, strict.
+	err := vetRefs(v.root, "", true)
+	if err != nil {
+		return err
+	}
+
+	processed := map[string]bool{}
+	vetCursor, refCursor := 0, 0
+
+	for {
+		progressed := false
+
+		// Registry-known documents, key-sorted for stable attribution. The
+		// first round covers the URIs buildRefReg seeded before any fetch
+		// (the root under its normalized base and nested absolute-$id
+		// subschemas); later rounds cover documents the walks fetched. Each
+		// document is vetted, strictly ref-walked (an in-document reference
+		// that cannot resolve now never can, and the validation walk
+		// silently skips fragment misses on registry-known nodes on the
+		// strength of this pass), and folded into the node index so its
+		// nodes hit the precompute caches. A document wholly aliasing
+		// already-indexed nodes adds nothing: extend returns from == len().
+		var pending []string
+
+		for uri := range v.refReg.URI {
+			if !processed[uri] {
+				pending = append(pending, uri)
+			}
+		}
+
+		slices.Sort(pending)
+
+		for _, uri := range pending {
+			processed[uri] = true
+			progressed = true
+
+			s := v.refReg.URI[uri]
+
+			err := dv.vetDoc(s, uri+"#", uri)
+			if err != nil {
+				return err
+			}
+
+			err = vetRefs(s, uri+"#", true)
+			if err != nil {
+				return err
+			}
+
+			from := v.index.extend(s)
+			if from < v.index.len() {
+				v.sizeCaches(v.index.len())
+				v.precomputeRange(from, v.index.len())
+			}
+		}
+
+		// Structurally vet the fallback targets materialized since the last
+		// round: schemas carved out of unknown keywords or non-applicator
+		// keyword internals, which no typed pass reaches and which never
+		// join refReg.URI. Each target's locator names the pointer that
+		// materialized it. The precompute caches are deliberately not
+		// extended: a validation run re-materializes fallback targets as
+		// fresh objects, so pointer-keyed caches built here could never be
+		// hit. The list is append-only, so a cursor covers late arrivals.
+		for ; vetCursor < len(v.refSession.FallbackTargets()); vetCursor++ {
+			ft := v.refSession.FallbackTargets()[vetCursor]
+			progressed = true
+
+			err := dv.vet(ft.Schema, ft.Locator)
+			if err != nil {
+				return err
+			}
+		}
+
+		// Ref-walk the same targets tolerantly: this materializes targets
+		// one reference deeper and fetches their documents, without failing
+		// Compile on a miss, which the validation walk reports instead.
+		for ; refCursor < len(v.refSession.FallbackTargets()); refCursor++ {
+			ft := v.refSession.FallbackTargets()[refCursor]
+			progressed = true
+
+			err := vetRefs(ft.Schema, ft.Locator, false)
+			if err != nil {
+				return err
+			}
+		}
+
+		if !progressed {
+			return nil
+		}
+	}
+}
+
+// refWalkError maps one compile-time resolution outcome to the reference
+// walk's error policy: nil when the target resolved, when the walk is
+// tolerant, or when the document is missing (with or without a carried
+// resolver error; the validation walk reports it, per the Remote References
+// contract). A strict miss inside a present document wraps the resolver's
+// reported error when one exists and [ErrNotResolved] otherwise, naming the
+// bearing node through the document locator and the node's pointer.
+func refWalkError(res refresolve.Result, keyword, ref, locator string, loc Location, strict bool) error {
+	if !strict || res.Target != nil || res.DocumentMiss {
+		return nil
+	}
+
+	cause := res.Err
+	if cause == nil {
+		cause = ErrNotResolved
+	}
+
+	return fmt.Errorf("%s%s: cannot resolve %s %q: %w", locator, loc.Pointer, keyword, ref, cause)
 }
 
 // MustCompile is [Compile] with [context.Background] but panics on error;
@@ -2117,33 +2097,24 @@ func checkItemsArrayDraft2020(schema *Schema, schemaPath string, visited map[*Sc
 	return nil
 }
 
-var (
-	// The sizeBounds table lists the length and count keywords with their
-	// *int accessors, for the compile-time domain check in
-	// [checkBoundDomains]. The init guard below pins the list to
-	// [keywordmeta.Sizes], so a count keyword added to the semantics table
-	// cannot silently skip the check.
-	sizeBounds = []struct {
-		get     func(*Schema) *int
-		keyword string
-	}{
-		{func(s *Schema) *int { return s.MinLength }, KeywordMinLength},
-		{func(s *Schema) *int { return s.MaxLength }, KeywordMaxLength},
-		{func(s *Schema) *int { return s.MinItems }, KeywordMinItems},
-		{func(s *Schema) *int { return s.MaxItems }, KeywordMaxItems},
-		{func(s *Schema) *int { return s.MinProperties }, KeywordMinProperties},
-		{func(s *Schema) *int { return s.MaxProperties }, KeywordMaxProperties},
-		{func(s *Schema) *int { return s.MinContains }, KeywordMinContains},
-		{func(s *Schema) *int { return s.MaxContains }, KeywordMaxContains},
-	}
-
-	// The errRefCheckStop sentinel stops a [Walk] in the resolve-error gate
-	// at the first ref that fails its check. It never escapes: the gate reads
-	// only whether the walk returned nil, so the sentinel's identity is
-	// private control flow. It is deliberately distinct from walk.go's
-	// errStopIteration, which is the [Schemas] iterator's own break signal.
-	errRefCheckStop = errors.New("stop ref check")
-)
+// The sizeBounds table lists the length and count keywords with their
+// *int accessors, for the compile-time domain check in
+// [checkBoundDomains]. The init guard below pins the list to
+// [keywordmeta.Sizes], so a count keyword added to the semantics table
+// cannot silently skip the check.
+var sizeBounds = []struct {
+	get     func(*Schema) *int
+	keyword string
+}{
+	{func(s *Schema) *int { return s.MinLength }, KeywordMinLength},
+	{func(s *Schema) *int { return s.MaxLength }, KeywordMaxLength},
+	{func(s *Schema) *int { return s.MinItems }, KeywordMinItems},
+	{func(s *Schema) *int { return s.MaxItems }, KeywordMaxItems},
+	{func(s *Schema) *int { return s.MinProperties }, KeywordMinProperties},
+	{func(s *Schema) *int { return s.MaxProperties }, KeywordMaxProperties},
+	{func(s *Schema) *int { return s.MinContains }, KeywordMinContains},
+	{func(s *Schema) *int { return s.MaxContains }, KeywordMaxContains},
+}
 
 // init cross-checks sizeBounds against the semantics table's derived size
 // set. Panicking at load follows the dispatch table's convention: every test
@@ -2374,235 +2345,6 @@ func Validate(ctx context.Context, schema *Schema, instance any, opts ...Validat
 	// Call validateNormalized, not c.Validate, so the instance normalized just
 	// above is not walked by Normalize a second time.
 	return c.validateNormalized(ctx, instance)
-}
-
-// resolveErrorIsRefOnly reports whether a [jsonschema.Schema.Resolve] failure
-// is caused solely by $ref/$dynamicRef target lookup that this package resolves
-// itself.
-//
-// Upstream Resolve performs reference resolution as part of pre-validation and
-// rejects refs it cannot follow. One example is a JSON Pointer that targets an
-// unknown keyword or the internals of a non-applicator keyword such as
-// examples. This package resolves $ref/$dynamicRef targets itself (see
-// [validator.resolveRef]), so such a failure must not be fatal when the schema
-// is otherwise well-formed.
-//
-// The error is ref-only when all hold:
-//
-//   - The schema's sub-schemas form a tree (a JSON clone would otherwise hide
-//     upstream's tree check).
-//   - With every $ref and $dynamicRef removed, a deep copy resolves cleanly, so
-//     the failure is not a structural or meta-schema problem.
-//   - This package can resolve every reference in the schema, and each resolved
-//     target is itself well-formed.
-//
-// Any check failing means the original error stands.
-func (v *validator) resolveErrorIsRefOnly(schema *Schema, resolveOpts ResolveOptions) bool {
-	// A non-tree schema must be rejected before the JSON-clone-based checks
-	// below. The clone round-trips through JSON, which silently collapses Go
-	// pointer aliasing. Upstream rejects a schema whose sub-schemas do not form
-	// a tree, a check that depends on pointer identity rather than JSON content,
-	// so a JSON clone would hide it.
-	if !schemaFormsTree(schema) {
-		return false
-	}
-
-	if !v.structureResolves(schema, resolveOpts) {
-		return false
-	}
-
-	return v.refsResolveWellFormed(schema, resolveOpts)
-}
-
-// structureResolves reports whether schema resolves cleanly once every $ref and
-// $dynamicRef is removed, isolating structural and meta-schema validity from
-// reference target lookup. The caller must have confirmed [schemaFormsTree].
-func (v *validator) structureResolves(schema *Schema, resolveOpts ResolveOptions) bool {
-	stripped, err := cloneSchema(schema)
-	if err != nil {
-		return false
-	}
-
-	// Clearing the string ref keywords does not change SubschemaEntries, so Walk
-	// descends the same children; the callback never returns an error.
-	//nolint:errcheck // The callback only ever returns nil.
-	_ = Walk(stripped, func(_ Location, s *Schema) error {
-		s.Ref = ""
-		s.DynamicRef = ""
-
-		return nil
-	})
-
-	_, err = stripped.Resolve(&resolveOpts)
-
-	return err == nil
-}
-
-// refsResolveWellFormed reports whether this package can resolve every $ref and
-// $dynamicRef reachable from schema, and whether each resolved target is itself
-// well-formed (see [validator.refTargetWellFormed]). The target check re-imposes
-// the structural and meta-schema validation that upstream performs by
-// dereferencing refs. [structureResolves] skips that validation for targets
-// carried in unknown keywords or non-applicator keyword internals, since those
-// have no typed Schema field. A resolution reports failure through its
-// [refresolve.Result]; the gate reads only the target and the document-miss
-// attribution, so a resolver error does not leak into a later validation error.
-//
-// A ref whose target document is unavailable at compile time is tolerated
-// regardless of its fragment: a resolver may serve the document only after
-// compilation, and the validation walk reports a still-unresolvable ref as a
-// "cannot resolve $ref" [*ValidationError] (see
-// [validator.validateResolvedRef]). Without that tolerance a remote ref with a
-// fragment would fail Compile (upstream Resolve applies the fragment to the
-// empty stand-in document from [validator.remoteLoader]) while its
-// fragment-less spelling compiled and deferred, an asymmetry the Remote
-// References contract in the package documentation rules out.
-func (v *validator) refsResolveWellFormed(schema *Schema, resolveOpts ResolveOptions) bool {
-	// Stop at the first ill-formed ref target; the resolveRef/resolveDynamicRef
-	// lookups are idempotent and side-effect-free, so leaving the remaining nodes
-	// unvisited cannot change the result.
-	err := Walk(schema, func(_ Location, s *Schema) error {
-		if s.Ref != "" {
-			if res := v.resolveRef(s, s.Ref); !res.DocumentMiss && !v.refTargetWellFormed(res.Target, resolveOpts) {
-				return errRefCheckStop
-			}
-		}
-
-		if v.profile.dynamicRef && s.DynamicRef != "" {
-			if res := v.resolveDynamicRef(s, s.DynamicRef); !res.DocumentMiss &&
-				!v.refTargetWellFormed(res.Target, resolveOpts) {
-				return errRefCheckStop
-			}
-		}
-
-		return nil
-	})
-
-	return err == nil
-}
-
-// refTargetWellFormed reports whether a resolved ref target is structurally
-// well-formed. A nil target (an unresolvable ref) is not. Otherwise the target
-// must be structurally sound and each of its own references must resolve against
-// the root document. Two kinds of target are therefore rejected: a malformed
-// one and a target whose own reference cannot be followed. A malformed target
-// is, for example, a schema with an uncompilable pattern that upstream rejects
-// but typed-only traversal never reaches. The own-reference check is one level
-// deep: targets reached through the typed tree are already validated by
-// [structureResolves] on the root schema, and a deeper miss surfaces at
-// validation time (a fallback-materialized bearing node is outside the compiled
-// registry, so the fragment silent skip never applies to it), while a document
-// the registry does know is vetted in full by [validator.vetRegisteredRefs].
-func (v *validator) refTargetWellFormed(target *Schema, resolveOpts ResolveOptions) bool {
-	if target == nil || !schemaFormsTree(target) {
-		return false
-	}
-
-	if !v.structureResolves(target, resolveOpts) {
-		return false
-	}
-
-	return v.allRefsResolvable(target)
-}
-
-// allRefsResolvable reports whether this package can resolve every $ref and
-// $dynamicRef directly reachable from schema, without judging the resolved
-// targets. A resolution reports failure through its [refresolve.Result]; the
-// gate reads only the target and the document-miss attribution, so a resolver
-// error does not leak into a later error. A ref to a document unavailable at
-// compile time is tolerated for the same reason [refsResolveWellFormed]
-// tolerates it: the resolver may serve the document only after compilation,
-// and the validation walk reports a still-unresolvable ref.
-func (v *validator) allRefsResolvable(schema *Schema) bool {
-	// Stop at the first unresolvable ref; the lookups are idempotent and
-	// side-effect-free, so the unvisited nodes cannot change the outcome.
-	err := Walk(schema, func(_ Location, s *Schema) error {
-		if s.Ref != "" {
-			if res := v.resolveRef(s, s.Ref); res.Target == nil && !res.DocumentMiss {
-				return errRefCheckStop
-			}
-		}
-
-		if v.profile.dynamicRef && s.DynamicRef != "" {
-			if res := v.resolveDynamicRef(s, s.DynamicRef); res.Target == nil && !res.DocumentMiss {
-				return errRefCheckStop
-			}
-		}
-
-		return nil
-	})
-
-	return err == nil
-}
-
-// vetRegisteredRefs rejects a fragment-only $ref that does not resolve inside
-// a document the compiled registry knows. Such a ref resolves against its own
-// document alone, so one unresolvable at compile time stays unresolvable in
-// every run -- and the validation walk silently skips a fragment miss on a
-// registry-known bearing node precisely on the strength of compile-time
-// vetting (see [validator.validateResolvedRef]). Upstream Schema.Resolve
-// enforces this for the root document, but for a fetched remote the
-// resolve-error gate excuses failures past its one-level own-reference check,
-// so a ref two or more hops inside a remote is vetted only here. Refs to other
-// documents stay tolerated (a resolver may serve them only after
-// compilation), as does $dynamicRef, whose resolution depends on the run-time
-// dynamic scope.
-func (v *validator) vetRegisteredRefs(doc *Schema, locator string) error {
-	var vetErr error
-
-	//nolint:errcheck // The callback reports through vetErr.
-	_ = Walk(doc, func(_ Location, s *Schema) error {
-		if s.Ref == "" || !uriref.IsFragmentOnly(s.Ref) {
-			return nil
-		}
-
-		res := v.resolveRef(s, s.Ref)
-		if res.Target != nil {
-			return nil
-		}
-
-		vetErr = fmt.Errorf("schema resolve: %s: cannot resolve $ref %q: %w", locator, s.Ref, ErrNotResolved)
-		if res.Err != nil {
-			vetErr = fmt.Errorf("schema resolve: %s: cannot resolve $ref %q: %w", locator, s.Ref, res.Err)
-		}
-
-		return errRefCheckStop
-	})
-
-	return vetErr
-}
-
-// schemaFormsTree reports whether schema's sub-schema pointers form a tree: no
-// *Schema is reachable through more than one path, and there are no pointer
-// cycles. Upstream Resolve rejects non-tree schemas via pointer identity, a
-// check a JSON clone silently collapses (see [validator.resolveErrorIsRefOnly]),
-// so the resolve-error gate re-imposes it here before its clone-based checks run.
-func schemaFormsTree(schema *Schema) bool {
-	seen := map[*Schema]bool{}
-	tree := true
-
-	var visit func(*Schema)
-
-	visit = func(s *Schema) {
-		if s == nil || !tree {
-			return
-		}
-
-		if seen[s] {
-			tree = false
-
-			return
-		}
-
-		seen[s] = true
-		for _, entry := range SubschemaEntries(s) {
-			visit(entry.Schema)
-		}
-	}
-
-	visit(schema)
-
-	return tree
 }
 
 // validate performs the depth-first recursive walk.

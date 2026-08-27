@@ -13,11 +13,6 @@ import (
 // reference it without importing google/jsonschema-go directly.
 type Schema = jsonschema.Schema
 
-// ResolveOptions is an alias for the upstream [jsonschema.ResolveOptions]
-// type, so callers can configure [WithResolveOptions] without importing
-// google/jsonschema-go directly.
-type ResolveOptions = jsonschema.ResolveOptions
-
 // Raw marshals v with encoding/json for raw-JSON schema fields such as
 // [Schema.Default].
 func Raw(v any) (json.RawMessage, error) {

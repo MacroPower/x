@@ -39,7 +39,7 @@ type skipReason string
 const (
 	reasonCrossDraft       skipReason = "the referenced schema is Draft 2019-09, which this package does not support (Draft-07 and 2020-12 only); the draft is taken from the root schema's $schema and there is no per-ref switch to an unsupported draft's keyword semantics"
 	reasonRE2Whitespace    skipReason = `patterns use Go RE2, not ECMA 262: RE2 \s matches only [\t\n\f\r ], so this character's class membership differs`
-	reasonRE2ControlEscape skipReason = `patterns use Go RE2, not ECMA 262: RE2 has no \cX control escape, so Schema.Resolve rejects the pattern and the matching instance cannot validate`
+	reasonRE2ControlEscape skipReason = `patterns use Go RE2, not ECMA 262: RE2 has no \cX control escape, so the pattern does not compile and validation fails closed, rejecting the matching instance`
 	reasonAnnexBIdentity   skipReason = `the regex format applies ECMA 262 Annex B, where SourceCharacterIdentityEscape[~N] is "SourceCharacter but not c", so "\a" is a valid identity escape; the case pins the main grammar's narrower rule, which only applies under the u flag and which no engine applies to a bare pattern (V8 compiles /\a/ and rejects only /\a/u)`
 )
 
@@ -92,9 +92,10 @@ func addECMARegexSkips(skips map[string]skipReason) {
 			skips[file+`/ECMA 262 \S matches everything but whitespace/`+c.capSNoMatch] = reasonRE2Whitespace
 		}
 
-		// The \cX escape doesn't compile, so Schema.Resolve rejects the pattern
-		// and the matching instance can't validate. The "does not match"
-		// instance still runs: the rejected schema makes it invalid, as expected.
+		// The \cX escape doesn't compile, so validation of the pattern fails
+		// closed and the matching instance can't validate. The "does not match"
+		// instance still runs: the fail-closed pattern makes it invalid, as
+		// expected.
 		skips[file+`/ECMA 262 regex escapes control codes with \c and upper letter/matches`] = reasonRE2ControlEscape
 		skips[file+`/ECMA 262 regex escapes control codes with \c and lower letter/matches`] = reasonRE2ControlEscape
 	}
