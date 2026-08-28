@@ -1,15 +1,21 @@
 // Package schemafield is the canonical field-metadata table for the upstream
 // [jsonschema.Schema] type. Every behavior in the jsonschema package that must
 // enumerate Schema's fields -- the true/empty/ref-sibling predicates, the
-// sub-schema traversal, and the container-clone pass -- derives from the single
-// [Fields] table here, so an upstream field addition is one table edit caught by
-// one coverage test rather than six hand-maintained enumerations.
+// sub-schema traversal, the container-clone pass, and the structural deep copy
+// in internal/schemaclone -- derives from the single [Fields] table here, so an
+// upstream field addition is one table edit caught by one coverage test rather
+// than six hand-maintained enumerations.
 //
 // The table is a package-level slice of concrete [Field] structs built once at
 // load. Each field carries a closure-based [Field.IsZero] predicate (so the hot
 // predicates loop over closures, not reflection), its structural [Shape] and
-// [Class], and, where applicable, a sub-schema accessor or a container-clone
-// closure. The package deliberately exposes raw field extractors rather than the
+// [Class], and, where applicable, a sub-schema accessor and one of the three
+// clone closures. The three cover disjoint parts of a copy:
+// [Field.CloneSubschemas] rebuilds a sub-schema container, [Field.CloneDeep]
+// copies a container whose interior is mutable, and [Field.CloneContainer]
+// reallocates a header whose interior is not.
+//
+// The package deliberately exposes raw field extractors rather than the
 // jsonschema package's SubschemaEntry/Location types, leaving location assembly
 // to the caller.
 package schemafield
@@ -114,6 +120,24 @@ type Field struct {
 	// scalars) and the sub-schema fields (cloned by upstream CloneSchemas).
 	CloneContainer func(s *Schema)
 
+	// CloneDeep reallocates the field's container on s and copies every mutable
+	// value inside it, routing the any-typed members through copyValue. It is
+	// non-nil exactly for the fields whose interior stays shared with the source
+	// after CloneContainer reallocates the header: the any-typed value fields
+	// (Const, Enum, Examples, Extra) and the two maps of string lists
+	// (DependencyStrings, DependentRequired). A field carrying CloneDeep carries
+	// CloneContainer too, and a caller wanting the deep copy runs CloneDeep
+	// instead of, not after, the shallow one.
+	CloneDeep func(s *Schema, copyValue func(any) any)
+
+	// CloneSubschemas rebuilds the field's sub-schema container on s, replacing
+	// every child with clone(child). It is non-nil exactly when Shape is not
+	// None, and it preserves the nil-versus-empty distinction: a nil container
+	// stays nil, a non-nil empty one clones to a non-nil empty one. Unlike
+	// [Children], it reads each field on its own, so a schema setting both Items
+	// forms keeps both in the copy.
+	CloneSubschemas func(s *Schema, clone func(*Schema) *Schema)
+
 	// Name is the Go field name (for example "Properties").
 	Name string
 
@@ -170,8 +194,8 @@ func intField(name string, get func(*Schema) *int) Field {
 	}
 }
 
-// singleField builds a *Schema sub-schema field.
-func singleField(name, kw string, get func(*Schema) *Schema) Field {
+// singleField builds a *Schema sub-schema field from its accessor pair.
+func singleField(name, kw string, get func(*Schema) *Schema, set func(*Schema, *Schema)) Field {
 	return Field{
 		Name:     name,
 		Keyword:  kw,
@@ -179,11 +203,14 @@ func singleField(name, kw string, get func(*Schema) *Schema) Field {
 		Shape:    Single,
 		IsZero:   func(s *Schema) bool { return get(s) == nil },
 		SingleOf: get,
+		CloneSubschemas: func(s *Schema, clone func(*Schema) *Schema) {
+			set(s, clone(get(s)))
+		},
 	}
 }
 
-// sliceField builds a []*Schema sub-schema field.
-func sliceField(name, kw string, get func(*Schema) []*Schema) Field {
+// sliceField builds a []*Schema sub-schema field from its accessor pair.
+func sliceField(name, kw string, get func(*Schema) []*Schema, set func(*Schema, []*Schema)) Field {
 	return Field{
 		Name:    name,
 		Keyword: kw,
@@ -191,11 +218,24 @@ func sliceField(name, kw string, get func(*Schema) []*Schema) Field {
 		Shape:   Slice,
 		IsZero:  func(s *Schema) bool { return get(s) == nil },
 		SliceOf: get,
+		CloneSubschemas: func(s *Schema, clone func(*Schema) *Schema) {
+			src := get(s)
+			if src == nil {
+				return
+			}
+
+			out := make([]*Schema, len(src))
+			for i, sub := range src {
+				out[i] = clone(sub)
+			}
+
+			set(s, out)
+		},
 	}
 }
 
-// mapField builds a map[string]*Schema sub-schema field.
-func mapField(name, kw string, get func(*Schema) map[string]*Schema) Field {
+// mapField builds a map[string]*Schema sub-schema field from its accessor pair.
+func mapField(name, kw string, get func(*Schema) map[string]*Schema, set func(*Schema, map[string]*Schema)) Field {
 	return Field{
 		Name:    name,
 		Keyword: kw,
@@ -203,6 +243,19 @@ func mapField(name, kw string, get func(*Schema) map[string]*Schema) Field {
 		Shape:   Map,
 		IsZero:  func(s *Schema) bool { return get(s) == nil },
 		MapOf:   get,
+		CloneSubschemas: func(s *Schema, clone func(*Schema) *Schema) {
+			src := get(s)
+			if src == nil {
+				return
+			}
+
+			out := make(map[string]*Schema, len(src))
+			for key, sub := range src {
+				out[key] = clone(sub)
+			}
+
+			set(s, out)
+		},
 	}
 }
 
@@ -217,18 +270,32 @@ var (
 		strField("Schema", Identifier, func(s *Schema) string { return s.Schema }),
 		strField("Ref", Applicator, func(s *Schema) string { return s.Ref }),
 		strField("Comment", Identifier, func(s *Schema) string { return s.Comment }),
-		mapField("Defs", keyword.Defs, func(s *Schema) map[string]*Schema { return s.Defs }),
-		mapField("Definitions", keyword.Definitions, func(s *Schema) map[string]*Schema { return s.Definitions }),
+		mapField(
+			"Defs",
+			keyword.Defs,
+			func(s *Schema) map[string]*Schema { return s.Defs },
+			func(s *Schema, v map[string]*Schema) { s.Defs = v },
+		),
+		mapField(
+			"Definitions",
+			keyword.Definitions,
+			func(s *Schema) map[string]*Schema { return s.Definitions },
+			func(s *Schema, v map[string]*Schema) { s.Definitions = v },
+		),
 		mapField(
 			"DependencySchemas",
 			keyword.Dependencies,
 			func(s *Schema) map[string]*Schema { return s.DependencySchemas },
+			func(s *Schema, v map[string]*Schema) { s.DependencySchemas = v },
 		),
 		{
 			Name:           "DependencyStrings",
 			Class:          Constraint,
 			IsZero:         func(s *Schema) bool { return s.DependencyStrings == nil },
 			CloneContainer: func(s *Schema) { s.DependencyStrings = maps.Clone(s.DependencyStrings) },
+			CloneDeep: func(s *Schema, _ func(any) any) {
+				s.DependencyStrings = cloneStringLists(s.DependencyStrings)
+			},
 		},
 		strField("Anchor", Identifier, func(s *Schema) string { return s.Anchor }),
 		strField("DynamicAnchor", Identifier, func(s *Schema) string { return s.DynamicAnchor }),
@@ -258,6 +325,9 @@ var (
 			IsZero:         func(s *Schema) bool { return s.Examples == nil },
 			IsZeroInOutput: func(s *Schema) bool { return len(s.Examples) == 0 },
 			CloneContainer: func(s *Schema) { s.Examples = slices.Clone(s.Examples) },
+			CloneDeep: func(s *Schema, copyValue func(any) any) {
+				s.Examples = cloneValues(s.Examples, copyValue)
+			},
 		},
 
 		// Validation.
@@ -273,6 +343,9 @@ var (
 			Class:          Constraint,
 			IsZero:         func(s *Schema) bool { return s.Enum == nil },
 			CloneContainer: func(s *Schema) { s.Enum = slices.Clone(s.Enum) },
+			CloneDeep: func(s *Schema, copyValue func(any) any) {
+				s.Enum = cloneValues(s.Enum, copyValue)
+			},
 		},
 		{
 			Name:   "Const",
@@ -281,6 +354,12 @@ var (
 			CloneContainer: func(s *Schema) {
 				if s.Const != nil {
 					c := *s.Const
+					s.Const = &c
+				}
+			},
+			CloneDeep: func(s *Schema, copyValue func(any) any) {
+				if s.Const != nil {
+					c := copyValue(*s.Const)
 					s.Const = &c
 				}
 			},
@@ -295,20 +374,45 @@ var (
 		strField("Pattern", Constraint, func(s *Schema) string { return s.Pattern }),
 
 		// Arrays.
-		sliceField("PrefixItems", keyword.PrefixItems, func(s *Schema) []*Schema { return s.PrefixItems }),
-		singleField("Items", keyword.Items, func(s *Schema) *Schema { return s.Items }),
-		sliceField("ItemsArray", keyword.Items, func(s *Schema) []*Schema { return s.ItemsArray }),
+		sliceField(
+			"PrefixItems",
+			keyword.PrefixItems,
+			func(s *Schema) []*Schema { return s.PrefixItems },
+			func(s *Schema, v []*Schema) { s.PrefixItems = v },
+		),
+		singleField(
+			"Items",
+			keyword.Items,
+			func(s *Schema) *Schema { return s.Items },
+			func(s, v *Schema) { s.Items = v },
+		),
+		sliceField(
+			"ItemsArray",
+			keyword.Items,
+			func(s *Schema) []*Schema { return s.ItemsArray },
+			func(s *Schema, v []*Schema) { s.ItemsArray = v },
+		),
 		intField("MinItems", func(s *Schema) *int { return s.MinItems }),
 		intField("MaxItems", func(s *Schema) *int { return s.MaxItems }),
-		singleField("AdditionalItems", keyword.AdditionalItems, func(s *Schema) *Schema { return s.AdditionalItems }),
+		singleField(
+			"AdditionalItems",
+			keyword.AdditionalItems,
+			func(s *Schema) *Schema { return s.AdditionalItems },
+			func(s, v *Schema) { s.AdditionalItems = v },
+		),
 		boolField("UniqueItems", Constraint, func(s *Schema) bool { return s.UniqueItems }),
-		singleField("Contains", keyword.Contains, func(s *Schema) *Schema { return s.Contains }),
+		singleField(
+			"Contains",
+			keyword.Contains,
+			func(s *Schema) *Schema { return s.Contains },
+			func(s, v *Schema) { s.Contains = v },
+		),
 		intField("MinContains", func(s *Schema) *int { return s.MinContains }),
 		intField("MaxContains", func(s *Schema) *int { return s.MaxContains }),
 		singleField(
 			"UnevaluatedItems",
 			keyword.UnevaluatedItems,
-			func(s *Schema) *Schema { return s.UnevaluatedItems },
+			func(s *Schema) *Schema { return s.UnevaluatedItems }, func(s, v *Schema) { s.UnevaluatedItems = v },
 		),
 
 		// Objects.
@@ -325,45 +429,82 @@ var (
 			Class:          Constraint,
 			IsZero:         func(s *Schema) bool { return s.DependentRequired == nil },
 			CloneContainer: func(s *Schema) { s.DependentRequired = maps.Clone(s.DependentRequired) },
+			CloneDeep: func(s *Schema, _ func(any) any) {
+				s.DependentRequired = cloneStringLists(s.DependentRequired)
+			},
 		},
-		mapField("Properties", keyword.Properties, func(s *Schema) map[string]*Schema { return s.Properties }),
+		mapField(
+			"Properties",
+			keyword.Properties,
+			func(s *Schema) map[string]*Schema { return s.Properties },
+			func(s *Schema, v map[string]*Schema) { s.Properties = v },
+		),
 		mapField(
 			"PatternProperties",
 			keyword.PatternProperties,
 			func(s *Schema) map[string]*Schema { return s.PatternProperties },
+			func(s *Schema, v map[string]*Schema) { s.PatternProperties = v },
 		),
 		singleField(
 			"AdditionalProperties",
 			keyword.AdditionalProperties,
 			func(s *Schema) *Schema { return s.AdditionalProperties },
+			func(s, v *Schema) { s.AdditionalProperties = v },
 		),
-		singleField("PropertyNames", keyword.PropertyNames, func(s *Schema) *Schema { return s.PropertyNames }),
+		singleField(
+			"PropertyNames",
+			keyword.PropertyNames,
+			func(s *Schema) *Schema { return s.PropertyNames },
+			func(s, v *Schema) { s.PropertyNames = v },
+		),
 		singleField(
 			"UnevaluatedProperties",
 			keyword.UnevaluatedProperties,
 			func(s *Schema) *Schema { return s.UnevaluatedProperties },
+			func(s, v *Schema) { s.UnevaluatedProperties = v },
 		),
 
 		// Logic.
-		sliceField("AllOf", keyword.AllOf, func(s *Schema) []*Schema { return s.AllOf }),
-		sliceField("AnyOf", keyword.AnyOf, func(s *Schema) []*Schema { return s.AnyOf }),
-		sliceField("OneOf", keyword.OneOf, func(s *Schema) []*Schema { return s.OneOf }),
-		singleField("Not", keyword.Not, func(s *Schema) *Schema { return s.Not }),
+		sliceField(
+			"AllOf",
+			keyword.AllOf,
+			func(s *Schema) []*Schema { return s.AllOf },
+			func(s *Schema, v []*Schema) { s.AllOf = v },
+		),
+		sliceField(
+			"AnyOf",
+			keyword.AnyOf,
+			func(s *Schema) []*Schema { return s.AnyOf },
+			func(s *Schema, v []*Schema) { s.AnyOf = v },
+		),
+		sliceField(
+			"OneOf",
+			keyword.OneOf,
+			func(s *Schema) []*Schema { return s.OneOf },
+			func(s *Schema, v []*Schema) { s.OneOf = v },
+		),
+		singleField("Not", keyword.Not, func(s *Schema) *Schema { return s.Not }, func(s, v *Schema) { s.Not = v }),
 
 		// Conditional.
-		singleField("If", keyword.If, func(s *Schema) *Schema { return s.If }),
-		singleField("Then", keyword.Then, func(s *Schema) *Schema { return s.Then }),
-		singleField("Else", keyword.Else, func(s *Schema) *Schema { return s.Else }),
+		singleField("If", keyword.If, func(s *Schema) *Schema { return s.If }, func(s, v *Schema) { s.If = v }),
+		singleField("Then", keyword.Then, func(s *Schema) *Schema { return s.Then }, func(s, v *Schema) { s.Then = v }),
+		singleField("Else", keyword.Else, func(s *Schema) *Schema { return s.Else }, func(s, v *Schema) { s.Else = v }),
 		mapField(
 			"DependentSchemas",
 			keyword.DependentSchemas,
 			func(s *Schema) map[string]*Schema { return s.DependentSchemas },
+			func(s *Schema, v map[string]*Schema) { s.DependentSchemas = v },
 		),
 
 		// Content, format, and extensions.
 		strField("ContentEncoding", Constraint, func(s *Schema) string { return s.ContentEncoding }),
 		strField("ContentMediaType", Constraint, func(s *Schema) string { return s.ContentMediaType }),
-		singleField("ContentSchema", keyword.ContentSchema, func(s *Schema) *Schema { return s.ContentSchema }),
+		singleField(
+			"ContentSchema",
+			keyword.ContentSchema,
+			func(s *Schema) *Schema { return s.ContentSchema },
+			func(s, v *Schema) { s.ContentSchema = v },
+		),
 		strField("Format", Constraint, func(s *Schema) string { return s.Format }),
 		{
 			Name:           "Extra",
@@ -371,6 +512,9 @@ var (
 			IsZero:         func(s *Schema) bool { return s.Extra == nil },
 			IsZeroInOutput: func(s *Schema) bool { return len(s.Extra) == 0 },
 			CloneContainer: func(s *Schema) { s.Extra = maps.Clone(s.Extra) },
+			CloneDeep: func(s *Schema, copyValue func(any) any) {
+				s.Extra = cloneValueMap(s.Extra, copyValue)
+			},
 		},
 		{
 			Name:           "PropertyOrder",
@@ -496,13 +640,62 @@ func HasSiblingsBesides(s *Schema, except string) bool {
 
 // CloneContainers reallocates every mutable header container on s that upstream
 // CloneSchemas leaves aliased, so in-place writes to one cannot reach the source.
-// It backs schemashape.CloneOverrideExtras.
+// The reallocation is one level deep: a value held inside a container stays
+// shared with the source, which is what schemashape.CloneOverrideExtras, its
+// caller, needs. A caller wanting an independent interior runs the per-field
+// [Field.CloneDeep] closures instead.
 func CloneContainers(s *Schema) {
 	for i := range Fields {
 		if clone := Fields[i].CloneContainer; clone != nil {
 			clone(s)
 		}
 	}
+}
+
+// cloneValues copies a slice of JSON-shaped values, routing each member through
+// copyValue. A nil slice stays nil, so the caller's nil-versus-empty distinction
+// survives the copy.
+func cloneValues(vals []any, copyValue func(any) any) []any {
+	if vals == nil {
+		return nil
+	}
+
+	out := make([]any, len(vals))
+	for i, v := range vals {
+		out[i] = copyValue(v)
+	}
+
+	return out
+}
+
+// cloneValueMap copies a map of JSON-shaped values, routing each member through
+// copyValue. A nil map stays nil.
+func cloneValueMap(m map[string]any, copyValue func(any) any) map[string]any {
+	if m == nil {
+		return nil
+	}
+
+	out := make(map[string]any, len(m))
+	for key, v := range m {
+		out[key] = copyValue(v)
+	}
+
+	return out
+}
+
+// cloneStringLists copies a map of string lists, reallocating each list so a
+// write to one cannot reach the source. A nil map stays nil.
+func cloneStringLists(m map[string][]string) map[string][]string {
+	if m == nil {
+		return nil
+	}
+
+	out := make(map[string][]string, len(m))
+	for key, list := range m {
+		out[key] = slices.Clone(list)
+	}
+
+	return out
 }
 
 // Children returns the direct sub-schemas of s in the jsonschema package's

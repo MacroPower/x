@@ -2,7 +2,9 @@ package schemafield //nolint:testpackage // In-package by design: the canonical 
 
 import (
 	"encoding/json"
+	"maps"
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/google/jsonschema-go/jsonschema"
@@ -44,6 +46,48 @@ func needsCloneContainer(t reflect.Type) bool {
 	default:
 		return false
 	}
+}
+
+// needsCloneDeep reports whether a field's Go type keeps a mutable interior
+// after CloneContainer reallocates its header, which is what CloneDeep exists to
+// copy. A container whose element type is itself a reference kind (an any, a
+// slice, a map, or a pointer) qualifies; one whose elements are immutable
+// scalars ([]byte, []string, map[string]bool, *float64) does not, and neither
+// does a sub-schema field, whose children CloneSubschemas rebuilds.
+func needsCloneDeep(t reflect.Type) bool {
+	if shapeForType(t) != None {
+		return false
+	}
+
+	switch t.Kind() {
+	case reflect.Slice, reflect.Map, reflect.Pointer:
+	default:
+		return false
+	}
+
+	switch t.Elem().Kind() {
+	case reflect.Interface, reflect.Slice, reflect.Map, reflect.Pointer:
+		return true
+	default:
+		return false
+	}
+}
+
+// childOfShape returns a one-child container of the shape a sub-schema field
+// holds, for driving a field's CloneSubschemas closure through reflection.
+func childOfShape(shape Shape, child *jsonschema.Schema) any {
+	switch shape {
+	case Single:
+		return child
+	case Slice:
+		return []*jsonschema.Schema{child}
+	case Map:
+		return map[string]*jsonschema.Schema{"k": child}
+	case None:
+		return nil
+	}
+
+	return nil
 }
 
 // TestFieldTableMatchesUpstream is the primary staleness alarm: it reflects over
@@ -109,6 +153,19 @@ func TestFieldTableMatchesUpstream(t *testing.T) {
 
 			assert.Equal(t, needsCloneContainer(sf.Type), f.CloneContainer != nil,
 				"field %q CloneContainer presence does not match its Go type %s", sf.Name, sf.Type)
+
+			assert.Equal(t, needsCloneDeep(sf.Type), f.CloneDeep != nil,
+				"field %q CloneDeep presence does not match its Go type %s", sf.Name, sf.Type)
+
+			// A field with a mutable interior carries both closures: the deep
+			// copy reallocates the header the shallow one would.
+			if f.CloneDeep != nil {
+				assert.NotNil(t, f.CloneContainer,
+					"field %q carries CloneDeep, so it must carry CloneContainer too", sf.Name)
+			}
+
+			assert.Equal(t, f.Shape != None, f.CloneSubschemas != nil,
+				"field %q CloneSubschemas presence must match Shape", sf.Name)
 		})
 	}
 
@@ -213,4 +270,147 @@ func TestCloneContainersUnaliasesHeaders(t *testing.T) {
 	s.Extra["k2"] = "v2"
 	_, leaked := orig.Extra["k2"]
 	assert.False(t, leaked, "writes to a cloned map must not reach the source")
+}
+
+// TestCloneSubschemasWritesItsOwnField pins that each sub-schema field's setter
+// writes the field its getter reads. A presence check cannot catch a copied row
+// whose setter still names the field it was copied from: the closure would read
+// one field and write another, and the clone would silently drop children.
+func TestCloneSubschemasWritesItsOwnField(t *testing.T) {
+	t.Parallel()
+
+	for i := range Fields {
+		f := &Fields[i]
+		if f.Shape == None {
+			continue
+		}
+
+		t.Run(f.Name, func(t *testing.T) {
+			t.Parallel()
+
+			child := &jsonschema.Schema{Title: "child"}
+			replacement := &jsonschema.Schema{Title: "replacement"}
+
+			s := &jsonschema.Schema{}
+			field := reflect.ValueOf(s).Elem().FieldByName(f.Name)
+			field.Set(reflect.ValueOf(childOfShape(f.Shape, child)))
+
+			var seen []*jsonschema.Schema
+
+			f.CloneSubschemas(s, func(sub *jsonschema.Schema) *jsonschema.Schema {
+				seen = append(seen, sub)
+
+				return replacement
+			})
+
+			assert.Equal(t, []*jsonschema.Schema{child}, seen,
+				"the getter must read the field the test populated")
+
+			after := reflect.ValueOf(s).Elem().FieldByName(f.Name)
+			assert.Equal(t, []*jsonschema.Schema{replacement}, childrenOf(after),
+				"the setter must write the field the getter reads")
+		})
+	}
+}
+
+// childrenOf reads the sub-schemas out of a populated container of any shape.
+func childrenOf(field reflect.Value) []*jsonschema.Schema {
+	switch value := field.Interface().(type) {
+	case *jsonschema.Schema:
+		return []*jsonschema.Schema{value}
+
+	case []*jsonschema.Schema:
+		return value
+
+	case map[string]*jsonschema.Schema:
+		return slices.Collect(maps.Values(value))
+
+	default:
+		return nil
+	}
+}
+
+// TestCloneSubschemasKeepsNilAndEmpty pins the nil-versus-empty distinction
+// through the clone: an absent container stays absent, and a present empty one
+// stays present, which is the difference between an ignored keyword and one that
+// vacuously rejects.
+func TestCloneSubschemasKeepsNilAndEmpty(t *testing.T) {
+	t.Parallel()
+
+	identity := func(sub *jsonschema.Schema) *jsonschema.Schema { return sub }
+
+	for i := range Fields {
+		f := &Fields[i]
+		if f.Shape == None || f.Shape == Single {
+			continue
+		}
+
+		t.Run(f.Name, func(t *testing.T) {
+			t.Parallel()
+
+			absent := &jsonschema.Schema{}
+			f.CloneSubschemas(absent, identity)
+			assert.True(t, f.IsZero(absent), "a nil container must stay nil")
+
+			empty := &jsonschema.Schema{}
+			field := reflect.ValueOf(empty).Elem().FieldByName(f.Name)
+
+			if f.Shape == Map {
+				field.Set(reflect.MakeMap(field.Type()))
+			} else {
+				field.Set(reflect.MakeSlice(field.Type(), 0, 0))
+			}
+
+			f.CloneSubschemas(empty, identity)
+			assert.False(t, f.IsZero(empty), "a non-nil empty container must stay non-nil")
+		})
+	}
+}
+
+// TestCloneDeepUnaliasesInteriors confirms the deep clones reach one level past
+// the header CloneContainers reallocates, for the two map-of-list fields whose
+// values a maps.Clone leaves shared and for the any-typed fields the value copier
+// walks.
+func TestCloneDeepUnaliasesInteriors(t *testing.T) {
+	t.Parallel()
+
+	c := any(map[string]any{"k": "v"})
+	s := &jsonschema.Schema{
+		Const:             &c,
+		Enum:              []any{map[string]any{"k": "v"}},
+		Examples:          []any{map[string]any{"k": "v"}},
+		Extra:             map[string]any{"x": map[string]any{"k": "v"}},
+		DependencyStrings: map[string][]string{"a": {"b"}},
+		DependentRequired: map[string][]string{"a": {"b"}},
+	}
+
+	orig := *s
+
+	// A copier that rebuilds every map it is handed, standing in for the
+	// structural clone's own value walk.
+	copyValue := func(v any) any {
+		m, ok := v.(map[string]any)
+		if !ok {
+			return v
+		}
+
+		return maps.Clone(m)
+	}
+
+	for i := range Fields {
+		if clone := Fields[i].CloneDeep; clone != nil {
+			clone(s, copyValue)
+		}
+	}
+
+	s.DependencyStrings["a"][0] = "mutated"
+	s.DependentRequired["a"][0] = "mutated"
+
+	if nested, ok := s.Extra["x"].(map[string]any); ok {
+		nested["k"] = "mutated"
+	}
+
+	assert.Equal(t, []string{"b"}, orig.DependencyStrings["a"])
+	assert.Equal(t, []string{"b"}, orig.DependentRequired["a"])
+	assert.Equal(t, map[string]any{"k": "v"}, orig.Extra["x"])
 }
