@@ -37,10 +37,12 @@
 //     does not marshal to a JSON array, so it gets no array size floor:
 //     a []byte encodes as a base64 string and gets minLength: 1 on that
 //     string, while a byte-slice type whose schema is not a string
-//     (json.RawMessage) gets only the required entry. Pointer fields
-//     only get the required constraint, not the type-specific non-zero check.
-//     In go-playground/validator, required on a pointer means "must be
-//     non-nil", so the pointed-to value may be zero. The required tag adds the
+//     (json.RawMessage) gets only the required entry. A pointer field gets the
+//     required entry and a forbidden null instead of the type-specific
+//     non-zero check. In go-playground/validator, required on a pointer means
+//     "must be non-nil" and says nothing about the pointed-to value, which may
+//     be zero; the required entry alone cannot express that, since a property
+//     whose value is null is still present. The required tag adds the
 //     field to the parent's required array even when json:",omitempty" or
 //     json:",omitzero" would normally exclude it.
 //

@@ -772,7 +772,10 @@ produces:
 
 Supported tags (summary):
 
-- **Presence:** `required`.
+- **Presence:** `required`. A non-pointer field also gets a type-specific
+  non-zero constraint; a pointer field gets a forbidden `null` instead, since
+  go-playground reads `required` on a pointer as "must be non-nil" and a
+  property whose value is `null` is still present.
 - **Bounds:** `min`, `max`, `len`, `gt`, `lt`, `gte`, `lte`, `eq`, `ne`, mapped
   to length/numeric keywords for strings and numbers, and to
   `minItems`/`maxItems` or `minProperties`/`maxProperties` for collections.

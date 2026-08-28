@@ -649,5 +649,65 @@
         "want": "reject"
       }
     ]
+  },
+  {
+    "name": "required on a nullable field forbids null",
+    "note": "the schema's required entry alone is satisfied by a null-valued property",
+    "type": "*string",
+    "json": "v",
+    "validate": "required",
+    "schema": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "not": {
+        "type": "null"
+      }
+    },
+    "instances": [
+      {
+        "json": "x",
+        "want": "accept"
+      },
+      {
+        "json": null,
+        "want": "reject"
+      }
+    ]
+  },
+  {
+    "name": "required on a coerced nullable forbids null and nothing else",
+    "note": "go-playground's required on a pointer says nothing about the pointed-to value",
+    "type": "*int",
+    "json": "v,string",
+    "validate": "required",
+    "schema": {
+      "type": [
+        "null",
+        "string"
+      ],
+      "not": {
+        "type": "null"
+      }
+    },
+    "instances": [
+      {
+        "json": "1",
+        "want": "accept"
+      },
+      {
+        "json": "0",
+        "want": "accept"
+      },
+      {
+        "json": null,
+        "want": "reject"
+      }
+    ]
   }
 ]

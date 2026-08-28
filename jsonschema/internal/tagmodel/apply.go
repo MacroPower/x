@@ -385,13 +385,29 @@ func refBaseOf(t Target) *jsonschema.Schema {
 	return &jsonschema.Schema{}
 }
 
+// nonZeroNullable is the non-zero assertion on a nullable occurrence: forbid
+// null and assert nothing else.
+//
+// A pointer field's emptiness is its nil, which go-playground's required reads
+// as "must be non-nil" and says nothing about the pointed-to value, so the
+// pointed-to zero stays valid. The schema's required entry cannot express that
+// on its own, since a property whose value is null is still present, so the
+// assertion needs the null forbidden outright. The fact is a not, which the
+// keyword table scopes to the wrapper, so it lands on the branch the null
+// encoding put the null on.
+func nonZeroNullable(t Target) error {
+	ForbidSchema(t.Canvas, &jsonschema.Schema{Type: typename.Null})
+
+	return nil
+}
+
 // nonZeroFloor is the non-zero assertion on a shape whose emptiness is a size:
 // a floor of one on the axis that measures it. It is an ordinary intersect-only
 // floor, so a stronger bound another rule set is never lowered.
 func nonZeroFloor(axis Axis) func(Target, Rule, Policy) error {
 	return func(t Target, _ Rule, pol Policy) error {
 		if t.Shape.Nullable {
-			return nil
+			return nonZeroNullable(t)
 		}
 
 		return applySizeBound(t, Rule{Op: OpFloorIncl, Axis: axis, Params: ParamsOf("1")}, pol)
@@ -405,7 +421,7 @@ func nonZeroFloor(axis Axis) func(Target, Rule, Policy) error {
 // hardcoded "0" it never emits.
 func nonZeroForbidCoerced(t Target, _ Rule, pol Policy) error {
 	if t.Shape.Nullable {
-		return nil
+		return nonZeroNullable(t)
 	}
 
 	v, err := t.Shape.ParseScalar(t.Shape.zeroLiteral(), pol)
@@ -423,7 +439,7 @@ func nonZeroForbidCoerced(t Target, _ Rule, pol Policy) error {
 // folds together with any other spelling of zero the same target forbids.
 func nonZeroForbidNumber(t Target, _ Rule, _ Policy) error {
 	if t.Shape.Nullable {
-		return nil
+		return nonZeroNullable(t)
 	}
 
 	if numkind.IsInteger(t.Shape.Kind) {
@@ -441,7 +457,7 @@ func nonZeroForbidNumber(t Target, _ Rule, _ Policy) error {
 // whichever rule ran last.
 func nonZeroTrue(t Target, _ Rule, _ Policy) error {
 	if t.Shape.Nullable {
-		return nil
+		return nonZeroNullable(t)
 	}
 
 	return SetConst(t, true)
