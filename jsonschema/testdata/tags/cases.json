@@ -83,7 +83,7 @@
   {
     "name": "a sequence enumeration reaches coerced elements",
     "note": "1042aa7: the sequence rule dispatches on the element's own shape",
-    "type": "[]textLevel",
+    "type": "[]crossLevel",
     "json": "v",
     "jsonschema": "enum=1|2|3",
     "validate": "oneof=1 2 3",
@@ -627,7 +627,7 @@
   {
     "name": "a text-marshaling numeric pins the text it emits",
     "note": "1f74e42: the loudest shape, where the Go kind and the instance differ",
-    "type": "textLevel",
+    "type": "crossLevel",
     "json": "v",
     "jsonschema": "const=3",
     "validate": "eq=3",
@@ -762,5 +762,30 @@
     "json": "v",
     "jsonschema": "type=nope",
     "jsonschemaError": "ErrInvalidType"
+  },
+  {
+    "name": "a quoted json.Number pins its literal verbatim",
+    "note": "encoding/json writes a json.Number as the number it holds, without canonicalizing",
+    "type": "json.Number",
+    "json": "v,string",
+    "jsonschema": "const=5.0",
+    "schema": {
+      "type": "string",
+      "const": "5.0"
+    },
+    "instances": [
+      {
+        "json": "5.0",
+        "want": "accept"
+      },
+      {
+        "json": "5",
+        "want": "reject"
+      },
+      {
+        "json": 5.0,
+        "want": "reject"
+      }
+    ]
   }
 ]

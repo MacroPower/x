@@ -96,13 +96,10 @@ func crossShapes() []crossShape {
 	}
 }
 
-// generateWithTag builds a one-field struct carrying tag and generates its
-// schema. Building the type reflectively is what makes the cross product
-// exhaustive rather than a hand-written sample.
-//
-// The validate interpreter is registered only for a validate row, so a
-// jsonschema-tag row generates through the same path a caller who never
-// registered an interpreter would take.
+// generateOneField builds a one-field struct carrying jsonTag and one dialect
+// tag, then generates its schema. It registers the validate interpreter only
+// for a validate row, so a jsonschema-tag row generates through the same path a
+// caller who registered no interpreter would take.
 func generateOneField(
 	t *testing.T,
 	typ reflect.Type,
@@ -126,7 +123,9 @@ func generateOneField(
 	return jsonschema.Generate(t.Context(), doc, opts...)
 }
 
-// generateWithTag is generateOneField over a crossShape.
+// generateWithTag is generateOneField over a crossShape. Building the type
+// reflectively is what makes the cross product exhaustive rather than a
+// hand-written sample.
 func generateWithTag(t *testing.T, sh crossShape, tagKey, tagValue string) (*jsonschema.Schema, error) {
 	t.Helper()
 

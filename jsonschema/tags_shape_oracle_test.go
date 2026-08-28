@@ -37,16 +37,14 @@ const (
 	// Two fields resolving to one JSON name at the same depth are both dropped
 	// by encoding/json's dominance rule, so neither is a property to classify.
 	reasonShadowedName = "a JSON name claimed by more than one field at one depth is dropped"
-	// Three columns predict no token, so encoding/json cannot judge them. The
-	// form does not influence what encoding/json writes, so no assertion over
-	// the marshaled member could distinguish a right classification from a
-	// wrong one: the raw byte column admits any JSON value by definition, and
-	// the opaque column names the shapes the tag vocabulary cannot describe.
-	// Their totality is pinned in internal/tagmodel instead, by the matrix
-	// golden and TestFormClassificationTotal. The referenced column is the one
-	// of the three that does predict a token, read off the definition it names.
-	reasonFormPredictsNoToken = "the raw byte and opaque columns admit any JSON value, so no token follows from them"
 )
+
+// The raw byte and opaque columns admit any JSON value, so no token follows
+// from either, and the form does not influence what encoding/json writes. No
+// assertion over the marshaled member could distinguish a right classification
+// from a wrong one there. Their totality is pinned in internal/tagmodel
+// instead, by the matrix golden and TestFormClassificationTotal.
+const reasonFormPredictsNoToken = "the raw byte and opaque columns admit any JSON value, so no token follows from them"
 
 // unprobedReasons lists every reason the probe could legitimately not observe
 // f. An unobserved field matching none of them is a hole in the oracle rather
@@ -183,9 +181,10 @@ var (
 	rawMessageType = reflect.TypeFor[json.RawMessage]()
 	numberType     = reflect.TypeFor[json.Number]()
 
-	// The formToken table gives the token each classifying form predicts. The
-	// four forms absent from it predict no token on their own and carry a
-	// structural assertion in assertShapeMatchesToken instead.
+	// The formToken table gives the token each classifying form predicts.
+	// FormRef is absent because its token comes from the definition it names,
+	// and FormRawBytes and FormOpaque are absent because they predict none; see
+	// reasonFormPredictsNoToken.
 	formToken = map[jsonschema.Form]jsonToken{
 		jsonschema.FormString:         tokenString,
 		jsonschema.FormTextString:     tokenString,
@@ -352,7 +351,7 @@ func declaredToken(s *jsonschema.Schema) (jsonToken, bool) {
 }
 
 // assertShapeMatchesToken is the oracle. It asserts that the form the generator
-// assigned the field agrees with the JSON encoding/json actually wrote for it,
+// assigned the field agrees with the JSON encoding/json wrote for it,
 // and reports whether it had an assertion to make. A column that predicts no
 // token has none; see reasonFormPredictsNoToken.
 func assertShapeMatchesToken(
@@ -371,9 +370,12 @@ func assertShapeMatchesToken(
 	// it to the reflected value rather than waving it through is what keeps a
 	// nil slice or map from excusing a wrong form.
 	if got == tokenNull {
+		// A null token says the Go value was nil and nothing about the form, so
+		// the claim is worth making but does not count toward the assertion
+		// tally the vacuity guard reads.
 		assert.True(t, isNil, "%s marshaled null from a non-nil value", where)
 
-		return true
+		return false
 	}
 
 	require.False(t, isNil, "%s marshaled %s from a nil value", where, got)
@@ -443,6 +445,8 @@ func assertElementTokens(t *testing.T, obs *shapeObservation, raw json.RawMessag
 		var values map[string]json.RawMessage
 
 		require.NoError(t, json.Unmarshal(raw, &values), "%s: decode the object", where)
+		require.Len(t, obs.elems, 1,
+			"%s: an object carries one value context, so its members need no ordering", where)
 
 		for _, v := range values {
 			members = append(members, v)
@@ -533,9 +537,9 @@ type (
 	// The oracleText type marshals itself as text over a numeric kind, so its
 	// schema is a string while its Go value is a number.
 	oracleText int
-	// The oracleByte type is a uint8 carrying MarshalText. A slice of it
-	// marshals as a real JSON array rather than one base64 string, the
-	// exemption 649a6f2 added.
+	// The oracleByte type is a uint8 carrying MarshalText. A slice of it marshals
+	// as a real JSON array rather than one base64 string, the exemption 649a6f2
+	// added.
 	oracleByte uint8
 	// The oracleBoolWord type is a string kind whose declared schema is a boolean, the
 	// promotion 679bd8b added. Its MarshalJSON is what makes the declaration
@@ -580,6 +584,10 @@ type oracleRow struct {
 	opts       []jsonschema.GenerateOption
 	wantDefs   jsonschema.Form
 	wantNoDefs jsonschema.Form
+	// The noToken flag marks a row whose form predicts no token, so the row
+	// pins the classification and the oracle has nothing to check it against;
+	// see reasonFormPredictsNoToken.
+	noToken bool
 }
 
 // oracleRoster is the hand-written half of the oracle: every coercible kind
@@ -607,10 +615,13 @@ func oracleRoster() map[string]oracleRow {
 		// The map and the interface are what reach the object and opaque
 		// columns without relying on a synthesized shape drawing them.
 		"map":       {typ: reflect.TypeFor[map[string]int](), wantDefs: jsonschema.FormObject},
-		"interface": {typ: reflect.TypeFor[any](), wantDefs: jsonschema.FormOpaque},
+		"interface": {typ: reflect.TypeFor[any](), wantDefs: jsonschema.FormOpaque, noToken: true},
 
-		"byte slice":  {typ: reflect.TypeFor[[]byte](), wantDefs: jsonschema.FormByteString},
-		"raw message": {typ: reflect.TypeFor[json.RawMessage](), wantDefs: jsonschema.FormRawBytes},
+		"byte slice": {typ: reflect.TypeFor[[]byte](), wantDefs: jsonschema.FormByteString},
+		"raw message": {
+			typ:      reflect.TypeFor[json.RawMessage](),
+			wantDefs: jsonschema.FormRawBytes, noToken: true,
+		},
 
 		// A named struct and a time are $def'd by default and inline without
 		// definitions, which is what makes both the referenced and the
@@ -838,7 +849,15 @@ func TestTagShapeOracleRoster(t *testing.T) {
 						assert.Equal(t, want, field.shape.Form, "classified form")
 					}
 
-					assert.Positive(t, checkObservations(t, seen, root), "the oracle asserted no field")
+					checked := checkObservations(t, seen, root)
+					if row.noToken {
+						assert.Zero(t, checked,
+							"the row declares no token, so the oracle must have nothing to assert")
+
+						return
+					}
+
+					assert.Positive(t, checked, "the oracle asserted no field")
 				})
 			}
 		})
@@ -851,26 +870,40 @@ func TestTagShapeOracleRoster(t *testing.T) {
 func assertEveryFieldAccountedFor(t *testing.T, typ reflect.Type, seen []shapeObservation) {
 	t.Helper()
 
-	observed := make(map[string]bool, len(seen))
+	observed := make(map[reflect.Type]map[string]bool, len(seen))
+	owners := map[reflect.Type]bool{typ: true}
 
 	for i := range seen {
-		if seen[i].owner == typ {
-			observed[seen[i].field.Name] = true
+		owner := seen[i].owner
+		owners[owner] = true
+
+		if observed[owner] == nil {
+			observed[owner] = map[string]bool{}
 		}
+
+		observed[owner][seen[i].field.Name] = true
 	}
 
-	shared := make(map[string]int, typ.NumField())
-	for f := range typ.Fields() {
-		shared[jsonName(f)]++
-	}
-
-	for f := range typ.Fields() {
-		if observed[f.Name] {
+	// Every owner the probe reached is checked, not only the root, so a field
+	// class missed inside a nested or $def'd struct is caught too.
+	for owner := range owners {
+		if owner.Kind() != reflect.Struct {
 			continue
 		}
 
-		assert.NotEmpty(t, unprobedReasons(f, shared),
-			"field %s.%s was neither observed nor covered by a named reason", typ, f.Name)
+		shared := make(map[string]int, owner.NumField())
+		for f := range owner.Fields() {
+			shared[jsonName(f)]++
+		}
+
+		for f := range owner.Fields() {
+			if observed[owner][f.Name] {
+				continue
+			}
+
+			assert.NotEmpty(t, unprobedReasons(f, shared),
+				"field %s.%s was neither observed nor covered by a named reason", owner, f.Name)
+		}
 	}
 }
 

@@ -17,11 +17,11 @@ import (
 	playground "github.com/go-playground/validator/v10"
 )
 
-// The widened half of rig 2. The original roster holds every field
-// non-pointer, always present, and coerced only on plain scalars, which leaves
-// three shapes the interpreter has separate code for entirely unexercised: a
-// nullable occurrence, a field encoding/json may drop, and a coerced pointer.
-// Each gets a target here.
+// The widened half of the go-playground differential. The roster in
+// differential_test.go holds every field non-pointer, always present, and
+// coerced only on plain scalars, which leaves three shapes the interpreter has
+// separate code for unexercised. A nullable occurrence, a field encoding/json
+// may drop, and a coerced pointer each get a target here.
 
 // pointerConstraints exercises the value rules on nullable occurrences, where
 // the interpreter puts a value constraint on the value branch of the null
@@ -48,8 +48,7 @@ type pointerConstraints struct {
 
 // requiredPointerConstraints is the nullable roster required gets to itself.
 // Every field carries it, so no sibling can drop the object into the weaker
-// half of the agreement property and hide a null the schema should have
-// rejected. The pairings are the load-bearing rows: required composes its
+// half of the agreement property and hide a null the schema should reject. The pairings are the load-bearing rows: required composes its
 // forbidden null with another rule's forbidden value, and a composition that
 // escalated the pair off the null wrapper would let null through here.
 type requiredPointerConstraints struct {
@@ -65,7 +64,7 @@ type requiredPointerConstraints struct {
 }
 
 // omitemptyConstraints exercises the scalar rules on fields encoding/json drops
-// at their zero value, the case the original roster eliminated outright. The
+// at their zero value, the case the roster in differential_test.go excludes. The
 // agreement property weakens to a one-way implication where a field is
 // dropped; see reasonOmitemptyDropsField.
 type omitemptyConstraints struct {
@@ -214,8 +213,8 @@ func agreementHolds(t *testing.T, probes []fieldProbe, instance []byte, referenc
 // fuzzWidenedDifferential is fuzzValidatorDifferential with the agreement
 // property split on what the marshaled object actually carries. Where every
 // field is present with a non-null value the two validators must agree exactly,
-// which is the original property at full strength. Where encoding/json dropped
-// a field or wrote null for one, the schema has nothing to assert about it and
+// which is the property at full strength. Where encoding/json drops a field or
+// writes null for one, the schema has nothing to assert about it and
 // can only be the more permissive of the two, so the property weakens to the
 // one-way implication; see reasonOmitemptyDropsField and
 // reasonNullableValueRule.
@@ -333,7 +332,7 @@ func TestWidenedDifferentialReachesStrictAgreement(t *testing.T) {
 			t.Parallel()
 
 			// More than one, since a single strict seed would leave the
-			// biconditional resting on one blob: the cursor zero-extends, so a
+			// biconditional resting on one blob. The cursor zero-extends, so a
 			// short blob leaves every tail field nil and lands in the weak half.
 			assert.GreaterOrEqual(t, count(t), 2,
 				"too few seeds reach the biconditional half of the property")
@@ -342,9 +341,9 @@ func TestWidenedDifferentialReachesStrictAgreement(t *testing.T) {
 }
 
 // requiredNullableShapes are the one-field shapes required is checked against
-// on its own. A fuzz target cannot serve here: the schema verdict is per
-// object, so a sibling field that correctly rejects null masks another field
-// that wrongly accepts it. One field per struct is what makes the verdict
+// on its own. A fuzz target cannot serve here, because the schema verdict is
+// per object and a sibling field that correctly rejects null masks another
+// field that wrongly accepts it. One field per struct makes the verdict
 // attributable.
 //
 // The pairings are the point. Required contributes a forbidden null, and a
@@ -359,22 +358,41 @@ func requiredNullableShapes() map[string]reflect.Type {
 	}
 
 	return map[string]reflect.Type{
-		"string":            field(reflect.TypeFor[*string](), "v", "required"),
-		"number":            field(reflect.TypeFor[*int](), "v", "required"),
-		"float":             field(reflect.TypeFor[*float64](), "v", "required"),
-		"bool":              field(reflect.TypeFor[*bool](), "v", "required"),
-		"slice":             field(reflect.TypeFor[*[]int](), "v", "required"),
-		"map":               field(reflect.TypeFor[*map[string]int](), "v", "required"),
-		"coerced number":    field(reflect.TypeFor[*int](), "v,string", "required"),
-		"string with ne":    field(reflect.TypeFor[*string](), "v", "required,ne=banned"),
-		"number with ne":    field(reflect.TypeFor[*int](), "v", "required,ne=7"),
-		"bool with ne":      field(reflect.TypeFor[*bool](), "v", "required,ne=true"),
-		"string with oneof": field(reflect.TypeFor[*string](), "v", "required,oneof=alpha beta"),
-		"string with min":   field(reflect.TypeFor[*string](), "v", "required,min=2"),
-		"coerced with ne":   field(reflect.TypeFor[*int](), "v,string", "required,ne=3"),
-		"slice with ne":     field(reflect.TypeFor[*[]int](), "v", "required,ne=2"),
-		"repeated required": field(reflect.TypeFor[*string](), "v", "required,required"),
+		// A type whose own schema forbids a subschema is the shape that broke
+		// the composition once: a forbidden subschema cannot join the forbidden
+		// values, so whichever of the two gives way to allOf stops applying to
+		// null. It is drawn through WithTypeSchema in the caller.
+		"type-derived subschema forbid": field(reflect.TypeFor[*forbiddingWord](), "v", "required"),
+		"string":                        field(reflect.TypeFor[*string](), "v", "required"),
+		"number":                        field(reflect.TypeFor[*int](), "v", "required"),
+		"float":                         field(reflect.TypeFor[*float64](), "v", "required"),
+		"bool":                          field(reflect.TypeFor[*bool](), "v", "required"),
+		"slice":                         field(reflect.TypeFor[*[]int](), "v", "required"),
+		"map":                           field(reflect.TypeFor[*map[string]int](), "v", "required"),
+		"coerced number":                field(reflect.TypeFor[*int](), "v,string", "required"),
+		"string with ne":                field(reflect.TypeFor[*string](), "v", "required,ne=banned"),
+		"number with ne":                field(reflect.TypeFor[*int](), "v", "required,ne=7"),
+		"bool with ne":                  field(reflect.TypeFor[*bool](), "v", "required,ne=true"),
+		"string with oneof":             field(reflect.TypeFor[*string](), "v", "required,oneof=alpha beta"),
+		"string with min":               field(reflect.TypeFor[*string](), "v", "required,min=2"),
+		"coerced with ne":               field(reflect.TypeFor[*int](), "v,string", "required,ne=3"),
+		"slice with ne":                 field(reflect.TypeFor[*[]int](), "v", "required,ne=2"),
+		"repeated required":             field(reflect.TypeFor[*string](), "v", "required,required"),
 	}
+}
+
+// forbiddingWord is a string type whose own schema forbids a subschema rather
+// than a value, so the field arrives with a not the forbidden null cannot merge
+// into.
+type forbiddingWord string
+
+// forbiddingWordSchema declares that type's schema.
+func forbiddingWordSchema() jsonschema.GenerateOption {
+	three := 3
+
+	return jsonschema.WithTypeSchema(reflect.TypeFor[forbiddingWord](), jsonschema.TypeSchema{
+		Value: &jsonschema.Schema{Type: "string", Not: &jsonschema.Schema{MinLength: &three}},
+	})
 }
 
 // TestRequiredOnNullableRejectsNull pins that required on a nullable field
@@ -394,7 +412,8 @@ func TestRequiredOnNullableRejectsNull(t *testing.T) {
 			t.Parallel()
 
 			schema, err := jsonschema.Generate(t.Context(), typ,
-				jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()))
+				jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
+				forbiddingWordSchema())
 			require.NoError(t, err)
 
 			validator, err := jsonschema.Compile(t.Context(), schema)

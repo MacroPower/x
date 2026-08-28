@@ -28,12 +28,11 @@ var (
 // IsJSONNumber reports whether t is [encoding/json.Number]. Callers pass an
 // already-dereferenced type; the predicate does not follow a pointer chain.
 //
-// The type is the one string kind encoding/json writes as a number. Under
+// The type is the one Go string kind encoding/json writes as a number. Under
 // json:",string" it emits the literal once-quoted ("5"), where every other
-// string kind emits the already-encoded string a second time ("\"5\""). It is
-// a type identity rather than a predicate over the kind because the encoder
-// special-cases exactly this type, and it writes the literal verbatim, so 5.0
-// stays 5.0 rather than being canonicalized.
+// string kind emits the already-encoded string a second time ("\"5\""). The
+// encoder special-cases exactly this type, which is why the predicate compares
+// type identity rather than reading the kind.
 func IsJSONNumber(t reflect.Type) bool { return t == typeJSONNumber }
 
 // IsRecursiveContainerKind reports whether a kind can hold a value of its own

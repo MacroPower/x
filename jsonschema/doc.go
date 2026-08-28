@@ -528,10 +528,11 @@
 // the keywords that would measure or match the unquoted value (pattern,
 // format, and the length bounds) are rejected with an error rather than
 // silently asserting against the quoted, escaped text. [encoding/json.Number]
-// is the one string kind exempt from that rule. [encoding/json] writes it as
-// the number it holds, so a quoted one emits its literal once-quoted and takes
-// the coerced-numeric rules instead. It emits the literal verbatim rather than
-// canonicalizing it, so const=5.0 pins "5.0" and const=5 pins "5".
+// is the one Go string kind exempt from that rule. [encoding/json] writes it as
+// the number it holds, so the value 5 marshals as the JSON string "5" rather
+// than as "\"5\"", and the coerced-numeric rules apply. It writes the literal
+// verbatim rather than canonicalizing it, so const=5.0 pins "5.0" and const=5
+// pins "5".
 // Enum and examples values
 // are separated by "|". Unrecognized keys are a parse error. A value containing a
 // comma escapes it with a backslash (a literal backslash is "\\"), so

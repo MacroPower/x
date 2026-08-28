@@ -67,22 +67,44 @@ func TestValueSetForbidNumericDedupAcrossTypes(t *testing.T) {
 	assert.Nil(t, s.Not.Enum, "the same number must not become a two-member enum")
 }
 
-func TestValueSetForbidEscalatesToAllOfWhenNotHasSiblings(t *testing.T) {
+func TestValueSetForbidTakesTheNotSlotFromASiblingCarryingNot(t *testing.T) {
 	t.Parallel()
 
 	var vs constraint.ValueSet
 
 	// A range not (from a collection ne) carries sibling keywords, so a further
-	// forbidden value cannot merge into it and both move under allOf.
+	// forbidden value cannot merge into it. The value takes the not slot and the
+	// range moves under allOf, whichever order the two arrive in: the keyword
+	// table scopes not to the null wrapper and allOf to the value branch, so a
+	// forbidden value that lost the slot would stop applying to a null instance.
 	vs.ForbidSchema(&jsonschema.Schema{MinItems: new(2), MaxItems: new(2)})
 	vs.Forbid(9)
 
 	s := renderValues(vs)
-	assert.Nil(t, s.Not, "the existing not moves under allOf")
-	require.Len(t, s.AllOf, 2)
-	require.NotNil(t, s.AllOf[1].Not)
-	require.NotNil(t, s.AllOf[1].Not.Const)
-	assert.Equal(t, 9, *s.AllOf[1].Not.Const)
+	require.NotNil(t, s.Not, "the forbidden value keeps the not slot")
+	require.NotNil(t, s.Not.Const)
+	assert.Equal(t, 9, *s.Not.Const)
+	require.Len(t, s.AllOf, 1)
+	require.NotNil(t, s.AllOf[0].Not)
+	assert.NotNil(t, s.AllOf[0].Not.MinItems, "the range moves under allOf")
+}
+
+func TestValueSetForbidSchemaLeavesForbiddenValuesInTheNotSlot(t *testing.T) {
+	t.Parallel()
+
+	var vs constraint.ValueSet
+
+	// The mirror of the case above, arriving in the other order.
+	vs.Forbid(9)
+	vs.ForbidSchema(&jsonschema.Schema{MinItems: new(2), MaxItems: new(2)})
+
+	s := renderValues(vs)
+	require.NotNil(t, s.Not, "the forbidden value keeps the not slot")
+	require.NotNil(t, s.Not.Const)
+	assert.Equal(t, 9, *s.Not.Const)
+	require.Len(t, s.AllOf, 1)
+	require.NotNil(t, s.AllOf[0].Not)
+	assert.NotNil(t, s.AllOf[0].Not.MinItems, "the range moves under allOf")
 }
 
 func TestValueSetForbidSchema(t *testing.T) {
@@ -100,7 +122,7 @@ func TestValueSetForbidSchema(t *testing.T) {
 		assert.Same(t, forbidden, s.Not)
 	})
 
-	t.Run("moves an existing not under allOf", func(t *testing.T) {
+	t.Run("moves under allOf beside forbidden values", func(t *testing.T) {
 		t.Parallel()
 
 		var vs constraint.ValueSet
@@ -111,9 +133,29 @@ func TestValueSetForbidSchema(t *testing.T) {
 		vs.ForbidSchema(forbidden)
 
 		s := renderValues(vs)
-		assert.Nil(t, s.Not)
+		require.NotNil(t, s.Not, "the forbidden value keeps the not slot")
+		require.NotNil(t, s.Not.Const)
+		assert.Equal(t, 0, *s.Not.Const)
+		require.Len(t, s.AllOf, 1)
+		assert.Same(t, forbidden, s.AllOf[0].Not)
+	})
+
+	t.Run("moves an existing subschema forbid under allOf", func(t *testing.T) {
+		t.Parallel()
+
+		var vs constraint.ValueSet
+
+		first := &jsonschema.Schema{MinItems: new(1)}
+		second := &jsonschema.Schema{MaxItems: new(9)}
+
+		vs.ForbidSchema(first)
+		vs.ForbidSchema(second)
+
+		s := renderValues(vs)
+		assert.Nil(t, s.Not, "neither subschema forbid holds a slot the null split reads")
 		require.Len(t, s.AllOf, 2)
-		assert.Same(t, forbidden, s.AllOf[1].Not)
+		assert.Same(t, first, s.AllOf[0].Not)
+		assert.Same(t, second, s.AllOf[1].Not)
 	})
 }
 
@@ -121,8 +163,8 @@ func TestValueSetSeedNotWriteForbiddenPreservesOtherAllOf(t *testing.T) {
 	t.Parallel()
 
 	// A schema whose Not carries a sibling keyword, plus an unrelated allOf entry
-	// (an embedded struct's branch). Forbidding a value must escalate the not
-	// under allOf while leaving the pre-existing allOf entry in place.
+	// (an embedded struct's branch). Forbidding a value must move that not under
+	// allOf while leaving the pre-existing allOf entry in place.
 	embed := &jsonschema.Schema{Ref: "#/$defs/Embedded"}
 	s := &jsonschema.Schema{
 		Not:   &jsonschema.Schema{Const: new(any(5)), MinLength: new(3)},
@@ -135,12 +177,13 @@ func TestValueSetSeedNotWriteForbiddenPreservesOtherAllOf(t *testing.T) {
 	vs.Forbid(9)
 	vs.WriteForbidden(s)
 
-	assert.Nil(t, s.Not, "the sibling-carrying not moves under allOf")
-	require.Len(t, s.AllOf, 3)
+	require.NotNil(t, s.Not, "the forbidden value keeps the not slot")
+	require.NotNil(t, s.Not.Const)
+	assert.Equal(t, 9, *s.Not.Const)
+	require.Len(t, s.AllOf, 2)
 	assert.Same(t, embed, s.AllOf[0], "the pre-existing embed branch is preserved")
-	require.NotNil(t, s.AllOf[2].Not)
-	require.NotNil(t, s.AllOf[2].Not.Const)
-	assert.Equal(t, 9, *s.AllOf[2].Not.Const)
+	require.NotNil(t, s.AllOf[1].Not)
+	assert.NotNil(t, s.AllOf[1].Not.MinLength, "the sibling-carrying not moves under allOf")
 }
 
 func TestConjoinNot(t *testing.T) {
@@ -181,10 +224,10 @@ func TestConjoinNot(t *testing.T) {
 
 		not, conjuncts := constraint.ConjoinNot(typeNot, authored)
 
-		assert.Nil(t, not, "both nots move under allOf")
-		require.Len(t, conjuncts, 2)
-		require.NotNil(t, conjuncts[0].Not)
-		assert.Equal(t, "reserved", *conjuncts[0].Not.Const)
-		assert.Same(t, authored, conjuncts[1].Not)
+		require.NotNil(t, not, "the type's forbidden value keeps the not slot")
+		require.NotNil(t, not.Const)
+		assert.Equal(t, "reserved", *not.Const)
+		require.Len(t, conjuncts, 1)
+		assert.Same(t, authored, conjuncts[0].Not, "the sibling-carrying forbid moves under allOf")
 	})
 }

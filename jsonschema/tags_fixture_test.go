@@ -16,13 +16,11 @@ import (
 	"go.jacobcolvin.com/x/jsonschema/interpreters/validate"
 )
 
-// The cross-dialect fixture table. Tag behavior was pinned one scenario per
-// test function with an inline JSONEq, which records what a rule produces but
-// not what the produced schema then accepts, and makes a reversal a Go diff
-// rather than a data diff. Each row here carries a field shape, the spelling
-// each dialect gives one rule, and the instances the resulting schema must
-// accept and reject, so the two dialects are compared on verdicts rather than
-// on schema text alone.
+// The cross-dialect fixture table. Each row carries a field shape, the
+// spelling each dialect gives one rule, the property schema the rule must
+// produce, and the instances the compiled schema must accept and reject, so a
+// reversal shows up as a data diff and the two dialects answer for the verdicts
+// they produce rather than for their schema text alone.
 
 // fixturePath is the table's location, one file so a row's neighbors are
 // visible when it changes.
@@ -71,9 +69,10 @@ func fixtureTypes() map[string]reflect.Type {
 		"map[string]int": reflect.TypeFor[map[string]int](),
 		"[]byte":         reflect.TypeFor[[]byte](),
 		"RawMessage":     reflect.TypeFor[json.RawMessage](),
+		"json.Number":    reflect.TypeFor[json.Number](),
 		"time.Time":      reflect.TypeFor[time.Time](),
-		"textLevel":      reflect.TypeFor[crossLevel](),
-		"[]textLevel":    reflect.TypeFor[[]crossLevel](),
+		"crossLevel":     reflect.TypeFor[crossLevel](),
+		"[]crossLevel":   reflect.TypeFor[[]crossLevel](),
 	}
 }
 
@@ -183,8 +182,9 @@ func TestTagFixtures(t *testing.T) {
 
 // assertFixtureSchema checks the row's expected property schema, which pins
 // what the rule produced rather than only what it accepts. A row carrying both
-// dialects asserts it against both, which is what makes the verdict agreement
-// below a statement about one rule rather than two.
+// dialects asserts it against both, which makes
+// TestTagFixturesCrossDialectVerdictsAgree a statement about one rule rather
+// than two.
 func assertFixtureSchema(t *testing.T, tc tagCase, s *jsonschema.Schema) {
 	t.Helper()
 
@@ -229,9 +229,9 @@ func assertFixtureVerdicts(t *testing.T, tc tagCase, s *jsonschema.Schema) {
 // equivalence guard: where a row states both spellings of one rule, the two
 // generated schemas must return the same verdict on every instance.
 //
-// The two dialects interpret one constraint vocabulary, and every divergence
-// between them was a place one of them was silently wrong. Comparing verdicts
-// rather than schema text is what makes the row state the behavior a user sees.
+// The two dialects interpret one constraint vocabulary, so a divergence between
+// them is a place one of them is silently wrong. Comparing verdicts rather than
+// schema text makes the row state the behavior a user sees.
 func TestTagFixturesCrossDialectVerdictsAgree(t *testing.T) {
 	t.Parallel()
 
@@ -296,6 +296,22 @@ func TestTagFixturesCoverage(t *testing.T) {
 		used[tc.Type] = true
 
 		assert.NotEmpty(t, tc.Note, "row %q states no note naming what it pins", tc.Name)
+
+		// A row that names an error for a dialect it does not spell would run
+		// nothing, and a row that neither pins a schema nor validates an
+		// instance asserts only that generation succeeded.
+		if tc.JSONSchemaError != "" {
+			assert.NotEmpty(t, tc.JSONSchema, "row %q names a jsonschema error but no spelling", tc.Name)
+		}
+
+		if tc.ValidateError != "" {
+			assert.NotEmpty(t, tc.Validate, "row %q names a validate error but no spelling", tc.Name)
+		}
+
+		if tc.JSONSchemaError == "" && tc.ValidateError == "" {
+			assert.True(t, len(tc.Schema) > 0 || len(tc.Instances) > 0,
+				"row %q asserts only that generation succeeded", tc.Name)
+		}
 	}
 
 	for name := range fixtureTypes() {

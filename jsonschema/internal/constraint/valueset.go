@@ -10,22 +10,28 @@ import (
 	"go.jacobcolvin.com/x/jsonschema/internal/schemashape"
 )
 
-// ValueSet models the forbidden-value constraints on one schema (ne and
-// required's non-zero check): the escalation from not.const to not.enum to allOf
-// as rules accumulate, shared by the dialects. The allowed set (const/enum) is
-// not modeled here: each writer composes it directly on its canvas, where the
-// facade and the interpreters run their conflict checks against the canvas and
-// the type-derived base.
+// ValueSet models the forbidden-value constraints on one schema, the ne rule and
+// required's non-zero check, escalating from not.const to not.enum to allOf as
+// rules accumulate. The dialects share it. The allowed set (const/enum) is not
+// modeled here; each writer composes it directly on its canvas, where the facade
+// and the interpreters run their conflict checks against the canvas and the
+// type-derived base.
+//
+// Forbidden values hold the single not slot and forbidden subschemas give way to
+// allOf, whichever order they arrive in. The two slots are not interchangeable:
+// the keyword table scopes not to the null wrapper and allOf to the value
+// branch, so a value forbid that lost the not slot would stop applying to a null
+// instance, which is how required on a nullable field asserts anything at all.
 type ValueSet struct {
 	not       *jsonschema.Schema
 	allOfNots []*jsonschema.Schema
 }
 
 // Forbid records that the value must not equal v, accumulating so several rules
-// compose: the first forbidden value becomes not.const, a second distinct value
+// compose. The first forbidden value becomes not.const, a second distinct value
 // promotes the pair to not.enum, and further values append. A not already
-// carrying sibling keywords is a conjunction, so it moves under allOf beside a
-// fresh not for v rather than merging into it.
+// carrying sibling keywords is a conjunction it cannot merge into, so that not
+// moves under allOf and v takes the slot.
 func (vs *ValueSet) Forbid(v any) {
 	switch {
 	case vs.not == nil:
@@ -47,30 +53,37 @@ func (vs *ValueSet) Forbid(v any) {
 		vs.not.Enum = append(vs.not.Enum, v)
 
 	default:
-		vs.allOfNots = append(vs.allOfNots,
-			&jsonschema.Schema{Not: vs.not},
-			&jsonschema.Schema{Not: &jsonschema.Schema{Const: &v}},
-		)
-		vs.not = nil
+		vs.allOfNots = append(vs.allOfNots, &jsonschema.Schema{Not: vs.not})
+		vs.not = &jsonschema.Schema{Const: &v}
 	}
 }
 
 // ForbidSchema forbids a whole subschema (a length range, from a collection ne),
 // which cannot ride on the not.const/not.enum accumulation. It takes the single
-// not slot when free, otherwise moves the existing not under allOf beside the
-// new one so both apply conjunctively.
+// not slot when free, and otherwise moves under allOf so both apply
+// conjunctively. A not already holding forbidden values keeps the slot, since
+// those apply to a null instance only from there.
 func (vs *ValueSet) ForbidSchema(forbidden *jsonschema.Schema) {
-	if vs.not == nil {
+	switch {
+	case vs.not == nil:
 		vs.not = forbidden
 
-		return
-	}
+	case forbidsValuesOnly(vs.not):
+		vs.allOfNots = append(vs.allOfNots, &jsonschema.Schema{Not: forbidden})
 
-	vs.allOfNots = append(vs.allOfNots,
-		&jsonschema.Schema{Not: vs.not},
-		&jsonschema.Schema{Not: forbidden},
-	)
-	vs.not = nil
+	default:
+		vs.allOfNots = append(vs.allOfNots,
+			&jsonschema.Schema{Not: vs.not},
+			&jsonschema.Schema{Not: forbidden},
+		)
+		vs.not = nil
+	}
+}
+
+// forbidsValuesOnly reports whether s forbids values and nothing else, which is
+// what makes it the not the null split needs to keep.
+func forbidsValuesOnly(s *jsonschema.Schema) bool {
+	return (s.Const != nil && constrainsConstOnly(s)) || (s.Enum != nil && constrainsEnumOnly(s))
 }
 
 // SeedNot loads an existing not subschema so a subsequent [ValueSet.Forbid] or

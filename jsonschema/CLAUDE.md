@@ -97,7 +97,12 @@ The package has two independent halves sharing the `Schema` type:
   policy (`ParseNumericBound`, `ErrNotRepresentable`), the size-bound fold
   (`ParseSizeBound`), the const/enum subsumption (`ResolveBounds` under a
   caller-chosen `ResolveMode`), and the redundant-sibling collapse
-  (`CanonicalizeNumeric`) all live here. Its scope stops at the bound algebra
+  (`CanonicalizeNumeric`) all live here. In `ValueSet` a forbidden value always
+  holds the single `not` slot and a forbidden subschema gives way to `allOf`,
+  whichever order they arrive in: the keyword table scopes `not` to the null
+  wrapper and `allOf` to the value branch, so a value forbid that lost the slot
+  would stop applying to a null instance, which is the whole of what `required`
+  asserts on a nullable field. Its scope stops at the bound algebra
   and the forbidden-value escalation: `internal/tagmodel` and `reconcile.go`
   are its two callers, and the allowed set (const/enum) is composed on each
   writer's canvas, not modeled in the package),
@@ -372,6 +377,14 @@ contract the tests enforce.
   deterministic, zero-extending `Cursor`. The phase-level rig in
   `internal/fieldset` checks the same drift one layer down, against
   `encoding/json` itself rather than through the validator.
+- Three differential rigs close the loop on one property each. The first two
+  close the loop between the package's halves. **The schema generated for a Go
+  type must accept whatever `encoding/json` marshals from a value of that
+  type.** A rejection means
+  `reflect.go`'s hand-reimplementation of `encoding/json`'s field resolution has
+  drifted, which is where past fixes cluster. Both draw their values from
+  `internal/fuzzfill`, which turns a fuzzing entropy blob into a populated value
+  through a deterministic, zero-extending `Cursor`.
   - `fuzz_reflect_test.go` (rig 1) asserts it over a hand-written roster, one
     `FuzzReflectAccepts<T>` per type. The roster keeps the classes runtime type
     construction cannot express, and so stays permanently: a promoted marshaler,
@@ -504,7 +517,7 @@ contract the tests enforce.
   of a schema, naming it through a registry rather than matching message text;
   `anyGenerationError` covers the few rejections the interpreter raises with no
   sentinel. `TestTagFixturesCrossDialectVerdictsAgree` is the data-driven form
-  of the equivalence 1f74e42 pinned: where a row spells one rule in both
+  of the equivalence 1f74e42 pinned. Where a row spells one rule in both
   dialects, the two schemas must accept and reject the same instances, which is
   a stronger statement than the schema-text identity
   `TestCrossDialectEquivalence` asserts beside it. `TestTagFixturesCoverage`
@@ -513,21 +526,23 @@ contract the tests enforce.
 - The go-playground differential rig lives in the nested
   `interpreters/validate/differentialtest` module and asserts
   `validate.Struct(v) == nil iff schema.ValidateJSON(json.Marshal(v)) == nil`.
-  Its agreement property splits on what the marshaled object carries: where
+  Its agreement property splits on what the marshaled object carries. Where
   every field is present with a non-null value the two validators must agree
-  exactly, and where encoding/json dropped a field or wrote null for one the
+  exactly, and where encoding/json drops a field or writes null for one the
   schema has nothing to assert about it and can only be the more permissive of
   the two, so the property weakens to that one-way implication.
-  A `required` field is the exception to the weakening: it is the one rule that
-  does assert something about null, so its null stays under the biconditional.
+  A `required` field is the exception to the weakening, since it is the one rule
+  that does assert something about null, so its null stays under the
+  biconditional.
   `TestWidenedDifferentialReachesStrictAgreement` guards against the weak half
   swallowing everything. The schema verdict is per object, so a sibling field
   that correctly rejects null can mask one that wrongly accepts it; the
   deterministic `TestRequiredOnNullableRejectsNull` puts each nullable
-  `required` shape in a struct of its own for that reason. `FuzzValidatorTaggedShapes` fuzzes the shape as well as
-  the value through `drawTaggedStruct`, which draws the Go kind, the pointer
+  `required` shape in a struct of its own for that reason.
+  `FuzzValidatorTaggedShapes` fuzzes the shape as well as the value through
+  `drawTaggedStruct`, which draws the Go kind, the pointer
   wrapper, the json option, and the validate rule independently. That draw
-  deliberately does not come from `internal/fuzzshape`: that package synthesizes
+  deliberately does not come from `internal/fuzzshape`, which synthesizes
   embeds, unexported fields, and colliding JSON names to probe field collection,
   which go-playground reads differently and whose `reflect.StructOf` promoted
   methods panic when called. Every case the rig does not compare is a row in
@@ -537,13 +552,13 @@ contract the tests enforce.
 - `tags_shape_oracle_test.go` holds `encoding/json` to a third property, the
   struct-tag one: **the `Form` `internal/tagmodel` classifies a field as must
   agree with the JSON `encoding/json` writes for that field.** `Form` is the
-  dispatch column of the constraint matrix, so a field in the wrong column
-  silently gets the wrong rule set applied to it, which is where five past fixes
-  cluster (db3c7b5, 679bd8b, 99ba651, 5c04089, 649a6f2, one row each). A probe
-  `TagInterpreter` registered under the `json` tag key records
+  dispatch column of the constraint matrix, so the matrix silently applies
+  the wrong rule set to a field in the wrong column, which is where five past
+  fixes cluster (db3c7b5, 679bd8b, 99ba651, 5c04089, 649a6f2, one row each). A
+  probe `TagInterpreter` registered under the `json` tag key records
   `FieldContext.Shape()` and `FieldContext.Base` for every field generation
   classifies, so the oracle reads the production classification instead of
-  recomputing one. Recomputing is not equivalent: a `json:",string"` string
+  recomputing one. Recomputing is not equivalent. A `json:",string"` string
   field and its pointer carry a quoted flag `ShapeOf` cannot see, and a pointer
   to a text-marshaling numeric or to a `$def`'d type hides its payload behind
   the nullable wrapper the `permits-a-string` and `$ref` tests read. The roster

@@ -10,8 +10,8 @@ import (
 )
 
 // The reason constants name every case this rig does not compare, so widening
-// the roster is a diff a reviewer can read rather than a doc comment they have
-// to notice. Each states a divergence the interpreter takes by design, a shape
+// the record is a diff a reviewer can read rather than a doc comment they can
+// miss. Each states a divergence the interpreter takes by design, a shape
 // go-playground itself cannot serve as a reference for, or a region where the
 // agreement property is weaker than the biconditional.
 const (
@@ -45,7 +45,7 @@ const (
 	// construction. That surface has its own corpora in internal/format.
 	reasonFormatDelegated = "format checking is go-playground's regexes against internal/format, a separate surface"
 	// The pattern tags map to a fixed regex the schema then evaluates under Go
-	// RE2, which is not the engine go-playground matched with.
+	// RE2, which is not the engine go-playground matches with.
 	reasonPatternDialect = "a pattern tag is evaluated by two different regex engines"
 	// The content tags are runtime checks over the raw bytes on one side and
 	// keywords describing an encoded string on the other, and on a raw JSON
@@ -64,7 +64,7 @@ const (
 	// object, where the schema imposes nothing unless the field is required,
 	// while go-playground still validates the Go zero value.
 	reasonOmitemptyDropsField = "an absent field leaves the schema nothing to assert, so it can only be more permissive"
-	// A JSON Schema keyword is type-conditional: minLength says nothing about a
+	// A JSON Schema keyword is type-conditional. MinLength says nothing about a
 	// null instance, so every value rule passes on one. Go-playground has no
 	// such rule and rejects a nil pointer under any constraint. The interpreter
 	// takes the schema side deliberately, landing a value constraint on the
@@ -121,14 +121,14 @@ func rigExclusions() []rigExclusion {
 			reason: reasonCoercedNumericBounds,
 		},
 		{what: "a field encoding/json dropped", reason: reasonOmitemptyDropsField},
-		{what: "a field whose instance is null", reason: reasonNullableValueRule},
+		{what: "a field whose instance is null and carries no required", reason: reasonNullableValueRule},
 	}
 }
 
 // rigCoverage is the positive half of the record: a rule the rig claims to
 // compare, and the kinds whose pool must spell it. Without it the exclusion
-// check below is one-directional, and a pool that quietly lost a rule would
-// read as covered.
+// TestRigExclusionsMatchTheDraw is one-directional, and a pool that quietly
+// lost a rule would read as covered.
 func rigCoverage() map[string][]reflect.Type {
 	scalars := []reflect.Type{
 		reflect.TypeFor[string](), reflect.TypeFor[int](),
@@ -166,7 +166,7 @@ func TestRigCoverageMatchesTheDraw(t *testing.T) {
 	}
 }
 
-// TestRigExclusionsMatchTheDraw pins the record against the draw pools: a rule
+// TestRigExclusionsMatchTheDraw pins the record against the draw pools. A rule
 // the record excludes must be absent from the pools it names, and every entry
 // must carry a reason. Without this the record is prose that can drift away
 // from what the draw does.
@@ -204,13 +204,12 @@ func TestRigExclusionsMatchTheDraw(t *testing.T) {
 
 // spells reports whether a pool entry uses the named rule, comparing the key
 // rather than the whole spelling so an entry carrying a parameter still
-// matches. A dive prefix is stripped first, since a rule after dive is the same
+// matches. It strips a dive prefix first, since a rule after dive is the same
 // rule one level down.
 func spells(spelling, rule string) bool {
 	for part := range strings.SplitSeq(spelling, ",") {
-		// A dive is stripped so the rule after it matches as the rule it is,
-		// one level down. Asking for dive itself is the one case that reads the
-		// prefix rather than skipping it.
+		// Asking for dive itself is the one case that reads the prefix rather
+		// than skipping it.
 		if part == "dive" && rule != "dive" {
 			continue
 		}

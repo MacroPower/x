@@ -62,10 +62,10 @@ func tagKinds() []tagKind {
 	scalarFloat := slices.DeleteFunc(slices.Clone(scalarNumber), func(spelling string) bool {
 		return spells(spelling, "oneof")
 	})
-	// A bool draws no oneof either. It draws no required
-	// alongside eq=false either, which the interpreter reports as a conflict;
-	// see reasonRequiredEqFalseConflict. Drawing one rule per field is what
-	// keeps that pair unreachable.
+	// A bool draws no oneof. It never draws required
+	// alongside eq=false, which the interpreter reports as a conflict; see
+	// reasonRequiredEqFalseConflict. Drawing one rule per field keeps that pair
+	// unreachable.
 	scalarBool := []string{"eq=true", "ne=false", "required"}
 	// A sequence draws no required; see reasonRequiredCollectionNilCheck.
 	sequence := []string{"min=1", "max=3", "len=2", "eq=2", "ne=2", "unique", "dive,min=2"}
@@ -93,9 +93,9 @@ func tagKinds() []tagKind {
 }
 
 // drawTaggedStruct synthesizes a struct type from an entropy blob, one field at
-// a time, drawing the kind, the pointer wrapper, the json option, and the
-// validate rule independently so the cross product is explored rather than a
-// hand-picked corner of it. It is total: every blob yields a type
+// a time. It draws the kind, the pointer wrapper, the json option, and the
+// validate rule from independent cursor reads, so the cross product is explored
+// rather than a hand-picked corner of it. It is total: every blob yields a type
 // reflect.StructOf accepts, encoding/json can marshal, and go-playground can
 // walk.
 func drawTaggedStruct(c *fuzzfill.Cursor) reflect.Type {
@@ -111,10 +111,17 @@ func drawTaggedStruct(c *fuzzfill.Cursor) reflect.Type {
 			typ = reflect.PointerTo(typ)
 		}
 
+		// Both option draws run for every kind, so the cursor advances the same
+		// distance whatever the kind is and the rule index below does not shift
+		// with the option. A non-coercible kind discards the first draw.
+		quoted, omit := c.Bool(), c.Bool()
+
 		option := ""
-		if kind.coercible && c.Bool() {
+
+		switch {
+		case kind.coercible && quoted:
 			option = ",string"
-		} else if c.Bool() {
+		case omit:
 			option = ",omitempty"
 		}
 
