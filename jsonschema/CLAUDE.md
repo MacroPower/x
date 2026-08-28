@@ -360,13 +360,15 @@ contract the tests enforce.
 - `conformance_test.go` validates generated schemas against the official
   metaschemas vendored in `testdata/metaschemas/`, using this package's own
   validator and a `RefResolver` for the metaschema's vocabulary sub-schemas.
-- Two differential fuzz rigs close the loop between the package's halves on one
-  property: **the schema generated for a Go type must accept whatever
-  `encoding/json` marshals from a value of that type.** A rejection means
-  `reflect.go`'s hand-reimplementation of `encoding/json`'s field resolution has
-  drifted, which is where past fixes cluster. Both draw their values from
-  `internal/fuzzfill`, which turns a fuzzing entropy blob into a populated value
-  through a deterministic, zero-extending `Cursor`.
+- `encoding/json` parity is checked at two altitudes. Two schema-level
+  differential rigs close the loop between the package's halves on one property:
+  **the schema generated for a Go type must accept whatever `encoding/json`
+  marshals from a value of that type.** A rejection means the reimplementation of
+  `encoding/json`'s field resolution has drifted, which is where past fixes
+  cluster. Both draw their values from `internal/fuzzfill`, which turns a fuzzing
+  entropy blob into a populated value through a deterministic, zero-extending
+  `Cursor`. The phase-level rig in `internal/fieldset` checks the same drift one
+  layer down, against `encoding/json` itself rather than through the validator.
   - `fuzz_reflect_test.go` (rig 1) asserts it over a hand-written roster, one
     `FuzzReflectAccepts<T>` per type. The roster keeps the classes runtime type
     construction cannot express, and so stays permanently: a promoted marshaler,
@@ -391,6 +393,22 @@ contract the tests enforce.
     `reasonStructOfPromotion` live in `fuzz_shape_test.go` with the rig. The
     `StructOf` limitation is a property of the harness, not of the package, and
     deliberately does not appear in `doc.go` or `README.md`.
+  - The phase-level rig (`internal/fieldset/fieldset_test.go`, in-package on the
+    `internal/schemafield` precedent) asserts two properties over a hand-written
+    embed and tag roster and over every `internal/fuzzshape` shape, each crossed
+    with a set of composed-embed predicates. **Key-set parity**: the names the
+    phases resolve are exactly the keys `encoding/json` marshals, and the value
+    under each key is what the winning field marshals to, so a wrong dominance
+    verdict fails even when the name set is unchanged. Its three reason
+    constants, each pinned by a guard test, are `reasonPromotedMarshaler` (the
+    marshaler replaces the object, so the resolved fields describe nothing in the
+    output), `reasonMarshalFailed`, and `reasonNotObject`. **Composition
+    invariance**: composing an embed rather than promoting it moves a name
+    between the emitted properties and the ghost-won list without changing the
+    set. That one needs no guards, so it covers the types key-set parity skips.
+    Both properties owe their reach to the injected `ComposedFunc`: composition
+    is a provider decision, and `internal/fuzzshape`'s pools are provider-free,
+    so a synthesized shape reaches the ghost machinery here and nowhere else.
   - `task go:fuzz` searches for new counterexamples; the seed corpora run on
     every `go test`. A discovered counterexample is committed under
     `testdata/fuzz/<Target>/` as a permanent regression seed before the fix.

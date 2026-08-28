@@ -195,6 +195,14 @@ type Result struct {
 // shadow marking needs. It is the entry point, and the one place the in-flight
 // guard is taken, so the guard spans the recursion whichever phase reaches it.
 func (c *Collector) Of(t reflect.Type) Result {
+	_, _, out := c.phases(t)
+
+	return out
+}
+
+// phases runs the pipeline and returns every phase's output, so a test can
+// assert against an intermediate one under the same in-flight guard Of takes.
+func (c *Collector) phases(t reflect.Type) (Collection, Resolution, Result) {
 	// Mark t in-progress so the ghost recursion below terminates on a self- or
 	// mutually composed cycle instead of recursing without bound.
 	if owned := !c.inFlight[t]; owned {
@@ -205,7 +213,7 @@ func (c *Collector) Of(t reflect.Type) Result {
 	col := c.Collect(t)
 	res := Resolve(col)
 
-	return Classify(res, c.promoted(col))
+	return col, res, Classify(res, c.promoted(col))
 }
 
 // promoted resolves each composed embed type the walk scanned, giving the
