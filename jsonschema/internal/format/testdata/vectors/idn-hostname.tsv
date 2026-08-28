@@ -1,0 +1,86 @@
+# idn-hostname acceptance vectors.
+#
+# Source: curated from RFC 5890/5891 (IDNA2008) example text and the UTS-46
+# lookup profile as implemented by golang.org/x/net/idna (idna.Lookup), which
+# the idn-hostname validator delegates to. Pinned to golang.org/x/net v0.56.0
+# (jsonschema/go.mod), the same module the validator compiles against.
+#
+# This is a curated subset, not the full Unicode IdnaTestV2.txt corpus.
+# IdnaTestV2.txt records per-row toUnicode/toASCII outputs and status codes for
+# both the transitional and non-transitional profiles; reducing those columns to
+# one accept/reject for this validator needs its own mapping logic. The
+# validator also layers RFC 5890/5891 structure on top of the idna.Lookup pass:
+# label and total-length limits, the RFC 1123 numeric-TLD ban, and the
+# trailing-dot and empty-label rules, none of which the corpus's raw conversion
+# status captures. These vectors lock the accept/reject boundary the validator
+# actually implements; consuming the full corpus would be a separate rig.
+#
+# That corpus stays out deliberately, not for lack of a reason to want it. At
+# 665 KB and roughly 6000 rows it would be the largest fixture in the module,
+# golang.org/x/net/idna ships no conformance test against it, so every
+# divergence would be ours to discover and own, and the reduction above needs
+# mapping logic the validator's RFC 5891 layer does not mirror. What it would
+# buy is the one thing FuzzFormatIDNHostnameVsIDNA cannot: that differential
+# asserts the RFC 5890/5891 layer is the only thing narrowing idna.Lookup, not
+# that either of them gives the right answer.
+#
+# Format: three tab-separated fields, "<input>"\t<valid>\t<note>. The input is a
+# Go quoted string literal in the spelling strconv.Quote produces, so printable
+# non-ASCII stays literal and everything else is an escape. '#' lines and blank
+# lines are skipped.
+#
+"example.com"	true	an ASCII name passes through unchanged
+"a.b.c"	true	three single-character labels
+"xn--fsq.jp"	true	an A-label that decodes to a valid U-label
+"münchen.de"	true	RFC 5890 §2.3.2.1 U-label
+"例え.jp"	true	Han and Hiragana U-label
+"αβγ.gr"	true	Greek U-label
+"example.com."	true	the DNS root dot on a multi-label FQDN
+"föö.example"	true	two mapped Latin characters in one label
+"-bad.example"	false	RFC 5891 §4.2.3.1 bans a leading hyphen
+"bad-.example"	false	RFC 5891 §4.2.3.1 bans a trailing hyphen
+"xn--"	false	the ACE prefix with no Punycode payload
+"123"	false	RFC 1123 §2.1 numeric top-level label
+"a..b"	false	an empty interior label
+#
+# RFC 5892 Appendix A contextual rules. A.1 ZWNJ and A.2 ZWJ (CONTEXTJ) are
+# permitted only after a Virama; the rest are CONTEXTO rules on the surrounding
+# characters.
+#
+"a‌b.example"	false	A.1 ZWNJ between two Latin letters
+"क्‌ष.example"	true	A.1 ZWNJ after a Devanagari Virama
+"a‍b.example"	false	A.2 ZWJ between two Latin letters
+"क्‍ष.example"	true	A.2 ZWJ after a Devanagari Virama
+"l·l.example"	true	A.3 MIDDLE DOT between two 'l'
+"a·b.example"	false	A.3 MIDDLE DOT elsewhere
+"α͵β.example"	true	A.4 GREEK KERAIA before a Greek character
+"α͵b.example"	false	A.4 GREEK KERAIA before a non-Greek character
+"א׳.example"	true	A.5 HEBREW GERESH after a Hebrew character
+"a׳.example"	false	A.5 HEBREW GERESH after a non-Hebrew character
+"א״.example"	true	A.6 HEBREW GERSHAYIM after a Hebrew character
+"a״.example"	false	A.6 HEBREW GERSHAYIM after a non-Hebrew character
+"ア・ア.example"	true	A.7 KATAKANA MIDDLE DOT in a Katakana label
+"ab・cd.example"	false	A.7 KATAKANA MIDDLE DOT in a Latin label
+"۱۲.example"	true	A.9 EXTENDED ARABIC-INDIC DIGITS stand alone; Bidi class EN leaves the label LTR
+"١٢٣.example"	false	A.8 ARABIC-INDIC DIGITS carry Bidi class AN, and RFC 5893 §2 rule 1 wants L, R, or AL first
+#
+# RFC 5893 §2 Bidi Rule. A domain name with any RTL label is a Bidi domain name
+# and every label in it must satisfy the rule.
+#
+"אב.example"	true	rules 1 and 3: an RTL label opening and closing on Hebrew
+"אa.example"	false	rule 2: an RTL label may not carry a character of Bidi class L
+"א1.example"	true	rules 3 and 4: an RTL label may close on EN
+"א١.example"	true	rules 3 and 4: an RTL label may close on AN
+#
+# RFC 5892 exception characters, DISALLOWED regardless of context.
+#
+"ـ.example"	false	U+0640 ARABIC TATWEEL
+"〱.example"	false	U+3031 VERTICAL KANA REPEAT MARK
+#
+# RFC 5890 §2.3.2.2 reserved-LDH: a label with a hyphen in positions 3 and 4 is
+# reserved and invalid for IDNA. This is a documented deviation from the plain
+# hostname format, which accepts the same label under RFC 1123 §2.1; the
+# containment invariant hostname implies idn-hostname is false because of it and
+# is deliberately not asserted.
+#
+"ab--cd.com"	false	reserved-LDH, which the hostname format accepts

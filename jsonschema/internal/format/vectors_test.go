@@ -3,6 +3,8 @@ package format_test
 import (
 	"bufio"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -15,9 +17,11 @@ import (
 // from the RFCs' own example text. They complement the robustness fuzz (layer 1)
 // and the stdlib differentials (layer 2), and sit alongside the official JSON
 // Schema Test Suite's optional/format cases, which already run via
-// TestSuiteFormat. The suite already carries every RFC 6901 §5 pointer example
-// and RFC 3339's leap second, so those are not re-transcribed here; only the
-// gaps it leaves are.
+// TestSuiteFormat. Each vector file names the suite file it complements and
+// carries only what that file leaves open, so RFC 3339's leap second and the RFC
+// 6901 §5 pointer examples are not re-transcribed. Those §5 examples are all
+// valid, though, which leaves the json-pointer escape boundary open, and that
+// gap does get vectors.
 //
 // One accepted coverage gap: iri and iri-reference get only the one-way
 // containment from uri and uri-reference (containment_test.go) plus the narrow
@@ -288,17 +292,48 @@ func TestHostnameVectors(t *testing.T) {
 	})
 }
 
-// TestIDNHostnameVectors checks the idn-hostname format against the vendored
-// vector file, which pins the RFC 5890/5891 label structure the validator
-// enforces over golang.org/x/net/idna.
-func TestIDNHostnameVectors(t *testing.T) {
+// vectorDir holds one acceptance-vector file per format, each file named for
+// the format it covers.
+const vectorDir = "testdata/vectors"
+
+// TestFormatVectors runs every vector file under testdata/vectors through the
+// validator its basename names. Adding a file adds a test with no Go edit. A
+// basename that names no registered format fails inside runFormatVectors, so a
+// renamed format cannot leave an orphaned file sitting unexercised.
+func TestFormatVectors(t *testing.T) {
 	t.Parallel()
 
-	runFormatVectors(t, "idn-hostname", loadVectorFile(t, "testdata/idn_hostname_vectors.tsv"))
+	entries, err := os.ReadDir(vectorDir)
+	require.NoError(t, err, "read vector directory %s", vectorDir)
+
+	for _, entry := range entries {
+		name, ok := strings.CutSuffix(entry.Name(), ".tsv")
+		require.True(t, ok, "vector file %s must carry the .tsv extension", entry.Name())
+
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			runFormatVectors(t, name, loadVectorFile(t, filepath.Join(vectorDir, entry.Name())))
+		})
+	}
 }
 
-// loadVectorFile reads a tab-separated <input>\t<valid> acceptance-vector file,
-// skipping blank and '#' comment lines. The case name is the input itself.
+// loadVectorFile reads an acceptance-vector file: three tab-separated fields per
+// row, "<input>", <valid>, <note>, with '#' comment lines and blank lines
+// skipped. The map is keyed by the raw quoted field, which is printable by
+// construction and unique once a duplicate fails the load, so it names the
+// subtest without mangling an invisible character.
+//
+// The input is a Go quoted string literal, which is what lets a row carry the
+// empty string, a tab, an invisible joiner, or a lone invalid UTF-8 byte. Write
+// it in the spelling strconv.Quote produces: printable non-ASCII stays literal,
+// so "münchen.de" is the intended form rather than "m\u00fcnchen.de".
+//
+// Every field is mandatory. A note that rots to empty, a validity column that
+// reads neither "true" nor "false", and an input that repeats an earlier row all
+// fail the load, because each of the three would otherwise degrade a row into a
+// weaker test that still passes. The note documents the row for whoever reads
+// the file; the failure messages identify a row by its input.
 func loadVectorFile(t *testing.T, path string) map[string]formatVector {
 	t.Helper()
 
@@ -306,21 +341,38 @@ func loadVectorFile(t *testing.T, path string) map[string]formatVector {
 	require.NoError(t, err, "read vector file %s", path)
 
 	cases := make(map[string]formatVector)
+	seen := make(map[string]int)
 
 	scanner := bufio.NewScanner(strings.NewReader(string(data)))
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line == "" || strings.HasPrefix(line, "#") {
+
+	for line := 1; scanner.Scan(); line++ {
+		text := scanner.Text()
+		if text == "" || strings.HasPrefix(text, "#") {
 			continue
 		}
 
-		input, validText, ok := strings.Cut(line, "\t")
-		require.True(t, ok, "vector line missing tab separator: %q", line)
+		fields := strings.SplitN(text, "\t", 3)
+		require.Len(t, fields, 3, "%s:%d: want three tab-separated fields in %q", path, line, text)
 
-		cases[input] = formatVector{instance: input, valid: validText == "true"}
+		quoted, validText, note := fields[0], fields[1], fields[2]
+		require.NotEmpty(t, note, "%s:%d: the note field is mandatory", path, line)
+
+		input, err := strconv.Unquote(quoted)
+		require.NoError(t, err, "%s:%d: input %s is not a Go quoted string", path, line, quoted)
+
+		require.Contains(t, []string{"true", "false"}, validText,
+			"%s:%d: validity must be true or false", path, line)
+
+		prior, duplicate := seen[input]
+		require.False(t, duplicate, "%s:%d: input %s repeats the row on line %d", path, line, quoted, prior)
+
+		seen[input] = line
+
+		cases[quoted] = formatVector{instance: input, valid: validText == "true"}
 	}
 
 	require.NoError(t, scanner.Err(), "scan vector file %s", path)
+	require.NotEmpty(t, cases, "vector file %s carries no rows", path)
 
 	return cases
 }
