@@ -1,0 +1,26 @@
+# json-pointer acceptance vectors, from RFC 6901 §3.
+#
+# The official suite's optional/format/json-pointer.json runs RFC 6901 §5's own
+# examples, so those are not re-transcribed. Every §5 example is a valid
+# pointer, though, which leaves the escape rule's rejecting side untested, and
+# that rule is the whole of what this validator checks beyond the leading
+# solidus: a '~' must be followed by '0' or '1'.
+#
+# Format: three tab-separated fields, "<input>"\t<valid>\t<note>. The input is a
+# Go quoted string literal in the spelling strconv.Quote produces. '#' lines and
+# blank lines are skipped.
+#
+""	true	the empty pointer names the whole document
+"/"	true	one empty member name
+"//"	true	two empty member names
+"/foo"	true	one member name
+"/a~0b"	true	~0 escapes a tilde
+"/a~1b"	true	~1 escapes a solidus
+"/~01"	true	~0 then a literal '1', which spells the member name ~1
+"/~00"	true	~0 then a literal '0'
+"/a%2Fb"	true	%2F is an ordinary member-name character, not an escape
+"a"	false	a non-empty pointer must begin with a solidus
+"~0"	false	an escape does not stand in for the leading solidus
+"/~"	false	a trailing tilde escapes nothing
+"/~2"	false	~2 names no escape
+"/a~"	false	a tilde at the end of a member name escapes nothing

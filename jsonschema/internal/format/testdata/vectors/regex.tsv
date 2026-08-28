@@ -19,3 +19,14 @@
 "["	false	an unterminated class
 "[]"	true	the empty class
 "\\"	false	a trailing backslash
+#
+# ECMA-262 22.2.1 defines CharacterClass as '[' [lookahead != ^] ClassContents
+# ']' with ClassContents permitted to be empty, and ClassAtomNoDash excludes an
+# unescaped ']', so the first unescaped ']' always closes the class. 6c3c47a
+# read the POSIX bracket expression instead and rejected the empty class;
+# fdbad66 restored it. These rows are why the question does not reopen.
+#
+"[^]"	true	the negated empty class, a common any-character idiom (6c3c47a, then fdbad66)
+"[]]"	true	an empty class followed by a literal ']' (6c3c47a, then fdbad66)
+"[a"	false	a class with a member and no terminator is genuinely unterminated
+"[^"	false	a negated class with no terminator is genuinely unterminated

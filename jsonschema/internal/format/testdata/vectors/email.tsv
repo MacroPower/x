@@ -16,3 +16,11 @@
 "@example.com"	false	an empty local part
 "user@"	false	an empty domain
 "user@@example.com"	false	a double at sign
+#
+# RFC 5321 Quoted-string = DQUOTE *QcontentSMTP DQUOTE permits zero content
+# characters, and both drafts define the format by grammar conformance rather
+# than by deliverability. e9372c3 rejected the empty quoted local part and
+# 16d9020 restored it; this row is why the question does not reopen.
+#
+"\"\"@example.com"	true	the empty quoted local part (e9372c3, then 16d9020)
+"\"@example.com"	false	an unterminated quoted local part stays malformed

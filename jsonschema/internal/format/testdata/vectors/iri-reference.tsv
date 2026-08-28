@@ -1,0 +1,20 @@
+# iri-reference acceptance vectors, from the RFC 3987 example text.
+#
+# RFC 3987 §2.2 derives the IRI grammar from RFC 3986's by widening iunreserved
+# and the ipchar family with ucschar. The code-point boundaries of those sets
+# are covered by format_iri_ucschar_test.go and TestIRIRejectsC1Controls; these
+# rows are the RFC's own example IRIs, which the official suite's
+# optional/format/iri-reference.json does not carry.
+#
+# Format: three tab-separated fields, "<input>"\t<valid>\t<note>. The input is a
+# Go quoted string literal in the spelling strconv.Quote produces. '#' lines and
+# blank lines are skipped.
+#
+"http://résumé.example.org"	true	an absolute IRI is an IRI-reference
+"//résumé.example.org"	true	network-path reference
+"/rosé"	true	absolute-path reference
+"../rosé"	true	relative-path reference
+"#rosé"	true	fragment-only reference
+"?q=résumé"	true	query-only reference
+""	true	the empty reference resolves to the base
+"http://exa mple.org/rosé"	false	a space is forbidden

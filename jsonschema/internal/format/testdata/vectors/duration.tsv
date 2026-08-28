@@ -20,3 +20,15 @@
 "PT"	false	T with no time component
 "P1Y2D"	false	dur-year = 1*DIGIT "Y" [dur-month], so year to day skips a link
 "P1W2D"	false	dur-week is an alternative to dur-date, not a prefix of it
+#
+# The week alternative and the two same-letter designators, which the
+# official suite reaches only through P1Y2W.
+#
+"P1WT1H"	false	duration = "P" (dur-date / dur-time / dur-week), so dur-week admits no time
+"P2D1W"	false	weeks do not combine with days in either order
+"P1M"	true	dur-month: M outside dur-time counts months
+"PT1M"	true	dur-minute: the same letter inside dur-time counts minutes
+"PT1H1M1S"	true	the full dur-time chain
+"P1YT1H"	true	dur-date followed by dur-time
+"PT1H1S"	false	dur-hour = 1*DIGIT "H" [dur-minute], so hour to second skips a link
+"P٣Y"	false	1*DIGIT is ASCII; these are Arabic-Indic digits

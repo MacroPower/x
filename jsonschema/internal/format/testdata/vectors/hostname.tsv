@@ -20,3 +20,34 @@
 "example."	false	a bare trailing dot on a single label
 "a..b"	false	an empty interior label
 "xn--"	false	the ACE prefix with no Punycode payload
+#
+# RFC 1034 §3.5 and RFC 1123 §2.1 example names.
+#
+"A.ISI.EDU"	true	RFC 1034 §3.5 example; an LDH label is case-insensitive
+"XX.LCS.MIT.EDU"	true	RFC 1034 §3.5 example
+"3com.com"	true	RFC 1123 §2.1 relaxes RFC 952 to permit a leading digit
+"9.example"	true	a numeric label below the top level is fine
+"example.123"	false	RFC 1123 §2.1 bans an all-numeric top-level label
+"1.2.3.4"	false	an IPv4 address reads as a numeric top-level label
+"a_b.com"	false	an underscore is not an LDH character
+".com"	false	an empty first label
+""	false	the empty name
+#
+# RFC 5890 §2.3.2.2 reserved-LDH. This is the documented deviation: the
+# hostname format reads RFC 1123 §2.1, which permits the label, while
+# idn-hostname rejects the same label per IDNA. See b4d0fae, which stopped
+# forcing every positions-3-and-4 double hyphen through Punycode decoding.
+#
+"ab--cd.com"	true	reserved-LDH under IDNA, an ordinary RFC 1123 label here (b4d0fae)
+"te--st.example.com"	true	the same shape below the top level (b4d0fae)
+"xn--bcher-kva.example.com"	true	a genuine A-label still decodes as Punycode
+"xn--a.com"	false	the ACE prefix demands valid Punycode
+"XN--aa---o47jg78q.com"	false	RFC 5890 §2.3.2.1 matches the ACE prefix without regard to case
+#
+# The RFC 1035 §2.3.4 253-octet name cap. The DNS root dot does not count
+# toward it, which is why the 253-octet name stays valid with one appended
+# (f4a7b23 moved the measurement after the trim).
+#
+"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"	true	253 octets, at the cap
+"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"	false	254 octets, one past the cap
+"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa."	true	253 octets plus the root dot, 254 characters (f4a7b23)

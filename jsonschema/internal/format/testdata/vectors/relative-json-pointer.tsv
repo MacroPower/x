@@ -1,0 +1,40 @@
+# relative-json-pointer acceptance vectors, from
+# draft-handrews-relative-json-pointer, the draft the validator implements.
+#
+# relative-json-pointer = non-negative-integer ( "#" / json-pointer ), so the
+# pointer half is RFC 6901's production verbatim. The official suite's
+# optional/format/relative-json-pointer.json carries 18 cases covering the
+# integer prefix, the leading-zero ban, and a bare "#"; it reaches none of the
+# RFC 6901 escape rule that the pointer half inherits.
+#
+# Format: three tab-separated fields, "<input>"\t<valid>\t<note>. The input is a
+# Go quoted string literal in the spelling strconv.Quote produces. '#' lines and
+# blank lines are skipped.
+#
+"0"	true	the smallest non-negative-integer
+"10"	true	a multi-digit prefix without a leading zero
+"1/0"	true	draft §5.1 example, evaluating to "bar"
+"2/highly/nested/objects"	true	draft §5.1 example, evaluating to true
+"1#"	true	the index form after a non-zero prefix
+#
+# The RFC 6901 escape rule the pointer half inherits.
+#
+"0/~0"	true	~0 escapes a tilde in the member name
+"0/~1"	true	~1 escapes a solidus in the member name
+"1/~2"	false	~2 names no escape
+"1/~"	false	a trailing tilde escapes nothing
+"0/a%2Fb"	true	%2F is an ordinary member-name character, since RFC 6901 spells a solidus ~1 (cfea10e, 9dd7528)
+#
+# The '#' terminates the pointer; nothing follows it.
+#
+"1#/a"	false	a pointer cannot follow the index form
+"1#foo"	false	text cannot follow the index form
+"0foo"	false	the prefix must be followed by '#' or a pointer
+#
+# The index-manipulation production. draft-bhutton-relative-json-pointer-00
+# §3 adds ( "+" / "-" ) non-negative-integer between the prefix and the
+# pointer; draft-handrews, which this validator implements and which both
+# supported drafts of the specification cite, has no such production.
+#
+"0-1"	false	index manipulation belongs to the later draft
+"0+1"	false	index manipulation belongs to the later draft
