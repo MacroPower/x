@@ -4,6 +4,7 @@ import (
 	"net/mail"
 	"net/netip"
 	"net/url"
+	"regexp"
 	"regexp/syntax"
 	"strings"
 	"testing"
@@ -400,7 +401,7 @@ func emailCarveOut(s string) bool {
 // rule, and the RFC 5892 contextual-rule pass. This is narrower than importing
 // Unicode's IdnaTestV2.txt, which would test whether that layer gives the right
 // answer rather than that it is the only narrowing; see the note in
-// testdata/idn_hostname_vectors.tsv.
+// testdata/vectors/idn-hostname.tsv.
 func FuzzFormatIDNHostnameVsIDNA(f *testing.F) {
 	fn := validator(f, "idn-hostname")
 
@@ -610,4 +611,155 @@ func addIPSeeds(f *testing.F) {
 	} {
 		f.Add(seed)
 	}
+}
+
+// FuzzFormatUUIDVsGrammar differentials the uuid validator against a regular
+// expression transcribing the same canonical form. The oracle is not a second
+// specification: both sides read RFC 9562 §4's 8-4-4-4-12 hex grammar, and what
+// the target buys is that they arrive at it by different means. The validator
+// walks fixed byte offsets and switches on the four hyphen positions, an
+// arithmetic that an off-by-one would move silently; the expression states the
+// field widths outright. Agreement is two-way, since neither side is looser
+// than the other, and no carve-out exists.
+func FuzzFormatUUIDVsGrammar(f *testing.F) {
+	fn := validator(f, "uuid")
+
+	for _, seed := range []string{
+		"f47ac10b-58cc-4372-a567-0e02b2c3d479", "F47AC10B-58CC-4372-A567-0E02B2C3D479",
+		"00000000-0000-0000-0000-000000000000", "f47ac10b-58cc4-372-a567-0e02b2c3d479",
+		"f47ac10b58cc4372a5670e02b2c3d479", "g47ac10b-58cc-4372-a567-0e02b2c3d479",
+		"urn:uuid:f47ac10b-58cc-4372-a567-0e02b2c3d479", "f47ac10b-58cc", "",
+	} {
+		f.Add(seed)
+	}
+
+	f.Fuzz(func(t *testing.T, s string) {
+		sutValid := fn(s) == nil
+
+		oracleValid := uuidGrammar.MatchString(s)
+		if sutValid == oracleValid {
+			return
+		}
+
+		t.Fatalf("uuid disagrees with the RFC 9562 §4 grammar on %q: sut=%v oracle=%v", s, sutValid, oracleValid)
+	})
+}
+
+// FuzzFormatDurationVsABNF differentials the duration validator against a
+// regular expression transcribing the RFC 3339 Appendix A grammar. As with the
+// uuid target the oracle is an independent transcription of the same ABNF
+// rather than a second specification, and what it buys is that the two reach
+// the grammar differently. The validator walks the string once and enforces the
+// nesting through an order index and a last-seen comparison, so the chain rules
+// (dur-year = 1*DIGIT "Y" [dur-month], dur-hour = 1*DIGIT "H" [dur-minute]) and
+// the standalone dur-week are arithmetic there and structure here. Agreement is
+// two-way, and no carve-out exists.
+func FuzzFormatDurationVsABNF(f *testing.F) {
+	fn := validator(f, "duration")
+
+	for _, seed := range []string{
+		"P1Y2M3DT4H5M6S", "P1Y", "P1W", "PT1H", "P0D", "P1YT1H", "PT1H1M1S",
+		"P1Y2D", "PT1H1S", "P1W2D", "P1WT1H", "P1M", "PT1M", "PT0.5S", "PTT1H",
+		"P1YT", "1Y", "P", "PT", "p1y", "",
+	} {
+		f.Add(seed)
+	}
+
+	f.Fuzz(func(t *testing.T, s string) {
+		sutValid := fn(s) == nil
+
+		oracleValid := durationABNF.MatchString(s)
+		if sutValid == oracleValid {
+			return
+		}
+
+		t.Fatalf("duration disagrees with the RFC 3339 Appendix A grammar on %q: sut=%v oracle=%v",
+			s, sutValid, oracleValid)
+	})
+}
+
+const (
+	// The RFC 3339 Appendix A dur-time production: "T" followed by dur-hour,
+	// dur-minute, or dur-second, each optionally carrying the next link of the
+	// chain.
+	durTimeABNF = `T(?:[0-9]+H(?:[0-9]+M(?:[0-9]+S)?)?|[0-9]+M(?:[0-9]+S)?|[0-9]+S)`
+
+	// The dur-day / dur-month / dur-year alternation dur-date opens with, each
+	// again optionally carrying the next link.
+	durDateABNF = `(?:[0-9]+D|[0-9]+M(?:[0-9]+D)?|[0-9]+Y(?:[0-9]+M(?:[0-9]+D)?)?)`
+)
+
+var (
+	// The RFC 9562 §4 canonical textual representation: four hyphens at fixed
+	// places and hex digits of either case elsewhere.
+	uuidGrammar = regexp.MustCompile(
+		`\A[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\z`,
+	)
+
+	// The RFC 3339 Appendix A duration production: "P" followed by a dur-date
+	// with an optional dur-time, a bare dur-time, or a standalone dur-week.
+	// 1*DIGIT is ASCII, which is what [0-9] rather than \d states.
+	durationABNF = regexp.MustCompile(
+		`\AP(?:` + durDateABNF + `(?:` + durTimeABNF + `)?|` + durTimeABNF + `|[0-9]+W)\z`,
+	)
+)
+
+// FuzzFormatHostnameVsIDNA differentials the hostname validator against
+// golang.org/x/net/idna in one direction: if idna.Lookup leaves an all-ASCII
+// name completely unchanged and the name trips none of the checks
+// idnaAcceptsHostname already models, hostname must accept it. The converse is
+// false by design and must not be asserted, since hostname accepts the
+// reserved-LDH label idna.Lookup rejects.
+//
+// The reserved-LDH deviation needs no carve-out of its own: idna.Lookup sets
+// checkHyphens, so the oracle simply never fires on "ab--cd". The other checks
+// hostname layers on -- the numeric-TLD ban, the empty-label and trailing-dot
+// rules, and the octet caps -- are the ones idnaAcceptsHostname already folds
+// in for the idn-hostname target, so this target restates none of them.
+//
+// The yield is modest and worth stating plainly. Behind the ASCII-unchanged
+// guard the oracle reduces to "LDH labels with no edge hyphen and no hyphen in
+// positions 3 and 4", which is isLDHLabel minus the deviation, so this is a
+// fence against a future rewrite of the label scan rather than an engine for
+// finding new cases. It also never sees an uppercase name, since the lookup
+// mapping lowercases and the unchanged guard then skips.
+func FuzzFormatHostnameVsIDNA(f *testing.F) {
+	fn := validator(f, "hostname")
+
+	for _, seed := range []string{
+		"example.com", "a.b.c", "3com.com", "a", "foo-bar.example", "ab--cd.com",
+		"xn--fsq.jp", "-bad.example", "bad-.example", "a..b", "example.com.",
+		"123", "a_b.com", "example.123", "",
+	} {
+		f.Add(seed)
+	}
+
+	f.Fuzz(func(t *testing.T, s string) {
+		if !isASCIITest(s) || !idnaAcceptsHostname(s) {
+			return
+		}
+
+		ascii, err := idna.Lookup.ToASCII(s)
+		if err != nil || ascii != s {
+			return
+		}
+
+		err = fn(s)
+		if err != nil {
+			t.Fatalf("idna.Lookup leaves the ASCII name %q unchanged but hostname rejects it: %v", s, err)
+		}
+	})
+}
+
+// isASCIITest reports whether s holds only ASCII bytes, mirroring isASCII. A
+// name idna.Lookup maps or converts is not one the hostname format is being
+// compared on, and this is the cheap half of that guard.
+func isASCIITest(s string) bool {
+	for i := range len(s) {
+		if s[i] >= utf8.RuneSelf {
+			return false
+		}
+	}
+
+	return true
 }
