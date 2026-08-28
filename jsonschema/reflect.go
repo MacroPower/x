@@ -129,8 +129,8 @@ func (g *generator) forRun(ctx context.Context) *generator {
 	run.visiting = map[reflect.Type]bool{}
 	run.refAliasing = map[reflect.Type]bool{}
 
-	// Bound to run, not to the prototype: needsAllOfComposition reads the
-	// per-run context and type-override cache.
+	// Bind to run rather than the prototype, since needsAllOfComposition reads
+	// the per-run context and type-override cache.
 	run.fields = fieldset.NewCollector(run.needsAllOfComposition)
 
 	return &run

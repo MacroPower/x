@@ -1,20 +1,20 @@
-// Package fieldset resolves which JSON names a Go struct type marshals, in the
-// three phases [encoding/json]'s field collection uses: a breadth-first walk
-// that records every sighting of a name, a dominance pass that picks one winner
-// per name, and a classification pass that turns each winner into a property,
-// an allOf-composed embed, or a ghost.
+// Package fieldset resolves which JSON names a Go struct type marshals, in
+// three phases. Two mirror [encoding/json]'s field collection: a breadth-first
+// walk that records every sighting of a name, and a dominance pass that picks
+// one winner per name. The third is this package's own, classifying each winner
+// as a property, an allOf-composed embed, or a ghost.
 //
 // The caller injects composition detection as a [ComposedFunc], so the package
 // reflects over a type without depending on schema generation. A composed embed
 // still promotes its fields as far as [encoding/json] is concerned, so its
-// subtree joins the walk as a ghost subtree: those names compete in resolution,
+// subtree joins the walk as a ghost subtree. Those names compete in resolution,
 // and a winning ghost becomes no property, because the embed's allOf branch
 // carries its assertion.
 //
 // Splitting the phases is what lets a test compare one of them against
 // [encoding/json] directly. [Resolve] and [Classify] are pure functions of their
-// inputs; [Collector.Collect] is the only phase that consults the callback or
-// recurses.
+// inputs. [Collector.Collect] is the only phase that consults the callback, and
+// [Collector.Of] recurses into each composed embed the shadow marking needs.
 package fieldset
 
 import (
@@ -32,9 +32,9 @@ import (
 // [Collector.Collect] calls it only for an embedded field whose type is a
 // struct, and only outside a ghost subtree, since [encoding/json] knows nothing
 // of composition and promotes a nested embed's fields like any other. It must
-// be deterministic and idempotent per type: the package memoizes nothing, so a
-// callback that answers differently across calls, or that reports an error
-// through its answer, must do its own caching.
+// be deterministic and idempotent per type, because the package memoizes
+// nothing. A callback that answers differently across calls, or that reports an
+// error through its answer, does its own caching.
 type ComposedFunc func(reflect.Type) bool
 
 // Collector runs the three phases over a type. It carries the in-flight set
@@ -56,7 +56,7 @@ func NewCollector(composed ComposedFunc) *Collector {
 // Field order is tuned for struct packing (govet fieldalignment).
 type Sighting struct {
 	// GhostOwner names the composed embed type a ghost sighting belongs to;
-	// see the Ghost flag below.
+	// see [Sighting.Ghost].
 	GhostOwner reflect.Type
 	// Name is the key the sighting was recorded under: the field's JSON name,
 	// or the synthetic composition key when ComposeAllOf is set.
@@ -85,8 +85,8 @@ type Sighting struct {
 	// Ghost marks a sighting of a composed embed's promoted JSON name.
 	// [encoding/json] promotes those fields normally, so they compete in name
 	// resolution (shadowing deeper real fields, annihilating on ties), but a
-	// winning ghost never becomes a property: the embed's allOf branch carries
-	// its assertion.
+	// winning ghost never becomes a property, because the embed's allOf branch
+	// carries its assertion.
 	Ghost bool
 }
 
@@ -97,15 +97,18 @@ type Sighting struct {
 //
 // Field order is tuned for struct packing (govet fieldalignment).
 type Key struct {
-	Name         string
+	// Name is the JSON name, or the synthetic composition key.
+	Name string
+	// ComposeAllOf distinguishes the two namespaces.
 	ComposeAllOf bool
 }
 
 // Collection is the breadth-first walk's output.
 type Collection struct {
-	// Order lists each key in the order the walk first sighted it. It is
-	// load-bearing: [Classify] emits [Result.GhostWon] in this order, and the
-	// generator appends those names to the object's property order.
+	// Order lists each key in the order the walk first sighted it, which is
+	// load-bearing. [Resolve] orders [Resolution.Winners] by it and [Classify]
+	// carries that order into [Result.GhostWon], which the caller appends to
+	// the object's property order.
 	Order []Key
 	// ByName holds every sighting of each key, in walk order. A type embedded
 	// more than once at one depth contributes each of its fields twice, so the
@@ -113,7 +116,7 @@ type Collection struct {
 	ByName map[Key][]Sighting
 	// Scanned lists the composed embed types whose promoted fields the shadow
 	// marking needs, deduplicated and in walk order. A type already in flight
-	// is absent: its subtree is a self- or mutually composed cycle, and
+	// is absent, since its subtree is a self- or mutually composed cycle;
 	// [Classify] leaves such an embed's branch unconditional.
 	Scanned []reflect.Type
 }
@@ -123,14 +126,15 @@ type Resolution struct {
 	// Annihilated maps each real JSON name dropped by the same-depth tie-break
 	// to the depth that dropped it. The marshaled object carries no such name.
 	Annihilated map[string]int
-	// Winners is the dominant sighting for each key that resolved, in
+	// Winners lists the dominant sighting for each key that resolved, in
 	// [Collection.Order] order.
 	Winners []Sighting
 }
 
-// Outcome is the resolution result for one real JSON name: the depth that
-// claimed it, whether a same-depth ambiguity annihilated it, and, when a
-// composed embed's ghost won, which embed type owns it.
+// Outcome is the per-name verdict [Classify] builds for the shadow marking. It
+// records the depth that claimed a real JSON name, whether a same-depth
+// ambiguity annihilated it, and, when a composed embed's ghost won, which embed
+// type owns it.
 //
 // Field order is tuned for struct packing (govet fieldalignment).
 type Outcome struct {
@@ -151,8 +155,8 @@ type Field struct {
 	// StructField is the Go field, with Index the path from the walk's root
 	// type.
 	StructField reflect.StructField
-	// Omitempty reports the ",omitempty" option, and folds in promotion
-	// through a pointer embed, which omits the field the same way.
+	// Omitempty reports the ",omitempty" option. It folds in promotion through
+	// a pointer embed, since a nil pointer embed omits the field the same way.
 	Omitempty bool
 	// Omitzero reports the ",omitzero" option.
 	Omitzero bool
@@ -168,10 +172,10 @@ type Field struct {
 	// required. Regular fields fold this into Omitempty instead.
 	Optional bool
 	// Shadowed marks an allOf-composed embed at least one of whose promoted
-	// JSON names loses [encoding/json]'s field resolution to a real field: the
-	// marshaled object carries the winner's value under that name (or drops
-	// the name on an ambiguity tie), so the composed schema's claim on it does
-	// not hold and the branch must not be unconditional.
+	// JSON names loses [encoding/json]'s field resolution to a real field. The
+	// marshaled object then carries the winner's value under that name, or
+	// drops the name on an ambiguity tie. Either way the composed schema's
+	// claim on it does not hold, so the branch must not be unconditional.
 	Shadowed bool
 	// ShadowPartial marks a shadowed composed embed that still promotes at
 	// least one unshadowed name. Only the (now conditional) branch evaluates
@@ -185,15 +189,16 @@ type Result struct {
 	// Fields lists the resolved fields in the order they are declared in the
 	// Go source, a promoted field sorting at its embed's position.
 	Fields []Field
-	// GhostWon lists the names a composed embed's promoted field won, each a
-	// name the marshaled object carries whose assertion lives in that embed's
-	// allOf branch rather than an emitted property.
+	// GhostWon lists the names a composed embed's promoted field won. The
+	// marshaled object carries each of them, and the embed's allOf branch
+	// rather than an emitted property carries its assertion.
 	GhostWon []string
 }
 
 // Of runs all three phases over t, recursing into each composed embed the
-// shadow marking needs. It is the entry point, and the one place the in-flight
-// guard is taken, so the guard spans the recursion whichever phase reaches it.
+// shadow marking needs. It is the entry point, and the only place that takes
+// the in-flight guard, so the guard spans the recursion whichever phase
+// reaches it.
 func (c *Collector) Of(t reflect.Type) Result {
 	_, _, out := c.phases(t)
 
@@ -216,9 +221,8 @@ func (c *Collector) phases(t reflect.Type) (Collection, Resolution, Result) {
 	return col, res, Classify(res, c.promoted(col))
 }
 
-// promoted resolves each composed embed type the walk scanned, giving the
-// shadow marking the promoted fields it compares against the enclosing
-// resolution.
+// promoted resolves each composed embed type the walk scanned. The shadow
+// marking compares those fields against the enclosing resolution.
 func (c *Collector) promoted(col Collection) map[reflect.Type][]Field {
 	if len(col.Scanned) == 0 {
 		return nil
@@ -233,7 +237,7 @@ func (c *Collector) promoted(col Collection) map[reflect.Type][]Field {
 }
 
 // embedEntry is a struct type queued for processing at the next depth. A ghost
-// entry is a composed embed's subtree: [encoding/json] promotes its fields
+// entry is a composed embed's subtree. [encoding/json] promotes its fields
 // normally, so they walk here and compete in resolution, but every sighting
 // they record is a ghost owned by ghostOwner, the composed embed whose allOf
 // branch carries the assertions.
@@ -327,7 +331,6 @@ func (c *Collector) Collect(t reflect.Type) Collection {
 				f.Index = fieldIndex
 
 				if f.Anonymous {
-					// Embedded field.
 					ft := f.Type
 					embeddedViaPointer := ft.Kind() == reflect.Pointer
 					if embeddedViaPointer {
@@ -370,10 +373,10 @@ func (c *Collector) Collect(t reflect.Type) Collection {
 
 					if ft.Kind() == reflect.Struct {
 						// Check whether this embedded struct is composed via allOf.
-						// Inside a ghost subtree the probe is skipped: encoding/json
-						// knows nothing of composition and promotes the nested
-						// embed's fields like any other, so the subtree flattens
-						// below and its names stay in the competition.
+						// A ghost subtree skips the probe, since encoding/json knows
+						// nothing of composition and promotes the nested embed's
+						// fields like any other, so the subtree flattens below and
+						// its names stay in the competition.
 						if !e.ghost && c.composed(ft) {
 							// Compose via allOf: treat as a single entry. A pointer
 							// embed makes the composition optional, since a nil
@@ -477,9 +480,9 @@ func (c *Collector) Collect(t reflect.Type) Collection {
 	return col
 }
 
-// Resolve applies [encoding/json]'s dominance rules to each key: the shallowest
-// depth wins, and a same-depth collision is broken by explicit json tag, with
-// every candidate dropped when none or more than one is tagged.
+// Resolve applies [encoding/json]'s dominance rules to each key. The shallowest
+// depth wins, and an explicit json tag breaks a same-depth collision. Resolve
+// drops every candidate when none or more than one of them is tagged.
 func Resolve(col Collection) Resolution {
 	res := Resolution{Annihilated: map[string]int{}}
 
@@ -504,10 +507,10 @@ func Resolve(col Collection) Resolution {
 			}
 		}
 
-		// Multiple fields collide on this JSON name at the shallowest depth.
-		// Encoding/json breaks the tie by explicit tag: if exactly one of them
-		// has an explicit json tag name, that field wins; if none or more than
-		// one is tagged, they are all dropped as ambiguous.
+		// Multiple fields collide on this JSON name at the shallowest depth. The
+		// tie-break follows encoding/json. If exactly one of them has an
+		// explicit json tag name, that field wins; if none or more than one is
+		// tagged, they are all dropped as ambiguous.
 		if len(atMin) > 1 {
 			var tagged []Sighting
 
@@ -540,9 +543,11 @@ func Resolve(col Collection) Resolution {
 // resolved fields; a type absent from it was skipped as a self- or mutually
 // composed cycle and keeps its unconditional branch.
 func Classify(res Resolution, promoted map[reflect.Type][]Field) Result {
-	// Each real JSON name's outcome feeds the shadow marking below: which
-	// depth claimed the name, whether a same-depth ambiguity annihilated it,
-	// and whether the winner was a composed embed's ghost.
+	// Each real JSON name's outcome feeds the shadow marking below. Folding the
+	// annihilated names in first rather than in resolution order is safe
+	// because every write targets a distinct name: an annihilated name has no
+	// winner, a composed embed writes no outcome, and a real winner's parsed
+	// JSON name is the key it was recorded under.
 	outcomes := make(map[string]Outcome, len(res.Winners)+len(res.Annihilated))
 	for name, depth := range res.Annihilated {
 		outcomes[name] = Outcome{Depth: depth, Annihilated: true}
@@ -553,11 +558,12 @@ func Classify(res Resolution, promoted map[reflect.Type][]Field) Result {
 	for i := range res.Winners {
 		w := &res.Winners[i]
 		if w.Ghost {
-			// A composed embed's promoted field won the name: no property is
-			// emitted (the embed's allOf branch carries the assertion), and the
-			// real fields it defeated stay out of the result, matching the value
-			// encoding/json actually marshals under the name. The name is
-			// reported to the caller, whose closed object must still evaluate it.
+			// A composed embed's promoted field won the name, so Classify emits
+			// no property; the embed's allOf branch carries the assertion. The
+			// real fields it defeated stay out of the result too, matching the
+			// value encoding/json actually marshals under the name. Result
+			// reports the name, since the caller's closed object must still
+			// evaluate it.
 			outcomes[w.Name] = Outcome{Depth: w.Depth, GhostOwner: w.GhostOwner}
 			out.GhostWon = append(out.GhostWon, w.Name)
 
@@ -605,13 +611,13 @@ func Classify(res Resolution, promoted map[reflect.Type][]Field) Result {
 
 // markShadowedCompositions flags each allOf-composed embed whose promoted JSON
 // names [encoding/json] resolves away from the embed: a shallower (or
-// same-depth winning) real field carries the winner's value under the name, an
-// annihilated name is dropped from the marshaled object entirely, and another
-// embed's winning ghost carries that embed's value. In each case the composed
-// branch would assert this embed's constraints against a value it does not
-// produce, so the branch must not be unconditional. The outcomes map is the
-// enclosing resolution's per-name verdict, ghost sightings included, so the tag
-// tie-break is already replayed.
+// same-depth winning) real field carries the winner's value under the name, the
+// marshaled object drops an annihilated name entirely, and another embed's
+// winning ghost carries that embed's value. In each case the composed branch
+// would assert this embed's constraints against a value it does not produce, so
+// the branch must not be unconditional. The outcomes map is the enclosing
+// resolution's per-name verdict, ghost sightings included, so it already
+// replays the tag tie-break.
 func markShadowedCompositions(
 	fields []Field,
 	outcomes map[string]Outcome,
@@ -655,8 +661,8 @@ func markShadowedCompositions(
 
 			switch {
 			case !ok:
-				// No outcome recorded: the name resolved to nothing (its ghost
-				// was skipped with this scan); keep the branch's claim.
+				// No outcome recorded, so the name resolved to nothing because
+				// the in-flight guard skipped its ghost. Keep the branch's claim.
 				unshadowedAny = true
 			case !out.Annihilated && out.GhostOwner == ft && out.Depth == de:
 				// This embed's own ghost won the name, so the marshaled object

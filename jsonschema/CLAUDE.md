@@ -12,7 +12,8 @@ The package has two independent halves sharing the `Schema` type:
   `comments.go`): Go types -> JSON Schema via reflection. `generator` in
   `reflect.go` is the core; `generate.go` holds the functional options and
   the `GenerateFor`/`Generate` entry points. Struct-field resolution lives in
-  `internal/fieldset`, which `generator.fields` drives once per struct type.
+  `internal/fieldset`; `generator.fields` is the collector the generation half
+  drives.
 - **Validation** (`validate.go`, `errors.go`): JSON instances -> structured
   `*ValidationError` trees. `Compile` builds a `validator` once (registry
   construction from `$id`/`$anchor`, precomputed numeric bounds and compiled
@@ -116,22 +117,23 @@ The package has two independent halves sharing the `Schema` type:
   key), never as duplicated code. It renders onto the upstream `Schema` for the
   same no-cycle reason `constraint` does and must not import the main package),
   `internal/fieldset` (the `encoding/json` field-resolution parity core for the
-  generation half, in the three phases the standard library uses: `Collect`
-  walks embeds breadth-first and records every sighting of a JSON name,
-  `Resolve` applies the shallowest-depth rule and the same-depth tag tie-break,
-  and `Classify` turns each winner into a property, an allOf-composed embed, or
-  a ghost, then marks the composed embeds whose promoted names the resolution
-  took away. `Resolve` and `Classify` are pure, which is what lets the key-set
-  oracle below test one phase directly. Composition detection stays parent-side
-  as an injected `ComposedFunc`, since `needsAllOfComposition` reads
-  `resolveTypeSchema` and the public `JSONSchemaProvider`; the package therefore
-  reflects over a type without importing the parent. A composed embed's subtree
-  still joins the walk as a ghost, because `encoding/json` promotes its fields
-  like any other, and the recursion that resolves the embed's own fields for the
-  shadow marking is bounded by a `Collector`-owned in-flight set whose skip
-  leaves that embed's branch unconditional. `Collection.Order` is load-bearing:
-  `GhostWon` is emitted in that order and the generator appends those names to
-  the object's property order),
+  generation half, in three phases. Two mirror the standard library: `Collect`
+  walks embeds breadth-first and records every sighting of a JSON name, and
+  `Resolve` applies the shallowest-depth rule and the same-depth tag tie-break.
+  The third is this package's own. `Classify` turns each winner into a property,
+  an allOf-composed embed, or a ghost, then marks the composed embeds whose
+  promoted names the resolution took away. `Resolve` and `Classify` are pure,
+  which is what lets the phase-level rig test one phase directly. Composition
+  detection stays parent-side as an injected `ComposedFunc`, since
+  `needsAllOfComposition` reads `resolveTypeSchema` and the public
+  `JSONSchemaProvider`; the package therefore reflects over a type without
+  importing the parent. A composed embed's subtree still joins the walk as a
+  ghost, because `encoding/json` promotes its fields like any other, and a
+  `Collector`-owned in-flight set bounds the recursion that resolves the embed's
+  own fields for the shadow marking. That set's skip leaves the embed's branch
+  unconditional. `Collection.Order` is load-bearing, since `Classify` emits
+  `GhostWon` in that order and the generator appends those names to the object's
+  property order),
   `internal/typename` (the seven
   canonical JSON Schema type-name constants and their predicate, shared by
   both halves and schemashape), `internal/uriref` (RFC 3986 URI-reference
@@ -360,12 +362,12 @@ contract the tests enforce.
 - `conformance_test.go` validates generated schemas against the official
   metaschemas vendored in `testdata/metaschemas/`, using this package's own
   validator and a `RefResolver` for the metaschema's vocabulary sub-schemas.
-- `encoding/json` parity is checked at two altitudes. Two schema-level
+- The package checks `encoding/json` parity at two altitudes. Two schema-level
   differential rigs close the loop between the package's halves on one property:
   **the schema generated for a Go type must accept whatever `encoding/json`
-  marshals from a value of that type.** A rejection means the reimplementation of
-  `encoding/json`'s field resolution has drifted, which is where past fixes
-  cluster. Both draw their values from `internal/fuzzfill`, which turns a fuzzing
+  marshals from a value of that type.** A rejection means `internal/fieldset`'s
+  reimplementation of `encoding/json`'s field resolution has drifted, which is
+  where past fixes cluster. Both draw their values from `internal/fuzzfill`, which turns a fuzzing
   entropy blob into a populated value through a deterministic, zero-extending
   `Cursor`. The phase-level rig in `internal/fieldset` checks the same drift one
   layer down, against `encoding/json` itself rather than through the validator.
@@ -396,19 +398,32 @@ contract the tests enforce.
   - The phase-level rig (`internal/fieldset/fieldset_test.go`, in-package on the
     `internal/schemafield` precedent) asserts two properties over a hand-written
     embed and tag roster and over every `internal/fuzzshape` shape, each crossed
-    with a set of composed-embed predicates. **Key-set parity**: the names the
-    phases resolve are exactly the keys `encoding/json` marshals, and the value
-    under each key is what the winning field marshals to, so a wrong dominance
-    verdict fails even when the name set is unchanged. Its three reason
-    constants, each pinned by a guard test, are `reasonPromotedMarshaler` (the
-    marshaler replaces the object, so the resolved fields describe nothing in the
-    output), `reasonMarshalFailed`, and `reasonNotObject`. **Composition
-    invariance**: composing an embed rather than promoting it moves a name
-    between the emitted properties and the ghost-won list without changing the
-    set. That one needs no guards, so it covers the types key-set parity skips.
-    Both properties owe their reach to the injected `ComposedFunc`: composition
-    is a provider decision, and `internal/fuzzshape`'s pools are provider-free,
-    so a synthesized shape reaches the ghost machinery here and nowhere else.
+    with a set of composed-embed predicates. **Key-set parity** asserts that the
+    names the phases resolve are exactly the keys `encoding/json` marshals, and
+    that the value under each key is what the winning field marshals to, so a
+    wrong dominance verdict fails the rig even when the name set matches. It
+    carries three reason constants, each pinned by a guard test:
+    `reasonPromotedMarshaler` (the marshaler replaces the object, so the
+    resolved fields describe nothing in the output), `reasonMarshalFailed` (the
+    value has no marshaled form to compare against), and `reasonNotObject` (the
+    output has no top-level keys). **Composition invariance** asserts that
+    composing an embed rather than promoting it moves a name between the emitted
+    properties and the ghost-won list without changing the set. Composition
+    invariance needs no reason constants, so it covers the types key-set parity
+    skips. `FuzzFieldSetKeys` searches the parity property, drawing its composed
+    predicate from the shape blob so a counterexample minimizes down to the
+    composition that produced it. The injected `ComposedFunc` is what lets these
+    reach the ghost machinery at all, since composition is a provider decision
+    and `internal/fuzzshape`'s pools are provider-free.
+  - Three tests in the same file pin what the oracle cannot see, since it
+    compares name sets and values. `TestClassificationPins` pins `Result.Fields`
+    with their index paths and composed-embed flags, and `Result.GhostWon` in
+    order; both feed the generated schema, the field order as the object's
+    property order and the marks as whether a composed branch is conditional.
+    `TestPhasesComposeIntoOf` asserts the three phases run separately reproduce
+    `Of`. `TestCycleSkipKeepsBranchUnconditional` pins the mutually composed
+    cycle, whose skip leaves `promoted` short of the root's names and so leaves
+    that branch unconditional.
   - `task go:fuzz` searches for new counterexamples; the seed corpora run on
     every `go test`. A discovered counterexample is committed under
     `testdata/fuzz/<Target>/` as a permanent regression seed before the fix.

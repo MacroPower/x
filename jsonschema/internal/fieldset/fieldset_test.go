@@ -1,4 +1,4 @@
-package fieldset //nolint:testpackage // In-package by design: the resolution phases are guarded from inside their own package (see jsonschema/CLAUDE.md); the no-in-package-test policy is main-package only.
+package fieldset //nolint:testpackage // In-package by design: the resolution phases are tested from inside their own package, and the no-in-package-test policy applies to the main jsonschema package only.
 
 import (
 	"encoding"
@@ -18,20 +18,21 @@ import (
 	"go.jacobcolvin.com/x/jsonschema/internal/jsontag"
 )
 
-// The key-set oracle: the names the resolution phases emit for a Go type are
-// exactly the keys encoding/json marshals from a value of that type. It checks
-// dominance against the standard library directly, where the package's two
-// end-to-end fuzz rigs see a dominance bug only as a validation failure.
+// The key-set oracle asserts that the names the resolution phases emit for a Go
+// type are exactly the keys encoding/json marshals from a value of that type. It
+// checks dominance against the standard library directly, whereas the jsonschema
+// package's two schema-level rigs see a dominance bug only as a validation
+// failure several layers away.
 //
 // Three classes of type carry no verdict, each with a reason constant and a
 // guard test pinning its cause.
 
 // reasonPromotedMarshaler is why a type whose method set carries MarshalJSON or
 // MarshalText is skipped.
-const reasonPromotedMarshaler = "encoding/json routes the whole value through the marshaler instead of emitting a field-by-field object, so the marshaled output has no relationship to the resolved field set. Whether a pointer-receiver marshaler applies further depends on the value's addressability, which the caller controls, so the type is skipped rather than reasoned about"
+const reasonPromotedMarshaler = "encoding/json routes the whole value through the marshaler instead of emitting a field-by-field object, so the marshaled output has no relationship to the resolved field set. Whether a pointer-receiver marshaler applies further depends on the value's addressability, which the caller controls, so the oracle skips the type rather than reasoning about it"
 
 // reasonMarshalFailed is why a value encoding/json rejects is skipped.
-const reasonMarshalFailed = "encoding/json produced no output for the value, so there is no key set to compare against: a cyclic value, a map with an unsupported key type, or a non-representable float"
+const reasonMarshalFailed = "encoding/json emits no output for the value, so there is no key set to compare against: a cyclic value, a map with an unsupported key type, or a non-representable float"
 
 // reasonNotObject is why output that is not a JSON object is skipped.
 const reasonNotObject = "the marshaled output is not a JSON object, so it has no top-level keys; this is the backstop for a marshaler the method-set probe missed"
@@ -129,10 +130,10 @@ type deepChain struct {
 	Zeta string `json:"zeta"`
 }
 
-// embedding builds a struct type embedding each of types. The three roster
-// entries below use it rather than source declarations because they embed two
-// types that claim one JSON name, which is the collision the resolution exists
-// to settle and which govet's structtag check rejects in source.
+// embedding builds a struct type embedding each of types. Each type built with
+// it embeds two types that claim one JSON name, the collision the resolution
+// exists to settle. A source declaration cannot express that, since govet's
+// structtag check rejects a repeated json tag.
 func embedding(types ...reflect.Type) reflect.Type {
 	fields := make([]reflect.StructField, len(types))
 	for i, ft := range types {
@@ -252,6 +253,9 @@ var (
 	}
 )
 
+// valueBlobs sets how many values fill each synthesized shape.
+const valueBlobs = 4
+
 // composedIn returns a ComposedFunc over the named candidates.
 func composedIn(names []string) ComposedFunc {
 	set := map[reflect.Type]bool{}
@@ -275,9 +279,9 @@ type resolvedNames struct {
 
 // resolve runs all three phases, asserts what holds within each, and derives
 // the name sets the oracle compares against encoding/json. A property reads its
-// options off the classified field, so the option folding the classification
-// does is under test; a ghost-won name produces no field, so it reads them off
-// the winning sighting instead.
+// options off the classified field, which puts the option folding the
+// classification does under test. A ghost-won name produces no field, so it
+// reads them off the winning sighting instead.
 func resolve(t *testing.T, typ reflect.Type, composed ComposedFunc) resolvedNames {
 	t.Helper()
 
@@ -305,8 +309,6 @@ func resolve(t *testing.T, typ reflect.Type, composed ComposedFunc) resolvedName
 		coerced:   map[string]bool{},
 	}
 
-	// A property's options come off the classified field, so the oracle checks
-	// the option folding the classification does rather than redoing it.
 	for i := range out.Fields {
 		f := &out.Fields[i]
 
@@ -348,9 +350,6 @@ func resolve(t *testing.T, typ reflect.Type, composed ComposedFunc) resolvedName
 
 		winners[w.Name] = true
 
-		// A ghost-won name produces no field, so its options come off the
-		// winning sighting. Reading them there is what the exported dominance
-		// phase is for.
 		if !ghost[w.Name] {
 			continue
 		}
@@ -391,14 +390,6 @@ func marshalObject(v any) (map[string]json.RawMessage, string) {
 	return obj, ""
 }
 
-// pointerOnlyMarshaler reports whether only the pointer to t marshals itself.
-// Reading such a field back out of the struct copies it, so it loses the
-// addressability encoding/json had and would marshal differently.
-func pointerOnlyMarshaler(t reflect.Type) bool {
-	return hasMarshaler(t) &&
-		!t.Implements(typeJSONMarshaler) && !t.Implements(typeTextMarshaler)
-}
-
 // checkWinners asserts that the value under each resolved name is what the
 // winning field marshals to. Without it the oracle sees only the name set, and
 // a dominance rule that picks the wrong field of two claiming one name still
@@ -414,7 +405,7 @@ func checkWinners(t *testing.T, rv reflect.Value, rn resolvedNames, obj map[stri
 
 		// A ",string" field is re-encoded as a quoted string, so the field's
 		// own marshaling is not what the object carries.
-		if rn.coerced[name] || pointerOnlyMarshaler(sf.Type) {
+		if rn.coerced[name] {
 			continue
 		}
 
@@ -423,10 +414,9 @@ func checkWinners(t *testing.T, rv reflect.Value, rn resolvedNames, obj map[stri
 			continue // A nil pointer embed on the path; the name is omitted.
 		}
 
+		// The parent marshaled, so a field of it marshals too.
 		want, err := json.Marshal(fv.Interface())
-		if err != nil {
-			continue
-		}
+		require.NoError(t, err)
 
 		assert.JSONEq(t, string(want), string(raw),
 			"name %q carries a value the winning field does not marshal", name)
@@ -457,7 +447,7 @@ func filled(typ reflect.Type, blob []byte) reflect.Value {
 // blob: every marshaled key is a resolved name (soundness), and every resolved
 // name the options do not excuse appears in the filled value's keys
 // (completeness). A blob whose value carries no verdict contributes its reason
-// instead, and the caller skips only when no blob reached an assertion.
+// instead, and checkKeySet skips only when no blob reached an assertion.
 func checkKeySet(
 	t *testing.T,
 	typ reflect.Type,
@@ -503,8 +493,8 @@ func checkKeySet(
 		}
 
 		for name := range rn.names {
-			// An omitempty field with a struct type is never omitted by
-			// encoding/json, so excusing it only weakens the assertion.
+			// An omitempty struct-typed field is one encoding/json never
+			// omits, so excusing that name only weakens the assertion.
 			if rn.omissible[name] {
 				continue
 			}
@@ -545,20 +535,27 @@ func TestKeySetParityShapes(t *testing.T) {
 	blobs := fuzzshape.Blobs(64)
 
 	for setName, set := range predicateSets {
-		t.Run(setName, func(t *testing.T) {
-			t.Parallel()
+		for i, blob := range blobs {
+			t.Run(fmt.Sprintf("%s/shape %d", setName, i), func(t *testing.T) {
+				t.Parallel()
 
-			for i, blob := range blobs {
-				typ := fuzzshape.Type(blob)
-				checkKeySet(t, typ, composedIn(set), blobs[(i+1)%len(blobs):])
-			}
-		})
+				// Fill each shape from the valueBlobs blobs that follow it, so
+				// shape and value entropy stay independent without the
+				// population thinning out toward the end of the list.
+				values := make([][]byte, 0, valueBlobs)
+				for n := 1; n <= valueBlobs; n++ {
+					values = append(values, blobs[(i+n)%len(blobs)])
+				}
+
+				checkKeySet(t, fuzzshape.Type(blob), composedIn(set), values)
+			})
+		}
 	}
 }
 
 // TestCompositionInvariance asserts that composing an embed rather than
 // promoting it moves a name between the emitted properties and the ghost-won
-// list without changing the set. It is the unguarded half of the oracle: it
+// list without changing the set. It is the unguarded half of the oracle, so it
 // holds for every type, including those the key-set parity check must skip.
 func TestCompositionInvariance(t *testing.T) {
 	t.Parallel()
@@ -585,6 +582,150 @@ func TestCompositionInvariance(t *testing.T) {
 	}
 }
 
+// wantField is one expected row of [Result.Fields].
+//
+//nolint:unused // Read via struct equality in the comparison below.
+type wantField struct {
+	name          string
+	index         []int
+	compose       bool
+	optional      bool
+	shadowed      bool
+	shadowPartial bool
+}
+
+// TestClassificationPins pins what the key-set oracle cannot see. The oracle
+// compares name sets and values, so it is blind to the order Classify emits
+// fields and ghost-won names in, and to the shadow marks entirely. Gutting the
+// shadow marking leaves every other test in this package green. Both feed the
+// generated schema. The field order becomes the object's property order, and
+// the marks decide whether a composed branch is conditional.
+func TestClassificationPins(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		typ      reflect.Type
+		composed []string
+		want     []wantField
+		ghostWon []string
+	}{
+		"promoted embed": {
+			typ: reflect.TypeFor[valueEmbed](),
+			want: []wantField{
+				{name: "alpha", index: []int{0, 0}},
+				{name: "beta", index: []int{0, 1}},
+				{name: "gamma", index: []int{1}},
+			},
+		},
+		"promoted through two levels": {
+			typ: reflect.TypeFor[deepChain](),
+			want: []wantField{
+				{name: "alpha", index: []int{0, 0, 0}},
+				{name: "beta", index: []int{0, 0, 1}},
+				{name: "epsilon", index: []int{0, 1}},
+				{name: "zeta", index: []int{1}},
+			},
+		},
+		"composed embed": {
+			typ:      reflect.TypeFor[valueEmbed](),
+			composed: []string{"Base"},
+			want: []wantField{
+				{index: []int{0}, compose: true},
+				{name: "gamma", index: []int{1}},
+			},
+			ghostWon: []string{"alpha", "beta"},
+		},
+		"composed embed partly shadowed": {
+			typ:      reflect.TypeFor[shadowOuter](),
+			composed: []string{"Base"},
+			want: []wantField{
+				{index: []int{0}, compose: true, shadowed: true, shadowPartial: true},
+				{name: "alpha", index: []int{1}},
+			},
+			ghostWon: []string{"beta"},
+		},
+		"composed pointer embed": {
+			typ:      reflect.TypeFor[pointerEmbed](),
+			composed: []string{"Base"},
+			want: []wantField{
+				{index: []int{0}, compose: true, optional: true},
+				{name: "gamma", index: []int{1}},
+			},
+			ghostWon: []string{"alpha", "beta"},
+		},
+		"composed embed promoting two levels": {
+			typ:      reflect.TypeFor[deepChain](),
+			composed: []string{"Deep"},
+			want: []wantField{
+				{index: []int{0}, compose: true},
+				{name: "zeta", index: []int{1}},
+			},
+			// Breadth-first: the embed's own name before the ones it promotes.
+			ghostWon: []string{"epsilon", "alpha", "beta"},
+		},
+		"composition nested in a promoted embed": {
+			typ:      reflect.TypeFor[deepChain](),
+			composed: []string{"Base"},
+			want: []wantField{
+				{index: []int{0, 0}, compose: true},
+				{name: "epsilon", index: []int{0, 1}},
+				{name: "zeta", index: []int{1}},
+			},
+			ghostWon: []string{"alpha", "beta"},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			out := NewCollector(composedIn(tc.composed)).Of(tc.typ)
+
+			got := make([]wantField, 0, len(out.Fields))
+			for i := range out.Fields {
+				f := &out.Fields[i]
+				got = append(got, wantField{
+					name:          f.JSONName,
+					index:         f.StructField.Index,
+					compose:       f.ComposeViaAllOf,
+					optional:      f.Optional,
+					shadowed:      f.Shadowed,
+					shadowPartial: f.ShadowPartial,
+				})
+			}
+
+			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.ghostWon, out.GhostWon)
+		})
+	}
+}
+
+// TestPhasesComposeIntoOf drives the three phases separately and asserts they
+// reproduce Of, so the split is part of the package's contract rather than a
+// detail Of happens to use.
+func TestPhasesComposeIntoOf(t *testing.T) {
+	t.Parallel()
+
+	for name, typ := range roster {
+		for setName, set := range predicateSets {
+			t.Run(name+"/"+setName, func(t *testing.T) {
+				t.Parallel()
+
+				composed := composedIn(set)
+
+				// A self- or mutually composed root needs Of's in-flight guard,
+				// which only Of can take; no roster type is one.
+				require.False(t, composed(typ), "the root is not composed")
+
+				c := NewCollector(composed)
+				col := c.Collect(typ)
+
+				assert.Equal(t, c.Of(typ), Classify(Resolve(col), c.promoted(col)))
+			})
+		}
+	}
+}
+
 type cycA struct {
 	*cycB //nolint:unused // The mutual embed is the shape under test.
 
@@ -601,8 +742,7 @@ type cycB struct {
 // outermost resolution of cycA queues cycB's ghost subtree, since only cycA is
 // in flight; the skip fires one level down, inside the resolution of cycB that
 // feeds the shadow marking, and leaves promoted[cycB] short of cycA's names. So
-// cycB's branch keeps the unconditional form it had before ghost tracking
-// existed. A change here is a deliberate diff, not an accident.
+// cycB's branch stays unconditional. Change this pin deliberately.
 func TestCycleSkipKeepsBranchUnconditional(t *testing.T) {
 	t.Parallel()
 
