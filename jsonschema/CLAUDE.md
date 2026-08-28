@@ -495,3 +495,22 @@ contract the tests enforce.
   bullet's own quoted examples run through the public API. The row count must
   equal the bullet count in both lists, so a sixth deviation cannot land with
   nothing asserting it.
+- `tags_shape_oracle_test.go` holds `encoding/json` to a third property, the
+  struct-tag one: **the `Form` `internal/tagmodel` classifies a field as must
+  agree with the JSON `encoding/json` writes for that field.** `Form` is the
+  dispatch column of the constraint matrix, so a field in the wrong column
+  silently gets the wrong rule set applied to it, which is where five past fixes
+  cluster (db3c7b5, 679bd8b, 99ba651, 5c04089, 649a6f2, one row each). A probe
+  `TagInterpreter` registered under the `json` tag key records
+  `FieldContext.Shape()` and `FieldContext.Base` for every field generation
+  classifies, so the oracle reads the production classification instead of
+  recomputing one. Recomputing is not equivalent: a `json:",string"` string
+  field and its pointer carry a quoted flag `ShapeOf` cannot see, and a pointer
+  to a text-marshaling numeric or to a `$def`'d type hides its payload behind
+  the nullable wrapper the `permits-a-string` and `$ref` tests read. The roster
+  runs under both `WithDefinitions` settings, which is what makes the referenced
+  and text-marshaled columns reachable at all, and a second leg runs the same
+  property over `internal/fuzzshape` shapes. Five reason constants name the
+  field classes the probe cannot observe (untagged, `json:"-"`, unexported, an
+  allOf-composed embed, and a JSON name two fields claim at one depth); a field
+  matching none of them and still unobserved fails the leg.
