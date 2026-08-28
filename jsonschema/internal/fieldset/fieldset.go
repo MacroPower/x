@@ -131,16 +131,16 @@ type Resolution struct {
 	Winners []Sighting
 }
 
-// Outcome is the per-name verdict [Classify] builds for the shadow marking. It
+// outcome is the per-name verdict [Classify] builds for the shadow marking. It
 // records the depth that claimed a real JSON name, whether a same-depth
 // ambiguity annihilated it, and, when a composed embed's ghost won, which embed
 // type owns it.
 //
 // Field order is tuned for struct packing (govet fieldalignment).
-type Outcome struct {
-	GhostOwner  reflect.Type
-	Depth       int
-	Annihilated bool
+type outcome struct {
+	ghostOwner  reflect.Type
+	depth       int
+	annihilated bool
 }
 
 // Field is one resolved struct field: a property the caller emits, or an
@@ -548,9 +548,9 @@ func Classify(res Resolution, promoted map[reflect.Type][]Field) Result {
 	// because every write targets a distinct name: an annihilated name has no
 	// winner, a composed embed writes no outcome, and a real winner's parsed
 	// JSON name is the key it was recorded under.
-	outcomes := make(map[string]Outcome, len(res.Winners)+len(res.Annihilated))
+	outcomes := make(map[string]outcome, len(res.Winners)+len(res.Annihilated))
 	for name, depth := range res.Annihilated {
-		outcomes[name] = Outcome{Depth: depth, Annihilated: true}
+		outcomes[name] = outcome{depth: depth, annihilated: true}
 	}
 
 	var out Result
@@ -564,7 +564,7 @@ func Classify(res Resolution, promoted map[reflect.Type][]Field) Result {
 			// value encoding/json actually marshals under the name. Result
 			// reports the name, since the caller's closed object must still
 			// evaluate it.
-			outcomes[w.Name] = Outcome{Depth: w.Depth, GhostOwner: w.GhostOwner}
+			outcomes[w.Name] = outcome{depth: w.Depth, ghostOwner: w.GhostOwner}
 			out.GhostWon = append(out.GhostWon, w.Name)
 
 			continue
@@ -585,7 +585,7 @@ func Classify(res Resolution, promoted map[reflect.Type][]Field) Result {
 			continue
 		}
 
-		outcomes[info.JSONName] = Outcome{Depth: w.Depth}
+		outcomes[info.JSONName] = outcome{depth: w.Depth}
 
 		out.Fields = append(out.Fields, Field{
 			StructField: w.StructField,
@@ -620,7 +620,7 @@ func Classify(res Resolution, promoted map[reflect.Type][]Field) Result {
 // replays the tag tie-break.
 func markShadowedCompositions(
 	fields []Field,
-	outcomes map[string]Outcome,
+	outcomes map[string]outcome,
 	promoted map[reflect.Type][]Field,
 ) {
 	for i := range fields {
@@ -664,11 +664,11 @@ func markShadowedCompositions(
 				// No outcome recorded, so the name resolved to nothing because
 				// the in-flight guard skipped its ghost. Keep the branch's claim.
 				unshadowedAny = true
-			case !out.Annihilated && out.GhostOwner == ft && out.Depth == de:
+			case !out.annihilated && out.ghostOwner == ft && out.depth == de:
 				// This embed's own ghost won the name, so the marshaled object
 				// carries the embed's value there.
 				unshadowedAny = true
-			case out.Depth <= de:
+			case out.depth <= de:
 				// A real field won the tie-break, the name annihilated, or
 				// another embed claimed it at or above this depth.
 				shadowedAny = true
