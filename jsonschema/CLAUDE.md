@@ -379,7 +379,7 @@ contract the tests enforce.
   deterministic, zero-extending `Cursor`. The phase-level rig in
   `internal/fieldset` checks the same drift one layer down, against
   `encoding/json` itself rather than through the validator.
-- Four differential rigs close the loop on three properties. The two in this
+- Five differential rigs close the loop on four properties. The two in this
   bullet share the first. **The schema generated for a Go type must accept
   whatever `encoding/json` marshals from a value of that type.** A rejection means
   `reflect.go`'s hand-reimplementation of `encoding/json`'s field resolution has
@@ -442,7 +442,7 @@ contract the tests enforce.
   - `task go:fuzz` searches for new counterexamples; the seed corpora run on
     every `go test`. A discovered counterexample is committed under
     `testdata/fuzz/<Target>/` as a permanent regression seed before the fix.
-- A third differential rig closes the loop across the three sites that
+- The `$ref` differential rig closes the loop across the three sites that
   materialize a `$ref` target -- `Compile`'s reference fixpoint, `Inline`'s own
   registry and index, and the JSON-pointer fallback both reach through
   `internal/refresolve` -- on one property: **Compile, Inline, and the
@@ -458,7 +458,7 @@ contract the tests enforce.
     different question from whether the two engines agree.
   - `TestRefEnginesAgreeOnPastFixes` pins one graph per past `$ref` fix as
     JSON.
-  - `FuzzRefEnginesAgree` (`fuzz_ref_test.go`, rig 3) synthesizes a
+  - `FuzzRefEnginesAgree` (`fuzz_ref_test.go`) synthesizes a
     multi-document graph from a blob, drawing the draft, each document's `$id`,
     the anchor form, and eight reference spellings. A third pipeline withholds one document from
     the resolver and serves it through a `WithRefFallback` substitute. It has no
