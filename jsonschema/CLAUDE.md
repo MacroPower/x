@@ -11,7 +11,8 @@ The package has two independent halves sharing the `Schema` type:
 - **Generation** (`generate.go`, `reflect.go`, `tags.go`, `names.go`,
   `comments.go`): Go types -> JSON Schema via reflection. `generator` in
   `reflect.go` is the core; `generate.go` holds the functional options and
-  the `GenerateFor`/`Generate` entry points.
+  the `GenerateFor`/`Generate` entry points. Struct-field resolution lives in
+  `internal/fieldset`, which `generator.fields` drives once per struct type.
 - **Validation** (`validate.go`, `errors.go`): JSON instances -> structured
   `*ValidationError` trees. `Compile` builds a `validator` once (registry
   construction from `$id`/`$anchor`, precomputed numeric bounds and compiled
@@ -114,6 +115,23 @@ The package has two independent halves sharing the `Schema` type:
   dialect's own `KeyRule` row (arity, list spelling, the implied value of a bare
   key), never as duplicated code. It renders onto the upstream `Schema` for the
   same no-cycle reason `constraint` does and must not import the main package),
+  `internal/fieldset` (the `encoding/json` field-resolution parity core for the
+  generation half, in the three phases the standard library uses: `Collect`
+  walks embeds breadth-first and records every sighting of a JSON name,
+  `Resolve` applies the shallowest-depth rule and the same-depth tag tie-break,
+  and `Classify` turns each winner into a property, an allOf-composed embed, or
+  a ghost, then marks the composed embeds whose promoted names the resolution
+  took away. `Resolve` and `Classify` are pure, which is what lets the key-set
+  oracle below test one phase directly. Composition detection stays parent-side
+  as an injected `ComposedFunc`, since `needsAllOfComposition` reads
+  `resolveTypeSchema` and the public `JSONSchemaProvider`; the package therefore
+  reflects over a type without importing the parent. A composed embed's subtree
+  still joins the walk as a ghost, because `encoding/json` promotes its fields
+  like any other, and the recursion that resolves the embed's own fields for the
+  shadow marking is bounded by a `Collector`-owned in-flight set whose skip
+  leaves that embed's branch unconditional. `Collection.Order` is load-bearing:
+  `GhostWon` is emitted in that order and the generator appends those names to
+  the object's property order),
   `internal/typename` (the seven
   canonical JSON Schema type-name constants and their predicate, shared by
   both halves and schemashape), `internal/uriref` (RFC 3986 URI-reference

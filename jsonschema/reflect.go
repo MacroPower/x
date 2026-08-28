@@ -10,11 +10,10 @@ import (
 	"math/big"
 	"reflect"
 	"slices"
-	"strings"
 	"time"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/content"
-	"go.jacobcolvin.com/x/jsonschema/internal/jsontag"
+	"go.jacobcolvin.com/x/jsonschema/internal/fieldset"
 	"go.jacobcolvin.com/x/jsonschema/internal/numkind"
 	"go.jacobcolvin.com/x/jsonschema/internal/reflectkind"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemashape"
@@ -58,10 +57,10 @@ type generator struct {
 	defs              []*defEntry
 	typeOverrideCache map[reflect.Type]typeOverrideResult
 	visiting          map[reflect.Type]bool
-	// ShadowScan tracks the composed embed types whose promoted names are
-	// being collected for shadow analysis, so a mutually-composed pair does
-	// not recurse through its own analysis forever.
-	shadowScan map[reflect.Type]bool
+	// Fields resolves each struct type's JSON fields. It carries the in-flight
+	// set that terminates the ghost recursion, so a mutually composed pair does
+	// not recurse through its own shadow analysis forever.
+	fields *fieldset.Collector
 	// RefAliasing tracks the types whose [TypeSchema.Ref] alias is being
 	// resolved, so an alias chain that reaches one of them again (a self-Ref, or
 	// a mutual A -> B -> A cycle) is reported instead of recursing forever.
@@ -129,7 +128,10 @@ func (g *generator) forRun(ctx context.Context) *generator {
 	run.typeOverrideCache = map[reflect.Type]typeOverrideResult{}
 	run.visiting = map[reflect.Type]bool{}
 	run.refAliasing = map[reflect.Type]bool{}
-	run.shadowScan = map[reflect.Type]bool{}
+
+	// Bound to run, not to the prototype: needsAllOfComposition reads the
+	// per-run context and type-override cache.
+	run.fields = fieldset.NewCollector(run.needsAllOfComposition)
 
 	return &run
 }
@@ -1013,33 +1015,34 @@ func (g *generator) buildStructSchema(t reflect.Type) (*node, Nullability, error
 	// then run tag interpreters. This ensures a tag interpreter observing
 	// FieldContext.Parent sees the complete sibling property set regardless of
 	// field order.
-	fields, ghostWon := g.collectStructFields(t)
+	resolved := g.fields.Of(t)
+	fields, ghostWon := resolved.Fields, resolved.GhostWon
 
 	var hasAllOf, hasShadowPartial bool
 
 	type pendingField struct {
 		node *node
-		fi   structFieldInfo
+		fi   fieldset.Field
 	}
 
 	var pending []pendingField
 
 	for idx := range fields {
-		if fields[idx].composeViaAllOf {
+		if fields[idx].ComposeViaAllOf {
 			err := g.processAllOfField(fields[idx], obj)
 			if err != nil {
-				return nil, NullFromReflection, fmt.Errorf("embedded %s: %w", fields[idx].field.Type, err)
+				return nil, NullFromReflection, fmt.Errorf("embedded %s: %w", fields[idx].StructField.Type, err)
 			}
 
 			hasAllOf = true
-			hasShadowPartial = hasShadowPartial || fields[idx].shadowPartial
+			hasShadowPartial = hasShadowPartial || fields[idx].ShadowPartial
 
 			continue
 		}
 
 		fieldNode, err := g.buildFieldSchema(t, fields[idx], obj)
 		if err != nil {
-			return nil, NullFromReflection, fmt.Errorf("field %q: %w", fields[idx].jsonName, err)
+			return nil, NullFromReflection, fmt.Errorf("field %q: %w", fields[idx].JSONName, err)
 		}
 
 		pending = append(pending, pendingField{fi: fields[idx], node: fieldNode})
@@ -1050,7 +1053,7 @@ func (g *generator) buildStructSchema(t reflect.Type) (*node, Nullability, error
 
 		err := g.applyFieldInterpreters(t, pf.fi, pf.node, obj)
 		if err != nil {
-			return nil, NullFromReflection, fmt.Errorf("field %q: %w", pf.fi.jsonName, err)
+			return nil, NullFromReflection, fmt.Errorf("field %q: %w", pf.fi.JSONName, err)
 		}
 	}
 
@@ -1115,535 +1118,6 @@ func (g *generator) buildStructSchema(t reflect.Type) (*node, Nullability, error
 	return obj, stance, nil
 }
 
-// structFieldInfo holds processed information about a struct field.
-type structFieldInfo struct {
-	jsonName        string
-	field           reflect.StructField
-	omitempty       bool
-	omitzero        bool
-	jsonString      bool
-	composeViaAllOf bool
-	// Optional is true for an allOf-composed embed reached through a
-	// pointer-typed embedded field (directly or via an enclosing pointer
-	// embed). Encoding/json omits the embed's entire contribution when the
-	// pointer is nil, so the composed schema must not be unconditionally
-	// required. Regular fields fold this into omitempty instead.
-	optional bool
-	// Shadowed marks an allOf-composed embed at least one of whose promoted
-	// JSON names loses encoding/json's field resolution to a real field: the
-	// marshaled object carries the winner's value under that name (or drops
-	// the name on an ambiguity tie), so the composed schema's claim on it
-	// does not hold and the branch must not be unconditional.
-	shadowed bool
-	// ShadowPartial marks a shadowed composed embed that still promotes at
-	// least one unshadowed name. Only the (now conditional) branch evaluates
-	// that name, so the parent object must stay open or a failing branch
-	// would leave it unevaluated and rejected.
-	shadowPartial bool
-}
-
-// collectStructFields mimics encoding/json's field collection logic,
-// handling promotion, shadowing, and ambiguity.
-//
-// The walk is breadth-first level by level, matching encoding/json's
-// typeFields: all fields at depth d are recorded before any embed at depth
-// d+1 is descended into, and a struct type is processed only once, at its
-// shallowest occurrence. A depth-first walk would mark a deep occurrence of
-// a type as visited and then skip a shallower embed of the same type,
-// silently dropping fields that encoding/json promotes.
-//
-// Composed embeds join the same walk as ghost subtrees: their promoted names
-// compete in resolution exactly as encoding/json's flat walk resolves them,
-// and the second return value lists the ghost-won names, each a name the
-// marshaled object carries whose assertion lives in an embed's allOf branch
-// rather than an emitted property.
-//
-//nolint:nestif // Mirrors encoding/json's field collection logic which is inherently nested.
-func (g *generator) collectStructFields(t reflect.Type) ([]structFieldInfo, []string) {
-	// Mark t in-progress so the ghost collection below (which re-enters this
-	// method for composed embed types) terminates on a self- or mutually
-	// composed cycle instead of recursing without bound.
-	if owned := !g.shadowScan[t]; owned {
-		g.shadowScan[t] = true
-		defer delete(g.shadowScan, t)
-	}
-
-	type fieldLevel struct {
-		// GhostOwner names the composed embed type a ghost sighting belongs
-		// to; see the ghost flag below.
-		ghostOwner reflect.Type
-		field      reflect.StructField
-		depth      int
-		// Optional is true when the field is promoted through a pointer-typed
-		// embedded struct. Such fields are omitted by encoding/json when the
-		// embedded pointer is nil, so they are not required.
-		optional bool
-		// Tagged is true when the field's JSON name comes from an explicit json
-		// tag name rather than the Go field name. Encoding/json's tie-break for
-		// fields colliding on a JSON name at the same depth keeps the field only
-		// if exactly one of them is tagged; this records the input to that rule.
-		tagged bool
-		// ComposeAllOf marks a synthetic sighting for an embedded type composed
-		// via allOf rather than a real promoted field. It is carried explicitly
-		// instead of being inferred from the synthetic name's prefix, so a user
-		// field whose JSON name happens to start with that prefix is not
-		// misclassified as a composition.
-		composeAllOf bool
-		// Ghost marks a sighting of a composed embed's promoted JSON name.
-		// Encoding/json promotes those fields normally, so they compete in
-		// name resolution (shadowing deeper real fields, annihilating on
-		// ties), but a winning ghost never becomes a property: the embed's
-		// allOf branch carries its assertion.
-		ghost bool
-	}
-
-	// A fieldKey groups sightings; the composeAllOf flag puts synthetic allOf
-	// compositions in a namespace disjoint from real JSON names, so a user field
-	// whose JSON name equals a composition's synthetic key cannot collide with it
-	// and shadow the composition in the same-depth tie-break.
-	type fieldKey struct {
-		//nolint:unused // Read via struct equality when used as a map key.
-		name string
-		//nolint:unused // Read via struct equality when used as a map key.
-		composeAllOf bool
-	}
-
-	// Collect all visible fields grouped by JSON name.
-	byName := map[fieldKey][]fieldLevel{}
-
-	var order []fieldKey
-
-	// Record adds a sighting of a JSON name. The dup flag marks fields of a
-	// struct type embedded more than once at the same depth: the sighting is
-	// recorded twice so the same-depth ambiguity resolution below drops the
-	// name, matching encoding/json's annihilation of fields from repeated
-	// embeds.
-	record := func(name string, fl fieldLevel, dup bool) {
-		key := fieldKey{composeAllOf: fl.composeAllOf, name: name}
-		if _, seen := byName[key]; !seen {
-			order = append(order, key)
-		}
-
-		byName[key] = append(byName[key], fl)
-		if dup {
-			byName[key] = append(byName[key], fl)
-		}
-	}
-
-	// Embedded types composed via allOf get a synthetic byName key from
-	// allOfName. The key is stable per type, so the same type composed at one
-	// depth collides into a single name and its two sightings annihilate as
-	// ambiguous, matching encoding/json's treatment of a type embedded twice at
-	// the same depth; a deeper re-occurrence is shadowed by the shallower one.
-	// The per-type index keeps distinct types apart even when their names match
-	// across packages.
-	// GhostPromoted memoizes each composed embed type's promoted fields,
-	// collected once for the ghost sightings and reused by the shadow marking.
-	ghostPromoted := map[reflect.Type][]structFieldInfo{}
-
-	allOfNames := map[reflect.Type]string{}
-	allOfName := func(ft reflect.Type) string {
-		if n, ok := allOfNames[ft]; ok {
-			return n
-		}
-
-		n := fmt.Sprintf("__allof__%s__%d", ft.Name(), len(allOfNames))
-		allOfNames[ft] = n
-
-		return n
-	}
-
-	// EmbedEntry is a struct type queued for processing at the next depth. A
-	// ghost entry is a composed embed's subtree: encoding/json promotes its
-	// fields normally, so they walk here and compete in resolution, but every
-	// sighting they record is a ghost owned by ghostOwner, the composed embed
-	// whose allOf branch carries the assertions.
-	type embedEntry struct {
-		typ        reflect.Type
-		ghostOwner reflect.Type
-		index      []int
-		optional   bool
-		ghost      bool
-	}
-
-	// Visited tracks every struct type processed during the walk. A type is
-	// processed only at its shallowest level: a deeper re-occurrence (including
-	// a self-embedding type T struct{ *T; X int }) is skipped, because its
-	// fields are shadowed by the shallower ones, matching encoding/json.
-	visited := map[reflect.Type]bool{}
-
-	next := []embedEntry{{typ: t}}
-
-	var count, nextCount map[reflect.Type]int
-
-	for depth := 0; len(next) > 0; depth++ {
-		current := next
-		next = nil
-		count, nextCount = nextCount, map[reflect.Type]int{}
-
-		for _, e := range current {
-			if visited[e.typ] {
-				continue
-			}
-
-			visited[e.typ] = true
-
-			// A type embedded more than once at this depth contributes every
-			// field twice so the resolution drops them all as ambiguous.
-			dup := count[e.typ] > 1
-
-			for i := range e.typ.NumField() {
-				f := e.typ.Field(i)
-				fieldIndex := append(slices.Clone(e.index), i)
-				f.Index = fieldIndex
-
-				if f.Anonymous {
-					// Embedded field.
-					ft := f.Type
-					embeddedViaPointer := ft.Kind() == reflect.Pointer
-					if embeddedViaPointer {
-						ft = ft.Elem()
-					}
-
-					// Skip unexported embedded non-struct types, matching
-					// encoding/json behavior. Unexported embedded structs
-					// still have their exported fields promoted.
-					if !f.IsExported() && ft.Kind() != reflect.Struct {
-						continue
-					}
-
-					tagVal, hasTag := f.Tag.Lookup("json")
-					explicitName, _, _ := strings.Cut(tagVal, ",")
-					if hasTag && jsontag.ValidName(explicitName) {
-						// Embedded struct with an explicit json name → treated as a
-						// regular named field; encoding/json does not promote it. An
-						// options-only tag (json:",omitempty") has no name -- and a
-						// name encoding/json rejects as invalid is discarded the same
-						// way -- so both fall through to promotion below, matching
-						// encoding/json.
-						info := jsontag.Parse(f)
-						if info.JSONName == "" {
-							continue // json:"-"
-						}
-
-						record(
-							info.JSONName,
-							fieldLevel{
-								field: f, depth: depth, optional: e.optional, tagged: true,
-								ghost: e.ghost, ghostOwner: e.ghostOwner,
-							},
-							dup,
-						)
-
-						continue
-					}
-
-					if ft.Kind() == reflect.Struct {
-						// Check if this embedded struct needs to be composed via
-						// allOf. Inside a ghost subtree the probe is skipped:
-						// encoding/json knows nothing of composition and promotes
-						// the nested embed's fields like any other, so the subtree
-						// flattens below and its names stay in the competition.
-						if !e.ghost && g.needsAllOfComposition(ft) {
-							// Compose via allOf: treat as a single entry. A pointer
-							// embed makes the composition optional: a nil pointer
-							// contributes nothing to the marshaled object.
-							record(
-								allOfName(ft),
-								fieldLevel{
-									field:        f,
-									depth:        depth,
-									optional:     e.optional || embeddedViaPointer,
-									composeAllOf: true,
-								},
-								false,
-							)
-
-							// Ghost sightings: encoding/json still promotes the
-							// composed embed's fields normally, so its subtree
-							// joins this walk as a ghost entry and its names
-							// compete in resolution -- shadowing, same-depth
-							// annihilation (including a tie inside the embed
-							// that a replay of its resolved winners would
-							// miss), and the tag tie-break -- exactly as the
-							// flat encoding/json walk resolves them. A subtree
-							// skipped by the in-flight guard (a self- or
-							// mutually composed type) leaves its names out,
-							// keeping the pre-ghost conservative behavior for
-							// that cycle.
-							if !g.shadowScan[ft] {
-								promoted, _ := g.collectStructFields(ft)
-								ghostPromoted[ft] = promoted
-
-								nextCount[ft]++
-								if nextCount[ft] == 1 {
-									next = append(next, embedEntry{
-										typ:        ft,
-										index:      fieldIndex,
-										optional:   e.optional || embeddedViaPointer,
-										ghost:      true,
-										ghostOwner: ft,
-									})
-								}
-							}
-
-							continue
-						}
-
-						// Queue for the next depth. A type queued more than once at
-						// the same depth is processed once but counted, so its fields
-						// annihilate as ambiguous, matching encoding/json.
-						nextCount[ft]++
-						if nextCount[ft] == 1 {
-							// Fields reached through a pointer embed are optional
-							// because a nil embed omits them entirely.
-							next = append(next, embedEntry{
-								typ:        ft,
-								index:      fieldIndex,
-								optional:   e.optional || embeddedViaPointer,
-								ghost:      e.ghost,
-								ghostOwner: e.ghostOwner,
-							})
-						}
-
-						continue
-					}
-
-					// Embedded non-struct type (interfaces included): encoding/json
-					// records it as a regular leaf field under the field name, never
-					// flattened, so it participates in normal shadowing and
-					// ambiguity resolution. The field name is the unqualified type
-					// identifier, without the type arguments [reflect.Type.Name]
-					// carries for an instantiated generic type.
-					record(f.Name, fieldLevel{
-						field: f, depth: depth, optional: e.optional,
-						ghost: e.ghost, ghostOwner: e.ghostOwner,
-					}, dup)
-
-					continue
-				}
-
-				if !f.IsExported() {
-					continue
-				}
-
-				info := jsontag.Parse(f)
-				if info.JSONName == "" {
-					continue // json:"-"
-				}
-
-				record(
-					info.JSONName,
-					fieldLevel{
-						field: f, depth: depth, optional: e.optional, tagged: info.TaggedName,
-						ghost: e.ghost, ghostOwner: e.ghostOwner,
-					},
-					dup,
-				)
-			}
-		}
-	}
-
-	// Resolve shadowing and ambiguity. Each real JSON name's outcome is
-	// recorded for the shadow marking below: which depth claimed the name,
-	// whether a same-depth ambiguity annihilated it, and whether the winner
-	// was a composed embed's ghost.
-	var (
-		result   []structFieldInfo
-		ghostWon []string
-	)
-
-	outcomes := map[string]nameOutcome{}
-
-	for _, key := range order {
-		candidates := byName[key]
-		if len(candidates) == 0 {
-			continue
-		}
-
-		// Find minimum depth.
-		minDepth := candidates[0].depth
-		for ci := 1; ci < len(candidates); ci++ {
-			if candidates[ci].depth < minDepth {
-				minDepth = candidates[ci].depth
-			}
-		}
-
-		// Filter to only those at minimum depth.
-		var atMin []fieldLevel
-
-		for ci := range candidates {
-			if candidates[ci].depth == minDepth {
-				atMin = append(atMin, candidates[ci])
-			}
-		}
-
-		// Multiple fields collide on this JSON name at the shallowest depth.
-		// Encoding/json breaks the tie by explicit tag: if exactly one of them
-		// has an explicit json tag name, that field wins; if none or more than
-		// one is tagged, they are all dropped as ambiguous.
-		if len(atMin) > 1 {
-			var tagged []fieldLevel
-
-			for ci := range atMin {
-				if atMin[ci].tagged {
-					tagged = append(tagged, atMin[ci])
-				}
-			}
-
-			if len(tagged) != 1 {
-				if !key.composeAllOf {
-					outcomes[key.name] = nameOutcome{depth: minDepth, annihilated: true}
-				}
-
-				continue
-			}
-
-			atMin = tagged
-		}
-
-		if atMin[0].ghost {
-			// A composed embed's promoted field won the name: no property is
-			// emitted (the embed's allOf branch carries the assertion), and
-			// the real fields it defeated stay out of the result, matching
-			// the value encoding/json actually marshals under the name. The
-			// name is reported to the caller, whose closed object must still
-			// evaluate it.
-			outcomes[key.name] = nameOutcome{depth: minDepth, ghostOwner: atMin[0].ghostOwner}
-			ghostWon = append(ghostWon, key.name)
-
-			continue
-		}
-
-		f := atMin[0].field
-		isAllOf := atMin[0].composeAllOf
-
-		if isAllOf {
-			result = append(result, structFieldInfo{
-				field:           f,
-				composeViaAllOf: true,
-				optional:        atMin[0].optional,
-			})
-
-			continue
-		}
-
-		info := jsontag.Parse(f)
-		if info.JSONName == "" {
-			continue
-		}
-
-		outcomes[info.JSONName] = nameOutcome{depth: minDepth}
-
-		sfi := structFieldInfo{
-			field:      f,
-			jsonName:   info.JSONName,
-			omitempty:  info.Omitempty || atMin[0].optional,
-			omitzero:   info.Omitzero,
-			jsonString: info.JSONString,
-		}
-		result = append(result, sfi)
-	}
-
-	// The breadth-first walk sights names level by level, so `order` lists all
-	// depth-0 names before any promoted ones. Sorting the winners by their
-	// index path restores source declaration order, matching encoding/json's
-	// byIndex ordering. A promoted field sorts at its embed's position.
-	slices.SortStableFunc(result, func(a, b structFieldInfo) int {
-		return slices.Compare(a.field.Index, b.field.Index)
-	})
-
-	g.markShadowedCompositions(result, outcomes, ghostPromoted)
-
-	return result, ghostWon
-}
-
-// nameOutcome is the resolution result for one real JSON name: the depth that
-// claimed it, whether a same-depth ambiguity annihilated it (the name never
-// appears in the marshaled object), and, when a composed embed's ghost won,
-// which embed type owns it.
-type nameOutcome struct {
-	ghostOwner  reflect.Type
-	depth       int
-	annihilated bool
-}
-
-// markShadowedCompositions flags each allOf-composed embed whose promoted
-// JSON names encoding/json resolves away from the embed: a shallower (or
-// same-depth winning) real field carries the winner's value under the name,
-// an annihilated name is dropped from the marshaled object entirely, and
-// another embed's winning ghost carries that embed's value. In each case the
-// composed branch would assert this embed's constraints against a value it
-// does not produce, so the branch must not be unconditional. The outcomes map
-// is the enclosing resolution's per-name verdict (ghost sightings included,
-// so the tag tie-break is already replayed), and ghostPromoted carries each
-// scanned embed type's promoted fields; a type absent from it was skipped as
-// a self- or mutually composed cycle and keeps its unconditional branch, as
-// before.
-func (g *generator) markShadowedCompositions(
-	fields []structFieldInfo,
-	outcomes map[string]nameOutcome,
-	ghostPromoted map[reflect.Type][]structFieldInfo,
-) {
-	for i := range fields {
-		fi := &fields[i]
-		if !fi.composeViaAllOf {
-			continue
-		}
-
-		ft := fi.field.Type
-		if ft.Kind() == reflect.Pointer {
-			ft = ft.Elem()
-		}
-
-		promoted, scanned := ghostPromoted[ft]
-		if !scanned {
-			continue
-		}
-
-		embedDepth := len(fi.field.Index) - 1
-
-		var shadowedAny, unshadowedAny bool
-
-		for j := range promoted {
-			p := &promoted[j]
-			if p.composeViaAllOf {
-				// A nested composition's names are opaque to this analysis;
-				// assume it contributes to the marshaled object.
-				unshadowedAny = true
-
-				continue
-			}
-
-			// The promoted name sits at the embed's depth plus its own depth
-			// within the embed type.
-			de := embedDepth + len(p.field.Index)
-
-			out, ok := outcomes[p.jsonName]
-
-			switch {
-			case !ok:
-				// No outcome recorded: the name resolved to nothing (its
-				// ghost was skipped with this scan); keep the branch's claim.
-				unshadowedAny = true
-			case !out.annihilated && out.ghostOwner == ft && out.depth == de:
-				// This embed's own ghost won the name, so the marshaled
-				// object carries the embed's value there.
-				unshadowedAny = true
-			case out.depth <= de:
-				// A real field won the tie-break, the name annihilated, or
-				// another embed claimed it at or above this depth.
-				shadowedAny = true
-			default:
-				unshadowedAny = true
-			}
-		}
-
-		fi.shadowed = shadowedAny
-		fi.shadowPartial = shadowedAny && unshadowedAny
-	}
-}
-
 // needsAllOfComposition reports whether an embedded struct type should be
 // composed via allOf rather than having its fields promoted.
 func (g *generator) needsAllOfComposition(t reflect.Type) bool {
@@ -1685,10 +1159,10 @@ func (g *generator) needsAllOfComposition(t reflect.Type) bool {
 // later in applyFieldInterpreters once all sibling properties exist.
 func (g *generator) buildFieldSchema(
 	parentType reflect.Type,
-	fi structFieldInfo,
+	fi fieldset.Field,
 	parent *node,
 ) (*node, error) {
-	fieldType := fi.field.Type
+	fieldType := fi.StructField.Type
 	isPointer := fieldType.Kind() == reflect.Pointer
 
 	// 1. JSON ",string" override. When it coerces the field schema to a string,
@@ -1714,7 +1188,7 @@ func (g *generator) buildFieldSchema(
 	// raw bytes, so the field keeps the kind-based reflection a direct
 	// marshaler otherwise gets rather than a string schema its output never
 	// satisfies.
-	stringOverride := fi.jsonString && reflectkind.IsStringableType(fieldType) &&
+	stringOverride := fi.JSONString && reflectkind.IsStringableType(fieldType) &&
 		!reflectkind.ImplementsJSONMarshaler(fieldType)
 	tagTypeSchema := (*Schema)(nil)
 
@@ -1768,7 +1242,7 @@ func (g *generator) buildFieldSchema(
 	// 3. Schema struct tag. Facts land on the authored canvas; a type= override
 	// restructures the type-derived payload (it replaces the reflected assertion),
 	// so it takes the payload directly.
-	if tag, ok := fi.field.Tag.Lookup("jsonschema"); ok {
+	if tag, ok := fi.StructField.Tag.Lookup("jsonschema"); ok {
 		res, err := tagparse.Apply(
 			tag, fieldType, fieldNode.authored, fieldNode.payload, tagTypeSchema, stringOverride)
 		if err != nil {
@@ -1796,14 +1270,14 @@ func (g *generator) buildFieldSchema(
 		parent.payload.Properties = map[string]*Schema{}
 	}
 
-	required := !fi.omitempty && !fi.omitzero
+	required := !fi.Omitempty && !fi.Omitzero
 	if required {
-		parent.payload.Required = append(parent.payload.Required, fi.jsonName)
+		parent.payload.Required = append(parent.payload.Required, fi.JSONName)
 	}
 
-	parent.payload.Properties[fi.jsonName] = fieldNode.payload
-	parent.payload.PropertyOrder = append(parent.payload.PropertyOrder, fi.jsonName)
-	parent.props = append(parent.props, nodeProp{name: fi.jsonName, schema: fieldNode})
+	parent.payload.Properties[fi.JSONName] = fieldNode.payload
+	parent.payload.PropertyOrder = append(parent.payload.PropertyOrder, fi.JSONName)
+	parent.props = append(parent.props, nodeProp{name: fi.JSONName, schema: fieldNode})
 
 	return fieldNode, nil
 }
@@ -1846,7 +1320,7 @@ func rebuildOverriddenField(fieldNode *node) *node {
 // canvases reads the field node's element children.
 func (g *generator) fieldContext(
 	parentType reflect.Type,
-	fi structFieldInfo,
+	fi fieldset.Field,
 	fieldNode *node,
 	parent *Schema,
 ) FieldContext {
@@ -1858,13 +1332,13 @@ func (g *generator) fieldContext(
 	}
 
 	return FieldContext{
-		Name:        fi.jsonName,
-		Type:        fi.field.Type,
-		Owner:       reflectkind.DeclaringType(parentType, fi.field),
+		Name:        fi.JSONName,
+		Type:        fi.StructField.Type,
+		Owner:       reflectkind.DeclaringType(parentType, fi.StructField),
 		Canvas:      fieldNode.authored,
 		Base:        base,
 		Parent:      parent,
-		StructField: fi.field,
+		StructField: fi.StructField,
 		Draft:       g.draft,
 		node:        fieldNode,
 	}
@@ -1876,11 +1350,11 @@ func (g *generator) fieldContext(
 // wrap are handled by render, from the complete graph.
 func (g *generator) applyFieldInterpreters(
 	parentType reflect.Type,
-	fi structFieldInfo,
+	fi fieldset.Field,
 	fieldNode, parent *node,
 ) error {
 	for _, reg := range g.tagInterpreters {
-		if tag, ok := fi.field.Tag.Lookup(reg.key); ok {
+		if tag, ok := fi.StructField.Tag.Lookup(reg.key); ok {
 			fc := g.fieldContext(parentType, fi, fieldNode, parent.payload)
 
 			err := reg.interp.Interpret(g.ctx, fc, Tag{Key: reg.key, Value: tag})
@@ -1913,7 +1387,7 @@ func (g *generator) wrapRefForDraft7(s *Schema) {
 
 // processAllOfField handles embedded structs that need allOf composition.
 //
-// An embed reached through a pointer (fi.optional) contributes nothing to the
+// An embed reached through a pointer (fi.Optional) contributes nothing to the
 // marshaled object when the pointer is nil, so its schema cannot be an
 // unconditional allOf branch. Such a branch would require the embed's
 // properties in every instance and reject the nil-embed serialization. The
@@ -1923,13 +1397,13 @@ func (g *generator) wrapRefForDraft7(s *Schema) {
 // partial embed serialization under Draft-07 (which lacks unevaluated
 // semantics); accepting those is the price of not rejecting valid documents.
 //
-// A shadowed embed (fi.shadowed) takes the same wrap for the same reason: a
+// A shadowed embed (fi.Shadowed) takes the same wrap for the same reason: a
 // real field wins one of the embed's promoted names, so the marshaled object
 // carries the winner's value where the branch asserts the embed's
 // constraints, and an unconditional branch would reject the type's own
 // marshaled JSON.
-func (g *generator) processAllOfField(fi structFieldInfo, parent *node) error {
-	ft := fi.field.Type
+func (g *generator) processAllOfField(fi fieldset.Field, parent *node) error {
+	ft := fi.StructField.Type
 	if ft.Kind() == reflect.Pointer {
 		ft = ft.Elem()
 	}
@@ -1945,7 +1419,7 @@ func (g *generator) processAllOfField(fi structFieldInfo, parent *node) error {
 	// optionality rides on embedNode.optional, not the node's null bit).
 	branch.nullable = false
 
-	parent.embeds = append(parent.embeds, embedNode{branch: branch, optional: fi.optional || fi.shadowed})
+	parent.embeds = append(parent.embeds, embedNode{branch: branch, optional: fi.Optional || fi.Shadowed})
 
 	return nil
 }
@@ -2150,7 +1624,7 @@ func (g *generator) applyTypeDescription(t reflect.Type, s *Schema) error {
 // [reflectkind.DeclaringType]); an empty comment leaves the description unset, and a
 // provider error aborts generation.
 func (g *generator) applyFieldDescription(
-	parentType reflect.Type, fi structFieldInfo, fieldNode *node, parent *Schema,
+	parentType reflect.Type, fi fieldset.Field, fieldNode *node, parent *Schema,
 ) error {
 	if g.descriptionProvider == nil {
 		return nil
@@ -2160,7 +1634,7 @@ func (g *generator) applyFieldDescription(
 
 	comment, err := g.descriptionProvider.FieldDescription(g.ctx, fc)
 	if err != nil {
-		return fmt.Errorf("describe field %q of %s: %w", fi.jsonName, parentType, err)
+		return fmt.Errorf("describe field %q of %s: %w", fi.JSONName, parentType, err)
 	}
 
 	if comment != "" {
