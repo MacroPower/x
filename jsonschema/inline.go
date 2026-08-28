@@ -462,7 +462,7 @@ func (in *inliner) run(s *Schema) (*Schema, error) {
 	// into a malformed output schema this package's own [Compile] rejects.
 	in.session = reg.NewSession(in.fallbackVet)
 
-	in.record(rootDoc.Schema(), "", in.session.SchemaBase(pristine))
+	in.recordDoc(rootDoc, "", in.session.SchemaBase(pristine))
 
 	// The context reaches the resolver through the ctx field set above:
 	// document fetches happen deep inside the expansion walk, which cannot
@@ -481,13 +481,35 @@ func (in *inliner) run(s *Schema) (*Schema, error) {
 	return working, nil
 }
 
-// record interns every schema in the pristine document rooted at s into the
+// recordDoc records a vetted document: the pristine root, a fetched remote, or
+// a fallback substitute, each of which enters resolution space as a document of
+// its own. Taking the [schemavet.Doc] currency rather than a raw *Schema is
+// what states, in the signature, that only vetted material reaches the index
+// and the expansion bookkeeping keyed by it, the demand [schemaIndex.extend]
+// makes of the validator's own index.
+func (in *inliner) recordDoc(doc schemavet.Doc, path, docURI string) {
+	in.recordTree(doc.Schema(), path, docURI)
+}
+
+// recordNode records a vetted fragment: a JSON-pointer fallback target the
+// session materialized from raw JSON inside an unknown keyword, which is a
+// fragment of a document rather than one of its own and so carries the
+// [schemavet.Node] currency (see [inliner.vetTarget]).
+func (in *inliner) recordNode(node schemavet.Node, path, docURI string) {
+	in.recordTree(node.Schema(), path, docURI)
+}
+
+// recordTree interns every schema in the pristine document rooted at s into the
 // node-identity index and stores, under the id it assigns, the schema's JSON
 // Pointer path within that document and doc, the document's URI. The paths and
 // document URIs name ref-node locations for fallback consultations. A schema
 // already indexed stops the walk, so an aliased or cyclic graph keeps the first
 // location recorded for a node.
-func (in *inliner) record(s *Schema, path, doc string) {
+//
+// It is the walk behind [inliner.recordDoc] and [inliner.recordNode], which are
+// its only callers: the currency each demands is where the vetting invariant is
+// stated, the way [schemaIndex.walk] sits behind [schemaIndex.extend].
+func (in *inliner) recordTree(s *Schema, path, doc string) {
 	if s == nil {
 		return
 	}
@@ -503,7 +525,7 @@ func (in *inliner) record(s *Schema, path, doc string) {
 	in.docs[id] = doc
 
 	for _, child := range SubschemaEntries(s) {
-		in.record(child.Schema, path+child.Pointer, doc)
+		in.recordTree(child.Schema, path+child.Pointer, doc)
 	}
 }
 
@@ -516,6 +538,23 @@ func (in *inliner) grow() {
 	in.docs = growSlice(in.docs, n)
 	in.inflight = growSlice(in.inflight, n)
 	in.memo = growSlice(in.memo, n)
+}
+
+// vetTarget mints the [schemavet.Node] currency [inliner.recordNode] demands
+// for a resolved target the walk has not recorded yet. Every such target comes
+// from the session's JSON-pointer fallback, which vets it through this same
+// vetter before returning it, so the checks all short-circuit on their visited
+// sets and this re-mints the proof rather than running a second pass. A target
+// that reaches here unchecked is vetted now, and its violation travels as an
+// ordinary expansion failure, wrapping [ErrRefResolve] at the referencing ref
+// where a [WithRefFallback] policy can answer it.
+func (in *inliner) vetTarget(target *Schema, doc, ptr string) (schemavet.Node, error) {
+	node, err := in.vetter.Vet(target, doc+"#"+ptr)
+	if err != nil {
+		return schemavet.Node{}, fmt.Errorf("%w: %w", ErrRefResolve, err)
+	}
+
+	return node, nil
 }
 
 // internedID returns the node id the index assigned to s. Every caller relies
@@ -705,7 +744,12 @@ func (in *inliner) expandTarget(pristine *Schema, path string) (*Schema, error) 
 			}
 		}
 
-		in.record(target, targetPtr, targetDoc)
+		node, vetErr := in.vetTarget(target, targetDoc, targetPtr)
+		if vetErr != nil {
+			return in.substitute(pristine, path, ref, vetErr)
+		}
+
+		in.recordNode(node, targetPtr, targetDoc)
 	}
 
 	targetID, err := in.internedID(target)
@@ -839,7 +883,7 @@ func (in *inliner) substitute(pristine *Schema, path, ref string, inlineErr erro
 		seed, doc = "", in.session.SchemaBase(cp)
 	}
 
-	in.record(cp, seed, doc)
+	in.recordDoc(subDoc, seed, doc)
 
 	return in.inlineCopy(cp, seed, false)
 }
@@ -1073,7 +1117,7 @@ func (in *inliner) fetchDoc(baseURI string) (*Schema, error) {
 
 	in.session.Registry().URI[baseURI] = cp
 	in.session.RegisterFallback(cp, baseURI)
-	in.record(cp, "", in.session.SchemaBase(cp))
+	in.recordDoc(doc, "", in.session.SchemaBase(cp))
 
 	return cp, nil
 }

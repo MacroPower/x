@@ -53,7 +53,10 @@ The package has two independent halves sharing the `Schema` type:
   re-checked where the inliner records it. `inliner.vetProfile` is the one
   narrowing: under `WithRetrievalBase` the resolution walk reads `$id` as
   inert, so `schemavet.Profile.InertIDs` skips the `$id` domain check in every
-  document the run holds. The
+  document the run holds. The inliner's own index walk takes the
+  currency at its entry points, `recordDoc` for a document root and
+  `recordNode` for a materialized pointer target, so the walk behind them
+  reaches no schema the run has not vetted. The
   pointer-graph policy is separate from that vetting and has rules at two
   boundaries.
   `checkSchemaTree` (`validate.go`) rejects a root whose sub-schema pointers
