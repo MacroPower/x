@@ -105,6 +105,10 @@
 // keywords -- are rejected with an error for the same reason numeric bounds
 // are above.
 //
+// An [encoding/json.Number] is the one string kind exempt from that rule.
+// [encoding/json] writes it as the number it holds, so a quoted one emits its
+// literal once-quoted and follows the coerced-numeric rules above instead.
+//
 // Length and size bounds (minLength/maxLength, minItems/maxItems,
 // minProperties/maxProperties) from several rules in one tag intersect
 // independently of order: a floor only rises and a ceiling only falls, and len=N

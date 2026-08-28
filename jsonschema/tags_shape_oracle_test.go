@@ -82,8 +82,6 @@ func jsonName(f reflect.StructField) string {
 	return name
 }
 
-const reasonNumberNotDoubleEncoded = "encoding/json quotes a json.Number under ,string once, not twice"
-
 // jsonToken is the kind of JSON value a marshaled field turned out to be. It is
 // the oracle's observation: encoding/json wrote one of these six, and the form
 // tagmodel assigned the field has to agree.
@@ -554,12 +552,6 @@ func assertCoercedContent(t *testing.T, obs *shapeObservation, raw json.RawMessa
 			"%s: a quoted bool field emits a bool literal", where)
 
 	case jsonschema.FormCoercedString:
-		if obs.shape.Elem == numberType {
-			t.Log(reasonNumberNotDoubleEncoded)
-
-			return
-		}
-
 		assert.True(t, json.Valid([]byte(content)) && strings.HasPrefix(content, `"`),
 			"%s: a quoted string field double-encodes, got %q", where, content)
 	}
@@ -700,6 +692,17 @@ func oracleRoster() map[string]oracleRow {
 		},
 		"pointer to text-marshaling numeric": {
 			typ: reflect.TypeFor[*oracleText](), wantDefs: jsonschema.FormCoercedNumber,
+		},
+
+		// A json.Number is the one string kind encoding/json writes as a
+		// number, so a quoted one emits its literal once-quoted rather than
+		// double-encoded and classifies in the numeric coercion column.
+		"quoted json number": {
+			typ: reflect.TypeFor[json.Number](), jsonTag: "v,string",
+			wantDefs: jsonschema.FormCoercedNumber,
+		},
+		"json number": {
+			typ: reflect.TypeFor[json.Number](), wantDefs: jsonschema.FormNumber,
 		},
 
 		// 649a6f2: a marshaler-bearing uint8 element is exempt from the byte

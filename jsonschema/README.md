@@ -430,7 +430,12 @@ already-encoded string a second time, so the value `abc` marshals as the JSON
 string `"\"abc\""` -- and its scalars serialize the same way (`const=abc` pins
 that quoted text), while the keywords that would measure or match the unquoted
 value (`pattern`, `format`, and the length bounds) are rejected with an error
-rather than silently asserting against the quoted, escaped text. `enum`
+rather than silently asserting against the quoted, escaped text.
+`encoding/json.Number` is the one string kind exempt from that rule.
+`encoding/json` writes it as the number it holds, so a quoted one emits its
+literal once-quoted and takes the coerced-numeric rules instead. It emits the
+literal verbatim rather than canonicalizing it, so `const=5.0` pins `"5.0"` and
+`const=5` pins `"5"`. `enum`
 and `examples` values are separated by `|`; commas separate pairs, so a value
 containing a comma escapes it with a backslash (`\,`, and `\\` for a literal
 backslash). For complex values, use `JSONSchemaExtender` or doc comments with

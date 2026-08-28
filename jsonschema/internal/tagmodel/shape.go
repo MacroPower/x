@@ -287,6 +287,14 @@ func classifyForm(t reflect.Type, base *jsonschema.Schema, quoted bool) Form {
 		// The quoted flag is the only thing that distinguishes a
 		// double-encoding json:",string" string field from a plain one.
 		if quoted && str {
+			// A json.Number is the one string kind encoding/json writes as a
+			// number, so a quoted one emits its literal once-quoted ("5") and
+			// belongs in the numeric coercion column rather than the
+			// double-encoding one.
+			if reflectkind.IsJSONNumber(t) {
+				return FormCoercedNumber
+			}
+
 			return FormCoercedString
 		}
 

@@ -144,9 +144,19 @@ func (sh Shape) coercedText(lit string) (any, error) {
 		err    error
 	)
 
-	if sh.Form == FormCoercedBool {
+	switch {
+	case sh.Form == FormCoercedBool:
 		parsed, err = ParseBoolLiteral(lit)
-	} else {
+
+	case sh.Kind == reflect.String:
+		// A numeric type with a string kind (json.Number) holds its literal as
+		// text and has no width to parse at, so the literal converts straight
+		// through and the marshal below is what validates it. Parsing a number
+		// first would be both pointless and unconvertible: reflect refuses a
+		// float64 to a string-kinded type.
+		parsed = lit
+
+	default:
 		parsed, err = sh.parseNumber(lit)
 	}
 
