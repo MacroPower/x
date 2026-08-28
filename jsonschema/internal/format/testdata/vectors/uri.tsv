@@ -2,17 +2,17 @@
 #
 # A uri is an absolute URI, so it must carry a scheme (RFC 3986 §3). The
 # scheme-less reference forms are the rejected rows. The official suite's
-# optional/format/uri.json covers the character rules and carries the ftp and
-# mailto examples verbatim. What it leaves open are the two RFC 3986 §5.4
-# references that carry a scheme, which TestURIReferenceResolutionVectors hands
-# over here because a relative-ref cannot begin with one. The RFC 3986 §1.1.2
-# rows below restate suite cases, kept so the scheme rules read whole in one
-# place.
+# optional/format/uri.json covers the character rules and carries seven of the
+# eight RFC 3986 §1.1.2 example URIs verbatim. What it leaves open are the two
+# RFC 3986 §5.4 references that carry a scheme, which
+# TestURIReferenceResolutionVectors hands over here because a relative-ref
+# cannot begin with one. The ftp and mailto rows below restate suite cases,
+# kept so the scheme rules read whole in one place.
 #
 # Row format: see loadVectorFile in vectors_test.go.
 #
 "https://example.com/a?b=c#d"	true	http with a query and a fragment
-"urn:isbn:0451450523"	true	RFC 3986 §1.1.2 urn isbn
+"urn:isbn:0451450523"	true	a URN, which carries a scheme and no authority
 "mailto:John.Doe@example.com"	true	RFC 3986 §1.1.2 mailto
 "ftp://ftp.is.co.za/rfc/rfc1808.txt"	true	RFC 3986 §1.1.2 ftp
 "//example.com"	false	a network-path reference carries no scheme

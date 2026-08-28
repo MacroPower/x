@@ -24,8 +24,8 @@ import (
 //
 // Breadth stays where it already lives: format_regex_ascii_escape_test.go,
 // format_uritemplate_literals_test.go, format_uri_ipvfuture_test.go, and
-// internal/format. The exception is the email
-// bullet. Nothing else asserts its size limits, so that row carries them all.
+// internal/format. The exception is the email bullet. Nothing else asserts its
+// size limits, so that row carries them all.
 
 const (
 	// The sentence introducing each list, and the heading each list runs up to.

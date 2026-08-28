@@ -485,7 +485,7 @@ contract the tests enforce.
   corpus, or a vector file, so a newly registered format cannot arrive with
   none. A claim names the Go function value rather than its name as a string, so
   renaming a target breaks the build in the coverage table. Containment targets
-  are deliberately not a coverage source: a containment oracle is another format
+  are deliberately not a coverage source. A containment oracle is another format
   in the same package rather than an independent one, so a containment pair that
   drifts together stays green. Each allowlist entry carries a reason string; the
   allowlist ships empty.

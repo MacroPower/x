@@ -31,7 +31,8 @@ import (
 // source. A containment oracle is another format in this package rather than an
 // independent one, so a containment pair that drifts together stays green, and
 // a format covered by containment alone is not covered. One-wayness is not the
-// distinction, since two of the differentials this table accepts are one-way.
+// distinction, since several of the differentials this table accepts are
+// one-way too.
 
 // coverageSource is a differential target or a corpus loader, held as the
 // function value so the compiler enforces that the identifier exists.

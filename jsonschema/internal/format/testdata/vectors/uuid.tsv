@@ -2,10 +2,10 @@
 #
 # The canonical form is 8-4-4-4-12 hex digits and case is insignificant. The
 # official suite's optional/format/uuid.json carries 16 string cases: the nil
-# UUID,
-# a set of malformed spellings, and one value each for versions 1, 4, 5, and 6
-# plus a reserved variant nibble. What it leaves open is the RFC's own test
-# vectors, the max UUID, and the URN and braced spellings.
+# UUID, a set of malformed spellings, and one value each for versions 1, 4, 5,
+# and 6, plus one whose version nibble is unassigned. What it leaves open is the
+# RFC's own test vectors, the max UUID, a reserved variant nibble, and the URN
+# and braced spellings.
 #
 # Row format: see loadVectorFile in vectors_test.go.
 #

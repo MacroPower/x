@@ -18,7 +18,8 @@ import (
 // and the stdlib differentials (layer 2), and sit alongside the official JSON
 // Schema Test Suite's optional/format cases, which already run via
 // TestSuiteFormat. Each vector file names the suite coverage it complements and
-// carries only what that coverage leaves open, so no vector file re-transcribes
+// carries what that coverage leaves open, restating a suite case only where a
+// boundary reads better whole in one place. So no vector file re-transcribes
 // RFC 3339's leap second or the RFC 6901 §5 pointer examples. Those §5 examples
 // are all valid, which leaves the json-pointer escape boundary open, so
 // json-pointer.tsv carries it.
@@ -183,7 +184,8 @@ func loadVectorFile(t *testing.T, path string) map[string]formatVector {
 
 	for line := 1; scanner.Scan(); line++ {
 		text := scanner.Text()
-		if strings.TrimSpace(text) == "" || strings.HasPrefix(text, "#") {
+		trimmed := strings.TrimSpace(text)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			continue
 		}
 

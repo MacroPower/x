@@ -42,8 +42,8 @@
 "ab--cd.com"	true	reserved-LDH under IDNA, an ordinary RFC 1123 label here (b4d0fae)
 "te--st.example.com"	true	the same shape below the top level (b4d0fae)
 "xn--bcher-kva.example.com"	true	a genuine A-label still decodes as Punycode
-"xn--a.com"	false	the ACE prefix demands valid Punycode
-"XN--aa---o47jg78q.com"	false	invalid Punycode, reached because RFC 5890 §2.3.2.1 matches the prefix in any case
+"xn--a.com"	false	the payload decodes to U+0080, which IDNA disallows
+"XN--aa---o47jg78q.com"	false	decodes to a reserved-LDH U-label, the same rule reached through Punycode
 #
 # The RFC 1035 §2.3.4 253-octet name cap. The DNS root dot does not count
 # toward it, which is why the 253-octet name stays valid with one appended

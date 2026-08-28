@@ -2,10 +2,11 @@
 #
 # The vendored is_email corpus (testdata/corpus/isemail) grades 164 addresses
 # against the RFC 5322 spectrum, and the official suite's
-# optional/format/email.json carries the dot-atom and address-literal rules.
-# What both leave open is the dotless single-label domain, which Domain permits
-# and the RFC 1123 numeric-TLD ban does not reach, and the empty quoted local
-# part below.
+# optional/format/email.json carries 21 string cases covering the dot-atom and
+# address-literal rules. Between them they reach every shape below, so this
+# file adds no case neither runs. What it adds is the naming: one row per RFC
+# 5321 production, in one place, with the empty quoted local part carrying the
+# history that made it worth pinning.
 #
 # Row format: see loadVectorFile in vectors_test.go.
 #
