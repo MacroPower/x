@@ -1,0 +1,653 @@
+[
+  {
+    "name": "coerced numeric len pins the serialized text",
+    "note": "43a3598: len routes through the string path for a coerced numeric",
+    "type": "int",
+    "json": "v,string",
+    "validate": "len=3",
+    "schema": {
+      "type": "string",
+      "const": "3"
+    },
+    "instances": [
+      {
+        "json": "3",
+        "want": "accept"
+      },
+      {
+        "json": 3,
+        "want": "reject"
+      },
+      {
+        "json": "33",
+        "want": "reject"
+      }
+    ]
+  },
+  {
+    "name": "a numeric bound on a coerced field is rejected",
+    "note": "b83aba2: minimum constrains JSON numbers, not the quoted instance",
+    "type": "int",
+    "json": "v,string",
+    "validate": "min=3",
+    "validateError": "ErrUnsupported"
+  },
+  {
+    "name": "a coerced scalar canonicalizes its literal",
+    "note": "1e45215: eq=5.0 constrains the canonical text the field emits",
+    "type": "float64",
+    "json": "v,string",
+    "validate": "eq=5.0",
+    "schema": {
+      "type": "string",
+      "const": "5"
+    },
+    "instances": [
+      {
+        "json": "5",
+        "want": "accept"
+      },
+      {
+        "json": "5.0",
+        "want": "reject"
+      },
+      {
+        "json": 5,
+        "want": "reject"
+      }
+    ]
+  },
+  {
+    "name": "coerced required forbids the serialized zero",
+    "note": "5e8a780: the non-zero check compares against the emitted text",
+    "type": "int",
+    "json": "v,string",
+    "validate": "required",
+    "schema": {
+      "type": "string",
+      "not": {
+        "const": "0"
+      }
+    },
+    "instances": [
+      {
+        "json": "1",
+        "want": "accept"
+      },
+      {
+        "json": "0",
+        "want": "reject"
+      }
+    ]
+  },
+  {
+    "name": "a sequence enumeration reaches coerced elements",
+    "note": "1042aa7: the sequence rule dispatches on the element's own shape",
+    "type": "[]textLevel",
+    "json": "v",
+    "jsonschema": "enum=1|2|3",
+    "validate": "oneof=1 2 3",
+    "schema": {
+      "type": [
+        "null",
+        "array"
+      ],
+      "items": {
+        "type": "string",
+        "enum": [
+          "L1",
+          "L2",
+          "L3"
+        ]
+      }
+    },
+    "instances": [
+      {
+        "json": [
+          "L1",
+          "L2"
+        ],
+        "want": "accept"
+      },
+      {
+        "json": [
+          "1"
+        ],
+        "want": "reject"
+      },
+      {
+        "json": [
+          1
+        ],
+        "want": "reject"
+      },
+      {
+        "json": null,
+        "want": "accept"
+      }
+    ]
+  },
+  {
+    "name": "a quoted string field double-encodes",
+    "note": "77744d1: the instance is the JSON-quoted text, so the literal is too",
+    "type": "string",
+    "json": "v,string",
+    "jsonschema": "const=abc",
+    "validate": "eq=abc",
+    "schema": {
+      "type": "string",
+      "const": "\"abc\""
+    },
+    "instances": [
+      {
+        "json": "\"abc\"",
+        "want": "accept"
+      },
+      {
+        "json": "abc",
+        "want": "reject"
+      }
+    ]
+  },
+  {
+    "name": "a coerced pointer keeps the coercion on the value branch",
+    "note": "5b1cf4a: the tag interpreters see the pointer ,string coercion",
+    "type": "*int",
+    "json": "v,string",
+    "jsonschema": "const=7",
+    "validate": "eq=7",
+    "schema": {
+      "anyOf": [
+        {
+          "type": "string",
+          "const": "7"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "instances": [
+      {
+        "json": "7",
+        "want": "accept"
+      },
+      {
+        "json": null,
+        "want": "accept"
+      },
+      {
+        "json": 7,
+        "want": "reject"
+      },
+      {
+        "json": "8",
+        "want": "reject"
+      }
+    ]
+  },
+  {
+    "name": "unique on a shape with no array is rejected",
+    "note": "4964618: uniqueItems has nothing to constrain on a string",
+    "type": "string",
+    "json": "v",
+    "validate": "unique",
+    "validateError": "ErrUnsupported"
+  },
+  {
+    "name": "an element enumeration drops the kind bounds in both dialects",
+    "note": "18a2265: the rule reads the keyword, not which dialect wrote it",
+    "type": "[]int8",
+    "json": "v",
+    "jsonschema": "enum=1|2|3",
+    "validate": "oneof=1 2 3",
+    "schema": {
+      "type": [
+        "null",
+        "array"
+      ],
+      "items": {
+        "type": "integer",
+        "enum": [
+          1,
+          2,
+          3
+        ]
+      }
+    },
+    "instances": [
+      {
+        "json": [
+          1,
+          2
+        ],
+        "want": "accept"
+      },
+      {
+        "json": [
+          4
+        ],
+        "want": "reject"
+      },
+      {
+        "json": null,
+        "want": "accept"
+      }
+    ]
+  },
+  {
+    "name": "a scalar enumeration drops the kind bounds in both dialects",
+    "note": "18a2265 at field level: an int8 restricted to 1, 2, 3 keeps no range",
+    "type": "int8",
+    "json": "v",
+    "jsonschema": "enum=1|2|3",
+    "validate": "oneof=1 2 3",
+    "schema": {
+      "type": "integer",
+      "enum": [
+        1,
+        2,
+        3
+      ]
+    },
+    "instances": [
+      {
+        "json": 2,
+        "want": "accept"
+      },
+      {
+        "json": 4,
+        "want": "reject"
+      }
+    ]
+  },
+  {
+    "name": "a const excluded by an enum is a conflict",
+    "note": "496175c: the pair can never both hold, so it reports",
+    "type": "int",
+    "json": "v",
+    "jsonschema": "enum=5|6,const=7",
+    "jsonschemaError": "ErrConstraintConflict"
+  },
+  {
+    "name": "content rules on a raw JSON field are no-ops",
+    "note": "d524621: a raw field's instance is already-decoded JSON",
+    "type": "RawMessage",
+    "json": "v",
+    "validate": "json",
+    "schema": true,
+    "instances": [
+      {
+        "json": 1,
+        "want": "accept"
+      },
+      {
+        "json": {
+          "a": 1
+        },
+        "want": "accept"
+      },
+      {
+        "json": "x",
+        "want": "accept"
+      }
+    ]
+  },
+  {
+    "name": "unique on a map splits on the naming policy",
+    "note": "4797c50: the keyword-naming dialect reports what the rule-shaped one drops",
+    "type": "map[string]int",
+    "json": "v",
+    "jsonschema": "uniqueItems=true",
+    "jsonschemaError": "ErrUnsupported",
+    "validate": "unique",
+    "schema": {
+      "type": [
+        "null",
+        "object"
+      ],
+      "additionalProperties": {
+        "type": "integer"
+      }
+    },
+    "instances": [
+      {
+        "json": {
+          "a": 1
+        },
+        "want": "accept"
+      },
+      {
+        "json": null,
+        "want": "accept"
+      }
+    ]
+  },
+  {
+    "name": "unique with a field parameter is rejected",
+    "note": "30d9394: uniqueItems compares whole elements, not one named field",
+    "type": "[]string",
+    "json": "v",
+    "validate": "unique=Name",
+    "validateError": "any"
+  },
+  {
+    "name": "a float32 value outside the type range is rejected",
+    "note": "bfd542b: a scalar is range-checked against the field's Go type",
+    "type": "float32",
+    "json": "v",
+    "validate": "eq=1e39",
+    "validateError": "any"
+  },
+  {
+    "name": "an element enumeration survives an array type override",
+    "note": "daa58cb: type=array keeps the items the enum rides on",
+    "type": "[]string",
+    "json": "v",
+    "jsonschema": "enum=a|b,type=array",
+    "schema": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "a",
+          "b"
+        ]
+      }
+    },
+    "instances": [
+      {
+        "json": [
+          "a"
+        ],
+        "want": "accept"
+      },
+      {
+        "json": [
+          "c"
+        ],
+        "want": "reject"
+      }
+    ]
+  },
+  {
+    "name": "an element enumeration conflicts with a non-array override",
+    "note": "daa58cb: the enum lands on items, which type=string has none of",
+    "type": "[]string",
+    "json": "v",
+    "jsonschema": "enum=a|b,type=string",
+    "jsonschemaError": "any"
+  },
+  {
+    "name": "a boolean const agrees across dialects",
+    "note": "the shared model's pinned-value cell on the boolean column",
+    "type": "bool",
+    "json": "v",
+    "jsonschema": "const=true",
+    "validate": "eq=true",
+    "schema": {
+      "type": "boolean",
+      "const": true
+    },
+    "instances": [
+      {
+        "json": true,
+        "want": "accept"
+      },
+      {
+        "json": false,
+        "want": "reject"
+      }
+    ]
+  },
+  {
+    "name": "a nullable boolean const keeps null valid",
+    "note": "a value constraint lands on the value branch of the null encoding",
+    "type": "*bool",
+    "json": "v",
+    "jsonschema": "const=true",
+    "validate": "eq=true",
+    "schema": {
+      "anyOf": [
+        {
+          "type": "boolean",
+          "const": true
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "instances": [
+      {
+        "json": true,
+        "want": "accept"
+      },
+      {
+        "json": null,
+        "want": "accept"
+      },
+      {
+        "json": false,
+        "want": "reject"
+      }
+    ]
+  },
+  {
+    "name": "a nullable string enumeration keeps null valid",
+    "note": "the enumeration cell under the same null encoding",
+    "type": "*string",
+    "json": "v",
+    "jsonschema": "enum=a|b",
+    "validate": "oneof=a b",
+    "schema": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "a",
+            "b"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "instances": [
+      {
+        "json": "a",
+        "want": "accept"
+      },
+      {
+        "json": null,
+        "want": "accept"
+      },
+      {
+        "json": "c",
+        "want": "reject"
+      }
+    ]
+  },
+  {
+    "name": "a map count bound agrees across dialects",
+    "note": "the rule-shaped min and the keyword-naming minProperties are one cell",
+    "type": "map[string]int",
+    "json": "v",
+    "jsonschema": "minProperties=1",
+    "validate": "min=1",
+    "schema": {
+      "type": [
+        "null",
+        "object"
+      ],
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "integer"
+      }
+    },
+    "instances": [
+      {
+        "json": {
+          "a": 1
+        },
+        "want": "accept"
+      },
+      {
+        "json": {},
+        "want": "reject"
+      }
+    ]
+  },
+  {
+    "name": "element uniqueness agrees across dialects",
+    "note": "1f74e42: the uniqueness cell both dialects reach",
+    "type": "[]string",
+    "json": "v",
+    "jsonschema": "uniqueItems=true",
+    "validate": "unique",
+    "schema": {
+      "type": [
+        "null",
+        "array"
+      ],
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "instances": [
+      {
+        "json": [
+          "a",
+          "b"
+        ],
+        "want": "accept"
+      },
+      {
+        "json": [
+          "a",
+          "a"
+        ],
+        "want": "reject"
+      }
+    ]
+  },
+  {
+    "name": "a nested dive reaches the innermost element",
+    "note": "each dive descends one container, and the rule applies at the bottom",
+    "type": "[][]string",
+    "json": "v",
+    "validate": "dive,dive,min=2",
+    "schema": {
+      "type": [
+        "null",
+        "array"
+      ],
+      "items": {
+        "type": [
+          "null",
+          "array"
+        ],
+        "items": {
+          "type": "string",
+          "minLength": 2
+        }
+      }
+    },
+    "instances": [
+      {
+        "json": [
+          [
+            "ab"
+          ]
+        ],
+        "want": "accept"
+      },
+      {
+        "json": [
+          [
+            "a"
+          ]
+        ],
+        "want": "reject"
+      }
+    ]
+  },
+  {
+    "name": "a byte slice length measures the base64 string",
+    "note": "a []byte encodes as one base64 string, so it has no array to size",
+    "type": "[]byte",
+    "json": "v",
+    "jsonschema": "minLength=1",
+    "schema": {
+      "type": [
+        "null",
+        "string"
+      ],
+      "minLength": 1,
+      "contentEncoding": "base64"
+    },
+    "instances": [
+      {
+        "json": "YQ==",
+        "want": "accept"
+      },
+      {
+        "json": "",
+        "want": "reject"
+      },
+      {
+        "json": null,
+        "want": "accept"
+      }
+    ]
+  },
+  {
+    "name": "a format on a referenced definition rides beside the ref",
+    "note": "a string-first-wins keyword lands as a $ref sibling",
+    "type": "time.Time",
+    "json": "v",
+    "jsonschema": "format=date-time",
+    "schema": {
+      "$ref": "#/$defs/Time",
+      "format": "date-time"
+    },
+    "instances": [
+      {
+        "json": "2020-01-01T00:00:00Z",
+        "want": "accept"
+      },
+      {
+        "json": 5,
+        "want": "reject"
+      }
+    ]
+  },
+  {
+    "name": "a text-marshaling numeric pins the text it emits",
+    "note": "1f74e42: the loudest shape, where the Go kind and the instance differ",
+    "type": "textLevel",
+    "json": "v",
+    "jsonschema": "const=3",
+    "validate": "eq=3",
+    "schema": {
+      "type": "string",
+      "const": "L3"
+    },
+    "instances": [
+      {
+        "json": "L3",
+        "want": "accept"
+      },
+      {
+        "json": 3,
+        "want": "reject"
+      },
+      {
+        "json": "3",
+        "want": "reject"
+      }
+    ]
+  }
+]

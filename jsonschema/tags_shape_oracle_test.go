@@ -397,6 +397,9 @@ func assertShapeMatchesToken(
 		return
 	}
 
+	// The forms with a predicted token returned above, and the default fails on
+	// anything this switch does not name.
+	//nolint:exhaustive // The predicted-token forms are handled by formToken above.
 	switch obs.shape.Form {
 	case jsonschema.FormRawBytes:
 		// The raw form is a byte slice whose schema declines to call it a
@@ -540,6 +543,7 @@ func assertCoercedContent(t *testing.T, obs *shapeObservation, raw json.RawMessa
 		return
 	}
 
+	//nolint:exhaustive // The switch above already narrowed the form to the three coerced ones.
 	switch obs.shape.Form {
 	case jsonschema.FormCoercedNumber:
 		_, err := strconv.ParseFloat(content, 64)

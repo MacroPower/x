@@ -495,6 +495,21 @@ contract the tests enforce.
   bullet's own quoted examples run through the public API. The row count must
   equal the bullet count in both lists, so a sixth deviation cannot land with
   nothing asserting it.
+- `testdata/tags/cases.json` is the cross-dialect fixture table, run by
+  `tags_fixture_test.go`. Each row names a field shape through a small type
+  registry, the spelling each dialect gives one rule, the property schema the
+  rule must produce, and the instances the compiled schema must accept and
+  reject, so tag behavior is data rather than an inline `JSONEq` per scenario
+  and a reversal shows up as a fixture diff. A row may state a sentinel instead
+  of a schema, naming it through a registry rather than matching message text;
+  `anyGenerationError` covers the few rejections the interpreter raises with no
+  sentinel. `TestTagFixturesCrossDialectVerdictsAgree` is the data-driven form
+  of the equivalence 1f74e42 pinned: where a row spells one rule in both
+  dialects, the two schemas must accept and reject the same instances, which is
+  a stronger statement than the schema-text identity
+  `TestCrossDialectEquivalence` asserts beside it. `TestTagFixturesCoverage`
+  requires a unique name and a note per row and exercises every shape the type
+  registry offers.
 - The go-playground differential rig lives in the nested
   `interpreters/validate/differentialtest` module and asserts
   `validate.Struct(v) == nil iff schema.ValidateJSON(json.Marshal(v)) == nil`.

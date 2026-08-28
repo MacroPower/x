@@ -99,18 +99,38 @@ func crossShapes() []crossShape {
 // generateWithTag builds a one-field struct carrying tag and generates its
 // schema. Building the type reflectively is what makes the cross product
 // exhaustive rather than a hand-written sample.
+//
+// The validate interpreter is registered only for a validate row, so a
+// jsonschema-tag row generates through the same path a caller who never
+// registered an interpreter would take.
+func generateOneField(
+	t *testing.T,
+	typ reflect.Type,
+	jsonTag, tagKey, tagValue string,
+) (*jsonschema.Schema, error) {
+	t.Helper()
+
+	doc := reflect.StructOf([]reflect.StructField{{
+		Name: "V",
+		Type: typ,
+		Tag:  reflect.StructTag(fmt.Sprintf(`json:%q %s:%q`, jsonTag, tagKey, tagValue)),
+	}})
+
+	var opts []jsonschema.GenerateOption
+
+	if tagKey == "validate" {
+		opts = append(opts, jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()))
+	}
+
+	//nolint:wrapcheck // The test asserts on the generation error itself.
+	return jsonschema.Generate(t.Context(), doc, opts...)
+}
+
+// generateWithTag is generateOneField over a crossShape.
 func generateWithTag(t *testing.T, sh crossShape, tagKey, tagValue string) (*jsonschema.Schema, error) {
 	t.Helper()
 
-	typ := reflect.StructOf([]reflect.StructField{{
-		Name: "V",
-		Type: sh.typ,
-		Tag:  reflect.StructTag(fmt.Sprintf(`json:%q %s:%q`, sh.jsonTag, tagKey, tagValue)),
-	}})
-
-	//nolint:wrapcheck // The test asserts on the generation error itself.
-	return jsonschema.Generate(t.Context(), typ,
-		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()))
+	return generateOneField(t, sh.typ, sh.jsonTag, tagKey, tagValue)
 }
 
 // TestCrossDialectEquivalence is the keystone: for every field shape, a rule
