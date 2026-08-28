@@ -19,10 +19,10 @@ import (
 // Schema Test Suite's optional/format cases, which already run via
 // TestSuiteFormat. Each vector file names the suite coverage it complements and
 // carries what that coverage leaves open, restating a suite case only where a
-// boundary reads better whole in one place. So no vector file re-transcribes
-// RFC 3339's leap second or the RFC 6901 §5 pointer examples. Those §5 examples
-// are all valid, which leaves the json-pointer escape boundary open, so
-// json-pointer.tsv carries it.
+// boundary reads better whole in one place. No vector file re-transcribes RFC
+// 3339's leap second. The RFC 6901 §5 pointer examples are all valid, which
+// leaves the escape boundary open, so json-pointer.tsv carries that boundary
+// alongside the four §5 examples that frame it.
 //
 // One accepted coverage gap. One-way containment from uri and uri-reference
 // (containment_test.go), the ucschar cases in format_iri_ucschar_test.go, and

@@ -43,7 +43,7 @@
 "te--st.example.com"	true	the same shape below the top level (b4d0fae)
 "xn--bcher-kva.example.com"	true	a genuine A-label still decodes as Punycode
 "xn--a.com"	false	the payload decodes to U+0080, which IDNA disallows
-"XN--aa---o47jg78q.com"	false	decodes to a reserved-LDH U-label, the same rule reached through Punycode
+"XN--aa---o47jg78q.com"	false	the ACE prefix forces a decode, and the decoded aa--點看 carries the hyphens idna.Lookup rejects
 #
 # The RFC 1035 §2.3.4 253-octet name cap. The DNS root dot does not count
 # toward it, which is why the 253-octet name stays valid with one appended

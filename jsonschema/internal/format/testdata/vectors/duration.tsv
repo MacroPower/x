@@ -4,9 +4,10 @@
 # official suite's optional/format/duration.json carries 36 string cases and
 # already pins the contiguous-chain rejections P1Y2D and PT1H2S, which the rows
 # below restate so the chain rules read whole in one place. What it leaves open
-# is the week alternative's exclusivity beyond P1Y2W, and the date-then-time
-# composition in a spelling other than the P1DT12H it carries.
-# FuzzFormatDurationVsABNF carries the depth beyond both.
+# is the week alternative's exclusivity beyond P1Y2W, and a partial date part
+# before a time: every valid date-then-time case it carries runs the chain down
+# to the day, so P1YT1H below is the first with a year and no day.
+# FuzzFormatDurationVsABNF carries the depth beyond all of it.
 #
 # Row format: see loadVectorFile in vectors_test.go.
 #

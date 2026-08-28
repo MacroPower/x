@@ -3,10 +3,10 @@
 # The vendored is_email corpus (testdata/corpus/isemail) grades 164 addresses
 # against the RFC 5322 spectrum, and the official suite's
 # optional/format/email.json carries 21 string cases covering the dot-atom and
-# address-literal rules. Between them they reach every shape below, so this
-# file adds no case neither runs. What it adds is the naming: one row per RFC
-# 5321 production, in one place, with the empty quoted local part carrying the
-# history that made it worth pinning.
+# address-literal rules. Every shape below already runs in one of them. What
+# this file adds is the naming, one row per RFC 5321 production in one place,
+# with the empty quoted local part carrying the history that made it worth
+# pinning.
 #
 # Row format: see loadVectorFile in vectors_test.go.
 #

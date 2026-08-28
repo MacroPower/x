@@ -2,12 +2,11 @@
 #
 # A uri is an absolute URI, so it must carry a scheme (RFC 3986 §3). The
 # scheme-less reference forms are the rejected rows. The official suite's
-# optional/format/uri.json covers the character rules and carries seven of the
-# eight RFC 3986 §1.1.2 example URIs verbatim. What it leaves open are the two
-# RFC 3986 §5.4 references that carry a scheme, which
-# TestURIReferenceResolutionVectors hands over here because a relative-ref
-# cannot begin with one. The ftp and mailto rows below restate suite cases,
-# kept so the scheme rules read whole in one place.
+# optional/format/uri.json covers the character rules and carries the RFC 3986
+# §1.1.2 example URIs. What it leaves open are the two RFC 3986 §5.4 references
+# that carry a scheme, which TestURIReferenceResolutionVectors hands over here
+# because a relative-ref cannot begin with one. The ftp and mailto rows below
+# restate suite cases, kept so the scheme rules read whole in one place.
 #
 # Row format: see loadVectorFile in vectors_test.go.
 #

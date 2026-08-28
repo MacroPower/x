@@ -470,7 +470,7 @@ contract the tests enforce.
     suite. The three conformance tests and the differential all draw their files
     from it, so the differential cannot drift from what the conformance tests
     run.
-- `internal/format` (rig 3) pins the built-in string-format checkers in three
+- `internal/format` pins the built-in string-format checkers in three
   layers: robustness fuzz (`fuzz_format_test.go`), stdlib and cross-format
   differentials (`differential_test.go`, `containment_test.go`), and vendored
   corpora plus curated vectors (`corpus_*_test.go`, `vectors_test.go`).
