@@ -115,14 +115,14 @@ var (
 	// originates in that package or here.
 	ErrDuplicatePropertyOrder = schemavet.ErrDuplicatePropertyOrder
 
-	// ErrSchemaNotTree is returned by [Compile] when the root document's
-	// sub-schema pointers do not form a tree: one *Schema value is reachable
-	// through two different paths, or a pointer cycle exists. The compiled
-	// per-node caches and error paths assume each node has one location, and
-	// the JSON form of such a graph silently duplicates (or, for a cycle,
-	// cannot express) the shared node. The error names both paths that reach
-	// the repeated node. Reference the shared schema with $ref instead of
-	// aliasing the pointer.
+	// ErrSchemaNotTree is returned by [Compile] and [Inline] when the root
+	// document's sub-schema pointers do not form a tree: one *Schema value is
+	// reachable through two different paths, or a pointer cycle exists. The
+	// compiled per-node caches and error paths assume each node has one
+	// location, and inlining expands each reference in place, so a node reached
+	// from two positions would take one position's expansion at both. The error
+	// names both paths that reach the repeated node. Reference the shared schema
+	// with $ref instead of aliasing the pointer.
 	ErrSchemaNotTree = errors.New("schema is not a tree")
 
 	// ErrInvalidID is returned by [Compile] for an $id outside the keyword's

@@ -898,9 +898,9 @@ func callResolver(ctx context.Context, resolver RefResolver, uri string) (*Schem
 // The two result shapes the callers distinguish are: missed true, a plain
 // not-resolved answer (a resolver miss or a replayed plain miss) that each
 // caller shapes into its own miss behavior; and a non-nil err, already wrapped
-// with [ErrRefResolve] (a resolver-reported failure, a replayed recorded error,
-// or a clone failure). On success cp holds the clone with missed false and a nil
-// error. The caller then vets and registers cp under its own policy.
+// with [ErrRefResolve] (a resolver-reported failure or a replayed recorded
+// error). On success cp holds the clone with missed false and a nil error. The
+// caller then vets and registers cp under its own policy.
 func fetchAndClone(
 	ctx context.Context, resolver RefResolver, sess *refresolve.Session, baseURI string,
 ) (*Schema, bool, error) {
@@ -925,14 +925,7 @@ func fetchAndClone(
 		return nil, true, nil
 	}
 
-	cp, err := cloneSchema(schema)
-	if err != nil {
-		sess.RecordRemoteMiss(baseURI, err)
-
-		return nil, false, fmt.Errorf("%w: %w", ErrRefResolve, err)
-	}
-
-	return cp, false, nil
+	return cloneSchema(schema), false, nil
 }
 
 // remoteFetch returns the [refresolve.Fetch] the resolution core calls when a
@@ -1043,14 +1036,12 @@ func newFallbackVet(profile draftProfile) refresolve.FallbackVet {
 	}
 }
 
-// cloneSchema deep-copies a [Schema] via JSON round-trip, restoring the
-// render-only PropertyOrder field the round-trip drops. The copy logic lives in
-// [schemaclone.Clone]; the lockstep PropertyOrder restore walks
-// [schemafield.Children], the schemas-only form of the [SubschemaEntries]
-// traversal order.
-func cloneSchema(s *Schema) (*Schema, error) {
-	//nolint:wrapcheck // Clone already wraps with "clone schema:".
-	return schemaclone.Clone(s, schemafield.Children)
+// cloneSchema deep-copies a [Schema] structurally, field by field, through
+// [schemaclone.Clone]. The copy reproduces the source's pointer graph, so an
+// aliased node stays one node and a cyclic document copies as a cycle; no graph
+// shape makes the copy fail.
+func cloneSchema(s *Schema) *Schema {
+	return schemaclone.Clone(s)
 }
 
 // resolveDraft returns the draft a validation or inlining run operates under: a
@@ -1683,11 +1674,13 @@ func CheckTypeNames(schema *Schema) error {
 // checkSchemaTree verifies that the root document's sub-schema pointers form a
 // tree: no *Schema value reachable through two paths, and no pointer cycle.
 // The compiled per-node caches and the error paths assume each node has one
-// location, so [Compile] runs this once over the root document; fetched and
-// fallback-materialized documents are parsed fresh and are trees by
-// construction. The error names both paths that reach the repeated node. This
-// is a root-document check, distinct from the graph-tolerant traversals
-// ([Walk], the registry walk, the node index), which dedupe pointers instead.
+// location, so [Compile] runs this once over the root document, and [Inline]
+// runs it over the document it inlines. A document a resolver hands in goes
+// unchecked: the walks that reach one all dedupe pointers, so an aliased remote
+// costs the accuracy of a location in an error message rather than correctness.
+// The error names both paths that reach the repeated node. This is a
+// root-document check, distinct from the graph-tolerant traversals ([Walk], the
+// registry walk, the node index), which dedupe pointers instead.
 func checkSchemaTree(schema *Schema) error {
 	seen := map[*Schema]string{}
 

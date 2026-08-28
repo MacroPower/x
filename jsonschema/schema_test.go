@@ -177,9 +177,9 @@ func TestIsTrueSchemaRejectsEverySetField(t *testing.T) {
 // Extra keys), so a JSON round-trip still carries them. PropertyOrder is the
 // lone exception: a render-only ordering hint that the custom marshaler drops,
 // so a plain round-trip (such as ParseSchemaValue) does not carry it. It has no
-// validation semantics; Inline's deep copy restores it separately (see
-// cloneSchema/restorePropertyOrder) so property ordering survives inlining. Each
-// entry's value documents the reason.
+// validation semantics, and Inline's structural deep copy carries it like any
+// other field, so property ordering survives inlining. Each entry's value
+// documents the reason.
 var jsonUntaggedFields = map[string]string{
 	"Type":              "custom MarshalJSON renders as \"type\"",
 	"Types":             "custom MarshalJSON renders as \"type\" (array form)",

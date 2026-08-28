@@ -513,10 +513,9 @@ func (g *generator) handleOverrideType(t reflect.Type, ts TypeSchema, nullable b
 //     edge so its definition stays reachable.
 //
 // The Value/Verbatim source is copied with the upstream shallow CloneSchemas,
-// not the JSON round-trip cloneSchema used for remote refs: CloneSchemas
-// preserves the caller's exact any-typed Enum/Const/Default values, whereas a
-// round-trip would rewrite them (a Go int enum value would decode back as
-// float64). CloneSchemas only deep-copies sub-schema fields, leaving the Enum,
+// not the deep cloneSchema used for remote refs: the generation half needs only
+// the sub-schema copy plus the container unaliasing below, and pays for nothing
+// deeper. CloneSchemas only deep-copies sub-schema fields, leaving the Enum,
 // Const, Default, and Extra headers aliased to the caller's schema;
 // CloneOverrideExtras copies those too, so a tag interpreter or
 // JSONSchemaExtender that mutates them in place (appending to Enum, reassigning

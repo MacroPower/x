@@ -4108,8 +4108,9 @@ func TestRegexCacheKeyedByPattern(t *testing.T) {
 func TestCycleDetectionPointerIdentity(t *testing.T) {
 	t.Parallel()
 
-	// If two different *Schema pointers represent the same logical schema
-	// (e.g., after cloneSchema), cycles involving the clone won't be detected.
+	// If two different *Schema pointers represent the same logical schema (a
+	// resolver handing out a fresh copy per call), pointer identity alone does
+	// not see the cycle; the walk's guard keys on the instance position too.
 	schema := &jsonschema.Schema{
 		ID: "https://example.com/root",
 		Properties: map[string]*jsonschema.Schema{

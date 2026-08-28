@@ -1384,6 +1384,11 @@ position still resolves.
 
 Failure modes:
 
+- A root document whose sub-schema pointers do not form a tree, one `*Schema`
+  reached through two paths or through a pointer cycle, returns an error
+  wrapping `ErrSchemaNotTree`, the same demand `Compile` makes. Inlining
+  expands each reference in place, so a node reached from two positions would
+  take one position's expansion at both.
 - A ref whose expansion reaches its own target is recursive and returns an
   error wrapping `ErrRefCycle`: a cyclic reference graph has no finite
   expansion.
@@ -1452,7 +1457,7 @@ cycle introduced by the substitute is an ordinary `ErrRefCycle`.
 | `ErrConflictingSchemaFields`  | Both Go fields of one JSON keyword set, e.g. `Type`/`Types` or a `dependencies` key in both maps (returned by `Compile`).                   |
 | `ErrNilSubschema`             | A nil `*Schema` element inside a sub-schema slice or map (returned by `Compile`).                                                           |
 | `ErrDuplicatePropertyOrder`   | A `PropertyOrder` slice listing the same property twice (returned by `Compile`).                                                            |
-| `ErrSchemaNotTree`            | The root document's sub-schema pointers alias or cycle (returned by `Compile`; reference shared schemas with `$ref` instead).               |
+| `ErrSchemaNotTree`            | The root document's sub-schema pointers alias or cycle (returned by `Compile` and `Inline`; reference shared schemas with `$ref` instead).  |
 | `ErrInvalidID`                | An `$id` that does not parse, carries a fragment under 2020-12, or does not resolve to an absolute URI (returned by `Compile`).             |
 | `ErrInvalidBaseURI`           | A `WithBaseURI` value that does not parse (returned by `Compile`).                                                                          |
 | `ErrMisplacedVocabulary`      | A `$vocabulary` on a node whose `$schema` does not establish the 2020-12 dialect (returned by `Compile`).                                   |

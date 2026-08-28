@@ -62,8 +62,17 @@ type inliner struct {
 
 	// The memo[id] entry is a pristine schema's finished self-contained copy, so
 	// a target referenced from several places is expanded once. Every additional
-	// use clones the memoized copy, so no two positions in the output share nodes.
+	// use clones the memoized copy, so no two splice positions share nodes. A
+	// document that was itself aliased keeps its own sharing, since the copy
+	// reproduces the graph it was taken from.
 	memo []*Schema
+
+	// The working nodes walkPair has already expanded. A working copy mirrors
+	// the aliasing of the document it was cloned from, and expansion writes the
+	// node in place, so a node reached from two positions must be expanded once
+	// and observed at both. Working nodes are not interned (only pristine ones
+	// are), so the set is keyed by pointer rather than by node id.
+	expanded map[*Schema]bool
 
 	// The paths[id] entry is a pristine schema's JSON Pointer path within its
 	// containing document, recorded when each document joins resolution space. The
@@ -281,6 +290,10 @@ func WithRefFallback(f RefFallback) InlineOption {
 // covers; a $ref carried as raw JSON inside an unknown keyword is left
 // as-is, although a ref pointing into such a position still resolves.
 //
+// The root document's sub-schema pointers must form a tree, the same demand
+// [Compile] makes: a root reaching one *Schema through two paths, or through
+// a pointer cycle, returns an error wrapping [ErrSchemaNotTree].
+//
 // A ref whose expansion reaches its own target returns an error wrapping
 // [ErrRefCycle]. A $dynamicRef under Draft 2020-12 has no faithful static
 // expansion and returns an error wrapping [ErrRefInline] (Draft 7 ignores
@@ -350,6 +363,7 @@ func (il *Inliner) Inline(ctx context.Context, s *Schema) (*Schema, error) {
 		baseURI:       il.proto.baseURI,
 		retrievalBase: il.proto.retrievalBase,
 		index:         newSchemaIndex(),
+		expanded:      map[*Schema]bool{},
 	}
 
 	// The context reaches the resolver through the ctx field set above:
@@ -361,20 +375,23 @@ func (il *Inliner) Inline(ctx context.Context, s *Schema) (*Schema, error) {
 
 // run inlines s under the receiver's configuration and per-call state.
 func (in *inliner) run(s *Schema) (*Schema, error) {
+	// The root's sub-schema pointers must form a tree, the same demand
+	// [Compile] makes of the document it compiles. Inlining copies the input
+	// and expands each ref in place, so a node reached from two positions
+	// would take one position's expansion at both, and a pointer cycle has no
+	// finite expansion at all.
+	err := checkSchemaTree(s)
+	if err != nil {
+		return nil, err
+	}
+
 	// Two clones of the document: the pristine copy carries the registries
 	// and answers every ref-target resolution, while the working copy
 	// receives the expansions and becomes the result. Both are clones of
 	// the same input, so they are structurally identical and walk in
 	// lockstep.
-	pristine, err := cloneSchema(s)
-	if err != nil {
-		return nil, err
-	}
-
-	working, err := cloneSchema(s)
-	if err != nil {
-		return nil, err
-	}
+	pristine := cloneSchema(s)
+	working := cloneSchema(s)
 
 	// The same registry construction Compile performs, seeded with the
 	// configured base URI: the walk registers every $id, $anchor, and
@@ -488,6 +505,15 @@ func (in *inliner) internedID(s *Schema) (int, error) {
 // pristine counterpart and are already self-contained, so the walk never
 // descends into them.
 func (in *inliner) walkPair(working, pristine *Schema, path string) error {
+	// A node reached a second time is already expanded in place, and both
+	// positions read that one node. Expanding it again would splice its target
+	// into the same allOf twice.
+	if in.expanded[working] {
+		return nil
+	}
+
+	in.expanded[working] = true
+
 	// Self-contained copies to join the node's allOf after its children are
 	// walked: a Draft 2020-12 $ref target, a fallback substitute for a
 	// $dynamicRef, or both.
@@ -732,10 +758,7 @@ func (in *inliner) substitute(pristine *Schema, path, ref string, inlineErr erro
 		return nil, nil //nolint:nilnil // The caller drops the reference keyword.
 	}
 
-	cp, err := cloneSchema(action.substitute)
-	if err != nil {
-		return nil, err
-	}
+	cp := cloneSchema(action.substitute)
 
 	// Register the substitute's $id/$anchor in the per-run fallback registries
 	// rather than the shared ones. A caller-supplied substitute whose $id
@@ -793,16 +816,13 @@ func (in *inliner) inlineCopy(target *Schema, path string, memoize bool) (*Schem
 	}
 
 	if memoized := in.memo[id]; memoized != nil {
-		return cloneSchema(memoized)
+		return cloneSchema(memoized), nil
 	}
 
 	in.inflight[id] = true
 	defer func() { in.inflight[id] = false }()
 
-	cp, err := cloneSchema(target)
-	if err != nil {
-		return nil, err
-	}
+	cp := cloneSchema(target)
 
 	// The $schema dialect declaration belongs to a document, not to a
 	// spliced sub-schema; the output keeps the root document's dialect.
@@ -836,7 +856,7 @@ func (in *inliner) inlineCopy(target *Schema, path string, memoize bool) (*Schem
 		// position in the output tree. Every caller, first or later, then gets an
 		// independent copy, and no downstream mutation of one placement can leak
 		// into another through a shared memo node.
-		return cloneSchema(cp)
+		return cloneSchema(cp), nil
 	}
 
 	// A non-memoized copy (a substitute, a $dynamicRef expansion, or a
@@ -849,15 +869,28 @@ func (in *inliner) inlineCopy(target *Schema, path string, memoize bool) (*Schem
 // stripIdentifiers clears $id, $anchor, and $dynamicAnchor from every node of
 // a spliced copy's subtree. The names identify the target at its original
 // position; a copy spliced elsewhere must not re-declare them (see
-// [inliner.inlineCopy]). The copy is a tree -- cloning shares no nodes -- so
-// the recursion needs no cycle guard.
+// [inliner.inlineCopy]). A copy reproduces the pointer graph of the document it
+// was cloned from, so the walk carries the visited set an aliased or cyclic
+// document needs to terminate.
 func stripIdentifiers(s *Schema) {
+	stripIdentifiersFrom(s, map[*Schema]bool{})
+}
+
+// stripIdentifiersFrom is [stripIdentifiers]'s recursion, carrying the set of
+// nodes already stripped.
+func stripIdentifiersFrom(s *Schema, stripped map[*Schema]bool) {
+	if stripped[s] {
+		return
+	}
+
+	stripped[s] = true
+
 	s.ID = ""
 	s.Anchor = ""
 	s.DynamicAnchor = ""
 
 	for _, entry := range SubschemaEntries(s) {
-		stripIdentifiers(entry.Schema)
+		stripIdentifiersFrom(entry.Schema, stripped)
 	}
 }
 

@@ -1250,9 +1250,9 @@ func TestInlineFetchedDocIDDoesNotClobber(t *testing.T) {
 }
 
 // TestInlinePreservesPropertyOrder pins that Inline keeps the render-only
-// PropertyOrder field. Inline deep-copies through cloneSchema, whose JSON
-// round-trip drops PropertyOrder (json:"-"); without restoring it the inlined
-// schema would re-order properties instead of preserving the input's order.
+// PropertyOrder field. The field carries json:"-", so any copy routed through
+// JSON drops it and the inlined schema re-orders its properties instead of
+// preserving the input's order.
 func TestInlinePreservesPropertyOrder(t *testing.T) {
 	t.Parallel()
 

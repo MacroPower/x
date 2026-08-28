@@ -1209,6 +1209,13 @@
 // covers); a $ref carried as raw JSON inside an unknown keyword is left
 // as-is, although a ref pointing into such a position still resolves.
 //
+// The root document's sub-schema pointers must form a tree, the same demand
+// [Compile] makes of the document it compiles: a root reaching one *Schema
+// through two paths, or through a pointer cycle, returns an error wrapping
+// [ErrSchemaNotTree]. Inlining expands each reference in place, so a node
+// reached from two positions would take one position's expansion at both, and
+// a pointer cycle has no finite expansion.
+//
 // A ref whose expansion reaches its own target, a recursive schema,
 // returns an error wrapping [ErrRefCycle]: a cyclic reference graph has no
 // finite expansion. A $dynamicRef under Draft 2020-12 returns an error

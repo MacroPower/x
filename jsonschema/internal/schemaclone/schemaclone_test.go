@@ -11,29 +11,6 @@ import (
 	"go.jacobcolvin.com/x/jsonschema/internal/schemaclone"
 )
 
-// children pairs a schema with its direct sub-schemas in a deterministic order,
-// matching the lockstep contract Clone relies on. It returns the single Items
-// child and each Properties child in a fixed key order.
-func children(s *jsonschema.Schema) []*jsonschema.Schema {
-	if s == nil {
-		return nil
-	}
-
-	var out []*jsonschema.Schema
-
-	if s.Items != nil {
-		out = append(out, s.Items)
-	}
-
-	for _, key := range []string{"a", "b", "c"} {
-		if sub, ok := s.Properties[key]; ok {
-			out = append(out, sub)
-		}
-	}
-
-	return out
-}
-
 func TestClone(t *testing.T) {
 	t.Parallel()
 
@@ -48,8 +25,7 @@ func TestClone(t *testing.T) {
 			},
 		}
 
-		cp, err := schemaclone.Clone(src, children)
-		require.NoError(t, err)
+		cp := schemaclone.Clone(src)
 		require.NotNil(t, cp)
 
 		assert.Equal(t, src.Type, cp.Type)
@@ -61,7 +37,7 @@ func TestClone(t *testing.T) {
 		assert.Equal(t, "x", src.Enum[0])
 	})
 
-	t.Run("restores PropertyOrder at every depth", func(t *testing.T) {
+	t.Run("copies PropertyOrder at every depth", func(t *testing.T) {
 		t.Parallel()
 
 		src := &jsonschema.Schema{
@@ -74,8 +50,7 @@ func TestClone(t *testing.T) {
 			},
 		}
 
-		cp, err := schemaclone.Clone(src, children)
-		require.NoError(t, err)
+		cp := schemaclone.Clone(src)
 
 		assert.Equal(t, []string{"a", "b"}, cp.PropertyOrder)
 		assert.Equal(t, []string{"deep", "nested"}, cp.Items.PropertyOrder)
@@ -87,49 +62,35 @@ func TestClone(t *testing.T) {
 
 		src := &jsonschema.Schema{PropertyOrder: []string{"a", "b"}}
 
-		cp, err := schemaclone.Clone(src, children)
-		require.NoError(t, err)
+		cp := schemaclone.Clone(src)
 
 		cp.PropertyOrder[0] = "mutated"
 		assert.Equal(t, "a", src.PropertyOrder[0])
 	})
 
-	t.Run("structural mismatch stops the lockstep restore", func(t *testing.T) {
+	t.Run("unaliases the interior of a map of string lists", func(t *testing.T) {
 		t.Parallel()
 
 		src := &jsonschema.Schema{
-			PropertyOrder: []string{"root"},
-			Items:         &jsonschema.Schema{PropertyOrder: []string{"child"}},
+			DependencyStrings: map[string][]string{"a": {"b"}},
+			DependentRequired: map[string][]string{"c": {"d"}},
 		}
 
-		// Children yields a different count for src's root than for its clone
-		// (two entries versus one), forcing the length-mismatch bail-out at the
-		// root. The root PropertyOrder is restored before the comparison, but the
-		// mismatch prevents descent, so the Items child is never restored.
-		mismatched := func(s *jsonschema.Schema) []*jsonschema.Schema {
-			if s == src {
-				return []*jsonschema.Schema{s.Items, s.Items}
-			}
+		cp := schemaclone.Clone(src)
 
-			if s.Items != nil {
-				return []*jsonschema.Schema{s.Items}
-			}
+		cp.DependencyStrings["a"][0] = "mutated"
+		cp.DependentRequired["c"][0] = "mutated"
 
-			return nil
-		}
-
-		cp, err := schemaclone.Clone(src, mismatched)
-		require.NoError(t, err)
-
-		assert.Equal(t, []string{"root"}, cp.PropertyOrder)
-		assert.Nil(t, cp.Items.PropertyOrder)
+		assert.Equal(t, []string{"b"}, src.DependencyStrings["a"])
+		assert.Equal(t, []string{"d"}, src.DependentRequired["c"])
 	})
 }
 
-// TestClonePreservesNumberValues covers the any-typed value fields: the plain
-// round-trip decodes their numbers as float64, silently rounding a json.Number
-// beyond float64 precision and changing what a cloned const/enum accepts. The
-// number-preserving re-copy keeps the literal exact and the copy unaliased.
+// TestClonePreservesNumberValues covers the any-typed value fields. A plain JSON
+// round-trip decoded their numbers as float64, silently rounding a json.Number
+// beyond float64 precision and changing what a cloned const or enum accepts. A
+// structural copy carries the literal across untouched, since json.Number is a
+// string type.
 func TestClonePreservesNumberValues(t *testing.T) {
 	t.Parallel()
 
@@ -143,16 +104,15 @@ func TestClonePreservesNumberValues(t *testing.T) {
 		Items:    &jsonschema.Schema{Const: new(any(json.Number(big)))},
 	}
 
-	cp, err := schemaclone.Clone(src, children)
-	require.NoError(t, err)
+	cp := schemaclone.Clone(src)
 
 	assert.Equal(t, json.Number(big), *cp.Const)
 	assert.Equal(t, []any{json.Number(big), "x"}, cp.Enum)
 	assert.Equal(t, []any{json.Number(big)}, cp.Examples)
 	assert.Equal(t, json.Number(big), cp.Extra["x-custom"])
-	assert.Equal(t, json.Number(big), *cp.Items.Const, "nested nodes are restored too")
+	assert.Equal(t, json.Number(big), *cp.Items.Const, "nested nodes carry their literals too")
 
-	// The restored values are copies, not aliases.
+	// The copied values are copies, not aliases.
 	assert.NotSame(t, src.Const, cp.Const)
 
 	*src.Const = any(json.Number("1"))
@@ -160,4 +120,94 @@ func TestClonePreservesNumberValues(t *testing.T) {
 
 	assert.Equal(t, json.Number(big), *cp.Const)
 	assert.Equal(t, "x", cp.Enum[1])
+}
+
+// TestCloneFidelity pins the copy's faithfulness on the shapes a JSON round-trip
+// normalized away. Each case is a value the round-trip rewrote: it re-encoded
+// hand-built Go values, hoisted an unknown keyword whose name collides with a
+// real one, turned a nil sub-schema into the reject-everything schema, and
+// refused outright to marshal a schema upstream's own checks reject.
+func TestCloneFidelity(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		src   *jsonschema.Schema
+		check func(t *testing.T, cp *jsonschema.Schema)
+	}{
+		"a Go-typed const keeps its Go type": {
+			src:   &jsonschema.Schema{Const: new(any(42))},
+			check: func(t *testing.T, cp *jsonschema.Schema) { t.Helper(); assert.Equal(t, 42, *cp.Const) },
+		},
+		"an unknown keyword colliding with a real one stays unknown": {
+			src: &jsonschema.Schema{Extra: map[string]any{"type": "string"}},
+			check: func(t *testing.T, cp *jsonschema.Schema) {
+				t.Helper()
+				assert.Empty(t, cp.Type, "the round-trip hoisted this into Type")
+				assert.Equal(t, "string", cp.Extra["type"])
+			},
+		},
+		"a nil sub-schema element stays nil": {
+			src: &jsonschema.Schema{AllOf: []*jsonschema.Schema{nil}},
+			check: func(t *testing.T, cp *jsonschema.Schema) {
+				t.Helper()
+				require.Len(t, cp.AllOf, 1)
+				assert.Nil(t, cp.AllOf[0], "the round-trip made this the false schema")
+			},
+		},
+		"a schema upstream refuses to marshal still copies": {
+			src: &jsonschema.Schema{Type: "object", Types: []string{"string"}},
+			check: func(t *testing.T, cp *jsonschema.Schema) {
+				t.Helper()
+				assert.Equal(t, "object", cp.Type)
+				assert.Equal(t, []string{"string"}, cp.Types)
+			},
+		},
+		"both items forms survive together": {
+			src: &jsonschema.Schema{
+				Items:      &jsonschema.Schema{Type: "string"},
+				ItemsArray: []*jsonschema.Schema{{Type: "integer"}},
+			},
+			check: func(t *testing.T, cp *jsonschema.Schema) {
+				t.Helper()
+				require.NotNil(t, cp.Items, "the traversal skips Items here; the copy must not")
+				assert.Equal(t, "string", cp.Items.Type)
+				require.Len(t, cp.ItemsArray, 1)
+				assert.Equal(t, "integer", cp.ItemsArray[0].Type)
+			},
+		},
+		"an empty container stays present": {
+			src: &jsonschema.Schema{
+				Enum:       []any{},
+				Properties: map[string]*jsonschema.Schema{},
+				AllOf:      []*jsonschema.Schema{},
+			},
+			check: func(t *testing.T, cp *jsonschema.Schema) {
+				t.Helper()
+				assert.NotNil(t, cp.Enum, "a present empty enum rejects every instance")
+				assert.NotNil(t, cp.Properties)
+				assert.NotNil(t, cp.AllOf)
+				assert.Empty(t, cp.Enum)
+			},
+		},
+		"an absent container stays absent": {
+			src: &jsonschema.Schema{Type: "string"},
+			check: func(t *testing.T, cp *jsonschema.Schema) {
+				t.Helper()
+				assert.Nil(t, cp.Enum)
+				assert.Nil(t, cp.Properties)
+				assert.Nil(t, cp.AllOf)
+			},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			cp := schemaclone.Clone(tc.src)
+			require.NotNil(t, cp)
+
+			tc.check(t, cp)
+		})
+	}
 }
