@@ -287,15 +287,33 @@ func referenceRejects(reference *playground.Validate, val any) (bool, error) {
 	return false, fmt.Errorf("go-playground returned an unexpected error type: %w", err)
 }
 
-// addDifferentialSeeds adds entropy blobs covering the zero value and a spread
-// of set values, including all-equal runs that produce duplicate collection
-// elements for the unique constraint.
+// differentialSeeds returns the entropy blobs every rig-2 target starts from:
+// the zero value and a spread of set values, including all-equal runs that
+// produce duplicate collection elements for the unique constraint. The list is
+// a function rather than a call sequence so a test can draw the same
+// population without a testing.F.
+func differentialSeeds() [][]byte {
+	return [][]byte{
+		{},
+		make([]byte, 64),
+		bytes.Repeat([]byte{0x01}, 96),
+		bytes.Repeat([]byte{0x07}, 128),
+		bytes.Repeat([]byte{0xff}, 80),
+		{0x02, 0x03, 0x05, 0x07, 0x0b, 0x0d, 0x11, 0x13, 0x17, 0x1d, 0x1f, 0x25, 0x29, 0x2b, 0x2f, 0x35},
+		// A blob long enough to set every field of the widest roster type. The
+		// cursor zero-extends past its data, so a short blob leaves the tail
+		// fields nil or zero and never reaches the region where the two
+		// validators see the same information; see
+		// TestWidenedDifferentialReachesStrictAgreement.
+		bytes.Repeat([]byte{0xff}, 384),
+	}
+}
+
+// addDifferentialSeeds seeds f from differentialSeeds.
 func addDifferentialSeeds(f *testing.F) {
 	f.Helper()
-	f.Add([]byte{})
-	f.Add(make([]byte, 64))
-	f.Add(bytes.Repeat([]byte{0x01}, 96))
-	f.Add(bytes.Repeat([]byte{0x07}, 128))
-	f.Add(bytes.Repeat([]byte{0xff}, 80))
-	f.Add([]byte{0x02, 0x03, 0x05, 0x07, 0x0b, 0x0d, 0x11, 0x13, 0x17, 0x1d, 0x1f, 0x25, 0x29, 0x2b, 0x2f, 0x35})
+
+	for _, seed := range differentialSeeds() {
+		f.Add(seed)
+	}
 }

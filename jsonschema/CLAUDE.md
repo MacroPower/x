@@ -495,6 +495,25 @@ contract the tests enforce.
   bullet's own quoted examples run through the public API. The row count must
   equal the bullet count in both lists, so a sixth deviation cannot land with
   nothing asserting it.
+- The go-playground differential rig lives in the nested
+  `interpreters/validate/differentialtest` module and asserts
+  `validate.Struct(v) == nil iff schema.ValidateJSON(json.Marshal(v)) == nil`.
+  Its agreement property splits on what the marshaled object carries: where
+  every field is present with a non-null value the two validators must agree
+  exactly, and where encoding/json dropped a field or wrote null for one the
+  schema has nothing to assert about it and can only be the more permissive of
+  the two, so the property weakens to that one-way implication.
+  `TestWidenedDifferentialReachesStrictAgreement` guards against the weak half
+  swallowing everything. `FuzzValidatorTaggedShapes` fuzzes the shape as well as
+  the value through `drawTaggedStruct`, which draws the Go kind, the pointer
+  wrapper, the json option, and the validate rule independently. That draw
+  deliberately does not come from `internal/fuzzshape`: that package synthesizes
+  embeds, unexported fields, and colliding JSON names to probe field collection,
+  which go-playground reads differently and whose `reflect.StructOf` promoted
+  methods panic when called. Every case the rig does not compare is a row in
+  `rigExclusions` carrying a reason constant, and
+  `TestRigExclusionsMatchTheDraw` pins each rule-bearing row against the draw
+  pools so the record cannot drift from what the draw does.
 - `tags_shape_oracle_test.go` holds `encoding/json` to a third property, the
   struct-tag one: **the `Form` `internal/tagmodel` classifies a field as must
   agree with the JSON `encoding/json` writes for that field.** `Form` is the
