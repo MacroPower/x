@@ -1,17 +1,17 @@
 # idn-email acceptance vectors, from RFC 6531.
 #
-# RFC 6531 §3.2 and §3.3 widen the RFC 5321 Mailbox grammar: UTF-8 in the local
-# part, U-labels in the domain. These rows cover the widened alternatives, which
-# neither the vendored ASCII is_email corpus nor the official suite reaches.
+# RFC 6531 §3.2 and §3.3 widen the RFC 5321 Mailbox grammar rather than
+# restating it: UTF-8 in the local part, U-labels in the domain. The official
+# suite's optional/format/idn-email.json reaches both widenings with one
+# address; these rows separate them, so a check landing on only the local part
+# or only the domain shows up as one failing row rather than none.
 #
-# Format: three tab-separated fields, "<input>"\t<valid>\t<note>. The input is a
-# Go quoted string literal in the spelling strconv.Quote produces. '#' lines and
-# blank lines are skipped.
+# Row format: see loadVectorFile in vectors_test.go.
 #
 "user@example.com"	true	an ASCII mailbox is an idn-email
 "宏@example.com"	true	RFC 6532 §3.1 UTF-8 in the local part
 "user@例.jp"	true	a U-label domain
-"not-an-email"	false	no at sign
+"not-an-email"	false	RFC 6531 widens Mailbox without dropping the "@"
 #
 # RFC 6531 widens the RFC 5321 grammar rather than restating it, so the empty
 # quoted local part reads the same here (e9372c3, then 16d9020).

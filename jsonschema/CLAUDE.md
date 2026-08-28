@@ -470,3 +470,26 @@ contract the tests enforce.
     suite. The three conformance tests and the differential all draw their files
     from it, so the differential cannot drift from what the conformance tests
     run.
+- `internal/format` pins the built-in string-format checkers in three layers:
+  robustness fuzz (`fuzz_format_test.go`), stdlib and cross-format differentials
+  (`differential_test.go`, `containment_test.go`), and vendored corpora plus
+  curated vectors (`corpus_*_test.go`, `vectors_test.go`). Acceptance vectors are
+  data, not Go literals: one `testdata/vectors/<format-name>.tsv` per format,
+  basename matching the name registered in `format.Validators()` exactly, three
+  mandatory tab-separated fields per row (a Go quoted input literal, `true` or
+  `false`, and a note), and `TestFormatVectors` walks the directory, so a new
+  file adds a test with no Go edit. `loadVectorFile` carries the authoritative
+  statement of the row format.
+- `TestFormatCoverage` (`internal/format/coverage_test.go`) requires every name
+  in `format.Validators()` to carry a differential fuzz target, a vendored
+  corpus, or a vector file, so a newly registered format cannot arrive with none.
+  A claim names the Go function value rather than its name as a string, so
+  renaming a target breaks the build there. Containment targets are deliberately
+  not a coverage source, since a one-way subset relation cannot catch
+  over-acceptance. The allowlist mechanism carries a reason string and is empty.
+- `format_deviations_test.go` binds each bullet of the format-deviations list in
+  `doc.go` and `README.md` to the behavior it claims: a phrase both files must
+  carry, matched over normalized text so a reflow cannot break it, and the
+  bullet's own quoted examples run through the public API. The row count must
+  equal the bullet count in both lists, so a sixth deviation cannot land with
+  nothing asserting it.

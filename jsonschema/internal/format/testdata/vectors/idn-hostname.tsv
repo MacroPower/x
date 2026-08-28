@@ -24,10 +24,7 @@
 # asserts the RFC 5890/5891 layer is the only thing narrowing idna.Lookup, not
 # that either of them gives the right answer.
 #
-# Format: three tab-separated fields, "<input>"\t<valid>\t<note>. The input is a
-# Go quoted string literal in the spelling strconv.Quote produces, so printable
-# non-ASCII stays literal and everything else is an escape. '#' lines and blank
-# lines are skipped.
+# Row format: see loadVectorFile in vectors_test.go.
 #
 "example.com"	true	an ASCII name passes through unchanged
 "a.b.c"	true	three single-character labels

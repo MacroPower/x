@@ -1,21 +1,22 @@
 # email acceptance vectors, from the RFC 5321 Mailbox grammar.
 #
 # The vendored is_email corpus (testdata/corpus/isemail) grades 164 addresses
-# against the RFC 5322 spectrum; these rows pin the RFC 5321 shapes it and the
-# official suite's optional/format/email.json leave implicit.
+# against the RFC 5322 spectrum, and the official suite's
+# optional/format/email.json carries the dot-atom and address-literal rules.
+# What both leave open is the dotless single-label domain, which Domain permits
+# and the RFC 1123 numeric-TLD ban does not reach, and the empty quoted local
+# part below.
 #
-# Format: three tab-separated fields, "<input>"\t<valid>\t<note>. The input is a
-# Go quoted string literal in the spelling strconv.Quote produces. '#' lines and
-# blank lines are skipped.
+# Row format: see loadVectorFile in vectors_test.go.
 #
-"user@example.com"	true	a simple mailbox
-"john.doe@example.org"	true	a dotted local part
-"a@b.co"	true	a short domain
-"a@b"	true	a single-label domain
-"not-an-email"	false	no at sign
-"@example.com"	false	an empty local part
-"user@"	false	an empty domain
-"user@@example.com"	false	a double at sign
+"user@example.com"	true	RFC 5321 Mailbox = Local-part "@" Domain
+"john.doe@example.org"	true	Dot-string permits an interior period
+"a@b.co"	true	sub-domain = Let-dig [Ldh-str], so one octet is a label
+"a@b"	true	Domain needs no dot; the RFC 1123 numeric-TLD ban is hostname's
+"not-an-email"	false	Mailbox has no production without the "@"
+"@example.com"	false	Local-part is a Dot-string or a Quoted-string, never empty
+"user@"	false	Domain is 1*sub-domain, never empty
+"user@@example.com"	false	"@" is not an atext character, so it cannot open a Domain
 #
 # RFC 5321 Quoted-string = DQUOTE *QcontentSMTP DQUOTE permits zero content
 # characters, and both drafts define the format by grammar conformance rather

@@ -25,19 +25,21 @@ import (
 // Breadth stays in the tests that already carry it, in
 // format_regex_ascii_escape_test.go, format_uritemplate_literals_test.go,
 // format_uri_ipvfuture_test.go, and internal/format. The exception is the email
-// bullet: nothing else asserts its size limits, so that row carries them all.
+// bullet. Nothing else asserts its size limits, so that row carries them all.
 
 const (
 	// The sentence introducing each list, and the heading each list runs up to.
-	// The bullet count is taken between them.
-	deviationListOpening = "the checker takes the position below"
-	deviationDocHeading  = "// #"
-	deviationReadHeading = "### "
+	// The guard counts bullets between them. The README terminator is a bare
+	// '#', so a heading of any level closes the window; a deviation bullet
+	// indents by two and never matches it.
+	deviationListOpening   = "the checker takes the position below"
+	deviationDocHeading    = "// #"
+	deviationReadmeHeading = "#"
 
 	// The line prefix a bullet takes in each file. A continuation line indents
 	// further in doc.go and by two spaces in README.md, so neither matches.
-	deviationDocBullet  = "//   - "
-	deviationReadBullet = "- **"
+	deviationDocBullet    = "//   - "
+	deviationReadmeBullet = "- **"
 )
 
 // deviationCase is one instance run through one format's checker.
@@ -56,8 +58,7 @@ type deviation struct {
 
 // formatDeviations holds one row per bullet, keyed by the format the bullet
 // leads with. Every phrase is chosen to survive the normalization below, so a
-// reflow of either file cannot break it; only a rewording can, which is the
-// point.
+// reflow of either file cannot break it; only a rewording can.
 var formatDeviations = map[string]deviation{
 	"regex": {
 		phrase: "every ASCII character is a valid ECMA-262 Annex B identity escape",
@@ -99,10 +100,10 @@ var formatDeviations = map[string]deviation{
 }
 
 // emailSizeLimitCases builds the RFC 5321 §4.5.3.1 boundary set the email
-// bullet claims. The three limits do not compose the way the sentence reads:
-// the 254-octet forward path is measured before the split, so a 253-octet
-// domain forces a total of at least 255 and no address reaches that limit
-// through the email format. It is reachable through idn-email, where the domain
+// bullet claims. The three limits do not compose the way the bullet reads. The
+// 254-octet forward path is measured before the split, so a 253-octet domain
+// forces a total of at least 255 and no address reaches that limit through the
+// email format. It is reachable through idn-email, where the domain
 // is measured in its A-label form, which is longer than the U-labels the
 // 254-octet check counted. The last two rows are that case and its complement.
 func emailSizeLimitCases() []deviationCase {
@@ -193,7 +194,7 @@ func TestFormatDeviationsCounted(t *testing.T) {
 
 	counts := map[string]int{
 		"doc.go":    countDeviationBullets(t, "doc.go", deviationDocHeading, deviationDocBullet),
-		"README.md": countDeviationBullets(t, "README.md", deviationReadHeading, deviationReadBullet),
+		"README.md": countDeviationBullets(t, "README.md", deviationReadmeHeading, deviationReadmeBullet),
 	}
 
 	for file, count := range counts {
@@ -203,9 +204,9 @@ func TestFormatDeviationsCounted(t *testing.T) {
 }
 
 // normalizeDeviationProse reads a file and reduces it to text the two sources
-// can be compared on: comment and list markers dropped, the backtick, asterisk,
-// and quote markup deleted, and every whitespace run collapsed to one space, so
-// a line break inside a phrase does not hide it.
+// can be compared on. It drops comment and list markers, deletes the backtick,
+// asterisk, and quote markup, and collapses every whitespace run to one space,
+// so a line break inside a phrase cannot hide it.
 func normalizeDeviationProse(t *testing.T, path string) string {
 	t.Helper()
 
@@ -216,7 +217,7 @@ func normalizeDeviationProse(t *testing.T, path string) string {
 
 	for line := range strings.Lines(string(data)) {
 		trimmed := strings.TrimSpace(line)
-		trimmed = strings.TrimPrefix(trimmed, "//")
+		trimmed = strings.TrimSpace(strings.TrimPrefix(trimmed, "//"))
 		trimmed = strings.TrimPrefix(trimmed, "- ")
 		text.WriteString(trimmed)
 		text.WriteString(" ")

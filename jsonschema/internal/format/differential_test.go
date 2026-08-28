@@ -615,12 +615,12 @@ func addIPSeeds(f *testing.F) {
 
 // FuzzFormatUUIDVsGrammar differentials the uuid validator against a regular
 // expression transcribing the same canonical form. The oracle is not a second
-// specification: both sides read RFC 9562 §4's 8-4-4-4-12 hex grammar, and what
-// the target buys is that they arrive at it by different means. The validator
-// walks fixed byte offsets and switches on the four hyphen positions, an
-// arithmetic that an off-by-one would move silently; the expression states the
-// field widths outright. Agreement is two-way, since neither side is looser
-// than the other, and no carve-out exists.
+// specification. Both sides read RFC 9562 §4's 8-4-4-4-12 hex grammar, and the
+// two sides reach that grammar by different means. The validator walks fixed
+// byte offsets and switches on the four hyphen positions, arithmetic an
+// off-by-one would shift silently, while the expression states the field widths
+// outright. Agreement is two-way, since neither side is looser than the other,
+// and no carve-out exists.
 func FuzzFormatUUIDVsGrammar(f *testing.F) {
 	fn := validator(f, "uuid")
 
@@ -648,12 +648,12 @@ func FuzzFormatUUIDVsGrammar(f *testing.F) {
 // FuzzFormatDurationVsABNF differentials the duration validator against a
 // regular expression transcribing the RFC 3339 Appendix A grammar. As with the
 // uuid target the oracle is an independent transcription of the same ABNF
-// rather than a second specification, and what it buys is that the two reach
-// the grammar differently. The validator walks the string once and enforces the
-// nesting through an order index and a last-seen comparison, so the chain rules
+// rather than a second specification, and the two sides reach that grammar by
+// different means. The validator walks the string once and enforces the nesting
+// through an order index and a last-seen comparison, so the chain rules
 // (dur-year = 1*DIGIT "Y" [dur-month], dur-hour = 1*DIGIT "H" [dur-minute]) and
-// the standalone dur-week are arithmetic there and structure here. Agreement is
-// two-way, and no carve-out exists.
+// the standalone dur-week are arithmetic in the validator and structure in the
+// expression. Agreement is two-way, and no carve-out exists.
 func FuzzFormatDurationVsABNF(f *testing.F) {
 	fn := validator(f, "duration")
 
@@ -711,17 +711,17 @@ var (
 // false by design and must not be asserted, since hostname accepts the
 // reserved-LDH label idna.Lookup rejects.
 //
-// The reserved-LDH deviation needs no carve-out of its own: idna.Lookup sets
-// checkHyphens, so the oracle simply never fires on "ab--cd". The other checks
-// hostname layers on -- the numeric-TLD ban, the empty-label and trailing-dot
-// rules, and the octet caps -- are the ones idnaAcceptsHostname already folds
-// in for the idn-hostname target, so this target restates none of them.
+// The reserved-LDH deviation needs no carve-out of its own. The idna.Lookup
+// profile sets checkHyphens, so the oracle never fires on "ab--cd". The other
+// checks hostname layers on -- the numeric-TLD ban, the empty-label and
+// trailing-dot rules, and the octet caps -- are the ones idnaAcceptsHostname
+// already folds in for the idn-hostname target, so this target restates none
+// of them.
 //
-// The yield is modest and worth stating plainly. Behind the ASCII-unchanged
-// guard the oracle reduces to "LDH labels with no edge hyphen and no hyphen in
-// positions 3 and 4", which is isLDHLabel minus the deviation, so this is a
-// fence against a future rewrite of the label scan rather than an engine for
-// finding new cases. It also never sees an uppercase name, since the lookup
+// Behind the ASCII-unchanged guard the oracle reduces to "LDH labels with no
+// edge hyphen and no hyphen in positions 3 and 4", which is isLDHLabel minus
+// the deviation, so this is a fence against a future rewrite of the label scan
+// rather than an engine for finding new cases. It also never sees an uppercase name, since the lookup
 // mapping lowercases and the unchanged guard then skips.
 func FuzzFormatHostnameVsIDNA(f *testing.F) {
 	fn := validator(f, "hostname")
@@ -751,9 +751,10 @@ func FuzzFormatHostnameVsIDNA(f *testing.F) {
 	})
 }
 
-// isASCIITest reports whether s holds only ASCII bytes, mirroring isASCII. A
-// name idna.Lookup maps or converts is not one the hostname format is being
-// compared on, and this is the cheap half of that guard.
+// isASCIITest reports whether s holds only ASCII bytes, mirroring isASCII. The
+// unchanged-conversion guard beside it already implies this, since a successful
+// ToASCII returns ASCII. The call stays as the cheap pre-filter that keeps a
+// non-ASCII name out of the conversion entirely.
 func isASCIITest(s string) bool {
 	for i := range len(s) {
 		if s[i] >= utf8.RuneSelf {

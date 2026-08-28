@@ -1,17 +1,17 @@
 # uuid acceptance vectors, from RFC 9562.
 #
 # The canonical form is 8-4-4-4-12 hex digits and case is insignificant. The
-# official suite's optional/format/uuid.json carries 22 cases: the nil UUID, one
-# version-1 value, and a set of malformed spellings.
+# official suite's optional/format/uuid.json carries 22 cases: the nil UUID,
+# a set of malformed spellings, and one value each for versions 1, 4, 5, and 6
+# plus a reserved variant nibble. What it leaves open is the RFC's own test
+# vectors, the max UUID, and the URN and braced spellings.
 #
-# Format: three tab-separated fields, "<input>"\t<valid>\t<note>. The input is a
-# Go quoted string literal in the spelling strconv.Quote produces. '#' lines and
-# blank lines are skipped.
+# Row format: see loadVectorFile in vectors_test.go.
 #
-"f47ac10b-58cc-4372-a567-0e02b2c3d479"	true	RFC 4122 §3 example
+"f47ac10b-58cc-4372-a567-0e02b2c3d479"	true	a canonical-form UUIDv4 in wide circulation, from no RFC
 "00000000-0000-0000-0000-000000000000"	true	RFC 9562 §5.9 Nil UUID
 "F47AC10B-58CC-4372-A567-0E02B2C3D479"	true	uppercase hex is insignificant
-"f47ac10b-58cc"	false	too short
+"f47ac10b-58cc"	false	13 characters, short of the 36 the canonical form takes
 "f47ac10b58cc4372a5670e02b2c3d479"	false	the hyphens are missing
 "g47ac10b-58cc-4372-a567-0e02b2c3d479"	false	a non-hex digit
 #
@@ -37,4 +37,4 @@
 "urn:uuid:f47ac10b-58cc-4372-a567-0e02b2c3d479"	false	the RFC 9562 §4 URN form is not the canonical text
 "{f47ac10b-58cc-4372-a567-0e02b2c3d479}"	false	the braced form is 38 characters
 "f47ac10b-58cc4-372-a567-0e02b2c3d479"	false	36 characters with the hyphens off the fixed offsets
-""	false	the empty string
+""	false	the canonical form is exactly 36 characters

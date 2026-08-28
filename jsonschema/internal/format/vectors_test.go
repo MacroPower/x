@@ -23,11 +23,12 @@ import (
 // valid, though, which leaves the json-pointer escape boundary open, and that
 // gap does get vectors.
 //
-// One accepted coverage gap: iri and iri-reference get only the one-way
-// containment from uri and uri-reference (containment_test.go) plus the narrow
-// ucschar cases in format_iri_ucschar_test.go. Containment cannot catch
-// over-acceptance on the ucschar side, and there is no public IRI corpus and no
-// stdlib IRI parser to differential against, so that side stays uncovered.
+// One accepted coverage gap. The iri and iri-reference formats are pinned by
+// the one-way containment from uri and uri-reference (containment_test.go), the
+// ucschar cases in format_iri_ucschar_test.go, and the RFC 3987 example rows in
+// testdata/vectors. Containment cannot catch over-acceptance on the ucschar
+// side, and there is no public IRI corpus and no stdlib IRI parser to
+// differential against, so that side stays uncovered.
 
 // formatVector is one acceptance vector: an instance and whether the format
 // validator must accept it.
@@ -94,11 +95,11 @@ var (
 
 // TestURIReferenceResolutionVectors runs every RFC 3986 §5.4 reference-
 // resolution input through the uri-reference format. §5.4 is the RFC's own
-// inventory of
-// relative-reference shapes -- dot segments, empty references, semicolon
-// parameters, a query or fragment carrying what looks like a path -- and none
-// of it appears in the vendored suite. The two inputs that carry a scheme are
-// rows in testdata/vectors/uri.tsv, since a relative-ref cannot begin with one.
+// inventory of relative-reference shapes -- dot segments, empty references,
+// semicolon parameters, a query or fragment carrying what looks like a path --
+// and none of it appears in the vendored suite. The two inputs that carry a
+// scheme are rows in testdata/vectors/uri.tsv, since a relative-ref cannot
+// begin with one.
 func TestURIReferenceResolutionVectors(t *testing.T) {
 	t.Parallel()
 
@@ -140,11 +141,13 @@ func TestFormatVectors(t *testing.T) {
 	require.NoError(t, err, "read vector directory %s", vectorDir)
 
 	for _, entry := range entries {
-		name, ok := strings.CutSuffix(entry.Name(), ".tsv")
-		require.True(t, ok, "vector file %s must carry the .tsv extension", entry.Name())
-
-		t.Run(name, func(t *testing.T) {
+		t.Run(entry.Name(), func(t *testing.T) {
 			t.Parallel()
+
+			require.False(t, entry.IsDir(), "%s holds vector files, not directories", vectorDir)
+
+			name, ok := strings.CutSuffix(entry.Name(), ".tsv")
+			require.True(t, ok, "vector file %s must carry the .tsv extension", entry.Name())
 
 			runFormatVectors(t, name, loadVectorFile(t, filepath.Join(vectorDir, entry.Name())))
 		})
@@ -159,7 +162,7 @@ func TestFormatVectors(t *testing.T) {
 //
 // The input is a Go quoted string literal, which is what lets a row carry the
 // empty string, a tab, an invisible joiner, or a lone invalid UTF-8 byte. Write
-// it in the spelling strconv.Quote produces: printable non-ASCII stays literal,
+// it in the spelling strconv.Quote produces. Printable non-ASCII stays literal,
 // so "münchen.de" is the intended form rather than "m\u00fcnchen.de".
 //
 // Every field is mandatory. A note that rots to empty, a validity column that
@@ -180,7 +183,7 @@ func loadVectorFile(t *testing.T, path string) map[string]formatVector {
 
 	for line := 1; scanner.Scan(); line++ {
 		text := scanner.Text()
-		if text == "" || strings.HasPrefix(text, "#") {
+		if strings.TrimSpace(text) == "" || strings.HasPrefix(text, "#") {
 			continue
 		}
 
@@ -188,7 +191,7 @@ func loadVectorFile(t *testing.T, path string) map[string]formatVector {
 		require.Len(t, fields, 3, "%s:%d: want three tab-separated fields in %q", path, line, text)
 
 		quoted, validText, note := fields[0], fields[1], fields[2]
-		require.NotEmpty(t, note, "%s:%d: the note field is mandatory", path, line)
+		require.NotEmpty(t, strings.TrimSpace(note), "%s:%d: the note field is mandatory", path, line)
 
 		input, err := strconv.Unquote(quoted)
 		require.NoError(t, err, "%s:%d: input %s is not a Go quoted string", path, line, quoted)

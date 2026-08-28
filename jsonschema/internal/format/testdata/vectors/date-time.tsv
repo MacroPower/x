@@ -1,18 +1,17 @@
 # date-time acceptance vectors, from RFC 3339 §4.3.
 #
-# The offset "-00:00" carries a meaning "+00:00" does not: the offset is
-# unknown, as distinct from known to be UTC. Both are well-formed time-offset
-# productions and the official suite's optional/format/date-time.json covers
-# neither, nor the offset field bounds.
+# The offset "-00:00" carries a meaning "+00:00" does not. The offset is
+# unknown, as distinct from known to be UTC. The official suite's
+# optional/format/date-time.json carries neither spelling, and it carries no
+# offset missing its minute field. Its own out-of-range offsets are the two rows
+# here that restate it, kept so the offset boundary reads whole in one place.
 #
-# Format: three tab-separated fields, "<input>"\t<valid>\t<note>. The input is a
-# Go quoted string literal in the spelling strconv.Quote produces. '#' lines and
-# blank lines are skipped.
+# Row format: see loadVectorFile in vectors_test.go.
 #
 "2020-01-02T03:04:05-00:00"	true	RFC 3339 §4.3 unknown offset
 "2020-01-02T03:04:05+00:00"	true	a known UTC offset
 "2020-01-02T03:04:05Z"	true	the Z designator
-"2020-01-02T03:04:05-05:00"	true	a negative offset
+"2020-01-02T03:04:05-05:00"	true	time-numoffset with a non-zero hour
 "2020-01-02T03:04:05-24:00"	false	the offset hour is out of range
 "2020-01-02T03:04:05-00:60"	false	the offset minute is out of range
 "2020-01-02T03:04:05-05"	false	time-numoffset requires the minute field

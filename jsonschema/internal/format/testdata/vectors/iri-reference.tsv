@@ -2,19 +2,18 @@
 #
 # RFC 3987 §2.2 derives the IRI grammar from RFC 3986's by widening iunreserved
 # and the ipchar family with ucschar. The code-point boundaries of those sets
-# are covered by format_iri_ucschar_test.go and TestIRIRejectsC1Controls; these
-# rows are the RFC's own example IRIs, which the official suite's
-# optional/format/iri-reference.json does not carry.
+# are covered by format_iri_ucschar_test.go and TestIRIRejectsC1Controls. The
+# official suite's optional/format/iri-reference.json reaches the network-path,
+# absolute-path, and fragment-only forms with invented non-ASCII strings; these
+# rows build every reference form from the RFC's own example IRI instead.
 #
-# Format: three tab-separated fields, "<input>"\t<valid>\t<note>. The input is a
-# Go quoted string literal in the spelling strconv.Quote produces. '#' lines and
-# blank lines are skipped.
+# Row format: see loadVectorFile in vectors_test.go.
 #
 "http://résumé.example.org"	true	an absolute IRI is an IRI-reference
-"//résumé.example.org"	true	network-path reference
-"/rosé"	true	absolute-path reference
-"../rosé"	true	relative-path reference
-"#rosé"	true	fragment-only reference
-"?q=résumé"	true	query-only reference
+"//résumé.example.org"	true	a network-path reference
+"/rosé"	true	an absolute-path reference
+"../rosé"	true	a relative-path reference
+"#rosé"	true	a fragment-only reference
+"?q=résumé"	true	a query-only reference
 ""	true	the empty reference resolves to the base
 "http://exa mple.org/rosé"	false	a space is forbidden

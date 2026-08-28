@@ -2,19 +2,18 @@
 #
 # The validator is a structural check (balanced parens, terminated classes,
 # defined escapes), so it accepts ECMA-262 patterns RE2 rejects and rejects only
-# structurally malformed patterns. The official suite's
-# optional/format/ecmascript-regex.json tests pattern semantics rather than this
-# grammar check.
+# structurally malformed patterns. The official suite holds one case against
+# this format, "\a" in optional/format/ecmascript-regex.json graded invalid,
+# and suite_test.go skips it under reasonAnnexBIdentity as a documented
+# divergence. These rows are where the boundary is written down instead.
 #
-# Format: three tab-separated fields, "<input>"\t<valid>\t<note>. The input is a
-# Go quoted string literal in the spelling strconv.Quote produces. '#' lines and
-# blank lines are skipped.
+# Row format: see loadVectorFile in vectors_test.go.
 #
-"^[a-z]+$"	true	an anchored class
+"^[a-z]+$"	true	Assertion, ClassRanges, and a quantifier in one pattern
 "(foo)\\1"	true	a backreference, which ECMA-262 has and RE2 does not
 "foo(?=bar)"	true	lookahead, which ECMA-262 has and RE2 does not
-"[abc]"	true	a character class
-"a{2,3}"	true	quantifier braces
+"[abc]"	true	ClassContents holding three ClassAtoms
+"a{2,3}"	true	QuantifierPrefix in its two-bound brace form
 "("	false	an unbalanced parenthesis
 "["	false	an unterminated class
 "[]"	true	the empty class

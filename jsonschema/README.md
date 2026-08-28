@@ -1100,7 +1100,9 @@ spec asks, the checker takes the position below. Replace any of them with
   the template string cannot reach. The literals rule follows errata ID 6937,
   so an apostrophe is a literal.
 - **`email`** and **`idn-email`** assert the RFC 5321 `Mailbox` grammar plus the
-  §4.5.3.1 size limits (64 octets local, 253 domain, 254 total). The RFC 5322
+  §4.5.3.1 size limits (64 octets local, 253 domain, 254 total). The total is
+  measured before the local/domain split, so only `idn-email` reaches the domain
+  limit, where the domain counts in its longer A-label form. The RFC 5322
   comment, folding-whitespace, and obsolete productions that Draft-07's cited
   §3.4.1 would permit are rejected. Deliverability is never consulted.
 - **`uri`** and **`uri-reference`** accept an IPvFuture authority

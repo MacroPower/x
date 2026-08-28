@@ -21,24 +21,25 @@ import (
 //
 // A coverage claim names the Go function itself rather than its name as a
 // string, so deleting or renaming a target breaks the build here instead of
-// leaving a claim that reads true and means nothing. Two limits of that
-// mechanism are worth stating outright. A function reference proves the
-// identifier exists, not that the target it names actually exercises the format
-// the row claims it for; and a new differential that nobody adds to the table
-// stays invisible to this test, since nothing enumerates the package's fuzz
-// targets. The table is a declaration, and it is only as honest as its author.
+// leaving a claim that reads true and means nothing. The mechanism has two
+// limits. A function reference proves the identifier exists, not that the
+// target it names exercises the format the row claims it for. A new
+// differential that nobody adds to the table stays invisible to this test,
+// since nothing enumerates the package's fuzz targets.
 //
 // Containment targets (containment_test.go) are deliberately not a coverage
-// source. Each asserts one direction of a subset relation, which cannot catch
-// over-acceptance, so a format covered by containment alone is not covered.
+// source. A containment oracle is another format in this package rather than an
+// independent one, so a containment pair that drifts together stays green, and
+// a format covered by containment alone is not covered. One-wayness is not the
+// distinction, since two of the differentials this table accepts are one-way.
 
 // coverageSource is a differential target or a corpus loader, held as the
 // function value so the compiler enforces that the identifier exists.
 type coverageSource any
 
 // coverage states how one format's accept/reject boundary is pinned. A row
-// carries sources or a reason, never both: a reason is the admission that the
-// format has no mechanical coverage, and a source contradicts it.
+// carries sources or a reason, never both. A reason is the admission that the
+// format has no mechanical coverage, which a source contradicts.
 type coverage struct {
 	// Differential fuzz targets asserting this format against an oracle.
 	differentials []coverageSource
@@ -54,7 +55,7 @@ type coverage struct {
 }
 
 // formatCoverage maps every built-in format to the tests pinning it. The
-// allowlist is empty: every one of the nineteen carries at least one source.
+// allowlist is empty. Every registered format carries at least one source.
 var formatCoverage = map[string]coverage{
 	"date-time": {differentials: []coverageSource{FuzzFormatDateTimeVsRFC3339}, vectors: true},
 	"date":      {differentials: []coverageSource{FuzzFormatDateVsTimeParse}},
@@ -81,9 +82,10 @@ var formatCoverage = map[string]coverage{
 	"regex":                 {differentials: []coverageSource{FuzzFormatRegexVsRE2}, vectors: true},
 }
 
-// TestFormatCoverage asserts that the table and the registry describe the same
-// nineteen formats, that each row claims coverage that exists, and that a row
-// claiming a vector file has one carrying rows.
+// TestFormatCoverage asserts that every registered format carries a coverage
+// row, that each row claims coverage that exists, and that a row claiming a
+// vector file has one carrying rows. The other direction, that the table names
+// nothing the registry does not, is TestFormatCoverageTableIsLive's.
 func TestFormatCoverage(t *testing.T) {
 	t.Parallel()
 
@@ -127,10 +129,10 @@ func TestFormatCoverage(t *testing.T) {
 }
 
 // TestFormatCoverageTableIsLive asserts the table names nothing the registry
-// does not, and that every vector file is claimed by a row. Both directions
-// matter: a row for a format that no longer exists sits unexercised, and a
-// vector file no row claims would make the coverage table read as complete
-// while the guard skipped a file.
+// does not, that an allowlist entry carries a written reason, and that a row
+// claims every vector file. A row for a format that no longer exists sits
+// unexercised, and a vector file no row claims would make the table read as
+// complete while the guard skipped a file.
 func TestFormatCoverageTableIsLive(t *testing.T) {
 	t.Parallel()
 

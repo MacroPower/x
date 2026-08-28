@@ -1,21 +1,21 @@
-# hostname acceptance vectors, from RFC 1123 §2.1.
+# hostname acceptance vectors, from RFC 1123 §2.1 and the DNS name rules it
+# builds on.
 #
-# Labels are ASCII letters, digits, and interior hyphens, and the top-level
-# label must not be all-numeric. The official suite's optional/format/
-# hostname.json carries 61 cases covering the label character rules and the
-# 63-octet cap; these rows cover what it leaves open.
+# The official suite's optional/format/hostname.json carries 61 cases covering
+# the label character rules, the 63-octet cap, and a long set of A-labels. What
+# it leaves open is the numeric top-level ban, the trailing-dot FQDN, the plain
+# reserved-LDH label, and the 253-octet name cap. The remaining rows restate a
+# suite case, kept so the label rules read whole in one place.
 #
-# Format: three tab-separated fields, "<input>"\t<valid>\t<note>. The input is a
-# Go quoted string literal in the spelling strconv.Quote produces. '#' lines and
-# blank lines are skipped.
+# Row format: see loadVectorFile in vectors_test.go.
 #
-"example.com"	true	a multi-label name
-"a"	true	a single label
-"foo-bar.example"	true	an interior hyphen
-"xn--fsq.jp"	true	an A-label that decodes as valid Punycode
+"example.com"	true	RFC 1123 §2.1 host name: LDH labels joined by dots
+"a"	true	RFC 1035 §2.3.1 permits a one-octet label
+"foo-bar.example"	true	Ldh-str admits a hyphen anywhere but the edges
+"xn--fsq.jp"	true	an A-label that decodes to a valid U-label
 "example.com."	true	the DNS root dot on a multi-label FQDN
-"-bad.com"	false	a leading hyphen
-"bad-.com"	false	a trailing hyphen
+"-bad.com"	false	Let-dig opens a label, so a hyphen cannot
+"bad-.com"	false	Ldh-str ends on Let-dig, so a hyphen cannot
 "123"	false	an all-numeric top-level label
 "example."	false	a bare trailing dot on a single label
 "a..b"	false	an empty interior label
@@ -31,7 +31,7 @@
 "1.2.3.4"	false	an IPv4 address reads as a numeric top-level label
 "a_b.com"	false	an underscore is not an LDH character
 ".com"	false	an empty first label
-""	false	the empty name
+""	false	a name holds at least one label
 #
 # RFC 5890 §2.3.2.2 reserved-LDH. This is the documented deviation: the
 # hostname format reads RFC 1123 §2.1, which permits the label, while
@@ -42,7 +42,7 @@
 "te--st.example.com"	true	the same shape below the top level (b4d0fae)
 "xn--bcher-kva.example.com"	true	a genuine A-label still decodes as Punycode
 "xn--a.com"	false	the ACE prefix demands valid Punycode
-"XN--aa---o47jg78q.com"	false	RFC 5890 §2.3.2.1 matches the ACE prefix without regard to case
+"XN--aa---o47jg78q.com"	false	invalid Punycode, reached because RFC 5890 §2.3.2.1 matches the prefix in any case
 #
 # The RFC 1035 §2.3.4 253-octet name cap. The DNS root dot does not count
 # toward it, which is why the 253-octet name stays valid with one appended

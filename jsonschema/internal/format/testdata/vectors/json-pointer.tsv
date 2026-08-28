@@ -1,14 +1,15 @@
 # json-pointer acceptance vectors, from RFC 6901 §3.
 #
-# The official suite's optional/format/json-pointer.json runs RFC 6901 §5's own
-# examples, so those are not re-transcribed. Every §5 example is a valid
-# pointer, though, which leaves the escape rule's rejecting side untested, and
-# that rule is the whole of what this validator checks beyond the leading
-# solidus: a '~' must be followed by '0' or '1'.
+# The official suite's optional/format/json-pointer.json carries 34 string
+# cases, including RFC 6901 §5's own examples and a thorough set of escape
+# rejections. What it leaves open is narrow. The escape-then-literal-digit forms
+# "/~01" and "/~00" are absent, so is a bare "//", and so is a percent-encoded
+# solidus, which is an ordinary member-name character rather than an escape. The
+# remaining rows restate a suite case so this file reads as a whole boundary set
+# for the validator's one rule past the leading solidus, that a '~' must be
+# followed by '0' or '1'.
 #
-# Format: three tab-separated fields, "<input>"\t<valid>\t<note>. The input is a
-# Go quoted string literal in the spelling strconv.Quote produces. '#' lines and
-# blank lines are skipped.
+# Row format: see loadVectorFile in vectors_test.go.
 #
 ""	true	the empty pointer names the whole document
 "/"	true	one empty member name

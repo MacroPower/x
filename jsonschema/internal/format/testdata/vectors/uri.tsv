@@ -1,13 +1,13 @@
 # uri acceptance vectors, from RFC 3986 examples.
 #
-# A uri is an absolute URI, so it must carry a scheme (RFC 3986 §3): the
+# A uri is an absolute URI, so it must carry a scheme (RFC 3986 §3). The
 # scheme-less reference forms are the rejected rows. The official suite's
-# optional/format/uri.json covers the character-level rules; these rows cover
-# the scheme requirement and the RFC's own §1.1.2 example URIs, which it omits.
+# optional/format/uri.json covers the character rules and carries the ftp and
+# mailto examples verbatim. What it leaves open are the two RFC 3986 §5.4
+# references that carry a scheme, which TestURIReferenceResolutionVectors hands
+# over here because a relative-ref cannot begin with one.
 #
-# Format: three tab-separated fields, "<input>"\t<valid>\t<note>. The input is a
-# Go quoted string literal in the spelling strconv.Quote produces. '#' lines and
-# blank lines are skipped.
+# Row format: see loadVectorFile in vectors_test.go.
 #
 "https://example.com/a?b=c#d"	true	http with a query and a fragment
 "urn:isbn:0451450523"	true	RFC 3986 §1.1.2 urn isbn
@@ -19,5 +19,5 @@
 "http://exa mple.com"	false	a space is forbidden
 "g:h"	true	RFC 3986 §5.4.1, the one normal reference that carries a scheme
 "http:g"	true	RFC 3986 §5.4.2, the one abnormal reference that carries a scheme
-"../../g"	false	a relative-ref cannot begin with a scheme (RFC 3986 §4.2)
+"../../g"	false	a dot-segment reference carries no scheme
 "//g"	false	a network-path reference carries no scheme

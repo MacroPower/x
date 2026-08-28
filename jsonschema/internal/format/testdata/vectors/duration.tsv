@@ -1,17 +1,17 @@
 # duration acceptance vectors, from the RFC 3339 Appendix A ABNF.
 #
 # Components appear in canonical order with no gaps, and weeks stand alone. The
-# official suite's optional/format/duration.json carries 42 cases, including the
-# contiguous-chain rejections P1Y2D and PT1H2S; FuzzFormatDurationVsABNF carries
-# the depth beyond both.
+# official suite's optional/format/duration.json carries 42 cases and already
+# pins the contiguous-chain rejections P1Y2D and PT1H2S, which the rows below
+# restate so the chain rules read whole in one place. What it leaves open is the
+# week alternative's exclusivity beyond P1Y2W and the composition P1YT1H.
+# FuzzFormatDurationVsABNF carries the depth beyond both.
 #
-# Format: three tab-separated fields, "<input>"\t<valid>\t<note>. The input is a
-# Go quoted string literal in the spelling strconv.Quote produces. '#' lines and
-# blank lines are skipped.
+# Row format: see loadVectorFile in vectors_test.go.
 #
 "P1Y2M3DT4H5M6S"	true	a full date and time
-"P1Y"	true	years alone
-"PT1H"	true	time alone
+"P1Y"	true	dur-year with its optional dur-month absent
+"PT1H"	true	dur-time with no dur-date before it
 "P1W"	true	dur-week stands alone
 "P0D"	true	a zero quantity is well formed
 "1Y"	false	the P designator is missing
@@ -21,13 +21,14 @@
 "P1Y2D"	false	dur-year = 1*DIGIT "Y" [dur-month], so year to day skips a link
 "P1W2D"	false	dur-week is an alternative to dur-date, not a prefix of it
 #
-# The week alternative and the two same-letter designators, which the
-# official suite reaches only through P1Y2W.
+# The week alternative's exclusivity, the composition of a date with a time,
+# and the two productions that spell a month and a minute with the same
+# letter.
 #
 "P1WT1H"	false	duration = "P" (dur-date / dur-time / dur-week), so dur-week admits no time
 "P2D1W"	false	weeks do not combine with days in either order
-"P1M"	true	dur-month: M outside dur-time counts months
-"PT1M"	true	dur-minute: the same letter inside dur-time counts minutes
+"P1M"	true	M outside dur-time is dur-month, so this counts months
+"PT1M"	true	the same letter inside dur-time is dur-minute, so this counts minutes
 "PT1H1M1S"	true	the full dur-time chain
 "P1YT1H"	true	dur-date followed by dur-time
 "PT1H1S"	false	dur-hour = 1*DIGIT "H" [dur-minute], so hour to second skips a link
