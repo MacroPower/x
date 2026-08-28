@@ -6,8 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
-	"slices"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -39,6 +37,15 @@ const (
 	// Two fields resolving to one JSON name at the same depth are both dropped
 	// by encoding/json's dominance rule, so neither is a property to classify.
 	reasonShadowedName = "a JSON name claimed by more than one field at one depth is dropped"
+	// Three columns predict no token, so encoding/json cannot judge them. The
+	// form does not influence what encoding/json writes, so no assertion over
+	// the marshaled member could distinguish a right classification from a
+	// wrong one: the raw byte column admits any JSON value by definition, and
+	// the opaque column names the shapes the tag vocabulary cannot describe.
+	// Their totality is pinned in internal/tagmodel instead, by the matrix
+	// golden and TestFormClassificationTotal. The referenced column is the one
+	// of the three that does predict a token, read off the definition it names.
+	reasonFormPredictsNoToken = "the raw byte and opaque columns admit any JSON value, so no token follows from them"
 )
 
 // unprobedReasons lists every reason the probe could legitimately not observe
@@ -344,33 +351,17 @@ func declaredToken(s *jsonschema.Schema) (jsonToken, bool) {
 	return tokenNull, false
 }
 
-// permitsString mirrors the base test classifyForm applies: a schema holds a
-// string instance when it names the string type or carries a base64 encoding.
-func permitsString(s *jsonschema.Schema) bool {
-	if s == nil {
-		return false
-	}
-
-	if s.ContentEncoding == "base64" {
-		return true
-	}
-
-	if s.Type == "string" {
-		return true
-	}
-
-	return slices.Contains(s.Types, "string")
-}
-
 // assertShapeMatchesToken is the oracle. It asserts that the form the generator
-// assigned the field agrees with the JSON encoding/json actually wrote for it.
+// assigned the field agrees with the JSON encoding/json actually wrote for it,
+// and reports whether it had an assertion to make. A column that predicts no
+// token has none; see reasonFormPredictsNoToken.
 func assertShapeMatchesToken(
 	t *testing.T,
 	obs *shapeObservation,
 	raw json.RawMessage,
 	isNil bool,
 	root *jsonschema.Schema,
-) {
+) bool {
 	t.Helper()
 
 	got := tokenOf(t, raw)
@@ -382,7 +373,7 @@ func assertShapeMatchesToken(
 	if got == tokenNull {
 		assert.True(t, isNil, "%s marshaled null from a non-nil value", where)
 
-		return
+		return true
 	}
 
 	require.False(t, isNil, "%s marshaled %s from a nil value", where, got)
@@ -392,21 +383,13 @@ func assertShapeMatchesToken(
 		assertCoercedContent(t, obs, raw, where)
 		assertElementTokens(t, obs, raw, where)
 
-		return
+		return true
 	}
 
 	// The forms with a predicted token returned above, and the default fails on
 	// anything this switch does not name.
 	//nolint:exhaustive // The predicted-token forms are handled by formToken above.
 	switch obs.shape.Form {
-	case jsonschema.FormRawBytes:
-		// The raw form is a byte slice whose schema declines to call it a
-		// string, so its instance is whatever JSON the field carries. Asserting
-		// the byte slice and the absent string is what the column claims;
-		// asserting a token would claim more than it does.
-		assert.Equal(t, reflect.Slice, obs.shape.Elem.Kind(), "%s: the raw form is a byte slice", where)
-		assert.False(t, permitsString(obs.base), "%s: the raw form's base permits no string", where)
-
 	case jsonschema.FormRef:
 		// The definition states the instance shape the Go kind withheld, so the
 		// oracle reads it there rather than restating the base.Ref guard
@@ -417,38 +400,23 @@ func assertShapeMatchesToken(
 		def, ok := root.Defs[name]
 		require.True(t, ok, "%s: $defs has no entry %q", where, name)
 
-		if want, ok := declaredToken(def); ok {
-			assert.Equal(t, want, got, "%s: $defs/%s declares a %s instance", where, name, want)
+		want, ok := declaredToken(def)
+		if !ok {
+			return false
 		}
 
-	case jsonschema.FormOpaque:
-		// Every kind that reaches the opaque column through the generator is an
-		// interface: a struct classifies through its declared object or its
-		// $ref, and chan, func, and complex fail generation outright.
-		assert.True(t,
-			obs.shape.Kind == reflect.Interface || !declaresObjectOrRef(obs.base),
-			"%s: the opaque form is an interface kind or a base declaring neither an object nor a $ref", where)
+		assert.Equal(t, want, got, "%s: $defs/%s declares a %s instance", where, name, want)
+
+		return true
+
+	case jsonschema.FormRawBytes, jsonschema.FormOpaque:
+		return false
 
 	default:
 		t.Fatalf("%s: unclassified form", where)
-	}
-}
 
-// declaresObjectOrRef reports whether the base states an object or defers to a
-// definition, the two readings that keep a non-interface kind out of the opaque
-// column.
-func declaresObjectOrRef(s *jsonschema.Schema) bool {
-	if s == nil {
 		return false
 	}
-
-	if s.Ref != "" {
-		return true
-	}
-
-	tok, ok := declaredToken(s)
-
-	return ok && tok == tokenObject
 }
 
 // assertElementTokens asserts the element classifications the field's own
@@ -544,8 +512,10 @@ func assertCoercedContent(t *testing.T, obs *shapeObservation, raw json.RawMessa
 	//nolint:exhaustive // The switch above already narrowed the form to the three coerced ones.
 	switch obs.shape.Form {
 	case jsonschema.FormCoercedNumber:
-		_, err := strconv.ParseFloat(content, 64)
-		require.NoError(t, err, "%s: a quoted number field emits a number literal, got %q", where, content)
+		// Validating the bare text as JSON applies the JSON number grammar
+		// itself, which strconv would have widened to NaN, Inf, and hex floats.
+		assert.True(t, json.Valid([]byte(content)) && !strings.ContainsAny(content, `"{[tfn`),
+			"%s: a quoted number field emits a JSON number literal, got %q", where, content)
 
 	case jsonschema.FormCoercedBool:
 		assert.Contains(t, []string{"true", "false"}, content,
@@ -798,9 +768,9 @@ func checkObservations(t *testing.T, seen []shapeObservation, root *jsonschema.S
 			field := owner.FieldByName(obs.field.Name)
 			require.True(t, field.IsValid(), "%s has no field %s", obs.owner, obs.field.Name)
 
-			assertShapeMatchesToken(t, obs, raw, isNilValue(field), root)
-
-			checked++
+			if assertShapeMatchesToken(t, obs, raw, isNilValue(field), root) {
+				checked++
+			}
 		}
 	}
 
@@ -844,15 +814,20 @@ func TestTagShapeOracleRoster(t *testing.T) {
 
 					// The vacuity guard: a roster row that loses its json tag
 					// would otherwise go unprobed and assert nothing.
-					var field *shapeObservation
+					var (
+						field *shapeObservation
+						count int
+					)
 
 					for i, obs := range seen {
 						if obs.owner == doc {
 							field = &seen[i]
+							count++
 						}
 					}
 
-					require.NotNil(t, field, "the probe saw no observation for the roster field")
+					require.Equal(t, 1, count,
+						"the roster field must be probed exactly once; an untagged row reaches no interpreter")
 
 					want := row.wantDefs
 					if !defs && row.wantNoDefs != formUnpinned {
@@ -910,9 +885,9 @@ func assertEveryFieldAccountedFor(t *testing.T, typ reflect.Type, seen []shapeOb
 // appears only where the Go value is nil, and that needs a pass where every
 // nullable field is guaranteed to carry a value.
 //
-// Four field classes stay unobserved and are named rather than left implicit:
-// reasonUntaggedField, reasonExcludedField, reasonUnexportedField, and
-// reasonComposedEmbed.
+// Five field classes stay unobserved and are named rather than left implicit:
+// reasonUntaggedField, reasonExcludedField, reasonUnexportedField,
+// reasonComposedEmbed, and reasonShadowedName.
 func TestTagShapeOracleSynthesized(t *testing.T) {
 	t.Parallel()
 
@@ -936,4 +911,19 @@ func TestTagShapeOracleSynthesized(t *testing.T) {
 	// them would leave the leg green and inert.
 	assert.Positive(t, checked, "the synthesized leg asserted no field")
 	t.Logf("checked %d field observations across %d synthesized shapes", checked, len(blobs))
+}
+
+// TestTagShapeOracleNoTokenColumns pins the split between the columns
+// encoding/json can judge and the two it cannot, so a form cannot be both
+// predicted by the token table and excused by the oracle's switch. The excuse
+// is reasonFormPredictsNoToken; making it a guard rather than a comment is what
+// keeps a later token prediction from being silently overridden.
+func TestTagShapeOracleNoTokenColumns(t *testing.T) {
+	t.Parallel()
+
+	for _, form := range []jsonschema.Form{jsonschema.FormRawBytes, jsonschema.FormOpaque} {
+		_, predicted := formToken[form]
+		assert.False(t, predicted, "%s predicts a token, so %s no longer holds",
+			form, reasonFormPredictsNoToken)
+	}
 }

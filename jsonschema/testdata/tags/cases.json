@@ -666,7 +666,7 @@
         }
       ],
       "not": {
-        "type": "null"
+        "const": null
       }
     },
     "instances": [
@@ -692,7 +692,7 @@
         "string"
       ],
       "not": {
-        "type": "null"
+        "const": null
       }
     },
     "instances": [
@@ -709,5 +709,58 @@
         "want": "reject"
       }
     ]
+  },
+  {
+    "name": "required composes with a second forbidding rule on the wrapper",
+    "note": "a forbidden subschema would escalate to allOf, which the null encoding scopes to the value branch",
+    "type": "*string",
+    "json": "v",
+    "validate": "required,ne=banned",
+    "schema": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "not": {
+        "enum": [
+          null,
+          "banned"
+        ]
+      }
+    },
+    "instances": [
+      {
+        "json": "x",
+        "want": "accept"
+      },
+      {
+        "json": null,
+        "want": "reject"
+      },
+      {
+        "json": "banned",
+        "want": "reject"
+      }
+    ]
+  },
+  {
+    "name": "required with eq=false on a bool is a conflict",
+    "note": "required on a bool pins true, which a const of false contradicts",
+    "type": "bool",
+    "json": "v",
+    "validate": "required,eq=false",
+    "validateError": "ErrConflictingConstraints"
+  },
+  {
+    "name": "a type override naming no JSON type is rejected",
+    "note": "type= must name one of the seven JSON Schema types",
+    "type": "string",
+    "json": "v",
+    "jsonschema": "type=nope",
+    "jsonschemaError": "ErrInvalidType"
   }
 ]

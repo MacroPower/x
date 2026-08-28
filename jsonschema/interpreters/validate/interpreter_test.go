@@ -593,9 +593,11 @@ func TestValidateInterpreter_RequiredOnPointer(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	// Pointer: required but no minLength.
+	// Pointer: required forbids null rather than measuring the value, since
+	// go-playground reads required on a pointer as "must be non-nil".
 	assert.Contains(t, s.Required, "name")
 	assert.Nil(t, s.Properties["name"].MinLength)
+	assertForbidsNull(t, s.Properties["name"])
 }
 
 func TestValidateInterpreter_Dive(t *testing.T) {
@@ -1087,9 +1089,11 @@ func TestValidateInterpreter_RequiredOnPointerSlice(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	// Pointer: required but no minItems (pointer means "must be non-nil").
+	// Pointer: required forbids null rather than sizing the collection, since
+	// go-playground reads required on a pointer as "must be non-nil".
 	assert.Contains(t, s.Required, "tags")
 	assert.Nil(t, s.Properties["tags"].MinItems)
+	assertForbidsNull(t, s.Properties["tags"])
 }
 
 func TestValidateInterpreter_RequiredOnPointerMap(t *testing.T) {
@@ -1104,9 +1108,11 @@ func TestValidateInterpreter_RequiredOnPointerMap(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	// Pointer: required but no minProperties.
+	// Pointer: required forbids null rather than counting entries, since
+	// go-playground reads required on a pointer as "must be non-nil".
 	assert.Contains(t, s.Required, "labels")
 	assert.Nil(t, s.Properties["labels"].MinProperties)
+	assertForbidsNull(t, s.Properties["labels"])
 }
 
 func TestValidateInterpreter_RequiredOnNonPointerSlice(t *testing.T) {
@@ -2795,4 +2801,22 @@ func TestValidateInterpreter_LenOnCollectionUnaffectedByFieldWidth(t *testing.T)
 		"required":["code","items"],
 		"additionalProperties":false
 	}`, string(got))
+}
+
+// assertForbidsNull requires the schema to forbid the null value, the whole of
+// what required asserts on a nullable occurrence. The fact rides the forbidden
+// value accumulation, so it is a not.const of null on its own and a member of a
+// not.enum once another rule forbids something too.
+func assertForbidsNull(t *testing.T, s *jsonschema.Schema) {
+	t.Helper()
+
+	require.NotNil(t, s.Not, "required must forbid null on a nullable occurrence")
+
+	if s.Not.Const != nil {
+		assert.Nil(t, *s.Not.Const, "the forbidden value is null")
+
+		return
+	}
+
+	assert.Contains(t, s.Not.Enum, nil, "null is among the forbidden values")
 }

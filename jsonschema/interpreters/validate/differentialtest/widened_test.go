@@ -3,6 +3,7 @@ package differentialtest_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -25,8 +26,11 @@ import (
 // pointerConstraints exercises the value rules on nullable occurrences, where
 // the interpreter puts a value constraint on the value branch of the null
 // encoding so a permitted null stays valid. The bool fields carry only eq and
-// ne; see reasonOneOfKindPanic. A nil field puts the pair in the weaker half of
-// the agreement property; see reasonNullableValueRule.
+// ne; see reasonOneOfKindPanic. A nil value rule field puts the pair in the
+// weaker half of the agreement property; see reasonNullableValueRule. The
+// required fields are the exception, and the reason they are here: required is
+// the one rule that does assert something about null, so its nil stays under
+// the biconditional and a schema that let null through would fail.
 type pointerConstraints struct {
 	Min    *string  `json:"min"     validate:"min=2"`
 	Max    *string  `json:"max"     validate:"max=5"`
@@ -40,6 +44,24 @@ type pointerConstraints struct {
 	FMin   *float64 `json:"f_min"   validate:"min=1.5"`
 	Flag   *bool    `json:"flag"    validate:"eq=true"`
 	FlagN  *bool    `json:"flag_n"  validate:"ne=false"`
+}
+
+// requiredPointerConstraints is the nullable roster required gets to itself.
+// Every field carries it, so no sibling can drop the object into the weaker
+// half of the agreement property and hide a null the schema should have
+// rejected. The pairings are the load-bearing rows: required composes its
+// forbidden null with another rule's forbidden value, and a composition that
+// escalated the pair off the null wrapper would let null through here.
+type requiredPointerConstraints struct {
+	Str     *string  `json:"str"            validate:"required"`
+	Num     *int     `json:"num"            validate:"required"`
+	FNum    *float64 `json:"f_num"          validate:"required"`
+	Flag    *bool    `json:"flag"           validate:"required"`
+	StrNe   *string  `json:"str_ne"         validate:"required,ne=banned"`
+	NumNe   *int     `json:"num_ne"         validate:"required,ne=7"`
+	StrOne  *string  `json:"str_one"        validate:"required,oneof=alpha beta"`
+	StrMin  *string  `json:"str_min"        validate:"required,min=2"`
+	Coerced *int     `json:"coerced,string" validate:"required,ne=3"`
 }
 
 // omitemptyConstraints exercises the scalar rules on fields encoding/json drops
@@ -81,6 +103,17 @@ func FuzzValidatorPointerConstraints(f *testing.F) {
 	}))
 }
 
+// FuzzValidatorRequiredPointerConstraints asserts the agreement property over
+// nullable occurrences that all carry required.
+func FuzzValidatorRequiredPointerConstraints(f *testing.F) {
+	fuzzWidenedDifferential[requiredPointerConstraints](f, fuzzfill.WithCandidates(map[string][]string{
+		"StrNe":  {"banned", "allowed"},
+		"NumNe":  {"7", "8"},
+		"StrOne": {"alpha", "beta", "gamma"},
+		"StrMin": {"a", "ab", "abc"},
+	}))
+}
+
 // FuzzValidatorOmitemptyConstraints asserts the agreement property over fields
 // encoding/json may drop.
 func FuzzValidatorOmitemptyConstraints(f *testing.F) {
@@ -103,11 +136,23 @@ func FuzzValidatorCoercedPointerConstraints(f *testing.F) {
 	}))
 }
 
-// jsonNames returns the JSON property name of every field of typ that
-// encoding/json writes, so the harness can tell a dropped or null field from a
-// present one without re-deriving the tag grammar per target.
-func jsonNames(typ reflect.Type) []string {
-	out := make([]string, 0, typ.NumField())
+// fieldProbe is what the harness needs to know about one field to decide which
+// half of the agreement property its instance falls under.
+type fieldProbe struct {
+	name string
+	// The required field marks a rule that asserts something about null. Every
+	// other rule passes on a null instance in JSON Schema (see
+	// reasonNullableValueRule), so a null there weakens the comparison; a
+	// required field's null is exactly what the schema is supposed to reject,
+	// so it stays under the biconditional.
+	required bool
+}
+
+// jsonNames returns a probe per field of typ that encoding/json writes, so the
+// harness can tell a dropped or null field from a present one without
+// re-deriving the tag grammar per target.
+func jsonNames(typ reflect.Type) []fieldProbe {
+	out := make([]fieldProbe, 0, typ.NumField())
 
 	for f := range typ.Fields() {
 		if !f.IsExported() {
@@ -123,7 +168,7 @@ func jsonNames(typ reflect.Type) []string {
 			name = f.Name
 		}
 
-		out = append(out, name)
+		out = append(out, fieldProbe{name: name, required: spells(f.Tag.Get("validate"), "required")})
 	}
 
 	return out
@@ -132,16 +177,20 @@ func jsonNames(typ reflect.Type) []string {
 // everyFieldSet reports whether the marshaled object carries every named
 // property with a non-null value, which is the region where the two validators
 // see the same information and the biconditional holds.
-func everyFieldSet(t *testing.T, names []string, instance []byte) bool {
+func everyFieldSet(t *testing.T, probes []fieldProbe, instance []byte) bool {
 	t.Helper()
 
 	var members map[string]json.RawMessage
 
 	require.NoError(t, json.Unmarshal(instance, &members), "decode %s", instance)
 
-	for _, name := range names {
-		raw, ok := members[name]
-		if !ok || string(raw) == "null" {
+	for _, probe := range probes {
+		raw, ok := members[probe.name]
+		if !ok {
+			return false
+		}
+
+		if string(raw) == "null" && !probe.required {
 			return false
 		}
 	}
@@ -152,10 +201,10 @@ func everyFieldSet(t *testing.T, names []string, instance []byte) bool {
 // agreementHolds applies the split property: the biconditional where every
 // field is set, the one-way implication that the schema is never the stricter
 // of the two otherwise.
-func agreementHolds(t *testing.T, names []string, instance []byte, referenceReject, schemaReject bool) bool {
+func agreementHolds(t *testing.T, probes []fieldProbe, instance []byte, referenceReject, schemaReject bool) bool {
 	t.Helper()
 
-	if everyFieldSet(t, names, instance) {
+	if everyFieldSet(t, probes, instance) {
 		return referenceReject == schemaReject
 	}
 
@@ -274,11 +323,94 @@ func TestWidenedDifferentialReachesStrictAgreement(t *testing.T) {
 
 			return strictSeedCount[coercedPointerConstraints](t)
 		},
+		"required pointer": func(t *testing.T) int {
+			t.Helper()
+
+			return strictSeedCount[requiredPointerConstraints](t)
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Positive(t, count(t), "no seed reaches the biconditional half of the property")
+			// More than one, since a single strict seed would leave the
+			// biconditional resting on one blob: the cursor zero-extends, so a
+			// short blob leaves every tail field nil and lands in the weak half.
+			assert.GreaterOrEqual(t, count(t), 2,
+				"too few seeds reach the biconditional half of the property")
+		})
+	}
+}
+
+// requiredNullableShapes are the one-field shapes required is checked against
+// on its own. A fuzz target cannot serve here: the schema verdict is per
+// object, so a sibling field that correctly rejects null masks another field
+// that wrongly accepts it. One field per struct is what makes the verdict
+// attributable.
+//
+// The pairings are the point. Required contributes a forbidden null, and a
+// second forbidding rule has to compose with it without pushing the pair off
+// the branch the null encoding put the null on.
+func requiredNullableShapes() map[string]reflect.Type {
+	field := func(typ reflect.Type, jsonTag, rule string) reflect.Type {
+		return reflect.StructOf([]reflect.StructField{{
+			Name: "V", Type: typ,
+			Tag: reflect.StructTag(fmt.Sprintf(`json:%q validate:%q`, jsonTag, rule)),
+		}})
+	}
+
+	return map[string]reflect.Type{
+		"string":            field(reflect.TypeFor[*string](), "v", "required"),
+		"number":            field(reflect.TypeFor[*int](), "v", "required"),
+		"float":             field(reflect.TypeFor[*float64](), "v", "required"),
+		"bool":              field(reflect.TypeFor[*bool](), "v", "required"),
+		"slice":             field(reflect.TypeFor[*[]int](), "v", "required"),
+		"map":               field(reflect.TypeFor[*map[string]int](), "v", "required"),
+		"coerced number":    field(reflect.TypeFor[*int](), "v,string", "required"),
+		"string with ne":    field(reflect.TypeFor[*string](), "v", "required,ne=banned"),
+		"number with ne":    field(reflect.TypeFor[*int](), "v", "required,ne=7"),
+		"bool with ne":      field(reflect.TypeFor[*bool](), "v", "required,ne=true"),
+		"string with oneof": field(reflect.TypeFor[*string](), "v", "required,oneof=alpha beta"),
+		"string with min":   field(reflect.TypeFor[*string](), "v", "required,min=2"),
+		"coerced with ne":   field(reflect.TypeFor[*int](), "v,string", "required,ne=3"),
+		"slice with ne":     field(reflect.TypeFor[*[]int](), "v", "required,ne=2"),
+		"repeated required": field(reflect.TypeFor[*string](), "v", "required,required"),
+	}
+}
+
+// TestRequiredOnNullableRejectsNull pins that required on a nullable field
+// rejects the null instance, agreeing with go-playground's reading of required
+// on a pointer as "must be non-nil".
+//
+// The schema's required entry cannot say that on its own, since a property
+// whose value is null is still present, so the assertion rides on a forbidden
+// null that has to survive composition with whatever else the field forbids.
+func TestRequiredOnNullableRejectsNull(t *testing.T) {
+	t.Parallel()
+
+	reference := playground.New(playground.WithRequiredStructEnabled())
+
+	for name, typ := range requiredNullableShapes() {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			schema, err := jsonschema.Generate(t.Context(), typ,
+				jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()))
+			require.NoError(t, err)
+
+			validator, err := jsonschema.Compile(t.Context(), schema)
+			require.NoError(t, err)
+
+			doc, err := json.Marshal(schema.Properties["v"])
+			require.NoError(t, err)
+
+			// The nil occurrence: go-playground rejects it, so the schema must
+			// too. The zero value of a one-field struct is exactly that.
+			referenceReject, err := referenceRejects(reference, reflect.New(typ).Elem().Interface())
+			require.NoError(t, err)
+			require.True(t, referenceReject, "go-playground must reject the nil occurrence")
+
+			assert.Error(t, validator.ValidateJSON(t.Context(), []byte(`{"v":null}`)),
+				"the schema must reject null for %s: %s", name, doc)
 		})
 	}
 }

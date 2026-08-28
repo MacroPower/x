@@ -2,6 +2,7 @@ package differentialtest_test
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -124,6 +125,47 @@ func rigExclusions() []rigExclusion {
 	}
 }
 
+// rigCoverage is the positive half of the record: a rule the rig claims to
+// compare, and the kinds whose pool must spell it. Without it the exclusion
+// check below is one-directional, and a pool that quietly lost a rule would
+// read as covered.
+func rigCoverage() map[string][]reflect.Type {
+	scalars := []reflect.Type{
+		reflect.TypeFor[string](), reflect.TypeFor[int](),
+		reflect.TypeFor[int8](), reflect.TypeFor[float64](),
+	}
+
+	return map[string][]reflect.Type{
+		"required": {reflect.TypeFor[string](), reflect.TypeFor[int](), reflect.TypeFor[bool]()},
+		"min":      append(scalars, reflect.TypeFor[[]string](), reflect.TypeFor[map[string]int]()),
+		"max":      append(scalars, reflect.TypeFor[[]string](), reflect.TypeFor[map[string]int]()),
+		"len":      append(scalars, reflect.TypeFor[[]string](), reflect.TypeFor[map[string]int]()),
+		"eq":       {reflect.TypeFor[string](), reflect.TypeFor[int](), reflect.TypeFor[bool]()},
+		"ne":       {reflect.TypeFor[string](), reflect.TypeFor[int](), reflect.TypeFor[bool]()},
+		"oneof":    {reflect.TypeFor[string](), reflect.TypeFor[int]()},
+		"unique":   {reflect.TypeFor[[]string](), reflect.TypeFor[[]int8]()},
+		"dive":     {reflect.TypeFor[[]string](), reflect.TypeFor[[]int8]()},
+	}
+}
+
+// TestRigCoverageMatchesTheDraw pins that every rule the rig claims to compare
+// is actually drawn for the kinds it names.
+func TestRigCoverageMatchesTheDraw(t *testing.T) {
+	t.Parallel()
+
+	pools := make(map[reflect.Type][]string)
+	for _, kind := range tagKinds() {
+		pools[kind.typ] = kind.pool
+	}
+
+	for rule, kinds := range rigCoverage() {
+		for _, typ := range kinds {
+			assert.True(t, slices.ContainsFunc(pools[typ], func(s string) bool { return spells(s, rule) }),
+				"the %s pool no longer spells %q, which the rig claims to cover", typ, rule)
+		}
+	}
+}
+
 // TestRigExclusionsMatchTheDraw pins the record against the draw pools: a rule
 // the record excludes must be absent from the pools it names, and every entry
 // must carry a reason. Without this the record is prose that can drift away
@@ -166,7 +208,10 @@ func TestRigExclusionsMatchTheDraw(t *testing.T) {
 // rule one level down.
 func spells(spelling, rule string) bool {
 	for part := range strings.SplitSeq(spelling, ",") {
-		if part == "dive" {
+		// A dive is stripped so the rule after it matches as the rule it is,
+		// one level down. Asking for dive itself is the one case that reads the
+		// prefix rather than skipping it.
+		if part == "dive" && rule != "dive" {
 			continue
 		}
 

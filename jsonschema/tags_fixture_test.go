@@ -51,10 +51,6 @@ type tagCase struct {
 	Instances       []tagInstance   `json:"instances"`
 }
 
-// textLevel is a numeric type that marshals itself as text, the shape whose
-// schema is a string while its Go value is a number.
-type textLevel = crossLevel
-
 // fixtureTypes resolves a row's type name. A row names a shape rather than
 // spelling a Go type, so the table stays data and the set of shapes it can
 // reach is reviewable in one place.
@@ -76,8 +72,8 @@ func fixtureTypes() map[string]reflect.Type {
 		"[]byte":         reflect.TypeFor[[]byte](),
 		"RawMessage":     reflect.TypeFor[json.RawMessage](),
 		"time.Time":      reflect.TypeFor[time.Time](),
-		"textLevel":      reflect.TypeFor[textLevel](),
-		"[]textLevel":    reflect.TypeFor[[]textLevel](),
+		"textLevel":      reflect.TypeFor[crossLevel](),
+		"[]textLevel":    reflect.TypeFor[[]crossLevel](),
 	}
 }
 
@@ -304,5 +300,18 @@ func TestTagFixturesCoverage(t *testing.T) {
 
 	for name := range fixtureTypes() {
 		assert.True(t, used[name], "the type registry offers %q but no row uses it", name)
+	}
+
+	named := make(map[string]bool, len(cases))
+	for _, tc := range cases {
+		for _, key := range []string{"jsonschema", "validate"} {
+			if name := tc.wantError(key); name != "" {
+				named[name] = true
+			}
+		}
+	}
+
+	for name := range fixtureErrors() {
+		assert.True(t, named[name], "the sentinel registry offers %q but no row names it", name)
 	}
 }

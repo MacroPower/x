@@ -76,10 +76,8 @@ type numericConstraints struct {
 }
 
 // boolConstraints exercises the modeled boolean tags go-playground can serve as
-// an oracle for. The required+eq=false combination is absent because the
-// interpreter rejects it at generation as a conflict, and oneof is absent
-// because go-playground panics ("Bad field type bool") on oneof against a bool
-// field, so it cannot be the reference there.
+// an oracle for. The required+eq=false combination is absent; see
+// reasonRequiredEqFalseConflict. Oneof is absent; see reasonOneOfKindPanic.
 type boolConstraints struct {
 	Eq bool `json:"eq" validate:"eq=true"`
 	Ne bool `json:"ne" validate:"ne=false"`
@@ -120,11 +118,9 @@ type mapConstraints struct {
 // value and the schema's non-zero keyword (minLength:1, not const:0, const:true)
 // rejects the same marshaled form.
 //
-// Slices and maps are excluded on purpose, since go-playground applies required
-// to them as a nil check: an empty but non-nil collection passes, whereas the
-// interpreter models required as minItems:1 / minProperties:1 and rejects the
-// empty collection. That documented divergence is false equivalence, not a bug
-// the rig should flag, so it stays out of the roster.
+// Slices and maps are excluded on purpose; see
+// reasonRequiredCollectionNilCheck. That documented divergence is false
+// equivalence, not a bug the rig should flag, so it stays out of the roster.
 type requiredConstraints struct {
 	Str  string  `json:"str"   validate:"required"`
 	Num  int     `json:"num"   validate:"required"`
@@ -141,8 +137,7 @@ type requiredConstraints struct {
 // field emits "5", and this rig would catch it.
 //
 // Only the value rules appear. The numeric bounds are excluded by design, not
-// by omission: minimum constrains JSON numbers and is inert against the quoted
-// instance, so the interpreter rejects them outright rather than modeling them.
+// by omission; see reasonCoercedNumericBounds.
 type coercedConstraints struct {
 	Eq    int     `json:"eq,string"     validate:"eq=7"`
 	Ne    int     `json:"ne,string"     validate:"ne=7"`
@@ -300,12 +295,14 @@ func differentialSeeds() [][]byte {
 		bytes.Repeat([]byte{0x07}, 128),
 		bytes.Repeat([]byte{0xff}, 80),
 		{0x02, 0x03, 0x05, 0x07, 0x0b, 0x0d, 0x11, 0x13, 0x17, 0x1d, 0x1f, 0x25, 0x29, 0x2b, 0x2f, 0x35},
-		// A blob long enough to set every field of the widest roster type. The
-		// cursor zero-extends past its data, so a short blob leaves the tail
-		// fields nil or zero and never reaches the region where the two
-		// validators see the same information; see
+		// Two blobs long enough to set every field of the widest roster type,
+		// drawn from different byte values so the strict region does not rest
+		// on one. The cursor zero-extends past its data, so a short blob leaves
+		// the tail fields nil or zero and never reaches the region where the
+		// two validators see the same information; see
 		// TestWidenedDifferentialReachesStrictAgreement.
 		bytes.Repeat([]byte{0xff}, 384),
+		bytes.Repeat([]byte{0x7f}, 384),
 	}
 }
 

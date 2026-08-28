@@ -8,6 +8,7 @@ import (
 
 	"go.jacobcolvin.com/x/jsonschema/internal/constraint"
 	"go.jacobcolvin.com/x/jsonschema/internal/numkind"
+	"go.jacobcolvin.com/x/jsonschema/internal/reflectkind"
 	"go.jacobcolvin.com/x/jsonschema/internal/typename"
 )
 
@@ -148,12 +149,11 @@ func (sh Shape) coercedText(lit string) (any, error) {
 	case sh.Form == FormCoercedBool:
 		parsed, err = ParseBoolLiteral(lit)
 
-	case sh.Kind == reflect.String:
-		// A numeric type with a string kind (json.Number) holds its literal as
-		// text and has no width to parse at, so the literal converts straight
-		// through and the marshal below is what validates it. Parsing a number
-		// first would be both pointless and unconvertible: reflect refuses a
-		// float64 to a string-kinded type.
+	case reflectkind.IsJSONNumber(sh.Elem):
+		// A json.Number holds its literal as text and has no width to parse at,
+		// so the literal converts straight through and the marshal below is
+		// what validates it. Parsing a number first would be both pointless and
+		// unconvertible: reflect refuses a float64 to a string-kinded type.
 		parsed = lit
 
 	default:

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -56,7 +57,11 @@ func tagKinds() []tagKind {
 		"eq=7", "ne=7", "len=5", "oneof=1 2 3", "required",
 	}
 	// A float draws the same rules without oneof; see reasonOneOfKindPanic.
-	scalarFloat := scalarNumber[:len(scalarNumber)-2]
+	// Filtering rather than reslicing is what keeps the pool from silently
+	// losing a rule when scalarNumber grows or is reordered.
+	scalarFloat := slices.DeleteFunc(slices.Clone(scalarNumber), func(spelling string) bool {
+		return spells(spelling, "oneof")
+	})
 	// A bool draws no oneof either. It draws no required
 	// alongside eq=false either, which the interpreter reports as a conflict;
 	// see reasonRequiredEqFalseConflict. Drawing one rule per field is what
@@ -155,6 +160,8 @@ func errorsIsAny(err error, targets ...error) bool {
 // shapes. It takes two blobs so the shape entropy and the value entropy evolve
 // independently, the convention the shape rig in the parent package uses.
 func FuzzValidatorTaggedShapes(f *testing.F) {
+	f.Helper()
+
 	ctx := context.Background()
 	reference := playground.New(playground.WithRequiredStructEnabled())
 

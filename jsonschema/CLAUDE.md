@@ -518,8 +518,13 @@ contract the tests enforce.
   exactly, and where encoding/json dropped a field or wrote null for one the
   schema has nothing to assert about it and can only be the more permissive of
   the two, so the property weakens to that one-way implication.
+  A `required` field is the exception to the weakening: it is the one rule that
+  does assert something about null, so its null stays under the biconditional.
   `TestWidenedDifferentialReachesStrictAgreement` guards against the weak half
-  swallowing everything. `FuzzValidatorTaggedShapes` fuzzes the shape as well as
+  swallowing everything. The schema verdict is per object, so a sibling field
+  that correctly rejects null can mask one that wrongly accepts it; the
+  deterministic `TestRequiredOnNullableRejectsNull` puts each nullable
+  `required` shape in a struct of its own for that reason. `FuzzValidatorTaggedShapes` fuzzes the shape as well as
   the value through `drawTaggedStruct`, which draws the Go kind, the pointer
   wrapper, the json option, and the validate rule independently. That draw
   deliberately does not come from `internal/fuzzshape`: that package synthesizes

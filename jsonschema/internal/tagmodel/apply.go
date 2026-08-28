@@ -392,11 +392,16 @@ func refBaseOf(t Target) *jsonschema.Schema {
 // as "must be non-nil" and says nothing about the pointed-to value, so the
 // pointed-to zero stays valid. The schema's required entry cannot express that
 // on its own, since a property whose value is null is still present, so the
-// assertion needs the null forbidden outright. The fact is a not, which the
-// keyword table scopes to the wrapper, so it lands on the branch the null
-// encoding put the null on.
+// assertion needs the null forbidden outright.
+//
+// Null is forbidden as a value rather than as a subschema, which is what keeps
+// it on the null wrapper. A forbidden value rides the not.const to not.enum
+// accumulation and stays in the single not slot, which the keyword table scopes
+// to the wrapper; a forbidden subschema cannot join an enum, so a second
+// forbidding rule escalates the pair into allOf, and allOf is scoped to the
+// value branch of the null encoding, where a null instance never reaches it.
 func nonZeroNullable(t Target) error {
-	ForbidSchema(t.Canvas, &jsonschema.Schema{Type: typename.Null})
+	Forbid(t.Canvas, nil)
 
 	return nil
 }
