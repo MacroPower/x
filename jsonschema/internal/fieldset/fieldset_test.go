@@ -175,18 +175,44 @@ type excludedFields struct {
 	Shown  int    `json:"shown"`
 }
 
-// nestedComposition's embed contributes nothing to the marshaled object except
-// through a composition nested inside it, which is the only arm of the shadow
-// marking no other roster type reaches.
+// nestedComposition embeds Deep, whose own Epsilon the outer field shadows.
+// Composing both Deep and Base leaves the nested composition of Base as Deep's
+// only unshadowed contribution, the one arm of the shadow marking no other
+// roster type reaches.
 type nestedComposition struct {
 	Deep
 
 	Epsilon int `json:"epsilon"`
 }
 
+// NonStructOwner embeds a non-struct, so composing it exercises the ghost flags
+// that a sighting of an embedded leaf carries.
+type NonStructOwner struct {
+	Leafish
+
+	Q int `json:"q"`
+}
+
+// composedNonStruct composes NonStructOwner, which is how the promoted leaf
+// reaches the enclosing resolution as a ghost.
+type composedNonStruct struct {
+	NonStructOwner
+
+	R int `json:"r"`
+}
+
+// shadowedPointerEmbed embeds *Base and takes one of its promoted names with a
+// real field. Composing Base is what makes the shadow marking dereference the
+// pointer to find the embed's fields.
+type shadowedPointerEmbed struct {
+	*Base
+
+	Alpha int `json:"alpha"`
+}
+
 // allOfNameClash carries a field whose JSON name is the synthetic key a
-// composition of Base takes, which is the collision Key's disjoint namespaces
-// exist to keep apart.
+// composition of Base takes. Key's disjoint namespaces exist to keep that
+// collision apart.
 type allOfNameClash struct {
 	Base
 
@@ -239,19 +265,22 @@ var (
 		"string-coerced fields": reflect.TypeFor[stringOptFields](),
 		"nested composition":    reflect.TypeFor[nestedComposition](),
 		"allOf name clash":      reflect.TypeFor[allOfNameClash](),
+		"composed non-struct":   reflect.TypeFor[composedNonStruct](),
+		"shadowed pointer":      reflect.TypeFor[shadowedPointerEmbed](),
 	}
 
 	// ComposedCandidates are the embed types the predicate sets below designate
 	// as allOf-composed. A candidate no type in the population embeds is a
 	// no-op, which keeps one list serving both halves.
 	composedCandidates = map[string]reflect.Type{
-		"Base":         reflect.TypeFor[Base](),
-		"Other":        reflect.TypeFor[Other](),
-		"Deep":         reflect.TypeFor[Deep](),
-		"TaggedShared": reflect.TypeFor[TaggedShared](),
-		"WrapA":        reflect.TypeFor[WrapA](),
-		"Alpha":        reflect.TypeFor[fuzzshape.Alpha](),
-		"Beta":         reflect.TypeFor[fuzzshape.Beta](),
+		"Base":           reflect.TypeFor[Base](),
+		"Other":          reflect.TypeFor[Other](),
+		"Deep":           reflect.TypeFor[Deep](),
+		"TaggedShared":   reflect.TypeFor[TaggedShared](),
+		"WrapA":          reflect.TypeFor[WrapA](),
+		"NonStructOwner": reflect.TypeFor[NonStructOwner](),
+		"Alpha":          reflect.TypeFor[fuzzshape.Alpha](),
+		"Beta":           reflect.TypeFor[fuzzshape.Beta](),
 	}
 
 	// PredicateSets names the composed-type sets every type in the population is
@@ -259,17 +288,21 @@ var (
 	// provider intercepts; the rest reach the ghost machinery, for which nothing
 	// driven through the public API can synthesize a shape.
 	predicateSets = map[string][]string{
-		"none":       {},
-		"base":       {"Base"},
-		"other":      {"Other"},
-		"base+other": {"Base", "Other"},
-		"deep":       {"Deep"},
-		"tagged":     {"TaggedShared"},
-		"wrap":       {"WrapA"},
-		"alpha":      {"Alpha"},
-		"beta":       {"Beta"},
-		"alpha+beta": {"Alpha", "Beta"},
-		"all embeds": {"Base", "Other", "Deep", "TaggedShared", "WrapA", "Alpha", "Beta"},
+		"none":             {},
+		"base":             {"Base"},
+		"other":            {"Other"},
+		"base+other":       {"Base", "Other"},
+		"deep":             {"Deep"},
+		"tagged":           {"TaggedShared"},
+		"wrap":             {"WrapA"},
+		"alpha":            {"Alpha"},
+		"beta":             {"Beta"},
+		"alpha+beta":       {"Alpha", "Beta"},
+		"non-struct owner": {"NonStructOwner"},
+		"all embeds": {
+			"Base", "Other", "Deep", "TaggedShared", "WrapA", "NonStructOwner",
+			"Alpha", "Beta",
+		},
 	}
 )
 
@@ -429,18 +462,16 @@ func checkWinners(t *testing.T, rv reflect.Value, rn resolvedNames, obj map[stri
 			continue
 		}
 
-		// Marshaling the field alone loses the addressability encoding/json has
-		// for a field promoted through a pointer embed, so a type whose pointer
-		// alone marshals itself would disagree here. No component type in the
-		// population is one; adding a value type with a pointer-only
-		// MarshalJSON or MarshalText needs an escape for it.
-
 		fv, err := rv.FieldByIndexErr(sf.Index)
 		if err != nil {
 			continue // A nil pointer embed on the path; the name is omitted.
 		}
 
-		// The parent marshaled, so a field of it marshals too.
+		// The parent marshaled, so a field of it marshals too. Marshaling the
+		// field alone cannot reach a pointer-receiver marshaler, which
+		// encoding/json does reach for a field promoted through a pointer
+		// embed. No component type in the population has one; adding a type
+		// with a pointer-only MarshalJSON or MarshalText needs a skip here.
 		want, err := json.Marshal(fv.Interface())
 		require.NoError(t, err)
 
@@ -634,6 +665,10 @@ func TestClassificationPins(t *testing.T) {
 		composed []string
 		want     []wantField
 		ghostWon []string
+		// The wantKey field, when set, is a composition key Collect must have
+		// produced. It ties a row that names the synthetic key in a struct tag
+		// to allOfName, which mints it.
+		wantKey string
 	}{
 		"promoted embed": {
 			typ: reflect.TypeFor[valueEmbed](),
@@ -686,10 +721,10 @@ func TestClassificationPins(t *testing.T) {
 				{index: []int{0}, compose: true},
 				{name: "zeta", index: []int{1}},
 			},
-			// GhostWon keeps walk order where Fields is sorted into
-			// declaration order, so the embed's own name comes before the
-			// ones it promotes. The asymmetry is deliberate and observable:
-			// both reach the object's property order.
+			// GhostWon keeps walk order, whereas Fields is sorted into
+			// declaration order, so the embed's own name comes before the ones
+			// it promotes. Both orders reach the object's property order, so
+			// the asymmetry is deliberate.
 			ghostWon: []string{"epsilon", "alpha", "beta"},
 		},
 		"annihilated name shadows a composed embed": {
@@ -726,6 +761,29 @@ func TestClassificationPins(t *testing.T) {
 			// The synthetic key lives in its own namespace, so the field does
 			// not shadow the composition in the same-depth tie-break.
 			ghostWon: []string{"alpha", "beta"},
+			wantKey:  "__allof__Base__0",
+		},
+		"composed embed promoting a non-struct": {
+			typ:      reflect.TypeFor[composedNonStruct](),
+			composed: []string{"NonStructOwner"},
+			want: []wantField{
+				{index: []int{0}, compose: true},
+				{name: "r", index: []int{1}},
+			},
+			// An embedded non-struct is a leaf field keyed by its field name,
+			// so the embed's ghost wins it like any other.
+			ghostWon: []string{"Leafish", "q"},
+		},
+		"shadowed composed pointer embed": {
+			typ:      reflect.TypeFor[shadowedPointerEmbed](),
+			composed: []string{"Base"},
+			want: []wantField{
+				{index: []int{0}, compose: true, optional: true, shadowed: true, shadowPartial: true},
+				{name: "alpha", index: []int{1}},
+			},
+			// The shadow marking is keyed by the element type, so it
+			// dereferences *Base to reach the embed's fields.
+			ghostWon: []string{"beta"},
 		},
 		"composition nested in a promoted embed": {
 			typ:      reflect.TypeFor[deepChain](),
@@ -743,7 +801,13 @@ func TestClassificationPins(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			out := NewCollector(composedIn(tc.composed)).Of(tc.typ)
+			c := NewCollector(composedIn(tc.composed))
+			out := c.Of(tc.typ)
+
+			if tc.wantKey != "" {
+				assert.Contains(t, c.Collect(tc.typ).Order,
+					Key{Name: tc.wantKey, ComposeAllOf: true})
+			}
 
 			got := make([]wantField, 0, len(out.Fields))
 			for i := range out.Fields {
@@ -784,9 +848,8 @@ func TestPhasesComposeIntoOf(t *testing.T) {
 				c := NewCollector(composed)
 				col := c.Collect(typ)
 
-				// Collection.Scanned is what a caller resolves the shadow
-				// marking's input from, so build that map rather than reaching
-				// for the unexported helper Of uses.
+				// A caller builds the shadow marking's input from
+				// Collection.Scanned, so build it the same way here.
 				promoted := map[reflect.Type][]Field{}
 				for _, ft := range col.Scanned {
 					promoted[ft] = c.Of(ft).Fields

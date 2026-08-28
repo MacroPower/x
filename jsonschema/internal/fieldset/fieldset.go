@@ -196,9 +196,8 @@ type Result struct {
 }
 
 // Of runs all three phases over t, recursing into each composed embed the
-// shadow marking needs. It is the entry point; phases takes the in-flight
-// guard around the whole pipeline, so the guard spans the recursion whichever
-// phase reaches it.
+// shadow marking needs. It is the entry point. An in-flight guard spans the
+// whole pipeline, so the recursion terminates whichever phase reaches it.
 func (c *Collector) Of(t reflect.Type) Result {
 	_, _, out := c.phases(t)
 
@@ -206,7 +205,7 @@ func (c *Collector) Of(t reflect.Type) Result {
 }
 
 // phases runs the pipeline and returns every phase's output, so a test can
-// assert against an intermediate one under the same in-flight guard Of takes.
+// assert against an intermediate one under the pipeline's in-flight guard.
 func (c *Collector) phases(t reflect.Type) (Collection, Resolution, Result) {
 	// Mark t in-progress so the ghost recursion below terminates on a self- or
 	// mutually composed cycle instead of recursing without bound.
@@ -263,7 +262,7 @@ func (c *Collector) Collect(t reflect.Type) Collection {
 	col := Collection{ByName: map[Key][]Sighting{}}
 
 	// Record adds a sighting of a JSON name. The dup flag marks fields of a
-	// struct type embedded more than once at the same depth: the sighting is
+	// struct type embedded more than once at the same depth. Such a sighting is
 	// recorded twice so the same-depth ambiguity resolution drops the name,
 	// matching encoding/json's annihilation of fields from repeated embeds.
 	record := func(name string, s Sighting, dup bool) {
@@ -521,6 +520,10 @@ func Resolve(col Collection) Resolution {
 			}
 
 			if len(tagged) != 1 {
+				// Annihilated is keyed by plain name, so writing a composition
+				// key there would mark a real field of the same spelling
+				// annihilated. Only a field named like the synthetic key of an
+				// embed composed twice at one depth reaches that.
 				if !key.ComposeAllOf {
 					res.Annihilated[key.Name] = minDepth
 				}
@@ -661,8 +664,9 @@ func markShadowedCompositions(
 
 			switch {
 			case !ok:
-				// No outcome recorded, so the name resolved to nothing because
-				// the in-flight guard skipped its ghost. Keep the branch's claim.
+				// A backstop. Every promoted name of a scanned embed is sighted
+				// in the enclosing ghost walk, so an outcome always exists.
+				// Keep the branch's claim if one ever does not.
 				unshadowedAny = true
 			case !out.annihilated && out.ghostOwner == ft && out.depth == de:
 				// This embed's own ghost won the name, so the marshaled object
@@ -673,6 +677,8 @@ func markShadowedCompositions(
 				// another embed claimed it at or above this depth.
 				shadowedAny = true
 			default:
+				// A backstop. The ghost walk cannot sight a name deeper than
+				// the embed promotes it, so no outcome sits deeper than de.
 				unshadowedAny = true
 			}
 		}
