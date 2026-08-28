@@ -1,8 +1,8 @@
 # iri-reference acceptance vectors, from the RFC 3987 example text.
 #
 # RFC 3987 §2.2 derives the IRI grammar from RFC 3986's by widening iunreserved
-# and the ipchar family with ucschar. The code-point boundaries of those sets
-# are covered by format_iri_ucschar_test.go and TestIRIRejectsC1Controls. The
+# and the ipchar family with ucschar. format_iri_ucschar_test.go and
+# TestIRIRejectsC1Controls cover the code-point boundaries of those sets. The
 # official suite's optional/format/iri-reference.json reaches the network-path,
 # absolute-path, and fragment-only forms with invented non-ASCII strings; these
 # rows build every reference form from the RFC's own example IRI instead.

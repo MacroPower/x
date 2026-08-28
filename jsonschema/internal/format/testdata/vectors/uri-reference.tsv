@@ -1,8 +1,9 @@
 # uri-reference acceptance vectors, from RFC 3986 §4.1.
 #
 # URI-reference = URI / relative-ref, so a reference may be relative and the
-# scheme-less forms are accepted. Only forbidden characters reject. The official
-# suite's optional/format/uri-reference.json carries the network-path,
+# format accepts the scheme-less forms. Only a forbidden character makes it
+# reject. The official suite's optional/format/uri-reference.json carries the
+# network-path,
 # absolute-path, relative-path, and fragment-only forms; what it leaves open are
 # the query-only and empty references. The RFC 3986 §5.4 reference-resolution
 # inputs stay in vectors_test.go, where they run verbatim and in order against

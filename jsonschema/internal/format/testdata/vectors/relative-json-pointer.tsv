@@ -3,7 +3,8 @@
 #
 # relative-json-pointer = non-negative-integer ( "#" / json-pointer ), so the
 # pointer half is RFC 6901's production verbatim. The official suite's
-# optional/format/relative-json-pointer.json carries 18 cases covering the
+# optional/format/relative-json-pointer.json carries 12 string cases covering
+# the
 # integer prefix, the leading-zero ban, and a bare "#". It reaches none of the
 # RFC 6901 escape rule the pointer half inherits, nothing following the "#", and
 # neither form of the later draft's index manipulation.

@@ -1,7 +1,8 @@
 # uuid acceptance vectors, from RFC 9562.
 #
 # The canonical form is 8-4-4-4-12 hex digits and case is insignificant. The
-# official suite's optional/format/uuid.json carries 22 cases: the nil UUID,
+# official suite's optional/format/uuid.json carries 16 string cases: the nil
+# UUID,
 # a set of malformed spellings, and one value each for versions 1, 4, 5, and 6
 # plus a reserved variant nibble. What it leaves open is the RFC's own test
 # vectors, the max UUID, and the URN and braced spellings.

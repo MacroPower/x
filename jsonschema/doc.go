@@ -964,11 +964,12 @@
 //     check over the template string cannot reach. The literals rule follows
 //     errata ID 6937, so an apostrophe is a literal.
 //   - email and idn-email assert the RFC 5321 Mailbox grammar plus the §4.5.3.1
-//     size limits (64 octets local, 253 domain, 254 total). The total is
-//     measured before the local/domain split, so only idn-email reaches the
-//     domain limit, where the domain counts in its longer A-label form. The RFC
-//     5322 comment, folding-whitespace, and obsolete productions that Draft-07's
-//     cited §3.4.1 would permit are rejected. Deliverability is never consulted.
+//     size limits (64 octets local, 253 domain, 254 total). The 254-octet limit
+//     covers the whole address, so a domain long enough to break the 253-octet
+//     limit already breaks the total; only idn-email reaches the domain limit,
+//     counting the domain in its longer A-label form. The RFC 5322 comment,
+//     folding-whitespace, and obsolete productions that Draft-07's cited §3.4.1
+//     would permit are rejected. Deliverability is never consulted.
 //   - uri and uri-reference accept an IPvFuture authority ("http://[v7.x]/"),
 //     which RFC 3986 §3.2.2 defines and Go's net/url cannot parse.
 //   - hostname accepts a reserved-LDH label (a hyphen in positions 3 and 4, as

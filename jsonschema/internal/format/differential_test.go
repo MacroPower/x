@@ -721,8 +721,8 @@ var (
 // Behind the ASCII-unchanged guard the oracle reduces to "LDH labels with no
 // edge hyphen and no hyphen in positions 3 and 4", which is isLDHLabel minus
 // the deviation, so this is a fence against a future rewrite of the label scan
-// rather than an engine for finding new cases. It also never sees an uppercase name, since the lookup
-// mapping lowercases and the unchanged guard then skips.
+// rather than an engine for finding new cases. It also never sees an uppercase
+// name, since the lookup mapping lowercases and the unchanged guard then skips.
 func FuzzFormatHostnameVsIDNA(f *testing.F) {
 	fn := validator(f, "hostname")
 

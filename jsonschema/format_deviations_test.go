@@ -13,18 +13,18 @@ import (
 // The format-deviations ledger. Both doc.go and README.md carry the same
 // five-bullet list of positions the built-in format checkers take where a
 // grammar admits more than one reading, and the module CLAUDE.md requires the
-// two files stay in lockstep. Prose alone is a weak contract: two of these positions were decided
-// twice, once in each direction, because the reading lived in a sentence rather
-// than a fixture.
+// two files stay in lockstep. Prose alone is a weak contract. Two of these
+// positions were decided twice, once in each direction, because the reading
+// lived in a sentence rather than a fixture.
 //
 // Each ledger row binds one bullet to the behavior it claims. The phrase must
 // appear in both files, and the vectors are the bullet's own quoted examples run
 // through the public API. The row count must equal the bullet count in both
-// lists, which is the half that catches a sixth deviation landing with no test.
+// lists, which is the check that catches a sixth deviation landing with no test.
 //
-// Breadth stays in the tests that already carry it, in
-// format_regex_ascii_escape_test.go, format_uritemplate_literals_test.go,
-// format_uri_ipvfuture_test.go, and internal/format. The exception is the email
+// Breadth stays where it already lives: format_regex_ascii_escape_test.go,
+// format_uritemplate_literals_test.go, format_uri_ipvfuture_test.go, and
+// internal/format. The exception is the email
 // bullet. Nothing else asserts its size limits, so that row carries them all.
 
 const (
@@ -101,11 +101,11 @@ var formatDeviations = map[string]deviation{
 
 // emailSizeLimitCases builds the RFC 5321 §4.5.3.1 boundary set the email
 // bullet claims. The three limits do not compose the way the bullet reads. The
-// 254-octet forward path is measured before the split, so a 253-octet domain
-// forces a total of at least 255 and no address reaches that limit through the
-// email format. It is reachable through idn-email, where the domain
-// is measured in its A-label form, which is longer than the U-labels the
-// 254-octet check counted. The last two rows are that case and its complement.
+// checker measures the 254-octet forward path before the split, so a 253-octet
+// domain forces a total of at least 255 and no address reaches that limit
+// through the email format. Only idn-email reaches it, counting the domain in
+// its A-label form, which is longer than the U-labels the 254-octet check saw.
+// The last two rows are that case and its complement.
 func emailSizeLimitCases() []deviationCase {
 	const (
 		label63 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"

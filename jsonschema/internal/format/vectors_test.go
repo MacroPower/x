@@ -17,18 +17,18 @@ import (
 // from the RFCs' own example text. They complement the robustness fuzz (layer 1)
 // and the stdlib differentials (layer 2), and sit alongside the official JSON
 // Schema Test Suite's optional/format cases, which already run via
-// TestSuiteFormat. Each vector file names the suite file it complements and
-// carries only what that file leaves open, so RFC 3339's leap second and the RFC
-// 6901 §5 pointer examples are not re-transcribed. Those §5 examples are all
-// valid, though, which leaves the json-pointer escape boundary open, and that
-// gap does get vectors.
+// TestSuiteFormat. Each vector file names the suite coverage it complements and
+// carries only what that coverage leaves open, so no vector file re-transcribes
+// RFC 3339's leap second or the RFC 6901 §5 pointer examples. Those §5 examples
+// are all valid, which leaves the json-pointer escape boundary open, so
+// json-pointer.tsv carries it.
 //
-// One accepted coverage gap. The iri and iri-reference formats are pinned by
-// the one-way containment from uri and uri-reference (containment_test.go), the
-// ucschar cases in format_iri_ucschar_test.go, and the RFC 3987 example rows in
-// testdata/vectors. Containment cannot catch over-acceptance on the ucschar
-// side, and there is no public IRI corpus and no stdlib IRI parser to
-// differential against, so that side stays uncovered.
+// One accepted coverage gap. One-way containment from uri and uri-reference
+// (containment_test.go), the ucschar cases in format_iri_ucschar_test.go, and
+// the RFC 3987 example rows in testdata/vectors pin the iri and iri-reference
+// formats. Containment cannot catch over-acceptance on the ucschar side, and
+// there is no public IRI corpus and no stdlib IRI parser to differential
+// against, so that side stays uncovered.
 
 // formatVector is one acceptance vector: an instance and whether the format
 // validator must accept it.

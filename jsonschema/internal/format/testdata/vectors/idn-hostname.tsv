@@ -5,6 +5,11 @@
 # the idn-hostname validator delegates to. Pinned to golang.org/x/net v0.56.0
 # (jsonschema/go.mod), the same module the validator compiles against.
 #
+# The official suite's optional/format/idn-hostname.json carries 71 string
+# cases, most of them A-labels drawn from the same RFC 5892 rules. What it
+# leaves open is the U-label spelling of those rules, which is what these rows
+# carry, one per Appendix A rule and one per RFC 5893 Bidi clause.
+#
 # This is a curated subset, not the full Unicode IdnaTestV2.txt corpus.
 # IdnaTestV2.txt records per-row toUnicode/toASCII outputs and status codes for
 # both the transitional and non-transitional profiles; reducing those columns to

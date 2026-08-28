@@ -1,11 +1,12 @@
 # hostname acceptance vectors, from RFC 1123 §2.1 and the DNS name rules it
 # builds on.
 #
-# The official suite's optional/format/hostname.json carries 61 cases covering
-# the label character rules, the 63-octet cap, and a long set of A-labels. What
-# it leaves open is the numeric top-level ban, the trailing-dot FQDN, the plain
-# reserved-LDH label, and the 253-octet name cap. The remaining rows restate a
-# suite case, kept so the label rules read whole in one place.
+# The official suite's optional/format/hostname.json carries 55 string cases
+# covering the label character rules, the 63-octet cap, and a long set of
+# A-labels. What it leaves open is the numeric top-level ban, the trailing-dot
+# FQDN, the plain reserved-LDH label, and the exact 253-octet boundary, which
+# the suite only approaches with a 259-character rejection. The remaining rows
+# restate a suite case, kept so the label rules read whole in one place.
 #
 # Row format: see loadVectorFile in vectors_test.go.
 #

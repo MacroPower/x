@@ -83,9 +83,10 @@ var formatCoverage = map[string]coverage{
 }
 
 // TestFormatCoverage asserts that every registered format carries a coverage
-// row, that each row claims coverage that exists, and that a row claiming a
-// vector file has one carrying rows. The other direction, that the table names
-// nothing the registry does not, is TestFormatCoverageTableIsLive's.
+// row, that each row claims coverage that exists or a reason for having none
+// but never both, and that a row claiming a vector file has one carrying rows.
+// The other direction, that the table names nothing the registry does not, is
+// TestFormatCoverageTableIsLive's.
 func TestFormatCoverage(t *testing.T) {
 	t.Parallel()
 
@@ -129,10 +130,10 @@ func TestFormatCoverage(t *testing.T) {
 }
 
 // TestFormatCoverageTableIsLive asserts the table names nothing the registry
-// does not, that an allowlist entry carries a written reason, and that a row
-// claims every vector file. A row for a format that no longer exists sits
-// unexercised, and a vector file no row claims would make the table read as
-// complete while the guard skipped a file.
+// does not, that an allowlist entry's reason is written out rather than left as
+// a TODO placeholder, and that a row claims every vector file. A row naming a
+// format the registry dropped sits unexercised, and a vector file no row claims
+// lets the table read as complete while the guard skips that file.
 func TestFormatCoverageTableIsLive(t *testing.T) {
 	t.Parallel()
 

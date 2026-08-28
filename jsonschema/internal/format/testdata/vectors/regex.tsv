@@ -2,10 +2,11 @@
 #
 # The validator is a structural check (balanced parens, terminated classes,
 # defined escapes), so it accepts ECMA-262 patterns RE2 rejects and rejects only
-# structurally malformed patterns. The official suite holds one case against
-# this format, "\a" in optional/format/ecmascript-regex.json graded invalid,
-# and suite_test.go skips it under reasonAnnexBIdentity as a documented
-# divergence. These rows are where the boundary is written down instead.
+# structurally malformed patterns. The official suite holds three string cases
+# against this format: a valid pattern and an unbalanced parenthesis in
+# optional/format/regex.json, and "\a" in optional/format/ecmascript-regex.json,
+# which suite_test.go skips under reasonAnnexBIdentity as a documented
+# divergence. These rows write down the class boundary all three leave open.
 #
 # Row format: see loadVectorFile in vectors_test.go.
 #

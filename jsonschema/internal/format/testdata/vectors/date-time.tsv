@@ -1,10 +1,10 @@
 # date-time acceptance vectors, from RFC 3339 §4.3.
 #
-# The offset "-00:00" carries a meaning "+00:00" does not. The offset is
-# unknown, as distinct from known to be UTC. The official suite's
-# optional/format/date-time.json carries neither spelling, and it carries no
-# offset missing its minute field. Its own out-of-range offsets are the two rows
-# here that restate it, kept so the offset boundary reads whole in one place.
+# "-00:00" states that the offset is unknown, as distinct from known to be UTC,
+# which "+00:00" cannot say. The official suite's optional/format/date-time.json
+# carries neither spelling, and it carries no offset missing its minute field.
+# The two out-of-range offset rows below restate cases the suite already
+# carries, kept so the offset boundary reads whole in one place.
 #
 # Row format: see loadVectorFile in vectors_test.go.
 #

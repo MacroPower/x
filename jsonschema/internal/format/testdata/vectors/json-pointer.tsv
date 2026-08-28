@@ -3,8 +3,9 @@
 # The official suite's optional/format/json-pointer.json carries 34 string
 # cases, including RFC 6901 §5's own examples and a thorough set of escape
 # rejections. What it leaves open is narrow. The escape-then-literal-digit forms
-# "/~01" and "/~00" are absent, so is a bare "//", and so is a percent-encoded
-# solidus, which is an ordinary member-name character rather than an escape. The
+# "/~01" and "/~00" are absent, so is a pointer that is nothing but empty member
+# names, and so is a percent-encoded solidus, which is an ordinary member-name
+# character rather than an escape. The
 # remaining rows restate a suite case so this file reads as a whole boundary set
 # for the validator's one rule past the leading solidus, that a '~' must be
 # followed by '0' or '1'.

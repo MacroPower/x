@@ -5,7 +5,9 @@
 # optional/format/uri.json covers the character rules and carries the ftp and
 # mailto examples verbatim. What it leaves open are the two RFC 3986 §5.4
 # references that carry a scheme, which TestURIReferenceResolutionVectors hands
-# over here because a relative-ref cannot begin with one.
+# over here because a relative-ref cannot begin with one. The RFC 3986 §1.1.2
+# rows below restate suite cases, kept so the scheme rules read whole in one
+# place.
 #
 # Row format: see loadVectorFile in vectors_test.go.
 #
