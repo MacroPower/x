@@ -1,0 +1,22 @@
+# hostname acceptance vectors, from RFC 1123 §2.1.
+#
+# Labels are ASCII letters, digits, and interior hyphens, and the top-level
+# label must not be all-numeric. The official suite's optional/format/
+# hostname.json carries 61 cases covering the label character rules and the
+# 63-octet cap; these rows cover what it leaves open.
+#
+# Format: three tab-separated fields, "<input>"\t<valid>\t<note>. The input is a
+# Go quoted string literal in the spelling strconv.Quote produces. '#' lines and
+# blank lines are skipped.
+#
+"example.com"	true	a multi-label name
+"a"	true	a single label
+"foo-bar.example"	true	an interior hyphen
+"xn--fsq.jp"	true	an A-label that decodes as valid Punycode
+"example.com."	true	the DNS root dot on a multi-label FQDN
+"-bad.com"	false	a leading hyphen
+"bad-.com"	false	a trailing hyphen
+"123"	false	an all-numeric top-level label
+"example."	false	a bare trailing dot on a single label
+"a..b"	false	an empty interior label
+"xn--"	false	the ACE prefix with no Punycode payload

@@ -1,0 +1,22 @@
+# duration acceptance vectors, from the RFC 3339 Appendix A ABNF.
+#
+# Components appear in canonical order with no gaps, and weeks stand alone. The
+# official suite's optional/format/duration.json carries 42 cases, including the
+# contiguous-chain rejections P1Y2D and PT1H2S; FuzzFormatDurationVsABNF carries
+# the depth beyond both.
+#
+# Format: three tab-separated fields, "<input>"\t<valid>\t<note>. The input is a
+# Go quoted string literal in the spelling strconv.Quote produces. '#' lines and
+# blank lines are skipped.
+#
+"P1Y2M3DT4H5M6S"	true	a full date and time
+"P1Y"	true	years alone
+"PT1H"	true	time alone
+"P1W"	true	dur-week stands alone
+"P0D"	true	a zero quantity is well formed
+"1Y"	false	the P designator is missing
+"P"	false	no components
+"P1H"	false	an hour outside dur-time
+"PT"	false	T with no time component
+"P1Y2D"	false	dur-year = 1*DIGIT "Y" [dur-month], so year to day skips a link
+"P1W2D"	false	dur-week is an alternative to dur-date, not a prefix of it

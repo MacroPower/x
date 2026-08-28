@@ -1,0 +1,21 @@
+# regex acceptance vectors, from ECMA-262 22.2.
+#
+# The validator is a structural check (balanced parens, terminated classes,
+# defined escapes), so it accepts ECMA-262 patterns RE2 rejects and rejects only
+# structurally malformed patterns. The official suite's
+# optional/format/ecmascript-regex.json tests pattern semantics rather than this
+# grammar check.
+#
+# Format: three tab-separated fields, "<input>"\t<valid>\t<note>. The input is a
+# Go quoted string literal in the spelling strconv.Quote produces. '#' lines and
+# blank lines are skipped.
+#
+"^[a-z]+$"	true	an anchored class
+"(foo)\\1"	true	a backreference, which ECMA-262 has and RE2 does not
+"foo(?=bar)"	true	lookahead, which ECMA-262 has and RE2 does not
+"[abc]"	true	a character class
+"a{2,3}"	true	quantifier braces
+"("	false	an unbalanced parenthesis
+"["	false	an unterminated class
+"[]"	true	the empty class
+"\\"	false	a trailing backslash

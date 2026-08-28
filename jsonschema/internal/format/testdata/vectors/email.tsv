@@ -1,0 +1,18 @@
+# email acceptance vectors, from the RFC 5321 Mailbox grammar.
+#
+# The vendored is_email corpus (testdata/corpus/isemail) grades 164 addresses
+# against the RFC 5322 spectrum; these rows pin the RFC 5321 shapes it and the
+# official suite's optional/format/email.json leave implicit.
+#
+# Format: three tab-separated fields, "<input>"\t<valid>\t<note>. The input is a
+# Go quoted string literal in the spelling strconv.Quote produces. '#' lines and
+# blank lines are skipped.
+#
+"user@example.com"	true	a simple mailbox
+"john.doe@example.org"	true	a dotted local part
+"a@b.co"	true	a short domain
+"a@b"	true	a single-label domain
+"not-an-email"	false	no at sign
+"@example.com"	false	an empty local part
+"user@"	false	an empty domain
+"user@@example.com"	false	a double at sign

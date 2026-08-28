@@ -1,0 +1,18 @@
+# uri-reference acceptance vectors, from RFC 3986 §4.1.
+#
+# URI-reference = URI / relative-ref, so a reference may be relative and the
+# scheme-less forms are accepted; only forbidden characters reject. The RFC
+# 3986 §5.4 reference-resolution inputs stay in vectors_test.go, where they run
+# verbatim and in order against both this format and uri.
+#
+# Format: three tab-separated fields, "<input>"\t<valid>\t<note>. The input is a
+# Go quoted string literal in the spelling strconv.Quote produces. '#' lines and
+# blank lines are skipped.
+#
+"https://example.com"	true	an absolute URI is a reference
+"/path/only"	true	absolute-path reference
+"../sibling"	true	relative-path reference
+"#section"	true	fragment-only reference
+"?q=1"	true	query-only reference
+""	true	the empty reference resolves to the base
+"http://exa mple"	false	a space is forbidden

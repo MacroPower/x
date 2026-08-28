@@ -56,41 +56,6 @@ func runFormatVectors(t *testing.T, name string, cases map[string]formatVector) 
 	}
 }
 
-// TestURIVectors checks the uri format against RFC 3986 examples. A uri is an
-// absolute URI, so it must carry a scheme (RFC 3986 §3): the scheme-less
-// reference forms are the rejected cases.
-func TestURIVectors(t *testing.T) {
-	t.Parallel()
-
-	runFormatVectors(t, "uri", map[string]formatVector{
-		"http with query and fragment": {"https://example.com/a?b=c#d", true},
-		"urn isbn (RFC 3986 §1.1.2)":   {"urn:isbn:0451450523", true},
-		"mailto scheme":                {"mailto:John.Doe@example.com", true},
-		"ftp scheme (RFC 3986 §1.1.2)": {"ftp://ftp.is.co.za/rfc/rfc1808.txt", true},
-		"network-path reference":       {"//example.com", false},
-		"absolute-path reference":      {"/relative/path", false},
-		"scheme-less host":             {"example.com", false},
-		"space is forbidden":           {"http://exa mple.com", false},
-	})
-}
-
-// TestURIReferenceVectors checks the uri-reference format against RFC 3986 §4.1:
-// a reference may be relative, so scheme-less forms are accepted; only forbidden
-// characters reject.
-func TestURIReferenceVectors(t *testing.T) {
-	t.Parallel()
-
-	runFormatVectors(t, "uri-reference", map[string]formatVector{
-		"absolute uri":            {"https://example.com", true},
-		"absolute-path reference": {"/path/only", true},
-		"relative-path reference": {"../sibling", true},
-		"fragment-only reference": {"#section", true},
-		"query-only reference":    {"?q=1", true},
-		"empty reference":         {"", true},
-		"space is forbidden":      {"http://exa mple", false},
-	})
-}
-
 var (
 	// The RFC 3986 §5.4.1 normal and §5.4.2 abnormal reference-resolution
 	// inputs, verbatim and in order. Every one is a well-formed
@@ -128,11 +93,12 @@ var (
 )
 
 // TestURIReferenceResolutionVectors runs every RFC 3986 §5.4 reference-
-// resolution input through the uri-reference format, and the two that carry a
-// scheme through the uri format as well. §5.4 is the RFC's own inventory of
+// resolution input through the uri-reference format. §5.4 is the RFC's own
+// inventory of
 // relative-reference shapes -- dot segments, empty references, semicolon
 // parameters, a query or fragment carrying what looks like a path -- and none
-// of it appears in the vendored suite.
+// of it appears in the vendored suite. The two inputs that carry a scheme are
+// rows in testdata/vectors/uri.tsv, since a relative-ref cannot begin with one.
 func TestURIReferenceResolutionVectors(t *testing.T) {
 	t.Parallel()
 
@@ -142,15 +108,6 @@ func TestURIReferenceResolutionVectors(t *testing.T) {
 	}
 
 	runFormatVectors(t, "uri-reference", cases)
-
-	// URI-reference = URI / relative-ref, and a relative-ref cannot begin with
-	// a scheme, so exactly the two schemed inputs are absolute URIs.
-	runFormatVectors(t, "uri", map[string]formatVector{
-		"schemed reference g:h":      {"g:h", true},
-		"schemed reference http:g":   {"http:g", true},
-		"dot-segment reference":      {"../../g", false},
-		"network-path reference //g": {"//g", false},
-	})
 }
 
 // TestURIResolutionTargetVectors runs every RFC 3986 §5.4 resolution target
@@ -166,130 +123,6 @@ func TestURIResolutionTargetVectors(t *testing.T) {
 	}
 
 	runFormatVectors(t, "uri", cases)
-}
-
-// TestDateTimeOffsetVectors checks the date-time format against RFC 3339 §4.3,
-// which gives "-00:00" a meaning "+00:00" does not: the offset is unknown, as
-// distinct from known to be UTC. Both are well-formed time-offset productions
-// and the suite covers neither.
-func TestDateTimeOffsetVectors(t *testing.T) {
-	t.Parallel()
-
-	runFormatVectors(t, "date-time", map[string]formatVector{
-		"negative zero offset (RFC 3339 §4.3)": {"2020-01-02T03:04:05-00:00", true},
-		"positive zero offset":                 {"2020-01-02T03:04:05+00:00", true},
-		"Z designator":                         {"2020-01-02T03:04:05Z", true},
-		"negative offset":                      {"2020-01-02T03:04:05-05:00", true},
-		"offset hour out of range":             {"2020-01-02T03:04:05-24:00", false},
-		"offset minute out of range":           {"2020-01-02T03:04:05-00:60", false},
-		"offset without minutes":               {"2020-01-02T03:04:05-05", false},
-	})
-}
-
-// TestEmailVectors checks the email format against RFC 5321 mailbox examples.
-func TestEmailVectors(t *testing.T) {
-	t.Parallel()
-
-	runFormatVectors(t, "email", map[string]formatVector{
-		"simple mailbox":      {"user@example.com", true},
-		"dotted local part":   {"john.doe@example.org", true},
-		"short domain":        {"a@b.co", true},
-		"single-label domain": {"a@b", true},
-		"no at sign":          {"not-an-email", false},
-		"empty local part":    {"@example.com", false},
-		"empty domain":        {"user@", false},
-		"double at sign":      {"user@@example.com", false},
-	})
-}
-
-// TestIDNEmailVectors checks the idn-email format (RFC 6531) accepts non-ASCII
-// local and domain parts that the ASCII email format would reject.
-func TestIDNEmailVectors(t *testing.T) {
-	t.Parallel()
-
-	runFormatVectors(t, "idn-email", map[string]formatVector{
-		"ascii mailbox":    {"user@example.com", true},
-		"non-ascii local":  {"宏@example.com", true},
-		"non-ascii domain": {"user@例.jp", true},
-		"missing at sign":  {"not-an-email", false},
-	})
-}
-
-// TestUUIDVectors checks the uuid format against RFC 4122. The canonical form is
-// 8-4-4-4-12 hex digits; case is insignificant.
-func TestUUIDVectors(t *testing.T) {
-	t.Parallel()
-
-	runFormatVectors(t, "uuid", map[string]formatVector{
-		"RFC 4122 §3 example": {"f47ac10b-58cc-4372-a567-0e02b2c3d479", true},
-		"nil uuid":            {"00000000-0000-0000-0000-000000000000", true},
-		"uppercase accepted":  {"F47AC10B-58CC-4372-A567-0E02B2C3D479", true},
-		"too short":           {"f47ac10b-58cc", false},
-		"missing hyphens":     {"f47ac10b58cc4372a5670e02b2c3d479", false},
-		"non-hex digit":       {"g47ac10b-58cc-4372-a567-0e02b2c3d479", false},
-	})
-}
-
-// TestDurationVectors checks the duration format against RFC 3339 Appendix A
-// (the ISO 8601 duration ABNF). Components must appear in canonical order with
-// no gaps, and weeks stand alone.
-func TestDurationVectors(t *testing.T) {
-	t.Parallel()
-
-	runFormatVectors(t, "duration", map[string]formatVector{
-		"full date and time":       {"P1Y2M3DT4H5M6S", true},
-		"years only":               {"P1Y", true},
-		"time only":                {"PT1H", true},
-		"weeks alone":              {"P1W", true},
-		"zero days":                {"P0D", true},
-		"missing P":                {"1Y", false},
-		"no components":            {"P", false},
-		"hours without T":          {"P1H", false},
-		"T without time component": {"PT", false},
-		"gap in date chain":        {"P1Y2D", false},
-		"weeks mixed with days":    {"P1W2D", false},
-	})
-}
-
-// TestRegexVectors checks the regex format against ECMA-262 constructs. The
-// validator is a structural check (balanced parens, terminated classes, defined
-// escapes), so it accepts ECMA-262 patterns RE2 rejects (backreferences,
-// lookaround) and rejects only structurally malformed patterns.
-func TestRegexVectors(t *testing.T) {
-	t.Parallel()
-
-	runFormatVectors(t, "regex", map[string]formatVector{
-		"anchored class":         {"^[a-z]+$", true},
-		"backreference":          {`(foo)\1`, true},
-		"lookahead":              {"foo(?=bar)", true},
-		"character class":        {"[abc]", true},
-		"quantifier braces":      {"a{2,3}", true},
-		"unbalanced parenthesis": {"(", false},
-		"unterminated class":     {"[", false},
-		"empty class":            {"[]", true},
-		"trailing backslash":     {`\`, false},
-	})
-}
-
-// TestHostnameVectors checks the hostname format against RFC 1123 §2.1: labels
-// are ASCII letters, digits, and interior hyphens, and the top-level label must
-// not be all-numeric.
-func TestHostnameVectors(t *testing.T) {
-	t.Parallel()
-
-	runFormatVectors(t, "hostname", map[string]formatVector{
-		"multi-label":          {"example.com", true},
-		"single label":         {"a", true},
-		"interior hyphen":      {"foo-bar.example", true},
-		"ace prefix label":     {"xn--fsq.jp", true},
-		"trailing dot on fqdn": {"example.com.", true},
-		"leading hyphen":       {"-bad.com", false},
-		"trailing hyphen":      {"bad-.com", false},
-		"numeric top label":    {"123", false},
-		"bare trailing dot":    {"example.", false},
-		"empty interior label": {"a..b", false},
-		"degenerate ace label": {"xn--", false},
-	})
 }
 
 // vectorDir holds one acceptance-vector file per format, each file named for

@@ -1,0 +1,14 @@
+# idn-email acceptance vectors, from RFC 6531.
+#
+# RFC 6531 §3.2 and §3.3 widen the RFC 5321 Mailbox grammar: UTF-8 in the local
+# part, U-labels in the domain. These rows cover the widened alternatives, which
+# neither the vendored ASCII is_email corpus nor the official suite reaches.
+#
+# Format: three tab-separated fields, "<input>"\t<valid>\t<note>. The input is a
+# Go quoted string literal in the spelling strconv.Quote produces. '#' lines and
+# blank lines are skipped.
+#
+"user@example.com"	true	an ASCII mailbox is an idn-email
+"宏@example.com"	true	RFC 6532 §3.1 UTF-8 in the local part
+"user@例.jp"	true	a U-label domain
+"not-an-email"	false	no at sign
