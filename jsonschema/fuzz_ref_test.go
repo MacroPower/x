@@ -541,10 +541,10 @@ func (g *refGraphGen) enter(document string) {
 // carrying two lets the two engines name different violations while both
 // correctly refuse the schema.
 //
-// Inline leaves its root unvetted while Compile vets it, a deliberate
-// divergence inline_root_unvetted_test.go pins. It does not surface here: the
-// second pipeline compiles the inlined output, which still carries the root's
-// definitions, so both pipelines refuse a malformed one.
+// Both engines vet a root, so a malformed one fails Inline before any
+// reference resolves and reaches the rig as a build error carrying the
+// sentinel Compile reports. The rig compares it by that sentinel, the way it
+// compares a rejected remote.
 func (g *refGraphGen) drawLeaf() string {
 	slot := g.slot
 	g.slot++

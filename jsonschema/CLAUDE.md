@@ -37,17 +37,25 @@ The package has two independent halves sharing the `Schema` type:
   inliner clones through `internal/schemaclone` for its pristine and working
   copies. Structural vetting is compiler-enforced through the
   `internal/schemavet` currency: only boundary code holds a bare `*Schema`
-  (the public API, the fetch closures, the compile reference walk -- which
-  registers a fetched document and vets it before Compile returns -- and the
-  inliner's resolution space), and everything past the vetter demands the
-  minted `schemavet.Doc`/`schemavet.Node` proof. `schemaIndex.extend` takes a
-  `Doc`, so an unvetted document cannot reach the precompute caches, and
-  `refresolve.Registry.NewSession` requires a `FallbackVet`, so every session
-  states its vetting policy at construction. The one deliberate exception is
-  the inliner, whose own root and `WithRefFallback` substitutes stay unvetted
-  (each site carries an "Unvetted by design" marker and
-  `inline_root_unvetted_test.go` pins the behavior). The pointer-graph policy
-  is separate from that vetting and has rules at two boundaries.
+  (the public API, the fetch closures, and the compile reference walk, which
+  registers a fetched document and vets it before Compile returns), and
+  everything past the vetter demands the minted `schemavet.Doc`/`schemavet.Node`
+  proof. `schemaIndex.extend` takes a `Doc`, so an unvetted document cannot
+  reach the precompute caches, and `refresolve.Registry.NewSession` requires a
+  `FallbackVet`, so every session states its vetting policy at construction.
+  Both engines vet alike: `Inline` runs `VetDoc` over its pristine root and
+  over each `WithRefFallback` substitute, which enters resolution space as a
+  document of its own, so the two engines refuse the same documents for the
+  same sentinels (a substitute's violation is wrapped to name the ref whose
+  failure the fallback answered). One `schemavet.Vetter` carries the run, the
+  way Compile shares one across its passes, and the session's `FallbackVet` is
+  a method over it, so a materialized pointer target is re-minted rather than
+  re-checked where the inliner records it. `inliner.vetProfile` is the one
+  narrowing: under `WithRetrievalBase` the resolution walk reads `$id` as
+  inert, so `schemavet.Profile.InertIDs` skips the `$id` domain check in every
+  document the run holds. The
+  pointer-graph policy is separate from that vetting and has rules at two
+  boundaries.
   `checkSchemaTree` (`validate.go`) rejects a root whose sub-schema pointers
   alias or cycle, and both `Compile` and `Inline` run it over the document they
   are given, so the two engines make the same demand of a root's sub-schema
@@ -217,8 +225,11 @@ The package has two independent halves sharing the `Schema` type:
   checks, and only `Vetter.VetDoc`/`Vetter.Vet` can produce a `Doc`/`Node`,
   whose unexported fields make the compiler enforce that vetting ran. The
   nine vetting sentinels live here, re-exported from `errors.go` on the
-  refresolve convention. It carries its own three-flag `Profile` (converted
-  by `draftProfile.vetProfile`, mirroring `toRefDraft`) and its own
+  refresolve convention. It carries its own four-flag `Profile` (three draft
+  flags converted by `draftProfile.vetProfile`, mirroring `toRefDraft`, plus
+  `InertIDs`, which the inliner sets from `WithRetrievalBase` so the `$id`
+  domain check follows the resolution walk that ignores the keyword) and its
+  own
   `Entries` traversal, whose pointer assembly a lockstep guard test in
   `walk_test.go` pins to `SubschemaEntries`, since vetting errors embed
   those pointers).

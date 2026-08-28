@@ -14,11 +14,10 @@
 // invariant that raw *Schema values stop at the package boundary (the public
 // API, the fetch closures, and the compile-time reference walk, which
 // registers a fetched document and vets it before compilation returns).
-// The inliner (inline.go) is the sole holder of unvetted schemas past that
-// boundary: its own root and its caller-supplied fallback substitutes are
-// deliberately not vetted (only the remotes it fetches are), so Inline
-// accepts inputs Compile rejects; each such site carries an "Unvetted by
-// design" marker.
+// Both engines hold every document to the policy. The inliner vets its own
+// root and each caller-supplied fallback substitute the way Compile vets a
+// root, so Inline and Compile refuse the same documents for the same
+// sentinels.
 package schemavet
 
 import (
@@ -42,6 +41,12 @@ type Profile struct {
 	// Vocabularies reports whether the $vocabulary concept applies
 	// (Draft 2020-12; Draft-07 predates it).
 	Vocabularies bool
+	// InertIDs reports whether the run reads $id as an inert annotation
+	// (the inliner's WithRetrievalBase), where an $id establishes no base
+	// URI and registers no resolution target. The keyword then addresses
+	// nothing, so its domain is outside this policy and the identifier pass
+	// skips it, mirroring the resolution walk that skips it too.
+	InertIDs bool
 }
 
 // Doc is the currency minted by [Vetter.VetDoc]: proof that a whole schema
@@ -129,8 +134,10 @@ func (v *Vetter) Vet(s *Schema, pathPrefix string) (Node, error) {
 // VetDoc applies [Vetter.Vet] plus the identifier checks ($id domain and
 // $vocabulary placement, see checkIdentifiers) to a document rooted at s,
 // whose base URI is base. It serves the call sites that hold a whole document
-// with a known base: the root at Compile, each registry-known document, and
-// each fetched document. JSON-pointer fallback targets keep the plain
+// with a known base: the root at Compile, each registry-known document, each
+// fetched document, the inliner's root, and a fallback substitute, which
+// enters resolution space as a document of its own. JSON-pointer fallback
+// targets keep the plain
 // [Vetter.Vet]; a pointer target is a fragment of a document already checked,
 // and no document base is in hand at its location. It returns the minted
 // [Doc] on success, or the zero Doc and the first violation.

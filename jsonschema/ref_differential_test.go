@@ -266,10 +266,14 @@ func inlinePipeline(
 		return refPipeline{}, reasonInlineDynamicRef
 	case isRefMiss(inlineErr):
 		return refPipeline{}, reasonDeferredRefMiss
-	case errors.Is(inlineErr, jsonschema.ErrRefResolve):
-		// A structural rejection of a fetched document or a fallback target.
-		// Compile refuses the same schema for the same cause, so the two stay
-		// comparable through the build-error outcome.
+	case refErrSignature(inlineErr) != refUnclassified:
+		// A refusal refBuildSentinels names: the root, a fetched document, a
+		// substitute, or a fallback target that failed the structural vet, a
+		// root whose pointers are not a tree, an unsupported dialect. Compile
+		// refuses the same schema for the same cause, so the two stay
+		// comparable through the build-error outcome. The case sits after
+		// isRefMiss, which matches only an unclassified signature, so the two
+		// never contend for one error.
 		return refPipeline{name: name, buildErr: inlineErr}, ""
 
 	default:

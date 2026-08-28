@@ -822,6 +822,11 @@
 // inherits the run's dialect, accepted under 2020-12 and rejected under
 // Draft-07, which predates the vocabulary concept.
 //
+// [Inline] holds the root it is given, and each [SubstituteRef] schema a
+// [WithRefFallback] policy supplies, to this same policy, so the two entry
+// points refuse the same documents for the same sentinels. See Reference
+// Inlining for the one option that narrows it.
+//
 // Compile then statically resolves every reference reachable from the root
 // ($ref and, under 2020-12, $dynamicRef) through the same resolution core
 // the validation walk uses. A reference that resolves to nothing while its
@@ -1132,8 +1137,9 @@
 // [ErrItemsArrayUnderDraft2020], [ErrConflictingSchemaFields],
 // [ErrNilSubschema], [ErrDuplicatePropertyOrder], or, for a fetched
 // document, [ErrInvalidID] or [ErrMisplacedVocabulary]), rather than letting
-// the document silently mis-validate. [Inline] shares this same vetting
-// policy for the documents it fetches (see Reference Inlining below).
+// the document silently mis-validate. [Inline] applies this same vetting
+// policy to every document it holds, its own root included (see Reference
+// Inlining below).
 //
 // A fetched document, and a [SubstituteRef] schema, must also hold no pointer
 // cycle, meaning no path that crosses a schema and returns to a schema or to a
@@ -1250,6 +1256,16 @@
 // the keyword, as the validator does). A non-local ref with no resolver
 // configured, or any ref whose target cannot be found, returns an error
 // wrapping [ErrRefResolve].
+//
+// The root document is structurally vetted before any reference resolves,
+// through the policy [Compile] applies to the document it is given (see
+// Remote References for the full check list). A violation returns the check's
+// sentinel naming the offending path, so a root that inlines is a root that
+// compiles. A [SubstituteRef] schema enters resolution space as a document of
+// its own and is vetted as one, with the failing reference named in the
+// message. Under [WithRetrievalBase] the $id domain check is skipped
+// throughout the run, in the root and in every fetched document, since an
+// inert $id establishes no base and registers no target.
 //
 // A remote document fetched during inlining is structurally vetted before it
 // is inlined, through the same policy the validator applies to fetched

@@ -56,6 +56,14 @@ type inliner struct {
 	// pointers stay stable keys for the run.
 	index *schemaIndex
 
+	// The run's structural vetter, minting the [schemavet.Doc] currency for
+	// the pristine root, each fallback substitute, and each fetched document,
+	// and the [schemavet.Node] currency for each JSON-pointer fallback target
+	// the session materializes. One vetter carries its visited sets across
+	// every pass, the way Compile shares one over its root, its remotes, and
+	// its fallback targets.
+	vetter *schemavet.Vetter
+
 	// The inflight[id] flag marks a pristine schema whose self-contained copy is
 	// currently being built; a ref that resolves to an in-flight schema is a cycle.
 	inflight []bool
@@ -132,7 +140,9 @@ func (f inlineOptionFunc) applyInline(in *inliner) { f(in) }
 // retrieval URI, treating $id as an inert annotation: $id neither
 // establishes a base URI nor registers a resolution target, in any
 // document. Anchors still resolve within their document, and $id keywords
-// pass through to the output verbatim.
+// pass through to the output verbatim. An inert $id addresses nothing, so
+// the structural vet skips its domain check too, in the root and in every
+// document a resolver serves.
 //
 // Real-world schemas commonly declare a published remote $id while
 // shipping the files their refs name alongside the schema; under the
@@ -250,7 +260,10 @@ func (f RefFallbackFunc) ResolveRefFailure(ctx context.Context, failure RefFailu
 // at the enclosing refs. A returned schema is deep-copied before splicing
 // and is itself inlined recursively, its refs resolving in the context of
 // the document containing the failing ref; a cycle introduced by the
-// returned schema is an ordinary [ErrRefCycle]. A fallback that keeps
+// returned schema is an ordinary [ErrRefCycle]. The copy enters resolution
+// space as a document of its own, so it is vetted as one: a violation ends
+// the Inline call with the check's sentinel, in a message naming the
+// reference the substitute answered. A fallback that keeps
 // substituting a schema carrying its own failing ref is bounded: nesting beyond
 // an internal depth limit surfaces [ErrRefInline] rather than exhausting the
 // stack.
@@ -297,6 +310,16 @@ func WithRefFallback(f RefFallback) InlineOption {
 // a pointer cycle, returns an error wrapping [ErrSchemaNotTree], as does one
 // whose loop closes through a value field (Const, Enum, Examples, or Extra),
 // a shape Compile's own check does not read.
+//
+// The root is then structurally vetted, the pass Compile runs over the
+// document it is given, before any reference resolves. A violation returns the
+// check's sentinel ([ErrInvalidType], [ErrItemsArrayUnderDraft2020],
+// [ErrNegativeBound], [ErrNonPositiveMultipleOf], [ErrNilSubschema],
+// [ErrConflictingSchemaFields], [ErrDuplicatePropertyOrder], [ErrInvalidID],
+// or [ErrMisplacedVocabulary]) naming the offending path, so the two engines
+// refuse the same roots for the same causes and a document Inline expands is
+// a document Compile accepts. [WithRetrievalBase] carves out the $id domain
+// check alone, since an inert $id addresses nothing.
 //
 // A ref whose expansion reaches its own target returns an error wrapping
 // [ErrRefCycle]. A $dynamicRef under Draft 2020-12 has no faithful static
@@ -419,20 +442,27 @@ func (in *inliner) run(s *Schema) (*Schema, error) {
 	reg := refresolve.NewRegistry(refDeps(), toRefDraft(in.draft), in.retrievalBase)
 	reg.Build(pristine, in.baseURI)
 
+	in.vetter = schemavet.NewVetter(in.vetProfile())
+
+	// Structurally vet the root, the pass Compile runs over the document it is
+	// given: field structure, identifiers, type names, bound domains, and
+	// under 2020-12 the items array form. Both engines make the same demand of
+	// a root, so a document Inline expands is a document Compile accepts, and
+	// the vetted currency is what enters resolution space below.
+	rootDoc, err := in.vetter.VetDoc(pristine, "", in.baseURI)
+	if err != nil {
+		//nolint:wrapcheck // The vetting error already names the document and path.
+		return nil, err
+	}
+
 	// A JSON-pointer fallback target (a sub-schema carried as raw JSON in an
 	// unknown keyword) is materialized fresh by the session and spliced into
-	// the output, so it is vetted at materialization under the same
-	// [schemavet.Vetter] policy a fetched document gets in [inliner.fetchDoc];
-	// without this an ill-formed target would inline into a malformed output
-	// schema this package's own [Compile] rejects.
-	in.session = reg.NewSession(newFallbackVet(in.profile))
+	// the output, so [inliner.fallbackVet] checks it at materialization
+	// through the run's vetter; without this an ill-formed target would inline
+	// into a malformed output schema this package's own [Compile] rejects.
+	in.session = reg.NewSession(in.fallbackVet)
 
-	// Unvetted by design (see the internal/schemavet package doc): Inline
-	// accepts a root whose structure and identifiers Compile's vetter would
-	// reject, so the pristine root enters the resolution space without minting
-	// a vetted document. The tree check is not part of that exception; both
-	// engines run it.
-	in.record(pristine, "", in.session.SchemaBase(pristine))
+	in.record(rootDoc.Schema(), "", in.session.SchemaBase(pristine))
 
 	// The context reaches the resolver through the ctx field set above:
 	// document fetches happen deep inside the expansion walk, which cannot
@@ -772,13 +802,28 @@ func (in *inliner) substitute(pristine *Schema, path, ref string, inlineErr erro
 		return nil, err
 	}
 
+	// The substitute enters resolution space as a document of its own, so it
+	// is vetted as one, under the base URI in effect at the failing node. The
+	// violation names the ref that triggered the fallback, since a caller
+	// reading a bare sentinel has no way to tell which substitute carried it;
+	// the sentinel stays reachable through the wrap. A bad substitute is fatal
+	// rather than a second consultation, which would let a policy that always
+	// substitutes loop.
+	base := in.session.SchemaBase(pristine)
+
+	subDoc, err := in.vetter.VetDoc(cp, "", base)
+	if err != nil {
+		return nil, fmt.Errorf("the substitute for %q: %w", ref, err)
+	}
+
 	// Register the substitute's $id/$anchor in the per-run fallback registries
 	// rather than the shared ones. A caller-supplied substitute whose $id
 	// collides with an already-loaded document URI must not overwrite that
 	// entry; the fallback is consulted only after the shared registry, so the
 	// real document keeps priority while the substitute's own nested refs still
-	// resolve.
-	base := in.session.SchemaBase(pristine)
+	// resolve. The registrations use the minted document's pointer (the same
+	// clone), so the vetted currency is what resolution reads.
+	cp = subDoc.Schema()
 	in.session.RegisterFallback(cp, base)
 
 	// A substitute that re-bases via its own $id reports a nested ref failure
@@ -794,10 +839,6 @@ func (in *inliner) substitute(pristine *Schema, path, ref string, inlineErr erro
 		seed, doc = "", in.session.SchemaBase(cp)
 	}
 
-	// Unvetted by design (see the internal/schemavet package doc): a
-	// caller-supplied WithRefFallback substitute carries the same trust as
-	// the inliner's own root, so it enters the resolution space without
-	// minting a vetted document.
 	in.record(cp, seed, doc)
 
 	return in.inlineCopy(cp, seed, false)
@@ -944,6 +985,37 @@ func (in *inliner) runContext() context.Context {
 	return in.ctx
 }
 
+// vetProfile is the structural-vetting policy the run applies to every
+// document it holds: the draft's own policy, plus the inert-$id flag when
+// [WithRetrievalBase] is set. Under that option the resolution walk passes
+// every $id over, registering no URI and rebasing no child, so the keyword
+// addresses nothing and its domain is not the vetter's business; checking it
+// would refuse the published-$id documents the option exists to inline.
+func (in *inliner) vetProfile() schemavet.Profile {
+	profile := in.profile.vetProfile()
+	profile.InertIDs = in.retrievalBase
+
+	return profile
+}
+
+// fallbackVet is the session's [refresolve.FallbackVet]: the structural check
+// each JSON-pointer fallback target passes before the session registers it. A
+// target carved out of raw JSON in an unknown keyword never passed through a
+// document-level vet, so the check runs at materialization, minus the
+// identifier pass, which needs a document base no pointer target carries. It
+// runs on the run's own vetter, so [inliner.vetTarget] can re-mint the proof
+// where the walk records the target. A violation wraps [ErrRefResolve], so it
+// surfaces through the referencing ref exactly like a malformed-document
+// violation.
+func (in *inliner) fallbackVet(sc *Schema, locator string) (schemavet.Node, error) {
+	node, err := in.vetter.Vet(sc, locator)
+	if err != nil {
+		return schemavet.Node{}, fmt.Errorf("%w: %w", ErrRefResolve, err)
+	}
+
+	return node, nil
+}
+
 // fetchDoc is the inliner's [refresolve.Fetch] closure: it fetches the document
 // at baseURI through the configured resolver, registers a pristine copy under
 // baseURI, and returns the copy. The copy is resolution space only and is never
@@ -964,9 +1036,10 @@ func (in *inliner) runContext() context.Context {
 // failure, preserving the inliner's fail-on-first-unresolvable-ref behavior.
 //
 // A fetched document is structurally vetted before registration, through the
-// same [schemavet.Vetter] policy the validator applies, so a remote carrying
-// an invalid type name, a negative bound, or (under a draft that rejects it)
-// the array form of items fails [Inline] with an error wrapping
+// same [schemavet.Vetter] policy the validator applies (see
+// [inliner.vetProfile] for the one option that narrows it), so a remote
+// carrying an invalid type name, a negative bound, or (under a draft that
+// rejects it) the array form of items fails [Inline] with an error wrapping
 // [ErrRefResolve] rather than being inlined into a malformed output schema.
 // The check is recorded in the negative cache like the other failures, so it
 // too is run at most once per baseURI in a run.
@@ -986,7 +1059,7 @@ func (in *inliner) fetchDoc(baseURI string) (*Schema, error) {
 		return nil, fmt.Errorf("%w: cannot resolve %q", ErrRefResolve, baseURI)
 	}
 
-	doc, vetErr := schemavet.NewVetter(in.profile.vetProfile()).VetDoc(cp, baseURI+"#", baseURI)
+	doc, vetErr := schemavet.NewVetter(in.vetProfile()).VetDoc(cp, baseURI+"#", baseURI)
 	if vetErr != nil {
 		in.session.RecordRemoteMiss(baseURI, vetErr)
 

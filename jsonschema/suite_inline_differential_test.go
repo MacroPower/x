@@ -78,9 +78,10 @@ func TestSuiteInlineAgrees(t *testing.T) {
 // The observable consequence is that Compile refuses a schema whose inlined
 // form it accepts, so Inline turns an uncompilable document into a compilable
 // one. Both behaviors are defensible on their own. The doc.go contract promises
-// only that a document fetched during inlining is vetted, and Inline never
-// fetches this one, so neither engine breaks it. Resolving it means choosing
-// whether a reference graph is vetted as a whole or only where it is walked.
+// that Inline vets every document it holds, its own root, its substitutes, and
+// the remotes it fetches, and Inline never fetches this one, so neither engine
+// breaks it. Resolving it means choosing whether a reference graph is vetted as
+// a whole or only where it is walked.
 func TestCompileVetsTransitivelyInlineDoesNot(t *testing.T) {
 	t.Parallel()
 

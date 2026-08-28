@@ -20,17 +20,18 @@ var (
 	// ErrInvalidType is returned when a schema's type keyword names something
 	// other than the seven JSON Schema type names ("null", "boolean", "string",
 	// "integer", "number", "object", "array"). It is reported by
-	// [CheckTypeNames] and by [Compile], as well as by the one-shot [Validate]
-	// helper, which routes through the same check. A typo'd type would otherwise
-	// compile cleanly and then reject every instance at runtime.
+	// [CheckTypeNames], by [Compile] and [Inline], which vet a root alike, and
+	// by the one-shot [Validate] helper, which routes through the same check.
+	// A typo'd type would otherwise compile cleanly and then reject every
+	// instance at runtime.
 	//
 	// It is re-exported from internal/schemavet, the shared structural-vetting
 	// core, so [errors.Is] matches the sentinel identically whether a failure
 	// originates in that package or here.
 	ErrInvalidType = schemavet.ErrInvalidType
 
-	// ErrItemsArrayUnderDraft2020 is returned by [Compile] when a schema
-	// compiled under [Draft2020] sets the array form of the items keyword
+	// ErrItemsArrayUnderDraft2020 is returned by [Compile] and [Inline] when a
+	// document processed under [Draft2020] sets the array form of the items keyword
 	// (the field upstream parses a JSON `"items": [ ... ]` into). Array-form
 	// items is the Draft-7 spelling of tuple validation; under 2020-12 tuples
 	// are spelled with prefixItems and array-form items has no meaning, so the
@@ -55,7 +56,7 @@ var (
 	// custom metaschema) keeps the [Draft2020] default as before.
 	ErrUnsupportedDraft = errors.New("unsupported $schema dialect")
 
-	// ErrNegativeBound is returned by [Compile] when a length or count keyword
+	// ErrNegativeBound is returned by [Compile] and [Inline] when a length or count keyword
 	// (minLength, maxLength, minItems, maxItems, minProperties, maxProperties,
 	// minContains, maxContains) carries a negative value, which the spec defines
 	// as a non-negative integer. A negative bound would otherwise compile
@@ -68,7 +69,7 @@ var (
 	// originates in that package or here.
 	ErrNegativeBound = schemavet.ErrNegativeBound
 
-	// ErrNonPositiveMultipleOf is returned by [Compile] when a multipleOf
+	// ErrNonPositiveMultipleOf is returned by [Compile] and [Inline] when a multipleOf
 	// keyword carries a value that is not strictly greater than zero. The spec
 	// defines the keyword's value domain as a number > 0; the invalid schema
 	// would otherwise compile cleanly and then reject every numeric instance
@@ -81,7 +82,7 @@ var (
 	// originates in that package or here.
 	ErrNonPositiveMultipleOf = schemavet.ErrNonPositiveMultipleOf
 
-	// ErrNilSubschema is returned by [Compile] when a sub-schema slice or map
+	// ErrNilSubschema is returned by [Compile] and [Inline] when a sub-schema slice or map
 	// holds a nil *Schema element (for example AllOf: []*Schema{nil}). A nil
 	// element has no JSON form, and the walk skips it silently, so the branch
 	// the author listed would assert nothing. Only container elements are
@@ -92,7 +93,7 @@ var (
 	// originates in that package or here.
 	ErrNilSubschema = schemavet.ErrNilSubschema
 
-	// ErrConflictingSchemaFields is returned by [Compile] when a schema sets
+	// ErrConflictingSchemaFields is returned by [Compile] and [Inline] when a schema sets
 	// both Go fields that spell one JSON keyword: Type and Types, Defs and
 	// Definitions, Items and ItemsArray, or one dependencies key in both
 	// DependencySchemas and DependencyStrings. Each pair marshals to a single
@@ -104,7 +105,7 @@ var (
 	// originates in that package or here.
 	ErrConflictingSchemaFields = schemavet.ErrConflictingSchemaFields
 
-	// ErrDuplicatePropertyOrder is returned by [Compile] when a schema's
+	// ErrDuplicatePropertyOrder is returned by [Compile] and [Inline] when a schema's
 	// PropertyOrder slice lists the same property twice. The slice fixes the
 	// JSON rendering order of properties, a duplicate entry makes that order
 	// ambiguous, and upstream MarshalJSON rejects it, so the schema could
@@ -137,15 +138,17 @@ var (
 	// fallback marshals the document it searches.
 	ErrSchemaNotTree = errors.New("schema is not a tree")
 
-	// ErrInvalidID is returned by [Compile] for an $id outside the keyword's
-	// domain: a value [net/url.Parse] rejects, one that carries a fragment
-	// under Draft 2020-12 (core section 8.2.1 forbids any fragment in $id),
-	// or one that does not resolve to an absolute URI against its enclosing
-	// base (the parent $id chain, or [WithBaseURI] for the root). A relative
-	// $id with no absolute base would register no resolvable URI, so every
-	// ref targeting it would silently miss. Under Draft-07 two forms go
+	// ErrInvalidID is returned by [Compile] and [Inline] for an $id outside
+	// the keyword's domain: a value [net/url.Parse] rejects, one that carries
+	// a fragment under Draft 2020-12 (core section 8.2.1 forbids any fragment
+	// in $id), or one that does not resolve to an absolute URI against its
+	// enclosing base (the parent $id chain, or [WithBaseURI] for the root). A
+	// relative $id with no absolute base would register no resolvable URI, so
+	// every ref targeting it would silently miss. Under Draft-07 two forms go
 	// unchecked: an $id beside a $ref (the draft ignores it) and a
-	// fragment-carrying $id (the anchor spelling).
+	// fragment-carrying $id (the anchor spelling). An [Inline] run under
+	// [WithRetrievalBase] checks no $id at all, since an inert $id registers
+	// nothing.
 	//
 	// It is re-exported from internal/schemavet, the shared structural-vetting
 	// core, so [errors.Is] matches the sentinel identically whether a failure
@@ -158,8 +161,9 @@ var (
 	// corrupt each derived registry key rather than surface anywhere.
 	ErrInvalidBaseURI = errors.New("invalid base URI")
 
-	// ErrMisplacedVocabulary is returned by [Compile] for a $vocabulary on a
-	// node whose $schema does not establish the Draft 2020-12 dialect:
+	// ErrMisplacedVocabulary is returned by [Compile] and [Inline] for a
+	// $vocabulary on a node whose $schema does not establish the Draft
+	// 2020-12 dialect:
 	// a non-empty $schema that is not exactly
 	// "https://json-schema.org/draft/2020-12/schema", or an empty $schema
 	// under Draft-07, which predates the vocabulary concept. A node with an

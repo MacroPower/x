@@ -933,6 +933,11 @@ value is rejected with `ErrInvalidBaseURI`, and a `$vocabulary` on a node whose
 (exact URI match; an empty `$schema` inherits the run's dialect, accepted under
 2020-12 and rejected under draft-07).
 
+`Inline` holds the root it is given, and each `SubstituteRef` schema a
+`WithRefFallback` policy supplies, to this same policy, so the two entry points
+refuse the same documents for the same sentinels. See
+[Inlining references](#inlining-references) for the one option that narrows it.
+
 `Compile` then statically resolves every reference reachable from the root
 (`$ref` and, under 2020-12, `$dynamicRef`) through the same resolution core
 the validation walk uses. A reference that resolves to nothing while its
@@ -1176,8 +1181,8 @@ wrapping the check's sentinel (`ErrInvalidType`, `ErrNegativeBound`,
 `ErrConflictingSchemaFields`, `ErrNilSubschema`, `ErrDuplicatePropertyOrder`,
 or, for a fetched document, `ErrInvalidID` or `ErrMisplacedVocabulary`)
 instead of silently mis-validating. `Inline`
-shares this same vetting policy for the documents it fetches (see
-[Inlining references](#inlining-references)). A fetched document, and a
+applies this same vetting policy to every document it holds, its own root
+included (see [Inlining references](#inlining-references)). A fetched document, and a
 `SubstituteRef` schema, must also hold no pointer cycle, meaning no path that
 crosses a schema and returns to a schema or to a container it is already
 inside. A container that loops without crossing a schema is left to
@@ -1367,7 +1372,8 @@ retrieval URI instead, treating `$id` as an inert annotation: `$id` neither
 establishes a base URI nor registers a resolution target, in any document,
 including the Draft 7 fragment-only `$id` form that otherwise acts as an
 anchor. `$anchor` and `$dynamicAnchor` still resolve within their document,
-and `$id` keywords pass through to the output verbatim. Real-world schemas
+and `$id` keywords pass through to the output verbatim. An inert `$id`
+addresses nothing, so the structural vet skips its domain check too. Real-world schemas
 commonly declare a published remote `$id` while shipping the files their
 refs name alongside the schema; under the default RFC behavior those refs
 absolutize against the remote `$id` and cannot be served from disk. With
@@ -1424,6 +1430,15 @@ Failure modes:
   as the validator does).
 - A non-local ref with no resolver configured, or any ref whose target cannot
   be found, returns an error wrapping `ErrRefResolve`.
+- The root document is structurally vetted before any reference resolves,
+  through the policy `Compile` applies to the document it is given (see
+  [Remote references](#remote-references) for the full check list). A violation
+  returns the check's sentinel naming the offending path, so a root that inlines
+  is a root that compiles. A `SubstituteRef` schema enters resolution space as a
+  document of its own and is vetted as one, with the failing reference named in
+  the message. Under `WithRetrievalBase` the `$id` domain check is skipped
+  throughout the run, in the root and in every fetched document, since an inert
+  `$id` establishes no base and registers no target.
 - A remote document fetched during inlining is structurally vetted before it is
   inlined, through the same policy the validator applies to fetched documents
   (see [Remote references](#remote-references) for the full check list). A
@@ -1471,7 +1486,7 @@ cycle introduced by the substitute is an ordinary `ErrRefCycle`.
 | `WithDraft(Draft)`        | Override the draft otherwise detected from the root schema's `$schema`.                                                                               |
 | `WithRefResolver(r)`      | Set the `RefResolver` that fetches the documents non-local refs target (called at most once per distinct URI).                                        |
 | `WithBaseURI(base)`       | Set the root document's base URI; a schemeless base is normalized against `file:///`. Also serves validation.                                         |
-| `WithRetrievalBase(bool)` | Resolve refs against each document's retrieval URI, treating `$id` as an inert annotation that passes through verbatim.                               |
+| `WithRetrievalBase(bool)` | Resolve refs against each document's retrieval URI, treating `$id` as an inert, unchecked annotation that passes through verbatim.                    |
 | `WithRefFallback(f)`      | Per-reference failure policy returning a `RefAction`: `PropagateRef()`, `DropRef()`, or `SubstituteRef(s)`. `RefFallbackFunc` adapts a bare function. |
 
 ## Errors
@@ -1480,15 +1495,17 @@ cycle introduced by the substitute is an ordinary `ErrRefCycle`.
 | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `ErrUnsupportedType`          | A Go type with no JSON Schema representation (`func`, `chan`, `complex`, `unsafe.Pointer`).                                                                                                                                                           |
 | `ErrUnsupportedMapKey`        | A map key that is not a string, integer type, or `encoding.TextMarshaler`.                                                                                                                                                                            |
-| `ErrInvalidType`              | A `type` keyword naming something other than the seven JSON Schema type names (returned by `CheckTypeNames` and `Compile`).                                                                                                                           |
-| `ErrItemsArrayUnderDraft2020` | The draft-07 array form of `items` used under draft 2020-12, where tuples are spelled with `prefixItems` (returned by `Compile`).                                                                                                                     |
-| `ErrConflictingSchemaFields`  | Both Go fields of one JSON keyword set, e.g. `Type`/`Types` or a `dependencies` key in both maps (returned by `Compile`).                                                                                                                             |
-| `ErrNilSubschema`             | A nil `*Schema` element inside a sub-schema slice or map (returned by `Compile`).                                                                                                                                                                     |
-| `ErrDuplicatePropertyOrder`   | A `PropertyOrder` slice listing the same property twice (returned by `Compile`).                                                                                                                                                                      |
+| `ErrInvalidType`              | A `type` keyword naming something other than the seven JSON Schema type names (returned by `CheckTypeNames`, `Compile`, and `Inline`).                                                                                                                |
+| `ErrItemsArrayUnderDraft2020` | The draft-07 array form of `items` used under draft 2020-12, where tuples are spelled with `prefixItems` (returned by `Compile` and `Inline`).                                                                                                        |
+| `ErrNegativeBound`            | A negative length or count keyword: `minLength`, `maxLength`, `minItems`, `maxItems`, `minProperties`, `maxProperties`, `minContains`, `maxContains` (returned by `Compile` and `Inline`).                                                            |
+| `ErrNonPositiveMultipleOf`    | A `multipleOf` that is not strictly greater than zero (returned by `Compile` and `Inline`).                                                                                                                                                           |
+| `ErrConflictingSchemaFields`  | Both Go fields of one JSON keyword set, e.g. `Type`/`Types` or a `dependencies` key in both maps (returned by `Compile` and `Inline`).                                                                                                                |
+| `ErrNilSubschema`             | A nil `*Schema` element inside a sub-schema slice or map (returned by `Compile` and `Inline`).                                                                                                                                                        |
+| `ErrDuplicatePropertyOrder`   | A `PropertyOrder` slice listing the same property twice (returned by `Compile` and `Inline`).                                                                                                                                                         |
 | `ErrSchemaNotTree`            | The root document's sub-schema pointers alias or cycle (`Compile` and `Inline`), a root loop closes through a value field (`Inline`), a fetched document holds a pointer cycle (`Compile` and `Inline`), or a `SubstituteRef` schema does (`Inline`). |
-| `ErrInvalidID`                | An `$id` that does not parse, carries a fragment under 2020-12, or does not resolve to an absolute URI (returned by `Compile`).                                                                                                                       |
+| `ErrInvalidID`                | An `$id` that does not parse, carries a fragment under 2020-12, or does not resolve to an absolute URI (returned by `Compile` and `Inline`; an `Inline` run under `WithRetrievalBase` checks no `$id`).                                               |
 | `ErrInvalidBaseURI`           | A `WithBaseURI` value that does not parse (returned by `Compile`).                                                                                                                                                                                    |
-| `ErrMisplacedVocabulary`      | A `$vocabulary` on a node whose `$schema` does not establish the 2020-12 dialect (returned by `Compile`).                                                                                                                                             |
+| `ErrMisplacedVocabulary`      | A `$vocabulary` on a node whose `$schema` does not establish the 2020-12 dialect (returned by `Compile` and `Inline`).                                                                                                                                |
 | `ErrInvalidSchemaDocument`    | A schema document whose top-level value is not a JSON object or boolean (returned by `CompileJSON`, `ParseSchema`, and `ParseSchemaValue`).                                                                                                           |
 | `ErrUnknownVocabulary`        | A required `$vocabulary` URI is unrecognized (or 2020-12 core is marked optional).                                                                                                                                                                    |
 | `ErrRefResolve`               | A `RefResolver` returns an error resolving a remote `$ref`; in `Inline`, also a non-local ref with no resolver or any unresolvable target.                                                                                                            |

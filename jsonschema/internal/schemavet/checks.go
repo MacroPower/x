@@ -239,11 +239,12 @@ func checkNilSubschemaEntries(schema *Schema, schemaPath string) error {
 // document, threading the enclosing base URI exactly as the registry walk
 // does, so a violation is judged against the same base the resolution
 // machinery would use. Per node it checks the $vocabulary placement (see
-// [ErrMisplacedVocabulary]) and, when the node declares an $id, its domain
-// (see [ErrInvalidID] and [checkSchemaID], which also computes the base the
-// node's children inherit). The traversal mirrors [checkTypeNames]: it uses
-// [Entries] for the recursion and each entry's Pointer for the location, with
-// visited guarding schema-graph cycles.
+// [ErrMisplacedVocabulary]) and, when the node declares an $id the run reads
+// as live, its domain (see [ErrInvalidID] and [checkSchemaID], which also
+// computes the base the node's children inherit). Under [Profile.InertIDs]
+// the $id pass is skipped, since an inert $id names no target. The traversal
+// mirrors [checkTypeNames]: it uses [Entries] for the recursion and each
+// entry's Pointer for the location, with visited guarding schema-graph cycles.
 func checkIdentifiers(
 	schema *Schema, schemaPath, base string, profile Profile, visited map[*Schema]bool,
 ) error {
@@ -260,7 +261,10 @@ func checkIdentifiers(
 
 	currentBase := base
 
-	if schema.ID != "" {
+	// An inert-$id run registers no $id and rebases no child, so the keyword
+	// addresses nothing and the base stays the document's retrieval URI. The
+	// skip mirrors refresolve's own walk, which passes the same $id over.
+	if schema.ID != "" && !profile.InertIDs {
 		next, err := checkSchemaID(schema, schemaPath, currentBase, profile)
 		if err != nil {
 			return err
