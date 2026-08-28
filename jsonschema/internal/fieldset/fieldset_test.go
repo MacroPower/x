@@ -175,6 +175,24 @@ type excludedFields struct {
 	Shown  int    `json:"shown"`
 }
 
+// nestedComposition's embed contributes nothing to the marshaled object except
+// through a composition nested inside it, which is the only arm of the shadow
+// marking no other roster type reaches.
+type nestedComposition struct {
+	Deep
+
+	Epsilon int `json:"epsilon"`
+}
+
+// allOfNameClash carries a field whose JSON name is the synthetic key a
+// composition of Base takes, which is the collision Key's disjoint namespaces
+// exist to keep apart.
+type allOfNameClash struct {
+	Base
+
+	Clash string `json:"__allof__Base__0"`
+}
+
 type stringOptFields struct {
 	N int    `json:"n,string"`
 	S string `json:"s,string"`
@@ -219,6 +237,8 @@ var (
 		"omitted fields":        reflect.TypeFor[omitFields](),
 		"excluded fields":       reflect.TypeFor[excludedFields](),
 		"string-coerced fields": reflect.TypeFor[stringOptFields](),
+		"nested composition":    reflect.TypeFor[nestedComposition](),
+		"allOf name clash":      reflect.TypeFor[allOfNameClash](),
 	}
 
 	// ComposedCandidates are the embed types the predicate sets below designate
@@ -408,6 +428,12 @@ func checkWinners(t *testing.T, rv reflect.Value, rn resolvedNames, obj map[stri
 		if rn.coerced[name] {
 			continue
 		}
+
+		// Marshaling the field alone loses the addressability encoding/json has
+		// for a field promoted through a pointer embed, so a type whose pointer
+		// alone marshals itself would disagree here. No component type in the
+		// population is one; adding a value type with a pointer-only
+		// MarshalJSON or MarshalText needs an escape for it.
 
 		fv, err := rv.FieldByIndexErr(sf.Index)
 		if err != nil {
@@ -660,8 +686,46 @@ func TestClassificationPins(t *testing.T) {
 				{index: []int{0}, compose: true},
 				{name: "zeta", index: []int{1}},
 			},
-			// Breadth-first: the embed's own name before the ones it promotes.
+			// GhostWon keeps walk order where Fields is sorted into
+			// declaration order, so the embed's own name comes before the
+			// ones it promotes. The asymmetry is deliberate and observable:
+			// both reach the object's property order.
 			ghostWon: []string{"epsilon", "alpha", "beta"},
+		},
+		"annihilated name shadows a composed embed": {
+			typ:      ambiguousEmbeds,
+			composed: []string{"Base"},
+			want: []wantField{
+				{index: []int{0}, compose: true, shadowed: true, shadowPartial: true},
+				{name: "delta", index: []int{1, 1}},
+			},
+			// Base and Other both claim "alpha" at one depth and both are
+			// tagged, so the name annihilates and Base's branch cannot be
+			// unconditional. Only "beta" survives for Base's ghost to win.
+			ghostWon: []string{"beta"},
+		},
+		"composition nested in a composed embed": {
+			typ:      reflect.TypeFor[nestedComposition](),
+			composed: []string{"Deep", "Base"},
+			want: []wantField{
+				{index: []int{0}, compose: true, shadowed: true, shadowPartial: true},
+				{name: "epsilon", index: []int{1}},
+			},
+			// The outer Epsilon shadows the one Deep promotes, so Deep's only
+			// unshadowed contribution is the composition of Base nested inside
+			// it, whose names the shadow marking treats as opaque.
+			ghostWon: []string{"alpha", "beta"},
+		},
+		"field named like a composition key": {
+			typ:      reflect.TypeFor[allOfNameClash](),
+			composed: []string{"Base"},
+			want: []wantField{
+				{index: []int{0}, compose: true},
+				{name: "__allof__Base__0", index: []int{1}},
+			},
+			// The synthetic key lives in its own namespace, so the field does
+			// not shadow the composition in the same-depth tie-break.
+			ghostWon: []string{"alpha", "beta"},
 		},
 		"composition nested in a promoted embed": {
 			typ:      reflect.TypeFor[deepChain](),
@@ -720,7 +784,15 @@ func TestPhasesComposeIntoOf(t *testing.T) {
 				c := NewCollector(composed)
 				col := c.Collect(typ)
 
-				assert.Equal(t, c.Of(typ), Classify(Resolve(col), c.promoted(col)))
+				// Collection.Scanned is what a caller resolves the shadow
+				// marking's input from, so build that map rather than reaching
+				// for the unexported helper Of uses.
+				promoted := map[reflect.Type][]Field{}
+				for _, ft := range col.Scanned {
+					promoted[ft] = c.Of(ft).Fields
+				}
+
+				assert.Equal(t, c.Of(typ), Classify(Resolve(col), promoted))
 			})
 		}
 	}

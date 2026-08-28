@@ -367,10 +367,11 @@ contract the tests enforce.
   **the schema generated for a Go type must accept whatever `encoding/json`
   marshals from a value of that type.** A rejection means `internal/fieldset`'s
   reimplementation of `encoding/json`'s field resolution has drifted, which is
-  where past fixes cluster. Both draw their values from `internal/fuzzfill`, which turns a fuzzing
-  entropy blob into a populated value through a deterministic, zero-extending
-  `Cursor`. The phase-level rig in `internal/fieldset` checks the same drift one
-  layer down, against `encoding/json` itself rather than through the validator.
+  where past fixes cluster. Both draw their values from `internal/fuzzfill`,
+  which turns a fuzzing entropy blob into a populated value through a
+  deterministic, zero-extending `Cursor`. The phase-level rig in
+  `internal/fieldset` checks the same drift one layer down, against
+  `encoding/json` itself rather than through the validator.
   - `fuzz_reflect_test.go` (rig 1) asserts it over a hand-written roster, one
     `FuzzReflectAccepts<T>` per type. The roster keeps the classes runtime type
     construction cannot express, and so stays permanently: a promoted marshaler,

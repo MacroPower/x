@@ -196,9 +196,9 @@ type Result struct {
 }
 
 // Of runs all three phases over t, recursing into each composed embed the
-// shadow marking needs. It is the entry point, and the only place that takes
-// the in-flight guard, so the guard spans the recursion whichever phase
-// reaches it.
+// shadow marking needs. It is the entry point; phases takes the in-flight
+// guard around the whole pipeline, so the guard spans the recursion whichever
+// phase reaches it.
 func (c *Collector) Of(t reflect.Type) Result {
 	_, _, out := c.phases(t)
 
