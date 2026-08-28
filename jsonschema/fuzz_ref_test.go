@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -14,13 +16,18 @@ import (
 	"go.jacobcolvin.com/x/jsonschema/internal/fuzzfill"
 )
 
-// The reference differential rig. TestRefEnginesAgreeOnPastFixes asserts the
-// agreement property over the graphs behind past fixes, so it only catches
-// drift in shapes someone already wrote down, and TestSuiteInlineAgrees runs
-// only the graphs the official suite happens to contain. This rig fuzzes the
-// graph itself: the document count, each document's $id, the anchor form, the
-// reference spelling, and the draft, so the combinations nobody enumerated get
-// exercised too.
+// Rig 3 -- Compile vs Inline vs the substitute path, over a synthesized
+// reference graph. The property:
+//
+//	Compile, Inline, and the substitute path must reach the same verdict on
+//	every instance of one reference graph.
+//
+// TestRefEnginesAgreeOnPastFixes asserts that property over the graphs behind
+// past fixes, so it only catches drift in graphs someone already wrote down,
+// and TestSuiteInlineAgrees runs only the graphs the official suite happens to
+// contain. This rig fuzzes the graph itself: the document count, each
+// document's $id, the anchor form, the reference spelling, and the draft, so
+// the combinations nobody enumerated get exercised too.
 //
 // The generated $id pool deliberately collides with the root's base and with
 // the other documents' retrieval URIs, since a fetched document's $id
@@ -38,14 +45,18 @@ const (
 	// 2020-12 and as a fragment-only $id under Draft 7.
 	refGraphAnchor = "anc"
 
-	// A URI no document serves, so a reference to it fails to resolve. It is
-	// what drives the substitute pipeline and, without one, what makes a graph
-	// incomparable under reasonDeferredRefMiss.
+	// A URI no document serves. A reference to it fails to resolve, so Inline
+	// refuses the graph and the rig discards the iteration under
+	// reasonDeferredRefMiss.
 	refGraphMissingURI = "https://nowhere.test/missing.json"
 
 	// How many instances one blob draws. Each is checked against every
 	// pipeline.
 	refGraphInstanceCount = 6
+
+	// How many leaves one document renders: two definitions, the anchored
+	// definition, and the unknown-keyword target.
+	refGraphLeavesPerDoc = 4
 
 	draft7SchemaURI    = "http://json-schema.org/draft-07/schema#"
 	draft2020SchemaURI = "https://json-schema.org/draft/2020-12/schema"
@@ -58,21 +69,27 @@ var (
 		"https://example.test/b.json",
 	}
 
-	// The $id values a synthesized document can declare. The pool overlaps the
-	// root's base and both retrieval URIs on purpose: a document whose $id
-	// resolves to an already-loaded URI is the shape behind da61121 and
-	// 52b5110, where the fetched document silently overwrote the loaded one.
+	// The $id values a synthesized document can declare. A document declaring a
+	// canonical $id that differs from the URI it was fetched from is the graph
+	// behind dfa3d6b and 9ee414c, where an anchor registered under the
+	// canonical base had to be found through the retrieval URI.
+	//
+	// No entry collides with the root's URI or with either retrieval URI. A
+	// fetched document claiming a URI another document already holds makes the
+	// two engines resolve one anchor reference to two different targets, which
+	// TestRefEnginesDisagreeOnCollidingIDs pins for both spellings of that
+	// collision. Leaving a colliding value in the pool would make the fuzz
+	// target rediscover that one finding within two minutes on every run
+	// instead of searching for the next.
 	refGraphIDs = []string{
 		"",
-		refGraphRootURI,
-		"https://example.test/a.json",
-		"https://example.test/b.json",
 		"https://example.test/other.json",
+		"https://elsewhere.test/doc.json",
 	}
 
-	// The constraint shapes a drawn target resolves to. They are chosen so the
-	// drawn instances tell them apart: a target that resolved to the wrong one
-	// changes a verdict rather than passing unnoticed.
+	// The constraint shapes a drawn target resolves to. The pool keeps every
+	// shape distinguishable by the drawn instances, so a target that resolved
+	// to the wrong one changes a verdict rather than passing unnoticed.
 	refGraphLeaves = []string{
 		`{"type": "string"}`,
 		`{"type": "integer"}`,
@@ -86,8 +103,20 @@ var (
 		`{}`,
 	}
 
+	// Constraint shapes the structural vet refuses. The misspelled type names
+	// are deliberate. Reaching these is the only way a synthesized graph
+	// produces the build-error outcome, so they keep refBuildSentinels and the
+	// build-error comparison exercised rather than dead.
+	refGraphMalformedLeaves = []string{
+		`{"type": "strnig"}`,
+		`{"type": "nteger"}`,
+		`{"minLength": -1}`,
+		`{"maxItems": -3}`,
+		`{"multipleOf": 0}`,
+	}
+
 	// Keywords drawn beside a $ref. Draft 2020-12 keeps them and conjoins the
-	// target, Draft 7 ignores them, so they are one of the places the two
+	// target while Draft 7 ignores them, so they are one of the places the two
 	// engines must apply the same draft rule.
 	refGraphSiblings = []string{
 		"",
@@ -105,8 +134,27 @@ var (
 		`[]`, `[1]`, `["a", "b"]`,
 		`{}`, `{"k": 1}`,
 		`{"p0": "ab"}`, `{"p0": 1, "p1": "ab"}`, `{"p0": null}`, `{"p0": [1]}`,
+		`{"p0": "ab", "p1": 3, "p2": "k"}`, `{"p2": [1]}`,
 	}
 )
+
+// refGraphRef is one reference drawn into the root, with everything about its
+// placement decided before any leaf is drawn.
+type refGraphRef struct {
+	// The reference value, one of the spellings drawRefSpelling returns.
+	spelling string
+
+	// A keyword rendered beside the $ref, empty for a bare reference. The two
+	// drafts treat siblings differently, so this is one of the places the
+	// engines must apply the same draft rule.
+	sibling string
+
+	// True to place the reference in the root's allOf, false for properties.
+	inAllOf bool
+
+	// The property name the reference takes when it lands in properties.
+	name string
+}
 
 // refGraphDoc is one synthesized document.
 type refGraphDoc struct {
@@ -118,7 +166,7 @@ type refGraphDoc struct {
 	hasRef bool
 
 	// True when some reference reaches the document by anchor, which also
-	// disqualifies it. See reasonSubstituteBaseURI.
+	// disqualifies it. See reasonSubstituteNoAnchors.
 	anchorTargeted bool
 }
 
@@ -133,13 +181,19 @@ type refGraphSpec struct {
 	// The URI of a document eligible to be served through a WithRefFallback
 	// substitute instead of the resolver, or empty when none qualifies.
 	withheld string
+
+	// True when some reference names refGraphMissingURI. Withholding a
+	// document then leaves two unresolvable references, and the substitute
+	// covers only one, so the substitute pipeline legitimately declines.
+	unresolvable bool
 }
 
-// synthRefGraph turns an entropy blob into a reference graph. It is total:
-// every blob, including an empty or truncated one, yields documents
-// ParseSchema accepts, since the cursor zero-extends once the blob runs out.
+// synthRefGraph turns an entropy blob into a reference graph. It never fails:
+// every blob, including an empty or truncated one, yields documents ParseSchema
+// accepts, since the cursor zero-extends once the blob runs out.
 func synthRefGraph(blob []byte) refGraphSpec {
 	cursor := fuzzfill.NewCursor(blob)
+	gen := &refGraphGen{cursor: cursor}
 
 	draft2020 := cursor.Bool()
 
@@ -154,95 +208,165 @@ func synthRefGraph(blob []byte) refGraphSpec {
 		schemaURI = draft2020SchemaURI
 	}
 
+	// Every structural choice is drawn before any leaf: the document count,
+	// each $id, each inner reference, every reference spelling and its
+	// placement, and where the malformed leaf goes. Leaves pad the documents
+	// and consume whatever entropy is left. The cursor zero-extends past the
+	// end of the blob, so a choice drawn after the padding would collapse to
+	// its first option on every short blob.
 	docCount := cursor.Intn(len(refGraphDocURIs) + 1)
-	docs := make(map[string]*refGraphDoc, docCount)
-	served := make([]string, 0, docCount)
+	served := refGraphDocURIs[:docCount]
+
+	ids := make([]string, docCount)
+	innerRefs := make([]string, docCount)
 
 	for i := range docCount {
-		uri := refGraphDocURIs[i]
-		id := refGraphIDs[cursor.Intn(len(refGraphIDs))]
+		ids[i] = refGraphIDs[cursor.Intn(len(refGraphIDs))]
 
 		// A document referencing another exercises cross-document base URI
 		// resolution, and rules itself out of the substitute pipeline.
-		var innerRef string
-
-		if cursor.Bool() && docCount > 1 {
-			innerRef = refGraphDocURIs[cursor.Intn(len(refGraphDocURIs))]
+		if docCount > 1 && cursor.Bool() {
+			innerRefs[i] = refGraphDocURIs[cursor.Intn(len(refGraphDocURIs))]
 		}
-
-		docs[uri] = &refGraphDoc{
-			json:   buildRefDoc(cursor, draft2020, defsKey, id, innerRef),
-			hasRef: innerRef != "",
-		}
-		served = append(served, uri)
 	}
 
 	refCount := 1 + cursor.Intn(3)
-	refs := make([]string, 0, refCount)
+	refs := make([]refGraphRef, 0, refCount)
+	anchorTargeted := map[string]bool{}
+	directlyReferenced := map[string]bool{}
+	unresolvable := false
 
-	for range refCount {
-		ref, target, byAnchor := drawRefSpelling(cursor, defsKey, served)
-		refs = append(refs, ref)
+	for i := range refCount {
+		spelling, target, byAnchor := drawRefSpelling(cursor, defsKey, served)
 
-		if doc, ok := docs[target]; ok && byAnchor {
-			doc.anchorTargeted = true
+		refs = append(refs, refGraphRef{
+			spelling: spelling,
+			sibling:  refGraphSiblings[cursor.Intn(len(refGraphSiblings))],
+			inAllOf:  cursor.Bool(),
+			name:     "p" + strconv.Itoa(i),
+		})
+
+		if spelling == refGraphMissingURI {
+			unresolvable = true
+		}
+
+		if target != "" {
+			directlyReferenced[target] = true
+
+			if byAnchor {
+				anchorTargeted[target] = true
+			}
+		}
+	}
+
+	gen.planMalformed(served, directlyReferenced)
+
+	docs := make(map[string]*refGraphDoc, docCount)
+
+	for i, uri := range served {
+		docs[uri] = &refGraphDoc{
+			json:           buildRefDoc(gen, uri, draft2020, defsKey, ids[i], innerRefs[i]),
+			hasRef:         innerRefs[i] != "",
+			anchorTargeted: anchorTargeted[uri],
 		}
 	}
 
 	spec := refGraphSpec{
-		root:      buildRefRoot(cursor, draft2020, defsKey, schemaURI, refs),
-		documents: make(map[string]string, len(docs)),
+		root:         buildRefRoot(gen, draft2020, defsKey, schemaURI, refs),
+		documents:    make(map[string]string, len(docs)),
+		unresolvable: unresolvable,
 	}
 
 	for uri, doc := range docs {
 		spec.documents[uri] = doc.json
 	}
 
-	// Only a reference-free document that nothing reaches by anchor can be
-	// withheld: reasonSubstituteBaseURI. The first qualifying URI in retrieval
-	// order is chosen, so the choice stays a function of the blob.
-	for _, uri := range served {
-		doc := docs[uri]
-		if !doc.hasRef && !doc.anchorTargeted && strings.Contains(spec.root, uri) {
-			spec.withheld = uri
-
-			break
-		}
-	}
+	spec.withheld = chooseWithheld(served, docs, ids, gen.malformedDoc, directlyReferenced)
 
 	return spec
 }
 
-// buildRefDoc renders one remote document: an optional $id, a definition map of
-// two leaves, an anchored leaf, an unknown keyword holding a leaf only the
-// JSON-pointer fallback reaches, and an optional reference to another document.
-func buildRefDoc(cursor *fuzzfill.Cursor, draft2020 bool, defsKey, id, innerRef string) string {
+// chooseWithheld names the document the substitute pipeline may serve through a
+// WithRefFallback substitute instead of the resolver, or returns empty when no
+// document qualifies. Four conditions disqualify a document, and each rules out
+// a false divergence rather than a real one:
+//
+//   - It carries a reference of its own (reasonSubstituteBaseURI).
+//   - Some reference reaches it by anchor (reasonSubstituteNoAnchors).
+//   - It holds the malformed leaf. The resolver serves a whole document and
+//     both engines vet all of it, while a substitute stands in for one
+//     reference and materializes only that target, so a violation elsewhere in
+//     the document reaches one path and not the other.
+//   - It takes part in an $id collision, by claiming another document's
+//     retrieval URI, by having its own claimed, or by sharing an $id with
+//     another served document. Withholding removes it from the resolver, which
+//     changes which document wins the collision and so changes how references
+//     that have nothing to do with the substitute resolve.
+//
+// The document must also be referenced from the root, or withholding it changes
+// nothing. The first qualifying URI in retrieval order wins, so the choice stays
+// a function of the blob.
+func chooseWithheld(
+	served []string,
+	docs map[string]*refGraphDoc,
+	ids []string,
+	malformedDoc string,
+	directlyReferenced map[string]bool,
+) string {
+	claims := map[string]int{}
+	for _, id := range ids {
+		claims[id]++
+	}
+
+	for i, uri := range served {
+		doc := docs[uri]
+
+		switch {
+		case doc.hasRef, doc.anchorTargeted:
+			continue
+		case uri == malformedDoc:
+			continue
+		case !directlyReferenced[uri]:
+			continue
+		case claims[uri] > 0 || slices.Contains(served, ids[i]):
+			// The document's retrieval URI is claimed as an $id, or it claims
+			// another's.
+			continue
+		case ids[i] != "" && claims[ids[i]] > 1:
+			// Two served documents claim this $id, and only one wins.
+			continue
+		}
+
+		return uri
+	}
+
+	return ""
+}
+
+// buildRefDoc renders one remote document: an optional $id, a definition map
+// holding two leaves and an anchored third, an unknown keyword holding a leaf
+// only the JSON-pointer fallback reaches, and an optional reference to another
+// document.
+func buildRefDoc(gen *refGraphGen, uri string, draft2020 bool, defsKey, id, innerRef string) string {
+	gen.enter(uri)
+
 	fields := make([]string, 0, 6)
 
 	if id != "" {
 		fields = append(fields, jsonField("$id", quoteJSON(id)))
 	}
 
-	if draft2020 {
-		fields = append(fields, jsonField("$anchor", quoteJSON(refGraphAnchor)))
-	}
-
-	anchored := drawLeaf(cursor)
-	if !draft2020 {
-		// Draft 7's anchor is a fragment-only $id, which must sit on a
-		// sub-schema rather than the document root, where $id is the base.
-		anchored = mergeIntoObject(anchored, jsonField("$id", quoteJSON("#"+refGraphAnchor)))
-	}
+	anchored := anchoredLeaf(gen, draft2020)
 
 	defs := "{" + strings.Join([]string{
-		jsonField("d0", drawLeaf(cursor)),
-		jsonField("d1", drawLeaf(cursor)),
+		jsonField("d0", gen.drawLeaf()),
+		jsonField("d1", gen.drawLeaf()),
 		jsonField(refGraphAnchor, anchored),
 	}, ",") + "}"
 
 	fields = append(fields,
 		jsonField(defsKey, defs),
-		jsonField("x-custom", "{"+jsonField("sub", drawLeaf(cursor))+"}"),
+		jsonField("x-custom", "{"+jsonField("sub", gen.drawLeaf())+"}"),
 	)
 
 	if innerRef != "" {
@@ -255,15 +379,14 @@ func buildRefDoc(cursor *fuzzfill.Cursor, draft2020 bool, defsKey, id, innerRef 
 // buildRefRoot renders the root document, placing the drawn references in
 // properties and allOf so both a keyword-scoped and a conjoined position are
 // covered.
-func buildRefRoot(cursor *fuzzfill.Cursor, draft2020 bool, defsKey, schemaURI string, refs []string) string {
-	anchored := drawLeaf(cursor)
-	if !draft2020 {
-		anchored = mergeIntoObject(anchored, jsonField("$id", quoteJSON("#"+refGraphAnchor)))
-	}
+func buildRefRoot(gen *refGraphGen, draft2020 bool, defsKey, schemaURI string, refs []refGraphRef) string {
+	gen.enter("")
+
+	anchored := anchoredLeaf(gen, draft2020)
 
 	defs := "{" + strings.Join([]string{
-		jsonField("d0", drawLeaf(cursor)),
-		jsonField("d1", drawLeaf(cursor)),
+		jsonField("d0", gen.drawLeaf()),
+		jsonField("d1", gen.drawLeaf()),
 		jsonField(refGraphAnchor, anchored),
 	}, ",") + "}"
 
@@ -271,32 +394,28 @@ func buildRefRoot(cursor *fuzzfill.Cursor, draft2020 bool, defsKey, schemaURI st
 		jsonField("$schema", quoteJSON(schemaURI)),
 		jsonField("$id", quoteJSON(refGraphRootURI)),
 		jsonField(defsKey, defs),
-		jsonField("x-custom", "{"+jsonField("sub", drawLeaf(cursor))+"}"),
-	}
-
-	if draft2020 {
-		fields = append(fields, jsonField("$anchor", quoteJSON(refGraphAnchor)))
+		jsonField("x-custom", "{"+jsonField("sub", gen.drawLeaf())+"}"),
 	}
 
 	properties := make([]string, 0, len(refs))
 	allOf := make([]string, 0, len(refs))
 
-	for i, ref := range refs {
-		node := "{" + jsonField("$ref", quoteJSON(ref))
+	for _, ref := range refs {
+		node := "{" + jsonField("$ref", quoteJSON(ref.spelling))
 
-		if sibling := refGraphSiblings[cursor.Intn(len(refGraphSiblings))]; sibling != "" {
-			node += "," + sibling
+		if ref.sibling != "" {
+			node += "," + ref.sibling
 		}
 
 		node += "}"
 
-		if cursor.Bool() {
+		if ref.inAllOf {
 			allOf = append(allOf, node)
 
 			continue
 		}
 
-		properties = append(properties, jsonField("p"+string(rune('0'+i)), node))
+		properties = append(properties, jsonField(ref.name, node))
 	}
 
 	if len(properties) > 0 {
@@ -320,6 +439,7 @@ func drawRefSpelling(cursor *fuzzfill.Cursor, defsKey string, served []string) (
 	local := []string{
 		"#/" + defsKey + "/d0",
 		"#/" + defsKey + "/d1",
+		"#/" + defsKey + "/" + refGraphAnchor,
 		"#" + refGraphAnchor,
 		"#/x-custom/sub",
 	}
@@ -346,9 +466,108 @@ func drawRefSpelling(cursor *fuzzfill.Cursor, defsKey string, served []string) (
 	}
 }
 
-// drawLeaf picks one constraint shape from the pool.
-func drawLeaf(cursor *fuzzfill.Cursor) string {
-	return refGraphLeaves[cursor.Intn(len(refGraphLeaves))]
+// refGraphGen draws one graph. It carries the malformed-leaf plan alongside the
+// cursor, since a document renders its leaves through two helpers and the plan
+// has to name one leaf across all of them.
+type refGraphGen struct {
+	cursor *fuzzfill.Cursor
+
+	// The document that holds the malformed leaf: empty for the root, a
+	// retrieval URI for a remote, and refGraphNoMalformed when the graph draws
+	// none at all.
+	malformedDoc string
+
+	// Which of the document's leaves is the malformed one, indexed in draw
+	// order.
+	malformedSlot int
+
+	// The document being rendered and how many leaves it has drawn.
+	current string
+	slot    int
+}
+
+// refGraphNoMalformed marks a graph that draws no malformed leaf. The empty
+// string cannot serve, since it names the root.
+const refGraphNoMalformed = "\x00none"
+
+// planMalformed decides whether the graph carries a malformed leaf and, if so,
+// which leaf of which document. It is drawn once, before any leaf, so the
+// fuzzer can flip it as a single structural bit.
+//
+// One leaf in twenty graphs, because a malformed leaf refuses the whole schema:
+// every instance then compares a refusal and no reference resolves, so a high
+// rate trades the rig's validation coverage for its build-error coverage.
+//
+// The candidates are the root and every document the root references directly.
+// Both engines fetch and vet a directly referenced document, so both refuse it
+// for the same cause. A document reachable only through another document's own
+// reference is excluded: Compile walks the reference graph transitively and
+// vets it, while Inline fetches only what it must expand, so a violation there
+// reaches one engine and not the other. That difference is real, and
+// TestCompileVetsTransitivelyInlineDoesNot pins it with a minimized graph; the
+// generator stays off it so the rig searches for the next finding rather than
+// rediscovering this one.
+func (g *refGraphGen) planMalformed(served []string, directlyReferenced map[string]bool) {
+	g.malformedDoc = refGraphNoMalformed
+
+	if g.cursor.Intn(20) != 0 {
+		return
+	}
+
+	candidates := []string{""}
+
+	for _, uri := range served {
+		if directlyReferenced[uri] {
+			candidates = append(candidates, uri)
+		}
+	}
+
+	g.malformedDoc = candidates[g.cursor.Intn(len(candidates))]
+	g.malformedSlot = g.cursor.Intn(refGraphLeavesPerDoc)
+}
+
+// enter starts rendering one document, empty for the root.
+func (g *refGraphGen) enter(document string) {
+	g.current = document
+	g.slot = 0
+}
+
+// drawLeaf picks the next constraint shape for the document being rendered.
+// Exactly one leaf of one document is malformed when planMalformed chose it,
+// and that leaf is what reaches the build-error outcome.
+//
+// A graph carries at most one violation because each engine reports the first
+// one its own walk reaches, and Inline restructures the document, so a graph
+// carrying two lets the two engines name different violations while both
+// correctly refuse the schema.
+//
+// Inline leaves its root unvetted while Compile vets it, a deliberate
+// divergence inline_root_unvetted_test.go pins. It does not surface here: the
+// second pipeline compiles the inlined output, which still carries the root's
+// definitions, so both pipelines refuse a malformed one.
+func (g *refGraphGen) drawLeaf() string {
+	slot := g.slot
+	g.slot++
+
+	if g.current == g.malformedDoc && slot == g.malformedSlot {
+		return refGraphMalformedLeaves[g.cursor.Intn(len(refGraphMalformedLeaves))]
+	}
+
+	return refGraphLeaves[g.cursor.Intn(len(refGraphLeaves))]
+}
+
+// anchoredLeaf renders the leaf every document anchors, spelled $anchor under
+// Draft 2020-12 and as a fragment-only $id under Draft 7. The anchor sits on a
+// definition entry rather than the document root under both drafts. On the root
+// it would make the same-document reference "#anc" name the root itself, which
+// Inline reports as a cycle, discarding the graph before anything is compared.
+func anchoredLeaf(gen *refGraphGen, draft2020 bool) string {
+	name := jsonField("$id", quoteJSON("#"+refGraphAnchor))
+	if draft2020 {
+		name = jsonField("$anchor", quoteJSON(refGraphAnchor))
+	}
+
+	return mergeIntoObject(gen.drawLeaf(), name)
 }
 
 // jsonField renders one object member from a name and rendered value.
@@ -367,8 +586,8 @@ func quoteJSON(s string) string {
 	return string(encoded)
 }
 
-// mergeIntoObject adds a member to a rendered JSON object, returning a fresh
-// object when the value is not one (the pool's `{}` included).
+// mergeIntoObject adds a member to a rendered JSON object. A value that is not
+// an object, or an empty one, yields a fresh object holding only the member.
 func mergeIntoObject(object, field string) string {
 	trimmed := strings.TrimSpace(object)
 	if !strings.HasPrefix(trimmed, "{") {
@@ -426,9 +645,7 @@ func pointerInto(t *testing.T, document, pointer string) (*jsonschema.Schema, bo
 	require.NoError(t, err, "re-encode a pointer target")
 
 	schema, err := jsonschema.ParseSchema(encoded)
-	if err != nil {
-		return nil, false
-	}
+	require.NoErrorf(t, err, "the pointer target %s is not a schema", encoded)
 
 	return schema, true
 }
@@ -479,25 +696,20 @@ func substitutePipeline(
 
 			if !hasFragment || fragment == "" {
 				parsed, err := jsonschema.ParseSchema([]byte(withheldText))
-				if err != nil {
-					return jsonschema.PropagateRef()
-				}
+				require.NoErrorf(t, err, "parse the withheld document %s", spec.withheld)
 
 				return jsonschema.SubstituteRef(parsed)
 			}
 
-			if !strings.HasPrefix(fragment, "/") {
-				// An anchor fragment needs the withheld document's anchor
-				// registry, which the substitute path does not build. See
-				// reasonSubstituteBaseURI: the generator never withholds an
-				// anchor-targeted document, so this is unreachable.
-				return jsonschema.PropagateRef()
-			}
+			// An anchor fragment is unreachable here, since the generator
+			// never withholds an anchor-targeted document. See
+			// reasonSubstituteNoAnchors.
+			require.Truef(t, strings.HasPrefix(fragment, "/"),
+				"withheld an anchor-targeted document: %s", reasonSubstituteNoAnchors)
 
 			target, ok := pointerInto(t, withheldText, fragment)
-			if !ok {
-				return jsonschema.PropagateRef()
-			}
+			require.Truef(t, ok, "the pointer %q names nothing in the withheld document %s",
+				fragment, spec.withheld)
 
 			return jsonschema.SubstituteRef(target)
 		})
@@ -507,13 +719,23 @@ func substitutePipeline(
 		jsonschema.WithRefFallback(fallback),
 	}
 
-	pipelines, reason := refEngines(ctx, t, schema, compileOpts, inlineOpts)
+	substituted, reason := inlinePipeline(ctx, t, "Inline+Substitute", schema, compileOpts, inlineOpts)
+
 	if reason != "" {
+		// One decline is legitimate. The graph also draws refGraphMissingURI,
+		// so Inline meets a reference no substitute stands in for. Every
+		// reference to the withheld document is covered, since the closure
+		// above substitutes each one or fails outright, so a decline can only
+		// come from a reference pointing elsewhere. Anything else means the
+		// fallback failed to stand in for a document the resolver serves
+		// without complaint, and declining quietly would let a broken
+		// substitute path leave the fuzz target green.
+		require.Truef(t, reason == reasonDeferredRefMiss && spec.unresolvable,
+			"the fallback did not stand in for the withheld document %s: %s",
+			spec.withheld, reason)
+
 		return refPipeline{}, false
 	}
-
-	substituted := pipelines[len(pipelines)-1]
-	substituted.name = "Inline+Substitute"
 
 	return substituted, true
 }
@@ -535,7 +757,7 @@ func refGraphBlobs(n int) [][]byte {
 	blobs := make([][]byte, 0, n)
 
 	for range n {
-		blob := make([]byte, 8+int(next()%120))
+		blob := make([]byte, 48+int(next()%208))
 		for i := range blob {
 			blob[i] = byte(next())
 		}
@@ -547,10 +769,9 @@ func refGraphBlobs(n int) [][]byte {
 }
 
 // TestRefGraphSynthesisReachesEveryForm pins that the generator still draws
-// every shape the rig depends on. A generator edit that silently stops emitting
+// every form the rig depends on. A generator edit that silently stops emitting
 // a reference spelling, a draft, or a substitutable document would leave
-// FuzzRefEnginesAgree green while covering less, which is the failure mode this
-// guard exists to prevent.
+// FuzzRefEnginesAgree green while covering less.
 func TestRefGraphSynthesisReachesEveryForm(t *testing.T) {
 	t.Parallel()
 
@@ -571,22 +792,38 @@ func TestRefGraphSynthesisReachesEveryForm(t *testing.T) {
 			seen["a substitutable document"]++
 		}
 
+		first, second := refGraphDocURIs[0], refGraphDocURIs[1]
+
 		for form, text := range map[string]string{
-			"a same-document pointer reference":  "#/$defs/d0",
-			"a draft 7 definitions reference":    "#/definitions/d0",
-			"an anchor reference":                "#" + refGraphAnchor,
-			"an unknown-keyword reference":       "#/x-custom/sub",
-			"an unresolvable reference":          refGraphMissingURI,
-			"a reference to the first document":  refGraphDocURIs[0],
-			"a reference to the second document": refGraphDocURIs[1],
+			"a same-document $defs reference":        `"$ref":"#/$defs/d0"`,
+			"a same-document definitions reference":  `"$ref":"#/definitions/d0"`,
+			"a same-document anchor reference":       `"$ref":"#` + refGraphAnchor + `"`,
+			"a same-document unknown-keyword target": `"$ref":"#/x-custom/sub"`,
+			"a pointer to the anchored definition":   `/` + refGraphAnchor + `"`,
+			"an unresolvable reference":              `"$ref":"` + refGraphMissingURI + `"`,
+			"a whole-document reference":             `"$ref":"` + first + `"`,
+			"a remote pointer reference":             `"$ref":"` + first + `#/`,
+			"a remote anchor reference":              `#` + refGraphAnchor + `"`,
+			"a remote unknown-keyword target":        `#/x-custom/sub"`,
+			"a reference to the second document":     `"$ref":"` + second,
+			"a reference placed in allOf":            `"allOf":[{"$ref"`,
+			"a reference placed in properties":       `"properties":{"p`,
 		} {
 			if strings.Contains(spec.root, text) {
 				seen[form]++
 			}
 		}
 
+		for _, sibling := range refGraphSiblings {
+			if sibling != "" && strings.Contains(spec.root, ","+sibling+"}") {
+				seen["a reference carrying a sibling"]++
+
+				break
+			}
+		}
+
 		for _, document := range spec.documents {
-			if strings.Contains(document, `"$id"`) {
+			if strings.Contains(document, `"$id":"http`) {
 				seen["a document declaring $id"]++
 			}
 
@@ -594,21 +831,52 @@ func TestRefGraphSynthesisReachesEveryForm(t *testing.T) {
 				seen["a document carrying its own reference"]++
 			}
 		}
+
+		// The build-error outcome is only reachable through a malformed leaf
+		// in a document both engines vet, so the pools must keep drawing one.
+		schema, resolver := parseRefGraph(t, spec.root, spec.documents)
+
+		pipelines, reason := refEngines(t.Context(), t, schema,
+			[]jsonschema.ValidateOption{jsonschema.WithRefResolver(resolver)},
+			[]jsonschema.InlineOption{jsonschema.WithRefResolver(resolver)})
+		if reason != "" {
+			continue
+		}
+
+		refused := 0
+
+		for _, pipeline := range pipelines {
+			if pipeline.outcome(t.Context(), []byte(`null`)).kind == refBuildErr {
+				refused++
+			}
+		}
+
+		if refused == len(pipelines) {
+			seen["a schema both engines refuse"]++
+		}
 	}
 
 	for _, form := range []string{
 		"draft 7",
 		"draft 2020-12",
 		"a substitutable document",
-		"a same-document pointer reference",
-		"a draft 7 definitions reference",
-		"an anchor reference",
-		"an unknown-keyword reference",
+		"a same-document $defs reference",
+		"a same-document definitions reference",
+		"a same-document anchor reference",
+		"a same-document unknown-keyword target",
+		"a pointer to the anchored definition",
 		"an unresolvable reference",
-		"a reference to the first document",
+		"a whole-document reference",
+		"a remote pointer reference",
+		"a remote anchor reference",
+		"a remote unknown-keyword target",
 		"a reference to the second document",
+		"a reference carrying a sibling",
+		"a reference placed in allOf",
+		"a reference placed in properties",
 		"a document declaring $id",
 		"a document carrying its own reference",
+		"a schema both engines refuse",
 	} {
 		assert.NotZerof(t, seen[form], "the generator draws %s in none of %d blobs", form, draws)
 	}
@@ -624,7 +892,7 @@ func TestRefGraphSynthesisReachesEveryForm(t *testing.T) {
 // its relative references resolve against that document's base. Here the two
 // bases differ by one path segment, so the substituted copy looks for a
 // document nobody serves. Were Inline to start rebasing a substitute onto the
-// document it stands in for, this test fails and the generator could withhold
+// document it stands in for, this test would fail and the generator could withhold
 // any document.
 func TestSubstituteDoesNotRebaseNestedRefs(t *testing.T) {
 	t.Parallel()
@@ -670,36 +938,48 @@ func TestSubstituteDoesNotRebaseNestedRefs(t *testing.T) {
 				return jsonschema.SubstituteRef(withheld)
 			})))
 
-	require.ErrorIs(t, err, jsonschema.ErrRefResolve, string(reasonSubstituteBaseURI))
+	require.ErrorIs(t, err, jsonschema.ErrRefResolve, reasonSubstituteBaseURI)
 }
 
-// TestSubstitutePipelineBuilds pins that the third pipeline actually runs on
-// synthesized graphs. The builder declines silently when a graph has no
-// withheld document, or when the fallback does not cover every failing
-// reference, so without this guard the substitute path could stop being
-// exercised while FuzzRefEnginesAgree stayed green.
+// TestSubstitutePipelineBuilds pins that the third pipeline runs on every
+// synthesized graph that qualifies for it. The builder declines only when a
+// graph withholds nothing or draws an unresolvable reference, and the loop
+// rules out both, so every remaining graph must build and this asserts equality
+// rather than a non-zero count. Without it the rig could stop exercising the
+// substitute path while FuzzRefEnginesAgree stayed green.
 func TestSubstitutePipelineBuilds(t *testing.T) {
 	t.Parallel()
 
 	const draws = 300
 
-	built := 0
+	eligible, built := 0, 0
 
 	for _, blob := range refGraphBlobs(draws) {
 		spec := synthRefGraph(blob)
-		if spec.withheld == "" {
+		if spec.withheld == "" || spec.unresolvable {
 			continue
 		}
 
 		schema, resolver := parseRefGraph(t, spec.root, spec.documents)
 		compileOpts := []jsonschema.ValidateOption{jsonschema.WithRefResolver(resolver)}
+		inlineOpts := []jsonschema.InlineOption{jsonschema.WithRefResolver(resolver)}
+
+		// The fuzz target reaches substitutePipeline only for a graph the full
+		// resolver already handled, so the guard applies the same precondition.
+		if _, reason := refEngines(t.Context(), t, schema, compileOpts, inlineOpts); reason != "" {
+			continue
+		}
+
+		eligible++
 
 		if _, ok := substitutePipeline(t.Context(), t, spec, schema, compileOpts); ok {
 			built++
 		}
 	}
 
-	assert.NotZerof(t, built, "the substitute pipeline builds for none of %d graphs", draws)
+	assert.NotZerof(t, eligible, "no comparable graph withholds a document in %d blobs", draws)
+	assert.Equalf(t, eligible, built,
+		"the substitute pipeline built for %d of %d eligible graphs", built, eligible)
 }
 
 // FuzzRefEnginesAgree asserts that Compile, Inline, and the substitute path

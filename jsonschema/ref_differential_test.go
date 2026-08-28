@@ -14,46 +14,49 @@ import (
 	"go.jacobcolvin.com/x/jsonschema"
 )
 
-// The differential rig runs one schema through every site that materializes a
-// $ref target and asserts the sites agree on every instance. Three sites exist:
-// Compile's reference fixpoint, Inline's own registry and index, and the
-// JSON-pointer fallback both engines reach through internal/refresolve. The
-// reasons below name the cases where a comparison is not meaningful. Each is
-// classified from the error Inline returns rather than from a test name, so a
-// reason cannot go stale against a renamed suite case.
+// The reference differential. It runs one schema through every site that
+// materializes a $ref target and asserts the sites agree on every instance.
+// Three sites exist: Compile's reference fixpoint, Inline's own registry and
+// index, and the JSON-pointer fallback both engines reach through
+// internal/refresolve.
+//
+// Three reasons below name a graph the differential cannot compare, and two
+// name a constraint the substitute pipeline works under. The rig classifies a
+// graph from the error Inline returns rather than from a test name, so a reason
+// cannot go stale against a renamed suite case.
 
-const (
-	// Why a recursive reference graph is not compared. A cyclic graph has no
-	// finite static expansion, so Inline returns ErrRefCycle by design while
-	// Compile resolves the cycle lazily per instance.
-	reasonInlineCycle skipReason = "the reference graph is cyclic, which has no finite static expansion, so Inline returns ErrRefCycle by design while Compile resolves the cycle lazily at validation time"
+// reasonInlineCycle is why a cyclic reference graph is not compared.
+const reasonInlineCycle skipReason = "a cyclic reference graph has no finite static expansion, so Inline returns ErrRefCycle by design while Compile resolves the cycle lazily at validation time"
 
-	// Why a $dynamicRef graph is not compared. The target depends on the
-	// dynamic scope at validation time, so no single replacement preserves it
-	// and Inline returns ErrRefInline by design.
-	reasonInlineDynamicRef skipReason = "$dynamicRef resolves through the dynamic scope at validation time, so no single static replacement preserves its semantics and Inline returns ErrRefInline by design"
+// reasonInlineDynamicRef is why a $dynamicRef graph is not compared.
+const reasonInlineDynamicRef skipReason = "$dynamicRef resolves through the dynamic scope at validation time, so no single static replacement preserves its semantics and Inline returns ErrRefInline by design"
 
-	// Why an unresolvable reference makes the two engines incomparable. The
-	// compile-time reference walk tolerates a document miss, so Compile
-	// succeeds and reports the failure only if a validation walk reaches the
-	// bearing reference, while Inline fails outright. An instance that never
-	// reaches the reference is accepted by one engine and refused by the
-	// other, and both answers are correct.
-	reasonDeferredRefMiss skipReason = "the reference does not resolve: Compile tolerates a missing remote document and defers the failure to the validation walk that reaches the reference, while Inline fails at inline time, so the two verdicts are not comparable"
+// reasonDeferredRefMiss is why an unresolvable reference leaves the engines
+// incomparable.
+const reasonDeferredRefMiss skipReason = "the reference does not resolve. The compile-time reference walk tolerates a missing remote document and defers to the validation walk that reaches the reference, while Inline fails at inline time, so one engine accepts an instance that never reaches the reference and the other refuses it, and both answers are correct"
 
-	// Why the substitute pipeline withholds only a reference-free document. A
-	// substitute's own references resolve in the context of the document
-	// holding the failing reference, while a fetched document's resolve
-	// against its own base URI, so a substituted document carrying references
-	// is not the schema the resolver would have served.
-	reasonSubstituteBaseURI skipReason = "a WithRefFallback substitute's own references resolve against the document holding the failing reference, while a fetched document's resolve against its own base URI, so only a reference-free document can be withheld and substituted"
-)
+// reasonSubstituteBaseURI is why the substitute pipeline withholds only a
+// document carrying no reference of its own. It is not a skip reason. The
+// generator applies it when choosing what to withhold, and
+// TestSubstituteDoesNotRebaseNestedRefs pins the behavior it describes.
+const reasonSubstituteBaseURI = "a WithRefFallback substitute's own references resolve against the document holding the failing reference, while a fetched document's resolve against its own base URI, so only a reference-free document can be withheld and substituted"
 
-// refVetSentinels are the nine structural-vetting sentinels a materialization
-// site can report. Two build failures agree when they match the same subset,
-// which distinguishes a negative-bound rejection from an invalid-type one
-// without depending on message text.
-var refVetSentinels = map[string]error{
+// reasonSubstituteNoAnchors is why the substitute pipeline withholds only a
+// document nothing reaches by anchor. It is not a skip reason; the generator
+// applies it when choosing what to withhold.
+const reasonSubstituteNoAnchors = "resolving an anchor fragment needs the withheld document's anchor registry, which the substitute path never builds, and a spliced copy carries no $anchor of its own"
+
+// refBuildSentinels are the sentinels a materialization site can report when it
+// refuses a schema outright. Two build failures agree when they match the same
+// subset, which tells a negative-bound rejection from an invalid-type one
+// without depending on message text. The structural-vetting sentinels carry
+// that comparison; the rest are the other ways Compile refuses a document.
+//
+// The table also decides what isRefMiss counts as a miss, since a miss is an
+// error wrapping ErrRefResolve that matches nothing here. Adding a sentinel
+// that can travel with ErrRefResolve reclassifies a genuine miss as a build
+// failure, which the rig would then compare against Compile's deferral.
+var refBuildSentinels = map[string]error{
 	"ErrInvalidType":              jsonschema.ErrInvalidType,
 	"ErrNegativeBound":            jsonschema.ErrNegativeBound,
 	"ErrNonPositiveMultipleOf":    jsonschema.ErrNonPositiveMultipleOf,
@@ -63,23 +66,29 @@ var refVetSentinels = map[string]error{
 	"ErrInvalidID":                jsonschema.ErrInvalidID,
 	"ErrMisplacedVocabulary":      jsonschema.ErrMisplacedVocabulary,
 	"ErrItemsArrayUnderDraft2020": jsonschema.ErrItemsArrayUnderDraft2020,
+	"ErrSchemaNotTree":            jsonschema.ErrSchemaNotTree,
+	"ErrUnsupportedDraft":         jsonschema.ErrUnsupportedDraft,
+	"ErrUnknownVocabulary":        jsonschema.ErrUnknownVocabulary,
+	"ErrInvalidSchemaDocument":    jsonschema.ErrInvalidSchemaDocument,
+	"ErrNilSchema":                jsonschema.ErrNilSchema,
 }
 
-// refErrSignature names the vetting sentinels err matches, sorted and joined so
-// two errors carrying the same causes compare equal regardless of wording. An
-// error matching none reports "unclassified", which compares equal to another
-// unclassified error and so does not by itself fail a comparison.
+// refUnclassified is the signature of an error matching no build sentinel.
+const refUnclassified = "unclassified"
+
+// refErrSignature names the build sentinels err matches, sorted and joined so
+// two errors carrying the same causes compare equal regardless of wording.
 func refErrSignature(err error) string {
 	var names []string
 
-	for name, sentinel := range refVetSentinels {
+	for name, sentinel := range refBuildSentinels {
 		if errors.Is(err, sentinel) {
 			names = append(names, name)
 		}
 	}
 
 	if len(names) == 0 {
-		return "unclassified"
+		return refUnclassified
 	}
 
 	slices.Sort(names)
@@ -87,7 +96,8 @@ func refErrSignature(err error) string {
 	return strings.Join(names, "+")
 }
 
-// refOutcomeKind is one pipeline's answer for one instance.
+// refOutcomeKind is a pipeline's answer for one instance, one of accept,
+// reject, and build error.
 type refOutcomeKind int
 
 const (
@@ -116,8 +126,8 @@ func (k refOutcomeKind) String() string {
 	}
 }
 
-// refOutcome is one pipeline's answer for one instance, with the error behind a
-// rejection or a build failure.
+// refOutcome pairs one pipeline's answer with the error behind a rejection or a
+// build failure.
 type refOutcome struct {
 	kind refOutcomeKind
 	err  error
@@ -148,9 +158,10 @@ func (p refPipeline) outcome(ctx context.Context, instance []byte) refOutcome {
 }
 
 // assertRefEnginesAgree fails unless every pipeline answers identically for the
-// instance. Two build failures agree when they carry the same vetting
-// sentinels, so a schema both engines refuse for the same structural cause
-// passes while a disagreement about the cause does not.
+// instance. Two build failures agree when they carry the same build sentinels.
+// A pair carrying none on either side fails too. By construction that is a
+// refusal cause refBuildSentinels does not model, and calling two unmodeled
+// causes equal would let a real disagreement pass.
 func assertRefEnginesAgree(ctx context.Context, t *testing.T, instance []byte, pipelines ...refPipeline) {
 	t.Helper()
 
@@ -170,28 +181,44 @@ func assertRefEnginesAgree(ctx context.Context, t *testing.T, instance []byte, p
 			continue
 		}
 
-		if want.kind == refBuildErr {
-			assert.Equalf(t, refErrSignature(want.err), refErrSignature(got.err),
-				"%s and %s refuse the schema for different causes\n  %s: %v\n  %s: %v",
-				pipelines[0].name, pipeline.name,
-				pipelines[0].name, want.err,
-				pipeline.name, got.err,
-			)
+		if want.kind != refBuildErr {
+			continue
 		}
+
+		wantSig, gotSig := refErrSignature(want.err), refErrSignature(got.err)
+
+		if !assert.Equalf(t, wantSig, gotSig,
+			"%s and %s refuse the schema for different causes\n  %s: %v\n  %s: %v",
+			pipelines[0].name, pipeline.name,
+			pipelines[0].name, want.err,
+			pipeline.name, got.err,
+		) {
+			continue
+		}
+
+		assert.NotEqualf(
+			t,
+			refUnclassified,
+			wantSig,
+			"%s and %s both refuse the schema for a cause refBuildSentinels does not model, so the match proves nothing; add the sentinel\n  %s: %v\n  %s: %v",
+			pipelines[0].name,
+			pipeline.name,
+			pipelines[0].name,
+			want.err,
+			pipeline.name,
+			got.err,
+		)
 	}
 }
 
-// dynamicRefInlinePhrase is the text distinguishing Inline's one documented
-// ErrRefInline case from its three other producers, which report "schema not
-// interned in the node index", "subschema child count diverged", and
-// "substitution exceeded N nested levels". Only the $dynamicRef case carries
-// this phrase, and the two invariant violations and the substitute depth limit
-// must fail the rig rather than skip it.
+// dynamicRefInlinePhrase distinguishes Inline's one documented ErrRefInline
+// case from its three other producers, two internal-invariant violations and
+// the substitute depth limit, none of which may skip the rig.
 //
 // The schema graph cannot be inspected instead. A $dynamicRef commonly lives in
 // a fetched document that a walk from the root never reaches, which is the case
 // for every suite group referencing the Draft 2020-12 metaschema.
-// TestInlineDifferentialSkipsAreLive fails if this phrase ever stops matching.
+// TestInlineDifferentialSkipsAreLive fails if this phrase stops matching.
 const dynamicRefInlinePhrase = "has no static expansion"
 
 // isDynamicRefInline reports whether err is Inline's refusal to statically
@@ -202,21 +229,75 @@ func isDynamicRefInline(err error) bool {
 }
 
 // isRefMiss reports whether err is a reference that did not resolve, as opposed
-// to one that resolved to a target the structural vet refused. Both wrap
-// ErrRefResolve, and only the former makes the engines incomparable.
+// to one that resolved to a target some check refused. Both wrap ErrRefResolve
+// or ErrNotResolved, and only a reference that did not resolve leaves the
+// engines incomparable.
 func isRefMiss(err error) bool {
 	if !errors.Is(err, jsonschema.ErrRefResolve) && !errors.Is(err, jsonschema.ErrNotResolved) {
 		return false
 	}
 
-	return refErrSignature(err) == "unclassified"
+	return refErrSignature(err) == refUnclassified
+}
+
+// inlinePipeline inlines schema under inlineOpts and compiles the result. The
+// second return names the reason the graph is not comparable, and is empty when
+// the graph is comparable. An Inline failure the rig does not classify fails
+// the test outright,
+// since ErrRefInline also covers two internal-invariant violations and the
+// substitute depth limit.
+func inlinePipeline(
+	ctx context.Context,
+	t *testing.T,
+	name string,
+	schema *jsonschema.Schema,
+	compileOpts []jsonschema.ValidateOption,
+	inlineOpts []jsonschema.InlineOption,
+) (refPipeline, skipReason) {
+	t.Helper()
+
+	inlined, inlineErr := jsonschema.Inline(ctx, schema, inlineOpts...)
+
+	switch {
+	case inlineErr == nil:
+	case errors.Is(inlineErr, jsonschema.ErrRefCycle):
+		return refPipeline{}, reasonInlineCycle
+	case isDynamicRefInline(inlineErr):
+		return refPipeline{}, reasonInlineDynamicRef
+	case isRefMiss(inlineErr):
+		return refPipeline{}, reasonDeferredRefMiss
+	case errors.Is(inlineErr, jsonschema.ErrRefResolve):
+		// A structural rejection of a fetched document or a fallback target.
+		// Compile refuses the same schema for the same cause, so the two stay
+		// comparable through the build-error outcome.
+		return refPipeline{name: name, buildErr: inlineErr}, ""
+
+	default:
+		require.NoError(t, inlineErr, "Inline failed for a reason the differential does not classify")
+	}
+
+	// The inlined schema must be self-contained, so the rig disables the ref
+	// resolver. ValidateOption is opaque and suiteBaseOpts bundles both
+	// resolvers, so the slice cannot be filtered; a trailing nil resolver wins
+	// instead, since the option assigns rather than merges, and a nil resolver
+	// is documented as restoring local-only resolution. Every other option
+	// survives. The metaschema resolver and the format and content gates decide
+	// vocabulary and assertion behavior that has nothing to do with $ref, and
+	// dropping them reports divergences the engines do not have: 309 over the
+	// vendored suite for the format and content gates, 3 more for the
+	// metaschema resolver.
+	standaloneOpts := make([]jsonschema.ValidateOption, 0, len(compileOpts)+1)
+	standaloneOpts = append(standaloneOpts, compileOpts...)
+	standaloneOpts = append(standaloneOpts, jsonschema.WithRefResolver(nil))
+
+	standalone, standaloneErr := jsonschema.Compile(ctx, inlined, standaloneOpts...)
+
+	return refPipeline{name: name, validator: standalone, buildErr: standaloneErr}, ""
 }
 
 // refEngines builds the Compile and Inline pipelines for one schema. The second
-// return names the reason the schema is not comparable and is empty when it is;
-// an Inline failure the rig does not classify fails the test outright, since
-// ErrRefInline also covers two internal-invariant violations and the substitute
-// depth limit.
+// return names the reason the graph is not comparable, and is empty when the
+// graph is comparable.
 func refEngines(
 	ctx context.Context,
 	t *testing.T,
@@ -227,49 +308,15 @@ func refEngines(
 	t.Helper()
 
 	compiled, compileErr := jsonschema.Compile(ctx, schema, compileOpts...)
-	compilePipeline := refPipeline{name: "Compile", validator: compiled, buildErr: compileErr}
 
-	inlined, inlineErr := jsonschema.Inline(ctx, schema, inlineOpts...)
-
-	switch {
-	case inlineErr == nil:
-	case errors.Is(inlineErr, jsonschema.ErrRefCycle):
-		return nil, reasonInlineCycle
-	case isDynamicRefInline(inlineErr):
-		return nil, reasonInlineDynamicRef
-	case isRefMiss(inlineErr):
-		return nil, reasonDeferredRefMiss
-	case errors.Is(inlineErr, jsonschema.ErrRefResolve):
-		// A structural rejection of a fetched document or a fallback target.
-		// Compile refuses the same schema for the same cause, so the two stay
-		// comparable through the build-error outcome.
-		return []refPipeline{
-			compilePipeline,
-			{name: "Inline+Compile", buildErr: inlineErr},
-		}, ""
-
-	default:
-		require.NoError(t, inlineErr, "Inline failed for a reason the differential does not classify")
+	inlined, reason := inlinePipeline(ctx, t, "Inline+Compile", schema, compileOpts, inlineOpts)
+	if reason != "" {
+		return nil, reason
 	}
 
-	// The inlined schema must be self-contained, so the ref resolver is
-	// disabled. ValidateOption is opaque and suiteBaseOpts bundles both
-	// resolvers, so the slice cannot be filtered; a trailing nil resolver wins
-	// instead, since the option assigns rather than merges, and a nil resolver
-	// is documented as restoring local-only resolution. Every other option
-	// survives: the metaschema resolver and the format and content gates
-	// decide vocabulary and assertion behavior that has nothing to do with
-	// $ref, and dropping them reports hundreds of divergences the engines do
-	// not have.
-	standaloneOpts := make([]jsonschema.ValidateOption, 0, len(compileOpts)+1)
-	standaloneOpts = append(standaloneOpts, compileOpts...)
-	standaloneOpts = append(standaloneOpts, jsonschema.WithRefResolver(nil))
-
-	standalone, standaloneErr := jsonschema.Compile(ctx, inlined, standaloneOpts...)
-
 	return []refPipeline{
-		compilePipeline,
-		{name: "Inline+Compile", validator: standalone, buildErr: standaloneErr},
+		{name: "Compile", validator: compiled, buildErr: compileErr},
+		inlined,
 	}, ""
 }
 
@@ -293,10 +340,17 @@ func parseRefGraph(t *testing.T, root string, remotes map[string]string) (*jsons
 	return schema, resolver
 }
 
-// TestRefEnginesAgreeOnPastFixes runs the reference graph behind every past
-// $ref fix through the differential. Each row names the commits whose bug it
-// reproduces, so a regression in one of those classes fails here with the graph
-// in view rather than waiting for the fuzzer to rediscover it.
+// TestRefEnginesAgreeOnPastFixes runs one reference graph per past $ref fix,
+// eleven rows over ten commits in five classes: a fetched document's $id
+// clobbering the registry, structural vetting of JSON-pointer fallback targets,
+// the fallback cache key, fallback registry merge order, and anchor resolution
+// under a fetched document's canonical base. A regression in one of those
+// classes fails here with the graph in view rather than waiting for the fuzzer
+// to rediscover it.
+//
+// Several rows misspell a type name, "strnig" and "nteger". Those are the
+// invalid type names the structural vet rejects, and correcting them guts the
+// row.
 func TestRefEnginesAgreeOnPastFixes(t *testing.T) {
 	t.Parallel()
 
@@ -322,7 +376,7 @@ func TestRefEnginesAgreeOnPastFixes(t *testing.T) {
 			},
 			instances: []string{`"text"`, `42`, `null`, `[]`},
 		},
-		"items array in a JSON-pointer fallback target (371092b)": {
+		"items array in a same-document fallback target (371092b)": {
 			root: stringtest.Input(`
 				{
 					"$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -332,7 +386,7 @@ func TestRefEnginesAgreeOnPastFixes(t *testing.T) {
 			`),
 			instances: []string{`[]`, `["a"]`, `[1]`, `"text"`},
 		},
-		"negative bound in a JSON-pointer fallback target (371092b)": {
+		"negative bound in a same-document fallback target (371092b)": {
 			root: stringtest.Input(`
 				{
 					"$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -342,7 +396,7 @@ func TestRefEnginesAgreeOnPastFixes(t *testing.T) {
 			`),
 			instances: []string{`"text"`, `""`, `42`},
 		},
-		"fallback target vetted during a run (e88e354)": {
+		"fallback target in a document fetched at validation time (e88e354)": {
 			root: stringtest.Input(`
 				{
 					"$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -354,7 +408,7 @@ func TestRefEnginesAgreeOnPastFixes(t *testing.T) {
 			},
 			instances: []string{`[]`, `[1]`, `"text"`},
 		},
-		"fallback target vetted two remote hops out (df730d4)": {
+		"fallback target two remote hops from the root (df730d4)": {
 			root: `{"$schema": "https://json-schema.org/draft/2020-12/schema", "$ref": "https://example.test/a.json"}`,
 			remotes: map[string]string{
 				"https://example.test/a.json": `{"$ref": "https://example.test/b.json"}`,
@@ -362,7 +416,7 @@ func TestRefEnginesAgreeOnPastFixes(t *testing.T) {
 			},
 			instances: []string{`"text"`, `42`},
 		},
-		"fallback target vetted in the inliner's session (575eeff)": {
+		"fallback target in a remote unknown keyword (575eeff)": {
 			root: stringtest.Input(`
 				{
 					"$schema": "https://json-schema.org/draft/2020-12/schema",

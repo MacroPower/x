@@ -123,21 +123,21 @@ var (
 	// $vocabulary set and should be registered as metaschemas.
 	remoteMetaSchemas []*jsonschema.Schema
 
-	// The two drafts the vendored suite covers, each with the $schema URI
-	// injected into a group schema that declares none.
+	// The two drafts the vendored suite covers. Each row carries the $schema
+	// URI to inject into a group schema that declares none.
 	suiteDrafts = []struct {
 		name      string
 		schemaURI string
 	}{
-		{"draft7", "http://json-schema.org/draft-07/schema#"},
-		{"draft2020-12", "https://json-schema.org/draft/2020-12/schema"},
+		{"draft7", draft7SchemaURI},
+		{"draft2020-12", draft2020SchemaURI},
 	}
 
-	// The three non-recursive directory levels the suite is split across. The
-	// tier partitions the file set: TestSuite runs the required files,
-	// TestSuiteOptional the implementation-defined ones, and TestSuiteFormat
-	// the format assertions, so a file belongs to exactly one of them. The
-	// empty tier names the draft directory itself.
+	// The three directory levels the suite is split across, each globbed
+	// non-recursively. The tier partitions the file set: TestSuite runs the
+	// required files, TestSuiteOptional the implementation-defined ones, and
+	// TestSuiteFormat the format assertions, so a file belongs to exactly one
+	// of them. The empty tier names the draft directory itself.
 	suiteTiers = []string{"", "optional", "optional/format"}
 )
 
@@ -256,10 +256,7 @@ func suiteBaseOpts() []jsonschema.ValidateOption {
 	}
 }
 
-// suiteFile is one vendored suite file with everything needed to run it. It is
-// the single enumeration of the suite: the three conformance tests and the
-// inline differential all draw their files from it, so the differential cannot
-// drift from what the conformance tests actually run.
+// suiteFile is one vendored suite file with everything needed to run it.
 type suiteFile struct {
 	// The draft directory name, "draft7" or "draft2020-12".
 	draft string
@@ -288,8 +285,14 @@ type suiteFile struct {
 }
 
 // suiteFiles enumerates every vendored suite file across both drafts and all
-// three tiers. Each row carries its own options slice, since suiteBaseOpts
-// builds a fresh metaschema map per call.
+// three tiers. It is the single enumeration of the suite. The three conformance
+// tests and the inline differential all draw their files from it, so the
+// differential cannot drift from what the conformance tests run.
+//
+// Each row carries its own options slice, since suiteBaseOpts builds a fresh
+// metaschema map per call. Every draft and tier directory must hold at least
+// one file, so an emptied directory fails whichever test calls this, not only
+// the one that owns that tier.
 func suiteFiles(t *testing.T) []suiteFile {
 	t.Helper()
 
@@ -309,8 +312,8 @@ func suiteFiles(t *testing.T) []suiteFile {
 			for _, path := range matches {
 				fileName := filepath.Base(path)
 
-				// The key is assembled from slash-joined parts rather than
-				// filepath.Rel, which would yield host separators.
+				// The key joins its parts with slashes rather than going
+				// through filepath.Rel, which would yield host separators.
 				pathKey := draft.name + "/" + fileName
 				if tier != "" {
 					pathKey = draft.name + "/" + tier + "/" + fileName
@@ -343,7 +346,7 @@ func suiteFileOpts(tier, fileName string) []jsonschema.ValidateOption {
 		// Draft-07 asserts regardless.
 		opts = append(opts, jsonschema.WithFormats(true))
 	case tier == "" && fileName == "format.json":
-		// Format.json tests annotation-only behavior: format must NOT cause
+		// Format.json tests annotation-only behavior. Format must not cause
 		// validation failures.
 		opts = append(opts, jsonschema.WithFormats(false))
 	case tier == "optional" && fileName == "content.json":
@@ -356,8 +359,10 @@ func suiteFileOpts(tier, fileName string) []jsonschema.ValidateOption {
 }
 
 // runSuiteTier runs every suite file in one tier, grouped by draft. The two
-// levels of subtest, the draft then the file, give each case the name
-// TestX/draft/file.json/group/case that suiteSkips keys mirror.
+// levels of subtest, the draft then the file, keep every subtest name byte
+// identical to what the three tests produced before they shared this helper.
+// The suiteSkips key is file.pathKey, which carries the tier segment the
+// subtest name omits.
 func runSuiteTier(t *testing.T, tier string) {
 	t.Helper()
 
@@ -431,7 +436,7 @@ func loadSuiteGroups(t *testing.T, path string) []suiteGroup {
 	return groups
 }
 
-// runSuiteFile loads and runs all test groups from a single suite file.
+// runSuiteFile runs every test group in one suite file.
 func runSuiteFile(t *testing.T, path, pathKey, schemaURI string, opts ...jsonschema.ValidateOption) {
 	t.Helper()
 

@@ -342,3 +342,45 @@ contract the tests enforce.
   - `task go:fuzz` searches for new counterexamples; the seed corpora run on
     every `go test`. A discovered counterexample is committed under
     `testdata/fuzz/<Target>/` as a permanent regression seed before the fix.
+- A third differential rig closes the loop across the three sites that
+  materialize a `$ref` target -- `Compile`'s reference fixpoint, `Inline`'s own
+  registry and index, and the JSON-pointer fallback both reach through
+  `internal/refresolve` -- on one property: **Compile, Inline, and the
+  substitute path must reach the same verdict on every instance of one
+  reference graph.** A disagreement is a bug at one of the sites. The shared
+  harness lives in `ref_differential_test.go` (`refPipeline`, `refEngines`,
+  `inlinePipeline`, `assertRefEnginesAgree`, and the `refBuildSentinels` table
+  that makes two build failures comparable by cause rather than by message
+  text).
+  - `TestSuiteInlineAgrees` (`suite_inline_differential_test.go`) runs every
+    vendored suite group through both engines. It ignores `suiteSkips`, which
+    record where this package diverges from the suite's expected answer, a
+    different question from whether the two engines agree.
+  - `TestRefEnginesAgreeOnPastFixes` pins one graph per past `$ref` fix as
+    JSON.
+  - `FuzzRefEnginesAgree` (`fuzz_ref_test.go`, rig 3) synthesizes a
+    multi-document graph from a blob, drawing the draft, each document's `$id`,
+    the anchor form, and eight reference spellings. A third pipeline withholds one document from
+    the resolver and serves it through a `WithRefFallback` substitute. It has no
+    seed corpus, since a corpus entry for a `[]byte` argument is entropy and no
+    blob can be written by hand to decode to a chosen graph.
+  - Five reason constants live in `ref_differential_test.go`. Three are skip
+    reasons the rig classifies from the error `Inline` returns, never from a
+    test name, so a reason cannot go stale against a renamed suite case:
+    `reasonInlineCycle`, `reasonInlineDynamicRef`, and `reasonDeferredRefMiss`
+    (`Compile` tolerates a missing remote document and defers, `Inline` fails at
+    inline time, so the verdicts are not comparable). `reasonSubstituteBaseURI`
+    and `reasonSubstituteNoAnchors` are not skips; the generator applies them
+    when choosing which document to withhold.
+  - Two divergences the rig found are pinned as tests rather than fixed, since
+    resolving either is a policy decision: `TestCompileVetsTransitivelyInlineDoesNot`
+    (Compile vets a document reached only through another document's reference,
+    which Inline never fetches) and `TestRefEnginesDisagreeOnCollidingIDs` (with
+    three documents colliding on `$id`, one anchor reference resolves to two
+    different targets). The generator stays off both shapes, which is why the
+    `$id` pool excludes the root's own URI and a malformed leaf lands only in
+    the root or a directly referenced document.
+  - `suiteFiles` in `suite_test.go` is the single enumeration of the vendored
+    suite. The three conformance tests and the differential all draw their files
+    from it, so the differential cannot drift from what the conformance tests
+    run.
