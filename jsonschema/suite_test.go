@@ -122,6 +122,23 @@ var (
 	// Remote metaschemas: schemas from the remotes directory that have
 	// $vocabulary set and should be registered as metaschemas.
 	remoteMetaSchemas []*jsonschema.Schema
+
+	// The two drafts the vendored suite covers, each with the $schema URI
+	// injected into a group schema that declares none.
+	suiteDrafts = []struct {
+		name      string
+		schemaURI string
+	}{
+		{"draft7", "http://json-schema.org/draft-07/schema#"},
+		{"draft2020-12", "https://json-schema.org/draft/2020-12/schema"},
+	}
+
+	// The three non-recursive directory levels the suite is split across. The
+	// tier partitions the file set: TestSuite runs the required files,
+	// TestSuiteOptional the implementation-defined ones, and TestSuiteFormat
+	// the format assertions, so a file belongs to exactly one of them. The
+	// empty tier names the draft directory itself.
+	suiteTiers = []string{"", "optional", "optional/format"}
 )
 
 func init() {
@@ -239,83 +256,152 @@ func suiteBaseOpts() []jsonschema.ValidateOption {
 	}
 }
 
-// TestSuite runs the JSON Schema Test Suite for draft7 and draft2020-12.
-//
-// Test suite commit: 60755c1097769e313fae3ec4d63bcc9d49b5d2d5.
-func TestSuite(t *testing.T) {
-	t.Parallel()
+// suiteFile is one vendored suite file with everything needed to run it. It is
+// the single enumeration of the suite: the three conformance tests and the
+// inline differential all draw their files from it, so the differential cannot
+// drift from what the conformance tests actually run.
+type suiteFile struct {
+	// The draft directory name, "draft7" or "draft2020-12".
+	draft string
 
-	drafts := []struct {
-		name      string
-		dir       string
-		schemaURI string
-	}{
-		{"draft7", "testdata/suite/draft7", "http://json-schema.org/draft-07/schema#"},
-		{"draft2020-12", "testdata/suite/draft2020-12", "https://json-schema.org/draft/2020-12/schema"},
+	// The sub-directory below the draft, one of suiteTiers.
+	tier string
+
+	// The base name, which is also the subtest name.
+	fileName string
+
+	// The file's path on disk.
+	path string
+
+	// The suiteSkips key for the file, the path relative to
+	// testdata/suite with forward slashes. The shouldSkip helper appends the
+	// group and test descriptions to it, and TestSuiteSkipsAreLive turns it
+	// back into a path, so its spelling is load-bearing.
+	pathKey string
+
+	// The $schema injected into a group schema that declares none.
+	schemaURI string
+
+	// The validate options the file runs under, the base set plus the
+	// per-file format and content gates.
+	opts []jsonschema.ValidateOption
+}
+
+// suiteFiles enumerates every vendored suite file across both drafts and all
+// three tiers. Each row carries its own options slice, since suiteBaseOpts
+// builds a fresh metaschema map per call.
+func suiteFiles(t *testing.T) []suiteFile {
+	t.Helper()
+
+	var files []suiteFile
+
+	for _, draft := range suiteDrafts {
+		for _, tier := range suiteTiers {
+			dir := filepath.Join("testdata", "suite", draft.name)
+			if tier != "" {
+				dir = filepath.Join(dir, filepath.FromSlash(tier))
+			}
+
+			matches, err := filepath.Glob(filepath.Join(dir, "*.json"))
+			require.NoError(t, err)
+			require.NotEmpty(t, matches, "no suite files in %s", dir)
+
+			for _, path := range matches {
+				fileName := filepath.Base(path)
+
+				// The key is assembled from slash-joined parts rather than
+				// filepath.Rel, which would yield host separators.
+				pathKey := draft.name + "/" + fileName
+				if tier != "" {
+					pathKey = draft.name + "/" + tier + "/" + fileName
+				}
+
+				files = append(files, suiteFile{
+					draft:     draft.name,
+					tier:      tier,
+					fileName:  fileName,
+					path:      path,
+					pathKey:   pathKey,
+					schemaURI: draft.schemaURI,
+					opts:      suiteFileOpts(tier, fileName),
+				})
+			}
+		}
 	}
 
-	for _, draft := range drafts {
+	return files
+}
+
+// suiteFileOpts returns the validate options one suite file runs under.
+func suiteFileOpts(tier, fileName string) []jsonschema.ValidateOption {
+	opts := suiteBaseOpts()
+
+	switch {
+	case tier == "optional/format":
+		// The optional format suite tests format as an assertion. Under Draft
+		// 2020-12 format is annotation-only by default, so opt in explicitly;
+		// Draft-07 asserts regardless.
+		opts = append(opts, jsonschema.WithFormats(true))
+	case tier == "" && fileName == "format.json":
+		// Format.json tests annotation-only behavior: format must NOT cause
+		// validation failures.
+		opts = append(opts, jsonschema.WithFormats(false))
+	case tier == "optional" && fileName == "content.json":
+		// The optional content suite asserts contentEncoding and
+		// contentMediaType, which are annotation-only by default.
+		opts = append(opts, jsonschema.WithContent(true))
+	}
+
+	return opts
+}
+
+// runSuiteTier runs every suite file in one tier, grouped by draft. The two
+// levels of subtest, the draft then the file, give each case the name
+// TestX/draft/file.json/group/case that suiteSkips keys mirror.
+func runSuiteTier(t *testing.T, tier string) {
+	t.Helper()
+
+	files := suiteFiles(t)
+
+	for _, draft := range suiteDrafts {
 		t.Run(draft.name, func(t *testing.T) {
 			t.Parallel()
 
-			files, err := filepath.Glob(filepath.Join(draft.dir, "*.json"))
-			require.NoError(t, err)
-			require.NotEmpty(t, files)
+			var selected []suiteFile
 
 			for _, file := range files {
-				fileName := filepath.Base(file)
-				t.Run(fileName, func(t *testing.T) {
+				if file.draft == draft.name && file.tier == tier {
+					selected = append(selected, file)
+				}
+			}
+
+			require.NotEmpty(t, selected)
+
+			for _, file := range selected {
+				t.Run(file.fileName, func(t *testing.T) {
 					t.Parallel()
 
-					opts := suiteBaseOpts()
-					if fileName == "format.json" {
-						// Format.json tests annotation-only behavior: format
-						// must NOT cause validation failures.
-						opts = append(opts, jsonschema.WithFormats(false))
-					}
-
-					runSuiteFile(t, file, draft.name+"/"+fileName, draft.schemaURI, opts...)
+					runSuiteFile(t, file.path, file.pathKey, file.schemaURI, file.opts...)
 				})
 			}
 		})
 	}
 }
 
+// TestSuite runs the JSON Schema Test Suite for draft7 and draft2020-12.
+//
+// Test suite commit: 60755c1097769e313fae3ec4d63bcc9d49b5d2d5.
+func TestSuite(t *testing.T) {
+	t.Parallel()
+
+	runSuiteTier(t, "")
+}
+
 // TestSuiteFormat runs optional format tests from the JSON Schema Test Suite.
 func TestSuiteFormat(t *testing.T) {
 	t.Parallel()
 
-	drafts := []struct {
-		name      string
-		dir       string
-		schemaURI string
-	}{
-		{"draft7", "testdata/suite/draft7/optional/format", "http://json-schema.org/draft-07/schema#"},
-		{"draft2020-12", "testdata/suite/draft2020-12/optional/format", "https://json-schema.org/draft/2020-12/schema"},
-	}
-
-	for _, draft := range drafts {
-		t.Run(draft.name, func(t *testing.T) {
-			t.Parallel()
-
-			files, err := filepath.Glob(filepath.Join(draft.dir, "*.json"))
-			require.NoError(t, err)
-			require.NotEmpty(t, files)
-
-			for _, file := range files {
-				fileName := filepath.Base(file)
-				t.Run(fileName, func(t *testing.T) {
-					t.Parallel()
-
-					// The optional format suite tests format as an assertion.
-					// Under Draft 2020-12 format is annotation-only by default,
-					// so opt in explicitly; Draft-07 asserts regardless.
-					opts := append(suiteBaseOpts(), jsonschema.WithFormats(true))
-					runSuiteFile(t, file, draft.name+"/optional/format/"+fileName, draft.schemaURI, opts...)
-				})
-			}
-		})
-	}
+	runSuiteTier(t, "optional/format")
 }
 
 // TestSuiteOptional runs the optional (non-format) files from the JSON Schema
@@ -328,40 +414,21 @@ func TestSuiteFormat(t *testing.T) {
 func TestSuiteOptional(t *testing.T) {
 	t.Parallel()
 
-	drafts := []struct {
-		name      string
-		dir       string
-		schemaURI string
-	}{
-		{"draft7", "testdata/suite/draft7/optional", "http://json-schema.org/draft-07/schema#"},
-		{"draft2020-12", "testdata/suite/draft2020-12/optional", "https://json-schema.org/draft/2020-12/schema"},
-	}
+	runSuiteTier(t, "optional")
+}
 
-	for _, draft := range drafts {
-		t.Run(draft.name, func(t *testing.T) {
-			t.Parallel()
+// loadSuiteGroups reads one suite file and decodes its test groups.
+func loadSuiteGroups(t *testing.T, path string) []suiteGroup {
+	t.Helper()
 
-			files, err := filepath.Glob(filepath.Join(draft.dir, "*.json"))
-			require.NoError(t, err)
-			require.NotEmpty(t, files)
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
 
-			for _, file := range files {
-				fileName := filepath.Base(file)
-				t.Run(fileName, func(t *testing.T) {
-					t.Parallel()
+	var groups []suiteGroup
 
-					opts := suiteBaseOpts()
-					if fileName == "content.json" {
-						// The optional content suite asserts contentEncoding and
-						// contentMediaType, which are annotation-only by default.
-						opts = append(opts, jsonschema.WithContent(true))
-					}
+	require.NoError(t, json.Unmarshal(data, &groups))
 
-					runSuiteFile(t, file, draft.name+"/optional/"+fileName, draft.schemaURI, opts...)
-				})
-			}
-		})
-	}
+	return groups
 }
 
 // runSuiteFile loads and runs all test groups from a single suite file.
@@ -372,14 +439,7 @@ func runSuiteFile(t *testing.T, path, pathKey, schemaURI string, opts ...jsonsch
 		t.Skip(reason)
 	}
 
-	data, err := os.ReadFile(path)
-	require.NoError(t, err)
-
-	var groups []suiteGroup
-
-	require.NoError(t, json.Unmarshal(data, &groups))
-
-	for _, group := range groups {
+	for _, group := range loadSuiteGroups(t, path) {
 		t.Run(group.Description, func(t *testing.T) {
 			t.Parallel()
 
