@@ -43,6 +43,11 @@ func TestSuiteInlineAgrees(t *testing.T) {
 					pipelines, reason := refEngines(
 						t.Context(), t, schema, file.opts, suiteInlineOpts(),
 					)
+					// The suite serves every remote it references, so a miss
+					// here is an Inline resolution bug, never a deferred fetch.
+					require.NotEqual(t, reasonDeferredRefMiss, reason,
+						"Inline failed to resolve a reference the suite serves")
+
 					if reason != "" {
 						t.Skip(string(reason))
 					}

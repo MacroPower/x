@@ -492,6 +492,11 @@ func TestRefEnginesAgreeOnPastFixes(t *testing.T) {
 				[]jsonschema.ValidateOption{jsonschema.WithRefResolver(resolver)},
 				[]jsonschema.InlineOption{jsonschema.WithRefResolver(resolver)},
 			)
+			// Every row names each document its references reach, so a miss
+			// is a resolution bug in one engine, not a deferred fetch.
+			require.NotEqual(t, reasonDeferredRefMiss, reason,
+				"Inline failed to resolve a reference the row serves")
+
 			if reason != "" {
 				t.Skip(string(reason))
 			}

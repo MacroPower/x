@@ -1001,8 +1001,15 @@ func FuzzRefEnginesAgree(f *testing.F) {
 
 		pipelines, reason := refEngines(t.Context(), t, schema, compileOpts, inlineOpts)
 		if reason != "" {
-			// A documented Inline limitation or an unresolvable reference; the
-			// pipelines are not comparable for this graph.
+			// A documented Inline limitation, or an unresolvable reference the
+			// generator drew on purpose; the pipelines are not comparable for
+			// this graph. A miss on a graph whose every reference resolves is
+			// an Inline registry bug, the class the rig exists to catch.
+			if reason == reasonDeferredRefMiss {
+				require.Truef(t, spec.unresolvable,
+					"Inline reported a reference miss on a graph the generator built fully resolvable:\n%s", spec.root)
+			}
+
 			return
 		}
 
