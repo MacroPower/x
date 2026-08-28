@@ -385,8 +385,8 @@ func refBaseOf(t Target) *jsonschema.Schema {
 	return &jsonschema.Schema{}
 }
 
-// nonZeroNullable is the non-zero assertion on a nullable occurrence: forbid
-// null and assert nothing else.
+// nonZeroNullable is the non-zero assertion on a nullable occurrence, a
+// forbidden null and nothing else.
 //
 // A pointer field's emptiness is its nil, which go-playground's required reads
 // as "must be non-nil" and says nothing about the pointed-to value, so the
@@ -394,12 +394,12 @@ func refBaseOf(t Target) *jsonschema.Schema {
 // on its own, since a property whose value is null is still present, so the
 // assertion needs the null forbidden outright.
 //
-// Null is forbidden as a value rather than as a subschema, which is what keeps
+// The applier forbids null as a value rather than as a subschema, which keeps
 // it on the null wrapper. A forbidden value rides the not.const to not.enum
-// accumulation and stays in the single not slot, which the keyword table scopes
-// to the wrapper; a forbidden subschema cannot join an enum, so a second
-// forbidding rule escalates the pair into allOf, and allOf is scoped to the
-// value branch of the null encoding, where a null instance never reaches it.
+// accumulation and holds the single not slot, which the keyword table scopes to
+// the wrapper. A forbidden subschema cannot join that accumulation, so it gives
+// way to allOf, and allOf is scoped to the value branch of the null encoding,
+// where a null instance never reaches it.
 func nonZeroNullable(t Target) error {
 	Forbid(t.Canvas, nil)
 

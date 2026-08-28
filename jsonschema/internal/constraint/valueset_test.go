@@ -74,7 +74,7 @@ func TestValueSetForbidTakesTheNotSlotFromASiblingCarryingNot(t *testing.T) {
 
 	// A range not (from a collection ne) carries sibling keywords, so a further
 	// forbidden value cannot merge into it. The value takes the not slot and the
-	// range moves under allOf, whichever order the two arrive in: the keyword
+	// range moves under allOf, whichever order the two arrive in. The keyword
 	// table scopes not to the null wrapper and allOf to the value branch, so a
 	// forbidden value that lost the slot would stop applying to a null instance.
 	vs.ForbidSchema(&jsonschema.Schema{MinItems: new(2), MaxItems: new(2)})

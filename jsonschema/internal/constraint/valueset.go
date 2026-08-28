@@ -17,11 +17,17 @@ import (
 // and the interpreters run their conflict checks against the canvas and the
 // type-derived base.
 //
-// Forbidden values hold the single not slot and forbidden subschemas give way to
-// allOf, whichever order they arrive in. The two slots are not interchangeable:
-// the keyword table scopes not to the null wrapper and allOf to the value
-// branch, so a value forbid that lost the not slot would stop applying to a null
-// instance, which is how required on a nullable field asserts anything at all.
+// A forbidden value never loses the single not slot, whatever else arrives and
+// in whatever order. The two slots are not interchangeable. The keyword table
+// scopes not to the null wrapper and allOf to the value branch, so a value
+// forbid that lost the slot would stop applying to a null instance, which is how
+// required on a nullable field asserts anything at all.
+//
+// A forbidden subschema takes the slot only when it arrives first and alone.
+// That case is the one asymmetry left: a subschema naming no type validates null
+// vacuously, so from the wrapper it rejects null, where the same subschema beside
+// any other forbid moves to allOf and does not. Every caller in this module
+// names a type on the schema it forbids, which makes the two placements agree.
 type ValueSet struct {
 	not       *jsonschema.Schema
 	allOfNots []*jsonschema.Schema
@@ -80,8 +86,8 @@ func (vs *ValueSet) ForbidSchema(forbidden *jsonschema.Schema) {
 	}
 }
 
-// forbidsValuesOnly reports whether s forbids values and nothing else, which is
-// what makes it the not the null split needs to keep.
+// forbidsValuesOnly reports whether s forbids values and nothing else. Only
+// such a not keeps the slot, since the null split reads the not slot alone.
 func forbidsValuesOnly(s *jsonschema.Schema) bool {
 	return (s.Const != nil && constrainsConstOnly(s)) || (s.Enum != nil && constrainsEnumOnly(s))
 }

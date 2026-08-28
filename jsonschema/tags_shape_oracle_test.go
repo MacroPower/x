@@ -42,8 +42,8 @@ const (
 // The raw byte and opaque columns admit any JSON value, so no token follows
 // from either, and the form does not influence what encoding/json writes. No
 // assertion over the marshaled member could distinguish a right classification
-// from a wrong one there. Their totality is pinned in internal/tagmodel
-// instead, by the matrix golden and TestFormClassificationTotal.
+// from a wrong one there. The internal/tagmodel package pins their totality
+// instead, through the matrix golden and TestFormClassificationTotal.
 const reasonFormPredictsNoToken = "the raw byte and opaque columns admit any JSON value, so no token follows from them"
 
 // unprobedReasons lists every reason the probe could legitimately not observe
@@ -88,7 +88,7 @@ func jsonName(f reflect.StructField) string {
 }
 
 // jsonToken is the kind of JSON value a marshaled field turned out to be. It is
-// the oracle's observation: encoding/json wrote one of these six, and the form
+// the oracle's observation. Encoding/json wrote one of these six, and the form
 // tagmodel assigned the field has to agree.
 type jsonToken uint8
 
@@ -146,7 +146,7 @@ type shapeObservation struct {
 
 // shapeProbe returns a generate option that records the classification of every
 // field carrying a json tag. It registers under the json key rather than a key
-// of its own so no roster type and no synthesized shape needs retagging: the
+// of its own so no roster type and no synthesized shape needs retagging. The
 // generator looks an interpreter's key up with StructField.Tag.Lookup and
 // special-cases nothing. The probe writes nothing to the canvas, so the schema
 // it observes is the schema generation would have produced without it.
@@ -456,15 +456,16 @@ func assertElementTokens(t *testing.T, obs *shapeObservation, raw json.RawMessag
 		return
 	}
 
+	// A tuple carries one context per position, so its members and its contexts
+	// are the same length; a list carries one context for every member.
+	if len(obs.elems) > 1 {
+		require.Len(t, members, len(obs.elems),
+			"%s: a tuple's members and element contexts must pair up", where)
+	}
+
 	for i, member := range members {
-		// A tuple carries one context per position; a list and a map carry one
-		// context for every member.
 		elem := obs.elems[0]
 		if len(obs.elems) > 1 {
-			if i >= len(obs.elems) {
-				continue
-			}
-
 			elem = obs.elems[i]
 		}
 
@@ -675,7 +676,7 @@ func oracleRoster() map[string]oracleRow {
 			typ: reflect.TypeFor[*oracleText](), wantDefs: jsonschema.FormCoercedNumber,
 		},
 
-		// A json.Number is the one string kind encoding/json writes as a
+		// A json.Number is the one Go string kind encoding/json writes as a
 		// number, so a quoted one emits its literal once-quoted rather than
 		// double-encoded and classifies in the numeric coercion column.
 		"quoted json number": {

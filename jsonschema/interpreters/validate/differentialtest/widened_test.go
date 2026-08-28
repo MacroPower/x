@@ -28,7 +28,7 @@ import (
 // encoding so a permitted null stays valid. The bool fields carry only eq and
 // ne; see reasonOneOfKindPanic. A nil value rule field puts the pair in the
 // weaker half of the agreement property; see reasonNullableValueRule. The
-// required fields are the exception, and the reason they are here: required is
+// required fields are the exception, and the reason they are here. Required is
 // the one rule that does assert something about null, so its nil stays under
 // the biconditional and a schema that let null through would fail.
 type pointerConstraints struct {
@@ -48,7 +48,8 @@ type pointerConstraints struct {
 
 // requiredPointerConstraints is the nullable roster required gets to itself.
 // Every field carries it, so no sibling can drop the object into the weaker
-// half of the agreement property and hide a null the schema should reject. The pairings are the load-bearing rows: required composes its
+// half of the agreement property and hide a null the schema should reject. The
+// pairings are the load-bearing rows. Required composes its
 // forbidden null with another rule's forbidden value, and a composition that
 // escalated the pair off the null wrapper would let null through here.
 type requiredPointerConstraints struct {
@@ -359,9 +360,9 @@ func requiredNullableShapes() map[string]reflect.Type {
 
 	return map[string]reflect.Type{
 		// A type whose own schema forbids a subschema is the shape that broke
-		// the composition once: a forbidden subschema cannot join the forbidden
-		// values, so whichever of the two gives way to allOf stops applying to
-		// null. It is drawn through WithTypeSchema in the caller.
+		// the composition thinnest on. A forbidden subschema cannot join the
+		// forbidden values, so whichever of the two gives way to allOf stops
+		// applying to null. The caller draws it through WithTypeSchema.
 		"type-derived subschema forbid": field(reflect.TypeFor[*forbiddingWord](), "v", "required"),
 		"string":                        field(reflect.TypeFor[*string](), "v", "required"),
 		"number":                        field(reflect.TypeFor[*int](), "v", "required"),
@@ -386,7 +387,8 @@ func requiredNullableShapes() map[string]reflect.Type {
 // into.
 type forbiddingWord string
 
-// forbiddingWordSchema declares that type's schema.
+// forbiddingWordSchema returns the generate option declaring forbiddingWord's
+// schema, a string whose own not forbids a minLength subschema.
 func forbiddingWordSchema() jsonschema.GenerateOption {
 	three := 3
 

@@ -97,12 +97,14 @@ The package has two independent halves sharing the `Schema` type:
   policy (`ParseNumericBound`, `ErrNotRepresentable`), the size-bound fold
   (`ParseSizeBound`), the const/enum subsumption (`ResolveBounds` under a
   caller-chosen `ResolveMode`), and the redundant-sibling collapse
-  (`CanonicalizeNumeric`) all live here. In `ValueSet` a forbidden value always
-  holds the single `not` slot and a forbidden subschema gives way to `allOf`,
-  whichever order they arrive in: the keyword table scopes `not` to the null
-  wrapper and `allOf` to the value branch, so a value forbid that lost the slot
-  would stop applying to a null instance, which is the whole of what `required`
-  asserts on a nullable field. Its scope stops at the bound algebra
+  (`CanonicalizeNumeric`) all live here. In `ValueSet` a forbidden value never
+  loses the single `not` slot, whatever else arrives and in whatever order. The
+  keyword table scopes `not` to the null wrapper and `allOf` to the value branch,
+  so a value forbid that lost the slot would stop applying to a null instance,
+  which is the whole of what `required` asserts on a nullable field. A forbidden
+  subschema takes the slot only when it arrives first and alone; every caller
+  here names a type on the schema it forbids, which is what makes that placement
+  agree with the `allOf` one. Its scope stops at the bound algebra
   and the forbidden-value escalation: `internal/tagmodel` and `reconcile.go`
   are its two callers, and the allowed set (const/enum) is composed on each
   writer's canvas, not modeled in the package),
@@ -377,10 +379,9 @@ contract the tests enforce.
   deterministic, zero-extending `Cursor`. The phase-level rig in
   `internal/fieldset` checks the same drift one layer down, against
   `encoding/json` itself rather than through the validator.
-- Three differential rigs close the loop on one property each. The first two
-  close the loop between the package's halves. **The schema generated for a Go
-  type must accept whatever `encoding/json` marshals from a value of that
-  type.** A rejection means
+- Four differential rigs close the loop on three properties. The two in this
+  bullet share the first. **The schema generated for a Go type must accept
+  whatever `encoding/json` marshals from a value of that type.** A rejection means
   `reflect.go`'s hand-reimplementation of `encoding/json`'s field resolution has
   drifted, which is where past fixes cluster. Both draw their values from
   `internal/fuzzfill`, which turns a fuzzing entropy blob into a populated value

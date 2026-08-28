@@ -28,7 +28,7 @@ import (
 // The draw deliberately does not come from internal/fuzzshape. That package
 // synthesizes embeds, unexported fields, and colliding JSON names to probe
 // encoding/json field collection, which is a different property and an active
-// hazard here: go-playground recurses into an embedded struct as a nested
+// hazard here. Go-playground recurses into an embedded struct as a nested
 // struct, and reflect.StructOf synthesizes a promoted interface method as a
 // stub that panics when called. Every field this draw produces is exported,
 // flat, and uniquely named.
@@ -74,7 +74,7 @@ func tagKinds() []tagKind {
 	mapping := []string{"min=1", "max=3", "len=2", "eq=2", "ne=2"}
 	// A byte slice encodes as one base64 string, so it takes the string size
 	// rules but has no element schema for oneof to reach. It draws no required
-	// either: go-playground reads it as the slice it is and checks non-nil,
+	// either, since go-playground reads it as the slice it is and checks non-nil,
 	// while the schema measures the string it becomes; see
 	// reasonRequiredCollectionNilCheck.
 	byteSlice := []string{"min=1", "max=5", "len=3"}
@@ -95,9 +95,9 @@ func tagKinds() []tagKind {
 // drawTaggedStruct synthesizes a struct type from an entropy blob, one field at
 // a time. It draws the kind, the pointer wrapper, the json option, and the
 // validate rule from independent cursor reads, so the cross product is explored
-// rather than a hand-picked corner of it. It is total: every blob yields a type
-// reflect.StructOf accepts, encoding/json can marshal, and go-playground can
-// walk.
+// rather than a hand-picked corner of it. The draw is total, so every blob
+// yields a type reflect.StructOf accepts, encoding/json can marshal, and
+// go-playground can walk.
 func drawTaggedStruct(c *fuzzfill.Cursor) reflect.Type {
 	kinds := tagKinds()
 	n := 1 + c.Intn(maxTagFields)
@@ -229,8 +229,8 @@ func FuzzValidatorTaggedShapes(f *testing.F) {
 
 // TestTaggedShapeDrawIsTotal pins the draw's totality claim over the shared
 // seed population: every blob must yield a type the generator either accepts or
-// declines with a known sentinel, and enough must be accepted for the target to
-// be doing work.
+// declines with a known sentinel, and at least one must be accepted, or the
+// target exercises nothing.
 func TestTaggedShapeDrawIsTotal(t *testing.T) {
 	t.Parallel()
 

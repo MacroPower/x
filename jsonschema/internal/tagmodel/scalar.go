@@ -153,7 +153,7 @@ func (sh Shape) coercedText(lit string) (any, error) {
 		// A json.Number holds its literal as text and has no width to parse at,
 		// so the literal converts straight through and the marshal below is
 		// what validates it. Parsing a number first would be both pointless and
-		// unconvertible: reflect refuses a float64 to a string-kinded type.
+		// unconvertible, since reflect refuses a float64 to a string-kinded type.
 		parsed = lit
 
 	default:

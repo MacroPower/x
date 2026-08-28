@@ -42,7 +42,9 @@
 //     non-zero check. In go-playground/validator, required on a pointer means
 //     "must be non-nil" and says nothing about the pointed-to value, which may
 //     be zero; the required entry alone cannot express that, since a property
-//     whose value is null is still present. The required tag adds the
+//     whose value is null is still present. The forbidden null is inert where
+//     the occurrence admits no null anyway, as under WithNullable(false) or a
+//     type schema declaring NullForbidden. The required tag adds the
 //     field to the parent's required array even when json:",omitempty" or
 //     json:",omitzero" would normally exclude it.
 //
@@ -107,7 +109,7 @@
 // keywords -- are rejected with an error for the same reason numeric bounds
 // are above.
 //
-// An [encoding/json.Number] is the one string kind exempt from that rule.
+// An [encoding/json.Number] is the one Go string kind exempt from that rule.
 // [encoding/json] writes it as the number it holds, so a quoted one emits its
 // literal once-quoted and follows the coerced-numeric rules above instead.
 //

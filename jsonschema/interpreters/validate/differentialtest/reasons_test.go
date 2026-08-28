@@ -64,8 +64,8 @@ const (
 	// object, where the schema imposes nothing unless the field is required,
 	// while go-playground still validates the Go zero value.
 	reasonOmitemptyDropsField = "an absent field leaves the schema nothing to assert, so it can only be more permissive"
-	// A JSON Schema keyword is type-conditional. MinLength says nothing about a
-	// null instance, so every value rule passes on one. Go-playground has no
+	// A JSON Schema keyword is type-conditional. The minLength keyword says
+	// nothing about a null instance, so every value rule passes on one. Go-playground has no
 	// such rule and rejects a nil pointer under any constraint. The interpreter
 	// takes the schema side deliberately, landing a value constraint on the
 	// value branch of the null encoding so a permitted null stays valid.
@@ -126,7 +126,7 @@ func rigExclusions() []rigExclusion {
 }
 
 // rigCoverage is the positive half of the record: a rule the rig claims to
-// compare, and the kinds whose pool must spell it. Without it the exclusion
+// compare, and the kinds whose pool must spell it. Without it
 // TestRigExclusionsMatchTheDraw is one-directional, and a pool that quietly
 // lost a rule would read as covered.
 func rigCoverage() map[string][]reflect.Type {

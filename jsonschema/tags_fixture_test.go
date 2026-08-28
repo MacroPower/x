@@ -279,9 +279,9 @@ func TestTagFixturesCrossDialectVerdictsAgree(t *testing.T) {
 	assert.Positive(t, paired, "no row pairs the two dialects, so the guard asserts nothing")
 }
 
-// TestTagFixturesCoverage keeps the table honest: a row name is unique, every
-// row states a note naming the fix it pins, and every shape the type registry
-// offers is exercised by at least one row.
+// TestTagFixturesCoverage keeps the table honest. A row name is unique, every
+// row states a note naming the fix it pins, and at least one row exercises
+// every shape the type registry offers.
 func TestTagFixturesCoverage(t *testing.T) {
 	t.Parallel()
 
@@ -308,9 +308,15 @@ func TestTagFixturesCoverage(t *testing.T) {
 			assert.NotEmpty(t, tc.Validate, "row %q names a validate error but no spelling", tc.Name)
 		}
 
-		if tc.JSONSchemaError == "" && tc.ValidateError == "" {
+		// The check is per dialect: a row naming an error for one dialect still
+		// runs the other, and that leg needs something to assert.
+		for key := range tc.dialects() {
+			if tc.wantError(key) != "" {
+				continue
+			}
+
 			assert.True(t, len(tc.Schema) > 0 || len(tc.Instances) > 0,
-				"row %q asserts only that generation succeeded", tc.Name)
+				"row %q asserts only that %s generation succeeded", tc.Name, key)
 		}
 	}
 
