@@ -1126,6 +1126,18 @@
 // the document silently mis-validate. [Inline] shares this same vetting
 // policy for the documents it fetches (see Reference Inlining below).
 //
+// A fetched document, and a [SubstituteRef] schema, must also hold no pointer
+// cycle, meaning no path that crosses a schema and returns to a schema or to a
+// container it is already inside. A container that loops without crossing a
+// schema is left to [encoding/json], which reports it as an ordinary error. A
+// cyclic fetched document fails the referencing ref with an error wrapping
+// [ErrRefResolve] and [ErrSchemaNotTree]; a cyclic substitute fails with
+// [ErrSchemaNotTree] at the substitution site. Both sources accept aliasing,
+// unlike a root document, because every walk that reaches a registered
+// document dedupes pointers. The boundary refuses a cycle because the
+// JSON-pointer fallback marshals the document it searches and a cyclic schema
+// graph has no JSON form.
+//
 // Non-local refs absolutize against the enclosing resource's base URI: its
 // $id, or the root base set with [WithBaseURI], which also registers the
 // root document under that URI so a ref absolutizing back to it resolves
@@ -1209,12 +1221,17 @@
 // covers); a $ref carried as raw JSON inside an unknown keyword is left
 // as-is, although a ref pointing into such a position still resolves.
 //
-// The root document's sub-schema pointers must form a tree, the same demand
-// [Compile] makes of the document it compiles: a root reaching one *Schema
-// through two paths, or through a pointer cycle, returns an error wrapping
-// [ErrSchemaNotTree]. Inlining expands each reference in place, so a node
-// reached from two positions would take one position's expansion at both, and
-// a pointer cycle has no finite expansion.
+// The root document's sub-schema pointers must form a tree, holding the input
+// to the same contract [Compile] holds it to, one location per node. A root
+// reaching one *Schema through two paths, or through a pointer cycle, returns
+// an error wrapping [ErrSchemaNotTree]. A loop closing through a value field
+// (Const, Enum, Examples, or Extra) returns the same error, a shape Compile's
+// own check does not read. A document reached through a resolver or a fallback
+// is held to the weaker no-cycle rule instead, and a node it shares between two
+// positions is expanded once, at the first location the walk reaches. That
+// sharing survives into the result, so an output built from an aliased resolver
+// document or substitute is not a tree and [Compile] rejects it. Only a
+// hand-built graph can carry such sharing; a parsed document never does.
 //
 // A ref whose expansion reaches its own target, a recursive schema,
 // returns an error wrapping [ErrRefCycle]: a cyclic reference graph has no
@@ -1233,12 +1250,14 @@
 // [ErrItemsArrayUnderDraft2020], [ErrConflictingSchemaFields],
 // [ErrNilSubschema], [ErrDuplicatePropertyOrder], [ErrInvalidID], or
 // [ErrMisplacedVocabulary]), rather than inlining the document into a
-// malformed output schema. The fetched document follows the root document's
-// draft, so a Draft-7 array-form items remote inlined under a Draft-7 run is
-// left intact. A JSON-pointer fallback target (a schema carried inside an
-// unknown keyword, in the root document or a fetched one) is vetted the same
-// way at materialization, minus the identifier checks, so an ill-formed
-// target cannot be spliced into the output either.
+// malformed output schema. A fetched document holding a pointer cycle fails
+// the same way, wrapping [ErrSchemaNotTree]; a cyclic [SubstituteRef] schema
+// returns that sentinel from the substitution site. The fetched document
+// follows the root document's draft, so a Draft-7 array-form items remote
+// inlined under a Draft-7 run is left intact. A JSON-pointer fallback target (a
+// schema carried inside an unknown keyword, in the root document or a fetched
+// one) is vetted the same way at materialization, minus the identifier checks,
+// so an ill-formed target cannot be spliced into the output either.
 //
 // [WithRefFallback] sets a per-reference failure policy (a
 // [RefFallback]) consulted when expanding a reference fails for any of those

@@ -86,11 +86,11 @@ func TestClone(t *testing.T) {
 	})
 }
 
-// TestClonePreservesNumberValues covers the any-typed value fields. A plain JSON
-// round-trip decoded their numbers as float64, silently rounding a json.Number
-// beyond float64 precision and changing what a cloned const or enum accepts. A
-// structural copy carries the literal across untouched, since json.Number is a
-// string type.
+// TestClonePreservesNumberValues covers the any-typed value fields. A copy
+// routed through JSON decodes their numbers as float64, silently rounding a
+// json.Number beyond float64 precision and changing what a cloned const or enum
+// accepts. A structural copy carries the literal across untouched, since
+// json.Number is a string type.
 func TestClonePreservesNumberValues(t *testing.T) {
 	t.Parallel()
 
@@ -112,8 +112,7 @@ func TestClonePreservesNumberValues(t *testing.T) {
 	assert.Equal(t, json.Number(big), cp.Extra["x-custom"])
 	assert.Equal(t, json.Number(big), *cp.Items.Const, "nested nodes carry their literals too")
 
-	// The copied values are copies, not aliases.
-	assert.NotSame(t, src.Const, cp.Const)
+	assert.NotSame(t, src.Const, cp.Const, "the const box is reallocated")
 
 	*src.Const = any(json.Number("1"))
 	src.Enum[1] = "mutated"
@@ -122,11 +121,11 @@ func TestClonePreservesNumberValues(t *testing.T) {
 	assert.Equal(t, "x", cp.Enum[1])
 }
 
-// TestCloneFidelity pins the copy's faithfulness on the shapes a JSON round-trip
-// normalized away. Each case is a value the round-trip rewrote: it re-encoded
-// hand-built Go values, hoisted an unknown keyword whose name collides with a
-// real one, turned a nil sub-schema into the reject-everything schema, and
-// refused outright to marshal a schema upstream's own checks reject.
+// TestCloneFidelity pins the copy's faithfulness on the shapes a JSON-mediated
+// copy normalizes away. Such a copy re-encodes hand-built Go values, hoists an
+// unknown keyword whose name collides with a real one, and refuses outright to
+// marshal a schema upstream's own checks reject. The remaining cases pin the
+// contract those shapes share: what the source holds is what the copy holds.
 func TestCloneFidelity(t *testing.T) {
 	t.Parallel()
 
@@ -142,7 +141,7 @@ func TestCloneFidelity(t *testing.T) {
 			src: &jsonschema.Schema{Extra: map[string]any{"type": "string"}},
 			check: func(t *testing.T, cp *jsonschema.Schema) {
 				t.Helper()
-				assert.Empty(t, cp.Type, "the round-trip hoisted this into Type")
+				assert.Empty(t, cp.Type, "an Extra key colliding with a keyword must stay in Extra")
 				assert.Equal(t, "string", cp.Extra["type"])
 			},
 		},
@@ -151,7 +150,7 @@ func TestCloneFidelity(t *testing.T) {
 			check: func(t *testing.T, cp *jsonschema.Schema) {
 				t.Helper()
 				require.Len(t, cp.AllOf, 1)
-				assert.Nil(t, cp.AllOf[0], "the round-trip made this the false schema")
+				assert.Nil(t, cp.AllOf[0], "a nil sub-schema element must stay nil")
 			},
 		},
 		"a schema upstream refuses to marshal still copies": {

@@ -12,8 +12,8 @@ import (
 )
 
 // wrapper is a typed container with an exported schema field, the shape the
-// reflection walk must reach: encoding/json serializes the field, so the copy
-// owes it the same treatment a sub-schema gets.
+// reflection walk must reach. Encoding a wrapper serializes that field, so the
+// copy owes it the same treatment a sub-schema gets.
 type wrapper struct {
 	S *jsonschema.Schema `json:"s"`
 }

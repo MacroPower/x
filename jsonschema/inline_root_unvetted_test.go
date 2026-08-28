@@ -11,8 +11,10 @@ import (
 
 // TestInlineRootUnvetted pins the inliner's documented vetting exception: its
 // own root schema is not vetted (only the remotes it fetches are), so Inline
-// accepts a root that Compile rejects. The root here carries a negative
-// minLength, a structural violation Compile reports as ErrNegativeBound.
+// accepts a root whose structure Compile's vetter rejects. The root here
+// carries a negative minLength, a violation Compile reports as
+// ErrNegativeBound. The tree check is not part of that exception; both engines
+// run it.
 func TestInlineRootUnvetted(t *testing.T) {
 	t.Parallel()
 

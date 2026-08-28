@@ -62,16 +62,18 @@ type inliner struct {
 
 	// The memo[id] entry is a pristine schema's finished self-contained copy, so
 	// a target referenced from several places is expanded once. Every additional
-	// use clones the memoized copy, so no two splice positions share nodes. A
-	// document that was itself aliased keeps its own sharing, since the copy
-	// reproduces the graph it was taken from.
+	// use clones the memoized copy, so no two splice positions share nodes.
+	// Sharing within one copied document survives, since the copy reproduces
+	// the graph it was taken from. A resolver-returned document or a
+	// WithRefFallback substitute can carry such sharing, since neither is
+	// tree-checked.
 	memo []*Schema
 
 	// The working nodes walkPair has already expanded. A working copy mirrors
 	// the aliasing of the document it was cloned from, and expansion writes the
-	// node in place, so a node reached from two positions must be expanded once
-	// and observed at both. Working nodes are not interned (only pristine ones
-	// are), so the set is keyed by pointer rather than by node id.
+	// node in place, so the walk expands such a node once and both positions
+	// read that one expansion. Working nodes are not interned (only pristine
+	// ones are), so the set keys on the pointer rather than on a node id.
 	expanded map[*Schema]bool
 
 	// The paths[id] entry is a pristine schema's JSON Pointer path within its
@@ -291,8 +293,10 @@ func WithRefFallback(f RefFallback) InlineOption {
 // as-is, although a ref pointing into such a position still resolves.
 //
 // The root document's sub-schema pointers must form a tree, the same demand
-// [Compile] makes: a root reaching one *Schema through two paths, or through
-// a pointer cycle, returns an error wrapping [ErrSchemaNotTree].
+// [Compile] makes. A root reaching one *Schema through two paths, or through
+// a pointer cycle, returns an error wrapping [ErrSchemaNotTree], as does one
+// whose loop closes through a value field (Const, Enum, Examples, or Extra),
+// a shape Compile's own check does not read.
 //
 // A ref whose expansion reaches its own target returns an error wrapping
 // [ErrRefCycle]. A $dynamicRef under Draft 2020-12 has no faithful static
@@ -375,11 +379,10 @@ func (il *Inliner) Inline(ctx context.Context, s *Schema) (*Schema, error) {
 
 // run inlines s under the receiver's configuration and per-call state.
 func (in *inliner) run(s *Schema) (*Schema, error) {
-	// The root's sub-schema pointers must form a tree, the same demand
-	// [Compile] makes of the document it compiles. Inlining copies the input
-	// and expands each ref in place, so a node reached from two positions
-	// would take one position's expansion at both, and a pointer cycle has no
-	// finite expansion at all.
+	// The tree check runs before the clones, so a root the inliner cannot
+	// expand fails before the run copies anything. It reads the sub-schema
+	// graph; the pristine clone below covers the rest, reporting a loop that
+	// closes through a value field.
 	err := checkSchemaTree(s)
 	if err != nil {
 		return nil, err
@@ -390,7 +393,11 @@ func (in *inliner) run(s *Schema) (*Schema, error) {
 	// receives the expansions and becomes the result. Both are clones of
 	// the same input, so they are structurally identical and walk in
 	// lockstep.
-	pristine := cloneSchema(s)
+	pristine, err := cloneCheckedSchema(s, "the root document")
+	if err != nil {
+		return nil, err
+	}
+
 	working := cloneSchema(s)
 
 	// The same registry construction Compile performs, seeded with the
@@ -421,8 +428,10 @@ func (in *inliner) run(s *Schema) (*Schema, error) {
 	in.session = reg.NewSession(newFallbackVet(in.profile))
 
 	// Unvetted by design (see the internal/schemavet package doc): Inline
-	// accepts a root schema Compile would reject, so the pristine root enters
-	// the resolution space without minting a vetted document.
+	// accepts a root whose structure and identifiers Compile's vetter would
+	// reject, so the pristine root enters the resolution space without minting
+	// a vetted document. The tree check is not part of that exception; both
+	// engines run it.
 	in.record(pristine, "", in.session.SchemaBase(pristine))
 
 	// The context reaches the resolver through the ctx field set above:
@@ -758,7 +767,10 @@ func (in *inliner) substitute(pristine *Schema, path, ref string, inlineErr erro
 		return nil, nil //nolint:nilnil // The caller drops the reference keyword.
 	}
 
-	cp := cloneSchema(action.substitute)
+	cp, err := cloneCheckedSchema(action.substitute, fmt.Sprintf("the substitute for %q", ref))
+	if err != nil {
+		return nil, err
+	}
 
 	// Register the substitute's $id/$anchor in the per-run fallback registries
 	// rather than the shared ones. A caller-supplied substitute whose $id
@@ -870,8 +882,8 @@ func (in *inliner) inlineCopy(target *Schema, path string, memoize bool) (*Schem
 // a spliced copy's subtree. The names identify the target at its original
 // position; a copy spliced elsewhere must not re-declare them (see
 // [inliner.inlineCopy]). A copy reproduces the pointer graph of the document it
-// was cloned from, so the walk carries the visited set an aliased or cyclic
-// document needs to terminate.
+// was cloned from, so the walk carries the visited set an aliased document
+// needs to reach each node once.
 func stripIdentifiers(s *Schema) {
 	stripIdentifiersFrom(s, map[*Schema]bool{})
 }

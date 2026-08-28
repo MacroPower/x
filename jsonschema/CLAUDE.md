@@ -44,23 +44,33 @@ The package has two independent halves sharing the `Schema` type:
   states its vetting policy at construction. The one deliberate exception is
   the inliner, whose own root and `WithRefFallback` substitutes stay unvetted
   (each site carries an "Unvetted by design" marker and
-  `inline_root_unvetted_test.go` pins the behavior). Structural vetting is
-  separate from the tree check: `checkSchemaTree` (`validate.go`) rejects a
-  root whose sub-schema pointers alias or cycle, and both `Compile` and
-  `Inline` run it over the document they are given, so the two engines accept
-  the same roots. A document a resolver hands in goes unchecked, because every
-  walk that reaches one dedupes pointers; the deep copy no longer launders such
-  a graph into a tree, so the inliner's own `walkPair` and `stripIdentifiers`
-  walks carry visited sets. A single-point cycle policy for fetched documents
-  remains open. Two constraints any such design must handle: `refresolve` is a
-  standalone package with no parent import (leaf-to-leaf imports like its
-  `schemavet` dependency are fine; the parent is not), so keying its
-  `baseURIs`/`walked` by node id means either an extra lookup at the boundary
-  or breaking that boundary; and the defensive fetched-document `cloneSchema`
-  keeps every cache independent of the resolver-owned schema (a resolver may
-  hand out one shared object to many callers, and cached documents are walked
-  and registered long after the resolver returned), an isolation a pointer
-  index alone cannot provide.
+  `inline_root_unvetted_test.go` pins the behavior). The pointer-graph policy
+  is separate from that vetting and has rules at two boundaries.
+  `checkSchemaTree` (`validate.go`) rejects a root whose sub-schema pointers
+  alias or cycle, and both `Compile` and `Inline` run it over the document they
+  are given, so the two engines make the same demand of a root's sub-schema
+  graph. `cloneCheckedSchema` holds the rest to the weaker no-cycle rule: the
+  inliner's pristine root, where it reports a loop closing through a value
+  field that the tree check does not read, plus a document a `RefResolver`
+  returns and a `SubstituteRef` schema. Aliasing survives there, because every
+  walk that reaches a registered document dedupes pointers, so within this
+  package it costs only the accuracy of a location in an error message. It does
+  reach `Inline`'s output, which `checkSchemaTree` then rejects if the caller
+  compiles it, so an aliased resolver document buys a non-tree result. A cycle is fatal,
+  because `refresolve`'s JSON-pointer fallback marshals the document it
+  searches and upstream's `MarshalJSON` re-enters `json.Marshal` at every
+  nesting level, so no encoder sees the repeat and the marshal recurses into a
+  stack overflow no `recover` catches. The deep copy reproduces an aliased
+  graph rather than flattening it into a tree, so the inliner's own `walkPair`
+  and `stripIdentifiers` walks carry visited sets. Two constraints the design
+  works within: `refresolve` is a standalone package with no parent import
+  (leaf-to-leaf imports like its `schemavet` dependency are fine; the parent is
+  not), so keying its `baseURIs`/`walked` by node id means either an extra
+  lookup at the boundary or breaking that boundary; and the defensive
+  fetched-document `cloneCheckedSchema` keeps every cache independent of the
+  resolver-owned schema (a resolver may hand out one shared object to many
+  callers, and cached documents are walked and registered long after the
+  resolver returned), an isolation a pointer index alone cannot provide.
   `$ref`/`$dynamicRef`/`$anchor` resolution lives in the
   shared `internal/refresolve` core, which both the validator and the inliner
   (`inline.go`) consume so the two engines cannot disagree; the inliner resolves
@@ -113,15 +123,16 @@ The package has two independent halves sharing the `Schema` type:
   widths to `json.Number`, float32 widening, recursive container coercion with
   copy-on-change and a cycle guard), `internal/schemafield` (the canonical
   field-metadata table for the upstream `Schema` type: one row per exported
-  field carrying its class, sub-schema shape, zero predicate, and up to three
-  clone closures, from which the true/empty/ref-sibling predicates, the
-  sub-schema traversal, the container-clone pass, and `internal/schemaclone`'s
-  structural deep copy all derive. The three clone columns cover disjoint parts
-  of a copy and each one's presence follows from the field's Go type, so the
-  table's staleness guard checks them: `CloneSubschemas` rebuilds a sub-schema
-  container, `CloneDeep` copies a container whose interior is mutable, and
-  `CloneContainer` reallocates a header whose interior is not), `internal/keywordmeta`
-  (schemafield's keyword-side sibling: one declared row per keyword name in
+  field carrying its class, sub-schema shape, zero predicate, and the clone
+  closures its Go type calls for, from which the true/empty/ref-sibling
+  predicates, the sub-schema traversal, the container-clone pass, and
+  `internal/schemaclone`'s structural deep copy all derive. `CloneSubschemas`
+  rebuilds a sub-schema container, `CloneDeep` copies a container whose
+  interior is mutable and supersedes the `CloneContainer` the same field also
+  carries, and `CloneContainer` alone reallocates a header whose interior is
+  not. Each column's presence follows from the field's Go type, so the table's
+  staleness guard checks all three), `internal/keywordmeta` (schemafield's
+  keyword-side sibling: one declared row per keyword name in
   `internal/keyword`, stating how an authored value merges with the type-derived
   one (`Merge`), which branch of the nullable `anyOf` split it lands on
   (`Scope`), and the drafts and vocabulary gating it. `reconcile.go`'s movable,
@@ -132,26 +143,27 @@ The package has two independent halves sharing the `Schema` type:
   rows it claims, and each dispatch row's draft range derives from its member
   keywords' declared ranges, while the row's vocabulary is cross-checked against
   them at load), `internal/schemashape` (structural shape classification of a
-  `Schema`), `internal/schemaclone`
-  (structural deep copy of a `Schema`, one field at a time through the
-  `internal/schemafield` table. The copy is faithful rather than normalized: it
-  reproduces the source's pointer graph, so an aliased node stays one node and a
-  cycle copies as a cycle, and it keeps each value's Go type, so a `json.Number`
-  holds its literal, `PropertyOrder` rides along like any other field, and a
-  schema stored in `Extra` stays a schema instead of degrading to
-  `map[string]any`. No graph shape defeats it, so `Clone` has no error return.
-  One value stays shared with the source: an unexported struct field inside one
-  of the any-typed value fields, which reflection cannot write), `internal/jsonequal` (DoS-guarded,
-  JSON-semantic value equality for `const`/`enum` and the matching content
-  hash for `uniqueItems`, layered on `internal/numrat` for exact decimal
-  comparison), `internal/goast` (doc-comment and type/field-shape
-  extraction from a parsed Go package, for the generation half's comment
-  provider), `internal/regexcache` (process-wide compile-once cache for
-  validation-time regular-expression patterns, memoizing the compiled
-  expression or the compile error so a pattern compiles at most once and fails
-  closed identically across runs), and `internal/annotations` (the 2020-12
-  annotation collection -- evaluated-property set, matched-item index set,
-  items watermark, saturation flags -- with the nil-safe `Set` type whose
+  `Schema`), `internal/schemaclone` (structural deep copy of a `Schema`, one
+  field at a time through the `internal/schemafield` table. The copy is
+  faithful rather than normalized. It reproduces the source's pointer graph and
+  keeps each value's Go type, so an aliased node stays one node, a cycle copies
+  as a cycle, a `json.Number` holds its literal, `PropertyOrder` rides along
+  like any other field, and a schema stored in `Extra` stays a schema. No graph
+  shape defeats it, so `Clone` has no error return; `CloneChecked` returns the
+  same copy plus a report of whether the source held a pointer cycle, which the
+  three resolution boundaries read. The package doc names the two values a copy
+  still shares with its source),
+  `internal/jsonequal` (DoS-guarded, JSON-semantic value equality for
+  `const`/`enum` and the matching content hash for `uniqueItems`, layered on
+  `internal/numrat` for exact decimal comparison), `internal/goast`
+  (doc-comment and type/field-shape extraction from a parsed Go package, for
+  the generation half's comment provider), `internal/regexcache` (process-wide
+  compile-once cache for validation-time regular-expression patterns,
+  memoizing the compiled expression or the compile error so a pattern compiles
+  at most once and fails closed identically across runs), and
+  `internal/annotations` (the 2020-12 annotation collection --
+  evaluated-property set, matched-item index set, items watermark, saturation
+  flags -- with the nil-safe `Set` type whose
   `Merge` is the union the `unevaluatedProperties`/`unevaluatedItems` walk
   consults; the merge _policy_ of when a subschema rolls up stays in the
   validator), and `internal/content` (the `contentEncoding`/`contentMediaType`
@@ -208,16 +220,17 @@ An upstream bump has two update sites, both guarded. The first is the canonical
 field-metadata table in `internal/schemafield`: `IsTrueSchema`,
 `internal/schemashape`'s `IsEmpty` and `HasRefSiblings`, `SubschemaEntries`, the
 container-clone pass, and the structural deep copy all derive from it and do not
-carry their own field enumerations. Add the new field to the table (one row) and the derived
-predicates and traversals pick it up. The second is the per-keyword semantics
-table in `internal/keywordmeta`: every new field's keyword needs a row there,
-naming the schemafield rows it claims. The generation half's movable,
-authorable, and bound sets and the dispatch table's draft ranges all derive from
-it. Reflection-based maintenance guards fail on an unclassified upstream
-addition; the main-package guards below run through the public API (that
-package has no in-package test files by policy), while `TestFieldTableMatchesUpstream`
-and the `TestKeywordMeta*` guards are in-package tests in `internal/schemafield`
-and `internal/keywordmeta`, where that policy does not apply:
+carry their own field enumerations. Add the new field to the table (one row)
+and the derived predicates and traversals pick it up. The second is the
+per-keyword semantics table in `internal/keywordmeta`: every new field's
+keyword needs a row there, naming the schemafield rows it claims. The
+generation half's movable, authorable, and bound sets and the dispatch table's
+draft ranges all derive from it. Reflection-based maintenance guards fail on an
+unclassified upstream addition; the main-package guards below run through the
+public API (that package has no in-package test files by policy), while
+`TestFieldTableMatchesUpstream` and the `TestKeywordMeta*` guards are
+in-package tests in `internal/schemafield` and `internal/keywordmeta`, where
+that policy does not apply:
 
 - `TestFieldTableMatchesUpstream` (internal/schemafield): the primary staleness
   alarm. It reflects over the upstream `Schema` and asserts every exported field
@@ -225,6 +238,10 @@ and `internal/keywordmeta`, where that policy does not apply:
   `Class`, the right sub-schema accessor, and the right clone-closure presence
   for each of the three columns. A new upstream field fails this until it is
   added to the table.
+- `TestCloneSubschemasWritesItsOwnField` (internal/schemafield): each
+  sub-schema field's setter writes the field its getter reads, which a presence
+  check cannot catch (a row copied from another would read one field and write
+  the other, and the clone would drop children).
 - `TestIsTrueSchemaRejectsEverySetField` (`schema_test.go`): every exported
   field set alone must defeat `IsTrueSchema`. It is the only guard that each
   field's zero predicate reads the correct field (a presence-only table check

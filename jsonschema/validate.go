@@ -898,9 +898,10 @@ func callResolver(ctx context.Context, resolver RefResolver, uri string) (*Schem
 // The two result shapes the callers distinguish are: missed true, a plain
 // not-resolved answer (a resolver miss or a replayed plain miss) that each
 // caller shapes into its own miss behavior; and a non-nil err, already wrapped
-// with [ErrRefResolve] (a resolver-reported failure or a replayed recorded
-// error). On success cp holds the clone with missed false and a nil error. The
-// caller then vets and registers cp under its own policy.
+// with [ErrRefResolve] (a resolver-reported failure, a replayed recorded error,
+// or a document whose pointer graph holds a cycle). On success cp holds the
+// clone with missed false and a nil error. The caller then vets and registers
+// cp under its own policy.
 func fetchAndClone(
 	ctx context.Context, resolver RefResolver, sess *refresolve.Session, baseURI string,
 ) (*Schema, bool, error) {
@@ -925,7 +926,14 @@ func fetchAndClone(
 		return nil, true, nil
 	}
 
-	return cloneSchema(schema), false, nil
+	cp, err := cloneCheckedSchema(schema, fmt.Sprintf("document %q", baseURI))
+	if err != nil {
+		sess.RecordRemoteMiss(baseURI, err)
+
+		return nil, false, fmt.Errorf("%w: %w", ErrRefResolve, err)
+	}
+
+	return cp, false, nil
 }
 
 // remoteFetch returns the [refresolve.Fetch] the resolution core calls when a
@@ -1038,10 +1046,29 @@ func newFallbackVet(profile draftProfile) refresolve.FallbackVet {
 
 // cloneSchema deep-copies a [Schema] structurally, field by field, through
 // [schemaclone.Clone]. The copy reproduces the source's pointer graph, so an
-// aliased node stays one node and a cyclic document copies as a cycle; no graph
-// shape makes the copy fail.
+// aliased node stays one node and a cyclic document copies as a cycle, and no
+// graph shape makes the copy fail.
 func cloneSchema(s *Schema) *Schema {
 	return schemaclone.Clone(s)
+}
+
+// cloneCheckedSchema deep-copies a [Schema] the way [cloneSchema] does and
+// rejects a copy whose cycle crosses a schema, for the boundaries where a graph
+// arrives from outside the package: a document a [RefResolver] returns, a
+// [SubstituteRef] schema, and the inliner's own root. All three enter
+// resolution space, where the JSON-pointer fallback marshals the document it
+// searches, and marshaling a cyclic schema graph overflows the stack fatally
+// rather than returning an error (see [schemaclone.CloneChecked]). Aliasing
+// survives, because every walk that reaches a registered document dedupes
+// pointers.
+func cloneCheckedSchema(s *Schema, subject string) (*Schema, error) {
+	cp, cyclic := schemaclone.CloneChecked(s)
+	if cyclic {
+		return nil, fmt.Errorf("%w: %s holds a path that crosses a schema and returns to something "+
+			"it is already inside", ErrSchemaNotTree, subject)
+	}
+
+	return cp, nil
 }
 
 // resolveDraft returns the draft a validation or inlining run operates under: a
@@ -1153,8 +1180,8 @@ func Compile(ctx context.Context, schema *Schema, opts ...ValidateOption) (*Vali
 	}
 
 	// The root document's sub-schema pointers must form a tree. This runs once
-	// over the root only: fetched and fallback-materialized documents are
-	// parsed fresh and are trees by construction.
+	// over the root; a document a resolver hands in is held to the weaker
+	// no-cycle rule at the fetch boundary (see cloneCheckedSchema).
 	err = checkSchemaTree(schema)
 	if err != nil {
 		return nil, err
@@ -1444,13 +1471,13 @@ func ParseSchemaValue(doc any) (*Schema, error) {
 
 // restoreExactValues re-copies each decoded node's any-typed value members
 // (const, enum, examples, and the unknown-keyword Extra map, mirroring the set
-// internal/schemaclone restores) from the
-// source document. The upstream UnmarshalJSON decodes those any-typed members
-// without UseNumber, so a number beyond float64 precision comes back rounded
-// and the validator would compare instances against the rounded neighbor of
-// what the author wrote; a sub-schema carried inside an unknown keyword would
-// likewise reach the JSON-pointer fallback with its numbers already rounded.
-// Each node's typed [Location] segments resolve its
+// internal/schemaclone deep-copies) from the source document. The upstream
+// UnmarshalJSON decodes those any-typed members without UseNumber, so a number
+// beyond float64 precision comes back rounded and the validator would compare
+// instances against the rounded neighbor of what the author wrote; a sub-schema
+// carried inside an unknown keyword would likewise reach the JSON-pointer
+// fallback with its numbers already rounded. Each node's typed [Location]
+// segments resolve its
 // source map, and each member is re-copied via a marshal + UseNumber decode,
 // keeping numbers as exact [json.Number] literals while staying unaliased from
 // the caller's document. Restoration is gated on what upstream parsed (a node
@@ -1675,12 +1702,20 @@ func CheckTypeNames(schema *Schema) error {
 // tree: no *Schema value reachable through two paths, and no pointer cycle.
 // The compiled per-node caches and the error paths assume each node has one
 // location, so [Compile] runs this once over the root document, and [Inline]
-// runs it over the document it inlines. A document a resolver hands in goes
-// unchecked: the walks that reach one all dedupe pointers, so an aliased remote
-// costs the accuracy of a location in an error message rather than correctness.
-// The error names both paths that reach the repeated node. This is a
-// root-document check, distinct from the graph-tolerant traversals ([Walk], the
-// registry walk, the node index), which dedupe pointers instead.
+// runs it over the document it inlines. A document a resolver hands in is held
+// to the weaker no-cycle rule instead (see [cloneCheckedSchema]), because the
+// walks that reach one all dedupe pointers, so an aliased remote costs the
+// accuracy of a location in an error message rather than correctness. The error
+// names both paths that reach the repeated node.
+//
+// The check reads the sub-schema graph, so a loop closing through a value field
+// (Const, Enum, Examples, Extra) passes it. [Inline] catches that shape when it
+// copies its root; Compile does not copy, so such a root reaches the walks
+// unchecked, and the one that marshals, the JSON-pointer fallback, overflows the
+// stack on it.
+//
+// This is a root-document check, distinct from the graph-tolerant traversals
+// ([Walk], the registry walk, the node index), which dedupe pointers instead.
 func checkSchemaTree(schema *Schema) error {
 	seen := map[*Schema]string{}
 

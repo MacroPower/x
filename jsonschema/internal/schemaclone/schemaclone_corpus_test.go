@@ -17,20 +17,20 @@ import (
 	"go.jacobcolvin.com/x/jsonschema/internal/schemaclone"
 )
 
-// corpusRoots are the vendored schema corpora the package already carries: the
-// official test suite (its keyword files, their optional/ subdirectories, and
-// the remotes served to $ref tests) and the official metaschemas. Between them
-// they exercise every keyword and every sub-schema shape the package supports,
-// which is what makes them the fidelity oracle a hand-written table cannot be.
+// corpusRoots are the vendored schema corpora: the official test suite (its
+// keyword files, their optional/ subdirectories, and the remotes served to $ref
+// tests) and the official metaschemas. Between them they exercise every keyword
+// and every sub-schema shape the package supports, which is what makes them the
+// fidelity oracle a hand-written table cannot be.
 var corpusRoots = []string{
 	filepath.Join("..", "..", "testdata", "suite"),
 	filepath.Join("..", "..", "testdata", "metaschemas"),
 }
 
 // TestCloneCorpusFidelity asserts the load-bearing property over every vendored
-// schema: the copy is value-equal to its source and shares no container with it.
-// Marshaled-byte equality follows from value equality and rides along as a cheap
-// cross-check.
+// schema. The copy is value-equal to its source and shares no container with
+// it. Marshaled-byte equality follows from value equality and rides along as a
+// cheap cross-check.
 func TestCloneCorpusFidelity(t *testing.T) {
 	t.Parallel()
 
@@ -122,8 +122,8 @@ func schemasIn(t *testing.T, path string) []*jsonschema.Schema {
 // assertDisjoint asserts that the copy reuses none of the source's nodes or
 // containers. Node identity comes from the package's own Schemas iterator, which
 // dedups pointers and so terminates on any graph; container identity comes from
-// the backing storage of each node's non-empty slice and map fields. Empty
-// containers are left out: Go serves every zero-size allocation from one
+// the backing storage of each node's non-empty slice and map fields. It leaves
+// empty containers out, because Go serves every zero-size allocation from one
 // address, so two distinct empty slices would read as shared.
 func assertDisjoint(t *testing.T, index int, src, cp *jsonschema.Schema) {
 	t.Helper()
@@ -148,9 +148,11 @@ func assertDisjoint(t *testing.T, index int, src, cp *jsonschema.Schema) {
 	}
 }
 
-// containerPointers returns the backing storage of every non-empty slice and map
-// field on one node. The numeric bound pointers are deliberately left out: they
-// address immutable scalars and stay shared by design.
+// containerPointers returns the backing storage of every non-empty slice and
+// map one node owns, descending through the any-typed value fields so a
+// container nested inside Extra, Enum, Examples, or Const is covered too. The
+// numeric bound pointers stay out deliberately, since they address immutable
+// scalars and stay shared by design.
 func containerPointers(s *jsonschema.Schema) []uintptr {
 	var ptrs []uintptr
 
@@ -163,6 +165,43 @@ func containerPointers(s *jsonschema.Schema) []uintptr {
 
 		default:
 		}
+	}
+
+	for _, value := range []any{s.Extra, s.Enum, s.Examples} {
+		ptrs = valuePointers(value, ptrs)
+	}
+
+	if s.Const != nil {
+		ptrs = valuePointers(*s.Const, ptrs)
+	}
+
+	return ptrs
+}
+
+// valuePointers appends the backing storage of every non-empty JSON container
+// reachable from v. A schema nested in a value field is left to the node walk,
+// which reaches it through the same iterator.
+func valuePointers(v any, ptrs []uintptr) []uintptr {
+	switch value := v.(type) {
+	case map[string]any:
+		if len(value) > 0 {
+			ptrs = append(ptrs, reflect.ValueOf(value).Pointer())
+		}
+
+		for _, elem := range value {
+			ptrs = valuePointers(elem, ptrs)
+		}
+
+	case []any:
+		if len(value) > 0 {
+			ptrs = append(ptrs, reflect.ValueOf(value).Pointer())
+		}
+
+		for _, elem := range value {
+			ptrs = valuePointers(elem, ptrs)
+		}
+
+	default:
 	}
 
 	return ptrs

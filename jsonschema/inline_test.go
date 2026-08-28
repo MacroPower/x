@@ -1250,9 +1250,9 @@ func TestInlineFetchedDocIDDoesNotClobber(t *testing.T) {
 }
 
 // TestInlinePreservesPropertyOrder pins that Inline keeps the render-only
-// PropertyOrder field. The field carries json:"-", so any copy routed through
-// JSON drops it and the inlined schema re-orders its properties instead of
-// preserving the input's order.
+// PropertyOrder field. The field carries json:"-", so any copy path that
+// enumerates fields by tag drops it silently and re-orders the output's
+// properties instead of preserving the input's order.
 func TestInlinePreservesPropertyOrder(t *testing.T) {
 	t.Parallel()
 
@@ -1603,10 +1603,9 @@ func TestValidateWithBaseURI(t *testing.T) {
 
 // TestInlineDeepCopyIndependence verifies the deep-copy contract of
 // [jsonschema.Inline] from the copy's side: mutating the returned schema must
-// never reach back into the input. Because the copy round-trips through JSON,
-// every JSON-serializable field -- including maps, slices, and pointers --
-// comes back as a fresh value. The probes are ref-free, so Inline is a pure
-// deep copy here.
+// never reach back into the input. The copy walks the field table, so every
+// container and every value inside one comes back fresh. The probes are
+// ref-free, so Inline is a pure deep copy here.
 func TestInlineDeepCopyIndependence(t *testing.T) {
 	t.Parallel()
 

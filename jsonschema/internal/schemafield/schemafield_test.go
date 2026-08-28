@@ -93,9 +93,9 @@ func childOfShape(shape Shape, child *jsonschema.Schema) any {
 // TestFieldTableMatchesUpstream is the primary staleness alarm: it reflects over
 // the upstream Schema and asserts the canonical table classifies every exported
 // field exactly once, with a Shape matching the Go type, a valid Class, the
-// right sub-schema accessor, and the right CloneContainer presence. When upstream
-// adds a field, this test fails until the table lists it; no derived predicate
-// needs touching.
+// right sub-schema accessor, and the right presence for each of the three clone
+// columns. When upstream adds a field, this test fails until the table lists it;
+// no derived predicate needs touching.
 func TestFieldTableMatchesUpstream(t *testing.T) {
 	t.Parallel()
 
@@ -157,8 +157,8 @@ func TestFieldTableMatchesUpstream(t *testing.T) {
 			assert.Equal(t, needsCloneDeep(sf.Type), f.CloneDeep != nil,
 				"field %q CloneDeep presence does not match its Go type %s", sf.Name, sf.Type)
 
-			// A field with a mutable interior carries both closures: the deep
-			// copy reallocates the header the shallow one would.
+			// A field with a mutable interior carries both closures, since the
+			// deep copy reallocates the header the shallow one would.
 			if f.CloneDeep != nil {
 				assert.NotNil(t, f.CloneContainer,
 					"field %q carries CloneDeep, so it must carry CloneContainer too", sf.Name)
@@ -274,8 +274,9 @@ func TestCloneContainersUnaliasesHeaders(t *testing.T) {
 
 // TestCloneSubschemasWritesItsOwnField pins that each sub-schema field's setter
 // writes the field its getter reads. A presence check cannot catch a copied row
-// whose setter still names the field it was copied from: the closure would read
-// one field and write another, and the clone would silently drop children.
+// whose setter still names the field it was copied from, since the closure
+// would read one field and write another and the clone would silently drop
+// children.
 func TestCloneSubschemasWritesItsOwnField(t *testing.T) {
 	t.Parallel()
 
@@ -331,9 +332,9 @@ func childrenOf(field reflect.Value) []*jsonschema.Schema {
 }
 
 // TestCloneSubschemasKeepsNilAndEmpty pins the nil-versus-empty distinction
-// through the clone: an absent container stays absent, and a present empty one
-// stays present, which is the difference between an ignored keyword and one that
-// vacuously rejects.
+// through the clone. An absent container stays absent and a present empty one
+// stays present, which is the difference between an ignored keyword and one
+// that constrains vacuously.
 func TestCloneSubschemasKeepsNilAndEmpty(t *testing.T) {
 	t.Parallel()
 
@@ -368,9 +369,9 @@ func TestCloneSubschemasKeepsNilAndEmpty(t *testing.T) {
 }
 
 // TestCloneDeepUnaliasesInteriors confirms the deep clones reach one level past
-// the header CloneContainers reallocates, for the two map-of-list fields whose
-// values a maps.Clone leaves shared and for the any-typed fields the value copier
-// walks.
+// the header CloneContainers reallocates: the two map-of-list fields, whose
+// values a maps.Clone leaves shared, and the four any-typed fields, whose
+// members the value copier walks.
 func TestCloneDeepUnaliasesInteriors(t *testing.T) {
 	t.Parallel()
 
@@ -386,15 +387,36 @@ func TestCloneDeepUnaliasesInteriors(t *testing.T) {
 
 	orig := *s
 
-	// A copier that rebuilds every map it is handed, standing in for the
+	// A copier that rebuilds every container it is handed, standing in for the
 	// structural clone's own value walk.
-	copyValue := func(v any) any {
-		m, ok := v.(map[string]any)
-		if !ok {
+	var copyValue func(any) any
+
+	copyValue = func(v any) any {
+		switch value := v.(type) {
+		case *any:
+			box := copyValue(*value)
+
+			return &box
+
+		case map[string]any:
+			out := make(map[string]any, len(value))
+			for key, elem := range value {
+				out[key] = copyValue(elem)
+			}
+
+			return out
+
+		case []any:
+			out := make([]any, len(value))
+			for i, elem := range value {
+				out[i] = copyValue(elem)
+			}
+
+			return out
+
+		default:
 			return v
 		}
-
-		return maps.Clone(m)
 	}
 
 	for i := range Fields {
@@ -406,11 +428,18 @@ func TestCloneDeepUnaliasesInteriors(t *testing.T) {
 	s.DependencyStrings["a"][0] = "mutated"
 	s.DependentRequired["a"][0] = "mutated"
 
-	if nested, ok := s.Extra["x"].(map[string]any); ok {
-		nested["k"] = "mutated"
+	for _, held := range []any{s.Extra["x"], s.Enum[0], s.Examples[0], *s.Const} {
+		if nested, ok := held.(map[string]any); ok {
+			nested["k"] = "mutated"
+		}
 	}
+
+	want := map[string]any{"k": "v"}
 
 	assert.Equal(t, []string{"b"}, orig.DependencyStrings["a"])
 	assert.Equal(t, []string{"b"}, orig.DependentRequired["a"])
-	assert.Equal(t, map[string]any{"k": "v"}, orig.Extra["x"])
+	assert.Equal(t, want, orig.Extra["x"])
+	assert.Equal(t, want, orig.Enum[0])
+	assert.Equal(t, want, orig.Examples[0])
+	assert.Equal(t, want, *orig.Const)
 }

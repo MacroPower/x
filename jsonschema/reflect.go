@@ -513,14 +513,13 @@ func (g *generator) handleOverrideType(t reflect.Type, ts TypeSchema, nullable b
 //     edge so its definition stays reachable.
 //
 // The Value/Verbatim source is copied with the upstream shallow CloneSchemas,
-// not the deep cloneSchema used for remote refs: the generation half needs only
-// the sub-schema copy plus the container unaliasing below, and pays for nothing
-// deeper. CloneSchemas only deep-copies sub-schema fields, leaving the Enum,
-// Const, Default, and Extra headers aliased to the caller's schema;
-// CloneOverrideExtras copies those too, so a tag interpreter or
-// JSONSchemaExtender that mutates them in place (appending to Enum, reassigning
-// Const, writing into Extra) cannot reach back into an override or provider
-// schema reused across Generate calls.
+// not the deep cloneSchema used for remote refs, because the generation half
+// needs only sub-schema copies plus the header unaliasing below. CloneSchemas
+// only deep-copies sub-schema fields, leaving the Enum, Const, Default, and
+// Extra headers aliased to the caller's schema; CloneOverrideExtras copies
+// those too, so a tag interpreter or JSONSchemaExtender that mutates them in
+// place (appending to Enum, reassigning Const, writing into Extra) cannot reach
+// back into an override or provider schema reused across Generate calls.
 func (g *generator) finishTypeOverride(t reflect.Type, ts TypeSchema, nullable bool) (*node, error) {
 	err := checkTypeSchemaExclusive(t, ts)
 	if err != nil {

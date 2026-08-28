@@ -1168,10 +1168,20 @@ wrapping the check's sentinel (`ErrInvalidType`, `ErrNegativeBound`,
 or, for a fetched document, `ErrInvalidID` or `ErrMisplacedVocabulary`)
 instead of silently mis-validating. `Inline`
 shares this same vetting policy for the documents it fetches (see
-[Inlining references](#inlining-references)). Non-local refs absolutize against the enclosing
-resource's base URI: its `$id`, or the root base set with `WithBaseURI`.
-That base also registers the root document under its URI, so a ref
-absolutizing back to it resolves in-memory. The same `WithBaseURI` value serves `Inline`,
+[Inlining references](#inlining-references)). A fetched document, and a
+`SubstituteRef` schema, must also hold no pointer cycle, meaning no path that
+crosses a schema and returns to a schema or to a container it is already
+inside. A container that loops without crossing a schema is left to
+`encoding/json`, which reports it as an ordinary error. A cyclic fetched
+document fails the referencing ref with `ErrRefResolve` wrapping
+`ErrSchemaNotTree`; a cyclic substitute fails with `ErrSchemaNotTree` at the
+substitution site. Both sources accept aliasing, unlike a root document,
+because every walk that reaches a registered document dedupes pointers. The
+boundary refuses a cycle because the JSON-pointer fallback marshals the
+document it searches and a cyclic schema graph has no JSON form. Non-local
+refs absolutize against the enclosing resource's base URI: its `$id`, or the
+root base set with `WithBaseURI`. That base also registers the root document
+under its URI, so a ref absolutizing back to it resolves in-memory. The same `WithBaseURI` value serves `Inline`,
 so one option configures both.
 
 The resolver receives a context with every resolution call:
@@ -1386,9 +1396,16 @@ Failure modes:
 
 - A root document whose sub-schema pointers do not form a tree, one `*Schema`
   reached through two paths or through a pointer cycle, returns an error
-  wrapping `ErrSchemaNotTree`, the same demand `Compile` makes. Inlining
-  expands each reference in place, so a node reached from two positions would
-  take one position's expansion at both.
+  wrapping `ErrSchemaNotTree`. This holds the input to the same contract
+  `Compile` holds it to, one location per node. A root whose loop closes
+  through a value field (`Const`, `Enum`, `Examples`, or `Extra`) returns the
+  same error, a shape `Compile`'s own check does not read. A document reached
+  through a resolver or a fallback is held to the weaker no-cycle rule instead,
+  and a node it shares between two positions is expanded once, at the first
+  location the walk reaches. That sharing survives into the result, so an output
+  built from an aliased resolver document or substitute is not a tree and
+  `Compile` rejects it. Only a hand-built graph can carry such sharing; a parsed
+  document never does.
 - A ref whose expansion reaches its own target is recursive and returns an
   error wrapping `ErrRefCycle`: a cyclic reference graph has no finite
   expansion.
@@ -1406,12 +1423,14 @@ Failure modes:
   `ErrNonPositiveMultipleOf`, `ErrItemsArrayUnderDraft2020`,
   `ErrConflictingSchemaFields`, `ErrNilSubschema`, `ErrDuplicatePropertyOrder`,
   `ErrInvalidID`, or `ErrMisplacedVocabulary`), rather than being inlined into
-  a malformed output schema. The fetched document follows the root document's
-  draft, so a Draft-07 array-form `items` remote inlined under a Draft-07 run
-  is left intact. A JSON-pointer fallback target (a schema carried inside an
-  unknown keyword, in the root document or a fetched one) is vetted the same
-  way at materialization, minus the identifier checks, so an ill-formed target
-  cannot be spliced into the output either.
+  a malformed output schema. A fetched document holding a pointer cycle fails
+  the same way, wrapping `ErrSchemaNotTree`, and a cyclic `SubstituteRef` schema
+  returns that sentinel from the substitution site. The fetched document
+  follows the root document's draft, so a Draft-07 array-form `items` remote
+  inlined under a Draft-07 run is left intact. A JSON-pointer fallback target
+  (a schema carried inside an unknown keyword, in the root document or a
+  fetched one) is vetted the same way at materialization, minus the identifier
+  checks, so an ill-formed target cannot be spliced into the output either.
 
 `WithRefFallback` sets a per-reference failure policy (a `RefFallback`,
 with `RefFallbackFunc` adapting a bare function) consulted when
@@ -1448,26 +1467,26 @@ cycle introduced by the substitute is an ordinary `ErrRefCycle`.
 
 ## Errors
 
-| Error                         | Trigger                                                                                                                                     |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ErrUnsupportedType`          | A Go type with no JSON Schema representation (`func`, `chan`, `complex`, `unsafe.Pointer`).                                                 |
-| `ErrUnsupportedMapKey`        | A map key that is not a string, integer type, or `encoding.TextMarshaler`.                                                                  |
-| `ErrInvalidType`              | A `type` keyword naming something other than the seven JSON Schema type names (returned by `CheckTypeNames` and `Compile`).                 |
-| `ErrItemsArrayUnderDraft2020` | The draft-07 array form of `items` used under draft 2020-12, where tuples are spelled with `prefixItems` (returned by `Compile`).           |
-| `ErrConflictingSchemaFields`  | Both Go fields of one JSON keyword set, e.g. `Type`/`Types` or a `dependencies` key in both maps (returned by `Compile`).                   |
-| `ErrNilSubschema`             | A nil `*Schema` element inside a sub-schema slice or map (returned by `Compile`).                                                           |
-| `ErrDuplicatePropertyOrder`   | A `PropertyOrder` slice listing the same property twice (returned by `Compile`).                                                            |
-| `ErrSchemaNotTree`            | The root document's sub-schema pointers alias or cycle (returned by `Compile` and `Inline`; reference shared schemas with `$ref` instead).  |
-| `ErrInvalidID`                | An `$id` that does not parse, carries a fragment under 2020-12, or does not resolve to an absolute URI (returned by `Compile`).             |
-| `ErrInvalidBaseURI`           | A `WithBaseURI` value that does not parse (returned by `Compile`).                                                                          |
-| `ErrMisplacedVocabulary`      | A `$vocabulary` on a node whose `$schema` does not establish the 2020-12 dialect (returned by `Compile`).                                   |
-| `ErrInvalidSchemaDocument`    | A schema document whose top-level value is not a JSON object or boolean (returned by `CompileJSON`, `ParseSchema`, and `ParseSchemaValue`). |
-| `ErrUnknownVocabulary`        | A required `$vocabulary` URI is unrecognized (or 2020-12 core is marked optional).                                                          |
-| `ErrRefResolve`               | A `RefResolver` returns an error resolving a remote `$ref`; in `Inline`, also a non-local ref with no resolver or any unresolvable target.  |
-| `ErrRefCycle`                 | `Inline` expands a `$ref` that reaches its own target: the reference graph is cyclic and has no finite expansion.                           |
-| `ErrRefInline`                | `Inline` encounters a reference with no faithful static expansion (`$dynamicRef` under Draft 2020-12).                                      |
-| `ErrProviderPanic`            | A `JSONSchemaProvider`/`JSONSchemaExtender` method panics (recovered and wrapped).                                                          |
-| `ErrInvalidDefaultsInstance`  | The `WithDefaultsFrom` instance does not match the generated root type or does not marshal to a JSON object.                                |
+| Error                         | Trigger                                                                                                                                                                                                                                               |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ErrUnsupportedType`          | A Go type with no JSON Schema representation (`func`, `chan`, `complex`, `unsafe.Pointer`).                                                                                                                                                           |
+| `ErrUnsupportedMapKey`        | A map key that is not a string, integer type, or `encoding.TextMarshaler`.                                                                                                                                                                            |
+| `ErrInvalidType`              | A `type` keyword naming something other than the seven JSON Schema type names (returned by `CheckTypeNames` and `Compile`).                                                                                                                           |
+| `ErrItemsArrayUnderDraft2020` | The draft-07 array form of `items` used under draft 2020-12, where tuples are spelled with `prefixItems` (returned by `Compile`).                                                                                                                     |
+| `ErrConflictingSchemaFields`  | Both Go fields of one JSON keyword set, e.g. `Type`/`Types` or a `dependencies` key in both maps (returned by `Compile`).                                                                                                                             |
+| `ErrNilSubschema`             | A nil `*Schema` element inside a sub-schema slice or map (returned by `Compile`).                                                                                                                                                                     |
+| `ErrDuplicatePropertyOrder`   | A `PropertyOrder` slice listing the same property twice (returned by `Compile`).                                                                                                                                                                      |
+| `ErrSchemaNotTree`            | The root document's sub-schema pointers alias or cycle (`Compile` and `Inline`), a root loop closes through a value field (`Inline`), a fetched document holds a pointer cycle (`Compile` and `Inline`), or a `SubstituteRef` schema does (`Inline`). |
+| `ErrInvalidID`                | An `$id` that does not parse, carries a fragment under 2020-12, or does not resolve to an absolute URI (returned by `Compile`).                                                                                                                       |
+| `ErrInvalidBaseURI`           | A `WithBaseURI` value that does not parse (returned by `Compile`).                                                                                                                                                                                    |
+| `ErrMisplacedVocabulary`      | A `$vocabulary` on a node whose `$schema` does not establish the 2020-12 dialect (returned by `Compile`).                                                                                                                                             |
+| `ErrInvalidSchemaDocument`    | A schema document whose top-level value is not a JSON object or boolean (returned by `CompileJSON`, `ParseSchema`, and `ParseSchemaValue`).                                                                                                           |
+| `ErrUnknownVocabulary`        | A required `$vocabulary` URI is unrecognized (or 2020-12 core is marked optional).                                                                                                                                                                    |
+| `ErrRefResolve`               | A `RefResolver` returns an error resolving a remote `$ref`; in `Inline`, also a non-local ref with no resolver or any unresolvable target.                                                                                                            |
+| `ErrRefCycle`                 | `Inline` expands a `$ref` that reaches its own target: the reference graph is cyclic and has no finite expansion.                                                                                                                                     |
+| `ErrRefInline`                | `Inline` encounters a reference with no faithful static expansion (`$dynamicRef` under Draft 2020-12).                                                                                                                                                |
+| `ErrProviderPanic`            | A `JSONSchemaProvider`/`JSONSchemaExtender` method panics (recovered and wrapped).                                                                                                                                                                    |
+| `ErrInvalidDefaultsInstance`  | The `WithDefaultsFrom` instance does not match the generated root type or does not marshal to a JSON object.                                                                                                                                          |
 
 ## CLI: `jsonschemagen`
 

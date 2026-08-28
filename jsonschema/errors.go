@@ -117,12 +117,24 @@ var (
 
 	// ErrSchemaNotTree is returned by [Compile] and [Inline] when the root
 	// document's sub-schema pointers do not form a tree: one *Schema value is
-	// reachable through two different paths, or a pointer cycle exists. The
-	// compiled per-node caches and error paths assume each node has one
-	// location, and inlining expands each reference in place, so a node reached
-	// from two positions would take one position's expansion at both. The error
-	// names both paths that reach the repeated node. Reference the shared schema
+	// reachable through two paths, or a pointer cycle exists. The compiled
+	// per-node caches and error paths assume each node has one location, and
+	// inlining expands each reference in place, so a node reached from two
+	// positions would take one position's expansion at both. The error names
+	// both paths that reach the repeated node. Reference the shared schema
 	// with $ref instead of aliasing the pointer.
+	//
+	// [Inline] returns it for one more shape, a root loop closing through a
+	// value field (Const, Enum, Examples, or Extra) rather than through a
+	// sub-schema keyword. Inlining copies its root, so the copy's own cycle
+	// report covers the graph the tree check does not read.
+	//
+	// It also reports a pointer cycle in a document a [RefResolver] returns,
+	// wrapped in [ErrRefResolve] and naming the document's base URI, and one in
+	// a [SubstituteRef] schema, returned bare from the substitution site and
+	// naming the reference whose fallback supplied it. Those two sources accept
+	// aliasing. The boundary refuses only the cycle, because the JSON-pointer
+	// fallback marshals the document it searches.
 	ErrSchemaNotTree = errors.New("schema is not a tree")
 
 	// ErrInvalidID is returned by [Compile] for an $id outside the keyword's

@@ -6,10 +6,12 @@
 // single source of truth.
 //
 // The copy is faithful rather than normalized. It reproduces the source graph's
-// shape, a node reached through two paths and a pointer cycle included, and it
+// shape, including a node reached through two paths and a pointer cycle, and it
 // keeps each value's Go type as it stands, so a [json.Number] holds its literal
 // and a schema riding in an unknown keyword stays a schema. No graph shape
-// defeats the copy, so [Clone] has no error return.
+// defeats the copy, so [Clone] has no error return. A caller that must not
+// hold a cyclic graph, because something downstream marshals it, takes the
+// same copy through [CloneChecked] and reads the cycle report.
 package schemaclone
 
 import (
@@ -21,14 +23,15 @@ import (
 	"go.jacobcolvin.com/x/jsonschema/internal/schemafield"
 )
 
-// Clone returns a deep copy of s that shares no mutable value with it.
+// Clone returns a deep copy of s. Two kinds of value stay shared with the
+// source, both named below; nothing else does.
 //
 // Upstream [jsonschema.Schema.CloneSchemas] is shallow for the non-sub-schema
-// fields (Extra, Enum, Const, Default, Examples): it shares their backing maps,
+// fields (Extra, Enum, Const, Default, Examples), sharing their backing maps,
 // slices, and pointers with the original. Clone copies those too, which is what
-// remote-ref isolation requires. The caches hold copies independent of the
-// resolver-owned schemas, so no later walk of a cached document can reach the
-// caller's or the resolver's values.
+// remote-ref isolation demands. The validator's document caches hold copies
+// independent of the resolver-owned schemas, so no later walk of a cached
+// document can reach the caller's or the resolver's values.
 //
 // The copy reproduces the source's pointer graph rather than flattening it. A
 // schema reachable through two paths is copied once and reachable through two
@@ -36,26 +39,93 @@ import (
 // result under the same pointer dedup the input needs. A nil s clones to nil, at
 // the root and at every sub-schema position alike.
 //
-// One value stays shared with the source: an unexported struct field inside one
-// of the any-typed value fields (Const, Enum, Examples, Extra). Reflection
-// cannot write such a field and [encoding/json] never serialized it, so the copy
-// keeps whatever the shallow struct copy gave it.
+// Both shared kinds are immutable in practice. The numeric bound fields
+// (Minimum, MaxItems, and their siblings) keep the source's *float64 and *int
+// pointers, since nothing writes through them. An unexported struct field
+// inside one of the any-typed value fields (Const, Enum, Examples, Extra) keeps
+// whatever the shallow struct copy gave it, because reflection cannot write
+// such a field and [encoding/json] never serializes it.
 func Clone(s *jsonschema.Schema) *jsonschema.Schema {
+	cp, _ := CloneChecked(s)
+
+	return cp
+}
+
+// CloneChecked returns [Clone]'s copy along with a report of whether the source
+// holds a cycle that passes through a schema: a path returning to a *Schema it
+// is already inside, or to a container it is already inside after crossing a
+// schema.
+//
+// The report rides along on the walk that builds the copy, which reaches every
+// edge [json.Marshal] follows. A caller needs it when something downstream
+// marshals the copy, because a cyclic schema graph defeats [encoding/json]'s
+// cycle detection. Upstream MarshalJSON re-enters [json.Marshal] with a fresh
+// encoder at every nesting level, so no single encoder ever sees the repeat and
+// the marshal recurses into a stack overflow the runtime cannot recover from.
+//
+// A cycle closed without passing through a schema, a container holding itself,
+// is not reported and needs no report, since [encoding/json] sees that one
+// within a single encoder and returns an ordinary error.
+func CloneChecked(s *jsonschema.Schema) (*jsonschema.Schema, bool) {
 	c := cloner{
-		schemas: map[*jsonschema.Schema]*jsonschema.Schema{},
-		values:  map[valueKey]any{},
+		schemas:     map[*jsonschema.Schema]*jsonschema.Schema{},
+		values:      map[valueKey]any{},
+		onPath:      map[*jsonschema.Schema]bool{},
+		onPathValue: map[valueKey]int{},
 	}
 
-	return c.schema(s)
+	cp := c.schema(s)
+
+	return cp, c.cyclic
 }
 
 // cloner carries one Clone call's identity memos. The schemas memo pairs each
 // source schema with its copy, and the values memo does the same for the
-// containers held in the any-typed value fields. Both are what make an aliased
-// edge stay one edge and a cyclic walk terminate.
+// containers held in the any-typed value fields. Both collapse a node reached
+// twice onto one copy, which is also what lets a cyclic walk terminate.
 type cloner struct {
 	schemas map[*jsonschema.Schema]*jsonschema.Schema
 	values  map[valueKey]any
+
+	// These four fields track the current path: which schemas it holds, which
+	// containers it holds and at what schema depth, how deep it runs, and
+	// whether the walk re-entered a node without leaving it first.
+	onPath      map[*jsonschema.Schema]bool
+	onPathValue map[valueKey]int
+	depth       int
+	cyclic      bool
+}
+
+// enterValue records a container's copy in the memo and marks the container as
+// being on the current path, so a later hit on it can tell a back edge from a
+// second, independent visit.
+func (c *cloner) enterValue(key valueKey, keyed bool, cp any) {
+	if !keyed {
+		return
+	}
+
+	c.values[key] = cp
+	c.onPathValue[key] = c.depth
+}
+
+// leaveValue takes a filled container off the path. Its memo entry stays, since
+// a later visit still reuses the copy.
+func (c *cloner) leaveValue(key valueKey, keyed bool) {
+	if keyed {
+		delete(c.onPathValue, key)
+	}
+}
+
+// revisitValue reports a cycle when a memo hit lands on a container still being
+// filled and the walk entered at least one schema since. That is the shape a
+// marshal recurses into, because the path leaves the container, crosses a
+// schema, and comes back. A container that merely holds itself crosses no
+// schema and stays unreported, since [encoding/json] catches that one on its
+// own.
+func (c *cloner) revisitValue(key valueKey) {
+	if entered, onPath := c.onPathValue[key]; onPath && c.depth > entered {
+		c.cyclic = true
+	}
 }
 
 // valueKey identifies a container by its type and its backing storage.
@@ -69,9 +139,11 @@ type valueKey struct {
 }
 
 // containerKey returns the memo key for a container of size elements, and
-// whether that container has an identity to key on. An empty container has
-// none: Go serves every zero-size allocation from one address, so two distinct
-// empty containers would share a key and collapse into one copy.
+// whether that container has an identity to key on. A pointer keys as a
+// one-element container, since its identity is the address alone. An empty
+// container has none, because Go serves every zero-size allocation from one
+// address, so two distinct empty containers would share a key and collapse into
+// one copy.
 func containerKey(rv reflect.Value, size int) (valueKey, bool) {
 	if size == 0 {
 		return valueKey{}, false
@@ -80,30 +152,40 @@ func containerKey(rv reflect.Value, size int) (valueKey, bool) {
 	return valueKey{typ: rv.Type(), ptr: rv.Pointer(), size: size}, true
 }
 
-// schema returns the copy of s, making it on first sight. The memo entry is
-// recorded before the fields are filled, so a cycle re-entering s finds the copy
-// under construction and closes the loop instead of recursing.
+// schema returns the copy of s, making it on first sight. It records the memo
+// entry before filling the fields, so a cycle re-entering s finds the copy under
+// construction and closes the loop instead of recursing.
 func (c *cloner) schema(s *jsonschema.Schema) *jsonschema.Schema {
 	if s == nil {
 		return nil
 	}
 
 	if cp, seen := c.schemas[s]; seen {
+		if c.onPath[s] {
+			c.cyclic = true
+		}
+
 		return cp
 	}
 
 	cp := new(jsonschema.Schema)
 	c.schemas[s] = cp
+	c.onPath[s] = true
+	c.depth++
+
 	c.fill(cp, s)
+
+	c.depth--
+	delete(c.onPath, s)
 
 	return cp
 }
 
 // fill copies every field of src onto dst. The shallow struct copy carries the
-// scalars and the field table then handles each field that owns something
-// mutable: a sub-schema container is rebuilt through the memo, a container with
-// a mutable interior is copied value by value, and every other container has its
-// header reallocated.
+// scalars, and the field table then handles each field that owns something
+// mutable. Each field's own closure rebuilds a sub-schema container through the
+// memo, copies a container with a mutable interior value by value, or
+// reallocates the container's header.
 func (c *cloner) fill(dst, src *jsonschema.Schema) {
 	*dst = *src
 
@@ -123,21 +205,26 @@ func (c *cloner) fill(dst, src *jsonschema.Schema) {
 
 // schemaValue copies a schema held as a value rather than a pointer. Such a
 // schema has no address the memo can key on, and a copy of it cannot be shared
-// anyway, so only its sub-schema pointers route through the memo. Any cycle
-// through a schema value re-enters a schema pointer, so the walk still
-// terminates.
+// anyway, so only its sub-schema pointers route through the memo. It still
+// counts toward the path depth. Upstream's MarshalJSON takes a value receiver,
+// so a schema value re-enters [json.Marshal] with a fresh encoder exactly as a
+// pointer does, and a loop closing around one recurses just as far.
 func (c *cloner) schemaValue(src *jsonschema.Schema) jsonschema.Schema {
 	var out jsonschema.Schema
 
+	c.depth++
+
 	c.fill(&out, src)
+
+	c.depth--
 
 	return out
 }
 
 // value returns a deep copy of a value held in one of the any-typed fields. The
 // concrete cases cover what parsed JSON and the schema graph produce, a
-// [json.Number] included: it is a string type, so the assignment carries the
-// literal across exactly. Anything else goes to the reflection walk, which
+// [json.Number] included. That one is a string type, so the assignment carries
+// the literal across exactly. Anything else goes to the reflection walk, which
 // reaches a schema nested in a typed container just as [encoding/json] would.
 func (c *cloner) value(v any) any {
 	switch val := v.(type) {
@@ -168,18 +255,20 @@ func (c *cloner) valueMap(m map[string]any) map[string]any {
 	key, keyed := containerKey(reflect.ValueOf(m), len(m))
 	if keyed {
 		if seen, hit := c.values[key].(map[string]any); hit {
+			c.revisitValue(key)
+
 			return seen
 		}
 	}
 
 	cp := make(map[string]any, len(m))
-	if keyed {
-		c.values[key] = cp
-	}
+	c.enterValue(key, keyed, cp)
 
 	for name, elem := range m {
 		cp[name] = c.value(elem)
 	}
+
+	c.leaveValue(key, keyed)
 
 	return cp
 }
@@ -195,18 +284,20 @@ func (c *cloner) valueSlice(list []any) []any {
 	key, keyed := containerKey(reflect.ValueOf(list), len(list))
 	if keyed {
 		if seen, hit := c.values[key].([]any); hit {
+			c.revisitValue(key)
+
 			return seen
 		}
 	}
 
 	cp := make([]any, len(list))
-	if keyed {
-		c.values[key] = cp
-	}
+	c.enterValue(key, keyed, cp)
 
 	for i, elem := range list {
 		cp[i] = c.value(elem)
 	}
+
+	c.leaveValue(key, keyed)
 
 	return cp
 }
@@ -216,7 +307,7 @@ func (c *cloner) valueSlice(list []any) []any {
 // interfaces, slices, arrays, maps, and exported struct fields. A schema found
 // along the way routes back through the memo, so aliasing and cycles survive the
 // walk. Unexported struct fields keep the value the whole-struct copy gave them,
-// because encoding/json never serialized them and reflection cannot write them.
+// because encoding/json never serializes them and reflection cannot write them.
 // Kinds with no interior (strings, numbers, funcs, channels) are returned as
 // they stand.
 func (c *cloner) reflectValue(rv reflect.Value) reflect.Value {
@@ -267,16 +358,17 @@ func (c *cloner) reflectPointer(rv reflect.Value) reflect.Value {
 	key, keyed := containerKey(rv, 1)
 	if keyed {
 		if seen, hit := c.values[key]; hit {
+			c.revisitValue(key)
+
 			return reflect.ValueOf(seen)
 		}
 	}
 
 	out := reflect.New(rv.Type().Elem())
-	if keyed {
-		c.values[key] = out.Interface()
-	}
+	c.enterValue(key, keyed, out.Interface())
 
 	out.Elem().Set(c.reflectValue(rv.Elem()))
+	c.leaveValue(key, keyed)
 
 	return out
 }
@@ -312,25 +404,29 @@ func (c *cloner) reflectSlice(rv reflect.Value) reflect.Value {
 	key, keyed := containerKey(rv, rv.Len())
 	if keyed {
 		if seen, hit := c.values[key]; hit {
+			c.revisitValue(key)
+
 			return reflect.ValueOf(seen)
 		}
 	}
 
 	out := reflect.MakeSlice(rv.Type(), rv.Len(), rv.Len())
-	if keyed {
-		c.values[key] = out.Interface()
-	}
+	c.enterValue(key, keyed, out.Interface())
 
 	for i := range rv.Len() {
 		out.Index(i).Set(c.reflectValue(rv.Index(i)))
 	}
 
+	c.leaveValue(key, keyed)
+
 	return out
 }
 
 // reflectMap copies a map, recording the copy before filling it so a map
-// reaching itself terminates. Keys are copied too, since a map keyed by an array
-// can hold a pointer.
+// reaching itself terminates. Keys carry over unchanged, because
+// [encoding/json] only serializes a map whose keys are strings or scalars, and
+// copying a reference-typed key would leave the copy unequal to its source and
+// unsearchable with the source's keys.
 func (c *cloner) reflectMap(rv reflect.Value) reflect.Value {
 	if rv.IsNil() {
 		return rv
@@ -339,18 +435,20 @@ func (c *cloner) reflectMap(rv reflect.Value) reflect.Value {
 	key, keyed := containerKey(rv, rv.Len())
 	if keyed {
 		if seen, hit := c.values[key]; hit {
+			c.revisitValue(key)
+
 			return reflect.ValueOf(seen)
 		}
 	}
 
 	out := reflect.MakeMapWithSize(rv.Type(), rv.Len())
-	if keyed {
-		c.values[key] = out.Interface()
-	}
+	c.enterValue(key, keyed, out.Interface())
 
 	for iter := rv.MapRange(); iter.Next(); {
-		out.SetMapIndex(c.reflectValue(iter.Key()), c.reflectValue(iter.Value()))
+		out.SetMapIndex(iter.Key(), c.reflectValue(iter.Value()))
 	}
+
+	c.leaveValue(key, keyed)
 
 	return out
 }
