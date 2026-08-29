@@ -24,9 +24,10 @@ func testDeps() refresolve.Deps {
 // fragment-only $id: Draft-07 reads it as the anchor spelling and registers an
 // anchor, while Draft 2020-12 forbids a fragment in $id (core section 8.2.1)
 // and registers nothing, so a plain-name fragment naming it stays
-// unresolvable. Both engines refuse such a document at the identifier check
-// before resolution runs, so this gate is the layer behind that refusal and
-// has no observable path through the public API.
+// unresolvable. Under 2020-12 both engines refuse such a document at the
+// identifier check before resolution runs, so the gate sits behind that
+// refusal with no observable path through the public API; under Draft-07 the
+// registration it makes is what a fragment reference resolves through.
 func TestFragmentOnlyIDRegistersByDraft(t *testing.T) {
 	t.Parallel()
 

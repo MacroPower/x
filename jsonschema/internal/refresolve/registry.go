@@ -30,12 +30,12 @@ type Registry struct {
 	baseURIs map[*jsonschema.Schema]string
 
 	// Records every schema the walk has registered, so a node reached twice
-	// registers once. It is a dedup guard rather than a cycle policy: it
-	// bounds the walk over an aliased or cyclic graph without judging either,
-	// and the package cannot judge them, since the parent owns the node index
-	// and the graph rules. Rejection happens there instead, at the clone
-	// boundary the three resolution entry points cross and in the parent's
-	// tree check over a compiled or inlined root.
+	// registers once. It is a dedup guard rather than a cycle policy. It
+	// bounds the walk over an aliased or cyclic graph, and this package
+	// judges neither shape, since the parent owns the node index and the
+	// graph rules. The parent rejects instead, at the clone boundary every
+	// resolution entry point crosses and in its tree check over a compiled or
+	// inlined root.
 	walked map[*jsonschema.Schema]bool
 
 	root *jsonschema.Schema
@@ -103,8 +103,8 @@ func (r *Registry) walkInto(schema *jsonschema.Schema, parentBase string, onlyIf
 	}
 
 	// Registering each pointer once and returning on a repeat keeps the walk
-	// bounded over a graph that aliases or cycles. Neither shape is rejected
-	// here; see the walked field for where the policy lives.
+	// bounded over a graph that aliases or cycles. This walk rejects neither
+	// shape; see the walked field for where the policy lives.
 	if r.walked[schema] {
 		return
 	}

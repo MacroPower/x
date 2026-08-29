@@ -543,8 +543,8 @@ func (g *refGraphGen) enter(document string) {
 //
 // Both engines vet a root, so a malformed one fails Inline before any
 // reference resolves and reaches the rig as a build error carrying the
-// sentinel Compile reports. The rig compares it by that sentinel, the way it
-// compares a rejected remote.
+// sentinel Compile reports. The rig compares that error by its sentinel, the
+// way it compares a rejected remote.
 func (g *refGraphGen) drawLeaf() string {
 	slot := g.slot
 	g.slot++

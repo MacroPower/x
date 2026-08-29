@@ -18,10 +18,10 @@ var (
 	ErrUnsupportedMapKey = errors.New("unsupported map key type")
 
 	// ErrInvalidType is returned when a schema's type keyword names something
-	// other than the seven JSON Schema type names ("null", "boolean", "string",
-	// "integer", "number", "object", "array"). It is reported by
-	// [CheckTypeNames], by [Compile] and [Inline], which vet a root alike, and
-	// by the one-shot [Validate] helper, which routes through the same check.
+	// other than the seven JSON Schema type names ("null", "boolean",
+	// "string", "integer", "number", "object", "array"). It is reported by
+	// [CheckTypeNames], by [Compile] and [Inline], and by the one-shot
+	// [Validate] helper, which routes through the same check.
 	// A typo'd type would otherwise compile cleanly and then reject every
 	// instance at runtime.
 	//
@@ -31,14 +31,14 @@ var (
 	ErrInvalidType = schemavet.ErrInvalidType
 
 	// ErrItemsArrayUnderDraft2020 is returned by [Compile] and [Inline] when a
-	// document processed under [Draft2020] sets the array form of the items keyword
-	// (the field upstream parses a JSON `"items": [ ... ]` into). Array-form
-	// items is the Draft-7 spelling of tuple validation; under 2020-12 tuples
-	// are spelled with prefixItems and array-form items has no meaning, so the
-	// 2020-12 walk would silently validate every element against nothing.
-	// Rejecting it at construction surfaces the dropped constraint instead of
-	// accepting every instance; set the Draft-7 $schema (or [WithDraft]) for
-	// tuple semantics, or use prefixItems.
+	// document processed under [Draft2020] sets the array form of the items
+	// keyword (the field upstream parses a JSON `"items": [ ... ]` into).
+	// Array-form items is the Draft-7 spelling of tuple validation; under
+	// 2020-12 tuples are spelled with prefixItems and array-form items has no
+	// meaning, so the 2020-12 walk would silently validate every element
+	// against nothing. Rejecting it at construction surfaces the dropped
+	// constraint instead of accepting every instance; set the Draft-7 $schema
+	// (or [WithDraft]) for tuple semantics, or use prefixItems.
 	//
 	// It is re-exported from internal/schemavet, the shared structural-vetting
 	// core, so [errors.Is] matches the sentinel identically whether a failure
@@ -56,60 +56,62 @@ var (
 	// custom metaschema) keeps the [Draft2020] default as before.
 	ErrUnsupportedDraft = errors.New("unsupported $schema dialect")
 
-	// ErrNegativeBound is returned by [Compile] and [Inline] when a length or count keyword
-	// (minLength, maxLength, minItems, maxItems, minProperties, maxProperties,
-	// minContains, maxContains) carries a negative value, which the spec defines
-	// as a non-negative integer. A negative bound would otherwise compile
-	// cleanly and then silently mis-validate: a negative maximum rejects
-	// every instance and a negative minimum is a dead no-op. Rejecting it at
-	// construction surfaces the malformed schema instead.
+	// ErrNegativeBound is returned by [Compile] and [Inline] when a length or
+	// count keyword (minLength, maxLength, minItems, maxItems, minProperties,
+	// maxProperties, minContains, maxContains) carries a negative value, which
+	// the spec defines as a non-negative integer. A negative bound would
+	// otherwise compile cleanly and then silently mis-validate: a negative
+	// maximum rejects every instance and a negative minimum is a dead no-op.
+	// Rejecting it at construction surfaces the malformed schema instead.
 	//
 	// It is re-exported from internal/schemavet, the shared structural-vetting
 	// core, so [errors.Is] matches the sentinel identically whether a failure
 	// originates in that package or here.
 	ErrNegativeBound = schemavet.ErrNegativeBound
 
-	// ErrNonPositiveMultipleOf is returned by [Compile] and [Inline] when a multipleOf
-	// keyword carries a value that is not strictly greater than zero. The spec
-	// defines the keyword's value domain as a number > 0; the invalid schema
-	// would otherwise compile cleanly and then reject every numeric instance
-	// at validation time while silently accepting every non-numeric one.
-	// Rejecting it at construction surfaces the malformed schema instead, the
-	// same policy [ErrNegativeBound] applies to the length and count keywords.
+	// ErrNonPositiveMultipleOf is returned by [Compile] and [Inline] when a
+	// multipleOf keyword carries a value that is not strictly greater than
+	// zero. The spec defines the keyword's value domain as a number > 0; the
+	// invalid schema would otherwise compile cleanly and then reject every
+	// numeric instance at validation time while silently accepting every non-
+	// numeric one. Rejecting it at construction surfaces the malformed schema
+	// instead, the same policy [ErrNegativeBound] applies to the length and
+	// count keywords.
 	//
 	// It is re-exported from internal/schemavet, the shared structural-vetting
 	// core, so [errors.Is] matches the sentinel identically whether a failure
 	// originates in that package or here.
 	ErrNonPositiveMultipleOf = schemavet.ErrNonPositiveMultipleOf
 
-	// ErrNilSubschema is returned by [Compile] and [Inline] when a sub-schema slice or map
-	// holds a nil *Schema element (for example AllOf: []*Schema{nil}). A nil
-	// element has no JSON form, and the walk skips it silently, so the branch
-	// the author listed would assert nothing. Only container elements are
-	// checked: a nil direct field such as Not or Items is an absent keyword.
+	// ErrNilSubschema is returned by [Compile] and [Inline] when a sub-schema
+	// slice or map holds a nil *Schema element (for example AllOf:
+	// []*Schema{nil}). A nil element has no JSON form, and the walk skips it
+	// silently, so the branch the author listed would assert nothing. Only
+	// container elements are checked: a nil direct field such as Not or Items
+	// is an absent keyword.
 	//
 	// It is re-exported from internal/schemavet, the shared structural-vetting
 	// core, so [errors.Is] matches the sentinel identically whether a failure
 	// originates in that package or here.
 	ErrNilSubschema = schemavet.ErrNilSubschema
 
-	// ErrConflictingSchemaFields is returned by [Compile] and [Inline] when a schema sets
-	// both Go fields that spell one JSON keyword: Type and Types, Defs and
-	// Definitions, Items and ItemsArray, or one dependencies key in both
-	// DependencySchemas and DependencyStrings. Each pair marshals to a single
-	// keyword, so a schema setting both cannot round-trip through JSON, and
-	// the walk would silently prefer one form over the other.
+	// ErrConflictingSchemaFields is returned by [Compile] and [Inline] when a
+	// schema sets both Go fields that spell one JSON keyword: Type and Types,
+	// Defs and Definitions, Items and ItemsArray, or one dependencies key in
+	// both DependencySchemas and DependencyStrings. Each pair marshals to a
+	// single keyword, so a schema setting both cannot round-trip through JSON,
+	// and the walk would silently prefer one form over the other.
 	//
 	// It is re-exported from internal/schemavet, the shared structural-vetting
 	// core, so [errors.Is] matches the sentinel identically whether a failure
 	// originates in that package or here.
 	ErrConflictingSchemaFields = schemavet.ErrConflictingSchemaFields
 
-	// ErrDuplicatePropertyOrder is returned by [Compile] and [Inline] when a schema's
-	// PropertyOrder slice lists the same property twice. The slice fixes the
-	// JSON rendering order of properties, a duplicate entry makes that order
-	// ambiguous, and upstream MarshalJSON rejects it, so the schema could
-	// never be marshaled.
+	// ErrDuplicatePropertyOrder is returned by [Compile] and [Inline] when a
+	// schema's PropertyOrder slice lists the same property twice. The slice
+	// fixes the JSON rendering order of properties, a duplicate entry makes
+	// that order ambiguous, and upstream MarshalJSON rejects it, so the schema
+	// could never be marshaled.
 	//
 	// It is re-exported from internal/schemavet, the shared structural-vetting
 	// core, so [errors.Is] matches the sentinel identically whether a failure
@@ -145,8 +147,8 @@ var (
 	// enclosing base (the parent $id chain, or [WithBaseURI] for the root). A
 	// relative $id with no absolute base would register no resolvable URI, so
 	// every ref targeting it would silently miss. Under Draft-07 two forms go
-	// unchecked: an $id beside a $ref (the draft ignores it) and a
-	// fragment-carrying $id (the anchor spelling). An [Inline] run under
+	// unchecked: an $id beside a $ref (the draft ignores it) and a fragment-
+	// carrying $id (the anchor spelling). An [Inline] run under
 	// [WithRetrievalBase] checks no $id at all, since an inert $id registers
 	// nothing.
 	//
@@ -162,14 +164,12 @@ var (
 	ErrInvalidBaseURI = errors.New("invalid base URI")
 
 	// ErrMisplacedVocabulary is returned by [Compile] and [Inline] for a
-	// $vocabulary on a node whose $schema does not establish the Draft
-	// 2020-12 dialect:
-	// a non-empty $schema that is not exactly
-	// "https://json-schema.org/draft/2020-12/schema", or an empty $schema
-	// under Draft-07, which predates the vocabulary concept. A node with an
-	// empty $schema under Draft 2020-12 is accepted: the document inherits
-	// the referrer's dialect (the reading upstream applies to loaded
-	// documents).
+	// $vocabulary on a node whose $schema does not establish the Draft 2020-12
+	// dialect: a non-empty $schema that is not exactly "https://json-
+	// schema.org/draft/2020-12/schema", or an empty $schema under Draft-07,
+	// which predates the vocabulary concept. A node with an empty $schema
+	// under Draft 2020-12 is accepted: the document inherits the referrer's
+	// dialect (the reading upstream applies to loaded documents).
 	//
 	// It is re-exported from internal/schemavet, the shared structural-vetting
 	// core, so [errors.Is] matches the sentinel identically whether a failure

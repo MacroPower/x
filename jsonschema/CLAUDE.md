@@ -43,22 +43,25 @@ The package has two independent halves sharing the `Schema` type:
   proof. `schemaIndex.extend` takes a `Doc`, so an unvetted document cannot
   reach the precompute caches, and `refresolve.Registry.NewSession` requires a
   `FallbackVet`, so every session states its vetting policy at construction.
-  Both engines vet alike: `Inline` runs `VetDoc` over its pristine root and
+  Both engines vet alike. `Inline` runs `VetDoc` over its pristine root and
   over each `WithRefFallback` substitute, which enters resolution space as a
-  document of its own, so the two engines refuse the same documents for the
-  same sentinels (a substitute's violation is wrapped to name the ref whose
-  failure the fallback answered). One `schemavet.Vetter` carries the run, the
-  way Compile shares one across its passes, and the session's `FallbackVet` is
-  a method over it, so a materialized pointer target is re-minted rather than
-  re-checked where the inliner records it. `inliner.vetProfile` is the one
-  narrowing: under `WithRetrievalBase` the resolution walk reads `$id` as
-  inert, so `schemavet.Profile.InertIDs` skips the `$id` domain check in every
-  document the run holds. The inliner's own index walk takes the
-  currency at its entry points, `recordDoc` for a document root and
-  `recordNode` for a materialized pointer target, so the walk behind them
-  reaches no schema the run has not vetted. The
-  pointer-graph policy is separate from that vetting and has rules at two
-  boundaries.
+  document of its own, so the two refuse the same documents for the same
+  sentinels; the inliner wraps a substitute's violation to name the ref
+  whose failure the fallback answered. Two compile-time refusals have no
+  inline counterpart, `ErrInvalidBaseURI` and `ErrUnknownVocabulary`, so the
+  agreement covers the structural vet rather than every error. One
+  `schemavet.Vetter` serves the root, the substitutes, and the fallback
+  targets, and the session's `FallbackVet` is a method over it, so
+  `vetTarget` re-mints a materialized pointer target rather than re-checking
+  it where the inliner records it; `fetchDoc` keeps a fresh vetter per
+  remote, since each fetched document is independent. `inliner.vetProfile`
+  supplies the one narrowing. Under `WithRetrievalBase` the resolution walk
+  reads `$id` as inert, so `schemavet.Profile.InertIDs` skips the `$id`
+  domain check in every document the run holds. The inliner's own index walk
+  takes the currency at its entry points, `recordDoc` for a document root
+  and `recordNode` for a materialized pointer target, so the walk behind
+  them reaches no schema the run has not vetted. The pointer-graph policy is
+  separate from that vetting and has rules at two boundaries.
   `checkSchemaTree` (`validate.go`) rejects a root whose sub-schema pointers
   alias or cycle, and both `Compile` and `Inline` run it over the document they
   are given, so the two engines make the same demand of a root's sub-schema
@@ -232,8 +235,7 @@ The package has two independent halves sharing the `Schema` type:
   flags converted by `draftProfile.vetProfile`, mirroring `toRefDraft`, plus
   `InertIDs`, which the inliner sets from `WithRetrievalBase` so the `$id`
   domain check follows the resolution walk that ignores the keyword) and its
-  own
-  `Entries` traversal, whose pointer assembly a lockstep guard test in
+  own `Entries` traversal, whose pointer assembly a lockstep guard test in
   `walk_test.go` pins to `SubschemaEntries`, since vetting errors embed
   those pointers).
 

@@ -14,10 +14,11 @@
 // invariant that raw *Schema values stop at the package boundary (the public
 // API, the fetch closures, and the compile-time reference walk, which
 // registers a fetched document and vets it before compilation returns).
-// Both engines hold every document to the policy. The inliner vets its own
-// root and each caller-supplied fallback substitute the way Compile vets a
-// root, so Inline and Compile refuse the same documents for the same
-// sentinels.
+// Compile and Inline hold every document to the policy. The inliner vets its
+// own root and each caller-supplied fallback substitute the way Compile vets a
+// root, so the two refuse the same documents for the same sentinels, except
+// under the inliner's inert-$id profile, where the $id domain check does not
+// run.
 package schemavet
 
 import (
@@ -45,7 +46,7 @@ type Profile struct {
 	// (the inliner's WithRetrievalBase), where an $id establishes no base
 	// URI and registers no resolution target. The keyword then addresses
 	// nothing, so its domain is outside this policy and the identifier pass
-	// skips it, mirroring the resolution walk that skips it too.
+	// skips it, as the resolution walk does.
 	InertIDs bool
 }
 
@@ -133,14 +134,14 @@ func (v *Vetter) Vet(s *Schema, pathPrefix string) (Node, error) {
 
 // VetDoc applies [Vetter.Vet] plus the identifier checks ($id domain and
 // $vocabulary placement, see checkIdentifiers) to a document rooted at s,
-// whose base URI is base. It serves the call sites that hold a whole document
-// with a known base: the root at Compile, each registry-known document, each
-// fetched document, the inliner's root, and a fallback substitute, which
-// enters resolution space as a document of its own. JSON-pointer fallback
-// targets keep the plain
-// [Vetter.Vet]; a pointer target is a fragment of a document already checked,
-// and no document base is in hand at its location. It returns the minted
-// [Doc] on success, or the zero Doc and the first violation.
+// whose base URI is base. It serves the call sites that hold a whole
+// document with a known base: the root at Compile, each registry-known
+// document, each fetched document, the inliner's root, and a fallback
+// substitute, which enters resolution space as a document of its own. A
+// JSON-pointer fallback target keeps the plain [Vetter.Vet]; it is a
+// fragment of a document already checked, and no document base is in hand at
+// its location. It returns the minted [Doc] on success, or the zero Doc
+// and the first violation.
 func (v *Vetter) VetDoc(s *Schema, pathPrefix, base string) (Doc, error) {
 	_, err := v.Vet(s, pathPrefix)
 	if err != nil {
