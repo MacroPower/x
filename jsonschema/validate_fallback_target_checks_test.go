@@ -36,8 +36,10 @@ func TestCompileChecksJSONPointerFallbackTargets(t *testing.T) {
 		},
 		"violation one ref deeper than the first target": {
 			// The compile-time reference walk resolves #/x directly and #/y
-			// only through x's own $ref, so the checks must cover every
-			// materialized target, not just the first level.
+			// only through x's own $ref, on the pass that ref-walks the
+			// targets tolerantly. A refused target is settled, so that pass
+			// fails on it too. The checks therefore cover every materialized
+			// target, not just the first level.
 			schema: `{"$ref": "#/x", "x": {"$ref": "#/y"}, "y": {"maxItems": -1}}`,
 			err:    jsonschema.ErrNegativeBound,
 		},
@@ -70,9 +72,11 @@ func TestCompileChecksJSONPointerFallbackTargets(t *testing.T) {
 	}
 }
 
-// TestCompileFallbackTargetErrorNamesLocation pins the error path: a violation
-// in a fallback target names the JSON Pointer that materialized it, so the
-// offending keyword is addressable.
+// TestCompileFallbackTargetErrorNamesLocation pins the error path. The error
+// names the JSON Pointer that materialized the target, so the offending
+// keyword is addressable. It also names the reference that reached the target,
+// since the closure walk reports the vet's refusal where the reference
+// resolves.
 func TestCompileFallbackTargetErrorNamesLocation(t *testing.T) {
 	t.Parallel()
 
@@ -81,5 +85,8 @@ func TestCompileFallbackTargetErrorNamesLocation(t *testing.T) {
 
 	_, err = jsonschema.Compile(t.Context(), schema)
 	require.ErrorIs(t, err, jsonschema.ErrNegativeBound)
-	assert.Contains(t, err.Error(), "#/x/minLength")
+	assert.Contains(t, err.Error(), "#/x/minLength",
+		"the message names the pointer that materialized the target")
+	assert.Contains(t, err.Error(), `cannot resolve $ref "#/x"`,
+		"the message names the reference the walk refused the target at")
 }

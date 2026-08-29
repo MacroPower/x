@@ -190,10 +190,10 @@ func (r *Registry) Clone() *Registry {
 
 // NewSession derives a per-run [Session] sharing r's maps by reference until the
 // first write clones them via [Session.EnsureOwned]. Requiring vet at
-// construction forces every session to state its vetting policy: vet is the
-// [FallbackVet] applied to each JSON-pointer fallback target the session
-// materializes, and nil is reserved for the compile-time session, whose
-// targets the compiler vets in one shared pass after resolution.
+// construction forces every session to state its vetting policy. The vet is
+// the [FallbackVet] the session applies to each JSON-pointer fallback target
+// it materializes, and every production session passes one. Only a test whose
+// walk materializes no target passes nil, which skips vetting.
 func (r *Registry) NewSession(vet FallbackVet) *Session {
 	return &Session{reg: r, fallbackVet: vet}
 }

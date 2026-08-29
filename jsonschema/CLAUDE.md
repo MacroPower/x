@@ -48,9 +48,10 @@ The package has two independent halves sharing the `Schema` type:
   (`refclosure.go`) is the reference-closure walk both drive. It ref-walks a
   document, whose resolutions fetch and register further documents, and
   repeats until the frontier is empty; the caller injects the per-document
-  and per-fallback-target work as hooks (`Compile` vets each document and
-  folds it into its node index; `Inline` vets through `closureDoc`, which
-  no-ops on a document `fetchDoc` already vetted). `Compile` runs it as
+  work as one hook (`Compile` vets each document and folds it into its node
+  index; `Inline` vets through `closureDoc`, which no-ops on a document
+  `fetchDoc` already vetted). A fallback target needs no hook, since every
+  session vets each one where it materializes it. `Compile` runs it as
   `compileRefPasses`, and `Inline` runs it in `walkClosure` before expanding
   anything, so both vet a document reachable only through another document's
   reference. `Inline` also runs `VetDoc` over its pristine root and over
@@ -66,41 +67,44 @@ The package has two independent halves sharing the `Schema` type:
   meets one. Second, `WithRefFallback` suspends the walk's refusals apart from
   an identifier collision, because a fallback answers one failing reference at
   a time and a document outside the expansion has no reference in the
-  expansion for a policy to answer; the closure is the same either way. Two
-  attribution gaps remain, and `doc.go` states the first. The validator's fetch
+  expansion for a policy to answer; the closure is the same either way. One
+  attribution gap remains, and `doc.go` states it. The validator's fetch
   walks a fetched document's nested absolute `$id` resources into the shared
   registry, giving each its own frontier entry and locator, while `fetchDoc`
   and `prefetchDoc` route them through `RegisterFallback`, which never touches
-  `Registry().URI`. For the second, the inliner's session vets a JSON-pointer
-  fallback target where it materializes it, while `Compile` carries a nil
-  `FallbackVet` and vets targets after the document frontier.
-  A graph whose fetched document is malformed both at a pointer target and
-  elsewhere therefore makes the two name different sentinels. Both engines
-  vet whole documents either way, so the refusals agree; only the locator
-  differs, which is why the agreement tests assert on the document URI
-  rather than an exact pointer. A strict walk fetches through `prefetchDoc`,
-  which registers without vetting. The walk's per-document hook then vets
-  each document as the sorted frontier reaches it, the order `Compile` vets
-  in. Vetting inside the fetch would report whichever document a reference
-  named first. One `schemavet.Vetter` serves the root, the substitutes, and
-  the fallback targets, and the session's `FallbackVet` is a method over it,
-  so `vetTarget` re-mints a materialized pointer target rather than
-  re-checking it where the inliner records it; `fetchDoc` keeps a fresh
-  vetter per remote, since each fetched document is independent.
+  `Registry().URI`. Both engines vet the whole document whichever route a
+  nested resource takes, so the refusals agree; only the locator differs,
+  which is why the agreement tests assert on the document URI rather than an
+  exact pointer. A strict walk fetches through `prefetchDoc`, which registers
+  without vetting. The walk's per-document hook then vets each document as the
+  sorted frontier reaches it, the order `Compile` vets in. Vetting inside the
+  fetch would report whichever document a reference named first. Each engine
+  holds one `schemavet.Vetter` over the root and the fallback targets, plus
+  the substitutes in the inliner, and `Compile` extends it to the documents
+  its walk fetches. `Compile`'s session takes that vetter's `Vet` method as
+  its `FallbackVet` directly, and the inliner's session takes
+  `inliner.fallbackVet`, which runs the same vetter. Both engines therefore
+  vet a pointer target where the walk materializes it and report whichever
+  fault the walk meets first. In the inliner that also lets `vetTarget`
+  re-mint a materialized pointer target rather than re-checking it where the
+  inliner records it. `Compile` builds its vetter in `buildRefReg`, since the
+  session needs the method, and drops it beside the compile context; a
+  run-time late fetch keeps a fresh vetter, as `fetchDoc` does per remote,
+  since each fetched document is independent.
   `inliner.vetProfile` supplies the one narrowing. Under `WithRetrievalBase`
   the resolution walk reads `$id` as inert, so `schemavet.Profile.InertIDs`
-  skips the `$id` domain check in every document the run holds. The
-  inliner's own index walk takes the currency at its entry points,
-  `recordDoc` for a document root and `recordNode` for a materialized
-  pointer target, so the walk behind them reaches no schema the run has not
-  vetted. The pointer-graph policy is
-  separate from that vetting and has rules at two boundaries, the root document
-  and the graphs that arrive from outside the package. `checkSchemaTree`
-  (`validate.go`) rejects a root whose sub-schema pointers alias or cycle, and
-  both `Compile` and `Inline` run it over the document they are given, so the two
-  engines make the same demand of a root's sub-schema graph. A loop closing
-  through a value field is the shape that check skips, so each engine runs a
-  cycle check beside it over the same root. Both word the refusal through one
+  skips the `$id` domain check in every document the run holds. The inliner's
+  own index walk takes the currency at
+  its entry points, `recordDoc` for a document root and `recordNode` for a
+  materialized pointer target, so the walk behind them reaches no schema the
+  run has not vetted. The pointer-graph policy is separate from that vetting
+  and has rules at two boundaries, the root document and the graphs that
+  arrive from outside the package. `checkSchemaTree` (`validate.go`) rejects a
+  root whose sub-schema pointers alias or cycle, and both `Compile` and
+  `Inline` run it over the document they are given, so the two engines make
+  the same demand of a root's sub-schema graph. A loop closing through a value
+  field is the shape that check skips, so each engine runs a cycle check
+  beside it over the same root. Both word the refusal through one
   `cycleError` helper. `Compile` reads `schemaclone.HasCycle` through
   `checkSchemaCycle` and keeps no copy, since its root stays the caller's own
   value; `Inline` reads the same report off the `cloneCheckedSchema` copy it
@@ -269,33 +273,35 @@ The package has two independent halves sharing the `Schema` type:
   its `Result`. A compiled `Registry` is shared by reference; each run derives a
   `Session` that copies the registry on write, and `Registry.NewSession`
   requires a `FallbackVet` -- the vet, minting `schemavet.Node`, applied to
-  each JSON-pointer fallback target the session materializes; nil is reserved
-  for the compile-time session, whose targets the compiler vets in one
-  shared pass. The `ErrRefResolve`, `ErrNotResolved`, and `ErrIDCollision`
-  sentinels live here and are re-exported from `errors.go` so `errors.Is`
-  identity holds across the boundary. `ErrIDCollision` carries the registration
-  rule both engines share. The registration refuses a fetched document
-  claiming a `$id` or anchor another document already holds rather than merging
-  it, and judges a substitute on its `$id` alone. Detection is a merge-time
-  check against a scratch walk, so the walk itself stays infallible and a
-  refused document leaves no half-written registry behind.
-  `Session.RegisterFetched` is the one path both engines take for a fetched
-  document. A collision settles at the fetch, ahead of the structural vet, so
-  a document carrying both faults fails with one sentinel wherever it is read;
-  `Session.CheckFetched` serves the two callers that vet in between. A
-  configured fallback suspends the closure walk's other refusals but not this
-  one. `doc.go` states the rest of the rule. Sub-schema traversal, which it
-  cannot name without importing the parent, is injected as a `Deps` closure
-  (deep cloning stays parent-side in the fetch closures), and the two
-  draft-dependent branches use its own two-value `Draft` enum; the sibling
-  leaf `internal/schemavet` is its one internal import), and
-  `internal/schemavet` (the single structural-vetting policy and the mint for
-  the vetted-currency types. A `Vetter` runs the structure, type-name, bound,
-  items-array, and identifier checks, and only `Vetter.VetDoc`/`Vetter.Vet` can
-  produce a `Doc`/`Node`, whose unexported fields make the compiler enforce
-  that vetting ran. The nine vetting sentinels live here, re-exported from
-  `errors.go` on the refresolve convention. It carries its own four-flag
-  `Profile` (three draft flags converted by `draftProfile.vetProfile`,
+  each JSON-pointer fallback target the session materializes. Every production
+  session passes one, so the resolution marks a refusal on the `Result` and
+  the closure walk treats it as settled, unlike an ordinary pointer miss. Only
+  a test whose walk materializes no target passes nil, which skips vetting.
+  The `ErrRefResolve`, `ErrNotResolved`, and `ErrIDCollision` sentinels live
+  here and are re-exported from `errors.go` so `errors.Is` identity holds
+  across the boundary. `ErrIDCollision` carries the registration rule both
+  engines share. The registration refuses a fetched document claiming a `$id`
+  or anchor another document already holds rather than merging it, and judges
+  a substitute on its `$id` alone. Detection is a merge-time check against a
+  scratch walk, so the walk itself stays infallible and a refused document
+  leaves no half-written registry behind. `Session.RegisterFetched` is the one
+  path both engines take for a fetched document. A collision settles at the
+  fetch, ahead of the structural vet, so a document carrying both faults fails
+  with one sentinel wherever it is read; `Session.CheckFetched` serves the two
+  callers that vet in between. A configured fallback suspends the closure
+  walk's other refusals but not this one. `doc.go` states the rest of the
+  rule. Sub-schema traversal, which it cannot name without importing the
+  parent, is injected as a `Deps` closure (deep cloning stays parent-side in
+  the fetch closures), and the two draft-dependent branches use its own
+  two-value `Draft` enum; the sibling leaf `internal/schemavet` is its one
+  internal import), and `internal/schemavet` (the single structural-vetting
+  policy and the mint for the vetted-currency types. A `Vetter` runs the
+  structure, type-name, bound, items-array, and identifier checks, and only
+  `Vetter.VetDoc`/`Vetter.Vet` can produce a `Doc`/`Node`, whose unexported
+  fields make the compiler enforce that vetting ran. The nine vetting
+  sentinels live here, re-exported from `errors.go` on the refresolve
+  convention. It carries its own four-flag `Profile` (three draft flags
+  converted by `draftProfile.vetProfile`,
   mirroring `toRefDraft`, plus `InertIDs`, which the inliner sets from
   `WithRetrievalBase` so the `$id` domain check follows the resolution walk
   that ignores the keyword) and its own `Entries` traversal, whose pointer
@@ -566,10 +572,10 @@ contract the tests enforce.
     through another document's reference. One identifier rule closes the
     colliding-`$id` one, and `TestRefEnginesAgreeOnCollidingIDs` asserts it.
     The `$id` pool therefore draws the root's URI and both retrieval URIs, and
-    the fuzzer searches colliding graphs for a disagreement. A graph whose
-    `$id`s collide gives up the unknown-keyword malformed slot, the one
-    placement whose cause the two engines reach in different passes, so the rig
-    compares causes rather than which fault an engine reached first.
+    the fuzzer searches colliding graphs for a disagreement. Every malformed
+    slot is drawable on every graph, colliding `$id`s included, since both
+    engines vet a fallback target where the walk materializes it and so name
+    the fault the walk reaches first.
   - `suiteFiles` in `suite_test.go` is the single enumeration of the vendored
     suite. The three conformance tests and the differential all draw their files
     from it, so the differential cannot drift from what the conformance tests

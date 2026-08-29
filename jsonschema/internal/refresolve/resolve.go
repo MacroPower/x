@@ -26,9 +26,11 @@ type Result struct {
 	// Target is the resolved schema, nil on failure.
 	Target *jsonschema.Schema
 
-	// Err wraps [ErrRefResolve] when the fetch closure reported a failure or
-	// the session's [FallbackVet] rejected a materialized JSON-pointer target;
-	// nil otherwise (including an ordinary unresolved fragment).
+	// Err carries the failure the resolution met. The fetch closure reports
+	// one; the session's [FallbackVet] reports the other when it refuses a
+	// materialized JSON-pointer target. Err is nil otherwise, including for an
+	// ordinary unresolved fragment. Each vet states its own wrapping, so a
+	// rejection wraps [ErrRefResolve] only when that vet wraps it.
 	Err error
 
 	// DocumentURI is the located document's base URI for a non-fragment ref, ""
@@ -52,6 +54,14 @@ type Result struct {
 	// later fetch changes the answer and the compile-time walk has nothing to
 	// defer to.
 	DocumentMiss bool
+
+	// TargetRejected reports that the session's [FallbackVet] refused a
+	// materialized JSON-pointer target, with the vet's error in Err. The
+	// refusal is a settled answer, since the target is a fragment of a
+	// document the run already holds and no later fetch changes it. That
+	// separates it from an unlocatable pointer inside a present document,
+	// which arrives with a nil Err and which a tolerant walk defers.
+	TargetRejected bool
 }
 
 // ResolveRef resolves a $ref string to a target, caching a successful result
@@ -112,7 +122,10 @@ func (s *Session) resolveRefUncached(schema *jsonschema.Schema, ref string, fetc
 
 			t, ptrErr := s.ResolveJSONPointer(resourceRoot, raw, encoded)
 
-			return Result{Target: t, Err: ptrErr}
+			// A non-nil error from the pointer resolution is the fallback
+			// vet's refusal and nothing else; an unlocatable pointer answers
+			// (nil, nil).
+			return Result{Target: t, Err: ptrErr, TargetRejected: ptrErr != nil}
 		}
 
 		// Anchor reference.
@@ -160,7 +173,9 @@ func (s *Session) resolveRefUncached(schema *jsonschema.Schema, ref string, fetc
 			return Result{Target: t, DocumentURI: baseURI, Fragment: fragment}
 		}
 
-		return Result{Err: ptrErr}
+		// The fragment-only path above holds the same invariant. A non-nil
+		// error from the pointer resolution is the fallback vet's refusal.
+		return Result{Err: ptrErr, TargetRejected: ptrErr != nil}
 	}
 
 	// Anchor within resolved schema, resolved via the shared cross-document

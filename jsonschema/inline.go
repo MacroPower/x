@@ -547,6 +547,12 @@ func (in *inliner) run(s *Schema) (*Schema, error) {
 // reference in the expansion for a policy to answer, so walkPair replays each
 // other failure at the references that do reach it.
 //
+// The mode decides a target that [inliner.fallbackVet] rejects the same way it
+// decides a document. Under a strict walk the rejection refuses the run at
+// materialization, the same point at which Compile refuses it. Under a
+// tolerant walk it waits in the session's pointer cache until the ref that
+// expands the target consults the policy through [inliner.expandTarget].
+//
 // The walk resolves a $dynamicRef to reach the document it names, but a
 // $dynamicRef that resolves to nothing never refuses the walk, whatever the
 // mode. Inline has no static expansion for the keyword and answers
@@ -565,7 +571,6 @@ func (in *inliner) walkClosure(pristine *Schema) error {
 		fetch:      fetch,
 		root:       pristine,
 		onDoc:      in.closureDoc,
-		onTarget:   nil,
 		dynamicRef: in.profile.dynamicRef,
 		strictRef:  strict,
 		strictDyn:  false,

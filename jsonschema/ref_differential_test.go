@@ -354,14 +354,14 @@ func parseRefGraph(t *testing.T, root string, remotes map[string]string) (*jsons
 }
 
 // TestRefEnginesAgreeOnPastFixes runs one reference graph per $ref fix,
-// thirteen rows over ten commits in six classes: a fetched document claiming a
-// URI another document holds, structural vetting of JSON-pointer fallback
-// targets, the fallback cache key, fallback registry merge order, anchor
-// resolution under a fetched document's canonical base, and vetting the whole
-// closure, which covers a document only another document's reference reaches
-// and the order the two engines report a violation in. A regression in one of
-// those classes fails here with the graph in view rather than waiting for the
-// fuzzer to rediscover it.
+// fourteen rows in six classes: a fetched document claiming a URI another
+// document holds, structural vetting of JSON-pointer fallback targets, the
+// fallback cache key, fallback registry merge order, anchor resolution under a
+// fetched document's canonical base, and vetting the whole closure, which
+// covers a document only another document's reference reaches and the order
+// the two engines report a violation in. One row carries two independent
+// faults. A regression in one of those classes fails here with the graph in
+// view rather than waiting for the fuzzer to rediscover it.
 //
 // Several rows misspell a type name, "strnig" and "nteger". Those are the
 // invalid type names the structural vet rejects, and correcting them guts the
@@ -400,6 +400,23 @@ func TestRefEnginesAgreeOnPastFixes(t *testing.T) {
 				}
 			`),
 			instances: []string{`[]`, `["a"]`, `[1]`, `"text"`},
+		},
+		"collision beside a malformed fallback target": {
+			root: stringtest.Input(`
+				{
+					"$schema": "http://json-schema.org/draft-07/schema#",
+					"$id": "https://ex.test/root.json",
+					"x-custom": {"sub": {"type": "strnig"}},
+					"properties": {
+						"a": {"$ref": "#/x-custom/sub"},
+						"b": {"$ref": "https://ex.test/b.json"}
+					}
+				}
+			`),
+			remotes: map[string]string{
+				"https://ex.test/b.json": `{"$id": "https://ex.test/root.json", "type": "array"}`,
+			},
+			instances: []string{`{}`, `{"a": "text"}`, `{"b": []}`, `null`},
 		},
 		"violation in a transitively reached document": {
 			root: stringtest.Input(`

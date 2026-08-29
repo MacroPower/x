@@ -1137,20 +1137,25 @@
 // A remote document first fetched during a validation run is vetted with the
 // same structural checks Compile applies to compile-time-fetched documents:
 // field structure, identifiers, type names, non-negative bounds, and under
-// [Draft2020] the Draft-7 items array. A JSON-pointer fallback target
-// materialized during a run (a schema carried inside an unknown keyword or
-// the internals of a non-applicator keyword) is vetted with the same checks
-// minus the identifier pass, which needs a document base no pointer target
-// carries, matching the vet Compile runs over the fallback targets its own
-// reference walk materializes. A violation makes the referencing ref fail
-// with an error wrapping [ErrRefResolve] that also wraps the check's
-// sentinel ([ErrInvalidType], [ErrNegativeBound], [ErrNonPositiveMultipleOf],
+// [Draft2020] the Draft-7 items array. A JSON-pointer fallback target (a
+// schema carried inside an unknown keyword or the internals of a
+// non-applicator keyword) is vetted with the same checks minus the identifier
+// pass, which needs a document base no pointer target carries. Both engines
+// vet a target where they materialize it, so the reference that reaches the
+// target is the one that reports its violation.
+//
+// The vet refuses the schema with the check's sentinel ([ErrInvalidType],
+// [ErrNegativeBound], [ErrNonPositiveMultipleOf],
 // [ErrItemsArrayUnderDraft2020], [ErrConflictingSchemaFields],
-// [ErrNilSubschema], [ErrDuplicatePropertyOrder], or, for a fetched
-// document, [ErrInvalidID] or [ErrMisplacedVocabulary]), rather than letting
-// the document silently mis-validate. [Inline] applies this same vetting
-// policy to every document its own reference closure reaches, its root
-// included (see Reference Inlining below).
+// [ErrNilSubschema], [ErrDuplicatePropertyOrder], or, for a fetched document,
+// [ErrInvalidID] or [ErrMisplacedVocabulary]) rather than letting the schema
+// silently mis-validate. A validation run and [Inline] both fail the
+// referencing ref with an error wrapping [ErrRefResolve] and that sentinel.
+// [Compile] reports the bare sentinel. It frames a fallback target's violation
+// under the failing reference, and a fetched document's under that document's
+// own locator. [Inline] applies this same vetting policy to every document its
+// own reference closure reaches, its root included (see Reference Inlining
+// below).
 //
 // A fetched document must claim no identifier another document already holds.
 // A $id that resolves to a URI another document already holds, or an $anchor or
@@ -1168,6 +1173,12 @@
 // Both engines check identifiers before the structural checks, so a document
 // carrying both an identifier collision and a structural violation fails with
 // [ErrIDCollision] rather than the structural sentinel.
+//
+// Across a graph the reference walk decides instead. Both engines drive one
+// walk in the same order and vet each document and each fallback target at the
+// point the walk reaches it, so a graph carrying a collision in one place and a
+// malformed fallback target in another fails with whichever fault the walk
+// meets first, and the two engines name the same one.
 //
 // Three cases make no claim. A document registers under the URI it was
 // fetched from whatever its $id says, so the near-universal remote whose $id

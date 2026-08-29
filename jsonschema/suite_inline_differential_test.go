@@ -2,6 +2,7 @@ package jsonschema_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -188,6 +189,76 @@ func TestRefEnginesAgreeOnCollidingIDs(t *testing.T) {
 				assert.Containsf(t, err.Error(), tc.holder,
 					"%s must name the document already holding the URI", engine)
 			}
+		})
+	}
+}
+
+// TestRefEnginesAgreeOnCollisionBesideMalformedTarget pins which of two
+// independent faults both engines report when one graph carries both. One
+// document claims the root's URI, and an unknown keyword holds a malformed
+// JSON-pointer target. Each engine vets a fallback target where its session
+// materializes it, and each drives the same closure walk over sorted map keys.
+// The reference the walk reaches first therefore decides the sentinel, and
+// both engines name the same one.
+//
+// The two rows differ only in which property key carries which reference, which
+// is what makes the walk order the variable under test. Either fault alone
+// makes both engines refuse the graph, so a row proves nothing on its own; the
+// pair proves the order is the reference order and not a fixed precedence
+// between the two checks.
+func TestRefEnginesAgreeOnCollisionBesideMalformedTarget(t *testing.T) {
+	t.Parallel()
+
+	const (
+		root = `{"$schema":"http://json-schema.org/draft-07/schema#",` +
+			`"$id":"https://ex.test/root.json",` +
+			`"x-custom":{"sub":{"type":"strnig"}},` +
+			`"properties":{%q:{"$ref":"#/x-custom/sub"},%q:{"$ref":"https://ex.test/b.json"}}}`
+
+		collidingDoc = `{"$id":"https://ex.test/root.json","type":"array"}`
+	)
+
+	tests := map[string]struct {
+		targetKey string
+		remoteKey string
+		want      error
+		other     error
+	}{
+		"target first": {
+			targetKey: "a",
+			remoteKey: "b",
+			want:      jsonschema.ErrInvalidType,
+			other:     jsonschema.ErrIDCollision,
+		},
+		"collision first": {
+			targetKey: "b",
+			remoteKey: "a",
+			want:      jsonschema.ErrIDCollision,
+			other:     jsonschema.ErrInvalidType,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			documents := map[string]string{"https://ex.test/b.json": collidingDoc}
+
+			schema, resolver := parseRefGraph(t,
+				fmt.Sprintf(root, tc.targetKey, tc.remoteKey), documents)
+
+			_, compileErr := jsonschema.Compile(t.Context(), schema, jsonschema.WithRefResolver(resolver))
+			_, inlineErr := jsonschema.Inline(t.Context(), schema, jsonschema.WithRefResolver(resolver))
+
+			for engine, err := range map[string]error{"Compile": compileErr, "Inline": inlineErr} {
+				require.ErrorIsf(t, err, tc.want,
+					"%s must report the fault the walk reaches first", engine)
+				require.NotErrorIsf(t, err, tc.other,
+					"%s must stop at the first fault rather than report both", engine)
+			}
+
+			assert.Equal(t, refErrSignature(compileErr), refErrSignature(inlineErr),
+				"both engines must refuse the two-fault graph for the same cause")
 		})
 	}
 }

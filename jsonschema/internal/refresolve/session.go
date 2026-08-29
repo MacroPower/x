@@ -32,15 +32,14 @@ type Session struct {
 
 	// The schemas the JSON-pointer fallback materialized this session, in
 	// materialization order, each with the location that produced it. The
-	// compile-time session exposes them via [Session.FallbackTargets] so
-	// content checks extend to exactly the schemas the reference walk resolved.
+	// session exposes them via [Session.FallbackTargets] so the reference
+	// closure walk can ref-walk each target and reach the documents behind it.
 	fallbackTargets []FallbackTarget
 
 	// Structural vet applied to each schema the JSON-pointer fallback
 	// materializes, before registration (the [FallbackVet] passed to
-	// [Registry.NewSession]). Nil skips vetting: only the compile-time
-	// session passes nil, because the compiler vets its
-	// [Session.FallbackTargets] in one shared pass after resolution.
+	// [Registry.NewSession]). Every production session passes one. Only a test
+	// whose walk materializes no target passes nil, which skips vetting.
 	fallbackVet FallbackVet
 
 	refCache         map[refCacheKey]Result
@@ -209,13 +208,14 @@ func (s *Session) LookupDynamicAnchor(key string) (*jsonschema.Schema, bool) {
 // FallbackVet is the structural vet a session applies to each schema the
 // JSON-pointer fallback materializes, before it is registered. On success it
 // returns the minted [schemavet.Node], proof the target passed the structural
-// checks; a non-nil error rejects the target, so the resolution reports the
-// error instead of a target and an ill-formed schema reached only through the
-// fallback cannot silently mis-validate or inline. Every session names its
-// policy at construction ([Registry.NewSession]): the validator's per-run
-// sessions and the inliner's session pass their vet, and only the compile-time
-// session passes nil, because the compiler vets its [Session.FallbackTargets]
-// in one shared pass instead.
+// checks. A non-nil error rejects the target, so the resolution reports the
+// error and [Result.TargetRejected] instead of a target, and an ill-formed
+// schema reached only through the fallback cannot silently mis-validate or
+// inline. Every session names its policy at construction
+// ([Registry.NewSession]), and every production session passes a vet. The
+// compile-time session, the validator's per-run sessions, and the inliner's
+// session all vet each target where they materialize it. Only a test whose
+// walk materializes no target passes nil, which skips vetting.
 type FallbackVet func(sc *jsonschema.Schema, locator string) (schemavet.Node, error)
 
 // ResolveJSONPointer resolves a JSON Pointer fragment against a schema. Typed
@@ -243,9 +243,11 @@ func (s *Session) ResolveJSONPointer(
 // resolveJSONPointerViaJSON resolves a JSON Pointer by walking the schema's JSON
 // encoding rather than its typed fields, reaching locations typed traversal
 // cannot. A located schema is freshly unmarshaled and unknown to the compiled
-// registries; it is vetted (when a vet is installed) and registered through the
-// per-run fallback registries with the base URI in effect at its location.
-// Results, including vet rejections, are cached per (root, pointer).
+// registries. The session vets it (when a vet is installed) and registers it
+// through the per-run fallback registries with the base URI in effect at its
+// location. A rejected target registers nothing and joins no frontier, so the
+// walk never reads past it. Results, including vet rejections, are cached per
+// (root, pointer).
 func (s *Session) resolveJSONPointerViaJSON(
 	root *jsonschema.Schema, segments []string,
 ) (*jsonschema.Schema, error) {
@@ -292,8 +294,9 @@ func (s *Session) resolveJSONPointerViaJSON(
 }
 
 // FallbackTarget pairs a schema the JSON-pointer fallback materialized with the
-// location it was resolved from, so a compile-time caller can run content
-// checks over exactly the schemas the reference walk materialized.
+// location it was resolved from, so the reference closure walk can ref-walk
+// exactly the schemas the session materialized and reach the documents their
+// own references name.
 type FallbackTarget struct {
 	// Schema is the freshly-unmarshaled schema at the pointer target.
 	Schema *jsonschema.Schema

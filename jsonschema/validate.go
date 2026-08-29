@@ -298,6 +298,17 @@ type validator struct {
 	// copy-on-write before its first write.
 	refFetch refresolve.Fetch
 
+	// The one vetter every compile-time pass shares. It vets the root
+	// document, each document the reference walk fetches, and, as the
+	// compile-time session's FallbackVet, each JSON-pointer fallback target
+	// that session materializes. Its visited sets span all three, so the
+	// vetter checks a node reached both locally and through a remote URI once
+	// and attributes it to the pass that reached it first. Compile clears it beside
+	// the compile context. A validation run vets through its own session's
+	// FallbackVet, and through a fresh vetter per late fetch
+	// (checkFetchedDocument).
+	vetter *schemavet.Vetter
+
 	// The index is the node-identity index over the root document: each
 	// schema reachable through sub-schema keywords has a dense id, and the
 	// per-node caches below are slices indexed by that id. Built during Compile
@@ -471,20 +482,24 @@ func toRefDraft(d Draft) refresolve.Draft {
 }
 
 // buildRefReg builds the compiled ref-resolution registry over the root document
-// (seeded with the [WithBaseURI] base, normalized by newValidator) and the
-// compile-time session the compile reference walk resolves through. The walk's
-// fetches write the shared refReg directly (via a copy-on-write-disabled fetch)
-// so remote documents fetched while compiling persist into the registry every
-// run shares.
+// (seeded with the [WithBaseURI] base, normalized by newValidator), the vetter
+// every compile-time pass shares, and the compile-time session the compile
+// reference walk resolves through. The walk's fetches write the shared refReg
+// directly (via a copy-on-write-disabled fetch) so remote documents fetched
+// while compiling persist into the registry every run shares.
 func (v *validator) buildRefReg() {
 	v.refReg = refresolve.NewRegistry(refDeps(), toRefDraft(v.draft), v.inertIDs)
 	v.refReg.Build(v.root, v.baseURI)
 
-	// A nil FallbackVet is reserved for this compile-time session: Compile
-	// vets the session's FallbackTargets itself, in compileRefPasses's shared
-	// vetter pass, so fallback targets materialized here are checked once with
-	// the root's visited sets rather than per materialization.
-	v.refSession = v.refReg.NewSession(nil)
+	// The compile-time session vets each JSON-pointer fallback target at
+	// materialization, through the same vetter the root pass and the document
+	// pass use. The walk therefore meets a malformed target at that point rather
+	// than in a later pass. The inliner's session vets at the same point, which
+	// is what makes the two engines report whichever fault the closure walk
+	// reaches first. The method value does not wrap, so Compile reports the bare
+	// vetting sentinel and refWalkError supplies the reference framing.
+	v.vetter = schemavet.NewVetter(v.profile.vetProfile())
+	v.refSession = v.refReg.NewSession(v.vetter.Vet)
 	// The fetch reads the run's context from the ctx field, so no parameter
 	// threads through the deep resolution machinery.
 	//nolint:contextcheck // See the comment above.
@@ -509,12 +524,13 @@ func (v *validator) forInstance(ctx context.Context) *validator {
 	rv.ctx = ctx
 	rv.visiting = map[visitKey]bool{}
 
-	// A JSON-pointer fallback target materialized during this run never passed
-	// through Compile's fallback vet loop (a run re-materializes targets as
-	// fresh objects, and a target inside a late-fetched document has no
-	// compile-time counterpart at all), so the same structural policy runs at
-	// materialization; a violation surfaces through the referencing ref as an
-	// error wrapping [ErrRefResolve], matching the late-fetched-document vet.
+	// A JSON-pointer fallback target materialized during this run is a fresh
+	// object no compile-time pass saw (a run re-materializes every target, and
+	// a target inside a late-fetched document has no compile-time counterpart
+	// at all), so this session vets at materialization the way the
+	// compile-time one does. A violation surfaces through the referencing ref
+	// as an error wrapping [ErrRefResolve], matching the
+	// late-fetched-document vet.
 	rv.refSession = v.refReg.NewSession(newFallbackVet(rv.profile))
 	if rv.profile.dynamicRef {
 		rv.refSession.SeedDynamicScope(rv.refSession.SchemaBase(rv.root))
@@ -1035,18 +1051,18 @@ func (v *validator) checkFetchedDocument(s *Schema, baseURI string) (schemavet.D
 	return schemavet.NewVetter(v.profile.vetProfile()).VetDoc(s, baseURI+"#", baseURI)
 }
 
-// newFallbackVet returns the [refresolve.FallbackVet] a session applies to
-// each JSON-pointer fallback target it materializes: a target carved out of
-// raw JSON in an unknown keyword never passed through a document-level vet, so
-// the check must run at materialization. The validator's per-run sessions
-// carry it for parity with Compile's fallback vet loop (a run re-materializes
-// targets as fresh objects, and a target inside a late-fetched document has no
-// compile-time counterpart at all), and the inliner's session carries it so a
-// target spliced into the output is held to the same policy a fetched document
-// is. One lazily-built vetter is shared across a session's targets, mirroring
-// the compile loop's shared visited sets, and a violation is wrapped in
-// [ErrRefResolve] so it surfaces through the referencing ref exactly like a
-// malformed-document violation.
+// newFallbackVet returns the [refresolve.FallbackVet] the validator's per-run
+// sessions apply to each JSON-pointer fallback target they materialize. A
+// target carved out of raw JSON in an unknown keyword never passed through a
+// document-level vet, so the check runs at materialization, where the
+// compile-time session and the inliner also run it.
+//
+// One lazily-built vetter is shared across a session's targets, mirroring the
+// compile-time vetter's shared visited sets. The vet wraps a violation in
+// [ErrRefResolve], so it surfaces through the referencing ref exactly like a
+// malformed-document violation. The compile-time vet is the one that does not
+// wrap, since refWalkError frames the bare sentinel under the failing
+// reference.
 func newFallbackVet(profile draftProfile) refresolve.FallbackVet {
 	var vt *schemavet.Vetter
 
@@ -1235,14 +1251,11 @@ func Compile(ctx context.Context, schema *Schema, opts ...ValidateOption) (*Vali
 	// Structurally vet the root document up front: field structure,
 	// identifiers, type names, bound domains, and (under 2020-12) the items
 	// array form, so a malformed document fails compilation instead of
-	// silently mis-validating. One vetter carries the visited sets across
-	// this root pass and the reference walk's passes over fallback targets
-	// and fetched remotes, so a node reached both locally and through a
-	// remote URI is checked once and attributed to the pass that reached it
-	// first.
-	vt := schemavet.NewVetter(v.profile.vetProfile())
-
-	rootDoc, err := vt.VetDoc(schema, "", v.baseURI)
+	// silently mis-validating. This pass reuses the vetter buildRefReg built,
+	// since the compile-time session needs its Vet method as the FallbackVet.
+	// Its visited sets carry across this root pass, the fallback targets the
+	// session materializes, and the documents the reference walk fetches.
+	rootDoc, err := v.vetter.VetDoc(schema, "", v.baseURI)
 	if err != nil {
 		//nolint:wrapcheck // The vetting error already names the document and path.
 		return nil, err
@@ -1260,34 +1273,41 @@ func Compile(ctx context.Context, schema *Schema, opts ...ValidateOption) (*Vali
 	// returned Validator only reads these caches once shared across goroutines.
 	v.precompute()
 
-	// Resolve every reference reachable from the root, fetching remote
-	// documents through the resolver and vetting each document and fallback
-	// target the walk uncovers.
+	// Resolve every reference reachable from the root, fetching and vetting
+	// each remote document the walk uncovers. The session vets each fallback
+	// target as it materializes it, so the walk needs no pass of its own.
 	//nolint:contextcheck // The compile context rides on the ctx field set above.
-	err = v.compileRefPasses(vt)
+	err = v.compileRefPasses()
 	if err != nil {
 		return nil, err
 	}
 
-	// Drop the compile context so the cached validator never holds a stale or
-	// canceled context; each validation run supplies its own via forInstance.
+	// Drop the compile-only state. The cached validator then holds no stale or
+	// canceled context, and releases the walk's session and the vetter's
+	// visited sets. Each validation run supplies its own through forInstance,
+	// which overwrites the session and the fetch before any walk reads them.
+	// The fetch goes too, since it closes over both the session and the
+	// context.
 	v.ctx = nil
+	v.refSession = nil
+	v.refFetch = nil
+	v.vetter = nil
 
 	return &Validator{proto: v}, nil
 }
 
 // compileRefPasses runs the compile-time reference walk over the root and every
-// document it reaches, supplying the two hooks [refClosure] leaves to its
-// caller. The document hook vets each document the closure reaches with the
-// shared vetter and folds it into the node index, so its nodes hit the
-// precompute caches; a document wholly aliasing already-indexed nodes adds
-// nothing, since extend returns from == len(). The target hook vets each
-// fallback target with the same vetter, the pass the compile-time session
-// defers by carrying a nil [refresolve.FallbackVet]. The target hook does not
-// extend the precompute caches, because a validation run re-materializes
-// targets as fresh objects, so pointer-keyed caches built here could never be
-// hit.
-func (v *validator) compileRefPasses(vt *schemavet.Vetter) error {
+// document it reaches, supplying the document hook [refClosure] leaves to its
+// caller. The hook vets each document the closure reaches with the shared
+// vetter and folds it into the node index, so its nodes hit the precompute
+// caches; a document wholly aliasing already-indexed nodes adds nothing, since
+// extend returns from == len().
+//
+// A JSON-pointer fallback target needs no hook of its own. The compile-time
+// session vets each one where it materializes it, and the caches would not
+// serve it either way, since a validation run re-materializes targets as fresh
+// objects and pointer-keyed caches built here could never be hit.
+func (v *validator) compileRefPasses() error {
 	return refClosure{
 		session:    v.refSession,
 		fetch:      v.refFetch,
@@ -1296,7 +1316,7 @@ func (v *validator) compileRefPasses(vt *schemavet.Vetter) error {
 		strictRef:  true,
 		strictDyn:  true,
 		onDoc: func(s *Schema, uri string) error {
-			doc, err := vt.VetDoc(s, uri+"#", uri)
+			doc, err := v.vetter.VetDoc(s, uri+"#", uri)
 			if err != nil {
 				//nolint:wrapcheck // The vetting error already names the document and path.
 				return err
@@ -1309,11 +1329,6 @@ func (v *validator) compileRefPasses(vt *schemavet.Vetter) error {
 			}
 
 			return nil
-		},
-		onTarget: func(ft refresolve.FallbackTarget) error {
-			_, err := vt.Vet(ft.Schema, ft.Locator)
-			//nolint:wrapcheck // The vetting error already names the target's locator.
-			return err
 		},
 	}.run()
 }

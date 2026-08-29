@@ -264,7 +264,7 @@ func synthRefGraph(blob []byte) refGraphSpec {
 		}
 	}
 
-	gen.planMalformed(served, ids)
+	gen.planMalformed(served)
 
 	docs := make(map[string]*refGraphDoc, docCount)
 
@@ -527,38 +527,24 @@ const refGraphNoMalformed = "\x00none"
 // reference closure and vet every document in it, so both refuse the same
 // graph for the same cause wherever the leaf lands.
 //
-// A graph whose $ids collide drops one placement, the unknown-keyword slot,
-// because there the two engines name different causes and the rig would compare
-// which fault each reached first rather than the cause both name. Either fault
-// refuses the schema, but the engines reach them at different points. A
-// collision settles at the fetch that registers the document, while a malformed
-// JSON-pointer fallback target waits for a vetting pass, and those passes do not
-// line up. Compile vets a fallback target after its closure walk; Inline vets it
-// at materialization during expansion. A graph pairing a colliding document with
-// a malformed fallback target, in the root or in a served document, therefore
-// has Compile name ErrIDCollision and Inline name ErrInvalidType, both correct
-// answers to a graph carrying two faults. The ordering that divergence exposes
-// is independent of the identifier rule and is not the property this rig
-// asserts. The other three slots land in $defs, which both engines vet in the
-// same pass, so a collision leaves them drawable.
-func (g *refGraphGen) planMalformed(served, ids []string) {
+// Every slot is drawable on every graph, colliding $ids included. Each engine
+// vets a JSON-pointer fallback target where its own session materializes it, so
+// both meet the unknown-keyword slot at the same point in the shared closure
+// walk. In a graph pairing a colliding document with a malformed target, both
+// engines name the fault the walk reaches first, which is what makes the slot
+// comparable. TestRefEnginesAgreeOnCollisionBesideMalformedTarget pins that
+// pairing deterministically.
+func (g *refGraphGen) planMalformed(served []string) {
 	g.malformedDoc = refGraphNoMalformed
 
 	if g.cursor.Intn(20) != 0 {
 		return
 	}
 
-	// The draw runs before the discard, so the cursor consumes the same bytes
-	// either way and a blob decodes independently of the $ids beside it.
 	candidates := append([]string{""}, served...)
 	doc := candidates[g.cursor.Intn(len(candidates))]
-	slot := g.cursor.Intn(refGraphLeavesPerDoc)
 
-	if slot == refGraphLeavesPerDoc-1 && refGraphCollides(served, ids) {
-		return
-	}
-
-	g.malformedDoc, g.malformedSlot = doc, slot
+	g.malformedDoc, g.malformedSlot = doc, g.cursor.Intn(refGraphLeavesPerDoc)
 }
 
 // inCollision reports whether the document served at index i takes part in an
@@ -583,35 +569,6 @@ func inCollision(claims map[string]int, served, ids []string, i int) bool {
 	}
 
 	return id == refGraphRootURI || slices.Contains(served, id)
-}
-
-// refGraphCollides reports whether the drawn $ids make one document claim a URI
-// another already holds: the root's, another document's retrieval URI, or an
-// $id a second document also claims. Both engines refuse such a graph with
-// ErrIDCollision.
-func refGraphCollides(served, ids []string) bool {
-	claims := map[string]int{}
-
-	for _, id := range ids {
-		if id != "" {
-			claims[id]++
-		}
-	}
-
-	for i, id := range ids {
-		// A document whose $id repeats the URI it is served from claims
-		// nothing, so it is not a collision and must not cost the graph its
-		// malformed leaf.
-		if id == "" || id == served[i] {
-			continue
-		}
-
-		if id == refGraphRootURI || slices.Contains(served, id) || claims[id] > 1 {
-			return true
-		}
-	}
-
-	return false
 }
 
 // enter starts rendering one document, empty for the root.

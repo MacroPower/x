@@ -90,9 +90,9 @@ func TestCompileRemoteTransitiveBrokenRef(t *testing.T) {
 // TestCompileTransitiveFallbackTargetVetted locks in that a JSON-pointer
 // fallback target first materialized while vetting a remote's registered refs
 // (a fragment ref two remote hops from the root) is structurally vetted at
-// Compile. The identical shape one hop deep fails Compile; before the
-// post-loop vet pass, the two-hop shape compiled cleanly and then failed
-// every Validate run with a ref-resolve error instead.
+// Compile. The identical shape one hop deep fails Compile. Without that vet
+// the two-hop shape compiles cleanly and then fails every Validate run with a
+// ref-resolve error instead.
 func TestCompileTransitiveFallbackTargetVetted(t *testing.T) {
 	t.Parallel()
 
