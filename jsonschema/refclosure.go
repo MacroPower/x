@@ -58,10 +58,9 @@ type refClosure struct {
 	fetch refresolve.Fetch
 
 	// The document the walk starts from, which the walk reports with an empty
-	// locator. The
-	// walk visits it before the registry frontier, so a reference in it
-	// resolves and caches its answer before any fetch can change what a later
-	// document registers.
+	// locator. The walk visits it before the registry frontier, so a reference
+	// in it resolves and caches its answer before any fetch can change what a
+	// later document registers.
 	root *Schema
 
 	// Runs for each registry document the walk reaches, in key-sorted order.

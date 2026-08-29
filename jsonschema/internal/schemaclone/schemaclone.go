@@ -11,18 +11,51 @@
 // and a schema riding in an unknown keyword stays a schema. No graph shape
 // defeats the copy, so [Clone] has no error return. A caller that must not
 // hold a cyclic graph, because something downstream marshals it, takes the
-// same copy through [CloneChecked] and reads the cycle report. A caller that
-// needs the report and not the copy calls [HasCycle].
+// same copy through [CloneChecked] and reads the cycle report, which names
+// where the loop closes. A caller that needs the report and not the copy calls
+// [FindCycle].
 package schemaclone
 
 import (
 	"encoding/json"
+	"fmt"
+	"maps"
 	"reflect"
+	"slices"
+	"strconv"
+	"strings"
 
 	"github.com/google/jsonschema-go/jsonschema"
 
+	"go.jacobcolvin.com/x/jsonschema/internal/jsonptr"
+	"go.jacobcolvin.com/x/jsonschema/internal/keyword"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemafield"
 )
+
+// Cycle names where a loop closes. Both members are RFC 6901 JSON Pointers
+// rooted at the schema the walk started from, so that schema itself renders as
+// the empty string.
+//
+// Where a graph holds more than one loop, the report names one of them, and
+// names the same one on every rerun. The field table fixes which keyword the
+// walk descends first, and every container it descends walks its members in
+// sorted order. One shape escapes that guarantee. A map keyed by anything but
+// a string sorts on each key's printed form, so two keys printing alike hold
+// the order Go's map iteration gave them, which a rerun may vary.
+//
+// Two positions render approximately, because [encoding/json] writes the value
+// under a name no pointer segment recovers. A struct field tagged json:"-"
+// renders under its Go name, though the output holds no such key. An embedded
+// struct renders as a segment of its own under its Go type name, though
+// [encoding/json] promotes its fields to the enclosing object and writes no
+// segment for the embed.
+type Cycle struct {
+	// Path is the pointer where the loop closes.
+	Path string
+
+	// Target is the pointer where the walk entered the node Path returns to.
+	Target string
+}
 
 // Clone returns a deep copy of s. Two kinds of value stay shared with the
 // source, both named below; nothing else does.
@@ -52,10 +85,10 @@ func Clone(s *jsonschema.Schema) *jsonschema.Schema {
 	return cp
 }
 
-// CloneChecked returns [Clone]'s copy along with a report of whether the source
-// holds a cycle that passes through a schema: a path returning to a *Schema it
+// CloneChecked returns [Clone]'s copy along with a report of where the source
+// closes a cycle that passes through a schema: a path returning to a *Schema it
 // is already inside, or to a container it is already inside after crossing a
-// schema.
+// schema. A nil report means the source holds neither.
 //
 // The report rides along on the walk that builds the copy, which reaches every
 // edge [json.Marshal] follows. A caller needs it when something downstream
@@ -67,24 +100,23 @@ func Clone(s *jsonschema.Schema) *jsonschema.Schema {
 // A cycle closed without passing through a schema, a container holding itself,
 // is not reported and needs no report, since [encoding/json] sees that one
 // within a single encoder and returns an ordinary error.
-func CloneChecked(s *jsonschema.Schema) (*jsonschema.Schema, bool) {
+func CloneChecked(s *jsonschema.Schema) (*jsonschema.Schema, *Cycle) {
 	c := cloner{
 		schemas:     map[*jsonschema.Schema]*jsonschema.Schema{},
 		values:      map[valueKey]any{},
-		onPath:      map[*jsonschema.Schema]bool{},
-		onPathValue: map[valueKey]int{},
+		onPath:      map[*jsonschema.Schema]int{},
+		onPathValue: map[valueKey]valueEntry{},
 	}
 
 	cp := c.schema(s)
 
-	return cp, c.cyclic
+	return cp, c.cycle
 }
 
-// HasCycle reports whether s holds a cycle whose path crosses a schema. It
-// returns the report [CloneChecked] hands back beside its copy, and nothing
-// else. It serves a caller that keeps the graph it was handed rather than a
-// copy, and still has to refuse a cyclic one because something downstream
-// marshals it.
+// FindCycle returns the cycle report [CloneChecked] hands back beside its copy,
+// and nothing else. It serves a caller that keeps the graph it was handed
+// rather than a copy, and still has to refuse a cyclic one because something
+// downstream marshals it.
 //
 // It builds the copy and drops it. The walk that finds a cycle is the walk that
 // builds the copy, since each field's own closure in the
@@ -92,27 +124,74 @@ func CloneChecked(s *jsonschema.Schema) (*jsonschema.Schema, bool) {
 // and each closure writes into a destination the walk hands it. A walk that
 // skipped the allocation would be a second implementation of the cycle rule,
 // free to drift from [CloneChecked].
-func HasCycle(s *jsonschema.Schema) bool {
-	_, cyclic := CloneChecked(s)
+func FindCycle(s *jsonschema.Schema) *Cycle {
+	_, cyc := CloneChecked(s)
 
-	return cyclic
+	return cyc
+}
+
+// valueKeywords maps a value-bearing field's Go name to the keyword its
+// contents sit under, which the path walk pushes before descending into it.
+// Extra is absent on purpose, because its own keys are top-level keywords and
+// the map walk pushes each of them. DependencyStrings and DependentRequired
+// carry a CloneDeep that never reaches the copier, so they need no entry
+// either. TestValueKeywordsCoverCopiedFields holds this map to that rule.
+var valueKeywords = map[string]string{
+	"Const":    keyword.Const,
+	"Enum":     keyword.Enum,
+	"Examples": keyword.Examples,
 }
 
 // cloner carries one Clone call's identity memos. The schemas memo pairs each
 // source schema with its copy, and the values memo does the same for the
 // containers held in the any-typed value fields. Both collapse a node reached
 // twice onto one copy, which is also what lets a cyclic walk terminate.
+//
+// The remaining fields track the current path. The two onPath maps are keyed by
+// the schemas and containers the walk is inside and record where the walk
+// entered each, a path length for a schema and a [valueEntry] for a container; path
+// holds the decoded segments leading to the position being copied; depth counts
+// the schemas crossed; and cycle keeps the first loop the walk closed. Field
+// order here answers to govet fieldalignment.
 type cloner struct {
-	schemas map[*jsonschema.Schema]*jsonschema.Schema
-	values  map[valueKey]any
-
-	// These four fields track the current path: which schemas it holds, which
-	// containers it holds and at what schema depth, how deep it runs, and
-	// whether the walk re-entered a node without leaving it first.
-	onPath      map[*jsonschema.Schema]bool
-	onPathValue map[valueKey]int
+	schemas     map[*jsonschema.Schema]*jsonschema.Schema
+	values      map[valueKey]any
+	onPath      map[*jsonschema.Schema]int
+	onPathValue map[valueKey]valueEntry
+	cycle       *Cycle
+	path        []string
 	depth       int
-	cyclic      bool
+}
+
+// valueEntry records where the walk entered a container. The schema depth tells
+// a back edge that crossed a schema from one that did not, and the path length
+// addresses the container itself.
+type valueEntry struct {
+	depth   int
+	pathLen int
+}
+
+// render writes the first n segments of the current path as an RFC 6901 JSON
+// Pointer. The empty prefix is the root, which renders as the empty string.
+func (c *cloner) render(n int) string {
+	var out strings.Builder
+
+	for _, segment := range c.path[:n] {
+		out.WriteByte('/')
+		out.WriteString(jsonptr.Escape(segment))
+	}
+
+	return out.String()
+}
+
+// reportCycle records the loop closing at the current position. The entered
+// parameter is the path length at which the walk entered the node the loop
+// returns to, so rendering that prefix gives the node's own pointer. The first
+// loop the walk finds is the one it keeps.
+func (c *cloner) reportCycle(entered int) {
+	if c.cycle == nil {
+		c.cycle = &Cycle{Path: c.render(len(c.path)), Target: c.render(entered)}
+	}
 }
 
 // enterValue records a container's copy in the memo and marks the container as
@@ -124,7 +203,7 @@ func (c *cloner) enterValue(key valueKey, keyed bool, cp any) {
 	}
 
 	c.values[key] = cp
-	c.onPathValue[key] = c.depth
+	c.onPathValue[key] = valueEntry{depth: c.depth, pathLen: len(c.path)}
 }
 
 // leaveValue takes a filled container off the path. Its memo entry stays, since
@@ -142,8 +221,8 @@ func (c *cloner) leaveValue(key valueKey, keyed bool) {
 // schema and stays unreported, since [encoding/json] catches that one on its
 // own.
 func (c *cloner) revisitValue(key valueKey) {
-	if entered, onPath := c.onPathValue[key]; onPath && c.depth > entered {
-		c.cyclic = true
+	if entry, onPath := c.onPathValue[key]; onPath && c.depth > entry.depth {
+		c.reportCycle(entry.pathLen)
 	}
 }
 
@@ -180,8 +259,8 @@ func (c *cloner) schema(s *jsonschema.Schema) *jsonschema.Schema {
 	}
 
 	if cp, seen := c.schemas[s]; seen {
-		if c.onPath[s] {
-			c.cyclic = true
+		if entered, onPath := c.onPath[s]; onPath {
+			c.reportCycle(entered)
 		}
 
 		return cp
@@ -189,7 +268,7 @@ func (c *cloner) schema(s *jsonschema.Schema) *jsonschema.Schema {
 
 	cp := new(jsonschema.Schema)
 	c.schemas[s] = cp
-	c.onPath[s] = true
+	c.onPath[s] = len(c.path)
 	c.depth++
 
 	c.fill(cp, s)
@@ -205,21 +284,54 @@ func (c *cloner) schema(s *jsonschema.Schema) *jsonschema.Schema {
 // mutable. Each field's own closure rebuilds a sub-schema container through the
 // memo, copies a container with a mutable interior value by value, or
 // reallocates the container's header.
+//
+// Fill pushes the keyword addressing each field's contents, then truncates the
+// path back, so the path always names the position being copied. A
+// single-schema field takes no push here, since its closure passes the keyword
+// itself as the child's one segment. The table's order fixes which keyword the
+// walk descends first.
 func (c *cloner) fill(dst, src *jsonschema.Schema) {
 	*dst = *src
 
 	for i := range schemafield.Fields {
 		f := &schemafield.Fields[i]
+		mark := len(c.path)
 
 		switch {
 		case f.CloneSubschemas != nil:
-			f.CloneSubschemas(dst, c.schema)
+			if f.Shape != schemafield.Single {
+				c.path = append(c.path, f.Keyword)
+			}
+
+			f.CloneSubschemas(dst, c.subschema)
+
 		case f.CloneDeep != nil:
+			if kw := valueKeywords[f.Name]; kw != "" {
+				c.path = append(c.path, kw)
+			}
+
 			f.CloneDeep(dst, c.value)
+
 		case f.CloneContainer != nil:
 			f.CloneContainer(dst)
 		}
+
+		c.path = c.path[:mark]
 	}
+}
+
+// subschema copies one sub-schema of the field being filled, appending the
+// segment that field's clone closure supplies. It appends unconditionally, so a
+// map key that is the empty string addresses its child the same way any other
+// key does.
+func (c *cloner) subschema(token string, sub *jsonschema.Schema) *jsonschema.Schema {
+	mark := len(c.path)
+	c.path = append(c.path, token)
+
+	cp := c.schema(sub)
+	c.path = c.path[:mark]
+
+	return cp
 }
 
 // schemaValue copies a schema held as a value rather than a pointer. Such a
@@ -265,7 +377,7 @@ func (c *cloner) value(v any) any {
 }
 
 // valueMap copies a JSON object, recording the copy before filling it so a map
-// holding itself terminates.
+// holding itself terminates. It walks the map's keys in sorted order.
 func (c *cloner) valueMap(m map[string]any) map[string]any {
 	if m == nil {
 		return nil
@@ -283,8 +395,12 @@ func (c *cloner) valueMap(m map[string]any) map[string]any {
 	cp := make(map[string]any, len(m))
 	c.enterValue(key, keyed, cp)
 
-	for name, elem := range m {
-		cp[name] = c.value(elem)
+	for _, name := range slices.Sorted(maps.Keys(m)) {
+		mark := len(c.path)
+		c.path = append(c.path, name)
+
+		cp[name] = c.value(m[name])
+		c.path = c.path[:mark]
 	}
 
 	c.leaveValue(key, keyed)
@@ -313,7 +429,11 @@ func (c *cloner) valueSlice(list []any) []any {
 	c.enterValue(key, keyed, cp)
 
 	for i, elem := range list {
+		mark := len(c.path)
+		c.path = append(c.path, strconv.Itoa(i))
+
 		cp[i] = c.value(elem)
+		c.path = c.path[:mark]
 	}
 
 	c.leaveValue(key, keyed)
@@ -350,7 +470,12 @@ func (c *cloner) reflectValue(rv reflect.Value) reflect.Value {
 	case reflect.Array:
 		out := reflect.New(rv.Type()).Elem()
 		for i := range rv.Len() {
+			mark := len(c.path)
+			c.path = append(c.path, strconv.Itoa(i))
+
 			out.Index(i).Set(c.reflectValue(rv.Index(i)))
+
+			c.path = c.path[:mark]
 		}
 
 		return out
@@ -403,14 +528,36 @@ func (c *cloner) reflectStruct(rv reflect.Value) reflect.Value {
 	out.Set(rv)
 
 	for i := range rv.NumField() {
-		if !rv.Type().Field(i).IsExported() {
+		field := rv.Type().Field(i)
+		if !field.IsExported() {
 			continue
 		}
 
+		mark := len(c.path)
+		c.path = append(c.path, fieldToken(field))
+
 		out.Field(i).Set(c.reflectValue(rv.Field(i)))
+
+		c.path = c.path[:mark]
 	}
 
 	return out
+}
+
+// fieldToken addresses a struct field the way [encoding/json] writes it: the
+// name its json tag gives, or the Go field name when the tag names none. Two
+// shapes render approximately rather than exactly, each for its own reason. A
+// field tagged json:"-" leaves no key in the output, so the Go name stands in
+// for a segment the output has none of. An embedded struct writes no key
+// either, since [encoding/json] promotes its fields to the enclosing object,
+// so the Go type name here is one segment more than the output carries.
+func fieldToken(field reflect.StructField) string {
+	name, _, _ := strings.Cut(field.Tag.Get("json"), ",")
+	if name == "" || name == "-" {
+		return field.Name
+	}
+
+	return name
 }
 
 // reflectSlice copies a slice, recording the copy before filling it so a slice
@@ -433,7 +580,12 @@ func (c *cloner) reflectSlice(rv reflect.Value) reflect.Value {
 	c.enterValue(key, keyed, out.Interface())
 
 	for i := range rv.Len() {
+		mark := len(c.path)
+		c.path = append(c.path, strconv.Itoa(i))
+
 		out.Index(i).Set(c.reflectValue(rv.Index(i)))
+
+		c.path = c.path[:mark]
 	}
 
 	c.leaveValue(key, keyed)
@@ -445,7 +597,8 @@ func (c *cloner) reflectSlice(rv reflect.Value) reflect.Value {
 // reaching itself terminates. Keys carry over unchanged, because
 // [encoding/json] only serializes a map whose keys are strings or scalars, and
 // copying a reference-typed key would leave the copy unequal to its source and
-// unsearchable with the source's keys.
+// unsearchable with the source's keys. Each key addresses its value by its
+// printed form, and the walk walks the keys in sorted order.
 func (c *cloner) reflectMap(rv reflect.Value) reflect.Value {
 	if rv.IsNil() {
 		return rv
@@ -463,11 +616,39 @@ func (c *cloner) reflectMap(rv reflect.Value) reflect.Value {
 	out := reflect.MakeMapWithSize(rv.Type(), rv.Len())
 	c.enterValue(key, keyed, out.Interface())
 
-	for iter := rv.MapRange(); iter.Next(); {
-		out.SetMapIndex(iter.Key(), c.reflectValue(iter.Value()))
+	for _, entry := range sortedEntries(rv) {
+		mark := len(c.path)
+		c.path = append(c.path, entry.token)
+
+		out.SetMapIndex(entry.key, c.reflectValue(rv.MapIndex(entry.key)))
+
+		c.path = c.path[:mark]
 	}
 
 	c.leaveValue(key, keyed)
 
 	return out
+}
+
+// mapEntry pairs a map key with the path segment addressing its value.
+type mapEntry struct {
+	key   reflect.Value
+	token string
+}
+
+// sortedEntries lists a map's keys beside their printed form, in sorted order
+// on that form. The order fixes which key the walk reaches first. Two keys
+// printing alike keep the order [reflect.Value.MapKeys] gave them.
+func sortedEntries(rv reflect.Value) []mapEntry {
+	entries := make([]mapEntry, 0, rv.Len())
+
+	for _, key := range rv.MapKeys() {
+		entries = append(entries, mapEntry{key: key, token: fmt.Sprint(key.Interface())})
+	}
+
+	slices.SortStableFunc(entries, func(a, b mapEntry) int {
+		return strings.Compare(a.token, b.token)
+	})
+
+	return entries
 }

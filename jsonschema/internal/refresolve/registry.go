@@ -226,9 +226,11 @@ func (r *Registry) collision(claimed, held map[string]*jsonschema.Schema, kind, 
 }
 
 // holderName names the holder of key by its own base URI. When that base is
-// the claimed key itself, printing it would repeat one URI and leave the holder
-// unnamed, so holderName uses another URI the holder is registered under
-// instead, found by the other key mapping to the same schema.
+// the claimed key itself, printing it repeats the key the claimant is claiming
+// and names nothing new, so holderName prefers another URI the holder is
+// registered under, found by the other key mapping to the same schema. A holder
+// registered under that one URI alone offers no other name, so the message
+// repeats it and lets the surrounding wording carry which document is which.
 func (r *Registry) holderName(sc *jsonschema.Schema, key string) string {
 	base := r.baseURIs[sc]
 	if base != key {

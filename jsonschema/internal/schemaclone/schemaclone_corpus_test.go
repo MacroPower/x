@@ -58,13 +58,13 @@ func TestCloneCorpusFidelity(t *testing.T) {
 	}
 }
 
-// TestHasCycleOverCorpus asserts that no vendored schema reads as cyclic. Every
-// schema in the corpora arrives through json.Unmarshal, and parsed JSON holds
-// no pointer alias or cycle, so no vendored schema can hold a genuine cycle.
-// The test guards the reverse direction. [schemaclone.HasCycle] never
-// over-reports on a real document, so the check turns away nothing the
+// TestFindCycleOverCorpus asserts that no vendored schema reads as cyclic.
+// Every schema in the corpora arrives through json.Unmarshal, and parsed JSON
+// holds no pointer alias or cycle, so no vendored schema can hold a genuine
+// cycle. The test guards the reverse direction. [schemaclone.FindCycle] never
+// reports a loop in a real document, so the check turns away nothing the
 // validation walk or the inliner is asked to accept.
-func TestHasCycleOverCorpus(t *testing.T) {
+func TestFindCycleOverCorpus(t *testing.T) {
 	t.Parallel()
 
 	files := corpusFiles(t)
@@ -75,7 +75,7 @@ func TestHasCycleOverCorpus(t *testing.T) {
 			t.Parallel()
 
 			for i, src := range schemasIn(t, path) {
-				assert.False(t, schemaclone.HasCycle(src), "schema %d must read as acyclic", i)
+				assert.Nil(t, schemaclone.FindCycle(src), "schema %d must read as acyclic", i)
 			}
 		})
 	}

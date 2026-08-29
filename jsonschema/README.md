@@ -1256,14 +1256,16 @@ container it is already inside. A container that loops without crossing a schema
 is left to `encoding/json`, which reports it as an ordinary error. A cyclic
 fetched document fails the referencing ref with `ErrRefResolve` wrapping
 `ErrSchemaNotTree`; a cyclic substitute fails with `ErrSchemaNotTree` at the
-substitution site. Both sources accept aliasing, unlike a root document,
-because every walk that reaches a registered document dedupes pointers. The
-boundary refuses a cycle because the JSON-pointer fallback marshals the
-document it searches and a cyclic schema graph has no JSON form. Non-local
-refs absolutize against the enclosing resource's base URI: its `$id`, or the
-root base set with `WithBaseURI`. That base also registers the root document
-under its URI, so a ref absolutizing back to it resolves in-memory. The same `WithBaseURI` value serves `Inline`,
-so one option configures both.
+substitution site. Either refusal names the pointer where the loop closes and
+the pointer it returns to, both rooted at the document the check walked rather
+than at the root the run started from. Both sources accept aliasing, unlike a
+root document, because every walk that reaches a registered document dedupes
+pointers. The boundary refuses a cycle because the JSON-pointer fallback
+marshals the document it searches and a cyclic schema graph has no JSON form.
+Non-local refs absolutize against the enclosing resource's base URI: its `$id`,
+or the root base set with `WithBaseURI`. That base also registers the root
+document under its URI, so a ref absolutizing back to it resolves in-memory. The
+same `WithBaseURI` value serves `Inline`, so one option configures both.
 
 The resolver receives a context with every resolution call:
 
@@ -1478,16 +1480,17 @@ Failure modes:
 - A root document whose sub-schema pointers do not form a tree, one `*Schema`
   reached through two paths or through a pointer cycle, returns an error
   wrapping `ErrSchemaNotTree`. This holds the input to the same contract
-  `Compile` holds it to, one location per node. A root whose loop closes
-  through a value field (`Const`, `Enum`, `Examples`, or `Extra`) returns the
-  same error, naming the root document rather than a location, and `Compile`
-  refuses that root with the same message. A document reached through a resolver
-  or a fallback is held to the weaker no-cycle rule instead, and a node it
-  shares between two positions is expanded once, at the first location the walk
-  reaches. That sharing survives into the result, so an output built from an
-  aliased resolver document or substitute is not a tree and `Compile` rejects
-  it. Only a hand-built graph can carry such sharing; a parsed document never
-  does.
+  `Compile` holds it to, one location per node. A root whose loop closes through
+  a value field (`Const`, `Enum`, `Examples`, or `Extra`) returns the same
+  error, naming the pointer where the loop closes and the pointer it returns to,
+  and `Compile` refuses that root with the same message. Where a root holds
+  several loops, the message names one of them, and both engines name it. A
+  document reached through a resolver or a fallback is held to the weaker
+  no-cycle rule instead, and a node it shares between two positions is expanded
+  once, at the first location the walk reaches. That sharing survives into the
+  result, so an output built from an aliased resolver document or substitute is
+  not a tree and `Compile` rejects it. Only a hand-built graph can carry such
+  sharing; a parsed document never does.
 - A ref whose target is a node the walk is already inside closes a reference
   cycle and returns an error wrapping `ErrRefCycle`, since a cyclic reference
   graph has no finite expansion. The walk marks every node it enters, the root

@@ -30,12 +30,18 @@ type hidden struct {
 // must reach those the way encoding/json's reflection would, so the container is
 // rebuilt and the schema inside it routes through the same memo the sub-schema
 // walk uses.
+//
+// Each row also pins the cycle report, nil where the graph holds no loop. The
+// pinned pointers show the reflection walk pushes a segment at every edge it
+// follows. A typed slice addresses its element by index, a typed map by its
+// printed key, and a struct by the name its json tag gives.
 func TestCloneTypedContainers(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]struct {
 		build func() *jsonschema.Schema
 		check func(t *testing.T, src, cp *jsonschema.Schema)
+		want  *schemaclone.Cycle
 	}{
 		"cycle through typed schema slice in Extra": {
 			build: func() *jsonschema.Schema {
@@ -51,6 +57,7 @@ func TestCloneTypedContainers(t *testing.T) {
 				require.True(t, ok, "the copy keeps the container's Go type")
 				assert.Same(t, cp, list[0])
 			},
+			want: &schemaclone.Cycle{Path: "/x/0"},
 		},
 		"cycle through typed schema map in Extra": {
 			build: func() *jsonschema.Schema {
@@ -66,6 +73,7 @@ func TestCloneTypedContainers(t *testing.T) {
 				require.True(t, ok, "the copy keeps the container's Go type")
 				assert.Same(t, cp, m["y"])
 			},
+			want: &schemaclone.Cycle{Path: "/x/y"},
 		},
 		"two-node cycle split across typed slices": {
 			build: func() *jsonschema.Schema {
@@ -86,6 +94,7 @@ func TestCloneTypedContainers(t *testing.T) {
 				require.True(t, ok)
 				assert.Same(t, cp, inner[0])
 			},
+			want: &schemaclone.Cycle{Path: "/x/0/y/0"},
 		},
 		"cycle through schema value element in typed slice": {
 			build: func() *jsonschema.Schema {
@@ -101,6 +110,7 @@ func TestCloneTypedContainers(t *testing.T) {
 				require.True(t, ok, "a schema held by value stays a value")
 				assert.Same(t, cp, list[0].Items, "its sub-schema pointer still routes through the memo")
 			},
+			want: &schemaclone.Cycle{Path: "/x/0/items"},
 		},
 		"cycle through exported struct field in Examples": {
 			build: func() *jsonschema.Schema {
@@ -116,6 +126,7 @@ func TestCloneTypedContainers(t *testing.T) {
 				require.True(t, ok, "the copy keeps the struct's Go type")
 				assert.Same(t, cp, held.S)
 			},
+			want: &schemaclone.Cycle{Path: "/examples/0/s"},
 		},
 		"cycle through typed slice nested under any containers": {
 			build: func() *jsonschema.Schema {
@@ -134,6 +145,7 @@ func TestCloneTypedContainers(t *testing.T) {
 				require.True(t, ok)
 				assert.Same(t, cp, list[0])
 			},
+			want: &schemaclone.Cycle{Path: "/enum/0/deep/0"},
 		},
 		"acyclic typed schema slice in Extra is unaliased": {
 			build: func() *jsonschema.Schema {
@@ -176,7 +188,9 @@ func TestCloneTypedContainers(t *testing.T) {
 			t.Parallel()
 
 			src := tc.build()
-			cp := schemaclone.Clone(src)
+
+			cp, cyc := schemaclone.CloneChecked(src)
+			assert.Equal(t, tc.want, cyc)
 
 			require.NotNil(t, cp)
 			assert.NotSame(t, src, cp)

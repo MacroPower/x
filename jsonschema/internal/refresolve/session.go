@@ -352,9 +352,12 @@ func (s *Session) walkScratch(sc *jsonschema.Schema, base string) *Registry {
 // concurrent run. A session over a registry built for one run, as the inliner
 // builds, has nothing to protect and owns its maps already.
 //
-// The retrieval URI is seeded before the walk, so a document whose own $id
-// equals the URI it was fetched from registers one schema under one key rather
-// than colliding with itself.
+// The scratch walk runs first, and checkFetched then writes the retrieval URI
+// over its result. A document whose own $id equals the URI it was fetched from
+// therefore registers one schema under one key rather than colliding with
+// itself, because both writes name that key with that schema. The order
+// carries no weight either way, since the collision check reads the finished
+// scratch rather than watching it fill.
 //
 // In practice every collision surfaces in the URI space. Two documents share an
 // anchor key only by sharing the base it hangs off, and sharing a base means

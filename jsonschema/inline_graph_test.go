@@ -22,12 +22,15 @@ import (
 // The rows split into two groups. One group fails the tree check: a sub-schema
 // pointer that aliases, or a loop that closes through a sub-schema keyword. The
 // other closes its loop through a value field, which the tree check skips and
-// each engine's cycle check catches.
+// each engine's cycle check catches. Each value-field row states the pointer
+// the refusal must name, since agreement on a message the two engines both word
+// wrongly would still pass the byte-equal assertion.
 func TestInlineRejectsNonTreeRoot(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]struct {
-		build func() *jsonschema.Schema
+		build   func() *jsonschema.Schema
+		pointer string
 	}{
 		"self cycle": {
 			build: func() *jsonschema.Schema {
@@ -63,6 +66,7 @@ func TestInlineRejectsNonTreeRoot(t *testing.T) {
 
 				return s
 			},
+			pointer: `"/x-self"`,
 		},
 		"a cycle through examples": {
 			build: func() *jsonschema.Schema {
@@ -71,6 +75,21 @@ func TestInlineRejectsNonTreeRoot(t *testing.T) {
 
 				return s
 			},
+			pointer: `"/examples/0"`,
+		},
+		"a root holding several loops": {
+			build: func() *jsonschema.Schema {
+				// Three loops close on this root. The field table walks
+				// examples before the unknown keywords, and each container
+				// orders its own members, so both engines close the same loop
+				// first.
+				s := &jsonschema.Schema{Type: "object"}
+				s.Examples = []any{"first", s}
+				s.Extra = map[string]any{"x-late": s, "a-early": s}
+
+				return s
+			},
+			pointer: `"/examples/1"`,
 		},
 		"a cycle through const": {
 			build: func() *jsonschema.Schema {
@@ -83,6 +102,7 @@ func TestInlineRejectsNonTreeRoot(t *testing.T) {
 
 				return s
 			},
+			pointer: `"/const"`,
 		},
 	}
 
@@ -99,6 +119,11 @@ func TestInlineRejectsNonTreeRoot(t *testing.T) {
 
 			assert.Equal(t, inlineErr.Error(), compileErr.Error(),
 				"the two engines must refuse one root with one message")
+
+			if tc.pointer != "" {
+				assert.Contains(t, inlineErr.Error(), tc.pointer,
+					"the refusal must name the pointer where the loop closes")
+			}
 		})
 	}
 }

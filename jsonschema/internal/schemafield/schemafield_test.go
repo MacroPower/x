@@ -277,6 +277,11 @@ func TestCloneContainersUnaliasesHeaders(t *testing.T) {
 // whose setter still names the field it was copied from, since the closure
 // would read one field and write another and the clone would silently drop
 // children.
+//
+// It also pins the segment by which each shape addresses its child. The clone
+// walk renders those segments into the pointer it reports a cycle at. A slice
+// names the index and a map the key, each appended below the field's keyword;
+// a single-schema field names the keyword itself, since its child sits there.
 func TestCloneSubschemasWritesItsOwnField(t *testing.T) {
 	t.Parallel()
 
@@ -296,10 +301,14 @@ func TestCloneSubschemasWritesItsOwnField(t *testing.T) {
 			field := reflect.ValueOf(s).Elem().FieldByName(f.Name)
 			field.Set(reflect.ValueOf(childOfShape(f.Shape, child)))
 
-			var seen []*jsonschema.Schema
+			var (
+				seen   []*jsonschema.Schema
+				tokens []string
+			)
 
-			f.CloneSubschemas(s, func(sub *jsonschema.Schema) *jsonschema.Schema {
+			f.CloneSubschemas(s, func(token string, sub *jsonschema.Schema) *jsonschema.Schema {
 				seen = append(seen, sub)
+				tokens = append(tokens, token)
 
 				return replacement
 			})
@@ -307,11 +316,30 @@ func TestCloneSubschemasWritesItsOwnField(t *testing.T) {
 			assert.Equal(t, []*jsonschema.Schema{child}, seen,
 				"the getter must read the field the test populated")
 
+			assert.Equal(t, []string{tokenOfShape(f)}, tokens,
+				"the closure must address the child by its own pointer segment")
+
 			after := reflect.ValueOf(s).Elem().FieldByName(f.Name)
 			assert.Equal(t, []*jsonschema.Schema{replacement}, childrenOf(after),
 				"the setter must write the field the getter reads")
 		})
 	}
+}
+
+// tokenOfShape returns the pointer segment where [childOfShape]'s one child sits.
+// A single-schema field names its own keyword, a slice names index "0", and a
+// map names the key "k".
+func tokenOfShape(f *Field) string {
+	switch f.Shape {
+	case Slice:
+		return "0"
+	case Map:
+		return "k"
+	case Single, None:
+		return f.Keyword
+	}
+
+	return f.Keyword
 }
 
 // childrenOf reads the sub-schemas out of a populated container of any shape.
@@ -338,7 +366,7 @@ func childrenOf(field reflect.Value) []*jsonschema.Schema {
 func TestCloneSubschemasKeepsNilAndEmpty(t *testing.T) {
 	t.Parallel()
 
-	identity := func(sub *jsonschema.Schema) *jsonschema.Schema { return sub }
+	identity := func(_ string, sub *jsonschema.Schema) *jsonschema.Schema { return sub }
 
 	for i := range Fields {
 		f := &Fields[i]

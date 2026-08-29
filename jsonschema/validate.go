@@ -1099,9 +1099,9 @@ func cloneSchema(s *Schema) *Schema {
 // that reaches a registered document dedupes pointers; the inliner's root
 // answers to [checkSchemaTree] for aliasing.
 func cloneCheckedSchema(s *Schema, subject string) (*Schema, error) {
-	cp, cyclic := schemaclone.CloneChecked(s)
-	if cyclic {
-		return nil, cycleError(subject)
+	cp, cyc := schemaclone.CloneChecked(s)
+	if cyc != nil {
+		return nil, cycleError(subject, cyc)
 	}
 
 	return cp, nil
@@ -1110,20 +1110,25 @@ func cloneCheckedSchema(s *Schema, subject string) (*Schema, error) {
 // checkSchemaCycle applies [cloneCheckedSchema]'s rule to [Compile]'s root
 // without keeping the copy the walk builds while finding the cycle. That root
 // stays the caller's own value, which [Validator.Schema] hands back (see
-// [schemaclone.HasCycle]).
+// [schemaclone.FindCycle]).
 func checkSchemaCycle(s *Schema, subject string) error {
-	if !schemaclone.HasCycle(s) {
+	cyc := schemaclone.FindCycle(s)
+	if cyc == nil {
 		return nil
 	}
 
-	return cycleError(subject)
+	return cycleError(subject, cyc)
 }
 
 // cycleError words the cycle refusal once, so the two engines refuse one root
-// with one message.
-func cycleError(subject string) error {
-	return fmt.Errorf("%w: %s holds a path that crosses a schema and returns to something "+
-		"it is already inside", ErrSchemaNotTree, subject)
+// with one message. It names the pointer where the loop closes and the pointer
+// it returns to, both rooted at the graph the check walked. A root position
+// renders as the empty string, the spelling [checkSchemaTree] uses. Where that
+// graph holds several loops, the message names one of them, and the clone walk
+// orders every container it descends, so the two engines name the same one.
+func cycleError(subject string, cyc *schemaclone.Cycle) error {
+	return fmt.Errorf("%w: %s holds a loop where %q crosses a schema and returns to %q",
+		ErrSchemaNotTree, subject, cyc.Path, cyc.Target)
 }
 
 // resolveDraft returns the draft a validation or inlining run operates under: a

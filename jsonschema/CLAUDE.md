@@ -101,29 +101,32 @@ The package has two independent halves sharing the `Schema` type:
   since each fetched document is independent.
   `inliner.vetProfile` supplies the one narrowing. Under `WithRetrievalBase`
   the resolution walk reads `$id` as inert, so `schemavet.Profile.InertIDs`
-  skips the `$id` domain check in every document the run holds. The inliner's
-  own index walk takes the currency at
-  its entry points, `recordDoc` for a document root and `recordNode` for a
-  materialized pointer target, so the walk behind them reaches no schema the
-  run has not vetted. The pointer-graph policy is separate from that vetting
-  and has rules at two boundaries, the root document and the graphs that
-  arrive from outside the package. `checkSchemaTree` (`validate.go`) rejects a
-  root whose sub-schema pointers alias or cycle, and both `Compile` and
-  `Inline` run it over the document they are given, so the two engines make
-  the same demand of a root's sub-schema graph. A loop closing through a value
-  field is the shape that check skips, so each engine runs a cycle check
-  beside it over the same root. Both word the refusal through one
-  `cycleError` helper. `Compile` reads `schemaclone.HasCycle` through
+  skips the `$id` domain check in every document the run holds. The
+  inliner's own index walk takes the currency at its entry points,
+  `recordDoc` for a document root and `recordNode` for a materialized
+  pointer target, so the walk behind them reaches no schema the run has not
+  vetted. The pointer-graph policy is
+  separate from that vetting and has rules at two boundaries, the root document
+  and the graphs that arrive from outside the package. `checkSchemaTree`
+  (`validate.go`) rejects a root whose sub-schema pointers alias or cycle, and
+  both `Compile` and `Inline` run it over the document they are given, so the two
+  engines make the same demand of a root's sub-schema graph. A loop closing
+  through a value field is the shape that check skips, so each engine runs a
+  cycle check beside it over the same root. Both word the refusal through one
+  `cycleError` helper, which names the pointer where the loop closes and the
+  pointer it returns to. `Compile` reads `schemaclone.FindCycle` through
   `checkSchemaCycle` and keeps no copy, since its root stays the caller's own
   value; `Inline` reads the same report off the `cloneCheckedSchema` copy it
-  needs anyway. `cloneCheckedSchema` holds the two graphs that arrive from
-  outside the package to the weaker no-cycle rule alone: a document a
-  `RefResolver` returns and a `SubstituteRef` schema.
-  Aliasing survives there, because every
-  walk that reaches a registered document dedupes pointers, so within this
-  package it costs only the accuracy of a location in an error message. It does
-  reach `Inline`'s output, which `checkSchemaTree` then rejects if the caller
-  compiles it, so an aliased resolver document buys a non-tree result. A cycle is fatal,
+  needs anyway. The report names one loop out of a root holding several. The
+  field table fixes which keyword the walk descends first and every container it
+  descends orders its own members, so the two engines name the same one.
+  `cloneCheckedSchema` holds the two graphs that arrive from outside the package
+  to the weaker no-cycle rule alone: a document a `RefResolver` returns and a
+  `SubstituteRef` schema. Aliasing survives there, because every walk that
+  reaches a registered document dedupes pointers, so within this package it
+  costs only the accuracy of a location in an error message. It does reach
+  `Inline`'s output, which `checkSchemaTree` then rejects if the caller compiles
+  it, so an aliased resolver document buys a non-tree result. A cycle is fatal,
   because `refresolve`'s JSON-pointer fallback marshals the document it
   searches and upstream's `MarshalJSON` re-enters `json.Marshal` at every
   nesting level, so no encoder sees the repeat and the marshal recurses into
@@ -230,12 +233,14 @@ The package has two independent halves sharing the `Schema` type:
   closures its Go type calls for, from which the true/empty/ref-sibling
   predicates, the sub-schema traversal, the container-clone pass, and
   `internal/schemaclone`'s structural deep copy all derive. `CloneSubschemas`
-  rebuilds a sub-schema container, `CloneDeep` copies a container whose
-  interior is mutable and supersedes the `CloneContainer` the same field also
-  carries, and `CloneContainer` alone reallocates a header whose interior is
-  not. Each column's presence follows from the field's Go type, so the table's
-  staleness guard checks all three), `internal/keywordmeta` (schemafield's
-  keyword-side sibling: one declared row per keyword name in
+  rebuilds a sub-schema container, handing each child the pointer segment that
+  addresses it and walking a map's keys in sorted order, which is what settles
+  which loop the clone walk's cycle report names; `CloneDeep` copies a container
+  whose interior is mutable and supersedes the `CloneContainer` the same field
+  also carries, and `CloneContainer` alone reallocates a header whose interior
+  is not. Each column's presence follows from the field's Go type, so the
+  table's staleness guard checks all three), `internal/keywordmeta`
+  (schemafield's keyword-side sibling: one declared row per keyword name in
   `internal/keyword`, stating how an authored value merges with the type-derived
   one (`Merge`), which branch of the nullable `anyOf` split it lands on
   (`Scope`), and the drafts and vocabulary gating it. `reconcile.go`'s movable,
@@ -253,19 +258,21 @@ The package has two independent halves sharing the `Schema` type:
   as a cycle, a `json.Number` holds its literal, `PropertyOrder` rides along
   like any other field, and a schema stored in `Extra` stays a schema. No graph
   shape defeats it, so `Clone` has no error return; `CloneChecked` returns the
-  same copy plus a report of whether the source held a pointer cycle, which the
-  three `cloneCheckedSchema` boundaries read; `HasCycle` returns that report
-  alone, for `Compile`, which keeps no copy of the root it is handed. The
-  package doc names the two values a copy still shares with its source, and
-  `HasCycle`'s own doc comment says why it builds a copy it drops),
-  `internal/jsonequal` (DoS-guarded, JSON-semantic value equality for
-  `const`/`enum` and the matching content hash for `uniqueItems`, layered on
-  `internal/numrat` for exact decimal comparison), `internal/goast`
-  (doc-comment and type/field-shape extraction from a parsed Go package, for
-  the generation half's comment provider), `internal/regexcache` (process-wide
-  compile-once cache for validation-time regular-expression patterns,
-  memoizing the compiled expression or the compile error so a pattern compiles
-  at most once and fails closed identically across runs), and
+  same copy plus a `*Cycle` naming the pointer where the source's first loop
+  closes and the pointer it returns to, which the three `cloneCheckedSchema`
+  boundaries read; `FindCycle` returns that report alone, for `Compile`, which
+  keeps no copy of the root it is handed. The copy walk carries a stack of
+  decoded path segments and renders it as a JSON pointer only where a loop
+  closes, so an acyclic copy renders nothing. The package doc names the two
+  values a copy still shares with its source, and `FindCycle`'s own doc comment
+  says why it builds a copy it drops), `internal/jsonequal` (DoS-guarded,
+  JSON-semantic value equality for `const`/`enum` and the matching content hash
+  for `uniqueItems`, layered on `internal/numrat` for exact decimal comparison),
+  `internal/goast` (doc-comment and type/field-shape extraction from a parsed Go
+  package, for the generation half's comment provider), `internal/regexcache`
+  (process-wide compile-once cache for validation-time regular-expression
+  patterns, memoizing the compiled expression or the compile error so a pattern
+  compiles at most once and fails closed identically across runs), and
   `internal/annotations` (the 2020-12 annotation collection --
   evaluated-property set, matched-item index set, items watermark, saturation
   flags -- with the nil-safe `Set` type whose

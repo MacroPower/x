@@ -147,15 +147,20 @@ func TestCloneCyclicGraph(t *testing.T) {
 // the copy to anything that marshals it. A loop counts when the path crosses a
 // schema, whether it closes on a schema or on a container. Aliasing is not a
 // loop, and a loop through containers alone is one encoding/json catches within
-// its own encoder. Every row also holds [schemaclone.HasCycle] to the same
+// its own encoder. Every row also holds [schemaclone.FindCycle] to the same
 // answer, so the report-only entry point cannot drift from
 // [schemaclone.CloneChecked].
+//
+// Each cyclic row pins both pointers the report carries, since the refusal the
+// two engines word from it names them. The rows cover a loop closing on a
+// schema and one closing on a container. For the container, the report's target
+// is the container's own position rather than that of the schema holding it.
 func TestCloneCheckedReportsCycles(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]struct {
 		build func() *jsonschema.Schema
-		want  bool
+		want  *schemaclone.Cycle
 	}{
 		"a self cycle": {
 			build: func() *jsonschema.Schema {
@@ -164,7 +169,7 @@ func TestCloneCheckedReportsCycles(t *testing.T) {
 
 				return s
 			},
-			want: true,
+			want: &schemaclone.Cycle{Path: "/items"},
 		},
 		"a cycle through an unknown keyword": {
 			build: func() *jsonschema.Schema {
@@ -173,7 +178,7 @@ func TestCloneCheckedReportsCycles(t *testing.T) {
 
 				return s
 			},
-			want: true,
+			want: &schemaclone.Cycle{Path: "/self"},
 		},
 		"a cycle through a typed container": {
 			build: func() *jsonschema.Schema {
@@ -182,7 +187,7 @@ func TestCloneCheckedReportsCycles(t *testing.T) {
 
 				return s
 			},
-			want: true,
+			want: &schemaclone.Cycle{Path: "/x/0"},
 		},
 		"a cycle closed through a container reached from outside it": {
 			build: func() *jsonschema.Schema {
@@ -196,7 +201,7 @@ func TestCloneCheckedReportsCycles(t *testing.T) {
 
 				return &jsonschema.Schema{Extra: map[string]any{"a": shared}}
 			},
-			want: true,
+			want: &schemaclone.Cycle{Path: "/a/s/b", Target: "/a"},
 		},
 		"a cycle closed around a schema value": {
 			build: func() *jsonschema.Schema {
@@ -208,7 +213,7 @@ func TestCloneCheckedReportsCycles(t *testing.T) {
 
 				return &jsonschema.Schema{Extra: map[string]any{"x-thing": held}}
 			},
-			want: true,
+			want: &schemaclone.Cycle{Path: "/x-thing/self", Target: "/x-thing"},
 		},
 		"a cycle closed through a const box": {
 			build: func() *jsonschema.Schema {
@@ -222,7 +227,30 @@ func TestCloneCheckedReportsCycles(t *testing.T) {
 
 				return &jsonschema.Schema{Const: &held}
 			},
-			want: true,
+			want: &schemaclone.Cycle{Path: "/const/const", Target: "/const"},
+		},
+		"a cycle through a property named with the empty string": {
+			build: func() *jsonschema.Schema {
+				// The empty string is a legal JSON object key, so it addresses
+				// a child the way any other key does. Dropping it would render
+				// a pointer naming the keyword alone.
+				s := &jsonschema.Schema{}
+				s.Properties = map[string]*jsonschema.Schema{"": s}
+
+				return s
+			},
+			want: &schemaclone.Cycle{Path: "/properties/"},
+		},
+		"a cycle below a def named with the empty string": {
+			build: func() *jsonschema.Schema {
+				// Dropping the empty segment here would render "/$defs/items",
+				// a well-formed pointer naming a def that does not exist.
+				s := &jsonschema.Schema{}
+				s.Defs = map[string]*jsonschema.Schema{"": {Items: s}}
+
+				return s
+			},
+			want: &schemaclone.Cycle{Path: "/$defs//items"},
 		},
 		"a diamond": {
 			build: func() *jsonschema.Schema {
@@ -232,7 +260,6 @@ func TestCloneCheckedReportsCycles(t *testing.T) {
 					Properties: map[string]*jsonschema.Schema{"a": shared, "b": shared},
 				}
 			},
-			want: false,
 		},
 		"a chain reaching one node twice in sequence": {
 			build: func() *jsonschema.Schema {
@@ -242,11 +269,9 @@ func TestCloneCheckedReportsCycles(t *testing.T) {
 					AllOf: []*jsonschema.Schema{{Items: shared}, {Items: shared}},
 				}
 			},
-			want: false,
 		},
 		"a nil schema": {
 			build: func() *jsonschema.Schema { return nil },
-			want:  false,
 		},
 	}
 
@@ -254,13 +279,13 @@ func TestCloneCheckedReportsCycles(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			cp, cyclic := schemaclone.CloneChecked(tc.build())
-			assert.Equal(t, tc.want, cyclic)
+			cp, cyc := schemaclone.CloneChecked(tc.build())
+			assert.Equal(t, tc.want, cyc)
 
-			assert.Equal(t, tc.want, schemaclone.HasCycle(tc.build()),
-				"HasCycle reports what CloneChecked reports")
+			assert.Equal(t, tc.want, schemaclone.FindCycle(tc.build()),
+				"FindCycle reports what CloneChecked reports")
 
-			if !tc.want && cp != nil {
+			if tc.want == nil && cp != nil {
 				_, err := json.Marshal(cp)
 				require.NoError(t, err, "an acyclic copy marshals")
 			}
@@ -278,8 +303,8 @@ func TestCloneCheckedIgnoresContainerSelfReference(t *testing.T) {
 	held := map[string]any{}
 	held["self"] = held
 
-	cp, cyclic := schemaclone.CloneChecked(&jsonschema.Schema{Extra: held})
-	assert.False(t, cyclic)
+	cp, cyc := schemaclone.CloneChecked(&jsonschema.Schema{Extra: held})
+	assert.Nil(t, cyc)
 
 	copied, ok := cp.Extra["self"].(map[string]any)
 	require.True(t, ok)

@@ -11,9 +11,10 @@
 // predicates loop over closures, not reflection), its structural [Shape] and
 // [Class], and, where applicable, a sub-schema accessor and the clone closures
 // its Go type calls for. [Field.CloneSubschemas] rebuilds a sub-schema
-// container. [Field.CloneDeep] copies a container whose interior is mutable,
-// superseding the [Field.CloneContainer] the same field also carries.
-// [Field.CloneContainer] alone reallocates a header whose interior is not.
+// container, handing each child the pointer segment that addresses it.
+// [Field.CloneDeep] copies a container whose interior is mutable, superseding
+// the [Field.CloneContainer] the same field also carries. [Field.CloneContainer]
+// alone reallocates a header whose interior is not.
 //
 // The package deliberately exposes raw field extractors rather than the
 // jsonschema package's SubschemaEntry/Location types, leaving location assembly
@@ -23,6 +24,7 @@ package schemafield
 import (
 	"maps"
 	"slices"
+	"strconv"
 
 	"github.com/google/jsonschema-go/jsonschema"
 
@@ -134,12 +136,21 @@ type Field struct {
 	CloneDeep func(s *Schema, copyValue func(any) any)
 
 	// CloneSubschemas rebuilds the field's sub-schema container on s, replacing
-	// every child with clone(child). It is non-nil exactly when Shape is not
-	// None, and it preserves the nil-versus-empty distinction. A nil container
-	// stays nil, and a non-nil empty one clones to a non-nil empty one. Unlike
-	// [Children], it reads each field on its own, so a schema setting both Items
-	// forms keeps both in the copy.
-	CloneSubschemas func(s *Schema, clone func(*Schema) *Schema)
+	// every child with clone(token, child). It is non-nil exactly when Shape is
+	// not None, and it preserves the nil-versus-empty distinction. A nil
+	// container stays nil, and a non-nil empty one clones to a non-nil empty
+	// one. Unlike [Children], it reads each field on its own, so a schema
+	// setting both Items forms keeps both in the copy.
+	//
+	// The token is the last JSON Pointer segment addressing the child. Only the
+	// closure knows it. A single-schema field passes its own keyword,
+	// since the child sits at the keyword itself. A slice passes the decimal
+	// index and a map the key, each of which the caller appends below the
+	// field's keyword. The caller appends every token it receives, so a map key
+	// that is the empty string addresses a child the same way any other key
+	// does. A map iterates its keys in sorted order, so a caller tracking the
+	// path it walks reaches the same child first on every run.
+	CloneSubschemas func(s *Schema, clone func(token string, sub *Schema) *Schema)
 
 	// Name is the Go field name (for example "Properties").
 	Name string
@@ -206,8 +217,8 @@ func singleField(name, kw string, get func(*Schema) *Schema, set func(*Schema, *
 		Shape:    Single,
 		IsZero:   func(s *Schema) bool { return get(s) == nil },
 		SingleOf: get,
-		CloneSubschemas: func(s *Schema, clone func(*Schema) *Schema) {
-			set(s, clone(get(s)))
+		CloneSubschemas: func(s *Schema, clone func(token string, sub *Schema) *Schema) {
+			set(s, clone(kw, get(s)))
 		},
 	}
 }
@@ -221,7 +232,7 @@ func sliceField(name, kw string, get func(*Schema) []*Schema, set func(*Schema, 
 		Shape:   Slice,
 		IsZero:  func(s *Schema) bool { return get(s) == nil },
 		SliceOf: get,
-		CloneSubschemas: func(s *Schema, clone func(*Schema) *Schema) {
+		CloneSubschemas: func(s *Schema, clone func(token string, sub *Schema) *Schema) {
 			src := get(s)
 			if src == nil {
 				return
@@ -229,7 +240,7 @@ func sliceField(name, kw string, get func(*Schema) []*Schema, set func(*Schema, 
 
 			out := make([]*Schema, len(src))
 			for i, sub := range src {
-				out[i] = clone(sub)
+				out[i] = clone(strconv.Itoa(i), sub)
 			}
 
 			set(s, out)
@@ -246,15 +257,15 @@ func mapField(name, kw string, get func(*Schema) map[string]*Schema, set func(*S
 		Shape:   Map,
 		IsZero:  func(s *Schema) bool { return get(s) == nil },
 		MapOf:   get,
-		CloneSubschemas: func(s *Schema, clone func(*Schema) *Schema) {
+		CloneSubschemas: func(s *Schema, clone func(token string, sub *Schema) *Schema) {
 			src := get(s)
 			if src == nil {
 				return
 			}
 
 			out := make(map[string]*Schema, len(src))
-			for key, sub := range src {
-				out[key] = clone(sub)
+			for _, key := range slices.Sorted(maps.Keys(src)) {
+				out[key] = clone(key, src[key])
 			}
 
 			set(s, out)
