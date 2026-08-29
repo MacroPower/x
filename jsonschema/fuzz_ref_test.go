@@ -30,11 +30,13 @@ import (
 // the combinations nobody enumerated get exercised too.
 //
 // The generated $id pool deliberately collides with the root's base and with
-// the other documents' retrieval URIs, since a fetched document's $id
-// overwriting a loaded registry entry is one of the two bug classes this rig
-// exists to catch. The unknown-keyword position is drawn for the other: a
-// target reachable only through the JSON-pointer fallback, which is the site
-// past fixes kept forgetting to vet.
+// the other documents' retrieval URIs, since a fetched document claiming a URI
+// another document already holds is one of the two bug classes this rig exists
+// to catch. It also holds each document's own retrieval URI, the near-universal
+// remote that claims nothing, so the draw covers both sides of that rule. The
+// unknown-keyword position is drawn for the other bug class, a target reachable
+// only through the JSON-pointer fallback, which is the site past fixes kept
+// forgetting to vet.
 
 const (
 	// The root document's $id, and so the base every relative reference in it
@@ -74,18 +76,16 @@ var (
 	// behind dfa3d6b and 9ee414c, where an anchor registered under the
 	// canonical base had to be found through the retrieval URI.
 	//
-	// No entry collides with the root's URI or with either retrieval URI. A
-	// fetched document claiming a URI another document already holds makes the
-	// two engines resolve one anchor reference to two different targets, which
-	// TestRefEnginesDisagreeOnCollidingIDs pins for both spellings of that
-	// collision. Leaving a colliding value in the pool would make the fuzz
-	// target rediscover that one finding within two minutes on every run
-	// instead of searching for the next.
-	refGraphIDs = []string{
+	// The pool includes the root's URI and both retrieval URIs, so a draw can
+	// make one document claim a URI another already holds. Both engines refuse
+	// that graph with ErrIDCollision, which refBuildSentinels makes comparable
+	// by cause, so the draw searches colliding graphs for a disagreement.
+	refGraphIDs = append([]string{
 		"",
 		"https://example.test/other.json",
 		"https://elsewhere.test/doc.json",
-	}
+		refGraphRootURI,
+	}, refGraphDocURIs...)
 
 	// The constraint shapes a drawn target resolves to. The pool keeps every
 	// shape distinguishable by the drawn instances, so a target that resolved
@@ -264,7 +264,7 @@ func synthRefGraph(blob []byte) refGraphSpec {
 		}
 	}
 
-	gen.planMalformed(served)
+	gen.planMalformed(served, ids)
 
 	docs := make(map[string]*refGraphDoc, docCount)
 
@@ -307,17 +307,17 @@ func synthRefGraph(blob []byte) refGraphSpec {
 //     both engines vet all of it, while a substitute stands in for one
 //     reference and materializes only that target, so a violation elsewhere in
 //     the document reaches one path and not the other.
-//   - It takes part in an $id collision, by claiming another document's
-//     retrieval URI, by having its own claimed, or by sharing an $id with
-//     another served document. Withholding removes it from the resolver, which
-//     changes which document wins the collision and so changes how references
-//     that have nothing to do with the substitute resolve.
+//   - It takes part in an $id collision, by claiming a URI another document
+//     already holds (the root's, or another served document's retrieval URI),
+//     by having its own claimed, or by sharing an $id with another served
+//     document. Withholding removes it from the resolver, so the collision the
+//     other two pipelines refuse never happens on this one.
 //
 // No document qualifies at all when the malformed leaf sits in a document no
 // reference reaches directly (reasonSubstituteTransitiveMalformed). The
 // substitute pipeline configures a fallback, which suspends the walk's
-// refusals, so the graph would compare a Compile refusal against an Inline that
-// accepts.
+// refusals for a structural violation, so the graph would compare a Compile
+// refusal against an Inline that accepts.
 //
 // The document must also be referenced from the root, or withholding it changes
 // nothing. The first qualifying URI in retrieval order wins, so the choice stays
@@ -352,9 +352,9 @@ func chooseWithheld(
 			continue
 		case !directlyReferenced[uri]:
 			continue
-		case claims[uri] > 0 || slices.Contains(served, ids[i]):
-			// The document's retrieval URI is claimed as an $id, or it claims
-			// another's.
+		case inCollision(claims, served, ids, i):
+			// Another document claims this one's retrieval URI as its $id, or
+			// this one claims a URI another document already holds.
 			continue
 		case ids[i] != "" && claims[ids[i]] > 1:
 			// Two served documents claim this $id, and only one wins.
@@ -526,17 +526,92 @@ const refGraphNoMalformed = "\x00none"
 // only through another document's own reference. Both engines walk the whole
 // reference closure and vet every document in it, so both refuse the same
 // graph for the same cause wherever the leaf lands.
-func (g *refGraphGen) planMalformed(served []string) {
+//
+// A graph whose $ids collide drops one placement, the unknown-keyword slot,
+// because there the two engines name different causes and the rig would compare
+// which fault each reached first rather than the cause both name. Either fault
+// refuses the schema, but the engines reach them at different points. A
+// collision settles at the fetch that registers the document, while a malformed
+// JSON-pointer fallback target waits for a vetting pass, and those passes do not
+// line up. Compile vets a fallback target after its closure walk; Inline vets it
+// at materialization during expansion. A graph pairing a colliding document with
+// a malformed fallback target, in the root or in a served document, therefore
+// has Compile name ErrIDCollision and Inline name ErrInvalidType, both correct
+// answers to a graph carrying two faults. The ordering that divergence exposes
+// is independent of the identifier rule and is not the property this rig
+// asserts. The other three slots land in $defs, which both engines vet in the
+// same pass, so a collision leaves them drawable.
+func (g *refGraphGen) planMalformed(served, ids []string) {
 	g.malformedDoc = refGraphNoMalformed
 
 	if g.cursor.Intn(20) != 0 {
 		return
 	}
 
+	// The draw runs before the discard, so the cursor consumes the same bytes
+	// either way and a blob decodes independently of the $ids beside it.
 	candidates := append([]string{""}, served...)
+	doc := candidates[g.cursor.Intn(len(candidates))]
+	slot := g.cursor.Intn(refGraphLeavesPerDoc)
 
-	g.malformedDoc = candidates[g.cursor.Intn(len(candidates))]
-	g.malformedSlot = g.cursor.Intn(refGraphLeavesPerDoc)
+	if slot == refGraphLeavesPerDoc-1 && refGraphCollides(served, ids) {
+		return
+	}
+
+	g.malformedDoc, g.malformedSlot = doc, slot
+}
+
+// inCollision reports whether the document served at index i takes part in an
+// $id collision, in either direction: another document claims its retrieval
+// URI, or it claims a URI another document already holds. Its own $id repeating
+// its retrieval URI claims nothing, so inCollision excludes that case in both
+// directions.
+func inCollision(claims map[string]int, served, ids []string, i int) bool {
+	uri, id := served[i], ids[i]
+
+	self := 0
+	if id == uri {
+		self = 1
+	}
+
+	if claims[uri]-self > 0 {
+		return true
+	}
+
+	if id == "" || id == uri {
+		return false
+	}
+
+	return id == refGraphRootURI || slices.Contains(served, id)
+}
+
+// refGraphCollides reports whether the drawn $ids make one document claim a URI
+// another already holds: the root's, another document's retrieval URI, or an
+// $id a second document also claims. Both engines refuse such a graph with
+// ErrIDCollision.
+func refGraphCollides(served, ids []string) bool {
+	claims := map[string]int{}
+
+	for _, id := range ids {
+		if id != "" {
+			claims[id]++
+		}
+	}
+
+	for i, id := range ids {
+		// A document whose $id repeats the URI it is served from claims
+		// nothing, so it is not a collision and must not cost the graph its
+		// malformed leaf.
+		if id == "" || id == served[i] {
+			continue
+		}
+
+		if id == refGraphRootURI || slices.Contains(served, id) || claims[id] > 1 {
+			return true
+		}
+	}
+
+	return false
 }
 
 // enter starts rendering one document, empty for the root.
@@ -688,9 +763,9 @@ func substitutePipeline(
 	}
 
 	// The substitute pipeline configures a fallback, which suspends the walk's
-	// refusals, so a graph whose violation only that walk reaches would compare
-	// a Compile refusal against an Inline that accepts. On such a graph
-	// chooseWithheld therefore withholds nothing. See
+	// refusals for a structural violation, so a graph whose violation only that
+	// walk reaches would compare a Compile refusal against an Inline that
+	// accepts. On such a graph chooseWithheld therefore withholds nothing. See
 	// reasonSubstituteTransitiveMalformed.
 	require.Falsef(t, spec.malformedTransitive,
 		"withheld a document on a transitively malformed graph: %s",

@@ -323,35 +323,154 @@ func displayPointer(segments []string) string {
 	return b.String()
 }
 
-// RegisterFallback walks a schema materialized by the JSON-pointer fallback (or
-// a caller-supplied substitute) and records its subtree's base URIs, $ids, and
-// anchors in the per-run fallback registries. A scratch registry collects the
-// walk output so the shared registry stays untouched and concurrent runs cannot
-// race on it.
-func (s *Session) RegisterFallback(sc *jsonschema.Schema, base string) {
+// walkScratch walks sc into a fresh registry, so the caller can inspect what the
+// document claims before any of it reaches a live registry. The scratch starts
+// empty, so [Registry.WalkFetched]'s only-if-absent gate settles a repeat within
+// one document here, leaving the collision check to speak only for keys another
+// document holds.
+func (s *Session) walkScratch(sc *jsonschema.Schema, base string) *Registry {
 	scratch := NewRegistry(s.reg.deps, s.reg.draft, s.reg.inertIDs)
-	// WalkFetched keeps the first entry for a duplicate $id/$anchor key within
-	// the document, matching the precedence the validator's fetched-document
-	// walk applies; the plain Walk would resolve such a duplicate last-wins
-	// and the two engines would disagree on the same reference.
 	scratch.WalkFetched(sc, base)
 
+	return scratch
+}
+
+// RegisterFetched registers a document fetched from a resolver under its
+// retrieval URI and merges its subtree's $ids, anchors, and base URIs into the
+// session's registry, the one path both engines take for a fetched document. It
+// reports [ErrIDCollision] when the document claims a URI or anchor the registry
+// already holds for a different schema, and merges nothing in that case, so a
+// refused document leaves no half-written registry behind.
+//
+// Copy-on-write ownership stays the caller's. The compile-time session writes
+// the shared registry on purpose, so a document fetched while compiling
+// persists into the registry every run shares, and the validator's per-run
+// session calls [Session.EnsureOwned] first so its registrations cannot race a
+// concurrent run. A session over a registry built for one run, as the inliner
+// builds, has nothing to protect and owns its maps already.
+//
+// The retrieval URI is seeded before the walk, so a document whose own $id
+// equals the URI it was fetched from registers one schema under one key rather
+// than colliding with itself.
+//
+// In practice every collision surfaces in the URI space. Two documents share an
+// anchor key only by sharing the base it hangs off, and sharing a base means
+// claiming one URI, which the URI space reports first. The check covers the
+// anchor spaces anyway, so the rule holds by construction rather than by that
+// argument.
+func (s *Session) RegisterFetched(doc *jsonschema.Schema, baseURI string) error {
+	scratch, err := s.checkFetched(doc, baseURI)
+	if err != nil {
+		return err
+	}
+
+	s.reg.absorb(scratch)
+
+	return nil
+}
+
+// CheckFetched reports the [ErrIDCollision] that [Session.RegisterFetched]
+// would report for the same document, registering nothing. A caller that goes
+// on to register walks the document into a scratch registry twice, once here
+// and once there; a fetch is rare enough that sharing the walk is not worth the
+// state it would take.
+//
+// It exists for the two callers that run a structural vet between the fetch and
+// the registration. Every other caller registers at the fetch, so the collision
+// settles there; a caller that vetted first would report the structural cause
+// instead, and one document carrying both faults would fail with two different
+// sentinels depending on which engine read it. Checking without merging keeps
+// the order without registering a document the vet goes on to reject.
+func (s *Session) CheckFetched(doc *jsonschema.Schema, baseURI string) error {
+	_, err := s.checkFetched(doc, baseURI)
+
+	return err
+}
+
+// checkFetched walks doc into a scratch registry and reports the first
+// identifier it claims that the session's registry already holds for a
+// different schema. It returns the scratch so a caller that means to register
+// can merge the same walk rather than repeating it.
+func (s *Session) checkFetched(doc *jsonschema.Schema, baseURI string) (*Registry, error) {
+	scratch := s.walkScratch(doc, baseURI)
+	scratch.URI[baseURI] = doc
+
+	claimant := documentName(baseURI)
+
+	for _, space := range []struct {
+		claimed, held map[string]*jsonschema.Schema
+		kind          string
+	}{
+		{scratch.URI, s.reg.URI, "URI"},
+		{scratch.anchor, s.reg.anchor, "anchor"},
+		{scratch.dynamicAnchor, s.reg.dynamicAnchor, "dynamic anchor"},
+	} {
+		err := s.reg.collision(space.claimed, space.held, space.kind, claimant)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return scratch, nil
+}
+
+// RegisterFallbackDocument registers a caller-supplied substitute, which enters
+// resolution space as a document of its own, into the per-run fallback
+// registries. It reports [ErrIDCollision] when the substitute's $id names a URI
+// the shared registry already holds for a different schema, the one claim a
+// substitute makes that a real document could answer instead. The claimant
+// argument names the substitute in that message, so the caller can identify the
+// reference whose fallback supplied it.
+//
+// Anchors and the per-run fallback registrations are outside the check, and both
+// exclusions are load-bearing. A substitute registers under the base in effect at
+// the failing reference rather than a base of its own, so its anchors land in
+// the containing document's anchor space. No reference reaches them, because the
+// substitute path builds no anchor registry a lookup consults before the shared
+// one. The check skips the fallback registrations because the parent consults a
+// fallback once per referencing node and clones the substitute afresh each time,
+// so one substitute answering several references would otherwise collide with
+// its own earlier copies.
+func (s *Session) RegisterFallbackDocument(sc *jsonschema.Schema, base, claimant string) error {
+	scratch := s.walkScratch(sc, base)
+
+	err := s.reg.collision(scratch.URI, s.reg.URI, "URI", claimant)
+	if err != nil {
+		return err
+	}
+
+	s.mergeFallback(scratch)
+
+	return nil
+}
+
+// RegisterFallback walks a schema the JSON-pointer fallback materialized and
+// records its subtree's base URIs, $ids, and anchors in the per-run fallback
+// registries. Such a target is a fragment of a document the run already
+// registered rather than a document of its own, so it makes no identifier claim
+// against another document and no collision check applies; two targets claiming
+// one key resolve first-write-wins, in materialization order.
+func (s *Session) RegisterFallback(sc *jsonschema.Schema, base string) {
+	s.mergeFallback(s.walkScratch(sc, base))
+}
+
+// mergeFallback folds a scratch walk into the per-run fallback registries.
+//
+// It deliberately drops $dynamicAnchor registrations from the fallback scope.
+// LookupDynamicAnchor resolves only against the shared registry, so a dynamic
+// anchor a fallback materialized cannot pollute an unrelated $dynamicRef's
+// dynamic scope.
+//
+// The merge is first-write-wins so two schemas registering the same absolute
+// $id/$anchor key resolve deterministically to the earliest-materialized one,
+// matching register's onlyIfAbsent precedence rather than a map-iteration race.
+func (s *Session) mergeFallback(scratch *Registry) {
 	if s.fallbackBaseURIs == nil {
 		s.fallbackURI = map[string]*jsonschema.Schema{}
 		s.fallbackAnchor = map[string]*jsonschema.Schema{}
 		s.fallbackBaseURIs = map[*jsonschema.Schema]string{}
 	}
 
-	// $dynamicAnchor registrations are deliberately not carried into the
-	// fallback scope: LookupDynamicAnchor resolves only against the shared
-	// registry, so a dynamic anchor a fallback materialized cannot pollute an
-	// unrelated $dynamicRef's dynamic scope.
-	//
-	// Merge first-write-wins so two distinct fallback schemas registering the
-	// same absolute $id/$anchor key (only reachable from a malformed
-	// duplicate-key schema) resolve deterministically to the earliest-materialized
-	// one, matching register's onlyIfAbsent precedence rather than a
-	// map-iteration race.
 	for k, v := range scratch.URI {
 		if _, ok := s.fallbackURI[k]; !ok {
 			s.fallbackURI[k] = v

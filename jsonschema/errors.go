@@ -232,6 +232,35 @@ var (
 	// originates in that package or here.
 	ErrRefResolve = refresolve.ErrRefResolve
 
+	// ErrIDCollision is returned by [Compile] and [Inline] when a document
+	// entering resolution space claims an identifier another document already
+	// holds, either a $id resolving to a registered URI or an $anchor or
+	// $dynamicAnchor key registered for a different schema. Two
+	// documents under one identifier leave every reference naming it
+	// ambiguous, so the registration refuses the claim rather than picking a
+	// winner. The message names the identifier and both documents.
+	//
+	// Three cases make no claim. A document registered under the URI it was
+	// fetched from claims nothing, whatever its $id says. A duplicate $id or
+	// anchor within one document resolves to the first the walk reaches. A
+	// JSON-pointer fallback target is a fragment of a document the run already
+	// holds, not a document of its own, so two such targets claiming one key
+	// resolve in materialization order.
+	//
+	// Both engines report a fetched document's collision through the
+	// referencing $ref, wrapped in [ErrRefResolve]. [Compile] fails when its
+	// reference walk reaches the document, and a document the resolver first
+	// serves after compilation fails the validation run that reaches the
+	// reference. A [SubstituteRef] schema reports it from the substitution
+	// site, naming the reference whose fallback supplied it, and only for the
+	// $id it declares, since a substitute registers under the base of the
+	// reference it answers and no reference can reach an anchor it carries.
+	//
+	// It is re-exported from internal/refresolve, the shared resolution core,
+	// so [errors.Is] matches the sentinel identically whether a failure
+	// originates in that package or here.
+	ErrIDCollision = refresolve.ErrIDCollision
+
 	// ErrRefCycle is returned by [Inline] when expanding a $ref reaches a
 	// schema whose own expansion is still in progress: the reference graph
 	// is cyclic, so it has no finite static expansion.

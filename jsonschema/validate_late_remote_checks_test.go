@@ -106,3 +106,38 @@ func TestValidateLateFetchedRemoteStructuralChecks(t *testing.T) {
 		})
 	}
 }
+
+// TestValidateLateFetchedRemoteIDCollision pins that a document first fetched
+// during a validation run is held to the identifier rule Compile applies to a
+// compile-time fetch. The late document claims the root's own URI, so the two
+// documents leave every reference naming it ambiguous. Compile tolerates the
+// miss, and the run that reaches the reference reports the collision rather
+// than letting the late document take the root's URI for the rest of the run.
+func TestValidateLateFetchedRemoteIDCollision(t *testing.T) {
+	t.Parallel()
+
+	schema, err := jsonschema.ParseSchema([]byte(
+		`{"$id": "https://example.test/root.json", "$ref": "https://example.test/late.json"}`))
+	require.NoError(t, err)
+
+	// The document carries both faults, so the assertions below pin which one
+	// the run names.
+	doc, err := jsonschema.ParseSchema([]byte(
+		`{"$id": "https://example.test/root.json", "type": "strnig"}`))
+	require.NoError(t, err)
+
+	resolver := &lateResolver{doc: doc}
+
+	v, err := jsonschema.Compile(t.Context(), schema, jsonschema.WithRefResolver(resolver))
+	require.NoError(t, err, "a resolver miss at compile time is tolerated")
+
+	resolver.armed.Store(true)
+
+	err = v.ValidateJSON(t.Context(), []byte(`"hello"`))
+	require.ErrorIs(t, err, jsonschema.ErrIDCollision,
+		"the late document claims the URI the root holds")
+	require.ErrorIs(t, err, jsonschema.ErrRefResolve,
+		"the collision surfaces through the referencing ref")
+	require.NotErrorIs(t, err, jsonschema.ErrInvalidType,
+		"the collision is settled ahead of the structural vet, which the misspelled type would fail")
+}

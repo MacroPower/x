@@ -2982,14 +2982,14 @@ func TestValidateWithRefResolver(t *testing.T) {
 	}
 }
 
-// TestValidateFetchedDocIDDoesNotClobber pins that a fetched document whose
-// nested $id resolves to an already-loaded URI does not overwrite that URI's
-// schema in the registry. Document A (referenced first) is loaded as the string
-// schema for /a; document B (referenced next) carries a nested $id of /a, but
-// registering it must not replace the already-loaded A, so /a keeps validating
-// against A's string constraint, not B's nested integer. This is the
-// validation-path twin of the inliner's fetchDoc fix (commit 11e45e2).
-func TestValidateFetchedDocIDDoesNotClobber(t *testing.T) {
+// TestCompileFetchedDocIDCollisionRefused pins that a fetched document whose
+// nested $id resolves to an already-loaded URI fails Compile. Document A
+// (referenced first) is loaded as the string schema for /a; document B
+// (referenced next) carries a nested $id of /a, so two documents claim one URI
+// and every ref naming it is ambiguous. The registration refuses B rather than
+// picking a winner, and the message names both documents. Inline refuses the
+// same graph, which TestInlineFetchedDocIDCollisionRefused pins.
+func TestCompileFetchedDocIDCollisionRefused(t *testing.T) {
 	t.Parallel()
 
 	docA := &jsonschema.Schema{Type: "string"}
@@ -3013,10 +3013,15 @@ func TestValidateFetchedDocIDDoesNotClobber(t *testing.T) {
 		"https://example.com/b": docB,
 	}
 
-	// A string satisfies both A (string) and B's root (string). It would only
-	// fail if B's nested $id had clobbered /a with the integer schema.
-	err := jsonschema.Validate(t.Context(), schema, "hello", jsonschema.WithRefResolver(resolver))
-	require.NoError(t, err, "the ref to /a must resolve to A, not the clobbering B")
+	_, err := jsonschema.Compile(t.Context(), schema, jsonschema.WithRefResolver(resolver))
+	require.ErrorIs(t, err, jsonschema.ErrIDCollision,
+		"B claims the URI A already holds")
+	require.ErrorIs(t, err, jsonschema.ErrRefResolve,
+		"the collision surfaces through the referencing ref")
+	assert.Contains(t, err.Error(), `document "https://example.com/b"`,
+		"the message names the document claiming the URI")
+	assert.Contains(t, err.Error(), `document "https://example.com/a"`,
+		"the message names the document already holding it")
 }
 
 // TestValidateAnchorInFetchedDocWithCanonicalID pins that an $anchor reference

@@ -935,9 +935,11 @@ func fetchAndClone(
 
 // remoteFetch returns the [refresolve.Fetch] the resolution core calls when a
 // non-fragment ref's document is not yet registered. It fetches the document
-// through the configured [RefResolver], deep-copies it, registers the copy under
-// baseURI, and walks its nested $id/$anchor entries in only-if-absent mode so
-// they cannot clobber an already-loaded entry.
+// through the configured [RefResolver], deep-copies it, and registers the copy
+// under baseURI along with its nested $id/$anchor entries. A nested identifier
+// another document already holds fails the registration with
+// [ErrIDCollision]; a duplicate within the document itself resolves to the
+// first entry the walk reaches.
 //
 // A per-run session (cow true) clones the compiled registry copy-on-write before
 // its first write via [refresolve.Session.EnsureOwned], so the registrations
@@ -966,6 +968,16 @@ func (v *validator) remoteFetch(sess *refresolve.Session, cow bool) refresolve.F
 		}
 
 		if cow {
+			// The vet below runs between the fetch and the registration, so
+			// this checks the collision without merging first. See
+			// [refresolve.Session.CheckFetched] for why the order matters.
+			collErr := sess.CheckFetched(cp, baseURI)
+			if collErr != nil {
+				sess.RecordRemoteMiss(baseURI, collErr)
+
+				return nil, fmt.Errorf("%w: %w", ErrRefResolve, collErr)
+			}
+
 			// A document first fetched during a validation run never passes
 			// through the compile reference walk's document loop, so the same
 			// checks run here before registration; a compile-time fetch (cow
@@ -994,9 +1006,18 @@ func (v *validator) remoteFetch(sess *refresolve.Session, cow bool) refresolve.F
 			sess.EnsureOwned()
 		}
 
-		reg := sess.Registry()
-		reg.URI[baseURI] = cp
-		reg.WalkFetched(cp, baseURI)
+		// Both engines refuse a document claiming an identifier another
+		// document already holds rather than merging it. The failure is
+		// recorded like the checks above, so the at-most-once-per-baseURI
+		// contract holds, and it surfaces through the ref wrapping
+		// [ErrRefResolve]. On the per-run path the check above already passed,
+		// so this call only merges.
+		err = sess.RegisterFetched(cp, baseURI)
+		if err != nil {
+			sess.RecordRemoteMiss(baseURI, err)
+
+			return nil, fmt.Errorf("%w: %w", ErrRefResolve, err)
+		}
 
 		return cp, nil
 	}

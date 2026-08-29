@@ -197,3 +197,93 @@ func TestInlineClosureRejectsBeforeSplicing(t *testing.T) {
 	require.ErrorContains(t, err, "a.json", "the message names the document the walk refused")
 	assert.Nil(t, out, "a refused closure yields no document")
 }
+
+// TestInlineFetchedDocCollisionPrecedesVet pins which fault the engines report
+// for a remote carrying two, one claiming the root's URI and misspelling a type
+// name. Both report the collision, because prefetchDoc registers at the fetch
+// and the strict closure walk vets afterwards. A fetch that vetted first would
+// name the other cause, and the two engines would refuse one graph for two
+// reasons. TestInlineFallbackCollisionPrecedesVet covers the same graph over
+// the path a configured fallback takes.
+func TestInlineFetchedDocCollisionPrecedesVet(t *testing.T) {
+	t.Parallel()
+
+	root, err := jsonschema.ParseSchema([]byte(
+		`{"$id": "https://ex.test/root.json", "properties": {"p": {"$ref": "https://ex.test/a.json"}}}`))
+	require.NoError(t, err)
+
+	doc, err := jsonschema.ParseSchema([]byte(
+		`{"$id": "https://ex.test/root.json", "type": "strnig"}`))
+	require.NoError(t, err)
+
+	resolver := mapResolver{"https://ex.test/a.json": doc}
+
+	_, err = jsonschema.Inline(t.Context(), root, jsonschema.WithRefResolver(resolver))
+	require.ErrorIs(t, err, jsonschema.ErrIDCollision,
+		"the collision is reported ahead of the structural vet")
+	require.NotErrorIs(t, err, jsonschema.ErrInvalidType,
+		"the vet does not run on a document the registration refused")
+
+	_, err = jsonschema.Compile(t.Context(), root, jsonschema.WithRefResolver(resolver))
+	require.ErrorIs(t, err, jsonschema.ErrIDCollision, "Compile names the same cause")
+}
+
+// TestInlineFallbackDoesNotSuspendCollision pins the one closure-walk refusal a
+// configured fallback leaves standing, the identifier collision doc.go's
+// WithRefFallback section carves out. The colliding document sits in a $defs
+// branch no expansion visits, so only the walk reaches it.
+func TestInlineFallbackDoesNotSuspendCollision(t *testing.T) {
+	t.Parallel()
+
+	root, err := jsonschema.ParseSchema([]byte(
+		`{"$id": "https://ex.test/root.json", "$defs": {"unused": {"$ref": "https://ex.test/a.json"}}}`))
+	require.NoError(t, err)
+
+	doc, err := jsonschema.ParseSchema([]byte(
+		`{"$id": "https://ex.test/root.json", "type": "integer"}`))
+	require.NoError(t, err)
+
+	consulted := 0
+	fallback := jsonschema.RefFallbackFunc(func(context.Context, jsonschema.RefFailure) jsonschema.RefAction {
+		consulted++
+
+		return jsonschema.DropRef()
+	})
+
+	_, err = jsonschema.Inline(t.Context(), root,
+		jsonschema.WithRefResolver(mapResolver{"https://ex.test/a.json": doc}),
+		jsonschema.WithRefFallback(fallback))
+	require.ErrorIs(t, err, jsonschema.ErrIDCollision,
+		"a configured fallback does not suspend the collision refusal")
+	assert.Zero(t, consulted, "the walk refuses before any reference reaches the fallback")
+}
+
+// TestInlineFallbackCollisionPrecedesVet guards the collision check
+// inliner.fetchDoc runs before its vet. A configured fallback stands the strict
+// prefetchDoc path down, so fetchDoc is where the document is first seen, and a
+// vet running first would hand the fallback a structural failure to drop. The
+// run would then succeed with a substitute in place of a graph Compile
+// refuses.
+func TestInlineFallbackCollisionPrecedesVet(t *testing.T) {
+	t.Parallel()
+
+	root, err := jsonschema.ParseSchema([]byte(
+		`{"$id": "https://ex.test/root.json", "properties": {"p": {"$ref": "https://ex.test/a.json"}}}`))
+	require.NoError(t, err)
+
+	// The remote carries both faults. It claims the root's URI and misspells a
+	// type name.
+	doc, err := jsonschema.ParseSchema([]byte(
+		`{"$id": "https://ex.test/root.json", "type": "strnig"}`))
+	require.NoError(t, err)
+
+	fallback := jsonschema.RefFallbackFunc(func(context.Context, jsonschema.RefFailure) jsonschema.RefAction {
+		return jsonschema.DropRef()
+	})
+
+	_, err = jsonschema.Inline(t.Context(), root,
+		jsonschema.WithRefResolver(mapResolver{"https://ex.test/a.json": doc}),
+		jsonschema.WithRefFallback(fallback))
+	require.ErrorIs(t, err, jsonschema.ErrIDCollision,
+		"the collision is settled before the vet, so the fallback never sees a structural failure to drop")
+}

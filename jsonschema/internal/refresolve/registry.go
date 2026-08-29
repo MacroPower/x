@@ -1,7 +1,9 @@
 package refresolve
 
 import (
+	"fmt"
 	"maps"
+	"slices"
 
 	"github.com/google/jsonschema-go/jsonschema"
 
@@ -10,10 +12,9 @@ import (
 
 // Registry is the compiled, shareable resolution state: the maps built once at
 // compile time by [Registry.Build] and immutable afterward except through
-// [Registry.Clone]'s copy-on-write. Only URI is exported, since only a fetch
-// closure and the compile-time precompute loop touch a registry map from outside
-// the package; the anchor, dynamic-anchor, base-URI, and walked maps are read
-// and written exclusively through this package's own methods.
+// [Registry.Clone]'s copy-on-write. Only URI is exported, and only for reading.
+// The shared closure walk iterates it to reach each registered document. Every
+// write, and every other map, goes through this package's own methods.
 type Registry struct {
 	// URI maps an absolute URI to the schema registered under it ($id or the
 	// document base).
@@ -86,9 +87,11 @@ func (r *Registry) Walk(s *jsonschema.Schema, parentBase string) {
 }
 
 // WalkFetched registers a document fetched from a resolver, keeping an existing
-// entry instead of overwriting it: a fetched document whose nested $id resolves
-// to an already-loaded URI must not clobber that entry, while its own refs still
-// resolve.
+// entry instead of overwriting it. Every caller walks into a scratch registry,
+// so the only entry the walk yields to is one this same document already
+// claimed. A duplicate $id or anchor within one document therefore resolves to
+// the first the walk reaches, and a key another document holds is a collision
+// the caller reports once the walk is done.
 func (r *Registry) WalkFetched(s *jsonschema.Schema, parentBase string) {
 	r.walkInto(s, parentBase, true)
 }
@@ -195,9 +198,88 @@ func (r *Registry) NewSession(vet FallbackVet) *Session {
 	return &Session{reg: r, fallbackVet: vet}
 }
 
+// collision reports the first identifier that claimed and held bind to
+// different schemas, naming the key, the claimant the caller supplies, and the
+// document holding it. The kind argument names the identifier space for the
+// message. Sorting the colliding keys keeps the report stable, so a document
+// colliding on several keys names the same one every run rather than following
+// Go's map order.
+func (r *Registry) collision(claimed, held map[string]*jsonschema.Schema, kind, claimant string) error {
+	var keys []string
+
+	for key, sc := range claimed {
+		if other, ok := held[key]; ok && other != sc {
+			keys = append(keys, key)
+		}
+	}
+
+	if len(keys) == 0 {
+		return nil
+	}
+
+	slices.Sort(keys)
+
+	key := keys[0]
+
+	return fmt.Errorf("%w: %s claims %s %q, already held by %s",
+		ErrIDCollision, claimant, kind, key, r.holderName(held[key], key))
+}
+
+// holderName names the holder of key by its own base URI. When that base is
+// the claimed key itself, printing it would repeat one URI and leave the holder
+// unnamed, so holderName uses another URI the holder is registered under
+// instead, found by the other key mapping to the same schema.
+func (r *Registry) holderName(sc *jsonschema.Schema, key string) string {
+	base := r.baseURIs[sc]
+	if base != key {
+		return documentName(base)
+	}
+
+	var others []string
+
+	for uri, held := range r.URI {
+		if held == sc && uri != key {
+			others = append(others, uri)
+		}
+	}
+
+	if len(others) == 0 {
+		return documentName(base)
+	}
+
+	slices.Sort(others)
+
+	return fmt.Sprintf("the document retrieved from %q", others[0])
+}
+
+// absorb merges a scratch walk's registrations into r. The caller rejects a
+// collision first, so every key the two share holds the same schema and a plain
+// copy and an only-if-absent merge agree. The walked set merges too, and
+// deliberately. It decides whether the parent reports or skips an unresolvable
+// fragment ref inside the document, so a fetched document's nodes must reach
+// it.
+func (r *Registry) absorb(scratch *Registry) {
+	maps.Copy(r.URI, scratch.URI)
+	maps.Copy(r.anchor, scratch.anchor)
+	maps.Copy(r.dynamicAnchor, scratch.dynamicAnchor)
+	maps.Copy(r.baseURIs, scratch.baseURIs)
+	maps.Copy(r.walked, scratch.walked)
+}
+
+// documentName renders a document's base URI for a collision message. An empty
+// base names the root document, the one document that holds registrations
+// without a URI of its own.
+func documentName(base string) string {
+	if base == "" {
+		return "the root document"
+	}
+
+	return fmt.Sprintf("document %q", base)
+}
+
 // register stores s under key in reg. When onlyIfAbsent is true an existing
-// entry is preserved, so a fetched document cannot overwrite a URI or anchor
-// already claimed by the root or an earlier document.
+// entry is preserved, so a duplicate $id or anchor key within one document
+// resolves to the first the walk reaches.
 func register(reg map[string]*jsonschema.Schema, key string, s *jsonschema.Schema, onlyIfAbsent bool) {
 	if onlyIfAbsent {
 		if _, ok := reg[key]; ok {

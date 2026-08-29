@@ -1,6 +1,7 @@
 package refresolve
 
 import (
+	"errors"
 	"net/url"
 	"strings"
 
@@ -41,10 +42,15 @@ type Result struct {
 	// DocumentMiss reports that a non-fragment ref's target document could not
 	// be located: the registry has no entry for its base URI and the fetch
 	// closure answered a miss or a failure (a failure rides in Err). The
-	// validator's compile-time reference walk tolerates this outcome, since
-	// a resolver
-	// may serve the document only after compilation, while a validation run
-	// reports it through the bearing node. Always false when Target is set.
+	// validator's compile-time reference walk tolerates this outcome, since a
+	// resolver may serve the document only after compilation, while a
+	// validation run reports it through the bearing node. Always false when
+	// Target is set.
+	//
+	// An [ErrIDCollision] failure is the one fetch failure this excludes. The
+	// resolver served the document and the registration refused it, so no
+	// later fetch changes the answer and the compile-time walk has nothing to
+	// defer to.
 	DocumentMiss bool
 }
 
@@ -137,7 +143,7 @@ func (s *Session) resolveRefUncached(schema *jsonschema.Schema, ref string, fetc
 		// Try remote resolution as fallback.
 		cp, fetchErr := fetch(baseURI)
 		if cp == nil {
-			return Result{Err: fetchErr, DocumentMiss: true}
+			return Result{Err: fetchErr, DocumentMiss: !errors.Is(fetchErr, ErrIDCollision)}
 		}
 
 		target = cp

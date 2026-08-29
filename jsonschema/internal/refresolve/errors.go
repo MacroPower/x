@@ -14,4 +14,13 @@ var (
 	// parent package re-exports it as its public ErrRefResolve, so [errors.Is]
 	// matches a resolution failure through either name.
 	ErrRefResolve = errors.New("ref resolve")
+
+	// ErrIDCollision is returned when a document entering resolution space
+	// claims an identifier another document already holds, either a $id
+	// resolving to a registered URI or an anchor key registered for a different
+	// schema. Two documents under one identifier leave every reference naming it
+	// ambiguous, so the registration refuses the claim rather than picking a
+	// winner. The parent package re-exports it as its public ErrIDCollision,
+	// so [errors.Is] matches through either name.
+	ErrIDCollision = errors.New("identifier collision")
 )

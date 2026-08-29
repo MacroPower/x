@@ -45,7 +45,7 @@ const reasonSubstituteBaseURI = "a WithRefFallback substitute's own references r
 // down on a graph whose malformed leaf sits in a document no reference reaches
 // directly. It is not a skip reason; the generator applies it when choosing
 // which document to withhold.
-const reasonSubstituteTransitiveMalformed = "a WithRefFallback substitute answers one failing reference at a time, so Inline suspends the walk's refusals whenever a fallback is configured, and Compile refuses the graph regardless; the substitute pipeline therefore compares nothing on a graph whose violation only the closure walk reaches"
+const reasonSubstituteTransitiveMalformed = "a WithRefFallback substitute answers one failing reference at a time, so Inline suspends the walk's structural refusals whenever a fallback is configured, and Compile refuses the graph regardless; the substitute pipeline therefore compares nothing on a graph whose violation only the closure walk reaches"
 
 // reasonSubstituteNoAnchors is why the substitute pipeline withholds only a
 // document nothing reaches by anchor. It is not a skip reason; the generator
@@ -59,9 +59,11 @@ const reasonSubstituteNoAnchors = "resolving an anchor fragment needs the withhe
 // that comparison; the rest are the other ways Compile refuses a document.
 //
 // The table also decides what isRefMiss counts as a miss, since a miss is an
-// error wrapping ErrRefResolve that matches nothing here. Adding a sentinel
-// that can travel with ErrRefResolve reclassifies a genuine miss as a build
-// failure, which the rig would then compare against Compile's deferral.
+// error wrapping ErrRefResolve that matches nothing here. A sentinel that can
+// travel with ErrRefResolve reclassifies a genuine miss as a build failure, so
+// only a sentinel both engines report on the same graph belongs here.
+// ErrIDCollision qualifies, because the registration refuses the document at
+// both engines and no later fetch changes the answer, so neither defers it.
 var refBuildSentinels = map[string]error{
 	"ErrInvalidType":              jsonschema.ErrInvalidType,
 	"ErrNegativeBound":            jsonschema.ErrNegativeBound,
@@ -73,6 +75,7 @@ var refBuildSentinels = map[string]error{
 	"ErrMisplacedVocabulary":      jsonschema.ErrMisplacedVocabulary,
 	"ErrItemsArrayUnderDraft2020": jsonschema.ErrItemsArrayUnderDraft2020,
 	"ErrSchemaNotTree":            jsonschema.ErrSchemaNotTree,
+	"ErrIDCollision":              jsonschema.ErrIDCollision,
 	"ErrUnsupportedDraft":         jsonschema.ErrUnsupportedDraft,
 	"ErrUnknownVocabulary":        jsonschema.ErrUnknownVocabulary,
 	"ErrInvalidSchemaDocument":    jsonschema.ErrInvalidSchemaDocument,
@@ -351,13 +354,14 @@ func parseRefGraph(t *testing.T, root string, remotes map[string]string) (*jsons
 }
 
 // TestRefEnginesAgreeOnPastFixes runs one reference graph per $ref fix,
-// thirteen rows over ten commits in six classes: a fetched document's $id clobbering
-// the registry, structural vetting of JSON-pointer fallback targets, the
-// fallback cache key, fallback registry merge order, anchor resolution under a
-// fetched document's canonical base, and vetting the whole closure, which
-// covers a document only another document's reference reaches and the order the
-// two engines report a violation in. A regression in one of those classes fails here with the
-// graph in view rather than waiting for the fuzzer to rediscover it.
+// thirteen rows over ten commits in six classes: a fetched document claiming a
+// URI another document holds, structural vetting of JSON-pointer fallback
+// targets, the fallback cache key, fallback registry merge order, anchor
+// resolution under a fetched document's canonical base, and vetting the whole
+// closure, which covers a document only another document's reference reaches
+// and the order the two engines report a violation in. A regression in one of
+// those classes fails here with the graph in view rather than waiting for the
+// fuzzer to rediscover it.
 //
 // Several rows misspell a type name, "strnig" and "nteger". Those are the
 // invalid type names the structural vet rejects, and correcting them guts the
@@ -370,7 +374,7 @@ func TestRefEnginesAgreeOnPastFixes(t *testing.T) {
 		remotes   map[string]string
 		instances []string
 	}{
-		"fetched document $id clobbers the registry (da61121, 52b5110)": {
+		"fetched document claims a loaded URI (da61121, 52b5110)": {
 			root: stringtest.Input(`
 				{
 					"$schema": "https://json-schema.org/draft/2020-12/schema",

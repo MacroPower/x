@@ -1186,12 +1186,38 @@ wrapping the check's sentinel (`ErrInvalidType`, `ErrNegativeBound`,
 or, for a fetched document, `ErrInvalidID` or `ErrMisplacedVocabulary`)
 instead of silently mis-validating. `Inline` applies this same vetting policy
 to every document its own reference closure reaches, its root included (see
-[Inlining references](#inlining-references)). A fetched document, and a
-`SubstituteRef` schema, must also hold no pointer cycle, meaning no path that
-crosses a schema and returns to a schema or to a container it is already
-inside. A container that loops without crossing a schema is left to
-`encoding/json`, which reports it as an ordinary error. A cyclic fetched
-document fails the referencing ref with `ErrRefResolve` wrapping
+[Inlining references](#inlining-references)).
+
+A fetched document must claim no identifier another document already holds. A
+`$id` that resolves to a URI another document already holds, or an `$anchor` or
+`$dynamicAnchor` key registered for a different schema, fails the referencing
+ref with an error wrapping `ErrRefResolve` and `ErrIDCollision` naming the
+identifier and both documents. Two documents under one identifier leave every
+reference naming it ambiguous, and the rule refuses the claim rather than
+picking a winner. `Inline` applies it at the same point, so the two engines
+refuse the same graphs. A substitute is judged on its `$id` alone, since it
+registers under the base of the reference it answers and an `$anchor` it
+carries reaches no reference. A document the resolver first serves after
+compilation is checked the same way, and the validation run that reaches the
+reference reports the collision.
+
+Both engines check identifiers before the structural checks, so a document
+carrying both an identifier collision and a structural violation fails with
+`ErrIDCollision` rather than the structural sentinel.
+
+Three cases make no claim. A document registers under the URI it was fetched
+from whatever its `$id` says, so the near-universal remote whose `$id` repeats
+its own retrieval URI passes, as does the same document fetched again. A
+duplicate `$id` or anchor within one document resolves to the first the walk
+reaches. A JSON-pointer fallback target is a fragment of a document the run
+already holds rather than a document of its own, so two targets claiming one
+key resolve in materialization order.
+
+A fetched document, and a `SubstituteRef` schema, must also hold no pointer
+cycle, meaning no path that crosses a schema and returns to a schema or to a
+container it is already inside. A container that loops without crossing a schema
+is left to `encoding/json`, which reports it as an ordinary error. A cyclic
+fetched document fails the referencing ref with `ErrRefResolve` wrapping
 `ErrSchemaNotTree`; a cyclic substitute fails with `ErrSchemaNotTree` at the
 substitution site. Both sources accept aliasing, unlike a root document,
 because every walk that reaches a registered document dedupes pointers. The
@@ -1474,20 +1500,24 @@ Failure modes:
   rather than being inlined into a malformed output schema. A fetched
   document holding a pointer cycle fails the same way, wrapping
   `ErrSchemaNotTree`, and a cyclic `SubstituteRef` schema returns that
-  sentinel from the substitution site. The fetched document follows the root
-  document's draft, so a Draft-07 array-form `items` remote inlined under a
-  Draft-07 run is left intact. A JSON-pointer fallback target (a schema
-  carried inside an unknown keyword, in the root document or a fetched one)
-  is vetted the same way at materialization, minus the identifier checks, so
-  an ill-formed target cannot be spliced into the output either.
+  sentinel from the substitution site. A substitute whose own `$id` names a
+  URI a real document already holds returns `ErrIDCollision` from the
+  substitution site, naming the reference whose fallback supplied it. The
+  fetched document follows the root document's draft, so a Draft-07 array-form
+  `items` remote inlined under a Draft-07 run is left intact. A JSON-pointer
+  fallback target (a schema carried inside an unknown keyword, in the root
+  document or a fetched one) is vetted the same way at materialization, minus
+  the identifier checks, so an ill-formed target cannot be spliced into the
+  output either.
 - A reference that resolves to nothing inside a document that is present can
   never resolve later, so the walk refuses it wherever it sits, including a
   branch no expansion would have copied.
 - The closure walk tolerates a document the resolver cannot serve, and the
   expansion that reaches the reference reports it. That matches the deferral
   `Compile` makes, so an unreachable remote in a branch no expansion visits
-  surfaces no error. `WithRefFallback` suspends the walk's refusals
-  entirely. See [Inlining references](#inlining-references) below.
+  surfaces no error. `WithRefFallback` suspends the walk's refusals apart from
+  an identifier collision. See [Inlining references](#inlining-references)
+  below.
 
 `WithRefFallback` sets a per-reference failure policy (a `RefFallback`,
 with `RefFallbackFunc` adapting a bare function) consulted when
@@ -1516,14 +1546,21 @@ and a violation ends the call with the check's sentinel in a message naming
 the reference the substitute answered and the document and path where the
 inliner consulted the fallback.
 
-Configuring a fallback also suspends the reference-closure walk's refusals. A
-`RefFallback` answers one failing reference at a time, and a document reachable
-only through another document's reference has no reference in the expansion for
-a policy to answer. With a fallback set the walk therefore fetches and caches
-without refusing anything, and the expansion reports each failure at the
-references it does reach. A run with no fallback refuses a violation anywhere
-in the closure, so adding a fallback that only propagates is not the same as
-adding none.
+Configuring a fallback also suspends the reference-closure walk's refusals apart
+from an identifier collision. A `RefFallback` answers one failing reference at a
+time, and a document reachable only through another document's reference has no
+reference in the expansion for a policy to answer. With a fallback set the walk
+therefore fetches and caches, refusing only an identifier collision, and the
+expansion reports each failure at the references it does reach. A run with no
+fallback refuses a violation anywhere in the closure, so adding a fallback that
+only propagates is not the same as adding none.
+
+`ErrIDCollision` is the one refusal a fallback does not suspend. A substitute
+stands in for one reference; it cannot decide which of two documents owns a URI
+they both claim, and every reference naming that URI resolves through the
+ambiguity whether or not the fallback answers this one. The walk therefore
+refuses a colliding document wherever it sits, with or without a fallback
+configured.
 
 ### Inlining options
 
@@ -1555,6 +1592,7 @@ adding none.
 | `ErrInvalidSchemaDocument`    | A schema document whose top-level value is not a JSON object or boolean (returned by `CompileJSON`, `ParseSchema`, and `ParseSchemaValue`).                                                                                                           |
 | `ErrUnknownVocabulary`        | A required `$vocabulary` URI is unrecognized, or 2020-12 core is marked optional (returned by `Compile`).                                                                                                                                             |
 | `ErrRefResolve`               | A `RefResolver` returns an error resolving a remote `$ref`; in `Inline`, also a non-local ref with no resolver or any unresolvable target.                                                                                                            |
+| `ErrIDCollision`              | A document entering resolution space claims a `$id` or anchor another document already holds (returned by `Compile` and `Inline`; a substitute is judged on its `$id` alone).                                                                         |
 | `ErrRefCycle`                 | `Inline` expands a `$ref` that reaches its own target: the reference graph is cyclic and has no finite expansion.                                                                                                                                     |
 | `ErrRefInline`                | `Inline` encounters a reference with no faithful static expansion (`$dynamicRef` under Draft 2020-12).                                                                                                                                                |
 | `ErrProviderPanic`            | A `JSONSchemaProvider`/`JSONSchemaExtender` method panics (recovered and wrapped).                                                                                                                                                                    |

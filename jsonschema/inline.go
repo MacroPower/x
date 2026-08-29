@@ -337,9 +337,10 @@ func WithRefFallback(f RefFallback) InlineOption {
 // anything. It fetches and vets every document a reference reaches, however
 // many documents deep, so the walk holds a document reachable only through
 // another document's reference to the same policy as one the root names
-// outright. [WithRefFallback] suspends the walk's refusals, since a fallback
-// answers one failing reference at a time and a document outside the expansion
-// has no reference in the expansion for a policy to answer.
+// outright. [WithRefFallback] suspends the walk's refusals apart from an
+// identifier collision, since a fallback answers one failing reference at a
+// time and a document outside the expansion has no reference in the expansion
+// for a policy to answer.
 //
 // A ref whose expansion reaches its own target returns an error wrapping
 // [ErrRefCycle]. A $dynamicRef under Draft 2020-12 has no faithful static
@@ -537,11 +538,13 @@ func (in *inliner) run(s *Schema) (*Schema, error) {
 // refuses the run.
 //
 // With a fallback the walk is tolerant and fetches through [inliner.fetchDoc],
-// which vets before registering and records every failure in the negative
-// cache. The walk then refuses nothing. A fallback answers one failing
-// reference at a time, and a document no reference in the expansion reaches
-// has no reference in the expansion for a policy to answer, so walkPair
-// replays each failure at the references that do reach it.
+// which checks for an identifier collision, then vets, then registers, and
+// records every failure in the negative cache. The walk then refuses nothing
+// but that collision, which no substitute can answer: a fallback answers one
+// failing reference at a time and cannot decide which of two documents owns a
+// URI they both claim. A document no reference in the expansion reaches has no
+// reference in the expansion for a policy to answer, so walkPair replays each
+// other failure at the references that do reach it.
 //
 // The walk resolves a $dynamicRef to reach the document it names, but a
 // $dynamicRef that resolves to nothing never refuses the walk, whatever the
@@ -996,12 +999,16 @@ func (in *inliner) substitute(pristine *Schema, path, ref string, inlineErr erro
 	}
 
 	// Register the substitute's $id/$anchor in the per-run fallback registries
-	// rather than the shared ones. A caller-supplied substitute whose $id
-	// collides with an already-loaded document URI must not overwrite that
-	// entry; the fallback is consulted only after the shared registry, so the
-	// real document keeps priority while the substitute's own nested refs still
-	// resolve.
-	in.session.RegisterFallback(cp, base)
+	// rather than the shared ones, so its nested refs resolve without the
+	// substitute outranking a real document. RegisterFallbackDocument instead
+	// refuses a substitute whose own $id names a URI a real document already
+	// holds, the same rule Compile applies to a fetched document. The wrap
+	// names the ref whose fallback supplied it, as the vet failure above does.
+	err = in.session.RegisterFallbackDocument(cp, base, fmt.Sprintf("the substitute for %q", ref))
+	if err != nil {
+		//nolint:wrapcheck // The claimant above already names the ref.
+		return nil, err
+	}
 
 	// A substitute that re-bases via its own $id reports a nested ref failure
 	// in its own document: it is the root of that document, so its nested
@@ -1205,12 +1212,10 @@ func (in *inliner) fallbackVet(sc *Schema, locator string) (schemavet.Node, erro
 // baseURI, and returns the copy. The copy is resolution space only and is never
 // mutated; output material is cloned from it on demand.
 //
-// Its own $ids, anchors, and base URIs are registered through the per-run
-// fallback registries rather than walked into the shared ones: a fetched
-// document whose nested $id resolves to an already-loaded URI (the root base or
-// an earlier document) must not overwrite that entry, so the already-loaded
-// document keeps priority while the fetched document's own refs still resolve.
-// This mirrors the substitute path's convention.
+// Its own $ids, anchors, and base URIs join the same registry, through the
+// registration the validator's fetch runs. A nested $id resolving to a URI
+// another document already holds is refused with [ErrIDCollision] rather than
+// merged, so no precedence between the two is needed.
 //
 // A resolver miss or error is recorded in the session's per-run negative cache
 // and replayed on later fetches of the same URI, so the resolver is consulted
@@ -1253,6 +1258,18 @@ func (in *inliner) fetchDoc(baseURI string) (*Schema, error) {
 		return nil, fmt.Errorf("%w: cannot resolve %q", ErrRefResolve, baseURI)
 	}
 
+	// The vet below runs between the fetch and the registration, so this
+	// checks the collision without merging first. See
+	// [refresolve.Session.CheckFetched] for why the order matters. Registering
+	// here instead would leave a malformed remote resolvable and rob
+	// [WithRefFallback] of the failure it answers.
+	collErr := in.session.CheckFetched(cp, baseURI)
+	if collErr != nil {
+		in.session.RecordRemoteMiss(baseURI, collErr)
+
+		return nil, fmt.Errorf("%w: %w", ErrRefResolve, collErr)
+	}
+
 	doc, vetErr := schemavet.NewVetter(in.vetProfile()).VetDoc(cp, baseURI+"#", baseURI)
 	if vetErr != nil {
 		in.session.RecordRemoteMiss(baseURI, vetErr)
@@ -1260,21 +1277,36 @@ func (in *inliner) fetchDoc(baseURI string) (*Schema, error) {
 		return nil, fmt.Errorf("%w: %w", ErrRefResolve, vetErr)
 	}
 
-	in.registerDoc(cp, baseURI)
+	regErr := in.registerDoc(cp, baseURI)
+	if regErr != nil {
+		return nil, regErr
+	}
+
 	in.recordDoc(doc, "", in.session.SchemaBase(cp))
 
 	return cp, nil
 }
 
 // registerDoc puts a fetched document into resolution space under the URI the
-// fetch retrieved it from. Its own $ids, anchors, and base URIs go through the
-// per-run fallback registries rather than the shared ones, so a nested $id
-// resolving to an already-loaded URI leaves that document's entry in place
-// while the fetched document's own refs still resolve. Both fetch closures
-// register here, so the two cannot drift.
-func (in *inliner) registerDoc(cp *Schema, baseURI string) {
-	in.session.Registry().URI[baseURI] = cp
-	in.session.RegisterFallback(cp, baseURI)
+// fetch retrieved it from, along with its own $ids, anchors, and base URIs. It
+// is the registration the validator's fetch runs, so a fetched document enters
+// both engines through one path and neither can refuse an identifier collision
+// the other accepts. Both of the inliner's fetch closures register here, so
+// they cannot drift from each other either.
+//
+// A document claiming a $id or anchor another document already holds is
+// refused with [ErrIDCollision] and registers nothing. This method records that
+// failure in the negative cache like the other fetch failures, so a run reports
+// it once however many references name the document.
+func (in *inliner) registerDoc(cp *Schema, baseURI string) error {
+	err := in.session.RegisterFetched(cp, baseURI)
+	if err != nil {
+		in.session.RecordRemoteMiss(baseURI, err)
+
+		return fmt.Errorf("%w: %w", ErrRefResolve, err)
+	}
+
+	return nil
 }
 
 // prefetchDoc is the [refresolve.Fetch] closure the strict closure walk drives.
@@ -1302,7 +1334,10 @@ func (in *inliner) prefetchDoc(baseURI string) (*Schema, error) {
 		return nil, fmt.Errorf("%w: cannot resolve %q", ErrRefResolve, baseURI)
 	}
 
-	in.registerDoc(cp, baseURI)
+	err = in.registerDoc(cp, baseURI)
+	if err != nil {
+		return nil, err
+	}
 
 	return cp, nil
 }

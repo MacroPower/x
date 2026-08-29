@@ -928,14 +928,15 @@ func TestInlineDynamicRefDroppedBesideRef(t *testing.T) {
 	assert.Empty(t, a.DynamicRef)
 }
 
-func TestInlineSubstituteIDDoesNotCorruptResolution(t *testing.T) {
+func TestInlineSubstituteIDCollisionRefused(t *testing.T) {
 	t.Parallel()
 
-	// A SubstituteRef whose $id collides with an already-registered document URI
-	// must not overwrite that registration. Property "a"'s dangling ref triggers
-	// a substitute carrying $id https://example.com/doc (the root's own id), and
-	// property "b" then refs that id; b must still resolve to the real root's
-	// $defs/Real, not the substitute, which the substitute does not contain.
+	// A SubstituteRef whose $id names a URI a real document already holds is
+	// refused, the rule a fetched document follows. Property "a"'s dangling ref
+	// triggers a substitute carrying $id https://example.com/doc, the root's own
+	// id, so the root and the substitute both claim one URI and property "b"'s
+	// ref to that URI has two answers. Inline reports the collision instead of
+	// choosing, naming the reference whose fallback supplied the substitute.
 	input := stringtest.Input(`
 		{
 			"$id": "https://example.com/doc",
@@ -957,12 +958,13 @@ func TestInlineSubstituteIDDoesNotCorruptResolution(t *testing.T) {
 	root, err := jsonschema.ParseSchema([]byte(input))
 	require.NoError(t, err)
 
-	got, err := jsonschema.Inline(t.Context(), root, jsonschema.WithRefFallback(substitute))
-	require.NoError(t, err)
-
-	require.Contains(t, got.Properties, "b")
-	assert.Equal(t, "integer", got.Properties["b"].Type,
-		"b must resolve to the real root's $defs/Real, not the colliding substitute")
+	_, err = jsonschema.Inline(t.Context(), root, jsonschema.WithRefFallback(substitute))
+	require.ErrorIs(t, err, jsonschema.ErrIDCollision,
+		"the substitute claims the URI the root document holds")
+	assert.Contains(t, err.Error(), `the substitute for "#/$defs/missing"`,
+		"the message names the reference whose fallback supplied the substitute")
+	assert.Contains(t, err.Error(), `document "https://example.com/doc"`,
+		"the message names the document already holding the URI")
 }
 
 func TestInlineRefFailurePathForExtraKeywordTarget(t *testing.T) {
@@ -1220,12 +1222,15 @@ func TestInlineDoesNotMutateInput(t *testing.T) {
 	assert.NotEqual(t, string(schemaBefore), string(gotJSON), "the result is a distinct, inlined copy")
 }
 
-func TestInlineFetchedDocIDDoesNotClobber(t *testing.T) {
+// TestInlineFetchedDocIDCollisionRefused pins the inline half of the identifier
+// collision Compile refuses in TestCompileFetchedDocIDCollisionRefused. Two
+// documents claim one URI, so Inline refuses the graph rather than resolving
+// the later ref to whichever document its own registry happens to hold.
+func TestInlineFetchedDocIDCollisionRefused(t *testing.T) {
 	t.Parallel()
 
-	// Document B is fetched for the ref to /b but declares $id /a. Registering
-	// it must not overwrite the already-loaded document A in the shared
-	// registry, so the later ref to /a still inlines A's content, not B's.
+	// Document B is fetched for the ref to /b but declares $id /a, the URI the
+	// already-loaded document A holds.
 	docA := &jsonschema.Schema{Type: "string"}
 	docB := &jsonschema.Schema{ID: "https://example.com/a", Type: "integer"}
 
@@ -1237,16 +1242,18 @@ func TestInlineFetchedDocIDDoesNotClobber(t *testing.T) {
 		},
 	}
 
-	got, err := jsonschema.Inline(t.Context(), root, jsonschema.WithRefResolver(mapResolver{
+	_, err := jsonschema.Inline(t.Context(), root, jsonschema.WithRefResolver(mapResolver{
 		"https://example.com/a": docA,
 		"https://example.com/b": docB,
 	}))
-	require.NoError(t, err)
-
-	require.Len(t, got.AllOf, 3)
-	assert.Equal(t, "string", got.AllOf[0].Type, "the first ref to /a inlines A")
-	assert.Equal(t, "string", got.AllOf[2].Type,
-		"the later ref to /a still inlines A, not the clobbering B")
+	require.ErrorIs(t, err, jsonschema.ErrIDCollision,
+		"B claims the URI A already holds")
+	require.ErrorIs(t, err, jsonschema.ErrRefResolve,
+		"the collision surfaces through the referencing ref")
+	assert.Contains(t, err.Error(), `document "https://example.com/b"`,
+		"the message names the document claiming the URI")
+	assert.Contains(t, err.Error(), `document "https://example.com/a"`,
+		"the message names the document already holding it")
 }
 
 // TestInlinePreservesPropertyOrder pins that Inline keeps the render-only

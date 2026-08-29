@@ -1,6 +1,7 @@
 package jsonschema
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 
@@ -226,9 +227,18 @@ func (c refClosure) run() error {
 // that reaches the reference reports it, per the Remote References contract). A
 // strict miss inside a present document wraps the resolver's reported error
 // when one exists and [ErrNotResolved] otherwise, naming the bearing node
-// through the document locator and the node's pointer.
+// through the document locator and the node's pointer. It reports an
+// [ErrIDCollision] whether the walk is strict or tolerant, since no later fetch
+// can resolve it.
 func refWalkError(res refresolve.Result, keyword, ref, locator string, loc Location, strict bool) error {
-	if !strict || res.Target != nil || res.DocumentMiss {
+	// This check reports an identifier collision ahead of the strictness gate,
+	// for the reason the gate exists. A tolerant pass defers an answer a later
+	// fetch may change, and no later fetch changes a refused registration.
+	// Without this the tolerant pass over the fallback targets would swallow a
+	// collision reachable only through a target's own ref.
+	collided := res.Target == nil && errors.Is(res.Err, ErrIDCollision)
+
+	if !collided && (!strict || res.Target != nil || res.DocumentMiss) {
 		return nil
 	}
 

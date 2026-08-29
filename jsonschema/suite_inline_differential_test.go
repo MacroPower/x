@@ -133,46 +133,41 @@ func TestInlineFallbackSuspendsTransitiveVetting(t *testing.T) {
 	require.Error(t, standalone.ValidateJSON(t.Context(), []byte(`1`)))
 }
 
-// TestRefEnginesDisagreeOnCollidingIDs records a divergence the rig found, not
-// a behavior the package promises. Pinned so a fix at either engine has to
-// acknowledge it.
+// TestRefEnginesAgreeOnCollidingIDs pins that both engines refuse a graph in
+// which a fetched document claims a URI another document already holds. Two
+// documents under one URI leave every reference naming it ambiguous, so the
+// registration reports ErrIDCollision at both engines instead of picking a
+// winner.
 //
-// A fetched document claims a URI another document already holds, and the two
-// engines then resolve one anchor reference to two different targets. Compile
-// registers the fetched document's anchor under the $id that document claims
-// and reaches it. Inline keeps the document already loaded under that URI and
-// reaches its anchor instead. Both engines carry a fix for a fetched $id
-// overwriting a loaded registry entry, 52b5110 for the validator and da61121
-// for the inliner, and the two fixes disagree here.
-//
-// The collision has two spellings and both diverge, so this is a class rather
-// than one graph. A document can claim the root's URI, or it can claim another
-// document's retrieval URI. In each row one engine accepts exactly what the
-// other refuses.
-//
-// Neither engine breaks a stated contract, since doc.go fixes no precedence for
-// a fetched document claiming a URI another document already holds. Resolving
-// it means stating that precedence once and applying it at both sites.
-func TestRefEnginesDisagreeOnCollidingIDs(t *testing.T) {
+// The collision has two spellings and both are refused. A document can claim
+// the root's URI, or it can claim another document's retrieval URI. Each row
+// holds exactly one collision, since the engines reach documents in different
+// orders and a graph with two would let them name different pairs.
+func TestRefEnginesAgreeOnCollidingIDs(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]struct {
 		root      string
 		documents map[string]string
+		claimant  string
+		holder    string
 	}{
 		"a fetched document claims the root's URI": {
-			root: `{"$schema":"http://json-schema.org/draft-07/schema#","$id":"https://ex.test/root.json","definitions":{"anc":{"$id":"#anc","type":"string"}},"properties":{"p0":{"$ref":"https://ex.test/b.json#anc"}}}`,
+			root: `{"$schema":"http://json-schema.org/draft-07/schema#","$id":"https://ex.test/root.json","properties":{"p0":{"$ref":"https://ex.test/b.json"}}}`,
 			documents: map[string]string{
-				"https://ex.test/a.json": `{"$id":"https://ex.test/b.json","definitions":{"anc":{"$id":"#anc","type":"array"}}}`,
-				"https://ex.test/b.json": `{"$id":"https://ex.test/root.json","allOf":[{"$ref":"https://ex.test/a.json"}]}`,
+				"https://ex.test/b.json": `{"$id":"https://ex.test/root.json","type":"array"}`,
 			},
+			claimant: `document "https://ex.test/b.json"`,
+			holder:   `document "https://ex.test/root.json"`,
 		},
 		"a fetched document claims another's retrieval URI": {
-			root: `{"$schema":"http://json-schema.org/draft-07/schema#","$id":"https://ex.test/root.json","properties":{"p0":{"$ref":"https://ex.test/a.json#anc"}}}`,
+			root: `{"$schema":"http://json-schema.org/draft-07/schema#","$id":"https://ex.test/root.json","properties":{"p0":{"$ref":"https://ex.test/a.json"}}}`,
 			documents: map[string]string{
-				"https://ex.test/a.json": `{"$id":"https://ex.test/other.json","definitions":{"anc":{"$id":"#anc","type":"array"}},"allOf":[{"$ref":"https://ex.test/b.json"}]}`,
-				"https://ex.test/b.json": `{"$id":"https://ex.test/a.json","definitions":{"anc":{"$id":"#anc","type":"string"}}}`,
+				"https://ex.test/a.json": `{"type":"array","allOf":[{"$ref":"https://ex.test/b.json"}]}`,
+				"https://ex.test/b.json": `{"$id":"https://ex.test/a.json","type":"string"}`,
 			},
+			claimant: `document "https://ex.test/b.json"`,
+			holder:   `document "https://ex.test/a.json"`,
 		},
 	}
 
@@ -182,28 +177,17 @@ func TestRefEnginesDisagreeOnCollidingIDs(t *testing.T) {
 
 			schema, resolver := parseRefGraph(t, tc.root, tc.documents)
 
-			compiled, err := jsonschema.Compile(t.Context(), schema, jsonschema.WithRefResolver(resolver))
-			require.NoError(t, err)
+			_, compileErr := jsonschema.Compile(t.Context(), schema, jsonschema.WithRefResolver(resolver))
+			_, inlineErr := jsonschema.Inline(t.Context(), schema, jsonschema.WithRefResolver(resolver))
 
-			inlined, err := jsonschema.Inline(t.Context(), schema, jsonschema.WithRefResolver(resolver))
-			require.NoError(t, err)
-
-			standalone, err := jsonschema.Compile(t.Context(), inlined)
-			require.NoError(t, err)
-
-			// The disagreement runs both ways, which rules out one side simply
-			// being broken: each engine accepts exactly what the other refuses.
-			array, str := []byte(`{"p0": [1]}`), []byte(`{"p0": "x"}`)
-
-			assert.NotEqual(t,
-				compiled.ValidateJSON(t.Context(), array) == nil,
-				standalone.ValidateJSON(t.Context(), array) == nil,
-				"the engines resolve the same anchor reference to different targets")
-
-			assert.NotEqual(t,
-				compiled.ValidateJSON(t.Context(), str) == nil,
-				standalone.ValidateJSON(t.Context(), str) == nil,
-				"the disagreement runs in both directions")
+			for engine, err := range map[string]error{"Compile": compileErr, "Inline": inlineErr} {
+				require.ErrorIsf(t, err, jsonschema.ErrIDCollision,
+					"%s must refuse a document claiming a URI another document holds", engine)
+				assert.Containsf(t, err.Error(), tc.claimant,
+					"%s must name the document making the claim", engine)
+				assert.Containsf(t, err.Error(), tc.holder,
+					"%s must name the document already holding the URI", engine)
+			}
 		})
 	}
 }
