@@ -1371,19 +1371,18 @@ deadlines. `Inline` applies its options per call; `NewInliner` applies them once
 and the returned `Inliner` is reused, completing the reusable trio with
 `Generator` and `Validator`.
 
-`WithRetrievalBase` makes refs resolve against each document's
-retrieval URI instead, treating `$id` as an inert annotation: `$id` neither
-establishes a base URI nor registers a resolution target, in any document,
-including the Draft 7 fragment-only `$id` form that otherwise acts as an
-anchor. `$anchor` and `$dynamicAnchor` still resolve within their document,
-and `$id` keywords pass through to the output verbatim. An inert `$id`
-addresses nothing, so the structural vet skips its domain check.
-Real-world schemas commonly declare a published remote `$id` while
-shipping the files their refs name alongside the schema; under the default
-RFC behavior those refs absolutize against the remote `$id` and cannot be
-served from disk. With this option the root document's refs absolutize
-against the base from `WithBaseURI` and each fetched document's refs
-against the URI it was fetched from.
+`WithRetrievalBase` makes refs resolve against each document's retrieval URI
+instead, treating `$id` as an inert annotation: `$id` neither establishes a
+base URI nor registers a resolution target, in any document, including the
+Draft 7 fragment-only `$id` form that otherwise acts as an anchor. `$anchor`
+and `$dynamicAnchor` still resolve within their document, and `$id` keywords
+pass through to the output verbatim. An inert `$id` addresses nothing, so
+the structural vet skips its domain check. Real-world schemas commonly
+declare a published remote `$id` while shipping the files their refs name
+alongside the schema; under the default RFC behavior those refs absolutize
+against the remote `$id` and cannot be served from disk. With this option
+the root document's refs absolutize against the base from `WithBaseURI` and
+each fetched document's refs against the URI it was fetched from.
 
 Sibling keywords beside `$ref` follow draft semantics, with the draft
 detected from the root schema's `$schema` exactly as the validator detects
@@ -1436,12 +1435,12 @@ Failure modes:
   be found, returns an error wrapping `ErrRefResolve`.
 - `Inline` vets the root document before any reference resolves, through the
   policy `Compile` applies to the document it is given (see
-  [Remote references](#remote-references) for the full check list). A violation
-  returns the check's sentinel naming the offending path, so a root `Inline`'s
-  vet accepts is a root `Compile`'s vet accepts. A `SubstituteRef` schema
-  enters
-  resolution space as a document of its own, so `Inline` vets it as one and
-  names the failing reference in the message. Under `WithRetrievalBase`
+  [Remote references](#remote-references) for the full check list). A
+  violation returns the check's sentinel naming the offending path, so the
+  structural vet accepts the same roots at both entry points. A
+  `SubstituteRef` schema
+  enters resolution space as a document of its own, so `Inline` vets it as one
+  and names the failing reference in the message. Under `WithRetrievalBase`
   `Inline` skips the `$id` domain check throughout the run, in the root, in
   each substitute, and in every fetched document, since an inert `$id`
   establishes no base and registers no target.

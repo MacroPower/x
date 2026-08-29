@@ -242,9 +242,10 @@ func checkNilSubschemaEntries(schema *Schema, schemaPath string) error {
 // [ErrMisplacedVocabulary]) and, when the node declares an $id the run reads
 // as live, its domain (see [ErrInvalidID] and [checkSchemaID], which also
 // computes the base the node's children inherit). Under [Profile.InertIDs]
-// checkIdentifiers skips the $id pass, since an inert $id names no target. The traversal
-// mirrors [checkTypeNames]: it uses [Entries] for the recursion and each
-// entry's Pointer for the location, with visited guarding schema-graph cycles.
+// checkIdentifiers skips the $id pass, since an inert $id names no target.
+// The traversal mirrors [checkTypeNames]: it uses [Entries] for the
+// recursion and each entry's Pointer for the location, with visited guarding
+// schema-graph cycles.
 func checkIdentifiers(
 	schema *Schema, schemaPath, base string, profile Profile, visited map[*Schema]bool,
 ) error {

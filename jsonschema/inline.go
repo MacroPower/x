@@ -57,13 +57,12 @@ type inliner struct {
 	index *schemaIndex
 
 	// The run's structural vetter, minting the [schemavet.Doc] currency for
-	// the pristine root and each fallback substitute, and the
-	// [schemavet.Node] currency for each JSON-pointer fallback target the
-	// session materializes. Those passes share the vetter's visited sets, so
-	// it checks a node reached twice only once. Each fetched document gets a
-	// fresh
-	// vetter in [inliner.fetchDoc] instead, since a remote is independent of
-	// the document that referenced it.
+	// the pristine root and each fallback substitute, and the [schemavet.Node]
+	// currency for each JSON-pointer fallback target the session materializes.
+	// Those passes share the vetter's visited sets, so the vetter checks a
+	// node reached twice only once. Each fetched document gets a fresh vetter
+	// in [inliner.fetchDoc] instead, since a remote is independent of the
+	// document that referenced it.
 	vetter *schemavet.Vetter
 
 	// The inflight[id] flag marks a pristine schema whose self-contained copy is

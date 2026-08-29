@@ -595,8 +595,8 @@
 // value to a set, so an explicit bound narrows it further and is kept:
 // enum=10|20,minimum=15 keeps minimum and so admits only 20. Numeric, length,
 // and count bounds from all three sources (the Go kind, the jsonschema tag, and
-// tag interpreters) merge through that one model: they intersect order-
-// independently (a weaker bound never loosens a stronger one), a conflict in the
+// tag interpreters) merge through that one model: they intersect
+// order-independently (a weaker bound never loosens a stronger one), a conflict in the
 // discrete value set aborts generation, and an unsatisfiable range (a minimum
 // above a maximum) is emitted as its impossible bounds rather than loosened.
 //
@@ -1264,9 +1264,9 @@
 // Inline vets the root document before any reference resolves, through the
 // policy [Compile] applies to the document it is given (see Remote References
 // for the full check list). A violation returns the check's sentinel naming
-// the offending path, so a root Inline's vet accepts is a root Compile's vet
-// accepts. A [SubstituteRef] schema enters resolution space as a document of its
-// own, so Inline vets it as one and names the failing reference in the
+// the offending path, so the structural vet accepts the same roots at both
+// entry points. A [SubstituteRef] schema enters resolution space as a document
+// of its own, so Inline vets it as one and names the failing reference in the
 // message. Under [WithRetrievalBase] Inline skips the $id domain check
 // throughout the run, in the root, in each substitute, and in every fetched
 // document, since an inert $id establishes no base and registers no target.

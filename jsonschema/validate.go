@@ -984,9 +984,11 @@ func (v *validator) remoteFetch(sess *refresolve.Session, cow bool) refresolve.F
 				return nil, fmt.Errorf("%w: %w", ErrRefResolve, checkErr)
 			}
 
-			// The registrations below use the minted document's pointer (the
-			// same clone), so the vetted currency, not the raw fetch result,
-			// is what enters the registry.
+			// Register the minted document's pointer (the same clone), so the
+			// vetted currency reaches the registry rather than the raw fetch
+			// result. The inliner's fetchDoc consumes its own Doc where it
+			// records the document; nothing here does, so the assignment is
+			// what keeps the mint load-bearing on this path.
 			cp = doc.Schema()
 
 			// Clone the registry into this run's own copy before the first

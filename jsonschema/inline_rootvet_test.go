@@ -190,11 +190,12 @@ func TestInlineRetrievalBaseKeepsIDsInert(t *testing.T) {
 // TestCompileChecksTheBaseURIInlineDoesNot pins one of the two compile-time
 // refusals with no Inline counterpart, the reason the engines agree on the
 // structural vet rather than on every error. [jsonschema.Compile] parses the
-// [jsonschema.WithBaseURI] value and rejects one that is not a URI reference;
-// Inline takes the same option without that check, and an unparsable base
-// normalizes to something its resolution walk carries. The other refusal,
-// ErrUnknownVocabulary, has no test here because vocabulary resolution reads
-// options Inline does not take.
+// [jsonschema.WithBaseURI] value and rejects one that is not a URI reference.
+// [jsonschema.Inline] normalizes the same value and resolves against it
+// without ever parsing it, so a malformed base reaches the walk unexamined
+// and a root with no refs inlines unchanged. The other refusal,
+// [jsonschema.ErrUnknownVocabulary], has no test here, since vocabulary
+// resolution reads options Inline does not take.
 func TestCompileChecksTheBaseURIInlineDoesNot(t *testing.T) {
 	t.Parallel()
 
