@@ -24,6 +24,21 @@ import (
 // package's two schema-level rigs see a dominance bug only as a validation
 // failure several layers away.
 //
+// A reflect.VisibleFields cross-guard is deliberately not a second oracle
+// beside encoding/json. It would assert that the names the phases resolve are
+// the exported field names reflect.VisibleFields reports for the same type. Go
+// promotion keys on the Go field name while encoding/json keys on the JSON
+// name, so the two rule sets agree only over types where no tag renames or
+// drops an exported field. What this population leaves of that subset holds
+// nothing worth comparing. The roster types that agree resolve no name at all,
+// and a synthesized shape agrees only where no tag touches a name, which is
+// where reflect.VisibleFields restates what the phases already emit. Three
+// divergences make the rest disagree: JSON-name dominance, the same-depth tag
+// tie-break, and a composed embed trading its own name for its promoted ones.
+// Excusing those rather than skipping the type needs the JSON-name resolution
+// such a guard would be checking. The standard library is the ground truth
+// these phases reimplement, and the oracle compares against it directly.
+//
 // Three classes of type carry no verdict, each with a reason constant and a
 // guard test pinning its cause.
 
