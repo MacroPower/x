@@ -6,12 +6,12 @@
 # (jsonschema/go.mod), the same module the validator compiles against.
 #
 # The official suite's optional/format/idn-hostname.json carries 71 string
-# cases, only three of them A-labels, and it exercises many of the same RFC
-# 5892 and RFC 5893 rules with its own examples. None of the rows below appears
-# in it. Each of the A.1 through A.7 contextual rules gets both an accept and a
-# reject, so a check that reads one of them too broadly fails a row rather than
-# none. The Bidi and exception groups carry whichever verdict their rule
-# decides.
+# cases under draft 2020-12 and 70 under draft 7, only three of them A-labels
+# in either. Both files exercise many of the same RFC 5892 and RFC 5893 rules
+# with their own examples. None of the rows below appears in the suite. Each of
+# the A.1 through A.7 contextual rules gets both an accept and a reject, so a
+# check that reads one of them too broadly fails a row rather than none. The
+# Bidi and exception groups carry whichever verdict their rule decides.
 #
 # This is a curated subset, not the full Unicode IdnaTestV2.txt corpus.
 # IdnaTestV2.txt records per-row toUnicode/toASCII outputs and status codes for

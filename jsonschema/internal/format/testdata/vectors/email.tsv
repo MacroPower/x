@@ -2,11 +2,13 @@
 #
 # The vendored is_email corpus (testdata/corpus/isemail) grades 164 addresses
 # against the RFC 5322 spectrum, and the official suite's
-# optional/format/email.json carries 21 string cases covering the dot-atom and
-# address-literal rules. Every shape below already runs in one of them. What
-# this file adds is the naming, one row per RFC 5321 production in one place,
-# with the empty quoted local part carrying the history that made it worth
-# pinning.
+# optional/format/email.json carries 21 string cases under draft 2020-12 and 14
+# under draft 7. Both drafts reach the dot-atom and domain rules, and the
+# 2020-12 file adds the quoted-local-part, address-literal, and invalid-domain
+# cases the draft 7 one lacks. Every shape below already runs in the corpus or
+# one of those files. What this file adds is the naming, one row per RFC 5321
+# production in one place, with the empty quoted local part carrying the
+# history that made it worth pinning.
 #
 # Row format: see loadVectorFile in vectors_test.go.
 #
