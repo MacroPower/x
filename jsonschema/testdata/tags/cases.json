@@ -748,6 +748,162 @@
     ]
   },
   {
+    "name": "required on a slice forbids null beside the size floor",
+    "note": "a nil slice marshals as null, which go-playground's required rejects and minItems never reaches",
+    "type": "[]string",
+    "json": "v",
+    "validate": "required",
+    "schema": {
+      "type": [
+        "null",
+        "array"
+      ],
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "not": {
+        "const": null
+      }
+    },
+    "instances": [
+      {
+        "json": null,
+        "want": "reject"
+      },
+      {
+        "json": [],
+        "want": "reject"
+      },
+      {
+        "json": [
+          "a"
+        ],
+        "want": "accept"
+      }
+    ]
+  },
+  {
+    "name": "required on a map forbids null beside the size floor",
+    "note": "a nil map marshals as null, which go-playground's required rejects and minProperties never reaches",
+    "type": "map[string]int",
+    "json": "v",
+    "validate": "required",
+    "schema": {
+      "type": [
+        "null",
+        "object"
+      ],
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "integer"
+      },
+      "not": {
+        "const": null
+      }
+    },
+    "instances": [
+      {
+        "json": null,
+        "want": "reject"
+      },
+      {
+        "json": {},
+        "want": "reject"
+      },
+      {
+        "json": {
+          "a": 1
+        },
+        "want": "accept"
+      }
+    ]
+  },
+  {
+    "name": "required on a byte slice forbids null beside the size floor",
+    "note": "a nil byte slice marshals as null, which go-playground's required rejects and minLength never reaches",
+    "type": "[]byte",
+    "json": "v",
+    "validate": "required",
+    "schema": {
+      "type": [
+        "null",
+        "string"
+      ],
+      "minLength": 1,
+      "not": {
+        "const": null
+      },
+      "contentEncoding": "base64"
+    },
+    "instances": [
+      {
+        "json": null,
+        "want": "reject"
+      },
+      {
+        "json": "",
+        "want": "reject"
+      },
+      {
+        "json": "YQ==",
+        "want": "accept"
+      }
+    ]
+  },
+  {
+    "name": "a dive carries required onto a nilable element",
+    "note": "a nil inner slice marshals as null, which go-playground's dive,required rejects per element",
+    "type": "[][]string",
+    "json": "v",
+    "validate": "dive,required",
+    "schema": {
+      "type": [
+        "null",
+        "array"
+      ],
+      "items": {
+        "type": [
+          "null",
+          "array"
+        ],
+        "items": {
+          "type": "string"
+        },
+        "minItems": 1,
+        "not": {
+          "const": null
+        }
+      }
+    },
+    "instances": [
+      {
+        "json": [
+          null
+        ],
+        "want": "reject"
+      },
+      {
+        "json": [
+          []
+        ],
+        "want": "reject"
+      },
+      {
+        "json": [
+          [
+            "a"
+          ]
+        ],
+        "want": "accept"
+      },
+      {
+        "json": null,
+        "want": "accept"
+      }
+    ]
+  },
+  {
     "name": "required with eq=false on a bool is a conflict",
     "note": "required on a bool pins true, which a const of false contradicts",
     "type": "bool",

@@ -385,34 +385,48 @@ func refBaseOf(t Target) *jsonschema.Schema {
 	return &jsonschema.Schema{}
 }
 
-// nonZeroNullable is the non-zero assertion on a nullable occurrence, a
-// forbidden null and nothing else.
+// nonZeroNullOnly applies the null half of the non-zero assertion and reports
+// whether that is the whole of it. A nil occurrence marshals as null and
+// go-playground's required rejects that nil, so it forbids null wherever the
+// occurrence admits one. The schema's required entry cannot say so on its own,
+// since a property whose value is null is still present. An occurrence with no
+// null branch already rejects null through its type, so nothing is left to
+// forbid and this writes nothing.
 //
-// A pointer field's emptiness is its nil, which go-playground's required reads
-// as "must be non-nil" and says nothing about the pointed-to value, so the
-// pointed-to zero stays valid. The schema's required entry cannot express that
-// on its own, since a property whose value is null is still present, so the
-// assertion needs the null forbidden outright.
+// The forbidden null is the whole assertion on a pointer occurrence.
+// Go-playground reads required on a pointer as "must be non-nil" and says
+// nothing about the pointed-to value, so the pointed-to zero stays valid. Every
+// other occurrence also carries the type-specific non-zero constraint.
 //
-// The applier forbids null as a value rather than as a subschema, which keeps
-// it on the null wrapper. A forbidden value rides the not.const to not.enum
-// accumulation and holds the single not slot, which the keyword table scopes to
-// the wrapper. A forbidden subschema cannot join that accumulation, so it gives
-// way to allOf, and allOf is scoped to the value branch of the null encoding,
-// where a null instance never reaches it.
-func nonZeroNullable(t Target) error {
-	Forbid(t.Canvas, nil)
+// Every non-zero applier opens with this call, so the two halves cannot come
+// apart. An applier that forbade the null without asking whether to stop, or
+// asked without forbidding, would be a silent divergence in one column of the
+// matrix.
+//
+// It forbids null as a value rather than as a subschema, which keeps it on the
+// null wrapper. A forbidden value rides the not.const to not.enum accumulation
+// and holds the single not slot, which the keyword table scopes to the wrapper.
+// A forbidden subschema cannot join that accumulation, so it gives way to
+// allOf, and allOf is scoped to the value branch of the null encoding, where a
+// null instance never reaches it.
+func nonZeroNullOnly(t Target) bool {
+	if t.Shape.Nullable {
+		Forbid(t.Canvas, nil)
+	}
 
-	return nil
+	return t.Shape.isPointer()
 }
 
-// nonZeroFloor is the non-zero assertion on a shape whose emptiness is a size:
-// a floor of one on the axis that measures it. It is an ordinary intersect-only
-// floor, so a stronger bound another rule set is never lowered.
+// nonZeroFloor is the non-zero assertion on a shape whose emptiness is a size,
+// a floor of one on the axis that measures it, beside the forbidden null a
+// nilable container needs. A nil slice, map, or byte slice marshals as null,
+// which go-playground's required rejects and the floor never reaches, since a
+// null instance carries no size to measure. The floor is an ordinary
+// intersect-only bound, so it never lowers a bound another rule already set.
 func nonZeroFloor(axis Axis) func(Target, Rule, Policy) error {
 	return func(t Target, _ Rule, pol Policy) error {
-		if t.Shape.Nullable {
-			return nonZeroNullable(t)
+		if nonZeroNullOnly(t) {
+			return nil
 		}
 
 		return applySizeBound(t, Rule{Op: OpFloorIncl, Axis: axis, Params: ParamsOf("1")}, pol)
@@ -425,8 +439,8 @@ func nonZeroFloor(axis Axis) func(Target, Rule, Policy) error {
 // string-marshaling type forbids the text it actually writes rather than a
 // hardcoded "0" it never emits.
 func nonZeroForbidCoerced(t Target, _ Rule, pol Policy) error {
-	if t.Shape.Nullable {
-		return nonZeroNullable(t)
+	if nonZeroNullOnly(t) {
+		return nil
 	}
 
 	v, err := t.Shape.ParseScalar(t.Shape.zeroLiteral(), pol)
@@ -443,8 +457,8 @@ func nonZeroForbidCoerced(t Target, _ Rule, pol Policy) error {
 // zero literal directly. The untyped literals are what the numeric-aware dedup
 // folds together with any other spelling of zero the same target forbids.
 func nonZeroForbidNumber(t Target, _ Rule, _ Policy) error {
-	if t.Shape.Nullable {
-		return nonZeroNullable(t)
+	if nonZeroNullOnly(t) {
+		return nil
 	}
 
 	if numkind.IsInteger(t.Shape.Kind) {
@@ -461,8 +475,8 @@ func nonZeroForbidNumber(t Target, _ Rule, _ Policy) error {
 // satisfy it, so the impossible pair is reported rather than resolved by
 // whichever rule ran last.
 func nonZeroTrue(t Target, _ Rule, _ Policy) error {
-	if t.Shape.Nullable {
-		return nonZeroNullable(t)
+	if nonZeroNullOnly(t) {
+		return nil
 	}
 
 	return SetConst(t, true)

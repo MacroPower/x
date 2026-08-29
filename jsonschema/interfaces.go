@@ -737,14 +737,25 @@ func (fc FieldContext) Constraints() *Constraints {
 	return fc.ConstraintsFor(fc.Shape())
 }
 
-// Shape classifies the field, folding in the json:",string" flag read from
-// [FieldContext.StructField] -- the one input [ShapeOf] cannot see. A quoted
-// string field double-encodes (its instance is the JSON-quoted text), which
-// only the flag distinguishes from a plain string field; every other coercion
-// is already visible in [FieldContext.Base]. Prefer this over calling [ShapeOf]
-// directly when a context is available.
+// Shape classifies the field, folding in the two facts [ShapeOf] cannot see.
+// The first is the json:",string" flag read from [FieldContext.StructField]. A
+// quoted string field double-encodes (its instance is the JSON-quoted text),
+// which only the flag distinguishes from a plain string field, while every
+// other coercion is already visible in [FieldContext.Base]. The second is
+// whether the occurrence admits null. A Go type states only its pointer-ness.
+// The generator gives a nil-able slice, map, or byte slice a null branch too,
+// and the field's node carries that decision, so this method reads it there.
+// A caller-built context has no backing node, so its null admission falls back
+// to the pointer-derived answer. Prefer this over calling [ShapeOf] directly
+// when a context is available.
 func (fc FieldContext) Shape() Shape {
-	return tagmodel.ShapeOfQuoted(fc.Type, fc.Base, fc.quotedString())
+	shape := tagmodel.ShapeOfQuoted(fc.Type, fc.Base, fc.quotedString())
+
+	if fc.node != nil {
+		shape.Nullable = fc.node.nullableDecision()
+	}
+
+	return shape
 }
 
 // quotedString reports whether the field carries a double-encoding

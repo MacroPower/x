@@ -67,16 +67,17 @@ func tagKinds() []tagKind {
 	// reasonRequiredEqFalseConflict. Drawing one rule per field keeps that pair
 	// unreachable.
 	scalarBool := []string{"eq=true", "ne=false", "required"}
-	// A sequence draws no required; see reasonRequiredCollectionNilCheck.
+	// A sequence draws no required, since the two validators diverge on the
+	// empty collection; see reasonRequiredCollectionEmptyFloor.
 	sequence := []string{"min=1", "max=3", "len=2", "eq=2", "ne=2", "unique", "dive,min=2"}
 	// A map draws neither required nor unique; see
-	// reasonRequiredCollectionNilCheck and reasonUniqueMapNoOp.
+	// reasonRequiredCollectionEmptyFloor and reasonUniqueMapNoOp.
 	mapping := []string{"min=1", "max=3", "len=2", "eq=2", "ne=2"}
 	// A byte slice encodes as one base64 string, so it takes the string size
 	// rules but has no element schema for oneof to reach. It draws no required
-	// either, since go-playground reads it as the slice it is and checks non-nil,
-	// while the schema measures the string it becomes; see
-	// reasonRequiredCollectionNilCheck.
+	// either, since an empty non-nil slice passes go-playground and trips the
+	// minLength the schema puts on the base64 string; see
+	// reasonRequiredCollectionEmptyFloor.
 	byteSlice := []string{"min=1", "max=5", "len=3"}
 
 	return []tagKind{

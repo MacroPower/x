@@ -119,8 +119,10 @@ type mapConstraints struct {
 // rejects the same marshaled form.
 //
 // Slices and maps are excluded on purpose; see
-// reasonRequiredCollectionNilCheck. That documented divergence is false
-// equivalence, not a bug the rig should flag, so it stays out of the roster.
+// reasonRequiredCollectionEmptyFloor. The two validators diverge only on the
+// empty collection, which the interpreter rejects by design, so slices and maps
+// stay out of the roster. The draw cannot build their nil occurrence, and
+// TestRequiredOnNullableRejectsNull pins that side instead.
 type requiredConstraints struct {
 	Str  string  `json:"str"   validate:"required"`
 	Num  int     `json:"num"   validate:"required"`

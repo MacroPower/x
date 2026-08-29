@@ -16,12 +16,16 @@ import (
 // agreement property is weaker than the biconditional.
 const (
 	// Go-playground applies required to a slice or map as a nil check, so an
-	// empty but non-nil collection passes, while the interpreter models it as a
-	// size floor and rejects the empty collection. A byte slice diverges the
-	// same way with minLength standing in for minItems, since go-playground
-	// reads the slice it is while the schema measures the base64 string it
-	// becomes.
-	reasonRequiredCollectionNilCheck = "required on a collection is a nil check in go-playground, a size floor in the schema"
+	// empty but non-nil collection passes, while the interpreter floors the size
+	// and rejects that collection. A byte slice diverges the same way with
+	// minLength standing in for minItems, since go-playground reads the slice it
+	// is while the schema measures the base64 string it becomes. The nil side of
+	// the same rule agrees, because the interpreter forbids the null a nil
+	// collection marshals as. The draw cannot reach that side, since it builds
+	// every collection through reflect.MakeSlice or reflect.MakeMap, which return
+	// a non-nil container even at length zero.
+	// TestRequiredOnNullableRejectsNull pins that side instead.
+	reasonRequiredCollectionEmptyFloor = "a non-nil empty collection satisfies go-playground's required and trips the schema's size floor"
 	// Go-playground's oneof formats the field as text and handles only the
 	// string and integer kinds, panicking with "Bad field type" on anything
 	// else, so it cannot be the reference for oneof on a bool or a float.
@@ -94,8 +98,9 @@ func rigExclusions() []rigExclusion {
 
 	return []rigExclusion{
 		{
-			what: "required on a slice, map, or byte slice", reason: reasonRequiredCollectionNilCheck,
-			rule: "required", kinds: collections,
+			what:   "required on a slice, map, or byte slice",
+			reason: reasonRequiredCollectionEmptyFloor,
+			rule:   "required", kinds: collections,
 		},
 		{
 			what: "oneof on a bool or a float", reason: reasonOneOfKindPanic,

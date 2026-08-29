@@ -9,10 +9,13 @@
 // The interpreter declares each constraint as a fact on the field's authored
 // canvas ([jsonschema.FieldContext.Canvas]) rather than mutating a merged
 // schema, and generation composes those facts with the field's type-derived
-// schema. On a nil-able (pointer) field a value constraint such as eq or oneof
-// therefore lands on the value branch of the null encoding, so the permitted
-// null stays valid, while a forbidden value (ne) and length or numeric bounds
-// move to the null wrapper. Element constraints (dive, and oneof on a sequence)
+// schema. On a nilable field that composition splits across the null encoding.
+// A value constraint such as eq or oneof lands on the value branch of the
+// anyOf[value, null] wrapper, so the permitted null stays valid. A forbidden
+// value (ne) and length or numeric bounds move to the wrapper itself. A nilable
+// slice, map, or []byte carrying no const or enum takes the ["null", base] type
+// list instead, where every keyword is a plain sibling of that list. Element
+// constraints (dive, and oneof on a sequence)
 // reach the element schemas through the field's element contexts.
 //
 // # Usage
@@ -30,23 +33,41 @@
 //
 // Presence:
 //
-//   - required: adds the field to the parent's "required" array. For non-pointer
-//     fields it also adds a type-specific non-zero constraint: minLength: 1 for
-//     strings, minItems: 1 for slices/arrays, minProperties: 1 for maps,
-//     const: true for bools, and a not forbidding 0 for numbers. A byte slice
-//     does not marshal to a JSON array, so it gets no array size floor:
-//     a []byte encodes as a base64 string and gets minLength: 1 on that
-//     string, while a byte-slice type whose schema is not a string
-//     (json.RawMessage) gets only the required entry. A pointer field gets the
-//     required entry and a forbidden null instead of the type-specific
-//     non-zero check. In go-playground/validator, required on a pointer means
-//     "must be non-nil" and says nothing about the pointed-to value, which may
-//     be zero; the required entry alone cannot express that, since a property
-//     whose value is null is still present. The forbidden null is inert where
-//     the occurrence admits no null anyway, as under WithNullable(false) or a
-//     type schema declaring NullForbidden. The required tag adds the
-//     field to the parent's required array even when json:",omitempty" or
-//     json:",omitzero" would normally exclude it.
+//   - required: adds the field to the parent's "required" array, even where
+//     json:",omitempty" or json:",omitzero" would normally exclude it. A
+//     property whose value is null satisfies that entry on its own, so wherever
+//     the field's shape has a non-zero form the interpreter also forbids null:
+//     a string, number, bool, slice, map, or []byte, as a pointer or bare. A
+//     pointer is nilable, and so are a bare slice, map, and []byte, each of
+//     which carries a null branch of its own. Encoding/json writes null for a
+//     nil value, which go-playground's required rejects. Where the occurrence
+//     admits no null, as under
+//     WithNullable(false) or a type schema declaring NullForbidden, the
+//     interpreter writes no forbidden null and the type rejects a null instance
+//     on its own.
+//
+//     A non-pointer field also gets a type-specific non-zero constraint:
+//     minLength: 1 for strings, minItems: 1 for slices/arrays,
+//     minProperties: 1 for maps, const: true for bools, and a not forbidding 0
+//     for numbers. On a bare container that constraint measures a size, which a
+//     null instance does not carry, so the field needs the forbidden null
+//     beside it. A pointer field gets the forbidden null and no such
+//     constraint, since go-playground reads required on a pointer as "must be
+//     non-nil" and says nothing about the pointed-to value, which may be zero.
+//
+//     A shape with no non-zero form the schema can express gets the required
+//     entry and nothing else, not even the forbidden null: a struct, a
+//     text-marshaling type, a referenced definition, an opaque value such as
+//     an interface, and a raw JSON value. A byte slice falls on one side or
+//     the other, depending on its schema. A []byte encodes as a base64 string
+//     and gets minLength: 1 on that string, while a byte-slice type whose
+//     schema is not a string (json.RawMessage) gets neither the floor nor the
+//     forbidden null, since a RawMessage holding the literal null is a non-nil
+//     value go-playground accepts.
+//
+//     A dive carries the whole rule onto the element schemas, so
+//     dive,required on a [][]string forbids null and floors the size on each
+//     inner slice.
 //
 // String constraints:
 //

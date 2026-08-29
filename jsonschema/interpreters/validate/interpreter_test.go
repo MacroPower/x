@@ -1127,9 +1127,11 @@ func TestValidateInterpreter_RequiredOnNonPointerSlice(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	// Non-pointer slice: required + minItems=1.
+	// Non-pointer slice: required forbids null and floors the item count, since
+	// a nil slice marshals as null and an empty one carries no items.
 	assert.Contains(t, s.Required, "tags")
 	assert.Equal(t, new(1), s.Properties["tags"].MinItems)
+	assertForbidsNull(t, s.Properties["tags"])
 }
 
 func TestValidateInterpreter_RequiredOnNonPointerMap(t *testing.T) {
@@ -1144,9 +1146,47 @@ func TestValidateInterpreter_RequiredOnNonPointerMap(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	// Non-pointer map: required + minProperties=1.
+	// Non-pointer map: required forbids null and floors the property count,
+	// since a nil map marshals as null and an empty one carries no properties.
 	assert.Contains(t, s.Required, "labels")
 	assert.Equal(t, new(1), s.Properties["labels"].MinProperties)
+	assertForbidsNull(t, s.Properties["labels"])
+}
+
+// TestValidateInterpreter_RequiredUnderNullableOff pins what required emits
+// where the occurrence admits no null. The type rejects a null instance on its
+// own, so the interpreter writes no forbidden null. A bare container keeps its
+// size floor, and a pointer field gets only the required entry.
+func TestValidateInterpreter_RequiredUnderNullableOff(t *testing.T) {
+	t.Parallel()
+
+	type Config struct {
+		Tags []string `json:"tags" validate:"required"`
+		Name *string  `json:"name" validate:"required"`
+	}
+
+	s, err := jsonschema.GenerateFor[Config](t.Context(),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
+		jsonschema.WithNullable(false),
+	)
+	require.NoError(t, err)
+
+	assert.Contains(t, s.Required, "tags")
+	assert.Equal(t, new(1), s.Properties["tags"].MinItems)
+	assert.Nil(t, s.Properties["tags"].Not)
+
+	assert.Contains(t, s.Required, "name")
+	assert.Nil(t, s.Properties["name"].MinLength)
+	assert.Nil(t, s.Properties["name"].Not)
+
+	// The type is what rejects null here, so compile and check the instance
+	// rather than the keyword. Dropping the null branch and the forbidden null
+	// together would satisfy the assertions above and accept null.
+	v, err := jsonschema.Compile(t.Context(), s)
+	require.NoError(t, err)
+
+	require.Error(t, v.ValidateJSON(t.Context(), []byte(`{"tags":null,"name":"x"}`)))
+	require.Error(t, v.ValidateJSON(t.Context(), []byte(`{"tags":["x"],"name":null}`)))
 }
 
 func TestNumericConstPreservesLargeIntegers(t *testing.T) {
@@ -1897,8 +1937,8 @@ func TestValidateInterpreter_RequiredPreservesStrongerBound(t *testing.T) {
 		"properties":{
 			"min_then_req":{"type":"string","minLength":5},
 			"req_then_min":{"type":"string","minLength":5},
-			"tags":{"type":["null","array"],"items":{"type":"string"},"minItems":3},
-			"labels":{"type":["null","object"],"additionalProperties":{"type":"string"},"minProperties":2},
+			"tags":{"type":["null","array"],"items":{"type":"string"},"minItems":3,"not":{"const":null}},
+			"labels":{"type":["null","object"],"additionalProperties":{"type":"string"},"minProperties":2,"not":{"const":null}},
 			"bare":{"type":"string","minLength":1}
 		},
 		"required":["min_then_req","req_then_min","tags","labels","bare"],
@@ -2374,10 +2414,10 @@ func TestValidateInterpreter_RequiredMinZeroKeepsFloor(t *testing.T) {
 		"properties":{
 			"req_min_str":{"type":"string","minLength":1},
 			"min_req_str":{"type":"string","minLength":1},
-			"req_min_vec":{"type":["null","array"],"items":{"type":"string"},"minItems":1},
-			"min_req_vec":{"type":["null","array"],"items":{"type":"string"},"minItems":1},
-			"req_min_map":{"type":["null","object"],"additionalProperties":{"type":"string"},"minProperties":1},
-			"min_req_map":{"type":["null","object"],"additionalProperties":{"type":"string"},"minProperties":1}
+			"req_min_vec":{"type":["null","array"],"items":{"type":"string"},"minItems":1,"not":{"const":null}},
+			"min_req_vec":{"type":["null","array"],"items":{"type":"string"},"minItems":1,"not":{"const":null}},
+			"req_min_map":{"type":["null","object"],"additionalProperties":{"type":"string"},"minProperties":1,"not":{"const":null}},
+			"min_req_map":{"type":["null","object"],"additionalProperties":{"type":"string"},"minProperties":1,"not":{"const":null}}
 		},
 		"required":["req_min_str","min_req_str","req_min_vec","min_req_vec","req_min_map","min_req_map"],
 		"additionalProperties":false
@@ -2803,10 +2843,13 @@ func TestValidateInterpreter_LenOnCollectionUnaffectedByFieldWidth(t *testing.T)
 	}`, string(got))
 }
 
-// assertForbidsNull requires the schema to forbid the null value, the whole of
-// what required asserts on a nullable occurrence. The fact rides the forbidden
-// value accumulation, so it is a not.const of null on its own and a member of a
-// not.enum once another rule forbids something too.
+// assertForbidsNull requires the schema to forbid the null value, the null half
+// of what required asserts wherever the occurrence admits null. That half is
+// the whole assertion on a pointer, which carries no type-specific non-zero
+// constraint beside it. The fact rides the forbidden value accumulation, so it
+// is a
+// not.const of null on its own and a member of a not.enum once another rule
+// forbids something too.
 func assertForbidsNull(t *testing.T, s *jsonschema.Schema) {
 	t.Helper()
 

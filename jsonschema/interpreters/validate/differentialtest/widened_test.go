@@ -342,14 +342,21 @@ func TestWidenedDifferentialReachesStrictAgreement(t *testing.T) {
 }
 
 // requiredNullableShapes are the one-field shapes required is checked against
-// on its own. A fuzz target cannot serve here, because the schema verdict is
-// per object and a sibling field that correctly rejects null masks another
-// field that wrongly accepts it. One field per struct makes the verdict
-// attributable.
+// on its own, covering both kinds of occurrence that admit null: the pointer,
+// and the bare slice, map, and byte slice. A fuzz target cannot serve here for
+// two reasons. The schema verdict is per object, so a sibling field that
+// correctly rejects null masks another field that wrongly accepts it. The nil
+// occurrence is also out of the draw's reach, since internal/fuzzfill builds
+// every container through reflect.MakeSlice or reflect.MakeMap, which return a
+// non-nil container even at length zero. One field per struct makes the verdict
+// attributable, and the zero value of that struct is the nil these shapes need.
 //
-// The pairings are the point. Required contributes a forbidden null, and a
-// second forbidding rule has to compose with it without pushing the pair off
-// the branch the null encoding put the null on.
+// Some pointer rows pair required with a second forbidding rule. Required
+// contributes a forbidden null, and the second rule has to compose with it
+// without pushing the pair off the branch the null encoding put the null on.
+// The bare container rows carry no second rule, because their null rides a
+// ["null", base] type list with no wrapper to fall off, so they pin only that
+// the forbidden null lands.
 func requiredNullableShapes() map[string]reflect.Type {
 	field := func(typ reflect.Type, jsonTag, rule string) reflect.Type {
 		return reflect.StructOf([]reflect.StructField{{
@@ -379,6 +386,12 @@ func requiredNullableShapes() map[string]reflect.Type {
 		"coerced with ne":               field(reflect.TypeFor[*int](), "v,string", "required,ne=3"),
 		"slice with ne":                 field(reflect.TypeFor[*[]int](), "v", "required,ne=2"),
 		"repeated required":             field(reflect.TypeFor[*string](), "v", "required,required"),
+		// A bare slice, map, or byte slice is nil-able in Go, so its schema
+		// admits null exactly as a pointer's does and required has to forbid it
+		// there too. The size floor beside it never sees a null instance.
+		"bare slice":      field(reflect.TypeFor[[]int](), "v", "required"),
+		"bare map":        field(reflect.TypeFor[map[string]int](), "v", "required"),
+		"bare byte slice": field(reflect.TypeFor[[]byte](), "v", "required"),
 	}
 }
 
@@ -397,9 +410,10 @@ func forbiddingWordSchema() jsonschema.GenerateOption {
 	})
 }
 
-// TestRequiredOnNullableRejectsNull pins that required on a nullable field
-// rejects the null instance, agreeing with go-playground's reading of required
-// on a pointer as "must be non-nil".
+// TestRequiredOnNullableRejectsNull pins that required on a field whose schema
+// admits null rejects the null instance. Go-playground rejects the nil
+// occurrence, and encoding/json writes null for that nil. A pointer and a bare
+// slice, map, or byte slice all marshal their nil the same way.
 //
 // The schema's required entry cannot say that on its own, since a property
 // whose value is null is still present, so the assertion rides on a forbidden

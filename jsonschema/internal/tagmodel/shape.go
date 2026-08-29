@@ -138,11 +138,29 @@ type Shape struct {
 	Kind reflect.Kind
 	// Form is the JSON shape of the instance.
 	Form Form
-	// Nullable reports a pointer occurrence. Exactly one operation consults it:
-	// the non-zero assertion, because go-playground's required on a pointer
-	// means non-nil and says nothing about the pointed-to value. Doubling the
-	// matrix for one operation would cost more than this documented branch.
+	// Nullable reports whether the occurrence admits null. Two producers derive
+	// it differently. [ShapeOf] reads the Go type alone, so it reports the
+	// pointer occurrences and nothing else; internal/tagparse classifies through
+	// it and sees only that pointer answer. The parent package's
+	// FieldContext.Shape reads the generator's own null decision off the field's
+	// node, so Nullable is true there for a nilable slice, map, or byte slice,
+	// though its Go type is not a pointer.
+	//
+	// Two operations consult it. The non-zero assertion forbids the null a nil
+	// occurrence marshals as, and the scalar constructor admits the literal null
+	// only where the occurrence can hold it. Doubling the matrix for them would
+	// cost more than these documented branches.
 	Nullable bool
+}
+
+// isPointer reports whether the occurrence is a pointer, a narrower question
+// than [Shape.Nullable] answers. The non-zero assertion asks it because
+// go-playground's required on a pointer means non-nil and says nothing about
+// the pointed-to value. A nilable container's emptiness is still a size, so
+// the floor keeps applying there. [ShapeForTypeName] builds a shape with no
+// Type, so the method guards on that before reading the kind.
+func (sh Shape) isPointer() bool {
+	return sh.Type != nil && sh.Type.Kind() == reflect.Pointer
 }
 
 // FormForTypeName returns the form an instance of the named JSON type takes. It

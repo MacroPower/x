@@ -236,7 +236,7 @@ func TestMatrixGolden(t *testing.T) {
 		|non-zero assertion / number -> apply
 		|non-zero assertion / object -> apply
 		|non-zero assertion / opaque value -> ignore: an opaque value has no schema-expressible zero
-		|non-zero assertion / raw byte slice -> ignore: an unconstrained raw JSON value has no faithful non-zero form
+		|non-zero assertion / raw byte slice -> ignore: an unconstrained raw JSON value has no faithful non-zero form, not even a forbidden null
 		|non-zero assertion / referenced definition -> ignore: a referenced definition's zero is not readable here; only the parent's required entry applies
 		|non-zero assertion / string -> apply
 		|non-zero assertion / string-coerced boolean -> apply

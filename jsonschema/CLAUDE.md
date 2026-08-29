@@ -155,9 +155,9 @@ The package has two independent halves sharing the `Schema` type:
   loses the single `not` slot, whatever else arrives and in whatever order. The
   keyword table scopes `not` to the null wrapper and `allOf` to the value branch,
   so a value forbid that lost the slot would stop applying to a null instance,
-  which is the whole of what `required` asserts on a nullable field. A forbidden
-  subschema takes the slot only when it arrives first and alone; every caller
-  here names a type on the schema it forbids, which is what makes that placement
+  which is the null half of what `required` asserts. A forbidden subschema takes
+  the slot only when it arrives first and alone; every caller here names a type
+  on the schema it forbids, which is what makes that placement
   agree with the `allOf` one. Its scope stops at the bound algebra
   and the forbidden-value escalation: `internal/tagmodel` and `reconcile.go`
   are its two callers, and the allowed set (const/enum) is composed on each
@@ -169,9 +169,13 @@ The package has two independent halves sharing the `Schema` type:
   and it is the dispatch column, so string coercion is a column of the table
   rather than a gate each operation re-derives. An `Op` is the shared operation
   vocabulary, a `Target` the one write destination a field and an element share
-  (which makes element retargeting one implementation), `Shape.ParseScalar` the
-  one scalar constructor including the convert-and-marshal round-trip a
-  text-marshaling type needs, and a total `[opCount][formCount]` matrix the
+  (which makes element retargeting one implementation), `Shape.Nullable` the
+  occurrence's null admission, which `ShapeOf` approximates as pointer-ness and
+  the parent package's `FieldContext.Shape` answers exactly from the field's
+  node,
+  `Shape.ParseScalar` the one scalar constructor including the
+  convert-and-marshal round-trip a text-marshaling type needs, and a total
+  `[opCount][formCount]` matrix the
   dispatch. Dialect divergence is expressed as a named `Policy` parameter (the
   numeric-bound literal domain, the negative-size question) or a field on the
   dialect's own `KeyRule` row (arity, list spelling, the implied value of a bare
@@ -611,8 +615,16 @@ contract the tests enforce.
   `TestWidenedDifferentialReachesStrictAgreement` guards against the weak half
   swallowing everything. The schema verdict is per object, so a sibling field
   that correctly rejects null can mask one that wrongly accepts it; the
-  deterministic `TestRequiredOnNullableRejectsNull` puts each nullable
-  `required` shape in a struct of its own for that reason.
+  deterministic `TestRequiredOnNullableRejectsNull` puts each `required` shape
+  that admits null in a struct of its own for that reason. It is also the only
+  place the nil occurrence is reachable, since `internal/fuzzfill` builds every
+  container through `reflect.MakeSlice` or `reflect.MakeMap`, which return a
+  non-nil container even at length zero. `required` forbids null on a bare
+  slice, map, or `[]byte` beside its size floor, exactly as it forbids null
+  alone on a pointer. The nil side agrees with
+  go-playground and the empty-but-non-nil side does not, which is why the draw
+  pools omit `required` on a collection under
+  `reasonRequiredCollectionEmptyFloor`.
   `FuzzValidatorTaggedShapes` fuzzes the shape as well as the value through
   `drawTaggedStruct`, which draws the Go kind, the pointer
   wrapper, the json option, and the validate rule independently. That draw

@@ -30,10 +30,12 @@ const (
 	// An unexported field is ignored by encoding/json, and the generator builds
 	// no node for one.
 	reasonUnexportedField = "an unexported field has no property to classify"
-	// An embed the generator composes with allOf returns before the pending
-	// field list, so its own node never reaches applyFieldInterpreters. Its
-	// promoted fields are observed under the embedded type as their owner.
-	reasonComposedEmbed = "an allOf-composed embed is not a property of the parent object"
+	// An embedded field is never a property of the parent, whether the generator
+	// promotes its fields or composes it with allOf. Promotion hands the fields
+	// to the parent and composition returns before the pending field list, so
+	// either way the embed's own node never reaches applyFieldInterpreters. The
+	// oracle observes its fields under the embedded type as their owner.
+	reasonEmbeddedField = "an embedded field is not a property of the parent object"
 	// Two fields resolving to one JSON name at the same depth are both dropped
 	// by encoding/json's dominance rule, so neither is a property to classify.
 	reasonShadowedName = "a JSON name claimed by more than one field at one depth is dropped"
@@ -66,7 +68,7 @@ func unprobedReasons(f reflect.StructField, shared map[string]int) []string {
 	}
 
 	if f.Anonymous {
-		out = append(out, reasonComposedEmbed)
+		out = append(out, reasonEmbeddedField)
 	}
 
 	if shared[jsonName(f)] > 1 {
@@ -644,9 +646,23 @@ func oracleRoster() map[string]oracleRow {
 		},
 
 		// db3c7b5: a json:",string" field classifies at its real Go kind, so
-		// its scalars compare against the text it emits.
+		// its scalars compare against the text it emits. Every numeric kind
+		// encoding/json quotes reaches the same form, FormCoercedNumber, whether
+		// integer or float and whatever its width.
 		"quoted int": {
 			typ: reflect.TypeFor[int](), jsonTag: "v,string",
+			wantDefs: jsonschema.FormCoercedNumber,
+		},
+		"quoted int8": {
+			typ: reflect.TypeFor[int8](), jsonTag: "v,string",
+			wantDefs: jsonschema.FormCoercedNumber,
+		},
+		"quoted uint16": {
+			typ: reflect.TypeFor[uint16](), jsonTag: "v,string",
+			wantDefs: jsonschema.FormCoercedNumber,
+		},
+		"quoted float64": {
+			typ: reflect.TypeFor[float64](), jsonTag: "v,string",
 			wantDefs: jsonschema.FormCoercedNumber,
 		},
 		"quoted pointer to int": {
@@ -921,7 +937,7 @@ func assertEveryFieldAccountedFor(t *testing.T, typ reflect.Type, seen []shapeOb
 //
 // Five field classes stay unobserved and are named rather than left implicit:
 // reasonUntaggedField, reasonExcludedField, reasonUnexportedField,
-// reasonComposedEmbed, and reasonShadowedName.
+// reasonEmbeddedField, and reasonShadowedName.
 func TestTagShapeOracleSynthesized(t *testing.T) {
 	t.Parallel()
 

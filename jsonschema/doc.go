@@ -352,13 +352,17 @@
 //
 // An interpreter that branches on what the field is classifies it once with
 // [FieldContext.Shape], or with [ShapeOf] when no context is available --
-// reading the field's Go type against its type-derived [FieldContext.Base],
-// though without a context the json:",string" flag on a string Go kind (the
-// one coercion, [FormCoercedString], type and base alone cannot express) is
-// invisible. The resulting [Shape] carries the declared type, that
-// type with its pointer chain followed, the kind a scalar literal parses at,
-// whether the occurrence admits null, and the [Form] -- the JSON shape the
-// instance actually takes, which is what the model dispatches on. Form is
+// reading the field's Go type against its type-derived [FieldContext.Base].
+// The context supplies two facts [ShapeOf] cannot. The json:",string" flag on a
+// string Go kind is the one coercion, [FormCoercedString], that type and base
+// alone cannot express. Whether a nil-able slice, map, or byte slice admits
+// null is the generator's decision rather than the Go type's, so [ShapeOf]
+// reports only the pointer occurrences as admitting null, which is also what a
+// context the generator did not build falls back to. The resulting [Shape]
+// carries the declared type, that type with its pointer chain followed, the
+// kind a scalar literal parses at, whether the occurrence admits null, and the
+// [Form] -- the JSON shape the instance actually takes, which is what the model
+// dispatches on. Form is
 // deliberately not the Go kind, so a field that encodes itself as a string
 // (through json:",string" or its own MarshalText) reads as [FormCoercedNumber]
 // or [FormTextString] rather than as a number every branch has to
@@ -533,13 +537,13 @@
 // than as "\"5\"", and the coerced-numeric rules apply. It writes the literal
 // verbatim rather than canonicalizing it, so const=5.0 pins "5.0" and const=5
 // pins "5".
-// Enum and examples values
-// are separated by "|". Unrecognized keys are a parse error. A value containing a
-// comma escapes it with a backslash (a literal backslash is "\\"), so
-// jsonschema:"description=Hello\, World" sets the description "Hello, World";
-// enum and examples values cannot contain "|" (used as value separator). For
-// complex values, use [JSONSchemaExtender] or AST doc comments with
-// [WithDescriptionProvider].
+//
+// Enum and examples values are separated by "|". Unrecognized keys are a parse
+// error. A value containing a comma escapes it with a backslash (a literal
+// backslash is "\\"), so jsonschema:"description=Hello\, World" sets the
+// description "Hello, World"; enum and examples values cannot contain "|" (used
+// as value separator). For complex values, use [JSONSchemaExtender] or AST doc
+// comments with [WithDescriptionProvider].
 //
 // An empty value (for example const= or default=) is rejected for every key
 // except const and default on a string field, where it expresses the valid

@@ -699,13 +699,17 @@ the single 2^53 policy. Named conveniences remain for the value set
 first.
 
 An interpreter that branches on what the field is classifies it once with
-`FieldContext.Shape()` (or `ShapeOf(fieldType, base)` when no context is
-available, which cannot see the `json:",string"` flag on a string Go kind --
-the one coercion, `FormCoercedString`, that type and base alone do not
-express). The resulting `Shape` carries the declared Go type,
-that type with its pointer chain followed, the kind a scalar literal parses at,
-whether the occurrence admits null, and the `Form` -- the JSON shape the
-instance actually takes, which is what the model dispatches on. `Form` is
+`FieldContext.Shape()`, or with `ShapeOf(fieldType, base)` when no context is
+available. The context supplies two facts `ShapeOf` cannot. The `json:",string"`
+flag on a string Go kind is the one coercion, `FormCoercedString`, that type and
+base alone do not express. Whether a nil-able slice, map, or `[]byte` admits
+`null` is the generator's decision rather than the Go type's, so `ShapeOf`
+reports only the pointer occurrences as admitting `null`, which is also what a
+context the generator did not build falls back to. The resulting `Shape`
+carries the declared Go type, that type with its pointer chain followed, the
+kind a scalar literal parses at, whether the occurrence admits null, and the
+`Form` -- the JSON shape the instance actually takes, which is what the model
+dispatches on. `Form` is
 deliberately not the Go kind, so a field that encodes itself as a string
 (through `json:",string"` or its own `MarshalText`) reads as
 `FormCoercedNumber` or `FormTextString` rather than as a number every branch
@@ -772,8 +776,20 @@ produces:
 
 Supported tags (summary):
 
-- **Presence:** `required`. A pointer field forbids `null`; a non-pointer field
-  gets a type-specific non-zero constraint.
+- **Presence:** `required`. A property whose value is null satisfies the
+  `required` entry on its own, so wherever the field's shape has a non-zero form
+  the interpreter also forbids `null`: a string, number, bool, slice, map, or
+  `[]byte`, as a pointer or bare. A non-pointer field also gets a type-specific
+  non-zero constraint; a pointer field gets the forbidden `null` and no such
+  constraint, since go-playground reads `required` on a pointer as "must be
+  non-nil". Where the occurrence admits no `null`, as under
+  `WithNullable(false)`, the interpreter writes no forbidden `null` and the type
+  rejects a `null` instance on its own. A shape with no non-zero form the schema
+  can express gets the `required` entry and nothing else, not even the forbidden
+  `null`: a struct, a text-marshaling type, a referenced definition, an opaque
+  value such as an interface, and a raw JSON value such as `json.RawMessage`,
+  where the literal `null` is a non-nil value go-playground accepts. A `dive`
+  carries the whole rule onto the element schemas.
 - **Bounds:** `min`, `max`, `len`, `gt`, `lt`, `gte`, `lte`, `eq`, `ne`, mapped
   to length/numeric keywords for strings and numbers, and to
   `minItems`/`maxItems` or `minProperties`/`maxProperties` for collections.

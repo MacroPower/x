@@ -292,12 +292,14 @@ func fillNonZero() {
 
 	apply(OpNonZero, FormBool, nonZeroTrue)
 
-	// A raw byte slice's schema admits any JSON value, so no non-zero constraint
-	// is faithful: a minItems would reject the empty array a non-nil
-	// json.RawMessage holding "[]" legitimately carries. Only the parent's
-	// required entry applies, which the front-end adds separately.
+	// A raw byte slice's schema admits any JSON value, so neither half of the
+	// non-zero assertion is faithful. A minItems would reject the empty array a
+	// non-nil json.RawMessage holding "[]" legitimately carries, and a forbidden
+	// null would reject the one holding "null", which go-playground reads as the
+	// non-nil slice it is. Only the parent's required entry applies, which the
+	// front-end adds separately.
 	ignore(OpNonZero, FormRawBytes,
-		"an unconstrained raw JSON value has no faithful non-zero form")
+		"an unconstrained raw JSON value has no faithful non-zero form, not even a forbidden null")
 
 	// A text-marshaled or opaque value has no emptiness the schema can name.
 	// A declared object is in the same position: its Go value is a struct or
