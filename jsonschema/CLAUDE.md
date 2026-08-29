@@ -93,19 +93,25 @@ The package has two independent halves sharing the `Schema` type:
   inliner's own index walk takes the currency at its entry points,
   `recordDoc` for a document root and `recordNode` for a materialized
   pointer target, so the walk behind them reaches no schema the run has not
-  vetted. The pointer-graph policy is separate from that vetting and has
-  rules at two boundaries. `checkSchemaTree` (`validate.go`) rejects a root
-  whose sub-schema pointers alias or cycle, and both `Compile` and `Inline`
-  run it over the document they are given, so the two engines make the same
-  demand of a root's sub-schema graph. `cloneCheckedSchema` holds the rest
-  to the weaker no-cycle rule: the inliner's pristine root, where it reports
-  a loop closing through a value field that the tree check does not read,
-  plus a document a `RefResolver` returns and a `SubstituteRef` schema.
-  Aliasing survives there, because every walk that reaches a registered
-  document dedupes pointers, so within this package it costs only the
-  accuracy of a location in an error message. It does reach `Inline`'s
-  output, which `checkSchemaTree` then rejects if the caller compiles it, so
-  an aliased resolver document buys a non-tree result. A cycle is fatal,
+  vetted. The pointer-graph policy is
+  separate from that vetting and has rules at two boundaries, the root document
+  and the graphs that arrive from outside the package. `checkSchemaTree`
+  (`validate.go`) rejects a root whose sub-schema pointers alias or cycle, and
+  both `Compile` and `Inline` run it over the document they are given, so the two
+  engines make the same demand of a root's sub-schema graph. A loop closing
+  through a value field is the shape that check skips, so each engine runs a
+  cycle check beside it over the same root. Both word the refusal through one
+  `cycleError` helper. `Compile` reads `schemaclone.HasCycle` through
+  `checkSchemaCycle` and keeps no copy, since its root stays the caller's own
+  value; `Inline` reads the same report off the `cloneCheckedSchema` copy it
+  needs anyway. `cloneCheckedSchema` holds the two graphs that arrive from
+  outside the package to the weaker no-cycle rule alone: a document a
+  `RefResolver` returns and a `SubstituteRef` schema.
+  Aliasing survives there, because every
+  walk that reaches a registered document dedupes pointers, so within this
+  package it costs only the accuracy of a location in an error message. It does
+  reach `Inline`'s output, which `checkSchemaTree` then rejects if the caller
+  compiles it, so an aliased resolver document buys a non-tree result. A cycle is fatal,
   because `refresolve`'s JSON-pointer fallback marshals the document it
   searches and upstream's `MarshalJSON` re-enters `json.Marshal` at every
   nesting level, so no encoder sees the repeat and the marshal recurses into
@@ -226,8 +232,10 @@ The package has two independent halves sharing the `Schema` type:
   like any other field, and a schema stored in `Extra` stays a schema. No graph
   shape defeats it, so `Clone` has no error return; `CloneChecked` returns the
   same copy plus a report of whether the source held a pointer cycle, which the
-  three resolution boundaries read. The package doc names the two values a copy
-  still shares with its source),
+  three `cloneCheckedSchema` boundaries read; `HasCycle` returns that report
+  alone, for `Compile`, which keeps no copy of the root it is handed. The
+  package doc names the two values a copy still shares with its source, and
+  `HasCycle`'s own doc comment says why it builds a copy it drops),
   `internal/jsonequal` (DoS-guarded, JSON-semantic value equality for
   `const`/`enum` and the matching content hash for `uniqueItems`, layered on
   `internal/numrat` for exact decimal comparison), `internal/goast`

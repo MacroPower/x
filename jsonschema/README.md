@@ -920,15 +920,16 @@ identifiers. A schema setting both Go fields of one JSON keyword (`Type` and
 key in both maps) is rejected with `ErrConflictingSchemaFields`; a nil
 `*Schema` element inside a sub-schema slice or map with `ErrNilSubschema`; a
 duplicate `PropertyOrder` entry with `ErrDuplicatePropertyOrder`; and a root
-document whose sub-schema pointers alias or cycle with `ErrSchemaNotTree`. An
-`$id` outside the keyword's domain is rejected with `ErrInvalidID`: one that
-does not parse, one carrying a fragment under draft 2020-12, or one that does
-not resolve to an absolute URI against its enclosing base (the parent `$id`
-chain, or `WithBaseURI` for the root, so a relative root `$id` compiles exactly
-when a base supplies the absolute prefix). Under draft-07 two forms go
-unchecked: an `$id` beside a `$ref` (the draft ignores it) and a
-fragment-carrying `$id` (the anchor spelling). An unparsable `WithBaseURI`
-value is rejected with `ErrInvalidBaseURI`, and a `$vocabulary` on a node whose
+document whose sub-schema pointers alias or cycle, or whose loop closes through
+a value field (`Const`, `Enum`, `Examples`, or `Extra`), with
+`ErrSchemaNotTree`. An `$id` outside the keyword's domain is rejected with
+`ErrInvalidID`: one that does not parse, one carrying a fragment under draft
+2020-12, or one that does not resolve to an absolute URI against its enclosing
+base (the parent `$id` chain, or `WithBaseURI` for the root, so a relative root
+`$id` compiles exactly when a base supplies the absolute prefix). Under draft-07
+two forms go unchecked: an `$id` beside a `$ref` (the draft ignores it) and a
+fragment-carrying `$id` (the anchor spelling). An unparsable `WithBaseURI` value
+is rejected with `ErrInvalidBaseURI`, and a `$vocabulary` on a node whose
 `$schema` does not establish the 2020-12 dialect with `ErrMisplacedVocabulary`
 (exact URI match; an empty `$schema` inherits the run's dialect, accepted under
 2020-12 and rejected under draft-07).
@@ -1443,13 +1444,14 @@ Failure modes:
   wrapping `ErrSchemaNotTree`. This holds the input to the same contract
   `Compile` holds it to, one location per node. A root whose loop closes
   through a value field (`Const`, `Enum`, `Examples`, or `Extra`) returns the
-  same error, a shape `Compile`'s own check does not read. A document reached
-  through a resolver or a fallback is held to the weaker no-cycle rule instead,
-  and a node it shares between two positions is expanded once, at the first
-  location the walk reaches. That sharing survives into the result, so an output
-  built from an aliased resolver document or substitute is not a tree and
-  `Compile` rejects it. Only a hand-built graph can carry such sharing; a parsed
-  document never does.
+  same error, naming the root document rather than a location, and `Compile`
+  refuses that root with the same message. A document reached through a resolver
+  or a fallback is held to the weaker no-cycle rule instead, and a node it
+  shares between two positions is expanded once, at the first location the walk
+  reaches. That sharing survives into the result, so an output built from an
+  aliased resolver document or substitute is not a tree and `Compile` rejects
+  it. Only a hand-built graph can carry such sharing; a parsed document never
+  does.
 - A ref whose expansion reaches its own target is recursive and returns an
   error wrapping `ErrRefCycle`: a cyclic reference graph has no finite
   expansion.
@@ -1585,7 +1587,7 @@ configured.
 | `ErrConflictingSchemaFields`  | Both Go fields of one JSON keyword set, e.g. `Type`/`Types` or a `dependencies` key in both maps (returned by `Compile` and `Inline`).                                                                                                                |
 | `ErrNilSubschema`             | A nil `*Schema` element inside a sub-schema slice or map (returned by `Compile` and `Inline`).                                                                                                                                                        |
 | `ErrDuplicatePropertyOrder`   | A `PropertyOrder` slice listing the same property twice (returned by `Compile` and `Inline`).                                                                                                                                                         |
-| `ErrSchemaNotTree`            | The root document's sub-schema pointers alias or cycle (`Compile` and `Inline`), a root loop closes through a value field (`Inline`), a fetched document holds a pointer cycle (`Compile` and `Inline`), or a `SubstituteRef` schema does (`Inline`). |
+| `ErrSchemaNotTree`            | The root document's sub-schema pointers alias or cycle, or a root loop closes through a value field (`Compile` and `Inline`); a fetched document holds a pointer cycle (`Compile` and `Inline`); or a `SubstituteRef` schema does (`Inline`). |
 | `ErrInvalidID`                | An `$id` that does not parse, carries a fragment under 2020-12, or does not resolve to an absolute URI (returned by `Compile` and `Inline`; an `Inline` run under `WithRetrievalBase` checks no `$id`).                                               |
 | `ErrInvalidBaseURI`           | A `WithBaseURI` value that does not parse (returned by `Compile` and `Inline`).                                                                                                                                                                       |
 | `ErrMisplacedVocabulary`      | A `$vocabulary` on a node whose `$schema` does not establish the 2020-12 dialect (returned by `Compile` and `Inline`).                                                                                                                                |

@@ -11,7 +11,8 @@
 // and a schema riding in an unknown keyword stays a schema. No graph shape
 // defeats the copy, so [Clone] has no error return. A caller that must not
 // hold a cyclic graph, because something downstream marshals it, takes the
-// same copy through [CloneChecked] and reads the cycle report.
+// same copy through [CloneChecked] and reads the cycle report. A caller that
+// needs the report and not the copy calls [HasCycle].
 package schemaclone
 
 import (
@@ -77,6 +78,24 @@ func CloneChecked(s *jsonschema.Schema) (*jsonschema.Schema, bool) {
 	cp := c.schema(s)
 
 	return cp, c.cyclic
+}
+
+// HasCycle reports whether s holds a cycle whose path crosses a schema. It
+// returns the report [CloneChecked] hands back beside its copy, and nothing
+// else. It serves a caller that keeps the graph it was handed rather than a
+// copy, and still has to refuse a cyclic one because something downstream
+// marshals it.
+//
+// It builds the copy and drops it. The walk that finds a cycle is the walk that
+// builds the copy, since each field's own closure in the
+// [go.jacobcolvin.com/x/jsonschema/internal/schemafield] table drives that walk,
+// and each closure writes into a destination the walk hands it. A walk that
+// skipped the allocation would be a second implementation of the cycle rule,
+// free to drift from [CloneChecked].
+func HasCycle(s *jsonschema.Schema) bool {
+	_, cyclic := CloneChecked(s)
+
+	return cyclic
 }
 
 // cloner carries one Clone call's identity memos. The schemas memo pairs each

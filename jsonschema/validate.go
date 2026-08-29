@@ -1073,22 +1073,41 @@ func cloneSchema(s *Schema) *Schema {
 }
 
 // cloneCheckedSchema deep-copies a [Schema] the way [cloneSchema] does and
-// rejects a copy whose cycle crosses a schema, for the boundaries where a graph
-// arrives from outside the package: a document a [RefResolver] returns, a
+// rejects a copy whose cycle crosses a schema, for the boundaries that need
+// the copy and the report together: a document a [RefResolver] returns, a
 // [SubstituteRef] schema, and the inliner's own root. All three enter
 // resolution space, where the JSON-pointer fallback marshals the document it
 // searches, and marshaling a cyclic schema graph overflows the stack fatally
 // rather than returning an error (see [schemaclone.CloneChecked]). Aliasing
-// survives, because every walk that reaches a registered document dedupes
-// pointers.
+// survives at the two that arrive from outside the package, because every walk
+// that reaches a registered document dedupes pointers; the inliner's root
+// answers to [checkSchemaTree] for aliasing.
 func cloneCheckedSchema(s *Schema, subject string) (*Schema, error) {
 	cp, cyclic := schemaclone.CloneChecked(s)
 	if cyclic {
-		return nil, fmt.Errorf("%w: %s holds a path that crosses a schema and returns to something "+
-			"it is already inside", ErrSchemaNotTree, subject)
+		return nil, cycleError(subject)
 	}
 
 	return cp, nil
+}
+
+// checkSchemaCycle applies [cloneCheckedSchema]'s rule to [Compile]'s root
+// without keeping the copy the walk builds while finding the cycle. That root
+// stays the caller's own value, which [Validator.Schema] hands back (see
+// [schemaclone.HasCycle]).
+func checkSchemaCycle(s *Schema, subject string) error {
+	if !schemaclone.HasCycle(s) {
+		return nil
+	}
+
+	return cycleError(subject)
+}
+
+// cycleError words the cycle refusal once, so the two engines refuse one root
+// with one message.
+func cycleError(subject string) error {
+	return fmt.Errorf("%w: %s holds a path that crosses a schema and returns to something "+
+		"it is already inside", ErrSchemaNotTree, subject)
 }
 
 // resolveDraft returns the draft a validation or inlining run operates under: a
@@ -1199,10 +1218,16 @@ func Compile(ctx context.Context, schema *Schema, opts ...ValidateOption) (*Vali
 		return nil, err
 	}
 
-	// The root document's sub-schema pointers must form a tree. This runs once
-	// over the root; a document a resolver hands in is held to the weaker
-	// no-cycle rule at the fetch boundary (see cloneCheckedSchema).
+	// The root document's sub-schema pointers must form a tree, and no loop
+	// may close through a value field. Both checks run once over the root. A
+	// document a resolver hands in is held to the weaker no-cycle rule at the
+	// fetch boundary (see cloneCheckedSchema).
 	err = checkSchemaTree(schema)
+	if err != nil {
+		return nil, err
+	}
+
+	err = checkSchemaCycle(schema, "the root document")
 	if err != nil {
 		return nil, err
 	}
@@ -1591,10 +1616,11 @@ func CheckTypeNames(schema *Schema) error {
 // names both paths that reach the repeated node.
 //
 // The check reads the sub-schema graph, so a loop closing through a value field
-// (Const, Enum, Examples, Extra) passes it. [Inline] catches that shape when it
-// copies its root; Compile does not copy, so such a root reaches the walks
-// unchecked, and the one that marshals, the JSON-pointer fallback, overflows the
-// stack on it.
+// (Const, Enum, Examples, or Extra) passes it. Each engine runs a cycle check
+// beside this one to catch that shape, [Compile] through [checkSchemaCycle] and
+// [Inline] through the [cloneCheckedSchema] copy it needs anyway. Neither may
+// let the shape through, because the JSON-pointer fallback marshals the
+// document it searches and overflows the stack on such a graph.
 //
 // This is a root-document check, distinct from the graph-tolerant traversals
 // ([Walk], the registry walk, the node index), which dedupe pointers instead.

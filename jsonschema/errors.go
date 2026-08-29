@@ -127,10 +127,11 @@ var (
 	// both paths that reach the repeated node. Reference the shared schema
 	// with $ref instead of aliasing the pointer.
 	//
-	// [Inline] returns it for one more shape, a root loop closing through a
+	// Both engines return it for a second root shape, a loop closing through a
 	// value field (Const, Enum, Examples, or Extra) rather than through a
-	// sub-schema keyword. Inlining copies its root, so the copy's own cycle
-	// report covers the graph the tree check does not read.
+	// sub-schema keyword. That error names the root document rather than a
+	// location, because the walk that finds such a loop reports only that a
+	// loop exists, not the path around it.
 	//
 	// It also reports a pointer cycle in a document a [RefResolver] returns,
 	// wrapped in [ErrRefResolve] and naming the document's base URI, and one in

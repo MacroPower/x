@@ -147,7 +147,9 @@ func TestCloneCyclicGraph(t *testing.T) {
 // the copy to anything that marshals it. A loop counts when the path crosses a
 // schema, whether it closes on a schema or on a container. Aliasing is not a
 // loop, and a loop through containers alone is one encoding/json catches within
-// its own encoder.
+// its own encoder. Every row also holds [schemaclone.HasCycle] to the same
+// answer, so the report-only entry point cannot drift from
+// [schemaclone.CloneChecked].
 func TestCloneCheckedReportsCycles(t *testing.T) {
 	t.Parallel()
 
@@ -254,6 +256,9 @@ func TestCloneCheckedReportsCycles(t *testing.T) {
 
 			cp, cyclic := schemaclone.CloneChecked(tc.build())
 			assert.Equal(t, tc.want, cyclic)
+
+			assert.Equal(t, tc.want, schemaclone.HasCycle(tc.build()),
+				"HasCycle reports what CloneChecked reports")
 
 			if !tc.want && cp != nil {
 				_, err := json.Marshal(cp)

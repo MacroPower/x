@@ -315,8 +315,9 @@ func WithRefFallback(f RefFallback) InlineOption {
 // The root document's sub-schema pointers must form a tree, the same demand
 // [Compile] makes. A root reaching one *Schema through two paths, or through
 // a pointer cycle, returns an error wrapping [ErrSchemaNotTree], as does one
-// whose loop closes through a value field (Const, Enum, Examples, or Extra),
-// a shape Compile's own check does not read.
+// whose loop closes through a value field (Const, Enum, Examples, or Extra).
+// Compile refuses all three shapes, wording each refusal exactly as Inline
+// does.
 //
 // Inline then vets the root structurally, the pass Compile runs over the
 // document it is given, before any reference resolves. A violation returns the
@@ -439,8 +440,8 @@ func (il *Inliner) Inline(ctx context.Context, s *Schema) (*Schema, error) {
 func (in *inliner) run(s *Schema) (*Schema, error) {
 	// The tree check runs before the clones, so a root the inliner cannot
 	// expand fails before the run copies anything. It reads the sub-schema
-	// graph; the pristine clone below covers the rest, reporting a loop that
-	// closes through a value field.
+	// graph, and the pristine clone below reports a loop closing through a
+	// value field. Compile makes both demands too.
 	err := checkSchemaTree(s)
 	if err != nil {
 		return nil, err

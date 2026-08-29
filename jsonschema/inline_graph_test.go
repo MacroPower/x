@@ -10,20 +10,24 @@ import (
 	"go.jacobcolvin.com/x/jsonschema"
 )
 
-// TestInlineRejectsNonTreeRoot pins that Inline demands the same root shape
-// Compile does. Inlining copies the input and expands each reference in place,
-// so a node reached from two positions would take one position's expansion at
-// both, and a pointer cycle has no finite expansion.
+// TestInlineRejectsNonTreeRoot pins that Inline and Compile demand the same
+// root shape and say the same thing when a root fails it. Inlining copies the
+// input and expands each reference in place, so a node reached from two
+// positions would take one position's expansion at both, and a pointer cycle
+// has no finite expansion. Compile refuses the same graphs. It holds a root to
+// the same one-location-per-node rule, and it refuses a cyclic root because the
+// JSON-pointer fallback marshals the document it searches and overflows the
+// stack on a cyclic graph.
+//
+// The rows split into two groups. One group fails the tree check: a sub-schema
+// pointer that aliases, or a loop that closes through a sub-schema keyword. The
+// other closes its loop through a value field, which the tree check skips and
+// each engine's cycle check catches.
 func TestInlineRejectsNonTreeRoot(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]struct {
 		build func() *jsonschema.Schema
-
-		// False marks a root Compile accepts and Inline does not. Compile never
-		// copies its root, so a loop closing through a value field escapes its
-		// tree check.
-		compileRejects bool
 	}{
 		"self cycle": {
 			build: func() *jsonschema.Schema {
@@ -32,7 +36,6 @@ func TestInlineRejectsNonTreeRoot(t *testing.T) {
 
 				return s
 			},
-			compileRejects: true,
 		},
 		"two-node cycle": {
 			build: func() *jsonschema.Schema {
@@ -43,18 +46,6 @@ func TestInlineRejectsNonTreeRoot(t *testing.T) {
 
 				return a
 			},
-			compileRejects: true,
-		},
-		"a cycle through an unknown keyword": {
-			build: func() *jsonschema.Schema {
-				// The tree check reads the sub-schema graph only, so the
-				// pristine clone is what reports this one.
-				s := &jsonschema.Schema{Type: "object"}
-				s.Extra = map[string]any{"x-self": s}
-
-				return s
-			},
-			compileRejects: false,
 		},
 		"one node at two positions": {
 			build: func() *jsonschema.Schema {
@@ -64,7 +55,34 @@ func TestInlineRejectsNonTreeRoot(t *testing.T) {
 					Properties: map[string]*jsonschema.Schema{"a": shared, "b": shared},
 				}
 			},
-			compileRejects: true,
+		},
+		"a cycle through an unknown keyword": {
+			build: func() *jsonschema.Schema {
+				s := &jsonschema.Schema{Type: "object"}
+				s.Extra = map[string]any{"x-self": s}
+
+				return s
+			},
+		},
+		"a cycle through examples": {
+			build: func() *jsonschema.Schema {
+				s := &jsonschema.Schema{Type: "object"}
+				s.Examples = []any{s}
+
+				return s
+			},
+		},
+		"a cycle through const": {
+			build: func() *jsonschema.Schema {
+				// Const is *any, so the box is the pointer the loop closes
+				// around.
+				var held any
+
+				s := &jsonschema.Schema{Type: "object", Const: &held}
+				held = any(s)
+
+				return s
+			},
 		},
 	}
 
@@ -72,16 +90,15 @@ func TestInlineRejectsNonTreeRoot(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := jsonschema.Inline(t.Context(), tc.build())
-			require.ErrorIs(t, err, jsonschema.ErrSchemaNotTree)
-
-			if !tc.compileRejects {
-				return
-			}
+			_, inlineErr := jsonschema.Inline(t.Context(), tc.build())
+			require.ErrorIs(t, inlineErr, jsonschema.ErrSchemaNotTree)
 
 			_, compileErr := jsonschema.Compile(t.Context(), tc.build())
 			require.ErrorIs(t, compileErr, jsonschema.ErrSchemaNotTree,
-				"Compile and Inline must reject the same sub-schema graphs")
+				"Compile and Inline must reject the same root graphs")
+
+			assert.Equal(t, inlineErr.Error(), compileErr.Error(),
+				"the two engines must refuse one root with one message")
 		})
 	}
 }

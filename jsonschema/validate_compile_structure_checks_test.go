@@ -142,10 +142,13 @@ func TestCompileRejectsNilSubschemaEntries(t *testing.T) {
 	}
 }
 
-// TestCompileRejectsNonTreeSchema locks in the root-document tree check: a
-// *Schema value reachable through two paths, or a pointer cycle, fails Compile
-// with [jsonschema.ErrSchemaNotTree] naming both reaching paths. Two distinct
-// pointers with identical content stay a tree and compile.
+// TestCompileRejectsNonTreeSchema locks in the two root-document graph checks.
+// A *Schema value reachable through two paths, or a pointer cycle, fails
+// Compile with [jsonschema.ErrSchemaNotTree] naming both reaching paths. A loop
+// closing through a value field fails with the same sentinel, naming the root
+// document rather than a location, since the walk that finds it reports only
+// that a loop exists, not the path around it. Two distinct pointers with
+// identical content stay a tree and compile.
 func TestCompileRejectsNonTreeSchema(t *testing.T) {
 	t.Parallel()
 
@@ -154,10 +157,14 @@ func TestCompileRejectsNonTreeSchema(t *testing.T) {
 	cyclic := &jsonschema.Schema{Defs: map[string]*jsonschema.Schema{}}
 	cyclic.Defs["loop"] = cyclic
 
+	valueCyclic := &jsonschema.Schema{Type: "object"}
+	valueCyclic.Extra = map[string]any{"x-self": valueCyclic}
+
 	tests := map[string]struct {
-		schema *jsonschema.Schema
-		err    error
-		paths  []string
+		schema  *jsonschema.Schema
+		err     error
+		paths   []string
+		subject string
 	}{
 		"aliased subschema": {
 			schema: &jsonschema.Schema{
@@ -170,6 +177,12 @@ func TestCompileRejectsNonTreeSchema(t *testing.T) {
 			schema: cyclic,
 			err:    jsonschema.ErrSchemaNotTree,
 			paths:  []string{"/$defs/loop"},
+		},
+		"cycle through a value field": {
+			schema:  valueCyclic,
+			err:     jsonschema.ErrSchemaNotTree,
+			paths:   nil,
+			subject: "the root document",
 		},
 		"distinct pointers with identical content": {
 			schema: &jsonschema.Schema{
@@ -197,6 +210,13 @@ func TestCompileRejectsNonTreeSchema(t *testing.T) {
 			for _, path := range tc.paths {
 				assert.Contains(t, err.Error(), path,
 					"the violation must name the paths reaching the repeated schema")
+			}
+
+			if tc.subject != "" {
+				assert.Contains(t, err.Error(), tc.subject,
+					"a violation with no path to name must name its subject")
+				assert.NotContains(t, err.Error(), "reach the same schema",
+					"the value-field check reports the loop, not a pair of paths")
 			}
 		})
 	}
