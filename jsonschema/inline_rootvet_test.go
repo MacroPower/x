@@ -12,10 +12,9 @@ import (
 )
 
 // TestInlineVetsRootLikeCompile pins that the two engines make the same
-// structural demand of a root document: every sentinel [jsonschema.Compile]
+// structural demand of a root document. Every sentinel [jsonschema.Compile]
 // reports for a malformed root, [jsonschema.Inline] reports for the same
-// document, so a schema that inlines is a schema that compiles. The rows cover
-// each vetting sentinel a root can carry.
+// document. The rows cover each vetting sentinel a root can carry.
 func TestInlineVetsRootLikeCompile(t *testing.T) {
 	t.Parallel()
 
@@ -95,9 +94,10 @@ func TestInlineVetsRootLikeCompile(t *testing.T) {
 }
 
 // TestInlineVetsSubstitute pins the same demand on a [jsonschema.SubstituteRef]
-// schema: it enters resolution space as a document, so it is vetted as one, and
-// a violation names the reference whose failure the fallback answered. The
-// sentinel stays reachable, so a caller matching on it still matches.
+// schema. It enters resolution space as a document, so [jsonschema.Inline] vets
+// it as one, and the violation names the reference whose failure the fallback
+// answered. The sentinel stays reachable, so a caller matching on it still
+// matches.
 func TestInlineVetsSubstitute(t *testing.T) {
 	t.Parallel()
 
@@ -185,4 +185,27 @@ func TestInlineRetrievalBaseKeepsIDsInert(t *testing.T) {
 		`{"$id": "#published", "properties": {"a": {"type": "string"}}}`,
 		string(data),
 		"the root's inert $id passes through, while the splice drops the remote's as always")
+}
+
+// TestCompileChecksTheBaseURIInlineDoesNot pins one of the two compile-time
+// refusals with no Inline counterpart, the reason the engines agree on the
+// structural vet rather than on every error. [jsonschema.Compile] parses the
+// [jsonschema.WithBaseURI] value and rejects one that is not a URI reference;
+// Inline takes the same option without that check, and an unparsable base
+// normalizes to something its resolution walk carries. The other refusal,
+// ErrUnknownVocabulary, has no test here because vocabulary resolution reads
+// options Inline does not take.
+func TestCompileChecksTheBaseURIInlineDoesNot(t *testing.T) {
+	t.Parallel()
+
+	const malformed = "http://[::1"
+
+	root := &jsonschema.Schema{Type: "string"}
+
+	_, err := jsonschema.Compile(t.Context(), root, jsonschema.WithBaseURI(malformed))
+	require.ErrorIs(t, err, jsonschema.ErrInvalidBaseURI)
+
+	out, err := jsonschema.Inline(t.Context(), root, jsonschema.WithBaseURI(malformed))
+	require.NoError(t, err, "Inline never parses the base it is given")
+	assert.Equal(t, "string", out.Type)
 }

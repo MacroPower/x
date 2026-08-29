@@ -59,8 +59,9 @@ type inliner struct {
 	// The run's structural vetter, minting the [schemavet.Doc] currency for
 	// the pristine root and each fallback substitute, and the
 	// [schemavet.Node] currency for each JSON-pointer fallback target the
-	// session materializes. Those passes share one set of visited sets, so a
-	// node reached twice is checked once. Each fetched document gets a fresh
+	// session materializes. Those passes share the vetter's visited sets, so
+	// it checks a node reached twice only once. Each fetched document gets a
+	// fresh
 	// vetter in [inliner.fetchDoc] instead, since a remote is independent of
 	// the document that referenced it.
 	vetter *schemavet.Vetter
@@ -142,8 +143,8 @@ func (f inlineOptionFunc) applyInline(in *inliner) { f(in) }
 // establishes a base URI nor registers a resolution target, in any
 // document. Anchors still resolve within their document, and $id keywords
 // pass through to the output verbatim. An inert $id addresses nothing, so the
-// structural vet skips its domain check as well, in the root, in each
-// substitute, and in every fetched document.
+// structural vet skips its domain check, in the root, in each substitute, and
+// in every fetched document.
 //
 // Real-world schemas commonly declare a published remote $id while
 // shipping the files their refs name alongside the schema; under the
@@ -321,10 +322,11 @@ func WithRefFallback(f RefFallback) InlineOption {
 // refuse the same roots for the same structural causes. [WithRetrievalBase]
 // carves out the $id domain check, in the root, in each substitute, and in
 // every fetched document, since an inert $id addresses nothing. Two
-// compile-time checks have no Inline counterpart, which is why the agreement
-// covers the structural vet rather than every refusal: [ErrInvalidBaseURI],
-// which reads the [WithBaseURI] value, and [ErrUnknownVocabulary], which
-// needs a resolved vocabulary set Inline never builds.
+// compile-time refusals have no Inline counterpart, which is why the
+// agreement covers the structural vet rather than every error.
+// [ErrInvalidBaseURI] reads the [WithBaseURI] value, which Inline takes
+// without parse-checking it, and [ErrUnknownVocabulary] belongs to the
+// vocabulary resolution Inline does not run.
 //
 // A ref whose expansion reaches its own target returns an error wrapping
 // [ErrRefCycle]. A $dynamicRef under Draft 2020-12 has no faithful static
@@ -452,8 +454,8 @@ func (in *inliner) run(s *Schema) (*Schema, error) {
 	// Vet the root structurally, the pass Compile runs over the document it is
 	// given. It covers field structure, identifiers, type names, bound
 	// domains, and under 2020-12 the items array form, so the two engines
-	// refuse the same roots for the same causes, and the minted currency is
-	// what enters resolution space below.
+	// refuse the same roots for the same structural causes, and the minted
+	// currency is what enters resolution space below.
 	rootDoc, err := in.vetter.VetDoc(pristine, "", in.baseURI)
 	if err != nil {
 		//nolint:wrapcheck // The vetting error already names the document and path.
@@ -488,10 +490,9 @@ func (in *inliner) run(s *Schema) (*Schema, error) {
 
 // recordDoc records a vetted document: the pristine root, a fetched remote, or
 // a fallback substitute, each of which enters resolution space as a document of
-// its own. Taking the [schemavet.Doc] currency rather than a raw *Schema is
-// what states, in the signature, that only vetted material reaches the index
-// and the expansion bookkeeping keyed by it, the demand [schemaIndex.extend]
-// makes of the validator's own index.
+// its own. The [schemavet.Doc] parameter states in the signature that only
+// vetted material reaches the index and the expansion bookkeeping keyed by
+// it, the demand [schemaIndex.extend] makes of the validator's own index.
 func (in *inliner) recordDoc(doc schemavet.Doc, path, docURI string) {
 	in.recordTree(doc.Schema(), path, docURI)
 }
@@ -1114,11 +1115,6 @@ func (in *inliner) fetchDoc(baseURI string) (*Schema, error) {
 
 		return nil, fmt.Errorf("%w: %w", ErrRefResolve, vetErr)
 	}
-
-	// The registrations below use the minted document's pointer (the same
-	// clone), so the vetted currency, not the raw fetch result, is what
-	// enters the registry.
-	cp = doc.Schema()
 
 	in.session.Registry().URI[baseURI] = cp
 	in.session.RegisterFallback(cp, baseURI)

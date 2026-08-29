@@ -824,10 +824,11 @@
 //
 // [Inline] applies these same structural checks to the root it is given and
 // to each [SubstituteRef] schema a fallback supplies, so the two entry points
-// refuse the same documents for the same sentinels. Two checks above stay
-// Compile's alone, since Inline builds neither input they read:
-// [ErrInvalidBaseURI] and [ErrUnknownVocabulary]. See Reference Inlining for
-// the one option that narrows the rest.
+// refuse the same documents for the same sentinels. Two compile-time refusals
+// have no Inline counterpart. [ErrInvalidBaseURI] reads the [WithBaseURI]
+// value, which Inline takes without parse-checking it, and
+// [ErrUnknownVocabulary] belongs to the vocabulary resolution Inline does not
+// run. See Reference Inlining for the one option that narrows the rest.
 //
 // Compile then statically resolves every reference reachable from the root
 // ($ref and, under 2020-12, $dynamicRef) through the same resolution core
@@ -1211,9 +1212,7 @@
 // document, including the Draft 7 fragment-only $id form that otherwise
 // acts as an anchor. $anchor and $dynamicAnchor still resolve within their
 // document, and $id keywords pass through to the output verbatim. An inert
-// $id addresses nothing, so the structural vet skips its domain check as
-// well.
-//
+// $id addresses nothing, so the structural vet skips its domain check.
 // Real-world schemas commonly declare a published remote $id while
 // shipping the files their refs name alongside the schema; under the
 // default RFC behavior those refs absolutize against the remote $id and
@@ -1265,8 +1264,8 @@
 // Inline vets the root document before any reference resolves, through the
 // policy [Compile] applies to the document it is given (see Remote References
 // for the full check list). A violation returns the check's sentinel naming
-// the offending path, so a root the structural vet passes here passes there
-// too. A [SubstituteRef] schema enters resolution space as a document of its
+// the offending path, so a root Inline's vet accepts is a root Compile's vet
+// accepts. A [SubstituteRef] schema enters resolution space as a document of its
 // own, so Inline vets it as one and names the failing reference in the
 // message. Under [WithRetrievalBase] Inline skips the $id domain check
 // throughout the run, in the root, in each substitute, and in every fetched
@@ -1310,5 +1309,7 @@
 // before splicing and is itself inlined
 // recursively, its refs resolving in the context of the document containing
 // the failing ref; a cycle introduced by the substitute is an ordinary
-// [ErrRefCycle].
+// [ErrRefCycle]. The copy enters resolution space as a document of its own,
+// so Inline vets it as one, and a violation ends the call with the check's
+// sentinel in a message naming the reference the substitute answered.
 package jsonschema

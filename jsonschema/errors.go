@@ -73,10 +73,10 @@ var (
 	// multipleOf keyword carries a value that is not strictly greater than
 	// zero. The spec defines the keyword's value domain as a number > 0; the
 	// invalid schema would otherwise compile cleanly and then reject every
-	// numeric instance at validation time while silently accepting every non-
-	// numeric one. Rejecting it at construction surfaces the malformed schema
-	// instead, the same policy [ErrNegativeBound] applies to the length and
-	// count keywords.
+	// numeric instance at validation time while silently accepting every
+	// non-numeric one. Rejecting it at construction surfaces the malformed
+	// schema instead, the same policy [ErrNegativeBound] applies to the length
+	// and count keywords.
 	//
 	// It is re-exported from internal/schemavet, the shared structural-vetting
 	// core, so [errors.Is] matches the sentinel identically whether a failure
@@ -147,8 +147,8 @@ var (
 	// enclosing base (the parent $id chain, or [WithBaseURI] for the root). A
 	// relative $id with no absolute base would register no resolvable URI, so
 	// every ref targeting it would silently miss. Under Draft-07 two forms go
-	// unchecked: an $id beside a $ref (the draft ignores it) and a fragment-
-	// carrying $id (the anchor spelling). An [Inline] run under
+	// unchecked: an $id beside a $ref (the draft ignores it) and a
+	// fragment-carrying $id (the anchor spelling). An [Inline] run under
 	// [WithRetrievalBase] checks no $id at all, since an inert $id registers
 	// nothing.
 	//
@@ -165,11 +165,12 @@ var (
 
 	// ErrMisplacedVocabulary is returned by [Compile] and [Inline] for a
 	// $vocabulary on a node whose $schema does not establish the Draft 2020-12
-	// dialect: a non-empty $schema that is not exactly "https://json-
-	// schema.org/draft/2020-12/schema", or an empty $schema under Draft-07,
-	// which predates the vocabulary concept. A node with an empty $schema
-	// under Draft 2020-12 is accepted: the document inherits the referrer's
-	// dialect (the reading upstream applies to loaded documents).
+	// dialect: a non-empty $schema that is not exactly
+	// "https://json-schema.org/draft/2020-12/schema", or an empty $schema
+	// under Draft-07, which predates the vocabulary concept. The check accepts
+	// a node with an empty $schema under Draft 2020-12, since the document
+	// inherits the referrer's dialect (the reading upstream applies to loaded
+	// documents).
 	//
 	// It is re-exported from internal/schemavet, the shared structural-vetting
 	// core, so [errors.Is] matches the sentinel identically whether a failure

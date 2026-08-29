@@ -26,8 +26,8 @@ func testDeps() refresolve.Deps {
 // and registers nothing, so a plain-name fragment naming it stays
 // unresolvable. Under 2020-12 both engines refuse such a document at the
 // identifier check before resolution runs, so the gate sits behind that
-// refusal with no observable path through the public API; under Draft-07 the
-// registration it makes is what a fragment reference resolves through.
+// refusal with no observable path through the public API; under Draft-07 a
+// fragment reference resolves through the registration it makes.
 func TestFragmentOnlyIDRegistersByDraft(t *testing.T) {
 	t.Parallel()
 

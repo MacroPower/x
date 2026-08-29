@@ -935,10 +935,12 @@ value is rejected with `ErrInvalidBaseURI`, and a `$vocabulary` on a node whose
 
 `Inline` applies these same structural checks to the root it is given and to
 each `SubstituteRef` schema a fallback supplies, so the two entry points refuse
-the same documents for the same sentinels. Two checks above stay `Compile`'s
-alone, since `Inline` builds neither input they read: `ErrInvalidBaseURI` and
-`ErrUnknownVocabulary`. See [Inlining references](#inlining-references) for the
-one option that narrows the rest.
+the same documents for the same sentinels. Two compile-time refusals have no
+`Inline` counterpart. `ErrInvalidBaseURI` reads the `WithBaseURI` value, which
+`Inline` takes without parse-checking it, and `ErrUnknownVocabulary` belongs to
+the vocabulary resolution `Inline` does not run. See
+[Inlining references](#inlining-references) for the one option that narrows the
+rest.
 
 `Compile` then statically resolves every reference reachable from the root
 (`$ref` and, under 2020-12, `$dynamicRef`) through the same resolution core
@@ -1375,14 +1377,13 @@ establishes a base URI nor registers a resolution target, in any document,
 including the Draft 7 fragment-only `$id` form that otherwise acts as an
 anchor. `$anchor` and `$dynamicAnchor` still resolve within their document,
 and `$id` keywords pass through to the output verbatim. An inert `$id`
-addresses nothing, so the structural vet skips its domain check as well.
-Real-world schemas
-commonly declare a published remote `$id` while shipping the files their
-refs name alongside the schema; under the default RFC behavior those refs
-absolutize against the remote `$id` and cannot be served from disk. With
-this option the root document's refs absolutize against the base from
-`WithBaseURI` and each fetched document's refs against the URI it was
-fetched from.
+addresses nothing, so the structural vet skips its domain check.
+Real-world schemas commonly declare a published remote `$id` while
+shipping the files their refs name alongside the schema; under the default
+RFC behavior those refs absolutize against the remote `$id` and cannot be
+served from disk. With this option the root document's refs absolutize
+against the base from `WithBaseURI` and each fetched document's refs
+against the URI it was fetched from.
 
 Sibling keywords beside `$ref` follow draft semantics, with the draft
 detected from the root schema's `$schema` exactly as the validator detects
@@ -1436,8 +1437,9 @@ Failure modes:
 - `Inline` vets the root document before any reference resolves, through the
   policy `Compile` applies to the document it is given (see
   [Remote references](#remote-references) for the full check list). A violation
-  returns the check's sentinel naming the offending path, so a root the
-  structural vet passes here passes there too. A `SubstituteRef` schema enters
+  returns the check's sentinel naming the offending path, so a root `Inline`'s
+  vet accepts is a root `Compile`'s vet accepts. A `SubstituteRef` schema
+  enters
   resolution space as a document of its own, so `Inline` vets it as one and
   names the failing reference in the message. Under `WithRetrievalBase`
   `Inline` skips the `$id` domain check throughout the run, in the root, in
@@ -1514,7 +1516,7 @@ the reference the substitute answered.
 | `ErrInvalidBaseURI`           | A `WithBaseURI` value that does not parse (returned by `Compile`).                                                                                                                                                                                    |
 | `ErrMisplacedVocabulary`      | A `$vocabulary` on a node whose `$schema` does not establish the 2020-12 dialect (returned by `Compile` and `Inline`).                                                                                                                                |
 | `ErrInvalidSchemaDocument`    | A schema document whose top-level value is not a JSON object or boolean (returned by `CompileJSON`, `ParseSchema`, and `ParseSchemaValue`).                                                                                                           |
-| `ErrUnknownVocabulary`        | A required `$vocabulary` URI is unrecognized (or 2020-12 core is marked optional).                                                                                                                                                                    |
+| `ErrUnknownVocabulary`        | A required `$vocabulary` URI is unrecognized, or 2020-12 core is marked optional (returned by `Compile`).                                                                                                                                             |
 | `ErrRefResolve`               | A `RefResolver` returns an error resolving a remote `$ref`; in `Inline`, also a non-local ref with no resolver or any unresolvable target.                                                                                                            |
 | `ErrRefCycle`                 | `Inline` expands a `$ref` that reaches its own target: the reference graph is cyclic and has no finite expansion.                                                                                                                                     |
 | `ErrRefInline`                | `Inline` encounters a reference with no faithful static expansion (`$dynamicRef` under Draft 2020-12).                                                                                                                                                |
