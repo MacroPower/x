@@ -596,9 +596,10 @@
 // enum=10|20,minimum=15 keeps minimum and so admits only 20. Numeric, length,
 // and count bounds from all three sources (the Go kind, the jsonschema tag, and
 // tag interpreters) merge through that one model: they intersect
-// order-independently (a weaker bound never loosens a stronger one), a conflict in the
-// discrete value set aborts generation, and an unsatisfiable range (a minimum
-// above a maximum) is emitted as its impossible bounds rather than loosened.
+// order-independently (a weaker bound never loosens a stronger one), a
+// conflict in the discrete value set aborts generation, and an unsatisfiable
+// range (a minimum above a maximum) is emitted as its impossible bounds
+// rather than loosened.
 //
 // A sequence or map element resolves by the same rule, reading its own authored
 // canvas rather than the field's. Which dialect wrote the element's const or
