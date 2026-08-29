@@ -939,6 +939,17 @@ func TestRefGraphSynthesisReachesEveryForm(t *testing.T) {
 			[]jsonschema.ValidateOption{jsonschema.WithRefResolver(resolver)},
 			[]jsonschema.InlineOption{jsonschema.WithRefResolver(resolver)})
 		if reason != "" {
+			// FuzzRefEnginesAgree checks reasonDeferredRefMiss only in the
+			// negative direction, that it arrives on no graph the generator
+			// built fully resolvable. Counting it here states the other
+			// direction, that a drawn missing reference reaches the
+			// classification at all. The form check above cannot see that,
+			// since it reads the root text rather than what the engines make
+			// of it.
+			if reason == reasonDeferredRefMiss {
+				seen["a deferred reference miss"]++
+			}
+
 			continue
 		}
 
@@ -979,6 +990,12 @@ func TestRefGraphSynthesisReachesEveryForm(t *testing.T) {
 	} {
 		assert.NotZerof(t, seen[form], "the generator draws %s in none of %d blobs", form, draws)
 	}
+
+	// A deferred reference miss carries its own message, since the one above
+	// names the generator rather than the classification.
+	assert.NotZerof(t, seen["a deferred reference miss"],
+		"no graph in %d blobs reaches a deferred reference miss, so nothing exercises that classification",
+		draws)
 }
 
 // TestSubstituteDoesNotRebaseNestedRefs pins the carve-out behind

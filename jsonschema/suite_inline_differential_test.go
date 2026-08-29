@@ -199,8 +199,10 @@ func TestRefEnginesAgreeOnCollidingIDs(t *testing.T) {
 // matching constant would stop earning its place and this test would fail.
 //
 // One reason is not checked here, reasonDeferredRefMiss. The suite serves every
-// remote it references, so no case reaches it, and FuzzRefEnginesAgree draws
-// unresolvable references on purpose. Three reasons are not skips,
+// remote it references, so no case reaches it.
+// TestRefGraphSynthesisReachesEveryForm keeps that reason live instead, since
+// its generator draws unresolvable references on purpose and one of its blobs
+// must reach the classification. Three reasons are not skips,
 // reasonSubstituteBaseURI, reasonSubstituteNoAnchors, and
 // reasonSubstituteTransitiveMalformed, which chooseWithheld applies when it
 // picks a document to withhold. TestSubstituteDoesNotRebaseNestedRefs pins
