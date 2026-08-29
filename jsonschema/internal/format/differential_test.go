@@ -723,6 +723,11 @@ var (
 // the deviation, so this is a fence against a future rewrite of the label scan
 // rather than an engine for finding new cases. It also never sees an uppercase
 // name, since the lookup mapping lowercases and the unchanged guard then skips.
+//
+// The guard that follows carries the ASCII condition as well. A successful
+// idna.Lookup.ToASCII returns an all-ASCII name, so err == nil and ascii == s
+// together already report that s holds only ASCII bytes, and a pre-filter ahead
+// of them would restate the same condition.
 func FuzzFormatHostnameVsIDNA(f *testing.F) {
 	fn := validator(f, "hostname")
 
@@ -735,7 +740,7 @@ func FuzzFormatHostnameVsIDNA(f *testing.F) {
 	}
 
 	f.Fuzz(func(t *testing.T, s string) {
-		if !isASCIITest(s) || !idnaAcceptsHostname(s) {
+		if !idnaAcceptsHostname(s) {
 			return
 		}
 
@@ -749,18 +754,4 @@ func FuzzFormatHostnameVsIDNA(f *testing.F) {
 			t.Fatalf("idna.Lookup leaves the ASCII name %q unchanged but hostname rejects it: %v", s, err)
 		}
 	})
-}
-
-// isASCIITest reports whether s holds only ASCII bytes, mirroring isASCII. The
-// unchanged-conversion guard beside it already implies this, since a successful
-// ToASCII returns ASCII. The call stays as the cheap pre-filter that keeps a
-// non-ASCII name out of the conversion entirely.
-func isASCIITest(s string) bool {
-	for i := range len(s) {
-		if s[i] >= utf8.RuneSelf {
-			return false
-		}
-	}
-
-	return true
 }
