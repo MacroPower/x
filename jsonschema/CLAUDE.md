@@ -518,9 +518,12 @@ contract the tests enforce.
     `Of`. `TestCycleSkipKeepsBranchUnconditional` pins the mutually composed
     cycle, whose skip leaves `promoted` short of the root's names and so leaves
     that branch unconditional.
-  - `task go:fuzz` searches for new counterexamples; the seed corpora run on
-    every `go test`. A discovered counterexample is committed under
-    `testdata/fuzz/<Target>/` as a permanent regression seed before the fix.
+  - `task go:fuzz` searches for new counterexamples. A target's seed corpus
+    runs on every `go test`. It holds the `f.Add` seeds written in the target
+    and any entry committed under `testdata/fuzz/<Target>/` in the directory
+    of the package that declares the target. Every rig here seeds in code, and
+    a discovered counterexample is committed as a permanent regression seed
+    before the fix.
 - The `$ref` differential rig closes the loop across the three sites that
   materialize a `$ref` target -- `Compile`'s reference fixpoint, `Inline`'s own
   registry and index, and the JSON-pointer fallback both reach through
@@ -537,12 +540,16 @@ contract the tests enforce.
     different question from whether the two engines agree.
   - `TestRefEnginesAgreeOnPastFixes` pins one graph per `$ref` fix as
     JSON.
-  - `FuzzRefEnginesAgree` (`fuzz_ref_test.go`) synthesizes a
-    multi-document graph from a blob, drawing the draft, each document's `$id`,
-    the anchor form, and eight reference spellings. A third pipeline withholds one document from
-    the resolver and serves it through a `WithRefFallback` substitute. It has no
-    seed corpus, since a corpus entry for a `[]byte` argument is entropy and no
-    blob can be written by hand to decode to a chosen graph.
+  - `FuzzRefEnginesAgree` (`fuzz_ref_test.go`) synthesizes a multi-document
+    graph from a blob, drawing the draft, each document's `$id`, the anchor
+    form, and eight reference spellings. A third pipeline withholds one
+    document from the resolver and serves it through a `WithRefFallback`
+    substitute. Its seeds run the draw cursor from every choice at zero to a
+    saturated blob, with mixed patterns between. No seed is written by hand,
+    since a corpus entry for a `[]byte` argument is entropy and no blob can be
+    written by hand to decode to a chosen graph; the entries under
+    `testdata/fuzz/FuzzRefEnginesAgree/` are minimized counterexamples the
+    fuzzer found.
   - Six reason constants live in `ref_differential_test.go`. Three are skip
     reasons the rig classifies from the error `Inline` returns, never from a
     test name, so a reason cannot go stale against a renamed suite case:
@@ -581,11 +588,24 @@ contract the tests enforce.
   in `format.Validators()` to carry a differential fuzz target, a vendored
   corpus, or a vector file, so a newly registered format cannot arrive with
   none. A claim names the Go function value rather than its name as a string, so
-  renaming a target breaks the build in the coverage table. Containment targets
-  are deliberately not a coverage source. A containment oracle is another format
-  in the same package rather than an independent one, so a containment pair that
-  drifts together stays green. Each allowlist entry carries a reason string; the
-  allowlist ships empty.
+  renaming a target breaks the build in the coverage table. Two guards beside it
+  read the package's own test sources for what a function value cannot carry.
+  `TestFormatCoverageSourcesNameTheirFormat` requires each claimed source to
+  name its row's format through one of the helpers `formatHelper` lists, and
+  refuses a differential claim on a target of another shape.
+  `TestFormatCoverageClaimsEveryDifferential` requires a coverage row to claim
+  every target shaped like a differential, wherever the package declares it, so
+  a differential that names its format the way the others do cannot stay
+  invisible. A differential's shape is a `Fuzz` target that names one format and
+  does not reach its validator through `fuzzFormatRobust`. A robustness target
+  reaches it through that helper and asserts only that the validator neither
+  panics nor contradicts itself, so it names a format and covers none.
+  Containment targets are deliberately not a coverage source either. A
+  containment oracle is another format in the same package rather than an
+  independent one, so a containment pair that drifts together stays green, and
+  `TestFormatCoverageClaimsEveryDifferential` passes over any target naming more
+  than one format. Each allowlist entry carries a reason string; the allowlist
+  ships empty.
 - `format_deviations_test.go` binds each bullet of the format-deviations list in
   `doc.go` and `README.md` to the behavior it claims: a phrase both files must
   carry, matched over normalized text so a reflow cannot break it, and the
