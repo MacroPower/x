@@ -743,8 +743,9 @@ func (fc FieldContext) Constraints() *Constraints {
 // which only the flag distinguishes from a plain string field, while every
 // other coercion is already visible in [FieldContext.Base]. The second is
 // whether the occurrence admits null. A Go type states only its pointer-ness.
-// The generator gives a nil-able slice, map, or byte slice a null branch too,
-// and the field's node carries that decision, so this method reads it there.
+// The generator gives a nil-able slice, map, byte slice, or interface a null
+// branch too, and the field's node carries that decision, so this method reads
+// it there.
 // A caller-built context has no backing node, so its null admission falls back
 // to the pointer-derived answer. Prefer this over calling [ShapeOf] directly
 // when a context is available.

@@ -1723,6 +1723,377 @@ func TestTagScalarAfterTypeOverride(t *testing.T) {
 	}
 }
 
+// nullStanced is the type the stance and verbatim rows below configure. A
+// type-level hook keys on a named type, so the rows cannot declare it locally
+// the way the rest of the table declares its field structs.
+type nullStanced struct {
+	X string `json:"x"`
+}
+
+// TestTagNullLiteralFollowsTheNullDecision pins where the tag's null literal is
+// a value the field can hold. A scalar key spells null wherever the occurrence
+// admits one, and which occurrences those are is the generator's decision
+// rather than the Go type's. A bare slice, map, byte slice, or interface is
+// nilable without being a pointer, and WithNullable(false), a NullForbidden
+// stance, and a verbatim payload each turn the decision off. Each switch gets a
+// pair of rows running the same tag against the same field shape.
+//
+// Default and examples both reach the literal through Shape.ParseScalar, so
+// one examples row per direction stands in for the type roster the default
+// rows walk. A const on a container never reaches it. The shape the container
+// names rejects the key before the parser reads the value. An enum on a
+// sequence reaches the elements instead, and an element occurrence answers
+// from its own Go type. Rows for both pin that neither takes the literal from
+// the container's decision.
+func TestTagNullLiteralFollowsTheNullDecision(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		generate func() (*jsonschema.Schema, error)
+		prop     string
+		want     string // marshaled property schema
+		err      string // substring required in the generation error
+	}{
+		"null default on a bare slice": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V []string `json:"v" jsonschema:"default=null"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			prop: "v",
+			want: `{"type":["null","array"],"items":{"type":"string"},"default":null}`,
+		},
+		"null default on a bare map": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V map[string]int `json:"v" jsonschema:"default=null"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			prop: "v",
+			want: `{"type":["null","object"],"additionalProperties":{"type":"integer"},"default":null}`,
+		},
+		"null default on a byte slice": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V []byte `json:"v" jsonschema:"default=null"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			prop: "v",
+			want: `{"type":["null","string"],"contentEncoding":"base64","default":null}`,
+		},
+		// A plain interface reflects as the unrestricted schema, and render
+		// drops the null branch as a duplicate of it, so the row pins the
+		// accepted default rather than a type list.
+		"null default on an interface": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V any `json:"v" jsonschema:"default=null"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			prop: "v",
+			want: `{"default":null}`,
+		},
+		// A json.RawMessage renders as the same unrestricted schema an interface
+		// does, and answers the opposite way. Its schema comes from the built-in
+		// leaf table rather than from reflection over a container, so no node
+		// records a null decision for the tag to read.
+		"null default on a raw message": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V json.RawMessage `json:"v" jsonschema:"default=null"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			err: "cannot assign null",
+		},
+		"null examples member on a bare slice": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V []string `json:"v" jsonschema:"examples=null"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			prop: "v",
+			want: `{"type":["null","array"],"items":{"type":"string"},"examples":[null]}`,
+		},
+		"null examples member with the null branch dropped": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V []string `json:"v" jsonschema:"examples=null"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context(), jsonschema.WithNullable(false))
+			},
+			err: "cannot assign null",
+		},
+		"null default on a slice with the null branch dropped": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V []string `json:"v" jsonschema:"default=null"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context(), jsonschema.WithNullable(false))
+			},
+			err: "cannot assign null",
+		},
+		"null default on a map with the null branch dropped": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V map[string]int `json:"v" jsonschema:"default=null"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context(), jsonschema.WithNullable(false))
+			},
+			err: "cannot assign null",
+		},
+		"null default on a byte slice with the null branch dropped": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V []byte `json:"v" jsonschema:"default=null"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context(), jsonschema.WithNullable(false))
+			},
+			err: "cannot assign null",
+		},
+		"null default on an interface with the null branch dropped": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V any `json:"v" jsonschema:"default=null"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context(), jsonschema.WithNullable(false))
+			},
+			err: "cannot assign null",
+		},
+		// The pointer occurrence answers the same decision. With the null branch
+		// dropped its schema is a bare integer, which a null default could
+		// never be an instance of.
+		"null default on a pointer with the null branch dropped": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V *int `json:"v" jsonschema:"default=null"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context(), jsonschema.WithNullable(false))
+			},
+			err: "cannot assign null",
+		},
+		// WithNullable is not the only switch. A type declaring NullForbidden
+		// gives every occurrence of itself a schema with no null branch, and the
+		// generator emits a verbatim payload as authored, with no null encoding
+		// at all, so a pointer to either holds no null for the literal to name.
+		// A stance moves the decision the other way too, which the NullAllowed
+		// row below takes on a field that is not a pointer at all.
+		"null default on a pointer to a null-forbidding type": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V *nullStanced `json:"v" jsonschema:"default=null"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context(),
+					jsonschema.WithTypeSchemaFor[nullStanced](jsonschema.TypeSchema{
+						Value:       &jsonschema.Schema{Type: "object"},
+						Nullability: jsonschema.NullForbidden,
+					}))
+			},
+			err: "cannot assign null",
+		},
+		"null default on a pointer to a verbatim type": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V *nullStanced `json:"v" jsonschema:"default=null"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context(),
+					jsonschema.WithTypeSchemaFor[nullStanced](jsonschema.TypeSchema{
+						Verbatim: &jsonschema.Schema{Type: "object"},
+					}))
+			},
+			err: "cannot assign null",
+		},
+		"null default on a value field of a null-admitting type": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V nullStanced `json:"v" jsonschema:"default=null"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context(),
+					jsonschema.WithTypeSchemaFor[nullStanced](jsonschema.TypeSchema{
+						Value:       &jsonschema.Schema{Type: "object"},
+						Nullability: jsonschema.NullAllowed,
+					}))
+			},
+			prop: "v",
+			want: `{"default":null,"anyOf":[{"$ref":"#/$defs/nullStanced"},{"type":"null"}]}`,
+		},
+		// Pairs apply in order, so a scalar key before a type= pair parses
+		// against the field's own occurrence. The override then replaces the
+		// type and leaves the null behind, which is a mismatch the docs record
+		// beside the other two rather than a behavior to rely on.
+		"null default before a type override on a bare slice": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V []string `json:"v" jsonschema:"default=null,type=string"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			prop: "v",
+			want: `{"type":"string","default":null}`,
+		},
+		// The carve-out is the null literal alone. A slice has no scalar value
+		// the tag can spell.
+		"a non-null default on a bare slice": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V []string `json:"v" jsonschema:"default=x"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			err: "cannot assign scalar value",
+		},
+		// The shape a map names refuses a const before the parser reads the
+		// value, so the null decision never reaches it.
+		"null const on a bare map": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V map[string]int `json:"v" jsonschema:"const=null"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			err: "pinned value is not supported on a object",
+		},
+		// An enum on a sequence constrains the elements, and an element
+		// occurrence is not the container. These rows read the element's own
+		// pointer-ness, which the container's decision must not displace. The
+		// last of them is a mismatch the package accepts. The member has no
+		// null branch on the element schema to match it.
+		"null enum member on a slice of pointers": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V []*string `json:"v" jsonschema:"enum=a|null"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			prop: "v",
+			want: `{"type":["null","array"],"items":{"anyOf":[{"type":"string","enum":["a",null]},{"type":"null"}]}}`,
+		},
+		"null enum member on a slice of values": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V []string `json:"v" jsonschema:"enum=a|null"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			err: "cannot assign null to non-nullable type string",
+		},
+		"null enum member on a slice of pointers with the null branch dropped": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V []*string `json:"v" jsonschema:"enum=a|null"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context(), jsonschema.WithNullable(false))
+			},
+			prop: "v",
+			want: `{"type":"array","items":{"type":"string","enum":["a",null]}}`,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			s, err := tc.generate()
+			if tc.err != "" {
+				require.ErrorContains(t, err, tc.err)
+
+				return
+			}
+
+			require.NoError(t, err)
+
+			got, err := json.Marshal(s.Properties[tc.prop])
+			require.NoError(t, err)
+			assert.JSONEq(t, tc.want, string(got))
+		})
+	}
+}
+
+// TestTagNullDefaultOnASelfReferentialField pins the null decision on a node
+// that carries it in two halves. A field referencing a type links to a $defs
+// entry rather than to a body, and such a node's own nullable field is never
+// set. Its decision is the entry's recorded stance combined with the
+// occurrence's pointer-ness, so reading that nullable field instead of the
+// combination would reject this tag.
+func TestTagNullDefaultOnASelfReferentialField(t *testing.T) {
+	t.Parallel()
+
+	type selfRef struct {
+		Next *selfRef `json:"next" jsonschema:"default=null"`
+	}
+
+	s, err := jsonschema.GenerateFor[selfRef](t.Context())
+	require.NoError(t, err)
+
+	def := s.Defs["selfRef"]
+	require.NotNil(t, def)
+
+	got, err := json.Marshal(def.Properties["next"])
+	require.NoError(t, err)
+	assert.JSONEq(t,
+		`{"default":null,"anyOf":[{"$ref":"#/$defs/selfRef"},{"type":"null"}]}`, string(got))
+}
+
+// nullStancedRecursive is the self-referential type
+// TestTagNullLiteralOnARecursiveStancedType configures.
+type nullStancedRecursive struct {
+	Next *nullStancedRecursive `json:"next" jsonschema:"default=null"`
+}
+
+// TestTagNullLiteralOnARecursiveStancedType pins the one occurrence the null
+// decision reaches too early. A field referencing the type it belongs to
+// resolves against a $defs entry that is still being built, so the stance the
+// extender records for that type lands after the tag has already accepted the
+// literal against it. The schema that comes out carries a null default on a
+// $ref whose target admits no null, which is the gap this test states rather
+// than a behavior to rely on.
+func TestTagNullLiteralOnARecursiveStancedType(t *testing.T) {
+	t.Parallel()
+
+	s, err := jsonschema.GenerateFor[nullStancedRecursive](t.Context(),
+		jsonschema.WithTypeSchemaExtenderFor[nullStancedRecursive](
+			func(_ context.Context, _ jsonschema.TypeContext, ts *jsonschema.TypeSchema) error {
+				ts.Nullability = jsonschema.NullForbidden
+
+				return nil
+			}))
+	require.NoError(t, err)
+
+	def := s.Defs["nullStancedRecursive"]
+	require.NotNil(t, def)
+
+	got, err := json.Marshal(def.Properties["next"])
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"$ref":"#/$defs/nullStancedRecursive","default":null}`, string(got),
+		"the stance drops the null branch, and the default the tag already took stays behind")
+}
+
 // TestTagEmptyStringKeyValues covers the empty-value rule for the string-typed
 // annotation keys: an empty description=, title=, pattern=, or format= would
 // assign the field's zero value, so the keyword would silently never be

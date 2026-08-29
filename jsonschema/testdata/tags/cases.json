@@ -1051,5 +1051,100 @@
         "want": "reject"
       }
     ]
+  },
+  {
+    "name": "a null default lands on a nilable slice",
+    "note": "a bare slice admits null, so the tag's null literal is a value it can hold",
+    "type": "[]string",
+    "json": "v",
+    "jsonschema": "default=null",
+    "schema": {
+      "type": [
+        "null",
+        "array"
+      ],
+      "items": {
+        "type": "string"
+      },
+      "default": null
+    },
+    "instances": [
+      {
+        "json": null,
+        "want": "accept"
+      },
+      {
+        "json": [
+          "a"
+        ],
+        "want": "accept"
+      },
+      {
+        "json": 1,
+        "want": "reject"
+      }
+    ]
+  },
+  {
+    "name": "a null default lands on a nilable map",
+    "note": "the same null admission on a map",
+    "type": "map[string]int",
+    "json": "v",
+    "jsonschema": "default=null",
+    "schema": {
+      "type": [
+        "null",
+        "object"
+      ],
+      "additionalProperties": {
+        "type": "integer"
+      },
+      "default": null
+    },
+    "instances": [
+      {
+        "json": null,
+        "want": "accept"
+      },
+      {
+        "json": {
+          "a": 1
+        },
+        "want": "accept"
+      },
+      {
+        "json": 1,
+        "want": "reject"
+      }
+    ]
+  },
+  {
+    "name": "a null default lands on a nilable byte slice",
+    "note": "a []byte encodes as a base64 string and still admits the null its nil marshals as",
+    "type": "[]byte",
+    "json": "v",
+    "jsonschema": "default=null",
+    "schema": {
+      "type": [
+        "null",
+        "string"
+      ],
+      "contentEncoding": "base64",
+      "default": null
+    },
+    "instances": [
+      {
+        "json": null,
+        "want": "accept"
+      },
+      {
+        "json": "YWJj",
+        "want": "accept"
+      },
+      {
+        "json": 1,
+        "want": "reject"
+      }
+    ]
   }
 ]

@@ -186,8 +186,9 @@ The package has two independent halves sharing the `Schema` type:
   vocabulary, a `Target` the one write destination a field and an element share
   (which makes element retargeting one implementation), `Shape.Nullable` the
   occurrence's null admission, which `ShapeOf` approximates as pointer-ness and
-  the parent package's `FieldContext.Shape` answers exactly from the field's
-  node,
+  the parent package answers exactly from the field's node at both of its
+  classification sites (the input it hands `internal/tagparse` and
+  `FieldContext.Shape`),
   `Shape.ParseScalar` the one scalar constructor including the
   convert-and-marshal round-trip a text-marshaling type needs, and a total
   `[opCount][formCount]` matrix the

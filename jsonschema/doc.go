@@ -355,16 +355,16 @@
 // reading the field's Go type against its type-derived [FieldContext.Base].
 // The context supplies two facts [ShapeOf] cannot. The json:",string" flag on a
 // string Go kind is the one coercion, [FormCoercedString], that type and base
-// alone cannot express. Whether a nil-able slice, map, or byte slice admits
-// null is the generator's decision rather than the Go type's, so [ShapeOf]
-// reports only the pointer occurrences as admitting null, which is also what a
-// context the generator did not build falls back to. The resulting [Shape]
-// carries the declared type, that type with its pointer chain followed, the
-// kind a scalar literal parses at, whether the occurrence admits null, and the
-// [Form] -- the JSON shape the instance actually takes, which is what the model
-// dispatches on. Form is
-// deliberately not the Go kind, so a field that encodes itself as a string
-// (through json:",string" or its own MarshalText) reads as [FormCoercedNumber]
+// alone cannot express. Whether a nil-able slice, map, byte slice, or
+// interface admits null is the generator's decision rather than the Go type's,
+// so [ShapeOf] reports only the pointer occurrences as admitting null, which
+// is also what a context the generator did not build falls back to. The
+// resulting [Shape] carries the declared type, that type with its pointer
+// chain followed, the kind a scalar literal parses at, whether the occurrence
+// admits null, and the [Form] -- the JSON shape the instance actually takes,
+// which is what the model dispatches on. Form is deliberately not the Go kind,
+// so a field that encodes itself as a string (through json:",string" or its
+// own MarshalText) reads as [FormCoercedNumber]
 // or [FormTextString] rather than as a number every branch has to
 // special-case. Passing that same Shape to [FieldContext.ConstraintsFor] builds
 // the facade without classifying the field a second time, which
@@ -538,6 +538,40 @@
 // verbatim rather than canonicalizing it, so const=5.0 pins "5.0" and const=5
 // pins "5".
 //
+// Which field occurrences admit null is the generator's decision rather than
+// the Go type's, and the literal null is a value wherever that decision
+// applies. A pointer field takes default=null, and so does every other
+// nil-able occurrence reflection builds: a slice, a map, a []byte, and an
+// interface. A type the package maps to a built-in leaf schema is not a
+// container reflection built, so [encoding/json.RawMessage] refuses the literal
+// even though the {} it produces admits null. A [Nullability] stance moves the
+// decision either way, so a value field of a [NullAllowed] type takes the
+// literal and a pointer to a [NullForbidden] one does not.
+// Whatever else turns the decision off takes the literal with it, so a null
+// literal is an error under [WithNullable](false) and on a
+// [TypeSchema.Verbatim] payload, which carries no null encoding at all.
+//
+// Default and examples are the two keys that reach the literal on a container.
+// The shape a container names rejects a const before the parser reads the
+// value, so const=null fails there for the same reason const=5 does, on a
+// pointer to a container as much as on a bare one. An enum on a sequence
+// constrains the elements instead, and an element occurrence answers from its
+// own Go type rather than from the container's decision.
+//
+// Three cases take the literal against a schema that admits no null, and none
+// of them is behavior to rely on. The first is the element case just named. A
+// []*string takes a null enum member even under [WithNullable](false), where
+// the element schema has no null branch to match it. The second is a
+// self-referential field, which reads the decision before its type finishes
+// recording a stance. Such a field resolves against a $defs entry still being
+// built, so a [Nullability] stance a type-level hook records for that type
+// arrives after the tag has accepted the literal, and the field keeps a null
+// default on a $ref whose target admits no null. The third follows from the
+// ordering rule below. A scalar key before a type= pair parses against the
+// field's own occurrence, so default=null,type=string on a []string keeps the
+// null the slice admitted, and the property schema carries it beside the
+// overriding string type.
+//
 // Enum and examples values are separated by "|". Unrecognized keys are a parse
 // error. A value containing a comma escapes it with a backslash (a literal
 // backslash is "\\"), so jsonschema:"description=Hello\, World" sets the
@@ -568,11 +602,13 @@
 // array value: the values land on the item schemas, where each element parses
 // against its own shape, so a coerced or text-marshaling element gets the same
 // treatment a coerced field does. Nested sequences descend to the innermost
-// element schema. Const, default, and examples remain whole-value constraints
-// and are still errors on sequence fields, as is enum on []byte (a base64
-// string with no item schema). This is the same element path a validate dive or
-// sequence-wide oneof takes, so the two dialects cannot disagree about what an
-// element is.
+// element schema. Const, default, and examples remain whole-value constraints,
+// so a scalar value for one of them is an error on a sequence field. A null
+// value for default or examples is the exception, since it names the array's
+// own null rather than an element's. Enum on []byte is an error too, because a
+// base64 string has no item schema. This is the same element path a validate
+// dive or sequence-wide oneof takes, so the two dialects cannot disagree about
+// what an element is.
 //
 // A keyword the field's shape cannot carry is an error rather than an inert
 // keyword nothing enforces: minItems=3 on a string, or any numeric bound on a

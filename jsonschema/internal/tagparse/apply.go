@@ -85,6 +85,41 @@ type Result struct {
 	TypeOverridden bool
 }
 
+// Input is one field occurrence for [Apply] to read: the field's Go type, the
+// schemas a fact lands on and classifies against, the tag text itself, and the
+// two facts none of those expresses.
+type Input struct {
+	// FieldType is the field's own Go type, which every key classifies against
+	// until a type= pair replaces the classification outright.
+	FieldType reflect.Type
+	// Canvas is where the value-scoped facts and annotations land.
+	Canvas *jsonschema.Schema
+	// Payload is the type-derived schema a type= pair restructures, since such
+	// a pair replaces the reflected type assertion rather than declaring a
+	// canvas fact.
+	Payload *jsonschema.Schema
+	// TypeSchema is the type-derived schema the tag classifies the field
+	// against. It is the payload for an ordinary field, and differs only where
+	// the payload alone understates what the instance is. A nullable
+	// json:",string" field keeps its string on the node's null-branch base, so
+	// the caller passes a view saying so. A nil value means "use the payload".
+	TypeSchema *jsonschema.Schema
+	// Tag is the jsonschema struct tag's value.
+	Tag string
+	// Quoted is the field's json:",string" flag when it applies to a string Go
+	// kind, the one coercion no schema view can express (see
+	// [tagmodel.ShapeOfQuoted]).
+	Quoted bool
+	// Nullable reports whether the occurrence admits null, which the caller
+	// reads off the field's node. It is the generator's decision rather than
+	// the Go type's. A slice, map, byte slice, or interface is nilable without
+	// being a pointer, and WithNullable(false) drops the null branch a pointer
+	// would otherwise carry. A scalar key spells that admission as the literal
+	// null, so [Apply] accepts default=null wherever that decision applies,
+	// whether or not the rendered schema keeps a null branch.
+	Nullable bool
+}
+
 // Apply parses and applies a jsonschema struct tag. Value-scoped facts and
 // annotations land on the authored canvas, while a type= pair restructures the
 // type-derived payload (it replaces the reflected type assertion, not a canvas
@@ -99,39 +134,32 @@ type Result struct {
 // parsing while one after it parses as the overridden type. The non-scalar
 // overrides (array, object, null) spell no scalar, so a scalar key following
 // one is an error.
-// TypeSchema is the type-derived schema the tag classifies the field against.
-// It is the payload for an ordinary field, and differs only where the payload
-// alone understates what the instance is: a nullable json:",string" field keeps
-// its string on the node's null-branch base, so the caller passes a view saying
-// so. A nil value means "use the payload". Quoted is the field's json:",string"
-// flag when it applies to a string Go kind, the one coercion no schema view can
-// express (see [tagmodel.ShapeOfQuoted]).
-func Apply(
-	tag string, fieldType reflect.Type, canvas, payload, typeSchema *jsonschema.Schema, quoted bool,
-) (Result, error) {
-	directives, description, err := Parse(tag)
+func Apply(in Input) (Result, error) {
+	directives, description, err := Parse(in.Tag)
 	if err != nil {
 		return Result{}, err
 	}
 
 	if len(directives) == 0 {
 		if description != "" {
-			canvas.Description = description
+			in.Canvas.Description = description
 		}
 
 		return Result{}, nil
 	}
 
+	typeSchema := in.TypeSchema
 	if typeSchema == nil {
-		typeSchema = payload
+		typeSchema = in.Payload
 	}
 
 	state := &applyState{
-		canvas:     canvas,
-		payload:    payload,
+		canvas:     in.Canvas,
+		payload:    in.Payload,
 		typeSchema: typeSchema,
-		fieldType:  fieldType,
-		quoted:     quoted,
+		fieldType:  in.FieldType,
+		quoted:     in.Quoted,
+		nullable:   in.Nullable,
 		groupsSet:  map[string]bool{},
 		seen:       map[string]bool{},
 	}
@@ -168,8 +196,11 @@ type applyState struct {
 	// while overriddenType names the type it came from.
 	overridden tagmodel.Shape
 	// The quoted field carries the json:",string" flag for a string Go kind,
-	// which no schema view can express (see [Apply]).
+	// which no schema view can express (see [Input.Quoted]).
 	quoted bool
+	// The nullable field is the occurrence's null admission as the generator
+	// decided it (see [Input.Nullable]).
+	nullable bool
 }
 
 // apply folds one directive into the state.
@@ -465,12 +496,20 @@ func (s *applyState) applyExamples(key, value string) error {
 // shape classifies what the tag is currently constraining: the shape a type=
 // pair installed, which restates the instance outright, or the field's own Go
 // type against the payload as it now stands.
+//
+// The classification reads the Go type, so it approximates null admission as
+// pointer-ness. The generator's own decision replaces that answer. An override
+// keeps the never-null shape [tagmodel.ShapeForTypeName] builds, because the
+// named type displaces the occurrence along with the Go type.
 func (s *applyState) shape() tagmodel.Shape {
 	if s.overriddenType != "" {
 		return s.overridden
 	}
 
-	return tagmodel.ShapeOfQuoted(s.fieldType, s.typeSchema, s.quoted)
+	shape := tagmodel.ShapeOfQuoted(s.fieldType, s.typeSchema, s.quoted)
+	shape.Nullable = s.nullable
+
+	return shape
 }
 
 // target builds the write destination for the field, pairing the canvas's

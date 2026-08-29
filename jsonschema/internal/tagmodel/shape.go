@@ -138,13 +138,16 @@ type Shape struct {
 	Kind reflect.Kind
 	// Form is the JSON shape of the instance.
 	Form Form
-	// Nullable reports whether the occurrence admits null. Two producers derive
-	// it differently. [ShapeOf] reads the Go type alone, so it reports the
-	// pointer occurrences and nothing else; internal/tagparse classifies through
-	// it and sees only that pointer answer. The parent package's
-	// FieldContext.Shape reads the generator's own null decision off the field's
-	// node, so Nullable is true there for a nilable slice, map, or byte slice,
-	// though its Go type is not a pointer.
+	// Nullable reports whether the occurrence admits null. [ShapeOf] reads the
+	// Go type alone, so it reports the pointer occurrences and nothing else.
+	// The parent package reads the generator's own null decision off the
+	// field's node and overrides that answer at the two places it classifies a
+	// field: the input it hands internal/tagparse, and FieldContext.Shape.
+	// Nullable is therefore true for a nilable slice, map, byte slice, or
+	// interface, none of which is a pointer type. It is false for a pointer
+	// field under WithNullable(false), whose schema the generator gives no null
+	// branch. An element occurrence keeps the pointer answer, since an element
+	// is not the container that holds it.
 	//
 	// Two operations consult it. The non-zero assertion forbids the null a nil
 	// occurrence marshals as, and the scalar constructor admits the literal null

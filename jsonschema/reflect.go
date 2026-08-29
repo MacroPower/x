@@ -1243,8 +1243,17 @@ func (g *generator) buildFieldSchema(
 	// restructures the type-derived payload (it replaces the reflected assertion),
 	// so it takes the payload directly.
 	if tag, ok := fi.StructField.Tag.Lookup("jsonschema"); ok {
-		res, err := tagparse.Apply(
-			tag, fieldType, fieldNode.authored, fieldNode.payload, tagTypeSchema, stringOverride)
+		res, err := tagparse.Apply(tagparse.Input{
+			Tag:        tag,
+			FieldType:  fieldType,
+			Canvas:     fieldNode.authored,
+			Payload:    fieldNode.payload,
+			TypeSchema: tagTypeSchema,
+			Quoted:     stringOverride,
+			// FieldContext.Shape reads this same decision, so a field's null
+			// admission is one answer whichever site classifies it.
+			Nullable: fieldNode.nullableDecision(),
+		})
 		if err != nil {
 			// Tagparse carries its own ErrInvalidType sentinel; map it onto the
 			// package's exported ErrInvalidType so errors.Is keeps working.
