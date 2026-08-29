@@ -1,6 +1,7 @@
 package tagmodel_test
 
 import (
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"testing"
@@ -199,19 +200,43 @@ func TestShapeParseScalarNullPolicy(t *testing.T) {
 	})
 }
 
-// TestShapeZeroLiteralRoutesThroughParseScalar is the direct guard on the bug
-// class a hardcoded zero produced: the non-zero assertion must forbid the text
-// the field actually emits, which for a text-marshaling type is neither "0" nor
-// any spelling of the number.
-func TestShapeZeroLiteralRoutesThroughParseScalar(t *testing.T) {
+// TestShapeZeroLiteralsRouteThroughParseScalar is the direct guard on the bug
+// class a hardcoded zero produced. The non-zero assertion must forbid every text
+// the field actually emits for a zero. A text-marshaling type emits neither "0"
+// nor any spelling of the number, and a float emits two texts rather than one.
+func TestShapeZeroLiteralsRouteThroughParseScalar(t *testing.T) {
 	t.Parallel()
 
-	sh := tagmodel.ShapeOf(reflect.TypeFor[level](), stringSchema())
+	tests := map[string]struct {
+		typ  reflect.Type
+		want []any
+	}{
+		"text marshaler": {
+			typ:  reflect.TypeFor[level](),
+			want: []any{"L0"},
+		},
+		"coerced float": {
+			typ:  reflect.TypeFor[float64](),
+			want: []any{"0", "-0"},
+		},
+		"json number": {
+			typ:  reflect.TypeFor[json.Number](),
+			want: []any{"0"},
+		},
+	}
 
-	got, err := sh.ParseScalar(sh.ZeroLiteralForTest(), tagmodel.Policy{})
-	require.NoError(t, err)
-	assert.Equal(t, "L0", got,
-		"the forbidden zero is what the type serializes, not a hardcoded \"0\"")
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			sh := tagmodel.ShapeOfQuoted(tc.typ, stringSchema(), true)
+
+			got, err := sh.ParseScalars(sh.ZeroLiteralsForTest(), tagmodel.Policy{})
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got,
+				"the forbidden zeros are what the type serializes, not a hardcoded \"0\"")
+		})
+	}
 }
 
 // TestShapeParseScalarUnsupportedForms confirms a shape with no tag-spellable

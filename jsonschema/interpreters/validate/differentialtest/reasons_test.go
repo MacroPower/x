@@ -141,15 +141,23 @@ func rigCoverage() map[string][]reflect.Type {
 	}
 
 	return map[string][]reflect.Type{
-		"required": {reflect.TypeFor[string](), reflect.TypeFor[int](), reflect.TypeFor[bool]()},
-		"min":      append(scalars, reflect.TypeFor[[]string](), reflect.TypeFor[map[string]int]()),
-		"max":      append(scalars, reflect.TypeFor[[]string](), reflect.TypeFor[map[string]int]()),
-		"len":      append(scalars, reflect.TypeFor[[]string](), reflect.TypeFor[map[string]int]()),
-		"eq":       {reflect.TypeFor[string](), reflect.TypeFor[int](), reflect.TypeFor[bool]()},
-		"ne":       {reflect.TypeFor[string](), reflect.TypeFor[int](), reflect.TypeFor[bool]()},
-		"oneof":    {reflect.TypeFor[string](), reflect.TypeFor[int]()},
-		"unique":   {reflect.TypeFor[[]string](), reflect.TypeFor[[]int8]()},
-		"dive":     {reflect.TypeFor[[]string](), reflect.TypeFor[[]int8]()},
+		// The int8 and float64 pools are scalarNumber and its float clone, both
+		// of which spell required and ne, so the record names them beside int.
+		"required": {
+			reflect.TypeFor[string](), reflect.TypeFor[int](), reflect.TypeFor[int8](),
+			reflect.TypeFor[float64](), reflect.TypeFor[bool](),
+		},
+		"min": append(scalars, reflect.TypeFor[[]string](), reflect.TypeFor[map[string]int]()),
+		"max": append(scalars, reflect.TypeFor[[]string](), reflect.TypeFor[map[string]int]()),
+		"len": append(scalars, reflect.TypeFor[[]string](), reflect.TypeFor[map[string]int]()),
+		"eq":  {reflect.TypeFor[string](), reflect.TypeFor[int](), reflect.TypeFor[bool]()},
+		"ne": {
+			reflect.TypeFor[string](), reflect.TypeFor[int](), reflect.TypeFor[int8](),
+			reflect.TypeFor[float64](), reflect.TypeFor[bool](),
+		},
+		"oneof":  {reflect.TypeFor[string](), reflect.TypeFor[int]()},
+		"unique": {reflect.TypeFor[[]string](), reflect.TypeFor[[]int8]()},
+		"dive":   {reflect.TypeFor[[]string](), reflect.TypeFor[[]int8]()},
 	}
 }
 

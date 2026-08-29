@@ -147,6 +147,8 @@ type coercedConstraints struct {
 	Req   int     `json:"req,string"    validate:"required"`
 	FlagR bool    `json:"flag_r,string" validate:"required"`
 	FEq   float64 `json:"f_eq,string"   validate:"eq=2.5"`
+	FReq  float64 `json:"f_req,string"  validate:"required"`
+	FNe   float64 `json:"f_ne,string"   validate:"ne=0"`
 }
 
 func FuzzValidatorStringConstraints(f *testing.F) {
@@ -195,6 +197,11 @@ func FuzzValidatorCoercedConstraints(f *testing.F) {
 		"Ne":    {"7", "8"},
 		"OneOf": {"1", "2", "3", "4"},
 		"FEq":   {"2.5", "3.5"},
+		// Cursor.Float64 reads a whole uint64 as a bit pattern, so exactly one
+		// draw in 2^64 yields the negative zero. Naming it as a candidate is
+		// what puts that draw within reach.
+		"FReq": {"0", "-0", "1"},
+		"FNe":  {"0", "-0", "1"},
 	}))
 }
 

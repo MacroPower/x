@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"reflect"
 	"strings"
 	"testing"
@@ -446,6 +447,58 @@ func TestRequiredOnNullableRejectsNull(t *testing.T) {
 
 			assert.Error(t, validator.ValidateJSON(t.Context(), []byte(`{"v":null}`)),
 				"the schema must reject null for %s: %s", name, doc)
+		})
+	}
+}
+
+// TestCoercedFloatRejectsNegativeZero pins the value the fuzzer found, a float
+// under json:",string" whose Go value is the negative zero. Go compares that
+// value equal to zero, so go-playground's required and its ne=0 both reject it.
+// Because encoding/json writes the sign bit, the instance carries "-0" rather
+// than "0", and a forbid side naming one text would accept a value the reference
+// validator rejects.
+//
+// The committed corpus entry that found this is entropy, and any change to the
+// draw pools retires it. This test names the shape outright, so no draw change
+// can retire it.
+func TestCoercedFloatRejectsNegativeZero(t *testing.T) {
+	t.Parallel()
+
+	reference := playground.New(playground.WithRequiredStructEnabled())
+
+	for name, rule := range map[string]string{
+		"required": "required",
+		"ne":       "ne=0",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			typ := reflect.StructOf([]reflect.StructField{{
+				Name: "V", Type: reflect.TypeFor[float64](),
+				Tag: reflect.StructTag(fmt.Sprintf(`json:"v,string" validate:%q`, rule)),
+			}})
+
+			val := reflect.New(typ).Elem()
+			val.Field(0).SetFloat(math.Copysign(0, -1))
+
+			doc, err := json.Marshal(val.Interface())
+			require.NoError(t, err)
+			require.JSONEq(t, `{"v":"-0"}`, string(doc),
+				"encoding/json must write the sign bit for the negative zero")
+
+			referenceReject, err := referenceRejects(reference, val.Interface())
+			require.NoError(t, err)
+			require.True(t, referenceReject, "go-playground must reject the negative zero")
+
+			schema, err := jsonschema.Generate(t.Context(), typ,
+				jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()))
+			require.NoError(t, err)
+
+			validator, err := jsonschema.Compile(t.Context(), schema)
+			require.NoError(t, err)
+
+			assert.Error(t, validator.ValidateJSON(t.Context(), doc),
+				"the schema must reject the negative zero for %s", rule)
 		})
 	}
 }

@@ -81,6 +81,114 @@
     ]
   },
   {
+    "name": "coerced float required forbids both serialized zeros",
+    "note": "encoding/json writes the sign bit, so a float's zero has two texts and go-playground rejects both",
+    "type": "float64",
+    "json": "v,string",
+    "validate": "required",
+    "schema": {
+      "type": "string",
+      "not": {
+        "enum": [
+          "0",
+          "-0"
+        ]
+      }
+    },
+    "instances": [
+      {
+        "json": "1",
+        "want": "accept"
+      },
+      {
+        "json": "0",
+        "want": "reject"
+      },
+      {
+        "json": "-0",
+        "want": "reject"
+      }
+    ]
+  },
+  {
+    "name": "coerced float ne=0 forbids both serialized zeros",
+    "note": "ne reaches the second spelling through the forbid path it shares with required",
+    "type": "float64",
+    "json": "v,string",
+    "validate": "ne=0",
+    "schema": {
+      "type": "string",
+      "not": {
+        "enum": [
+          "0",
+          "-0"
+        ]
+      }
+    },
+    "instances": [
+      {
+        "json": "1",
+        "want": "accept"
+      },
+      {
+        "json": "0",
+        "want": "reject"
+      },
+      {
+        "json": "-0",
+        "want": "reject"
+      }
+    ]
+  },
+  {
+    "name": "plain float required forbids the negative zero",
+    "note": "the numeric-aware dedup discards the sign of an all-zero literal, so one forbidden const covers both",
+    "type": "float64",
+    "json": "v",
+    "validate": "required",
+    "schema": {
+      "type": "number",
+      "not": {
+        "const": 0
+      }
+    },
+    "instances": [
+      {
+        "json": 1,
+        "want": "accept"
+      },
+      {
+        "json": 0,
+        "want": "reject"
+      },
+      {
+        "json": -0,
+        "want": "reject"
+      }
+    ]
+  },
+  {
+    "name": "coerced float eq=0 pins the canonical zero alone",
+    "note": "the pin side is stricter than go-playground, which accepts the -0 this const rejects",
+    "type": "float64",
+    "json": "v,string",
+    "validate": "eq=0",
+    "schema": {
+      "type": "string",
+      "const": "0"
+    },
+    "instances": [
+      {
+        "json": "0",
+        "want": "accept"
+      },
+      {
+        "json": "-0",
+        "want": "reject"
+      }
+    ]
+  },
+  {
     "name": "a sequence enumeration reaches coerced elements",
     "note": "1042aa7: the sequence rule dispatches on the element's own shape",
     "type": "[]crossLevel",

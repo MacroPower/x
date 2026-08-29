@@ -198,19 +198,30 @@ func (sh Shape) quotedText(lit string) (any, error) {
 	return string(out), nil
 }
 
-// zeroLiteral is the literal whose serialized form the non-zero assertion
-// forbids on a coerced shape: the value the field emits when it holds its Go
-// zero. It routes through the same [Shape.ParseScalar] every other coerced
-// operation uses, so a string-marshaling type forbids the text it actually
-// writes rather than a hardcoded "0" it never emits.
-func (sh Shape) zeroLiteral() string {
-	switch sh.Form {
-	case FormCoercedBool:
-		return boolFalse
-	case FormCoercedString:
-		return "" // The empty string, whose quoted serialization is `""`.
+// zeroLiterals are the literals whose serialized forms the non-zero assertion
+// forbids on a coerced shape, canonical spelling first. Each is a text the field
+// emits when it holds a Go zero. They route through the same
+// [Shape.ParseScalar] every other coerced operation uses, so a string-marshaling
+// type forbids the text it actually writes rather than a hardcoded "0" it never
+// emits.
+//
+// A coerced float has two of them. Go's negative zero compares equal to zero, so
+// go-playground rejects it wherever it rejects zero. Because encoding/json
+// writes the sign bit, an instance can carry "-0", and a forbid side naming only
+// "0" would admit a value the reference validator rejects. An
+// [encoding/json.Number] classifies as a coerced number with a string kind and
+// holds the text "-0" as an ordinary value, so the float gate reads the Go kind
+// rather than asking whether the shape is an integer.
+func (sh Shape) zeroLiterals() []string {
+	switch {
+	case sh.Form == FormCoercedBool:
+		return []string{boolFalse}
+	case sh.Form == FormCoercedString:
+		return []string{""} // The empty string, whose quoted serialization is `""`.
+	case sh.Form == FormCoercedNumber && numkind.IsFloat(sh.Kind):
+		return []string{"0", "-0"}
 	default:
-		return "0"
+		return []string{"0"}
 	}
 }
 

@@ -265,12 +265,52 @@ func applyEqual(t Target, r Rule, pol Policy) error {
 // can forbid values on one target, and the numeric-aware dedup treats the same
 // number arriving with different dynamic types as one value.
 func applyNotEqual(t Target, r Rule, pol Policy) error {
-	v, err := t.Shape.ParseScalar(r.Params.One(), pol)
+	return forbidLiteral(t, r.Params.One(), pol)
+}
+
+// forbidLiteral forbids the value one literal names, together with every other
+// text that same value serializes to. It is the shared path of the two rules
+// that forbid a scalar, ne and the non-zero assertion, which differ only in who
+// writes the literal.
+//
+// A coerced float is the one shape with a second text, since Go's negative zero
+// compares equal to zero and encoding/json writes the sign bit for it. See
+// [Shape.zeroLiterals]. Membership among the parsed zeros selects the pair, so
+// an author spelling ne=-0 reaches it the same way ne=0 does, and a literal
+// naming any other value reaches only itself.
+//
+// The pair survives onto the schema because [constraint.ValueSet.Forbid]
+// compares two forbidden strings as exact text. Its numeric-aware dedup has no
+// string branch, so "0" and "-0" stay two values and escalate to not.enum. A
+// dedup that read the two texts as numbers would fold them together and leave
+// this a silent no-op.
+func forbidLiteral(t Target, lit string, pol Policy) error {
+	v, err := t.Shape.ParseScalar(lit, pol)
 	if err != nil {
 		return err
 	}
 
 	Forbid(t.Canvas, v)
+
+	spellings := t.Shape.zeroLiterals()
+	if len(spellings) < 2 {
+		return nil
+	}
+
+	zeros, err := t.Shape.ParseScalars(spellings, pol)
+	if err != nil {
+		return err
+	}
+
+	if !slices.Contains(zeros, v) {
+		return nil
+	}
+
+	for _, zero := range zeros {
+		if zero != v {
+			Forbid(t.Canvas, zero)
+		}
+	}
 
 	return nil
 }
@@ -437,20 +477,15 @@ func nonZeroFloor(axis Axis) func(Target, Rule, Policy) error {
 // string because it serializes itself as one: forbid the serialized zero, taken
 // from the same scalar constructor every other coerced operation calls, so a
 // string-marshaling type forbids the text it actually writes rather than a
-// hardcoded "0" it never emits.
+// hardcoded "0" it never emits. It hands the canonical spelling to
+// [forbidLiteral], which adds the second text a coerced float's zero also
+// serializes to.
 func nonZeroForbidCoerced(t Target, _ Rule, pol Policy) error {
 	if nonZeroNullOnly(t) {
 		return nil
 	}
 
-	v, err := t.Shape.ParseScalar(t.Shape.zeroLiteral(), pol)
-	if err != nil {
-		return err
-	}
-
-	Forbid(t.Canvas, v)
-
-	return nil
+	return forbidLiteral(t, t.Shape.zeroLiterals()[0], pol)
 }
 
 // nonZeroForbidNumber is the non-zero assertion on a native number: forbid the

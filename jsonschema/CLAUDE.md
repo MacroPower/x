@@ -176,7 +176,13 @@ The package has two independent halves sharing the `Schema` type:
   `Shape.ParseScalar` the one scalar constructor including the
   convert-and-marshal round-trip a text-marshaling type needs, and a total
   `[opCount][formCount]` matrix the
-  dispatch. Dialect divergence is expressed as a named `Policy` parameter (the
+  dispatch. A coerced float is the one shape whose zero has two serializations,
+  since Go's negative zero compares equal to zero and `encoding/json` writes the
+  sign bit for it. `Shape.zeroLiterals` names both texts, and the shared
+  `forbidLiteral` path behind `required` and `ne` forbids each. `eq` and `oneof`
+  constrain the canonical text alone, a divergence `testdata/tags/cases.json`
+  records as a fixture row rather than resolving. Dialect divergence is
+  expressed as a named `Policy` parameter (the
   numeric-bound literal domain, the negative-size question) or a field on the
   dialect's own `KeyRule` row (arity, list spelling, the implied value of a bare
   key), never as duplicated code. It renders onto the upstream `Schema` for the

@@ -118,6 +118,15 @@
 // string-marshaling type constrains whatever text it writes rather than the
 // number's own spelling.
 //
+// A coerced float has two serializations of its zero, since Go's negative zero
+// compares equal to zero and encoding/json writes the sign bit for it. The
+// forbid side names both texts, so required and ne=0 emit not.enum ["0", "-0"].
+// That matches go-playground, which rejects the negative zero wherever it
+// rejects zero. The pin side names the canonical text alone, so eq=0 emits
+// const "0" and a oneof listing zero enumerates "0". Either one rejects a "-0"
+// instance. For eq=0 that is stricter than go-playground, which accepts the
+// value.
+//
 // Numeric bounds (min, max, gt, lt, gte, lte) have no faithful mapping onto that
 // serialized string -- minimum and friends constrain JSON numbers, not the
 // quoted instance -- so they are rejected with an error rather than silently
