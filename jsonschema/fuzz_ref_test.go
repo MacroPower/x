@@ -186,6 +186,11 @@ type refGraphSpec struct {
 	// document then leaves two unresolvable references, and the substitute
 	// covers only one, so the substitute pipeline legitimately declines.
 	unresolvable bool
+
+	// True when the malformed leaf sits in a document no reference reaches
+	// directly, in which case chooseWithheld withholds nothing and the
+	// substitute pipeline never runs on the graph.
+	malformedTransitive bool
 }
 
 // synthRefGraph turns an entropy blob into a reference graph. It never fails:
@@ -259,7 +264,7 @@ func synthRefGraph(blob []byte) refGraphSpec {
 		}
 	}
 
-	gen.planMalformed(served, directlyReferenced)
+	gen.planMalformed(served)
 
 	docs := make(map[string]*refGraphDoc, docCount)
 
@@ -281,7 +286,12 @@ func synthRefGraph(blob []byte) refGraphSpec {
 		spec.documents[uri] = doc.json
 	}
 
-	spec.withheld = chooseWithheld(served, docs, ids, gen.malformedDoc, directlyReferenced)
+	spec.malformedTransitive = gen.malformedDoc != "" &&
+		gen.malformedDoc != refGraphNoMalformed &&
+		!directlyReferenced[gen.malformedDoc]
+
+	spec.withheld = chooseWithheld(
+		served, docs, ids, gen.malformedDoc, spec.malformedTransitive, directlyReferenced)
 
 	return spec
 }
@@ -303,6 +313,12 @@ func synthRefGraph(blob []byte) refGraphSpec {
 //     changes which document wins the collision and so changes how references
 //     that have nothing to do with the substitute resolve.
 //
+// No document qualifies at all when the malformed leaf sits in a document no
+// reference reaches directly (reasonSubstituteTransitiveMalformed). The
+// substitute pipeline configures a fallback, which suspends the walk's
+// refusals, so the graph would compare a Compile refusal against an Inline that
+// accepts.
+//
 // The document must also be referenced from the root, or withholding it changes
 // nothing. The first qualifying URI in retrieval order wins, so the choice stays
 // a function of the blob.
@@ -311,8 +327,16 @@ func chooseWithheld(
 	docs map[string]*refGraphDoc,
 	ids []string,
 	malformedDoc string,
+	malformedTransitive bool,
 	directlyReferenced map[string]bool,
 ) string {
+	// The substitute pipeline runs with a fallback configured, under which
+	// Inline reports nothing for a document only the closure walk reaches. See
+	// reasonSubstituteTransitiveMalformed.
+	if malformedTransitive {
+		return ""
+	}
+
 	claims := map[string]int{}
 	for _, id := range ids {
 		claims[id]++
@@ -498,29 +522,18 @@ const refGraphNoMalformed = "\x00none"
 // every instance then compares a refusal and no reference resolves, so a high
 // rate trades the rig's validation coverage for its build-error coverage.
 //
-// The candidates are the root and every document the root references directly.
-// Both engines fetch and vet a directly referenced document, so both refuse it
-// for the same cause. A document reachable only through another document's own
-// reference is excluded: Compile walks the reference graph transitively and
-// vets it, while Inline fetches only what it must expand, so a violation there
-// reaches one engine and not the other. That difference is real, and
-// TestCompileVetsTransitivelyInlineDoesNot pins it with a minimized graph; the
-// generator stays off it so the rig searches for the next finding rather than
-// rediscovering this one.
-func (g *refGraphGen) planMalformed(served []string, directlyReferenced map[string]bool) {
+// The candidates are the root and every served document, reached directly or
+// only through another document's own reference. Both engines walk the whole
+// reference closure and vet every document in it, so both refuse the same
+// graph for the same cause wherever the leaf lands.
+func (g *refGraphGen) planMalformed(served []string) {
 	g.malformedDoc = refGraphNoMalformed
 
 	if g.cursor.Intn(20) != 0 {
 		return
 	}
 
-	candidates := []string{""}
-
-	for _, uri := range served {
-		if directlyReferenced[uri] {
-			candidates = append(candidates, uri)
-		}
-	}
+	candidates := append([]string{""}, served...)
 
 	g.malformedDoc = candidates[g.cursor.Intn(len(candidates))]
 	g.malformedSlot = g.cursor.Intn(refGraphLeavesPerDoc)
@@ -544,7 +557,9 @@ func (g *refGraphGen) enter(document string) {
 // Both engines vet a root, so a malformed one fails Inline before any
 // reference resolves and reaches the rig as a build error carrying the
 // sentinel Compile reports. The rig compares that error by its sentinel, the
-// way it compares a rejected remote.
+// way it compares a rejected remote. A malformed remote reaches the same
+// outcome through the closure walk, whether a reference names it directly or
+// only another document's reference does.
 func (g *refGraphGen) drawLeaf() string {
 	slot := g.slot
 	g.slot++
@@ -671,6 +686,15 @@ func substitutePipeline(
 	if spec.withheld == "" {
 		return refPipeline{}, false
 	}
+
+	// The substitute pipeline configures a fallback, which suspends the walk's
+	// refusals, so a graph whose violation only that walk reaches would compare
+	// a Compile refusal against an Inline that accepts. On such a graph
+	// chooseWithheld therefore withholds nothing. See
+	// reasonSubstituteTransitiveMalformed.
+	require.Falsef(t, spec.malformedTransitive,
+		"withheld a document on a transitively malformed graph: %s",
+		reasonSubstituteTransitiveMalformed)
 
 	partial := mapResolver{}
 

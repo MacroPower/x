@@ -170,7 +170,8 @@ func (s *Session) resolveRefUncached(schema *jsonschema.Schema, ref string, fetc
 // (as a $ref), then engages dynamic resolution only when static resolution
 // landed on the schema bearing a $dynamicAnchor of the fragment name
 // (bookending), walking the dynamic scope outermost to innermost for the first
-// match. The inliner never calls it.
+// match. The inliner calls it only from its reference-closure walk, to reach
+// the documents a $dynamicRef names.
 func (s *Session) ResolveDynamicRef(schema *jsonschema.Schema, ref string, fetch Fetch) Result {
 	parsed, err := url.Parse(ref)
 	if err != nil {

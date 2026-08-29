@@ -41,6 +41,12 @@ const reasonDeferredRefMiss skipReason = "the reference does not resolve. The co
 // TestSubstituteDoesNotRebaseNestedRefs pins the behavior it describes.
 const reasonSubstituteBaseURI = "a WithRefFallback substitute's own references resolve against the document holding the failing reference, while a fetched document's resolve against its own base URI, so only a reference-free document can be withheld and substituted"
 
+// reasonSubstituteTransitiveMalformed is why the substitute pipeline stands
+// down on a graph whose malformed leaf sits in a document no reference reaches
+// directly. It is not a skip reason; the generator applies it when choosing
+// which document to withhold.
+const reasonSubstituteTransitiveMalformed = "a WithRefFallback substitute answers one failing reference at a time, so Inline suspends the walk's refusals whenever a fallback is configured, and Compile refuses the graph regardless; the substitute pipeline therefore compares nothing on a graph whose violation only the closure walk reaches"
+
 // reasonSubstituteNoAnchors is why the substitute pipeline withholds only a
 // document nothing reaches by anchor. It is not a skip reason; the generator
 // applies it when choosing what to withhold.
@@ -344,13 +350,14 @@ func parseRefGraph(t *testing.T, root string, remotes map[string]string) (*jsons
 	return schema, resolver
 }
 
-// TestRefEnginesAgreeOnPastFixes runs one reference graph per past $ref fix,
-// eleven rows over ten commits in five classes: a fetched document's $id
-// clobbering the registry, structural vetting of JSON-pointer fallback targets,
-// the fallback cache key, fallback registry merge order, and anchor resolution
-// under a fetched document's canonical base. A regression in one of those
-// classes fails here with the graph in view rather than waiting for the fuzzer
-// to rediscover it.
+// TestRefEnginesAgreeOnPastFixes runs one reference graph per $ref fix,
+// thirteen rows over ten commits in six classes: a fetched document's $id clobbering
+// the registry, structural vetting of JSON-pointer fallback targets, the
+// fallback cache key, fallback registry merge order, anchor resolution under a
+// fetched document's canonical base, and vetting the whole closure, which
+// covers a document only another document's reference reaches and the order the
+// two engines report a violation in. A regression in one of those classes fails here with the
+// graph in view rather than waiting for the fuzzer to rediscover it.
 //
 // Several rows misspell a type name, "strnig" and "nteger". Those are the
 // invalid type names the structural vet rejects, and correcting them guts the
@@ -389,6 +396,37 @@ func TestRefEnginesAgreeOnPastFixes(t *testing.T) {
 				}
 			`),
 			instances: []string{`[]`, `["a"]`, `[1]`, `"text"`},
+		},
+		"violation in a transitively reached document": {
+			root: stringtest.Input(`
+				{
+					"$schema": "http://json-schema.org/draft-07/schema#",
+					"$id": "https://ex.test/root.json",
+					"$ref": "https://ex.test/b.json#anc"
+				}
+			`),
+			remotes: map[string]string{
+				"https://ex.test/b.json": `{"$id":"https://ex.test/b.json","definitions":{"anc":{"$id":"#anc","type":"string"}},"allOf":[{"$ref":"https://ex.test/a.json"}]}`,
+				"https://ex.test/a.json": `{"definitions":{"bad":{"type":"strnig"}}}`,
+			},
+			instances: []string{`"x"`, `1`, `null`},
+		},
+		"malformed document beside an unresolvable reference": {
+			root: stringtest.Input(`
+				{
+					"$schema": "http://json-schema.org/draft-07/schema#",
+					"$id": "https://ex.test/root.json",
+					"allOf": [
+						{"$ref": "https://ex.test/a.json"},
+						{"$ref": "https://ex.test/b.json"}
+					]
+				}
+			`),
+			remotes: map[string]string{
+				"https://ex.test/a.json": `{"$id":"https://ex.test/a.json","definitions":{"bad":{"type":"strnig"}}}`,
+				"https://ex.test/b.json": `{"$id":"https://ex.test/b.json","allOf":[{"$ref":"#/definitions/nope"}]}`,
+			},
+			instances: []string{`"x"`, `1`},
 		},
 		"negative bound in a same-document fallback target (371092b)": {
 			root: stringtest.Input(`

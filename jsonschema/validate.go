@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"maps"
 	"math/big"
-	"net/url"
 	"reflect"
 	"regexp"
 	"slices"
@@ -394,18 +393,16 @@ func newValidator(ctx context.Context, schema *Schema, opts []ValidateOption) (*
 		opt.applyValidate(v)
 	}
 
-	// A configured base URI must parse before anything absolutizes against
-	// it; an unparsable base would corrupt every registry key derived from it
-	// rather than surface anywhere. It is normalized once here, so buildRefReg
-	// and the identifier checks read the same canonical form.
-	if v.baseURI != "" {
-		_, err := url.Parse(v.baseURI)
-		if err != nil {
-			return nil, fmt.Errorf("%w: %w", ErrInvalidBaseURI, err)
-		}
-
-		v.baseURI = uriref.NormalizeBaseURI(v.baseURI)
+	// A configured base URI must parse before anything absolutizes against it.
+	// ParseBaseURI normalizes it once here, so buildRefReg and the identifier
+	// checks read the same canonical form. NewInliner calls the same helper, so
+	// the two entry points accept the same bases.
+	base, err := uriref.ParseBaseURI(v.baseURI)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidBaseURI, err)
 	}
+
+	v.baseURI = base
 
 	// Detect draft from $schema field; a WithDraft override wins.
 	draft, err := resolveDraft(schema, v.draftOverride)
@@ -1233,118 +1230,29 @@ func Compile(ctx context.Context, schema *Schema, opts ...ValidateOption) (*Vali
 	return &Validator{proto: v}, nil
 }
 
-// compileRefPasses is the compile-time reference walk: it statically resolves
-// every $ref (and, under a dialect with $dynamicRef, every $dynamicRef)
-// reachable from the root, from each registry-known document, and from each
-// JSON-pointer fallback target, through the same resolution core the
-// validation walk uses. Resolving is also what fetches remote documents at
-// compile time: a non-fragment ref whose document is absent triggers the
-// compile session's fetch, which consults the [RefResolver] at most once per
-// URI (misses and failures are negative-cached) and registers the document in
-// the shared refReg every run reads.
-//
-// Strictness splits by provenance. The root and registry-known documents are
-// strict: a reference that resolves to nothing while its document is present
-// can never resolve later, so it fails compilation, wrapping the resolver's
-// reported error when one exists and [ErrNotResolved] otherwise. A document
-// miss is tolerated regardless of any carried resolver error, upholding the
-// Remote References contract: the resolver may serve the document only after
-// compilation, so the validation walk reports the ref instead. Fallback
-// targets are walked tolerantly: the walk exists to materialize deeper
-// targets and fetch their documents, and a miss there defers to the
-// validation walk (a fallback-borne node is outside the compiled registry,
-// so the validation walk never silently skips it).
-//
-// The fixpoint loop drains three monotone frontiers until none advances: the
-// not-yet-processed refReg.URI documents in key-sorted order (each vetted,
-// ref-walked strictly, and folded into the node index), the fallback-target
-// vet cursor, and the fallback-target ref cursor. Fetches and pointer
-// fallbacks only append to those frontiers, and the session caches make
-// re-resolution idempotent, so the loop terminates.
+// compileRefPasses runs the compile-time reference walk over the root and every
+// document it reaches, supplying the two hooks [refClosure] leaves to its
+// caller. The document hook vets each document the closure reaches with the
+// shared vetter and folds it into the node index, so its nodes hit the
+// precompute caches; a document wholly aliasing already-indexed nodes adds
+// nothing, since extend returns from == len(). The target hook vets each
+// fallback target with the same vetter, the pass the compile-time session
+// defers by carrying a nil [refresolve.FallbackVet]. The target hook does not
+// extend the precompute caches, because a validation run re-materializes
+// targets as fresh objects, so pointer-keyed caches built here could never be
+// hit.
 func (v *validator) compileRefPasses(vt *schemavet.Vetter) error {
-	// Cross-pass dedup on top of Walk's per-call dedup, so a node reachable
-	// from several documents resolves its references once. Skipping an
-	// already-walked node's children is sound because the pass that first
-	// reached the node walked its whole subtree. Fallback targets are fresh
-	// ParseSchemaValue objects, never pointer-aliased into registry
-	// documents, so a tolerant fallback visit can never suppress a later
-	// strict check through this set.
-	walked := map[*Schema]bool{}
-
-	vetRefs := func(doc *Schema, locator string, strict bool) error {
-		//nolint:wrapcheck // Walk relays the callback's already-constructed error.
-		return Walk(doc, func(loc Location, s *Schema) error {
-			if walked[s] {
-				return SkipChildren
-			}
-
-			walked[s] = true
-
-			if s.Ref != "" {
-				err := refWalkError(v.resolveRef(s, s.Ref), KeywordRef, s.Ref, locator, loc, strict)
-				if err != nil {
-					return err
-				}
-			}
-
-			if v.profile.dynamicRef && s.DynamicRef != "" {
-				err := refWalkError(
-					v.resolveDynamicRef(s, s.DynamicRef), KeywordDynamicRef, s.DynamicRef, locator, loc, strict)
-				if err != nil {
-					return err
-				}
-			}
-
-			return nil
-		})
-	}
-
-	// The root document, strict.
-	err := vetRefs(v.root, "", true)
-	if err != nil {
-		return err
-	}
-
-	processed := map[string]bool{}
-	vetCursor, refCursor := 0, 0
-
-	for {
-		progressed := false
-
-		// Registry-known documents, key-sorted for stable attribution. The
-		// first round covers the URIs buildRefReg seeded before any fetch
-		// (the root under its normalized base and nested absolute-$id
-		// subschemas); later rounds cover documents the walks fetched. Each
-		// document is vetted, strictly ref-walked (an in-document reference
-		// that cannot resolve now never can, and the validation walk
-		// silently skips fragment misses on registry-known nodes on the
-		// strength of this pass), and folded into the node index so its
-		// nodes hit the precompute caches. A document wholly aliasing
-		// already-indexed nodes adds nothing: extend returns from == len().
-		var pending []string
-
-		for uri := range v.refReg.URI {
-			if !processed[uri] {
-				pending = append(pending, uri)
-			}
-		}
-
-		slices.Sort(pending)
-
-		for _, uri := range pending {
-			processed[uri] = true
-			progressed = true
-
-			s := v.refReg.URI[uri]
-
+	return refClosure{
+		session:    v.refSession,
+		fetch:      v.refFetch,
+		root:       v.root,
+		dynamicRef: v.profile.dynamicRef,
+		strictRef:  true,
+		strictDyn:  true,
+		onDoc: func(s *Schema, uri string) error {
 			doc, err := vt.VetDoc(s, uri+"#", uri)
 			if err != nil {
 				//nolint:wrapcheck // The vetting error already names the document and path.
-				return err
-			}
-
-			err = vetRefs(s, uri+"#", true)
-			if err != nil {
 				return err
 			}
 
@@ -1353,64 +1261,15 @@ func (v *validator) compileRefPasses(vt *schemavet.Vetter) error {
 				v.sizeCaches(v.index.len())
 				v.precomputeRange(from, v.index.len())
 			}
-		}
 
-		// Structurally vet the fallback targets materialized since the last
-		// round: schemas carved out of unknown keywords or non-applicator
-		// keyword internals, which no typed pass reaches and which never
-		// join refReg.URI. Each target's locator names the pointer that
-		// materialized it. The precompute caches are deliberately not
-		// extended: a validation run re-materializes fallback targets as
-		// fresh objects, so pointer-keyed caches built here could never be
-		// hit. The list is append-only, so a cursor covers late arrivals.
-		for ; vetCursor < len(v.refSession.FallbackTargets()); vetCursor++ {
-			ft := v.refSession.FallbackTargets()[vetCursor]
-			progressed = true
-
-			_, err := vt.Vet(ft.Schema, ft.Locator)
-			if err != nil {
-				//nolint:wrapcheck // The vetting error already names the target's locator.
-				return err
-			}
-		}
-
-		// Ref-walk the same targets tolerantly: this materializes targets
-		// one reference deeper and fetches their documents, without failing
-		// Compile on a miss, which the validation walk reports instead.
-		for ; refCursor < len(v.refSession.FallbackTargets()); refCursor++ {
-			ft := v.refSession.FallbackTargets()[refCursor]
-			progressed = true
-
-			err := vetRefs(ft.Schema, ft.Locator, false)
-			if err != nil {
-				return err
-			}
-		}
-
-		if !progressed {
 			return nil
-		}
-	}
-}
-
-// refWalkError maps one compile-time resolution outcome to the reference
-// walk's error policy: nil when the target resolved, when the walk is
-// tolerant, or when the document is missing (with or without a carried
-// resolver error; the validation walk reports it, per the Remote References
-// contract). A strict miss inside a present document wraps the resolver's
-// reported error when one exists and [ErrNotResolved] otherwise, naming the
-// bearing node through the document locator and the node's pointer.
-func refWalkError(res refresolve.Result, keyword, ref, locator string, loc Location, strict bool) error {
-	if !strict || res.Target != nil || res.DocumentMiss {
-		return nil
-	}
-
-	cause := res.Err
-	if cause == nil {
-		cause = ErrNotResolved
-	}
-
-	return fmt.Errorf("%s%s: cannot resolve %s %q: %w", locator, loc.Pointer, keyword, ref, cause)
+		},
+		onTarget: func(ft refresolve.FallbackTarget) error {
+			_, err := vt.Vet(ft.Schema, ft.Locator)
+			//nolint:wrapcheck // The vetting error already names the target's locator.
+			return err
+		},
+	}.run()
 }
 
 // MustCompile is [Compile] with [context.Background] but panics on error;

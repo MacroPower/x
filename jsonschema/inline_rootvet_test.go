@@ -187,16 +187,17 @@ func TestInlineRetrievalBaseKeepsIDsInert(t *testing.T) {
 		"the root's inert $id passes through, while the splice drops the remote's as always")
 }
 
-// TestCompileChecksTheBaseURIInlineDoesNot pins one of the two compile-time
-// refusals with no Inline counterpart, the reason the engines agree on the
-// structural vet rather than on every error. [jsonschema.Compile] parses the
-// [jsonschema.WithBaseURI] value and rejects one that is not a URI reference.
-// [jsonschema.Inline] normalizes the same value and resolves against it
-// without ever parsing it, so a malformed base reaches the walk unexamined
-// and a root with no refs inlines unchanged. The other refusal,
-// [jsonschema.ErrUnknownVocabulary], has no test here, since vocabulary
-// resolution reads options Inline does not take.
-func TestCompileChecksTheBaseURIInlineDoesNot(t *testing.T) {
+// TestRefEnginesAgreeOnTheBaseURI pins that both entry points parse the
+// [jsonschema.WithBaseURI] value and refuse one that is not a URI reference.
+// The base seeds every registry key a run derives, so a value that does not
+// parse would corrupt the resolution space of either engine rather than
+// surface anywhere. [jsonschema.NewInliner] has no error to return, so the
+// refusal arrives from [jsonschema.Inliner.Inline].
+//
+// [jsonschema.ErrUnknownVocabulary] is the one compile-time refusal with no
+// Inline counterpart, and has no test here, since vocabulary resolution
+// reads options Inline does not take.
+func TestRefEnginesAgreeOnTheBaseURI(t *testing.T) {
 	t.Parallel()
 
 	const malformed = "http://[::1"
@@ -206,7 +207,56 @@ func TestCompileChecksTheBaseURIInlineDoesNot(t *testing.T) {
 	_, err := jsonschema.Compile(t.Context(), root, jsonschema.WithBaseURI(malformed))
 	require.ErrorIs(t, err, jsonschema.ErrInvalidBaseURI)
 
-	out, err := jsonschema.Inline(t.Context(), root, jsonschema.WithBaseURI(malformed))
-	require.NoError(t, err, "Inline never parses the base it is given")
-	assert.Equal(t, "string", out.Type)
+	_, err = jsonschema.Inline(t.Context(), root, jsonschema.WithBaseURI(malformed))
+	require.ErrorIs(t, err, jsonschema.ErrInvalidBaseURI)
+}
+
+// TestInlinerReusesTheBaseURIRefusal pins that the refusal rides the
+// [jsonschema.Inliner] rather than one call. The constructor records it once
+// and every Inline call reports it. A nil schema still answers nil first, the
+// order [jsonschema.Compile] uses when it refuses a nil schema before reading
+// the base.
+func TestInlinerReusesTheBaseURIRefusal(t *testing.T) {
+	t.Parallel()
+
+	inliner := jsonschema.NewInliner(jsonschema.WithBaseURI("http://[::1"))
+
+	out, err := inliner.Inline(t.Context(), nil)
+	require.NoError(t, err, "Inline answers a nil schema before it reads the base")
+	assert.Nil(t, out)
+
+	for range 2 {
+		_, err = inliner.Inline(t.Context(), &jsonschema.Schema{Type: "string"})
+		require.ErrorIs(t, err, jsonschema.ErrInvalidBaseURI)
+	}
+}
+
+// TestInlineSubstituteViolationNamesItsSite pins the attribution on a bad
+// substitute. The fallback authors the schema, so its own paths locate nothing
+// the caller can look up. The message names the consultation instead. It
+// carries the reference the substitute answered plus the document and JSON
+// Pointer the [jsonschema.RefFailure] arrived with.
+func TestInlineSubstituteViolationNamesItsSite(t *testing.T) {
+	t.Parallel()
+
+	const ref = "https://example.test/absent.json"
+
+	root := &jsonschema.Schema{
+		ID:         "https://example.test/root.json",
+		Properties: map[string]*jsonschema.Schema{"a": {Ref: ref}},
+	}
+
+	fallback := jsonschema.RefFallbackFunc(
+		func(_ context.Context, _ jsonschema.RefFailure) jsonschema.RefAction {
+			return jsonschema.SubstituteRef(&jsonschema.Schema{Type: "strng"})
+		})
+
+	_, err := jsonschema.Inline(t.Context(), root, jsonschema.WithRefFallback(fallback))
+
+	require.ErrorIs(t, err, jsonschema.ErrInvalidType)
+	require.ErrorContains(t, err, ref, "the message names the reference the substitute answered")
+	require.ErrorContains(t, err, "https://example.test/root.json",
+		"the message names the document where the inliner consulted the fallback")
+	require.ErrorContains(t, err, "/properties/a",
+		"the message names the path of the node bearing the reference")
 }

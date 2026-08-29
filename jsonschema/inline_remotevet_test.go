@@ -162,3 +162,38 @@ func TestInlineRefFallbackOnVetFailedRemote(t *testing.T) {
 		})
 	}
 }
+
+// TestInlineClosureRejectsBeforeSplicing pins that a violation only the
+// closure walk reaches yields no document at all, rather than one spliced
+// around the offending branch. It runs the same three-document shape as
+// TestRefEnginesAgreeOnTransitiveVetting, which compares the two engines'
+// causes; this one asserts what an Inline caller receives, and it
+// carries a different violation so the two do not pin one sentinel twice.
+func TestInlineClosureRejectsBeforeSplicing(t *testing.T) {
+	t.Parallel()
+
+	root, err := jsonschema.ParseSchema([]byte(
+		`{"$schema":"http://json-schema.org/draft-07/schema#",` +
+			`"$id":"https://ex.test/root.json","$ref":"https://ex.test/b.json#anc"}`))
+	require.NoError(t, err)
+
+	documents := map[string]*jsonschema.Schema{}
+
+	for uri, body := range map[string]string{
+		"https://ex.test/b.json": `{"$id":"https://ex.test/b.json","definitions":{"anc":{"$id":"#anc","type":"string"}},"allOf":[{"$ref":"https://ex.test/a.json"}]}`,
+		"https://ex.test/a.json": `{"definitions":{"bad":{"maxItems": -1}}}`,
+	} {
+		doc, parseErr := jsonschema.ParseSchema([]byte(body))
+		require.NoError(t, parseErr)
+
+		documents[uri] = doc
+	}
+
+	out, err := jsonschema.Inline(t.Context(), root,
+		jsonschema.WithRefResolver(jsonschema.SchemaMap(documents)))
+
+	require.ErrorIs(t, err, jsonschema.ErrRefResolve)
+	require.ErrorIs(t, err, jsonschema.ErrNegativeBound)
+	require.ErrorContains(t, err, "a.json", "the message names the document the walk refused")
+	assert.Nil(t, out, "a refused closure yields no document")
+}

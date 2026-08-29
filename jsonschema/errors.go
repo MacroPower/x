@@ -157,10 +157,12 @@ var (
 	// originates in that package or here.
 	ErrInvalidID = schemavet.ErrInvalidID
 
-	// ErrInvalidBaseURI is returned by [Compile] when the [WithBaseURI] value
-	// does not parse as a URI reference. Every ref and $id in the root
-	// document absolutizes against the base, so an unparsable base would
-	// corrupt each derived registry key rather than surface anywhere.
+	// ErrInvalidBaseURI is returned by [Compile] and [Inline] when the
+	// [WithBaseURI] value does not parse as a URI reference. Every ref and $id
+	// in the root document absolutizes against the base, so an unparsable base
+	// would corrupt each derived registry key rather than surface anywhere.
+	// [NewInliner] records the refusal and every [Inliner.Inline] call reports
+	// it, since the constructor has no error to return.
 	ErrInvalidBaseURI = errors.New("invalid base URI")
 
 	// ErrMisplacedVocabulary is returned by [Compile] and [Inline] for a

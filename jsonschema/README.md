@@ -933,14 +933,14 @@ value is rejected with `ErrInvalidBaseURI`, and a `$vocabulary` on a node whose
 (exact URI match; an empty `$schema` inherits the run's dialect, accepted under
 2020-12 and rejected under draft-07).
 
-`Inline` applies these same structural checks to the root it is given and to
-each `SubstituteRef` schema a fallback supplies, so the two entry points refuse
-the same documents for the same sentinels. Two compile-time refusals have no
-`Inline` counterpart. `ErrInvalidBaseURI` reads the `WithBaseURI` value, which
-`Inline` takes without parse-checking it, and `ErrUnknownVocabulary` belongs to
-the vocabulary resolution `Inline` does not run. See
-[Inlining references](#inlining-references) for the one option that narrows the
-rest.
+`Inline` applies these same structural checks to the root it is given, to each
+document its reference closure reaches, and to each `SubstituteRef` schema a
+fallback supplies, so the two entry points refuse the same documents for the
+same sentinels. Both also reject an unparsable `WithBaseURI` value with
+`ErrInvalidBaseURI`. One compile-time refusal has no `Inline` counterpart,
+`ErrUnknownVocabulary`, which belongs to the vocabulary resolution `Inline` does
+not run. See [Inlining references](#inlining-references), where
+`WithRetrievalBase` and `WithRefFallback` each narrow the rest.
 
 `Compile` then statically resolves every reference reachable from the root
 (`$ref` and, under 2020-12, `$dynamicRef`) through the same resolution core
@@ -1185,7 +1185,7 @@ wrapping the check's sentinel (`ErrInvalidType`, `ErrNegativeBound`,
 `ErrConflictingSchemaFields`, `ErrNilSubschema`, `ErrDuplicatePropertyOrder`,
 or, for a fetched document, `ErrInvalidID` or `ErrMisplacedVocabulary`)
 instead of silently mis-validating. `Inline` applies this same vetting policy
-to every document it holds, its own root included (see
+to every document its own reference closure reaches, its root included (see
 [Inlining references](#inlining-references)). A fetched document, and a
 `SubstituteRef` schema, must also hold no pointer cycle, meaning no path that
 crosses a schema and returns to a schema or to a container it is already
@@ -1440,26 +1440,54 @@ Failure modes:
   structural vet accepts the same roots at both entry points. A
   `SubstituteRef` schema
   enters resolution space as a document of its own, so `Inline` vets it as one
-  and names the failing reference in the message. Under `WithRetrievalBase`
+  and names the reference it answered along with the document and path where
+  the inliner consulted the fallback. Under `WithRetrievalBase`
   `Inline` skips the `$id` domain check throughout the run, in the root, in
   each substitute, and in every fetched document, since an inert `$id`
   establishes no base and registers no target.
-- A remote document fetched during inlining is structurally vetted before it is
-  inlined, through the same policy the validator applies to fetched documents
-  (see [Remote references](#remote-references) for the full check list). A
-  violation returns an error wrapping `ErrRefResolve` that also wraps the
-  check's sentinel (`ErrInvalidType`, `ErrNegativeBound`,
+- `Inline` runs the same reference-closure walk as `Compile` before
+  expanding anything. It fetches each document a reference names, vets it,
+  walks that document's own references, and repeats until no document is
+  added. The walk holds a document reachable only through another document's
+  reference to the same policy as one the root names outright. No expansion
+  copies anything out of such a document, and the two entry points still
+  refuse the same reference graphs. The walk resolves a `$dynamicRef` to
+  reach the document it names but never refuses on one, since `Inline` has
+  no static expansion for the keyword and answers `ErrRefInline` wherever
+  the expansion meets one. A `$dynamicRef` that resolves to nothing in a
+  document no expansion reaches therefore leaves `Inline` silent where
+  `Compile` refuses.
+- One attribution difference survives. The validator's fetch walks a fetched
+  document's nested absolute-`$id` resources into its registry, so a
+  violation inside one names that resource's own URI, while `Inline` reaches
+  the same violation under the enclosing document's URI. Both engines vet
+  the whole document and refuse the same graphs; only the path in the
+  message differs.
+- `Inline` structurally vets a remote document the closure reaches before
+  inlining it, through the same policy the validator applies to fetched
+  documents (see [Remote references](#remote-references) for the full check
+  list). A violation returns an error wrapping `ErrRefResolve` that also
+  wraps the check's sentinel (`ErrInvalidType`, `ErrNegativeBound`,
   `ErrNonPositiveMultipleOf`, `ErrItemsArrayUnderDraft2020`,
-  `ErrConflictingSchemaFields`, `ErrNilSubschema`, `ErrDuplicatePropertyOrder`,
-  `ErrInvalidID`, or `ErrMisplacedVocabulary`), rather than being inlined into
-  a malformed output schema. A fetched document holding a pointer cycle fails
-  the same way, wrapping `ErrSchemaNotTree`, and a cyclic `SubstituteRef` schema
-  returns that sentinel from the substitution site. The fetched document
-  follows the root document's draft, so a Draft-07 array-form `items` remote
-  inlined under a Draft-07 run is left intact. A JSON-pointer fallback target
-  (a schema carried inside an unknown keyword, in the root document or a
-  fetched one) is vetted the same way at materialization, minus the identifier
-  checks, so an ill-formed target cannot be spliced into the output either.
+  `ErrConflictingSchemaFields`, `ErrNilSubschema`,
+  `ErrDuplicatePropertyOrder`, `ErrInvalidID`, or `ErrMisplacedVocabulary`),
+  rather than being inlined into a malformed output schema. A fetched
+  document holding a pointer cycle fails the same way, wrapping
+  `ErrSchemaNotTree`, and a cyclic `SubstituteRef` schema returns that
+  sentinel from the substitution site. The fetched document follows the root
+  document's draft, so a Draft-07 array-form `items` remote inlined under a
+  Draft-07 run is left intact. A JSON-pointer fallback target (a schema
+  carried inside an unknown keyword, in the root document or a fetched one)
+  is vetted the same way at materialization, minus the identifier checks, so
+  an ill-formed target cannot be spliced into the output either.
+- A reference that resolves to nothing inside a document that is present can
+  never resolve later, so the walk refuses it wherever it sits, including a
+  branch no expansion would have copied.
+- The closure walk tolerates a document the resolver cannot serve, and the
+  expansion that reaches the reference reports it. That matches the deferral
+  `Compile` makes, so an unreachable remote in a branch no expansion visits
+  surfaces no error. `WithRefFallback` suspends the walk's refusals
+  entirely. See [Inlining references](#inlining-references) below.
 
 `WithRefFallback` sets a per-reference failure policy (a `RefFallback`,
 with `RefFallbackFunc` adapting a bare function) consulted when
@@ -1485,7 +1513,17 @@ resolving in the context of the document containing the failing ref; a
 cycle introduced by the substitute is an ordinary `ErrRefCycle`. The copy
 enters resolution space as a document of its own, so `Inline` vets it as one,
 and a violation ends the call with the check's sentinel in a message naming
-the reference the substitute answered.
+the reference the substitute answered and the document and path where the
+inliner consulted the fallback.
+
+Configuring a fallback also suspends the reference-closure walk's refusals. A
+`RefFallback` answers one failing reference at a time, and a document reachable
+only through another document's reference has no reference in the expansion for
+a policy to answer. With a fallback set the walk therefore fetches and caches
+without refusing anything, and the expansion reports each failure at the
+references it does reach. A run with no fallback refuses a violation anywhere
+in the closure, so adding a fallback that only propagates is not the same as
+adding none.
 
 ### Inlining options
 
@@ -1512,7 +1550,7 @@ the reference the substitute answered.
 | `ErrDuplicatePropertyOrder`   | A `PropertyOrder` slice listing the same property twice (returned by `Compile` and `Inline`).                                                                                                                                                         |
 | `ErrSchemaNotTree`            | The root document's sub-schema pointers alias or cycle (`Compile` and `Inline`), a root loop closes through a value field (`Inline`), a fetched document holds a pointer cycle (`Compile` and `Inline`), or a `SubstituteRef` schema does (`Inline`). |
 | `ErrInvalidID`                | An `$id` that does not parse, carries a fragment under 2020-12, or does not resolve to an absolute URI (returned by `Compile` and `Inline`; an `Inline` run under `WithRetrievalBase` checks no `$id`).                                               |
-| `ErrInvalidBaseURI`           | A `WithBaseURI` value that does not parse (returned by `Compile`).                                                                                                                                                                                    |
+| `ErrInvalidBaseURI`           | A `WithBaseURI` value that does not parse (returned by `Compile` and `Inline`).                                                                                                                                                                       |
 | `ErrMisplacedVocabulary`      | A `$vocabulary` on a node whose `$schema` does not establish the 2020-12 dialect (returned by `Compile` and `Inline`).                                                                                                                                |
 | `ErrInvalidSchemaDocument`    | A schema document whose top-level value is not a JSON object or boolean (returned by `CompileJSON`, `ParseSchema`, and `ParseSchemaValue`).                                                                                                           |
 | `ErrUnknownVocabulary`        | A required `$vocabulary` URI is unrecognized, or 2020-12 core is marked optional (returned by `Compile`).                                                                                                                                             |

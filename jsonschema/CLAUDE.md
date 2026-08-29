@@ -37,56 +37,90 @@ The package has two independent halves sharing the `Schema` type:
   inliner clones through `internal/schemaclone` for its pristine and working
   copies. Structural vetting is compiler-enforced through the
   `internal/schemavet` currency: only boundary code holds a bare `*Schema`
-  (the public API, the fetch closures, and the compile reference walk, which
-  registers a fetched document and vets it before Compile returns), and
-  everything past the vetter demands the minted `schemavet.Doc`/`schemavet.Node`
+  (the public API, the fetch closures, and the shared reference-closure walk,
+  whose fetches register a document and whose hooks vet it before either engine
+  returns), and everything past the vetter demands the minted
+  `schemavet.Doc`/`schemavet.Node`
   proof. `schemaIndex.extend` takes a `Doc`, so an unvetted document cannot
   reach the precompute caches, and `refresolve.Registry.NewSession` requires a
   `FallbackVet`, so every session states its vetting policy at construction.
-  Both engines vet alike. `Inline` runs `VetDoc` over its pristine root and
-  over each `WithRefFallback` substitute, which enters resolution space as a
-  document of its own, so the two refuse the same documents for the same
-  sentinels; the inliner wraps a substitute's violation to name the ref
-  whose failure the fallback answered. Two compile-time refusals have no
-  inline counterpart, `ErrInvalidBaseURI` and `ErrUnknownVocabulary`, so the
-  agreement covers the structural vet rather than every error. One
-  `schemavet.Vetter` serves the root, the substitutes, and the fallback
-  targets, and the session's `FallbackVet` is a method over it, so
-  `vetTarget` re-mints a materialized pointer target rather than re-checking
-  it where the inliner records it; `fetchDoc` keeps a fresh vetter per
-  remote, since each fetched document is independent. `inliner.vetProfile`
-  supplies the one narrowing. Under `WithRetrievalBase` the resolution walk
-  reads `$id` as inert, so `schemavet.Profile.InertIDs` skips the `$id`
-  domain check in every document the run holds. The inliner's own index walk
-  takes the currency at its entry points, `recordDoc` for a document root
-  and `recordNode` for a materialized pointer target, so the walk behind
-  them reaches no schema the run has not vetted. The pointer-graph policy is
-  separate from that vetting and has rules at two boundaries.
-  `checkSchemaTree` (`validate.go`) rejects a root whose sub-schema pointers
-  alias or cycle, and both `Compile` and `Inline` run it over the document they
-  are given, so the two engines make the same demand of a root's sub-schema
-  graph. `cloneCheckedSchema` holds the rest to the weaker no-cycle rule: the
-  inliner's pristine root, where it reports a loop closing through a value
-  field that the tree check does not read, plus a document a `RefResolver`
-  returns and a `SubstituteRef` schema. Aliasing survives there, because every
-  walk that reaches a registered document dedupes pointers, so within this
-  package it costs only the accuracy of a location in an error message. It does
-  reach `Inline`'s output, which `checkSchemaTree` then rejects if the caller
-  compiles it, so an aliased resolver document buys a non-tree result. A cycle is fatal,
+  Both engines vet alike, over the same set of documents. `refClosure`
+  (`refclosure.go`) is the reference-closure walk both drive. It ref-walks a
+  document, whose resolutions fetch and register further documents, and
+  repeats until the frontier is empty; the caller injects the per-document
+  and per-fallback-target work as hooks (`Compile` vets each document and
+  folds it into its node index; `Inline` vets through `closureDoc`, which
+  no-ops on a document `fetchDoc` already vetted). `Compile` runs it as
+  `compileRefPasses`, and `Inline` runs it in `walkClosure` before expanding
+  anything, so both vet a document reachable only through another document's
+  reference. `Inline` also runs `VetDoc` over its pristine root and over
+  each `WithRefFallback` substitute, which enters resolution space as a
+  document of its own; the inliner wraps a substitute's violation to name
+  the ref whose failure the fallback answered along with the document and
+  path where the inliner consulted the fallback. One compile-time refusal
+  has no inline counterpart, `ErrUnknownVocabulary`, so the agreement covers
+  the structural vet rather than every error. `doc.go` states two narrowings
+  of the inliner's walk. First, the walk resolves a `$dynamicRef` to reach
+  the document it names, but a `$dynamicRef` that resolves to nothing never
+  refuses the walk, since `walkPair` answers `ErrRefInline` wherever it
+  meets one. Second, `WithRefFallback` suspends the walk's refusals, because
+  a fallback answers one failing reference at a time and a document outside
+  the expansion has no reference in the expansion for a policy to answer;
+  the closure is the same either way. Two attribution gaps remain, and
+  `doc.go` states the first. The validator's fetch walks a fetched
+  document's nested absolute `$id` resources into the shared registry,
+  giving each its own frontier entry and locator, while `fetchDoc` and
+  `prefetchDoc` route them through `RegisterFallback`, which never touches
+  `Registry().URI`. For the second, the inliner's session vets a
+  JSON-pointer fallback target where it materializes it, while `Compile`
+  carries a nil `FallbackVet` and vets targets after the document frontier.
+  A graph whose fetched document is malformed both at a pointer target and
+  elsewhere therefore makes the two name different sentinels. Both engines
+  vet whole documents either way, so the refusals agree; only the locator
+  differs, which is why the agreement tests assert on the document URI
+  rather than an exact pointer. A strict walk fetches through `prefetchDoc`,
+  which registers without vetting. The walk's per-document hook then vets
+  each document as the sorted frontier reaches it, the order `Compile` vets
+  in. Vetting inside the fetch would report whichever document a reference
+  named first. One `schemavet.Vetter` serves the root, the substitutes, and
+  the fallback targets, and the session's `FallbackVet` is a method over it,
+  so `vetTarget` re-mints a materialized pointer target rather than
+  re-checking it where the inliner records it; `fetchDoc` keeps a fresh
+  vetter per remote, since each fetched document is independent.
+  `inliner.vetProfile` supplies the one narrowing. Under `WithRetrievalBase`
+  the resolution walk reads `$id` as inert, so `schemavet.Profile.InertIDs`
+  skips the `$id` domain check in every document the run holds. The
+  inliner's own index walk takes the currency at its entry points,
+  `recordDoc` for a document root and `recordNode` for a materialized
+  pointer target, so the walk behind them reaches no schema the run has not
+  vetted. The pointer-graph policy is separate from that vetting and has
+  rules at two boundaries. `checkSchemaTree` (`validate.go`) rejects a root
+  whose sub-schema pointers alias or cycle, and both `Compile` and `Inline`
+  run it over the document they are given, so the two engines make the same
+  demand of a root's sub-schema graph. `cloneCheckedSchema` holds the rest
+  to the weaker no-cycle rule: the inliner's pristine root, where it reports
+  a loop closing through a value field that the tree check does not read,
+  plus a document a `RefResolver` returns and a `SubstituteRef` schema.
+  Aliasing survives there, because every walk that reaches a registered
+  document dedupes pointers, so within this package it costs only the
+  accuracy of a location in an error message. It does reach `Inline`'s
+  output, which `checkSchemaTree` then rejects if the caller compiles it, so
+  an aliased resolver document buys a non-tree result. A cycle is fatal,
   because `refresolve`'s JSON-pointer fallback marshals the document it
   searches and upstream's `MarshalJSON` re-enters `json.Marshal` at every
-  nesting level, so no encoder sees the repeat and the marshal recurses into a
-  stack overflow no `recover` catches. The deep copy reproduces an aliased
-  graph rather than flattening it into a tree, so the inliner's own `walkPair`
-  and `stripIdentifiers` walks carry visited sets. Two constraints the design
-  works within: `refresolve` is a standalone package with no parent import
-  (leaf-to-leaf imports like its `schemavet` dependency are fine; the parent is
-  not), so keying its `baseURIs`/`walked` by node id means either an extra
-  lookup at the boundary or breaking that boundary; and the defensive
-  fetched-document `cloneCheckedSchema` keeps every cache independent of the
-  resolver-owned schema (a resolver may hand out one shared object to many
-  callers, and cached documents are walked and registered long after the
-  resolver returned), an isolation a pointer index alone cannot provide.
+  nesting level, so no encoder sees the repeat and the marshal recurses into
+  a stack overflow no `recover` catches. The deep copy reproduces an aliased
+  graph rather than flattening it into a tree, so the inliner's own
+  `walkPair` and `stripIdentifiers` walks carry visited sets. Two
+  constraints the design works within: `refresolve` is a standalone package
+  with no parent import (leaf-to-leaf imports like its `schemavet`
+  dependency are fine; the parent is not), so keying its `baseURIs`/`walked`
+  by node id means either an extra lookup at the boundary or breaking that
+  boundary; and the defensive fetched-document `cloneCheckedSchema` keeps
+  every cache independent of the resolver-owned schema (a resolver may hand
+  out one shared object to many callers, and cached documents are walked and
+  registered long after the resolver returned), an isolation a pointer index
+  alone cannot provide.
   `$ref`/`$dynamicRef`/`$anchor` resolution lives in the
   shared `internal/refresolve` core, which both the validator and the inliner
   (`inline.go`) consume so the two engines cannot disagree; the inliner resolves
@@ -472,7 +506,7 @@ contract the tests enforce.
     vendored suite group through both engines. It ignores `suiteSkips`, which
     record where this package diverges from the suite's expected answer, a
     different question from whether the two engines agree.
-  - `TestRefEnginesAgreeOnPastFixes` pins one graph per past `$ref` fix as
+  - `TestRefEnginesAgreeOnPastFixes` pins one graph per `$ref` fix as
     JSON.
   - `FuzzRefEnginesAgree` (`fuzz_ref_test.go`) synthesizes a
     multi-document graph from a blob, drawing the draft, each document's `$id`,
@@ -480,22 +514,24 @@ contract the tests enforce.
     the resolver and serves it through a `WithRefFallback` substitute. It has no
     seed corpus, since a corpus entry for a `[]byte` argument is entropy and no
     blob can be written by hand to decode to a chosen graph.
-  - Five reason constants live in `ref_differential_test.go`. Three are skip
+  - Six reason constants live in `ref_differential_test.go`. Three are skip
     reasons the rig classifies from the error `Inline` returns, never from a
     test name, so a reason cannot go stale against a renamed suite case:
     `reasonInlineCycle`, `reasonInlineDynamicRef`, and `reasonDeferredRefMiss`
     (`Compile` tolerates a missing remote document and defers, `Inline` fails at
-    inline time, so the verdicts are not comparable). `reasonSubstituteBaseURI`
-    and `reasonSubstituteNoAnchors` are not skips; the generator applies them
-    when choosing which document to withhold.
-  - Two divergences the rig found are pinned as tests rather than fixed, since
-    resolving either is a policy decision: `TestCompileVetsTransitivelyInlineDoesNot`
-    (Compile vets a document reached only through another document's reference,
-    which Inline never fetches) and `TestRefEnginesDisagreeOnCollidingIDs` (with
-    three documents colliding on `$id`, one anchor reference resolves to two
-    different targets). The generator stays off both shapes, which is why the
-    `$id` pool excludes the root's own URI and a malformed leaf lands only in
-    the root or a directly referenced document.
+    inline time, so the verdicts are not comparable). `reasonSubstituteBaseURI`,
+    `reasonSubstituteNoAnchors`, and `reasonSubstituteTransitiveMalformed` are
+    not skips; the generator applies them when choosing which document to
+    withhold.
+  - One divergence the rig found is pinned as a test rather than fixed, since
+    resolving it is a policy decision. `TestRefEnginesDisagreeOnCollidingIDs`
+    covers it. Three documents collide on `$id`, and one anchor reference
+    resolves to two different targets. The generator stays off that shape, which
+    is why the `$id` pool excludes the root's own URI. The shared `refClosure`
+    walk closes the transitive-vetting divergence the rig also found, and
+    `TestRefEnginesAgreeOnTransitiveVetting` asserts the agreement, so a
+    malformed leaf may land in any served document, including one reached only
+    through another document's reference.
   - `suiteFiles` in `suite_test.go` is the single enumeration of the vendored
     suite. The three conformance tests and the differential all draw their files
     from it, so the differential cannot drift from what the conformance tests

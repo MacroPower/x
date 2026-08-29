@@ -363,3 +363,55 @@ func TestIDBase(t *testing.T) {
 		})
 	}
 }
+
+func TestParseBaseURI(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		base string
+		want string
+		err  bool
+	}{
+		"empty passes through":        {base: "", want: ""},
+		"absolute passes through":     {base: "https://ex.test/a.json", want: "https://ex.test/a.json"},
+		"schemeless resolves to file": {base: "main.json", want: "file:///main.json"},
+		"unparsable reports the parse failure and returns the input": {
+			base: "http://[::1",
+			want: "http://[::1",
+			err:  true,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := uriref.ParseBaseURI(tc.base)
+
+			if tc.err {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// TestNormalizeBaseURIMatchesParseBaseURI pins that the two helpers agree on
+// each base form below, empty, schemeless, absolute, unparsable, and opaque, so
+// an entry point that tolerates an unparsable base and one that refuses it
+// still register documents under the same keys.
+func TestNormalizeBaseURIMatchesParseBaseURI(t *testing.T) {
+	t.Parallel()
+
+	for _, base := range []string{"", "main.json", "https://ex.test/a.json", "http://[::1", "urn:x:y"} {
+		parsed, err := uriref.ParseBaseURI(base)
+		if err != nil {
+			assert.Equal(t, base, parsed, "a rejected base %q is returned unchanged", base)
+		}
+
+		assert.Equal(t, uriref.NormalizeBaseURI(base), parsed, "base %q", base)
+	}
+}

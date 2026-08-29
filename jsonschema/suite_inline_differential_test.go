@@ -1,6 +1,7 @@
 package jsonschema_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -65,24 +66,13 @@ func TestSuiteInlineAgrees(t *testing.T) {
 	}
 }
 
-// TestCompileVetsTransitivelyInlineDoesNot records a divergence the rig found,
-// not a behavior the package promises. Pinned so a fix at either engine has to
-// acknowledge it.
-//
-// Compile walks the reference graph transitively. It fetches b.json for the
-// root's anchor reference, then walks b.json's own references, fetches a.json,
-// vets it, and refuses the schema. Inline expands only what a reference needs.
-// The anchor resolves to a leaf inside b.json, so Inline never expands b.json's
-// allOf reference, never fetches a.json, and never vets it.
-//
-// The observable consequence is that Compile refuses a schema whose inlined
-// form it accepts, so Inline turns an uncompilable document into a compilable
-// one. Both behaviors are defensible on their own. The doc.go contract promises
-// that Inline vets every document it holds, its own root, its substitutes, and
-// the remotes it fetches. Inline never fetches this one, so neither engine
-// breaks that contract. Resolving the divergence means choosing whether a
-// reference graph is vetted as a whole or only where it is walked.
-func TestCompileVetsTransitivelyInlineDoesNot(t *testing.T) {
+// TestRefEnginesAgreeOnTransitiveVetting pins the reference closure both
+// engines compute. The root's anchor reference reaches b.json, whose own allOf
+// reference reaches a.json, and a.json carries an invalid type name. Neither
+// engine copies anything out of a.json, and Inline's output would be identical
+// without it. A document inside the closure is still a document the run holds,
+// so both engines fetch it, vet it, and refuse the graph for the same cause.
+func TestRefEnginesAgreeOnTransitiveVetting(t *testing.T) {
 	t.Parallel()
 
 	root := `{"$schema":"http://json-schema.org/draft-07/schema#","$id":"https://ex.test/root.json","$ref":"https://ex.test/b.json#anc"}`
@@ -93,27 +83,59 @@ func TestCompileVetsTransitivelyInlineDoesNot(t *testing.T) {
 
 	schema, resolver := parseRefGraph(t, root, documents)
 
-	_, err := jsonschema.Compile(t.Context(), schema, jsonschema.WithRefResolver(resolver))
-	require.ErrorIs(t, err, jsonschema.ErrInvalidType,
-		"Compile reaches a.json through b.json's own reference and vets it")
-	require.ErrorContains(t, err, "a.json",
-		"the violation Compile reports is the one inside the transitively fetched document")
+	_, compileErr := jsonschema.Compile(t.Context(), schema, jsonschema.WithRefResolver(resolver))
+	_, inlineErr := jsonschema.Inline(t.Context(), schema, jsonschema.WithRefResolver(resolver))
 
-	inlined, err := jsonschema.Inline(t.Context(), schema, jsonschema.WithRefResolver(resolver))
-	require.NoError(t, err, "Inline expands only the anchor, so it never fetches a.json")
+	for name, err := range map[string]error{"Compile": compileErr, "Inline": inlineErr} {
+		require.ErrorIsf(t, err, jsonschema.ErrInvalidType,
+			"%s reaches a.json through b.json's own reference and vets it", name)
+		require.ErrorContainsf(t, err, "a.json",
+			"%s names the transitively fetched document holding the violation", name)
+	}
+}
 
-	standalone, err := jsonschema.Compile(t.Context(), inlined)
-	require.NoError(t, err, "the inlined output carries nothing from a.json")
+// TestInlineFallbackSuspendsTransitiveVetting pins what a fallback narrows. A
+// [jsonschema.RefFallback] answers one failing reference at a time, and a
+// document reachable only through another document's reference has no reference
+// in the expansion for a policy to answer, so with a fallback configured the walk
+// refuses nothing and every failure waits in the negative cache for the
+// references walkPair does reach. TestRefEnginesAgreeOnTransitiveVetting pins
+// that Inline refuses the same graph with no fallback.
+func TestInlineFallbackSuspendsTransitiveVetting(t *testing.T) {
+	t.Parallel()
 
-	// The anchor really inlined, rather than collapsing to a schema that
-	// accepts everything.
+	root := `{"$schema":"http://json-schema.org/draft-07/schema#","$id":"https://ex.test/root.json","$ref":"https://ex.test/b.json#anc"}`
+	documents := map[string]string{
+		"https://ex.test/b.json": `{"$id":"https://ex.test/b.json","definitions":{"anc":{"$id":"#anc","type":"string"}},"allOf":[{"$ref":"https://ex.test/a.json"}]}`,
+		"https://ex.test/a.json": `{"definitions":{"bad":{"type":"strnig"}}}`,
+	}
+
+	schema, resolver := parseRefGraph(t, root, documents)
+
+	var consulted []jsonschema.RefFailure
+
+	fallback := jsonschema.RefFallbackFunc(
+		func(_ context.Context, f jsonschema.RefFailure) jsonschema.RefAction {
+			consulted = append(consulted, f)
+
+			return jsonschema.PropagateRef()
+		})
+
+	out, err := jsonschema.Inline(t.Context(), schema,
+		jsonschema.WithRefResolver(resolver), jsonschema.WithRefFallback(fallback))
+	require.NoError(t, err, "a fallback suspends the walk's refusals, so the graph inlines")
+	assert.Empty(t, consulted, "a document outside the expansion consults nobody")
+
+	// The anchor still inlined, so the run did the work rather than stopping early.
+	standalone, err := jsonschema.Compile(t.Context(), out)
+	require.NoError(t, err)
 	require.NoError(t, standalone.ValidateJSON(t.Context(), []byte(`"x"`)))
 	require.Error(t, standalone.ValidateJSON(t.Context(), []byte(`1`)))
 }
 
-// TestRefEnginesDisagreeOnCollidingIDs records a second divergence the rig
-// found, not a behavior the package promises. Pinned so a fix at either engine
-// has to acknowledge it.
+// TestRefEnginesDisagreeOnCollidingIDs records a divergence the rig found, not
+// a behavior the package promises. Pinned so a fix at either engine has to
+// acknowledge it.
 //
 // A fetched document claims a URI another document already holds, and the two
 // engines then resolve one anchor reference to two different targets. Compile
@@ -194,10 +216,11 @@ func TestRefEnginesDisagreeOnCollidingIDs(t *testing.T) {
 //
 // One reason is not checked here, reasonDeferredRefMiss. The suite serves every
 // remote it references, so no case reaches it, and FuzzRefEnginesAgree draws
-// unresolvable references on purpose. Neither reasonSubstituteBaseURI nor
-// reasonSubstituteNoAnchors is a skip reason.
-// TestSubstituteDoesNotRebaseNestedRefs pins reasonSubstituteBaseURI, and
-// chooseWithheld applies both.
+// unresolvable references on purpose. Three reasons are not skips,
+// reasonSubstituteBaseURI, reasonSubstituteNoAnchors, and
+// reasonSubstituteTransitiveMalformed, which chooseWithheld applies when it
+// picks a document to withhold. TestSubstituteDoesNotRebaseNestedRefs pins
+// reasonSubstituteBaseURI.
 func TestInlineDifferentialSkipsAreLive(t *testing.T) {
 	t.Parallel()
 

@@ -224,17 +224,42 @@ func IDBase(base, id string) string {
 // file:/// makes RFC 3986 joining well-defined and gives the root document a
 // registry key that refs absolutizing back to it reproduce exactly. An
 // empty, absolute, or unparsable base passes through unchanged.
+//
+// Callers that refuse an unparsable base call [ParseBaseURI] instead, which
+// reports the parse failure this function swallows.
 func NormalizeBaseURI(base string) string {
-	if base == "" {
+	normalized, err := ParseBaseURI(base)
+	if err != nil {
 		return base
+	}
+
+	return normalized
+}
+
+// ParseBaseURI returns the base absolutized against file:/// when it carries no
+// scheme, and the parse error when it is not a URI reference. An empty or
+// already-absolute base passes through. Every entry point that registers
+// documents against a configured base reads it through here, so the engines
+// cannot disagree on which bases they accept. An unparsable base would
+// otherwise corrupt every registry key derived from it rather than surface
+// anywhere. The result carries the base unchanged alongside the error, so a
+// caller that tolerates the failure still gets the base it passed in.
+func ParseBaseURI(base string) (string, error) {
+	if base == "" {
+		return base, nil
 	}
 
 	parsed, err := url.Parse(base)
-	if err != nil || parsed.Scheme != "" {
-		return base
+	if err != nil {
+		//nolint:wrapcheck // The caller names the option the value came from.
+		return base, err
 	}
 
-	return ResolveURI("file:///", base)
+	if parsed.Scheme != "" {
+		return base, nil
+	}
+
+	return ResolveURI("file:///", base), nil
 }
 
 // RawFragment returns the JSON Pointer fragment to resolve plus whether it is
