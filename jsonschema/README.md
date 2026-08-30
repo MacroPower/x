@@ -1571,7 +1571,13 @@ Failure modes:
   no static expansion for the keyword and answers `ErrRefInline` wherever
   the expansion meets one. A `$dynamicRef` that resolves to nothing in a
   document no expansion reaches therefore leaves `Inline` silent where
-  `Compile` refuses.
+  `Compile` refuses. A `$dynamicRef` whose JSON-pointer target the structural
+  vet rejects divides the two engines differently. The walk does not report
+  that rejection, so `Inline` without a fallback answers `ErrRefInline` rather
+  than the check's sentinel that `Compile` reports. Under a `WithRefFallback` that
+  drops the reference, `Inline` instead succeeds on the input `Compile`
+  refuses. The inlined document carries no `$dynamicRef`, so `Compile`
+  accepts it.
 - One attribution difference survives. The validator's fetch walks a fetched
   document's nested absolute-`$id` resources into its registry, so a
   violation inside one names that resource's own URI, while `Inline` reaches

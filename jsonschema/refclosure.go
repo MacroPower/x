@@ -77,7 +77,12 @@ type refClosure struct {
 	// fragment ref through both passes.
 	strictRef bool
 
-	// The strictRef counterpart for $dynamicRef.
+	// The strictRef counterpart for $dynamicRef. Compile sets it true. Inline
+	// holds it false in both walk modes, since Inline has no static expansion
+	// for the keyword and answers ErrRefInline wherever walkPair meets one. A
+	// $dynamicRef that resolves to nothing, and one whose target the structural
+	// vet rejects, therefore pass this walk under Inline. Compile refuses both.
+	// See doc.go for the divergence both cases produce.
 	strictDyn bool
 }
 

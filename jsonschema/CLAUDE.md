@@ -72,7 +72,13 @@ The package has two independent halves sharing the `Schema` type:
   of the inliner's walk. First, the walk resolves a `$dynamicRef` to reach
   the document it names, but a `$dynamicRef` that resolves to nothing never
   refuses the walk, since `walkPair` answers `ErrRefInline` wherever it
-  meets one. Second, `WithRefFallback` suspends the walk's refusals apart from
+  meets one. A JSON-pointer target the structural vet rejects passes the walk
+  on the same terms, because `refClosure.strictDyn` is false in both of
+  `Inline`'s modes. `Inline` without a fallback still refuses, with
+  `ErrRefInline` rather than the check's sentinel that `Compile` reports, and a
+  dropping fallback inlines the graph.
+  `TestDynamicRefRejectedPointerTargetSplitsTheEngines` pins both engines'
+  answers. Second, `WithRefFallback` suspends the walk's refusals apart from
   an identifier collision, because a fallback answers one failing reference at
   a time and a document outside the expansion has no reference in the
   expansion for a policy to answer; the closure is the same either way. One
@@ -677,6 +683,15 @@ contract the tests enforce.
   every container through `reflect.MakeSlice` or `reflect.MakeMap`, which return
   a non-nil container even at length zero, and it stays the default so the
   committed corpora keep decoding to the values the fuzzer minimized.
+  One `requiredNullableShapes` row carries a type schema forbidding a
+  `minLength: 3` subschema, and its tag adds `max=2`. A `not` on `minLength: 3`
+  admits exactly the strings `maxLength: 2` admits, so both validators judge
+  that row by one predicate and the target compares it. No shared shape blob
+  draws that row, so `requiredNullableSeeds` seeds it directly and
+  `TestRequiredNullableForbidRowIsCompared` pins that those seeds reach both
+  sides of the ceiling. `TestRequiredOnNullableRejectsNull` pins the ceiling on
+  the generated property, keying off the field's Go type so a dropped `max`
+  fails the test rather than skipping the check.
   `required` forbids null on a bare slice, map, or `[]byte` beside its size
   floor, exactly as it forbids null alone on a pointer. The nil side agrees with
   go-playground and the empty-but-non-nil side does not. That empty collection

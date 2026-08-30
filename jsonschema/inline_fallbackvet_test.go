@@ -167,3 +167,152 @@ func TestInlineFallbackTargetStructuralChecks(t *testing.T) {
 		})
 	}
 }
+
+// TestDynamicRefRejectedPointerTargetSplitsTheEngines pins the one structural
+// rejection the two engines answer differently. Inline resolves a $dynamicRef
+// non-strictly in both walk modes, so a rejected target never refuses the walk,
+// while [jsonschema.Compile] resolves it strictly and refuses with the check's
+// sentinel.
+//
+// The divergence is deliberate, and doc.go and README.md state it. Inline has
+// no static expansion for the keyword and answers [jsonschema.ErrRefInline]
+// wherever the expansion meets one, so a strict walk would displace that answer
+// with a resolution error. The two rows record the cost. Inline without a
+// fallback reports the keyword rather than the rejection, and a fallback that
+// drops the reference inlines the input [jsonschema.Compile] refuses.
+func TestDynamicRefRejectedPointerTargetSplitsTheEngines(t *testing.T) {
+	t.Parallel()
+
+	// The one graph this test hands both engines. Property p carries a
+	// $dynamicRef whose JSON-pointer fragment names a schema inside an unknown
+	// keyword, and that schema misspells its type name. The resolution core
+	// materializes the target out of x-custom and the structural vet rejects
+	// it. The two engines answer that rejection differently.
+	const rejectedDynamicTarget = `{"x-custom": {"sub": {"type": "strnig"}},` +
+		` "properties": {"p": {"$dynamicRef": "#/x-custom/sub"}}}`
+
+	tests := map[string]struct {
+		// Whether the row installs a [jsonschema.RefFallback] that drops the
+		// reference. Inline resolves the $dynamicRef non-strictly either way,
+		// so the row records what Inline tells the policy rather than a second
+		// refusal.
+		fallback bool
+
+		// The ref each fallback consultation must name, in order.
+		consulted []string
+
+		// The output a row that inlines must produce. Read only when err is
+		// nil.
+		want string
+
+		// The sentinel Inline must report, and the sentinels it must not. The
+		// negative half is the load-bearing one. It states that the structural
+		// vet's rejection is the fault Inline does not report. The Compile
+		// sub-test below establishes that the vet does reject this graph.
+		err    error
+		notErr []error
+	}{
+		"a strict walk answers the keyword and not the vet": {
+			err: jsonschema.ErrRefInline,
+			notErr: []error{
+				jsonschema.ErrInvalidType,
+				jsonschema.ErrRefResolve,
+			},
+		},
+		"a dropping fallback inlines the graph Compile refuses": {
+			fallback:  true,
+			consulted: []string{"#/x-custom/sub"},
+			want: `{"x-custom": {"sub": {"type": "strnig"}},` +
+				` "properties": {"p": true}}`,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			root, err := jsonschema.ParseSchema([]byte(rejectedDynamicTarget))
+			require.NoError(t, err)
+
+			opts := []jsonschema.InlineOption{}
+
+			var failures []jsonschema.RefFailure
+
+			if tc.fallback {
+				opts = append(opts, jsonschema.WithRefFallback(jsonschema.RefFallbackFunc(
+					func(_ context.Context, f jsonschema.RefFailure) jsonschema.RefAction {
+						failures = append(failures, f)
+
+						return jsonschema.DropRef()
+					})))
+			}
+
+			out, err := jsonschema.Inline(t.Context(), root, opts...)
+
+			var refs []string
+
+			for _, failure := range failures {
+				refs = append(refs, failure.Ref)
+
+				// Inline tells the policy the keyword has no static expansion,
+				// not that the vet refused the target. That is the other row's
+				// divergence read from the side that gets to answer it.
+				require.ErrorIs(t, failure.Err, jsonschema.ErrRefInline,
+					"the fallback answers Inline's own refusal to expand the keyword")
+				require.NotErrorIs(t, failure.Err, jsonschema.ErrInvalidType,
+					"the vet's rejection must not reach the policy")
+			}
+
+			assert.Equal(t, tc.consulted, refs,
+				"the fallback answers the $dynamicRef the walk passed over")
+
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+				assert.Contains(t, err.Error(), dynamicRefInlinePhrase,
+					"the refusal must name the keyword, not one of ErrRefInline's other producers")
+
+				for _, sentinel := range tc.notErr {
+					require.NotErrorIs(t, err, sentinel,
+						"a non-strict $dynamicRef walk reports no resolution fault")
+				}
+
+				return
+			}
+
+			require.NoError(t, err)
+
+			data, err := json.Marshal(out)
+			require.NoError(t, err)
+			assert.JSONEq(t, tc.want, string(data))
+
+			// The dropped reference takes the $dynamicRef with it, leaving the
+			// rejected target unreachable inside x-custom, so Compile accepts
+			// what it refused as input.
+			_, err = jsonschema.Compile(t.Context(), out)
+			require.NoError(t, err, "Compile must accept the inlined document")
+		})
+	}
+
+	// The rows above rest on the vet rejecting this graph, and this sub-test
+	// establishes that rejection. TestInlineFallbackTargetStructuralChecks
+	// cannot absorb them, since it requires [jsonschema.ErrRefResolve]. Inline
+	// adds that wrapper itself in walkClosure, over whatever its closure walk
+	// refuses, and with strictDyn false no rejected $dynamicRef target reaches
+	// it. The refWalkError helper wraps the cause alone, so Compile reports the
+	// check's sentinel unwrapped, whichever keyword carried the rejected
+	// target.
+	t.Run("Compile refuses the target Inline passes over", func(t *testing.T) {
+		t.Parallel()
+
+		root, err := jsonschema.ParseSchema([]byte(rejectedDynamicTarget))
+		require.NoError(t, err)
+
+		_, err = jsonschema.Compile(t.Context(), root)
+		require.ErrorIs(t, err, jsonschema.ErrInvalidType,
+			"a strict $dynamicRef walk reports the check's sentinel that Inline never does")
+		require.NotErrorIs(t, err, jsonschema.ErrRefResolve,
+			"Compile reports the check's sentinel unwrapped, so the $ref path's wrapper is Inline's")
+		assert.Contains(t, err.Error(), `cannot resolve $dynamicRef "#/x-custom/sub"`,
+			"the refusal names the keyword whose target the vet rejected")
+	})
+}

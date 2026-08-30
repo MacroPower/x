@@ -24,15 +24,6 @@ const (
 	// rule agrees, because the interpreter forbids the null a nil collection
 	// marshals as, and FuzzValidatorRequiredNullableShapes compares it.
 	reasonRequiredCollectionEmptyFloor = "a non-nil empty collection satisfies go-playground's required and trips the schema's size floor"
-	// The forbiddingWord row of requiredNullableShapes carries a type schema
-	// whose "not" forbids a minLength subschema no validate tag spells, so the
-	// schema rejects a string of three runes or more while go-playground, which
-	// reads only the tag, accepts it. Dropping that override would not make the
-	// row comparable. The model can classify a bare named string type as a $ref,
-	// the form the matrix ignores required on, so the schema then forbids no
-	// null at all. TestRequiredOnNullableRejectsNull reads the null instance
-	// alone, which neither divergence reaches.
-	reasonTypeSchemaForbidUnmodeled = "a WithTypeSchema forbid states a constraint no validate tag spells"
 	// Go-playground's oneof formats the field as text and handles only the
 	// string and integer kinds, panicking with "Bad field type" on anything
 	// else, so it cannot be the reference for oneof on a bool or a float.
@@ -145,10 +136,6 @@ func rigExclusions() []rigExclusion {
 			reason: reasonCoercedNumericBounds,
 		},
 		{what: "a field encoding/json dropped", reason: reasonOmitemptyDropsField},
-		{
-			what:   "the requiredNullableShapes row whose type schema forbids a subschema",
-			reason: reasonTypeSchemaForbidUnmodeled,
-		},
 		{what: "a field whose instance is null and carries no required", reason: reasonNullableValueRule},
 	}
 }

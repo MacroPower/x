@@ -560,7 +560,9 @@ func (in *inliner) run(s *Schema) (*Schema, error) {
 // $dynamicRef that resolves to nothing never refuses the walk, whatever the
 // mode. Inline has no static expansion for the keyword and answers
 // [ErrRefInline] wherever walkPair meets one, and a strict pre-walk would
-// displace that answer with a resolution error.
+// displace that answer with a resolution error. A JSON-pointer target the
+// structural vet rejects passes the walk on the same terms, while [Compile]
+// reports the check's sentinel on the same graph.
 func (in *inliner) walkClosure(pristine *Schema) error {
 	strict := in.fallback == nil
 

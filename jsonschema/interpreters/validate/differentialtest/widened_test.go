@@ -9,8 +9,10 @@ import (
 	"math"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -209,11 +211,13 @@ func requiredNullableOrder() []string {
 // The cross product carries the shared blobs, whose all-zero member draws the
 // roster's first row with its container nil. The two pairs after it put the
 // other two bare collections in that same state, the one the target exists
-// for. They look their row up by name, since Cursor.Intn reads a shape blob as
-// a big-endian index into a roster whose order a new key can shift.
+// for. The pairs after those reach the forbid row, which no shared shape blob
+// draws. The bare-collection pairs and the forbid pairs look their row up by
+// name, since Cursor.Intn reads a shape blob as a big-endian index into a
+// roster whose order a new key can shift.
 func requiredNullableSeeds() [][2][]byte {
 	shared := differentialSeeds()
-	pairs := make([][2][]byte, 0, len(shared)*len(shared)+2)
+	pairs := make([][2][]byte, 0, len(shared)*len(shared)+len(shared)+2)
 
 	for _, shape := range shared {
 		for _, value := range shared {
@@ -234,6 +238,20 @@ func requiredNullableSeeds() [][2][]byte {
 		pairs = append(pairs, [2][]byte{shape, make([]byte, 8)})
 	}
 
+	// The forbid row's comparison turns on a rune ceiling rather than on the
+	// null alone, so pairing its index with every shared value blob reaches
+	// strings on both sides of that ceiling.
+	// TestRequiredNullableForbidRowIsCompared pins that the seeds reach both
+	// sides of it.
+	if index := slices.Index(order, forbidRowKey); index >= 0 {
+		//nolint:gosec // index is a bounded, non-negative roster position.
+		shape := binary.BigEndian.AppendUint64(nil, uint64(index))
+
+		for _, value := range shared {
+			pairs = append(pairs, [2][]byte{shape, value})
+		}
+	}
+
 	return pairs
 }
 
@@ -244,15 +262,16 @@ func requiredNullableSeeds() [][2][]byte {
 //
 // Each shape holds one field, so the object verdict is that field's verdict and
 // the full biconditional applies. The rows it adds over
-// FuzzValidatorRequiredPointerConstraints are the six carrying a collection and
-// three pointer-scalar pairings that roster omits: a coerced number under a
-// bare required, a bool under required with ne, and a repeated required. Every
-// other pointer-scalar row is a shape and rule that target already compares
-// under the same draw, so a failure on one of those reads as a regression in
-// the shared driver rather than a new find. The roster is fixed, so the target
-// compiles every row once and draws an index per iteration. It takes two blobs
-// so the shape entropy and the value entropy evolve independently, the
-// convention FuzzValidatorTaggedShapes uses.
+// FuzzValidatorRequiredPointerConstraints are the six carrying a collection,
+// three pointer-scalar pairings that roster omits (a coerced number under a
+// bare required, a bool under required with ne, and a repeated required), and
+// the type-schema forbid row, the only WithTypeSchema occurrence any roster in
+// this package carries. Every other pointer-scalar row is a shape and rule that
+// target already compares under the same draw, so a failure on one of those
+// reads as a regression in the shared driver rather than a new find. The
+// roster is fixed, so the target compiles every row once and draws an index
+// per iteration. It takes two blobs so the shape entropy and the value entropy
+// evolve independently, the convention FuzzValidatorTaggedShapes uses.
 func FuzzValidatorRequiredNullableShapes(f *testing.F) {
 	ctx := context.Background()
 	reference := playground.New(playground.WithRequiredStructEnabled())
@@ -264,9 +283,6 @@ func FuzzValidatorRequiredNullableShapes(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, shapeBlob, valueBlob []byte) {
 		rig := rigs[fuzzfill.NewCursor(shapeBlob).Intn(len(rigs))]
-		if rig.name == forbidRosterKey {
-			return // reasonTypeSchemaForbidUnmodeled
-		}
 
 		val := reflect.New(rig.typ)
 		fuzzfill.Fill(val, valueBlob, fuzzfill.WithNilContainers())
@@ -507,9 +523,8 @@ func TestWidenedDifferentialReachesStrictAgreement(t *testing.T) {
 	}
 }
 
-// forbidRosterKey names the one roster row FuzzValidatorRequiredNullableShapes
-// leaves out; see reasonTypeSchemaForbidUnmodeled.
-const forbidRosterKey = "type-derived subschema forbid"
+// forbidRowKey names the roster row whose type schema forbids a subschema.
+const forbidRowKey = "type-derived subschema forbid"
 
 // requiredNullableShapes are the one-field shapes required is checked against
 // on its own, covering both kinds of occurrence that admit null: the pointer,
@@ -526,9 +541,11 @@ const forbidRosterKey = "type-derived subschema forbid"
 // Some pointer rows pair required with a second forbidding rule. Required
 // contributes a forbidden null, and the second rule has to compose with it
 // without pushing the pair off the branch the null encoding put the null on.
-// The bare container rows carry no second rule, because their null rides a
-// ["null", base] type list with no wrapper to fall off, so they pin only that
-// the forbidden null lands.
+// The forbid row's max is not one of those rules. It is a bound, and it states
+// the same ceiling that row's type schema imposes through its not, so the two
+// validators judge by one predicate. The bare container rows carry no second
+// rule, because their null rides a ["null", base] type list with no wrapper to
+// fall off, so they pin only that the forbidden null lands.
 func requiredNullableShapes() map[string]reflect.Type {
 	field := func(typ reflect.Type, jsonTag, rule string) reflect.Type {
 		return reflect.StructOf([]reflect.StructField{{
@@ -542,7 +559,14 @@ func requiredNullableShapes() map[string]reflect.Type {
 		// the composition thinnest on. A forbidden subschema cannot join the
 		// forbidden values, so whichever of the two gives way to allOf stops
 		// applying to null. The caller draws it through WithTypeSchema.
-		forbidRosterKey:     field(reflect.TypeFor[*forbiddingWord](), "v", "required"),
+		//
+		// The tag's max=2 spells the same rune ceiling that forbidden
+		// subschema imposes, since a not on minLength 3 admits exactly the
+		// strings maxLength 2 admits. Both validators therefore judge by one
+		// predicate, so the fuzzer compares the row, and
+		// TestRequiredOnNullableRejectsNull pins that the ceiling reaches the
+		// generated schema.
+		forbidRowKey:        field(reflect.TypeFor[*forbiddingWord](), "v", "required,max=2"),
 		"string":            field(reflect.TypeFor[*string](), "v", "required"),
 		"number":            field(reflect.TypeFor[*int](), "v", "required"),
 		"float":             field(reflect.TypeFor[*float64](), "v", "required"),
@@ -582,6 +606,28 @@ func forbiddingWordSchema() jsonschema.GenerateOption {
 	})
 }
 
+// taggedCeiling returns the rune ceiling the roster shape's validate tag
+// spells, and whether it spells one. Callers read the ceiling off the tag
+// rather than repeating the number, so the tag stays the only place the
+// assertions read that number from.
+func taggedCeiling(t *testing.T, typ reflect.Type) (int, bool) {
+	t.Helper()
+
+	for part := range strings.SplitSeq(typ.Field(0).Tag.Get("validate"), ",") {
+		key, param, found := strings.Cut(part, "=")
+		if !found || key != "max" {
+			continue
+		}
+
+		ceiling, err := strconv.Atoi(param)
+		require.NoError(t, err, "the max tag on %s spells no number", typ)
+
+		return ceiling, true
+	}
+
+	return 0, false
+}
+
 // TestRequiredOnNullableRejectsNull pins that required on a field whose schema
 // admits null rejects the null instance. Go-playground rejects the nil
 // occurrence, and encoding/json writes null for that nil. A pointer and a bare
@@ -607,8 +653,33 @@ func TestRequiredOnNullableRejectsNull(t *testing.T) {
 			validator, err := jsonschema.Compile(t.Context(), schema)
 			require.NoError(t, err)
 
-			doc, err := json.Marshal(schema.Properties["v"])
+			prop := schema.Properties["v"]
+
+			doc, err := json.Marshal(prop)
 			require.NoError(t, err)
+
+			// The forbid row carries a type schema forbidding a subschema that
+			// imposes a rune ceiling, and its tag must spell that same ceiling
+			// for the two validators to judge by one predicate. The generated
+			// property must carry both the ceiling and the forbidden null. The
+			// gate reads the field's Go type. Reading the tag would let a
+			// dropped tag skip the check, and reading the roster key would let
+			// a rename silence it.
+			if typ.Field(0).Type == reflect.PointerTo(reflect.TypeFor[forbiddingWord]()) {
+				ceiling, ok := taggedCeiling(t, typ)
+				require.True(t, ok,
+					"the forbid row must spell the ceiling its type schema forbids, "+
+						"or FuzzValidatorRequiredNullableShapes cannot compare it")
+
+				require.NotNil(t, prop.MaxLength, "the max tag wrote no maxLength: %s", doc)
+				assert.Equal(t, ceiling, *prop.MaxLength, "the maxLength must be the tag's ceiling: %s", doc)
+
+				// The forbidden null has to hold the property's own not slot,
+				// which the forbidden subschema competes for.
+				require.NotNil(t, prop.Not, "the forbidden null left the property: %s", doc)
+				require.NotNil(t, prop.Not.Const, "the not must forbid a value, not a subschema: %s", doc)
+				assert.Nil(t, *prop.Not.Const, "the forbidden value must be the null: %s", doc)
+			}
 
 			// The nil occurrence: go-playground rejects it, so the schema must
 			// too. The zero value of a one-field struct is exactly that.
@@ -663,6 +734,53 @@ func TestRequiredNullableNilSideIsCompared(t *testing.T) {
 			assert.Positive(t, seededNil[name], "no seed pair reaches the %s row with its field nil", name)
 		})
 	}
+}
+
+// TestRequiredNullableForbidRowIsCompared pins that
+// FuzzValidatorRequiredNullableShapes reaches the forbid row on its seeds, not
+// only under an explicit -fuzz run. No shared shape blob draws that row, so
+// without the seeds written for it the deterministic run never compares it and
+// the row is excluded in all but name.
+//
+// The row's whole subject is the ceiling both validators judge it by, so the
+// seeds must draw it on both sides of that ceiling. If every draw produced a
+// string within the ceiling, the two validators would agree for the wrong
+// reason.
+func TestRequiredNullableForbidRowIsCompared(t *testing.T) {
+	t.Parallel()
+
+	shapes := requiredNullableShapes()
+	require.Contains(t, shapes, forbidRowKey, "the roster no longer holds this row")
+
+	ceiling, ok := taggedCeiling(t, shapes[forbidRowKey])
+	require.True(t, ok, "the forbid row no longer spells a ceiling")
+
+	order := requiredNullableOrder()
+
+	var within, above int
+
+	for _, pair := range requiredNullableSeeds() {
+		if order[fuzzfill.NewCursor(pair[0]).Intn(len(order))] != forbidRowKey {
+			continue
+		}
+
+		val := reflect.New(shapes[forbidRowKey])
+		fuzzfill.Fill(val, pair[1], fuzzfill.WithNilContainers())
+
+		field := val.Elem().Field(0)
+		if field.IsNil() {
+			continue
+		}
+
+		if utf8.RuneCountInString(field.Elem().String()) > ceiling {
+			above++
+		} else {
+			within++
+		}
+	}
+
+	assert.Positive(t, within, "no seed pair draws the forbid row within its ceiling")
+	assert.Positive(t, above, "no seed pair draws the forbid row above its ceiling")
 }
 
 // seededNilRows counts, per roster row, the seed pairs that draw that row and
