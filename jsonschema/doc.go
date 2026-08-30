@@ -1297,14 +1297,18 @@
 // document or substitute is not a tree and [Compile] rejects it. Only a
 // hand-built graph can carry such sharing; a parsed document never does.
 //
-// A ref whose expansion reaches its own target, a recursive schema,
-// returns an error wrapping [ErrRefCycle]: a cyclic reference graph has no
-// finite expansion. A $dynamicRef under Draft 2020-12 returns an error
-// wrapping [ErrRefInline], since its target depends on the dynamic scope at
-// validation time and no single replacement preserves that (Draft 7 ignores
-// the keyword, as the validator does). A non-local ref with no resolver
-// configured, or any ref whose target cannot be found, returns an error
-// wrapping [ErrRefResolve].
+// A ref whose target is a node the walk is already inside closes a reference
+// cycle and returns an error wrapping [ErrRefCycle], since a cyclic reference
+// graph has no finite expansion. The walk marks every node it enters, the root
+// document included, so the truncation point does not depend on whether the
+// walk reached that node by descending the document or by expanding a ref to
+// it.
+//
+// A $dynamicRef under Draft 2020-12 returns an error wrapping [ErrRefInline],
+// since its target depends on the dynamic scope at validation time and no
+// single replacement preserves that (Draft 7 ignores the keyword, as the
+// validator does). A non-local ref with no resolver configured, or any ref
+// whose target cannot be found, returns an error wrapping [ErrRefResolve].
 //
 // Inline vets the root document before any reference resolves, through the
 // policy [Compile] applies to the document it is given (see Remote References
@@ -1377,15 +1381,14 @@
 // failed: a failure inside a nested expansion consults the innermost
 // failing ref with its path in its containing document, and a declined
 // consultation propagates outward without re-consulting at the enclosing
-// refs. A cycle failure belongs to the expansion that closed it: a copy
-// truncated by a cycle stays local to that expansion rather than being
-// reused, so the same source ref can consult again when another expansion
-// reaches it with a different in-flight stack. A substitute is deep-copied
-// before splicing and is itself inlined
-// recursively, its refs resolving in the context of the document containing
-// the failing ref; a cycle introduced by the substitute is an ordinary
-// [ErrRefCycle]. The copy enters resolution space as a document of its own,
-// so Inline vets it as one, and a violation ends the call with the check's
+// refs. A cycle failure belongs to the expansion that closed it. A copy
+// truncated by a cycle stays local to that expansion rather than being reused,
+// so the same source ref consults again from a position whose walk is inside a
+// different set of nodes. A substitute is deep-copied before splicing and is
+// itself inlined recursively, its refs resolving in the context of the document
+// containing the failing ref; a cycle introduced by the substitute is an
+// ordinary [ErrRefCycle]. The copy enters resolution space as a document of its
+// own, so Inline vets it as one, and a violation ends the call with the check's
 // sentinel in a message naming the reference the substitute answered and the
 // document and path where the inliner consulted the fallback.
 //

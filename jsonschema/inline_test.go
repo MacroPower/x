@@ -657,9 +657,11 @@ func TestInlineRefFallback(t *testing.T) {
 			err: jsonschema.ErrRefResolve,
 		},
 		"cycle consults the ref closing each expansion and drop breaks it": {
-			// A cycle truncation depends on the expansion's inflight stack, so
+			// A cycle truncation depends on which nodes the walk is inside, so
 			// a truncated copy is never memoized: each of the two expansions
-			// consults the fallback at the ref that closed its own cycle.
+			// consults the fallback at the ref that closed its own cycle. The
+			// in-place walk of /$defs/a marks a before expanding a's ref, so
+			// the cycle closes at b's ref back to a.
 			schema: stringtest.Input(`
 				{
 					"$defs": {
@@ -670,10 +672,45 @@ func TestInlineRefFallback(t *testing.T) {
 			`),
 			fallback: drop,
 			wantCalls: []refFallbackCall{
-				{path: "/$defs/a", ref: "#/$defs/b", err: jsonschema.ErrRefCycle},
 				{path: "/$defs/b", ref: "#/$defs/a", err: jsonschema.ErrRefCycle},
+				{path: "/$defs/a", ref: "#/$defs/b", err: jsonschema.ErrRefCycle},
 			},
 			want: `{"$defs": {"a": true, "b": true}}`,
+		},
+		"self-referential def truncates the same way through a ref and in place": {
+			// /properties/x enters n through a ref and the in-place /$defs/n
+			// walk descends into it. Both close the cycle at n's own child, so
+			// the two consultations name one path and the two expansions of n
+			// carry the same shape.
+			schema: stringtest.Input(`
+				{
+					"properties": {"x": {"$ref": "#/$defs/n"}},
+					"$defs": {
+						"n": {"properties": {"next": {"$ref": "#/$defs/n"}}}
+					}
+				}
+			`),
+			fallback: drop,
+			wantCalls: []refFallbackCall{
+				{path: "/$defs/n/properties/next", ref: "#/$defs/n", err: jsonschema.ErrRefCycle},
+				{path: "/$defs/n/properties/next", ref: "#/$defs/n", err: jsonschema.ErrRefCycle},
+			},
+			want: stringtest.Input(`
+				{
+					"properties": {"x": {"properties": {"next": true}}},
+					"$defs": {"n": {"properties": {"next": true}}}
+				}
+			`),
+		},
+		"ref to the root closes at the referring node": {
+			// The walk starts at the root, so the root is in flight throughout
+			// and a ref naming it closes the cycle at that ref.
+			schema:   `{"properties": {"x": {"$ref": "#"}}}`,
+			fallback: drop,
+			wantCalls: []refFallbackCall{
+				{path: "/properties/x", ref: "#", err: jsonschema.ErrRefCycle},
+			},
+			want: `{"properties": {"x": true}}`,
 		},
 		"nested failure consults the failing ref only and a decline propagates": {
 			schema: stringtest.Input(`
@@ -795,7 +832,9 @@ func TestInlineRefFallback(t *testing.T) {
 				}
 			`),
 		},
-		"cycle introduced by the substitute is an ordinary cycle error": {
+		"cycle introduced by the substitute closes on the node bearing the ref": {
+			// The walk is inside /properties/a when the substitute's own ref
+			// names it, so the cycle closes at the first substitute.
 			schema: `{"properties": {"a": {"$ref": "#/missing"}}}`,
 			fallback: jsonschema.RefFallbackFunc(func(_ context.Context, f jsonschema.RefFailure) jsonschema.RefAction {
 				if errors.Is(f.Err, jsonschema.ErrRefCycle) {
@@ -805,7 +844,6 @@ func TestInlineRefFallback(t *testing.T) {
 				return jsonschema.SubstituteRef(&jsonschema.Schema{Ref: "#/properties/a"})
 			}),
 			wantCalls: []refFallbackCall{
-				{path: "/properties/a", ref: "#/missing", err: jsonschema.ErrRefResolve},
 				{path: "/properties/a", ref: "#/missing", err: jsonschema.ErrRefResolve},
 				{path: "/properties/a", ref: "#/properties/a", err: jsonschema.ErrRefCycle},
 			},

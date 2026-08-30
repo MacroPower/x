@@ -262,9 +262,9 @@ var (
 	// originates in that package or here.
 	ErrIDCollision = refresolve.ErrIDCollision
 
-	// ErrRefCycle is returned by [Inline] when expanding a $ref reaches a
-	// schema whose own expansion is still in progress: the reference graph
-	// is cyclic, so it has no finite static expansion.
+	// ErrRefCycle is returned by [Inline] when a $ref resolves to a node the
+	// walk is already inside. The reference graph is cyclic, so it has no
+	// finite static expansion.
 	ErrRefCycle = errors.New("reference cycle")
 
 	// ErrRefInline is returned by [Inline] for a reference construct with no

@@ -66,8 +66,10 @@ type inliner struct {
 	// document that referenced it.
 	vetter *schemavet.Vetter
 
-	// The inflight[id] flag marks a pristine schema whose self-contained copy is
-	// currently being built; a ref that resolves to an in-flight schema is a cycle.
+	// The inflight[id] flag marks a pristine schema the walk is currently inside;
+	// a ref that resolves to an in-flight schema is a cycle. [inliner.walkPair]
+	// owns the flag and sets it for every node it enters, in place or through a
+	// ref.
 	inflight []bool
 
 	// The memo[id] entry is a pristine schema's finished self-contained copy, so
@@ -110,9 +112,9 @@ type inliner struct {
 
 	// Count of fallback consultations caused by a ref closing on an in-flight
 	// target. Unlike a resolution failure, which fails identically wherever the
-	// ref is expanded from, a cycle truncation depends on the inflight stack of
-	// the expansion that hit it, so a copy built while the counter moved is
-	// context-dependent and must not be memoized (see [inliner.inlineCopy]).
+	// ref is expanded from, a cycle truncation depends on which nodes the walk
+	// is inside when it reaches the ref, so a copy built while the counter moved
+	// is context-dependent and must not be memoized (see [inliner.inlineCopy]).
 	cycleFallbacks int
 
 	// Current depth of nested substitute expansions. Each [SubstituteRef]
@@ -343,11 +345,12 @@ func WithRefFallback(f RefFallback) InlineOption {
 // time and a document outside the expansion has no reference in the expansion
 // for a policy to answer.
 //
-// A ref whose expansion reaches its own target returns an error wrapping
-// [ErrRefCycle]. A $dynamicRef under Draft 2020-12 has no faithful static
-// expansion and returns an error wrapping [ErrRefInline] (Draft 7 ignores the
-// keyword, as the validator does). A non-local ref with no resolver, or an
-// unresolvable target, returns an error wrapping [ErrRefResolve].
+// A ref whose target is a node the walk is already inside returns an error
+// wrapping [ErrRefCycle]. A $dynamicRef under Draft 2020-12 has no faithful
+// static expansion and returns an error wrapping [ErrRefInline] (Draft 7
+// ignores the keyword, as the validator does). A non-local ref with no
+// resolver, or an unresolvable target, returns an error wrapping
+// [ErrRefResolve].
 // [WithRefFallback] sets a per-reference policy that can turn any of these
 // failures into dropping the reference keyword or expanding a substitute
 // schema instead.
@@ -713,6 +716,11 @@ func (in *inliner) internedID(s *Schema) (int, error) {
 // spliced into working per the draft's sibling rules. Spliced copies have no
 // pristine counterpart and are already self-contained, so the walk never
 // descends into them.
+//
+// The pristine node stays in flight for the whole visit, so a ref resolving to
+// any node the walk is currently inside closes a cycle. A cycle therefore
+// truncates at the same hop whether the walk reached the node by descending the
+// document or by expanding a ref to it.
 func (in *inliner) walkPair(working, pristine *Schema, path string) error {
 	// A node reached a second time is already expanded in place, and both
 	// positions read that one node. Expanding it again would splice its target
@@ -722,6 +730,34 @@ func (in *inliner) walkPair(working, pristine *Schema, path string) error {
 	}
 
 	in.expanded[working] = true
+
+	// Every pristine node reaching here belongs to a tree that recordTree
+	// interned whole, so a miss is an invariant violation rather than an ordinary
+	// absence, and internedID surfaces it instead of letting a zero id alias the
+	// root's bookkeeping.
+	id, err := in.internedID(pristine)
+	if err != nil {
+		return err
+	}
+
+	// Mark the node the walk is descending into and clear the mark on the way
+	// out, so a ref below it closes a cycle. The mark sits after the expanded
+	// check because that early return descends nothing, so no ref runs under it
+	// to close on the node.
+	//
+	// A node already in flight belongs to an outer visit, which owns the clear.
+	// An aliased document (a resolver document or a substitute is held to the
+	// no-cycle rule rather than the tree rule, so aliasing survives there) can
+	// carry one node both on the walk's own path and inside a ref target's
+	// subtree, and the walk enters that node again below the visit that marked
+	// it. An unconditional deferred clear would release the flag on the way out
+	// of the inner visit and leave the cycle unguarded for the rest of the outer
+	// one, and such a graph then expands without bound.
+	if !in.inflight[id] {
+		in.inflight[id] = true
+
+		defer func() { in.inflight[id] = false }()
+	}
 
 	// Self-contained copies to join the node's allOf after its children are
 	// walked: a Draft 2020-12 $ref target, a fallback substitute for a
@@ -852,8 +888,8 @@ func (in *inliner) expandTarget(pristine *Schema, path string) (*Schema, error) 
 		return in.substitute(pristine, path, ref, err)
 	}
 
-	// A target already indexed and currently in flight closes a reference cycle;
-	// a not-yet-indexed target cannot be in flight.
+	// A target the walk is already inside closes a reference cycle; a
+	// not-yet-indexed target cannot be in flight.
 	if id, ok := in.index.nodeID(target); ok && in.inflight[id] {
 		in.cycleFallbacks++
 
@@ -1042,12 +1078,12 @@ func (in *inliner) substitute(pristine *Schema, path, ref string, inlineErr erro
 // referenced from several places is expanded once; every additional use clones
 // the memoized copy so no two positions in the output share nodes. A copy
 // truncated by the cycle fallback is never recorded, since the truncation
-// belongs to this expansion's inflight stack, not to the target. A
+// depends on which nodes the walk is inside, not on the target alone. A
 // substitute-originated copy passes memoize false: its pointer is fresh and
-// never resolved again, so memoizing it would only accumulate dead entries. The
-// inflight set marks targets whose copy is still being built: a ref resolving
-// to one means the expansion reached its own target, which only a reference
-// cycle can cause.
+// never resolved again, so memoizing it would only accumulate dead entries.
+// [inliner.walkPair] marks the target in flight for the whole walk over the
+// copy, so a ref reaching it again from inside its own expansion closes a
+// cycle.
 func (in *inliner) inlineCopy(target *Schema, path string, memoize bool) (*Schema, error) {
 	// The target was interned before inlineCopy runs (record seeds it at the
 	// resolving ref, or it belongs to a document already recorded); the checked
@@ -1061,9 +1097,6 @@ func (in *inliner) inlineCopy(target *Schema, path string, memoize bool) (*Schem
 	if memoized := in.memo[id]; memoized != nil {
 		return cloneSchema(memoized), nil
 	}
-
-	in.inflight[id] = true
-	defer func() { in.inflight[id] = false }()
 
 	cp := cloneSchema(target)
 
@@ -1088,10 +1121,10 @@ func (in *inliner) inlineCopy(target *Schema, path string, memoize bool) (*Schem
 	// not only the top-level node.
 	stripIdentifiers(cp)
 
-	// A copy whose expansion consulted the cycle fallback was truncated by the
-	// inflight stack of this particular expansion; an expansion of the same
-	// target from a cycle-free position must not inherit the truncation, so
-	// the copy is returned without being memoized.
+	// A copy whose expansion consulted the cycle fallback was truncated at a ref
+	// that closed on a node this particular expansion is inside; an expansion of
+	// the same target from a cycle-free position must not inherit the
+	// truncation, so the copy is returned without being memoized.
 	if memoize && in.cycleFallbacks == cyclesBefore {
 		in.memo[id] = cp
 

@@ -1488,9 +1488,11 @@ Failure modes:
   aliased resolver document or substitute is not a tree and `Compile` rejects
   it. Only a hand-built graph can carry such sharing; a parsed document never
   does.
-- A ref whose expansion reaches its own target is recursive and returns an
-  error wrapping `ErrRefCycle`: a cyclic reference graph has no finite
-  expansion.
+- A ref whose target is a node the walk is already inside closes a reference
+  cycle and returns an error wrapping `ErrRefCycle`, since a cyclic reference
+  graph has no finite expansion. The walk marks every node it enters, the root
+  document included, so the truncation point does not depend on whether the walk
+  reached that node by descending the document or by expanding a ref to it.
 - A `$dynamicRef` under Draft 2020-12 returns an error wrapping
   `ErrRefInline`, since its target depends on the dynamic scope at validation
   time and no single replacement preserves that (Draft 7 ignores the keyword,
@@ -1572,12 +1574,11 @@ consulted once per failure, at the reference that directly failed: a
 failure inside a nested expansion consults the innermost failing ref with
 its path in its containing document, and a declined consultation propagates
 outward without re-consulting at the enclosing refs. A cycle failure
-belongs to the expansion that closed it: a copy truncated by a cycle stays
+belongs to the expansion that closed it. A copy truncated by a cycle stays
 local to that expansion rather than being reused, so the same source ref
-can consult again when another expansion reaches it with a different
-in-flight stack. A substitute is
-deep-copied before splicing and is itself inlined recursively, its refs
-resolving in the context of the document containing the failing ref; a
+consults again from a position whose walk is inside a different set of nodes.
+A substitute is deep-copied before splicing and is itself inlined recursively,
+its refs resolving in the context of the document containing the failing ref; a
 cycle introduced by the substitute is an ordinary `ErrRefCycle`. The copy
 enters resolution space as a document of its own, so `Inline` vets it as one,
 and a violation ends the call with the check's sentinel in a message naming
@@ -1631,7 +1632,7 @@ configured.
 | `ErrUnknownVocabulary`        | A required `$vocabulary` URI is unrecognized, or 2020-12 core is marked optional (returned by `Compile`).                                                                                                                                     |
 | `ErrRefResolve`               | A `RefResolver` returns an error resolving a remote `$ref`; in `Inline`, also a non-local ref with no resolver or any unresolvable target.                                                                                                    |
 | `ErrIDCollision`              | A document entering resolution space claims a `$id` or anchor another document already holds (returned by `Compile` and `Inline`; a substitute is judged on its `$id` alone).                                                                 |
-| `ErrRefCycle`                 | `Inline` expands a `$ref` that reaches its own target: the reference graph is cyclic and has no finite expansion.                                                                                                                             |
+| `ErrRefCycle`                 | `Inline` expands a `$ref` whose target is a node the walk is already inside; the reference graph is cyclic and has no finite expansion.                                                                                                       |
 | `ErrRefInline`                | `Inline` encounters a reference with no faithful static expansion (`$dynamicRef` under Draft 2020-12).                                                                                                                                        |
 | `ErrProviderPanic`            | A `JSONSchemaProvider`/`JSONSchemaExtender` method panics (recovered and wrapped).                                                                                                                                                            |
 | `ErrInvalidDefaultsInstance`  | The `WithDefaultsFrom` instance does not match the generated root type or does not marshal to a JSON object.                                                                                                                                  |

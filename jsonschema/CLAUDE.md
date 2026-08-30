@@ -33,9 +33,17 @@ The package has two independent halves sharing the `Schema` type:
   substitute, and each target materialized from an unknown keyword) into its own
   `schemaIndex` via `intern`, and its expansion bookkeeping (the in-flight cycle
   guard, the memoized self-contained copies, and each node's path and
-  containing-document URI) lives in slices indexed by the assigned id. The
-  inliner clones through `internal/schemaclone` for its pristine and working
-  copies. Structural vetting is compiler-enforced through the
+  containing-document URI) lives in slices indexed by the assigned id.
+  `walkPair` owns the in-flight guard and marks every node the walk is inside,
+  the root document included. A cycle therefore truncates at the same depth
+  whether the walk reached that node by descending the document or by expanding
+  a ref to it. The guard skips a node another visit already marked, since an
+  aliased document can carry one node both on the walk's path and inside a ref
+  target's subtree, and clearing the mark on the way out of the inner visit
+  would leave the rest of the outer one unguarded. A truncated copy is never
+  memoized, because two positions can reach the same target with different nodes
+  in flight. The inliner clones through `internal/schemaclone` for its pristine
+  and working copies. Structural vetting is compiler-enforced through the
   `internal/schemavet` currency: only boundary code holds a bare `*Schema`
   (the public API, the fetch closures, and the shared reference-closure walk,
   whose fetches register a document and whose hooks vet it before either engine
