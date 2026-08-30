@@ -1,9 +1,11 @@
 package jsonschema
 
 import (
+	"fmt"
 	"reflect"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/schemafield"
+	"go.jacobcolvin.com/x/jsonschema/internal/tagmodel"
 )
 
 // nodeKind classifies an IR node by the JSON Schema shape its render produces.
@@ -58,6 +60,10 @@ type node struct {
 	// base for the null-branch split), so hooks dispatch on this
 	// {"type":["null","string"]} view instead. Nil for every other node.
 	tagView *Schema
+	// NullLit records the null literals the field's jsonschema tag took, for
+	// the re-check in [generator.checkNullLiterals]. Nil for every node whose
+	// tag spelled none.
+	nullLit *nullLiteral
 	props   []nodeProp  // struct properties, declaration order
 	prefix  []*node     // array elements (prefixItems / itemsArray)
 	embeds  []embedNode // struct allOf/anyOf composition branches
@@ -105,6 +111,17 @@ func (n *node) nullableDecision() bool {
 	}
 
 	return n.nullable
+}
+
+// nullLiteral records what a field's jsonschema tag committed a null literal
+// to. The field's own null decision can still change after the tag reads it, so
+// the generator carries the record to a pass that runs once every decision is
+// final.
+type nullLiteral struct {
+	parent reflect.Type // the struct whose schema carries the field
+	typ    reflect.Type // the field's own Go type; a kindRef reads def.typ
+	field  string       // the field's JSON name
+	keys   []string     // the keys that took the literal, in tag order
 }
 
 // nodeProp is a struct property: its value node and JSON name.
@@ -277,6 +294,48 @@ func walkNodes(root *node, seen map[*defEntry]bool, visit func(*node)) {
 	for _, e := range root.embeds {
 		walkNodes(e.branch, seen, visit)
 	}
+}
+
+// checkNullLiterals re-checks every null literal a field's jsonschema tag took
+// against the occurrence's final null decision and reports the first one that
+// decision now refuses. A self- or mutually recursive field resolves against a
+// $defs entry still being built, so a [Nullability] stance a type-level hook
+// records for that type lands after the tag has already accepted the literal.
+// [node.nullableDecision] reads the stance lazily, and this pass is where the
+// tag's early answer and that late stance meet.
+//
+// The walk is [generator.walkReachable] rather than [walkNodes], so the check
+// covers exactly the defs render emits. A def whose only surviving reference is
+// a raw $ref string an extender authored into a payload is reachable by that
+// scan alone. The visitor returns nothing, so the pass keeps the first report
+// and lets the walk finish. Walk order is deterministic, which is what makes
+// the first report name one occurrence rather than an arbitrary one.
+//
+// Only a kindRef node reaches the report. Every other node's null decision is
+// fixed inside schemaForType before buildFieldSchema reads it, and
+// extendTypeSchema runs inside buildStructSchema ahead of defineType, so the
+// cycle placeholder is the one window a stance lands in after the tag, and it
+// always yields a reference. The field's own type answers if that stops
+// holding.
+func (g *generator) checkNullLiterals(root *node) error {
+	var reported error
+
+	g.walkReachable(root, map[*defEntry]bool{}, func(n *node) {
+		if reported != nil || n.nullLit == nil || n.nullableDecision() {
+			return
+		}
+
+		typ := n.nullLit.typ
+		if n.kind == kindRef {
+			typ = n.def.typ
+		}
+
+		reported = fmt.Errorf("%s field %q: jsonschema tag: key %q: %w %s",
+			n.nullLit.parent, n.nullLit.field, n.nullLit.keys[0],
+			tagmodel.ErrNullNotAdmitted, typ)
+	}, nil)
+
+	return reported
 }
 
 // payloadRefTargets maps every $defs ref string a hook may have authored to its

@@ -79,6 +79,14 @@ var (
 // Result reports what [Apply] did that the generator's render phase needs. It is
 // internal, so it is free to widen as more provenance is required.
 type Result struct {
+	// NullLiteralKeys names the keys whose value the tag spelled as the literal
+	// null, in tag order. The generator re-checks them once every nullability
+	// stance is final. Reading them here rather than scanning the canvas for
+	// nulls is what separates a literal the tag wrote from one a hook or an
+	// extender authored. An override never carries keys here. [Apply] rejects
+	// the tag for every type but null, and under type=null it drops the keys,
+	// since the rebuilt field carries the literal on its own canvas.
+	NullLiteralKeys []string
 	// TypeOverridden reports whether a type= pair replaced the field's type. The
 	// field is then inline and non-nullable, so the builder detaches its $ref
 	// link and clears its null bit.
@@ -116,7 +124,10 @@ type Input struct {
 	// being a pointer, and WithNullable(false) drops the null branch a pointer
 	// would otherwise carry. A scalar key spells that admission as the literal
 	// null, so [Apply] accepts default=null wherever that decision applies,
-	// whether or not the rendered schema keeps a null branch.
+	// whether or not the rendered schema keeps a null branch. A type= pair
+	// anywhere in the tag withdraws that acceptance. A stance recorded after
+	// this decision withdraws it too, which is why [Result.NullLiteralKeys]
+	// reports the keys that took the literal.
 	Nullable bool
 }
 
@@ -134,6 +145,12 @@ type Input struct {
 // parsing while one after it parses as the overridden type. The non-scalar
 // overrides (array, object, null) spell no scalar, so a scalar key following
 // one is an error.
+//
+// The ordering rule does not govern the literal null. A type= pair replaces the
+// occurrence the literal was parsed against, so a null literal on either side of
+// one is an error. A literal before type=null is the exception, since that
+// override names the null instance outright. One after it is an error like every
+// other scalar key there, for want of a scalar type to parse against.
 func Apply(in Input) (Result, error) {
 	directives, description, err := Parse(in.Tag)
 	if err != nil {
@@ -171,7 +188,24 @@ func Apply(in Input) (Result, error) {
 		}
 	}
 
-	return Result{TypeOverridden: state.overriddenType != ""}, nil
+	// A null literal the fold already took is wrong once a type= pair lands
+	// after it, since the override replaces the occurrence that admitted the
+	// null. The check runs after the fold rather than as a pre-scan over the
+	// directives, because a pre-scan would reject every scalar key preceding
+	// the pair and only the null literal is wrong there.
+	if state.overrideForbidsNull() && len(state.nullKeys) > 0 {
+		return Result{}, state.nullNotAdmittedError(state.nullKeys[0])
+	}
+
+	// An override withdraws the occurrence the literal was parsed against, so
+	// the keys go no further. Under type=null the literal is still correct and
+	// the rebuilt field carries it on the canvas, and nothing later re-checks a
+	// field the override made non-nullable.
+	if state.overriddenType != "" {
+		return Result{TypeOverridden: true}, nil
+	}
+
+	return Result{NullLiteralKeys: state.nullKeys}, nil
 }
 
 // applyState is the fold's mutable state: where facts land, the effective types
@@ -188,6 +222,9 @@ type applyState struct {
 	fieldType reflect.Type
 	groupsSet map[string]bool
 	seen      map[string]bool
+	// The nullKeys field names the scalar keys the fold read as the literal
+	// null, in tag order (see [Result.NullLiteralKeys]).
+	nullKeys []string
 	// The overriddenType field names the JSON type a type= pair installed, and is
 	// empty until one does.
 	overriddenType string
@@ -209,6 +246,13 @@ func (s *applyState) apply(d Directive) error {
 
 	if !s.scalarOK() && isScalarValueKey(key) {
 		return fmt.Errorf("jsonschema tag: key %q cannot follow type=%s", key, s.overriddenType)
+	}
+
+	// The override leaves the literal nothing to assign to. Reporting here
+	// rather than letting the scalar constructor reject it is what makes this
+	// ordering name the JSON type the other ordering names.
+	if s.overrideForbidsNull() && spellsNullLiteral(key, value) {
+		return s.nullNotAdmittedError(key)
 	}
 
 	// A type= override drops the constraint groups the new type cannot use.
@@ -358,6 +402,15 @@ func (s *applyState) applyConstraint(rule tagmodel.KeyRule, key, value string) e
 		return s.wrapApplyError(key, value, err)
 	}
 
+	// An enum on a sequence retargets to the element canvases, where each
+	// element answers null admission from its own Go type, so the array form
+	// records nothing. Only enum reaches that form. The matrix carries no array
+	// cell for a pinned value, so a const on a sequence is rejected upstream.
+	if isValueKey(key) && shape.Form != tagmodel.FormArray &&
+		slices.Contains(bound.Params.Values(), typename.Null) {
+		s.nullKeys = append(s.nullKeys, key)
+	}
+
 	return nil
 }
 
@@ -375,6 +428,25 @@ func (s *applyState) wrapApplyError(key, value string, err error) error {
 	}
 
 	return fmt.Errorf("jsonschema tag: key %q: %w", key, err)
+}
+
+// overrideForbidsNull reports whether a type= pair has installed a type that
+// refuses the null literal. Six of the seven names do. Only type=null names the
+// null instance outright, so a literal the fold already took stays valid under
+// it, and a scalar key that follows it is rejected by [applyState.scalarOK]
+// before this is asked.
+func (s *applyState) overrideForbidsNull() bool {
+	return s.overriddenType != "" && s.overriddenType != typename.Null
+}
+
+// nullNotAdmittedError phrases the rejection a type= pair forces on a null
+// literal. It names the JSON type the override installed rather than the Go
+// kind [tagmodel.Shape.ParseScalar] reports, so type=integer reads integer
+// rather than int64, and a scalar override reports the same type on either side
+// of the pair.
+func (s *applyState) nullNotAdmittedError(key string) error {
+	return fmt.Errorf("jsonschema tag: key %q: %w %s",
+		key, tagmodel.ErrNullNotAdmitted, s.overriddenType)
 }
 
 // bind resolves a key's parameters, with the one exception this dialect's
@@ -461,6 +533,10 @@ func (s *applyState) applyDefault(key, value string) error {
 		return fmt.Errorf("jsonschema tag: key %q: %w", key, err)
 	}
 
+	if v == nil {
+		s.nullKeys = append(s.nullKeys, key)
+	}
+
 	raw, err := json.Marshal(v)
 	if err != nil {
 		return fmt.Errorf("jsonschema tag: key %q: %w", key, err)
@@ -486,6 +562,10 @@ func (s *applyState) applyExamples(key, value string) error {
 	vals, err := s.shape().ParseScalars(parts, tagPolicy)
 	if err != nil {
 		return fmt.Errorf("jsonschema tag: key %q: %w", key, err)
+	}
+
+	if slices.Contains(vals, nil) {
+		s.nullKeys = append(s.nullKeys, key)
 	}
 
 	s.canvas.Examples = vals
@@ -601,6 +681,28 @@ func isScalarValueKey(key string) bool {
 	switch key {
 	case keyword.Default, keyword.Const, keyword.Enum, keyword.Examples:
 		return true
+	default:
+		return false
+	}
+}
+
+// isValueKey reports whether a key states the instance's own value outright.
+// Const and enum are the two such keys [applyState.applyConstraint] routes, so
+// they are the two whose parameters it reads for a null literal.
+func isValueKey(key string) bool {
+	return key == keyword.Const || key == keyword.Enum
+}
+
+// spellsNullLiteral reports whether a scalar key's raw value carries the null
+// literal. The test is exact rather than a substring search, since
+// [tagmodel.Shape.ParseScalar] reads null as the literal before it dispatches on
+// the form and no other value of these keys spells it.
+func spellsNullLiteral(key, value string) bool {
+	switch key {
+	case keyword.Default, keyword.Const:
+		return value == typename.Null
+	case keyword.Enum, keyword.Examples:
+		return slices.Contains(splitEnumValues(value), typename.Null)
 	default:
 		return false
 	}

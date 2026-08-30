@@ -192,7 +192,13 @@ The package has two independent halves sharing the `Schema` type:
   `Shape.ParseScalar` the one scalar constructor including the
   convert-and-marshal round-trip a text-marshaling type needs, and a total
   `[opCount][formCount]` matrix the
-  dispatch. A coerced float is the one shape whose zero has two serializations,
+  dispatch. The field's node also records which tag keys took a null literal,
+  and `generate` re-checks those keys once every nullability stance is final. A
+  self-referential field reads the decision before its type records a stance, so
+  the re-check reports the tag error rather than rendering the null.
+  `FieldContext.Shape` keeps the early answer. That costs nothing, since the
+  built-in validate dialect sets `AllowNullScalar: false` and spells no null.
+  A coerced float is the one shape whose zero has two serializations,
   since Go's negative zero compares equal to zero and `encoding/json` writes the
   sign bit for it. `Shape.zeroLiterals` names both texts, and the shared
   `forbidLiteral` path behind `required` and `ne` forbids each. `eq` and `oneof`

@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/x/jsonschema"
+	"go.jacobcolvin.com/x/jsonschema/internal/tagmodel"
 )
 
 // Tests for jsonschema struct-tag parsing: key-value vs bare-description
@@ -1495,8 +1496,12 @@ func TestTagEnumExamplesEmptySegment(t *testing.T) {
 // before type= parses against the field's Go type, while one after it parses
 // against the overridden JSON type via a stand-in. Overrides to the
 // non-scalar types (array, object, null) leave no type to parse against, so
-// scalar keys following them are errors, as is the literal null (the
-// stand-ins are never pointers).
+// scalar keys following them are errors. The ordering rule does not govern the
+// literal null. An override replaces the occurrence the literal was parsed
+// against, so the tag rejects the literal on either side of the pair, and when a
+// key on either side is an error, the message names the JSON type rather than
+// the stand-in's Go kind. A literal before type=null is the exception, since that
+// override names the null instance outright.
 func TestTagScalarAfterTypeOverride(t *testing.T) {
 	t.Parallel()
 
@@ -1618,7 +1623,155 @@ func TestTagScalarAfterTypeOverride(t *testing.T) {
 
 				return jsonschema.GenerateFor[T](t.Context())
 			},
-			err: "cannot assign null",
+			err: "cannot assign null to non-nullable type string",
+		},
+		"null default after integer override": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V *int `json:"v" jsonschema:"type=integer,default=null"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			err: "cannot assign null to non-nullable type integer",
+		},
+		// The same rejection from the other side of the pair. The fold takes
+		// the literal against the slice's own decision, and the override then
+		// withdraws the occurrence that admitted it.
+		"null examples before a string override": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V []string `json:"v" jsonschema:"examples=null,type=string"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			err: "cannot assign null to non-nullable type string",
+		},
+		"null const before an integer override": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V *int `json:"v" jsonschema:"const=null,type=integer"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			err: "cannot assign null to non-nullable type integer",
+		},
+		"null enum member before a string override": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V *string `json:"v" jsonschema:"enum=a|null,type=string"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			err: "cannot assign null to non-nullable type string",
+		},
+		// A null literal keeps its meaning under the one override that names
+		// the null instance, so type=null is the exception to the rule the
+		// rows above state. Only the literal preceding it survives. A type=null
+		// override carries no scalar type, so a key after it is an error like
+		// every other scalar key there.
+		"null default before a null override": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V *string `json:"v" jsonschema:"default=null,type=null"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			prop: "v",
+			want: `{"type":"null","default":null}`,
+		},
+		"null default after a null override": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V *string `json:"v" jsonschema:"type=null,default=null"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			err: `key "default" cannot follow type=null`,
+		},
+		// A list-valued key after the override reaches the rejection through the
+		// per-member null test, so the report names the JSON type here too
+		// rather than the stand-in's int64.
+		"null enum member after an integer override": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V *string `json:"v" jsonschema:"type=integer,enum=1|null"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			err: "cannot assign null to non-nullable type integer",
+		},
+		// An override to array carries no scalar type, so a null key following
+		// it reports the missing scalar type instead. One preceding it still
+		// reaches the null rejection, since the array the override names admits
+		// no null either.
+		"null default before an array override": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V []string `json:"v" jsonschema:"default=null,type=array"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			err: "cannot assign null to non-nullable type array",
+		},
+		// An enum on a sequence retargets to the item schemas, so a non-array
+		// override reports the group conflict before the null literal is ever
+		// weighed. That conflict is what keeps the element retarget outside the
+		// null bookkeeping.
+		"null enum member on a sequence before a string override": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V []*string `json:"v" jsonschema:"enum=a|null,type=string"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			err: "array constraint conflicts with type=string",
+		},
+		// Tag order picks the key the report names.
+		"the first null key names the rejection": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V *string `json:"v" jsonschema:"default=null,examples=null,type=string"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			err: `key "default": cannot assign null`,
+		},
+		// Only the null literal is rejected. A non-null scalar before the
+		// override still parses against the field's own shape.
+		"a non-null default before a string override": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V *string `json:"v" jsonschema:"default=abc,type=string"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			prop: "v",
+			want: `{"type":"string","default":"abc"}`,
+		},
+		// The key after the override is the side read from the raw tag text, so
+		// this is where a value that merely begins with null has to stay an
+		// ordinary string.
+		"a default beginning with null after a string override": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V *string `json:"v" jsonschema:"type=string,default=nullish"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			prop: "v",
+			want: `{"type":"string","default":"nullish"}`,
 		},
 		"overflow still checked against stand-in": {
 			generate: func() (*jsonschema.Schema, error) {
@@ -1938,9 +2091,10 @@ func TestTagNullLiteralFollowsTheNullDecision(t *testing.T) {
 			want: `{"default":null,"anyOf":[{"$ref":"#/$defs/nullStanced"},{"type":"null"}]}`,
 		},
 		// Pairs apply in order, so a scalar key before a type= pair parses
-		// against the field's own occurrence. The override then replaces the
-		// type and leaves the null behind, which is a mismatch the docs record
-		// beside the other two rather than a behavior to rely on.
+		// against the field's own occurrence. The ordering rule does not govern
+		// the literal null. The override withdraws the occurrence that admitted
+		// the null, so the fold rejects the literal it already took.
+		// TestTagScalarAfterTypeOverride covers the remaining orderings.
 		"null default before a type override on a bare slice": {
 			generate: func() (*jsonschema.Schema, error) {
 				type T struct {
@@ -1949,8 +2103,7 @@ func TestTagNullLiteralFollowsTheNullDecision(t *testing.T) {
 
 				return jsonschema.GenerateFor[T](t.Context())
 			},
-			prop: "v",
-			want: `{"type":"string","default":null}`,
+			err: "cannot assign null to non-nullable type string",
 		},
 		// The carve-out is the null literal alone. A slice has no scalar value
 		// the tag can spell.
@@ -2061,37 +2214,129 @@ func TestTagNullDefaultOnASelfReferentialField(t *testing.T) {
 }
 
 // nullStancedRecursive is the self-referential type
-// TestTagNullLiteralOnARecursiveStancedType configures.
+// TestTagNullLiteralOnARecursiveStancedType configures. The untagged sibling
+// references the same type, so the report has to name the field whose tag took
+// the literal rather than every reference the stance reaches.
 type nullStancedRecursive struct {
-	Next *nullStancedRecursive `json:"next" jsonschema:"default=null"`
+	Other *nullStancedRecursive `json:"other"`
+	Next  *nullStancedRecursive `json:"next"  jsonschema:"default=null"`
 }
 
-// TestTagNullLiteralOnARecursiveStancedType pins the one occurrence the null
-// decision reaches too early. A field referencing the type it belongs to
-// resolves against a $defs entry that is still being built, so the stance the
+// nullStancedRecursiveExamples is the examples half of the same shape. Default
+// and examples are the two keys that reach a null literal on a reference. The
+// referenced shape refuses a const or an enum outright, before the null
+// decision enters into it.
+type nullStancedRecursiveExamples struct {
+	Next *nullStancedRecursiveExamples `json:"next" jsonschema:"examples=null"`
+}
+
+// nullStancedMutualOuter and nullStancedMutualInner are the mutually recursive
+// pair TestTagNullLiteralOnAMutuallyRecursiveStancedType configures. The tagged
+// field sits on the inner type, so the re-check reaches it through the outer
+// type's $defs body rather than through the root's own properties.
+type nullStancedMutualOuter struct {
+	Inner *nullStancedMutualInner `json:"inner"`
+}
+
+// nullStancedMutualInner is nullStancedMutualOuter's partner.
+type nullStancedMutualInner struct {
+	Outer *nullStancedMutualOuter `json:"outer" jsonschema:"default=null"`
+}
+
+// nullStancedPlain is the type
+// TestTagNullLiteralOnANonRecursiveStancedType records a stance for. Nothing
+// references it from inside its own definition, so its stance is recorded
+// before any tag reads it.
+type nullStancedPlain struct {
+	X string `json:"x"`
+}
+
+// forbidNullStance returns the extender that records a NullForbidden stance for
+// T, the one hook the null re-check answers to.
+func forbidNullStance[T any]() jsonschema.GenerateOption {
+	return jsonschema.WithTypeSchemaExtenderFor[T](
+		func(_ context.Context, _ jsonschema.TypeContext, ts *jsonschema.TypeSchema) error {
+			ts.Nullability = jsonschema.NullForbidden
+
+			return nil
+		})
+}
+
+// TestTagNullLiteralOnARecursiveStancedType pins the re-check that closes the
+// one window a null decision moves in. A field referencing the type it belongs
+// to resolves against a $defs entry still being built, so the stance the
 // extender records for that type lands after the tag has already accepted the
-// literal against it. The schema that comes out carries a null default on a
-// $ref whose target admits no null, which is the gap this test states rather
-// than a behavior to rely on.
+// literal against it. The generator carries the keys that took a literal to a
+// pass running once every stance is final, and that pass reports the occurrence
+// the final decision refuses.
 func TestTagNullLiteralOnARecursiveStancedType(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[nullStancedRecursive](t.Context(),
-		jsonschema.WithTypeSchemaExtenderFor[nullStancedRecursive](
-			func(_ context.Context, _ jsonschema.TypeContext, ts *jsonschema.TypeSchema) error {
-				ts.Nullability = jsonschema.NullForbidden
+	tests := map[string]struct {
+		generate func() (*jsonschema.Schema, error)
+		parent   string // the declaring struct the report must name
+		key      string // the tag key the report must name
+	}{
+		"default": {
+			generate: func() (*jsonschema.Schema, error) {
+				return jsonschema.GenerateFor[nullStancedRecursive](t.Context(),
+					forbidNullStance[nullStancedRecursive]())
+			},
+			parent: "jsonschema_test.nullStancedRecursive",
+			key:    "default",
+		},
+		"examples": {
+			generate: func() (*jsonschema.Schema, error) {
+				return jsonschema.GenerateFor[nullStancedRecursiveExamples](t.Context(),
+					forbidNullStance[nullStancedRecursiveExamples]())
+			},
+			parent: "jsonschema_test.nullStancedRecursiveExamples",
+			key:    "examples",
+		},
+	}
 
-				return nil
-			}))
-	require.NoError(t, err)
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-	def := s.Defs["nullStancedRecursive"]
-	require.NotNil(t, def)
+			_, err := tc.generate()
+			require.ErrorIs(t, err, tagmodel.ErrNullNotAdmitted)
+			require.ErrorContains(t, err,
+				tc.parent+` field "next": jsonschema tag: key "`+tc.key+`"`)
+		})
+	}
+}
 
-	got, err := json.Marshal(def.Properties["next"])
-	require.NoError(t, err)
-	assert.JSONEq(t, `{"$ref":"#/$defs/nullStancedRecursive","default":null}`, string(got),
-		"the stance drops the null branch, and the default the tag already took stays behind")
+// TestTagNullLiteralOnAMutuallyRecursiveStancedType pins the same re-check
+// where the offending field is not the root's own. The tagged field sits on the
+// inner type, so the walk reaches it through the outer type's $defs body, and
+// the report names the struct whose schema carries the field rather than the
+// root.
+func TestTagNullLiteralOnAMutuallyRecursiveStancedType(t *testing.T) {
+	t.Parallel()
+
+	_, err := jsonschema.GenerateFor[nullStancedMutualOuter](t.Context(),
+		forbidNullStance[nullStancedMutualOuter]())
+	require.ErrorIs(t, err, tagmodel.ErrNullNotAdmitted)
+	require.ErrorContains(t, err, `nullStancedMutualInner field "outer"`)
+}
+
+// TestTagNullLiteralOnANonRecursiveStancedType is the control for the case the
+// re-check never sees. A field referencing a type the generator has already
+// finished reads the final stance while the tag runs, so the scalar constructor
+// refuses the literal there and names the field's Go kind rather than the
+// referenced type.
+func TestTagNullLiteralOnANonRecursiveStancedType(t *testing.T) {
+	t.Parallel()
+
+	type holder struct {
+		Next *nullStancedPlain `json:"next" jsonschema:"default=null"`
+	}
+
+	_, err := jsonschema.GenerateFor[holder](t.Context(),
+		forbidNullStance[nullStancedPlain]())
+	require.ErrorIs(t, err, tagmodel.ErrNullNotAdmitted)
+	require.ErrorContains(t, err, "cannot assign null to non-nullable type struct")
 }
 
 // TestTagEmptyStringKeyValues covers the empty-value rule for the string-typed

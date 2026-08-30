@@ -747,8 +747,19 @@ func (fc FieldContext) Constraints() *Constraints {
 // branch too, and the field's node carries that decision, so this method reads
 // it there.
 // A caller-built context has no backing node, so its null admission falls back
-// to the pointer-derived answer. Prefer this over calling [ShapeOf] directly
-// when a context is available.
+// to the pointer-derived answer.
+//
+// A type= pair in the jsonschema tag never reaches this method. The generator
+// rebuilds an overridden field as a non-nullable, non-reference node before it
+// runs the tag interpreters, so an interpreter classifies against the overridden
+// payload and never against the shape the field carried before the override.
+//
+// A [Nullability] stance recorded for a self-referential type after this method
+// runs can withdraw the null admission the method reported. The built-in
+// validate dialect spells no null literal, so nothing in the package reads the
+// early answer for one.
+//
+// Prefer this over calling [ShapeOf] directly when a context is available.
 func (fc FieldContext) Shape() Shape {
 	shape := tagmodel.ShapeOfQuoted(fc.Type, fc.Base, fc.quotedString())
 

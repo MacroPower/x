@@ -487,6 +487,14 @@
     "jsonschemaError": "any"
   },
   {
+    "name": "a null literal before a type override is rejected",
+    "note": "the override withdraws the occurrence that admitted the null, and the late-stance half needs a self-referential type this registry has no shape for",
+    "type": "[]string",
+    "json": "v",
+    "jsonschema": "default=null,type=string",
+    "jsonschemaError": "ErrNullNotAdmitted"
+  },
+  {
     "name": "a boolean const agrees across dialects",
     "note": "the shared model's pinned-value cell on the boolean column",
     "type": "bool",

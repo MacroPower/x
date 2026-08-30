@@ -161,6 +161,14 @@ func (g *generator) generate(t reflect.Type) (*Schema, error) {
 	// mutually recursive root keeps its $ref so those references never dangle.
 	root = g.maybeInlineRoot(root)
 
+	// Re-check the null literals the field tags took. Every def entry holds its
+	// final stance here, so a reference that read the decision early answers the
+	// way [generator.render] will.
+	err = g.checkNullLiterals(root)
+	if err != nil {
+		return nil, err
+	}
+
 	schema := g.render(root)
 
 	// Emit only the defs reachable from the final root graph. A def orphaned by
@@ -1265,10 +1273,25 @@ func (g *generator) buildFieldSchema(
 			return nil, err
 		}
 
-		// A type= override replaces the field's type wholesale, so the field is
-		// now inline: it is not a reference and not nullable.
-		if res.TypeOverridden {
+		// The two outcomes are exclusive. [tagparse.Apply] rejects the tag for
+		// every type but null when it carries both a type= pair and a null
+		// literal, and under type=null it reports no keys.
+		switch {
+		case res.TypeOverridden:
+			// A type= override replaces the field's type wholesale, so the
+			// field is inline, neither a reference nor nullable.
 			fieldNode = rebuildOverriddenField(fieldNode)
+
+		case len(res.NullLiteralKeys) > 0:
+			// The tag reads the null decision before a self-referential type
+			// finishes recording its stance, so the node carries the keys that
+			// took a null literal into checkNullLiterals.
+			fieldNode.nullLit = &nullLiteral{
+				keys:   res.NullLiteralKeys,
+				parent: parentType,
+				typ:    fieldType,
+				field:  fi.JSONName,
+			}
 		}
 	}
 

@@ -86,6 +86,7 @@ const anyGenerationError = "any"
 // it means rather than matching on message text.
 func fixtureErrors() map[string]error {
 	return map[string]error{
+		"ErrNullNotAdmitted":        tagmodel.ErrNullNotAdmitted,
 		"ErrUnsupported":            tagmodel.ErrUnsupported,
 		"ErrConstraintConflict":     jsonschema.ErrConstraintConflict,
 		"ErrConflictingConstraints": validate.ErrConflictingConstraints,

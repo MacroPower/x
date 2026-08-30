@@ -457,19 +457,26 @@ a container as much as on a bare one. An `enum` on a sequence constrains the
 elements instead, and an element occurrence answers from its own Go type rather
 than from the container's decision.
 
-Three cases take the literal against a schema that admits no null, and none of
-them is behavior to rely on. The first is the element case just named. A
-`[]*string` takes a null `enum` member even under `WithNullable(false)`, where
-the element schema has no null branch to match it. The second is a
-self-referential field, which reads the decision before its type finishes
-recording a stance. Such a field resolves against a `$defs` entry still being
-built, so a `Nullability` stance a type-level hook records for that type arrives
-after the tag has accepted the literal, and the field keeps a null `default` on
-a `$ref` whose target admits no null. The third follows from the ordering rule
-below. A scalar key before a `type=` pair parses against the field's own
-occurrence, so `default=null,type=string` on a `[]string` keeps the null the
-slice admitted, and the property schema carries it beside the overriding string
-type.
+The element case just named is the one case that takes the literal against a
+schema admitting no null. A `[]*string` takes a null `enum` member even under
+`WithNullable(false)`, where the element schema has no null branch to match it.
+The member belongs to the element rather than to the field, so the field's own
+decision never reaches it.
+
+The generator checks every other literal against the shape the occurrence
+finally takes. A `type=` pair replaces the occurrence, so the null admission the
+tag read no longer applies and a null literal is an error wherever that pair
+sits in the tag (see the ordering rule below). Only a literal that precedes
+`type=null` survives, since that override names the null instance outright. One
+that follows it is an error like every other scalar key there.
+
+A `Nullability` stance a type-level hook records for a self-referential type
+lands after that field's tag has read the decision, since the field resolves
+against a `$defs` entry still being built. The generator re-checks the literals
+each tag took once every stance is final and raises the rejection the tag would
+have raised had the stance been final, naming the struct whose schema carries
+the field. The re-check only tightens. A late stance withdraws a null the tag
+took, and never grants a null the tag refused.
 
 `enum` and `examples` values are separated by `|`; commas separate pairs, so a
 value containing a comma escapes it with a backslash (`\,`, and `\\` for a
@@ -497,10 +504,12 @@ field with `jsonschema:"type=string,default=15m"` yields
 `{"type":"string","default":"15m"}` where the Go int64 kind would have
 rejected `15m`. The same keys before the `type=` pair still parse against the
 Go type. After an override to `array`, `object`, or `null` there is no scalar
-type to parse against, so those keys are an error, and the literal value
-`null` is rejected after any override (the overridden type is never
-nullable). An `enum` after a `type=` override always constrains the value
-schema itself, even on a slice or array field: the redirection to the item
+type to parse against, so those keys are an error. A null literal before the
+pair is an error for every override but `type=null`, since the override replaces
+the occurrence that admitted the null. When a key on either side of the pair is
+an error, the message names the JSON type the override installed rather than the
+stand-in's Go kind. An `enum` after a `type=` override always constrains the
+value schema itself, even on a slice or array field: the redirection to the item
 schemas (next paragraph) keys on the scalar-parse type, which an override
 replaces.
 

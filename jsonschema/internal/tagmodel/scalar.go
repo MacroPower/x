@@ -2,6 +2,7 @@ package tagmodel
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"strconv"
@@ -18,6 +19,13 @@ const (
 	boolTrue  = "true"
 	boolFalse = "false"
 )
+
+// ErrNullNotAdmitted reports a null literal on an occurrence that admits no
+// null. A front-end wraps the sentinel with its own dialect prefix and names
+// the type the literal had nothing to assign to. A front-end that refuses the
+// literal before calling [Shape.ParseScalar] returns the same sentinel, so one
+// identity covers both sites.
+var ErrNullNotAdmitted = errors.New("cannot assign null to non-nullable type")
 
 // ParseScalar turns one tag literal into the value a const, enum member,
 // default, or forbidden value carries. It dispatches on [Shape.Form], so a
@@ -39,7 +47,7 @@ const (
 func (sh Shape) ParseScalar(lit string, pol Policy) (any, error) {
 	if pol.AllowNullScalar && lit == typename.Null {
 		if !sh.Nullable {
-			return nil, fmt.Errorf("cannot assign null to non-nullable type %s", sh.Kind)
+			return nil, fmt.Errorf("%w %s", ErrNullNotAdmitted, sh.Kind)
 		}
 
 		return nil, nil //nolint:nilnil // Intentional: nil represents JSON null.
