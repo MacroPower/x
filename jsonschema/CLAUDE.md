@@ -204,9 +204,21 @@ The package has two independent halves sharing the `Schema` type:
   dispatch. The field's node also records which tag keys took a null literal,
   and `generate` re-checks those keys once every nullability stance is final. A
   self-referential field reads the decision before its type records a stance, so
-  the re-check reports the tag error rather than rendering the null.
-  `FieldContext.Shape` keeps the early answer. That costs nothing, since the
-  built-in validate dialect sets `AllowNullScalar: false` and spells no null.
+  the re-check reports the tag error rather than rendering the null. Both of
+  the classification sites named above keep that early answer on a cycle
+  placeholder. The same pass therefore scans each reference's authored canvas
+  for a null literal an interpreter wrote against that early answer. The scan
+  covers the four value keywords (`default`, `const`, `enum`, `examples`) and
+  goes no further. `Constraints.Forbid(nil)` writes under `not`, so the
+  forbidden null survives as a redundant sibling of the `$ref`. Nothing in the
+  package trips the scan, since the matrix ignores a non-zero rule on `FormRef`
+  and the built-in validate dialect therefore spells no null on a referenced
+  definition. A third-party interpreter reaches the scan through the canvas
+  directly or through `Constraints.SetConst` and `Constraints.SetEnum`, which
+  compose a value without consulting the matrix. The scan compares `default` as
+  raw JSON text and asks `encoding/json` what the other three keywords' values
+  marshal to, so a `json.RawMessage` holding the literal and a typed nil answer
+  the same as an untyped one.
   A coerced float is the one shape whose zero has two serializations,
   since Go's negative zero compares equal to zero and `encoding/json` writes the
   sign bit for it. `Shape.zeroLiterals` names both texts, and the shared

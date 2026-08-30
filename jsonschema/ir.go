@@ -1,8 +1,11 @@
 package jsonschema
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/schemafield"
 	"go.jacobcolvin.com/x/jsonschema/internal/tagmodel"
@@ -60,13 +63,17 @@ type node struct {
 	// base for the null-branch split), so hooks dispatch on this
 	// {"type":["null","string"]} view instead. Nil for every other node.
 	tagView *Schema
-	// The nullLit field records the null literals the field's jsonschema tag
-	// took, for the re-check in [generator.checkNullLiterals]. Nil for every
-	// node whose tag spelled none.
-	nullLit *nullLiteral
-	props   []nodeProp  // struct properties, declaration order
-	prefix  []*node     // array elements (prefixItems / itemsArray)
-	embeds  []embedNode // struct allOf/anyOf composition branches
+	// The origin field names the field position this node occupies, for the
+	// reports in [generator.checkNullLiterals]. A field node carries it, and so
+	// does every element node beneath that field. Nil for every other node.
+	origin *fieldOrigin
+	// The nullKeys field records the keys the field's jsonschema tag took a
+	// null literal for, in tag order. Empty for every node whose tag spelled
+	// none.
+	nullKeys []string
+	props    []nodeProp  // struct properties, declaration order
+	prefix   []*node     // array elements (prefixItems / itemsArray)
+	embeds   []embedNode // struct allOf/anyOf composition branches
 
 	kind nodeKind
 	// Nullable is the single deferred null decision for a non-kindRef node; base
@@ -113,15 +120,17 @@ func (n *node) nullableDecision() bool {
 	return n.nullable
 }
 
-// nullLiteral records what a field's jsonschema tag committed a null literal
-// to. The field's own null decision can still change after the tag reads it, so
-// the generator carries the record to a pass that runs once every decision is
-// final.
-type nullLiteral struct {
-	parent reflect.Type // the struct whose schema carries the field
-	typ    reflect.Type // the field's own Go type; a kindRef reads def.typ
-	field  string       // the field's JSON name
-	keys   []string     // the keys that took the literal, in tag order
+// fieldOrigin names the field position a node occupies: the struct declaring
+// the field, the field's JSON name, and whether the node is an element beneath
+// that field rather than the field itself. A field-level writer can commit to a
+// null the occurrence's final decision later withdraws, so the generator
+// carries this record to a pass that runs once every decision is final. The
+// element flag holds no index, so a tuple element's report names the field
+// rather than the position within it.
+type fieldOrigin struct {
+	parent  reflect.Type // the struct whose schema carries the field
+	field   string       // the field's JSON name
+	element bool         // an element beneath the field, not the field itself
 }
 
 // nodeProp is a struct property: its value node and JSON name.
@@ -229,6 +238,37 @@ func allocCanvasTree(n *node, draft Draft) {
 	n.authored = a
 }
 
+// assignFieldOrigins records the field position on a field node and on every
+// sequence or map element beneath it, so [generator.checkNullLiterals] can name
+// the field a late-refused null literal sits in. It descends only into
+// elements (items and prefix), wherever a node carries them. A struct property
+// or an embed is a separate field node, which takes its own origin when the
+// generator builds its struct. The walk allocates one element origin per field
+// that has elements and hands the same pointer to every depth, so a [][]*T
+// inner element reads the same origin as the outer one.
+func assignFieldOrigins(n *node, origin *fieldOrigin) {
+	if n == nil || origin == nil {
+		return
+	}
+
+	n.origin = origin
+
+	if n.items == nil && len(n.prefix) == 0 {
+		return
+	}
+
+	elem := origin
+	if !elem.element {
+		elem = &fieldOrigin{parent: origin.parent, field: origin.field, element: true}
+	}
+
+	assignFieldOrigins(n.items, elem)
+
+	for _, c := range n.prefix {
+		assignFieldOrigins(c, elem)
+	}
+}
+
 // refNode builds a kindRef node linking to e, carrying the occurrence's
 // pointer-ness. The nullableDecision method later combines it with the def
 // entry's recorded stance: a pointer occurrence of a NullForbidden type still
@@ -296,13 +336,18 @@ func walkNodes(root *node, seen map[*defEntry]bool, visit func(*node)) {
 	}
 }
 
-// checkNullLiterals re-checks every null literal a field's jsonschema tag took
-// against the occurrence's final null decision and reports the first one that
-// decision now refuses. A self- or mutually recursive field resolves against a
-// $defs entry still being built, so a [Nullability] stance a type-level hook
-// records for that type lands after the tag has already accepted the literal.
-// [node.nullableDecision] reads the stance lazily, and this pass is where the
-// tag's early answer and that late stance meet.
+// checkNullLiterals re-checks the null literals a field's two writers
+// committed. It compares each against the occurrence's final null decision and
+// reports the first one that decision refuses. A self- or mutually recursive
+// field resolves against a $defs entry still being built, so a [Nullability]
+// stance a type-level hook records for that type lands after both field-level
+// writers have read the decision. [node.nullableDecision] reads the stance
+// lazily, and this pass is where those early answers and the late stance meet.
+//
+// Two writers reach this pass. The jsonschema tag records on the node the keys
+// it took a literal for, and a tag interpreter writes its literal onto the
+// authored canvas, which canvasNullLiteral scans. The pass reports a field
+// carrying both faults on its tag key.
 //
 // The walk is [generator.walkReachable] rather than [walkNodes], so the check
 // covers exactly the defs render emits. A def whose only surviving reference is
@@ -310,32 +355,141 @@ func walkNodes(root *node, seen map[*defEntry]bool, visit func(*node)) {
 // scan alone. The visitor returns nothing, so the pass keeps the first report
 // and lets the walk finish. Walk order is deterministic, which is what makes
 // the first report name one occurrence rather than an arbitrary one.
-//
-// Only a kindRef node reaches the report. Every other node's null decision is
-// fixed inside schemaForType before buildFieldSchema reads it, and
-// extendTypeSchema runs inside buildStructSchema ahead of defineType, so the
-// cycle placeholder is the one window a stance lands in after the tag, and it
-// always yields a reference. The field's own type answers if that stops
-// holding.
 func (g *generator) checkNullLiterals(root *node) error {
 	var reported error
 
 	g.walkReachable(root, map[*defEntry]bool{}, func(n *node) {
-		if reported != nil || n.nullLit == nil || n.nullableDecision() {
-			return
+		if reported == nil {
+			reported = nullLiteralReport(n)
 		}
-
-		typ := n.nullLit.typ
-		if n.kind == kindRef {
-			typ = n.def.typ
-		}
-
-		reported = fmt.Errorf("%s field %q: jsonschema tag: key %q: %w %s",
-			n.nullLit.parent, n.nullLit.field, n.nullLit.keys[0],
-			tagmodel.ErrNullNotAdmitted, typ)
 	}, nil)
 
 	return reported
+}
+
+// nullLiteralReport returns the rejection a node's recorded null literals earn
+// against its final null decision, or nil when the node has none to answer for.
+//
+// The check covers a reference and nothing else. Every other node has its
+// decision fixed in schemaForType before buildFieldSchema reads it, so tagparse
+// refuses the tag at parse time and the node records nothing. The generator
+// runs extendTypeSchema inside buildStructSchema ahead of defineType, so the
+// cycle placeholder is the one window a stance lands in afterwards. Holding
+// the canvas scan to that same scope is a deliberate narrowing. An interpreter
+// that writes a null onto a node whose decision was already final has a bug of
+// its own, and this pass does not look for it. A type= override rebuilds the
+// field as a non-reference node carrying no origin, while the element nodes it
+// keeps carry theirs, so the pass still reports an element that stayed a
+// reference.
+func nullLiteralReport(n *node) error {
+	if n.kind != kindRef || n.origin == nil || n.nullableDecision() {
+		return nil
+	}
+
+	if len(n.nullKeys) > 0 {
+		return fmt.Errorf("%s field %q: jsonschema tag: key %q: %w %s",
+			n.origin.parent, n.origin.field, n.nullKeys[0],
+			tagmodel.ErrNullNotAdmitted, n.def.typ)
+	}
+
+	keyword := canvasNullLiteral(n.authored)
+	if keyword == "" {
+		return nil
+	}
+
+	if n.origin.element {
+		return fmt.Errorf(
+			"%s field %q: element: authored canvas: keyword %q: %w %s",
+			n.origin.parent, n.origin.field, keyword,
+			tagmodel.ErrNullNotAdmitted, n.def.typ)
+	}
+
+	return fmt.Errorf("%s field %q: authored canvas: keyword %q: %w %s",
+		n.origin.parent, n.origin.field, keyword,
+		tagmodel.ErrNullNotAdmitted, n.def.typ)
+}
+
+// canvasNullLiteral returns the name of the first authored-canvas keyword
+// holding a JSON null, or "" when no keyword holds one. It reads the four
+// keywords a field-level writer spells a literal value with. It never descends
+// into not or allOf. A forbidden null lands there, and forbidding null on a
+// reference that admits none is redundant rather than wrong.
+//
+// Default is already raw JSON, so the scan compares it as text. The other
+// three hold Go values, which isJSONNull judges by what encoding/json writes
+// for them.
+func canvasNullLiteral(canvas *Schema) string {
+	if canvas == nil {
+		return ""
+	}
+
+	if len(canvas.Default) > 0 &&
+		bytes.Equal(bytes.TrimSpace(canvas.Default), []byte("null")) {
+		return "default"
+	}
+
+	if canvas.Const != nil && isJSONNull(*canvas.Const) {
+		return "const"
+	}
+
+	if slices.ContainsFunc(canvas.Enum, isJSONNull) {
+		return "enum"
+	}
+
+	if slices.ContainsFunc(canvas.Examples, isJSONNull) {
+		return "examples"
+	}
+
+	return ""
+}
+
+// isJSONNull reports whether v marshals to a JSON null. Apart from an untyped
+// nil it asks encoding/json rather than testing the Go value, so every spelling
+// answers alike: a nil pointer, slice, or map, a [json.RawMessage] holding the
+// literal, and a [json.Marshaler] returning one. A value that encoding/json
+// refuses to marshal (a func or a channel) is not a null. Leaving it on the
+// canvas lets the caller's own marshal report the fault.
+//
+// Maps, pointers, and slices are the only kinds encoding/json writes null for
+// on their own, so every other kind answers false without a marshal unless it
+// carries its own [json.Marshaler]. That keeps the scan off most values, and
+// the recover keeps a third-party MarshalJSON that panics from escaping
+// generation, which reports through errors alone.
+func isJSONNull(v any) bool {
+	if v == nil {
+		return true
+	}
+
+	if _, marshaler := v.(json.Marshaler); !marshaler {
+		switch reflect.ValueOf(v).Kind() {
+		case reflect.Map, reflect.Pointer, reflect.Slice:
+		default:
+			return false
+		}
+	}
+
+	return marshalsToNull(v)
+}
+
+// marshalsToNull reports whether encoding/json writes null for v. It answers
+// false for a value encoding/json refuses and for one whose own MarshalJSON
+// panics, so neither the error nor the panic reaches
+// [generator.checkNullLiterals].
+func marshalsToNull(v any) bool {
+	null := false
+
+	func() {
+		defer func() {
+			if recover() != nil {
+				null = false
+			}
+		}()
+
+		encoded, err := json.Marshal(v)
+		null = err == nil && bytes.Equal(encoded, []byte("null"))
+	}()
+
+	return null
 }
 
 // payloadRefTargets maps every $defs ref string a hook may have authored to its

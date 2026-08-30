@@ -358,16 +358,21 @@
 // alone cannot express. Whether a nil-able slice, map, byte slice, or
 // interface admits null is the generator's decision rather than the Go type's,
 // so [ShapeOf] reports only the pointer occurrences as admitting null, which
-// is also what a context the generator did not build falls back to. The
-// resulting [Shape] carries the declared type, that type with its pointer
-// chain followed, the kind a scalar literal parses at, whether the occurrence
-// admits null, and the [Form] -- the JSON shape the instance actually takes,
-// which is what the model dispatches on. Form is deliberately not the Go kind,
-// so a field that encodes itself as a string (through json:",string" or its
-// own MarshalText) reads as [FormCoercedNumber]
-// or [FormTextString] rather than as a number every branch has to
-// special-case. Passing that same Shape to [FieldContext.ConstraintsFor] builds
-// the facade without classifying the field a second time, which
+// is also what a context the generator did not build falls back to. A field
+// referencing the type it belongs to reads its null admission before that type
+// records a [Nullability] stance, so a later stance can withdraw the answer.
+// Two field-level writers take a null literal against a reference, the
+// jsonschema tag and the tag interpreters. The generator re-checks both once
+// the stances are final and refuses the ones the final decision leaves
+// unadmitted. The resulting [Shape] carries the declared type, that type with
+// its pointer chain followed, the kind a scalar literal parses at, whether the
+// occurrence admits null, and the [Form] -- the JSON shape the instance
+// actually takes, which is what the model dispatches on. Form is deliberately
+// not the Go kind, so a field that encodes itself as a string (through
+// json:",string" or its own MarshalText) reads as [FormCoercedNumber] or
+// [FormTextString] rather than as a number every branch has to special-case.
+// Passing that same Shape to [FieldContext.ConstraintsFor] builds the facade
+// without classifying the field a second time, which
 // [FieldContext.Constraints] would.
 //
 // Bounds are intersect-only: each writes back only when it would not loosen the
@@ -578,6 +583,19 @@
 // would have raised had the stance been final, naming the struct whose schema
 // carries the field. The re-check only tightens. A late stance withdraws a null
 // the tag took, and never grants a null the tag refused.
+//
+// The same pass covers the null literals a tag interpreter writes onto a
+// field's or an element's canvas. The scan reads the default, const, enum,
+// and examples keywords there. It refuses a null on a field or element
+// whose reference admits none once the decision is final, and the report
+// names the keyword holding it. The pass refuses on the same terms a
+// reference that admitted no null before the interpreter ran. It also
+// refuses a pointer reference under [WithNullable](false) that no stance
+// grants the null back to. The scan reaches no further than a reference,
+// the one occurrence whose answer can change after an interpreter reads
+// it. Forbidding a null through [Constraints.Forbid] writes under not
+// rather than into a value keyword, so the null stays and renders as a not
+// beside the $ref.
 //
 // Enum and examples values are separated by "|". Unrecognized keys are a parse
 // error. A value containing a comma escapes it with a backslash (a literal

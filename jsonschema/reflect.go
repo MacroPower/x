@@ -161,9 +161,10 @@ func (g *generator) generate(t reflect.Type) (*Schema, error) {
 	// mutually recursive root keeps its $ref so those references never dangle.
 	root = g.maybeInlineRoot(root)
 
-	// Re-check the null literals the field tags took. Every def entry holds its
-	// final stance here, so a reference that read the decision early answers the
-	// way [generator.render] will.
+	// Re-check what both field-level writers committed: the tag keys that took a
+	// null literal and the literals an interpreter wrote onto a canvas. Every
+	// def entry holds its final stance here, so a reference that read the
+	// decision early answers the way [generator.render] will.
 	err = g.checkNullLiterals(root)
 	if err != nil {
 		return nil, err
@@ -1241,6 +1242,13 @@ func (g *generator) buildFieldSchema(
 	// provenance and reconcileField composes the two at render.
 	allocCanvasTree(fieldNode, g.draft)
 
+	// Record the field position on the node and on every element beneath it, so
+	// checkNullLiterals can name the field a late-refused null literal sits in.
+	assignFieldOrigins(fieldNode, &fieldOrigin{
+		parent: parentType,
+		field:  fi.JSONName,
+	})
+
 	// 2. Field-level comment.
 	err = g.applyFieldDescription(parentType, fi, fieldNode, parent.payload)
 	if err != nil {
@@ -1286,12 +1294,7 @@ func (g *generator) buildFieldSchema(
 			// The tag reads the null decision before a self-referential type
 			// finishes recording its stance, so the node carries the keys that
 			// took a null literal into checkNullLiterals.
-			fieldNode.nullLit = &nullLiteral{
-				keys:   res.NullLiteralKeys,
-				parent: parentType,
-				typ:    fieldType,
-				field:  fi.JSONName,
-			}
+			fieldNode.nullKeys = res.NullLiteralKeys
 		}
 	}
 
