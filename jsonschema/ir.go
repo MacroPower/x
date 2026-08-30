@@ -60,9 +60,9 @@ type node struct {
 	// base for the null-branch split), so hooks dispatch on this
 	// {"type":["null","string"]} view instead. Nil for every other node.
 	tagView *Schema
-	// NullLit records the null literals the field's jsonschema tag took, for
-	// the re-check in [generator.checkNullLiterals]. Nil for every node whose
-	// tag spelled none.
+	// The nullLit field records the null literals the field's jsonschema tag
+	// took, for the re-check in [generator.checkNullLiterals]. Nil for every
+	// node whose tag spelled none.
 	nullLit *nullLiteral
 	props   []nodeProp  // struct properties, declaration order
 	prefix  []*node     // array elements (prefixItems / itemsArray)
