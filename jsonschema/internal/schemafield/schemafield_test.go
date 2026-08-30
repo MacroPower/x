@@ -335,11 +335,9 @@ func tokenOfShape(f *Field) string {
 		return "0"
 	case Map:
 		return "k"
-	case Single, None:
+	default:
 		return f.Keyword
 	}
-
-	return f.Keyword
 }
 
 // childrenOf reads the sub-schemas out of a populated container of any shape.

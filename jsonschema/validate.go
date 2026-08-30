@@ -303,9 +303,9 @@ type validator struct {
 	// compile-time session's FallbackVet, each JSON-pointer fallback target
 	// that session materializes. Its visited sets span all three, so the
 	// vetter checks a node reached both locally and through a remote URI once
-	// and attributes it to the pass that reached it first. Compile clears it beside
-	// the compile context. A validation run vets through its own session's
-	// FallbackVet, and through a fresh vetter per late fetch
+	// and attributes it to the pass that reached it first. Compile clears it
+	// beside the compile context. A validation run vets through its own
+	// session's FallbackVet, and through a fresh vetter per late fetch
 	// (checkFetchedDocument).
 	vetter *schemavet.Vetter
 

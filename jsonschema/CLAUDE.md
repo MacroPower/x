@@ -34,16 +34,19 @@ The package has two independent halves sharing the `Schema` type:
   `schemaIndex` via `intern`, and its expansion bookkeeping (the in-flight cycle
   guard, the memoized self-contained copies, and each node's path and
   containing-document URI) lives in slices indexed by the assigned id.
-  `walkPair` owns the in-flight guard and marks every node the walk is inside,
-  the root document included. A cycle therefore truncates at the same depth
-  whether the walk reached that node by descending the document or by expanding
-  a ref to it. The guard skips a node another visit already marked, since an
-  aliased document can carry one node both on the walk's path and inside a ref
-  target's subtree, and clearing the mark on the way out of the inner visit
-  would leave the rest of the outer one unguarded. A truncated copy is never
-  memoized, because two positions can reach the same target with different nodes
-  in flight. The inliner clones through `internal/schemaclone` for its pristine
-  and working copies. Structural vetting is compiler-enforced through the
+  A pristine node missing from the index is an invariant violation rather than
+  an ordinary absence, so `internedID` answers the miss with `ErrRefInline`
+  instead of letting a zero id alias the root's slots. `walkPair` owns the
+  in-flight guard and marks every node the walk is inside, the root document
+  included. A cycle therefore truncates at the same depth whether the walk
+  reached that node by descending the document or by expanding a ref to it. The
+  guard skips a node another visit already marked, since an aliased document can
+  carry one node both on the walk's path and inside a ref target's subtree, and
+  clearing the mark on the way out of the inner visit would leave the rest of
+  the outer one unguarded. A truncated copy is never memoized, because two
+  positions can reach the same target with different nodes in flight. The
+  inliner clones through `internal/schemaclone` for its pristine and
+  working copies. Structural vetting is compiler-enforced through the
   `internal/schemavet` currency: only boundary code holds a bare `*Schema`
   (the public API, the fetch closures, and the shared reference-closure walk,
   whose fetches register a document and whose hooks vet it before either engine
@@ -726,3 +729,13 @@ contract the tests enforce.
   field classes the probe cannot observe (untagged, `json:"-"`, unexported, an
   allOf-composed embed, and a JSON name two fields claim at one depth); a field
   matching none of them and still unobserved fails the leg.
+
+### Tooling
+
+Bare `go vet ./...` reports five deliberate `structtag` findings: two json tags
+on unexported fields in `internal/jsontag/jsontag_unexported_test.go`, and
+three declarations repeating a JSON name across
+`reflect_ghost_annihilation_test.go` and `reflect_shadowed_embed_test.go`. Each
+of the five is what its test exercises and carries a `//nolint` directive
+listing `govet`. Only golangci-lint reads that directive, so the local gate,
+`task check`, stays clean while bare `go vet` does not.

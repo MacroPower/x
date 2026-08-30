@@ -129,7 +129,7 @@ func TestInlineCycleGuardHoldsAcrossAliasedTarget(t *testing.T) {
 	`), marshalValue(t, inlined))
 }
 
-// marshalValue renders an inlined document, or a value inside one, as JSON text.
+// marshalValue renders an inlined document, or a value in one, as JSON text.
 func marshalValue(t *testing.T, value any) string {
 	t.Helper()
 

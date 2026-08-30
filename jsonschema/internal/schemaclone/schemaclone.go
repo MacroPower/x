@@ -149,10 +149,10 @@ var valueKeywords = map[string]string{
 //
 // The remaining fields track the current path. The two onPath maps are keyed by
 // the schemas and containers the walk is inside and record where the walk
-// entered each, a path length for a schema and a [valueEntry] for a container; path
-// holds the decoded segments leading to the position being copied; depth counts
-// the schemas crossed; and cycle keeps the first loop the walk closed. Field
-// order here answers to govet fieldalignment.
+// entered each, a path length for a schema and a [valueEntry] for a container;
+// path holds the decoded segments leading to the position being copied; depth
+// counts the schemas crossed; and cycle keeps the first loop the walk closed.
+// Field order here answers to govet fieldalignment.
 type cloner struct {
 	schemas     map[*jsonschema.Schema]*jsonschema.Schema
 	values      map[valueKey]any

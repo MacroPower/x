@@ -208,16 +208,16 @@ func requiredNullableOrder() []string {
 // call sequence so TestRequiredNullableNilSideIsCompared can draw the same
 // population without a testing.F.
 //
-// The cross product carries the shared blobs, whose all-zero member draws the
-// roster's first row with its container nil. The two pairs after it put the
-// other two bare collections in that same state, the one the target exists
-// for. The pairs after those reach the forbid row, which no shared shape blob
-// draws. The bare-collection pairs and the forbid pairs look their row up by
-// name, since Cursor.Intn reads a shape blob as a big-endian index into a
-// roster whose order a new key can shift.
+// The cross product carries the shared blobs. The three pairs after it put
+// each bare collection in the nil state the target exists for, rather than
+// leaving one of them to an all-zero blob that reaches its row only while
+// that row heads the roster. The pairs after those reach the forbid row,
+// which no shared shape blob draws. The bare-collection pairs and the forbid
+// pairs look their row up by name, since Cursor.Intn reads a shape blob as a
+// big-endian index into a roster whose order a new key can shift.
 func requiredNullableSeeds() [][2][]byte {
 	shared := differentialSeeds()
-	pairs := make([][2][]byte, 0, len(shared)*len(shared)+len(shared)+2)
+	pairs := make([][2][]byte, 0, len(shared)*len(shared)+len(shared)+3)
 
 	for _, shape := range shared {
 		for _, value := range shared {
@@ -227,7 +227,7 @@ func requiredNullableSeeds() [][2][]byte {
 
 	order := requiredNullableOrder()
 
-	for _, name := range []string{"bare map", "bare slice"} {
+	for _, name := range []string{"bare byte slice", "bare map", "bare slice"} {
 		index := slices.Index(order, name)
 		if index < 0 {
 			continue
@@ -851,8 +851,8 @@ func TestEmptyBareCollectionSkipsTheFloorAlone(t *testing.T) {
 // under json:",string" whose Go value is the negative zero. Go compares that
 // value equal to zero, so go-playground's required and its ne=0 both reject it.
 // Because encoding/json writes the sign bit, the instance carries "-0" rather
-// than "0", and a forbid side naming one text would accept a value the reference
-// validator rejects.
+// than "0", and a forbid side naming one text would accept a value the
+// reference validator rejects.
 //
 // The committed corpus entry that found this is entropy, and any change to the
 // draw pools retires it. This test names the shape outright, so no draw change

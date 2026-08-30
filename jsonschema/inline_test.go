@@ -656,7 +656,7 @@ func TestInlineRefFallback(t *testing.T) {
 			},
 			err: jsonschema.ErrRefResolve,
 		},
-		"cycle consults the ref closing each expansion and drop breaks it": {
+		"cycle consults the ref closing each expansion (a's in-place walk closes at b's ref) and drop breaks it": {
 			// A cycle truncation depends on which nodes the walk is inside, so
 			// a truncated copy is never memoized: each of the two expansions
 			// consults the fallback at the ref that closed its own cycle. The
