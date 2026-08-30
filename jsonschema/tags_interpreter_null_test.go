@@ -76,12 +76,12 @@ type nullCanvasWrite struct {
 	keyword string
 }
 
-// nullCanvasWrites returns one row per way a tag interpreter spells a JSON null
-// on a canvas. Default takes the literal as raw JSON. The other three value
-// keywords each carry an untyped nil. The rest carry a Go value the scan cannot
-// recognize by identity: a typed nil, and a [json.RawMessage] holding the
-// literal, which is what an interpreter reaches for after writing the same
-// value to Default.
+// nullCanvasWrites returns one row per way a tag interpreter spells a JSON
+// null on a canvas. Default takes the literal as raw JSON. The const, enum,
+// and examples rows each carry an untyped nil. The remaining rows carry a Go
+// value the scan cannot recognize by identity: a typed nil, and a
+// [json.RawMessage] holding the literal, the same spelling the default row
+// uses.
 func nullCanvasWrites() map[string]nullCanvasWrite {
 	return map[string]nullCanvasWrite{
 		"default": {

@@ -69,17 +69,17 @@
 //
 // # Configuration
 //
-// Configuration is via functional [GenerateOption] values passed to [GenerateFor] or
-// [Generate]:
+// Configuration is via functional [GenerateOption] values passed to
+// [GenerateFor] or [Generate]:
 //
 //   - [WithDraft] sets the target JSON Schema draft ([Draft7] or [Draft2020]).
 //     The returned [DraftOption] also serves validation and inlining, where
 //     it overrides $schema draft detection (see Draft Support below).
 //   - [WithTagInterpreter] registers a [TagInterpreter] under the struct tag
 //     key it reads, for mapping struct tags to schema constraints.
-//   - [WithDescriptionProvider] sets the [DescriptionProvider] used as the source of
-//     type and field descriptions; [NewGoCommentProvider] constructs the
-//     AST-backed provider that extracts Go doc comments.
+//   - [WithDescriptionProvider] sets the [DescriptionProvider] used as the
+//     source of type and field descriptions; [NewGoCommentProvider] constructs
+//     the AST-backed provider that extracts Go doc comments.
 //   - [WithTypeSchema] overrides the schema for a specific Go type with a
 //     [TypeSchema] envelope (a bare value plus a [Nullability] stance, or a
 //     [TypeSchema.Verbatim] escape hatch, or a [TypeSchema.Ref] alias);
@@ -129,14 +129,15 @@
 // Across every entry point, an option given a nil interface or pointer value
 // restores the default behavior: [WithNamer] the built-in namer,
 // [WithDescriptionProvider] no descriptions, [WithRefResolver] local-only ref
-// resolution, [WithRefFallback] fatal expansion failures, and [WithDefaultsFrom]
-// no seeded defaults (a typed nil pointer is a value, not a reset: it
-// marshals to JSON null and fails as a non-object instance). The exception is
-// additive registrations that a nil cannot identify anything to remove from
-// ([WithTagInterpreter], [WithTypeSchemaProvider], [WithTypeSchemaExtender],
-// [WithFormatValidator]); these ignore a nil registration. [WithTypeSchema]
-// takes a [TypeSchema] value, not a pointer: every call adds a registration,
-// and a zero [TypeSchema] marks the type unrestricted ({}).
+// resolution, [WithRefFallback] fatal expansion failures, and
+// [WithDefaultsFrom] no seeded defaults (a typed nil pointer is a value, not a
+// reset: it marshals to JSON null and fails as a non-object instance). The
+// exception is additive registrations that a nil cannot identify anything to
+// remove from ([WithTagInterpreter], [WithTypeSchemaProvider],
+// [WithTypeSchemaExtender], [WithFormatValidator]); these ignore a nil
+// registration. [WithTypeSchema] takes a [TypeSchema] value, not a pointer:
+// every call adds a registration, and a zero [TypeSchema] marks the type
+// unrestricted ({}).
 //
 // # Type Mapping
 //
@@ -257,22 +258,22 @@
 // recovered and wrapped with [ErrProviderPanic] as a backstop.
 //
 // A type-level hook declares its intent through a [TypeSchema] envelope rather
-// than a pre-shaped schema, so generation applies the null encoding and resolves
-// references itself. A provider (or [WithTypeSchema]) fills exactly one of
-// [TypeSchema.Value] (a bare value schema, decorated by a [Nullability] stance
-// and the occurrence's pointer-ness), [TypeSchema.Verbatim] (emitted exactly as
-// authored, no null encoding), or [TypeSchema.Ref] (a whole-type alias to another
-// Go type, kept reachable through a node-backed $ref edge); setting more than one
-// is [ErrConflictingTypeSchema]. A zero TypeSchema marks the type unrestricted
-// ({}). The [Nullability] stance ([NullAllowed]/[NullForbidden]) makes every
-// occurrence of the type admit null (or none), replacing a hand-shaped
-// anyOf[value, null] wrapper the generator would otherwise have to recognize. An
-// extender receives the same envelope with [TypeSchema.Value] set to the
-// reflection-generated schema to mutate in place, and may set [TypeSchema.Nullability]
-// to declare a stance too; those are the only fields an extender may set, since
-// Verbatim and Ref declare a replacement schema only a provider supplies, so an
-// extender setting either is [ErrConflictingTypeSchema] rather than a silently
-// ignored declaration.
+// than a pre-shaped schema, so generation applies the null encoding and
+// resolves references itself. A provider (or [WithTypeSchema]) fills exactly
+// one of [TypeSchema.Value] (a bare value schema, decorated by a [Nullability]
+// stance and the occurrence's pointer-ness), [TypeSchema.Verbatim] (emitted
+// exactly as authored, no null encoding), or [TypeSchema.Ref] (a whole-type
+// alias to another Go type, kept reachable through a node-backed $ref edge);
+// setting more than one is [ErrConflictingTypeSchema]. A zero TypeSchema marks
+// the type unrestricted ({}). The [Nullability] stance
+// ([NullAllowed]/[NullForbidden]) makes every occurrence of the type admit null
+// (or none), replacing a hand-shaped anyOf[value, null] wrapper the generator
+// would otherwise have to recognize. An extender receives the same envelope
+// with [TypeSchema.Value] set to the reflection-generated schema to mutate in
+// place, and may set [TypeSchema.Nullability] to declare a stance too; those
+// are the only fields an extender may set, since Verbatim and Ref declare a
+// replacement schema only a provider supplies, so an extender setting either is
+// [ErrConflictingTypeSchema] rather than a silently ignored declaration.
 //
 // When a registered provider ([WithTypeSchemaProvider] or [WithTypeSchema]) or
 // [JSONSchemaProvider] provides the schema, [JSONSchemaExtender] is not
@@ -316,24 +317,24 @@
 // through the pluggable [TagInterpreter] interface. Interpreters receive the
 // Generate call's context, like the other generation-time hooks, a [Tag]
 // carrying the struct tag key and value the call runs under, and a
-// [FieldContext] containing the field's authored canvas ([FieldContext.Canvas]),
-// its type-derived [FieldContext.Base], the parent schema, JSON name, Go type,
-// declaring struct type, full [reflect.StructField] (for reading sibling struct
-// tags such as the json tag's options), and the target [Draft] (for emitting
-// draft-appropriate keywords). An interpreter declares facts by writing them to
-// the canvas rather than mutating a merged schema: value-scoped facts (const,
-// enum) and annotations, plus numeric, string, and array bounds it writes to the
-// canvas. A canvas bound can only tighten the type's own: generation intersects
-// each canvas bound with the type-derived bound from Base, keeping the stronger
-// side, so a weaker authored bound never widens the type's, and an interpreter
-// need only intersect its own repeated rules within a tag against the canvas
-// value. (The string first-wins keywords -- format, pattern, contentEncoding,
-// contentMediaType -- read [FieldContext.EffectiveFormat] and its siblings so a
-// tag never overrides a value the type already set.) The type-derived Base is
-// read-only, for dispatching on the reflected shape. Generation composes the
-// canvas with Base and applies the null encoding,
-// so a const or enum an interpreter declares lands on the value branch and keeps
-// a permitted null valid.
+// [FieldContext] containing the field's authored canvas
+// ([FieldContext.Canvas]), its type-derived [FieldContext.Base], the parent
+// schema, JSON name, Go type, declaring struct type, full [reflect.StructField]
+// (for reading sibling struct tags such as the json tag's options), and the
+// target [Draft] (for emitting draft-appropriate keywords). An interpreter
+// declares facts by writing them to the canvas rather than mutating a merged
+// schema: value-scoped facts (const, enum) and annotations, plus numeric,
+// string, and array bounds it writes to the canvas. A canvas bound can only
+// tighten the type's own: generation intersects each canvas bound with the
+// type-derived bound from Base, keeping the stronger side, so a weaker authored
+// bound never widens the type's, and an interpreter need only intersect its own
+// repeated rules within a tag against the canvas value. (The string first-wins
+// keywords -- format, pattern, contentEncoding, contentMediaType -- read
+// [FieldContext.EffectiveFormat] and its siblings so a tag never overrides a
+// value the type already set.) The type-derived Base is read-only, for
+// dispatching on the reflected shape. Generation composes the canvas with Base
+// and applies the null encoding, so a const or enum an interpreter declares
+// lands on the value branch and keeps a permitted null valid.
 //
 // For bounds and value constraints an interpreter uses the [Constraints] facade
 // [FieldContext.Constraints] returns, whose vocabulary is the shared constraint
@@ -361,7 +362,7 @@
 // is also what a context the generator did not build falls back to. A field
 // referencing the type it belongs to reads its null admission before that type
 // records a [Nullability] stance, so a later stance can withdraw the answer.
-// Two field-level writers take a null literal against a reference, the
+// Two field-level writers take a null literal against a reference: the
 // jsonschema tag and the tag interpreters. The generator re-checks both once
 // the stances are final and refuses the ones the final decision leaves
 // unadmitted. The resulting [Shape] carries the declared type, that type with
@@ -641,32 +642,32 @@
 // keyword nothing enforces: minItems=3 on a string, or any numeric bound on a
 // json:",string" coerced field, whose instance is a quoted string that minimum
 // cannot constrain. The shape is read from the field's schema, not only its Go
-// kind, so a field whose type supplies a verbatim or overridden schema is judged
-// by what that schema declares.
+// kind, so a field whose type supplies a verbatim or overridden schema is
+// judged by what that schema declares.
 //
 // A repeated bound key intersects rather than overwriting: minimum=5,minimum=3
 // keeps 5, matching how bounds from every other source compose. A second const
 // or enum, or one disagreeing with a value the field's type already pins, is
-// [ErrConstraintConflict]: both fully describe the allowed value, so neither can
-// silently win. Format and pattern replace what the field's type declared (the
-// tag names the keyword outright, unlike a tag interpreter, which defers to
-// both), but naming either twice in one tag is an error, since there no
+// [ErrConstraintConflict]: both fully describe the allowed value, so neither
+// can silently win. Format and pattern replace what the field's type declared
+// (the tag names the keyword outright, unlike a tag interpreter, which defers
+// to both), but naming either twice in one tag is an error, since there no
 // precedence applies and dropping one of two stated values would be silent.
 //
 // A const or enum makes the kind-derived numeric bounds (an int8's
 // minimum/maximum, for instance) redundant, so they are dropped. This
 // const/enum-subsumes-bounds precedence is owned once by the shared constraint
 // algebra and applies uniformly to every authored bound, whether the jsonschema
-// tag or a tag interpreter set it. A const subsumes an explicit bound too, since
-// it pins a single value, so that bound is dropped. An enum only restricts the
-// value to a set, so an explicit bound narrows it further and is kept:
-// enum=10|20,minimum=15 keeps minimum and so admits only 20. Numeric, length,
-// and count bounds from all three sources (the Go kind, the jsonschema tag, and
-// tag interpreters) merge through that one model: they intersect
-// order-independently (a weaker bound never loosens a stronger one), a
-// conflict in the discrete value set aborts generation, and an unsatisfiable
-// range (a minimum above a maximum) is emitted as its impossible bounds
-// rather than loosened.
+// tag or a tag interpreter set it. A const subsumes an explicit bound too,
+// since it pins a single value, so that bound is dropped. An enum only
+// restricts the value to a set, so an explicit bound narrows it further and is
+// kept: enum=10|20,minimum=15 keeps minimum and so admits only 20. Numeric,
+// length, and count bounds from all three sources (the Go kind, the jsonschema
+// tag, and tag interpreters) merge through that one model: they intersect
+// order-independently (a weaker bound never loosens a stronger one), a conflict
+// in the discrete value set aborts generation, and an unsatisfiable range (a
+// minimum above a maximum) is emitted as its impossible bounds rather than
+// loosened.
 //
 // A sequence or map element resolves by the same rule, reading its own authored
 // canvas rather than the field's. Which dialect wrote the element's const or
@@ -712,7 +713,7 @@
 // generation targets the given draft, while validation and [Inline] use it
 // in place of the draft they otherwise detect from the root schema's $schema
 // field, for schema documents that omit $schema or carry one that does not
-// reflect their dialect. Detection recognizes the Draft-7 and 2020-12 URIs;
+// reflect their dialect. Detection recognizes the Draft-07 and 2020-12 URIs;
 // a document omitting $schema, or carrying a custom metaschema URI, defaults
 // to [Draft2020]. A $schema declaring an official dialect this package does
 // not implement (2019-09, draft-06, draft-04, or draft-03) fails [Compile]
@@ -731,10 +732,10 @@
 // (4) registered [TypeSchemaExtender] values in registration order.
 //
 // Field-level processing is executed per struct field, after the field's type
-// schema is resolved: (1) json:",string" override, (2) comment extraction,
-// (3) jsonschema struct tag, (4) registered tag interpreters in order. Steps
-// (2) through (4) declare facts on a separate authored canvas rather than
-// mutating the type-derived schema, so which schema a keyword lives in is its
+// schema is resolved: (1) json:",string" override, (2) comment extraction, (3)
+// jsonschema struct tag, (4) registered tag interpreters in order. Steps (2)
+// through (4) declare facts on a separate authored canvas rather than mutating
+// the type-derived schema, so which schema a keyword lives in is its
 // provenance. Generation then reconciles the two, composing the final schema
 // and applying the null encoding for a nil-able field (an anyOf[value, null]
 // wrapper, or a ["null", base] type list): the value-scoped facts (const, enum,
@@ -745,22 +746,22 @@
 // reshape of a stamped wrapper, and a keyword resolves to the same value on a
 // nullable field as on a non-nullable one. Which side a keyword lands on is
 // declared per keyword in a single table, not spread across the reconciliation.
-// As part of the composition each authored bound keyword is intersected with the
-// type-derived bound and the stronger side kept, so a canvas bound can only
+// As part of the composition each authored bound keyword is intersected with
+// the type-derived bound and the stronger side kept, so a canvas bound can only
 // tighten the type's own value, never weaken it -- the same guarantee for every
-// writer (the jsonschema tag, a tag interpreter, a third party).
-// Field-level processing always applies, including when the type is referenced
-// via $ref. When a not-yet-migrated override or provider supplies a nullable
-// shape at the field's type, an interpreter that declares a const or enum
-// disagreeing with one already on that shape's value branch reports the
-// conflict rather than silently overwriting it, comparing against the
-// type-derived schema before it writes. That conflict check covers the inline
-// case, where the overlay would otherwise lose the type's value; for a
-// $defs-extracted type the const or enum lives in the referenced definition,
-// not on the field's own payload, so no conflict is reported there -- the
-// canvas value rides beside the $ref and the two compose conjunctively (an
-// enum intersects and only tightens; a disagreeing const composes to a
-// faithfully unsatisfiable schema rather than aborting generation).
+// writer (the jsonschema tag, a tag interpreter, a third party). Field-level
+// processing always applies, including when the type is referenced via $ref.
+// When a not-yet-migrated override or provider supplies a nullable shape at the
+// field's type, an interpreter that declares a const or enum disagreeing with
+// one already on that shape's value branch reports the conflict rather than
+// silently overwriting it, comparing against the type-derived schema before it
+// writes. That conflict check covers the inline case, where the overlay would
+// otherwise lose the type's value; for a $defs-extracted type the const or enum
+// lives in the referenced definition, not on the field's own payload, so no
+// conflict is reported there -- the canvas value rides beside the $ref and the
+// two compose conjunctively (an enum intersects and only tightens; a
+// disagreeing const composes to a faithfully unsatisfiable schema rather than
+// aborting generation).
 //
 // # Validation
 //
@@ -814,14 +815,14 @@
 // entry points. [CompileJSON] decodes data as a single JSON schema document
 // (numbers as [encoding/json.Number], trailing data rejected) and compiles it
 // with [Compile]; [ParseSchema] is its decode half alone, returning the
-// [*Schema] uncompiled for consumers that work with the schema itself ([Inline],
-// [Walk], programmatic editing); [ParseSchemaValue] converts an already-decoded
-// document (a bool or a map[string]any, such as [Normalize] output) to a
-// [*Schema]. With all three, a top-level value that is not an object or
-// boolean returns an error wrapping [ErrInvalidSchemaDocument]; this includes
-// JSON null, which unmarshaling into a [Schema] directly silently coerces to
-// the false schema. Malformed JSON returns the wrapped decode error without
-// the sentinel.
+// [*Schema] uncompiled for consumers that work with the schema itself
+// ([Inline], [Walk], programmatic editing); [ParseSchemaValue] converts an
+// already-decoded document (a bool or a map[string]any, such as [Normalize]
+// output) to a [*Schema]. With all three, a top-level value that is not an
+// object or boolean returns an error wrapping [ErrInvalidSchemaDocument]; this
+// includes JSON null, which unmarshaling into a [Schema] directly silently
+// coerces to the false schema. Malformed JSON returns the wrapped decode error
+// without the sentinel.
 //
 // Every compile and validate entry point takes a [context.Context] as its
 // first parameter, carried to the [RefResolver] (see Remote References
@@ -849,10 +850,10 @@
 //
 // Compile under [Draft2020] also rejects the array form of the items keyword
 // (what a JSON "items": [ ... ] parses into) with an error wrapping
-// [ErrItemsArrayUnderDraft2020]. That form is the Draft-7 spelling of tuple
+// [ErrItemsArrayUnderDraft2020]. That form is the Draft-07 spelling of tuple
 // validation; 2020-12 spells tuples with prefixItems, so an array-form items
-// would otherwise be dropped silently and accept every element. Set the Draft-7
-// $schema (or [WithDraft]) for tuple semantics, or use prefixItems.
+// would otherwise be dropped silently and accept every element. Set the
+// Draft-07 $schema (or [WithDraft]) for tuple semantics, or use prefixItems.
 //
 // Compile also rejects a negative length or count keyword (minLength,
 // maxLength, minItems, maxItems, minProperties, maxProperties, minContains,
@@ -897,8 +898,8 @@
 // schema a fallback supplies, so the two entry points refuse the same documents
 // for the same sentinels. Both also reject an unparsable [WithBaseURI] value
 // with [ErrInvalidBaseURI]. One compile-time refusal has no Inline counterpart,
-// [ErrUnknownVocabulary], which belongs to the vocabulary resolution Inline does
-// not run. See Reference Inlining, where [WithRetrievalBase] and
+// [ErrUnknownVocabulary], which belongs to the vocabulary resolution Inline
+// does not run. See Reference Inlining, where [WithRetrievalBase] and
 // [WithRefFallback] each narrow the rest.
 //
 // Compile then statically resolves every reference reachable from the root
@@ -914,9 +915,9 @@
 // would judge fails closed at validation time.
 //
 // Instance numbers are compared exactly (decoded with UseNumber, compared as
-// [math/big.Rat]), with one bound on the work an adversarial literal can demand:
-// for a JSON number whose exact value exceeds an internal cap (about 4096
-// significant digits or decimal exponent magnitude), minimum, maximum,
+// [math/big.Rat]), with one bound on the work an adversarial literal can
+// demand: for a JSON number whose exact value exceeds an internal cap (about
+// 4096 significant digits or decimal exponent magnitude), minimum, maximum,
 // exclusiveMinimum, and exclusiveMaximum are still enforced exactly. The
 // multipleOf check is enforced for an over-cap integer (its divisibility is
 // computed with modular arithmetic, so the magnitude is never expanded) and
@@ -927,25 +928,25 @@
 // the instance value they are compared against is exact. Both const and enum
 // values are preserved exactly (decoded as [json.Number]); on the generation
 // side an authored bound the shipped float64 would not reproduce is rejected
-// rather than silently loosened, through a single exact-representability
-// policy shared by every source (the jsonschema tag and every tag interpreter,
-// via [ErrBoundNotRepresentable]): an integer bound is accepted only when the
-// float64's shortest-decimal interpretation -- the value the schema renders
-// and the validator enforces -- equals the authored value (2^60, which renders
-// as 1152921504606847000, is rejected the same way regardless of which tag set
-// it; 2^54, which renders as itself, is accepted), and a bound parsed at an
-// integer-kind field is capped at 2^53 outright. A float64 in a
-// pre-parsed instance (JSON decoding always yields [encoding/json.Number]) is
-// interpreted at its shortest decimal value across all numeric keywords,
-// including the uniqueItems comparison, so float64(0.1) and a decoded 0.1 are
-// one value under const, enum, and uniqueItems alike. A number-shaped value
-// with no numeric value to compare -- a non-finite float64 (NaN or an
-// infinity, which JSON cannot represent but a Go instance can carry) or a
-// [encoding/json.Number] whose literal is not a valid JSON number -- passes a
-// bare type assertion but fails every numeric bound keyword present
-// (minimum, maximum, exclusiveMinimum, exclusiveMaximum, multipleOf): a bound
-// written to constrain a number fails closed rather than silently skipping a
-// value it cannot compare.
+// rather than silently loosened, through a single exact-representability policy
+// shared by every source (the jsonschema tag and every tag interpreter, via
+// [ErrBoundNotRepresentable]): an integer bound is accepted only when the
+// float64's shortest-decimal interpretation -- the value the schema renders and
+// the validator enforces -- equals the authored value (2^60, which renders as
+// 1152921504606847000, is rejected the same way regardless of which tag set it;
+// 2^54, which renders as itself, is accepted), and a bound parsed at an
+// integer-kind field is capped at 2^53 outright. A float64 in a pre-parsed
+// instance (JSON decoding always yields [encoding/json.Number]) is interpreted
+// at its shortest decimal value across all numeric keywords, including the
+// uniqueItems comparison, so float64(0.1) and a decoded 0.1 are one value under
+// const, enum, and uniqueItems alike. A number-shaped value with no numeric
+// value to compare -- a non-finite float64 (NaN or an infinity, which JSON
+// cannot represent but a Go instance can carry) or a [encoding/json.Number]
+// whose literal is not a valid JSON number -- passes a bare type assertion but
+// fails every numeric bound keyword present (minimum, maximum,
+// exclusiveMinimum, exclusiveMaximum, multipleOf): a bound written to constrain
+// a number fails closed rather than silently skipping a value it cannot
+// compare.
 //
 // Validation is configured via [ValidateOption] values:
 //
@@ -954,11 +955,11 @@
 //     default to [Draft2020]) or carry one that does not reflect their
 //     dialect.
 //   - [WithRefResolver] sets a [RefResolver] for resolving remote $ref URIs.
-//     The resolver is called only when local fragment resolution fails. Resolved
-//     schemas are cached within the validation run, as are not-resolved
-//     answers and errors, so the resolver is consulted at most once per
-//     distinct URI per run. The resolver receives the caller's context (see
-//     Remote References below).
+//     The resolver is called only when local fragment resolution fails.
+//     Resolved schemas are cached within the validation run, as are
+//     not-resolved answers and errors, so the resolver is consulted at most
+//     once per distinct URI per run. The resolver receives the caller's context
+//     (see Remote References below).
 //   - [WithBaseURI] sets the root document's base URI, the base its
 //     non-local refs absolutize against when no root $id establishes one,
 //     and registers the root under it so a ref absolutizing back to the
@@ -999,18 +1000,18 @@
 //
 // All validation failures are collected; validation does not stop on the first
 // error. The returned [*ValidationError] forms a tree: compositional keywords
-// (allOf, anyOf, oneOf, if/then/else, $ref, $dynamicRef, unevaluated*) wrap their
-// child failures in intermediate [ValidationError.Causes] nodes, while container
-// keywords (properties, items, additionalProperties) flatten child failures into
-// the parent's Causes, each retaining its full instance and schema path. The not
-// keyword produces a childless leaf error. A false subschema failure ("value is
-// not allowed") carries the applicator keyword that applied it (for example
-// additionalProperties for additionalProperties: false); a standalone boolean
-// false schema has no applicator context and leaves Keyword empty. A
-// propertyNames violation constrains a key, which has no JSON Pointer of its
-// own, so it borrows the property's location: the surfaced error carries
-// Keyword "propertyNames" and an InstancePath pointing at the offending
-// property, with the inner keyword failure in its Causes.
+// (allOf, anyOf, oneOf, if/then/else, $ref, $dynamicRef, unevaluated*) wrap
+// their child failures in intermediate [ValidationError.Causes] nodes, while
+// container keywords (properties, items, additionalProperties) flatten child
+// failures into the parent's Causes, each retaining its full instance and
+// schema path. The not keyword produces a childless leaf error. A false
+// subschema failure ("value is not allowed") carries the applicator keyword
+// that applied it (for example additionalProperties for additionalProperties:
+// false); a standalone boolean false schema has no applicator context and
+// leaves Keyword empty. A propertyNames violation constrains a key, which has
+// no JSON Pointer of its own, so it borrows the property's location: the
+// surfaced error carries Keyword "propertyNames" and an InstancePath pointing
+// at the offending property, with the inner keyword failure in its Causes.
 //
 // Alongside the InstancePath and SchemaPath JSON Pointers, every error
 // produced by validation carries both paths in typed form:
@@ -1028,19 +1029,19 @@
 //
 // Built-in format checkers are provided for: date-time, date, time, duration,
 // email, idn-email, hostname, idn-hostname, uri, uri-reference, uri-template,
-// iri, iri-reference, uuid, ipv4, ipv6, json-pointer, relative-json-pointer, and
-// regex.
+// iri, iri-reference, uuid, ipv4, ipv6, json-pointer, relative-json-pointer,
+// and regex.
 //
 // Each checker asserts its format's defining grammar. Where that grammar admits
 // more than one reading, or where the string alone cannot decide what the spec
-// asks, the checker takes the position below; [WithFormatValidator] replaces any
-// of them.
+// asks, the checker takes the position below; [WithFormatValidator] replaces
+// any of them.
 //
 //   - regex is a structural ECMA-262 check, not a compile: balanced groups,
-//     terminated classes, well-formed escapes. Backreferences and lookaround are
-//     accepted, since ECMA-262 has them and Go's RE2 does not, and every ASCII
-//     character is a valid ECMA-262 Annex B identity escape, so "\a" and "\_"
-//     are accepted (as is a bare "\c", an Annex B ExtendedAtom in its own
+//     terminated classes, well-formed escapes. Backreferences and lookaround
+//     are accepted, since ECMA-262 has them and Go's RE2 does not, and every
+//     ASCII character is a valid ECMA-262 Annex B identity escape, so "\a" and
+//     "\_" are accepted (as is a bare "\c", an Annex B ExtendedAtom in its own
 //     right). The format therefore accepts patterns RE2 rejects. This is
 //     independent of the pattern keyword, which does use RE2.
 //   - uri-template accepts the RFC 6570 op-reserve operators ("{=path}",
@@ -1120,11 +1121,11 @@
 //
 // Draft 2020-12 introduces $vocabulary, which appears in metaschemas and maps
 // vocabulary URIs to booleans indicating whether each vocabulary is required
-// (true) or optional (false). The validator respects $vocabulary to gate keyword
-// groups: when a vocabulary is inactive, its keywords are silently skipped.
-// The contains keyword's at-least-one rule (its default minContains=1 floor)
-// belongs to contains itself in the applicator vocabulary, so disabling the
-// validation vocabulary skips only the explicit minContains/maxContains
+// (true) or optional (false). The validator respects $vocabulary to gate
+// keyword groups: when a vocabulary is inactive, its keywords are silently
+// skipped. The contains keyword's at-least-one rule (its default minContains=1
+// floor) belongs to contains itself in the applicator vocabulary, so disabling
+// the validation vocabulary skips only the explicit minContains/maxContains
 // bounds, not the default floor.
 //
 // The boolean governs only implementations that do not understand the
@@ -1184,23 +1185,23 @@
 // document -- fails Compile with an error wrapping [ErrNotResolved], since
 // it can never resolve later.
 //
-// At validation time, an unresolvable remote or absolute $ref is reported as
-// a [*ValidationError]: with no resolver (or a resolver answering
-// ErrNotResolved) the message begins with "cannot resolve $ref" and includes
-// the quoted ref, while a resolver that returns any other error yields one
-// wrapping [ErrRefResolve]. An unresolvable local fragment ref is reported
-// the same way when it sits in a part of the graph no compile-time pass
-// vetted: inside a document first fetched during a validation run, or inside
-// a JSON-pointer fallback target. Only an unresolvable local fragment ref
-// within a compile-vetted document is silently skipped, because there the
-// compile-time reference walk has already rejected genuinely broken fragment
-// refs before the walk begins.
-// Circular refs are detected and treated as passing to avoid infinite recursion.
+// At validation time, an unresolvable remote or absolute $ref is reported as a
+// [*ValidationError]: with no resolver (or a resolver answering ErrNotResolved)
+// the message begins with "cannot resolve $ref" and includes the quoted ref,
+// while a resolver that returns any other error yields one wrapping
+// [ErrRefResolve]. An unresolvable local fragment ref is reported the same way
+// when it sits in a part of the graph no compile-time pass vetted: inside a
+// document first fetched during a validation run, or inside a JSON-pointer
+// fallback target. Only an unresolvable local fragment ref within a
+// compile-vetted document is silently skipped, because there the compile-time
+// reference walk has already rejected genuinely broken fragment refs before the
+// walk begins. Circular refs are detected and treated as passing to avoid
+// infinite recursion.
 //
 // A remote document first fetched during a validation run is vetted with the
 // same structural checks Compile applies to compile-time-fetched documents:
 // field structure, identifiers, type names, non-negative bounds, and under
-// [Draft2020] the Draft-7 items array. A JSON-pointer fallback target (a
+// [Draft2020] the Draft-07 items array. A JSON-pointer fallback target (a
 // schema carried inside an unknown keyword or the internals of a
 // non-applicator keyword) is vetted with the same checks minus the identifier
 // pass, which needs a document base no pointer target carries. Both engines
@@ -1417,22 +1418,22 @@
 // Inline structurally vets a remote document the closure reaches before
 // inlining it, through the same policy the validator applies to fetched
 // documents (see Remote References for the full check list). A violation
-// returns an error wrapping [ErrRefResolve] that also wraps the sentinel of
-// the check that failed ([ErrInvalidType], [ErrNegativeBound],
+// returns an error wrapping [ErrRefResolve] that also wraps the sentinel of the
+// check that failed ([ErrInvalidType], [ErrNegativeBound],
 // [ErrNonPositiveMultipleOf], [ErrItemsArrayUnderDraft2020],
-// [ErrConflictingSchemaFields], [ErrNilSubschema],
-// [ErrDuplicatePropertyOrder], [ErrInvalidID], or [ErrMisplacedVocabulary]),
-// rather than inlining the document into a malformed output schema. A fetched
-// document holding a pointer cycle fails the same way, wrapping
-// [ErrSchemaNotTree]; a cyclic [SubstituteRef] schema returns that sentinel
-// from the substitution site. A substitute whose own $id names a URI a real
-// document already holds returns [ErrIDCollision] from the substitution site,
-// naming the reference whose fallback supplied it. The fetched document follows
-// the root document's draft, so a Draft-7 array-form items remote inlined under
-// a Draft-7 run is left intact. A JSON-pointer fallback target (a schema
-// carried inside an unknown keyword, in the root document or a fetched one) is
-// vetted the same way at materialization, minus the identifier checks, so an
-// ill-formed target cannot be spliced into the output either.
+// [ErrConflictingSchemaFields], [ErrNilSubschema], [ErrDuplicatePropertyOrder],
+// [ErrInvalidID], or [ErrMisplacedVocabulary]), rather than inlining the
+// document into a malformed output schema. A fetched document holding a pointer
+// cycle fails the same way, wrapping [ErrSchemaNotTree], and a cyclic
+// [SubstituteRef] schema returns that sentinel from the substitution site. A
+// substitute whose own $id names a URI a real document already holds returns
+// [ErrIDCollision] from the substitution site, naming the reference whose
+// fallback supplied it. The fetched document follows the root document's draft,
+// so a Draft-07 array-form items remote inlined under a Draft-07 run is left
+// intact. A JSON-pointer fallback target (a schema carried inside an unknown
+// keyword, in the root document or a fetched one) is vetted the same way at
+// materialization, minus the identifier checks, so an ill-formed target cannot
+// be spliced into the output either.
 //
 // A reference that resolves to nothing inside a document that is present can
 // never resolve later, so the walk refuses it wherever it sits, including a

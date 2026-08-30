@@ -561,8 +561,9 @@ func (in *inliner) run(s *Schema) (*Schema, error) {
 // mode. Inline has no static expansion for the keyword and answers
 // [ErrRefInline] wherever walkPair meets one, and a strict pre-walk would
 // displace that answer with a resolution error. A JSON-pointer target the
-// structural vet rejects passes the walk on the same terms. On the same graph
-// [Compile] reports the sentinel of the check that rejected the target.
+// structural vet rejects passes the walk on the same terms. On the same
+// graph, [Compile] reports the sentinel of the check that rejected the
+// target.
 func (in *inliner) walkClosure(pristine *Schema) error {
 	strict := in.fallback == nil
 

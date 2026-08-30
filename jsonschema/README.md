@@ -766,7 +766,7 @@ admits `null` is the generator's decision rather than the Go type's, so
 also what a context the generator did not build falls back to. A field
 referencing the type it belongs to reads its null admission before that type
 records a `Nullability` stance, so a later stance can withdraw the answer.
-Two field-level writers take a null literal against a reference, the
+Two field-level writers take a null literal against a reference: the
 `jsonschema` tag and the tag interpreters. The generator re-checks both once the
 stances are final and refuses the ones the final decision leaves unadmitted. The
 resulting `Shape` carries the declared Go type, that type with its pointer chain

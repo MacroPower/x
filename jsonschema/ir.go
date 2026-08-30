@@ -247,7 +247,7 @@ func allocCanvasTree(n *node, draft Draft) {
 // that has elements and hands the same pointer to every depth, so a [][]*T
 // inner element reads the same origin as the outer one.
 func assignFieldOrigins(n *node, origin *fieldOrigin) {
-	if n == nil || origin == nil {
+	if n == nil {
 		return
 	}
 
@@ -453,8 +453,8 @@ func canvasNullLiteral(canvas *Schema) string {
 // Maps, pointers, and slices are the only kinds encoding/json writes null for
 // on their own, so every other kind answers false without a marshal unless it
 // carries its own [json.Marshaler]. That keeps the scan off most values, and
-// the recover keeps a third-party MarshalJSON that panics from escaping
-// generation, which reports through errors alone.
+// marshalsToNull recovers a third-party MarshalJSON panic, so generation
+// reports through errors alone.
 func isJSONNull(v any) bool {
 	if v == nil {
 		return true

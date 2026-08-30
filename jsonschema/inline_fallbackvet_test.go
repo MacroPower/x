@@ -310,8 +310,9 @@ func TestDynamicRefRejectedPointerTargetSplitsTheEngines(t *testing.T) {
 
 		_, err = jsonschema.Compile(t.Context(), root)
 		require.ErrorIs(t, err, jsonschema.ErrInvalidType,
-			"a strict $dynamicRef walk reports the sentinel of the check "+
-				"that rejected the target, a sentinel Inline never reports")
+			"a strict $dynamicRef walk reports ErrInvalidType, the sentinel "+
+				"of the check that rejected the target, "+
+				"a sentinel Inline never reports")
 		require.NotErrorIs(t, err, jsonschema.ErrRefResolve,
 			"Compile reports ErrInvalidType unwrapped, "+
 				"so the $ref path's wrapper is Inline's")
