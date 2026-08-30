@@ -78,8 +78,8 @@ The package has two independent halves sharing the `Schema` type:
   meets one. A JSON-pointer target the structural vet rejects passes the walk
   on the same terms, because `refClosure.strictDyn` is false in both of
   `Inline`'s modes. `Inline` without a fallback still refuses, with
-  `ErrRefInline` rather than the check's sentinel that `Compile` reports, and a
-  dropping fallback inlines the graph.
+  `ErrRefInline` rather than the sentinel `Compile` reports for the check that
+  rejected the target, and a dropping fallback inlines the graph.
   `TestDynamicRefRejectedPointerTargetSplitsTheEngines` pins both engines'
   answers. Second, `WithRefFallback` suspends the walk's refusals apart from
   an identifier collision, because a fallback answers one failing reference at

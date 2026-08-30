@@ -1269,17 +1269,17 @@ which needs a document base no pointer target carries. Both engines vet a
 target where they materialize it, so the reference that reaches the target is
 the one that reports its violation.
 
-The vet refuses the schema with the check's sentinel (`ErrInvalidType`,
-`ErrNegativeBound`, `ErrNonPositiveMultipleOf`, `ErrItemsArrayUnderDraft2020`,
-`ErrConflictingSchemaFields`, `ErrNilSubschema`, `ErrDuplicatePropertyOrder`,
-or, for a fetched document, `ErrInvalidID` or `ErrMisplacedVocabulary`) rather
-than letting the schema silently mis-validate. A validation run and `Inline`
-both fail the referencing ref with an error wrapping `ErrRefResolve` and that
-sentinel. `Compile` reports the bare sentinel. It frames a fallback target's
-violation under the failing reference, and a fetched document's under that
-document's own locator. `Inline` applies this same vetting policy to every
-document its own reference closure reaches, its root included (see [Inlining
-references](#inlining-references)).
+The vet refuses the schema with the sentinel of the check that failed
+(`ErrInvalidType`, `ErrNegativeBound`, `ErrNonPositiveMultipleOf`,
+`ErrItemsArrayUnderDraft2020`, `ErrConflictingSchemaFields`, `ErrNilSubschema`,
+`ErrDuplicatePropertyOrder`, or, for a fetched document, `ErrInvalidID` or
+`ErrMisplacedVocabulary`) rather than letting the schema silently mis-validate.
+A validation run and `Inline` both fail the referencing ref with an error
+wrapping `ErrRefResolve` and that sentinel. `Compile` reports the bare sentinel.
+It frames a fallback target's violation under the failing reference, and a
+fetched document's under that document's own locator. `Inline` applies this same
+vetting policy to every document its own reference closure reaches, its root
+included (see [Inlining references](#inlining-references)).
 
 A fetched document must claim no identifier another document already holds. A
 `$id` that resolves to a URI another document already holds, or an `$anchor` or
@@ -1566,16 +1566,15 @@ Failure modes:
   be found, returns an error wrapping `ErrRefResolve`.
 - `Inline` vets the root document before any reference resolves, through the
   policy `Compile` applies to the document it is given (see
-  [Remote references](#remote-references) for the full check list). A
-  violation returns the check's sentinel naming the offending path, so the
-  structural vet accepts the same roots at both entry points. A
-  `SubstituteRef` schema
-  enters resolution space as a document of its own, so `Inline` vets it as one
-  and names the reference it answered along with the document and path where
-  the inliner consulted the fallback. Under `WithRetrievalBase`
-  `Inline` skips the `$id` domain check throughout the run, in the root, in
-  each substitute, and in every fetched document, since an inert `$id`
-  establishes no base and registers no target.
+  [Remote references](#remote-references) for the full check list). A violation
+  returns the sentinel of the check that failed, in a message naming the
+  offending path, so the structural vet accepts the same roots at both entry
+  points. A `SubstituteRef` schema enters resolution space as a document of its
+  own, so `Inline` vets it as one and names the reference it answered along
+  with the document and path where the inliner consulted the fallback. Under
+  `WithRetrievalBase` `Inline` skips the `$id` domain check throughout the run,
+  in the root, in each substitute, and in every fetched document, since an inert
+  `$id` establishes no base and registers no target.
 - `Inline` runs the same reference-closure walk as `Compile` before
   expanding anything. It fetches each document a reference names, vets it,
   walks that document's own references, and repeats until no document is
@@ -1588,12 +1587,12 @@ Failure modes:
   the expansion meets one. A `$dynamicRef` that resolves to nothing in a
   document no expansion reaches therefore leaves `Inline` silent where
   `Compile` refuses. A `$dynamicRef` whose JSON-pointer target the structural
-  vet rejects divides the two engines differently. The walk does not report
-  that rejection, so `Inline` without a fallback answers `ErrRefInline` rather
-  than the check's sentinel that `Compile` reports. Under a `WithRefFallback` that
-  drops the reference, `Inline` instead succeeds on the input `Compile`
-  refuses. The inlined document carries no `$dynamicRef`, so `Compile`
-  accepts it.
+  vet rejects divides the two engines differently. The walk does not report that
+  rejection, so `Inline` without a fallback answers `ErrRefInline` rather than
+  the sentinel `Compile` reports for the check that rejected the target. Under a
+  `WithRefFallback` that drops the reference, `Inline` instead succeeds on the
+  input `Compile` refuses. The inlined document carries no `$dynamicRef`, so
+  `Compile` accepts it.
 - One attribution difference survives. The validator's fetch walks a fetched
   document's nested absolute-`$id` resources into its registry, so a
   violation inside one names that resource's own URI, while `Inline` reaches
@@ -1603,23 +1602,22 @@ Failure modes:
 - `Inline` structurally vets a remote document the closure reaches before
   inlining it, through the same policy the validator applies to fetched
   documents (see [Remote references](#remote-references) for the full check
-  list). A violation returns an error wrapping `ErrRefResolve` that also
-  wraps the check's sentinel (`ErrInvalidType`, `ErrNegativeBound`,
+  list). A violation returns an error wrapping `ErrRefResolve` that also wraps
+  the sentinel of the check that failed (`ErrInvalidType`, `ErrNegativeBound`,
   `ErrNonPositiveMultipleOf`, `ErrItemsArrayUnderDraft2020`,
   `ErrConflictingSchemaFields`, `ErrNilSubschema`,
   `ErrDuplicatePropertyOrder`, `ErrInvalidID`, or `ErrMisplacedVocabulary`),
-  rather than being inlined into a malformed output schema. A fetched
+  rather than inlining the document into a malformed output schema. A fetched
   document holding a pointer cycle fails the same way, wrapping
-  `ErrSchemaNotTree`, and a cyclic `SubstituteRef` schema returns that
-  sentinel from the substitution site. A substitute whose own `$id` names a
-  URI a real document already holds returns `ErrIDCollision` from the
-  substitution site, naming the reference whose fallback supplied it. The
-  fetched document follows the root document's draft, so a Draft-07 array-form
-  `items` remote inlined under a Draft-07 run is left intact. A JSON-pointer
-  fallback target (a schema carried inside an unknown keyword, in the root
-  document or a fetched one) is vetted the same way at materialization, minus
-  the identifier checks, so an ill-formed target cannot be spliced into the
-  output either.
+  `ErrSchemaNotTree`, and a cyclic `SubstituteRef` schema returns that sentinel
+  from the substitution site. A substitute whose own `$id` names a URI a real
+  document already holds returns `ErrIDCollision` from the substitution site,
+  naming the reference whose fallback supplied it. The fetched document follows
+  the root document's draft, so a Draft-07 array-form `items` remote inlined
+  under a Draft-07 run is left intact. A JSON-pointer fallback target (a schema
+  carried inside an unknown keyword, in the root document or a fetched one) is
+  vetted the same way at materialization, minus the identifier checks, so an
+  ill-formed target cannot be spliced into the output either.
 - A reference that resolves to nothing inside a document that is present can
   never resolve later, so the walk refuses it wherever it sits, including a
   branch no expansion would have copied.
@@ -1652,9 +1650,9 @@ A substitute is deep-copied before splicing and is itself inlined recursively,
 its refs resolving in the context of the document containing the failing ref; a
 cycle introduced by the substitute is an ordinary `ErrRefCycle`. The copy
 enters resolution space as a document of its own, so `Inline` vets it as one,
-and a violation ends the call with the check's sentinel in a message naming
-the reference the substitute answered and the document and path where the
-inliner consulted the fallback.
+and a violation ends the call with the sentinel of the check that failed, in a
+message naming the reference the substitute answered and the document and path
+where the inliner consulted the fallback.
 
 Configuring a fallback also suspends the reference-closure walk's refusals apart
 from an identifier collision. A `RefFallback` answers one failing reference at a

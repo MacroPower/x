@@ -672,13 +672,16 @@ func TestRequiredOnNullableRejectsNull(t *testing.T) {
 						"or FuzzValidatorRequiredNullableShapes cannot compare it")
 
 				require.NotNil(t, prop.MaxLength, "the max tag wrote no maxLength: %s", doc)
-				assert.Equal(t, ceiling, *prop.MaxLength, "the maxLength must be the tag's ceiling: %s", doc)
+				assert.Equal(t, ceiling, *prop.MaxLength,
+					"the maxLength must be the tag's ceiling: %s", doc)
 
 				// The forbidden null has to hold the property's own not slot,
 				// which the forbidden subschema competes for.
 				require.NotNil(t, prop.Not, "the forbidden null left the property: %s", doc)
-				require.NotNil(t, prop.Not.Const, "the not must forbid a value, not a subschema: %s", doc)
-				assert.Nil(t, *prop.Not.Const, "the forbidden value must be the null: %s", doc)
+				require.NotNil(t, prop.Not.Const,
+					"the not must forbid a value, not a subschema: %s", doc)
+				assert.Nil(t, *prop.Not.Const,
+					"the forbidden value must be the null: %s", doc)
 			}
 
 			// The nil occurrence: go-playground rejects it, so the schema must
@@ -750,7 +753,8 @@ func TestRequiredNullableForbidRowIsCompared(t *testing.T) {
 	t.Parallel()
 
 	shapes := requiredNullableShapes()
-	require.Contains(t, shapes, forbidRowKey, "the roster no longer holds this row")
+	require.Contains(t, shapes, forbidRowKey,
+		"the roster no longer holds this row")
 
 	ceiling, ok := taggedCeiling(t, shapes[forbidRowKey])
 	require.True(t, ok, "the forbid row no longer spells a ceiling")
@@ -779,8 +783,10 @@ func TestRequiredNullableForbidRowIsCompared(t *testing.T) {
 		}
 	}
 
-	assert.Positive(t, within, "no seed pair draws the forbid row within its ceiling")
-	assert.Positive(t, above, "no seed pair draws the forbid row above its ceiling")
+	assert.Positive(t, within,
+		"no seed pair draws the forbid row within its ceiling")
+	assert.Positive(t, above,
+		"no seed pair draws the forbid row above its ceiling")
 }
 
 // seededNilRows counts, per roster row, the seed pairs that draw that row and

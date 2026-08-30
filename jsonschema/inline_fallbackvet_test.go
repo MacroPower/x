@@ -171,8 +171,9 @@ func TestInlineFallbackTargetStructuralChecks(t *testing.T) {
 // TestDynamicRefRejectedPointerTargetSplitsTheEngines pins the one structural
 // rejection the two engines answer differently. Inline resolves a $dynamicRef
 // non-strictly in both walk modes, so a rejected target never refuses the walk,
-// while [jsonschema.Compile] resolves it strictly and refuses with the check's
-// sentinel.
+// while [jsonschema.Compile] resolves it strictly and refuses with the sentinel
+// of the check that rejected the target, [jsonschema.ErrInvalidType] for this
+// fixture.
 //
 // The divergence is deliberate, and doc.go and README.md state it. Inline has
 // no static expansion for the keyword and answers [jsonschema.ErrRefInline]
@@ -269,7 +270,8 @@ func TestDynamicRefRejectedPointerTargetSplitsTheEngines(t *testing.T) {
 			if tc.err != nil {
 				require.ErrorIs(t, err, tc.err)
 				assert.Contains(t, err.Error(), dynamicRefInlinePhrase,
-					"the refusal must name the keyword, not one of ErrRefInline's other producers")
+					"the refusal must name the keyword, "+
+						"not one of ErrRefInline's other producers")
 
 				for _, sentinel := range tc.notErr {
 					require.NotErrorIs(t, err, sentinel,
@@ -298,9 +300,8 @@ func TestDynamicRefRejectedPointerTargetSplitsTheEngines(t *testing.T) {
 	// cannot absorb them, since it requires [jsonschema.ErrRefResolve]. Inline
 	// adds that wrapper itself in walkClosure, over whatever its closure walk
 	// refuses, and with strictDyn false no rejected $dynamicRef target reaches
-	// it. The refWalkError helper wraps the cause alone, so Compile reports the
-	// check's sentinel unwrapped, whichever keyword carried the rejected
-	// target.
+	// it. The refWalkError helper wraps the cause alone, so Compile reports
+	// ErrInvalidType unwrapped, whatever keyword carries this target.
 	t.Run("Compile refuses the target Inline passes over", func(t *testing.T) {
 		t.Parallel()
 
@@ -309,9 +310,11 @@ func TestDynamicRefRejectedPointerTargetSplitsTheEngines(t *testing.T) {
 
 		_, err = jsonschema.Compile(t.Context(), root)
 		require.ErrorIs(t, err, jsonschema.ErrInvalidType,
-			"a strict $dynamicRef walk reports the check's sentinel that Inline never does")
+			"a strict $dynamicRef walk reports the sentinel of the check "+
+				"that rejected the target, a sentinel Inline never reports")
 		require.NotErrorIs(t, err, jsonschema.ErrRefResolve,
-			"Compile reports the check's sentinel unwrapped, so the $ref path's wrapper is Inline's")
+			"Compile reports ErrInvalidType unwrapped, "+
+				"so the $ref path's wrapper is Inline's")
 		assert.Contains(t, err.Error(), `cannot resolve $dynamicRef "#/x-custom/sub"`,
 			"the refusal names the keyword whose target the vet rejected")
 	})

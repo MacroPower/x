@@ -271,11 +271,11 @@ func (f RefFallbackFunc) ResolveRefFailure(ctx context.Context, failure RefFailu
 // the document containing the failing ref; a cycle introduced by the
 // returned schema is an ordinary [ErrRefCycle]. The copy enters resolution
 // space as a document of its own, so Inline vets it as one. A violation ends
-// the Inline call with the check's sentinel, in a message naming the
-// reference the substitute answered. A fallback that keeps
-// substituting a schema carrying its own failing ref is bounded: nesting beyond
-// an internal depth limit surfaces [ErrRefInline] rather than exhausting the
-// stack.
+// the Inline call with the sentinel of the check that failed, in a message
+// naming the reference the substitute answered (see [Inline] for the full
+// check list). A fallback that keeps substituting a schema carrying its own
+// failing ref is bounded: nesting beyond an internal depth limit surfaces
+// [ErrRefInline] rather than exhausting the stack.
 func WithRefFallback(f RefFallback) InlineOption {
 	return inlineOptionFunc(func(in *inliner) { in.fallback = f })
 }
@@ -323,18 +323,18 @@ func WithRefFallback(f RefFallback) InlineOption {
 //
 // Inline then vets the root structurally, the pass Compile runs over the
 // document it is given, before any reference resolves. A violation returns the
-// check's sentinel ([ErrInvalidType], [ErrItemsArrayUnderDraft2020],
-// [ErrNegativeBound], [ErrNonPositiveMultipleOf], [ErrNilSubschema],
-// [ErrConflictingSchemaFields], [ErrDuplicatePropertyOrder], [ErrInvalidID],
-// or [ErrMisplacedVocabulary]) naming the offending path, so the two engines
-// refuse the same roots for the same structural causes. Both engines refuse an
-// unparsable [WithBaseURI] value with [ErrInvalidBaseURI].
-// [WithRetrievalBase] carves out the $id domain check, in the root, in each
-// substitute, and in every fetched document, since an inert $id addresses
-// nothing. One compile-time refusal has no Inline counterpart,
-// [ErrUnknownVocabulary], which belongs to the vocabulary resolution Inline
-// does not run. The agreement therefore covers the structural vet rather than
-// every error.
+// sentinel of the check that failed ([ErrInvalidType],
+// [ErrItemsArrayUnderDraft2020], [ErrNegativeBound],
+// [ErrNonPositiveMultipleOf], [ErrNilSubschema], [ErrConflictingSchemaFields],
+// [ErrDuplicatePropertyOrder], [ErrInvalidID], or [ErrMisplacedVocabulary]),
+// in a message naming the offending path, so the two engines refuse the same
+// roots for the same structural causes. Both engines refuse an unparsable
+// [WithBaseURI] value with [ErrInvalidBaseURI]. [WithRetrievalBase] carves out
+// the $id domain check, in the root, in each substitute, and in every fetched
+// document, since an inert $id addresses nothing. One compile-time refusal has
+// no Inline counterpart, [ErrUnknownVocabulary], which belongs to the
+// vocabulary resolution Inline does not run. The agreement therefore covers
+// the structural vet rather than every error.
 //
 // Inline then runs the same reference-closure walk as Compile before expanding
 // anything. It fetches and vets every document a reference reaches, however
@@ -561,8 +561,8 @@ func (in *inliner) run(s *Schema) (*Schema, error) {
 // mode. Inline has no static expansion for the keyword and answers
 // [ErrRefInline] wherever walkPair meets one, and a strict pre-walk would
 // displace that answer with a resolution error. A JSON-pointer target the
-// structural vet rejects passes the walk on the same terms, while [Compile]
-// reports the check's sentinel on the same graph.
+// structural vet rejects passes the walk on the same terms. On the same graph
+// [Compile] reports the sentinel of the check that rejected the target.
 func (in *inliner) walkClosure(pristine *Schema) error {
 	strict := in.fallback == nil
 
