@@ -121,8 +121,8 @@ type mapConstraints struct {
 // Slices and maps are excluded on purpose; see
 // reasonRequiredCollectionEmptyFloor. The two validators diverge only on the
 // empty collection, which the interpreter rejects by design, so slices and maps
-// stay out of the roster. The draw cannot build their nil occurrence, and
-// TestRequiredOnNullableRejectsNull pins that side instead.
+// stay out of the roster. Their nil occurrence agrees, and
+// FuzzValidatorRequiredNullableShapes compares it one shape at a time.
 type requiredConstraints struct {
 	Str  string  `json:"str"   validate:"required"`
 	Num  int     `json:"num"   validate:"required"`

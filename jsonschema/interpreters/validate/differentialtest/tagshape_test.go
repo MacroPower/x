@@ -68,7 +68,10 @@ func tagKinds() []tagKind {
 	// unreachable.
 	scalarBool := []string{"eq=true", "ne=false", "required"}
 	// A sequence draws no required, since the two validators diverge on the
-	// empty collection; see reasonRequiredCollectionEmptyFloor.
+	// empty collection; see reasonRequiredCollectionEmptyFloor. This draw builds
+	// multi-field structs, where no one field owns the object verdict, so
+	// FuzzValidatorRequiredNullableShapes compares the nil side of the same
+	// rule.
 	sequence := []string{"min=1", "max=3", "len=2", "eq=2", "ne=2", "unique", "dive,min=2"}
 	// A map draws neither required nor unique; see
 	// reasonRequiredCollectionEmptyFloor and reasonUniqueMapNoOp.

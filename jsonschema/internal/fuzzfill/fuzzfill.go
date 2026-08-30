@@ -153,8 +153,9 @@ func (c *Cursor) String(maxLen int) string {
 type Constructor func(c *Cursor) any
 
 type config struct {
-	constructors map[reflect.Type]Constructor
-	candidates   map[string][]string
+	constructors  map[reflect.Type]Constructor
+	candidates    map[string][]string
+	nilContainers bool
 }
 
 // Recursion depth and collection/string size caps Fill applies.
@@ -190,6 +191,19 @@ func WithConstructor(t reflect.Type, ctor Constructor) Option {
 // strconv; an unparseable candidate is skipped for that draw.
 func WithCandidates(m map[string][]string) Option {
 	return func(cfg *config) { cfg.candidates = m }
+}
+
+// WithNilContainers makes Fill draw a nil slice or map about half the time,
+// the way it draws a nil pointer. A []byte is one of the slices it draws for.
+// Use it in a rig that compares what a nil container marshals to; every nil
+// container marshals to null.
+//
+// It is off by default because the fuzzer minimized the committed corpora
+// against a draw that allocates. Fill reads the bit only when a rig sets the
+// option, so a rig that leaves it off consumes the entropy the default draw
+// consumes and decodes every corpus entry to the same value.
+func WithNilContainers() Option {
+	return func(cfg *config) { cfg.nilContainers = true }
 }
 
 // Fill populates the value rv points at from data. Rv must be a non-nil
@@ -292,6 +306,20 @@ func (f *filler) atDepthLimit(rv reflect.Value, depth int) bool {
 	return false
 }
 
+// drewNil reports whether the nil-container draw came up nil for rv. It zeroes
+// rv when it did, and reads no entropy unless a rig sets [WithNilContainers],
+// which keeps the default draw's cursor positions where the committed corpora
+// expect them.
+func (f *filler) drewNil(rv reflect.Value) bool {
+	if !f.cfg.nilContainers || f.cur.Bool() {
+		return false
+	}
+
+	rv.Set(reflect.Zero(rv.Type()))
+
+	return true
+}
+
 func (f *filler) fillPointer(rv reflect.Value, depth int) {
 	if depth >= maxDepth || !f.cur.Bool() {
 		rv.Set(reflect.Zero(rv.Type()))
@@ -304,7 +332,7 @@ func (f *filler) fillPointer(rv reflect.Value, depth int) {
 }
 
 func (f *filler) fillSlice(rv reflect.Value, depth int) {
-	if f.atDepthLimit(rv, depth) {
+	if f.atDepthLimit(rv, depth) || f.drewNil(rv) {
 		return
 	}
 
@@ -319,7 +347,7 @@ func (f *filler) fillSlice(rv reflect.Value, depth int) {
 }
 
 func (f *filler) fillMap(rv reflect.Value, depth int) {
-	if f.atDepthLimit(rv, depth) {
+	if f.atDepthLimit(rv, depth) || f.drewNil(rv) {
 		return
 	}
 

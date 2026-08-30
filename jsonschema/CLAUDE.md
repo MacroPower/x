@@ -664,15 +664,18 @@ contract the tests enforce.
   swallowing everything. The schema verdict is per object, so a sibling field
   that correctly rejects null can mask one that wrongly accepts it; the
   deterministic `TestRequiredOnNullableRejectsNull` puts each `required` shape
-  that admits null in a struct of its own for that reason. It is also the only
-  place the nil occurrence is reachable, since `internal/fuzzfill` builds every
-  container through `reflect.MakeSlice` or `reflect.MakeMap`, which return a
-  non-nil container even at length zero. `required` forbids null on a bare
-  slice, map, or `[]byte` beside its size floor, exactly as it forbids null
-  alone on a pointer. The nil side agrees with
-  go-playground and the empty-but-non-nil side does not, which is why the draw
-  pools omit `required` on a collection under
-  `reasonRequiredCollectionEmptyFloor`.
+  that admits null in a struct of its own for that reason, and
+  `FuzzValidatorRequiredNullableShapes` fuzzes those same one-field shapes with
+  `internal/fuzzfill`'s `WithNilContainers` draw on. That option is the only way
+  a nil slice, map, or `[]byte` reaches the fuzzer. The default draw builds
+  every container through `reflect.MakeSlice` or `reflect.MakeMap`, which return
+  a non-nil container even at length zero, and it stays the default so the
+  committed corpora keep decoding to the values the fuzzer minimized.
+  `required` forbids null on a bare slice, map, or `[]byte` beside its size
+  floor, exactly as it forbids null alone on a pointer. The nil side agrees with
+  go-playground and the empty-but-non-nil side does not. That empty collection
+  is the only `required` exclusion, `reasonRequiredCollectionEmptyFloor`, and
+  the draw pools omit `required` on a collection under it.
   `FuzzValidatorTaggedShapes` fuzzes the shape as well as the value through
   `drawTaggedStruct`, which draws the Go kind, the pointer
   wrapper, the json option, and the validate rule independently. That draw

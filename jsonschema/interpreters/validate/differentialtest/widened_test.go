@@ -2,10 +2,13 @@ package differentialtest_test
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"math"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -135,6 +138,168 @@ func FuzzValidatorCoercedPointerConstraints(f *testing.F) {
 		"OneOf": {"1", "2", "3", "4"},
 		"FEq":   {"2.5", "3.5"},
 	}))
+}
+
+// requiredNullableRig is one requiredNullableShapes row prepared for the fuzz
+// loop: the type a blob draws, the validator its schema compiles to, and the
+// schema text a failure prints.
+type requiredNullableRig struct {
+	name      string
+	typ       reflect.Type
+	validator *jsonschema.Validator
+	doc       []byte
+}
+
+// buildRequiredNullableRigs generates and compiles a schema per roster row,
+// ordered by name so a shape blob draws the same row on every run.
+func buildRequiredNullableRigs(f *testing.F) []requiredNullableRig {
+	f.Helper()
+
+	ctx := context.Background()
+	shapes := requiredNullableShapes()
+	rigs := make([]requiredNullableRig, 0, len(shapes))
+
+	for _, name := range requiredNullableOrder() {
+		schema, err := jsonschema.Generate(ctx, shapes[name],
+			jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
+			forbiddingWordSchema())
+		require.NoError(f, err, "generate the schema for %s", name)
+
+		validator, err := jsonschema.Compile(ctx, schema)
+		require.NoError(f, err, "compile the schema for %s", name)
+
+		doc, err := json.MarshalIndent(schema, "", "  ")
+		require.NoError(f, err, "marshal the schema for %s", name)
+
+		rigs = append(rigs, requiredNullableRig{
+			name: name, typ: shapes[name], validator: validator, doc: doc,
+		})
+	}
+
+	return rigs
+}
+
+// emptyBareCollection reports whether v is an allocated empty slice or map,
+// the one value in this roster the two validators judge differently; see
+// reasonRequiredCollectionEmptyFloor. A pointer occurrence is not a bare one.
+// Required stops at the forbidden null there and lays down no size floor, which
+// TestValidateInterpreter_RequiredOnPointerSlice pins, so the target compares
+// an empty container behind a pointer like any other value.
+func emptyBareCollection(v reflect.Value) bool {
+	switch v.Kind() { //nolint:exhaustive // only the two nilable collection kinds carry a size floor.
+	case reflect.Slice, reflect.Map:
+		return !v.IsNil() && v.Len() == 0
+	default:
+		return false
+	}
+}
+
+// requiredNullableOrder returns the roster keys in the order a shape blob
+// indexes them. Sorting keeps the shape a function of the blob; a map's
+// iteration order would not.
+func requiredNullableOrder() []string {
+	return slices.Sorted(maps.Keys(requiredNullableShapes()))
+}
+
+// requiredNullableSeeds returns the shape and value blob pairs
+// FuzzValidatorRequiredNullableShapes starts from, a function rather than a
+// call sequence so TestRequiredNullableNilSideIsCompared can draw the same
+// population without a testing.F.
+//
+// The cross product carries the shared blobs, whose all-zero member draws the
+// roster's first row with its container nil. The two pairs after it put the
+// other two bare collections in that same state, the one the target exists
+// for. They look their row up by name, since Cursor.Intn reads a shape blob as
+// a big-endian index into a roster whose order a new key can shift.
+func requiredNullableSeeds() [][2][]byte {
+	shared := differentialSeeds()
+	pairs := make([][2][]byte, 0, len(shared)*len(shared)+2)
+
+	for _, shape := range shared {
+		for _, value := range shared {
+			pairs = append(pairs, [2][]byte{shape, value})
+		}
+	}
+
+	order := requiredNullableOrder()
+
+	for _, name := range []string{"bare map", "bare slice"} {
+		index := slices.Index(order, name)
+		if index < 0 {
+			continue
+		}
+
+		//nolint:gosec // index is a bounded, non-negative roster position.
+		shape := binary.BigEndian.AppendUint64(nil, uint64(index))
+		pairs = append(pairs, [2][]byte{shape, make([]byte, 8)})
+	}
+
+	return pairs
+}
+
+// FuzzValidatorRequiredNullableShapes asserts the agreement property over the
+// requiredNullableShapes roster with the nil-container draw on, so the fuzzer,
+// not only the deterministic TestRequiredOnNullableRejectsNull, compares the
+// null side of required on a collection.
+//
+// Each shape holds one field, so the object verdict is that field's verdict and
+// the full biconditional applies. The rows it adds over
+// FuzzValidatorRequiredPointerConstraints are the six carrying a collection and
+// three pointer-scalar pairings that roster omits: a coerced number under a
+// bare required, a bool under required with ne, and a repeated required. Every
+// other pointer-scalar row is a shape and rule that target already compares
+// under the same draw, so a failure on one of those reads as a regression in
+// the shared driver rather than a new find. The roster is fixed, so the target
+// compiles every row once and draws an index per iteration. It takes two blobs
+// so the shape entropy and the value entropy evolve independently, the
+// convention FuzzValidatorTaggedShapes uses.
+func FuzzValidatorRequiredNullableShapes(f *testing.F) {
+	ctx := context.Background()
+	reference := playground.New(playground.WithRequiredStructEnabled())
+	rigs := buildRequiredNullableRigs(f)
+
+	for _, pair := range requiredNullableSeeds() {
+		f.Add(pair[0], pair[1])
+	}
+
+	f.Fuzz(func(t *testing.T, shapeBlob, valueBlob []byte) {
+		rig := rigs[fuzzfill.NewCursor(shapeBlob).Intn(len(rigs))]
+		if rig.name == forbidRosterKey {
+			return // reasonTypeSchemaForbidUnmodeled
+		}
+
+		val := reflect.New(rig.typ)
+		fuzzfill.Fill(val, valueBlob, fuzzfill.WithNilContainers())
+
+		if emptyBareCollection(val.Elem().Field(0)) {
+			return // reasonRequiredCollectionEmptyFloor
+		}
+
+		referenceReject, err := referenceRejects(reference, val.Elem().Interface())
+		if err != nil {
+			t.Fatalf("go-playground could not handle the %s tag: %v", rig.name, err)
+		}
+
+		instance, err := json.Marshal(val.Elem().Interface())
+		if err != nil {
+			return
+		}
+
+		schemaReject := rig.validator.ValidateJSON(ctx, instance) != nil
+		if referenceReject == schemaReject {
+			return
+		}
+
+		t.Fatalf(
+			"validators disagree on the %s shape\n"+
+				"value:            %#v\n"+
+				"marshaled:        %s\n"+
+				"go-playground:    reject=%v\n"+
+				"schema:           reject=%v\n"+
+				"schema doc:       %s",
+			rig.name, val.Elem().Interface(), instance, referenceReject, schemaReject, rig.doc,
+		)
+	})
 }
 
 // fieldProbe is what the harness needs to know about one field to decide which
@@ -342,15 +507,21 @@ func TestWidenedDifferentialReachesStrictAgreement(t *testing.T) {
 	}
 }
 
+// forbidRosterKey names the one roster row FuzzValidatorRequiredNullableShapes
+// leaves out; see reasonTypeSchemaForbidUnmodeled.
+const forbidRosterKey = "type-derived subschema forbid"
+
 // requiredNullableShapes are the one-field shapes required is checked against
 // on its own, covering both kinds of occurrence that admit null: the pointer,
-// and the bare slice, map, and byte slice. A fuzz target cannot serve here for
-// two reasons. The schema verdict is per object, so a sibling field that
-// correctly rejects null masks another field that wrongly accepts it. The nil
-// occurrence is also out of the draw's reach, since internal/fuzzfill builds
-// every container through reflect.MakeSlice or reflect.MakeMap, which return a
-// non-nil container even at length zero. One field per struct makes the verdict
-// attributable, and the zero value of that struct is the nil these shapes need.
+// and the bare slice, map, and byte slice. One field per struct makes a verdict
+// attributable. The schema verdict is per object, so a sibling field that
+// correctly rejects null would mask another field that wrongly accepts it, and
+// the zero value of a one-field struct is the nil these shapes need.
+//
+// TestRequiredOnNullableRejectsNull pins the null instance of every row,
+// FuzzValidatorRequiredNullableShapes searches the rest of each row's value
+// space with internal/fuzzfill's nil-container draw on, and
+// TestRequiredNullableNilSideIsCompared guards that draw.
 //
 // Some pointer rows pair required with a second forbidding rule. Required
 // contributes a forbidden null, and the second rule has to compose with it
@@ -371,22 +542,22 @@ func requiredNullableShapes() map[string]reflect.Type {
 		// the composition thinnest on. A forbidden subschema cannot join the
 		// forbidden values, so whichever of the two gives way to allOf stops
 		// applying to null. The caller draws it through WithTypeSchema.
-		"type-derived subschema forbid": field(reflect.TypeFor[*forbiddingWord](), "v", "required"),
-		"string":                        field(reflect.TypeFor[*string](), "v", "required"),
-		"number":                        field(reflect.TypeFor[*int](), "v", "required"),
-		"float":                         field(reflect.TypeFor[*float64](), "v", "required"),
-		"bool":                          field(reflect.TypeFor[*bool](), "v", "required"),
-		"slice":                         field(reflect.TypeFor[*[]int](), "v", "required"),
-		"map":                           field(reflect.TypeFor[*map[string]int](), "v", "required"),
-		"coerced number":                field(reflect.TypeFor[*int](), "v,string", "required"),
-		"string with ne":                field(reflect.TypeFor[*string](), "v", "required,ne=banned"),
-		"number with ne":                field(reflect.TypeFor[*int](), "v", "required,ne=7"),
-		"bool with ne":                  field(reflect.TypeFor[*bool](), "v", "required,ne=true"),
-		"string with oneof":             field(reflect.TypeFor[*string](), "v", "required,oneof=alpha beta"),
-		"string with min":               field(reflect.TypeFor[*string](), "v", "required,min=2"),
-		"coerced with ne":               field(reflect.TypeFor[*int](), "v,string", "required,ne=3"),
-		"slice with ne":                 field(reflect.TypeFor[*[]int](), "v", "required,ne=2"),
-		"repeated required":             field(reflect.TypeFor[*string](), "v", "required,required"),
+		forbidRosterKey:     field(reflect.TypeFor[*forbiddingWord](), "v", "required"),
+		"string":            field(reflect.TypeFor[*string](), "v", "required"),
+		"number":            field(reflect.TypeFor[*int](), "v", "required"),
+		"float":             field(reflect.TypeFor[*float64](), "v", "required"),
+		"bool":              field(reflect.TypeFor[*bool](), "v", "required"),
+		"slice":             field(reflect.TypeFor[*[]int](), "v", "required"),
+		"map":               field(reflect.TypeFor[*map[string]int](), "v", "required"),
+		"coerced number":    field(reflect.TypeFor[*int](), "v,string", "required"),
+		"string with ne":    field(reflect.TypeFor[*string](), "v", "required,ne=banned"),
+		"number with ne":    field(reflect.TypeFor[*int](), "v", "required,ne=7"),
+		"bool with ne":      field(reflect.TypeFor[*bool](), "v", "required,ne=true"),
+		"string with oneof": field(reflect.TypeFor[*string](), "v", "required,oneof=alpha beta"),
+		"string with min":   field(reflect.TypeFor[*string](), "v", "required,min=2"),
+		"coerced with ne":   field(reflect.TypeFor[*int](), "v,string", "required,ne=3"),
+		"slice with ne":     field(reflect.TypeFor[*[]int](), "v", "required,ne=2"),
+		"repeated required": field(reflect.TypeFor[*string](), "v", "required,required"),
 		// A bare slice, map, or byte slice is nil-able in Go, so its schema
 		// admits null exactly as a pointer's does and required has to forbid it
 		// there too. The size floor beside it never sees a null instance.
@@ -447,6 +618,113 @@ func TestRequiredOnNullableRejectsNull(t *testing.T) {
 
 			assert.Error(t, validator.ValidateJSON(t.Context(), []byte(`{"v":null}`)),
 				"the schema must reject null for %s: %s", name, doc)
+		})
+	}
+}
+
+// TestRequiredNullableNilSideIsCompared guards
+// FuzzValidatorRequiredNullableShapes from going inert at the draw. The null a
+// nil collection marshals to is the whole subject of that target, so a draw
+// that stopped producing one, or that produced nothing else, would leave it
+// green and comparing only what FuzzValidatorRequiredPointerConstraints already
+// covers.
+//
+// It asserts both halves of the path to that null. The value draw fills each
+// bare collection nil and non-nil over the shared blobs, and the seeded shape
+// and value pairs reach each bare row with its field nil, the state the
+// target's own seeds claim to reach.
+func TestRequiredNullableNilSideIsCompared(t *testing.T) {
+	t.Parallel()
+
+	shapes := requiredNullableShapes()
+	seededNil := seededNilRows(t)
+
+	for _, name := range []string{"bare slice", "bare map", "bare byte slice"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			require.Contains(t, shapes, name, "the roster no longer holds this row")
+
+			var drewNil, drewSet int
+
+			for _, blob := range differentialSeeds() {
+				val := reflect.New(shapes[name])
+				fuzzfill.Fill(val, blob, fuzzfill.WithNilContainers())
+
+				if val.Elem().Field(0).IsNil() {
+					drewNil++
+				} else {
+					drewSet++
+				}
+			}
+
+			assert.Positive(t, drewNil, "the draw never left the %s nil", name)
+			assert.Positive(t, drewSet, "the draw always left the %s nil", name)
+			assert.Positive(t, seededNil[name], "no seed pair reaches the %s row with its field nil", name)
+		})
+	}
+}
+
+// seededNilRows counts, per roster row, the seed pairs that draw that row and
+// leave its bare collection nil. It resolves the row the way the target does,
+// so a shape blob that stopped selecting the row its seed was written for shows
+// up here rather than as a silently narrower search.
+func seededNilRows(t *testing.T) map[string]int {
+	t.Helper()
+
+	order := requiredNullableOrder()
+	shapes := requiredNullableShapes()
+	counts := make(map[string]int, len(order))
+
+	for _, pair := range requiredNullableSeeds() {
+		name := order[fuzzfill.NewCursor(pair[0]).Intn(len(order))]
+
+		val := reflect.New(shapes[name])
+		fuzzfill.Fill(val, pair[1], fuzzfill.WithNilContainers())
+
+		field := val.Elem().Field(0)
+		if kind := field.Kind(); (kind == reflect.Slice || kind == reflect.Map) && field.IsNil() {
+			counts[name]++
+		}
+	}
+
+	return counts
+}
+
+// TestEmptyBareCollectionSkipsTheFloorAlone guards
+// FuzzValidatorRequiredNullableShapes from going inert at the skip. The skip
+// predicate has to let through every occurrence that marshals to null, since
+// those are the comparisons the target exists for, and skip only the allocated
+// empty collection the size floor divides the two validators on.
+func TestEmptyBareCollectionSkipsTheFloorAlone(t *testing.T) {
+	t.Parallel()
+
+	var (
+		nilSlice   []int
+		emptySlice = []int{}
+	)
+
+	for name, tc := range map[string]struct {
+		value any
+		want  bool
+	}{
+		"a nil bare slice":              {value: []int(nil)},
+		"a nil bare map":                {value: map[string]int(nil)},
+		"a nil bare byte slice":         {value: []byte(nil)},
+		"a filled bare slice":           {value: []int{1}},
+		"a filled bare map":             {value: map[string]int{"a": 1}},
+		"a nil pointer to a slice":      {value: (*[]int)(nil)},
+		"a pointer to a nil slice":      {value: &nilSlice},
+		"a pointer to an empty slice":   {value: &emptySlice},
+		"an allocated empty slice":      {value: []int{}, want: true},
+		"an allocated empty map":        {value: map[string]int{}, want: true},
+		"an allocated empty byte slice": {value: []byte{}, want: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, emptyBareCollection(reflect.ValueOf(tc.value)),
+				"the skip predicate disagrees on %s", name)
 		})
 	}
 }

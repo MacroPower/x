@@ -15,17 +15,24 @@ import (
 // go-playground itself cannot serve as a reference for, or a region where the
 // agreement property is weaker than the biconditional.
 const (
-	// Go-playground applies required to a slice or map as a nil check, so an
-	// empty but non-nil collection passes, while the interpreter floors the size
-	// and rejects that collection. A byte slice diverges the same way with
+	// Go-playground applies required to a bare slice or map as a nil check, so
+	// an empty but non-nil collection passes, while the interpreter floors the
+	// size and rejects that collection. A byte slice diverges the same way with
 	// minLength standing in for minItems, since go-playground reads the slice it
-	// is while the schema measures the base64 string it becomes. The nil side of
-	// the same rule agrees, because the interpreter forbids the null a nil
-	// collection marshals as. The draw cannot reach that side, since it builds
-	// every collection through reflect.MakeSlice or reflect.MakeMap, which return
-	// a non-nil container even at length zero.
-	// TestRequiredOnNullableRejectsNull pins that side instead.
+	// is while the schema measures the base64 string it becomes. The exclusion
+	// covers that empty collection and nothing else. The nil side of the same
+	// rule agrees, because the interpreter forbids the null a nil collection
+	// marshals as, and FuzzValidatorRequiredNullableShapes compares it.
 	reasonRequiredCollectionEmptyFloor = "a non-nil empty collection satisfies go-playground's required and trips the schema's size floor"
+	// The forbiddingWord row of requiredNullableShapes carries a type schema
+	// whose "not" forbids a minLength subschema no validate tag spells, so the
+	// schema rejects a string of three runes or more while go-playground, which
+	// reads only the tag, accepts it. Dropping that override would not make the
+	// row comparable. The model can classify a bare named string type as a $ref,
+	// the form the matrix ignores required on, so the schema then forbids no
+	// null at all. TestRequiredOnNullableRejectsNull reads the null instance
+	// alone, which neither divergence reaches.
+	reasonTypeSchemaForbidUnmodeled = "a WithTypeSchema forbid states a constraint no validate tag spells"
 	// Go-playground's oneof formats the field as text and handles only the
 	// string and integer kinds, panicking with "Bad field type" on anything
 	// else, so it cannot be the reference for oneof on a bool or a float.
@@ -87,6 +94,17 @@ type rigExclusion struct {
 	// The kinds field narrows a rule exclusion to particular field types. An empty
 	// list with a rule set means the draw never spells that rule for any type.
 	kinds []reflect.Type
+	// The covered field applies to an entry excluding one side of a rule rather
+	// than the whole rule. It names the target that compares the side the entry
+	// leaves in, holding the function value rather than the name, as
+	// internal/format's coverage table does, so renaming the target breaks the
+	// build instead of leaving the record pointing at a name that is gone. The
+	// positive record rigCoverage cannot carry the claim, since
+	// TestRigCoverageMatchesTheDraw checks its rows against the tagKinds pools
+	// and those omit required on the collection kinds. The check over this field
+	// runs one way. It reads what an entry claims, and cannot tell that an entry
+	// claiming nothing excludes one side of its rule.
+	covered func(*testing.F)
 }
 
 // rigExclusions is the reviewable record of everything this rig leaves out.
@@ -98,9 +116,10 @@ func rigExclusions() []rigExclusion {
 
 	return []rigExclusion{
 		{
-			what:   "required on a slice, map, or byte slice",
+			what:   "required on a slice, map, or byte slice holding an empty non-nil collection",
 			reason: reasonRequiredCollectionEmptyFloor,
 			rule:   "required", kinds: collections,
+			covered: FuzzValidatorRequiredNullableShapes,
 		},
 		{
 			what: "oneof on a bool or a float", reason: reasonOneOfKindPanic,
@@ -126,6 +145,10 @@ func rigExclusions() []rigExclusion {
 			reason: reasonCoercedNumericBounds,
 		},
 		{what: "a field encoding/json dropped", reason: reasonOmitemptyDropsField},
+		{
+			what:   "the requiredNullableShapes row whose type schema forbids a subschema",
+			reason: reasonTypeSchemaForbidUnmodeled,
+		},
 		{what: "a field whose instance is null and carries no required", reason: reasonNullableValueRule},
 	}
 }
@@ -180,9 +203,16 @@ func TestRigCoverageMatchesTheDraw(t *testing.T) {
 }
 
 // TestRigExclusionsMatchTheDraw pins the record against the draw pools. A rule
-// the record excludes must be absent from the pools it names, and every entry
-// must carry a reason. Without this the record is prose that can drift away
-// from what the draw does.
+// the record excludes must be absent from the pools it names, every entry must
+// carry a reason, and an entry naming a covering target must name the rule and
+// kinds that target compares the other side of. Without this the record is
+// prose that can drift away from what the draw does.
+//
+// The collection pools omit required, even though
+// FuzzValidatorRequiredNullableShapes compares its nil side. The shape draw
+// builds multi-field structs and the schema verdict is per object, so a sibling
+// field's rejection would mask the field under test; the covering target puts
+// each shape in a struct of its own for that reason.
 func TestRigExclusionsMatchTheDraw(t *testing.T) {
 	t.Parallel()
 
@@ -193,6 +223,11 @@ func TestRigExclusionsMatchTheDraw(t *testing.T) {
 
 	for _, ex := range rigExclusions() {
 		assert.NotEmpty(t, ex.reason, "exclusion %q states no reason", ex.what)
+
+		if ex.covered != nil {
+			assert.NotEmpty(t, ex.rule, "exclusion %q names a covering target but no rule", ex.what)
+			assert.NotEmpty(t, ex.kinds, "exclusion %q names a covering target but no kinds", ex.what)
+		}
 
 		if ex.rule == "" {
 			continue
