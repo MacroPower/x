@@ -147,10 +147,10 @@ type Input struct {
 // one is an error.
 //
 // The ordering rule does not govern the literal null. A type= pair replaces the
-// occurrence the literal was parsed against, so a null literal on either side of
-// one is an error. A literal before type=null is the exception, since that
-// override names the null instance outright. One after it is an error like every
-// other scalar key there, for want of a scalar type to parse against.
+// occurrence the literal was parsed against, so a null literal on either side
+// of one is an error. A literal before type=null is the exception, since that
+// override names the null instance outright. One after it is an error like
+// every other scalar key there, for want of a scalar type to parse against.
 func Apply(in Input) (Result, error) {
 	directives, description, err := Parse(in.Tag)
 	if err != nil {
@@ -695,8 +695,8 @@ func isValueKey(key string) bool {
 
 // spellsNullLiteral reports whether a scalar key's raw value carries the null
 // literal. The test is exact rather than a substring search, since
-// [tagmodel.Shape.ParseScalar] reads null as the literal before it dispatches on
-// the form and no other value of these keys spells it.
+// [tagmodel.Shape.ParseScalar] reads null as the literal before it dispatches
+// on the form and no other value of these keys spells it.
 func spellsNullLiteral(key, value string) bool {
 	switch key {
 	case keyword.Default, keyword.Const:

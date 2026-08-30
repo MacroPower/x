@@ -1494,13 +1494,13 @@ func TestTagEnumExamplesEmptySegment(t *testing.T) {
 // TestTagScalarAfterTypeOverride pins the effective scalar-parse type for the
 // default/const/enum/examples keys: pairs apply in order, so a scalar key
 // before type= parses against the field's Go type, while one after it parses
-// against the overridden JSON type via a stand-in. Overrides to the
-// non-scalar types (array, object, null) leave no type to parse against, so
-// scalar keys following them are errors. The ordering rule does not govern the
-// literal null. An override replaces the occurrence the literal was parsed
-// against, so the tag rejects the literal on either side of the pair, and when a
-// key on either side is an error, the message names the JSON type rather than
-// the stand-in's Go kind. A literal before type=null is the exception, since that
+// against the overridden JSON type via a stand-in. Overrides to the non-scalar
+// types (array, object, null) leave no type to parse against, so scalar keys
+// following them are errors. The ordering rule does not govern the literal
+// null. An override replaces the occurrence the literal was parsed against, so
+// the tag rejects the literal on either side of the pair, and when a key on
+// either side is an error, the message names the JSON type rather than the
+// stand-in's Go kind. A literal before type=null is the exception, since that
 // override names the null instance outright.
 func TestTagScalarAfterTypeOverride(t *testing.T) {
 	t.Parallel()
@@ -2223,9 +2223,10 @@ type nullStancedRecursive struct {
 }
 
 // nullStancedRecursiveExamples is the examples half of the same shape. Default
-// and examples are the two keys that reach a null literal on a reference. The
-// referenced shape refuses a const or an enum outright, before the null
-// decision enters into it.
+// and examples are the two keys that reach a null literal on a reference,
+// since the matrix rejects const and enum on a referenced definition before
+// the null decision runs. TestTagValueKeyOnAStructShapedField pins that
+// rejection.
 type nullStancedRecursiveExamples struct {
 	Next *nullStancedRecursiveExamples `json:"next" jsonschema:"examples=null"`
 }
@@ -2337,6 +2338,167 @@ func TestTagNullLiteralOnANonRecursiveStancedType(t *testing.T) {
 		forbidNullStance[nullStancedPlain]())
 	require.ErrorIs(t, err, tagmodel.ErrNullNotAdmitted)
 	require.ErrorContains(t, err, "cannot assign null to non-nullable type struct")
+}
+
+// TestTagValueKeyOnAStructShapedField pins the rejection the null re-check
+// tests lean on. A struct-shaped field carries no scalar to pin or to
+// enumerate, so the constraint matrix rejects const and enum on it before the
+// tag parses the value, and the null decision never runs.
+//
+// Every row records a NullForbidden stance for the struct type, so the null
+// decision would reject the literal if it ran first. The two default= rows are
+// the controls. The same shape under the same stance reports the null
+// sentinel, so the const and enum rows report the matrix sentinel because the
+// matrix runs first, not because the stance left the null decision nothing to
+// reject. Two rows spell a non-null literal the null decision could never
+// reach, since the matrix is keyed on the field's shape rather than on the
+// key's value. The last row generates without definitions, where the same
+// struct classifies as a declared object, so the rejection holds under either
+// setting.
+func TestTagValueKeyOnAStructShapedField(t *testing.T) {
+	t.Parallel()
+
+	// Type other stands in for any struct a field can name.
+	type other struct {
+		X string `json:"x"`
+	}
+
+	// The generator extracts a named struct into $defs by default, so a field
+	// of that type classifies as a referenced definition. WithDefinitions(false)
+	// inlines the same struct, and the matrix names the inlined form "declared
+	// object" instead.
+	const (
+		constOnRef = `key "const": constraint not supported for this shape: ` +
+			`pinned value is not supported on a referenced definition`
+		enumOnRef = `key "enum": constraint not supported for this shape: ` +
+			`enumerated values is not supported on a referenced definition`
+		enumOnObject = `key "enum": constraint not supported for this shape: ` +
+			`enumerated values is not supported on a declared object`
+		nullRefused = `key "default": cannot assign null to non-nullable type`
+	)
+
+	tests := map[string]struct {
+		generate func() (*jsonschema.Schema, error)
+		want     error  // the sentinel the report must carry
+		absent   error  // the sentinel the report must not carry
+		err      string // substring required in the generation error
+	}{
+		"null const on a self-referential pointer": {
+			generate: func() (*jsonschema.Schema, error) {
+				type selfRef struct {
+					Next *selfRef `json:"next" jsonschema:"const=null"`
+				}
+
+				return jsonschema.GenerateFor[selfRef](t.Context(),
+					forbidNullStance[selfRef]())
+			},
+			want:   tagmodel.ErrUnsupported,
+			absent: tagmodel.ErrNullNotAdmitted,
+			err:    constOnRef,
+		},
+		"null enum on a self-referential pointer": {
+			generate: func() (*jsonschema.Schema, error) {
+				type selfRef struct {
+					Next *selfRef `json:"next" jsonschema:"enum=null"`
+				}
+
+				return jsonschema.GenerateFor[selfRef](t.Context(),
+					forbidNullStance[selfRef]())
+			},
+			want:   tagmodel.ErrUnsupported,
+			absent: tagmodel.ErrNullNotAdmitted,
+			err:    enumOnRef,
+		},
+		"null default on a self-referential pointer": {
+			generate: func() (*jsonschema.Schema, error) {
+				type selfRef struct {
+					Next *selfRef `json:"next" jsonschema:"default=null"`
+				}
+
+				return jsonschema.GenerateFor[selfRef](t.Context(),
+					forbidNullStance[selfRef]())
+			},
+			want:   tagmodel.ErrNullNotAdmitted,
+			absent: tagmodel.ErrUnsupported,
+			err:    nullRefused,
+		},
+		"non-null const on a self-referential pointer": {
+			generate: func() (*jsonschema.Schema, error) {
+				type selfRef struct {
+					Next *selfRef `json:"next" jsonschema:"const=x"`
+				}
+
+				return jsonschema.GenerateFor[selfRef](t.Context(),
+					forbidNullStance[selfRef]())
+			},
+			want:   tagmodel.ErrUnsupported,
+			absent: tagmodel.ErrNullNotAdmitted,
+			err:    constOnRef,
+		},
+		"null const on a struct pointer": {
+			generate: func() (*jsonschema.Schema, error) {
+				type holder struct {
+					Next *other `json:"next" jsonschema:"const=null"`
+				}
+
+				return jsonschema.GenerateFor[holder](t.Context(),
+					forbidNullStance[other]())
+			},
+			want:   tagmodel.ErrUnsupported,
+			absent: tagmodel.ErrNullNotAdmitted,
+			err:    constOnRef,
+		},
+		"null enum on a struct pointer": {
+			generate: func() (*jsonschema.Schema, error) {
+				type holder struct {
+					Next *other `json:"next" jsonschema:"enum=null"`
+				}
+
+				return jsonschema.GenerateFor[holder](t.Context(),
+					forbidNullStance[other]())
+			},
+			want:   tagmodel.ErrUnsupported,
+			absent: tagmodel.ErrNullNotAdmitted,
+			err:    enumOnRef,
+		},
+		"null default on a struct pointer": {
+			generate: func() (*jsonschema.Schema, error) {
+				type holder struct {
+					Next *other `json:"next" jsonschema:"default=null"`
+				}
+
+				return jsonschema.GenerateFor[holder](t.Context(),
+					forbidNullStance[other]())
+			},
+			want:   tagmodel.ErrNullNotAdmitted,
+			absent: tagmodel.ErrUnsupported,
+			err:    nullRefused,
+		},
+		"enum on an inlined struct": {
+			generate: func() (*jsonschema.Schema, error) {
+				type holder struct {
+					Next other `json:"next" jsonschema:"enum=a|b"`
+				}
+
+				return jsonschema.GenerateFor[holder](t.Context(),
+					jsonschema.WithDefinitions(false), forbidNullStance[other]())
+			},
+			want:   tagmodel.ErrUnsupported,
+			absent: tagmodel.ErrNullNotAdmitted,
+			err:    enumOnObject,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := tc.generate()
+			require.ErrorIs(t, err, tc.want)
+			require.NotErrorIs(t, err, tc.absent)
+			require.ErrorContains(t, err, tc.err)
+		})
+	}
 }
 
 // TestTagEmptyStringKeyValues covers the empty-value rule for the string-typed

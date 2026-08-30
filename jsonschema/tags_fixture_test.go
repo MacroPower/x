@@ -49,6 +49,14 @@ type tagCase struct {
 	Instances       []tagInstance   `json:"instances"`
 }
 
+// fixtureObject backs the registry's fixtureObject and *fixtureObject
+// entries, the only shapes the registry offers that the generator extracts
+// into $defs, so rows reach the referenced-definition form through them
+// alone.
+type fixtureObject struct {
+	X string `json:"x"`
+}
+
 // fixtureTypes resolves a row's type name. A row names a shape rather than
 // spelling a Go type, so the table stays data and the set of shapes it can
 // reach is reviewable in one place.
@@ -73,6 +81,8 @@ func fixtureTypes() map[string]reflect.Type {
 		"time.Time":      reflect.TypeFor[time.Time](),
 		"crossLevel":     reflect.TypeFor[crossLevel](),
 		"[]crossLevel":   reflect.TypeFor[[]crossLevel](),
+		"fixtureObject":  reflect.TypeFor[fixtureObject](),
+		"*fixtureObject": reflect.TypeFor[*fixtureObject](),
 	}
 }
 

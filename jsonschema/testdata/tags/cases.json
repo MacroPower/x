@@ -1154,5 +1154,21 @@
         "want": "reject"
       }
     ]
+  },
+  {
+    "name": "a const on a struct pointer is rejected",
+    "note": "the matrix rejects a value key on a referenced definition, so the null decision never reads the literal",
+    "type": "*fixtureObject",
+    "json": "v",
+    "jsonschema": "const=null",
+    "jsonschemaError": "ErrUnsupported"
+  },
+  {
+    "name": "an enum on a struct field is rejected",
+    "note": "the matrix rejects enumerated values on the non-pointer occurrence of the same shape, so the rejection follows the form rather than the const row's null literal",
+    "type": "fixtureObject",
+    "json": "v",
+    "jsonschema": "enum=a|b",
+    "jsonschemaError": "ErrUnsupported"
   }
 ]
