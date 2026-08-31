@@ -86,26 +86,46 @@ func TestIntegerMultipleOfHugeShift(t *testing.T) {
 // TestIntegerMultipleOfAdversarialCost pins the DoS guard: a multi-megabyte
 // significand or exponent digit run must be decided in time linear in the
 // literal, never expanded through the quadratic big.Int parse (which takes
-// tens of seconds at this size).
+// tens of seconds at this size). A fixed wall-clock bound cannot separate the
+// two paths on every machine -- race and coverage instrumentation slow the
+// linear path past any constant tight enough to catch the quadratic one on
+// fast hardware -- so each case calibrates its budget from the same decision
+// at 1/32 the size. Linear scaling stays well inside the scaled budget on any
+// machine, and a quadratic expansion overshoots it by orders of magnitude.
 func TestIntegerMultipleOfAdversarialCost(t *testing.T) {
 	t.Parallel()
 
-	const digits = 8 << 20
+	const (
+		digits   = 8 << 20
+		refScale = 32
+
+		// The budget grants 4x headroom over exact linear scaling
+		// (4 * refScale); the quadratic parse costs refScale times more
+		// than the budget allows.
+		budgetScale = 4 * refScale
+
+		// The floor absorbs timer noise when the reference run is too
+		// fast to measure reliably.
+		refFloor = 100 * time.Millisecond
+	)
 
 	tests := map[string]struct {
 		literal string
+		refLit  string
 		divisor *big.Rat
 		want    bool
 	}{
 		"huge significand": {
-			// The digit sum of 8Mi nines is divisible by 9, so by 3.
+			// The digit sum of a run of nines is divisible by 9, so by 3.
 			literal: strings.Repeat("9", digits),
+			refLit:  strings.Repeat("9", digits/refScale),
 			divisor: big.NewRat(3, 1),
 			want:    true,
 		},
 		"huge exponent digit run": {
 			// 10^k is never a multiple of 3, at any magnitude.
 			literal: "1e" + strings.Repeat("9", digits),
+			refLit:  "1e" + strings.Repeat("9", digits/refScale),
 			divisor: big.NewRat(3, 1),
 			want:    false,
 		},
@@ -115,20 +135,33 @@ func TestIntegerMultipleOfAdversarialCost(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			d, ok := numrat.ParseDecNumber(tc.literal)
-			require.True(t, ok)
-			require.True(t, d.IsIntegral(),
-				"IntegerMultipleOf requires an integral value")
-			require.False(t, d.ExactlyComparable(),
-				"input must be over-cap so it exercises the guarded path")
+			_, refElapsed := timeIntegerMultipleOf(t, tc.refLit, tc.divisor)
+			budget := budgetScale * max(refElapsed, refFloor)
 
-			start := time.Now()
-			got := numrat.IntegerMultipleOf(d, tc.literal, tc.divisor)
-			elapsed := time.Since(start)
+			got, elapsed := timeIntegerMultipleOf(t, tc.literal, tc.divisor)
 
 			assert.Equal(t, tc.want, got)
-			assert.Less(t, elapsed, 10*time.Second,
+			assert.Less(t, elapsed, budget,
 				"an adversarial literal must never reach a quadratic expansion")
 		})
 	}
+}
+
+// timeIntegerMultipleOf parses literal, verifies it exercises the guarded
+// over-cap path, and returns the divisibility verdict together with the time
+// IntegerMultipleOf alone took.
+func timeIntegerMultipleOf(t *testing.T, literal string, divisor *big.Rat) (bool, time.Duration) {
+	t.Helper()
+
+	d, ok := numrat.ParseDecNumber(literal)
+	require.True(t, ok)
+	require.True(t, d.IsIntegral(),
+		"IntegerMultipleOf requires an integral value")
+	require.False(t, d.ExactlyComparable(),
+		"input must be over-cap so it exercises the guarded path")
+
+	start := time.Now()
+	got := numrat.IntegerMultipleOf(d, literal, divisor)
+
+	return got, time.Since(start)
 }
