@@ -134,7 +134,8 @@ func TestInlineFallbackTargetStructuralChecks(t *testing.T) {
 						}
 
 						return jsonschema.DropRef()
-					})))
+					},
+				)))
 			}
 
 			if tc.doc != "" {
@@ -245,7 +246,8 @@ func TestDynamicRefRejectedPointerTargetSplitsTheEngines(t *testing.T) {
 						failures = append(failures, f)
 
 						return jsonschema.DropRef()
-					})))
+					},
+				)))
 			}
 
 			out, err := jsonschema.Inline(t.Context(), root, opts...)

@@ -18,7 +18,6 @@ package main
 
 import (
 	"bytes"
-	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -139,8 +138,10 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 
 	// A close error can mean unflushed data, so it matters as much as a write
 	// error; take whichever failed first.
-	_, writeErr := tmp.Write(data)
-	err = cmp.Or(writeErr, tmp.Close())
+	_, err = tmp.Write(data)
+	if closeErr := tmp.Close(); err == nil {
+		err = closeErr
+	}
 
 	// CreateTemp makes the file 0600, so set the requested mode explicitly.
 	if err == nil {

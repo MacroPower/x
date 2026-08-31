@@ -1299,7 +1299,8 @@ func TestValidateWithCustomFormatValidator(t *testing.T) {
 				}
 
 				return nil
-			})),
+			},
+		)),
 	)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "custom-format")
@@ -1319,7 +1320,8 @@ func TestValidateCustomFormatErrorIsMatchable(t *testing.T) {
 		jsonschema.WithFormatValidator("custom-format", jsonschema.FormatValidatorFunc(
 			func(_ context.Context, _, _ string) error {
 				return errMyFormat
-			})),
+			},
+		)),
 	)
 	require.Error(t, err)
 	require.ErrorIs(t, err, errMyFormat)
@@ -2432,7 +2434,8 @@ func TestValidateVocabularyResolution(t *testing.T) {
 								// Validation vocab absent, so disabled.
 							},
 						}, nil
-					})),
+					},
+				)),
 			},
 			// Type and required are validation vocab, so both skipped.
 		},
@@ -2468,7 +2471,8 @@ func TestValidateVocabularyResolution(t *testing.T) {
 									jsonschema.VocabApplicator2020: true,
 								},
 							}, nil
-						}),
+						},
+					),
 				)),
 			},
 			err: "(type)",
@@ -2483,7 +2487,8 @@ func TestValidateVocabularyResolution(t *testing.T) {
 				jsonschema.WithMetaSchemaResolver(jsonschema.RefResolverFunc(
 					func(context.Context, string) (*jsonschema.Schema, error) {
 						return nil, jsonschema.ErrNotResolved
-					})),
+					},
+				)),
 			},
 			// Default vocabularies keep the validation vocab active.
 			err: "(type)",
@@ -2498,7 +2503,8 @@ func TestValidateVocabularyResolution(t *testing.T) {
 				jsonschema.WithMetaSchemaResolver(jsonschema.RefResolverFunc(
 					func(context.Context, string) (*jsonschema.Schema, error) {
 						return nil, errors.New("metaschema store unreachable")
-					})),
+					},
+				)),
 			},
 			err: "resolve metaschema",
 		},
@@ -6898,7 +6904,8 @@ func TestCompileRejectsItemsArrayUnderDraft2020(t *testing.T) {
 		// present-but-empty array form is rejected like any other, so its
 		// Draft-07 additionalItems semantics cannot be dropped silently.
 		v, err := jsonschema.ParseSchema([]byte(
-			`{"items": [], "additionalItems": {"type": "string"}}`))
+			`{"items": [], "additionalItems": {"type": "string"}}`,
+		))
 		require.NoError(t, err)
 
 		_, err = jsonschema.Compile(t.Context(), v)

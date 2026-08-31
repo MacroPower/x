@@ -154,7 +154,7 @@ type instanceLocation struct {
 func (l instanceLocation) key(name string) instanceLocation {
 	return instanceLocation{
 		ptr:  l.ptr + "/" + jsonptr.Escape(name),
-		segs: append(l.segs[:len(l.segs):len(l.segs)], Segment{Key: name}),
+		segs: append(slices.Clip(l.segs), Segment{Key: name}),
 	}
 }
 
@@ -164,7 +164,7 @@ func (l instanceLocation) key(name string) instanceLocation {
 func (l instanceLocation) index(i int) instanceLocation {
 	return instanceLocation{
 		ptr:  l.ptr + "/" + strconv.Itoa(i),
-		segs: append(l.segs[:len(l.segs):len(l.segs)], Segment{Index: i, IsIndex: true}),
+		segs: append(slices.Clip(l.segs), Segment{Index: i, IsIndex: true}),
 	}
 }
 
@@ -188,7 +188,7 @@ type schemaLocation struct {
 func (l schemaLocation) kw(keyword string) schemaLocation {
 	return schemaLocation{
 		ptr:  l.ptr + "/" + keyword,
-		segs: append(l.segs[:len(l.segs):len(l.segs)], Segment{Key: keyword}),
+		segs: append(slices.Clip(l.segs), Segment{Key: keyword}),
 	}
 }
 
@@ -198,7 +198,7 @@ func (l schemaLocation) kw(keyword string) schemaLocation {
 func (l schemaLocation) key(name string) schemaLocation {
 	return schemaLocation{
 		ptr:  l.ptr + "/" + jsonptr.Escape(name),
-		segs: append(l.segs[:len(l.segs):len(l.segs)], Segment{Key: name}),
+		segs: append(slices.Clip(l.segs), Segment{Key: name}),
 	}
 }
 
@@ -208,7 +208,7 @@ func (l schemaLocation) key(name string) schemaLocation {
 func (l schemaLocation) idx(i int) schemaLocation {
 	return schemaLocation{
 		ptr:  l.ptr + "/" + strconv.Itoa(i),
-		segs: append(l.segs[:len(l.segs):len(l.segs)], Segment{Index: i, IsIndex: true}),
+		segs: append(slices.Clip(l.segs), Segment{Index: i, IsIndex: true}),
 	}
 }
 
@@ -2288,7 +2288,8 @@ func evalNumeric(ctx evalContext) []*ValidationError {
 		d, ok := numrat.ParseDecNumber(string(n))
 		if !ok {
 			return validateNumericNonComparable(
-				schema, fmt.Sprintf("%q", string(n)), instancePath, schemaPath)
+				schema, fmt.Sprintf("%q", string(n)), instancePath, schemaPath,
+			)
 		}
 
 		if !d.ExactlyComparable() {
@@ -2303,7 +2304,8 @@ func evalNumeric(ctx evalContext) []*ValidationError {
 		val, ok = numrat.ToBigRat(instance)
 		if !ok {
 			return validateNumericNonComparable(
-				schema, fmt.Sprintf("%v", instance), instancePath, schemaPath)
+				schema, fmt.Sprintf("%v", instance), instancePath, schemaPath,
+			)
 		}
 	}
 
@@ -2969,7 +2971,8 @@ func evalDependentSchemas(ctx evalContext) []*ValidationError {
 
 	return ctx.v.validateSchemaDependencies(
 		ctx.schema.DependentSchemas, triggers, KeywordDependentSchemas,
-		ctx.instance, obj, ctx.instancePath, ctx.schemaPath, ctx.ann)
+		ctx.instance, obj, ctx.instancePath, ctx.schemaPath, ctx.ann,
+	)
 }
 
 // evalObjectCount checks the object count keywords (required, minProperties,
@@ -3019,7 +3022,8 @@ func evalDependentRequired(ctx evalContext) []*ValidationError {
 
 	return ctx.v.validateRequiredDependencies(
 		ctx.schema.DependentRequired, triggers, KeywordDependentRequired,
-		obj, ctx.instancePath, ctx.schemaPath)
+		obj, ctx.instancePath, ctx.schemaPath,
+	)
 }
 
 // evalLegacyDependencies checks the legacy draft-07 dependencies keyword, which
@@ -3047,9 +3051,11 @@ func evalLegacyDependencies(ctx evalContext) []*ValidationError {
 
 	errs = append(errs, v.validateSchemaDependencies(
 		schema.DependencySchemas, schemaTriggers, KeywordDependencies,
-		ctx.instance, obj, instancePath, schemaPath, ctx.ann)...)
+		ctx.instance, obj, instancePath, schemaPath, ctx.ann,
+	)...)
 	errs = append(errs, v.validateRequiredDependencies(
-		schema.DependencyStrings, stringTriggers, KeywordDependencies, obj, instancePath, schemaPath)...)
+		schema.DependencyStrings, stringTriggers, KeywordDependencies, obj, instancePath, schemaPath,
+	)...)
 
 	return errs
 }
@@ -3383,7 +3389,8 @@ func evalRef(ctx evalContext) []*ValidationError {
 
 	return ctx.v.validateResolvedRef(
 		ctx.v.resolveRef(schema, ref), schema, ref, KeywordRef,
-		ctx.instance, ctx.instancePath, ctx.schemaPath, ctx.ann)
+		ctx.instance, ctx.instancePath, ctx.schemaPath, ctx.ann,
+	)
 }
 
 // evalDynamicRef resolves and validates a $dynamicRef. Its table row carries the
@@ -3399,7 +3406,8 @@ func evalDynamicRef(ctx evalContext) []*ValidationError {
 
 	return ctx.v.validateResolvedRef(
 		ctx.v.resolveDynamicRef(schema, ref), schema, ref, KeywordDynamicRef,
-		ctx.instance, ctx.instancePath, ctx.schemaPath, ctx.ann)
+		ctx.instance, ctx.instancePath, ctx.schemaPath, ctx.ann,
+	)
 }
 
 // validateResolvedRef validates the instance against a resolved reference

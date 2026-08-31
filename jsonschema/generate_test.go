@@ -3542,7 +3542,8 @@ func TestGenerateFor_StanceReachesSelfReference(t *testing.T) {
 			func(_ context.Context, _ jsonschema.TypeContext, ts *jsonschema.TypeSchema) error {
 				ts.Nullability = jsonschema.NullForbidden
 				return nil
-			}),
+			},
+		),
 	)
 	require.NoError(t, err)
 
@@ -4166,7 +4167,8 @@ func TestWithTagInterpreterNilDoesNotPanic(t *testing.T) {
 		_, _ = jsonschema.GenerateFor[Simple](t.Context(),
 			jsonschema.WithTagInterpreter("inspect", nil),
 			jsonschema.WithTagInterpreter("", jsonschema.TagInterpreterFunc(
-				func(context.Context, jsonschema.FieldContext, jsonschema.Tag) error { return nil })))
+				func(context.Context, jsonschema.FieldContext, jsonschema.Tag) error { return nil },
+			)))
 	}, "WithTagInterpreter with a nil interpreter or empty key should not panic")
 }
 
@@ -5861,13 +5863,15 @@ func TestWithTypeSchemaExtenderUnnamedTypes(t *testing.T) {
 				ts.Value.MinItems = new(1)
 
 				return nil
-			}),
+			},
+		),
 		jsonschema.WithTypeSchemaExtenderFor[map[string]int](
 			func(_ context.Context, _ jsonschema.TypeContext, ts *jsonschema.TypeSchema) error {
 				ts.Value.MinProperties = new(1)
 
 				return nil
-			}),
+			},
+		),
 	)
 	require.NoError(t, err)
 
@@ -5983,7 +5987,8 @@ func TestWithTypeSchemaExtenderFor(t *testing.T) {
 				func(_ context.Context, _ jsonschema.TypeContext, ts *jsonschema.TypeSchema) error {
 					ts.Value.Description = "extended"
 					return nil
-				}),
+				},
+			),
 		)
 		require.NoError(t, err)
 
@@ -6008,7 +6013,8 @@ func TestWithTypeSchemaExtenderFor(t *testing.T) {
 
 		_, err := jsonschema.GenerateFor[doc](t.Context(),
 			jsonschema.WithTypeSchemaExtenderFor[plainKind](
-				func(context.Context, jsonschema.TypeContext, *jsonschema.TypeSchema) error { return errBoom }),
+				func(context.Context, jsonschema.TypeContext, *jsonschema.TypeSchema) error { return errBoom },
+			),
 		)
 		require.ErrorIs(t, err, errBoom)
 	})

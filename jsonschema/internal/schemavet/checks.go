@@ -438,7 +438,8 @@ func init() {
 	if derived := keywordmeta.Names(keywordmeta.Sizes); !slices.Equal(declared, derived) {
 		panic(fmt.Sprintf(
 			"schemavet: sizeBounds (%v) does not match keywordmeta.Sizes (%v)",
-			declared, derived))
+			declared, derived,
+		))
 	}
 }
 

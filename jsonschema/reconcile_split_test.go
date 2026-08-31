@@ -89,7 +89,8 @@ func (c splitCase) generate(t *testing.T) *jsonschema.Schema {
 				c.canvas(fc.Canvas)
 
 				return nil
-			})))
+			},
+		)))
 	}
 
 	doc := reflect.StructOf([]reflect.StructField{

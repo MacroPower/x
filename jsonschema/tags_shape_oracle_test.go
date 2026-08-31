@@ -173,7 +173,8 @@ func shapeProbe(seen *[]shapeObservation) jsonschema.GenerateOption {
 			})
 
 			return nil
-		}))
+		},
+	))
 }
 
 // rawMessageType and numberType are the two encoding/json types whose contents
@@ -599,7 +600,8 @@ type oracleRow struct {
 func oracleRoster() map[string]oracleRow {
 	boolWordSchema := jsonschema.WithTypeSchema(
 		reflect.TypeFor[oracleBoolWord](),
-		jsonschema.TypeSchema{Value: &jsonschema.Schema{Type: "boolean"}})
+		jsonschema.TypeSchema{Value: &jsonschema.Schema{Type: "boolean"}},
+	)
 
 	rows := map[string]oracleRow{
 		"string":             {typ: reflect.TypeFor[string](), wantDefs: jsonschema.FormString},

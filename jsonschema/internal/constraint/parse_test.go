@@ -191,7 +191,8 @@ func TestParseSizeBound(t *testing.T) {
 			t.Parallel()
 
 			got, err := constraint.ParseSizeBound(
-				tc.value, tc.rule, constraint.SizeFold, constraint.Intersect, constraint.Authored)
+				tc.value, tc.rule, constraint.SizeFold, constraint.Intersect, constraint.Authored,
+			)
 			require.NoError(t, err)
 			require.Len(t, got, len(tc.want))
 
@@ -213,12 +214,14 @@ func TestParseSizeBoundStrictDomain(t *testing.T) {
 	t.Parallel()
 
 	folded, err := constraint.ParseSizeBound(
-		"-1", constraint.RuleMax, constraint.SizeFold, constraint.Intersect, constraint.Authored)
+		"-1", constraint.RuleMax, constraint.SizeFold, constraint.Intersect, constraint.Authored,
+	)
 	require.NoError(t, err, "a rule-shaped dialect folds a negative into the unsatisfiable range")
 	require.Len(t, folded, 2, "the unsatisfiable range is a floor and a ceiling")
 
 	_, err = constraint.ParseSizeBound(
-		"-1", constraint.RuleMax, constraint.SizeStrict, constraint.Intersect, constraint.Authored)
+		"-1", constraint.RuleMax, constraint.SizeStrict, constraint.Intersect, constraint.Authored,
+	)
 	require.Error(t, err, "a keyword-shaped dialect rejects a negative outright")
 	assert.Contains(t, err.Error(), "must be non-negative")
 }
@@ -227,7 +230,8 @@ func TestParseSizeBoundInvalid(t *testing.T) {
 	t.Parallel()
 
 	_, err := constraint.ParseSizeBound(
-		"abc", constraint.RuleMin, constraint.SizeFold, constraint.Intersect, constraint.Authored)
+		"abc", constraint.RuleMin, constraint.SizeFold, constraint.Intersect, constraint.Authored,
+	)
 	require.Error(t, err)
 }
 

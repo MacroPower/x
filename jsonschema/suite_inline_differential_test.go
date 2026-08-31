@@ -120,7 +120,8 @@ func TestInlineFallbackSuspendsTransitiveVetting(t *testing.T) {
 			consulted = append(consulted, f)
 
 			return jsonschema.PropagateRef()
-		})
+		},
+	)
 
 	out, err := jsonschema.Inline(t.Context(), schema,
 		jsonschema.WithRefResolver(resolver), jsonschema.WithRefFallback(fallback))

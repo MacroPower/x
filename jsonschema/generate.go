@@ -123,7 +123,8 @@ func WithTypeSchemaExtenderFor[T any](
 			}
 
 			return f(ctx, tc, ts)
-		}))
+		},
+	))
 }
 
 // exactTypeProvider is the [TypeSchemaProvider] registered by

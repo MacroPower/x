@@ -495,7 +495,7 @@ func (c *cloner) reflectPointer(rv reflect.Value) reflect.Value {
 		return rv
 	}
 
-	if s, isSchema := rv.Interface().(*jsonschema.Schema); isSchema {
+	if s, isSchema := reflect.TypeAssert[*jsonschema.Schema](rv); isSchema {
 		return reflect.ValueOf(c.schema(s))
 	}
 
@@ -520,7 +520,7 @@ func (c *cloner) reflectPointer(rv reflect.Value) reflect.Value {
 // reflectStruct copies a struct value, deep-copying its exported fields over the
 // whole-struct copy that carries the unexported ones.
 func (c *cloner) reflectStruct(rv reflect.Value) reflect.Value {
-	if s, isSchema := rv.Interface().(jsonschema.Schema); isSchema {
+	if s, isSchema := reflect.TypeAssert[jsonschema.Schema](rv); isSchema {
 		return reflect.ValueOf(c.schemaValue(&s))
 	}
 

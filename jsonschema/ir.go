@@ -401,7 +401,8 @@ func nullLiteralReport(n *node) error {
 		return fmt.Errorf(
 			"%s field %q: element: authored canvas: keyword %q: %w %s",
 			n.origin.parent, n.origin.field, keyword,
-			tagmodel.ErrNullNotAdmitted, n.def.typ)
+			tagmodel.ErrNullNotAdmitted, n.def.typ,
+		)
 	}
 
 	return fmt.Errorf("%s field %q: authored canvas: keyword %q: %w %s",

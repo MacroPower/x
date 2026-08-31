@@ -128,7 +128,8 @@ func (c refClosure) run() error {
 
 				err := refWalkError(
 					res, KeywordDynamicRef, s.DynamicRef, locator, loc,
-					refStrictness{pass: strict, keyword: c.strictDyn})
+					refStrictness{pass: strict, keyword: c.strictDyn},
+				)
 				if err != nil {
 					return err
 				}

@@ -91,7 +91,8 @@ func TestChainResolvers(t *testing.T) {
 	failing := jsonschema.RefResolverFunc(
 		func(context.Context, string) (*jsonschema.Schema, error) {
 			return nil, errBoom
-		})
+		},
+	)
 
 	t.Run("miss falls through to the first answer", func(t *testing.T) {
 		t.Parallel()

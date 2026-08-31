@@ -133,7 +133,8 @@ func drawTaggedStruct(c *fuzzfill.Cursor) reflect.Type {
 			Name: fmt.Sprintf("F%d", i),
 			Type: typ,
 			Tag: reflect.StructTag(fmt.Sprintf(
-				`json:"f%d%s" validate:%q`, i, option, kind.pool[c.Intn(len(kind.pool))])),
+				`json:"f%d%s" validate:%q`, i, option, kind.pool[c.Intn(len(kind.pool))],
+			)),
 		})
 	}
 

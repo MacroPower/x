@@ -184,6 +184,9 @@ linters:
       check-type-assertions: true
       check-blank: true
       exclude-functions:
+        # The (T, bool) form: the bool is the check, and discarding the
+        # extracted value with `_, ok :=` is the idiomatic match-only use.
+        - errors.AsType
         - io/ioutil.ReadFile
         - io.Copy(*bytes.Buffer)
         - io.Copy(os.Stdout)

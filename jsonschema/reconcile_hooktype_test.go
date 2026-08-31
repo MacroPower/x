@@ -43,7 +43,8 @@ func TestReconcileHookAuthoredTypeSlot(t *testing.T) {
 					ts.Value.Type = "array"
 
 					return nil
-				}),
+				},
+			),
 		)
 		require.NoError(t, err)
 
@@ -65,7 +66,8 @@ func TestReconcileHookAuthoredTypeSlot(t *testing.T) {
 					ts.Value.Types = []string{"array"}
 
 					return nil
-				}),
+				},
+			),
 		)
 		require.NoError(t, err)
 

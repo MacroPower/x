@@ -274,15 +274,11 @@ func referenceRejects(reference *playground.Validate, val any) (bool, error) {
 		return false, nil
 	}
 
-	var invalid *playground.InvalidValidationError
-
-	if errors.As(err, &invalid) {
+	if _, ok := errors.AsType[*playground.InvalidValidationError](err); ok {
 		return false, fmt.Errorf("go-playground rejected the roster tag: %w", err)
 	}
 
-	var verrs playground.ValidationErrors
-
-	if errors.As(err, &verrs) {
+	if _, ok := errors.AsType[playground.ValidationErrors](err); ok {
 		return true, nil
 	}
 

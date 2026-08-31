@@ -629,7 +629,8 @@ func (g *generator) refTypeOverride(t reflect.Type, ts TypeSchema, nullable bool
 
 	if ref.kind != kindRef {
 		return nil, fmt.Errorf(
-			"%w: type %s Ref %s does not name an extractable type", ErrConflictingTypeSchema, t, ts.Ref)
+			"%w: type %s Ref %s does not name an extractable type", ErrConflictingTypeSchema, t, ts.Ref,
+		)
 	}
 
 	// Fold the alias's own stance with the occurrence's pointer-ness into the
@@ -1513,12 +1514,12 @@ func callProvider(ctx context.Context, tc TypeContext) (ts TypeSchema, err error
 	results := v.MethodByName("JSONSchema").
 		Call([]reflect.Value{reflect.ValueOf(ctx), reflect.ValueOf(tc)})
 
-	provErr, ok := results[1].Interface().(error)
+	provErr, ok := reflect.TypeAssert[error](results[1])
 	if ok && provErr != nil {
 		return TypeSchema{}, fmt.Errorf("%s.JSONSchema: %w", t, provErr)
 	}
 
-	res, ok := results[0].Interface().(TypeSchema)
+	res, ok := reflect.TypeAssert[TypeSchema](results[0])
 	if !ok {
 		return TypeSchema{}, nil
 	}
@@ -1558,7 +1559,7 @@ func callExtender(ctx context.Context, tc TypeContext, ts *TypeSchema) (err erro
 	results := v.MethodByName("JSONSchemaExtend").
 		Call([]reflect.Value{reflect.ValueOf(ctx), reflect.ValueOf(tc), reflect.ValueOf(ts)})
 
-	extErr, ok := results[0].Interface().(error)
+	extErr, ok := reflect.TypeAssert[error](results[0])
 	if ok && extErr != nil {
 		return fmt.Errorf("%s.JSONSchemaExtend: %w", t, extErr)
 	}
@@ -1621,7 +1622,8 @@ func (g *generator) extendTypeSchema(t reflect.Type, s *Schema) (Nullability, er
 	if ts.Verbatim != nil || ts.Ref != nil {
 		return NullFromReflection, fmt.Errorf(
 			"%w: extender for type %s sets Verbatim or Ref; an extender declares only Value and Nullability",
-			ErrConflictingTypeSchema, t)
+			ErrConflictingTypeSchema, t,
+		)
 	}
 
 	if ts.Value != nil && ts.Value != s {

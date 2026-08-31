@@ -175,12 +175,14 @@ func TestRegisterFallbackDocumentChecksOnlyIDs(t *testing.T) {
 	sess := loadedSession(t, rootURI, loadedURI)
 
 	err := sess.RegisterFallbackDocument(
-		&jsonschema.Schema{ID: loadedURI, Type: "string"}, rootURI, "the substitute")
+		&jsonschema.Schema{ID: loadedURI, Type: "string"}, rootURI, "the substitute",
+	)
 	require.ErrorIs(t, err, refresolve.ErrIDCollision,
 		"a substitute may not claim a URI a real document holds")
 
 	err = sess.RegisterFallbackDocument(
-		&jsonschema.Schema{Anchor: "r", Type: "string"}, rootURI, "the substitute")
+		&jsonschema.Schema{Anchor: "r", Type: "string"}, rootURI, "the substitute",
+	)
 	require.NoError(t, err, "a substitute's anchor is not a claim against the document holding it")
 }
 

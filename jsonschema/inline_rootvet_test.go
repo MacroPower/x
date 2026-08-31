@@ -131,7 +131,8 @@ func TestInlineVetsSubstitute(t *testing.T) {
 			fallback := jsonschema.RefFallbackFunc(
 				func(_ context.Context, _ jsonschema.RefFailure) jsonschema.RefAction {
 					return jsonschema.SubstituteRef(tc.substitute)
-				})
+				},
+			)
 
 			out, err := jsonschema.Inline(t.Context(), root, jsonschema.WithRefFallback(fallback))
 
@@ -164,7 +165,8 @@ func TestInlineRetrievalBaseKeepsIDsInert(t *testing.T) {
 	const leaf = "leaf.json"
 
 	root, err := jsonschema.ParseSchema([]byte(
-		`{"$id": "#published", "properties": {"a": {"$ref": "leaf.json"}}}`))
+		`{"$id": "#published", "properties": {"a": {"$ref": "leaf.json"}}}`,
+	))
 	require.NoError(t, err)
 
 	document, err := jsonschema.ParseSchema([]byte(`{"$id": "#remote", "type": "string"}`))
@@ -249,7 +251,8 @@ func TestInlineSubstituteViolationNamesItsSite(t *testing.T) {
 	fallback := jsonschema.RefFallbackFunc(
 		func(_ context.Context, _ jsonschema.RefFailure) jsonschema.RefAction {
 			return jsonschema.SubstituteRef(&jsonschema.Schema{Type: "strng"})
-		})
+		},
+	)
 
 	_, err := jsonschema.Inline(t.Context(), root, jsonschema.WithRefFallback(fallback))
 

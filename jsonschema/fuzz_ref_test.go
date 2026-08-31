@@ -291,7 +291,8 @@ func synthRefGraph(blob []byte) refGraphSpec {
 		!directlyReferenced[gen.malformedDoc]
 
 	spec.withheld = chooseWithheld(
-		served, docs, ids, gen.malformedDoc, spec.malformedTransitive, directlyReferenced)
+		served, docs, ids, gen.malformedDoc, spec.malformedTransitive, directlyReferenced,
+	)
 
 	return spec
 }
@@ -768,7 +769,8 @@ func substitutePipeline(
 				fragment, spec.withheld)
 
 			return jsonschema.SubstituteRef(target)
-		})
+		},
+	)
 
 	inlineOpts := []jsonschema.InlineOption{
 		jsonschema.WithRefResolver(partial),
@@ -1009,7 +1011,8 @@ func TestSubstituteDoesNotRebaseNestedRefs(t *testing.T) {
 				}
 
 				return jsonschema.SubstituteRef(withheld)
-			})))
+			},
+		)))
 
 	require.ErrorIs(t, err, jsonschema.ErrRefResolve, reasonSubstituteBaseURI)
 }

@@ -229,7 +229,8 @@ func TestChainDescriptionProviders(t *testing.T) {
 
 		s, err := jsonschema.GenerateFor[commentedWidget](t.Context(),
 			jsonschema.WithDescriptionProvider(jsonschema.ChainDescriptionProviders(
-				nil, overrides, commentedWidgetProvider())),
+				nil, overrides, commentedWidgetProvider(),
+			)),
 		)
 		require.NoError(t, err)
 
@@ -263,7 +264,8 @@ func TestChainDescriptionProviders(t *testing.T) {
 
 		_, err := jsonschema.GenerateFor[commentedWidget](t.Context(),
 			jsonschema.WithDescriptionProvider(jsonschema.ChainDescriptionProviders(
-				mapDescriptionProvider{}, failing, commentedWidgetProvider())),
+				mapDescriptionProvider{}, failing, commentedWidgetProvider(),
+			)),
 		)
 		require.ErrorIs(t, err, errLookup)
 	})

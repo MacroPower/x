@@ -2260,7 +2260,8 @@ func forbidNullStance[T any]() jsonschema.GenerateOption {
 			ts.Nullability = jsonschema.NullForbidden
 
 			return nil
-		})
+		},
+	)
 }
 
 // TestTagNullLiteralOnARecursiveStancedType pins the re-check that closes the

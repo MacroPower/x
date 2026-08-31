@@ -178,7 +178,8 @@ type Config struct {
 	require.NoError(t, os.MkdirAll(filepath.Join(dir, "vendor"), 0o755))
 	require.NoError(t, os.WriteFile(
 		filepath.Join(dir, "vendor", "modules.txt"),
-		[]byte("# example.com/testmod\n"), 0o644))
+		[]byte("# example.com/testmod\n"), 0o644,
+	))
 
 	cmd := exec.CommandContext(t.Context(), binary, "-type", "Config")
 	cmd.Dir = dir

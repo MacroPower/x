@@ -90,7 +90,8 @@ func retargetToElements(t Target, r Rule, pol Policy) error {
 		if t.recursesIntoItself(elem) {
 			return fmt.Errorf(
 				"%w: recursive element type %s cannot carry an element constraint",
-				ErrUnsupported, t.Shape.Type)
+				ErrUnsupported, t.Shape.Type,
+			)
 		}
 
 		err := Apply(elem, r, pol)
@@ -188,7 +189,8 @@ func applyNumericBound(t Target, r Rule, pol Policy) error {
 // one.
 func applySizeBound(t Target, r Rule, pol Policy) error {
 	bounds, err := constraint.ParseSizeBound(
-		r.Params.One(), sizeRuleFor(r.Op), pol.Sizes, constraint.Intersect, constraint.Authored)
+		r.Params.One(), sizeRuleFor(r.Op), pol.Sizes, constraint.Intersect, constraint.Authored,
+	)
 	if err != nil {
 		//nolint:wrapcheck // The shared algebra owns the message dialect.
 		return err

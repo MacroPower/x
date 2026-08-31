@@ -134,7 +134,8 @@ func TestInlineRefFallbackOnVetFailedRemote(t *testing.T) {
 					failures = append(failures, f)
 
 					return tc.action
-				})
+				},
+			)
 
 			out, err := jsonschema.Inline(t.Context(), root,
 				jsonschema.WithRefResolver(jsonschema.SchemaMap{uri: doc}),
@@ -174,7 +175,8 @@ func TestInlineClosureRejectsBeforeSplicing(t *testing.T) {
 
 	root, err := jsonschema.ParseSchema([]byte(
 		`{"$schema":"http://json-schema.org/draft-07/schema#",` +
-			`"$id":"https://ex.test/root.json","$ref":"https://ex.test/b.json#anc"}`))
+			`"$id":"https://ex.test/root.json","$ref":"https://ex.test/b.json#anc"}`,
+	))
 	require.NoError(t, err)
 
 	documents := map[string]*jsonschema.Schema{}
@@ -209,11 +211,13 @@ func TestInlineFetchedDocCollisionPrecedesVet(t *testing.T) {
 	t.Parallel()
 
 	root, err := jsonschema.ParseSchema([]byte(
-		`{"$id": "https://ex.test/root.json", "properties": {"p": {"$ref": "https://ex.test/a.json"}}}`))
+		`{"$id": "https://ex.test/root.json", "properties": {"p": {"$ref": "https://ex.test/a.json"}}}`,
+	))
 	require.NoError(t, err)
 
 	doc, err := jsonschema.ParseSchema([]byte(
-		`{"$id": "https://ex.test/root.json", "type": "strnig"}`))
+		`{"$id": "https://ex.test/root.json", "type": "strnig"}`,
+	))
 	require.NoError(t, err)
 
 	resolver := mapResolver{"https://ex.test/a.json": doc}
@@ -236,11 +240,13 @@ func TestInlineFallbackDoesNotSuspendCollision(t *testing.T) {
 	t.Parallel()
 
 	root, err := jsonschema.ParseSchema([]byte(
-		`{"$id": "https://ex.test/root.json", "$defs": {"unused": {"$ref": "https://ex.test/a.json"}}}`))
+		`{"$id": "https://ex.test/root.json", "$defs": {"unused": {"$ref": "https://ex.test/a.json"}}}`,
+	))
 	require.NoError(t, err)
 
 	doc, err := jsonschema.ParseSchema([]byte(
-		`{"$id": "https://ex.test/root.json", "type": "integer"}`))
+		`{"$id": "https://ex.test/root.json", "type": "integer"}`,
+	))
 	require.NoError(t, err)
 
 	consulted := 0
@@ -268,13 +274,15 @@ func TestInlineFallbackCollisionPrecedesVet(t *testing.T) {
 	t.Parallel()
 
 	root, err := jsonschema.ParseSchema([]byte(
-		`{"$id": "https://ex.test/root.json", "properties": {"p": {"$ref": "https://ex.test/a.json"}}}`))
+		`{"$id": "https://ex.test/root.json", "properties": {"p": {"$ref": "https://ex.test/a.json"}}}`,
+	))
 	require.NoError(t, err)
 
 	// The remote carries both faults. It claims the root's URI and misspells a
 	// type name.
 	doc, err := jsonschema.ParseSchema([]byte(
-		`{"$id": "https://ex.test/root.json", "type": "strnig"}`))
+		`{"$id": "https://ex.test/root.json", "type": "strnig"}`,
+	))
 	require.NoError(t, err)
 
 	fallback := jsonschema.RefFallbackFunc(func(context.Context, jsonschema.RefFailure) jsonschema.RefAction {

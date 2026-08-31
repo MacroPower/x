@@ -117,13 +117,15 @@ func TestValidateLateFetchedRemoteIDCollision(t *testing.T) {
 	t.Parallel()
 
 	schema, err := jsonschema.ParseSchema([]byte(
-		`{"$id": "https://example.test/root.json", "$ref": "https://example.test/late.json"}`))
+		`{"$id": "https://example.test/root.json", "$ref": "https://example.test/late.json"}`,
+	))
 	require.NoError(t, err)
 
 	// The document carries both faults, so the assertions below pin which one
 	// the run names.
 	doc, err := jsonschema.ParseSchema([]byte(
-		`{"$id": "https://example.test/root.json", "type": "strnig"}`))
+		`{"$id": "https://example.test/root.json", "type": "strnig"}`,
+	))
 	require.NoError(t, err)
 
 	resolver := &lateResolver{doc: doc}

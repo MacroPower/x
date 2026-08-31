@@ -57,7 +57,8 @@ func TestInlineSubstituteNestedRefFailurePath(t *testing.T) {
 					}
 
 					return jsonschema.SubstituteRef(tt.substitute)
-				})
+				},
+			)
 
 			root, err := jsonschema.ParseSchema([]byte(stringtest.Input(`
 				{

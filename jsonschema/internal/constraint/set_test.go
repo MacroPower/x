@@ -166,7 +166,8 @@ func TestSetSizeRendering(t *testing.T) {
 
 		set := constraint.New()
 		bounds, err := constraint.ParseSizeBound(
-			"5", constraint.RuleMin, constraint.SizeFold, constraint.Intersect, constraint.Authored)
+			"5", constraint.RuleMin, constraint.SizeFold, constraint.Intersect, constraint.Authored,
+		)
 		require.NoError(t, err)
 		set.AddSize(constraint.Length, bounds)
 
@@ -181,7 +182,8 @@ func TestSetSizeRendering(t *testing.T) {
 
 		set := constraint.New()
 		bounds, err := constraint.ParseSizeBound(
-			"0", constraint.RuleLt, constraint.SizeFold, constraint.Intersect, constraint.Authored)
+			"0", constraint.RuleLt, constraint.SizeFold, constraint.Intersect, constraint.Authored,
+		)
 		require.NoError(t, err)
 		set.AddSize(constraint.Length, bounds)
 
@@ -197,11 +199,13 @@ func TestSetSizeRendering(t *testing.T) {
 
 		set := constraint.New()
 		maxB, err := constraint.ParseSizeBound(
-			"3", constraint.RuleMax, constraint.SizeFold, constraint.Intersect, constraint.Authored)
+			"3", constraint.RuleMax, constraint.SizeFold, constraint.Intersect, constraint.Authored,
+		)
 		require.NoError(t, err)
 
 		lenB, err := constraint.ParseSizeBound(
-			"5", constraint.RuleLen, constraint.SizeFold, constraint.Intersect, constraint.Authored)
+			"5", constraint.RuleLen, constraint.SizeFold, constraint.Intersect, constraint.Authored,
+		)
 		require.NoError(t, err)
 		set.AddSize(constraint.Items, maxB)
 		set.AddSize(constraint.Items, lenB)
@@ -220,7 +224,8 @@ func TestSetSizeRendering(t *testing.T) {
 		// bound survives a DropAll resolve.
 		set := constraint.New()
 		bounds, err := constraint.ParseSizeBound(
-			"5", constraint.RuleMin, constraint.SizeFold, constraint.Intersect, constraint.Authored)
+			"5", constraint.RuleMin, constraint.SizeFold, constraint.Intersect, constraint.Authored,
+		)
 		require.NoError(t, err)
 		set.AddSize(constraint.Items, bounds)
 

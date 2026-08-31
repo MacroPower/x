@@ -910,7 +910,8 @@ func TestInlineRefFallback(t *testing.T) {
 						calls = append(calls, refFallbackCall{doc: f.Document, path: f.Path, ref: f.Ref, err: f.Err})
 
 						return tc.fallback.ResolveRefFailure(ctx, f)
-					})))
+					},
+				)))
 			}
 
 			got, err := jsonschema.Inline(t.Context(), &schema, opts...)

@@ -180,7 +180,8 @@ func TestInterpreterNullLiteralOnARecursiveStancedType(t *testing.T) {
 					tc.write(field.Canvas)
 
 					return nil
-				})
+				},
+			)
 
 			_, err := jsonschema.GenerateFor[interpNullRecursive](
 				t.Context(),
@@ -232,7 +233,8 @@ func TestInterpreterNullLiteralOnARecursiveElement(t *testing.T) {
 					tc.write(elems[0].Canvas)
 
 					return nil
-				})
+				},
+			)
 
 			_, err := jsonschema.GenerateFor[interpNullElement](
 				t.Context(),
@@ -292,7 +294,8 @@ func TestInterpreterNullLiteralOnMapAndTupleElements(t *testing.T) {
 					}
 
 					return nil
-				})
+				},
+			)
 
 			err := tc.generate(jsonschema.WithTagInterpreter("mytag", interp))
 			require.ErrorIs(t, err, tagmodel.ErrNullNotAdmitted)
@@ -314,7 +317,8 @@ func TestInterpreterNullLiteralYieldsToTheTagKey(t *testing.T) {
 			field.Canvas.Enum = []any{nil}
 
 			return nil
-		})
+		},
+	)
 
 	_, err := jsonschema.GenerateFor[interpNullBothWriters](
 		t.Context(),
@@ -364,7 +368,8 @@ func TestConstraintsNullLiteralOnARecursiveStancedType(t *testing.T) {
 					setErr = tc.set(field.Constraints())
 
 					return nil
-				})
+				},
+			)
 
 			_, err := jsonschema.GenerateFor[interpNullRecursive](
 				t.Context(),
@@ -406,7 +411,8 @@ func TestInterpreterPanickingMarshalerOnARecursiveStancedType(t *testing.T) {
 			field.Canvas.Const = &value
 
 			return nil
-		})
+		},
+	)
 
 	require.NotPanics(t, func() {
 		_, err := jsonschema.GenerateFor[interpNullRecursive](
@@ -430,7 +436,8 @@ func TestInterpreterNullLiteralOnARecursiveType(t *testing.T) {
 			field.Canvas.Default = json.RawMessage("null")
 
 			return nil
-		})
+		},
+	)
 
 	s, err := jsonschema.GenerateFor[interpNullRecursive](
 		t.Context(),
@@ -464,7 +471,8 @@ func TestInterpreterNullLiteralOnANonRecursiveStancedType(t *testing.T) {
 			field.Canvas.Default = json.RawMessage("null")
 
 			return nil
-		})
+		},
+	)
 
 	_, err := jsonschema.GenerateFor[interpNullHolder](
 		t.Context(),
@@ -491,7 +499,8 @@ func TestInterpreterNullForbidOnARecursiveStancedType(t *testing.T) {
 			field.Constraints().Forbid(nil)
 
 			return nil
-		})
+		},
+	)
 
 	s, err := jsonschema.GenerateFor[interpNullRecursive](
 		t.Context(),
@@ -537,7 +546,8 @@ func TestValidateRequiredOnARecursiveStancedType(t *testing.T) {
 			}
 
 			s, err := jsonschema.GenerateFor[interpNullRequired](
-				t.Context(), append(opts, tc.stance...)...)
+				t.Context(), append(opts, tc.stance...)...,
+			)
 			require.NoError(t, err)
 
 			def := s.Defs["interpNullRequired"]

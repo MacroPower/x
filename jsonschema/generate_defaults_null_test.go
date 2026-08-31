@@ -109,7 +109,8 @@ func unionNullExtender() jsonschema.GenerateOption {
 			}
 
 			return nil
-		})
+		},
+	)
 }
 
 // defaultsNullUnionDef is a named type whose hook replaces its body with a
@@ -155,7 +156,8 @@ func cycleNullExtender() jsonschema.GenerateOption {
 			ts.Value.Properties["v"] = self
 
 			return nil
-		})
+		},
+	)
 }
 
 // defaultsNullIntersection is the type whose hook authors an allOf holding a
@@ -178,7 +180,8 @@ func intersectionNullExtender(ref string) jsonschema.GenerateOption {
 			}
 
 			return nil
-		})
+		},
+	)
 }
 
 // defaultsNullOtherObj is the object def a hook branch points at. An object
@@ -208,7 +211,8 @@ func wrapPlusHookExtender() jsonschema.GenerateOption {
 				&jsonschema.Schema{Ref: "#/definitions/defaultsNullOtherObj"})
 
 			return nil
-		})
+		},
+	)
 }
 
 // TestWithDefaultsFromNullDefault pins which properties a null-marshaling key
