@@ -105,16 +105,20 @@
 //     property becomes that property's default, overwriting tag defaults.
 //     Keys the json tags omit (omitempty, omitzero) contribute nothing, so
 //     presence follows the json tags exactly; nested struct, slice, and map
-//     values become whole-value defaults on their top-level property. An
-//     instance whose pointer-dereferenced type is not the generated type, or
-//     that does not marshal to a JSON object, returns an error wrapping
+//     values become whole-value defaults on their top-level property. A nil
+//     field carrying neither omitempty nor omitzero marshals to JSON null,
+//     and that null seeds no default on a property admitting no null. A
+//     property admits none under [WithNullable] set to false, or when a
+//     [NullForbidden] stance covers the referenced type. An instance whose
+//     pointer-dereferenced type is not the generated type, or that does not
+//     marshal to a JSON object, returns an error wrapping
 //     [ErrInvalidDefaultsInstance]. A pointer root's nullable anyOf wrapper
-//     is resolved to its value branch first, so the defaults reach the
-//     object schema (or its $defs entry) inside. When a self-referential
-//     root stays in $defs, the defaults apply to that definition, shared by
-//     every recursive occurrence. Under [Draft7], a default landing on a
-//     $ref'd property moves the $ref into an allOf wrap, the same shape tag
-//     defaults produce, because Draft-07 readers ignore $ref siblings.
+//     is resolved to its value branch first, so the defaults reach the object
+//     schema (or its $defs entry) inside. When a self-referential root stays
+//     in $defs, the defaults apply to that definition, shared by every
+//     recursive occurrence. Under [Draft7], a default landing on a $ref'd
+//     property moves the $ref into an allOf wrap, the same shape tag defaults
+//     produce, because Draft-07 readers ignore $ref siblings.
 //   - [WithRootTitle] sets the root schema's title to the root type's name
 //     when no title is otherwise present (default: false). The [WithNamer]
 //     namer is honored and the root type is pointer-dereferenced first;

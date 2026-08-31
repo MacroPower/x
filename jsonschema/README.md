@@ -199,17 +199,21 @@ each top-level key of the output that matches a root property becomes that
 property's `default`, overwriting any default set via struct tags. Keys the
 `json` tags omit (`omitempty`, `omitzero`) contribute nothing, so presence
 follows the tags exactly, and nested struct, slice, and map values become
-whole-value defaults on their top-level property. An instance whose
-pointer-dereferenced type is not the generated type, or that does not marshal to
-a JSON object, returns an error wrapping `ErrInvalidDefaultsInstance`. A nil
-instance instead restores the default, seeding no defaults. A typed nil pointer
-is a value, not a reset: it marshals to JSON null and fails as a non-object
-instance. A pointer root's nullable `anyOf` wrapper is resolved to its value
-branch first, so the defaults reach the object schema (or its `$defs` entry)
-inside. When a self-referential root stays in `$defs`, the defaults apply to
-that definition, shared by every recursive occurrence. Under `Draft7`, a default
-landing on a `$ref`'d property moves the `$ref` into an `allOf` wrap, the same
-shape tag defaults produce, because Draft-07 readers ignore `$ref` siblings:
+whole-value defaults on their top-level property. A nil field carrying neither
+`omitempty` nor `omitzero` marshals to JSON null, and that null seeds no default
+on a property admitting no null. A property admits none under
+`WithNullable(false)`, or when a `NullForbidden` stance covers the referenced
+type. An instance whose pointer-dereferenced type is not the generated type, or
+that does not marshal to a JSON object, returns an error wrapping
+`ErrInvalidDefaultsInstance`. A nil instance instead restores the default,
+seeding no defaults. A typed nil pointer is a value, not a reset: it marshals to
+JSON null and fails as a non-object instance. A pointer root's nullable `anyOf`
+wrapper is resolved to its value branch first, so the defaults reach the object
+schema (or its `$defs` entry) inside. When a self-referential root stays in
+`$defs`, the defaults apply to that definition, shared by every recursive
+occurrence. Under `Draft7`, a default landing on a `$ref`'d property moves the
+`$ref` into an `allOf` wrap, the same shape tag defaults produce, because
+Draft-07 readers ignore `$ref` siblings:
 
 ```go
 schema, err := jsonschema.GenerateFor[Config](ctx,

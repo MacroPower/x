@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/numkind"
 )
@@ -288,9 +289,12 @@ func WithRootTitle(enabled bool) GenerateOption {
 // schema. The instance's pointer-dereferenced dynamic type must be rootType
 // (the pointer-dereferenced generated type) and the marshaled output must be
 // a JSON object; either violation returns an error wrapping
-// [ErrInvalidDefaultsInstance]. Keys absent from the output (omitted by
-// omitempty or omitzero) leave their property untouched, and keys without a
-// matching property are ignored. Under [Draft7], a property that receives a
+// [ErrInvalidDefaultsInstance]. Three kinds of key leave their property
+// untouched: a key absent from the output (omitted by omitempty or omitzero),
+// a key with no matching property, and a key marshaling to JSON null against a
+// property that admits no null (see [generator.propAdmitsNull]). The third
+// carries no default its property can hold, so seeding it would place a null
+// beside a schema that rejects one. Under [Draft7], a property that receives a
 // default beside a non-empty $ref has the $ref moved into an allOf wrap
 // (see [generator.wrapRefForDraft7]); Draft-07 readers ignore keywords
 // beside $ref, so the sibling default would otherwise be discarded.
@@ -340,6 +344,13 @@ func (g *generator) applyInstanceDefaults(instance any, rootType reflect.Type, s
 
 	for key, raw := range values {
 		if prop, ok := schema.Properties[key]; ok && prop != nil {
+			// A nil field with neither omitempty nor omitzero marshals to null,
+			// which a property admitting no null cannot hold. Skip the key
+			// rather than emitting a default the property's own schema rejects.
+			if isRawNull(raw) && !g.propAdmitsNull(prop) {
+				continue
+			}
+
 			prop.Default = raw
 			// The default may now sit beside a $ref (a definitions-extracted
 			// field), where Draft-07 readers would ignore it; wrap the $ref
@@ -352,6 +363,36 @@ func (g *generator) applyInstanceDefaults(instance any, rootType reflect.Type, s
 	}
 
 	return nil
+}
+
+// propAdmitsNull reports whether the rendered property accepts a JSON null. It
+// asks the rendered schema rather than the field node's null decision, since
+// the two diverge. A jsonschema:"type=null" field renders {"type":"null"} while
+// rebuildOverriddenField leaves the node's nullable unset, and a hook payload
+// naming null in its type list admits null without declaring [NullAllowed].
+//
+// Three encodings answer yes. The property itself admits null under
+// refTargetAdmitsNull (an empty schema, or a type list naming null). One anyOf
+// branch does, the nullable wrapper [generator.reconcileField] emits. Or the
+// property is a bare $ref whose target admits null, the one case that wrapper
+// skips. Every reachable def is rendered and carries its final name by the time
+// [generator.applyInstanceDefaults] runs, so the $ref resolves.
+func (g *generator) propAdmitsNull(prop *Schema) bool {
+	if prop == nil {
+		return false
+	}
+
+	if refTargetAdmitsNull(prop) || slices.ContainsFunc(prop.AnyOf, refTargetAdmitsNull) {
+		return true
+	}
+
+	if prop.Ref != "" {
+		if entry, ok := g.payloadRefTargets()[prop.Ref]; ok {
+			return refTargetAdmitsNull(entry.rendered)
+		}
+	}
+
+	return false
 }
 
 // Generator generates schemas from one fixed option set, the

@@ -409,6 +409,15 @@ func nullLiteralReport(n *node) error {
 		tagmodel.ErrNullNotAdmitted, n.def.typ)
 }
 
+// isRawNull reports whether raw holds the JSON null literal. Both null-literal
+// writers recognize a literal through it: the authored-canvas default
+// canvasNullLiteral scans, and the marshaled field value
+// [generator.applyInstanceDefaults] seeds. Whitespace around a JSON value is
+// insignificant, so the comparison trims it first.
+func isRawNull(raw json.RawMessage) bool {
+	return bytes.Equal(bytes.TrimSpace(raw), []byte("null"))
+}
+
 // canvasNullLiteral returns the name of the first authored-canvas keyword
 // holding a JSON null, or "" when no keyword holds one. It reads the four
 // keywords a field-level writer spells a literal value with. It never descends
@@ -423,8 +432,7 @@ func canvasNullLiteral(canvas *Schema) string {
 		return ""
 	}
 
-	if len(canvas.Default) > 0 &&
-		bytes.Equal(bytes.TrimSpace(canvas.Default), []byte("null")) {
+	if isRawNull(canvas.Default) {
 		return "default"
 	}
 
