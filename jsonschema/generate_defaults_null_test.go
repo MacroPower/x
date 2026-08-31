@@ -74,16 +74,16 @@ type defaultsNullRef struct {
 	Host string                 `json:"host"`
 }
 
-// defaultsNullRefSibling is defaultsNullRef with a description on the reference.
-// The description moves the $ref into an allOf branch under Draft-07, the shape
-// both drafts must answer alike.
+// defaultsNullRefSibling is defaultsNullRef with a description on the
+// reference. The description moves the $ref into an allOf branch under
+// Draft-07, the shape both drafts must answer alike.
 type defaultsNullRefSibling struct {
 	Tags *defaultsNullExtracted `json:"tags" jsonschema:"description=the tags"`
 	Host string                 `json:"host"`
 }
 
-// defaultsNullTagged carries a tag default on the field the instance leaves nil.
-// A skipped key writes nothing, so the tag default survives.
+// defaultsNullTagged carries a tag default on the field the instance
+// leaves nil. A skipped key writes nothing, so the tag default survives.
 type defaultsNullTagged struct {
 	Ptr  *string `json:"ptr"  jsonschema:"default=fallback"`
 	Host string  `json:"host"`

@@ -378,8 +378,11 @@ func (g *generator) propAdmitsNull(prop *Schema) bool {
 // its aliases intact (unlike the JSON-decoded payloads walkReachable assumes),
 // so a schema aliased into its own anyOf would otherwise recurse until the
 // stack gives out, which no caller can recover from. A schema asked twice
-// answers no, the conservative direction: a yes short-circuits every caller, so
-// the second visit could only have answered yes by way of the first.
+// answers no, the conservative direction. A union caller stops at the first
+// yes, so a revisit cannot change its answer. The allOf scan keeps asking
+// after a yes, so a branch that revisits a schema an earlier branch marked
+// reads no where a fresh visit would read yes. That miss drops a usable
+// default and never admits a null the property forbids.
 //
 // Five encodings answer yes. The schema admits null itself under
 // refTargetAdmitsNull (an empty schema, or a type list naming null). Its const
