@@ -200,11 +200,12 @@ property's `default`, overwriting any default set via struct tags. Keys the
 `json` tags omit (`omitempty`, `omitzero`) contribute nothing, so presence
 follows the tags exactly, and nested struct, slice, and map values become
 whole-value defaults on their top-level property. A nil field carrying neither
-`omitempty` nor `omitzero` marshals to JSON null, and that null seeds no default
-on a property admitting no null. A property admits none under
-`WithNullable(false)`, or when a `NullForbidden` stance covers the referenced
-type. An instance whose pointer-dereferenced type is not the generated type, or
-that does not marshal to a JSON object, returns an error wrapping
+`omitempty` nor `omitzero` marshals to JSON null. That null leaves a property
+admitting no null untouched, so the property keeps whatever default its tag
+wrote. `WithNullable(false)` takes the null branch off every nilable property,
+and a `NullForbidden` stance takes it off every occurrence of the type it
+covers. An instance whose pointer-dereferenced type is not the generated type,
+or that does not marshal to a JSON object, returns an error wrapping
 `ErrInvalidDefaultsInstance`. A nil instance instead restores the default,
 seeding no defaults. A typed nil pointer is a value, not a reset: it marshals to
 JSON null and fails as a non-object instance. A pointer root's nullable `anyOf`

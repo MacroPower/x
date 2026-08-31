@@ -287,17 +287,17 @@ func WithRootTitle(enabled bool) GenerateOption {
 // applyInstanceDefaults marshals the [WithDefaultsFrom] instance and copies
 // each top-level key of the output onto the matching property's Default in
 // schema. The instance's pointer-dereferenced dynamic type must be rootType
-// (the pointer-dereferenced generated type) and the marshaled output must be
-// a JSON object; either violation returns an error wrapping
-// [ErrInvalidDefaultsInstance]. Three kinds of key leave their property
-// untouched: a key absent from the output (omitted by omitempty or omitzero),
-// a key with no matching property, and a key marshaling to JSON null against a
-// property that admits no null (see [generator.propAdmitsNull]). The third
-// carries no default its property can hold, so seeding it would place a null
-// beside a schema that rejects one. Under [Draft7], a property that receives a
-// default beside a non-empty $ref has the $ref moved into an allOf wrap
-// (see [generator.wrapRefForDraft7]); Draft-07 readers ignore keywords
-// beside $ref, so the sibling default would otherwise be discarded.
+// (the pointer-dereferenced generated type) and the marshaled output must be a
+// JSON object; either violation returns an error wrapping
+// [ErrInvalidDefaultsInstance]. A key absent from the output (omitted by
+// omitempty or omitzero) leaves its property untouched, a key with no matching
+// property is ignored, and a key marshaling to JSON null against a property
+// that admits no null is skipped (see [generator.propAdmitsNull]). A skipped
+// key writes nothing, so the property keeps whatever default its tag wrote.
+// Under [Draft7], a property that receives a default beside a non-empty $ref
+// has the $ref moved into an allOf wrap (see [generator.wrapRefForDraft7]);
+// Draft-07 readers ignore keywords beside $ref, so the sibling default would
+// otherwise be discarded.
 func (g *generator) applyInstanceDefaults(instance any, rootType reflect.Type, schema *Schema) error {
 	// DerefType guards against pointer cycles (type P *P, or a mutually
 	// recursive pair), returning the still-unresolved pointer type; that can
@@ -345,8 +345,7 @@ func (g *generator) applyInstanceDefaults(instance any, rootType reflect.Type, s
 	for key, raw := range values {
 		if prop, ok := schema.Properties[key]; ok && prop != nil {
 			// A nil field with neither omitempty nor omitzero marshals to null,
-			// which a property admitting no null cannot hold. Skip the key
-			// rather than emitting a default the property's own schema rejects.
+			// which a property admitting no null cannot hold.
 			if isRawNull(raw) && !g.propAdmitsNull(prop) {
 				continue
 			}
@@ -370,25 +369,72 @@ func (g *generator) applyInstanceDefaults(instance any, rootType reflect.Type, s
 // the two diverge. A jsonschema:"type=null" field renders {"type":"null"} while
 // rebuildOverriddenField leaves the node's nullable unset, and a hook payload
 // naming null in its type list admits null without declaring [NullAllowed].
-//
-// Three encodings answer yes. The property itself admits null under
-// refTargetAdmitsNull (an empty schema, or a type list naming null). One anyOf
-// branch does, the nullable wrapper [generator.reconcileField] emits. Or the
-// property is a bare $ref whose target admits null, the one case that wrapper
-// skips. Every reachable def is rendered and carries its final name by the time
-// [generator.applyInstanceDefaults] runs, so the $ref resolves.
 func (g *generator) propAdmitsNull(prop *Schema) bool {
-	if prop == nil {
+	return g.admitsNull(prop, map[*Schema]bool{})
+}
+
+// admitsNull answers [generator.propAdmitsNull]'s question, carrying the set of
+// schemas already asked. A build-time extender's payload reaches this path with
+// its aliases intact (unlike the JSON-decoded payloads walkReachable assumes),
+// so a schema aliased into its own anyOf would otherwise recurse until the
+// stack gives out, which no caller can recover from. A schema asked twice
+// answers no, the conservative direction: a yes short-circuits every caller, so
+// the second visit could only have answered yes by way of the first.
+//
+// Five encodings answer yes. The schema admits null itself under
+// refTargetAdmitsNull (an empty schema, or a type list naming null). Its const
+// is a null, or its enum holds one, and a hook payload authors either. One
+// anyOf or oneOf branch admits null, which covers the nullable wrapper
+// [generator.reconcileField] emits and any union a hook wrote. Every allOf
+// branch admits null, since an intersection accepts an instance only when all
+// of its branches do. Or the schema carries a $ref whose target admits null,
+// which is exactly when [generator.reconcileRefField] emits no null wrapper;
+// the target is asked the same questions, since a hook can put the null in the
+// shared def body rather than on the reference.
+//
+// The allOf rule is what reads a Draft-07 property, where [generator.renderRef]
+// and [generator.wrapRefForDraft7] move a $ref beside any sibling into an allOf
+// branch of its own. Asking whether the whole intersection admits null needs no
+// guess at which branch the wrap contributed, so a lone wrapped $ref and a
+// hook's intersection around one both answer correctly, and both drafts answer
+// alike for the same field.
+//
+// A not goes unread, since it inverts its subschema's answer.
+func (g *generator) admitsNull(prop *Schema, seen map[*Schema]bool) bool {
+	if prop == nil || seen[prop] {
 		return false
 	}
 
-	if refTargetAdmitsNull(prop) || slices.ContainsFunc(prop.AnyOf, refTargetAdmitsNull) {
+	seen[prop] = true
+
+	if refTargetAdmitsNull(prop) {
+		return true
+	}
+
+	if prop.Const != nil && isJSONNull(*prop.Const) {
+		return true
+	}
+
+	if slices.ContainsFunc(prop.Enum, isJSONNull) {
+		return true
+	}
+
+	branch := func(b *Schema) bool { return g.admitsNull(b, seen) }
+	if slices.ContainsFunc(prop.AnyOf, branch) || slices.ContainsFunc(prop.OneOf, branch) {
+		return true
+	}
+
+	// An empty allOf constrains nothing, so it answers for no instance and the
+	// remaining encodings decide.
+	if len(prop.AllOf) > 0 && !slices.ContainsFunc(prop.AllOf, func(b *Schema) bool {
+		return !g.admitsNull(b, seen)
+	}) {
 		return true
 	}
 
 	if prop.Ref != "" {
 		if entry, ok := g.payloadRefTargets()[prop.Ref]; ok {
-			return refTargetAdmitsNull(entry.rendered)
+			return g.admitsNull(entry.rendered, seen)
 		}
 	}
 

@@ -79,9 +79,9 @@ type nullCanvasWrite struct {
 
 // baseNullCanvasWrites returns one row per canvas keyword a tag interpreter
 // spells a JSON null on. Default takes the literal as raw JSON, and the const,
-// enum, and examples rows each carry an untyped nil. The four keywords are what
-// every caller of canvasNullLiteral answers for, so a test covering the scan
-// itself ranges this set rather than the wider one.
+// enum, and examples rows each carry an untyped nil. The scan in
+// canvasNullLiteral reads exactly these four keywords, so a test covering it
+// ranges this set rather than [nullCanvasWrites].
 func baseNullCanvasWrites() map[string]nullCanvasWrite {
 	return map[string]nullCanvasWrite{
 		"default": {
@@ -203,8 +203,9 @@ func TestInterpreterNullLiteralOnARecursiveStancedType(t *testing.T) {
 // does. The element therefore carries the field's origin, and the report names
 // that field and marks the position as an element.
 //
-// It ranges the keyword rows alone. The value forms the wider table adds differ
-// only in what isJSONNull judges, which the field-level test pins through the
+// It ranges the keyword rows alone. The extra value forms
+// [nullCanvasWrites] adds differ only in what isJSONNull judges, which
+// [TestInterpreterNullLiteralOnARecursiveStancedType] pins through the
 // identical canvasNullLiteral call.
 func TestInterpreterNullLiteralOnARecursiveElement(t *testing.T) {
 	t.Parallel()

@@ -106,12 +106,13 @@
 //     Keys the json tags omit (omitempty, omitzero) contribute nothing, so
 //     presence follows the json tags exactly; nested struct, slice, and map
 //     values become whole-value defaults on their top-level property. A nil
-//     field carrying neither omitempty nor omitzero marshals to JSON null,
-//     and that null seeds no default on a property admitting no null. A
-//     property admits none under [WithNullable] set to false, or when a
-//     [NullForbidden] stance covers the referenced type. An instance whose
-//     pointer-dereferenced type is not the generated type, or that does not
-//     marshal to a JSON object, returns an error wrapping
+//     field carrying neither omitempty nor omitzero marshals to JSON null.
+//     That null leaves a property admitting no null untouched, so the
+//     property keeps whatever default its tag wrote. [WithNullable](false)
+//     takes the null branch off every nilable property, and a [NullForbidden]
+//     stance takes it off every occurrence of the type it covers. An instance
+//     whose pointer-dereferenced type is not the generated type, or that does
+//     not marshal to a JSON object, returns an error wrapping
 //     [ErrInvalidDefaultsInstance]. A pointer root's nullable anyOf wrapper
 //     is resolved to its value branch first, so the defaults reach the object
 //     schema (or its $defs entry) inside. When a self-referential root stays
