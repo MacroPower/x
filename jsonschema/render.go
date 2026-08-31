@@ -9,7 +9,7 @@ import (
 
 // render produces the final schema for a node: its base shape with the null
 // encoding applied. It is the only place null wrapping, $ref strings, dedup,
-// and the Draft-7 sibling wrap are decided, all from the complete graph. A
+// and the Draft-07 sibling wrap are decided, all from the complete graph. A
 // field or element node (the only nodes carrying an authored canvas) routes to
 // [generator.reconcileField], which composes the type-derived payload with the
 // field-level facts and owns its wrapper/value keyword placement; every other

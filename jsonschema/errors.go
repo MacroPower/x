@@ -33,11 +33,11 @@ var (
 	// ErrItemsArrayUnderDraft2020 is returned by [Compile] and [Inline] when a
 	// document processed under [Draft2020] sets the array form of the items
 	// keyword (the field upstream parses a JSON `"items": [ ... ]` into).
-	// Array-form items is the Draft-7 spelling of tuple validation; under
+	// Array-form items is the Draft-07 spelling of tuple validation; under
 	// 2020-12 tuples are spelled with prefixItems and array-form items has no
 	// meaning, so the 2020-12 walk would silently validate every element
 	// against nothing. Rejecting it at construction surfaces the dropped
-	// constraint instead of accepting every instance; set the Draft-7 $schema
+	// constraint instead of accepting every instance; set the Draft-07 $schema
 	// (or [WithDraft]) for tuple semantics, or use prefixItems.
 	//
 	// It is re-exported from internal/schemavet, the shared structural-vetting

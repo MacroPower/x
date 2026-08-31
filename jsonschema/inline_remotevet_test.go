@@ -17,7 +17,7 @@ import (
 // carrying an invalid type name, a negative bound, or the array form of items
 // under a draft that rejects it fails Inline with an error wrapping
 // [jsonschema.ErrRefResolve] instead of being inlined into a malformed output
-// schema. A Draft-7 array-form items remote stays valid under a Draft-7 run,
+// schema. A Draft-07 array-form items remote stays valid under a Draft-07 run,
 // since fetched documents follow the root document's draft.
 func TestInlineFetchedRemoteStructuralChecks(t *testing.T) {
 	t.Parallel()

@@ -20,7 +20,7 @@ package refresolve
 import "github.com/google/jsonschema-go/jsonschema"
 
 // Draft selects the two draft-dependent branches of the resolution core: the
-// Draft-7 sibling-$id exception during the registry walk and dynamic-scope
+// Draft-07 sibling-$id exception during the registry walk and dynamic-scope
 // seeding. It is a distinct enum from the parent package's Draft; the parent
 // converts at the single construction site.
 type Draft int

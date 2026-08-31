@@ -3,6 +3,7 @@ package jsonschema_test
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -76,13 +77,12 @@ type nullCanvasWrite struct {
 	keyword string
 }
 
-// nullCanvasWrites returns one row per way a tag interpreter spells a JSON
-// null on a canvas. Default takes the literal as raw JSON. The const, enum,
-// and examples rows each carry an untyped nil. The remaining rows carry a Go
-// value the scan cannot recognize by identity: a typed nil, and a
-// [json.RawMessage] holding the literal, the same spelling the default row
-// uses.
-func nullCanvasWrites() map[string]nullCanvasWrite {
+// baseNullCanvasWrites returns one row per canvas keyword a tag interpreter
+// spells a JSON null on. Default takes the literal as raw JSON, and the const,
+// enum, and examples rows each carry an untyped nil. The four keywords are what
+// every caller of canvasNullLiteral answers for, so a test covering the scan
+// itself ranges this set rather than the wider one.
+func baseNullCanvasWrites() map[string]nullCanvasWrite {
 	return map[string]nullCanvasWrite{
 		"default": {
 			keyword: "default",
@@ -110,6 +110,17 @@ func nullCanvasWrites() map[string]nullCanvasWrite {
 				canvas.Examples = []any{nil}
 			},
 		},
+	}
+}
+
+// nullCanvasWrites returns the keyword rows of [baseNullCanvasWrites] plus one
+// row per Go value form isJSONNull judges rather than recognizes by identity: a
+// typed nil, and a [json.RawMessage] holding the literal, the same spelling the
+// default row uses.
+func nullCanvasWrites() map[string]nullCanvasWrite {
+	writes := baseNullCanvasWrites()
+
+	maps.Copy(writes, map[string]nullCanvasWrite{
 		"typed nil const": {
 			keyword: "const",
 			write: func(canvas *jsonschema.Schema) {
@@ -138,7 +149,9 @@ func nullCanvasWrites() map[string]nullCanvasWrite {
 				canvas.Enum = []any{json.RawMessage("null")}
 			},
 		},
-	}
+	})
+
+	return writes
 }
 
 // TestInterpreterNullLiteralOnARecursiveStancedType pins the re-check over the
@@ -189,10 +202,14 @@ func TestInterpreterNullLiteralOnARecursiveStancedType(t *testing.T) {
 // hands out the element's own node, which reads the same early answer the field
 // does. The element therefore carries the field's origin, and the report names
 // that field and marks the position as an element.
+//
+// It ranges the keyword rows alone. The value forms the wider table adds differ
+// only in what isJSONNull judges, which the field-level test pins through the
+// identical canvasNullLiteral call.
 func TestInterpreterNullLiteralOnARecursiveElement(t *testing.T) {
 	t.Parallel()
 
-	for name, tc := range nullCanvasWrites() {
+	for name, tc := range baseNullCanvasWrites() {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 

@@ -94,7 +94,7 @@ func (g *generator) reconcileField(n *node) *Schema {
 // reconcileRefField composes a $ref field or element. It merges the authored
 // canvas onto the provisional-ref payload, then emits the final $ref: annotations
 // move to the wrapper while const/enum ride the $ref on the value branch, which
-// takes its own Draft-7 sibling wrap in [generator.renderRef]. When the
+// takes its own Draft-07 sibling wrap in [generator.renderRef]. When the
 // referenced definition already admits null (it is empty, or a nilable container
 // whose def body carries the null), the ref carries every keyword and no null
 // branch is added.

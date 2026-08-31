@@ -242,10 +242,10 @@ func allocCanvasTree(n *node, draft Draft) {
 // sequence or map element beneath it, so [generator.checkNullLiterals] can name
 // the field a late-refused null literal sits in. It descends only into
 // elements (items and prefix), wherever a node carries them. A struct property
-// or an embed is a separate field node, which takes its own origin when the
-// generator builds its struct. The walk allocates one element origin per field
-// that has elements and hands the same pointer to every depth, so a [][]*T
-// inner element reads the same origin as the outer one.
+// is a separate field node, which takes its own origin when the generator
+// builds its struct. The walk allocates one element origin per field that has
+// elements and hands the same pointer to every depth, so a [][]*T inner element
+// reads the same origin as the outer one.
 func assignFieldOrigins(n *node, origin *fieldOrigin) {
 	if n == nil {
 		return

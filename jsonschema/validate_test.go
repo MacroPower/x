@@ -6853,10 +6853,10 @@ func TestCompileRejectsNonPositiveMultipleOf(t *testing.T) {
 	})
 }
 
-// TestCompileRejectsItemsArrayUnderDraft2020 pins that the Draft-7 array form of
-// items (what a JSON `"items": [ ... ]` parses into) is rejected at Compile
-// under Draft 2020-12, where the validation walk would otherwise drop it
-// silently and accept every element, while remaining valid under Draft-7.
+// TestCompileRejectsItemsArrayUnderDraft2020 pins that the Draft-07 array
+// form of items (what a JSON `"items": [ ... ]` parses into) is rejected at
+// Compile under Draft 2020-12, where the validation walk would otherwise drop
+// it silently and accept every element, while remaining valid under Draft-07.
 func TestCompileRejectsItemsArrayUnderDraft2020(t *testing.T) {
 	t.Parallel()
 
@@ -6896,7 +6896,7 @@ func TestCompileRejectsItemsArrayUnderDraft2020(t *testing.T) {
 
 		// A JSON `"items": []` unmarshals to a non-nil empty ItemsArray; the
 		// present-but-empty array form is rejected like any other, so its
-		// Draft-7 additionalItems semantics cannot be dropped silently.
+		// Draft-07 additionalItems semantics cannot be dropped silently.
 		v, err := jsonschema.ParseSchema([]byte(
 			`{"items": [], "additionalItems": {"type": "string"}}`))
 		require.NoError(t, err)
@@ -6936,7 +6936,7 @@ func TestCompileRejectsItemsArrayUnderDraft2020(t *testing.T) {
 func TestCompileChecksRemoteDocumentStructure(t *testing.T) {
 	t.Parallel()
 
-	// The structural checks (type names, the Draft-7 items array under Draft
+	// The structural checks (type names, the Draft-07 items array under Draft
 	// 2020-12) must also cover remote documents fetched during Resolve, not just
 	// the local root. A remote reached only through a root $ref otherwise compiles
 	// cleanly and then silently mis-validates.

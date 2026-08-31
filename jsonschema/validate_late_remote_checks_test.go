@@ -30,8 +30,8 @@ func (r *lateResolver) ResolveRef(_ context.Context, _ string) (*jsonschema.Sche
 // TestValidateLateFetchedRemoteStructuralChecks locks in that a remote document
 // first fetched at validation time is vetted with the same structural checks
 // Compile applies to compile-time-fetched remotes. Without them a late-fetched
-// document with a negative bound rejects every instance, and one with a Draft-7
-// items array under a 2020-12 run silently accepts every element.
+// document with a negative bound rejects every instance, and one with a
+// Draft-07 items array under a 2020-12 run silently accepts every element.
 func TestValidateLateFetchedRemoteStructuralChecks(t *testing.T) {
 	t.Parallel()
 

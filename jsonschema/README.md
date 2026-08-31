@@ -779,9 +779,9 @@ null, and the `Form` -- the JSON shape the instance actually takes, which is
 what the model dispatches on. `Form` is deliberately not the Go kind, so a field
 that encodes itself as a string (through `json:",string"` or its own
 `MarshalText`) reads as `FormCoercedNumber` or `FormTextString` rather than as a
-number every branch has to special-case. Handing that same `Shape` to
-`FieldContext.ConstraintsFor` builds the facade without classifying the field
-again, which `FieldContext.Constraints()` would.
+number every branch has to special-case. Passing that same `Shape` to
+`FieldContext.ConstraintsFor` builds the facade without classifying the field a
+second time, which `FieldContext.Constraints()` would.
 
 That one call carries the coercion decision for a field whose schema is a
 string, and the retargeting of an element rule onto the item schemas, so an

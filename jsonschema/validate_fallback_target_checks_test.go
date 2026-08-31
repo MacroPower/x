@@ -10,7 +10,7 @@ import (
 )
 
 // TestCompileChecksJSONPointerFallbackTargets locks in that the compile-time
-// structural checks (type names, non-negative bounds, and the Draft-7 items
+// structural checks (type names, non-negative bounds, and the Draft-07 items
 // array under Draft 2020-12) extend to $ref targets materialized through the
 // JSON-pointer fallback: schemas carried inside unknown keywords, which the
 // typed root pass never reaches. Without the extension such a target compiles

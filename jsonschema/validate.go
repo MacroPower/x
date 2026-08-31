@@ -472,7 +472,7 @@ func refDeps() refresolve.Deps {
 }
 
 // toRefDraft maps the parent draft to the resolution core's two-value enum,
-// which drives the Draft-7 sibling-$id exception and dynamic-scope seeding.
+// which drives the Draft-07 sibling-$id exception and dynamic-scope seeding.
 func toRefDraft(d Draft) refresolve.Draft {
 	if d == Draft7 {
 		return refresolve.Draft7
