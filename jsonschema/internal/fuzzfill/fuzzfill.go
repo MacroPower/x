@@ -10,9 +10,9 @@
 //
 // Generic reflection recursion cannot populate types with unexported fields
 // ([time.Time], [big.Int]): [reflect.Value.Set] panics on them. Nor can it produce
-// a valid [json.RawMessage], since arbitrary bytes make [json.Marshal] fail. Such
+// a valid [jsontext.Value], since arbitrary bytes make [json.Marshal] fail. Such
 // types are populated by a constructor registry consulted before the kind
-// switch; the defaults cover [time.Time], [big.Int], and [json.RawMessage], and
+// switch; the defaults cover [time.Time], [big.Int], and [jsontext.Value], and
 // callers register more with [WithConstructor]. A rig type that has unexported
 // fields without a registered constructor fills as its zero value, so its
 // coverage is near-nil.
@@ -21,7 +21,8 @@
 package fuzzfill
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"maps"
 	"math"
 	"math/big"
@@ -57,12 +58,12 @@ var (
 
 	// Registry entries for the standard-library types generic reflection cannot
 	// fill: [time.Time] and [big.Int] have unexported fields, and
-	// [json.RawMessage] must hold valid JSON. It is never mutated after init;
+	// [jsontext.Value] must hold valid JSON. It is never mutated after init;
 	// [WithConstructor] copies it before adding an override.
 	defaultConstructors = map[reflect.Type]Constructor{
-		reflect.TypeFor[time.Time]():       fillTime,
-		reflect.TypeFor[big.Int]():         fillBigInt,
-		reflect.TypeFor[json.RawMessage](): fillRawMessage,
+		reflect.TypeFor[time.Time]():      fillTime,
+		reflect.TypeFor[big.Int]():        fillBigInt,
+		reflect.TypeFor[jsontext.Value](): fillRawMessage,
 	}
 )
 
@@ -484,24 +485,24 @@ func fillBigInt(c *Cursor) any {
 func fillRawMessage(c *Cursor) any {
 	switch c.Intn(6) {
 	case 0:
-		return json.RawMessage(`null`)
+		return jsontext.Value(`null`)
 	case 1:
-		return json.RawMessage(`true`)
+		return jsontext.Value(`true`)
 	case 2:
 		//nolint:gosec // any 64-bit pattern is a valid signed integer.
-		return json.RawMessage(strconv.FormatInt(int64(c.Uint64()), 10))
+		return jsontext.Value(strconv.FormatInt(int64(c.Uint64()), 10))
 	case 3:
 		// The generated string is valid UTF-8, so marshaling it never errors.
 		b, err := json.Marshal(c.String(4))
 		if err != nil {
-			return json.RawMessage(`""`)
+			return jsontext.Value(`""`)
 		}
 
-		return json.RawMessage(b)
+		return jsontext.Value(b)
 
 	case 4:
-		return json.RawMessage(`[]`)
+		return jsontext.Value(`[]`)
 	default:
-		return json.RawMessage(`{}`)
+		return jsontext.Value(`{}`)
 	}
 }

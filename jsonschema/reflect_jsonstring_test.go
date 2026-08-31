@@ -1,7 +1,7 @@
 package jsonschema_test
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -10,27 +10,28 @@ import (
 	"go.jacobcolvin.com/x/jsonschema"
 )
 
-// intPtr is a named pointer type; encoding/json never dereferences it for the
-// json:",string" option, so such a field marshals as a bare number.
+// intPtr is a named pointer type; encoding/json/v2's json:",string" flag
+// survives every pointer level, named or not, so every pointer chain over a
+// numeric payload is quoted.
 type intPtr *int
 
 func TestGenerateFor_JSONStringPointerKinds(t *testing.T) {
 	t.Parallel()
 
 	type doc struct {
-		A **int  `json:",string"` //nolint:staticcheck // Intentional: encoding/json ignores ",string" here.
+		A **int  `json:",string"` //nolint:staticcheck // SA5008 models v1; v2 carries the flag down the whole pointer chain.
 		B intPtr `json:",string"`
 		C *int   `json:",string"`
 		D int    `json:",string"`
 	}
 
-	// Encoding/json quotes only D and C (one unnamed pointer deref); the double
-	// pointer A and the named pointer B marshal as bare numbers.
+	// Encoding/json/v2 quotes every chain, the double pointer included (v1
+	// dereferenced exactly one level and left A bare).
 	v := 5
 	p := &v
 	data, err := json.Marshal(doc{A: &p, B: intPtr(&v), C: &v, D: 5})
 	require.NoError(t, err)
-	require.JSONEq(t, `{"A":5,"B":5,"C":"5","D":"5"}`, string(data))
+	require.JSONEq(t, `{"A":"5","B":"5","C":"5","D":"5"}`, string(data))
 
 	s, err := jsonschema.GenerateFor[doc](t.Context())
 	require.NoError(t, err)
@@ -42,8 +43,8 @@ func TestGenerateFor_JSONStringPointerKinds(t *testing.T) {
 		"$schema":"https://json-schema.org/draft/2020-12/schema",
 		"type":"object",
 		"properties":{
-			"A":{"anyOf":[{"type":"integer"},{"type":"null"}]},
-			"B":{"anyOf":[{"type":"integer"},{"type":"null"}]},
+			"A":{"type":["null","string"]},
+			"B":{"type":["null","string"]},
 			"C":{"type":["null","string"]},
 			"D":{"type":"string"}
 		},

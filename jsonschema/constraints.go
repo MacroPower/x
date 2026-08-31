@@ -111,7 +111,6 @@ const (
 	FormObject         = tagmodel.FormObject
 	FormCoercedNumber  = tagmodel.FormCoercedNumber
 	FormCoercedBool    = tagmodel.FormCoercedBool
-	FormCoercedString  = tagmodel.FormCoercedString
 	FormTextString     = tagmodel.FormTextString
 	FormByteString     = tagmodel.FormByteString
 	FormRawBytes       = tagmodel.FormRawBytes
@@ -130,8 +129,8 @@ const (
 // The base decides the form wherever the Go type alone understates what the
 // instance is, as it does for a field whose type serializes itself as a string;
 // pass [FieldContext.Base]. A nil base classifies from the Go type alone. The
-// one coercion neither input can express is a json:",string" flag on a string
-// Go kind (a double-encoding field, [FormCoercedString]), which only
+// one coercion neither input can express is a json:",string" flag on an
+// [encoding/json.Number] field (string Go kind, numeric instance), which only
 // [FieldContext.Shape] sees; prefer it when a context is available.
 func ShapeOf(t reflect.Type, base *Schema) Shape {
 	return tagmodel.ShapeOf(t, base)

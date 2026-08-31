@@ -2,7 +2,8 @@ package jsonschema_test
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"math"
 	"testing"
 	"time"
@@ -1033,11 +1034,11 @@ func TestFloat32ScalarOverflow(t *testing.T) {
 func TestTagTypeOverride(t *testing.T) {
 	t.Parallel()
 
-	t.Run("pointer duration as string", func(t *testing.T) {
+	t.Run("pointer int64 as string", func(t *testing.T) {
 		t.Parallel()
 
 		type T struct {
-			SLA *time.Duration `json:"sla" jsonschema:"type=string,pattern=^[0-9]+(ms|s|m|h)$"`
+			SLA *int64 `json:"sla" jsonschema:"type=string,pattern=^[0-9]+(ms|s|m|h)$"`
 		}
 
 		s, err := jsonschema.GenerateFor[T](t.Context())
@@ -1049,11 +1050,11 @@ func TestTagTypeOverride(t *testing.T) {
 			"no anyOf/null wrapper and no leftover integer bounds")
 	})
 
-	t.Run("non-pointer duration as string", func(t *testing.T) {
+	t.Run("non-pointer int64 as string", func(t *testing.T) {
 		t.Parallel()
 
 		type T struct {
-			Dur time.Duration `json:"dur" jsonschema:"type=string"`
+			Dur int64 `json:"dur" jsonschema:"type=string"`
 		}
 
 		s, err := jsonschema.GenerateFor[T](t.Context())
@@ -1063,6 +1064,28 @@ func TestTagTypeOverride(t *testing.T) {
 		require.NoError(t, err)
 		assert.JSONEq(t, `{"type":"string"}`, string(got),
 			"the int64-derived range bounds are dropped with the type")
+	})
+
+	t.Run("duration is refused before the override", func(t *testing.T) {
+		t.Parallel()
+
+		// A time.Duration has no default representation in encoding/json/v2,
+		// so generation refuses the field before the tag override could
+		// apply; WithTypeSchema (which precedes reflection) is the escape
+		// hatch for a caller that marshals durations with its own options.
+		type T struct {
+			Dur time.Duration `json:"dur" jsonschema:"type=string"`
+		}
+
+		_, err := jsonschema.GenerateFor[T](t.Context())
+		require.ErrorIs(t, err, jsonschema.ErrUnsupportedType)
+
+		s, err := jsonschema.GenerateFor[T](t.Context(),
+			jsonschema.WithTypeSchemaFor[time.Duration](jsonschema.TypeSchema{
+				Value: &jsonschema.Schema{Type: "string"},
+			}))
+		require.NoError(t, err)
+		assert.Equal(t, "string", s.Properties["dur"].Type)
 	})
 
 	t.Run("string keywords dropped for non-string type", func(t *testing.T) {
@@ -1511,10 +1534,10 @@ func TestTagScalarAfterTypeOverride(t *testing.T) {
 		want     string // marshaled property schema
 		err      string // substring required in the generation error
 	}{
-		"duration default after string override": {
+		"int64 default after string override": {
 			generate: func() (*jsonschema.Schema, error) {
 				type T struct {
-					SLA *time.Duration `json:"sla" jsonschema:"title=SLA,type=string,default=15m"`
+					SLA *int64 `json:"sla" jsonschema:"title=SLA,type=string,default=15m"`
 				}
 
 				return jsonschema.GenerateFor[T](t.Context())
@@ -1635,9 +1658,10 @@ func TestTagScalarAfterTypeOverride(t *testing.T) {
 			},
 			err: "cannot assign null to non-nullable type integer",
 		},
-		// The same rejection from the other side of the pair. The fold takes
-		// the literal against the slice's own decision, and the override then
-		// withdraws the occurrence that admitted it.
+		// The same rejection from the other side of the pair. A bare slice
+		// admits no null under encoding/json/v2 (nil marshals []), so the
+		// fold rejects the literal at the slice's own decision before the
+		// override is read.
 		"null examples before a string override": {
 			generate: func() (*jsonschema.Schema, error) {
 				type T struct {
@@ -1646,7 +1670,7 @@ func TestTagScalarAfterTypeOverride(t *testing.T) {
 
 				return jsonschema.GenerateFor[T](t.Context())
 			},
-			err: "cannot assign null to non-nullable type string",
+			err: "cannot assign null to non-nullable type slice",
 		},
 		"null const before an integer override": {
 			generate: func() (*jsonschema.Schema, error) {
@@ -1708,9 +1732,9 @@ func TestTagScalarAfterTypeOverride(t *testing.T) {
 			err: "cannot assign null to non-nullable type integer",
 		},
 		// An override to array carries no scalar type, so a null key following
-		// it reports the missing scalar type instead. One preceding it still
-		// reaches the null rejection, since the array the override names admits
-		// no null either.
+		// it reports the missing scalar type instead. One preceding it is
+		// rejected at the bare slice's own decision, which admits no null
+		// under encoding/json/v2.
 		"null default before an array override": {
 			generate: func() (*jsonschema.Schema, error) {
 				type T struct {
@@ -1719,7 +1743,7 @@ func TestTagScalarAfterTypeOverride(t *testing.T) {
 
 				return jsonschema.GenerateFor[T](t.Context())
 			},
-			err: "cannot assign null to non-nullable type array",
+			err: "cannot assign null to non-nullable type slice",
 		},
 		// An enum on a sequence retargets to the item schemas, so a non-array
 		// override reports the group conflict before the null literal is ever
@@ -1907,6 +1931,10 @@ func TestTagNullLiteralFollowsTheNullDecision(t *testing.T) {
 		want     string // marshaled property schema
 		err      string // substring required in the generation error
 	}{
+		// A bare container admits no null under encoding/json/v2: a nil slice
+		// marshals as [], a nil map as {}, and a nil []byte as "". A null
+		// literal on one is rejected; a pointer field is the occurrence that
+		// admits it (the pointer rows below).
 		"null default on a bare slice": {
 			generate: func() (*jsonschema.Schema, error) {
 				type T struct {
@@ -1915,8 +1943,7 @@ func TestTagNullLiteralFollowsTheNullDecision(t *testing.T) {
 
 				return jsonschema.GenerateFor[T](t.Context())
 			},
-			prop: "v",
-			want: `{"type":["null","array"],"items":{"type":"string"},"default":null}`,
+			err: "cannot assign null to non-nullable type slice",
 		},
 		"null default on a bare map": {
 			generate: func() (*jsonschema.Schema, error) {
@@ -1926,8 +1953,7 @@ func TestTagNullLiteralFollowsTheNullDecision(t *testing.T) {
 
 				return jsonschema.GenerateFor[T](t.Context())
 			},
-			prop: "v",
-			want: `{"type":["null","object"],"additionalProperties":{"type":"integer"},"default":null}`,
+			err: "cannot assign null to non-nullable type map",
 		},
 		"null default on a byte slice": {
 			generate: func() (*jsonschema.Schema, error) {
@@ -1937,8 +1963,18 @@ func TestTagNullLiteralFollowsTheNullDecision(t *testing.T) {
 
 				return jsonschema.GenerateFor[T](t.Context())
 			},
+			err: "cannot assign null to non-nullable type slice",
+		},
+		"null default on a pointer to a slice": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					V *[]string `json:"v" jsonschema:"default=null"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
 			prop: "v",
-			want: `{"type":["null","string"],"contentEncoding":"base64","default":null}`,
+			want: `{"type":["null","array"],"items":{"type":"string"},"default":null}`,
 		},
 		// A plain interface reflects as the unrestricted schema, and render
 		// drops the null branch as a duplicate of it, so the row pins the
@@ -1954,14 +1990,14 @@ func TestTagNullLiteralFollowsTheNullDecision(t *testing.T) {
 			prop: "v",
 			want: `{"default":null}`,
 		},
-		// A json.RawMessage renders as the same unrestricted schema an interface
+		// A jsontext.Value renders as the same unrestricted schema an interface
 		// does, and answers the opposite way. Its schema comes from the built-in
 		// leaf table rather than from reflection over a container, so no node
 		// records a null decision for the tag to read.
 		"null default on a raw message": {
 			generate: func() (*jsonschema.Schema, error) {
 				type T struct {
-					V json.RawMessage `json:"v" jsonschema:"default=null"`
+					V jsontext.Value `json:"v" jsonschema:"default=null"`
 				}
 
 				return jsonschema.GenerateFor[T](t.Context())
@@ -1976,8 +2012,7 @@ func TestTagNullLiteralFollowsTheNullDecision(t *testing.T) {
 
 				return jsonschema.GenerateFor[T](t.Context())
 			},
-			prop: "v",
-			want: `{"type":["null","array"],"items":{"type":"string"},"examples":[null]}`,
+			err: "cannot assign null to non-nullable type slice",
 		},
 		"null examples member with the null branch dropped": {
 			generate: func() (*jsonschema.Schema, error) {
@@ -2091,9 +2126,9 @@ func TestTagNullLiteralFollowsTheNullDecision(t *testing.T) {
 			want: `{"default":null,"anyOf":[{"$ref":"#/$defs/nullStanced"},{"type":"null"}]}`,
 		},
 		// Pairs apply in order, so a scalar key before a type= pair parses
-		// against the field's own occurrence. The ordering rule does not govern
-		// the literal null. The override withdraws the occurrence that admitted
-		// the null, so the fold rejects the literal it already took.
+		// against the field's own occurrence. A bare slice never admits null
+		// under encoding/json/v2, so that occurrence refuses the literal
+		// outright and the override is never consulted.
 		// TestTagScalarAfterTypeOverride covers the remaining orderings.
 		"null default before a type override on a bare slice": {
 			generate: func() (*jsonschema.Schema, error) {
@@ -2103,7 +2138,7 @@ func TestTagNullLiteralFollowsTheNullDecision(t *testing.T) {
 
 				return jsonschema.GenerateFor[T](t.Context())
 			},
-			err: "cannot assign null to non-nullable type string",
+			err: "cannot assign null to non-nullable type slice",
 		},
 		// The carve-out is the null literal alone. A slice has no scalar value
 		// the tag can spell.
@@ -2143,7 +2178,7 @@ func TestTagNullLiteralFollowsTheNullDecision(t *testing.T) {
 				return jsonschema.GenerateFor[T](t.Context())
 			},
 			prop: "v",
-			want: `{"type":["null","array"],"items":{"anyOf":[{"type":"string","enum":["a",null]},{"type":"null"}]}}`,
+			want: `{"type":"array","items":{"anyOf":[{"type":"string","enum":["a",null]},{"type":"null"}]}}`,
 		},
 		"null enum member on a slice of values": {
 			generate: func() (*jsonschema.Schema, error) {

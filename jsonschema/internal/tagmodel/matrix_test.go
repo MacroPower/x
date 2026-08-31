@@ -59,7 +59,6 @@ func TestMatrixGolden(t *testing.T) {
 		|content encoding / string -> apply
 		|content encoding / string-coerced boolean -> apply
 		|content encoding / string-coerced number -> apply
-		|content encoding / string-coerced string -> reject: not supported on a json:",string" string field (the keyword would apply to the quoted serialized text, not the value)
 		|content encoding / text-marshaled string -> apply
 		|content media type / array -> reject: content media type is not supported on a array
 		|content media type / base64 byte string -> apply
@@ -73,7 +72,6 @@ func TestMatrixGolden(t *testing.T) {
 		|content media type / string -> apply
 		|content media type / string-coerced boolean -> apply
 		|content media type / string-coerced number -> apply
-		|content media type / string-coerced string -> reject: not supported on a json:",string" string field (the keyword would apply to the quoted serialized text, not the value)
 		|content media type / text-marshaled string -> apply
 		|divisor / array -> reject: divisor is not supported on a array
 		|divisor / base64 byte string -> reject: divisor is not supported on a base64 byte string
@@ -87,7 +85,6 @@ func TestMatrixGolden(t *testing.T) {
 		|divisor / string -> reject: divisor is not supported on a string
 		|divisor / string-coerced boolean -> reject: divisor is not supported on a string-coerced boolean
 		|divisor / string-coerced number -> reject: divisor is not supported on a string-coerced number
-		|divisor / string-coerced string -> reject: divisor is not supported on a string-coerced string
 		|divisor / text-marshaled string -> reject: divisor is not supported on a text-marshaled string
 		|element uniqueness / array -> apply
 		|element uniqueness / base64 byte string -> reject: unique has no array to constrain on a base64 byte string
@@ -101,7 +98,6 @@ func TestMatrixGolden(t *testing.T) {
 		|element uniqueness / string -> reject: unique has no array to constrain on a string
 		|element uniqueness / string-coerced boolean -> reject: unique has no array to constrain on a string-coerced boolean
 		|element uniqueness / string-coerced number -> reject: unique has no array to constrain on a string-coerced number
-		|element uniqueness / string-coerced string -> reject: unique has no array to constrain on a string-coerced string
 		|element uniqueness / text-marshaled string -> reject: unique has no array to constrain on a text-marshaled string
 		|enumerated values / array -> apply
 		|enumerated values / base64 byte string -> reject: a []byte field has no item schema to constrain (it encodes as a base64 string)
@@ -115,7 +111,6 @@ func TestMatrixGolden(t *testing.T) {
 		|enumerated values / string -> apply
 		|enumerated values / string-coerced boolean -> apply
 		|enumerated values / string-coerced number -> apply
-		|enumerated values / string-coerced string -> apply
 		|enumerated values / text-marshaled string -> reject: a text-marshaled value cannot be compared against a tag literal (the tag has no way to spell the marshaled form)
 		|exact size / array -> apply
 		|exact size / base64 byte string -> apply
@@ -129,7 +124,6 @@ func TestMatrixGolden(t *testing.T) {
 		|exact size / string -> apply
 		|exact size / string-coerced boolean -> reject: exact size is not supported on a string-coerced boolean
 		|exact size / string-coerced number -> apply
-		|exact size / string-coerced string -> reject: not supported on a json:",string" string field (the keyword would apply to the quoted serialized text, not the value)
 		|exact size / text-marshaled string -> apply
 		|exclusive ceiling / array -> apply
 		|exclusive ceiling / base64 byte string -> apply
@@ -143,7 +137,6 @@ func TestMatrixGolden(t *testing.T) {
 		|exclusive ceiling / string -> apply
 		|exclusive ceiling / string-coerced boolean -> reject: a bound is not supported on a json:",string" coerced numeric field (minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)
 		|exclusive ceiling / string-coerced number -> reject: a bound is not supported on a json:",string" coerced numeric field (minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)
-		|exclusive ceiling / string-coerced string -> reject: not supported on a json:",string" string field (the keyword would apply to the quoted serialized text, not the value)
 		|exclusive ceiling / text-marshaled string -> apply
 		|exclusive floor / array -> apply
 		|exclusive floor / base64 byte string -> apply
@@ -157,7 +150,6 @@ func TestMatrixGolden(t *testing.T) {
 		|exclusive floor / string -> apply
 		|exclusive floor / string-coerced boolean -> reject: a bound is not supported on a json:",string" coerced numeric field (minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)
 		|exclusive floor / string-coerced number -> reject: a bound is not supported on a json:",string" coerced numeric field (minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)
-		|exclusive floor / string-coerced string -> reject: not supported on a json:",string" string field (the keyword would apply to the quoted serialized text, not the value)
 		|exclusive floor / text-marshaled string -> apply
 		|forbidden size / array -> apply
 		|forbidden size / base64 byte string -> reject: forbidden size is not supported on a base64 byte string
@@ -171,7 +163,6 @@ func TestMatrixGolden(t *testing.T) {
 		|forbidden size / string -> reject: forbidden size is not supported on a string
 		|forbidden size / string-coerced boolean -> reject: forbidden size is not supported on a string-coerced boolean
 		|forbidden size / string-coerced number -> reject: forbidden size is not supported on a string-coerced number
-		|forbidden size / string-coerced string -> reject: forbidden size is not supported on a string-coerced string
 		|forbidden size / text-marshaled string -> reject: forbidden size is not supported on a text-marshaled string
 		|forbidden value / array -> reject: forbidden value is not supported on a array
 		|forbidden value / base64 byte string -> reject: forbidden value is not supported on a base64 byte string
@@ -185,7 +176,6 @@ func TestMatrixGolden(t *testing.T) {
 		|forbidden value / string -> apply
 		|forbidden value / string-coerced boolean -> apply
 		|forbidden value / string-coerced number -> apply
-		|forbidden value / string-coerced string -> apply
 		|forbidden value / text-marshaled string -> reject: a text-marshaled value cannot be compared against a tag literal (the tag has no way to spell the marshaled form)
 		|format / array -> reject: format is not supported on a array
 		|format / base64 byte string -> apply
@@ -199,7 +189,6 @@ func TestMatrixGolden(t *testing.T) {
 		|format / string -> apply
 		|format / string-coerced boolean -> apply
 		|format / string-coerced number -> apply
-		|format / string-coerced string -> reject: not supported on a json:",string" string field (the keyword would apply to the quoted serialized text, not the value)
 		|format / text-marshaled string -> apply
 		|inclusive ceiling / array -> apply
 		|inclusive ceiling / base64 byte string -> apply
@@ -213,7 +202,6 @@ func TestMatrixGolden(t *testing.T) {
 		|inclusive ceiling / string -> apply
 		|inclusive ceiling / string-coerced boolean -> reject: a bound is not supported on a json:",string" coerced numeric field (minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)
 		|inclusive ceiling / string-coerced number -> reject: a bound is not supported on a json:",string" coerced numeric field (minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)
-		|inclusive ceiling / string-coerced string -> reject: not supported on a json:",string" string field (the keyword would apply to the quoted serialized text, not the value)
 		|inclusive ceiling / text-marshaled string -> apply
 		|inclusive floor / array -> apply
 		|inclusive floor / base64 byte string -> apply
@@ -227,7 +215,6 @@ func TestMatrixGolden(t *testing.T) {
 		|inclusive floor / string -> apply
 		|inclusive floor / string-coerced boolean -> reject: a bound is not supported on a json:",string" coerced numeric field (minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)
 		|inclusive floor / string-coerced number -> reject: a bound is not supported on a json:",string" coerced numeric field (minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)
-		|inclusive floor / string-coerced string -> reject: not supported on a json:",string" string field (the keyword would apply to the quoted serialized text, not the value)
 		|inclusive floor / text-marshaled string -> apply
 		|non-zero assertion / array -> apply
 		|non-zero assertion / base64 byte string -> apply
@@ -241,7 +228,6 @@ func TestMatrixGolden(t *testing.T) {
 		|non-zero assertion / string -> apply
 		|non-zero assertion / string-coerced boolean -> apply
 		|non-zero assertion / string-coerced number -> apply
-		|non-zero assertion / string-coerced string -> apply
 		|non-zero assertion / text-marshaled string -> ignore: a text-marshaled value has no schema-expressible zero
 		|pattern / array -> reject: pattern is not supported on a array
 		|pattern / base64 byte string -> apply
@@ -255,7 +241,6 @@ func TestMatrixGolden(t *testing.T) {
 		|pattern / string -> apply
 		|pattern / string-coerced boolean -> apply
 		|pattern / string-coerced number -> apply
-		|pattern / string-coerced string -> reject: not supported on a json:",string" string field (the keyword would apply to the quoted serialized text, not the value)
 		|pattern / text-marshaled string -> apply
 		|pinned value / array -> reject: pinned value is not supported on a array
 		|pinned value / base64 byte string -> reject: pinned value is not supported on a base64 byte string
@@ -269,7 +254,6 @@ func TestMatrixGolden(t *testing.T) {
 		|pinned value / string -> apply
 		|pinned value / string-coerced boolean -> apply
 		|pinned value / string-coerced number -> apply
-		|pinned value / string-coerced string -> apply
 		|pinned value / text-marshaled string -> reject: a text-marshaled value cannot be compared against a tag literal (the tag has no way to spell the marshaled form)
 `)
 

@@ -1,13 +1,14 @@
 package jsonschema_test
 
 import (
-	"encoding/json"
 	"math"
 	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	jsonv1 "encoding/json"
 
 	"go.jacobcolvin.com/x/jsonschema"
 )
@@ -19,29 +20,29 @@ func TestNormalize(t *testing.T) {
 		instance any
 		want     any
 	}{
-		"int":     {instance: 30, want: json.Number("30")},
-		"int8":    {instance: int8(-8), want: json.Number("-8")},
-		"int16":   {instance: int16(-16), want: json.Number("-16")},
-		"int32":   {instance: int32(-32), want: json.Number("-32")},
-		"int64":   {instance: int64(-64), want: json.Number("-64")},
-		"uint":    {instance: uint(1), want: json.Number("1")},
-		"uint8":   {instance: uint8(8), want: json.Number("8")},
-		"uint16":  {instance: uint16(16), want: json.Number("16")},
-		"uint32":  {instance: uint32(32), want: json.Number("32")},
-		"uint64":  {instance: uint64(math.MaxUint64), want: json.Number("18446744073709551615")},
-		"uintptr": {instance: uintptr(7), want: json.Number("7")},
+		"int":     {instance: 30, want: jsonv1.Number("30")},
+		"int8":    {instance: int8(-8), want: jsonv1.Number("-8")},
+		"int16":   {instance: int16(-16), want: jsonv1.Number("-16")},
+		"int32":   {instance: int32(-32), want: jsonv1.Number("-32")},
+		"int64":   {instance: int64(-64), want: jsonv1.Number("-64")},
+		"uint":    {instance: uint(1), want: jsonv1.Number("1")},
+		"uint8":   {instance: uint8(8), want: jsonv1.Number("8")},
+		"uint16":  {instance: uint16(16), want: jsonv1.Number("16")},
+		"uint32":  {instance: uint32(32), want: jsonv1.Number("32")},
+		"uint64":  {instance: uint64(math.MaxUint64), want: jsonv1.Number("18446744073709551615")},
+		"uintptr": {instance: uintptr(7), want: jsonv1.Number("7")},
 		"large int64 exact": {
 			instance: int64(9007199254740993), // 2^53+1: float64 would round this
-			want:     json.Number("9007199254740993"),
+			want:     jsonv1.Number("9007199254740993"),
 		},
 		"float32": {instance: float32(0.5), want: 0.5},
 		"float64": {instance: 1.5, want: 1.5},
 		"string":  {instance: "x", want: "x"},
 		"bool":    {instance: true, want: true},
 		"nil":     {instance: nil, want: nil},
-		"json.Number": {
-			instance: json.Number("1.5"),
-			want:     json.Number("1.5"),
+		"jsonv1.Number": {
+			instance: jsonv1.Number("1.5"),
+			want:     jsonv1.Number("1.5"),
 		},
 		"nested map and slice": {
 			instance: map[string]any{
@@ -50,9 +51,9 @@ func TestNormalize(t *testing.T) {
 				"sub":  map[string]any{"n": int64(5)},
 			},
 			want: map[string]any{
-				"age":  json.Number("30"),
-				"tags": []any{json.Number("1"), "a", float64(2)},
-				"sub":  map[string]any{"n": json.Number("5")},
+				"age":  jsonv1.Number("30"),
+				"tags": []any{jsonv1.Number("1"), "a", float64(2)},
+				"sub":  map[string]any{"n": jsonv1.Number("5")},
 			},
 		},
 		"unaccepted type passes through": {
@@ -98,7 +99,7 @@ func TestNormalizeCopyOnWrite(t *testing.T) {
 		assert.Equal(t, map[string]any{"age": 30, "l": []any{int64(1)}}, m,
 			"the input must keep its original Go values")
 		assert.Equal(t,
-			map[string]any{"age": json.Number("30"), "l": []any{json.Number("1")}},
+			map[string]any{"age": jsonv1.Number("30"), "l": []any{jsonv1.Number("1")}},
 			got)
 	})
 }
@@ -120,13 +121,13 @@ func TestNormalizeResliceAliasing(t *testing.T) {
 		got, ok := jsonschema.Normalize(c).([]any)
 		require.True(t, ok)
 		require.Len(t, got, 2)
-		assert.Equal(t, json.Number("7"), got[0])
+		assert.Equal(t, jsonv1.Number("7"), got[0])
 
 		inner, ok := got[1].([]any)
 		require.True(t, ok, "the reslice element must be descended, not returned raw")
 		require.Len(t, inner, 1)
-		assert.Equal(t, json.Number("7"), inner[0],
-			"the int inside the reslice must be normalized to json.Number")
+		assert.Equal(t, jsonv1.Number("7"), inner[0],
+			"the int inside the reslice must be normalized to jsonv1.Number")
 	})
 
 	t.Run("true self-reference terminates", func(t *testing.T) {

@@ -1,7 +1,8 @@
 package format_test
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -111,7 +112,7 @@ func TestURITemplateCorpus(t *testing.T) {
 
 // loadURITemplateCorpus decodes every vendored corpus file into a flat case
 // list. The corpus shape is {group: {"variables": {...}, "testcases": [[template,
-// expansion], ...]}}; the expansion element is decoded as json.RawMessage
+// expansion], ...]}}; the expansion element is decoded as jsontext.Value
 // because it is a string in most cases, an array of acceptable expansions in
 // others, and the boolean false throughout negative-tests.json.
 func loadURITemplateCorpus(t *testing.T) []uriTemplateCase {
@@ -126,7 +127,7 @@ func loadURITemplateCorpus(t *testing.T) []uriTemplateCase {
 		require.NoError(t, err, "read corpus file %s", path)
 
 		var groups map[string]struct {
-			TestCases [][]json.RawMessage `json:"testcases"`
+			TestCases [][]jsontext.Value `json:"testcases"`
 		}
 
 		require.NoError(t, json.Unmarshal(data, &groups), "decode corpus file %s", path)

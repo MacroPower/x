@@ -1,6 +1,7 @@
 package jsonschema_test
 
 import (
+	"encoding/json/jsontext"
 	"strconv"
 	"strings"
 	"testing"
@@ -14,7 +15,7 @@ import (
 func TestValidationError_Leaves(t *testing.T) {
 	t.Parallel()
 
-	leaf := func(path, keyword string) *jsonschema.ValidationError {
+	leaf := func(path jsontext.Pointer, keyword string) *jsonschema.ValidationError {
 		return &jsonschema.ValidationError{InstancePath: path, Keyword: keyword}
 	}
 
@@ -148,8 +149,8 @@ func TestValidationError_Leaves_EndToEnd(t *testing.T) {
 	leaves := ve.Leaves()
 	require.Len(t, leaves, 2)
 
-	paths := []string{leaves[0].InstancePath, leaves[1].InstancePath}
-	assert.ElementsMatch(t, []string{"/name", "/age"}, paths)
+	paths := []jsontext.Pointer{leaves[0].InstancePath, leaves[1].InstancePath}
+	assert.ElementsMatch(t, []jsontext.Pointer{"/name", "/age"}, paths)
 
 	for _, l := range leaves {
 		assert.Equal(t, "type", l.Keyword)
@@ -162,7 +163,7 @@ func TestValidationError_InstanceSegments(t *testing.T) {
 	tcs := map[string]struct {
 		schema   *jsonschema.Schema
 		instance any
-		wantPath string
+		wantPath jsontext.Pointer
 		want     []jsonschema.Segment
 	}{
 		"object property named 0": {
@@ -297,12 +298,12 @@ func TestValidationError_InstanceSegments_SiblingsDoNotAlias(t *testing.T) {
 
 	require.ErrorAs(t, err, &ve)
 
-	got := map[string][]jsonschema.Segment{}
+	got := map[jsontext.Pointer][]jsonschema.Segment{}
 	for _, leaf := range ve.Leaves() {
 		got[leaf.InstancePath] = leaf.InstanceSegments()
 	}
 
-	assert.Equal(t, map[string][]jsonschema.Segment{
+	assert.Equal(t, map[jsontext.Pointer][]jsonschema.Segment{
 		"/l1/l2/l3/a": {{Key: "l1"}, {Key: "l2"}, {Key: "l3"}, {Key: "a"}},
 		"/l1/l2/l3/b": {{Key: "l1"}, {Key: "l2"}, {Key: "l3"}, {Key: "b"}},
 	}, got)
@@ -378,16 +379,16 @@ func TestValidationError_InstanceSegments_RenderEqualsInstancePath(t *testing.T)
 
 	leaves := ve.Leaves()
 
-	wantPaths := make([]string, 0, 4*depth)
+	wantPaths := make([]jsontext.Pointer, 0, 4*depth)
 
-	prefix := ""
+	prefix := jsontext.Pointer("")
 	for range depth {
 		wantPaths = append(wantPaths,
 			prefix+"/a~0x", prefix+"/b~1y", prefix+"/arr/0", prefix+"/arr/1")
 		prefix += "/n"
 	}
 
-	gotPaths := make([]string, 0, len(leaves))
+	gotPaths := make([]jsontext.Pointer, 0, len(leaves))
 	for _, leaf := range leaves {
 		gotPaths = append(gotPaths, leaf.InstancePath)
 	}
@@ -395,7 +396,7 @@ func TestValidationError_InstanceSegments_RenderEqualsInstancePath(t *testing.T)
 	require.ElementsMatch(t, wantPaths, gotPaths)
 
 	for _, leaf := range leaves {
-		assert.Equal(t, leaf.InstancePath, render(leaf.InstanceSegments()),
+		assert.Equal(t, string(leaf.InstancePath), render(leaf.InstanceSegments()),
 			"re-rendered segments must reproduce the pointer %q", leaf.InstancePath)
 	}
 }
@@ -414,7 +415,7 @@ func TestValidationError_SchemaSegments(t *testing.T) {
 	tcs := map[string]struct {
 		schema   *jsonschema.Schema
 		instance any
-		wantPath string
+		wantPath jsontext.Pointer
 		want     []jsonschema.Segment
 	}{
 		"root keyword": {
@@ -539,7 +540,7 @@ func TestValidationError_SchemaSegments_RenderEqualsSchemaPath(t *testing.T) {
 
 	checked := 0
 	walkTree = func(e *jsonschema.ValidationError) {
-		assert.Equal(t, e.SchemaPath, render(e.SchemaSegments()),
+		assert.Equal(t, string(e.SchemaPath), render(e.SchemaSegments()),
 			"re-rendered segments must reproduce the pointer %q", e.SchemaPath)
 
 		checked++

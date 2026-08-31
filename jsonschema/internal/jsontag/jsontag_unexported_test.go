@@ -1,7 +1,7 @@
 package jsontag_test
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"reflect"
 	"testing"
 
@@ -12,8 +12,9 @@ import (
 )
 
 // unexportedTagged carries json tags on unexported non-embedded fields.
-// Encoding/json skips such a field before reading its tag, so the tag cannot
-// resurrect it; Parse must report the documented exclusion (empty Info).
+// Encoding/json/v2 skips such a field before reading its tag, so the tag
+// cannot resurrect it, and reports the tag as an error; Parse must report the
+// documented exclusion (empty Info) beside the same error.
 type unexportedTagged struct {
 	hidden  int `json:"h"`           //nolint:unused,govet,staticcheck // Intentional: tag on an unexported field, exercised via reflection.
 	options int `json:"o,omitempty"` //nolint:unused,govet,staticcheck // Intentional: tag on an unexported field, exercised via reflection.
@@ -24,17 +25,24 @@ type unexportedTagged struct {
 func TestParse_UnexportedTaggedFieldExcluded(t *testing.T) {
 	t.Parallel()
 
-	// Encoding/json omits the tagged unexported fields entirely.
-	data, err := json.Marshal(unexportedTagged{Ok: 2})
-	require.NoError(t, err)
-	require.JSONEq(t, `{"ok":2}`, string(data))
+	// Encoding/json/v2 refuses the struct outright for the same fault Parse
+	// reports per field.
+	_, err := json.Marshal(unexportedTagged{Ok: 2})
+	require.ErrorContains(t, err, "unexported Go struct field hidden cannot have non-ignored")
 
 	tests := map[string]struct {
 		field int
 		want  jsontag.Info
+		err   string
 	}{
-		"tagged unexported":              {field: 0, want: jsontag.Info{}},
-		"tagged unexported with options": {field: 1, want: jsontag.Info{}},
+		"tagged unexported": {
+			field: 0, want: jsontag.Info{},
+			err: "unexported Go struct field hidden cannot have non-ignored",
+		},
+		"tagged unexported with options": {
+			field: 1, want: jsontag.Info{},
+			err: "unexported Go struct field options cannot have non-ignored",
+		},
 		"tagged exported": {
 			field: 2,
 			want:  jsontag.Info{JSONName: "ok", TaggedName: true},
@@ -46,7 +54,15 @@ func TestParse_UnexportedTaggedFieldExcluded(t *testing.T) {
 			t.Parallel()
 
 			f := reflect.TypeFor[unexportedTagged]().Field(tc.field)
-			assert.Equal(t, tc.want, jsontag.Parse(f))
+
+			info, err := jsontag.Parse(f)
+			assert.Equal(t, tc.want, info)
+
+			if tc.err == "" {
+				assert.NoError(t, err)
+			} else {
+				assert.ErrorContains(t, err, tc.err)
+			}
 		})
 	}
 }

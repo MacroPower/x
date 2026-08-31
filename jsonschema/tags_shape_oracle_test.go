@@ -3,7 +3,8 @@ package jsonschema_test
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"reflect"
 	"strings"
@@ -12,6 +13,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	jsonv1 "encoding/json"
 
 	"go.jacobcolvin.com/x/jsonschema"
 	"go.jacobcolvin.com/x/jsonschema/internal/fuzzshape"
@@ -39,6 +42,10 @@ const (
 	// Two fields resolving to one JSON name at the same depth are both dropped
 	// by encoding/json's dominance rule, so neither is a property to classify.
 	reasonShadowedName = "a JSON name claimed by more than one field at one depth is dropped"
+	// An embedded fallback field emits no property: its members become the
+	// parent object's extra-member constraint, and tag interpreters run only
+	// over the emitted properties.
+	reasonFallbackField = "an embedded fallback field emits no property to classify"
 )
 
 // The raw byte and opaque columns admit any JSON value, so no token follows
@@ -73,6 +80,10 @@ func unprobedReasons(f reflect.StructField, shared map[string]int) []string {
 
 	if shared[jsonName(f)] > 1 {
 		out = append(out, reasonShadowedName)
+	}
+
+	if !f.Anonymous && strings.Contains(tag, ",embed") {
+		out = append(out, reasonFallbackField)
 	}
 
 	return out
@@ -110,7 +121,7 @@ func (tk jsonToken) String() string {
 
 // tokenOf classifies a marshaled JSON value by its first structural byte, which
 // is all encoding/json's grammar needs to distinguish the six.
-func tokenOf(t *testing.T, raw json.RawMessage) jsonToken {
+func tokenOf(t *testing.T, raw jsonv1.RawMessage) jsonToken {
 	t.Helper()
 
 	require.NotEmpty(t, raw, "marshaled value is empty")
@@ -181,8 +192,8 @@ func shapeProbe(seen *[]shapeObservation) jsonschema.GenerateOption {
 // are a JSON document rather than an ordinary Go value, so the filler writes
 // valid JSON into them instead of a generic non-zero value.
 var (
-	rawMessageType = reflect.TypeFor[json.RawMessage]()
-	numberType     = reflect.TypeFor[json.Number]()
+	rawMessageType = reflect.TypeFor[jsonv1.RawMessage]()
+	numberType     = reflect.TypeFor[jsonv1.Number]()
 
 	// The formToken table gives the token each classifying form predicts.
 	// FormRef is absent because its token comes from the definition it names,
@@ -198,7 +209,6 @@ var (
 		jsonschema.FormDeclaredObject: tokenObject,
 		jsonschema.FormCoercedNumber:  tokenString,
 		jsonschema.FormCoercedBool:    tokenString,
-		jsonschema.FormCoercedString:  tokenString,
 		jsonschema.FormByteString:     tokenString,
 	}
 )
@@ -360,7 +370,7 @@ func declaredToken(s *jsonschema.Schema) (jsonToken, bool) {
 func assertShapeMatchesToken(
 	t *testing.T,
 	obs *shapeObservation,
-	raw json.RawMessage,
+	raw jsonv1.RawMessage,
 	isNil bool,
 	root *jsonschema.Schema,
 ) bool {
@@ -369,9 +379,10 @@ func assertShapeMatchesToken(
 	got := tokenOf(t, raw)
 	where := fmt.Sprintf("field %s.%s (%s, form %s)", obs.owner, obs.field.Name, obs.typ, obs.shape.Form)
 
-	// A null token is the marshaling of a nil Go value and nothing else. Tying
-	// it to the reflected value rather than waving it through is what keeps a
-	// nil slice or map from excusing a wrong form.
+	// A null token is the marshaling of a nil pointer or interface and nothing
+	// else: encoding/json/v2 writes a nil slice, map, or []byte as its empty
+	// instance, which the form checks below hold to the form like any other
+	// value.
 	if got == tokenNull {
 		// A null token says the Go value was nil and nothing about the form, so
 		// the claim is worth making but does not count toward the assertion
@@ -380,8 +391,6 @@ func assertShapeMatchesToken(
 
 		return false
 	}
-
-	require.False(t, isNil, "%s marshaled %s from a nil value", where, got)
 
 	if want, ok := formToken[obs.shape.Form]; ok {
 		require.Equal(t, want, got, "%s: %s predicts a %s instance", where, obs.shape.Form, want)
@@ -431,21 +440,21 @@ func assertShapeMatchesToken(
 //
 // A null member is a nil element, which every form admits, and a member whose
 // element form predicts no token is left to the field-level assertion.
-func assertElementTokens(t *testing.T, obs *shapeObservation, raw json.RawMessage, where string) {
+func assertElementTokens(t *testing.T, obs *shapeObservation, raw jsonv1.RawMessage, where string) {
 	t.Helper()
 
 	if len(obs.elems) == 0 {
 		return
 	}
 
-	var members []json.RawMessage
+	var members []jsonv1.RawMessage
 
 	switch obs.shape.Form {
 	case jsonschema.FormArray:
 		require.NoError(t, json.Unmarshal(raw, &members), "%s: decode the array", where)
 
 	case jsonschema.FormObject:
-		var values map[string]json.RawMessage
+		var values map[string]jsonv1.RawMessage
 
 		require.NoError(t, json.Unmarshal(raw, &values), "%s: decode the object", where)
 		require.Len(t, obs.elems, 1,
@@ -488,13 +497,13 @@ func assertElementTokens(t *testing.T, obs *shapeObservation, raw json.RawMessag
 // the string it predicted. The claim holds for a json:",string" field, whose
 // text is the value re-encoded; a type that marshals itself as text writes
 // whatever it likes, so only the string token is asserted there.
-func assertCoercedContent(t *testing.T, obs *shapeObservation, raw json.RawMessage, where string) {
+func assertCoercedContent(t *testing.T, obs *shapeObservation, raw jsonv1.RawMessage, where string) {
 	t.Helper()
 
 	var content string
 
 	switch obs.shape.Form {
-	case jsonschema.FormCoercedNumber, jsonschema.FormCoercedBool, jsonschema.FormCoercedString:
+	case jsonschema.FormCoercedNumber, jsonschema.FormCoercedBool:
 		if !jsonStringOption(obs.field) {
 			return
 		}
@@ -517,21 +526,17 @@ func assertCoercedContent(t *testing.T, obs *shapeObservation, raw json.RawMessa
 		return
 	}
 
-	//nolint:exhaustive // The switch above already narrowed the form to the three coerced ones.
+	//nolint:exhaustive // The switch above already narrowed the form to the two coerced ones.
 	switch obs.shape.Form {
 	case jsonschema.FormCoercedNumber:
 		// Validating the bare text as JSON applies the JSON number grammar
 		// itself, which strconv would have widened to NaN, Inf, and hex floats.
-		assert.True(t, json.Valid([]byte(content)) && !strings.ContainsAny(content, `"{[tfn`),
+		assert.True(t, jsontext.Value(content).IsValid() && !strings.ContainsAny(content, `"{[tfn`),
 			"%s: a quoted number field emits a JSON number literal, got %q", where, content)
 
 	case jsonschema.FormCoercedBool:
 		assert.Contains(t, []string{"true", "false"}, content,
-			"%s: a quoted bool field emits a bool literal", where)
-
-	case jsonschema.FormCoercedString:
-		assert.True(t, json.Valid([]byte(content)) && strings.HasPrefix(content, `"`),
-			"%s: a quoted string field double-encodes, got %q", where, content)
+			"%s: a text-marshaled bool field emits a bool literal", where)
 	}
 }
 
@@ -588,6 +593,9 @@ type oracleRow struct {
 	opts       []jsonschema.GenerateOption
 	wantDefs   jsonschema.Form
 	wantNoDefs jsonschema.Form
+	// The wantErr string, when set, is the generation error the row must
+	// produce: a declaration encoding/json/v2 itself refuses to marshal.
+	wantErr string
 	// The noToken flag marks a row whose form predicts no token, so the row
 	// pins the classification and the oracle has nothing to check it against;
 	// see reasonFormPredictsNoToken.
@@ -624,7 +632,7 @@ func oracleRoster() map[string]oracleRow {
 
 		"byte slice": {typ: reflect.TypeFor[[]byte](), wantDefs: jsonschema.FormByteString},
 		"raw message": {
-			typ:      reflect.TypeFor[json.RawMessage](),
+			typ:      reflect.TypeFor[jsonv1.RawMessage](),
 			wantDefs: jsonschema.FormRawBytes, noToken: true,
 		},
 
@@ -671,18 +679,32 @@ func oracleRoster() map[string]oracleRow {
 			typ: reflect.TypeFor[*int](), jsonTag: "v,string",
 			wantDefs: jsonschema.FormCoercedNumber,
 		},
+		// A json:",string" on a bool or string field is a SemanticError under
+		// encoding/json/v2, so generation refuses the type outright (77744d1
+		// pinned v1's double-encoding; v2 removed the behavior).
 		"quoted bool": {
 			typ: reflect.TypeFor[bool](), jsonTag: "v,string",
-			wantDefs: jsonschema.FormCoercedBool,
+			wantErr: "invalid use of `string` tag option",
 		},
-		// 77744d1: a json:",string" string field double-encodes.
 		"quoted string": {
 			typ: reflect.TypeFor[string](), jsonTag: "v,string",
-			wantDefs: jsonschema.FormCoercedString,
+			wantErr: "invalid use of `string` tag option",
 		},
 		"quoted pointer to string": {
 			typ: reflect.TypeFor[*string](), jsonTag: "v,string",
-			wantDefs: jsonschema.FormCoercedString,
+			wantErr: "invalid use of `string` tag option",
+		},
+
+		// The format tag option was cut from stable encoding/json/v2
+		// (go.dev/issue/79071): any value on any field is a marshal-time
+		// SemanticError, so generation refuses the type outright.
+		"format on string": {
+			typ: reflect.TypeFor[string](), jsonTag: "v,format:date",
+			wantErr: "has unsupported `format` tag option",
+		},
+		"format on int": {
+			typ: reflect.TypeFor[int](), jsonTag: "v,format:units",
+			wantErr: "has unsupported `format` tag option",
 		},
 
 		// A text-marshaling numeric reaches the same coerced column without a
@@ -694,15 +716,15 @@ func oracleRoster() map[string]oracleRow {
 			typ: reflect.TypeFor[*oracleText](), wantDefs: jsonschema.FormCoercedNumber,
 		},
 
-		// A json.Number is the one Go string kind encoding/json writes as a
+		// A jsonv1.Number is the one Go string kind encoding/json writes as a
 		// number, so a quoted one emits its literal once-quoted rather than
 		// double-encoded and classifies in the numeric coercion column.
 		"quoted json number": {
-			typ: reflect.TypeFor[json.Number](), jsonTag: "v,string",
+			typ: reflect.TypeFor[jsonv1.Number](), jsonTag: "v,string",
 			wantDefs: jsonschema.FormCoercedNumber,
 		},
 		"json number": {
-			typ: reflect.TypeFor[json.Number](), wantDefs: jsonschema.FormNumber,
+			typ: reflect.TypeFor[jsonv1.Number](), wantDefs: jsonschema.FormNumber,
 		},
 
 		// 649a6f2: a marshaler-bearing uint8 element is exempt from the byte
@@ -777,7 +799,7 @@ func checkObservations(t *testing.T, seen []shapeObservation, root *jsonschema.S
 			data, err := json.Marshal(owner.Interface())
 			require.NoError(t, err, "marshal %s", obs.owner)
 
-			var members map[string]json.RawMessage
+			var members map[string]jsonv1.RawMessage
 
 			require.NoError(t, json.Unmarshal(data, &members), "decode %s as an object", obs.owner)
 
@@ -812,11 +834,11 @@ func checkObservations(t *testing.T, seen []shapeObservation, root *jsonschema.S
 // writes for a value of it.
 //
 // The oracle observes the classification through a probe interpreter rather
-// than recomputing it from the generated schema, because four shapes do not
-// survive that reconstruction: a json:",string" string field and its pointer
-// (the quoted flag is invisible to ShapeOf), a pointer to a text-marshaling
-// numeric, and a pointer to a $def'd type (the nullable wrapper hides the
-// payload the string and $ref tests read).
+// than recomputing it from the generated schema, because three shapes do not
+// survive that reconstruction: a json:",string" json.Number field (the quoted
+// flag is invisible to ShapeOf), a pointer to a text-marshaling numeric, and
+// a pointer to a $def'd type (the nullable wrapper hides the payload the
+// string and $ref tests read).
 func TestTagShapeOracleRoster(t *testing.T) {
 	t.Parallel()
 
@@ -840,6 +862,17 @@ func TestTagShapeOracleRoster(t *testing.T) {
 					}})
 
 					root, err := jsonschema.Generate(t.Context(), doc, opts...)
+					if row.wantErr != "" {
+						require.ErrorContains(t, err, row.wantErr)
+						require.ErrorIs(t, err, jsonschema.ErrInvalidJSONField)
+
+						// The declaration refuses to marshal under v2 too,
+						// which is the agreement the row pins.
+						requireV2RefusesValue(t, doc, err)
+
+						return
+					}
+
 					require.NoError(t, err)
 
 					// The vacuity guard: a roster row that loses its json tag
@@ -937,22 +970,28 @@ func assertEveryFieldAccountedFor(t *testing.T, typ reflect.Type, seen []shapeOb
 // appears only where the Go value is nil, and that needs a pass where every
 // nullable field is guaranteed to carry a value.
 //
-// Five field classes stay unobserved and are named rather than left implicit:
+// Six field classes stay unobserved and are named rather than left implicit:
 // reasonUntaggedField, reasonExcludedField, reasonUnexportedField,
-// reasonEmbeddedField, and reasonShadowedName.
+// reasonEmbeddedField, reasonShadowedName, and reasonFallbackField.
 func TestTagShapeOracleSynthesized(t *testing.T) {
 	t.Parallel()
 
 	blobs := fuzzshape.Blobs(256)
 	checked := 0
 
-	for i, blob := range blobs {
+	for _, blob := range blobs {
 		typ := fuzzshape.Type(blob)
 
 		var seen []shapeObservation
 
 		root, err := jsonschema.Generate(t.Context(), typ, shapeProbe(&seen))
-		require.NoError(t, err, "generate shape %d", i)
+		if err != nil {
+			// The pools draw declarations encoding/json/v2 itself refuses, and
+			// the property then becomes agreement on the refusal.
+			requireV2RefusesValue(t, typ, err)
+
+			continue
+		}
 
 		assertEveryFieldAccountedFor(t, typ, seen)
 

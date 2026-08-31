@@ -66,7 +66,6 @@ var (
 		FormBool:          AxisAuto,
 		FormCoercedNumber: AxisAuto,
 		FormCoercedBool:   AxisAuto,
-		FormCoercedString: AxisAuto,
 		FormRawBytes:      AxisAuto,
 		FormOpaque:        AxisAuto,
 		FormUnset:         AxisAuto,
@@ -119,13 +118,6 @@ var (
 // form to applyBound, so the axis check never sees one.
 const coercedBoundNote = "a bound is not supported on a json:\",string\" coerced numeric field " +
 	"(minimum constrains JSON numbers, and no keyword constrains the magnitude of a string)"
-
-// coercedStringNote explains why no length or string keyword reaches a
-// double-encoded string field: every such keyword would measure or match the
-// quoted, escaped text the field serializes to, not the value the author
-// constrains, and the escaping makes the two differ by more than a constant.
-const coercedStringNote = "not supported on a json:\",string\" string field " +
-	"(the keyword would apply to the quoted serialized text, not the value)"
 
 // FormCarriesAxis reports whether a form's schema has a given keyword family at
 // all. It is the table [resolveAxis] consults, exported because a dialect can
@@ -210,18 +202,12 @@ func fillBounds() {
 			reject(op, f, coercedBoundNote)
 		}
 	}
-
-	// A double-encoded string's bounds and exact size mean the value's length,
-	// which no keyword over the quoted, escaped text expresses.
-	for _, op := range []Op{OpFloorIncl, OpFloorExcl, OpCeilIncl, OpCeilExcl, OpExactSize} {
-		reject(op, FormCoercedString, coercedStringNote)
-	}
 }
 
 // fillValues fills the value rows: pinning, forbidding, enumerating, uniqueness,
 // and the divisor.
 func fillValues() {
-	scalars := []Form{FormString, FormNumber, FormBool, FormCoercedNumber, FormCoercedBool, FormCoercedString}
+	scalars := []Form{FormString, FormNumber, FormBool, FormCoercedNumber, FormCoercedBool}
 
 	for _, f := range scalars {
 		apply(OpEqual, f, applyEqual)
@@ -288,7 +274,6 @@ func fillNonZero() {
 	apply(OpNonZero, FormNumber, nonZeroForbidNumber)
 	apply(OpNonZero, FormCoercedNumber, nonZeroForbidCoerced)
 	apply(OpNonZero, FormCoercedBool, nonZeroForbidCoerced)
-	apply(OpNonZero, FormCoercedString, nonZeroForbidCoerced)
 
 	apply(OpNonZero, FormBool, nonZeroTrue)
 
@@ -314,10 +299,7 @@ func fillNonZero() {
 }
 
 // fillStringKeywords fills the four first-wins string-keyword rows, which apply
-// wherever the instance is a string. A double-encoded string is the deliberate
-// exception: its instance text is the quoted, escaped serialization, so a
-// format or pattern written for the value would silently assert against text
-// the author never sees, and the row rejects instead.
+// wherever the instance is a string.
 func fillStringKeywords() {
 	for op := OpUnset + 1; op < opCount; op++ {
 		if !op.IsStringKeyword() {
@@ -329,8 +311,6 @@ func fillStringKeywords() {
 		} {
 			apply(op, f, applyStringKeyword)
 		}
-
-		reject(op, FormCoercedString, coercedStringNote)
 	}
 
 	// A raw JSON value never carries encoded content: contentMediaType and

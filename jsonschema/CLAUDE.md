@@ -136,10 +136,11 @@ The package has two independent halves sharing the `Schema` type:
   costs only the accuracy of a location in an error message. It does reach
   `Inline`'s output, which `checkSchemaTree` then rejects if the caller compiles
   it, so an aliased resolver document buys a non-tree result. A cycle is fatal,
-  because `refresolve`'s JSON-pointer fallback marshals the document it
-  searches and upstream's `MarshalJSON` re-enters `json.Marshal` at every
-  nesting level, so no encoder sees the repeat and the marshal recurses into
-  a stack overflow no `recover` catches. The deep copy reproduces an aliased
+  because `refresolve`'s JSON-pointer fallback marshals the subtree standing
+  where a pointer leaves the typed sub-schema graph, and upstream's
+  `MarshalJSON` re-enters `json.Marshal` at every nesting level, so no encoder
+  sees a repeat reachable from that subtree and the marshal recurses into a
+  stack overflow no `recover` catches. The deep copy reproduces an aliased
   graph rather than flattening it into a tree, so the inliner's own
   `walkPair` and `stripIdentifiers` walks carry visited sets. Two
   constraints the design works within: `refresolve` is a standalone package
@@ -216,12 +217,12 @@ The package has two independent halves sharing the `Schema` type:
   definition. A third-party interpreter reaches the scan through the canvas
   directly or through `Constraints.SetConst` and `Constraints.SetEnum`, which
   compose a value without consulting the matrix. The scan compares `default` as
-  raw JSON text and asks `encoding/json` what the other three keywords' values
+  raw JSON text and asks `encoding/json/v2` what the other three keywords' values
   marshal to, so a `json.RawMessage` holding the literal and a typed nil answer
   the same as an untyped one.
   A coerced float is the one shape whose zero has two serializations,
-  since Go's negative zero compares equal to zero and `encoding/json` writes the
-  sign bit for it. `Shape.zeroLiterals` names both texts, and the shared
+  since Go's negative zero compares equal to zero and `encoding/json/v2` writes
+  the sign bit for it. `Shape.zeroLiterals` names both texts, and the shared
   `forbidLiteral` path behind `required` and `ne` forbids each. `eq` and `oneof`
   constrain the canonical text alone, a divergence `testdata/tags/cases.json`
   records as a fixture row rather than resolving. Dialect divergence is
@@ -230,19 +231,23 @@ The package has two independent halves sharing the `Schema` type:
   dialect's own `KeyRule` row (arity, list spelling, the implied value of a bare
   key), never as duplicated code. It renders onto the upstream `Schema` for the
   same no-cycle reason `constraint` does and must not import the main package),
-  `internal/fieldset` (the `encoding/json` field-resolution parity core for the
+  `internal/fieldset` (the `encoding/json/v2` field-resolution parity core for the
   generation half, in three phases. Two mirror the standard library: `Collect`
   walks embeds breadth-first and records every sighting of a JSON name, and
   `Resolve` applies the shallowest-depth rule and the same-depth tag tie-break.
   The third is this package's own. `Classify` turns each winner into a property,
   an allOf-composed embed, or a ghost, then marks the composed embeds whose
-  promoted names the resolution took away. `Resolve` and `Classify` are pure,
+  promoted names the resolution took away. The walk also records each embedded
+  fallback field (`json:",embed"` on a string-keyed map or `jsontext.Value`),
+  and `Result.Fallback` carries the one the dominance rule kept (shallowest
+  wins, a same-depth tie drops them all), whose members the generator models
+  as the object's extra-member constraint. `Resolve` and `Classify` are pure,
   which is what lets the phase-level rig test one phase directly. Composition
   detection stays parent-side as an injected `ComposedFunc`, since
   `needsAllOfComposition` reads `resolveTypeSchema` and the public
   `JSONSchemaProvider`; the package therefore reflects over a type without
   importing the parent. A composed embed's subtree still joins the walk as a
-  ghost, because `encoding/json` promotes its fields like any other, and a
+  ghost, because `encoding/json/v2` promotes its fields like any other, and a
   `Collector`-owned in-flight set bounds the recursion that resolves the embed's
   own fields for the shadow marking. That set's skip leaves the embed's branch
   unconditional. `Collection.Order` is load-bearing, since `Classify` emits
@@ -353,8 +358,11 @@ The package has two independent halves sharing the `Schema` type:
 
 ### Relationship to google/jsonschema-go
 
-`Schema` is a type alias to the upstream type (`schema.go`). The upstream is
-used for exactly one behavior beyond the type alias: as a recovering fallback,
+`Schema` is a type alias to the upstream type (`schema.go`). The upstream
+marshals `Schema` itself through its own `MarshalJSON`, which
+`encoding/json/v2`'s precedence chain honors byte-identically, so schema
+documents render the same whichever json package marshals them. The upstream
+is used for exactly one behavior beyond the type alias: as a recovering fallback,
 value equality for hand-built operand shapes the JSON-semantic walk in
 `internal/jsonequal` does not model (`const`/`enum`/`uniqueItems` comparisons
 otherwise run entirely in that package, and a panic in the upstream fallback
@@ -497,27 +505,28 @@ contract the tests enforce.
 - `conformance_test.go` validates generated schemas against the official
   metaschemas vendored in `testdata/metaschemas/`, using this package's own
   validator and a `RefResolver` for the metaschema's vocabulary sub-schemas.
-- The package checks `encoding/json` parity at two altitudes. Two schema-level
-  differential rigs close the loop between the package's halves on one property:
-  **the schema generated for a Go type must accept whatever `encoding/json`
-  marshals from a value of that type.** A rejection means `internal/fieldset`'s
-  reimplementation of `encoding/json`'s field resolution has drifted, which is
-  where past fixes cluster. Both draw their values from `internal/fuzzfill`,
-  which turns a fuzzing entropy blob into a populated value through a
-  deterministic, zero-extending `Cursor`. The phase-level rig in
-  `internal/fieldset` checks the same drift one layer down, against
-  `encoding/json` itself rather than through the validator.
-- Five differential rigs close the loop on four properties. The two in this
-  bullet share the first. **The schema generated for a Go type must accept
-  whatever `encoding/json` marshals from a value of that type.** A rejection means
-  `reflect.go`'s hand-reimplementation of `encoding/json`'s field resolution has
+- Five differential rigs close the loop on four properties. Rigs 1 and 2
+  share the first. **The schema generated for a Go type must accept
+  whatever `encoding/json/v2` marshals from a value of that type, and
+  generation must refuse exactly the declarations v2 refuses to marshal**
+  (the refusal side is asserted on a saturated fill, so a nil pointer cannot
+  hide a faulty declaration behind a null). A rejection means
+  `internal/fieldset`'s reimplementation of v2's field resolution has
   drifted, which is where past fixes cluster. Both draw their values from
   `internal/fuzzfill`, which turns a fuzzing entropy blob into a populated value
-  through a deterministic, zero-extending `Cursor`.
+  through a deterministic, zero-extending `Cursor`. The phase-level rig in
+  `internal/fieldset` checks the same drift one layer down, against
+  `encoding/json/v2` itself rather than through the validator. Rig 2's
+  option-paired targets (`FuzzShapeAcceptsNilContainersNull`,
+  `FuzzShapeAcceptsOmitZero`) keep generate options, marshal options, and
+  fill draws in lockstep, while their refusal probe stays on default marshal
+  options, since a shape-altering option can hide a faulty declaration from
+  v2 before it is evaluated; rig 1 deliberately stays default-only, since
+  its roster exists for the classes `reflect.StructOf` cannot express.
   - `fuzz_reflect_test.go` (rig 1) asserts it over a hand-written roster, one
     `FuzzReflectAccepts<T>` per type. The roster keeps the classes runtime type
     construction cannot express, and so stays permanently: a promoted marshaler,
-    an embedded generic instantiation, an embedded interface.
+    an embedded generic instantiation, a named embedded interface.
   - `fuzz_shape_test.go` (rig 2) fuzzes the type shape as well as the value.
     `internal/fuzzshape` synthesizes a `reflect.Type` from a blob via
     `reflect.StructOf`, which the non-generic `Generate` entry point takes
@@ -528,7 +537,7 @@ contract the tests enforce.
     marshaled shape is refused, so an accept-everything schema cannot pass
     vacuously.
   - Three causes would make a synthesized shape report a divergence the package
-    is not guilty of: a direct `json.Marshaler` (whose output shape reflection
+    is not guilty of: a direct JSON marshaler (whose output shape reflection
     cannot know), `WithNullable(false)` (which drops the null branch by
     design), and `reflect.StructOf`'s inability to reproduce method promotion.
     Each has a reason constant carried as the message of a guard that pins the
@@ -542,7 +551,7 @@ contract the tests enforce.
     `internal/schemafield` precedent) asserts two properties over a hand-written
     embed and tag roster and over every `internal/fuzzshape` shape, each crossed
     with a set of composed-embed predicates. **Key-set parity** asserts that the
-    names the phases resolve are exactly the keys `encoding/json` marshals, and
+    names the phases resolve are exactly the keys `encoding/json/v2` marshals, and
     that the value under each key is what the winning field marshals to, so a
     wrong dominance verdict fails the rig even when the name set matches. It
     carries three reason constants, each pinned by a guard test:
@@ -686,7 +695,11 @@ contract the tests enforce.
   the two, so the property weakens to that one-way implication.
   A `required` field is the exception to the weakening, since it is the one rule
   that does assert something about null, so its null stays under the
-  biconditional.
+  biconditional. The pairing of `required` with omitempty on one field is
+  excluded outright (`reasonRequiredOmitemptyDropped`): encoding/json/v2's
+  omitempty drops a set field whose encoded value is empty, and the required
+  entry then makes the schema stricter than go-playground where the weakened
+  property demands it be more permissive.
   `TestWidenedDifferentialReachesStrictAgreement` guards against the weak half
   swallowing everything. The schema verdict is per object, so a sibling field
   that correctly rejects null can mask one that wrongly accepts it; the
@@ -707,11 +720,17 @@ contract the tests enforce.
   sides of the ceiling. `TestRequiredOnNullableRejectsNull` pins the ceiling on
   the generated property, keying off the field's Go type so a dropped `max`
   fails the test rather than skipping the check.
-  `required` forbids null on a bare slice, map, or `[]byte` beside its size
-  floor, exactly as it forbids null alone on a pointer. The nil side agrees with
-  go-playground and the empty-but-non-nil side does not. That empty collection
-  is the only `required` exclusion, `reasonRequiredCollectionEmptyFloor`, and
-  the draw pools omit `required` on a collection under it.
+  `required` contributes a size floor on a bare slice, map, or `[]byte`, whose
+  schema admits no null (a nil container marshals as its empty instance under
+  encoding/json/v2), and forbids null alone on a pointer. The nil side agrees
+  with go-playground either way, since the floor rejects a nil container's
+  marshaled empty instance, and the empty-but-non-nil side does not. That
+  empty collection is one of two `required` exclusions,
+  `reasonRequiredCollectionEmptyFloor`, and the draw pools omit `required` on
+  a collection under it. The other is `reasonRequiredPointerNilCollection`: a
+  nil collection behind a non-nil pointer marshals identically to the
+  allocated empty go-playground accepts, so no schema can state
+  go-playground's nil rejection and the fuzz target skips that value.
   `FuzzValidatorTaggedShapes` fuzzes the shape as well as the value through
   `drawTaggedStruct`, which draws the Go kind, the pointer
   wrapper, the json option, and the validate rule independently. That draw
@@ -722,32 +741,35 @@ contract the tests enforce.
   `rigExclusions` carrying a reason constant, and
   `TestRigExclusionsMatchTheDraw` pins each rule-bearing row against the draw
   pools so the record cannot drift from what the draw does.
-- `tags_shape_oracle_test.go` holds `encoding/json` to a third property, the
+- `tags_shape_oracle_test.go` holds `encoding/json/v2` to a third property, the
   struct-tag one: **the `Form` `internal/tagmodel` classifies a field as must
-  agree with the JSON `encoding/json` writes for that field.** `Form` is the
+  agree with the JSON `encoding/json/v2` writes for that field.** `Form` is the
   dispatch column of the constraint matrix, so the matrix silently applies
   the wrong rule set to a field in the wrong column, which is where five past
   fixes cluster (db3c7b5, 679bd8b, 99ba651, 5c04089, 649a6f2, one row each). A
   probe `TagInterpreter` registered under the `json` tag key records
   `FieldContext.Shape()` and `FieldContext.Base` for every field generation
   classifies, so the oracle reads the production classification instead of
-  recomputing one. Recomputing is not equivalent. A `json:",string"` string
-  field and its pointer carry a quoted flag `ShapeOf` cannot see, and a pointer
+  recomputing one. Recomputing is not equivalent. A `json:",string"`
+  `json.Number` field carries a quoted flag `ShapeOf` cannot see, and a pointer
   to a text-marshaling numeric or to a `$def`'d type hides its payload behind
   the nullable wrapper the `permits-a-string` and `$ref` tests read. The roster
   runs under both `WithDefinitions` settings, which is what makes the referenced
   and text-marshaled columns reachable at all, and a second leg runs the same
-  property over `internal/fuzzshape` shapes. Five reason constants name the
+  property over `internal/fuzzshape` shapes. Six reason constants name the
   field classes the probe cannot observe (untagged, `json:"-"`, unexported, an
-  allOf-composed embed, and a JSON name two fields claim at one depth); a field
-  matching none of them and still unobserved fails the leg.
+  allOf-composed embed, a JSON name two fields claim at one depth, and an
+  embedded fallback, which emits no property); a field matching none of them
+  and still unobserved fails the leg.
 
 ### Tooling
 
-Bare `go vet ./...` reports five deliberate `structtag` findings: two json tags
-on unexported fields in `internal/jsontag/jsontag_unexported_test.go`, and
-three declarations repeating a JSON name across
-`reflect_ghost_annihilation_test.go` and `reflect_shadowed_embed_test.go`. Each
-of the five is what its test exercises and carries a `//nolint` directive
-listing `govet`. Only golangci-lint reads that directive, so the local gate,
-`task check`, stays clean while bare `go vet` does not.
+Bare `go vet ./...` reports six deliberate `structtag` findings: three json
+tags on unexported fields (two in
+`internal/jsontag/jsontag_unexported_test.go`, one in
+`reflect_fallback_test.go`), and three declarations repeating a JSON name
+across `reflect_ghost_annihilation_test.go` and
+`reflect_shadowed_embed_test.go`. Each of the six is what its test exercises
+and carries a `//nolint` directive listing `govet`. Only golangci-lint reads
+that directive, so the local gate, `task check`, stays clean while bare
+`go vet` does not.

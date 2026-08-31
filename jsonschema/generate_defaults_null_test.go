@@ -25,9 +25,10 @@ type defaultsNullRec struct {
 	Name string           `json:"name"`
 }
 
-// defaultsNullContainers holds one nilable field per container kind
-// [jsonschema.WithNullable] governs, beside a scalar sibling. None carries
-// omitempty, so the zero value of each marshals to JSON null.
+// defaultsNullContainers holds one nilable field per container kind, beside a
+// scalar sibling. None carries omitempty or omitzero. Under encoding/json/v2
+// only the nil pointer marshals to JSON null; the nil slice and map marshal
+// their empty instances, which every schema for them admits.
 type defaultsNullContainers struct {
 	Tags []string          `json:"tags"`
 	Meta map[string]string `json:"meta"`
@@ -53,8 +54,8 @@ type defaultsNullAny struct {
 
 // defaultsNullExtracted is a named slice that reaches $defs. A named non-struct
 // type earns an entry only by implementing a schema hook. The def body carries
-// the container null, so a pointer reference to it renders as a bare $ref with
-// no null wrapper beside it.
+// no null of its own, so a pointer reference to it renders with the null
+// wrapper on the reference.
 type defaultsNullExtracted []string
 
 // JSONSchemaExtend is the hook that earns defaultsNullExtracted its $defs
@@ -192,9 +193,9 @@ type defaultsNullOtherObj struct {
 
 // defaultsNullWrapPlusHook carries two allOf branches on one property under
 // Draft-07: the hook's, appended first, and the generator's $ref wrap, landing
-// after it. The wrap's own target admits null and the hook's does not, so the
-// intersection admits none. Reading the wrap's branch alone would answer the
-// opposite and seed a null the property rejects.
+// after it. The null encoding for the pointer field wraps the whole
+// intersection in an anyOf beside a null branch, so the property admits null
+// outside either branch and takes the marshaled null as its default.
 type defaultsNullWrapPlusHook struct {
 	Tags  *defaultsNullExtracted `json:"tags"  jsonschema:"description=the tags"`
 	Other defaultsNullOtherObj   `json:"other"`
@@ -256,7 +257,7 @@ func TestWithDefaultsFromNullDefault(t *testing.T) {
 				)
 			},
 			want: map[string]string{
-				"tags": "", "meta": "", "ptr": "", "host": `"localhost"`,
+				"tags": "[]", "meta": "{}", "ptr": "", "host": `"localhost"`,
 			},
 		},
 		"nullable containers": {
@@ -269,7 +270,7 @@ func TestWithDefaultsFromNullDefault(t *testing.T) {
 				)
 			},
 			want: map[string]string{
-				"tags": "null", "meta": "null", "ptr": "null", "host": `"localhost"`,
+				"tags": "[]", "meta": "{}", "ptr": "null", "host": `"localhost"`,
 			},
 		},
 		"tag-typed null": {
@@ -407,7 +408,7 @@ func TestWithDefaultsFromNullDefault(t *testing.T) {
 					}),
 				)
 			},
-			want: map[string]string{"tags": "", "other": `{"x":1}`},
+			want: map[string]string{"tags": "null", "other": `{"x":1}`},
 		},
 		"hook-authored intersection under draft-07": {
 			generate: func(t *testing.T) (*jsonschema.Schema, error) {

@@ -2,11 +2,13 @@ package differentialtest_test
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -83,12 +85,15 @@ func tagKinds() []tagKind {
 	// reasonRequiredCollectionEmptyFloor.
 	byteSlice := []string{"min=1", "max=5", "len=3"}
 
+	// Only the numeric kinds are coercible: encoding/json/v2 stringifies
+	// numbers alone, and json:",string" on a string or bool is a refused
+	// declaration with nothing for the two validators to compare.
 	return []tagKind{
-		{typ: reflect.TypeFor[string](), pool: scalarString, coercible: true},
+		{typ: reflect.TypeFor[string](), pool: scalarString},
 		{typ: reflect.TypeFor[int](), pool: scalarNumber, coercible: true},
 		{typ: reflect.TypeFor[int8](), pool: scalarNumber, coercible: true},
 		{typ: reflect.TypeFor[float64](), pool: scalarFloat, coercible: true},
-		{typ: reflect.TypeFor[bool](), pool: scalarBool, coercible: true},
+		{typ: reflect.TypeFor[bool](), pool: scalarBool},
 		{typ: reflect.TypeFor[[]string](), pool: sequence},
 		{typ: reflect.TypeFor[[]int8](), pool: sequence},
 		{typ: reflect.TypeFor[map[string]int](), pool: mapping},
@@ -141,6 +146,20 @@ func drawTaggedStruct(c *fuzzfill.Cursor) reflect.Type {
 	return reflect.StructOf(fields)
 }
 
+// pairsRequiredWithOmitempty reports whether any drawn field carries both the
+// json omitempty option and the validate required rule; see
+// reasonRequiredOmitemptyDropped.
+func pairsRequiredWithOmitempty(typ reflect.Type) bool {
+	for field := range typ.Fields() {
+		if strings.Contains(field.Tag.Get("json"), ",omitempty") &&
+			spells(field.Tag.Get("validate"), "required") {
+			return true
+		}
+	}
+
+	return false
+}
+
 // interpreterRejects reports whether err is one the interpreter raises by
 // design for a shape that cannot carry a drawn rule. Requiring a known sentinel
 // rather than swallowing every error is what keeps a generation the rig broke
@@ -186,6 +205,10 @@ func FuzzValidatorTaggedShapes(f *testing.F) {
 	f.Fuzz(func(t *testing.T, shapeBlob, valueBlob []byte) {
 		typ := drawTaggedStruct(fuzzfill.NewCursor(shapeBlob))
 
+		if pairsRequiredWithOmitempty(typ) {
+			return // reasonRequiredOmitemptyDropped
+		}
+
 		schema, err := jsonschema.Generate(ctx, typ,
 			jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()))
 		if err != nil {
@@ -213,7 +236,7 @@ func FuzzValidatorTaggedShapes(f *testing.F) {
 		schemaReject := validator.ValidateJSON(ctx, instance) != nil
 
 		if !agreementHolds(t, jsonNames(typ), instance, referenceReject, schemaReject) {
-			schemaJSON, marshalErr := json.MarshalIndent(schema, "", "  ")
+			schemaJSON, marshalErr := json.Marshal(schema, jsontext.WithIndent("  "))
 			require.NoError(t, marshalErr)
 
 			t.Fatalf(

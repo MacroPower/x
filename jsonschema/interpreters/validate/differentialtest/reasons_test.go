@@ -21,9 +21,23 @@ const (
 	// minLength standing in for minItems, since go-playground reads the slice it
 	// is while the schema measures the base64 string it becomes. The exclusion
 	// covers that empty collection and nothing else. The nil side of the same
-	// rule agrees, because the interpreter forbids the null a nil collection
-	// marshals as, and FuzzValidatorRequiredNullableShapes compares it.
+	// rule agrees, because the size floor rejects the empty instance a nil
+	// collection marshals as under encoding/json/v2, and
+	// FuzzValidatorRequiredNullableShapes compares it.
 	reasonRequiredCollectionEmptyFloor = "a non-nil empty collection satisfies go-playground's required and trips the schema's size floor"
+	// An omitempty field whose encoded value is empty is absent from the
+	// marshaled object even when its Go value is set: encoding/json/v2 drops a
+	// non-nil pointer to an empty string, which go-playground's required
+	// accepts as present. The required entry then rejects the object for the
+	// missing key, making the schema stricter than go-playground where the
+	// weakened property demands it be more permissive, so the draw skips the
+	// pairing.
+	reasonRequiredOmitemptyDropped = "required beside omitempty rejects an object encoding/json/v2 dropped a set field from"
+	// Go-playground dereferences a pointer and rejects a nil collection behind
+	// it, but encoding/json/v2 marshals that nil as its empty instance,
+	// byte-identical to the allocated empty go-playground accepts, so no
+	// schema can state the distinction and the target skips the value.
+	reasonRequiredPointerNilCollection = "a nil collection behind a non-nil pointer marshals identically to the allocated empty go-playground accepts"
 	// Go-playground's oneof formats the field as text and handles only the
 	// string and integer kinds, panicking with "Bad field type" on anything
 	// else, so it cannot be the reference for oneof on a bool or a float.
@@ -134,6 +148,14 @@ func rigExclusions() []rigExclusion {
 		{
 			what:   "a numeric bound on a coerced field, drawn and checked as a rejection",
 			reason: reasonCoercedNumericBounds,
+		},
+		{
+			what:   "required on a nil collection behind a non-nil pointer",
+			reason: reasonRequiredPointerNilCollection,
+		},
+		{
+			what:   "required paired with omitempty on one field",
+			reason: reasonRequiredOmitemptyDropped,
 		},
 		{what: "a field encoding/json dropped", reason: reasonOmitemptyDropsField},
 		{what: "a field whose instance is null and carries no required", reason: reasonNullableValueRule},

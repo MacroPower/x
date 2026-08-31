@@ -2,7 +2,8 @@ package jsonschema_test
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"math"
 	"strconv"
@@ -13,6 +14,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	jsonv1 "encoding/json"
 
 	"go.jacobcolvin.com/x/jsonschema"
 )
@@ -215,7 +218,7 @@ func TestValidateEnum(t *testing.T) {
 		},
 		"enum numeric equality": {
 			schema:   &jsonschema.Schema{Enum: []any{1.0, 2.0}},
-			instance: json.Number("1"),
+			instance: jsonv1.Number("1"),
 		},
 	}
 	for name, tt := range tests {
@@ -332,13 +335,13 @@ func TestValidateNumeric(t *testing.T) {
 			instance: 10.0,
 			err:      "(multipleOf)",
 		},
-		"json.Number integer": {
+		"jsonv1.Number integer": {
 			schema:   &jsonschema.Schema{Type: "integer", Minimum: new(0.0)},
-			instance: json.Number("5"),
+			instance: jsonv1.Number("5"),
 		},
-		"json.Number negative fail minimum": {
+		"jsonv1.Number negative fail minimum": {
 			schema:   &jsonschema.Schema{Type: "integer", Minimum: new(0.0)},
-			instance: json.Number("-1"),
+			instance: jsonv1.Number("-1"),
 			err:      "(minimum)",
 		},
 	}
@@ -474,9 +477,9 @@ func TestValidateArray(t *testing.T) {
 			instance: []any{1.0, 2.0, 1.0},
 			err:      "(uniqueItems)",
 		},
-		"uniqueItems json.Number equality": {
+		"uniqueItems jsonv1.Number equality": {
 			schema:   &jsonschema.Schema{Type: "array", UniqueItems: true},
-			instance: []any{json.Number("1"), 1.0},
+			instance: []any{jsonv1.Number("1"), 1.0},
 			err:      "(uniqueItems)",
 		},
 		"contains pass": {
@@ -948,11 +951,11 @@ func TestValidateJSON(t *testing.T) {
 			json:   `{invalid`,
 			err:    "JSON decode",
 		},
-		"json.Number preserves integers": {
+		"jsonv1.Number preserves integers": {
 			schema: &jsonschema.Schema{Type: "integer"},
 			json:   `42`,
 		},
-		"json.Number float": {
+		"jsonv1.Number float": {
 			schema: &jsonschema.Schema{Type: "integer"},
 			json:   `3.14`,
 			err:    "(type)",
@@ -994,7 +997,7 @@ func TestValidateJSON(t *testing.T) {
 
 // TestValidateConstEnumFloatEquality covers const/enum equality between
 // schema-authored float64 values (parsed without UseNumber, so 0.1 is the
-// nearest float64) and instance json.Number values. The comparison expands the
+// nearest float64) and instance jsonv1.Number values. The comparison expands the
 // schema float through its shortest decimal so that 0.1 in the schema matches
 // the literal 0.1 in the instance, while keeping JSON Schema type distinctions
 // (true is not 1) and exact-representable numbers unchanged.
@@ -3222,7 +3225,7 @@ func TestHashValueDistinguishesLargeFloat64Integers(t *testing.T) {
 func TestHashValueDistinguishesLargeJSONNumbers(t *testing.T) {
 	t.Parallel()
 
-	// Distinct json.Number integers beyond the int64 range hash distinctly: the
+	// Distinct jsonv1.Number integers beyond the int64 range hash distinctly: the
 	// int64 fast path is bounded and larger values use exact big.Rat keys.
 	schema := &jsonschema.Schema{
 		Type:        "array",
@@ -3231,7 +3234,7 @@ func TestHashValueDistinguishesLargeJSONNumbers(t *testing.T) {
 
 	data := `[9999999999999999999, 9999999999999999998]`
 	err := validateJSON(t.Context(), schema, []byte(data))
-	require.NoError(t, err, "distinct large json.Number integers should be treated as unique")
+	require.NoError(t, err, "distinct large jsonv1.Number integers should be treated as unique")
 }
 
 func TestContentSchemaIsAnnotationOnly(t *testing.T) {
@@ -3504,7 +3507,7 @@ func TestUnevaluatedPropertiesCauseOrderDeterministic(t *testing.T) {
 
 	require.ErrorAs(t, err, &ve)
 
-	var got []string
+	var got []jsontext.Pointer
 
 	var walk func(e *jsonschema.ValidationError)
 
@@ -3520,7 +3523,7 @@ func TestUnevaluatedPropertiesCauseOrderDeterministic(t *testing.T) {
 
 	walk(ve)
 
-	want := []string{"/alpha", "/bravo", "/charlie", "/delta", "/echo"}
+	want := []jsontext.Pointer{"/alpha", "/bravo", "/charlie", "/delta", "/echo"}
 	assert.Equal(t, want, got)
 }
 
@@ -3745,13 +3748,13 @@ func TestValidateNonFiniteFloat(t *testing.T) {
 		})
 	}
 
-	t.Run("numeric/unparseable json.Number", func(t *testing.T) {
+	t.Run("numeric/unparseable jsonv1.Number", func(t *testing.T) {
 		t.Parallel()
 
 		schema := &jsonschema.Schema{Minimum: new(5.0)}
 
-		err := jsonschema.Validate(t.Context(), schema, json.Number("abc"))
-		assert.Error(t, err, "a malformed json.Number has no value, so minimum must fail closed")
+		err := jsonschema.Validate(t.Context(), schema, jsonv1.Number("abc"))
+		assert.Error(t, err, "a malformed jsonv1.Number has no value, so minimum must fail closed")
 	})
 
 	t.Run("numeric/bare type still admits non-finite", func(t *testing.T) {
@@ -4652,14 +4655,14 @@ func (r *mutatingResolver) ResolveRef(_ context.Context, _ string) (*jsonschema.
 	return r.schema, nil
 }
 
-// The conformance suite drives ValidateJSON (the json.Number path); the tests
+// The conformance suite drives ValidateJSON (the jsonv1.Number path); the tests
 // below cover the Validate() float64 path and other entry points the suite does
 // not exercise.
 
 func TestValidateFloat64PathForNumericKeywords(t *testing.T) {
 	t.Parallel()
 
-	// The suite only uses ValidateJSON (json.Number path). This exercises the
+	// The suite only uses ValidateJSON (jsonv1.Number path). This exercises the
 	// Validate() float64 path for all numeric keywords.
 	tests := map[string]struct {
 		schema   *jsonschema.Schema
@@ -4817,7 +4820,7 @@ func TestKeywordAndInstancePathTogether(t *testing.T) {
 }
 
 // findError recursively searches a ValidationError tree for a specific keyword + path.
-func findError(ve *jsonschema.ValidationError, keyword, path string) bool {
+func findError(ve *jsonschema.ValidationError, keyword string, path jsontext.Pointer) bool {
 	if ve.Keyword == keyword && ve.InstancePath == path {
 		return true
 	}
@@ -4850,7 +4853,7 @@ func findErrorByKeyword(ve *jsonschema.ValidationError, keyword string) bool {
 func TestJSONNumberAcrossNumericKeywords(t *testing.T) {
 	t.Parallel()
 
-	// The json.Number type is tested in only 2 of 12 numeric test cases.
+	// The jsonv1.Number type is tested in only 2 of 12 numeric test cases.
 	tests := map[string]struct {
 		schema *jsonschema.Schema
 		data   string
@@ -4923,33 +4926,33 @@ func TestUniqueItemsNumericRepresentation(t *testing.T) {
 	// UniqueItems must recognize the same number across Go representations,
 	// with a float64 interpreted at its shortest decimal value the way const,
 	// enum, and the numeric-bound keywords interpret it. This is reachable
-	// only through Validate; ValidateJSON produces json.Number uniformly.
+	// only through Validate; ValidateJSON produces jsonv1.Number uniformly.
 	tests := map[string]struct {
 		instance []any
 		err      bool
 	}{
 		"small integer mixed representations": {
-			instance: []any{float64(5), json.Number("5")},
+			instance: []any{float64(5), jsonv1.Number("5")},
 			err:      true,
 		},
 		"integer at 2^63 shortest-decimal spelling": {
 			// Float64(1<<63)'s shortest decimal is 9223372036854776000 (the
-			// float64 spacing at 2^63 is 2048), so that json.Number spelling
+			// float64 spacing at 2^63 is 2048), so that jsonv1.Number spelling
 			// is the same value.
-			instance: []any{float64(9223372036854775808), json.Number("9223372036854776000")},
+			instance: []any{float64(9223372036854775808), jsonv1.Number("9223372036854776000")},
 			err:      true,
 		},
 		"integer at 2^63 exact binary spelling": {
 			// The exact binary integer 9223372036854775808 is a different
 			// value than float64(1<<63)'s shortest decimal, just as
 			// float64(1<<63) does not match const 9223372036854775808.
-			instance: []any{float64(9223372036854775808), json.Number("9223372036854775808")},
+			instance: []any{float64(9223372036854775808), jsonv1.Number("9223372036854775808")},
 		},
 		"fraction mixed representations": {
 			// Float64(0.1) is interpreted as its shortest decimal 1/10, the
-			// same value json.Number("0.1") denotes (and the value both match
+			// same value jsonv1.Number("0.1") denotes (and the value both match
 			// under const 0.1), not its exact binary expansion 0.1000...0555.
-			instance: []any{float64(0.1), json.Number("0.1")},
+			instance: []any{float64(0.1), jsonv1.Number("0.1")},
 			err:      true,
 		},
 	}
@@ -5451,8 +5454,8 @@ func TestFalseSchemaKeyword(t *testing.T) {
 		schema       *jsonschema.Schema
 		instance     any
 		keyword      string
-		instancePath string
-		schemaPath   string
+		instancePath jsontext.Pointer
+		schemaPath   jsontext.Pointer
 	}{
 		"additionalProperties false": {
 			schema: &jsonschema.Schema{
@@ -5579,15 +5582,15 @@ func TestPropertyNamesViolationIdentifiesKey(t *testing.T) {
 		require.ErrorAs(t, err, &ve)
 
 		assert.Equal(t, "propertyNames", ve.Keyword)
-		assert.Equal(t, "/BadKey", ve.InstancePath,
+		assert.Equal(t, jsontext.Pointer("/BadKey"), ve.InstancePath,
 			"the violation borrows the property's location")
-		assert.Equal(t, "/propertyNames", ve.SchemaPath)
+		assert.Equal(t, jsontext.Pointer("/propertyNames"), ve.SchemaPath)
 		assert.Contains(t, ve.Message, `"BadKey"`)
 
 		require.Len(t, ve.Causes, 1)
 		assert.Equal(t, "pattern", ve.Causes[0].Keyword,
 			"the inner keyword failure stays available in Causes")
-		assert.Equal(t, "/BadKey", ve.Causes[0].InstancePath)
+		assert.Equal(t, jsontext.Pointer("/BadKey"), ve.Causes[0].InstancePath)
 	})
 
 	t.Run("nested object", func(t *testing.T) {
@@ -5612,7 +5615,7 @@ func TestPropertyNamesViolationIdentifiesKey(t *testing.T) {
 		require.ErrorAs(t, err, &ve)
 
 		assert.Equal(t, "propertyNames", ve.Keyword)
-		assert.Equal(t, "/settings/toolong", ve.InstancePath,
+		assert.Equal(t, jsontext.Pointer("/settings/toolong"), ve.InstancePath,
 			"the path identifies both the key and its containing object")
 	})
 
@@ -5630,7 +5633,7 @@ func TestPropertyNamesViolationIdentifiesKey(t *testing.T) {
 
 		require.ErrorAs(t, err, &ve)
 
-		assert.Equal(t, "/a~1b", ve.InstancePath,
+		assert.Equal(t, jsontext.Pointer("/a~1b"), ve.InstancePath,
 			"the key is escaped per RFC 6901")
 		assert.Contains(t, ve.Message, `"a/b"`)
 	})
@@ -5650,7 +5653,7 @@ func TestPropertyNamesViolationIdentifiesKey(t *testing.T) {
 		require.ErrorAs(t, err, &ve)
 
 		assert.Equal(t, "propertyNames", ve.Keyword)
-		assert.Equal(t, "/any", ve.InstancePath)
+		assert.Equal(t, jsontext.Pointer("/any"), ve.InstancePath)
 	})
 }
 
@@ -5682,7 +5685,7 @@ func TestValidationErrorStructure(t *testing.T) {
 		// points at the object root with no nested causes.
 		assert.Equal(t, "required", ve.Keyword)
 		assert.Empty(t, ve.InstancePath, "required failure is reported at the object root")
-		assert.Equal(t, "/required", ve.SchemaPath)
+		assert.Equal(t, jsontext.Pointer("/required"), ve.SchemaPath)
 		assert.Empty(t, ve.Causes, "a lone required failure is a childless leaf")
 	})
 
@@ -5698,7 +5701,7 @@ func TestValidationErrorStructure(t *testing.T) {
 		require.ErrorAs(t, err, &ve)
 
 		assert.Equal(t, "maximum", ve.Keyword)
-		assert.Equal(t, "/maximum", ve.SchemaPath)
+		assert.Equal(t, jsontext.Pointer("/maximum"), ve.SchemaPath)
 		assert.Empty(t, ve.Causes)
 	})
 
@@ -5728,9 +5731,9 @@ func TestValidationErrorStructure(t *testing.T) {
 		// Container keywords flatten a single child failure into the parent, so
 		// the deepest leaf rises to the root retaining its full nested paths.
 		assert.Equal(t, "minLength", ve.Keyword)
-		assert.Equal(t, "/address/city", ve.InstancePath,
+		assert.Equal(t, jsontext.Pointer("/address/city"), ve.InstancePath,
 			"nested failure carries the JSON Pointer to the failing value")
-		assert.Equal(t, "/properties/address/properties/city/minLength", ve.SchemaPath)
+		assert.Equal(t, jsontext.Pointer("/properties/address/properties/city/minLength"), ve.SchemaPath)
 	})
 
 	t.Run("multiple property failures flatten into causes", func(t *testing.T) {
@@ -5769,8 +5772,8 @@ func TestValidationErrorStructure(t *testing.T) {
 		}
 
 		require.NotNil(t, nested, "nested type failure should be present among causes")
-		assert.Equal(t, "/meta/n", nested.InstancePath)
-		assert.Equal(t, "/properties/meta/properties/n/type", nested.SchemaPath)
+		assert.Equal(t, jsontext.Pointer("/meta/n"), nested.InstancePath)
+		assert.Equal(t, jsontext.Pointer("/properties/meta/properties/n/type"), nested.SchemaPath)
 	})
 
 	t.Run("anyOf wraps branch failures", func(t *testing.T) {
@@ -5792,10 +5795,10 @@ func TestValidationErrorStructure(t *testing.T) {
 		// Compositional keywords wrap their child failures: the root is the
 		// anyOf node and each branch's type failure is a cause beneath it.
 		assert.Equal(t, "anyOf", ve.Keyword)
-		assert.Equal(t, "/anyOf", ve.SchemaPath)
+		assert.Equal(t, jsontext.Pointer("/anyOf"), ve.SchemaPath)
 		require.Len(t, ve.Causes, 2)
-		assert.Equal(t, "/anyOf/0/type", ve.Causes[0].SchemaPath)
-		assert.Equal(t, "/anyOf/1/type", ve.Causes[1].SchemaPath)
+		assert.Equal(t, jsontext.Pointer("/anyOf/0/type"), ve.Causes[0].SchemaPath)
+		assert.Equal(t, jsontext.Pointer("/anyOf/1/type"), ve.Causes[1].SchemaPath)
 	})
 }
 
@@ -6226,8 +6229,8 @@ func TestValidationErrorSchemaPath(t *testing.T) {
 
 	leaf := findValidationNode(ve, "minLength")
 	require.NotNil(t, leaf, "expected a minLength error")
-	assert.Equal(t, "/address/city", leaf.InstancePath)
-	assert.Equal(t, "/properties/address/properties/city/minLength", leaf.SchemaPath)
+	assert.Equal(t, jsontext.Pointer("/address/city"), leaf.InstancePath)
+	assert.Equal(t, jsontext.Pointer("/properties/address/properties/city/minLength"), leaf.SchemaPath)
 }
 
 func TestValidateCollectsAllErrors(t *testing.T) {
@@ -6261,7 +6264,7 @@ func TestValidateCollectsAllErrors(t *testing.T) {
 	// regression that collapses or duplicates leaves is caught.
 	got := make([]string, 0, len(leaves))
 	for _, leaf := range leaves {
-		got = append(got, leaf.Keyword+" "+leaf.InstancePath)
+		got = append(got, leaf.Keyword+" "+string(leaf.InstancePath))
 	}
 
 	assert.ElementsMatch(t, []string{
@@ -6621,14 +6624,14 @@ func TestCompileNilSchema(t *testing.T) {
 }
 
 // TestValidateConstUnboundedJSONNumber pins that a hand-built const carrying a
-// json.Number whose exponent is far outside the cheap-expansion bounds is
+// jsonv1.Number whose exponent is far outside the cheap-expansion bounds is
 // compared through the unbounded-number guard rather than upstream's uncapped
 // big.Rat expansion (a quadratic-time DoS). The calls must answer promptly.
 func TestValidateConstUnboundedJSONNumber(t *testing.T) {
 	t.Parallel()
 
 	schema := &jsonschema.Schema{
-		Const: new(any(json.Number("1e90000000"))),
+		Const: new(any(jsonv1.Number("1e90000000"))),
 	}
 
 	v, err := jsonschema.Compile(t.Context(), schema)
@@ -6643,7 +6646,7 @@ func TestValidateConstUnboundedJSONNumber(t *testing.T) {
 
 // TestValidateBigConstThroughRemoteFetch covers the clone the validator's
 // remote-fetch path applies to a resolver-returned document: the deep copy
-// must preserve a json.Number const/enum exactly, or the fetched document
+// must preserve a jsonv1.Number const/enum exactly, or the fetched document
 // mis-validates instances the same document compiled directly accepts
 // (numbers beyond float64 precision round in a plain JSON round-trip).
 func TestValidateBigConstThroughRemoteFetch(t *testing.T) {
@@ -6651,7 +6654,7 @@ func TestValidateBigConstThroughRemoteFetch(t *testing.T) {
 
 	const big = "12345678901234567890"
 
-	remote := &jsonschema.Schema{Const: new(any(json.Number(big)))}
+	remote := &jsonschema.Schema{Const: new(any(jsonv1.Number(big)))}
 	root := &jsonschema.Schema{Ref: "https://ex.com/big.json"}
 
 	v, err := jsonschema.Compile(t.Context(), root,
@@ -7313,21 +7316,21 @@ func TestParseSchemaValue(t *testing.T) {
 			instance: "x",
 			valid:    false,
 		},
-		"normalized document with json.Number leaves": {
+		"normalized document with jsonv1.Number leaves": {
 			doc: map[string]any{
 				"type":    "integer",
-				"minimum": json.Number("3"),
+				"minimum": jsonv1.Number("3"),
 			},
 			instance: 2.0,
 			valid:    false,
 		},
-		"json.Number survives at instance-exceeding magnitude": {
+		"jsonv1.Number survives at instance-exceeding magnitude": {
 			doc: map[string]any{
 				"type": "number",
 				// Within float64 range, so the schema-side float64 cap does
 				// not round it; the point is the marshal round-trip keeps the
-				// json.Number literal intact.
-				"minimum": json.Number("12345678901234"),
+				// jsonv1.Number literal intact.
+				"minimum": jsonv1.Number("12345678901234"),
 			},
 			instance: 12345678901233.0,
 			valid:    false,
@@ -7448,7 +7451,7 @@ func TestParseSchema(t *testing.T) {
 		},
 		"trailing data": {
 			data:     `{"type":"object"} {}`,
-			contains: "unexpected data after top-level value",
+			contains: "after top-level value",
 		},
 	}
 
@@ -7482,7 +7485,7 @@ func TestParseSchema(t *testing.T) {
 }
 
 // TestParseSchemaPreservesLargeIntegerLiterals pins the decode discipline:
-// raw-JSON fields such as default hold the json.Number literal verbatim, so an
+// raw-JSON fields such as default hold the jsonv1.Number literal verbatim, so an
 // integer beyond float64 precision survives into the Schema exactly.
 func TestParseSchemaPreservesLargeIntegerLiterals(t *testing.T) {
 	t.Parallel()
@@ -7552,7 +7555,7 @@ func TestCompileJSON(t *testing.T) {
 		},
 		"trailing data": {
 			data:     `{"type":"object"} {}`,
-			contains: "unexpected data after top-level value",
+			contains: "after top-level value",
 		},
 	}
 
@@ -7786,10 +7789,12 @@ func TestBuiltinFormatChecks(t *testing.T) {
 }
 
 // valueConfig is the struct type the ValidateValue tests generate a schema
-// for and validate instances of.
+// for and validate instances of. The port carries omitzero rather than
+// omitempty: encoding/json/v2 never treats an encoded number as empty, so
+// omitzero is the option that still drops the zero port.
 type valueConfig struct {
 	Host string `json:"host"`
-	Port int    `json:"port,omitempty" jsonschema:"minimum=1"`
+	Port int    `json:"port,omitzero" jsonschema:"minimum=1"`
 }
 
 func TestValidateValue(t *testing.T) {
@@ -7811,8 +7816,8 @@ func TestValidateValue(t *testing.T) {
 			instance: valueConfig{Host: "localhost", Port: -1},
 			err:      "/port (minimum)",
 		},
-		"omitempty omits the violating zero": {
-			// Port 0 violates minimum=1 but omitempty drops the key, so the
+		"omitzero omits the violating zero": {
+			// Port 0 violates minimum=1 but omitzero drops the key, so the
 			// validated JSON form carries no port at all.
 			instance: valueConfig{Host: "localhost"},
 		},
@@ -7870,7 +7875,7 @@ func TestValidateValue(t *testing.T) {
 		var ve *jsonschema.ValidationError
 
 		require.ErrorAs(t, err, &ve)
-		assert.Equal(t, "/port", ve.InstancePath)
+		assert.Equal(t, jsontext.Pointer("/port"), ve.InstancePath)
 	})
 
 	t.Run("MarshalJSON form is what validates", func(t *testing.T) {

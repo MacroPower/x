@@ -2,7 +2,7 @@ package validate_test
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"math"
 	"reflect"
 	"strconv"
@@ -76,17 +76,17 @@ func TestValidateInterpreter_OneOfQuoteTokenization(t *testing.T) {
 func TestValidateInterpreter_StringCoercedValueConstraints(t *testing.T) {
 	t.Parallel()
 
-	// A json:",string" field serializes its numeric or bool value as a quoted
-	// string, so the generated schema is a string. The eq/ne/oneof family must
-	// compare against that serialized form (a string const/enum), not the
-	// numeric or bool value, or the constraint is unsatisfiable against the
-	// quoted instance.
+	// A json:",string" field serializes its numeric value as a quoted string,
+	// so the generated schema is a string. The eq/ne/oneof family must compare
+	// against that serialized form (a string const/enum), not the numeric
+	// value, or the constraint is unsatisfiable against the quoted instance.
+	// (encoding/json/v2 stringifies numbers only; the bool form is a refusal,
+	// pinned elsewhere.)
 	type Form struct {
-		Count   int  `json:"count,string"    validate:"eq=5"`
-		Choice  int  `json:"choice,string"   validate:"oneof=1 2 3"`
-		NotZero int  `json:"not_zero,string" validate:"ne=0"`
-		Flag    bool `json:"flag,string"     validate:"eq=true"`
-		Exact   int  `json:"exact,string"    validate:"len=7"`
+		Count   int `json:"count,string"    validate:"eq=5"`
+		Choice  int `json:"choice,string"   validate:"oneof=1 2 3"`
+		NotZero int `json:"not_zero,string" validate:"ne=0"`
+		Exact   int `json:"exact,string"    validate:"len=7"`
 	}
 
 	s, err := jsonschema.GenerateFor[Form](t.Context(),
@@ -107,30 +107,29 @@ func TestValidateInterpreter_StringCoercedValueConstraints(t *testing.T) {
 			"count":{"type":"string","const":"5"},
 			"choice":{"type":"string","enum":["1","2","3"]},
 			"not_zero":{"type":"string","not":{"const":"0"}},
-			"flag":{"type":"string","const":"true"},
 			"exact":{"type":"string","const":"7"}
 		},
-		"required":["count","choice","not_zero","flag","exact"],
+		"required":["count","choice","not_zero","exact"],
 		"additionalProperties":false
 	}`, string(got))
 
 	v, err := jsonschema.Compile(t.Context(), s)
 	require.NoError(t, err)
 	require.NoError(t, v.ValidateJSON(t.Context(),
-		[]byte(`{"count":"5","choice":"2","not_zero":"3","flag":"true","exact":"7"}`)),
+		[]byte(`{"count":"5","choice":"2","not_zero":"3","exact":"7"}`)),
 		"the serialized string form satisfies the coerced constraints")
 }
 
 func TestValidateInterpreter_StringCoercedRequired(t *testing.T) {
 	t.Parallel()
 
-	// Required on a json:",string" numeric or bool field must forbid the
-	// serialized zero ("0"/"false"), not the raw numeric/bool zero: a numeric
-	// not.const is inert against the quoted string instance, and a bool const
-	// pins an unsatisfiable bool on a string schema.
+	// Required on a json:",string" numeric field must forbid the serialized
+	// zero ("0"), not the raw numeric zero: a numeric not.const is inert
+	// against the quoted string instance. A float zero has two serializations
+	// ("0" and "-0"), and required must forbid both.
 	type Form struct {
-		N    int  `json:"n,string"    validate:"required"`
-		Flag bool `json:"flag,string" validate:"required"`
+		N int     `json:"n,string" validate:"required"`
+		F float64 `json:"f,string" validate:"required"`
 	}
 
 	s, err := jsonschema.GenerateFor[Form](t.Context(),
@@ -146,20 +145,20 @@ func TestValidateInterpreter_StringCoercedRequired(t *testing.T) {
 		"type":"object",
 		"properties":{
 			"n":{"type":"string","not":{"const":"0"}},
-			"flag":{"type":"string","not":{"const":"false"}}
+			"f":{"type":"string","not":{"enum":["0","-0"]}}
 		},
-		"required":["n","flag"],
+		"required":["n","f"],
 		"additionalProperties":false
 	}`, string(got))
 
 	v, err := jsonschema.Compile(t.Context(), s)
 	require.NoError(t, err)
-	require.NoError(t, v.ValidateJSON(t.Context(), []byte(`{"n":"5","flag":"true"}`)),
+	require.NoError(t, v.ValidateJSON(t.Context(), []byte(`{"n":"5","f":"1.5"}`)),
 		"a non-zero serialized value satisfies required")
-	require.Error(t, v.ValidateJSON(t.Context(), []byte(`{"n":"0","flag":"true"}`)),
+	require.Error(t, v.ValidateJSON(t.Context(), []byte(`{"n":"0","f":"1.5"}`)),
 		"the serialized numeric zero must be rejected")
-	require.Error(t, v.ValidateJSON(t.Context(), []byte(`{"n":"5","flag":"false"}`)),
-		"the serialized bool zero must be rejected")
+	require.Error(t, v.ValidateJSON(t.Context(), []byte(`{"n":"5","f":"-0"}`)),
+		"the serialized negative-zero float must be rejected")
 }
 
 func TestValidateInterpreter_StringCoercedNumericBoundRejected(t *testing.T) {
@@ -407,8 +406,8 @@ func TestValidateInterpreter_OneOfOnSequenceFields(t *testing.T) {
 		"$schema":"https://json-schema.org/draft/2020-12/schema",
 		"type":"object",
 		"properties":{
-			"days":{"type":["null","array"],"items":{"type":"string","enum":["monday","tuesday","wednesday"]}},
-			"codes":{"type":["null","array"],"items":{"type":"integer","enum":[1,2,3]}},
+			"days":{"type":"array","items":{"type":"string","enum":["monday","tuesday","wednesday"]}},
+			"codes":{"type":"array","items":{"type":"integer","enum":[1,2,3]}},
 			"pair":{
 				"type":"array",
 				"minItems":2,"maxItems":2,
@@ -461,9 +460,9 @@ func TestValidateInterpreter_SliceConstraints(t *testing.T) {
 		"$schema":"https://json-schema.org/draft/2020-12/schema",
 		"type":"object",
 		"properties":{
-			"tags":{"type":["null","array"],"items":{"type":"string"},"minItems":1,"maxItems":10},
-			"unique":{"type":["null","array"],"items":{"type":"integer"},"uniqueItems":true},
-			"fixed_len":{"type":["null","array"],"items":{"type":"string"},"minItems":3,"maxItems":3}
+			"tags":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":10},
+			"unique":{"type":"array","items":{"type":"integer"},"uniqueItems":true},
+			"fixed_len":{"type":"array","items":{"type":"string"},"minItems":3,"maxItems":3}
 		},
 		"required":["tags","unique","fixed_len"],
 		"additionalProperties":false
@@ -489,7 +488,7 @@ func TestValidateInterpreter_MapConstraints(t *testing.T) {
 		"$schema":"https://json-schema.org/draft/2020-12/schema",
 		"type":"object",
 		"properties":{
-			"labels":{"type":["null","object"],"additionalProperties":{"type":"string"},"minProperties":1,"maxProperties":5}
+			"labels":{"type":"object","additionalProperties":{"type":"string"},"minProperties":1,"maxProperties":5}
 		},
 		"required":["labels"],
 		"additionalProperties":false
@@ -620,7 +619,7 @@ func TestValidateInterpreter_Dive(t *testing.T) {
 		"type":"object",
 		"properties":{
 			"tags":{
-				"type":["null","array"],
+				"type":"array",
 				"items":{"type":"string","minLength":3},
 				"minItems":1
 			}
@@ -650,10 +649,10 @@ func TestValidateInterpreter_NestedDive(t *testing.T) {
 		"type":"object",
 		"properties":{
 			"matrix":{
-				"type":["null","array"],
+				"type":"array",
 				"minItems":1,
 				"items":{
-					"type":["null","array"],
+					"type":"array",
 					"maxItems":5,
 					"items":{
 						"type":"string",
@@ -693,7 +692,7 @@ func TestValidateInterpreter_DiveEnumKeepsAuthoredElementBound(t *testing.T) {
 		"type":"object",
 		"properties":{
 			"values":{
-				"type":["null","array"],
+				"type":"array",
 				"items":{"type":"integer","enum":[5,10],"minimum":0}
 			}
 		},
@@ -724,7 +723,7 @@ func TestValidateInterpreter_DivePointerElement(t *testing.T) {
 		"type":"object",
 		"properties":{
 			"values":{
-				"type":["null","array"],
+				"type":"array",
 				"minItems":1,
 				"items":{
 					"anyOf":[{"type":"integer"},{"type":"null"}],
@@ -761,7 +760,7 @@ func TestValidateInterpreter_OneOfOnPointerElement(t *testing.T) {
 		"type":"object",
 		"properties":{
 			"tags":{
-				"type":["null","array"],
+				"type":"array",
 				"items":{
 					"anyOf":[{"type":"string","enum":["a","b","c"]},{"type":"null"}]
 				}
@@ -876,7 +875,7 @@ func TestValidateInterpreter_DiveEqOnPointerElement(t *testing.T) {
 		"type":"object",
 		"properties":{
 			"values":{
-				"type":["null","array"],
+				"type":"array",
 				"items":{
 					"anyOf":[{"type":"integer","const":5},{"type":"null"}]
 				}
@@ -911,8 +910,8 @@ func TestValidateInterpreter_DiveDropsSizedIntBounds(t *testing.T) {
 		"$schema":"https://json-schema.org/draft/2020-12/schema",
 		"type":"object",
 		"properties":{
-			"exact":{"type":["null","array"],"items":{"type":"integer","const":5}},
-			"set":{"type":["null","array"],"items":{"type":"integer","enum":[1,2,3]}}
+			"exact":{"type":"array","items":{"type":"integer","const":5}},
+			"set":{"type":"array","items":{"type":"integer","enum":[1,2,3]}}
 		},
 		"required":["exact","set"],
 		"additionalProperties":false
@@ -943,8 +942,8 @@ func TestValidateInterpreter_DiveDropsSizedIntBoundsOnPointerElement(t *testing.
 		"$schema":"https://json-schema.org/draft/2020-12/schema",
 		"type":"object",
 		"properties":{
-			"exact":{"type":["null","array"],"items":{"anyOf":[{"type":"integer","const":5},{"type":"null"}]}},
-			"set":{"type":["null","array"],"items":{"anyOf":[{"type":"integer","enum":[1,2,3]},{"type":"null"}]}}
+			"exact":{"type":"array","items":{"anyOf":[{"type":"integer","const":5},{"type":"null"}]}},
+			"set":{"type":"array","items":{"anyOf":[{"type":"integer","enum":[1,2,3]},{"type":"null"}]}}
 		},
 		"required":["exact","set"],
 		"additionalProperties":false
@@ -972,7 +971,7 @@ func TestValidateInterpreter_DiveMap(t *testing.T) {
 		"type":"object",
 		"properties":{
 			"labels":{
-				"type":["null","object"],
+				"type":"object",
 				"additionalProperties":{"type":"string","minLength":1},
 				"minProperties":1
 			}
@@ -1127,11 +1126,12 @@ func TestValidateInterpreter_RequiredOnNonPointerSlice(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	// Non-pointer slice: required forbids null and floors the item count, since
-	// a nil slice marshals as null and an empty one carries no items.
+	// Non-pointer slice: required floors the item count, since an empty slice
+	// carries no items. A nil slice marshals as [] under encoding/json/v2, so
+	// the schema admits no null and there is none to forbid.
 	assert.Contains(t, s.Required, "tags")
 	assert.Equal(t, new(1), s.Properties["tags"].MinItems)
-	assertForbidsNull(t, s.Properties["tags"])
+	assert.Nil(t, s.Properties["tags"].Not)
 }
 
 func TestValidateInterpreter_RequiredOnNonPointerMap(t *testing.T) {
@@ -1146,11 +1146,12 @@ func TestValidateInterpreter_RequiredOnNonPointerMap(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	// Non-pointer map: required forbids null and floors the property count,
-	// since a nil map marshals as null and an empty one carries no properties.
+	// Non-pointer map: required floors the property count, since an empty map
+	// carries no properties. A nil map marshals as {} under encoding/json/v2,
+	// so the schema admits no null and there is none to forbid.
 	assert.Contains(t, s.Required, "labels")
 	assert.Equal(t, new(1), s.Properties["labels"].MinProperties)
-	assertForbidsNull(t, s.Properties["labels"])
+	assert.Nil(t, s.Properties["labels"].Not)
 }
 
 // TestValidateInterpreter_RequiredUnderNullableOff pins what required emits
@@ -1275,7 +1276,7 @@ func TestApplyDiveErrorsWhenItemsNil(t *testing.T) {
 		Properties: map[string]*jsonschema.Schema{
 			"items": {
 				// Items is nil: no sub-schema to dive into.
-				Types: []string{"null", "array"},
+				Type: "array",
 			},
 		},
 	}
@@ -1937,8 +1938,8 @@ func TestValidateInterpreter_RequiredPreservesStrongerBound(t *testing.T) {
 		"properties":{
 			"min_then_req":{"type":"string","minLength":5},
 			"req_then_min":{"type":"string","minLength":5},
-			"tags":{"type":["null","array"],"items":{"type":"string"},"minItems":3,"not":{"const":null}},
-			"labels":{"type":["null","object"],"additionalProperties":{"type":"string"},"minProperties":2,"not":{"const":null}},
+			"tags":{"type":"array","items":{"type":"string"},"minItems":3},
+			"labels":{"type":"object","additionalProperties":{"type":"string"},"minProperties":2},
 			"bare":{"type":"string","minLength":1}
 		},
 		"required":["min_then_req","req_then_min","tags","labels","bare"],
@@ -1979,8 +1980,8 @@ func TestValidateInterpreter_LenIntersectsBounds(t *testing.T) {
 			"len_then_max":{"type":"string","minLength":5,"maxLength":3},
 			"req_then_len":{"type":"string","minLength":1,"maxLength":0},
 			"len_then_req":{"type":"string","minLength":1,"maxLength":0},
-			"items_max":{"type":["null","array"],"items":{"type":"string"},"minItems":5,"maxItems":3},
-			"props_max":{"type":["null","object"],"additionalProperties":{"type":"string"},"minProperties":5,"maxProperties":3}
+			"items_max":{"type":"array","items":{"type":"string"},"minItems":5,"maxItems":3},
+			"props_max":{"type":"object","additionalProperties":{"type":"string"},"minProperties":5,"maxProperties":3}
 		},
 		"required":["max_then_len","len_then_max","req_then_len","len_then_req","items_max","props_max"],
 		"additionalProperties":false
@@ -2016,14 +2017,12 @@ func TestValidateInterpreter_CollectionNe(t *testing.T) {
 	assert.Equal(t, new(2), labels.Not.MinProperties)
 	assert.Equal(t, new(2), labels.Not.MaxProperties)
 
-	// The nilable fields' schemas deliberately admit null; without the type
-	// gate the size keywords are inert against null, the forbidden subschema
-	// vacuously validates, and the outer not rejects the null the schema
-	// admits.
+	// The type gate keeps the forbidden subschema from vacuously matching an
+	// instance of another type, where the size keywords are inert.
 	require.NoError(t, jsonschema.Validate(t.Context(), s,
-		map[string]any{"tags": nil, "labels": nil}))
+		map[string]any{"tags": []any{"a"}, "labels": map[string]any{}}))
 	require.Error(t, jsonschema.Validate(t.Context(), s,
-		map[string]any{"tags": []any{"a", "b", "c"}, "labels": nil}))
+		map[string]any{"tags": []any{"a", "b", "c"}, "labels": map[string]any{}}))
 }
 
 func TestValidateInterpreter_CollectionNeComposesWithAllOf(t *testing.T) {
@@ -2117,7 +2116,7 @@ func TestValidateInterpreter_LengthConstraintOnByteSlice(t *testing.T) {
 			s := &jsonschema.Schema{
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
-					"data": {Types: []string{"null", "string"}, ContentEncoding: "base64"},
+					"data": {Type: "string", ContentEncoding: "base64"},
 				},
 			}
 
@@ -2414,10 +2413,10 @@ func TestValidateInterpreter_RequiredMinZeroKeepsFloor(t *testing.T) {
 		"properties":{
 			"req_min_str":{"type":"string","minLength":1},
 			"min_req_str":{"type":"string","minLength":1},
-			"req_min_vec":{"type":["null","array"],"items":{"type":"string"},"minItems":1,"not":{"const":null}},
-			"min_req_vec":{"type":["null","array"],"items":{"type":"string"},"minItems":1,"not":{"const":null}},
-			"req_min_map":{"type":["null","object"],"additionalProperties":{"type":"string"},"minProperties":1,"not":{"const":null}},
-			"min_req_map":{"type":["null","object"],"additionalProperties":{"type":"string"},"minProperties":1,"not":{"const":null}}
+			"req_min_vec":{"type":"array","items":{"type":"string"},"minItems":1},
+			"min_req_vec":{"type":"array","items":{"type":"string"},"minItems":1},
+			"req_min_map":{"type":"object","additionalProperties":{"type":"string"},"minProperties":1},
+			"min_req_map":{"type":"object","additionalProperties":{"type":"string"},"minProperties":1}
 		},
 		"required":["req_min_str","min_req_str","req_min_vec","min_req_vec","req_min_map","min_req_map"],
 		"additionalProperties":false
@@ -2453,10 +2452,10 @@ func TestValidateInterpreter_RepeatedMinIntersects(t *testing.T) {
 		"properties":{
 			"min_str":{"type":"string","minLength":5},
 			"max_str":{"type":"string","maxLength":5},
-			"min_vec":{"type":["null","array"],"items":{"type":"string"},"minItems":5},
-			"max_vec":{"type":["null","array"],"items":{"type":"string"},"maxItems":5},
-			"min_map":{"type":["null","object"],"additionalProperties":{"type":"string"},"minProperties":5},
-			"max_map":{"type":["null","object"],"additionalProperties":{"type":"string"},"maxProperties":5}
+			"min_vec":{"type":"array","items":{"type":"string"},"minItems":5},
+			"max_vec":{"type":"array","items":{"type":"string"},"maxItems":5},
+			"min_map":{"type":"object","additionalProperties":{"type":"string"},"minProperties":5},
+			"max_map":{"type":"object","additionalProperties":{"type":"string"},"maxProperties":5}
 		},
 		"required":["min_str","max_str","min_vec","max_vec","min_map","max_map"],
 		"additionalProperties":false
@@ -2836,7 +2835,7 @@ func TestValidateInterpreter_LenOnCollectionUnaffectedByFieldWidth(t *testing.T)
 		"type":"object",
 		"properties":{
 			"code":{"type":"string","minLength":200,"maxLength":200},
-			"items":{"type":["null","array"],"items":{"type":"string"},"minItems":300,"maxItems":300}
+			"items":{"type":"array","items":{"type":"string"},"minItems":300,"maxItems":300}
 		},
 		"required":["code","items"],
 		"additionalProperties":false

@@ -1,7 +1,7 @@
 package jsonschema_test
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -11,9 +11,9 @@ import (
 )
 
 // quotedJSONMarshaler is an int-kind type that directly implements
-// json.Marshaler. The encoding/json package ignores the json:",string" option for a
-// marshaler-bearing field and emits the marshaler's raw bytes, so the
-// generator must not coerce such a field to {"type":"string"}.
+// json.Marshaler. Encoding/json/v2 routes a marshaler-bearing field through
+// its method, which ignores the json:",string" option, so the generator must
+// not coerce such a field to {"type":"string"}.
 type quotedJSONMarshaler int
 
 func (quotedJSONMarshaler) MarshalJSON() ([]byte, error) { return []byte("7"), nil }
@@ -32,15 +32,14 @@ func TestGenerateFor_JSONStringMarshalerKeepsKindSchema(t *testing.T) {
 		F quotedJSONMarshaler    `json:"f,string"`
 		G *quotedJSONMarshaler   `json:"g,string"`
 		P quotedPtrJSONMarshaler `json:"p,string"`
-		S string                 `json:"s,string"`
 	}
 
-	// The encoding/json package routes f, g, and p through MarshalJSON, discarding the
-	// quoted option; the plain string field s stays double-encoded.
+	// Encoding/json/v2 routes f, g, and p through MarshalJSON, discarding the
+	// quoted option.
 	v := quotedJSONMarshaler(3)
-	data, err := json.Marshal(&doc{F: 3, G: &v, P: 4, S: "abc"})
+	data, err := json.Marshal(&doc{F: 3, G: &v, P: 4})
 	require.NoError(t, err)
-	require.JSONEq(t, `{"f":7,"g":7,"p":8,"s":"\"abc\""}`, string(data))
+	require.JSONEq(t, `{"f":7,"g":7,"p":8}`, string(data))
 
 	s, err := jsonschema.GenerateFor[doc](t.Context())
 	require.NoError(t, err)
@@ -57,10 +56,9 @@ func TestGenerateFor_JSONStringMarshalerKeepsKindSchema(t *testing.T) {
 		"properties":{
 			"f":{"type":"integer"},
 			"g":{"anyOf":[{"type":"integer"},{"type":"null"}]},
-			"p":{"type":"integer"},
-			"s":{"type":"string"}
+			"p":{"type":"integer"}
 		},
-		"required":["f","g","p","s"],
+		"required":["f","g","p"],
 		"additionalProperties":false
 	}`, string(got))
 

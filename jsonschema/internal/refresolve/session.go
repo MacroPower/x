@@ -240,8 +240,8 @@ func (s *Session) ResolveJSONPointer(
 	return s.resolveJSONPointerViaJSON(root, segments)
 }
 
-// resolveJSONPointerViaJSON resolves a JSON Pointer by walking the schema's JSON
-// encoding rather than its typed fields, reaching locations typed traversal
+// resolveJSONPointerViaJSON resolves a JSON Pointer through the schema's JSON
+// encoding where its typed fields end, reaching locations typed traversal
 // cannot. A located schema is freshly unmarshaled and unknown to the compiled
 // registries. The session vets it (when a vet is installed) and registers it
 // through the per-run fallback registries with the base URI in effect at its

@@ -1,7 +1,7 @@
 package jsonschema_test
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -12,7 +12,7 @@ import (
 )
 
 // TestValidateContentTagsIgnoredOnRawMessage pins that validate:"json" and
-// validate:"base64" on a json.RawMessage field are documented no-ops rather
+// validate:"base64" on a jsontext.Value field are documented no-ops rather
 // than generation errors: both are real runtime checks over the raw bytes, but
 // the content keywords describe a string carrying an encoded document, and a
 // raw field's instance is already decoded JSON, so nothing faithful is emitted
@@ -23,7 +23,7 @@ func TestValidateContentTagsIgnoredOnRawMessage(t *testing.T) {
 	for name, build := range map[string]func() (*jsonschema.Schema, error){
 		"json": func() (*jsonschema.Schema, error) {
 			type T struct {
-				V json.RawMessage `json:"v" validate:"json"`
+				V jsontext.Value `json:"v" validate:"json"`
 			}
 
 			return jsonschema.GenerateFor[T](t.Context(),
@@ -31,7 +31,7 @@ func TestValidateContentTagsIgnoredOnRawMessage(t *testing.T) {
 		},
 		"base64": func() (*jsonschema.Schema, error) {
 			type T struct {
-				V json.RawMessage `json:"v" validate:"base64"`
+				V jsontext.Value `json:"v" validate:"base64"`
 			}
 
 			return jsonschema.GenerateFor[T](t.Context(),

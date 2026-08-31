@@ -8,10 +8,13 @@ package reflectkind
 
 import (
 	"encoding"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"reflect"
 	"runtime"
 	"strings"
+
+	jsonv1 "encoding/json"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/numkind"
 )
@@ -19,20 +22,82 @@ import (
 var (
 	// TypeTextMarshaler is the [reflect.Type] of [encoding.TextMarshaler].
 	TypeTextMarshaler = reflect.TypeFor[encoding.TextMarshaler]()
-	// TypeJSONMarshaler is the [reflect.Type] of [encoding/json.Marshaler].
+	// TypeTextAppender is the [reflect.Type] of [encoding.TextAppender].
+	TypeTextAppender = reflect.TypeFor[encoding.TextAppender]()
+	// TypeJSONMarshaler is the [reflect.Type] of [encoding/json/v2.Marshaler]
+	// (which [encoding/json.Marshaler] aliases).
 	TypeJSONMarshaler = reflect.TypeFor[json.Marshaler]()
+	// TypeJSONMarshalerTo is the [reflect.Type] of [encoding/json/v2.MarshalerTo].
+	TypeJSONMarshalerTo = reflect.TypeFor[json.MarshalerTo]()
+	// TypeJSONTextValue is the [reflect.Type] of [jsontext.Value] (which
+	// [encoding/json.RawMessage] aliases).
+	TypeJSONTextValue = reflect.TypeFor[jsontext.Value]()
 	// The typeJSONNumber value is the [reflect.Type] of [encoding/json.Number].
-	typeJSONNumber = reflect.TypeFor[json.Number]()
+	typeJSONNumber = reflect.TypeFor[jsonv1.Number]()
+
+	// The unmarshal-side interfaces join the marshal-side ones in
+	// [ImplementsAnyMarshalMethod], which mirrors encoding/json/v2's
+	// allMethodTypes set for its embedded-field refusal.
+	typeTextUnmarshaler     = reflect.TypeFor[encoding.TextUnmarshaler]()
+	typeJSONUnmarshaler     = reflect.TypeFor[json.Unmarshaler]()
+	typeJSONUnmarshalerFrom = reflect.TypeFor[json.UnmarshalerFrom]()
+
+	// The allMethodTypes list mirrors encoding/json/v2's list of every
+	// custom serialization interface, in its order.
+	allMethodTypes = []reflect.Type{
+		TypeJSONMarshalerTo, TypeJSONMarshaler, TypeTextAppender, TypeTextMarshaler,
+		typeJSONUnmarshalerFrom, typeJSONUnmarshaler, typeTextUnmarshaler,
+	}
+
+	// The marshalerTypes list is the marshal-side subset, for the
+	// json:",string" exemption: encoding/json/v2 routes a marshaler-bearing
+	// value through its method, which ignores the flag (json.Number, which
+	// honors StringifyNumbers, is special-cased by [IsJSONNumber] instead).
+	marshalerTypes = []reflect.Type{
+		TypeJSONMarshalerTo, TypeJSONMarshaler, TypeTextAppender, TypeTextMarshaler,
+	}
 )
+
+// implementsAny reports whether t or its pointer type implements any of the
+// given interfaces, mirroring encoding/json/v2's implementsAny: v2 resolves a
+// pointer-receiver method wherever the value came from an addressable place,
+// and the generator models the addressable case.
+func implementsAny(t reflect.Type, ifaces ...reflect.Type) bool {
+	for _, iface := range ifaces {
+		if t.Implements(iface) || reflect.PointerTo(t).Implements(iface) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// ImplementsAnyMarshalMethod reports whether t or its pointer type implements
+// any of encoding/json/v2's seven custom serialization interfaces.
+// Encoding/json/v2 refuses to promote the fields of an embedded type for
+// which this holds (jsontext.Value excepted), since the methods make the
+// promoted shape unknowable.
+func ImplementsAnyMarshalMethod(t reflect.Type) bool {
+	return implementsAny(t, allMethodTypes...)
+}
+
+// ImplementsAnyMarshaler reports whether t or its pointer type implements any
+// of the four marshal-side interfaces. A json:",string" flag on such a type
+// is ignored rather than an error: the method output replaces the default
+// encoding the flag would have applied to.
+func ImplementsAnyMarshaler(t reflect.Type) bool {
+	return implementsAny(t, marshalerTypes...)
+}
 
 // IsJSONNumber reports whether t is [encoding/json.Number]. Callers pass an
 // already-dereferenced type; the predicate does not follow a pointer chain.
 //
-// The type is the one Go string kind encoding/json writes as a number. Under
-// json:",string" it emits the literal once-quoted ("5"), where every other
-// string kind emits the already-encoded string a second time ("\"5\""). The
-// encoder special-cases exactly this type, which is why the predicate compares
-// type identity rather than reading the kind.
+// The type is the one Go string kind encoding/json/v2 writes as a number: its
+// MarshalJSONTo emits the literal bare, and it honors StringifyNumbers, so
+// json:",string" quotes it once ("5") where every other string kind is a
+// SemanticError under the flag. The predicate compares type identity rather
+// than reading the kind because the special casing rides on the type's
+// methods.
 func IsJSONNumber(t reflect.Type) bool { return t == typeJSONNumber }
 
 // IsRecursiveContainerKind reports whether a kind can hold a value of its own
@@ -48,43 +113,45 @@ func IsRecursiveContainerKind(k reflect.Kind) bool {
 	}
 }
 
-// IsValidMapKey checks if a type is a valid map key for JSON serialization.
-func IsValidMapKey(t reflect.Type) bool {
-	if t.Kind() == reflect.String || numkind.IsInteger(t.Kind()) {
+// IsEmbeddedFallback reports whether t qualifies as encoding/json/v2's
+// embedded fallback under json:",embed": exactly [jsontext.Value], or a map
+// whose key kind is string and whose key type implements no marshal or
+// unmarshal method. The caller removes the one unnamed-pointer level v2's
+// indirectType unwraps before asking.
+func IsEmbeddedFallback(t reflect.Type) bool {
+	if t == TypeJSONTextValue {
 		return true
 	}
 
-	// Map keys are not addressable, so encoding/json requires the key type
-	// itself to implement TextMarshaler; a method set satisfied only via a
-	// pointer receiver does not count and json.Marshal rejects such a map. This
-	// deliberately differs from implementsTextMarshaler, which serves addressable
-	// struct fields where the pointer-receiver form is usable.
-	if t.Implements(TypeTextMarshaler) {
-		return true
-	}
-
-	return false
+	return t.Kind() == reflect.Map && t.Key().Kind() == reflect.String &&
+		!ImplementsAnyMarshalMethod(t.Key())
 }
 
-// IsStringableType reports whether json:",string" applies to the given type.
-// Encoding/json dereferences exactly one pointer level, and only when the
-// pointer type is unnamed, before checking the quotable kinds; a named pointer
-// type or a multi-level pointer is not quoted and marshals as a bare value.
-func IsStringableType(t reflect.Type) bool {
-	if t.Name() == "" && t.Kind() == reflect.Pointer {
-		t = t.Elem()
-	}
-
-	if numkind.IsInteger(t.Kind()) {
+// IsValidMapKey reports whether a map key type can encode as a JSON object
+// member name. Encoding/json/v2 accepts any key that encodes as a JSON
+// string: the string kinds, the integer and float kinds (their numbers are
+// quoted in the name position), and any marshaler-bearing key, pointer
+// receivers included (v2 boxes the key, so addressability never matters). A
+// marshaler whose output is not a JSON string still fails, but only when the
+// value marshals, which a static predicate cannot see.
+func IsValidMapKey(t reflect.Type) bool {
+	if t.Kind() == reflect.String || numkind.IsInteger(t.Kind()) || numkind.IsFloat(t.Kind()) {
 		return true
 	}
 
-	switch t.Kind() {
-	case reflect.String, reflect.Bool, reflect.Float32, reflect.Float64:
-		return true
-	default:
-		return false
-	}
+	return ImplementsAnyMarshaler(t)
+}
+
+// IsStringifiableNumber reports whether json:",string" stringifies the given
+// type. Encoding/json/v2 applies the flag to number-encoding values only --
+// the integer and float kinds, plus [encoding/json.Number] -- and the flag
+// survives every pointer level (a nil pointer still marshals null). Any other
+// non-marshaler-bearing type makes marshaling return a SemanticError; see
+// [ImplementsAnyMarshaler] for the exemption.
+func IsStringifiableNumber(t reflect.Type) bool {
+	t = numkind.DerefType(t)
+
+	return numkind.IsInteger(t.Kind()) || numkind.IsFloat(t.Kind()) || IsJSONNumber(t)
 }
 
 // IsDirectTextMarshaler reports whether a type directly implements
@@ -98,30 +165,36 @@ func IsDirectTextMarshaler(t reflect.Type) bool {
 }
 
 // IsBase64ByteSlice reports whether a slice type marshals as one base64
-// string under [encoding/json]: its element kind is uint8 and the element
-// carries no [encoding/json.Marshaler] or [encoding.TextMarshaler] of its
-// own. Encoding/json encodes a marshaler-bearing element through its method,
-// which makes such a slice a real JSON array rather than a base64 string.
+// string under [encoding/json/v2]: its element is the unnamed builtin byte.
+// A named byte element (which, unlike the builtin, could also carry methods)
+// makes the slice a JSON array of numbers.
 func IsBase64ByteSlice(t reflect.Type) bool {
-	if t.Kind() != reflect.Slice || t.Elem().Kind() != reflect.Uint8 {
-		return false
-	}
+	return t.Kind() == reflect.Slice && isUnnamedByte(t.Elem())
+}
 
-	pt := reflect.PointerTo(t.Elem())
+// IsBase64ByteArray reports whether an array type marshals as one base64
+// string under [encoding/json/v2]: a [N]byte with the unnamed builtin
+// element, on the same condition as [IsBase64ByteSlice]. Unmarshaling
+// requires the string to decode to exactly N bytes.
+func IsBase64ByteArray(t reflect.Type) bool {
+	return t.Kind() == reflect.Array && isUnnamedByte(t.Elem())
+}
 
-	return !pt.Implements(TypeJSONMarshaler) && !pt.Implements(TypeTextMarshaler)
+// isUnnamedByte reports whether t is the builtin byte type.
+func isUnnamedByte(t reflect.Type) bool {
+	return t.Kind() == reflect.Uint8 && t.PkgPath() == ""
 }
 
 // ImplementsJSONMarshaler reports whether the type or its pointer type
 // implements [encoding/json.Marshaler], directly or via promotion.
 func ImplementsJSONMarshaler(t reflect.Type) bool {
-	return t.Implements(TypeJSONMarshaler) || reflect.PointerTo(t).Implements(TypeJSONMarshaler)
+	return implementsAny(t, TypeJSONMarshaler)
 }
 
 // implementsTextMarshaler reports whether the type or its pointer type
 // implements [encoding.TextMarshaler], directly or via promotion.
 func implementsTextMarshaler(t reflect.Type) bool {
-	return t.Implements(TypeTextMarshaler) || reflect.PointerTo(t).Implements(TypeTextMarshaler)
+	return implementsAny(t, TypeTextMarshaler)
 }
 
 // IsPromotedJSONMarshaler reports whether a type's method set includes
@@ -146,6 +219,40 @@ func IsPromotedTextMarshaler(t reflect.Type) bool {
 	}
 
 	return !HasDirectMethod(t, "MarshalText")
+}
+
+// ImplementsJSONMarshalerTo reports whether the type or its pointer type
+// implements [encoding/json/v2.MarshalerTo], directly or via promotion.
+func ImplementsJSONMarshalerTo(t reflect.Type) bool {
+	return implementsAny(t, TypeJSONMarshalerTo)
+}
+
+// IsPromotedJSONMarshalerTo reports whether a type's method set includes
+// MarshalJSONTo solely via promotion from an embedded field. See
+// [IsPromotedJSONMarshaler]; MarshalJSONTo outranks every other custom
+// serialization method in encoding/json/v2's precedence.
+func IsPromotedJSONMarshalerTo(t reflect.Type) bool {
+	if !ImplementsJSONMarshalerTo(t) {
+		return false
+	}
+
+	return !HasDirectMethod(t, "MarshalJSONTo")
+}
+
+// ImplementsAnyJSONMarshaler reports whether the type or its pointer type
+// implements [encoding/json/v2.MarshalerTo] or [encoding/json/v2.Marshaler],
+// directly or via promotion. It is the guard that keeps a text-marshaling
+// type's string schema from applying where a json marshaler outranks the
+// text method.
+func ImplementsAnyJSONMarshaler(t reflect.Type) bool {
+	return ImplementsJSONMarshalerTo(t) || ImplementsJSONMarshaler(t)
+}
+
+// ImplementsAnyTextMarshaler reports whether the type or its pointer type
+// implements [encoding.TextAppender] or [encoding.TextMarshaler], directly or
+// via promotion. Either method always emits a string.
+func ImplementsAnyTextMarshaler(t reflect.Type) bool {
+	return implementsAny(t, TypeTextAppender, TypeTextMarshaler)
 }
 
 // HasDirectMethod reports whether a method is defined directly on the type

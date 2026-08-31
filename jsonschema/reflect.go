@@ -2,7 +2,9 @@ package jsonschema
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -11,6 +13,8 @@ import (
 	"reflect"
 	"slices"
 	"time"
+
+	jsonv2 "encoding/json/v2"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/content"
 	"go.jacobcolvin.com/x/jsonschema/internal/fieldset"
@@ -22,8 +26,9 @@ import (
 )
 
 var (
-	typeJSONRawMessage = reflect.TypeFor[json.RawMessage]()
+	typeJSONRawMessage = reflect.TypeFor[jsontext.Value]()
 	typeTime           = reflect.TypeFor[time.Time]()
+	typeTimeDuration   = reflect.TypeFor[time.Duration]()
 	typeSlogLevel      = reflect.TypeFor[slog.Level]()
 	typeJSONNumber     = reflect.TypeFor[json.Number]()
 	typeBigInt         = reflect.TypeFor[big.Int]()
@@ -67,17 +72,27 @@ type generator struct {
 	refAliasing map[reflect.Type]bool
 	// DefaultsFrom is the WithDefaultsFrom instance; defaultsFromSet
 	// distinguishes an explicit nil instance from the option being absent.
-	defaultsFrom         any
-	descriptionProvider  DescriptionProvider
-	tagInterpreters      []tagInterpreterRegistration
+	defaultsFrom        any
+	descriptionProvider DescriptionProvider
+	tagInterpreters     []tagInterpreterRegistration
+	// The WithJSONOptions state: the joined [jsonv2.Options] value and the
+	// refusal it resolved to (surfaced per run by generate). The three
+	// honored flags probed from it sit with the other bools below.
+	jsonOpts             jsonv2.Options
+	jsonOptsErr          error
 	typeExtenders        []TypeSchemaExtender
-	draft                Draft
 	profile              draftProfile // per-draft behavioral policy, resolved once from draft
+	draft                Draft
 	definitions          bool
 	additionalProperties bool
 	nullable             bool
-	defaultsFromSet      bool
-	rootTitle            bool
+	// The three honored WithJSONOptions flags, probed from jsonOpts at
+	// option-application time.
+	nilSliceNull    bool
+	nilMapNull      bool
+	omitZeroFields  bool
+	defaultsFromSet bool
+	rootTitle       bool
 }
 
 // typeOverrideResult memoizes one [generator.resolveTypeSchema] consultation so
@@ -136,8 +151,33 @@ func (g *generator) forRun(ctx context.Context) *generator {
 	return &run
 }
 
+// containerNullable is the one definition of the nilable-container null law.
+// A container occurrence admits null when it is a pointer occurrence
+// (occurrence) or when the relevant WithJSONOptions format flag makes the
+// marshal write null for a nil one (optFlag), and WithNullable(false) wins
+// over both.
+func (g *generator) containerNullable(occurrence, optFlag bool) bool {
+	return occurrence || (optFlag && g.nullable)
+}
+
+// marshalOptions returns the WithJSONOptions options in variadic form for a
+// [jsonv2.Marshal] call, empty when none were configured.
+func (g *generator) marshalOptions() []jsonv2.Options {
+	if g.jsonOpts == nil {
+		return nil
+	}
+
+	return []jsonv2.Options{g.jsonOpts}
+}
+
 // generate produces the root schema for the given type.
 func (g *generator) generate(t reflect.Type) (*Schema, error) {
+	// A WithJSONOptions refusal surfaces per run, so NewGenerator-then-
+	// Generate reports it the same way the one-shot entry points do.
+	if g.jsonOptsErr != nil {
+		return nil, g.jsonOptsErr
+	}
+
 	// A nil type carries no kind to reflect on; report it through the error
 	// contract instead of panicking in numkind.DerefType.
 	if t == nil {
@@ -318,35 +358,47 @@ func (g *generator) schemaForType(t reflect.Type, nullable bool) (*node, error) 
 		return g.handleBuiltinType(t, s, nullable)
 	}
 
+	// A time.Duration has no default representation in encoding/json/v2:
+	// marshaling one returns a SemanticError. Refusing it here (after the
+	// override steps, so WithTypeSchema or a provider can still declare a
+	// shape for it) keeps the ground-truth claim exact.
+	if t == typeTimeDuration {
+		return nil, fmt.Errorf("%w: %s has no default representation in encoding/json/v2", ErrUnsupportedType, t)
+	}
+
 	// 4. Marshaler methods promoted from an embedded field. A struct whose
-	// method set includes a promoted MarshalJSON or MarshalText is serialized
-	// by that method. Encoding/json resolves marshalers through the method set,
-	// so the embedded type's marshaler takes over the whole struct, and
-	// reflecting its fields would describe a shape that never appears.
-	// A promoted json.Marshaler can emit any JSON value, so the schema is
-	// unrestricted; a promoted TextMarshaler always emits a string. A type
-	// that directly implements json.Marshaler is deliberately NOT handled
+	// method set includes a promoted MarshalJSONTo or MarshalJSON is
+	// serialized by that method. Encoding/json/v2 resolves marshalers through
+	// the method set (MarshalJSONTo outranking MarshalJSON), so the embedded
+	// type's marshaler takes over the whole struct, and reflecting its fields
+	// would describe a shape that never appears. A promoted json marshaler
+	// can emit any JSON value, so the schema is unrestricted. A type that
+	// directly implements either json interface is deliberately NOT handled
 	// here: per the documented resolution priority it falls through to
 	// kind-based reflection, and WithTypeSchema or JSONSchemaProvider is the
-	// escape hatch for its real shape.
-	if reflectkind.IsPromotedJSONMarshaler(t) {
+	// escape hatch for its real shape. A direct method on either interface
+	// also suppresses the other's promoted form, since v2 consults the
+	// higher-ranked method set entry first.
+	if reflectkind.IsPromotedJSONMarshalerTo(t) {
 		return g.handleBuiltinType(t, &Schema{}, nullable)
 	}
 
-	if reflectkind.IsPromotedTextMarshaler(t) && !reflectkind.ImplementsJSONMarshaler(t) {
-		return g.handleBuiltinType(t, &Schema{Type: typename.String}, nullable)
+	if reflectkind.IsPromotedJSONMarshaler(t) && !reflectkind.ImplementsJSONMarshalerTo(t) {
+		return g.handleBuiltinType(t, &Schema{}, nullable)
 	}
 
-	// 5. TextMarshaler (direct implementation). A direct TextMarshaler
-	// serializes as a string and shares the built-in path's type-level
-	// post-processing (comments, extender, $defs extraction). A type that
-	// also implements json.Marshaler is not a string: encoding/json prefers
-	// MarshalJSON over MarshalText, so the text form never appears in the
-	// output. Such a type falls through to kind-based reflection like any
-	// other direct json.Marshaler, mirroring the guard on step 4's promoted
-	// TextMarshaler branch.
-	if reflectkind.IsDirectTextMarshaler(t) && !reflectkind.ImplementsJSONMarshaler(t) {
+	// 5. Text serialization (encoding.TextAppender or encoding.TextMarshaler,
+	// direct or promoted). Either method always emits a string, so the schema
+	// is one; the built-in path supplies the type-level post-processing
+	// (comments, extender, $defs extraction). A type that also implements a
+	// json marshaler interface is not a string: encoding/json/v2 ranks
+	// MarshalJSONTo and MarshalJSON above both text methods, so the text form
+	// never appears in the output. Such a type falls through to kind-based
+	// reflection like any other direct json marshaler.
+	if reflectkind.ImplementsAnyTextMarshaler(t) &&
+		!reflectkind.ImplementsAnyJSONMarshaler(t) {
 		s := &Schema{Type: typename.String}
+
 		return g.handleBuiltinType(t, s, nullable)
 	}
 
@@ -709,21 +761,18 @@ func (g *generator) handleBuiltinType(t reflect.Type, s *Schema, nullable bool) 
 	return value, nil
 }
 
-// byteSliceNode returns the IR node for a byte slice, which encoding/json
-// renders as a base64-encoded string. It is a real nilable container: the node
-// carries base "string" and a bare payload ({contentEncoding: base64}), so
-// render encodes the container null as the ["null", "string"] type list (or the
-// bare {type: string} when WithNullable is off), the same shape a slice or map
-// uses. A []byte carries no const/enum, so the type-list encoding never has to
-// flip to the anyOf form. The container null rides on the node's nullable bit
-// (g.nullable, independent of the occurrence's pointer-ness), matching the
-// nilable-container policy.
-func (g *generator) byteSliceNode() *node {
+// byteSliceNode returns the IR node for a []byte, which encoding/json/v2
+// renders as a base64-encoded string (a nil one as ""). The node carries base
+// "string" and a bare payload ({contentEncoding: base64}); a pointer
+// occurrence (the threaded flag) renders its null as the ["null", "string"]
+// type list. A []byte carries no const/enum, so the type-list encoding never
+// has to flip to the anyOf form.
+func (g *generator) byteSliceNode(nullable bool) *node {
 	return &node{
 		kind:     kindValue,
 		payload:  &Schema{ContentEncoding: content.Base64},
 		base:     typename.String,
-		nullable: g.nullable,
+		nullable: nullable,
 	}
 }
 
@@ -858,20 +907,21 @@ const (
 )
 
 // schemaForSlice generates a schema for slice types.
-//
-//nolint:unparam // nullable is accepted for consistency with other schema-producing methods.
 func (g *generator) schemaForSlice(t reflect.Type, nullable bool) (*node, error) {
-	// Byte slices marshal to base64 strings in encoding/json. The element's kind
-	// (uint8) drives this, not the slice's exact type, so named byte-slice types
-	// (type Bytes []byte) and slices of named uint8 elements are base64 too,
-	// with the marshaler-bearing-element exception the predicate carries.
+	// A nil slice marshals as [] under encoding/json/v2's defaults (not
+	// null), so a bare slice occurrence admits no null; a pointer occurrence
+	// (the threaded flag) does, and so does every occurrence under
+	// [jsonv2.FormatNilSliceAsNull], whose marshal writes null for the nil
+	// slice.
+	nullable = g.containerNullable(nullable, g.nilSliceNull)
+
+	// An exact []byte marshals to a base64 string in encoding/json/v2. Only
+	// the unnamed builtin element gets that encoding: a named byte element
+	// makes the slice a JSON array of numbers.
 	if reflectkind.IsBase64ByteSlice(t) {
-		return g.byteSliceNode(), nil
+		return g.byteSliceNode(nullable), nil
 	}
 
-	// A slice is nil-able in Go, so it folds g.nullable into the node itself,
-	// independent of the threaded flag: a bare non-pointer []int field still
-	// produces the ["null","array"] type list.
 	items, err := g.schemaForType(t.Elem(), false)
 	if err != nil {
 		return nil, fmt.Errorf("element type: %w", err)
@@ -881,7 +931,7 @@ func (g *generator) schemaForSlice(t reflect.Type, nullable bool) (*node, error)
 		kind:     kindList,
 		payload:  &Schema{Items: items.payload},
 		items:    items,
-		nullable: g.nullable,
+		nullable: nullable,
 		base:     typename.Array,
 	}, nil
 }
@@ -892,6 +942,22 @@ func (g *generator) schemaForSlice(t reflect.Type, nullable bool) (*node, error)
 // generated independently so the result is a tree (no shared sub-schema
 // pointers), which the validator requires.
 func (g *generator) schemaForArray(t reflect.Type, nullable bool) (*node, error) {
+	// A [N]byte with the unnamed builtin element marshals as one base64
+	// string under encoding/json/v2, and unmarshaling requires the string to
+	// decode to exactly N bytes, so the encoded length is pinned to the
+	// padded base64 length.
+	if reflectkind.IsBase64ByteArray(t) {
+		enc := base64.StdEncoding.EncodedLen(t.Len())
+		s := &Schema{
+			Type:            typename.String,
+			ContentEncoding: content.Base64,
+			MinLength:       new(enc),
+			MaxLength:       new(enc),
+		}
+
+		return g.scalarNode(s, nullable), nil
+	}
+
 	n := t.Len()
 
 	prefix := make([]*node, n)
@@ -924,15 +990,25 @@ func (g *generator) schemaForArray(t reflect.Type, nullable bool) (*node, error)
 }
 
 // schemaForMap generates a schema for map types.
-//
-//nolint:unparam // nullable is accepted for consistency with other schema-producing methods.
 func (g *generator) schemaForMap(t reflect.Type, nullable bool) (*node, error) {
+	// The exact time.Duration key gets the same refusal its value occurrence
+	// does, since encoding/json/v2's native duration codec has no default
+	// representation and pre-empts the integer-kind key encoding.
+	if t.Key() == typeTimeDuration {
+		return nil, fmt.Errorf(
+			"%w: map key %s has no default representation in encoding/json/v2",
+			ErrUnsupportedMapKey, t.Key(),
+		)
+	}
+
 	if !reflectkind.IsValidMapKey(t.Key()) {
 		return nil, fmt.Errorf("%w: %s", ErrUnsupportedMapKey, t.Key())
 	}
 
-	// A map is nil-able in Go, so like a slice it folds g.nullable into the node
-	// itself, independent of the threaded flag.
+	// A nil map marshals as {} under encoding/json/v2's defaults (not null),
+	// so a bare map occurrence admits no null; a pointer occurrence (the
+	// threaded flag) does, and so does every occurrence under
+	// [jsonv2.FormatNilMapAsNull], whose marshal writes null for the nil map.
 	val, err := g.schemaForType(t.Elem(), false)
 	if err != nil {
 		return nil, fmt.Errorf("map value type: %w", err)
@@ -942,7 +1018,7 @@ func (g *generator) schemaForMap(t reflect.Type, nullable bool) (*node, error) {
 		kind:     kindMap,
 		payload:  &Schema{AdditionalProperties: val.payload},
 		items:    val,
-		nullable: g.nullable,
+		nullable: g.containerNullable(nullable, g.nilMapNull),
 		base:     typename.Object,
 	}, nil
 }
@@ -1025,8 +1101,30 @@ func (g *generator) buildStructSchema(t reflect.Type) (*node, Nullability, error
 	// then run tag interpreters. This ensures a tag interpreter observing
 	// FieldContext.Parent sees the complete sibling property set regardless of
 	// field order.
-	resolved := g.fields.Of(t)
+	resolved, err := g.fields.Of(t)
+	if err != nil {
+		return nil, NullFromReflection, fmt.Errorf("%w: %w", ErrInvalidJSONField, err)
+	}
+
 	fields, ghostWon := resolved.Fields, resolved.GhostWon
+
+	// An embedded fallback's members splice into the marshaled object after
+	// the named fields, so the map form's value schema becomes the object's
+	// extra-member constraint below. Built before the additionalProperties
+	// option is consulted, so a value type with no representation refuses
+	// generation under every option, exactly where v2's marshal refuses the
+	// value. The jsontext.Value form carries arbitrary object members and
+	// contributes no value schema; it leaves the object open instead.
+	var fallbackNode *node
+
+	if fb := resolved.Fallback; fb != nil && fb.Type != reflectkind.TypeJSONTextValue {
+		fallbackNode, err = g.schemaForType(fb.Type.Elem(), false)
+		if err != nil {
+			return nil, NullFromReflection, fmt.Errorf(
+				"embedded fallback field %s: %w", fb.StructField.Name, err,
+			)
+		}
+	}
 
 	var hasAllOf, hasShadowPartial bool
 
@@ -1067,9 +1165,76 @@ func (g *generator) buildStructSchema(t reflect.Type) (*node, Nullability, error
 		}
 	}
 
-	// Handle allOf + additionalProperties interaction. Decided here on embed
-	// presence and carried on the payload; render appends the embed branches.
-	if hasAllOf && !g.additionalProperties {
+	// PunchGhostWon gives each ghost-won name a true property. A ghost-won
+	// name appears in the marshaled object (the embed's field value is
+	// carried under it) with no emitted property: the embed's allOf branch
+	// holds the assertion. The branch is not guaranteed to evaluate the name
+	// -- an unrestricted TypeSchema renders as true and evaluates nothing --
+	// and a non-nil unevaluatedProperties would then reject the object's own
+	// marshaled output, so the parent evaluates each ghost-won name itself.
+	// The branch's assertions still apply through allOf, so this changes no
+	// verdict a property-enumerating branch produces.
+	punchGhostWon := func() {
+		for _, name := range ghostWon {
+			if _, ok := s.Properties[name]; ok {
+				continue
+			}
+
+			if s.Properties == nil {
+				s.Properties = map[string]*Schema{}
+			}
+
+			s.Properties[name] = &Schema{}
+			s.PropertyOrder = append(s.PropertyOrder, name)
+		}
+	}
+
+	// The extra-member slot: the fallback and allOf interactions with the
+	// default close, decided here on the payload; render appends the embed
+	// branches and swaps a provisional fallback payload for its rendered
+	// form.
+	switch {
+	case g.additionalProperties:
+		// WithAdditionalProperties(true) leaves the object open; a fallback's
+		// members pass like any other extra member, so no value schema is
+		// emitted (fallbackNode was still built, refusing a bad value type).
+
+	case resolved.Fallback != nil:
+		// The initial close never holds beside a fallback: v2 splices the
+		// fallback's members into the object as extra members.
+		s.AdditionalProperties = nil
+
+		switch {
+		case fallbackNode == nil:
+			// The jsontext.Value form: its members are arbitrary JSON, so the
+			// object stays fully open and ghost punching has nothing to
+			// guard.
+
+		case hasShadowPartial:
+			// Open, dropping the value schema: the same accept-over-tighten
+			// tradeoff the shadow-partial wrap makes without a fallback.
+
+		case hasAllOf && g.profile.closeWithUnevaluated:
+			// The branches evaluate the promoted names, so the fallback's
+			// value schema judges exactly the unevaluated rest: the spliced
+			// members (a fallback key colliding with a named field is a
+			// marshal-time duplicate-name error and never appears).
+			s.UnevaluatedProperties = fallbackNode.payload
+			obj.items = fallbackNode
+
+			punchGhostWon()
+
+		case hasAllOf:
+			// Draft-07 beside allOf: open, the dialect's existing
+			// degradation; additionalProperties would wrongly constrain the
+			// embed-promoted names.
+
+		default:
+			s.AdditionalProperties = fallbackNode.payload
+			obj.items = fallbackNode
+		}
+
+	case hasAllOf:
 		switch {
 		case hasShadowPartial:
 			// A partially shadowed composition can fail against the marshaled
@@ -1083,27 +1248,7 @@ func (g *generator) buildStructSchema(t reflect.Type) (*node, Nullability, error
 			s.AdditionalProperties = nil
 			s.UnevaluatedProperties = &Schema{Not: &Schema{}}
 
-			// A ghost-won name appears in the marshaled object (the embed's
-			// field value is carried under it) with no emitted property: the
-			// embed's allOf branch holds the assertion. The branch is not
-			// guaranteed to evaluate the name -- an unrestricted TypeSchema
-			// renders as true and evaluates nothing -- and the close would
-			// then reject the object's own marshaled output, so the parent
-			// evaluates each ghost-won name itself with a true property. The
-			// branch's assertions still apply through allOf, so this changes
-			// no verdict a property-enumerating branch produces.
-			for _, name := range ghostWon {
-				if _, ok := s.Properties[name]; ok {
-					continue
-				}
-
-				if s.Properties == nil {
-					s.Properties = map[string]*Schema{}
-				}
-
-				s.Properties[name] = &Schema{}
-				s.PropertyOrder = append(s.PropertyOrder, name)
-			}
+			punchGhostWon()
 
 		default:
 			// Draft-07: omit additionalProperties when allOf is in use.
@@ -1112,7 +1257,7 @@ func (g *generator) buildStructSchema(t reflect.Type) (*node, Nullability, error
 	}
 
 	// Type-level comment.
-	err := g.applyTypeDescription(t, s)
+	err = g.applyTypeDescription(t, s)
 	if err != nil {
 		return nil, NullFromReflection, err
 	}
@@ -1187,19 +1332,42 @@ func (g *generator) buildFieldSchema(
 	// pointer the string lives on the node's null-branch base rather than the
 	// payload, so the tag is handed a view that states the coerced type outright.
 	//
-	// On a stringable type the override fully replaces the field schema, so
+	// On a stringifiable type the override fully replaces the field schema, so
 	// generating the field's own type is skipped: it would be wasted work and,
 	// for a type extracted to $defs (a provider or extender), would register an
 	// orphan definition and drop the provider's constraints.
 	//
-	// A type that implements json.Marshaler (directly or through its pointer
-	// method set) is exempt: encoding/json routes such a field through
-	// MarshalJSON, which ignores the ",string" option and emits the marshaler's
-	// raw bytes, so the field keeps the kind-based reflection a direct
-	// marshaler otherwise gets rather than a string schema its output never
-	// satisfies.
-	stringOverride := fi.JSONString && reflectkind.IsStringableType(fieldType) &&
-		!reflectkind.ImplementsJSONMarshaler(fieldType)
+	// A marshaler-bearing type (any of the four marshal interfaces, on the
+	// type or through its pointer method set) is exempt: encoding/json/v2
+	// routes such a field through the method, which ignores the ",string"
+	// option, so the field keeps the kind-based reflection a direct marshaler
+	// otherwise gets rather than a string schema its output never satisfies.
+	// The one marshaler that honors the flag is [encoding/json.Number], whose
+	// MarshalJSONTo respects StringifyNumbers; [reflectkind.IsStringifiableNumber]
+	// includes it, and its exemption is skipped. [time.Time] carries
+	// MarshalJSON but is not exempt either: v2's native time codec pre-empts
+	// the method and rejects the flag outright, at any pointer depth.
+	//
+	// On every other type the flag is a SemanticError under v2 (the flag
+	// reaches a default marshaler that encodes no number), so generation
+	// refuses the field exactly where v2 refuses the value.
+	// The marshaler check covers the fully dereferenced type too: v2's
+	// pointer marshaler delegates level by level, so a method anywhere down
+	// the chain serializes the value and the flag is ignored there as well.
+	derefField := numkind.DerefType(fieldType)
+	bearsMarshaler := reflectkind.ImplementsAnyMarshaler(fieldType) ||
+		(derefField != fieldType && reflectkind.ImplementsAnyMarshaler(derefField))
+	marshalerExempt := bearsMarshaler &&
+		!reflectkind.IsJSONNumber(derefField) && derefField != typeTime
+	stringOverride := fi.JSONString && !marshalerExempt &&
+		reflectkind.IsStringifiableNumber(fieldType)
+
+	if fi.JSONString && !marshalerExempt && !stringOverride {
+		return nil, fmt.Errorf(
+			"%w: invalid use of `string` tag option on %s", ErrInvalidJSONField, fieldType,
+		)
+	}
+
 	tagTypeSchema := (*Schema)(nil)
 
 	var (
@@ -1306,7 +1474,15 @@ func (g *generator) buildFieldSchema(
 		parent.payload.Properties = map[string]*Schema{}
 	}
 
-	required := !fi.Omitempty && !fi.Omitzero
+	// Encoding/json/v2's omitempty omits a field only when its encoded value
+	// is an empty JSON value (null, "", {}, []), so a field whose type can
+	// never encode one stays required even under the option. A field promoted
+	// through a pointer embed (Optional) is omitted whole when the embed is
+	// nil, whatever its kind. [jsonv2.OmitZeroStructFields] makes every field
+	// behave as ,omitzero, and every Go type has a zero value, so no required
+	// entry survives it.
+	required := (!fi.Omitempty || !omitEmptyCanOmit(fieldType, bearsMarshaler)) &&
+		!fi.Omitzero && !fi.Optional && !g.omitZeroFields
 	if required {
 		parent.payload.Required = append(parent.payload.Required, fi.JSONName)
 	}
@@ -1316,6 +1492,33 @@ func (g *generator) buildFieldSchema(
 	parent.props = append(parent.props, nodeProp{name: fi.JSONName, schema: fieldNode})
 
 	return fieldNode, nil
+}
+
+// omitEmptyCanOmit reports whether a field of type t can ever be omitted by
+// json:",omitempty" under encoding/json/v2: the kinds whose encoding can be
+// an empty JSON value (a zero-length string, map, slice, or [0]-array; a nil
+// pointer or interface; a struct whose members all omit, which encodes {}),
+// plus any marshaler-bearing type, whose method may emit one (v2 checks the
+// encoded output). A plain bool or numeric field never encodes an empty
+// value, so the option never omits it and the field stays required. A struct
+// kind answers true without inspecting its fields: a struct that always
+// encodes a member is never omitted, so the answer is looser than v2 there,
+// and looser is the safe direction for required. The caller passes
+// bearsMarshaler, which it already computed for the json:",string" exemption.
+func omitEmptyCanOmit(t reflect.Type, bearsMarshaler bool) bool {
+	switch t.Kind() {
+	case reflect.String, reflect.Map, reflect.Slice, reflect.Pointer,
+		reflect.Interface, reflect.Struct:
+		return true
+	case reflect.Array:
+		if t.Len() == 0 {
+			return true
+		}
+
+	default:
+	}
+
+	return bearsMarshaler
 }
 
 // rebuildOverriddenField rebuilds a field node after a type= override replaced
@@ -1344,6 +1547,14 @@ func rebuildOverriddenField(fieldNode *node) *node {
 		(len(fieldNode.payload.PrefixItems) > 0 || len(fieldNode.payload.ItemsArray) > 0):
 		rebuilt.kind = kindTuple
 		rebuilt.prefix = fieldNode.prefix
+
+	case fieldNode.kind == kindObject && fieldNode.items != nil:
+		// An inline struct field carrying an embedded fallback keeps the
+		// fallback value node, so render still swaps the extra-member slot's
+		// provisional payload for its rendered form (null wrap and final
+		// $ref name included).
+		rebuilt.kind = kindObject
+		rebuilt.items = fieldNode.items
 	}
 
 	return rebuilt

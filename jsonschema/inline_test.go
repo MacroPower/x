@@ -2,7 +2,8 @@ package jsonschema_test
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"testing"
 	"testing/fstest"
@@ -1723,7 +1724,7 @@ func TestInlineDeepCopyIndependence(t *testing.T) {
 			},
 		},
 		"default raw message byte": {
-			schema: &jsonschema.Schema{Default: json.RawMessage(`"a"`)},
+			schema: &jsonschema.Schema{Default: jsontext.Value(`"a"`)},
 			mutate: func(inlined *jsonschema.Schema) { inlined.Default[1] = 'X' },
 			check: func(t *testing.T, original *jsonschema.Schema) {
 				t.Helper()

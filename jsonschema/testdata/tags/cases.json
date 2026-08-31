@@ -162,7 +162,7 @@
         "want": "reject"
       },
       {
-        "json": -0,
+        "json": 0,
         "want": "reject"
       }
     ]
@@ -196,10 +196,7 @@
     "jsonschema": "enum=1|2|3",
     "validate": "oneof=1 2 3",
     "schema": {
-      "type": [
-        "null",
-        "array"
-      ],
+      "type": "array",
       "items": {
         "type": "string",
         "enum": [
@@ -231,31 +228,19 @@
       },
       {
         "json": null,
-        "want": "accept"
+        "want": "reject"
       }
     ]
   },
   {
-    "name": "a quoted string field double-encodes",
-    "note": "77744d1: the instance is the JSON-quoted text, so the literal is too",
+    "name": "a quoted string field is refused",
+    "note": "encoding/json/v2 stringifies numbers only; ,string on a string kind is a SemanticError (was 77744d1's double-encoding)",
     "type": "string",
     "json": "v,string",
     "jsonschema": "const=abc",
     "validate": "eq=abc",
-    "schema": {
-      "type": "string",
-      "const": "\"abc\""
-    },
-    "instances": [
-      {
-        "json": "\"abc\"",
-        "want": "accept"
-      },
-      {
-        "json": "abc",
-        "want": "reject"
-      }
-    ]
+    "jsonschemaError": "any",
+    "validateError": "any"
   },
   {
     "name": "a coerced pointer keeps the coercion on the value branch",
@@ -310,10 +295,7 @@
     "jsonschema": "enum=1|2|3",
     "validate": "oneof=1 2 3",
     "schema": {
-      "type": [
-        "null",
-        "array"
-      ],
+      "type": "array",
       "items": {
         "type": "integer",
         "enum": [
@@ -339,7 +321,7 @@
       },
       {
         "json": null,
-        "want": "accept"
+        "want": "reject"
       }
     ]
   },
@@ -410,10 +392,7 @@
     "jsonschemaError": "ErrUnsupported",
     "validate": "unique",
     "schema": {
-      "type": [
-        "null",
-        "object"
-      ],
+      "type": "object",
       "additionalProperties": {
         "type": "integer"
       }
@@ -427,7 +406,7 @@
       },
       {
         "json": null,
-        "want": "accept"
+        "want": "reject"
       }
     ]
   },
@@ -593,10 +572,7 @@
     "jsonschema": "minProperties=1",
     "validate": "min=1",
     "schema": {
-      "type": [
-        "null",
-        "object"
-      ],
+      "type": "object",
       "minProperties": 1,
       "additionalProperties": {
         "type": "integer"
@@ -623,10 +599,7 @@
     "jsonschema": "uniqueItems=true",
     "validate": "unique",
     "schema": {
-      "type": [
-        "null",
-        "array"
-      ],
+      "type": "array",
       "items": {
         "type": "string"
       },
@@ -656,15 +629,9 @@
     "json": "v",
     "validate": "dive,dive,min=2",
     "schema": {
-      "type": [
-        "null",
-        "array"
-      ],
+      "type": "array",
       "items": {
-        "type": [
-          "null",
-          "array"
-        ],
+        "type": "array",
         "items": {
           "type": "string",
           "minLength": 2
@@ -697,10 +664,7 @@
     "json": "v",
     "jsonschema": "minLength=1",
     "schema": {
-      "type": [
-        "null",
-        "string"
-      ],
+      "type": "string",
       "minLength": 1,
       "contentEncoding": "base64"
     },
@@ -715,7 +679,7 @@
       },
       {
         "json": null,
-        "want": "accept"
+        "want": "reject"
       }
     ]
   },
@@ -864,23 +828,17 @@
     ]
   },
   {
-    "name": "required on a slice forbids null beside the size floor",
-    "note": "a nil slice marshals as null, which go-playground's required rejects and minItems never reaches",
+    "name": "required on a slice keeps the size floor alone",
+    "note": "a nil slice marshals as [] under encoding/json/v2, so required has only the emptiness to reject",
     "type": "[]string",
     "json": "v",
     "validate": "required",
     "schema": {
-      "type": [
-        "null",
-        "array"
-      ],
+      "type": "array",
       "items": {
         "type": "string"
       },
-      "minItems": 1,
-      "not": {
-        "const": null
-      }
+      "minItems": 1
     },
     "instances": [
       {
@@ -900,23 +858,17 @@
     ]
   },
   {
-    "name": "required on a map forbids null beside the size floor",
-    "note": "a nil map marshals as null, which go-playground's required rejects and minProperties never reaches",
+    "name": "required on a map keeps the size floor alone",
+    "note": "a nil map marshals as {} under encoding/json/v2, so required has only the emptiness to reject",
     "type": "map[string]int",
     "json": "v",
     "validate": "required",
     "schema": {
-      "type": [
-        "null",
-        "object"
-      ],
-      "minProperties": 1,
+      "type": "object",
       "additionalProperties": {
         "type": "integer"
       },
-      "not": {
-        "const": null
-      }
+      "minProperties": 1
     },
     "instances": [
       {
@@ -929,28 +881,22 @@
       },
       {
         "json": {
-          "a": 1
+          "k": 1
         },
         "want": "accept"
       }
     ]
   },
   {
-    "name": "required on a byte slice forbids null beside the size floor",
-    "note": "a nil byte slice marshals as null, which go-playground's required rejects and minLength never reaches",
+    "name": "required on a byte slice keeps the size floor alone",
+    "note": "a nil []byte marshals as \"\" under encoding/json/v2, so required has only the emptiness to reject",
     "type": "[]byte",
     "json": "v",
     "validate": "required",
     "schema": {
-      "type": [
-        "null",
-        "string"
-      ],
-      "minLength": 1,
-      "not": {
-        "const": null
-      },
-      "contentEncoding": "base64"
+      "type": "string",
+      "contentEncoding": "base64",
+      "minLength": 1
     },
     "instances": [
       {
@@ -968,28 +914,19 @@
     ]
   },
   {
-    "name": "a dive carries required onto a nilable element",
-    "note": "a nil inner slice marshals as null, which go-playground's dive,required rejects per element",
+    "name": "a dive carries required onto a nested element",
+    "note": "a nil inner slice marshals as [] under encoding/json/v2, so the per-element required keeps only its size floor",
     "type": "[][]string",
     "json": "v",
     "validate": "dive,required",
     "schema": {
-      "type": [
-        "null",
-        "array"
-      ],
+      "type": "array",
       "items": {
-        "type": [
-          "null",
-          "array"
-        ],
+        "type": "array",
         "items": {
           "type": "string"
         },
-        "minItems": 1,
-        "not": {
-          "const": null
-        }
+        "minItems": 1
       }
     },
     "instances": [
@@ -1015,7 +952,7 @@
       },
       {
         "json": null,
-        "want": "accept"
+        "want": "reject"
       }
     ]
   },
@@ -1061,99 +998,28 @@
     ]
   },
   {
-    "name": "a null default lands on a nilable slice",
-    "note": "a bare slice admits null, so the tag's null literal is a value it can hold",
+    "name": "a null default on a bare slice is rejected",
+    "note": "a nil slice marshals as [] under encoding/json/v2, so the bare occurrence admits no null",
     "type": "[]string",
     "json": "v",
     "jsonschema": "default=null",
-    "schema": {
-      "type": [
-        "null",
-        "array"
-      ],
-      "items": {
-        "type": "string"
-      },
-      "default": null
-    },
-    "instances": [
-      {
-        "json": null,
-        "want": "accept"
-      },
-      {
-        "json": [
-          "a"
-        ],
-        "want": "accept"
-      },
-      {
-        "json": 1,
-        "want": "reject"
-      }
-    ]
+    "jsonschemaError": "ErrNullNotAdmitted"
   },
   {
-    "name": "a null default lands on a nilable map",
-    "note": "the same null admission on a map",
+    "name": "a null default on a bare map is rejected",
+    "note": "a nil map marshals as {} under encoding/json/v2, so the bare occurrence admits no null",
     "type": "map[string]int",
     "json": "v",
     "jsonschema": "default=null",
-    "schema": {
-      "type": [
-        "null",
-        "object"
-      ],
-      "additionalProperties": {
-        "type": "integer"
-      },
-      "default": null
-    },
-    "instances": [
-      {
-        "json": null,
-        "want": "accept"
-      },
-      {
-        "json": {
-          "a": 1
-        },
-        "want": "accept"
-      },
-      {
-        "json": 1,
-        "want": "reject"
-      }
-    ]
+    "jsonschemaError": "ErrNullNotAdmitted"
   },
   {
-    "name": "a null default lands on a nilable byte slice",
-    "note": "a []byte encodes as a base64 string and still admits the null its nil marshals as",
+    "name": "a null default on a bare byte slice is rejected",
+    "note": "a nil []byte marshals as \"\" under encoding/json/v2, so the bare occurrence admits no null",
     "type": "[]byte",
     "json": "v",
     "jsonschema": "default=null",
-    "schema": {
-      "type": [
-        "null",
-        "string"
-      ],
-      "contentEncoding": "base64",
-      "default": null
-    },
-    "instances": [
-      {
-        "json": null,
-        "want": "accept"
-      },
-      {
-        "json": "YWJj",
-        "want": "accept"
-      },
-      {
-        "json": 1,
-        "want": "reject"
-      }
-    ]
+    "jsonschemaError": "ErrNullNotAdmitted"
   },
   {
     "name": "a const on a struct pointer is rejected",

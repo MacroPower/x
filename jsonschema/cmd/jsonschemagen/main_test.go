@@ -2,7 +2,7 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"os"
 	"os/exec"
@@ -33,7 +33,8 @@ func TestRenderMainGo(t *testing.T) {
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"os"
 	"reflect"
@@ -52,7 +53,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}
-	data, err := json.MarshalIndent(schema, "", "  ")
+	data, err := json.Marshal(schema, jsontext.WithIndent("  "))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
@@ -77,7 +78,8 @@ func main() {
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"os"
 	"reflect"
@@ -97,7 +99,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}
-	data, err := json.MarshalIndent(schema, "", "\t")
+	data, err := json.Marshal(schema, jsontext.WithIndent("\t"))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
@@ -125,7 +127,8 @@ func main() {
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"os"
 	"reflect"
@@ -148,7 +151,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}
-	data, err := json.MarshalIndent(schema, "", "    ")
+	data, err := json.Marshal(schema, jsontext.WithIndent("    "))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
@@ -236,7 +239,7 @@ func moduleDir(t *testing.T) string {
 // testGoVersion is the go directive for generated test modules. It must be at
 // least the jsonschema module's own go directive (they require jsonschema), so
 // it is pinned rather than derived from the running toolchain.
-const testGoVersion = "1.26.0"
+const testGoVersion = "1.27.0"
 
 // createTestModule creates a temporary Go module with the given type definition
 // and returns the module directory.

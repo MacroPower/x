@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/jsontag"
 )
@@ -54,7 +55,10 @@ func TestParse_EmbeddedGenericFieldName(t *testing.T) {
 			t.Parallel()
 
 			f := tc.owner.Field(0)
-			assert.Equal(t, tc.want, jsontag.Parse(f))
+
+			info, err := jsontag.Parse(f)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, info)
 		})
 	}
 }

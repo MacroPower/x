@@ -1,7 +1,8 @@
 package jsonschema_test
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -10,6 +11,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	jsonv1 "encoding/json"
 
 	"go.jacobcolvin.com/x/jsonschema"
 	"go.jacobcolvin.com/x/jsonschema/internal/tagmodel"
@@ -28,8 +31,8 @@ const fixturePath = "testdata/tags/cases.json"
 
 // tagInstance is one instance a row's schema must accept or reject.
 type tagInstance struct {
-	JSON json.RawMessage `json:"json"`
-	Want string          `json:"want"`
+	JSON jsontext.Value `json:"json"`
+	Want string         `json:"want"`
 }
 
 // tagCase is one row: a field shape, the rule as each dialect spells it, and
@@ -37,16 +40,16 @@ type tagInstance struct {
 // an expected error instead of a schema, naming the sentinel it carries or
 // anyGenerationError where the interpreter raises a plain error with none.
 type tagCase struct {
-	Name            string          `json:"name"`
-	Note            string          `json:"note"`
-	Type            string          `json:"type"`
-	JSON            string          `json:"json"`
-	JSONSchema      string          `json:"jsonschema"`
-	Validate        string          `json:"validate"`
-	Schema          json.RawMessage `json:"schema"`
-	JSONSchemaError string          `json:"jsonschemaError"`
-	ValidateError   string          `json:"validateError"`
-	Instances       []tagInstance   `json:"instances"`
+	Name            string         `json:"name"`
+	Note            string         `json:"note"`
+	Type            string         `json:"type"`
+	JSON            string         `json:"json"`
+	JSONSchema      string         `json:"jsonschema"`
+	Validate        string         `json:"validate"`
+	Schema          jsontext.Value `json:"schema"`
+	JSONSchemaError string         `json:"jsonschemaError"`
+	ValidateError   string         `json:"validateError"`
+	Instances       []tagInstance  `json:"instances"`
 }
 
 // fixtureObject backs the registry's fixtureObject and *fixtureObject
@@ -76,8 +79,8 @@ func fixtureTypes() map[string]reflect.Type {
 		"[][]string":     reflect.TypeFor[[][]string](),
 		"map[string]int": reflect.TypeFor[map[string]int](),
 		"[]byte":         reflect.TypeFor[[]byte](),
-		"RawMessage":     reflect.TypeFor[json.RawMessage](),
-		"json.Number":    reflect.TypeFor[json.Number](),
+		"RawMessage":     reflect.TypeFor[jsontext.Value](),
+		"json.Number":    reflect.TypeFor[jsonv1.Number](),
 		"time.Time":      reflect.TypeFor[time.Time](),
 		"crossLevel":     reflect.TypeFor[crossLevel](),
 		"[]crossLevel":   reflect.TypeFor[[]crossLevel](),
@@ -220,7 +223,7 @@ func assertFixtureVerdicts(t *testing.T, tc tagCase, s *jsonschema.Schema) {
 	require.NoError(t, err)
 
 	for _, inst := range tc.Instances {
-		doc, err := json.Marshal(map[string]json.RawMessage{"v": inst.JSON})
+		doc, err := json.Marshal(map[string]jsontext.Value{"v": inst.JSON})
 		require.NoError(t, err)
 
 		err = validator.ValidateJSON(t.Context(), doc)
@@ -273,7 +276,7 @@ func TestTagFixturesCrossDialectVerdictsAgree(t *testing.T) {
 				require.NoError(t, err)
 
 				for _, inst := range tc.Instances {
-					doc, err := json.Marshal(map[string]json.RawMessage{"v": inst.JSON})
+					doc, err := json.Marshal(map[string]jsontext.Value{"v": inst.JSON})
 					require.NoError(t, err)
 
 					verdicts[key] = append(verdicts[key],

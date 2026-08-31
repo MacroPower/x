@@ -2,7 +2,8 @@ package jsonschema
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"reflect"
 	"slices"
@@ -228,31 +229,88 @@ func WithDefinitions(enabled bool) GenerateOption {
 // on generated object schemas. By default, generated object schemas include
 // "additionalProperties": false, disallowing extra keys.
 // WithAdditionalProperties(true) omits both "additionalProperties": false and
-// "unevaluatedProperties": false.
+// "unevaluatedProperties": false, and an embedded fallback's value schema
+// with them. The option asks for no extra-member constraint, so the object
+// stays fully open. The fallback's value type is still resolved, so one with
+// no representation refuses generation under every option.
 func WithAdditionalProperties(allowed bool) GenerateOption {
 	return generateOptionFunc(func(g *generator) { g.additionalProperties = allowed })
 }
 
-// WithNullable controls whether nil-able Go types (slices, maps, pointers,
-// []byte) are made nullable. Default: true. When false, []T -> {"type":"array"},
-// map -> {"type":"object"}, *T -> the bare value schema, no null branch. A nil
-// field that [encoding/json] marshals to null is then outside the generated
-// schema, so turn it off only where absent values are never serialized as null.
+// WithNullable controls whether pointer occurrences and intercepted interface
+// types admit null. Default: true. When false, *T yields the bare value
+// schema with no null branch, so the nil pointer's marshaled null is outside
+// the generated schema; turn it off only where absent values are never
+// serialized as null. Slices, maps, and []byte take no null either way, since
+// [encoding/json/v2] marshals a nil one as its empty instance.
 func WithNullable(allowed bool) GenerateOption {
 	return generateOptionFunc(func(g *generator) { g.nullable = allowed })
 }
 
+// WithJSONOptions makes generation honor [encoding/json/v2] marshal options
+// that change the marshaled shape, so the generated schema accepts exactly
+// what [json.Marshal] emits for a value under the same options. Repeated
+// calls join with [json.JoinOptions] semantics, where later options win.
+// Three options are honored:
+//
+//   - [json.FormatNilSliceAsNull]: every slice and []byte occurrence admits
+//     null, since the marshal writes null for a nil one.
+//   - [json.FormatNilMapAsNull]: every map occurrence admits null likewise.
+//   - [json.OmitZeroStructFields]: every struct field behaves as ,omitzero,
+//     so no required entries are emitted.
+//
+// [WithNullable] with false wins over the two format options. It stays the
+// one promise that no marshal path writes null for an absent value, so no
+// null branch appears anywhere. [WithDefaultsFrom] marshals its instance
+// under these options, so seeded defaults match the caller's marshal.
+// [Validator.ValidateValue] marshals with the defaults, so under
+// non-default options marshal the value with them and validate the bytes
+// through [Validator.ValidateJSON] or [Validator.ValidateReader].
+//
+// Two options change the marshaled shape in ways generation does not model
+// and are refused with [ErrUnsupportedJSONOption] when set:
+// [json.StringifyNumbers] with true (it stringifies numbers inside
+// containers, beyond what the per-field ,string tag machinery reaches) and a
+// non-nil [json.WithMarshalers] (its output shape is unknowable). Options
+// with no effect on the marshaled shape are ignored: unmarshal-side options
+// such as [json.MatchCaseInsensitiveNames] and [json.RejectUnknownMembers],
+// [json.Deterministic], and jsontext formatting.
+func WithJSONOptions(opts ...json.Options) GenerateOption {
+	return generateOptionFunc(func(g *generator) {
+		// JoinOptions skips nil sources, so the first call needs no guard.
+		joined := json.JoinOptions(g.jsonOpts, json.JoinOptions(opts...))
+		g.jsonOpts = joined
+
+		// Re-derive every flag and the refusal from the full joined value,
+		// so a later call can also unset what an earlier one set.
+		g.nilSliceNull, _ = json.GetOption(joined, json.FormatNilSliceAsNull)
+		g.nilMapNull, _ = json.GetOption(joined, json.FormatNilMapAsNull)
+		g.omitZeroFields, _ = json.GetOption(joined, json.OmitZeroStructFields)
+
+		g.jsonOptsErr = nil
+
+		if v, _ := json.GetOption(joined, json.StringifyNumbers); v {
+			g.jsonOptsErr = fmt.Errorf("%w: StringifyNumbers", ErrUnsupportedJSONOption)
+		}
+
+		if m, _ := json.GetOption(joined, json.WithMarshalers); m != nil {
+			g.jsonOptsErr = fmt.Errorf("%w: WithMarshalers", ErrUnsupportedJSONOption)
+		}
+	})
+}
+
 // WithDefaultsFrom seeds property defaults on the root object schema from an
 // instance of the generated type. After generation, instance is marshaled
-// with encoding/json; each top-level key in the output that matches a root
-// property gets its value as that property's Default, overwriting any
-// default set via struct tags. Keys omitted by omitempty or omitzero leave
-// Default unset, so presence follows the json tags exactly.
+// with [encoding/json/v2] under the [WithJSONOptions] options, so seeded
+// defaults match the caller's marshal; each top-level key in the output that
+// matches a root property gets its value as that property's Default,
+// overwriting any default set via struct tags. Keys omitted by omitempty or
+// omitzero leave Default unset, so presence follows the json tags exactly.
 //
 // A nil instance restores the default, where no defaults are seeded,
 // following the package's nil convention. A typed nil pointer is a value,
-// not a reset: it marshals to JSON null rather than to an object, so it
-// returns the error below.
+// not a reset; it marshals to JSON null rather than to an object, and
+// Generate then reports the non-object error below.
 //
 // Generate returns an error wrapping [ErrInvalidDefaultsInstance] when the
 // pointer-dereferenced dynamic type of instance is not the
@@ -314,12 +372,15 @@ func (g *generator) applyInstanceDefaults(instance any, rootType reflect.Type, s
 			ErrInvalidDefaultsInstance, instType, rootType)
 	}
 
-	data, err := json.Marshal(instance)
+	// The WithJSONOptions options apply, so a seeded default is what the
+	// caller's own marshal would emit (a nil slice seeds null under
+	// FormatNilSliceAsNull, say).
+	data, err := json.Marshal(instance, g.marshalOptions()...)
 	if err != nil {
 		return fmt.Errorf("marshal defaults instance: %w", err)
 	}
 
-	var values map[string]json.RawMessage
+	var values map[string]jsontext.Value
 
 	err = json.Unmarshal(data, &values)
 	if err != nil {

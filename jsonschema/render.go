@@ -61,12 +61,15 @@ func (g *generator) renderBase(n *node) *Schema {
 			n.payload.AllOf = append(n.payload.AllOf, branch)
 		}
 
+		// An embedded fallback's value node fills whichever extra-member slot
+		// the build chose (exactly one of the two).
+		g.renderSlot(&n.payload.AdditionalProperties, n.items)
+		g.renderSlot(&n.payload.UnevaluatedProperties, n.items)
+
 		return n.payload
 
 	case kindList:
-		if n.payload.Items == n.items.payload {
-			n.payload.Items = g.render(n.items)
-		}
+		g.renderSlot(&n.payload.Items, n.items)
 
 		return n.payload
 
@@ -85,9 +88,7 @@ func (g *generator) renderBase(n *node) *Schema {
 		return n.payload
 
 	case kindMap:
-		if n.payload.AdditionalProperties == n.items.payload {
-			n.payload.AdditionalProperties = g.render(n.items)
-		}
+		g.renderSlot(&n.payload.AdditionalProperties, n.items)
 
 		return n.payload
 
@@ -98,6 +99,16 @@ func (g *generator) renderBase(n *node) *Schema {
 
 	default:
 		return n.payload
+	}
+}
+
+// renderSlot swaps one payload slot's provisional child payload for the
+// child's rendered form. A slot a build-time extender replaced or deleted no
+// longer holds the child's payload, misses the identity check, and survives
+// as written.
+func (g *generator) renderSlot(slot **Schema, child *node) {
+	if child != nil && *slot == child.payload {
+		*slot = g.render(child)
 	}
 }
 

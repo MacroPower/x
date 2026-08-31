@@ -1,6 +1,7 @@
 package jsonschema
 
 import (
+	"encoding/json/jsontext"
 	"errors"
 	"strings"
 
@@ -13,9 +14,32 @@ var (
 	// representation (e.g., func, chan, complex, [unsafe.Pointer]).
 	ErrUnsupportedType = errors.New("unsupported type")
 
-	// ErrUnsupportedMapKey is returned when a map key type is neither
-	// string, an integer type, nor an [encoding.TextMarshaler].
+	// ErrUnsupportedMapKey is returned when a map key type cannot encode as
+	// a JSON object member name because it is none of a string kind, an
+	// integer or float kind, or a marshaler-bearing type.
 	ErrUnsupportedMapKey = errors.New("unsupported map key type")
+
+	// ErrUnsupportedJSONOption is returned by generation when
+	// [WithJSONOptions] carries an option that changes the marshaled shape
+	// in a way generation does not model: [encoding/json/v2.StringifyNumbers]
+	// with true, or a non-nil [encoding/json/v2.WithMarshalers]. Refusing
+	// loudly keeps the generated-schema-accepts-the-marshal property honest;
+	// silently ignoring either option would emit a schema that rejects what
+	// the configured marshal writes.
+	ErrUnsupportedJSONOption = errors.New("unsupported encoding/json/v2 option for generation")
+
+	// ErrInvalidJSONField is returned when a struct field declaration cannot
+	// marshal under [encoding/json/v2]: a malformed json tag, two fields of
+	// one struct conflicting over a JSON name, a json tag on an unexported
+	// field, an invalid embedded field or fallback (two fallback fields in
+	// one declaration, a non-qualifying type or key under json:",embed", or
+	// json:",embed" combined with a name or another option), a
+	// json:",string" on a field that encodes no number, a `format` tag
+	// option (cut from stable v2, go.dev/issue/79071), or a struct with
+	// fields but none serializable (every field unexported and untagged).
+	// Generation refuses the type exactly where [encoding/json/v2.Marshal]
+	// would.
+	ErrInvalidJSONField = errors.New("invalid json field declaration")
 
 	// ErrInvalidType is returned when a schema's type keyword names something
 	// other than the seven JSON Schema type names ("null", "boolean",
@@ -322,13 +346,17 @@ type ValidationError struct {
 	schemaSegs []Segment
 
 	// InstancePath is the JSON Pointer path to the failing location in the
-	// input data (e.g., "/address/city").
-	InstancePath string
+	// input data (e.g., "/address/city"). The [jsontext.Pointer] type carries
+	// helpers such as Tokens, Parent, and LastToken; for the array-index vs
+	// numeric-key distinction a pointer string cannot make, see
+	// [ValidationError.InstanceSegments].
+	InstancePath jsontext.Pointer
 
 	// SchemaPath is the JSON Pointer path to the keyword that triggered the
 	// failure within the schema
-	// (e.g., "/properties/address/properties/city/minLength").
-	SchemaPath string
+	// (e.g., "/properties/address/properties/city/minLength"), typed like
+	// [ValidationError.InstancePath].
+	SchemaPath jsontext.Pointer
 
 	// Keyword is the JSON Schema keyword that failed (e.g., "type", "required",
 	// "minLength", "pattern").
@@ -421,7 +449,7 @@ func (e *ValidationError) writeError(b *strings.Builder, depth int, seen map[*Va
 		b.WriteString(indent)
 
 		if e.InstancePath != "" {
-			b.WriteString(e.InstancePath)
+			b.WriteString(string(e.InstancePath))
 		}
 
 		if e.Keyword != "" {

@@ -2,7 +2,8 @@ package jsonschema
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"reflect"
 	"slices"
@@ -18,8 +19,9 @@ const (
 	// A kindValue node is a leaf: a scalar, an unrestricted schema, a []byte, or
 	// an opaque override/provider payload. Its payload is rendered as-is.
 	kindValue nodeKind = iota
-	// A kindObject node is a struct: props hold its declared properties and
-	// embeds its allOf/anyOf composition branches.
+	// A kindObject node is a struct: props hold its declared properties,
+	// embeds its allOf/anyOf composition branches, and items its embedded
+	// fallback's value node when the struct declares a map fallback.
 	kindObject
 	// A kindList node is a slice: items holds the element node.
 	kindList
@@ -40,7 +42,7 @@ const (
 type node struct {
 	payload *Schema   // bare type-derived payload; sub-schema fields hold child payloads (shared)
 	def     *defEntry // non-nil iff kindRef
-	items   *node     // slice element / map value
+	items   *node     // slice element / map value / object fallback value
 	// The authored canvas carries the field-level facts that field and element
 	// hooks (the jsonschema tag, the comment provider, tag interpreters) declare:
 	// annotations, value-scoped const/enum, and numeric/string/array bounds. It is
@@ -415,7 +417,7 @@ func nullLiteralReport(n *node) error {
 // authored default, and [generator.applyInstanceDefaults], testing a marshaled
 // field value. Whitespace around a JSON value is insignificant, so the
 // comparison trims it first.
-func isRawNull(raw json.RawMessage) bool {
+func isRawNull(raw jsontext.Value) bool {
 	return bytes.Equal(bytes.TrimSpace(raw), []byte("null"))
 }
 
@@ -453,26 +455,28 @@ func canvasNullLiteral(canvas *Schema) string {
 }
 
 // isJSONNull reports whether v marshals to a JSON null. Apart from an untyped
-// nil it asks encoding/json rather than testing the Go value, so every spelling
-// answers alike: a nil pointer, slice, or map, a [json.RawMessage] holding the
-// literal, and a [json.Marshaler] returning one. A value that encoding/json
-// refuses to marshal (a func or a channel) is not a null. Leaving it on the
-// canvas lets the caller's own marshal report the fault.
+// nil it asks encoding/json/v2 rather than testing the Go value, so every
+// spelling answers alike: a nil pointer, a [jsontext.Value] holding the
+// literal, and a marshaler returning one. A value v2 refuses to marshal (a
+// func or a channel) is not a null. Leaving it on the canvas lets the
+// caller's own marshal report the fault.
 //
-// Maps, pointers, and slices are the only kinds encoding/json writes null for
-// on their own, so every other kind answers false without a marshal unless it
-// carries its own [json.Marshaler]. That keeps the scan off most values, and
-// marshalsToNull recovers a third-party MarshalJSON panic, so generation
-// reports through errors alone.
+// A pointer and an interface are the only kinds encoding/json/v2 writes null
+// for on their own (a nil slice marshals as [] and a nil map as {}), so
+// every other kind answers false without a marshal unless it carries its own
+// marshaler ([encoding/json/v2.MarshalerTo] or [encoding/json/v2.Marshaler]).
+// That keeps the scan off most values, and marshalsToNull recovers a
+// third-party MarshalJSON panic, so generation reports through errors alone.
 func isJSONNull(v any) bool {
 	if v == nil {
 		return true
 	}
 
-	if _, marshaler := v.(json.Marshaler); !marshaler {
-		switch reflect.ValueOf(v).Kind() {
-		case reflect.Map, reflect.Pointer, reflect.Slice:
-		default:
+	_, marshalerTo := v.(json.MarshalerTo)
+	_, marshaler := v.(json.Marshaler)
+
+	if !marshaler && !marshalerTo {
+		if reflect.ValueOf(v).Kind() != reflect.Pointer {
 			return false
 		}
 	}
@@ -480,8 +484,8 @@ func isJSONNull(v any) bool {
 	return marshalsToNull(v)
 }
 
-// marshalsToNull reports whether encoding/json writes null for v. It answers
-// false for a value encoding/json refuses and for one whose own MarshalJSON
+// marshalsToNull reports whether encoding/json/v2 writes null for v. It
+// answers false for a value v2 refuses and for one whose own marshaler
 // panics, so neither the error nor the panic reaches
 // [generator.checkNullLiterals].
 func marshalsToNull(v any) bool {

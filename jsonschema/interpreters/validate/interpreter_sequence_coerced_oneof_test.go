@@ -1,7 +1,7 @@
 package validate_test
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"testing"
 
@@ -54,8 +54,8 @@ func TestValidateInterpreter_SequenceOneOfStringCoercedElement(t *testing.T) {
 		"$schema":"https://json-schema.org/draft/2020-12/schema",
 		"type":"object",
 		"properties":{
-			"seq":{"type":["null","array"],"items":{"type":"string","enum":["L1","L2","L3"]}},
-			"dive":{"type":["null","array"],"items":{"type":"string","enum":["L1","L2","L3"]}}
+			"seq":{"type":"array","items":{"type":"string","enum":["L1","L2","L3"]}},
+			"dive":{"type":"array","items":{"type":"string","enum":["L1","L2","L3"]}}
 		},
 		"required":["seq","dive"],
 		"additionalProperties":false

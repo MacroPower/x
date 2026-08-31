@@ -21,8 +21,10 @@ func TestIDNHostnameWrapsUnderlyingError(t *testing.T) {
 		want     string // message of the wrapped underlying error
 	}{
 		"idna rejection is wrapped": {
-			instance: "≠.example",
-			want:     "idna: disallowed rune U+2260",
+			// U+0378 is unassigned, so idna rejects the label under every
+			// Unicode version.
+			instance: "\u0378.example",
+			want:     "idna: invalid label \"\\u0378\"",
 		},
 		"contextual-rule rejection through an A-label is wrapped": {
 			// The A-label xn--ab-0ea decodes to "a·b"; the MIDDLE DOT

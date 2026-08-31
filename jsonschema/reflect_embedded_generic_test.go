@@ -1,10 +1,9 @@
 package jsonschema_test
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/x/jsonschema"
@@ -25,34 +24,12 @@ type hasGenericEmbed struct {
 func TestGenerateFor_EmbeddedGenericNonStructType(t *testing.T) {
 	t.Parallel()
 
-	// Encoding/json keys the embed by the field name, without type arguments.
-	setData, err := json.Marshal(hasGenericEmbed{GenList: GenList[int]{1}, B: "x"})
-	require.NoError(t, err)
-	require.JSONEq(t, `{"GenList":[1],"b":"x"}`, string(setData))
+	// An embedded non-struct without an explicit name is an error under
+	// encoding/json/v2, generic instantiations included.
+	_, err := json.Marshal(hasGenericEmbed{GenList: GenList[int]{1}, B: "x"})
+	require.ErrorContains(t, err, "must be explicitly given a JSON name")
 
-	nilData, err := json.Marshal(hasGenericEmbed{B: "x"})
-	require.NoError(t, err)
-	require.JSONEq(t, `{"GenList":null,"b":"x"}`, string(nilData))
-
-	s, err := jsonschema.GenerateFor[hasGenericEmbed](t.Context())
-	require.NoError(t, err)
-
-	got, err := json.Marshal(s)
-	require.NoError(t, err)
-
-	assert.JSONEq(t, `{
-		"$schema":"https://json-schema.org/draft/2020-12/schema",
-		"type":"object",
-		"properties":{
-			"GenList":{"type":["null","array"],"items":{"type":"integer"}},
-			"b":{"type":"string"}
-		},
-		"required":["GenList","b"],
-		"additionalProperties":false
-	}`, string(got))
-
-	require.NoError(t, validateJSON(t.Context(), s, setData),
-		"generated schema rejected the struct's own serialization: %s", setData)
-	require.NoError(t, validateJSON(t.Context(), s, nilData),
-		"generated schema rejected the nil-embed serialization: %s", nilData)
+	_, err = jsonschema.GenerateFor[hasGenericEmbed](t.Context())
+	require.ErrorIs(t, err, jsonschema.ErrInvalidJSONField)
+	require.ErrorContains(t, err, "GenList")
 }

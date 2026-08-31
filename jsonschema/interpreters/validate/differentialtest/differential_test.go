@@ -3,7 +3,8 @@ package differentialtest_test
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"reflect"
@@ -131,12 +132,13 @@ type requiredConstraints struct {
 }
 
 // coercedConstraints exercises the value rules on json:",string" fields, whose
-// schema is a string while the Go value is a number or bool. Both sides see the
-// same instance -- go-playground validates the Go value, the schema validates
-// the quoted text encoding/json writes -- so the equivalence holds only because
-// the interpreter parses each tag value at the real Go kind and re-serializes
-// it. A dialect that compared against the raw literal would pin "5.0" where the
-// field emits "5", and this rig would catch it.
+// schema is a string while the Go value is a number (encoding/json/v2
+// stringifies numbers only). Both sides see the same instance -- go-playground
+// validates the Go value, the schema validates the quoted text encoding/json
+// writes -- so the equivalence holds only because the interpreter parses each
+// tag value at the real Go kind and re-serializes it. A dialect that compared
+// against the raw literal would pin "5.0" where the field emits "5", and this
+// rig would catch it.
 //
 // Only the value rules appear. The numeric bounds are excluded by design, not
 // by omission; see reasonCoercedNumericBounds.
@@ -145,7 +147,6 @@ type coercedConstraints struct {
 	Ne    int     `json:"ne,string"     validate:"ne=7"`
 	OneOf int8    `json:"one_of,string" validate:"oneof=1 2 3"`
 	Req   int     `json:"req,string"    validate:"required"`
-	FlagR bool    `json:"flag_r,string" validate:"required"`
 	FEq   float64 `json:"f_eq,string"   validate:"eq=2.5"`
 	FReq  float64 `json:"f_req,string"  validate:"required"`
 	FNe   float64 `json:"f_ne,string"   validate:"ne=0"`
@@ -223,7 +224,7 @@ func fuzzValidatorDifferential[T any](f *testing.F, fillOpts ...fuzzfill.Option)
 	validator, err := jsonschema.Compile(ctx, schema)
 	require.NoError(f, err, "compile schema for %T", *new(T))
 
-	schemaJSON, err := json.MarshalIndent(schema, "", "  ")
+	schemaJSON, err := json.Marshal(schema, jsontext.WithIndent("  "))
 	require.NoError(f, err, "marshal schema for %T", *new(T))
 
 	reference := playground.New(playground.WithRequiredStructEnabled())

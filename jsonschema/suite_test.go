@@ -2,7 +2,8 @@ package jsonschema_test
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,16 +18,16 @@ import (
 
 // suiteGroup is one test group from the JSON Schema Test Suite.
 type suiteGroup struct {
-	Description string          `json:"description"`
-	Schema      json.RawMessage `json:"schema"`
-	Tests       []suiteCase     `json:"tests"`
+	Description string         `json:"description"`
+	Schema      jsontext.Value `json:"schema"`
+	Tests       []suiteCase    `json:"tests"`
 }
 
 // suiteCase is a single test case within a group.
 type suiteCase struct {
-	Description string          `json:"description"`
-	Data        json.RawMessage `json:"data"`
-	Valid       bool            `json:"valid"`
+	Description string         `json:"description"`
+	Data        jsontext.Value `json:"data"`
+	Valid       bool           `json:"valid"`
 }
 
 // skipReason documents why a test is skipped.
@@ -476,7 +477,7 @@ func runSuiteFile(t *testing.T, path, pathKey, schemaURI string, opts ...jsonsch
 
 // unmarshalTestSchema deserializes a test schema from JSON.
 // It injects $schema if not present, based on the draft.
-func unmarshalTestSchema(t *testing.T, raw json.RawMessage, schemaURI string) *jsonschema.Schema {
+func unmarshalTestSchema(t *testing.T, raw jsontext.Value, schemaURI string) *jsonschema.Schema {
 	t.Helper()
 
 	// Handle boolean schemas: true -> {}, false -> {"not":{}}.

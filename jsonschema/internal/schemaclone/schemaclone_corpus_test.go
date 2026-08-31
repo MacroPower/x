@@ -2,7 +2,7 @@ package schemaclone_test
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/json/v2"
 	"io/fs"
 	"os"
 	"path/filepath"

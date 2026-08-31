@@ -1,7 +1,8 @@
 package jsonschema
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 
 	"github.com/google/jsonschema-go/jsonschema"
@@ -15,7 +16,7 @@ type Schema = jsonschema.Schema
 
 // Raw marshals v with encoding/json for raw-JSON schema fields such as
 // [Schema.Default].
-func Raw(v any) (json.RawMessage, error) {
+func Raw(v any) (jsontext.Value, error) {
 	data, err := json.Marshal(v)
 	if err != nil {
 		return nil, fmt.Errorf("marshal raw value: %w", err)
@@ -26,7 +27,7 @@ func Raw(v any) (json.RawMessage, error) {
 
 // MustRaw is [Raw] but panics on marshal error; intended for values known
 // valid at compile time.
-func MustRaw(v any) json.RawMessage {
+func MustRaw(v any) jsontext.Value {
 	data, err := Raw(v)
 	if err != nil {
 		panic(err)

@@ -116,6 +116,13 @@ linters:
       locale: US
       mode: default
 
+    modernize:
+      disable:
+        # Embedded-struct literals stay spelled out: the jsonschema tests pin
+        # encoding/json embedding semantics through them, and the promoted
+        # form defeats the unused check under field-writes-are-uses: false.
+        - embedlit
+
     exhaustive:
       default-signifies-exhaustive: true
 

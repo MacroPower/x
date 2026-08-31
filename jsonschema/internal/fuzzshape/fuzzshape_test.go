@@ -1,7 +1,8 @@
 package fuzzshape_test
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"math/big"
 	"reflect"
 	"strings"
@@ -9,6 +10,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	jsonv1 "encoding/json"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/fuzzfill"
 	"go.jacobcolvin.com/x/jsonschema/internal/fuzzshape"
@@ -29,10 +32,10 @@ const reasonUnmodeledMarshaler = "a type marshaling itself is reflected by its G
 // overriddenMarshalers are the marshaler-implementing types the generator
 // models exactly through a built-in override, so pooling them is safe.
 var overriddenMarshalers = map[reflect.Type]bool{
-	reflect.TypeFor[time.Time]():       true,
-	reflect.TypeFor[json.RawMessage](): true,
-	reflect.TypeFor[json.Number]():     true,
-	reflect.TypeFor[big.Int]():         true,
+	reflect.TypeFor[time.Time]():      true,
+	reflect.TypeFor[jsontext.Value](): true,
+	reflect.TypeFor[jsonv1.Number]():  true,
+	reflect.TypeFor[big.Int]():        true,
 }
 
 // TestPoolsExcludeUnmodeledMarshalers asserts no drawn shape reaches a type
@@ -97,16 +100,21 @@ func marshalsItself(rt reflect.Type) bool {
 		reflect.PointerTo(rt).Implements(reflectkind.TypeTextMarshaler)
 }
 
-// TestTypeIsTotal asserts every blob yields a usable type. Totality is what
-// lets the rig treat a panic or a marshal error as a finding rather than an
-// expected outcome to skip: reflect.StructOf panics on a shape it cannot
-// build, and json.Marshal errors on a value it cannot encode, so a pool entry
-// or draw constraint that regresses surfaces here instead of as fuzzing noise
-// in the differential rig.
+// TestTypeIsTotal asserts every blob yields a usable type: reflect.StructOf
+// panics on a shape it cannot build, so a pool entry or draw constraint that
+// regresses surfaces here instead of as fuzzing noise in the differential
+// rig. Marshaling is deliberately not total. Some draws are declarations
+// [encoding/json/v2] refuses, and the differential rigs assert generation
+// refuses exactly those, so this guard requires only that refusals do not
+// swallow the population: a healthy share of draws must still marshal, or the
+// accept property has little to run on.
 func TestTypeIsTotal(t *testing.T) {
 	t.Parallel()
 
-	for i, blob := range fuzzshape.Blobs(drawCount) {
+	marshaled := 0
+	blobs := fuzzshape.Blobs(drawCount)
+
+	for i, blob := range blobs {
 		rt := fuzzshape.Type(blob)
 		require.Equal(t, reflect.Struct, rt.Kind(), "draw %d is not a struct", i)
 
@@ -114,8 +122,13 @@ func TestTypeIsTotal(t *testing.T) {
 		fuzzfill.Fill(val, blob, fuzzshape.FillOptions()...)
 
 		_, err := json.Marshal(val.Interface())
-		require.NoError(t, err, "draw %d (%s) does not marshal", i, rt)
+		if err == nil {
+			marshaled++
+		}
 	}
+
+	require.Greater(t, marshaled, len(blobs)/2,
+		"refused declarations swallow the population")
 }
 
 // TestTypeIsDeterministic asserts a blob always yields the same type, the
@@ -145,7 +158,7 @@ func TestTypeDrawsDiverseShapes(t *testing.T) {
 		"an embedded field": func(f reflect.StructField) bool {
 			return f.Anonymous
 		},
-		"an invalid tag name that must fall back to the Go name": func(f reflect.StructField) bool {
+		"a tag name cut short by a reserved character": func(f reflect.StructField) bool {
 			return strings.Contains(f.Tag.Get("json"), `"`)
 		},
 		"a ,string coercion": func(f reflect.StructField) bool {
@@ -157,12 +170,11 @@ func TestTypeDrawsDiverseShapes(t *testing.T) {
 		`a json:"-" exclusion`: func(f reflect.StructField) bool {
 			return f.Tag.Get("json") == "-"
 		},
-		"an unexported field whose json tag names a property": func(f reflect.StructField) bool {
-			// An options-only tag would satisfy a bare Lookup without being the
-			// case that matters: a name encoding/json must still not honor.
-			name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
-
-			return !f.IsExported() && name != "" && name != "-"
+		"an untagged unexported field": func(f reflect.StructField) bool {
+			// The draw never tags an unexported field, since encoding/json/v2
+			// refuses the tagged form outright; the untagged form is the
+			// exclusion class the pool exists for.
+			return !f.IsExported()
 		},
 	}
 

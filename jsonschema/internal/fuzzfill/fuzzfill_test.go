@@ -2,7 +2,7 @@ package fuzzfill_test
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/json/v2"
 	"reflect"
 	"testing"
 
@@ -120,7 +120,9 @@ func TestFillDefaultDrawIsGolden(t *testing.T) {
 	want := `{"words":[],"table":{"":-4121404043104227081," @\\|,":6223240672740737159},` +
 		`"blob":"Zw==","tail":7959404820854577311}`
 
-	doc, err := json.Marshal(fillContainers(t, rampBlob()))
+	// Deterministic map ordering: encoding/json/v2 randomizes member order by
+	// default, and this assertion pins exact bytes.
+	doc, err := json.Marshal(fillContainers(t, rampBlob()), json.Deterministic(true))
 	require.NoError(t, err)
 	assert.Equal(t, want, string(doc))
 }

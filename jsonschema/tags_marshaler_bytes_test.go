@@ -1,7 +1,7 @@
 package jsonschema_test
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"testing"
 
@@ -43,7 +43,7 @@ func TestTagsMarshalerByteSlice(t *testing.T) {
 		prop := s.Properties["levels"]
 		require.NotNil(t, prop.MinItems)
 		assert.Equal(t, 1, *prop.MinItems)
-		assert.Equal(t, []string{"null", "array"}, prop.Types)
+		assert.Equal(t, "array", prop.Type)
 	})
 
 	t.Run("validate tag parity with string slice", func(t *testing.T) {

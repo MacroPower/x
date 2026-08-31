@@ -19,7 +19,7 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"flag"
 	"fmt"
@@ -82,9 +82,9 @@ func run(cfg config, stdout io.Writer) error {
 		return fmt.Errorf("unsupported draft %q: must be \"7\" or \"2020\"", cfg.Draft)
 	}
 
-	// The indent string is embedded verbatim into json.MarshalIndent, which does
-	// not validate it. A non-whitespace indent is repeated between JSON tokens
-	// and produces output that no longer parses, so reject it up front.
+	// The indent string is embedded verbatim into the generated helper's
+	// jsontext.WithIndent call, which rejects a non-whitespace indent only when
+	// the helper runs. Reject it up front so the error names the flag.
 	if strings.TrimLeft(cfg.Indent, " \t\n\r") != "" {
 		return fmt.Errorf("invalid -indent %q: must contain only whitespace", cfg.Indent)
 	}
@@ -426,7 +426,8 @@ var mainGoTmpl = template.Must(template.New("main.go").Parse(`package main
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"os"
 	"reflect"
@@ -460,7 +461,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}
-	data, err := json.MarshalIndent(schema, "", {{.IndentLiteral}})
+	data, err := json.Marshal(schema, jsontext.WithIndent({{.IndentLiteral}}))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)

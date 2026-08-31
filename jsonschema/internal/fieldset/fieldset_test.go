@@ -2,7 +2,8 @@ package fieldset //nolint:testpackage // In-package by design: the resolution ph
 
 import (
 	"encoding"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"maps"
 	"math"
@@ -13,9 +14,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	jsonv1 "encoding/json"
+
 	"go.jacobcolvin.com/x/jsonschema/internal/fuzzfill"
 	"go.jacobcolvin.com/x/jsonschema/internal/fuzzshape"
-	"go.jacobcolvin.com/x/jsonschema/internal/jsontag"
+	"go.jacobcolvin.com/x/jsonschema/internal/reflectkind"
 )
 
 // The key-set oracle asserts that the names the resolution phases emit for a Go
@@ -42,12 +45,16 @@ import (
 // Three classes of type carry no verdict, each with a reason constant and a
 // guard test pinning its cause.
 
-// reasonPromotedMarshaler is why a type whose method set carries MarshalJSON or
-// MarshalText is skipped.
-const reasonPromotedMarshaler = "encoding/json routes the whole value through the marshaler instead of emitting a field-by-field object, so the marshaled output has no relationship to the resolved field set. Whether a pointer-receiver marshaler applies further depends on the value's addressability, which the caller controls, so the oracle skips the type rather than reasoning about it"
+// reasonPromotedMarshaler is why a type whose method set carries any of the
+// four marshal-side methods is skipped.
+const reasonPromotedMarshaler = "encoding/json/v2 routes the whole value through the marshaler instead of emitting a field-by-field object, so the marshaled output has no relationship to the resolved field set"
 
-// reasonMarshalFailed is why a value encoding/json rejects is skipped.
-const reasonMarshalFailed = "encoding/json emits no output for the value, so there is no key set to compare against: a cyclic value, a map with an unsupported key type, or a non-representable float"
+// reasonMarshalFailed is why a value encoding/json/v2 rejects is skipped. The
+// faults v2 turned from lenient parses into errors (a malformed tag, a
+// json:",string" on a non-numeric field) land here too: the phases report
+// them as errors beside their recovered output, and the marshaled side has no
+// key set to compare.
+const reasonMarshalFailed = "encoding/json/v2 emits no output for the value, so there is no key set to compare against: a cyclic value, a map with an unsupported key type, a non-representable float, or a field declaration v2 refuses"
 
 // reasonNotObject is why output that is not a JSON object is skipped.
 const reasonNotObject = "the marshaled output is not a JSON object, so it has no top-level keys; this is the backstop for a marshaler the method-set probe missed"
@@ -185,7 +192,6 @@ type omitFields struct {
 
 type excludedFields struct {
 	Skip   string `json:"-"`
-	Keep   string `json:"-,"` //nolint:staticcheck // Pins the literal "-" name encoding/json gives a trailing-comma tag.
 	hidden string //nolint:unused // Pins that an unexported field stays out of the key set.
 	Shown  int    `json:"shown"`
 }
@@ -235,19 +241,128 @@ type allOfNameClash struct {
 }
 
 type stringOptFields struct {
-	N int    `json:"n,string"`
-	S string `json:"s,string"`
+	N int `json:"n,string"`
+}
+
+// FallbackKey is a named string-kind map key, which qualifies a map as an
+// embedded fallback exactly like the builtin string.
+type FallbackKey string
+
+// FallbackCarrier is an embeddable struct carrying a fallback, so a type
+// embedding it promotes the fallback at depth 1.
+type FallbackCarrier struct {
+	Extra map[string]int `json:",embed"`
+	Q     int            `json:"q"`
+}
+
+// FallbackCarrierB is a second carrier for the same-depth tie.
+type FallbackCarrierB struct {
+	More map[string]bool `json:",embed"`
+	S    int             `json:"s"`
+}
+
+// FallbackWrapA and FallbackWrapB each embed FallbackCarrier, so a type
+// embedding both reaches its fallback twice at one depth.
+type FallbackWrapA struct{ FallbackCarrier }
+
+// FallbackWrapB is FallbackWrapA's counterpart; see FallbackWrapA.
+type FallbackWrapB struct{ FallbackCarrier }
+
+type fallbackMap struct {
+	Name  string         `json:"name"`
+	Extra map[string]int `json:",embed"`
+}
+
+type fallbackValue struct {
+	Name  string         `json:"name"`
+	Extra jsontext.Value `json:",embed"`
+}
+
+type fallbackPtrMap struct {
+	Name  string          `json:"name"`
+	Extra *map[string]int `json:",embed"`
+}
+
+type fallbackNamedKey struct {
+	Name  string              `json:"name"`
+	Extra map[FallbackKey]int `json:",embed"`
+}
+
+// twoFallbacks declares two fallback fields, the per-declaration refusal; v2
+// still records both, so the same-depth tie drops them.
+type twoFallbacks struct {
+	A map[string]int `json:",embed"`
+	B jsontext.Value `json:",embed"`
+}
+
+// fallbackBadKey has a string-kind key carrying marshal methods
+// (json.Number's), which disqualifies the map and recovers as a leaf field.
+type fallbackBadKey struct {
+	Extra map[jsonv1.Number]int `json:",embed"`
+}
+
+// namedRawValue has jsontext.Value's underlying type without its identity or
+// methods, so it is no fallback and recovers as a leaf field.
+type namedRawValue []byte
+
+type fallbackNamedValueType struct {
+	Extra namedRawValue `json:",embed"`
+}
+
+// marshalerMap carries its own MarshalJSON, which v2 refuses under ",embed"
+// and drops the field.
+type marshalerMap map[string]int
+
+// MarshalJSON marshals the map as an empty object.
+func (marshalerMap) MarshalJSON() ([]byte, error) { return []byte(`{}`), nil }
+
+type fallbackMarshalerMap struct {
+	Extra marshalerMap `json:",embed"`
+	Y     int          `json:"y"`
+}
+
+// Bag is an anonymous-embeddable map, which v2 refuses however it is tagged.
+type Bag map[string]int
+
+type fallbackAnonymous struct {
+	Bag `json:",embed"` //nolint:staticcheck // Tag under test: ",embed" on an anonymous non-struct.
+}
+
+type fallbackPromoted struct {
+	FallbackCarrier
+
+	R int `json:"r"`
+}
+
+// fallbackShallowWins declares its own fallback beside a promoted one, so
+// depth 0 wins.
+type fallbackShallowWins struct {
+	FallbackCarrier
+
+	Own map[string]string `json:",embed"`
+	R   int               `json:"r"`
+}
+
+// fallbackSameDepthTie promotes two fallbacks at depth 1, which silently
+// drops both.
+type fallbackSameDepthTie struct {
+	FallbackCarrier
+	FallbackCarrierB
+
+	R int `json:"r"`
 }
 
 type promotedMarshaler struct {
-	json.RawMessage
+	jsonv1.RawMessage
 
 	Gamma bool `json:"gamma"`
 }
 
 var (
-	typeJSONMarshaler = reflect.TypeFor[json.Marshaler]()
-	typeTextMarshaler = reflect.TypeFor[encoding.TextMarshaler]()
+	typeJSONMarshaler   = reflect.TypeFor[json.Marshaler]()
+	typeJSONMarshalerTo = reflect.TypeFor[json.MarshalerTo]()
+	typeTextMarshaler   = reflect.TypeFor[encoding.TextMarshaler]()
+	typeTextAppender    = reflect.TypeFor[encoding.TextAppender]()
 
 	// AmbiguousEmbeds embeds two types claiming "alpha" at one depth, which the
 	// tag tie-break cannot settle because both are tagged.
@@ -258,6 +373,11 @@ var (
 	)
 	// RepeatedEmbed reaches Base twice at one depth, so its fields annihilate.
 	repeatedEmbed = embedding(reflect.TypeFor[WrapA](), reflect.TypeFor[WrapB]())
+	// FallbackRepeated reaches FallbackCarrier twice at one depth via the two
+	// wrappers, annihilating its fallback along with its names.
+	fallbackRepeated = embedding(
+		reflect.TypeFor[FallbackWrapA](), reflect.TypeFor[FallbackWrapB](),
+	)
 
 	// Roster is the hand-written half of the oracle's type population, covering
 	// the embed and tag classes reflect.StructOf cannot synthesize or fuzzshape
@@ -282,20 +402,35 @@ var (
 		"allOf name clash":      reflect.TypeFor[allOfNameClash](),
 		"composed non-struct":   reflect.TypeFor[composedNonStruct](),
 		"shadowed pointer":      reflect.TypeFor[shadowedPointerEmbed](),
+
+		"map fallback":            reflect.TypeFor[fallbackMap](),
+		"value fallback":          reflect.TypeFor[fallbackValue](),
+		"pointer fallback":        reflect.TypeFor[fallbackPtrMap](),
+		"named-key fallback":      reflect.TypeFor[fallbackNamedKey](),
+		"promoted fallback":       reflect.TypeFor[fallbackPromoted](),
+		"shallow fallback wins":   reflect.TypeFor[fallbackShallowWins](),
+		"fallback same-depth tie": reflect.TypeFor[fallbackSameDepthTie](),
+		"fallback repeated":       fallbackRepeated,
+		"two fallbacks":           reflect.TypeFor[twoFallbacks](),
+		"fallback bad key":        reflect.TypeFor[fallbackBadKey](),
+		"fallback named raw":      reflect.TypeFor[fallbackNamedValueType](),
+		"fallback marshaler map":  reflect.TypeFor[fallbackMarshalerMap](),
+		"fallback anonymous":      reflect.TypeFor[fallbackAnonymous](),
 	}
 
 	// ComposedCandidates are the embed types the predicate sets below designate
 	// as allOf-composed. A candidate no type in the population embeds is a
 	// no-op, which keeps one list serving both halves.
 	composedCandidates = map[string]reflect.Type{
-		"Base":           reflect.TypeFor[Base](),
-		"Other":          reflect.TypeFor[Other](),
-		"Deep":           reflect.TypeFor[Deep](),
-		"TaggedShared":   reflect.TypeFor[TaggedShared](),
-		"WrapA":          reflect.TypeFor[WrapA](),
-		"NonStructOwner": reflect.TypeFor[NonStructOwner](),
-		"Alpha":          reflect.TypeFor[fuzzshape.Alpha](),
-		"Beta":           reflect.TypeFor[fuzzshape.Beta](),
+		"Base":            reflect.TypeFor[Base](),
+		"Other":           reflect.TypeFor[Other](),
+		"Deep":            reflect.TypeFor[Deep](),
+		"TaggedShared":    reflect.TypeFor[TaggedShared](),
+		"WrapA":           reflect.TypeFor[WrapA](),
+		"NonStructOwner":  reflect.TypeFor[NonStructOwner](),
+		"FallbackCarrier": reflect.TypeFor[FallbackCarrier](),
+		"Alpha":           reflect.TypeFor[fuzzshape.Alpha](),
+		"Beta":            reflect.TypeFor[fuzzshape.Beta](),
 	}
 
 	// PredicateSets names the composed-type sets every type in the population is
@@ -314,9 +449,10 @@ var (
 		"beta":             {"Beta"},
 		"alpha+beta":       {"Alpha", "Beta"},
 		"non-struct owner": {"NonStructOwner"},
+		"fallback carrier": {"FallbackCarrier"},
 		"all embeds": {
 			"Base", "Other", "Deep", "TaggedShared", "WrapA", "NonStructOwner",
-			"Alpha", "Beta",
+			"FallbackCarrier", "Alpha", "Beta",
 		},
 	}
 )
@@ -336,13 +472,15 @@ func composedIn(names []string) ComposedFunc {
 
 // resolvedNames is what the phases say about one type: the names the marshaled
 // object may carry, the subset encoding/json is allowed to leave out, the field
-// that won each name, and the names whose value encoding/json re-encodes as a
-// quoted string.
+// that won each name, the names whose value encoding/json re-encodes as a
+// quoted string, and the embedded fallback whose members join the object
+// beside the names.
 type resolvedNames struct {
 	names     map[string]bool
 	omissible map[string]bool
 	winner    map[string]reflect.StructField
 	coerced   map[string]bool
+	fallback  *Fallback
 }
 
 // resolve runs all three phases, asserts what holds within each, and derives
@@ -355,7 +493,11 @@ func resolve(t *testing.T, typ reflect.Type, composed ComposedFunc) resolvedName
 
 	c := NewCollector(composed)
 
-	col, res, out := c.phases(typ)
+	// The error is the walk's report of a declaration v2 refuses; the phases
+	// still produce their recovered output, which is what the oracle compares
+	// (a refused declaration also refuses to marshal, so the key-set check
+	// skips it through reasonMarshalFailed).
+	col, res, out, _ := c.phases(typ) //nolint:errcheck // See above.
 
 	// Phase 1 invariants: a key is listed once, and a scanned type is a
 	// composed embed the walk reached outside the in-flight guard.
@@ -375,6 +517,7 @@ func resolve(t *testing.T, typ reflect.Type, composed ComposedFunc) resolvedName
 		omissible: map[string]bool{},
 		winner:    map[string]reflect.StructField{},
 		coerced:   map[string]bool{},
+		fallback:  out.Fallback,
 	}
 
 	for i := range out.Fields {
@@ -392,7 +535,7 @@ func resolve(t *testing.T, typ reflect.Type, composed ComposedFunc) resolvedName
 		rn.names[f.JSONName] = true
 		rn.winner[f.JSONName] = f.StructField
 
-		if f.Omitempty || f.Omitzero {
+		if f.Omitempty || f.Omitzero || f.Optional {
 			rn.omissible[f.JSONName] = true
 		}
 
@@ -424,7 +567,7 @@ func resolve(t *testing.T, typ reflect.Type, composed ComposedFunc) resolvedName
 
 		rn.winner[w.Name] = w.StructField
 
-		info := jsontag.Parse(w.StructField)
+		info := w.Info
 		if info.Omitempty || info.Omitzero || w.Optional {
 			rn.omissible[w.Name] = true
 		}
@@ -442,13 +585,13 @@ func resolve(t *testing.T, typ reflect.Type, composed ComposedFunc) resolvedName
 
 // marshalObject returns the top-level members encoding/json emits for v, or the
 // reason the value carries no verdict.
-func marshalObject(v any) (map[string]json.RawMessage, string) {
+func marshalObject(v any) (map[string]jsontext.Value, string) {
 	data, err := json.Marshal(v)
 	if err != nil {
 		return nil, reasonMarshalFailed
 	}
 
-	var obj map[string]json.RawMessage
+	var obj map[string]jsontext.Value
 
 	err = json.Unmarshal(data, &obj)
 	if err != nil {
@@ -462,7 +605,7 @@ func marshalObject(v any) (map[string]json.RawMessage, string) {
 // winning field marshals to. Without it the oracle sees only the name set, and
 // a dominance rule that picks the wrong field of two claiming one name still
 // produces the right names.
-func checkWinners(t *testing.T, rv reflect.Value, rn resolvedNames, obj map[string]json.RawMessage) {
+func checkWinners(t *testing.T, rv reflect.Value, rn resolvedNames, obj map[string]jsontext.Value) {
 	t.Helper()
 
 	for name, raw := range obj {
@@ -495,11 +638,12 @@ func checkWinners(t *testing.T, rv reflect.Value, rn resolvedNames, obj map[stri
 	}
 }
 
-// hasMarshaler reports whether encoding/json would route a value of t through a
-// marshaler rather than emitting an object of its fields.
+// hasMarshaler reports whether encoding/json/v2 would route a value of t
+// through a marshaler rather than emitting an object of its fields.
 func hasMarshaler(t reflect.Type) bool {
 	for _, probe := range []reflect.Type{t, reflect.PointerTo(t)} {
-		if probe.Implements(typeJSONMarshaler) || probe.Implements(typeTextMarshaler) {
+		if probe.Implements(typeJSONMarshaler) || probe.Implements(typeJSONMarshalerTo) ||
+			probe.Implements(typeTextMarshaler) || probe.Implements(typeTextAppender) {
 			return true
 		}
 	}
@@ -515,11 +659,60 @@ func filled(typ reflect.Type, blob []byte) reflect.Value {
 	return rv.Elem()
 }
 
+// fallbackMembers returns the members the winning fallback contributes to the
+// marshaled object for one filled value: the map's entries marshaled one by
+// one, or the members of the jsontext.Value object. A nil map, a nil pointer
+// (on the field or its embed path), and a jsontext.Value holding no object
+// contribute nothing; the last of those refuses to marshal, so the caller's
+// marshalObject already skipped the blob.
+func fallbackMembers(t *testing.T, rv reflect.Value, fb *Fallback) map[string]jsontext.Value {
+	t.Helper()
+
+	if fb == nil {
+		return nil
+	}
+
+	fv, err := rv.FieldByIndexErr(fb.StructField.Index)
+	if err != nil {
+		return nil
+	}
+
+	if fv.Kind() == reflect.Pointer {
+		if fv.IsNil() {
+			return nil
+		}
+
+		fv = fv.Elem()
+	}
+
+	if fv.Type() == reflectkind.TypeJSONTextValue {
+		// A jsontext.Value marshals as itself, so marshalObject decodes its
+		// members directly; both of its no-verdict reasons collapse to "no
+		// members" here.
+		obj, _ := marshalObject(fv.Interface())
+
+		return obj
+	}
+
+	out := map[string]jsontext.Value{}
+
+	iter := fv.MapRange()
+	for iter.Next() {
+		data, err := json.Marshal(iter.Value().Interface())
+		require.NoError(t, err)
+
+		out[iter.Key().String()] = data
+	}
+
+	return out
+}
+
 // checkKeySet asserts the oracle for one type under one predicate, over every
-// blob: every marshaled key is a resolved name (soundness), and every resolved
-// name the options do not excuse appears in the filled value's keys
-// (completeness). A blob whose value carries no verdict contributes its reason
-// instead, and checkKeySet skips only when no blob reached an assertion.
+// blob: every marshaled key is a resolved name or a fallback member
+// (soundness), and every resolved name the options do not excuse appears in
+// the filled value's keys, as does every fallback member (completeness). A
+// blob whose value carries no verdict contributes its reason instead, and
+// checkKeySet skips only when no blob reached an assertion.
 func checkKeySet(
 	t *testing.T,
 	typ reflect.Type,
@@ -559,9 +752,28 @@ func checkKeySet(
 
 		checkWinners(t, rv, rn, fullKeys)
 
-		for key := range fullKeys {
+		// A fallback key equal to a resolved name is a marshal-time
+		// duplicate-name error, so a blob that marshaled has the two sets
+		// disjoint and each key attributes to exactly one of them.
+		fbMembers := fallbackMembers(t, rv, rn.fallback)
+
+		for key, raw := range fullKeys {
+			want, spliced := fbMembers[key]
+			if spliced && !rn.names[key] {
+				assert.JSONEq(t, string(want), string(raw),
+					"fallback member %q carries a value the fallback field does not hold", key)
+
+				continue
+			}
+
 			assert.True(t, rn.names[key],
 				"filled value marshals key %q that no phase resolved", key)
+		}
+
+		for key := range fbMembers {
+			_, present := fullKeys[key]
+			assert.True(t, present,
+				"fallback member %q is absent from the marshaled object", key)
 		}
 
 		for name := range rn.names {
@@ -643,12 +855,20 @@ func TestCompositionInvariance(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			want := resolve(t, typ, composedIn(nil)).names
+			base := resolve(t, typ, composedIn(nil))
 
 			for setName, set := range predicateSets {
-				got := resolve(t, typ, composedIn(set)).names
-				assert.Equal(t, want, got,
+				got := resolve(t, typ, composedIn(set))
+				assert.Equal(t, base.names, got.names,
 					"composing %s changed the resolved name set", setName)
+
+				// The fallback resolution is composition-independent: a
+				// fallback sighted in a ghost subtree competes like any
+				// other. The population holds no self- or mutually composed
+				// root, the one shape whose in-flight skip legitimately drops
+				// a fallback; TestCycleSkipDropsSubtreeFallback pins it.
+				assert.Equal(t, base.fallback, got.fallback,
+					"composing %s changed the resolved fallback", setName)
 			}
 		})
 	}
@@ -666,6 +886,14 @@ type wantField struct {
 	shadowPartial bool
 }
 
+// wantFallback pins one [Result.Fallback]: the field's index path, its
+// unwrapped type, and the depth the walk sighted it at.
+type wantFallback struct {
+	typ   reflect.Type
+	index []int
+	depth int
+}
+
 // TestClassificationPins pins what the key-set oracle cannot see. The oracle
 // compares name sets and values, so it is blind to the order Classify emits
 // fields and ghost-won names in, and to the shadow marks entirely. Gutting the
@@ -680,11 +908,118 @@ func TestClassificationPins(t *testing.T) {
 		composed []string
 		want     []wantField
 		ghostWon []string
+		// The fallback field, when set, pins [Result.Fallback]'s index path,
+		// unwrapped type, and depth; unset pins a nil fallback.
+		fallback *wantFallback
 		// The wantKey field, when set, is a composition key Collect must have
 		// produced. It ties a row that names the synthetic key in a struct tag
 		// to allOfName, which mints it.
 		wantKey string
+		// The err field is the fault encoding/json/v2 reports for the type;
+		// the recovered classification is still pinned beside it.
+		err string
 	}{
+		"map fallback": {
+			typ: reflect.TypeFor[fallbackMap](),
+			want: []wantField{
+				{name: "name", index: []int{0}},
+			},
+			fallback: &wantFallback{
+				index: []int{1}, typ: reflect.TypeFor[map[string]int](),
+			},
+		},
+		"value fallback": {
+			typ: reflect.TypeFor[fallbackValue](),
+			want: []wantField{
+				{name: "name", index: []int{0}},
+			},
+			fallback: &wantFallback{
+				index: []int{1}, typ: reflect.TypeFor[jsontext.Value](),
+			},
+		},
+		"pointer fallback unwraps one level": {
+			typ: reflect.TypeFor[fallbackPtrMap](),
+			want: []wantField{
+				{name: "name", index: []int{0}},
+			},
+			fallback: &wantFallback{
+				index: []int{1}, typ: reflect.TypeFor[map[string]int](),
+			},
+		},
+		"named-key fallback": {
+			typ: reflect.TypeFor[fallbackNamedKey](),
+			want: []wantField{
+				{name: "name", index: []int{0}},
+			},
+			fallback: &wantFallback{
+				index: []int{1}, typ: reflect.TypeFor[map[FallbackKey]int](),
+			},
+		},
+		"promoted fallback": {
+			typ: reflect.TypeFor[fallbackPromoted](),
+			want: []wantField{
+				{name: "q", index: []int{0, 1}},
+				{name: "r", index: []int{1}},
+			},
+			fallback: &wantFallback{
+				index: []int{0, 0}, typ: reflect.TypeFor[map[string]int](), depth: 1,
+			},
+		},
+		"depth-0 fallback beats a promoted one": {
+			typ: reflect.TypeFor[fallbackShallowWins](),
+			want: []wantField{
+				{name: "q", index: []int{0, 1}},
+				{name: "r", index: []int{2}},
+			},
+			fallback: &wantFallback{
+				index: []int{1}, typ: reflect.TypeFor[map[string]string](),
+			},
+		},
+		"same-depth fallback tie drops both": {
+			typ: reflect.TypeFor[fallbackSameDepthTie](),
+			want: []wantField{
+				{name: "q", index: []int{0, 1}},
+				{name: "s", index: []int{1, 1}},
+				{name: "r", index: []int{2}},
+			},
+		},
+		"repeated embed annihilates its fallback": {
+			typ:  fallbackRepeated,
+			want: []wantField{},
+		},
+		"two fallbacks in one declaration": {
+			typ:  reflect.TypeFor[twoFallbacks](),
+			want: []wantField{},
+			err:  "embedded Go struct fields A and B cannot both be a Go map or jsontext.Value",
+		},
+		"fallback key carrying marshal methods": {
+			typ: reflect.TypeFor[fallbackBadKey](),
+			want: []wantField{
+				{name: "Extra", index: []int{0}},
+			},
+			err: "embedded map field Extra of type map[json.Number]int must have a string key that does not implement marshal or unmarshal methods",
+		},
+		"named type with jsontext.Value underlying": {
+			typ: reflect.TypeFor[fallbackNamedValueType](),
+			want: []wantField{
+				{name: "Extra", index: []int{0}},
+			},
+			err: "embedded Go struct field Extra of type fieldset.namedRawValue must be a Go struct, Go map of string key, or jsontext.Value",
+		},
+		"marshaler-bearing map is dropped": {
+			typ: reflect.TypeFor[fallbackMarshalerMap](),
+			want: []wantField{
+				{name: "y", index: []int{1}},
+			},
+			err: "embedded Go struct field Extra of type fieldset.marshalerMap must not implement marshal or unmarshal methods",
+		},
+		"anonymous fallback form": {
+			typ: reflect.TypeFor[fallbackAnonymous](),
+			want: []wantField{
+				{name: "Bag", index: []int{0}},
+			},
+			err: "embedded Go struct field Bag of non-struct type must be explicitly given a JSON name",
+		},
 		"promoted embed": {
 			typ: reflect.TypeFor[valueEmbed](),
 			want: []wantField{
@@ -785,9 +1120,11 @@ func TestClassificationPins(t *testing.T) {
 				{index: []int{0}, compose: true},
 				{name: "r", index: []int{1}},
 			},
-			// An embedded non-struct is a leaf field keyed by its field name,
-			// so the embed's ghost wins it like any other.
+			// An embedded non-struct without an explicit name is a v2 error,
+			// recovered as a leaf field keyed by the field name, so the
+			// embed's ghost wins it like any other.
 			ghostWon: []string{"Leafish", "q"},
+			err:      "embedded Go struct field Leafish of non-struct type must be explicitly given a JSON name",
 		},
 		"shadowed composed pointer embed": {
 			typ:      reflect.TypeFor[shadowedPointerEmbed](),
@@ -817,11 +1154,18 @@ func TestClassificationPins(t *testing.T) {
 			t.Parallel()
 
 			c := NewCollector(composedIn(tc.composed))
-			out := c.Of(tc.typ)
+
+			out, err := c.Of(tc.typ)
+			if tc.err == "" {
+				require.NoError(t, err)
+			} else {
+				require.ErrorContains(t, err, tc.err)
+			}
 
 			if tc.wantKey != "" {
-				assert.Contains(t, c.Collect(tc.typ).Order,
-					Key{Name: tc.wantKey, ComposeAllOf: true})
+				// The error is asserted against Of above; Collect repeats it.
+				col, _ := c.Collect(tc.typ) //nolint:errcheck // See above.
+				assert.Contains(t, col.Order, Key{Name: tc.wantKey, ComposeAllOf: true})
 			}
 
 			got := make([]wantField, 0, len(out.Fields))
@@ -839,6 +1183,14 @@ func TestClassificationPins(t *testing.T) {
 
 			assert.Equal(t, tc.want, got)
 			assert.Equal(t, tc.ghostWon, out.GhostWon)
+
+			if tc.fallback == nil {
+				assert.Nil(t, out.Fallback)
+			} else if assert.NotNil(t, out.Fallback) {
+				assert.Equal(t, tc.fallback.index, out.Fallback.StructField.Index)
+				assert.Equal(t, tc.fallback.typ, out.Fallback.Type)
+				assert.Equal(t, tc.fallback.depth, out.Fallback.Depth)
+			}
 		})
 	}
 }
@@ -861,16 +1213,23 @@ func TestPhasesComposeIntoOf(t *testing.T) {
 				require.False(t, composed(typ), "the root is not composed")
 
 				c := NewCollector(composed)
-				col := c.Collect(typ)
+
+				col, colErr := c.Collect(typ)
 
 				// A caller builds the shadow marking's input from
 				// Collection.Scanned, so build it the same way here.
 				promoted := map[reflect.Type][]Field{}
 				for _, ft := range col.Scanned {
-					promoted[ft] = c.Of(ft).Fields
+					// A scanned embed that v2 refuses still classifies through
+					// its recovered output.
+					fields, _ := c.Of(ft) //nolint:errcheck // See the comment above.
+					promoted[ft] = fields.Fields
 				}
 
-				assert.Equal(t, c.Of(typ), Classify(Resolve(col), promoted))
+				whole, wholeErr := c.Of(typ)
+				assert.Equal(t, whole, Classify(Resolve(col), promoted))
+				assert.Equal(t, colErr == nil, wholeErr == nil,
+					"the split phases and Of agree on whether the type is refused")
 			})
 		}
 	}
@@ -900,7 +1259,8 @@ func TestCycleSkipKeepsBranchUnconditional(t *testing.T) {
 		return typ == reflect.TypeFor[cycA]() || typ == reflect.TypeFor[cycB]()
 	}
 
-	out := NewCollector(composed).Of(reflect.TypeFor[cycA]())
+	out, err := NewCollector(composed).Of(reflect.TypeFor[cycA]())
+	require.NoError(t, err)
 
 	var embeds int
 
@@ -919,6 +1279,63 @@ func TestCycleSkipKeepsBranchUnconditional(t *testing.T) {
 	assert.Equal(t, 1, embeds, "cycA composes cycB")
 }
 
+// cycFbA embeds the composed cycFbB, whose subtree carries a fallback.
+type cycFbA struct {
+	*cycFbB //nolint:unused // The mutual embed is the shape under test.
+
+	X int `json:"x"`
+}
+
+// cycFbB re-enters cycFbA and carries the fallback the skip drops.
+type cycFbB struct {
+	*cycFbA //nolint:unused // The mutual embed is the shape under test.
+
+	Extra map[string]int `json:",embed"`
+	Y     int            `json:"y"`
+}
+
+// TestCycleSkipDropsSubtreeFallback pins the conservative drop: a fallback
+// inside a composed subtree the in-flight guard skips resolves to nil, like
+// the subtree's names. The direct Of sees cycFbB's fallback through the ghost
+// walk; only a resolution entered while cycFbA is already in flight (the
+// inner resolution [Collector.promoted] runs for the shadow marking) skips
+// the re-entry and drops it. The test seeds the in-flight set the way that
+// inner resolution finds it.
+func TestCycleSkipDropsSubtreeFallback(t *testing.T) {
+	t.Parallel()
+
+	composed := func(typ reflect.Type) bool {
+		return typ == reflect.TypeFor[cycFbA]() || typ == reflect.TypeFor[cycFbB]()
+	}
+
+	direct, err := NewCollector(composed).Of(reflect.TypeFor[cycFbA]())
+	require.NoError(t, err)
+	require.NotNil(t, direct.Fallback,
+		"the ghost walk sights the composed subtree's fallback")
+	assert.Equal(t, 1, direct.Fallback.Depth)
+
+	c := NewCollector(composed)
+	c.inFlight[reflect.TypeFor[cycFbA]()] = true
+
+	inner, err := c.Of(reflect.TypeFor[cycFbB]())
+	require.NoError(t, err)
+	assert.NotNil(t, inner.Fallback, "cycFbB's own fallback is sighted directly")
+
+	// A carrier whose only fallback sits beyond the skipped re-entry resolves
+	// none at all.
+	innerA, err := c.Of(reflect.TypeFor[cycFbA]())
+	require.NoError(t, err)
+	assert.NotNil(t, innerA.Fallback)
+
+	c2 := NewCollector(composed)
+	c2.inFlight[reflect.TypeFor[cycFbB]()] = true
+
+	skipped, err := c2.Of(reflect.TypeFor[cycFbA]())
+	require.NoError(t, err)
+	assert.Nil(t, skipped.Fallback,
+		"the in-flight skip of cycFbB drops the fallback its subtree carries")
+}
+
 // TestPromotedMarshalerHasNoKeySet pins reasonPromotedMarshaler: a promoted
 // MarshalJSON replaces the whole object, so the resolved fields describe
 // nothing the marshaled output carries.
@@ -928,7 +1345,7 @@ func TestPromotedMarshalerHasNoKeySet(t *testing.T) {
 	typ := reflect.TypeFor[promotedMarshaler]()
 	require.True(t, hasMarshaler(typ), reasonPromotedMarshaler)
 
-	data, err := json.Marshal(promotedMarshaler{RawMessage: json.RawMessage(`[1]`)})
+	data, err := json.Marshal(promotedMarshaler{RawMessage: jsonv1.RawMessage(`[1]`)})
 	require.NoError(t, err)
 	assert.JSONEq(t, `[1]`, string(data), reasonPromotedMarshaler)
 }

@@ -1,6 +1,7 @@
 package jsonschema_test
 
 import (
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"testing"
@@ -151,7 +152,7 @@ func TestSubschemaEntriesItemsAndItemsArray(t *testing.T) {
 	})
 
 	require.Len(t, entries, 1)
-	assert.Equal(t, "/items/0", entries[0].Pointer)
+	assert.Equal(t, jsontext.Pointer("/items/0"), entries[0].Pointer)
 	assert.Same(t, first, entries[0].Schema)
 }
 
@@ -454,7 +455,7 @@ func TestWalk(t *testing.T) {
 			AllOf:      []*jsonschema.Schema{{Type: "integer"}},
 		}
 
-		paths := map[*jsonschema.Schema]string{}
+		paths := map[*jsonschema.Schema]jsontext.Pointer{}
 
 		err := jsonschema.Walk(root, func(loc jsonschema.Location, s *jsonschema.Schema) error {
 			paths[s] = loc.Pointer
@@ -464,9 +465,9 @@ func TestWalk(t *testing.T) {
 
 		require.NoError(t, err)
 		assert.Empty(t, paths[root], "the root is the empty pointer")
-		assert.Equal(t, "/properties/a~1b", paths[mid], "map keys are RFC 6901-escaped")
-		assert.Equal(t, "/properties/a~1b/items", paths[leaf])
-		assert.Equal(t, "/allOf/0", paths[root.AllOf[0]])
+		assert.Equal(t, jsontext.Pointer("/properties/a~1b"), paths[mid], "map keys are RFC 6901-escaped")
+		assert.Equal(t, jsontext.Pointer("/properties/a~1b/items"), paths[leaf])
+		assert.Equal(t, jsontext.Pointer("/allOf/0"), paths[root.AllOf[0]])
 	})
 
 	t.Run("segments mirror the pointer in typed form", func(t *testing.T) {
@@ -534,7 +535,7 @@ func TestWalk(t *testing.T) {
 		shared := &jsonschema.Schema{Type: "string"}
 		root := &jsonschema.Schema{Items: shared, Not: shared}
 
-		var paths []string
+		var paths []jsontext.Pointer
 
 		err := jsonschema.Walk(root, func(loc jsonschema.Location, s *jsonschema.Schema) error {
 			if s == shared {
@@ -545,7 +546,7 @@ func TestWalk(t *testing.T) {
 		})
 
 		require.NoError(t, err)
-		assert.Equal(t, []string{"/items"}, paths,
+		assert.Equal(t, []jsontext.Pointer{"/items"}, paths,
 			"one visit, with the path of the first traversal order arrival")
 	})
 
@@ -559,7 +560,7 @@ func TestWalk(t *testing.T) {
 			},
 		}
 
-		var visited []string
+		var visited []jsontext.Pointer
 
 		err := jsonschema.Walk(root, func(loc jsonschema.Location, _ *jsonschema.Schema) error {
 			visited = append(visited, loc.Pointer)
@@ -571,7 +572,11 @@ func TestWalk(t *testing.T) {
 		})
 
 		require.NoError(t, err)
-		assert.Equal(t, []string{"", "/properties/skip", "/properties/walk", "/properties/walk/items"}, visited)
+		assert.Equal(
+			t,
+			[]jsontext.Pointer{"", "/properties/skip", "/properties/walk", "/properties/walk/items"},
+			visited,
+		)
 	})
 }
 
@@ -592,7 +597,7 @@ func TestSchemas(t *testing.T) {
 
 		var (
 			walkedSchemas, rangedSchemas []*jsonschema.Schema
-			walkedPaths, rangedPaths     []string
+			walkedPaths, rangedPaths     []jsontext.Pointer
 		)
 
 		err := jsonschema.Walk(root, func(loc jsonschema.Location, s *jsonschema.Schema) error {

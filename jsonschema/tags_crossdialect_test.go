@@ -1,7 +1,8 @@
 package jsonschema_test
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"reflect"
 	"testing"
@@ -87,7 +88,7 @@ func crossShapes() []crossShape {
 		sized(num, "slice of int8", reflect.TypeFor[[]int8]()),
 		sized(str, "nested string slice", reflect.TypeFor[[][]string]()),
 		with(str, "byte slice", reflect.TypeFor[[]byte](), "v"),
-		with(str, "raw message", reflect.TypeFor[json.RawMessage](), "v"),
+		with(str, "raw message", reflect.TypeFor[jsontext.Value](), "v"),
 		mapShape,
 		with(num, "string-coerced int", reflect.TypeFor[int](), "v,string"),
 		with(num, "text-marshaling numeric", reflect.TypeFor[crossLevel](), "v"),

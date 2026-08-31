@@ -1,6 +1,7 @@
 package jsonschema_test
 
 import (
+	"encoding/json/jsontext"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -20,7 +21,7 @@ func TestValidateDependenciesFalseSchemaKeyword(t *testing.T) {
 	tests := map[string]struct {
 		schema     string
 		keyword    string
-		schemaPath string
+		schemaPath jsontext.Pointer
 	}{
 		"dependentSchemas false subschema": {
 			schema:     `{"dependentSchemas": {"a": false}}`,

@@ -2,7 +2,7 @@ package jsonschema_test
 
 import (
 	"encoding"
-	"encoding/json"
+	"encoding/json/v2"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -11,18 +11,12 @@ import (
 	"go.jacobcolvin.com/x/jsonschema"
 )
 
-// Encoding/json never flattens an embedded interface: the field is a regular
-// leaf keyed by the field name, emitted as null when the interface is nil. The
-// generated schema must model it the same way, or the default
-// additionalProperties: false rejects every marshaled instance.
+// Encoding/json/v2 refuses an embedded interface outright: an embedded
+// non-struct must be explicitly given a JSON name. Generation refuses the
+// same declarations; an interface as a regular named field stays supported.
 
 // LeafIface is an exported interface embedded as a leaf field.
 type LeafIface interface{ LeafValue() string }
-
-// leafIfaceString is a concrete LeafIface that marshals as a JSON string.
-type leafIfaceString string
-
-func (s leafIfaceString) LeafValue() string { return string(s) }
 
 // leafIfaceObject is a concrete LeafIface that marshals as a JSON object
 // matching the WithTypeSchema override used in the tests below.
@@ -38,40 +32,18 @@ type hasLeafIface struct {
 	Name string `json:"name"`
 }
 
-func TestGenerateFor_EmbeddedInterfaceLeafProperty(t *testing.T) {
+func TestGenerateFor_EmbeddedInterfaceRefused(t *testing.T) {
 	t.Parallel()
 
-	// A nil interface marshals as null; a non-nil one as its concrete value.
-	// Either way the key is always present.
-	nilData, err := json.Marshal(hasLeafIface{Name: "x"})
-	require.NoError(t, err)
-	require.JSONEq(t, `{"LeafIface":null,"name":"x"}`, string(nilData))
+	// Encoding/json/v2 refuses the embedded interface, whatever the value.
+	_, err := json.Marshal(hasLeafIface{Name: "x"})
+	require.ErrorContains(t, err, "must be explicitly given a JSON name")
 
-	setData, err := json.Marshal(hasLeafIface{LeafIface: leafIfaceString("hi"), Name: "x"})
-	require.NoError(t, err)
-	require.JSONEq(t, `{"LeafIface":"hi","name":"x"}`, string(setData))
-
-	s, err := jsonschema.GenerateFor[hasLeafIface](t.Context())
-	require.NoError(t, err)
-
-	got, err := json.Marshal(s)
-	require.NoError(t, err)
-
-	assert.JSONEq(t, `{
-		"$schema":"https://json-schema.org/draft/2020-12/schema",
-		"type":"object",
-		"properties":{
-			"LeafIface":true,
-			"name":{"type":"string"}
-		},
-		"required":["LeafIface","name"],
-		"additionalProperties":false
-	}`, string(got))
-
-	require.NoError(t, validateJSON(t.Context(), s, nilData),
-		"generated schema rejected the nil-embed serialization: %s", nilData)
-	require.NoError(t, validateJSON(t.Context(), s, setData),
-		"generated schema rejected the non-nil-embed serialization: %s", setData)
+	// Generation refuses the same declaration. A concrete implementation
+	// stays usable as a regular field (asserted by the field tests below).
+	_, err = jsonschema.GenerateFor[hasLeafIface](t.Context())
+	require.ErrorIs(t, err, jsonschema.ErrInvalidJSONField)
+	require.ErrorContains(t, err, "must be explicitly given a JSON name")
 }
 
 // leafIfaceOverride is the WithTypeSchema override describing what every
@@ -89,49 +61,15 @@ func leafIfaceOverride() *jsonschema.Schema {
 func TestGenerateFor_EmbeddedInterfaceWithTypeSchemaOverride(t *testing.T) {
 	t.Parallel()
 
-	nilData, err := json.Marshal(hasLeafIface{Name: "x"})
-	require.NoError(t, err)
-	require.JSONEq(t, `{"LeafIface":null,"name":"x"}`, string(nilData))
-
-	setData, err := json.Marshal(hasLeafIface{LeafIface: leafIfaceObject{Kind: "a"}, Name: "x"})
-	require.NoError(t, err)
-	require.JSONEq(t, `{"LeafIface":{"kind":"a"},"name":"x"}`, string(setData))
-
-	s, err := jsonschema.GenerateFor[hasLeafIface](
+	// A WithTypeSchema override cannot rescue an embedded interface: the
+	// refusal is encoding/json/v2's, about the declaration rather than the
+	// schema, so generation reports it before the override is consulted.
+	_, err := jsonschema.GenerateFor[hasLeafIface](
 		t.Context(),
 		jsonschema.WithTypeSchemaFor[LeafIface](jsonschema.TypeSchema{Value: leafIfaceOverride()}),
 	)
-	require.NoError(t, err)
-
-	got, err := json.Marshal(s)
-	require.NoError(t, err)
-
-	// The intercepted embed is a leaf property under the field name; the
-	// override admits null alongside, since a nil interface marshals as null.
-	assert.JSONEq(t, `{
-		"$schema":"https://json-schema.org/draft/2020-12/schema",
-		"type":"object",
-		"properties":{
-			"LeafIface":{
-				"anyOf":[
-					{
-						"type":"object",
-						"properties":{"kind":{"type":"string"}},
-						"required":["kind"]
-					},
-					{"type":"null"}
-				]
-			},
-			"name":{"type":"string"}
-		},
-		"required":["LeafIface","name"],
-		"additionalProperties":false
-	}`, string(got))
-
-	require.NoError(t, validateJSON(t.Context(), s, nilData),
-		"generated schema rejected the nil-embed serialization: %s", nilData)
-	require.NoError(t, validateJSON(t.Context(), s, setData),
-		"generated schema rejected the non-nil-embed serialization: %s", setData)
+	require.ErrorIs(t, err, jsonschema.ErrInvalidJSONField)
+	require.ErrorContains(t, err, "must be explicitly given a JSON name")
 }
 
 func TestGenerateFor_InterfaceFieldTypeSchemaAdmitsNull(t *testing.T) {
@@ -241,8 +179,8 @@ func TestGenerateFor_TextMarshalerInterfaceFieldAdmitsNull(t *testing.T) {
 
 // embedsTextIface embeds the exported TextMarshaler interface. Its direct
 // MarshalJSON keeps the promoted-TextMarshaler interception from firing on the
-// outer type, so the struct reflects its fields and exposes how the embedded
-// interface itself is handled.
+// outer type, so the struct reflects its fields and reaches the embedded
+// interface's refusal.
 type embedsTextIface struct {
 	TextIface
 
@@ -251,25 +189,15 @@ type embedsTextIface struct {
 
 func (embedsTextIface) MarshalJSON() ([]byte, error) { return []byte(`{}`), nil }
 
-func TestGenerateFor_EmbeddedTextMarshalerInterfaceLeafProperty(t *testing.T) {
+func TestGenerateFor_EmbeddedTextMarshalerInterfaceRefused(t *testing.T) {
 	t.Parallel()
 
-	s, err := jsonschema.GenerateFor[embedsTextIface](t.Context())
-	require.NoError(t, err)
-
-	got, err := json.Marshal(s)
-	require.NoError(t, err)
-
-	// The exported embed is a leaf property under the field name: a string when
-	// non-nil (MarshalText), null when nil.
-	assert.JSONEq(t, `{
-		"$schema":"https://json-schema.org/draft/2020-12/schema",
-		"type":"object",
-		"properties":{
-			"TextIface":{"anyOf":[{"type":"string"},{"type":"null"}]},
-			"name":{"type":"string"}
-		},
-		"required":["TextIface","name"],
-		"additionalProperties":false
-	}`, string(got))
+	// Encoding/json/v2 marshals the outer value through its direct
+	// MarshalJSON and never walks the fields, but the generator's documented
+	// policy reflects a direct marshaler's fields as its best guess, and the
+	// reflected declaration carries an embedded interface v2 refuses to walk.
+	// The conservative answer is the refusal.
+	_, err := jsonschema.GenerateFor[embedsTextIface](t.Context())
+	require.ErrorIs(t, err, jsonschema.ErrInvalidJSONField)
+	require.ErrorContains(t, err, "must be explicitly given a JSON name")
 }

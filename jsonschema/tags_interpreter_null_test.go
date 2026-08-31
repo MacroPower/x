@@ -2,7 +2,8 @@ package jsonschema_test
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"maps"
 	"testing"
 
@@ -87,7 +88,7 @@ func baseNullCanvasWrites() map[string]nullCanvasWrite {
 		"default": {
 			keyword: "default",
 			write: func(canvas *jsonschema.Schema) {
-				canvas.Default = json.RawMessage("null")
+				canvas.Default = jsontext.Value("null")
 			},
 		},
 		"const": {
@@ -115,7 +116,7 @@ func baseNullCanvasWrites() map[string]nullCanvasWrite {
 
 // nullCanvasWrites returns the keyword rows of [baseNullCanvasWrites] plus one
 // row per Go value form isJSONNull judges rather than recognizes by identity: a
-// typed nil, and a [json.RawMessage] holding the literal, the same spelling the
+// typed nil, and a [jsontext.Value] holding the literal, the same spelling the
 // default row uses.
 func nullCanvasWrites() map[string]nullCanvasWrite {
 	writes := baseNullCanvasWrites()
@@ -132,13 +133,15 @@ func nullCanvasWrites() map[string]nullCanvasWrite {
 		"typed nil enum member": {
 			keyword: "enum",
 			write: func(canvas *jsonschema.Schema) {
-				canvas.Enum = []any{[]string(nil)}
+				// A nil pointer, not a nil slice: encoding/json/v2 writes a nil
+				// slice as [], so only pointer and interface nils spell null.
+				canvas.Enum = []any{(*int)(nil)}
 			},
 		},
 		"raw const": {
 			keyword: "const",
 			write: func(canvas *jsonschema.Schema) {
-				var null any = json.RawMessage("null")
+				var null any = jsontext.Value("null")
 
 				canvas.Const = &null
 			},
@@ -146,7 +149,7 @@ func nullCanvasWrites() map[string]nullCanvasWrite {
 		"raw enum member": {
 			keyword: "enum",
 			write: func(canvas *jsonschema.Schema) {
-				canvas.Enum = []any{json.RawMessage("null")}
+				canvas.Enum = []any{jsontext.Value("null")}
 			},
 		},
 	})
@@ -290,7 +293,7 @@ func TestInterpreterNullLiteralOnMapAndTupleElements(t *testing.T) {
 			interp := jsonschema.TagInterpreterFunc(
 				func(_ context.Context, field jsonschema.FieldContext, _ jsonschema.Tag) error {
 					for _, elem := range field.ElementContexts() {
-						elem.Canvas.Default = json.RawMessage("null")
+						elem.Canvas.Default = jsontext.Value("null")
 					}
 
 					return nil
@@ -433,7 +436,7 @@ func TestInterpreterNullLiteralOnARecursiveType(t *testing.T) {
 
 	interp := jsonschema.TagInterpreterFunc(
 		func(_ context.Context, field jsonschema.FieldContext, _ jsonschema.Tag) error {
-			field.Canvas.Default = json.RawMessage("null")
+			field.Canvas.Default = jsontext.Value("null")
 
 			return nil
 		},
@@ -468,7 +471,7 @@ func TestInterpreterNullLiteralOnANonRecursiveStancedType(t *testing.T) {
 	interp := jsonschema.TagInterpreterFunc(
 		func(_ context.Context, field jsonschema.FieldContext, _ jsonschema.Tag) error {
 			nullable = field.Shape().Nullable
-			field.Canvas.Default = json.RawMessage("null")
+			field.Canvas.Default = jsontext.Value("null")
 
 			return nil
 		},

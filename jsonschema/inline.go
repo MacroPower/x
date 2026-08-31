@@ -660,7 +660,7 @@ func (in *inliner) recordTree(s *Schema, path, doc string) {
 	in.docs[id] = doc
 
 	for _, child := range SubschemaEntries(s) {
-		in.recordTree(child.Schema, path+child.Pointer, doc)
+		in.recordTree(child.Schema, path+string(child.Pointer), doc)
 	}
 }
 
@@ -835,7 +835,7 @@ func (in *inliner) walkPair(working, pristine *Schema, path string) error {
 	}
 
 	for i, p := range pristineChildren {
-		err := in.walkPair(workingChildren[i].Schema, p.Schema, path+p.Pointer)
+		err := in.walkPair(workingChildren[i].Schema, p.Schema, path+string(p.Pointer))
 		if err != nil {
 			return err
 		}

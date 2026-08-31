@@ -10,19 +10,19 @@
       "version": "16.2.0",
       "platforms": ["aarch64-linux", "x86_64-linux"]
     },
-    "github:dagger/nix/89dee52f7839a290326eb1f929a4ac99d4a1aae1#packages.aarch64-darwin.dagger": {
+    "github:dagger/nix/4a39fb35b724a8f85c254fa1513fa0ffc17162e7#packages.aarch64-darwin.dagger": {
       "version": "",
       "platforms": ["aarch64-darwin"]
     },
-    "github:dagger/nix/89dee52f7839a290326eb1f929a4ac99d4a1aae1#packages.aarch64-linux.dagger": {
+    "github:dagger/nix/4a39fb35b724a8f85c254fa1513fa0ffc17162e7#packages.aarch64-linux.dagger": {
       "version": "",
       "platforms": ["aarch64-linux"]
     },
-    "github:dagger/nix/89dee52f7839a290326eb1f929a4ac99d4a1aae1#packages.x86_64-darwin.dagger": {
+    "github:dagger/nix/4a39fb35b724a8f85c254fa1513fa0ffc17162e7#packages.x86_64-darwin.dagger": {
       "version": "",
       "platforms": ["x86_64-darwin"]
     },
-    "github:dagger/nix/89dee52f7839a290326eb1f929a4ac99d4a1aae1#packages.x86_64-linux.dagger": {
+    "github:dagger/nix/4a39fb35b724a8f85c254fa1513fa0ffc17162e7#packages.x86_64-linux.dagger": {
       "version": "",
       "platforms": ["x86_64-linux"]
     }

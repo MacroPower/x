@@ -13,7 +13,7 @@ package content
 
 import (
 	"encoding/base64"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"mime"
 	"strings"
@@ -87,7 +87,7 @@ func Assert(encoding, mediaType, str string, strictBase64 bool) (string, error) 
 		decodedKnown = false
 	}
 
-	if decodedKnown && MediaTypeIsJSON(mediaType) && !json.Valid(decoded) {
+	if decodedKnown && MediaTypeIsJSON(mediaType) && !jsontext.Value(decoded).IsValid() {
 		return "contentMediaType", nil
 	}
 

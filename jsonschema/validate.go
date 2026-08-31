@@ -1,11 +1,12 @@
 package jsonschema
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"math/big"
 	"reflect"
@@ -15,11 +16,12 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	jsonv1 "encoding/json"
+
 	"go.jacobcolvin.com/x/jsonschema/internal/annotations"
 	"go.jacobcolvin.com/x/jsonschema/internal/content"
 	"go.jacobcolvin.com/x/jsonschema/internal/format"
 	"go.jacobcolvin.com/x/jsonschema/internal/jsonequal"
-	"go.jacobcolvin.com/x/jsonschema/internal/jsonptr"
 	"go.jacobcolvin.com/x/jsonschema/internal/normalize"
 	"go.jacobcolvin.com/x/jsonschema/internal/numrat"
 	"go.jacobcolvin.com/x/jsonschema/internal/refresolve"
@@ -133,7 +135,7 @@ type visitKey struct {
 	//nolint:unused // Read via struct equality when used as a map key.
 	schema *Schema
 	//nolint:unused // Read via struct equality when used as a map key.
-	instancePath string
+	instancePath jsontext.Pointer
 }
 
 // instanceLocation is the position in the instance that the validation walk is
@@ -143,17 +145,18 @@ type visitKey struct {
 // the root location (empty pointer, nil segments).
 type instanceLocation struct {
 	// The RFC 6901-encoded JSON Pointer.
-	ptr string
+	ptr jsontext.Pointer
 	// One typed [Segment] per reference token of ptr.
 	segs []Segment
 }
 
 // key returns the location of the object member named name, extending both
-// representations. The full slice expression caps segs so sibling descents
-// append into fresh backing arrays instead of aliasing a shared one.
+// representations ([jsontext.Pointer.AppendToken] carries the ~0/~1
+// escaping). The full slice expression caps segs so sibling descents append
+// into fresh backing arrays instead of aliasing a shared one.
 func (l instanceLocation) key(name string) instanceLocation {
 	return instanceLocation{
-		ptr:  l.ptr + "/" + jsonptr.Escape(name),
+		ptr:  l.ptr.AppendToken(name),
 		segs: append(slices.Clip(l.segs), Segment{Key: name}),
 	}
 }
@@ -162,8 +165,11 @@ func (l instanceLocation) key(name string) instanceLocation {
 // representations. The full slice expression caps segs so sibling descents
 // append into fresh backing arrays instead of aliasing a shared one.
 func (l instanceLocation) index(i int) instanceLocation {
+	// One conversion around the whole concatenation keeps it a single
+	// three-operand string concat (one allocation); a conversion in the
+	// middle would split it into two.
 	return instanceLocation{
-		ptr:  l.ptr + "/" + strconv.Itoa(i),
+		ptr:  jsontext.Pointer(string(l.ptr) + "/" + strconv.Itoa(i)),
 		segs: append(slices.Clip(l.segs), Segment{Index: i, IsIndex: true}),
 	}
 }
@@ -175,7 +181,7 @@ func (l instanceLocation) index(i int) instanceLocation {
 // the root location (empty pointer, nil segments).
 type schemaLocation struct {
 	// The RFC 6901-encoded JSON Pointer.
-	ptr string
+	ptr jsontext.Pointer
 	// One typed [Segment] per reference token of ptr.
 	segs []Segment
 }
@@ -186,18 +192,22 @@ type schemaLocation struct {
 // descents append into fresh backing arrays instead of aliasing a shared
 // one.
 func (l schemaLocation) kw(keyword string) schemaLocation {
+	// One conversion around the whole concatenation keeps it a single
+	// three-operand string concat (one allocation); a conversion in the
+	// middle would split it into two.
 	return schemaLocation{
-		ptr:  l.ptr + "/" + keyword,
+		ptr:  jsontext.Pointer(string(l.ptr) + "/" + keyword),
 		segs: append(slices.Clip(l.segs), Segment{Key: keyword}),
 	}
 }
 
 // key returns the location of the member named name under a map keyword
 // (properties, patternProperties, dependentSchemas, ...), extending both
-// representations with the aliasing discipline of [schemaLocation.kw].
+// representations with the aliasing discipline of [schemaLocation.kw];
+// [jsontext.Pointer.AppendToken] carries the ~0/~1 escaping.
 func (l schemaLocation) key(name string) schemaLocation {
 	return schemaLocation{
-		ptr:  l.ptr + "/" + jsonptr.Escape(name),
+		ptr:  l.ptr.AppendToken(name),
 		segs: append(slices.Clip(l.segs), Segment{Key: name}),
 	}
 }
@@ -207,7 +217,7 @@ func (l schemaLocation) key(name string) schemaLocation {
 // with the aliasing discipline of [schemaLocation.kw].
 func (l schemaLocation) idx(i int) schemaLocation {
 	return schemaLocation{
-		ptr:  l.ptr + "/" + strconv.Itoa(i),
+		ptr:  jsontext.Pointer(string(l.ptr) + "/" + strconv.Itoa(i)),
 		segs: append(slices.Clip(l.segs), Segment{Index: i, IsIndex: true}),
 	}
 }
@@ -461,7 +471,7 @@ func newValidator(ctx context.Context, schema *Schema, opts []ValidateOption) (*
 // the sub-schema traversal the parent owns, and the decoded-document
 // materializer the JSON-pointer fallback builds its targets through.
 // [ParseSchemaValue] serves as the materializer so a fallback target's const
-// and enum numbers stay exact [json.Number] literals, like every other path a
+// and enum numbers stay exact [jsonv1.Number] literals, like every other path a
 // schema document takes into the engines. Deep cloning stays parent-side in
 // the fetch closures, so the core needs no clone dependency.
 func refDeps() refresolve.Deps {
@@ -1358,7 +1368,7 @@ func MustCompile(schema *Schema, opts ...ValidateOption) *Validator {
 // other dynamic type returns an error wrapping [ErrInvalidSchemaDocument]
 // naming the Go type. This includes nil, the decoding of a top-level JSON
 // null, which [Schema.UnmarshalJSON] silently coerces to the false schema.
-// Values produced by [Normalize] ([json.Number] leaves) convert correctly.
+// Values produced by [Normalize] ([jsonv1.Number] leaves) convert correctly.
 func ParseSchemaValue(doc any) (*Schema, error) {
 	switch d := doc.(type) {
 	case bool:
@@ -1372,7 +1382,7 @@ func ParseSchemaValue(doc any) (*Schema, error) {
 
 	case map[string]any:
 		// Round-trip through encoding/json, delegating keyword parsing to the
-		// upstream UnmarshalJSON. A [json.Number] leaf marshals verbatim as a
+		// upstream UnmarshalJSON. A [jsonv1.Number] leaf marshals verbatim as a
 		// JSON number, so a [Normalize]d document converts exactly.
 		data, err := json.Marshal(d)
 		if err != nil {
@@ -1404,12 +1414,12 @@ func ParseSchemaValue(doc any) (*Schema, error) {
 // instances against the rounded neighbor of what the author wrote; a sub-schema
 // carried inside an unknown keyword would likewise reach the JSON-pointer
 // fallback with its numbers already rounded. Each node's typed [Location]
-// segments resolve its
-// source map, and each member is re-copied via a marshal + UseNumber decode,
-// keeping numbers as exact [json.Number] literals while staying unaliased from
-// the caller's document. Restoration is gated on what upstream parsed (a node
-// whose members are unset stays unset), so the two trees stay shape-aligned;
-// a member that fails the re-copy keeps its round-tripped value.
+// segments resolve its source map, and each member is re-copied via
+// [normalize.ExactValue], keeping numbers as exact [jsonv1.Number] literals
+// while staying unaliased from the caller's document. Restoration is gated
+// on what upstream parsed (a node whose members are unset stays unset), so
+// the two trees stay shape-aligned; a member that fails the re-copy keeps
+// its round-tripped value.
 func restoreExactValues(s *Schema, doc map[string]any) {
 	//nolint:errcheck // The walk callback never returns an error.
 	_ = Walk(s, func(loc Location, node *Schema) error {
@@ -1478,10 +1488,10 @@ func dropUnderflowedMultipleOf(s *Schema, doc map[string]any) {
 			return nil
 		}
 
-		// Only a [json.Number] source carries the authored literal; a float64
+		// Only a [jsonv1.Number] source carries the authored literal; a float64
 		// source lost the sign of an underflowed value before this package saw
 		// the document, so it keeps the decoded zero.
-		lit, ok := src[KeywordMultipleOf].(json.Number)
+		lit, ok := src[KeywordMultipleOf].(jsonv1.Number)
 		if !ok {
 			return nil
 		}
@@ -1532,30 +1542,7 @@ func copySourceMember(src map[string]any, key string) (any, bool) {
 		return nil, false
 	}
 
-	return copyExactJSONValue(v)
-}
-
-// copyExactJSONValue deep-copies a JSON-shaped value via a marshal + UseNumber
-// decode, so numbers come back as exact [json.Number] literals and the copy is
-// unaliased from the source. It reports ok=false on any error so the caller
-// keeps its fallback value.
-func copyExactJSONValue(v any) (any, bool) {
-	data, err := json.Marshal(v)
-	if err != nil {
-		return nil, false
-	}
-
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.UseNumber()
-
-	var out any
-
-	err = dec.Decode(&out)
-	if err != nil {
-		return nil, false
-	}
-
-	return out, true
+	return normalize.ExactValue(v)
 }
 
 // ParseSchema decodes data as a single JSON schema document and returns it
@@ -1563,7 +1550,7 @@ func copyExactJSONValue(v any) (any, bool) {
 // itself, through [Inline], [Walk], or programmatic editing, rather than
 // validating instances against it. It applies the same decode
 // discipline as [CompileJSON] (which is equivalent to compiling its result):
-// numbers decode as [json.Number] so large integer keywords survive the
+// numbers decode as [jsonv1.Number] so large integer keywords survive the
 // round-trip into the Schema, and trailing data after the document is rejected.
 // A top-level value that is not an object or boolean returns an error wrapping
 // [ErrInvalidSchemaDocument]; this includes JSON null, which unmarshaling into
@@ -1580,7 +1567,7 @@ func ParseSchema(data []byte) (*Schema, error) {
 
 // CompileJSON decodes data as a single JSON schema document with
 // [ParseSchema] and compiles it with [Compile]. It is the schema-side
-// counterpart of [Validator.ValidateJSON]: numbers decode as [json.Number], and trailing
+// counterpart of [Validator.ValidateJSON]: numbers decode as [jsonv1.Number], and trailing
 // data after the document is rejected. A top-level value that is not an object
 // or boolean returns an error wrapping [ErrInvalidSchemaDocument]; this
 // includes JSON null, which unmarshaling into a [Schema] directly silently
@@ -1661,7 +1648,7 @@ func checkSchemaTree(schema *Schema) error {
 		seen[s] = path
 
 		for _, entry := range SubschemaEntries(s) {
-			err := visit(entry.Schema, path+entry.Pointer)
+			err := visit(entry.Schema, path+string(entry.Pointer))
 			if err != nil {
 				return err
 			}
@@ -1676,7 +1663,7 @@ func checkSchemaTree(schema *Schema) error {
 // Validate validates a pre-parsed Go value against the compiled schema.
 //
 // Accepted instance types: map[string]any, []any, string, float64,
-// [json.Number], bool, nil. The Go numeric kinds that encoding/json does not
+// [jsonv1.Number], bool, nil. The Go numeric kinds that encoding/json does not
 // produce are accepted too, namely the signed and unsigned integer types and
 // float32; they are normalized via [Normalize], so values decoded from YAML or
 // TOML or built by hand validate directly (integers exactly, at any
@@ -1743,7 +1730,7 @@ func (c *Validator) validateNormalized(ctx context.Context, instance any) error 
 	return &ValidationError{Causes: errs}
 }
 
-// ValidateJSON decodes data as a JSON instance (numbers as [json.Number]) and
+// ValidateJSON decodes data as a JSON instance (numbers as [jsonv1.Number]) and
 // validates it against the compiled schema.
 //
 // The context is passed to the [RefResolver] for remote refs reached during
@@ -1757,23 +1744,41 @@ func (c *Validator) ValidateJSON(ctx context.Context, data []byte) error {
 	return c.Validate(ctx, instance)
 }
 
-// ValidateValue marshals v with encoding/json and validates its JSON form
-// against the compiled schema. It accepts the Go values [Validator.Validate]
-// rejects, namely structs and other types encoding/json can marshal, so an
-// instance of the very type a schema was generated for validates in one
-// call. What is validated is the value's marshaled form, exactly what a JSON
-// consumer of the value would see: json tags, omitempty and omitzero, and
-// MarshalJSON implementations all apply. A non-pointer v is marshaled
-// through a pointer to a copy, so pointer-receiver MarshalJSON and
-// MarshalText implementations (big.Int's, for example) apply exactly as
+// ValidateReader applies [Validator.ValidateJSON]'s discipline to an
+// [io.Reader], reading r to EOF, decoding numbers as [jsonv1.Number] while
+// rejecting data after the single top-level value, duplicate object member
+// names, and invalid UTF-8, then validating against the compiled schema. A
+// read error returns wrapped, without a validation verdict, and does not
+// unwrap to [*ValidationError].
+//
+// The context is passed to the [RefResolver] for remote refs reached during
+// this validation run (see [Validator.Validate]).
+func (c *Validator) ValidateReader(ctx context.Context, r io.Reader) error {
+	instance, err := normalize.DecodeJSONInstanceReader(r)
+	if err != nil {
+		return err //nolint:wrapcheck // DecodeJSONInstanceReader already wraps with "JSON decode:".
+	}
+
+	return c.Validate(ctx, instance)
+}
+
+// ValidateValue marshals v with [encoding/json/v2] and validates its JSON
+// form against the compiled schema. It accepts the Go values
+// [Validator.Validate] rejects, namely structs and other types it can
+// marshal, so an instance of the very type a schema was generated for
+// validates in one call. What is validated is the value's marshaled form,
+// exactly what a JSON consumer of the value would see: json tags, omitempty
+// and omitzero, and MarshalJSON implementations all apply. A non-pointer v
+// is marshaled through a pointer to a copy, so pointer-receiver MarshalJSON
+// and MarshalText implementations (big.Int's, for example) apply exactly as
 // they would for &v -- generation resolves marshalers through the type's
 // full method set, and ValidateValue(ctx, v) and ValidateValue(ctx, &v)
 // validate the same JSON form. The bytes are decoded back with the
-// [Validator.ValidateJSON] discipline (numbers as [json.Number]).
+// [Validator.ValidateJSON] discipline (numbers as [jsonv1.Number]).
 //
 // Returns nil on success or an error that can be unwrapped to
-// [*ValidationError] via [errors.AsType]. A value encoding/json cannot marshal
-// returns the wrapped marshal error, which does not unwrap to
+// [*ValidationError] via [errors.AsType]. A value [encoding/json/v2] cannot
+// marshal returns the wrapped marshal error, which does not unwrap to
 // [*ValidationError]; this covers channels, cyclic values, and unsupported
 // floats.
 //
@@ -1815,7 +1820,7 @@ func addressableInstance(v any) any {
 // the same schema, call [Compile] once and reuse the returned [Validator].
 //
 // Accepted instance types: map[string]any, []any, string, float64,
-// [json.Number], bool, nil. The Go numeric kinds that encoding/json does not
+// [jsonv1.Number], bool, nil. The Go numeric kinds that encoding/json does not
 // produce are accepted too, namely the signed and unsigned integer types and
 // float32; they are normalized via [Normalize]. Go structs are not accepted;
 // passing any other type returns an error (marshal to JSON or use
@@ -2284,7 +2289,7 @@ func evalNumeric(ctx evalContext) []*ValidationError {
 	var val *big.Rat
 
 	switch n := instance.(type) {
-	case json.Number:
+	case jsonv1.Number:
 		d, ok := numrat.ParseDecNumber(string(n))
 		if !ok {
 			return validateNumericNonComparable(
@@ -2382,7 +2387,7 @@ func evalNumeric(ctx evalContext) []*ValidationError {
 }
 
 // validateNumericUnbounded checks the numeric bound keywords for a
-// [json.Number] whose exact expansion is too expensive (see numrat.MaxNumberLen): a
+// [jsonv1.Number] whose exact expansion is too expensive (see numrat.MaxNumberLen): a
 // huge magnitude (exponent above the cap), a tiny magnitude (exponent below
 // the negative cap), or a significand longer than the cap. Every such value
 // still orders deterministically against any float64 bound via
@@ -2465,7 +2470,7 @@ func (v *validator) validateNumericUnbounded(
 // validateNumericNonComparable reports every numeric bound keyword present on
 // the schema as violated by an instance that carries no numeric value to
 // compare: a non-finite float64 (NaN or an infinity, which JSON cannot
-// represent) or a [json.Number] whose literal is not a valid JSON number. Such
+// represent) or a [jsonv1.Number] whose literal is not a valid JSON number. Such
 // a value still passes a bare type assertion (normalize admits both as
 // number-shaped leaves), but a bound written to constrain a number fails
 // closed against it rather than being silently skipped: +Inf under a maximum,

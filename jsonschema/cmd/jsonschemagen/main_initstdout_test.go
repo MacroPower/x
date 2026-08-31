@@ -2,7 +2,7 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -54,7 +54,7 @@ func TestIntegrationInitStdoutKeptOutOfSchemaOutput(t *testing.T) {
 	out, err := cmd.Output()
 	require.NoError(t, err, "stderr: %s", stderr.String())
 
-	require.True(t, json.Valid(out),
+	require.True(t, jsontext.Value(out).IsValid(),
 		"stdout must be valid JSON, got: %s", out)
 	assert.JSONEq(t, initStdoutWant, string(out))
 	assert.Contains(t, stderr.String(), "boot message",
@@ -79,7 +79,7 @@ func TestIntegrationInitStdoutKeptOutOfSchemaFile(t *testing.T) {
 	data, err := os.ReadFile(outFile)
 	require.NoError(t, err)
 
-	require.True(t, json.Valid(data),
+	require.True(t, jsontext.Value(data).IsValid(),
 		"the output file must be valid JSON, got: %s", data)
 	assert.JSONEq(t, initStdoutWant, string(data))
 }

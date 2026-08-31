@@ -3,7 +3,8 @@ package jsonschema_test
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"maps"
 	"reflect"
 	"slices"
@@ -52,6 +53,12 @@ const reasonStructOfPromotion = "reflect.StructOf cannot reproduce method promot
 
 // reasonNullableOff is why the accept rigs have no WithNullable(false) variant.
 const reasonNullableOff = "WithNullable(false) deliberately drops the null branch, so a nil pointer marshaling to null is correctly rejected and the accept property does not hold"
+
+// reasonFallbackAdmitsExtras is why FuzzShapeRejectsNearMiss skips its
+// extra-property leg when the drawn shape carries a winning embedded
+// fallback. TestShapeFallbackNearMissTeeth restores the leg's teeth
+// deterministically.
+const reasonFallbackAdmitsExtras = "an embedded fallback's value schema admits unknown members by design, so an injected sentinel property is not a near miss; the schema still constrains each member's value"
 
 // nearMissSentinel is the property name FuzzShapeRejectsNearMiss injects. No
 // fuzzshape tag pool entry can produce it, so its absence from a marshaled
@@ -138,6 +145,26 @@ func FuzzShapeAcceptsWithFormats(f *testing.F) {
 	fuzzShapeAccepts(f, nil, []jsonschema.ValidateOption{jsonschema.WithFormats(true)})
 }
 
+// FuzzShapeAcceptsNilContainersNull pairs WithJSONOptions(FormatNil*AsNull)
+// generation with the same marshal options and the nil-container fill draw;
+// without that draw the default fill never produces a nil slice or map and
+// the target would assert nothing new.
+func FuzzShapeAcceptsNilContainersNull(f *testing.F) {
+	opts := []json.Options{json.FormatNilSliceAsNull(true), json.FormatNilMapAsNull(true)}
+	fuzzShapeAcceptsOpts(f,
+		[]jsonschema.GenerateOption{jsonschema.WithJSONOptions(opts...)}, nil,
+		opts, []fuzzfill.Option{fuzzfill.WithNilContainers()})
+}
+
+// FuzzShapeAcceptsOmitZero pairs WithJSONOptions(OmitZeroStructFields)
+// generation with the matching marshal option; the zero-heavy seed blobs
+// exercise omission with the default fill.
+func FuzzShapeAcceptsOmitZero(f *testing.F) {
+	opts := []json.Options{json.OmitZeroStructFields(true)}
+	fuzzShapeAcceptsOpts(f,
+		[]jsonschema.GenerateOption{jsonschema.WithJSONOptions(opts...)}, nil, opts, nil)
+}
+
 // fuzzShapeAccepts is the shared body for every rig-2a target. Unlike rig 1 it
 // generates and compiles inside the callback, since the type differs per
 // iteration. The f.Fuzz callback cannot call t.Parallel (the fuzzing framework
@@ -151,6 +178,28 @@ func fuzzShapeAccepts(
 	validateOpts []jsonschema.ValidateOption,
 ) {
 	f.Helper()
+	fuzzShapeAcceptsOpts(f, genOpts, validateOpts, nil, nil)
+}
+
+// fuzzShapeAcceptsOpts is fuzzShapeAccepts with the marshal side configured
+// in lockstep: an options-paired target (WithJSONOptions on the generation
+// side) marshals its instances under the same encoding/json/v2 options, and
+// may add fill draws the property needs (the nil-container target is
+// toothless without nil containers). The refusal probe deliberately stays on
+// default marshal options: generation's refusals are declaration-level and
+// option-independent, while a shape-altering option can hide the faulty
+// declaration from v2 before it is evaluated (OmitZeroStructFields omits a
+// zero-valued field whose saturated fill is still zero -- an opaque type --
+// so its invalid ,string tag never errs), which would break the agreement
+// without any disagreement about the declaration.
+func fuzzShapeAcceptsOpts(
+	f *testing.F,
+	genOpts []jsonschema.GenerateOption,
+	validateOpts []jsonschema.ValidateOption,
+	marshalOpts []json.Options,
+	fillOpts []fuzzfill.Option,
+) {
+	f.Helper()
 
 	ctx := context.Background()
 
@@ -159,7 +208,7 @@ func fuzzShapeAccepts(
 	f.Fuzz(func(t *testing.T, shape, values []byte) {
 		rt := fuzzshape.Type(shape)
 		schema, validator := generateAndCompile(ctx, t, rt, genOpts, validateOpts)
-		instance := marshalShapeValue(t, rt, values)
+		instance := marshalShapeValue(t, rt, values, marshalOpts, fillOpts)
 
 		err := validator.ValidateJSON(ctx, instance)
 		if err != nil {
@@ -184,9 +233,10 @@ func fuzzShapeAccepts(
 // needsAllOfComposition, which requires a registered TypeSchemaProvider, a
 // WithTypeSchema override, or a JSONSchemaProvider; fuzzshape's pools are
 // provider-free by construction, so no synthesized shape reaches it, and
-// buildStructSchema therefore always closes the object. A StructOf root is
-// inlined rather than extracted to $defs, so the root's Required list is
-// readable directly.
+// buildStructSchema therefore closes the object unless the shape carries a
+// winning embedded fallback, whose extra-property leg the target skips
+// (reasonFallbackAdmitsExtras). A StructOf root is inlined rather than
+// extracted to $defs, so the root's Required list is readable directly.
 func FuzzShapeRejectsNearMiss(f *testing.F) {
 	ctx := context.Background()
 
@@ -195,12 +245,12 @@ func FuzzShapeRejectsNearMiss(f *testing.F) {
 	f.Fuzz(func(t *testing.T, shape, values []byte) {
 		rt := fuzzshape.Type(shape)
 		schema, validator := generateAndCompile(ctx, t, rt, nil, nil)
-		instance := marshalShapeValue(t, rt, values)
+		instance := marshalShapeValue(t, rt, values, nil, nil)
 
 		// A StructOf root always marshals to an object, since the pools exclude
 		// every embed that could promote a marshaler. Asserting it rather than
 		// skipping keeps a pool change from turning the rig into a no-op.
-		var object map[string]json.RawMessage
+		var object map[string]jsontext.Value
 
 		require.NoErrorf(t, json.Unmarshal(instance, &object),
 			"a value of %s marshaled to %s, which is not an object", rt, instance)
@@ -213,9 +263,13 @@ func FuzzShapeRejectsNearMiss(f *testing.F) {
 		require.NotContainsf(t, object, nearMissSentinel,
 			"the sentinel property is already present in %s, so injecting it is not a near miss", instance)
 
-		extra := maps.Clone(object)
-		extra[nearMissSentinel] = json.RawMessage(`1`)
-		requireRejects(ctx, t, validator, rt, schema, extra, "an unknown property")
+		if !shapeHasFallback(rt) {
+			extra := maps.Clone(object)
+			extra[nearMissSentinel] = jsontext.Value(`1`)
+			requireRejects(ctx, t, validator, rt, schema, extra, "an unknown property")
+		} else {
+			t.Log(reasonFallbackAdmitsExtras)
+		}
 
 		for _, name := range schema.Required {
 			require.Containsf(t, object, name,
@@ -229,6 +283,50 @@ func FuzzShapeRejectsNearMiss(f *testing.F) {
 	})
 }
 
+// shapeHasFallback reports whether a drawn shape carries a winning embedded
+// fallback. The pools draw fallbacks at depth 0 only (no embed pool type
+// carries one), and a shape that drew two is a declaration refusal
+// generateAndCompile already skipped, so a depth-0 scan for a non-anonymous
+// ",embed" field of a qualifying type is exact.
+func shapeHasFallback(rt reflect.Type) bool {
+	for field := range rt.Fields() {
+		if field.Anonymous || !strings.Contains(field.Tag.Get("json"), ",embed") {
+			continue
+		}
+
+		ft := field.Type
+		if ft.Kind() == reflect.Pointer && ft.Name() == "" {
+			ft = ft.Elem()
+		}
+
+		if reflectkind.IsEmbeddedFallback(ft) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// TestShapeFallbackNearMissTeeth pins reasonFallbackAdmitsExtras and restores
+// the teeth the skip gives up: the fallback's value schema still judges every
+// extra member, accepting one of the value type and rejecting one outside it.
+func TestShapeFallbackNearMissTeeth(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+
+	schema, err := jsonschema.GenerateFor[fbMap](ctx)
+	require.NoError(t, err)
+
+	validator, err := jsonschema.Compile(ctx, schema)
+	require.NoError(t, err)
+
+	require.NoError(t, validator.ValidateJSON(ctx, []byte(`{"name":"n","extra":7}`)),
+		"an extra integer member satisfies the fallback's value schema")
+	require.Error(t, validator.ValidateJSON(ctx, []byte(`{"name":"n","extra":"seven"}`)),
+		reasonFallbackAdmitsExtras)
+}
+
 // requireRejects marshals a mutated object and fails unless the schema refuses
 // it.
 func requireRejects(
@@ -237,7 +335,7 @@ func requireRejects(
 	validator *jsonschema.Validator,
 	rt reflect.Type,
 	schema *jsonschema.Schema,
-	object map[string]json.RawMessage,
+	object map[string]jsontext.Value,
 	what string,
 ) {
 	t.Helper()
@@ -262,6 +360,14 @@ func requireRejects(
 // structure, identifier, and reference checks, so it doubles as the
 // structural well-formedness assertion; full metaschema validation stays in
 // conformance_test.go, too costly to run per iteration.
+//
+// A refused generation is not automatically a failure: the pools draw
+// declarations encoding/json/v2 itself refuses (a tag with a cut name, a
+// ",string" on a non-numeric field, an unnamed embedded non-struct, a struct
+// with no serializable fields), and the ground-truth property then becomes
+// agreement on the refusal. Generate may err only where v2 refuses to marshal the same type,
+// asserted on a saturated fill so a nil pointer cannot hide the faulty
+// declaration; the target then skips, having asserted the agreement.
 func generateAndCompile(
 	ctx context.Context,
 	t *testing.T,
@@ -272,7 +378,10 @@ func generateAndCompile(
 	t.Helper()
 
 	schema, err := jsonschema.Generate(ctx, rt, genOpts...)
-	require.NoErrorf(t, err, "generate a schema for %s", rt)
+	if err != nil {
+		requireV2RefusesValue(t, rt, err)
+		t.Skipf("declaration refused by generation and encoding/json/v2 alike: %v", err)
+	}
 
 	validator, err := jsonschema.Compile(ctx, schema, validateOpts...)
 	require.NoErrorf(t, err, "compile the schema generated for %s", rt)
@@ -285,26 +394,43 @@ func generateAndCompile(
 // component pool is marshalable by construction and declares its own filling
 // requirements through FillOptions, so a failure here means the pool or a
 // constructor is wrong, not that the fuzzer found a hostile value.
-func marshalShapeValue(t *testing.T, rt reflect.Type, values []byte) []byte {
+func marshalShapeValue(
+	t *testing.T, rt reflect.Type, values []byte,
+	marshalOpts []json.Options, fillOpts []fuzzfill.Option,
+) []byte {
 	t.Helper()
 
 	val := reflect.New(rt)
-	fuzzfill.Fill(val, values, fuzzshape.FillOptions()...)
+	fuzzfill.Fill(val, values, append(fuzzshape.FillOptions(), fillOpts...)...)
 
-	instance, err := json.Marshal(val.Interface())
+	instance, err := json.Marshal(val.Interface(), marshalOpts...)
 	require.NoErrorf(t, err, "marshal a value of %s", rt)
 
 	return instance
 }
 
+// requireV2RefusesValue asserts encoding/json/v2 also refuses to marshal a
+// value of rt, the agreement a refused generation pins. The fill is saturated
+// so a nil pointer cannot hide the faulty declaration behind a null.
+func requireV2RefusesValue(tb testing.TB, rt reflect.Type, genErr error) {
+	tb.Helper()
+
+	val := reflect.New(rt)
+	fuzzfill.Fill(val, bytes.Repeat([]byte{0xff}, 512), fuzzshape.FillOptions()...)
+
+	_, err := json.Marshal(val.Interface())
+	require.Errorf(tb, err,
+		"generation refused %s (%v) but encoding/json/v2 marshals it", rt, genErr)
+}
+
 // indentSchema renders a schema for a failure message. It runs only on the
 // failure path, since the schema differs per iteration and rendering every one
 // would cost more than the property check itself.
-func indentSchema(t *testing.T, schema *jsonschema.Schema) []byte {
-	t.Helper()
+func indentSchema(tb testing.TB, schema *jsonschema.Schema) []byte {
+	tb.Helper()
 
-	rendered, err := json.MarshalIndent(schema, "", "  ")
-	require.NoError(t, err, "marshal the generated schema for the failure message")
+	rendered, err := json.Marshal(schema, jsontext.WithIndent("  "))
+	require.NoError(tb, err, "marshal the generated schema for the failure message")
 
 	return rendered
 }
@@ -315,7 +441,7 @@ func indentSchema(t *testing.T, schema *jsonschema.Schema) []byte {
 // by hand -- all zeros, all ones, a repeating nibble -- drive every draw to the
 // same residue, which collapses the shape to at most one field once the name
 // dedupe runs. TestShapeSeedsDrawRichShapes states what the set has to cover.
-var shapeSeedDraws = []int{83, 91, 146, 155, 200, 232}
+var shapeSeedDraws = []int{79, 85, 162, 372, 1976}
 
 // seedShapeBlobs returns the population shapeSeedDraws indexes into.
 func seedShapeBlobs() [][]byte {
@@ -378,6 +504,12 @@ func TestShapeSeedsDrawRichShapes(t *testing.T) {
 
 			return name != "" && name != "-"
 		},
+		"an embedded fallback": func(f reflect.StructField) bool {
+			return !f.Anonymous && strings.Contains(f.Tag.Get("json"), ",embed")
+		},
+		"a format tag option": func(f reflect.StructField) bool {
+			return strings.Contains(f.Tag.Get("json"), ",format:")
+		},
 	}
 
 	seen := make(map[string]bool, len(fieldClasses)+2)
@@ -387,8 +519,15 @@ func TestShapeSeedsDrawRichShapes(t *testing.T) {
 		require.GreaterOrEqualf(t, rt.NumField(), 3, "seed draw %d yields the thin shape %s", draw, rt)
 
 		schema, err := jsonschema.Generate(ctx, rt)
-		require.NoErrorf(t, err, "generate a schema for seed draw %d", draw)
-		require.NotEmptyf(t, schema.Required, "seed draw %d (%s) requires no property", draw, rt)
+		if err != nil {
+			// A refused draw earns its seed slot only through the refusal
+			// half of the property, v2 refusing the same declaration. The
+			// format-option class is reachable no other way.
+			requireV2RefusesValue(t, rt, err)
+		} else {
+			require.NotEmptyf(t, schema.Required, "seed draw %d (%s) requires no property", draw, rt)
+			markPromotionClasses(ctx, t, rt, schema, seen)
+		}
 
 		for field := range rt.Fields() {
 			for name, match := range fieldClasses {
@@ -397,8 +536,6 @@ func TestShapeSeedsDrawRichShapes(t *testing.T) {
 				}
 			}
 		}
-
-		markPromotionClasses(ctx, t, rt, schema, seen)
 	}
 
 	for name := range fieldClasses {

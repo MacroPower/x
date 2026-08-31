@@ -2,10 +2,9 @@ package jsonschema_test
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"math/big"
-	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -86,8 +85,8 @@ func loadMetaSchemas(t *testing.T) (map[string]*jsonschema.Schema, []jsonschema.
 // The following package-level types form a corpus exercising the distinct
 // shapes the generator emits: primitives, bounded integers, nullable pointers
 // (anyOf with null), slices, arrays, maps, []byte (contentEncoding), well-known
-// overrides (time.Time, url.URL, big.Int), $defs/$ref extraction, recursion,
-// generics, and interface fields.
+// overrides (time.Time, big.Int), $defs/$ref extraction, recursion, generics,
+// and interface fields.
 
 type conformanceAddress struct {
 	Street string `json:"street"`
@@ -102,7 +101,6 @@ type conformancePerson struct {
 	Score    float64             `json:"score"    jsonschema:"minimum=0,maximum=100"`
 	Active   bool                `json:"active"`
 	Email    string              `json:"email"    jsonschema:"format=email"`
-	Website  url.URL             `json:"website"`
 	Born     time.Time           `json:"born"`
 	Balance  big.Int             `json:"balance"`
 	Tags     []string            `json:"tags"`
@@ -165,7 +163,6 @@ func TestGeneratedSchemaConformsToMetaschema(t *testing.T) {
 		"bytes":     reflect.TypeFor[[]byte](),
 		"interface": reflect.TypeFor[any](),
 		"time":      reflect.TypeFor[time.Time](),
-		"url":       reflect.TypeFor[url.URL](),
 		"bigint":    reflect.TypeFor[big.Int](),
 		"address":   reflect.TypeFor[conformanceAddress](),
 		"person":    reflect.TypeFor[conformancePerson](),

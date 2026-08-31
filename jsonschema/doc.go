@@ -31,7 +31,7 @@
 //
 // Both functions accept any Go type as the root, not just structs. For
 // example, [GenerateFor] on string produces {"type": "string"}, and on
-// []int produces {"type": ["null", "array"], "items": {"type": "integer"}}.
+// []int produces {"type": "array", "items": {"type": "integer"}}.
 // The root schema always carries the $schema keyword; sub-schemas and $defs
 // entries never do.
 //
@@ -51,9 +51,25 @@
 // Sentinel errors are defined for error matching with [errors.Is]:
 //
 //   - [ErrUnsupportedType]: returned when a Go type has no JSON Schema
-//     representation (func, chan, complex, [unsafe.Pointer]).
-//   - [ErrUnsupportedMapKey]: returned when a map key type is not string,
-//     an integer type, or an [encoding.TextMarshaler].
+//     representation (func, chan, complex, [unsafe.Pointer], and
+//     [time.Duration], which [encoding/json/v2] gives no default
+//     representation).
+//   - [ErrUnsupportedMapKey]: returned when a map key type cannot encode as
+//     an object member name because it is none of a string, integer, or
+//     float kind and carries no marshaler method. The exact [time.Duration] key
+//     is refused too, since v2's native duration codec pre-empts the
+//     integer-kind key encoding and has no default representation.
+//   - [ErrInvalidJSONField]: returned when a struct field declaration cannot
+//     marshal under [encoding/json/v2]: a malformed json tag, two fields of
+//     one struct claiming one JSON name, a tagged unexported field, an
+//     invalid embedded field or fallback (two fallback fields in one
+//     declaration, a non-qualifying type or key under json:",embed", or
+//     json:",embed" combined with a name or another option), a
+//     json:",string" on a field that encodes no number, a format tag option
+//     (cut from stable v2, go.dev/issue/79071), or a struct with fields but
+//     none serializable (every field unexported and untagged). Generation
+//     refuses the type exactly where [encoding/json/v2.Marshal] refuses a
+//     value of it.
 //   - [ErrProviderPanic]: returned when a [JSONSchemaProvider] or
 //     [JSONSchemaExtender] method panics; the panic is recovered and wrapped.
 //   - [ErrConflictingTypeSchema]: returned for a malformed [TypeSchema] a
@@ -97,19 +113,32 @@
 //   - [WithDefinitions] controls $defs/$ref extraction (default: true).
 //   - [WithAdditionalProperties] controls whether extra keys are allowed on
 //     object schemas (default: false, disallowing extra keys).
-//   - [WithNullable] controls whether nil-able types (pointers, slices, maps,
-//     []byte) accept null (default: true; false drops the null branch).
+//   - [WithNullable] controls whether pointer occurrences and intercepted
+//     interface types accept null (default: true; false drops the null
+//     branch). Slices, maps, and []byte take no null under the default
+//     marshal options, where a nil one marshals as its empty instance; see
+//     [WithJSONOptions].
+//   - [WithJSONOptions] makes generation honor the [encoding/json/v2]
+//     marshal options that change output shape (FormatNilSliceAsNull,
+//     FormatNilMapAsNull, OmitZeroStructFields), so the schema matches
+//     the marshal under the same options; shape-changing options
+//     generation does not model are refused with
+//     [ErrUnsupportedJSONOption], and [WithNullable](false) still drops
+//     every null branch.
 //   - [WithDefaultsFrom] seeds root property defaults from an instance of the
 //     generated type: after generation the instance is marshaled with
-//     encoding/json and each top-level key of the output that matches a root
-//     property becomes that property's default, overwriting tag defaults.
-//     Keys the json tags omit (omitempty, omitzero) contribute nothing, so
-//     presence follows the json tags exactly; nested struct, slice, and map
-//     values become whole-value defaults on their top-level property. A nil
-//     field carrying neither omitempty nor omitzero marshals to JSON null.
-//     That null leaves a property admitting no null untouched, so the
+//     [encoding/json/v2] (under the [WithJSONOptions] options, so seeded
+//     defaults match the caller's marshal) and each top-level key of the
+//     output that matches a root property becomes that property's default,
+//     overwriting tag defaults. Keys the json tags omit (omitempty, omitzero)
+//     contribute nothing, so presence follows the json tags exactly; nested
+//     struct, slice, and map values become whole-value defaults on their
+//     top-level property. A nil slice, map, or []byte marshals as its empty
+//     instance ([], {}, ""), which seeds like any other value. A nil pointer
+//     or interface carrying neither omitempty nor omitzero marshals to JSON
+//     null. That null leaves a property admitting no null untouched, so the
 //     property keeps whatever default its tag wrote. [WithNullable](false)
-//     takes the null branch off every nilable property, and a [NullForbidden]
+//     takes the null branch off every pointer property, and a [NullForbidden]
 //     stance takes it off every occurrence of the type it covers. An instance
 //     whose pointer-dereferenced type is not the generated type, or that does
 //     not marshal to a JSON object, returns an error wrapping
@@ -157,12 +186,25 @@
 //     indirection (e.g., **T) are treated identically to *T. Pointers to
 //     unrestricted types (*interface{}, [*encoding/json.RawMessage]) produce an
 //     unrestricted schema ({}) since it already permits null.
-//   - Slices: []T produces a nullable array with items schema. []byte is a
-//     special case producing a nullable base64-encoded string.
+//   - Slices: []T produces an array with items schema; a nil slice marshals
+//     as [] under [encoding/json/v2]'s defaults, so no null is admitted
+//     (under [WithJSONOptions] with FormatNilSliceAsNull, every slice
+//     occurrence admits null). []byte is a special case producing a
+//     base64-encoded string (a nil []byte marshals as "" under the
+//     defaults and follows the slice option). Only the unnamed
+//     byte element type gets the base64 form: a []T whose element is a named
+//     uint8 type marshals as a number array and produces one.
 //   - Arrays: [N]T produces a fixed-size array with minItems/maxItems = N.
-//   - Maps: map[K]V produces a nullable object with additionalProperties.
-//     K must be string, an integer type, or implement [encoding.TextMarshaler];
-//     other key types return [ErrUnsupportedMapKey].
+//     [N]byte is the base64 exception again, producing a string whose
+//     minLength/maxLength pin the exact encoded length.
+//   - Maps: map[K]V produces an object with additionalProperties; a nil map
+//     marshals as {} under the defaults, so no null is admitted (under
+//     [WithJSONOptions] with FormatNilMapAsNull, every map occurrence
+//     admits null). K must be a string, integer,
+//     or float kind, or carry a marshaler method (through its pointer
+//     method set included); other key types return [ErrUnsupportedMapKey],
+//     and so does the exact [time.Duration] key, whose native v2 codec has
+//     no default representation.
 //   - Interfaces: any interface type produces an unrestricted schema ({}).
 //     A nil interface marshals as null, so an interface whose schema an
 //     earlier resolution step intercepts (a registered override, or a
@@ -171,10 +213,9 @@
 //   - Structs: produce objects with properties, required, and
 //     additionalProperties: false by default.
 //
-// The "nullable" behavior of pointers, slices, maps, []byte, and intercepted
-// interfaces above is the default; [WithNullable](false) drops the null branch
-// so *T yields the bare value schema, []T yields {"type":"array"}, and map
-// yields {"type":"object"}.
+// The "nullable" behavior of pointers and intercepted interfaces above is the
+// default; [WithNullable](false) drops the null branch so *T yields the bare
+// value schema.
 //
 // Well-known types have built-in overrides: [time.Time] maps to
 // {"type": "string", "format": "date-time"}, [encoding/json.RawMessage] to {},
@@ -188,15 +229,19 @@
 // the string schema its output requires. Built-in overrides are matched by
 // exact [reflect.Type], so named types wrapping a built-in-overridden type
 // (e.g., type MyTime [time.Time]) do not receive the override and fall
-// through to subsequent resolution steps. [net/url.URL] has no override: it
-// implements no marshaler interface, so it reflects as the struct object
-// encoding/json actually emits.
+// through to subsequent resolution steps. [net/url.URL] has no override and
+// is refused: it implements no marshaler interface, and reflecting it
+// reaches [net/url.Userinfo], a struct with fields but none serializable,
+// which [encoding/json/v2] refuses ([ErrInvalidJSONField]).
 //
-// Types implementing [encoding.TextMarshaler] map to {"type": "string"},
-// checked before struct reflection.
+// Types implementing [encoding.TextAppender] or [encoding.TextMarshaler] map
+// to {"type": "string"}, checked before struct reflection.
 //
 // Unsupported types (func, chan, complex, [unsafe.Pointer]) return
-// [ErrUnsupportedType].
+// [ErrUnsupportedType], and so does [time.Duration], which
+// [encoding/json/v2] gives no default representation. The refusal runs after
+// the override steps, so [WithTypeSchema] or a provider can still declare a
+// shape for a duration.
 //
 // Go type aliases (defined with =) are invisible to reflection and are treated
 // as their underlying type. Only defined types (e.g., type MyString string)
@@ -212,36 +257,38 @@
 //  2. [JSONSchemaProvider] interface.
 //  3. Built-in overrides ([]byte, [time.Time], [encoding/json.Number], etc.).
 //  4. Marshaler methods promoted from an embedded field: a promoted
-//     [encoding/json.Marshaler] makes the schema unrestricted ({}), and a
-//     promoted [encoding.TextMarshaler] makes it {"type": "string"}.
-//  5. [encoding.TextMarshaler] interface (direct implementation, for types
-//     not also implementing [encoding/json.Marshaler]).
+//     [encoding/json/v2.MarshalerTo] or [encoding/json.Marshaler] makes the
+//     schema unrestricted ({}), and a promoted [encoding.TextAppender] or
+//     [encoding.TextMarshaler] makes it {"type": "string"}.
+//  5. [encoding.TextAppender] or [encoding.TextMarshaler] interface (direct
+//     implementation, for types implementing no JSON marshaler interface).
 //  6. Kind-based reflection.
 //
-// A direct [encoding/json.Marshaler] implementation is not in this chain.
-// Types directly implementing [encoding/json.Marshaler] are handled by
-// kind-based reflection, since MarshalJSON can return any JSON type, leaving
-// the output type unknowable via reflection. That holds even when the type
-// also implements [encoding.TextMarshaler]: encoding/json prefers MarshalJSON
-// over MarshalText, so the text form never appears in the output and step 5
-// does not claim the type as a string. Specific well-known
-// [encoding/json.Marshaler] types are handled via built-in overrides.
-// Other [encoding/json.Marshaler] types should use
-// [WithTypeSchema] or implement [JSONSchemaProvider]. A marshaler promoted
-// from an embedded field is different (step 4): encoding/json resolves
-// marshalers through the method set, so the promoted method serializes the
-// whole outer struct and reflecting its fields would describe a shape that
-// never appears in the output.
+// A direct JSON marshaler implementation ([encoding/json/v2.MarshalerTo] or
+// [encoding/json.Marshaler]) is not in this chain. Types directly
+// implementing one are handled by kind-based reflection, since the method
+// can return any JSON type, leaving the output type unknowable via
+// reflection. That holds even when the type also implements a text
+// marshaler: [encoding/json/v2] prefers the JSON method, so the text form
+// never appears in the output and step 5 does not claim the type as a
+// string. Specific well-known JSON-marshaling types are handled via built-in
+// overrides. Other JSON-marshaling types should use [WithTypeSchema] or
+// implement [JSONSchemaProvider]. A marshaler promoted from an embedded
+// field is different (step 4): [encoding/json/v2] resolves marshalers
+// through the method set, so the promoted method serializes the whole outer
+// struct and reflecting its fields would describe a shape that never appears
+// in the output.
 //
-// # Deviations from encoding/json
+// # Deviations from encoding/json/v2
 //
 // Two points where the generated schema's model of a Go type differs from what
-// [encoding/json] emits for that type, each specified in the section that owns
-// it.
+// [encoding/json/v2] emits for that type, each specified in the section that
+// owns it.
 //
-//   - A direct [encoding/json.Marshaler] implementation is reflected by its Go
-//     struct shape, not its marshaled shape, so the schema can reject output
-//     [encoding/json] produces (see Type Resolution Priority, above).
+//   - A direct JSON marshaler implementation ([encoding/json/v2.MarshalerTo]
+//     or [encoding/json.Marshaler]) is reflected by its Go struct shape, not
+//     its marshaled shape, so the schema can reject output
+//     [encoding/json/v2] produces (see Type Resolution Priority, above).
 //   - [Draft7] omits additionalProperties: false from the parent under allOf
 //     composition, which loosens the schema rather than tightening it, so it
 //     cannot reject valid output (see Struct Field Rules, below).
@@ -359,12 +406,15 @@
 // An interpreter that branches on what the field is classifies it once with
 // [FieldContext.Shape], or with [ShapeOf] when no context is available --
 // reading the field's Go type against its type-derived [FieldContext.Base].
-// The context supplies two facts [ShapeOf] cannot. The json:",string" flag on a
-// string Go kind is the one coercion, [FormCoercedString], that type and base
-// alone cannot express. Whether a nil-able slice, map, byte slice, or
-// interface admits null is the generator's decision rather than the Go type's,
-// so [ShapeOf] reports only the pointer occurrences as admitting null, which
-// is also what a context the generator did not build falls back to. A field
+// The context supplies two facts [ShapeOf] cannot. The json:",string" flag on
+// an [encoding/json.Number] field is the one coercion that type and base
+// alone cannot express (the type is a string kind and the coerced base is a
+// string schema, so only the flag says the instance is a quoted number).
+// Whether a pointer or interface occurrence admits null is the generator's
+// decision rather than the Go type's ([WithNullable], a [Nullability]
+// stance), so [ShapeOf] reports only the pointer occurrences as admitting
+// null, which is also what a context the generator did not build falls back
+// to. A field
 // referencing the type it belongs to reads its null admission before that type
 // records a [Nullability] stance, so a later stance can withdraw the answer.
 // Two field-level writers take a null literal against a reference: the
@@ -421,31 +471,48 @@
 //
 // # Struct Field Rules
 //
-// Struct fields follow [encoding/json] conventions: the json tag determines
-// the field name, json:"-" excludes the field (but json:"-," with a trailing
-// comma uses the literal name "-" as the JSON key), a tag name [encoding/json]
-// rejects as invalid (characters outside letters, digits, and its fixed
-// punctuation set) is discarded in favor of the Go field name, omitempty and
-// omitzero
-// omit the field from required, and json:",string" overrides the field schema
-// to {"type": "string"} for applicable types (string, integer, float, bool,
-// and a single unnamed pointer to one of those; a named pointer type or a
-// multi-level pointer is not quoted by [encoding/json], so it keeps its
-// underlying type's schema). A field whose type implements
-// [encoding/json.Marshaler] (directly or through its pointer method set) is
-// not quoted either: [encoding/json] routes it through MarshalJSON, which
-// ignores the option, so the field keeps the kind-based schema a direct
-// marshaler otherwise gets.
-// Unexported non-embedded fields are excluded; unexported embedded struct
-// types still have their exported fields promoted.
+// Struct fields follow [encoding/json/v2] conventions: the json tag
+// determines the field name, and json:"-" excludes the field. A tag name is
+// the run of characters before the first comma. A name containing a quote
+// character, and the json:"-," spelling, are malformed tags, refused with
+// [ErrInvalidJSONField] exactly as [encoding/json/v2.Marshal] refuses them;
+// any other rune run is a name, so json:"a b" names the property "a b".
 //
-// Embedded structs without a json tag have their fields promoted into the
-// parent schema. Embedded pointer-to-struct (no json tag) is treated
-// identically, except the promoted fields are not required: a nil embed omits
-// them from the output. A struct whose method set includes a MarshalJSON or
-// MarshalText promoted from an embedded field is not reflected field by field
-// at all; the promoted marshaler serializes the whole outer value (see the
-// resolution priority above). Embedded struct types intercepted by earlier
+// The omitzero option omits the field from required. The omitempty option
+// omits it only where the field's encoded value can be empty (null, "", [],
+// or {}): a string, map, slice, pointer, interface, struct, zero-length
+// array, or marshaler-bearing field.
+// [encoding/json/v2] never treats an encoded number or bool as empty, so
+// omitempty on one leaves the field required.
+//
+// json:",string" overrides the field schema to {"type": "string"} for the
+// types [encoding/json/v2] stringifies: the integer and float kinds,
+// [encoding/json.Number], and pointers to those at any depth (the flag
+// survives the whole pointer chain; a pointer occurrence keeps its null
+// branch beside the string). On any other type the flag is refused with
+// [ErrInvalidJSONField], as v2 refuses it, with one exception on each side.
+// A field whose type carries a JSON or text marshaler (directly or through
+// its pointer method set) is not quoted and not refused: v2 routes it
+// through the method, which ignores the option, so the field keeps the
+// schema the marshaler steps produce. [time.Time] is the reverse exception:
+// it carries MarshalJSON, but v2's native time codec pre-empts the method
+// and rejects the flag, so generation refuses it too.
+//
+// Unexported non-embedded fields without a json tag are excluded; a json tag
+// on an unexported field is refused with [ErrInvalidJSONField]. Unexported
+// embedded struct types still have their exported fields promoted.
+//
+// Embedded structs without a json tag, or with the explicit json:",embed"
+// option, have their fields promoted into the parent schema. Embedded
+// pointer-to-struct is treated identically, except the promoted fields are
+// not required: a nil embed omits them from the output. A struct
+// whose method set includes a JSON or text marshaler promoted from an
+// embedded field is not reflected field by field at all; the promoted
+// marshaler serializes the whole outer value (see the resolution priority
+// above). Where the field walk does run, an embedded struct type carrying
+// any marshal or unmarshal method of its own is refused with
+// [ErrInvalidJSONField], as [encoding/json/v2] refuses to promote it.
+// Embedded struct types intercepted by earlier
 // priority chain steps (a registered [TypeSchemaProvider] or
 // [JSONSchemaProvider]) are
 // composed via allOf rather than having their fields promoted; an embed reached
@@ -456,29 +523,60 @@
 // object, so a closed branch rejects the parent's sibling properties and the
 // generated schema then rejects the struct's own marshaled JSON. Embedded
 // structs with an explicit json name (e.g. json:"base") are treated as regular
-// named fields, not promoted; an options-only tag with no name (e.g.
-// json:",omitempty") promotes the fields, matching encoding/json.
+// named fields, not promoted. The embed option composes with nothing: an
+// embedded field whose tag combines a promoting form with any other option
+// (json:",omitempty", json:",embed,omitzero") is refused with
+// [ErrInvalidJSONField], as [encoding/json/v2] refuses the declaration.
 //
-// Embedded non-struct named types (e.g., type MyString string) are treated as
-// regular fields with the field name as the JSON key, not promoted. The field
-// name is the unqualified type identifier, so an embedded instantiated generic
-// type (e.g. GenList[int]) is keyed "GenList", without the type arguments
-// [reflect.Type.Name] carries, matching [encoding/json]. Embedded
-// pointer-to-non-struct types are handled the same way, with the pointer
-// adding nullability.
+// An anonymous non-struct type must be explicitly given a JSON name:
+// [encoding/json/v2] refuses the untagged form (and the json:",embed" one),
+// and generation refuses it with [ErrInvalidJSONField]. With a name (e.g.
+// json:"bag"), the field is a regular leaf property under that name, a
+// pointer adding nullability.
 //
-// Embedded interface types are regular leaf fields too, keyed by the field
-// name: [encoding/json] never flattens them, and always emits the key (null
-// for a nil interface, the concrete value otherwise). A plain interface
+// A non-anonymous exported field tagged json:",embed" is v2's embedded
+// fallback when its type, after one unnamed-pointer level, is a
+// [encoding/json/jsontext.Value] or a map whose key kind is string and whose
+// key type implements no marshal or unmarshal method. V2 splices the
+// fallback's members into the parent object after the named fields, and the
+// generated schema carries the constraint those members satisfy. A map
+// fallback puts the map's value schema in the object's additionalProperties,
+// or in unevaluatedProperties when the object composes embeds via allOf
+// under [Draft2020]. Beside allOf under [Draft7] the object stays open, the
+// dialect's usual degradation. A jsontext.Value fallback leaves the object
+// open, since its members are arbitrary JSON. A nil map, a nil pointer, and
+// an empty jsontext.Value contribute no members, so the fallback never adds
+// a null branch. Generation ignores non-json tags on the fallback field,
+// since the field emits no property for a tag interpreter to constrain. One
+// fallback survives per type, on v2's rules. The shallowest wins, a
+// same-depth tie silently drops them all, and two fallback fields in one
+// struct declaration are refused with [ErrInvalidJSONField]. The other
+// invalid fallback forms are refused on v2's terms too: a fallback type or
+// map key carrying marshal or unmarshal methods, a non-string-keyed map or
+// any other non-struct type under json:",embed", and json:",embed" combined
+// with a name or any other option. A fallback map value type with no
+// representation (map[string]time.Duration, map[string]func()) is refused
+// with [ErrUnsupportedType] under every option, exactly where v2's marshal
+// refuses the value. Generation drops a fallback inside a composed subtree
+// that a self- or mutually composed cycle cuts short, along with the
+// subtree's names, on the cycle's conservative terms.
+//
+// Embedded interface types are regular leaf fields on the same terms: an
+// explicit JSON name is required, and [encoding/json/v2] never flattens
+// them, always emitting the key (null for a nil interface, the concrete
+// value otherwise). A plain interface
 // produces an unrestricted schema ({}) since its concrete type is unknowable
 // at compile time; an interface intercepted by an earlier resolution step (a
 // registered override, or a [encoding.TextMarshaler] method set) uses the
 // intercepted schema with null admitted alongside. Unexported embedded
 // interfaces, like all unexported embedded non-struct types, are excluded.
 //
-// Field shadowing and ambiguity follow [encoding/json] rules: outer fields
-// shadow inner fields of the same name, and ambiguous fields at the same
-// depth are silently dropped. A composed embed's promoted names take part in
+// Field shadowing and ambiguity follow [encoding/json/v2] rules. Two fields
+// of one struct claiming one JSON name are refused with
+// [ErrInvalidJSONField], as v2 refuses the declaration. Across embedding
+// levels the v1 rules survive: outer fields shadow deeper fields of the same
+// name, and a tie between names promoted from different embeds at the same
+// depth silently drops the name. A composed embed's promoted names take part in
 // the same resolution, exactly as [encoding/json]'s flat walk resolves them
 // (shadowing deeper fields, annihilating on same-depth ties -- including a
 // tie inside the embed itself -- and applying the tag tie-break), even though
@@ -495,9 +593,11 @@
 // allOf is in use.
 //
 // Property ordering in the output matches the order fields appear in the Go
-// struct definition (via the upstream PropertyOrder field). Empty structs and
-// structs with no exported fields produce {"type": "object",
-// "additionalProperties": false} with no properties or required fields.
+// struct definition (via the upstream PropertyOrder field). The field-free
+// struct produces {"type": "object", "additionalProperties": false} with no
+// properties or required fields. A struct with fields but none serializable
+// (every field unexported and untagged) is refused with
+// [ErrInvalidJSONField], as [encoding/json/v2] refuses to marshal one.
 //
 // # jsonschema Struct Tag
 //
@@ -517,9 +617,10 @@
 // the seven JSON Schema types. The overridden field is not nullable (it
 // names a concrete type in place of the one a pointer would make nil-able)
 // and not a reference. When the new type is not numeric, its Go-kind numeric
-// bounds are dropped too. A pointer [time.Duration] field with
-// jsonschema:"type=string,pattern=..." therefore produces a clean string
-// schema without needing [JSONSchemaExtender]. Tag pairs apply in order;
+// bounds are dropped too. The override cannot rescue a type generation
+// refuses before field processing runs: a [time.Duration] field fails in
+// type resolution, ahead of the tag, so declaring a shape for a duration
+// takes [WithTypeSchema] or a provider. Tag pairs apply in order;
 // keys after type= still take effect. A constraint keyword the tag sets
 // explicitly (a numeric bound such as minimum or multipleOf, or a string,
 // array, or object constraint) is the author's input, so combining it with a
@@ -531,38 +632,34 @@
 // schema *shape* -- the JSON shape its instance actually takes -- rather than
 // against its Go kind alone. The two agree for an ordinary field and diverge
 // wherever the field serializes itself as something else: a json:",string"
-// numeric or bool field, and equally a type that marshals itself as text, has a
+// numeric field, and equally a type that marshals itself as text, has a
 // string schema, so its scalars are parsed at the real Go kind (keeping the
 // range check, so const=200 on an int8 is an error) and then re-serialized to
 // the text the field emits. A MarshalText int whose value 3 writes as "L3"
 // therefore gets const=3 as {"const":"L3"}, not the unsatisfiable
-// {"type":"string","const":3}, and default=3 likewise. A json:",string" string
-// field double-encodes -- [encoding/json] encodes the already-encoded string a
-// second time, so the value abc marshals as the JSON string "\"abc\"" -- and
-// its scalars serialize the same way (const=abc pins that quoted text), while
-// the keywords that would measure or match the unquoted value (pattern,
-// format, and the length bounds) are rejected with an error rather than
-// silently asserting against the quoted, escaped text. [encoding/json.Number]
-// is the one Go string kind exempt from that rule. [encoding/json] writes it as
-// the number it holds, so the value 5 marshals as the JSON string "5" rather
-// than as "\"5\"", and the coerced-numeric rules apply. It writes the literal
-// verbatim rather than canonicalizing it, so const=5.0 pins "5.0" and const=5
-// pins "5".
+// {"type":"string","const":3}, and default=3 likewise. [encoding/json.Number]
+// is a string kind but reaches the same coerced-numeric rules under
+// json:",string": [encoding/json/v2] writes it as the quoted number it
+// holds, so the value 5 marshals as the JSON string "5". It writes the
+// literal verbatim rather than canonicalizing it, so const=5.0 pins "5.0"
+// and const=5 pins "5".
 //
 // Which field occurrences admit null is the generator's decision rather than
 // the Go type's, and the literal null is a value wherever that decision
-// applies. A pointer field takes default=null, and so does every other
-// nil-able occurrence reflection builds: a slice, a map, a []byte, and an
-// interface. A type the package maps to a built-in leaf schema is not a
-// container reflection built, so [encoding/json.RawMessage] refuses the literal
-// even though the {} it produces admits null. A [Nullability] stance moves the
-// decision either way, so a value field of a [NullAllowed] type takes the
-// literal and a pointer to a [NullForbidden] one does not.
-// Whatever else turns the decision off takes the literal with it, so a null
-// literal is an error under [WithNullable](false) and on a
-// [TypeSchema.Verbatim] payload, which carries no null encoding at all.
+// applies. A pointer field takes default=null, and so does an interface
+// occurrence. A bare slice, map, or []byte does not: [encoding/json/v2]
+// writes a nil one as its empty instance, never null, so the schema admits
+// no null and the literal is refused. A pointer to a container takes the
+// literal, since the pointer's own null branch admits it. A type the
+// package maps to a built-in leaf schema refuses the literal too, so
+// [encoding/json.RawMessage] refuses it even though the {} it produces
+// admits null. A [Nullability] stance moves the decision either way, so a
+// value field of a [NullAllowed] type takes the literal and a pointer to a
+// [NullForbidden] one does not. Whatever else turns the decision off takes
+// the literal with it, so a null literal is an error under
+// [WithNullable](false) and on a [TypeSchema.Verbatim] payload, which
+// carries no null encoding at all.
 //
-// Default and examples are the two keys that reach the literal on a container.
 // The shape a container names rejects a const before the parser reads the
 // value, so const=null fails there for the same reason const=5 does, on a
 // pointer to a container as much as on a bare one. An enum on a sequence
@@ -617,8 +714,8 @@
 // Because pairs apply in order, a default, const, enum, or examples value
 // appearing after a type= pair parses against the overridden JSON type
 // rather than the field's Go type: string, integer, number, and boolean
-// overrides parse subsequent scalar values as that type, so a [time.Duration]
-// field with jsonschema:"type=string,default=15m" yields
+// overrides parse subsequent scalar values as that type, so an int64 field
+// with jsonschema:"type=string,default=15m" yields
 // {"type":"string","default":"15m"} where the Go int64 kind would have
 // rejected "15m". The same keys before the type= pair still parse against
 // the Go type. After an override to array, object, or null there is no
@@ -637,11 +734,12 @@
 // treatment a coerced field does. Nested sequences descend to the innermost
 // element schema. Const, default, and examples remain whole-value constraints,
 // so a scalar value for one of them is an error on a sequence field. A null
-// value for default or examples is the exception, since it names the array's
-// own null rather than an element's. Enum on []byte is an error too, because a
-// base64 string has no item schema. This is the same element path a validate
-// dive or sequence-wide oneof takes, so the two dialects cannot disagree about
-// what an element is.
+// value for default or examples names the sequence occurrence's own null
+// rather than an element's, so it follows the field's null decision: refused
+// on a bare slice, taken on a pointer to one. Enum on []byte is an error too,
+// because a base64 string has no item schema. This is the same element path a
+// validate dive or sequence-wide oneof takes, so the two dialects cannot
+// disagree about what an element is.
 //
 // A keyword the field's shape cannot carry is an error rather than an inert
 // keyword nothing enforces: minItems=3 on a string, or any numeric bound on a
@@ -742,8 +840,9 @@
 // through (4) declare facts on a separate authored canvas rather than mutating
 // the type-derived schema, so which schema a keyword lives in is its
 // provenance. Generation then reconciles the two, composing the final schema
-// and applying the null encoding for a nil-able field (an anyOf[value, null]
-// wrapper, or a ["null", base] type list): the value-scoped facts (const, enum,
+// and applying the null encoding for a null-admitting field (an
+// anyOf[value, null] wrapper, or a ["null", base] type list): the
+// value-scoped facts (const, enum,
 // string-content keywords, and the replace-semantics pattern, format, and
 // multipleOf) land on the value branch by construction while annotations and
 // the authored bounds move to the null wrapper (the type-derived bounds stay on
@@ -785,11 +884,17 @@
 //     [Normalize], so values decoded from YAML or TOML validate directly
 //     (integers exactly, at any magnitude). A self-referential instance (a
 //     map or slice that contains itself) is rejected rather than walked.
-//   - [Validator.ValidateJSON] unmarshals raw JSON bytes with
-//     [encoding/json.Decoder] using UseNumber() to preserve integer vs
-//     number distinction, then validates.
-//   - [Validator.ValidateValue] marshals a Go value with encoding/json and
-//     validates its JSON form, closing the loop with generation: an instance
+//   - [Validator.ValidateJSON] decodes raw JSON bytes with
+//     [encoding/json/v2], reading every number as [encoding/json.Number] to
+//     preserve the integer vs number distinction, then validates. Decoding
+//     rejects duplicate object member names and invalid UTF-8 (RFC 7493),
+//     as v2 does.
+//   - [Validator.ValidateReader] applies [Validator.ValidateJSON]'s
+//     discipline to an [io.Reader], decoding it to EOF (numbers as
+//     [encoding/json.Number]; trailing data, duplicate object member names,
+//     and invalid UTF-8 rejected) before validating.
+//   - [Validator.ValidateValue] marshals a Go value with [encoding/json/v2]
+//     and validates its JSON form, closing the loop with generation: an instance
 //     of the very type a schema was generated for validates in one call,
 //     with json tags, omitempty and omitzero, and MarshalJSON
 //     implementations all applying exactly as a JSON consumer of the value
@@ -818,8 +923,9 @@
 //
 // A schema arriving as a JSON document rather than a [*Schema] has symmetric
 // entry points. [CompileJSON] decodes data as a single JSON schema document
-// (numbers as [encoding/json.Number], trailing data rejected) and compiles it
-// with [Compile]; [ParseSchema] is its decode half alone, returning the
+// (numbers as [encoding/json.Number]; trailing data, duplicate object member
+// names, and invalid UTF-8 rejected) and compiles it with [Compile];
+// [ParseSchema] is its decode half alone, returning the
 // [*Schema] uncompiled for consumers that work with the schema itself
 // ([Inline], [Walk], programmatic editing); [ParseSchemaValue] converts an
 // already-decoded document (a bool or a map[string]any, such as [Normalize]
@@ -919,11 +1025,11 @@
 // regex-compile outcome per node, and every string instance the pattern
 // would judge fails closed at validation time.
 //
-// Instance numbers are compared exactly (decoded with UseNumber, compared as
-// [math/big.Rat]), with one bound on the work an adversarial literal can
-// demand: for a JSON number whose exact value exceeds an internal cap (about
-// 4096 significant digits or decimal exponent magnitude), minimum, maximum,
-// exclusiveMinimum, and exclusiveMaximum are still enforced exactly. The
+// Instance numbers are compared exactly (decoded as [encoding/json.Number],
+// compared as [math/big.Rat]), with one bound on the work an adversarial
+// literal can demand: for a JSON number whose exact value exceeds an internal
+// cap (about 4096 significant digits or decimal exponent magnitude), minimum,
+// maximum, exclusiveMinimum, and exclusiveMaximum are still enforced exactly. The
 // multipleOf check is enforced for an over-cap integer (its divisibility is
 // computed with modular arithmetic, so the magnitude is never expanded) and
 // skipped only for an over-cap non-integer, whose fractional part cannot be
@@ -1018,15 +1124,17 @@
 // surfaced error carries Keyword "propertyNames" and an InstancePath pointing
 // at the offending property, with the inner keyword failure in its Causes.
 //
-// Alongside the InstancePath and SchemaPath JSON Pointers, every error
-// produced by validation carries both paths in typed form:
-// [ValidationError.InstanceSegments] and [ValidationError.SchemaSegments]
-// return one [Segment] per reference token, each marked as an object key or
-// an array index. The pointer strings cannot distinguish array index 1 from
-// an object property named "1" (or an allOf branch from a property named
-// "allOf"'s member), and member keys carry ~0/~1 escaping; the segments
-// resolve both, so source-mapping consumers need not re-parse the pointers
-// and guess. Hand-constructed errors return nil from both.
+// Alongside the InstancePath and SchemaPath JSON Pointers (typed as
+// [jsontext.Pointer], so the stdlib's Tokens, Parent, and LastToken helpers
+// apply directly), every error produced by validation carries both paths in
+// typed form: [ValidationError.InstanceSegments] and
+// [ValidationError.SchemaSegments] return one [Segment] per reference token,
+// each marked as an object key or an array index. A JSON Pointer cannot
+// distinguish array index 1 from an object property named "1" (or an allOf
+// branch from a property named "allOf"'s member), and member keys carry
+// ~0/~1 escaping; the segments resolve both, so source-mapping consumers
+// need not re-parse the pointers and guess. Hand-constructed errors return
+// nil from both.
 //
 // The keyword names validation reports are exported as Keyword* constants
 // ([KeywordRequired], [KeywordRef], ...), so code branching on
@@ -1268,8 +1376,8 @@
 // the document the check walked rather than at the root the run started from.
 // Both sources accept aliasing, unlike a root document, because every walk
 // that reaches a registered document dedupes pointers. The boundary refuses a
-// cycle because the JSON-pointer fallback marshals the document it searches
-// and a cyclic schema graph has no JSON form.
+// cycle because the JSON-pointer fallback marshals part of the document it
+// searches and a cyclic schema graph has no JSON form.
 //
 // Non-local refs absolutize against the enclosing resource's base URI: its
 // $id, or the root base set with [WithBaseURI], which also registers the

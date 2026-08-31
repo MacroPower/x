@@ -37,19 +37,11 @@ const (
 	// json:",string" field, or a numeric type marshaling itself as text. Its
 	// scalars compare against the text the field emits, never against the number.
 	FormCoercedNumber
-	// FormCoercedBool is a bool Go kind whose schema is a string, the boolean
-	// half of the same coercion.
+	// FormCoercedBool is a bool Go kind whose schema is a string: a bool type
+	// marshaling itself as text. The boolean half of the numeric coercion.
+	// (A json:",string" bool is a generation error under encoding/json/v2, so
+	// the flag produces no boolean coercion.)
 	FormCoercedBool
-	// FormCoercedString is a string Go kind under json:",string": encoding/json
-	// encodes the already-encoded string a second time, so the instance is the
-	// JSON-quoted text (value abc marshals as "\"abc\""). Its scalars compare
-	// against that quoted text; keywords that would measure or match the
-	// unquoted value (bounds, len, the string keywords) have no faithful
-	// mapping and report. Unlike the numeric and bool coercions, this form is
-	// invisible to the type-and-base classification (a plain string field has
-	// the same string kind under the same string-typed schema), so it exists
-	// only where the caller supplies the quoted flag ([ShapeOfQuoted]).
-	FormCoercedString
 	// FormTextString is a string-typed schema over a Go kind that is not a
 	// scalar at all: [time.Time], big.Rat, a struct or map marshaling itself as
 	// text. A string-only keyword such as format applies; a scalar comparison
@@ -99,7 +91,6 @@ var formNames = [formCount]string{
 	FormObject:         "object",
 	FormCoercedNumber:  "string-coerced number",
 	FormCoercedBool:    "string-coerced boolean",
-	FormCoercedString:  "string-coerced string",
 	FormTextString:     "text-marshaled string",
 	FormByteString:     "base64 byte string",
 	FormRawBytes:       "raw byte slice",
@@ -143,11 +134,15 @@ type Shape struct {
 	// The parent package reads the generator's own null decision off the
 	// field's node and overrides that answer at the two places it classifies a
 	// field: the input it hands internal/tagparse, and FieldContext.Shape.
-	// Nullable is therefore true for a nilable slice, map, byte slice, or
-	// interface, none of which is a pointer type. It is false for a pointer
-	// field under WithNullable(false), whose schema the generator gives no null
-	// branch. An element occurrence keeps the pointer answer, since an element
-	// is not the container that holds it.
+	// The override is what makes Nullable true for an interface occurrence or
+	// a NullAllowed stance, neither of which is a pointer type, and false for
+	// a pointer field under WithNullable(false), whose schema the generator
+	// gives no null branch. A bare slice, map, or byte slice is not nullable
+	// under the default marshal options, where encoding/json/v2 marshals a
+	// nil one as its empty instance; the generator's WithJSONOptions with
+	// FormatNilSliceAsNull or FormatNilMapAsNull makes the parent's override
+	// answer true for those occurrences too. An element occurrence keeps the
+	// pointer answer, since an element is not the container that holds it.
 	//
 	// Two operations consult it. The non-zero assertion forbids the null a nil
 	// occurrence marshals as, and the scalar constructor admits the literal null
@@ -228,19 +223,21 @@ func ShapeForTypeName(name string) Shape {
 // schema-permits-a-string test, the byte-slice test, and every kind predicate
 // the dialects used to each keep their own copy of.
 //
-// Type and base alone cannot see a json:",string" flag on a string Go kind
-// (the numeric and bool coercions surface as a string-typed base over a
-// non-string kind, but a quoted string field looks exactly like a plain one);
-// a caller that knows the flag classifies through [ShapeOfQuoted] instead.
+// Type and base alone cannot see a json:",string" flag on
+// [encoding/json.Number] (the numeric coercion otherwise surfaces as a
+// string-typed base over a non-string kind, but Number's kind is string); a
+// caller that knows the flag classifies through [ShapeOfQuoted] instead.
 func ShapeOf(t reflect.Type, base *jsonschema.Schema) Shape {
 	return ShapeOfQuoted(t, base, false)
 }
 
-// ShapeOfQuoted is [ShapeOf] carrying the field's json:",string" flag, the one
-// input the type and base cannot express: with it, a string Go kind under a
-// string-typed base classifies as [FormCoercedString] (its instance is the
-// JSON-quoted text) rather than a plain string. The flag is redundant for
-// every other kind, whose coercion the base already states.
+// ShapeOfQuoted is [ShapeOf] carrying the field's json:",string" flag, the
+// one input the type and base cannot express: with it, an
+// [encoding/json.Number] under a string-typed base classifies as
+// [FormCoercedNumber] (its instance is the once-quoted numeric literal)
+// rather than a plain string. The flag is redundant for every other kind:
+// the numeric kinds' coercion the base already states, and every other kind
+// under the flag is a generation error upstream.
 func ShapeOfQuoted(t reflect.Type, base *jsonschema.Schema, quoted bool) Shape {
 	elem := numkind.DerefType(t)
 
@@ -306,15 +303,10 @@ func classifyForm(t reflect.Type, base *jsonschema.Schema, quoted bool) Form {
 		}
 
 		// The quoted flag is the only thing that distinguishes a
-		// double-encoding json:",string" string field from a plain one.
-		if quoted && str {
-			// A json.Number belongs in the numeric coercion column rather than
-			// the double-encoding one; see [reflectkind.IsJSONNumber].
-			if reflectkind.IsJSONNumber(t) {
-				return FormCoercedNumber
-			}
-
-			return FormCoercedString
+		// json:",string" [encoding/json.Number] field (string kind, numeric
+		// instance) from a plain string field; see [reflectkind.IsJSONNumber].
+		if quoted && str && reflectkind.IsJSONNumber(t) {
+			return FormCoercedNumber
 		}
 
 		return FormString

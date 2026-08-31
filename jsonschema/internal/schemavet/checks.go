@@ -1,6 +1,7 @@
 package schemavet
 
 import (
+	"encoding/json/jsontext"
 	"fmt"
 	"maps"
 	"net/url"
@@ -25,17 +26,17 @@ const draft2020SchemaURI = "https://json-schema.org/draft/2020-12/schema"
 // addressing it from that node.
 type Entry struct {
 	Schema  *Schema
-	Pointer string
+	Pointer jsontext.Pointer
 }
 
 // Entries returns the direct sub-schemas of s with their pointers, the
 // schemas-and-pointers form of the parent package's SubschemaEntries: the same
 // [schemafield.Subschemas] field list in the same pinned order, sorted map
-// keys with [jsonptr.Escape], /keyword/N for slices, and the single Items form
-// skipped when ItemsArray is populated. The parent package cannot be imported
-// from here, so a parent-side lockstep guard test pins the two traversals to
-// each other; the pointers are load-bearing, since every vetting violation
-// embeds them.
+// keys escaped by [jsontext.Pointer.AppendToken], /keyword/N for slices, and
+// the single Items form skipped when ItemsArray is populated. The parent
+// package cannot be imported from here, so a parent-side lockstep guard test
+// pins the two traversals to each other; the pointers are load-bearing, since
+// every vetting violation embeds them.
 func Entries(s *Schema) []Entry {
 	if s == nil {
 		return nil
@@ -54,7 +55,7 @@ func Entries(s *Schema) []Entry {
 			for _, key := range slices.Sorted(maps.Keys(m)) {
 				if sub := m[key]; sub != nil {
 					children = append(children, Entry{
-						Pointer: "/" + f.Keyword + "/" + jsonptr.Escape(key),
+						Pointer: jsontext.Pointer("/" + f.Keyword).AppendToken(key),
 						Schema:  sub,
 					})
 				}
@@ -64,7 +65,7 @@ func Entries(s *Schema) []Entry {
 			for i, sub := range f.SliceOf(s) {
 				if sub != nil {
 					children = append(children, Entry{
-						Pointer: "/" + f.Keyword + "/" + strconv.Itoa(i),
+						Pointer: jsontext.Pointer("/" + f.Keyword + "/" + strconv.Itoa(i)),
 						Schema:  sub,
 					})
 				}
@@ -85,7 +86,7 @@ func Entries(s *Schema) []Entry {
 			}
 
 			children = append(children, Entry{
-				Pointer: "/" + f.Keyword,
+				Pointer: jsontext.Pointer("/" + f.Keyword),
 				Schema:  sub,
 			})
 		}
@@ -119,7 +120,7 @@ func checkTypeNames(schema *Schema, schemaPath string, visited map[*Schema]bool)
 	}
 
 	for _, entry := range Entries(schema) {
-		err := checkTypeNames(entry.Schema, schemaPath+entry.Pointer, visited)
+		err := checkTypeNames(entry.Schema, schemaPath+string(entry.Pointer), visited)
 		if err != nil {
 			return err
 		}
@@ -158,7 +159,7 @@ func checkSchemaStructure(schema *Schema, schemaPath string, visited map[*Schema
 	}
 
 	for _, entry := range Entries(schema) {
-		err := checkSchemaStructure(entry.Schema, schemaPath+entry.Pointer, visited)
+		err := checkSchemaStructure(entry.Schema, schemaPath+string(entry.Pointer), visited)
 		if err != nil {
 			return err
 		}
@@ -275,7 +276,7 @@ func checkIdentifiers(
 	}
 
 	for _, entry := range Entries(schema) {
-		err := checkIdentifiers(entry.Schema, schemaPath+entry.Pointer, currentBase, profile, visited)
+		err := checkIdentifiers(entry.Schema, schemaPath+string(entry.Pointer), currentBase, profile, visited)
 		if err != nil {
 			return err
 		}
@@ -394,7 +395,7 @@ func checkItemsArrayDraft2020(schema *Schema, schemaPath string, visited map[*Sc
 	}
 
 	for _, entry := range Entries(schema) {
-		err := checkItemsArrayDraft2020(entry.Schema, schemaPath+entry.Pointer, visited)
+		err := checkItemsArrayDraft2020(entry.Schema, schemaPath+string(entry.Pointer), visited)
 		if err != nil {
 			return err
 		}
@@ -473,7 +474,7 @@ func checkBoundDomains(schema *Schema, schemaPath string, visited map[*Schema]bo
 	}
 
 	for _, entry := range Entries(schema) {
-		err := checkBoundDomains(entry.Schema, schemaPath+entry.Pointer, visited)
+		err := checkBoundDomains(entry.Schema, schemaPath+string(entry.Pointer), visited)
 		if err != nil {
 			return err
 		}

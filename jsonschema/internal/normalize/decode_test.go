@@ -34,7 +34,7 @@ func TestDecodeJSONInstance(t *testing.T) {
 
 		_, err := normalize.DecodeJSONInstance([]byte(`true false`))
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "unexpected data after top-level value")
+		assert.Contains(t, err.Error(), "after top-level value")
 	})
 
 	t.Run("invalid json is rejected", func(t *testing.T) {

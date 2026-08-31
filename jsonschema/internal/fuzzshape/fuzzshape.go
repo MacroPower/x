@@ -1,17 +1,19 @@
 // Package fuzzshape synthesizes a Go struct type from a fuzzing entropy blob.
 //
 // The differential rigs assert that a schema generated for a type accepts
-// whatever [encoding/json] marshals from a value of that type. Rig 1 asserts it
+// whatever [encoding/json/v2] marshals from a value of that type. Rig 1 asserts it
 // over a hand-written roster, so it covers only shapes someone thought to write
 // down. This package makes the shape itself fuzzable: [Type] turns a blob into
 // a [reflect.Type] built with [reflect.StructOf], which the jsonschema
 // package's non-generic Generate entry point accepts as-is.
 //
-// [Type] is total. Every blob, including an empty or truncated one, yields a
-// type [reflect.StructOf] accepts and [encoding/json.Marshal] can encode.
-// Totality is a design property rather than a recover: every pool and every
-// draw is constrained so no reachable combination trips a StructOf panic or a
-// marshaling error, and each constraint is recorded at the pool it shapes.
+// [Type] is total over construction. Every blob, including an empty or
+// truncated one, yields a type [reflect.StructOf] accepts: every pool and
+// every draw is constrained so no reachable combination trips a StructOf
+// panic, and each constraint is recorded at the pool it shapes. Marshaling is
+// deliberately not total. Some draws yield declarations [encoding/json/v2]
+// refuses -- a malformed tag name, a JSON name two fields of one struct claim
+// -- and the rigs assert that generation refuses exactly those types.
 //
 // [Type] is deterministic: it draws through a [fuzzfill.Cursor], so a given
 // blob always yields the same type. Go's fuzzing engine re-runs a failing
@@ -33,6 +35,7 @@ package fuzzshape
 
 import (
 	"encoding/json"
+	"encoding/json/jsontext"
 	"math/big"
 	"reflect"
 	"strconv"
@@ -47,6 +50,7 @@ import (
 const (
 	maxFields      = 4
 	embedOdds      = 4
+	fallbackOdds   = 6
 	unexportedOdds = 4
 	tagOdds        = 8
 
@@ -60,6 +64,13 @@ const (
 // Key is a named string used as a map key, the form encoding/json renders as an
 // object key without conversion.
 type Key string
+
+// BagKey is the key type of every drawn embedded-fallback map. Its
+// constructor draws from a namespace disjoint from exportedNames, tagNames,
+// and every name the embed pool promotes, so a spliced fallback member can
+// never collide with a named field, which is a marshal-time duplicate-name
+// error that would cost the rig the whole iteration.
+type BagKey string
 
 // Level is a named non-struct type. Embedded, encoding/json keeps it as a leaf
 // field named for the type rather than flattening it.
@@ -112,10 +123,10 @@ var (
 	// outside that set would reflect its Go struct shape rather than its
 	// marshaled shape and report a false divergence.
 	//
-	// The multi-level pointer chains earn their place: encoding/json
-	// dereferences exactly one unnamed pointer level for a ,string field, so
-	// crossing **T with that option reaches the deepest drift case the rig
-	// exists to catch.
+	// The multi-level pointer chains earn their place: encoding/json/v2
+	// carries the ,string flag down the whole pointer chain, so crossing
+	// **T with that option reaches the deepest drift case the rig exists to
+	// catch.
 	componentTypes = []reflect.Type{
 		reflect.TypeFor[string](),
 		reflect.TypeFor[bool](),
@@ -139,7 +150,7 @@ var (
 		reflect.TypeFor[map[Key]float64](),
 		reflect.TypeFor[time.Time](),
 		reflect.TypeFor[*time.Time](),
-		reflect.TypeFor[json.RawMessage](),
+		reflect.TypeFor[jsontext.Value](),
 		reflect.TypeFor[json.Number](),
 		reflect.TypeFor[*big.Int](),
 		reflect.TypeFor[any](),
@@ -167,15 +178,15 @@ var (
 	exportedNames = []string{"Shared", "Name", "Value", "Data", "Item", "Count"}
 
 	// Go names drawn with PkgPath set, which [reflect.StructOf] accepts and which
-	// encoding/json excludes from the output. A field drawing one always carries
-	// a json tag, since a tag on an unexported field must still produce an
-	// exclusion rather than a property name.
+	// encoding/json excludes from the output. A field drawing one never carries
+	// a json tag, since [encoding/json/v2] refuses a tag on an unexported field
+	// outright and the exclusion class is what the draw is for.
 	unexportedNames = []string{"shared", "hidden"}
 
 	// JSON tag name parts that name a property. They span encoding/json's name
-	// validity boundary, which is not the obvious one: the quote is outside the
-	// allowed punctuation set, so a"b is invalid and the Go field name is used
-	// instead, while the space is inside it, so "a b" is a valid property name.
+	// grammar, which is not the obvious one: the quote is a reserved character,
+	// so a"b keeps its leading identifier and names the property "a", while any
+	// other rune run is a name, so "a b" names a property as written.
 	// The "-," form names a property that is literally a hyphen, distinct from
 	// the bare "-" exclusion drawn separately.
 	tagNames = []string{
@@ -187,13 +198,33 @@ var (
 		"été",
 	}
 
-	// JSON tag option parts, crossed with every name.
-	tagOpts = []string{"", ",omitempty", ",omitzero", ",string"}
+	// JSON tag option parts, crossed with every name. The format option is a
+	// declaration refusal on every field (the feature was cut from stable
+	// encoding/json/v2, go.dev/issue/79071), so every draw of it asserts the
+	// refusal agreement.
+	tagOpts = []string{"", ",omitempty", ",omitzero", ",string", ",format:units"}
+
+	// Types an embedded-fallback field is drawn from. The maps qualify (a
+	// string-kind key with no marshal methods, one behind the unnamed-pointer
+	// level v2 unwraps); the int-keyed map and the scalar are declaration
+	// refusals both sides agree on. The pool deliberately omits
+	// jsontext.Value, because its shared fill draws arbitrary JSON and a
+	// non-object value is a value-level v2 refusal the accept rig treats as
+	// failure, so the Value form lives in rig 1's roster and the static
+	// tables instead.
+	fallbackFieldTypes = []reflect.Type{
+		reflect.TypeFor[map[BagKey]int](),
+		reflect.TypeFor[*map[BagKey]int](),
+		reflect.TypeFor[map[BagKey]*string](),
+		reflect.TypeFor[map[int]string](),
+		reflect.TypeFor[int](),
+	}
 
 	// Built once and shared: the override set is the same for every draw, and
 	// [FillOptions] is called on every fuzzing iteration.
 	fillOptions = []fuzzfill.Option{
 		fuzzfill.WithConstructor(reflect.TypeFor[json.Number](), fillNumber),
+		fuzzfill.WithConstructor(reflect.TypeFor[BagKey](), fillBagKey),
 	}
 
 	// This package's import path, required on an unexported field.
@@ -202,11 +233,17 @@ var (
 
 // FillOptions returns the [fuzzfill.Option] values a value of a synthesized type must
 // be filled with. Generic reflection fills a [encoding/json.Number] with the
-// cursor's spicy runes, and [encoding/json.Marshal] then rejects the result as
+// cursor's spicy runes, and [encoding/json/v2.Marshal] then rejects the result as
 // an invalid number literal, losing the whole iteration. Keeping the
 // requirement here means a component type added to the pool has one place to
 // declare what filling it needs.
 func FillOptions() []fuzzfill.Option { return fillOptions }
+
+// fillBagKey draws one of sixteen fallback member names, keeping the spliced
+// keys inside BagKey's reserved namespace.
+func fillBagKey(c *fuzzfill.Cursor) any {
+	return BagKey("bag" + strconv.Itoa(c.Intn(16)))
+}
 
 // fillNumber draws a valid JSON number literal, spanning the integer, negative,
 // fractional, and exponent forms.
@@ -294,18 +331,21 @@ func drawField(c *fuzzfill.Cursor, used map[string]bool) (reflect.StructField, b
 		return drawEmbed(c, used)
 	}
 
+	if c.Intn(fallbackOdds) == 0 {
+		return drawFallback(c, used)
+	}
+
 	if c.Intn(unexportedOdds) == 0 {
 		name, ok := pickUnused(c, used, unexportedNames)
 		if !ok {
 			return reflect.StructField{}, false
 		}
 
-		// Never the untagged or excluded form; see unexportedNames.
+		// Never a json tag; see unexportedNames.
 		return reflect.StructField{
 			Name:    name,
 			PkgPath: pkgPath,
 			Type:    componentTypes[c.Intn(len(componentTypes))],
-			Tag:     drawNamedTag(c),
 		}, true
 	}
 
@@ -328,6 +368,29 @@ func pickUnused(c *fuzzfill.Cursor, used map[string]bool, names []string) (strin
 	name := names[c.Intn(len(names))]
 
 	return name, !used[name]
+}
+
+// drawFallback draws a non-anonymous json:",embed" field. Most draws are
+// valid embedded fallbacks; the pool's refusal entries and the
+// option-combined tag are declaration refusals encoding/json/v2 agrees on.
+// Two fallback draws in one struct are allowed for the same reason: the
+// same-declaration error is a refusal both sides report.
+func drawFallback(c *fuzzfill.Cursor, used map[string]bool) (reflect.StructField, bool) {
+	name, ok := pickUnused(c, used, exportedNames)
+	if !ok {
+		return reflect.StructField{}, false
+	}
+
+	opt := ",embed"
+	if c.Intn(4) == 0 {
+		opt = ",embed,omitempty"
+	}
+
+	return reflect.StructField{
+		Name: name,
+		Type: fallbackFieldTypes[c.Intn(len(fallbackFieldTypes))],
+		Tag:  buildTag("", opt),
+	}, true
 }
 
 // drawEmbed draws an anonymous field. Its Go name must be the embedded type's

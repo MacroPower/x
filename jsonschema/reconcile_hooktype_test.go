@@ -2,7 +2,7 @@ package jsonschema_test
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -10,23 +10,27 @@ import (
 	"go.jacobcolvin.com/x/jsonschema"
 )
 
-// hookTypedLevels is a named nilable container whose extender writes the
-// natural, redundant Type into the bare payload; the null encoding on its
-// extracted def body must fold that authored type into the type list.
+// hookTypedLevels is a named container whose extender declares the type
+// nullable and writes the natural, redundant Type into the bare payload; the
+// null encoding on its extracted def body must fold that authored type into
+// the type list.
 type hookTypedLevels []string
 
 func (hookTypedLevels) JSONSchemaExtend(_ context.Context, _ jsonschema.TypeContext, ts *jsonschema.TypeSchema) error {
 	ts.Value.Type = "array"
+	ts.Nullability = jsonschema.NullAllowed
 
 	return nil
 }
 
 // TestReconcileHookAuthoredTypeSlot pins that the null encoding honors a
-// hook-authored Type or Types on a nilable container's bare payload instead
+// hook-authored Type or Types on a nullable occurrence's bare payload instead
 // of stacking its own write beside it. An extender may set the natural,
 // redundant type slot ("add, remove, or modify any fields"); the encoding
 // must still emit exactly one of Type/Types, or the generated schema fails
-// to marshal ("both Type and Types are set") far from the cause.
+// to marshal ("both Type and Types are set") far from the cause. A container
+// is not nullable on its own under encoding/json/v2, so the null admission
+// comes from the extender's [jsonschema.NullAllowed] stance.
 func TestReconcileHookAuthoredTypeSlot(t *testing.T) {
 	t.Parallel()
 
@@ -41,6 +45,7 @@ func TestReconcileHookAuthoredTypeSlot(t *testing.T) {
 			jsonschema.WithTypeSchemaExtenderFor[[]string](
 				func(_ context.Context, _ jsonschema.TypeContext, ts *jsonschema.TypeSchema) error {
 					ts.Value.Type = "array"
+					ts.Nullability = jsonschema.NullAllowed
 
 					return nil
 				},
@@ -91,10 +96,17 @@ func TestReconcileHookAuthoredTypeSlot(t *testing.T) {
 
 		require.Len(t, s.Defs, 1)
 
+		// An extracted def keeps the bare payload with the authored Type; the
+		// stance's null admission rides each reference's anyOf wrapper instead
+		// of the def body.
 		for _, def := range s.Defs {
-			require.Empty(t, def.Type)
-			require.Equal(t, []string{"null", "array"}, def.Types)
+			require.Equal(t, "array", def.Type)
+			require.Empty(t, def.Types)
 		}
+
+		prop := s.Properties["l"]
+		require.Len(t, prop.AnyOf, 2)
+		require.Equal(t, "null", prop.AnyOf[1].Type)
 
 		_, err = json.Marshal(s)
 		require.NoError(t, err)

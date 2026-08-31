@@ -780,17 +780,24 @@ func (fc FieldContext) Shape() Shape {
 	return shape
 }
 
-// quotedString reports whether the field carries a double-encoding
-// json:",string": the flag is set, the type is one encoding/json quotes, and
-// the quoted value is itself a string. It mirrors the generator's own
-// string-override test, and tolerates the zero StructField of a caller-built
-// context.
+// quotedString reports whether the field carries a json:",string" that the
+// type and base cannot re-derive: the flag on an [encoding/json.Number]
+// field, whose string kind would otherwise classify as a plain string. It
+// mirrors the generator's own string-override test, and tolerates the zero
+// StructField of a caller-built context.
 func (fc FieldContext) quotedString() bool {
-	if fc.Type == nil || !jsontag.Parse(fc.StructField).JSONString {
+	if fc.Type == nil {
 		return false
 	}
 
-	return reflectkind.IsStringableType(fc.Type) && numkind.DerefType(fc.Type).Kind() == reflect.String
+	info, err := jsontag.Parse(fc.StructField)
+	if err != nil {
+		// Generation refuses an invalid declaration before any interpreter
+		// runs, so only a hand-built context reaches this, unquoted.
+		return false
+	}
+
+	return info.JSONString && reflectkind.IsJSONNumber(numkind.DerefType(fc.Type))
 }
 
 // ConstraintsFor is [FieldContext.Constraints] for a caller that has already

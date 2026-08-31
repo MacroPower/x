@@ -68,6 +68,39 @@ func ValueChecked(instance any) (any, bool) {
 	return normalized, accepted
 }
 
+// intNumber formats a Go integer of any width as its exact [json.Number]
+// literal, reporting ok=false for every other type. It is the one integer
+// switch [normalizeInstance] and [exactValue] share, so a numeric-kind fix
+// lands in both.
+func intNumber(v any) (json.Number, bool) {
+	switch v := v.(type) {
+	case int:
+		return json.Number(strconv.FormatInt(int64(v), 10)), true
+	case int8:
+		return json.Number(strconv.FormatInt(int64(v), 10)), true
+	case int16:
+		return json.Number(strconv.FormatInt(int64(v), 10)), true
+	case int32:
+		return json.Number(strconv.FormatInt(int64(v), 10)), true
+	case int64:
+		return json.Number(strconv.FormatInt(v, 10)), true
+	case uint:
+		return json.Number(strconv.FormatUint(uint64(v), 10)), true
+	case uint8:
+		return json.Number(strconv.FormatUint(uint64(v), 10)), true
+	case uint16:
+		return json.Number(strconv.FormatUint(uint64(v), 10)), true
+	case uint32:
+		return json.Number(strconv.FormatUint(uint64(v), 10)), true
+	case uint64:
+		return json.Number(strconv.FormatUint(v, 10)), true
+	case uintptr:
+		return json.Number(strconv.FormatUint(uint64(v), 10)), true
+	default:
+		return "", false
+	}
+}
+
 // normalizeInstance returns the normalized value, whether it differs from the
 // input, and whether it (and every nested leaf) is an accepted JSON-shaped
 // value. The changed flag lets container normalization share unchanged children
@@ -76,35 +109,17 @@ func ValueChecked(instance any) (any, bool) {
 // acceptance check through the same walk, so the validation funnel needs only
 // one traversal.
 func normalizeInstance(instance any, onPath map[[2]uintptr]bool) (any, bool, bool) {
+	// Go integer widths convert to the JSON shape; the result is an accepted
+	// leaf.
+	if n, ok := intNumber(instance); ok {
+		return n, true, true
+	}
+
 	switch v := instance.(type) {
 	// JSON-shaped scalar leaves pass through unchanged and are accepted.
 	case nil, bool, string, float64, json.Number:
 		return instance, false, true
 
-	// Go integer and float widths convert to the JSON shape; the result is an
-	// accepted leaf.
-	case int:
-		return json.Number(strconv.FormatInt(int64(v), 10)), true, true
-	case int8:
-		return json.Number(strconv.FormatInt(int64(v), 10)), true, true
-	case int16:
-		return json.Number(strconv.FormatInt(int64(v), 10)), true, true
-	case int32:
-		return json.Number(strconv.FormatInt(int64(v), 10)), true, true
-	case int64:
-		return json.Number(strconv.FormatInt(v, 10)), true, true
-	case uint:
-		return json.Number(strconv.FormatUint(uint64(v), 10)), true, true
-	case uint8:
-		return json.Number(strconv.FormatUint(uint64(v), 10)), true, true
-	case uint16:
-		return json.Number(strconv.FormatUint(uint64(v), 10)), true, true
-	case uint32:
-		return json.Number(strconv.FormatUint(uint64(v), 10)), true, true
-	case uint64:
-		return json.Number(strconv.FormatUint(v, 10)), true, true
-	case uintptr:
-		return json.Number(strconv.FormatUint(uint64(v), 10)), true, true
 	case float32:
 		return float64(v), true, true
 

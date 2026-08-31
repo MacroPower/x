@@ -1,13 +1,13 @@
 package jsonschema
 
 import (
+	"encoding/json/jsontext"
 	"errors"
 	"iter"
 	"maps"
 	"slices"
 	"strconv"
 
-	"go.jacobcolvin.com/x/jsonschema/internal/jsonptr"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemafield"
 )
 
@@ -37,8 +37,10 @@ var (
 // yields the schema path the package's own errors report.
 type Location struct {
 	// Pointer is the RFC 6901 JSON Pointer ("" addresses the root). Member
-	// keys carry ~0/~1 escaping.
-	Pointer string
+	// keys carry ~0/~1 escaping, which [jsontext.Pointer.Tokens] undoes; the
+	// index-vs-numeric-key distinction that even decoded tokens cannot make
+	// is what Segments adds.
+	Pointer jsontext.Pointer
 
 	// Segments is the typed form of Pointer, one [Segment] per reference
 	// token (nil addresses the root). It differs from Pointer in two ways: a
@@ -101,7 +103,7 @@ func SubschemaEntries(s *Schema) []SubschemaEntry {
 				if sub := m[key]; sub != nil {
 					children = append(children, SubschemaEntry{
 						Location: Location{
-							Pointer:  "/" + f.Keyword + "/" + jsonptr.Escape(key),
+							Pointer:  jsontext.Pointer("/" + f.Keyword).AppendToken(key),
 							Segments: []Segment{{Key: f.Keyword}, {Key: key}},
 						},
 						Schema: sub,
@@ -114,7 +116,7 @@ func SubschemaEntries(s *Schema) []SubschemaEntry {
 				if sub != nil {
 					children = append(children, SubschemaEntry{
 						Location: Location{
-							Pointer:  "/" + f.Keyword + "/" + strconv.Itoa(i),
+							Pointer:  jsontext.Pointer("/" + f.Keyword + "/" + strconv.Itoa(i)),
 							Segments: []Segment{{Key: f.Keyword}, {Index: i, IsIndex: true}},
 						},
 						Schema: sub,
@@ -140,7 +142,7 @@ func SubschemaEntries(s *Schema) []SubschemaEntry {
 
 			children = append(children, SubschemaEntry{
 				Location: Location{
-					Pointer:  "/" + f.Keyword,
+					Pointer:  jsontext.Pointer("/" + f.Keyword),
 					Segments: []Segment{{Key: f.Keyword}},
 				},
 				Schema: sub,

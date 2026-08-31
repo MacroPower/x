@@ -1,121 +1,61 @@
 package jsonschema_test
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/x/jsonschema"
 	"go.jacobcolvin.com/x/jsonschema/interpreters/validate"
 )
 
-// TestGenerateFor_JSONStringStringFieldScalars pins the double-encoding a
-// json:",string" string field performs: encoding/json encodes the
-// already-encoded string a second time, so the value abc marshals as the JSON
-// string "\"abc\"". Scalar literals from either tag dialect must serialize the
-// same way, or the schema pins a const the field's own output never satisfies.
+// TestGenerateFor_JSONStringStringFieldScalars pins the fate of the
+// json:",string" string field: encoding/json/v2 stringifies numbers only, so
+// the option on a string field is a SemanticError and generation refuses the
+// type before any tag dialect could interpret its scalars. (V1 double-encoded
+// the value instead; that behavior is gone.)
 func TestGenerateFor_JSONStringStringFieldScalars(t *testing.T) {
 	t.Parallel()
 
-	t.Run("jsonschema const serializes double-encoded", func(t *testing.T) {
+	t.Run("jsonschema const is refused with the field", func(t *testing.T) {
 		t.Parallel()
 
 		type Form struct {
 			F string `json:"f,string" jsonschema:"const=abc"`
 		}
 
-		s, err := jsonschema.GenerateFor[Form](t.Context())
-		require.NoError(t, err)
+		_, err := jsonschema.GenerateFor[Form](t.Context())
+		require.ErrorIs(t, err, jsonschema.ErrInvalidJSONField)
+		require.ErrorContains(t, err, "invalid use of `string` tag option")
 
-		v, err := jsonschema.Compile(t.Context(), s)
-		require.NoError(t, err)
-
-		data, err := json.Marshal(Form{F: "abc"})
-		require.NoError(t, err)
-		require.JSONEq(t, `{"f":"\"abc\""}`, string(data),
-			"encoding/json double-encodes a json:\",string\" string field")
-
-		require.NoError(t, v.ValidateJSON(t.Context(), data),
-			"the schema must accept the field's own marshaled output")
-		require.Error(t, v.ValidateJSON(t.Context(), []byte(`{"f":"abc"}`)),
-			"the unquoted text never occurs in marshaled output")
+		_, err = json.Marshal(Form{F: "abc"})
+		require.Error(t, err, "encoding/json/v2 refuses the same declaration")
 	})
 
-	t.Run("validate eq serializes double-encoded", func(t *testing.T) {
+	t.Run("validate eq is refused with the field", func(t *testing.T) {
 		t.Parallel()
 
 		type Form struct {
 			F string `json:"f,string" validate:"eq=abc"`
 		}
 
-		s, err := jsonschema.GenerateFor[Form](t.Context(),
+		_, err := jsonschema.GenerateFor[Form](t.Context(),
 			jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()))
-		require.NoError(t, err)
-
-		v, err := jsonschema.Compile(t.Context(), s)
-		require.NoError(t, err)
-
-		data, err := json.Marshal(Form{F: "abc"})
-		require.NoError(t, err)
-
-		require.NoError(t, v.ValidateJSON(t.Context(), data),
-			"the schema must accept the field's own marshaled output")
-		require.Error(t, v.ValidateJSON(t.Context(), []byte(`{"f":"abc"}`)),
-			"the unquoted text never occurs in marshaled output")
+		require.ErrorIs(t, err, jsonschema.ErrInvalidJSONField)
 	})
 
-	t.Run("pointer field keeps the coercion and null", func(t *testing.T) {
+	t.Run("pointer field is refused too", func(t *testing.T) {
 		t.Parallel()
 
+		// The flag survives the pointer level, so a *string under it is the
+		// same refusal.
 		type Form struct {
 			F *string `json:"f,string" jsonschema:"const=abc"`
 		}
 
-		s, err := jsonschema.GenerateFor[Form](t.Context())
-		require.NoError(t, err)
-
-		v, err := jsonschema.Compile(t.Context(), s)
-		require.NoError(t, err)
-
-		abc := "abc"
-		data, err := json.Marshal(Form{F: &abc})
-		require.NoError(t, err)
-		require.JSONEq(t, `{"f":"\"abc\""}`, string(data))
-
-		require.NoError(t, v.ValidateJSON(t.Context(), data),
-			"the schema must accept the field's own marshaled output")
-		require.NoError(t, v.ValidateJSON(t.Context(), []byte(`{"f":null}`)),
-			"a nil pointer marshals as null and stays admitted")
-	})
-
-	t.Run("string keywords are rejected rather than mis-anchored", func(t *testing.T) {
-		t.Parallel()
-
-		type Form struct {
-			F string `json:"f,string" jsonschema:"format=email"`
-		}
-
-		s, err := jsonschema.GenerateFor[Form](t.Context())
-		require.Error(t, err,
-			"a format would assert against the quoted serialized text, not the value")
-		assert.Contains(t, err.Error(), "not supported")
-		assert.Nil(t, s)
-	})
-
-	t.Run("length bounds are rejected rather than mis-measured", func(t *testing.T) {
-		t.Parallel()
-
-		type Form struct {
-			F string `json:"f,string" jsonschema:"minLength=3"`
-		}
-
-		s, err := jsonschema.GenerateFor[Form](t.Context())
-		require.Error(t, err,
-			"a length bound would measure the quoted, escaped text, not the value")
-		assert.Contains(t, err.Error(), "not supported")
-		assert.Nil(t, s)
+		_, err := jsonschema.GenerateFor[Form](t.Context())
+		require.ErrorIs(t, err, jsonschema.ErrInvalidJSONField)
 	})
 
 	t.Run("plain string field is unaffected", func(t *testing.T) {

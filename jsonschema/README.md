@@ -31,7 +31,7 @@ go get go.jacobcolvin.com/x/jsonschema
 type SimpleStruct struct {
 	Name  string `json:"name"`
 	Email string `json:"email"`
-	Age   int    `json:"age,omitempty"`
+	Age   int    `json:"age,omitzero"`
 }
 
 schema, err := jsonschema.GenerateFor[SimpleStruct](ctx)
@@ -146,19 +146,20 @@ entries never do.
 
 ### Type mapping
 
-| Go type                              | JSON Schema                                                                                                 |
-| ------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
-| `string`, `bool`, `float64`          | `string`, `boolean`, `number`                                                                               |
-| `int`                                | `integer`                                                                                                   |
-| `int8`...`int64`, `uint8`...`uint64` | `integer` with `minimum`/`maximum` bounds                                                                   |
-| `uint`, `uintptr`                    | `integer` with `minimum: 0`                                                                                 |
-| `*T`                                 | nullable: base schema wrapped in `anyOf` with a `{"type":"null"}` branch (see `WithNullable`)               |
-| `[]T`                                | nullable `array` with an `items` schema (see `WithNullable`)                                                |
-| `[]byte`                             | nullable base64-encoded `string` (`contentEncoding`) (see `WithNullable`)                                   |
-| `[N]T`                               | fixed-size array via `prefixItems` with `minItems`/`maxItems` = N                                           |
-| `map[K]V`                            | nullable `object` with `additionalProperties` (K: string, integer, or `TextMarshaler`) (see `WithNullable`) |
-| `any` / interface                    | unrestricted (`{}`); an intercepted interface schema admits `null` alongside (see `WithNullable`)           |
-| `struct`                             | `object` with `properties`, `required`, and `additionalProperties: false`                                   |
+| Go type                              | JSON Schema                                                                                                                                                 |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `string`, `bool`, `float64`          | `string`, `boolean`, `number`                                                                                                                               |
+| `int`                                | `integer`                                                                                                                                                   |
+| `int8`...`int64`, `uint8`...`uint64` | `integer` with `minimum`/`maximum` bounds                                                                                                                   |
+| `uint`, `uintptr`                    | `integer` with `minimum: 0`                                                                                                                                 |
+| `*T`                                 | nullable: base schema wrapped in `anyOf` with a `{"type":"null"}` branch (see `WithNullable`)                                                               |
+| `[]T`                                | `array` with an `items` schema (a nil slice marshals as `[]` by default, so no null; see `WithJSONOptions`)                                                 |
+| `[]byte`                             | base64-encoded `string` (`contentEncoding`); unnamed byte element only, and a nil `[]byte` marshals as `""` by default (see `WithJSONOptions`)              |
+| `[N]T`                               | fixed-size array via `prefixItems` with `minItems`/`maxItems` = N                                                                                           |
+| `[N]byte`                            | base64-encoded `string` whose `minLength`/`maxLength` pin the exact encoded length                                                                          |
+| `map[K]V`                            | `object` with `additionalProperties` (K: a string, integer, or float kind, or any marshaler); a nil map marshals as `{}` by default (see `WithJSONOptions`) |
+| `any` / interface                    | unrestricted (`{}`); an intercepted interface schema admits `null` alongside (see `WithNullable`)                                                           |
+| `struct`                             | `object` with `properties`, `required`, and `additionalProperties: false`                                                                                   |
 
 Well-known types have built-in overrides matched by exact `reflect.Type`:
 `time.Time` -> `{"type":"string","format":"date-time"}`,
@@ -169,52 +170,59 @@ a numeric pattern (`big.Float`'s pattern also admits the `"+Inf"`/`"-Inf"`
 text it marshals for infinities). `log/slog.Level` -> `{"type":"string"}`: it
 implements both direct marshalers, and its MarshalJSON emits the level name
 as a JSON string, so the override pins the string schema its output
-requires. `net/url.URL` has no override: it
-implements no marshaler interface, so it reflects as the struct object
-`encoding/json` actually emits.
-Types implementing `encoding.TextMarshaler` map to `{"type":"string"}`.
+requires. `net/url.URL` has no override and is refused: reflecting it reaches
+`net/url.Userinfo`, a struct with fields but none serializable, which
+`encoding/json/v2` refuses (`ErrInvalidJSONField`).
+Types implementing `encoding.TextAppender` or `encoding.TextMarshaler` map to
+`{"type":"string"}`.
 Unsupported types (`func`, `chan`, `complex`, `unsafe.Pointer`) return
-`ErrUnsupportedType`.
+`ErrUnsupportedType`, and so does `time.Duration`, which `encoding/json/v2`
+gives no default representation; `WithTypeSchema` or a provider can still
+declare a shape for one.
 
 ### Configuration options
 
-| Option                           | Effect                                                                                        |
-| -------------------------------- | --------------------------------------------------------------------------------------------- |
-| `WithDraft(Draft)`               | Target draft: `Draft2020` (default) or `Draft7`; also serves validation and `Inline`.         |
-| `WithTagInterpreter(key, t)`     | Register a `TagInterpreter` under the struct tag key it reads; multiple are applied in order. |
-| `WithDescriptionProvider(p)`     | Set the `DescriptionProvider` used as the source of descriptions.                             |
-| `WithTypeSchema(t, ts)`          | Override a specific Go type with a `TypeSchema` envelope (highest priority).                  |
-| `WithTypeSchemaFor[T](ts)`       | `WithTypeSchema` for a statically known type, without `reflect.TypeFor`.                      |
-| `WithTypeSchemaProvider(p)`      | Register a `TypeSchemaProvider` that overrides types by predicate.                            |
-| `WithTypeSchemaExtender(e)`      | Register a `TypeSchemaExtender` that modifies reflection-generated schemas.                   |
-| `WithNamer(n)`                   | Custom `Namer` for `$defs` entries; an empty name defers to the built-in namer.               |
-| `WithDefinitions(bool)`          | Extract named types into `$defs`/`$ref` (default `true`).                                     |
-| `WithAdditionalProperties(bool)` | Allow extra object keys (default `false`, disallowing them).                                  |
-| `WithNullable(bool)`             | Make nil-able types (`*T`, `[]T`, `map`, `[]byte`) nullable (default `true`).                 |
-| `WithDefaultsFrom(instance)`     | Seed root property defaults from an instance of the generated type.                           |
-| `WithRootTitle(bool)`            | Title the root schema with the root type's name (default `false`).                            |
+| Option                           | Effect                                                                                                                                                                                    |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `WithDraft(Draft)`               | Target draft: `Draft2020` (default) or `Draft7`; also serves validation and `Inline`.                                                                                                     |
+| `WithTagInterpreter(key, t)`     | Register a `TagInterpreter` under the struct tag key it reads; multiple are applied in order.                                                                                             |
+| `WithDescriptionProvider(p)`     | Set the `DescriptionProvider` used as the source of descriptions.                                                                                                                         |
+| `WithTypeSchema(t, ts)`          | Override a specific Go type with a `TypeSchema` envelope (highest priority).                                                                                                              |
+| `WithTypeSchemaFor[T](ts)`       | `WithTypeSchema` for a statically known type, without `reflect.TypeFor`.                                                                                                                  |
+| `WithTypeSchemaProvider(p)`      | Register a `TypeSchemaProvider` that overrides types by predicate.                                                                                                                        |
+| `WithTypeSchemaExtender(e)`      | Register a `TypeSchemaExtender` that modifies reflection-generated schemas.                                                                                                               |
+| `WithNamer(n)`                   | Custom `Namer` for `$defs` entries; an empty name defers to the built-in namer.                                                                                                           |
+| `WithDefinitions(bool)`          | Extract named types into `$defs`/`$ref` (default `true`).                                                                                                                                 |
+| `WithAdditionalProperties(bool)` | Allow extra object keys (default `false`, disallowing them).                                                                                                                              |
+| `WithNullable(bool)`             | Make pointer occurrences and intercepted interfaces nullable (default `true`).                                                                                                            |
+| `WithJSONOptions(opts...)`       | Honor `encoding/json/v2` marshal options that change output shape (`FormatNilSliceAsNull`, `FormatNilMapAsNull`, `OmitZeroStructFields`); unsupported shape-changing options are refused. |
+| `WithDefaultsFrom(instance)`     | Seed root property defaults from an instance of the generated type.                                                                                                                       |
+| `WithRootTitle(bool)`            | Title the root schema with the root type's name (default `false`).                                                                                                                        |
 
-`WithDefaultsFrom` marshals the instance with `encoding/json` after generation;
-each top-level key of the output that matches a root property becomes that
-property's `default`, overwriting any default set via struct tags. Keys the
-`json` tags omit (`omitempty`, `omitzero`) contribute nothing, so presence
-follows the tags exactly, and nested struct, slice, and map values become
-whole-value defaults on their top-level property. A nil field carrying neither
+`WithDefaultsFrom` marshals the instance with `encoding/json/v2` after
+generation (under the `WithJSONOptions` options, so seeded defaults match the
+caller's marshal); each top-level key of the output that matches a root
+property becomes that property's `default`, overwriting any default set via
+struct tags. Keys the `json` tags omit (`omitempty`, `omitzero`) contribute
+nothing, so presence follows the tags exactly, and nested struct, slice, and
+map values become whole-value defaults on their top-level property. A nil
+slice, map, or `[]byte` marshals as its empty instance (`[]`, `{}`, `""`),
+which seeds like any other value. A nil pointer or interface carrying neither
 `omitempty` nor `omitzero` marshals to JSON null. That null leaves a property
 admitting no null untouched, so the property keeps whatever default its tag
-wrote. `WithNullable(false)` takes the null branch off every nilable property,
+wrote. `WithNullable(false)` takes the null branch off every pointer property,
 and a `NullForbidden` stance takes it off every occurrence of the type it
 covers. An instance whose pointer-dereferenced type is not the generated type,
 or that does not marshal to a JSON object, returns an error wrapping
 `ErrInvalidDefaultsInstance`. A nil instance instead restores the default,
-seeding no defaults. A typed nil pointer is a value, not a reset: it marshals to
-JSON null and fails as a non-object instance. A pointer root's nullable `anyOf`
-wrapper is resolved to its value branch first, so the defaults reach the object
-schema (or its `$defs` entry) inside. When a self-referential root stays in
-`$defs`, the defaults apply to that definition, shared by every recursive
-occurrence. Under `Draft7`, a default landing on a `$ref`'d property moves the
-`$ref` into an `allOf` wrap, the same shape tag defaults produce, because
-Draft-07 readers ignore `$ref` siblings:
+seeding no defaults. A typed nil pointer is a value, not a reset; it marshals
+to JSON null and fails as a non-object instance. A pointer root's nullable
+`anyOf` wrapper is resolved to its value branch first, so the defaults reach
+the object schema (or its `$defs` entry) inside. When a self-referential root
+stays in `$defs`, the defaults apply to that definition, shared by every
+recursive occurrence. Under `Draft7`, a default landing on a `$ref`'d property
+moves the `$ref` into an `allOf` wrap, the same shape tag defaults produce,
+because Draft-07 readers ignore `$ref` siblings:
 
 ```go
 schema, err := jsonschema.GenerateFor[Config](ctx,
@@ -300,20 +308,20 @@ For each type, the schema is determined by the first matching step:
 2. `JSONSchemaProvider`.
 3. Built-in overrides (`[]byte`, `time.Time`, `encoding/json.Number`, ...).
 4. Marshaler methods promoted from an embedded field: a promoted
-   `encoding/json.Marshaler` makes the schema unrestricted (`{}`), and a
-   promoted `encoding.TextMarshaler` makes it `{"type":"string"}`. In both
-   cases the promoted method serializes the whole outer struct, so reflecting
-   its fields would describe a shape that never appears.
-5. `encoding.TextMarshaler` (direct implementation, for types not also
-   implementing `encoding/json.Marshaler`).
+   `MarshalJSONTo` or `MarshalJSON` makes the schema unrestricted (`{}`), and
+   a promoted `AppendText` or `MarshalText` makes it `{"type":"string"}`. In
+   both cases the promoted method serializes the whole outer struct, so
+   reflecting its fields would describe a shape that never appears.
+5. `encoding.TextAppender` or `encoding.TextMarshaler` (direct
+   implementation, for types implementing no JSON marshaler interface).
 6. Kind-based reflection.
 
-A direct `encoding/json.Marshaler` implementation is not consulted: it falls
-through to kind-based reflection, since MarshalJSON can return any JSON type.
-That holds even when the type also implements `encoding.TextMarshaler`
-(`encoding/json` prefers MarshalJSON, so the text form never appears in the
-output). Use `WithTypeSchema` or `JSONSchemaProvider` to describe its real
-shape.
+A direct JSON marshaler implementation (`MarshalJSONTo` or `MarshalJSON`) is
+not consulted: it falls through to kind-based reflection, since the method
+can return any JSON type. That holds even when the type also implements a
+text marshaler (`encoding/json/v2` prefers the JSON method, so the text form
+never appears in the output). Use `WithTypeSchema` or `JSONSchemaProvider` to
+describe its real shape.
 
 A `TypeSchemaProvider` registered with `WithTypeSchemaProvider` supplies
 schemas for whole families of types by predicate: every type implementing a
@@ -424,30 +432,27 @@ and `const`. Values for `default`, `const`, `enum`, and `examples` are parsed
 against the field's schema _shape_ -- the JSON shape its instance actually
 takes -- rather than against its Go kind alone. The two agree for an ordinary
 field and diverge wherever the field serializes itself as something else: a
-`json:",string"` numeric or bool field, and equally a type that marshals itself
-as text, has a string schema, so its scalars parse at the real Go kind (keeping
+`json:",string"` numeric field, and equally a type that marshals itself as
+text, has a string schema, so its scalars parse at the real Go kind (keeping
 the range check, so `const=200` on an `int8` is an error) and are then
 re-serialized to the text the field emits. A `MarshalText` int whose value `3`
 writes as `"L3"` therefore gets `const=3` as `{"const":"L3"}` rather than the
-unsatisfiable `{"type":"string","const":3}`, and `default=3` likewise. A
-`json:",string"` string field double-encodes -- `encoding/json` encodes the
-already-encoded string a second time, so the value `abc` marshals as the JSON
-string `"\"abc\""` -- and its scalars serialize the same way (`const=abc` pins
-that quoted text), while the keywords that would measure or match the unquoted
-value (`pattern`, `format`, and the length bounds) are rejected with an error
-rather than silently asserting against the quoted, escaped text.
-`encoding/json.Number` is the one Go string kind exempt from that rule.
-`encoding/json` writes it as the number it holds, so the value `5` marshals as
-the JSON string `"5"` rather than as `"\"5\""`, and the coerced-numeric rules
-apply. It writes the literal verbatim rather than canonicalizing it, so
-`const=5.0` pins `"5.0"` and `const=5` pins `"5"`.
+unsatisfiable `{"type":"string","const":3}`, and `default=3` likewise.
+`encoding/json.Number` is a string kind but reaches the same coerced-numeric
+rules under `json:",string"`: `encoding/json/v2` writes it as the quoted
+number it holds, so the value `5` marshals as the JSON string `"5"`. It writes
+the literal verbatim rather than canonicalizing it, so `const=5.0` pins
+`"5.0"` and `const=5` pins `"5"`.
 
 Which field occurrences admit `null` is the generator's decision rather than the
 Go type's, and the literal `null` is a value wherever that decision applies. A
-pointer field takes `default=null`, and so does every other nil-able occurrence
-reflection builds: a slice, a map, a `[]byte`, and an interface. A type the
-package maps to a built-in leaf schema is not a container reflection built, so
-`json.RawMessage` refuses the literal even though the `{}` it produces admits
+pointer field takes `default=null`, and so does an interface occurrence. A
+bare slice, map, or `[]byte` does not: `encoding/json/v2` writes a nil one as
+its empty instance, never `null`, so the schema admits no null and the literal
+is refused; a pointer to a container takes it through the pointer's own null
+branch. A type the
+package maps to a built-in leaf schema refuses the literal too, so
+`json.RawMessage` refuses it even though the `{}` it produces admits
 `null`. A `Nullability` stance
 moves the decision either way, so a value field of a `NullAllowed` type takes
 the literal and a pointer to a `NullForbidden` one does not. Whatever else turns
@@ -455,7 +460,6 @@ the decision off takes the literal with it, so a `null` literal is an error
 under `WithNullable(false)` and on a `TypeSchema.Verbatim` payload, which
 carries no null encoding at all.
 
-`default` and `examples` are the two keys that reach the literal on a container.
 The shape a container names rejects a `const` before the parser reads the value,
 so `const=null` fails there for the same reason `const=5` does, on a pointer to
 a container as much as on a bare one. An `enum` on a sequence constrains the
@@ -505,10 +509,10 @@ representation differs from its reflection: it must name one of the seven
 JSON Schema types. The overridden field is not nullable (it names a concrete
 type in place of the one a pointer would make nil-able) and not a reference.
 When the new type is not numeric, it also removes the numeric bounds derived
-from the Go kind. So a `*time.Duration` field (reflected as a nullable
-integer) with `jsonschema:"type=string,pattern=..."` produces a clean
-`{"type":"string","pattern":"..."}` without needing
-`JSONSchemaExtend`. Tag pairs apply in order; keys after `type=` still take
+from the Go kind. The override cannot rescue a type generation refuses before
+field processing runs: a `time.Duration` field fails in type resolution,
+ahead of the tag, so declaring a shape for a duration takes `WithTypeSchema`
+or a provider. Tag pairs apply in order; keys after `type=` still take
 effect. A numeric bound set by an earlier pair and then dropped by a
 non-numeric `type=` override is reported as an error rather than silently
 discarded, since it is the author's explicit input.
@@ -516,8 +520,8 @@ discarded, since it is the author's explicit input.
 Because pairs apply in order, `default`, `const`, `enum`, and `examples`
 values appearing after a `type=` pair parse against the overridden JSON type
 rather than the field's Go type: `string`, `integer`, `number`, and `boolean`
-overrides parse subsequent scalar values as that type, so a `time.Duration`
-field with `jsonschema:"type=string,default=15m"` yields
+overrides parse subsequent scalar values as that type, so an int64 field with
+`jsonschema:"type=string,default=15m"` yields
 `{"type":"string","default":"15m"}` where the Go int64 kind would have
 rejected `15m`. The same keys before the `type=` pair still parse against the
 Go type. After an override to `array`, `object`, or `null` there is no scalar
@@ -537,8 +541,10 @@ against its own shape, so `Days []string` with `enum=monday|tuesday` produces
 text-marshaling element gets the same treatment a coerced field does. Nested
 sequences (`[][]T`) descend to the innermost element schema. `const`, `default`,
 and `examples` remain whole-value constraints, so a scalar value for one of them
-is an error on a sequence field. A `null` value for `default` or `examples` is
-the exception, since it names the array's own `null` rather than an element's.
+is an error on a sequence field. A `null` value for `default` or `examples`
+names the sequence occurrence's own `null` rather than an element's, so it
+follows the field's null decision: refused on a bare slice, taken on a pointer
+to one.
 `enum` on `[]byte` is an error too, because a base64 string has no item schema.
 This is the same element path a `validate` dive or sequence-wide `oneof` takes,
 so the two dialects cannot disagree about what an element is.
@@ -587,16 +593,32 @@ alongside the pin, mirroring the field rule.
 
 ### Struct field rules
 
-Fields follow `encoding/json` conventions: the `json` tag sets the property
-name, `json:"-"` excludes a field (`json:"-,"` uses the literal name `"-"`),
-`omitempty` and `omitzero` drop the field from `required`, and `json:",string"`
-forces a `{"type":"string"}` schema for applicable types (a type implementing
-`json.Marshaler` is exempt: `encoding/json` ignores the option for it, so the
-field keeps the kind-based schema a direct marshaler otherwise gets). Embedded
-structs
-without a `json` tag have their fields promoted; embedded struct types
-intercepted by
-an earlier resolution step are composed via `allOf` (wrapped as
+Fields follow `encoding/json/v2` conventions: the `json` tag sets the
+property name, and `json:"-"` excludes a field. A declaration v2 refuses to
+marshal -- a malformed tag name (a quote character, or the `json:"-,"`
+spelling), a tag on an unexported field, two fields of one struct claiming
+one JSON name, an embedded non-struct without an explicit name, an embed
+option combined with any other option, a `format` tag option (cut from
+stable v2, go.dev/issue/79071), or a struct with fields
+but none serializable (every field unexported and untagged) -- is refused
+with `ErrInvalidJSONField` exactly where `encoding/json/v2.Marshal` refuses a
+value of the type.
+
+`omitzero` drops the field from `required`; `omitempty` does too only where
+the field's encoded value can be empty (`null`, `""`, `[]`, or `{}`) -- a
+string, map, slice, pointer, interface, struct, zero-length array, or
+marshaler-bearing field. v2 never treats an encoded number or bool as empty,
+so `omitempty` on one leaves the field required. `json:",string"` forces a
+`{"type":"string"}` schema for the types v2 stringifies -- the integer and
+float kinds, `json.Number`, and pointer chains to those -- and is refused on
+anything else. A type carrying a JSON or text marshaler is exempt because v2
+ignores the option for it; the field keeps the schema the marshaler steps
+produce (`time.Time` is the exception -- v2's native time codec rejects the
+flag, so generation refuses it too). Embedded structs without a `json` tag
+(or with the explicit `json:",embed"` option) have their fields promoted; an
+embedded struct carrying any marshal or unmarshal method of its own is
+refused where the field walk reaches it; embedded struct types intercepted
+by an earlier resolution step are composed via `allOf` (wrapped as
 `anyOf[schema, {}]` for a pointer embed, since a nil pointer contributes
 nothing to the marshaled object). A provider schema (registered or on-type)
 used for such an embedded type must leave the object
@@ -614,9 +636,29 @@ property on the parent: the branch is not guaranteed to evaluate the name (an
 unrestricted `TypeSchema` renders as `true` and evaluates nothing), and an
 unevaluated name would otherwise be rejected. `Draft7` omits
 `additionalProperties: false` from the parent altogether. Embedded non-struct
-types, interfaces included, are regular leaf fields keyed by the field name,
-exactly as `encoding/json` records them: the key is always emitted (`null` for a
-nil interface), so an intercepted interface schema admits `null` alongside.
+types, interfaces included, are regular leaf fields under the explicit JSON
+name their tag must give them: the key is always emitted (`null` for a nil
+interface), so an intercepted interface schema admits `null` alongside.
+
+A non-anonymous exported field tagged `json:",embed"` is v2's embedded
+fallback when its type, after one unnamed-pointer level, is a
+`jsontext.Value` or a map whose key kind is string and whose key type
+implements no marshal or unmarshal method. V2 splices the fallback's members
+into the parent object after the named fields, and the schema carries the
+constraint those members satisfy. A map fallback's value schema becomes the
+object's `additionalProperties`, or its `unevaluatedProperties` beside
+`allOf` composition under `Draft2020`. Beside `allOf` under `Draft7` the
+object stays open, the dialect's usual degradation. A `jsontext.Value`
+fallback leaves the object open, since its members are arbitrary JSON. A nil
+map, a nil pointer, and an empty `jsontext.Value` contribute no members, so
+a fallback never adds a null branch. One fallback survives per type, on v2's
+rules. The shallowest wins and a same-depth tie silently drops them all. Two
+fallback fields in one struct declaration, a fallback type or key carrying
+marshal or unmarshal methods, any other non-struct type under
+`json:",embed"`, and `json:",embed"` combined with a name or another option
+are refused with `ErrInvalidJSONField`. A fallback map value type with no
+representation (`map[string]time.Duration`) is refused with
+`ErrUnsupportedType` under every option.
 
 ### Comment extraction
 
@@ -743,7 +785,7 @@ canvas value. (The string first-wins keywords -- `format`, `pattern`,
 sibling accessors so a tag never overrides a value the type already set.) The
 read-only `Base` is the type-derived schema, for dispatching on the reflected
 shape. Generation composes the canvas with `Base` and applies the null encoding
-for a nil-able field, so a `const` or `enum` an interpreter declares lands on the
+for a null-admitting field, so a `const` or `enum` an interpreter declares lands on the
 value branch and keeps null valid. Which side a keyword lands on is declared per
 keyword in a single table, not spread across the reconciliation. The context also
 holds the parent schema, JSON name, and Go type; the declaring struct type, which
@@ -764,11 +806,13 @@ first.
 An interpreter that branches on what the field is classifies it once with
 `FieldContext.Shape()`, or with `ShapeOf(fieldType, base)` when no context is
 available. The context supplies two facts `ShapeOf` cannot. The `json:",string"`
-flag on a string Go kind is the one coercion, `FormCoercedString`, that type and
-base alone do not express. Whether a nil-able slice, map, `[]byte`, or interface
-admits `null` is the generator's decision rather than the Go type's, so
-`ShapeOf` reports only the pointer occurrences as admitting `null`, which is
-also what a context the generator did not build falls back to. A field
+flag on an `encoding/json.Number` field is the one coercion type and base
+alone do not express (the type is a string kind and the coerced base is a
+string schema, so only the flag says the instance is a quoted number).
+Whether a pointer or interface occurrence admits `null` is the generator's
+decision rather than the Go type's (`WithNullable`, a `Nullability` stance),
+so `ShapeOf` reports only the pointer occurrences as admitting `null`, which
+is also what a context the generator did not build falls back to. A field
 referencing the type it belongs to reads its null admission before that type
 records a `Nullability` stance, so a later stance can withdraw the answer.
 Two field-level writers take a null literal against a reference: the
@@ -844,14 +888,15 @@ produces:
 Supported tags (summary):
 
 - **Presence:** `required`. A property whose value is null satisfies the
-  `required` entry on its own, so wherever the field's shape has a non-zero form
-  the interpreter also forbids `null`: a string, number, bool, slice, map, or
-  `[]byte`, as a pointer or bare. A non-pointer field also gets a type-specific
-  non-zero constraint; a pointer field gets the forbidden `null` and no such
+  `required` entry on its own, so where the occurrence admits `null` and the
+  field's shape has a non-zero form, the interpreter also forbids `null`. A
+  non-pointer field gets a type-specific non-zero constraint (a size floor on
+  a bare slice or map, whose nil value marshals as its empty instance rather
+  than `null`); a pointer field gets the forbidden `null` and no such
   constraint, since go-playground reads `required` on a pointer as "must be
-  non-nil". Where the occurrence admits no `null`, as under
-  `WithNullable(false)`, the interpreter writes no forbidden `null` and the type
-  rejects a `null` instance on its own. A shape with no non-zero form the schema
+  non-nil". Where the occurrence admits no `null` -- a bare container, or a
+  pointer under `WithNullable(false)` -- the interpreter writes no forbidden
+  `null` and the type rejects a `null` instance on its own. A shape with no non-zero form the schema
   can express gets the `required` entry and nothing else, not even the forbidden
   `null`: a struct, a text-marshaling type, a referenced definition, an opaque
   value such as an interface, and a raw JSON value such as `json.RawMessage`,
@@ -880,10 +925,10 @@ Supported tags (summary):
 - **Content:** `json` -> `contentMediaType`; `base64` -> `contentEncoding`.
 
 On a field whose schema is a string because it serializes itself as one -- a
-`json:",string"` numeric or bool field, or a type that marshals itself as text --
+`json:",string"` numeric field, or a type that marshals itself as text --
 the scalar rules compare against that text, as they do for the `jsonschema` tag
 above. A coerced float has two serializations of its zero, since Go's negative
-zero compares equal to zero and `encoding/json` writes the sign bit for it.
+zero compares equal to zero and `encoding/json/v2` writes the sign bit for it.
 `required` and `ne=0` forbid both texts, so they match go-playground. `eq=0` pins
 the canonical `"0"` alone, so it rejects a `"-0"` instance go-playground accepts.
 
@@ -920,11 +965,16 @@ always succeeds or always fails (following `regexp.MustCompile` and
   widens to `float64`. `Normalize` is exported for callers that want to
   pre-normalize a value once and reuse it. A self-referential instance (a map
   or slice that contains itself) is rejected rather than walked.
-- `Validator.ValidateJSON(ctx, data)` unmarshals raw JSON with a
-  `json.Decoder` using `UseNumber()` (preserving the integer-vs-number
-  distinction), then validates.
+- `Validator.ValidateJSON(ctx, data)` decodes raw JSON with
+  `encoding/json/v2`, reading every number as `json.Number` (preserving the
+  integer-vs-number distinction), then validates. Decoding rejects duplicate
+  object member names and invalid UTF-8 (RFC 7493), as v2 does.
+- `Validator.ValidateReader(ctx, r)` applies `ValidateJSON`'s discipline to
+  an `io.Reader`, decoding it to EOF (numbers as `json.Number`; trailing
+  data, duplicate object member names, and invalid UTF-8 rejected) before
+  validating.
 - `Validator.ValidateValue(ctx, v)` marshals a Go value with
-  `encoding/json` and validates its JSON form, closing the loop with
+  `encoding/json/v2` and validates its JSON form, closing the loop with
   generation: an instance of the very type a schema was generated for
   validates in one call. `json` tags, `omitempty` and `omitzero`, and
   `MarshalJSON` implementations all apply, so what is validated is exactly
@@ -1059,7 +1109,7 @@ an unaccepted instance type, the compile-time check sentinels, and
 
 ### Numeric precision
 
-Instance numbers are compared exactly (decoded with `UseNumber`, compared as
+Instance numbers are compared exactly (decoded as `json.Number`, compared as
 `big.Rat`), with one bound on the work an adversarial literal can demand: for a
 JSON number whose exact value exceeds an internal cap (about 4096 significant
 digits or decimal exponent magnitude), `minimum`/`maximum`/`exclusiveMinimum`/
@@ -1089,8 +1139,8 @@ than silently skipping a value it cannot compare.
 
 ```go
 type ValidationError struct {
-	InstancePath string             // JSON Pointer into the instance, e.g. "/address/city"
-	SchemaPath   string             // JSON Pointer into the schema
+	InstancePath jsontext.Pointer   // JSON Pointer into the instance, e.g. "/address/city"
+	SchemaPath   jsontext.Pointer   // JSON Pointer into the schema
 	Keyword      string             // failing keyword, e.g. "type", "minLength", "$ref"
 	Message      string             // human-readable message
 	Causes       []*ValidationError // child failures
@@ -1117,13 +1167,16 @@ consumer can highlight the key instead of the value. The keyword names
 themselves are exported as `Keyword*` constants (`KeywordRequired`,
 `KeywordRef`, ...), so code branching on `Keyword` needs no raw strings.
 
-`InstanceSegments()` returns the `InstancePath` location in typed form: one
-`Segment` per reference token, outermost first, each marked as an object key
-or an array index. The JSON Pointer string cannot distinguish array index `1`
-from an object property named `"1"` (YAML decoders in particular produce
-string map keys that look numeric), and its keys are RFC 6901-escaped; the
-segments carry the unescaped key and an explicit index/key distinction, so
-consumers need not re-parse the pointer and guess with `strconv.Atoi`.
+The two path fields are `encoding/json/jsontext.Pointer` values, so the
+stdlib's pointer helpers (`Tokens`, `Parent`, `LastToken`, `Contains`) apply
+to them directly. `InstanceSegments()` returns the `InstancePath` location in
+typed form: one `Segment` per reference token, outermost first, each marked
+as an object key or an array index. A JSON Pointer cannot distinguish array
+index `1` from an object property named `"1"` (YAML decoders in particular
+produce string map keys that look numeric), and its keys are RFC
+6901-escaped; the segments carry the unescaped key and an explicit index/key
+distinction, so consumers need not re-parse the pointer and guess with
+`strconv.Atoi`.
 `SchemaSegments()` is the schema-side counterpart for `SchemaPath`,
 distinguishing an `allOf` branch index from a property named like a number
 and carrying property names under `properties` verbatim. Segments are
@@ -1328,7 +1381,8 @@ the pointer it returns to, both rooted at the document the check walked rather
 than at the root the run started from. Both sources accept aliasing, unlike a
 root document, because every walk that reaches a registered document dedupes
 pointers. The boundary refuses a cycle because the JSON-pointer fallback
-marshals the document it searches and a cyclic schema graph has no JSON form.
+marshals part of the document it searches and a cyclic schema graph has no
+JSON form.
 Non-local refs absolutize against the enclosing resource's base URI: its `$id`,
 or the root base set with `WithBaseURI`. That base also registers the root
 document under its URI, so a ref absolutizing back to it resolves in-memory. The
@@ -1687,29 +1741,30 @@ configured.
 
 ## Errors
 
-| Error                         | Trigger                                                                                                                                                                                                                                       |
-| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ErrUnsupportedType`          | A Go type with no JSON Schema representation (`func`, `chan`, `complex`, `unsafe.Pointer`).                                                                                                                                                   |
-| `ErrUnsupportedMapKey`        | A map key that is not a string, integer type, or `encoding.TextMarshaler`.                                                                                                                                                                    |
-| `ErrInvalidType`              | A `type` keyword naming something other than the seven JSON Schema type names (returned by `CheckTypeNames`, `Compile`, and `Inline`).                                                                                                        |
-| `ErrItemsArrayUnderDraft2020` | The draft-07 array form of `items` used under draft 2020-12, where tuples are spelled with `prefixItems` (returned by `Compile` and `Inline`).                                                                                                |
-| `ErrNegativeBound`            | A negative length or count keyword: `minLength`, `maxLength`, `minItems`, `maxItems`, `minProperties`, `maxProperties`, `minContains`, `maxContains` (returned by `Compile` and `Inline`).                                                    |
-| `ErrNonPositiveMultipleOf`    | A `multipleOf` that is not strictly greater than zero (returned by `Compile` and `Inline`).                                                                                                                                                   |
-| `ErrConflictingSchemaFields`  | Both Go fields of one JSON keyword set, e.g. `Type`/`Types` or a `dependencies` key in both maps (returned by `Compile` and `Inline`).                                                                                                        |
-| `ErrNilSubschema`             | A nil `*Schema` element inside a sub-schema slice or map (returned by `Compile` and `Inline`).                                                                                                                                                |
-| `ErrDuplicatePropertyOrder`   | A `PropertyOrder` slice listing the same property twice (returned by `Compile` and `Inline`).                                                                                                                                                 |
-| `ErrSchemaNotTree`            | The root document's sub-schema pointers alias or cycle, or a root loop closes through a value field (`Compile` and `Inline`); a fetched document holds a pointer cycle (`Compile` and `Inline`); or a `SubstituteRef` schema does (`Inline`). |
-| `ErrInvalidID`                | An `$id` that does not parse, carries a fragment under 2020-12, or does not resolve to an absolute URI (returned by `Compile` and `Inline`; an `Inline` run under `WithRetrievalBase` checks no `$id`).                                       |
-| `ErrInvalidBaseURI`           | A `WithBaseURI` value that does not parse (returned by `Compile` and `Inline`).                                                                                                                                                               |
-| `ErrMisplacedVocabulary`      | A `$vocabulary` on a node whose `$schema` does not establish the 2020-12 dialect (returned by `Compile` and `Inline`).                                                                                                                        |
-| `ErrInvalidSchemaDocument`    | A schema document whose top-level value is not a JSON object or boolean (returned by `CompileJSON`, `ParseSchema`, and `ParseSchemaValue`).                                                                                                   |
-| `ErrUnknownVocabulary`        | A required `$vocabulary` URI is unrecognized, or 2020-12 core is marked optional (returned by `Compile`).                                                                                                                                     |
-| `ErrRefResolve`               | A `RefResolver` returns an error resolving a remote `$ref`; in `Inline`, also a non-local ref with no resolver or any unresolvable target.                                                                                                    |
-| `ErrIDCollision`              | A document entering resolution space claims a `$id` or anchor another document already holds (returned by `Compile` and `Inline`; a substitute is judged on its `$id` alone).                                                                 |
-| `ErrRefCycle`                 | `Inline` expands a `$ref` whose target is a node the walk is already inside; the reference graph is cyclic and has no finite expansion.                                                                                                       |
-| `ErrRefInline`                | `Inline` encounters a reference with no faithful static expansion (`$dynamicRef` under Draft 2020-12).                                                                                                                                        |
-| `ErrProviderPanic`            | A `JSONSchemaProvider`/`JSONSchemaExtender` method panics (recovered and wrapped).                                                                                                                                                            |
-| `ErrInvalidDefaultsInstance`  | The `WithDefaultsFrom` instance does not match the generated root type or does not marshal to a JSON object.                                                                                                                                  |
+| Error                         | Trigger                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ErrUnsupportedType`          | A Go type with no JSON Schema representation (`func`, `chan`, `complex`, `unsafe.Pointer`, `time.Duration`).                                                                                                                                                                                                                                                                                                                                                                                    |
+| `ErrUnsupportedMapKey`        | A map key that is none of a string, integer, or float kind and carries no marshaler method; the exact `time.Duration` key, whose native v2 codec has no default representation, is refused too.                                                                                                                                                                                                                                                                                                 |
+| `ErrInvalidJSONField`         | A field declaration `encoding/json/v2` refuses to marshal: a malformed json tag, a duplicate JSON name within one struct, a tagged unexported field, an invalid embed or fallback (two fallback fields in one declaration, a non-qualifying type or key under `json:",embed"`, or `json:",embed"` combined with a name or another option), `json:",string"` on a non-numeric field, a `format` tag option, or a struct with fields but none serializable (every field unexported and untagged). |
+| `ErrInvalidType`              | A `type` keyword naming something other than the seven JSON Schema type names (returned by `CheckTypeNames`, `Compile`, and `Inline`).                                                                                                                                                                                                                                                                                                                                                          |
+| `ErrItemsArrayUnderDraft2020` | The draft-07 array form of `items` used under draft 2020-12, where tuples are spelled with `prefixItems` (returned by `Compile` and `Inline`).                                                                                                                                                                                                                                                                                                                                                  |
+| `ErrNegativeBound`            | A negative length or count keyword: `minLength`, `maxLength`, `minItems`, `maxItems`, `minProperties`, `maxProperties`, `minContains`, `maxContains` (returned by `Compile` and `Inline`).                                                                                                                                                                                                                                                                                                      |
+| `ErrNonPositiveMultipleOf`    | A `multipleOf` that is not strictly greater than zero (returned by `Compile` and `Inline`).                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `ErrConflictingSchemaFields`  | Both Go fields of one JSON keyword set, e.g. `Type`/`Types` or a `dependencies` key in both maps (returned by `Compile` and `Inline`).                                                                                                                                                                                                                                                                                                                                                          |
+| `ErrNilSubschema`             | A nil `*Schema` element inside a sub-schema slice or map (returned by `Compile` and `Inline`).                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `ErrDuplicatePropertyOrder`   | A `PropertyOrder` slice listing the same property twice (returned by `Compile` and `Inline`).                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `ErrSchemaNotTree`            | The root document's sub-schema pointers alias or cycle, or a root loop closes through a value field (`Compile` and `Inline`); a fetched document holds a pointer cycle (`Compile` and `Inline`); or a `SubstituteRef` schema does (`Inline`).                                                                                                                                                                                                                                                   |
+| `ErrInvalidID`                | An `$id` that does not parse, carries a fragment under 2020-12, or does not resolve to an absolute URI (returned by `Compile` and `Inline`; an `Inline` run under `WithRetrievalBase` checks no `$id`).                                                                                                                                                                                                                                                                                         |
+| `ErrInvalidBaseURI`           | A `WithBaseURI` value that does not parse (returned by `Compile` and `Inline`).                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `ErrMisplacedVocabulary`      | A `$vocabulary` on a node whose `$schema` does not establish the 2020-12 dialect (returned by `Compile` and `Inline`).                                                                                                                                                                                                                                                                                                                                                                          |
+| `ErrInvalidSchemaDocument`    | A schema document whose top-level value is not a JSON object or boolean (returned by `CompileJSON`, `ParseSchema`, and `ParseSchemaValue`).                                                                                                                                                                                                                                                                                                                                                     |
+| `ErrUnknownVocabulary`        | A required `$vocabulary` URI is unrecognized, or 2020-12 core is marked optional (returned by `Compile`).                                                                                                                                                                                                                                                                                                                                                                                       |
+| `ErrRefResolve`               | A `RefResolver` returns an error resolving a remote `$ref`; in `Inline`, also a non-local ref with no resolver or any unresolvable target.                                                                                                                                                                                                                                                                                                                                                      |
+| `ErrIDCollision`              | A document entering resolution space claims a `$id` or anchor another document already holds (returned by `Compile` and `Inline`; a substitute is judged on its `$id` alone).                                                                                                                                                                                                                                                                                                                   |
+| `ErrRefCycle`                 | `Inline` expands a `$ref` whose target is a node the walk is already inside; the reference graph is cyclic and has no finite expansion.                                                                                                                                                                                                                                                                                                                                                         |
+| `ErrRefInline`                | `Inline` encounters a reference with no faithful static expansion (`$dynamicRef` under Draft 2020-12).                                                                                                                                                                                                                                                                                                                                                                                          |
+| `ErrProviderPanic`            | A `JSONSchemaProvider`/`JSONSchemaExtender` method panics (recovered and wrapped).                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `ErrInvalidDefaultsInstance`  | The `WithDefaultsFrom` instance does not match the generated root type or does not marshal to a JSON object.                                                                                                                                                                                                                                                                                                                                                                                    |
 
 ## CLI: `jsonschemagen`
 
@@ -1806,9 +1861,13 @@ refs.
 - **`anyOf` for nullable `$ref`**: conventional, and avoids `oneOf` overhead.
 - **`additionalProperties: false` by default**: a Go struct defines exactly what
   is allowed; opt in to permissive schemas with `WithAdditionalProperties`.
-- **Nullable maps and slices**: both emit null-typed schemas by default,
-  matching `encoding/json` nil behavior; `WithNullable(false)` drops the null
-  branch for callers whose absent values are never serialized as `null`.
+- **No null on maps and slices**: `encoding/json/v2` writes a nil slice or
+  map as its empty instance under the default marshal options, so their
+  schemas name the bare container type; only pointers and intercepted
+  interfaces earn a null branch, and `WithNullable(false)` drops that branch
+  for callers whose absent values are never serialized as `null`.
+  `WithJSONOptions` with `FormatNilSliceAsNull` or `FormatNilMapAsNull`
+  adds the null those options make v2 write.
 - **Hierarchical `ValidationError`**: a tree mirrors the schema/instance
   structure so callers can inspect failures at any depth or flatten them.
 - **Pluggable format validation**: formats are checked by registered
@@ -1820,8 +1879,9 @@ refs.
 - **Go RE2 for patterns**: `pattern` and `patternProperties` use Go's `regexp`,
   not ECMA 262; this matches the upstream and is a known deviation from the
   spec.
-- **`Validator.ValidateJSON` uses `UseNumber`** to preserve the integer-vs-number
-  distinction that default `float64` unmarshaling would lose.
+- **`Validator.ValidateJSON` decodes numbers as `json.Number`** to preserve
+  the integer-vs-number distinction that default `float64` unmarshaling would
+  lose.
 - **One operation x shape table for every tag dialect**: the `jsonschema` tag and
   the `validate` tag are two spellings of one constraint vocabulary, so they are
   two grammars over one model (`internal/tagmodel`) rather than two engines. The
@@ -1835,11 +1895,13 @@ refs.
   implementation.
 
 Two points where the generated schema's model of a Go type differs from what
-`encoding/json` emits for that type, each specified in the section that owns it:
+`encoding/json/v2` emits for that type, each specified in the section that
+owns it:
 
-- **A direct `encoding/json.Marshaler` is reflected by its Go struct shape**,
-  not its marshaled shape, so the schema can reject output `encoding/json`
-  produces (see [Customization interfaces](#customization-interfaces)).
+- **A direct JSON marshaler (`MarshalJSONTo` or `MarshalJSON`) is reflected
+  by its Go struct shape**, not its marshaled shape, so the schema can reject
+  output `encoding/json/v2` produces (see
+  [Customization interfaces](#customization-interfaces)).
 - **Draft-07 omits `additionalProperties: false` from the parent under `allOf`
   composition**, which loosens the schema rather than tightening it, so it
   cannot reject valid output (see [Struct field rules](#struct-field-rules)).

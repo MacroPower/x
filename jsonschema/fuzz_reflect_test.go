@@ -3,7 +3,8 @@ package jsonschema_test
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"math/big"
 	"reflect"
 	"strconv"
@@ -28,7 +29,11 @@ import (
 // which is a reflect.go bug. Each FuzzReflectAccepts<T> covers one roster type
 // chosen to hit a historical fix cluster; fuzzfill turns the fuzzing entropy
 // blob into a populated T. The seed corpus runs on every `go test`, and
-// `task go:fuzz` searches for new counterexamples.
+// `task go:fuzz` searches for new counterexamples. This rig deliberately
+// stays on default marshal options: its roster exists for the classes
+// reflect.StructOf cannot express, which are orthogonal to WithJSONOptions,
+// and rig 2's option-paired targets cover slices, maps, and omission far
+// more densely.
 
 // plainScalarsContainersPointers exercises the baseline kinds: scalars, a
 // slice, a map, and a pointer.
@@ -155,19 +160,23 @@ type promotedJSONMarshaler struct {
 	Ignored string `json:"ignored"`
 }
 
-// stringCoercion carries json:",string" on every coercible kind. The
-// encoding/json package wraps each value in a JSON string, and generation must
-// model each field as a string rather than by its Go kind.
+// stringCoercion carries json:",string" on every kind the option applies to:
+// encoding/json/v2 stringifies numbers only, wrapping each numeric value in a
+// JSON string, and the flag survives any pointer depth. Generation must model
+// each field as a string rather than by its numeric kind, and the pointer
+// chains as nullable strings.
 type stringCoercion struct {
-	Int   int     `json:"int,string"`
-	Uint  uint16  `json:"uint,string"`
-	Float float64 `json:"float,string"`
-	Bool  bool    `json:"bool,string"`
-	Str   string  `json:"str,string"`
+	Int    int      `json:"int,string"`
+	Uint   uint16   `json:"uint,string"`
+	Float  float64  `json:"float,string"`
+	Ptr    *int     `json:"ptr,string"`
+	PtrPtr **uint32 `json:"ptrptr,string"` //nolint:staticcheck // SA5008 models v1; v2 carries the flag down the whole pointer chain.
 }
 
-// omitFields carries omitempty and omitzero. A zero value drops the field from
-// the marshaled object, so generation must not require it.
+// omitFields carries omitempty and omitzero. A zero value drops most of these
+// fields from the marshaled object, so generation must not require them. The
+// numeric omitempty field is the exception: encoding/json/v2 never treats an
+// encoded number as empty, so it stays required and always present.
 type omitFields struct {
 	A string    `json:"a,omitempty"`
 	B int       `json:"b,omitempty"`
@@ -189,11 +198,11 @@ type timeWrapper struct {
 	Opt  *time.Time `json:"opt"`
 }
 
-// rawWrapper carries a json.RawMessage, which generation models as an
+// rawWrapper carries a jsontext.Value, which generation models as an
 // unrestricted schema and which must round-trip as arbitrary valid JSON.
 type rawWrapper struct {
-	Payload json.RawMessage `json:"payload"`
-	Label   string          `json:"label"`
+	Payload jsontext.Value `json:"payload"`
+	Label   string         `json:"label"`
 }
 
 // bigWrapper carries a *big.Int, which marshals as a bare arbitrary-precision
@@ -213,29 +222,28 @@ type Wrap[T any] struct {
 	Note  string `json:"note"`
 }
 
-// Bag is an exported generic map type. Embedded as Bag[string] it stays a leaf
-// property, and the two ways to name that property disagree: its
-// [reflect.StructField.Name] is the bare identifier "Bag" while
-// [reflect.Type.Name] carries the type arguments as "Bag[string]".
-// Encoding/json keys the property by the field name, so a schema keyed by the
-// instantiated type name requires a property no marshaled object ever has.
+// Bag is an exported generic map type. Encoding/json/v2 refuses an embedded
+// non-struct that has no JSON name (reflect_embedded_generic_test.go pins that
+// refusal), so embeddedGeneric embeds it under an explicit name and it stays a
+// leaf property under that name.
 type Bag[T any] map[string]T
 
 // embeddedGeneric embeds both generic forms alongside a plain sibling: the
 // struct instantiation whose fields promote, and the map instantiation that
-// remains a leaf keyed by "Bag". Only a hand-written type can express this:
-// [reflect.StructOf] cannot build an embed whose field name would have to be
-// "Wrap[int]", which is not an identifier.
+// remains a leaf under its explicit name. Only a hand-written type can express
+// this: [reflect.StructOf] cannot build an embed whose field name would have
+// to be "Wrap[int]", which is not an identifier.
 type embeddedGeneric struct {
 	Wrap[int]
-	Bag[string]
+	Bag[string] `json:"bag"`
 
 	Extra string `json:"extra"`
 }
 
-// Marker is an exported interface embedded as a leaf. Encoding/json never
-// flattens an embedded interface: it stays a regular property under the field
-// name.
+// Marker is an exported interface embedded as a leaf. Encoding/json/v2 never
+// flattens an embedded interface, and refuses one that has no JSON name
+// (reflect_embedded_interface_test.go pins that refusal), so embeddedInterface
+// names it and it stays a regular property under that name.
 type Marker interface{ MarkerKind() string }
 
 // dualMarshaler implements json.Marshaler and encoding.TextMarshaler directly.
@@ -256,10 +264,10 @@ func (dualMarshaler) MarshalText() ([]byte, error) { return []byte("dual"), nil 
 // embeddedInterface embeds Marker alongside fuzzable siblings. Fuzzfill leaves
 // an interface at its zero value, so the embedded field marshals as
 // null on every run, and the schema must both carry the property under the
-// field name and admit null there or the default additionalProperties: false
+// tag name and admit null there or the default additionalProperties: false
 // rejects the object outright.
 type embeddedInterface struct {
-	Marker
+	Marker `json:"marker"`
 
 	Name string        `json:"name"`
 	Dual dualMarshaler `json:"dual"`
@@ -386,12 +394,79 @@ func FuzzReflectAcceptsDeepEmbedChain(f *testing.F) {
 	fuzzReflectAccepts[deepEmbedChain](f)
 }
 
+// fbrKey is the key type of the fallback target's map, filled through a
+// constructor so a spliced member never collides with a named property, which
+// would be a marshal-time duplicate-name error costing the iteration.
+type fbrKey string
+
+// embeddedFallbackMap crosses named fields with a map fallback whose value
+// type is nullable, so the value schema's null branch is exercised too.
+type embeddedFallbackMap struct {
+	Name  string          `json:"name"`
+	Count int             `json:"count,omitempty"`
+	Extra map[fbrKey]*int `json:",embed"`
+}
+
+// embeddedFallbackValue carries the jsontext.Value fallback form, which rig 2
+// cannot draw (its shared fill produces arbitrary JSON, and a non-object
+// value is a value-level v2 refusal), so the roster owns it.
+type embeddedFallbackValue struct {
+	Name  string         `json:"name"`
+	Extra jsontext.Value `json:",embed"`
+}
+
+// fillFbrKey draws one of eight safe fallback member names.
+func fillFbrKey(c *fuzzfill.Cursor) any { return fbrKey("fbr" + strconv.Itoa(c.Intn(8))) }
+
+// fillFallbackObject draws a jsontext.Value holding a small JSON object whose
+// keys are unique and inside the safe namespace, the only content the splice
+// accepts at marshal time.
+func fillFallbackObject(c *fuzzfill.Cursor) any {
+	out := []byte{'{'}
+
+	n := c.Intn(4)
+	for i := range n {
+		if i > 0 {
+			out = append(out, ',')
+		}
+
+		out = strconv.AppendQuote(out, "fbr"+strconv.Itoa(i))
+		out = append(out, ':')
+		out = strconv.AppendInt(out, int64(c.Intn(1000)), 10)
+	}
+
+	return jsontext.Value(append(out, '}'))
+}
+
+func FuzzReflectAcceptsEmbeddedFallbackMap(f *testing.F) {
+	fuzzReflectAcceptsFilled[embeddedFallbackMap](f, []fuzzfill.Option{
+		fuzzfill.WithConstructor(reflect.TypeFor[fbrKey](), fillFbrKey),
+	})
+}
+
+func FuzzReflectAcceptsEmbeddedFallbackValue(f *testing.F) {
+	fuzzReflectAcceptsFilled[embeddedFallbackValue](f, []fuzzfill.Option{
+		fuzzfill.WithConstructor(reflect.TypeFor[jsontext.Value](), fillFallbackObject),
+	})
+}
+
 // fuzzReflectAccepts is the shared body for every rig-1 target. It generates
 // and compiles T's schema once, seeds the corpus, then for each blob fills a T,
 // marshals it, and asserts the schema accepts the marshaled bytes. The f.Fuzz
 // callback cannot call t.Parallel (the fuzzing framework forbids it), the one
 // documented exemption from the t.Parallel-everywhere convention.
 func fuzzReflectAccepts[T any](f *testing.F, compileOpts ...jsonschema.ValidateOption) {
+	f.Helper()
+	fuzzReflectAcceptsFilled[T](f, nil, compileOpts...)
+}
+
+// fuzzReflectAcceptsFilled is [fuzzReflectAccepts] with fill options, for a
+// target whose type needs a constructor to stay marshalable.
+func fuzzReflectAcceptsFilled[T any](
+	f *testing.F,
+	fillOpts []fuzzfill.Option,
+	compileOpts ...jsonschema.ValidateOption,
+) {
 	f.Helper()
 
 	ctx := context.Background()
@@ -402,15 +477,14 @@ func fuzzReflectAccepts[T any](f *testing.F, compileOpts ...jsonschema.ValidateO
 	validator, err := jsonschema.Compile(ctx, schema, compileOpts...)
 	require.NoError(f, err, "compile schema for %T", *new(T))
 
-	schemaJSON, err := json.MarshalIndent(schema, "", "  ")
-	require.NoError(f, err, "marshal schema for %T", *new(T))
+	schemaJSON := indentSchema(f, schema)
 
 	addReflectSeeds(f)
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		var val T
 
-		fuzzfill.Fill(reflect.ValueOf(&val), data)
+		fuzzfill.Fill(reflect.ValueOf(&val), data, fillOpts...)
 
 		instance, err := json.Marshal(val)
 		if err != nil {
