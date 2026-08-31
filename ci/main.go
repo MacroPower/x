@@ -100,6 +100,12 @@ func (m *Ci) env() *dagger.Container {
 	return m.Devbox.WithSource().
 		WithMountedCache(devboxHome+"/go/pkg/mod", dag.CacheVolume(cacheNamespace+":gomod"), owner).
 		WithEnvVariable("GOMODCACHE", devboxHome+"/go/pkg/mod").
+		// Mounting pkg/mod leaves its parents root-owned, and go creates
+		// pkg/sumdb beside it to record checksum-database state; without a
+		// writable mount there, verifying any checksum absent from go.sum
+		// fails with a misleading "open .../sumdb/.../latest: no such file"
+		// error.
+		WithMountedCache(devboxHome+"/go/pkg/sumdb", dag.CacheVolume(cacheNamespace+":gosumdb"), owner).
 		WithMountedCache(devboxHome+"/.cache/go-build", dag.CacheVolume(cacheNamespace+":gobuild"), owner).
 		WithEnvVariable("GOCACHE", devboxHome+"/.cache/go-build").
 		WithMountedCache(devboxHome+"/.cache/golangci-lint", dag.CacheVolume(cacheNamespace+":golangci-lint"), owner)
