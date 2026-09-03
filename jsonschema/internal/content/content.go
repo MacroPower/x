@@ -87,7 +87,14 @@ func Assert(encoding, mediaType, str string, strictBase64 bool) (string, error) 
 		decodedKnown = false
 	}
 
-	if decodedKnown && MediaTypeIsJSON(mediaType) && !jsontext.Value(decoded).IsValid() {
+	// The assertion is against the application/json media type, which is
+	// RFC 8259: duplicate member names and invalid UTF-8 are valid there,
+	// so the check permits both rather than applying IsValid's default
+	// RFC 7493 discipline (which encoding/json v1's Valid never enforced).
+	if decodedKnown && MediaTypeIsJSON(mediaType) &&
+		!jsontext.Value(decoded).IsValid(
+			jsontext.AllowDuplicateNames(true), jsontext.AllowInvalidUTF8(true),
+		) {
 		return "contentMediaType", nil
 	}
 
