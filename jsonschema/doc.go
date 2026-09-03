@@ -568,8 +568,10 @@
 // produces an unrestricted schema ({}) since its concrete type is unknowable
 // at compile time; an interface intercepted by an earlier resolution step (a
 // registered override, or a [encoding.TextMarshaler] method set) uses the
-// intercepted schema with null admitted alongside. Unexported embedded
-// interfaces, like all unexported embedded non-struct types, are excluded.
+// intercepted schema with null admitted alongside. An unexported embedded
+// interface, like every unexported embedded non-struct type, is refused with
+// [ErrInvalidJSONField]: v2 demands an explicit JSON name for a non-struct
+// embed, and an unexported field cannot carry one.
 //
 // Field shadowing and ambiguity follow [encoding/json/v2] rules. Two fields
 // of one struct claiming one JSON name are refused with

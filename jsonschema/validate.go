@@ -1377,6 +1377,10 @@ func MustCompile(schema *Schema, opts ...ValidateOption) *Validator {
 // naming the Go type. This includes nil, the decoding of a top-level JSON
 // null, which [Schema.UnmarshalJSON] silently coerces to the false schema.
 // Values produced by [Normalize] ([jsonv1.Number] leaves) convert correctly.
+// A document string holding invalid UTF-8 (reachable only from a hand-built
+// or non-JSON-sourced document) returns a wrapped encode error rather than
+// being silently rewritten with U+FFFD, matching the package's RFC 7493
+// treatment of the byte-decoding entry points.
 func ParseSchemaValue(doc any) (*Schema, error) {
 	switch d := doc.(type) {
 	case bool:

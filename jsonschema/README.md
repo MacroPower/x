@@ -1014,7 +1014,9 @@ symmetric entry points:
 - `ParseSchemaValue(doc)` converts an already-decoded document to a `*Schema`:
   a `bool` (`true` is the empty schema, `false` the schema that rejects every
   instance) or a `map[string]any`, such as `Normalize` output with `json.Number`
-  leaves.
+  leaves. A document string holding invalid UTF-8 (reachable only from a
+  hand-built or non-JSON-sourced document) returns a wrapped encode error
+  rather than being silently rewritten with U+FFFD.
 
 With all three, a top-level value that is not an object or boolean returns an
 error wrapping `ErrInvalidSchemaDocument`. That includes JSON `null`, which
