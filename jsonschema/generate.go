@@ -374,8 +374,12 @@ func (g *generator) applyInstanceDefaults(instance any, rootType reflect.Type, s
 
 	// The WithJSONOptions options apply, so a seeded default is what the
 	// caller's own marshal would emit (a nil slice seeds null under
-	// FormatNilSliceAsNull, say).
-	data, err := json.Marshal(instance, g.marshalOptions()...)
+	// FormatNilSliceAsNull, say). Deterministic keeps map members sorted, so
+	// a map-valued default seeds the same bytes on every run and committed
+	// schema output stays stable; it changes ordering only, never shape, so
+	// forcing it after the caller's options is safe.
+	data, err := json.Marshal(instance,
+		append(g.marshalOptions(), json.Deterministic(true))...)
 	if err != nil {
 		return fmt.Errorf("marshal defaults instance: %w", err)
 	}

@@ -14,10 +14,11 @@ import (
 // reference it without importing google/jsonschema-go directly.
 type Schema = jsonschema.Schema
 
-// Raw marshals v with encoding/json for raw-JSON schema fields such as
-// [Schema.Default].
+// Raw marshals v with encoding/json/v2 for raw-JSON schema fields such as
+// [Schema.Default]. Map members marshal in sorted key order, so the same
+// value produces the same bytes on every call.
 func Raw(v any) (jsontext.Value, error) {
-	data, err := json.Marshal(v)
+	data, err := json.Marshal(v, json.Deterministic(true))
 	if err != nil {
 		return nil, fmt.Errorf("marshal raw value: %w", err)
 	}
