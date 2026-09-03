@@ -199,9 +199,22 @@ func TestRun_InvalidDraft(t *testing.T) {
 func TestRun_InvalidIndent(t *testing.T) {
 	t.Parallel()
 
-	err := run(config{TypeName: "Foo", Draft: "2020", Indent: "xx"}, &bytes.Buffer{})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid -indent")
+	// The generated helper's jsontext.WithIndent call permits only spaces
+	// and tabs, so \n and \r must be refused up front alongside
+	// non-whitespace: embedded in the helper they would panic when it runs.
+	for name, indent := range map[string]string{
+		"letters":  "xx",
+		"newline":  "\n",
+		"carriage": "\r",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := run(config{TypeName: "Foo", Draft: "2020", Indent: indent}, &bytes.Buffer{})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "invalid -indent")
+		})
+	}
 }
 
 // buildBinary builds the jsonschemagen binary and returns its path.

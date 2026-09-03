@@ -83,10 +83,11 @@ func run(cfg config, stdout io.Writer) error {
 	}
 
 	// The indent string is embedded verbatim into the generated helper's
-	// jsontext.WithIndent call, which rejects a non-whitespace indent only when
-	// the helper runs. Reject it up front so the error names the flag.
-	if strings.TrimLeft(cfg.Indent, " \t\n\r") != "" {
-		return fmt.Errorf("invalid -indent %q: must contain only whitespace", cfg.Indent)
+	// jsontext.WithIndent call, which permits only spaces and tabs and panics
+	// on anything else only when the helper runs. Reject the rest up front so
+	// the error names the flag.
+	if strings.TrimLeft(cfg.Indent, " \t") != "" {
+		return fmt.Errorf("invalid -indent %q: must contain only spaces and tabs", cfg.Indent)
 	}
 
 	goMod, err := ensureInModule()
