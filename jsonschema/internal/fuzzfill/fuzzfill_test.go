@@ -108,6 +108,44 @@ func TestFillWithNilContainersDrawsBothSides(t *testing.T) {
 	}
 }
 
+// TestFillWithFullAllocatesEverything pins that the option leaves no pointer
+// nil and no slice or map empty at any depth short of the cap, over every
+// blob, the saturated one included. A saturated blob draws a zero length for
+// every collection on the default path, which is the blind spot the option
+// exists to close.
+func TestFillWithFullAllocatesEverything(t *testing.T) {
+	t.Parallel()
+
+	type deep struct {
+		Next  *deep
+		Words []string
+		Table map[string]int
+	}
+
+	for name, blob := range blobs() {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var val deep
+
+			fuzzfill.Fill(reflect.ValueOf(&val), blob, fuzzfill.WithFull())
+
+			// The chain ends at the depth cap, where the filler zeroes every
+			// container, so the last link is the one level the option does
+			// not reach.
+			depth := 0
+			for cur := &val; cur.Next != nil; cur = cur.Next {
+				assert.NotEmpty(t, cur.Words, "the slice at depth %d must be non-empty", depth)
+				assert.NotEmpty(t, cur.Table, "the map at depth %d must be non-empty", depth)
+
+				depth++
+			}
+
+			assert.Greater(t, depth, 1, "the pointer chain must be allocated past the root")
+		})
+	}
+}
+
 // TestFillDefaultDrawIsGolden pins what the default path fills from a fixed
 // blob. Fill reads the nil-container bit only under WithNilContainers, which
 // keeps every committed fuzz corpus entry decoding to one stable value; this

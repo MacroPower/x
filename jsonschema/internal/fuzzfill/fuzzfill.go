@@ -17,6 +17,12 @@
 // fields without a registered constructor fills as its zero value, so its
 // coverage is near-nil.
 //
+// The default draw reads the blob for every choice, so a corpus entry decodes
+// to one stable value. [WithFull] is the exception: it allocates every pointer
+// to the depth cap and sizes every slice and map at the collection cap without
+// consulting the blob, for a caller that needs a value with nothing hidden
+// behind a nil pointer or an empty container.
+//
 // The package is test-only infrastructure; it is not part of the fast gate.
 package fuzzfill
 
@@ -157,6 +163,7 @@ type config struct {
 	constructors  map[reflect.Type]Constructor
 	candidates    map[string][]string
 	nilContainers bool
+	full          bool
 }
 
 // Recursion depth and collection/string size caps Fill applies.
@@ -205,6 +212,19 @@ func WithCandidates(m map[string][]string) Option {
 // consumes and decodes every corpus entry to the same value.
 func WithNilContainers() Option {
 	return func(cfg *config) { cfg.nilContainers = true }
+}
+
+// WithFull makes Fill allocate every pointer down to the depth cap and size
+// every slice and map at the collection cap, reading no entropy for those
+// choices. Scalars still draw from the blob. Use it for a value that must
+// expose every declaration the type carries, since a nil pointer marshals as
+// null and an empty container as [] or {} without visiting the element type.
+//
+// A saturated blob is not a substitute. [Cursor.Intn] reduces a draw modulo
+// its bound, and an all-ones read is divisible by five, so every collection
+// length drawn from such a blob is zero.
+func WithFull() Option {
+	return func(cfg *config) { cfg.full = true }
 }
 
 // Fill populates the value rv points at from data. Rv must be a non-nil
@@ -312,7 +332,7 @@ func (f *filler) atDepthLimit(rv reflect.Value, depth int) bool {
 // which keeps the default draw's cursor positions where the committed corpora
 // expect them.
 func (f *filler) drewNil(rv reflect.Value) bool {
-	if !f.cfg.nilContainers || f.cur.Bool() {
+	if f.cfg.full || !f.cfg.nilContainers || f.cur.Bool() {
 		return false
 	}
 
@@ -322,7 +342,7 @@ func (f *filler) drewNil(rv reflect.Value) bool {
 }
 
 func (f *filler) fillPointer(rv reflect.Value, depth int) {
-	if depth >= maxDepth || !f.cur.Bool() {
+	if depth >= maxDepth || (!f.cfg.full && !f.cur.Bool()) {
 		rv.Set(reflect.Zero(rv.Type()))
 
 		return
@@ -337,7 +357,7 @@ func (f *filler) fillSlice(rv reflect.Value, depth int) {
 		return
 	}
 
-	n := f.cur.Intn(maxCollLen + 1)
+	n := f.collLen()
 	s := reflect.MakeSlice(rv.Type(), n, n)
 
 	for i := range n {
@@ -352,7 +372,7 @@ func (f *filler) fillMap(rv reflect.Value, depth int) {
 		return
 	}
 
-	n := f.cur.Intn(maxCollLen + 1)
+	n := f.collLen()
 	m := reflect.MakeMap(rv.Type())
 	kt, vt := rv.Type().Key(), rv.Type().Elem()
 
@@ -366,6 +386,16 @@ func (f *filler) fillMap(rv reflect.Value, depth int) {
 	}
 
 	rv.Set(m)
+}
+
+// collLen returns the length of the next slice or map: the collection cap
+// under [WithFull], and a draw from the blob otherwise.
+func (f *filler) collLen() int {
+	if f.cfg.full {
+		return maxCollLen
+	}
+
+	return f.cur.Intn(maxCollLen + 1)
 }
 
 func (f *filler) fillStruct(rv reflect.Value, depth int) {

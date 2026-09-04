@@ -412,13 +412,15 @@ func marshalShapeValue(
 }
 
 // requireV2RefusesValue asserts encoding/json/v2 also refuses to marshal a
-// value of rt, the agreement a refused generation pins. The fill is saturated
-// so a nil pointer cannot hide the faulty declaration behind a null.
+// value of rt, the agreement a refused generation pins. The fill is full so
+// neither a nil pointer nor an empty container can hide the faulty
+// declaration behind a null, [] or {}.
 func requireV2RefusesValue(tb testing.TB, rt reflect.Type, genErr error) {
 	tb.Helper()
 
 	val := reflect.New(rt)
-	fuzzfill.Fill(val, bytes.Repeat([]byte{0xff}, 512), fuzzshape.FillOptions()...)
+	fuzzfill.Fill(val, bytes.Repeat([]byte{0xff}, 512),
+		append(fuzzshape.FillOptions(), fuzzfill.WithFull())...)
 
 	_, err := json.Marshal(val.Interface())
 	require.Errorf(tb, err,
