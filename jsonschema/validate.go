@@ -344,6 +344,17 @@ type validator struct {
 	itemsPlans         []*itemsPlan                 // normalized array item keywords (see numericBounds)
 	depKeys            []*dependencyKeys            // dependency trigger keys, sorted (see numericBounds)
 
+	// The lateEnums and lateConsts memoize, for one validation run, the
+	// document views of schemas outside the index (JSON-pointer fallback
+	// targets and documents first fetched during the run), keyed by schema
+	// pointer. Such a schema is a fresh object each run but stable within it,
+	// so the memo lives on the per-run copy, never on the shared proto,
+	// and forInstance clears both, while constView and enumView allocate
+	// each map lazily, so a run that reaches no out-of-index schema pays
+	// nothing.
+	lateEnums  map[*Schema]lateEnumView
+	lateConsts map[*Schema]lateConstView
+
 	// The WithDraft override; nil leaves the draft to $schema detection.
 	draftOverride *Draft
 
@@ -526,6 +537,8 @@ func (v *validator) forInstance(ctx context.Context) *validator {
 	rv := *v
 	rv.ctx = ctx
 	rv.visiting = map[visitKey]bool{}
+	rv.lateEnums = nil
+	rv.lateConsts = nil
 
 	// A JSON-pointer fallback target materialized during this run is a fresh
 	// object no compile-time pass saw (a run re-materializes every target, and
@@ -2225,41 +2238,80 @@ func evalConst(ctx evalContext) []*ValidationError {
 // inIndex reports whether id addresses an indexed node whose cache slot may hold a
 // precomputed value: a non-negative id within the sized slices. A negative id
 // marks a schema outside the index (a fallback target reached only at
-// validation time), whose caches were never built. The bound is index.len()
+// validation time), whose caches were never built; constView and enumView
+// memoize such a schema's views per run instead. The bound is index.len()
 // because sizeCaches keeps every cache slice invariantly that long, so a
 // non-negative in-index id never over-indexes a shorter slice.
 func (v *validator) inIndex(id int) bool {
 	return id >= 0 && id < v.index.len()
 }
 
+// lateConstView is the document view of an out-of-index schema's const value
+// and, for a numeric one, its rational, memoized per run in lateConsts.
+type lateConstView struct {
+	val any
+	rat *big.Rat
+}
+
+// lateEnumView is the document view of an out-of-index schema's enum members
+// and, by index, the rationals of the numeric ones, memoized per run in
+// lateEnums.
+type lateEnumView struct {
+	members []any
+	rats    []*big.Rat
+}
+
 // constView returns the document view of schema's const value and, for a
-// numeric one, its rational, preferring the per-node cache and converting on
-// the fly for a schema outside the index (a remote or JSON-pointer fallback
-// schema reached only at validation time). The caller checks that the schema
-// sets const. The returned values are operands only; callers must not mutate
-// them.
+// numeric one, its rational, preferring the per-node cache. For a schema
+// outside the index (a remote or JSON-pointer fallback schema reached only at
+// validation time) it converts on first sight and memoizes the result in the
+// run's lateConsts, so an instance with many nodes against one such schema
+// converts once. The caller checks that the schema sets const. The returned
+// values are operands only; callers must not mutate them.
 func (v *validator) constView(id int, schema *Schema) (any, *big.Rat) {
 	if v.inIndex(id) && v.constVals[id] != nil {
 		return *v.constVals[id], v.constRats[id]
 	}
 
+	if view, ok := v.lateConsts[schema]; ok {
+		return view.val, view.rat
+	}
+
 	val := documentConst(*schema.Const)
 	r, _ := numrat.SchemaNumberRat(val)
+
+	if v.lateConsts == nil {
+		v.lateConsts = map[*Schema]lateConstView{}
+	}
+
+	v.lateConsts[schema] = lateConstView{val: val, rat: r}
 
 	return val, r
 }
 
 // enumView returns the document view of schema's enum members and, by index,
-// the rationals of the numeric ones, on the same terms as [validator.constView].
-// A nil rationals slice means no member is numeric.
+// the rationals of the numeric ones, on the same terms as [validator.constView]
+// (the per-node cache first, then the run's lateEnums memo). A nil rationals
+// slice means no member is numeric.
 func (v *validator) enumView(id int, schema *Schema) ([]any, []*big.Rat) {
 	if v.inIndex(id) && v.enumVals[id] != nil {
 		return v.enumVals[id], v.enumRats[id]
 	}
 
-	members := documentEnum(schema.Enum)
+	if view, ok := v.lateEnums[schema]; ok {
+		return view.members, view.rats
+	}
 
-	return members, numrat.EnumMemberRats(members)
+	members := documentEnum(schema.Enum)
+	rats := numrat.EnumMemberRats(members)
+
+	if v.lateEnums == nil {
+		v.lateEnums = map[*Schema]lateEnumView{}
+	}
+
+	v.lateEnums[schema] = lateEnumView{members: members, rats: rats}
+
+	return members, rats
 }
 
 // boundsFor returns the numeric bound rationals for schema, preferring the

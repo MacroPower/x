@@ -8418,3 +8418,116 @@ func TestValidateConstEnumDocumentView(t *testing.T) {
 		}
 	}
 }
+
+// TestValidateFallbackEnumConstMatchesIndexed pins that a const or enum
+// schema reached through a JSON-pointer ref into an unknown keyword
+// (#/examples/0), which a run materializes outside the node index and reads
+// through its per-run view memo, reaches the verdict the same schema reaches
+// under $defs, where Compile caches the view by node id. Each case validates
+// twice on one Validator, so a memo that outlived its run would show as a
+// changed second verdict, and the object case carries two out-of-index
+// targets so a memo keyed on anything coarser than the schema pointer would
+// answer one with the other's members.
+func TestValidateFallbackEnumConstMatchesIndexed(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		target   string // the schema the ref reaches, as a JSON fragment
+		instance string
+		want     bool
+	}{
+		"string enum member": {
+			target:   `{"enum": ["a", "b", "c"]}`,
+			instance: `"c"`,
+			want:     true,
+		},
+		"string enum non-member": {
+			target:   `{"enum": ["a", "b", "c"]}`,
+			instance: `"d"`,
+		},
+		"empty enum rejects everything": {
+			target:   `{"enum": []}`,
+			instance: `"a"`,
+		},
+		"numeric enum equal by value": {
+			target:   `{"enum": [1, 2.5]}`,
+			instance: `1.0`,
+			want:     true,
+		},
+		"numeric enum exact beyond float64": {
+			target:   `{"enum": [9007199254740993]}`,
+			instance: `9007199254740992`,
+		},
+		"object enum member": {
+			target:   `{"enum": [{"k": [1, null]}]}`,
+			instance: `{"k": [1, null]}`,
+			want:     true,
+		},
+		"const string": {
+			target:   `{"const": "x"}`,
+			instance: `"x"`,
+			want:     true,
+		},
+		"const numeric equal by value": {
+			target:   `{"const": 2}`,
+			instance: `2.0`,
+			want:     true,
+		},
+		"const null": {
+			target:   `{"const": null}`,
+			instance: `null`,
+			want:     true,
+		},
+		"const mismatch": {
+			target:   `{"const": {"a": 1}}`,
+			instance: `{"a": 2}`,
+		},
+		"array of enum members": {
+			target:   `{"items": {"enum": ["a", "b"]}}`,
+			instance: `["a", "b", "a", "b", "a", "b", "a", "b"]`,
+			want:     true,
+		},
+		"array with one non-member": {
+			target:   `{"items": {"enum": ["a", "b"]}}`,
+			instance: `["a", "b", "a", "b", "a", "c", "a", "b"]`,
+		},
+		"two targets each keep their own members": {
+			target:   `{"properties": {"p": {"enum": ["x"]}, "q": {"enum": ["y"]}}}`,
+			instance: `{"p": "x", "q": "y"}`,
+			want:     true,
+		},
+		"two targets do not share members": {
+			target:   `{"properties": {"p": {"enum": ["x"]}, "q": {"enum": ["y"]}}}`,
+			instance: `{"p": "y", "q": "x"}`,
+		},
+		"two const targets": {
+			target:   `{"properties": {"p": {"const": 1}, "q": {"const": 2}}}`,
+			instance: `{"p": 2, "q": 1}`,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx := t.Context()
+
+			indexedDoc := `{"$defs": {"t": ` + tc.target + `}, "$ref": "#/$defs/t"}`
+			fallbackDoc := `{"examples": [` + tc.target + `], "$ref": "#/examples/0"}`
+
+			indexed, err := jsonschema.CompileJSON(ctx, []byte(indexedDoc))
+			require.NoError(t, err)
+
+			fallback, err := jsonschema.CompileJSON(ctx, []byte(fallbackDoc))
+			require.NoError(t, err)
+
+			for run := range 2 {
+				indexedErr := indexed.ValidateJSON(ctx, []byte(tc.instance))
+				fallbackErr := fallback.ValidateJSON(ctx, []byte(tc.instance))
+
+				assert.Equal(t, tc.want, indexedErr == nil, "indexed verdict on run %d: %v", run, indexedErr)
+				assert.Equal(t, tc.want, fallbackErr == nil, "fallback verdict on run %d: %v", run, fallbackErr)
+			}
+		})
+	}
+}
