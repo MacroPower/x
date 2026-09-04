@@ -10,7 +10,9 @@
 // (a `string` option on a kind that encodes no number, a [time.Duration] with
 // no format, an unsupported kind, a map key it cannot name) only when it
 // writes the value, and a nil pointer or an empty container hides the
-// element type behind a null, [] or {}.
+// element type behind a null, [] or {}. [Probe.OmitsZero] marshals a field's
+// zero value, the emptiest value its type encodes, and reads whether the
+// omitempty option dropped the member.
 //
 // User code never runs. Four interceptors registered through
 // [encoding/json/v2.WithMarshalers] catch every type whose method set carries
@@ -84,14 +86,23 @@ type fieldResult struct {
 	stringified bool
 }
 
+// omitResult is one memoized [Probe.OmitsZero] answer.
+type omitResult struct {
+	err     error
+	omitted bool
+}
+
 // Probe answers refusal questions for one set of marshal options. It memoizes
 // every answer and is not safe for concurrent use; a generation run owns one.
+// The field verdicts are keyed by the one-field struct type [oneField]
+// builds, which [reflect.StructOf] interns per field type and tag, the two
+// inputs that decide one.
 type Probe struct {
 	opts    json.Options
 	types   map[reflect.Type]error
 	structs map[reflect.Type]error
-	// Field verdicts, memoized by the two inputs that decide one.
-	fields map[reflect.Type]map[reflect.StructTag]fieldResult
+	fields  map[reflect.Type]fieldResult
+	omits   map[reflect.Type]omitResult
 }
 
 // New returns a Probe whose verdicts are v2's under opts joined with the
@@ -114,7 +125,8 @@ func New(opts json.Options) *Probe {
 		opts:    joined,
 		types:   map[reflect.Type]error{},
 		structs: map[reflect.Type]error{},
-		fields:  map[reflect.Type]map[reflect.StructTag]fieldResult{},
+		fields:  map[reflect.Type]fieldResult{},
+		omits:   map[reflect.Type]omitResult{},
 	}
 }
 
@@ -200,25 +212,20 @@ func (p *Probe) declaration(v reflect.Value) error {
 // interceptors either way, matching v2 ignoring the option on such a type,
 // and a [jsontext.Value] writes its own bytes either way.
 func (p *Probe) Field(sf reflect.StructField) (bool, error) {
-	byTag, ok := p.fields[sf.Type]
+	tagged := oneField(sf)
+
+	res, ok := p.fields[tagged]
 	if !ok {
-		byTag = map[reflect.StructTag]fieldResult{}
-		p.fields[sf.Type] = byTag
+		res = p.probeField(tagged, sf.Type)
+		p.fields[tagged] = res
 	}
-
-	if res, ok := byTag[sf.Tag]; ok {
-		return res.stringified, res.err
-	}
-
-	res := p.probeField(sf)
-	byTag[sf.Tag] = res
 
 	return res.stringified, res.err
 }
 
-func (p *Probe) probeField(sf reflect.StructField) fieldResult {
-	tagged := reflect.StructOf([]reflect.StructField{{Name: "F", Type: sf.Type, Tag: sf.Tag}})
-
+// probeField answers [Probe.Field] for the one-field struct tagged, whose
+// field has type typ.
+func (p *Probe) probeField(tagged, typ reflect.Type) fieldResult {
 	out, err := p.encode(p.filled(tagged))
 	if err != nil {
 		return fieldResult{err: fmt.Errorf("%w: %w", ErrValue, cause(err))}
@@ -232,7 +239,7 @@ func (p *Probe) probeField(sf reflect.StructField) fieldResult {
 	// value. A tag option can hide a fault the untagged marshal raises
 	// (omitzero on a func), and the tagged verdict rules, so that fault only
 	// reads as not stringified.
-	untagged := reflect.StructOf([]reflect.StructField{{Name: "F", Type: sf.Type}})
+	untagged := oneField(reflect.StructField{Type: typ})
 
 	bare, err := p.encode(p.filled(untagged))
 	if err != nil {
@@ -242,22 +249,77 @@ func (p *Probe) probeField(sf reflect.StructField) fieldResult {
 	return fieldResult{stringified: !firstMemberIsString(bare)}
 }
 
+// OmitsZero reports whether v2 omits a struct field declared with sf's type
+// and tag when the field holds its zero value, which is whether the tag's
+// omitempty option ever omits the field. Omitempty drops a member whose
+// encoded value is null, "", {}, or [], and the zero value encodes the
+// emptiest value a type has: a nil pointer, interface, slice, or map, an
+// empty string, and a struct with every member at its own zero. The three
+// native-codec types answer as their codecs write, so a [time.Time] (its
+// zero instant) and a [encoding/json.Number] (0) never omit, while a nil
+// [jsontext.Value] does. A type whose method set carries a marshal
+// interface writes a null under the interceptors, at the field or inside a
+// struct member, and so reads as omitted whatever its method would write; a
+// schema that leaves such a field optional accepts every document v2
+// writes. A fault of any kind is [ErrValue] wrapping v2's reason.
+func (p *Probe) OmitsZero(sf reflect.StructField) (bool, error) {
+	tagged := oneField(sf)
+
+	res, ok := p.omits[tagged]
+	if !ok {
+		res = p.probeOmitsZero(tagged)
+		p.omits[tagged] = res
+	}
+
+	return res.omitted, res.err
+}
+
+// probeOmitsZero answers [Probe.OmitsZero] for the one-field struct tagged.
+func (p *Probe) probeOmitsZero(tagged reflect.Type) omitResult {
+	out, err := p.encode(reflect.Zero(tagged))
+	if err != nil {
+		return omitResult{err: fmt.Errorf("%w: %w", ErrValue, cause(err))}
+	}
+
+	_, hasMember := openObject(out)
+
+	return omitResult{omitted: !hasMember}
+}
+
+// oneField returns the struct type holding sf alone as its field F, with
+// the embedded flag cleared.
+func oneField(sf reflect.StructField) reflect.Type {
+	return reflect.StructOf([]reflect.StructField{{Name: "F", Type: sf.Type, Tag: sf.Tag}})
+}
+
 // firstMemberIsString reports whether the first member of the object in doc
 // is a JSON string. An empty object (the field was omitted) reads as false.
 func firstMemberIsString(doc []byte) bool {
-	dec := jsontext.NewDecoder(bytes.NewReader(doc))
-
-	tok, err := dec.ReadToken()
-	if err != nil || tok.Kind() != '{' || dec.PeekKind() == '}' {
+	dec, hasMember := openObject(doc)
+	if !hasMember {
 		return false
 	}
 
-	_, err = dec.ReadToken()
+	_, err := dec.ReadToken()
 	if err != nil {
 		return false
 	}
 
 	return dec.PeekKind() == '"'
+}
+
+// openObject reads the opening brace of the object in doc and reports
+// whether a member follows it, returning the decoder positioned at that
+// member's name.
+func openObject(doc []byte) (*jsontext.Decoder, bool) {
+	dec := jsontext.NewDecoder(bytes.NewReader(doc))
+
+	tok, err := dec.ReadToken()
+	if err != nil || tok.Kind() != '{' {
+		return dec, false
+	}
+
+	return dec, dec.PeekKind() != '}'
 }
 
 // Type reports whether v2 refuses a filled value of t. A fault on t itself is

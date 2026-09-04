@@ -1262,23 +1262,10 @@ func (g *run) buildFieldSchema(
 	// flag ([time.Duration]) is answered as it is unflagged, so the field
 	// builds through [run.schemaForType] first and the flag's refusal
 	// stands only when that build was kind-based.
-	//
-	// The marshaler probe below serves the omitempty decision alone, and
-	// omitEmptyCanOmit consults it only for a kind that cannot encode an
-	// empty value on its own, so a field carrying omitempty on a string,
-	// container, pointer, interface, or struct kind skips the pointer walk
-	// and the marshaler-interface probes entirely.
-	var bearsMarshaler, stringOverride bool
-
-	if fi.Omitempty && !kindCanOmit(fieldType) {
-		derefField := numkind.DerefType(fieldType)
-		bearsMarshaler = reflectkind.ImplementsAnyMarshaler(fieldType) ||
-			(derefField != fieldType && reflectkind.ImplementsAnyMarshaler(derefField))
-	}
-
 	var (
-		fieldNode *node
-		err       error
+		fieldNode      *node
+		stringOverride bool
+		err            error
 	)
 
 	if fi.JSONString {
@@ -1332,13 +1319,14 @@ func (g *run) buildFieldSchema(
 	fieldNode = g.applyTypeOverrideDirective(fieldNode, fi)
 
 	// Encoding/json/v2's omitempty omits a field only when its encoded value	// Encoding/json/v2's omitempty omits a field only when its encoded value
-	// is an empty JSON value (null, "", {}, []), so a field whose type can
-	// never encode one stays required even under the option. A field promoted
-	// through a pointer embed (Optional) is omitted whole when the embed is
-	// nil, whatever its kind. [jsonv2.OmitZeroStructFields] makes every field
-	// behave as ,omitzero, and every Go type has a zero value, so no required
-	// entry survives it.
-	required := (!fi.Omitempty || !omitEmptyCanOmit(fieldType, bearsMarshaler)) &&
+	// is an empty JSON value (null, "", {}, []), so a field whose type never
+	// encodes one stays required even under the option. The probe answers
+	// from the field's zero value, the emptiest value its type encodes. A
+	// field promoted through a pointer embed (Optional) is omitted whole when
+	// the embed is nil, whatever its kind. [jsonv2.OmitZeroStructFields]
+	// makes every field behave as ,omitzero, and every Go type has a zero
+	// value, so no required entry survives it.
+	required := (!fi.Omitempty || !g.omitsZero(fi)) &&
 		!fi.Omitzero && !fi.Optional && !g.omitZeroFields
 	if required {
 		parent.payload.Required = append(parent.payload.Required, fi.JSONName)
@@ -1587,43 +1575,15 @@ func (g *run) stringOptionField(fi fieldset.Field) (*node, bool, error) {
 	return fieldNode, false, nil
 }
 
-// omitEmptyCanOmit reports whether a field of type t can ever be omitted by
-// json:",omitempty" under encoding/json/v2: the kinds [kindCanOmit] admits,
-// plus any marshaler-bearing type, whose method may emit an empty value (v2
-// checks the encoded output). A plain bool or numeric field never encodes an
-// empty value, so the option never omits it and the field stays required.
-// An [encoding/json.Number] stays required too. It is the one string kind
-// whose marshaler writes 0 for the empty value, and this function alone
-// owns that exclusion, checked by type identity before either the kind or
-// the marshaler probe can answer true. The caller passes bearsMarshaler,
-// which it computes only when the kind alone cannot answer.
-func omitEmptyCanOmit(t reflect.Type, bearsMarshaler bool) bool {
-	if reflectkind.IsJSONNumber(t) {
-		return false
-	}
+// omitsZero reports whether json:",omitempty" ever omits the field: the v2
+// probe marshals the field's zero value and reports whether the member was
+// dropped. A zero value v2 refuses belongs to a type a hook declared (the
+// kind-based build refused it already), and v2 never marshals the struct at
+// all, so the field stays required.
+func (g *run) omitsZero(fi fieldset.Field) bool {
+	omitted, err := g.probe.OmitsZero(fi.StructField)
 
-	return kindCanOmit(t) || bearsMarshaler
-}
-
-// kindCanOmit reports whether t's kind alone can encode an empty JSON value:
-// a zero-length string, map, slice, or [0]-array; a nil pointer or
-// interface; or a struct whose members all omit, which encodes {}. It is
-// the part of [omitEmptyCanOmit] that needs no marshaler probe, and it
-// answers from the kind alone, so every string kind is true here; the
-// [encoding/json.Number] exclusion is a type-identity fact that
-// omitEmptyCanOmit applies on its own. A struct kind answers true without
-// inspecting its fields: a struct that always encodes a member is never
-// omitted, so the answer is looser than v2 there, and looser is the safe
-// direction for required.
-func kindCanOmit(t reflect.Type) bool {
-	switch t.Kind() {
-	case reflect.String, reflect.Map, reflect.Slice, reflect.Pointer, reflect.Interface, reflect.Struct:
-		return true
-	case reflect.Array:
-		return t.Len() == 0
-	default:
-		return false
-	}
+	return err == nil && omitted
 }
 
 // rebuildOverriddenField rebuilds a field node after a type= override replaced

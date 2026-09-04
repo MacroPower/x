@@ -587,12 +587,14 @@
 // A field is required unless its tag says otherwise:
 //
 //   - omitzero drops the field from required.
-//   - omitempty drops it only where the field's encoded value can be empty
-//     (null, "", [], or {}): a string, map, slice, pointer, interface, struct,
-//     zero-length array, or marshaler-bearing field. [encoding/json/v2]
-//     never treats an encoded number or bool as empty, so omitempty on one
-//     leaves the field required, and so does an [encoding/json.Number], the
-//     one string kind whose marshaler writes 0 for the empty value.
+//   - omitempty drops it only where the field's zero value encodes as an
+//     empty JSON value (null, "", [], or {}): a string, map, slice, pointer,
+//     interface, or zero-length array, a struct whose members all omit at
+//     their zero values, or a marshaler-bearing field. A number, bool, or
+//     longer array never encodes empty, so omitempty on one leaves the field
+//     required, and so it does on a [time.Time], which writes its zero
+//     instant, an [encoding/json.Number], which writes 0, and a struct that
+//     writes a member at its zero value.
 //
 // The json:",string" flag forces a {"type": "string"} schema exactly where it
 // is what makes v2 write a string:

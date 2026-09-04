@@ -197,6 +197,70 @@ func TestField(t *testing.T) {
 	}
 }
 
+// textAlways is an integer kind whose text marshaler always writes a
+// non-empty string; under the probe it writes a null instead.
+type textAlways int
+
+func (textAlways) MarshalText() ([]byte, error) { return []byte("always"), nil }
+
+func TestOmitsZero(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		typ     reflect.Type
+		tag     string
+		err     error
+		omitted bool
+	}{
+		"int":                 {typ: reflect.TypeFor[int](), tag: `json:"a,omitempty"`},
+		"quoted int":          {typ: reflect.TypeFor[int](), tag: `json:"a,omitempty,string"`},
+		"bool":                {typ: reflect.TypeFor[bool](), tag: `json:"a,omitempty"`},
+		"string":              {typ: reflect.TypeFor[string](), tag: `json:"a,omitempty"`, omitted: true},
+		"pointer":             {typ: reflect.TypeFor[*int](), tag: `json:"a,omitempty"`, omitted: true},
+		"interface":           {typ: reflect.TypeFor[any](), tag: `json:"a,omitempty"`, omitted: true},
+		"slice":               {typ: reflect.TypeFor[[]int](), tag: `json:"a,omitempty"`, omitted: true},
+		"map":                 {typ: reflect.TypeFor[map[string]int](), tag: `json:"a,omitempty"`, omitted: true},
+		"zero-length array":   {typ: reflect.TypeFor[[0]int](), tag: `json:"a,omitempty"`, omitted: true},
+		"byte array":          {typ: reflect.TypeFor[[2]byte](), tag: `json:"a,omitempty"`},
+		"time":                {typ: reflect.TypeFor[time.Time](), tag: `json:"a,omitempty"`},
+		"json number":         {typ: reflect.TypeFor[jsonv1.Number](), tag: `json:"a,omitempty"`},
+		"raw value":           {typ: reflect.TypeFor[jsontext.Value](), tag: `json:"a,omitempty"`, omitted: true},
+		"struct with member":  {typ: reflect.TypeFor[struct{ A int }](), tag: `json:"a,omitempty"`},
+		"empty struct":        {typ: reflect.TypeFor[struct{}](), tag: `json:"a,omitempty"`, omitted: true},
+		"marshaler int":       {typ: reflect.TypeFor[textAlways](), tag: `json:"a,omitempty"`, omitted: true},
+		"panicking marshaler": {typ: reflect.TypeFor[panicker](), tag: `json:"a,omitempty"`, omitted: true},
+		"struct with marshaler member": {
+			typ: reflect.TypeFor[struct{ A panicker }](), tag: `json:"a,omitempty"`,
+		},
+		"no option":     {typ: reflect.TypeFor[string](), tag: `json:"a"`},
+		"omitzero":      {typ: reflect.TypeFor[int](), tag: `json:"a,omitzero"`, omitted: true},
+		"duration":      {typ: reflect.TypeFor[time.Duration](), tag: `json:"a,omitempty"`, err: ErrValue},
+		"func":          {typ: reflect.TypeFor[func()](), tag: `json:"a,omitempty"`, err: ErrValue},
+		"zero panicker": {typ: reflect.TypeFor[zeroPanicker](), tag: `json:"a,omitzero"`, err: ErrValue},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			p := New(nil)
+
+			omitted, err := p.OmitsZero(field(t, tc.typ, tc.tag))
+			if tc.err == nil {
+				require.NoError(t, err)
+			} else {
+				require.ErrorIs(t, err, tc.err)
+			}
+
+			assert.Equal(t, tc.omitted, omitted)
+
+			again, err2 := p.OmitsZero(field(t, tc.typ, tc.tag))
+			assert.Equal(t, omitted, again, "the answer must be memoized as given")
+			assert.Equal(t, err, err2, "the answer must be memoized as given")
+		})
+	}
+}
+
 func TestType(t *testing.T) {
 	t.Parallel()
 
