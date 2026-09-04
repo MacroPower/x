@@ -8363,6 +8363,17 @@ func TestValidateConstEnumDocumentView(t *testing.T) {
 		"raw null":          {value: jsontext.Value("null")},
 		"typed slice":       {value: []string{"a"}, literal: `["a"]`},
 		"struct":            {value: pair{A: 1}, literal: `{"a":1}`},
+		"float32":           {value: float32(0.1), literal: `0.1`},
+		"nested float32":    {value: []any{float32(0.1)}, literal: `[0.1]`},
+		"empty number":      {value: jsonv1.Number(""), literal: `0`},
+		"invalid UTF-8 string": {
+			value:   "\xff",
+			literal: `"\ufffd"`,
+		},
+		"invalid UTF-8 member name": {
+			value:   map[string]any{"\xff": 1},
+			literal: `{"\ufffd":1}`,
+		},
 	}
 
 	keywords := map[string]func(v any) *jsonschema.Schema{

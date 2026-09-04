@@ -16,7 +16,32 @@ import (
 	"maps"
 	"reflect"
 	"strconv"
+	"unicode/utf8"
 )
+
+// walk carries the state of one normalization traversal: the cycle guard
+// every walk needs, and the render flag [DocumentValue] reads.
+type walk struct {
+	// The onPath set holds the containers between the root and the current
+	// node, keyed by {pointer, len}; normalizeMap and normalizeSlice explain
+	// the key.
+	onPath map[[2]uintptr]bool
+
+	// The document flag turns on the UTF-8 scan of every string leaf and
+	// member name, and only documentChecked sets it. The validation funnel
+	// leaves it off, since nothing there reads render and the scan would tax
+	// each string of every instance.
+	document bool
+
+	// The render flag reports that the input holds a leaf [encoding/json] v1
+	// renders to a different shape than the normalized value: a nil []any or
+	// map[string]any (null, where the empty instance writes [] or {}), a
+	// float32 (v1 formats the 32-bit shortest decimal, where the walk widens
+	// the bits to float64), an empty [json.Number] (v1 writes 0), and, with
+	// document set, a string or member name holding invalid UTF-8 (v1 writes
+	// U+FFFD).
+	render bool
+}
 
 // Value converts a Go value into the JSON-compatible shape the validator works
 // with, so instances decoded from non-encoding/json sources (YAML, TOML, a
@@ -45,7 +70,7 @@ import (
 // best-effort for cyclic inputs; [ValueChecked] reports such an instance as
 // not accepted.
 func Value(instance any) any {
-	normalized, _, _ := normalizeInstance(instance, map[[2]uintptr]bool{})
+	normalized, _, _ := normalizeInstance(instance, &walk{onPath: map[[2]uintptr]bool{}})
 
 	return normalized
 }
@@ -63,9 +88,23 @@ func Value(instance any) any {
 // cycle's back-edge still points at the original container, whose leaves may
 // be un-normalized, and the validation walk cannot safely traverse it.
 func ValueChecked(instance any) (any, bool) {
-	normalized, _, accepted := normalizeInstance(instance, map[[2]uintptr]bool{})
+	normalized, _, accepted := normalizeInstance(instance, &walk{onPath: map[[2]uintptr]bool{}})
 
 	return normalized, accepted
+}
+
+// documentChecked normalizes instance like [ValueChecked] and additionally
+// reports whether instance holds a leaf [encoding/json] v1 renders to a shape
+// other than the normalized one, the shapes [walk.render] lists, so
+// [DocumentValue] learns both from one traversal. The render flag reads the
+// input rather than the output because the float32 widening has already
+// happened in the output.
+func documentChecked(instance any) (any, bool, bool) {
+	w := &walk{onPath: map[[2]uintptr]bool{}, document: true}
+
+	normalized, _, accepted := normalizeInstance(instance, w)
+
+	return normalized, accepted, w.render
 }
 
 // intNumber formats a Go integer of any width as its exact [json.Number]
@@ -105,24 +144,40 @@ func intNumber(v any) (json.Number, bool) {
 // with the input instead of comparing interface values (which would panic on
 // uncomparable types like maps and slices). The accepted flag carries the
 // acceptance check through the same walk, so the validation funnel needs only
-// one traversal.
-func normalizeInstance(instance any, onPath map[[2]uintptr]bool) (any, bool, bool) {
+// one traversal. The render cases record on w the leaves [walk.render] lists.
+func normalizeInstance(instance any, w *walk) (any, bool, bool) {
 	switch v := instance.(type) {
 	// JSON-shaped scalar leaves pass through unchanged and are accepted.
 	// They lead the dispatch: every node of an already-JSON-shaped instance
 	// -- the entirety of the validation funnel's traffic -- matches here, so
 	// the integer widths wait in the default branch rather than taxing each
 	// node with a guaranteed-failing 11-case dispatch first.
-	case nil, bool, string, float64, json.Number:
+	case nil, bool, float64:
+		return instance, false, true
+
+	case string:
+		if w.document && !utf8.ValidString(v) {
+			w.render = true
+		}
+
+		return instance, false, true
+
+	case json.Number:
+		if v == "" {
+			w.render = true
+		}
+
 		return instance, false, true
 
 	case float32:
+		w.render = true
+
 		return float64(v), true, true
 
 	case map[string]any:
-		return normalizeMap(v, onPath)
+		return normalizeMap(v, w)
 	case []any:
-		return normalizeSlice(v, onPath)
+		return normalizeSlice(v, w)
 
 	default:
 		// Go integer widths convert to the JSON shape; the result is an
@@ -140,7 +195,7 @@ func normalizeInstance(instance any, onPath map[[2]uintptr]bool) (any, bool, boo
 
 // normalizeMap normalizes a map's values, returning the input map untouched
 // when no value changes.
-func normalizeMap(m map[string]any, onPath map[[2]uintptr]bool) (any, bool, bool) {
+func normalizeMap(m map[string]any, w *walk) (any, bool, bool) {
 	// Cycle guard: a self-referential instance (a map that contains itself,
 	// directly or transitively) would otherwise recurse without bound and abort
 	// the process with a stack overflow that recover cannot catch. Track the
@@ -154,19 +209,27 @@ func normalizeMap(m map[string]any, onPath map[[2]uintptr]bool) (any, bool, bool
 	// points at the original map, whose leaves may be un-normalized, and the
 	// funnel must reject the instance rather than mis-validate through it.
 	key := [2]uintptr{reflect.ValueOf(m).Pointer(), uintptr(len(m))}
-	if onPath[key] {
+	if w.onPath[key] {
 		return m, false, false
 	}
 
-	onPath[key] = true
-	defer delete(onPath, key)
+	w.onPath[key] = true
+	defer delete(w.onPath, key)
+
+	if m == nil {
+		w.render = true
+	}
 
 	var out map[string]any
 
 	allAccepted := true
 
 	for k, val := range m {
-		nv, changed, ok := normalizeInstance(val, onPath)
+		if w.document && !utf8.ValidString(k) {
+			w.render = true
+		}
+
+		nv, changed, ok := normalizeInstance(val, w)
 		if !ok {
 			allAccepted = false
 		}
@@ -197,7 +260,7 @@ func normalizeMap(m map[string]any, onPath map[[2]uintptr]bool) (any, bool, bool
 
 // normalizeSlice normalizes a slice's elements, returning the input slice
 // untouched when no element changes.
-func normalizeSlice(s []any, onPath map[[2]uintptr]bool) (any, bool, bool) {
+func normalizeSlice(s []any, w *walk) (any, bool, bool) {
 	// Cycle guard: see normalizeMap. A slice that contains itself would
 	// otherwise recurse without bound and crash the process. The guard keys on
 	// {data pointer, len} rather than the data pointer alone: a reslice such as
@@ -207,19 +270,23 @@ func normalizeSlice(s []any, onPath map[[2]uintptr]bool) (any, bool, bool) {
 	// and length, so it is still caught. A back-edge is returned unchanged and
 	// reported not accepted, for the reason given in normalizeMap.
 	key := [2]uintptr{reflect.ValueOf(s).Pointer(), uintptr(len(s))}
-	if onPath[key] {
+	if w.onPath[key] {
 		return s, false, false
 	}
 
-	onPath[key] = true
-	defer delete(onPath, key)
+	w.onPath[key] = true
+	defer delete(w.onPath, key)
+
+	if s == nil {
+		w.render = true
+	}
 
 	var out []any
 
 	allAccepted := true
 
 	for i, val := range s {
-		nv, changed, ok := normalizeInstance(val, onPath)
+		nv, changed, ok := normalizeInstance(val, w)
 		if !ok {
 			allAccepted = false
 		}

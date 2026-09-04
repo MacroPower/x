@@ -23,8 +23,11 @@ func (panicMarshaler) MarshalJSON() ([]byte, error) {
 // TestDocumentValue pins the encoding/json v1 rendering DocumentValue takes:
 // a typed nil container or pointer is null, an empty non-nil container keeps
 // its shape, a struct becomes an object, a raw value decodes to what it
-// holds, and a string v1 escapes comes back unescaped. The refusals cover a
-// value with no JSON form and a marshaler that panics.
+// holds, and a string v1 escapes comes back unescaped. The four accepted
+// shapes that still take the render come back as v1 writes them: a float32
+// as its 32-bit shortest decimal, an empty Number as 0, and invalid UTF-8 in
+// a string or member name as U+FFFD, each at the top level and nested. The
+// refusals cover a value with no JSON form and a marshaler that panics.
 func TestDocumentValue(t *testing.T) {
 	t.Parallel()
 
@@ -84,6 +87,26 @@ func TestDocumentValue(t *testing.T) {
 		"already shaped container": {
 			in:   map[string]any{"k": []any{"v", nil}},
 			want: map[string]any{"k": []any{"v", nil}},
+			ok:   true,
+		},
+		"float32":        {in: float32(0.1), want: jsonv1.Number("0.1"), ok: true},
+		"nested float32": {in: []any{float32(0.1)}, want: []any{jsonv1.Number("0.1")}, ok: true},
+		"empty number":   {in: jsonv1.Number(""), want: jsonv1.Number("0"), ok: true},
+		"nested empty number": {
+			in:   map[string]any{"n": jsonv1.Number("")},
+			want: map[string]any{"n": jsonv1.Number("0")},
+			ok:   true,
+		},
+		"invalid UTF-8 string":        {in: "\xff", want: "\ufffd", ok: true},
+		"nested invalid UTF-8 string": {in: []any{"a", "\xff"}, want: []any{"a", "\ufffd"}, ok: true},
+		"invalid UTF-8 member name": {
+			in:   map[string]any{"\xff": 1},
+			want: map[string]any{"\ufffd": jsonv1.Number("1")},
+			ok:   true,
+		},
+		"nested invalid UTF-8 member name": {
+			in:   []any{map[string]any{"k\xff": "v"}},
+			want: []any{map[string]any{"k\ufffd": "v"}},
 			ok:   true,
 		},
 		"chan":                {in: make(chan int), want: nil, ok: false},

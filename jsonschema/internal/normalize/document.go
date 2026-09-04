@@ -1,16 +1,8 @@
 package normalize
 
 import (
-	"errors"
-	"fmt"
-	"slices"
-
 	jsonv1 "encoding/json"
 )
-
-// errNoJSONForm marks a value whose own marshaler panicked, so DocumentValue
-// reports it the way it reports a marshal error.
-var errNoJSONForm = errors.New("value has no JSON form")
 
 // DocumentValue returns the JSON-shaped value v denotes in the emitted schema
 // document. The upstream Schema.MarshalJSON renders const, enum, and examples
@@ -18,19 +10,23 @@ var errNoJSONForm = errors.New("value has no JSON form")
 // DocumentValue marshals v the same way and decodes the bytes exactly through
 // [DecodeJSONInstance]. A value [ValueChecked] accepts skips the round trip,
 // since v1 renders it to the same shape, so every decoded document and every
-// tag-authored value costs no marshal. The one accepted shape v1 renders
-// differently is a nil []any or map[string]any, which it writes as null
-// where the empty instance writes [] or {}, so a value holding one anywhere
-// takes the round trip. DocumentValue reports ok=false where v has no JSON
-// form (a func, a channel, a cyclic value) or its own marshaler panics, and
-// recovers the panic so the caller sees only the flag.
+// tag-authored value costs no marshal. Four accepted shapes v1 renders
+// differently, and a value holding one at any depth takes the round trip: a
+// nil []any or map[string]any, which v1 writes as null where the empty
+// instance writes [] or {}; a float32, which v1 formats as the 32-bit
+// shortest decimal where ValueChecked widens the bits to float64 (0.1
+// against 0.10000000149011612); an empty [jsonv1.Number], which v1 writes as
+// 0; and a string or member name holding invalid UTF-8, which v1 writes with
+// U+FFFD in place of each bad byte. DocumentValue reports ok=false where v
+// has no JSON form (a func, a channel, a cyclic value) or its own marshaler
+// panics, and recovers the panic so the caller sees only the flag.
 func DocumentValue(v any) (any, bool) {
-	if out, ok := ValueChecked(v); ok && !hasNilContainer(out) {
+	if out, ok, render := documentChecked(v); ok && !render {
 		return out, true
 	}
 
-	data, err := marshalV1(v)
-	if err != nil {
+	data, ok := marshalV1(v)
+	if !ok {
 		return nil, false
 	}
 
@@ -42,52 +38,18 @@ func DocumentValue(v any) (any, bool) {
 	return out, true
 }
 
-// marshalV1 marshals v with [encoding/json] v1, converting a panic in v's own
-// marshaler into an error.
-func marshalV1(v any) ([]byte, error) {
-	var (
-		data []byte
-		err  error
-	)
-
-	func() {
-		defer func() {
-			if recover() != nil {
-				data, err = nil, errNoJSONForm
-			}
-		}()
-
-		data, err = jsonv1.Marshal(v)
+// marshalV1 marshals v with [encoding/json] v1 and reports ok=false where the
+// marshal returns an error or v's own marshaler panics. A recovered panic
+// leaves the unnamed results at their zero values, nil and false, which is
+// the refusal the caller expects.
+func marshalV1(v any) ([]byte, bool) {
+	defer func() {
+		if recover() != nil {
+			return
+		}
 	}()
 
-	if err != nil {
-		return nil, fmt.Errorf("marshal document value: %w", err)
-	}
+	data, err := jsonv1.Marshal(v)
 
-	return data, nil
-}
-
-// hasNilContainer reports whether an accepted JSON-shaped value holds a nil
-// []any or map[string]any at any depth. [ValueChecked] has already refused a
-// cyclic value, so the walk terminates.
-func hasNilContainer(v any) bool {
-	switch val := v.(type) {
-	case []any:
-		return val == nil || slices.ContainsFunc(val, hasNilContainer)
-
-	case map[string]any:
-		if val == nil {
-			return true
-		}
-
-		for _, elem := range val {
-			if hasNilContainer(elem) {
-				return true
-			}
-		}
-
-		return false
-	}
-
-	return false
+	return data, err == nil
 }
