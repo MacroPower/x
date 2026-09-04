@@ -22,6 +22,7 @@ import (
 	"go.jacobcolvin.com/x/jsonschema/internal/content"
 	"go.jacobcolvin.com/x/jsonschema/internal/format"
 	"go.jacobcolvin.com/x/jsonschema/internal/jsonequal"
+	"go.jacobcolvin.com/x/jsonschema/internal/jsonptr"
 	"go.jacobcolvin.com/x/jsonschema/internal/normalize"
 	"go.jacobcolvin.com/x/jsonschema/internal/numrat"
 	"go.jacobcolvin.com/x/jsonschema/internal/refresolve"
@@ -152,17 +153,19 @@ type instanceLocation struct {
 
 // appendPointerToken extends p with one reference token, the single pointer
 // builder behind the instance and schema location types and
-// [SubschemaEntries]. A token free of the RFC 6901 specials '~' and '/' and
-// holding valid UTF-8 -- every keyword, index, and nearly every member name
-// -- appends as one three-operand string concat: one allocation, where
-// [jsontext.Pointer.AppendToken] costs several on this hot path. One
-// conversion around the whole concatenation keeps it a single concat; a
-// conversion in the middle would split it into two. The rest go through
-// AppendToken, which carries the ~0/~1 escaping and substitutes U+FFFD for
-// invalid UTF-8.
+// [SubschemaEntries]. A token free of the RFC 6901 specials '~' and '/' --
+// every keyword, index, and nearly every member name -- appends as one
+// three-operand string concat: one allocation, where an escaping pass costs
+// several on this hot path. One conversion around the whole concatenation
+// keeps it a single concat; a conversion in the middle would split it into
+// two. The rest go through [jsonptr.Escape], which carries the ~0/~1
+// escaping and keeps every byte verbatim -- unlike
+// [jsontext.Pointer.AppendToken], which substitutes U+FFFD for invalid
+// UTF-8, so a hand-built instance's two map keys differing only in invalid
+// bytes would alias to one path and stop matching their [Segment] keys.
 func appendPointerToken(p jsontext.Pointer, tok string) jsontext.Pointer {
-	if strings.ContainsAny(tok, "~/") || !utf8.ValidString(tok) {
-		return p.AppendToken(tok)
+	if strings.ContainsAny(tok, "~/") {
+		return jsontext.Pointer(string(p) + "/" + jsonptr.Escape(tok))
 	}
 
 	return jsontext.Pointer(string(p) + "/" + tok)
