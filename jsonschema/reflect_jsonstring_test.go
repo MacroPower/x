@@ -3,6 +3,7 @@ package jsonschema_test
 import (
 	"encoding/json/v2"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -60,4 +61,47 @@ func TestGenerateFor_JSONStringPointerKinds(t *testing.T) {
 	require.JSONEq(t, `{"A":null,"B":null,"C":null,"D":"5"}`, string(nilData))
 	assert.NoError(t, validateJSON(t.Context(), s, nilData),
 		"generated schema rejected the nil-pointer serialization: %s", nilData)
+}
+
+// TestGenerateFor_JSONStringDurationRefused pins that the json:",string"
+// override never claims a time.Duration. Encoding/json/v2's duration codec
+// has no default representation and refuses the value before it consults the
+// flag, so the field takes the same path as an unflagged duration: refused
+// under the defaults, and answered by a type override when one is registered.
+func TestGenerateFor_JSONStringDurationRefused(t *testing.T) {
+	t.Parallel()
+
+	type value struct {
+		D time.Duration `json:"d,string"`
+	}
+
+	type pointer struct {
+		D *time.Duration `json:"d,string"`
+	}
+
+	override := jsonschema.WithTypeSchemaFor[time.Duration](jsonschema.TypeSchema{
+		Value: &jsonschema.Schema{Type: "string", Pattern: "^[0-9]+s$"},
+	})
+
+	t.Run("value refused", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := jsonschema.GenerateFor[value](t.Context())
+		require.ErrorIs(t, err, jsonschema.ErrUnsupportedType)
+	})
+
+	t.Run("pointer refused", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := jsonschema.GenerateFor[pointer](t.Context())
+		require.ErrorIs(t, err, jsonschema.ErrUnsupportedType)
+	})
+
+	t.Run("override applies", func(t *testing.T) {
+		t.Parallel()
+
+		s, err := jsonschema.GenerateFor[value](t.Context(), override)
+		require.NoError(t, err)
+		assert.Equal(t, "^[0-9]+s$", s.Properties["d"].Pattern)
+	})
 }

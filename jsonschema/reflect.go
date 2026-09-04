@@ -1365,10 +1365,16 @@ func (g *generator) buildFieldSchema(
 			(derefField != fieldType && reflectkind.ImplementsAnyMarshaler(derefField))
 		marshalerExempt := bearsMarshaler &&
 			!reflectkind.IsJSONNumber(derefField) && derefField != typeTime
-		stringOverride = fi.JSONString && !marshalerExempt &&
+		// V2's native duration codec has no default representation and
+		// pre-empts the int64 ",string" encoding, so the exact time.Duration
+		// never takes the string override. It falls through to schemaForType,
+		// where a type override still applies and the plain refusal
+		// otherwise fires, the same answer the field gets without the flag.
+		isDuration := derefField == typeTimeDuration
+		stringOverride = fi.JSONString && !marshalerExempt && !isDuration &&
 			reflectkind.IsStringifiableNumber(fieldType)
 
-		if fi.JSONString && !marshalerExempt && !stringOverride {
+		if fi.JSONString && !marshalerExempt && !stringOverride && !isDuration {
 			return nil, fmt.Errorf(
 				"%w: invalid use of `string` tag option on %s", ErrInvalidJSONField, fieldType,
 			)
