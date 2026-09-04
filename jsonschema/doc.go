@@ -129,7 +129,7 @@
 //     generation does not model are refused with
 //     [ErrUnsupportedJSONOption].
 //   - [WithDefaultsFrom] seeds root property defaults from an instance of the
-//     generated type: after generation the instance is marshaled with
+//     generated type: the instance is marshaled with
 //     [encoding/json/v2] (under the [WithJSONOptions] options, so seeded
 //     defaults match the caller's marshal) and each top-level key of the
 //     output that matches a root property becomes that property's default,

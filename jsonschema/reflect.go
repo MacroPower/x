@@ -206,22 +206,21 @@ func (g *generator) generate(t reflect.Type) (*Schema, error) {
 		return nil, err
 	}
 
+	// Phase 7: seed the WithDefaultsFrom instance onto the root object's
+	// properties, on the canvases render composes.
+	if g.defaultsFromSet {
+		err = g.seedDefaults(root, rootType)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	schema := g.render(root)
 	// Emit only the defs reachable from the final root graph. A def orphaned by
 	// a type= override or by root inlining is never reached and so dropped.
 	reached := g.collectReferencedDefs(root)
 	for _, e := range reached {
 		g.renderDef(e)
-	}
-
-	// Seed property defaults from the WithDefaultsFrom instance, resolving the
-	// produced root schema to the object that carries the properties (through a
-	// nullable wrapper, or to the $defs body of a recursive root).
-	if g.defaultsFromSet {
-		err := g.applyInstanceDefaults(g.defaultsFrom, rootType, g.rootDefaultsTarget(schema, root))
-		if err != nil {
-			return nil, err
-		}
 	}
 
 	// Set the root title from the type name when WithRootTitle is enabled and
@@ -255,38 +254,11 @@ func (g *generator) generate(t reflect.Type) (*Schema, error) {
 	return schema, nil
 }
 
-// rootDefaultsTarget resolves the schema that WithDefaultsFrom seeds. A
-// pointer root generates an anyOf nullable wrapper whose value branch holds
-// the object schema, so the target resolves through the wrapper first. When
-// the resolved target is a $ref to a $defs entry (a pointer root's value
-// branch, or a self-reference or mutual recursion kept the root from being
-// inlined), the defaults land on that definition's properties, shared by
-// every occurrence of the type.
-func (g *generator) rootDefaultsTarget(schema *Schema, root *node) *Schema {
-	// A self- or mutually recursive root stayed a $ref: seed the shared $defs
-	// body so every occurrence of the type carries the defaults.
-	if root.kind == kindRef {
-		return root.def.rendered
-	}
-
-	// A pointer root renders as anyOf[value, {null}]; applyNull
-	// always emits the null branch second and records the wrap on the node, so
-	// the value branch is AnyOf[0]. The flag (not the anyOf arity) identifies
-	// the wrapper: a nullable hook root whose schema already admits null keeps
-	// its own anyOf un-wrapped and carries the properties itself, so seeding
-	// must not descend into a hook-authored branch.
-	if root.nullWrapped && len(schema.AnyOf) == 2 {
-		return schema.AnyOf[0]
-	}
-
-	return schema
-}
-
 // rootTitleTarget resolves the schema that WithRootTitle titles. Draft-07
 // readers ignore keywords beside $ref, so when a self-referential root stays
 // a bare $ref into definitions, the title goes on the definitions entry it
 // targets instead, shared by every occurrence of the type;
-// [generator.rootDefaultsTarget] redirects the same way.
+// [generator.seedDefaults] redirects the same way.
 func (g *generator) rootTitleTarget(schema *Schema, root *node) *Schema {
 	// Draft-07 readers ignore keywords beside a bare $ref, so a self-referential
 	// root that stayed a $ref is titled on its $defs body instead.
@@ -1753,9 +1725,9 @@ func (g *generator) applyFieldInterpreters(
 }
 
 // wrapRefForDraft7 wraps a bare $ref with allOf if sibling keywords were added
-// and the draft is Draft-07 (where $ref siblings are ignored). It serves the
-// post-render defaults path, where a default landing beside a bare $ref root or
-// property needs the wrap; render's renderRef handles the field path itself.
+// and the draft is Draft-07 (where $ref siblings are ignored). It serves a
+// property a hook declared as a literal, where a seeded default lands beside
+// the $ref the hook wrote; render's renderRef handles the field path itself.
 func (g *generator) wrapRefForDraft7(s *Schema) {
 	if g.profile.honorRefSiblings || s.Ref == "" {
 		return

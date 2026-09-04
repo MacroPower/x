@@ -116,11 +116,6 @@ type node struct {
 	// through [TypeSchema.Verbatim]: it is emitted exactly as authored, so render
 	// and reconcile skip the null encoding for it entirely.
 	verbatim bool
-	// NullWrapped records that render emitted the anyOf[base, null] wrapper
-	// for this node, so the rendered schema's two-element AnyOf is the
-	// generator's null encoding; [generator.rootDefaultsTarget] resolves
-	// through the wrapper only on this flag.
-	nullWrapped bool
 	// Hooked marks a field node whose field-level hooks have run, so a node
 	// reached twice (a def body's field seen through the body and through an
 	// inlined copy) is hooked once.
@@ -188,6 +183,19 @@ func (n *node) containerType() string {
 	}
 
 	return ""
+}
+
+// prop returns the node-backed property of an object node with the given
+// JSON name, or nil when none or when the property lives only in the payload
+// as a literal a hook declared.
+func (n *node) prop(name string) *node {
+	for i := range n.props {
+		if n.props[i].name == name {
+			return n.props[i].schema
+		}
+	}
+
+	return nil
 }
 
 // declaresNull reports whether a schema's own type keyword names null: a
@@ -852,7 +860,7 @@ func nullLiteralReport(n *node) error {
 
 // isRawNull reports whether raw holds the JSON null literal. Two call sites
 // share it, so the two cannot drift apart: canvasNullLiteral, scanning an
-// authored default, and [generator.applyInstanceDefaults], testing a marshaled
+// authored default, and [generator.seedDefaults], testing a marshaled
 // field value. Whitespace around a JSON value is insignificant, so the
 // comparison trims it first.
 func isRawNull(raw jsontext.Value) bool {

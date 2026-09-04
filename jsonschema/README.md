@@ -202,9 +202,9 @@ type; `WithTypeSchema` or a provider can still declare a shape for one.
 | `WithDefaultsFrom(instance)`     | Seed root property defaults from an instance of the generated type.                                                                                                                       |
 | `WithRootTitle(bool)`            | Title the root schema with the root type's name (default `false`).                                                                                                                        |
 
-`WithDefaultsFrom` marshals the instance with `encoding/json/v2` after
-generation (under the `WithJSONOptions` options, so seeded defaults match the
-caller's marshal); each top-level key of the output that matches a root
+`WithDefaultsFrom` marshals the instance with `encoding/json/v2` (under the
+`WithJSONOptions` options, so seeded defaults match the caller's marshal); each
+top-level key of the output that matches a root
 property becomes that property's `default`, overwriting any default set via
 struct tags. Keys the `json` tags omit (`omitempty`, `omitzero`) contribute
 nothing, so presence follows the tags exactly, and nested struct, slice, and

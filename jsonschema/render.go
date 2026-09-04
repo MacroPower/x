@@ -178,10 +178,6 @@ func (g *generator) applyNull(n *node, base *Schema) *Schema {
 		bareContainerType(base, n.containerType())
 	}
 
-	// Record the wrap on the node, so the defaults target resolution can tell
-	// this generator-emitted anyOf from one the base itself authored.
-	n.nullWrapped = true
-
 	return &Schema{AnyOf: []*Schema{base, {Type: typename.Null}}}
 }
 
