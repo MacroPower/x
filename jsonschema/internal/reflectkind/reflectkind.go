@@ -138,11 +138,10 @@ func IndirectType(t reflect.Type) reflect.Type {
 // IsEmbeddedFallback reports whether t qualifies as encoding/json/v2's
 // embedded fallback under json:",embed": exactly [jsontext.Value], or a map
 // whose key kind is string and whose key type implements no marshal or
-// unmarshal method. It unwraps the one unnamed-pointer level v2's
-// indirectType removes (see [IndirectType]) before classifying.
+// unmarshal method. The caller removes the one unnamed-pointer level v2's
+// indirectType unwraps (see [IndirectType]) before asking; the predicate
+// classifies t as given, so a second pointer level stays a refusal.
 func IsEmbeddedFallback(t reflect.Type) bool {
-	t = IndirectType(t)
-
 	if t == TypeJSONTextValue {
 		return true
 	}

@@ -540,6 +540,12 @@ type fbScalar struct {
 	Extra int `json:",embed"`
 }
 
+// fbPtrPtrMap sits one pointer level past the single unnamed level v2's
+// indirectType unwraps, so the field classifies as *map and is refused.
+type fbPtrPtrMap struct {
+	Extra **map[string]int `json:",embed"`
+}
+
 // fbBag is an anonymous-embeddable map, refused however it is tagged.
 type fbBag map[string]int //nolint:unused // Embedded below; read via reflection only.
 
@@ -611,6 +617,12 @@ func TestGenerateFor_EmbeddedFallbackRefused(t *testing.T) {
 			marshal:  func() ([]byte, error) { return json.Marshal(fbIntKey{}) },
 			errIs:    jsonschema.ErrInvalidJSONField,
 			wantErr:  "must be a Go struct, Go map of string key, or jsontext.Value",
+		},
+		"map behind two pointer levels": {
+			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[fbPtrPtrMap](t.Context()) },
+			marshal:  func() ([]byte, error) { return json.Marshal(fbPtrPtrMap{}) },
+			errIs:    jsonschema.ErrInvalidJSONField,
+			wantErr:  "field Extra of type *map[string]int must be a Go struct, Go map of string key, or jsontext.Value",
 		},
 		"scalar under embed": {
 			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[fbScalar](t.Context()) },

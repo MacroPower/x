@@ -206,18 +206,19 @@ var (
 
 	// Types an embedded-fallback field is drawn from. The maps qualify (a
 	// string-kind key with no marshal methods, one behind the unnamed-pointer
-	// level v2 unwraps); the int-keyed map and the scalar are declaration
-	// refusals both sides agree on. The pool deliberately omits
-	// jsontext.Value, because its shared fill draws arbitrary JSON and a
-	// non-object value is a value-level v2 refusal the accept rig treats as
-	// failure, so the Value form lives in rig 1's roster and the static
-	// tables instead.
+	// level v2 unwraps); the int-keyed map, the scalar, and the map behind a
+	// second pointer level (v2 unwraps exactly one) are declaration refusals
+	// both sides agree on. The pool deliberately omits jsontext.Value,
+	// because its shared fill draws arbitrary JSON and a non-object value is
+	// a value-level v2 refusal the accept rig treats as failure, so the Value
+	// form lives in rig 1's roster and the static tables instead.
 	fallbackFieldTypes = []reflect.Type{
 		reflect.TypeFor[map[BagKey]int](),
 		reflect.TypeFor[*map[BagKey]int](),
 		reflect.TypeFor[map[BagKey]*string](),
 		reflect.TypeFor[map[int]string](),
 		reflect.TypeFor[int](),
+		reflect.TypeFor[**map[BagKey]int](),
 	}
 
 	// Built once and shared: the override set is the same for every draw, and
