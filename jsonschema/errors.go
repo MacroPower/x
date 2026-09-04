@@ -26,7 +26,8 @@ var (
 	// [encoding/json] v1 compat options that alter the marshaled shape
 	// (OmitEmptyWithLegacySemantics, FormatByteArrayAsArray,
 	// FormatBytesWithLegacySemantics, StringifyWithLegacySemantics,
-	// CallMethodsWithLegacySemantics, FormatDurationAsNano -- and so the
+	// CallMethodsWithLegacySemantics, ReportErrorsWithLegacySemantics,
+	// FormatDurationAsNano -- and so the
 	// DefaultOptionsV1 bundle carrying them). Refusing loudly keeps the
 	// generated-schema-accepts-the-marshal property honest; silently
 	// ignoring any of them would emit a schema that rejects what the
