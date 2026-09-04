@@ -1154,21 +1154,29 @@ func TestValidateInterpreter_RequiredOnNonPointerMap(t *testing.T) {
 	assert.Nil(t, s.Properties["labels"].Not)
 }
 
-// TestValidateInterpreter_RequiredUnderNullableOff pins what required emits
+// stancedName is the pointee whose NullForbidden stance leaves a pointer to
+// it no null branch.
+type stancedName string
+
+// TestValidateInterpreter_RequiredUnderNullForbidden pins what required emits
 // where the occurrence admits no null. The type rejects a null instance on its
 // own, so the interpreter writes no forbidden null. A bare container keeps its
-// size floor, and a pointer field gets only the required entry.
-func TestValidateInterpreter_RequiredUnderNullableOff(t *testing.T) {
+// size floor, and a pointer to a NullForbidden type gets only the required
+// entry.
+func TestValidateInterpreter_RequiredUnderNullForbidden(t *testing.T) {
 	t.Parallel()
 
 	type Config struct {
-		Tags []string `json:"tags" validate:"required"`
-		Name *string  `json:"name" validate:"required"`
+		Tags []string     `json:"tags" validate:"required"`
+		Name *stancedName `json:"name" validate:"required"`
 	}
 
 	s, err := jsonschema.GenerateFor[Config](t.Context(),
 		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
-		jsonschema.WithNullable(false),
+		jsonschema.WithTypeSchemaFor[stancedName](jsonschema.TypeSchema{
+			Value:       &jsonschema.Schema{Type: "string"},
+			Nullability: jsonschema.NullForbidden,
+		}),
 	)
 	require.NoError(t, err)
 

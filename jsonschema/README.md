@@ -152,13 +152,13 @@ entries never do.
 | `int`                                | `integer`                                                                                                                                                   |
 | `int8`...`int64`, `uint8`...`uint64` | `integer` with `minimum`/`maximum` bounds                                                                                                                   |
 | `uint`, `uintptr`                    | `integer` with `minimum: 0`                                                                                                                                 |
-| `*T`                                 | nullable: base schema wrapped in `anyOf` with a `{"type":"null"}` branch (see `WithNullable`)                                                               |
+| `*T`                                 | nullable: base schema wrapped in `anyOf` with a `{"type":"null"}` branch (a `NullForbidden` stance drops it)                                                |
 | `[]T`                                | `array` with an `items` schema (a nil slice marshals as `[]` by default, so no null; see `WithJSONOptions`)                                                 |
 | `[]byte`                             | base64-encoded `string` (`contentEncoding`); unnamed byte element only, and a nil `[]byte` marshals as `""` by default (see `WithJSONOptions`)              |
 | `[N]T`                               | fixed-size array via `prefixItems` with `minItems`/`maxItems` = N                                                                                           |
 | `[N]byte`                            | base64-encoded `string` whose `minLength`/`maxLength` pin the exact encoded length                                                                          |
 | `map[K]V`                            | `object` with `additionalProperties` (K: a string, integer, or float kind, or any marshaler); a nil map marshals as `{}` by default (see `WithJSONOptions`) |
-| `any` / interface                    | unrestricted (`{}`); an intercepted interface schema admits `null` alongside (see `WithNullable`)                                                           |
+| `any` / interface                    | unrestricted (`{}`); an intercepted interface schema admits `null` alongside, like a pointer                                                                |
 | `struct`                             | `object` with `properties`, `required`, and `additionalProperties: false`                                                                                   |
 
 Well-known types have built-in overrides matched by exact `reflect.Type`:
@@ -198,7 +198,6 @@ type; `WithTypeSchema` or a provider can still declare a shape for one.
 | `WithNamer(n)`                   | Custom `Namer` for `$defs` entries; an empty name defers to the built-in namer.                                                                                                           |
 | `WithDefinitions(bool)`          | Extract named types into `$defs`/`$ref` (default `true`).                                                                                                                                 |
 | `WithAdditionalProperties(bool)` | Allow extra object keys (default `false`, disallowing them).                                                                                                                              |
-| `WithNullable(bool)`             | Make pointer occurrences and intercepted interfaces nullable (default `true`).                                                                                                            |
 | `WithJSONOptions(opts...)`       | Honor `encoding/json/v2` marshal options that change output shape (`FormatNilSliceAsNull`, `FormatNilMapAsNull`, `OmitZeroStructFields`); unsupported shape-changing options are refused. |
 | `WithDefaultsFrom(instance)`     | Seed root property defaults from an instance of the generated type.                                                                                                                       |
 | `WithRootTitle(bool)`            | Title the root schema with the root type's name (default `false`).                                                                                                                        |
@@ -216,9 +215,9 @@ slice, map, or `[]byte` marshals as its empty instance (`[]`, `{}`, `""`),
 which seeds like any other value. A nil pointer or interface carrying neither
 `omitempty` nor `omitzero` marshals to JSON null. That null leaves a property
 admitting no null untouched, so the property keeps whatever default its tag
-wrote. `WithNullable(false)` takes the null branch off every pointer property,
-and a `NullForbidden` stance takes it off every occurrence of the type it
-covers. An instance whose pointer-dereferenced type is not the generated type,
+wrote. A `NullForbidden` stance takes the null branch off every occurrence of
+the type it covers. An instance whose pointer-dereferenced type is not the
+generated type,
 or that does not marshal to a JSON object, returns an error wrapping
 `ErrInvalidDefaultsInstance`. A nil instance instead restores the default,
 seeding no defaults. A typed nil pointer is a value, not a reset; it marshals
@@ -464,10 +463,9 @@ type the package maps to a built-in leaf schema refuses the literal too, so
 `json.RawMessage` refuses it even though the `{}` it produces admits
 `null`. A `Nullability` stance
 moves the decision either way, so a value field of a `NullAllowed` type takes
-the literal and a pointer to a `NullForbidden` one does not. Whatever else turns
-the decision off takes the literal with it, so a `null` literal is an error
-under `WithNullable(false)` and on a `TypeSchema.Verbatim` payload, which
-carries no null encoding at all.
+the literal and a pointer to a `NullForbidden` one does not. A
+`TypeSchema.Verbatim` payload carries no null encoding at all, so a `null`
+literal is an error on it too.
 
 The shape a container names rejects a `const` before the parser reads the value,
 so `const=null` fails there for the same reason `const=5` does, on a pointer to
@@ -476,10 +474,10 @@ elements instead, and an element occurrence answers from its own Go type rather
 than from the container's decision.
 
 The element case just named is the one case that takes the literal against a
-schema admitting no null. A `[]*string` takes a null `enum` member even under
-`WithNullable(false)`, where the element schema has no null branch to match it.
-The member belongs to the element rather than to the field, so the field's own
-decision never reaches it.
+schema admitting no null. A `[]*string` takes a null `enum` member even where a
+stance leaves the element schema no null branch to match it. The member
+belongs to the element rather than to the field, so the field's own decision
+never reaches it.
 
 The generator checks every other literal against the shape the occurrence
 finally takes. A `type=` pair replaces the occurrence, so the null admission the
@@ -501,9 +499,8 @@ or an element's canvas. The scan reads the `default`, `const`, `enum`, and
 `examples` keywords there. It refuses a null on a field or element whose
 reference admits none once the decision is final, and the report names the
 keyword holding it. The pass refuses on the same terms a reference that
-admitted no null before the interpreter ran. It also refuses a pointer
-reference under `WithNullable(false)` that no stance grants the null back to.
-The scan reaches no further than a reference, the one occurrence whose answer
+admitted no null before the interpreter ran. The scan reaches no further than
+a reference, the one occurrence whose answer
 can change after an interpreter reads it. Forbidding a null through
 `Constraints.Forbid` writes under `not` rather than into a value keyword, so
 the null stays and renders as a `not` beside the `$ref`.
@@ -842,8 +839,9 @@ flag on an `encoding/json.Number` field is the one coercion type and base
 alone do not express (the type is a string kind and the coerced base is a
 string schema, so only the flag says the instance is a quoted number).
 Whether a pointer or interface occurrence admits `null` is the generator's
-decision rather than the Go type's (`WithNullable`, a `Nullability` stance),
-so `ShapeOf` reports only the pointer occurrences as admitting `null`, which
+decision rather than the Go type's (a `Nullability` stance, a
+`WithJSONOptions` format flag), so `ShapeOf` reports only the pointer
+occurrences as admitting `null`, which
 is also what a context the generator did not build falls back to. A field
 referencing the type it belongs to reads its null admission before that type
 records a `Nullability` stance, so a later stance can withdraw the answer.
@@ -928,7 +926,7 @@ Supported tags (summary):
   `FormatNilMapAsNull`); a pointer field gets the forbidden `null` and no such
   constraint, since go-playground reads `required` on a pointer as "must be
   non-nil". Where the occurrence admits no `null` -- a bare container under
-  the default marshal options, or a pointer under `WithNullable(false)` -- the
+  the default marshal options, or a pointer to a `NullForbidden` type -- the
   interpreter writes no forbidden
   `null` and the type rejects a `null` instance on its own. A shape with no non-zero form the schema
   can express gets the `required` entry and nothing else, not even the forbidden
@@ -1919,8 +1917,8 @@ refs.
 - **No null on maps and slices**: `encoding/json/v2` writes a nil slice or
   map as its empty instance under the default marshal options, so their
   schemas name the bare container type; only pointers and intercepted
-  interfaces earn a null branch, and `WithNullable(false)` drops that branch
-  for callers whose absent values are never serialized as `null`.
+  interfaces earn a null branch, and a `NullForbidden` stance drops that
+  branch for a type whose absent values are never serialized as `null`.
   `WithJSONOptions` with `FormatNilSliceAsNull` or `FormatNilMapAsNull`
   adds the null those options make v2 write.
 - **Hierarchical `ValidationError`**: a tree mirrors the schema/instance

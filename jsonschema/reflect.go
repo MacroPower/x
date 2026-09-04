@@ -87,7 +87,6 @@ type generator struct {
 	draft                Draft
 	definitions          bool
 	additionalProperties bool
-	nullable             bool
 	// The three honored WithJSONOptions flags, probed from jsonOpts at
 	// option-application time.
 	nilSliceNull    bool
@@ -115,7 +114,6 @@ func newGenerator(opts []GenerateOption) *generator {
 		draft:       Draft2020,
 		namer:       defaultNamerFunc(),
 		definitions: true,
-		nullable:    true,
 	}
 
 	for _, opt := range opts {
@@ -157,10 +155,9 @@ func (g *generator) forRun(ctx context.Context) *generator {
 // containerNullable is the one definition of the nilable-container null law.
 // A container occurrence admits null when it is a pointer occurrence
 // (occurrence) or when the relevant WithJSONOptions format flag makes the
-// marshal write null for a nil one (optFlag), and WithNullable(false) wins
-// over both.
+// marshal write null for a nil one (optFlag).
 func (g *generator) containerNullable(occurrence, optFlag bool) bool {
-	return occurrence || (optFlag && g.nullable)
+	return occurrence || optFlag
 }
 
 // generate produces the root schema for the given type.
@@ -254,12 +251,12 @@ func (g *generator) generate(t reflect.Type) (*Schema, error) {
 }
 
 // rootDefaultsTarget resolves the schema that WithDefaultsFrom seeds. A
-// pointer root under WithNullable generates an anyOf nullable wrapper whose
-// value branch holds the object schema, so the target resolves through the
-// wrapper first. When the resolved target is a $ref to a $defs entry (a
-// pointer root's value branch, or a self-reference or mutual recursion kept
-// the root from being inlined), the defaults land on that definition's
-// properties, shared by every occurrence of the type.
+// pointer root generates an anyOf nullable wrapper whose value branch holds
+// the object schema, so the target resolves through the wrapper first. When
+// the resolved target is a $ref to a $defs entry (a pointer root's value
+// branch, or a self-reference or mutual recursion kept the root from being
+// inlined), the defaults land on that definition's properties, shared by
+// every occurrence of the type.
 func (g *generator) rootDefaultsTarget(schema *Schema, root *node) *Schema {
 	// A self- or mutually recursive root stayed a $ref: seed the shared $defs
 	// body so every occurrence of the type carries the defaults.
@@ -267,7 +264,7 @@ func (g *generator) rootDefaultsTarget(schema *Schema, root *node) *Schema {
 		return root.def.rendered
 	}
 
-	// A pointer root under WithNullable renders as anyOf[value, {null}]; applyNull
+	// A pointer root renders as anyOf[value, {null}]; applyNull
 	// always emits the null branch second and records the wrap on the node, so
 	// the value branch is AnyOf[0]. The flag (not the anyOf arity) identifies
 	// the wrapper: a nullable hook root whose schema already admits null keeps
@@ -304,7 +301,7 @@ func (g *generator) rootTitleTarget(schema *Schema, root *node) *Schema {
 func (g *generator) schemaForType(t reflect.Type, nullable bool) (*node, error) {
 	// Follow pointers. A pointer at any level makes the schema nullable.
 	if t.Kind() == reflect.Pointer {
-		nullable = g.nullable
+		nullable = true
 	}
 
 	t = numkind.DerefType(t)
@@ -315,7 +312,7 @@ func (g *generator) schemaForType(t reflect.Type, nullable bool) (*node, error) 
 	// or a TextMarshaler method set): a plain interface reflects as {}, which
 	// already admits null, and render dedups the wrapper away.
 	if t.Kind() == reflect.Interface {
-		nullable = g.nullable
+		nullable = true
 	}
 
 	// A named type already registered in $defs is referenced again, not rebuilt:
@@ -1416,7 +1413,7 @@ func (g *generator) buildFieldSchema(
 		fieldNode = &node{kind: kindValue, payload: payload}
 
 		if isPointer {
-			fieldNode.nullable = g.nullable
+			fieldNode.nullable = true
 			fieldNode.base = typename.String
 			tagTypeSchema = &Schema{Types: []string{typename.Null, typename.String}}
 			// Tag interpreters dispatch on FieldContext.Base; hand them the

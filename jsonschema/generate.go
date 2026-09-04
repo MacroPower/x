@@ -239,16 +239,6 @@ func WithAdditionalProperties(allowed bool) GenerateOption {
 	return generateOptionFunc(func(g *generator) { g.additionalProperties = allowed })
 }
 
-// WithNullable controls whether pointer occurrences and intercepted interface
-// types admit null. Default: true. When false, *T yields the bare value
-// schema with no null branch, so the nil pointer's marshaled null is outside
-// the generated schema; turn it off only where absent values are never
-// serialized as null. Slices, maps, and []byte take no null either way, since
-// [encoding/json/v2] marshals a nil one as its empty instance.
-func WithNullable(allowed bool) GenerateOption {
-	return generateOptionFunc(func(g *generator) { g.nullable = allowed })
-}
-
 // WithJSONOptions makes generation honor [encoding/json/v2] marshal options
 // that change the marshaled shape, so the generated schema accepts exactly
 // what [json.Marshal] emits for a value under the same options. Repeated
@@ -261,10 +251,10 @@ func WithNullable(allowed bool) GenerateOption {
 //   - [json.OmitZeroStructFields]: every struct field behaves as ,omitzero,
 //     so no required entries are emitted.
 //
-// [WithNullable] with false wins over the two format options. It stays the
-// one promise that no marshal path writes null for an absent value, so no
-// null branch appears anywhere. [WithDefaultsFrom] marshals its instance
-// under these options, so seeded defaults match the caller's marshal.
+// A [NullForbidden] stance on a type takes the null off every occurrence of
+// that type, format options included. [WithDefaultsFrom] marshals its
+// instance under these options, so seeded defaults match the caller's
+// marshal.
 // [Validator.ValidateValue] marshals with the defaults, so under
 // non-default options marshal the value with them and validate the bytes
 // through [Validator.ValidateJSON] or [Validator.ValidateReader].

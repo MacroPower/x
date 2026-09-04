@@ -41,9 +41,9 @@
 //     pointer is nilable, and so are a bare slice, map, and []byte, each of
 //     which carries a null branch of its own. Encoding/json writes null for a
 //     nil value, which go-playground's required rejects. Where the occurrence
-//     admits no null, as under WithNullable(false) or a type schema declaring
-//     NullForbidden, the interpreter writes no forbidden null and the type
-//     rejects a null instance on its own.
+//     admits no null, as under a type schema declaring NullForbidden, the
+//     interpreter writes no forbidden null and the type rejects a null
+//     instance on its own.
 //
 //     A non-pointer field also gets a type-specific non-zero constraint:
 //     minLength: 1 for strings, minItems: 1 for slices/arrays,

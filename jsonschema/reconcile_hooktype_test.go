@@ -65,7 +65,6 @@ func TestReconcileHookAuthoredTypeSlot(t *testing.T) {
 		t.Parallel()
 
 		s, err := jsonschema.GenerateFor[doc](t.Context(),
-			jsonschema.WithNullable(false),
 			jsonschema.WithTypeSchemaExtenderFor[[]string](
 				func(_ context.Context, _ jsonschema.TypeContext, ts *jsonschema.TypeSchema) error {
 					ts.Value.Types = []string{"array"}

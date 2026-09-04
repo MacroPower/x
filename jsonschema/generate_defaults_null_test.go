@@ -83,11 +83,15 @@ type defaultsNullRefSibling struct {
 	Host string                 `json:"host"`
 }
 
+// defaultsNullTaggedValue is the pointee whose NullForbidden stance leaves
+// the reference to it no null branch.
+type defaultsNullTaggedValue string
+
 // defaultsNullTagged carries a tag default on the field the instance
 // leaves nil. A skipped key writes nothing, so the tag default survives.
 type defaultsNullTagged struct {
-	Ptr  *string `json:"ptr"  jsonschema:"default=fallback"`
-	Host string  `json:"host"`
+	Ptr  *defaultsNullTaggedValue `json:"ptr"  jsonschema:"default=fallback"`
+	Host string                   `json:"host"`
 }
 
 // defaultsNullUnion holds the two shapes a hook authors a null into, an enum
@@ -130,9 +134,9 @@ func (defaultsNullUnionDef) JSONSchemaExtend(
 	return nil
 }
 
-// defaultsNullDefUnion reaches defaultsNullUnionDef through a pointer. Under
-// WithNullable(false) the reference takes no null wrapper, so the property is a
-// bare $ref and only the def body answers.
+// defaultsNullDefUnion reaches defaultsNullUnionDef through a pointer. The
+// def body already admits null, so the reference takes no null wrapper, the
+// property is a bare $ref, and only the def body answers.
 type defaultsNullDefUnion struct {
 	V    *defaultsNullUnionDef `json:"v"`
 	Host string                `json:"host"`
@@ -246,20 +250,6 @@ func TestWithDefaultsFromNullDefault(t *testing.T) {
 			def:  "defaultsNullRec",
 			want: map[string]string{"next": "", "name": `"root"`},
 		},
-		"non-nullable containers": {
-			generate: func(t *testing.T) (*jsonschema.Schema, error) {
-				t.Helper()
-
-				return jsonschema.GenerateFor[defaultsNullContainers](
-					t.Context(),
-					jsonschema.WithNullable(false),
-					jsonschema.WithDefaultsFrom(defaultsNullContainers{Host: "localhost"}),
-				)
-			},
-			want: map[string]string{
-				"tags": "[]", "meta": "{}", "ptr": "", "host": `"localhost"`,
-			},
-		},
 		"nullable containers": {
 			generate: func(t *testing.T) (*jsonschema.Schema, error) {
 				t.Helper()
@@ -279,7 +269,6 @@ func TestWithDefaultsFromNullDefault(t *testing.T) {
 
 				return jsonschema.GenerateFor[defaultsNullTyped](
 					t.Context(),
-					jsonschema.WithNullable(false),
 					jsonschema.WithDefaultsFrom(defaultsNullTyped{Host: "localhost"}),
 				)
 			},
@@ -337,7 +326,6 @@ func TestWithDefaultsFromNullDefault(t *testing.T) {
 
 				return jsonschema.GenerateFor[defaultsNullUnion](
 					t.Context(),
-					jsonschema.WithNullable(false),
 					unionNullExtender(),
 					jsonschema.WithDefaultsFrom(defaultsNullUnion{Host: "localhost"}),
 				)
@@ -352,7 +340,7 @@ func TestWithDefaultsFromNullDefault(t *testing.T) {
 
 				return jsonschema.GenerateFor[defaultsNullTagged](
 					t.Context(),
-					jsonschema.WithNullable(false),
+					forbidNullStance[defaultsNullTaggedValue](),
 					jsonschema.WithDefaultsFrom(defaultsNullTagged{Host: "localhost"}),
 				)
 			},
@@ -364,7 +352,6 @@ func TestWithDefaultsFromNullDefault(t *testing.T) {
 
 				return jsonschema.GenerateFor[defaultsNullDefUnion](
 					t.Context(),
-					jsonschema.WithNullable(false),
 					jsonschema.WithDefaultsFrom(defaultsNullDefUnion{Host: "localhost"}),
 				)
 			},
@@ -376,7 +363,6 @@ func TestWithDefaultsFromNullDefault(t *testing.T) {
 
 				return jsonschema.GenerateFor[defaultsNullCycle](
 					t.Context(),
-					jsonschema.WithNullable(false),
 					cycleNullExtender(),
 					jsonschema.WithDefaultsFrom(defaultsNullCycle{Host: "localhost"}),
 				)
@@ -429,7 +415,6 @@ func TestWithDefaultsFromNullDefault(t *testing.T) {
 
 				return jsonschema.GenerateFor[defaultsNullAny](
 					t.Context(),
-					jsonschema.WithNullable(false),
 					jsonschema.WithDefaultsFrom(defaultsNullAny{Host: "localhost"}),
 				)
 			},

@@ -121,8 +121,8 @@ type Input struct {
 	// Nullable reports whether the occurrence admits null, which the caller
 	// reads off the field's node. It is the generator's decision rather than
 	// the Go type's. A slice, map, byte slice, or interface is nilable without
-	// being a pointer, and WithNullable(false) drops the null branch a pointer
-	// would otherwise carry. A scalar key spells that admission as the literal
+	// being a pointer, and a NullForbidden stance drops the null branch a
+	// pointer would otherwise carry. A scalar key spells that admission as the literal
 	// null, so [Apply] accepts default=null wherever that decision applies,
 	// whether or not the rendered schema keeps a null branch. A type= pair
 	// anywhere in the tag withdraws that acceptance. A stance recorded after

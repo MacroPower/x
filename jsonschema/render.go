@@ -249,8 +249,8 @@ func (g *generator) maybeInlineRoot(root *node) *node {
 
 	// A nullable root renders as anyOf[{$ref}, null], not a bare $ref, so its
 	// def stays referenced through the wrapper and is never inlined; only a
-	// bare-$ref root (a non-pointer struct, or a pointer root under
-	// WithNullable(false)) is a candidate.
+	// bare-$ref root (a non-pointer struct, or a pointer root whose type
+	// declares NullForbidden) is a candidate.
 	if root.nullableDecision() {
 		return root
 	}
@@ -260,7 +260,7 @@ func (g *generator) maybeInlineRoot(root *node) *node {
 	}
 
 	// The root is a bare-$ref (non-nullable) ref here, so the inlined body keeps
-	// its own encoding: a container body already folds g.nullable into a type
+	// its own encoding: a container body already folds its null into a type
 	// list, and a scalar/array/struct body is bare and non-nullable like the root.
 	inlined := *root.def.body
 

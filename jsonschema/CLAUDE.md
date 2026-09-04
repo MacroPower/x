@@ -552,15 +552,14 @@ contract the tests enforce.
     asserts the complement, that an instance one property away from the
     marshaled shape is refused, so an accept-everything schema cannot pass
     vacuously.
-  - Three causes would make a synthesized shape report a divergence the package
+  - Two causes would make a synthesized shape report a divergence the package
     is not guilty of: a direct JSON marshaler (whose output shape reflection
-    cannot know), `WithNullable(false)` (which drops the null branch by
-    design), and `reflect.StructOf`'s inability to reproduce method promotion.
-    Each has a reason constant carried as the message of a guard that pins the
-    cause down, the same convention `suite_test.go` uses for skips.
-    `reasonUnmodeledMarshaler` lives in `internal/fuzzshape`'s test, beside the
-    guard over drawn shapes that enforces it; `reasonNullableOff` and
-    `reasonStructOfPromotion` live in `fuzz_shape_test.go` with the rig. The
+    cannot know) and `reflect.StructOf`'s inability to reproduce method
+    promotion. Each has a reason constant carried as the message of a guard
+    that pins the cause down, the same convention `suite_test.go` uses for
+    skips. `reasonUnmodeledMarshaler` lives in `internal/fuzzshape`'s test,
+    beside the guard over drawn shapes that enforces it;
+    `reasonStructOfPromotion` lives in `fuzz_shape_test.go` with the rig. The
     `StructOf` limitation is a property of the harness, not of the package, and
     deliberately does not appear in `doc.go` or `README.md`.
   - The phase-level rig (`internal/fieldset/fieldset_test.go`, in-package on the

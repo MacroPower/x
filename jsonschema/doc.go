@@ -122,18 +122,12 @@
 //   - [WithDefinitions] controls $defs/$ref extraction (default: true).
 //   - [WithAdditionalProperties] controls whether extra keys are allowed on
 //     object schemas (default: false, disallowing extra keys).
-//   - [WithNullable] controls whether pointer occurrences and intercepted
-//     interface types accept null (default: true; false drops the null
-//     branch). Slices, maps, and []byte take no null under the default
-//     marshal options, where a nil one marshals as its empty instance; see
-//     [WithJSONOptions].
 //   - [WithJSONOptions] makes generation honor the [encoding/json/v2]
 //     marshal options that change output shape (FormatNilSliceAsNull,
 //     FormatNilMapAsNull, OmitZeroStructFields), so the schema matches
 //     the marshal under the same options; shape-changing options
 //     generation does not model are refused with
-//     [ErrUnsupportedJSONOption], and [WithNullable](false) still drops
-//     every null branch.
+//     [ErrUnsupportedJSONOption].
 //   - [WithDefaultsFrom] seeds root property defaults from an instance of the
 //     generated type: after generation the instance is marshaled with
 //     [encoding/json/v2] (under the [WithJSONOptions] options, so seeded
@@ -146,9 +140,9 @@
 //     instance ([], {}, ""), which seeds like any other value. A nil pointer
 //     or interface carrying neither omitempty nor omitzero marshals to JSON
 //     null. That null leaves a property admitting no null untouched, so the
-//     property keeps whatever default its tag wrote. [WithNullable](false)
-//     takes the null branch off every pointer property, and a [NullForbidden]
-//     stance takes it off every occurrence of the type it covers. An instance
+//     property keeps whatever default its tag wrote. A [NullForbidden]
+//     stance takes the null branch off every occurrence of the type it
+//     covers. An instance
 //     whose pointer-dereferenced type is not the generated type, or that does
 //     not marshal to a JSON object, returns an error wrapping
 //     [ErrInvalidDefaultsInstance]. A pointer root's nullable anyOf wrapper
@@ -224,9 +218,11 @@
 //   - Structs: produce objects with properties, required, and
 //     additionalProperties: false by default.
 //
-// The "nullable" behavior of pointers and intercepted interfaces above is the
-// default; [WithNullable](false) drops the null branch so *T yields the bare
-// value schema.
+// A pointer or intercepted interface occurrence always admits null, since a
+// nil one marshals as null; a [NullForbidden] stance on the type is what
+// drops the branch, so *T yields the bare value schema. Slices, maps, and
+// []byte take no null under the default marshal options, where a nil one
+// marshals as its empty instance; see [WithJSONOptions].
 //
 // Well-known types have built-in overrides: [time.Time] maps to
 // {"type": "string", "format": "date-time"}, [encoding/json.RawMessage] to {},
@@ -426,8 +422,9 @@
 // alone cannot express (the type is a string kind and the coerced base is a
 // string schema, so only the flag says the instance is a quoted number).
 // Whether a pointer or interface occurrence admits null is the generator's
-// decision rather than the Go type's ([WithNullable], a [Nullability]
-// stance), so [ShapeOf] reports only the pointer occurrences as admitting
+// decision rather than the Go type's (a [Nullability] stance, a
+// [WithJSONOptions] format flag), so [ShapeOf] reports only the pointer
+// occurrences as admitting
 // null, which is also what a context the generator did not build falls back
 // to. A field
 // referencing the type it belongs to reads its null admission before that type
@@ -691,10 +688,8 @@
 // [encoding/json.RawMessage] refuses it even though the {} it produces
 // admits null. A [Nullability] stance moves the decision either way, so a
 // value field of a [NullAllowed] type takes the literal and a pointer to a
-// [NullForbidden] one does not. Whatever else turns the decision off takes
-// the literal with it, so a null literal is an error under
-// [WithNullable](false) and on a [TypeSchema.Verbatim] payload, which
-// carries no null encoding at all.
+// [NullForbidden] one does not. A [TypeSchema.Verbatim] payload carries no
+// null encoding at all, so a null literal is an error on it too.
 //
 // The shape a container names rejects a const before the parser reads the
 // value, so const=null fails there for the same reason const=5 does, on a
@@ -703,10 +698,10 @@
 // own Go type rather than from the container's decision.
 //
 // The element case just named is the one case that takes the literal against a
-// schema admitting no null. A []*string takes a null enum member even under
-// [WithNullable](false), where the element schema has no null branch to match
-// it. The member belongs to the element rather than to the field, so the
-// field's own decision never reaches it.
+// schema admitting no null. A []*string takes a null enum member even where a
+// stance leaves the element schema no null branch to match it. The member
+// belongs to the element rather than to the field, so the field's own
+// decision never reaches it.
 //
 // The generator checks every other literal against the shape the occurrence
 // finally takes. A type= pair replaces the occurrence, so the null admission
@@ -728,9 +723,8 @@
 // and examples keywords there. It refuses a null on a field or element
 // whose reference admits none once the decision is final, and the report
 // names the keyword holding it. The pass refuses on the same terms a
-// reference that admitted no null before the interpreter ran. It also
-// refuses a pointer reference under [WithNullable](false) that no stance
-// grants the null back to. The scan reaches no further than a reference,
+// reference that admitted no null before the interpreter ran. The scan
+// reaches no further than a reference,
 // the one occurrence whose answer can change after an interpreter reads
 // it. Forbidding a null through [Constraints.Forbid] writes under not
 // rather than into a value keyword, so the null stays and renders as a not

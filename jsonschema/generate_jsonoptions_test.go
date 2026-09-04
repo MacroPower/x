@@ -307,17 +307,27 @@ func TestNilContainersNullUnderJSONOptions(t *testing.T) {
 		"the default-options schema must reject null containers")
 }
 
+// stancedSlice and stancedMap are the named containers a NullForbidden stance
+// covers in TestNilContainerNullPrecedence.
+type (
+	stancedSlice []int
+	stancedMap   map[string]int
+)
+
+// TestNilContainerNullPrecedence pins that a NullForbidden stance on a
+// container type wins over the format flag that would otherwise make every
+// occurrence of it admit null.
 func TestNilContainerNullPrecedence(t *testing.T) {
 	t.Parallel()
 
 	type payload struct {
-		Slice []int          `json:"slice"`
-		Map   map[string]int `json:"map"`
-		Ptr   *int           `json:"ptr"`
+		Slice stancedSlice `json:"slice"`
+		Map   stancedMap   `json:"map"`
 	}
 
 	schema, err := jsonschema.GenerateFor[payload](t.Context(),
-		jsonschema.WithNullable(false),
+		forbidNullStance[stancedSlice](),
+		forbidNullStance[stancedMap](),
 		jsonschema.WithJSONOptions(json.FormatNilSliceAsNull(true), json.FormatNilMapAsNull(true)),
 	)
 	require.NoError(t, err)
@@ -325,7 +335,7 @@ func TestNilContainerNullPrecedence(t *testing.T) {
 	out, err := json.Marshal(schema)
 	require.NoError(t, err)
 	assert.NotContains(t, string(out), "null",
-		"WithNullable(false) stays the kill-switch: no null branch anywhere")
+		"a NullForbidden stance drops the null the format flags add")
 }
 
 func TestOmitZeroDropsRequired(t *testing.T) {

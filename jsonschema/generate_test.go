@@ -1384,142 +1384,6 @@ func TestGenerateFor_SliceNullable(t *testing.T) {
 	assert.Equal(t, "array", s.Type)
 }
 
-// NullableOptOut exercises WithNullable(false) on a struct: a pointer to a
-// scalar, a pointer to a $ref'd struct, and a json:",string" pointer field all
-// lose their null branch.
-type NullableOptOut struct {
-	Count *int     `json:"count"`
-	Work  *Address `json:"work"`
-	Port  *int     `json:"port,string"`
-}
-
-func TestGenerateFor_WithNullable(t *testing.T) {
-	t.Parallel()
-
-	// With WithNullable(false), nil-able container types drop the "null" branch
-	// and emit a singular type keyword.
-	t.Run("containers", func(t *testing.T) {
-		t.Parallel()
-
-		tests := map[string]struct {
-			generate func() (*jsonschema.Schema, error)
-			want     string
-		}{
-			"slice": {
-				generate: func() (*jsonschema.Schema, error) {
-					return jsonschema.GenerateFor[[]string](t.Context(), jsonschema.WithNullable(false))
-				},
-				want: `{
-					"$schema":"https://json-schema.org/draft/2020-12/schema",
-					"type":"array",
-					"items":{"type":"string"}
-				}`,
-			},
-			"map": {
-				generate: func() (*jsonschema.Schema, error) {
-					return jsonschema.GenerateFor[map[string]int](t.Context(), jsonschema.WithNullable(false))
-				},
-				want: `{
-					"$schema":"https://json-schema.org/draft/2020-12/schema",
-					"type":"object",
-					"additionalProperties":{"type":"integer"}
-				}`,
-			},
-			"byteSlice": {
-				generate: func() (*jsonschema.Schema, error) {
-					return jsonschema.GenerateFor[[]byte](t.Context(), jsonschema.WithNullable(false))
-				},
-				want: `{
-					"$schema":"https://json-schema.org/draft/2020-12/schema",
-					"type":"string",
-					"contentEncoding":"base64"
-				}`,
-			},
-			// A named, recursive slice forces the extractToDefs path; the $defs
-			// entry must also drop the null branch and the root ref stays bare.
-			"recursiveSliceDefs": {
-				generate: func() (*jsonschema.Schema, error) {
-					return jsonschema.GenerateFor[recursiveSlice](t.Context(), jsonschema.WithNullable(false))
-				},
-				want: `{
-					"$schema":"https://json-schema.org/draft/2020-12/schema",
-					"$ref":"#/$defs/recursiveSlice",
-					"$defs":{
-						"recursiveSlice":{
-							"type":"array",
-							"items":{"$ref":"#/$defs/recursiveSlice"}
-						}
-					}
-				}`,
-			},
-		}
-
-		for name, tc := range tests {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-
-				s, err := tc.generate()
-				require.NoError(t, err)
-
-				got, err := json.Marshal(s)
-				require.NoError(t, err)
-				assert.JSONEq(t, tc.want, string(got))
-			})
-		}
-	})
-
-	// Pointer fields produce bare value schemas, none wrapped in anyOf: *int
-	// inlines, pointer-to-struct is a bare $ref, and json:",string" yields a
-	// plain string.
-	t.Run("pointers", func(t *testing.T) {
-		t.Parallel()
-
-		s, err := jsonschema.GenerateFor[NullableOptOut](t.Context(), jsonschema.WithNullable(false))
-		require.NoError(t, err)
-
-		got, err := json.Marshal(s)
-		require.NoError(t, err)
-		assert.JSONEq(t, `{
-			"$schema":"https://json-schema.org/draft/2020-12/schema",
-			"type":"object",
-			"properties":{
-				"count":{"type":"integer"},
-				"work":{"$ref":"#/$defs/Address"},
-				"port":{"type":"string"}
-			},
-			"required":["count","work","port"],
-			"additionalProperties":false,
-			"$defs":{
-				"Address":{
-					"type":"object",
-					"properties":{
-						"city":{"type":"string"},
-						"state":{"type":"string"}
-					},
-					"required":["city","state"],
-					"additionalProperties":false
-				}
-			}
-		}`, string(got))
-	})
-
-	// The default (and explicit WithNullable(true)) affects only pointer and
-	// interface occurrences; a bare container never admits null under
-	// encoding/json/v2, so the option leaves it bare.
-	t.Run("defaultStillNullable", func(t *testing.T) {
-		t.Parallel()
-
-		s, err := jsonschema.GenerateFor[[]string](t.Context(), jsonschema.WithNullable(true))
-		require.NoError(t, err)
-		assert.Empty(t, s.Types)
-		assert.Equal(t, "array", s.Type)
-
-		ptr, err := jsonschema.GenerateFor[*[]string](t.Context(), jsonschema.WithNullable(true))
-		require.NoError(t, err)
-		assert.Equal(t, []string{"null", "array"}, ptr.Types)
-	})
-}
-
 func TestGenerateFor_Draft7_RefWithAnnotation(t *testing.T) {
 	t.Parallel()
 
@@ -5367,11 +5231,11 @@ func TestWithDefaultsFrom(t *testing.T) {
 			"the instance value wins over the jsonschema tag default")
 	})
 
-	t.Run("pointer root with nullability disabled", func(t *testing.T) {
+	t.Run("pointer root with null forbidden", func(t *testing.T) {
 		t.Parallel()
 
 		s, err := jsonschema.GenerateFor[*defaultsConfig](t.Context(),
-			jsonschema.WithNullable(false),
+			forbidNullStance[defaultsConfig](),
 			jsonschema.WithDefaultsFrom(defaultsConfig{Host: "localhost"}),
 		)
 		require.NoError(t, err)

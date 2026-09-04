@@ -136,8 +136,8 @@ type Shape struct {
 	// field: the input it hands internal/tagparse, and FieldContext.Shape.
 	// The override is what makes Nullable true for an interface occurrence or
 	// a NullAllowed stance, neither of which is a pointer type, and false for
-	// a pointer field under WithNullable(false), whose schema the generator
-	// gives no null branch. A bare slice, map, or byte slice is not nullable
+	// a pointer to a NullForbidden type, whose schema the generator gives no
+	// null branch. A bare slice, map, or byte slice is not nullable
 	// under the default marshal options, where encoding/json/v2 marshals a
 	// nil one as its empty instance; the generator's WithJSONOptions with
 	// FormatNilSliceAsNull or FormatNilMapAsNull makes the parent's override

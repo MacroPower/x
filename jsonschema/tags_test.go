@@ -1907,13 +1907,17 @@ type nullStanced struct {
 	X string `json:"x"`
 }
 
+// nullStancedString is the string counterpart, for an element occurrence
+// whose stance leaves it no null branch.
+type nullStancedString string
+
 // TestTagNullLiteralFollowsTheNullDecision pins where the tag's null literal is
 // a value the field can hold. A scalar key spells null wherever the occurrence
 // admits one, and which occurrences those are is the generator's decision
 // rather than the Go type's. A bare slice, map, byte slice, or interface is
-// nilable without being a pointer, and WithNullable(false), a NullForbidden
-// stance, and a verbatim payload each turn the decision off. Each switch gets a
-// pair of rows running the same tag against the same field shape.
+// nilable without being a pointer, and a NullForbidden stance and a verbatim
+// payload each turn the decision off. Each switch gets a pair of rows running
+// the same tag against the same field shape.
 //
 // Default and examples both reach the literal through Shape.ParseScalar, so
 // one examples row per direction stands in for the type roster the default
@@ -2014,75 +2018,12 @@ func TestTagNullLiteralFollowsTheNullDecision(t *testing.T) {
 			},
 			err: "cannot assign null to non-nullable type slice",
 		},
-		"null examples member with the null branch dropped": {
-			generate: func() (*jsonschema.Schema, error) {
-				type T struct {
-					V []string `json:"v" jsonschema:"examples=null"`
-				}
-
-				return jsonschema.GenerateFor[T](t.Context(), jsonschema.WithNullable(false))
-			},
-			err: "cannot assign null",
-		},
-		"null default on a slice with the null branch dropped": {
-			generate: func() (*jsonschema.Schema, error) {
-				type T struct {
-					V []string `json:"v" jsonschema:"default=null"`
-				}
-
-				return jsonschema.GenerateFor[T](t.Context(), jsonschema.WithNullable(false))
-			},
-			err: "cannot assign null",
-		},
-		"null default on a map with the null branch dropped": {
-			generate: func() (*jsonschema.Schema, error) {
-				type T struct {
-					V map[string]int `json:"v" jsonschema:"default=null"`
-				}
-
-				return jsonschema.GenerateFor[T](t.Context(), jsonschema.WithNullable(false))
-			},
-			err: "cannot assign null",
-		},
-		"null default on a byte slice with the null branch dropped": {
-			generate: func() (*jsonschema.Schema, error) {
-				type T struct {
-					V []byte `json:"v" jsonschema:"default=null"`
-				}
-
-				return jsonschema.GenerateFor[T](t.Context(), jsonschema.WithNullable(false))
-			},
-			err: "cannot assign null",
-		},
-		"null default on an interface with the null branch dropped": {
-			generate: func() (*jsonschema.Schema, error) {
-				type T struct {
-					V any `json:"v" jsonschema:"default=null"`
-				}
-
-				return jsonschema.GenerateFor[T](t.Context(), jsonschema.WithNullable(false))
-			},
-			err: "cannot assign null",
-		},
-		// The pointer occurrence answers the same decision. With the null branch
-		// dropped its schema is a bare integer, which a null default could
-		// never be an instance of.
-		"null default on a pointer with the null branch dropped": {
-			generate: func() (*jsonschema.Schema, error) {
-				type T struct {
-					V *int `json:"v" jsonschema:"default=null"`
-				}
-
-				return jsonschema.GenerateFor[T](t.Context(), jsonschema.WithNullable(false))
-			},
-			err: "cannot assign null",
-		},
-		// WithNullable is not the only switch. A type declaring NullForbidden
-		// gives every occurrence of itself a schema with no null branch, and the
-		// generator emits a verbatim payload as authored, with no null encoding
-		// at all, so a pointer to either holds no null for the literal to name.
-		// A stance moves the decision the other way too, which the NullAllowed
-		// row below takes on a field that is not a pointer at all.
+		// A type declaring NullForbidden gives every occurrence of itself a
+		// schema with no null branch, and the generator emits a verbatim
+		// payload as authored, with no null encoding at all, so a pointer to
+		// either holds no null for the literal to name. A stance moves the
+		// decision the other way too, which the NullAllowed row below takes on
+		// a field that is not a pointer at all.
 		"null default on a pointer to a null-forbidding type": {
 			generate: func() (*jsonschema.Schema, error) {
 				type T struct {
@@ -2190,13 +2131,17 @@ func TestTagNullLiteralFollowsTheNullDecision(t *testing.T) {
 			},
 			err: "cannot assign null to non-nullable type string",
 		},
-		"null enum member on a slice of pointers with the null branch dropped": {
+		"null enum member on a slice of pointers to a null-forbidding type": {
 			generate: func() (*jsonschema.Schema, error) {
 				type T struct {
-					V []*string `json:"v" jsonschema:"enum=a|null"`
+					V []*nullStancedString `json:"v" jsonschema:"enum=a|null"`
 				}
 
-				return jsonschema.GenerateFor[T](t.Context(), jsonschema.WithNullable(false))
+				return jsonschema.GenerateFor[T](t.Context(),
+					jsonschema.WithTypeSchemaFor[nullStancedString](jsonschema.TypeSchema{
+						Value:       &jsonschema.Schema{Type: "string"},
+						Nullability: jsonschema.NullForbidden,
+					}))
 			},
 			prop: "v",
 			want: `{"type":"array","items":{"type":"string","enum":["a",null]}}`,
