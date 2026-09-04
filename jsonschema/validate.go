@@ -1759,10 +1759,14 @@ func normalizeAndCheck(instance any) (any, error) {
 	return instance, nil
 }
 
-// validateNormalized validates an already-normalized, accepted instance,
+// validateNormalized validates an instance already in accepted form,
 // returning nil on success or the assembled *ValidationError. The one-shot
-// [Validate] entry point calls it directly so an instance it already normalized
-// is not walked a second time.
+// [Validate] entry point calls it directly so an instance it already
+// normalized is not walked a second time, and [Validator.ValidateJSON] and
+// [Validator.ValidateReader] call it directly because a decoded tree is
+// already in accepted form. [normalize.DecodeJSONInstance] emits only nil,
+// bool, string, [jsonv1.Number], map[string]any, and []any, with no shared
+// containers.
 func (c *Validator) validateNormalized(ctx context.Context, instance any) error {
 	v := c.proto.forInstance(ctx)
 
@@ -1782,7 +1786,9 @@ func (c *Validator) validateNormalized(ctx context.Context, instance any) error 
 }
 
 // ValidateJSON decodes data as a JSON instance (numbers as [jsonv1.Number]) and
-// validates it against the compiled schema.
+// validates it against the compiled schema. The decoded tree is already in
+// the form [Validator.Validate] accepts, so it goes to the walk without the
+// normalization pass a Go value gets.
 //
 // The context is passed to the [RefResolver] for remote refs reached during
 // this validation run (see [Validator.Validate]).
@@ -1792,7 +1798,10 @@ func (c *Validator) ValidateJSON(ctx context.Context, data []byte) error {
 		return err //nolint:wrapcheck // DecodeJSONInstance already wraps with "JSON decode:".
 	}
 
-	return c.Validate(ctx, instance)
+	// Call validateNormalized, not c.Validate. The decoder emits only nil,
+	// bool, string, jsonv1.Number, map[string]any, and []any, so a second
+	// normalization walk could neither change nor reject the tree.
+	return c.validateNormalized(ctx, instance)
 }
 
 // ValidateReader applies [Validator.ValidateJSON]'s discipline to an
@@ -1800,7 +1809,9 @@ func (c *Validator) ValidateJSON(ctx context.Context, data []byte) error {
 // rejecting data after the single top-level value, duplicate object member
 // names, and invalid UTF-8, then validating against the compiled schema. A
 // read error returns wrapped, without a validation verdict, and does not
-// unwrap to [*ValidationError].
+// unwrap to [*ValidationError]. The decoded tree is already in the form
+// [Validator.Validate] accepts, so it goes to the walk without the
+// normalization pass a Go value gets.
 //
 // The context is passed to the [RefResolver] for remote refs reached during
 // this validation run (see [Validator.Validate]).
@@ -1810,7 +1821,9 @@ func (c *Validator) ValidateReader(ctx context.Context, r io.Reader) error {
 		return err //nolint:wrapcheck // DecodeJSONInstanceReader already wraps with "JSON decode:".
 	}
 
-	return c.Validate(ctx, instance)
+	// Call validateNormalized, not c.Validate, on the same terms as
+	// ValidateJSON, since the decoder emits only accepted shapes.
+	return c.validateNormalized(ctx, instance)
 }
 
 // ValidateValue marshals v with [encoding/json/v2] and validates its JSON
