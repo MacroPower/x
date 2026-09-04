@@ -8,6 +8,7 @@ import (
 	"slices"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/normalize"
+	"go.jacobcolvin.com/x/jsonschema/internal/schemaclone"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemafield"
 	"go.jacobcolvin.com/x/jsonschema/internal/tagmodel"
 )
@@ -33,14 +34,31 @@ const (
 	kindRef
 )
 
+// fallbackSlot names the extra-member keyword an object node's embedded
+// fallback value renders into.
+type fallbackSlot uint8
+
+const (
+	// A slotNone object carries no fallback value node.
+	slotNone fallbackSlot = iota
+	// A slotAdditional object renders its fallback value as
+	// additionalProperties.
+	slotAdditional
+	// A slotUnevaluated object renders its fallback value as
+	// unevaluatedProperties.
+	slotUnevaluated
+)
+
 // node is one position in the generation IR. Build produces a node tree
 // carrying intent; render walks it to a final [Schema]. Each node owns a bare
-// payload (no null wrapper, no final $ref string). For a composite node the
-// payload's sub-schema fields hold the child nodes' payloads, the same
-// pointers, so field and element hooks navigate and mutate the shared bare
-// leaves in place during build.
+// payload (no null wrapper, no final $ref string) that nothing outside the
+// node shares. A composite node's child positions live on the node (items,
+// props, prefix), never in the payload's own sub-schema slots, which hold only
+// what a hook authored there as a literal. A hook that needs the structure
+// gets a [node.view], a private copy with each child slot filled from the
+// child's own view.
 type node struct {
-	payload *Schema   // bare type-derived payload; sub-schema fields hold child payloads (shared)
+	payload *Schema   // bare type-derived payload; child slots are node-backed, not stored here
 	def     *defEntry // non-nil iff kindRef
 	items   *node     // slice element / map value / object fallback value
 	// The authored canvas carries the field-level facts that field and element
@@ -78,6 +96,9 @@ type node struct {
 	embeds   []embedNode // struct allOf/anyOf composition branches
 
 	kind nodeKind
+	// Fallback names the extra-member slot an object's fallback value node
+	// (items) renders into.
+	fallback fallbackSlot
 	// Nullable is the single deferred null decision for a non-kindRef node; base
 	// selects the encoding render applies when it is set. A kindRef node instead
 	// carries ptrNullable and resolves its decision lazily in nullableDecision,
@@ -335,6 +356,238 @@ func walkNodes(root *node, seen map[*defEntry]bool, visit func(*node)) {
 
 	for _, e := range root.embeds {
 		walkNodes(e.branch, seen, visit)
+	}
+}
+
+// view returns a private copy of the node's bare base for a hook: a deep clone
+// of the payload, with each node-backed child slot holding the child's own
+// view and a ref child as its provisional $ref. The tuple form follows the
+// draft. A hook may mutate the copy freely; the generator reads a declaration
+// back from it only where it chooses to ([node.absorbView]).
+func (n *node) view(draft Draft) *Schema {
+	v := schemaclone.Clone(n.payload)
+
+	switch n.kind {
+	case kindObject:
+		if len(n.props) > 0 && v.Properties == nil {
+			v.Properties = make(map[string]*Schema, len(n.props))
+		}
+
+		for _, p := range n.props {
+			v.Properties[p.name] = p.schema.view(draft)
+		}
+
+		if n.items != nil {
+			switch n.fallback {
+			case slotAdditional:
+				v.AdditionalProperties = n.items.view(draft)
+			case slotUnevaluated:
+				v.UnevaluatedProperties = n.items.view(draft)
+			case slotNone:
+			}
+		}
+
+	case kindList:
+		if n.items != nil {
+			v.Items = n.items.view(draft)
+		}
+
+	case kindMap:
+		if n.items != nil {
+			v.AdditionalProperties = n.items.view(draft)
+		}
+
+	case kindTuple:
+		elems := make([]*Schema, len(n.prefix))
+		for i, c := range n.prefix {
+			elems[i] = c.view(draft)
+		}
+
+		if draft == Draft7 {
+			v.ItemsArray = elems
+		} else {
+			v.PrefixItems = elems
+		}
+
+	case kindValue, kindRef:
+	}
+
+	return v
+}
+
+// absorbView takes a hook's edited view as the node's new base and classifies
+// each child slot against the pristine view it was handed. A slot equal to the
+// pristine one is node-backed and leaves the base, so render fills it from the
+// child. A slot that kept every pristine field and only gained fields is
+// node-backed too, and the gained fields land on the child's own base, where
+// the hook would have written them before the base was private. An absent
+// slot drops the child. Anything else, a cyclic slot included (upstream
+// MarshalJSON does not terminate on a cycle, so no comparison runs over one),
+// stays in the base as the literal the hook authored and the child is
+// dropped.
+func (n *node) absorbView(edited, pristine *Schema, draft Draft) {
+	n.payload = edited
+
+	switch n.kind {
+	case kindObject:
+		n.absorbProps(edited, pristine)
+		n.absorbFallback(edited, pristine)
+
+	case kindList:
+		if n.items != nil && !absorbSlot(n.items, &edited.Items, pristine.Items) {
+			n.items = nil
+		}
+
+	case kindMap:
+		if n.items != nil && !absorbSlot(n.items, &edited.AdditionalProperties, pristine.AdditionalProperties) {
+			n.items = nil
+		}
+
+	case kindTuple:
+		n.absorbPrefix(edited, pristine, draft)
+
+	case kindValue, kindRef:
+	}
+}
+
+// absorbProps classifies an object's property slots. A dropped property keeps
+// whatever the hook left in the base's map, and a node-backed one is deleted
+// from it so render fills it from the child.
+func (n *node) absorbProps(edited, pristine *Schema) {
+	kept := n.props[:0]
+
+	for _, p := range n.props {
+		slot, ok := edited.Properties[p.name]
+		if !ok {
+			continue
+		}
+
+		if absorbSlot(p.schema, &slot, pristine.Properties[p.name]) {
+			delete(edited.Properties, p.name)
+
+			kept = append(kept, p)
+		}
+	}
+
+	clear(n.props[len(kept):])
+
+	n.props = kept
+}
+
+// absorbFallback classifies an object's fallback value slot.
+func (n *node) absorbFallback(edited, pristine *Schema) {
+	if n.items == nil {
+		return
+	}
+
+	var ok bool
+
+	switch n.fallback {
+	case slotAdditional:
+		ok = absorbSlot(n.items, &edited.AdditionalProperties, pristine.AdditionalProperties)
+	case slotUnevaluated:
+		ok = absorbSlot(n.items, &edited.UnevaluatedProperties, pristine.UnevaluatedProperties)
+	case slotNone:
+	}
+
+	if !ok {
+		n.items = nil
+		n.fallback = slotNone
+	}
+}
+
+// absorbPrefix classifies a tuple's element slots. A hook that changed the
+// element count authored the whole list, which then stays literal.
+func (n *node) absorbPrefix(edited, pristine *Schema, draft Draft) {
+	elems, pristineElems := &edited.PrefixItems, pristine.PrefixItems
+	if draft == Draft7 {
+		elems, pristineElems = &edited.ItemsArray, pristine.ItemsArray
+	}
+
+	if len(*elems) != len(n.prefix) || len(pristineElems) != len(n.prefix) {
+		n.prefix = nil
+
+		return
+	}
+
+	for i, c := range n.prefix {
+		if !absorbSlot(c, &(*elems)[i], pristineElems[i]) {
+			n.prefix = nil
+
+			return
+		}
+	}
+
+	*elems = nil
+}
+
+// absorbSlot classifies one child slot and reports whether it stays
+// node-backed. A node-backed slot is cleared, and its additions, if any, are
+// merged onto the child's base.
+func absorbSlot(child *node, slot **Schema, pristine *Schema) bool {
+	edited := *slot
+	if edited == nil || pristine == nil || schemaclone.FindCycle(edited) != nil {
+		return false
+	}
+
+	adds, ok := schemaAdditions(edited, pristine)
+	if !ok {
+		return false
+	}
+
+	if adds != nil {
+		mergeSchemaFields(child.payload, adds)
+	}
+
+	*slot = nil
+
+	return true
+}
+
+// schemaAdditions compares edited against pristine field by field. It reports
+// false when a field set on pristine differs on edited. Otherwise it returns
+// the fields edited gained, or nil when the two are equal.
+func schemaAdditions(edited, pristine *Schema) (*Schema, bool) {
+	ev, pv := reflect.ValueOf(edited).Elem(), reflect.ValueOf(pristine).Elem()
+
+	var adds *Schema
+
+	for i := range ev.NumField() {
+		ef, pf := ev.Field(i), pv.Field(i)
+		if !ef.CanSet() {
+			continue
+		}
+
+		if pf.IsZero() {
+			if ef.IsZero() {
+				continue
+			}
+
+			if adds == nil {
+				adds = &Schema{}
+			}
+
+			reflect.ValueOf(adds).Elem().Field(i).Set(ef)
+
+			continue
+		}
+
+		if !reflect.DeepEqual(ef.Interface(), pf.Interface()) {
+			return nil, false
+		}
+	}
+
+	return adds, true
+}
+
+// mergeSchemaFields sets every non-zero field of src on dst.
+func mergeSchemaFields(dst, src *Schema) {
+	dv, sv := reflect.ValueOf(dst).Elem(), reflect.ValueOf(src).Elem()
+
+	for i := range sv.NumField() {
+		if sf := sv.Field(i); sf.CanSet() && !sf.IsZero() {
+			dv.Field(i).Set(sf)
+		}
 	}
 }
 

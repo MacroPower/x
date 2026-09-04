@@ -696,7 +696,7 @@ func (fc FieldContext) ElementContexts() []FieldContext {
 		return FieldContext{
 			Type:   elemType,
 			Canvas: child.authored,
-			Base:   child.payload,
+			Base:   child.view(fc.Draft),
 			Draft:  fc.Draft,
 			node:   child,
 		}

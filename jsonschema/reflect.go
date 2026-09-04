@@ -20,6 +20,7 @@ import (
 	"go.jacobcolvin.com/x/jsonschema/internal/jsonprobe"
 	"go.jacobcolvin.com/x/jsonschema/internal/numkind"
 	"go.jacobcolvin.com/x/jsonschema/internal/reflectkind"
+	"go.jacobcolvin.com/x/jsonschema/internal/schemaclone"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemashape"
 	"go.jacobcolvin.com/x/jsonschema/internal/tagparse"
 	"go.jacobcolvin.com/x/jsonschema/internal/typename"
@@ -451,7 +452,7 @@ func (g *generator) schemaForType(t reflect.Type, nullable bool) (*node, error) 
 		// applies the null wrapper afterward, where a type-level keyword cannot
 		// reject the permitted null. An extender may also declare a nullability
 		// stance, folded into the node's null decision below.
-		stance, err := g.extendTypeSchema(t, n.payload)
+		stance, err := g.extendTypeSchema(t, n)
 		if err != nil {
 			return nil, err
 		}
@@ -741,7 +742,7 @@ func (g *generator) handleBuiltinType(t reflect.Type, s *Schema, nullable bool) 
 		}
 	}
 
-	stance, err := g.extendTypeSchema(t, s)
+	stance, err := g.extendTypeSchema(t, value)
 	if err != nil {
 		return nil, err
 	}
@@ -950,7 +951,7 @@ func (g *generator) schemaForSlice(t reflect.Type, nullable bool) (*node, error)
 
 	return &node{
 		kind:     kindList,
-		payload:  &Schema{Items: items.payload},
+		payload:  &Schema{},
 		items:    items,
 		nullable: nullable,
 		base:     typename.Array,
@@ -982,7 +983,6 @@ func (g *generator) schemaForArray(t reflect.Type, nullable bool) (*node, error)
 	n := t.Len()
 
 	prefix := make([]*node, n)
-	elems := make([]*Schema, n)
 
 	for i := range prefix {
 		item, err := g.schemaForType(t.Elem(), false)
@@ -991,18 +991,12 @@ func (g *generator) schemaForArray(t reflect.Type, nullable bool) (*node, error)
 		}
 
 		prefix[i] = item
-		elems[i] = item.payload
 	}
 
 	s := &Schema{
 		Type:     typename.Array,
 		MinItems: new(n),
 		MaxItems: new(n),
-	}
-	if !g.profile.prefixItemsTuple {
-		s.ItemsArray = elems
-	} else {
-		s.PrefixItems = elems
 	}
 
 	// A fixed array is not nil-able in Go, so its null (a pointer to it) uses the
@@ -1024,7 +1018,7 @@ func (g *generator) schemaForMap(t reflect.Type, nullable bool) (*node, error) {
 
 	return &node{
 		kind:     kindMap,
-		payload:  &Schema{AdditionalProperties: val.payload},
+		payload:  &Schema{},
 		items:    val,
 		nullable: g.containerNullable(nullable, g.nilMapNull),
 		base:     typename.Object,
@@ -1086,11 +1080,11 @@ func (g *generator) schemaForStruct(t reflect.Type, nullable bool) (*node, error
 }
 
 // buildStructSchema builds the object node for a struct type, including
-// type-level comment extraction and JSONSchemaExtend. The payload's Properties
-// hold the child nodes' bare payloads (shared pointers), so a tag interpreter
-// reading FieldContext.Parent sees the sibling shapes; render later overwrites
-// each entry still holding its provisional payload with its rendered child,
-// leaving an entry a type-level extender deleted or replaced as authored.
+// type-level comment extraction and JSONSchemaExtend. The field nodes hang off
+// the object node's props; a field hook that reads the enclosing object
+// (FieldContext.Parent) sees a view of it with every sibling's bare shape, and
+// a type-level extender sees a view of the whole object, whose edits
+// [node.absorbView] reads back.
 func (g *generator) buildStructSchema(t reflect.Type) (*node, Nullability, error) {
 	s := &Schema{
 		Type: typename.Object,
@@ -1119,10 +1113,11 @@ func (g *generator) buildStructSchema(t reflect.Type) (*node, Nullability, error
 
 	// Process fields using encoding/json rules.
 	//
-	// Two passes: first build every field's schema and populate Properties,
-	// then run tag interpreters. This ensures a tag interpreter observing
-	// FieldContext.Parent sees the complete sibling property set regardless of
-	// field order.
+	// Three passes: build every field's node, run the field description
+	// provider and the jsonschema tag over each, then run the tag
+	// interpreters. A hook observing FieldContext.Parent sees the complete
+	// sibling set regardless of field order, and an interpreter sees every
+	// sibling as the tag left it.
 	resolved, err := g.fields.Of(t)
 	if err != nil {
 		if probed {
@@ -1156,11 +1151,6 @@ func (g *generator) buildStructSchema(t reflect.Type) (*node, Nullability, error
 
 	var hasAllOf, hasShadowPartial bool
 
-	type pendingField struct {
-		node *node
-		fi   fieldset.Field
-	}
-
 	var pending []pendingField
 
 	for idx := range fields {
@@ -1176,18 +1166,38 @@ func (g *generator) buildStructSchema(t reflect.Type) (*node, Nullability, error
 			continue
 		}
 
-		fieldNode, err := g.buildFieldSchema(t, fields[idx], obj)
+		pf, err := g.buildFieldSchema(t, fields[idx], obj)
 		if err != nil {
 			return nil, NullFromReflection, fmt.Errorf("field %q: %w", fields[idx].JSONName, err)
 		}
 
-		pending = append(pending, pendingField{fi: fields[idx], node: fieldNode})
+		pending = append(pending, pf)
 	}
+
+	parentView := obj.view(g.draft)
 
 	for i := range pending {
 		pf := &pending[i]
 
-		err := g.applyFieldInterpreters(t, pf.fi, pf.node, obj)
+		err := g.applyFieldDescription(t, pf.fi, pf.node, parentView)
+		if err != nil {
+			return nil, NullFromReflection, err
+		}
+
+		err = g.applyFieldTag(pf, obj)
+		if err != nil {
+			return nil, NullFromReflection, fmt.Errorf("field %q: %w", pf.fi.JSONName, err)
+		}
+	}
+
+	// The tag pass can rebuild a node under a type= override, so the
+	// interpreters get a view taken after it.
+	parentView = obj.view(g.draft)
+
+	for i := range pending {
+		pf := &pending[i]
+
+		err := g.applyFieldInterpreters(t, pf.fi, pf.node, parentView, obj)
 		if err != nil {
 			return nil, NullFromReflection, fmt.Errorf("field %q: %w", pf.fi.JSONName, err)
 		}
@@ -1247,8 +1257,8 @@ func (g *generator) buildStructSchema(t reflect.Type) (*node, Nullability, error
 			// value schema judges exactly the unevaluated rest: the spliced
 			// members (a fallback key colliding with a named field is a
 			// marshal-time duplicate-name error and never appears).
-			s.UnevaluatedProperties = fallbackNode.payload
 			obj.items = fallbackNode
+			obj.fallback = slotUnevaluated
 
 			punchGhostWon()
 
@@ -1258,8 +1268,8 @@ func (g *generator) buildStructSchema(t reflect.Type) (*node, Nullability, error
 			// embed-promoted names.
 
 		default:
-			s.AdditionalProperties = fallbackNode.payload
 			obj.items = fallbackNode
+			obj.fallback = slotAdditional
 		}
 
 	case hasAllOf:
@@ -1293,7 +1303,7 @@ func (g *generator) buildStructSchema(t reflect.Type) (*node, Nullability, error
 	// JSONSchemaExtend, then registered extenders. An extender may declare a
 	// nullability stance, returned for the caller to fold into the reference or
 	// inline node's null decision.
-	stance, err := g.extendTypeSchema(t, s)
+	stance, err := g.extendTypeSchema(t, obj)
 	if err != nil {
 		return nil, NullFromReflection, err
 	}
@@ -1333,15 +1343,30 @@ func (g *generator) needsAllOfComposition(t reflect.Type) bool {
 	return false
 }
 
-// buildFieldSchema generates a struct field's schema, applies the json:",string"
-// override, comment extraction, and jsonschema struct tag, then registers it in
-// the parent's Properties/PropertyOrder and required list. Tag interpreters run
-// later in applyFieldInterpreters once all sibling properties exist.
+// pendingField is a struct field whose node is built and whose field-level
+// hooks (the description provider, the jsonschema tag, the tag interpreters)
+// have yet to run.
+type pendingField struct {
+	node *node
+	// TagTypeSchema is the corrected type view the jsonschema tag classifies a
+	// ",string" pointer against, nil for every other field.
+	tagTypeSchema *Schema
+	fi            fieldset.Field
+	// StringOverride records that the json:",string" option coerced the field
+	// to a string schema.
+	stringOverride bool
+}
+
+// buildFieldSchema generates a struct field's node, applies the json:",string"
+// override, and registers it in the parent's props, PropertyOrder, and
+// required list. The field-level hooks run later, once every sibling exists:
+// the description provider and the jsonschema tag in [generator.applyFieldTag],
+// then the tag interpreters in [generator.applyFieldInterpreters].
 func (g *generator) buildFieldSchema(
 	parentType reflect.Type,
 	fi fieldset.Field,
 	parent *node,
-) (*node, error) {
+) (pendingField, error) {
 	fieldType := fi.StructField.Type
 	isPointer := fieldType.Kind() == reflect.Pointer
 
@@ -1396,7 +1421,7 @@ func (g *generator) buildFieldSchema(
 	if fi.JSONString {
 		fieldNode, stringOverride, err = g.stringOptionField(fi)
 		if err != nil {
-			return nil, err
+			return pendingField{}, err
 		}
 	}
 
@@ -1429,7 +1454,7 @@ func (g *generator) buildFieldSchema(
 	default:
 		fieldNode, err = g.schemaForType(fieldType, false)
 		if err != nil {
-			return nil, err
+			return pendingField{}, err
 		}
 	}
 
@@ -1449,63 +1474,7 @@ func (g *generator) buildFieldSchema(
 		field:  fi.JSONName,
 	})
 
-	// 2. Field-level comment.
-	err = g.applyFieldDescription(parentType, fi, fieldNode, parent.payload)
-	if err != nil {
-		return nil, err
-	}
-
-	// 3. Schema struct tag. Facts land on the authored canvas; a type= override
-	// restructures the type-derived payload (it replaces the reflected assertion),
-	// so it takes the payload directly.
-	if tag, ok := fi.StructField.Tag.Lookup("jsonschema"); ok {
-		res, err := tagparse.Apply(tagparse.Input{
-			Tag:        tag,
-			FieldType:  fieldType,
-			Canvas:     fieldNode.authored,
-			Payload:    fieldNode.payload,
-			TypeSchema: tagTypeSchema,
-			Quoted:     stringOverride,
-			// FieldContext.Shape reads this same decision, so a field's null
-			// admission is one answer whichever site classifies it.
-			Nullable: fieldNode.nullableDecision(),
-		})
-		if err != nil {
-			// Tagparse carries its own ErrInvalidType sentinel; map it onto the
-			// package's exported ErrInvalidType so errors.Is keeps working.
-			if errors.Is(err, tagparse.ErrInvalidType) {
-				err = fmt.Errorf("%w: %w", ErrInvalidType, err)
-			}
-
-			// Tagparse errors already carry the "jsonschema tag:" prefix.
-			return nil, err
-		}
-
-		// The two outcomes are exclusive. [tagparse.Apply] rejects the tag for
-		// every type but null when it carries both a type= pair and a null
-		// literal, and under type=null it reports no keys.
-		switch {
-		case res.TypeOverridden:
-			// A type= override replaces the field's type wholesale, so the
-			// field is inline, neither a reference nor nullable.
-			fieldNode = rebuildOverriddenField(fieldNode)
-
-		case len(res.NullLiteralKeys) > 0:
-			// The tag reads the null decision before a self-referential type
-			// finishes recording its stance, so the node carries the keys that
-			// took a null literal into checkNullLiterals.
-			fieldNode.nullKeys = res.NullLiteralKeys
-		}
-	}
-
-	// Add to parent. The payload (bare) is shared into parent.Properties so a
-	// build-time interpreter sees the sibling shape; render overwrites the
-	// entry unless an extender deleted or replaced it.
-	if parent.payload.Properties == nil {
-		parent.payload.Properties = map[string]*Schema{}
-	}
-
-	// Encoding/json/v2's omitempty omits a field only when its encoded value
+	// Encoding/json/v2's omitempty omits a field only when its encoded value	// Encoding/json/v2's omitempty omits a field only when its encoded value
 	// is an empty JSON value (null, "", {}, []), so a field whose type can
 	// never encode one stays required even under the option. A field promoted
 	// through a pointer embed (Optional) is omitted whole when the embed is
@@ -1518,11 +1487,77 @@ func (g *generator) buildFieldSchema(
 		parent.payload.Required = append(parent.payload.Required, fi.JSONName)
 	}
 
-	parent.payload.Properties[fi.JSONName] = fieldNode.payload
 	parent.payload.PropertyOrder = append(parent.payload.PropertyOrder, fi.JSONName)
 	parent.props = append(parent.props, nodeProp{name: fi.JSONName, schema: fieldNode})
 
-	return fieldNode, nil
+	return pendingField{
+		node:           fieldNode,
+		tagTypeSchema:  tagTypeSchema,
+		fi:             fi,
+		stringOverride: stringOverride,
+	}, nil
+}
+
+// applyFieldTag applies the jsonschema struct tag to a pending field. Facts
+// land on the authored canvas; a type= override restructures the type-derived
+// schema (it replaces the reflected assertion), so the tag works on a view of
+// the field's base, which the generator reads back only under that override,
+// rebuilding the node over it and replacing the parent's entry.
+func (g *generator) applyFieldTag(pf *pendingField, parent *node) error {
+	tag, ok := pf.fi.StructField.Tag.Lookup("jsonschema")
+	if !ok {
+		return nil
+	}
+
+	fieldNode := pf.node
+	view := fieldNode.view(g.draft)
+
+	res, err := tagparse.Apply(tagparse.Input{
+		Tag:        tag,
+		FieldType:  pf.fi.StructField.Type,
+		Canvas:     fieldNode.authored,
+		Payload:    view,
+		TypeSchema: pf.tagTypeSchema,
+		Quoted:     pf.stringOverride,
+		// FieldContext.Shape reads this same decision, so a field's null
+		// admission is one answer whichever site classifies it.
+		Nullable: fieldNode.nullableDecision(),
+	})
+	if err != nil {
+		// Tagparse carries its own ErrInvalidType sentinel; map it onto the
+		// package's exported ErrInvalidType so errors.Is keeps working.
+		if errors.Is(err, tagparse.ErrInvalidType) {
+			err = fmt.Errorf("%w: %w", ErrInvalidType, err)
+		}
+
+		// Tagparse errors already carry the "jsonschema tag:" prefix.
+		return err
+	}
+
+	// The two outcomes are exclusive. [tagparse.Apply] rejects the tag for
+	// every type but null when it carries both a type= pair and a null
+	// literal, and under type=null it reports no keys.
+	switch {
+	case res.TypeOverridden:
+		// A type= override replaces the field's type wholesale, so the
+		// field is inline, neither a reference nor nullable.
+		rebuilt := rebuildOverriddenField(fieldNode, view)
+		pf.node = rebuilt
+
+		for i := range parent.props {
+			if parent.props[i].schema == fieldNode {
+				parent.props[i].schema = rebuilt
+			}
+		}
+
+	case len(res.NullLiteralKeys) > 0:
+		// The tag reads the null decision before a self-referential type
+		// finishes recording its stance, so the node carries the keys that
+		// took a null literal into checkNullLiterals.
+		fieldNode.nullKeys = res.NullLiteralKeys
+	}
+
+	return nil
 }
 
 // stringOptionField answers a field carrying json:",string". It returns the
@@ -1589,39 +1624,45 @@ func kindCanOmit(t reflect.Type) bool {
 }
 
 // rebuildOverriddenField rebuilds a field node after a type= override replaced
-// its type wholesale: a plain value node over the overridden payload, dropping
+// its type wholesale: a plain value node over the overridden view, dropping
 // the def link, children, and null bits in one place, while carrying the
 // authored canvas across. Reachability drops any def the detached ref
-// orphaned. A type=array override on a sequence field keeps the payload's
-// element structure (applyTypeOverride drops it for every other type), and the
-// authored element canvases can carry a redirected element enum; those element
-// nodes are kept so reconcile still composes them per child instead of
-// silently dropping the author's enum.
-func rebuildOverriddenField(fieldNode *node) *node {
+// orphaned. A type=array override on a sequence field keeps the element
+// structure (applyTypeOverride drops it for every other type, which the
+// view's cleared element slot reports), and the authored element canvases can
+// carry a redirected element enum; those element nodes are kept so reconcile
+// still composes them per child instead of silently dropping the author's
+// enum. The view's own element slots are cleared, since render fills them from
+// the kept nodes.
+func rebuildOverriddenField(fieldNode *node, payload *Schema) *node {
 	rebuilt := &node{
 		kind:     kindValue,
-		payload:  fieldNode.payload,
+		payload:  payload,
 		authored: fieldNode.authored,
 		isField:  true,
 	}
 
 	switch {
-	case fieldNode.kind == kindList && fieldNode.payload.Items != nil:
+	case fieldNode.kind == kindList && payload.Items != nil:
 		rebuilt.kind = kindList
 		rebuilt.items = fieldNode.items
+		payload.Items = nil
 
-	case fieldNode.kind == kindTuple &&
-		(len(fieldNode.payload.PrefixItems) > 0 || len(fieldNode.payload.ItemsArray) > 0):
+	case fieldNode.kind == kindTuple && (len(payload.PrefixItems) > 0 || len(payload.ItemsArray) > 0):
 		rebuilt.kind = kindTuple
 		rebuilt.prefix = fieldNode.prefix
+		payload.PrefixItems = nil
+		payload.ItemsArray = nil
 
 	case fieldNode.kind == kindObject && fieldNode.items != nil:
 		// An inline struct field carrying an embedded fallback keeps the
-		// fallback value node, so render still swaps the extra-member slot's
-		// provisional payload for its rendered form (null wrap and final
-		// $ref name included).
+		// fallback value node, so render still fills the extra-member slot
+		// from it (null wrap and final $ref name included).
 		rebuilt.kind = kindObject
 		rebuilt.items = fieldNode.items
+		rebuilt.fallback = fieldNode.fallback
+		payload.AdditionalProperties = nil
+		payload.UnevaluatedProperties = nil
 	}
 
 	return rebuilt
@@ -1630,8 +1671,9 @@ func rebuildOverriddenField(fieldNode *node) *node {
 // fieldContext builds the FieldContext passed to tag interpreters and the
 // description provider for one struct field, computing the declaring type once.
 // Canvas is the field's authored canvas (where a hook declares its facts) and
-// Base is the type-derived payload (read-only); the accessor exposing element
-// canvases reads the field node's element children.
+// Base is a private view of the type-derived base; the accessor exposing
+// element canvases reads the field node's element children. Parent is the
+// caller's view of the enclosing object.
 func (g *generator) fieldContext(
 	parentType reflect.Type,
 	fi fieldset.Field,
@@ -1640,9 +1682,9 @@ func (g *generator) fieldContext(
 ) FieldContext {
 	// A ",string" pointer records its coercion on the node's tagView rather
 	// than the (empty) payload; hooks must see the coerced type to dispatch.
-	base := fieldNode.payload
+	base := fieldNode.view(g.draft)
 	if fieldNode.tagView != nil {
-		base = fieldNode.tagView
+		base = schemaclone.Clone(fieldNode.tagView)
 	}
 
 	return FieldContext{
@@ -1660,21 +1702,34 @@ func (g *generator) fieldContext(
 }
 
 // applyFieldInterpreters runs the registered tag interpreters for a field on its
-// authored canvas. It runs after all field payloads are in place so interpreters
-// see the full parent.Properties. Const/enum placement and the Draft-07 $ref
-// wrap are handled by render, from the complete graph.
+// authored canvas. It runs after every field node is built and tagged, so an
+// interpreter sees the full sibling set through parentView. The one write an
+// interpreter makes through the parent, a name appended to Required, is read
+// back onto the object node after each call. Const/enum placement and the
+// Draft-07 $ref wrap are handled by render, from the complete graph.
 func (g *generator) applyFieldInterpreters(
 	parentType reflect.Type,
 	fi fieldset.Field,
-	fieldNode, parent *node,
+	fieldNode *node,
+	parentView *Schema,
+	parent *node,
 ) error {
 	for _, reg := range g.tagInterpreters {
-		if tag, ok := fi.StructField.Tag.Lookup(reg.key); ok {
-			fc := g.fieldContext(parentType, fi, fieldNode, parent.payload)
+		tag, ok := fi.StructField.Tag.Lookup(reg.key)
+		if !ok {
+			continue
+		}
 
-			err := reg.interp.Interpret(g.ctx, fc, Tag{Key: reg.key, Value: tag})
-			if err != nil {
-				return fmt.Errorf("tag interpreter %q: %w", reg.key, err)
+		fc := g.fieldContext(parentType, fi, fieldNode, parentView)
+
+		err := reg.interp.Interpret(g.ctx, fc, Tag{Key: reg.key, Value: tag})
+		if err != nil {
+			return fmt.Errorf("tag interpreter %q: %w", reg.key, err)
+		}
+
+		for _, name := range parentView.Required {
+			if !slices.Contains(parent.payload.Required, name) {
+				parent.payload.Required = append(parent.payload.Required, name)
 			}
 		}
 	}
@@ -1886,22 +1941,27 @@ func (g *generator) extendType(t reflect.Type, ts *TypeSchema) error {
 	return nil
 }
 
-// extendTypeSchema runs [generator.extendType] over the type-derived payload s,
-// wrapping it in a [TypeSchema] the extenders mutate. It returns the declared
-// [Nullability] stance (NullFromReflection when no extender sets one) for the call
-// site to fold into the node's null decision. An extender that replaces ts.Value
-// with a new pointer is copied back into s in place, since s is the shared
-// payload aliased into the node graph (and, once the field is registered, into
-// the parent's Properties); mutating in place keeps those aliases consistent. An
-// extender that clears ts.Value to nil leaves the payload unchanged, since there
-// is nothing to copy back.
+// extendTypeSchema runs [generator.extendType] over a view of the node's
+// type-derived base, wrapping it in a [TypeSchema] the extenders mutate. It
+// returns the declared [Nullability] stance (NullFromReflection when no
+// extender sets one) for the call site to fold into the node's null decision.
+// The extenders' edits reach the node through [node.absorbView], which reads
+// the view back against a pristine copy; an extender that clears ts.Value to
+// nil leaves the node unchanged, since there is nothing to read back. With no
+// extender registered for the run, nothing is built.
 //
 // The envelope enters with Verbatim and Ref nil: those declare a replacement
 // schema, which only a provider supplies. An extender honors only Value and
 // Nullability, so one that sets Verbatim or Ref is reported as a malformed
 // TypeSchema rather than having the declaration silently ignored.
-func (g *generator) extendTypeSchema(t reflect.Type, s *Schema) (Nullability, error) {
-	ts := &TypeSchema{Value: s}
+func (g *generator) extendTypeSchema(t reflect.Type, n *node) (Nullability, error) {
+	if len(g.typeExtenders) == 0 && !implementsExtender(t) {
+		return NullFromReflection, nil
+	}
+
+	view := n.view(g.draft)
+	pristine := n.view(g.draft)
+	ts := &TypeSchema{Value: view}
 
 	err := g.extendType(t, ts)
 	if err != nil {
@@ -1915,8 +1975,8 @@ func (g *generator) extendTypeSchema(t reflect.Type, s *Schema) (Nullability, er
 		)
 	}
 
-	if ts.Value != nil && ts.Value != s {
-		*s = *ts.Value
+	if ts.Value != nil {
+		n.absorbView(ts.Value, pristine, g.draft)
 	}
 
 	return ts.Nullability, nil

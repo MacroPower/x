@@ -30,25 +30,21 @@ func (g *generator) render(n *node) *Schema {
 }
 
 // renderBase renders a node's shape without the null encoding. For a composite
-// it merges the rendered child nodes into the node's own payload rather than
-// rebuilding it, and only into slots that still hold the child's provisional
-// bare payload. A slot a build-time extender edited -- a property or element
-// deleted, replaced with the extender's own schema, or dropped wholesale by
-// replacing TypeSchema.Value -- is the extender's authored shape and survives
-// as written, as does anything the extender added (not node-backed).
+// it fills the node's own payload slots from the rendered child nodes. A slot
+// a build-time extender authored as a literal (a property replaced with the
+// extender's own schema, say) is no longer node-backed, so it survives in the
+// payload as written.
 func (g *generator) renderBase(n *node) *Schema {
 	switch n.kind {
 	case kindValue:
 		return n.payload
 
 	case kindObject:
-		for _, p := range n.props {
-			// A nil or extender-replaced Properties map misses here too, so a
-			// wholesale Value replacement renders without resurrecting fields.
-			if n.payload.Properties[p.name] != p.schema.payload {
-				continue
-			}
+		if len(n.props) > 0 && n.payload.Properties == nil {
+			n.payload.Properties = make(map[string]*Schema, len(n.props))
+		}
 
+		for _, p := range n.props {
 			n.payload.Properties[p.name] = g.render(p.schema)
 		}
 
@@ -62,33 +58,48 @@ func (g *generator) renderBase(n *node) *Schema {
 		}
 
 		// An embedded fallback's value node fills whichever extra-member slot
-		// the build chose (exactly one of the two).
-		g.renderSlot(&n.payload.AdditionalProperties, n.items)
-		g.renderSlot(&n.payload.UnevaluatedProperties, n.items)
-
-		return n.payload
-
-	case kindList:
-		g.renderSlot(&n.payload.Items, n.items)
-
-		return n.payload
-
-	case kindTuple:
-		elems := n.payload.PrefixItems
-		if !g.profile.prefixItemsTuple {
-			elems = n.payload.ItemsArray
-		}
-
-		for i, c := range n.prefix {
-			if i < len(elems) && elems[i] == c.payload {
-				elems[i] = g.render(c)
+		// the build chose.
+		if n.items != nil {
+			switch n.fallback {
+			case slotAdditional:
+				n.payload.AdditionalProperties = g.render(n.items)
+			case slotUnevaluated:
+				n.payload.UnevaluatedProperties = g.render(n.items)
+			case slotNone:
 			}
 		}
 
 		return n.payload
 
+	case kindList:
+		if n.items != nil {
+			n.payload.Items = g.render(n.items)
+		}
+
+		return n.payload
+
+	case kindTuple:
+		if len(n.prefix) == 0 {
+			return n.payload
+		}
+
+		elems := make([]*Schema, len(n.prefix))
+		for i, c := range n.prefix {
+			elems[i] = g.render(c)
+		}
+
+		if g.profile.prefixItemsTuple {
+			n.payload.PrefixItems = elems
+		} else {
+			n.payload.ItemsArray = elems
+		}
+
+		return n.payload
+
 	case kindMap:
-		g.renderSlot(&n.payload.AdditionalProperties, n.items)
+		if n.items != nil {
+			n.payload.AdditionalProperties = g.render(n.items)
+		}
 
 		return n.payload
 
@@ -99,16 +110,6 @@ func (g *generator) renderBase(n *node) *Schema {
 
 	default:
 		return n.payload
-	}
-}
-
-// renderSlot swaps one payload slot's provisional child payload for the
-// child's rendered form. A slot a build-time extender replaced or deleted no
-// longer holds the child's payload, misses the identity check, and survives
-// as written.
-func (g *generator) renderSlot(slot **Schema, child *node) {
-	if child != nil && *slot == child.payload {
-		*slot = g.render(child)
 	}
 }
 
