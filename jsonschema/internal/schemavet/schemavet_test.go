@@ -12,8 +12,10 @@ import (
 func TestZeroCurrencyIsInert(t *testing.T) {
 	t.Parallel()
 
-	assert.Nil(t, schemavet.Doc{}.Schema())
-	assert.Nil(t, schemavet.Node{}.Schema())
+	assert.Nil(t, schemavet.Doc{}.Root())
+	assert.Nil(t, schemavet.Node{}.Root())
+	assert.Nil(t, schemavet.Doc{}.Frozen())
+	assert.Nil(t, schemavet.Node{}.Frozen())
 }
 
 func TestVetMintsOnlyOnSuccess(t *testing.T) {
@@ -25,21 +27,21 @@ func TestVetMintsOnlyOnSuccess(t *testing.T) {
 
 	node, err := vt.Vet(valid, "")
 	require.NoError(t, err)
-	assert.Same(t, valid, node.Schema())
+	assert.Same(t, valid, node.Root())
 
 	doc, err := schemavet.NewVetter(schemavet.Profile{}).VetDoc(valid, "", "https://example.com/s")
 	require.NoError(t, err)
-	assert.Same(t, valid, doc.Schema())
+	assert.Same(t, valid, doc.Root())
 
 	invalid := &schemavet.Schema{Type: "no-such-type"}
 
 	node, err = schemavet.NewVetter(schemavet.Profile{}).Vet(invalid, "")
 	require.ErrorIs(t, err, schemavet.ErrInvalidType)
-	assert.Nil(t, node.Schema())
+	assert.Nil(t, node.Root())
 
 	doc, err = schemavet.NewVetter(schemavet.Profile{}).VetDoc(invalid, "", "https://example.com/s")
 	require.ErrorIs(t, err, schemavet.ErrInvalidType)
-	assert.Nil(t, doc.Schema())
+	assert.Nil(t, doc.Root())
 }
 
 func TestVetViolationPaths(t *testing.T) {

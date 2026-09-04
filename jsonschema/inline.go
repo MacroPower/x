@@ -623,7 +623,7 @@ func (in *inliner) closureDoc(s *Schema, uri string) error {
 // vetted material reaches the index and the expansion bookkeeping keyed by
 // it, the demand [schemaIndex.extend] makes of the validator's own index.
 func (in *inliner) recordDoc(doc schemavet.Doc, path, docURI string) {
-	in.recordTree(doc.Schema(), path, docURI)
+	in.recordTree(doc.Root(), path, docURI)
 }
 
 // recordNode records a vetted fragment: a JSON-pointer fallback target the
@@ -631,7 +631,7 @@ func (in *inliner) recordDoc(doc schemavet.Doc, path, docURI string) {
 // fragment of a document rather than one of its own and so carries the
 // [schemavet.Node] currency (see [inliner.vetTarget]).
 func (in *inliner) recordNode(node schemavet.Node, path, docURI string) {
-	in.recordTree(node.Schema(), path, docURI)
+	in.recordTree(node.Root(), path, docURI)
 }
 
 // recordTree interns every schema in the pristine document rooted at s into the

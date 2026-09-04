@@ -71,7 +71,7 @@ func (d *schemaIndex) intern(s *Schema) (int, bool) {
 // corrupting the index.
 func (d *schemaIndex) extend(doc schemavet.Doc) int {
 	from := len(d.schemas)
-	d.walk(doc.Schema())
+	d.walk(doc.Root())
 
 	return from
 }

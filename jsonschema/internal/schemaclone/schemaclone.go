@@ -113,6 +113,50 @@ func CloneChecked(s *jsonschema.Schema) (*jsonschema.Schema, *Cycle) {
 	return cp, c.cycle
 }
 
+// Tree is the result of [CloneTree]: a copy in which every schema node has one
+// position, plus the record of which source nodes the walk copied more than
+// once.
+type Tree struct {
+	// Root is the copy.
+	Root *jsonschema.Schema
+
+	// Aliased lists, for each source node the walk reached through more than
+	// one path, every copy it made of that node, in the order the walk made
+	// them. A caller that must refuse a duplicated identifier reads it.
+	Aliased map[*jsonschema.Schema][]*jsonschema.Schema
+}
+
+// CloneTree returns a copy of s in which no schema node is shared: a source
+// node reached through two paths is copied once per path, so the copy is a
+// tree wherever the source was a DAG, and the report names each such node.
+// A cycle has no tree form, so a loop that crosses a schema is reported the
+// way [CloneChecked] reports it and the copy is incomplete; a container that
+// holds itself without crossing a schema copies as a cyclic container, as it
+// does under [Clone], since [encoding/json] refuses that shape on its own.
+//
+// The copy shares the two immutable value kinds [Clone] names and nothing
+// else.
+func CloneTree(s *jsonschema.Schema) (Tree, *Cycle) {
+	c := cloner{
+		copies:      map[*jsonschema.Schema][]*jsonschema.Schema{},
+		onPath:      map[*jsonschema.Schema]int{},
+		onPathValue: map[valueKey]valueEntry{},
+		tree:        true,
+	}
+
+	cp := c.schema(s)
+
+	aliased := map[*jsonschema.Schema][]*jsonschema.Schema{}
+
+	for src, copies := range c.copies {
+		if len(copies) > 1 {
+			aliased[src] = copies
+		}
+	}
+
+	return Tree{Root: cp, Aliased: aliased}, c.cycle
+}
+
 // FindCycle returns the cycle report [CloneChecked] hands back beside its copy,
 // and nothing else. It serves a caller that keeps the graph it was handed
 // rather than a copy, and still has to refuse a cyclic one because something
@@ -142,10 +186,13 @@ var valueKeywords = map[string]string{
 	"Examples": keyword.Examples,
 }
 
-// cloner carries one Clone call's identity memos. The schemas memo pairs each
-// source schema with its copy, and the values memo does the same for the
-// containers held in the any-typed value fields. Both collapse a node reached
-// twice onto one copy, which is also what lets a cyclic walk terminate.
+// cloner carries one copy's identity memos. The schemas memo pairs each source
+// schema with its copy, and the values memo does the same for the containers
+// held in the any-typed value fields. Both collapse a node reached twice onto
+// one copy, which is also what lets a cyclic walk terminate. A tree copy
+// consults neither: it copies a node afresh at every path, records each copy
+// under its source in copies, and reads only the on-path maps, so a back edge
+// is a cycle and every other repeat is a duplicate.
 //
 // The remaining fields track the current path. The two onPath maps are keyed by
 // the schemas and containers the walk is inside and record where the walk
@@ -156,17 +203,21 @@ var valueKeywords = map[string]string{
 type cloner struct {
 	schemas     map[*jsonschema.Schema]*jsonschema.Schema
 	values      map[valueKey]any
+	copies      map[*jsonschema.Schema][]*jsonschema.Schema
 	onPath      map[*jsonschema.Schema]int
 	onPathValue map[valueKey]valueEntry
 	cycle       *Cycle
 	path        []string
 	depth       int
+	tree        bool
 }
 
 // valueEntry records where the walk entered a container. The schema depth tells
-// a back edge that crossed a schema from one that did not, and the path length
-// addresses the container itself.
+// a back edge that crossed a schema from one that did not, the path length
+// addresses the container itself, and cp is the copy being filled, which a
+// tree copy hands back to a back edge that crossed no schema.
 type valueEntry struct {
+	cp      any
 	depth   int
 	pathLen int
 }
@@ -189,14 +240,18 @@ func (c *cloner) reportCycle(entered int) {
 
 // enterValue records a container's copy in the memo and marks the container as
 // being on the current path, so a later hit on it can tell a back edge from a
-// second, independent visit.
+// second, independent visit. A tree copy keeps no memo, so only the path mark
+// is recorded.
 func (c *cloner) enterValue(key valueKey, keyed bool, cp any) {
 	if !keyed {
 		return
 	}
 
-	c.values[key] = cp
-	c.onPathValue[key] = valueEntry{depth: c.depth, pathLen: len(c.path)}
+	if !c.tree {
+		c.values[key] = cp
+	}
+
+	c.onPathValue[key] = valueEntry{cp: cp, depth: c.depth, pathLen: len(c.path)}
 }
 
 // leaveValue takes a filled container off the path. Its memo entry stays, since
@@ -217,6 +272,37 @@ func (c *cloner) revisitValue(key valueKey) {
 	if entry, onPath := c.onPathValue[key]; onPath && c.depth > entry.depth {
 		c.reportCycle(entry.pathLen)
 	}
+}
+
+// hit returns the copy to reuse for a container the walk has met before, and
+// whether there is one. Under the memo any earlier copy serves, and a back
+// edge reports its cycle through revisitValue. A tree copy reuses only a
+// container still being filled: a back edge that crossed a schema is a cycle,
+// reported here and answered with nil since the copy is discarded, and one
+// that crossed none hands back the copy under construction, the shape [Clone]
+// also produces for it. Every other repeat copies afresh.
+func (c *cloner) hit(key valueKey) (any, bool) {
+	if !c.tree {
+		seen, ok := c.values[key]
+		if ok {
+			c.revisitValue(key)
+		}
+
+		return seen, ok
+	}
+
+	entry, onPath := c.onPathValue[key]
+	if !onPath {
+		return nil, false
+	}
+
+	if c.depth > entry.depth {
+		c.reportCycle(entry.pathLen)
+
+		return nil, true
+	}
+
+	return entry.cp, true
 }
 
 // valueKey identifies a container by its type and its backing storage.
@@ -245,13 +331,21 @@ func containerKey(rv reflect.Value, size int) (valueKey, bool) {
 
 // schema returns the copy of s, making it on first sight. It records the memo
 // entry before filling the fields, so a cycle re-entering s finds the copy under
-// construction and closes the loop instead of recursing.
+// construction and closes the loop instead of recursing. A tree copy makes a
+// fresh copy at every path and answers a back edge with nil, since a cycle has
+// no tree form and the report is what the caller reads.
 func (c *cloner) schema(s *jsonschema.Schema) *jsonschema.Schema {
 	if s == nil {
 		return nil
 	}
 
-	if cp, seen := c.schemas[s]; seen {
+	if c.tree {
+		if entered, onPath := c.onPath[s]; onPath {
+			c.reportCycle(entered)
+
+			return nil
+		}
+	} else if cp, seen := c.schemas[s]; seen {
 		if entered, onPath := c.onPath[s]; onPath {
 			c.reportCycle(entered)
 		}
@@ -260,7 +354,13 @@ func (c *cloner) schema(s *jsonschema.Schema) *jsonschema.Schema {
 	}
 
 	cp := new(jsonschema.Schema)
-	c.schemas[s] = cp
+
+	if c.tree {
+		c.copies[s] = append(c.copies[s], cp)
+	} else {
+		c.schemas[s] = cp
+	}
+
 	c.onPath[s] = len(c.path)
 	c.depth++
 
@@ -378,10 +478,12 @@ func (c *cloner) valueMap(m map[string]any) map[string]any {
 
 	key, keyed := containerKey(reflect.ValueOf(m), len(m))
 	if keyed {
-		if seen, hit := c.values[key].(map[string]any); hit {
-			c.revisitValue(key)
+		if seen, ok := c.hit(key); ok {
+			if cp, isMap := seen.(map[string]any); isMap {
+				return cp
+			}
 
-			return seen
+			return nil
 		}
 	}
 
@@ -411,10 +513,12 @@ func (c *cloner) valueSlice(list []any) []any {
 
 	key, keyed := containerKey(reflect.ValueOf(list), len(list))
 	if keyed {
-		if seen, hit := c.values[key].([]any); hit {
-			c.revisitValue(key)
+		if seen, ok := c.hit(key); ok {
+			if cp, isSlice := seen.([]any); isSlice {
+				return cp
+			}
 
-			return seen
+			return nil
 		}
 	}
 
@@ -494,8 +598,10 @@ func (c *cloner) reflectPointer(rv reflect.Value) reflect.Value {
 
 	key, keyed := containerKey(rv, 1)
 	if keyed {
-		if seen, hit := c.values[key]; hit {
-			c.revisitValue(key)
+		if seen, ok := c.hit(key); ok {
+			if seen == nil {
+				return reflect.Zero(rv.Type())
+			}
 
 			return reflect.ValueOf(seen)
 		}

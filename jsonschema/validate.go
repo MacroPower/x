@@ -1053,7 +1053,7 @@ func (v *validator) remoteFetch(sess *refresolve.Session, cow bool) refresolve.F
 			// result. The inliner's fetchDoc consumes its own Doc where it
 			// records the document; nothing here does, so the assignment is
 			// what keeps the mint load-bearing on this path.
-			cp = doc.Schema()
+			cp = doc.Root()
 
 			// Clone the registry into this run's own copy before the first
 			// remote registration so the writes below cannot race a concurrent

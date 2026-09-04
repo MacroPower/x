@@ -48,27 +48,43 @@ type Profile struct {
 	// nothing, so its domain is outside this policy and the identifier pass
 	// skips it, as the resolution walk does.
 	InertIDs bool
+	// Draft7 reports whether the run resolves under Draft-07, which
+	// [Freeze]'s identifier walk reads: a fragment-only $id is the anchor
+	// spelling, $anchor and $dynamicAnchor are unknown keywords, and a
+	// sibling $id does not change the base a $ref resolves against.
+	Draft7 bool
 }
 
-// Doc is the currency minted by [Vetter.VetDoc]: proof that a whole schema
-// document, identifiers included, passed the vetting policy. The zero value
-// holds no schema and is inert.
+// Doc is the currency minted by [Frozen.Vet] and [Vetter.VetDoc]: proof that
+// a whole schema document, identifiers included, passed the vetting policy.
+// The zero value holds no schema and is inert.
 type Doc struct {
-	s *Schema
+	root *Schema
+	f    *Frozen
 }
 
-// Schema returns the vetted document's root, or nil for the zero value.
-func (d Doc) Schema() *Schema { return d.s }
+// Root returns the vetted document's root, or nil for the zero value.
+func (d Doc) Root() *Schema { return d.root }
 
-// Node is the currency minted by [Vetter.Vet]: proof that a schema fragment
-// (a JSON-pointer fallback target, which has no document base of its own)
-// passed the structural checks. The zero value holds no schema and is inert.
+// Frozen returns the tree the document was vetted from, or nil where the
+// document was vetted in place.
+func (d Doc) Frozen() *Frozen { return d.f }
+
+// Node is the currency minted by [Frozen.VetNode] and [Vetter.Vet]: proof
+// that a schema fragment (a JSON-pointer fallback target, which has no
+// document base of its own) passed the structural checks. The zero value
+// holds no schema and is inert.
 type Node struct {
-	s *Schema
+	root *Schema
+	f    *Frozen
 }
 
-// Schema returns the vetted fragment, or nil for the zero value.
-func (n Node) Schema() *Schema { return n.s }
+// Root returns the vetted fragment, or nil for the zero value.
+func (n Node) Root() *Schema { return n.root }
+
+// Frozen returns the tree the fragment was vetted from, or nil where the
+// fragment was vetted in place.
+func (n Node) Frozen() *Frozen { return n.f }
 
 // Vetter runs the structural-vetting policy. The visited sets guard
 // schema-graph cycles and let one vetter deduplicate across several passes;
@@ -129,7 +145,7 @@ func (v *Vetter) Vet(s *Schema, pathPrefix string) (Node, error) {
 		}
 	}
 
-	return Node{s: s}, nil
+	return Node{root: s}, nil
 }
 
 // VetDoc applies [Vetter.Vet] plus the identifier checks ($id domain and
@@ -153,7 +169,7 @@ func (v *Vetter) VetDoc(s *Schema, pathPrefix, base string) (Doc, error) {
 		return Doc{}, err
 	}
 
-	return Doc{s: s}, nil
+	return Doc{root: s}, nil
 }
 
 // CheckTypeNames verifies that every type keyword reachable from schema names

@@ -1,6 +1,10 @@
 package refresolve
 
-import "errors"
+import (
+	"errors"
+
+	"go.jacobcolvin.com/x/jsonschema/internal/schemavet"
+)
 
 var (
 	// ErrNotResolved is returned by a resolver to report a URI it does not
@@ -20,7 +24,9 @@ var (
 	// resolving to a registered URI or an anchor key registered for a different
 	// schema. Two documents under one identifier leave every reference naming it
 	// ambiguous, so the registration refuses the claim rather than picking a
-	// winner. The parent package re-exports it as its public ErrIDCollision,
-	// so [errors.Is] matches through either name.
-	ErrIDCollision = errors.New("identifier collision")
+	// winner. The value is [schemavet.ErrIDCollision], which reports the
+	// within-document form of the same claim, and the parent package
+	// re-exports it as its public ErrIDCollision, so [errors.Is] matches
+	// through every name.
+	ErrIDCollision = schemavet.ErrIDCollision
 )

@@ -179,6 +179,18 @@ var (
 	// fallback marshals the document it searches.
 	ErrSchemaNotTree = errors.New("schema is not a tree")
 
+	// ErrSchemaCycle is returned by [Compile] and [Inline] when a schema
+	// graph holds a loop that crosses a schema, through a sub-schema keyword
+	// or through a value field (Const, Enum, Examples, or Extra). A cyclic
+	// graph has no tree form, and upstream's MarshalJSON recurses into one
+	// without bound. The error names the document, the pointer where the
+	// loop closes, and the pointer it returns to. It also reports a cycle in
+	// a document a [RefResolver] returns, wrapped in [ErrRefResolve], and one
+	// in a [SubstituteRef] schema, returned bare from the substitution site.
+	// It is the [schemavet] sentinel re-exported, so [errors.Is] matches
+	// through either name.
+	ErrSchemaCycle = schemavet.ErrSchemaCycle
+
 	// ErrInvalidID is returned by [Compile] and [Inline] for an $id outside
 	// the keyword's domain: a value [net/url.Parse] rejects, one that carries
 	// a fragment under Draft 2020-12 (core section 8.2.1 forbids any fragment

@@ -42,4 +42,18 @@ var (
 	// ErrMisplacedVocabulary reports a $vocabulary on a node whose $schema
 	// does not establish the Draft 2020-12 dialect.
 	ErrMisplacedVocabulary = errors.New("misplaced $vocabulary")
+
+	// ErrSchemaCycle reports a schema graph holding a loop that crosses a
+	// schema, which has no tree form and which upstream's MarshalJSON
+	// recurses into without bound.
+	ErrSchemaCycle = errors.New("schema graph holds a cycle")
+
+	// ErrIDCollision reports a document claiming an identifier another
+	// document already holds, or one node of a document claiming an
+	// identifier through two positions. Two schemas under one identifier
+	// leave every reference naming it ambiguous, so the claim is refused
+	// rather than a winner picked. The refresolve package re-exports it for
+	// the cross-document case, and the parent package re-exports it
+	// publicly, so [errors.Is] matches through every name.
+	ErrIDCollision = errors.New("identifier collision")
 )
