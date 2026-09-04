@@ -233,11 +233,18 @@ func (s *Session) ResolveJSONPointer(
 		return nil, nil //nolint:nilnil // An unlocatable pointer is a plain miss, not an error.
 	}
 
-	if target := jsonptr.TraverseSchema(root, segments); target != nil {
-		return target, nil
+	// ID tracking during pointer navigation follows the same inertIDs policy
+	// as the registry walk: under a retrieval-base run a crossed $id must not
+	// rebase the located schema, or its refs would absolutize against the $id
+	// instead of the document's retrieval base.
+	trackIDs := !s.reg.inertIDs
+
+	node, rest, base := jsonptr.TypedPrefix(root, segments, s.SchemaBase(root), trackIDs)
+	if node != nil && len(rest) == 0 {
+		return node, nil
 	}
 
-	return s.resolveJSONPointerViaJSON(root, segments)
+	return s.resolveJSONPointerViaJSON(root, segments, node, rest, base, trackIDs)
 }
 
 // resolveJSONPointerViaJSON resolves a JSON Pointer through the schema's JSON
@@ -248,8 +255,13 @@ func (s *Session) ResolveJSONPointer(
 // location. A rejected target registers nothing and joins no frontier, so the
 // walk never reads past it. Results, including vet rejections, are cached per
 // (root, pointer).
+//
+// The node, rest, and prefixBase parameters carry what [jsonptr.TypedPrefix]
+// already reached for these segments, so the JSON-form walk resumes there
+// instead of retaking the typed steps the caller took.
 func (s *Session) resolveJSONPointerViaJSON(
 	root *jsonschema.Schema, segments []string,
+	node *jsonschema.Schema, rest []string, prefixBase string, trackIDs bool,
 ) (*jsonschema.Schema, error) {
 	if s.jsonPointerCache == nil {
 		s.jsonPointerCache = map[jsonPointerKey]fallbackResult{}
@@ -260,12 +272,8 @@ func (s *Session) resolveJSONPointerViaJSON(
 		return cached.target, cached.err
 	}
 
-	// ID tracking during pointer navigation follows the same inertIDs policy
-	// as the registry walk: under a retrieval-base run a crossed $id must not
-	// rebase the located schema, or its refs would absolutize against the $id
-	// instead of the document's retrieval base.
-	target, base := jsonptr.SchemaAtJSONPointer(
-		root, segments, s.SchemaBase(root), !s.reg.inertIDs, s.reg.deps.Materialize,
+	target, base := jsonptr.SchemaAtJSONForm(
+		node, rest, prefixBase, trackIDs, s.reg.deps.Materialize,
 	)
 
 	locator := s.SchemaBase(root) + "#" + displayPointer(segments)
