@@ -23,6 +23,7 @@ import (
 type Frozen struct {
 	root    *Schema
 	ids     map[*Schema]int
+	byPath  map[string]int
 	uri     map[string]*Schema
 	anchor  map[string]*Schema
 	dynamic map[string]*Schema
@@ -61,6 +62,7 @@ func Freeze(s *Schema, subject, base string, profile Profile) (*Frozen, error) {
 	f := &Frozen{
 		root:    tree.Root,
 		ids:     map[*Schema]int{},
+		byPath:  map[string]int{},
 		uri:     map[string]*Schema{},
 		anchor:  map[string]*Schema{},
 		dynamic: map[string]*Schema{},
@@ -154,6 +156,7 @@ func (f *Frozen) walk(s *Schema, path, parentBase string) {
 	id := len(f.nodes)
 	f.nodes = append(f.nodes, s)
 	f.ids[s] = id
+	f.byPath[path] = id
 	f.paths = append(f.paths, path)
 
 	currentBase := parentBase
@@ -270,21 +273,20 @@ func (f *Frozen) ScopeBase(id int) string {
 }
 
 // At returns the node the JSON Pointer addresses through sub-schema keyword
-// edges alone, and whether one stands there. A pointer into a value keyword
-// or an unknown keyword names no node here; the caller's JSON-form fallback
-// answers those.
+// edges alone, and whether one stands there, by one map lookup. A pointer
+// into a value keyword or an unknown keyword names no node here; the
+// caller's JSON-form fallback answers those.
 func (f *Frozen) At(pointer string) (*Schema, bool) {
 	if f == nil {
 		return nil, false
 	}
 
-	for id, path := range f.paths {
-		if path == pointer {
-			return f.nodes[id], true
-		}
+	id, ok := f.byPath[pointer]
+	if !ok {
+		return nil, false
 	}
 
-	return nil, false
+	return f.nodes[id], true
 }
 
 // URIs returns the document's $id registrations, keyed by absolute URI. The
