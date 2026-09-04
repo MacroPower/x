@@ -601,8 +601,11 @@ one JSON name, an embedded non-struct without an explicit name, an embed
 option combined with any other option, a `format` tag option (cut from
 stable v2, go.dev/issue/79071), or a struct with fields
 but none serializable (every field unexported and untagged) -- is refused
-with `ErrInvalidJSONField` exactly where `encoding/json/v2.Marshal` refuses a
-value of the type.
+with `ErrInvalidJSONField` exactly where `encoding/json/v2.Marshal` refuses
+to walk the declarations. A type with a direct JSON marshaler marshals
+without its field declarations being read, but generation reflects those
+fields by policy and still applies these checks, so its refusal there is a
+conservative superset of v2's.
 
 `omitzero` drops the field from `required`; `omitempty` does too only where
 the field's encoded value can be empty (`null`, `""`, `[]`, or `{}`) -- a

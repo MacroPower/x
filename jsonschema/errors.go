@@ -42,8 +42,11 @@ var (
 	// json:",string" on a field that encodes no number, a `format` tag
 	// option (cut from stable v2, go.dev/issue/79071), or a struct with
 	// fields but none serializable (every field unexported and untagged).
-	// Generation refuses the type exactly where [encoding/json/v2.Marshal]
-	// would.
+	// Generation refuses exactly the declarations [encoding/json/v2.Marshal]
+	// refuses to walk. A type with a direct JSON marshaler marshals without
+	// its field declarations being read, but generation reflects those
+	// fields by policy and still applies these checks, so its refusal there
+	// is a conservative superset of v2's.
 	ErrInvalidJSONField = errors.New("invalid json field declaration")
 
 	// ErrInvalidType is returned when a schema's type keyword names something

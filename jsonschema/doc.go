@@ -68,8 +68,11 @@
 //     json:",string" on a field that encodes no number, a format tag option
 //     (cut from stable v2, go.dev/issue/79071), or a struct with fields but
 //     none serializable (every field unexported and untagged). Generation
-//     refuses the type exactly where [encoding/json/v2.Marshal] refuses a
-//     value of it.
+//     refuses exactly the declarations [encoding/json/v2.Marshal] refuses to
+//     walk; a type with a direct JSON marshaler marshals without its field
+//     declarations being read, but generation reflects those fields by
+//     policy and still applies these checks, so its refusal there is a
+//     conservative superset of v2's.
 //   - [ErrProviderPanic]: returned when a [JSONSchemaProvider] or
 //     [JSONSchemaExtender] method panics; the panic is recovered and wrapped.
 //   - [ErrConflictingTypeSchema]: returned for a malformed [TypeSchema] a
@@ -475,8 +478,10 @@
 // determines the field name, and json:"-" excludes the field. A tag name is
 // the run of characters before the first comma. A name containing a quote
 // character, and the json:"-," spelling, are malformed tags, refused with
-// [ErrInvalidJSONField] exactly as [encoding/json/v2.Marshal] refuses them;
-// any other rune run is a name, so json:"a b" names the property "a b".
+// [ErrInvalidJSONField] as [encoding/json/v2.Marshal] refuses them (on a
+// direct-marshaler type, whose fields v2 never reads, the refusal is
+// generation's own conservative superset); any other rune run is a name, so
+// json:"a b" names the property "a b".
 //
 // The omitzero option omits the field from required. The omitempty option
 // omits it only where the field's encoded value can be empty (null, "", [],
