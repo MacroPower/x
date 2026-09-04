@@ -17,6 +17,7 @@ import (
 
 	"go.jacobcolvin.com/x/jsonschema/internal/content"
 	"go.jacobcolvin.com/x/jsonschema/internal/fieldset"
+	"go.jacobcolvin.com/x/jsonschema/internal/jsonprobe"
 	"go.jacobcolvin.com/x/jsonschema/internal/numkind"
 	"go.jacobcolvin.com/x/jsonschema/internal/reflectkind"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemashape"
@@ -25,15 +26,14 @@ import (
 )
 
 var (
-	typeTime         = reflect.TypeFor[time.Time]()
-	typeTimeDuration = reflect.TypeFor[time.Duration]()
-	typeSlogLevel    = reflect.TypeFor[slog.Level]()
-	typeJSONNumber   = reflect.TypeFor[json.Number]()
-	typeBigInt       = reflect.TypeFor[big.Int]()
-	typeBigRat       = reflect.TypeFor[big.Rat]()
-	typeBigFloat     = reflect.TypeFor[big.Float]()
-	typeProvider     = reflect.TypeFor[JSONSchemaProvider]()
-	typeExtender     = reflect.TypeFor[JSONSchemaExtender]()
+	typeTime       = reflect.TypeFor[time.Time]()
+	typeSlogLevel  = reflect.TypeFor[slog.Level]()
+	typeJSONNumber = reflect.TypeFor[json.Number]()
+	typeBigInt     = reflect.TypeFor[big.Int]()
+	typeBigRat     = reflect.TypeFor[big.Rat]()
+	typeBigFloat   = reflect.TypeFor[big.Float]()
+	typeProvider   = reflect.TypeFor[JSONSchemaProvider]()
+	typeExtender   = reflect.TypeFor[JSONSchemaExtender]()
 
 	// Inclusive [minimum, maximum] float64 bounds for each fixed-width integer
 	// kind. Int64 and Uint64 are excluded: float64 cannot name their maxima
@@ -68,6 +68,10 @@ type generator struct {
 	// resolved, so an alias chain that reaches one of them again (a self-Ref, or
 	// a mutual A -> B -> A cycle) is reported instead of recursing forever.
 	refAliasing map[reflect.Type]bool
+	// Probe is the [encoding/json/v2] refusal oracle for this run: it answers
+	// whether v2 refuses a struct declaration, a field, or a type under the
+	// run's json options, and memoizes each answer.
+	probe *jsonprobe.Probe
 	// DefaultsFrom is the WithDefaultsFrom instance; defaultsFromSet
 	// distinguishes an explicit nil instance from the option being absent.
 	defaultsFrom        any
@@ -141,6 +145,7 @@ func (g *generator) forRun(ctx context.Context) *generator {
 	run.typeOverrideCache = map[reflect.Type]typeOverrideResult{}
 	run.visiting = map[reflect.Type]bool{}
 	run.refAliasing = map[reflect.Type]bool{}
+	run.probe = jsonprobe.New(g.jsonOpts)
 
 	// Bind to run rather than the prototype, since needsAllOfComposition reads
 	// the per-run context and type-override cache.
@@ -344,14 +349,6 @@ func (g *generator) schemaForType(t reflect.Type, nullable bool) (*node, error) 
 	// 3. Built-in overrides.
 	if s, ok := g.builtinOverride(t); ok {
 		return g.handleBuiltinType(t, s, nullable)
-	}
-
-	// A time.Duration has no default representation in encoding/json/v2:
-	// marshaling one returns a SemanticError. Refusing it here (after the
-	// override steps, so WithTypeSchema or a provider can still declare a
-	// shape for it) keeps the ground-truth claim exact.
-	if t == typeTimeDuration {
-		return nil, fmt.Errorf("%w: %s has no default representation in encoding/json/v2", ErrUnsupportedType, t)
 	}
 
 	// 4. Marshaler methods promoted from an embedded field. A struct whose
@@ -825,8 +822,20 @@ func (g *generator) scalarNode(payload *Schema, nullable bool) *node {
 	return &node{kind: kindValue, payload: payload, nullable: nullable}
 }
 
-// schemaForKind handles the kind-based reflection step, producing a node.
+// schemaForKind handles the kind-based reflection step, producing a node. The
+// v2 probe answers first for every kind but struct, whose declaration
+// [generator.buildStructSchema] probes on its own: a func, chan, complex, or
+// [unsafe.Pointer] kind, a [time.Duration] (which v2's native codec refuses
+// with no format), and a map key v2 cannot name are all refused here, with
+// v2's own reason.
 func (g *generator) schemaForKind(t reflect.Type, nullable bool) (*node, error) {
+	if t.Kind() != reflect.Struct {
+		err := g.probeType(t)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	switch t.Kind() {
 	case reflect.Bool:
 		return g.scalarNode(&Schema{Type: typename.Boolean}, nullable), nil
@@ -890,10 +899,25 @@ func (g *generator) schemaForKind(t reflect.Type, nullable bool) (*node, error) 
 		return g.schemaForStruct(t, nullable)
 
 	default:
-		// Func, chan, complex, and unsafe.Pointer have no JSON Schema
-		// representation; encoding/json cannot marshal them either.
+		// Unreachable: the probe refused every kind v2 cannot encode.
 		return nil, fmt.Errorf("%w: %s", ErrUnsupportedType, t)
 	}
+}
+
+// probeType maps the v2 probe's verdict on t onto the generation sentinels: a
+// key v2 cannot name is [ErrUnsupportedMapKey], any other refusal is
+// [ErrUnsupportedType].
+func (g *generator) probeType(t reflect.Type) error {
+	err := g.probe.Type(t)
+
+	switch {
+	case errors.Is(err, jsonprobe.ErrMapKey):
+		return fmt.Errorf("%w: %w", ErrUnsupportedMapKey, err)
+	case err != nil:
+		return fmt.Errorf("%w: %w", ErrUnsupportedType, err)
+	}
+
+	return nil
 }
 
 // exclusiveMaxInt64 and exclusiveMaxUint64 are the exclusive upper bounds for
@@ -989,22 +1013,9 @@ func (g *generator) schemaForArray(t reflect.Type, nullable bool) (*node, error)
 	return &node{kind: kindTuple, payload: s, prefix: prefix, nullable: nullable}, nil
 }
 
-// schemaForMap generates a schema for map types.
+// schemaForMap generates a schema for map types. The key was vetted by the
+// probe in [generator.schemaForKind].
 func (g *generator) schemaForMap(t reflect.Type, nullable bool) (*node, error) {
-	// The exact time.Duration key gets the same refusal its value occurrence
-	// does, since encoding/json/v2's native duration codec has no default
-	// representation and pre-empts the integer-kind key encoding.
-	if t.Key() == typeTimeDuration {
-		return nil, fmt.Errorf(
-			"%w: map key %s has no default representation in encoding/json/v2",
-			ErrUnsupportedMapKey, t.Key(),
-		)
-	}
-
-	if !reflectkind.IsValidMapKey(t.Key()) {
-		return nil, fmt.Errorf("%w: %s", ErrUnsupportedMapKey, t.Key())
-	}
-
 	// A nil map marshals as {} under encoding/json/v2's defaults (not null),
 	// so a bare map occurrence admits no null; a pointer occurrence (the
 	// threaded flag) does, and so does every occurrence under
@@ -1095,6 +1106,20 @@ func (g *generator) buildStructSchema(t reflect.Type) (*node, Nullability, error
 
 	obj := &node{kind: kindObject, payload: s}
 
+	// The v2 probe answers for the declaration first, with v2's own reason.
+	// A type whose method set carries a marshal interface is not probed: v2
+	// never analyzes such a struct's fields, and generation reflects them by
+	// policy, so the field set's own refusal stands there. Everywhere else
+	// the field set only names the JSON members, and a refusal it raises
+	// that the probe did not is drift between the two, reported as such.
+	probed := !reflectkind.ImplementsAnyMarshaler(t)
+	if probed {
+		err := g.probe.Struct(t)
+		if err != nil {
+			return nil, NullFromReflection, fmt.Errorf("%w: %w", ErrInvalidJSONField, err)
+		}
+	}
+
 	// Process fields using encoding/json rules.
 	//
 	// Two passes: first build every field's schema and populate Properties,
@@ -1103,6 +1128,12 @@ func (g *generator) buildStructSchema(t reflect.Type) (*node, Nullability, error
 	// field order.
 	resolved, err := g.fields.Of(t)
 	if err != nil {
+		if probed {
+			return nil, NullFromReflection, fmt.Errorf(
+				"%w: field set disagrees with encoding/json/v2: %w", ErrInvalidJSONField, err,
+			)
+		}
+
 		return nil, NullFromReflection, fmt.Errorf("%w: %w", ErrInvalidJSONField, err)
 	}
 
@@ -1334,61 +1365,50 @@ func (g *generator) buildFieldSchema(
 	// for a type extracted to $defs (a provider or extender), would register an
 	// orphan definition and drop the provider's constraints.
 	//
-	// A marshaler-bearing type (any of the four marshal interfaces, on the
-	// type or through its pointer method set) is exempt: encoding/json/v2
-	// routes such a field through the method, which ignores the ",string"
-	// option, so the field keeps the kind-based reflection a direct marshaler
-	// otherwise gets rather than a string schema its output never satisfies.
-	// The one marshaler that honors the flag is [encoding/json.Number], whose
-	// MarshalJSONTo respects StringifyNumbers; [reflectkind.IsStringifiableNumber]
-	// includes it, and its exemption is skipped. [time.Time] carries
-	// MarshalJSON but is not exempt either: v2's native time codec pre-empts
-	// the method and rejects the flag outright, at any pointer depth.
+	// The v2 probe decides both halves. It marshals a full value of the field
+	// and reports whether v2 refuses the declaration and whether the value it
+	// writes is a JSON string: the integer and float kinds and
+	// [encoding/json.Number] are quoted at any pointer depth, a type whose
+	// method set carries a marshal interface is written by the method, which
+	// ignores the flag, and every other type is a SemanticError. A refusal is
+	// the field's answer only where the type resolves through kind-based
+	// reflection: a type a [WithTypeSchemaFor] override or a provider declares
+	// is the caller's to describe, and a type v2 refuses with or without the
+	// flag ([time.Duration]) is answered as it is unflagged, so the field
+	// builds through [generator.schemaForType] first and the flag's refusal
+	// stands only when that build was kind-based.
 	//
-	// On every other type the flag is a SemanticError under v2 (the flag
-	// reaches a default marshaler that encodes no number), so generation
-	// refuses the field exactly where v2 refuses the value.
-	// The marshaler check covers the fully dereferenced type too: v2's
-	// pointer marshaler delegates level by level, so a method anywhere down
-	// the chain serializes the value and the flag is ignored there as well.
-	// The probes serve only the ",string" refusal here and the omitempty
-	// decision below, and omitEmptyCanOmit consults them only for a kind
-	// that cannot encode an empty value on its own, so a field carrying
-	// neither option, or omitempty on a string, container, pointer,
-	// interface, or struct kind, skips the pointer walk and the
-	// marshaler-interface probes entirely.
+	// The marshaler probe below serves the omitempty decision alone, and
+	// omitEmptyCanOmit consults it only for a kind that cannot encode an
+	// empty value on its own, so a field carrying omitempty on a string,
+	// container, pointer, interface, or struct kind skips the pointer walk
+	// and the marshaler-interface probes entirely.
 	var bearsMarshaler, stringOverride bool
 
-	if fi.JSONString || (fi.Omitempty && !kindCanOmit(fieldType)) {
+	if fi.Omitempty && !kindCanOmit(fieldType) {
 		derefField := numkind.DerefType(fieldType)
 		bearsMarshaler = reflectkind.ImplementsAnyMarshaler(fieldType) ||
 			(derefField != fieldType && reflectkind.ImplementsAnyMarshaler(derefField))
-		marshalerExempt := bearsMarshaler &&
-			!reflectkind.IsJSONNumber(derefField) && derefField != typeTime
-		// V2's native duration codec has no default representation and
-		// pre-empts the int64 ",string" encoding, so the exact time.Duration
-		// never takes the string override. It falls through to schemaForType,
-		// where a type override still applies and the plain refusal
-		// otherwise fires, the same answer the field gets without the flag.
-		isDuration := derefField == typeTimeDuration
-		stringOverride = fi.JSONString && !marshalerExempt && !isDuration &&
-			reflectkind.IsStringifiableNumber(fieldType)
-
-		if fi.JSONString && !marshalerExempt && !stringOverride && !isDuration {
-			return nil, fmt.Errorf(
-				"%w: invalid use of `string` tag option on %s", ErrInvalidJSONField, fieldType,
-			)
-		}
 	}
-
-	tagTypeSchema := (*Schema)(nil)
 
 	var (
 		fieldNode *node
 		err       error
 	)
 
-	if stringOverride {
+	if fi.JSONString {
+		fieldNode, stringOverride, err = g.stringOptionField(fi)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	tagTypeSchema := (*Schema)(nil)
+
+	switch {
+	case fieldNode != nil:
+		// Built above: a hook declared the type behind a refused flag.
+	case stringOverride:
 		// A pointer to a stringable type is a nilable container, so it shares the
 		// slice/map null-branch policy (recorded on the node, applied by render);
 		// a non-pointer is always a bare string.
@@ -1408,7 +1428,8 @@ func (g *generator) buildFieldSchema(
 		} else {
 			payload.Type = typename.String
 		}
-	} else {
+
+	default:
 		fieldNode, err = g.schemaForType(fieldType, false)
 		if err != nil {
 			return nil, err
@@ -1505,6 +1526,30 @@ func (g *generator) buildFieldSchema(
 	parent.props = append(parent.props, nodeProp{name: fi.JSONName, schema: fieldNode})
 
 	return fieldNode, nil
+}
+
+// stringOptionField answers a field carrying json:",string". It returns the
+// node a hook built for a type v2 refuses under the flag (nil otherwise),
+// whether the field takes the string override, and the refusal when neither
+// applies; see the override discussion in [generator.buildFieldSchema].
+func (g *generator) stringOptionField(fi fieldset.Field) (*node, bool, error) {
+	stringified, probeErr := g.probe.Field(fi.StructField)
+	if probeErr == nil {
+		return nil, stringified, nil
+	}
+
+	fieldType := fi.StructField.Type
+
+	fieldNode, err := g.schemaForType(fieldType, false)
+	if err != nil {
+		return nil, false, err
+	}
+
+	if !g.hookDeclares(numkind.DerefType(fieldType)) {
+		return nil, false, fmt.Errorf("%w: %w", ErrInvalidJSONField, probeErr)
+	}
+
+	return fieldNode, false, nil
 }
 
 // omitEmptyCanOmit reports whether a field of type t can ever be omitted by
@@ -1694,6 +1739,17 @@ func (g *generator) processAllOfField(fi fieldset.Field, parent *node) error {
 	parent.embeds = append(parent.embeds, embedNode{branch: branch, optional: fi.Optional || fi.Shadowed})
 
 	return nil
+}
+
+// hookDeclares reports whether a caller-registered hook declares t's schema: a
+// type provider registered through [WithTypeSchemaProvider] or
+// [WithTypeSchemaFor], or the type's own [JSONSchemaProvider] method. Such a
+// type is exempt from the v2 probes, since the caller took over describing
+// what it marshals to.
+func (g *generator) hookDeclares(t reflect.Type) bool {
+	_, ok, err := g.resolveTypeSchema(t)
+
+	return (ok && err == nil) || implementsProvider(t)
 }
 
 // implementsProvider checks if a type (or pointer to type) implements

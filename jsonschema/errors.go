@@ -10,13 +10,17 @@ import (
 )
 
 var (
-	// ErrUnsupportedType is returned when a Go type has no JSON Schema
-	// representation (e.g., func, chan, complex, [unsafe.Pointer]).
+	// ErrUnsupportedType is returned when [encoding/json/v2] refuses a value
+	// of a Go type: a func, chan, complex, or [unsafe.Pointer] kind, or
+	// [time.Duration], which v2's native codec refuses with no format. The
+	// verdict is v2's own, taken on a value with every pointer allocated
+	// and every container filled.
 	ErrUnsupportedType = errors.New("unsupported type")
 
-	// ErrUnsupportedMapKey is returned when a map key type cannot encode as
-	// a JSON object member name because it is none of a string kind, an
-	// integer or float kind, or a marshaler-bearing type.
+	// ErrUnsupportedMapKey is returned when [encoding/json/v2] cannot encode
+	// a map key as a JSON object member name. A string, integer, or float
+	// kind and any marshaler-bearing key are accepted; the exact
+	// [time.Duration] key is refused.
 	ErrUnsupportedMapKey = errors.New("unsupported map key type")
 
 	// ErrUnsupportedJSONOption is returned by generation when
@@ -34,8 +38,8 @@ var (
 	// configured marshal writes.
 	ErrUnsupportedJSONOption = errors.New("unsupported encoding/json/v2 option for generation")
 
-	// ErrInvalidJSONField is returned when a struct field declaration cannot
-	// marshal under [encoding/json/v2]: a malformed json tag, two fields of
+	// ErrInvalidJSONField is returned when [encoding/json/v2] refuses a
+	// struct declaration or a field: a malformed json tag, two fields of
 	// one struct conflicting over a JSON name, a json tag on an unexported
 	// field, an invalid embedded field or fallback (two fallback fields in
 	// one declaration, a non-qualifying type or key under json:",embed", or
@@ -43,11 +47,12 @@ var (
 	// json:",string" on a field that encodes no number, a `format` tag
 	// option (cut from stable v2, go.dev/issue/79071), or a struct with
 	// fields but none serializable (every field unexported and untagged).
-	// Generation refuses exactly the declarations [encoding/json/v2.Marshal]
-	// refuses to walk. A type with a direct JSON marshaler marshals without
-	// its field declarations being read, but generation reflects those
-	// fields by policy and still applies these checks, so its refusal there
-	// is a conservative superset of v2's.
+	// The verdict is v2's own, taken on a value with every pointer
+	// allocated and every container filled, and the error carries v2's
+	// reason. A type with a direct JSON marshaler marshals without its field
+	// declarations being read, but generation reflects those fields by
+	// policy and still applies the field-set checks, so its refusal there is
+	// a conservative superset of v2's.
 	ErrInvalidJSONField = errors.New("invalid json field declaration")
 
 	// ErrInvalidType is returned when a schema's type keyword names something

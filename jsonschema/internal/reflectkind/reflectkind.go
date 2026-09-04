@@ -152,33 +152,6 @@ func IsEmbeddedFallback(t reflect.Type) bool {
 		!ImplementsAnyMarshalMethod(t.Key())
 }
 
-// IsValidMapKey reports whether a map key type can encode as a JSON object
-// member name. Encoding/json/v2 accepts any key that encodes as a JSON
-// string: the string kinds, the integer and float kinds (their numbers are
-// quoted in the name position), and any marshaler-bearing key, pointer
-// receivers included (v2 boxes the key, so addressability never matters). A
-// marshaler whose output is not a JSON string still fails, but only when the
-// value marshals, which a static predicate cannot see.
-func IsValidMapKey(t reflect.Type) bool {
-	if t.Kind() == reflect.String || numkind.IsInteger(t.Kind()) || numkind.IsFloat(t.Kind()) {
-		return true
-	}
-
-	return ImplementsAnyMarshaler(t)
-}
-
-// IsStringifiableNumber reports whether json:",string" stringifies the given
-// type. Encoding/json/v2 applies the flag to number-encoding values only --
-// the integer and float kinds, plus [encoding/json.Number] -- and the flag
-// survives every pointer level (a nil pointer still marshals null). Any other
-// non-marshaler-bearing type makes marshaling return a SemanticError; see
-// [ImplementsAnyMarshaler] for the exemption.
-func IsStringifiableNumber(t reflect.Type) bool {
-	t = numkind.DerefType(t)
-
-	return numkind.IsInteger(t.Kind()) || numkind.IsFloat(t.Kind()) || IsJSONNumber(t)
-}
-
 // IsBase64ByteSlice reports whether a slice type marshals as one base64
 // string under [encoding/json/v2]: its element is the unnamed builtin byte.
 // A named byte element (which, unlike the builtin, could also carry methods)

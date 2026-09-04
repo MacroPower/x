@@ -1,7 +1,6 @@
 package reflectkind_test
 
 import (
-	"encoding/json"
 	"reflect"
 	"testing"
 
@@ -108,57 +107,6 @@ func TestJSONMarshaler(t *testing.T) {
 			t.Parallel()
 			assert.Equal(t, tc.wantImplement, reflectkind.ImplementsJSONMarshaler(tc.typ))
 			assert.Equal(t, tc.wantPromoted, reflectkind.IsPromotedJSONMarshaler(tc.typ))
-		})
-	}
-}
-
-func TestIsStringifiableNumber(t *testing.T) {
-	t.Parallel()
-
-	// Encoding/json/v2 stringifies numbers only: a json:",string" on a
-	// string, bool, or composite field is a SemanticError rather than a
-	// quotation, so those types report false.
-	tests := map[string]struct {
-		typ  reflect.Type
-		want bool
-	}{
-		"int":         {typ: reflect.TypeFor[int](), want: true},
-		"uint8":       {typ: reflect.TypeFor[uint8](), want: true},
-		"float64":     {typ: reflect.TypeFor[float64](), want: true},
-		"pointer int": {typ: reflect.TypeFor[*int](), want: true},
-		"json number": {typ: reflect.TypeFor[json.Number](), want: true},
-		"string":      {typ: reflect.TypeFor[string](), want: false},
-		"bool":        {typ: reflect.TypeFor[bool](), want: false},
-		"struct":      {typ: reflect.TypeFor[plain](), want: false},
-		"byte slice":  {typ: reflect.TypeFor[[]byte](), want: false},
-	}
-
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			assert.Equal(t, tc.want, reflectkind.IsStringifiableNumber(tc.typ))
-		})
-	}
-}
-
-func TestIsValidMapKey(t *testing.T) {
-	t.Parallel()
-
-	tests := map[string]struct {
-		typ  reflect.Type
-		want bool
-	}{
-		"string":              {typ: reflect.TypeFor[string](), want: true},
-		"int":                 {typ: reflect.TypeFor[int](), want: true},
-		"value textmarshaler": {typ: reflect.TypeFor[directText](), want: true},
-		"float":               {typ: reflect.TypeFor[float64](), want: true},
-		"plain struct":        {typ: reflect.TypeFor[plain](), want: false},
-	}
-
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			assert.Equal(t, tc.want, reflectkind.IsValidMapKey(tc.typ))
 		})
 	}
 }

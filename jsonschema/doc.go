@@ -50,34 +50,35 @@
 //
 // Sentinel errors are defined for error matching with [errors.Is]:
 //
-//   - [ErrUnsupportedType]: returned when a Go type has no JSON Schema
-//     representation (func, chan, complex, [unsafe.Pointer], and
-//     [time.Duration], which [encoding/json/v2] gives no default
-//     representation).
-//   - [ErrUnsupportedMapKey]: returned when a map key type cannot encode as
-//     an object member name because it is none of a string, integer, or
-//     float kind and carries no marshaler method. The exact [time.Duration] key
-//     is refused too, since v2's native duration codec pre-empts the
-//     integer-kind key encoding and has no default representation.
-//   - [ErrInvalidJSONField]: returned when a struct field declaration cannot
-//     marshal under [encoding/json/v2]: a malformed json tag, two fields of
+//   - [ErrUnsupportedType]: returned when [encoding/json/v2] refuses a value
+//     of a Go type: a func, chan, complex, or [unsafe.Pointer] kind, or
+//     [time.Duration], which v2's native codec refuses with no format.
+//   - [ErrUnsupportedMapKey]: returned when [encoding/json/v2] cannot encode
+//     a map key as an object member name. A string, integer, or float kind
+//     and any marshaler-bearing key are accepted; the exact [time.Duration]
+//     key is refused, since v2's native duration codec pre-empts the
+//     integer-kind key encoding.
+//   - [ErrInvalidJSONField]: returned when [encoding/json/v2] refuses a
+//     struct declaration or a field: a malformed json tag, two fields of
 //     one struct claiming one JSON name, a tagged unexported field, an
 //     invalid embedded field or fallback (two fallback fields in one
 //     declaration, a non-qualifying type or key under json:",embed", or
 //     json:",embed" combined with a name or another option), a
 //     json:",string" on a field that encodes no number, a format tag option
 //     (cut from stable v2, go.dev/issue/79071), or a struct with fields but
-//     none serializable (every field unexported and untagged). Generation
-//     refuses exactly the declarations [encoding/json/v2.Marshal] refuses to
-//     walk on a saturated value, one whose pointers are non-nil and whose
-//     maps and slices are non-empty (v2 reads a struct's declarations only
-//     when it marshals a value of that struct, so a nil pointer, nil map,
-//     or empty slice hides a faulty declaration behind null, {}, or [] that
-//     generation still refuses); a type with a direct JSON marshaler
-//     marshals without its field
-//     declarations being read, but generation reflects those fields by
-//     policy and still applies these checks, so its refusal there is a
-//     conservative superset of v2's.
+//     none serializable (every field unexported and untagged).
+//
+// Each of the three verdicts is v2's own. Generation asks v2 to marshal a
+// value of the type with every pointer allocated and every container filled,
+// under the [WithJSONOptions] value in force and with every marshal method
+// intercepted so no user code runs, and refuses what v2 refuses with v2's
+// reason. The one gap is a field v2 never writes: a func field under
+// omitzero is always omitted and marshals, while generation refuses the
+// func type. A type with a direct JSON marshaler marshals without its
+// field declarations being read, but generation reflects those fields by
+// policy and still applies the field-set checks, so its refusal there is
+// a conservative superset of v2's.
+//
 //   - [ErrProviderPanic]: returned when a [JSONSchemaProvider] or
 //     [JSONSchemaExtender] method panics; the panic is recovered and wrapped.
 //   - [ErrConflictingTypeSchema]: returned for a malformed [TypeSchema] a
@@ -212,9 +213,9 @@
 //     [WithJSONOptions] with FormatNilMapAsNull, every map occurrence
 //     admits null). K must be a string, integer,
 //     or float kind, or carry a marshaler method (through its pointer
-//     method set included); other key types return [ErrUnsupportedMapKey],
-//     and so does the exact [time.Duration] key, whose native v2 codec has
-//     no default representation.
+//     method set included); a key v2 cannot name returns
+//     [ErrUnsupportedMapKey], and so does the exact [time.Duration] key,
+//     whose native v2 codec pre-empts the integer-kind encoding.
 //   - Interfaces: any interface type produces an unrestricted schema ({}).
 //     A nil interface marshals as null, so an interface whose schema an
 //     earlier resolution step intercepts (a registered override, or a
@@ -253,9 +254,9 @@
 //
 // Unsupported types (func, chan, complex, [unsafe.Pointer]) return
 // [ErrUnsupportedType], and so does [time.Duration], which
-// [encoding/json/v2] gives no default representation. The refusal runs after
-// the override steps, so [WithTypeSchema] or a provider can still declare a
-// shape for a duration.
+// [encoding/json/v2] refuses with no format. The refusal is v2's own verdict
+// on a value of the type and runs after the override steps, so
+// [WithTypeSchema] or a provider can still declare a shape for a duration.
 //
 // Go type aliases (defined with =) are invisible to reflection and are treated
 // as their underlying type. Only defined types (e.g., type MyString string)
@@ -505,25 +506,24 @@
 // [encoding/json.Number], the one string kind whose marshaler writes 0 for
 // the empty value.
 //
-// json:",string" overrides the field schema to {"type": "string"} for the
-// types [encoding/json/v2] stringifies: the integer and float kinds,
-// [encoding/json.Number], and pointers to those at any depth (the flag
-// survives the whole pointer chain; a pointer occurrence keeps its null
-// branch beside the string). On any other type the flag is refused with
-// [ErrInvalidJSONField], as v2 refuses it, with one exception on each side
-// and one type that takes neither answer. A field whose type carries a JSON
-// or text marshaler (directly or through its pointer method set) is not
-// quoted and not refused: v2 routes it through the method, which ignores the
-// option, so the field keeps the schema the marshaler steps produce.
-// [time.Time] is the reverse exception: it carries MarshalJSON, but v2's
-// native time codec pre-empts the method and rejects the flag, so generation
-// refuses it too. [time.Duration] takes neither answer. The native v2 duration
-// codec has no default representation and pre-empts the int64
-// stringification, so at any pointer depth the flag neither quotes the field
-// nor draws [ErrInvalidJSONField], and generation answers the field exactly
-// as it does unflagged, refusing it with [ErrUnsupportedType] under the
-// defaults and honoring a [WithTypeSchemaFor] override where one is
-// registered.
+// json:",string" overrides the field schema to {"type": "string"} where the
+// flag is what makes [encoding/json/v2] write a string: the integer and
+// float kinds, [encoding/json.Number], and pointers to those at any depth
+// (the flag survives the whole pointer chain; a pointer occurrence keeps its
+// null branch beside the string). Generation learns both answers by
+// marshaling a value of the field with and without the flag. A field whose
+// type carries a JSON or text marshaler (directly or through its pointer
+// method set) is not quoted and not refused: v2 routes it through the
+// method, which ignores the option, so the field keeps the schema the
+// marshaler steps produce. A [encoding/json/jsontext.Value] is written
+// verbatim either way and keeps its unrestricted schema. On any other type
+// v2 refuses the flag, [time.Time] included (its native codec pre-empts
+// MarshalJSON and rejects the flag), and generation refuses it with
+// [ErrInvalidJSONField] and v2's reason. A type v2 refuses with or without
+// the flag, [time.Duration] at any pointer depth, is answered as it is
+// unflagged: refused with [ErrUnsupportedType] under the defaults, and
+// described by a [WithTypeSchemaFor] override or a provider where one is
+// registered, since a type a hook declares is the caller's to describe.
 //
 // Unexported non-embedded fields without a json tag are excluded; a json tag
 // on an unexported field is refused with [ErrInvalidJSONField]. Unexported
@@ -587,8 +587,8 @@
 // any other non-struct type under json:",embed", and json:",embed" combined
 // with a name or any other option. A fallback map value type with no
 // representation (map[string]time.Duration, map[string]func()) is refused
-// with [ErrUnsupportedType] under every option, exactly where v2's marshal
-// refuses the value. Generation drops a fallback inside a composed subtree
+// with [ErrUnsupportedType] under every option, where v2's marshal refuses
+// the value. Generation drops a fallback inside a composed subtree
 // that a self- or mutually composed cycle cuts short, along with the
 // subtree's names, on the cycle's conservative terms.
 //

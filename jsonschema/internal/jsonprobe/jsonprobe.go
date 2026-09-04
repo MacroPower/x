@@ -188,14 +188,16 @@ func (p *Probe) declaration(v reflect.Value) error {
 }
 
 // Field reports whether v2 refuses a struct field declared with sf's type and
-// tag, and whether the value it writes for the field is a JSON string, which
-// is what the `string` option turns on. It probes a one-field struct built
-// from sf with the embedded flag cleared, filled through [fuzzfill.WithFull]
-// so no pointer level or container hides the leaf. A fault of any kind is
-// [ErrValue] wrapping v2's reason. A type whose method set carries a marshal
-// interface writes a null under the interceptors and reads as not
-// stringified, which matches v2 ignoring the option on such a type; a
-// [encoding/json.Number] honors it and reads as stringified.
+// tag, and whether the tag's `string` option is what makes the written value
+// a JSON string. It probes a one-field struct built from sf with the embedded
+// flag cleared, filled through [fuzzfill.WithFull] so no pointer level or
+// container hides the leaf. A fault of any kind is [ErrValue] wrapping v2's
+// reason. The field reads as stringified when the tagged marshal writes a
+// string where an untagged marshal of the same value does not: the integer
+// and float kinds and a [encoding/json.Number] do at any pointer depth. A
+// type whose method set carries a marshal interface writes a null under the
+// interceptors either way, matching v2 ignoring the option on such a type,
+// and a [jsontext.Value] writes its own bytes either way.
 func (p *Probe) Field(sf reflect.StructField) (bool, error) {
 	byTag, ok := p.fields[sf.Type]
 	if !ok {
@@ -214,14 +216,29 @@ func (p *Probe) Field(sf reflect.StructField) (bool, error) {
 }
 
 func (p *Probe) probeField(sf reflect.StructField) fieldResult {
-	st := reflect.StructOf([]reflect.StructField{{Name: "F", Type: sf.Type, Tag: sf.Tag}})
+	tagged := reflect.StructOf([]reflect.StructField{{Name: "F", Type: sf.Type, Tag: sf.Tag}})
 
-	out, err := p.encode(p.filled(st))
+	out, err := p.encode(p.filled(tagged))
 	if err != nil {
 		return fieldResult{err: fmt.Errorf("%w: %w", ErrValue, cause(err))}
 	}
 
-	return fieldResult{stringified: firstMemberIsString(out)}
+	if !firstMemberIsString(out) {
+		return fieldResult{}
+	}
+
+	// The untagged struct fills at the same depth, so both marshals see one
+	// value. A tag option can hide a fault the untagged marshal raises
+	// (omitzero on a func), and the tagged verdict rules, so that fault only
+	// reads as not stringified.
+	untagged := reflect.StructOf([]reflect.StructField{{Name: "F", Type: sf.Type}})
+
+	bare, err := p.encode(p.filled(untagged))
+	if err != nil {
+		return fieldResult{}
+	}
+
+	return fieldResult{stringified: !firstMemberIsString(bare)}
 }
 
 // firstMemberIsString reports whether the first member of the object in doc
