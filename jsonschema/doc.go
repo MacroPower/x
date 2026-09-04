@@ -69,7 +69,12 @@
 //     (cut from stable v2, go.dev/issue/79071), or a struct with fields but
 //     none serializable (every field unexported and untagged). Generation
 //     refuses exactly the declarations [encoding/json/v2.Marshal] refuses to
-//     walk; a type with a direct JSON marshaler marshals without its field
+//     walk on a saturated value, one whose pointers are non-nil and whose
+//     maps and slices are non-empty (v2 reads a struct's declarations only
+//     when it marshals a value of that struct, so a nil pointer, nil map,
+//     or empty slice hides a faulty declaration behind null, {}, or [] that
+//     generation still refuses); a type with a direct JSON marshaler
+//     marshals without its field
 //     declarations being read, but generation reflects those fields by
 //     policy and still applies these checks, so its refusal there is a
 //     conservative superset of v2's.
@@ -152,6 +157,8 @@
 //     recursive occurrence. Under [Draft7], a default landing on a $ref'd
 //     property moves the $ref into an allOf wrap, the same shape tag defaults
 //     produce, because Draft-07 readers ignore $ref siblings.
+//     Map values marshal in sorted key order, so a map-valued default
+//     seeds identical bytes on every run.
 //   - [WithRootTitle] sets the root schema's title to the root type's name
 //     when no title is otherwise present (default: false). The [WithNamer]
 //     namer is honored and the root type is pointer-dereferenced first;
@@ -233,9 +240,11 @@
 // exact [reflect.Type], so named types wrapping a built-in-overridden type
 // (e.g., type MyTime [time.Time]) do not receive the override and fall
 // through to subsequent resolution steps. [net/url.URL] has no override and
-// is refused: it implements no marshaler interface, and reflecting it
-// reaches [net/url.Userinfo], a struct with fields but none serializable,
-// which [encoding/json/v2] refuses ([ErrInvalidJSONField]).
+// is refused ([ErrInvalidJSONField]): it implements no marshaler interface,
+// and reflecting it reaches [net/url.Userinfo], a struct with fields but
+// none serializable, which [encoding/json/v2] refuses once a non-nil User
+// pointer is marshaled (a URL with a nil User marshals as "User": null,
+// since v2 never reads the declarations behind a nil pointer).
 //
 // Types implementing [encoding.TextAppender] or [encoding.TextMarshaler] map
 // to {"type": "string"}, checked before struct reflection.
@@ -476,8 +485,10 @@
 //
 // Struct fields follow [encoding/json/v2] conventions: the json tag
 // determines the field name, and json:"-" excludes the field. A tag name is
-// the run of characters before the first comma. A name containing a quote
-// character, and the json:"-," spelling, are malformed tags, refused with
+// the run of characters before the first reserved rune: a comma, a
+// backslash, or a quote character (single quote, double quote, or backtick).
+// A name a backslash or quote character cuts short, and the json:"-,"
+// spelling, are malformed tags, refused with
 // [ErrInvalidJSONField] as [encoding/json/v2.Marshal] refuses them (on a
 // direct-marshaler type, whose fields v2 never reads, the refusal is
 // generation's own conservative superset); any other rune run is a name, so
@@ -539,6 +550,10 @@
 // json:"bag"), the field is a regular leaf property under that name, a
 // pointer adding nullability.
 //
+// A non-anonymous exported field of struct type (or unnamed pointer to
+// struct) tagged json:",embed" is promoted exactly as an anonymous embed:
+// [encoding/json/v2] treats the option as Go embedding, so its fields join
+// the parent object and the schema, the pointer form leaving them optional.
 // A non-anonymous exported field tagged json:",embed" is v2's embedded
 // fallback when its type, after one unnamed-pointer level, is a
 // [encoding/json/jsontext.Value] or a map whose key kind is string and whose

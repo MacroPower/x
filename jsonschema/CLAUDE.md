@@ -217,9 +217,10 @@ The package has two independent halves sharing the `Schema` type:
   definition. A third-party interpreter reaches the scan through the canvas
   directly or through `Constraints.SetConst` and `Constraints.SetEnum`, which
   compose a value without consulting the matrix. The scan compares `default` as
-  raw JSON text and asks `encoding/json/v2` what the other three keywords' values
-  marshal to, so a `json.RawMessage` holding the literal and a typed nil answer
-  the same as an untyped one.
+  raw JSON text and asks `encoding/json` v1 what the other three keywords'
+  values marshal to, because the upstream `Schema.MarshalJSON` renders them
+  with v1, where a typed nil map or slice writes null; so a `json.RawMessage`
+  holding the literal and a typed nil answer the same as an untyped one.
   A coerced float is the one shape whose zero has two serializations,
   since Go's negative zero compares equal to zero and `encoding/json/v2` writes
   the sign bit for it. `Shape.zeroLiterals` names both texts, and the shared
@@ -360,8 +361,11 @@ The package has two independent halves sharing the `Schema` type:
 
 `Schema` is a type alias to the upstream type (`schema.go`). The upstream
 marshals `Schema` itself through its own `MarshalJSON`, which
-`encoding/json/v2`'s precedence chain honors byte-identically, so schema
-documents render the same whichever json package marshals them. The upstream
+`encoding/json/v2`'s precedence chain honors, so a schema document carries the
+same members in the same order whichever json package marshals it. The bytes
+differ only where `encoding/json` escapes `<`, `>`, `&`, U+2028, and U+2029
+in strings as `\uXXXX` and v2 writes them verbatim; the two forms decode to
+the same JSON text. The upstream
 is used for exactly one behavior beyond the type alias: as a recovering fallback,
 value equality for hand-built operand shapes the JSON-semantic walk in
 `internal/jsonequal` does not model (`const`/`enum`/`uniqueItems` comparisons

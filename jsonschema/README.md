@@ -170,9 +170,11 @@ a numeric pattern (`big.Float`'s pattern also admits the `"+Inf"`/`"-Inf"`
 text it marshals for infinities). `log/slog.Level` -> `{"type":"string"}`: it
 implements both direct marshalers, and its MarshalJSON emits the level name
 as a JSON string, so the override pins the string schema its output
-requires. `net/url.URL` has no override and is refused: reflecting it reaches
-`net/url.Userinfo`, a struct with fields but none serializable, which
-`encoding/json/v2` refuses (`ErrInvalidJSONField`).
+requires. `net/url.URL` has no override and is refused (`ErrInvalidJSONField`):
+reflecting it reaches `net/url.Userinfo`, a struct with fields but none
+serializable, which `encoding/json/v2` refuses once a non-nil `User` pointer
+is marshaled (a URL with a nil `User` marshals as `"User": null`, since v2
+never reads the declarations behind a nil pointer).
 Types implementing `encoding.TextAppender` or `encoding.TextMarshaler` map to
 `{"type":"string"}`.
 Unsupported types (`func`, `chan`, `complex`, `unsafe.Pointer`) return
@@ -597,14 +599,18 @@ alongside the pin, mirroring the field rule.
 
 Fields follow `encoding/json/v2` conventions: the `json` tag sets the
 property name, and `json:"-"` excludes a field. A declaration v2 refuses to
-marshal -- a malformed tag name (a quote character, or the `json:"-,"`
-spelling), a tag on an unexported field, two fields of one struct claiming
+marshal -- a malformed tag name (a backslash or a quote character -- single quote,
+double quote, or backtick -- in the name, or the `json:"-,"` spelling), a tag on an unexported field, two fields of one struct claiming
 one JSON name, an embedded non-struct without an explicit name, an embed
 option combined with any other option, a `format` tag option (cut from
 stable v2, go.dev/issue/79071), or a struct with fields
 but none serializable (every field unexported and untagged) -- is refused
 with `ErrInvalidJSONField` exactly where `encoding/json/v2.Marshal` refuses
-to walk the declarations. A type with a direct JSON marshaler marshals
+to walk the declarations of a saturated value (pointers non-nil, maps and
+slices non-empty; v2 reads a struct's declarations only when it marshals a
+value of that struct, so a nil pointer, nil map, or empty slice hides a
+faulty declaration behind `null`, `{}`, or `[]` that generation still
+refuses). A type with a direct JSON marshaler marshals
 without its field declarations being read, but generation reflects those
 fields by policy and still applies these checks, so its refusal there is a
 conservative superset of v2's.
@@ -645,7 +651,11 @@ types, interfaces included, are regular leaf fields under the explicit JSON
 name their tag must give them: the key is always emitted (`null` for a nil
 interface), so an intercepted interface schema admits `null` alongside.
 
-A non-anonymous exported field tagged `json:",embed"` is v2's embedded
+A non-anonymous exported field of struct type (or unnamed pointer to struct)
+tagged `json:",embed"` is promoted exactly as an anonymous embed:
+`encoding/json/v2` treats the option as Go embedding, so its fields join the
+parent object and the schema, the pointer form leaving them optional. A
+non-anonymous exported field tagged `json:",embed"` is v2's embedded
 fallback when its type, after one unnamed-pointer level, is a
 `jsontext.Value` or a map whose key kind is string and whose key type
 implements no marshal or unmarshal method. V2 splices the fallback's members
