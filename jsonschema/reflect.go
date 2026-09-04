@@ -1355,11 +1355,14 @@ func (g *generator) buildFieldSchema(
 	// pointer marshaler delegates level by level, so a method anywhere down
 	// the chain serializes the value and the flag is ignored there as well.
 	// The probes serve only the ",string" refusal here and the omitempty
-	// decision below, so a field carrying neither option skips the pointer
-	// walk and the marshaler-interface probes entirely.
+	// decision below, and omitEmptyCanOmit consults them only for a kind
+	// that cannot encode an empty value on its own, so a field carrying
+	// neither option, or omitempty on a string, container, pointer,
+	// interface, or struct kind, skips the pointer walk and the
+	// marshaler-interface probes entirely.
 	var bearsMarshaler, stringOverride bool
 
-	if fi.JSONString || fi.Omitempty {
+	if fi.JSONString || (fi.Omitempty && !kindCanOmit(fieldType)) {
 		derefField := numkind.DerefType(fieldType)
 		bearsMarshaler = reflectkind.ImplementsAnyMarshaler(fieldType) ||
 			(derefField != fieldType && reflectkind.ImplementsAnyMarshaler(derefField))
@@ -1513,25 +1516,34 @@ func (g *generator) buildFieldSchema(
 // pointer or interface; a struct whose members all omit, which encodes {}),
 // plus any marshaler-bearing type, whose method may emit one (v2 checks the
 // encoded output). A plain bool or numeric field never encodes an empty
-// value, so the option never omits it and the field stays required. A struct
-// kind answers true without inspecting its fields: a struct that always
-// encodes a member is never omitted, so the answer is looser than v2 there,
-// and looser is the safe direction for required. The caller passes
-// bearsMarshaler, which it already computed for the json:",string" exemption.
+// value, so the option never omits it and the field stays required, and so
+// does an [encoding/json.Number], the one string kind whose marshaler writes
+// 0 for the empty value. A struct kind answers true without inspecting its
+// fields: a struct that always encodes a member is never omitted, so the
+// answer is looser than v2 there, and looser is the safe direction for
+// required. The caller passes bearsMarshaler, which it computes only when
+// the kind alone cannot answer.
 func omitEmptyCanOmit(t reflect.Type, bearsMarshaler bool) bool {
-	switch t.Kind() {
-	case reflect.String, reflect.Map, reflect.Slice, reflect.Pointer,
-		reflect.Interface, reflect.Struct:
-		return true
-	case reflect.Array:
-		if t.Len() == 0 {
-			return true
-		}
-
-	default:
+	if reflectkind.IsJSONNumber(t) {
+		return false
 	}
 
-	return bearsMarshaler
+	return kindCanOmit(t) || bearsMarshaler
+}
+
+// kindCanOmit reports whether t's kind alone can encode an empty JSON value,
+// the part of [omitEmptyCanOmit] that needs no marshaler probe.
+func kindCanOmit(t reflect.Type) bool {
+	switch t.Kind() {
+	case reflect.String:
+		return !reflectkind.IsJSONNumber(t)
+	case reflect.Map, reflect.Slice, reflect.Pointer, reflect.Interface, reflect.Struct:
+		return true
+	case reflect.Array:
+		return t.Len() == 0
+	default:
+		return false
+	}
 }
 
 // rebuildOverriddenField rebuilds a field node after a type= override replaced

@@ -619,7 +619,9 @@ conservative superset of v2's.
 the field's encoded value can be empty (`null`, `""`, `[]`, or `{}`) -- a
 string, map, slice, pointer, interface, struct, zero-length array, or
 marshaler-bearing field. v2 never treats an encoded number or bool as empty,
-so `omitempty` on one leaves the field required. `json:",string"` forces a
+so `omitempty` on one leaves the field required, and so does a
+`json.Number`, the one string kind whose marshaler writes `0` for the empty
+value. `json:",string"` forces a
 `{"type":"string"}` schema for the types v2 stringifies -- the integer and
 float kinds, `json.Number`, and pointer chains to those -- and is refused on
 anything else. A type carrying a JSON or text marshaler is exempt because v2

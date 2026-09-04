@@ -499,7 +499,9 @@
 // or {}): a string, map, slice, pointer, interface, struct, zero-length
 // array, or marshaler-bearing field.
 // [encoding/json/v2] never treats an encoded number or bool as empty, so
-// omitempty on one leaves the field required.
+// omitempty on one leaves the field required, and so does an
+// [encoding/json.Number], the one string kind whose marshaler writes 0 for
+// the empty value.
 //
 // json:",string" overrides the field schema to {"type": "string"} for the
 // types [encoding/json/v2] stringifies: the integer and float kinds,

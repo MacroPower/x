@@ -13,6 +13,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	jsonv1 "encoding/json"
+
 	"go.jacobcolvin.com/x/jsonschema"
 	"go.jacobcolvin.com/x/jsonschema/internal/fuzzfill"
 )
@@ -175,14 +177,16 @@ type stringCoercion struct {
 
 // omitFields carries omitempty and omitzero. A zero value drops most of these
 // fields from the marshaled object, so generation must not require them. The
-// numeric omitempty field is the exception: encoding/json/v2 never treats an
-// encoded number as empty, so it stays required and always present.
+// numeric omitempty fields are the exception: encoding/json/v2 never treats
+// an encoded number as empty, and json.Number writes 0 for its empty value,
+// so both stay required and always present.
 type omitFields struct {
-	A string    `json:"a,omitempty"`
-	B int       `json:"b,omitempty"`
-	C *int      `json:"c,omitempty"`
-	D string    `json:"d,omitzero"`
-	E time.Time `json:"e,omitzero"`
+	A string        `json:"a,omitempty"`
+	B int           `json:"b,omitempty"`
+	C *int          `json:"c,omitempty"`
+	D string        `json:"d,omitzero"`
+	E time.Time     `json:"e,omitzero"`
+	F jsonv1.Number `json:"f,omitempty"`
 }
 
 // intKeyMap marshals a map keyed by an integer, which encoding/json renders
