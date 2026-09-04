@@ -4,6 +4,7 @@ import (
 	"slices"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/annotations"
+	"go.jacobcolvin.com/x/jsonschema/internal/jsonvalue"
 	"go.jacobcolvin.com/x/jsonschema/internal/keywordmeta"
 )
 
@@ -120,9 +121,9 @@ type evalContext struct {
 	v            *validator
 	schema       *Schema
 	ann          *annotations.Set
-	instance     any
 	instancePath instanceLocation
 	schemaPath   schemaLocation
+	instance     jsonvalue.Value
 	// The nodeID is schema's node id, or -1 when schema is outside the
 	// index (a fallback target reached only at validation time). The
 	// per-node cache accessors index their slices by it and recompute on -1. It

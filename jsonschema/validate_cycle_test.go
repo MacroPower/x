@@ -13,8 +13,9 @@ import (
 // before any keyword runs, so the value-comparison keywords -- uniqueItems,
 // const, and enum -- can never walk a cycle and abort the process with a fatal
 // stack overflow. The rejection arrives as an ordinary error, not a crash and
-// not a *ValidationError. The comparison walks themselves keep their own cycle
-// guards as defense in depth, pinned in internal/jsonequal.
+// not a *ValidationError. The comparison walks run over internal/jsonvalue
+// trees, which are finite by construction, so they carry no guard of their
+// own.
 func TestValidateCyclicInstanceValueComparisons(t *testing.T) {
 	t.Parallel()
 

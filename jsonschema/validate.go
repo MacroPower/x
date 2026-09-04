@@ -21,9 +21,8 @@ import (
 	"go.jacobcolvin.com/x/jsonschema/internal/annotations"
 	"go.jacobcolvin.com/x/jsonschema/internal/content"
 	"go.jacobcolvin.com/x/jsonschema/internal/format"
-	"go.jacobcolvin.com/x/jsonschema/internal/jsonequal"
 	"go.jacobcolvin.com/x/jsonschema/internal/jsonptr"
-	"go.jacobcolvin.com/x/jsonschema/internal/normalize"
+	"go.jacobcolvin.com/x/jsonschema/internal/jsonvalue"
 	"go.jacobcolvin.com/x/jsonschema/internal/numrat"
 	"go.jacobcolvin.com/x/jsonschema/internal/refresolve"
 	"go.jacobcolvin.com/x/jsonschema/internal/regexcache"
@@ -335,10 +334,8 @@ type validator struct {
 	visiting           map[visitKey]bool
 	patternCache       []*compiledPattern           // schema.Pattern compiled (see numericBounds)
 	patternProps       []map[string]compiledPattern // patternProperties keys compiled (see numericBounds)
-	constVals          []*any                       // document view of the const value (see documentConst)
-	enumVals           [][]any                      // document view of the enum members (see documentEnum)
-	constRats          []*big.Rat                   // numeric const value as a rational (see numericBounds)
-	enumRats           [][]*big.Rat                 // numeric enum members as rationals by index (see numericBounds)
+	constVals          []*jsonvalue.Value           // document view of the const value (see documentConst)
+	enumVals           [][]jsonvalue.Value          // document view of the enum members (see documentEnum)
 	sortedPropertyKeys [][]string                   // schema.Properties keys, sorted (see numericBounds)
 	sortedPatternKeys  [][]string                   // schema.PatternProperties keys, sorted (see numericBounds)
 	itemsPlans         []*itemsPlan                 // normalized array item keywords (see numericBounds)
@@ -352,8 +349,8 @@ type validator struct {
 	// and forInstance clears both, while constView and enumView allocate
 	// each map lazily, so a run that reaches no out-of-index schema pays
 	// nothing.
-	lateEnums  map[*Schema]lateEnumView
-	lateConsts map[*Schema]lateConstView
+	lateEnums  map[*Schema][]jsonvalue.Value
+	lateConsts map[*Schema]jsonvalue.Value
 
 	// The WithDraft override; nil leaves the draft to $schema detection.
 	draftOverride *Draft
@@ -686,8 +683,6 @@ func (v *validator) sizeCaches(n int) {
 	v.patternProps = growSlice(v.patternProps, n)
 	v.constVals = growSlice(v.constVals, n)
 	v.enumVals = growSlice(v.enumVals, n)
-	v.constRats = growSlice(v.constRats, n)
-	v.enumRats = growSlice(v.enumRats, n)
 	v.sortedPropertyKeys = growSlice(v.sortedPropertyKeys, n)
 	v.sortedPatternKeys = growSlice(v.sortedPatternKeys, n)
 	v.itemsPlans = growSlice(v.itemsPlans, n)
@@ -731,25 +726,18 @@ func numericCompile(v *validator, id int, s *Schema) {
 	}
 }
 
-// enumCompile caches the document view of a schema's enum members and, by
-// index, the numeric ones as rationals for the enum row's eval, under the
-// schema's node id.
+// enumCompile caches the document view of a schema's enum members for the
+// enum row's eval, under the schema's node id.
 func enumCompile(v *validator, id int, s *Schema) {
 	if s.Enum == nil {
 		return
 	}
 
-	members := documentEnum(s.Enum)
-	v.enumVals[id] = members
-
-	if rats := numrat.EnumMemberRats(members); rats != nil {
-		v.enumRats[id] = rats
-	}
+	v.enumVals[id] = documentEnum(s.Enum)
 }
 
-// constCompile caches the document view of a schema's const value and, for a
-// numeric one, its rational for the const row's eval, under the schema's node
-// id.
+// constCompile caches the document view of a schema's const value for the
+// const row's eval, under the schema's node id.
 func constCompile(v *validator, id int, s *Schema) {
 	if s.Const == nil {
 		return
@@ -757,36 +745,24 @@ func constCompile(v *validator, id int, s *Schema) {
 
 	val := documentConst(*s.Const)
 	v.constVals[id] = &val
-
-	if r, ok := numrat.SchemaNumberRat(val); ok {
-		v.constRats[id] = r
-	}
 }
 
-// documentConst returns the value a const compares as: the JSON-shaped value
-// the emitted document renders for it ([normalize.DocumentValue]), so a
-// hand-built typed nil container, struct, or raw [jsontext.Value] validates
-// the way its document does. A value the document view refuses (a func, a
-// cyclic value) keeps its Go form, which the comparison treats as unequal to
-// everything. A map or slice already in document shape returns as is, so the
-// view may share storage with the schema; the rule against mutating a schema
-// after [Compile] keeps that sharing safe.
-func documentConst(val any) any {
-	if dv, ok := normalize.DocumentValue(val); ok {
-		return dv
-	}
+// documentConst returns the value a const compares as: the JSON value the
+// emitted document renders for it ([jsonvalue.FromDocument]), so a hand-built
+// typed nil container, struct, or raw [jsontext.Value] validates the way its
+// document does. A value the document view refuses (a func, a cyclic value)
+// is the Invalid value, which the comparison treats as unequal to
+// everything. The view shares nothing with the schema.
+func documentConst(val any) jsonvalue.Value {
+	dv, _ := jsonvalue.FromDocument(val)
 
-	return val
+	return dv
 }
 
 // documentEnum returns a fresh slice holding [documentConst] of each enum
-// member. The outer slice is fresh so the conversion never writes back into
-// the caller's Enum (a typed nil container becomes nil, a struct becomes a
-// map). A container member the document view leaves unchanged still shares
-// its storage with the schema, which the rule against mutating a schema after
-// [Compile] (see [Validator.Schema]) already covers.
-func documentEnum(members []any) []any {
-	out := make([]any, len(members))
+// member.
+func documentEnum(members []any) []jsonvalue.Value {
+	out := make([]jsonvalue.Value, len(members))
 	for i, member := range members {
 		out[i] = documentConst(member)
 	}
@@ -1472,7 +1448,7 @@ func ParseSchemaValue(doc any) (*Schema, error) {
 // carried inside an unknown keyword would likewise reach the JSON-pointer
 // fallback with its numbers already rounded. Each node's typed [Location]
 // segments resolve its source map, and each member is re-copied via
-// [normalize.ExactValue], keeping numbers as exact [jsonv1.Number] literals
+// [jsonvalue.Exact], keeping numbers as exact [jsonv1.Number] literals
 // while staying unaliased from the caller's document. Restoration is gated
 // on what upstream parsed (a node whose members are unset stays unset), so
 // the two trees stay shape-aligned; a member that fails the re-copy keeps
@@ -1599,7 +1575,7 @@ func copySourceMember(src map[string]any, key string) (any, bool) {
 		return nil, false
 	}
 
-	return normalize.ExactValue(v)
+	return jsonvalue.Exact(v)
 }
 
 // ParseSchema decodes data as a single JSON schema document and returns it
@@ -1614,12 +1590,12 @@ func copySourceMember(src map[string]any, key string) (any, bool) {
 // a [Schema] directly silently coerces to the false schema. Malformed JSON
 // returns the wrapped decode error without the sentinel.
 func ParseSchema(data []byte) (*Schema, error) {
-	doc, err := normalize.DecodeJSONInstance(data)
+	doc, err := jsonvalue.Decode(data)
 	if err != nil {
-		return nil, err //nolint:wrapcheck // DecodeJSONInstance already wraps with "JSON decode:".
+		return nil, err //nolint:wrapcheck // Decode already wraps with "JSON decode:".
 	}
 
-	return ParseSchemaValue(doc)
+	return ParseSchemaValue(doc.Interface())
 }
 
 // CompileJSON decodes data as a single JSON schema document with
@@ -1737,24 +1713,22 @@ func checkSchemaTree(schema *Schema) error {
 // the network can honor cancellation and deadlines. The context is held only
 // for the duration of the run, never by the [Validator] itself.
 func (c *Validator) Validate(ctx context.Context, instance any) error {
-	instance, err := normalizeAndCheck(instance)
+	value, err := normalizeAndCheck(instance)
 	if err != nil {
 		return err
 	}
 
-	return c.validateNormalized(ctx, instance)
+	return c.validateNormalized(ctx, value)
 }
 
-// normalizeAndCheck normalizes instance and reports an error if, after
-// normalization, its type, a nested container leaf, or a self-referential
+// normalizeAndCheck converts instance through [jsonvalue.FromGo] and reports
+// an error if its type, a nested container leaf, or a self-referential
 // container is not one the validation walk accepts. The message lists the
 // accepted shapes in one place so the two entry points cannot drift.
-// Normalization and the acceptance check share one tree walk via
-// [normalize.ValueChecked].
-func normalizeAndCheck(instance any) (any, error) {
-	instance, ok := normalize.ValueChecked(instance)
+func normalizeAndCheck(instance any) (jsonvalue.Value, error) {
+	value, ok := jsonvalue.FromGo(instance)
 	if !ok {
-		return nil, fmt.Errorf(
+		return jsonvalue.Value{}, fmt.Errorf(
 			"instance of type %T is not accepted: instances must contain only map[string]any, "+
 				"[]any, string, bool, nil, and numeric values, with no self-referential containers; "+
 				"marshal to JSON or use Validator.ValidateJSON",
@@ -1762,18 +1736,14 @@ func normalizeAndCheck(instance any) (any, error) {
 		)
 	}
 
-	return instance, nil
+	return value, nil
 }
 
-// validateNormalized validates an instance already in accepted form,
-// returning nil on success or the assembled *ValidationError. The one-shot
-// [Validate] entry point calls it directly so an instance it already
-// normalized is not walked a second time, and [Validator.ValidateJSON] and
-// [Validator.ValidateReader] call it directly because a decoded tree is
-// already in accepted form. [normalize.DecodeJSONInstance] emits only nil,
-// bool, string, [jsonv1.Number], map[string]any, and []any, with no shared
-// containers.
-func (c *Validator) validateNormalized(ctx context.Context, instance any) error {
+// validateNormalized validates a converted instance, returning nil on
+// success or the assembled *ValidationError. Every entry point converts its
+// instance exactly once, through [jsonvalue.FromGo] for a Go value or
+// [jsonvalue.Decode] for JSON text, and hands the Value here.
+func (c *Validator) validateNormalized(ctx context.Context, instance jsonvalue.Value) error {
 	v := c.proto.forInstance(ctx)
 
 	// The run context reaches the resolver through the per-run ctx field set
@@ -1791,44 +1761,35 @@ func (c *Validator) validateNormalized(ctx context.Context, instance any) error 
 	return &ValidationError{Causes: errs}
 }
 
-// ValidateJSON decodes data as a JSON instance (numbers as [jsonv1.Number]) and
-// validates it against the compiled schema. The decoded tree is already in
-// the form [Validator.Validate] accepts, so it goes to the walk without the
-// normalization pass a Go value gets.
+// ValidateJSON decodes data as a JSON instance, keeping every number as its
+// exact literal, and validates it against the compiled schema.
 //
 // The context is passed to the [RefResolver] for remote refs reached during
 // this validation run (see [Validator.Validate]).
 func (c *Validator) ValidateJSON(ctx context.Context, data []byte) error {
-	instance, err := normalize.DecodeJSONInstance(data)
+	instance, err := jsonvalue.Decode(data)
 	if err != nil {
-		return err //nolint:wrapcheck // DecodeJSONInstance already wraps with "JSON decode:".
+		return err //nolint:wrapcheck // Decode already wraps with "JSON decode:".
 	}
 
-	// Call validateNormalized, not c.Validate. The decoder emits only nil,
-	// bool, string, jsonv1.Number, map[string]any, and []any, so a second
-	// normalization walk could neither change nor reject the tree.
 	return c.validateNormalized(ctx, instance)
 }
 
 // ValidateReader applies [Validator.ValidateJSON]'s discipline to an
-// [io.Reader], reading r to EOF, decoding numbers as [jsonv1.Number] while
-// rejecting data after the single top-level value, duplicate object member
-// names, and invalid UTF-8, then validating against the compiled schema. A
-// read error returns wrapped, without a validation verdict, and does not
-// unwrap to [*ValidationError]. The decoded tree is already in the form
-// [Validator.Validate] accepts, so it goes to the walk without the
-// normalization pass a Go value gets.
+// [io.Reader], reading r to EOF, keeping every number as its exact literal
+// while rejecting data after the single top-level value, duplicate object
+// member names, and invalid UTF-8, then validating against the compiled
+// schema. A read error returns wrapped, without a validation verdict, and
+// does not unwrap to [*ValidationError].
 //
 // The context is passed to the [RefResolver] for remote refs reached during
 // this validation run (see [Validator.Validate]).
 func (c *Validator) ValidateReader(ctx context.Context, r io.Reader) error {
-	instance, err := normalize.DecodeJSONInstanceReader(r)
+	instance, err := jsonvalue.DecodeReader(r)
 	if err != nil {
-		return err //nolint:wrapcheck // DecodeJSONInstanceReader already wraps with "JSON decode:".
+		return err //nolint:wrapcheck // DecodeReader already wraps with "JSON decode:".
 	}
 
-	// Call validateNormalized, not c.Validate, on the same terms as
-	// ValidateJSON, since the decoder emits only accepted shapes.
 	return c.validateNormalized(ctx, instance)
 }
 
@@ -1905,7 +1866,7 @@ func addressableInstance(v any) any {
 func Validate(ctx context.Context, schema *Schema, instance any, opts ...ValidateOption) error {
 	// Check the instance type before compiling so an unaccepted instance is
 	// reported without the cost of (or any error from) schema preparation.
-	instance, err := normalizeAndCheck(instance)
+	value, err := normalizeAndCheck(instance)
 	if err != nil {
 		return err
 	}
@@ -1915,15 +1876,13 @@ func Validate(ctx context.Context, schema *Schema, instance any, opts ...Validat
 		return err
 	}
 
-	// Call validateNormalized, not c.Validate, so the instance normalized just
-	// above is not walked by Normalize a second time.
-	return c.validateNormalized(ctx, instance)
+	return c.validateNormalized(ctx, value)
 }
 
 // validate performs the depth-first recursive walk.
 func (v *validator) validate(
 	schema *Schema,
-	instance any,
+	instance jsonvalue.Value,
 	instancePath instanceLocation,
 	schemaPath schemaLocation,
 	ann *annotations.Set,
@@ -2027,10 +1986,11 @@ func evalUnevaluatedProperties(ctx evalContext) []*ValidationError {
 		return nil
 	}
 
-	obj, ok := ctx.instance.(map[string]any)
-	if !ok || ann.AllPropertiesSet() {
+	if ctx.instance.Kind() != jsonvalue.Object || ann.AllPropertiesSet() {
 		return nil
 	}
+
+	obj := ctx.instance.Members()
 
 	// IsEmptySchema implies Not == nil, so the schema is not a false schema: an
 	// empty (always-true) unevaluatedProperties evaluates every remaining
@@ -2087,10 +2047,11 @@ func evalUnevaluatedItems(ctx evalContext) []*ValidationError {
 		return nil
 	}
 
-	arr, ok := ctx.instance.([]any)
-	if !ok || ann.AllItemsSet() {
+	if ctx.instance.Kind() != jsonvalue.Array || ann.AllItemsSet() {
 		return nil
 	}
+
+	arr := ctx.instance.Elements()
 
 	// IsEmptySchema implies Not == nil, so the schema is not a false schema: an
 	// empty (always-true) unevaluatedItems evaluates every remaining item and
@@ -2177,13 +2138,11 @@ func evalType(ctx evalContext) []*ValidationError {
 		return nil
 	}
 
-	for _, t := range types {
-		if normalize.MatchesType(ctx.instance, t) {
-			return nil
-		}
+	if slices.ContainsFunc(types, ctx.instance.MatchesType) {
+		return nil
 	}
 
-	got := normalize.TypeName(ctx.instance)
+	got := ctx.instance.TypeName()
 
 	return []*ValidationError{
 		leafError(ctx.instancePath, ctx.schemaPath, KeywordType,
@@ -2214,18 +2173,8 @@ func evalEnum(ctx evalContext) []*ValidationError {
 		return nil
 	}
 
-	// A nil rats (no numeric enum members) leaves every member's rational nil;
-	// the loop below tolerates that and compares members by value.
-	members, rats := ctx.v.enumView(ctx.nodeID, schema)
-
-	for i, allowed := range members {
-		var allowedRat *big.Rat
-
-		if rats != nil {
-			allowedRat = rats[i]
-		}
-
-		if jsonequal.EqualWithRat(allowed, allowedRat, ctx.instance) {
+	for _, allowed := range ctx.v.enumView(ctx.nodeID, schema) {
+		if allowed.Equal(ctx.instance) {
 			return nil
 		}
 	}
@@ -2242,10 +2191,7 @@ func evalConst(ctx evalContext) []*ValidationError {
 		return nil
 	}
 
-	// A non-numeric const leaves constRat nil; EqualWithRat is nil-safe and
-	// falls back to value comparison.
-	constVal, constRat := ctx.v.constView(ctx.nodeID, schema)
-	if jsonequal.EqualWithRat(constVal, constRat, ctx.instance) {
+	if ctx.v.constView(ctx.nodeID, schema).Equal(ctx.instance) {
 		return nil
 	}
 
@@ -2265,72 +2211,54 @@ func (v *validator) inIndex(id int) bool {
 	return id >= 0 && id < v.index.len()
 }
 
-// lateConstView is the document view of an out-of-index schema's const value
-// and, for a numeric one, its rational, memoized per run in lateConsts.
-type lateConstView struct {
-	val any
-	rat *big.Rat
-}
-
-// lateEnumView is the document view of an out-of-index schema's enum members
-// and, by index, the rationals of the numeric ones, memoized per run in
-// lateEnums.
-type lateEnumView struct {
-	members []any
-	rats    []*big.Rat
-}
-
-// constView returns the document view of schema's const value and, for a
-// numeric one, its rational, preferring the per-node cache. For a schema
-// outside the index (a remote or JSON-pointer fallback schema reached only at
-// validation time) it converts on first sight and memoizes the result in the
-// run's lateConsts, so an instance with many nodes against one such schema
-// converts once. The caller checks that the schema sets const. The returned
-// values are operands only; callers must not mutate them.
-func (v *validator) constView(id int, schema *Schema) (any, *big.Rat) {
+// constView returns the document view of schema's const value, preferring
+// the per-node cache. For a schema outside the index (a remote or
+// JSON-pointer fallback schema reached only at validation time) it converts
+// on first sight and memoizes the result in the run's lateConsts, so an
+// instance with many nodes against one such schema converts once. The caller
+// checks that the schema sets const.
+func (v *validator) constView(id int, schema *Schema) jsonvalue.Value {
 	if v.inIndex(id) && v.constVals[id] != nil {
-		return *v.constVals[id], v.constRats[id]
+		return *v.constVals[id]
 	}
 
 	if view, ok := v.lateConsts[schema]; ok {
-		return view.val, view.rat
+		return view
 	}
 
 	val := documentConst(*schema.Const)
-	r, _ := numrat.SchemaNumberRat(val)
 
 	if v.lateConsts == nil {
-		v.lateConsts = map[*Schema]lateConstView{}
+		v.lateConsts = map[*Schema]jsonvalue.Value{}
 	}
 
-	v.lateConsts[schema] = lateConstView{val: val, rat: r}
+	v.lateConsts[schema] = val
 
-	return val, r
+	return val
 }
 
-// enumView returns the document view of schema's enum members and, by index,
-// the rationals of the numeric ones, on the same terms as [validator.constView]
-// (the per-node cache first, then the run's lateEnums memo). A nil rationals
-// slice means no member is numeric.
-func (v *validator) enumView(id int, schema *Schema) ([]any, []*big.Rat) {
+// enumView returns the document view of schema's enum members, on the same
+// terms as [validator.constView] (the per-node cache first, then the run's
+// lateEnums memo). The returned slice is an operand only; callers must not
+// mutate it.
+func (v *validator) enumView(id int, schema *Schema) []jsonvalue.Value {
 	if v.inIndex(id) && v.enumVals[id] != nil {
-		return v.enumVals[id], v.enumRats[id]
+		return v.enumVals[id]
 	}
 
 	if view, ok := v.lateEnums[schema]; ok {
-		return view.members, view.rats
+		return view
 	}
 
 	members := documentEnum(schema.Enum)
-	rats := numrat.EnumMemberRats(members)
 
 	if v.lateEnums == nil {
-		v.lateEnums = map[*Schema]lateEnumView{}
+		v.lateEnums = map[*Schema][]jsonvalue.Value{}
 	}
 
-	v.lateEnums[schema] = lateEnumView{members: members, rats: rats}
+	v.lateEnums[schema] = members
 
-	return members, rats
+	return members
 }
 
 // boundsFor returns the numeric bound rationals for schema, preferring the
@@ -2402,43 +2330,32 @@ func evalNumeric(ctx evalContext) []*ValidationError {
 	instancePath, schemaPath := ctx.instancePath, ctx.schemaPath
 	nodeID := ctx.nodeID
 
-	if !numrat.IsNumeric(instance) {
+	if instance.Kind() != jsonvalue.Number {
 		return nil
 	}
 
-	// Decompose a JSON number exactly once. An over-cap literal (the DoS guard)
-	// takes the magnitude-class comparison without a second scan of the literal;
-	// an unparseable one has no value to compare and fails every present bound
-	// keyword closed; an exactly-comparable one yields the rational the bounded
-	// checks use. A float64 (the default) converts through its shortest
-	// decimal, and a non-finite float yields no rational and likewise fails
-	// closed.
-	var val *big.Rat
+	// The value carries its decomposition from the parse. An over-cap literal
+	// (the DoS guard) takes the magnitude-class comparison without a second
+	// scan of the literal; a value with none (an unparseable literal, or a
+	// non-finite float, which yields no rational) fails every present bound
+	// keyword closed; an exactly comparable one yields the rational the
+	// bounded checks use.
+	literal := instance.Literal()
 
-	switch n := instance.(type) {
-	case jsonv1.Number:
-		d, ok := numrat.ParseDecNumber(string(n))
-		if !ok {
-			return validateNumericNonComparable(
-				schema, fmt.Sprintf("%q", string(n)), instancePath, schemaPath,
-			)
+	if !instance.Comparable() {
+		desc := literal
+		if !instance.FromFloat() {
+			desc = fmt.Sprintf("%q", literal)
 		}
 
-		if !d.ExactlyComparable() {
-			return v.validateNumericUnbounded(nodeID, schema, d, string(n), instancePath, schemaPath)
-		}
+		return validateNumericNonComparable(schema, desc, instancePath, schemaPath)
+	}
 
-		val = d.Rat()
+	val, ok := instance.Rat()
+	if !ok {
+		d, _ := instance.Dec()
 
-	default:
-		var ok bool
-
-		val, ok = numrat.ToBigRat(instance)
-		if !ok {
-			return validateNumericNonComparable(
-				schema, fmt.Sprintf("%v", instance), instancePath, schemaPath,
-			)
-		}
+		return v.validateNumericUnbounded(nodeID, schema, d, literal, instancePath, schemaPath)
 	}
 
 	var errs []*ValidationError
@@ -2655,12 +2572,11 @@ func evalString(ctx evalContext) []*ValidationError {
 	schema := ctx.schema
 	instancePath, schemaPath := ctx.instancePath, ctx.schemaPath
 
-	str, ok := ctx.instance.(string)
-	if !ok {
-		// Json.Number is a distinct type, so it fails this assertion and string
-		// keywords correctly do not apply to numbers.
+	if ctx.instance.Kind() != jsonvalue.String {
 		return nil
 	}
+
+	str := ctx.instance.Str()
 
 	var errs []*ValidationError
 
@@ -2706,14 +2622,11 @@ func evalString(ctx evalContext) []*ValidationError {
 func evalFormat(ctx evalContext) []*ValidationError {
 	schema := ctx.schema
 
-	str, ok := ctx.instance.(string)
-	if !ok {
+	if ctx.instance.Kind() != jsonvalue.String || schema.Format == "" {
 		return nil
 	}
 
-	if schema.Format == "" {
-		return nil
-	}
+	str := ctx.instance.Str()
 
 	fv, exists := ctx.v.formatCheckers[schema.Format]
 	if !exists {
@@ -2755,10 +2668,11 @@ func evalFormat(ctx evalContext) []*ValidationError {
 // success, and the rest marks all items only when it is the 2020-12 items
 // keyword (restMarksAllItems) and actually reached a trailing element.
 func evalArrayItems(ctx evalContext) []*ValidationError {
-	arr, ok := ctx.instance.([]any)
-	if !ok {
+	if ctx.instance.Kind() != jsonvalue.Array {
 		return nil
 	}
+
+	arr := ctx.instance.Elements()
 
 	plan := ctx.v.itemsPlanFor(ctx.nodeID, ctx.schema)
 	if plan == nil {
@@ -2835,10 +2749,11 @@ func evalContains(ctx evalContext) []*ValidationError {
 		return nil
 	}
 
-	arr, ok := ctx.instance.([]any)
-	if !ok {
+	if ctx.instance.Kind() != jsonvalue.Array {
 		return nil
 	}
+
+	arr := ctx.instance.Elements()
 
 	v, ann := ctx.v, ctx.ann
 	instancePath, schemaPath := ctx.instancePath, ctx.schemaPath
@@ -2908,10 +2823,11 @@ func evalContains(ctx evalContext) []*ValidationError {
 func evalArrayLength(ctx evalContext) []*ValidationError {
 	schema := ctx.schema
 
-	arr, ok := ctx.instance.([]any)
-	if !ok {
+	if ctx.instance.Kind() != jsonvalue.Array {
 		return nil
 	}
+
+	arr := ctx.instance.Elements()
 
 	instancePath, schemaPath := ctx.instancePath, ctx.schemaPath
 
@@ -2927,7 +2843,7 @@ func evalArrayLength(ctx evalContext) []*ValidationError {
 			fmt.Sprintf("array has %d items, maximum is %d", len(arr), *schema.MaxItems)))
 	}
 
-	if schema.UniqueItems && jsonequal.HasDuplicates(arr) {
+	if schema.UniqueItems && jsonvalue.HasDuplicates(arr) {
 		errs = append(errs, leafError(instancePath, schemaPath, KeywordUniqueItems,
 			"array contains duplicate items"))
 	}
@@ -2948,10 +2864,11 @@ func evalArrayLength(ctx evalContext) []*ValidationError {
 func evalObjectApplicators(ctx evalContext) []*ValidationError {
 	schema, ann := ctx.schema, ctx.ann
 
-	obj, ok := ctx.instance.(map[string]any)
-	if !ok {
+	if ctx.instance.Kind() != jsonvalue.Object {
 		return nil
 	}
+
+	obj := ctx.instance.Members()
 
 	v := ctx.v
 	instancePath, schemaPath := ctx.instancePath, ctx.schemaPath
@@ -3077,7 +2994,9 @@ func evalObjectApplicators(ctx evalContext) []*ValidationError {
 
 		for _, propName := range sortedObjKeys {
 			childPath := instancePath.key(propName)
-			childErrs := v.validate(schema.PropertyNames, propName, childPath, childSchemaPath, nil)
+			childErrs := v.validate(
+				schema.PropertyNames, jsonvalue.NewString(propName), childPath, childSchemaPath, nil,
+			)
 			if len(childErrs) > 0 {
 				errs = append(errs, newError(
 					childPath, childSchemaPath, KeywordPropertyNames,
@@ -3093,10 +3012,11 @@ func evalObjectApplicators(ctx evalContext) []*ValidationError {
 // evalDependentSchemas checks the 2020-12 dependentSchemas keyword. Its table
 // row gates it on the applicator vocabulary and the 2020-12-and-up draft range.
 func evalDependentSchemas(ctx evalContext) []*ValidationError {
-	obj, ok := ctx.instance.(map[string]any)
-	if !ok {
+	if ctx.instance.Kind() != jsonvalue.Object {
 		return nil
 	}
+
+	obj := ctx.instance.Members()
 
 	triggers := dependencyKeysFor(ctx.v, ctx.nodeID, ctx.schema.DependentSchemas,
 		func(dk *dependencyKeys) []string { return dk.dependentSchemas })
@@ -3112,10 +3032,11 @@ func evalDependentSchemas(ctx evalContext) []*ValidationError {
 func evalObjectCount(ctx evalContext) []*ValidationError {
 	schema := ctx.schema
 
-	obj, ok := ctx.instance.(map[string]any)
-	if !ok {
+	if ctx.instance.Kind() != jsonvalue.Object {
 		return nil
 	}
+
+	obj := ctx.instance.Members()
 
 	instancePath, schemaPath := ctx.instancePath, ctx.schemaPath
 
@@ -3144,10 +3065,11 @@ func evalObjectCount(ctx evalContext) []*ValidationError {
 // evalDependentRequired checks the 2020-12 dependentRequired keyword, gated on
 // the validation vocabulary and the 2020-12-and-up draft range by its table row.
 func evalDependentRequired(ctx evalContext) []*ValidationError {
-	obj, ok := ctx.instance.(map[string]any)
-	if !ok {
+	if ctx.instance.Kind() != jsonvalue.Object {
 		return nil
 	}
+
+	obj := ctx.instance.Members()
 
 	triggers := dependencyKeysFor(ctx.v, ctx.nodeID, ctx.schema.DependentRequired,
 		func(dk *dependencyKeys) []string { return dk.dependentRequired })
@@ -3166,10 +3088,11 @@ func evalDependentRequired(ctx evalContext) []*ValidationError {
 // Ungated by vocabulary: vocabulary is a 2020-12 concept and the legacy keyword
 // predates it, so its table row carries the always-active core group.
 func evalLegacyDependencies(ctx evalContext) []*ValidationError {
-	obj, ok := ctx.instance.(map[string]any)
-	if !ok {
+	if ctx.instance.Kind() != jsonvalue.Object {
 		return nil
 	}
+
+	obj := ctx.instance.Members()
 
 	v, schema := ctx.v, ctx.schema
 	instancePath, schemaPath := ctx.instancePath, ctx.schemaPath
@@ -3204,8 +3127,8 @@ func (v *validator) validateSchemaDependencies(
 	deps map[string]*Schema,
 	triggers []string,
 	keyword string,
-	instance any,
-	obj map[string]any,
+	instance jsonvalue.Value,
+	obj map[string]jsonvalue.Value,
 	instancePath instanceLocation,
 	schemaPath schemaLocation,
 	ann *annotations.Set,
@@ -3246,7 +3169,7 @@ func (v *validator) validateRequiredDependencies(
 	deps map[string][]string,
 	triggers []string,
 	keyword string,
-	obj map[string]any,
+	obj map[string]jsonvalue.Value,
 	instancePath instanceLocation,
 	schemaPath schemaLocation,
 ) []*ValidationError {
@@ -3479,14 +3402,15 @@ func evalContent(ctx evalContext) []*ValidationError {
 // asserted; unrecognized encodings and media types remain annotations.
 func (v *validator) assertContent(
 	schema *Schema,
-	instance any,
+	instance jsonvalue.Value,
 	instancePath instanceLocation,
 	schemaPath schemaLocation,
 ) []*ValidationError {
-	str, ok := instance.(string)
-	if !ok {
+	if instance.Kind() != jsonvalue.String {
 		return nil
 	}
+
+	str := instance.Str()
 
 	switch kw, decodeErr := content.Assert(
 		schema.ContentEncoding, schema.ContentMediaType, str,
@@ -3552,7 +3476,7 @@ func (v *validator) validateResolvedRef(
 	res refresolve.Result,
 	schema *Schema,
 	ref, keyword string,
-	instance any,
+	instance jsonvalue.Value,
 	instancePath instanceLocation,
 	schemaPath schemaLocation,
 	ann *annotations.Set,

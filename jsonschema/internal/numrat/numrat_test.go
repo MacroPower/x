@@ -1,7 +1,6 @@
 package numrat_test
 
 import (
-	"encoding/json"
 	"math/big"
 	"strings"
 	"testing"
@@ -200,56 +199,6 @@ func TestIsIntegral(t *testing.T) {
 	}
 }
 
-func TestJSONNumberIsIntegral(t *testing.T) {
-	t.Parallel()
-
-	tests := map[string]struct {
-		input json.Number
-		want  bool
-	}{
-		"plain integer":   {input: json.Number("7"), want: true},
-		"point-zero":      {input: json.Number("7.0"), want: true},
-		"exponent form":   {input: json.Number("1e3"), want: true},
-		"beyond int64":    {input: json.Number("1e30"), want: true},
-		"fraction":        {input: json.Number("7.25"), want: false},
-		"not a number":    {input: json.Number("abc"), want: false},
-		"empty is no int": {input: json.Number(""), want: false},
-	}
-
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			assert.Equal(t, tc.want, numrat.JSONNumberIsIntegral(tc.input))
-		})
-	}
-}
-
-func TestIsIntegralInstance(t *testing.T) {
-	t.Parallel()
-
-	tests := map[string]struct {
-		input any
-		want  bool
-	}{
-		"small json.Number int": {input: json.Number("3"), want: true},
-		"large integral float":  {input: 1e30, want: true},
-		"large json.Number int": {input: json.Number("1e30"), want: true},
-		"float with fraction":   {input: 1.5, want: false},
-		"json.Number fraction":  {input: json.Number("1.5"), want: false},
-		"string is not numeric": {input: "3", want: false},
-		"nil is not numeric":    {input: nil, want: false},
-	}
-
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			assert.Equal(t, tc.want, numrat.IsIntegralInstance(tc.input))
-		})
-	}
-}
-
 func TestCmpRatMagnitudeClasses(t *testing.T) {
 	t.Parallel()
 
@@ -349,121 +298,6 @@ func TestIntegerMultipleOf(t *testing.T) {
 				"IntegerMultipleOf requires an integral value")
 			assert.Equal(t, tc.want,
 				numrat.IntegerMultipleOf(d, tc.literal, tc.divisor))
-		})
-	}
-}
-
-func TestSchemaNumberRat(t *testing.T) {
-	t.Parallel()
-
-	tests := map[string]struct {
-		input any
-		ok    bool
-		want  *big.Rat
-	}{
-		"float shortest decimal": {
-			input: 0.1,
-			ok:    true,
-			want:  big.NewRat(1, 10),
-		},
-		"int kind": {
-			input: 7,
-			ok:    true,
-			want:  big.NewRat(7, 1),
-		},
-		"uint kind": {
-			input: uint8(255),
-			ok:    true,
-			want:  big.NewRat(255, 1),
-		},
-		"json.Number in range": {
-			input: json.Number("1.5"),
-			ok:    true,
-			want:  big.NewRat(3, 2),
-		},
-		"over-cap json.Number rejected": {
-			input: json.Number("1e" + strings.Repeat("9", 12)),
-			ok:    false,
-		},
-		"string is not numeric": {
-			input: "5",
-			ok:    false,
-		},
-	}
-
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			got, ok := numrat.SchemaNumberRat(tc.input)
-			require.Equal(t, tc.ok, ok)
-
-			if !tc.ok {
-				return
-			}
-
-			assert.Zero(t, tc.want.Cmp(got), "got %v, want %v", got, tc.want)
-		})
-	}
-}
-
-func TestEnumMemberRats(t *testing.T) {
-	t.Parallel()
-
-	t.Run("nil when no member is numeric", func(t *testing.T) {
-		t.Parallel()
-
-		assert.Nil(t, numrat.EnumMemberRats([]any{"a", true, nil}))
-	})
-
-	t.Run("aligned by index with nil for non-numeric", func(t *testing.T) {
-		t.Parallel()
-
-		rats := numrat.EnumMemberRats([]any{"a", 2, json.Number("3.5")})
-		require.Len(t, rats, 3)
-		assert.Nil(t, rats[0], "non-numeric member has no rational")
-		require.NotNil(t, rats[1])
-		assert.Zero(t, big.NewRat(2, 1).Cmp(rats[1]))
-		require.NotNil(t, rats[2])
-		assert.Zero(t, big.NewRat(7, 2).Cmp(rats[2]))
-	})
-}
-
-func TestToBigRatAndIsNumeric(t *testing.T) {
-	t.Parallel()
-
-	tests := map[string]struct {
-		input     any
-		isNumeric bool
-		ratOK     bool
-		want      *big.Rat
-	}{
-		"float64": {
-			input: 1.25, isNumeric: true, ratOK: true, want: big.NewRat(5, 4),
-		},
-		"json.Number": {
-			input: json.Number("2.5"), isNumeric: true, ratOK: true, want: big.NewRat(5, 2),
-		},
-		"over-cap json.Number": {
-			input: json.Number("1e" + strings.Repeat("9", 12)), isNumeric: true, ratOK: false,
-		},
-		"string": {
-			input: "1", isNumeric: false, ratOK: false,
-		},
-	}
-
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			assert.Equal(t, tc.isNumeric, numrat.IsNumeric(tc.input))
-
-			got, ok := numrat.ToBigRat(tc.input)
-			require.Equal(t, tc.ratOK, ok)
-
-			if tc.ratOK {
-				assert.Zero(t, tc.want.Cmp(got))
-			}
 		})
 	}
 }
