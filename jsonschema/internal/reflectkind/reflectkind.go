@@ -22,13 +22,15 @@ import (
 var (
 	// TypeTextMarshaler is the [reflect.Type] of [encoding.TextMarshaler].
 	TypeTextMarshaler = reflect.TypeFor[encoding.TextMarshaler]()
-	// TypeTextAppender is the [reflect.Type] of [encoding.TextAppender].
-	TypeTextAppender = reflect.TypeFor[encoding.TextAppender]()
-	// TypeJSONMarshaler is the [reflect.Type] of [encoding/json/v2.Marshaler]
-	// (which [encoding/json.Marshaler] aliases).
-	TypeJSONMarshaler = reflect.TypeFor[json.Marshaler]()
-	// TypeJSONMarshalerTo is the [reflect.Type] of [encoding/json/v2.MarshalerTo].
-	TypeJSONMarshalerTo = reflect.TypeFor[json.MarshalerTo]()
+	// The typeTextAppender value is the [reflect.Type] of
+	// [encoding.TextAppender].
+	typeTextAppender = reflect.TypeFor[encoding.TextAppender]()
+	// The typeJSONMarshaler value is the [reflect.Type] of
+	// [encoding/json/v2.Marshaler] (which [encoding/json.Marshaler] aliases).
+	typeJSONMarshaler = reflect.TypeFor[json.Marshaler]()
+	// The typeJSONMarshalerTo value is the [reflect.Type] of
+	// [encoding/json/v2.MarshalerTo].
+	typeJSONMarshalerTo = reflect.TypeFor[json.MarshalerTo]()
 	// TypeJSONTextValue is the [reflect.Type] of [jsontext.Value] (which
 	// [encoding/json.RawMessage] aliases).
 	TypeJSONTextValue = reflect.TypeFor[jsontext.Value]()
@@ -48,7 +50,7 @@ var (
 	// The allMethodTypes list mirrors encoding/json/v2's list of every
 	// custom serialization interface, in its order.
 	allMethodTypes = []reflect.Type{
-		TypeJSONMarshalerTo, TypeJSONMarshaler, TypeTextAppender, TypeTextMarshaler,
+		typeJSONMarshalerTo, typeJSONMarshaler, typeTextAppender, TypeTextMarshaler,
 		typeJSONUnmarshalerFrom, typeJSONUnmarshaler, typeTextUnmarshaler,
 	}
 
@@ -57,7 +59,7 @@ var (
 	// value through its method, which ignores the flag (json.Number, which
 	// honors StringifyNumbers, is special-cased by [IsJSONNumber] instead).
 	marshalerTypes = []reflect.Type{
-		TypeJSONMarshalerTo, TypeJSONMarshaler, TypeTextAppender, TypeTextMarshaler,
+		typeJSONMarshalerTo, typeJSONMarshaler, typeTextAppender, TypeTextMarshaler,
 	}
 )
 
@@ -201,7 +203,7 @@ func isUnnamedByte(t reflect.Type) bool {
 // ImplementsJSONMarshaler reports whether the type or its pointer type
 // implements [encoding/json.Marshaler], directly or via promotion.
 func ImplementsJSONMarshaler(t reflect.Type) bool {
-	return implementsAny(t, TypeJSONMarshaler)
+	return implementsAny(t, typeJSONMarshaler)
 }
 
 // IsPromotedJSONMarshaler reports whether a type's method set includes
@@ -220,7 +222,7 @@ func IsPromotedJSONMarshaler(t reflect.Type) bool {
 // ImplementsJSONMarshalerTo reports whether the type or its pointer type
 // implements [encoding/json/v2.MarshalerTo], directly or via promotion.
 func ImplementsJSONMarshalerTo(t reflect.Type) bool {
-	return implementsAny(t, TypeJSONMarshalerTo)
+	return implementsAny(t, typeJSONMarshalerTo)
 }
 
 // IsPromotedJSONMarshalerTo reports whether a type's method set includes
@@ -248,7 +250,7 @@ func ImplementsAnyJSONMarshaler(t reflect.Type) bool {
 // implements [encoding.TextAppender] or [encoding.TextMarshaler], directly or
 // via promotion. Either method always emits a string.
 func ImplementsAnyTextMarshaler(t reflect.Type) bool {
-	return implementsAny(t, TypeTextAppender, TypeTextMarshaler)
+	return implementsAny(t, typeTextAppender, TypeTextMarshaler)
 }
 
 // HasDirectMethod reports whether a method is defined directly on the type
