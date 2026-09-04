@@ -1,9 +1,9 @@
-// Package main implements the jsonschemagen CLI tool, which generates JSON
+// Package main implements the gen CLI tool, which generates JSON
 // Schema files from Go types at build time.
 //
 // Usage:
 //
-//	//go:generate go run go.jacobcolvin.com/x/jsonschema/cmd/jsonschemagen -type Config -o config.schema.json
+//	//go:generate go run go.jacobcolvin.com/x/jsonschema/cmd/gen -type Config -o config.schema.json
 //
 // The tool builds a small helper program that imports the target package, calls
 // [jsonschema.Generate], and writes the resulting JSON to a hand-off file the
@@ -62,13 +62,13 @@ func main() {
 	// token in a //go:generate line, a value given without its flag) fails
 	// loudly instead of generating against the default configuration.
 	if flag.NArg() > 0 {
-		fmt.Fprintf(os.Stderr, "jsonschemagen: unexpected arguments: %v\n", flag.Args())
+		fmt.Fprintf(os.Stderr, "gen: unexpected arguments: %v\n", flag.Args())
 		os.Exit(2)
 	}
 
 	err := run(cfg, os.Stdout)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "jsonschemagen: %v\n", err)
+		fmt.Fprintf(os.Stderr, "gen: %v\n", err)
 		os.Exit(1)
 	}
 }
@@ -163,7 +163,7 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 }
 
 // resolveImportPath returns the import path of the current package. It rejects a
-// main package up front: jsonschemagen builds a helper that imports the target
+// main package up front: gen builds a helper that imports the target
 // package to reflect over it, and Go forbids importing a package main, which
 // would otherwise fail late with the opaque "is a program, not an importable
 // package" build error. The package name comes from the same `go list` call, so
@@ -200,7 +200,7 @@ func resolveImportPath(inWork bool) (string, error) {
 
 	if name == "main" {
 		return "", fmt.Errorf(
-			"cannot generate a schema for a type in package main (%s): jsonschemagen imports "+
+			"cannot generate a schema for a type in package main (%s): gen imports "+
 				"the target package to reflect over it, which Go does not allow for a main package; "+
 				"move the type to an importable (non-main) package",
 			importPath,
@@ -225,7 +225,7 @@ func ensureInModule() (string, error) {
 
 	goMod := strings.TrimSpace(string(out))
 	if goMod == "" || goMod == os.DevNull {
-		return "", fmt.Errorf("jsonschemagen must run inside a module (no go.mod found for the current directory)")
+		return "", fmt.Errorf("gen must run inside a module (no go.mod found for the current directory)")
 	}
 
 	return goMod, nil
@@ -258,7 +258,7 @@ func runGenerate(goMod string, cfg config, importPath string, inWork bool) ([]by
 		return nil, fmt.Errorf("resolve working directory: %w", err)
 	}
 
-	tempDir, err := os.MkdirTemp("", "jsonschemagen-*")
+	tempDir, err := os.MkdirTemp("", "gen-*")
 	if err != nil {
 		return nil, fmt.Errorf("create temp dir: %w", err)
 	}

@@ -231,7 +231,7 @@ type Config struct {
 func TestIntegrationLeavesNoArtifacts(t *testing.T) {
 	t.Parallel()
 
-	// The helper is supplied through a build overlay, so no .jsonschemagen-*
+	// The helper is supplied through a build overlay, so no .gen-*
 	// directory is ever written into the target package's directory.
 	binary := buildBinary(t)
 	dir := createTestModule(t, `package testmod
@@ -251,7 +251,7 @@ type Config struct {
 	require.NoError(t, err)
 
 	for _, e := range entries {
-		assert.False(t, strings.HasPrefix(e.Name(), ".jsonschemagen-"),
+		assert.False(t, strings.HasPrefix(e.Name(), ".gen-"),
 			"no helper directory should remain in the source tree: %s", e.Name())
 	}
 }

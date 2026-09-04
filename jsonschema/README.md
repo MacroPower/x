@@ -107,7 +107,7 @@ if ve, ok := errors.AsType[*jsonschema.ValidationError](err); ok {
   and schema paths.
 - `$vocabulary` gating and pluggable, opt-in remote `$ref` resolution.
 - Schema traversal helpers and `$ref` inlining.
-- A build-time code-generation CLI (`jsonschemagen`) for `//go:generate`.
+- A build-time code-generation CLI (`gen`) for `//go:generate`.
 
 ## Generation
 
@@ -336,15 +336,15 @@ inlined, err := jsonschema.Inline(ctx, schema,
 See
 [Inlining](https://pkg.go.dev/go.jacobcolvin.com/x/jsonschema#hdr-Inlining).
 
-## jsonschemagen
+## Usage with `//go:generate`
 
-`cmd/jsonschemagen` writes a JSON Schema file for a named Go type at build
+`cmd/gen` writes a JSON Schema file for a named Go type at build
 time, intended for `//go:generate`. It builds a small helper program inside the
 target's own module, so the module must be able to resolve this package (via a
 `require`, a workspace, or a `tool` directive):
 
 ```go
-//go:generate go run go.jacobcolvin.com/x/jsonschema/cmd/jsonschemagen -type Config -o config.schema.json
+//go:generate go run go.jacobcolvin.com/x/jsonschema/cmd/gen -type Config -o config.schema.json
 ```
 
 | Flag                     | Default    | Description                              |

@@ -217,14 +217,14 @@ func TestRun_InvalidIndent(t *testing.T) {
 	}
 }
 
-// buildBinary builds the jsonschemagen binary and returns its path.
+// buildBinary builds the gen binary and returns its path.
 func buildBinary(t *testing.T) string {
 	t.Helper()
 
-	binary := filepath.Join(t.TempDir(), "jsonschemagen")
+	binary := filepath.Join(t.TempDir(), "gen")
 
 	cmd := exec.CommandContext(t.Context(), "go", "build", "-o", binary, ".")
-	cmd.Dir = filepath.Join(moduleDir(t), "cmd", "jsonschemagen")
+	cmd.Dir = filepath.Join(moduleDir(t), "cmd", "gen")
 
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, "build failed: %s", out)
@@ -499,7 +499,7 @@ type Exists struct{}
 func TestIntegrationPackageMainRejected(t *testing.T) {
 	t.Parallel()
 
-	// A type in a package main cannot be reflected over, because jsonschemagen
+	// A type in a package main cannot be reflected over, because gen
 	// imports the target package and Go forbids importing a main package. The
 	// tool must reject it with a clear message rather than failing late with the
 	// opaque "is a program, not an importable package" build error.
