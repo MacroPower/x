@@ -1,4 +1,4 @@
-// Package main implements the gen CLI tool, which generates JSON
+// Package main implements the jsonschema-gen CLI tool, which generates JSON
 // Schema files from Go types at build time.
 //
 // Usage:
@@ -36,6 +36,11 @@ import (
 // imports; it seeds the remediation hint when a build cannot resolve it.
 const jsonschemaModule = "go.jacobcolvin.com/x/jsonschema"
 
+// toolName is the name the tool reports in diagnostics and uses for the
+// directories it creates. It carries the module name so that neither collides
+// with another generator that also calls itself "gen".
+const toolName = "jsonschema-gen"
+
 type config struct {
 	TypeName             string
 	Output               string
@@ -62,13 +67,13 @@ func main() {
 	// token in a //go:generate line, a value given without its flag) fails
 	// loudly instead of generating against the default configuration.
 	if flag.NArg() > 0 {
-		fmt.Fprintf(os.Stderr, "gen: unexpected arguments: %v\n", flag.Args())
+		fmt.Fprintf(os.Stderr, "%s: unexpected arguments: %v\n", toolName, flag.Args())
 		os.Exit(2)
 	}
 
 	err := run(cfg, os.Stdout)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "gen: %v\n", err)
+		fmt.Fprintf(os.Stderr, "%s: %v\n", toolName, err)
 		os.Exit(1)
 	}
 }
@@ -163,7 +168,7 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 }
 
 // resolveImportPath returns the import path of the current package. It rejects a
-// main package up front: gen builds a helper that imports the target
+// main package up front: jsonschema-gen builds a helper that imports the target
 // package to reflect over it, and Go forbids importing a package main, which
 // would otherwise fail late with the opaque "is a program, not an importable
 // package" build error. The package name comes from the same `go list` call, so
@@ -225,7 +230,7 @@ func ensureInModule() (string, error) {
 
 	goMod := strings.TrimSpace(string(out))
 	if goMod == "" || goMod == os.DevNull {
-		return "", fmt.Errorf("gen must run inside a module (no go.mod found for the current directory)")
+		return "", fmt.Errorf("%s must run inside a module (no go.mod found for the current directory)", toolName)
 	}
 
 	return goMod, nil
@@ -258,7 +263,7 @@ func runGenerate(goMod string, cfg config, importPath string, inWork bool) ([]by
 		return nil, fmt.Errorf("resolve working directory: %w", err)
 	}
 
-	tempDir, err := os.MkdirTemp("", "gen-*")
+	tempDir, err := os.MkdirTemp("", toolName+"-*")
 	if err != nil {
 		return nil, fmt.Errorf("create temp dir: %w", err)
 	}
