@@ -10,7 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/refresolve"
-	"go.jacobcolvin.com/x/jsonschema/internal/schemafield"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemavet"
 )
 
@@ -18,13 +17,11 @@ import (
 // in for the structural sentinels the parent package's vets carry.
 var errVetRefused = errors.New("refused")
 
-// pointerTargetDeps returns the Deps the JSON-pointer fallback needs: the
-// sub-schema traversal every registry walk takes, plus a Materialize spelled as
-// a plain JSON round-trip, which is what the parent's ParseSchemaValue does for
-// the shapes these tests use.
+// pointerTargetDeps returns the Deps the JSON-pointer fallback needs: a
+// Materialize spelled as a plain JSON round-trip, which is what the parent's
+// ParseSchemaValue does for the shapes these tests use.
 func pointerTargetDeps() refresolve.Deps {
 	return refresolve.Deps{
-		Children: schemafield.Children,
 		Materialize: func(node any) (*jsonschema.Schema, error) {
 			data, err := json.Marshal(node)
 			if err != nil {
@@ -81,26 +78,24 @@ func TestResolveRefMarksVetRejectedTargets(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			root := &jsonschema.Schema{
+			doc := freeze(t, &jsonschema.Schema{
 				ID:    rootURI,
 				Type:  "object",
 				Extra: map[string]any{"x-custom": map[string]any{"sub": map[string]any{"type": "string"}}},
-			}
+			}, rootURI, schemavet.Profile{})
 
-			reg := refresolve.NewRegistry(pointerTargetDeps(), refresolve.Draft2020, false)
-			reg.Build(root, rootURI)
+			reg := refresolve.NewRegistry(pointerTargetDeps(), false)
+			reg.Build(doc)
 
-			vetter := schemavet.NewVetter(schemavet.Profile{})
-
-			sess := reg.NewSession(func(sc *jsonschema.Schema, locator string) (schemavet.Node, error) {
+			sess := reg.NewSession(func(sc *jsonschema.Schema, base, locator string) (schemavet.Node, error) {
 				if tc.reject {
 					return schemavet.Node{}, errVetRefused
 				}
 
-				return vetter.Vet(sc, locator)
+				return schemavet.FreezeNode(sc, locator, base, schemavet.Profile{})
 			})
 
-			res := sess.ResolveRef(root, tc.ref, nil)
+			res := sess.ResolveRef(doc.Root(), tc.ref, nil)
 
 			if tc.resolved {
 				require.NotNil(t, res.Target, "the vet accepted the target, so the resolution reports it")
@@ -123,19 +118,19 @@ func TestFallbackTargetsExcludeRejected(t *testing.T) {
 
 	const rootURI = "https://example.test/root.json"
 
-	root := &jsonschema.Schema{
+	doc := freeze(t, &jsonschema.Schema{
 		ID:    rootURI,
 		Type:  "object",
 		Extra: map[string]any{"x-custom": map[string]any{"sub": map[string]any{"type": "string"}}},
-	}
+	}, rootURI, schemavet.Profile{})
 
-	reg := refresolve.NewRegistry(pointerTargetDeps(), refresolve.Draft2020, false)
-	reg.Build(root, rootURI)
+	reg := refresolve.NewRegistry(pointerTargetDeps(), false)
+	reg.Build(doc)
 
-	sess := reg.NewSession(func(_ *jsonschema.Schema, _ string) (schemavet.Node, error) {
+	sess := reg.NewSession(func(_ *jsonschema.Schema, _, _ string) (schemavet.Node, error) {
 		return schemavet.Node{}, errVetRefused
 	})
 
-	require.True(t, sess.ResolveRef(root, "#/x-custom/sub", nil).TargetRejected)
+	require.True(t, sess.ResolveRef(doc.Root(), "#/x-custom/sub", nil).TargetRejected)
 	assert.Empty(t, sess.FallbackTargets(), "a refused target joins no frontier")
 }

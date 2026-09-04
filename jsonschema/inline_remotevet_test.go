@@ -202,11 +202,11 @@ func TestInlineClosureRejectsBeforeSplicing(t *testing.T) {
 
 // TestInlineFetchedDocCollisionPrecedesVet pins which fault the engines report
 // for a remote carrying two, one claiming the root's URI and misspelling a type
-// name. Both report the collision, because prefetchDoc registers at the fetch
-// and the strict closure walk vets afterwards. A fetch that vetted first would
-// name the other cause, and the two engines would refuse one graph for two
-// reasons. TestInlineFallbackCollisionPrecedesVet covers the same graph over
-// the path a configured fallback takes.
+// name. Both report the collision, because the shared fetch checks the frozen
+// document's claims before it vets. A fetch that vetted first would name the
+// other cause, and a fault ordered differently in one engine would refuse one
+// graph for two reasons. TestInlineFallbackCollisionPrecedesVet covers the
+// same graph over the path a configured fallback takes.
 func TestInlineFetchedDocCollisionPrecedesVet(t *testing.T) {
 	t.Parallel()
 
@@ -264,12 +264,11 @@ func TestInlineFallbackDoesNotSuspendCollision(t *testing.T) {
 	assert.Zero(t, consulted, "the walk refuses before any reference reaches the fallback")
 }
 
-// TestInlineFallbackCollisionPrecedesVet guards the collision check
-// inliner.fetchDoc runs before its vet. A configured fallback stands the strict
-// prefetchDoc path down, so fetchDoc is where the document is first seen, and a
-// vet running first would hand the fallback a structural failure to drop. The
-// run would then succeed with a substitute in place of a graph Compile
-// refuses.
+// TestInlineFallbackCollisionPrecedesVet guards the collision check the fetch
+// runs before its vet under a configured fallback. The fallback suspends a
+// structural refusal but not a collision, so a vet running first would hand
+// the fallback a structural failure to drop. The run would then succeed with
+// a substitute in place of a graph Compile refuses.
 func TestInlineFallbackCollisionPrecedesVet(t *testing.T) {
 	t.Parallel()
 

@@ -142,13 +142,13 @@ func TestCompileRejectsNilSubschemaEntries(t *testing.T) {
 	}
 }
 
-// TestCompileRejectsNonTreeSchema locks in the two root-document graph checks.
-// A *Schema value reachable through two paths, or a pointer cycle, fails
-// Compile with [jsonschema.ErrSchemaNotTree] naming both reaching paths. A loop
-// closing through a value field fails with the same sentinel, naming the graph
-// the check walked and the pointer where the loop closes. Two distinct
-// pointers with identical content stay a tree and compile.
-func TestCompileRejectsNonTreeSchema(t *testing.T) {
+// TestCompileFreezesRootGraph locks in the root-document graph rule. A
+// pointer cycle fails Compile with [jsonschema.ErrSchemaCycle] naming the
+// graph the freeze walked and the pointer where the loop closes, whether the
+// loop runs through a sub-schema keyword or a value field. A *Schema value
+// reachable through two paths compiles, since the freeze copies it once per
+// path, as do two distinct pointers with identical content.
+func TestCompileFreezesRootGraph(t *testing.T) {
 	t.Parallel()
 
 	shared := &jsonschema.Schema{Type: "string"}
@@ -169,17 +169,16 @@ func TestCompileRejectsNonTreeSchema(t *testing.T) {
 			schema: &jsonschema.Schema{
 				Properties: map[string]*jsonschema.Schema{"a": shared, "b": shared},
 			},
-			err:   jsonschema.ErrSchemaNotTree,
-			paths: []string{"/properties/a", "/properties/b"},
 		},
 		"pointer cycle": {
-			schema: cyclic,
-			err:    jsonschema.ErrSchemaNotTree,
-			paths:  []string{"/$defs/loop"},
+			schema:  cyclic,
+			err:     jsonschema.ErrSchemaCycle,
+			paths:   []string{"/$defs/loop"},
+			subject: "the root document",
 		},
 		"cycle through a value field": {
 			schema:  valueCyclic,
-			err:     jsonschema.ErrSchemaNotTree,
+			err:     jsonschema.ErrSchemaCycle,
 			paths:   []string{"/x-self"},
 			subject: "the root document",
 		},
@@ -213,9 +212,7 @@ func TestCompileRejectsNonTreeSchema(t *testing.T) {
 
 			if tc.subject != "" {
 				assert.Contains(t, err.Error(), tc.subject,
-					"a loop the tree check skips must name the graph the walk found it in")
-				assert.NotContains(t, err.Error(), "reach the same schema",
-					"the value-field check reports the loop, not a pair of paths")
+					"a loop must name the graph the freeze found it in")
 			}
 		})
 	}

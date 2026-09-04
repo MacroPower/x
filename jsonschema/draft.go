@@ -179,15 +179,17 @@ func (d Draft) profile() draftProfile {
 	return draftProfiles[Draft2020]
 }
 
-// vetProfile narrows the profile to the three flags the structural vetting
-// checks consult, in the leaf package's own [schemavet.Profile] type. The
-// conversion mirrors toRefDraft: schemavet, like refresolve, cannot import
-// the parent package, so it carries its own policy type and the parent
-// converts at the boundary.
-func (p draftProfile) vetProfile() schemavet.Profile {
+// vetProfile narrows the draft's profile to the flags the structural vetting
+// checks and the frozen identifier walk consult, in the leaf package's own
+// [schemavet.Profile] type. The schemavet package cannot import the parent, so it
+// carries its own policy type and the parent converts at the boundary.
+func (d Draft) vetProfile() schemavet.Profile {
+	p := d.profile()
+
 	return schemavet.Profile{
 		RejectItemsArray: p.rejectItemsArray,
 		RejectIDFragment: p.rejectIDFragment,
 		Vocabularies:     p.vocabularies,
+		Draft7:           d == Draft7,
 	}
 }

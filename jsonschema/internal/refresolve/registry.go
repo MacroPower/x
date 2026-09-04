@@ -7,14 +7,21 @@ import (
 
 	"github.com/google/jsonschema-go/jsonschema"
 
-	"go.jacobcolvin.com/x/jsonschema/internal/uriref"
+	"go.jacobcolvin.com/x/jsonschema/internal/schemavet"
 )
 
 // Registry is the compiled, shareable resolution state: the maps built once at
-// compile time by [Registry.Build] and immutable afterward except through
-// [Registry.Clone]'s copy-on-write. Only URI is exported, and only for reading.
-// The shared closure walk iterates it to reach each registered document. Every
-// write, and every other map, goes through this package's own methods.
+// compile time from the frozen documents [Registry.Build] and
+// [Session.RegisterFetched] merge, immutable afterward except through
+// [Registry.Clone]'s copy-on-write. Only URI is exported, and only for
+// reading. The shared closure walk iterates it to reach each registered
+// document. Every write, and every other map, goes through this package's own
+// methods.
+//
+// Every schema the registry holds is a node of a [schemavet.Doc], a vetted
+// tree copy the parent froze at the boundary the document crossed, so no
+// pointer here is shared with a caller or a resolver and no node has two
+// positions.
 type Registry struct {
 	// URI maps an absolute URI to the schema registered under it ($id or the
 	// document base).
@@ -30,148 +37,65 @@ type Registry struct {
 	// Maps a schema to its base URI, consulted during $ref resolution.
 	baseURIs map[*jsonschema.Schema]string
 
-	// Records every schema the walk has registered, so a node reached twice
-	// registers once. It is a dedup guard rather than a cycle policy. It
-	// bounds the walk over an aliased or cyclic graph, and this package
-	// judges neither shape, since the parent owns the node index and the
-	// graph rules. The parent rejects instead, at the clone boundary every
-	// resolution entry point crosses and in its tree check over a compiled or
-	// inlined root.
-	walked map[*jsonschema.Schema]bool
+	// Maps every node the registry holds to the document it is a node of, so
+	// a JSON-pointer resolution finds the tree to answer from and a walk can
+	// ask whether a schema belongs to a registered document.
+	nodes map[*jsonschema.Schema]schemavet.Doc
 
 	root *jsonschema.Schema
 	deps Deps
 
-	draft    Draft
 	inertIDs bool
 }
 
-// NewRegistry allocates an empty registry. The draft argument selects the
-// draft-dependent walk branches; inertIDs treats $id as an inert annotation (no
-// URI/anchor registration and no base-URI change), for WithRetrievalBase.
-func NewRegistry(deps Deps, draft Draft, inertIDs bool) *Registry {
+// NewRegistry allocates an empty registry. The inertIDs flag records that the
+// run treats $id as an inert annotation (WithRetrievalBase), which the
+// JSON-form pointer walk reads so a crossed $id rebases nothing.
+func NewRegistry(deps Deps, inertIDs bool) *Registry {
 	return &Registry{
 		URI:           map[string]*jsonschema.Schema{},
 		anchor:        map[string]*jsonschema.Schema{},
 		dynamicAnchor: map[string]*jsonschema.Schema{},
 		baseURIs:      map[*jsonschema.Schema]string{},
-		walked:        map[*jsonschema.Schema]bool{},
-		draft:         draft,
+		nodes:         map[*jsonschema.Schema]schemavet.Doc{},
 		inertIDs:      inertIDs,
 		deps:          deps,
 	}
 }
 
-// Build walks the entire schema tree rooted at root to fill the URI, anchor, and
-// base-URI registries for $id and $anchor resolution, seeded with base, which
-// must already be normalized (the caller applies [uriref.NormalizeBaseURI]); a
-// non-empty base is registered for the root document when its own $id did not
-// already claim one, so a ref that absolutizes back to the root document
-// resolves to this copy instead of being fetched.
-func (r *Registry) Build(root *jsonschema.Schema, base string) {
-	r.root = root
-	r.Walk(root, base)
+// Build seeds the registry with the root document: its $id, anchor, and
+// base-URI tables, frozen against the base the caller froze it with. A
+// non-empty base is registered for the root when its own $id did not already
+// claim one, so a ref that absolutizes back to the root document resolves to
+// this copy instead of being fetched.
+func (r *Registry) Build(root schemavet.Doc) {
+	r.root = root.Root()
+	r.absorb(root)
 
-	if base != "" {
+	if base := root.Frozen().Base(); base != "" {
 		if _, ok := r.URI[base]; !ok {
-			r.URI[base] = root
+			r.URI[base] = r.root
 		}
 	}
 }
 
-// Walk registers a schema tree's $id/$anchor entries and base URIs, overwriting
-// any key it repeats, which is the right behavior for the single authoritative
-// document [Registry.Build] walks.
-func (r *Registry) Walk(s *jsonschema.Schema, parentBase string) {
-	r.walkInto(s, parentBase, false)
-}
-
-// WalkFetched registers a document fetched from a resolver, keeping an existing
-// entry instead of overwriting it. Every caller walks into a scratch registry,
-// so the only entry the walk yields to is one this same document already
-// claimed. A duplicate $id or anchor within one document therefore resolves to
-// the first the walk reaches, and a key another document holds is a collision
-// the caller reports once the walk is done.
-func (r *Registry) WalkFetched(s *jsonschema.Schema, parentBase string) {
-	r.walkInto(s, parentBase, true)
-}
-
-// walkInto is the shared walk core. When onlyIfAbsent is true, a string-keyed
-// registration ($id URI, $anchor, $dynamicAnchor) yields to an existing entry;
-// the pointer-keyed base URI is always recorded so every node resolves its own
-// relative refs.
-func (r *Registry) walkInto(schema *jsonschema.Schema, parentBase string, onlyIfAbsent bool) {
-	if schema == nil {
-		return
-	}
-
-	// Registering each pointer once and returning on a repeat keeps the walk
-	// bounded over a graph that aliases or cycles. This walk rejects neither
-	// shape; see the walked field for where the policy lives.
-	if r.walked[schema] {
-		return
-	}
-
-	r.walked[schema] = true
-
-	currentBase := parentBase
-
-	if schema.ID != "" && !r.inertIDs {
-		if uriref.IsFragmentOnly(schema.ID) {
-			// Draft-07: fragment-only $id acts as an anchor. Draft 2020-12
-			// forbids a fragment in $id (core section 8.2.1), so there the
-			// form registers nothing and a ref naming it stays unresolvable.
-			if r.draft == Draft7 {
-				anchor := schema.ID[1:] // strip leading '#'
-				register(r.anchor, uriref.AnchorKey(currentBase, anchor), schema, onlyIfAbsent)
-			}
-		} else {
-			resolved := uriref.IDBase(currentBase, schema.ID)
-			register(r.URI, resolved, schema, onlyIfAbsent)
-
-			currentBase = resolved
-		}
-	}
-
-	// $anchor and $dynamicAnchor are Draft 2020-12 keywords; under Draft-07
-	// they are unknown annotations, register nothing, and a plain-name
-	// fragment naming one stays unresolvable.
-	if r.draft != Draft7 {
-		// 2020-12: $anchor keyword.
-		if schema.Anchor != "" {
-			register(r.anchor, uriref.AnchorKey(currentBase, schema.Anchor), schema, onlyIfAbsent)
-		}
-
-		// 2020-12: $dynamicAnchor keyword. Also registered as a regular anchor
-		// (accessible via $ref).
-		if schema.DynamicAnchor != "" {
-			key := uriref.AnchorKey(currentBase, schema.DynamicAnchor)
-			register(r.anchor, key, schema, onlyIfAbsent)
-			register(r.dynamicAnchor, key, schema, onlyIfAbsent)
-		}
-	}
-
-	// Store base URI for this schema (used during $ref resolution). Draft-07
-	// exception: a sibling $id doesn't affect $ref resolution.
-	if r.draft == Draft7 && schema.Ref != "" && schema.ID != "" && !uriref.IsFragmentOnly(schema.ID) {
-		r.baseURIs[schema] = parentBase
-	} else {
-		r.baseURIs[schema] = currentBase
-	}
-
-	// Recurse into all sub-schema fields. Every child inherits currentBase.
-	for _, child := range r.deps.Children(schema) {
-		r.walkInto(child, currentBase, onlyIfAbsent)
-	}
-}
-
-// KnownSchema reports whether sc was registered by this registry's walks: it
-// belongs to the root document or to a document walked in while the registry
-// was built (for the compiled registry, the documents present at compile
-// time). A schema materialized by the JSON-pointer fallback or fetched into a
-// per-run clone is not known to the compiled registry.
+// KnownSchema reports whether sc is a node of a document the registry holds:
+// the root document or a document merged in while the registry was built
+// (for the compiled registry, the documents present at compile time). A
+// schema materialized by the JSON-pointer fallback or fetched into a per-run
+// clone is not known to the compiled registry.
 func (r *Registry) KnownSchema(sc *jsonschema.Schema) bool {
-	return r.walked[sc]
+	_, ok := r.nodes[sc]
+
+	return ok
+}
+
+// DocOf returns the document sc is a node of, and whether the registry holds
+// one.
+func (r *Registry) DocOf(sc *jsonschema.Schema) (schemavet.Doc, bool) {
+	doc, ok := r.nodes[sc]
+
+	return doc, ok
 }
 
 // Clone returns a copy-on-write duplicate of r: the five maps are cloned so a
@@ -183,7 +107,7 @@ func (r *Registry) Clone() *Registry {
 	c.anchor = maps.Clone(r.anchor)
 	c.dynamicAnchor = maps.Clone(r.dynamicAnchor)
 	c.baseURIs = maps.Clone(r.baseURIs)
-	c.walked = maps.Clone(r.walked)
+	c.nodes = maps.Clone(r.nodes)
 
 	return &c
 }
@@ -193,7 +117,8 @@ func (r *Registry) Clone() *Registry {
 // construction forces every session to state its vetting policy. The vet is
 // the [FallbackVet] the session applies to each JSON-pointer fallback target
 // it materializes, and every production session passes one. Only a test whose
-// walk materializes no target passes nil, which skips vetting.
+// walk materializes no target passes nil, which freezes each target under an
+// empty profile instead.
 func (r *Registry) NewSession(vet FallbackVet) *Session {
 	return &Session{reg: r, fallbackVet: vet}
 }
@@ -254,18 +179,35 @@ func (r *Registry) holderName(sc *jsonschema.Schema, key string) string {
 	return fmt.Sprintf("the document retrieved from %q", others[0])
 }
 
-// absorb merges a scratch walk's registrations into r. The caller rejects a
-// collision first, so every key the two share holds the same schema and a plain
-// copy and an only-if-absent merge agree. The walked set merges too, and
-// deliberately. It decides whether the parent reports or skips an unresolvable
-// fragment ref inside the document, so a fetched document's nodes must reach
-// it.
-func (r *Registry) absorb(scratch *Registry) {
-	maps.Copy(r.URI, scratch.URI)
-	maps.Copy(r.anchor, scratch.anchor)
-	maps.Copy(r.dynamicAnchor, scratch.dynamicAnchor)
-	maps.Copy(r.baseURIs, scratch.baseURIs)
-	maps.Copy(r.walked, scratch.walked)
+// absorb merges a document's tables into r. The caller rejects a collision
+// first, so every key the two share holds the same schema and a plain copy
+// and an only-if-absent merge agree. Every node joins the node map, and
+// deliberately. It decides whether the parent reports or skips an
+// unresolvable fragment ref inside the document, so a fetched document's
+// nodes must reach it.
+func (r *Registry) absorb(doc schemavet.Doc) {
+	f := doc.Frozen()
+
+	maps.Copy(r.URI, f.URIs())
+	maps.Copy(r.anchor, f.Anchors())
+	maps.Copy(r.dynamicAnchor, f.DynamicAnchors())
+
+	for id, node := range f.Nodes() {
+		r.baseURIs[node] = f.NodeBase(id)
+		r.nodes[node] = doc
+	}
+}
+
+// claims returns the URI table a frozen document claims when it registers
+// under baseURI: its own $id registrations plus the retrieval URI for its
+// root. A document whose own $id equals the URI it was fetched from names
+// that key with that schema twice, so it registers one schema under one key
+// rather than colliding with itself.
+func claims(f *schemavet.Frozen, baseURI string) map[string]*jsonschema.Schema {
+	uris := maps.Clone(f.URIs())
+	uris[baseURI] = f.Root()
+
+	return uris
 }
 
 // documentName renders a document's base URI for a collision message. An empty
@@ -277,17 +219,4 @@ func documentName(base string) string {
 	}
 
 	return fmt.Sprintf("document %q", base)
-}
-
-// register stores s under key in reg. When onlyIfAbsent is true an existing
-// entry is preserved, so a duplicate $id or anchor key within one document
-// resolves to the first the walk reaches.
-func register(reg map[string]*jsonschema.Schema, key string, s *jsonschema.Schema, onlyIfAbsent bool) {
-	if onlyIfAbsent {
-		if _, ok := reg[key]; ok {
-			return
-		}
-	}
-
-	reg[key] = s
 }

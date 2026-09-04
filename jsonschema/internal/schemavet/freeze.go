@@ -28,6 +28,7 @@ type Frozen struct {
 	nodes   []*Schema
 	paths   []string
 	bases   []string
+	scopes  []string
 	profile Profile
 }
 
@@ -183,6 +184,7 @@ func (f *Frozen) walk(s *Schema, path, parentBase string) {
 	}
 
 	f.bases = append(f.bases, base)
+	f.scopes = append(f.scopes, currentBase)
 
 	for _, entry := range Entries(s) {
 		f.walk(entry.Schema, path+string(entry.Pointer), currentBase)
@@ -246,6 +248,13 @@ func (f *Frozen) Path(id int) string {
 // one its own references resolve against.
 func (f *Frozen) NodeBase(id int) string {
 	return f.bases[id]
+}
+
+// ScopeBase returns the base URI a child of the node with the given id
+// inherits: the node's own $id applied to its parent's base, whether or not
+// a Draft-07 $ref beside it ignores that $id for the node's own reference.
+func (f *Frozen) ScopeBase(id int) string {
+	return f.scopes[id]
 }
 
 // At returns the node the JSON Pointer addresses through sub-schema keyword

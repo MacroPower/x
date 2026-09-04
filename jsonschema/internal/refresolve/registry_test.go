@@ -8,19 +8,25 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/refresolve"
-	"go.jacobcolvin.com/x/jsonschema/internal/schemafield"
+	"go.jacobcolvin.com/x/jsonschema/internal/schemavet"
 	"go.jacobcolvin.com/x/jsonschema/internal/uriref"
 )
 
-// testDeps returns the Deps the registry walk needs: the sub-schema traversal
-// the parent injects, spelled here with the same schemafield table the parent
-// derives it from. The walk materializes no JSON-pointer target, so
-// Materialize stays nil.
-func testDeps() refresolve.Deps {
-	return refresolve.Deps{Children: schemafield.Children}
+// freeze freezes and vets s against base under profile, failing the test on
+// a refusal, so a registry test builds documents the way the engines do.
+func freeze(t *testing.T, s *jsonschema.Schema, base string, profile schemavet.Profile) schemavet.Doc {
+	t.Helper()
+
+	frozen, err := schemavet.Freeze(s, "document "+base, base, profile)
+	require.NoError(t, err)
+
+	doc, err := frozen.Vet(base + "#")
+	require.NoError(t, err)
+
+	return doc
 }
 
-// TestFragmentOnlyIDRegistersByDraft pins the walk's draft gate on the
+// TestFragmentOnlyIDRegistersByDraft pins the frozen walk's draft gate on the
 // fragment-only $id: Draft-07 reads it as the anchor spelling and registers an
 // anchor, while Draft 2020-12 forbids a fragment in $id (core section 8.2.1)
 // and registers nothing, so a plain-name fragment naming it stays
@@ -32,22 +38,25 @@ func TestFragmentOnlyIDRegistersByDraft(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]struct {
-		draft refresolve.Draft
-		want  bool
+		profile schemavet.Profile
+		want    bool
 	}{
-		"draft-07 reads a fragment-only $id as an anchor": {draft: refresolve.Draft7, want: true},
-		"draft 2020-12 registers nothing for it":          {draft: refresolve.Draft2020, want: false},
+		"draft-07 reads a fragment-only $id as an anchor": {profile: schemavet.Profile{Draft7: true}, want: true},
+		"draft 2020-12 registers nothing for it":          {profile: schemavet.Profile{}, want: false},
 	}
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			target := &jsonschema.Schema{ID: "#a", Type: "integer"}
-			root := &jsonschema.Schema{Definitions: map[string]*jsonschema.Schema{"t": target}}
+			root := &jsonschema.Schema{Definitions: map[string]*jsonschema.Schema{
+				"t": {ID: "#a", Type: "integer"},
+			}}
 
-			reg := refresolve.NewRegistry(testDeps(), tc.draft, false)
-			reg.Build(root, "https://example.test/root.json")
+			doc := freeze(t, root, "https://example.test/root.json", tc.profile)
+
+			reg := refresolve.NewRegistry(refresolve.Deps{}, false)
+			reg.Build(doc)
 
 			got, ok := reg.NewSession(nil).
 				LookupAnchor(uriref.AnchorKey("https://example.test/root.json", "a"))
@@ -55,7 +64,9 @@ func TestFragmentOnlyIDRegistersByDraft(t *testing.T) {
 			require.Equal(t, tc.want, ok, "the anchor registration follows the draft")
 
 			if tc.want {
-				assert.Same(t, target, got, "the anchor names the schema carrying the $id")
+				target, found := doc.Frozen().At("/definitions/t")
+				require.True(t, found)
+				assert.Same(t, target, got, "the anchor names the frozen node carrying the $id")
 			}
 		})
 	}
@@ -123,8 +134,9 @@ func TestRegisterFetchedCollisions(t *testing.T) {
 			t.Parallel()
 
 			sess := loadedSession(t, rootURI, loadedURI)
+			doc := freeze(t, tc.doc, tc.baseURI, schemavet.Profile{})
 
-			err := sess.RegisterFetched(tc.doc, tc.baseURI)
+			err := sess.RegisterFetched(doc)
 			if tc.err {
 				require.ErrorIs(t, err, refresolve.ErrIDCollision)
 
@@ -138,7 +150,7 @@ func TestRegisterFetchedCollisions(t *testing.T) {
 
 			got, ok := sess.LookupURI(tc.baseURI)
 			require.True(t, ok, "the document registers under its retrieval URI")
-			assert.Same(t, tc.doc, got)
+			assert.Same(t, doc.Root(), got)
 		})
 	}
 }
@@ -151,17 +163,18 @@ func TestRegisterFetchedTwiceIsNotACollision(t *testing.T) {
 	t.Parallel()
 
 	sess := loadedSession(t, "https://example.test/root.json", "https://example.test/a.json")
-	doc := &jsonschema.Schema{ID: "https://example.test/b.json", Type: "string"}
+	doc := freeze(t, &jsonschema.Schema{ID: "https://example.test/b.json", Type: "string"},
+		"https://example.test/b.json", schemavet.Profile{})
 
-	require.NoError(t, sess.RegisterFetched(doc, "https://example.test/b.json"))
-	require.NoError(t, sess.RegisterFetched(doc, "https://example.test/b.json"),
+	require.NoError(t, sess.RegisterFetched(doc))
+	require.NoError(t, sess.RegisterFetched(doc),
 		"the same document under the same URI claims nothing new")
 }
 
 // TestRegisterFallbackDocumentChecksOnlyIDs pins the narrower rule a substitute
 // follows. Its $id is a claim a real document could answer instead, so a $id
 // naming a loaded URI is refused. Its anchors are not, because a substitute
-// registers under the base of the reference it answers, so an anchor it
+// is frozen against the base of the reference it answers, so an anchor it
 // carries lands in that document's anchor space by construction and no
 // reference reaches it.
 func TestRegisterFallbackDocumentChecksOnlyIDs(t *testing.T) {
@@ -175,13 +188,15 @@ func TestRegisterFallbackDocumentChecksOnlyIDs(t *testing.T) {
 	sess := loadedSession(t, rootURI, loadedURI)
 
 	err := sess.RegisterFallbackDocument(
-		&jsonschema.Schema{ID: loadedURI, Type: "string"}, rootURI, "the substitute",
+		freeze(t, &jsonschema.Schema{ID: loadedURI, Type: "string"}, rootURI, schemavet.Profile{}),
+		"the substitute",
 	)
 	require.ErrorIs(t, err, refresolve.ErrIDCollision,
 		"a substitute may not claim a URI a real document holds")
 
 	err = sess.RegisterFallbackDocument(
-		&jsonschema.Schema{Anchor: "r", Type: "string"}, rootURI, "the substitute",
+		freeze(t, &jsonschema.Schema{Anchor: "r", Type: "string"}, rootURI, schemavet.Profile{}),
+		"the substitute",
 	)
 	require.NoError(t, err, "a substitute's anchor is not a claim against the document holding it")
 }
@@ -195,11 +210,13 @@ func loadedSession(t *testing.T, rootURI, loadedURI string) *refresolve.Session 
 
 	root := &jsonschema.Schema{ID: rootURI, Anchor: "r", Type: "object"}
 
-	reg := refresolve.NewRegistry(testDeps(), refresolve.Draft2020, false)
-	reg.Build(root, rootURI)
+	reg := refresolve.NewRegistry(refresolve.Deps{}, false)
+	reg.Build(freeze(t, root, rootURI, schemavet.Profile{}))
 
 	sess := reg.NewSession(nil)
-	require.NoError(t, sess.RegisterFetched(&jsonschema.Schema{Type: "string"}, loadedURI))
+	require.NoError(t, sess.RegisterFetched(
+		freeze(t, &jsonschema.Schema{Type: "string"}, loadedURI, schemavet.Profile{}),
+	))
 
 	return sess
 }
@@ -219,13 +236,17 @@ func TestCollisionMessageNamesBothDocuments(t *testing.T) {
 		sharedID  = "https://example.test/shared.json"
 	)
 
-	reg := refresolve.NewRegistry(testDeps(), refresolve.Draft2020, false)
-	reg.Build(&jsonschema.Schema{ID: rootURI, Type: "object"}, rootURI)
+	reg := refresolve.NewRegistry(refresolve.Deps{}, false)
+	reg.Build(freeze(t, &jsonschema.Schema{ID: rootURI, Type: "object"}, rootURI, schemavet.Profile{}))
 
 	sess := reg.NewSession(nil)
-	require.NoError(t, sess.RegisterFetched(&jsonschema.Schema{ID: sharedID, Type: "string"}, firstURI))
+	require.NoError(t, sess.RegisterFetched(
+		freeze(t, &jsonschema.Schema{ID: sharedID, Type: "string"}, firstURI, schemavet.Profile{}),
+	))
 
-	err := sess.RegisterFetched(&jsonschema.Schema{ID: sharedID, Type: "integer"}, secondURI)
+	err := sess.RegisterFetched(
+		freeze(t, &jsonschema.Schema{ID: sharedID, Type: "integer"}, secondURI, schemavet.Profile{}),
+	)
 	require.ErrorIs(t, err, refresolve.ErrIDCollision)
 	assert.Contains(t, err.Error(), secondURI, "the message names the document making the claim")
 	assert.Contains(t, err.Error(), firstURI,

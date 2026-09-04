@@ -156,29 +156,6 @@ var (
 	// originates in that package or here.
 	ErrDuplicatePropertyOrder = schemavet.ErrDuplicatePropertyOrder
 
-	// ErrSchemaNotTree is returned by [Compile] and [Inline] when the root
-	// document's sub-schema pointers do not form a tree: one *Schema value is
-	// reachable through two paths, or a pointer cycle exists. The compiled
-	// per-node caches and error paths assume each node has one location, and
-	// inlining expands each reference in place, so a node reached from two
-	// positions would take one position's expansion at both. The error names
-	// both paths that reach the repeated node. Reference the shared schema
-	// with $ref instead of aliasing the pointer.
-	//
-	// Both engines return it for a second root shape, a loop closing through a
-	// value field (Const, Enum, Examples, or Extra) rather than through a
-	// sub-schema keyword. That error names the root document rather than a
-	// location, because the walk that finds such a loop reports only that a
-	// loop exists, not the path around it.
-	//
-	// It also reports a pointer cycle in a document a [RefResolver] returns,
-	// wrapped in [ErrRefResolve] and naming the document's base URI, and one in
-	// a [SubstituteRef] schema, returned bare from the substitution site and
-	// naming the reference whose fallback supplied it. Those two sources accept
-	// aliasing. The boundary refuses only the cycle, because the JSON-pointer
-	// fallback marshals the document it searches.
-	ErrSchemaNotTree = errors.New("schema is not a tree")
-
 	// ErrSchemaCycle is returned by [Compile] and [Inline] when a schema
 	// graph holds a loop that crosses a schema, through a sub-schema keyword
 	// or through a value field (Const, Enum, Examples, or Extra). A cyclic

@@ -74,7 +74,7 @@ var refBuildSentinels = map[string]error{
 	"ErrInvalidID":                jsonschema.ErrInvalidID,
 	"ErrMisplacedVocabulary":      jsonschema.ErrMisplacedVocabulary,
 	"ErrItemsArrayUnderDraft2020": jsonschema.ErrItemsArrayUnderDraft2020,
-	"ErrSchemaNotTree":            jsonschema.ErrSchemaNotTree,
+	"ErrSchemaCycle":              jsonschema.ErrSchemaCycle,
 	"ErrIDCollision":              jsonschema.ErrIDCollision,
 	"ErrUnsupportedDraft":         jsonschema.ErrUnsupportedDraft,
 	"ErrUnknownVocabulary":        jsonschema.ErrUnknownVocabulary,
@@ -278,7 +278,7 @@ func inlinePipeline(
 	case refErrSignature(inlineErr) != refUnclassified:
 		// Any refusal refBuildSentinels names: a structural-vet violation in
 		// the root, a fetched document, a substitute, or a fallback target; a
-		// root whose pointers are not a tree; or an unsupported dialect.
+		// cyclic root; or an unsupported dialect.
 		// Compile refuses the same schema for the same cause, so the two stay
 		// comparable through the build-error outcome. The case sits after
 		// isRefMiss, which matches only an unclassified signature, so the two

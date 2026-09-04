@@ -27,7 +27,6 @@ import (
 	"go.jacobcolvin.com/x/jsonschema/internal/refresolve"
 	"go.jacobcolvin.com/x/jsonschema/internal/regexcache"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemaclone"
-	"go.jacobcolvin.com/x/jsonschema/internal/schemafield"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemashape"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemavet"
 	"go.jacobcolvin.com/x/jsonschema/internal/uriref"
@@ -298,16 +297,8 @@ type validator struct {
 	// copy-on-write before its first write.
 	refFetch refresolve.Fetch
 
-	// The one vetter every compile-time pass shares. It vets the root
-	// document, each document the reference walk fetches, and, as the
-	// compile-time session's FallbackVet, each JSON-pointer fallback target
-	// that session materializes. Its visited sets span all three, so the
-	// vetter checks a node reached both locally and through a remote URI once
-	// and attributes it to the pass that reached it first. Compile clears it
-	// beside the compile context. A validation run vets through its own
-	// session's FallbackVet, and through a fresh vetter per late fetch
-	// (checkFetchedDocument).
-	vetter *schemavet.Vetter
+	// The rootDoc is the frozen, vetted root document; root is its Root().
+	rootDoc schemavet.Doc
 
 	// The index is the node-identity index over the root document: each
 	// schema reachable through sub-schema keywords has a dense id, and the
@@ -452,13 +443,32 @@ func newValidator(ctx context.Context, schema *Schema, opts []ValidateOption) (*
 	// per-node walk iterates only applicable rows and never re-runs gatePasses.
 	v.buildActiveRows()
 
+	// Freeze the caller's document into a private tree and vet it up front:
+	// field structure, identifiers, type names, bound domains, and (under
+	// 2020-12) the items array form, so a malformed document fails compilation
+	// instead of silently mis-validating. Every walk from here on reads the
+	// frozen copy, so the caller's value is never held and never read again,
+	// and a node reached through two paths in the caller's value is two nodes
+	// here.
+	frozen, err := schemavet.Freeze(schema, "the root document", v.baseURI, v.draft.vetProfile())
+	if err != nil {
+		//nolint:wrapcheck // The freeze error already names the document and path.
+		return nil, err
+	}
+
+	rootDoc, err := frozen.Vet("")
+	if err != nil {
+		//nolint:wrapcheck // The vetting error already names the document and path.
+		return nil, err
+	}
+
+	v.root = rootDoc.Root()
+	v.rootDoc = rootDoc
+
 	// The compile session's fetch reads the compile context from the ctx field
 	// set above, not a threaded parameter.
 	//nolint:contextcheck // See the comment above.
 	v.buildRefReg()
-
-	// Compile builds the node-identity index after vetting the root; extend
-	// demands the vetted-document currency.
 
 	// The dynamic scope is seeded per run by forInstance, the single source for
 	// the rule; the compiled validator's compile-time session (used only by the
@@ -469,48 +479,32 @@ func newValidator(ctx context.Context, schema *Schema, opts []ValidateOption) (*
 }
 
 // refDeps returns the dependency-injection boundary the resolution core needs:
-// the sub-schema traversal the parent owns, and the decoded-document
-// materializer the JSON-pointer fallback builds its targets through.
-// [ParseSchemaValue] serves as the materializer so a fallback target's const
-// and enum numbers stay exact [jsonv1.Number] literals, like every other path a
-// schema document takes into the engines. Deep cloning stays parent-side in
-// the fetch closures, so the core needs no clone dependency.
+// the decoded-document materializer the JSON-pointer fallback builds its
+// targets through. [ParseSchemaValue] serves as the materializer so a fallback
+// target's const and enum numbers stay exact [jsonv1.Number] literals, like
+// every other path a schema document takes into the engines.
 func refDeps() refresolve.Deps {
-	return refresolve.Deps{
-		Children:    schemafield.Children,
-		Materialize: ParseSchemaValue,
-	}
+	return refresolve.Deps{Materialize: ParseSchemaValue}
 }
 
-// toRefDraft maps the parent draft to the resolution core's two-value enum,
-// which drives the Draft-07 sibling-$id exception and dynamic-scope seeding.
-func toRefDraft(d Draft) refresolve.Draft {
-	if d == Draft7 {
-		return refresolve.Draft7
-	}
-
-	return refresolve.Draft2020
-}
-
-// buildRefReg builds the compiled ref-resolution registry over the root document
-// (seeded with the [WithBaseURI] base, normalized by newValidator), the vetter
-// every compile-time pass shares, and the compile-time session the compile
-// reference walk resolves through. The walk's fetches write the shared refReg
-// directly (via a copy-on-write-disabled fetch) so remote documents fetched
-// while compiling persist into the registry every run shares.
+// buildRefReg builds the compiled ref-resolution registry over the frozen
+// root document (frozen against the [WithBaseURI] base, normalized by
+// newValidator) and the compile-time session the compile reference walk
+// resolves through. The walk's fetches write the shared refReg directly (via
+// a copy-on-write-disabled fetch) so remote documents fetched while compiling
+// persist into the registry every run shares.
 func (v *validator) buildRefReg() {
-	v.refReg = refresolve.NewRegistry(refDeps(), toRefDraft(v.draft), v.inertIDs)
-	v.refReg.Build(v.root, v.baseURI)
+	v.refReg = refresolve.NewRegistry(refDeps(), v.inertIDs)
+	v.refReg.Build(v.rootDoc)
 
-	// The compile-time session vets each JSON-pointer fallback target at
-	// materialization, through the same vetter the root pass and the document
-	// pass use. The walk therefore meets a malformed target at that point rather
-	// than in a later pass. The inliner's session vets at the same point, which
-	// is what makes the two engines report whichever fault the closure walk
-	// reaches first. The method value does not wrap, so Compile reports the bare
-	// vetting sentinel and refWalkError supplies the reference framing.
-	v.vetter = schemavet.NewVetter(v.profile.vetProfile())
-	v.refSession = v.refReg.NewSession(v.vetter.Vet)
+	// The compile-time session freezes and vets each JSON-pointer fallback
+	// target at materialization, so the walk meets a malformed target at that
+	// point rather than in a later pass. The inliner's session vets at the
+	// same point, which is what makes the two engines report whichever fault
+	// the closure walk reaches first. The vet does not wrap, so Compile
+	// reports the bare vetting sentinel and refWalkError supplies the
+	// reference framing.
+	v.refSession = v.refReg.NewSession(newFallbackVet(v.draft.vetProfile(), false))
 	// The fetch reads the run's context from the ctx field, so no parameter
 	// threads through the deep resolution machinery.
 	//nolint:contextcheck // See the comment above.
@@ -544,7 +538,7 @@ func (v *validator) forInstance(ctx context.Context) *validator {
 	// compile-time one does. A violation surfaces through the referencing ref
 	// as an error wrapping [ErrRefResolve], matching the
 	// late-fetched-document vet.
-	rv.refSession = v.refReg.NewSession(newFallbackVet(rv.profile))
+	rv.refSession = v.refReg.NewSession(newFallbackVet(rv.draft.vetProfile(), true))
 	if rv.profile.dynamicRef {
 		rv.refSession.SeedDynamicScope(rv.refSession.SchemaBase(rv.root))
 	}
@@ -938,63 +932,90 @@ func callResolver(ctx context.Context, resolver RefResolver, uri string) (*Schem
 	return s, true, nil
 }
 
-// fetchAndClone is the shared fetch-and-clone skeleton the validator's
+// fetchAndFreeze is the shared fetch skeleton the validator's
 // [validator.remoteFetch] and the inliner's [inliner.fetchDoc] both run: it
 // consults the session's per-run negative cache, calls the resolver through
-// [callResolver], and deep-clones the resolved document so the resolver-owned
-// schema is never mutated by a later walk and the cache holds an independent
-// copy. Every failure path records the outcome in the negative cache, upholding
-// the at-most-once-per-baseURI-in-a-run contract even when many nodes reference
-// the same URI.
+// [callResolver], freezes the resolved document into a private tree so the
+// resolver-owned schema is never held and every cache reads an independent
+// copy, settles an identifier collision against the session's registry, and
+// vets the document. Every failure path records the outcome in the negative
+// cache, upholding the at-most-once-per-baseURI-in-a-run contract even when
+// many nodes reference the same URI.
 //
-// The two result shapes the callers distinguish are: missed true, a plain
+// The order is load-bearing. The collision settles ahead of the vet, so a
+// document carrying both faults fails with one sentinel wherever it is read;
+// a caller that vetted first would report the structural cause instead. The
+// two result shapes the callers distinguish are: missed true, a plain
 // not-resolved answer (a resolver miss or a replayed plain miss) that each
-// caller shapes into its own miss behavior; and a non-nil err, already wrapped
-// with [ErrRefResolve] (a resolver-reported failure, a replayed recorded error,
-// or a document whose pointer graph holds a cycle). On success cp holds the
-// clone with missed false and a nil error. The caller then vets and registers
-// cp under its own policy.
-func fetchAndClone(
-	ctx context.Context, resolver RefResolver, sess *refresolve.Session, baseURI string,
-) (*Schema, bool, error) {
+// caller shapes into its own miss behavior; and a non-nil err, already
+// wrapped with [ErrRefResolve] (a resolver-reported failure, a replayed
+// recorded error, a cyclic document, a collision, or a vetting violation). On
+// success the minted document is returned with missed false and a nil error,
+// and the caller registers it.
+func fetchAndFreeze(
+	ctx context.Context, resolver RefResolver, sess *refresolve.Session,
+	baseURI string, profile schemavet.Profile,
+) (schemavet.Doc, bool, error) {
 	if recorded, seen := sess.RemoteMiss(baseURI); seen {
 		if recorded != nil {
-			return nil, false, fmt.Errorf("%w: %w", ErrRefResolve, recorded)
+			return schemavet.Doc{}, false, fmt.Errorf("%w: %w", ErrRefResolve, recorded)
 		}
 
-		return nil, true, nil
+		return schemavet.Doc{}, true, nil
 	}
 
 	schema, ok, err := callResolver(ctx, resolver, baseURI)
 	if err != nil {
 		sess.RecordRemoteMiss(baseURI, err)
 
-		return nil, false, fmt.Errorf("%w: %w", ErrRefResolve, err)
+		return schemavet.Doc{}, false, fmt.Errorf("%w: %w", ErrRefResolve, err)
 	}
 
 	if !ok {
 		sess.RecordRemoteMiss(baseURI, nil)
 
-		return nil, true, nil
+		return schemavet.Doc{}, true, nil
 	}
 
-	cp, err := cloneCheckedSchema(schema, fmt.Sprintf("document %q", baseURI))
+	frozen, err := schemavet.Freeze(schema, fmt.Sprintf("document %q", baseURI), baseURI, profile)
 	if err != nil {
-		sess.RecordRemoteMiss(baseURI, err)
-
-		return nil, false, fmt.Errorf("%w: %w", ErrRefResolve, err)
+		return schemavet.Doc{}, false, refuseFetched(sess, baseURI, err)
 	}
 
-	return cp, false, nil
+	err = sess.CheckFetched(frozen)
+	if err != nil {
+		return schemavet.Doc{}, false, refuseFetched(sess, baseURI, err)
+	}
+
+	doc, err := frozen.Vet(baseURI + "#")
+	if err != nil {
+		return schemavet.Doc{}, false, refuseFetched(sess, baseURI, err)
+	}
+
+	return doc, false, nil
+}
+
+// refuseFetched records the refusal of a document the resolver served under
+// baseURI and returns the error the fetch reports for it. The cause rides
+// inside a [refresolve.RefusedError], which the resolution reads as a settled
+// answer rather than a miss, so the reference-closure walk fails on it in
+// every pass where a plain miss would be deferred; the negative cache holds
+// the same marked error, so a replay settles the same way. The whole is
+// wrapped in [ErrRefResolve], as every fetch failure is.
+func refuseFetched(sess *refresolve.Session, baseURI string, cause error) error {
+	refused := &refresolve.RefusedError{Err: cause}
+	sess.RecordRemoteMiss(baseURI, refused)
+
+	return fmt.Errorf("%w: %w", ErrRefResolve, refused)
 }
 
 // remoteFetch returns the [refresolve.Fetch] the resolution core calls when a
 // non-fragment ref's document is not yet registered. It fetches the document
-// through the configured [RefResolver], deep-copies it, and registers the copy
-// under baseURI along with its nested $id/$anchor entries. A nested identifier
-// another document already holds fails the registration with
-// [ErrIDCollision]; a duplicate within the document itself resolves to the
-// first entry the walk reaches.
+// through the configured [RefResolver], freezes and vets it, and registers the
+// frozen tree under baseURI along with its nested $id/$anchor entries. A
+// nested identifier another document already holds fails the registration
+// with [ErrIDCollision]; a duplicate within the document itself resolves to
+// the first entry the walk reaches.
 //
 // A per-run session (cow true) clones the compiled registry copy-on-write before
 // its first write via [refresolve.Session.EnsureOwned], so the registrations
@@ -1013,7 +1034,7 @@ func (v *validator) remoteFetch(sess *refresolve.Session, cow bool) refresolve.F
 			return nil, nil //nolint:nilnil // A missing resolver is a plain miss, not an error.
 		}
 
-		cp, missed, err := fetchAndClone(v.runContext(), v.refResolver, sess, baseURI)
+		doc, missed, err := fetchAndFreeze(v.runContext(), v.refResolver, sess, baseURI, v.draft.vetProfile())
 		if err != nil {
 			return nil, err
 		}
@@ -1023,96 +1044,44 @@ func (v *validator) remoteFetch(sess *refresolve.Session, cow bool) refresolve.F
 		}
 
 		if cow {
-			// The vet below runs between the fetch and the registration, so
-			// this checks the collision without merging first. See
-			// [refresolve.Session.CheckFetched] for why the order matters.
-			collErr := sess.CheckFetched(cp, baseURI)
-			if collErr != nil {
-				sess.RecordRemoteMiss(baseURI, collErr)
-
-				return nil, fmt.Errorf("%w: %w", ErrRefResolve, collErr)
-			}
-
-			// A document first fetched during a validation run never passes
-			// through the compile reference walk's document loop, so the same
-			// checks run here before registration; a compile-time fetch (cow
-			// false) registers into the shared refReg and is checked by that
-			// loop instead. A violation is recorded like the misses above, so
-			// the at-most-once-per-baseURI contract holds, and surfaces
-			// through the ref as an error wrapping [ErrRefResolve] rather
-			// than silently mis-validating.
-			doc, checkErr := v.checkFetchedDocument(cp, baseURI)
-			if checkErr != nil {
-				sess.RecordRemoteMiss(baseURI, checkErr)
-
-				return nil, fmt.Errorf("%w: %w", ErrRefResolve, checkErr)
-			}
-
-			// Register the minted document's pointer (the same clone), so the
-			// vetted currency reaches the registry rather than the raw fetch
-			// result. The inliner's fetchDoc consumes its own Doc where it
-			// records the document; nothing here does, so the assignment is
-			// what keeps the mint load-bearing on this path.
-			cp = doc.Root()
-
 			// Clone the registry into this run's own copy before the first
-			// remote registration so the writes below cannot race a concurrent
+			// remote registration so the write below cannot race a concurrent
 			// run still sharing the compiled registry.
 			sess.EnsureOwned()
 		}
 
-		// Both engines refuse a document claiming an identifier another
-		// document already holds rather than merging it. The failure is
-		// recorded like the checks above, so the at-most-once-per-baseURI
-		// contract holds, and it surfaces through the ref wrapping
-		// [ErrRefResolve]. On the per-run path the check above already passed,
-		// so this call only merges.
-		err = sess.RegisterFetched(cp, baseURI)
+		// The collision settled at the fetch, so this call only merges; the
+		// check is repeated because the registration is the one path both
+		// engines take for a fetched document.
+		err = sess.RegisterFetched(doc)
 		if err != nil {
-			sess.RecordRemoteMiss(baseURI, err)
-
-			return nil, fmt.Errorf("%w: %w", ErrRefResolve, err)
+			return nil, refuseFetched(sess, baseURI, err)
 		}
 
-		return cp, nil
+		return doc.Root(), nil
 	}
 }
 
-// checkFetchedDocument runs the single [schemavet.Vetter] policy over a
-// document fetched during a validation run, giving late-fetched documents
-// parity with compile-time-fetched ones. Each late fetch is independent, so it
-// uses a fresh vetter. The base URI prefixes the path so a violation names the
-// offending document exactly as the compile-time pass does. On success it
-// returns the minted [schemavet.Doc], which the caller registers; the currency
-// makes registering an unvetted late fetch a compile error.
-func (v *validator) checkFetchedDocument(s *Schema, baseURI string) (schemavet.Doc, error) {
-	//nolint:wrapcheck // The vetting error already names the document and path.
-	return schemavet.NewVetter(v.profile.vetProfile()).VetDoc(s, baseURI+"#", baseURI)
-}
-
-// newFallbackVet returns the [refresolve.FallbackVet] the validator's per-run
-// sessions apply to each JSON-pointer fallback target they materialize. A
-// target carved out of raw JSON in an unknown keyword never passed through a
-// document-level vet, so the check runs at materialization, where the
-// compile-time session and the inliner also run it.
+// newFallbackVet returns the [refresolve.FallbackVet] a session applies to
+// each JSON-pointer fallback target it materializes. A target carved out of
+// raw JSON in an unknown keyword never passed through a document-level vet,
+// so it is frozen and checked at materialization, where the compile-time
+// session, the per-run sessions, and the inliner all run it.
 //
-// One lazily-built vetter is shared across a session's targets, mirroring the
-// compile-time vetter's shared visited sets. The vet wraps a violation in
-// [ErrRefResolve], so it surfaces through the referencing ref exactly like a
-// malformed-document violation. The compile-time vet is the one that does not
-// wrap, since refWalkError frames the bare sentinel under the failing
-// reference.
-func newFallbackVet(profile draftProfile) refresolve.FallbackVet {
-	var vt *schemavet.Vetter
-
-	return func(sc *Schema, locator string) (schemavet.Node, error) {
-		if vt == nil {
-			vt = schemavet.NewVetter(profile.vetProfile())
-		}
-
-		node, err := vt.Vet(sc, locator)
+// The per-run vet wraps a violation in [ErrRefResolve], so it surfaces
+// through the referencing ref exactly like a malformed-document violation.
+// The compile-time vet passes wrap false, since refWalkError frames the bare
+// sentinel under the failing reference.
+func newFallbackVet(profile schemavet.Profile, wrap bool) refresolve.FallbackVet {
+	return func(sc *Schema, base, locator string) (schemavet.Node, error) {
+		node, err := schemavet.FreezeNode(sc, locator, base, profile)
 		if err != nil {
-			return schemavet.Node{}, fmt.Errorf("%w: %w", ErrRefResolve, err)
+			if wrap {
+				return schemavet.Node{}, fmt.Errorf("%w: %w", ErrRefResolve, err)
+			}
+
+			//nolint:wrapcheck // The vetting error already names the target and path.
+			return schemavet.Node{}, err
 		}
 
 		return node, nil
@@ -1122,52 +1091,10 @@ func newFallbackVet(profile draftProfile) refresolve.FallbackVet {
 // cloneSchema deep-copies a [Schema] structurally, field by field, through
 // [schemaclone.Clone]. The copy reproduces the source's pointer graph, so an
 // aliased node stays one node and a cyclic document copies as a cycle, and no
-// graph shape makes the copy fail.
+// graph shape makes the copy fail. The inliner clones its working copies and
+// its memoized expansions through it, all of which are trees already.
 func cloneSchema(s *Schema) *Schema {
 	return schemaclone.Clone(s)
-}
-
-// cloneCheckedSchema deep-copies a [Schema] the way [cloneSchema] does and
-// rejects a copy whose cycle crosses a schema, for the boundaries that need
-// the copy and the report together: a document a [RefResolver] returns, a
-// [SubstituteRef] schema, and the inliner's own root. All three enter
-// resolution space, where the JSON-pointer fallback marshals the document it
-// searches, and marshaling a cyclic schema graph overflows the stack fatally
-// rather than returning an error (see [schemaclone.CloneChecked]). Aliasing
-// survives at the two that arrive from outside the package, because every walk
-// that reaches a registered document dedupes pointers; the inliner's root
-// answers to [checkSchemaTree] for aliasing.
-func cloneCheckedSchema(s *Schema, subject string) (*Schema, error) {
-	cp, cyc := schemaclone.CloneChecked(s)
-	if cyc != nil {
-		return nil, cycleError(subject, cyc)
-	}
-
-	return cp, nil
-}
-
-// checkSchemaCycle applies [cloneCheckedSchema]'s rule to [Compile]'s root
-// without keeping the copy the walk builds while finding the cycle. That root
-// stays the caller's own value, which [Validator.Schema] hands back (see
-// [schemaclone.FindCycle]).
-func checkSchemaCycle(s *Schema, subject string) error {
-	cyc := schemaclone.FindCycle(s)
-	if cyc == nil {
-		return nil
-	}
-
-	return cycleError(subject, cyc)
-}
-
-// cycleError words the cycle refusal once, so the two engines refuse one root
-// with one message. It names the pointer where the loop closes and the pointer
-// it returns to, both rooted at the graph the check walked. A root position
-// renders as the empty string, the spelling [checkSchemaTree] uses. Where that
-// graph holds several loops, the message names one of them, and the clone walk
-// orders every container it descends, so the two engines name the same one.
-func cycleError(subject string, cyc *schemaclone.Cycle) error {
-	return fmt.Errorf("%w: %s holds a loop where %q crosses a schema and returns to %q",
-		ErrSchemaNotTree, subject, cyc.Path, cyc.Target)
 }
 
 // resolveDraft returns the draft a validation or inlining run operates under: a
@@ -1239,11 +1166,13 @@ type Validator struct {
 	proto *validator
 }
 
-// Schema returns the root schema the Validator was compiled for: the very
-// *Schema given to [Compile], not a copy, so a consumer handed only the
-// Validator can still inspect, marshal, or [Inline] what it validates.
-// The compiled caches are derived from the schema at Compile time; treat the
-// returned schema as read-only, and recompile after any mutation.
+// Schema returns the root schema the Validator validates: a private tree
+// copy of the *Schema given to [Compile], so a consumer handed only the
+// Validator can still inspect, marshal, or [Inline] what it validates. The
+// copy shares nothing with the caller's value, and a node the caller's value
+// reached through two paths is two nodes in it. The compiled caches are
+// derived from it at Compile time; treat the returned schema as read-only,
+// and recompile after any mutation.
 func (c *Validator) Schema() *Schema {
 	return c.proto.root
 }
@@ -1278,39 +1207,12 @@ func Compile(ctx context.Context, schema *Schema, opts ...ValidateOption) (*Vali
 		return nil, err
 	}
 
-	// The root document's sub-schema pointers must form a tree, and no loop
-	// may close through a value field. Both checks run once over the root. A
-	// document a resolver hands in is held to the weaker no-cycle rule at the
-	// fetch boundary (see cloneCheckedSchema).
-	err = checkSchemaTree(schema)
-	if err != nil {
-		return nil, err
-	}
-
-	err = checkSchemaCycle(schema, "the root document")
-	if err != nil {
-		return nil, err
-	}
-
-	// Structurally vet the root document up front: field structure,
-	// identifiers, type names, bound domains, and (under 2020-12) the items
-	// array form, so a malformed document fails compilation instead of
-	// silently mis-validating. This pass reuses the vetter buildRefReg built,
-	// since the compile-time session needs its Vet method as the FallbackVet.
-	// Its visited sets carry across this root pass, the fallback targets the
-	// session materializes, and the documents the reference walk fetches.
-	rootDoc, err := v.vetter.VetDoc(schema, "", v.baseURI)
-	if err != nil {
-		//nolint:wrapcheck // The vetting error already names the document and path.
-		return nil, err
-	}
-
-	// Build the node-identity index over the vetted root document. The per-node
-	// precompute caches are slices indexed by the ids it assigns. It references
-	// the caller's *Schema pointers (Validator.Schema stays the caller's value),
-	// so nodeID hits for the same pointers the validation walk descends.
+	// Build the node-identity index over the frozen, vetted root document.
+	// The per-node precompute caches are slices indexed by the ids it
+	// assigns, and the validation walk descends the same frozen nodes, so
+	// nodeID hits for every one of them.
 	v.index = newSchemaIndex()
-	v.index.extend(rootDoc)
+	v.index.extend(v.rootDoc)
 
 	// Precompute derived per-node state (numeric bounds and compiled patterns)
 	// into the id-indexed caches while still single-threaded, so the
@@ -1327,25 +1229,23 @@ func Compile(ctx context.Context, schema *Schema, opts ...ValidateOption) (*Vali
 	}
 
 	// Drop the compile-only state. The cached validator then holds no stale or
-	// canceled context, and releases the walk's session and the vetter's
-	// visited sets. Each validation run supplies its own through forInstance,
-	// which overwrites the session and the fetch before any walk reads them.
-	// The fetch goes too, since it closes over both the session and the
-	// context.
+	// canceled context, and releases the walk's session. Each validation run
+	// supplies its own through forInstance, which overwrites the session and
+	// the fetch before any walk reads them. The fetch goes too, since it
+	// closes over both the session and the context.
 	v.ctx = nil
 	v.refSession = nil
 	v.refFetch = nil
-	v.vetter = nil
 
 	return &Validator{proto: v}, nil
 }
 
 // compileRefPasses runs the compile-time reference walk over the root and every
 // document it reaches, supplying the document hook [refClosure] leaves to its
-// caller. The hook vets each document the closure reaches with the shared
-// vetter and folds it into the node index, so its nodes hit the precompute
-// caches; a document wholly aliasing already-indexed nodes adds nothing, since
-// extend returns from == len().
+// caller. Every document the closure reaches was frozen and vetted at its
+// fetch, so the hook only folds it into the node index, once per document,
+// so its nodes hit the precompute caches; the root document is indexed
+// already and adds nothing, since extend returns from == len().
 //
 // A JSON-pointer fallback target needs no hook of its own. The compile-time
 // session vets each one where it materializes it, and the caches would not
@@ -1359,13 +1259,7 @@ func (v *validator) compileRefPasses() error {
 		dynamicRef: v.profile.dynamicRef,
 		strictRef:  true,
 		strictDyn:  true,
-		onDoc: func(s *Schema, uri string) error {
-			doc, err := v.vetter.VetDoc(s, uri+"#", uri)
-			if err != nil {
-				//nolint:wrapcheck // The vetting error already names the document and path.
-				return err
-			}
-
+		onDoc: func(doc schemavet.Doc) error {
 			from := v.index.extend(doc)
 			if from < v.index.len() {
 				v.sizeCaches(v.index.len())
@@ -1643,54 +1537,6 @@ func MustCompileJSON(data []byte, opts ...ValidateOption) *Validator {
 func CheckTypeNames(schema *Schema) error {
 	//nolint:wrapcheck // The vetting error already names the offending path.
 	return schemavet.CheckTypeNames(schema)
-}
-
-// checkSchemaTree verifies that the root document's sub-schema pointers form a
-// tree: no *Schema value reachable through two paths, and no pointer cycle.
-// The compiled per-node caches and the error paths assume each node has one
-// location, so [Compile] runs this once over the root document, and [Inline]
-// runs it over the document it inlines. A document a resolver hands in is held
-// to the weaker no-cycle rule instead (see [cloneCheckedSchema]), because the
-// walks that reach one all dedupe pointers, so an aliased remote costs the
-// accuracy of a location in an error message rather than correctness. The error
-// names both paths that reach the repeated node.
-//
-// The check reads the sub-schema graph, so a loop closing through a value field
-// (Const, Enum, Examples, or Extra) passes it. Each engine runs a cycle check
-// beside this one to catch that shape, [Compile] through [checkSchemaCycle] and
-// [Inline] through the [cloneCheckedSchema] copy it needs anyway. Neither may
-// let the shape through, because the JSON-pointer fallback marshals the
-// document it searches and overflows the stack on such a graph.
-//
-// This is a root-document check, distinct from the graph-tolerant traversals
-// ([Walk], the registry walk, the node index), which dedupe pointers instead.
-func checkSchemaTree(schema *Schema) error {
-	seen := map[*Schema]string{}
-
-	var visit func(s *Schema, path string) error
-
-	visit = func(s *Schema, path string) error {
-		if s == nil {
-			return nil
-		}
-
-		if first, ok := seen[s]; ok {
-			return fmt.Errorf("%w: %q and %q reach the same schema", ErrSchemaNotTree, first, path)
-		}
-
-		seen[s] = path
-
-		for _, entry := range SubschemaEntries(s) {
-			err := visit(entry.Schema, path+string(entry.Pointer))
-			if err != nil {
-				return err
-			}
-		}
-
-		return nil
-	}
-
-	return visit(schema, "")
 }
 
 // Validate validates a pre-parsed Go value against the compiled schema.

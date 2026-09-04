@@ -6408,14 +6408,6 @@ func TestValidateRefTargetWellFormed(t *testing.T) {
 
 // aliasedSchema builds a schema whose two properties share one *Schema, so its
 // sub-schema pointers do not form a tree.
-func aliasedSchema() *jsonschema.Schema {
-	shared := &jsonschema.Schema{Type: "string"}
-
-	return &jsonschema.Schema{
-		Properties: map[string]*jsonschema.Schema{"a": shared, "b": shared},
-	}
-}
-
 // TestCompileMalformedSchemaStillFatal locks in the strict side of the
 // compile-time checks: a schema that is genuinely malformed, or whose $ref
 // this package cannot resolve, must surface a compile error rather than
@@ -6447,12 +6439,6 @@ func TestCompileMalformedSchemaStillFatal(t *testing.T) {
 				},
 			},
 			instance: []any{"hello"},
-		},
-		// Aliased sub-schema pointers do not form a tree; the root tree check
-		// rejects this, even with a valid instance and no refs in play.
-		"aliased sub-schema pointers are not a tree": {
-			schema:   aliasedSchema(),
-			instance: map[string]any{"a": "x", "b": "y"},
 		},
 	}
 
@@ -7069,7 +7055,7 @@ func TestCheckTypeNamesMatchesCompile(t *testing.T) {
 // CheckTypeNames vets type names without the registry, reference resolution,
 // and vocabulary work Compile performs, so schemas Compile rejects still get a
 // verdict on their type keywords. The case here is a cyclic pointer graph,
-// which Compile's tree check rejects outright.
+// which Compile's freeze rejects outright.
 func TestCheckTypeNamesToleratesUncompilableSchemas(t *testing.T) {
 	t.Parallel()
 
@@ -7677,20 +7663,29 @@ func TestCompileConcurrentWithRefResolver(t *testing.T) {
 }
 
 // TestValidatorAccessors pins Schema and Draft: a compiled validator exposes
-// the very schema it was compiled for and the draft it validates under, so
-// it can be passed across package boundaries without the schema riding
-// alongside it.
+// a private copy of the schema it was compiled for and the draft it
+// validates under, so it can be passed across package boundaries without the
+// schema riding alongside it.
 func TestValidatorAccessors(t *testing.T) {
 	t.Parallel()
 
-	t.Run("Schema returns the compiled root", func(t *testing.T) {
+	t.Run("Schema returns a frozen copy of the compiled root", func(t *testing.T) {
 		t.Parallel()
 
-		schema := &jsonschema.Schema{Type: "string"}
+		schema := &jsonschema.Schema{Type: "string", Properties: map[string]*jsonschema.Schema{"a": {Type: "integer"}}}
 		v, err := jsonschema.Compile(t.Context(), schema)
 		require.NoError(t, err)
 
-		assert.Same(t, schema, v.Schema())
+		assert.NotSame(t, schema, v.Schema(), "the validator holds its own tree")
+		assert.NotSame(t, schema.Properties["a"], v.Schema().Properties["a"])
+
+		want, err := json.Marshal(schema)
+		require.NoError(t, err)
+
+		got, err := json.Marshal(v.Schema())
+		require.NoError(t, err)
+
+		assert.JSONEq(t, string(want), string(got), "the copy renders the same document")
 	})
 
 	t.Run("Draft detects from the root $schema", func(t *testing.T) {

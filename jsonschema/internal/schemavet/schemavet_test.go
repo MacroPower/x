@@ -21,25 +21,33 @@ func TestZeroCurrencyIsInert(t *testing.T) {
 func TestVetMintsOnlyOnSuccess(t *testing.T) {
 	t.Parallel()
 
-	vt := schemavet.NewVetter(schemavet.Profile{RejectItemsArray: true, RejectIDFragment: true, Vocabularies: true})
-
+	strict := schemavet.Profile{RejectItemsArray: true, RejectIDFragment: true, Vocabularies: true}
 	valid := &schemavet.Schema{Type: "string"}
 
-	node, err := vt.Vet(valid, "")
+	node, err := schemavet.FreezeNode(valid, "", "https://example.com/s", strict)
 	require.NoError(t, err)
-	assert.Same(t, valid, node.Root())
+	require.NotNil(t, node.Root())
+	assert.NotSame(t, valid, node.Root(), "the currency holds the frozen copy")
+	assert.Same(t, node.Frozen().Root(), node.Root())
 
-	doc, err := schemavet.NewVetter(schemavet.Profile{}).VetDoc(valid, "", "https://example.com/s")
+	frozen, err := schemavet.Freeze(valid, "the document", "https://example.com/s", schemavet.Profile{})
 	require.NoError(t, err)
-	assert.Same(t, valid, doc.Root())
+
+	doc, err := frozen.Vet("")
+	require.NoError(t, err)
+	assert.Same(t, frozen.Root(), doc.Root())
+	assert.Same(t, frozen, doc.Frozen())
 
 	invalid := &schemavet.Schema{Type: "no-such-type"}
 
-	node, err = schemavet.NewVetter(schemavet.Profile{}).Vet(invalid, "")
+	node, err = schemavet.FreezeNode(invalid, "", "https://example.com/s", schemavet.Profile{})
 	require.ErrorIs(t, err, schemavet.ErrInvalidType)
 	assert.Nil(t, node.Root())
 
-	doc, err = schemavet.NewVetter(schemavet.Profile{}).VetDoc(invalid, "", "https://example.com/s")
+	frozen, err = schemavet.Freeze(invalid, "the document", "https://example.com/s", schemavet.Profile{})
+	require.NoError(t, err, "the freeze reads structure, not the checks")
+
+	doc, err = frozen.Vet("")
 	require.ErrorIs(t, err, schemavet.ErrInvalidType)
 	assert.Nil(t, doc.Root())
 }
@@ -77,7 +85,7 @@ func TestVetViolationPaths(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := schemavet.NewVetter(tc.profile).Vet(tc.schema, "")
+			_, err := schemavet.FreezeNode(tc.schema, "", "https://example.com/s", tc.profile)
 			require.ErrorIs(t, err, tc.err)
 			assert.Contains(t, err.Error(), tc.path)
 		})
@@ -87,24 +95,32 @@ func TestVetViolationPaths(t *testing.T) {
 func TestVetDocIdentifierChecks(t *testing.T) {
 	t.Parallel()
 
+	vetDoc := func(s *schemavet.Schema, profile schemavet.Profile) error {
+		frozen, err := schemavet.Freeze(s, "the document", "https://example.com/s", profile)
+		require.NoError(t, err)
+
+		_, err = frozen.Vet("")
+
+		return err
+	}
+
 	// A fragment-carrying $id is rejected under RejectIDFragment (2020-12)
 	// and tolerated as the anchor spelling without it (Draft-07).
 	withFragment := &schemavet.Schema{ID: "#frag"}
 
-	_, err := schemavet.NewVetter(schemavet.Profile{RejectIDFragment: true}).
-		VetDoc(withFragment, "", "https://example.com/s")
+	err := vetDoc(withFragment, schemavet.Profile{RejectIDFragment: true})
 	require.ErrorIs(t, err, schemavet.ErrInvalidID)
 
-	_, err = schemavet.NewVetter(schemavet.Profile{}).VetDoc(withFragment, "", "https://example.com/s")
+	err = vetDoc(withFragment, schemavet.Profile{})
 	require.NoError(t, err)
 
 	// $vocabulary under an empty $schema follows the Vocabularies flag.
 	vocab := &schemavet.Schema{Vocabulary: map[string]bool{"https://example.com/vocab": true}}
 
-	_, err = schemavet.NewVetter(schemavet.Profile{Vocabularies: true}).VetDoc(vocab, "", "https://example.com/s")
+	err = vetDoc(vocab, schemavet.Profile{Vocabularies: true})
 	require.NoError(t, err)
 
-	_, err = schemavet.NewVetter(schemavet.Profile{}).VetDoc(vocab, "", "https://example.com/s")
+	err = vetDoc(vocab, schemavet.Profile{})
 	require.ErrorIs(t, err, schemavet.ErrMisplacedVocabulary)
 }
 

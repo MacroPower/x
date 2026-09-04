@@ -5,9 +5,12 @@
 // identically by construction.
 //
 // The package depends on the upstream [jsonschema.Schema] type and the internal
-// uriref/jsonptr helpers, but not on the parent jsonschema package: parent-typed
-// behavior it needs (sub-schema traversal, deep clone) is injected as closures
-// through [Deps], mirroring the pattern internal/schemaclone uses.
+// schemavet, uriref, and jsonptr helpers, but not on the parent jsonschema
+// package. Every document it holds arrives as a [schemavet.Doc], a vetted
+// tree the parent froze at the boundary the document crossed, and the tables
+// the registry merges are the ones the freeze computed, so the core walks no
+// schema graph of its own. The one parent-typed behavior it needs, the
+// materializer behind the JSON-pointer fallback, is injected through [Deps].
 //
 // A [Registry] is the compiled, shareable resolution state built once at compile
 // time; a [Session] is the per-run view derived from it, carrying the ref and
@@ -19,32 +22,10 @@ package refresolve
 
 import "github.com/google/jsonschema-go/jsonschema"
 
-// Draft selects the two draft-dependent branches of the resolution core: the
-// Draft-07 sibling-$id exception during the registry walk and dynamic-scope
-// seeding. It is a distinct enum from the parent package's Draft; the parent
-// converts at the single construction site.
-type Draft int
-
-const (
-	// Draft2020 targets JSON Schema Draft 2020-12.
-	Draft2020 Draft = iota
-
-	// Draft7 targets JSON Schema Draft-07, where a sibling $id does not affect
-	// $ref resolution.
-	Draft7
-)
-
 // Deps injects the parent-typed behavior the core needs but cannot name without
 // importing the parent package. The parent builds one Deps and hands it to
 // [NewRegistry].
 type Deps struct {
-	// Children returns the direct sub-schemas of a schema in a stable order,
-	// the parent's schemaChildren. The registry walk consumes only the child
-	// schema, so the []*jsonschema.Schema shape (dropping each child's Location)
-	// suffices. Deep cloning stays on the parent side, in the fetch closures
-	// that register remote documents, so the core needs no clone dependency.
-	Children func(*jsonschema.Schema) []*jsonschema.Schema
-
 	// Materialize converts a decoded JSON schema document (a map[string]any or
 	// bool, with json.Number leaves) into a Schema, the parent's
 	// ParseSchemaValue. The JSON-pointer fallback builds its targets through it

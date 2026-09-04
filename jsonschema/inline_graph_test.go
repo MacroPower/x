@@ -10,22 +10,14 @@ import (
 	"go.jacobcolvin.com/x/jsonschema"
 )
 
-// TestInlineRejectsNonTreeRoot pins that Inline and Compile demand the same
-// root shape and say the same thing when a root fails it. Inlining copies the
-// input and expands each reference in place, so a node reached from two
-// positions would take one position's expansion at both, and a pointer cycle
-// has no finite expansion. Compile refuses the same graphs. It holds a root to
-// the same one-location-per-node rule, and it refuses a cyclic root because the
-// JSON-pointer fallback marshals the document it searches and overflows the
-// stack on a cyclic graph.
-//
-// The rows split into two groups. One group fails the tree check: a sub-schema
-// pointer that aliases, or a loop that closes through a sub-schema keyword. The
-// other closes its loop through a value field, which the tree check skips and
-// each engine's cycle check catches. Each value-field row states the pointer
-// the refusal must name, since agreement on a message the two engines both word
-// wrongly would still pass the byte-equal assertion.
-func TestInlineRejectsNonTreeRoot(t *testing.T) {
+// TestInlineRejectsCyclicRoot pins that Inline and Compile refuse the same
+// cyclic roots and say the same thing. Both freeze the root into a tree
+// before reading it, and a pointer cycle has no tree form, whether the loop
+// closes through a sub-schema keyword or through a value field. Each
+// value-field row states the pointer the refusal must name, since agreement
+// on a message the two engines both word wrongly would still pass the
+// byte-equal assertion.
+func TestInlineRejectsCyclicRoot(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]struct {
@@ -48,15 +40,6 @@ func TestInlineRejectsNonTreeRoot(t *testing.T) {
 				b.Items = a
 
 				return a
-			},
-		},
-		"one node at two positions": {
-			build: func() *jsonschema.Schema {
-				shared := &jsonschema.Schema{Type: "string"}
-
-				return &jsonschema.Schema{
-					Properties: map[string]*jsonschema.Schema{"a": shared, "b": shared},
-				}
 			},
 		},
 		"a cycle through an unknown keyword": {
@@ -111,10 +94,10 @@ func TestInlineRejectsNonTreeRoot(t *testing.T) {
 			t.Parallel()
 
 			_, inlineErr := jsonschema.Inline(t.Context(), tc.build())
-			require.ErrorIs(t, inlineErr, jsonschema.ErrSchemaNotTree)
+			require.ErrorIs(t, inlineErr, jsonschema.ErrSchemaCycle)
 
 			_, compileErr := jsonschema.Compile(t.Context(), tc.build())
-			require.ErrorIs(t, compileErr, jsonschema.ErrSchemaNotTree,
+			require.ErrorIs(t, compileErr, jsonschema.ErrSchemaCycle,
 				"Compile and Inline must reject the same root graphs")
 
 			assert.Equal(t, inlineErr.Error(), compileErr.Error(),
@@ -128,10 +111,38 @@ func TestInlineRejectsNonTreeRoot(t *testing.T) {
 	}
 }
 
-// TestInlineAliasedRemoteDocument covers the graph a resolver can hand in, which
-// no engine tree-checks. The shared node is expanded once, in place, and
-// both positions read that one expansion; expanding it twice would join the
-// target to the node's allOf twice over.
+// TestInlineAliasedRoot pins that both engines accept a root reaching one
+// node through two paths: the freeze copies the node once per path, so the
+// output holds two independent nodes and Compile accepts what Inline
+// produced.
+func TestInlineAliasedRoot(t *testing.T) {
+	t.Parallel()
+
+	shared := &jsonschema.Schema{Ref: "#/$defs/leaf"}
+	root := &jsonschema.Schema{
+		Defs:       map[string]*jsonschema.Schema{"leaf": {Type: "string"}},
+		Properties: map[string]*jsonschema.Schema{"a": shared, "b": shared},
+	}
+
+	out, err := jsonschema.Inline(t.Context(), root)
+	require.NoError(t, err)
+
+	a := out.Properties["a"]
+	b := out.Properties["b"]
+
+	require.NotNil(t, a)
+	assert.NotSame(t, a, b, "each position holds its own copy")
+	assert.Equal(t, "string", a.Type)
+	assert.Equal(t, "string", b.Type)
+	assert.Same(t, shared, root.Properties["a"], "the input is left as it was")
+
+	_, err = jsonschema.Compile(t.Context(), root)
+	require.NoError(t, err, "Compile freezes the same root")
+}
+
+// TestInlineAliasedRemoteDocument covers the graph a resolver can hand in. The
+// freeze copies the shared node once per path, so each position expands its
+// own copy and the output shares nothing.
 func TestInlineAliasedRemoteDocument(t *testing.T) {
 	t.Parallel()
 
@@ -154,18 +165,21 @@ func TestInlineAliasedRemoteDocument(t *testing.T) {
 	b := out.Properties["b"]
 
 	require.NotNil(t, a)
-	assert.Same(t, a, b, "the copy of an aliased document keeps the node shared")
+	require.NotNil(t, b)
+	assert.NotSame(t, a, b, "the frozen copy holds one node per position")
 	assert.Empty(t, a.Ref, "the reference is expanded")
+	assert.Empty(t, b.Ref, "the reference is expanded at both positions")
 
 	_, err = jsonschema.Compile(t.Context(), out)
-	require.ErrorIs(t, err, jsonschema.ErrSchemaNotTree,
-		"the sharing survives into the output, which Compile then rejects")
-	require.Len(t, a.AllOf, 1, "the target joins the node's allOf once, not once per position")
+	require.NoError(t, err, "the output is a tree Compile accepts")
+	require.Len(t, a.AllOf, 1, "the target joins each node's allOf once")
+	require.Len(t, b.AllOf, 1, "the target joins each node's allOf once")
 	assert.Equal(t, "string", a.AllOf[0].Type)
+	assert.Equal(t, "string", b.AllOf[0].Type)
 }
 
-// TestInlineAliasedSubstitute covers the second graph no engine tree-checks: a
-// WithRefFallback substitute, which the caller hands in at fallback time.
+// TestInlineAliasedSubstitute covers the second graph a caller hands in
+// aliased: a WithRefFallback substitute, frozen at fallback time.
 func TestInlineAliasedSubstitute(t *testing.T) {
 	t.Parallel()
 
@@ -192,8 +206,10 @@ func TestInlineAliasedSubstitute(t *testing.T) {
 	b := out.Properties["b"]
 
 	require.NotNil(t, a)
-	assert.Same(t, a, b, "the copy of an aliased substitute keeps the node shared")
-	require.Len(t, a.AllOf, 1, "the target joins the node's allOf once, not once per position")
+	require.NotNil(t, b)
+	assert.NotSame(t, a, b, "the frozen substitute holds one node per position")
+	require.Len(t, a.AllOf, 1, "the target joins each node's allOf once")
+	require.Len(t, b.AllOf, 1, "the target joins each node's allOf once")
 	assert.Equal(t, "integer", a.AllOf[0].Type)
 }
 
@@ -214,10 +230,8 @@ func cyclicRemote() *jsonschema.Schema {
 
 // TestCyclicGraphFromOutsideRejected pins that the fetch and substitution
 // boundaries refuse a schema graph holding a pointer cycle, whether it arrives
-// from a resolver or a fallback. Such a graph enters resolution space, where
-// the JSON-pointer fallback marshals the document it searches, and marshaling a
-// cyclic schema graph overflows the stack fatally rather than returning an
-// error. The boundary returns an ordinary ErrSchemaNotTree instead, wrapped in
+// from a resolver or a fallback. Such a graph has no tree form, so the freeze
+// at the boundary returns an ordinary ErrSchemaCycle, wrapped in
 // ErrRefResolve for a fetched document and bare for a substitute.
 func TestCyclicGraphFromOutsideRejected(t *testing.T) {
 	t.Parallel()
@@ -283,7 +297,7 @@ func TestCyclicGraphFromOutsideRejected(t *testing.T) {
 			root := &jsonschema.Schema{Ref: tc.ref}
 
 			_, err := jsonschema.Inline(t.Context(), root, tc.opts...)
-			require.ErrorIs(t, err, jsonschema.ErrSchemaNotTree)
+			require.ErrorIs(t, err, jsonschema.ErrSchemaCycle)
 		})
 	}
 }
@@ -299,13 +313,13 @@ func TestValidateCyclicRemoteDocument(t *testing.T) {
 	err := jsonschema.Validate(t.Context(), root, []any{},
 		jsonschema.WithRefResolver(fixedResolver{schema: cyclicRemote()}))
 	require.ErrorIs(t, err, jsonschema.ErrRefResolve)
-	require.ErrorIs(t, err, jsonschema.ErrSchemaNotTree)
+	require.ErrorIs(t, err, jsonschema.ErrSchemaCycle)
 }
 
-// TestValidateAliasedRemoteDocument pins that the boundary check reads cycles
-// only. A remote reaching one node from two positions is legal, because every
-// walk that reaches a registered document dedupes pointers, and the validator
-// gives the shared node one index id and one cache slot.
+// TestValidateAliasedRemoteDocument pins that the boundary refuses cycles
+// only. A remote reaching one node from two positions is legal, because the
+// freeze copies the node once per position and the validator indexes each
+// copy on its own.
 func TestValidateAliasedRemoteDocument(t *testing.T) {
 	t.Parallel()
 

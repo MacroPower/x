@@ -15,10 +15,37 @@ import (
 // each per-run session) and the inliner's fetchDoc. [Session.ResolveRef] calls
 // it for a non-fragment ref whose base URI is not already registered. It
 // returns the registered document on success, (nil, nil) for a plain miss, or
-// (nil, err) for a failure whose error becomes [Result.Err]. The closure owns
-// resolver invocation, deep copy, registration target, and negative caching;
-// the core owns the resolution decision tree around it.
+// (nil, err) for a failure whose error becomes [Result.Err]. A failure is a
+// miss unless the error carries a [RefusedError], which marks a document the
+// resolver did serve and the fetch turned away. The closure owns resolver
+// invocation, the freeze, registration target, and negative caching; the
+// core owns the resolution decision tree around it.
 type Fetch func(baseURI string) (*jsonschema.Schema, error)
+
+// RefusedError marks a fetch failure as the refusal of a document the resolver
+// served: a pointer cycle the freeze found, an identifier another document
+// already holds, or a structural violation the vet reported. A resolution
+// reports it with [Result.DocumentMiss] false, since the document is present
+// and no later fetch answers differently, so the reference-closure walk
+// settles it where a plain miss would be deferred. The wrapper renders as
+// its cause, so the message a caller reads is unchanged.
+type RefusedError struct {
+	// Err is the cause the fetch refused the document for.
+	Err error
+}
+
+// Error renders the cause.
+func (r *RefusedError) Error() string { return r.Err.Error() }
+
+// Unwrap exposes the cause, so [errors.Is] finds its sentinel.
+func (r *RefusedError) Unwrap() error { return r.Err }
+
+// refused reports whether err carries a [RefusedError].
+func refused(err error) bool {
+	var r *RefusedError
+
+	return errors.As(err, &r)
+}
 
 // Result is the structured outcome of a reference resolution that both engines
 // map to their own error and attribution shapes.
@@ -49,10 +76,10 @@ type Result struct {
 	// validation run reports it through the bearing node. Always false when
 	// Target is set.
 	//
-	// An [ErrIDCollision] failure is the one fetch failure this excludes. The
-	// resolver served the document and the registration refused it, so no
-	// later fetch changes the answer and the compile-time walk has nothing to
-	// defer to.
+	// A failure carrying [RefusedError] is the one fetch failure this excludes.
+	// The resolver served the document and the fetch refused it, so no later
+	// fetch changes the answer and the compile-time walk has nothing to defer
+	// to.
 	DocumentMiss bool
 
 	// TargetRejected reports that the session's [FallbackVet] refused a
@@ -156,7 +183,7 @@ func (s *Session) resolveRefUncached(schema *jsonschema.Schema, ref string, fetc
 		// Try remote resolution as fallback.
 		cp, fetchErr := fetch(baseURI)
 		if cp == nil {
-			return Result{Err: fetchErr, DocumentMiss: !errors.Is(fetchErr, ErrIDCollision)}
+			return Result{Err: fetchErr, DocumentMiss: !refused(fetchErr)}
 		}
 
 		target = cp

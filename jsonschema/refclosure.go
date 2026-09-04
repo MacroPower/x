@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/refresolve"
+	"go.jacobcolvin.com/x/jsonschema/internal/schemavet"
 )
 
 // refClosure is the reference-closure walk both engines drive. It statically
@@ -20,12 +21,12 @@ import (
 // anything, so the two engines hold the same set of documents and vet the same
 // graph.
 //
-// The caller supplies the one hook that differs. It runs once per document the
-// walk reaches through the registry, where Compile vets the document and folds
-// it into its node index. A JSON-pointer fallback target needs no hook, since
-// every session the engines build carries a [refresolve.FallbackVet] and vets
-// each target at materialization. Both engines therefore meet a malformed
-// target at the same point in this walk.
+// The caller supplies the one hook that differs. It runs once per registered
+// document the walk reaches, where Compile folds the document into its node
+// index. Every document is vetted at its fetch, and a JSON-pointer fallback
+// target needs no hook either, since every session the engines build carries
+// a [refresolve.FallbackVet] and vets each target at materialization. Both
+// engines therefore meet a malformed document or target at the same point.
 //
 // Strictness splits by provenance and by keyword. The root and registry-known
 // documents obey strictRef and strictDyn. A reference that resolves to nothing
@@ -63,9 +64,11 @@ type refClosure struct {
 	// later document registers.
 	root *Schema
 
-	// Runs for each registry document the walk reaches, in key-sorted order.
-	// Nil skips the pass.
-	onDoc func(s *Schema, uri string) error
+	// Runs once for each registered document the walk reaches, in the
+	// key-sorted order of the first URI naming a node of it. A nested
+	// absolute-$id resource is a node of its enclosing document, so it
+	// triggers no second call. Nil skips the pass.
+	onDoc func(doc schemavet.Doc) error
 
 	// Whether the run's dialect resolves $dynamicRef at all.
 	dynamicRef bool
@@ -147,6 +150,7 @@ func (c refClosure) run() error {
 	}
 
 	processed := map[string]bool{}
+	folded := map[*Schema]bool{}
 	refCursor := 0
 
 	for {
@@ -155,9 +159,10 @@ func (c refClosure) run() error {
 		// Registry-known documents, key-sorted for stable attribution. The
 		// first round covers the URIs registry construction seeded before any
 		// fetch (the root under its normalized base and nested absolute-$id
-		// subschemas); later rounds cover documents the walks fetched. Each is
-		// handed to onDoc and then strictly ref-walked, since an in-document
-		// reference that cannot resolve now never can.
+		// subschemas); later rounds cover documents the walks fetched. The
+		// document each names is handed to onDoc on first sight, and each is
+		// then strictly ref-walked, since an in-document reference that
+		// cannot resolve now never can.
 		var pending []string
 
 		// One snapshot per round. It holds because no fetch this walk drives
@@ -180,8 +185,10 @@ func (c refClosure) run() error {
 
 			s := reg.URI[uri]
 
-			if c.onDoc != nil {
-				err := c.onDoc(s, uri)
+			if doc, ok := c.session.DocOf(s); ok && c.onDoc != nil && !folded[doc.Root()] {
+				folded[doc.Root()] = true
+
+				err := c.onDoc(doc)
 				if err != nil {
 					return err
 				}
@@ -251,13 +258,16 @@ type refStrictness struct {
 func refWalkError(
 	res refresolve.Result, keyword, ref, locator string, loc Location, strict refStrictness,
 ) error {
-	// Both checks ignore the pass's tolerance, because a tolerant pass defers
-	// only answers a later pass may change, and neither of these changes.
+	// All three checks ignore the pass's tolerance, because a tolerant pass
+	// defers only answers a later pass may change, and none of these changes.
 	// Without them the tolerant pass over the fallback targets would swallow a
-	// collision or a rejected target reachable only through a target's own
-	// ref.
-	collided := res.Target == nil && errors.Is(res.Err, ErrIDCollision)
-	rejected := res.TargetRejected && strict.keyword
+	// collision, a refused document, or a rejected target reachable only
+	// through a target's own ref. A refused document is one the resolver
+	// served and the fetch turned away, for a cycle, a collision, or a
+	// structural violation; it arrives with the cause in Err and no miss.
+	refused := res.Target == nil && res.Err != nil && !res.DocumentMiss && !res.TargetRejected
+	collided := refused && errors.Is(res.Err, ErrIDCollision)
+	rejected := (res.TargetRejected || refused) && strict.keyword
 
 	// A reference that resolved to nothing while its document is present can
 	// never resolve later, so a pass that demands resolution fails on it.
