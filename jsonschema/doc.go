@@ -1091,6 +1091,21 @@
 // a number fails closed rather than silently skipping a value it cannot
 // compare.
 //
+// A const or enum value on a hand-built schema compares as the JSON the
+// emitted document renders for it, not as the Go value it holds. The upstream
+// Schema.MarshalJSON writes const, enum, and examples with [encoding/json] v1,
+// so Compile reads each value the same way. A typed nil map, slice, or pointer
+// matches the instance null rather than [] or {}, a float32 compares at its
+// 32-bit shortest decimal, an empty [encoding/json.Number] compares as 0, a
+// string carrying invalid UTF-8 compares with each bad byte replaced by
+// U+FFFD, a struct matches its marshaled object, and a raw
+// [encoding/json/jsontext.Value] matches the value its bytes decode to. A
+// func, a channel, a cyclic value, a map whose keys [encoding/json] cannot
+// render, and a value whose own marshaler panics have no JSON form, so Compile
+// keeps the Go value, which compares unequal to every instance. A value
+// decoded from a JSON document already carries the document shape, so the rule
+// is visible only to schemas built in Go.
+//
 // Validation is configured via [ValidateOption] values:
 //
 //   - [WithDraft] overrides the draft otherwise detected from the root

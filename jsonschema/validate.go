@@ -768,7 +768,9 @@ func constCompile(v *validator, id int, s *Schema) {
 // hand-built typed nil container, struct, or raw [jsontext.Value] validates
 // the way its document does. A value the document view refuses (a func, a
 // cyclic value) keeps its Go form, which the comparison treats as unequal to
-// everything.
+// everything. A map or slice already in document shape returns as is, so the
+// view may share storage with the schema; the rule against mutating a schema
+// after [Compile] keeps that sharing safe.
 func documentConst(val any) any {
 	if dv, ok := normalize.DocumentValue(val); ok {
 		return dv
@@ -778,7 +780,11 @@ func documentConst(val any) any {
 }
 
 // documentEnum returns a fresh slice holding [documentConst] of each enum
-// member, so the cached members never alias the caller's schema.
+// member. The outer slice is fresh so the conversion never writes back into
+// the caller's Enum (a typed nil container becomes nil, a struct becomes a
+// map). A container member the document view leaves unchanged still shares
+// its storage with the schema, which the rule against mutating a schema after
+// [Compile] (see [Validator.Schema]) already covers.
 func documentEnum(members []any) []any {
 	out := make([]any, len(members))
 	for i, member := range members {

@@ -261,10 +261,14 @@ The package has two independent halves sharing the `Schema` type:
   including the opaque/URN merge that corrects `net/url.ResolveReference`),
   `internal/normalize` (Go value -> JSON-shaped value normalization: integer
   widths to `json.Number`, float32 widening, recursive container coercion with
-  copy-on-change and a cycle guard), `internal/schemafield` (the canonical
-  field-metadata table for the upstream `Schema` type: one row per exported
-  field carrying its class, sub-schema shape, zero predicate, and the clone
-  closures its Go type calls for, from which the true/empty/ref-sibling
+  copy-on-change and a cycle guard; `DecodeJSONInstance` decodes a document to
+  that shape through a token walker, and `DocumentValue` is the one statement
+  of what a Go value renders as in the emitted document, such as the
+  `encoding/json` null a nil container writes, shared by generation's
+  `isJSONNull` and validation's const/enum view), `internal/schemafield` (the
+  canonical field-metadata table for the upstream `Schema` type: one row per
+  exported field carrying its class, sub-schema shape, zero predicate, and the
+  clone closures its Go type calls for, from which the true/empty/ref-sibling
   predicates, the sub-schema traversal, the container-clone pass, and
   `internal/schemaclone`'s structural deep copy all derive. `CloneSubschemas`
   rebuilds a sub-schema container, handing each child the pointer segment that

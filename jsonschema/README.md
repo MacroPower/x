@@ -1133,6 +1133,21 @@ an unaccepted instance type, the compile-time check sentinels, and
 `ErrUnknownVocabulary`) return ordinary wrapped errors that do not unwrap to
 `*ValidationError`.
 
+A `const` or `enum` value on a hand-built schema compares as the JSON the
+emitted document renders for it, not as the Go value it holds. The upstream
+`Schema.MarshalJSON` writes `const`, `enum`, and `examples` with
+`encoding/json` v1, so `Compile` reads each value the same way. A typed nil
+map, slice, or pointer matches the instance `null` rather than `[]` or `{}`, a
+`float32` compares at its 32-bit shortest decimal, an empty `json.Number`
+compares as `0`, a string carrying invalid UTF-8 compares with each bad byte
+replaced by U+FFFD, a struct matches its marshaled object, and a raw
+`jsontext.Value` matches the value its bytes decode to. A func, a channel, a
+cyclic value, a map whose keys `encoding/json` cannot render, and a value whose
+own marshaler panics have no JSON form, so `Compile` keeps the Go value, which
+compares unequal to every instance. A value decoded from a JSON document
+already carries the document shape, so the rule is visible only to schemas
+built in Go.
+
 ### Numeric precision
 
 Instance numbers are compared exactly (decoded as `json.Number`, compared as
@@ -1848,8 +1863,12 @@ forward-direction generation only; schema-to-code generation is a non-goal.
 
 This package re-exports the upstream `Schema` type so users need only import
 this package, and reuses the upstream for exactly one behavior beyond the
-type alias: JSON-semantic comparison of hand-built `const`/`enum` values
-outside the decoded JSON shapes (via `Equal`, as a recovering fallback).
+type alias: JSON-semantic comparison of the hand-built `const`/`enum` values
+that have no JSON form (a func, a channel, a cyclic value, a map whose keys
+`encoding/json` cannot render, or a value whose own marshaler panics), which
+reach the comparison as Go values (via `Equal`, as a recovering fallback).
+This package converts every other hand-built value to its document shape and
+compares it here.
 The alias is an interop commitment. `Schema` is and will remain the upstream
 type, so schemas pass directly to and from any package that accepts or
 produces `google/jsonschema-go`'s `jsonschema.Schema`, with no conversion. The
