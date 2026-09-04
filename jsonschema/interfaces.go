@@ -759,27 +759,28 @@ func (fc FieldContext) Constraints() *Constraints {
 // overridden payload and never against the shape the field carried before the
 // override.
 //
-// A [Nullability] stance recorded for a self-referential type after this method
-// runs can withdraw the null admission the method reported. The generator
-// refuses a null literal written against any reference the final decision
-// leaves unadmitted. The check covers the two field-level writers, the
-// jsonschema tag and the tag interpreters, and the report names the tag key or
-// the canvas keyword holding the literal. No tag interpreter in this package
-// writes such a literal. On a referenced definition the built-in validate
-// dialect spells no null, because the constraint matrix ignores the dialect's
-// non-zero rule there. A third-party interpreter reaches the check either
-// through [FieldContext.Canvas] or through [Constraints.SetConst] and
-// [Constraints.SetEnum], which compose a value onto the canvas without
-// consulting the matrix. Forbidding a null through [Constraints.Forbid] writes
-// under not rather than into a value keyword, so the forbid stays. It asserts
-// nothing the reference does not assert already.
+// The decision this method reports is final. The generator runs every tag
+// interpreter after it has decided the null admission of every occurrence,
+// so a [Nullability] stance a type-level hook records for a self-referential
+// type is already in force here. A null literal an interpreter writes onto a
+// field or element whose occurrence admits none is refused after the
+// interpreters run, and the report names the canvas keyword holding it. No tag
+// interpreter in this package writes such a literal. On a referenced
+// definition the built-in validate dialect spells no null, because the
+// constraint matrix ignores the dialect's non-zero rule there. A third-party
+// interpreter reaches the check either through [FieldContext.Canvas] or
+// through [Constraints.SetConst] and [Constraints.SetEnum], which compose a
+// value onto the canvas without consulting the matrix. Forbidding a null
+// through [Constraints.Forbid] writes under not rather than into a value
+// keyword, so the forbid stays. It asserts nothing the reference does not
+// assert already.
 //
 // Prefer this over calling [ShapeOf] directly when a context is available.
 func (fc FieldContext) Shape() Shape {
 	shape := tagmodel.ShapeOfQuoted(fc.Type, fc.Base, fc.quotedString())
 
 	if fc.node != nil {
-		shape.Nullable = fc.node.nullableDecision()
+		shape.Nullable = fc.node.null.admit
 	}
 
 	return shape

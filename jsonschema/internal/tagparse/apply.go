@@ -79,17 +79,9 @@ var (
 // Result reports what [Apply] did that the generator's render phase needs. It is
 // internal, so it is free to widen as more provenance is required.
 type Result struct {
-	// NullLiteralKeys names the keys whose value the tag spelled as the literal
-	// null, in tag order. The generator re-checks them once every nullability
-	// stance is final. Reading them here rather than scanning the canvas for
-	// nulls is what separates a literal the tag wrote from one a hook or an
-	// extender authored. An override never carries keys here. [Apply] rejects
-	// the tag for every type but null, and under type=null it drops the keys,
-	// since the rebuilt field carries the literal on its own canvas.
-	NullLiteralKeys []string
-	// TypeOverridden reports whether a type= pair replaced the field's type. The
-	// field is then inline and non-nullable, so the builder detaches its $ref
-	// link and clears its null bit.
+	// TypeOverridden reports whether a type= pair replaced the field's type.
+	// The generator applied that pair to the field's node before calling
+	// [Apply], so the report only confirms what it already knows.
 	TypeOverridden bool
 }
 
@@ -102,32 +94,26 @@ type Input struct {
 	FieldType reflect.Type
 	// Canvas is where the value-scoped facts and annotations land.
 	Canvas *jsonschema.Schema
-	// Payload is the type-derived schema a type= pair restructures, since such
-	// a pair replaces the reflected type assertion rather than declaring a
-	// canvas fact.
+	// Payload is a view of the type-derived schema the tag classifies the
+	// field against, which a type= pair restructures, since such a pair
+	// replaces the reflected type assertion rather than declaring a canvas
+	// fact. The generator applies the pair to the field before [Apply] runs
+	// and discards the view afterward.
 	Payload *jsonschema.Schema
-	// TypeSchema is the type-derived schema the tag classifies the field
-	// against. It is the payload for an ordinary field, and differs only where
-	// the payload alone understates what the instance is. A nullable
-	// json:",string" field keeps its string on the node's null-branch base, so
-	// the caller passes a view saying so. A nil value means "use the payload".
-	TypeSchema *jsonschema.Schema
 	// Tag is the jsonschema struct tag's value.
 	Tag string
 	// Quoted is the field's json:",string" flag when it applies to a string Go
 	// kind, the one coercion no schema view can express (see
 	// [tagmodel.ShapeOfQuoted]).
 	Quoted bool
-	// Nullable reports whether the occurrence admits null, which the caller
-	// reads off the field's node. It is the generator's decision rather than
-	// the Go type's. A slice, map, byte slice, or interface is nilable without
-	// being a pointer, and a NullForbidden stance drops the null branch a
-	// pointer would otherwise carry. A scalar key spells that admission as the literal
+	// Nullable reports whether the occurrence admits null, the generator's
+	// final decision for the field rather than the Go type's own answer. A
+	// slice, map, byte slice, or interface is nilable without being a pointer,
+	// and a NullForbidden stance drops the null branch a pointer would
+	// otherwise carry. A scalar key spells that admission as the literal
 	// null, so [Apply] accepts default=null wherever that decision applies,
 	// whether or not the rendered schema keeps a null branch. A type= pair
-	// anywhere in the tag withdraws that acceptance. A stance recorded after
-	// this decision withdraws it too, which is why [Result.NullLiteralKeys]
-	// reports the keys that took the literal.
+	// anywhere in the tag withdraws that acceptance.
 	Nullable bool
 }
 
@@ -165,15 +151,10 @@ func Apply(in Input) (Result, error) {
 		return Result{}, nil
 	}
 
-	typeSchema := in.TypeSchema
-	if typeSchema == nil {
-		typeSchema = in.Payload
-	}
-
 	state := &applyState{
 		canvas:     in.Canvas,
 		payload:    in.Payload,
-		typeSchema: typeSchema,
+		typeSchema: in.Payload,
 		fieldType:  in.FieldType,
 		quoted:     in.Quoted,
 		nullable:   in.Nullable,
@@ -197,15 +178,7 @@ func Apply(in Input) (Result, error) {
 		return Result{}, state.nullNotAdmittedError(state.nullKeys[0])
 	}
 
-	// An override withdraws the occurrence the literal was parsed against, so
-	// the keys go no further. Under type=null the literal is still correct and
-	// the rebuilt field carries it on the canvas, and nothing later re-checks a
-	// field the override made non-nullable.
-	if state.overriddenType != "" {
-		return Result{TypeOverridden: true}, nil
-	}
-
-	return Result{NullLiteralKeys: state.nullKeys}, nil
+	return Result{TypeOverridden: state.overriddenType != ""}, nil
 }
 
 // applyState is the fold's mutable state: where facts land, the effective types
@@ -213,9 +186,8 @@ func Apply(in Input) (Result, error) {
 type applyState struct {
 	canvas  *jsonschema.Schema
 	payload *jsonschema.Schema
-	// The typeSchema field is what the field classifies against, which is the
-	// payload except where the payload understates the instance (see [Apply]).
-	// A type= override restates the payload outright, so it replaces this too.
+	// The typeSchema field is what the field classifies against: the payload,
+	// which a type= override restates outright.
 	typeSchema *jsonschema.Schema
 	// The fieldType field is the field's own Go type, which every key classifies
 	// against until a type= pair replaces the classification outright.
@@ -223,7 +195,7 @@ type applyState struct {
 	groupsSet map[string]bool
 	seen      map[string]bool
 	// The nullKeys field names the scalar keys the fold read as the literal
-	// null, in tag order (see [Result.NullLiteralKeys]).
+	// null, in tag order, for the check a later type= pair makes.
 	nullKeys []string
 	// The overriddenType field names the JSON type a type= pair installed, and is
 	// empty until one does.
@@ -348,7 +320,7 @@ func (s *applyState) applyKey(key, value string) error {
 			return fmt.Errorf("jsonschema tag: key %q: %w: %q", key, ErrInvalidType, value)
 		}
 
-		applyTypeOverride(s.payload, value)
+		ApplyTypeOverride(s.payload, value)
 
 		// The override restates what the instance is, so it supersedes any
 		// coerced view the caller supplied.

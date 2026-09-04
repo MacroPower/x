@@ -44,8 +44,8 @@ func (g *generator) renderBase(n *node) *Schema {
 			n.payload.Properties = make(map[string]*Schema, len(n.props))
 		}
 
-		for _, p := range n.props {
-			n.payload.Properties[p.name] = g.render(p.schema)
+		for i := range n.props {
+			n.payload.Properties[n.props[i].name] = g.render(n.props[i].schema)
 		}
 
 		for _, e := range n.embeds {
@@ -144,16 +144,18 @@ func (g *generator) renderDef(e *defEntry) {
 	e.rendering = false
 }
 
-// applyNull applies a node's deferred null decision to its rendered base for
-// every node that has no authored canvas: the root, definition bodies, embed
+// applyNull applies a node's null decision to its rendered base for every
+// node that has no authored canvas: the root, definition bodies, embed
 // branches, and type-level provider/override payloads. It chooses the null
-// encoding and performs the null-admission dedup for the inline and $ref paths.
-// A field or element node never reaches here; render routes it to
+// encoding from the container kind and the presence of const/enum, and adds
+// no branch where the decision says the target already admits null or where
+// an inline leaf is unrestricted (an interface, whose {} admits null). A field
+// or element node never reaches here; render routes it to
 // [generator.reconcileField].
 func (g *generator) applyNull(n *node, base *Schema) *Schema {
-	if !n.nullableDecision() {
+	if !n.null.admit {
 		if n.nilableContainer() {
-			bareContainerType(base, n.base)
+			bareContainerType(base, n.containerType())
 		}
 
 		return base
@@ -161,30 +163,19 @@ func (g *generator) applyNull(n *node, base *Schema) *Schema {
 
 	hasConstEnum := base.Const != nil || base.Enum != nil
 	if n.nilableContainer() && !hasConstEnum {
-		nullTypeList(base, n.base)
+		nullTypeList(base, n.containerType())
 
 		return base
 	}
 
-	// A target that already admits null needs no second null branch. For an
-	// inline node the target is its own bare payload, null-admitting only when
-	// empty (an interface). For a $ref the target is the shared def body, which
-	// also admits null when it is a nilable container -- a slice, map, or []byte,
-	// whose container null lives in the def body's type list rather than on each
-	// reference.
-	target := base
-	if n.kind == kindRef {
-		target = n.def.rendered
-	}
-
-	if refTargetAdmitsNull(target) {
+	if !n.null.wrap || (!n.nilableContainer() && schemashape.IsEmpty(base)) {
 		return base
 	}
 
 	if n.nilableContainer() {
 		// A const/enum cannot ride on a ["null", base] list, so flip to the
 		// anyOf form with the base type on the value branch.
-		bareContainerType(base, n.base)
+		bareContainerType(base, n.containerType())
 	}
 
 	// Record the wrap on the node, so the defaults target resolution can tell
@@ -226,20 +217,6 @@ func bareContainerType(s *Schema, base string) {
 	}
 }
 
-// refTargetAdmitsNull reports whether a rendered schema already accepts a JSON
-// null, so a nullable reference to it needs no second null branch: an empty
-// schema (an interface, or a $ref to an empty def), or a type list naming null
-// (an extracted nilable container -- slice, map, []byte -- whose container null
-// lives in the shared def body rather than on each reference). A nil target (an
-// unfilled cycle placeholder) is not yet known.
-func refTargetAdmitsNull(s *Schema) bool {
-	if s == nil {
-		return false
-	}
-
-	return schemashape.IsEmpty(s) || s.Type == typename.Null || slices.Contains(s.Types, typename.Null)
-}
-
 // maybeInlineRoot inlines a root $ref whose def is reached from nowhere else,
 // dropping the entry. A def referenced elsewhere (self-reference or mutual
 // recursion) keeps the root a $ref so those references never dangle.
@@ -252,7 +229,7 @@ func (g *generator) maybeInlineRoot(root *node) *node {
 	// def stays referenced through the wrapper and is never inlined; only a
 	// bare-$ref root (a non-pointer struct, or a pointer root whose type
 	// declares NullForbidden) is a candidate.
-	if root.nullableDecision() {
+	if root.null.admit {
 		return root
 	}
 

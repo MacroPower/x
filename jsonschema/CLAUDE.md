@@ -202,17 +202,16 @@ The package has two independent halves sharing the `Schema` type:
   `Shape.ParseScalar` the one scalar constructor including the
   convert-and-marshal round-trip a text-marshaling type needs, and a total
   `[opCount][formCount]` matrix the
-  dispatch. The field's node also records which tag keys took a null literal,
-  and `generate` re-checks those keys once every nullability stance is final. A
-  self-referential field reads the decision before its type records a stance, so
-  the re-check reports the tag error rather than rendering the null. Both of
-  the classification sites named above keep that early answer on a cycle
-  placeholder. The same pass therefore scans each reference's authored canvas
-  for a null literal an interpreter wrote against that early answer. The scan
-  covers the four value keywords (`default`, `const`, `enum`, `examples`) and
-  goes no further. `Constraints.Forbid(nil)` writes under `not`, so the
-  forbidden null survives as a redundant sibling of the `$ref`. Nothing in the
-  package trips the scan, since the matrix ignores a non-zero rule on `FormRef`
+  dispatch. Both classification sites read the null decision
+  `resolveNullability` fixed before any field hook ran, so a tag null literal
+  against an occurrence that admits none is refused as the tag is read. After
+  the interpreters run, `checkNullLiterals` scans every field and element
+  canvas for a null literal an interpreter wrote against a non-admitting
+  occurrence. The scan covers the four value keywords (`default`, `const`,
+  `enum`, `examples`) and goes no further. `Constraints.Forbid(nil)` writes
+  under `not`, so the forbidden null survives as a redundant sibling of the
+  `$ref`. Nothing in the package trips the scan, since the matrix ignores a
+  non-zero rule on `FormRef`
   and the built-in validate dialect therefore spells no null on a referenced
   definition. A third-party interpreter reaches the scan through the canvas
   directly or through `Constraints.SetConst` and `Constraints.SetEnum`, which

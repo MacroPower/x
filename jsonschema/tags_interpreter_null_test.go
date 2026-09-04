@@ -207,7 +207,7 @@ func TestInterpreterNullLiteralOnARecursiveStancedType(t *testing.T) {
 				forbidNullStance[interpNullRecursive](),
 			)
 
-			assert.True(t, nullable, "the interpreter reads the early null answer")
+			assert.False(t, nullable, "the interpreter reads the final null answer")
 			require.ErrorIs(t, err, tagmodel.ErrNullNotAdmitted)
 			require.ErrorContains(t, err,
 				`jsonschema_test.interpNullRecursive field "next": `+
@@ -261,7 +261,7 @@ func TestInterpreterNullLiteralOnARecursiveElement(t *testing.T) {
 			)
 
 			require.Equal(t, 1, elemCount)
-			assert.True(t, nullable, "the element reads the early null answer")
+			assert.False(t, nullable, "the element reads the final null answer")
 			require.ErrorIs(t, err, tagmodel.ErrNullNotAdmitted)
 			require.ErrorContains(t, err,
 				`jsonschema_test.interpNullElement field "kids": element: `+

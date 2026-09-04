@@ -132,7 +132,7 @@ func conflictingGroup(groupsSet map[string]bool, typeName string) string {
 	return ""
 }
 
-// applyTypeOverride applies a type= tag value, replacing the reflected type
+// ApplyTypeOverride applies a type= tag value, replacing the reflected type
 // assertion: it sets Type, clears a Types array, drops a bare $ref to a
 // definition, removes the nullable anyOf wrapper a pointer field generates,
 // and drops the keyword groups the new type cannot use. The numeric bounds,
@@ -143,8 +143,9 @@ func conflictingGroup(groupsSet map[string]bool, typeName string) string {
 // format/pattern, and a []byte field carries the string-only content
 // keywords); left on a schema of a different type they are vacuous but
 // emit as confusing dead structure. Tag pairs apply in order, so keys after
-// type= still take effect.
-func applyTypeOverride(s *jsonschema.Schema, typeName string) {
+// type= still take effect. The generator applies the pair to the field's
+// node before the null pass and [Apply] replays it on a discarded view.
+func ApplyTypeOverride(s *jsonschema.Schema, typeName string) {
 	// A field whose type was extracted to $defs reflects to a bare {$ref}; the
 	// explicit type replaces that assertion, so drop the ref. Leaving it would
 	// emit {$ref, type}, which under 2020-12 requires both to hold and is

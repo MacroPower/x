@@ -7,10 +7,14 @@ import (
 	"reflect"
 	"slices"
 
+	"go.jacobcolvin.com/x/jsonschema/internal/fieldset"
 	"go.jacobcolvin.com/x/jsonschema/internal/normalize"
+	"go.jacobcolvin.com/x/jsonschema/internal/numkind"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemaclone"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemafield"
+	"go.jacobcolvin.com/x/jsonschema/internal/schemashape"
 	"go.jacobcolvin.com/x/jsonschema/internal/tagmodel"
+	"go.jacobcolvin.com/x/jsonschema/internal/typename"
 )
 
 // nodeKind classifies an IR node by the JSON Schema shape its render produces.
@@ -60,7 +64,9 @@ const (
 type node struct {
 	payload *Schema   // bare type-derived payload; child slots are node-backed, not stored here
 	def     *defEntry // non-nil iff kindRef
-	items   *node     // slice element / map value / object fallback value
+	// Typ is the struct type an object node reflects, for the field hooks.
+	typ   reflect.Type
+	items *node // slice element / map value / object fallback value
 	// The authored canvas carries the field-level facts that field and element
 	// hooks (the jsonschema tag, the comment provider, tag interpreters) declare:
 	// annotations, value-scoped const/enum, and numeric/string/array bounds. It is
@@ -72,75 +78,122 @@ type node struct {
 	// canvases the way it navigates payloads.
 	authored *Schema
 
-	// Base is the non-null base type of a nilable container (array/object/string
-	// for a slice, map, or ",string" pointer). It is empty for every other node;
-	// a non-empty base is exactly what makes render encode null as a
-	// ["null", base] type list rather than an anyOf[base, null] wrapper.
-	base string
-	// TagView is the corrected type view handed to field-level hooks (the
-	// jsonschema tag and tag interpreters) when the payload alone understates
-	// the type: a ",string" pointer's payload is empty (the coercion lives on
-	// base for the null-branch split), so hooks dispatch on this
-	// {"type":["null","string"]} view instead. Nil for every other node.
-	tagView *Schema
 	// The origin field names the field position this node occupies, for the
 	// reports in [generator.checkNullLiterals]. A field node carries it, and so
 	// does every element node beneath that field. Nil for every other node.
 	origin *fieldOrigin
-	// The nullKeys field records the keys the field's jsonschema tag took a
-	// null literal for, in tag order. Empty for every node whose tag spelled
-	// none.
-	nullKeys []string
+	// The overrode field, on a node a jsonschema tag's type= pair rebuilt,
+	// is the node it replaced. The tag's remaining directives read that node's
+	// null decision, since the pair replaced the occurrence they were parsed
+	// against.
+	overrode *node
 	props    []nodeProp  // struct properties, declaration order
 	prefix   []*node     // array elements (prefixItems / itemsArray)
 	embeds   []embedNode // struct allOf/anyOf composition branches
+
+	// Occ holds the facts of this occurrence that decide whether it admits
+	// null, and stance the null-admission stance a type-level hook declared
+	// for an inline node (an alias's own stance for a ref). Null is the
+	// decision [generator.resolveNullability] derives from them once the
+	// graph is complete; nothing reads it before that pass.
+	occ    occurrence
+	stance Nullability
+	null   nullDecision
 
 	kind nodeKind
 	// Fallback names the extra-member slot an object's fallback value node
 	// (items) renders into.
 	fallback fallbackSlot
-	// Nullable is the single deferred null decision for a non-kindRef node; base
-	// selects the encoding render applies when it is set. A kindRef node instead
-	// carries ptrNullable and resolves its decision lazily in nullableDecision,
-	// so a stance recorded on the def entry after a self-referential placeholder
-	// ref is built still reaches that reference.
-	nullable bool
-	// PtrNullable is a kindRef node's occurrence pointer-ness, combined with the
-	// def entry's recorded stance in nullableDecision.
-	ptrNullable bool
+	// IsBody marks a $defs body. A body is shared by every reference, so its
+	// own decision ignores the occurrence's pointer-ness and a stance's grant
+	// (a reference carries both) and keeps only a stance's veto over the
+	// container null a format option adds.
+	isBody bool
+	// Composed marks an embed's allOf branch. An embed is composition rather
+	// than an occurrence, so the branch never admits null.
+	composed bool
 	// Verbatim marks a kindValue leaf whose payload a type-level hook declared
 	// through [TypeSchema.Verbatim]: it is emitted exactly as authored, so render
 	// and reconcile skip the null encoding for it entirely.
 	verbatim bool
-	// NullWrapped records that applyNull emitted the anyOf[base, null] wrapper
-	// for this node's render, so the rendered schema's two-element AnyOf is the
-	// generator's null encoding. A nullable node whose base already admits null
-	// (a hook schema naming "null" in its type list) skips the wrapper and
-	// keeps the flag unset, so a hook-authored anyOf is never mistaken for the
-	// wrapper; [generator.rootDefaultsTarget] resolves through the wrapper only
-	// on this flag.
+	// NullWrapped records that render emitted the anyOf[base, null] wrapper
+	// for this node, so the rendered schema's two-element AnyOf is the
+	// generator's null encoding; [generator.rootDefaultsTarget] resolves
+	// through the wrapper only on this flag.
 	nullWrapped bool
-	isField     bool // marks a struct-field node, so reconcile applies the field const/enum bound subsumption
+	// Hooked marks a field node whose field-level hooks have run, so a node
+	// reached twice (a def body's field seen through the body and through an
+	// inlined copy) is hooked once.
+	hooked  bool
+	isField bool // marks a struct-field node, so reconcile applies the field const/enum bound subsumption
 }
 
-// nilableContainer reports whether the node is a slice, map, or ",string"
-// pointer, whose null render encodes as a ["null", base] type list. Every other
-// node uses the anyOf[base, null] wrapper.
+// containerKind names the nilable container an occurrence is, if any. A
+// container's null renders as a ["null", base] type list rather than an
+// anyOf[base, null] wrapper.
+type containerKind uint8
+
+const (
+	containerNone containerKind = iota
+	// A containerSlice occurrence is a slice with an array schema.
+	containerSlice
+	// A containerMap occurrence is a map with an object schema.
+	containerMap
+	// A containerBytes occurrence is a []byte with a base64 string schema.
+	containerBytes
+	// A containerQuoted occurrence is a json:",string" number with a string
+	// schema.
+	containerQuoted
+)
+
+// occurrence holds the facts about one position that decide its null
+// admission.
+type occurrence struct {
+	// Pointer reports a *T at any depth, or an interface position, both of
+	// which marshal null when nil.
+	pointer bool
+	// Container names the nilable container the position is, whose nil
+	// marshals as null only under the matching WithJSONOptions format flag.
+	container containerKind
+}
+
+// nullDecision is the resolved null admission of one node.
+type nullDecision struct {
+	// Admit reports that the occurrence admits a JSON null.
+	admit bool
+	// Wrap reports that render adds a null branch. It is false where the
+	// declared base already names null, where a reference's body admits null
+	// on its own, and on a verbatim node.
+	wrap bool
+}
+
+// nilableContainer reports whether the node is a slice, map, byte slice, or
+// ",string" number, whose null render encodes as a ["null", base] type list.
+// Every other node uses the anyOf[base, null] wrapper.
 func (n *node) nilableContainer() bool {
-	return n.base != ""
+	return n.occ.container != containerNone
 }
 
-// nullableDecision resolves whether the node's occurrence admits null. A kindRef
-// combines its occurrence pointer-ness with the def entry's recorded stance,
-// read lazily so a stance set after a self-referential placeholder ref is built
-// (the extender runs after the recursive fields it reaches) still applies. Every
-// other node carries its decision directly, fixed when the node is built.
-func (n *node) nullableDecision() bool {
-	if n.kind == kindRef {
-		return combineNullable(n.def.nullability, n.ptrNullable)
+// containerType returns the JSON type name a nilable container's schema
+// carries when it admits no null.
+func (n *node) containerType() string {
+	switch n.occ.container {
+	case containerSlice:
+		return typename.Array
+	case containerMap:
+		return typename.Object
+	case containerBytes, containerQuoted:
+		return typename.String
+	case containerNone:
 	}
 
-	return n.nullable
+	return ""
+}
+
+// declaresNull reports whether a schema's own type keyword names null: a
+// jsonschema:"type=null" override, or a hook's Types list carrying it.
+func declaresNull(s *Schema) bool {
+	return s.Type == typename.Null || slices.Contains(s.Types, typename.Null)
 }
 
 // fieldOrigin names the field position a node occupies: the struct declaring
@@ -151,15 +204,23 @@ func (n *node) nullableDecision() bool {
 // element flag holds no index, so a tuple element's report names the field
 // rather than the position within it.
 type fieldOrigin struct {
-	parent  reflect.Type // the struct whose schema carries the field
-	field   string       // the field's JSON name
-	element bool         // an element beneath the field, not the field itself
+	parent reflect.Type // the struct whose schema carries the field
+	// Typ is the Go type of the occurrence, pointer levels removed, which the
+	// report names.
+	typ     reflect.Type
+	field   string // the field's JSON name
+	element bool   // an element beneath the field, not the field itself
 }
 
-// nodeProp is a struct property: its value node and JSON name.
+// nodeProp is a struct property: its value node, its JSON name, and the field
+// the field-level hooks read.
 type nodeProp struct {
 	schema *node
 	name   string
+	fi     fieldset.Field
+	// Quoted records that the json:",string" option coerced the field to a
+	// string schema.
+	quoted bool
 }
 
 // embedNode is one struct composition branch. The optional flag wraps the
@@ -285,6 +346,10 @@ func assignFieldOrigins(n *node, origin *fieldOrigin) {
 		elem = &fieldOrigin{parent: origin.parent, field: origin.field, element: true}
 	}
 
+	if et := elementType(origin.typ); et != nil {
+		elem = &fieldOrigin{parent: origin.parent, field: origin.field, element: true, typ: numkind.DerefType(et)}
+	}
+
 	assignFieldOrigins(n.items, elem)
 
 	for _, c := range n.prefix {
@@ -292,39 +357,172 @@ func assignFieldOrigins(n *node, origin *fieldOrigin) {
 	}
 }
 
-// refNode builds a kindRef node linking to e, carrying the occurrence's
-// pointer-ness. The nullableDecision method later combines it with the def
+// refNode builds a kindRef node linking to e, recording the occurrence's
+// pointer-ness. [generator.resolveNullability] later combines it with the def
 // entry's recorded stance: a pointer occurrence of a NullForbidden type still
-// admits no null, and a non-pointer occurrence of a NullAllowed type does. The
-// combine is deferred rather than baked in here, so a stance the def entry
-// records after a self-referential placeholder ref is built still reaches that
-// reference. Its payload holds the
-// provisional $ref string (the pre-disambiguation name), so a build-time
-// interpreter or extender reading .Ref sees a real reference; render re-emits the
-// final name via renderRef and grafts any siblings.
-func (g *generator) refNode(e *defEntry, ptrNullable bool) *node {
+// admits no null, and a non-pointer occurrence of a NullAllowed type does. Its
+// payload holds the provisional $ref string (the pre-disambiguation name), so
+// a hook reading .Ref sees a real reference; render re-emits the final name
+// via renderRef and grafts any siblings.
+func (g *generator) refNode(e *defEntry, pointer bool) *node {
 	return &node{
-		kind:        kindRef,
-		def:         e,
-		ptrNullable: ptrNullable,
-		payload:     &Schema{Ref: g.profile.refPrefix() + e.baseName},
+		kind:    kindRef,
+		def:     e,
+		occ:     occurrence{pointer: pointer},
+		payload: &Schema{Ref: g.profile.refPrefix() + e.baseName},
 	}
 }
 
 // defineType fills t's def entry with body (if still a placeholder), records the
 // type's nullability stance on the entry, and returns a reference node. The body
 // is always the bare value node; the stance lives on the entry and is combined
-// with each reference's pointer-ness in refNode, so $defs nullability stays
-// order-independent.
-func (g *generator) defineType(t reflect.Type, body *node, stance Nullability, ptrNullable bool) *node {
+// with each reference's pointer-ness in the null pass, so $defs nullability
+// stays order-independent.
+func (g *generator) defineType(t reflect.Type, body *node, stance Nullability, pointer bool) *node {
 	e := g.newDefEntry(t)
 	e.nullability = stance
 
 	if e.body == nil {
 		e.body = body
+		body.isBody = true
 	}
 
-	return g.refNode(e, ptrNullable)
+	return g.refNode(e, pointer)
+}
+
+// fillDef completes the placeholder def entry e with body, the node a cyclic
+// re-entry left unfilled while its type was being built.
+func fillDef(e *defEntry, body *node, stance Nullability) {
+	if e.body == nil {
+		e.body = body
+		body.isBody = true
+	}
+
+	e.nullability = stance
+}
+
+// resolveNullability decides the null admission of every node in the graph
+// once it is complete, so a hook that reads a field's decision reads the
+// final one. Every def body resolves first, since a reference's own answer
+// reads its body's: a body admits null on its own when it is a nilable
+// container under a format flag its stance does not veto, when its declared
+// type names null, or when it is an unrestricted leaf, and a reference to
+// such a body adds no null branch of its own.
+//
+// An inline occurrence admits null when its stance grants it, or when its
+// stance defers and the position is a pointer, an interface, or a container
+// whose nil the marshal writes as null. A body ignores the pointer-ness of the
+// occurrence that built it and a stance's grant, since each reference carries
+// those, and keeps only the veto. A composed embed branch admits none, and
+// neither does a verbatim leaf, which carries no null encoding at all. A
+// declared null type admits null whatever the occurrence, since the schema
+// names it outright. Render adds a null branch (wrap) to an admitting node
+// unless its declared type already names null or its body already admits.
+func (g *generator) resolveNullability(root *node) {
+	for _, e := range g.defs {
+		if e.body != nil {
+			g.resolveAdmit(e.body, e)
+		}
+	}
+
+	seen := map[*defEntry]bool{}
+	visit := func(n *node) {
+		g.resolveNode(n)
+
+		if n.overrode != nil {
+			g.resolveNode(n.overrode)
+		}
+	}
+
+	walkNodes(root, seen, visit)
+
+	for _, e := range g.defs {
+		if !seen[e] {
+			seen[e] = true
+			walkNodes(e.body, seen, visit)
+		}
+	}
+}
+
+// resolveNode fills a node's decision. A body was already given its admit;
+// every other node derives it here.
+func (g *generator) resolveNode(n *node) {
+	switch {
+	case n.isBody:
+	case n.kind == kindRef:
+		g.resolveAdmit(n, n.def)
+	default:
+		g.resolveAdmit(n, nil)
+	}
+
+	n.null.wrap = n.null.admit && !n.verbatim && !g.targetAdmitsNull(n)
+}
+
+// resolveAdmit derives a node's admit from its facts; e is the def entry a
+// body or a reference resolves against, nil for an inline node.
+func (g *generator) resolveAdmit(n *node, e *defEntry) {
+	switch {
+	case n.composed || n.verbatim:
+		n.null.admit = false
+	case n.isBody:
+		n.null.admit = e.nullability != NullForbidden && g.containerNull(n.occ.container)
+	case n.kind == kindRef:
+		n.null.admit = e.nullability.apply(n.stance.apply(n.occ.pointer))
+	default:
+		n.null.admit = n.stance.apply(n.occ.pointer || g.containerNull(n.occ.container))
+	}
+
+	if n.kind != kindRef && declaresNull(n.payload) {
+		n.null.admit = true
+	}
+}
+
+// containerNull reports whether the marshal writes null for a nil container
+// of the given kind under the run's WithJSONOptions value.
+func (g *generator) containerNull(c containerKind) bool {
+	switch c {
+	case containerSlice, containerBytes:
+		return g.nilSliceNull
+	case containerMap:
+		return g.nilMapNull
+	case containerQuoted, containerNone:
+		return false
+	}
+
+	return false
+}
+
+// targetAdmitsNull reports whether the schema a node renders already admits
+// null before any wrapper: for a reference its body, otherwise its declared
+// base. A nilable container that admits null carries it in its own type list,
+// which is what a reference to an extracted container reads.
+func (g *generator) targetAdmitsNull(n *node) bool {
+	if n.kind == kindRef {
+		body := n.def.body
+		if body == nil {
+			return false
+		}
+
+		return body.null.admit && body.nilableContainer() || declaresNull(body.payload) ||
+			(body.kind == kindValue && !body.verbatim && schemashape.IsEmpty(body.payload))
+	}
+
+	return declaresNull(n.payload)
+}
+
+// apply resolves a [Nullability] stance against an occurrence's own answer:
+// NullAllowed always admits null, NullForbidden never does, and
+// NullFromReflection defers to the occurrence.
+func (s Nullability) apply(occurrence bool) bool {
+	switch s {
+	case NullAllowed:
+		return true
+	case NullForbidden:
+		return false
+	case NullFromReflection:
+	}
+
+	return occurrence
 }
 
 // walkNodes visits every node reachable from root, following items, props,
@@ -346,8 +544,8 @@ func walkNodes(root *node, seen map[*defEntry]bool, visit func(*node)) {
 
 	walkNodes(root.items, seen, visit)
 
-	for _, p := range root.props {
-		walkNodes(p.schema, seen, visit)
+	for i := range root.props {
+		walkNodes(root.props[i].schema, seen, visit)
 	}
 
 	for _, c := range root.prefix {
@@ -373,8 +571,8 @@ func (n *node) view(draft Draft) *Schema {
 			v.Properties = make(map[string]*Schema, len(n.props))
 		}
 
-		for _, p := range n.props {
-			v.Properties[p.name] = p.schema.view(draft)
+		for i := range n.props {
+			v.Properties[n.props[i].name] = n.props[i].schema.view(draft)
 		}
 
 		if n.items != nil {
@@ -456,7 +654,9 @@ func (n *node) absorbView(edited, pristine *Schema, draft Draft) {
 func (n *node) absorbProps(edited, pristine *Schema) {
 	kept := n.props[:0]
 
-	for _, p := range n.props {
+	for i := range n.props {
+		p := &n.props[i]
+
 		slot, ok := edited.Properties[p.name]
 		if !ok {
 			continue
@@ -465,7 +665,7 @@ func (n *node) absorbProps(edited, pristine *Schema) {
 		if absorbSlot(p.schema, &slot, pristine.Properties[p.name]) {
 			delete(edited.Properties, p.name)
 
-			kept = append(kept, p)
+			kept = append(kept, *p)
 		}
 	}
 
@@ -591,18 +791,13 @@ func mergeSchemaFields(dst, src *Schema) {
 	}
 }
 
-// checkNullLiterals re-checks the null literals a field's two writers
-// committed. It compares each against the occurrence's final null decision and
-// reports the first one that decision refuses. A self- or mutually recursive
-// field resolves against a $defs entry still being built, so a [Nullability]
-// stance a type-level hook records for that type lands after both field-level
-// writers have read the decision. [node.nullableDecision] reads the stance
-// lazily, and this pass is where those early answers and the late stance meet.
-//
-// Two writers reach this pass. The jsonschema tag records on the node the keys
-// it took a literal for, and a tag interpreter writes its literal onto the
-// authored canvas, which canvasNullLiteral scans. The pass reports a field
-// carrying both faults on its tag key.
+// checkNullLiterals scans the authored canvas of every field and element
+// node for a null literal a field-level writer committed against an
+// occurrence whose final decision admits none, and reports the first. The
+// jsonschema tag refuses such a literal at parse time, since it runs after
+// the null pass; a tag interpreter writes onto the canvas without consulting
+// the decision, through [FieldContext.Canvas] or a [Constraints] setter, so
+// this pass is where its literal meets the decision.
 //
 // The walk is [generator.walkReachable] rather than [walkNodes], so the check
 // covers exactly the defs render emits. A def whose only surviving reference is
@@ -622,29 +817,14 @@ func (g *generator) checkNullLiterals(root *node) error {
 	return reported
 }
 
-// nullLiteralReport returns the rejection a node's recorded null literals earn
-// against its final null decision, or nil when the node has none to answer for.
-//
-// The check covers a reference and nothing else. Every other node has its
-// decision fixed in schemaForType before buildFieldSchema reads it, so tagparse
-// refuses the tag at parse time and the node records nothing. The generator
-// runs extendTypeSchema inside buildStructSchema ahead of defineType, so the
-// cycle placeholder is the one window a stance lands in afterwards. Holding
-// the canvas scan to that same scope is a deliberate narrowing. An interpreter
-// that writes a null onto a node whose decision was already final has a bug of
-// its own, and this pass does not look for it. A type= override rebuilds the
-// field as a non-reference node carrying no origin, while the element nodes it
-// keeps carry theirs, so the pass still reports an element that stayed a
-// reference.
+// nullLiteralReport returns the rejection a node's authored canvas earns
+// against its final null decision, or nil when the node admits null, carries
+// no origin (it is not a field or element), or holds no literal. The report
+// names the field the literal sits in, marks an element position, and names
+// the occurrence's Go type.
 func nullLiteralReport(n *node) error {
-	if n.kind != kindRef || n.origin == nil || n.nullableDecision() {
+	if n.origin == nil || n.null.admit {
 		return nil
-	}
-
-	if len(n.nullKeys) > 0 {
-		return fmt.Errorf("%s field %q: jsonschema tag: key %q: %w %s",
-			n.origin.parent, n.origin.field, n.nullKeys[0],
-			tagmodel.ErrNullNotAdmitted, n.def.typ)
 	}
 
 	keyword := canvasNullLiteral(n.authored)
@@ -652,17 +832,22 @@ func nullLiteralReport(n *node) error {
 		return nil
 	}
 
+	typ := n.origin.typ
+	if n.kind == kindRef {
+		typ = n.def.typ
+	}
+
 	if n.origin.element {
 		return fmt.Errorf(
 			"%s field %q: element: authored canvas: keyword %q: %w %s",
 			n.origin.parent, n.origin.field, keyword,
-			tagmodel.ErrNullNotAdmitted, n.def.typ,
+			tagmodel.ErrNullNotAdmitted, typ,
 		)
 	}
 
 	return fmt.Errorf("%s field %q: authored canvas: keyword %q: %w %s",
 		n.origin.parent, n.origin.field, keyword,
-		tagmodel.ErrNullNotAdmitted, n.def.typ)
+		tagmodel.ErrNullNotAdmitted, typ)
 }
 
 // isRawNull reports whether raw holds the JSON null literal. Two call sites

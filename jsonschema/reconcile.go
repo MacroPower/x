@@ -50,9 +50,9 @@ func (g *generator) reconcileField(n *node) *Schema {
 	// the resolved keywords.
 	g.resolveBounds(n, &merged, base)
 
-	if !n.nullable {
+	if !n.null.admit {
 		if n.nilableContainer() {
-			bareContainerType(&merged, n.base)
+			bareContainerType(&merged, n.containerType())
 		}
 
 		return &merged
@@ -64,14 +64,15 @@ func (g *generator) reconcileField(n *node) *Schema {
 	// null-admitting) must not run first.
 	hasConstEnum := merged.Const != nil || merged.Enum != nil
 	if n.nilableContainer() && !hasConstEnum {
-		nullTypeList(&merged, n.base)
+		nullTypeList(&merged, n.containerType())
 
 		return &merged
 	}
 
-	// An empty payload (an interface field) already admits null, so it needs no
-	// second null branch: return it with its authored keywords inline.
-	if !n.nilableContainer() && schemashape.IsEmpty(&merged) {
+	// A declared null type needs no branch, and an empty merged schema (an
+	// interface field whose canvas constrains nothing) already admits null, so
+	// either returns with its authored keywords inline.
+	if !n.null.wrap || (!n.nilableContainer() && schemashape.IsEmpty(&merged)) {
 		return &merged
 	}
 
@@ -83,7 +84,7 @@ func (g *generator) reconcileField(n *node) *Schema {
 	wrapper := splitFieldKeywords(&merged, base)
 
 	if n.nilableContainer() {
-		bareContainerType(&merged, n.base)
+		bareContainerType(&merged, n.containerType())
 	}
 
 	wrapper.AnyOf = []*Schema{&merged, {Type: typename.Null}}
@@ -96,8 +97,8 @@ func (g *generator) reconcileField(n *node) *Schema {
 // move to the wrapper while const/enum ride the $ref on the value branch, which
 // takes its own Draft-07 sibling wrap in [generator.renderRef]. When the
 // referenced definition already admits null (it is empty, or a nilable container
-// whose def body carries the null), the ref carries every keyword and no null
-// branch is added.
+// whose def body carries the null), the decision says so and the ref carries
+// every keyword with no null branch added.
 func (g *generator) reconcileRefField(n *node) *Schema {
 	g.renderDef(n.def)
 
@@ -111,11 +112,7 @@ func (g *generator) reconcileRefField(n *node) *Schema {
 	// the allOf beside the $ref rather than leaving it as an ignored sibling.
 	g.resolveBounds(n, &merged, base)
 
-	if !n.nullableDecision() {
-		return g.renderRef(&merged, n.def)
-	}
-
-	if refTargetAdmitsNull(n.def.rendered) {
+	if !n.null.wrap {
 		return g.renderRef(&merged, n.def)
 	}
 
