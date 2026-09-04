@@ -221,6 +221,31 @@ func (r *failingReader) Read(p []byte) (int, error) {
 	return copy(p, r.data), nil
 }
 
+// TestDecodeJSONInstanceReusesDecoder pins the pooled decoder: a document
+// decoded after an input that ended mid-value comes back whole, and a result
+// keeps its strings and numbers after the caller overwrites the bytes it
+// decoded and the decoder has read another document over the same buffer.
+func TestDecodeJSONInstanceReusesDecoder(t *testing.T) {
+	t.Parallel()
+
+	_, err := normalize.DecodeJSONInstance([]byte(`{"a": [1, `))
+	require.Error(t, err)
+
+	first := []byte(`{"key": "value", "n": 12345}`)
+
+	got, err := normalize.DecodeJSONInstance(first)
+	require.NoError(t, err)
+
+	for i := range first {
+		first[i] = 'x'
+	}
+
+	_, err = normalize.DecodeJSONInstance([]byte(`["other", 99999]`))
+	require.NoError(t, err)
+
+	assert.Equal(t, map[string]any{"key": "value", "n": json.Number("12345")}, got)
+}
+
 func TestDecodeJSONInstanceReader(t *testing.T) {
 	t.Parallel()
 

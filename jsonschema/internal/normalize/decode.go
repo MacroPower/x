@@ -6,9 +6,37 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 
 	jsonv1 "encoding/json"
 )
+
+// pooledDecoder pairs a [jsontext.Decoder] with the [bytes.Reader] it reads
+// from, so [DecodeJSONInstance] resets both per call instead of allocating
+// them.
+type pooledDecoder struct {
+	dec *jsontext.Decoder
+	rd  bytes.Reader
+}
+
+// newPooledDecoder builds a decoder over its own empty reader.
+func newPooledDecoder() *pooledDecoder {
+	d := &pooledDecoder{}
+	d.dec = jsontext.NewDecoder(&d.rd)
+
+	return d
+}
+
+// decoders holds idle decoders for DecodeJSONInstance, each keeping the read
+// buffer its last document grew, so a loop decoding small instances allocates
+// neither a decoder nor a buffer per call. Nothing the walk returns aliases
+// that buffer: [jsontext.Token.String] copies the bytes of every string and
+// number, readObject and readArray build fresh containers, and the errors
+// decodeExact returns carry an offset and one formatted byte, so a later call
+// overwriting the buffer cannot reach an earlier result.
+var decoders = sync.Pool{
+	New: func() any { return newPooledDecoder() },
+}
 
 // DecodeJSONInstance decodes JSON bytes into an instance value by walking the
 // token stream of a [jsontext.Decoder]. Numbers survive as exact
@@ -19,7 +47,21 @@ import (
 // duplicate object member names, invalid UTF-8, and nesting deeper than
 // 10000 levels, so the walk itself needs no such checks.
 func DecodeJSONInstance(data []byte) (any, error) {
-	instance, err := decodeExact(jsontext.NewDecoder(bytes.NewReader(data)))
+	d, ok := decoders.Get().(*pooledDecoder)
+	if !ok {
+		d = newPooledDecoder()
+	}
+
+	d.rd.Reset(data)
+	d.dec.Reset(&d.rd)
+
+	instance, err := decodeExact(d.dec)
+
+	// Clearing the reader drops its reference to data, so an idle decoder
+	// pins none of the caller's bytes.
+	d.rd.Reset(nil)
+	decoders.Put(d)
+
 	if err != nil {
 		return nil, fmt.Errorf("JSON decode: %w", err)
 	}
