@@ -66,18 +66,7 @@ type inliner struct {
 	// The memo[id] entry is a pristine schema's finished self-contained copy, so
 	// a target referenced from several places is expanded once. Every additional
 	// use clones the memoized copy, so no two splice positions share nodes.
-	// Sharing within one copied document survives, since the copy reproduces
-	// the graph it was taken from. A resolver-returned document or a
-	// WithRefFallback substitute can carry such sharing, since neither is
-	// tree-checked.
 	memo []*Schema
-
-	// The working nodes walkPair has already expanded. A working copy mirrors
-	// the aliasing of the document it was cloned from, and expansion writes the
-	// node in place, so the walk expands such a node once and both positions
-	// read that one expansion. Working nodes are not interned (only pristine
-	// ones are), so the set keys on the pointer rather than on a node id.
-	expanded map[*Schema]bool
 
 	// The refusal [NewInliner] records when the [WithBaseURI] value does not
 	// parse. Every [Inliner.Inline] call returns it, since the constructor has
@@ -85,9 +74,10 @@ type inliner struct {
 	baseURIErr error
 
 	// The paths[id] entry is a pristine schema's JSON Pointer path within its
-	// containing document, recorded when each document joins resolution space. The
-	// paths name ref-node locations for [WithRefFallback] consultations and seed
-	// the path of each expansion walk.
+	// containing document, read off the frozen tree when each document joins
+	// resolution space. The paths name ref-node locations for
+	// [WithRefFallback] consultations and seed the path of each expansion
+	// walk.
 	paths []string
 
 	// The docs[id] entry is the URI of a pristine schema's containing document,
@@ -420,7 +410,6 @@ func (il *Inliner) Inline(ctx context.Context, s *Schema) (*Schema, error) {
 		baseURI:       il.proto.baseURI,
 		retrievalBase: il.proto.retrievalBase,
 		index:         newSchemaIndex(),
-		expanded:      map[*Schema]bool{},
 	}
 
 	// The context reaches the resolver through the ctx field set above:
@@ -573,7 +562,7 @@ func (in *inliner) walkClosure(pristine *Schema) error {
 // vetted material reaches the index and the expansion bookkeeping keyed by
 // it, the demand [schemaIndex.extend] makes of the validator's own index.
 func (in *inliner) recordDoc(doc schemavet.Doc, path, docURI string) {
-	in.recordTree(doc.Root(), path, docURI)
+	in.recordFrozen(doc.Frozen(), path, docURI)
 }
 
 // recordNode records a vetted fragment: a JSON-pointer fallback target the
@@ -581,36 +570,30 @@ func (in *inliner) recordDoc(doc schemavet.Doc, path, docURI string) {
 // fragment of a document rather than one of its own and so carries the
 // [schemavet.Node] currency (see [inliner.vetTarget]).
 func (in *inliner) recordNode(node schemavet.Node, path, docURI string) {
-	in.recordTree(node.Root(), path, docURI)
+	in.recordFrozen(node.Frozen(), path, docURI)
 }
 
-// recordTree interns every schema in the pristine document rooted at s into the
-// node-identity index and stores, under the id it assigns, the schema's JSON
-// Pointer path within that document and doc, the document's URI. The paths and
-// document URIs name ref-node locations for fallback consultations. A schema
-// already indexed stops the walk, so an aliased or cyclic graph keeps the first
-// location recorded for a node.
+// recordFrozen interns every node of the frozen tree into the node-identity
+// index and stores, under the id it assigns, the node's JSON Pointer path
+// within its containing document, read off the tree and prefixed by the
+// tree's own location, and doc, the document's URI. The paths and document
+// URIs name ref-node locations for fallback consultations. A tree already
+// indexed keeps the location first recorded for each node.
 //
-// It is the walk behind [inliner.recordDoc] and [inliner.recordNode], its only
-// callers. The currency each demands is where the vetting invariant is stated,
-// the way [schemaIndex.walk] sits behind [schemaIndex.extend].
-func (in *inliner) recordTree(s *Schema, path, doc string) {
-	if s == nil {
-		return
-	}
+// It sits behind [inliner.recordDoc] and [inliner.recordNode], its only
+// callers. The currency each demands is where the vetting invariant is
+// stated, the way [schemaIndex.extend] states it for the validator's index.
+func (in *inliner) recordFrozen(f *schemavet.Frozen, prefix, doc string) {
+	for i, node := range f.Nodes() {
+		id, indexed := in.index.intern(node)
+		if indexed {
+			continue
+		}
 
-	id, indexed := in.index.intern(s)
-	if indexed {
-		return
-	}
+		in.grow()
 
-	in.grow()
-
-	in.paths[id] = path
-	in.docs[id] = doc
-
-	for _, child := range SubschemaEntries(s) {
-		in.recordTree(child.Schema, path+string(child.Pointer), doc)
+		in.paths[id] = prefix + f.Path(i)
+		in.docs[id] = doc
 	}
 }
 
@@ -672,42 +655,24 @@ func (in *inliner) internedID(s *Schema) (int, error) {
 // truncates at the same hop whether the walk reached the node by descending the
 // document or by expanding a ref to it.
 func (in *inliner) walkPair(working, pristine *Schema, path string) error {
-	// A node reached a second time is already expanded in place, and both
-	// positions read that one node. Expanding it again would splice its target
-	// into the same allOf twice.
-	if in.expanded[working] {
-		return nil
-	}
-
-	in.expanded[working] = true
-
-	// Every pristine node reaching here belongs to a tree that recordTree
-	// interned whole, so a miss is an invariant violation rather than an ordinary
-	// absence, and internedID surfaces it instead of letting a zero id alias the
-	// root's bookkeeping.
+	// Every pristine node reaching here belongs to a tree that recordFrozen
+	// interned whole, so a miss is an invariant violation rather than an
+	// ordinary absence, and internedID surfaces it instead of letting a zero
+	// id alias the root's bookkeeping.
 	id, err := in.internedID(pristine)
 	if err != nil {
 		return err
 	}
 
 	// Mark the node the walk is descending into and clear the mark on the way
-	// out, so a ref below it closes a cycle. The mark sits after the expanded
-	// check because that early return descends nothing, so no ref runs under it
-	// to close on the node.
-	//
-	// A node already in flight belongs to an outer visit, which owns the clear.
-	// An aliased document (a resolver document or a substitute is held to the
-	// no-cycle rule rather than the tree rule, so aliasing survives there) can
-	// carry one node both on the walk's own path and inside a ref target's
-	// subtree, and the walk enters that node again below the visit that marked
-	// it. An unconditional deferred clear would release the flag on the way out
-	// of the inner visit and leave the cycle unguarded for the rest of the outer
-	// one, and such a graph then expands without bound.
-	if !in.inflight[id] {
-		in.inflight[id] = true
+	// out, so a ref below it closes a cycle. Every pristine document is a
+	// frozen tree, so the walk enters a node at most once per visit: it
+	// descends in place through each node's children, and it reaches a node
+	// through a ref only by inlineCopy, which the cycle check above it keeps
+	// off any node in flight. One mark per visit therefore owns its clear.
+	in.inflight[id] = true
 
-		defer func() { in.inflight[id] = false }()
-	}
+	defer func() { in.inflight[id] = false }()
 
 	// Self-contained copies to join the node's allOf after its children are
 	// walked: a Draft 2020-12 $ref target, a fallback substitute for a
@@ -1108,28 +1073,15 @@ func (in *inliner) inlineCopy(target *Schema, path string, memoize bool) (*Schem
 // stripIdentifiers clears $id, $anchor, and $dynamicAnchor from every node of
 // a spliced copy's subtree. The names identify the target at its original
 // position; a copy spliced elsewhere must not re-declare them (see
-// [inliner.inlineCopy]). A copy reproduces the pointer graph of the document it
-// was cloned from, so the walk carries the visited set an aliased document
-// needs to reach each node once.
+// [inliner.inlineCopy]). A copy is cloned from a frozen tree and is a tree
+// itself, so the walk reaches each node once with no visited set.
 func stripIdentifiers(s *Schema) {
-	stripIdentifiersFrom(s, map[*Schema]bool{})
-}
-
-// stripIdentifiersFrom is [stripIdentifiers]'s recursion, carrying the set of
-// nodes already stripped.
-func stripIdentifiersFrom(s *Schema, stripped map[*Schema]bool) {
-	if stripped[s] {
-		return
-	}
-
-	stripped[s] = true
-
 	s.ID = ""
 	s.Anchor = ""
 	s.DynamicAnchor = ""
 
 	for _, entry := range SubschemaEntries(s) {
-		stripIdentifiersFrom(entry.Schema, stripped)
+		stripIdentifiers(entry.Schema)
 	}
 }
 

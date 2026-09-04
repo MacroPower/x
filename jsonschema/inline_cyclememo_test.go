@@ -82,14 +82,17 @@ func TestInlineCycleTruncatedCopyNotMemoized(t *testing.T) {
 		"the inlined schema must keep rejecting what minimum forbids")
 }
 
-// TestInlineCycleGuardHoldsAcrossAliasedTarget pins that a node the walk is
-// inside stays in flight while the walk re-enters it further down. The document
-// comes from a resolver, which is held to the no-cycle rule rather than the
-// tree rule, so /$defs/p is also /$defs/t/properties/inner. Expanding p reaches
-// t, whose child is p again; that inner visit must leave p's in-flight mark
-// alone. Otherwise p's own second ref to itself expands instead of closing the
-// cycle, and the walk expands the aliased graph without bound; losing the guard
-// kills the test binary with a stack overflow rather than failing this test.
+// TestInlineCycleGuardHoldsAcrossAliasedTarget pins the expansion of a
+// resolver document that reaches one node through two paths. The freeze
+// copies the shared node once per path, so /$defs/p and
+// /$defs/t/properties/inner are two nodes of the frozen tree, each carrying
+// the same two refs. Expanding p reaches t, whose inner node refs t and p
+// again; both are in flight, so both refs close a cycle and the fallback
+// drops them, while p's own second ref, to itself, closes the same way. The
+// expected document is the one the aliased graph produced before the freeze,
+// so the copy changes no verdict. Losing the in-flight guard would expand
+// the graph without bound and kill the test binary with a stack overflow
+// rather than failing this test.
 func TestInlineCycleGuardHoldsAcrossAliasedTarget(t *testing.T) {
 	t.Parallel()
 

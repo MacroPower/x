@@ -1694,12 +1694,6 @@ Failure modes:
   `WithRefFallback` that drops the reference, `Inline` instead succeeds on the
   input `Compile` refuses. The inlined document carries no `$dynamicRef`, so
   `Compile` accepts it.
-- One attribution difference survives. The validator's fetch walks a fetched
-  document's nested absolute-`$id` resources into its registry, so a
-  violation inside one names that resource's own URI, while `Inline` reaches
-  the same violation under the enclosing document's URI. Both engines vet
-  the whole document and refuse the same graphs; only the path in the
-  message differs.
 - `Inline` structurally vets a remote document the closure reaches before
   inlining it, through the same policy the validator applies to fetched
   documents (see [Remote references](#remote-references) for the full check
