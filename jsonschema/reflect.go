@@ -1613,6 +1613,7 @@ func (g *generator) fieldContext(
 		StructField: fi.StructField,
 		Draft:       g.draft,
 		node:        fieldNode,
+		quoted:      fi.JSONString,
 	}
 }
 

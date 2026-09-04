@@ -661,6 +661,10 @@ type FieldContext struct {
 	// emit draft-appropriate keywords (for example dependentRequired under
 	// [Draft2020] versus dependencies under [Draft7]).
 	Draft Draft
+	// The quoted field is the json:",string" option the fieldset walk parsed
+	// for a context the generator builds. A caller-built context has no node
+	// and reads the flag from StructField instead.
+	quoted bool
 }
 
 // ElementContexts returns a FieldContext for each element schema of a sequence
@@ -737,8 +741,10 @@ func (fc FieldContext) Constraints() *Constraints {
 }
 
 // Shape classifies the field, folding in the two facts [ShapeOf] cannot see.
-// The first is the json:",string" flag read from [FieldContext.StructField]. A
-// quoted string field double-encodes (its instance is the JSON-quoted text),
+// The first is the json:",string" flag, taken from the generator's own tag
+// parse for a generated context and read from [FieldContext.StructField] for
+// a caller-built one. A quoted string field double-encodes (its instance is
+// the JSON-quoted text),
 // which only the flag distinguishes from a plain string field, while every
 // other coercion is already visible in [FieldContext.Base]. The second is
 // whether the occurrence admits null. A Go type states only its pointer-ness.
@@ -783,17 +789,22 @@ func (fc FieldContext) Shape() Shape {
 // Which types the flag coerces is decided once, in [tagmodel]'s form
 // classification (only an [encoding/json.Number] field's string kind
 // reclassifies), so the raw flag is handed over and the relevance test is
-// not repeated here. It tolerates the zero StructField of a caller-built
-// context.
+// not repeated here. A generated context carries the flag the fieldset walk
+// parsed, so no interpreter re-runs the tag grammar. A caller-built context
+// parses its StructField, tolerating the zero value.
 func (fc FieldContext) quotedString() bool {
+	if fc.node != nil {
+		return fc.quoted
+	}
+
 	if fc.Type == nil {
 		return false
 	}
 
 	info, err := jsontag.Parse(fc.StructField)
 	if err != nil {
-		// Generation refuses an invalid declaration before any interpreter
-		// runs, so only a hand-built context reaches this, unquoted.
+		// Only a hand-built context with an invalid declaration reaches
+		// this, unquoted.
 		return false
 	}
 
