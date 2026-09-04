@@ -34,7 +34,8 @@ type Session struct {
 
 	// Maps each materialized target's root to the [schemavet.Node] the vet
 	// minted for it, so a caller that records targets reads the proof
-	// rather than vetting the same target twice.
+	// rather than vetting the same target twice. [Session.FallbackNode]
+	// reaches it from any node of the tree through fallbackNodes.
 	fallbackMinted map[*jsonschema.Schema]schemavet.Node
 
 	// The schemas the JSON-pointer fallback materialized this session, in
@@ -160,12 +161,24 @@ func (s *Session) DocOf(sc *jsonschema.Schema) (schemavet.Doc, bool) {
 	return s.reg.DocOf(sc)
 }
 
-// FallbackNode returns the [schemavet.Node] the session minted for a
-// materialized JSON-pointer target whose root is sc, and whether sc is one.
+// FallbackNode returns the [schemavet.Node] the session minted for the
+// materialized JSON-pointer target sc is a node of, narrowed to sc, and
+// whether sc is one. The target's tree registers the $ids and anchors its
+// nodes declare, so a reference resolves to a node below the root as readily
+// as to the root; the proof covers the whole tree either way. A substitute's
+// node is not one, since the session holds no minted proof for a substitute.
 func (s *Session) FallbackNode(sc *jsonschema.Schema) (schemavet.Node, bool) {
-	node, ok := s.fallbackMinted[sc]
+	f, ok := s.fallbackNodes[sc]
+	if !ok {
+		return schemavet.Node{}, false
+	}
 
-	return node, ok
+	node, ok := s.fallbackMinted[f.Root()]
+	if !ok {
+		return schemavet.Node{}, false
+	}
+
+	return node.Narrow(sc)
 }
 
 // LookupURI resolves an absolute URI to its schema, consulting the shared

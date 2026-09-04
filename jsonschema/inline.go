@@ -562,29 +562,46 @@ func (in *inliner) walkClosure(pristine *Schema) error {
 // vetted material reaches the index and the expansion bookkeeping keyed by
 // it, the demand [schemaIndex.extend] makes of the validator's own index.
 func (in *inliner) recordDoc(doc schemavet.Doc, path, docURI string) {
-	in.recordFrozen(doc.Frozen(), path, docURI)
+	in.recordFrozen(doc.Frozen(), doc.Root(), path, docURI)
 }
 
 // recordNode records a vetted fragment: a JSON-pointer fallback target the
 // session materialized from raw JSON inside an unknown keyword, which is a
 // fragment of a document rather than one of its own and so carries the
-// [schemavet.Node] currency (see [inliner.vetTarget]).
+// [schemavet.Node] currency (see [inliner.vetTarget]). The fragment may sit
+// below the root of the tree the session froze, and then the record covers
+// that fragment's subtree alone. The nodes above it stay unrecorded until
+// the ref naming the tree's root expands, which records them at the root's
+// own location.
 func (in *inliner) recordNode(node schemavet.Node, path, docURI string) {
-	in.recordFrozen(node.Frozen(), path, docURI)
+	in.recordFrozen(node.Frozen(), node.Root(), path, docURI)
 }
 
-// recordFrozen interns every node of the frozen tree into the node-identity
-// index and stores, under the id it assigns, the node's JSON Pointer path
-// within its containing document, read off the tree and prefixed by the
-// tree's own location, and doc, the document's URI. The paths and document
-// URIs name ref-node locations for fallback consultations. A tree already
-// indexed keeps the location first recorded for each node.
+// recordFrozen interns every node of the frozen tree at or below root into
+// the node-identity index and stores, under the id it assigns, the node's
+// JSON Pointer path within its containing document, read off the tree
+// relative to root and prefixed by root's own location, and doc, the
+// document's URI. The paths and document URIs name ref-node locations for
+// fallback consultations. A node already indexed keeps the location first
+// recorded for it.
 //
 // It sits behind [inliner.recordDoc] and [inliner.recordNode], its only
 // callers. The currency each demands is where the vetting invariant is
-// stated, the way [schemaIndex.extend] states it for the validator's index.
-func (in *inliner) recordFrozen(f *schemavet.Frozen, prefix, doc string) {
+// stated, the way [schemaIndex.extend] states it for the validator's index,
+// and root is the currency's own root, so it is a node of the tree.
+func (in *inliner) recordFrozen(f *schemavet.Frozen, root *Schema, prefix, doc string) {
+	rootID, _ := f.ID(root)
+	base := f.Path(rootID)
+
 	for i, node := range f.Nodes() {
+		// A pointer extends base at a token boundary or is base itself; a
+		// sibling whose token merely starts with base's last token is
+		// neither.
+		path, below := strings.CutPrefix(f.Path(i), base)
+		if !below || (path != "" && path[0] != '/') {
+			continue
+		}
+
 		id, indexed := in.index.intern(node)
 		if indexed {
 			continue
@@ -592,7 +609,7 @@ func (in *inliner) recordFrozen(f *schemavet.Frozen, prefix, doc string) {
 
 		in.grow()
 
-		in.paths[id] = prefix + f.Path(i)
+		in.paths[id] = prefix + path
 		in.docs[id] = doc
 	}
 }
@@ -610,11 +627,15 @@ func (in *inliner) grow() {
 
 // vetTarget returns the [schemavet.Node] currency [inliner.recordNode]
 // demands for a resolved target the walk has not recorded yet. Every such
-// target comes from the session's JSON-pointer fallback, which froze and
-// vetted it through [inliner.fallbackVet] before returning it and kept the
-// proof, so the call reads that proof rather than running a second pass. A
-// target the session does not know is an invariant violation, reported as
-// [ErrRefInline] like a missing index entry.
+// target is a node of a tree the session's JSON-pointer fallback froze and
+// vetted through [inliner.fallbackVet] before returning it, and the session
+// kept the proof, so the call reads that proof rather than running a second
+// pass. The target is the tree's root, or a node below it that an $id or
+// $anchor inside the tree registered, reached when the ref naming it expands
+// before the ref that materialized the tree; the session narrows the proof
+// to whichever the walk holds. A target the session does not know is an
+// invariant violation, reported as [ErrRefInline] like a missing index
+// entry.
 func (in *inliner) vetTarget(target *Schema, doc, ptr string) (schemavet.Node, error) {
 	node, ok := in.session.FallbackNode(target)
 	if !ok {

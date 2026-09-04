@@ -74,8 +74,9 @@ func (d Doc) Frozen() *Frozen { return d.f }
 
 // Node is the currency minted by [Frozen.VetNode]: proof that a schema
 // fragment (a JSON-pointer fallback target, which has no document base of
-// its own) was frozen and passed the structural checks. The zero value holds
-// no schema and is inert.
+// its own) was frozen and passed the structural checks. [Node.Narrow]
+// re-roots it at a node below the fragment's root. The zero value holds no
+// schema and is inert.
 type Node struct {
 	root *Schema
 	f    *Frozen
@@ -87,6 +88,20 @@ func (n Node) Root() *Schema { return n.root }
 // Frozen returns the tree the fragment was vetted from, or nil for the zero
 // value.
 func (n Node) Frozen() *Frozen { return n.f }
+
+// Narrow returns the currency rooted at s, a node of the vetted tree, and
+// whether s is one. The checks ran over the whole tree, so every subtree
+// passed them, and the narrowed proof names the fragment a caller reached
+// below the root: a node an $id or $anchor inside the tree registered, which
+// a reference resolves to without naming the root. Its [Node.Frozen] is the
+// whole tree.
+func (n Node) Narrow(s *Schema) (Node, bool) {
+	if _, ok := n.f.ID(s); !ok {
+		return Node{}, false
+	}
+
+	return Node{root: s, f: n.f}, true
+}
 
 // CheckTypeNames verifies that every type keyword reachable from schema names
 // one of the seven JSON Schema type names, returning nil or an error wrapping

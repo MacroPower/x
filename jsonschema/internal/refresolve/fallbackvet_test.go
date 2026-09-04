@@ -134,3 +134,48 @@ func TestFallbackTargetsExcludeRejected(t *testing.T) {
 	require.True(t, sess.ResolveRef(doc.Root(), "#/x-custom/sub", nil).TargetRejected)
 	assert.Empty(t, sess.FallbackTargets(), "a refused target joins no frontier")
 }
+
+// TestFallbackNodeAnswersBelowTheRoot pins that the session hands back the
+// proof it minted for a materialized target from any node of that target's
+// tree, narrowed to the node asked for, since an $id the tree registers lets
+// a reference resolve to a node below the root.
+func TestFallbackNodeAnswersBelowTheRoot(t *testing.T) {
+	t.Parallel()
+
+	const rootURI = "https://example.test/root.json"
+
+	doc := freeze(t, &jsonschema.Schema{
+		ID:   rootURI,
+		Type: "object",
+		Extra: map[string]any{"x-custom": map[string]any{"sub": map[string]any{
+			"type":       "object",
+			"properties": map[string]any{"p": map[string]any{"$id": "urn:t", "type": "string"}},
+		}}},
+	}, rootURI, schemavet.Profile{})
+
+	reg := refresolve.NewRegistry(pointerTargetDeps(), false)
+	reg.Build(doc)
+
+	sess := reg.NewSession(func(sc *jsonschema.Schema, base, locator string) (schemavet.Node, error) {
+		return schemavet.FreezeNode(sc, locator, base, schemavet.Profile{})
+	})
+
+	root := sess.ResolveRef(doc.Root(), "#/x-custom/sub", nil).Target
+	require.NotNil(t, root)
+
+	inner := sess.ResolveRef(doc.Root(), "urn:t", nil).Target
+	require.NotNil(t, inner)
+	require.NotSame(t, root, inner)
+
+	node, ok := sess.FallbackNode(inner)
+	require.True(t, ok)
+	assert.Same(t, inner, node.Root())
+	assert.Same(t, root, node.Frozen().Root())
+
+	node, ok = sess.FallbackNode(root)
+	require.True(t, ok)
+	assert.Same(t, root, node.Root())
+
+	_, ok = sess.FallbackNode(doc.Root())
+	assert.False(t, ok, "a registered document's node is not a fallback target")
+}

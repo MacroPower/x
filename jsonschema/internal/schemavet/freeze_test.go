@@ -365,3 +365,29 @@ func TestFreezeNode(t *testing.T) {
 	require.ErrorIs(t, err, schemavet.ErrInvalidType)
 	assert.Contains(t, err.Error(), rootURI+"#/x-custom/sub/type")
 }
+
+// TestNodeNarrow pins that a minted Node re-roots at any node of its tree
+// and at nothing else, keeping the whole tree behind the narrowed proof.
+func TestNodeNarrow(t *testing.T) {
+	t.Parallel()
+
+	node, err := schemavet.FreezeNode(
+		&schemavet.Schema{Properties: map[string]*schemavet.Schema{"p": {Type: "string"}}},
+		rootURI+"#/x-custom/sub", rootURI, schemavet.Profile{},
+	)
+	require.NoError(t, err)
+
+	inner, ok := node.Frozen().At("/properties/p")
+	require.True(t, ok)
+
+	narrowed, ok := node.Narrow(inner)
+	require.True(t, ok)
+	assert.Same(t, inner, narrowed.Root())
+	assert.Same(t, node.Frozen(), narrowed.Frozen())
+
+	_, ok = node.Narrow(&schemavet.Schema{Type: "string"})
+	assert.False(t, ok, "a schema outside the tree narrows nothing")
+
+	_, ok = schemavet.Node{}.Narrow(inner)
+	assert.False(t, ok, "the zero Node holds no tree")
+}
