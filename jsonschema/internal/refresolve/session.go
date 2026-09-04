@@ -2,7 +2,6 @@ package refresolve
 
 import (
 	"maps"
-	"strings"
 
 	"github.com/google/jsonschema-go/jsonschema"
 
@@ -324,14 +323,7 @@ func (s *Session) FallbackTargets() []FallbackTarget {
 // displayPointer renders decoded JSON Pointer segments back into an RFC 6901
 // pointer for error locations, escaping each reference token.
 func displayPointer(segments []string) string {
-	var b strings.Builder
-
-	for _, seg := range segments {
-		b.WriteByte('/')
-		b.WriteString(jsonptr.Escape(seg))
-	}
-
-	return b.String()
+	return jsonptr.JoinTokens(segments)
 }
 
 // walkScratch walks sc into a fresh registry, so the caller can inspect what the

@@ -174,14 +174,7 @@ type valueEntry struct {
 // render writes the first n segments of the current path as an RFC 6901 JSON
 // Pointer. The empty prefix is the root, which renders as the empty string.
 func (c *cloner) render(n int) string {
-	var out strings.Builder
-
-	for _, segment := range c.path[:n] {
-		out.WriteByte('/')
-		out.WriteString(jsonptr.Escape(segment))
-	}
-
-	return out.String()
+	return jsonptr.JoinTokens(c.path[:n])
 }
 
 // reportCycle records the loop closing at the current position. The entered

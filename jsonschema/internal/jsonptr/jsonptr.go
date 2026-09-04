@@ -60,6 +60,23 @@ func AppendToken(p jsontext.Pointer, tok string) jsontext.Pointer {
 	return jsontext.Pointer(string(p) + "/" + tok)
 }
 
+// JoinTokens renders decoded reference tokens as an RFC 6901 pointer,
+// escaping each one through [Escape]. The empty list renders as the empty
+// string, the root pointer, and an empty token renders as a bare separator.
+// One [strings.Builder] amortizes the growth across the whole list, which is
+// what separates this from a fold over [AppendToken]; callers that build a
+// pointer one token at a time still want AppendToken.
+func JoinTokens(segments []string) string {
+	var b strings.Builder
+
+	for _, seg := range segments {
+		b.WriteByte('/')
+		b.WriteString(Escape(seg))
+	}
+
+	return b.String()
+}
+
 // SafeToken restricts a token to the conservative unreserved set [A-Za-z0-9._-]
 // so the generated $ref resolves in external tools as both an RFC 6901 pointer
 // token and an RFC 3986 URI fragment. Generic type names embed characters that

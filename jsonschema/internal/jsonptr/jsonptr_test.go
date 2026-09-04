@@ -113,3 +113,39 @@ func TestSegmentsKey(t *testing.T) {
 		jsonptr.SegmentsKey([]string{"a", "b"}),
 	)
 }
+
+func TestJoinTokens(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		segments []string
+		want     string
+	}{
+		"nil list renders the root pointer":   {segments: nil, want: ""},
+		"empty list renders the root pointer": {segments: []string{}, want: ""},
+		"single token":                        {segments: []string{"a"}, want: "/a"},
+		"several tokens":                      {segments: []string{"$defs", "Foo"}, want: "/$defs/Foo"},
+		"empty token renders a bare separator": {
+			segments: []string{"a", "", "b"},
+			want:     "/a//b",
+		},
+		"only an empty token":  {segments: []string{""}, want: "/"},
+		"tilde escapes to ~0":  {segments: []string{"a~b"}, want: "/a~0b"},
+		"slash escapes to ~1":  {segments: []string{"a/b"}, want: "/a~1b"},
+		"both specials escape": {segments: []string{"~/"}, want: "/~0~1"},
+		"pre-escaped text escapes again": {
+			segments: []string{"~0", "~1"},
+			want:     "/~00/~01",
+		},
+		"index tokens pass through": {segments: []string{"allOf", "0"}, want: "/allOf/0"},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := jsonptr.JoinTokens(tt.segments)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
