@@ -17,11 +17,12 @@
 // fields without a registered constructor fills as its zero value, so its
 // coverage is near-nil.
 //
-// The default draw reads the blob for every choice, so a corpus entry decodes
-// to one stable value. [WithFull] is the exception: it allocates every pointer
-// to the depth cap and sizes every slice and map at the collection cap without
-// consulting the blob, for a caller that needs a value with nothing hidden
-// behind a nil pointer or an empty container.
+// The default draw reads the blob for every choice and stops descending at a
+// fixed depth, so a corpus entry decodes to one stable value. [WithFull] is
+// the exception. It allocates every pointer and sizes every slice and map at
+// the collection cap without consulting the blob, and it descends until a type
+// recurs rather than to the depth cap, for a caller that needs a value with
+// nothing hidden behind a nil pointer or an empty container.
 //
 // The package is test-only infrastructure; it is not part of the fast gate.
 package fuzzfill
@@ -214,11 +215,17 @@ func WithNilContainers() Option {
 	return func(cfg *config) { cfg.nilContainers = true }
 }
 
-// WithFull makes Fill allocate every pointer down to the depth cap and size
-// every slice and map at the collection cap, reading no entropy for those
-// choices. Scalars still draw from the blob. Use it for a value that must
-// expose every declaration the type carries, since a nil pointer marshals as
-// null and an empty container as [] or {} without visiting the element type.
+// WithFull makes Fill allocate every pointer and size every slice and map at
+// the collection cap, reading no entropy for those choices. Scalars still
+// draw from the blob. Use it for a value that must expose every declaration
+// the type carries, since a nil pointer marshals as null and an empty
+// container as [] or {} without visiting the element type.
+//
+// The depth cap does not apply. A pointer or container is left nil or empty
+// only where its element type (or a map's key type) is already being filled
+// higher on the path, which is where a recursive type would otherwise fill
+// forever. A chain of distinct types, such as a pointer to a pointer to an
+// int, fills to its leaf however long it is.
 //
 // A saturated blob is not a substitute. [Cursor.Intn] reduces a draw modulo
 // its bound, and an all-ones read is divisible by five, so every collection
@@ -237,13 +244,16 @@ func Fill(rv reflect.Value, data []byte, opts ...Option) {
 		opt(cfg)
 	}
 
-	f := &filler{cfg: cfg, cur: NewCursor(data)}
+	f := &filler{cfg: cfg, cur: NewCursor(data), path: map[reflect.Type]bool{}}
 	f.fill(rv.Elem(), 0)
 }
 
 type filler struct {
 	cfg *config
 	cur *Cursor
+	// The types on the path from the root to the value being filled. Only
+	// [WithFull] reads it, in place of the depth cap.
+	path map[reflect.Type]bool
 }
 
 func (f *filler) fill(rv reflect.Value, depth int) {
@@ -255,6 +265,11 @@ func (f *filler) fill(rv reflect.Value, depth int) {
 		rv.Set(reflect.ValueOf(ctor(f.cur)))
 
 		return
+	}
+
+	if f.cfg.full {
+		f.path[rv.Type()] = true
+		defer delete(f.path, rv.Type())
 	}
 
 	switch rv.Kind() {
@@ -315,16 +330,28 @@ func (f *filler) fillFloat(rv reflect.Value) {
 	rv.SetFloat(v)
 }
 
-// atDepthLimit reports whether depth has reached the recursion cap, zeroing rv
-// when it has so the caller can stop descending.
-func (f *filler) atDepthLimit(rv reflect.Value, depth int) bool {
-	if depth >= maxDepth {
-		rv.Set(reflect.Zero(rv.Type()))
+// atLimit reports whether the fill stops descending at rv, zeroing rv when it
+// does. The default draw stops at the depth cap. [WithFull] ignores the cap
+// and stops where one of elems, the types rv would fill next, is already on
+// the path, so a recursive type terminates and every other chain fills to
+// its leaf.
+func (f *filler) atLimit(rv reflect.Value, depth int, elems ...reflect.Type) bool {
+	stop := depth >= maxDepth
+	if f.cfg.full {
+		stop = false
 
-		return true
+		for _, t := range elems {
+			if f.path[t] {
+				stop = true
+			}
+		}
 	}
 
-	return false
+	if stop {
+		rv.Set(reflect.Zero(rv.Type()))
+	}
+
+	return stop
 }
 
 // drewNil reports whether the nil-container draw came up nil for rv. It zeroes
@@ -342,7 +369,11 @@ func (f *filler) drewNil(rv reflect.Value) bool {
 }
 
 func (f *filler) fillPointer(rv reflect.Value, depth int) {
-	if depth >= maxDepth || (!f.cfg.full && !f.cur.Bool()) {
+	if f.atLimit(rv, depth, rv.Type().Elem()) {
+		return
+	}
+
+	if !f.cfg.full && !f.cur.Bool() {
 		rv.Set(reflect.Zero(rv.Type()))
 
 		return
@@ -353,7 +384,7 @@ func (f *filler) fillPointer(rv reflect.Value, depth int) {
 }
 
 func (f *filler) fillSlice(rv reflect.Value, depth int) {
-	if f.atDepthLimit(rv, depth) || f.drewNil(rv) {
+	if f.atLimit(rv, depth, rv.Type().Elem()) || f.drewNil(rv) {
 		return
 	}
 
@@ -368,13 +399,13 @@ func (f *filler) fillSlice(rv reflect.Value, depth int) {
 }
 
 func (f *filler) fillMap(rv reflect.Value, depth int) {
-	if f.atDepthLimit(rv, depth) || f.drewNil(rv) {
+	kt, vt := rv.Type().Key(), rv.Type().Elem()
+	if f.atLimit(rv, depth, kt, vt) || f.drewNil(rv) {
 		return
 	}
 
 	n := f.collLen()
 	m := reflect.MakeMap(rv.Type())
-	kt, vt := rv.Type().Key(), rv.Type().Elem()
 
 	for range n {
 		k := reflect.New(kt).Elem()

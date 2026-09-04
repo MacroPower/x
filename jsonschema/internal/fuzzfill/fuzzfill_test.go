@@ -109,41 +109,64 @@ func TestFillWithNilContainersDrawsBothSides(t *testing.T) {
 }
 
 // TestFillWithFullAllocatesEverything pins that the option leaves no pointer
-// nil and no slice or map empty at any depth short of the cap, over every
-// blob, the saturated one included. A saturated blob draws a zero length for
-// every collection on the default path, which is the blind spot the option
-// exists to close.
+// nil and no slice or map empty, over every blob, the saturated one included.
+// A saturated blob draws a zero length for every collection on the default
+// path, which is the blind spot the option exists to close. The pointer
+// chain is six levels, one past the default draw's depth cap, so a fill that
+// still honored the cap would leave the leaf behind a nil.
 func TestFillWithFullAllocatesEverything(t *testing.T) {
 	t.Parallel()
 
-	type deep struct {
-		Next  *deep
+	type leaf struct {
 		Words []string
 		Table map[string]int
+		Chain ******int
 	}
 
 	for name, blob := range blobs() {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			var val deep
+			var val leaf
 
 			fuzzfill.Fill(reflect.ValueOf(&val), blob, fuzzfill.WithFull())
 
-			// The chain ends at the depth cap, where the filler zeroes every
-			// container, so the last link is the one level the option does
-			// not reach.
-			depth := 0
-			for cur := &val; cur.Next != nil; cur = cur.Next {
-				assert.NotEmpty(t, cur.Words, "the slice at depth %d must be non-empty", depth)
-				assert.NotEmpty(t, cur.Table, "the map at depth %d must be non-empty", depth)
+			assert.NotEmpty(t, val.Words, "the slice must be non-empty")
+			assert.NotEmpty(t, val.Table, "the map must be non-empty")
 
-				depth++
+			chain := reflect.ValueOf(val.Chain)
+			for depth := 1; chain.Kind() == reflect.Pointer; depth++ {
+				require.Falsef(t, chain.IsNil(), "the pointer at depth %d must be allocated", depth)
+
+				chain = chain.Elem()
 			}
-
-			assert.Greater(t, depth, 1, "the pointer chain must be allocated past the root")
 		})
 	}
+}
+
+// TestFillWithFullStopsWhereATypeRecurs pins the guard that replaces the
+// depth cap under the option. A pointer, slice, or map whose element type is
+// already being filled higher on the path stays nil or empty, and the
+// recursion ends there rather than at a fixed depth. A sibling of another
+// type on the same path still fills.
+func TestFillWithFullStopsWhereATypeRecurs(t *testing.T) {
+	t.Parallel()
+
+	type node struct {
+		Next     *node
+		Children []node
+		Index    map[string]node
+		Label    *string
+	}
+
+	var val node
+
+	fuzzfill.Fill(reflect.ValueOf(&val), rampBlob(), fuzzfill.WithFull())
+
+	assert.Nil(t, val.Next, "the self-referential pointer must stay nil")
+	assert.Empty(t, val.Children, "the self-referential slice must stay empty")
+	assert.Empty(t, val.Index, "the self-referential map must stay empty")
+	assert.NotNil(t, val.Label, "a pointer to another type on the same path must fill")
 }
 
 // TestFillDefaultDrawIsGolden pins what the default path fills from a fixed

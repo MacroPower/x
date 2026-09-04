@@ -148,6 +148,7 @@ func TestField(t *testing.T) {
 		"int":                   {typ: reflect.TypeFor[int](), tag: `json:",string"`, stringified: true},
 		"pointer to int":        {typ: reflect.TypeFor[*int](), tag: `json:",string"`, stringified: true},
 		"double pointer":        {typ: reflect.TypeFor[**uint8](), tag: `json:",string"`, stringified: true},
+		"six pointers":          {typ: reflect.TypeFor[******int](), tag: `json:",string"`, stringified: true},
 		"float":                 {typ: reflect.TypeFor[float64](), tag: `json:",string"`, stringified: true},
 		"json number":           {typ: reflect.TypeFor[jsonv1.Number](), tag: `json:",string"`, stringified: true},
 		"int without string":    {typ: reflect.TypeFor[int](), tag: `json:"a"`},
@@ -168,8 +169,11 @@ func TestField(t *testing.T) {
 		"marshaler that panics": {typ: reflect.TypeFor[panicker](), tag: `json:"a"`},
 		"interface":             {typ: reflect.TypeFor[any](), tag: `json:",string"`, err: ErrValue},
 		"func":                  {typ: reflect.TypeFor[func()](), tag: `json:"a"`, err: ErrValue},
-		"func omitzero":         {typ: reflect.TypeFor[func()](), tag: `json:"a,omitzero"`},
-		"malformed tag":         {typ: reflect.TypeFor[int](), tag: `json:"a,"`, err: ErrValue},
+		"func behind six pointers": {
+			typ: reflect.TypeFor[******func()](), tag: `json:"a"`, err: ErrValue,
+		},
+		"func omitzero": {typ: reflect.TypeFor[func()](), tag: `json:"a,omitzero"`},
+		"malformed tag": {typ: reflect.TypeFor[int](), tag: `json:"a,"`, err: ErrValue},
 		"zero panicker omitzero": {
 			typ: reflect.TypeFor[zeroPanicker](), tag: `json:"a,omitzero"`, err: ErrValue,
 		},
@@ -213,7 +217,13 @@ func TestType(t *testing.T) {
 		"panicking marshaler ptr": {
 			typ: reflect.TypeFor[*panicker](),
 		},
-		"func":           {typ: reflect.TypeFor[func()](), err: ErrValue},
+		"func": {typ: reflect.TypeFor[func()](), err: ErrValue},
+		"func behind six pointers": {
+			typ: reflect.TypeFor[******func()](), err: ErrValue,
+		},
+		"duration behind six pointers": {
+			typ: reflect.TypeFor[******time.Duration](), err: ErrValue,
+		},
 		"chan":           {typ: reflect.TypeFor[chan int](), err: ErrValue},
 		"complex":        {typ: reflect.TypeFor[complex128](), err: ErrValue},
 		"unsafe pointer": {typ: reflect.TypeFor[unsafe.Pointer](), err: ErrValue},
