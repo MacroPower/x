@@ -123,12 +123,26 @@ func IsRecursiveContainerKind(k reflect.Kind) bool {
 	}
 }
 
+// IndirectType strips one level of unnamed-pointer indirection, mirroring
+// encoding/json/v2's indirectType. A named pointer type carries its own
+// method set and stays a leaf, so only an unnamed pointer unwraps, and only
+// one level deep.
+func IndirectType(t reflect.Type) reflect.Type {
+	if t.Kind() == reflect.Pointer && t.Name() == "" {
+		return t.Elem()
+	}
+
+	return t
+}
+
 // IsEmbeddedFallback reports whether t qualifies as encoding/json/v2's
 // embedded fallback under json:",embed": exactly [jsontext.Value], or a map
 // whose key kind is string and whose key type implements no marshal or
-// unmarshal method. The caller removes the one unnamed-pointer level v2's
-// indirectType unwraps before asking.
+// unmarshal method. It unwraps the one unnamed-pointer level v2's
+// indirectType removes (see [IndirectType]) before classifying.
 func IsEmbeddedFallback(t reflect.Type) bool {
+	t = IndirectType(t)
+
 	if t == TypeJSONTextValue {
 		return true
 	}

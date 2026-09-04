@@ -80,11 +80,6 @@ type Sighting struct {
 	// embedded struct. [encoding/json] omits such fields when the embedded
 	// pointer is nil, so they are not required.
 	Optional bool
-	// Tagged is true when the field's JSON name comes from an explicit json
-	// tag name rather than the Go field name. [encoding/json]'s tie-break for
-	// fields colliding on a JSON name at the same depth keeps the field only
-	// if exactly one of them is tagged; this records the input to that rule.
-	Tagged bool
 	// ComposeAllOf marks a synthetic sighting for an embedded type composed
 	// via allOf rather than a real promoted field. It is carried explicitly
 	// instead of being inferred from the synthetic name's prefix, so a user
@@ -274,9 +269,6 @@ func (c *Collector) phases(t reflect.Type) (Collection, Resolution, Result, erro
 // marking compares those fields against the enclosing resolution.
 func (c *Collector) promoted(col Collection) (map[reflect.Type][]Field, error) {
 	out := make(map[reflect.Type][]Field, len(col.Scanned))
-	if len(col.Scanned) == 0 {
-		return out, nil
-	}
 
 	var firstErr error
 
@@ -464,15 +456,12 @@ func (c *Collector) Collect(t reflect.Type) (Collection, error) {
 				}
 
 				if embedded {
-					ft := f.Type
 					// Only an unnamed pointer derefs, since v2's
 					// indirectType stops at a named pointer type, which then
 					// fails the non-struct embed check below like any other
 					// leaf.
-					embeddedViaPointer := ft.Kind() == reflect.Pointer && ft.Name() == ""
-					if embeddedViaPointer {
-						ft = ft.Elem()
-					}
+					ft := reflectkind.IndirectType(f.Type)
+					embeddedViaPointer := ft != f.Type
 
 					if ft.Kind() != reflect.Struct {
 						// V2 embeds only structs, plus the two fallback forms on
@@ -647,10 +636,7 @@ func (c *Collector) Collect(t reflect.Type) (Collection, error) {
 				// unexported field, which reflection forbids. V2 drops the
 				// field from its walk, so it neither conflicts nor records.
 				if !f.IsExported() {
-					ft := f.Type
-					if ft.Kind() == reflect.Pointer && ft.Name() == "" {
-						ft = ft.Elem()
-					}
+					ft := reflectkind.IndirectType(f.Type)
 
 					switch {
 					case ft.Kind() != reflect.Struct:
@@ -685,7 +671,7 @@ func (c *Collector) Collect(t reflect.Type) (Collection, error) {
 					info.JSONName,
 					Sighting{
 						StructField: f, Depth: depth, Optional: e.optional,
-						Tagged: info.TaggedName, Info: info,
+						Info:  info,
 						Ghost: e.ghost, GhostOwner: e.ghostOwner,
 					},
 					dup,
@@ -759,7 +745,7 @@ func Resolve(col Collection) Resolution {
 			var tagged []Sighting
 
 			for ci := range atMin {
-				if atMin[ci].Tagged {
+				if atMin[ci].Info.TaggedName {
 					tagged = append(tagged, atMin[ci])
 				}
 			}
@@ -828,10 +814,9 @@ func Classify(res Resolution, promoted map[reflect.Type][]Field) Result {
 			continue
 		}
 
+		// The walk records a sighting only under a non-empty JSON name, so
+		// Info.JSONName is the key this winner was resolved under.
 		info := w.Info
-		if info.JSONName == "" {
-			continue
-		}
 
 		outcomes[info.JSONName] = outcome{depth: w.Depth}
 
