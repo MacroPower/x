@@ -1508,18 +1508,15 @@ func (g *generator) buildFieldSchema(
 }
 
 // omitEmptyCanOmit reports whether a field of type t can ever be omitted by
-// json:",omitempty" under encoding/json/v2: the kinds whose encoding can be
-// an empty JSON value (a zero-length string, map, slice, or [0]-array; a nil
-// pointer or interface; a struct whose members all omit, which encodes {}),
-// plus any marshaler-bearing type, whose method may emit one (v2 checks the
-// encoded output). A plain bool or numeric field never encodes an empty
-// value, so the option never omits it and the field stays required, and so
-// does an [encoding/json.Number], the one string kind whose marshaler writes
-// 0 for the empty value. A struct kind answers true without inspecting its
-// fields: a struct that always encodes a member is never omitted, so the
-// answer is looser than v2 there, and looser is the safe direction for
-// required. The caller passes bearsMarshaler, which it computes only when
-// the kind alone cannot answer.
+// json:",omitempty" under encoding/json/v2: the kinds [kindCanOmit] admits,
+// plus any marshaler-bearing type, whose method may emit an empty value (v2
+// checks the encoded output). A plain bool or numeric field never encodes an
+// empty value, so the option never omits it and the field stays required.
+// An [encoding/json.Number] stays required too. It is the one string kind
+// whose marshaler writes 0 for the empty value, and this function alone
+// owns that exclusion, checked by type identity before either the kind or
+// the marshaler probe can answer true. The caller passes bearsMarshaler,
+// which it computes only when the kind alone cannot answer.
 func omitEmptyCanOmit(t reflect.Type, bearsMarshaler bool) bool {
 	if reflectkind.IsJSONNumber(t) {
 		return false
@@ -1528,13 +1525,19 @@ func omitEmptyCanOmit(t reflect.Type, bearsMarshaler bool) bool {
 	return kindCanOmit(t) || bearsMarshaler
 }
 
-// kindCanOmit reports whether t's kind alone can encode an empty JSON value,
-// the part of [omitEmptyCanOmit] that needs no marshaler probe.
+// kindCanOmit reports whether t's kind alone can encode an empty JSON value:
+// a zero-length string, map, slice, or [0]-array; a nil pointer or
+// interface; or a struct whose members all omit, which encodes {}. It is
+// the part of [omitEmptyCanOmit] that needs no marshaler probe, and it
+// answers from the kind alone, so every string kind is true here; the
+// [encoding/json.Number] exclusion is a type-identity fact that
+// omitEmptyCanOmit applies on its own. A struct kind answers true without
+// inspecting its fields: a struct that always encodes a member is never
+// omitted, so the answer is looser than v2 there, and looser is the safe
+// direction for required.
 func kindCanOmit(t reflect.Type) bool {
 	switch t.Kind() {
-	case reflect.String:
-		return !reflectkind.IsJSONNumber(t)
-	case reflect.Map, reflect.Slice, reflect.Pointer, reflect.Interface, reflect.Struct:
+	case reflect.String, reflect.Map, reflect.Slice, reflect.Pointer, reflect.Interface, reflect.Struct:
 		return true
 	case reflect.Array:
 		return t.Len() == 0
