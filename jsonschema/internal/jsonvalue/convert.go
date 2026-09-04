@@ -28,9 +28,9 @@ type walk struct {
 	// renders to a different shape than the converted value: a nil []any or
 	// map[string]any (null, where the empty instance writes [] or {}), a
 	// float32 (v1 formats the 32-bit shortest decimal, where the walk widens
-	// the bits to float64), an empty [jsonv1.Number] (v1 writes 0), and, with
-	// document set, a string or member name holding invalid UTF-8 (v1 writes
-	// U+FFFD).
+	// the bits to float64), a [jsonv1.Number] outside the JSON number grammar
+	// (v1 writes an empty one as 0 and refuses any other), and, with document
+	// set, a string or member name holding invalid UTF-8 (v1 writes U+FFFD).
 	render bool
 }
 
@@ -64,12 +64,13 @@ func FromGo(instance any) (Value, bool) {
 // holding one at any depth takes the round trip: a nil []any or
 // map[string]any, which v1 writes as null where the empty instance writes []
 // or {}; a float32, which v1 formats as the 32-bit shortest decimal where
-// FromGo widens the bits to float64 (0.1 against 0.10000000149011612); an
-// empty [jsonv1.Number], which v1 writes as 0; and a string or member name
-// holding invalid UTF-8, which v1 writes with U+FFFD in place of each bad
-// byte. FromDocument reports false where v has no JSON form (a func, a
-// channel, a cyclic value, a map v1 refuses) or its own marshaler panics,
-// and recovers the panic so the caller sees only the flag.
+// FromGo widens the bits to float64 (0.1 against 0.10000000149011612); a
+// [jsonv1.Number] outside the JSON number grammar, which v1 writes as 0 when
+// empty and refuses otherwise; and a string or member name holding invalid
+// UTF-8, which v1 writes with U+FFFD in place of each bad byte. FromDocument
+// reports false where v has no JSON form (a func, a channel, a cyclic value,
+// a map v1 refuses, a Number literal v1 cannot parse) or its own marshaler
+// panics, and recovers the panic so the caller sees only the flag.
 func FromDocument(v any) (Value, bool) {
 	w := &walk{onPath: map[[2]uintptr]bool{}, document: true}
 	if out, ok := w.value(v); ok && !w.render {
@@ -152,11 +153,12 @@ func (w *walk) value(instance any) (Value, bool) {
 		return NewString(v), true
 
 	case jsonv1.Number:
-		if v == "" {
+		out := NewNumber(string(v))
+		if out.num == numNone {
 			w.render = true
 		}
 
-		return NewNumber(string(v)), true
+		return out, true
 
 	case float32:
 		w.render = true

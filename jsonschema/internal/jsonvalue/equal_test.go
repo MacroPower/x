@@ -135,16 +135,6 @@ func TestEqual(t *testing.T) {
 			instance:  []any{jsonv1.Number("1")},
 			want:      true,
 		},
-		"unparseable literals equal by text": {
-			schemaVal: jsonv1.Number("abc"),
-			instance:  jsonv1.Number("abc"),
-			want:      true,
-		},
-		"unparseable literal never equals a number": {
-			schemaVal: jsonv1.Number("abc"),
-			instance:  jsonv1.Number("1"),
-			want:      false,
-		},
 	}
 
 	for name, tc := range tests {
@@ -154,6 +144,21 @@ func TestEqual(t *testing.T) {
 			assert.Equal(t, tc.want, document(t, tc.schemaVal).Equal(instance(t, tc.instance)))
 		})
 	}
+}
+
+// TestEqualUnparseableLiteral pins the two sides of a Number literal outside
+// the JSON number grammar: the document view refuses it, since v1 cannot
+// render it, so as a schema value it equals nothing; as a Go instance it
+// keeps its text and equals only another instance spelling the same text.
+func TestEqualUnparseableLiteral(t *testing.T) {
+	t.Parallel()
+
+	_, ok := jsonvalue.FromDocument(jsonv1.Number("abc"))
+	assert.False(t, ok, "the document view refuses a literal v1 cannot render")
+
+	literal := instance(t, jsonv1.Number("abc"))
+	assert.True(t, literal.Equal(instance(t, jsonv1.Number("abc"))))
+	assert.False(t, literal.Equal(instance(t, jsonv1.Number("1"))))
 }
 
 func TestHasDuplicates(t *testing.T) {

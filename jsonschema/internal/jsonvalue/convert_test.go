@@ -153,7 +153,8 @@ func (panicMarshaler) MarshalJSON() ([]byte, error) {
 // shapes that still take the render come back as v1 writes them: a float32
 // as its 32-bit shortest decimal, an empty Number as 0, and invalid UTF-8 in
 // a string or member name as U+FFFD, each at the top level and nested. The
-// refusals cover a value with no JSON form and a marshaler that panics.
+// refusals cover a value with no JSON form, a Number literal v1 cannot
+// parse, and a marshaler that panics.
 func TestFromDocument(t *testing.T) {
 	t.Parallel()
 
@@ -223,10 +224,15 @@ func TestFromDocument(t *testing.T) {
 			want: map[string]any{"n": jsonv1.Number("0")},
 			ok:   true,
 		},
-		"unparseable number keeps its text": {in: jsonv1.Number("abc"), want: jsonv1.Number("abc"), ok: true},
-		"invalid UTF-8 string":              {in: "\xff", want: "�", ok: true},
-		"invalid UTF-8 run":                 {in: "a\xff\xffb", want: "a��b", ok: true},
-		"nested invalid UTF-8 string":       {in: []any{"a", "\xff"}, want: []any{"a", "�"}, ok: true},
+		"unparseable number": {in: jsonv1.Number("abc"), want: nil, ok: false},
+		"nested unparseable number": {
+			in:   map[string]any{"n": jsonv1.Number("abc")},
+			want: nil,
+			ok:   false,
+		},
+		"invalid UTF-8 string":        {in: "\xff", want: "�", ok: true},
+		"invalid UTF-8 run":           {in: "a\xff\xffb", want: "a��b", ok: true},
+		"nested invalid UTF-8 string": {in: []any{"a", "\xff"}, want: []any{"a", "�"}, ok: true},
 		"invalid UTF-8 member name": {
 			in:   map[string]any{"\xff": 1},
 			want: map[string]any{"�": jsonv1.Number("1")},
