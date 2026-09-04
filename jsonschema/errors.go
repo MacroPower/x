@@ -18,9 +18,12 @@ var (
 	ErrUnsupportedType = errors.New("unsupported type")
 
 	// ErrUnsupportedMapKey is returned when [encoding/json/v2] cannot encode
-	// a map key as a JSON object member name. A string, integer, or float
-	// kind and any marshaler-bearing key are accepted; the exact
-	// [time.Duration] key is refused.
+	// the probe's filled map key as a JSON object member name. A string,
+	// integer, or float kind and any marshaler-bearing key are accepted. The
+	// exact [time.Duration] key is refused, since v2's duration codec
+	// pre-empts the integer-kind encoding, and so is an interface kind, which
+	// the probe fills as nil; v2 itself accepts such a map at run time when
+	// every key holds a string, a fact no type-level schema can state.
 	ErrUnsupportedMapKey = errors.New("unsupported map key type")
 
 	// ErrUnsupportedJSONOption is returned by generation when

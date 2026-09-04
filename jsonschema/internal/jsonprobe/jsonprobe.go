@@ -49,8 +49,9 @@ var (
 	// marshal.
 	ErrValue = errors.New("value refused by encoding/json/v2")
 
-	// ErrMapKey reports a map whose key type v2 cannot encode as an object
-	// member name.
+	// ErrMapKey reports a map whose filled key v2 cannot encode as an object
+	// member name. An interface-kind key fills as nil and is refused here,
+	// though v2 accepts the map at run time when every key holds a string.
 	ErrMapKey = errors.New("map key refused by encoding/json/v2")
 
 	// The nativeCodecs set holds the types v2 encodes through its own codec

@@ -62,7 +62,9 @@ marshaler methods promoted from an embedded field -> direct
 `encoding.TextMarshaler` -> kind-based reflection. A direct `json.Marshaler` is
 not consulted. `JSONSchemaExtender` runs only on a reflected schema. Every
 refusal at the kind-based step is `encoding/json/v2`'s own verdict, taken by
-`internal/jsonprobe` on a filled value.
+`internal/jsonprobe` on a filled value. The fill leaves an interface-kind map
+key nil, so an interface-keyed map is refused although v2 accepts one at run
+time when every key holds a string.
 
 ### Internal packages
 

@@ -55,10 +55,12 @@
 //     refuses: a func, chan, complex, or [unsafe.Pointer] kind, or
 //     [time.Duration], which v2's native codec refuses with no format.
 //   - [ErrUnsupportedMapKey] reports a map key [encoding/json/v2] cannot
-//     encode as an object member name. V2 accepts a string, integer, or float
-//     kind and any marshaler-bearing key. It refuses the exact [time.Duration]
-//     key, since its native duration codec pre-empts the integer-kind
-//     encoding.
+//     encode as an object member name on the probe's filled value. V2 accepts
+//     a string, integer, or float kind and any marshaler-bearing key. It
+//     refuses the exact [time.Duration] key, since its native duration codec
+//     pre-empts the integer-kind encoding, and it refuses the nil the probe
+//     fills an interface-kind key with, though at run time it accepts such a
+//     map whenever every key holds a string.
 //   - [ErrInvalidJSONField] reports a struct declaration or field
 //     [encoding/json/v2] refuses: a malformed json tag, two fields of one
 //     struct claiming one JSON name, a tagged unexported field, an invalid
