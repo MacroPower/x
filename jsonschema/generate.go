@@ -18,13 +18,13 @@ import (
 // lets one option value serve several entry points, the way [WithRefResolver]
 // serves both [ValidateOption] and [InlineOption].
 type GenerateOption interface {
-	applyGenerate(g *generator)
+	applyGenerate(c *generatorConfig)
 }
 
 // generateOptionFunc adapts a function to [GenerateOption].
-type generateOptionFunc func(*generator)
+type generateOptionFunc func(*generatorConfig)
 
-func (f generateOptionFunc) applyGenerate(g *generator) { f(g) }
+func (f generateOptionFunc) applyGenerate(c *generatorConfig) { f(c) }
 
 // WithTagInterpreter registers a [TagInterpreter] under the struct tag key
 // it reads (e.g. "validate"), following [net/http.Handle]: the name lives at
@@ -33,7 +33,7 @@ func (f generateOptionFunc) applyGenerate(g *generator) { f(g) }
 // [TagInterpreterFunc] adapts a bare function. A nil t or an empty key is
 // ignored.
 func WithTagInterpreter(key string, t TagInterpreter) GenerateOption {
-	return generateOptionFunc(func(g *generator) {
+	return generateOptionFunc(func(g *generatorConfig) {
 		if t != nil && key != "" {
 			g.tagInterpreters = append(g.tagInterpreters, tagInterpreterRegistration{key: key, interp: t})
 		}
@@ -53,7 +53,7 @@ type tagInterpreterRegistration struct {
 // substitutes another source. The last registration wins, and a nil p
 // restores the default (no provider), leaving descriptions unset.
 func WithDescriptionProvider(p DescriptionProvider) GenerateOption {
-	return generateOptionFunc(func(g *generator) {
+	return generateOptionFunc(func(g *generatorConfig) {
 		g.descriptionProvider = p
 	})
 }
@@ -69,7 +69,7 @@ func WithDescriptionProvider(p DescriptionProvider) GenerateOption {
 // discipline [WithTypeSchema] documents, and [JSONSchemaExtender] is not
 // called for types it provides.
 func WithTypeSchemaProvider(p TypeSchemaProvider) GenerateOption {
-	return generateOptionFunc(func(g *generator) {
+	return generateOptionFunc(func(g *generatorConfig) {
 		if p != nil {
 			g.typeProviders = append(g.typeProviders, p)
 		}
@@ -87,7 +87,7 @@ func WithTypeSchemaProvider(p TypeSchemaProvider) GenerateOption {
 // types whose schema a registered provider or [JSONSchemaProvider] supplied.
 // [TypeSchemaExtenderFunc] adapts a bare function. A nil e is ignored.
 func WithTypeSchemaExtender(e TypeSchemaExtender) GenerateOption {
-	return generateOptionFunc(func(g *generator) {
+	return generateOptionFunc(func(g *generatorConfig) {
 		if e != nil {
 			g.typeExtenders = append(g.typeExtenders, e)
 		}
@@ -163,7 +163,7 @@ func (p exactTypeProvider) SchemaForType(_ context.Context, tc TypeContext) (Typ
 // so mutating through a pointer, slice, or map element held inside one of those
 // values can still leak.
 func WithTypeSchema(t reflect.Type, ts TypeSchema) GenerateOption {
-	return generateOptionFunc(func(g *generator) {
+	return generateOptionFunc(func(g *generatorConfig) {
 		g.typeProviders = append(g.typeProviders, exactTypeProvider{t: t, ts: ts})
 	})
 }
@@ -211,7 +211,7 @@ func (f NamerFunc) SchemaName(tc TypeContext) string { return f(tc) }
 // Go types. Default: uses the type's short name (e.g., "MyStruct").
 // A nil n restores the default namer.
 func WithNamer(n Namer) GenerateOption {
-	return generateOptionFunc(func(g *generator) {
+	return generateOptionFunc(func(g *generatorConfig) {
 		if n == nil {
 			n = defaultNamerFunc()
 		}
@@ -224,7 +224,7 @@ func WithNamer(n Namer) GenerateOption {
 // $defs (or definitions for Draft-07) and referenced via $ref.
 // Default: true.
 func WithDefinitions(enabled bool) GenerateOption {
-	return generateOptionFunc(func(g *generator) { g.definitions = enabled })
+	return generateOptionFunc(func(g *generatorConfig) { g.definitions = enabled })
 }
 
 // WithAdditionalProperties controls whether additional properties are allowed
@@ -236,7 +236,7 @@ func WithDefinitions(enabled bool) GenerateOption {
 // stays fully open. The fallback's value type is still resolved, so one with
 // no representation refuses generation under every option.
 func WithAdditionalProperties(allowed bool) GenerateOption {
-	return generateOptionFunc(func(g *generator) { g.additionalProperties = allowed })
+	return generateOptionFunc(func(g *generatorConfig) { g.additionalProperties = allowed })
 }
 
 // WithJSONOptions makes generation honor [encoding/json/v2] marshal options
@@ -276,7 +276,7 @@ func WithAdditionalProperties(allowed bool) GenerateOption {
 // [json.MatchCaseInsensitiveNames] and [json.RejectUnknownMembers],
 // [json.Deterministic], and jsontext formatting.
 func WithJSONOptions(opts ...json.Options) GenerateOption {
-	return generateOptionFunc(func(g *generator) {
+	return generateOptionFunc(func(g *generatorConfig) {
 		// JoinOptions skips nil sources, so the first call needs no guard.
 		joined := json.JoinOptions(g.jsonOpts, json.JoinOptions(opts...))
 		g.jsonOpts = joined
@@ -325,7 +325,7 @@ func WithJSONOptions(opts ...json.Options) GenerateOption {
 // the $ref into an allOf wrap, the same shape tag defaults produce, because
 // Draft-07 readers ignore keywords beside $ref.
 func WithDefaultsFrom(instance any) GenerateOption {
-	return generateOptionFunc(func(g *generator) {
+	return generateOptionFunc(func(g *generatorConfig) {
 		g.defaultsFrom = instance
 		g.defaultsFromSet = instance != nil
 	})
@@ -340,7 +340,7 @@ func WithDefaultsFrom(instance any) GenerateOption {
 // on the definitions entry instead, shared by every occurrence of the type.
 // Defaults to false.
 func WithRootTitle(enabled bool) GenerateOption {
-	return generateOptionFunc(func(g *generator) { g.rootTitle = enabled })
+	return generateOptionFunc(func(g *generatorConfig) { g.rootTitle = enabled })
 }
 
 // seedDefaults seeds the [WithDefaultsFrom] instance's top-level keys onto the
@@ -358,8 +358,8 @@ func WithRootTitle(enabled bool) GenerateOption {
 // of a pointer field, into the Draft-07 allOf wrap beside a $ref), and the
 // node's own null decision gates a null. A property a hook declared as a
 // literal (an override root's TypeSchema.Value, or a slot an extender
-// replaced) takes it on the literal, gated by [generator.declaredAdmitsNull].
-func (g *generator) seedDefaults(root *node, rootType reflect.Type) error {
+// replaced) takes it on the literal, gated by [run.declaredAdmitsNull].
+func (g *run) seedDefaults(root *node, rootType reflect.Type) error {
 	values, err := g.marshalDefaults(rootType)
 	if err != nil {
 		return err
@@ -414,7 +414,7 @@ func (g *generator) seedDefaults(root *node, rootType reflect.Type) error {
 // marshalDefaults marshals the [WithDefaultsFrom] instance and decodes its
 // top-level members, checking that the instance is a value of rootType that
 // marshals to a JSON object.
-func (g *generator) marshalDefaults(rootType reflect.Type) (map[string]jsontext.Value, error) {
+func (g *run) marshalDefaults(rootType reflect.Type) (map[string]jsontext.Value, error) {
 	instance := g.defaultsFrom
 
 	// DerefType guards against pointer cycles (type P *P, or a mutually
@@ -489,7 +489,7 @@ func (g *generator) marshalDefaults(rootType reflect.Type) (map[string]jsontext.
 // than on the reference.
 //
 // A not goes unread, since it inverts its subschema's answer.
-func (g *generator) declaredAdmitsNull(s *Schema, seen map[*Schema]bool) bool {
+func (g *run) declaredAdmitsNull(s *Schema, seen map[*Schema]bool) bool {
 	if s == nil || seen[s] {
 		return false
 	}
@@ -544,13 +544,13 @@ func (g *generator) declaredAdmitsNull(s *Schema, seen map[*Schema]bool) bool {
 // document their own concurrency contracts ([DescriptionProvider],
 // [RefResolver]).
 type Generator struct {
-	proto *generator
+	config *generatorConfig
 }
 
 // NewGenerator returns a [Generator] with the given options applied. Nil
 // options are skipped, so an optional option can be passed unconditionally.
 func NewGenerator(opts ...GenerateOption) *Generator {
-	return &Generator{proto: newGenerator(opts)}
+	return &Generator{config: newConfig(opts)}
 }
 
 // Generate generates a JSON Schema for the given [reflect.Type] under the
@@ -559,7 +559,7 @@ func NewGenerator(opts ...GenerateOption) *Generator {
 //
 //	jsonschema.GenerateWith[MyType](ctx, gen)
 func (gn *Generator) Generate(ctx context.Context, t reflect.Type) (*Schema, error) {
-	return gn.proto.forRun(ctx).generate(t)
+	return gn.config.forRun(ctx).generate(t)
 }
 
 // GenerateFor generates a JSON Schema for the type parameter T.

@@ -37,7 +37,7 @@ type draftOption struct {
 	d Draft
 }
 
-func (o draftOption) applyGenerate(g *generator) { g.draft = o.d }
+func (o draftOption) applyGenerate(c *generatorConfig) { c.draft = o.d }
 
 func (o draftOption) applyValidate(v *validator) { v.draftOverride = &o.d }
 

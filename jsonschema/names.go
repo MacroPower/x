@@ -32,7 +32,7 @@ func defaultNamerFunc() Namer {
 // JSON Pointer $ref token (such as '/' and '~') cannot produce a dangling or
 // misresolving reference. The sanitizer never empties a non-empty name, so the
 // deferral semantics are preserved.
-func (g *generator) schemaName(t reflect.Type) string {
+func (g *run) schemaName(t reflect.Type) string {
 	if name := g.namer.SchemaName(TypeContext{Type: t, Draft: g.draft}); name != "" {
 		return jsonptr.SafeToken(name)
 	}
@@ -42,7 +42,7 @@ func (g *generator) schemaName(t reflect.Type) string {
 
 // shouldExtract reports whether a type should be extracted to the definitions
 // map and referenced via $ref (as opposed to being inlined).
-func (g *generator) shouldExtract(t reflect.Type) bool {
+func (g *run) shouldExtract(t reflect.Type) bool {
 	if !g.definitions {
 		return false
 	}
@@ -67,7 +67,7 @@ func (g *generator) shouldExtract(t reflect.Type) bool {
 // with the full import path if collisions persist. It runs before render, so
 // renderRef emits final names directly; because refs are defEntry pointer
 // links, no ref re-pointing pass is needed.
-func (g *generator) assignDefNames() {
+func (g *run) assignDefNames() {
 	// Group entries by their pre-disambiguation base name.
 	byBase := map[string][]*defEntry{}
 	for _, e := range g.defs {

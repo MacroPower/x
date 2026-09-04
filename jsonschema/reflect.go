@@ -49,30 +49,11 @@ var (
 	}
 )
 
-// generator holds the state for a single schema generation run.
-type generator struct {
-	// The caller's context for this generation run, passed to the
-	// DescriptionProvider with every comment lookup.
-	ctx context.Context
-
-	typeProviders     []TypeSchemaProvider
-	namer             Namer
-	typeToDef         map[reflect.Type]*defEntry
-	defs              []*defEntry
-	typeOverrideCache map[reflect.Type]typeOverrideResult
-	visiting          map[reflect.Type]bool
-	// Fields resolves each struct type's JSON fields. It carries the in-flight
-	// set that terminates the ghost recursion, so a mutually composed pair does
-	// not recurse through its own shadow analysis forever.
-	fields *fieldset.Collector
-	// RefAliasing tracks the types whose [TypeSchema.Ref] alias is being
-	// resolved, so an alias chain that reaches one of them again (a self-Ref, or
-	// a mutual A -> B -> A cycle) is reported instead of recursing forever.
-	refAliasing map[reflect.Type]bool
-	// Probe is the [encoding/json/v2] refusal oracle for this run: it answers
-	// whether v2 refuses a struct declaration, a field, or a type under the
-	// run's json options, and memoizes each answer.
-	probe *jsonprobe.Probe
+// generatorConfig is the option set one [Generator] or one-shot entry point
+// applies once. Generation only reads it, so concurrent runs share one value.
+type generatorConfig struct {
+	typeProviders []TypeSchemaProvider
+	namer         Namer
 	// DefaultsFrom is the WithDefaultsFrom instance; defaultsFromSet
 	// distinguishes an explicit nil instance from the option being absent.
 	defaultsFrom        any
@@ -97,7 +78,35 @@ type generator struct {
 	rootTitle       bool
 }
 
-// typeOverrideResult memoizes one [generator.resolveTypeSchema] consultation so
+// run holds the state of a single schema generation run over one
+// configuration: the caller's context, the def table, the per-type memos,
+// and the v2 probe. Every phase method hangs off it.
+type run struct {
+	*generatorConfig
+
+	// The caller's context for this generation run, passed to the
+	// DescriptionProvider with every comment lookup.
+	ctx context.Context
+
+	typeToDef         map[reflect.Type]*defEntry
+	typeOverrideCache map[reflect.Type]typeOverrideResult
+	visiting          map[reflect.Type]bool
+	// Fields resolves each struct type's JSON fields. It carries the in-flight
+	// set that terminates the ghost recursion, so a mutually composed pair does
+	// not recurse through its own shadow analysis forever.
+	fields *fieldset.Collector
+	// RefAliasing tracks the types whose [TypeSchema.Ref] alias is being
+	// resolved, so an alias chain that reaches one of them again (a self-Ref, or
+	// a mutual A -> B -> A cycle) is reported instead of recursing forever.
+	refAliasing map[reflect.Type]bool
+	// Probe is the [encoding/json/v2] refusal oracle for this run: it answers
+	// whether v2 refuses a struct declaration, a field, or a type under the
+	// run's json options, and memoizes each answer.
+	probe *jsonprobe.Probe
+	defs  []*defEntry // every def entry, in build order
+}
+
+// typeOverrideResult memoizes one [run.resolveTypeSchema] consultation so
 // the registered type providers run at most once per type per run, even when the
 // allOf-composition probe and the real build both ask about the same type.
 type typeOverrideResult struct {
@@ -106,12 +115,11 @@ type typeOverrideResult struct {
 	resolved bool
 }
 
-// newGenerator returns a configuration-only generator prototype: the options
-// are applied, but no per-run state is initialized. Each generation run
-// derives its state from the prototype via [generator.forRun]. Nil options
-// are skipped, so an optional option can be passed unconditionally.
-func newGenerator(opts []GenerateOption) *generator {
-	g := &generator{
+// newConfig applies the options once and returns the configuration every
+// run derives from through [generatorConfig.forRun]. Nil options are
+// skipped, so an optional option can be passed unconditionally.
+func newConfig(opts []GenerateOption) *generatorConfig {
+	c := &generatorConfig{
 		draft:       Draft2020,
 		namer:       defaultNamerFunc(),
 		definitions: true,
@@ -119,42 +127,41 @@ func newGenerator(opts []GenerateOption) *generator {
 
 	for _, opt := range opts {
 		if opt != nil {
-			opt.applyGenerate(g)
+			opt.applyGenerate(c)
 		}
 	}
 
-	// Resolve the draft profile after options settle g.draft, so every
+	// Resolve the draft profile after options settle c.draft, so every
 	// generation site reads the policy through g.profile rather than comparing
-	// g.draft. Each run copies the prototype by value via forRun, carrying it
-	// along.
-	g.profile = g.draft.profile()
+	// g.draft.
+	c.profile = c.draft.profile()
+
+	return c
+}
+
+// forRun starts one generation run over the configuration. The per-run maps,
+// the probe, and the context are fresh, so concurrent runs from one
+// configuration never share mutable state.
+func (c *generatorConfig) forRun(ctx context.Context) *run {
+	g := &run{
+		generatorConfig:   c,
+		ctx:               ctx,
+		typeToDef:         map[reflect.Type]*defEntry{},
+		typeOverrideCache: map[reflect.Type]typeOverrideResult{},
+		visiting:          map[reflect.Type]bool{},
+		refAliasing:       map[reflect.Type]bool{},
+		probe:             jsonprobe.New(c.jsonOpts),
+	}
+
+	// Bind to the run, since needsAllOfComposition reads the per-run context
+	// and type-override cache.
+	g.fields = fieldset.NewCollector(g.needsAllOfComposition)
 
 	return g
 }
 
-// forRun derives one generation run from the prototype. The configuration
-// (providers, extenders, interpreters, namer, and flags) is shared, since
-// generation only reads it. The per-run maps and the context are fresh, so
-// concurrent runs from one prototype never share mutable state.
-func (g *generator) forRun(ctx context.Context) *generator {
-	run := *g
-	run.ctx = ctx
-	run.typeToDef = map[reflect.Type]*defEntry{}
-	run.defs = nil
-	run.typeOverrideCache = map[reflect.Type]typeOverrideResult{}
-	run.visiting = map[reflect.Type]bool{}
-	run.refAliasing = map[reflect.Type]bool{}
-	run.probe = jsonprobe.New(g.jsonOpts)
-
-	// Bind to run rather than the prototype, since needsAllOfComposition reads
-	// the per-run context and type-override cache.
-	run.fields = fieldset.NewCollector(run.needsAllOfComposition)
-
-	return &run
-}
-
 // generate produces the root schema for the given type.
-func (g *generator) generate(t reflect.Type) (*Schema, error) {
+func (g *run) generate(t reflect.Type) (*Schema, error) {
 	// A WithJSONOptions refusal surfaces per run, so NewGenerator-then-
 	// Generate reports it the same way the one-shot entry points do.
 	if g.jsonOptsErr != nil {
@@ -262,8 +269,8 @@ func (g *generator) generate(t reflect.Type) (*Schema, error) {
 // readers ignore keywords beside $ref, so when a self-referential root stays
 // a bare $ref into definitions, the title goes on the definitions entry it
 // targets instead, shared by every occurrence of the type;
-// [generator.seedDefaults] redirects the same way.
-func (g *generator) rootTitleTarget(schema *Schema, root *node, rendered map[*defEntry]*Schema) *Schema {
+// [run.seedDefaults] redirects the same way.
+func (g *run) rootTitleTarget(schema *Schema, root *node, rendered map[*defEntry]*Schema) *Schema {
 	// Draft-07 readers ignore keywords beside a bare $ref, so a self-referential
 	// root that stayed a $ref is titled on its $defs body instead.
 	if !g.profile.honorRefSiblings && schema.Ref != "" && root.kind == kindRef {
@@ -275,8 +282,8 @@ func (g *generator) rootTitleTarget(schema *Schema, root *node, rendered map[*de
 
 // schemaForType produces the IR node for the given type. Pointer reports a
 // pointer or interface occurrence at any level above t, which the node records
-// as a fact for [generator.resolveNullability].
-func (g *generator) schemaForType(t reflect.Type, pointer bool) (*node, error) {
+// as a fact for [run.resolveNullability].
+func (g *run) schemaForType(t reflect.Type, pointer bool) (*node, error) {
 	// Follow pointers. A pointer at any level makes the occurrence nullable.
 	if t.Kind() == reflect.Pointer {
 		pointer = true
@@ -445,7 +452,7 @@ func (g *generator) schemaForType(t reflect.Type, pointer bool) (*node, error) {
 // last-registration-wins behavior. An ErrTypeNotHandled answer passes the
 // type to the next provider; any other provider error stops the
 // consultation and aborts generation.
-func (g *generator) resolveTypeSchema(t reflect.Type) (TypeSchema, bool, error) {
+func (g *run) resolveTypeSchema(t reflect.Type) (TypeSchema, bool, error) {
 	// Memoize per run so a stateful or expensive provider is consulted once per
 	// type: the allOf-composition probe in needsAllOfComposition and the real
 	// build both resolve the same type, and a non-deterministic provider would
@@ -464,7 +471,7 @@ func (g *generator) resolveTypeSchema(t reflect.Type) (TypeSchema, bool, error) 
 
 // resolveTypeSchemaUncached performs the provider consultation that
 // resolveTypeSchema memoizes.
-func (g *generator) resolveTypeSchemaUncached(t reflect.Type) (TypeSchema, bool, error) {
+func (g *run) resolveTypeSchemaUncached(t reflect.Type) (TypeSchema, bool, error) {
 	tc := TypeContext{Type: t, Draft: g.draft}
 	for _, v := range slices.Backward(g.typeProviders) {
 		ts, err := v.SchemaForType(g.ctx, tc)
@@ -486,7 +493,7 @@ func (g *generator) resolveTypeSchemaUncached(t reflect.Type) (TypeSchema, bool,
 // TypeSchemaProvider (WithTypeSchemaProvider or WithTypeSchema). A zero
 // TypeSchema marks the type unrestricted, mirroring a JSONSchemaProvider
 // returning a zero TypeSchema.
-func (g *generator) handleOverrideType(t reflect.Type, ts TypeSchema, pointer bool) (*node, error) {
+func (g *run) handleOverrideType(t reflect.Type, ts TypeSchema, pointer bool) (*node, error) {
 	return g.finishTypeOverride(t, ts, pointer)
 }
 
@@ -513,7 +520,7 @@ func (g *generator) handleOverrideType(t reflect.Type, ts TypeSchema, pointer bo
 // those too, so a tag interpreter or JSONSchemaExtender that mutates them in
 // place (appending to Enum, reassigning Const, writing into Extra) cannot reach
 // back into an override or provider schema reused across Generate calls.
-func (g *generator) finishTypeOverride(t reflect.Type, ts TypeSchema, pointer bool) (*node, error) {
+func (g *run) finishTypeOverride(t reflect.Type, ts TypeSchema, pointer bool) (*node, error) {
 	err := checkTypeSchemaExclusive(t, ts)
 	if err != nil {
 		return nil, err
@@ -591,7 +598,7 @@ func checkTypeSchemaExclusive(t reflect.Type, ts TypeSchema) error {
 // The alias's own stance rides on the reference node, where the null pass
 // applies it after the target's recorded stance and before the occurrence's
 // pointer-ness.
-func (g *generator) refTypeOverride(t reflect.Type, ts TypeSchema, pointer bool) (*node, error) {
+func (g *run) refTypeOverride(t reflect.Type, ts TypeSchema, pointer bool) (*node, error) {
 	// The alias resolves through schemaForType, which consults the override
 	// chain again for the target; a Ref naming its own type, directly or through
 	// a chain of aliases, would recurse forever. Re-entering a type whose alias
@@ -632,7 +639,7 @@ func (g *generator) refTypeOverride(t reflect.Type, ts TypeSchema, pointer bool)
 // the def body aliases the pointer into the node graph. The shared
 // finishTypeOverride clones it first, so the provider's source schema is never
 // corrupted.
-func (g *generator) handleProviderType(t reflect.Type, pointer bool) (*node, error) {
+func (g *run) handleProviderType(t reflect.Type, pointer bool) (*node, error) {
 	provided, err := callProvider(g.ctx, TypeContext{Type: t, Draft: g.draft})
 	if err != nil {
 		return nil, err
@@ -645,7 +652,7 @@ func (g *generator) handleProviderType(t reflect.Type, pointer bool) (*node, err
 // type-level post-processing (comments, extender, $defs extraction) per
 // the processing order. The node records the occurrence's pointer-ness and
 // the extender's stance for the null pass.
-func (g *generator) handleBuiltinType(t reflect.Type, s *Schema, pointer bool) (*node, error) {
+func (g *run) handleBuiltinType(t reflect.Type, s *Schema, pointer bool) (*node, error) {
 	value := &node{kind: kindValue, payload: s, occ: occurrence{pointer: pointer}}
 
 	// Comment lookup is keyed by named type; the extender runs for unnamed
@@ -678,7 +685,7 @@ func (g *generator) handleBuiltinType(t reflect.Type, s *Schema, pointer bool) (
 // that admits null renders it as the ["null", "string"] type list. A []byte
 // carries no const/enum, so the type-list encoding never has to flip to the
 // anyOf form.
-func (g *generator) byteSliceNode(pointer bool) *node {
+func (g *run) byteSliceNode(pointer bool) *node {
 	return &node{
 		kind:    kindValue,
 		payload: &Schema{ContentEncoding: content.Base64},
@@ -688,9 +695,9 @@ func (g *generator) byteSliceNode(pointer bool) *node {
 
 // builtinOverride returns a schema for well-known types, if applicable. A byte
 // slice is deliberately not here: it is a nilable container, built through
-// [generator.byteSliceNode] on the slice reflection path so both an exact []byte
+// [run.byteSliceNode] on the slice reflection path so both an exact []byte
 // and a named byte-slice type share one encoding.
-func (g *generator) builtinOverride(t reflect.Type) (*Schema, bool) {
+func (g *run) builtinOverride(t reflect.Type) (*Schema, bool) {
 	switch t {
 	case typeTime:
 		return &Schema{Type: typename.String, Format: formatDateTime}, true
@@ -731,17 +738,17 @@ func boundedInteger(minimum, maximum float64) *Schema {
 // scalarNode wraps a bare scalar payload in a value node recording the
 // occurrence's pointer-ness, so render applies the anyOf null wrapper if and
 // only if the position admits null.
-func (g *generator) scalarNode(payload *Schema, pointer bool) *node {
+func (g *run) scalarNode(payload *Schema, pointer bool) *node {
 	return &node{kind: kindValue, payload: payload, occ: occurrence{pointer: pointer}}
 }
 
 // schemaForKind handles the kind-based reflection step, producing a node. The
 // v2 probe answers first for every kind but struct, whose declaration
-// [generator.buildStructSchema] probes on its own: a func, chan, complex, or
+// [run.buildStructSchema] probes on its own: a func, chan, complex, or
 // [unsafe.Pointer] kind, a [time.Duration] (which v2's native codec refuses
 // with no format), and a map key v2 cannot name are all refused here, with
 // v2's own reason.
-func (g *generator) schemaForKind(t reflect.Type, pointer bool) (*node, error) {
+func (g *run) schemaForKind(t reflect.Type, pointer bool) (*node, error) {
 	if t.Kind() != reflect.Struct {
 		err := g.probeType(t)
 		if err != nil {
@@ -820,7 +827,7 @@ func (g *generator) schemaForKind(t reflect.Type, pointer bool) (*node, error) {
 // probeType maps the v2 probe's verdict on t onto the generation sentinels: a
 // key v2 cannot name is [ErrUnsupportedMapKey], any other refusal is
 // [ErrUnsupportedType].
-func (g *generator) probeType(t reflect.Type) error {
+func (g *run) probeType(t reflect.Type) error {
 	err := g.probe.Type(t)
 
 	switch {
@@ -849,7 +856,7 @@ const (
 // under [jsonv2.FormatNilSliceAsNull], whose marshal writes null for the nil
 // slice. The node records the container kind and the null pass reads the
 // flag.
-func (g *generator) schemaForSlice(t reflect.Type, pointer bool) (*node, error) {
+func (g *run) schemaForSlice(t reflect.Type, pointer bool) (*node, error) {
 	// An exact []byte marshals to a base64 string in encoding/json/v2. Only
 	// the unnamed builtin element gets that encoding: a named byte element
 	// makes the slice a JSON array of numbers.
@@ -875,7 +882,7 @@ func (g *generator) schemaForSlice(t reflect.Type, pointer bool) (*node, error) 
 // items-as-array form. MinItems/maxItems pin the length. Each element schema is
 // generated independently so the result is a tree (no shared sub-schema
 // pointers), which the validator requires.
-func (g *generator) schemaForArray(t reflect.Type, pointer bool) (*node, error) {
+func (g *run) schemaForArray(t reflect.Type, pointer bool) (*node, error) {
 	// A [N]byte with the unnamed builtin element marshals as one base64
 	// string under encoding/json/v2, and unmarshaling requires the string to
 	// decode to exactly N bytes, so the encoded length is pinned to the
@@ -917,12 +924,12 @@ func (g *generator) schemaForArray(t reflect.Type, pointer bool) (*node, error) 
 }
 
 // schemaForMap generates a schema for map types. The key was vetted by the
-// probe in [generator.schemaForKind]. A nil map marshals as {} under
+// probe in [run.schemaForKind]. A nil map marshals as {} under
 // encoding/json/v2's defaults (not null), so a bare map occurrence admits no
 // null; a pointer occurrence does, and so does every occurrence under
 // [jsonv2.FormatNilMapAsNull], whose marshal writes null for the nil map. The
 // node records the container kind and the null pass reads the flag.
-func (g *generator) schemaForMap(t reflect.Type, pointer bool) (*node, error) {
+func (g *run) schemaForMap(t reflect.Type, pointer bool) (*node, error) {
 	val, err := g.schemaForType(t.Elem(), false)
 	if err != nil {
 		return nil, fmt.Errorf("map value type: %w", err)
@@ -937,7 +944,7 @@ func (g *generator) schemaForMap(t reflect.Type, pointer bool) (*node, error) {
 }
 
 // schemaForStruct generates a schema for struct types.
-func (g *generator) schemaForStruct(t reflect.Type, pointer bool) (*node, error) {
+func (g *run) schemaForStruct(t reflect.Type, pointer bool) (*node, error) {
 	// Cycle detection: even when definitions are disabled, cyclic types must
 	// emit $defs/$ref to prevent infinite recursion.
 	if g.visiting[t] {
@@ -993,7 +1000,7 @@ func (g *generator) schemaForStruct(t reflect.Type, pointer bool) (*node, error)
 // (FieldContext.Parent) sees a view of it with every sibling's bare shape, and
 // a type-level extender sees a view of the whole object, whose edits
 // [node.absorbView] reads back.
-func (g *generator) buildStructSchema(t reflect.Type) (*node, Nullability, error) {
+func (g *run) buildStructSchema(t reflect.Type) (*node, Nullability, error) {
 	s := &Schema{
 		Type: typename.Object,
 	}
@@ -1020,7 +1027,7 @@ func (g *generator) buildStructSchema(t reflect.Type) (*node, Nullability, error
 	}
 
 	// Process fields using encoding/json rules. Only the nodes are built here;
-	// the field-level hooks run in [generator.applyFieldHooks] once the whole
+	// the field-level hooks run in [run.applyFieldHooks] once the whole
 	// graph exists and every null decision is final.
 	resolved, err := g.fields.Of(t)
 	if err != nil {
@@ -1184,7 +1191,7 @@ func (g *generator) buildStructSchema(t reflect.Type) (*node, Nullability, error
 
 // needsAllOfComposition reports whether an embedded struct type should be
 // composed via allOf rather than having its fields promoted.
-func (g *generator) needsAllOfComposition(t reflect.Type) bool {
+func (g *run) needsAllOfComposition(t reflect.Type) bool {
 	// Check type provider overrides (WithTypeSchemaProvider / WithTypeSchema).
 	// A provider error counts as intercepted: the embed composes via allOf and
 	// the deterministic provider reports the same error when the embedded
@@ -1217,8 +1224,8 @@ func (g *generator) needsAllOfComposition(t reflect.Type) bool {
 // buildFieldSchema generates a struct field's node, applies the json:",string"
 // override and the jsonschema tag's type= pair, and registers the node in the
 // parent's props, PropertyOrder, and required list. The other field-level
-// hooks run in [generator.applyFieldHooks] once the graph is complete.
-func (g *generator) buildFieldSchema(
+// hooks run in [run.applyFieldHooks] once the graph is complete.
+func (g *run) buildFieldSchema(
 	parentType reflect.Type,
 	fi fieldset.Field,
 	parent *node,
@@ -1253,7 +1260,7 @@ func (g *generator) buildFieldSchema(
 	// reflection: a type a [WithTypeSchemaFor] override or a provider declares
 	// is the caller's to describe, and a type v2 refuses with or without the
 	// flag ([time.Duration]) is answered as it is unflagged, so the field
-	// builds through [generator.schemaForType] first and the flag's refusal
+	// builds through [run.schemaForType] first and the flag's refusal
 	// stands only when that build was kind-based.
 	//
 	// The marshaler probe below serves the omitempty decision alone, and
@@ -1352,16 +1359,16 @@ func (g *generator) buildFieldSchema(
 // tag to a view of the field's base and rebuilds the node over it, so the
 // override is a fact of the graph before the null pass runs. The rebuilt node
 // keeps the node it replaced, whose decision the tag's other directives read
-// in [generator.applyFieldTag]. A tag with no valid type= pair, or one the
+// in [run.applyFieldTag]. A tag with no valid type= pair, or one the
 // parser refuses, leaves the node as built.
-func (g *generator) applyTypeOverrideDirective(fieldNode *node, fi fieldset.Field) *node {
+func (g *run) applyTypeOverrideDirective(fieldNode *node, fi fieldset.Field) *node {
 	tag, ok := fi.StructField.Tag.Lookup("jsonschema")
 	if !ok {
 		return fieldNode
 	}
 
 	// A malformed tag is reported where the tag is applied, in
-	// [generator.applyFieldTag], which parses it again.
+	// [run.applyFieldTag], which parses it again.
 	directives, _, err := tagparse.Parse(tag)
 	if err != nil {
 		return fieldNode
@@ -1398,7 +1405,7 @@ func (g *generator) applyTypeOverrideDirective(fieldNode *node, fi fieldset.Fiel
 // in place. A struct is visited once, in walk order from the root, then each
 // def not reached from it. An error names the struct whose schema carries the
 // field, behind the field path from the root.
-func (g *generator) applyFieldHooks(root *node) error {
+func (g *run) applyFieldHooks(root *node) error {
 	seen := map[*defEntry]bool{}
 
 	err := g.hookNodes(root, "", seen)
@@ -1424,7 +1431,7 @@ func (g *generator) applyFieldHooks(root *node) error {
 
 // hookNodes walks the graph beneath n, running the hooks of every object node
 // it reaches; prefix is the field path to n, for error reports.
-func (g *generator) hookNodes(n *node, prefix string, seen map[*defEntry]bool) error {
+func (g *run) hookNodes(n *node, prefix string, seen map[*defEntry]bool) error {
 	if n == nil {
 		return nil
 	}
@@ -1476,7 +1483,7 @@ func (g *generator) hookNodes(n *node, prefix string, seen map[*defEntry]bool) e
 
 // hookStruct runs the field-level hooks of one object node's fields. A field
 // hooked already (reached through another node sharing its props) is skipped.
-func (g *generator) hookStruct(obj *node, prefix string) error {
+func (g *run) hookStruct(obj *node, prefix string) error {
 	parentView := obj.view(g.draft)
 
 	for i := range obj.props {
@@ -1515,11 +1522,11 @@ func (g *generator) hookStruct(obj *node, prefix string) error {
 
 // applyFieldTag applies the jsonschema struct tag to a field: facts land on
 // the authored canvas, and the tag's type= pair, applied to the node in
-// [generator.applyTypeOverrideDirective], replays on a discarded view of the
+// [run.applyTypeOverrideDirective], replays on a discarded view of the
 // occurrence the pair replaced, so the fold keeps its ordering rules and a
 // directive before the pair classifies against that occurrence and reads its
 // null decision.
-func (g *generator) applyFieldTag(p nodeProp) error {
+func (g *run) applyFieldTag(p nodeProp) error {
 	tag, ok := p.fi.StructField.Tag.Lookup("jsonschema")
 	if !ok {
 		return nil
@@ -1559,8 +1566,8 @@ func (g *generator) applyFieldTag(p nodeProp) error {
 // stringOptionField answers a field carrying json:",string". It returns the
 // node a hook built for a type v2 refuses under the flag (nil otherwise),
 // whether the field takes the string override, and the refusal when neither
-// applies; see the override discussion in [generator.buildFieldSchema].
-func (g *generator) stringOptionField(fi fieldset.Field) (*node, bool, error) {
+// applies; see the override discussion in [run.buildFieldSchema].
+func (g *run) stringOptionField(fi fieldset.Field) (*node, bool, error) {
 	stringified, probeErr := g.probe.Field(fi.StructField)
 	if probeErr == nil {
 		return nil, stringified, nil
@@ -1670,7 +1677,7 @@ func rebuildOverriddenField(fieldNode *node, payload *Schema) *node {
 // Base is a private view of the type-derived base; the accessor exposing
 // element canvases reads the field node's element children. Parent is the
 // caller's view of the enclosing object.
-func (g *generator) fieldContext(
+func (g *run) fieldContext(
 	parentType reflect.Type,
 	fi fieldset.Field,
 	fieldNode *node,
@@ -1697,7 +1704,7 @@ func (g *generator) fieldContext(
 // interpreter makes through the parent, a name appended to Required, is read
 // back onto the object node after each call. Const/enum placement and the
 // Draft-07 $ref wrap are handled by render, from the complete graph.
-func (g *generator) applyFieldInterpreters(
+func (g *run) applyFieldInterpreters(
 	parentType reflect.Type,
 	fi fieldset.Field,
 	fieldNode *node,
@@ -1732,7 +1739,7 @@ func (g *generator) applyFieldInterpreters(
 // and the draft is Draft-07 (where $ref siblings are ignored). It serves a
 // property a hook declared as a literal, where a seeded default lands beside
 // the $ref the hook wrote; render's renderRef handles the field path itself.
-func (g *generator) wrapRefForDraft7(s *Schema) {
+func (g *run) wrapRefForDraft7(s *Schema) {
 	if g.profile.honorRefSiblings || s.Ref == "" {
 		return
 	}
@@ -1763,7 +1770,7 @@ func (g *generator) wrapRefForDraft7(s *Schema) {
 // carries the winner's value where the branch asserts the embed's
 // constraints, and an unconditional branch would reject the type's own
 // marshaled JSON.
-func (g *generator) processAllOfField(fi fieldset.Field, parent *node) error {
+func (g *run) processAllOfField(fi fieldset.Field, parent *node) error {
 	// Collect composes only a struct or an unnamed pointer to one, so
 	// IndirectType names the embed's type exactly as Collect recorded it.
 	ft := reflectkind.IndirectType(fi.StructField.Type)
@@ -1789,7 +1796,7 @@ func (g *generator) processAllOfField(fi fieldset.Field, parent *node) error {
 // [WithTypeSchemaFor], or the type's own [JSONSchemaProvider] method. Such a
 // type is exempt from the v2 probes, since the caller took over describing
 // what it marshals to.
-func (g *generator) hookDeclares(t reflect.Type) bool {
+func (g *run) hookDeclares(t reflect.Type) bool {
 	_, ok, err := g.resolveTypeSchema(t)
 
 	return (ok && err == nil) || implementsProvider(t)
@@ -1912,7 +1919,7 @@ func callExtender(ctx context.Context, tc TypeContext, ts *TypeSchema) (err erro
 // entirely.
 // The extenders mutate ts.Value in place and may set ts.Nullability to declare a
 // nullability stance.
-func (g *generator) extendType(t reflect.Type, ts *TypeSchema) error {
+func (g *run) extendType(t reflect.Type, ts *TypeSchema) error {
 	tc := TypeContext{Type: t, Draft: g.draft}
 
 	if implementsExtender(t) {
@@ -1932,7 +1939,7 @@ func (g *generator) extendType(t reflect.Type, ts *TypeSchema) error {
 	return nil
 }
 
-// extendTypeSchema runs [generator.extendType] over a view of the node's
+// extendTypeSchema runs [run.extendType] over a view of the node's
 // type-derived base, wrapping it in a [TypeSchema] the extenders mutate. It
 // returns the declared [Nullability] stance (NullFromReflection when no
 // extender sets one) for the call site to fold into the node's null decision.
@@ -1945,7 +1952,7 @@ func (g *generator) extendType(t reflect.Type, ts *TypeSchema) error {
 // schema, which only a provider supplies. An extender honors only Value and
 // Nullability, so one that sets Verbatim or Ref is reported as a malformed
 // TypeSchema rather than having the declaration silently ignored.
-func (g *generator) extendTypeSchema(t reflect.Type, n *node) (Nullability, error) {
+func (g *run) extendTypeSchema(t reflect.Type, n *node) (Nullability, error) {
 	if len(g.typeExtenders) == 0 && !implementsExtender(t) {
 		return NullFromReflection, nil
 	}
@@ -1977,7 +1984,7 @@ func (g *generator) extendTypeSchema(t reflect.Type, n *node) (Nullability, erro
 // ApplyTypeDescription sets the description from the comment provider on a
 // type's schema. An empty comment leaves the description unset; a provider
 // error aborts generation.
-func (g *generator) applyTypeDescription(t reflect.Type, s *Schema) error {
+func (g *run) applyTypeDescription(t reflect.Type, s *Schema) error {
 	if g.descriptionProvider == nil {
 		return nil
 	}
@@ -2000,7 +2007,7 @@ func (g *generator) applyTypeDescription(t reflect.Type, s *Schema) error {
 // with the tag pair empty and Owner the type declaring the field (see
 // [reflectkind.DeclaringType]); an empty comment leaves the description unset, and a
 // provider error aborts generation.
-func (g *generator) applyFieldDescription(
+func (g *run) applyFieldDescription(
 	parentType reflect.Type, fi fieldset.Field, fieldNode *node, parent *Schema,
 ) error {
 	if g.descriptionProvider == nil {

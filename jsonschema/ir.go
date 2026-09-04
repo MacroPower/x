@@ -79,7 +79,7 @@ type node struct {
 	authored *Schema
 
 	// The origin field names the field position this node occupies, for the
-	// reports in [generator.checkNullLiterals]. A field node carries it, and so
+	// reports in [run.checkNullLiterals]. A field node carries it, and so
 	// does every element node beneath that field. Nil for every other node.
 	origin *fieldOrigin
 	// The overrode field, on a node a jsonschema tag's type= pair rebuilt,
@@ -94,7 +94,7 @@ type node struct {
 	// Occ holds the facts of this occurrence that decide whether it admits
 	// null, and stance the null-admission stance a type-level hook declared
 	// for an inline node (an alias's own stance for a ref). Null is the
-	// decision [generator.resolveNullability] derives from them once the
+	// decision [run.resolveNullability] derives from them once the
 	// graph is complete; nothing reads it before that pass.
 	occ    occurrence
 	stance Nullability
@@ -260,7 +260,7 @@ type defEntry struct {
 // newDefEntry registers a placeholder $defs entry for t with no body yet. A
 // re-entry for t returns the existing entry, so a self- or mutually-recursive
 // type resolves to one shared body and its cycle is broken.
-func (g *generator) newDefEntry(t reflect.Type) *defEntry {
+func (g *run) newDefEntry(t reflect.Type) *defEntry {
 	if e, ok := g.typeToDef[t]; ok {
 		return e
 	}
@@ -326,7 +326,7 @@ func allocCanvasTree(n *node, draft Draft) {
 }
 
 // assignFieldOrigins records the field position on a field node and on every
-// sequence or map element beneath it, so [generator.checkNullLiterals] can name
+// sequence or map element beneath it, so [run.checkNullLiterals] can name
 // the field a late-refused null literal sits in. It descends only into
 // elements (items and prefix), wherever a node carries them. A struct property
 // is a separate field node, which takes its own origin when the generator
@@ -361,13 +361,13 @@ func assignFieldOrigins(n *node, origin *fieldOrigin) {
 }
 
 // refNode builds a kindRef node linking to e, recording the occurrence's
-// pointer-ness. [generator.resolveNullability] later combines it with the def
+// pointer-ness. [run.resolveNullability] later combines it with the def
 // entry's recorded stance: a pointer occurrence of a NullForbidden type still
 // admits no null, and a non-pointer occurrence of a NullAllowed type does. Its
 // payload holds the provisional $ref string (the pre-disambiguation name), so
 // a hook reading .Ref sees a real reference; render re-emits the final name
 // via renderRef and grafts any siblings.
-func (g *generator) refNode(e *defEntry, pointer bool) *node {
+func (g *run) refNode(e *defEntry, pointer bool) *node {
 	return &node{
 		kind:    kindRef,
 		def:     e,
@@ -381,7 +381,7 @@ func (g *generator) refNode(e *defEntry, pointer bool) *node {
 // is always the bare value node; the stance lives on the entry and is combined
 // with each reference's pointer-ness in the null pass, so $defs nullability
 // stays order-independent.
-func (g *generator) defineType(t reflect.Type, body *node, stance Nullability, pointer bool) *node {
+func (g *run) defineType(t reflect.Type, body *node, stance Nullability, pointer bool) *node {
 	e := g.newDefEntry(t)
 	e.nullability = stance
 
@@ -421,7 +421,7 @@ func fillDef(e *defEntry, body *node, stance Nullability) {
 // declared null type admits null whatever the occurrence, since the schema
 // names it outright. Render adds a null branch (wrap) to an admitting node
 // unless its declared type already names null or its body already admits.
-func (g *generator) resolveNullability(root *node) {
+func (g *run) resolveNullability(root *node) {
 	for _, e := range g.defs {
 		if e.body != nil {
 			g.resolveAdmit(e.body, e)
@@ -449,7 +449,7 @@ func (g *generator) resolveNullability(root *node) {
 
 // resolveNode fills a node's decision. A body was already given its admit;
 // every other node derives it here.
-func (g *generator) resolveNode(n *node) {
+func (g *run) resolveNode(n *node) {
 	switch {
 	case n.isBody:
 	case n.kind == kindRef:
@@ -463,7 +463,7 @@ func (g *generator) resolveNode(n *node) {
 
 // resolveAdmit derives a node's admit from its facts; e is the def entry a
 // body or a reference resolves against, nil for an inline node.
-func (g *generator) resolveAdmit(n *node, e *defEntry) {
+func (g *run) resolveAdmit(n *node, e *defEntry) {
 	switch {
 	case n.composed || n.verbatim:
 		n.null.admit = false
@@ -482,7 +482,7 @@ func (g *generator) resolveAdmit(n *node, e *defEntry) {
 
 // containerNull reports whether the marshal writes null for a nil container
 // of the given kind under the run's WithJSONOptions value.
-func (g *generator) containerNull(c containerKind) bool {
+func (g *run) containerNull(c containerKind) bool {
 	switch c {
 	case containerSlice, containerBytes:
 		return g.nilSliceNull
@@ -499,7 +499,7 @@ func (g *generator) containerNull(c containerKind) bool {
 // null before any wrapper: for a reference its body, otherwise its declared
 // base. A nilable container that admits null carries it in its own type list,
 // which is what a reference to an extracted container reads.
-func (g *generator) targetAdmitsNull(n *node) bool {
+func (g *run) targetAdmitsNull(n *node) bool {
 	if n.kind == kindRef {
 		body := n.def.body
 		if body == nil {
@@ -802,13 +802,13 @@ func mergeSchemaFields(dst, src *Schema) {
 // the decision, through [FieldContext.Canvas] or a [Constraints] setter, so
 // this pass is where its literal meets the decision.
 //
-// The walk is [generator.walkReachable] rather than [walkNodes], so the check
+// The walk is [run.walkReachable] rather than [walkNodes], so the check
 // covers exactly the defs render emits. A def whose only surviving reference is
 // a raw $ref string an extender authored into a payload is reachable by that
 // scan alone. The visitor returns nothing, so the pass keeps the first report
 // and lets the walk finish. Walk order is deterministic, which is what makes
 // the first report name one occurrence rather than an arbitrary one.
-func (g *generator) checkNullLiterals(root *node) error {
+func (g *run) checkNullLiterals(root *node) error {
 	var reported error
 
 	g.walkReachable(root, map[*defEntry]bool{}, func(n *node) {
@@ -855,7 +855,7 @@ func nullLiteralReport(n *node) error {
 
 // isRawNull reports whether raw holds the JSON null literal. Two call sites
 // share it, so the two cannot drift apart: canvasNullLiteral, scanning an
-// authored default, and [generator.seedDefaults], testing a marshaled
+// authored default, and [run.seedDefaults], testing a marshaled
 // field value. Whitespace around a JSON value is insignificant, so the
 // comparison trims it first.
 func isRawNull(raw jsontext.Value) bool {
@@ -919,7 +919,7 @@ func isJSONNull(v any) bool {
 // def entry: the final assigned name of each def, plus its provisional baseName
 // where no final name claims it (a ref node's own payload carries the
 // provisional form until render). It must be built after assignDefNames.
-func (g *generator) payloadRefTargets() map[string]*defEntry {
+func (g *run) payloadRefTargets() map[string]*defEntry {
 	prefix := g.profile.refPrefix()
 
 	targets := make(map[string]*defEntry, len(g.defs))
@@ -951,7 +951,7 @@ func (g *generator) payloadRefTargets() map[string]*defEntry {
 // assumed acyclic, as everywhere else in the generator (hook schemas arrive
 // JSON-decoded or JSON-round-trip cloned); the scanned set is a dedup,
 // keeping shared payload subtrees scanned once.
-func (g *generator) walkReachable(
+func (g *run) walkReachable(
 	root *node,
 	seen map[*defEntry]bool,
 	visit func(*node),
@@ -1010,7 +1010,7 @@ func (g *generator) walkReachable(
 // remaining reference is a raw $ref a hook authored stays alive. A def
 // orphaned by a type= override or by root inlining is never reached, so it is
 // dropped from the output.
-func (g *generator) collectReferencedDefs(root *node) []*defEntry {
+func (g *run) collectReferencedDefs(root *node) []*defEntry {
 	seen := map[*defEntry]bool{}
 	g.walkReachable(root, seen, func(*node) {}, nil)
 

@@ -14,11 +14,11 @@ import (
 // each from the decision the pass recorded on the node. Nothing it returns is
 // shared with the IR, so a run renders each node once and the output is the
 // caller's alone. A field or element node (the only nodes carrying an authored
-// canvas) routes to [generator.reconcileField], which composes the type-derived
+// canvas) routes to [run.reconcileField], which composes the type-derived
 // payload with the field-level facts and owns its wrapper/value keyword
 // placement; every other node applies the null encoding to its bare base
 // directly.
-func (g *generator) render(n *node) *Schema {
+func (g *run) render(n *node) *Schema {
 	if n.authored != nil {
 		return g.reconcileField(n)
 	}
@@ -38,7 +38,7 @@ func (g *generator) render(n *node) *Schema {
 // child nodes. A slot a build-time extender authored as a literal (a property
 // replaced with the extender's own schema, say) is no longer node-backed, so
 // the copy carries it as written.
-func (g *generator) renderBase(n *node) *Schema {
+func (g *run) renderBase(n *node) *Schema {
 	if n.kind == kindRef {
 		return g.renderRef(n.payload, n.def)
 	}
@@ -112,7 +112,7 @@ func (g *generator) renderBase(n *node) *Schema {
 // provisional name with the def's final name. Under Draft-07 a $ref beside any
 // sibling keyword moves into allOf, since Draft-07 readers ignore keywords next
 // to $ref; under 2020-12 the siblings stay alongside.
-func (g *generator) renderRef(payload *Schema, def *defEntry) *Schema {
+func (g *run) renderRef(payload *Schema, def *defEntry) *Schema {
 	s := schemaclone.Clone(payload)
 	s.Ref = g.profile.refPrefix() + def.name
 
@@ -132,8 +132,8 @@ func (g *generator) renderRef(payload *Schema, def *defEntry) *Schema {
 // no branch where the decision says the target already admits null or where
 // an inline leaf is unrestricted (an interface, whose {} admits null). A field
 // or element node never reaches here; render routes it to
-// [generator.reconcileField].
-func (g *generator) applyNull(n *node, base *Schema) *Schema {
+// [run.reconcileField].
+func (g *run) applyNull(n *node, base *Schema) *Schema {
 	if !n.null.admit {
 		if n.nilableContainer() {
 			bareContainerType(base, n.containerType())
@@ -197,7 +197,7 @@ func bareContainerType(s *Schema, base string) {
 // maybeInlineRoot inlines a root $ref whose def is reached from nowhere else,
 // dropping the entry. A def referenced elsewhere (self-reference or mutual
 // recursion) keeps the root a $ref so those references never dangle.
-func (g *generator) maybeInlineRoot(root *node) *node {
+func (g *run) maybeInlineRoot(root *node) *node {
 	if root.kind != kindRef {
 		return root
 	}
@@ -228,7 +228,7 @@ func (g *generator) maybeInlineRoot(root *node) *node {
 // is skipped while everything the body reaches, including a self- or
 // mutual-recursion ref back to def and a raw $ref an extender authored into a
 // payload, is inspected.
-func (g *generator) referencedElsewhere(exclude *node, def *defEntry) bool {
+func (g *run) referencedElsewhere(exclude *node, def *defEntry) bool {
 	found := false
 
 	g.walkReachable(def.body, map[*defEntry]bool{def: true}, func(n *node) {

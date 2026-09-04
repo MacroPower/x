@@ -19,7 +19,7 @@ import (
 // null wrapper. The pristine payload supplies each keyword's type-derived value,
 // which the split restores to the value branch; the merged copy carries the
 // authored facts overlaid on top.
-func (g *generator) reconcileField(n *node) *Schema {
+func (g *run) reconcileField(n *node) *Schema {
 	if n.kind == kindRef {
 		return g.reconcileRefField(n)
 	}
@@ -96,11 +96,11 @@ func (g *generator) reconcileField(n *node) *Schema {
 // reconcileRefField composes a $ref field or element. It merges the authored
 // canvas onto the provisional-ref payload, then emits the final $ref: annotations
 // move to the wrapper while const/enum ride the $ref on the value branch, which
-// takes its own Draft-07 sibling wrap in [generator.renderRef]. When the
+// takes its own Draft-07 sibling wrap in [run.renderRef]. When the
 // referenced definition already admits null (it is empty, or a nilable container
 // whose def body carries the null), the decision says so and the ref carries
 // every keyword with no null branch added.
-func (g *generator) reconcileRefField(n *node) *Schema {
+func (g *run) reconcileRefField(n *node) *Schema {
 	base := schemaclone.Clone(n.payload)
 
 	merged := *base
@@ -138,7 +138,7 @@ func (g *generator) reconcileRefField(n *node) *Schema {
 // keyword; CanonicalizeNumeric applies the shared canonical-form pass afterward
 // so the field/element numeric output stays canonical regardless of how the
 // bounds were written.
-func (g *generator) resolveBounds(n *node, merged, base *Schema) {
+func (g *run) resolveBounds(n *node, merged, base *Schema) {
 	set := constraint.New()
 	set.AbsorbAxes(base, constraint.Baseline, constraint.KindDerived)
 	set.AbsorbAxes(n.authored, constraint.Intersect, constraint.Authored)
