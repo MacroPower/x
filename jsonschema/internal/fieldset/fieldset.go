@@ -863,10 +863,10 @@ func markShadowedCompositions(
 			continue
 		}
 
-		ft := fi.StructField.Type
-		if ft.Kind() == reflect.Pointer {
-			ft = ft.Elem()
-		}
+		// Collect composes only a struct or an unnamed pointer to one and keys
+		// promoted by the same IndirectType result, so the lookup cannot miss
+		// on the pointer level.
+		ft := reflectkind.IndirectType(fi.StructField.Type)
 
 		embedFields, scanned := promoted[ft]
 		if !scanned {

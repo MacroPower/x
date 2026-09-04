@@ -1676,10 +1676,9 @@ func (g *generator) wrapRefForDraft7(s *Schema) {
 // constraints, and an unconditional branch would reject the type's own
 // marshaled JSON.
 func (g *generator) processAllOfField(fi fieldset.Field, parent *node) error {
-	ft := fi.StructField.Type
-	if ft.Kind() == reflect.Pointer {
-		ft = ft.Elem()
-	}
+	// Collect composes only a struct or an unnamed pointer to one, so
+	// IndirectType names the embed's type exactly as Collect recorded it.
+	ft := reflectkind.IndirectType(fi.StructField.Type)
 
 	branch, err := g.schemaForType(ft, false)
 	if err != nil {
