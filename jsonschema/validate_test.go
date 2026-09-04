@@ -8338,3 +8338,72 @@ func TestCompileJSONConstEnumExactness(t *testing.T) {
 		})
 	}
 }
+
+// TestValidateConstEnumDocumentView pins that Compile on an in-memory schema
+// and CompileJSON on that schema's marshaled document reach one verdict on a
+// const or enum value the upstream renderer writes with encoding/json v1
+// semantics. A typed nil slice, map, or pointer and a raw null are null in
+// the document, so the validator accepts null and rejects the empty
+// container; a typed slice or a struct is the array or object it marshals
+// to, so the validator accepts that literal.
+func TestValidateConstEnumDocumentView(t *testing.T) {
+	t.Parallel()
+
+	type pair struct {
+		A int `json:"a"`
+	}
+
+	values := map[string]struct {
+		value   any
+		literal string // the non-null literal the document renders; "" for null
+	}{
+		"typed nil slice":   {value: []string(nil)},
+		"typed nil map":     {value: map[string]int(nil)},
+		"typed nil pointer": {value: (*int)(nil)},
+		"raw null":          {value: jsontext.Value("null")},
+		"typed slice":       {value: []string{"a"}, literal: `["a"]`},
+		"struct":            {value: pair{A: 1}, literal: `{"a":1}`},
+	}
+
+	keywords := map[string]func(v any) *jsonschema.Schema{
+		"const": func(v any) *jsonschema.Schema { return &jsonschema.Schema{Const: &v} },
+		"enum":  func(v any) *jsonschema.Schema { return &jsonschema.Schema{Enum: []any{v}} },
+	}
+
+	for keyword, build := range keywords {
+		for name, tt := range values {
+			t.Run(keyword+" "+name, func(t *testing.T) {
+				t.Parallel()
+
+				ctx := t.Context()
+				schema := build(tt.value)
+
+				inMemory, err := jsonschema.Compile(ctx, schema)
+				require.NoError(t, err)
+
+				document, err := jsonv1.Marshal(schema)
+				require.NoError(t, err)
+
+				fromBytes, err := jsonschema.CompileJSON(ctx, document)
+				require.NoError(t, err)
+
+				instances := map[string]bool{
+					"null": tt.literal == "",
+					"[]":   false,
+					"{}":   false,
+				}
+				if tt.literal != "" {
+					instances[tt.literal] = true
+				}
+
+				for instance, want := range instances {
+					memErr := inMemory.ValidateJSON(ctx, []byte(instance))
+					docErr := fromBytes.ValidateJSON(ctx, []byte(instance))
+
+					assert.Equal(t, want, memErr == nil, "in-memory verdict on %s", instance)
+					assert.Equal(t, want, docErr == nil, "from-bytes verdict on %s", instance)
+				}
+			})
+		}
+	}
+}

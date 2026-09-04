@@ -11,26 +11,51 @@ import (
 
 // A hand-built const or enum value can carry container shapes the schema
 // parser never produces, most commonly the map[any]any gopkg.in/yaml.v2
-// decodes documents into. Comparing such a value against a decoded object
-// instance must report the values unequal instead of panicking inside the
-// upstream reflect-based comparison (reflect.Value.MapIndex rejects an
-// interface{} key against a string-keyed map).
+// decodes documents into. The validator compares such a value the way its
+// document renders it, so a string-keyed map[any]any equals the object
+// encoding/json v1 writes for it. A map v1 refuses to marshal (one with a
+// bool key) has no document form, and comparing it against a decoded object
+// must report the values unequal instead of panicking inside the upstream
+// reflect-based comparison (reflect.Value.MapIndex rejects an interface{}
+// key against a string-keyed map).
 func TestValidateHandBuiltMapAnyConst(t *testing.T) {
 	t.Parallel()
 
-	constVal := any(map[any]any{"a": 1})
+	stringKeyed := any(map[any]any{"a": 1})
+	boolKeyed := any(map[any]any{true: 1})
 
 	tests := map[string]struct {
-		schema *jsonschema.Schema
-		err    string
+		schema   *jsonschema.Schema
+		instance any
+		err      string
 	}{
-		"const": {
-			schema: &jsonschema.Schema{Const: &constVal},
-			err:    "const",
+		"const matches its document": {
+			schema:   &jsonschema.Schema{Const: &stringKeyed},
+			instance: map[string]any{"a": 1.0},
 		},
-		"enum": {
-			schema: &jsonschema.Schema{Enum: []any{map[any]any{"a": 1}}},
-			err:    "enum",
+		"const rejects another object": {
+			schema:   &jsonschema.Schema{Const: &stringKeyed},
+			instance: map[string]any{"a": 2.0},
+			err:      "const",
+		},
+		"const without a document form": {
+			schema:   &jsonschema.Schema{Const: &boolKeyed},
+			instance: map[string]any{"a": 1.0},
+			err:      "const",
+		},
+		"enum matches its document": {
+			schema:   &jsonschema.Schema{Enum: []any{map[any]any{"a": 1}}},
+			instance: map[string]any{"a": 1.0},
+		},
+		"enum rejects another object": {
+			schema:   &jsonschema.Schema{Enum: []any{map[any]any{"a": 1}}},
+			instance: map[string]any{"a": 2.0},
+			err:      "enum",
+		},
+		"enum without a document form": {
+			schema:   &jsonschema.Schema{Enum: []any{map[any]any{true: 1}}},
+			instance: map[string]any{"a": 1.0},
+			err:      "enum",
 		},
 	}
 
@@ -41,7 +66,13 @@ func TestValidateHandBuiltMapAnyConst(t *testing.T) {
 			v, err := jsonschema.Compile(t.Context(), tc.schema)
 			require.NoError(t, err)
 
-			err = v.Validate(t.Context(), map[string]any{"a": 1.0})
+			err = v.Validate(t.Context(), tc.instance)
+			if tc.err == "" {
+				require.NoError(t, err)
+
+				return
+			}
+
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tc.err)
 		})

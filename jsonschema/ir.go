@@ -3,13 +3,11 @@ package jsonschema
 import (
 	"bytes"
 	"encoding/json/jsontext"
-	"encoding/json/v2"
 	"fmt"
 	"reflect"
 	"slices"
 
-	jsonv1 "encoding/json"
-
+	"go.jacobcolvin.com/x/jsonschema/internal/normalize"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemafield"
 	"go.jacobcolvin.com/x/jsonschema/internal/tagmodel"
 )
@@ -457,62 +455,23 @@ func canvasNullLiteral(canvas *Schema) string {
 }
 
 // isJSONNull reports whether v renders as a JSON null in the emitted schema
-// document. Apart from an untyped nil it asks the marshaler rather than
-// testing the Go value, so every spelling answers alike: a nil pointer, a
-// typed nil map or slice, a [jsontext.Value] holding the literal, and a
-// marshaler returning one. A value the marshal refuses (a func or a channel)
-// is not a null. Leaving it on the canvas lets the caller's own marshal
-// report the fault.
+// document. It reads v through [normalize.DocumentValue], the same document
+// view the validator compares const and enum against, so every spelling
+// answers alike: a nil pointer, a typed nil map or slice, a [jsontext.Value]
+// holding the literal, and a marshaler returning one.
 //
 // The canvas values this guards (const, enum, examples) are rendered by the
 // upstream Schema.MarshalJSON, which marshals them with [encoding/json] v1
-// semantics -- where a typed nil map or slice writes null -- so the probe
-// must ask v1, not v2, and the kind gate admits the map and slice kinds
-// alongside pointers. Every other kind answers false without a marshal
-// unless it carries its own marshaler ([encoding/json/v2.MarshalerTo] or
-// [encoding/json/v2.Marshaler]). That keeps the scan off most values, and
-// marshalsToNull recovers a third-party MarshalJSON panic, so generation
-// reports through errors alone.
+// semantics, where a typed nil map or slice writes null, so the probe asks
+// v1, which DocumentValue does (v1 still honors the v2 marshaler interfaces,
+// so a MarshalJSONTo returning null answers true). A value the marshal
+// refuses (a func or a channel) or whose own marshaler panics is not a null.
+// Leaving it on the canvas lets the caller's own marshal report the fault,
+// so generation reports through errors alone.
 func isJSONNull(v any) bool {
-	if v == nil {
-		return true
-	}
+	dv, ok := normalize.DocumentValue(v)
 
-	_, marshalerTo := v.(json.MarshalerTo)
-	_, marshaler := v.(json.Marshaler)
-
-	if !marshaler && !marshalerTo {
-		switch reflect.ValueOf(v).Kind() {
-		case reflect.Map, reflect.Pointer, reflect.Slice:
-		default:
-			return false
-		}
-	}
-
-	return marshalsToNull(v)
-}
-
-// marshalsToNull reports whether the schema renderer writes null for v. It
-// probes with [encoding/json] v1, matching the upstream Schema.MarshalJSON
-// that renders canvas values (v1 still honors the v2 marshaler interfaces,
-// so a MarshalJSONTo returning null answers true). It answers false for a
-// value the marshal refuses and for one whose own marshaler panics, so
-// neither the error nor the panic reaches [generator.checkNullLiterals].
-func marshalsToNull(v any) bool {
-	null := false
-
-	func() {
-		defer func() {
-			if recover() != nil {
-				null = false
-			}
-		}()
-
-		encoded, err := jsonv1.Marshal(v)
-		null = err == nil && bytes.Equal(encoded, []byte("null"))
-	}()
-
-	return null
+	return ok && dv == nil
 }
 
 // payloadRefTargets maps every $defs ref string a hook may have authored to its

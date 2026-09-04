@@ -18,11 +18,15 @@ type Schema = jsonschema.Schema
 // [Schema.Default]. Map members marshal in sorted key order, so the same
 // value produces the same bytes on every call. A nil slice, map, or []byte
 // marshals as its empty instance ([], {}, ""), never null, matching the
-// generated schema and [WithDefaultsFrom]. The upstream Schema.MarshalJSON
-// renders [Schema.Const], [Schema.Enum], and [Schema.Examples] with
-// encoding/json v1, where a nil container still renders as null, so a value
-// that must agree with a default there is written as an explicit empty
-// container.
+// generated schema and [WithDefaultsFrom]. Raw refuses a value with no v2
+// representation, such as a [time.Duration] (see [ErrUnsupportedType]), and
+// a string holding invalid UTF-8, which v1 would coerce to U+FFFD.
+//
+// The schema document emits [Schema.Default] verbatim, so Raw's bytes are its
+// document form. The upstream Schema.MarshalJSON renders [Schema.Const],
+// [Schema.Enum], and [Schema.Examples] with encoding/json v1, where a nil
+// container renders as null, and both the validator and the generator's
+// null scan read those three the way the document renders them.
 func Raw(v any) (jsontext.Value, error) {
 	data, err := json.Marshal(v, json.Deterministic(true))
 	if err != nil {

@@ -335,6 +335,8 @@ type validator struct {
 	visiting           map[visitKey]bool
 	patternCache       []*compiledPattern           // schema.Pattern compiled (see numericBounds)
 	patternProps       []map[string]compiledPattern // patternProperties keys compiled (see numericBounds)
+	constVals          []*any                       // document view of the const value (see documentConst)
+	enumVals           [][]any                      // document view of the enum members (see documentEnum)
 	constRats          []*big.Rat                   // numeric const value as a rational (see numericBounds)
 	enumRats           [][]*big.Rat                 // numeric enum members as rationals by index (see numericBounds)
 	sortedPropertyKeys [][]string                   // schema.Properties keys, sorted (see numericBounds)
@@ -669,6 +671,8 @@ func (v *validator) sizeCaches(n int) {
 	v.numericBounds = growSlice(v.numericBounds, n)
 	v.patternCache = growSlice(v.patternCache, n)
 	v.patternProps = growSlice(v.patternProps, n)
+	v.constVals = growSlice(v.constVals, n)
+	v.enumVals = growSlice(v.enumVals, n)
 	v.constRats = growSlice(v.constRats, n)
 	v.enumRats = growSlice(v.enumRats, n)
 	v.sortedPropertyKeys = growSlice(v.sortedPropertyKeys, n)
@@ -714,22 +718,61 @@ func numericCompile(v *validator, id int, s *Schema) {
 	}
 }
 
-// enumCompile caches a schema's numeric enum members as rationals by index for
-// the enum row's eval, under the schema's node id.
+// enumCompile caches the document view of a schema's enum members and, by
+// index, the numeric ones as rationals for the enum row's eval, under the
+// schema's node id.
 func enumCompile(v *validator, id int, s *Schema) {
-	if rats := numrat.EnumMemberRats(s.Enum); rats != nil {
+	if s.Enum == nil {
+		return
+	}
+
+	members := documentEnum(s.Enum)
+	v.enumVals[id] = members
+
+	if rats := numrat.EnumMemberRats(members); rats != nil {
 		v.enumRats[id] = rats
 	}
 }
 
-// constCompile caches a schema's numeric const value as a rational for the const
-// row's eval, under the schema's node id.
+// constCompile caches the document view of a schema's const value and, for a
+// numeric one, its rational for the const row's eval, under the schema's node
+// id.
 func constCompile(v *validator, id int, s *Schema) {
-	if s.Const != nil {
-		if r, ok := numrat.SchemaNumberRat(*s.Const); ok {
-			v.constRats[id] = r
-		}
+	if s.Const == nil {
+		return
 	}
+
+	val := documentConst(*s.Const)
+	v.constVals[id] = &val
+
+	if r, ok := numrat.SchemaNumberRat(val); ok {
+		v.constRats[id] = r
+	}
+}
+
+// documentConst returns the value a const compares as: the JSON-shaped value
+// the emitted document renders for it ([normalize.DocumentValue]), so a
+// hand-built typed nil container, struct, or raw [jsontext.Value] validates
+// the way its document does. A value the document view refuses (a func, a
+// cyclic value) keeps its Go form, which the comparison treats as unequal to
+// everything.
+func documentConst(val any) any {
+	if dv, ok := normalize.DocumentValue(val); ok {
+		return dv
+	}
+
+	return val
+}
+
+// documentEnum returns a fresh slice holding [documentConst] of each enum
+// member, so the cached members never alias the caller's schema.
+func documentEnum(members []any) []any {
+	out := make([]any, len(members))
+	for i, member := range members {
+		out[i] = documentConst(member)
+	}
+
+	return out
 }
 
 // stringCompile caches a schema's compiled Pattern for the string row's eval,
@@ -2139,16 +2182,11 @@ func evalEnum(ctx evalContext) []*ValidationError {
 		return nil
 	}
 
-	// A nil slot (in-graph node with no numeric enum members, or an out-of-graph
-	// fallback schema) leaves rats nil; the loop below tolerates that and
-	// compares members by value.
-	var rats []*big.Rat
+	// A nil rats (no numeric enum members) leaves every member's rational nil;
+	// the loop below tolerates that and compares members by value.
+	members, rats := ctx.v.enumView(ctx.nodeID, schema)
 
-	if ctx.v.inIndex(ctx.nodeID) {
-		rats = ctx.v.enumRats[ctx.nodeID]
-	}
-
-	for i, allowed := range schema.Enum {
+	for i, allowed := range members {
 		var allowedRat *big.Rat
 
 		if rats != nil {
@@ -2172,16 +2210,9 @@ func evalConst(ctx evalContext) []*ValidationError {
 		return nil
 	}
 
-	// A nil slot (in-graph node with a non-numeric const, or an out-of-graph
-	// fallback schema) leaves constRat nil; EqualWithRat is nil-safe and falls
-	// back to value comparison.
-	var constRat *big.Rat
-
-	if ctx.v.inIndex(ctx.nodeID) {
-		constRat = ctx.v.constRats[ctx.nodeID]
-	}
-
-	constVal := *schema.Const
+	// A non-numeric const leaves constRat nil; EqualWithRat is nil-safe and
+	// falls back to value comparison.
+	constVal, constRat := ctx.v.constView(ctx.nodeID, schema)
 	if jsonequal.EqualWithRat(constVal, constRat, ctx.instance) {
 		return nil
 	}
@@ -2199,6 +2230,36 @@ func evalConst(ctx evalContext) []*ValidationError {
 // non-negative in-index id never over-indexes a shorter slice.
 func (v *validator) inIndex(id int) bool {
 	return id >= 0 && id < v.index.len()
+}
+
+// constView returns the document view of schema's const value and, for a
+// numeric one, its rational, preferring the per-node cache and converting on
+// the fly for a schema outside the index (a remote or JSON-pointer fallback
+// schema reached only at validation time). The caller checks that the schema
+// sets const. The returned values are operands only; callers must not mutate
+// them.
+func (v *validator) constView(id int, schema *Schema) (any, *big.Rat) {
+	if v.inIndex(id) && v.constVals[id] != nil {
+		return *v.constVals[id], v.constRats[id]
+	}
+
+	val := documentConst(*schema.Const)
+	r, _ := numrat.SchemaNumberRat(val)
+
+	return val, r
+}
+
+// enumView returns the document view of schema's enum members and, by index,
+// the rationals of the numeric ones, on the same terms as [validator.constView].
+// A nil rationals slice means no member is numeric.
+func (v *validator) enumView(id int, schema *Schema) ([]any, []*big.Rat) {
+	if v.inIndex(id) && v.enumVals[id] != nil {
+		return v.enumVals[id], v.enumRats[id]
+	}
+
+	members := documentEnum(schema.Enum)
+
+	return members, numrat.EnumMemberRats(members)
 }
 
 // boundsFor returns the numeric bound rationals for schema, preferring the
