@@ -8,8 +8,7 @@ import (
 	"reflect"
 	"slices"
 
-	jsonv1 "encoding/json"
-
+	"go.jacobcolvin.com/x/jsonschema/internal/jsonopts"
 	"go.jacobcolvin.com/x/jsonschema/internal/numkind"
 )
 
@@ -264,13 +263,13 @@ func WithAdditionalProperties(allowed bool) GenerateOption {
 // with true (it stringifies numbers inside containers, beyond what the
 // per-field ,string tag machinery reaches), a non-nil [json.WithMarshalers]
 // (its output shape is unknowable), and the [encoding/json] v1 compat options
-// that alter the marshaled shape ([jsonv1.OmitEmptyWithLegacySemantics],
-// [jsonv1.FormatByteArrayAsArray], [jsonv1.FormatBytesWithLegacySemantics],
-// [jsonv1.StringifyWithLegacySemantics],
-// [jsonv1.CallMethodsWithLegacySemantics],
-// [jsonv1.ReportErrorsWithLegacySemantics], which marshals a declaration v2
+// that alter the marshaled shape ([encoding/json.OmitEmptyWithLegacySemantics],
+// [encoding/json.FormatByteArrayAsArray], [encoding/json.FormatBytesWithLegacySemantics],
+// [encoding/json.StringifyWithLegacySemantics],
+// [encoding/json.CallMethodsWithLegacySemantics],
+// [encoding/json.ReportErrorsWithLegacySemantics], which marshals a declaration v2
 // otherwise refuses in a best-effort form, and
-// [jsonv1.FormatDurationAsNano] -- so [jsonv1.DefaultOptionsV1], which
+// [encoding/json.FormatDurationAsNano] -- so [encoding/json.DefaultOptionsV1], which
 // bundles them, is refused too). Options with no effect on the marshaled
 // shape are ignored: unmarshal-side options such as
 // [json.MatchCaseInsensitiveNames] and [json.RejectUnknownMembers],
@@ -282,52 +281,19 @@ func WithJSONOptions(opts ...json.Options) GenerateOption {
 		g.jsonOpts = joined
 
 		// Re-derive every flag and the refusal from the full joined value,
-		// so a later call can also unset what an earlier one set.
-		g.nilSliceNull, _ = json.GetOption(joined, json.FormatNilSliceAsNull)
-		g.nilMapNull, _ = json.GetOption(joined, json.FormatNilMapAsNull)
-		g.omitZeroFields, _ = json.GetOption(joined, json.OmitZeroStructFields)
+		// so a later call can also unset what an earlier one set. The
+		// classification of every constructor lives in internal/jsonopts.
+		flags := jsonopts.Honored(joined)
+		g.nilSliceNull = flags.NilSliceNull
+		g.nilMapNull = flags.NilMapNull
+		g.omitZeroFields = flags.OmitZeroFields
 
 		g.jsonOptsErr = nil
 
-		if m, _ := json.GetOption(joined, json.WithMarshalers); m != nil {
-			g.jsonOptsErr = fmt.Errorf("%w: WithMarshalers", ErrUnsupportedJSONOption)
-		}
-
-		// The first set option in refusedJSONOptions wins, so a refusal has
-		// one spelling and one precedence. GetOption sees through a joined
-		// DefaultOptionsV1 bundle, so probing the constituents refuses the
-		// bundle as well.
-		for _, refused := range refusedJSONOptions {
-			if v, _ := json.GetOption(joined, refused.option); v {
-				g.jsonOptsErr = fmt.Errorf("%w: %s", ErrUnsupportedJSONOption, refused.name)
-
-				break
-			}
+		if name, ok := jsonopts.Refused(joined); ok {
+			g.jsonOptsErr = fmt.Errorf("%w: %s", ErrUnsupportedJSONOption, name)
 		}
 	})
-}
-
-// refusedJSONOptions lists the boolean [encoding/json/v2] and [encoding/json]
-// v1 compat options that change the marshaled shape in ways generation does
-// not model. Every one sits in this table so [WithJSONOptions] refuses each
-// with [ErrUnsupportedJSONOption] the same way. The v1 compat rows are
-// honored by v2 Marshal too, so silently ignoring any of them would emit a
-// schema that rejects what the configured marshal writes.
-// ReportErrorsWithLegacySemantics belongs here because it makes v2 marshal a
-// declaration it otherwise refuses (conflicting names, a tagged unexported
-// field, a ",string" bool) in a best-effort form generation cannot describe.
-var refusedJSONOptions = []struct {
-	option func(bool) json.Options
-	name   string
-}{
-	{json.StringifyNumbers, "StringifyNumbers"},
-	{jsonv1.OmitEmptyWithLegacySemantics, "OmitEmptyWithLegacySemantics"},
-	{jsonv1.FormatByteArrayAsArray, "FormatByteArrayAsArray"},
-	{jsonv1.FormatBytesWithLegacySemantics, "FormatBytesWithLegacySemantics"},
-	{jsonv1.StringifyWithLegacySemantics, "StringifyWithLegacySemantics"},
-	{jsonv1.CallMethodsWithLegacySemantics, "CallMethodsWithLegacySemantics"},
-	{jsonv1.ReportErrorsWithLegacySemantics, "ReportErrorsWithLegacySemantics"},
-	{jsonv1.FormatDurationAsNano, "FormatDurationAsNano"},
 }
 
 // WithDefaultsFrom seeds property defaults on the root object schema from an

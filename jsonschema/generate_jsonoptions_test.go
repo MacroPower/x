@@ -3,15 +3,8 @@ package jsonschema_test
 import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
-	"go/ast"
-	"go/build"
-	"go/parser"
-	"go/token"
 	"maps"
-	"os"
-	"path/filepath"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
@@ -21,163 +14,62 @@ import (
 	jsonv1 "encoding/json"
 
 	"go.jacobcolvin.com/x/jsonschema"
+	"go.jacobcolvin.com/x/jsonschema/internal/jsonopts"
 )
 
-// jsonOptionClass says what WithJSONOptions does with one option constructor.
-type jsonOptionClass int
+// jsonOptionSamples holds the "set" form of every constructor
+// internal/jsonopts classifies, keyed as the table keys them. A combinator
+// (JoinOptions, DefaultOptionsV2) sets nothing on its own and has no sample.
+// TestJSONOptionClassificationBehaviour drives each sample through the public
+// API on the class the table assigns it, and fails when the two key sets
+// differ, so a row added to the table gets a sample here.
+var jsonOptionSamples = map[string]json.Options{
+	// Package encoding/json/v2.
+	"encoding/json/v2.FormatNilSliceAsNull": json.FormatNilSliceAsNull(true),
+	"encoding/json/v2.FormatNilMapAsNull":   json.FormatNilMapAsNull(true),
+	"encoding/json/v2.OmitZeroStructFields": json.OmitZeroStructFields(true),
+	"encoding/json/v2.StringifyNumbers":     json.StringifyNumbers(true),
+	"encoding/json/v2.WithMarshalers": json.WithMarshalers(
+		json.MarshalFunc(func(time.Time) ([]byte, error) { return []byte(`""`), nil }),
+	),
+	"encoding/json/v2.Deterministic":             json.Deterministic(true),
+	"encoding/json/v2.MatchCaseInsensitiveNames": json.MatchCaseInsensitiveNames(true),
+	"encoding/json/v2.RejectUnknownMembers":      json.RejectUnknownMembers(true),
+	"encoding/json/v2.WithUnmarshalers": json.WithUnmarshalers(
+		json.UnmarshalFunc(func([]byte, *time.Time) error { return nil }),
+	),
+	"encoding/json/v2.DefaultOptionsV2": nil,
+	"encoding/json/v2.JoinOptions":      nil,
 
-const (
-	// An honored option changes the generated schema; the behavior tests
-	// further down this file pin its exact effect.
-	honoredOption jsonOptionClass = iota
-	// A refused option makes generation fail with ErrUnsupportedJSONOption.
-	refusedOption
-	// An ignored option leaves the schema identical to the no-option baseline.
-	ignoredOption
-	// A combinator sets nothing on its own (JoinOptions, DefaultOptionsV2).
-	optionCombinator
-)
+	// Package encoding/json (v1 compat).
+	"encoding/json.DefaultOptionsV1":                jsonv1.DefaultOptionsV1(),
+	"encoding/json.OmitEmptyWithLegacySemantics":    jsonv1.OmitEmptyWithLegacySemantics(true),
+	"encoding/json.FormatByteArrayAsArray":          jsonv1.FormatByteArrayAsArray(true),
+	"encoding/json.FormatBytesWithLegacySemantics":  jsonv1.FormatBytesWithLegacySemantics(true),
+	"encoding/json.StringifyWithLegacySemantics":    jsonv1.StringifyWithLegacySemantics(true),
+	"encoding/json.CallMethodsWithLegacySemantics":  jsonv1.CallMethodsWithLegacySemantics(true),
+	"encoding/json.FormatDurationAsNano":            jsonv1.FormatDurationAsNano(true),
+	"encoding/json.ReportErrorsWithLegacySemantics": jsonv1.ReportErrorsWithLegacySemantics(true),
+	"encoding/json.MatchCaseSensitiveDelimiter":     jsonv1.MatchCaseSensitiveDelimiter(true),
+	"encoding/json.MergeWithLegacySemantics":        jsonv1.MergeWithLegacySemantics(true),
+	"encoding/json.ParseBytesWithLooseRFC4648":      jsonv1.ParseBytesWithLooseRFC4648(true),
+	"encoding/json.ParseTimeWithLooseRFC3339":       jsonv1.ParseTimeWithLooseRFC3339(true),
+	"encoding/json.UnmarshalArrayFromAnyLength":     jsonv1.UnmarshalArrayFromAnyLength(true),
 
-var (
-	// The toolchain packages that export Options constructors, as import
-	// paths under GOROOT/src.
-	jsonOptionPackages = []string{"encoding/json", "encoding/json/v2", "encoding/json/jsontext"}
-
-	// Every exported Options constructor in encoding/json, encoding/json/v2,
-	// and encoding/json/jsontext, keyed by import path and name.
-	// TestJSONOptionClassificationCoversToolchain fails when the toolchain's
-	// set differs, so a new constructor has to be classified here (and, if it
-	// changes the marshaled shape, refused in WithJSONOptions) before a
-	// toolchain bump passes. The opt column holds the "set" form of the option
-	// and is nil for a combinator.
-	jsonOptionClassification = map[string]struct {
-		class jsonOptionClass
-		opt   json.Options
-	}{
-		// Package encoding/json/v2.
-		"encoding/json/v2.FormatNilSliceAsNull": {honoredOption, json.FormatNilSliceAsNull(true)},
-		"encoding/json/v2.FormatNilMapAsNull":   {honoredOption, json.FormatNilMapAsNull(true)},
-		"encoding/json/v2.OmitZeroStructFields": {honoredOption, json.OmitZeroStructFields(true)},
-		// StringifyNumbers stringifies numbers inside containers, beyond what the
-		// per-field ,string tag machinery reaches, and a marshaler's output shape
-		// is unknowable.
-		"encoding/json/v2.StringifyNumbers": {refusedOption, json.StringifyNumbers(true)},
-		"encoding/json/v2.WithMarshalers": {refusedOption, json.WithMarshalers(
-			json.MarshalFunc(func(time.Time) ([]byte, error) { return []byte(`""`), nil }),
-		)},
-		"encoding/json/v2.Deterministic":             {ignoredOption, json.Deterministic(true)},
-		"encoding/json/v2.MatchCaseInsensitiveNames": {ignoredOption, json.MatchCaseInsensitiveNames(true)},
-		"encoding/json/v2.RejectUnknownMembers":      {ignoredOption, json.RejectUnknownMembers(true)},
-		"encoding/json/v2.WithUnmarshalers": {ignoredOption, json.WithUnmarshalers(
-			json.UnmarshalFunc(func([]byte, *time.Time) error { return nil }),
-		)},
-		"encoding/json/v2.DefaultOptionsV2": {optionCombinator, nil},
-		"encoding/json/v2.JoinOptions":      {optionCombinator, nil},
-
-		// Package encoding/json (v1 compat). The refused rows change the marshaled shape
-		// too (a legacy omitempty drops fields v2 keeps, the byte-array form swaps
-		// base64 for a number array), so each must be refused rather than silently
-		// generating a schema that rejects the configured marshal's output.
-		// ReportErrorsWithLegacySemantics makes v2 marshal declarations generation
-		// refuses (a ,string tag on a bool, conflicting names, a tagged unexported
-		// field), so it is refused as well. DefaultOptionsV1 bundles them all.
-		"encoding/json.DefaultOptionsV1":                {refusedOption, jsonv1.DefaultOptionsV1()},
-		"encoding/json.OmitEmptyWithLegacySemantics":    {refusedOption, jsonv1.OmitEmptyWithLegacySemantics(true)},
-		"encoding/json.FormatByteArrayAsArray":          {refusedOption, jsonv1.FormatByteArrayAsArray(true)},
-		"encoding/json.FormatBytesWithLegacySemantics":  {refusedOption, jsonv1.FormatBytesWithLegacySemantics(true)},
-		"encoding/json.StringifyWithLegacySemantics":    {refusedOption, jsonv1.StringifyWithLegacySemantics(true)},
-		"encoding/json.CallMethodsWithLegacySemantics":  {refusedOption, jsonv1.CallMethodsWithLegacySemantics(true)},
-		"encoding/json.FormatDurationAsNano":            {refusedOption, jsonv1.FormatDurationAsNano(true)},
-		"encoding/json.ReportErrorsWithLegacySemantics": {refusedOption, jsonv1.ReportErrorsWithLegacySemantics(true)},
-		// The remaining v1 rows affect unmarshaling only.
-		"encoding/json.MatchCaseSensitiveDelimiter": {ignoredOption, jsonv1.MatchCaseSensitiveDelimiter(true)},
-		"encoding/json.MergeWithLegacySemantics":    {ignoredOption, jsonv1.MergeWithLegacySemantics(true)},
-		"encoding/json.ParseBytesWithLooseRFC4648":  {ignoredOption, jsonv1.ParseBytesWithLooseRFC4648(true)},
-		"encoding/json.ParseTimeWithLooseRFC3339":   {ignoredOption, jsonv1.ParseTimeWithLooseRFC3339(true)},
-		"encoding/json.UnmarshalArrayFromAnyLength": {ignoredOption, jsonv1.UnmarshalArrayFromAnyLength(true)},
-
-		// Package encoding/json/jsontext. Whitespace, escaping, raw-value re-encoding,
-		// and decoder tolerance never change the JSON value a marshal writes.
-		"encoding/json/jsontext.AllowDuplicateNames":   {ignoredOption, jsontext.AllowDuplicateNames(true)},
-		"encoding/json/jsontext.AllowInvalidUTF8":      {ignoredOption, jsontext.AllowInvalidUTF8(true)},
-		"encoding/json/jsontext.CanonicalizeRawFloats": {ignoredOption, jsontext.CanonicalizeRawFloats(true)},
-		"encoding/json/jsontext.CanonicalizeRawInts":   {ignoredOption, jsontext.CanonicalizeRawInts(true)},
-		"encoding/json/jsontext.EscapeForHTML":         {ignoredOption, jsontext.EscapeForHTML(true)},
-		"encoding/json/jsontext.EscapeForJS":           {ignoredOption, jsontext.EscapeForJS(true)},
-		"encoding/json/jsontext.Multiline":             {ignoredOption, jsontext.Multiline(true)},
-		"encoding/json/jsontext.PreserveRawStrings":    {ignoredOption, jsontext.PreserveRawStrings(true)},
-		"encoding/json/jsontext.ReorderRawObjects":     {ignoredOption, jsontext.ReorderRawObjects(true)},
-		"encoding/json/jsontext.SpaceAfterColon":       {ignoredOption, jsontext.SpaceAfterColon(true)},
-		"encoding/json/jsontext.SpaceAfterComma":       {ignoredOption, jsontext.SpaceAfterComma(true)},
-		"encoding/json/jsontext.WithIndent":            {ignoredOption, jsontext.WithIndent("  ")},
-		"encoding/json/jsontext.WithIndentPrefix":      {ignoredOption, jsontext.WithIndentPrefix("\t")},
-	}
-)
-
-// toolchainJSONOptionConstructors parses the option packages under
-// build.Default.GOROOT and returns "importpath.Name" for every exported
-// top-level func whose sole result is the Options identifier. Parsing rather
-// than importing sidesteps the goexperiment.jsonv2 build tag, and skips a
-// constructor that exists only as commented-out source. A missing GOROOT/src
-// fails the caller rather than skipping it, since a skip would defeat the guard.
-func toolchainJSONOptionConstructors(t *testing.T) map[string]struct{} {
-	t.Helper()
-
-	found := map[string]struct{}{}
-
-	for _, pkg := range jsonOptionPackages {
-		dir := filepath.Join(build.Default.GOROOT, "src", pkg)
-
-		entries, err := os.ReadDir(dir)
-		require.NoError(t, err, "the guard needs the toolchain source under GOROOT/src")
-
-		fset := token.NewFileSet()
-
-		for _, entry := range entries {
-			name := entry.Name()
-			if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
-				continue
-			}
-
-			file, err := parser.ParseFile(fset, filepath.Join(dir, name), nil, parser.SkipObjectResolution)
-			require.NoError(t, err)
-
-			for _, decl := range file.Decls {
-				if ctor, ok := optionsConstructorName(decl); ok {
-					found[pkg+"."+ctor] = struct{}{}
-				}
-			}
-		}
-	}
-
-	return found
-}
-
-// optionsConstructorName returns the name of decl when it is an exported
-// top-level func with no receiver whose sole result is the Options identifier.
-func optionsConstructorName(decl ast.Decl) (string, bool) {
-	fn, ok := decl.(*ast.FuncDecl)
-	if !ok || fn.Recv != nil || !fn.Name.IsExported() ||
-		fn.Type.Results == nil || len(fn.Type.Results.List) != 1 {
-		return "", false
-	}
-
-	result, ok := fn.Type.Results.List[0].Type.(*ast.Ident)
-	if !ok || result.Name != "Options" {
-		return "", false
-	}
-
-	return fn.Name.Name, true
-}
-
-// TestJSONOptionClassificationCoversToolchain pins the classification table to
-// the constructor set the toolchain exports, in both directions.
-func TestJSONOptionClassificationCoversToolchain(t *testing.T) {
-	t.Parallel()
-
-	want := slices.Sorted(maps.Keys(toolchainJSONOptionConstructors(t)))
-	got := slices.Sorted(maps.Keys(jsonOptionClassification))
-	assert.Equal(t, want, got, "classify every Options constructor the toolchain exports")
+	// Package encoding/json/jsontext.
+	"encoding/json/jsontext.AllowDuplicateNames":   jsontext.AllowDuplicateNames(true),
+	"encoding/json/jsontext.AllowInvalidUTF8":      jsontext.AllowInvalidUTF8(true),
+	"encoding/json/jsontext.CanonicalizeRawFloats": jsontext.CanonicalizeRawFloats(true),
+	"encoding/json/jsontext.CanonicalizeRawInts":   jsontext.CanonicalizeRawInts(true),
+	"encoding/json/jsontext.EscapeForHTML":         jsontext.EscapeForHTML(true),
+	"encoding/json/jsontext.EscapeForJS":           jsontext.EscapeForJS(true),
+	"encoding/json/jsontext.Multiline":             jsontext.Multiline(true),
+	"encoding/json/jsontext.PreserveRawStrings":    jsontext.PreserveRawStrings(true),
+	"encoding/json/jsontext.ReorderRawObjects":     jsontext.ReorderRawObjects(true),
+	"encoding/json/jsontext.SpaceAfterColon":       jsontext.SpaceAfterColon(true),
+	"encoding/json/jsontext.SpaceAfterComma":       jsontext.SpaceAfterComma(true),
+	"encoding/json/jsontext.WithIndent":            jsontext.WithIndent("  "),
+	"encoding/json/jsontext.WithIndentPrefix":      jsontext.WithIndentPrefix("\t"),
 }
 
 // schemaJSON generates the schema for T under opts and returns its marshaled
@@ -194,10 +86,11 @@ func schemaJSON[T any](t *testing.T, opts ...jsonschema.GenerateOption) string {
 	return string(out)
 }
 
-// TestJSONOptionClassificationBehaviour checks each row's class through the
-// public API: a refused option fails generation with ErrUnsupportedJSONOption,
-// an ignored one leaves the schema identical to the no-option baseline, and an
-// honored one changes it.
+// TestJSONOptionClassificationBehaviour checks each table row's class through
+// the public API: a refused option fails generation with
+// ErrUnsupportedJSONOption, an ignored one leaves the schema identical to the
+// no-option baseline, and an honored one changes it. The samples and the table
+// must name the same constructors.
 func TestJSONOptionClassificationBehaviour(t *testing.T) {
 	t.Parallel()
 
@@ -207,39 +100,54 @@ func TestJSONOptionClassificationBehaviour(t *testing.T) {
 		M map[string]int `json:"m"`
 	}
 
+	keys := make([]string, 0, len(jsonopts.Table))
+	for _, row := range jsonopts.Table {
+		keys = append(keys, row.Key)
+	}
+
+	slices.Sort(keys)
+	require.Equal(t, keys, slices.Sorted(maps.Keys(jsonOptionSamples)),
+		"every table row needs a sample here, and every sample a row")
+
 	baseline := schemaJSON[payload](t)
 
-	for name, row := range jsonOptionClassification {
-		t.Run(name, func(t *testing.T) {
+	for _, row := range jsonopts.Table {
+		opt := jsonOptionSamples[row.Key]
+
+		t.Run(row.Key, func(t *testing.T) {
 			t.Parallel()
 
-			if row.class == optionCombinator {
-				assert.Nil(t, row.opt, "a combinator row sets nothing")
+			if row.Class == jsonopts.ClassCombinator {
+				assert.Nil(t, opt, "a combinator row sets nothing")
 
 				return
 			}
 
-			require.NotNil(t, row.opt, "every non-combinator row carries its set form")
+			require.NotNil(t, opt, "every non-combinator row carries its set form")
 
-			switch row.class {
-			case refusedOption:
-				_, err := jsonschema.GenerateFor[payload](t.Context(), jsonschema.WithJSONOptions(row.opt))
+			if row.Set != nil {
+				assert.True(t, row.Set(opt), "the row's probe must recognize its own set form")
+			}
+
+			switch row.Class {
+			case jsonopts.ClassRefused:
+				_, err := jsonschema.GenerateFor[payload](t.Context(), jsonschema.WithJSONOptions(opt))
 				require.ErrorIs(t, err, jsonschema.ErrUnsupportedJSONOption)
 
 				// The refusal surfaces from a reusable Generator's runs too.
-				gen := jsonschema.NewGenerator(jsonschema.WithJSONOptions(row.opt))
+				gen := jsonschema.NewGenerator(jsonschema.WithJSONOptions(opt))
 				_, err = jsonschema.GenerateWith[payload](t.Context(), gen)
 				require.ErrorIs(t, err, jsonschema.ErrUnsupportedJSONOption)
 
-			case ignoredOption:
-				assert.Equal(t, baseline, schemaJSON[payload](t, jsonschema.WithJSONOptions(row.opt)),
+			case jsonopts.ClassIgnored:
+				assert.Equal(t, baseline, schemaJSON[payload](t, jsonschema.WithJSONOptions(opt)),
 					"an ignored option must leave the schema untouched")
 
-			case honoredOption:
-				assert.NotEqual(t, baseline, schemaJSON[payload](t, jsonschema.WithJSONOptions(row.opt)),
+			case jsonopts.ClassHonored:
+				assert.NotEqual(t, baseline, schemaJSON[payload](t, jsonschema.WithJSONOptions(opt)),
 					"an honored option must change the schema (its exact effect is pinned elsewhere)")
 
-			case optionCombinator:
+			case jsonopts.ClassCombinator:
 				t.Fatal("unreachable: combinators return above")
 			}
 		})
