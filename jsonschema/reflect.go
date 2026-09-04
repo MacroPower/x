@@ -462,6 +462,17 @@ func (g *generator) schemaForType(t reflect.Type, nullable bool) (*node, error) 
 			return nil, err
 		}
 
+		// A slice or map builder folds a format-option null into the node even
+		// on a bare build, and the cyclic and extracted branches below store
+		// that node as a def body every reference shares. A reference carries
+		// the stance only in its own null decision and cannot take a null back
+		// out of the body it points at, so a NullForbidden stance has to clear
+		// the format null here, before the body is shared, or $defs admits the
+		// null the inline branch refuses.
+		if stance == NullForbidden {
+			n.nullable = false
+		}
+
 		// A cycle detected while building this type's element/value schema left a
 		// placeholder def entry (created by a guarded re-entry). Fill it with the
 		// now complete body and return a reference, mirroring the struct path.
@@ -482,8 +493,9 @@ func (g *generator) schemaForType(t reflect.Type, nullable bool) (*node, error) 
 		// Built bare as a guarded type but neither cyclic nor extracted, so it
 		// stays inline: restore the occurrence nullability withheld during the
 		// bare build, then fold the extender's stance. A slice or map node may
-		// already carry the null its builder derived from a format option, so
-		// the withheld pointer occurrence is OR-ed in rather than replacing it.
+		// already carry the null its builder derived from a format option
+		// (unless the veto above cleared it), so the withheld pointer
+		// occurrence is OR-ed in rather than replacing it.
 		base := n.nullable
 		if extractBare {
 			base = base || nullable
