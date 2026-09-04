@@ -684,6 +684,36 @@ are refused with `ErrInvalidJSONField`. A fallback map value type with no
 representation (`map[string]time.Duration`) is refused with
 `ErrUnsupportedType` under every option.
 
+### Null encoding
+
+Whether an occurrence admits `null` is decided once, from four inputs: the
+occurrence (a pointer or an intercepted interface admits `null`; a value does
+not), the `Nullability` stance a type-level hook declared for the type
+(`NullAllowed` grants it, `NullForbidden` withholds it), the container kind (a
+slice, map, or `[]byte` admits `null` only where the marshal writes one), and
+the `WithJSONOptions` value (`FormatNilSliceAsNull` and `FormatNilMapAsNull`
+are what make it write one). Every consumer reads that one answer: the null
+branch the schema carries, the `null` literal a tag or an interpreter may
+write, `FieldContext.Shape`, and a `WithDefaultsFrom` null. A null-admitting
+field renders as `anyOf[value, null]`, or as a `["null", base]` type list for
+a container with no `const` or `enum`.
+
+Field-level facts (the comment provider, the `jsonschema` tag, the tag
+interpreters) are declared on a canvas separate from the type-derived schema,
+and each keyword lands on the value branch or the null wrapper by its own rule:
+`const`, `enum`, the string-content keywords, and the replace-semantics
+`pattern`, `format`, and `multipleOf` stay on the value branch, while
+annotations and the authored bounds move to the wrapper. A keyword therefore
+resolves to the same value on a nullable field as on a non-nullable one. An
+authored bound is intersected with the type's own and the stronger side kept,
+so a tag, an interpreter, or a third-party writer can only tighten a bound,
+never weaken it. An interpreter that declares a `const` or `enum` disagreeing
+with one an inline override or provider already carries on its value branch
+reports the conflict rather than overwriting it; on a `$defs`-extracted type
+the canvas value rides beside the `$ref` and the two compose conjunctively (an
+`enum` intersects and only tightens; a disagreeing `const` composes to a
+faithfully unsatisfiable schema rather than aborting generation).
+
 ### Comment extraction
 
 Type and field descriptions come from a `DescriptionProvider`, registered with
@@ -1011,13 +1041,13 @@ always succeeds or always fails (following `regexp.MustCompile` and
   wrapped marshal error.
 
 A compiled `Validator` also reports what it validates: `Validator.Schema()`
-returns the root schema it was compiled for and `Validator.Draft()` the draft
-in effect, so a validator can be passed across package boundaries without the
-schema riding alongside. The returned schema is the caller's live value, not a
-copy, and the compiled validator's caches key off its nodes. Mutating a schema
-after `Compile` is unsupported, and validating through a `Validator` whose
-schema has been mutated has undefined behavior. Treat a compiled schema as
-immutable, and recompile after any change.
+returns a private tree copy of the root schema it was compiled for, and
+`Validator.Draft()` the draft in effect, so a validator can be passed across
+package boundaries without the schema riding alongside. The copy shares nothing
+with the caller's value, and a node the caller's value reached through two
+paths is two nodes in it; the compiled caches derive from the copy, so mutating
+the caller's value after `Compile` changes nothing. Treat the returned copy as
+read-only, and recompile after any change.
 
 The package-level `Validate(ctx, schema, instance, opts...)` is the one
 one-shot form, compiling the schema and validating one pre-parsed instance
@@ -1087,10 +1117,14 @@ identifiers. A schema setting both Go fields of one JSON keyword (`Type` and
 `Types`, `Defs` and `Definitions`, `Items` and `ItemsArray`, a `dependencies`
 key in both maps) is rejected with `ErrConflictingSchemaFields`; a nil
 `*Schema` element inside a sub-schema slice or map with `ErrNilSubschema`; a
-duplicate `PropertyOrder` entry with `ErrDuplicatePropertyOrder`; and a root
-document whose sub-schema pointers alias or cycle, or whose loop closes through
-a value field (`Const`, `Enum`, `Examples`, or `Extra`), with
-`ErrSchemaNotTree`. An `$id` outside the keyword's domain is rejected with
+duplicate `PropertyOrder` entry with `ErrDuplicatePropertyOrder`; and a
+document holding a loop that crosses a schema, through a sub-schema keyword or
+a value field (`Const`, `Enum`, `Examples`, or `Extra`), with `ErrSchemaCycle`,
+which names the pointer where the loop closes and the pointer it returns to.
+`Compile` works on a private tree copy of the document, so a node the caller's
+value reaches through two paths is two nodes in the copy and is accepted, and a
+duplicated node that carries a `$id` or an anchor is refused with
+`ErrIDCollision`, since its two copies would claim one key. An `$id` outside the keyword's domain is rejected with
 `ErrInvalidID`: one that does not parse, one carrying a fragment under draft
 2020-12, or one that does not resolve to an absolute URI against its enclosing
 base (the parent `$id` chain, or `WithBaseURI` for the root, so a relative root
@@ -1340,70 +1374,52 @@ optional or omits it, fails with `ErrUnknownVocabulary`. Draft-07 has no
 
 Local fragment refs (`#/$defs/...`, `#/definitions/...`, `#anchor`) resolve
 within the document. Remote and absolute `$ref` URIs are resolved through an
-optional `RefResolver` set with `WithRefResolver`. `Compile` resolves every
-reference reachable from the root: the first ref naming a remote document
-fetches it through the resolver, registers it in the compiled registry, and
-vets it. A fetched document persists in the compiled registry, so no later
-ref or validation run consults the resolver for it; misses and failures are
-negative-cached for the rest of the run that saw them, so an unresolvable
-URI costs one resolver call per run however many refs name it. A document
-the resolver cannot serve at compile time (a not-resolved answer, or any
-other error) does not fail `Compile`: the resolver may serve the document
-only after compilation, so the validation walk reports the ref instead. A
-fragment that cannot resolve inside a document that is present (the root, or
-a fetched document) fails `Compile` with `ErrNotResolved`, since it can
-never resolve later.
+optional `RefResolver` set with `WithRefResolver`. `Compile` fetches every
+document a reference reachable from the root names, and every document those
+documents name in turn, until no reference is left. Each fetch registers the
+document under the URI it was fetched from and vets it, and the document
+persists in the compiled registry, so no later reference or validation run
+consults the resolver for it. Misses and failures are negative-cached for the
+rest of the run that saw them, so an unresolvable URI costs one resolver call
+per run however many refs name it. A document the resolver cannot serve at
+compile time (a not-resolved answer, or any other error) does not fail
+`Compile`, since the resolver may serve it later; the validation walk reports
+the reference instead. A fragment that cannot resolve inside a document that is
+present (the root, or a fetched document) fails `Compile` with
+`ErrNotResolved`, since it can never resolve later.
 
 At validation time, a resolver error surfaces as `ErrRefResolve`; an
 unresolvable remote/absolute ref with no resolver is reported as a
 `*ValidationError`, and so is an unresolvable local fragment ref inside a
 document first fetched during a validation run or inside a JSON-pointer
-fallback target, where no compile-time pass vetted it (within a
-compile-vetted document such a fragment ref is silently skipped, since
-`Compile` already rejects genuinely broken ones). Circular refs are detected
-and treated as passing. A document first fetched during a validation run is
-vetted with the same structural checks `Compile` applies to compile-time-fetched
-documents, and a JSON-pointer fallback target (a schema carried inside an
-unknown keyword) is vetted with the same checks minus the identifier pass,
-which needs a document base no pointer target carries. Both engines vet a
-target where they materialize it, so the reference that reaches the target is
-the one that reports its violation.
+fallback target (within a compile-vetted document such a fragment ref is
+skipped, since `Compile` already rejected the broken ones). Circular refs are
+detected and treated as passing.
 
-The vet refuses the schema with the sentinel of the check that failed
-(`ErrInvalidType`, `ErrNegativeBound`, `ErrNonPositiveMultipleOf`,
-`ErrItemsArrayUnderDraft2020`, `ErrConflictingSchemaFields`, `ErrNilSubschema`,
-`ErrDuplicatePropertyOrder`, or, for a fetched document, `ErrInvalidID` or
-`ErrMisplacedVocabulary`) rather than letting the schema silently mis-validate.
-A validation run and `Inline` both fail the referencing ref with an error
-wrapping `ErrRefResolve` and that sentinel. `Compile` reports the bare sentinel.
-It frames a fallback target's violation under the failing reference, and a
-fetched document's under that document's own locator. `Inline` applies this same
-vetting policy to every document its own reference closure reaches, its root
-included (see [Inlining references](#inlining-references)).
+Every document that enters resolution space is held to one policy, at the point
+it enters: a fetched document at its fetch, whether at compile time or during a
+validation run; a `SubstituteRef` schema at the substitution site; and a
+JSON-pointer fallback target (a schema carried inside an unknown keyword) where
+a reference materializes it. The document is copied into a private tree first,
+so nothing the resolver returned is read again or mutated, and a node the
+source reaches through two paths is two nodes in the copy. The copy must hold
+no loop that crosses a schema, through a sub-schema keyword or a value field
+(`Const`, `Enum`, `Examples`, or `Extra`): a fetched document with one fails
+the referencing ref with `ErrRefResolve` wrapping `ErrSchemaCycle`, and a
+cyclic substitute fails with `ErrSchemaCycle` at the substitution site. Either
+refusal names the pointer where the loop closes and the pointer it returns to,
+rooted at the document the check walked. A container that loops without
+crossing a schema is left to `encoding/json`, which reports it as an ordinary
+error. A duplicated node that carries a `$id` or an anchor is refused with
+`ErrIDCollision`, since its two copies would claim one key.
 
-A fetched document must claim no identifier another document already holds. A
-`$id` that resolves to a URI another document already holds, or an `$anchor` or
-`$dynamicAnchor` key registered for a different schema, fails the referencing
-ref with an error wrapping `ErrRefResolve` and `ErrIDCollision` naming the
-identifier and both documents. Two documents under one identifier leave every
-reference naming it ambiguous, and the rule refuses the claim rather than
-picking a winner. `Inline` applies it at the same point, so the two engines
-refuse the same graphs. A substitute is judged on its `$id` alone, since it
-registers under the base of the reference it answers and an `$anchor` it
-carries reaches no reference. A document the resolver first serves after
-compilation is checked the same way, and the validation run that reaches the
-reference reports the collision.
-
-Both engines check identifiers before the structural checks, so a document
-carrying both an identifier collision and a structural violation fails with
-`ErrIDCollision` rather than the structural sentinel.
-
-Across a graph the reference walk decides instead. Both engines drive one walk
-in the same order and vet each document and each fallback target at the point
-the walk reaches it, so a graph carrying a collision in one place and a
-malformed fallback target in another fails with whichever fault the walk meets
-first, and the two engines name the same one.
-
+Identifiers are checked next. A fetched document must claim no identifier
+another document already holds: a `$id` that resolves to a URI another document
+already holds, or an `$anchor` or `$dynamicAnchor` key registered for a
+different schema, fails the referencing ref with an error wrapping
+`ErrRefResolve` and `ErrIDCollision` naming the identifier and both documents.
+A substitute is judged on its `$id` alone, since it registers under the base of
+the reference it answers and an `$anchor` it carries reaches no reference.
 Three cases make no claim. A document registers under the URI it was fetched
 from whatever its `$id` says, so the near-universal remote whose `$id` repeats
 its own retrieval URI passes, as does the same document fetched again. A
@@ -1412,19 +1428,25 @@ reaches. A JSON-pointer fallback target is a fragment of a document the run
 already holds rather than a document of its own, so two targets claiming one
 key resolve in materialization order.
 
-A fetched document, and a `SubstituteRef` schema, must also hold no pointer
-cycle, meaning no path that crosses a schema and returns to a schema or to a
-container it is already inside. A container that loops without crossing a schema
-is left to `encoding/json`, which reports it as an ordinary error. A cyclic
-fetched document fails the referencing ref with `ErrRefResolve` wrapping
-`ErrSchemaNotTree`; a cyclic substitute fails with `ErrSchemaNotTree` at the
-substitution site. Either refusal names the pointer where the loop closes and
-the pointer it returns to, both rooted at the document the check walked rather
-than at the root the run started from. Both sources accept aliasing, unlike a
-root document, because every walk that reaches a registered document dedupes
-pointers. The boundary refuses a cycle because the JSON-pointer fallback
-marshals part of the document it searches and a cyclic schema graph has no
-JSON form.
+The structural vet runs last: field structure, identifiers, type names,
+non-negative bounds, and under draft 2020-12 the draft-07 `items` array, the
+same checks `Compile` applies to the root. A fallback target skips the
+identifier pass, which needs a document base no pointer target carries. The vet
+refuses the document with the sentinel of the check that failed
+(`ErrInvalidType`, `ErrNegativeBound`, `ErrNonPositiveMultipleOf`,
+`ErrItemsArrayUnderDraft2020`, `ErrConflictingSchemaFields`, `ErrNilSubschema`,
+`ErrDuplicatePropertyOrder`, or, for a fetched document, `ErrInvalidID` or
+`ErrMisplacedVocabulary`). A validation run and `Inline` both fail the
+referencing ref with an error wrapping `ErrRefResolve` and that sentinel;
+`Compile` reports the bare sentinel, framing a fallback target's violation under
+the failing reference and a fetched document's under that document's own
+locator. The order is fixed, so a document carrying an identifier collision and
+a structural violation fails with `ErrIDCollision`.
+
+Both engines drive one reference walk in the same order, so a graph carrying
+faults in several documents fails with whichever fault the walk meets first,
+and `Compile` and `Inline` name the same one.
+
 Non-local refs absolutize against the enclosing resource's base URI: its `$id`,
 or the root base set with `WithBaseURI`. That base also registers the root
 document under its URI, so a ref absolutizing back to it resolves in-memory. The
@@ -1555,11 +1577,13 @@ Three predicates answer common shape questions:
 
 ## Inlining references
 
-`Inline` returns a deep copy of a schema in which every `$ref` (in the
-schema body, `$defs`, and `definitions` alike) is replaced by a copy of the
-schema it targets, producing one self-contained document for consumers that
-cannot follow references, such as code generators. The input and any
-resolver-returned schemas are never mutated.
+`Inline` returns a fresh schema tree in which every `$ref` (in the schema
+body, `$defs`, and `definitions` alike) is replaced by a copy of the schema it
+targets, producing one self-contained document for consumers that cannot follow
+references, such as code generators. The input and any resolver-returned
+schemas are never mutated, and the output shares no node with either: every
+position in the result is its own `*Schema`, so the result compiles whatever
+the input's pointer graph looked like.
 
 ```go
 fsys := os.DirFS("schemas") // main.json references sub/child.json, ...
@@ -1633,95 +1657,57 @@ keeps the input's `$schema`. A spliced copy also carries no `$id`,
 the target at its original position, and duplicating them at each splice
 would declare the same identifier several times in one document. The copy
 is self-contained, so the names have nothing left to resolve. Refs are
-inlined only in typed sub-schema
-positions (those `SubschemaEntries` covers); a `$ref` carried as raw JSON inside
-an unknown keyword is left as-is, although a ref pointing into such a
-position still resolves.
+inlined only in typed sub-schema positions (those `SubschemaEntries` covers);
+a `$ref` carried as raw JSON inside an unknown keyword is left as-is, although
+a ref pointing into such a position still resolves.
+
+`Inline` holds every document to the policy
+[Remote references](#remote-references) describes, at the point the document
+enters resolution space: the root before any reference resolves, each fetched
+document at its fetch, each `SubstituteRef` schema at the substitution site,
+and each JSON-pointer fallback target where a reference materializes it. A
+violation in the root returns the sentinel of the check that failed, in a
+message naming the offending path, so the structural vet accepts the same roots
+at both entry points; one in a fetched document returns an error wrapping
+`ErrRefResolve` and that sentinel; one in a substitute returns the sentinel in
+a message naming the reference the substitute answered and the document and
+path where the inliner consulted the fallback. A loop that crosses a schema in
+any of them is `ErrSchemaCycle`. Under `WithRetrievalBase` `Inline` skips the
+`$id` domain check throughout the run, since an inert `$id` establishes no base
+and registers no target. A fetched document follows the root document's draft,
+so a draft-07 array-form `items` remote inlined under a draft-07 run is left
+intact.
+
+Before expanding anything, `Inline` fetches every document the root's
+references name and every document those name in turn, the same closure
+`Compile` builds, so a document reachable only through another document's
+reference is held to the same policy as one the root names outright and the two
+entry points refuse the same reference graphs. A reference that resolves to
+nothing inside a document that is present can never resolve later, so it is
+refused wherever it sits, including a branch no expansion would have copied. A
+document the resolver cannot serve is tolerated, as `Compile` tolerates it, and
+the expansion that reaches the reference reports it, so an unreachable remote in
+a branch no expansion visits surfaces no error.
 
 Failure modes:
 
-- A root document whose sub-schema pointers do not form a tree, one `*Schema`
-  reached through two paths or through a pointer cycle, returns an error
-  wrapping `ErrSchemaNotTree`. This holds the input to the same contract
-  `Compile` holds it to, one location per node. A root whose loop closes through
-  a value field (`Const`, `Enum`, `Examples`, or `Extra`) returns the same
-  error, naming the pointer where the loop closes and the pointer it returns to,
-  and `Compile` refuses that root with the same message. Where a root holds
-  several loops, the message names one of them, and both engines name it. A
-  document reached through a resolver or a fallback is held to the weaker
-  no-cycle rule instead, and a node it shares between two positions is expanded
-  once, at the first location the walk reaches. That sharing survives into the
-  result, so an output built from an aliased resolver document or substitute is
-  not a tree and `Compile` rejects it. Only a hand-built graph can carry such
-  sharing; a parsed document never does.
 - A ref whose target is a node the walk is already inside closes a reference
   cycle and returns an error wrapping `ErrRefCycle`, since a cyclic reference
-  graph has no finite expansion. The walk marks every node it enters, the root
-  document included, so the truncation point does not depend on whether the walk
-  reached that node by descending the document or by expanding a ref to it.
+  graph has no finite expansion; the root document counts as entered, so a ref
+  back into it closes the cycle at the same depth however the walk reached the
+  target.
 - A `$dynamicRef` under Draft 2020-12 returns an error wrapping
   `ErrRefInline`, since its target depends on the dynamic scope at validation
   time and no single replacement preserves that (Draft 7 ignores the keyword,
-  as the validator does).
+  as the validator does). The closure resolves a `$dynamicRef` to reach the
+  document it names but never refuses on one, so a `$dynamicRef` that resolves
+  to nothing in a document no expansion reaches leaves `Inline` silent where
+  `Compile` refuses, and one whose JSON-pointer target the structural vet
+  rejects answers `ErrRefInline` rather than the sentinel `Compile` reports;
+  under a `WithRefFallback` that drops the reference, `Inline` succeeds on that
+  input and the inlined document, carrying no `$dynamicRef`, compiles.
 - A non-local ref with no resolver configured, or any ref whose target cannot
   be found, returns an error wrapping `ErrRefResolve`.
-- `Inline` vets the root document before any reference resolves, through the
-  policy `Compile` applies to the document it is given (see
-  [Remote references](#remote-references) for the full check list). A violation
-  returns the sentinel of the check that failed, in a message naming the
-  offending path, so the structural vet accepts the same roots at both entry
-  points. A `SubstituteRef` schema enters resolution space as a document of its
-  own, so `Inline` vets it as one and names the reference it answered along
-  with the document and path where the inliner consulted the fallback. Under
-  `WithRetrievalBase` `Inline` skips the `$id` domain check throughout the run,
-  in the root, in each substitute, and in every fetched document, since an inert
-  `$id` establishes no base and registers no target.
-- `Inline` runs the same reference-closure walk as `Compile` before
-  expanding anything. It fetches each document a reference names, vets it,
-  walks that document's own references, and repeats until no document is
-  added. The walk holds a document reachable only through another document's
-  reference to the same policy as one the root names outright. No expansion
-  copies anything out of such a document, and the two entry points still
-  refuse the same reference graphs. The walk resolves a `$dynamicRef` to
-  reach the document it names but never refuses on one, since `Inline` has
-  no static expansion for the keyword and answers `ErrRefInline` wherever
-  the expansion meets one. A `$dynamicRef` that resolves to nothing in a
-  document no expansion reaches therefore leaves `Inline` silent where
-  `Compile` refuses. A `$dynamicRef` whose JSON-pointer target the structural
-  vet rejects divides the two engines differently. The walk does not report that
-  rejection, so `Inline` without a fallback answers `ErrRefInline` rather than
-  the sentinel `Compile` reports for the check that rejected the target. Under a
-  `WithRefFallback` that drops the reference, `Inline` instead succeeds on the
-  input `Compile` refuses. The inlined document carries no `$dynamicRef`, so
-  `Compile` accepts it.
-- `Inline` structurally vets a remote document the closure reaches before
-  inlining it, through the same policy the validator applies to fetched
-  documents (see [Remote references](#remote-references) for the full check
-  list). A violation returns an error wrapping `ErrRefResolve` that also wraps
-  the sentinel of the check that failed (`ErrInvalidType`, `ErrNegativeBound`,
-  `ErrNonPositiveMultipleOf`, `ErrItemsArrayUnderDraft2020`,
-  `ErrConflictingSchemaFields`, `ErrNilSubschema`,
-  `ErrDuplicatePropertyOrder`, `ErrInvalidID`, or `ErrMisplacedVocabulary`),
-  rather than inlining the document into a malformed output schema. A fetched
-  document holding a pointer cycle fails the same way, wrapping
-  `ErrSchemaNotTree`, and a cyclic `SubstituteRef` schema returns that sentinel
-  from the substitution site. A substitute whose own `$id` names a URI a real
-  document already holds returns `ErrIDCollision` from the substitution site,
-  naming the reference whose fallback supplied it. The fetched document follows
-  the root document's draft, so a Draft-07 array-form `items` remote inlined
-  under a Draft-07 run is left intact. A JSON-pointer fallback target (a schema
-  carried inside an unknown keyword, in the root document or a fetched one) is
-  vetted the same way at materialization, minus the identifier checks, so an
-  ill-formed target cannot be spliced into the output either.
-- A reference that resolves to nothing inside a document that is present can
-  never resolve later, so the walk refuses it wherever it sits, including a
-  branch no expansion would have copied.
-- The closure walk tolerates a document the resolver cannot serve, and the
-  expansion that reaches the reference reports it. That matches the deferral
-  `Compile` makes, so an unreachable remote in a branch no expansion visits
-  surfaces no error. `WithRefFallback` suspends the walk's refusals apart from
-  an identifier collision. See [Inlining references](#inlining-references)
-  below.
 
 `WithRefFallback` sets a per-reference failure policy (a `RefFallback`,
 with `RefFallbackFunc` adapting a bare function) consulted when
@@ -1738,32 +1724,23 @@ consulted once per failure, at the reference that directly failed: a
 failure inside a nested expansion consults the innermost failing ref with
 its path in its containing document, and a declined consultation propagates
 outward without re-consulting at the enclosing refs. A cycle failure
-belongs to the expansion that closed it. A copy truncated by a cycle stays
-local to that expansion rather than being reused, so the same source ref
-consults again from a position whose walk is inside a different set of nodes.
-A substitute is deep-copied before splicing and is itself inlined recursively,
-its refs resolving in the context of the document containing the failing ref; a
-cycle introduced by the substitute is an ordinary `ErrRefCycle`. The copy
-enters resolution space as a document of its own, so `Inline` vets it as one,
-and a violation ends the call with the sentinel of the check that failed, in a
-message naming the reference the substitute answered and the document and path
-where the inliner consulted the fallback.
+belongs to the expansion that closed it, and the same source ref consults
+again from a position whose walk is inside a different set of nodes. A
+substitute is copied before splicing and is itself inlined recursively, its
+refs resolving in the context of the document containing the failing ref; a
+cycle introduced by the substitute is an ordinary `ErrRefCycle`.
 
-Configuring a fallback also suspends the reference-closure walk's refusals apart
-from an identifier collision. A `RefFallback` answers one failing reference at a
-time, and a document reachable only through another document's reference has no
-reference in the expansion for a policy to answer. With a fallback set the walk
-therefore fetches and caches, refusing only an identifier collision, and the
-expansion reports each failure at the references it does reach. A run with no
-fallback refuses a violation anywhere in the closure, so adding a fallback that
-only propagates is not the same as adding none.
-
-`ErrIDCollision` is the one refusal a fallback does not suspend. A substitute
-stands in for one reference; it cannot decide which of two documents owns a URI
-they both claim, and every reference naming that URI resolves through the
-ambiguity whether or not the fallback answers this one. The walk therefore
-refuses a colliding document wherever it sits, with or without a fallback
-configured.
+Configuring a fallback also suspends the closure's refusals apart from an
+identifier collision. A `RefFallback` answers one failing reference at a time,
+and a document reachable only through another document's reference has no
+reference in the expansion for a policy to answer. With a fallback set the
+closure therefore fetches and caches, refusing only an identifier collision, and
+the expansion reports each failure at the references it does reach. A run with
+no fallback refuses a violation anywhere in the closure, so adding a fallback
+that only propagates is not the same as adding none. `ErrIDCollision` is the
+one refusal a fallback does not suspend: a substitute stands in for one
+reference and cannot decide which of two documents owns a URI they both claim,
+so the closure refuses a colliding document wherever it sits.
 
 ### Inlining options
 
@@ -1789,7 +1766,7 @@ configured.
 | `ErrConflictingSchemaFields`  | Both Go fields of one JSON keyword set, e.g. `Type`/`Types` or a `dependencies` key in both maps (returned by `Compile` and `Inline`).                                                                                                                                                                                                                                                                                                                                                                                    |
 | `ErrNilSubschema`             | A nil `*Schema` element inside a sub-schema slice or map (returned by `Compile` and `Inline`).                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `ErrDuplicatePropertyOrder`   | A `PropertyOrder` slice listing the same property twice (returned by `Compile` and `Inline`).                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `ErrSchemaNotTree`            | The root document's sub-schema pointers alias or cycle, or a root loop closes through a value field (`Compile` and `Inline`); a fetched document holds a pointer cycle (`Compile` and `Inline`); or a `SubstituteRef` schema does (`Inline`).                                                                                                                                                                                                                                                                             |
+| `ErrSchemaCycle`              | A document holds a loop that crosses a schema, through a sub-schema keyword or a value field: the root (`Compile` and `Inline`), a fetched document (`Compile` and `Inline`, wrapped in `ErrRefResolve`), or a `SubstituteRef` schema (`Inline`).                                                                                                                                                                                                                                                                         |
 | `ErrInvalidID`                | An `$id` that does not parse, carries a fragment under 2020-12, or does not resolve to an absolute URI (returned by `Compile` and `Inline`; an `Inline` run under `WithRetrievalBase` checks no `$id`).                                                                                                                                                                                                                                                                                                                   |
 | `ErrInvalidBaseURI`           | A `WithBaseURI` value that does not parse (returned by `Compile` and `Inline`).                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `ErrMisplacedVocabulary`      | A `$vocabulary` on a node whose `$schema` does not establish the 2020-12 dialect (returned by `Compile` and `Inline`).                                                                                                                                                                                                                                                                                                                                                                                                    |
@@ -1857,32 +1834,28 @@ forward-direction generation only; schema-to-code generation is a non-goal.
 ### Relationship to `google/jsonschema-go`
 
 This package re-exports the upstream `Schema` type so users need only import
-this package, and reuses the upstream for exactly one behavior beyond the
-type alias: JSON-semantic comparison of the hand-built `const`/`enum` values
-that have no JSON form (a func, a channel, a cyclic value, a map whose keys
-`encoding/json` cannot render, or a value whose own marshaler panics), which
-reach the comparison as Go values (via `Equal`, as a recovering fallback).
-This package converts every other hand-built value to its document shape and
-compares it here.
-The alias is an interop commitment. `Schema` is and will remain the upstream
-type, so schemas pass directly to and from any package that accepts or
-produces `google/jsonschema-go`'s `jsonschema.Schema`, with no conversion. The
-package's internal vetted-schema types never appear in the public API; plain
-upstream `*Schema` values are what every entry point takes and returns.
-Everything else, including structural well-formedness checking at `Compile`
-and the `const`/`enum`/`uniqueItems` value comparison for decoded JSON shapes
-(exact decimal, with `float64` interpreted at its shortest decimal), is
-implemented here.
+this package. The alias is an interop commitment. `Schema` is and will remain
+the upstream type, so schemas pass directly to and from any package that
+accepts or produces `google/jsonschema-go`'s `jsonschema.Schema`, with no
+conversion. The package's internal vetted-schema types never appear in the
+public API; plain upstream `*Schema` values are what every entry point takes
+and returns, and a schema document marshals through the upstream
+`MarshalJSON`, so it carries the same members in the same order whichever
+json package marshals it. Everything else, including structural
+well-formedness checking at `Compile` and the `const`/`enum`/`uniqueItems`
+value comparison (exact decimal, with `float64` interpreted at its shortest
+decimal; a hand-built value with no JSON form equals nothing), is implemented
+here.
 
-| Concern                                                       | Implementation                             |
-| ------------------------------------------------------------- | ------------------------------------------ |
-| Schema data model (`Schema` struct)                           | Upstream (re-exported via type alias)      |
-| Structural well-formedness (compile-time checks)              | This package                               |
-| `$ref`/`$dynamicRef`/`$anchor` resolution (incl. remote refs) | This package (own URI/anchor registries)   |
-| Instance validation walk                                      | This package                               |
-| Error types and path tracking                                 | This package                               |
-| Format validation                                             | This package (pluggable)                   |
-| JSON-semantic value comparison (`const`/`enum`/`uniqueItems`) | This package (upstream `Equal()` fallback) |
+| Concern                                                       | Implementation                           |
+| ------------------------------------------------------------- | ---------------------------------------- |
+| Schema data model (`Schema` struct)                           | Upstream (re-exported via type alias)    |
+| Structural well-formedness (compile-time checks)              | This package                             |
+| `$ref`/`$dynamicRef`/`$anchor` resolution (incl. remote refs) | This package (own URI/anchor registries) |
+| Instance validation walk                                      | This package                             |
+| Error types and path tracking                                 | This package                             |
+| Format validation                                             | This package (pluggable)                 |
+| JSON-semantic value comparison (`const`/`enum`/`uniqueItems`) | This package                             |
 
 The package implements its own validation walk because the upstream
 `Resolved.Validate` returns on the first error within container keywords and
@@ -1891,69 +1864,9 @@ does not validate `format`. Because the upstream's resolved reference graph is
 unexported, this package resolves references itself: JSON Pointer traversal for
 local fragments, URI/anchor registries built from `$id`/`$anchor`, a
 dynamic-scope stack for `$dynamicRef`, and the optional `RefResolver` for remote
-refs.
-
-### Selected decisions
-
-- **Own reflection pipeline**, because the upstream's inference is too opaque to
-  extend with interfaces, tag interpreters, `$defs`, and cycle detection.
-- **Circular types via `$ref` to `$defs`**, where the upstream errors on cycles.
-- **`anyOf` for nullable `$ref`**: conventional, and avoids `oneOf` overhead.
-- **`additionalProperties: false` by default**: a Go struct defines exactly what
-  is allowed; opt in to permissive schemas with `WithAdditionalProperties`.
-- **No null on maps and slices**: `encoding/json/v2` writes a nil slice or
-  map as its empty instance under the default marshal options, so their
-  schemas name the bare container type; only pointers and intercepted
-  interfaces earn a null branch, and a `NullForbidden` stance drops that
-  branch for a type whose absent values are never serialized as `null`.
-  `WithJSONOptions` with `FormatNilSliceAsNull` or `FormatNilMapAsNull`
-  adds the null those options make v2 write.
-- **Hierarchical `ValidationError`**: a tree mirrors the schema/instance
-  structure so callers can inspect failures at any depth or flatten them.
-- **Pluggable format validation**: formats are checked by registered
-  `FormatValidator` values, matching the spec's recommendation that format
-  validation be optional and configurable.
-- **`unevaluatedProperties`/`unevaluatedItems`** are supported, with annotation
-  tracking reimplemented in the walk (the generator emits them for Draft 2020-12
-  `allOf` composition).
-- **Go RE2 for patterns**: `pattern` and `patternProperties` use Go's `regexp`,
-  not ECMA 262; this matches the upstream and is a known deviation from the
-  spec.
-- **`Validator.ValidateJSON` decodes numbers as `json.Number`** to preserve
-  the integer-vs-number distinction that default `float64` unmarshaling would
-  lose.
-- **One operation x shape table for every tag dialect**: the `jsonschema` tag and
-  the `validate` tag are two spellings of one constraint vocabulary, so they are
-  two grammars over one model (`internal/tagmodel`) rather than two engines. The
-  dispatch key is the JSON shape an instance actually takes, not the Go kind, so
-  string coercion is a column of the table instead of a gate each operation has
-  to remember; the table is a fixed-size array whose every cell is Apply, Ignore,
-  or Reject with a written reason, checked at import and pinned by a golden dump.
-  Where the dialects genuinely differ -- the numeric-bound literal domain, the
-  negative-size question, how a list is spelled, whether a bare key implies a
-  value -- the difference is a named parameter or a key-table row, never a second
-  implementation.
-
-Two points where the generated schema's model of a Go type differs from what
-`encoding/json/v2` emits for that type, each specified in the section that
-owns it:
-
-- **A direct JSON marshaler (`MarshalJSONTo` or `MarshalJSON`) is reflected
-  by its Go struct shape**, not its marshaled shape, so the schema can reject
-  output `encoding/json/v2` produces (see
-  [Customization interfaces](#customization-interfaces)).
-- **Draft-07 omits `additionalProperties: false` from the parent under `allOf`
-  composition**, which loosens the schema rather than tightening it, so it
-  cannot reject valid output (see [Struct field rules](#struct-field-rules)).
-
-### Non-goals
-
-- Full metaschema validation of input schemas. `Compile` checks structure,
-  identifiers, keyword domains, and references; validating a schema document
-  against its metaschema remains the caller's choice, and the conformance
-  tests apply it to generated schemas.
-- Code generation _from_ schemas (the reverse direction) is out of scope.
-  Forward-direction generation, including the `jsonschemagen` CLI, is supported.
+refs. The reflection pipeline is its own as well, so that customization
+interfaces, tag interpreters, `$defs` extraction, and recursive types can be
+supported.
 
 ## License
 
