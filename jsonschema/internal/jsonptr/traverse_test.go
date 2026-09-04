@@ -1,12 +1,15 @@
 package jsonptr_test
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/jsonptr"
+	"go.jacobcolvin.com/x/jsonschema/internal/schemafield"
 )
 
 func TestTraverseSchema(t *testing.T) {
@@ -137,6 +140,60 @@ func TestTraverseSchema(t *testing.T) {
 			got := jsonptr.TraverseSchema(tt.in, tt.segs)
 
 			assert.Same(t, tt.want, got)
+		})
+	}
+}
+
+// TestTraverseSchemaCoversSubschemaTable pins TraverseSchema's hand-written
+// keyword switch to the [schemafield.Subschemas] table, so a sub-schema
+// keyword added upstream cannot silently miss the typed fast path. A miss is
+// not a wrong answer -- the JSON-form fallback backstops it -- but it
+// reroutes resolution to a materialized fresh copy (vetted, registered,
+// listed in FallbackTargets) instead of the live in-registry node, an
+// observable identity change.
+func TestTraverseSchemaCoversSubschemaTable(t *testing.T) {
+	t.Parallel()
+
+	for _, f := range schemafield.Subschemas {
+		t.Run(f.Name, func(t *testing.T) {
+			t.Parallel()
+
+			child := &jsonschema.Schema{Title: f.Name}
+			root := &jsonschema.Schema{}
+			field := reflect.ValueOf(root).Elem().FieldByName(f.Name)
+			require.True(t, field.IsValid(),
+				"schemafield row %s names no Schema field", f.Name)
+
+			var segments []string
+
+			switch f.Shape {
+			case schemafield.Map:
+				field.Set(reflect.ValueOf(map[string]*jsonschema.Schema{"k": child}))
+
+				segments = []string{f.Keyword, "k"}
+
+			case schemafield.Slice:
+				field.Set(reflect.ValueOf([]*jsonschema.Schema{child}))
+
+				segments = []string{f.Keyword, "0"}
+
+			case schemafield.Single:
+				field.Set(reflect.ValueOf(child))
+
+				segments = []string{f.Keyword}
+
+			default:
+				t.Fatalf("Subschemas row %s carries non-sub-schema shape %v", f.Name, f.Shape)
+			}
+
+			assert.Same(
+				t,
+				child,
+				jsonptr.TraverseSchema(root, segments),
+				"TraverseSchema misses the %s edge (keyword %q): its keyword switch is stale against schemafield.Subschemas",
+				f.Name,
+				f.Keyword,
+			)
 		})
 	}
 }
