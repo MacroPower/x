@@ -8414,6 +8414,52 @@ func TestValidateConstEnumDocumentView(t *testing.T) {
 	}
 }
 
+// TestValidateConstDocumentViewAgainstGoInstance pins the pairing of a
+// hand-built const with a Go instance handed to Validator.Validate: the const
+// is read as the document renders it (a float32 as its 32-bit shortest
+// decimal, an empty Number as 0), while the instance is read as the Go value
+// it is (a float32 widened to float64, a Number by its literal). The two
+// spellings of one Go value therefore disagree, and only the instance that
+// spells the rendered literal matches.
+func TestValidateConstDocumentViewAgainstGoInstance(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		constant any
+		instance any
+		want     bool
+	}{
+		"float32 const against the same float32":   {constant: float32(0.1), instance: float32(0.1), want: false},
+		"float32 const against its rendered float": {constant: float32(0.1), instance: 0.1, want: true},
+		"empty number const against the empty number": {
+			constant: jsonv1.Number(""),
+			instance: jsonv1.Number(""),
+			want:     false,
+		},
+		"empty number const against zero": {
+			constant: jsonv1.Number(""),
+			instance: jsonv1.Number("0"),
+			want:     true,
+		},
+		"float64 const against the same float64": {constant: 0.1, instance: 0.1, want: true},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx := t.Context()
+			constant := tt.constant
+
+			validator, err := jsonschema.Compile(ctx, &jsonschema.Schema{Const: &constant})
+			require.NoError(t, err)
+
+			err = validator.Validate(ctx, tt.instance)
+			assert.Equal(t, tt.want, err == nil, "verdict: %v", err)
+		})
+	}
+}
+
 // TestValidateFallbackEnumConstMatchesIndexed pins that a const or enum
 // schema reached through a JSON-pointer ref into an unknown keyword
 // (#/examples/0), which a run materializes outside the node index and reads
