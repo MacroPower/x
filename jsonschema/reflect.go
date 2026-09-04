@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -26,16 +25,15 @@ import (
 )
 
 var (
-	typeJSONRawMessage = reflect.TypeFor[jsontext.Value]()
-	typeTime           = reflect.TypeFor[time.Time]()
-	typeTimeDuration   = reflect.TypeFor[time.Duration]()
-	typeSlogLevel      = reflect.TypeFor[slog.Level]()
-	typeJSONNumber     = reflect.TypeFor[json.Number]()
-	typeBigInt         = reflect.TypeFor[big.Int]()
-	typeBigRat         = reflect.TypeFor[big.Rat]()
-	typeBigFloat       = reflect.TypeFor[big.Float]()
-	typeProvider       = reflect.TypeFor[JSONSchemaProvider]()
-	typeExtender       = reflect.TypeFor[JSONSchemaExtender]()
+	typeTime         = reflect.TypeFor[time.Time]()
+	typeTimeDuration = reflect.TypeFor[time.Duration]()
+	typeSlogLevel    = reflect.TypeFor[slog.Level]()
+	typeJSONNumber   = reflect.TypeFor[json.Number]()
+	typeBigInt       = reflect.TypeFor[big.Int]()
+	typeBigRat       = reflect.TypeFor[big.Rat]()
+	typeBigFloat     = reflect.TypeFor[big.Float]()
+	typeProvider     = reflect.TypeFor[JSONSchemaProvider]()
+	typeExtender     = reflect.TypeFor[JSONSchemaExtender]()
 
 	// Inclusive [minimum, maximum] float64 bounds for each fixed-width integer
 	// kind. Int64 and Uint64 are excluded: float64 cannot name their maxima
@@ -158,16 +156,6 @@ func (g *generator) forRun(ctx context.Context) *generator {
 // over both.
 func (g *generator) containerNullable(occurrence, optFlag bool) bool {
 	return occurrence || (optFlag && g.nullable)
-}
-
-// marshalOptions returns the WithJSONOptions options in variadic form for a
-// [jsonv2.Marshal] call, empty when none were configured.
-func (g *generator) marshalOptions() []jsonv2.Options {
-	if g.jsonOpts == nil {
-		return nil
-	}
-
-	return []jsonv2.Options{g.jsonOpts}
 }
 
 // generate produces the root schema for the given type.
@@ -791,7 +779,7 @@ func (g *generator) builtinOverride(t reflect.Type) (*Schema, bool) {
 		// JSON string, so the string schema kind-based reflection of its int
 		// kind would miss is pinned here.
 		return &Schema{Type: typename.String}, true
-	case typeJSONRawMessage:
+	case reflectkind.TypeJSONTextValue:
 		return &Schema{}, true
 	case typeJSONNumber:
 		return &Schema{Type: typename.Number}, true

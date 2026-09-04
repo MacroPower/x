@@ -421,10 +421,21 @@ func (g *generator) applyInstanceDefaults(instance any, rootType reflect.Type, s
 	// a map-valued default seeds the same bytes on every run and committed
 	// schema output stays stable; it changes ordering only, never shape, so
 	// forcing it after the caller's options is safe.
-	data, err := json.Marshal(instance,
-		append(g.marshalOptions(), json.Deterministic(true))...)
+	data, err := json.Marshal(instance, g.jsonOpts, json.Deterministic(true))
 	if err != nil {
 		return fmt.Errorf("marshal defaults instance: %w", err)
+	}
+
+	// The top-level shape is settled once, before the decode: null gets its
+	// own message, every other non-object kind shares one, and only a
+	// genuine object proceeds.
+	if kind := jsontext.Value(data).Kind(); kind != '{' {
+		reason := "does not marshal to a JSON object"
+		if kind == 'n' {
+			reason = "marshals to JSON null, not an object"
+		}
+
+		return fmt.Errorf("%w: instance of type %s %s", ErrInvalidDefaultsInstance, instType, reason)
 	}
 
 	var values map[string]jsontext.Value
@@ -434,23 +445,9 @@ func (g *generator) applyInstanceDefaults(instance any, rootType reflect.Type, s
 		// The marshal above can emit bytes the default-options decode here
 		// refuses (a jsontext.Value field carrying duplicate member names
 		// under AllowDuplicateNames, say). A schema default must survive the
-		// document's own default-options marshal, so the refusal stands, but
-		// it must not be blamed on the top-level shape when the output is a
-		// genuine object.
-		reason := "does not decode under default options"
-		if jsontext.Value(data).Kind() != '{' {
-			reason = "does not marshal to a JSON object"
-		}
-
-		return fmt.Errorf("%w: instance of type %s %s: %w",
-			ErrInvalidDefaultsInstance, instType, reason, err)
-	}
-
-	// Unmarshaling JSON null into a map leaves it nil without an error, so a
-	// nil map means the instance marshaled to null rather than to an object.
-	if values == nil {
-		return fmt.Errorf("%w: instance of type %s marshals to JSON null, not an object",
-			ErrInvalidDefaultsInstance, instType)
+		// document's own default-options marshal, so the refusal stands.
+		return fmt.Errorf("%w: instance of type %s does not decode under default options: %w",
+			ErrInvalidDefaultsInstance, instType, err)
 	}
 
 	// A correctly resolved target is an object schema (inlined root, the $defs
