@@ -297,23 +297,22 @@ func WithJSONOptions(opts ...json.Options) GenerateOption {
 
 		g.jsonOptsErr = nil
 
-		if v, _ := json.GetOption(joined, json.StringifyNumbers); v {
-			g.jsonOptsErr = fmt.Errorf("%w: StringifyNumbers", ErrUnsupportedJSONOption)
-		}
-
 		if m, _ := json.GetOption(joined, json.WithMarshalers); m != nil {
 			g.jsonOptsErr = fmt.Errorf("%w: WithMarshalers", ErrUnsupportedJSONOption)
 		}
 
-		// The v1 compat options below also change the marshaled shape, and v2
-		// Marshal honors them, so silently ignoring any of them would emit a
-		// schema that rejects what the configured marshal writes. GetOption
-		// sees through a joined DefaultOptionsV1 bundle, so probing the
-		// constituents refuses the bundle as well.
-		for _, compat := range []struct {
-			option func(bool) jsonv1.Options
+		// Every boolean option that changes the marshaled shape in a way
+		// generation does not model sits in one table, so a refusal has one
+		// spelling and one precedence: the first set option wins. The v1
+		// compat rows are honored by v2 Marshal too, so silently ignoring
+		// any of them would emit a schema that rejects what the configured
+		// marshal writes; GetOption sees through a joined DefaultOptionsV1
+		// bundle, so probing the constituents refuses the bundle as well.
+		for _, refused := range []struct {
+			option func(bool) json.Options
 			name   string
 		}{
+			{json.StringifyNumbers, "StringifyNumbers"},
 			{jsonv1.OmitEmptyWithLegacySemantics, "OmitEmptyWithLegacySemantics"},
 			{jsonv1.FormatByteArrayAsArray, "FormatByteArrayAsArray"},
 			{jsonv1.FormatBytesWithLegacySemantics, "FormatBytesWithLegacySemantics"},
@@ -321,8 +320,8 @@ func WithJSONOptions(opts ...json.Options) GenerateOption {
 			{jsonv1.CallMethodsWithLegacySemantics, "CallMethodsWithLegacySemantics"},
 			{jsonv1.FormatDurationAsNano, "FormatDurationAsNano"},
 		} {
-			if v, _ := json.GetOption(joined, compat.option); v {
-				g.jsonOptsErr = fmt.Errorf("%w: %s", ErrUnsupportedJSONOption, compat.name)
+			if v, _ := json.GetOption(joined, refused.option); v {
+				g.jsonOptsErr = fmt.Errorf("%w: %s", ErrUnsupportedJSONOption, refused.name)
 
 				break
 			}
