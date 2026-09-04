@@ -427,10 +427,10 @@ func (g *generator) schemaForType(t reflect.Type, nullable bool) (*node, error) 
 	// A guarded (potentially cyclic) type is built bare too: a cycle detected
 	// while building it routes it to $defs via the cyclic-fill path below. When
 	// no cycle materializes and it stays inline, the withheld nullability is
-	// restored on the node. This is a no-op for slices and maps (their builders
-	// fold g.nullable into the node regardless of the build-time flag); only a
-	// named array, which honors the flag, is affected, fixing an order-dependent
-	// null in its shared body.
+	// restored on the node. The container builders read the build-time flag as
+	// the pointer occurrence, so a named slice, map, or byte slice needs the
+	// restore as much as a named array does, and the restore keeps a null the
+	// builder added from a format option.
 	extractBare := t.Kind() != reflect.Struct && t.Name() != "" && (g.shouldExtract(t) || guarded)
 
 	kindNullable := nullable
@@ -492,13 +492,13 @@ func (g *generator) schemaForType(t reflect.Type, nullable bool) (*node, error) 
 		}
 
 		// Built bare as a guarded type but neither cyclic nor extracted, so it
-		// stays inline: restore the nullability withheld during the bare build
-		// (only the anyOf-styled kinds, a named array, honor it; slices and maps
-		// carry their own container nullability on the node already), then fold
-		// the extender's stance.
+		// stays inline: restore the occurrence nullability withheld during the
+		// bare build, then fold the extender's stance. A slice or map node may
+		// already carry the null its builder derived from a format option, so
+		// the withheld pointer occurrence is OR-ed in rather than replacing it.
 		base := n.nullable
-		if extractBare && !n.nilableContainer() {
-			base = nullable
+		if extractBare {
+			base = base || nullable
 		}
 
 		n.nullable = combineNullable(stance, base)
