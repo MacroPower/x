@@ -12,7 +12,7 @@ import (
 	jsonv1 "encoding/json"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/jsonptr"
-	"go.jacobcolvin.com/x/jsonschema/internal/normalize"
+	"go.jacobcolvin.com/x/jsonschema/internal/jsonvalue"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemafield"
 	"go.jacobcolvin.com/x/jsonschema/internal/uriref"
 )
@@ -81,7 +81,7 @@ func schemaAtJSONPointerOracle(
 		return nil, ""
 	}
 
-	node, err := normalize.DecodeJSONInstance(data)
+	node, err := decodeExact(data)
 	if err != nil {
 		return nil, ""
 	}
@@ -269,7 +269,7 @@ func TestSchemaAtJSONPointerMatchesOracle(t *testing.T) {
 			data, err := json.Marshal(root)
 			require.NoError(t, err, "oracle roots must marshal cleanly")
 
-			decoded, err := normalize.DecodeJSONInstance(data)
+			decoded, err := decodeExact(data)
 			require.NoError(t, err)
 
 			var pointers [][]string
@@ -307,4 +307,15 @@ func TestSchemaAtJSONPointerMatchesOracle(t *testing.T) {
 			}
 		})
 	}
+}
+
+// decodeExact decodes data with the exact-number discipline and returns the
+// legacy any form the oracle walks.
+func decodeExact(data []byte) (any, error) {
+	v, err := jsonvalue.Decode(data)
+	if err != nil {
+		return nil, err
+	}
+
+	return v.Interface(), nil
 }

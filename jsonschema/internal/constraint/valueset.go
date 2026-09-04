@@ -5,8 +5,7 @@ import (
 
 	"github.com/google/jsonschema-go/jsonschema"
 
-	"go.jacobcolvin.com/x/jsonschema/internal/jsonequal"
-	"go.jacobcolvin.com/x/jsonschema/internal/numrat"
+	"go.jacobcolvin.com/x/jsonschema/internal/jsonvalue"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemashape"
 )
 
@@ -164,17 +163,22 @@ func ValuesEqual(a, b any) bool {
 	return valuesEqual(a, b)
 }
 
-// valuesEqual reports JSON-semantic equality with numeric awareness: two numbers
-// compare through their exact shortest-decimal rationals, so the same value in
-// different Go types (an untyped int 0 and a uint64 0) is equal, while values
-// beyond float64's exact range stay distinct. Non-numeric values fall back to
-// the guarded JSON equality.
+// valuesEqual reports JSON-semantic equality with numeric awareness: both
+// values convert to the document view [jsonvalue.FromDocument] gives them,
+// so two numbers compare through their canonical decimal forms and the same
+// value in different Go types (an untyped int 0 and a uint64 0) is equal,
+// while values beyond float64's exact range stay distinct. A value with no
+// document form equals nothing.
 func valuesEqual(a, b any) bool {
-	if ar, ok := numrat.SchemaNumberRat(a); ok {
-		if br, ok := numrat.SchemaNumberRat(b); ok {
-			return ar.Cmp(br) == 0
-		}
+	av, ok := jsonvalue.FromDocument(a)
+	if !ok {
+		return false
 	}
 
-	return jsonequal.EqualWithRat(a, nil, b)
+	bv, ok := jsonvalue.FromDocument(b)
+	if !ok {
+		return false
+	}
+
+	return av.Equal(bv)
 }

@@ -8,7 +8,7 @@ import (
 	"slices"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/fieldset"
-	"go.jacobcolvin.com/x/jsonschema/internal/normalize"
+	"go.jacobcolvin.com/x/jsonschema/internal/jsonvalue"
 	"go.jacobcolvin.com/x/jsonschema/internal/numkind"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemaclone"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemafield"
@@ -896,7 +896,7 @@ func canvasNullLiteral(canvas *Schema) string {
 }
 
 // isJSONNull reports whether v renders as a JSON null in the emitted schema
-// document. It reads v through [normalize.DocumentValue], the same document
+// document. It reads v through [jsonvalue.FromDocument], the same document
 // view the validator compares const and enum against, so every spelling
 // answers alike: a nil pointer, a typed nil map or slice, a [jsontext.Value]
 // holding the literal, and a marshaler returning one.
@@ -904,15 +904,15 @@ func canvasNullLiteral(canvas *Schema) string {
 // The canvas values this guards (const, enum, examples) are rendered by the
 // upstream Schema.MarshalJSON, which marshals them with [encoding/json] v1
 // semantics, where a typed nil map or slice writes null, so the probe asks
-// v1, which DocumentValue does (v1 still honors the v2 marshaler interfaces,
+// v1, which FromDocument does (v1 still honors the v2 marshaler interfaces,
 // so a MarshalJSONTo returning null answers true). A value the marshal
 // refuses (a func or a channel) or whose own marshaler panics is not a null.
 // Leaving it on the canvas lets the caller's own marshal report the fault,
 // so generation reports through errors alone.
 func isJSONNull(v any) bool {
-	dv, ok := normalize.DocumentValue(v)
+	dv, ok := jsonvalue.FromDocument(v)
 
-	return ok && dv == nil
+	return ok && dv.Kind() == jsonvalue.Null
 }
 
 // payloadRefTargets maps every $defs ref string a hook may have authored to its

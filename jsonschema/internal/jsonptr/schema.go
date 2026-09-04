@@ -3,7 +3,7 @@ package jsonptr
 import (
 	"github.com/google/jsonschema-go/jsonschema"
 
-	"go.jacobcolvin.com/x/jsonschema/internal/normalize"
+	"go.jacobcolvin.com/x/jsonschema/internal/jsonvalue"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemafield"
 	"go.jacobcolvin.com/x/jsonschema/internal/uriref"
 )
@@ -101,7 +101,7 @@ type Materialize func(node any) (*jsonschema.Schema, error)
 // boolean), or nil otherwise. [TypedPrefix] descends the typed tree while
 // each segment follows a sub-schema keyword edge ([schemafield.Subschemas]),
 // and [SchemaAtJSONForm] finishes from the first segment that does not. The
-// node standing there alone round-trips through [normalize.ExactValue], so
+// node standing there alone round-trips through [jsonvalue.Exact], so
 // numbers survive as exact [encoding/json.Number] literals without
 // re-encoding the whole root, and the located node is handed to materialize
 // as a fresh copy unaliased from root. A node with a marshal-fatal keyword
@@ -247,11 +247,11 @@ func SchemaAtJSONForm(
 	schema *jsonschema.Schema, segments []string, base string, trackIDs bool,
 	materialize Materialize,
 ) (*jsonschema.Schema, string) {
-	// ExactValue is the marshal + exact-decode round trip, so a number beyond
+	// Exact is the marshal + exact-decode round trip, so a number beyond
 	// float64 precision keeps its literal form: the materialized target's
 	// const/enum must hold what the author wrote, not the rounded float64
 	// neighbor.
-	node, ok := normalize.ExactValue(schema)
+	node, ok := jsonvalue.Exact(schema)
 	if !ok {
 		return nil, ""
 	}

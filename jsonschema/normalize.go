@@ -1,6 +1,6 @@
 package jsonschema
 
-import "go.jacobcolvin.com/x/jsonschema/internal/normalize"
+import "go.jacobcolvin.com/x/jsonschema/internal/jsonvalue"
 
 // Normalize converts a Go value into the JSON-compatible shape the validator
 // works with, so instances decoded from non-encoding/json sources (YAML, TOML,
@@ -30,4 +30,4 @@ import "go.jacobcolvin.com/x/jsonschema/internal/normalize"
 // result keeps pointing at the original, possibly un-normalized container, so
 // the result is best-effort for cyclic inputs; [Validate] and
 // [Validator.Validate] reject such instances outright.
-func Normalize(instance any) any { return normalize.Value(instance) }
+func Normalize(instance any) any { return jsonvalue.Normalize(instance) }
