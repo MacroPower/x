@@ -133,9 +133,24 @@ func nullCanvasWrites() map[string]nullCanvasWrite {
 		"typed nil enum member": {
 			keyword: "enum",
 			write: func(canvas *jsonschema.Schema) {
-				// A nil pointer, not a nil slice: encoding/json/v2 writes a nil
-				// slice as [], so only pointer and interface nils spell null.
 				canvas.Enum = []any{(*int)(nil)}
+			},
+		},
+		// The upstream renderer marshals canvas values with encoding/json v1,
+		// which writes null for a typed nil map or slice, so both spell null
+		// in the emitted document and the re-check must refuse them.
+		"typed nil map const": {
+			keyword: "const",
+			write: func(canvas *jsonschema.Schema) {
+				var null any = map[string]string(nil)
+
+				canvas.Const = &null
+			},
+		},
+		"typed nil slice enum member": {
+			keyword: "enum",
+			write: func(canvas *jsonschema.Schema) {
+				canvas.Enum = []any{[]int(nil)}
 			},
 		},
 		"raw const": {
