@@ -355,6 +355,14 @@
 // [ErrConflictingTypeSchema] instead of generation silently ignoring the
 // declaration.
 //
+// The value's property and element schemas are the generator's own views of
+// the fields and elements beneath the type, and an edit inside one lands on
+// that field or element at any depth. Generation emits a keyword added there
+// beside what it derives for the position, such as its null admission and its
+// struct-tag facts. A property or element whose type-derived keywords the
+// extender changed or replaced is emitted as written, and generation derives
+// nothing further for it.
+//
 // When a registered provider ([WithTypeSchemaProvider] or [WithTypeSchema])
 // or [JSONSchemaProvider] supplies the schema, [JSONSchemaExtender] does not
 // run.

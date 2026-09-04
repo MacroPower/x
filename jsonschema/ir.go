@@ -617,30 +617,30 @@ func (n *node) view(draft Draft) *Schema {
 }
 
 // absorbView takes a hook's edited view as the node's new base and classifies
-// each child slot against the pristine view it was handed. A slot equal to the
-// pristine one is node-backed and leaves the base, so render fills it from the
-// child. A slot that kept every pristine field and only gained fields is
-// node-backed too, and the gained fields land on the child's own base, where
-// the hook would have written them before the base was private. An absent
-// slot drops the child. Anything else, a cyclic slot included (upstream
-// MarshalJSON does not terminate on a cycle, so no comparison runs over one),
-// stays in the base as the literal the hook authored and the child is
-// dropped.
+// each child slot against the pristine view it was handed. A slot whose own
+// fields, the ones outside its node-backed sub-slots, match the pristine one
+// stays node-backed. It leaves the base so render fills it from the child,
+// the fields it gained land on the child's base, and the child classifies its
+// own sub-slots the same way against its pristine view, so an edit at any
+// depth reaches the node it belongs to. An absent slot drops the child.
+// Anything else, a cyclic slot included (upstream MarshalJSON does not
+// terminate on a cycle, so no comparison runs over one), stays in the base as
+// the literal the hook authored and the child is dropped.
 func (n *node) absorbView(edited, pristine *Schema, draft Draft) {
 	n.payload = edited
 
 	switch n.kind {
 	case kindObject:
-		n.absorbProps(edited, pristine)
-		n.absorbFallback(edited, pristine)
+		n.absorbProps(edited, pristine, draft)
+		n.absorbFallback(edited, pristine, draft)
 
 	case kindList:
-		if n.items != nil && !absorbSlot(n.items, &edited.Items, pristine.Items) {
+		if n.items != nil && !absorbSlot(n.items, &edited.Items, pristine.Items, draft) {
 			n.items = nil
 		}
 
 	case kindMap:
-		if n.items != nil && !absorbSlot(n.items, &edited.AdditionalProperties, pristine.AdditionalProperties) {
+		if n.items != nil && !absorbSlot(n.items, &edited.AdditionalProperties, pristine.AdditionalProperties, draft) {
 			n.items = nil
 		}
 
@@ -654,7 +654,7 @@ func (n *node) absorbView(edited, pristine *Schema, draft Draft) {
 // absorbProps classifies an object's property slots. A dropped property keeps
 // whatever the hook left in the base's map, and a node-backed one is deleted
 // from it so render fills it from the child.
-func (n *node) absorbProps(edited, pristine *Schema) {
+func (n *node) absorbProps(edited, pristine *Schema, draft Draft) {
 	kept := n.props[:0]
 
 	for i := range n.props {
@@ -665,7 +665,7 @@ func (n *node) absorbProps(edited, pristine *Schema) {
 			continue
 		}
 
-		if absorbSlot(p.schema, &slot, pristine.Properties[p.name]) {
+		if absorbSlot(p.schema, &slot, pristine.Properties[p.name], draft) {
 			delete(edited.Properties, p.name)
 
 			kept = append(kept, *p)
@@ -678,7 +678,7 @@ func (n *node) absorbProps(edited, pristine *Schema) {
 }
 
 // absorbFallback classifies an object's fallback value slot.
-func (n *node) absorbFallback(edited, pristine *Schema) {
+func (n *node) absorbFallback(edited, pristine *Schema, draft Draft) {
 	if n.items == nil {
 		return
 	}
@@ -687,9 +687,9 @@ func (n *node) absorbFallback(edited, pristine *Schema) {
 
 	switch n.fallback {
 	case slotAdditional:
-		ok = absorbSlot(n.items, &edited.AdditionalProperties, pristine.AdditionalProperties)
+		ok = absorbSlot(n.items, &edited.AdditionalProperties, pristine.AdditionalProperties, draft)
 	case slotUnevaluated:
-		ok = absorbSlot(n.items, &edited.UnevaluatedProperties, pristine.UnevaluatedProperties)
+		ok = absorbSlot(n.items, &edited.UnevaluatedProperties, pristine.UnevaluatedProperties, draft)
 	case slotNone:
 	}
 
@@ -714,7 +714,7 @@ func (n *node) absorbPrefix(edited, pristine *Schema, draft Draft) {
 	}
 
 	for i, c := range n.prefix {
-		if !absorbSlot(c, &(*elems)[i], pristineElems[i]) {
+		if !absorbSlot(c, &(*elems)[i], pristineElems[i], draft) {
 			n.prefix = nil
 
 			return
@@ -725,73 +725,87 @@ func (n *node) absorbPrefix(edited, pristine *Schema, draft Draft) {
 }
 
 // absorbSlot classifies one child slot and reports whether it stays
-// node-backed. A node-backed slot is cleared, and its additions, if any, are
-// merged onto the child's base.
-func absorbSlot(child *node, slot **Schema, pristine *Schema) bool {
+// node-backed. A node-backed slot is cleared and its edited view becomes the
+// child's base through [node.absorbView], which classifies the child's own
+// slots in turn.
+func absorbSlot(child *node, slot **Schema, pristine *Schema, draft Draft) bool {
 	edited := *slot
 	if edited == nil || pristine == nil || schemaclone.FindCycle(edited) != nil {
 		return false
 	}
 
-	adds, ok := schemaAdditions(edited, pristine)
-	if !ok {
+	if !keepsOwnFields(edited, pristine, child.slotFields(draft)) {
 		return false
 	}
 
-	if adds != nil {
-		mergeSchemaFields(child.payload, adds)
-	}
+	child.absorbView(edited, pristine, draft)
 
 	*slot = nil
 
 	return true
 }
 
-// schemaAdditions compares edited against pristine field by field. It reports
-// false when a field set on pristine differs on edited. Otherwise it returns
-// the fields edited gained, or nil when the two are equal.
-func schemaAdditions(edited, pristine *Schema) (*Schema, bool) {
-	ev, pv := reflect.ValueOf(edited).Elem(), reflect.ValueOf(pristine).Elem()
+// slotFields names the payload fields the node's kind fills from its
+// children, the fields a comparison of the node's own shape sets aside. The
+// tuple form follows the draft, as [node.view] does.
+func (n *node) slotFields(draft Draft) []string {
+	switch n.kind {
+	case kindObject:
+		fields := []string{"Properties"}
 
-	var adds *Schema
-
-	for i := range ev.NumField() {
-		ef, pf := ev.Field(i), pv.Field(i)
-		if !ef.CanSet() {
-			continue
-		}
-
-		if pf.IsZero() {
-			if ef.IsZero() {
-				continue
+		if n.items != nil {
+			switch n.fallback {
+			case slotAdditional:
+				fields = append(fields, "AdditionalProperties")
+			case slotUnevaluated:
+				fields = append(fields, "UnevaluatedProperties")
+			case slotNone:
 			}
-
-			if adds == nil {
-				adds = &Schema{}
-			}
-
-			reflect.ValueOf(adds).Elem().Field(i).Set(ef)
-
-			continue
 		}
 
-		if !reflect.DeepEqual(ef.Interface(), pf.Interface()) {
-			return nil, false
+		return fields
+
+	case kindList:
+		if n.items != nil {
+			return []string{"Items"}
 		}
+
+	case kindMap:
+		if n.items != nil {
+			return []string{"AdditionalProperties"}
+		}
+
+	case kindTuple:
+		if draft == Draft7 {
+			return []string{"ItemsArray"}
+		}
+
+		return []string{"PrefixItems"}
+
+	case kindValue, kindRef:
 	}
 
-	return adds, true
+	return nil
 }
 
-// mergeSchemaFields sets every non-zero field of src on dst.
-func mergeSchemaFields(dst, src *Schema) {
-	dv, sv := reflect.ValueOf(dst).Elem(), reflect.ValueOf(src).Elem()
+// keepsOwnFields reports whether every field set on pristine, apart from the
+// named slot fields, is equal on edited. A field zero on pristine is one
+// edited may have gained, which changes nothing about the shape it kept.
+func keepsOwnFields(edited, pristine *Schema, slots []string) bool {
+	ev, pv := reflect.ValueOf(edited).Elem(), reflect.ValueOf(pristine).Elem()
 
-	for i := range sv.NumField() {
-		if sf := sv.Field(i); sf.CanSet() && !sf.IsZero() {
-			dv.Field(i).Set(sf)
+	for i := range ev.NumField() {
+		f := ev.Type().Field(i)
+		if !f.IsExported() || slices.Contains(slots, f.Name) {
+			continue
+		}
+
+		if pf := pv.Field(i); !pf.IsZero() && !reflect.DeepEqual(ev.Field(i).Interface(), pf.Interface()) {
+			return false
 		}
 	}
+
+	return true
 }
 
 // checkNullLiterals scans the authored canvas of every field and element

@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/x/jsonschema"
 )
@@ -145,4 +146,120 @@ func TestExtenderReplacedSlotIsEmittedAsWritten(t *testing.T) {
 	got, err := json.Marshal(s.Properties["grafted"])
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"type":"integer"}`, string(got))
+}
+
+// nestedOuter holds an inline struct, so an extender's view reaches the
+// child's own property slots rather than a $ref to a def.
+type nestedOuter struct {
+	Addr struct {
+		City *string `json:"city" jsonschema:"minLength=1"`
+	} `json:"addr"`
+}
+
+// TestExtenderNestedSlotEditsReachTheChild pins that an extender edit below a
+// child slot is an addition on the node it lands on rather than a replacement
+// of the child. The child keeps its null decision and its tag facts, so the
+// schema still accepts what the type marshals, while a child whose own shape
+// the extender changed is emitted as written.
+func TestExtenderNestedSlotEditsReachTheChild(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		extend func(value *jsonschema.Schema)
+		want   string
+		// Zero requires the schema to accept the marshaled zero value of the
+		// type, which carries a null city.
+		zero   bool
+		accept []string
+		reject []string
+	}{
+		"grandchild description keeps the child's facts": {
+			extend: func(value *jsonschema.Schema) {
+				value.Properties["addr"].Properties["city"].Description = "the city"
+			},
+			want: stringtest.Input(`
+				{
+					"type":"object",
+					"properties":{
+						"city":{
+							"minLength":1,
+							"anyOf":[{"type":"string","description":"the city"},{"type":"null"}]
+						}
+					},
+					"required":["city"],
+					"additionalProperties":false
+				}
+			`),
+			zero:   true,
+			accept: []string{`{"addr":{"city":"x"}}`},
+			reject: []string{`{"addr":{"city":""}}`},
+		},
+		"property added under the child": {
+			extend: func(value *jsonschema.Schema) {
+				value.Properties["addr"].Properties["zip"] = &jsonschema.Schema{Type: "string"}
+			},
+			want: stringtest.Input(`
+				{
+					"type":"object",
+					"properties":{
+						"city":{
+							"minLength":1,
+							"anyOf":[{"type":"string"},{"type":"null"}]
+						},
+						"zip":{"type":"string"}
+					},
+					"required":["city"],
+					"additionalProperties":false
+				}
+			`),
+			zero:   true,
+			accept: []string{`{"addr":{"city":null,"zip":"x"}}`},
+			reject: []string{`{"addr":{"city":"","zip":"x"}}`, `{"addr":{"city":null,"zip":1}}`},
+		},
+		"child type replaced is emitted as written": {
+			extend: func(value *jsonschema.Schema) {
+				value.Properties["addr"] = &jsonschema.Schema{Type: "integer"}
+			},
+			want:   `{"type":"integer"}`,
+			accept: []string{`{"addr":1}`},
+			reject: []string{`{"addr":{"city":null}}`},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			s, err := jsonschema.GenerateFor[nestedOuter](t.Context(),
+				jsonschema.WithTypeSchemaExtenderFor[nestedOuter](
+					func(_ context.Context, _ jsonschema.TypeContext, ts *jsonschema.TypeSchema) error {
+						tc.extend(ts.Value)
+
+						return nil
+					},
+				))
+			require.NoError(t, err)
+
+			got, err := json.Marshal(s.Properties["addr"])
+			require.NoError(t, err)
+			assert.JSONEq(t, tc.want, string(got))
+
+			v, err := jsonschema.Compile(t.Context(), s)
+			require.NoError(t, err)
+
+			if tc.zero {
+				zero, err := json.Marshal(nestedOuter{})
+				require.NoError(t, err)
+				require.NoError(t, v.ValidateJSON(t.Context(), zero), "marshaled zero value %s", zero)
+			}
+
+			for _, instance := range tc.accept {
+				require.NoError(t, v.ValidateJSON(t.Context(), []byte(instance)), instance)
+			}
+
+			for _, instance := range tc.reject {
+				require.Error(t, v.ValidateJSON(t.Context(), []byte(instance)), instance)
+			}
+		})
+	}
 }
