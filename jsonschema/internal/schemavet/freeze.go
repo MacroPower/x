@@ -1,7 +1,9 @@
 package schemavet
 
 import (
+	"cmp"
 	"fmt"
+	"slices"
 	"strings"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/schemaclone"
@@ -66,73 +68,83 @@ func Freeze(s *Schema, subject, base string, profile Profile) (*Frozen, error) {
 		profile: profile,
 	}
 
+	f.walk(tree.Root, "", base)
+
 	err := f.refuseAliasedIdentifiers(subject, tree)
 	if err != nil {
 		return nil, err
 	}
 
-	f.walk(tree.Root, "", base)
-
 	return f, nil
 }
 
-// refuseAliasedIdentifiers reports the first duplicated source node that
-// carries an identifier the profile registers. Its copies would claim one
-// key, and a document may not hold a key twice through one node; the
-// registration rule for a fetched document already refuses the same claim
-// across documents.
+// refuseAliasedIdentifiers reports the duplicated source node that carries
+// an identifier the profile registers, choosing by the walk order of its
+// first copy where the tree holds several. Its copies would claim one key,
+// and a document may not hold a key twice through one node; the registration
+// rule for a fetched document already refuses the same claim across
+// documents. The walk has run, so every copy's pointer is on record, and the
+// walk-order choice keeps the message stable across runs, since the aliased
+// set is a map.
 func (f *Frozen) refuseAliasedIdentifiers(subject string, tree schemaclone.Tree) error {
-	for src, copies := range tree.Aliased {
-		var key string
+	type collision struct {
+		key string
+		ids []int
+	}
 
-		switch {
-		case src.ID != "" && !f.profile.InertIDs:
-			key = "$id " + fmt.Sprintf("%q", src.ID)
-		case src.Anchor != "" && !f.profile.Draft7:
-			key = "$anchor " + fmt.Sprintf("%q", src.Anchor)
-		case src.DynamicAnchor != "" && !f.profile.Draft7:
-			key = "$dynamicAnchor " + fmt.Sprintf("%q", src.DynamicAnchor)
-		default:
+	var found []collision
+
+	for src, copies := range tree.Aliased {
+		key, ok := f.registeredKey(src)
+		if !ok {
 			continue
 		}
 
-		// The walk has not run yet, so the copies have no recorded paths;
-		// locate them by a scan, which only a refusal pays for.
-		var paths []string
+		var ids []int
 
 		for _, cp := range copies {
-			paths = append(paths, fmt.Sprintf("%q", pointerOf(tree.Root, cp)))
-		}
-
-		return fmt.Errorf("%w: %s reaches one schema carrying %s at %s",
-			ErrIDCollision, subject, key, strings.Join(paths, " and "))
-	}
-
-	return nil
-}
-
-// pointerOf returns the JSON Pointer of target within the tree rooted at
-// root, or "" when target is the root or absent.
-func pointerOf(root, target *Schema) string {
-	var find func(s *Schema, path string) (string, bool)
-
-	find = func(s *Schema, path string) (string, bool) {
-		if s == target {
-			return path, true
-		}
-
-		for _, entry := range Entries(s) {
-			if found, ok := find(entry.Schema, path+string(entry.Pointer)); ok {
-				return found, true
+			if id, ok := f.ids[cp]; ok {
+				ids = append(ids, id)
 			}
 		}
 
-		return "", false
+		if len(ids) == 0 {
+			continue
+		}
+
+		slices.Sort(ids)
+
+		found = append(found, collision{key: key, ids: ids})
 	}
 
-	path, _ := find(root, "")
+	if len(found) == 0 {
+		return nil
+	}
 
-	return path
+	first := slices.MinFunc(found, func(a, b collision) int { return cmp.Compare(a.ids[0], b.ids[0]) })
+
+	paths := make([]string, 0, len(first.ids))
+	for _, id := range first.ids {
+		paths = append(paths, fmt.Sprintf("%q", f.paths[id]))
+	}
+
+	return fmt.Errorf("%w: %s reaches one schema carrying %s at %s",
+		ErrIDCollision, subject, first.key, strings.Join(paths, " and "))
+}
+
+// registeredKey names the identifier keyword and value s carries that the
+// profile registers, and reports false where s carries none.
+func (f *Frozen) registeredKey(s *Schema) (string, bool) {
+	switch {
+	case s.ID != "" && !f.profile.InertIDs:
+		return fmt.Sprintf("$id %q", s.ID), true
+	case s.Anchor != "" && !f.profile.Draft7:
+		return fmt.Sprintf("$anchor %q", s.Anchor), true
+	case s.DynamicAnchor != "" && !f.profile.Draft7:
+		return fmt.Sprintf("$dynamicAnchor %q", s.DynamicAnchor), true
+	default:
+		return "", false
+	}
 }
 
 // walk assigns s its id, records its pointer and base, registers its

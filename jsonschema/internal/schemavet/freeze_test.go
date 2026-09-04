@@ -159,6 +159,35 @@ func TestFreezeRefusesAliasedIdentifiers(t *testing.T) {
 	}
 }
 
+// TestFreezeRefusesAliasedIdentifiersInWalkOrder pins that a root holding
+// several duplicated identified nodes is refused with one stable message,
+// naming the node whose first copy the walk reaches first, since the aliased
+// set is a map and a message that varied by its iteration order would make
+// Compile and Inline disagree on one root.
+func TestFreezeRefusesAliasedIdentifiersInWalkOrder(t *testing.T) {
+	t.Parallel()
+
+	identified := &schemavet.Schema{ID: "https://example.test/x"}
+	anchored := &schemavet.Schema{Anchor: "y"}
+	src := &schemavet.Schema{
+		Properties: map[string]*schemavet.Schema{
+			"c": anchored,
+			"d": anchored,
+			"a": identified,
+			"b": identified,
+		},
+	}
+
+	want := `the root document reaches one schema carrying $id "https://example.test/x" ` +
+		`at "/properties/a" and "/properties/b"`
+
+	for range 50 {
+		_, err := schemavet.Freeze(src, "the root document", rootURI, schemavet.Profile{})
+		require.ErrorIs(t, err, schemavet.ErrIDCollision)
+		require.ErrorContains(t, err, want)
+	}
+}
+
 // TestFreezeTables pins the registrations and per-node bases the walk
 // records, under both drafts and under inert ids.
 func TestFreezeTables(t *testing.T) {
