@@ -638,6 +638,35 @@ func (c *Collector) Collect(t reflect.Type) (Collection, error) {
 					continue
 				}
 
+				// An unexported field reaches this named-field path only as an
+				// anonymous field carrying a tag name (jsontag excludes the
+				// non-anonymous ones). Encoding/json/v2 accepts it only as a
+				// struct it can walk without calling a method: a non-struct
+				// type has no fields to walk, and a marshal method or an
+				// omitzero IsZero would have to be called through the
+				// unexported field, which reflection forbids. V2 drops the
+				// field from its walk, so it neither conflicts nor records.
+				if !f.IsExported() {
+					ft := f.Type
+					if ft.Kind() == reflect.Pointer && ft.Name() == "" {
+						ft = ft.Elem()
+					}
+
+					switch {
+					case ft.Kind() != reflect.Struct:
+						keepErr(typeErrf(e.typ, "Go struct field %s is not exported", f.Name))
+
+						continue
+
+					case reflectkind.ImplementsAnyMarshalMethod(ft) ||
+						(info.Omitzero && reflectkind.ImplementsIsZeroer(ft)):
+						keepErr(typeErrf(e.typ,
+							"Go struct field %s is not exported for method calls", f.Name))
+
+						continue
+					}
+				}
+
 				// Stable encoding/json/v2 parses the `format` tag option but
 				// supports no value of it on a struct field: any appearance
 				// makes marshaling the struct a SemanticError.

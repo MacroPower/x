@@ -34,6 +34,9 @@ var (
 	TypeJSONTextValue = reflect.TypeFor[jsontext.Value]()
 	// The typeJSONNumber value is the [reflect.Type] of [encoding/json.Number].
 	typeJSONNumber = reflect.TypeFor[jsonv1.Number]()
+	// The typeIsZeroer value is the interface encoding/json/v2 consults
+	// under the omitzero option.
+	typeIsZeroer = reflect.TypeFor[interface{ IsZero() bool }]()
 
 	// The unmarshal-side interfaces join the marshal-side ones in
 	// [ImplementsAnyMarshalMethod], which mirrors encoding/json/v2's
@@ -79,6 +82,13 @@ func implementsAny(t reflect.Type, ifaces ...reflect.Type) bool {
 // promoted shape unknowable.
 func ImplementsAnyMarshalMethod(t reflect.Type) bool {
 	return implementsAny(t, allMethodTypes...)
+}
+
+// ImplementsIsZeroer reports whether t or its pointer type carries the IsZero
+// method encoding/json/v2 consults under the omitzero option, the other
+// method v2 refuses to call through an unexported named field.
+func ImplementsIsZeroer(t reflect.Type) bool {
+	return implementsAny(t, typeIsZeroer)
 }
 
 // ImplementsAnyMarshaler reports whether t or its pointer type implements any

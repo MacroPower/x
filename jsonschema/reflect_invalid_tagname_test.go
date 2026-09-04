@@ -130,3 +130,70 @@ func TestGenerateFor_DuplicateNameInOneDeclaration(t *testing.T) {
 	require.ErrorIs(t, err, jsonschema.ErrInvalidJSONField)
 	require.ErrorContains(t, err, `Go struct fields A and B conflict over JSON object name "dup"`)
 }
+
+// unexportedZeroer carries the IsZero method encoding/json/v2 would have to
+// call through an unexported named field under omitzero.
+type unexportedZeroer struct{ A int }
+
+func (unexportedZeroer) IsZero() bool { return false }
+
+// TestGenerateFor_UnexportedAnonymousNamedField pins encoding/json/v2's
+// export rule on the named-field path: an unexported anonymous field with a
+// tag name is walked only as a struct v2 can read without calling a method.
+// A non-struct type is refused outright, a struct whose marshal or omitzero
+// IsZero method would be called through the unexported field is refused for
+// method calls, and a plain struct is accepted as an ordinary named field.
+func TestGenerateFor_UnexportedAnonymousNamedField(t *testing.T) {
+	t.Parallel()
+
+	type myInt int //nolint:unused // Embedded only; exercised via reflection.
+
+	type nonStruct struct {
+		myInt `json:"n"` //nolint:govet,unused // The tag on the unexported field is the refusal under test; exercised via reflection.
+		B     int        `json:"b"`
+	}
+
+	type withMethodCall struct {
+		unexportedZeroer `json:"in,omitzero"` //nolint:govet,unused // The tag on the unexported field is the refusal under test; exercised via reflection.
+	}
+
+	type plain struct{ A int } //nolint:unused // Embedded only; exercised via reflection.
+
+	type accepted struct {
+		plain `json:"in"` //nolint:govet,unused // The tag on the unexported field is the case under test; exercised via reflection.
+	}
+
+	t.Run("non-struct type is refused", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := json.Marshal(nonStruct{})
+		require.ErrorContains(t, err, "Go struct field myInt is not exported")
+
+		_, err = jsonschema.GenerateFor[nonStruct](t.Context())
+		require.ErrorIs(t, err, jsonschema.ErrInvalidJSONField)
+		require.ErrorContains(t, err, "Go struct field myInt is not exported")
+	})
+
+	t.Run("struct needing a method call is refused", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := json.Marshal(withMethodCall{})
+		require.ErrorContains(t, err, "Go struct field unexportedZeroer is not exported for method calls")
+
+		_, err = jsonschema.GenerateFor[withMethodCall](t.Context())
+		require.ErrorIs(t, err, jsonschema.ErrInvalidJSONField)
+		require.ErrorContains(t, err, "Go struct field unexportedZeroer is not exported for method calls")
+	})
+
+	t.Run("plain struct is a named field", func(t *testing.T) {
+		t.Parallel()
+
+		data, err := json.Marshal(accepted{})
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"in":{"A":0}}`, string(data))
+
+		s, err := jsonschema.GenerateFor[accepted](t.Context())
+		require.NoError(t, err)
+		assert.Contains(t, s.Properties, "in")
+	})
+}
