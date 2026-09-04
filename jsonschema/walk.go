@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 
+	"go.jacobcolvin.com/x/jsonschema/internal/jsonptr"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemafield"
 )
 
@@ -103,7 +104,7 @@ func SubschemaEntries(s *Schema) []SubschemaEntry {
 				if sub := m[key]; sub != nil {
 					children = append(children, SubschemaEntry{
 						Location: Location{
-							Pointer:  appendPointerToken(jsontext.Pointer("/"+f.Keyword), key),
+							Pointer:  jsonptr.AppendToken(jsontext.Pointer("/"+f.Keyword), key),
 							Segments: []Segment{{Key: f.Keyword}, {Key: key}},
 						},
 						Schema: sub,

@@ -32,7 +32,7 @@ type Entry struct {
 // Entries returns the direct sub-schemas of s with their pointers, the
 // schemas-and-pointers form of the parent package's SubschemaEntries: the same
 // [schemafield.Subschemas] field list in the same pinned order, sorted map
-// keys escaped by [jsontext.Pointer.AppendToken], /keyword/N for slices, and
+// keys escaped by [jsonptr.AppendToken], /keyword/N for slices, and
 // the single Items form skipped when ItemsArray is populated. The parent
 // package cannot be imported from here, so a parent-side lockstep guard test
 // pins the two traversals to each other; the pointers are load-bearing, since
@@ -55,7 +55,7 @@ func Entries(s *Schema) []Entry {
 			for _, key := range slices.Sorted(maps.Keys(m)) {
 				if sub := m[key]; sub != nil {
 					children = append(children, Entry{
-						Pointer: jsontext.Pointer("/" + f.Keyword).AppendToken(key),
+						Pointer: jsonptr.AppendToken(jsontext.Pointer("/"+f.Keyword), key),
 						Schema:  sub,
 					})
 				}

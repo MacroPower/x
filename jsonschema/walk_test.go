@@ -673,6 +673,10 @@ func TestSchemavetEntriesMatchSubschemaEntries(t *testing.T) {
 			"plain": {Type: "string"},
 			"a/b":   {Type: "integer"},
 			"c~d":   {Type: "number"},
+			// Invalid UTF-8 must survive byte-verbatim in both walks; an
+			// escaper that substitutes U+FFFD would spell the two pointers
+			// differently while every other key still agreed.
+			"e\xffg": {Type: "boolean"},
 		},
 		Defs: map[string]*jsonschema.Schema{
 			"z": {Type: "number"},

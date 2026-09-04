@@ -3,6 +3,7 @@
 package jsonptr
 
 import (
+	"encoding/json/jsontext"
 	"net/url"
 	"strconv"
 	"strings"
@@ -35,6 +36,28 @@ func Escape(s string) string {
 // Unescape unescapes a JSON Pointer segment per RFC 6901.
 func Unescape(s string) string {
 	return unescaper.Replace(s)
+}
+
+// AppendToken extends p with one reference token. It is the one pointer
+// builder behind every traversal in the module -- the validation walk's
+// instance and schema locations, the parent package's SubschemaEntries, and
+// schemavet's Entries -- so the traversals the lockstep guard tests pin to
+// each other cannot drift in how they spell a token. A token free of the RFC
+// 6901 specials '~' and '/' (every keyword, index, and nearly every member
+// name) appends as one three-operand string concat, a single allocation on
+// the validation hot path; one conversion around the whole concatenation
+// keeps it a single concat, where a conversion in the middle would split it
+// into two. The rest go through [Escape], which carries the ~0/~1 escaping
+// and keeps every byte verbatim -- unlike [jsontext.Pointer.AppendToken],
+// which substitutes U+FFFD for invalid UTF-8, so a hand-built instance's two
+// map keys differing only in invalid bytes would alias to one path and stop
+// matching their typed segments.
+func AppendToken(p jsontext.Pointer, tok string) jsontext.Pointer {
+	if strings.ContainsAny(tok, "~/") {
+		return jsontext.Pointer(string(p) + "/" + Escape(tok))
+	}
+
+	return jsontext.Pointer(string(p) + "/" + tok)
 }
 
 // SafeToken restricts a token to the conservative unreserved set [A-Za-z0-9._-]

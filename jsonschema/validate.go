@@ -151,32 +151,12 @@ type instanceLocation struct {
 	segs []Segment
 }
 
-// appendPointerToken extends p with one reference token, the single pointer
-// builder behind the instance and schema location types and
-// [SubschemaEntries]. A token free of the RFC 6901 specials '~' and '/' --
-// every keyword, index, and nearly every member name -- appends as one
-// three-operand string concat: one allocation, where an escaping pass costs
-// several on this hot path. One conversion around the whole concatenation
-// keeps it a single concat; a conversion in the middle would split it into
-// two. The rest go through [jsonptr.Escape], which carries the ~0/~1
-// escaping and keeps every byte verbatim -- unlike
-// [jsontext.Pointer.AppendToken], which substitutes U+FFFD for invalid
-// UTF-8, so a hand-built instance's two map keys differing only in invalid
-// bytes would alias to one path and stop matching their [Segment] keys.
-func appendPointerToken(p jsontext.Pointer, tok string) jsontext.Pointer {
-	if strings.ContainsAny(tok, "~/") {
-		return jsontext.Pointer(string(p) + "/" + jsonptr.Escape(tok))
-	}
-
-	return jsontext.Pointer(string(p) + "/" + tok)
-}
-
 // key returns the location of the object member named name, extending both
 // representations. The full slice expression caps segs so sibling descents
 // append into fresh backing arrays instead of aliasing a shared one.
 func (l instanceLocation) key(name string) instanceLocation {
 	return instanceLocation{
-		ptr:  appendPointerToken(l.ptr, name),
+		ptr:  jsonptr.AppendToken(l.ptr, name),
 		segs: append(slices.Clip(l.segs), Segment{Key: name}),
 	}
 }
@@ -186,7 +166,7 @@ func (l instanceLocation) key(name string) instanceLocation {
 // append into fresh backing arrays instead of aliasing a shared one.
 func (l instanceLocation) index(i int) instanceLocation {
 	return instanceLocation{
-		ptr:  appendPointerToken(l.ptr, strconv.Itoa(i)),
+		ptr:  jsonptr.AppendToken(l.ptr, strconv.Itoa(i)),
 		segs: append(slices.Clip(l.segs), Segment{Index: i, IsIndex: true}),
 	}
 }
@@ -208,7 +188,7 @@ type schemaLocation struct {
 // append into fresh backing arrays instead of aliasing a shared one.
 func (l schemaLocation) kw(keyword string) schemaLocation {
 	return schemaLocation{
-		ptr:  appendPointerToken(l.ptr, keyword),
+		ptr:  jsonptr.AppendToken(l.ptr, keyword),
 		segs: append(slices.Clip(l.segs), Segment{Key: keyword}),
 	}
 }
@@ -218,7 +198,7 @@ func (l schemaLocation) kw(keyword string) schemaLocation {
 // representations with the aliasing discipline of [schemaLocation.kw].
 func (l schemaLocation) key(name string) schemaLocation {
 	return schemaLocation{
-		ptr:  appendPointerToken(l.ptr, name),
+		ptr:  jsonptr.AppendToken(l.ptr, name),
 		segs: append(slices.Clip(l.segs), Segment{Key: name}),
 	}
 }
@@ -228,7 +208,7 @@ func (l schemaLocation) key(name string) schemaLocation {
 // with the aliasing discipline of [schemaLocation.kw].
 func (l schemaLocation) idx(i int) schemaLocation {
 	return schemaLocation{
-		ptr:  appendPointerToken(l.ptr, strconv.Itoa(i)),
+		ptr:  jsonptr.AppendToken(l.ptr, strconv.Itoa(i)),
 		segs: append(slices.Clip(l.segs), Segment{Index: i, IsIndex: true}),
 	}
 }
