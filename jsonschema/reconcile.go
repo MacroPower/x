@@ -5,6 +5,7 @@ import (
 
 	"go.jacobcolvin.com/x/jsonschema/internal/constraint"
 	"go.jacobcolvin.com/x/jsonschema/internal/keywordmeta"
+	"go.jacobcolvin.com/x/jsonschema/internal/schemaclone"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemashape"
 	"go.jacobcolvin.com/x/jsonschema/internal/typename"
 )
@@ -100,9 +101,7 @@ func (g *generator) reconcileField(n *node) *Schema {
 // whose def body carries the null), the decision says so and the ref carries
 // every keyword with no null branch added.
 func (g *generator) reconcileRefField(n *node) *Schema {
-	g.renderDef(n.def)
-
-	base := n.payload
+	base := schemaclone.Clone(n.payload)
 
 	merged := *base
 	overlayAuthored(&merged, n.authored, base)

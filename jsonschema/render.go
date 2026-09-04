@@ -3,17 +3,21 @@ package jsonschema
 import (
 	"slices"
 
+	"go.jacobcolvin.com/x/jsonschema/internal/schemaclone"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemashape"
 	"go.jacobcolvin.com/x/jsonschema/internal/typename"
 )
 
-// render produces the final schema for a node: its base shape with the null
-// encoding applied. It is the only place null wrapping, $ref strings, dedup,
-// and the Draft-07 sibling wrap are decided, all from the complete graph. A
-// field or element node (the only nodes carrying an authored canvas) routes to
-// [generator.reconcileField], which composes the type-derived payload with the
-// field-level facts and owns its wrapper/value keyword placement; every other
-// node applies the null encoding to its bare base directly.
+// render produces the final schema for a node: a fresh [Schema] holding its
+// base shape with the null encoding applied. It is the only place the null
+// encoding, the final $ref strings, and the Draft-07 sibling wrap are chosen,
+// each from the decision the pass recorded on the node. Nothing it returns is
+// shared with the IR, so a run renders each node once and the output is the
+// caller's alone. A field or element node (the only nodes carrying an authored
+// canvas) routes to [generator.reconcileField], which composes the type-derived
+// payload with the field-level facts and owns its wrapper/value keyword
+// placement; every other node applies the null encoding to its bare base
+// directly.
 func (g *generator) render(n *node) *Schema {
 	if n.authored != nil {
 		return g.reconcileField(n)
@@ -23,29 +27,32 @@ func (g *generator) render(n *node) *Schema {
 	// as authored, so the null encoding is skipped even for a pointer occurrence's
 	// nullable bit.
 	if n.verbatim {
-		return n.payload
+		return schemaclone.Clone(n.payload)
 	}
 
 	return g.applyNull(n, g.renderBase(n))
 }
 
-// renderBase renders a node's shape without the null encoding. For a composite
-// it fills the node's own payload slots from the rendered child nodes. A slot
-// a build-time extender authored as a literal (a property replaced with the
-// extender's own schema, say) is no longer node-backed, so it survives in the
-// payload as written.
+// renderBase renders a node's shape without the null encoding onto a copy of
+// its payload. For a composite it fills the copy's slots from the rendered
+// child nodes. A slot a build-time extender authored as a literal (a property
+// replaced with the extender's own schema, say) is no longer node-backed, so
+// the copy carries it as written.
 func (g *generator) renderBase(n *node) *Schema {
-	switch n.kind {
-	case kindValue:
-		return n.payload
+	if n.kind == kindRef {
+		return g.renderRef(n.payload, n.def)
+	}
 
+	base := schemaclone.Clone(n.payload)
+
+	switch n.kind {
 	case kindObject:
-		if len(n.props) > 0 && n.payload.Properties == nil {
-			n.payload.Properties = make(map[string]*Schema, len(n.props))
+		if len(n.props) > 0 && base.Properties == nil {
+			base.Properties = make(map[string]*Schema, len(n.props))
 		}
 
 		for i := range n.props {
-			n.payload.Properties[n.props[i].name] = g.render(n.props[i].schema)
+			base.Properties[n.props[i].name] = g.render(n.props[i].schema)
 		}
 
 		for _, e := range n.embeds {
@@ -54,7 +61,7 @@ func (g *generator) renderBase(n *node) *Schema {
 				branch = &Schema{AnyOf: []*Schema{branch, {}}}
 			}
 
-			n.payload.AllOf = append(n.payload.AllOf, branch)
+			base.AllOf = append(base.AllOf, branch)
 		}
 
 		// An embedded fallback's value node fills whichever extra-member slot
@@ -62,25 +69,21 @@ func (g *generator) renderBase(n *node) *Schema {
 		if n.items != nil {
 			switch n.fallback {
 			case slotAdditional:
-				n.payload.AdditionalProperties = g.render(n.items)
+				base.AdditionalProperties = g.render(n.items)
 			case slotUnevaluated:
-				n.payload.UnevaluatedProperties = g.render(n.items)
+				base.UnevaluatedProperties = g.render(n.items)
 			case slotNone:
 			}
 		}
 
-		return n.payload
-
 	case kindList:
 		if n.items != nil {
-			n.payload.Items = g.render(n.items)
+			base.Items = g.render(n.items)
 		}
-
-		return n.payload
 
 	case kindTuple:
 		if len(n.prefix) == 0 {
-			return n.payload
+			break
 		}
 
 		elems := make([]*Schema, len(n.prefix))
@@ -89,59 +92,37 @@ func (g *generator) renderBase(n *node) *Schema {
 		}
 
 		if g.profile.prefixItemsTuple {
-			n.payload.PrefixItems = elems
+			base.PrefixItems = elems
 		} else {
-			n.payload.ItemsArray = elems
+			base.ItemsArray = elems
 		}
-
-		return n.payload
 
 	case kindMap:
 		if n.items != nil {
-			n.payload.AdditionalProperties = g.render(n.items)
+			base.AdditionalProperties = g.render(n.items)
 		}
 
-		return n.payload
-
-	case kindRef:
-		g.renderDef(n.def)
-
-		return g.renderRef(n.payload, n.def)
-
-	default:
-		return n.payload
+	case kindValue, kindRef:
 	}
+
+	return base
 }
 
-// renderRef emits a $ref schema from payload, replacing the provisional name
-// with the def's final name. Under Draft-07 a $ref beside any sibling keyword
-// moves into allOf, since Draft-07 readers ignore keywords next to $ref; under
-// 2020-12 the siblings stay alongside.
+// renderRef emits a $ref schema from a copy of payload, replacing the
+// provisional name with the def's final name. Under Draft-07 a $ref beside any
+// sibling keyword moves into allOf, since Draft-07 readers ignore keywords next
+// to $ref; under 2020-12 the siblings stay alongside.
 func (g *generator) renderRef(payload *Schema, def *defEntry) *Schema {
-	s := *payload
+	s := schemaclone.Clone(payload)
 	s.Ref = g.profile.refPrefix() + def.name
 
-	if !g.profile.honorRefSiblings && schemashape.HasRefSiblings(&s) {
+	if !g.profile.honorRefSiblings && schemashape.HasRefSiblings(s) {
 		inner := &Schema{Ref: s.Ref}
 		s.Ref = ""
 		s.AllOf = append(s.AllOf, inner)
 	}
 
-	return &s
-}
-
-// renderDef renders a def body once and memoizes it as both the $defs value and
-// the null-dedup target. While a body is mid-render (a self- or mutually
-// recursive body reaching its own ref), rendered is still nil, so the in-body
-// ref keeps its null wrapper rather than deduping against an unfinished body.
-func (g *generator) renderDef(e *defEntry) {
-	if e == nil || e.rendered != nil || e.rendering {
-		return
-	}
-
-	e.rendering = true
-	e.rendered = g.render(e.body)
-	e.rendering = false
+	return s
 }
 
 // applyNull applies a node's null decision to its rendered base for every

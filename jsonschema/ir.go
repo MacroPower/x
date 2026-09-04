@@ -245,10 +245,9 @@ type embedNode struct {
 // nullability order-independent.
 type defEntry struct {
 	typ      reflect.Type
-	body     *node   // bare value node; nil while a cycle placeholder
-	rendered *Schema // memoized render(body); the $defs value and null-dedup target
-	baseName string  // namer output, pre-disambiguation; the provisional $ref token
-	name     string  // final $defs key; set by assignDefNames before render
+	body     *node  // bare value node; nil while a cycle placeholder
+	baseName string // namer output, pre-disambiguation; the provisional $ref token
+	name     string // final $defs key; set by assignDefNames before render
 	// Nullability is the type's declared null-admission stance, recorded once at
 	// definition time and combined with each reference's pointer-ness in
 	// nullableDecision. The stance is a per-type property, so recording it on the
@@ -256,10 +255,6 @@ type defEntry struct {
 	// every reference and leaves the def body bare. It is NullFromReflection for a
 	// type with no stance.
 	nullability Nullability
-	// Rendering guards re-entrancy while body is mid-render: a self- or mutually
-	// recursive body reaching its own ref sees rendered still nil and keeps its
-	// null wrapper rather than deduping against an unfinished body.
-	rendering bool
 }
 
 // newDefEntry registers a placeholder $defs entry for t with no body yet. A
@@ -942,19 +937,20 @@ func (g *generator) payloadRefTargets() map[string]*defEntry {
 }
 
 // walkReachable visits every node reachable from root like walkNodes, and
-// additionally follows the raw $ref strings inside every payload: a Verbatim
-// payload ([TypeSchema.Verbatim]) is opaque and not node-backed, and a
-// build-time extender can author a raw $ref into a reflected payload (a
-// property, allOf branch, or additionalProperties renderBase preserves), so a
-// $defs reference inside either is a reachability edge only a string scan
+// additionally follows the raw $ref strings inside every payload. A payload
+// holds no node-backed child, so what the scan reaches is what a hook
+// declared: a Verbatim payload ([TypeSchema.Verbatim]), a provider's Value, a
+// slot a build-time extender replaced or a branch it grafted. A $defs
+// reference inside any of those is a reachability edge only a string scan
 // sees. The one payload Ref not scanned is a kindRef node's own: that edge is
 // node-backed (walkNodes follows it via n.def) and its string is the
 // provisional token, which a base-name collision would resolve to the wrong
-// def. Each def reached by a string hit has its body walked too, and
-// onPayloadRef (when non-nil) observes every payload ref hit, seen or not.
-// Payload subtrees are assumed acyclic, as everywhere else in the generator
-// (hook schemas arrive JSON-decoded or JSON-round-trip cloned); the scanned
-// set is a dedup, keeping shared payload subtrees scanned once.
+// def; the siblings a hook grafted onto that payload are still scanned. Each
+// def reached by a string hit has its body walked too, and onPayloadRef (when
+// non-nil) observes every payload ref hit, seen or not. Payload subtrees are
+// assumed acyclic, as everywhere else in the generator (hook schemas arrive
+// JSON-decoded or JSON-round-trip cloned); the scanned set is a dedup,
+// keeping shared payload subtrees scanned once.
 func (g *generator) walkReachable(
 	root *node,
 	seen map[*defEntry]bool,
@@ -964,34 +960,23 @@ func (g *generator) walkReachable(
 	targets := g.payloadRefTargets()
 	scanned := map[*Schema]bool{}
 
-	// A kindRef node's payload is aliased into its parent composite's payload
-	// (a field ref's payload sits in the parent's Properties), so the plain
-	// scan can reach one through the parent before walkNodes visits the ref
-	// node itself. The skip must therefore recognize a ref payload by
-	// identity, wherever the scan reaches it: collect every kindRef payload
-	// up front, across the root graph and every def body, since a def is
-	// often discovered only mid-walk through a string hit.
-	refPayloads := map[*Schema]bool{}
-	collectSeen := map[*defEntry]bool{}
-	markRefPayloads := func(n *node) {
-		if n.kind == kindRef {
-			refPayloads[n.payload] = true
-		}
-	}
-
-	walkNodes(root, collectSeen, markRefPayloads)
-
-	for _, e := range g.defs {
-		if !collectSeen[e] {
-			collectSeen[e] = true
-			walkNodes(e.body, collectSeen, markRefPayloads)
-		}
-	}
-
 	var scanPayload func(s *Schema)
+
+	scanChildren := func(s *Schema) {
+		for _, child := range schemafield.Children(s) {
+			scanPayload(child)
+		}
+	}
 
 	visitAndScan := func(n *node) {
 		visit(n)
+
+		if n.kind == kindRef {
+			scanChildren(n.payload)
+
+			return
+		}
+
 		scanPayload(n.payload)
 	}
 
@@ -1001,23 +986,6 @@ func (g *generator) walkReachable(
 		}
 
 		scanned[s] = true
-
-		scanChildren := func() {
-			for _, child := range schemafield.Children(s) {
-				scanPayload(child)
-			}
-		}
-
-		// A kindRef payload's own Ref is the node-backed edge walkNodes
-		// already follows via n.def, and it carries the provisional
-		// (pre-disambiguation) token: string-resolving it under a base-name
-		// collision would map to the wrong def. Skip it, but still scan any
-		// hook-grafted siblings on the payload.
-		if refPayloads[s] {
-			scanChildren()
-
-			return
-		}
 
 		if e, ok := targets[s.Ref]; ok {
 			if onPayloadRef != nil {
@@ -1030,7 +998,7 @@ func (g *generator) walkReachable(
 			}
 		}
 
-		scanChildren()
+		scanChildren(s)
 	}
 
 	walkNodes(root, seen, visitAndScan)

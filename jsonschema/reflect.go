@@ -215,12 +215,16 @@ func (g *generator) generate(t reflect.Type) (*Schema, error) {
 		}
 	}
 
+	// Phase 8: render, each node once, onto fresh schemas. Only the defs
+	// reachable from the final root graph are emitted. A def orphaned by a
+	// type= override or by root inlining is never reached and so dropped.
 	schema := g.render(root)
-	// Emit only the defs reachable from the final root graph. A def orphaned by
-	// a type= override or by root inlining is never reached and so dropped.
+
 	reached := g.collectReferencedDefs(root)
+
+	rendered := make(map[*defEntry]*Schema, len(reached))
 	for _, e := range reached {
-		g.renderDef(e)
+		rendered[e] = g.render(e.body)
 	}
 
 	// Set the root title from the type name when WithRootTitle is enabled and
@@ -228,7 +232,7 @@ func (g *generator) generate(t reflect.Type) (*Schema, error) {
 	// supplied one. Unnamed roots produce an empty name even after the
 	// empty-answer deferral to the default namer, and stay untitled.
 	if g.rootTitle {
-		target := g.rootTitleTarget(schema, root)
+		target := g.rootTitleTarget(schema, root, rendered)
 		if name := g.schemaName(rootType); name != "" && target.Title == "" {
 			target.Title = name
 		}
@@ -241,7 +245,7 @@ func (g *generator) generate(t reflect.Type) (*Schema, error) {
 	if len(reached) > 0 {
 		defs := make(map[string]*Schema, len(reached))
 		for _, e := range reached {
-			defs[e.name] = e.rendered
+			defs[e.name] = rendered[e]
 		}
 
 		if g.profile.definitionsKeyword {
@@ -259,11 +263,11 @@ func (g *generator) generate(t reflect.Type) (*Schema, error) {
 // a bare $ref into definitions, the title goes on the definitions entry it
 // targets instead, shared by every occurrence of the type;
 // [generator.seedDefaults] redirects the same way.
-func (g *generator) rootTitleTarget(schema *Schema, root *node) *Schema {
+func (g *generator) rootTitleTarget(schema *Schema, root *node, rendered map[*defEntry]*Schema) *Schema {
 	// Draft-07 readers ignore keywords beside a bare $ref, so a self-referential
 	// root that stayed a $ref is titled on its $defs body instead.
 	if !g.profile.honorRefSiblings && schema.Ref != "" && root.kind == kindRef {
-		return root.def.rendered
+		return rendered[root.def]
 	}
 
 	return schema
