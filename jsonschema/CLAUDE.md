@@ -122,7 +122,7 @@ is the only one that imports the parent package.
   oracle, and the vector files under `testdata/vectors/` are the data.
 - `TestTagFixturesCoverage`, `TestTagFixturesCrossDialectVerdictsAgree`:
   `testdata/tags/cases.json` covers every shape and both dialects agree.
-- `TestHookPointersArePrivateCopies` (ir_view_test.go): a hook write through
+- `TestHookPointersArePrivateCopies` (ir_test.go): a hook write through
   `Parent` or `Base` never reaches the output.
 - `TestRigExclusionsMatchTheDraw` (differentialtest): every excluded case is
   a recorded reason the draw pools honor.
@@ -146,6 +146,11 @@ is the only one that imports the parent package.
 ## Tooling
 
 - `task check` from the repo root is the gate: lint, race tests, prettier.
+- Test files are one per topic, not one per fix. A new regression test joins
+  the file whose prefix covers it (`validate_compile_test.go`,
+  `reflect_embedded_test.go`, `inline_remote_test.go`, ...), and the general
+  `validate_test.go`, `generate_test.go`, or `tags_test.go` when none does. Its
+  doc comment carries the regression context the filename used to.
 - Run formatting from the repo root. `golangci-lint fmt ./...` inside
   `jsonschema/` reaches the nested `differentialtest` module and reorders its
   alias import group against that module's own config.
