@@ -713,3 +713,57 @@ type Simple struct {
 	assert.Contains(t, string(out), "nonexistent-dir-12345",
 		"error message should reference the non-existent path")
 }
+
+// TestWriteFileAtomicPreservesTarget pins that the atomic write treats an
+// existing output path as the file the user owns: a symlink is written
+// through rather than replaced by a regular file, and an existing file keeps
+// its mode. The rename used to drop both.
+func TestWriteFileAtomicPreservesTarget(t *testing.T) {
+	t.Parallel()
+
+	t.Run("symlink is written through", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		target := filepath.Join(dir, "real.json")
+		link := filepath.Join(dir, "link.json")
+
+		require.NoError(t, os.WriteFile(target, []byte("old"), 0o644))
+		require.NoError(t, os.Symlink(target, link))
+
+		require.NoError(t, writeFileAtomic(link, []byte("new")))
+
+		fi, err := os.Lstat(link)
+		require.NoError(t, err)
+		assert.NotZero(t, fi.Mode()&os.ModeSymlink, "the link survives")
+
+		data, err := os.ReadFile(target)
+		require.NoError(t, err)
+		assert.Equal(t, "new", string(data), "the target holds the new content")
+	})
+
+	t.Run("existing mode is kept", func(t *testing.T) {
+		t.Parallel()
+
+		path := filepath.Join(t.TempDir(), "out.json")
+		require.NoError(t, os.WriteFile(path, []byte("old"), 0o600))
+		require.NoError(t, os.Chmod(path, 0o664), "set the mode past the umask")
+
+		require.NoError(t, writeFileAtomic(path, []byte("new")))
+
+		fi, err := os.Stat(path)
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0o664), fi.Mode().Perm())
+	})
+
+	t.Run("new file takes the default mode", func(t *testing.T) {
+		t.Parallel()
+
+		path := filepath.Join(t.TempDir(), "out.json")
+		require.NoError(t, writeFileAtomic(path, []byte("new")))
+
+		fi, err := os.Stat(path)
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0o644), fi.Mode().Perm())
+	})
+}

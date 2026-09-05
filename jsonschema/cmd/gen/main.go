@@ -139,7 +139,7 @@ func run(cfg config, stdout io.Writer) error {
 	}
 
 	if cfg.Output != "" {
-		return writeFileAtomic(cfg.Output, output, 0o644)
+		return writeFileAtomic(cfg.Output, output)
 	}
 
 	_, err = stdout.Write(output)
@@ -151,8 +151,23 @@ func run(cfg config, stdout io.Writer) error {
 // directory and renaming it into place, so a failed write never truncates or
 // corrupts a file already at path (unlike os.WriteFile, which opens with
 // O_TRUNC first). The rename is atomic within a filesystem; the temp file
-// shares path's directory to keep it on the same one.
-func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+// shares path's directory to keep it on the same one. A symlink at path is
+// written through, so the link survives, and an existing file keeps its
+// mode; a file the write creates is 0644. Ownership is whatever the invoking
+// user's is, as with any rename.
+func writeFileAtomic(path string, data []byte) error {
+	perm := os.FileMode(0o644)
+
+	resolved, err := filepath.EvalSymlinks(path)
+	if err == nil {
+		path = resolved
+	}
+
+	fi, err := os.Stat(path)
+	if err == nil {
+		perm = fi.Mode().Perm()
+	}
+
 	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-*")
 	if err != nil {
 		return fmt.Errorf("create temp file: %w", err)
@@ -338,15 +353,32 @@ func runGenerate(goMod string, cfg config, importPath string, inWork bool) ([]by
 	run.Dir = cwd
 	run.Env = env
 
+	// Capture stderr whole rather than letting Output keep a 32 KiB window
+	// it surfaces only on failure: a successful run's stderr (module
+	// downloads, build notes, the target package's own init diagnostics) is
+	// forwarded below, and a failure's is handed to the error unabridged.
+	var stderr bytes.Buffer
+
+	run.Stderr = &stderr
+
 	out, err := run.Output()
 	if err != nil {
+		if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
+			exitErr.Stderr = stderr.Bytes()
+		}
+
 		return nil, generateError(err)
 	}
 
 	// Anything on the helper's stdout is init-time noise from the target
-	// package or its dependencies, never schema data; surface it on stderr.
+	// package or its dependencies, never schema data; surface it on stderr
+	// along with whatever the helper wrote there itself.
 	if len(out) > 0 {
 		fmt.Fprintf(os.Stderr, "%s", out)
+	}
+
+	if stderr.Len() > 0 {
+		fmt.Fprintf(os.Stderr, "%s", stderr.Bytes())
 	}
 
 	schema, err := os.ReadFile(schemaPath)
