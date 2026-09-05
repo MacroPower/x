@@ -425,15 +425,10 @@ func (g *run) schemaForType(t reflect.Type, pointer bool) (*node, error) {
 	}
 
 	// A cycle detected while building this type's element/value schema left a
-	// placeholder def entry (created by a guarded re-entry). Fill it with the
-	// now complete body and return a reference, mirroring the struct path.
-	if e, cyclic := g.typeToDef[t]; cyclic {
-		fillDef(e, n, stance)
-
-		return g.refNode(e, pointer), nil
-	}
-
-	if g.shouldExtract(t) {
+	// placeholder def entry (created by a guarded re-entry), which defineType
+	// fills with the now complete body, mirroring the struct path. A type
+	// extracted to $defs takes the same route into a fresh entry.
+	if _, cyclic := g.typeToDef[t]; cyclic || g.shouldExtract(t) {
 		return g.defineType(t, n, stance, pointer), nil
 	}
 
@@ -979,11 +974,9 @@ func (g *run) schemaForStruct(t reflect.Type, pointer bool) (*node, error) {
 	delete(g.visiting, t)
 
 	// If a cycle was detected during buildStructSchema (a self-reference created
-	// a placeholder def entry), fill it and return a reference.
-	if e, exists := g.typeToDef[t]; exists {
-		fillDef(e, obj, stance)
-
-		return g.refNode(e, pointer), nil
+	// a placeholder def entry), defineType fills it and returns a reference.
+	if _, exists := g.typeToDef[t]; exists {
+		return g.defineType(t, obj, stance, pointer), nil
 	}
 
 	obj.stance = stance

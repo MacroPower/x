@@ -376,7 +376,9 @@ func (g *run) refNode(e *defEntry, pointer bool) *node {
 }
 
 // defineType fills t's def entry with body (if still a placeholder), records the
-// type's nullability stance on the entry, and returns a reference node. The body
+// type's nullability stance on the entry, and returns a reference node. The
+// entry is the one a cyclic re-entry registered while t was being built, or a
+// fresh one for a type extracted to $defs on its first visit. The body
 // is always the bare value node; the stance lives on the entry and is combined
 // with each reference's pointer-ness in the null pass, so $defs nullability
 // stays order-independent.
@@ -390,17 +392,6 @@ func (g *run) defineType(t reflect.Type, body *node, stance Nullability, pointer
 	}
 
 	return g.refNode(e, pointer)
-}
-
-// fillDef completes the placeholder def entry e with body, the node a cyclic
-// re-entry left unfilled while its type was being built.
-func fillDef(e *defEntry, body *node, stance Nullability) {
-	if e.body == nil {
-		e.body = body
-		body.isBody = true
-	}
-
-	e.nullability = stance
 }
 
 // resolveNullability decides the null admission of every node in the graph
