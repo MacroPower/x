@@ -23,6 +23,12 @@ func Apply(t Target, r Rule, pol Policy) error {
 		return fmt.Errorf("tagmodel: %s", r.Op)
 	}
 
+	// The axis is range-checked for the same reason as the operation: a
+	// caller constructing a Rule directly indexes the axis table with it.
+	if r.Axis >= axisCount {
+		return fmt.Errorf("tagmodel: %s", r.Axis)
+	}
+
 	// Arity is checked here as well as in Bind, so a caller constructing a
 	// Rule directly (the interpreter facade) cannot hand an applier a
 	// parameter count it would silently misread: a missing single value would

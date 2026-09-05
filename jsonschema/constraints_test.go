@@ -705,3 +705,20 @@ func TestConstraintsFacadeReadsNilCanvas(t *testing.T) {
 	assert.Nil(t, members)
 	assert.False(t, ok)
 }
+
+// TestConstraintsFacadeAxisRange pins that Apply range-checks the axis the
+// way it range-checks the operation, so a rule built with an axis outside the
+// table reports an error instead of indexing past it.
+func TestConstraintsFacadeAxisRange(t *testing.T) {
+	t.Parallel()
+
+	fc := jsonschema.FieldContext{
+		Type:   reflect.TypeFor[string](),
+		Canvas: &jsonschema.Schema{},
+		Base:   &jsonschema.Schema{Type: "string"},
+	}
+
+	err := fc.Constraints().Apply(jsonschema.OpFloorIncl, jsonschema.Axis(9), "1")
+	require.Error(t, err)
+	assert.Nil(t, fc.Canvas.MinLength, "the misapplied rule must leave no trace")
+}
