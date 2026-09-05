@@ -245,6 +245,8 @@
 // none serializable, which [encoding/json/v2] refuses once a non-nil User
 // pointer is marshaled (a URL with a nil User marshals as "User": null,
 // since v2 never reads the declarations behind a nil pointer).
+// [WithTypeSchemaFor] on [net/url.URL], or on [net/url.Userinfo] alone,
+// declares a shape in place of the refusal.
 //
 // Types implementing [encoding.TextAppender] or [encoding.TextMarshaler] map
 // to {"type": "string"}, checked before struct reflection.
@@ -671,9 +673,12 @@
 // Which field occurrences admit null is the generator's decision rather than
 // the Go type's, and the literal null is a value wherever that decision
 // applies. A pointer field takes default=null, and so does an interface
-// occurrence. A bare slice, map, or []byte does not: [encoding/json/v2]
-// writes a nil one as its empty instance, never null, so the schema admits
-// no null and the literal is refused. A pointer to a container takes the
+// occurrence. A bare slice, map, or []byte takes the literal only where its
+// occurrence admits null. Under the default marshal options none does, since
+// [encoding/json/v2] writes a nil one as its empty instance, so the literal
+// is refused there. [WithJSONOptions] with FormatNilSliceAsNull or
+// FormatNilMapAsNull admits the null, and the literal with it, as the Slices
+// and Maps entries above describe. A pointer to a container takes the
 // literal, since the pointer's own null branch admits it. A type the
 // package maps to a built-in leaf schema refuses the literal too, so
 // [encoding/json.RawMessage] refuses it even though the {} it produces

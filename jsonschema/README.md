@@ -174,7 +174,9 @@ requires. `net/url.URL` has no override and is refused (`ErrInvalidJSONField`):
 reflecting it reaches `net/url.Userinfo`, a struct with fields but none
 serializable, which `encoding/json/v2` refuses once a non-nil `User` pointer
 is marshaled (a URL with a nil `User` marshals as `"User": null`, since v2
-never reads the declarations behind a nil pointer).
+never reads the declarations behind a nil pointer). `WithTypeSchemaFor` on
+`net/url.URL`, or on `net/url.Userinfo` alone, declares a shape in place of
+the refusal.
 Types implementing `encoding.TextAppender` or `encoding.TextMarshaler` map to
 `{"type":"string"}`.
 Unsupported types (`func`, `chan`, `complex`, `unsafe.Pointer`) return
@@ -451,11 +453,14 @@ the literal verbatim rather than canonicalizing it, so `const=5.0` pins
 Which field occurrences admit `null` is the generator's decision rather than the
 Go type's, and the literal `null` is a value wherever that decision applies. A
 pointer field takes `default=null`, and so does an interface occurrence. A
-bare slice, map, or `[]byte` does not: `encoding/json/v2` writes a nil one as
-its empty instance, never `null`, so the schema admits no null and the literal
-is refused; a pointer to a container takes it through the pointer's own null
-branch. A type the
-package maps to a built-in leaf schema refuses the literal too, so
+bare slice, map, or `[]byte` takes the literal only where its occurrence
+admits `null`. Under the default marshal options none does, since
+`encoding/json/v2` writes a nil one as its empty instance, so the literal is
+refused there. `WithJSONOptions` with `FormatNilSliceAsNull` or
+`FormatNilMapAsNull` admits the null, and the literal with it, as the `[]T`
+and `map[K]V` rows of the type mapping table describe. A pointer to a
+container takes the literal, since the pointer's own null branch admits it. A
+type the package maps to a built-in leaf schema refuses the literal too, so
 `json.RawMessage` refuses it even though the `{}` it produces admits
 `null`. A `Nullability` stance
 moves the decision either way, so a value field of a `NullAllowed` type takes
@@ -908,11 +913,13 @@ Supported tags (summary):
   `required` entry on its own, so where the occurrence admits `null` and the
   field's shape has a non-zero form, the interpreter also forbids `null`. A
   non-pointer field gets a type-specific non-zero constraint (a size floor on
-  a bare slice or map, whose nil value marshals as its empty instance rather
-  than `null`); a pointer field gets the forbidden `null` and no such
+  a bare slice or map, plus the forbidden `null` wherever the occurrence
+  admits one, as under `WithJSONOptions` with `FormatNilSliceAsNull` or
+  `FormatNilMapAsNull`); a pointer field gets the forbidden `null` and no such
   constraint, since go-playground reads `required` on a pointer as "must be
-  non-nil". Where the occurrence admits no `null` -- a bare container, or a
-  pointer under `WithNullable(false)` -- the interpreter writes no forbidden
+  non-nil". Where the occurrence admits no `null` -- a bare container under
+  the default marshal options, or a pointer under `WithNullable(false)` -- the
+  interpreter writes no forbidden
   `null` and the type rejects a `null` instance on its own. A shape with no non-zero form the schema
   can express gets the `required` entry and nothing else, not even the forbidden
   `null`: a struct, a text-marshaling type, a referenced definition, an opaque

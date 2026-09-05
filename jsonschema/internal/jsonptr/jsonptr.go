@@ -38,11 +38,11 @@ func Unescape(s string) string {
 	return unescaper.Replace(s)
 }
 
-// AppendToken extends p with one reference token. It is the one pointer
-// builder behind every traversal in the module -- the validation walk's
-// instance and schema locations, the parent package's SubschemaEntries, and
-// schemavet's Entries -- so the traversals the lockstep guard tests pin to
-// each other cannot drift in how they spell a token. A token free of the RFC
+// AppendToken extends p with one reference token. It builds every instance and
+// schema location the validation walk appends, and it spells the map-key token
+// in the parent package's SubschemaEntries and in schemavet's Entries, so the
+// traversals the lockstep guard tests pin to each other cannot drift in how
+// they spell a key. A token free of the RFC
 // 6901 specials '~' and '/' (every keyword, index, and nearly every member
 // name) appends as one three-operand string concat, a single allocation on
 // the validation hot path; one conversion around the whole concatenation
