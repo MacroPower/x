@@ -2767,3 +2767,53 @@ func TestInlineCycleGuardHoldsAcrossNestedVisit(t *testing.T) {
 	require.NoError(t, err)
 	assert.LessOrEqual(t, consulted, 8, "each cycle is consulted once per visit")
 }
+
+// TestInlineFallbackTreeRecordsItsOwnLocation pins the path a nested ref
+// failure reports from inside a tree the JSON-pointer fallback materialized.
+// The tree is recorded from its root at the location the session resolved
+// it from, whichever ref reaches it first. Recording it under the reaching
+// ref's own text used to report a bogus "N/properties/z" for an anchor ref,
+// since an anchor name is not a pointer, and the document root for a ref into
+// an already-registered document, which lands on its target with no fragment.
+func TestInlineFallbackTreeRecordsItsOwnLocation(t *testing.T) {
+	t.Parallel()
+
+	root, err := jsonschema.ParseSchema([]byte(stringtest.Input(`
+		{
+			"properties": {
+				"a": {"$ref": "#N"},
+				"b": {"$ref": "#/x-ext/T"}
+			},
+			"x-ext": {
+				"T": {
+					"properties": {
+						"n": {
+							"$anchor": "N",
+							"properties": {"z": {"$ref": "#/nope"}}
+						}
+					}
+				}
+			}
+		}
+	`)))
+	require.NoError(t, err)
+
+	var calls []refFallbackCall
+
+	log := jsonschema.RefFallbackFunc(func(_ context.Context, f jsonschema.RefFailure) jsonschema.RefAction {
+		calls = append(calls, refFallbackCall{doc: f.Document, path: f.Path, ref: f.Ref})
+
+		return jsonschema.DropRef()
+	})
+
+	_, err = jsonschema.Inline(t.Context(), root, jsonschema.WithRefFallback(log))
+	require.NoError(t, err)
+
+	require.NotEmpty(t, calls)
+
+	for _, c := range calls {
+		assert.Equal(t, "#/nope", c.ref)
+		assert.Equal(t, "/x-ext/T/properties/n/properties/z", c.path,
+			"the failure is located within the document, not by the reaching ref's text")
+	}
+}

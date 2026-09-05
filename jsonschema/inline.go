@@ -836,25 +836,21 @@ func (in *inliner) expandTarget(pristine *Schema, path string) (*Schema, error) 
 
 	// A target materialized from an unknown (Extra) keyword via a JSON pointer
 	// is a fresh schema record never walked, so it has no recorded path or
-	// document. Seed it (idempotently) with its own document and pointer so a
-	// nested ref failure reports where the target physically lives. A
-	// fragment-only ref (empty targetDoc) shares the referencing node's
-	// document, and the ref's own pointer fragment is the target's location --
-	// the referring node's path would mislocate a nested ref failure.
+	// document. Seed the whole materialized tree (idempotently) from its root
+	// at the location the session resolved it from, so a nested ref failure
+	// anywhere in it reports where the target physically lives. The ref's
+	// own text is no guide: an anchor name is not a pointer, and a ref into
+	// an already-registered document lands on the target with no fragment.
 	if _, ok := in.index.nodeID(target); !ok {
-		if targetDoc == "" {
-			targetDoc, targetPtr, err = in.fragmentTargetLocation(pristine, ref)
-			if err != nil {
-				return nil, err
-			}
-		}
-
 		node, vetErr := in.vetTarget(target, targetDoc, targetPtr)
 		if vetErr != nil {
 			return in.substitute(pristine, path, ref, vetErr)
 		}
 
-		in.recordNode(node, targetPtr, targetDoc)
+		err = in.recordTarget(node, pristine, ref, targetDoc, targetPtr)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	targetID, err := in.internedID(target)
@@ -863,6 +859,58 @@ func (in *inliner) expandTarget(pristine *Schema, path string) (*Schema, error) 
 	}
 
 	return in.inlineCopy(target, in.paths[targetID], true)
+}
+
+// recordTarget records a vetted, not-yet-indexed target: the whole
+// materialized tree from its root when the session knows where it resolved
+// it from, else the target alone at the location the ref names. A
+// fragment-only ref (empty targetDoc) shares the referencing node's document,
+// and the ref's own pointer fragment is the target's location.
+func (in *inliner) recordTarget(node schemavet.Node, pristine *Schema, ref, targetDoc, targetPtr string) error {
+	frozen := node.Frozen()
+
+	if doc, ptr, known := in.fallbackOrigin(frozen.Root()); known {
+		in.recordFrozen(frozen, frozen.Root(), ptr, doc)
+
+		return nil
+	}
+
+	if targetDoc == "" {
+		var err error
+
+		targetDoc, targetPtr, err = in.fragmentTargetLocation(pristine, ref)
+		if err != nil {
+			return err
+		}
+	}
+
+	in.recordNode(node, targetPtr, targetDoc)
+
+	return nil
+}
+
+// fallbackOrigin returns the recorded document and pointer prefix of a tree
+// the JSON-pointer fallback materialized, from the resource root the session
+// resolved it within: that root's own recorded location extended by the
+// pointer, or the session's locator when the root is not indexed (it was
+// itself materialized by a fallback the walk has not recorded). It reports
+// false for a schema that is not a fallback tree root.
+func (in *inliner) fallbackOrigin(treeRoot *Schema) (string, string, bool) {
+	for _, ft := range in.session.FallbackTargets() {
+		if ft.Schema != treeRoot {
+			continue
+		}
+
+		if id, ok := in.index.nodeID(ft.Within); ok {
+			return in.docs[id], in.paths[id] + ft.Pointer, true
+		}
+
+		doc, ptr, _ := strings.Cut(ft.Locator, "#")
+
+		return doc, ptr, true
+	}
+
+	return "", "", false
 }
 
 // fragmentTargetLocation seeds the recorded location for a target reached by a

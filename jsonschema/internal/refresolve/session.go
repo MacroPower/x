@@ -376,6 +376,8 @@ func (s *Session) resolveJSONPointerViaJSON(
 			s.fallbackTargets = append(s.fallbackTargets, FallbackTarget{
 				Schema:  target,
 				Locator: locator,
+				Within:  root,
+				Pointer: displayPointer(segments),
 			})
 		}
 	}
@@ -406,6 +408,11 @@ type FallbackTarget struct {
 	// document it was resolved within (possibly empty), "#", and the RFC 6901
 	// pointer that located it.
 	Locator string
+	// Within is the resource root the pointer was resolved within, and
+	// Pointer the RFC 6901 pointer from that root to the target, so a caller
+	// that records locations relative to the root's own can extend it.
+	Within  *jsonschema.Schema
+	Pointer string
 }
 
 // FallbackTargets returns the schemas the JSON-pointer fallback materialized in
