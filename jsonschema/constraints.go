@@ -128,7 +128,8 @@ const (
 //
 // The base decides the form wherever the Go type alone understates what the
 // instance is, as it does for a field whose type serializes itself as a string;
-// pass [FieldContext.Base]. A nil base classifies from the Go type alone. The
+// pass [FieldContext.Base]. A nil base classifies from the Go type alone, and
+// a nil type classifies as [FormOpaque], the form every rule reports on. The
 // one coercion neither input can express is a json:",string" flag on an
 // [encoding/json.Number] field (string Go kind, numeric instance), which only
 // [FieldContext.Shape] sees; prefer it when a context is available.

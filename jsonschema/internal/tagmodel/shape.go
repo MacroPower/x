@@ -238,7 +238,15 @@ func ShapeOf(t reflect.Type, base *jsonschema.Schema) Shape {
 // rather than a plain string. The flag is redundant for every other kind:
 // the numeric kinds' coercion the base already states, and every other kind
 // under the flag is a generation error upstream.
+//
+// A nil type classifies as [FormOpaque], so every rule against it reports a
+// shape error rather than dereferencing nothing. Only a caller-built context
+// can reach here without a type.
 func ShapeOfQuoted(t reflect.Type, base *jsonschema.Schema, quoted bool) Shape {
+	if t == nil {
+		return Shape{Form: FormOpaque}
+	}
+
 	elem := numkind.DerefType(t)
 
 	return Shape{

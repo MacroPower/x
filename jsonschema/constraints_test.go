@@ -673,3 +673,17 @@ func TestConstraintsFacadeArity(t *testing.T) {
 	assert.Nil(t, field.Enum)
 	assert.Nil(t, field.Not)
 }
+
+// TestConstraintsFacadeNilType pins that a caller-built context with no Type,
+// the documented unit-test path for an interpreter, classifies as an opaque
+// value, so a rule reports a shape error rather than dereferencing nothing.
+func TestConstraintsFacadeNilType(t *testing.T) {
+	t.Parallel()
+
+	fc := jsonschema.FieldContext{Canvas: &jsonschema.Schema{}}
+	assert.Equal(t, jsonschema.FormOpaque, fc.Shape().Form)
+	assert.Equal(t, jsonschema.FormOpaque, jsonschema.ShapeOf(nil, nil).Form)
+
+	err := fc.Constraints().Apply(jsonschema.OpFloorIncl, jsonschema.AxisAuto, "1")
+	require.ErrorContains(t, err, "opaque value")
+}
