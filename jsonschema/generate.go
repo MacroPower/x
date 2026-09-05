@@ -388,7 +388,18 @@ func (g *generator) applyInstanceDefaults(instance any, rootType reflect.Type, s
 
 	err = json.Unmarshal(data, &values)
 	if err != nil {
-		return fmt.Errorf("%w: instance of type %s does not marshal to a JSON object: %w",
+		// The marshal above can emit bytes the default-options decode here
+		// refuses (a jsontext.Value field carrying duplicate member names
+		// under AllowDuplicateNames, say). A schema default must survive the
+		// document's own default-options marshal, so the refusal stands, but
+		// it must not be blamed on the top-level shape when the output is a
+		// genuine object.
+		if jsontext.Value(data).Kind() != '{' {
+			return fmt.Errorf("%w: instance of type %s does not marshal to a JSON object: %w",
+				ErrInvalidDefaultsInstance, instType, err)
+		}
+
+		return fmt.Errorf("%w: instance of type %s does not decode under default options: %w",
 			ErrInvalidDefaultsInstance, instType, err)
 	}
 
