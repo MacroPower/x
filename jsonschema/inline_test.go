@@ -2720,3 +2720,50 @@ func TestInlineSubstituteNestedRefFailurePath(t *testing.T) {
 		})
 	}
 }
+
+// TestInlineCycleGuardHoldsAcrossNestedVisit pins that a nested visit of a
+// node already in flight leaves the outer visit's cycle mark in place.
+// Expanding a ref to an ancestor of the node walks the ancestor's pristine
+// children in place and enters the node a second time; when that nested visit
+// ends, the outer visit is still inside the node, so a later ref back to it
+// must close a cycle rather than expand again. Clearing the mark instead
+// made a DropRef run consult the fallback without bound.
+func TestInlineCycleGuardHoldsAcrossNestedVisit(t *testing.T) {
+	t.Parallel()
+
+	root, err := jsonschema.ParseSchema([]byte(stringtest.Input(`
+		{
+			"$defs": {
+				"T": {
+					"properties": {
+						"n": {
+							"properties": {
+								"p": {"$ref": "#/$defs/T"},
+								"q": {"$ref": "#/$defs/T/properties/n"}
+							}
+						}
+					}
+				}
+			},
+			"properties": {
+				"a": {"$ref": "#/$defs/T/properties/n"}
+			}
+		}
+	`)))
+	require.NoError(t, err)
+
+	var consulted int
+
+	drop := jsonschema.RefFallbackFunc(func(context.Context, jsonschema.RefFailure) jsonschema.RefAction {
+		consulted++
+		if consulted > 64 {
+			return jsonschema.PropagateRef()
+		}
+
+		return jsonschema.DropRef()
+	})
+
+	_, err = jsonschema.Inline(t.Context(), root, jsonschema.WithRefFallback(drop))
+	require.NoError(t, err)
+	assert.LessOrEqual(t, consulted, 8, "each cycle is consulted once per visit")
+}

@@ -685,15 +685,17 @@ func (in *inliner) walkPair(working, pristine *Schema, path string) error {
 		return err
 	}
 
-	// Mark the node the walk is descending into and clear the mark on the way
-	// out, so a ref below it closes a cycle. Every pristine document is a
-	// frozen tree, so the walk enters a node at most once per visit: it
-	// descends in place through each node's children, and it reaches a node
-	// through a ref only by inlineCopy, which the cycle check above it keeps
-	// off any node in flight. One mark per visit therefore owns its clear.
+	// Mark the node the walk is descending into and restore the mark on the
+	// way out, so a ref below it closes a cycle. A visit can nest inside
+	// another visit of the same node: expanding a ref to an ancestor of a node
+	// in flight walks that ancestor's pristine children in place and enters
+	// the node a second time. Restoring rather than clearing keeps the outer
+	// visit's mark alive across the nested one, so a ref the outer visit
+	// reaches afterwards still closes the cycle instead of expanding again.
+	wasInflight := in.inflight[id]
 	in.inflight[id] = true
 
-	defer func() { in.inflight[id] = false }()
+	defer func() { in.inflight[id] = wasInflight }()
 
 	// Self-contained copies to join the node's allOf after its children are
 	// walked: a Draft 2020-12 $ref target, a fallback substitute for a
