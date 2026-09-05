@@ -319,7 +319,7 @@ type embedEntry struct {
 func (c *Collector) Collect(t reflect.Type) (Collection, error) {
 	col := Collection{ByName: map[Key][]Sighting{}}
 
-	var firstErr error
+	var firstErr, formatErr error
 
 	keepErr := func(err error) {
 		if firstErr == nil && err != nil {
@@ -443,6 +443,19 @@ func (c *Collector) Collect(t reflect.Type) (Collection, error) {
 				// Go embedding without an explicit name implies it.
 				embedded := info.Embed || (f.Anonymous && !info.TaggedName)
 
+				// V2 refuses an anonymous non-struct before it reads the
+				// options, and recovers it as a leaf field named by the type
+				// identifier, so the options fault below never fires for it.
+				// Only an unnamed pointer derefs, since v2's indirectType
+				// stops at a named pointer type.
+				if f.Anonymous && !info.TaggedName && reflectkind.IndirectType(f.Type).Kind() != reflect.Struct {
+					keepErr(typeErrf(e.typ,
+						"embedded Go struct field %s of non-struct type must be explicitly given a JSON name",
+						f.Name))
+
+					embedded = false
+				}
+
 				optioned := info.Omitempty || info.Omitzero || info.JSONString ||
 					info.Case != "" || info.Format != ""
 				if (embedded && optioned) || (info.Embed && info.TaggedName) {
@@ -466,65 +479,57 @@ func (c *Collector) Collect(t reflect.Type) (Collection, error) {
 					if ft.Kind() != reflect.Struct {
 						// V2 embeds only structs, plus the two fallback forms on
 						// a non-anonymous field under an explicit ",embed"
-						// option; an anonymous non-struct is an error however it
-						// is tagged, recovered as a leaf field named by the type
-						// identifier.
-						if f.Anonymous {
-							keepErr(typeErrf(e.typ,
-								"embedded Go struct field %s of non-struct type must be explicitly given a JSON name",
-								f.Name))
-						} else {
-							// A non-anonymous field reaches here only through
-							// info.Embed, and jsontag guarantees it is exported.
-							// V2 checks the marshaler methods first
-							// (jsontext.Value exempt), dropping the field.
-							if ft != reflectkind.TypeJSONTextValue &&
-								reflectkind.ImplementsAnyMarshalMethod(ft) {
-								keepErr(typeErrf(
-									e.typ,
-									"embedded Go struct field %s of type %s must not implement marshal or unmarshal methods",
-									f.Name,
-									ft,
-								))
+						// option (an anonymous non-struct was refused above).
+						// A non-anonymous field reaches here only through
+						// info.Embed, and jsontag guarantees it is exported.
+						// V2 checks the marshaler methods first
+						// (jsontext.Value exempt), dropping the field.
+						if ft != reflectkind.TypeJSONTextValue &&
+							reflectkind.ImplementsAnyMarshalMethod(ft) {
+							keepErr(typeErrf(
+								e.typ,
+								"embedded Go struct field %s of type %s must not implement marshal or unmarshal methods",
+								f.Name,
+								ft,
+							))
 
-								continue
+							continue
+						}
+
+						switch {
+						case reflectkind.IsEmbeddedFallback(ft):
+							// A valid fallback: v2 splices its members into
+							// the parent object after the named fields. Two
+							// in one declaration are an error, and v2 still
+							// records both so the same-depth tie drops them.
+							if firstFallbackInDecl != "" {
+								keepErr(typeErrf(e.typ,
+									"embedded Go struct fields %s and %s cannot both be a Go map or jsontext.Value",
+									firstFallbackInDecl, f.Name))
 							}
 
-							switch {
-							case reflectkind.IsEmbeddedFallback(ft):
-								// A valid fallback: v2 splices its members into
-								// the parent object after the named fields. Two
-								// in one declaration are an error, and v2 still
-								// records both so the same-depth tie drops them.
-								if firstFallbackInDecl != "" {
-									keepErr(typeErrf(e.typ,
-										"embedded Go struct fields %s and %s cannot both be a Go map or jsontext.Value",
-										firstFallbackInDecl, f.Name))
-								}
+							firstFallbackInDecl = f.Name
 
-								firstFallbackInDecl = f.Name
+							col.Fallbacks = appendDup(col.Fallbacks,
+								Fallback{StructField: f, Type: ft, Depth: depth}, dup)
 
-								col.Fallbacks = appendDup(col.Fallbacks,
-									Fallback{StructField: f, Type: ft, Depth: depth}, dup)
+							continue
 
-								continue
+						case ft.Kind() == reflect.Map && ft.Key().Kind() == reflect.String:
+							keepErr(typeErrf(
+								e.typ,
+								"embedded map field %s of type %s must have a string key that does not implement marshal or unmarshal methods",
+								f.Name,
+								ft,
+							))
 
-							case ft.Kind() == reflect.Map && ft.Key().Kind() == reflect.String:
-								keepErr(typeErrf(
-									e.typ,
-									"embedded map field %s of type %s must have a string key that does not implement marshal or unmarshal methods",
-									f.Name,
-									ft,
-								))
-
-							default:
-								keepErr(typeErrf(
-									e.typ,
-									"embedded Go struct field %s of type %s must be a Go struct, Go map of string key, or jsontext.Value",
-									f.Name,
-									ft,
-								))
-							}
+						default:
+							keepErr(typeErrf(
+								e.typ,
+								"embedded Go struct field %s of type %s must be a Go struct, Go map of string key, or jsontext.Value",
+								f.Name,
+								ft,
+							))
 						}
 
 						if !f.IsExported() {
@@ -655,10 +660,13 @@ func (c *Collector) Collect(t reflect.Type) (Collection, error) {
 
 				// Stable encoding/json/v2 parses the `format` tag option but
 				// supports no value of it on a struct field: any appearance
-				// makes marshaling the struct a SemanticError.
-				if info.Format != "" {
-					keepErr(typeErrf(e.typ,
-						"Go struct field %s has unsupported `format` tag option", f.Name))
+				// makes marshaling the struct a SemanticError. V2 keeps that
+				// fault aside and reports it only when the walk raised no
+				// other, so it takes its own slot rather than the first-error
+				// one.
+				if info.Format != "" && formatErr == nil {
+					formatErr = typeErrf(e.typ,
+						"Go struct field %s has unsupported `format` tag option", f.Name)
 				}
 
 				// A regular named field: a plain field, an embedded field with
@@ -683,6 +691,10 @@ func (c *Collector) Collect(t reflect.Type) (Collection, error) {
 				keepErr(fmt.Errorf("Go struct %s has no exported fields", e.typ))
 			}
 		}
+	}
+
+	if firstErr == nil {
+		firstErr = formatErr
 	}
 
 	return col, firstErr

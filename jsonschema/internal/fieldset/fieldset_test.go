@@ -1399,3 +1399,47 @@ func FuzzFieldSetKeys(f *testing.F) {
 		checkKeySet(t, typ, composedIn(predicateSets[setNames[pick]]), [][]byte{value})
 	})
 }
+
+type (
+	errOrderMyInt        int //nolint:unused // Embedded below; the faulty declaration is the point.
+	errOrderAnonOptioned struct {
+		errOrderMyInt `json:",omitempty"` //nolint:govet,unused // The faulty tag is the point.
+	}
+	errOrderFormatThenConflict struct {
+		A int `json:",format:x"` //nolint:govet // The faulty tag is the point.
+		B int `json:"b"`
+		C int `json:"b"` //nolint:govet // The conflict is the point.
+	}
+)
+
+// TestCollectFirstErrorMatchesV2 pins two orderings of the first fault
+// Collect reports against encoding/json/v2's. An anonymous non-struct field
+// is refused for its type before its options are read, so the options fault
+// never fires for it; and an unsupported format option is reported only when
+// the walk raises no other fault, so a later name conflict wins.
+func TestCollectFirstErrorMatchesV2(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		typ reflect.Type
+		err string
+	}{
+		"anonymous non-struct with options": {
+			typ: reflect.TypeFor[errOrderAnonOptioned](),
+			err: "embedded Go struct field errOrderMyInt of non-struct type must be explicitly given a JSON name",
+		},
+		"format fault yields to a later conflict": {
+			typ: reflect.TypeFor[errOrderFormatThenConflict](),
+			err: `Go struct fields B and C conflict over JSON object name "b"`,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := NewCollector(func(reflect.Type) bool { return false }).Of(tc.typ)
+			require.ErrorContains(t, err, tc.err)
+		})
+	}
+}
