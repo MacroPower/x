@@ -110,3 +110,23 @@ func TestGenerateFor_NamelessTagOnEmbeddedStructPromotes(t *testing.T) {
 	require.ErrorIs(t, err, jsonschema.ErrInvalidJSONField)
 	require.ErrorContains(t, err, "malformed `json` tag")
 }
+
+// TestGenerateFor_DuplicateNameInOneDeclaration pins the same-declaration
+// conflict: two fields of one struct claiming a JSON name is a refusal under
+// encoding/json/v2 (v1 silently dropped both), and generation mirrors it
+// with v2's verbatim text.
+func TestGenerateFor_DuplicateNameInOneDeclaration(t *testing.T) {
+	t.Parallel()
+
+	type dup struct {
+		A int `json:"dup"`
+		B int `json:"dup"` //nolint:govet // The duplicate json name is the refusal under test.
+	}
+
+	_, err := json.Marshal(dup{})
+	require.ErrorContains(t, err, `Go struct fields A and B conflict over JSON object name "dup"`)
+
+	_, err = jsonschema.GenerateFor[dup](t.Context())
+	require.ErrorIs(t, err, jsonschema.ErrInvalidJSONField)
+	require.ErrorContains(t, err, `Go struct fields A and B conflict over JSON object name "dup"`)
+}
