@@ -62,25 +62,30 @@ func TestHasDirectMethod(t *testing.T) {
 	}
 }
 
-func TestDirectAndPromotedTextMarshaler(t *testing.T) {
+// TestTextMarshalerPromotion pins the direct-versus-promoted distinction as
+// the two surviving predicates express it: [reflectkind.ImplementsAnyTextMarshaler]
+// answers whether MarshalText is in the method set at all, and
+// [reflectkind.HasDirectMethod] whether the declaration is the type's own
+// rather than a promotion wrapper.
+func TestTextMarshalerPromotion(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]struct {
-		typ          reflect.Type
-		wantDirect   bool
-		wantPromoted bool
+		typ            reflect.Type
+		wantImplements bool
+		wantDirect     bool
 	}{
-		"direct":   {typ: reflect.TypeFor[directText](), wantDirect: true, wantPromoted: false},
-		"promoted": {typ: reflect.TypeFor[promotedText](), wantDirect: false, wantPromoted: true},
-		"shadow":   {typ: reflect.TypeFor[shadowText](), wantDirect: true, wantPromoted: false},
-		"none":     {typ: reflect.TypeFor[plain](), wantDirect: false, wantPromoted: false},
+		"direct":   {typ: reflect.TypeFor[directText](), wantImplements: true, wantDirect: true},
+		"promoted": {typ: reflect.TypeFor[promotedText](), wantImplements: true, wantDirect: false},
+		"shadow":   {typ: reflect.TypeFor[shadowText](), wantImplements: true, wantDirect: true},
+		"none":     {typ: reflect.TypeFor[plain](), wantImplements: false, wantDirect: false},
 	}
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			assert.Equal(t, tc.wantDirect, reflectkind.IsDirectTextMarshaler(tc.typ))
-			assert.Equal(t, tc.wantPromoted, reflectkind.IsPromotedTextMarshaler(tc.typ))
+			assert.Equal(t, tc.wantImplements, reflectkind.ImplementsAnyTextMarshaler(tc.typ))
+			assert.Equal(t, tc.wantDirect, reflectkind.HasDirectMethod(tc.typ, "MarshalText"))
 		})
 	}
 }

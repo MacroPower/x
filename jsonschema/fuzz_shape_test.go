@@ -97,13 +97,15 @@ func TestShapeStructOfCannotReproducePromotion(t *testing.T) {
 	t.Parallel()
 
 	declared := reflect.TypeFor[promotedTextMarshaler]()
-	require.True(t, reflectkind.IsPromotedTextMarshaler(declared),
+	require.True(t, reflectkind.ImplementsAnyTextMarshaler(declared) &&
+		!reflectkind.HasDirectMethod(declared, "MarshalText"),
 		"a declared embed must read as promoted")
 
 	synthesized := reflect.StructOf([]reflect.StructField{
 		{Name: "Celsius", Type: reflect.TypeFor[Celsius](), Anonymous: true},
 	})
-	require.True(t, reflectkind.IsDirectTextMarshaler(synthesized), reasonStructOfPromotion)
+	require.True(t, reflectkind.ImplementsAnyTextMarshaler(synthesized) &&
+		reflectkind.HasDirectMethod(synthesized, "MarshalText"), reasonStructOfPromotion)
 
 	// The reason's other half: an embedded generic instantiation cannot be named
 	// at all, since a field name must be an identifier.

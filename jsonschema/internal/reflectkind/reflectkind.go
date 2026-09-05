@@ -154,16 +154,6 @@ func IsStringifiableNumber(t reflect.Type) bool {
 	return numkind.IsInteger(t.Kind()) || numkind.IsFloat(t.Kind()) || IsJSONNumber(t)
 }
 
-// IsDirectTextMarshaler reports whether a type directly implements
-// [encoding.TextMarshaler] (not via a promoted embedded field method).
-func IsDirectTextMarshaler(t reflect.Type) bool {
-	if !implementsTextMarshaler(t) {
-		return false
-	}
-
-	return HasDirectMethod(t, "MarshalText")
-}
-
 // IsBase64ByteSlice reports whether a slice type marshals as one base64
 // string under [encoding/json/v2]: its element is the unnamed builtin byte.
 // A named byte element (which, unlike the builtin, could also carry methods)
@@ -191,12 +181,6 @@ func ImplementsJSONMarshaler(t reflect.Type) bool {
 	return implementsAny(t, TypeJSONMarshaler)
 }
 
-// implementsTextMarshaler reports whether the type or its pointer type
-// implements [encoding.TextMarshaler], directly or via promotion.
-func implementsTextMarshaler(t reflect.Type) bool {
-	return implementsAny(t, TypeTextMarshaler)
-}
-
 // IsPromotedJSONMarshaler reports whether a type's method set includes
 // MarshalJSON solely via promotion from an embedded field. Encoding/json
 // resolves marshalers through the method set, so a promoted MarshalJSON
@@ -208,17 +192,6 @@ func IsPromotedJSONMarshaler(t reflect.Type) bool {
 	}
 
 	return !HasDirectMethod(t, "MarshalJSON")
-}
-
-// IsPromotedTextMarshaler reports whether a type's method set includes
-// MarshalText solely via promotion from an embedded field. See
-// [IsPromotedJSONMarshaler].
-func IsPromotedTextMarshaler(t reflect.Type) bool {
-	if !implementsTextMarshaler(t) {
-		return false
-	}
-
-	return !HasDirectMethod(t, "MarshalText")
 }
 
 // ImplementsJSONMarshalerTo reports whether the type or its pointer type
