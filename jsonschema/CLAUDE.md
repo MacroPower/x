@@ -686,6 +686,12 @@ contract the tests enforce.
   bullet's own quoted examples run through the public API. The row count must
   equal the bullet count in both lists, so a sixth deviation cannot land with
   nothing asserting it.
+- `doc_nullability_test.go` is a second guard of that shape, over the
+  container-null rule rather than the format list. `containerNullPhrases` holds
+  the three sentences that rule turns on, and `TestContainerNullDocumented`
+  requires each to appear in both `doc.go` and `README.md`, over the same
+  normalized text the deviation ledger compares on. Rewording the
+  container-null paragraph in either file breaks it; reflowing it does not.
 - `testdata/tags/cases.json` is the cross-dialect fixture table, run by
   `tags_fixture_test.go`. Each row names a field shape through a small type
   registry, the spelling each dialect gives one rule, the property schema the
@@ -780,12 +786,12 @@ contract the tests enforce.
 
 ### Tooling
 
-Bare `go vet ./...` reports six deliberate `structtag` findings: three json
+Bare `go vet ./...` reports seven deliberate `structtag` findings: three json
 tags on unexported fields (two in
 `internal/jsontag/jsontag_unexported_test.go`, one in
-`reflect_fallback_test.go`), and three declarations repeating a JSON name
-across `reflect_ghost_annihilation_test.go` and
-`reflect_shadowed_embed_test.go`. Each of the six is what its test exercises
-and carries a `//nolint` directive listing `govet`. Only golangci-lint reads
-that directive, so the local gate, `task check`, stays clean while bare
-`go vet` does not.
+`reflect_fallback_test.go`), and four declarations repeating a JSON name
+across `reflect_ghost_annihilation_test.go`,
+`reflect_invalid_tagname_test.go`, and `reflect_shadowed_embed_test.go`. Each
+of the seven is what its test exercises and carries a `//nolint` directive
+listing `govet`. Only golangci-lint reads that directive, so the local gate,
+`task check`, stays clean while bare `go vet` does not.
