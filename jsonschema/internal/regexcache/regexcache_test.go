@@ -1,6 +1,7 @@
 package regexcache_test
 
 import (
+	"fmt"
 	"regexp"
 	"sync"
 	"testing"
@@ -113,4 +114,18 @@ func TestCompileCachesErrorFailClosed(t *testing.T) {
 	require.Error(t, second)
 
 	assert.Same(t, first, second)
+}
+
+// TestCompileBoundsTheCache pins that the process-global cache never holds
+// more than MaxEntries patterns, so a process compiling caller-supplied
+// schemas with ever-new patterns does not grow without bound.
+func TestCompileBoundsTheCache(t *testing.T) {
+	t.Parallel()
+
+	for i := range regexcache.MaxEntries + 8 {
+		_, err := regexcache.Compile(fmt.Sprintf(`^bound-%d$`, i))
+		require.NoError(t, err)
+
+		assert.LessOrEqual(t, regexcache.Size(), regexcache.MaxEntries)
+	}
 }
