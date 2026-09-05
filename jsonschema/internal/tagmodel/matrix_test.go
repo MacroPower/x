@@ -91,7 +91,7 @@ func TestMatrixGolden(t *testing.T) {
 		|element uniqueness / boolean -> reject: unique has no array to constrain on a boolean
 		|element uniqueness / declared object -> reject: unique has no array to constrain on a declared object
 		|element uniqueness / number -> reject: unique has no array to constrain on a number
-		|element uniqueness / object -> ignore: unique on a map asserts distinct values, which no object keyword expresses
+		|element uniqueness / object -> ignore: a uniqueness rule on a map asserts distinct values, which no object keyword expresses
 		|element uniqueness / opaque value -> reject: unique has no array to constrain on a opaque value
 		|element uniqueness / raw byte slice -> reject: unique has no array to constrain on a raw byte slice
 		|element uniqueness / referenced definition -> reject: unique has no array to constrain on a referenced definition
@@ -104,7 +104,7 @@ func TestMatrixGolden(t *testing.T) {
 		|enumerated values / boolean -> apply
 		|enumerated values / declared object -> reject: enumerated values is not supported on a declared object
 		|enumerated values / number -> apply
-		|enumerated values / object -> reject: an enumeration on a map has no element meaning (use dive to constrain the values)
+		|enumerated values / object -> reject: an enumeration on a map has no element meaning (the map values carry their own schema)
 		|enumerated values / opaque value -> reject: enumerated values is not supported on a opaque value
 		|enumerated values / raw byte slice -> reject: a []byte field has no item schema to constrain (it encodes as a base64 string)
 		|enumerated values / referenced definition -> reject: enumerated values is not supported on a referenced definition

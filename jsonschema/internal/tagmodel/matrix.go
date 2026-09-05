@@ -136,7 +136,11 @@ func FormCarriesAxis(f Form, a Axis) bool {
 // axisRejection explains why a bound cannot land on a form, and is the message
 // the front-end wraps.
 func axisRejection(form Form, axis Axis) string {
-	if note := formAxisNote[form]; note != "" {
+	// A form's note explains its natural axis (the one AxisAuto resolves to)
+	// and the item count it looks like it should carry; a bound naming
+	// another family outright takes the generic wording, since the note
+	// would answer a question the author never asked.
+	if note := formAxisNote[form]; note != "" && (axis == AxisAuto || axis == AxisItems) {
 		return note
 	}
 
@@ -233,7 +237,7 @@ func fillValues() {
 	// A bare enumeration on a map has no go-playground element meaning, unlike a
 	// dive, which says "descend" explicitly. Keeping the asymmetry is deliberate.
 	reject(OpOneOf, FormObject,
-		"an enumeration on a map has no element meaning (use dive to constrain the values)")
+		"an enumeration on a map has no element meaning (the map values carry their own schema)")
 
 	// A byte slice encodes as one base64 string, so an element enumeration has
 	// nothing to land on. Rejecting it rather than dropping it silently is the
@@ -257,7 +261,7 @@ func fillValues() {
 	// constraint with no object-side counterpart to uniqueItems, so there is
 	// nothing faithful to emit and nothing mistaken about having written it.
 	ignore(OpUnique, FormObject,
-		"unique on a map asserts distinct values, which no object keyword expresses")
+		"a uniqueness rule on a map asserts distinct values, which no object keyword expresses")
 
 	apply(OpMultipleOf, FormNumber, applyMultipleOf)
 	apply(OpMultipleOf, FormRef, applyMultipleOf)
