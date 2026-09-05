@@ -3,6 +3,7 @@ package jsonvalue_test
 import (
 	"encoding/json/jsontext"
 	"math"
+	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -523,14 +524,5 @@ func TestNormalize(t *testing.T) {
 
 // sameMap reports whether two maps are the same underlying map value.
 func sameMap(a, b map[string]any) bool {
-	if len(a) != len(b) {
-		return false
-	}
-
-	a["__same_probe__"] = struct{}{}
-	defer delete(a, "__same_probe__")
-
-	_, ok := b["__same_probe__"]
-
-	return ok
+	return reflect.ValueOf(a).UnsafePointer() == reflect.ValueOf(b).UnsafePointer()
 }
