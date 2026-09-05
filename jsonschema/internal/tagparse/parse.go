@@ -146,9 +146,22 @@ func isKeyValueTag(pairs []string) bool {
 		return true
 	}
 
-	// Unknown key: prose (a value containing whitespace) is a description;
-	// a space-free value is a likely key=value typo that should error.
-	return !strings.ContainsAny(value, " \t")
+	// Unknown key: a space-free value is a likely key=value typo that should
+	// error. A value containing whitespace reads as prose, so the tag is a
+	// description, unless a later segment is a recognized key=value pair, in
+	// which case the author wrote pairs and the first key is the typo; taking
+	// the whole tag as prose there would swallow every real pair after it.
+	if !strings.ContainsAny(value, " \t") {
+		return true
+	}
+
+	for _, pair := range pairs[1:] {
+		if k, _, ok := strings.Cut(pair, "="); ok && jsonSchemaTagKeys[k] {
+			return true
+		}
+	}
+
+	return false
 }
 
 // splitTagPairs splits a tag string into key=value segments on unescaped

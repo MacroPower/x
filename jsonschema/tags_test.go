@@ -3734,3 +3734,28 @@ func TestInterpreterNullLiteralOnAnOverriddenField(t *testing.T) {
 	require.ErrorIs(t, err, tagmodel.ErrNullNotAdmitted)
 	require.ErrorContains(t, err, `field "a": authored canvas: keyword "default"`)
 }
+
+// TestTagTypoKeyWithSpacedValueStillErrors pins that an unrecognized first
+// key whose value contains whitespace is reported when a recognized key=value
+// pair follows it. The prose exemption exists for a bare description such as
+// "a=b is the formula"; a tag that goes on to name real keywords was written
+// as pairs, and taking it whole as a description used to swallow every pair
+// after the typo.
+func TestTagTypoKeyWithSpacedValueStillErrors(t *testing.T) {
+	t.Parallel()
+
+	type T struct {
+		Port int `json:"port" jsonschema:"descrption=Server port,minimum=1,maximum=65535"`
+	}
+
+	_, err := jsonschema.GenerateFor[T](t.Context())
+	require.ErrorContains(t, err, `unrecognized key "descrption"`)
+
+	type prose struct {
+		V string `json:"v" jsonschema:"a=b is the formula"`
+	}
+
+	s, err := jsonschema.GenerateFor[prose](t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, "a=b is the formula", s.Properties["v"].Description)
+}
