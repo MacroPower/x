@@ -1586,14 +1586,20 @@ func (g *run) omitsZero(fi fieldset.Field) bool {
 // rebuildOverriddenField rebuilds a field node after a type= override replaced
 // its type wholesale: a plain value node over the overridden view, dropping
 // the def link, children, and null bits in one place, while carrying the
-// authored canvas across. Reachability drops any def the detached ref
-// orphaned. A type=array override on a sequence field keeps the element
-// structure (applyTypeOverride drops it for every other type, which the
-// view's cleared element slot reports), and the authored element canvases can
-// carry a redirected element enum; those element nodes are kept so reconcile
-// still composes them per child instead of silently dropping the author's
-// enum. The view's own element slots are cleared, since render fills them from
-// the kept nodes.
+// authored canvas and the field origin across. Reachability drops any def
+// the detached ref orphaned.
+//
+// An override that keeps the field's container kind keeps its child nodes.
+// A type=array override on a sequence field keeps the element structure
+// (applyTypeOverride drops it for every other type, which the view's cleared
+// element slot reports), and a type=object override on a map or an inline
+// struct keeps the value node or the property and embed nodes. Each kept
+// node still carries its own null decision, authored canvas, and hooks, so a
+// pointer property keeps its null branch, a nested tag still applies, and a
+// ref child renders under its final def name rather than the provisional
+// token the view holds. The view's own child slots are cleared for the kept
+// nodes, since render fills them from the nodes; a slot a hook authored as a
+// literal stays as written.
 func rebuildOverriddenField(fieldNode *node, payload *Schema) *node {
 	rebuilt := &node{
 		kind:     kindValue,
@@ -1614,15 +1620,34 @@ func rebuildOverriddenField(fieldNode *node, payload *Schema) *node {
 		payload.PrefixItems = nil
 		payload.ItemsArray = nil
 
-	case fieldNode.kind == kindObject && fieldNode.items != nil:
+	case fieldNode.kind == kindMap && payload.Type == typename.Object && fieldNode.items != nil:
+		rebuilt.kind = kindMap
+		rebuilt.items = fieldNode.items
+		payload.AdditionalProperties = nil
+
+	case fieldNode.kind == kindObject && payload.Type == typename.Object:
+		rebuilt.kind = kindObject
+		rebuilt.typ = fieldNode.typ
+		rebuilt.props = fieldNode.props
+		rebuilt.embeds = fieldNode.embeds
+
+		for i := range fieldNode.props {
+			delete(payload.Properties, fieldNode.props[i].name)
+		}
+
+		if len(payload.Properties) == 0 {
+			payload.Properties = nil
+		}
+
 		// An inline struct field carrying an embedded fallback keeps the
 		// fallback value node, so render still fills the extra-member slot
 		// from it (null wrap and final $ref name included).
-		rebuilt.kind = kindObject
-		rebuilt.items = fieldNode.items
-		rebuilt.fallback = fieldNode.fallback
-		payload.AdditionalProperties = nil
-		payload.UnevaluatedProperties = nil
+		if fieldNode.items != nil {
+			rebuilt.items = fieldNode.items
+			rebuilt.fallback = fieldNode.fallback
+			payload.AdditionalProperties = nil
+			payload.UnevaluatedProperties = nil
+		}
 	}
 
 	return rebuilt

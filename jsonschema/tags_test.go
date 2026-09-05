@@ -15,6 +15,8 @@ import (
 
 	"go.jacobcolvin.com/x/jsonschema"
 	"go.jacobcolvin.com/x/jsonschema/internal/tagmodel"
+	"go.jacobcolvin.com/x/jsonschema/internal/testtypes/alpha"
+	"go.jacobcolvin.com/x/jsonschema/internal/testtypes/beta"
 	"go.jacobcolvin.com/x/jsonschema/interpreters/validate"
 )
 
@@ -3644,4 +3646,66 @@ func TestTagUniqueItemsOnMapIsRejected(t *testing.T) {
 	_, err := jsonschema.GenerateFor[T](t.Context())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "constraint not supported for this shape")
+}
+
+// TestTagTypeOverrideKeepsChildNodes pins that a type=object override keeps
+// the map value and struct property nodes the way a type=array override keeps
+// the element node. The rebuild used to freeze those children as literal
+// views: a pointer value or property lost its null branch, a nested tag and
+// interpreter never ran, and a ref child kept the provisional $ref token that
+// a def-name collision left dangling.
+func TestTagTypeOverrideKeepsChildNodes(t *testing.T) {
+	t.Parallel()
+
+	t.Run("map value keeps its null branch", func(t *testing.T) {
+		t.Parallel()
+
+		type T struct {
+			M map[string]*int `json:"m" jsonschema:"type=object"`
+		}
+
+		s, err := jsonschema.GenerateFor[T](t.Context())
+		require.NoError(t, err)
+
+		instance, err := json.Marshal(T{M: map[string]*int{"a": nil}})
+		require.NoError(t, err)
+		require.NoError(t, validateJSON(t.Context(), s, instance))
+	})
+
+	t.Run("inline struct keeps property nodes and hooks", func(t *testing.T) {
+		t.Parallel()
+
+		type T struct {
+			F struct {
+				A *int `json:"a" jsonschema:"description=hello"`
+			} `json:"f" jsonschema:"type=object"`
+		}
+
+		s, err := jsonschema.GenerateFor[T](t.Context())
+		require.NoError(t, err)
+
+		instance, err := json.Marshal(T{})
+		require.NoError(t, err)
+		require.NoError(t, validateJSON(t.Context(), s, instance))
+
+		assert.Equal(t, "hello", s.Properties["f"].Properties["a"].Description,
+			"the nested field's own tag still applies")
+	})
+
+	t.Run("ref child renders its final def name", func(t *testing.T) {
+		t.Parallel()
+
+		type T struct {
+			M map[string]alpha.Widget `json:"m" jsonschema:"type=object"`
+			B beta.Widget             `json:"b"`
+		}
+
+		s, err := jsonschema.GenerateFor[T](t.Context())
+		require.NoError(t, err)
+
+		assert.Equal(t, "#/$defs/alpha_Widget", s.Properties["m"].AdditionalProperties.Ref)
+
+		_, err = jsonschema.Compile(t.Context(), s)
+		require.NoError(t, err)
+	})
 }
