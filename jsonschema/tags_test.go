@@ -3775,3 +3775,50 @@ func TestTagUniqueItemsTwiceIsRejected(t *testing.T) {
 	_, err := jsonschema.GenerateFor[T](t.Context())
 	require.ErrorContains(t, err, `key "uniqueItems" is set twice in one tag`)
 }
+
+// enumeratedName is a string type whose hook-supplied schema pins an
+// enumeration, so a type= override over it has values of the old type to drop.
+type enumeratedName string
+
+// TestTagTypeOverrideDropsPinnedValues pins that a type= pair naming a
+// different type drops the const, enum, default, and examples the replaced
+// type pinned, along with any combinators composed over it. Keeping them used
+// to emit {"type":"integer","enum":["a","b"]}, a schema no instance
+// satisfies, and a const after the pair conflicted with the stale enum.
+func TestTagTypeOverrideDropsPinnedValues(t *testing.T) {
+	t.Parallel()
+
+	hook := jsonschema.WithTypeSchemaFor[enumeratedName](jsonschema.TypeSchema{
+		Value: &jsonschema.Schema{Type: "string", Enum: []any{"a", "b"}, Default: jsontext.Value(`"a"`)},
+	})
+
+	t.Run("different type drops the values", func(t *testing.T) {
+		t.Parallel()
+
+		type T struct {
+			V enumeratedName `json:"v" jsonschema:"type=integer,const=1"`
+		}
+
+		s, err := jsonschema.GenerateFor[T](t.Context(), hook)
+		require.NoError(t, err)
+
+		got, err := json.Marshal(s.Properties["v"])
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"type":"integer","const":1}`, string(got))
+	})
+
+	t.Run("same type keeps the values", func(t *testing.T) {
+		t.Parallel()
+
+		type T struct {
+			V enumeratedName `json:"v" jsonschema:"type=string"`
+		}
+
+		s, err := jsonschema.GenerateFor[T](t.Context(), hook)
+		require.NoError(t, err)
+
+		got, err := json.Marshal(s.Properties["v"])
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"type":"string","enum":["a","b"],"default":"a"}`, string(got))
+	})
+}

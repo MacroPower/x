@@ -134,23 +134,38 @@ func conflictingGroup(groupsSet map[string]bool, typeName string) string {
 
 // ApplyTypeOverride applies a type= tag value, replacing the reflected type
 // assertion: it sets Type, clears a Types array, drops a bare $ref to a
-// definition, removes the nullable anyOf wrapper a pointer field generates,
-// and drops the keyword groups the new type cannot use. The numeric bounds,
-// array keywords, object keywords, and string constraints each derive from the
-// original Go kind (an int64-reflected field such as [time.Duration] carries
-// range bounds, a slice carries items, a struct carries properties, and a
-// string-reflected field such as [time.Time] or [big.Rat] carries a
-// format/pattern, and a []byte field carries the string-only content
-// keywords); left on a schema of a different type they are vacuous but
-// emit as confusing dead structure. Tag pairs apply in order, so keys after
-// type= still take effect. The generator applies the pair to the field's
-// node before the null pass and [Apply] replays it on a discarded view.
+// definition, and drops the keyword groups the new type cannot use. The
+// numeric bounds, array keywords, object keywords, and string constraints
+// each derive from the original Go kind (an int64-reflected field such as
+// [time.Duration] carries range bounds, a slice carries items, a struct
+// carries properties, and a string-reflected field such as [time.Time] or
+// [big.Rat] carries a format/pattern, and a []byte field carries the
+// string-only content keywords); left on a schema of a different type they
+// are vacuous but emit as confusing dead structure. When the named type
+// differs from the one the schema declared, the values pinned for the old
+// type (const, enum, default, examples) and the combinators composed over it
+// (allOf, anyOf, oneOf, not) go too, since a value of the replaced type
+// describes nothing about the new one and a later const or enum pair would
+// otherwise conflict with it. Tag pairs apply in order, so keys after type=
+// still take effect. The generator applies the pair to the field's node
+// before the null pass and [Apply] replays it on a discarded view.
 func ApplyTypeOverride(s *jsonschema.Schema, typeName string) {
 	// A field whose type was extracted to $defs reflects to a bare {$ref}; the
 	// explicit type replaces that assertion, so drop the ref. Leaving it would
 	// emit {$ref, type}, which under 2020-12 requires both to hold and is
 	// unsatisfiable when the referenced definition is a different type.
 	s.Ref = ""
+
+	if s.Type != typeName {
+		s.Const = nil
+		s.Enum = nil
+		s.Default = nil
+		s.Examples = nil
+		s.AllOf = nil
+		s.AnyOf = nil
+		s.OneOf = nil
+		s.Not = nil
+	}
 
 	s.Type = typeName
 	s.Types = nil
