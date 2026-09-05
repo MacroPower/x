@@ -951,7 +951,12 @@
 //     context excludes gets no description, even when reflection sees the
 //     type.
 //   - It loads packages in the process working directory unless [WithLoadDir]
-//     points it at another module's directory.
+//     points it at another module's directory. A type declared in package
+//     main is located through that directory, which must be the main
+//     package's own, since reflection reports no import path for it.
+//   - A load that fails outright (a package the module graph cannot supply,
+//     a proxy that cannot be reached) is retried on the next Generate rather
+//     than remembered as a package with no sources.
 //   - A description in the jsonschema struct tag wins over the comment it
 //     supplies.
 //

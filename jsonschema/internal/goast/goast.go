@@ -40,14 +40,17 @@ func TypeDoc(files []*ast.File, name string) (string, bool) {
 					continue
 				}
 
-				// Doc comment can be on the GenDecl (for single-spec decls) or
-				// on the TypeSpec itself. The type name is unique per package, so
-				// return as soon as it matches instead of scanning the rest.
+				// The doc comment sits on the TypeSpec itself or, for a spec
+				// with none, on the GenDecl, whether the declaration holds one
+				// spec or a parenthesized group; go/doc attaches the group's
+				// comment to every spec lacking its own. The type name is
+				// unique per package, so return as soon as it matches instead
+				// of scanning the rest.
 				if ts.Doc != nil {
 					return strings.TrimSpace(ts.Doc.Text()), true
 				}
 
-				if gd.Doc != nil && len(gd.Specs) == 1 {
+				if gd.Doc != nil {
 					return strings.TrimSpace(gd.Doc.Text()), true
 				}
 

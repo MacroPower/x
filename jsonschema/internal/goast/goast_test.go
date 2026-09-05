@@ -65,6 +65,13 @@ type (
 	Other int
 )
 
+// Shapes are the geometric primitives.
+type (
+	Circle struct{}
+	// Square documents itself.
+	Square struct{}
+)
+
 type Bare struct{}
 `
 
@@ -79,6 +86,8 @@ type Bare struct{}
 		"single-spec gendecl": {typeName: "Solo", want: "Group documents the only spec in the group.", found: true},
 		"multi-spec typespec": {typeName: "Inner", want: "Inner documents a spec in a multi-spec group.", found: true},
 		"multi-spec no doc":   {typeName: "Other", want: "", found: true},
+		"group doc":           {typeName: "Circle", want: "Shapes are the geometric primitives.", found: true},
+		"group doc yields":    {typeName: "Square", want: "Square documents itself.", found: true},
 		"found without doc":   {typeName: "Bare", want: "", found: true},
 		"absent type":         {typeName: "Missing", want: "", found: false},
 	}

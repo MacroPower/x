@@ -37,7 +37,15 @@ func LoadPackageFiles(ctx context.Context, dir, pkgPath string) ([]*ast.File, bo
 		},
 	}
 
-	pkgs, err := packages.Load(cfg, pkgPath)
+	// A type declared in package main reflects the import path "main", which
+	// no pattern resolves; its sources are the package in the load directory
+	// when that directory is a main package.
+	pattern := pkgPath
+	if pkgPath == mainPkgPath {
+		pattern = "."
+	}
+
+	pkgs, err := packages.Load(cfg, pattern)
 
 	ctxErr := ctx.Err()
 	if ctxErr != nil {
@@ -49,5 +57,25 @@ func LoadPackageFiles(ctx context.Context, dir, pkgPath string) ([]*ast.File, bo
 		return nil, false, nil
 	}
 
-	return pkgs[0].Syntax, true, nil
+	pkg := pkgs[0]
+
+	// Most load failures (an unresolvable pattern, a module the proxy could
+	// not serve, a failed go list) arrive as package errors with a nil error.
+	// Nothing parsed and something failed, so the result is not definitive
+	// and stays out of the cache for a later call to retry.
+	if len(pkg.Syntax) == 0 && len(pkg.GoFiles) == 0 && len(pkg.Errors) > 0 {
+		return nil, false, nil
+	}
+
+	// A load directory that is not a main package holds no sources for a
+	// main-package type, and no retry changes that.
+	if pkgPath == mainPkgPath && pkg.Name != mainPkgPath {
+		return nil, true, nil
+	}
+
+	return pkg.Syntax, true, nil
 }
+
+// mainPkgPath is the import path reflection reports for a type declared in
+// package main.
+const mainPkgPath = "main"
