@@ -1,6 +1,7 @@
 package constraint_test
 
 import (
+	"math"
 	"testing"
 
 	"github.com/google/jsonschema-go/jsonschema"
@@ -351,5 +352,41 @@ func TestCanonicalizeNumeric(t *testing.T) {
 		constraint.CanonicalizeNumeric(s)
 		assert.Nil(t, s.Minimum)
 		require.NotNil(t, s.MinLength)
+	})
+}
+
+// TestComposeMultipleOf pins the divisor algebra: two divisors intersect to
+// their least common multiple over their shortest decimals, one dividing the
+// other keeps the larger, and a composite the float64 cannot spell exactly
+// keeps the later value.
+func TestComposeMultipleOf(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		a, b float64
+		want float64
+	}{
+		"divides":         {a: 2, b: 4, want: 4},
+		"divided":         {a: 4, b: 2, want: 4},
+		"equal":           {a: 0.3, b: 0.3, want: 0.3},
+		"coprime":         {a: 3, b: 10, want: 30},
+		"decimals":        {a: 0.3, b: 0.5, want: 1.5},
+		"tenths and half": {a: 0.1, b: 0.25, want: 0.5},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.InDelta(t, tc.want, constraint.ComposeMultipleOf(tc.a, tc.b), 0)
+			assert.InDelta(t, tc.want, constraint.ComposeMultipleOf(tc.b, tc.a), 0, "order-independent")
+		})
+	}
+
+	t.Run("non-finite keeps the later value", func(t *testing.T) {
+		t.Parallel()
+
+		assert.InDelta(t, 2, constraint.ComposeMultipleOf(math.Inf(1), 2), 0)
+		assert.InDelta(t, 2, constraint.ComposeMultipleOf(math.NaN(), 2), 0)
 	})
 }

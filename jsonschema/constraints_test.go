@@ -722,3 +722,65 @@ func TestConstraintsFacadeAxisRange(t *testing.T) {
 	require.Error(t, err)
 	assert.Nil(t, fc.Canvas.MinLength, "the misapplied rule must leave no trace")
 }
+
+// TestConstraintsMultipleOfComposes pins that an inferred multipleOf never
+// loosens one already in force. An interpreter's divisor intersects with the
+// jsonschema tag's, or with the one the field's type declares, to their least
+// common multiple, and two interpreters compose the same whichever order they
+// run in. A tag divisor still replaces the type's, as a named format does.
+func TestConstraintsMultipleOfComposes(t *testing.T) {
+	t.Parallel()
+
+	three := boundInterp(func(c *jsonschema.Constraints) error { return c.SetMultipleOf(3) })
+	ten := boundInterp(func(c *jsonschema.Constraints) error { return c.SetMultipleOf(10) })
+
+	t.Run("interpreter over tag", func(t *testing.T) {
+		t.Parallel()
+
+		type Payload struct {
+			V int `div:"x" json:"v" jsonschema:"multipleOf=10"`
+		}
+
+		s, err := jsonschema.GenerateFor[Payload](t.Context(), jsonschema.WithTagInterpreter("div", three))
+		require.NoError(t, err)
+		require.NotNil(t, s.Properties["v"].MultipleOf)
+		assert.InDelta(t, 30, *s.Properties["v"].MultipleOf, 0)
+	})
+
+	t.Run("interpreter over type", func(t *testing.T) {
+		t.Parallel()
+
+		type Payload struct {
+			V int `div:"x" json:"v"`
+		}
+
+		four := 4.0
+
+		s, err := jsonschema.GenerateFor[Payload](t.Context(),
+			jsonschema.WithTagInterpreter("div", three),
+			jsonschema.WithTypeSchemaFor[int](jsonschema.TypeSchema{
+				Value: &jsonschema.Schema{Type: "integer", MultipleOf: &four},
+			}))
+		require.NoError(t, err)
+		require.NotNil(t, s.Properties["v"].MultipleOf)
+		assert.InDelta(t, 12, *s.Properties["v"].MultipleOf, 0)
+	})
+
+	t.Run("two interpreters in either order", func(t *testing.T) {
+		t.Parallel()
+
+		type Payload struct {
+			V int `a:"x" b:"x" json:"v"`
+		}
+
+		for name, opts := range map[string][]jsonschema.GenerateOption{
+			"three then ten": {jsonschema.WithTagInterpreter("a", three), jsonschema.WithTagInterpreter("b", ten)},
+			"ten then three": {jsonschema.WithTagInterpreter("a", ten), jsonschema.WithTagInterpreter("b", three)},
+		} {
+			s, err := jsonschema.GenerateFor[Payload](t.Context(), opts...)
+			require.NoError(t, err, name)
+			require.NotNil(t, s.Properties["v"].MultipleOf, name)
+			assert.InDelta(t, 30, *s.Properties["v"].MultipleOf, 0, name)
+		}
+	})
+}

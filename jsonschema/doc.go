@@ -482,7 +482,11 @@
 //     walking them directly.
 //   - Intersect-only bounds. Each bound writes back only when it would not
 //     loosen the effective bound, so a bound never weakens a stronger one the
-//     field's type or an earlier rule set.
+//     field's type or an earlier rule set. A multipleOf composes the same
+//     way: an interpreter's divisor intersects with the one in force (the
+//     jsonschema tag's, or the type's) to their least common multiple, so
+//     a stated divisor is never replaced by a weaker inferred one and two
+//     inferred divisors compose in either order.
 //   - Shape errors. A rule the field's shape cannot carry is an error naming
 //     the reason rather than a keyword nothing enforces.
 //   - Conflicts. A conflicting const or enum surfaces the public
@@ -899,10 +903,11 @@
 //   - A second const or enum, or one disagreeing with a value the field's
 //     type already pins, is [ErrConstraintConflict]. Both fully describe the
 //     allowed value, so neither can silently win.
-//   - format and pattern replace what the field's type declared, since the
-//     tag names the keyword outright (a tag interpreter defers to both).
-//     Naming either twice in one tag is an error, because no precedence
-//     applies there and dropping one of two stated values would be silent.
+//   - format, pattern, and multipleOf replace what the field's type declared,
+//     since the tag names the keyword outright (a tag interpreter defers to
+//     both). Naming any of them twice in one tag is an error, because no
+//     precedence applies there and dropping one of two stated values would
+//     be silent.
 //
 // Numeric, length, and count bounds from the Go kind, the jsonschema tag, and
 // tag interpreters compose by one rule, whichever source set them:

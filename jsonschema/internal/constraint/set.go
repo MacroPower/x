@@ -1,6 +1,8 @@
 package constraint
 
 import (
+	"math/big"
+
 	"github.com/google/jsonschema-go/jsonschema"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/numrat"
@@ -48,11 +50,46 @@ func (set *Set) AddSize(field SizeField, bounds []Bound) {
 }
 
 // SetMultipleOf records a multipleOf value. A later value overwrites an earlier
-// one, matching the tag's last-pair-wins rule; the caller validates it is
-// positive.
+// one, matching the tag's replace rule for a keyword it names outright; the
+// caller validates it is positive. A writer that infers a divisor rather than
+// naming it composes through [ComposeMultipleOf] before recording.
 func (set *Set) SetMultipleOf(val float64) {
 	e := numericEndpoint(val, numrat.Float64ToRat(val))
 	set.multipleOf = &e
+}
+
+// ComposeMultipleOf returns the one divisor an instance satisfying both
+// multipleOf a and multipleOf b is a multiple of: the least common multiple
+// of the two, over the shortest decimals the float64s spell. When one divides
+// the other the result is the larger, so a divisor already implied by the one
+// in force changes nothing. A composite whose shortest decimal the float64
+// cannot spell exactly (the same representability rule every numeric bound
+// obeys) keeps b, as does a non-finite or non-positive input, which JSON
+// Schema forbids and the callers reject before composing.
+func ComposeMultipleOf(a, b float64) float64 {
+	ra, rb := numrat.Float64ToRat(a), numrat.Float64ToRat(b)
+	if ra == nil || rb == nil || ra.Sign() <= 0 || rb.Sign() <= 0 {
+		return b
+	}
+
+	// The least common multiple of p1/q1 and p2/q2 is
+	// lcm(p1*q2, p2*q1) / (q1*q2).
+	n1 := new(big.Int).Mul(ra.Num(), rb.Denom())
+	n2 := new(big.Int).Mul(rb.Num(), ra.Denom())
+	gcd := new(big.Int).GCD(nil, nil, n1, n2)
+
+	num := new(big.Int).Mul(n1, n2)
+	num.Quo(num, gcd)
+
+	den := new(big.Int).Mul(ra.Denom(), rb.Denom())
+	lcm := new(big.Rat).SetFrac(num, den)
+
+	f, _ := lcm.Float64()
+	if numrat.Float64ToRat(f).Cmp(lcm) != 0 {
+		return b
+	}
+
+	return f
 }
 
 // axisFor returns the axis backing a size field.

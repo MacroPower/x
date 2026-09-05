@@ -352,13 +352,20 @@ func applyUnique(t Target, r Rule, _ Policy) error {
 
 // applyMultipleOf records a divisor, rejecting the non-positive value JSON
 // Schema forbids.
-func applyMultipleOf(t Target, r Rule, _ Policy) error {
-	return applyDivisor(t, r.Params.One())
+func applyMultipleOf(t Target, r Rule, pol Policy) error {
+	return applyDivisor(t, r.Params.One(), pol)
 }
 
 // applyDivisor records a divisor from its literal, shared with the facade's
-// named setter so the positivity rule lives in one place.
-func applyDivisor(t Target, lit string) error {
+// named setter so the positivity rule lives in one place, under the dialect's
+// composition rule ([Policy.Keywords]). A dialect naming the keyword outright
+// replaces the divisor in force, as it does a format or pattern; the front-end
+// owning its grammar rejects the same key twice in one tag. A dialect that
+// infers a divisor intersects it with the one in force (the canvas value, or
+// the type-derived one) through [constraint.ComposeMultipleOf], so it never
+// loosens a divisor a tag or the type stated and two inferred divisors
+// compose order-independently.
+func applyDivisor(t Target, lit string, pol Policy) error {
 	// A divisor is a keyword value, not a field value, so it takes the
 	// keyword-shaped literal domain regardless of the target's kind.
 	end, err := constraint.ParseNumericBound(lit, reflect.Invalid)
@@ -372,9 +379,31 @@ func applyDivisor(t Target, lit string) error {
 	}
 
 	n := end.Val
+
+	if pol.Keywords == KeywordFirstWins {
+		if inForce := effectiveDivisor(t); inForce != nil {
+			n = constraint.ComposeMultipleOf(*inForce, n)
+		}
+	}
+
 	t.Canvas.MultipleOf = &n
 
 	return nil
+}
+
+// effectiveDivisor returns the multipleOf in force on a target: the canvas
+// value, else the one the type declares on its base or, for a $defs-extracted
+// type, on the definition the target's refBase seam reads.
+func effectiveDivisor(t Target) *float64 {
+	if t.Canvas.MultipleOf != nil {
+		return t.Canvas.MultipleOf
+	}
+
+	if v := baseOf(t).MultipleOf; v != nil {
+		return v
+	}
+
+	return refBaseOf(t).MultipleOf
 }
 
 // applyStringKeyword sets one of the string keywords under the dialect's
@@ -528,11 +557,11 @@ func nonZeroTrue(t Target, _ Rule, _ Policy) error {
 // SetMultipleOf records a divisor on the target, going through the same cell
 // the tag keyword does so a shape with no number to divide is reported rather
 // than stamped.
-func SetMultipleOf(t Target, value float64) error {
+func SetMultipleOf(t Target, value float64, pol Policy) error {
 	return Apply(t, Rule{
 		Op:     OpMultipleOf,
 		Params: ParamsOf(strconv.FormatFloat(value, 'g', -1, 64)),
-	}, Policy{})
+	}, pol)
 }
 
 // SetConst pins the target's const, reporting [ErrConflict] rather than

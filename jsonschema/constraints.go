@@ -181,11 +181,13 @@ func (c *Constraints) Apply(op Op, axis Axis, params ...string) error {
 
 // SetMultipleOf records a multipleOf value on the field, reporting an error for
 // a non-positive value, which JSON Schema forbids, and for a field whose shape
-// has no number to divide. It is the named form of
-// [Constraints.Apply] with [OpMultipleOf].
+// has no number to divide. A divisor already in force (from the field's type,
+// the jsonschema tag, or an earlier rule) intersects with it to their least
+// common multiple, so an inferred divisor never loosens a stated one. It is
+// the named form of [Constraints.Apply] with [OpMultipleOf].
 func (c *Constraints) SetMultipleOf(value float64) error {
 	//nolint:wrapcheck // The model owns the rule and its wording.
-	return tagmodel.SetMultipleOf(c.target, value)
+	return tagmodel.SetMultipleOf(c.target, value, c.policy())
 }
 
 // Const returns the value the field's const pins and whether one is set, so an
