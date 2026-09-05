@@ -8,6 +8,8 @@ import (
 	"reflect"
 	"slices"
 
+	jsonv1 "encoding/json"
+
 	"go.jacobcolvin.com/x/jsonschema/internal/numkind"
 )
 
@@ -267,13 +269,19 @@ func WithNullable(allowed bool) GenerateOption {
 // non-default options marshal the value with them and validate the bytes
 // through [Validator.ValidateJSON] or [Validator.ValidateReader].
 //
-// Two options change the marshaled shape in ways generation does not model
-// and are refused with [ErrUnsupportedJSONOption] when set:
-// [json.StringifyNumbers] with true (it stringifies numbers inside
-// containers, beyond what the per-field ,string tag machinery reaches) and a
-// non-nil [json.WithMarshalers] (its output shape is unknowable). Options
-// with no effect on the marshaled shape are ignored: unmarshal-side options
-// such as [json.MatchCaseInsensitiveNames] and [json.RejectUnknownMembers],
+// Options that change the marshaled shape in ways generation does not model
+// are refused with [ErrUnsupportedJSONOption] when set: [json.StringifyNumbers]
+// with true (it stringifies numbers inside containers, beyond what the
+// per-field ,string tag machinery reaches), a non-nil [json.WithMarshalers]
+// (its output shape is unknowable), and the [encoding/json] v1 compat options
+// that alter the marshaled shape ([jsonv1.OmitEmptyWithLegacySemantics],
+// [jsonv1.FormatByteArrayAsArray], [jsonv1.FormatBytesWithLegacySemantics],
+// [jsonv1.StringifyWithLegacySemantics],
+// [jsonv1.CallMethodsWithLegacySemantics], and
+// [jsonv1.FormatDurationAsNano] -- so [jsonv1.DefaultOptionsV1], which
+// bundles them, is refused too). Options with no effect on the marshaled
+// shape are ignored: unmarshal-side options such as
+// [json.MatchCaseInsensitiveNames] and [json.RejectUnknownMembers],
 // [json.Deterministic], and jsontext formatting.
 func WithJSONOptions(opts ...json.Options) GenerateOption {
 	return generateOptionFunc(func(g *generator) {
@@ -295,6 +303,29 @@ func WithJSONOptions(opts ...json.Options) GenerateOption {
 
 		if m, _ := json.GetOption(joined, json.WithMarshalers); m != nil {
 			g.jsonOptsErr = fmt.Errorf("%w: WithMarshalers", ErrUnsupportedJSONOption)
+		}
+
+		// The v1 compat options below also change the marshaled shape, and v2
+		// Marshal honors them, so silently ignoring any of them would emit a
+		// schema that rejects what the configured marshal writes. GetOption
+		// sees through a joined DefaultOptionsV1 bundle, so probing the
+		// constituents refuses the bundle as well.
+		for _, compat := range []struct {
+			option func(bool) jsonv1.Options
+			name   string
+		}{
+			{jsonv1.OmitEmptyWithLegacySemantics, "OmitEmptyWithLegacySemantics"},
+			{jsonv1.FormatByteArrayAsArray, "FormatByteArrayAsArray"},
+			{jsonv1.FormatBytesWithLegacySemantics, "FormatBytesWithLegacySemantics"},
+			{jsonv1.StringifyWithLegacySemantics, "StringifyWithLegacySemantics"},
+			{jsonv1.CallMethodsWithLegacySemantics, "CallMethodsWithLegacySemantics"},
+			{jsonv1.FormatDurationAsNano, "FormatDurationAsNano"},
+		} {
+			if v, _ := json.GetOption(joined, compat.option); v {
+				g.jsonOptsErr = fmt.Errorf("%w: %s", ErrUnsupportedJSONOption, compat.name)
+
+				break
+			}
 		}
 	})
 }

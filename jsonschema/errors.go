@@ -22,10 +22,15 @@ var (
 	// ErrUnsupportedJSONOption is returned by generation when
 	// [WithJSONOptions] carries an option that changes the marshaled shape
 	// in a way generation does not model: [encoding/json/v2.StringifyNumbers]
-	// with true, or a non-nil [encoding/json/v2.WithMarshalers]. Refusing
-	// loudly keeps the generated-schema-accepts-the-marshal property honest;
-	// silently ignoring either option would emit a schema that rejects what
-	// the configured marshal writes.
+	// with true, a non-nil [encoding/json/v2.WithMarshalers], or one of the
+	// [encoding/json] v1 compat options that alter the marshaled shape
+	// (OmitEmptyWithLegacySemantics, FormatByteArrayAsArray,
+	// FormatBytesWithLegacySemantics, StringifyWithLegacySemantics,
+	// CallMethodsWithLegacySemantics, FormatDurationAsNano -- and so the
+	// DefaultOptionsV1 bundle carrying them). Refusing loudly keeps the
+	// generated-schema-accepts-the-marshal property honest; silently
+	// ignoring any of them would emit a schema that rejects what the
+	// configured marshal writes.
 	ErrUnsupportedJSONOption = errors.New("unsupported encoding/json/v2 option for generation")
 
 	// ErrInvalidJSONField is returned when a struct field declaration cannot

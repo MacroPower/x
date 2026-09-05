@@ -8,6 +8,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	jsonv1 "encoding/json"
+
 	"go.jacobcolvin.com/x/jsonschema"
 )
 
@@ -25,6 +27,18 @@ func TestUnsupportedJSONOptionRefused(t *testing.T) {
 		"WithMarshalers": {opt: json.WithMarshalers(
 			json.MarshalFunc(func(time.Time) ([]byte, error) { return []byte(`""`), nil }),
 		)},
+		// The v1 compat options change the marshaled shape too (a legacy
+		// omitempty drops fields v2 keeps, the byte-array form swaps base64
+		// for a number array), so each must be refused rather than silently
+		// generating a schema that rejects the configured marshal's output.
+		// DefaultOptionsV1 bundles them all.
+		"OmitEmptyWithLegacySemantics":   {opt: jsonv1.OmitEmptyWithLegacySemantics(true)},
+		"FormatByteArrayAsArray":         {opt: jsonv1.FormatByteArrayAsArray(true)},
+		"FormatBytesWithLegacySemantics": {opt: jsonv1.FormatBytesWithLegacySemantics(true)},
+		"StringifyWithLegacySemantics":   {opt: jsonv1.StringifyWithLegacySemantics(true)},
+		"CallMethodsWithLegacySemantics": {opt: jsonv1.CallMethodsWithLegacySemantics(true)},
+		"FormatDurationAsNano":           {opt: jsonv1.FormatDurationAsNano(true)},
+		"DefaultOptionsV1 bundle":        {opt: jsonv1.DefaultOptionsV1()},
 	}
 
 	for name, tt := range tests {
