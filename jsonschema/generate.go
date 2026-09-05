@@ -426,13 +426,13 @@ func (g *generator) applyInstanceDefaults(instance any, rootType reflect.Type, s
 		// document's own default-options marshal, so the refusal stands, but
 		// it must not be blamed on the top-level shape when the output is a
 		// genuine object.
+		reason := "does not decode under default options"
 		if jsontext.Value(data).Kind() != '{' {
-			return fmt.Errorf("%w: instance of type %s does not marshal to a JSON object: %w",
-				ErrInvalidDefaultsInstance, instType, err)
+			reason = "does not marshal to a JSON object"
 		}
 
-		return fmt.Errorf("%w: instance of type %s does not decode under default options: %w",
-			ErrInvalidDefaultsInstance, instType, err)
+		return fmt.Errorf("%w: instance of type %s %s: %w",
+			ErrInvalidDefaultsInstance, instType, reason, err)
 	}
 
 	// Unmarshaling JSON null into a map leaves it nil without an error, so a
