@@ -460,6 +460,14 @@ that policy does not apply:
 - `TestDraftConstantsInSync` (dispatch_test.go): `Draft` is declared twice (the
   public enum and `internal/keywordmeta`'s copy, which the parent cannot import
   in reverse), so their numeric values are pinned equal.
+- `TestJSONOptionClassificationCoversToolchain` (generate_jsonoptions_test.go):
+  the toolchain-side staleness alarm for `WithJSONOptions`. It parses the three
+  `encoding/json` option packages under GOROOT/src and asserts that every
+  exported `Options` constructor has a row in the test file's classification
+  table (honored, refused, ignored, or combinator), whose classes
+  `TestJSONOptionClassificationBehaviour` checks through the public API. A
+  toolchain bump that adds a constructor fails until the row exists and, if the
+  option changes the marshaled shape, until `generate.go` refuses it.
 - `internal/tagmodel`'s constraint matrix is guarded in three escalating steps.
   The table is a fixed-size `[opCount][formCount]` array, so a new `Op` or
   `Form` grows every row and column rather than falling through a lookup. The
