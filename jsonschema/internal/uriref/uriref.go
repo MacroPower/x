@@ -21,8 +21,27 @@ func IsFragmentOnly(uri string) bool {
 }
 
 // ResolveURI resolves ref against base per RFC 3986.
+//
+// A base with no scheme and no authority is a bare path, the form a root
+// document with no configured base and every document fetched through it
+// carry. RFC 3986 defines resolution only against an absolute base, so this
+// function extends it: a relative ref merges into the base path per the
+// section 5.2.3 merge and takes remove_dot_segments, keeping the unrooted
+// shape the base had. An empty base takes remove_dot_segments alone. Both
+// keep a document on one registry key however it is reached, so "dir/a.json"
+// named from the root and "a.json" named from "dir/b.json" resolve to the
+// same key and the document is fetched once.
 func ResolveURI(base, ref string) string {
+	refURL, err := url.Parse(ref)
+	if err != nil {
+		return ref
+	}
+
 	if base == "" {
+		if isRelativePathRef(refURL) {
+			return relativePathRef(refURL, removeDotSegments(refURL.EscapedPath()))
+		}
+
 		return ref
 	}
 
@@ -31,9 +50,9 @@ func ResolveURI(base, ref string) string {
 		return ref
 	}
 
-	refURL, err := url.Parse(ref)
-	if err != nil {
-		return ref
+	if baseURL.Scheme == "" && baseURL.Host == "" && baseURL.Opaque == "" &&
+		!strings.HasPrefix(baseURL.EscapedPath(), "/") && isRelativeRef(refURL) {
+		return resolveBarePathRef(baseURL, refURL)
 	}
 
 	// The ResolveReference call mishandles an opaque base (a URN such as
@@ -59,6 +78,68 @@ func ResolveURI(base, ref string) string {
 	}
 
 	return baseURL.ResolveReference(refURL).String()
+}
+
+// isRelativeRef reports whether a parsed reference carries no scheme, no
+// authority, and no rooted path: a relative-path reference, or a query- or
+// fragment-only one. Such a reference resolves against its base's path
+// rather than replacing it.
+func isRelativeRef(u *url.URL) bool {
+	return u.Scheme == "" && u.Host == "" && u.Opaque == "" && u.User == nil &&
+		!strings.HasPrefix(u.EscapedPath(), "/")
+}
+
+// isRelativePathRef reports whether a relative reference carries a path,
+// which merges with the base's rather than keeping it.
+func isRelativePathRef(u *url.URL) bool {
+	return isRelativeRef(u) && u.Path != ""
+}
+
+// resolveBarePathRef resolves a relative ref against a bare-path base (no
+// scheme, no authority, unrooted path) per RFC 3986 section 5.2.2: a ref with
+// a path takes the section 5.2.3 merge (the base's last segment dropped, the
+// ref path appended) and remove_dot_segments, in the base's unrooted shape; a
+// ref with no path keeps the base path and takes the base query unless it
+// carries one. The fragment is the ref's either way.
+func resolveBarePathRef(baseURL, refURL *url.URL) string {
+	basePath := baseURL.EscapedPath()
+
+	if refURL.Path == "" {
+		out := *refURL
+		if out.RawQuery == "" && !out.ForceQuery {
+			out.RawQuery, out.ForceQuery = baseURL.RawQuery, baseURL.ForceQuery
+		}
+
+		return relativePathRef(&out, basePath)
+	}
+
+	merged := refURL.EscapedPath()
+	if i := strings.LastIndex(basePath, "/"); i >= 0 {
+		merged = basePath[:i+1] + merged
+	}
+
+	return relativePathRef(refURL, removeDotSegments(merged))
+}
+
+// relativePathRef spells a relative-path reference from its canonical path
+// and the query and fragment of the reference it came from.
+func relativePathRef(refURL *url.URL, path string) string {
+	out := url.URL{
+		RawPath:     path,
+		RawQuery:    refURL.RawQuery,
+		ForceQuery:  refURL.ForceQuery,
+		Fragment:    refURL.Fragment,
+		RawFragment: refURL.RawFragment,
+	}
+
+	unescaped, err := url.PathUnescape(path)
+	if err != nil {
+		unescaped = path
+	}
+
+	out.Path = unescaped
+
+	return out.String()
 }
 
 // resolveOpaqueRef resolves a relative non-fragment ref against an opaque

@@ -1649,7 +1649,11 @@
 //     the document through the [RefResolver] given via [WithRefResolver] and
 //     evaluates any fragment against the fetched document.
 //   - A schemeless base is normalized against file:///, so a back-reference
-//     to the root document finds the in-memory copy.
+//     to the root document finds the in-memory copy. With no base at all a
+//     relative ref is a bare path, and a relative ref inside a document
+//     fetched by one merges into that path per RFC 3986, so a document
+//     reached by "dir/a.json" from the root and by "a.json" from
+//     "dir/b.json" is one document under one key.
 //   - Inline expands fetched documents recursively under their own base URIs,
 //     so a relative ref inside a fetched document resolves against that
 //     document's URI and files can reference each other by relative path.

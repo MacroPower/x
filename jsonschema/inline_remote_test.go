@@ -833,3 +833,77 @@ func TestInlineRetrievalBasePointerFallback(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(data), `"type":"string"`)
 }
+
+// fetchCountingResolver serves an fs and counts each fetch, so a test can pin that
+// a document is fetched once however many references name it.
+type fetchCountingResolver struct {
+	inner jsonschema.RefResolver
+	calls map[string]int
+}
+
+func (r *fetchCountingResolver) ResolveRef(ctx context.Context, uri string) (*jsonschema.Schema, error) {
+	r.calls[uri]++
+
+	//nolint:wrapcheck // Transparent counting wrapper.
+	return r.inner.ResolveRef(ctx, uri)
+}
+
+// TestRefEnginesFetchOnceWithoutBase pins that a document reached by relative
+// path from the root and by a sibling-relative path from another file is one
+// document when no WithBaseURI is set. The root's refs used to pass through
+// verbatim while a fetched file's refs took net/url's rooted form, so
+// "dir/a.json" and "/dir/a.json" were two keys, the file was fetched twice,
+// and a live $id in it collided with its own first copy. A root-level "./"
+// ref likewise used to reach io/fs unnormalized.
+func TestRefEnginesFetchOnceWithoutBase(t *testing.T) {
+	t.Parallel()
+
+	files := map[string]string{
+		"dir/a.json": `{"$id": "http://x/a", "type": "string"}`,
+		"dir/b.json": `{"$ref": "a.json"}`,
+		"c.json":     `{"type": "integer"}`,
+	}
+
+	root, err := jsonschema.ParseSchema([]byte(stringtest.Input(`
+		{
+			"properties": {
+				"a": {"$ref": "dir/a.json"},
+				"b": {"$ref": "dir/b.json"},
+				"c": {"$ref": "./c.json"}
+			}
+		}
+	`)))
+	require.NoError(t, err)
+
+	for name, run := range map[string]func(t *testing.T, r jsonschema.RefResolver) error{
+		"inline": func(t *testing.T, r jsonschema.RefResolver) error {
+			t.Helper()
+
+			inlined, err := jsonschema.Inline(t.Context(), root, jsonschema.WithRefResolver(r))
+			if err != nil {
+				return err //nolint:wrapcheck // Transparent test helper.
+			}
+
+			return jsonschema.Validate(t.Context(), inlined, map[string]any{"a": "s", "b": "s", "c": 1})
+		},
+		"compile": func(t *testing.T, r jsonschema.RefResolver) error {
+			t.Helper()
+
+			return validateValue(t.Context(), root, map[string]any{"a": "s", "b": "s", "c": 1},
+				jsonschema.WithRefResolver(r))
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			r := &fetchCountingResolver{inner: jsonschema.NewFileResolver(mapFS(files)), calls: map[string]int{}}
+			require.NoError(t, run(t, r))
+
+			for uri, n := range r.calls {
+				assert.Equal(t, 1, n, "%s fetched once", uri)
+			}
+
+			assert.Len(t, r.calls, 3, "three files, each fetched under one key: %v", r.calls)
+		})
+	}
+}

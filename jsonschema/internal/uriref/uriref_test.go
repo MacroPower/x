@@ -415,3 +415,41 @@ func TestNormalizeBaseURIMatchesParseBaseURI(t *testing.T) {
 		assert.Equal(t, uriref.NormalizeBaseURI(base), parsed, "base %q", base)
 	}
 }
+
+// TestResolveURIBarePathBase pins resolution against a bare-path base, the
+// form a root document with no configured base and every document fetched
+// through it carry. A relative ref used to pass through verbatim under an
+// empty base and take net/url's rooted, dot-segment-free form under a
+// schemeless base, so one file registered under two keys and was fetched
+// twice; a live $id in it then collided with its own first copy.
+func TestResolveURIBarePathBase(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		base string
+		ref  string
+		want string
+	}{
+		"empty base keeps a plain path":          {base: "", ref: "dir/a.json", want: "dir/a.json"},
+		"empty base drops a dot segment":         {base: "", ref: "./c.json", want: "c.json"},
+		"empty base keeps an absolute ref":       {base: "", ref: "http://x/y", want: "http://x/y"},
+		"empty base keeps a rooted ref":          {base: "", ref: "/abs.json", want: "/abs.json"},
+		"empty base keeps a fragment ref":        {base: "", ref: "#/a", want: "#/a"},
+		"sibling merges into the base directory": {base: "dir/b.json", ref: "a.json", want: "dir/a.json"},
+		"parent segment pops the directory":      {base: "dir/b.json", ref: "../x.json", want: "x.json"},
+		"nested directory joins":                 {base: "dir/b.json", ref: "sub/c.json", want: "dir/sub/c.json"},
+		"query and fragment carry over":          {base: "dir/b.json", ref: "a.json?q=1#/x", want: "dir/a.json?q=1#/x"},
+		"fragment against a bare path":           {base: "dir/b.json", ref: "#frag", want: "dir/b.json#frag"},
+		"rooted ref replaces a bare path":        {base: "dir/b.json", ref: "/abs.json", want: "/abs.json"},
+		"absolute ref replaces a bare path":      {base: "dir/b.json", ref: "http://x/y", want: "http://x/y"},
+		"bare file name base":                    {base: "root.json", ref: "a.json", want: "a.json"},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, uriref.ResolveURI(tc.base, tc.ref))
+		})
+	}
+}
