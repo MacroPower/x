@@ -19,6 +19,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"flag"
@@ -78,6 +79,23 @@ func main() {
 	}
 }
 
+// validIndent reports whether [jsontext.WithIndent] accepts indent, by
+// calling it and recovering the panic it raises on any character other than
+// a space or a tab. Asking the constructor itself keeps the accepted set the
+// upstream one rather than a copy that can drift. A recovered panic leaves
+// the unnamed result at its zero value, false.
+func validIndent(indent string) bool {
+	defer func() {
+		if recover() != nil {
+			return
+		}
+	}()
+
+	_ = jsontext.WithIndent(indent)
+
+	return true
+}
+
 func run(cfg config, stdout io.Writer) error {
 	if cfg.TypeName == "" {
 		return fmt.Errorf("-type flag is required")
@@ -91,7 +109,7 @@ func run(cfg config, stdout io.Writer) error {
 	// jsontext.WithIndent call, which permits only spaces and tabs and panics
 	// on anything else only when the helper runs. Reject the rest up front so
 	// the error names the flag.
-	if strings.TrimLeft(cfg.Indent, " \t") != "" {
+	if !validIndent(cfg.Indent) {
 		return fmt.Errorf("invalid -indent %q: must contain only spaces and tabs", cfg.Indent)
 	}
 
