@@ -1,7 +1,9 @@
 package jsonvalue_test
 
 import (
+	"fmt"
 	"math"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -19,9 +21,9 @@ import (
 // into uniqueItems. A schema-authored value converts through FromDocument
 // (where the schema parser's float64 numbers take their shortest decimal) and
 // an instance through FromGo, so the tests here build each side the way the
-// validator does. HasDuplicates hashes then compares with the same JSON
-// semantics, so equal values must share a hash bucket regardless of spelling
-// or map order.
+// validator does. HasDuplicates compares a short array pairwise and a longer
+// one by hash with the same JSON semantics, so equal values must share a
+// hash bucket regardless of spelling or map order.
 
 // document converts a schema-authored value, failing the test where the
 // value has no document form.
@@ -236,6 +238,27 @@ func TestHasDuplicates(t *testing.T) {
 			arr:  []any{[]any{[]any{"a"}, []any{"a"}}, []any{[]any{"a"}, []any{"a"}}},
 			want: true,
 		},
+		"colliding unequal strings are distinct": {
+			// "Aa" and "BB" share a string hash, so the hashed scan compares
+			// them and must find them unequal.
+			arr:  []any{"Aa", "BB"},
+			want: false,
+		},
+		"duplicate behind a colliding string": {
+			// The second "Aa" shares its hash with "BB" and the first "Aa",
+			// so the hashed scan walks past the unequal collision to the
+			// duplicate.
+			arr:  []any{"Aa", "BB", "Aa"},
+			want: true,
+		},
+	}
+
+	// Each case runs as written and padded with distinct fillers past the
+	// size where HasDuplicates switches from the pairwise scan to the
+	// hashed one, so both scans reach the same verdict.
+	fillers := make([]any, 17)
+	for i := range fillers {
+		fillers[i] = fmt.Sprintf("filler-%d", i)
 	}
 
 	for name, tc := range tests {
@@ -243,6 +266,7 @@ func TestHasDuplicates(t *testing.T) {
 			t.Parallel()
 
 			assert.Equal(t, tc.want, jsonvalue.HasDuplicates(instances(t, tc.arr)))
+			assert.Equal(t, tc.want, jsonvalue.HasDuplicates(instances(t, slices.Concat(fillers, tc.arr))))
 		})
 	}
 }
@@ -416,4 +440,28 @@ func TestEqualHandBuiltShapes(t *testing.T) {
 	assert.False(t, invalid.Equal(same))
 	assert.False(t, invalid.Equal(jsonvalue.NewNull()))
 	assert.Equal(t, invalid.Hash(), same.Hash())
+}
+
+// BenchmarkHasDuplicates measures the uniqueItems scan over distinct object
+// elements at sizes on both sides of the pairwise threshold.
+func BenchmarkHasDuplicates(b *testing.B) {
+	for _, n := range []int{3, 8, 9, 64, 1024} {
+		arr := make([]jsonvalue.Value, n)
+		for i := range arr {
+			v, ok := jsonvalue.FromGo(map[string]any{"id": fmt.Sprintf("item-%d", i), "n": i})
+			require.True(b, ok)
+
+			arr[i] = v
+		}
+
+		b.Run(fmt.Sprintf("distinct-%d", n), func(b *testing.B) {
+			b.ReportAllocs()
+
+			for b.Loop() {
+				if jsonvalue.HasDuplicates(arr) {
+					b.Fatal("distinct array reported a duplicate")
+				}
+			}
+		})
+	}
 }

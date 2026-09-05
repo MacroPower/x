@@ -156,19 +156,50 @@ func (v Value) Hash() uint64 {
 	return 9
 }
 
-// HasDuplicates reports whether two elements of arr are [Value.Equal],
-// bucketing by [Value.Hash] so the comparison stays near linear in the
-// element count.
-func HasDuplicates(arr []Value) bool {
-	seen := make(map[uint64][]Value, len(arr))
+// pairwiseLimit is the largest array HasDuplicates compares pairwise. Up to
+// it the quadratic scan allocates nothing and Equal stops at the first
+// difference, where a hash walks every element in full; at eight the two
+// scans cost the same on two-member objects, and strings cross over later.
+const pairwiseLimit = 8
 
-	for _, item := range arr {
-		h := item.Hash()
-		if slices.ContainsFunc(seen[h], item.Equal) {
-			return true
+// HasDuplicates reports whether two elements of arr are [Value.Equal]. An
+// array of at most pairwiseLimit elements compares each pair directly; a
+// longer one hashes every element with [Value.Hash] and compares only
+// elements sharing a hash, so the scan stays near linear in the element
+// count.
+func HasDuplicates(arr []Value) bool {
+	if len(arr) <= pairwiseLimit {
+		for i := range arr {
+			if slices.ContainsFunc(arr[i+1:], arr[i].Equal) {
+				return true
+			}
 		}
 
-		seen[h] = append(seen[h], item)
+		return false
+	}
+
+	// The last map holds the index of the latest element with each hash and
+	// prev links that element back to the one before it with the same hash,
+	// so a collision walks the chain without a per-hash slice.
+	last := make(map[uint64]int, len(arr))
+	prev := make([]int, len(arr))
+
+	for i, item := range arr {
+		h := item.Hash()
+
+		j, ok := last[h]
+		if !ok {
+			j = -1
+		}
+
+		last[h] = i
+		prev[i] = j
+
+		for ; j >= 0; j = prev[j] {
+			if arr[j].Equal(item) {
+				return true
+			}
+		}
 	}
 
 	return false
