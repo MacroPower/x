@@ -1354,18 +1354,25 @@ func (g *generator) buildFieldSchema(
 	// The marshaler check covers the fully dereferenced type too: v2's
 	// pointer marshaler delegates level by level, so a method anywhere down
 	// the chain serializes the value and the flag is ignored there as well.
-	derefField := numkind.DerefType(fieldType)
-	bearsMarshaler := reflectkind.ImplementsAnyMarshaler(fieldType) ||
-		(derefField != fieldType && reflectkind.ImplementsAnyMarshaler(derefField))
-	marshalerExempt := bearsMarshaler &&
-		!reflectkind.IsJSONNumber(derefField) && derefField != typeTime
-	stringOverride := fi.JSONString && !marshalerExempt &&
-		reflectkind.IsStringifiableNumber(fieldType)
+	// The probes serve only the ",string" refusal here and the omitempty
+	// decision below, so a field carrying neither option skips the pointer
+	// walk and the marshaler-interface probes entirely.
+	var bearsMarshaler, stringOverride bool
 
-	if fi.JSONString && !marshalerExempt && !stringOverride {
-		return nil, fmt.Errorf(
-			"%w: invalid use of `string` tag option on %s", ErrInvalidJSONField, fieldType,
-		)
+	if fi.JSONString || fi.Omitempty {
+		derefField := numkind.DerefType(fieldType)
+		bearsMarshaler = reflectkind.ImplementsAnyMarshaler(fieldType) ||
+			(derefField != fieldType && reflectkind.ImplementsAnyMarshaler(derefField))
+		marshalerExempt := bearsMarshaler &&
+			!reflectkind.IsJSONNumber(derefField) && derefField != typeTime
+		stringOverride = fi.JSONString && !marshalerExempt &&
+			reflectkind.IsStringifiableNumber(fieldType)
+
+		if fi.JSONString && !marshalerExempt && !stringOverride {
+			return nil, fmt.Errorf(
+				"%w: invalid use of `string` tag option on %s", ErrInvalidJSONField, fieldType,
+			)
+		}
 	}
 
 	tagTypeSchema := (*Schema)(nil)
