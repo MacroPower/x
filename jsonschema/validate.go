@@ -150,13 +150,30 @@ type instanceLocation struct {
 	segs []Segment
 }
 
+// appendPointerToken extends p with one reference token, the single pointer
+// builder behind the instance and schema location types and
+// [SubschemaEntries]. A token free of the RFC 6901 specials '~' and '/' and
+// holding valid UTF-8 -- every keyword, index, and nearly every member name
+// -- appends as one three-operand string concat: one allocation, where
+// [jsontext.Pointer.AppendToken] costs several on this hot path. One
+// conversion around the whole concatenation keeps it a single concat; a
+// conversion in the middle would split it into two. The rest go through
+// AppendToken, which carries the ~0/~1 escaping and substitutes U+FFFD for
+// invalid UTF-8.
+func appendPointerToken(p jsontext.Pointer, tok string) jsontext.Pointer {
+	if strings.ContainsAny(tok, "~/") || !utf8.ValidString(tok) {
+		return p.AppendToken(tok)
+	}
+
+	return jsontext.Pointer(string(p) + "/" + tok)
+}
+
 // key returns the location of the object member named name, extending both
-// representations ([jsontext.Pointer.AppendToken] carries the ~0/~1
-// escaping). The full slice expression caps segs so sibling descents append
-// into fresh backing arrays instead of aliasing a shared one.
+// representations. The full slice expression caps segs so sibling descents
+// append into fresh backing arrays instead of aliasing a shared one.
 func (l instanceLocation) key(name string) instanceLocation {
 	return instanceLocation{
-		ptr:  l.ptr.AppendToken(name),
+		ptr:  appendPointerToken(l.ptr, name),
 		segs: append(slices.Clip(l.segs), Segment{Key: name}),
 	}
 }
@@ -165,11 +182,8 @@ func (l instanceLocation) key(name string) instanceLocation {
 // representations. The full slice expression caps segs so sibling descents
 // append into fresh backing arrays instead of aliasing a shared one.
 func (l instanceLocation) index(i int) instanceLocation {
-	// One conversion around the whole concatenation keeps it a single
-	// three-operand string concat (one allocation); a conversion in the
-	// middle would split it into two.
 	return instanceLocation{
-		ptr:  jsontext.Pointer(string(l.ptr) + "/" + strconv.Itoa(i)),
+		ptr:  appendPointerToken(l.ptr, strconv.Itoa(i)),
 		segs: append(slices.Clip(l.segs), Segment{Index: i, IsIndex: true}),
 	}
 }
@@ -187,27 +201,21 @@ type schemaLocation struct {
 }
 
 // kw returns the location of the keyword token named keyword, extending both
-// representations. Keyword tokens contain no JSON Pointer specials, so no
-// escaping is needed. The full slice expression caps segs so sibling
-// descents append into fresh backing arrays instead of aliasing a shared
-// one.
+// representations. The full slice expression caps segs so sibling descents
+// append into fresh backing arrays instead of aliasing a shared one.
 func (l schemaLocation) kw(keyword string) schemaLocation {
-	// One conversion around the whole concatenation keeps it a single
-	// three-operand string concat (one allocation); a conversion in the
-	// middle would split it into two.
 	return schemaLocation{
-		ptr:  jsontext.Pointer(string(l.ptr) + "/" + keyword),
+		ptr:  appendPointerToken(l.ptr, keyword),
 		segs: append(slices.Clip(l.segs), Segment{Key: keyword}),
 	}
 }
 
 // key returns the location of the member named name under a map keyword
 // (properties, patternProperties, dependentSchemas, ...), extending both
-// representations with the aliasing discipline of [schemaLocation.kw];
-// [jsontext.Pointer.AppendToken] carries the ~0/~1 escaping.
+// representations with the aliasing discipline of [schemaLocation.kw].
 func (l schemaLocation) key(name string) schemaLocation {
 	return schemaLocation{
-		ptr:  l.ptr.AppendToken(name),
+		ptr:  appendPointerToken(l.ptr, name),
 		segs: append(slices.Clip(l.segs), Segment{Key: name}),
 	}
 }
@@ -217,7 +225,7 @@ func (l schemaLocation) key(name string) schemaLocation {
 // with the aliasing discipline of [schemaLocation.kw].
 func (l schemaLocation) idx(i int) schemaLocation {
 	return schemaLocation{
-		ptr:  jsontext.Pointer(string(l.ptr) + "/" + strconv.Itoa(i)),
+		ptr:  appendPointerToken(l.ptr, strconv.Itoa(i)),
 		segs: append(slices.Clip(l.segs), Segment{Index: i, IsIndex: true}),
 	}
 }

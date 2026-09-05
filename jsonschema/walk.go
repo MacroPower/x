@@ -103,7 +103,7 @@ func SubschemaEntries(s *Schema) []SubschemaEntry {
 				if sub := m[key]; sub != nil {
 					children = append(children, SubschemaEntry{
 						Location: Location{
-							Pointer:  jsontext.Pointer("/" + f.Keyword).AppendToken(key),
+							Pointer:  appendPointerToken(jsontext.Pointer("/"+f.Keyword), key),
 							Segments: []Segment{{Key: f.Keyword}, {Key: key}},
 						},
 						Schema: sub,
