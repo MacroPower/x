@@ -259,6 +259,22 @@ func TestFreezeTables(t *testing.T) {
 
 		siblingID, _ := f.ID(sibling)
 		assert.Equal(t, rootURI, f.NodeBase(siblingID), "draft-07 ignores a $id beside $ref")
+		assert.NotContains(t, f.URIs(), "https://example.test/sibling.json",
+			"draft-07 registers no target for a $id beside $ref")
+	})
+
+	t.Run("draft-07 anchor beside ref", func(t *testing.T) {
+		t.Parallel()
+
+		src := &schemavet.Schema{Defs: map[string]*schemavet.Schema{
+			"a": {ID: "#foo", Ref: "#/$defs/b"},
+			"b": {Type: "string"},
+		}}
+
+		f, err := schemavet.Freeze(src, "the root document", rootURI, schemavet.Profile{Draft7: true})
+		require.NoError(t, err)
+		assert.NotContains(t, f.Anchors(), rootURI+"#foo",
+			"draft-07 registers no anchor for a fragment-only $id beside $ref")
 	})
 
 	t.Run("inert ids", func(t *testing.T) {

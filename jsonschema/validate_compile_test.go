@@ -898,3 +898,48 @@ func TestParseSchemaValueExactCopyMatchesRemarshal(t *testing.T) {
 		})
 	}
 }
+
+// TestCompileDraft7IDBesideRefIsNotATarget pins that under Draft-07 a $id
+// placed beside a $ref names no resolution target, in either its anchor or
+// its absolute form, since the draft ignores every sibling of $ref. The
+// freeze used to register the identifier before it applied the sibling
+// rule, so a $ref naming it resolved through a node the draft says has no
+// identifier. A fragment miss is refused at Compile; an absolute miss with
+// no resolver is the validation-time error every unresolvable remote ref is.
+func TestCompileDraft7IDBesideRefIsNotATarget(t *testing.T) {
+	t.Parallel()
+
+	t.Run("anchor form", func(t *testing.T) {
+		t.Parallel()
+
+		schema, err := jsonschema.ParseSchema([]byte(`{
+			"$schema": "http://json-schema.org/draft-07/schema#",
+			"definitions": {
+				"a": {"$id": "#foo", "$ref": "#/definitions/b"},
+				"b": {"type": "string"}
+			},
+			"$ref": "#foo"
+		}`))
+		require.NoError(t, err)
+
+		_, err = jsonschema.Compile(t.Context(), schema)
+		require.ErrorIs(t, err, jsonschema.ErrNotResolved)
+	})
+
+	t.Run("absolute form", func(t *testing.T) {
+		t.Parallel()
+
+		schema, err := jsonschema.ParseSchema([]byte(`{
+			"$schema": "http://json-schema.org/draft-07/schema#",
+			"definitions": {
+				"a": {"$id": "https://example.test/a.json", "$ref": "#/definitions/b"},
+				"b": {"type": "string"}
+			},
+			"$ref": "https://example.test/a.json"
+		}`))
+		require.NoError(t, err)
+
+		err = jsonschema.Validate(t.Context(), schema, 1)
+		require.ErrorContains(t, err, `cannot resolve $ref "https://example.test/a.json"`)
+	})
+}

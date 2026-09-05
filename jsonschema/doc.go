@@ -1300,8 +1300,9 @@
 //     dependentRequired/dependentSchemas under 2020-12. Both drafts honor the
 //     legacy dependencies keyword; under 2020-12 it stays accepted for
 //     backward compatibility alongside dependentRequired/dependentSchemas.
-//   - The $ref sibling behavior. Draft-07 ignores siblings; 2020-12 processes
-//     them.
+//   - The $ref sibling behavior. Draft-07 ignores siblings, so a $id beside
+//     a $ref names no resolution target and changes no base; 2020-12
+//     processes them.
 //   - Which anchors name resolution targets. $anchor and $dynamicAnchor do so
 //     only under 2020-12; under Draft-07 they are unknown annotations, and a
 //     $ref naming one does not resolve. Conversely the Draft-07 fragment-only

@@ -48,9 +48,10 @@ type Frozen struct {
 // effect at the position a fragment or substitute stands in. Each node's $id
 // resolves against the base of its parent, and the profile decides what
 // registers. Under [Profile.Draft7] a fragment-only $id registers an anchor,
-// $anchor and $dynamicAnchor register nothing, and a node bearing both $ref
-// and $id keeps its parent's base for its own reference; under
-// [Profile.InertIDs] no $id registers or rebases at all. A key two nodes
+// $anchor and $dynamicAnchor register nothing, and a $id beside a $ref
+// registers nothing and rebases nothing, since the draft ignores every
+// sibling of $ref; under [Profile.InertIDs] no $id registers or rebases at
+// all. A key two nodes
 // claim within the document resolves to the first the walk reaches.
 func Freeze(s *Schema, subject, base string, profile Profile) (*Frozen, error) {
 	tree, cyc := schemaclone.CloneTree(s)
@@ -161,7 +162,12 @@ func (f *Frozen) walk(s *Schema, path, parentBase string) {
 
 	currentBase := parentBase
 
-	if s.ID != "" && !f.profile.InertIDs {
+	// Draft-07 ignores the siblings of a $ref, so a $id beside one registers
+	// nothing and rebases nothing: neither an anchor or URI a reference could
+	// name nor a base the node or its children would resolve against.
+	ignoreID := f.profile.Draft7 && s.Ref != ""
+
+	if s.ID != "" && !f.profile.InertIDs && !ignoreID {
 		if uriref.IsFragmentOnly(s.ID) {
 			// Draft-07: a fragment-only $id is the anchor spelling. Draft
 			// 2020-12 forbids a fragment in $id, so there the form registers
@@ -191,14 +197,7 @@ func (f *Frozen) walk(s *Schema, path, parentBase string) {
 		}
 	}
 
-	// Draft-07 ignores the siblings of a $ref, so a sibling $id does not
-	// change the base the node's own reference resolves against.
-	base := currentBase
-	if f.profile.Draft7 && s.Ref != "" && s.ID != "" && !uriref.IsFragmentOnly(s.ID) {
-		base = parentBase
-	}
-
-	f.bases = append(f.bases, base)
+	f.bases = append(f.bases, currentBase)
 	f.scopes = append(f.scopes, currentBase)
 
 	for _, entry := range Entries(s) {
