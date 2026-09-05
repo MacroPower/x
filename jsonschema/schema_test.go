@@ -306,6 +306,17 @@ func TestRaw(t *testing.T) {
 			v:    []string{"a", "b"},
 			want: `["a","b"]`,
 		},
+		// Encoding/json/v2 renders a nil container as its empty instance,
+		// where v1 wrote null; the generated schema admits no null for a
+		// slice or map, so the empty instance is the default that validates.
+		"nil slice": {
+			v:    []string(nil),
+			want: `[]`,
+		},
+		"nil map": {
+			v:    map[string]int(nil),
+			want: `{}`,
+		},
 		"unmarshalable": {
 			v:   make(chan int),
 			err: true,
