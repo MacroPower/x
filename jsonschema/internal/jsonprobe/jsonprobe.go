@@ -35,6 +35,7 @@ import (
 	"fmt"
 	"reflect"
 	"strconv"
+	"sync"
 	"time"
 
 	jsonv1 "encoding/json"
@@ -92,17 +93,61 @@ type omitResult struct {
 	omitted bool
 }
 
+// memo holds one verdict per type under a lock. A miss is probed outside the
+// lock, so concurrent callers stay parallel, and the first verdict stored for
+// a type wins, so two callers that probe it at once read one answer from
+// then on.
+type memo[V any] struct {
+	verdicts map[reflect.Type]V
+	mu       sync.Mutex
+}
+
+// get returns the verdict memoized for t, probing and storing one on a miss.
+func (m *memo[V]) get(t reflect.Type, probe func() V) V {
+	if v, ok := m.load(t); ok {
+		return v
+	}
+
+	v := probe()
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if prior, ok := m.verdicts[t]; ok {
+		return prior
+	}
+
+	if m.verdicts == nil {
+		m.verdicts = map[reflect.Type]V{}
+	}
+
+	m.verdicts[t] = v
+
+	return v
+}
+
+// load returns the verdict memoized for t, if any.
+func (m *memo[V]) load(t reflect.Type) (V, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	v, ok := m.verdicts[t]
+
+	return v, ok
+}
+
 // Probe answers refusal questions for one set of marshal options. It memoizes
-// every answer and is not safe for concurrent use; a generation run owns one.
-// The field verdicts are keyed by the one-field struct type [oneField]
-// builds, which [reflect.StructOf] interns per field type and tag, the two
-// inputs that decide one.
+// every answer and is safe for concurrent use: a verdict depends only on the
+// type, the tag, and the options, so a generator configuration owns one and
+// every run over it shares the memos. The field verdicts are keyed by the
+// one-field struct type [oneField] builds, which [reflect.StructOf] interns
+// per field type and tag, the two inputs that decide one.
 type Probe struct {
 	opts    json.Options
-	types   map[reflect.Type]error
-	structs map[reflect.Type]error
-	fields  map[reflect.Type]fieldResult
-	omits   map[reflect.Type]omitResult
+	types   memo[error]
+	structs memo[error]
+	fields  memo[fieldResult]
+	omits   memo[omitResult]
 }
 
 // New returns a Probe whose verdicts are v2's under opts joined with the
@@ -121,13 +166,7 @@ func New(opts json.Options) *Probe {
 		joined = json.JoinOptions(opts, joined)
 	}
 
-	return &Probe{
-		opts:    joined,
-		types:   map[reflect.Type]error{},
-		structs: map[reflect.Type]error{},
-		fields:  map[reflect.Type]fieldResult{},
-		omits:   map[reflect.Type]omitResult{},
-	}
+	return &Probe{opts: joined}
 }
 
 // intercept builds the marshaler that stands in for every type whose pointer
@@ -176,14 +215,7 @@ func inNamePosition(enc *jsontext.Encoder) bool {
 // analysis. The caller skips a type whose method set carries a marshal
 // interface, whose fields v2 never analyzes.
 func (p *Probe) Struct(t reflect.Type) error {
-	if err, ok := p.structs[t]; ok {
-		return err
-	}
-
-	err := p.declaration(reflect.Zero(t))
-	p.structs[t] = err
-
-	return err
+	return p.structs.get(t, func() error { return p.declaration(reflect.Zero(t)) })
 }
 
 // declaration marshals v and reports a fault v2 raised at the root as
@@ -213,12 +245,7 @@ func (p *Probe) declaration(v reflect.Value) error {
 // and a [jsontext.Value] writes its own bytes either way.
 func (p *Probe) Field(sf reflect.StructField) (bool, error) {
 	tagged := oneField(sf)
-
-	res, ok := p.fields[tagged]
-	if !ok {
-		res = p.probeField(tagged, sf.Type)
-		p.fields[tagged] = res
-	}
+	res := p.fields.get(tagged, func() fieldResult { return p.probeField(tagged, sf.Type) })
 
 	return res.stringified, res.err
 }
@@ -264,12 +291,7 @@ func (p *Probe) probeField(tagged, typ reflect.Type) fieldResult {
 // writes. A fault of any kind is [ErrValue] wrapping v2's reason.
 func (p *Probe) OmitsZero(sf reflect.StructField) (bool, error) {
 	tagged := oneField(sf)
-
-	res, ok := p.omits[tagged]
-	if !ok {
-		res = p.probeOmitsZero(tagged)
-		p.omits[tagged] = res
-	}
+	res := p.omits.get(tagged, func() omitResult { return p.probeOmitsZero(tagged) })
 
 	return res.omitted, res.err
 }
@@ -329,14 +351,7 @@ func openObject(doc []byte) (*jsontext.Decoder, bool) {
 // and sizes every container, so a func, chan, complex, or [unsafe.Pointer]
 // kind, a [time.Duration], and a key v2 cannot name all surface.
 func (p *Probe) Type(t reflect.Type) error {
-	if err, ok := p.types[t]; ok {
-		return err
-	}
-
-	err := p.probeType(t)
-	p.types[t] = err
-
-	return err
+	return p.types.get(t, func() error { return p.probeType(t) })
 }
 
 func (p *Probe) probeType(t reflect.Type) error {

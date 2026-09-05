@@ -1164,6 +1164,8 @@ func TestGenerator(t *testing.T) {
 	t.Run("concurrent use", func(t *testing.T) {
 		t.Parallel()
 
+		// The runs share the configuration's probe, whose memos every run
+		// reads and fills, so under -race this also catches a race on them.
 		gen := jsonschema.NewGenerator()
 
 		const runs = 8
@@ -1185,6 +1187,7 @@ func TestGenerator(t *testing.T) {
 		for i := range runs {
 			require.NoError(t, errs[i])
 			assert.NotNil(t, schemas[i].Defs["Address"])
+			assert.Equal(t, schemas[0], schemas[i], "every run reads the same verdicts")
 		}
 	})
 

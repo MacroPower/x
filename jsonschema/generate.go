@@ -541,9 +541,10 @@ func (g *run) declaredAdmitsNull(s *Schema, seen map[*Schema]bool) bool {
 //
 // A Generator is safe for concurrent use by multiple goroutines, provided
 // the configured hooks are: the configuration is only read during
-// generation, every run keeps its own state, and the hook interfaces
-// document their own concurrency contracts ([DescriptionProvider],
-// [RefResolver]).
+// generation, the one memo it carries (the [encoding/json/v2] probe's
+// verdicts, which a reused Generator keeps across calls) takes a lock,
+// every run keeps its own state, and the hook interfaces document their
+// own concurrency contracts ([DescriptionProvider], [RefResolver]).
 type Generator struct {
 	config *generatorConfig
 }

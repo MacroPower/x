@@ -3,7 +3,9 @@ package jsonprobe //nolint:testpackage // In-package by design: the agreement ri
 import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"fmt"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 	"unsafe"
@@ -325,6 +327,74 @@ func TestType(t *testing.T) {
 // TestHonorsCallerOptions pins that the caller's option set reaches the
 // probe: under FormatNilMapAsNull a nil map is null, which the shape of the
 // output shows.
+func TestConcurrentUse(t *testing.T) {
+	t.Parallel()
+
+	// Every goroutine asks one shared probe the four questions about the same
+	// inputs, some of which v2 refuses, and every answer must match the one
+	// a probe of its own gives. Run under -race, this also catches a data
+	// race on the memos.
+	type input struct {
+		typ reflect.Type
+		tag string
+	}
+
+	inputs := []input{
+		{typ: reflect.TypeFor[int](), tag: `json:"a,string"`},
+		{typ: reflect.TypeFor[string](), tag: `json:"a,omitempty"`},
+		{typ: reflect.TypeFor[time.Duration](), tag: `json:"a"`},
+		{typ: reflect.TypeFor[func()](), tag: `json:"a,omitempty"`},
+		{typ: reflect.TypeFor[map[textKey]int](), tag: `json:"a"`},
+		{typ: reflect.TypeFor[struct{ A panicker }](), tag: `json:"a,omitempty"`},
+		{typ: reflect.TypeFor[struct{ N int }](), tag: `json:"a,omitempty,string"`},
+	}
+
+	// An answer renders the four verdicts as one line, so two errors built
+	// by separate marshals compare by what they say.
+	ask := func(p *Probe, in input) string {
+		sf := reflect.StructField{Name: "F", Type: in.typ, Tag: reflect.StructTag(in.tag)}
+
+		var decl error
+
+		if in.typ.Kind() == reflect.Struct {
+			decl = p.Struct(in.typ)
+		}
+
+		stringified, fieldErr := p.Field(sf)
+		omitted, omitErr := p.OmitsZero(sf)
+
+		return fmt.Sprintf("type=%v decl=%v field=%t/%v omit=%t/%v",
+			p.Type(in.typ), decl, stringified, fieldErr, omitted, omitErr)
+	}
+
+	want := make([]string, len(inputs))
+	for i, in := range inputs {
+		want[i] = ask(New(nil), in)
+	}
+
+	const n = 16
+
+	var (
+		shared = New(nil)
+		wg     sync.WaitGroup
+		got    [n][]string
+	)
+
+	for i := range n {
+		wg.Go(func() {
+			for _, in := range inputs {
+				got[i] = append(got[i], ask(shared, in))
+			}
+		})
+	}
+
+	wg.Wait()
+
+	for i := range n {
+		assert.Equal(t, want, got[i])
+	}
+}
+
 func TestHonorsCallerOptions(t *testing.T) {
 	t.Parallel()
 

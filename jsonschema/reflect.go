@@ -48,7 +48,8 @@ var (
 )
 
 // generatorConfig is the option set one [Generator] or one-shot entry point
-// applies once. Generation only reads it, so concurrent runs share one value.
+// applies once. Generation only reads it, apart from the probe's memos, which
+// the probe guards with its own lock, so concurrent runs share one value.
 type generatorConfig struct {
 	typeProviders []TypeSchemaProvider
 	namer         Namer
@@ -60,8 +61,14 @@ type generatorConfig struct {
 	// The WithJSONOptions state: the joined [jsonv2.Options] value and the
 	// refusal it resolved to (surfaced per run by generate). The three
 	// honored flags probed from it sit with the other bools below.
-	jsonOpts             jsonv2.Options
-	jsonOptsErr          error
+	jsonOpts    jsonv2.Options
+	jsonOptsErr error
+	// Probe is the [encoding/json/v2] refusal oracle: it answers whether v2
+	// refuses a struct declaration, a field, or a type under jsonOpts, and
+	// memoizes each answer. A verdict depends only on the type, the tag,
+	// and jsonOpts, so every run over the configuration shares one probe
+	// and a reused [Generator] marshals each type and field once.
+	probe                *jsonprobe.Probe
 	typeExtenders        []TypeSchemaExtender
 	profile              draftProfile // per-draft behavioral policy, resolved once from draft
 	draft                Draft
@@ -97,11 +104,7 @@ type run struct {
 	// resolved, so an alias chain that reaches one of them again (a self-Ref, or
 	// a mutual A -> B -> A cycle) is reported instead of recursing forever.
 	refAliasing map[reflect.Type]bool
-	// Probe is the [encoding/json/v2] refusal oracle for this run: it answers
-	// whether v2 refuses a struct declaration, a field, or a type under the
-	// run's json options, and memoizes each answer.
-	probe *jsonprobe.Probe
-	defs  []*defEntry // every def entry, in build order
+	defs        []*defEntry // every def entry, in build order
 }
 
 // typeOverrideResult memoizes one [run.resolveTypeSchema] consultation so
@@ -134,12 +137,16 @@ func newConfig(opts []GenerateOption) *generatorConfig {
 	// g.draft.
 	c.profile = c.draft.profile()
 
+	// The probe reads the joined json options, which are settled once the
+	// options have applied.
+	c.probe = jsonprobe.New(c.jsonOpts)
+
 	return c
 }
 
-// forRun starts one generation run over the configuration. The per-run maps,
-// the probe, and the context are fresh, so concurrent runs from one
-// configuration never share mutable state.
+// forRun starts one generation run over the configuration. The per-run maps
+// and the context are fresh, so concurrent runs from one configuration share
+// no mutable state beyond the probe's locked memos.
 func (c *generatorConfig) forRun(ctx context.Context) *run {
 	g := &run{
 		generatorConfig:   c,
@@ -148,7 +155,6 @@ func (c *generatorConfig) forRun(ctx context.Context) *run {
 		typeOverrideCache: map[reflect.Type]typeOverrideResult{},
 		visiting:          map[reflect.Type]bool{},
 		refAliasing:       map[reflect.Type]bool{},
-		probe:             jsonprobe.New(c.jsonOpts),
 	}
 
 	// Bind to the run, since needsAllOfComposition reads the per-run context
