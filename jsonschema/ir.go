@@ -1,7 +1,6 @@
 package jsonschema
 
 import (
-	"bytes"
 	"encoding/json/jsontext"
 	"fmt"
 	"reflect"
@@ -869,11 +868,11 @@ func nullLiteralReport(n *node) error {
 
 // isRawNull reports whether raw holds the JSON null literal. Two call sites
 // share it, so the two cannot drift apart: canvasNullLiteral, scanning an
-// authored default, and [run.seedDefaults], testing a marshaled
-// field value. Whitespace around a JSON value is insignificant, so the
-// comparison trims it first.
+// authored default, and [run.seedDefaults], testing a marshaled field
+// value. Both hand it a marshaled value, so the kind of its first token
+// answers, and leading whitespace does not change that kind.
 func isRawNull(raw jsontext.Value) bool {
-	return bytes.Equal(bytes.TrimSpace(raw), []byte("null"))
+	return raw.Kind() == jsontext.KindNull
 }
 
 // canvasNullLiteral returns the name of the first authored-canvas keyword
