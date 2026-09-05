@@ -1,12 +1,15 @@
 // Package schemashape holds small structural helpers over a generated
 // [jsonschema.Schema]: the empty-schema and $ref-sibling predicates that derive
 // from the canonical [go.jacobcolvin.com/x/jsonschema/internal/schemafield]
-// table. The reflection generator and the validate-tag interpreter live in
-// separate packages but inspect the same generated shapes, so the logic is
-// centralized here to keep a single source of truth.
+// table, and the type-keyword predicate over the Type and Types forms. The
+// reflection generator and the validate-tag interpreter live in separate
+// packages but inspect the same generated shapes, so the logic is centralized
+// here to keep a single source of truth.
 package schemashape
 
 import (
+	"slices"
+
 	"github.com/google/jsonschema-go/jsonschema"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/schemafield"
@@ -21,6 +24,13 @@ import (
 // Constraint and Applicator classes); a nil schema is not empty.
 func IsEmpty(s *jsonschema.Schema) bool {
 	return schemafield.IsEmpty(s)
+}
+
+// DeclaresType reports whether s names the JSON type name in its own type
+// keyword, in either the single Type form or the Types list a nullable field
+// or a hook produces. A nil schema declares no type.
+func DeclaresType(s *jsonschema.Schema, name string) bool {
+	return s != nil && (s.Type == name || slices.Contains(s.Types, name))
 }
 
 // HasRefSiblings reports whether a schema has any keyword set beyond just $ref.

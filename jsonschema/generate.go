@@ -11,6 +11,7 @@ import (
 	"go.jacobcolvin.com/x/jsonschema/internal/jsonopts"
 	"go.jacobcolvin.com/x/jsonschema/internal/numkind"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemashape"
+	"go.jacobcolvin.com/x/jsonschema/internal/typename"
 )
 
 // GenerateOption configures schema generation. Options are produced by this
@@ -496,7 +497,7 @@ func (g *run) declaredAdmitsNull(s *Schema, seen map[*Schema]bool) bool {
 
 	seen[s] = true
 
-	if schemashape.IsEmpty(s) || declaresNull(s) {
+	if schemashape.IsEmpty(s) || schemashape.DeclaresType(s, typename.Null) {
 		return true
 	}
 

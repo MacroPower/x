@@ -3,13 +3,13 @@ package tagmodel
 import (
 	"fmt"
 	"reflect"
-	"slices"
 
 	"github.com/google/jsonschema-go/jsonschema"
 
 	"go.jacobcolvin.com/x/jsonschema/internal/content"
 	"go.jacobcolvin.com/x/jsonschema/internal/numkind"
 	"go.jacobcolvin.com/x/jsonschema/internal/reflectkind"
+	"go.jacobcolvin.com/x/jsonschema/internal/schemashape"
 	"go.jacobcolvin.com/x/jsonschema/internal/typename"
 )
 
@@ -396,22 +396,6 @@ func namedForm(name string) Form {
 // string but whose schema is one -- classifies as the string it emits. A nil
 // schema permits no string.
 func schemaPermitsString(s *jsonschema.Schema) bool {
-	return schemaDeclares(s, typename.String) ||
+	return schemashape.DeclaresType(s, typename.String) ||
 		(s != nil && s.ContentEncoding == content.Base64)
-}
-
-// schemaDeclares reports whether the schema names any of the given JSON types,
-// in either the single Type form or the Types array a nullable field produces.
-func schemaDeclares(s *jsonschema.Schema, names ...string) bool {
-	if s == nil {
-		return false
-	}
-
-	for _, name := range names {
-		if s.Type == name || slices.Contains(s.Types, name) {
-			return true
-		}
-	}
-
-	return false
 }

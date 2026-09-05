@@ -1,8 +1,6 @@
 package jsonschema
 
 import (
-	"slices"
-
 	"go.jacobcolvin.com/x/jsonschema/internal/schemaclone"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemashape"
 	"go.jacobcolvin.com/x/jsonschema/internal/typename"
@@ -169,7 +167,7 @@ func (g *run) applyNull(n *node, base *Schema) *Schema {
 // set afterward, so the schema always marshals.
 func nullTypeList(s *Schema, base string) {
 	if s.Types != nil {
-		if !slices.Contains(s.Types, typename.Null) {
+		if !schemashape.DeclaresType(s, typename.Null) {
 			s.Types = append([]string{typename.Null}, s.Types...)
 		}
 

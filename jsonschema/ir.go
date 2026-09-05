@@ -197,12 +197,6 @@ func (n *node) prop(name string) *node {
 	return nil
 }
 
-// declaresNull reports whether a schema's own type keyword names null: a
-// jsonschema:"type=null" override, or a hook's Types list carrying it.
-func declaresNull(s *Schema) bool {
-	return s.Type == typename.Null || slices.Contains(s.Types, typename.Null)
-}
-
 // fieldOrigin names the field position a node occupies: the struct declaring
 // the field, the field's JSON name, and whether the node is an element beneath
 // that field rather than the field itself. A field-level writer can commit to a
@@ -465,7 +459,7 @@ func (g *run) resolveAdmit(n *node, e *defEntry) {
 		n.null.admit = n.stance.apply(n.occ.pointer || g.containerNull(n.occ.container))
 	}
 
-	if n.kind != kindRef && declaresNull(n.payload) {
+	if n.kind != kindRef && schemashape.DeclaresType(n.payload, typename.Null) {
 		n.null.admit = true
 	}
 }
@@ -496,11 +490,11 @@ func (g *run) targetAdmitsNull(n *node) bool {
 			return false
 		}
 
-		return body.null.admit && body.nilableContainer() || declaresNull(body.payload) ||
+		return body.null.admit && body.nilableContainer() || schemashape.DeclaresType(body.payload, typename.Null) ||
 			(body.kind == kindValue && !body.verbatim && schemashape.IsEmpty(body.payload))
 	}
 
-	return declaresNull(n.payload)
+	return schemashape.DeclaresType(n.payload, typename.Null)
 }
 
 // apply resolves a [Nullability] stance against an occurrence's own answer:
