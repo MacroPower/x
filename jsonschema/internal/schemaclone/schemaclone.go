@@ -668,8 +668,10 @@ func (c *cloner) reflectSlice(rv reflect.Value) reflect.Value {
 
 	key, keyed := containerKey(rv, rv.Len())
 	if keyed {
-		if seen, hit := c.values[key]; hit {
-			c.revisitValue(key)
+		if seen, ok := c.hit(key); ok {
+			if seen == nil {
+				return reflect.Zero(rv.Type())
+			}
 
 			return reflect.ValueOf(seen)
 		}
@@ -705,8 +707,10 @@ func (c *cloner) reflectMap(rv reflect.Value) reflect.Value {
 
 	key, keyed := containerKey(rv, rv.Len())
 	if keyed {
-		if seen, hit := c.values[key]; hit {
-			c.revisitValue(key)
+		if seen, ok := c.hit(key); ok {
+			if seen == nil {
+				return reflect.Zero(rv.Type())
+			}
 
 			return reflect.ValueOf(seen)
 		}

@@ -143,3 +143,73 @@ func TestCloneTreeKeepsContainerSelfReference(t *testing.T) {
 	_, err := json.Marshal(tree.Root)
 	require.Error(t, err, "encoding/json reports this cycle on its own")
 }
+
+// namedList and namedMap are typed containers the reflection walk copies,
+// rather than the bare []any and map[string]any the value walk handles.
+type (
+	namedList []any
+	namedMap  map[string]any
+)
+
+// TestCloneTreeKeepsTypedContainerSelfReference pins the same carve-out for
+// a typed container: the reflection walk consults the on-path table in tree
+// mode, so a named slice or map holding itself copies as a cyclic container
+// instead of recursing until the stack overflows.
+func TestCloneTreeKeepsTypedContainerSelfReference(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		build func() any
+		self  func(t *testing.T, copied any) any
+	}{
+		"named slice": {
+			build: func() any {
+				l := namedList{nil}
+				l[0] = l
+
+				return l
+			},
+			self: func(t *testing.T, copied any) any {
+				t.Helper()
+
+				l, ok := copied.(namedList)
+				require.True(t, ok, "the copy keeps the container's Go type")
+
+				return l[0]
+			},
+		},
+		"named map": {
+			build: func() any {
+				m := namedMap{}
+				m["self"] = m
+
+				return m
+			},
+			self: func(t *testing.T, copied any) any {
+				t.Helper()
+
+				m, ok := copied.(namedMap)
+				require.True(t, ok, "the copy keeps the container's Go type")
+
+				return m["self"]
+			},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			held := tc.build()
+
+			tree, cyc := schemaclone.CloneTree(&jsonschema.Schema{Extra: map[string]any{"x": held}})
+			assert.Nil(t, cyc)
+
+			copied := tree.Root.Extra["x"]
+			assert.NotEqual(t, reflect.ValueOf(held).Pointer(), reflect.ValueOf(copied).Pointer(),
+				"the copy owns its own container")
+			assert.Equal(t, reflect.ValueOf(copied).Pointer(), reflect.ValueOf(tc.self(t, copied)).Pointer(),
+				"the copy holds itself as the source does")
+		})
+	}
+}
