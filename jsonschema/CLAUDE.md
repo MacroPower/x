@@ -68,7 +68,8 @@ time when every key holds a string.
 
 ### Internal packages
 
-Each owns one invariant. None imports the parent package.
+Each owns one invariant, except `testtypes`, which holds test fixtures and
+is the only one that imports the parent package.
 
 - `annotations`: the 2020-12 annotation sets the `unevaluated*` walk merges.
 - `constraint`: the bound algebra; an authored bound only tightens a type's.
@@ -93,6 +94,9 @@ Each owns one invariant. None imports the parent package.
   identifier tables; only `Vet` mints the `Doc` currency the engines demand.
 - `tagmodel`, `tagparse`: one constraint matrix over JSON shape, and the
   jsonschema tag grammar over it.
+- `testtypes/alpha`, `testtypes/beta`: fixture types for the comment
+  extraction and cross-package name collision tests; real source packages so
+  `go/packages` can load their doc comments.
 - `regexcache`, `uriref`, `vocab`: pattern cache, RFC 3986, vocabulary gating.
 
 ## Guard tests
