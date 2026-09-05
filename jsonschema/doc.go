@@ -936,7 +936,10 @@
 // [*Schema] uncompiled for consumers that work with the schema itself
 // ([Inline], [Walk], programmatic editing); [ParseSchemaValue] converts an
 // already-decoded document (a bool or a map[string]any, such as [Normalize]
-// output) to a [*Schema]. With all three, a top-level value that is not an
+// output) to a [*Schema], where a document string holding invalid UTF-8
+// (reachable only from a hand-built or non-JSON-sourced document) returns a
+// wrapped encode error rather than being silently rewritten with U+FFFD.
+// With all three, a top-level value that is not an
 // object or boolean returns an error wrapping [ErrInvalidSchemaDocument]; this
 // includes JSON null, which unmarshaling into a [Schema] directly silently
 // coerces to the false schema. Malformed JSON returns the wrapped decode error
@@ -1095,6 +1098,10 @@
 //     (application/json) for string instances. Annotation-only by default.
 //     Base64 follows the draft's citation: RFC 4648 under 2020-12 (line
 //     breaks rejected), MIME base64 under Draft-07 (line breaks ignored).
+//     The media-type assertion judges the decoded content as
+//     application/json per RFC 8259, so duplicate member names and invalid
+//     UTF-8 pass there even though the validation entry points reject both
+//     in the instance document itself.
 //   - [WithVocabularies] directly specifies the active vocabularies for the
 //     validation run: the listed URIs are active, every other vocabulary is
 //     inactive.

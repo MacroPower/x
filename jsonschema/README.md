@@ -205,7 +205,9 @@ caller's marshal); each top-level key of the output that matches a root
 property becomes that property's `default`, overwriting any default set via
 struct tags. Keys the `json` tags omit (`omitempty`, `omitzero`) contribute
 nothing, so presence follows the tags exactly, and nested struct, slice, and
-map values become whole-value defaults on their top-level property. A nil
+map values become whole-value defaults on their top-level property. Map
+values marshal in sorted key order, so a map-valued default seeds identical
+bytes on every run. A nil
 slice, map, or `[]byte` marshals as its empty instance (`[]`, `{}`, `""`),
 which seeds like any other value. A nil pointer or interface carrying neither
 `omitempty` nor `omitzero` marshals to JSON null. That null leaves a property
@@ -1213,16 +1215,16 @@ containing object are both identifiable from `InstancePath` alone.
 
 ### Validation options
 
-| Option                         | Effect                                                                                                                   |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
-| `WithDraft(Draft)`             | Override the draft otherwise detected from the root schema's `$schema`.                                                  |
-| `WithRefResolver(r)`           | Resolve remote/absolute `$ref` URIs (called only when local lookup fails); the resolver receives the caller's context.   |
-| `WithBaseURI(base)`            | Set the root document's base URI for ref absolutization; also serves `Inline`.                                           |
-| `WithFormatValidator(name, f)` | Register a custom `format` checker (a `FormatValidator`; `FormatValidatorFunc` adapts a bare function) under `name`.     |
-| `WithFormats(bool)`            | Force `format` assertion on or off.                                                                                      |
-| `WithContent(bool)`            | Assert `contentEncoding`/`contentMediaType` (annotation-only by default; base64 rejects line breaks under 2020-12 only). |
-| `WithVocabularies(uris...)`    | Directly set the active vocabularies (highest precedence); unlisted ones are inactive.                                   |
-| `WithMetaSchemaResolver(r)`    | Set a `RefResolver` that looks up the metaschema (whose `$vocabulary` gates keyword groups) by the root's `$schema` URI. |
+| Option                         | Effect                                                                                                                                                                                                                                                                                                                                                   |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `WithDraft(Draft)`             | Override the draft otherwise detected from the root schema's `$schema`.                                                                                                                                                                                                                                                                                  |
+| `WithRefResolver(r)`           | Resolve remote/absolute `$ref` URIs (called only when local lookup fails); the resolver receives the caller's context.                                                                                                                                                                                                                                   |
+| `WithBaseURI(base)`            | Set the root document's base URI for ref absolutization; also serves `Inline`.                                                                                                                                                                                                                                                                           |
+| `WithFormatValidator(name, f)` | Register a custom `format` checker (a `FormatValidator`; `FormatValidatorFunc` adapts a bare function) under `name`.                                                                                                                                                                                                                                     |
+| `WithFormats(bool)`            | Force `format` assertion on or off.                                                                                                                                                                                                                                                                                                                      |
+| `WithContent(bool)`            | Assert `contentEncoding`/`contentMediaType` (annotation-only by default; base64 rejects line breaks under 2020-12 only). The media-type assertion judges decoded content as `application/json` per RFC 8259, so duplicate member names and invalid UTF-8 pass there even though the validation entry points reject both in the instance document itself. |
+| `WithVocabularies(uris...)`    | Directly set the active vocabularies (highest precedence); unlisted ones are inactive.                                                                                                                                                                                                                                                                   |
+| `WithMetaSchemaResolver(r)`    | Set a `RefResolver` that looks up the metaschema (whose `$vocabulary` gates keyword groups) by the root's `$schema` URI.                                                                                                                                                                                                                                 |
 
 ### Formats
 

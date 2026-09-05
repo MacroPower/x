@@ -337,6 +337,8 @@ func WithJSONOptions(opts ...json.Options) GenerateOption {
 // matches a root property gets its value as that property's Default,
 // overwriting any default set via struct tags. Keys omitted by omitempty or
 // omitzero leave Default unset, so presence follows the json tags exactly.
+// Map values marshal in sorted key order, so a map-valued default seeds
+// identical bytes on every run.
 //
 // A nil instance restores the default, where no defaults are seeded,
 // following the package's nil convention. A typed nil pointer is a value,
