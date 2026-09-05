@@ -3,7 +3,6 @@ package jsonschema
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -27,14 +26,13 @@ import (
 )
 
 var (
-	typeTime       = reflect.TypeFor[time.Time]()
-	typeSlogLevel  = reflect.TypeFor[slog.Level]()
-	typeJSONNumber = reflect.TypeFor[json.Number]()
-	typeBigInt     = reflect.TypeFor[big.Int]()
-	typeBigRat     = reflect.TypeFor[big.Rat]()
-	typeBigFloat   = reflect.TypeFor[big.Float]()
-	typeProvider   = reflect.TypeFor[JSONSchemaProvider]()
-	typeExtender   = reflect.TypeFor[JSONSchemaExtender]()
+	typeTime      = reflect.TypeFor[time.Time]()
+	typeSlogLevel = reflect.TypeFor[slog.Level]()
+	typeBigInt    = reflect.TypeFor[big.Int]()
+	typeBigRat    = reflect.TypeFor[big.Rat]()
+	typeBigFloat  = reflect.TypeFor[big.Float]()
+	typeProvider  = reflect.TypeFor[JSONSchemaProvider]()
+	typeExtender  = reflect.TypeFor[JSONSchemaExtender]()
 
 	// Inclusive [minimum, maximum] float64 bounds for each fixed-width integer
 	// kind. Int64 and Uint64 are excluded: float64 cannot name their maxima
@@ -710,7 +708,7 @@ func (g *run) builtinOverride(t reflect.Type) (*Schema, bool) {
 		return &Schema{Type: typename.String}, true
 	case reflectkind.TypeJSONTextValue:
 		return &Schema{}, true
-	case typeJSONNumber:
+	case reflectkind.TypeJSONNumber:
 		return &Schema{Type: typename.Number}, true
 	case typeBigInt:
 		// Big.Int.MarshalJSON emits a bare JSON number (arbitrary precision),

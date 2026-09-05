@@ -34,8 +34,8 @@ var (
 	// TypeJSONTextValue is the [reflect.Type] of [jsontext.Value] (which
 	// [encoding/json.RawMessage] aliases).
 	TypeJSONTextValue = reflect.TypeFor[jsontext.Value]()
-	// The typeJSONNumber value is the [reflect.Type] of [encoding/json.Number].
-	typeJSONNumber = reflect.TypeFor[jsonv1.Number]()
+	// TypeJSONNumber is the [reflect.Type] of [encoding/json.Number].
+	TypeJSONNumber = reflect.TypeFor[jsonv1.Number]()
 	// The typeIsZeroer value is the interface encoding/json/v2 consults
 	// under the omitzero option.
 	typeIsZeroer = reflect.TypeFor[interface{ IsZero() bool }]()
@@ -110,7 +110,7 @@ func ImplementsAnyMarshaler(t reflect.Type) bool {
 // SemanticError under the flag. The predicate compares type identity rather
 // than reading the kind because the special casing rides on the type's
 // methods.
-func IsJSONNumber(t reflect.Type) bool { return t == typeJSONNumber }
+func IsJSONNumber(t reflect.Type) bool { return t == TypeJSONNumber }
 
 // IsRecursiveContainerKind reports whether a kind can hold a value of its own
 // type and thus form a cycle through schema generation: slices, arrays, and
