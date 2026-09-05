@@ -10,7 +10,6 @@ import (
 
 	"go.jacobcolvin.com/x/jsonschema/internal/jsontag"
 	"go.jacobcolvin.com/x/jsonschema/internal/numkind"
-	"go.jacobcolvin.com/x/jsonschema/internal/reflectkind"
 	"go.jacobcolvin.com/x/jsonschema/internal/tagmodel"
 	"go.jacobcolvin.com/x/jsonschema/internal/uriref"
 )
@@ -780,11 +779,12 @@ func (fc FieldContext) Shape() Shape {
 	return shape
 }
 
-// quotedString reports whether the field carries a json:",string" that the
-// type and base cannot re-derive: the flag on an [encoding/json.Number]
-// field, whose string kind would otherwise classify as a plain string. It
-// mirrors the generator's own string-override test, and tolerates the zero
-// StructField of a caller-built context.
+// quotedString reports whether the field carries the json:",string" option.
+// Which types the flag coerces is decided once, in [tagmodel]'s form
+// classification (only an [encoding/json.Number] field's string kind
+// reclassifies), so the raw flag is handed over and the relevance test is
+// not repeated here. It tolerates the zero StructField of a caller-built
+// context.
 func (fc FieldContext) quotedString() bool {
 	if fc.Type == nil {
 		return false
@@ -797,7 +797,7 @@ func (fc FieldContext) quotedString() bool {
 		return false
 	}
 
-	return info.JSONString && reflectkind.IsJSONNumber(numkind.DerefType(fc.Type))
+	return info.JSONString
 }
 
 // ConstraintsFor is [FieldContext.Constraints] for a caller that has already
