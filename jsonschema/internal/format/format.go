@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -637,7 +638,7 @@ func isAllDigits(s string) bool {
 func validateURIAbs(s string, badChars func(string) bool, label string) error {
 	u, err := url.Parse(s)
 	if err != nil {
-		u = reparseIPvFutureHost(s)
+		u = reparseUnparsedHost(s)
 		if u == nil {
 			return fmt.Errorf("invalid %s", label)
 		}
@@ -651,7 +652,11 @@ func validateURIAbs(s string, badChars func(string) bool, label string) error {
 		return fmt.Errorf("invalid %s: forbidden characters", label)
 	}
 
-	if !validURIDelims(s, u.Host) {
+	if !validPctEncoding(s) {
+		return fmt.Errorf("invalid %s: malformed percent-encoding", label)
+	}
+
+	if !validURIDelims(s, u.Host) || !validAuthorityDelims(s) {
 		return fmt.Errorf("invalid %s: misplaced delimiter", label)
 	}
 
@@ -668,7 +673,7 @@ func validateURIAbs(s string, badChars func(string) bool, label string) error {
 func validateURIRef(s string, badChars func(string) bool, label string) error {
 	u, err := url.Parse(s)
 	if err != nil {
-		u = reparseIPvFutureHost(s)
+		u = reparseUnparsedHost(s)
 		if u == nil {
 			return fmt.Errorf("invalid %s reference", label)
 		}
@@ -678,7 +683,11 @@ func validateURIRef(s string, badChars func(string) bool, label string) error {
 		return fmt.Errorf("invalid %s reference: forbidden characters", label)
 	}
 
-	if !validURIDelims(s, u.Host) {
+	if !validPctEncoding(s) {
+		return fmt.Errorf("invalid %s reference: malformed percent-encoding", label)
+	}
+
+	if !validURIDelims(s, u.Host) || !validAuthorityDelims(s) {
 		return fmt.Errorf("invalid %s reference: misplaced delimiter", label)
 	}
 
@@ -714,6 +723,140 @@ func validURIDelims(s, host string) bool {
 	}
 
 	return strings.Count(s, "[") == want && strings.Count(s, "]") == want
+}
+
+// validPctEncoding reports whether every '%' in s begins a well-formed
+// pct-encoded triplet ("%" HEXDIG HEXDIG). RFC 3986 uses the one production
+// in every component, and net/url checks it everywhere but the query, which
+// it stores raw.
+func validPctEncoding(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] != '%' {
+			continue
+		}
+
+		if i+2 >= len(s) || !isHexDigit(s[i+1]) || !isHexDigit(s[i+2]) {
+			return false
+		}
+
+		i += 2
+	}
+
+	return true
+}
+
+// validAuthorityDelims reports whether the authority component of s, as
+// written, carries at most one '@'. RFC 3986 section 3.2.1 excludes '@' from
+// userinfo, so a second one belongs to no component; net/url splits at the
+// last '@' and admits the first into userinfo.
+func validAuthorityDelims(s string) bool {
+	start, end, ok := rawAuthoritySpan(s)
+
+	return !ok || strings.Count(s[start:end], "@") <= 1
+}
+
+// rawAuthoritySpan returns the byte range of the authority component of s as
+// written, and whether s carries one: the text after the scheme's "//" (or
+// after a leading "//" for a network-path reference) up to the first "/",
+// "?", or "#".
+func rawAuthoritySpan(s string) (int, int, bool) {
+	start := 0
+
+	if i := strings.IndexByte(s, ':'); i > 0 && isSchemeName(s[:i]) {
+		start = i + 1
+	}
+
+	if !strings.HasPrefix(s[start:], "//") {
+		return 0, 0, false
+	}
+
+	start += 2
+
+	end := len(s)
+	if i := strings.IndexAny(s[start:], "/?#"); i >= 0 {
+		end = start + i
+	}
+
+	return start, end, true
+}
+
+// isSchemeName reports whether s matches the RFC 3986 scheme production:
+// ALPHA *( ALPHA / DIGIT / "+" / "-" / "." ).
+func isSchemeName(s string) bool {
+	if s == "" || !isASCIILetter(s[0]) {
+		return false
+	}
+
+	for i := 1; i < len(s); i++ {
+		c := s[i]
+		if !isASCIILetter(c) && (c < '0' || c > '9') && c != '+' && c != '-' && c != '.' {
+			return false
+		}
+	}
+
+	return true
+}
+
+// isASCIILetter reports whether c is an ASCII letter.
+func isASCIILetter(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+}
+
+// reparseUnparsedHost retries a URL net/url refused for a host it cannot
+// represent but RFC 3986 admits: an IPvFuture literal, or a reg-name carrying
+// a percent-encoded ASCII octet (net/url unescapes a host and permits only
+// escapes at or above 0x80). The returned URL serves the remaining structural
+// checks, which read the original string wherever they are character-based.
+func reparseUnparsedHost(s string) *url.URL {
+	if u := reparseIPvFutureHost(s); u != nil {
+		return u
+	}
+
+	return reparsePctEncodedAuthority(s)
+}
+
+// reparsePctEncodedAuthority re-parses s with every well-formed pct-encoded
+// ASCII octet in its authority replaced by a letter, so a reg-name such as
+// "ex%41mple.com" (legal per RFC 3986 section 3.2.2, merely non-normalized)
+// parses. A malformed triplet is left in place, so it still fails. It returns
+// nil when the authority holds no such octet or the rewrite fails to parse.
+func reparsePctEncodedAuthority(s string) *url.URL {
+	start, end, ok := rawAuthoritySpan(s)
+	if !ok {
+		return nil
+	}
+
+	var (
+		b       strings.Builder
+		changed bool
+	)
+
+	for i := start; i < end; i++ {
+		if s[i] == '%' && i+2 < end && isHexDigit(s[i+1]) && isHexDigit(s[i+2]) {
+			v, err := strconv.ParseUint(s[i+1:i+3], 16, 8)
+			if err == nil && v < 0x80 {
+				b.WriteByte('a')
+
+				i += 2
+				changed = true
+
+				continue
+			}
+		}
+
+		b.WriteByte(s[i])
+	}
+
+	if !changed {
+		return nil
+	}
+
+	u, err := url.Parse(s[:start] + b.String() + s[end:])
+	if err != nil {
+		return nil
+	}
+
+	return u
 }
 
 // reparseIPvFutureHost works around net/url's missing support for the RFC

@@ -22,3 +22,10 @@
 "http:g"	true	RFC 3986 §5.4.2, the one abnormal reference that carries a scheme
 "../../g"	false	a dot-segment reference carries no scheme
 "//g"	false	a network-path reference carries no scheme
+"http://example.com/?q=%zz"	false	a malformed percent-encoded triplet in the query
+"http://example.com/?%"	false	a bare percent sign in the query
+"http://example.com/?q=%20x"	true	a well-formed percent-encoded triplet in the query
+"http://a@b@c/"	false	RFC 3986 §3.2.1 excludes a second raw '@' from the authority
+"http://user:%40@example.com/"	true	an encoded '@' inside userinfo
+"http://ex%41mple.com/"	true	RFC 3986 §3.2.2 admits a percent-encoded octet in a reg-name
+"http://ex%zzmple.com/"	false	a malformed percent-encoded triplet in the host

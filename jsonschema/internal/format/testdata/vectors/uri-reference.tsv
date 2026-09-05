@@ -17,3 +17,6 @@
 "?q=1"	true	a query-only reference
 ""	true	the empty reference resolves to the base
 "http://exa mple"	false	a space is forbidden
+"?%zz"	false	a malformed percent-encoded triplet in the query
+"//a@b@c"	false	RFC 3986 §3.2.1 excludes a second raw '@' from the authority
+"//ex%41mple.com/"	true	RFC 3986 §3.2.2 admits a percent-encoded octet in a reg-name

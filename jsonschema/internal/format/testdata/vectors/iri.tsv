@@ -20,3 +20,6 @@
 "//résumé.example.org"	false	an iri is absolute, so a network-path reference carries no scheme
 "/rosé"	false	an absolute-path reference carries no scheme
 "http://exa mple.org/rosé"	false	a space is forbidden in an IRI as in a URI
+"http://example.com/?q=%zz"	false	a malformed percent-encoded triplet in the query
+"http://a@b@c/"	false	RFC 3986 §3.2.1 excludes a second raw '@' from the authority
+"http://ex%41mple.com/"	true	RFC 3986 §3.2.2 admits a percent-encoded octet in a reg-name
