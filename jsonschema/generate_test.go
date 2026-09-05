@@ -7090,19 +7090,19 @@ func TestGenerateFor_EmbeddedOptionsOnlyTagPromotesFields(t *testing.T) {
 		generate func() (*jsonschema.Schema, error)
 		marshal  func() ([]byte, error)
 		promoted bool
-		wantErr  string
+		err      string
 	}{
 		// Encoding/json/v2 refuses an option on an embedded field
 		// (",omitempty") and a trailing comma (","); v1 promoted both.
 		"options-only tag is refused": {
 			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[embedOptionsOnly](t.Context()) },
 			marshal:  func() ([]byte, error) { return json.Marshal(embedOptionsOnly{embedPromoteInner{A: 5}}) },
-			wantErr:  "cannot have any options other than `embed` specified",
+			err:      "cannot have any options other than `embed` specified",
 		},
 		"empty name is refused": {
 			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[embedEmptyName](t.Context()) },
 			marshal:  func() ([]byte, error) { return json.Marshal(embedEmptyName{embedPromoteInner{A: 5}}) },
-			wantErr:  "invalid trailing ',' character",
+			err:      "invalid trailing ',' character",
 		},
 		"explicit name is a named field": {
 			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[embedExplicitName](t.Context()) },
@@ -7116,9 +7116,9 @@ func TestGenerateFor_EmbeddedOptionsOnlyTagPromotesFields(t *testing.T) {
 			t.Parallel()
 
 			s, err := tc.generate()
-			if tc.wantErr != "" {
+			if tc.err != "" {
 				require.ErrorIs(t, err, jsonschema.ErrInvalidJSONField)
-				require.ErrorContains(t, err, tc.wantErr)
+				require.ErrorContains(t, err, tc.err)
 
 				_, merr := tc.marshal()
 				require.Error(t, merr, "encoding/json/v2 refuses the same declaration")
@@ -7171,22 +7171,22 @@ func TestGenerateFor_FormatTagOptionRefused(t *testing.T) {
 	tests := map[string]struct {
 		generate func() (*jsonschema.Schema, error)
 		marshal  func() ([]byte, error)
-		wantErr  string
+		err      string
 	}{
 		"format on a plain field": {
 			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[formatTagString](t.Context()) },
 			marshal:  func() ([]byte, error) { return json.Marshal(formatTagString{V: "x"}) },
-			wantErr:  "has unsupported `format` tag option",
+			err:      "has unsupported `format` tag option",
 		},
 		"format combined with embed": {
 			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[formatTagEmbedCombo](t.Context()) },
 			marshal:  func() ([]byte, error) { return json.Marshal(formatTagEmbedCombo{embedPromoteInner{A: 5}}) },
-			wantErr:  "cannot have any options other than `embed` specified",
+			err:      "cannot have any options other than `embed` specified",
 		},
 		"single-quoted format value": {
 			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[formatTagQuoted](t.Context()) },
 			marshal:  func() ([]byte, error) { return json.Marshal(formatTagQuoted{}) },
-			wantErr:  "has unsupported `format` tag option",
+			err:      "has unsupported `format` tag option",
 		},
 	}
 
@@ -7196,11 +7196,11 @@ func TestGenerateFor_FormatTagOptionRefused(t *testing.T) {
 
 			_, err := tc.generate()
 			require.ErrorIs(t, err, jsonschema.ErrInvalidJSONField)
-			require.ErrorContains(t, err, tc.wantErr)
+			require.ErrorContains(t, err, tc.err)
 
 			_, merr := tc.marshal()
 			require.Error(t, merr, "encoding/json/v2 refuses the same declaration")
-			require.ErrorContains(t, merr, tc.wantErr)
+			require.ErrorContains(t, merr, tc.err)
 		})
 	}
 }

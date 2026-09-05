@@ -593,9 +593,9 @@ type oracleRow struct {
 	opts       []jsonschema.GenerateOption
 	wantDefs   jsonschema.Form
 	wantNoDefs jsonschema.Form
-	// The wantErr string, when set, is the generation error the row must
+	// The err string, when set, is the generation error the row must
 	// produce: a declaration encoding/json/v2 itself refuses to marshal.
-	wantErr string
+	err string
 	// The noToken flag marks a row whose form predicts no token, so the row
 	// pins the classification and the oracle has nothing to check it against;
 	// see reasonFormPredictsNoToken.
@@ -684,15 +684,15 @@ func oracleRoster() map[string]oracleRow {
 		// pinned v1's double-encoding; v2 removed the behavior).
 		"quoted bool": {
 			typ: reflect.TypeFor[bool](), jsonTag: "v,string",
-			wantErr: "invalid use of `string` tag option",
+			err: "invalid use of `string` tag option",
 		},
 		"quoted string": {
 			typ: reflect.TypeFor[string](), jsonTag: "v,string",
-			wantErr: "invalid use of `string` tag option",
+			err: "invalid use of `string` tag option",
 		},
 		"quoted pointer to string": {
 			typ: reflect.TypeFor[*string](), jsonTag: "v,string",
-			wantErr: "invalid use of `string` tag option",
+			err: "invalid use of `string` tag option",
 		},
 
 		// The format tag option was cut from stable encoding/json/v2
@@ -700,11 +700,11 @@ func oracleRoster() map[string]oracleRow {
 		// SemanticError, so generation refuses the type outright.
 		"format on string": {
 			typ: reflect.TypeFor[string](), jsonTag: "v,format:date",
-			wantErr: "has unsupported `format` tag option",
+			err: "has unsupported `format` tag option",
 		},
 		"format on int": {
 			typ: reflect.TypeFor[int](), jsonTag: "v,format:units",
-			wantErr: "has unsupported `format` tag option",
+			err: "has unsupported `format` tag option",
 		},
 
 		// A text-marshaling numeric reaches the same coerced column without a
@@ -862,8 +862,8 @@ func TestTagShapeOracleRoster(t *testing.T) {
 					}})
 
 					root, err := jsonschema.Generate(t.Context(), doc, opts...)
-					if row.wantErr != "" {
-						require.ErrorContains(t, err, row.wantErr)
+					if row.err != "" {
+						require.ErrorContains(t, err, row.err)
 						require.ErrorIs(t, err, jsonschema.ErrInvalidJSONField)
 
 						// The declaration refuses to marshal under v2 too,

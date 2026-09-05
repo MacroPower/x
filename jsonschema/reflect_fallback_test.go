@@ -594,84 +594,84 @@ func TestGenerateFor_EmbeddedFallbackRefused(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]struct {
-		generate func() (*jsonschema.Schema, error)
-		marshal  func() ([]byte, error)
-		errIs    error
-		wantErr  string
+		generate    func() (*jsonschema.Schema, error)
+		marshal     func() ([]byte, error)
+		err         error
+		errContains string
 	}{
 		"two fallbacks in one declaration": {
-			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[fbTwo](t.Context()) },
-			marshal:  func() ([]byte, error) { return json.Marshal(fbTwo{}) },
-			errIs:    jsonschema.ErrInvalidJSONField,
-			wantErr:  "embedded Go struct fields A and B cannot both be a Go map or jsontext.Value",
+			generate:    func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[fbTwo](t.Context()) },
+			marshal:     func() ([]byte, error) { return json.Marshal(fbTwo{}) },
+			err:         jsonschema.ErrInvalidJSONField,
+			errContains: "embedded Go struct fields A and B cannot both be a Go map or jsontext.Value",
 		},
 		"embed combined with another option": {
-			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[fbEmbedOpt](t.Context()) },
-			marshal:  func() ([]byte, error) { return json.Marshal(fbEmbedOpt{}) },
-			errIs:    jsonschema.ErrInvalidJSONField,
-			wantErr:  "cannot have any options other than `embed` specified",
+			generate:    func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[fbEmbedOpt](t.Context()) },
+			marshal:     func() ([]byte, error) { return json.Marshal(fbEmbedOpt{}) },
+			err:         jsonschema.ErrInvalidJSONField,
+			errContains: "cannot have any options other than `embed` specified",
 		},
 		"embed combined with a name": {
-			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[fbEmbedNamed](t.Context()) },
-			marshal:  func() ([]byte, error) { return json.Marshal(fbEmbedNamed{}) },
-			errIs:    jsonschema.ErrInvalidJSONField,
-			wantErr:  "cannot have any options other than `embed` specified",
+			generate:    func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[fbEmbedNamed](t.Context()) },
+			marshal:     func() ([]byte, error) { return json.Marshal(fbEmbedNamed{}) },
+			err:         jsonschema.ErrInvalidJSONField,
+			errContains: "cannot have any options other than `embed` specified",
 		},
 		"embed on an unexported field": {
-			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[fbUnexported](t.Context()) },
-			marshal:  func() ([]byte, error) { return json.Marshal(fbUnexported{}) },
-			errIs:    jsonschema.ErrInvalidJSONField,
-			wantErr:  "unexported Go struct field extra cannot have non-ignored `json:\",embed\"` tag",
+			generate:    func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[fbUnexported](t.Context()) },
+			marshal:     func() ([]byte, error) { return json.Marshal(fbUnexported{}) },
+			err:         jsonschema.ErrInvalidJSONField,
+			errContains: "unexported Go struct field extra cannot have non-ignored `json:\",embed\"` tag",
 		},
 		"marshaler-bearing map type": {
-			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[fbMarshalerBearing](t.Context()) },
-			marshal:  func() ([]byte, error) { return json.Marshal(fbMarshalerBearing{}) },
-			errIs:    jsonschema.ErrInvalidJSONField,
-			wantErr:  "must not implement marshal or unmarshal methods",
+			generate:    func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[fbMarshalerBearing](t.Context()) },
+			marshal:     func() ([]byte, error) { return json.Marshal(fbMarshalerBearing{}) },
+			err:         jsonschema.ErrInvalidJSONField,
+			errContains: "must not implement marshal or unmarshal methods",
 		},
 		"key carrying marshal methods": {
-			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[fbBadKey](t.Context()) },
-			marshal:  func() ([]byte, error) { return json.Marshal(fbBadKey{}) },
-			errIs:    jsonschema.ErrInvalidJSONField,
-			wantErr:  "must have a string key that does not implement marshal or unmarshal methods",
+			generate:    func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[fbBadKey](t.Context()) },
+			marshal:     func() ([]byte, error) { return json.Marshal(fbBadKey{}) },
+			err:         jsonschema.ErrInvalidJSONField,
+			errContains: "must have a string key that does not implement marshal or unmarshal methods",
 		},
 		"named type with jsontext.Value underlying": {
-			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[fbNamedRawEmbed](t.Context()) },
-			marshal:  func() ([]byte, error) { return json.Marshal(fbNamedRawEmbed{}) },
-			errIs:    jsonschema.ErrInvalidJSONField,
-			wantErr:  "must be a Go struct, Go map of string key, or jsontext.Value",
+			generate:    func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[fbNamedRawEmbed](t.Context()) },
+			marshal:     func() ([]byte, error) { return json.Marshal(fbNamedRawEmbed{}) },
+			err:         jsonschema.ErrInvalidJSONField,
+			errContains: "must be a Go struct, Go map of string key, or jsontext.Value",
 		},
 		"non-string map key": {
-			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[fbIntKey](t.Context()) },
-			marshal:  func() ([]byte, error) { return json.Marshal(fbIntKey{}) },
-			errIs:    jsonschema.ErrInvalidJSONField,
-			wantErr:  "must be a Go struct, Go map of string key, or jsontext.Value",
+			generate:    func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[fbIntKey](t.Context()) },
+			marshal:     func() ([]byte, error) { return json.Marshal(fbIntKey{}) },
+			err:         jsonschema.ErrInvalidJSONField,
+			errContains: "must be a Go struct, Go map of string key, or jsontext.Value",
 		},
 		"map behind two pointer levels": {
-			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[fbPtrPtrMap](t.Context()) },
-			marshal:  func() ([]byte, error) { return json.Marshal(fbPtrPtrMap{}) },
-			errIs:    jsonschema.ErrInvalidJSONField,
-			wantErr:  "field Extra of type *map[string]int must be a Go struct, Go map of string key, or jsontext.Value",
+			generate:    func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[fbPtrPtrMap](t.Context()) },
+			marshal:     func() ([]byte, error) { return json.Marshal(fbPtrPtrMap{}) },
+			err:         jsonschema.ErrInvalidJSONField,
+			errContains: "field Extra of type *map[string]int must be a Go struct, Go map of string key, or jsontext.Value",
 		},
 		"scalar under embed": {
-			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[fbScalar](t.Context()) },
-			marshal:  func() ([]byte, error) { return json.Marshal(fbScalar{}) },
-			errIs:    jsonschema.ErrInvalidJSONField,
-			wantErr:  "must be a Go struct, Go map of string key, or jsontext.Value",
+			generate:    func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[fbScalar](t.Context()) },
+			marshal:     func() ([]byte, error) { return json.Marshal(fbScalar{}) },
+			err:         jsonschema.ErrInvalidJSONField,
+			errContains: "must be a Go struct, Go map of string key, or jsontext.Value",
 		},
 		"anonymous fallback form": {
-			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[fbAnon](t.Context()) },
-			marshal:  func() ([]byte, error) { return json.Marshal(fbAnon{}) },
-			errIs:    jsonschema.ErrInvalidJSONField,
-			wantErr:  "embedded Go struct field fbBag of non-struct type must be explicitly given a JSON name",
+			generate:    func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[fbAnon](t.Context()) },
+			marshal:     func() ([]byte, error) { return json.Marshal(fbAnon{}) },
+			err:         jsonschema.ErrInvalidJSONField,
+			errContains: "embedded Go struct field fbBag of non-struct type must be explicitly given a JSON name",
 		},
 		"duration value type": {
 			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[fbDurationValues](t.Context()) },
 			marshal: func() ([]byte, error) {
 				return json.Marshal(fbDurationValues{Extra: map[string]time.Duration{"d": time.Second}})
 			},
-			errIs:   jsonschema.ErrUnsupportedType,
-			wantErr: "embedded fallback field Extra",
+			err:         jsonschema.ErrUnsupportedType,
+			errContains: "embedded fallback field Extra",
 		},
 		"unrepresentable value type under open objects": {
 			// V is built before WithAdditionalProperties is consulted, so a
@@ -682,8 +682,8 @@ func TestGenerateFor_EmbeddedFallbackRefused(t *testing.T) {
 			marshal: func() ([]byte, error) {
 				return json.Marshal(fbFuncValues{Extra: map[string]func(){"f": func() {}}})
 			},
-			errIs:   jsonschema.ErrUnsupportedType,
-			wantErr: "embedded fallback field Extra",
+			err:         jsonschema.ErrUnsupportedType,
+			errContains: "embedded fallback field Extra",
 		},
 	}
 
@@ -692,8 +692,8 @@ func TestGenerateFor_EmbeddedFallbackRefused(t *testing.T) {
 			t.Parallel()
 
 			_, err := tc.generate()
-			require.ErrorIs(t, err, tc.errIs)
-			require.ErrorContains(t, err, tc.wantErr)
+			require.ErrorIs(t, err, tc.err)
+			require.ErrorContains(t, err, tc.errContains)
 
 			_, merr := tc.marshal()
 			require.Error(t, merr, "encoding/json/v2 refuses the same declaration")

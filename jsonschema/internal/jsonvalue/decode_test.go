@@ -250,32 +250,32 @@ func TestDecodeReader(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]struct {
-		reader io.Reader
-		want   any
-		err    string
-		errIs  error
+		reader      io.Reader
+		want        any
+		err         error
+		errContains string
 	}{
 		"decodes like the byte form": {
 			reader: strings.NewReader(`{"a": [1, "x"], "b": -0}`),
 			want:   map[string]any{"a": []any{json.Number("1"), "x"}, "b": json.Number("-0")},
 		},
 		"trailing data is rejected": {
-			reader: strings.NewReader(`1 2`),
-			err:    "after top-level value",
+			reader:      strings.NewReader(`1 2`),
+			errContains: "after top-level value",
 		},
 		"duplicate member names are rejected": {
-			reader: strings.NewReader(`{"a":1,"a":2}`),
-			err:    "duplicate object member name",
+			reader:      strings.NewReader(`{"a":1,"a":2}`),
+			errContains: "duplicate object member name",
 		},
 		"read error surfaces": {
-			reader: &failingReader{data: `{"a": 1`},
-			err:    "JSON decode:",
-			errIs:  errRead,
+			reader:      &failingReader{data: `{"a": 1`},
+			errContains: "JSON decode:",
+			err:         errRead,
 		},
 		"read error after the value surfaces": {
-			reader: &failingReader{data: `{"a": 1}`},
-			err:    "JSON decode:",
-			errIs:  errRead,
+			reader:      &failingReader{data: `{"a": 1}`},
+			errContains: "JSON decode:",
+			err:         errRead,
 		},
 	}
 
@@ -284,11 +284,11 @@ func TestDecodeReader(t *testing.T) {
 			t.Parallel()
 
 			got, err := decodeReaderAny(tt.reader)
-			if tt.err != "" {
-				require.ErrorContains(t, err, tt.err)
+			if tt.errContains != "" {
+				require.ErrorContains(t, err, tt.errContains)
 
-				if tt.errIs != nil {
-					require.ErrorIs(t, err, tt.errIs)
+				if tt.err != nil {
+					require.ErrorIs(t, err, tt.err)
 				}
 
 				return
