@@ -255,14 +255,10 @@ func TestValidationError_InstanceSegments(t *testing.T) {
 func TestValidationError_InstanceSegments_SiblingsDoNotAlias(t *testing.T) {
 	t.Parallel()
 
-	// Both leaves descend from the same parent location, so this catches an
-	// append into a shared backing array overwriting a sibling's segment.
-	// The siblings branch at depth 4 because that is where a plain append
-	// would first alias: append's doubling growth (1, 2, 4) gives the shared
-	// three-segment prefix spare capacity (len 3, cap 4), so without the full
-	// slice expression both descents would write their fourth segment into
-	// the same backing array slot. At shallower depths cap equals len and
-	// every append reallocates, hiding the bug.
+	// Both leaves descend from the same parent location and the walk appends
+	// their fourth segment into the same slot of one shared segment stack, so
+	// this catches an error that keeps a view of the stack instead of a copy:
+	// the second sibling's descent would overwrite the first error's segment.
 	schema := &jsonschema.Schema{
 		Type: "object",
 		Properties: map[string]*jsonschema.Schema{
@@ -552,6 +548,65 @@ func TestValidationError_SchemaSegments_RenderEqualsSchemaPath(t *testing.T) {
 	walkTree(ve)
 
 	assert.Greater(t, checked, 4, "the error tree should exercise several locations")
+}
+
+// TestValidationError_SchemaSegments_SiblingsDoNotAlias is the schema-side
+// counterpart of the instance-side sibling test: two failing anyOf branches,
+// each with two failing properties, produce four leaves whose schema
+// locations share every prefix and diverge at the branch index and at the
+// property name. Each leaf is built while its siblings are still to come, so
+// an error that kept a view of the shared segment stack instead of a copy
+// would report a later sibling's segments.
+func TestValidationError_SchemaSegments_SiblingsDoNotAlias(t *testing.T) {
+	t.Parallel()
+
+	schema := &jsonschema.Schema{
+		AnyOf: []*jsonschema.Schema{
+			{
+				Properties: map[string]*jsonschema.Schema{
+					"a": {Type: "string"},
+					"b": {Type: "string"},
+				},
+			},
+			{
+				Properties: map[string]*jsonschema.Schema{
+					"a": {Type: "number"},
+					"b": {Type: "number"},
+				},
+			},
+		},
+	}
+
+	err := jsonschema.Validate(t.Context(), schema, map[string]any{"a": true, "b": true})
+
+	var ve *jsonschema.ValidationError
+
+	require.ErrorAs(t, err, &ve)
+	assert.Equal(t, jsontext.Pointer("/anyOf"), ve.SchemaPath)
+	assert.Equal(t, []jsonschema.Segment{{Key: "anyOf"}}, ve.SchemaSegments())
+
+	got := map[jsontext.Pointer][]jsonschema.Segment{}
+	for _, leaf := range ve.Leaves() {
+		got[leaf.SchemaPath] = leaf.SchemaSegments()
+	}
+
+	typeAt := func(branch int, prop string) []jsonschema.Segment {
+		return []jsonschema.Segment{
+			{Key: "anyOf"}, {Index: branch, IsIndex: true}, {Key: "properties"}, {Key: prop}, {Key: "type"},
+		}
+	}
+
+	assert.Equal(t, map[jsontext.Pointer][]jsonschema.Segment{
+		"/anyOf/0/properties/a/type": typeAt(0, "a"),
+		"/anyOf/0/properties/b/type": typeAt(0, "b"),
+		"/anyOf/1/properties/a/type": typeAt(1, "a"),
+		"/anyOf/1/properties/b/type": typeAt(1, "b"),
+	}, got)
+
+	for _, leaf := range ve.Leaves() {
+		assert.Equal(t, []jsonschema.Segment{{Key: leaf.InstancePath.LastToken()}}, leaf.InstanceSegments(),
+			"instance segments for %q", leaf.SchemaPath)
+	}
 }
 
 func TestValidationError_SchemaSegments_HandConstructed(t *testing.T) {

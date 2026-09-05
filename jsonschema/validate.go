@@ -142,6 +142,16 @@ type visitKey struct {
 // JSON Pointer string surfaced as [ValidationError.InstancePath], and the typed
 // segments surfaced as [ValidationError.InstanceSegments]. The zero value is
 // the root location (empty pointer, nil segments).
+//
+// Every location of one walk shares a single segment stack. The walk is
+// depth-first and sequential, so when a child location is built the
+// slot past its parent's length belongs to no live location, and a plain
+// append writes there (reallocating only when the stack outgrows its
+// capacity). A sibling built after the child returns overwrites the same
+// slot, which is why the segments are read in exactly one place, [newError],
+// and cloned there before the error outlives the descent that built it.
+// Building two sibling locations before descending into the first would
+// break this discipline; no site does.
 type instanceLocation struct {
 	// The RFC 6901-encoded JSON Pointer.
 	ptr jsontext.Pointer
@@ -150,22 +160,20 @@ type instanceLocation struct {
 }
 
 // key returns the location of the object member named name, extending both
-// representations. The full slice expression caps segs so sibling descents
-// append into fresh backing arrays instead of aliasing a shared one.
+// representations.
 func (l instanceLocation) key(name string) instanceLocation {
 	return instanceLocation{
 		ptr:  jsonptr.AppendToken(l.ptr, name),
-		segs: append(slices.Clip(l.segs), Segment{Key: name}),
+		segs: append(l.segs, Segment{Key: name}),
 	}
 }
 
 // index returns the location of the array element at index i, extending both
-// representations. The full slice expression caps segs so sibling descents
-// append into fresh backing arrays instead of aliasing a shared one.
+// representations.
 func (l instanceLocation) index(i int) instanceLocation {
 	return instanceLocation{
 		ptr:  jsonptr.AppendToken(l.ptr, strconv.Itoa(i)),
-		segs: append(slices.Clip(l.segs), Segment{Index: i, IsIndex: true}),
+		segs: append(l.segs, Segment{Index: i, IsIndex: true}),
 	}
 }
 
@@ -173,7 +181,8 @@ func (l instanceLocation) index(i int) instanceLocation {
 // currently at, the schema-side counterpart of [instanceLocation]: the RFC
 // 6901 JSON Pointer surfaced as [ValidationError.SchemaPath], and the typed
 // segments surfaced as [ValidationError.SchemaSegments]. The zero value is
-// the root location (empty pointer, nil segments).
+// the root location (empty pointer, nil segments). Its segments share one
+// stack per walk under the discipline described on [instanceLocation].
 type schemaLocation struct {
 	// The RFC 6901-encoded JSON Pointer.
 	ptr jsontext.Pointer
@@ -182,44 +191,50 @@ type schemaLocation struct {
 }
 
 // kw returns the location of the keyword token named keyword, extending both
-// representations. The full slice expression caps segs so sibling descents
-// append into fresh backing arrays instead of aliasing a shared one.
+// representations.
 func (l schemaLocation) kw(keyword string) schemaLocation {
 	return schemaLocation{
 		ptr:  jsonptr.AppendToken(l.ptr, keyword),
-		segs: append(slices.Clip(l.segs), Segment{Key: keyword}),
+		segs: append(l.segs, Segment{Key: keyword}),
 	}
 }
 
 // key returns the location of the member named name under a map keyword
 // (properties, patternProperties, dependentSchemas, ...), extending both
-// representations with the aliasing discipline of [schemaLocation.kw].
+// representations.
 func (l schemaLocation) key(name string) schemaLocation {
 	return schemaLocation{
 		ptr:  jsonptr.AppendToken(l.ptr, name),
-		segs: append(slices.Clip(l.segs), Segment{Key: name}),
+		segs: append(l.segs, Segment{Key: name}),
 	}
 }
 
 // idx returns the location of the element at index i under a list keyword
-// (allOf, anyOf, oneOf, prefixItems, ...), extending both representations
-// with the aliasing discipline of [schemaLocation.kw].
+// (allOf, anyOf, oneOf, prefixItems, ...), extending both representations.
 func (l schemaLocation) idx(i int) schemaLocation {
 	return schemaLocation{
 		ptr:  jsonptr.AppendToken(l.ptr, strconv.Itoa(i)),
-		segs: append(slices.Clip(l.segs), Segment{Index: i, IsIndex: true}),
+		segs: append(l.segs, Segment{Index: i, IsIndex: true}),
 	}
 }
+
+// rootSegmentCapacity is the segment stack capacity each walk starts with, on
+// both the instance and the schema side, so the ordinary depth of a descent
+// never reallocates the stack.
+const rootSegmentCapacity = 16
 
 // newError builds a validation error at the given instance location and the
 // fully-formed schema location, copying both path representations from the typed
 // locations through this single constructor so the four private path fields can
-// never be mismatched at a call site. It is a fresh value each call, keeping
-// validation safe to run concurrently on a shared [Validator]. [leafError] and
-// [wrapError] are the keyword-appending conveniences over it for the common case
-// where the schema location is exactly the keyword asserted; the few call sites
-// whose location names a map member (patternProperties, dependencies) or omits a
-// keyword (the boolean false schema) pass the location here directly.
+// never be mismatched at a call site. It is the one reader of the shared segment
+// stacks and clones them, so the error owns its segments once the descent that
+// built the locations returns and later siblings reuse the slots. It is a fresh
+// value each call, keeping validation safe to run concurrently on a shared
+// [Validator]. [leafError] and [wrapError] are the keyword-appending conveniences
+// over it for the common case where the schema location is exactly the keyword
+// asserted; the few call sites whose location names a map member
+// (patternProperties, dependencies) or omits a keyword (the boolean false schema)
+// pass the location here directly.
 func newError(
 	instancePath instanceLocation,
 	schemaPath schemaLocation,
@@ -228,13 +243,23 @@ func newError(
 ) *ValidationError {
 	return &ValidationError{
 		InstancePath: instancePath.ptr,
-		segments:     instancePath.segs,
+		segments:     cloneSegments(instancePath.segs),
 		SchemaPath:   schemaPath.ptr,
-		schemaSegs:   schemaPath.segs,
+		schemaSegs:   cloneSegments(schemaPath.segs),
 		Keyword:      keyword,
 		Message:      msg,
 		Causes:       causes,
 	}
+}
+
+// cloneSegments copies a location's segments off the shared stack, keeping
+// the root location's segments nil so a root error reports none.
+func cloneSegments(segs []Segment) []Segment {
+	if len(segs) == 0 {
+		return nil
+	}
+
+	return slices.Clone(segs)
 }
 
 // leafError builds a terminal (cause-free) validation error at the keyword token
@@ -1600,8 +1625,13 @@ func (c *Validator) validateNormalized(ctx context.Context, instance jsonvalue.V
 
 	// The run context reaches the resolver through the per-run ctx field set
 	// by forInstance: the recursive walk cannot thread a parameter.
+	// Each run starts its own segment stacks, so runs on a shared Validator
+	// never share one.
+	instancePath := instanceLocation{segs: make([]Segment, 0, rootSegmentCapacity)}
+	schemaPath := schemaLocation{segs: make([]Segment, 0, rootSegmentCapacity)}
+
 	//nolint:contextcheck // See the comment above.
-	errs := v.validate(v.root, instance, instanceLocation{}, schemaLocation{}, nil)
+	errs := v.validate(v.root, instance, instancePath, schemaPath, nil)
 	if len(errs) == 0 {
 		return nil
 	}
@@ -2752,7 +2782,10 @@ func evalObjectApplicators(ctx evalContext) []*ValidationError {
 
 	// Properties. Iterate in sorted-key order so the emitted error order is
 	// deterministic; Go map iteration is randomized. The key set is fixed
-	// per schema, so the sort is precomputed at Compile time.
+	// per schema, so the sort is precomputed at Compile time. The keyword
+	// location is built once and every property extends it.
+	propsSchemaPath := schemaPath.kw(KeywordProperties)
+
 	for _, propName := range v.propertyKeysFor(ctx.nodeID, schema) {
 		propSchema := schema.Properties[propName]
 		val, exists := obj[propName]
@@ -2767,7 +2800,7 @@ func evalObjectApplicators(ctx evalContext) []*ValidationError {
 		ann.RecordProperty(propName)
 
 		childPath := instancePath.key(propName)
-		childSchemaPath := schemaPath.kw(KeywordProperties).key(propName)
+		childSchemaPath := propsSchemaPath.key(propName)
 		childErrs := v.validate(propSchema, val, childPath, childSchemaPath, nil)
 		labelFalseSchemaKeyword(childErrs, propSchema, KeywordProperties)
 
