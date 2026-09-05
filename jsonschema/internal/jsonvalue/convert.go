@@ -28,8 +28,8 @@ type walk struct {
 	// renders to a different shape than the converted value: a nil []any or
 	// map[string]any (null, where the empty instance writes [] or {}), a
 	// float32 (v1 formats the 32-bit shortest decimal, where the walk widens
-	// the bits to float64), a [jsonv1.Number] outside the JSON number grammar
-	// (v1 writes an empty one as 0 and refuses any other), and, with document
+	// the bits to float64), a [jsonv1.Number] outside the strict JSON number
+	// grammar (v1 writes an empty one as 0 and refuses any other), and, with document
 	// set, a string or member name holding invalid UTF-8 (v1 writes U+FFFD).
 	render bool
 }
@@ -153,8 +153,12 @@ func (w *walk) value(instance any) (Value, bool) {
 		return NewString(v), true
 
 	case jsonv1.Number:
+		// The decimal parser accepts a few spellings outside the JSON grammar
+		// (a leading '+', a leading zero, a bare '.5' or '5.') that v1
+		// refuses to write, so the grammar is checked outright: a literal
+		// outside it takes the render path, where v1 reports the refusal.
 		out := NewNumber(string(v))
-		if out.num == numNone {
+		if out.num == numNone || !isJSONNumber(string(v)) {
 			w.render = true
 		}
 
@@ -275,4 +279,61 @@ func intLiteral(v any) (string, bool) {
 	default:
 		return "", false
 	}
+}
+
+// isJSONNumber reports whether s matches the JSON number grammar exactly: an
+// optional '-', an integer part with no leading zero, an optional fraction,
+// and an optional exponent. It mirrors [encoding/json]'s own check, which
+// refuses every other spelling a [jsonv1.Number] can carry.
+func isJSONNumber(s string) bool {
+	if s == "" {
+		return false
+	}
+
+	i := 0
+	if s[i] == '-' {
+		i++
+	}
+
+	switch {
+	case i == len(s):
+		return false
+	case s[i] == '0':
+		i++
+	case s[i] >= '1' && s[i] <= '9':
+		for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+			i++
+		}
+
+	default:
+		return false
+	}
+
+	if i < len(s) && s[i] == '.' {
+		i++
+		if i == len(s) || s[i] < '0' || s[i] > '9' {
+			return false
+		}
+
+		for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+			i++
+		}
+	}
+
+	if i < len(s) && (s[i] == 'e' || s[i] == 'E') {
+		i++
+		if i < len(s) && (s[i] == '+' || s[i] == '-') {
+			i++
+		}
+
+		if i == len(s) || s[i] < '0' || s[i] > '9' {
+			return false
+		}
+
+		for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+			i++
+		}
+	}
+
+	return i == len(s)
 }

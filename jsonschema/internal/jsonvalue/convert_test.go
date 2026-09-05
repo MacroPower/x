@@ -526,3 +526,37 @@ func TestNormalize(t *testing.T) {
 func sameMap(a, b map[string]any) bool {
 	return reflect.ValueOf(a).UnsafePointer() == reflect.ValueOf(b).UnsafePointer()
 }
+
+// TestFromDocumentNumberGrammar pins that a json.Number outside the strict
+// JSON grammar has no document form. The decimal parser tolerates a leading
+// '+', a leading zero, and a bare '.5' or '5.', so those literals used to
+// convert to a comparable number although encoding/json refuses to write
+// them; a hand-built schema pinning such a value then matched instances the
+// emitted document could never carry.
+func TestFromDocumentNumberGrammar(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]bool{
+		"01":      false,
+		"+5":      false,
+		".5":      false,
+		"5.":      false,
+		"1e":      false,
+		"0x10":    false,
+		"-0":      true,
+		"0":       true,
+		"1.5e-3":  true,
+		"10E+2":   true,
+		"-12.25":  true,
+		"1234567": true,
+	}
+
+	for literal, ok := range tests {
+		t.Run(literal, func(t *testing.T) {
+			t.Parallel()
+
+			_, got := jsonvalue.FromDocument(jsonv1.Number(literal))
+			assert.Equal(t, ok, got)
+		})
+	}
+}
