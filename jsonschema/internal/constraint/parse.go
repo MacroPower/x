@@ -41,7 +41,9 @@ const maxExactInt = int64(1) << 53
 func ParseNumericBound(value string, kind reflect.Kind) (Endpoint, error) {
 	switch {
 	case numkind.IsUnsigned(kind):
-		n, err := strconv.ParseUint(value, 10, 64)
+		// ParseUint refuses the explicit '+' the signed and float parsers
+		// accept, and a literal reads the same way whatever the kind.
+		n, err := strconv.ParseUint(strings.TrimPrefix(value, "+"), 10, 64)
 		if err != nil {
 			return Endpoint{}, fmt.Errorf("invalid unsigned integer %q: %w", value, err)
 		}

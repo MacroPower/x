@@ -247,3 +247,20 @@ func TestParseNumericBoundKindMatrix(t *testing.T) {
 	require.NoError(t, err)
 	assert.InDelta(t, 1.5, got.Val, 0)
 }
+
+// TestParseNumericBoundLeadingPlus pins that an explicit '+' reads the same
+// way at every kind. The unsigned branch parses with strconv.ParseUint, which
+// refuses the sign the signed and float branches accept, so the same literal
+// used to be valid or invalid by the field's signedness alone.
+func TestParseNumericBoundLeadingPlus(t *testing.T) {
+	t.Parallel()
+
+	for _, kind := range []reflect.Kind{reflect.Uint, reflect.Int, reflect.Float64, reflect.Invalid} {
+		got, err := constraint.ParseNumericBound("+5", kind)
+		require.NoError(t, err, kind)
+		assert.InDelta(t, 5, got.Val, 0, kind)
+	}
+
+	_, err := constraint.ParseNumericBound("-5", reflect.Uint)
+	require.Error(t, err, "a negative literal still fails at an unsigned kind")
+}
