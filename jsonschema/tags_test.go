@@ -3759,3 +3759,19 @@ func TestTagTypoKeyWithSpacedValueStillErrors(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "a=b is the formula", s.Properties["v"].Description)
 }
+
+// TestTagUniqueItemsTwiceIsRejected pins that uniqueItems named twice in one
+// tag is the same repeated-key error every other boolean annotation gets. The
+// unique operation is not an overwriting one in the shared model, so the tag
+// front-end used to skip the check and two contradictory values resolved
+// silently to true.
+func TestTagUniqueItemsTwiceIsRejected(t *testing.T) {
+	t.Parallel()
+
+	type T struct {
+		V []string `json:"v" jsonschema:"uniqueItems=true,uniqueItems=false"`
+	}
+
+	_, err := jsonschema.GenerateFor[T](t.Context())
+	require.ErrorContains(t, err, `key "uniqueItems" is set twice in one tag`)
+}

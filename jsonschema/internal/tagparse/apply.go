@@ -334,7 +334,11 @@ func (s *applyState) applyKey(key, value string) error {
 // applyConstraint binds a constraint key's value against its declared arity and
 // hands the rule to the shared model.
 func (s *applyState) applyConstraint(rule tagmodel.KeyRule, key, value string) error {
-	if rule.Op.Overwrites() {
+	// The unique operation does not overwrite in the model (a repeated bare
+	// unique in the validate dialect is idempotent), but this dialect spells
+	// it with a boolean, so two values in one tag are two intentions and
+	// take the same repeated-key check as every other overwriting key.
+	if rule.Op.Overwrites() || rule.Op == tagmodel.OpUnique {
 		err := s.checkRepeat(key)
 		if err != nil {
 			return err
