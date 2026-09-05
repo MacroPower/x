@@ -326,6 +326,13 @@ var (
 	// alias chain cycles back to itself (a self-Ref, or a mutual A -> B -> A
 	// chain, which no finite reference graph can satisfy).
 	ErrConflictingTypeSchema = errors.New("conflicting type schema")
+
+	// ErrNonFiniteBound is returned by [Generate] for a numeric bound
+	// (minimum, maximum, exclusiveMinimum, exclusiveMaximum, multipleOf) a
+	// type-level hook declares as NaN or an infinity. JSON carries neither,
+	// and the bound algebra reads a non-finite bound as no bound, so the
+	// value is refused rather than silently dropped.
+	ErrNonFiniteBound = errors.New("non-finite numeric bound")
 )
 
 // ValidationError represents a JSON Schema validation failure.

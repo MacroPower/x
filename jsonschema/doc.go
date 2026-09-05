@@ -88,6 +88,9 @@
 //   - [ErrInvalidDefaultsInstance] reports a [WithDefaultsFrom] instance that
 //     does not match the generated root type or does not marshal to a JSON
 //     object.
+//   - [ErrNonFiniteBound] reports a numeric bound a type-level hook declares
+//     as NaN or an infinity, which JSON cannot carry and the bound algebra
+//     would otherwise read as no bound at all.
 //
 // Every error carries the path to the offending field, as in
 // "field \"data\": unsupported type".

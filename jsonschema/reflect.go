@@ -547,6 +547,11 @@ func (g *run) finishTypeOverride(t reflect.Type, ts TypeSchema, pointer bool) (*
 	s := value.CloneSchemas()
 	schemashape.CloneOverrideExtras(s)
 
+	err = checkFiniteBounds(t, s)
+	if err != nil {
+		return nil, err
+	}
+
 	// Apply type-level comments.
 	err = g.applyTypeDescription(t, s)
 	if err != nil {
@@ -1978,10 +1983,38 @@ func (g *run) extendTypeSchema(t reflect.Type, n *node) (Nullability, error) {
 	}
 
 	if ts.Value != nil {
+		err = checkFiniteBounds(t, ts.Value)
+		if err != nil {
+			return NullFromReflection, err
+		}
+
 		n.absorbView(ts.Value, pristine, g.draft)
 	}
 
 	return ts.Nullability, nil
+}
+
+// checkFiniteBounds refuses a numeric bound a hook declared as NaN or an
+// infinity. The bound algebra reads a non-finite float64 as no bound, so the
+// rendered schema would silently carry none where the hook meant one, and
+// JSON could not carry the value anyway.
+func checkFiniteBounds(t reflect.Type, s *Schema) error {
+	for _, b := range []struct {
+		val  *float64
+		name string
+	}{
+		{s.Minimum, keyword.Minimum},
+		{s.Maximum, keyword.Maximum},
+		{s.ExclusiveMinimum, keyword.ExclusiveMinimum},
+		{s.ExclusiveMaximum, keyword.ExclusiveMaximum},
+		{s.MultipleOf, keyword.MultipleOf},
+	} {
+		if b.val != nil && (math.IsNaN(*b.val) || math.IsInf(*b.val, 0)) {
+			return fmt.Errorf("%w: type %s declares %s %v", ErrNonFiniteBound, t, b.name, *b.val)
+		}
+	}
+
+	return nil
 }
 
 // jsonTagInfo holds parsed json tag information.

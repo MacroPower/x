@@ -7677,3 +7677,47 @@ func TestDefaultsFromSeedsUnderJSONOptions(t *testing.T) {
 	assert.Equal(t, "null", string(prop.Default),
 		"a nil slice seeds the null the configured marshal writes")
 }
+
+// TestGenerateFor_NonFiniteBoundRefused pins that a numeric bound a type-level
+// hook declares as NaN or an infinity is refused. The bound algebra reads a
+// non-finite float64 as no bound, so the rendered field used to carry none
+// where the hook meant one, accepting every number with nothing reported.
+func TestGenerateFor_NonFiniteBoundRefused(t *testing.T) {
+	t.Parallel()
+
+	type T struct {
+		N int `json:"n"`
+	}
+
+	t.Run("type schema value", func(t *testing.T) {
+		t.Parallel()
+
+		inf := math.Inf(1)
+
+		_, err := jsonschema.GenerateFor[T](t.Context(),
+			jsonschema.WithTypeSchemaFor[int](jsonschema.TypeSchema{
+				Value: &jsonschema.Schema{Type: "integer", Minimum: &inf},
+			}))
+		require.ErrorIs(t, err, jsonschema.ErrNonFiniteBound)
+		require.ErrorContains(t, err, "minimum")
+	})
+
+	t.Run("extender", func(t *testing.T) {
+		t.Parallel()
+
+		nan := math.NaN()
+
+		_, err := jsonschema.GenerateFor[T](t.Context(),
+			jsonschema.WithTypeSchemaExtender(jsonschema.TypeSchemaExtenderFunc(
+				func(_ context.Context, tc jsonschema.TypeContext, ts *jsonschema.TypeSchema) error {
+					if tc.Type == reflect.TypeFor[int]() {
+						ts.Value.MultipleOf = &nan
+					}
+
+					return nil
+				},
+			)))
+		require.ErrorIs(t, err, jsonschema.ErrNonFiniteBound)
+		require.ErrorContains(t, err, "multipleOf")
+	})
+}
