@@ -849,10 +849,16 @@ func legacyDependenciesCompile(v *validator, id int, s *Schema) {
 // dependencyKeysFor returns deps' keys in sorted order, preferring the cached
 // slice pick selects from the node's [dependencyKeys] entry and sorting on
 // the fly for a schema outside the index (a remote or JSON-pointer fallback
-// schema reached only at validation time).
+// schema reached only at validation time). An empty map returns nil without
+// consulting the cache: the compile steps store nothing for it, and most
+// object nodes set none of the dependency keywords.
 func dependencyKeysFor[T any](
 	v *validator, id int, deps map[string]T, pick func(*dependencyKeys) []string,
 ) []string {
+	if len(deps) == 0 {
+		return nil
+	}
+
 	if v.inIndex(id) {
 		if dk := v.depKeys[id]; dk != nil {
 			if keys := pick(dk); keys != nil {
@@ -2122,7 +2128,13 @@ func (v *validator) boundsFor(id int, schema *Schema) *precomputedBounds {
 // propertyKeysFor returns schema.Properties' keys in sorted order, preferring
 // the per-node cache and sorting on the fly for a schema outside the index
 // (a remote or JSON-pointer fallback schema reached only at validation time).
+// An empty map returns nil without consulting the cache, which holds no entry
+// for it.
 func (v *validator) propertyKeysFor(id int, schema *Schema) []string {
+	if len(schema.Properties) == 0 {
+		return nil
+	}
+
 	if v.inIndex(id) && v.sortedPropertyKeys[id] != nil {
 		return v.sortedPropertyKeys[id]
 	}
@@ -2133,6 +2145,10 @@ func (v *validator) propertyKeysFor(id int, schema *Schema) []string {
 // patternKeysFor returns schema.PatternProperties' keys in sorted order, with
 // the same per-node cache and on-the-fly fallback as [propertyKeysFor].
 func (v *validator) patternKeysFor(id int, schema *Schema) []string {
+	if len(schema.PatternProperties) == 0 {
+		return nil
+	}
+
 	if v.inIndex(id) && v.sortedPatternKeys[id] != nil {
 		return v.sortedPatternKeys[id]
 	}
