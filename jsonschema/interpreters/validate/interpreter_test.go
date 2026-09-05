@@ -1804,34 +1804,36 @@ func TestRequiredOnBoolProducesConstTrue(t *testing.T) {
 		"required on bool produces a const:true constraint")
 }
 
-func TestTrailingDiveErrors(t *testing.T) {
+func TestTrailingDiveIsNoOp(t *testing.T) {
 	t.Parallel()
 
-	// A trailing dive needs a real element constraint. A bare dive, or one
-	// followed only by control or cross-field tags, has nothing to apply to the
-	// element and is an error, matching go-playground/validator. The error is
-	// raised before the element is descended into, so a canvas with no backing
-	// element node still exercises it.
-	errCases := map[string]string{
+	// A bare dive, or one followed only by control or cross-field tags, has
+	// nothing to apply to the element. The go-playground validator descends
+	// into nothing and accepts the tag, so the interpreter does the same rather
+	// than refusing a struct the validator takes. Nothing is descended into, so
+	// a canvas with no backing element node still exercises it.
+	noOpCases := map[string]string{
 		"bare dive":             "dive",
 		"dive then omitempty":   "dive,omitempty",
 		"dive then structonly":  "dive,structonly",
 		"dive then cross-field": "dive,eqfield=Other",
 	}
 
-	for name, tag := range errCases {
+	for name, tag := range noOpCases {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
+			canvas := &jsonschema.Schema{}
+
 			err := validate.NewInterpreter().Interpret(t.Context(), jsonschema.FieldContext{
 				Type:   reflect.TypeFor[[]string](),
-				Canvas: &jsonschema.Schema{},
+				Canvas: canvas,
 				Parent: &jsonschema.Schema{},
 				Name:   "items",
 			}, jsonschema.Tag{Key: "validate", Value: tag})
 
-			require.Error(t, err,
-				"a trailing dive with only control/cross-field tags is an error")
+			require.NoError(t, err, "a trailing dive is a no-op, as in go-playground")
+			assert.Equal(t, &jsonschema.Schema{}, canvas, "nothing lands on the canvas")
 		})
 	}
 
@@ -2869,4 +2871,103 @@ func assertForbidsNull(t *testing.T, s *jsonschema.Schema) {
 	}
 
 	assert.Contains(t, s.Not.Enum, nil, "null is among the forbidden values")
+}
+
+// TestValidateInterpreterGoPlaygroundParity pins a handful of spellings where
+// the interpreter used to diverge from go-playground/validator: isdefault is
+// a value validator there, not a control tag, so it is an unrecognized
+// constraint here rather than a silent skip; a non-canonical numeric oneof
+// token matches no value there, so it is an error here; eq= and unique= carry
+// an empty parameter there, so they do here; a trailing dive is a no-op
+// there, so it is here; and an empty first OR alternative is refused there,
+// so it is here.
+func TestValidateInterpreterGoPlaygroundParity(t *testing.T) {
+	t.Parallel()
+
+	opt := jsonschema.WithTagInterpreter("validate", validate.NewInterpreter())
+
+	t.Run("isdefault is unrecognized", func(t *testing.T) {
+		t.Parallel()
+
+		type T struct {
+			Name string `json:"name" validate:"isdefault"`
+		}
+
+		_, err := jsonschema.GenerateFor[T](t.Context(), opt)
+		require.ErrorContains(t, err, `unrecognized validator "isdefault"`)
+	})
+
+	t.Run("non-canonical numeric oneof token", func(t *testing.T) {
+		t.Parallel()
+
+		type T struct {
+			F int `json:"f" validate:"oneof=+1 01 2"`
+		}
+
+		_, err := jsonschema.GenerateFor[T](t.Context(), opt)
+		require.ErrorContains(t, err, `"+1" is not the canonical spelling "1"`)
+
+		type U struct {
+			F int `json:"f" validate:"oneof=1 1 2"`
+		}
+
+		s, err := jsonschema.GenerateFor[U](t.Context(), opt)
+		require.NoError(t, err)
+		assert.Len(t, s.Properties["f"].Enum, 2, "a repeated token enumerates once")
+	})
+
+	t.Run("empty eq pins the empty string", func(t *testing.T) {
+		t.Parallel()
+
+		type T struct {
+			F string `json:"f" validate:"eq="`
+		}
+
+		s, err := jsonschema.GenerateFor[T](t.Context(), opt)
+		require.NoError(t, err)
+		require.NotNil(t, s.Properties["f"].Const)
+		assert.Empty(t, *s.Properties["f"].Const)
+
+		type N struct {
+			F int `json:"f" validate:"eq="`
+		}
+
+		_, err = jsonschema.GenerateFor[N](t.Context(), opt)
+		require.Error(t, err, "an empty literal is no number")
+	})
+
+	t.Run("empty unique parameter is the bare unique", func(t *testing.T) {
+		t.Parallel()
+
+		type T struct {
+			Tags []string `json:"tags" validate:"unique="`
+		}
+
+		s, err := jsonschema.GenerateFor[T](t.Context(), opt)
+		require.NoError(t, err)
+		assert.True(t, s.Properties["tags"].UniqueItems)
+	})
+
+	t.Run("trailing dive is a no-op", func(t *testing.T) {
+		t.Parallel()
+
+		type T struct {
+			Tags []string `json:"tags" validate:"required,dive"`
+		}
+
+		s, err := jsonschema.GenerateFor[T](t.Context(), opt)
+		require.NoError(t, err)
+		assert.Contains(t, s.Required, "tags")
+	})
+
+	t.Run("empty first OR alternative is refused", func(t *testing.T) {
+		t.Parallel()
+
+		type T struct {
+			F string `json:"f" validate:"|required"`
+		}
+
+		_, err := jsonschema.GenerateFor[T](t.Context(), opt)
+		require.ErrorContains(t, err, "empty OR alternative")
+	})
 }

@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"go.jacobcolvin.com/x/jsonschema"
+	"go.jacobcolvin.com/x/jsonschema/internal/numkind"
 	"go.jacobcolvin.com/x/jsonschema/internal/tagmodel"
 )
 
@@ -79,6 +82,13 @@ func applyParts(parts []string, field jsonschema.FieldContext) error {
 		// constraints intact. A literal pipe in a param is written 0x7C and
 		// survives, since unescapeParam runs after this split.
 		if i := strings.IndexByte(part, '|'); i >= 0 {
+			// An empty first alternative is a tag go-playground refuses
+			// outright; dropping the whole group would silently weaken the
+			// schema instead.
+			if strings.TrimSpace(part[:i]) == "" {
+				return fmt.Errorf("validate tag: empty OR alternative in %q", part)
+			}
+
 			part = part[:i]
 		}
 
@@ -93,10 +103,11 @@ func applyParts(parts []string, field jsonschema.FieldContext) error {
 		// treated as a value-element dive. Only handle dive outside the block.
 		if part == "dive" && !inKeys {
 			// Descend into element type. A trailing dive with no subsequent
-			// constraints is an error (matches go-playground/validator).
+			// constraints descends into nothing, which go-playground/validator
+			// accepts as a no-op.
 			remaining := parts[idx+1:]
 			if !hasConstraint(remaining) {
-				return fmt.Errorf("validate tag: dive with no subsequent constraints")
+				return nil
 			}
 
 			return applyDive(remaining, field)
@@ -185,9 +196,67 @@ func applyValidator(key, value string, hasValue bool, field jsonschema.FieldCont
 		return fmt.Errorf("validate tag: %s: %w", reason, err)
 	}
 
+	// A coerced number is exempt: its scalars are canonicalized against the
+	// serialized text by design (see the package doc).
+	if bound.Op == tagmodel.OpOneOf && shape.Form == tagmodel.FormNumber {
+		err = checkCanonicalOneOf(shape.Kind, bound.Params.Values())
+		if err != nil {
+			return fmt.Errorf("validate tag: %s: %w", key, err)
+		}
+	}
+
 	err = field.ConstraintsFor(shape).Apply(bound.Op, bound.Axis, bound.Params.Values()...)
 	if err != nil {
 		return wrapApplyError(key, value, err)
+	}
+
+	return nil
+}
+
+// checkCanonicalOneOf rejects a oneof token on a numeric kind whose spelling
+// go-playground could never match. Its isOneOf compares the field's value
+// formatted with strconv against the raw tokens, so a token such as +1, 01,
+// or 1.0 matches no value at all, while the enum this dialect emits would
+// admit the number it parses to. A token that does not parse at the kind's
+// width is left to the model, which reports the parse or range fault.
+func checkCanonicalOneOf(kind reflect.Kind, tokens []string) error {
+	bits := kindBits(kind)
+
+	for _, tok := range tokens {
+		var canonical string
+
+		switch {
+		case numkind.IsUnsigned(kind):
+			n, err := strconv.ParseUint(tok, 10, bits)
+			if err != nil {
+				continue
+			}
+
+			canonical = strconv.FormatUint(n, 10)
+
+		case numkind.IsInteger(kind):
+			n, err := strconv.ParseInt(tok, 10, bits)
+			if err != nil {
+				continue
+			}
+
+			canonical = strconv.FormatInt(n, 10)
+
+		case numkind.IsFloat(kind):
+			f, err := strconv.ParseFloat(tok, bits)
+			if err != nil {
+				continue
+			}
+
+			canonical = strconv.FormatFloat(f, 'f', -1, 64)
+
+		default:
+			return nil
+		}
+
+		if canonical != tok {
+			return fmt.Errorf("%q is not the canonical spelling %q go-playground compares against", tok, canonical)
+		}
 	}
 
 	return nil
@@ -277,6 +346,21 @@ func addRequired(parent *jsonschema.Schema, name string) {
 	parent.Required = append(parent.Required, name)
 }
 
+// kindBits returns the bit width a numeric kind parses at, 64 for the
+// platform-sized and 64-bit kinds.
+func kindBits(kind reflect.Kind) int {
+	switch kind {
+	case reflect.Int8, reflect.Uint8:
+		return 8
+	case reflect.Int16, reflect.Uint16:
+		return 16
+	case reflect.Int32, reflect.Uint32, reflect.Float32:
+		return 32
+	default:
+		return 64
+	}
+}
+
 // splitOneOfValues tokenizes a oneof tag value the way go-playground/validator
 // does: whitespace separates values, but a single-quoted run is one value even
 // when it contains spaces, and every quote in each token is then stripped. So
@@ -285,9 +369,20 @@ func addRequired(parent *jsonschema.Schema, name string) {
 // interior quote does not suppress the separator -- matching the upstream
 // tokenize-then-strip exactly.
 func splitOneOfValues(value string) []string {
-	out := oneOfSplitRegexp.FindAllString(value, -1)
-	for i := range out {
-		out[i] = strings.ReplaceAll(out[i], "'", "")
+	found := oneOfSplitRegexp.FindAllString(value, -1)
+
+	// A value listed twice enumerates once; the enum is a set.
+	out := make([]string, 0, len(found))
+	seen := make(map[string]bool, len(found))
+
+	for _, tok := range found {
+		tok = strings.ReplaceAll(tok, "'", "")
+		if seen[tok] {
+			continue
+		}
+
+		seen[tok] = true
+		out = append(out, tok)
 	}
 
 	return out

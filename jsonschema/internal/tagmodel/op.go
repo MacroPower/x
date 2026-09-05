@@ -201,6 +201,10 @@ type KeyRule struct {
 	Axis Axis
 	// Param declares the key's arity.
 	Param ParamMode
+	// AllowEmpty admits an empty value on a ParamRequired key, for a dialect
+	// whose rule reads the empty parameter as the empty literal: go-playground
+	// takes eq= as "equals the empty string".
+	AllowEmpty bool
 }
 
 // Params is a key's bound parameter list. It exists so the only route from a
@@ -268,7 +272,9 @@ func Bind(rule KeyRule, sh Shape, raw string, hasValue bool) (Rule, error) {
 func bindParams(rule KeyRule, raw string, hasValue bool) (Params, error) {
 	switch rule.Param {
 	case ParamNone:
-		if hasValue {
+		// An empty parameter is no parameter: go-playground reads unique= as
+		// the bare unique.
+		if hasValue && raw != "" {
 			return Params{}, fmt.Errorf("takes no parameter, got %q", raw)
 		}
 
@@ -279,7 +285,7 @@ func bindParams(rule KeyRule, raw string, hasValue bool) (Params, error) {
 		return Params{values: []string{rule.Implied}}, nil
 
 	case ParamRequired:
-		if !hasValue || raw == "" {
+		if !hasValue || (raw == "" && !rule.AllowEmpty) {
 			return Params{}, errors.New("requires a non-empty value")
 		}
 

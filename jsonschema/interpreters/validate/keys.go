@@ -45,11 +45,14 @@ var validatorKeys = map[string]validatorRule{
 	"lt":  {KeyRule: tagmodel.KeyRule{Op: tagmodel.OpCeilExcl, Param: tagmodel.ParamRequired}},
 	"len": {KeyRule: tagmodel.KeyRule{Op: tagmodel.OpExactSize, Param: tagmodel.ParamRequired}},
 
+	// An empty parameter is the empty literal: go-playground pins a string
+	// to "" under eq= and forbids "" under ne=. A numeric or sized shape still
+	// refuses it, since "" parses as no number and no size.
 	"eq": {KeyRule: tagmodel.KeyRule{
-		Op: tagmodel.OpEqual, SizedOp: tagmodel.OpExactSize, Param: tagmodel.ParamRequired,
+		Op: tagmodel.OpEqual, SizedOp: tagmodel.OpExactSize, Param: tagmodel.ParamRequired, AllowEmpty: true,
 	}},
 	"ne": {KeyRule: tagmodel.KeyRule{
-		Op: tagmodel.OpNotEqual, SizedOp: tagmodel.OpForbidSize, Param: tagmodel.ParamRequired,
+		Op: tagmodel.OpNotEqual, SizedOp: tagmodel.OpForbidSize, Param: tagmodel.ParamRequired, AllowEmpty: true,
 	}},
 
 	"oneof": {KeyRule: tagmodel.KeyRule{Op: tagmodel.OpOneOf, Param: tagmodel.ParamList, Split: splitOneOfValues}},
@@ -103,11 +106,13 @@ func patternKey(pattern string) validatorRule {
 
 // isControlTag reports whether a key is a go-playground/validator control tag
 // that governs when validation runs rather than expressing a value constraint.
-// These have no JSON Schema representation and are skipped.
+// These have no JSON Schema representation and are skipped. The isdefault
+// key is not one: go-playground registers it as a value validator requiring
+// the zero value, so it takes the unrecognized-validator error like any
+// other constraint this dialect does not express.
 func isControlTag(key string) bool {
 	switch key {
-	case "omitempty", "omitnil", "omitzero", "structonly", "nostructlevel",
-		"isdefault":
+	case "omitempty", "omitnil", "omitzero", "structonly", "nostructlevel":
 		return true
 	}
 

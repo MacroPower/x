@@ -87,7 +87,10 @@
 //   - max=N / lte=N: maximum
 //   - gt=N: exclusiveMinimum
 //   - lt=N: exclusiveMaximum
-//   - oneof=1 2 3: enum (space-separated, parsed as numbers)
+//   - oneof=1 2 3: enum (space-separated, parsed as numbers). Each token
+//     must be the canonical spelling go-playground compares the value's
+//     text against, so +1, 01, and 1.0 are errors rather than an enum that
+//     admits a value go-playground rejects.
 //   - eq=N: const
 //   - ne=N: forbids the value via not (not.const for a single value, composed
 //     into not.enum or allOf when several values are forbidden, e.g. required+ne)
@@ -199,6 +202,10 @@
 //
 //   - email, url (-> "uri"), uri (-> "uri-reference"), uuid, ipv4, ipv6, hostname
 //
+// hostname maps to the RFC 1123 hostname format, which admits a label
+// beginning with a digit; go-playground's hostname is the RFC 952 grammar,
+// which does not, so "1host" passes the schema and fails go-playground.
+//
 // Pattern tags (mapped to "pattern"):
 //
 //   - alpha: ^[a-zA-Z]+$
@@ -251,9 +258,12 @@
 // conditional validators (eqfield, required_if, skip_unless, ...), control tags
 // that govern when validation runs (omitempty, structonly, ...), and the
 // constraints inside a keys...endkeys block (map-key constraints are not
-// modeled). The | OR operator is not modeled either: within a single comma
-// group the pipe separates OR alternatives, of which only the first is
-// interpreted, so later comma-separated constraints still apply.
+// modeled). A trailing dive with nothing after it descends into nothing and
+// is a no-op, as it is in go-playground. The | OR operator is not modeled
+// either: within a single comma group the pipe separates OR alternatives, of
+// which only the first is interpreted, so later comma-separated constraints
+// still apply; an empty first alternative is an error, since go-playground
+// refuses the tag.
 //
 // Any other key that is not a recognized constraint causes Interpret to return
 // an error rather than being silently consumed, so a typo'd or unsupported
