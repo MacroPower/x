@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"fmt"
+	"maps"
 	"math"
 	"testing"
 	"time"
@@ -13,6 +15,7 @@ import (
 
 	"go.jacobcolvin.com/x/jsonschema"
 	"go.jacobcolvin.com/x/jsonschema/internal/tagmodel"
+	"go.jacobcolvin.com/x/jsonschema/interpreters/validate"
 )
 
 // Tests for jsonschema struct-tag parsing: key-value vs bare-description
@@ -2688,4 +2691,957 @@ func TestTagFormatNullableStaysOnValueBranch(t *testing.T) {
 		"the null wrapper carries no format sibling")
 	assert.Equal(t, "email", prop.AnyOf[0].Format,
 		"the authored format replaces the type value on the value branch")
+}
+
+// TestTagConstOutsideEnumConflicts pins that a const and an enum that exclude
+// each other abort generation with [jsonschema.ErrConstraintConflict] rather
+// than composing silently into a schema no instance satisfies. Both keywords
+// fully describe the allowed set and assert conjunctively, so an excluded pin
+// is a contradiction, in either order and in either dialect.
+func TestTagConstOutsideEnumConflicts(t *testing.T) {
+	t.Parallel()
+
+	for name, build := range map[string]func() (*jsonschema.Schema, error){
+		"const then enum": func() (*jsonschema.Schema, error) {
+			type T struct {
+				V int `json:"v" jsonschema:"const=7,enum=5|6"`
+			}
+
+			return jsonschema.GenerateFor[T](t.Context())
+		},
+		"enum then const": func() (*jsonschema.Schema, error) {
+			type T struct {
+				V int `json:"v" jsonschema:"enum=5|6,const=7"`
+			}
+
+			return jsonschema.GenerateFor[T](t.Context())
+		},
+		"validate eq then oneof": func() (*jsonschema.Schema, error) {
+			type T struct {
+				V int `json:"v" validate:"eq=7,oneof=5 6"`
+			}
+
+			return jsonschema.GenerateFor[T](t.Context(),
+				jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()))
+		},
+		"validate oneof then eq": func() (*jsonschema.Schema, error) {
+			type T struct {
+				V int `json:"v" validate:"oneof=5 6,eq=7"`
+			}
+
+			return jsonschema.GenerateFor[T](t.Context(),
+				jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()))
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := build()
+			require.Error(t, err)
+			require.ErrorIs(t, err, jsonschema.ErrConstraintConflict)
+		})
+	}
+}
+
+// TestTagConstInsideEnumComposes pins the satisfiable half: a const the
+// enumeration admits is not a conflict, in either order.
+func TestTagConstInsideEnumComposes(t *testing.T) {
+	t.Parallel()
+
+	for name, build := range map[string]func() (*jsonschema.Schema, error){
+		"const then enum": func() (*jsonschema.Schema, error) {
+			type T struct {
+				V int `json:"v" jsonschema:"const=5,enum=5|6"`
+			}
+
+			return jsonschema.GenerateFor[T](t.Context())
+		},
+		"enum then const": func() (*jsonschema.Schema, error) {
+			type T struct {
+				V int `json:"v" jsonschema:"enum=5|6,const=5"`
+			}
+
+			return jsonschema.GenerateFor[T](t.Context())
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			s, err := build()
+			require.NoError(t, err)
+			assert.NotNil(t, s.Properties["v"].Const)
+			assert.Len(t, s.Properties["v"].Enum, 2)
+		})
+	}
+}
+
+// inlineBoundsInner is the named spelling of the anonymous struct below, so the
+// test can pin that both spellings take the same object-count bound.
+type inlineBoundsInner struct {
+	A int `json:"a"`
+}
+
+// TestTagObjectCountBoundsOnInlineStruct pins that an object-count bound lands
+// on an anonymous (inline) struct field exactly as it does on the $defs-backed
+// named spelling: the inline payload declares an object outright, so it is
+// judged by what that schema declares rather than rejected as an opaque value.
+// Bounds from the other keyword families still report, with the declared-object
+// shape named in the reason.
+func TestTagObjectCountBoundsOnInlineStruct(t *testing.T) {
+	t.Parallel()
+
+	t.Run("count bounds apply", func(t *testing.T) {
+		t.Parallel()
+
+		type T struct {
+			V struct {
+				A int `json:"a"`
+			} `json:"v" jsonschema:"minProperties=1,maxProperties=4"`
+		}
+
+		s, err := jsonschema.GenerateFor[T](t.Context())
+		require.NoError(t, err)
+
+		v := s.Properties["v"]
+		require.NotNil(t, v.MinProperties)
+		require.NotNil(t, v.MaxProperties)
+		assert.Equal(t, int64(1), int64(*v.MinProperties))
+		assert.Equal(t, int64(4), int64(*v.MaxProperties))
+	})
+
+	t.Run("named spelling agrees", func(t *testing.T) {
+		t.Parallel()
+
+		type T struct {
+			V inlineBoundsInner `json:"v" jsonschema:"minProperties=1"`
+		}
+
+		s, err := jsonschema.GenerateFor[T](t.Context())
+		require.NoError(t, err)
+
+		v := s.Properties["v"]
+		require.NotNil(t, v.MinProperties)
+		assert.Equal(t, int64(1), int64(*v.MinProperties))
+	})
+
+	t.Run("other families still report", func(t *testing.T) {
+		t.Parallel()
+
+		type T struct {
+			V struct {
+				A int `json:"a"`
+			} `json:"v" jsonschema:"minimum=1"`
+		}
+
+		_, err := jsonschema.GenerateFor[T](t.Context())
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "a declared object cannot carry a numeric bound")
+	})
+}
+
+// interpNullRecursive is the self-referential type the interpreter
+// null-literal tests configure. The field carries no jsonschema tag, so the
+// canvas scan reports the literal. A recorded tag key takes precedence over the
+// canvas, and this type spells none.
+type interpNullRecursive struct {
+	Next *interpNullRecursive `json:"next" mytag:"x"`
+}
+
+// interpNullElement is the self-referential type whose recursion sits on a
+// slice element. A []*T element is a pointer occurrence, so it reads the same
+// early null answer the field does. A []T element is a non-pointer occurrence
+// whose answer is already false and would exercise the wrong window.
+type interpNullElement struct {
+	Kids []*interpNullElement `json:"kids" mytag:"x"`
+}
+
+// interpNullMapElement is the map-valued sibling of interpNullElement. A map
+// value and a slice element share one node field, so the pair pins that the
+// origin walk reaches both.
+type interpNullMapElement struct {
+	Kids map[string]*interpNullMapElement `json:"kids" mytag:"x"`
+}
+
+// interpNullTupleElement is the fixed-array sibling. A tuple keeps one node per
+// position, which the origin walk descends separately from a slice element.
+type interpNullTupleElement struct {
+	Kids [2]*interpNullTupleElement `json:"kids" mytag:"x"`
+}
+
+// interpNullBothWriters carries a jsonschema tag null literal beside the
+// interpreter's keyword, so both field-level writers commit a null to one
+// field.
+type interpNullBothWriters struct {
+	Next *interpNullBothWriters `json:"next" jsonschema:"default=null" mytag:"x"`
+}
+
+// interpNullOther is the type the wider-gate control gives a NullForbidden
+// stance. Nothing references it from inside its own definition, so its stance
+// is final before an interpreter reads the decision.
+type interpNullOther struct {
+	X string `json:"x"`
+}
+
+// interpNullHolder references interpNullOther through a pointer field, the
+// occurrence whose null admission the stance on interpNullOther refuses.
+type interpNullHolder struct {
+	Next *interpNullOther `json:"next" mytag:"x"`
+}
+
+// interpNullRequired is the shape TestValidateRequiredOnARecursiveStancedType
+// generates. The omitempty is load-bearing. Without it the json tag alone adds
+// the required entry, and the assertion could not tell which writer added it.
+type interpNullRequired struct {
+	Next *interpNullRequired `json:"next,omitempty" validate:"required"`
+}
+
+// nullCanvasWrite is one row of the canvas-writer table: the function spelling
+// a JSON null onto a canvas, and the keyword the resulting report must name.
+type nullCanvasWrite struct {
+	write   func(canvas *jsonschema.Schema)
+	keyword string
+}
+
+// baseNullCanvasWrites returns one row per canvas keyword a tag interpreter
+// spells a JSON null on. Default takes the literal as raw JSON, and the const,
+// enum, and examples rows each carry an untyped nil. The scan in
+// canvasNullLiteral reads exactly these four keywords, so a test covering it
+// ranges this set rather than [nullCanvasWrites].
+func baseNullCanvasWrites() map[string]nullCanvasWrite {
+	return map[string]nullCanvasWrite{
+		"default": {
+			keyword: "default",
+			write: func(canvas *jsonschema.Schema) {
+				canvas.Default = jsontext.Value("null")
+			},
+		},
+		"const": {
+			keyword: "const",
+			write: func(canvas *jsonschema.Schema) {
+				var null any
+
+				canvas.Const = &null
+			},
+		},
+		"enum": {
+			keyword: "enum",
+			write: func(canvas *jsonschema.Schema) {
+				canvas.Enum = []any{nil}
+			},
+		},
+		"examples": {
+			keyword: "examples",
+			write: func(canvas *jsonschema.Schema) {
+				canvas.Examples = []any{nil}
+			},
+		},
+	}
+}
+
+// nullCanvasWrites returns the keyword rows of [baseNullCanvasWrites] plus one
+// row per Go value form isJSONNull judges rather than recognizes by identity: a
+// typed nil, and a [jsontext.Value] holding the literal, the same spelling the
+// default row uses.
+func nullCanvasWrites() map[string]nullCanvasWrite {
+	writes := baseNullCanvasWrites()
+
+	maps.Copy(writes, map[string]nullCanvasWrite{
+		"typed nil const": {
+			keyword: "const",
+			write: func(canvas *jsonschema.Schema) {
+				var null any = (*string)(nil)
+
+				canvas.Const = &null
+			},
+		},
+		"typed nil enum member": {
+			keyword: "enum",
+			write: func(canvas *jsonschema.Schema) {
+				canvas.Enum = []any{(*int)(nil)}
+			},
+		},
+		// The upstream renderer marshals canvas values with encoding/json v1,
+		// which writes null for a typed nil map or slice, so both spell null
+		// in the emitted document and the re-check must refuse them.
+		"typed nil map const": {
+			keyword: "const",
+			write: func(canvas *jsonschema.Schema) {
+				var null any = map[string]string(nil)
+
+				canvas.Const = &null
+			},
+		},
+		"typed nil slice enum member": {
+			keyword: "enum",
+			write: func(canvas *jsonschema.Schema) {
+				canvas.Enum = []any{[]int(nil)}
+			},
+		},
+		"raw const": {
+			keyword: "const",
+			write: func(canvas *jsonschema.Schema) {
+				var null any = jsontext.Value("null")
+
+				canvas.Const = &null
+			},
+		},
+		"raw enum member": {
+			keyword: "enum",
+			write: func(canvas *jsonschema.Schema) {
+				canvas.Enum = []any{jsontext.Value("null")}
+			},
+		},
+	})
+
+	return writes
+}
+
+// TestInterpreterNullLiteralOnARecursiveStancedType pins the re-check over the
+// second field-level writer. A field referencing the type it belongs to
+// resolves against a $defs entry still being built, so the stance the extender
+// records lands after the interpreter has read the decision as admitting null
+// and written a literal against it. The generator scans the authored canvas
+// once every stance is final and reports the keyword the final decision
+// refuses.
+//
+// The interpreter records what it observed rather than asserting on it. A
+// failed assertion inside the interpreter would abandon the generator's own
+// call stack.
+func TestInterpreterNullLiteralOnARecursiveStancedType(t *testing.T) {
+	t.Parallel()
+
+	for name, tc := range nullCanvasWrites() {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var nullable bool
+
+			interp := jsonschema.TagInterpreterFunc(
+				func(_ context.Context, field jsonschema.FieldContext, _ jsonschema.Tag) error {
+					nullable = field.Shape().Nullable
+					tc.write(field.Canvas)
+
+					return nil
+				},
+			)
+
+			_, err := jsonschema.GenerateFor[interpNullRecursive](
+				t.Context(),
+				jsonschema.WithTagInterpreter("mytag", interp),
+				forbidNullStance[interpNullRecursive](),
+			)
+
+			assert.False(t, nullable, "the interpreter reads the final null answer")
+			require.ErrorIs(t, err, tagmodel.ErrNullNotAdmitted)
+			require.ErrorContains(t, err,
+				`jsonschema_test.interpNullRecursive field "next": `+
+					`authored canvas: keyword "`+tc.keyword+`"`)
+		})
+	}
+}
+
+// TestInterpreterNullLiteralOnARecursiveElement pins the same re-check where
+// the literal sits on an element rather than on the field. ElementContexts
+// hands out the element's own node, which reads the same early answer the field
+// does. The element therefore carries the field's origin, and the report names
+// that field and marks the position as an element.
+//
+// It ranges the keyword rows alone. The extra value forms
+// [nullCanvasWrites] adds differ only in what isJSONNull judges, which
+// [TestInterpreterNullLiteralOnARecursiveStancedType] pins through the
+// identical canvasNullLiteral call.
+func TestInterpreterNullLiteralOnARecursiveElement(t *testing.T) {
+	t.Parallel()
+
+	for name, tc := range baseNullCanvasWrites() {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var (
+				elemCount int
+				nullable  bool
+			)
+
+			interp := jsonschema.TagInterpreterFunc(
+				func(_ context.Context, field jsonschema.FieldContext, _ jsonschema.Tag) error {
+					elems := field.ElementContexts()
+
+					elemCount = len(elems)
+					if elemCount != 1 {
+						return nil
+					}
+
+					nullable = elems[0].Shape().Nullable
+					tc.write(elems[0].Canvas)
+
+					return nil
+				},
+			)
+
+			_, err := jsonschema.GenerateFor[interpNullElement](
+				t.Context(),
+				jsonschema.WithTagInterpreter("mytag", interp),
+				forbidNullStance[interpNullElement](),
+			)
+
+			require.Equal(t, 1, elemCount)
+			assert.False(t, nullable, "the element reads the final null answer")
+			require.ErrorIs(t, err, tagmodel.ErrNullNotAdmitted)
+			require.ErrorContains(t, err,
+				`jsonschema_test.interpNullElement field "kids": element: `+
+					`authored canvas: keyword "`+tc.keyword+`"`)
+		})
+	}
+}
+
+// TestInterpreterNullLiteralOnMapAndTupleElements covers the two element
+// positions TestInterpreterNullLiteralOnARecursiveElement does not. A map value
+// rides the same node field a slice element does, while a tuple keeps one node
+// per position, so together they exercise both branches of the origin walk.
+func TestInterpreterNullLiteralOnMapAndTupleElements(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		generate func(opt jsonschema.GenerateOption) error
+		parent   string
+	}{
+		"map": {
+			generate: func(opt jsonschema.GenerateOption) error {
+				_, err := jsonschema.GenerateFor[interpNullMapElement](t.Context(),
+					opt, forbidNullStance[interpNullMapElement]())
+
+				return err
+			},
+			parent: "jsonschema_test.interpNullMapElement",
+		},
+		"tuple": {
+			generate: func(opt jsonschema.GenerateOption) error {
+				_, err := jsonschema.GenerateFor[interpNullTupleElement](t.Context(),
+					opt, forbidNullStance[interpNullTupleElement]())
+
+				return err
+			},
+			parent: "jsonschema_test.interpNullTupleElement",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			interp := jsonschema.TagInterpreterFunc(
+				func(_ context.Context, field jsonschema.FieldContext, _ jsonschema.Tag) error {
+					for _, elem := range field.ElementContexts() {
+						elem.Canvas.Default = jsontext.Value("null")
+					}
+
+					return nil
+				},
+			)
+
+			err := tc.generate(jsonschema.WithTagInterpreter("mytag", interp))
+			require.ErrorIs(t, err, tagmodel.ErrNullNotAdmitted)
+			require.ErrorContains(t, err,
+				tc.parent+` field "kids": element: authored canvas: keyword "default"`)
+		})
+	}
+}
+
+// TestInterpreterNullLiteralYieldsToTheTagKey pins the precedence between the
+// two writers. When a field's tag took a null literal and an interpreter wrote
+// another onto its canvas, the pass reports the tag key. That is the fault the
+// struct tag spells, so the report names the writer the author can act on.
+func TestInterpreterNullLiteralYieldsToTheTagKey(t *testing.T) {
+	t.Parallel()
+
+	interp := jsonschema.TagInterpreterFunc(
+		func(_ context.Context, field jsonschema.FieldContext, _ jsonschema.Tag) error {
+			field.Canvas.Enum = []any{nil}
+
+			return nil
+		},
+	)
+
+	_, err := jsonschema.GenerateFor[interpNullBothWriters](
+		t.Context(),
+		jsonschema.WithTagInterpreter("mytag", interp),
+		forbidNullStance[interpNullBothWriters](),
+	)
+
+	require.ErrorIs(t, err, tagmodel.ErrNullNotAdmitted)
+	require.ErrorContains(t, err,
+		`jsonschema_test.interpNullBothWriters field "next": `+
+			`jsonschema tag: key "default"`)
+	require.NotContains(t, err.Error(), "authored canvas")
+}
+
+// TestConstraintsNullLiteralOnARecursiveStancedType pins that the shared
+// model's own value setters reach the scan too. SetConst and SetEnum compose a
+// const or an enum on the canvas without consulting the constraint matrix, so a
+// null passed to either lands in the same keyword a direct canvas write would
+// use.
+func TestConstraintsNullLiteralOnARecursiveStancedType(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		set     func(c *jsonschema.Constraints) error
+		keyword string
+	}{
+		"const": {
+			keyword: "const",
+			set:     func(c *jsonschema.Constraints) error { return c.SetConst(nil) },
+		},
+		"enum": {
+			keyword: "enum",
+			set: func(c *jsonschema.Constraints) error {
+				return c.SetEnum([]any{nil})
+			},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var setErr error
+
+			interp := jsonschema.TagInterpreterFunc(
+				func(_ context.Context, field jsonschema.FieldContext, _ jsonschema.Tag) error {
+					setErr = tc.set(field.Constraints())
+
+					return nil
+				},
+			)
+
+			_, err := jsonschema.GenerateFor[interpNullRecursive](
+				t.Context(),
+				jsonschema.WithTagInterpreter("mytag", interp),
+				forbidNullStance[interpNullRecursive](),
+			)
+
+			require.NoError(t, setErr, "the setter accepts the null")
+			require.ErrorIs(t, err, tagmodel.ErrNullNotAdmitted)
+			require.ErrorContains(t, err,
+				`jsonschema_test.interpNullRecursive field "next": `+
+					`authored canvas: keyword "`+tc.keyword+`"`)
+		})
+	}
+}
+
+// interpNullPanicMarshaler marshals by panicking, the shape that reaches the
+// scan's own marshal through [json.Marshaler].
+type interpNullPanicMarshaler struct{}
+
+// MarshalJSON panics, standing in for a third-party marshaler with a bug.
+func (interpNullPanicMarshaler) MarshalJSON() ([]byte, error) {
+	panic("marshal")
+}
+
+// TestInterpreterPanickingMarshalerOnARecursiveStancedType pins that the scan
+// survives the marshaler it consults. Deciding whether a canvas value is a null
+// runs that value's own MarshalJSON, so a third-party marshaler with a bug
+// would otherwise panic out of a call that reports through errors alone. The
+// value is not a null, so generation carries it through to the caller's
+// marshal, where the panic is the caller's to see.
+func TestInterpreterPanickingMarshalerOnARecursiveStancedType(t *testing.T) {
+	t.Parallel()
+
+	interp := jsonschema.TagInterpreterFunc(
+		func(_ context.Context, field jsonschema.FieldContext, _ jsonschema.Tag) error {
+			var value any = interpNullPanicMarshaler{}
+
+			field.Canvas.Const = &value
+
+			return nil
+		},
+	)
+
+	require.NotPanics(t, func() {
+		_, err := jsonschema.GenerateFor[interpNullRecursive](
+			t.Context(),
+			jsonschema.WithTagInterpreter("mytag", interp),
+			forbidNullStance[interpNullRecursive](),
+		)
+		require.NoError(t, err)
+	})
+}
+
+// TestInterpreterNullLiteralOnARecursiveType is the control the re-check must
+// leave alone. The same interpreter over the same self-referential type with no
+// stance recorded for it keeps the null the occurrence admits, and the literal
+// renders on the wrapper beside the reference.
+func TestInterpreterNullLiteralOnARecursiveType(t *testing.T) {
+	t.Parallel()
+
+	interp := jsonschema.TagInterpreterFunc(
+		func(_ context.Context, field jsonschema.FieldContext, _ jsonschema.Tag) error {
+			field.Canvas.Default = jsontext.Value("null")
+
+			return nil
+		},
+	)
+
+	s, err := jsonschema.GenerateFor[interpNullRecursive](
+		t.Context(),
+		jsonschema.WithTagInterpreter("mytag", interp),
+	)
+	require.NoError(t, err)
+
+	def := s.Defs["interpNullRecursive"]
+	require.NotNil(t, def)
+
+	got, err := json.Marshal(def.Properties["next"])
+	require.NoError(t, err)
+	assert.JSONEq(t,
+		`{"default":null,"anyOf":[{"$ref":"#/$defs/interpNullRecursive"},`+
+			`{"type":"null"}]}`, string(got))
+}
+
+// TestInterpreterNullLiteralOnANonRecursiveStancedType pins that the scan
+// covers the whole reference window rather than the withdrawn answer alone.
+// The stance on interpNullOther is final before the interpreter runs, so the
+// interpreter reads the decision as refusing null and writes the literal
+// anyway. The literal is wrong either way, so the re-check reports it.
+func TestInterpreterNullLiteralOnANonRecursiveStancedType(t *testing.T) {
+	t.Parallel()
+
+	var nullable bool
+
+	interp := jsonschema.TagInterpreterFunc(
+		func(_ context.Context, field jsonschema.FieldContext, _ jsonschema.Tag) error {
+			nullable = field.Shape().Nullable
+			field.Canvas.Default = jsontext.Value("null")
+
+			return nil
+		},
+	)
+
+	_, err := jsonschema.GenerateFor[interpNullHolder](
+		t.Context(),
+		jsonschema.WithTagInterpreter("mytag", interp),
+		forbidNullStance[interpNullOther](),
+	)
+
+	assert.False(t, nullable, "the stance is final before the interpreter runs")
+	require.ErrorIs(t, err, tagmodel.ErrNullNotAdmitted)
+	require.ErrorContains(t, err,
+		`jsonschema_test.interpNullHolder field "next": `+
+			`authored canvas: keyword "default"`)
+}
+
+// TestInterpreterNullForbidOnARecursiveStancedType pins the other half of the
+// rule. Forbidding null writes under not rather than into a value keyword, so
+// the scan leaves it alone and the forbid renders beside the reference. The
+// forbid asserts nothing the reference does not assert already.
+func TestInterpreterNullForbidOnARecursiveStancedType(t *testing.T) {
+	t.Parallel()
+
+	interp := jsonschema.TagInterpreterFunc(
+		func(_ context.Context, field jsonschema.FieldContext, _ jsonschema.Tag) error {
+			field.Constraints().Forbid(nil)
+
+			return nil
+		},
+	)
+
+	s, err := jsonschema.GenerateFor[interpNullRecursive](
+		t.Context(),
+		jsonschema.WithTagInterpreter("mytag", interp),
+		forbidNullStance[interpNullRecursive](),
+	)
+	require.NoError(t, err)
+
+	def := s.Defs["interpNullRecursive"]
+	require.NotNil(t, def)
+
+	got, err := json.Marshal(def.Properties["next"])
+	require.NoError(t, err)
+	assert.JSONEq(t,
+		`{"$ref":"#/$defs/interpNullRecursive","not":{"const":null}}`, string(got))
+}
+
+// TestValidateRequiredOnARecursiveStancedType pins that the built-in dialect
+// cannot reach the canvas scan at all. The constraint matrix ignores a non-zero
+// rule on a referenced definition, so required on a self-referential pointer
+// adds the required entry and forbids nothing, whichever stance the type
+// carries.
+func TestValidateRequiredOnARecursiveStancedType(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		stance []jsonschema.GenerateOption
+	}{
+		"no stance": {},
+		"null forbidden": {
+			stance: []jsonschema.GenerateOption{
+				forbidNullStance[interpNullRequired](),
+			},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			opts := []jsonschema.GenerateOption{
+				jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
+			}
+
+			s, err := jsonschema.GenerateFor[interpNullRequired](
+				t.Context(), append(opts, tc.stance...)...,
+			)
+			require.NoError(t, err)
+
+			def := s.Defs["interpNullRequired"]
+			require.NotNil(t, def)
+			assert.Equal(t, []string{"next"}, def.Required)
+
+			got, err := json.Marshal(def.Properties["next"])
+			require.NoError(t, err)
+			assert.NotContains(t, string(got), `"not"`)
+		})
+	}
+}
+
+// TestGenerateFor_JSONStringStringFieldScalars pins the fate of the
+// json:",string" string field: encoding/json/v2 stringifies numbers only, so
+// the option on a string field is a SemanticError and generation refuses the
+// type before any tag dialect could interpret its scalars. (V1 double-encoded
+// the value instead; that behavior is gone.)
+func TestGenerateFor_JSONStringStringFieldScalars(t *testing.T) {
+	t.Parallel()
+
+	t.Run("jsonschema const is refused with the field", func(t *testing.T) {
+		t.Parallel()
+
+		type Form struct {
+			F string `json:"f,string" jsonschema:"const=abc"`
+		}
+
+		_, err := jsonschema.GenerateFor[Form](t.Context())
+		require.ErrorIs(t, err, jsonschema.ErrInvalidJSONField)
+		require.ErrorContains(t, err, "invalid use of `string` tag option")
+
+		_, err = json.Marshal(Form{F: "abc"})
+		require.Error(t, err, "encoding/json/v2 refuses the same declaration")
+	})
+
+	t.Run("validate eq is refused with the field", func(t *testing.T) {
+		t.Parallel()
+
+		type Form struct {
+			F string `json:"f,string" validate:"eq=abc"`
+		}
+
+		_, err := jsonschema.GenerateFor[Form](t.Context(),
+			jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()))
+		require.ErrorIs(t, err, jsonschema.ErrInvalidJSONField)
+	})
+
+	t.Run("pointer field is refused too", func(t *testing.T) {
+		t.Parallel()
+
+		// The flag survives the pointer level, so a *string under it is the
+		// same refusal.
+		type Form struct {
+			F *string `json:"f,string" jsonschema:"const=abc"`
+		}
+
+		_, err := jsonschema.GenerateFor[Form](t.Context())
+		require.ErrorIs(t, err, jsonschema.ErrInvalidJSONField)
+	})
+
+	t.Run("plain string field is unaffected", func(t *testing.T) {
+		t.Parallel()
+
+		type Form struct {
+			F string `json:"f" jsonschema:"const=abc"`
+		}
+
+		s, err := jsonschema.GenerateFor[Form](t.Context())
+		require.NoError(t, err)
+
+		v, err := jsonschema.Compile(t.Context(), s)
+		require.NoError(t, err)
+
+		require.NoError(t, v.ValidateJSON(t.Context(), []byte(`{"f":"abc"}`)))
+	})
+}
+
+// byteLevel is a uint8 element that marshals itself as text, so a []byteLevel
+// marshals as a real JSON array of strings, not a base64 string. The shape
+// classifier must apply the same marshaler exemption the generator does, or
+// the slice classifies as raw bytes and array constraints are rejected.
+type byteLevel uint8
+
+func (l byteLevel) MarshalText() ([]byte, error) {
+	return fmt.Appendf(nil, "L%d", int(l)), nil
+}
+
+// TestTagsMarshalerByteSlice pins that a slice of marshaler-bearing uint8
+// elements takes array-family constraints in both dialects, exactly like
+// []string: the generator already emits an array schema for it, so the tag
+// model's byte-slice short-circuit must honor the same encoding/json
+// exemption instead of classifying the field as raw bytes.
+func TestTagsMarshalerByteSlice(t *testing.T) {
+	t.Parallel()
+
+	t.Run("jsonschema tag minItems", func(t *testing.T) {
+		t.Parallel()
+
+		type doc struct {
+			Levels []byteLevel `json:"levels" jsonschema:"minItems=1"`
+		}
+
+		s, err := jsonschema.GenerateFor[doc](t.Context())
+		require.NoError(t, err)
+
+		prop := s.Properties["levels"]
+		require.NotNil(t, prop.MinItems)
+		assert.Equal(t, 1, *prop.MinItems)
+		assert.Equal(t, "array", prop.Type)
+	})
+
+	t.Run("validate tag parity with string slice", func(t *testing.T) {
+		t.Parallel()
+
+		type levelsDoc struct {
+			V []byteLevel `json:"v" validate:"required,unique"`
+		}
+
+		type stringsDoc struct {
+			V []string `json:"v" validate:"required,unique"`
+		}
+
+		opts := []jsonschema.GenerateOption{
+			jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
+		}
+
+		fromLevels, err := jsonschema.GenerateFor[levelsDoc](t.Context(), opts...)
+		require.NoError(t, err)
+
+		fromStrings, err := jsonschema.GenerateFor[stringsDoc](t.Context(), opts...)
+		require.NoError(t, err)
+
+		// Both slices generate the identical array-of-strings schema, so the
+		// identical tag must land the identical constraints.
+		got, err := json.Marshal(fromLevels.Properties["v"])
+		require.NoError(t, err)
+
+		want, err := json.Marshal(fromStrings.Properties["v"])
+		require.NoError(t, err)
+
+		assert.JSONEq(t, string(want), string(got))
+	})
+}
+
+// TestValidateContentTagsIgnoredOnRawMessage pins that validate:"json" and
+// validate:"base64" on a jsontext.Value field are documented no-ops rather
+// than generation errors: both are real runtime checks over the raw bytes, but
+// the content keywords describe a string carrying an encoded document, and a
+// raw field's instance is already decoded JSON, so nothing faithful is emitted
+// and nothing false either.
+func TestValidateContentTagsIgnoredOnRawMessage(t *testing.T) {
+	t.Parallel()
+
+	for name, build := range map[string]func() (*jsonschema.Schema, error){
+		"json": func() (*jsonschema.Schema, error) {
+			type T struct {
+				V jsontext.Value `json:"v" validate:"json"`
+			}
+
+			return jsonschema.GenerateFor[T](t.Context(),
+				jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()))
+		},
+		"base64": func() (*jsonschema.Schema, error) {
+			type T struct {
+				V jsontext.Value `json:"v" validate:"base64"`
+			}
+
+			return jsonschema.GenerateFor[T](t.Context(),
+				jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()))
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			s, err := build()
+			require.NoError(t, err)
+
+			v := s.Properties["v"]
+			require.NotNil(t, v)
+			assert.Empty(t, v.ContentMediaType, "no content keyword lands on the raw field")
+			assert.Empty(t, v.ContentEncoding, "no content keyword lands on the raw field")
+		})
+	}
+}
+
+// refFormatName is a named string type declaring no format of its own, the
+// control case for the first-wins gate below.
+type refFormatName string
+
+// TestInterpreterFormatDefersToRefDeclared pins the first-wins contract through
+// a $defs-extracted type: an interpreter's inferred format never overrides --
+// or conjoins with -- one the referenced definition declares outright. Before
+// the ref read-through, validate:"email" on a time.Time field landed format:
+// "email" as a $ref sibling beside the definition's date-time, and the two
+// asserted conjunctively, so the field rejected the very RFC 3339 text it
+// marshals.
+func TestInterpreterFormatDefersToRefDeclared(t *testing.T) {
+	t.Parallel()
+
+	t.Run("declared format wins through the ref", func(t *testing.T) {
+		t.Parallel()
+
+		type T struct {
+			V time.Time `json:"v" validate:"email"`
+		}
+
+		s, err := jsonschema.GenerateFor[T](t.Context(),
+			jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()))
+		require.NoError(t, err)
+
+		v := s.Properties["v"]
+		assert.Empty(t, v.Format, "the inferred format defers to the definition's date-time")
+		assert.NotEmpty(t, v.Ref)
+
+		compiled, err := jsonschema.Compile(t.Context(), s, jsonschema.WithFormats(true))
+		require.NoError(t, err)
+
+		instance := map[string]any{"v": time.Now().UTC().Format(time.RFC3339)}
+		require.NoError(t, compiled.Validate(t.Context(), instance),
+			"the text the field marshals validates against its own schema")
+	})
+
+	t.Run("inferred format applies where the type declares none", func(t *testing.T) {
+		t.Parallel()
+
+		type T struct {
+			V refFormatName `json:"v" validate:"email"`
+		}
+
+		s, err := jsonschema.GenerateFor[T](t.Context(),
+			jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()))
+		require.NoError(t, err)
+
+		assert.Equal(t, "email", s.Properties["v"].Format)
+	})
+}
+
+// TestTagUniqueItemsOnMapIsRejected pins that the jsonschema tag's explicit
+// uniqueItems on a map field is an error rather than a silent drop. The shared
+// model's cell is an ignore -- distinct map values are a real go-playground
+// rule with no object-side keyword -- which only a rule-shaped dialect may
+// take: this dialect names the keyword outright, and its documented policy is
+// an error rather than an inert keyword nothing enforces.
+func TestTagUniqueItemsOnMapIsRejected(t *testing.T) {
+	t.Parallel()
+
+	type T struct {
+		V map[string]int `json:"v" jsonschema:"uniqueItems=true"`
+	}
+
+	_, err := jsonschema.GenerateFor[T](t.Context())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "constraint not supported for this shape")
 }

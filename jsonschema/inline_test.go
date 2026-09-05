@@ -5,6 +5,7 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
+	"fmt"
 	"testing"
 	"testing/fstest"
 
@@ -1809,4 +1810,913 @@ func TestInliner(t *testing.T) {
 		require.NoError(t, err)
 		assert.Nil(t, got)
 	})
+}
+
+// TestInlineCycleTruncatedCopyNotMemoized pins two properties of the cycle
+// fallback. A copy truncated by the fallback is not reused for refs expanded
+// from a different position. Expanding /properties/x reaches b while a is in
+// flight, so b's inner ref to a is cycle-dropped, and that truncated copy must
+// stay local to x's expansion or a's minimum silently disappears from y. The
+// truncation point itself does not depend on the entry point. The walk marks
+// every node it is inside, so the in-place /$defs/a expansion truncates where
+// the /properties/x expansion of the same node does.
+func TestInlineCycleTruncatedCopyNotMemoized(t *testing.T) {
+	t.Parallel()
+
+	root, err := jsonschema.ParseSchema([]byte(stringtest.Input(`
+		{
+			"properties": {
+				"x": {"$ref": "#/$defs/a"},
+				"y": {"$ref": "#/$defs/b"}
+			},
+			"$defs": {
+				"a": {"allOf": [{"$ref": "#/$defs/b"}], "minimum": 1},
+				"b": {"allOf": [{"$ref": "#/$defs/a"}], "maximum": 5}
+			}
+		}
+	`)))
+	require.NoError(t, err)
+
+	drop := jsonschema.RefFallbackFunc(func(context.Context, jsonschema.RefFailure) jsonschema.RefAction {
+		return jsonschema.DropRef()
+	})
+
+	inlined, err := jsonschema.Inline(t.Context(), root, jsonschema.WithRefFallback(drop))
+	require.NoError(t, err)
+
+	raw, err := json.Marshal(inlined)
+	require.NoError(t, err)
+
+	var doc map[string]any
+
+	require.NoError(t, json.Unmarshal(raw, &doc))
+
+	properties, ok := doc["properties"].(map[string]any)
+	require.True(t, ok)
+
+	defs, ok := doc["$defs"].(map[string]any)
+	require.True(t, ok)
+
+	// Each def unrolls once and truncates at the ref that returns to the node the
+	// walk entered on. Asserting the exact shape pins that depth, not just the
+	// agreement between the two entry points.
+	wantA := `{"minimum": 1, "allOf": [{"maximum": 5, "allOf": [true]}]}`
+	wantB := `{"maximum": 5, "allOf": [{"minimum": 1, "allOf": [true]}]}`
+
+	assert.JSONEq(t, wantA, marshalValue(t, defs["a"]))
+	assert.JSONEq(t, wantB, marshalValue(t, defs["b"]))
+
+	// The two ways into each def must agree. /properties/x and /properties/y
+	// enter through a ref while the in-place $defs walk descends in, and both
+	// truncate on the first return to a node the walk is already inside.
+	assert.JSONEq(t, wantA, marshalValue(t, properties["x"]),
+		"the ref expansion of a and the in-place expansion of a must agree")
+	assert.JSONEq(t, wantB, marshalValue(t, properties["y"]),
+		"the expansion of b at y must keep the minimum constraint from a")
+
+	// The functional statement of the same property: the inlined schema must
+	// still reject an instance a's minimum forbids.
+	compiled, err := jsonschema.Compile(t.Context(), inlined)
+	require.NoError(t, err)
+	require.Error(t, compiled.ValidateJSON(t.Context(), []byte(`{"y": 0}`)),
+		"the inlined schema must keep rejecting what minimum forbids")
+}
+
+// TestInlineCycleGuardHoldsAcrossAliasedTarget pins the expansion of a
+// resolver document that reaches one node through two paths. The freeze
+// copies the shared node once per path, so /$defs/p and
+// /$defs/t/properties/inner are two nodes of the frozen tree, each carrying
+// the same two refs. Expanding p reaches t, whose inner node refs t and p
+// again; both are in flight, so both refs close a cycle and the fallback
+// drops them, while p's own second ref, to itself, closes the same way. The
+// expected document is the one the aliased graph produced before the freeze,
+// so the copy changes no verdict. Losing the in-flight guard would expand
+// the graph without bound and kill the test binary with a stack overflow
+// rather than failing this test.
+func TestInlineCycleGuardHoldsAcrossAliasedTarget(t *testing.T) {
+	t.Parallel()
+
+	// The refs sit in an allOf rather than in properties, so the walk reads them
+	// in the authored order rather than in a map-key sort.
+	shared := &jsonschema.Schema{AllOf: []*jsonschema.Schema{
+		{Ref: "#/$defs/t"},
+		{Ref: "#/$defs/p"},
+	}}
+
+	document := &jsonschema.Schema{
+		ID: "https://example.com/aliased.json",
+		Defs: map[string]*jsonschema.Schema{
+			"p": shared,
+			"t": {Properties: map[string]*jsonschema.Schema{"inner": shared}},
+		},
+	}
+
+	drop := jsonschema.RefFallbackFunc(func(context.Context, jsonschema.RefFailure) jsonschema.RefAction {
+		return jsonschema.DropRef()
+	})
+
+	root := &jsonschema.Schema{Ref: "https://example.com/aliased.json#/$defs/p"}
+
+	inlined, err := jsonschema.Inline(t.Context(), root,
+		jsonschema.WithRefResolver(fixedResolver{schema: document}),
+		jsonschema.WithRefFallback(drop))
+	require.NoError(t, err)
+
+	assert.JSONEq(t, stringtest.Input(`
+		{
+			"allOf": [
+				{"properties": {"inner": {"allOf": [true, true]}}},
+				true
+			]
+		}
+	`), marshalValue(t, inlined))
+}
+
+// marshalValue renders an inlined document, or a value in one, as JSON text.
+func marshalValue(t *testing.T, value any) string {
+	t.Helper()
+
+	raw, err := json.Marshal(value)
+	require.NoError(t, err)
+
+	return string(raw)
+}
+
+// duplicateAnchorResolver serves one remote document whose two $defs entries
+// both claim the same $anchor, the malformed shape where duplicate-key
+// precedence becomes observable.
+type duplicateAnchorResolver struct{}
+
+func (duplicateAnchorResolver) ResolveRef(_ context.Context, uri string) (*jsonschema.Schema, error) {
+	if uri != "http://example.com/doc" {
+		return nil, fmt.Errorf("unexpected uri %q", uri)
+	}
+
+	//nolint:wrapcheck // The test fails on any parse error either way.
+	return jsonschema.ParseSchema([]byte(stringtest.Input(`
+		{
+			"$defs": {
+				"one": {"$anchor": "a", "type": "string"},
+				"two": {"$anchor": "a", "type": "number"}
+			}
+		}
+	`)))
+}
+
+// TestInlineDuplicateAnchorMatchesValidator pins that the validator and the
+// inliner resolve a duplicate $anchor in a fetched document to the same
+// target (the first walked, matching the validator's only-if-absent
+// fetched-document precedence). The two engines share the refresolve core so
+// they cannot disagree on well-formed input; a malformed duplicate-key
+// document must not reopen the gap, or validating an instance against the
+// original schema and against its Inline output gives opposite verdicts.
+func TestInlineDuplicateAnchorMatchesValidator(t *testing.T) {
+	t.Parallel()
+
+	root, err := jsonschema.ParseSchema([]byte(stringtest.Input(`
+		{
+			"properties": {
+				"x": {"$ref": "http://example.com/doc#a"}
+			}
+		}
+	`)))
+	require.NoError(t, err)
+
+	direct, err := jsonschema.Compile(t.Context(), root,
+		jsonschema.WithRefResolver(duplicateAnchorResolver{}))
+	require.NoError(t, err)
+
+	inlined, err := jsonschema.Inline(t.Context(), root,
+		jsonschema.WithRefResolver(duplicateAnchorResolver{}))
+	require.NoError(t, err)
+
+	fromInline, err := jsonschema.Compile(t.Context(), inlined)
+	require.NoError(t, err)
+
+	for _, instance := range []string{`{"x": "s"}`, `{"x": 1.5}`} {
+		directErr := direct.ValidateJSON(t.Context(), []byte(instance))
+		inlineErr := fromInline.ValidateJSON(t.Context(), []byte(instance))
+
+		require.Equal(t, directErr == nil, inlineErr == nil,
+			"engines disagree on %s: direct=%v inline=%v", instance, directErr, inlineErr)
+	}
+}
+
+// TestInlineFragmentOnlyIDFollowsDraft pins that the fragment-only $id anchor
+// form is a Draft-07 mechanism: Draft 2020-12 forbids a fragment in $id (core
+// section 8.2.1), so under it the form names no target. Both engines refuse
+// such a document at the identifier check, with ErrInvalidID, which is why the
+// 2020-12 row asserts agreement rather than a resolution failure. The registry
+// walk carries its own draft gate behind that check, pinned directly in
+// internal/refresolve.
+func TestInlineFragmentOnlyIDFollowsDraft(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		schema string
+		want   string
+		err    error
+	}{
+		"draft 2020-12 fragment-only $id is refused outright": {
+			schema: stringtest.Input(`
+				{
+					"$schema": "https://json-schema.org/draft/2020-12/schema",
+					"properties": {"x": {"$ref": "#a"}},
+					"$defs": {"t": {"$id": "#a", "type": "integer"}}
+				}
+			`),
+			err: jsonschema.ErrInvalidID,
+		},
+		"draft-07 fragment-only $id still acts as an anchor": {
+			schema: stringtest.Input(`
+				{
+					"$schema": "http://json-schema.org/draft-07/schema#",
+					"properties": {"x": {"$ref": "#a"}},
+					"definitions": {"t": {"$id": "#a", "type": "integer"}}
+				}
+			`),
+			want: stringtest.Input(`
+				{
+					"$schema": "http://json-schema.org/draft-07/schema#",
+					"properties": {"x": {"type": "integer"}},
+					"definitions": {"t": {"$id": "#a", "type": "integer"}}
+				}
+			`),
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			schema, err := jsonschema.ParseSchema([]byte(tc.schema))
+			require.NoError(t, err)
+
+			got, err := jsonschema.Inline(t.Context(), schema)
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+
+				_, compileErr := jsonschema.Compile(t.Context(), schema)
+				require.ErrorIs(t, compileErr, tc.err,
+					"both engines vet a root, so both refuse the document for the same cause")
+
+				return
+			}
+
+			require.NoError(t, err)
+
+			gotJSON, err := json.Marshal(got)
+			require.NoError(t, err)
+
+			require.JSONEq(t, tc.want, string(gotJSON))
+		})
+	}
+}
+
+// TestInlineRejectsCyclicRoot pins that Inline and Compile refuse the same
+// cyclic roots and say the same thing. Both freeze the root into a tree
+// before reading it, and a pointer cycle has no tree form, whether the loop
+// closes through a sub-schema keyword or through a value field. Each
+// value-field row states the pointer the refusal must name, since agreement
+// on a message the two engines both word wrongly would still pass the
+// byte-equal assertion.
+func TestInlineRejectsCyclicRoot(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		build   func() *jsonschema.Schema
+		pointer string
+	}{
+		"self cycle": {
+			build: func() *jsonschema.Schema {
+				s := &jsonschema.Schema{Type: "object"}
+				s.Items = s
+
+				return s
+			},
+		},
+		"two-node cycle": {
+			build: func() *jsonschema.Schema {
+				a := &jsonschema.Schema{Type: "object"}
+				b := &jsonschema.Schema{Type: "array"}
+				a.Items = b
+				b.Items = a
+
+				return a
+			},
+		},
+		"a cycle through an unknown keyword": {
+			build: func() *jsonschema.Schema {
+				s := &jsonschema.Schema{Type: "object"}
+				s.Extra = map[string]any{"x-self": s}
+
+				return s
+			},
+			pointer: `"/x-self"`,
+		},
+		"a cycle through examples": {
+			build: func() *jsonschema.Schema {
+				s := &jsonschema.Schema{Type: "object"}
+				s.Examples = []any{s}
+
+				return s
+			},
+			pointer: `"/examples/0"`,
+		},
+		"a root holding several loops": {
+			build: func() *jsonschema.Schema {
+				// Three loops close on this root. The field table walks
+				// examples before the unknown keywords, and each container
+				// orders its own members, so both engines close the same loop
+				// first.
+				s := &jsonschema.Schema{Type: "object"}
+				s.Examples = []any{"first", s}
+				s.Extra = map[string]any{"x-late": s, "a-early": s}
+
+				return s
+			},
+			pointer: `"/examples/1"`,
+		},
+		"a cycle through const": {
+			build: func() *jsonschema.Schema {
+				// Const is *any, so the box is the pointer the loop closes
+				// around.
+				var held any
+
+				s := &jsonschema.Schema{Type: "object", Const: &held}
+				held = any(s)
+
+				return s
+			},
+			pointer: `"/const"`,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, inlineErr := jsonschema.Inline(t.Context(), tc.build())
+			require.ErrorIs(t, inlineErr, jsonschema.ErrSchemaCycle)
+
+			_, compileErr := jsonschema.Compile(t.Context(), tc.build())
+			require.ErrorIs(t, compileErr, jsonschema.ErrSchemaCycle,
+				"Compile and Inline must reject the same root graphs")
+
+			assert.Equal(t, inlineErr.Error(), compileErr.Error(),
+				"the two engines must refuse one root with one message")
+
+			if tc.pointer != "" {
+				assert.Contains(t, inlineErr.Error(), tc.pointer,
+					"the refusal must name the pointer where the loop closes")
+			}
+		})
+	}
+}
+
+// TestInlineAliasedRoot pins that both engines accept a root reaching one
+// node through two paths: the freeze copies the node once per path, so the
+// output holds two independent nodes and Compile accepts what Inline
+// produced.
+func TestInlineAliasedRoot(t *testing.T) {
+	t.Parallel()
+
+	shared := &jsonschema.Schema{Ref: "#/$defs/leaf"}
+	root := &jsonschema.Schema{
+		Defs:       map[string]*jsonschema.Schema{"leaf": {Type: "string"}},
+		Properties: map[string]*jsonschema.Schema{"a": shared, "b": shared},
+	}
+
+	out, err := jsonschema.Inline(t.Context(), root)
+	require.NoError(t, err)
+
+	a := out.Properties["a"]
+	b := out.Properties["b"]
+
+	require.NotNil(t, a)
+	assert.NotSame(t, a, b, "each position holds its own copy")
+	assert.Equal(t, "string", a.Type)
+	assert.Equal(t, "string", b.Type)
+	assert.Same(t, shared, root.Properties["a"], "the input is left as it was")
+
+	_, err = jsonschema.Compile(t.Context(), root)
+	require.NoError(t, err, "Compile freezes the same root")
+}
+
+// TestInlineAliasedRemoteDocument covers the graph a resolver can hand in. The
+// freeze copies the shared node once per path, so each position expands its
+// own copy and the output shares nothing.
+func TestInlineAliasedRemoteDocument(t *testing.T) {
+	t.Parallel()
+
+	shared := &jsonschema.Schema{Ref: "#/$defs/leaf", Title: "shared"}
+	remote := &jsonschema.Schema{
+		ID:   "https://example.com/aliased",
+		Defs: map[string]*jsonschema.Schema{"leaf": {Type: "string"}},
+		Properties: map[string]*jsonschema.Schema{
+			"a": shared,
+			"b": shared,
+		},
+	}
+
+	root := &jsonschema.Schema{Ref: "https://example.com/aliased"}
+
+	out, err := jsonschema.Inline(t.Context(), root, jsonschema.WithRefResolver(fixedResolver{schema: remote}))
+	require.NoError(t, err)
+
+	a := out.Properties["a"]
+	b := out.Properties["b"]
+
+	require.NotNil(t, a)
+	require.NotNil(t, b)
+	assert.NotSame(t, a, b, "the frozen copy holds one node per position")
+	assert.Empty(t, a.Ref, "the reference is expanded")
+	assert.Empty(t, b.Ref, "the reference is expanded at both positions")
+
+	_, err = jsonschema.Compile(t.Context(), out)
+	require.NoError(t, err, "the output is a tree Compile accepts")
+	require.Len(t, a.AllOf, 1, "the target joins each node's allOf once")
+	require.Len(t, b.AllOf, 1, "the target joins each node's allOf once")
+	assert.Equal(t, "string", a.AllOf[0].Type)
+	assert.Equal(t, "string", b.AllOf[0].Type)
+}
+
+// TestInlineAliasedSubstitute covers the second graph a caller hands in
+// aliased: a WithRefFallback substitute, frozen at fallback time.
+func TestInlineAliasedSubstitute(t *testing.T) {
+	t.Parallel()
+
+	shared := &jsonschema.Schema{Ref: "#/$defs/leaf", Title: "shared"}
+	substitute := &jsonschema.Schema{
+		ID:   "https://example.com/substitute",
+		Defs: map[string]*jsonschema.Schema{"leaf": {Type: "integer"}},
+		Properties: map[string]*jsonschema.Schema{
+			"a": shared,
+			"b": shared,
+		},
+	}
+
+	fallback := jsonschema.RefFallbackFunc(func(context.Context, jsonschema.RefFailure) jsonschema.RefAction {
+		return jsonschema.SubstituteRef(substitute)
+	})
+
+	root := &jsonschema.Schema{Ref: "https://example.com/missing"}
+
+	out, err := jsonschema.Inline(t.Context(), root, jsonschema.WithRefFallback(fallback))
+	require.NoError(t, err)
+
+	a := out.Properties["a"]
+	b := out.Properties["b"]
+
+	require.NotNil(t, a)
+	require.NotNil(t, b)
+	assert.NotSame(t, a, b, "the frozen substitute holds one node per position")
+	require.Len(t, a.AllOf, 1, "the target joins each node's allOf once")
+	require.Len(t, b.AllOf, 1, "the target joins each node's allOf once")
+	assert.Equal(t, "integer", a.AllOf[0].Type)
+}
+
+// cyclicRemote returns a document whose Items points back at itself, plus an
+// unknown keyword holding a schema the typed traversal cannot reach. A $ref
+// into that keyword drives the JSON-pointer fallback, which marshals the
+// document it searches.
+func cyclicRemote() *jsonschema.Schema {
+	remote := &jsonschema.Schema{
+		ID:    "https://example.com/cyclic",
+		Type:  "array",
+		Extra: map[string]any{"x-hidden": map[string]any{"type": "string"}},
+	}
+	remote.Items = remote
+
+	return remote
+}
+
+// TestCyclicGraphFromOutsideRejected pins that the fetch and substitution
+// boundaries refuse a schema graph holding a pointer cycle, whether it arrives
+// from a resolver or a fallback. Such a graph has no tree form, so the freeze
+// at the boundary returns an ordinary ErrSchemaCycle, wrapped in
+// ErrRefResolve for a fetched document and bare for a substitute.
+func TestCyclicGraphFromOutsideRejected(t *testing.T) {
+	t.Parallel()
+
+	cyclicSubstitute := func() *jsonschema.Schema {
+		s := &jsonschema.Schema{Type: "object"}
+		s.Items = s
+
+		return s
+	}
+
+	tests := map[string]struct {
+		ref  string
+		opts []jsonschema.InlineOption
+	}{
+		"validating against a cyclic remote": {
+			ref:  "https://example.com/cyclic",
+			opts: []jsonschema.InlineOption{jsonschema.WithRefResolver(fixedResolver{schema: cyclicRemote()})},
+		},
+		"a pointer fragment into an unknown keyword of a cyclic remote": {
+			ref:  "https://example.com/cyclic#/x-hidden",
+			opts: []jsonschema.InlineOption{jsonschema.WithRefResolver(fixedResolver{schema: cyclicRemote()})},
+		},
+		"a remote whose cycle closes through a shared container": {
+			ref: "https://example.com/shared",
+			opts: []jsonschema.InlineOption{jsonschema.WithRefResolver(fixedResolver{schema: func() *jsonschema.Schema {
+				shared := map[string]any{}
+				inner := &jsonschema.Schema{Extra: map[string]any{"b": shared}}
+				shared["s"] = inner
+
+				return &jsonschema.Schema{
+					ID:    "https://example.com/shared",
+					Extra: map[string]any{"a": shared},
+				}
+			}()})},
+		},
+		"a remote whose cycle closes around a schema value": {
+			ref: "https://example.com/value",
+			opts: []jsonschema.InlineOption{jsonschema.WithRefResolver(fixedResolver{schema: func() *jsonschema.Schema {
+				held := map[string]any{}
+				held["self"] = jsonschema.Schema{Extra: held}
+
+				return &jsonschema.Schema{
+					ID:    "https://example.com/value",
+					Extra: map[string]any{"x-thing": held},
+				}
+			}()})},
+		},
+		"a cyclic fallback substitute": {
+			ref: "https://example.com/missing",
+			opts: []jsonschema.InlineOption{jsonschema.WithRefFallback(
+				jsonschema.RefFallbackFunc(func(context.Context, jsonschema.RefFailure) jsonschema.RefAction {
+					return jsonschema.SubstituteRef(cyclicSubstitute())
+				}),
+			)},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			root := &jsonschema.Schema{Ref: tc.ref}
+
+			_, err := jsonschema.Inline(t.Context(), root, tc.opts...)
+			require.ErrorIs(t, err, jsonschema.ErrSchemaCycle)
+		})
+	}
+}
+
+// TestValidateCyclicRemoteDocument pins the validator's half of the same
+// boundary. The fetch refuses the cyclic document, so no cache holds a graph a
+// later marshal would recurse into.
+func TestValidateCyclicRemoteDocument(t *testing.T) {
+	t.Parallel()
+
+	root := &jsonschema.Schema{Ref: "https://example.com/cyclic"}
+
+	err := jsonschema.Validate(t.Context(), root, []any{},
+		jsonschema.WithRefResolver(fixedResolver{schema: cyclicRemote()}))
+	require.ErrorIs(t, err, jsonschema.ErrRefResolve)
+	require.ErrorIs(t, err, jsonschema.ErrSchemaCycle)
+}
+
+// TestValidateAliasedRemoteDocument pins that the boundary refuses cycles
+// only. A remote reaching one node from two positions is legal, because the
+// freeze copies the node once per position and the validator indexes each
+// copy on its own.
+func TestValidateAliasedRemoteDocument(t *testing.T) {
+	t.Parallel()
+
+	shared := &jsonschema.Schema{Type: "string"}
+	remote := &jsonschema.Schema{
+		ID:         "https://example.com/aliased-remote",
+		Properties: map[string]*jsonschema.Schema{"a": shared, "b": shared},
+	}
+
+	root := &jsonschema.Schema{Ref: "https://example.com/aliased-remote"}
+	opt := jsonschema.WithRefResolver(fixedResolver{schema: remote})
+
+	require.NoError(t, jsonschema.Validate(t.Context(), root, map[string]any{"a": "x", "b": "y"}, opt))
+	require.Error(t, jsonschema.Validate(t.Context(), root, map[string]any{"a": 1}, opt))
+}
+
+// TestInlineVetsRootLikeCompile pins that the two engines make the same
+// structural demand of a root document. Every sentinel [jsonschema.Compile]
+// reports for a malformed root, [jsonschema.Inline] reports for the same
+// document. The rows cover each vetting sentinel a root can carry.
+func TestInlineVetsRootLikeCompile(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		root *jsonschema.Schema
+		err  error
+	}{
+		"invalid type name": {
+			root: &jsonschema.Schema{Type: "strng"},
+			err:  jsonschema.ErrInvalidType,
+		},
+		"array form of items under 2020-12": {
+			root: &jsonschema.Schema{ItemsArray: []*jsonschema.Schema{{Type: "string"}}},
+			err:  jsonschema.ErrItemsArrayUnderDraft2020,
+		},
+		"negative bound": {
+			root: &jsonschema.Schema{Type: "string", MinLength: new(-1)},
+			err:  jsonschema.ErrNegativeBound,
+		},
+		"non-positive multipleOf": {
+			root: &jsonschema.Schema{Type: "number", MultipleOf: new(0.0)},
+			err:  jsonschema.ErrNonPositiveMultipleOf,
+		},
+		"nil sub-schema element": {
+			root: &jsonschema.Schema{AllOf: []*jsonschema.Schema{nil}},
+			err:  jsonschema.ErrNilSubschema,
+		},
+		"both Go fields of one keyword": {
+			root: &jsonschema.Schema{Type: "string", Types: []string{"string"}},
+			err:  jsonschema.ErrConflictingSchemaFields,
+		},
+		"duplicate property order": {
+			root: &jsonschema.Schema{
+				Properties:    map[string]*jsonschema.Schema{"a": {Type: "string"}},
+				PropertyOrder: []string{"a", "a"},
+			},
+			err: jsonschema.ErrDuplicatePropertyOrder,
+		},
+		"fragment in $id under 2020-12": {
+			root: &jsonschema.Schema{
+				Defs: map[string]*jsonschema.Schema{"t": {ID: "#a", Type: "integer"}},
+			},
+			err: jsonschema.ErrInvalidID,
+		},
+		"$vocabulary under a foreign dialect": {
+			root: &jsonschema.Schema{
+				Schema:     "http://json-schema.org/draft-07/schema#",
+				Vocabulary: map[string]bool{"https://example.test/vocab": true},
+			},
+			err: jsonschema.ErrMisplacedVocabulary,
+		},
+		"well-formed root": {
+			root: &jsonschema.Schema{Type: "string", MinLength: new(1)},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, compileErr := jsonschema.Compile(t.Context(), tc.root)
+			out, inlineErr := jsonschema.Inline(t.Context(), tc.root)
+
+			if tc.err == nil {
+				require.NoError(t, compileErr)
+				require.NoError(t, inlineErr)
+				require.NotNil(t, out)
+
+				return
+			}
+
+			require.ErrorIs(t, compileErr, tc.err)
+			require.ErrorIs(t, inlineErr, tc.err,
+				"Inline vets its root under the policy Compile applies to the same document")
+		})
+	}
+}
+
+// TestInlineVetsSubstitute pins the same demand on a [jsonschema.SubstituteRef]
+// schema. It enters resolution space as a document, so [jsonschema.Inline] vets
+// it as one, and the violation names the reference whose failure the fallback
+// answered. The sentinel stays reachable, so a caller matching on it still
+// matches.
+func TestInlineVetsSubstitute(t *testing.T) {
+	t.Parallel()
+
+	const ref = "https://example.test/absent.json"
+
+	tests := map[string]struct {
+		substitute *jsonschema.Schema
+		err        error
+		want       string
+	}{
+		"negative bound in the substitute": {
+			substitute: &jsonschema.Schema{Type: "string", MinLength: new(-1)},
+			err:        jsonschema.ErrNegativeBound,
+		},
+		"invalid type name in the substitute": {
+			substitute: &jsonschema.Schema{Type: "strng"},
+			err:        jsonschema.ErrInvalidType,
+		},
+		"well-formed substitute inlines": {
+			substitute: &jsonschema.Schema{Type: "string"},
+			want:       `{"title": "root", "allOf": [{"type": "string"}]}`,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			root := &jsonschema.Schema{Title: "root", Ref: ref}
+
+			fallback := jsonschema.RefFallbackFunc(
+				func(_ context.Context, _ jsonschema.RefFailure) jsonschema.RefAction {
+					return jsonschema.SubstituteRef(tc.substitute)
+				},
+			)
+
+			out, err := jsonschema.Inline(t.Context(), root, jsonschema.WithRefFallback(fallback))
+
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+				assert.ErrorContains(t, err, ref,
+					"the violation names the reference the substitute answered")
+
+				return
+			}
+
+			require.NoError(t, err)
+
+			data, err := json.Marshal(out)
+			require.NoError(t, err)
+			assert.JSONEq(t, tc.want, string(data))
+		})
+	}
+}
+
+// TestInlineRetrievalBaseKeepsIDsInert pins the one place the inliner's vet
+// stops short of Compile's, and why. Under [jsonschema.WithRetrievalBase] an
+// $id establishes no base URI and names no resolution target, so the keyword
+// addresses nothing and its domain goes unchecked; a document carrying a
+// published $id its refs do not use still inlines from disk, which is what the
+// option is for.
+func TestInlineRetrievalBaseKeepsIDsInert(t *testing.T) {
+	t.Parallel()
+
+	const leaf = "leaf.json"
+
+	root, err := jsonschema.ParseSchema([]byte(
+		`{"$id": "#published", "properties": {"a": {"$ref": "leaf.json"}}}`,
+	))
+	require.NoError(t, err)
+
+	document, err := jsonschema.ParseSchema([]byte(`{"$id": "#remote", "type": "string"}`))
+	require.NoError(t, err)
+
+	_, err = jsonschema.Compile(t.Context(), root)
+	require.ErrorIs(t, err, jsonschema.ErrInvalidID,
+		"a live $id carrying a fragment is outside the keyword's domain under 2020-12")
+
+	out, err := jsonschema.Inline(t.Context(), root,
+		jsonschema.WithRefResolver(jsonschema.SchemaMap{leaf: document}),
+		jsonschema.WithRetrievalBase(true))
+	require.NoError(t, err, "an inert $id has no domain to violate, in the root or a remote")
+
+	data, err := json.Marshal(out)
+	require.NoError(t, err)
+	assert.JSONEq(t,
+		`{"$id": "#published", "properties": {"a": {"type": "string"}}}`,
+		string(data),
+		"the root's inert $id passes through, while the splice drops the remote's as always")
+}
+
+// TestRefEnginesAgreeOnTheBaseURI pins that both entry points parse the
+// [jsonschema.WithBaseURI] value and refuse one that is not a URI reference.
+// The base seeds every registry key a run derives, so a value that does not
+// parse would corrupt the resolution space of either engine rather than
+// surface anywhere. [jsonschema.NewInliner] has no error to return, so the
+// refusal arrives from [jsonschema.Inliner.Inline].
+//
+// [jsonschema.ErrUnknownVocabulary] is the one compile-time refusal with no
+// Inline counterpart, and has no test here, since vocabulary resolution
+// reads options Inline does not take.
+func TestRefEnginesAgreeOnTheBaseURI(t *testing.T) {
+	t.Parallel()
+
+	const malformed = "http://[::1"
+
+	root := &jsonschema.Schema{Type: "string"}
+
+	_, err := jsonschema.Compile(t.Context(), root, jsonschema.WithBaseURI(malformed))
+	require.ErrorIs(t, err, jsonschema.ErrInvalidBaseURI)
+
+	_, err = jsonschema.Inline(t.Context(), root, jsonschema.WithBaseURI(malformed))
+	require.ErrorIs(t, err, jsonschema.ErrInvalidBaseURI)
+}
+
+// TestInlinerReusesTheBaseURIRefusal pins that the refusal rides the
+// [jsonschema.Inliner] rather than one call. The constructor records it once
+// and every Inline call reports it. A nil schema still answers nil first, the
+// order [jsonschema.Compile] uses when it refuses a nil schema before reading
+// the base.
+func TestInlinerReusesTheBaseURIRefusal(t *testing.T) {
+	t.Parallel()
+
+	inliner := jsonschema.NewInliner(jsonschema.WithBaseURI("http://[::1"))
+
+	out, err := inliner.Inline(t.Context(), nil)
+	require.NoError(t, err, "Inline answers a nil schema before it reads the base")
+	assert.Nil(t, out)
+
+	for range 2 {
+		_, err = inliner.Inline(t.Context(), &jsonschema.Schema{Type: "string"})
+		require.ErrorIs(t, err, jsonschema.ErrInvalidBaseURI)
+	}
+}
+
+// TestInlineSubstituteViolationNamesItsSite pins the attribution on a bad
+// substitute. The fallback authors the schema, so its own paths locate nothing
+// the caller can look up. The message names the consultation instead. It
+// carries the reference the substitute answered plus the document and JSON
+// Pointer the [jsonschema.RefFailure] arrived with.
+func TestInlineSubstituteViolationNamesItsSite(t *testing.T) {
+	t.Parallel()
+
+	const ref = "https://example.test/absent.json"
+
+	root := &jsonschema.Schema{
+		ID:         "https://example.test/root.json",
+		Properties: map[string]*jsonschema.Schema{"a": {Ref: ref}},
+	}
+
+	fallback := jsonschema.RefFallbackFunc(
+		func(_ context.Context, _ jsonschema.RefFailure) jsonschema.RefAction {
+			return jsonschema.SubstituteRef(&jsonschema.Schema{Type: "strng"})
+		},
+	)
+
+	_, err := jsonschema.Inline(t.Context(), root, jsonschema.WithRefFallback(fallback))
+
+	require.ErrorIs(t, err, jsonschema.ErrInvalidType)
+	require.ErrorContains(t, err, ref, "the message names the reference the substitute answered")
+	require.ErrorContains(t, err, "https://example.test/root.json",
+		"the message names the document where the inliner consulted the fallback")
+	require.ErrorContains(t, err, "/properties/a",
+		"the message names the path of the node bearing the reference")
+}
+
+func TestInlineSubstituteNestedRefFailurePath(t *testing.T) {
+	t.Parallel()
+
+	// A nested ref failure inside a fallback substitute must report a Document
+	// and Path that cohere: the Path is the referencing schema's JSON Pointer
+	// within the reported document. A substitute that re-bases via its own $id
+	// is the root of its own document, so nested failure paths are rooted at
+	// ""; a substitute without $id is spliced into the enclosing document, so
+	// paths stay rooted at the failing node's location there.
+	tests := map[string]struct {
+		substitute *jsonschema.Schema
+		wantDoc    string
+		wantPath   string
+	}{
+		"substitute with own $id": {
+			substitute: &jsonschema.Schema{
+				ID:         "https://substitute.example/sub.json",
+				Properties: map[string]*jsonschema.Schema{"inner": {Ref: "#/$defs/missing"}},
+			},
+			wantDoc:  "https://substitute.example/sub.json",
+			wantPath: "/properties/inner",
+		},
+		"substitute without $id": {
+			substitute: &jsonschema.Schema{
+				Properties: map[string]*jsonschema.Schema{"inner": {Ref: "#/$defs/missing"}},
+			},
+			wantDoc:  "https://root.example/root.json",
+			wantPath: "/properties/a/properties/inner",
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var captured jsonschema.RefFailure
+
+			fallback := jsonschema.RefFallbackFunc(
+				func(_ context.Context, f jsonschema.RefFailure) jsonschema.RefAction {
+					if f.Ref == "#/$defs/missing" {
+						captured = f
+
+						return jsonschema.DropRef()
+					}
+
+					return jsonschema.SubstituteRef(tt.substitute)
+				},
+			)
+
+			root, err := jsonschema.ParseSchema([]byte(stringtest.Input(`
+				{
+					"$id": "https://root.example/root.json",
+					"properties": {"a": {"$ref": "#/$defs/absent"}}
+				}
+			`)))
+			require.NoError(t, err)
+
+			_, err = jsonschema.Inline(t.Context(), root, jsonschema.WithRefFallback(fallback))
+			require.NoError(t, err)
+
+			assert.Equal(t, "#/$defs/missing", captured.Ref, "the nested ref is the one captured")
+			assert.Equal(t, tt.wantDoc, captured.Document,
+				"the failure reports the document containing the failing ref")
+			assert.Equal(t, tt.wantPath, captured.Path,
+				"the path is the referencing schema's pointer within the reported document")
+		})
+	}
 }

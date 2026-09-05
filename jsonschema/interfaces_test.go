@@ -264,3 +264,121 @@ func TestTagInterpreterFieldContextOwner(t *testing.T) {
 	assert.Equal(t, reflect.TypeFor[ownerOuter](), owners["outer"])
 	assert.Equal(t, reflect.TypeFor[ownerEmbedded](), owners["inner"])
 }
+
+// cyclicPtr is a pointer type whose element chain never leaves the Pointer
+// kind, the shape that requires a cycle guard in every deref loop.
+type cyclicPtr *cyclicPtr
+
+// TestFieldContextElementContextsCyclicPointer pins that ElementContexts
+// terminates on a field whose type is a cyclic pointer. A WithTypeSchema
+// override lets generation build a node for the type (bypassing the
+// kind-dispatch rejection), so an interpreter asking for element contexts
+// reaches elementType's pointer deref with a chain that never bottoms out;
+// the guarded deref treats it as a non-container and yields no elements.
+func TestFieldContextElementContextsCyclicPointer(t *testing.T) {
+	t.Parallel()
+
+	type host struct {
+		F cyclicPtr `mytag:"x"`
+	}
+
+	var elems []jsonschema.FieldContext
+
+	interp := jsonschema.TagInterpreterFunc(
+		func(_ context.Context, field jsonschema.FieldContext, _ jsonschema.Tag) error {
+			elems = field.ElementContexts()
+
+			return nil
+		},
+	)
+
+	_, err := jsonschema.GenerateFor[host](
+		t.Context(),
+		jsonschema.WithTypeSchema(
+			reflect.TypeFor[cyclicPtr](),
+			jsonschema.TypeSchema{Value: &jsonschema.Schema{}},
+		),
+		jsonschema.WithTagInterpreter("mytag", interp),
+	)
+	require.NoError(t, err)
+	require.Empty(t, elems)
+}
+
+// TestFieldContextEffectiveAccessorsNilCanvas pins that the Effective accessors
+// tolerate a caller-built FieldContext with a nil Canvas the same way they
+// tolerate a nil Base: the nil side reads as unauthored, so a hand-built
+// context (an interpreter unit test driving an accessor directly) falls back
+// to the type-derived Base value instead of panicking on a nil dereference.
+func TestFieldContextEffectiveAccessorsNilCanvas(t *testing.T) {
+	t.Parallel()
+
+	base := &jsonschema.Schema{
+		Format:           "email",
+		Pattern:          "^a+$",
+		ContentEncoding:  "base64",
+		ContentMediaType: "application/json",
+	}
+
+	tests := map[string]struct {
+		fc   jsonschema.FieldContext
+		get  func(jsonschema.FieldContext) string
+		want string
+	}{
+		"format falls back to base": {
+			fc:   jsonschema.FieldContext{Base: base},
+			get:  jsonschema.FieldContext.EffectiveFormat,
+			want: "email",
+		},
+		"pattern falls back to base": {
+			fc:   jsonschema.FieldContext{Base: base},
+			get:  jsonschema.FieldContext.EffectivePattern,
+			want: "^a+$",
+		},
+		"content encoding falls back to base": {
+			fc:   jsonschema.FieldContext{Base: base},
+			get:  jsonschema.FieldContext.EffectiveContentEncoding,
+			want: "base64",
+		},
+		"content media type falls back to base": {
+			fc:   jsonschema.FieldContext{Base: base},
+			get:  jsonschema.FieldContext.EffectiveContentMediaType,
+			want: "application/json",
+		},
+		"format empty when both sides nil": {
+			fc:   jsonschema.FieldContext{},
+			get:  jsonschema.FieldContext.EffectiveFormat,
+			want: "",
+		},
+		"pattern empty when both sides nil": {
+			fc:   jsonschema.FieldContext{},
+			get:  jsonschema.FieldContext.EffectivePattern,
+			want: "",
+		},
+		"content encoding empty when both sides nil": {
+			fc:   jsonschema.FieldContext{},
+			get:  jsonschema.FieldContext.EffectiveContentEncoding,
+			want: "",
+		},
+		"content media type empty when both sides nil": {
+			fc:   jsonschema.FieldContext{},
+			get:  jsonschema.FieldContext.EffectiveContentMediaType,
+			want: "",
+		},
+		"canvas still wins over base": {
+			fc: jsonschema.FieldContext{
+				Canvas: &jsonschema.Schema{Format: "uri"},
+				Base:   base,
+			},
+			get:  jsonschema.FieldContext.EffectiveFormat,
+			want: "uri",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, tc.get(tc.fc))
+		})
+	}
+}

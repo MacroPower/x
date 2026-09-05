@@ -1,16 +1,20 @@
 package jsonschema_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
+	"io"
 	"math"
+	"math/big"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/iotest"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -6638,9 +6642,9 @@ func TestValidateConstUnboundedJSONNumber(t *testing.T) {
 func TestValidateBigConstThroughRemoteFetch(t *testing.T) {
 	t.Parallel()
 
-	const big = "12345678901234567890"
+	const giant = "12345678901234567890"
 
-	remote := &jsonschema.Schema{Const: new(any(jsonv1.Number(big)))}
+	remote := &jsonschema.Schema{Const: new(any(jsonv1.Number(giant)))}
 	root := &jsonschema.Schema{Ref: "https://ex.com/big.json"}
 
 	v, err := jsonschema.Compile(t.Context(), root,
@@ -6649,7 +6653,7 @@ func TestValidateBigConstThroughRemoteFetch(t *testing.T) {
 		}))
 	require.NoError(t, err)
 
-	require.NoError(t, v.ValidateJSON(t.Context(), []byte(big)),
+	require.NoError(t, v.ValidateJSON(t.Context(), []byte(giant)),
 		"the exact literal must satisfy the fetched const")
 	require.Error(t, v.ValidateJSON(t.Context(), []byte("12345678901234567000")),
 		"the float64-rounded neighbor must not")
@@ -7908,16 +7912,16 @@ func (marshalsToNumber) MarshalJSON() ([]byte, error) {
 func TestValidateLargeNumberGuarded(t *testing.T) {
 	t.Parallel()
 
-	big := strings.Repeat("9", 5_000)
+	giant := strings.Repeat("9", 5_000)
 
 	cases := map[string]struct {
 		schema   string
 		instance string
 		valid    bool
 	}{
-		"giant integer is an integer":   {`{"type":"integer"}`, big, true},
-		"giant integer exceeds maximum": {`{"type":"integer","maximum":100}`, big, false},
-		"giant negative below minimum":  {`{"type":"integer","minimum":0}`, "-" + big, false},
+		"giant integer is an integer":   {`{"type":"integer"}`, giant, true},
+		"giant integer exceeds maximum": {`{"type":"integer","maximum":100}`, giant, false},
+		"giant negative below minimum":  {`{"type":"integer","minimum":0}`, "-" + giant, false},
 		"exact comparison within range": {`{"maximum":9007199254740992}`, "9007199254740993", false},
 
 		// A short literal with a large exponent expands to a huge value;
@@ -7942,14 +7946,14 @@ func TestValidateLargeNumberGuarded(t *testing.T) {
 
 		// Const and enum compare via equality rather than the numeric bound
 		// path; a giant literal must not reach an unguarded big.Rat parse.
-		"giant literal never matches const": {`{"const":1}`, big, false},
-		"giant literal never matches enum":  {`{"enum":[1,2]}`, big, false},
+		"giant literal never matches const": {`{"const":1}`, giant, false},
+		"giant literal never matches enum":  {`{"enum":[1,2]}`, giant, false},
 
 		// UniqueItems hashes and compares array members; large-exponent
 		// members must be deduplicated canonically without expansion.
 		"unique giant exponents distinct":  {`{"uniqueItems":true}`, "[1e5000,2e5000,3e5000]", true},
 		"unique giant exponents duplicate": {`{"uniqueItems":true}`, "[1e5000,10e4999]", false},
-		"unique giant literals duplicate":  {`{"uniqueItems":true}`, "[" + big + "," + big + "]", false},
+		"unique giant literals duplicate":  {`{"uniqueItems":true}`, "[" + giant + "," + giant + "]", false},
 
 		// An over-length literal whose value is small must compare by value,
 		// not be misclassified as extreme by its textual length.
@@ -8175,14 +8179,14 @@ func BenchmarkValidateDeepNesting(b *testing.B) {
 // scan; a regression into an unguarded big.Rat parse (quadratic in the digit
 // count) shows up here as a roughly thousandfold ns/op jump.
 func BenchmarkValidateLargeNumber(b *testing.B) {
-	big := strings.Repeat("9", 5_000_000)
+	giant := strings.Repeat("9", 5_000_000)
 
 	cases := map[string]struct {
 		schema   string
 		instance string
 	}{
-		"giant integer exceeds maximum": {`{"type":"integer","maximum":100}`, big},
-		"unique giant literals":         {`{"uniqueItems":true}`, "[" + big + "," + big + "]"},
+		"giant integer exceeds maximum": {`{"type":"integer","maximum":100}`, giant},
+		"unique giant literals":         {`{"uniqueItems":true}`, "[" + giant + "," + giant + "]"},
 	}
 
 	for name, c := range cases {
@@ -8617,4 +8621,242 @@ func TestValidateFallbackEnumConstMatchesIndexed(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A self-referential (cyclic) instance is rejected by the instance funnel
+// before any keyword runs, so the value-comparison keywords -- uniqueItems,
+// const, and enum -- can never walk a cycle and abort the process with a fatal
+// stack overflow. The rejection arrives as an ordinary error, not a crash and
+// not a *ValidationError. The comparison walks run over internal/jsonvalue
+// trees, which are finite by construction, so they carry no guard of their
+// own.
+func TestValidateCyclicInstanceValueComparisons(t *testing.T) {
+	t.Parallel()
+
+	cyclic := func() []any {
+		s := []any{nil, "x"}
+		s[0] = s
+
+		return s
+	}
+
+	sharedCycle := cyclic()
+
+	tests := map[string]struct {
+		schema   string
+		instance any
+	}{
+		"uniqueItems with cyclic element": {
+			schema:   `{"uniqueItems": true}`,
+			instance: cyclic(),
+		},
+		"uniqueItems with same cyclic value twice": {
+			schema:   `{"uniqueItems": true}`,
+			instance: []any{sharedCycle, sharedCycle},
+		},
+		"uniqueItems with duplicates beside a cyclic element": {
+			schema:   `{"uniqueItems": true}`,
+			instance: []any{cyclic(), "x", "x"},
+		},
+		"const with cyclic instance": {
+			schema:   `{"const": [null, "x"]}`,
+			instance: cyclic(),
+		},
+		"enum with cyclic instance": {
+			schema:   `{"enum": [[null, "x"], "y"]}`,
+			instance: cyclic(),
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			v := jsonschema.MustCompileJSON([]byte(tc.schema))
+
+			err := v.Validate(t.Context(), tc.instance)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "is not accepted")
+
+			var verr *jsonschema.ValidationError
+
+			assert.NotErrorAs(t, err, &verr,
+				"a cyclic instance is rejected by the funnel, not a validation failure")
+		})
+	}
+}
+
+// validateReader compiles schema and validates the reader's JSON against it,
+// the Compile-then-ValidateReader composition, transparent like validateJSON.
+//
+//nolint:wrapcheck // Transparent test helper; assertions match the original errors.
+func validateReader(
+	ctx context.Context, schema *jsonschema.Schema, r io.Reader, opts ...jsonschema.ValidateOption,
+) error {
+	v, err := jsonschema.Compile(ctx, schema, opts...)
+	if err != nil {
+		return err
+	}
+
+	return v.ValidateReader(ctx, r)
+}
+
+func TestValidateReader(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		schema *jsonschema.Schema
+		json   string
+		err    string
+		isVE   bool
+	}{
+		"valid object": {
+			schema: &jsonschema.Schema{
+				Type:       "object",
+				Required:   []string{"name"},
+				Properties: map[string]*jsonschema.Schema{"name": {Type: "string"}},
+			},
+			json: `{"name": "Alice"}`,
+		},
+		"validation failure": {
+			schema: &jsonschema.Schema{Type: "string"},
+			json:   `1`,
+			err:    "(type)",
+			isVE:   true,
+		},
+		"malformed json": {
+			schema: &jsonschema.Schema{Type: "object"},
+			json:   `{invalid`,
+			err:    "JSON decode",
+		},
+		"trailing data": {
+			schema: &jsonschema.Schema{Type: "object"},
+			json:   `{"a":1} x`,
+			err:    "JSON decode",
+		},
+		"trailing whitespace accepted": {
+			schema: &jsonschema.Schema{Type: "object"},
+			json:   "{\"a\":1}\n  \t\n",
+		},
+		"duplicate member names rejected": {
+			schema: &jsonschema.Schema{Type: "object"},
+			json:   `{"a":1,"a":2}`,
+			err:    "JSON decode",
+		},
+		"integer preserved as jsonv1.Number": {
+			schema: &jsonschema.Schema{Type: "integer"},
+			json:   `42`,
+		},
+		"float rejected by integer type": {
+			schema: &jsonschema.Schema{Type: "integer"},
+			json:   `3.14`,
+			err:    "(type)",
+			isVE:   true,
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := validateReader(t.Context(), tt.schema, strings.NewReader(tt.json))
+			if tt.err == "" {
+				require.NoError(t, err)
+
+				return
+			}
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.err)
+
+			ve, isVE := errors.AsType[*jsonschema.ValidationError](err)
+			assert.Equal(t, tt.isVE, isVE)
+
+			if tt.isVE {
+				require.NotNil(t, ve)
+			}
+		})
+	}
+
+	t.Run("reader error mid-stream", func(t *testing.T) {
+		t.Parallel()
+
+		errBoom := errors.New("boom")
+		r := io.MultiReader(strings.NewReader(`{"a":`), iotest.ErrReader(errBoom))
+
+		err := validateReader(t.Context(), &jsonschema.Schema{Type: "object"}, r)
+		require.Error(t, err)
+		require.ErrorIs(t, err, errBoom)
+
+		_, isVE := errors.AsType[*jsonschema.ValidationError](err)
+		assert.False(t, isVE, "a read error carries no validation verdict")
+	})
+
+	t.Run("agrees with ValidateJSON", func(t *testing.T) {
+		t.Parallel()
+
+		schema := &jsonschema.Schema{
+			Type:       "object",
+			Properties: map[string]*jsonschema.Schema{"n": {Type: "integer"}},
+		}
+
+		v, err := jsonschema.Compile(t.Context(), schema)
+		require.NoError(t, err)
+
+		for _, data := range []string{`{"n": 1}`, `{"n": 1.5}`, `{"n": 1} x`, `{`} {
+			fromBytes := v.ValidateJSON(t.Context(), []byte(data))
+			fromReader := v.ValidateReader(t.Context(), bytes.NewReader([]byte(data)))
+
+			if fromBytes == nil {
+				assert.NoError(t, fromReader, "input %q", data)
+			} else {
+				assert.Error(t, fromReader, "input %q", data)
+			}
+		}
+	})
+}
+
+// bigValueDoc holds big.Int and big.Float by value. Their MarshalJSON and
+// MarshalText have pointer receivers, which encoding/json only uses on
+// addressable values: a bare json.Marshal of the value form would fall back
+// to struct reflection ({"i":{},"v":{}}), a shape generation never
+// describes. ValidateValue must marshal through an addressable copy so the
+// value instance validates identically to the pointer instance, closing the
+// generation loop for both forms.
+type bigValueDoc struct {
+	I big.Int   `json:"i"`
+	V big.Float `json:"v"`
+}
+
+func TestValidateValue_NonAddressableFieldMarshalers(t *testing.T) {
+	t.Parallel()
+
+	s, err := jsonschema.GenerateFor[bigValueDoc](t.Context())
+	require.NoError(t, err)
+
+	v, err := jsonschema.Compile(t.Context(), s)
+	require.NoError(t, err)
+
+	doc := bigValueDoc{I: *big.NewInt(42), V: *big.NewFloat(1.5)}
+
+	assert.NoError(t, v.ValidateValue(t.Context(), doc),
+		"value instance must validate like the pointer instance")
+	assert.NoError(t, v.ValidateValue(t.Context(), &doc))
+}
+
+func TestValidateValue_NonAddressableRootMarshaler(t *testing.T) {
+	t.Parallel()
+
+	// The root itself relies on a pointer-receiver marshaler: big.Int's
+	// MarshalJSON emits a bare number, and the generated schema is
+	// {"type":"integer"}, which the reflected {} of a non-addressable
+	// marshal would fail.
+	s, err := jsonschema.GenerateFor[big.Int](t.Context())
+	require.NoError(t, err)
+
+	v, err := jsonschema.Compile(t.Context(), s)
+	require.NoError(t, err)
+
+	assert.NoError(t, v.ValidateValue(t.Context(), *big.NewInt(7)))
+	assert.NoError(t, v.ValidateValue(t.Context(), big.NewInt(7)))
 }
