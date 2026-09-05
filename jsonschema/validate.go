@@ -2190,9 +2190,17 @@ func (v *validator) patternPropertyFor(id int, pattern string) compiledPattern {
 func evalNumeric(ctx evalContext) []*ValidationError {
 	v, schema, instance := ctx.v, ctx.schema, ctx.instance
 	instancePath, schemaPath := ctx.instancePath, ctx.schemaPath
-	nodeID := ctx.nodeID
 
 	if instance.Kind() != jsonvalue.Number {
+		return nil
+	}
+
+	// Every branch below reports only under a set bound keyword, and the
+	// type keyword's integer test reads the decomposition rather than the
+	// rational, so a node that sets no bound has nothing to check and skips
+	// the rational expansion.
+	bounds := v.boundsFor(ctx.nodeID, schema)
+	if bounds == nil {
 		return nil
 	}
 
@@ -2217,7 +2225,7 @@ func evalNumeric(ctx evalContext) []*ValidationError {
 	if !ok {
 		d, _ := instance.Dec()
 
-		return v.validateNumericUnbounded(nodeID, schema, d, literal, instancePath, schemaPath)
+		return validateNumericUnbounded(schema, bounds, d, literal, instancePath, schemaPath)
 	}
 
 	var errs []*ValidationError
@@ -2227,8 +2235,6 @@ func evalNumeric(ctx evalContext) []*ValidationError {
 	add := func(keyword, msg string) {
 		errs = append(errs, leafError(instancePath, schemaPath, keyword, msg))
 	}
-
-	bounds := v.boundsFor(nodeID, schema)
 
 	if schema.MultipleOf != nil {
 		switch {
@@ -2303,10 +2309,11 @@ func evalNumeric(ctx evalContext) []*ValidationError {
 // (see [numrat.IntegerMultipleOf]); only an over-cap non-integer skips it, since
 // expanding its fractional part is unbounded. The schema-validity check (a
 // non-positive divisor) fires regardless. A zero value is always
-// ExactlyComparable, so it never reaches this path.
-func (v *validator) validateNumericUnbounded(
-	id int,
+// ExactlyComparable, so it never reaches this path. The bounds argument
+// carries the schema's bound keywords as rationals (see [boundsFor]).
+func validateNumericUnbounded(
 	schema *Schema,
+	bounds *precomputedBounds,
 	d numrat.DecNumber,
 	literal string,
 	instancePath instanceLocation,
@@ -2319,8 +2326,6 @@ func (v *validator) validateNumericUnbounded(
 	add := func(keyword, msg string) {
 		errs = append(errs, leafError(instancePath, schemaPath, keyword, msg))
 	}
-
-	bounds := v.boundsFor(id, schema)
 
 	// A non-positive multipleOf makes the schema invalid independent of the
 	// instance value. For a positive divisor, an over-cap integer's

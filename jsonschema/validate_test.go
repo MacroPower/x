@@ -8215,6 +8215,52 @@ func BenchmarkValidateLargeNumber(b *testing.B) {
 	}
 }
 
+// BenchmarkValidateNumbers validates an array of integers under a bare
+// `type: integer` items schema and under one that also sets a bound. The
+// integer test decides from the literal's decomposition alone, so the unbound
+// case measures the per-number cost of the numeric row when no bound keyword
+// applies; the bound case measures the exact rational comparison.
+func BenchmarkValidateNumbers(b *testing.B) {
+	const count = 1000
+
+	elems := make([]string, count)
+	for i := range elems {
+		elems[i] = strconv.Itoa(i)
+	}
+
+	instance := []byte("[" + strings.Join(elems, ",") + "]")
+
+	cases := map[string]string{
+		"integer":         `{"items":{"type":"integer"}}`,
+		"integer minimum": `{"items":{"type":"integer","minimum":0}}`,
+	}
+
+	for name, schema := range cases {
+		b.Run(name, func(b *testing.B) {
+			var s jsonschema.Schema
+
+			err := json.Unmarshal([]byte(schema), &s)
+			if err != nil {
+				b.Fatal(err)
+			}
+
+			v, err := jsonschema.Compile(b.Context(), &s)
+			if err != nil {
+				b.Fatal(err)
+			}
+
+			b.ReportAllocs()
+			b.ResetTimer()
+
+			for b.Loop() {
+				if v.ValidateJSON(b.Context(), instance) != nil {
+					b.Fatal("expected the instance to validate")
+				}
+			}
+		})
+	}
+}
+
 // BenchmarkValidateFieldPredicates exercises the two hot per-node predicates that
 // enumerate every Schema field through the canonical internal/schemafield table:
 // IsFalseSchema (per validated node carrying a `not`) and IsEmpty (per node
