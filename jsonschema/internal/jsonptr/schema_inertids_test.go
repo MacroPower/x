@@ -10,11 +10,11 @@ import (
 	"go.jacobcolvin.com/x/jsonschema/internal/jsonptr"
 )
 
-// TestSchemaAtJSONPointerInertIDs asserts the trackIDs switch: with tracking
+// TestSchemaAtJSONFormInertIDs asserts the trackIDs switch: with tracking
 // disabled (a retrieval-base walk, where $id is an inert annotation) crossing
 // an intermediate $id leaves the base untouched, while the same walk with
 // tracking enabled rebases below the crossed $id.
-func TestSchemaAtJSONPointerInertIDs(t *testing.T) {
+func TestSchemaAtJSONFormInertIDs(t *testing.T) {
 	t.Parallel()
 
 	root := &jsonschema.Schema{
@@ -47,7 +47,7 @@ func TestSchemaAtJSONPointerInertIDs(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got, base := jsonptr.SchemaAtJSONPointer(
+			got, base := jsonptr.SchemaAtJSONForm(
 				root, segments, "https://example.com/root", tc.trackIDs, materializeSchema,
 			)
 			require.NotNil(t, got)

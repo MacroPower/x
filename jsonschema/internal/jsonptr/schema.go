@@ -96,153 +96,32 @@ func nextPosition(pos position, seg string, child any) position {
 // decode discipline, which this package cannot name without an import cycle.
 type Materialize func(node any) (*jsonschema.Schema, error)
 
-// SchemaAtJSONPointer navigates root by segments and returns the value located
-// there, materialized as a Schema when it is itself a schema (a JSON object or
-// boolean), or nil otherwise. [TypedPrefix] descends the typed tree while
-// each segment follows a sub-schema keyword edge ([schemafield.Subschemas]),
-// and [SchemaAtJSONForm] finishes from the first segment that does not. The
-// node standing there alone round-trips through [jsonvalue.Exact], so
-// numbers survive as exact [encoding/json.Number] literals without
-// re-encoding the whole root, and the located node is handed to materialize
-// as a fresh copy unaliased from root. A node with a marshal-fatal keyword
-// combination (both items forms set, for one) therefore refuses the walk only
-// where the walk still marshals, at the node the JSON form starts from or
-// below it; a fault elsewhere in the document leaves other pointers
-// unaffected.
+// SchemaAtJSONForm navigates schema by segments through its JSON form and
+// returns the value located there, materialized as a Schema when it is
+// itself a schema (a JSON object or boolean), or nil otherwise. The schema
+// round-trips through [jsonvalue.Exact] alone, so numbers survive as exact
+// [encoding/json.Number] literals without re-encoding any enclosing document,
+// and the located node is handed to materialize as a fresh copy unaliased
+// from schema. A schema with a marshal-fatal keyword combination (both items
+// forms set, for one) refuses the walk, while a fault elsewhere in the
+// enclosing document leaves it unaffected; a caller that has already
+// followed the typed prefix of a pointer through its own tables (the
+// resolver session over its frozen trees) therefore passes the deepest node
+// it reached and the segments left below it rather than the document root,
+// which also spares the walk a second pass over the prefix.
 //
-// The walk starts from base (root's base URI) and, when trackIDs is set,
-// tracks $id members of the crossed objects that occupy schema positions --
-// the typed nodes of the prefix, and below the switch the sub-schema keyword
-// containers the [schemafield.Subschemas] table declares -- so the returned
-// base is the one in effect at the located target; the target's own $id is
-// left to the caller during registration. A "$id" string inside a non-schema
-// keyword's payload (examples, default, const) or an unknown keyword is plain
-// instance data, never a resource boundary, and leaves base untouched; a
-// target reached through such data keeps the base of its nearest enclosing
-// schema resource. A caller whose walk treats $id as inert (a retrieval-base
-// walk) passes trackIDs false, and every crossed $id leaves base untouched.
-func SchemaAtJSONPointer(
-	root *jsonschema.Schema, segments []string, base string, trackIDs bool,
-	materialize Materialize,
-) (*jsonschema.Schema, string) {
-	node, rest, base := TypedPrefix(root, segments, base, trackIDs)
-
-	return SchemaAtJSONForm(node, rest, base, trackIDs, materialize)
-}
-
-// TypedPrefix follows segments from root through sub-schema keyword edges of
-// the typed tree ([schemafield.Subschemas]) and stops at the first segment
-// that names no edge it can follow. It returns the deepest typed node it
-// reaches, the segments left unconsumed there, and the base URI in effect at
-// that node. An empty remainder means the segments locate the returned node
-// itself, root's live sub-schema rather than a copy of it.
-//
-// When trackIDs is set the walk rebases base on the $id of each intermediate
-// schema it crosses, skipping the starting root, whose $id base already
-// reflects. The rebase runs before the edge is attempted, mirroring the
-// JSON-form walk, which rebases on the object it stands on whatever the
-// segment then resolves to. A caller whose walk treats $id as inert (a
-// retrieval-base walk) passes trackIDs false, and every crossed $id leaves
-// base untouched.
-func TypedPrefix(
-	root *jsonschema.Schema, segments []string, base string, trackIDs bool,
-) (*jsonschema.Schema, []string, string) {
-	node := root
-
-	i := 0
-	for i < len(segments) && node != nil {
-		if trackIDs && i > 0 && node.ID != "" && !uriref.IsFragmentOnly(node.ID) {
-			base = uriref.IDBase(base, node.ID)
-		}
-
-		child, consumed, ok := typedEdge(node, segments[i:])
-		if !ok {
-			break
-		}
-
-		node = child
-		i += consumed
-	}
-
-	return node, segments[i:], base
-}
-
-// typedEdge descends one sub-schema keyword edge of the typed tree, consuming
-// the keyword segment plus, for a map- or slice-shaped keyword, the member
-// segment after it. It declines (ok=false) whatever it cannot follow as a
-// typed edge -- a data keyword, an absent member, a nil child, a keyword
-// whose two field forms are both set (items) -- and the caller answers those
-// from the node's JSON form, which is the arbiter the edge must agree with.
-func typedEdge(node *jsonschema.Schema, segs []string) (*jsonschema.Schema, int, bool) {
-	var (
-		child    *jsonschema.Schema
-		consumed int
-		set      int
-	)
-
-	for _, f := range schemafield.Subschemas {
-		if f.Keyword != segs[0] {
-			continue
-		}
-
-		switch f.Shape {
-		case schemafield.Single:
-			s := f.SingleOf(node)
-			if s == nil {
-				continue
-			}
-
-			set++
-			child, consumed = s, 1
-
-		case schemafield.Map:
-			m := f.MapOf(node)
-			if m == nil {
-				continue
-			}
-
-			set++
-
-			if len(segs) > 1 {
-				if s, ok := m[segs[1]]; ok && s != nil {
-					child, consumed = s, 2
-				}
-			}
-
-		case schemafield.Slice:
-			s := f.SliceOf(node)
-			if s == nil {
-				continue
-			}
-
-			set++
-
-			if len(segs) > 1 {
-				if idx, ok := ParseArrayIndex(segs[1]); ok && idx < len(s) && s[idx] != nil {
-					child, consumed = s[idx], 2
-				}
-			}
-
-		default: // None never appears in Subschemas.
-		}
-	}
-
-	// Two set forms of one keyword (items) marshal fatally; declining hands
-	// the conflict to the JSON form, which refuses it as the marshal does.
-	if set != 1 || child == nil {
-		return nil, 0, false
-	}
-
-	return child, consumed, true
-}
-
-// SchemaAtJSONForm finishes a pointer walk from the node [TypedPrefix]
-// stopped at. The node marshals alone, decodes with the exact-number
-// discipline, and the remaining segments descend its JSON form with $id
-// tracking picking up where the typed prefix left off. Base already carries
-// the node's own $id, so the local walk rebases only below it. A caller that
-// ran [TypedPrefix] itself passes the node, remainder, and base it returned,
-// which spares the walk a second pass over the prefix.
+// The walk starts from base, the base URI in effect at schema, and, when
+// trackIDs is set, tracks $id members of the crossed objects that occupy
+// schema positions -- the sub-schema keyword containers the
+// [schemafield.Subschemas] table declares -- so the returned base is the one
+// in effect at the located target. Base already carries schema's own $id, so
+// the walk rebases only below it; the target's own $id is left to the caller
+// during registration. A "$id" string inside a non-schema keyword's payload
+// (examples, default, const) or an unknown keyword is plain instance data,
+// never a resource boundary, and leaves base untouched; a target reached
+// through such data keeps the base of its nearest enclosing schema resource.
+// A caller whose walk treats $id as inert (a retrieval-base walk) passes
+// trackIDs false, and every crossed $id leaves base untouched.
 func SchemaAtJSONForm(
 	schema *jsonschema.Schema, segments []string, base string, trackIDs bool,
 	materialize Materialize,

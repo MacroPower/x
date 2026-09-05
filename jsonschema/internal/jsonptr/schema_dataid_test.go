@@ -10,13 +10,13 @@ import (
 	"go.jacobcolvin.com/x/jsonschema/internal/jsonptr"
 )
 
-// TestSchemaAtJSONPointerDataIDsInert asserts that $id tracking rebases only
+// TestSchemaAtJSONFormDataIDsInert asserts that $id tracking rebases only
 // at objects occupying schema positions. A "$id" string inside a non-schema
 // keyword's payload (examples) or an unknown keyword is plain instance data,
 // not a resource boundary, so a target materialized through it keeps the base
 // of its nearest enclosing schema resource; a $id in a genuine schema
 // position on the same kind of walk still rebases.
-func TestSchemaAtJSONPointerDataIDsInert(t *testing.T) {
+func TestSchemaAtJSONFormDataIDsInert(t *testing.T) {
 	t.Parallel()
 
 	const rootBase = "https://example.com/root"
@@ -86,7 +86,7 @@ func TestSchemaAtJSONPointerDataIDsInert(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got, base := jsonptr.SchemaAtJSONPointer(
+			got, base := jsonptr.SchemaAtJSONForm(
 				tc.root, tc.segments, rootBase, true, materializeSchema,
 			)
 			require.NotNil(t, got)

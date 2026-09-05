@@ -80,7 +80,7 @@ is the only one that imports the parent package.
 - `goast`: doc-comment extraction for the comment provider.
 - `jsonopts`: the one table classifying every `encoding/json` option.
 - `jsonprobe`: the v2 refusal oracle; what it refuses, v2 refuses.
-- `jsonptr`: RFC 6901 escaping and typed pointer walks.
+- `jsonptr`: RFC 6901 escaping and the JSON-form pointer walk.
 - `jsontag`: a verbatim port of v2's tag grammar.
 - `jsonvalue`: the one JSON value model; numbers carry their exact decimal.
 - `keyword`, `keywordmeta`: keyword names and their merge, scope, and draft.
