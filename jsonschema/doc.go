@@ -510,13 +510,20 @@
 // [encoding/json.Number], and pointers to those at any depth (the flag
 // survives the whole pointer chain; a pointer occurrence keeps its null
 // branch beside the string). On any other type the flag is refused with
-// [ErrInvalidJSONField], as v2 refuses it, with one exception on each side.
-// A field whose type carries a JSON or text marshaler (directly or through
-// its pointer method set) is not quoted and not refused: v2 routes it
-// through the method, which ignores the option, so the field keeps the
-// schema the marshaler steps produce. [time.Time] is the reverse exception:
-// it carries MarshalJSON, but v2's native time codec pre-empts the method
-// and rejects the flag, so generation refuses it too.
+// [ErrInvalidJSONField], as v2 refuses it, with one exception on each side
+// and one type that takes neither answer. A field whose type carries a JSON
+// or text marshaler (directly or through its pointer method set) is not
+// quoted and not refused: v2 routes it through the method, which ignores the
+// option, so the field keeps the schema the marshaler steps produce.
+// [time.Time] is the reverse exception: it carries MarshalJSON, but v2's
+// native time codec pre-empts the method and rejects the flag, so generation
+// refuses it too. [time.Duration] takes neither answer. The native v2 duration
+// codec has no default representation and pre-empts the int64
+// stringification, so at any pointer depth the flag neither quotes the field
+// nor draws [ErrInvalidJSONField], and generation answers the field exactly
+// as it does unflagged, refusing it with [ErrUnsupportedType] under the
+// defaults and honoring a [WithTypeSchemaFor] override where one is
+// registered.
 //
 // Unexported non-embedded fields without a json tag are excluded; a json tag
 // on an unexported field is refused with [ErrInvalidJSONField]. Unexported

@@ -629,10 +629,17 @@ so `omitempty` on one leaves the field required, and so does a
 value. `json:",string"` forces a
 `{"type":"string"}` schema for the types v2 stringifies -- the integer and
 float kinds, `json.Number`, and pointer chains to those -- and is refused on
-anything else. A type carrying a JSON or text marshaler is exempt because v2
+anything else, with one exception on each side and one type that takes
+neither answer. A type carrying a JSON or text marshaler is exempt because v2
 ignores the option for it; the field keeps the schema the marshaler steps
 produce (`time.Time` is the exception -- v2's native time codec rejects the
-flag, so generation refuses it too). Embedded structs without a `json` tag
+flag, so generation refuses it too). `time.Duration` takes neither answer.
+The native v2 duration codec has no default representation and pre-empts the
+`int64` stringification, so at any pointer depth the flag neither quotes the
+field nor draws `ErrInvalidJSONField`, and generation answers the field
+exactly as it does unflagged, refusing it with `ErrUnsupportedType` under the
+defaults and honoring a `WithTypeSchemaFor` override where one is registered.
+Embedded structs without a `json` tag
 (or with the explicit `json:",embed"` option) have their fields promoted; an
 embedded struct carrying any marshal or unmarshal method of its own is
 refused where the field walk reaches it; embedded struct types intercepted
