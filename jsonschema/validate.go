@@ -1904,6 +1904,8 @@ func evalUnevaluatedProperties(ctx evalContext) []*ValidationError {
 
 		childPath := ctx.instancePath.key(propName)
 		childErrs := v.validate(schema.UnevaluatedProperties, val, childPath, childSchemaPath, nil)
+		labelFalseSchemaKeyword(childErrs, schema.UnevaluatedProperties, KeywordUnevaluatedProperties)
+
 		if len(childErrs) == 0 {
 			ann.RecordProperty(propName)
 		} else {
@@ -1959,6 +1961,8 @@ func evalUnevaluatedItems(ctx evalContext) []*ValidationError {
 
 		childPath := ctx.instancePath.index(i)
 		childErrs := v.validate(schema.UnevaluatedItems, item, childPath, childSchemaPath, nil)
+		labelFalseSchemaKeyword(childErrs, schema.UnevaluatedItems, KeywordUnevaluatedItems)
+
 		if len(childErrs) == 0 {
 			ann.RecordItem(i)
 		} else {
@@ -2897,6 +2901,8 @@ func evalObjectApplicators(ctx evalContext) []*ValidationError {
 			childErrs := v.validate(
 				schema.PropertyNames, jsonvalue.NewString(propName), childPath, childSchemaPath, nil,
 			)
+			labelFalseSchemaKeyword(childErrs, schema.PropertyNames, KeywordPropertyNames)
+
 			if len(childErrs) > 0 {
 				errs = append(errs, newError(
 					childPath, childSchemaPath, KeywordPropertyNames,
@@ -3113,6 +3119,8 @@ func evalAllOf(ctx evalContext) []*ValidationError {
 		subAnn := ann.Child()
 		childSchemaPath := schemaPath.kw(KeywordAllOf).idx(i)
 		childErrs := v.validate(sub, ctx.instance, instancePath, childSchemaPath, subAnn)
+		labelFalseSchemaKeyword(childErrs, sub, KeywordAllOf)
+
 		if len(childErrs) > 0 {
 			allCauses = append(allCauses, childErrs...)
 		} else {
@@ -3152,6 +3160,8 @@ func evalAnyOf(ctx evalContext) []*ValidationError {
 		subAnn := ann.Child()
 		childSchemaPath := schemaPath.kw(KeywordAnyOf).idx(i)
 		childErrs := v.validate(sub, ctx.instance, instancePath, childSchemaPath, subAnn)
+		labelFalseSchemaKeyword(childErrs, sub, KeywordAnyOf)
+
 		if len(childErrs) == 0 {
 			matched = true
 
@@ -3192,6 +3202,8 @@ func evalOneOf(ctx evalContext) []*ValidationError {
 		subAnn := ann.Child()
 		childSchemaPath := schemaPath.kw(KeywordOneOf).idx(i)
 		childErrs := v.validate(sub, ctx.instance, instancePath, childSchemaPath, subAnn)
+		labelFalseSchemaKeyword(childErrs, sub, KeywordOneOf)
+
 		if len(childErrs) == 0 {
 			matchCount++
 			matchedAnn = subAnn
@@ -3260,6 +3272,8 @@ func evalIfThenElse(ctx evalContext) []*ValidationError {
 		if schema.Then != nil {
 			thenAnn := ann.Child()
 			thenErrs := v.validate(schema.Then, instance, instancePath, schemaPath.kw(KeywordThen), thenAnn)
+			labelFalseSchemaKeyword(thenErrs, schema.Then, KeywordThen)
+
 			if len(thenErrs) > 0 {
 				errs = append(errs, wrapError(instancePath, schemaPath, KeywordThen,
 					"if condition was true but did not validate against then subschema", thenErrs))
@@ -3270,6 +3284,8 @@ func evalIfThenElse(ctx evalContext) []*ValidationError {
 	} else if schema.Else != nil {
 		elseAnn := ann.Child()
 		elseErrs := v.validate(schema.Else, instance, instancePath, schemaPath.kw(KeywordElse), elseAnn)
+		labelFalseSchemaKeyword(elseErrs, schema.Else, KeywordElse)
+
 		if len(elseErrs) > 0 {
 			errs = append(errs, wrapError(instancePath, schemaPath, KeywordElse,
 				"if condition was false but did not validate against else subschema", elseErrs))
@@ -3415,6 +3431,8 @@ func (v *validator) validateResolvedRef(
 
 	refAnn := ann.Child()
 	childErrs := v.validate(res.Target, instance, instancePath, schemaPath.kw(keyword), refAnn)
+	labelFalseSchemaKeyword(childErrs, res.Target, keyword)
+
 	if len(childErrs) > 0 {
 		return []*ValidationError{
 			wrapError(instancePath, schemaPath, keyword, "", childErrs),

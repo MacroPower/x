@@ -3516,7 +3516,9 @@ func TestUnevaluatedPropertiesCauseOrderDeterministic(t *testing.T) {
 	var walk func(e *jsonschema.ValidationError)
 
 	walk = func(e *jsonschema.ValidationError) {
-		if e.Keyword == "unevaluatedProperties" {
+		// The wrapping error per property; its false-subschema leaf carries
+		// the same keyword and instance path.
+		if e.Keyword == "unevaluatedProperties" && len(e.Causes) > 0 {
 			got = append(got, e.InstancePath)
 		}
 
@@ -5460,6 +5462,9 @@ func TestFalseSchemaKeyword(t *testing.T) {
 		keyword      string
 		instancePath jsontext.Pointer
 		schemaPath   jsontext.Pointer
+		// The wrapped flag marks an applicator that wraps the false
+		// subschema's leaf in its own error, so the leaf is the first cause.
+		wrapped bool
 	}{
 		"additionalProperties false": {
 			schema: &jsonschema.Schema{
@@ -5528,6 +5533,49 @@ func TestFalseSchemaKeyword(t *testing.T) {
 			instancePath: "/1",
 			schemaPath:   "/additionalItems",
 		},
+		"ref to false": {
+			schema: &jsonschema.Schema{
+				Ref:  "#/$defs/never",
+				Defs: map[string]*jsonschema.Schema{"never": falseSchema()},
+			},
+			instance:     1.0,
+			keyword:      "$ref",
+			instancePath: "",
+			schemaPath:   "/$ref",
+			wrapped:      true,
+		},
+		"allOf false branch": {
+			schema:       &jsonschema.Schema{AllOf: []*jsonschema.Schema{falseSchema()}},
+			instance:     1.0,
+			keyword:      "allOf",
+			instancePath: "",
+			schemaPath:   "/allOf/0",
+			wrapped:      true,
+		},
+		"then false": {
+			schema:       &jsonschema.Schema{If: &jsonschema.Schema{}, Then: falseSchema()},
+			instance:     1.0,
+			keyword:      "then",
+			instancePath: "",
+			schemaPath:   "/then",
+			wrapped:      true,
+		},
+		"unevaluatedProperties false": {
+			schema:       &jsonschema.Schema{Type: "object", UnevaluatedProperties: falseSchema()},
+			instance:     map[string]any{"extra": 1.0},
+			keyword:      "unevaluatedProperties",
+			instancePath: "/extra",
+			schemaPath:   "/unevaluatedProperties",
+			wrapped:      true,
+		},
+		"propertyNames false": {
+			schema:       &jsonschema.Schema{Type: "object", PropertyNames: falseSchema()},
+			instance:     map[string]any{"k": 1.0},
+			keyword:      "propertyNames",
+			instancePath: "/k",
+			schemaPath:   "/propertyNames",
+			wrapped:      true,
+		},
 	}
 
 	for name, tt := range tests {
@@ -5539,6 +5587,12 @@ func TestFalseSchemaKeyword(t *testing.T) {
 			var ve *jsonschema.ValidationError
 
 			require.ErrorAs(t, err, &ve)
+
+			if tt.wrapped {
+				require.Len(t, ve.Causes, 1)
+
+				ve = ve.Causes[0]
+			}
 
 			assert.Equal(t, tt.keyword, ve.Keyword)
 			assert.Equal(t, tt.instancePath, ve.InstancePath)
