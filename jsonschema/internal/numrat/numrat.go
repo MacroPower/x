@@ -458,6 +458,13 @@ func (d DecNumber) ExactlyComparable() bool {
 	return len(d.sig) <= MaxNumberLen && d.exp <= MaxNumberLen && d.exp >= -MaxNumberLen
 }
 
+// machineDigits bounds the significand length and the decimal shift that
+// [DecNumber.Rat] handles in machine integers: 10^18 - 1 and 10^18 both fit
+// an int64, and a significand of at most that many digits times 10^shift with
+// the digit total at most machineDigits + 1 stays below 10^19, inside a
+// uint64.
+const machineDigits = 18
+
 // Rat expands the canonical form into an exact rational. The cost is bounded
 // only for ExactlyComparable values; callers must check that first.
 func (d DecNumber) Rat() *big.Rat {
@@ -465,23 +472,38 @@ func (d DecNumber) Rat() *big.Rat {
 		return new(big.Rat)
 	}
 
-	num := new(big.Int)
-	num.SetString(d.sig, 10) // sig is all digits, so this cannot fail
-
+	// Value = sig x 10^shift, where shift places the significand against the
+	// decimal point; a shift of zero is an integer whose significand ends at
+	// the point, the common shape of a JSON integer.
 	shift := int64(d.exp) - int64(len(d.sig))
 
-	absShift := shift
-	if absShift < 0 {
-		absShift = -absShift
-	}
-
-	pow := new(big.Int).Exp(big.NewInt(10), big.NewInt(absShift), nil)
-
 	r := new(big.Rat)
-	if shift >= 0 {
+
+	switch {
+	case len(d.sig) <= machineDigits && shift >= -machineDigits && int64(len(d.sig))+shift <= machineDigits+1:
+		// The ordinary JSON number: the significand and the power of ten
+		// both fit machine integers, so the rational is set from them
+		// directly without the big-number scanner or exponentiation.
+		u := digitsUint64(d.sig)
+
+		if shift >= 0 {
+			r.SetUint64(u * pow10(shift))
+		} else {
+			//nolint:gosec // u is below 10^18 and the power at most 10^18, both inside int64.
+			r.SetFrac64(int64(u), int64(pow10(-shift)))
+		}
+
+	case shift == 0:
+		r.SetInt(digitsBig(d.sig))
+
+	case shift > 0:
+		num := digitsBig(d.sig)
+		pow := new(big.Int).Exp(big.NewInt(10), big.NewInt(shift), nil)
 		r.SetInt(num.Mul(num, pow))
-	} else {
-		r.SetFrac(num, pow)
+
+	default:
+		pow := new(big.Int).Exp(big.NewInt(10), big.NewInt(-shift), nil)
+		r.SetFrac(digitsBig(d.sig), pow)
 	}
 
 	if d.neg {
@@ -489,6 +511,36 @@ func (d DecNumber) Rat() *big.Rat {
 	}
 
 	return r
+}
+
+// digitsUint64 reads a run of at most machineDigits decimal digits as a
+// uint64.
+func digitsUint64(digits string) uint64 {
+	var u uint64
+
+	for i := range len(digits) {
+		u = u*10 + uint64(digits[i]-'0')
+	}
+
+	return u
+}
+
+// digitsBig reads a run of decimal digits of any length as a big integer.
+func digitsBig(digits string) *big.Int {
+	n := new(big.Int)
+	n.SetString(digits, 10) // all digits, so this cannot fail
+
+	return n
+}
+
+// pow10 returns 10^n for 0 <= n <= machineDigits, which fits a uint64.
+func pow10(n int64) uint64 {
+	pow := uint64(1)
+	for range n {
+		pow *= 10
+	}
+
+	return pow
 }
 
 // CmpRat orders a value that is not ExactlyComparable against an exact
