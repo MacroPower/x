@@ -47,16 +47,18 @@ func TestHookPointersArePrivateCopies(t *testing.T) {
 
 	got, err := json.Marshal(s)
 	require.NoError(t, err)
-	assert.JSONEq(t, `{
-		"$schema":"https://json-schema.org/draft/2020-12/schema",
-		"type":"object",
-		"properties":{
-			"a":{"type":"string","title":"through the canvas"},
-			"b":{"type":"string"}
-		},
-		"required":["a","b"],
-		"additionalProperties":false
-	}`, string(got))
+	assert.JSONEq(t, stringtest.Input(`
+		{
+			"$schema":"https://json-schema.org/draft/2020-12/schema",
+			"type":"object",
+			"properties":{
+				"a":{"type":"string","title":"through the canvas"},
+				"b":{"type":"string"}
+			},
+			"required":["a","b"],
+			"additionalProperties":false
+		}
+	`), string(got))
 }
 
 // TestHookParentRequiredIsReadBack pins the one write the generator reads
@@ -113,13 +115,15 @@ func TestExtenderSlotAdditionsLandOnTheChild(t *testing.T) {
 
 	got, err := json.Marshal(s.Properties["grafted"])
 	require.NoError(t, err)
-	assert.JSONEq(t, `{
-		"description":"grafted",
-		"anyOf":[
-			{"$ref":"#/$defs/slotChild","allOf":[{"minProperties":1}]},
-			{"type":"null"}
-		]
-	}`, string(got))
+	assert.JSONEq(t, stringtest.Input(`
+		{
+			"description":"grafted",
+			"anyOf":[
+				{"$ref":"#/$defs/slotChild","allOf":[{"minProperties":1}]},
+				{"type":"null"}
+			]
+		}
+	`), string(got))
 
 	plain, err := json.Marshal(s.Properties["plain"])
 	require.NoError(t, err)

@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	jsonv1 "encoding/json"
 
@@ -98,102 +99,120 @@ func TestGenerateFor_EmbeddedFallbackSchemas(t *testing.T) {
 		"map fallback": {
 			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[fbMap](t.Context()) },
 			value:    fbMap{Name: "n", Extra: map[string]int{"a": 1}},
-			want: `{
-				"$schema":"https://json-schema.org/draft/2020-12/schema",
-				"type":"object",
-				"properties":{"name":{"type":"string"}},
-				"required":["name"],
-				"additionalProperties":{"type":"integer"}
-			}`,
+			want: stringtest.Input(`
+				{
+					"$schema":"https://json-schema.org/draft/2020-12/schema",
+					"type":"object",
+					"properties":{"name":{"type":"string"}},
+					"required":["name"],
+					"additionalProperties":{"type":"integer"}
+				}
+			`),
 		},
 		"map fallback under Draft7": {
 			generate: func() (*jsonschema.Schema, error) {
 				return jsonschema.GenerateFor[fbMap](t.Context(), jsonschema.WithDraft(jsonschema.Draft7))
 			},
 			value: fbMap{Name: "n", Extra: map[string]int{"a": 1}},
-			want: `{
-				"$schema":"http://json-schema.org/draft-07/schema#",
-				"type":"object",
-				"properties":{"name":{"type":"string"}},
-				"required":["name"],
-				"additionalProperties":{"type":"integer"}
-			}`,
+			want: stringtest.Input(`
+				{
+					"$schema":"http://json-schema.org/draft-07/schema#",
+					"type":"object",
+					"properties":{"name":{"type":"string"}},
+					"required":["name"],
+					"additionalProperties":{"type":"integer"}
+				}
+			`),
 		},
 		"jsontext.Value fallback leaves the object open": {
 			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[fbValue](t.Context()) },
 			value:    fbValue{Name: "n", Extra: jsontext.Value(`{"anything":[1,"two"]}`)},
-			want: `{
-				"$schema":"https://json-schema.org/draft/2020-12/schema",
-				"type":"object",
-				"properties":{"name":{"type":"string"}},
-				"required":["name"]
-			}`,
+			want: stringtest.Input(`
+				{
+					"$schema":"https://json-schema.org/draft/2020-12/schema",
+					"type":"object",
+					"properties":{"name":{"type":"string"}},
+					"required":["name"]
+				}
+			`),
 		},
 		"pointer fallback unwraps one level": {
 			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[fbPtrMap](t.Context()) },
 			value:    fbPtrMap{Name: "n", Extra: &map[string]int{"a": 1}},
-			want: `{
-				"$schema":"https://json-schema.org/draft/2020-12/schema",
-				"type":"object",
-				"properties":{"name":{"type":"string"}},
-				"required":["name"],
-				"additionalProperties":{"type":"integer"}
-			}`,
+			want: stringtest.Input(`
+				{
+					"$schema":"https://json-schema.org/draft/2020-12/schema",
+					"type":"object",
+					"properties":{"name":{"type":"string"}},
+					"required":["name"],
+					"additionalProperties":{"type":"integer"}
+				}
+			`),
 		},
 		"named string-kind key": {
 			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[fbNamedKey](t.Context()) },
 			value:    fbNamedKey{Extra: map[fbKey]bool{"k": true}},
-			want: `{
-				"$schema":"https://json-schema.org/draft/2020-12/schema",
-				"type":"object",
-				"additionalProperties":{"type":"boolean"}
-			}`,
+			want: stringtest.Input(`
+				{
+					"$schema":"https://json-schema.org/draft/2020-12/schema",
+					"type":"object",
+					"additionalProperties":{"type":"boolean"}
+				}
+			`),
 		},
 		"any value type renders an unrestricted constraint": {
 			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[fbAnyMap](t.Context()) },
 			value:    fbAnyMap{Extra: map[string]any{"a": 1, "b": "two"}},
-			want: `{
-				"$schema":"https://json-schema.org/draft/2020-12/schema",
-				"type":"object",
-				"additionalProperties":true
-			}`,
+			want: stringtest.Input(`
+				{
+					"$schema":"https://json-schema.org/draft/2020-12/schema",
+					"type":"object",
+					"additionalProperties":true
+				}
+			`),
 		},
 		"self-referential value type": {
 			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[fbSelf](t.Context()) },
 			value:    fbSelf{Name: "n", Extra: map[string]fbSelf{"kid": {Name: "k"}}},
-			want: `{
-				"$schema":"https://json-schema.org/draft/2020-12/schema",
-				"$ref":"#/$defs/fbSelf",
-				"$defs":{"fbSelf":{
-					"type":"object",
-					"properties":{"name":{"type":"string"}},
-					"required":["name"],
-					"additionalProperties":{"$ref":"#/$defs/fbSelf"}
-				}}
-			}`,
+			want: stringtest.Input(`
+				{
+					"$schema":"https://json-schema.org/draft/2020-12/schema",
+					"$ref":"#/$defs/fbSelf",
+					"$defs":{"fbSelf":{
+						"type":"object",
+						"properties":{"name":{"type":"string"}},
+						"required":["name"],
+						"additionalProperties":{"$ref":"#/$defs/fbSelf"}
+					}}
+				}
+			`),
 		},
 		"open objects emit no value schema": {
 			generate: func() (*jsonschema.Schema, error) {
 				return jsonschema.GenerateFor[fbMap](t.Context(), jsonschema.WithAdditionalProperties(true))
 			},
 			value: fbMap{Name: "n", Extra: map[string]int{"a": 1}},
-			want: `{
-				"$schema":"https://json-schema.org/draft/2020-12/schema",
-				"type":"object",
-				"properties":{"name":{"type":"string"}},
-				"required":["name"]
-			}`,
+			want: stringtest.Input(`
+				{
+					"$schema":"https://json-schema.org/draft/2020-12/schema",
+					"type":"object",
+					"properties":{"name":{"type":"string"}},
+					"required":["name"]
+				}
+			`),
 		},
 		"promoted fallback": {
 			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[fbPromoted](t.Context()) },
 			value:    fbPromoted{fbCarrier: fbCarrier{Extra: map[string]int{"a": 1}, Q: 2}, R: 3},
-			want: `{
-				"$schema":"https://json-schema.org/draft/2020-12/schema",
-				"type":"object",
-				"properties":{"q":{"type":"integer"},"r":{"type":"integer"}},
-				"required":["q","r"],
-				"additionalProperties":{"type":"integer"}
-			}`,
+			want: stringtest.Input(`
+				{
+					"$schema":"https://json-schema.org/draft/2020-12/schema",
+					"type":"object",
+					"properties":{"q":{"type":"integer"},"r":{"type":"integer"}},
+					"required":["q","r"],
+					"additionalProperties":{"type":"integer"}
+				}
+			`),
 		},
 		"depth-0 fallback beats a promoted one": {
 			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[fbShallow](t.Context()) },
@@ -201,13 +220,15 @@ func TestGenerateFor_EmbeddedFallbackSchemas(t *testing.T) {
 				fbCarrier: fbCarrier{Q: 2},
 				Own:       map[string]string{"o": "x"},
 			},
-			want: `{
-				"$schema":"https://json-schema.org/draft/2020-12/schema",
-				"type":"object",
-				"properties":{"q":{"type":"integer"}},
-				"required":["q"],
-				"additionalProperties":{"type":"string"}
-			}`,
+			want: stringtest.Input(`
+				{
+					"$schema":"https://json-schema.org/draft/2020-12/schema",
+					"type":"object",
+					"properties":{"q":{"type":"integer"}},
+					"required":["q"],
+					"additionalProperties":{"type":"string"}
+				}
+			`),
 		},
 		"same-depth tie drops both and stays closed": {
 			generate: func() (*jsonschema.Schema, error) { return jsonschema.GenerateFor[fbTie](t.Context()) },
@@ -218,13 +239,15 @@ func TestGenerateFor_EmbeddedFallbackSchemas(t *testing.T) {
 				fbCarrierB: fbCarrierB{More: map[string]bool{"m": true}, S: 3},
 				R:          4,
 			},
-			want: `{
-				"$schema":"https://json-schema.org/draft/2020-12/schema",
-				"type":"object",
-				"properties":{"q":{"type":"integer"},"s":{"type":"integer"},"r":{"type":"integer"}},
-				"required":["q","s","r"],
-				"additionalProperties":false
-			}`,
+			want: stringtest.Input(`
+				{
+					"$schema":"https://json-schema.org/draft/2020-12/schema",
+					"type":"object",
+					"properties":{"q":{"type":"integer"},"s":{"type":"integer"},"r":{"type":"integer"}},
+					"required":["q","s","r"],
+					"additionalProperties":false
+				}
+			`),
 		},
 	}
 
@@ -263,18 +286,20 @@ func TestGenerateFor_EmbeddedFallbackTypeOverriddenField(t *testing.T) {
 	s, err := jsonschema.GenerateFor[fbOverrideField](t.Context())
 	require.NoError(t, err)
 
-	assert.JSONEq(t, `{
-		"$schema":"https://json-schema.org/draft/2020-12/schema",
-		"type":"object",
-		"properties":{"f":{
+	assert.JSONEq(t, stringtest.Input(`
+		{
+			"$schema":"https://json-schema.org/draft/2020-12/schema",
 			"type":"object",
-			"properties":{"name":{"type":"string"}},
-			"required":["name"],
-			"additionalProperties":{"anyOf":[{"type":"integer"},{"type":"null"}]}
-		}},
-		"required":["f"],
-		"additionalProperties":false
-	}`, marshalSchema(t, s))
+			"properties":{"f":{
+				"type":"object",
+				"properties":{"name":{"type":"string"}},
+				"required":["name"],
+				"additionalProperties":{"anyOf":[{"type":"integer"},{"type":"null"}]}
+			}},
+			"required":["f"],
+			"additionalProperties":false
+		}
+	`), marshalSchema(t, s))
 
 	v := fbOverrideField{}
 	v.F.Name = "n"
@@ -355,15 +380,17 @@ func TestGenerateFor_EmbeddedFallbackComposed(t *testing.T) {
 		s, err := jsonschema.GenerateFor[fbComposed](t.Context(), composeTarget)
 		require.NoError(t, err)
 
-		assert.JSONEq(t, `{
-			"$schema":"https://json-schema.org/draft/2020-12/schema",
-			"type":"object",
-			"allOf":[{"$ref":"#/$defs/fbComposeTarget"}],
-			"properties":{"name":{"type":"string"},"inner":true},
-			"required":["name"],
-			"unevaluatedProperties":{"type":"integer"},
-			"$defs":{"fbComposeTarget":{"type":"object"}}
-		}`, marshalSchema(t, s))
+		assert.JSONEq(t, stringtest.Input(`
+			{
+				"$schema":"https://json-schema.org/draft/2020-12/schema",
+				"type":"object",
+				"allOf":[{"$ref":"#/$defs/fbComposeTarget"}],
+				"properties":{"name":{"type":"string"},"inner":true},
+				"required":["name"],
+				"unevaluatedProperties":{"type":"integer"},
+				"$defs":{"fbComposeTarget":{"type":"object"}}
+			}
+		`), marshalSchema(t, s))
 
 		data, err := json.Marshal(fbComposed{
 			fbComposeTarget: fbComposeTarget{Inner: "i"},
@@ -444,15 +471,17 @@ func TestGenerateFor_EmbeddedFallbackComposed(t *testing.T) {
 		s, err := jsonschema.GenerateFor[fbGhostComposed](t.Context(), ghostTarget)
 		require.NoError(t, err)
 
-		assert.JSONEq(t, `{
-			"$schema":"https://json-schema.org/draft/2020-12/schema",
-			"type":"object",
-			"allOf":[{"$ref":"#/$defs/fbGhostCarrier"}],
-			"properties":{"name":{"type":"string"},"inner":true,"q":true},
-			"required":["name"],
-			"unevaluatedProperties":{"type":"integer"},
-			"$defs":{"fbGhostCarrier":{"type":"object"}}
-		}`, marshalSchema(t, s))
+		assert.JSONEq(t, stringtest.Input(`
+			{
+				"$schema":"https://json-schema.org/draft/2020-12/schema",
+				"type":"object",
+				"allOf":[{"$ref":"#/$defs/fbGhostCarrier"}],
+				"properties":{"name":{"type":"string"},"inner":true,"q":true},
+				"required":["name"],
+				"unevaluatedProperties":{"type":"integer"},
+				"$defs":{"fbGhostCarrier":{"type":"object"}}
+			}
+		`), marshalSchema(t, s))
 
 		data, err := json.Marshal(fbGhostComposed{
 			fbGhostCarrier: fbGhostCarrier{
