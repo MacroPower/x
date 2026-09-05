@@ -893,7 +893,11 @@
 // json:",string" field, whose instance is a quoted string that minimum cannot
 // constrain. The check reads the shape from the field's schema rather than
 // its Go kind alone, so a field whose type supplies a verbatim or overridden
-// schema answers by what that schema declares.
+// schema answers by what that schema declares, and a field whose schema is a
+// $ref answers by what the referenced definition declares: minimum=5 on a
+// struct-typed field is an error, while minProperties=1 rides beside the
+// $ref. A definition still being built (a self-referential type) or one
+// declaring no type leaves the reference permissive.
 //
 // A key named twice in one tag resolves by what the keyword means:
 //

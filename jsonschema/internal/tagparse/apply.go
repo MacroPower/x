@@ -91,6 +91,13 @@ type Input struct {
 	// fact. The generator applies the pair to the field before [Apply] runs
 	// and discards the view afterward.
 	Payload *jsonschema.Schema
+	// RefBase returns the schema the field's definition declares when the
+	// payload is a bare $ref to one, or nil while that definition is still
+	// being built (a self-referential type). The model reads the instance's
+	// shape through it, so a keyword the definition's type cannot carry is
+	// an error rather than an inert $ref sibling. Nil leaves a reference
+	// permissive.
+	RefBase func() *jsonschema.Schema
 	// Tag is the jsonschema struct tag's value.
 	Tag string
 	// Quoted is the field's json:",string" flag when it applies to a string Go
@@ -146,6 +153,7 @@ func Apply(in Input) error {
 		canvas:    in.Canvas,
 		payload:   in.Payload,
 		fieldType: in.FieldType,
+		refBase:   in.RefBase,
 		quoted:    in.Quoted,
 		nullable:  in.Nullable,
 		groupsSet: map[string]bool{},
@@ -181,6 +189,8 @@ type applyState struct {
 	// The fieldType field is the field's own Go type, which every key classifies
 	// against until a type= pair replaces the classification outright.
 	fieldType reflect.Type
+	// The refBase field is the definition seam (see [Input.RefBase]).
+	refBase   func() *jsonschema.Schema
 	groupsSet map[string]bool
 	seen      map[string]bool
 	// The nullKeys field names the scalar keys the fold read as the literal
@@ -558,7 +568,12 @@ func (s *applyState) shape() tagmodel.Shape {
 // the elements here rather than reading only the canvas is what lets an element
 // classify itself, including the coercion its own type implies.
 func (s *applyState) target(shape tagmodel.Shape) tagmodel.Target {
-	return newTarget(shape, s.canvas, s.payload)
+	t := newTarget(shape, s.canvas, s.payload)
+	if s.refBase != nil && s.overriddenType == "" {
+		t = t.WithRefBase(s.refBase)
+	}
+
+	return t
 }
 
 // newTarget builds a target for a field or element, recursing lazily into

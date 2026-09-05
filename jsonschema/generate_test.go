@@ -2223,9 +2223,11 @@ func TestGenerateFor_Draft7_RefWithValidationKeywords(t *testing.T) {
 	t.Parallel()
 
 	// In Draft-07, $ref siblings (including validation keywords, not just
-	// annotations) must be wrapped in allOf to prevent silent loss.
+	// annotations) must be wrapped in allOf to prevent silent loss. The
+	// keywords are ones the referenced object definition can carry; a string
+	// keyword on it is refused as a keyword the shape cannot carry.
 	type Container struct {
-		Home Address `json:"home" jsonschema:"pattern=^[A-Z],format=custom"`
+		Home Address `json:"home" jsonschema:"minProperties=1,maxProperties=5"`
 	}
 
 	s, err := jsonschema.GenerateFor[Container](t.Context(), jsonschema.WithDraft(jsonschema.Draft7))
@@ -2240,8 +2242,8 @@ func TestGenerateFor_Draft7_RefWithValidationKeywords(t *testing.T) {
 		"properties":{
 			"home":{
 				"allOf":[{"$ref":"#/definitions/Address"}],
-				"pattern":"^[A-Z]",
-				"format":"custom"
+				"minProperties":1,
+				"maxProperties":5
 			}
 		},
 		"required":["home"],

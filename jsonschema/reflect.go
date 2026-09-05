@@ -1529,6 +1529,7 @@ func (g *run) applyFieldTag(p nodeProp) error {
 		FieldType: p.fi.StructField.Type,
 		Canvas:    fieldNode.authored,
 		Payload:   decided.view(g.draft),
+		RefBase:   defBodyPayload(fieldNode.def),
 		Quoted:    p.quoted,
 		// FieldContext.Shape reads this same decision, so a field's null
 		// admission is one answer whichever site classifies it.
@@ -1546,6 +1547,26 @@ func (g *run) applyFieldTag(p nodeProp) error {
 	}
 
 	return nil
+}
+
+// defBodyPayload returns the definition seam for a field whose node defers
+// to a $defs entry: a reader of the entry's body payload, nil while the body
+// is unfilled (a self-referential type mid-build). A field with no entry gets
+// no seam. It is the same read [FieldContext.targetOf] wires for the
+// interpreters, so both tag dialects classify a reference by what its
+// definition declares.
+func defBodyPayload(def *defEntry) func() *Schema {
+	if def == nil {
+		return nil
+	}
+
+	return func() *Schema {
+		if def.body == nil {
+			return nil
+		}
+
+		return def.body.payload
+	}
 }
 
 // stringOptionField answers a field carrying json:",string". It returns the

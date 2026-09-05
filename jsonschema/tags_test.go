@@ -3843,3 +3843,87 @@ func TestValidateRequiredOnPointerToByteArray(t *testing.T) {
 		"required forbids the null a nil pointer marshals as")
 	require.NoError(t, validateJSON(t.Context(), s, []byte(`{"f":"AAAAAA=="}`)))
 }
+
+// TestTagKeywordOnReferencedDefinitionReadsItsType pins that a keyword on a
+// field whose schema is a $ref is checked against the type the referenced
+// definition declares. The reference column used to accept every keyword
+// family without reading the definition, so a numeric bound, a format, or a
+// multipleOf on a struct-typed field emitted an inert $ref sibling instead of
+// the error the tag promises for a keyword the shape cannot carry.
+func TestTagKeywordOnReferencedDefinitionReadsItsType(t *testing.T) {
+	t.Parallel()
+
+	type Addr struct {
+		City string `json:"city"`
+	}
+
+	tests := map[string]struct {
+		generate func() (*jsonschema.Schema, error)
+		err      string
+	}{
+		"numeric bound on an object definition": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					A Addr `json:"a" jsonschema:"minimum=5"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			err: `key "minimum"`,
+		},
+		"format on an object definition": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					A Addr `json:"a" jsonschema:"format=email"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			err: `key "format": constraint not supported for this shape: the referenced definition declares a object`,
+		},
+		"multipleOf on an object definition": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					A Addr `json:"a" jsonschema:"multipleOf=3"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			err: `key "multipleOf"`,
+		},
+		"property count on an object definition rides beside the ref": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					A Addr `json:"a" jsonschema:"minProperties=1"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+		},
+		"format on a string definition rides beside the ref": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					A time.Time `json:"a" jsonschema:"format=date"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			s, err := tc.generate()
+			if tc.err != "" {
+				require.ErrorContains(t, err, tc.err)
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.NotEmpty(t, s.Properties["a"].Ref, "the keyword rides beside the reference")
+		})
+	}
+}
