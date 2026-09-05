@@ -329,9 +329,10 @@ func allocCanvasTree(n *node, draft Draft) {
 // the field a late-refused null literal sits in. It descends only into
 // elements (items and prefix), wherever a node carries them. A struct property
 // is a separate field node, which takes its own origin when the generator
-// builds its struct. The walk allocates one element origin per field that has
-// elements and hands the same pointer to every depth, so a [][]*T inner element
-// reads the same origin as the outer one.
+// builds its struct. Each depth whose Go type has an element type takes its
+// own element origin naming that type with pointer levels removed, so a
+// [][]*T inner element reports T where the outer one reports []*T. A deeper
+// node whose type has no element type shares the origin above it.
 func assignFieldOrigins(n *node, origin *fieldOrigin) {
 	if n == nil {
 		return
@@ -344,12 +345,11 @@ func assignFieldOrigins(n *node, origin *fieldOrigin) {
 	}
 
 	elem := origin
-	if !elem.element {
+	if et := elementType(origin.typ); et != nil || !origin.element {
 		elem = &fieldOrigin{parent: origin.parent, field: origin.field, element: true}
-	}
-
-	if et := elementType(origin.typ); et != nil {
-		elem = &fieldOrigin{parent: origin.parent, field: origin.field, element: true, typ: numkind.DerefType(et)}
+		if et != nil {
+			elem.typ = numkind.DerefType(et)
+		}
 	}
 
 	assignFieldOrigins(n.items, elem)
