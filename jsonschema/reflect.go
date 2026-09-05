@@ -1318,7 +1318,7 @@ func (g *run) buildFieldSchema(
 	// directives wait for the pass.
 	fieldNode = g.applyTypeOverrideDirective(fieldNode, fi)
 
-	// Encoding/json/v2's omitempty omits a field only when its encoded value	// Encoding/json/v2's omitempty omits a field only when its encoded value
+	// Encoding/json/v2's omitempty omits a field only when its encoded value
 	// is an empty JSON value (null, "", {}, []), so a field whose type never
 	// encodes one stays required even under the option. The probe answers
 	// from the field's zero value, the emptiest value its type encodes. A
