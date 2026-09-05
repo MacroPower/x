@@ -329,6 +329,18 @@ func TestRaw(t *testing.T) {
 	}
 }
 
+// TestRawDeterministicMapOrder pins the sorted-key guarantee Raw documents:
+// the same map produces the same bytes on every call, so committed schema
+// output does not churn. The assertion is byte-exact on purpose, since
+// JSONEq would pass for any member order.
+func TestRawDeterministicMapOrder(t *testing.T) {
+	t.Parallel()
+
+	got, err := jsonschema.Raw(map[string]int{"b": 2, "a": 1, "c": 3})
+	require.NoError(t, err)
+	assert.Equal(t, `{"a":1,"b":2,"c":3}`, string(got))
+}
+
 func TestMustRaw(t *testing.T) {
 	t.Parallel()
 

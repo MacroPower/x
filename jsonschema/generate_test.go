@@ -5291,6 +5291,26 @@ func TestWithDefaultsFrom(t *testing.T) {
 			"the instance value wins over the jsonschema tag default")
 	})
 
+	t.Run("map default seeds sorted member order", func(t *testing.T) {
+		t.Parallel()
+
+		type mapConfig struct {
+			Labels map[string]int `json:"labels"`
+		}
+
+		s, err := jsonschema.GenerateFor[mapConfig](t.Context(),
+			jsonschema.WithDefaultsFrom(mapConfig{
+				Labels: map[string]int{"b": 2, "a": 1, "c": 3},
+			}),
+		)
+		require.NoError(t, err)
+
+		// Byte-exact on purpose: the seeded default must carry sorted map
+		// members so committed schema output is identical on every run, and
+		// JSONEq would pass for any order.
+		assert.Equal(t, `{"a":1,"b":2,"c":3}`, string(s.Properties["labels"].Default))
+	})
+
 	t.Run("tag default survives without the option", func(t *testing.T) {
 		t.Parallel()
 

@@ -71,6 +71,24 @@ func TestAssert(t *testing.T) {
 			str:       `{not json`,
 			keyword:   "contentMediaType",
 		},
+		// The assertion is RFC 8259, not RFC 7493: duplicate member names
+		// and invalid UTF-8 are valid application/json, so both pass even
+		// though the validation entry points reject them in the instance
+		// document itself. Guards against jsontext's default I-JSON
+		// discipline sneaking back in.
+		"json media type duplicate member names pass": {
+			mediaType: "application/json",
+			str:       `{"a":1,"a":2}`,
+		},
+		"json media type invalid utf-8 passes": {
+			mediaType: "application/json",
+			str:       "\"a\xffb\"",
+		},
+		"base64 then duplicate member names pass": {
+			encoding:  content.Base64,
+			mediaType: "application/json",
+			str:       base64.StdEncoding.EncodeToString([]byte(`{"a":1,"a":2}`)),
+		},
 		"base64 then valid json": {
 			encoding:  content.Base64,
 			mediaType: "application/json",
