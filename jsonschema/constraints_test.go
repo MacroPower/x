@@ -3,6 +3,7 @@ package jsonschema_test
 import (
 	"context"
 	"encoding/json/v2"
+	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -686,4 +687,21 @@ func TestConstraintsFacadeNilType(t *testing.T) {
 
 	err := fc.Constraints().Apply(jsonschema.OpFloorIncl, jsonschema.AxisAuto, "1")
 	require.ErrorContains(t, err, "opaque value")
+}
+
+// TestConstraintsFacadeReadsNilCanvas pins that the Const and Enum reads
+// tolerate a caller-built context with no Canvas, as the Effective accessors
+// do; only a write through the facade needs a canvas to land on.
+func TestConstraintsFacadeReadsNilCanvas(t *testing.T) {
+	t.Parallel()
+
+	c := jsonschema.FieldContext{Type: reflect.TypeFor[string]()}.Constraints()
+
+	value, ok := c.Const()
+	assert.Nil(t, value)
+	assert.False(t, ok)
+
+	members, ok := c.Enum()
+	assert.Nil(t, members)
+	assert.False(t, ok)
 }

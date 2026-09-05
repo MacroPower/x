@@ -734,8 +734,10 @@ func (fc FieldContext) ElementContexts() []FieldContext {
 // The facade writes to Canvas, so a caller-built context must populate Canvas
 // before contributing through it (a facade over a nil canvas has nowhere to
 // record a contribution and panics on write). A context the generator builds
-// always carries a canvas; the read-only Effective accessors, by contrast,
-// tolerate a nil Canvas and fall back to Base.
+// always carries a canvas; the read-only Effective accessors and the facade's
+// own [Constraints.Const] and [Constraints.Enum] reads, by contrast, tolerate
+// a nil Canvas. A caller-built context with a nil Type classifies as
+// [FormOpaque], so every rule reports a shape error instead of panicking.
 func (fc FieldContext) Constraints() *Constraints {
 	return fc.ConstraintsFor(fc.Shape())
 }
