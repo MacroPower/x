@@ -1527,7 +1527,7 @@ func (g *run) applyFieldTag(p nodeProp) error {
 		decided = fieldNode.overrode
 	}
 
-	_, err := tagparse.Apply(tagparse.Input{
+	err := tagparse.Apply(tagparse.Input{
 		Tag:       tag,
 		FieldType: p.fi.StructField.Type,
 		Canvas:    fieldNode.authored,

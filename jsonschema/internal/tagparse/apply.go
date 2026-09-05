@@ -76,15 +76,6 @@ var (
 	}
 )
 
-// Result reports what [Apply] did that the generator's render phase needs. It is
-// internal, so it is free to widen as more provenance is required.
-type Result struct {
-	// TypeOverridden reports whether a type= pair replaced the field's type.
-	// The generator applied that pair to the field's node before calling
-	// [Apply], so the report only confirms what it already knows.
-	TypeOverridden bool
-}
-
 // Input is one field occurrence for [Apply] to read: the field's Go type, the
 // schemas a fact lands on and classifies against, the tag text itself, and the
 // two facts none of those expresses.
@@ -137,10 +128,10 @@ type Input struct {
 // of one is an error. A literal before type=null is the exception, since that
 // override names the null instance outright. One after it is an error like
 // every other scalar key there, for want of a scalar type to parse against.
-func Apply(in Input) (Result, error) {
+func Apply(in Input) error {
 	directives, description, err := Parse(in.Tag)
 	if err != nil {
-		return Result{}, err
+		return err
 	}
 
 	if len(directives) == 0 {
@@ -148,24 +139,23 @@ func Apply(in Input) (Result, error) {
 			in.Canvas.Description = description
 		}
 
-		return Result{}, nil
+		return nil
 	}
 
 	state := &applyState{
-		canvas:     in.Canvas,
-		payload:    in.Payload,
-		typeSchema: in.Payload,
-		fieldType:  in.FieldType,
-		quoted:     in.Quoted,
-		nullable:   in.Nullable,
-		groupsSet:  map[string]bool{},
-		seen:       map[string]bool{},
+		canvas:    in.Canvas,
+		payload:   in.Payload,
+		fieldType: in.FieldType,
+		quoted:    in.Quoted,
+		nullable:  in.Nullable,
+		groupsSet: map[string]bool{},
+		seen:      map[string]bool{},
 	}
 
 	for _, d := range directives {
 		err := state.apply(d)
 		if err != nil {
-			return Result{}, err
+			return err
 		}
 	}
 
@@ -175,20 +165,19 @@ func Apply(in Input) (Result, error) {
 	// directives, because a pre-scan would reject every scalar key preceding
 	// the pair and only the null literal is wrong there.
 	if state.overrideForbidsNull() && len(state.nullKeys) > 0 {
-		return Result{}, state.nullNotAdmittedError(state.nullKeys[0])
+		return state.nullNotAdmittedError(state.nullKeys[0])
 	}
 
-	return Result{TypeOverridden: state.overriddenType != ""}, nil
+	return nil
 }
 
 // applyState is the fold's mutable state: where facts land, the effective types
 // a later pair reads, and the bookkeeping the type= conflict check needs.
 type applyState struct {
-	canvas  *jsonschema.Schema
+	canvas *jsonschema.Schema
+	// The payload field is the type-derived schema the field classifies
+	// against and a type= override restructures in place.
 	payload *jsonschema.Schema
-	// The typeSchema field is what the field classifies against: the payload,
-	// which a type= override restates outright.
-	typeSchema *jsonschema.Schema
 	// The fieldType field is the field's own Go type, which every key classifies
 	// against until a type= pair replaces the classification outright.
 	fieldType reflect.Type
@@ -321,10 +310,6 @@ func (s *applyState) applyKey(key, value string) error {
 		}
 
 		ApplyTypeOverride(s.payload, value)
-
-		// The override restates what the instance is, so it supersedes any
-		// coerced view the caller supplied.
-		s.typeSchema = s.payload
 
 		return nil
 
@@ -558,7 +543,7 @@ func (s *applyState) shape() tagmodel.Shape {
 		return s.overridden
 	}
 
-	shape := tagmodel.ShapeOfQuoted(s.fieldType, s.typeSchema, s.quoted)
+	shape := tagmodel.ShapeOfQuoted(s.fieldType, s.payload, s.quoted)
 	shape.Nullable = s.nullable
 
 	return shape
@@ -569,7 +554,7 @@ func (s *applyState) shape() tagmodel.Shape {
 // the elements here rather than reading only the canvas is what lets an element
 // classify itself, including the coercion its own type implies.
 func (s *applyState) target(shape tagmodel.Shape) tagmodel.Target {
-	return newTarget(shape, s.canvas, s.typeSchema)
+	return newTarget(shape, s.canvas, s.payload)
 }
 
 // newTarget builds a target for a field or element, recursing lazily into
