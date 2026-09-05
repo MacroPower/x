@@ -283,6 +283,13 @@ func classifyForm(t reflect.Type, base *jsonschema.Schema, quoted bool) Form {
 		return FormRawBytes
 	}
 
+	// A byte array is the same base64 string with a pinned length; the
+	// generator never renders it as a raw JSON value, so only the string
+	// form applies.
+	if reflectkind.IsBase64ByteArray(t) && str {
+		return FormByteString
+	}
+
 	// The two scalar kinds that can be coerced decide on the base's string-ness
 	// alone; nothing else about the base can override what the Go value is.
 	switch {

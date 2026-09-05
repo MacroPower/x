@@ -3822,3 +3822,24 @@ func TestTagTypeOverrideDropsPinnedValues(t *testing.T) {
 		assert.JSONEq(t, `{"type":"string","enum":["a","b"],"default":"a"}`, string(got))
 	})
 }
+
+// TestValidateRequiredOnPointerToByteArray pins that a [N]byte classifies as
+// the base64 byte string a []byte does, so a validate required on a pointer
+// to one forbids the null a nil pointer marshals as. The array used to fall
+// through to the text-marshaled form, whose non-zero cell is an ignore, and
+// {"f":null} validated where go-playground rejects the nil pointer.
+func TestValidateRequiredOnPointerToByteArray(t *testing.T) {
+	t.Parallel()
+
+	type T struct {
+		F *[4]byte `json:"f" validate:"required"`
+	}
+
+	s, err := jsonschema.GenerateFor[T](t.Context(),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()))
+	require.NoError(t, err)
+
+	require.Error(t, validateJSON(t.Context(), s, []byte(`{"f":null}`)),
+		"required forbids the null a nil pointer marshals as")
+	require.NoError(t, validateJSON(t.Context(), s, []byte(`{"f":"AAAAAA=="}`)))
+}
