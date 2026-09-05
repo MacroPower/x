@@ -7615,6 +7615,48 @@ func TestTagNullLiteralOnBareSliceUnderJSONOptions(t *testing.T) {
 	assert.Equal(t, "null", string(prop.Default))
 }
 
+// nilSliceAsNullExtended is a named slice type with an extender, so it is
+// extracted to $defs and every field of it is a reference to the body.
+type nilSliceAsNullExtended []int
+
+func (nilSliceAsNullExtended) JSONSchemaExtend(
+	_ context.Context, _ jsonschema.TypeContext, ts *jsonschema.TypeSchema,
+) error {
+	ts.Value.Description = "extended"
+
+	return nil
+}
+
+// TestTagNullLiteralOnReferencedSliceUnderJSONOptions pins the same decision
+// through a reference: a non-pointer field of an extracted slice type admits
+// the null FormatNilSliceAsNull makes the marshal write, since the $defs body
+// already carries it, so a tag's null default lands there as it does on the
+// inline slice. The reference used to read only its own pointer-ness and
+// refused the literal while the rendered schema accepted the instance.
+func TestTagNullLiteralOnReferencedSliceUnderJSONOptions(t *testing.T) {
+	t.Parallel()
+
+	type payload struct {
+		S nilSliceAsNullExtended `json:"s" jsonschema:"default=null"`
+	}
+
+	_, err := jsonschema.GenerateFor[payload](t.Context())
+	require.Error(t, err, "a null default on a bare slice admits no null by default")
+
+	schema, err := jsonschema.GenerateFor[payload](t.Context(),
+		jsonschema.WithJSONOptions(json.FormatNilSliceAsNull(true)))
+	require.NoError(t, err)
+
+	prop := schema.Properties["s"]
+	require.NotNil(t, prop)
+	assert.Equal(t, "null", string(prop.Default))
+	assert.Equal(t, "#/$defs/nilSliceAsNullExtended", prop.Ref, "no null wrapper is added beside the body's own")
+
+	data, err := json.Marshal(payload{})
+	require.NoError(t, err)
+	require.NoError(t, validateJSON(t.Context(), schema, data))
+}
+
 func TestDefaultsFromSeedsUnderJSONOptions(t *testing.T) {
 	t.Parallel()
 

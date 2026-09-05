@@ -454,7 +454,14 @@ func (g *run) resolveAdmit(n *node, e *defEntry) {
 	case n.isBody:
 		n.null.admit = e.nullability != NullForbidden && g.containerNull(n.occ.container)
 	case n.kind == kindRef:
-		n.null.admit = e.nullability.apply(n.stance.apply(n.occ.pointer))
+		// A reference's occurrence is a pointer or not, but the body it
+		// resolves to may be a nilable container whose null a format option
+		// makes the marshal write; that container fact belongs to the
+		// occurrence too, so the reference reads it off the body. Bodies
+		// resolve before the references that read them.
+		occ := n.occ.pointer || (e.body != nil && g.containerNull(e.body.occ.container))
+		n.null.admit = e.nullability.apply(n.stance.apply(occ))
+
 	default:
 		n.null.admit = n.stance.apply(n.occ.pointer || g.containerNull(n.occ.container))
 	}
