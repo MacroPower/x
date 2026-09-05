@@ -4,12 +4,10 @@ import (
 	"encoding/json/jsontext"
 	"errors"
 	"iter"
-	"maps"
 	"slices"
-	"strconv"
 
-	"go.jacobcolvin.com/x/jsonschema/internal/jsonptr"
 	"go.jacobcolvin.com/x/jsonschema/internal/schemafield"
+	"go.jacobcolvin.com/x/jsonschema/internal/schemavet"
 )
 
 var (
@@ -79,76 +77,39 @@ type SubschemaEntry struct {
 // contradicts the /items/N ones.
 //
 // SubschemaEntries is the package's single source of truth for which Schema
-// fields hold sub-schemas: [Walk] and the internal traversals build on it,
-// and a maintenance test fails when an upstream Schema addition is not
-// covered.
+// fields hold sub-schemas: [Walk] and the internal vetting traversals descend
+// the same children with the same pointer spellings, and a maintenance test
+// fails when an upstream Schema addition is not covered.
 func SubschemaEntries(s *Schema) []SubschemaEntry {
-	if s == nil {
-		return nil
-	}
-
 	var children []SubschemaEntry
 
-	// The schemafield.Subschemas list holds the sub-schema fields in the pinned
-	// emission order (all maps, then all slices, then all singles); dispatch on
-	// each field's Shape to build the Location its keyword addresses.
-	for _, f := range schemafield.Subschemas {
-		switch f.Shape {
-		case schemafield.None:
-			// Subschemas never contains a None field; the case is here only to
-			// keep the switch exhaustive over Shape.
+	// The internal traversal yields the children in the pinned emission order
+	// with their pointers spelled; the typed segments are the same tokens
+	// carried verbatim, with the member key unescaped and the element index
+	// marked as one.
+	for _, e := range schemavet.Entries(s) {
+		var segments []Segment
 
+		switch e.Shape {
 		case schemafield.Map:
-			m := f.MapOf(s)
-			for _, key := range slices.Sorted(maps.Keys(m)) {
-				if sub := m[key]; sub != nil {
-					children = append(children, SubschemaEntry{
-						Location: Location{
-							Pointer:  jsonptr.AppendToken(jsontext.Pointer("/"+f.Keyword), key),
-							Segments: []Segment{{Key: f.Keyword}, {Key: key}},
-						},
-						Schema: sub,
-					})
-				}
-			}
+			segments = []Segment{{Key: e.Keyword}, {Key: e.Key}}
 
 		case schemafield.Slice:
-			for i, sub := range f.SliceOf(s) {
-				if sub != nil {
-					children = append(children, SubschemaEntry{
-						Location: Location{
-							Pointer:  jsontext.Pointer("/" + f.Keyword + "/" + strconv.Itoa(i)),
-							Segments: []Segment{{Key: f.Keyword}, {Index: i, IsIndex: true}},
-						},
-						Schema: sub,
-					})
-				}
-			}
+			segments = []Segment{{Key: e.Keyword}, {Index: e.Index, IsIndex: true}}
 
-		case schemafield.Single:
-			sub := f.SingleOf(s)
-			if sub == nil {
-				continue
-			}
-
-			// Items and ItemsArray are the two mutually exclusive forms of the
-			// items keyword. A schema parsed from JSON sets at most one, but a
-			// hand-built one could set both; when ItemsArray is populated
-			// (emitted above as /items/N), skip the single Items form so the
-			// keyword does not also yield a contradictory /items pointer for the
-			// same location.
-			if f.Name == "Items" && len(s.ItemsArray) > 0 {
-				continue
-			}
-
-			children = append(children, SubschemaEntry{
-				Location: Location{
-					Pointer:  jsontext.Pointer("/" + f.Keyword),
-					Segments: []Segment{{Key: f.Keyword}},
-				},
-				Schema: sub,
-			})
+		case schemafield.Single, schemafield.None:
+			// Entries never yields a None shape; the case is here only to
+			// keep the switch exhaustive over Shape.
+			segments = []Segment{{Key: e.Keyword}}
 		}
+
+		children = append(children, SubschemaEntry{
+			Location: Location{
+				Pointer:  e.Pointer,
+				Segments: segments,
+			},
+			Schema: e.Schema,
+		})
 	}
 
 	return children

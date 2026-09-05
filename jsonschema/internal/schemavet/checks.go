@@ -22,21 +22,41 @@ import (
 // since this package cannot import the parent.
 const draft2020SchemaURI = "https://json-schema.org/draft/2020-12/schema"
 
-// Entry is one direct sub-schema of a node, paired with the JSON Pointer
-// addressing it from that node.
+// Entry is one direct sub-schema of a node with the location addressing it
+// from that node, both as the JSON Pointer the vetting errors embed and as the
+// reference tokens the parent package's typed segments carry verbatim.
 type Entry struct {
-	Schema  *Schema
+	// Schema is the child schema.
+	Schema *Schema
+
+	// Pointer is the RFC 6901 JSON Pointer addressing Schema from its parent:
+	// the keyword token plus, for a map or slice keyword, the escaped member
+	// key or the element index.
 	Pointer jsontext.Pointer
+
+	// Keyword is the sub-schema keyword the child sits under.
+	Keyword string
+
+	// Key is the unescaped member key under a map keyword.
+	Key string
+
+	// Index is the element index under a slice keyword.
+	Index int
+
+	// Shape is the keyword's container shape, which says whether Key or
+	// Index carries the second token: [schemafield.Map] for Key,
+	// [schemafield.Slice] for Index, [schemafield.Single] for neither.
+	Shape schemafield.Shape
 }
 
-// Entries returns the direct sub-schemas of s with their pointers, the
-// schemas-and-pointers form of the parent package's SubschemaEntries: the same
-// [schemafield.Subschemas] field list in the same pinned order, sorted map
-// keys escaped by [jsonptr.AppendToken], /keyword/N for slices, and
-// the single Items form skipped when ItemsArray is populated. The parent
-// package cannot be imported from here, so a parent-side lockstep guard test
-// pins the two traversals to each other; the pointers are load-bearing, since
-// every vetting violation embeds them.
+// Entries returns the direct sub-schemas of s with their locations: the
+// [schemafield.Subschemas] field list in its pinned order, sorted map keys
+// escaped by [jsonptr.AppendToken], /keyword/N for slices, and the single
+// Items form skipped when ItemsArray is populated, since both express the
+// items keyword and a hand-built schema may set both. It is the one
+// traversal behind the parent package's SubschemaEntries, which adds the
+// typed segments, and behind every vetting check, whose violations embed the
+// pointers, so a location reads the same wherever the package reports it.
 func Entries(s *Schema) []Entry {
 	if s == nil {
 		return nil
@@ -55,8 +75,11 @@ func Entries(s *Schema) []Entry {
 			for _, key := range slices.Sorted(maps.Keys(m)) {
 				if sub := m[key]; sub != nil {
 					children = append(children, Entry{
-						Pointer: jsonptr.AppendToken(jsontext.Pointer("/"+f.Keyword), key),
 						Schema:  sub,
+						Pointer: jsonptr.AppendToken(jsontext.Pointer("/"+f.Keyword), key),
+						Keyword: f.Keyword,
+						Shape:   f.Shape,
+						Key:     key,
 					})
 				}
 			}
@@ -65,8 +88,11 @@ func Entries(s *Schema) []Entry {
 			for i, sub := range f.SliceOf(s) {
 				if sub != nil {
 					children = append(children, Entry{
-						Pointer: jsontext.Pointer("/" + f.Keyword + "/" + strconv.Itoa(i)),
 						Schema:  sub,
+						Pointer: jsontext.Pointer("/" + f.Keyword + "/" + strconv.Itoa(i)),
+						Keyword: f.Keyword,
+						Shape:   f.Shape,
+						Index:   i,
 					})
 				}
 			}
@@ -86,8 +112,10 @@ func Entries(s *Schema) []Entry {
 			}
 
 			children = append(children, Entry{
-				Pointer: jsontext.Pointer("/" + f.Keyword),
 				Schema:  sub,
+				Pointer: jsontext.Pointer("/" + f.Keyword),
+				Keyword: f.Keyword,
+				Shape:   f.Shape,
 			})
 		}
 	}
