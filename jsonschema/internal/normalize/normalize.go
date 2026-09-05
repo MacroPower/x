@@ -69,9 +69,7 @@ func ValueChecked(instance any) (any, bool) {
 }
 
 // intNumber formats a Go integer of any width as its exact [json.Number]
-// literal, reporting ok=false for every other type. It is the one integer
-// switch [normalizeInstance] and [exactValue] share, so a numeric-kind fix
-// lands in both.
+// literal, reporting ok=false for every other type.
 func intNumber(v any) (json.Number, bool) {
 	switch v := v.(type) {
 	case int:
@@ -109,14 +107,12 @@ func intNumber(v any) (json.Number, bool) {
 // acceptance check through the same walk, so the validation funnel needs only
 // one traversal.
 func normalizeInstance(instance any, onPath map[[2]uintptr]bool) (any, bool, bool) {
-	// Go integer widths convert to the JSON shape; the result is an accepted
-	// leaf.
-	if n, ok := intNumber(instance); ok {
-		return n, true, true
-	}
-
 	switch v := instance.(type) {
 	// JSON-shaped scalar leaves pass through unchanged and are accepted.
+	// They lead the dispatch: every node of an already-JSON-shaped instance
+	// -- the entirety of the validation funnel's traffic -- matches here, so
+	// the integer widths wait in the default branch rather than taxing each
+	// node with a guaranteed-failing 11-case dispatch first.
 	case nil, bool, string, float64, json.Number:
 		return instance, false, true
 
@@ -129,6 +125,12 @@ func normalizeInstance(instance any, onPath map[[2]uintptr]bool) (any, bool, boo
 		return normalizeSlice(v, onPath)
 
 	default:
+		// Go integer widths convert to the JSON shape; the result is an
+		// accepted leaf.
+		if n, ok := intNumber(instance); ok {
+			return n, true, true
+		}
+
 		// Not a JSON-shaped type (struct, named numeric, map[any]any, channel,
 		// ...): pass through unchanged and report it unaccepted so the funnel
 		// rejects it rather than mis-validating deeper in the walk.
