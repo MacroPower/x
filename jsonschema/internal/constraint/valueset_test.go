@@ -1,6 +1,7 @@
 package constraint_test
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/google/jsonschema-go/jsonschema"
@@ -230,4 +231,27 @@ func TestConjoinNot(t *testing.T) {
 		require.Len(t, conjuncts, 1)
 		assert.Same(t, authored, conjuncts[0].Not, "the sibling-carrying forbid moves under allOf")
 	})
+}
+
+// BenchmarkValueSetForbid measures accumulating distinct forbidden values,
+// where each Forbid scans every member already held.
+func BenchmarkValueSetForbid(b *testing.B) {
+	for _, n := range []int{4, 32, 256} {
+		vals := make([]any, n)
+		for i := range vals {
+			vals[i] = i
+		}
+
+		b.Run(fmt.Sprintf("distinct-%d", n), func(b *testing.B) {
+			b.ReportAllocs()
+
+			for b.Loop() {
+				var vs constraint.ValueSet
+
+				for _, v := range vals {
+					vs.Forbid(v)
+				}
+			}
+		})
+	}
 }

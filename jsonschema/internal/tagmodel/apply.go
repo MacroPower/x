@@ -545,11 +545,11 @@ func SetConst(t Target, v any) error {
 		return fmt.Errorf("%w: the type already pins a different value", ErrConflict)
 	}
 
-	if t.Canvas.Enum != nil && !enumAdmits(t.Canvas.Enum, v) {
+	if t.Canvas.Enum != nil && !constraint.ValuesContain(t.Canvas.Enum, v) {
 		return fmt.Errorf("%w: an enumeration already in force excludes the value", ErrConflict)
 	}
 
-	if base := baseOf(t); base.Enum != nil && !enumAdmits(base.Enum, v) {
+	if base := baseOf(t); base.Enum != nil && !constraint.ValuesContain(base.Enum, v) {
 		return fmt.Errorf("%w: the type's enumeration excludes the value", ErrConflict)
 	}
 
@@ -573,11 +573,11 @@ func SetEnum(t Target, vals []any) error {
 		return fmt.Errorf("%w: the type already sets an enumeration", ErrConflict)
 	}
 
-	if c := t.Canvas.Const; c != nil && !enumAdmits(vals, *c) {
+	if c := t.Canvas.Const; c != nil && !constraint.ValuesContain(vals, *c) {
 		return fmt.Errorf("%w: the enumeration excludes a value already pinned", ErrConflict)
 	}
 
-	if c := baseOf(t).Const; c != nil && !enumAdmits(vals, *c) {
+	if c := baseOf(t).Const; c != nil && !constraint.ValuesContain(vals, *c) {
 		return fmt.Errorf("%w: the enumeration excludes the value the type pins", ErrConflict)
 	}
 
@@ -586,15 +586,6 @@ func SetEnum(t Target, vals []any) error {
 	t.Canvas.Enum = slices.Clone(vals)
 
 	return nil
-}
-
-// enumAdmits reports whether the enumeration contains v, under the same
-// numeric-aware equality [SetConst] uses for a repeated pin, so 7 and 7.0
-// count as the same member.
-func enumAdmits(vals []any, v any) bool {
-	return slices.ContainsFunc(vals, func(m any) bool {
-		return constraint.ValuesEqual(m, v)
-	})
 }
 
 // Forbid records that the schema must not equal v, composing with anything

@@ -33,7 +33,8 @@
 //     const drops every numeric bound, an enum drops only the KindDerived ones)
 //     rather than this package inferring it.
 //   - [ValueSet] holds the forbidden-value escalation (not.const -> not.enum ->
-//     allOf) and the numeric-aware equality [ValuesEqual] the dialects share.
+//     allOf) and the numeric-aware equality [ValuesEqual] the dialects share,
+//     with [ValuesContain] as its scan over an enumeration's members.
 //     The allowed set (const/enum) is not modeled here: each writer composes it
 //     directly on its canvas, where the facade and the interpreters check
 //     conflicts against the canvas and the type-derived base.

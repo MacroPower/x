@@ -51,7 +51,7 @@ func (vs *ValueSet) Forbid(v any) {
 		vs.not.Const = nil
 
 	case vs.not.Enum != nil && constrainsEnumOnly(vs.not):
-		if slices.ContainsFunc(vs.not.Enum, func(e any) bool { return valuesEqual(e, v) }) {
+		if ValuesContain(vs.not.Enum, v) {
 			return
 		}
 
@@ -161,6 +161,22 @@ func constrainsEnumOnly(s *jsonschema.Schema) bool {
 // forbidden-value dedup and const conflict checks. It is [valuesEqual] exported.
 func ValuesEqual(a, b any) bool {
 	return valuesEqual(a, b)
+}
+
+// ValuesContain reports whether vals holds a member [ValuesEqual] to v. It
+// converts v to its document view once for the whole scan, so checking v
+// against n members costs n+1 conversions rather than 2n.
+func ValuesContain(vals []any, v any) bool {
+	vv, ok := jsonvalue.FromDocument(v)
+	if !ok {
+		return false
+	}
+
+	return slices.ContainsFunc(vals, func(m any) bool {
+		mv, ok := jsonvalue.FromDocument(m)
+
+		return ok && mv.Equal(vv)
+	})
 }
 
 // valuesEqual reports JSON-semantic equality with numeric awareness: both
