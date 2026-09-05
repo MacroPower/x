@@ -3709,3 +3709,28 @@ func TestTagTypeOverrideKeepsChildNodes(t *testing.T) {
 		require.NoError(t, err)
 	})
 }
+
+// TestInterpreterNullLiteralOnAnOverriddenField pins that the null-literal
+// scan still reaches a field a type= pair rebuilt. The rebuilt node used to
+// carry no field origin, which the scan reads as "not a field", so an
+// interpreter's null default was emitted against the override's non-nullable
+// occurrence instead of being refused.
+func TestInterpreterNullLiteralOnAnOverriddenField(t *testing.T) {
+	t.Parallel()
+
+	type T struct {
+		A *int `json:"a" jsonschema:"type=string" mytag:"x"`
+	}
+
+	interp := jsonschema.TagInterpreterFunc(
+		func(_ context.Context, field jsonschema.FieldContext, _ jsonschema.Tag) error {
+			field.Canvas.Default = jsontext.Value("null")
+
+			return nil
+		},
+	)
+
+	_, err := jsonschema.GenerateFor[T](t.Context(), jsonschema.WithTagInterpreter("mytag", interp))
+	require.ErrorIs(t, err, tagmodel.ErrNullNotAdmitted)
+	require.ErrorContains(t, err, `field "a": authored canvas: keyword "default"`)
+}

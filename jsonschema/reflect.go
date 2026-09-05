@@ -1605,6 +1605,7 @@ func rebuildOverriddenField(fieldNode *node, payload *Schema) *node {
 		kind:     kindValue,
 		payload:  payload,
 		authored: fieldNode.authored,
+		origin:   fieldNode.origin,
 		isField:  true,
 	}
 
