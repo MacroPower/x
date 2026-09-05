@@ -680,18 +680,9 @@ contract the tests enforce.
   `TestFormatCoverageClaimsEveryDifferential` passes over any target naming more
   than one format. Each allowlist entry carries a reason string; the allowlist
   ships empty.
-- `format_deviations_test.go` binds each bullet of the format-deviations list in
-  `doc.go` and `README.md` to the behavior it claims: a phrase both files must
-  carry, matched over normalized text so a reflow cannot break it, and the
-  bullet's own quoted examples run through the public API. The row count must
-  equal the bullet count in both lists, so a sixth deviation cannot land with
-  nothing asserting it.
-- `doc_nullability_test.go` is a second guard of that shape, over the
-  container-null rule rather than the format list. `containerNullPhrases` holds
-  the three sentences that rule turns on, and `TestContainerNullDocumented`
-  requires each to appear in both `doc.go` and `README.md`, over the same
-  normalized text the deviation ledger compares on. Rewording the
-  container-null paragraph in either file breaks it; reflowing it does not.
+- `format_deviations_test.go` runs the examples the format-deviations list in
+  `doc.go` and `README.md` quotes through the public API, so a deviation that
+  quietly reverses fails a test rather than surviving as a sentence.
 - `testdata/tags/cases.json` is the cross-dialect fixture table, run by
   `tags_fixture_test.go`. Each row names a field shape through a small type
   registry, the spelling each dialect gives one rule, the property schema the
