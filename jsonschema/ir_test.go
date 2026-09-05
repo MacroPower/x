@@ -320,3 +320,35 @@ func TestGenerateFor_RootInliningUnderBaseNameCollision(t *testing.T) {
 	assert.NotContains(t, s.Defs, "KnotRoot",
 		"an inlined root leaves no def behind")
 }
+
+// TestHookCanvasContainersAreNotAliased pins that the rendered schema shares
+// no container with a slice a hook assigned to its canvas. The overlay copies
+// an enum or examples header from the canvas as is, so an interpreter that
+// kept the slice could reach the output after Generate returned.
+func TestHookCanvasContainersAreNotAliased(t *testing.T) {
+	t.Parallel()
+
+	type doc struct {
+		X string `json:"x" keep:"x"`
+	}
+
+	vals := []any{"a"}
+	examples := []any{"a"}
+
+	s, err := jsonschema.GenerateFor[doc](t.Context(),
+		jsonschema.WithTagInterpreter("keep", jsonschema.TagInterpreterFunc(
+			func(_ context.Context, field jsonschema.FieldContext, _ jsonschema.Tag) error {
+				field.Canvas.Enum = vals
+				field.Canvas.Examples = examples
+
+				return nil
+			},
+		)))
+	require.NoError(t, err)
+
+	vals[0] = "b"
+	examples[0] = "b"
+
+	assert.Equal(t, []any{"a"}, s.Properties["x"].Enum)
+	assert.Equal(t, []any{"a"}, s.Properties["x"].Examples)
+}
