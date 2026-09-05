@@ -58,8 +58,9 @@ type refClosure struct {
 	// the resolution retrieves and registers an absent document.
 	fetch refresolve.Fetch
 
-	// The document the walk starts from, which the walk reports with an empty
-	// locator. The walk visits it before the registry frontier, so a reference
+	// The document the walk starts from, which the walk reports under the
+	// bare fragment locator "#" (a registered document carries its URI ahead
+	// of the same "#"). The walk visits it before the registry frontier, so a reference
 	// in it resolves and caches its answer before any fetch can change what a
 	// later document registers.
 	root *Schema
@@ -144,7 +145,7 @@ func (c refClosure) run() error {
 
 	// The root document first, so its references cache their answers before a
 	// fetch can register a document that would resolve one of them elsewhere.
-	err := walkRefs(c.root, "", true)
+	err := walkRefs(c.root, "#", true)
 	if err != nil {
 		return err
 	}

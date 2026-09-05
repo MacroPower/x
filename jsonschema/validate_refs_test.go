@@ -609,3 +609,40 @@ func TestValidateURNRootedRef(t *testing.T) {
 	assert.NotContains(t, verr.Error(), "cannot resolve")
 	assert.Contains(t, verr.Error(), `expected "integer"`)
 }
+
+// TestCompileRootRefErrorNamesTheRootDocument pins the location an
+// unresolvable reference in the root document reports: the bare fragment
+// locator "#" plus the node's pointer, matching the "uri#" plus pointer form a
+// registered document gets. The root used to be reported with an empty
+// locator, so a root-level miss read ": cannot resolve ..." and a nested one
+// carried a bare pointer with no document.
+func TestCompileRootRefErrorNamesTheRootDocument(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		schema string
+		want   string
+	}{
+		"root node": {
+			schema: `{"$ref": "#/$defs/missing"}`,
+			want:   `#: cannot resolve $ref "#/$defs/missing"`,
+		},
+		"nested node": {
+			schema: `{"properties": {"x": {"$ref": "#/$defs/missing"}}}`,
+			want:   `#/properties/x: cannot resolve $ref "#/$defs/missing"`,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			schema, err := jsonschema.ParseSchema([]byte(tc.schema))
+			require.NoError(t, err)
+
+			_, err = jsonschema.Compile(t.Context(), schema)
+			require.ErrorIs(t, err, jsonschema.ErrNotResolved)
+			assert.ErrorContains(t, err, tc.want)
+		})
+	}
+}
