@@ -176,3 +176,85 @@ func TestParse(t *testing.T) {
 		})
 	}
 }
+
+// tagCaseSample carries the case option's spellings and the mutant option
+// spellings v2 refuses; each malformed tag is the expectation of its row.
+type tagCaseSample struct {
+	CaseIgnore      int `json:"ci,case:ignore"`
+	CaseStrict      int `json:",case:strict"`
+	CaseNoValue     int `json:",case"`                    //nolint:staticcheck // Tag under test; the parse error is the expectation.
+	CaseUnknown     int `json:",case:fold"`               //nolint:staticcheck // Tag under test; the parse error is the expectation.
+	CaseBoth        int `json:",case:ignore,case:strict"` //nolint:staticcheck // Tag under test; the parse error is the expectation.
+	CaseBadValue    int `json:",case:'abc"`               //nolint:staticcheck // Tag under test; the parse error is the expectation.
+	OmitEmptyMutant int `json:",omitEmpty"`               //nolint:staticcheck // Tag under test; the parse error is the expectation.
+	OmitUnderscore  int `json:",omit_empty"`              //nolint:staticcheck // Tag under test; the parse error is the expectation.
+}
+
+// TestParseCaseAndMutantOptions pins the case option branch and the mutant
+// option refusal against v2's verbatim texts, since neither the fuzz-shape
+// option pool nor any other test reaches them.
+func TestParseCaseAndMutantOptions(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		field string
+		want  jsontag.Info
+		err   string
+	}{
+		"case ignore": {
+			field: "CaseIgnore",
+			want:  jsontag.Info{JSONName: "ci", TaggedName: true, Case: jsontag.CaseIgnore},
+		},
+		"case strict": {field: "CaseStrict", want: jsontag.Info{JSONName: "CaseStrict", Case: jsontag.CaseStrict}},
+		"case missing value": {
+			field: "CaseNoValue",
+			want:  jsontag.Info{JSONName: "CaseNoValue"},
+			err:   "is missing value for `case` tag option; specify `case:ignore` or `case:strict` instead",
+		},
+		"case unknown value": {
+			field: "CaseUnknown",
+			want:  jsontag.Info{JSONName: "CaseUnknown"},
+			err:   "has unknown `case:fold` tag value",
+		},
+		"case both": {
+			field: "CaseBoth",
+			want:  jsontag.Info{JSONName: "CaseBoth", Case: jsontag.CaseStrict},
+			err:   "cannot have both `case:ignore` and `case:strict` tag options",
+		},
+		"case malformed value": {
+			field: "CaseBadValue",
+			want:  jsontag.Info{JSONName: "CaseBadValue"},
+			err:   "has malformed value for `case` tag option",
+		},
+		"omitEmpty mutant": {
+			field: "OmitEmptyMutant",
+			want:  jsontag.Info{JSONName: "OmitEmptyMutant"},
+			err:   "has invalid appearance of `omitEmpty` tag option; specify `omitempty` instead",
+		},
+		"omit_empty mutant": {
+			field: "OmitUnderscore",
+			want:  jsontag.Info{JSONName: "OmitUnderscore"},
+			err:   "has invalid appearance of `omit_empty` tag option; specify `omitempty` instead",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			f, ok := reflect.TypeFor[tagCaseSample]().FieldByName(tc.field)
+			require.True(t, ok)
+
+			info, err := jsontag.Parse(f)
+			assert.Equal(t, tc.want, info)
+
+			if tc.err == "" {
+				require.NoError(t, err)
+
+				return
+			}
+
+			require.ErrorContains(t, err, tc.err)
+		})
+	}
+}
