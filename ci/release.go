@@ -28,7 +28,7 @@ import (
 
 const (
 	// goreleaserVersion pins the GoReleaser release used for package builds.
-	goreleaserVersion = "v2.18.0" // renovate: datasource=github-releases depName=goreleaser/goreleaser
+	goreleaserVersion = "v2.18.1" // renovate: datasource=github-releases depName=goreleaser/goreleaser
 
 	// ghVersion pins the GitHub CLI used to create GitHub releases.
 	ghVersion = "v2.100.0" // renovate: datasource=github-releases depName=cli/cli
