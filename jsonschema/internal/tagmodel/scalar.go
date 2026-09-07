@@ -130,13 +130,14 @@ func (sh Shape) parseNumber(lit string) (any, error) {
 }
 
 // parseFloatLiteral parses a float field value: the shared decimal spelling
-// policy, plus the range check the field's own kind implies.
+// policy, plus the width check the field's own kind implies.
 //
 // The value is stored at 64 bits even for a float32 field, so it is the float64
 // nearest the decimal the author wrote rather than its float32-rounded form:
-// rounding 0.1 to float32 stores 0.10000000149011612, which a {"v":0.1} instance
-// could never match against its own const. The 32-bit reparse is therefore an
-// overflow check and nothing else.
+// rounding 0.1 to float32 would store 0.10000000149011612, which a {"v":0.1}
+// instance could never match against its own const. The width check instead
+// requires the literal to be one a float32 marshals as, so 0.1 passes and
+// 10.0000001, which every float32 near it renders as 10, is an error.
 func parseFloatLiteral(lit string, kind reflect.Kind) (any, error) {
 	n, err := constraint.ParseDecimalFloat(lit)
 	if err != nil {
@@ -144,11 +145,10 @@ func parseFloatLiteral(lit string, kind reflect.Kind) (any, error) {
 		return nil, err
 	}
 
-	if kind == reflect.Float32 {
-		_, err = strconv.ParseFloat(lit, 32)
-		if err != nil {
-			return nil, fmt.Errorf("invalid number %q: %w", lit, err)
-		}
+	err = constraint.CheckFloatLiteral(lit, kind)
+	if err != nil {
+		//nolint:wrapcheck // The shared policy owns the width and its message.
+		return nil, err
 	}
 
 	return n, nil

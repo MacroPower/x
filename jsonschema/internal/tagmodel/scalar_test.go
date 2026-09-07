@@ -158,6 +158,17 @@ func TestShapeParseScalarRangeChecked(t *testing.T) {
 			_, err := sh.ParseScalar("200", tagmodel.Policy{})
 			require.Error(t, err, "200 does not fit an int8")
 			assert.Contains(t, err.Error(), "out of range")
+
+			// A float32 holds 0.1 in that the nearest float32 renders as
+			// 0.1, and not 10.0000001, which every float32 near it renders
+			// as 10.
+			wide := tagmodel.ShapeOf(reflect.TypeFor[float32](), base)
+
+			_, err = wide.ParseScalar("0.1", tagmodel.Policy{})
+			require.NoError(t, err)
+
+			_, err = wide.ParseScalar("10.0000001", tagmodel.Policy{})
+			require.ErrorIs(t, err, constraint.ErrNotRepresentable)
 		})
 	}
 }

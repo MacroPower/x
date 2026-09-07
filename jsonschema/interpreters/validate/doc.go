@@ -113,9 +113,15 @@
 // Numeric bounds intersect with the bounds derived from the field's Go type:
 // a tag bound wider than the type's range clamps to the type limit (int8 with
 // max=200 emits maximum: 127), matching the jsonschema tag's bound handling.
+// A float-kind bound is the shortest decimal of a value of the field's
+// width, as go-playground reads the parameter at that width: lt=10.0000001
+// on a float32 field is an error, since every float32 near it renders as 10
+// and go-playground compares against 10 there, and so is a literal beyond
+// the width's range.
 // Scalar values (eq, ne, oneof, and len on a numeric field) are instead
 // range-checked against the field's Go type, and a value the type cannot hold
-// is an error, mirroring the jsonschema tag's const/enum behavior.
+// is an error, mirroring the jsonschema tag's const/enum behavior. A float
+// value takes the same width rule as a bound.
 //
 // Some fields serialize a scalar Go value as a quoted string, so the generated
 // schema has type string: a json:",string" numeric or bool field, and equally a

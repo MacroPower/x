@@ -13,15 +13,16 @@ import (
 	"go.jacobcolvin.com/x/jsonschema/internal/numrat"
 )
 
-// ErrNotRepresentable marks a numeric bound whose exact value cannot be stored
-// as the schema's *float64 without changing it, so the stored bound would differ
-// from the tag. It is the single exact-representability policy, shared by every
-// dialect: a schema-side float64 denotes its shortest decimal (the value
-// encoding/json renders and the validator enforces), so an integer bound that
-// interpretation cannot reproduce -- one beyond 2^53 that rounds, or whose
-// shortest decimal differs from the exact binary value -- would silently loosen
-// (or tighten) the constraint and is rejected rather than shipped. Callers wrap
-// this with their own dialect-specific phrasing.
+// ErrNotRepresentable marks a numeric literal whose exact value neither the
+// schema's *float64 nor the field's own width stores without changing it, so
+// the number enforced would differ from the number written. It is the single
+// exact-representability policy, shared by every dialect: a float denotes its
+// shortest decimal (the value encoding/json renders and the validator
+// enforces), so a literal that interpretation cannot reproduce -- an integer
+// beyond 2^53 that rounds, a decimal with more digits than the width keeps,
+// or one whose shortest decimal differs from the exact binary value -- would
+// silently loosen (or tighten) the constraint and is rejected rather than
+// shipped. Callers wrap this with their own dialect-specific phrasing.
 var (
 	ErrNotRepresentable = errors.New("not exactly representable as a JSON Schema number")
 
@@ -47,10 +48,10 @@ const maxExactInt = int64(1) << 53
 // which both the jsonschema tag and the validate tag parse numeric bounds: an
 // integer-kind field parses exactly (rejecting a fractional or exponent spelling
 // the type cannot hold) and checks the 2^53 magnitude directly; every other kind
-// parses as a decimal float and accepts an integer-valued literal only when the
-// float64's shortest-decimal interpretation reproduces it exactly, so a
-// float-kind bound the schema cannot ship as authored is rejected rather than
-// silently rounded.
+// parses as a decimal float and accepts a literal only when it is the shortest
+// decimal of the float it rounds to at the kind's width ([CheckFloatLiteral]),
+// so a float-kind bound the schema or the field cannot hold as authored is
+// rejected rather than silently rounded.
 func ParseNumericBound(value string, kind reflect.Kind) (Endpoint, error) {
 	switch {
 	case numkind.IsUnsigned(kind):
@@ -88,7 +89,7 @@ func ParseNumericBound(value string, kind reflect.Kind) (Endpoint, error) {
 		return numericEndpoint(float64(n), new(big.Rat).SetInt64(n)), nil
 
 	default:
-		return parseFloatBound(value)
+		return parseFloatBound(value, kind)
 	}
 }
 
@@ -125,9 +126,8 @@ func CheckIntegerLiteral(value string) error {
 // reads the same way regardless of the field's type, and rejects the non-finite
 // values encoding/json cannot marshal and no JSON number can equal.
 //
-// It is the spelling half only. A bound additionally applies the
-// exact-representability policy ([parseFloatBound]); a field value additionally
-// range-checks against its own Go kind. Both start here.
+// It is the spelling half only. A bound and a field value both then apply
+// the width check of [CheckFloatLiteral]. Both start here.
 func ParseDecimalFloat(value string) (float64, error) {
 	if strings.ContainsAny(value, "_xX") {
 		return 0, fmt.Errorf("invalid number %q: not a decimal number", value)
@@ -145,31 +145,59 @@ func ParseDecimalFloat(value string) (float64, error) {
 	return n, nil
 }
 
-// parseFloatBound parses a decimal-float bound: the shared spelling policy, plus
-// the rejection of an integer-valued literal whose float64 form does not ship as
-// the exact value under the package's shortest-decimal interpretation.
-func parseFloatBound(value string) (Endpoint, error) {
+// parseFloatBound parses a decimal-float bound: the shared spelling policy,
+// then the width check, so the endpoint carries the number the tag wrote.
+func parseFloatBound(value string, kind reflect.Kind) (Endpoint, error) {
 	n, err := ParseDecimalFloat(value)
 	if err != nil {
 		return Endpoint{}, err
 	}
 
-	// Compare the float64's shortest-decimal interpretation ([numrat.Float64ToRat])
-	// against the exact integer, not its exact binary value: the shortest decimal
-	// is the number the bound ships and enforces as -- the endpoint rational
-	// below, the validator's precomputed bound rationals, and encoding/json's
-	// rendering of the schema's *float64 all go through it -- so it must
-	// reproduce the authored value. A binary-exact float64 is not enough: 2^60
-	// is stored exactly in binary yet renders as 1152921504606847000, so
-	// accepting it would ship a bound loosened by 24, while 2^54 or 1e23 (each
-	// its own float64's shortest decimal) ships verbatim and is accepted.
-	if dn, ok := numrat.ParseDecNumber(value); ok && dn.IsIntegral() && dn.ExactlyComparable() {
-		if numrat.Float64ToRat(n).Cmp(dn.Rat()) != 0 {
-			return Endpoint{}, notRepresentable(value)
-		}
+	err = CheckFloatLiteral(value, kind)
+	if err != nil {
+		return Endpoint{}, err
 	}
 
 	return numericEndpoint(n, numrat.Float64ToRat(n)), nil
+}
+
+// CheckFloatLiteral reports whether a decimal literal names a value of the
+// kind's width exactly: it parses at that width, 32 bits for a float32 kind
+// and 64 otherwise, refusing an overflow, and requires the literal to be the
+// shortest decimal of the float it parses to, so a value of the kind marshals
+// as the literal and the schema's own *float64 ships it unchanged. On a
+// float32 field 0.1 passes and 10.0000001 fails, since every float32 near it
+// renders as 10, which is also the number go-playground reads there. On a
+// float64 field 2^54 and 1e23 pass, each its float64's shortest decimal, and
+// 2^60 fails: it is stored exactly in binary yet renders as
+// 1152921504606847000, so shipping it would loosen a bound by 24. The
+// spelling is the caller's ([ParseDecimalFloat]); a literal that policy
+// admits but [numrat.ParseDecNumber] does not read is passed through.
+func CheckFloatLiteral(value string, kind reflect.Kind) error {
+	width := 64
+	if kind == reflect.Float32 {
+		width = 32
+	}
+
+	f, err := strconv.ParseFloat(value, width)
+	if err != nil {
+		return fmt.Errorf("invalid number %q: %w", value, err)
+	}
+
+	dn, ok := numrat.ParseDecNumber(value)
+	if !ok || !dn.ExactlyComparable() {
+		return nil
+	}
+
+	// The shortest decimal at the width is what a value of the kind renders
+	// as, and for a float32 kind it differs from Float64ToRat(f), which would
+	// expand the float32's float64 form (0.1 becomes 0.10000000149011612).
+	shortest, _ := numrat.ParseDecNumber(strconv.FormatFloat(f, 'f', -1, width))
+	if shortest.Rat().Cmp(dn.Rat()) != 0 {
+		return notRepresentable(value)
+	}
+
+	return nil
 }
 
 // notRepresentable wraps [ErrNotRepresentable] with the value, so both the

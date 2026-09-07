@@ -47,7 +47,40 @@ func TestParseNumericBound(t *testing.T) {
 		"unsigned rejects negative": {value: "-1", kind: reflect.Uint, wantErr: true},
 
 		// Float-kind fields: decision 2 unifies the 2^53 guard here too.
-		"float fractional ok":        {value: "1.5", kind: reflect.Float64, wantVal: 1.5},
+		"float fractional ok": {value: "1.5", kind: reflect.Float64, wantVal: 1.5},
+		"float32 in range ok": {value: "1.5", kind: reflect.Float32, wantVal: 1.5},
+		"float32 shortest decimal ok": {
+			// 0.1 is not a float32 value, but it is what the nearest one
+			// renders as, so the field holds it in the sense that matters.
+			value: "0.1", kind: reflect.Float32, wantVal: 0.1,
+		},
+		"float32 beyond range rejected": {
+			// Go-playground parses a float32 field's parameter at 32 bits and
+			// refuses the overflow, as the scalar path here does.
+			value:   "1000000000000000000000000000000000000000",
+			kind:    reflect.Float32,
+			wantErr: true,
+		},
+		"float32 rounded literal rejected": {
+			// Every float32 near 10.0000001 renders as 10, so the bound
+			// enforced at 32 bits is not the bound written.
+			value:           "10.0000001",
+			kind:            reflect.Float32,
+			wantErr:         true,
+			unrepresentable: true,
+		},
+		"float64 rounded literal rejected": {
+			value:           "0.30000000000000004441",
+			kind:            reflect.Float64,
+			wantErr:         true,
+			unrepresentable: true,
+		},
+		"float64 underflow rejected": {
+			value:           "1e-400",
+			kind:            reflect.Float64,
+			wantErr:         true,
+			unrepresentable: true,
+		},
 		"float tenth ok":             {value: "0.1", kind: reflect.Float64, wantVal: 0.1},
 		"float exponent integral ok": {value: "1e2", kind: reflect.Float64, wantVal: 100},
 		"float power of two above 2^53 rejected": {

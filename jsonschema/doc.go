@@ -763,7 +763,9 @@
 //     on an integer-kind field and every length or count, so minimum=+1,
 //     minimum=010, const=0x10, and minLength=010 are errors. A float-kind
 //     field takes any decimal spelling, including a leading plus and an
-//     exponent.
+//     exponent, so long as the value is one the field's width holds:
+//     10.0000001 on a float32 field is an error, since every float32 near
+//     it renders as 10.
 //   - For values the tag cannot express, use [JSONSchemaExtender] or doc
 //     comments through [WithDescriptionProvider].
 //
