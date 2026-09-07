@@ -45,9 +45,10 @@ var validatorKeys = map[string]validatorRule{
 	"lt":  {KeyRule: tagmodel.KeyRule{Op: tagmodel.OpCeilExcl, Param: tagmodel.ParamRequired}},
 	"len": {KeyRule: tagmodel.KeyRule{Op: tagmodel.OpExactSize, Param: tagmodel.ParamRequired}},
 
-	// An empty parameter is the empty literal: go-playground pins a string
-	// to "" under eq= and forbids "" under ne=. A numeric or sized shape still
-	// refuses it, since "" parses as no number and no size.
+	// An empty or missing parameter is the empty literal: go-playground pins
+	// a string to "" under eq= and bare eq alike, and forbids "" under ne=. A
+	// numeric or sized shape still refuses it, since "" parses as no number
+	// and no size.
 	"eq": {KeyRule: tagmodel.KeyRule{
 		Op: tagmodel.OpEqual, SizedOp: tagmodel.OpExactSize, Param: tagmodel.ParamRequired, AllowEmpty: true,
 	}},

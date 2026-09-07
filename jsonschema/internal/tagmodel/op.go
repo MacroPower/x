@@ -201,9 +201,10 @@ type KeyRule struct {
 	Axis Axis
 	// Param declares the key's arity.
 	Param ParamMode
-	// AllowEmpty admits an empty value on a ParamRequired key, for a dialect
-	// whose rule reads the empty parameter as the empty literal: go-playground
-	// takes eq= as "equals the empty string".
+	// AllowEmpty admits an empty or missing value on a ParamRequired key, for
+	// a dialect whose rule reads the empty parameter as the empty literal:
+	// go-playground takes eq= as "equals the empty string", and reads a
+	// missing parameter as an empty one, so bare eq means the same.
 	AllowEmpty bool
 }
 
@@ -285,7 +286,13 @@ func bindParams(rule KeyRule, raw string, hasValue bool) (Params, error) {
 		return Params{values: []string{rule.Implied}}, nil
 
 	case ParamRequired:
-		if !hasValue || (raw == "" && !rule.AllowEmpty) {
+		if !hasValue || raw == "" {
+			// Go-playground reads a missing parameter as the empty one, so a
+			// row admitting the empty literal admits the bare key too.
+			if rule.AllowEmpty {
+				return Params{values: []string{""}}, nil
+			}
+
 			return Params{}, errors.New("requires a non-empty value")
 		}
 

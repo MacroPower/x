@@ -2934,6 +2934,17 @@ func TestValidateInterpreterGoPlaygroundParity(t *testing.T) {
 
 		_, err = jsonschema.GenerateFor[N](t.Context(), opt)
 		require.Error(t, err, "an empty literal is no number")
+
+		// Go-playground reads a missing parameter as the empty one, so the
+		// bare key pins the same empty string.
+		type B struct {
+			F string `json:"f" validate:"eq"`
+		}
+
+		s, err = jsonschema.GenerateFor[B](t.Context(), opt)
+		require.NoError(t, err)
+		require.NotNil(t, s.Properties["f"].Const)
+		assert.Empty(t, *s.Properties["f"].Const)
 	})
 
 	t.Run("empty unique parameter is the bare unique", func(t *testing.T) {
