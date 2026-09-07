@@ -10,7 +10,8 @@ import (
 var (
 	// ErrConstraintConflict reports two value constraints an interpreter adds
 	// through [Constraints] that can never both hold: a second const pinned to a
-	// different value, or a second enum. It is the public conflict sentinel a tag
+	// different value, or an enum sharing no value with one in force. It is
+	// the public conflict sentinel a tag
 	// interpreter matches with [errors.Is]; the validate interpreter's own
 	// conflict sentinel is derived from it, so a conflict from either layer is
 	// recognizable through this one.
@@ -228,14 +229,15 @@ func (c *Constraints) SetConst(value any) error {
 	return tagmodel.SetConst(c.target, value)
 }
 
-// SetEnum sets the field's enum, reporting [ErrConstraintConflict] when an enum
-// is already set -- on the canvas by a previous rule, or on an inline
-// type-derived base, which reconcile would silently overwrite with the canvas
-// value -- so two enumerations cannot shadow one another. For a $defs-extracted
-// type the definition's enum is not visible on the base (the provisional {$ref}
-// payload) and no conflict is reported; the canvas enum rides beside the $ref
-// and the conjunction intersects the two sets, which only tightens. An
-// interpreter that needs its own wording checks [Constraints.Enum] first.
+// SetEnum sets the field's enum, intersecting with an enum already in force
+// -- on the canvas from a previous rule, or on an inline type-derived base,
+// which reconcile would otherwise overwrite with the canvas value -- so two
+// enumerations compose conjunctively rather than one shadowing the other. An
+// empty intersection is [ErrConstraintConflict]. For a $defs-extracted type
+// the definition's enum is not visible on the base (the provisional {$ref}
+// payload); the canvas enum rides beside the $ref and the conjunction
+// intersects the two sets there instead. An interpreter that needs its own
+// wording checks [Constraints.Enum] first.
 func (c *Constraints) SetEnum(values []any) error {
 	//nolint:wrapcheck // The model owns the conflict sentinel and its wording.
 	return tagmodel.SetEnum(c.target, values)

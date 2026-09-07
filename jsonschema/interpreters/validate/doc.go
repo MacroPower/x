@@ -76,7 +76,9 @@
 //   - gt=N: minLength: N+1
 //   - lt=N: maxLength: N-1
 //   - oneof=a b c: enum (space-separated values; single-quoted runs group
-//     multi-word values, e.g. oneof='New York' Boston)
+//     multi-word values, e.g. oneof='New York' Boston). A second oneof
+//     narrows the first to the values both list, as go-playground applies
+//     each in turn, and one sharing no value with it is a conflict.
 //   - eq=val: const
 //   - ne=val: forbids the value via not (not.const for a single value, composed
 //     into not.enum or allOf when several values are forbidden, e.g. required+ne)

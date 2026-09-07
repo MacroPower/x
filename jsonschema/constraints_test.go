@@ -3,6 +3,7 @@ package jsonschema_test
 import (
 	"context"
 	"encoding/json/v2"
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -156,7 +157,7 @@ func TestConstraintsFacadeBaseCrossCheck(t *testing.T) {
 		assert.Equal(t, "typed", *field.Const)
 	})
 
-	t.Run("enum conflicts with a type-set enum", func(t *testing.T) {
+	t.Run("enum intersects with a type-set enum", func(t *testing.T) {
 		t.Parallel()
 
 		type Payload struct {
@@ -166,20 +167,27 @@ func TestConstraintsFacadeBaseCrossCheck(t *testing.T) {
 		var conflict error
 
 		interp := boundInterp(func(c *jsonschema.Constraints) error {
-			conflict = c.SetEnum([]any{"a", "b"})
+			err := c.SetEnum([]any{"b", "a", "x"})
+			if err != nil {
+				return fmt.Errorf("first enumeration: %w", err)
+			}
+
+			conflict = c.SetEnum([]any{"x"})
 
 			return nil
 		})
 
-		_, err := jsonschema.GenerateFor[Payload](t.Context(),
+		s, err := jsonschema.GenerateFor[Payload](t.Context(),
 			jsonschema.WithTagInterpreter("pin", interp),
 			jsonschema.WithTypeSchemaFor[string](jsonschema.TypeSchema{
 				Value: &jsonschema.Schema{Type: "string", Enum: []any{"a", "b", "c"}},
 			}),
 		)
 		require.NoError(t, err)
+		assert.Equal(t, []any{"a", "b"}, s.Properties["name"].Enum,
+			"a second enumeration narrows the type's own, in the type's order")
 		require.ErrorIs(t, conflict, jsonschema.ErrConstraintConflict,
-			"a second enumeration cannot silently shadow the type's own")
+			"an enumeration sharing no value with the one in force is a conflict")
 	})
 }
 

@@ -771,18 +771,17 @@ func TestValidateInterpreter_OneOfOnPointerElement(t *testing.T) {
 	}`, string(got))
 }
 
-// TestValidateInterpreter_OneOfConflictsWithElementEnum pins that relocating a
-// oneof enum onto a nullable element's value branch reports a conflict when the
-// element type already supplied its own enum there, rather than silently
-// discarding the element's enum.
-func TestValidateInterpreter_OneOfConflictsWithElementEnum(t *testing.T) {
+// TestValidateInterpreter_OneOfNarrowsElementEnum pins that relocating a oneof
+// enum onto a nullable element's value branch intersects with the enum the
+// element type already supplied there, rather than discarding either.
+func TestValidateInterpreter_OneOfNarrowsElementEnum(t *testing.T) {
 	t.Parallel()
 
 	type Config struct {
-		Colors []*string `json:"colors" validate:"oneof=red green"`
+		Colors []*string `json:"colors" validate:"oneof=green red"`
 	}
 
-	_, err := jsonschema.GenerateFor[Config](t.Context(),
+	s, err := jsonschema.GenerateFor[Config](t.Context(),
 		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
 		jsonschema.WithTypeSchemaFor[string](jsonschema.TypeSchema{
 			Value: &jsonschema.Schema{
@@ -791,8 +790,12 @@ func TestValidateInterpreter_OneOfConflictsWithElementEnum(t *testing.T) {
 			},
 		}),
 	)
-	require.Error(t, err)
-	require.ErrorIs(t, err, validate.ErrConflictingConstraints)
+	require.NoError(t, err)
+
+	got, err := json.Marshal(s)
+	require.NoError(t, err)
+	assert.Contains(t, string(got), `"enum":["red","green"]`)
+	assert.NotContains(t, string(got), `"blue"`)
 }
 
 // TestValidateInterpreter_OneOfOnOverrideWrapperElement pins that oneof on a
@@ -825,30 +828,42 @@ func TestValidateInterpreter_OneOfOnOverrideWrapperElement(t *testing.T) {
 		"the enum lands on the wrapper's value branch")
 }
 
-// TestValidateInterpreter_OneOfConflictsWithWrapperElementEnum pins that
-// relocating a oneof enum onto a NullAllowed-stance element's value branch reports
-// a conflict when that branch already carries its own enum, rather than silently
-// discarding either.
-func TestValidateInterpreter_OneOfConflictsWithWrapperElementEnum(t *testing.T) {
+// TestValidateInterpreter_OneOfNarrowsWrapperElementEnum pins that relocating
+// a oneof enum onto a NullAllowed-stance element's value branch intersects with
+// the enum that branch already carries, and that one sharing no value with it
+// is a conflict rather than a silent replacement.
+func TestValidateInterpreter_OneOfNarrowsWrapperElementEnum(t *testing.T) {
 	t.Parallel()
 
 	type Color string
 
 	type Config struct {
-		Colors []Color `json:"colors" validate:"oneof=red green"`
+		Colors []Color `json:"colors" validate:"oneof=green red"`
 	}
 
-	_, err := jsonschema.GenerateFor[Config](t.Context(),
-		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()),
-		jsonschema.WithTypeSchemaFor[Color](jsonschema.TypeSchema{
-			Value: &jsonschema.Schema{
-				Type: "string",
-				Enum: []any{"red", "green", "blue"},
-			},
-			Nullability: jsonschema.NullAllowed,
-		}),
-	)
-	require.Error(t, err)
+	opt := jsonschema.WithTypeSchemaFor[Color](jsonschema.TypeSchema{
+		Value: &jsonschema.Schema{
+			Type: "string",
+			Enum: []any{"red", "green", "blue"},
+		},
+		Nullability: jsonschema.NullAllowed,
+	})
+
+	s, err := jsonschema.GenerateFor[Config](t.Context(),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()), opt)
+	require.NoError(t, err)
+
+	got, err := json.Marshal(s)
+	require.NoError(t, err)
+	assert.Contains(t, string(got), `"enum":["red","green"]`)
+	assert.NotContains(t, string(got), `"blue"`)
+
+	type Disjoint struct {
+		Colors []Color `json:"colors" validate:"oneof=black"`
+	}
+
+	_, err = jsonschema.GenerateFor[Disjoint](t.Context(),
+		jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()), opt)
 	require.ErrorIs(t, err, validate.ErrConflictingConstraints)
 }
 
@@ -2990,6 +3005,27 @@ func TestValidateInterpreterGoPlaygroundParity(t *testing.T) {
 
 		_, err := jsonschema.GenerateFor[T](t.Context(), opt)
 		require.ErrorContains(t, err, "empty OR alternative")
+	})
+
+	t.Run("a repeated oneof intersects", func(t *testing.T) {
+		t.Parallel()
+
+		// Go-playground applies each oneof in turn, so a value must satisfy
+		// both, and two listing no common value reject everything.
+		type T struct {
+			F int `json:"f" validate:"oneof=1 2 3,oneof=3 2"`
+		}
+
+		s, err := jsonschema.GenerateFor[T](t.Context(), opt)
+		require.NoError(t, err)
+		assert.Equal(t, []any{int64(2), int64(3)}, s.Properties["f"].Enum)
+
+		type D struct {
+			F int `json:"f" validate:"oneof=1,oneof=2"`
+		}
+
+		_, err = jsonschema.GenerateFor[D](t.Context(), opt)
+		require.ErrorIs(t, err, jsonschema.ErrConstraintConflict)
 	})
 
 	t.Run("a parameter on a control tag is an unrecognized validator", func(t *testing.T) {

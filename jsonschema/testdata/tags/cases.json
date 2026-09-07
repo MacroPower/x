@@ -352,6 +352,41 @@
     ]
   },
   {
+    "name": "a repeated enumeration intersects",
+    "note": "the two rules assert conjunctively, as go-playground applies each oneof in turn",
+    "type": "int",
+    "json": "v",
+    "jsonschema": "enum=1|2|3,enum=3|2",
+    "validate": "oneof=1 2 3,oneof=3 2",
+    "schema": {
+      "type": "integer",
+      "enum": [
+        2,
+        3
+      ]
+    },
+    "instances": [
+      {
+        "json": 2,
+        "want": "accept"
+      },
+      {
+        "json": 1,
+        "want": "reject"
+      }
+    ]
+  },
+  {
+    "name": "enumerations sharing no value are a conflict",
+    "note": "the intersection is empty, so the pair can never hold",
+    "type": "int",
+    "json": "v",
+    "jsonschema": "enum=1,enum=2",
+    "validate": "oneof=1,oneof=2",
+    "jsonschemaError": "ErrConstraintConflict",
+    "validateError": "ErrConstraintConflict"
+  },
+  {
     "name": "a const excluded by an enum is a conflict",
     "note": "496175c: the pair can never both hold, so it reports",
     "type": "int",

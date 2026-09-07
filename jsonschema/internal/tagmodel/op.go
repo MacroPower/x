@@ -7,8 +7,9 @@ import (
 
 var (
 	// ErrConflict reports two rules on one target that can never both hold: a
-	// second const pinned to a different value, a second enum, or a second
-	// authored value for a first-wins string keyword. The main package
+	// second const pinned to a different value, an enum sharing no value with
+	// one in force, or a second authored value for a first-wins string
+	// keyword. The main package
 	// re-exports it, so a conflict raised here is recognizable through the
 	// public sentinel and through each dialect's own derived one.
 	ErrConflict = errors.New("conflicting value constraints")

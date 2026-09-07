@@ -332,9 +332,10 @@ func forbidLiteral(t Target, lit string, pol Policy) error {
 	return nil
 }
 
-// applyOneOf enumerates the allowed values, reporting a conflict rather than
-// shadowing an enumeration already in force. Two enumerations of the same value
-// fully describe the allowed set, so neither can silently win.
+// applyOneOf enumerates the allowed values, intersecting with an enumeration
+// already in force rather than shadowing it, since the two assert
+// conjunctively: go-playground applies each oneof in turn, so a value must
+// satisfy both.
 func applyOneOf(t Target, r Rule, pol Policy) error {
 	vals, err := t.Shape.ParseScalars(r.Params.Values(), pol)
 	if err != nil {
@@ -628,20 +629,14 @@ func SetConst(t Target, v any) error {
 	return nil
 }
 
-// SetEnum sets the target's enum, reporting [ErrConflict] rather than shadowing
-// one already in force on the canvas or supplied by the type. A const already
-// pinned -- by another rule or by the type -- must be a member, for the same
-// reason [SetConst] checks the enumeration: the two keywords assert
-// conjunctively, so an excluded pin makes the schema unsatisfiable.
+// SetEnum sets the target's enum, intersecting with one already in force on
+// the canvas or supplied by the type rather than shadowing it: the two assert
+// conjunctively, so the allowed set is what both admit, in the order the
+// enumeration in force lists it. An empty intersection is [ErrConflict], a
+// schema no instance satisfies. A const already pinned -- by another rule or
+// by the type -- must be a member, for the same reason [SetConst] checks the
+// enumeration.
 func SetEnum(t Target, vals []any) error {
-	if t.Canvas.Enum != nil {
-		return fmt.Errorf("%w: an enumeration is already set", ErrConflict)
-	}
-
-	if baseOf(t).Enum != nil {
-		return fmt.Errorf("%w: the type already sets an enumeration", ErrConflict)
-	}
-
 	if c := t.Canvas.Const; c != nil && !constraint.ValuesContain(vals, *c) {
 		return fmt.Errorf("%w: the enumeration excludes a value already pinned", ErrConflict)
 	}
@@ -652,9 +647,39 @@ func SetEnum(t Target, vals []any) error {
 
 	// Copy rather than alias: this is public through the Constraints facade, so
 	// vals may be a caller's slice that it goes on to reuse or mutate.
-	t.Canvas.Enum = slices.Clone(vals)
+	enum := slices.Clone(vals)
+
+	if inForce := t.Canvas.Enum; inForce != nil {
+		enum = intersectValues(inForce, vals)
+		if len(enum) == 0 {
+			return fmt.Errorf("%w: the enumeration shares no value with the one already set", ErrConflict)
+		}
+	}
+
+	if inForce := baseOf(t).Enum; inForce != nil {
+		enum = intersectValues(inForce, enum)
+		if len(enum) == 0 {
+			return fmt.Errorf("%w: the enumeration shares no value with the type's own", ErrConflict)
+		}
+	}
+
+	t.Canvas.Enum = enum
 
 	return nil
+}
+
+// intersectValues returns the members of inForce that vals also holds, in
+// inForce's order, so a narrowing enumeration keeps the listing it narrows.
+func intersectValues(inForce, vals []any) []any {
+	var out []any
+
+	for _, v := range inForce {
+		if constraint.ValuesContain(vals, v) {
+			out = append(out, v)
+		}
+	}
+
+	return out
 }
 
 // Forbid records that the schema must not equal v, composing with anything

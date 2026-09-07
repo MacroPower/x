@@ -915,9 +915,12 @@
 //   - A repeated bound key intersects rather than overwriting.
 //     minimum=5,minimum=3 keeps 5, matching how bounds from every other
 //     source compose.
-//   - A second const or enum, or one disagreeing with a value the field's
-//     type already pins, is [ErrConstraintConflict]. Both fully describe the
-//     allowed value, so neither can silently win.
+//   - A repeated enum intersects with the one in force, whether an earlier
+//     key or the field's type listed it, and keeps that listing's order. An
+//     empty intersection is [ErrConstraintConflict].
+//   - A second const disagreeing with the one pinned, or a const outside an
+//     enum in force, is [ErrConstraintConflict]. A const fully describes the
+//     allowed value, so no other value can silently win.
 //   - format, pattern, and multipleOf replace what the field's type declared,
 //     since the tag names the keyword outright (a tag interpreter defers to
 //     both). Naming any of them twice in one tag is an error, because no
@@ -1047,8 +1050,9 @@
 // A const or enum an interpreter declares can disagree with one the type
 // already carries:
 //
-//   - Against an inline override or provider value, generation reports the
-//     conflict rather than overwriting it.
+//   - Against an inline override or provider value, an enum intersects
+//     with the type's, and a disagreeing const, or an intersection with
+//     nothing in it, is the conflict above.
 //   - Against a $defs-extracted type, the declared value rides beside the
 //     $ref and the two compose conjunctively. An enum intersects and only
 //     tightens, and a disagreeing const composes to a faithfully
