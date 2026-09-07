@@ -1057,6 +1057,49 @@
     "jsonschemaError": "ErrNullNotAdmitted"
   },
   {
+    "name": "a numeric bound on a struct definition is refused",
+    "note": "a reference classifies as its definition declares, so minimum has no number on a declared object",
+    "type": "fixtureObject",
+    "json": "v",
+    "jsonschema": "minimum=5",
+    "validate": "gte=5",
+    "jsonschemaError": "ErrConstraintUnsupported",
+    "validateError": "ErrConstraintUnsupported"
+  },
+  {
+    "name": "a property count on a struct definition rides beside the ref",
+    "note": "the definition declares an object, so the named count keyword lands as a $ref sibling",
+    "type": "fixtureObject",
+    "json": "v",
+    "jsonschema": "minProperties=1",
+    "schema": {
+      "$ref": "#/$defs/fixtureObject",
+      "minProperties": 1
+    },
+    "instances": [
+      {
+        "json": {
+          "x": "a"
+        },
+        "want": "accept"
+      },
+      {
+        "json": {},
+        "want": "reject"
+      }
+    ]
+  },
+  {
+    "name": "a format on a struct definition is refused",
+    "note": "a reference classifies as its definition declares, so a string keyword has no string on a declared object",
+    "type": "fixtureObject",
+    "json": "v",
+    "jsonschema": "format=email",
+    "validate": "email",
+    "jsonschemaError": "ErrConstraintUnsupported",
+    "validateError": "ErrConstraintUnsupported"
+  },
+  {
     "name": "a const on a struct pointer is rejected",
     "note": "the matrix rejects a value key on a referenced definition, so the null decision never reads the literal",
     "type": "*fixtureObject",

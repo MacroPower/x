@@ -238,7 +238,7 @@ func TestShapeZeroLiteralsRouteThroughParseScalar(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			sh := tagmodel.ShapeOfQuoted(tc.typ, stringSchema(), true)
+			sh := tagmodel.ShapeOfQuoted(tc.typ, stringSchema(), true, nil)
 
 			got, err := sh.ParseScalars(sh.ZeroLiteralsForTest(), tagmodel.Policy{})
 			require.NoError(t, err)

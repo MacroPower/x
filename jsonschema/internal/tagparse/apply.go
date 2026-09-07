@@ -76,43 +76,26 @@ var (
 	}
 )
 
+// ElemRef is the definition seam of one element slot: Def reads the schema
+// the element's definition declares, nil for an element that is not a
+// reference, and Elems carries the seams of the element's own slots.
+type ElemRef struct {
+	Def   func() *jsonschema.Schema
+	Elems []ElemRef
+}
+
 // Input is one field occurrence for [Apply] to read: the field's Go type, the
 // schemas a fact lands on and classifies against, the tag text itself, and the
 // two facts none of those expresses.
 type Input struct {
-	// FieldType is the field's own Go type, which every key classifies against
-	// until a type= pair replaces the classification outright.
 	FieldType reflect.Type
-	// Canvas is where the value-scoped facts and annotations land.
-	Canvas *jsonschema.Schema
-	// Payload is a view of the type-derived schema the tag classifies the
-	// field against, which a type= pair restructures, since such a pair
-	// replaces the reflected type assertion rather than declaring a canvas
-	// fact. The generator applies the pair to the field before [Apply] runs
-	// and discards the view afterward.
-	Payload *jsonschema.Schema
-	// RefBase returns the schema the field's definition declares when the
-	// payload is a bare $ref to one, or nil while that definition is still
-	// being built (a self-referential type). The model reads the instance's
-	// shape through it, so a keyword the definition's type cannot carry is
-	// an error rather than an inert $ref sibling. Nil leaves a reference
-	// permissive.
-	RefBase func() *jsonschema.Schema
-	// Tag is the jsonschema struct tag's value.
-	Tag string
-	// Quoted is the field's json:",string" flag when it applies to a string Go
-	// kind, the one coercion no schema view can express (see
-	// [tagmodel.ShapeOfQuoted]).
-	Quoted bool
-	// Nullable reports whether the occurrence admits null, the generator's
-	// final decision for the field rather than the Go type's own answer. A
-	// slice, map, byte slice, or interface is nilable without being a pointer,
-	// and a NullForbidden stance drops the null branch a pointer would
-	// otherwise carry. A scalar key spells that admission as the literal
-	// null, so [Apply] accepts default=null wherever that decision applies,
-	// whether or not the rendered schema keeps a null branch. A type= pair
-	// anywhere in the tag withdraws that acceptance.
-	Nullable bool
+	Canvas    *jsonschema.Schema
+	Payload   *jsonschema.Schema
+	RefBase   func() *jsonschema.Schema
+	Tag       string
+	Elements  []ElemRef
+	Quoted    bool
+	Nullable  bool
 }
 
 // Apply parses and applies a jsonschema struct tag. Value-scoped facts and
@@ -154,6 +137,7 @@ func Apply(in Input) error {
 		payload:   in.Payload,
 		fieldType: in.FieldType,
 		refBase:   in.RefBase,
+		elements:  in.Elements,
 		quoted:    in.Quoted,
 		nullable:  in.Nullable,
 		groupsSet: map[string]bool{},
@@ -189,8 +173,10 @@ type applyState struct {
 	// The fieldType field is the field's own Go type, which every key classifies
 	// against until a type= pair replaces the classification outright.
 	fieldType reflect.Type
-	// The refBase field is the definition seam (see [Input.RefBase]).
+	// The refBase field is the definition seam (see [Input.RefBase]), and
+	// elements the seams of the element slots (see [Input.Elements]).
 	refBase   func() *jsonschema.Schema
+	elements  []ElemRef
 	groupsSet map[string]bool
 	seen      map[string]bool
 	// The nullKeys field names the scalar keys the fold read as the literal
@@ -557,7 +543,7 @@ func (s *applyState) shape() tagmodel.Shape {
 		return s.overridden
 	}
 
-	shape := tagmodel.ShapeOfQuoted(s.fieldType, s.payload, s.quoted)
+	shape := tagmodel.ShapeOfQuoted(s.fieldType, s.payload, s.quoted, s.refBase)
 	shape.Nullable = s.nullable
 
 	return shape
@@ -568,7 +554,7 @@ func (s *applyState) shape() tagmodel.Shape {
 // the elements here rather than reading only the canvas is what lets an element
 // classify itself, including the coercion its own type implies.
 func (s *applyState) target(shape tagmodel.Shape) tagmodel.Target {
-	t := newTarget(shape, s.canvas, s.payload)
+	t := newTarget(shape, s.canvas, s.payload, s.elements)
 	if s.refBase != nil && s.overriddenType == "" {
 		t = t.WithRefBase(s.refBase)
 	}
@@ -577,8 +563,9 @@ func (s *applyState) target(shape tagmodel.Shape) tagmodel.Target {
 }
 
 // newTarget builds a target for a field or element, recursing lazily into
-// element slots.
-func newTarget(shape tagmodel.Shape, canvas, payload *jsonschema.Schema) tagmodel.Target {
+// element slots. Each element classifies through its own definition seam,
+// so an element of a $defs-extracted type resolves as the field does.
+func newTarget(shape tagmodel.Shape, canvas, payload *jsonschema.Schema, refs []ElemRef) tagmodel.Target {
 	var elems func() []tagmodel.Target
 
 	// A type=array override names a sequence with no Go element type behind it,
@@ -593,13 +580,25 @@ func newTarget(shape tagmodel.Shape, canvas, payload *jsonschema.Schema) tagmode
 			out := make([]tagmodel.Target, 0, len(canvases))
 
 			for i, c := range canvases {
-				var p *jsonschema.Schema
+				var (
+					p   *jsonschema.Schema
+					ref ElemRef
+				)
 
 				if i < len(payloads) {
 					p = payloads[i]
 				}
 
-				out = append(out, newTarget(tagmodel.ShapeOf(elemType, p), c, p))
+				if i < len(refs) {
+					ref = refs[i]
+				}
+
+				elem := newTarget(tagmodel.ShapeOfQuoted(elemType, p, false, ref.Def), c, p, ref.Elems)
+				if ref.Def != nil {
+					elem = elem.WithRefBase(ref.Def)
+				}
+
+				out = append(out, elem)
 			}
 
 			return out

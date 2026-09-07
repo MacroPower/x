@@ -1517,7 +1517,8 @@ func (g *run) applyFieldTag(p nodeProp) error {
 		FieldType: p.fi.StructField.Type,
 		Canvas:    fieldNode.authored,
 		Payload:   decided.view(g.draft),
-		RefBase:   defBodyPayload(fieldNode.def),
+		RefBase:   defBodyPayload(decided.def),
+		Elements:  elemRefs(decided),
 		Quoted:    p.quoted,
 		// FieldContext.Shape reads this same decision, so a field's null
 		// admission is one answer whichever site classifies it.
@@ -1535,6 +1536,37 @@ func (g *run) applyFieldTag(p nodeProp) error {
 	}
 
 	return nil
+}
+
+// elemRefs mirrors a node's element children as the definition seams the
+// jsonschema tag's element rules classify through, so an element of a
+// $defs-extracted type resolves as the field itself does. It follows the
+// slots the tag reads, a list's element and a tuple's positions, and recurses
+// so a nested sequence resolves at every depth.
+func elemRefs(n *node) []tagparse.ElemRef {
+	var children []*node
+
+	switch n.kind {
+	case kindList:
+		if n.items != nil {
+			children = []*node{n.items}
+		}
+
+	case kindTuple:
+		children = n.prefix
+	case kindValue, kindObject, kindMap, kindRef:
+	}
+
+	if len(children) == 0 {
+		return nil
+	}
+
+	out := make([]tagparse.ElemRef, len(children))
+	for i, c := range children {
+		out[i] = tagparse.ElemRef{Def: defBodyPayload(c.def), Elems: elemRefs(c)}
+	}
+
+	return out
 }
 
 // defBodyPayload returns the definition seam for a field whose node defers

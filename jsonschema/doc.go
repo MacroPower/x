@@ -916,10 +916,13 @@
 // constrain. The check reads the shape from the field's schema rather than
 // its Go kind alone, so a field whose type supplies a verbatim or overridden
 // schema answers by what that schema declares, and a field whose schema is a
-// $ref answers by what the referenced definition declares: minimum=5 on a
-// struct-typed field is an error, while minProperties=1 rides beside the
-// $ref. A definition still being built (a self-referential type) or one
-// declaring no type leaves the reference permissive.
+// $ref answers by what the referenced definition declares, as the inline
+// schema would: minimum=5 on a struct-typed field is an error, while
+// minProperties=1 rides beside the $ref, and minimum=5 on a field whose
+// provider declares an integer rides beside its $ref too. A definition
+// declaring no type is opaque, so a shape-dependent keyword on it is an
+// error. An element of a sequence resolves the same way, so an enum on a
+// slice of a provider-declared integer type lands on each element.
 //
 // A key named twice in one tag resolves by what the keyword means:
 //

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"maps"
 	"math"
@@ -2235,7 +2236,8 @@ type nullStancedRecursive struct {
 
 // nullStancedRecursiveExamples is the examples half of the same shape. Default
 // and examples are the two keys that reach a null literal on a reference,
-// since the matrix rejects const and enum on a referenced definition before
+// since the matrix rejects const and enum on a declared object, which a
+// reference to a struct definition classifies as, before
 // the null decision runs. TestTagValueKeyOnAStructShapedField pins that
 // rejection.
 type nullStancedRecursiveExamples struct {
@@ -2375,15 +2377,14 @@ func TestTagValueKeyOnAStructShapedField(t *testing.T) {
 		X string `json:"x"`
 	}
 
-	// The generator extracts a named struct into $defs by default, so a field
-	// of that type classifies as a referenced definition. WithDefinitions(false)
-	// inlines the same struct, and the matrix names the inlined form "declared
-	// object" instead.
+	// The generator extracts a named struct into $defs by default, and a
+	// field of that type classifies as the definition declares, a declared
+	// object, exactly as WithDefinitions(false) inlines it.
 	const (
 		constOnRef = `key "const": constraint not supported for this shape: ` +
-			`pinned value is not supported on a referenced definition`
+			`pinned value is not supported on a declared object`
 		enumOnRef = `key "enum": constraint not supported for this shape: ` +
-			`enumerated values is not supported on a referenced definition`
+			`enumerated values is not supported on a declared object`
 		enumOnObject = `key "enum": constraint not supported for this shape: ` +
 			`enumerated values is not supported on a declared object`
 		nullRefused = `key "default": cannot assign null to non-nullable type`
@@ -3386,7 +3387,8 @@ func TestInterpreterNullForbidOnARecursiveStancedType(t *testing.T) {
 
 // TestValidateRequiredOnARecursiveStancedType pins that the built-in dialect
 // cannot reach the canvas scan at all. The constraint matrix ignores a non-zero
-// rule on a referenced definition, so required on a self-referential pointer
+// rule on a declared object, which a reference to a struct definition
+// classifies as, so required on a self-referential pointer
 // adds the required entry and forbids nothing, whichever stance the type
 // carries.
 func TestValidateRequiredOnARecursiveStancedType(t *testing.T) {
@@ -3872,6 +3874,14 @@ func TestValidateRequiredOnPointerToByteArray(t *testing.T) {
 // family without reading the definition, so a numeric bound, a format, or a
 // multipleOf on a struct-typed field emitted an inert $ref sibling instead of
 // the error the tag promises for a keyword the shape cannot carry.
+// UntypedProvider declares a definition naming no type, so a reference to
+// it classifies as an opaque value.
+type untypedProvider struct{}
+
+func (untypedProvider) JSONSchema(context.Context, jsonschema.TypeContext) (jsonschema.TypeSchema, error) {
+	return jsonschema.TypeSchema{Value: &jsonschema.Schema{}}, nil
+}
+
 func TestTagKeywordOnReferencedDefinitionReadsItsType(t *testing.T) {
 	t.Parallel()
 
@@ -3901,7 +3911,7 @@ func TestTagKeywordOnReferencedDefinitionReadsItsType(t *testing.T) {
 
 				return jsonschema.GenerateFor[T](t.Context())
 			},
-			err: `key "format": constraint not supported for this shape: the referenced definition declares a object`,
+			err: `key "format": constraint not supported for this shape: format is not supported on a declared object`,
 		},
 		"multipleOf on an object definition": {
 			generate: func() (*jsonschema.Schema, error) {
@@ -3930,6 +3940,68 @@ func TestTagKeywordOnReferencedDefinitionReadsItsType(t *testing.T) {
 
 				return jsonschema.GenerateFor[T](t.Context())
 			},
+		},
+		"numeric bound on an integer definition rides beside the ref": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					A NonStructProvider `json:"a" jsonschema:"minimum=1"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+		},
+		"string keyword on an integer definition": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					A NonStructProvider `json:"a" jsonschema:"format=email"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			err: `key "format": constraint not supported for this shape: format is not supported on a number`,
+		},
+		"shape keyword on a definition declaring no type": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					A untypedProvider `json:"a" jsonschema:"minimum=1"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			err: `key "minimum": constraint not supported for this shape`,
+		},
+		"property count on a self-referential definition rides beside the ref": {
+			generate: func() (*jsonschema.Schema, error) {
+				type selfRef struct {
+					A *selfRef `json:"a" jsonschema:"minProperties=1"`
+				}
+
+				// The stance drops the pointer's null branch, so the
+				// property is the bare reference with its sibling.
+				s, err := jsonschema.GenerateFor[selfRef](t.Context(), forbidNullStance[selfRef]())
+				if err != nil {
+					return nil, err
+				}
+
+				// The root is a reference to its own definition, whose body
+				// holds the tagged field.
+				body, ok := s.Defs["selfRef"]
+				if !ok {
+					return nil, errors.New("no selfRef definition")
+				}
+
+				return body, nil
+			},
+		},
+		"keyword before a type override reads the definition": {
+			generate: func() (*jsonschema.Schema, error) {
+				type T struct {
+					A Addr `json:"a" jsonschema:"minimum=1,type=string"`
+				}
+
+				return jsonschema.GenerateFor[T](t.Context())
+			},
+			err: `key "minimum"`,
 		},
 	}
 

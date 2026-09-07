@@ -767,9 +767,10 @@ func (fc FieldContext) Constraints() *Constraints {
 // type is already in force here. A null literal an interpreter writes onto a
 // field or element whose occurrence admits none is refused after the
 // interpreters run, and the report names the canvas keyword holding it. No tag
-// interpreter in this package writes such a literal. On a referenced
-// definition the built-in validate dialect spells no null, because the
-// constraint matrix ignores the dialect's non-zero rule there. A third-party
+// interpreter in this package writes such a literal. On a reference to a
+// struct definition the built-in validate dialect spells no null, because the
+// constraint matrix ignores the dialect's non-zero rule on a declared object,
+// which such a reference classifies as. A third-party
 // interpreter reaches the check either through [FieldContext.Canvas] or
 // through [Constraints.SetConst] and [Constraints.SetEnum], which compose a
 // value onto the canvas without consulting the matrix. Forbidding a null
@@ -777,9 +778,15 @@ func (fc FieldContext) Constraints() *Constraints {
 // keyword, so the forbid stays. It asserts nothing the reference does not
 // assert already.
 //
+// A field whose Base is a bare $ref classifies as the definition it names,
+// read through the generator's own tables, so a reference to an integer
+// definition is a number here and one to a struct definition a declared
+// object. A caller-built context has no tables to read, so its $ref base is
+// [FormUnresolvedRef], the form every rule reports on.
+//
 // Prefer this over calling [ShapeOf] directly when a context is available.
 func (fc FieldContext) Shape() Shape {
-	shape := tagmodel.ShapeOfQuoted(fc.Type, fc.Base, fc.quotedString())
+	shape := tagmodel.ShapeOfQuoted(fc.Type, fc.Base, fc.quotedString(), fc.defPayload())
 
 	if fc.node != nil {
 		shape.Nullable = fc.node.null.admit
@@ -866,20 +873,22 @@ func (fc FieldContext) targetOf(shape tagmodel.Shape) tagmodel.Target {
 
 	// A $defs-extracted type declares its keywords on the definition, not on
 	// the provisional $ref payload the base holds, so the model reads the
-	// type-declared values through this seam. The read is deferred because a
-	// self-referential type's definition body may not be filled yet when the
-	// target is built.
-	if def := fcNodeDef(fc.node); def != nil {
-		target = target.WithRefBase(func() *Schema {
-			if def.body == nil {
-				return nil
-			}
-
-			return def.body.payload
-		})
+	// type-declared values through the same seam the classification read.
+	if read := fc.defPayload(); read != nil {
+		target = target.WithRefBase(read)
 	}
 
 	return target
+}
+
+// defPayload returns a reader of the definition body the field's payload
+// defers to, or nil for a non-reference field and a caller-built context. It
+// is the one seam the shape classification and the model's effective-value
+// reads go through, so both see the definition or neither does. The read is
+// deferred because a self-referential type's definition body may not be
+// filled yet when the context is built.
+func (fc FieldContext) defPayload() func() *Schema {
+	return defBodyPayload(fcNodeDef(fc.node))
 }
 
 // fcNodeDef returns the definition entry a field node's payload defers to, or

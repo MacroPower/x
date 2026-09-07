@@ -142,7 +142,7 @@ const (
 	FormTextString     = tagmodel.FormTextString
 	FormByteString     = tagmodel.FormByteString
 	FormRawBytes       = tagmodel.FormRawBytes
-	FormRef            = tagmodel.FormRef
+	FormUnresolvedRef  = tagmodel.FormUnresolvedRef
 	FormDeclaredObject = tagmodel.FormDeclaredObject
 	FormOpaque         = tagmodel.FormOpaque
 )
@@ -157,10 +157,13 @@ const (
 // The base decides the form wherever the Go type alone understates what the
 // instance is, as it does for a field whose type serializes itself as a string;
 // pass [FieldContext.Base]. A nil base classifies from the Go type alone, and
-// a nil type classifies as [FormOpaque], the form every rule reports on. The
-// one coercion neither input can express is a json:",string" flag on an
-// [encoding/json.Number] field (string Go kind, numeric instance), which only
-// [FieldContext.Shape] sees; prefer it when a context is available.
+// a nil type classifies as [FormOpaque], the form every rule reports on. Two
+// inputs the type and base cannot express reach only [FieldContext.Shape]:
+// a json:",string" flag on an [encoding/json.Number] field (string Go kind,
+// numeric instance), and the definition a bare $ref base names, which this
+// function cannot read and so classifies as [FormUnresolvedRef], the other
+// form every rule reports on. Prefer the context's method when one is
+// available.
 func ShapeOf(t reflect.Type, base *Schema) Shape {
 	return tagmodel.ShapeOf(t, base)
 }

@@ -69,11 +69,9 @@ var (
 		FormRawBytes:      AxisAuto,
 		FormOpaque:        AxisAuto,
 		FormUnset:         AxisAuto,
-		// A referenced definition has no natural axis either: a rule-shaped
-		// bound would have to guess which family the definition declares, and
-		// guessing is what this column exists not to do. A named keyword still
-		// applies, per formCarriesAxis below.
-		FormRef: AxisAuto,
+		// An unresolved reference has no axis: nothing about the instance is
+		// known, and the column rejects every rule before an axis is asked.
+		FormUnresolvedRef: AxisAuto,
 		// A declared object is an object instance, but not a map: go-playground
 		// defines min on a map as an entry count and on a struct not at all, so
 		// a rule-shaped bound reports here while the named property-count
@@ -93,9 +91,6 @@ var (
 		FormObject:     {AxisProperties: true},
 		FormTextString: {AxisLength: true},
 		FormByteString: {AxisLength: true},
-		// Every family, because the definition may declare any of them and this
-		// dialect named the keyword outright.
-		FormRef: {AxisNumeric: true, AxisLength: true, AxisItems: true, AxisProperties: true},
 		// Only the property count: the payload declares an object outright, so
 		// a named count keyword lands on it exactly as it does on the
 		// $defs-backed named spelling, and every other family is a shape the
@@ -169,6 +164,7 @@ func init() {
 	fillValues()
 	fillNonZero()
 	fillStringKeywords()
+	fillUnresolved()
 
 	verifyMatrix()
 }
@@ -178,7 +174,7 @@ func init() {
 // axis does not exist, so a cell reached here has a family to write.
 func fillBounds() {
 	bounded := []Form{
-		FormString, FormNumber, FormArray, FormObject, FormTextString, FormByteString, FormRef,
+		FormString, FormNumber, FormArray, FormObject, FormTextString, FormByteString,
 		FormDeclaredObject,
 	}
 
@@ -264,7 +260,6 @@ func fillValues() {
 		"a uniqueness rule on a map asserts distinct values, which no object keyword expresses")
 
 	apply(OpMultipleOf, FormNumber, applyMultipleOf)
-	apply(OpMultipleOf, FormRef, applyMultipleOf)
 }
 
 // fillNonZero fills the non-zero row, whose shape depends entirely on what
@@ -298,8 +293,6 @@ func fillNonZero() {
 	ignore(OpNonZero, FormOpaque, "an opaque value has no schema-expressible zero")
 	ignore(OpNonZero, FormDeclaredObject,
 		"a declared object's zero is not the empty object; only the parent's required entry applies")
-	ignore(OpNonZero, FormRef,
-		"a referenced definition's zero is not readable here; only the parent's required entry applies")
 }
 
 // fillStringKeywords fills the four first-wins string-keyword rows, which apply
@@ -311,7 +304,7 @@ func fillStringKeywords() {
 		}
 
 		for _, f := range []Form{
-			FormString, FormTextString, FormByteString, FormCoercedNumber, FormCoercedBool, FormRef,
+			FormString, FormTextString, FormByteString, FormCoercedNumber, FormCoercedBool,
 		} {
 			apply(op, f, applyStringKeyword)
 		}
@@ -328,6 +321,18 @@ func fillStringKeywords() {
 	for _, op := range []Op{OpContentMediaType, OpContentEncoding} {
 		ignore(op, FormRawBytes,
 			"a raw JSON value is already decoded JSON, not a string carrying encoded content")
+	}
+}
+
+// fillUnresolved fills the unresolved-reference column last, over every
+// row: the definition the reference names is not readable, so nothing about
+// the instance is known and no rule can be checked against it. The generator
+// resolves every reference it classifies, so the column is reachable only
+// through the public classifier and a caller-built context.
+func fillUnresolved() {
+	for op := OpUnset + 1; op < opCount; op++ {
+		reject(op, FormUnresolvedRef,
+			fmt.Sprintf("%s cannot be checked against a reference whose definition is not readable here", op))
 	}
 }
 

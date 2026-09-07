@@ -737,6 +737,27 @@ func TestConstraintsFacadeInvalidRule(t *testing.T) {
 	}
 }
 
+// TestShapeOfUnresolvedReference pins that a bare $ref base is unresolved
+// wherever nothing can read the definition: the public ShapeOf, and a
+// caller-built context with no backing node. A rule on it is the shape
+// refusal, naming the unreadable definition.
+func TestShapeOfUnresolvedReference(t *testing.T) {
+	t.Parallel()
+
+	type object struct{}
+
+	base := &jsonschema.Schema{Ref: "#/$defs/object"}
+
+	assert.Equal(t, jsonschema.FormUnresolvedRef, jsonschema.ShapeOf(reflect.TypeFor[object](), base).Form)
+
+	fc := jsonschema.FieldContext{Type: reflect.TypeFor[object](), Base: base, Canvas: &jsonschema.Schema{}}
+	assert.Equal(t, jsonschema.FormUnresolvedRef, fc.Shape().Form)
+
+	err := fc.Constraints().Apply(jsonschema.OpFloorIncl, jsonschema.AxisProperties, "1")
+	require.ErrorIs(t, err, jsonschema.ErrConstraintUnsupported)
+	require.ErrorContains(t, err, "not readable here")
+}
+
 // TestConstraintsMultipleOfComposes pins that an inferred multipleOf never
 // loosens one already in force. An interpreter's divisor intersects with the
 // jsonschema tag's, or with the one the field's type declares, to their least

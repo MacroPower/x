@@ -103,6 +103,7 @@ func fixtureErrors() map[string]error {
 		"ErrNullNotAdmitted":        tagmodel.ErrNullNotAdmitted,
 		"ErrUnsupported":            tagmodel.ErrUnsupported,
 		"ErrConstraintConflict":     jsonschema.ErrConstraintConflict,
+		"ErrConstraintUnsupported":  jsonschema.ErrConstraintUnsupported,
 		"ErrConflictingConstraints": validate.ErrConflictingConstraints,
 		"ErrInvalidType":            jsonschema.ErrInvalidType,
 	}

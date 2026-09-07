@@ -56,8 +56,11 @@
 //
 //     A shape with no non-zero form the schema can express gets the required
 //     entry and nothing else, not even the forbidden null: a struct, a
-//     text-marshaling type, a referenced definition, an opaque value such as
-//     an interface, and a raw JSON value. A byte slice falls on one side or
+//     text-marshaling type, an opaque value such as an interface, and a raw
+//     JSON value. A reference to a $defs entry takes the form the definition
+//     declares, so a reference to a struct definition is in this list while
+//     a reference to a string definition gets the string floor beside its
+//     $ref. A byte slice falls on one side or
 //     the other, depending on its schema. A []byte encodes as a base64 string
 //     and gets minLength: 1 on that string, while a byte-slice type whose
 //     schema is not a string (json.RawMessage) gets neither the floor nor the

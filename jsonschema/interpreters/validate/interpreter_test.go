@@ -1706,7 +1706,7 @@ func TestUniqueOnNonCollectionIsRejected(t *testing.T) {
 			return jsonschema.GenerateFor[MyType](t.Context(),
 				jsonschema.WithTagInterpreter("validate", validate.NewInterpreter()))
 		}},
-		"struct": {form: "referenced definition", build: func() (*jsonschema.Schema, error) {
+		"struct": {form: "declared object", build: func() (*jsonschema.Schema, error) {
 			type Inner struct {
 				A string `json:"a"`
 			}

@@ -124,16 +124,7 @@ func NoElementsReason(form Form) string {
 // pins the value, and its cell is the pinning applier, which has no axis to
 // resolve and must not be rejected for lacking one.
 func applyBound(t Target, r Rule, pol Policy) error {
-	// A pinned axis is checked against what the referenced definition
-	// declares; a rule-shaped bound keeps the reference column's answer,
-	// since a definition is not the map a rule's natural axis would read it
-	// as.
-	form := t.Shape.Form
-	if declared := declaredRefForm(t); declared != FormUnset && r.Axis != AxisAuto {
-		form = declared
-	}
-
-	axis, err := resolveAxis(form, r.Axis)
+	axis, err := resolveAxis(t.Shape.Form, r.Axis)
 	if err != nil {
 		return err
 	}
@@ -365,11 +356,6 @@ func applyMultipleOf(t Target, r Rule, pol Policy) error {
 // loosens a divisor a tag or the type stated and two inferred divisors
 // compose order-independently.
 func applyDivisor(t Target, lit string, pol Policy) error {
-	if declared := declaredRefForm(t); declared != FormUnset && declared != FormNumber {
-		return fmt.Errorf("%w: the referenced definition declares a %s, which has no number to divide",
-			ErrUnsupported, declared)
-	}
-
 	// A divisor is a keyword value, not a field value, so it takes the
 	// keyword-shaped literal domain regardless of the target's kind.
 	end, err := constraint.ParseNumericBound(lit, reflect.Invalid)
@@ -421,11 +407,6 @@ func effectiveDivisor(t Target) *float64 {
 // value would be silent; that is a repeated key in one tag, which the front-end
 // owning that grammar detects.
 func applyStringKeyword(t Target, r Rule, pol Policy) error {
-	if declared := declaredRefForm(t); declared != FormUnset && declared != FormString {
-		return fmt.Errorf("%w: the referenced definition declares a %s, which carries no string keyword",
-			ErrUnsupported, declared)
-	}
-
 	slot, typeValue := stringKeywordSlots(t, r.Op)
 
 	if pol.Keywords == KeywordFirstWins && (*slot != "" || typeValue != "") {
@@ -435,21 +416,6 @@ func applyStringKeyword(t Target, r Rule, pol Policy) error {
 	*slot = r.Params.One()
 
 	return nil
-}
-
-// declaredRefForm returns the form the definition a reference target defers
-// to declares outright, read through the target's refBase seam, or FormUnset
-// for a target that is not a reference or whose definition is unreadable (no
-// seam, an unfilled body, or a body naming no type). The FormRef column is
-// permissive for the rules that name a keyword because the definition may
-// declare anything; where the definition is readable, it decides instead, so
-// a keyword its type cannot carry is an error rather than an inert sibling.
-func declaredRefForm(t Target) Form {
-	if t.Shape.Form != FormRef {
-		return FormUnset
-	}
-
-	return declaredForm(refBaseOf(t))
 }
 
 // stringKeywordSlots returns the canvas slot a string keyword writes and the

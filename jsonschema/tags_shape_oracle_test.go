@@ -196,9 +196,10 @@ var (
 	numberType     = reflect.TypeFor[jsonv1.Number]()
 
 	// The formToken table gives the token each classifying form predicts.
-	// FormRef is absent because its token comes from the definition it names,
-	// and FormRawBytes and FormOpaque are absent because they predict none; see
-	// reasonFormPredictsNoToken.
+	// FormRawBytes and FormOpaque are absent because they predict none (see
+	// reasonFormPredictsNoToken), and FormUnresolvedRef because the generator
+	// never emits it: every reference it classifies resolves to the form its
+	// definition declares, which the default below guards.
 	formToken = map[jsonschema.Form]jsonToken{
 		jsonschema.FormString:         tokenString,
 		jsonschema.FormTextString:     tokenString,
@@ -332,37 +333,6 @@ func jsonOmitOption(f reflect.StructField) bool {
 	return false
 }
 
-// declaredToken returns the token a schema's own type names, skipping the null
-// member a nullable occurrence adds. The second result is false when the schema
-// names no type.
-func declaredToken(s *jsonschema.Schema) (jsonToken, bool) {
-	if s == nil {
-		return tokenNull, false
-	}
-
-	names := s.Types
-	if s.Type != "" {
-		names = []string{s.Type}
-	}
-
-	for _, name := range names {
-		switch name {
-		case "string":
-			return tokenString, true
-		case "integer", "number":
-			return tokenNumber, true
-		case "boolean":
-			return tokenBool, true
-		case "array":
-			return tokenArray, true
-		case "object":
-			return tokenObject, true
-		}
-	}
-
-	return tokenNull, false
-}
-
 // assertShapeMatchesToken is the oracle. It asserts that the form the generator
 // assigned the field agrees with the JSON encoding/json wrote for it,
 // and reports whether it had an assertion to make. A column that predicts no
@@ -372,7 +342,6 @@ func assertShapeMatchesToken(
 	obs *shapeObservation,
 	raw jsonv1.RawMessage,
 	isNil bool,
-	root *jsonschema.Schema,
 ) bool {
 	t.Helper()
 
@@ -404,25 +373,6 @@ func assertShapeMatchesToken(
 	// anything this switch does not name.
 	//nolint:exhaustive // The predicted-token forms are handled by formToken above.
 	switch obs.shape.Form {
-	case jsonschema.FormRef:
-		// The definition states the instance shape the Go kind withheld, so the
-		// oracle reads it there rather than restating the base.Ref guard
-		// classifyForm already applied.
-		name, ok := strings.CutPrefix(obs.base.Ref, "#/$defs/")
-		require.True(t, ok, "%s: expected a $defs pointer, got %q", where, obs.base.Ref)
-
-		def, ok := root.Defs[name]
-		require.True(t, ok, "%s: $defs has no entry %q", where, name)
-
-		want, ok := declaredToken(def)
-		if !ok {
-			return false
-		}
-
-		assert.Equal(t, want, got, "%s: $defs/%s declares a %s instance", where, name, want)
-
-		return true
-
 	case jsonschema.FormRawBytes, jsonschema.FormOpaque:
 		return false
 
@@ -637,21 +587,21 @@ func oracleRoster() map[string]oracleRow {
 		},
 
 		// A named struct and a time are $def'd by default and inline without
-		// definitions, which is what makes both the referenced and the
-		// text-marshaled columns reachable.
+		// definitions; a reference classifies as its definition declares, so
+		// both spellings reach the same column.
 		"named struct": {
 			typ:        reflect.TypeFor[oracleInner](),
-			wantDefs:   jsonschema.FormRef,
+			wantDefs:   jsonschema.FormDeclaredObject,
 			wantNoDefs: jsonschema.FormDeclaredObject,
 		},
 		"pointer to named struct": {
 			typ:        reflect.TypeFor[*oracleInner](),
-			wantDefs:   jsonschema.FormRef,
+			wantDefs:   jsonschema.FormDeclaredObject,
 			wantNoDefs: jsonschema.FormDeclaredObject,
 		},
 		"time": {
 			typ:        reflect.TypeFor[time.Time](),
-			wantDefs:   jsonschema.FormRef,
+			wantDefs:   jsonschema.FormTextString,
 			wantNoDefs: jsonschema.FormTextString,
 		},
 
@@ -743,7 +693,7 @@ func oracleRoster() map[string]oracleRow {
 		// 5c04089: a json.Marshaler field keeps its reflected schema.
 		"json marshaler": {
 			typ:        reflect.TypeFor[oracleMarshaler](),
-			wantDefs:   jsonschema.FormRef,
+			wantDefs:   jsonschema.FormDeclaredObject,
 			wantNoDefs: jsonschema.FormDeclaredObject,
 		},
 
@@ -782,7 +732,7 @@ func isNilValue(v reflect.Value) bool {
 // twice, once filled so every nullable field carries a value and once at its
 // zero so the null carve-out is exercised, and returns the number of fields it
 // actually asserted.
-func checkObservations(t *testing.T, seen []shapeObservation, root *jsonschema.Schema) int {
+func checkObservations(t *testing.T, seen []shapeObservation) int {
 	t.Helper()
 
 	checked := 0
@@ -820,7 +770,7 @@ func checkObservations(t *testing.T, seen []shapeObservation, root *jsonschema.S
 			field := owner.FieldByName(obs.field.Name)
 			require.True(t, field.IsValid(), "%s has no field %s", obs.owner, obs.field.Name)
 
-			if assertShapeMatchesToken(t, obs, raw, isNilValue(field), root) {
+			if assertShapeMatchesToken(t, obs, raw, isNilValue(field)) {
 				checked++
 			}
 		}
@@ -861,7 +811,7 @@ func TestTagShapeOracleRoster(t *testing.T) {
 						Tag: reflect.StructTag(fmt.Sprintf("json:%q", row.jsonTag)),
 					}})
 
-					root, err := jsonschema.Generate(t.Context(), doc, opts...)
+					_, err := jsonschema.Generate(t.Context(), doc, opts...)
 					if row.err != "" {
 						require.ErrorContains(t, err, row.err)
 						require.ErrorIs(t, err, jsonschema.ErrInvalidJSONField)
@@ -901,7 +851,7 @@ func TestTagShapeOracleRoster(t *testing.T) {
 						assert.Equal(t, want, field.shape.Form, "classified form")
 					}
 
-					checked := checkObservations(t, seen, root)
+					checked := checkObservations(t, seen)
 					if row.noToken {
 						assert.Zero(t, checked,
 							"the row declares no token, so the oracle must have nothing to assert")
@@ -984,7 +934,7 @@ func TestTagShapeOracleSynthesized(t *testing.T) {
 
 		var seen []shapeObservation
 
-		root, err := jsonschema.Generate(t.Context(), typ, shapeProbe(&seen))
+		_, err := jsonschema.Generate(t.Context(), typ, shapeProbe(&seen))
 		if err != nil {
 			// The pools draw declarations encoding/json/v2 itself refuses, and
 			// the property then becomes agreement on the refusal.
@@ -995,7 +945,7 @@ func TestTagShapeOracleSynthesized(t *testing.T) {
 
 		assertEveryFieldAccountedFor(t, typ, seen)
 
-		checked += checkObservations(t, seen, root)
+		checked += checkObservations(t, seen)
 	}
 
 	// The population must actually reach fields; a draw that stopped producing

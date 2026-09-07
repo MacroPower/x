@@ -55,14 +55,13 @@ const (
 	// [json.RawMessage], whose unconstrained schema admits any JSON value at all,
 	// so it has neither an array to size nor a string to measure.
 	FormRawBytes
-	// FormRef is a payload that is a bare reference to a definition, over a Go
-	// kind that reveals nothing either. The instance shape is whatever the
-	// definition declares, which is not readable here, so a keyword a dialect
-	// names outright is emitted as a $ref sibling and the definition decides
-	// whether it means anything. It is the one deliberately permissive column,
-	// and it is permissive only for the rules that name a keyword: a rule that
-	// would have to infer one, or read a value at a Go kind, still reports.
-	FormRef
+	// FormUnresolvedRef is a payload that is a bare reference to a definition
+	// the classifier cannot read: no resolver was supplied, or the definition
+	// is unfilled or is itself a reference. Nothing about the instance is
+	// known, so every rule reports. A reference whose definition is readable
+	// never lands here: it classifies as the definition's own schema would,
+	// which is what the generator supplies for every field and element.
+	FormUnresolvedRef
 	// FormDeclaredObject is a payload declaring an object outright over a Go
 	// kind that is not a map: an inline (anonymous) struct field is the common
 	// case, and a verbatim or overridden object schema on an opaque kind is
@@ -94,7 +93,7 @@ var formNames = [formCount]string{
 	FormTextString:     "text-marshaled string",
 	FormByteString:     "base64 byte string",
 	FormRawBytes:       "raw byte slice",
-	FormRef:            "referenced definition",
+	FormUnresolvedRef:  "unresolved reference",
 	FormDeclaredObject: "declared object",
 	FormOpaque:         "opaque value",
 }
@@ -226,23 +225,32 @@ func ShapeForTypeName(name string) Shape {
 // Type and base alone cannot see a json:",string" flag on
 // [encoding/json.Number] (the numeric coercion otherwise surfaces as a
 // string-typed base over a non-string kind, but Number's kind is string); a
-// caller that knows the flag classifies through [ShapeOfQuoted] instead.
+// caller that knows the flag classifies through [ShapeOfQuoted] instead. Nor
+// can they read the definition a bare $ref base names, so such a base
+// classifies as [FormUnresolvedRef] here; a caller that can read it
+// supplies the resolver to [ShapeOfQuoted].
 func ShapeOf(t reflect.Type, base *jsonschema.Schema) Shape {
-	return ShapeOfQuoted(t, base, false)
+	return ShapeOfQuoted(t, base, false, nil)
 }
 
-// ShapeOfQuoted is [ShapeOf] carrying the field's json:",string" flag, the
-// one input the type and base cannot express: with it, an
-// [encoding/json.Number] under a string-typed base classifies as
-// [FormCoercedNumber] (its instance is the once-quoted numeric literal)
-// rather than a plain string. The flag is redundant for every other kind:
-// the numeric kinds' coercion the base already states, and every other kind
-// under the flag is a generation error upstream.
+// ShapeOfQuoted is [ShapeOf] carrying the two inputs the type and base
+// cannot express. The json:",string" flag: with it, an [encoding/json.Number]
+// under a string-typed base classifies as [FormCoercedNumber] (its instance
+// is the once-quoted numeric literal) rather than a plain string. The flag is
+// redundant for every other kind: the numeric kinds' coercion the base
+// already states, and every other kind under the flag is a generation error
+// upstream. And the definition a bare $ref base names: def returns its
+// schema, or nil while it is unreadable, and a reference then classifies as
+// that schema would over the same Go type, so a bound on a reference to an
+// integer definition is a numeric one and a count on a reference to a struct
+// definition applies as it does on the inline struct. A nil def, or one
+// answering nil or another reference, leaves the reference
+// [FormUnresolvedRef], the column every rule reports on.
 //
 // A nil type classifies as [FormOpaque], so every rule against it reports a
 // shape error rather than dereferencing nothing. Only a caller-built context
 // can reach here without a type.
-func ShapeOfQuoted(t reflect.Type, base *jsonschema.Schema, quoted bool) Shape {
+func ShapeOfQuoted(t reflect.Type, base *jsonschema.Schema, quoted bool, def func() *jsonschema.Schema) Shape {
 	if t == nil {
 		return Shape{Form: FormOpaque}
 	}
@@ -253,7 +261,7 @@ func ShapeOfQuoted(t reflect.Type, base *jsonschema.Schema, quoted bool) Shape {
 		Type:     t,
 		Elem:     elem,
 		Kind:     elem.Kind(),
-		Form:     classifyForm(elem, base, quoted),
+		Form:     classifyForm(elem, base, quoted, def),
 		Nullable: t.Kind() == reflect.Pointer,
 	}
 }
@@ -267,7 +275,26 @@ func ShapeOfQuoted(t reflect.Type, base *jsonschema.Schema, quoted bool) Shape {
 // open, and is the only thing that can distinguish a coerced shape from a native
 // one -- a string-typed schema over a numeric kind is the json:",string" (or
 // MarshalText) shape, whose scalars compare against the serialized text.
-func classifyForm(t reflect.Type, base *jsonschema.Schema, quoted bool) Form {
+//
+// A base that is a bare $ref classifies as the definition it names, read
+// once through def: the definition's schema takes the base's place over the
+// same Go type, so the reference answers exactly as the inline schema would.
+// A definition that cannot be read, or that is itself a reference, leaves
+// the reference unresolved.
+func classifyForm(t reflect.Type, base *jsonschema.Schema, quoted bool, def func() *jsonschema.Schema) Form {
+	if base != nil && base.Ref != "" {
+		if def == nil {
+			return FormUnresolvedRef
+		}
+
+		body := def()
+		if body == nil || body.Ref != "" {
+			return FormUnresolvedRef
+		}
+
+		return classifyForm(t, body, quoted, nil)
+	}
+
 	str := schemaPermitsString(base)
 
 	// A byte slice never has per-element schemas: it is one base64 string when
@@ -359,12 +386,6 @@ func classifyForm(t reflect.Type, base *jsonschema.Schema, quoted bool) Form {
 
 		if f == FormObject {
 			return FormDeclaredObject
-		}
-
-		if base != nil && base.Ref != "" {
-			// The payload defers to a definition and the Go kind said nothing,
-			// so neither source knows what the instance is.
-			return FormRef
 		}
 
 		return FormOpaque
