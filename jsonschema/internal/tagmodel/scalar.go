@@ -42,8 +42,11 @@ var ErrNullNotAdmitted = errors.New("cannot assign null to non-nullable type")
 // actually emits. That round-trip is what makes a string-marshaling type
 // contribute its own serialized form: an int with json:",string" yields "5",
 // while a type whose MarshalText writes "L5" yields exactly that. It also
-// canonicalizes the spellings go-playground accepts but encoding/json never
-// emits, so "5.0", "+5", and "1e2" all become the text the instance carries.
+// canonicalizes the float spellings go-playground accepts but encoding/json
+// never emits, so "5.0" and "1e2" both become the text the instance carries.
+// An integer-kind literal takes the JSON integer grammar
+// ([constraint.CheckIntegerLiteral]) on both paths, so there is nothing of
+// its spelling left to canonicalize.
 func (sh Shape) ParseScalar(lit string, pol Policy) (any, error) {
 	if pol.AllowNullScalar && lit == typename.Null {
 		if !sh.Nullable {
@@ -92,6 +95,12 @@ func (sh Shape) ParseScalars(lits []string, pol Policy) ([]any, error) {
 func (sh Shape) parseNumber(lit string) (any, error) {
 	switch {
 	case numkind.IsUnsigned(sh.Kind):
+		err := constraint.CheckIntegerLiteral(lit)
+		if err != nil {
+			//nolint:wrapcheck // The shared policy owns the spelling and its message.
+			return nil, err
+		}
+
 		// Return uint64: neither int nor float64 holds every uint64 exactly.
 		n, err := strconv.ParseUint(lit, 10, numkind.UintBitSize(sh.Kind))
 		if err != nil {
@@ -101,6 +110,12 @@ func (sh Shape) parseNumber(lit string) (any, error) {
 		return n, nil
 
 	case numkind.IsInteger(sh.Kind):
+		err := constraint.CheckIntegerLiteral(lit)
+		if err != nil {
+			//nolint:wrapcheck // The shared policy owns the spelling and its message.
+			return nil, err
+		}
+
 		// Return int64, not a platform int, so a value above 2^31-1 survives on
 		// a 32-bit build.
 		n, err := strconv.ParseInt(lit, 10, numkind.IntBitSize(sh.Kind))

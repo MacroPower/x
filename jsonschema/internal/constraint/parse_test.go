@@ -248,19 +248,97 @@ func TestParseNumericBoundKindMatrix(t *testing.T) {
 	assert.InDelta(t, 1.5, got.Val, 0)
 }
 
-// TestParseNumericBoundLeadingPlus pins that an explicit '+' reads the same
-// way at every kind. The unsigned branch parses with strconv.ParseUint, which
-// refuses the sign the signed and float branches accept, so the same literal
-// used to be valid or invalid by the field's signedness alone.
-func TestParseNumericBoundLeadingPlus(t *testing.T) {
+// TestParseNumericBoundIntegerGrammar pins that an integer-kind literal is a
+// JSON integer at every integer kind, signed or unsigned: a leading plus, a
+// leading zero, and a base prefix are refused, since go-playground reads them
+// in base 0 (010 is eight there) and refuses the plus on an unsigned field
+// alone, so no other spelling means one number everywhere. A float kind takes
+// the decimal spellings strconv accepts, including the plus.
+func TestParseNumericBoundIntegerGrammar(t *testing.T) {
 	t.Parallel()
 
-	for _, kind := range []reflect.Kind{reflect.Uint, reflect.Int, reflect.Float64, reflect.Invalid} {
+	refused := map[string]string{
+		"leading plus":   "+5",
+		"leading zero":   "010",
+		"hex prefix":     "0x10",
+		"octal prefix":   "0o10",
+		"binary prefix":  "0b10",
+		"negative zeros": "-010",
+		"underscore":     "1_0",
+		"empty":          "",
+		"bare minus":     "-",
+	}
+
+	for name, value := range refused {
+		for _, kind := range []reflect.Kind{reflect.Uint, reflect.Uint8, reflect.Int, reflect.Int64} {
+			t.Run(name+" at "+kind.String(), func(t *testing.T) {
+				t.Parallel()
+
+				_, err := constraint.ParseNumericBound(value, kind)
+				require.ErrorIs(t, err, constraint.ErrIntegerLiteral)
+			})
+		}
+	}
+
+	for _, kind := range []reflect.Kind{reflect.Uint, reflect.Int} {
+		got, err := constraint.ParseNumericBound("0", kind)
+		require.NoError(t, err, kind)
+		assert.InDelta(t, 0, got.Val, 0, kind)
+
+		got, err = constraint.ParseNumericBound("10", kind)
+		require.NoError(t, err, kind)
+		assert.InDelta(t, 10, got.Val, 0, kind)
+	}
+
+	got, err := constraint.ParseNumericBound("-0", reflect.Int)
+	require.NoError(t, err, "a negative zero is a JSON integer")
+	assert.InDelta(t, 0, got.Val, 0)
+
+	_, err = constraint.ParseNumericBound("-5", reflect.Uint)
+	require.Error(t, err, "a negative literal still fails at an unsigned kind")
+	require.NotErrorIs(t, err, constraint.ErrIntegerLiteral, "the spelling is fine; the range is not")
+
+	for _, kind := range []reflect.Kind{reflect.Float64, reflect.Invalid} {
 		got, err := constraint.ParseNumericBound("+5", kind)
 		require.NoError(t, err, kind)
 		assert.InDelta(t, 5, got.Val, 0, kind)
 	}
+}
 
-	_, err := constraint.ParseNumericBound("-5", reflect.Uint)
-	require.Error(t, err, "a negative literal still fails at an unsigned kind")
+// TestCheckIntegerLiteral pins the grammar on its own, apart from any kind.
+func TestCheckIntegerLiteral(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		value string
+		ok    bool
+	}{
+		"zero":            {value: "0", ok: true},
+		"negative zero":   {value: "-0", ok: true},
+		"digits":          {value: "1234567890", ok: true},
+		"negative digits": {value: "-42", ok: true},
+		"leading plus":    {value: "+1"},
+		"leading zero":    {value: "01"},
+		"hex":             {value: "0x1"},
+		"fraction":        {value: "1.0"},
+		"exponent":        {value: "1e2"},
+		"space":           {value: " 1"},
+		"empty":           {value: ""},
+		"minus only":      {value: "-"},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := constraint.CheckIntegerLiteral(tc.value)
+			if tc.ok {
+				require.NoError(t, err)
+
+				return
+			}
+
+			require.ErrorIs(t, err, constraint.ErrIntegerLiteral)
+		})
+	}
 }

@@ -22,7 +22,19 @@ import (
 // shortest decimal differs from the exact binary value -- would silently loosen
 // (or tighten) the constraint and is rejected rather than shipped. Callers wrap
 // this with their own dialect-specific phrasing.
-var ErrNotRepresentable = errors.New("not exactly representable as a JSON Schema number")
+var (
+	ErrNotRepresentable = errors.New("not exactly representable as a JSON Schema number")
+
+	// ErrIntegerLiteral marks a literal on an integer-kind field that is not a
+	// JSON integer. Every dialect parses such a literal in base ten with no
+	// sign but a minus, no leading zero, and no base prefix, which is the one
+	// spelling every reader agrees on: go-playground reads its parameter in
+	// base 0, where 010 is eight and 0x10 is sixteen, and refuses a leading
+	// plus on an unsigned field while accepting it on a signed one, so a
+	// spelling outside the JSON grammar would mean one number here and
+	// another there.
+	ErrIntegerLiteral = errors.New("not a JSON integer")
+)
 
 // maxExactInt is the largest integer magnitude a float64 represents exactly;
 // beyond it consecutive integers share a float64 and a bound would round.
@@ -41,9 +53,12 @@ const maxExactInt = int64(1) << 53
 func ParseNumericBound(value string, kind reflect.Kind) (Endpoint, error) {
 	switch {
 	case numkind.IsUnsigned(kind):
-		// ParseUint refuses the explicit '+' the signed and float parsers
-		// accept, and a literal reads the same way whatever the kind.
-		n, err := strconv.ParseUint(strings.TrimPrefix(value, "+"), 10, 64)
+		err := CheckIntegerLiteral(value)
+		if err != nil {
+			return Endpoint{}, err
+		}
+
+		n, err := strconv.ParseUint(value, 10, 64)
 		if err != nil {
 			return Endpoint{}, fmt.Errorf("invalid unsigned integer %q: %w", value, err)
 		}
@@ -55,6 +70,11 @@ func ParseNumericBound(value string, kind reflect.Kind) (Endpoint, error) {
 		return numericEndpoint(float64(n), new(big.Rat).SetUint64(n)), nil
 
 	case numkind.IsInteger(kind):
+		err := CheckIntegerLiteral(value)
+		if err != nil {
+			return Endpoint{}, err
+		}
+
 		n, err := strconv.ParseInt(value, 10, 64)
 		if err != nil {
 			return Endpoint{}, fmt.Errorf("invalid integer %q: %w", value, err)
@@ -69,6 +89,32 @@ func ParseNumericBound(value string, kind reflect.Kind) (Endpoint, error) {
 	default:
 		return parseFloatBound(value)
 	}
+}
+
+// CheckIntegerLiteral reports whether value spells a JSON integer: an optional
+// minus, then a single zero or a digit run with no leading zero. It is the
+// spelling half of every integer-kind parse, bound and scalar alike, so a
+// literal reads the same way at every kind and in every dialect. The range
+// check is the caller's.
+func CheckIntegerLiteral(value string) error {
+	digits := strings.TrimPrefix(value, "-")
+
+	switch {
+	case digits == "":
+		return fmt.Errorf("%q is %w: no digits", value, ErrIntegerLiteral)
+	case strings.HasPrefix(value, "+"):
+		return fmt.Errorf("%q is %w: a leading plus", value, ErrIntegerLiteral)
+	case digits[0] == '0' && len(digits) > 1:
+		return fmt.Errorf("%q is %w: a leading zero", value, ErrIntegerLiteral)
+	}
+
+	for i := range len(digits) {
+		if digits[i] < '0' || digits[i] > '9' {
+			return fmt.Errorf("%q is %w: %q is not a decimal digit", value, ErrIntegerLiteral, digits[i])
+		}
+	}
+
+	return nil
 }
 
 // ParseDecimalFloat parses a decimal float literal under the one spelling policy

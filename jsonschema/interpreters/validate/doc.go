@@ -101,6 +101,14 @@
 // exact-representability policy and the one intersection the jsonschema tag and
 // the Go kind also merge through, rather than a private bound path.
 //
+// A literal on an integer-kind field (a bound, or an eq, ne, len, or oneof
+// value) is a JSON integer: an optional minus, then a single zero or a digit
+// run with no leading zero. The go-playground parser reads the parameter in
+// base 0, where 010 is eight and 0x10 sixteen, and refuses a leading plus on
+// an unsigned field while taking it on a signed one, so every such spelling
+// is an error here rather than a number that means something else there. A
+// float-kind field takes the decimal spellings strconv reads, plus included.
+//
 // Numeric bounds intersect with the bounds derived from the field's Go type:
 // a tag bound wider than the type's range clamps to the type limit (int8 with
 // max=200 emits maximum: 127), matching the jsonschema tag's bound handling.

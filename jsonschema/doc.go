@@ -758,6 +758,10 @@
 //   - An empty value (const= or default=) is an error for every key except
 //     const and default on a string field, where it means the empty string
 //     ({"type":"string","const":""}).
+//   - A numeric value on an integer-kind field is a JSON integer: an optional
+//     minus, then a single zero or a digit run with no leading zero.
+//     minimum=+1, minimum=010, and const=0x10 are errors. A float-kind field
+//     takes any decimal spelling, including a leading plus and an exponent.
 //   - For values the tag cannot express, use [JSONSchemaExtender] or doc
 //     comments through [WithDescriptionProvider].
 //

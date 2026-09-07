@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"go.jacobcolvin.com/x/jsonschema/internal/constraint"
 	"go.jacobcolvin.com/x/jsonschema/internal/tagmodel"
 )
 
@@ -107,12 +108,9 @@ func TestShapeParseScalarCoerced(t *testing.T) {
 			typ: reflect.TypeFor[float64](), lit: "1e2",
 			form: tagmodel.FormCoercedNumber, want: "100",
 		},
-		"a coerced int canonicalizes a signed padded spelling": {
-			// An integer kind parses in base 10, so it takes the spellings
-			// strconv accepts there -- a leading sign, leading zeros -- and not
-			// the float ones.
-			typ: reflect.TypeFor[int](), lit: "+05",
-			form: tagmodel.FormCoercedNumber, want: "5",
+		"a coerced negative int emits its decimal text": {
+			typ: reflect.TypeFor[int](), lit: "-5",
+			form: tagmodel.FormCoercedNumber, want: "-5",
 		},
 		"a coerced bool emits its literal": {
 			typ: reflect.TypeFor[bool](), lit: "false",
@@ -255,6 +253,37 @@ func TestShapeParseScalarUnsupportedForms(t *testing.T) {
 			_, err := tagmodel.ShapeOf(typ, nil).ParseScalar("x", tagmodel.Policy{})
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), "cannot assign scalar value")
+		})
+	}
+}
+
+// TestShapeParseScalarIntegerGrammar pins that an integer-kind scalar is a
+// JSON integer on both the native and the coerced path: a leading plus, a
+// leading zero, and a base prefix are refused rather than read in base ten,
+// since go-playground reads its parameter in base 0, where 010 is eight, and
+// refuses the plus on an unsigned field alone. The shared bound parser applies
+// the same grammar, so a literal reads one way in every position.
+func TestShapeParseScalarIntegerGrammar(t *testing.T) {
+	t.Parallel()
+
+	for name, base := range map[string]*jsonschema.Schema{
+		"native":  nil,
+		"coerced": stringSchema(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			for _, typ := range []reflect.Type{reflect.TypeFor[int](), reflect.TypeFor[uint8]()} {
+				sh := tagmodel.ShapeOf(typ, base)
+
+				for _, lit := range []string{"+5", "05", "0x5", "1_0"} {
+					_, err := sh.ParseScalar(lit, tagmodel.Policy{})
+					require.ErrorIs(t, err, constraint.ErrIntegerLiteral, "%s at %s", lit, typ)
+				}
+
+				_, err := sh.ParseScalar("5", tagmodel.Policy{})
+				require.NoError(t, err, typ)
+			}
 		})
 	}
 }

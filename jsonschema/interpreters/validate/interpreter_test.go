@@ -2970,4 +2970,41 @@ func TestValidateInterpreterGoPlaygroundParity(t *testing.T) {
 		_, err := jsonschema.GenerateFor[T](t.Context(), opt)
 		require.ErrorContains(t, err, "empty OR alternative")
 	})
+
+	t.Run("an integer literal outside the JSON grammar is refused", func(t *testing.T) {
+		t.Parallel()
+
+		// The go-playground parser reads an integer parameter in base 0, so
+		// 010 is eight and 0x10 sixteen there, and its unsigned parser
+		// refuses the plus its signed parser takes. Every such spelling is
+		// refused here rather than read either way, on bounds and scalars
+		// alike.
+		type Signed struct {
+			Min int `json:"min" validate:"min=010"`
+		}
+
+		_, err := jsonschema.GenerateFor[Signed](t.Context(), opt)
+		require.ErrorContains(t, err, "leading zero")
+
+		type Unsigned struct {
+			Min uint8 `json:"min" validate:"min=+1"`
+		}
+
+		_, err = jsonschema.GenerateFor[Unsigned](t.Context(), opt)
+		require.ErrorContains(t, err, "leading plus")
+
+		type Hex struct {
+			Eq int `json:"eq" validate:"eq=0x10"`
+		}
+
+		_, err = jsonschema.GenerateFor[Hex](t.Context(), opt)
+		require.ErrorContains(t, err, "not a JSON integer")
+
+		type Float struct {
+			Min float64 `json:"min" validate:"min=+1.5"`
+		}
+
+		_, err = jsonschema.GenerateFor[Float](t.Context(), opt)
+		require.NoError(t, err, "a float kind keeps the decimal spellings strconv reads")
+	})
 }
