@@ -274,9 +274,9 @@
 // refuses the tag.
 //
 // Any other key that is not a recognized constraint causes Interpret to return
-// an error rather than being silently consumed, so a typo'd or unsupported
-// validator surfaces at generation time instead of yielding a schema that
-// quietly drops the intended constraint.
+// [ErrUnrecognizedValidator] rather than being silently consumed, so a typo'd
+// or unsupported validator surfaces at generation time instead of yielding a
+// schema that quietly drops the intended constraint.
 //
 // # Implementation
 //

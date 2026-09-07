@@ -26,6 +26,13 @@ var (
 		jsonschema.ErrConstraintConflict,
 	)
 
+	// ErrUnrecognizedValidator reports a key this dialect does not express: a
+	// typo, or a go-playground validator with no constraint in the shared
+	// model, such as isdefault. The error names the key. A caller comparing
+	// this interpreter against go-playground reads it as the documented
+	// vocabulary gap rather than a refusal of the tag.
+	ErrUnrecognizedValidator = errors.New("validate tag: unrecognized validator")
+
 	// The oneOfSplitRegexp pattern matches one oneof token, mirroring
 	// go-playground/validator's own splitter (`'[^']*'|\S+`): a single-quoted
 	// run (one value even with spaces) or an unquoted whitespace-delimited run.
@@ -175,7 +182,7 @@ func applyParts(parts []string, field jsonschema.FieldContext) error {
 func applyValidator(key, value string, hasValue bool, field jsonschema.FieldContext) error {
 	rule, known := validatorKeys[key]
 	if !known {
-		return fmt.Errorf("validate tag: unrecognized validator %q", key)
+		return fmt.Errorf("%w %q", ErrUnrecognizedValidator, key)
 	}
 
 	if rule.Op == tagmodel.OpNonZero && field.Parent != nil && field.Name != "" {
