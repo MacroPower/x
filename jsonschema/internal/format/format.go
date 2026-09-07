@@ -802,28 +802,41 @@ func isASCIILetter(c byte) bool {
 	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
 }
 
-// reparseUnparsedHost retries a URL net/url refused for a host it cannot
-// represent but RFC 3986 admits: an IPvFuture literal, or a reg-name carrying
-// a percent-encoded ASCII octet (net/url unescapes a host and permits only
-// escapes at or above 0x80). The returned URL serves the remaining structural
-// checks, which read the original string wherever they are character-based.
+// reparseUnparsedHost retries a URL net/url refused for an authority it
+// cannot represent but the RFCs admit: an IPvFuture literal, a reg-name
+// carrying a percent-encoded ASCII octet (net/url unescapes a host and permits
+// only escapes at or above 0x80), or a userinfo carrying a code point above
+// ASCII (net/url reads userinfo as ASCII, where RFC 3987 iuserinfo admits
+// ucschar). The returned URL serves the remaining structural checks, which
+// read the original string wherever they are character-based, so the URI
+// validators still refuse the non-ASCII userinfo through their character
+// rule.
 func reparseUnparsedHost(s string) *url.URL {
 	if u := reparseIPvFutureHost(s); u != nil {
 		return u
 	}
 
-	return reparsePctEncodedAuthority(s)
+	return reparseAuthority(s)
 }
 
-// reparsePctEncodedAuthority re-parses s with every well-formed pct-encoded
-// ASCII octet in its authority replaced by a letter, so a reg-name such as
-// "ex%41mple.com" (legal per RFC 3986 section 3.2.2, merely non-normalized)
-// parses. A malformed triplet is left in place, so it still fails. It returns
-// nil when the authority holds no such octet or the rewrite fails to parse.
-func reparsePctEncodedAuthority(s string) *url.URL {
+// reparseAuthority re-parses s with every well-formed pct-encoded ASCII octet
+// in its authority, and every code point above ASCII in its userinfo,
+// replaced by a letter, so a reg-name such as "ex%41mple.com" (legal per RFC
+// 3986 section 3.2.2, merely non-normalized) and a userinfo such as
+// "é@host" (legal per RFC 3987 section 2.2) parse. A malformed triplet is
+// left in place, so it still fails. It returns nil when the authority holds
+// nothing to rewrite or the rewrite fails to parse.
+func reparseAuthority(s string) *url.URL {
 	start, end, ok := rawAuthoritySpan(s)
 	if !ok {
 		return nil
+	}
+
+	// The userinfo ends at the first "@" of the authority; a second one is
+	// refused later by validAuthorityDelims on the original string.
+	userinfoEnd := start
+	if at := strings.IndexByte(s[start:end], '@'); at >= 0 {
+		userinfoEnd = start + at
 	}
 
 	var (
@@ -842,6 +855,17 @@ func reparsePctEncodedAuthority(s string) *url.URL {
 
 				continue
 			}
+		}
+
+		if i < userinfoEnd && s[i] >= 0x80 {
+			_, size := utf8.DecodeRuneInString(s[i:userinfoEnd])
+
+			b.WriteByte('a')
+
+			i += size - 1
+			changed = true
+
+			continue
 		}
 
 		b.WriteByte(s[i])
