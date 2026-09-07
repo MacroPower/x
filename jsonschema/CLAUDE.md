@@ -4,6 +4,8 @@ Guidance for Claude Code in the `jsonschema` module, one module of the repo's
 go.work workspace. Behavior is specified in `doc.go` and `README.md`; any
 behavior change updates both, and `prettier` gates every `*.md` edit.
 
+Status: UNSTABLE. Breaking changes allowed.
+
 ## Architecture
 
 Two independent halves share the upstream `Schema` type (`schema.go`, a type
